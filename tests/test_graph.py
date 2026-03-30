@@ -7,8 +7,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from langchain_core.messages import AIMessage
 
-from bot.graph import build_graph
-from bot.state import BotState
+from graph import build_graph
+from state import BotState
 
 
 @pytest.mark.asyncio
@@ -47,13 +47,13 @@ async def test_full_graph_question_flow(sample_personality):
     graph = build_graph()
 
     with (
-        patch("bot.nodes.rag._get_embed_client", return_value=mock_embed_client),
-        patch("bot.nodes.rag.vector_search", new_callable=AsyncMock, return_value=mock_vector_results),
-        patch("bot.nodes.memory.get_conversation_history", new_callable=AsyncMock, return_value=mock_history),
-        patch("bot.nodes.memory.get_user_facts", new_callable=AsyncMock, return_value=["User goes by Commander"]),
-        patch("bot.nodes.memory.get_character_state", new_callable=AsyncMock, return_value=mock_char_state),
-        patch("bot.nodes.memory.get_affinity", new_callable=AsyncMock, return_value=500),
-        patch("bot.nodes.persona._get_llm", return_value=mock_llm),
+        patch("nodes.rag._get_embed_client", return_value=mock_embed_client),
+        patch("nodes.rag.vector_search", new_callable=AsyncMock, return_value=mock_vector_results),
+        patch("nodes.memory.get_conversation_history", new_callable=AsyncMock, return_value=mock_history),
+        patch("nodes.memory.get_user_facts", new_callable=AsyncMock, return_value=["User goes by Commander"]),
+        patch("nodes.memory.get_character_state", new_callable=AsyncMock, return_value=mock_char_state),
+        patch("nodes.memory.get_affinity", new_callable=AsyncMock, return_value=500),
+        patch("nodes.persona._get_llm", return_value=mock_llm),
     ):
         result = await graph.ainvoke(state)
 
@@ -82,11 +82,11 @@ async def test_full_graph_casual_greeting(sample_personality):
     graph = build_graph()
 
     with (
-        patch("bot.nodes.memory.get_conversation_history", new_callable=AsyncMock, return_value=[]),
-        patch("bot.nodes.memory.get_user_facts", new_callable=AsyncMock, return_value=[]),
-        patch("bot.nodes.memory.get_character_state", new_callable=AsyncMock, return_value={}),
-        patch("bot.nodes.memory.get_affinity", new_callable=AsyncMock, return_value=500),
-        patch("bot.nodes.persona._get_llm", return_value=mock_llm),
+        patch("nodes.memory.get_conversation_history", new_callable=AsyncMock, return_value=[]),
+        patch("nodes.memory.get_user_facts", new_callable=AsyncMock, return_value=[]),
+        patch("nodes.memory.get_character_state", new_callable=AsyncMock, return_value={}),
+        patch("nodes.memory.get_affinity", new_callable=AsyncMock, return_value=500),
+        patch("nodes.persona._get_llm", return_value=mock_llm),
     ):
         result = await graph.ainvoke(state)
 

@@ -18,15 +18,15 @@ import re
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
 from langchain_openai import ChatOpenAI
 
-from bot.config import (
+from config import (
     LLM_API_KEY,
     LLM_BASE_URL,
     LLM_MODEL,
     LLM_TEMPERATURE,
     MAX_TOOL_ITERATIONS,
 )
-from bot.mcp_client import mcp_manager
-from bot.state import BotState, ToolCall
+from mcp_client import mcp_manager
+from state import BotState, ToolCall
 
 logger = logging.getLogger(__name__)
 

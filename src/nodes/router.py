@@ -12,7 +12,7 @@ from __future__ import annotations
 import re
 import unicodedata
 
-from bot.state import BotState
+from state import BotState
 
 # ── CJK detection ──────────────────────────────────────────────────
 _CJK_RANGES = re.compile(

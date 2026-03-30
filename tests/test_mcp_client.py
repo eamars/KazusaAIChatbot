@@ -6,7 +6,7 @@ from dataclasses import dataclass
 
 import pytest
 
-from bot.mcp_client import McpManager, ToolInfo
+from mcp_client import McpManager, ToolInfo
 
 
 @dataclass

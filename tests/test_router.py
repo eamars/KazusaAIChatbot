@@ -1,6 +1,6 @@
 """Tests for Stage 2 — Rule-Based Router."""
 
-from bot.nodes.router import router
+from nodes.router import router
 
 
 def test_router_enables_rag_for_question(base_state):

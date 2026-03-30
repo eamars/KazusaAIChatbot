@@ -22,7 +22,7 @@ import numpy as np
 from motor.motor_asyncio import AsyncIOMotorClient
 from pymongo.errors import ConnectionFailure
 
-from bot.config import MONGODB_URI, MONGODB_DB_NAME
+from config import MONGODB_URI, MONGODB_DB_NAME
 
 logger = logging.getLogger(__name__)
 

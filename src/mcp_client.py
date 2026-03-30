@@ -14,7 +14,7 @@ from typing import Any
 from mcp import ClientSession
 from mcp.client.streamable_http import streamablehttp_client
 
-from bot.config import MCP_SERVERS
+from config import MCP_SERVERS
 
 logger = logging.getLogger(__name__)
 

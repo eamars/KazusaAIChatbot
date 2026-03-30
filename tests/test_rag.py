@@ -6,8 +6,8 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from bot.db import _cosine_similarity
-from bot.nodes.rag import _embed, rag_retriever
+from db import _cosine_similarity
+from nodes.rag import _embed, rag_retriever
 
 # Mark for tests that require a running LM Studio instance.
 # Run with:  pytest -m live_llm
@@ -37,8 +37,8 @@ async def test_rag_returns_results(routed_state):
     ]
 
     with (
-        patch("bot.nodes.rag._embed", new_callable=AsyncMock, return_value=mock_embedding),
-        patch("bot.nodes.rag.vector_search", new_callable=AsyncMock, return_value=mock_docs),
+        patch("nodes.rag._embed", new_callable=AsyncMock, return_value=mock_embedding),
+        patch("nodes.rag.vector_search", new_callable=AsyncMock, return_value=mock_docs),
     ):
         result = await rag_retriever(routed_state)
 
@@ -49,7 +49,7 @@ async def test_rag_returns_results(routed_state):
 
 @pytest.mark.asyncio
 async def test_rag_handles_embed_failure(routed_state):
-    with patch("bot.nodes.rag._embed", new_callable=AsyncMock, side_effect=Exception("embed error")):
+    with patch("nodes.rag._embed", new_callable=AsyncMock, side_effect=Exception("embed error")):
         result = await rag_retriever(routed_state)
 
     assert result["rag_results"] == []
@@ -58,8 +58,8 @@ async def test_rag_handles_embed_failure(routed_state):
 @pytest.mark.asyncio
 async def test_rag_handles_search_failure(routed_state):
     with (
-        patch("bot.nodes.rag._embed", new_callable=AsyncMock, return_value=[0.1] * 128),
-        patch("bot.nodes.rag.vector_search", new_callable=AsyncMock, side_effect=Exception("db error")),
+        patch("nodes.rag._embed", new_callable=AsyncMock, return_value=[0.1] * 128),
+        patch("nodes.rag.vector_search", new_callable=AsyncMock, side_effect=Exception("db error")),
     ):
         result = await rag_retriever(routed_state)
 

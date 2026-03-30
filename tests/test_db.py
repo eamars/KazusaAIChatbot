@@ -6,8 +6,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-import bot.db as db_module
-from bot.db import (
+import db as db_module
+from db import (
     AFFINITY_DEFAULT,
     close_db,
     get_affinity,
@@ -43,7 +43,7 @@ async def test_get_conversation_history():
     cursor.to_list = AsyncMock(return_value=mock_docs)
     db.conversation_history.find.return_value.sort.return_value.limit.return_value = cursor
 
-    with patch("bot.db.get_db", new_callable=AsyncMock, return_value=db):
+    with patch("db.get_db", new_callable=AsyncMock, return_value=db):
         result = await get_conversation_history("chan_1", limit=10)
 
     # Should be reversed (oldest first)
@@ -56,7 +56,7 @@ async def test_get_user_facts_found():
     db = _mock_db()
     db.user_facts.find_one = AsyncMock(return_value={"user_id": "u1", "facts": ["fact1", "fact2"]})
 
-    with patch("bot.db.get_db", new_callable=AsyncMock, return_value=db):
+    with patch("db.get_db", new_callable=AsyncMock, return_value=db):
         result = await get_user_facts("u1")
 
     assert result == ["fact1", "fact2"]
@@ -67,7 +67,7 @@ async def test_get_user_facts_not_found():
     db = _mock_db()
     db.user_facts.find_one = AsyncMock(return_value=None)
 
-    with patch("bot.db.get_db", new_callable=AsyncMock, return_value=db):
+    with patch("db.get_db", new_callable=AsyncMock, return_value=db):
         result = await get_user_facts("u1")
 
     assert result == []
@@ -79,7 +79,7 @@ async def test_upsert_user_facts_deduplicates():
     db.user_facts.find_one = AsyncMock(return_value={"user_id": "u1", "facts": ["fact1", "fact2"]})
     db.user_facts.update_one = AsyncMock()
 
-    with patch("bot.db.get_db", new_callable=AsyncMock, return_value=db):
+    with patch("db.get_db", new_callable=AsyncMock, return_value=db):
         await upsert_user_facts("u1", ["fact2", "fact3"])
 
     call_args = db.user_facts.update_one.call_args
@@ -100,7 +100,7 @@ async def test_get_character_state_found():
         "updated_at": "t1",
     })
 
-    with patch("bot.db.get_db", new_callable=AsyncMock, return_value=db):
+    with patch("db.get_db", new_callable=AsyncMock, return_value=db):
         result = await get_character_state()
 
     assert result["mood"] == "calm"
@@ -112,7 +112,7 @@ async def test_get_character_state_not_found():
     db = _mock_db()
     db.character_state.find_one = AsyncMock(return_value=None)
 
-    with patch("bot.db.get_db", new_callable=AsyncMock, return_value=db):
+    with patch("db.get_db", new_callable=AsyncMock, return_value=db):
         result = await get_character_state()
 
     assert result == {}
@@ -129,7 +129,7 @@ async def test_upsert_character_state_merges_events():
     })
     db.character_state.update_one = AsyncMock()
 
-    with patch("bot.db.get_db", new_callable=AsyncMock, return_value=db):
+    with patch("db.get_db", new_callable=AsyncMock, return_value=db):
         await upsert_character_state("happy", "warm", ["event3"], "t2")
 
     call_args = db.character_state.update_one.call_args
@@ -356,7 +356,7 @@ async def test_get_affinity_default_for_unknown_user():
     db = _mock_db()
     db.user_facts.find_one = AsyncMock(return_value=None)
 
-    with patch("bot.db.get_db", new_callable=AsyncMock, return_value=db):
+    with patch("db.get_db", new_callable=AsyncMock, return_value=db):
         result = await get_affinity("unknown_user")
 
     assert result == AFFINITY_DEFAULT
@@ -367,7 +367,7 @@ async def test_get_affinity_returns_stored_value():
     db = _mock_db()
     db.user_facts.find_one = AsyncMock(return_value={"user_id": "u1", "affinity": 750})
 
-    with patch("bot.db.get_db", new_callable=AsyncMock, return_value=db):
+    with patch("db.get_db", new_callable=AsyncMock, return_value=db):
         result = await get_affinity("u1")
 
     assert result == 750
@@ -379,7 +379,7 @@ async def test_update_affinity_clamps_to_max():
     db.user_facts.find_one = AsyncMock(return_value={"user_id": "u1", "affinity": 995})
     db.user_facts.update_one = AsyncMock()
 
-    with patch("bot.db.get_db", new_callable=AsyncMock, return_value=db):
+    with patch("db.get_db", new_callable=AsyncMock, return_value=db):
         result = await update_affinity("u1", 10)
 
     assert result == 1000
@@ -391,7 +391,7 @@ async def test_update_affinity_clamps_to_min():
     db.user_facts.find_one = AsyncMock(return_value={"user_id": "u1", "affinity": 5})
     db.user_facts.update_one = AsyncMock()
 
-    with patch("bot.db.get_db", new_callable=AsyncMock, return_value=db):
+    with patch("db.get_db", new_callable=AsyncMock, return_value=db):
         result = await update_affinity("u1", -20)
 
     assert result == 0

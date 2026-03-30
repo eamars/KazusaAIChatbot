@@ -13,9 +13,9 @@ import logging
 from langchain_core.messages import HumanMessage
 from langchain_openai import ChatOpenAI
 
-from bot.config import LLM_API_KEY, LLM_BASE_URL, LLM_MODEL
-from bot.db import update_affinity, upsert_character_state, upsert_user_facts
-from bot.state import BotState
+from config import LLM_API_KEY, LLM_BASE_URL, LLM_MODEL
+from db import update_affinity, upsert_character_state, upsert_user_facts
+from state import BotState
 
 logger = logging.getLogger(__name__)
 

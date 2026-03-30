@@ -1,6 +1,6 @@
 """Tests for Stage 1 — Message Intake."""
 
-from bot.nodes.intake import intake
+from nodes.intake import intake
 
 
 def test_intake_strips_mention_markup(base_state):

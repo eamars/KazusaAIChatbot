@@ -13,13 +13,13 @@ from __future__ import annotations
 
 from langgraph.graph import END, START, StateGraph
 
-from bot.nodes.assembler import assembler
-from bot.nodes.intake import intake
-from bot.nodes.memory import memory_retriever
-from bot.nodes.persona import persona_agent
-from bot.nodes.rag import rag_retriever
-from bot.nodes.router import router
-from bot.state import BotState
+from nodes.assembler import assembler
+from nodes.intake import intake
+from nodes.memory import memory_retriever
+from nodes.persona import persona_agent
+from nodes.rag import rag_retriever
+from nodes.router import router
+from state import BotState
 
 
 def _should_respond(state: BotState) -> str:

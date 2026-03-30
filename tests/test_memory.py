@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from bot.nodes.memory import memory_retriever
+from nodes.memory import memory_retriever
 
 
 @pytest.mark.asyncio
@@ -29,10 +29,10 @@ async def test_memory_returns_history_and_facts(routed_state):
     mock_char_state = {"mood": "calm", "emotional_tone": "warm", "recent_events": []}
 
     with (
-        patch("bot.nodes.memory.get_conversation_history", new_callable=AsyncMock, return_value=mock_history),
-        patch("bot.nodes.memory.get_user_facts", new_callable=AsyncMock, return_value=mock_facts),
-        patch("bot.nodes.memory.get_character_state", new_callable=AsyncMock, return_value=mock_char_state),
-        patch("bot.nodes.memory.get_affinity", new_callable=AsyncMock, return_value=700),
+        patch("nodes.memory.get_conversation_history", new_callable=AsyncMock, return_value=mock_history),
+        patch("nodes.memory.get_user_facts", new_callable=AsyncMock, return_value=mock_facts),
+        patch("nodes.memory.get_character_state", new_callable=AsyncMock, return_value=mock_char_state),
+        patch("nodes.memory.get_affinity", new_callable=AsyncMock, return_value=700),
     ):
         result = await memory_retriever(routed_state)
 
@@ -45,10 +45,10 @@ async def test_memory_returns_history_and_facts(routed_state):
 @pytest.mark.asyncio
 async def test_memory_handles_history_failure(routed_state):
     with (
-        patch("bot.nodes.memory.get_conversation_history", new_callable=AsyncMock, side_effect=Exception("db error")),
-        patch("bot.nodes.memory.get_user_facts", new_callable=AsyncMock, return_value=[]),
-        patch("bot.nodes.memory.get_character_state", new_callable=AsyncMock, return_value={}),
-        patch("bot.nodes.memory.get_affinity", new_callable=AsyncMock, return_value=500),
+        patch("nodes.memory.get_conversation_history", new_callable=AsyncMock, side_effect=Exception("db error")),
+        patch("nodes.memory.get_user_facts", new_callable=AsyncMock, return_value=[]),
+        patch("nodes.memory.get_character_state", new_callable=AsyncMock, return_value={}),
+        patch("nodes.memory.get_affinity", new_callable=AsyncMock, return_value=500),
     ):
         result = await memory_retriever(routed_state)
 
@@ -59,10 +59,10 @@ async def test_memory_handles_history_failure(routed_state):
 @pytest.mark.asyncio
 async def test_memory_handles_facts_failure(routed_state):
     with (
-        patch("bot.nodes.memory.get_conversation_history", new_callable=AsyncMock, return_value=[]),
-        patch("bot.nodes.memory.get_user_facts", new_callable=AsyncMock, side_effect=Exception("db error")),
-        patch("bot.nodes.memory.get_character_state", new_callable=AsyncMock, return_value={}),
-        patch("bot.nodes.memory.get_affinity", new_callable=AsyncMock, return_value=500),
+        patch("nodes.memory.get_conversation_history", new_callable=AsyncMock, return_value=[]),
+        patch("nodes.memory.get_user_facts", new_callable=AsyncMock, side_effect=Exception("db error")),
+        patch("nodes.memory.get_character_state", new_callable=AsyncMock, return_value={}),
+        patch("nodes.memory.get_affinity", new_callable=AsyncMock, return_value=500),
     ):
         result = await memory_retriever(routed_state)
 
@@ -73,10 +73,10 @@ async def test_memory_handles_facts_failure(routed_state):
 @pytest.mark.asyncio
 async def test_memory_handles_character_state_failure(routed_state):
     with (
-        patch("bot.nodes.memory.get_conversation_history", new_callable=AsyncMock, return_value=[]),
-        patch("bot.nodes.memory.get_user_facts", new_callable=AsyncMock, return_value=[]),
-        patch("bot.nodes.memory.get_character_state", new_callable=AsyncMock, side_effect=Exception("db error")),
-        patch("bot.nodes.memory.get_affinity", new_callable=AsyncMock, return_value=500),
+        patch("nodes.memory.get_conversation_history", new_callable=AsyncMock, return_value=[]),
+        patch("nodes.memory.get_user_facts", new_callable=AsyncMock, return_value=[]),
+        patch("nodes.memory.get_character_state", new_callable=AsyncMock, side_effect=Exception("db error")),
+        patch("nodes.memory.get_affinity", new_callable=AsyncMock, return_value=500),
     ):
         result = await memory_retriever(routed_state)
 

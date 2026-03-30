@@ -15,13 +15,13 @@ from pathlib import Path
 
 import discord
 
-from bot.config import DISCORD_TOKEN
-from bot.db import close_db, save_message
-from bot.graph import build_graph
-from bot.mcp_client import mcp_manager
-from bot.nodes.memory_writer import memory_writer
-from bot.state import BotState
-from bot.tools import build_tool_prompt_block
+from config import DISCORD_TOKEN
+from db import close_db, save_message
+from graph import build_graph
+from mcp_client import mcp_manager
+from nodes.memory_writer import memory_writer
+from state import BotState
+from tools import build_tool_prompt_block
 
 logger = logging.getLogger(__name__)
 

@@ -10,9 +10,9 @@ import logging
 
 from openai import AsyncOpenAI
 
-from bot.config import EMBEDDING_BASE_URL, EMBEDDING_MODEL, LLM_API_KEY, RAG_TOP_K
-from bot.db import vector_search
-from bot.state import BotState, RagResult
+from config import EMBEDDING_BASE_URL, EMBEDDING_MODEL, LLM_API_KEY, RAG_TOP_K
+from db import vector_search
+from state import BotState, RagResult
 
 logger = logging.getLogger(__name__)
 

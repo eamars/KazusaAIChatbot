@@ -4,7 +4,7 @@
 .env.*.local
 
 # Exclude private characteristics
-src/personalities/*
+# personalities/*
 
 # Python cache files
 __pycache__/

@@ -6,7 +6,7 @@ so the LLM knows what tools are available and how to call them.
 
 from __future__ import annotations
 
-from bot.mcp_client import McpManager, ToolInfo
+from mcp_client import McpManager, ToolInfo
 
 
 def build_tool_prompt_block(manager: McpManager) -> str:

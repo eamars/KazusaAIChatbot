@@ -11,8 +11,8 @@ import json
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
-from bot.config import TOKEN_BUDGET
-from bot.state import BotState
+from config import TOKEN_BUDGET
+from state import BotState
 
 # Rough estimate: 1 token ≈ 4 characters for English text
 CHARS_PER_TOKEN = 4

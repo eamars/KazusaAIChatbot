@@ -9,15 +9,15 @@ from __future__ import annotations
 
 import logging
 
-from bot.config import CONVERSATION_HISTORY_LIMIT
-from bot.db import (
+from config import CONVERSATION_HISTORY_LIMIT
+from db import (
     AFFINITY_DEFAULT,
     get_affinity,
     get_character_state,
     get_conversation_history,
     get_user_facts,
 )
-from bot.state import BotState, CharacterState, ChatMessage
+from state import BotState, CharacterState, ChatMessage
 
 logger = logging.getLogger(__name__)
 

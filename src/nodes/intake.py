@@ -9,7 +9,7 @@ from __future__ import annotations
 import re
 from datetime import datetime, timezone
 
-from bot.state import BotState
+from state import BotState
 
 
 def intake(state: BotState) -> BotState:

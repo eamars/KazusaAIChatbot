@@ -16,7 +16,7 @@ from pathlib import Path
 # Ensure the src directory is on the import path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from bot.discord_bot import run_bot
+from discord_bot import run_bot
 
 
 def main():

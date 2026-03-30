@@ -8,7 +8,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from langchain_core.messages import AIMessage
 
-from bot.nodes.memory_writer import memory_writer
+from nodes.memory_writer import memory_writer
 
 
 def _mock_llm(content: str) -> MagicMock:
@@ -42,10 +42,10 @@ async def test_writer_extracts_facts_and_mood():
     })
 
     with (
-        patch("bot.nodes.memory_writer._get_llm", return_value=_mock_llm(llm_output)),
-        patch("bot.nodes.memory_writer.upsert_user_facts", new_callable=AsyncMock) as mock_facts,
-        patch("bot.nodes.memory_writer.upsert_character_state", new_callable=AsyncMock) as mock_char,
-        patch("bot.nodes.memory_writer.update_affinity", new_callable=AsyncMock, return_value=505) as mock_aff,
+        patch("nodes.memory_writer._get_llm", return_value=_mock_llm(llm_output)),
+        patch("nodes.memory_writer.upsert_user_facts", new_callable=AsyncMock) as mock_facts,
+        patch("nodes.memory_writer.upsert_character_state", new_callable=AsyncMock) as mock_char,
+        patch("nodes.memory_writer.update_affinity", new_callable=AsyncMock, return_value=505) as mock_aff,
     ):
         result = await memory_writer(_make_state())
 
@@ -71,10 +71,10 @@ async def test_writer_no_facts():
     })
 
     with (
-        patch("bot.nodes.memory_writer._get_llm", return_value=_mock_llm(llm_output)),
-        patch("bot.nodes.memory_writer.upsert_user_facts", new_callable=AsyncMock) as mock_facts,
-        patch("bot.nodes.memory_writer.upsert_character_state", new_callable=AsyncMock) as mock_char,
-        patch("bot.nodes.memory_writer.update_affinity", new_callable=AsyncMock, return_value=503),
+        patch("nodes.memory_writer._get_llm", return_value=_mock_llm(llm_output)),
+        patch("nodes.memory_writer.upsert_user_facts", new_callable=AsyncMock) as mock_facts,
+        patch("nodes.memory_writer.upsert_character_state", new_callable=AsyncMock) as mock_char,
+        patch("nodes.memory_writer.update_affinity", new_callable=AsyncMock, return_value=503),
     ):
         result = await memory_writer(_make_state())
 
@@ -91,10 +91,10 @@ async def test_writer_handles_markdown_fenced_json():
     }) + "\n```"
 
     with (
-        patch("bot.nodes.memory_writer._get_llm", return_value=_mock_llm(llm_output)),
-        patch("bot.nodes.memory_writer.upsert_user_facts", new_callable=AsyncMock) as mock_facts,
-        patch("bot.nodes.memory_writer.upsert_character_state", new_callable=AsyncMock),
-        patch("bot.nodes.memory_writer.update_affinity", new_callable=AsyncMock, return_value=503),
+        patch("nodes.memory_writer._get_llm", return_value=_mock_llm(llm_output)),
+        patch("nodes.memory_writer.upsert_user_facts", new_callable=AsyncMock) as mock_facts,
+        patch("nodes.memory_writer.upsert_character_state", new_callable=AsyncMock),
+        patch("nodes.memory_writer.update_affinity", new_callable=AsyncMock, return_value=503),
     ):
         result = await memory_writer(_make_state())
 
@@ -105,10 +105,10 @@ async def test_writer_handles_markdown_fenced_json():
 @pytest.mark.asyncio
 async def test_writer_handles_malformed_json():
     with (
-        patch("bot.nodes.memory_writer._get_llm", return_value=_mock_llm("not valid json at all")),
-        patch("bot.nodes.memory_writer.upsert_user_facts", new_callable=AsyncMock) as mock_facts,
-        patch("bot.nodes.memory_writer.upsert_character_state", new_callable=AsyncMock) as mock_char,
-        patch("bot.nodes.memory_writer.update_affinity", new_callable=AsyncMock),
+        patch("nodes.memory_writer._get_llm", return_value=_mock_llm("not valid json at all")),
+        patch("nodes.memory_writer.upsert_user_facts", new_callable=AsyncMock) as mock_facts,
+        patch("nodes.memory_writer.upsert_character_state", new_callable=AsyncMock) as mock_char,
+        patch("nodes.memory_writer.update_affinity", new_callable=AsyncMock),
     ):
         result = await memory_writer(_make_state())
 
@@ -123,8 +123,8 @@ async def test_writer_handles_llm_failure():
     mock.ainvoke = AsyncMock(side_effect=Exception("LLM down"))
 
     with (
-        patch("bot.nodes.memory_writer._get_llm", return_value=mock),
-        patch("bot.nodes.memory_writer.upsert_user_facts", new_callable=AsyncMock) as mock_facts,
+        patch("nodes.memory_writer._get_llm", return_value=mock),
+        patch("nodes.memory_writer.upsert_user_facts", new_callable=AsyncMock) as mock_facts,
     ):
         result = await memory_writer(_make_state())
 
@@ -154,10 +154,10 @@ async def test_writer_clamps_affinity_delta():
     })
 
     with (
-        patch("bot.nodes.memory_writer._get_llm", return_value=_mock_llm(llm_output)),
-        patch("bot.nodes.memory_writer.upsert_user_facts", new_callable=AsyncMock),
-        patch("bot.nodes.memory_writer.upsert_character_state", new_callable=AsyncMock),
-        patch("bot.nodes.memory_writer.update_affinity", new_callable=AsyncMock, return_value=480) as mock_aff,
+        patch("nodes.memory_writer._get_llm", return_value=_mock_llm(llm_output)),
+        patch("nodes.memory_writer.upsert_user_facts", new_callable=AsyncMock),
+        patch("nodes.memory_writer.upsert_character_state", new_callable=AsyncMock),
+        patch("nodes.memory_writer.update_affinity", new_callable=AsyncMock, return_value=480) as mock_aff,
     ):
         await memory_writer(_make_state())
 
@@ -182,9 +182,9 @@ async def test_live_writer_extracts_valid_json():
     )
 
     with (
-        patch("bot.nodes.memory_writer.upsert_user_facts", new_callable=AsyncMock) as mock_facts,
-        patch("bot.nodes.memory_writer.upsert_character_state", new_callable=AsyncMock) as mock_char,
-        patch("bot.nodes.memory_writer.update_affinity", new_callable=AsyncMock, return_value=505) as mock_aff,
+        patch("nodes.memory_writer.upsert_user_facts", new_callable=AsyncMock) as mock_facts,
+        patch("nodes.memory_writer.upsert_character_state", new_callable=AsyncMock) as mock_char,
+        patch("nodes.memory_writer.update_affinity", new_callable=AsyncMock, return_value=505) as mock_aff,
     ):
         result = await memory_writer(state)
 

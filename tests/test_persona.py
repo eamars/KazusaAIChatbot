@@ -7,12 +7,12 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from langchain_core.messages import AIMessage
 
-from bot.nodes.persona import _parse_tool_call, _strip_tool_call, persona_agent
+from nodes.persona import _parse_tool_call, _strip_tool_call, persona_agent
 
 
 @pytest.mark.asyncio
 async def test_persona_generates_response(assembled_state):
-    from bot.nodes.assembler import assembler
+    from nodes.assembler import assembler
 
     state = assembler(assembled_state)
 
@@ -21,7 +21,7 @@ async def test_persona_generates_response(assembled_state):
         return_value=AIMessage(content="The gate held, Commander. Barely.")
     )
 
-    with patch("bot.nodes.persona._get_llm", return_value=mock_llm):
+    with patch("nodes.persona._get_llm", return_value=mock_llm):
         result = await persona_agent(state)
 
     assert result["response"] == "The gate held, Commander. Barely."
@@ -37,14 +37,14 @@ async def test_persona_empty_messages():
 
 @pytest.mark.asyncio
 async def test_persona_handles_llm_failure(assembled_state):
-    from bot.nodes.assembler import assembler
+    from nodes.assembler import assembler
 
     state = assembler(assembled_state)
 
     mock_llm = MagicMock()
     mock_llm.ainvoke = AsyncMock(side_effect=Exception("LLM down"))
 
-    with patch("bot.nodes.persona._get_llm", return_value=mock_llm):
+    with patch("nodes.persona._get_llm", return_value=mock_llm):
         result = await persona_agent(state)
 
     assert result["response"] == "*stays silent*"
@@ -52,14 +52,14 @@ async def test_persona_handles_llm_failure(assembled_state):
 
 @pytest.mark.asyncio
 async def test_persona_handles_none_content(assembled_state):
-    from bot.nodes.assembler import assembler
+    from nodes.assembler import assembler
 
     state = assembler(assembled_state)
 
     mock_llm = MagicMock()
     mock_llm.ainvoke = AsyncMock(return_value=AIMessage(content=""))
 
-    with patch("bot.nodes.persona._get_llm", return_value=mock_llm):
+    with patch("nodes.persona._get_llm", return_value=mock_llm):
         result = await persona_agent(state)
 
     assert result["response"] == "..."
@@ -101,7 +101,7 @@ class TestStripToolCall:
 @pytest.mark.asyncio
 async def test_persona_tool_call_loop(assembled_state):
     """LLM outputs a tool call, gets result, then produces final response."""
-    from bot.nodes.assembler import assembler
+    from nodes.assembler import assembler
 
     state = assembler(assembled_state)
 
@@ -117,8 +117,8 @@ async def test_persona_tool_call_loop(assembled_state):
     mock_mcp.call_tool = AsyncMock(return_value="Shadow wolves attacked the gate at midnight.")
 
     with (
-        patch("bot.nodes.persona._get_llm", return_value=mock_llm),
-        patch("bot.nodes.persona.mcp_manager", mock_mcp),
+        patch("nodes.persona._get_llm", return_value=mock_llm),
+        patch("nodes.persona.mcp_manager", mock_mcp),
     ):
         result = await persona_agent(state)
 
@@ -132,7 +132,7 @@ async def test_persona_tool_call_loop(assembled_state):
 @pytest.mark.asyncio
 async def test_persona_no_tool_call_returns_empty_history(assembled_state):
     """Normal response without tool calls should return empty tool_history."""
-    from bot.nodes.assembler import assembler
+    from nodes.assembler import assembler
 
     state = assembler(assembled_state)
 
@@ -141,7 +141,7 @@ async def test_persona_no_tool_call_returns_empty_history(assembled_state):
         return_value=AIMessage(content="The gate held, Commander.")
     )
 
-    with patch("bot.nodes.persona._get_llm", return_value=mock_llm):
+    with patch("nodes.persona._get_llm", return_value=mock_llm):
         result = await persona_agent(state)
 
     assert result["response"] == "The gate held, Commander."
@@ -151,7 +151,7 @@ async def test_persona_no_tool_call_returns_empty_history(assembled_state):
 @pytest.mark.asyncio
 async def test_persona_max_iterations_stops_loop(assembled_state):
     """If LLM keeps requesting tools past MAX_TOOL_ITERATIONS, loop stops."""
-    from bot.nodes.assembler import assembler
+    from nodes.assembler import assembler
 
     state = assembler(assembled_state)
 
@@ -165,9 +165,9 @@ async def test_persona_max_iterations_stops_loop(assembled_state):
     mock_mcp.call_tool = AsyncMock(return_value="result")
 
     with (
-        patch("bot.nodes.persona._get_llm", return_value=mock_llm),
-        patch("bot.nodes.persona.mcp_manager", mock_mcp),
-        patch("bot.nodes.persona.MAX_TOOL_ITERATIONS", 2),
+        patch("nodes.persona._get_llm", return_value=mock_llm),
+        patch("nodes.persona.mcp_manager", mock_mcp),
+        patch("nodes.persona.MAX_TOOL_ITERATIONS", 2),
     ):
         result = await persona_agent(state)
 
@@ -187,7 +187,7 @@ live_llm = pytest.mark.live_llm
 @pytest.mark.asyncio
 async def test_live_persona_generates_in_character_response(assembled_state):
     """Call the real LLM and verify a non-trivial in-character reply."""
-    from bot.nodes.assembler import assembler
+    from nodes.assembler import assembler
 
     state = assembler(assembled_state)
     result = await persona_agent(state)
