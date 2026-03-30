@@ -1,10 +1,10 @@
 # Role-Play Discord Chatbot
 
-A Discord chatbot that responds in-character using a configurable personality (JSON), long-term user memory, and RAG-powered world knowledge — built with **LangGraph**, **LM Studio** (local Qwen 3.5 27B), and **MongoDB**.
+A Discord chatbot that responds in-character using a configurable personality (JSON), long-term user memory, RAG-powered world knowledge, and **MCP tool calling** — built with **LangGraph**, **LM Studio** (local Qwen 3.5 27B), and **MongoDB**.
 
 ## Architecture
 
-The bot uses a **lean hybrid pipeline**: most stages are pure code (no LLM), with only **1 synchronous LLM call** per message and **1 deferred LLM call** after the reply is sent.
+The bot uses a **lean hybrid pipeline**: most stages are pure code (no LLM), with only **1–3 synchronous LLM calls** per message (1 base + up to 2 tool-calling iterations) and **1 deferred LLM call** after the reply is sent.
 
 ```
                     ┌─────────────┐
@@ -30,7 +30,7 @@ The bot uses a **lean hybrid pipeline**: most stages are pure code (no LLM), wit
                     └──────┬──────┘
                            │ llm_messages
                     ┌──────▼──────┐
-                    │ 6. Persona  │  ★ LLM CALL (in-character reply)
+                    │ 6. Persona  │  ★ LLM CALL (supervisor + tool loop)
                     └──────┬──────┘
                            │ response
                     ┌──────▼──────┐
@@ -89,14 +89,32 @@ Builds the final prompt within a **token budget**:
 
 Truncates oldest history first, then lowest-scored RAG chunks if over budget.
 
-### Stage 6 — Persona Agent (LLM call)
-Single chat completion call to LM Studio. The model receives a fully assembled prompt and generates an in-character reply. No tool use, no structured output — pure text generation.
+### Stage 6 — Persona Agent (LLM supervisor)
+The persona agent is an **inline LLM supervisor** with an optional tool-calling loop:
+
+1. Call the LLM with the assembled messages (including tool descriptions in the system prompt).
+2. If the response contains a `<tool_call>{"name": "...", "args": {...}}</tool_call>` tag, parse and execute the tool via MCP.
+3. Append the tool result and re-invoke the LLM (up to `MAX_TOOL_ITERATIONS`, default 3).
+4. Return the final text response (with any `<tool_call>` tags stripped).
+
+This avoids the overhead of a separate routing LLM — the persona decides in-context whether it needs a tool, with **zero extra latency** on normal (no-tool) messages.
+
+#### MCP Tool Calling
+
+Tools are provided by external **MCP servers** (HTTP/SSE). At startup, the bot connects to all configured servers, discovers available tools, and generates a prompt block describing them. Tool names are namespaced as `{server}__{tool}` internally, but the original name is sent to the MCP server.
+
+Configured via the `MCP_SERVERS` environment variable (JSON string):
+
+```json
+{"mcp-searxng": {"url": "http://host:4001/mcp"}, "playwright": {"url": "http://host:8931/mcp"}}
+```
 
 ### Stage 7 — Memory Writer (deferred LLM call)
 Runs **after** the reply is sent to Discord (fire-and-forget `asyncio.create_task`). Extracts from each exchange:
 - **User facts** — new facts about the user (e.g., preferred name)
 - **Character state** — updated mood and emotional tone
 - **Affinity delta** — integer (-20 to +10) indicating how the exchange changes the bot's feeling toward the user
+- **Tool history** — if tools were called during the turn, the tool names, arguments, and results are included in the extraction prompt so the LLM can reason about them
 
 All three are persisted to MongoDB. Affinity deltas are clamped to `[-20, +10]` by non-LLM code before applying. Best-effort — failures are logged and silently skipped.
 
@@ -104,24 +122,25 @@ All three are persisted to MongoDB. Affinity deltas are clamped to `[-20, +10]` 
 
 ```
 src/
-  bot/
-    config.py              # env vars, token budgets
-    state.py               # BotState TypedDict (shared graph state)
-    db.py                  # MongoDB async helpers + schema (TypedDict)
-    graph.py               # LangGraph StateGraph wiring
-    discord_bot.py         # Discord client, message handling, deferred tasks
-    nodes/
-      intake.py            # Stage 1
-      router.py            # Stage 2
-      rag.py               # Stage 3
-      memory.py            # Stage 4
-      assembler.py         # Stage 5 (universal rules, affinity block)
-      persona.py           # Stage 6
-      memory_writer.py     # Stage 7 (facts + character state + affinity delta)
-  personalities/
-    example.json           # sample personality ("Zara")
-    kazusa.json            # full personality with _reference section
   main.py                  # CLI entry point
+  config.py                # env vars, token budgets, MCP_SERVERS
+  state.py                 # BotState TypedDict + ToolCall (shared graph state)
+  db.py                    # MongoDB async helpers + schema (TypedDict)
+  graph.py                 # LangGraph StateGraph wiring
+  discord_bot.py           # Discord client, message handling, MCP lifecycle
+  mcp_client.py            # McpManager — MCP server connections + tool execution
+  tools.py                 # build_tool_prompt_block() for LLM prompt injection
+  nodes/
+    intake.py              # Stage 1
+    router.py              # Stage 2
+    rag.py                 # Stage 3
+    memory.py              # Stage 4
+    assembler.py           # Stage 5 (universal rules, affinity, tool descriptions)
+    persona.py             # Stage 6 (supervisor loop with <tool_call> parsing)
+    memory_writer.py       # Stage 7 (facts + character state + affinity + tool history)
+personalities/
+  example.json             # sample personality ("Zara")
+  kazusa.json              # full personality with _reference section
 .env.example               # environment variable template
 requirements.txt
 ```
@@ -143,6 +162,10 @@ DISCORD_TOKEN=your_discord_bot_token
 MONGODB_URI=mongodb://your_connection_string
 LLM_BASE_URL=http://localhost:1234/v1
 EMBEDDING_MODEL=your-embedding-model-name
+
+# Optional: MCP tool servers (JSON string)
+MCP_SERVERS={"mcp-searxng": {"url": "http://host:4001/mcp"}}
+MAX_TOOL_ITERATIONS=3
 ```
 
 ### 3. LM Studio
@@ -184,16 +207,16 @@ Keys prefixed with `_` (e.g., `_reference`) are **ignored** by the assembler —
 
 ```bash
 # Default: listen in ALL channels
-python src/main.py --personality src/personalities/example.json
+python src/main.py --personality personalities/example.json
 
 # Listen in specific channels only
-python src/main.py --personality src/personalities/example.json --channels 123456789 987654321
+python src/main.py --personality personalities/example.json --channels 123456789 987654321
 
 # Respond to @mentions only
-python src/main.py --personality src/personalities/example.json --no-listen-all
+python src/main.py --personality personalities/example.json --no-listen-all
 
 # With debug logging
-python src/main.py --personality src/personalities/example.json --log-level DEBUG
+python src/main.py --personality personalities/example.json --log-level DEBUG
 ```
 
 ## Design Decisions
@@ -206,3 +229,6 @@ python src/main.py --personality src/personalities/example.json --log-level DEBU
 - **Affinity system** — per-user 0–1000 score (default 500) that slowly shifts based on conversation quality. The LLM proposes a delta; non-LLM code clamps it. This avoids wild swings while letting the bot gradually warm up or cool down toward individual users.
 - **Universal rules in assembler** — behavioural rules ("never break character", etc.) are hardcoded rather than per-personality, ensuring consistency across all characters.
 - **`_`-prefixed keys ignored** — personality JSON can store reference data (appearance, art notes) under `_reference` without wasting prompt tokens.
+- **Inline supervisor over separate routing LLM** — the persona agent decides in-context whether to call a tool. This avoids an extra LLM call on every message (most messages don't need tools) and sidesteps the routing reliability problem with local models.
+- **Prompt-based `<tool_call>` tags** instead of native OpenAI function calling — ensures compatibility with Qwen and other local models served via LM Studio that may not support the `tools` parameter.
+- **MCP for tooling** — tools are served by external MCP servers over HTTP, making them language-agnostic and independently deployable. New tools can be added by spinning up a new MCP server without changing bot code.
