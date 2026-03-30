@@ -18,8 +18,10 @@ import discord
 from bot.config import DISCORD_TOKEN
 from bot.db import close_db, save_message
 from bot.graph import build_graph
+from bot.mcp_client import mcp_manager
 from bot.nodes.memory_writer import memory_writer
 from bot.state import BotState
+from bot.tools import build_tool_prompt_block
 
 logger = logging.getLogger(__name__)
 
@@ -61,6 +63,12 @@ class RolePlayBot(discord.Client):
         else:
             logger.info("No channels configured — responding to @mentions only")
 
+        # Connect to MCP tool servers
+        try:
+            await mcp_manager.start()
+        except Exception:
+            logger.exception("MCP manager failed to start — tools will be unavailable")
+
     async def on_message(self, message: discord.Message):
         # Ignore own messages
         if message.author == self.user:
@@ -93,6 +101,7 @@ class RolePlayBot(discord.Client):
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "should_respond": True,
             "personality": self.personality,
+            "tool_descriptions": build_tool_prompt_block(mcp_manager),
         }
 
         # Show typing indicator while processing
@@ -164,6 +173,7 @@ class RolePlayBot(discord.Client):
             logger.exception("Deferred memory writer failed")
 
     async def close(self):
+        await mcp_manager.stop()
         await close_db()
         await super().close()
 

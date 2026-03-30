@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from langchain_core.messages import AIMessage
 
-from bot.nodes.persona import persona_agent
+from bot.nodes.persona import _parse_tool_call, _strip_tool_call, persona_agent
 
 
 @pytest.mark.asyncio
@@ -63,6 +63,117 @@ async def test_persona_handles_none_content(assembled_state):
         result = await persona_agent(state)
 
     assert result["response"] == "..."
+
+
+# ── Tool-calling unit tests ──────────────────────────────────────────
+
+
+class TestParseToolCall:
+    def test_valid_tool_call(self):
+        text = 'Let me check. <tool_call>{"name": "search", "args": {"q": "test"}}</tool_call>'
+        result = _parse_tool_call(text)
+        assert result == {"name": "search", "args": {"q": "test"}}
+
+    def test_no_tool_call(self):
+        assert _parse_tool_call("Just a normal response.") is None
+
+    def test_malformed_json(self):
+        assert _parse_tool_call("<tool_call>not json</tool_call>") is None
+
+    def test_missing_name_key(self):
+        assert _parse_tool_call('<tool_call>{"args": {}}</tool_call>') is None
+
+    def test_multiline_json(self):
+        text = '<tool_call>\n{\n  "name": "search",\n  "args": {"q": "hi"}\n}\n</tool_call>'
+        result = _parse_tool_call(text)
+        assert result["name"] == "search"
+
+
+class TestStripToolCall:
+    def test_strip(self):
+        text = 'Hello <tool_call>{"name": "x", "args": {}}</tool_call> world'
+        assert _strip_tool_call(text) == "Hello  world"
+
+    def test_no_tool_call(self):
+        assert _strip_tool_call("Hello world") == "Hello world"
+
+
+@pytest.mark.asyncio
+async def test_persona_tool_call_loop(assembled_state):
+    """LLM outputs a tool call, gets result, then produces final response."""
+    from bot.nodes.assembler import assembler
+
+    state = assembler(assembled_state)
+
+    # First call: LLM requests a tool call
+    # Second call: LLM produces final response using tool result
+    mock_llm = MagicMock()
+    mock_llm.ainvoke = AsyncMock(side_effect=[
+        AIMessage(content='<tool_call>{"name": "mcp-searxng__search", "args": {"q": "northern gate"}}</tool_call>'),
+        AIMessage(content="The northern gate was attacked by shadow wolves last night."),
+    ])
+
+    mock_mcp = AsyncMock()
+    mock_mcp.call_tool = AsyncMock(return_value="Shadow wolves attacked the gate at midnight.")
+
+    with (
+        patch("bot.nodes.persona._get_llm", return_value=mock_llm),
+        patch("bot.nodes.persona.mcp_manager", mock_mcp),
+    ):
+        result = await persona_agent(state)
+
+    assert result["response"] == "The northern gate was attacked by shadow wolves last night."
+    assert len(result["tool_history"]) == 1
+    assert result["tool_history"][0]["tool"] == "mcp-searxng__search"
+    assert result["tool_history"][0]["result"] == "Shadow wolves attacked the gate at midnight."
+    assert mock_llm.ainvoke.call_count == 2
+
+
+@pytest.mark.asyncio
+async def test_persona_no_tool_call_returns_empty_history(assembled_state):
+    """Normal response without tool calls should return empty tool_history."""
+    from bot.nodes.assembler import assembler
+
+    state = assembler(assembled_state)
+
+    mock_llm = MagicMock()
+    mock_llm.ainvoke = AsyncMock(
+        return_value=AIMessage(content="The gate held, Commander.")
+    )
+
+    with patch("bot.nodes.persona._get_llm", return_value=mock_llm):
+        result = await persona_agent(state)
+
+    assert result["response"] == "The gate held, Commander."
+    assert result["tool_history"] == []
+
+
+@pytest.mark.asyncio
+async def test_persona_max_iterations_stops_loop(assembled_state):
+    """If LLM keeps requesting tools past MAX_TOOL_ITERATIONS, loop stops."""
+    from bot.nodes.assembler import assembler
+
+    state = assembler(assembled_state)
+
+    # LLM always returns a tool call — should stop after MAX_TOOL_ITERATIONS
+    mock_llm = MagicMock()
+    mock_llm.ainvoke = AsyncMock(
+        return_value=AIMessage(content='<tool_call>{"name": "t", "args": {}}</tool_call>')
+    )
+
+    mock_mcp = AsyncMock()
+    mock_mcp.call_tool = AsyncMock(return_value="result")
+
+    with (
+        patch("bot.nodes.persona._get_llm", return_value=mock_llm),
+        patch("bot.nodes.persona.mcp_manager", mock_mcp),
+        patch("bot.nodes.persona.MAX_TOOL_ITERATIONS", 2),
+    ):
+        result = await persona_agent(state)
+
+    # Should have called tool twice, then on 3rd iteration stripped the tool call
+    assert len(result["tool_history"]) == 2
+    assert result["response"] == "..."  # stripped tool_call leaves empty → "..."
 
 
 # ── Live LLM test ────────────────────────────────────────────────────

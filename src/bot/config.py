@@ -1,4 +1,6 @@
+import json
 import os
+
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -34,3 +36,10 @@ TOKEN_BUDGET = {
     "conversation_history": 4000,
     "current_message": 500,
 }
+
+# MCP tool servers — JSON dict of {name: {url: ...}}
+# Read from MCP_SERVERS env var (JSON string)
+MCP_SERVERS: dict[str, dict] = json.loads(os.getenv("MCP_SERVERS", "{}"))
+
+# Max tool-calling loop iterations in persona supervisor
+MAX_TOOL_ITERATIONS = int(os.getenv("MAX_TOOL_ITERATIONS", "3"))

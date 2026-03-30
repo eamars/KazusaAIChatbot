@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import TypedDict
+from typing import Any, TypedDict
 
 
 class RagResult(TypedDict):
@@ -21,6 +21,12 @@ class CharacterState(TypedDict, total=False):
     emotional_tone: str    # e.g. "warm", "guarded", "teasing"
     recent_events: list[str]  # short summaries of recent notable interactions
     updated_at: str        # ISO timestamp of last update
+
+
+class ToolCall(TypedDict):
+    tool: str              # fully-qualified tool name (e.g. "mcp-searxng__search")
+    args: dict[str, Any]   # arguments passed to the tool
+    result: str            # text result returned by the tool
 
 
 class BotState(TypedDict, total=False):
@@ -49,9 +55,11 @@ class BotState(TypedDict, total=False):
 
     # --- Stage 5: assembler ---
     llm_messages: list[dict]
+    tool_descriptions: str  # prompt block listing available tools
 
-    # --- Stage 6: persona ---
+    # --- Stage 6: persona (supervisor) ---
     response: str
+    tool_history: list[ToolCall]  # tools called during this turn
 
     # --- Stage 7: memory writer ---
     new_facts: list[str]

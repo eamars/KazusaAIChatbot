@@ -193,6 +193,10 @@ def assembler(state: BotState) -> BotState:
     if memory_block:
         system_parts.append(memory_block)
 
+    tool_descriptions = state.get("tool_descriptions", "")
+    if tool_descriptions:
+        system_parts.append(tool_descriptions)
+
     system_prompt = "\n\n".join(system_parts)
 
     # ── Build message list ──────────────────────────────────────────

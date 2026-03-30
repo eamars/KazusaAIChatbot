@@ -1,22 +1,41 @@
-"""Stage 6 — Persona Agent (LLM call).
+"""Stage 6 — Persona Agent (LLM supervisor).
 
-Single LLM call to generate the in-character role-play response.
-No tool use, no structured output — just text generation.
+Generates an in-character reply, optionally calling MCP tools.
+
+The supervisor loop:
+  1. Call the LLM with the assembled messages.
+  2. If the response contains a ``<tool_call>`` tag, parse and execute it.
+  3. Append the tool result and re-invoke the LLM (up to MAX_TOOL_ITERATIONS).
+  4. Return the final text response.
 """
 
 from __future__ import annotations
 
+import json
 import logging
+import re
 
-from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
+from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
 from langchain_openai import ChatOpenAI
 
-from bot.config import LLM_API_KEY, LLM_BASE_URL, LLM_MODEL, LLM_TEMPERATURE
-from bot.state import BotState
+from bot.config import (
+    LLM_API_KEY,
+    LLM_BASE_URL,
+    LLM_MODEL,
+    LLM_TEMPERATURE,
+    MAX_TOOL_ITERATIONS,
+)
+from bot.mcp_client import mcp_manager
+from bot.state import BotState, ToolCall
 
 logger = logging.getLogger(__name__)
 
 _llm: ChatOpenAI | None = None
+
+_TOOL_CALL_RE = re.compile(
+    r"<tool_call>\s*(\{.*?\})\s*</tool_call>",
+    re.DOTALL,
+)
 
 
 def _get_llm() -> ChatOpenAI:
@@ -55,19 +74,74 @@ def _prepare_messages(messages: list[BaseMessage]) -> list[BaseMessage]:
     return other
 
 
+def _parse_tool_call(text: str) -> dict | None:
+    """Extract the first <tool_call> JSON from the LLM output.
+
+    Returns ``{"name": ..., "args": ...}`` or None.
+    """
+    match = _TOOL_CALL_RE.search(text)
+    if not match:
+        return None
+    try:
+        parsed = json.loads(match.group(1))
+        if isinstance(parsed, dict) and "name" in parsed:
+            return parsed
+    except (json.JSONDecodeError, TypeError):
+        logger.warning("Failed to parse tool_call JSON: %s", match.group(1))
+    return None
+
+
+def _strip_tool_call(text: str) -> str:
+    """Remove <tool_call> blocks from the response text."""
+    return _TOOL_CALL_RE.sub("", text).strip()
+
+
 async def persona_agent(state: BotState) -> BotState:
-    """Generate an in-character reply using the assembled prompt."""
-    messages = state.get("llm_messages", [])
+    """Generate an in-character reply, optionally calling tools."""
+    messages: list[BaseMessage] = list(state.get("llm_messages", []))
     if not messages:
-        return {**state, "response": "..."}
+        return {**state, "response": "...", "tool_history": []}
+
+    tool_history: list[ToolCall] = []
 
     try:
         llm = _get_llm()
         prepared = _prepare_messages(messages)
-        result = await llm.ainvoke(prepared)
-        response = result.content or "..."
+
+        for iteration in range(MAX_TOOL_ITERATIONS + 1):
+            result = await llm.ainvoke(prepared)
+            raw_text = result.content or ""
+
+            # Check for a tool call
+            tool_req = _parse_tool_call(raw_text)
+            if tool_req is None or iteration == MAX_TOOL_ITERATIONS:
+                # No tool call or max iterations reached — return final response
+                response = _strip_tool_call(raw_text) or "..."
+                break
+
+            # Execute the tool
+            tool_name = tool_req["name"]
+            tool_args = tool_req.get("args", {})
+            logger.info("Tool call [%d/%d]: %s(%s)", iteration + 1, MAX_TOOL_ITERATIONS, tool_name, tool_args)
+
+            tool_result = await mcp_manager.call_tool(tool_name, tool_args)
+
+            tool_history.append(ToolCall(
+                tool=tool_name,
+                args=tool_args,
+                result=tool_result,
+            ))
+
+            # Append the exchange to the conversation for the next iteration
+            prepared.append(AIMessage(content=raw_text))
+            prepared.append(HumanMessage(
+                content=f"[Tool result for {tool_name}]:\n{tool_result}"
+            ))
+        else:
+            response = "..."
+
     except Exception:
         logger.exception("Persona agent LLM call failed")
         response = "*stays silent*"
 
-    return {**state, "response": response}
+    return {**state, "response": response, "tool_history": tool_history}
