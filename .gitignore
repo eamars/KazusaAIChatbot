@@ -3,6 +3,9 @@
 .env.local
 .env.*.local
 
+# Exclude private characteristics
+src/personalities/*
+
 # Python cache files
 __pycache__/
 *.py[cod]
