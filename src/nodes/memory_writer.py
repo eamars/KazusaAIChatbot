@@ -16,13 +16,14 @@ from langchain_openai import ChatOpenAI
 from config import LLM_API_KEY, LLM_BASE_URL, LLM_MODEL
 from db import update_affinity, upsert_character_state, upsert_user_facts
 from state import BotState
+from utils import format_history_text
 
 logger = logging.getLogger(__name__)
 
 _llm: ChatOpenAI | None = None
 
 EXTRACTION_PROMPT = """\
-Analyse this exchange between a user and a role-play character.
+Analyse this exchange between {user_name} and {persona_name}.
 Return ONLY a JSON object with three keys:
 
 1. "user_facts": array of short fact strings about the user. Return [] if nothing notable.
@@ -30,23 +31,31 @@ Return ONLY a JSON object with three keys:
 2. "character_state": object with keys "mood", "emotional_tone", and "event_summary".
    - "mood": the character's current mood after this exchange (e.g. "playful", "melancholic", "irritated", "content")
    - "emotional_tone": how the character is expressing themselves (e.g. "warm", "guarded", "teasing", "affectionate")
-   - "event_summary": one short sentence summarising what happened in this exchange, or "" if nothing notable
+   - "event_summary": one short sentence summarising what happened in this exchange, or "" if nothing notable.
+     Use the actual names ({user_name} and {persona_name}), NOT generic words like "user" or "bot".
 3. "affinity_delta": integer from -20 to +10 indicating how this exchange changes the character's feeling toward the user.
-   - Friendly, respectful, or engaging conversation: +3 to +10
-   - Neutral small-talk: +1 to +3
-   - Rude, hostile, or dismissive behaviour from the user: -5 to -20
-   - Default to +0 if the exchange is unremarkable
+   - Actively engaging, emotionally warm, or thoughtful conversation: +5 to +10
+   - Friendly and respectful conversation with substance: +3 to +5
+   - Neutral small-talk or simple acknowledgements: +1 to +2
+   - Polite but disengaging (declining invitations, brushing off topics, ending conversation): 0
+   - Cold, dismissive, or indifferent behaviour from the user: -3 to -5
+   - Rude, hostile, or deliberately hurtful behaviour from the user: -5 to -20
+   - Default to 0 if the exchange is unremarkable
 
 Examples:
 {{
   "user_facts": ["User prefers to be called Commander"],
-  "character_state": {{"mood": "amused", "emotional_tone": "teasing", "event_summary": "User asked about the northern gate incident"}},
+  "character_state": {{"mood": "amused", "emotional_tone": "teasing", "event_summary": "{user_name} asked {persona_name} about the northern gate incident"}},
+
   "affinity_delta": 5
 }}
 
-Exchange:
-User: {user_message}
-Bot: {bot_response}
+Recent conversation (for context):
+{history}
+
+Latest exchange (analyse THIS):
+{user_name}: {user_message}
+{persona_name}: {bot_response}
 
 JSON:"""
 
@@ -66,10 +75,14 @@ def _get_llm() -> ChatOpenAI:
 async def memory_writer(state: BotState) -> BotState:
     """Extract user facts and character state update. Best-effort — failures are silent."""
     user_id = state.get("user_id", "")
+    user_name = state.get("user_name", "User")
+    personality = state.get("personality", {})
+    persona_name = personality.get("name", "Bot")
     message_text = state.get("message_text", "")
     response = state.get("response", "")
     timestamp = state.get("timestamp", "")
     agent_results = state.get("agent_results", [])
+    conversation_history = state.get("conversation_history", [])
 
     if not user_id or not message_text:
         return {**state, "new_facts": []}
@@ -78,14 +91,21 @@ async def memory_writer(state: BotState) -> BotState:
         llm = _get_llm()
 
         # Build exchange text, including agent results if any
-        exchange = f"User: {message_text}\n"
+        exchange = f"{user_name}: {message_text}\n"
         for ar in agent_results:
             status = ar.get("status", "unknown")
             summary = ar.get("summary", "")
             exchange += f"[Agent: {ar['agent']} ({status}) → {summary}]\n"
-        exchange += f"Bot: {response}"
+        exchange += f"{persona_name}: {response}"
+
+        history_text = format_history_text(
+            conversation_history, persona_name, limit=10,
+        )
 
         prompt = EXTRACTION_PROMPT.format(
+            user_name=user_name,
+            persona_name=persona_name,
+            history=history_text or "(no prior conversation)",
             user_message=exchange,
             bot_response=response,
         )
@@ -123,7 +143,7 @@ async def memory_writer(state: BotState) -> BotState:
                 logger.info("Updated character state: mood=%s tone=%s", mood, tone)
 
         # ── Affinity delta ────────────────────────────────────────────
-        raw_delta = parsed.get("affinity_delta", 3)
+        raw_delta = parsed.get("affinity_delta", 0)
         if isinstance(raw_delta, (int, float)):
             delta = max(-20, min(10, int(raw_delta)))  # clamp to safe range
             new_affinity = await update_affinity(user_id, delta)
