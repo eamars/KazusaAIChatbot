@@ -57,6 +57,14 @@ async def test_full_graph_question_flow(sample_personality):
 
     graph = build_graph()
 
+    # Relevance agent LLM: approve the message
+    mock_relevance_llm = MagicMock()
+    mock_relevance_llm.ainvoke = AsyncMock(
+        return_value=AIMessage(content=json.dumps({
+            "should_respond": True, "reason": "Direct question.",
+        }))
+    )
+
     with (
         patch("nodes.rag._get_embed_client", return_value=mock_embed_client),
         patch("nodes.rag.vector_search", new_callable=AsyncMock, return_value=mock_vector_results),
@@ -64,6 +72,7 @@ async def test_full_graph_question_flow(sample_personality):
         patch("nodes.memory.get_user_facts", new_callable=AsyncMock, return_value=["User goes by Commander"]),
         patch("nodes.memory.get_character_state", new_callable=AsyncMock, return_value=mock_char_state),
         patch("nodes.memory.get_affinity", new_callable=AsyncMock, return_value=500),
+        patch("agents.relevance_agent._get_llm", return_value=mock_relevance_llm),
         patch("nodes.persona_supervisor._get_llm", return_value=mock_supervisor_llm),
         patch("agents.speech_agent._get_llm", return_value=mock_speech_llm),
     ):
@@ -103,11 +112,20 @@ async def test_full_graph_casual_greeting(sample_personality):
 
     graph = build_graph()
 
+    # Relevance agent LLM: approve the message
+    mock_relevance_llm = MagicMock()
+    mock_relevance_llm.ainvoke = AsyncMock(
+        return_value=AIMessage(content=json.dumps({
+            "should_respond": True, "reason": "Casual greeting.",
+        }))
+    )
+
     with (
         patch("nodes.memory.get_conversation_history", new_callable=AsyncMock, return_value=[]),
         patch("nodes.memory.get_user_facts", new_callable=AsyncMock, return_value=[]),
         patch("nodes.memory.get_character_state", new_callable=AsyncMock, return_value={}),
         patch("nodes.memory.get_affinity", new_callable=AsyncMock, return_value=500),
+        patch("agents.relevance_agent._get_llm", return_value=mock_relevance_llm),
         patch("nodes.persona_supervisor._get_llm", return_value=mock_supervisor_llm),
         patch("agents.speech_agent._get_llm", return_value=mock_speech_llm),
     ):

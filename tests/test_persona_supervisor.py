@@ -438,8 +438,8 @@ async def test_live_supervisor_calls_web_search_for_search_query():
     mock_search.run.assert_called_once()
 
 
-# @live_llm
-# @pytest.mark.asyncio
+@live_llm
+@pytest.mark.asyncio
 async def test_live_supervisor_no_agents_for_unsupported_task():
     """Real LLM should return empty agent list when no agent can handle the task.
 

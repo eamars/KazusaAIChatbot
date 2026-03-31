@@ -4,7 +4,7 @@ A Discord chatbot that responds in-character using a configurable personality (J
 
 ## Architecture
 
-The bot uses a **lean hybrid pipeline**: most stages are pure code (no LLM), with **2–4 synchronous LLM calls** per message (1 supervisor planning + 0–N tool agents + 1 speech agent) and **1 deferred LLM call** after the reply is sent.
+The bot uses a **lean hybrid pipeline**: most stages are pure code (no LLM), with **3–5 synchronous LLM calls** per message (1 relevance check + 1 supervisor planning + 0–N tool agents + 1 speech agent) and **1 deferred LLM call** after the reply is sent.
 
 ```
                     ┌─────────────┐
@@ -12,9 +12,9 @@ The bot uses a **lean hybrid pipeline**: most stages are pure code (no LLM), wit
                     └──────┬──────┘
                            │ raw event
                     ┌──────▼──────┐
-                    │  1. Intake   │  no LLM
+                    │  1. Intake   │  no LLM — mention filter
                     └──────┬──────┘
-                           │ clean state
+                           │ clean state (may exit early)
                     ┌──────▼──────┐
                     │  2. Router   │  no LLM (keyword/regex)
                     └──────┬──────┘
@@ -29,14 +29,24 @@ The bot uses a **lean hybrid pipeline**: most stages are pure code (no LLM), wit
                     │ 5. Assemble │  no LLM (prompt builder)
                     └──────┬──────┘
                            │ llm_messages
-                    ┌──────▼──────┐
-                    │6a. Supervisor│  ★ LLM CALL (planning)
-                    └──────┬──────┘
+                    ┌──────▼──────────────┐
+                    │6a. Supervisor        │
+                    │  ┌────────────────┐  │
+                    │  │ Relevance Agent │  │  ★ LLM CALL (should we reply?)
+                    │  └───────┬────────┘  │
+                    │     if relevant:      │
+                    │  ┌────────────────┐  │
+                    │  │ LLM Planning   │  │  ★ LLM CALL (which agents?)
+                    │  └───────┬────────┘  │
+                    │  ┌────────────────┐  │
+                    │  │ Agent Dispatch  │  │  ★ LLM CALL × N (tool agents)
+                    │  └────────────────┘  │
+                    └──────────┬───────────┘
                            │ agent_plan + agent_results
                     ┌──────▼──────┐
                     │6b. Speech   │  ★ LLM CALL (in-character reply)
                     └──────┬──────┘
-                           │ response
+                           │ response (or silence)
                     ┌──────▼──────┐
                     │  Discord     │  send reply
                     └──────┬──────┘
@@ -59,6 +69,8 @@ START → intake → router →┬→ rag_retriever    ─┬→ assembler → p
 
 ### Stage 1 — Intake (no LLM)
 Normalises the raw Discord message: strips mention markup, extracts user/channel metadata, sets `should_respond` flag. Early exit if nothing to respond to.
+
+**Mention filtering** — if the message mentions other Discord users but *not* the bot, `should_respond` is set to `False` immediately, short-circuiting the entire graph with zero LLM calls. Messages with no mentions pass through normally.
 
 ### Stage 2 — Router (no LLM)
 Rule-based decision tree using keyword matching and message length heuristics. Sets `retrieve_rag` and `retrieve_memory` flags. No LLM call — avoids unreliable routing on smaller models.
@@ -93,10 +105,21 @@ Builds the final prompt within a **token budget**:
 
 Truncates oldest history first, then lowest-scored RAG chunks if over budget.
 
-### Stage 6a — Persona Supervisor (LLM call)
-The supervisor is an **LLM-based planner** that decides which specialist agents to invoke:
+### Stage 6a — Persona Supervisor (LLM calls)
+The supervisor orchestrates two phases: a **relevance gate** and an **LLM-based planner**.
 
-1. Receive the user message and a catalog of available agents.
+#### Phase 0 — Relevance Agent (auto-run)
+Before any planning, the supervisor always runs the **relevance agent** — a lightweight LLM call that decides whether the bot should respond at all. It considers:
+- Whether the message is directed at the bot or is general chatter
+- Recent conversation history (last 6 messages) to understand conversational context
+- Whether responding would be appropriate (e.g. not interrupting a conversation between other users)
+
+If the relevance agent returns `should_respond: false`, the supervisor **short-circuits** with an empty plan and a "stay silent" directive — no planning LLM call, no agents dispatched, and the speech agent returns an empty response. This is a **fail-open** design: parse failures or LLM crashes default to responding.
+
+#### Phase 1 — Planning
+If the message is relevant:
+
+1. Receive the user message and a catalog of available agents (the relevance agent is excluded from this catalog — it's auto-managed).
 2. Call the LLM with a short planning prompt → returns a `SupervisorPlan`:
    - `agents`: list of agent names to invoke (e.g. `["web_search_agent"]`, or `[]` if none needed)
    - `speech_directive`: instruction for how the speech agent should incorporate the results (tone, detail level, error handling)
@@ -109,6 +132,7 @@ Each agent runs in its own LLM context with only the information it needs. If an
 
 | Agent | Description |
 |-------|-------------|
+| `relevance_agent` | **Auto-run** (not plannable). Lightweight LLM check on whether the bot should reply. Uses conversation history for context. Returns `should_respond: true/false` with a reason. |
 | `web_search_agent` | Searches the internet via MCP search tools. Gets only the user query + search tool descriptions. Runs its own `<tool_call>` loop, then summarises raw results. |
 | *(extensible)* | New agents are added by subclassing `BaseAgent` and calling `register_agent()` in `graph.py`. |
 
@@ -127,6 +151,8 @@ Always runs last. Generates the final **in-character reply** from:
 - Full personality context + conversation history (from the assembler)
 - Agent result summaries (not raw tool output)
 - The supervisor's `speech_directive`
+
+If the supervisor's directive is "Do not respond. Stay silent." (set by the relevance agent rejection), the speech agent **returns an empty response** without making an LLM call.
 
 The speech agent's LLM context is free of tool descriptions, keeping the token budget focused on personality and conversation quality. The speech directive guides how results are presented — e.g. a non-tech-savvy character will summarize search results in simpler terms.
 
@@ -151,18 +177,20 @@ src/
   discord_bot.py           # Discord client, message handling, MCP lifecycle
   mcp_client.py            # McpManager — MCP server connections + tool execution
   tools.py                 # build_tool_prompt_block() for agent prompt injection
+  utils.py                 # Shared helpers (history formatting)
   agents/
     __init__.py
     base.py                # BaseAgent ABC + AGENT_REGISTRY
+    relevance_agent.py     # Should-we-reply? LLM check (auto-run by supervisor)
     web_search_agent.py    # Web search via MCP (isolated context)
     speech_agent.py        # Stage 6b — in-character reply generation
   nodes/
-    intake.py              # Stage 1
+    intake.py              # Stage 1 (mention filtering)
     router.py              # Stage 2
     rag.py                 # Stage 3
     memory.py              # Stage 4
     assembler.py           # Stage 5 (universal rules, affinity)
-    persona_supervisor.py  # Stage 6a (LLM planning + agent dispatch)
+    persona_supervisor.py  # Stage 6a (relevance gate + LLM planning + agent dispatch)
     memory_writer.py       # Stage 7 (facts + character state + affinity + agent results)
 personalities/
   example.json             # sample personality ("Zara")
@@ -255,6 +283,7 @@ python src/main.py --personality personalities/example.json --log-level DEBUG
 - **Affinity system** — per-user 0–1000 score (default 500) that slowly shifts based on conversation quality. The LLM proposes a delta; non-LLM code clamps it. This avoids wild swings while letting the bot gradually warm up or cool down toward individual users.
 - **Universal rules in assembler** — behavioural rules ("never break character", etc.) are hardcoded rather than per-personality, ensuring consistency across all characters.
 - **`_`-prefixed keys ignored** — personality JSON can store reference data (appearance, art notes) under `_reference` without wasting prompt tokens.
+- **Two-layer "should I reply?" system** — Layer 1 (intake) uses rule-based mention filtering (zero cost). Layer 2 (relevance agent) uses a lightweight LLM call with conversation history context for nuanced decisions. Both are fail-open: if uncertain, the bot responds rather than staying silent.
 - **Supervisor + sub-agent architecture** — the persona supervisor plans which specialist agents to invoke, each running in an isolated LLM context. This provides failure isolation (a crashed agent doesn't kill the reply), context separation (tool agents don't bloat the speech prompt), and scalability (each agent can target a different LLM in the future).
 - **Speech directive from supervisor** — the supervisor tells the speech agent *how* to present results (tone, detail level), not just *what* to present. This keeps the speech agent focused on in-character generation while the supervisor controls data flow.
 - **Prompt-based `<tool_call>` tags** in tool agents — ensures compatibility with Qwen and other local models served via LM Studio that may not support the `tools` parameter.

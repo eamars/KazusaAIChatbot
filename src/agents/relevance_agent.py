@@ -24,10 +24,16 @@ from langchain_openai import ChatOpenAI
 from agents.base import BaseAgent
 from config import LLM_API_KEY, LLM_BASE_URL, LLM_MODEL
 from state import AgentResult, BotState
+from utils import format_history_text
 
 logger = logging.getLogger(__name__)
 
 _llm: ChatOpenAI | None = None
+
+_HISTORY_LIMIT = 6  # max recent messages to include for context
+
+# Re-export for backward compatibility with tests
+_format_history = format_history_text
 
 _RELEVANCE_PROMPT = """\
 You are a relevance filter for a role-play chatbot.  Your ONLY job is to
@@ -44,6 +50,10 @@ The bot should NOT respond when:
 - The message is irrelevant noise (random emoji, spam, etc.).
 
 Personality context: {persona_name}
+
+You will be given recent chat history (if available) to help you understand
+the conversational context.  Use it to judge whether the new message is
+part of an ongoing exchange with the bot or between other users.
 
 Respond with ONLY valid JSON (no markdown fences):
 {{"should_respond": true/false, "reason": "brief explanation"}}
@@ -106,12 +116,18 @@ class RelevanceAgent(BaseAgent):
 
         prompt = _RELEVANCE_PROMPT.format(persona_name=persona_name)
 
+        history = state.get("conversation_history", []) or []
+        history_block = format_history_text(history, persona_name, limit=_HISTORY_LIMIT)
+
+        message_parts = [prompt, "\n---\n"]
+        if history_block:
+            message_parts.append(f"Recent chat history:\n{history_block}\n\n")
+        message_parts.append(f'User message: "{user_query}"')
+
         try:
             llm = _get_llm()
             result = await llm.ainvoke([
-                HumanMessage(
-                    content=f"{prompt}\n\n---\n\nUser message: \"{user_query}\""
-                ),
+                HumanMessage(content="".join(message_parts)),
             ])
             decision = _parse_relevance(result.content or "")
         except Exception:

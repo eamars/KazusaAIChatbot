@@ -13,6 +13,7 @@ from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
 from config import TOKEN_BUDGET
 from state import BotState
+from utils import format_history_lines
 
 # Rough estimate: 1 token ≈ 4 characters for English text
 CHARS_PER_TOKEN = 4
@@ -138,17 +139,16 @@ def _build_affinity_block(affinity: int) -> str:
     return f"[Affinity toward this user: {label}]\n{instruction}"
 
 
-def _build_history_messages(history: list[dict]) -> list[dict]:
+def _build_history_messages(
+    history: list[dict], persona_name: str = "assistant"
+) -> list[dict]:
     """Convert conversation history into LangChain message objects."""
     messages = []
-    for msg in history:
-        role = msg.get("role", "user")
-        content = msg.get("content", "")
+    for label, content, role in format_history_lines(history, persona_name):
         if role == "assistant":
             messages.append(AIMessage(content=content))
         else:
-            name = msg.get("name", "user")
-            messages.append(HumanMessage(content=f"[{name}]: {content}"))
+            messages.append(HumanMessage(content=f"[{label}]: {content}"))
     return messages
 
 
@@ -199,7 +199,8 @@ def assembler(state: BotState) -> BotState:
     messages = [SystemMessage(content=system_prompt)]
 
     # Add conversation history (truncate from the oldest if over budget)
-    history_messages = _build_history_messages(history)
+    persona_name = personality.get("name", "assistant")
+    history_messages = _build_history_messages(history, persona_name)
     max_history_chars = TOKEN_BUDGET["conversation_history"] * CHARS_PER_TOKEN
     total_chars = 0
     trimmed = []
