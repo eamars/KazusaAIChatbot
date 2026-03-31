@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
+import json
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from langchain_core.messages import AIMessage
 
 from graph import build_graph
-from state import BotState
+from state import BotState, SupervisorPlan
 
 
 @pytest.mark.asyncio
@@ -31,8 +32,18 @@ async def test_full_graph_question_flow(sample_personality):
     mock_embed_client = AsyncMock()
     mock_embed_client.embeddings.create.return_value = mock_embed_resp
 
-    mock_llm = MagicMock()
-    mock_llm.ainvoke = AsyncMock(
+    # Supervisor LLM: no agents needed
+    mock_supervisor_llm = MagicMock()
+    mock_supervisor_llm.ainvoke = AsyncMock(
+        return_value=AIMessage(content=json.dumps({
+            "agents": [],
+            "speech_directive": "Answer the lore question using context.",
+        }))
+    )
+
+    # Speech agent LLM: generate reply
+    mock_speech_llm = MagicMock()
+    mock_speech_llm.ainvoke = AsyncMock(
         return_value=AIMessage(content="The gate held, Commander.")
     )
 
@@ -53,7 +64,8 @@ async def test_full_graph_question_flow(sample_personality):
         patch("nodes.memory.get_user_facts", new_callable=AsyncMock, return_value=["User goes by Commander"]),
         patch("nodes.memory.get_character_state", new_callable=AsyncMock, return_value=mock_char_state),
         patch("nodes.memory.get_affinity", new_callable=AsyncMock, return_value=500),
-        patch("nodes.persona._get_llm", return_value=mock_llm),
+        patch("nodes.persona_supervisor._get_llm", return_value=mock_supervisor_llm),
+        patch("agents.speech_agent._get_llm", return_value=mock_speech_llm),
     ):
         result = await graph.ainvoke(state)
 
@@ -76,8 +88,18 @@ async def test_full_graph_casual_greeting(sample_personality):
         "personality": sample_personality,
     }
 
-    mock_llm = MagicMock()
-    mock_llm.ainvoke = AsyncMock(return_value=AIMessage(content="Hey there."))
+    mock_supervisor_llm = MagicMock()
+    mock_supervisor_llm.ainvoke = AsyncMock(
+        return_value=AIMessage(content=json.dumps({
+            "agents": [],
+            "speech_directive": "Respond with a casual greeting.",
+        }))
+    )
+
+    mock_speech_llm = MagicMock()
+    mock_speech_llm.ainvoke = AsyncMock(
+        return_value=AIMessage(content="Hey there.")
+    )
 
     graph = build_graph()
 
@@ -86,7 +108,8 @@ async def test_full_graph_casual_greeting(sample_personality):
         patch("nodes.memory.get_user_facts", new_callable=AsyncMock, return_value=[]),
         patch("nodes.memory.get_character_state", new_callable=AsyncMock, return_value={}),
         patch("nodes.memory.get_affinity", new_callable=AsyncMock, return_value=500),
-        patch("nodes.persona._get_llm", return_value=mock_llm),
+        patch("nodes.persona_supervisor._get_llm", return_value=mock_supervisor_llm),
+        patch("agents.speech_agent._get_llm", return_value=mock_speech_llm),
     ):
         result = await graph.ainvoke(state)
 

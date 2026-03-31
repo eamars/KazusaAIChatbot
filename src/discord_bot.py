@@ -21,7 +21,6 @@ from graph import build_graph
 from mcp_client import mcp_manager
 from nodes.memory_writer import memory_writer
 from state import BotState
-from tools import build_tool_prompt_block
 
 logger = logging.getLogger(__name__)
 
@@ -97,11 +96,11 @@ class RolePlayBot(discord.Client):
             "user_name": message.author.display_name,
             "channel_id": str(message.channel.id),
             "guild_id": str(message.guild.id) if message.guild else "",
+            "bot_id": str(self.user.id) if self.user else "",
             "message_text": message.content,
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "should_respond": True,
             "personality": self.personality,
-            "tool_descriptions": build_tool_prompt_block(mcp_manager),
         }
 
         # Show typing indicator while processing

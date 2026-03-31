@@ -39,7 +39,10 @@ TOKEN_BUDGET = {
 
 # MCP tool servers — JSON dict of {name: {url: ...}}
 # Read from MCP_SERVERS env var (JSON string)
-MCP_SERVERS: dict[str, dict] = json.loads(os.getenv("MCP_SERVERS", "{}"))
+mcp_servers_env = os.getenv("MCP_SERVERS", "{}")
+# Handle escaped quotes that might come from shell environment
+mcp_servers_env = mcp_servers_env.replace('\\"', '"')
+MCP_SERVERS: dict[str, dict] = json.loads(mcp_servers_env)
 
 # Max tool-calling loop iterations in persona supervisor
 MAX_TOOL_ITERATIONS = int(os.getenv("MAX_TOOL_ITERATIONS", "3"))

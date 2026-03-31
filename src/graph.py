@@ -2,7 +2,7 @@
 
 Connects pipeline stages into a compiled graph:
 
-  intake → router →┬→ rag_retriever    ─┬→ assembler → persona_agent → END
+  intake → router →┬→ rag_retriever    ─┬→ assembler → persona_supervisor → speech_agent → END
                    └→ memory_retriever ─┘
 
 memory_writer is NOT in this graph — it runs as a fire-and-forget
@@ -13,13 +13,21 @@ from __future__ import annotations
 
 from langgraph.graph import END, START, StateGraph
 
+from agents.base import register_agent
+from agents.relevance_agent import RelevanceAgent
+from agents.speech_agent import speech_agent
+from agents.web_search_agent import WebSearchAgent
 from nodes.assembler import assembler
 from nodes.intake import intake
 from nodes.memory import memory_retriever
-from nodes.persona import persona_agent
+from nodes.persona_supervisor import persona_supervisor
 from nodes.rag import rag_retriever
 from nodes.router import router
 from state import BotState
+
+# ── Register sub-agents ─────────────────────────────────────────────
+register_agent(RelevanceAgent())
+register_agent(WebSearchAgent())
 
 
 def _should_respond(state: BotState) -> str:
@@ -52,7 +60,8 @@ def build_graph() -> StateGraph:
     graph.add_node("rag_retriever", rag_retriever)
     graph.add_node("memory_retriever", memory_retriever)
     graph.add_node("assembler", assembler)
-    graph.add_node("persona_agent", persona_agent)
+    graph.add_node("persona_supervisor", persona_supervisor)
+    graph.add_node("speech_agent", speech_agent)
 
     # ── Edges ───────────────────────────────────────────────────────
     # Entry
@@ -72,8 +81,9 @@ def build_graph() -> StateGraph:
     graph.add_edge("rag_retriever", "assembler")
     graph.add_edge("memory_retriever", "assembler")
 
-    # Assembler → Persona Agent → END
-    graph.add_edge("assembler", "persona_agent")
-    graph.add_edge("persona_agent", END)
+    # Assembler → Supervisor → Speech Agent → END
+    graph.add_edge("assembler", "persona_supervisor")
+    graph.add_edge("persona_supervisor", "speech_agent")
+    graph.add_edge("speech_agent", END)
 
     return graph.compile()

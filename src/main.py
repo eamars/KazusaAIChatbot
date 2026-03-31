@@ -53,6 +53,9 @@ def main():
         level=getattr(logging, args.log_level),
         format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
     )
+    # Suppress noisy MCP ping-validation warnings (harmless JSON-RPC pings
+    # that the mcp client doesn't recognise as valid ServerNotification).
+    logging.getLogger("mcp.client.session").setLevel(logging.ERROR)
 
     personality_path = Path(args.personality)
     if not personality_path.exists():

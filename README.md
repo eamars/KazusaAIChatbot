@@ -4,7 +4,7 @@ A Discord chatbot that responds in-character using a configurable personality (J
 
 ## Architecture
 
-The bot uses a **lean hybrid pipeline**: most stages are pure code (no LLM), with only **1–3 synchronous LLM calls** per message (1 base + up to 2 tool-calling iterations) and **1 deferred LLM call** after the reply is sent.
+The bot uses a **lean hybrid pipeline**: most stages are pure code (no LLM), with **2–4 synchronous LLM calls** per message (1 supervisor planning + 0–N tool agents + 1 speech agent) and **1 deferred LLM call** after the reply is sent.
 
 ```
                     ┌─────────────┐
@@ -30,7 +30,11 @@ The bot uses a **lean hybrid pipeline**: most stages are pure code (no LLM), wit
                     └──────┬──────┘
                            │ llm_messages
                     ┌──────▼──────┐
-                    │ 6. Persona  │  ★ LLM CALL (supervisor + tool loop)
+                    │6a. Supervisor│  ★ LLM CALL (planning)
+                    └──────┬──────┘
+                           │ agent_plan + agent_results
+                    ┌──────▼──────┐
+                    │6b. Speech   │  ★ LLM CALL (in-character reply)
                     └──────┬──────┘
                            │ response
                     ┌──────▼──────┐
@@ -47,7 +51,7 @@ The bot uses a **lean hybrid pipeline**: most stages are pure code (no LLM), wit
 Stages 1–6 are wired as a LangGraph `StateGraph`. Stage 7 (Memory Writer) runs **outside** the graph as an async task after the reply is sent.
 
 ```
-START → intake → router →┬→ rag_retriever    ─┬→ assembler → persona_agent → END
+START → intake → router →┬→ rag_retriever    ─┬→ assembler → persona_supervisor → speech_agent → END
                          └→ memory_retriever ─┘
 ```
 
@@ -89,19 +93,28 @@ Builds the final prompt within a **token budget**:
 
 Truncates oldest history first, then lowest-scored RAG chunks if over budget.
 
-### Stage 6 — Persona Agent (LLM supervisor)
-The persona agent is an **inline LLM supervisor** with an optional tool-calling loop:
+### Stage 6a — Persona Supervisor (LLM call)
+The supervisor is an **LLM-based planner** that decides which specialist agents to invoke:
 
-1. Call the LLM with the assembled messages (including tool descriptions in the system prompt).
-2. If the response contains a `<tool_call>{"name": "...", "args": {...}}</tool_call>` tag, parse and execute the tool via MCP.
-3. Append the tool result and re-invoke the LLM (up to `MAX_TOOL_ITERATIONS`, default 3).
-4. Return the final text response (with any `<tool_call>` tags stripped).
+1. Receive the user message and a catalog of available agents.
+2. Call the LLM with a short planning prompt → returns a `SupervisorPlan`:
+   - `agents`: list of agent names to invoke (e.g. `["web_search_agent"]`, or `[]` if none needed)
+   - `speech_directive`: instruction for how the speech agent should incorporate the results (tone, detail level, error handling)
+3. Execute each requested agent sequentially in isolated contexts.
+4. Write `supervisor_plan` and `agent_results` to state.
 
-This avoids the overhead of a separate routing LLM — the persona decides in-context whether it needs a tool, with **zero extra latency** on normal (no-tool) messages.
+Each agent runs in its own LLM context with only the information it needs. If an agent crashes or hits a context limit, the supervisor catches the error and records it as `AgentResult(status="error")` — the speech agent can then apologize gracefully.
+
+#### Available Agents
+
+| Agent | Description |
+|-------|-------------|
+| `web_search_agent` | Searches the internet via MCP search tools. Gets only the user query + search tool descriptions. Runs its own `<tool_call>` loop, then summarises raw results. |
+| *(extensible)* | New agents are added by subclassing `BaseAgent` and calling `register_agent()` in `graph.py`. |
 
 #### MCP Tool Calling
 
-Tools are provided by external **MCP servers** (HTTP/SSE). At startup, the bot connects to all configured servers, discovers available tools, and generates a prompt block describing them. Tool names are namespaced as `{server}__{tool}` internally, but the original name is sent to the MCP server.
+Tools are provided by external **MCP servers** (HTTP/SSE). At startup, the bot connects to all configured servers and discovers available tools. Tool names are namespaced as `{server}__{tool}` internally, but the original name is sent to the MCP server.
 
 Configured via the `MCP_SERVERS` environment variable (JSON string):
 
@@ -109,12 +122,20 @@ Configured via the `MCP_SERVERS` environment variable (JSON string):
 {"mcp-searxng": {"url": "http://host:4001/mcp"}, "playwright": {"url": "http://host:8931/mcp"}}
 ```
 
+### Stage 6b — Speech Agent (LLM call)
+Always runs last. Generates the final **in-character reply** from:
+- Full personality context + conversation history (from the assembler)
+- Agent result summaries (not raw tool output)
+- The supervisor's `speech_directive`
+
+The speech agent's LLM context is free of tool descriptions, keeping the token budget focused on personality and conversation quality. The speech directive guides how results are presented — e.g. a non-tech-savvy character will summarize search results in simpler terms.
+
 ### Stage 7 — Memory Writer (deferred LLM call)
 Runs **after** the reply is sent to Discord (fire-and-forget `asyncio.create_task`). Extracts from each exchange:
 - **User facts** — new facts about the user (e.g., preferred name)
 - **Character state** — updated mood and emotional tone
 - **Affinity delta** — integer (-20 to +10) indicating how the exchange changes the bot's feeling toward the user
-- **Tool history** — if tools were called during the turn, the tool names, arguments, and results are included in the extraction prompt so the LLM can reason about them
+- **Agent results** — if agents were invoked during the turn, their names, status, and summaries are included in the extraction prompt so the LLM can reason about them
 
 All three are persisted to MongoDB. Affinity deltas are clamped to `[-20, +10]` by non-LLM code before applying. Best-effort — failures are logged and silently skipped.
 
@@ -124,20 +145,25 @@ All three are persisted to MongoDB. Affinity deltas are clamped to `[-20, +10]` 
 src/
   main.py                  # CLI entry point
   config.py                # env vars, token budgets, MCP_SERVERS
-  state.py                 # BotState TypedDict + ToolCall (shared graph state)
+  state.py                 # BotState + AgentResult + SupervisorPlan TypedDicts
   db.py                    # MongoDB async helpers + schema (TypedDict)
-  graph.py                 # LangGraph StateGraph wiring
+  graph.py                 # LangGraph StateGraph wiring + agent registration
   discord_bot.py           # Discord client, message handling, MCP lifecycle
   mcp_client.py            # McpManager — MCP server connections + tool execution
-  tools.py                 # build_tool_prompt_block() for LLM prompt injection
+  tools.py                 # build_tool_prompt_block() for agent prompt injection
+  agents/
+    __init__.py
+    base.py                # BaseAgent ABC + AGENT_REGISTRY
+    web_search_agent.py    # Web search via MCP (isolated context)
+    speech_agent.py        # Stage 6b — in-character reply generation
   nodes/
     intake.py              # Stage 1
     router.py              # Stage 2
     rag.py                 # Stage 3
     memory.py              # Stage 4
-    assembler.py           # Stage 5 (universal rules, affinity, tool descriptions)
-    persona.py             # Stage 6 (supervisor loop with <tool_call> parsing)
-    memory_writer.py       # Stage 7 (facts + character state + affinity + tool history)
+    assembler.py           # Stage 5 (universal rules, affinity)
+    persona_supervisor.py  # Stage 6a (LLM planning + agent dispatch)
+    memory_writer.py       # Stage 7 (facts + character state + affinity + agent results)
 personalities/
   example.json             # sample personality ("Zara")
   kazusa.json              # full personality with _reference section
@@ -171,7 +197,7 @@ MAX_TOOL_ITERATIONS=3
 ### 3. LM Studio
 
 Load two models in LM Studio:
-- **Chat model** — e.g., Qwen 3.5 27B (used by Persona Agent and Memory Writer)
+- **Chat model** — e.g., Qwen 3.5 27B (used by Supervisor, Speech Agent, Tool Agents, and Memory Writer)
 - **Embedding model** — e.g., nomic-embed-text (used by RAG Retriever)
 
 ### 4. MongoDB
@@ -229,6 +255,7 @@ python src/main.py --personality personalities/example.json --log-level DEBUG
 - **Affinity system** — per-user 0–1000 score (default 500) that slowly shifts based on conversation quality. The LLM proposes a delta; non-LLM code clamps it. This avoids wild swings while letting the bot gradually warm up or cool down toward individual users.
 - **Universal rules in assembler** — behavioural rules ("never break character", etc.) are hardcoded rather than per-personality, ensuring consistency across all characters.
 - **`_`-prefixed keys ignored** — personality JSON can store reference data (appearance, art notes) under `_reference` without wasting prompt tokens.
-- **Inline supervisor over separate routing LLM** — the persona agent decides in-context whether to call a tool. This avoids an extra LLM call on every message (most messages don't need tools) and sidesteps the routing reliability problem with local models.
-- **Prompt-based `<tool_call>` tags** instead of native OpenAI function calling — ensures compatibility with Qwen and other local models served via LM Studio that may not support the `tools` parameter.
-- **MCP for tooling** — tools are served by external MCP servers over HTTP, making them language-agnostic and independently deployable. New tools can be added by spinning up a new MCP server without changing bot code.
+- **Supervisor + sub-agent architecture** — the persona supervisor plans which specialist agents to invoke, each running in an isolated LLM context. This provides failure isolation (a crashed agent doesn't kill the reply), context separation (tool agents don't bloat the speech prompt), and scalability (each agent can target a different LLM in the future).
+- **Speech directive from supervisor** — the supervisor tells the speech agent *how* to present results (tone, detail level), not just *what* to present. This keeps the speech agent focused on in-character generation while the supervisor controls data flow.
+- **Prompt-based `<tool_call>` tags** in tool agents — ensures compatibility with Qwen and other local models served via LM Studio that may not support the `tools` parameter.
+- **MCP for tooling** — tools are served by external MCP servers over HTTP, making them language-agnostic and independently deployable. New agents can be added by subclassing `BaseAgent` without changing existing code.

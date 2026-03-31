@@ -69,7 +69,7 @@ async def memory_writer(state: BotState) -> BotState:
     message_text = state.get("message_text", "")
     response = state.get("response", "")
     timestamp = state.get("timestamp", "")
-    tool_history = state.get("tool_history", [])
+    agent_results = state.get("agent_results", [])
 
     if not user_id or not message_text:
         return {**state, "new_facts": []}
@@ -77,10 +77,12 @@ async def memory_writer(state: BotState) -> BotState:
     try:
         llm = _get_llm()
 
-        # Build exchange text, including tool calls if any
+        # Build exchange text, including agent results if any
         exchange = f"User: {message_text}\n"
-        for t in tool_history:
-            exchange += f"[Tool: {t['tool']}({t['args']}) → {t['result']}]\n"
+        for ar in agent_results:
+            status = ar.get("status", "unknown")
+            summary = ar.get("summary", "")
+            exchange += f"[Agent: {ar['agent']} ({status}) → {summary}]\n"
         exchange += f"Bot: {response}"
 
         prompt = EXTRACTION_PROMPT.format(

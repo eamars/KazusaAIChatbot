@@ -29,12 +29,25 @@ class ToolCall(TypedDict):
     result: str            # text result returned by the tool
 
 
+class AgentResult(TypedDict):
+    agent: str             # agent name, e.g. "web_search_agent"
+    status: str            # "success" | "error"
+    summary: str           # condensed output for speech_agent
+    tool_history: list[ToolCall]  # tool calls made by this agent
+
+
+class SupervisorPlan(TypedDict):
+    agents: list[str]      # which agents to invoke, e.g. ["web_search_agent"]
+    speech_directive: str   # instruction for how speech_agent should respond
+
+
 class BotState(TypedDict, total=False):
     # --- Stage 1: intake ---
     user_id: str
     user_name: str
     channel_id: str
     guild_id: str
+    bot_id: str  # the bot's own Discord user ID (for mention filtering)
     message_text: str
     timestamp: str
     should_respond: bool
@@ -57,9 +70,12 @@ class BotState(TypedDict, total=False):
     llm_messages: list[dict]
     tool_descriptions: str  # prompt block listing available tools
 
-    # --- Stage 6: persona (supervisor) ---
+    # --- Stage 6a: persona_supervisor ---
+    supervisor_plan: SupervisorPlan
+    agent_results: list[AgentResult]
+
+    # --- Stage 6b: speech_agent ---
     response: str
-    tool_history: list[ToolCall]  # tools called during this turn
 
     # --- Stage 7: memory writer ---
     new_facts: list[str]

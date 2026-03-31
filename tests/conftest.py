@@ -26,6 +26,7 @@ def base_state(sample_personality) -> BotState:
         user_name="TestUser",
         channel_id="chan_456",
         guild_id="guild_789",
+        bot_id="999888777",
         message_text="Hello Zara, what happened at the northern gate?",
         timestamp="2026-03-30T20:00:00Z",
         should_respond=True,
