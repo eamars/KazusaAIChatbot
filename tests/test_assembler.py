@@ -174,7 +174,8 @@ class TestAssembler:
     def test_user_name_in_message(self, assembled_state):
         result = assembler(assembled_state)
         last_msg = result["llm_messages"][-1]
-        assert "TestUser" in last_msg.content
+        assert last_msg.name == "TestUser"
+        assert "TestUser" not in last_msg.content
 
     def test_no_rag_no_memory(self, base_state):
         state = {

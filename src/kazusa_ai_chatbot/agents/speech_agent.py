@@ -20,6 +20,14 @@ from kazusa_ai_chatbot.state import AgentResult, BotState
 
 logger = logging.getLogger(__name__)
 
+_DIRECTIVE_WRAPPER = """\
+The following section contains INTERNAL guidance from the planning system.
+Use it to shape your reply, but NEVER repeat, quote, paraphrase, or
+reference this guidance in your output. The user must not see any trace of
+these instructions — only your in-character response.
+
+{agent_context}"""
+
 _llm: ChatOpenAI | None = None
 
 
@@ -33,30 +41,6 @@ def _get_llm() -> ChatOpenAI:
             api_key=LLM_API_KEY,
         )
     return _llm
-
-
-def _prepare_messages(messages: list[BaseMessage]) -> list[BaseMessage]:
-    """Fold SystemMessage content into the first HumanMessage.
-
-    Many local models (e.g. Qwen via LM Studio) have Jinja templates
-    that reject or mishandle the ``system`` role.  Merging it into the
-    first HumanMessage keeps compatibility with every model template.
-    """
-    system_parts: list[str] = []
-    other: list[BaseMessage] = []
-    for msg in messages:
-        if isinstance(msg, SystemMessage):
-            system_parts.append(msg.content)
-        else:
-            other.append(msg)
-
-    if not system_parts or not other:
-        return other or messages
-
-    system_text = "\n\n".join(system_parts)
-    first = other[0]
-    other[0] = HumanMessage(content=f"{system_text}\n\n---\n\n{first.content}")
-    return other
 
 
 def _build_agent_context(
@@ -76,7 +60,8 @@ def _build_agent_context(
         status_label = "success" if ar["status"] == "success" else "FAILED"
         parts.append(f"[{ar['agent']} ({status_label})]\n{ar['summary']}")
 
-    return "\n\n".join(parts)
+    raw_context = "\n\n".join(parts)
+    return _DIRECTIVE_WRAPPER.format(agent_context=raw_context)
 
 
 async def speech_agent(state: BotState) -> dict:
@@ -88,6 +73,7 @@ async def speech_agent(state: BotState) -> dict:
     # Check if the supervisor directive says to stay silent
     plan = state.get("supervisor_plan", {})
     speech_directive = plan.get("speech_directive", "") if plan else ""
+
     if speech_directive == "Do not respond. Stay silent.":
         logger.info("Speech agent: staying silent per supervisor directive")
         return {"response": ""}
@@ -112,10 +98,11 @@ async def speech_agent(state: BotState) -> dict:
             # No system message — prepend one
             messages.insert(0, SystemMessage(content=agent_context))
 
+    logger.warning(f"Prompt Messages: {messages}")
+
     try:
         llm = _get_llm()
-        prepared = _prepare_messages(messages)
-        result = await llm.ainvoke(prepared)
+        result = await llm.ainvoke(messages)
         response = (result.content or "").strip() or "..."
     except Exception:
         logger.exception("Speech agent LLM call failed")

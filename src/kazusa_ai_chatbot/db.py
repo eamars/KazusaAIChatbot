@@ -134,8 +134,7 @@ async def close_db():
         _db = None
 
 
-async def vector_search(
-    collection_name: str,
+async def search_lore(
     query_embedding: list[float],
     top_k: int = 3,
     index_name: str = "default",
@@ -146,7 +145,7 @@ async def vector_search(
     Returns up to ``top_k`` documents with ``text``, ``source``, and ``score`` keys.
     """
     db = await get_db()
-    collection = db[collection_name]
+    collection = db["lore"]
 
     pipeline: list[dict[str, Any]] = [
         {
@@ -354,16 +353,71 @@ async def update_affinity(user_id: str, delta: int) -> int:
 
 
 async def upsert_user_facts(user_id: str, new_facts: list[str]) -> None:
-    """Add new facts to a user's memory, deduplicating."""
+    """Add new facts to a user's memory, deduplicating and updating embeddings."""
     db = await get_db()
     existing = await get_user_facts(user_id)
     merged = list(dict.fromkeys(existing + new_facts))  # deduplicate, preserve order
+    
+    # Generate embedding based on all user facts
+    if merged:
+        combined_facts_text = "\n".join(merged)
+        embedding = await get_text_embedding(combined_facts_text)
+    else:
+        embedding = []
+    
     await db.user_facts.update_one(
         {"user_id": user_id},
-        {"$set": {"user_id": user_id, "facts": merged}},
+        {"$set": {"user_id": user_id, "facts": merged, "embedding": embedding}},
         upsert=True,
     )
 
+
+async def enable_user_facts_vector_index() -> None:
+    """Create a vector search index on the user_facts collection for semantic user search."""
+    await enable_vector_index("user_facts", "user_facts_vector_index")
+
+
+async def search_users_by_facts(
+    query: str,
+    limit: int = 5,
+) -> list[tuple[float, UserFactsDoc]]:
+    """Search for users based on semantic similarity of their accumulated facts.
+    
+    Args:
+        query: Search query text
+        limit: Maximum number of results to return
+        
+    Returns:
+        List of (score, user_doc) tuples sorted by similarity (highest first)
+    """
+    query_embedding = await get_text_embedding(query)
+    db = await get_db()
+    collection = db.user_facts
+
+    pipeline: list[dict[str, Any]] = [
+        {
+            "$vectorSearch": {
+                "index": "user_facts_vector_index",
+                "path": "embedding",
+                "queryVector": query_embedding,
+                "numCandidates": limit * 10,
+                "limit": limit,
+            }
+        },
+        {"$addFields": {"score": {"$meta": "vectorSearchScore"}}},
+        {"$project": {"user_id": 1, "facts": 1, "affinity": 1, "score": 1, "_id": 0}},
+    ]
+
+    cursor = collection.aggregate(pipeline)
+    docs = await cursor.to_list(length=limit)
+    
+    # Convert to (score, doc) tuples
+    results = []
+    for doc in docs:
+        score = doc.pop("score")
+        results.append((score, doc))
+    
+    return results
 
 
 # ----------------------------------------------------------------------------------------

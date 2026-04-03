@@ -2,6 +2,22 @@
 
 This script provides a command-line interface to search through conversation history
 using either keyword regex search or semantic vector search.
+
+Typical Use Cases:
+    # Search for conversations about desserts using semantic search
+    search-conversations "甜点" --method vector --limit 5
+    
+    # Search for messages from a specific user about making mistakes
+    search-conversations "说错话" --user 320899931776745483 --method keyword
+    
+    # Search in a specific channel for recent discussions
+    search-conversations "northern gate" --channel 123456789 --method vector --limit 10
+    
+    # Broad semantic search across all conversations
+    search-conversations "what happened at the northern gate" --method vector
+    
+    # Keyword search with regex pattern
+    search-conversations "gate.*attack" --method keyword --limit 3
 """
 
 import asyncio

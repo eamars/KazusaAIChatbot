@@ -67,7 +67,7 @@ async def test_full_graph_question_flow(sample_personality):
 
     with (
         patch("kazusa_ai_chatbot.db.get_text_embedding", return_value=mock_embed_client),
-        patch("kazusa_ai_chatbot.nodes.rag.vector_search", new_callable=AsyncMock, return_value=mock_vector_results),
+        patch("kazusa_ai_chatbot.db.search_lore", new_callable=AsyncMock, return_value=mock_vector_results),
         patch("kazusa_ai_chatbot.nodes.memory.get_conversation_history", new_callable=AsyncMock, return_value=mock_history),
         patch("kazusa_ai_chatbot.nodes.memory.get_user_facts", new_callable=AsyncMock, return_value=["User goes by Commander"]),
         patch("kazusa_ai_chatbot.nodes.memory.get_character_state", new_callable=AsyncMock, return_value=mock_char_state),

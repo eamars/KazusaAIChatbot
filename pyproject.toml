@@ -44,7 +44,9 @@ dev = [
 
 [project.scripts]
 create-embeddings = "scripts.create_conversation_history_embedding:async_main"
+create-user-facts-embeddings = "scripts.create_user_facts_embedding:async_main"
 search-conversations = "scripts.search_conversation:async_main"
+search-user-facts = "scripts.search_user_facts:async_main"
 kazusa-ai-chatbot = "kazusa_ai_chatbot.main:main"
 
 [tool.setuptools.packages.find]

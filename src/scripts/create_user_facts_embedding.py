@@ -1,20 +1,20 @@
-"""Script to create embeddings for existing conversation history messages.
+"""Script to create embeddings for existing user facts documents.
 
-This script reads all conversation history documents that don't have embeddings
+This script reads all user facts documents that don't have embeddings
 and generates embeddings for them using the configured embedding model.
 
 Typical Use Cases:
-    # Create embeddings for all conversation messages without embeddings
-    create-embeddings
+    # Create embeddings for all user facts without embeddings
+    create-user-facts-embeddings
     
     # The script automatically:
-    # - Finds all documents missing embeddings
+    # - Finds all user facts documents missing embeddings
     # - Generates embeddings using the configured model
     # - Updates documents with embedding vectors
     # - Creates vector search index if needed
     
-    # Run after adding new conversation history or when changing embedding models
-    create-embeddings
+    # Run after adding new user facts or when changing embedding models
+    create-user-facts-embeddings
 """
 
 import asyncio
@@ -22,14 +22,13 @@ import logging
 from datetime import datetime
 
 from kazusa_ai_chatbot.config import EMBEDDING_MODEL
-
 from kazusa_ai_chatbot.config import MONGODB_URI, MONGODB_DB_NAME
 from kazusa_ai_chatbot.db import (
     get_db,
     close_db,
     get_text_embedding,
-    enable_vector_index,
-    ConversationMessageDoc
+    enable_user_facts_vector_index,
+    UserFactsDoc
 )
 
 # Configure logging
@@ -41,13 +40,13 @@ logger = logging.getLogger(__name__)
 
 
 async def main():
-    """Create embeddings for conversation history messages that lack them."""
-    logger.info("Starting conversation history embedding creation...")
+    """Create embeddings for user facts documents that lack them."""
+    logger.info("Starting user facts embedding creation...")
     
     try:
         # Connect to database
         db = await get_db()
-        collection = db.conversation_history
+        collection = db.user_facts
         
         # Find all documents without embeddings or with empty embeddings
         query = {
@@ -60,10 +59,10 @@ async def main():
         
         # Count documents to process
         total_count = await collection.count_documents(query)
-        logger.info(f"Found {total_count} conversation messages without embeddings")
+        logger.info(f"Found {total_count} user facts documents without embeddings")
         
         if total_count == 0:
-            logger.info("All conversation messages already have embeddings. Nothing to do.")
+            logger.info("All user facts documents already have embeddings. Nothing to do.")
             return
         
         # Process documents in batches to avoid memory issues
@@ -75,15 +74,16 @@ async def main():
         
         async for doc in cursor:
             try:
-                # Generate embedding for the message content
-                content = doc.get("content", "")
-                if not content:
-                    logger.warning(f"Document {doc['_id']} has empty content, skipping")
-                    failed += 1
-                    continue
-                
-                logger.debug(f"Generating embedding for document {doc['_id']}")
-                embedding = await get_text_embedding(content)
+                # Generate embedding for the combined facts text
+                facts = doc.get("facts", [])
+                if not facts:
+                    logger.warning(f"Document {doc['_id']} has no facts, setting empty embedding")
+                    embedding = []
+                else:
+                    # Join facts with newline for better semantic separation
+                    combined_facts_text = "\n".join(facts)
+                    logger.debug(f"Generating embedding for user {doc['user_id']} with {len(facts)} facts")
+                    embedding = await get_text_embedding(combined_facts_text)
                 
                 # Update the document with the embedding
                 await collection.update_one(
@@ -106,7 +106,7 @@ async def main():
         
         # Enable vector search index if it doesn't exist
         logger.info("Ensuring vector search index exists...")
-        await enable_vector_index("conversation_history", "conversation_history_vector_index")
+        await enable_user_facts_vector_index()
         logger.info("Vector search index setup completed")
         
     except Exception as e:

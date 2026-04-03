@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import logging
 
-from kazusa_ai_chatbot.db import vector_search, get_text_embedding
+from kazusa_ai_chatbot.db import search_lore, get_text_embedding
 from kazusa_ai_chatbot.state import BotState, RagResult
 from kazusa_ai_chatbot.config import RAG_TOP_K
 
@@ -28,8 +28,7 @@ async def rag_retriever(state: BotState) -> BotState:
 
     try:
         embedding = await get_text_embedding(query)
-        raw_results = await vector_search(
-            collection_name="lore",
+        raw_results = await search_lore(
             query_embedding=embedding,
             top_k=RAG_TOP_K,
         )

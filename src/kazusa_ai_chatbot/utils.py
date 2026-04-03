@@ -10,11 +10,10 @@ def format_history_lines(
     persona_name: str = "assistant",
     limit: int | None = None,
 ) -> list[tuple[str, str, str]]:
-    """Return a list of ``(label, content, role)`` tuples from chat history.
+    """Return a list of ``(name, content, role)`` tuples from chat history.
 
-    *   User messages are labelled with the sender's display name.
-    *   Assistant messages are labelled with *persona_name* so the LLM sees
-        the character name rather than a generic "bot".
+    *   User messages use the sender's display name.
+    *   Assistant messages use *persona_name* so the LLM sees the character name.
     *   When *limit* is given, only the last *limit* messages are returned.
     """
     msgs = history[-limit:] if limit else history
@@ -23,10 +22,17 @@ def format_history_lines(
         role = msg.get("role", "user")
         content = msg.get("content", "")
         if role == "assistant":
-            label = persona_name
+            name = persona_name
         else:
-            label = msg.get("name", "user")
-        result.append((label, content, role))
+            name = msg.get("name", "user")
+            
+        # Clean the name to be alphanumeric/underscore only (OpenAI name requirement)
+        import re
+        clean_name = re.sub(r'[^a-zA-Z0-9_-]', '', name)
+        if not clean_name:
+            clean_name = "user" if role == "user" else "assistant"
+            
+        result.append((clean_name, content, role))
     return result
 
 

@@ -26,6 +26,7 @@ UNIVERSAL_RULES = [
     "Keep responses under 150 words and one line if possible, unless the user asks for a story",
     "Do not use modern slang or references",
     "When unsure about lore, deflect in-character rather than making things up",
+    "NEVER generate markdown headers like '# Response' or 'Response Generation Analysis' - output ONLY your final dialogue.",
 ]
 
 
@@ -144,11 +145,11 @@ def _build_history_messages(
 ) -> list[dict]:
     """Convert conversation history into LangChain message objects."""
     messages = []
-    for label, content, role in format_history_lines(history, persona_name):
+    for name, content, role in format_history_lines(history, persona_name):
         if role == "assistant":
-            messages.append(AIMessage(content=content))
+            messages.append(AIMessage(content=content, name=name))
         else:
-            messages.append(HumanMessage(content=f"[{label}]: {content}"))
+            messages.append(HumanMessage(content=content, name=name))
     return messages
 
 
@@ -214,6 +215,10 @@ def assembler(state: BotState) -> BotState:
     messages.extend(trimmed)
 
     # Current user message
-    messages.append(HumanMessage(content=f"[{user_name}]: {message_text}"))
+    import re
+    clean_user_name = re.sub(r'[^a-zA-Z0-9_-]', '', user_name)
+    if not clean_user_name:
+        clean_user_name = "user"
+    messages.append(HumanMessage(content=message_text, name=clean_user_name))
 
     return {**state, "llm_messages": messages}

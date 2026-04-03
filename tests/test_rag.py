@@ -36,11 +36,13 @@ async def test_rag_returns_results(routed_state):
         {"text": "Voss reported casualties.", "source": "lore/npcs", "score": 0.8},
     ]
 
+
     with (
-        patch("kazusa_ai_chatbot.db.get_text_embedding", new_callable=AsyncMock, return_value=mock_embedding),
-        patch("kazusa_ai_chatbot.nodes.rag.vector_search", new_callable=AsyncMock, return_value=mock_docs),
+        patch("kazusa_ai_chatbot.nodes.rag.get_text_embedding", new_callable=AsyncMock, return_value=mock_embedding),
+        patch("kazusa_ai_chatbot.nodes.rag.search_lore", new_callable=AsyncMock, return_value=mock_docs),
     ):
         result = await rag_retriever(routed_state)
+
 
     assert len(result["rag_results"]) == 2
     assert result["rag_results"][0]["text"] == "The gate was breached."
@@ -49,8 +51,9 @@ async def test_rag_returns_results(routed_state):
 
 @pytest.mark.asyncio
 async def test_rag_handles_embed_failure(routed_state):
-    with patch("kazusa_ai_chatbot.db.get_text_embedding", new_callable=AsyncMock, side_effect=Exception("embed error")):
+    with patch("kazusa_ai_chatbot.nodes.rag.get_text_embedding", new_callable=AsyncMock, side_effect=Exception("embed error")):
         result = await rag_retriever(routed_state)
+
 
     assert result["rag_results"] == []
 
@@ -58,10 +61,11 @@ async def test_rag_handles_embed_failure(routed_state):
 @pytest.mark.asyncio
 async def test_rag_handles_search_failure(routed_state):
     with (
-        patch("kazusa_ai_chatbot.db.get_text_embedding", new_callable=AsyncMock, return_value=[0.1] * 128),
-        patch("kazusa_ai_chatbot.nodes.rag.vector_search", new_callable=AsyncMock, side_effect=Exception("db error")),
+        patch("kazusa_ai_chatbot.nodes.rag.get_text_embedding", new_callable=AsyncMock, return_value=[0.1] * 128),
+        patch("kazusa_ai_chatbot.nodes.rag.search_lore", new_callable=AsyncMock, side_effect=Exception("db error")),
     ):
         result = await rag_retriever(routed_state)
+
 
     assert result["rag_results"] == []
 

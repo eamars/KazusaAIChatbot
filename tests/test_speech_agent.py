@@ -55,6 +55,13 @@ class TestBuildAgentContext:
         assert "a (success)" in ctx
         assert "b (FAILED)" in ctx
 
+    def test_directive_wrapper_guard(self):
+        """Non-empty context is wrapped with an internal-only guard instruction."""
+        ctx = _build_agent_context([], "Be playful.")
+        assert "NEVER repeat, quote, paraphrase" in ctx
+        assert "INTERNAL guidance" in ctx
+        assert "Be playful." in ctx
+
 
 # ── speech_agent integration tests ──────────────────────────────────
 
@@ -115,7 +122,7 @@ async def test_speech_agent_incorporates_agent_results():
 
     # Verify the system prompt was enriched with agent context
     call_args = mock_llm.ainvoke.call_args[0][0]
-    # After _prepare_messages folds system into first human, check the merged content
+    # Check the native SystemMessage content
     merged_content = call_args[0].content
     assert "web_search_agent (success)" in merged_content
     assert "Tokyo is 18°C" in merged_content
@@ -198,3 +205,81 @@ async def test_speech_agent_no_supervisor_plan():
         result = await speech_agent(state)
 
     assert result["response"] == "Greetings."
+
+
+# ── Live LLM tests ──────────────────────────────────────────────────
+# Requires a running LM Studio instance with a chat model loaded.
+# Run with:  pytest -m live_llm -v
+
+live_llm = pytest.mark.live_llm
+
+
+@live_llm
+@pytest.mark.asyncio
+async def test_live_directive_not_leaked_in_response():
+    """The speech agent must NOT echo the supervisor directive in its reply.
+
+    This is a regression test for the bug where verbose speech_directives
+    (e.g. multi-line response plans) were parroted verbatim before the
+    actual in-character reply.
+    """
+    import kazusa_ai_chatbot.agents.speech_agent as sa
+
+    # Reset cached LLM so a real one is created
+    sa._llm = None
+
+    directive = (
+        "Warmly acknowledge the affectionate way they called you.\n"
+        "Show genuine delight at their cute self-given name.\n"
+        "Maybe make a playful comment about how fitting that nickname is."
+    )
+
+    state = {
+        "llm_messages": [
+            SystemMessage(content=(
+                "You are Kazusa, a gentle and caring character.\n"
+                "Reply in the same language the user is writing in.\n"
+                "Reply with SPEECH ONLY - no action tags or stage directions.\n"
+                "Keep responses under 150 words.\n"
+                "NEVER generate markdown headers like '# Response' or '# Response Generation Analysis'."
+            )),
+            HumanMessage(content="你希望我叫你什么呢？", name="EAMARS"),
+            AIMessage(content="你可以直接叫'千纱'或者'kazuza'——这两个都可以的哦！", name="Kazusa"),
+            HumanMessage(content="小千纱可以叫我小企鹅哦", name="EAMARS"),
+            AIMessage(content="小企鹅……？！好可爱啊。嗯，那我以后就叫你'小企鹅'啦～", name="Kazusa"),
+            HumanMessage(content="那你觉得我的外表应该是怎么样的呢？", name="EAMARS"),
+        ],
+        "supervisor_plan": SupervisorPlan(
+            agents=[],
+            speech_directive=directive,
+        ),
+        "agent_results": [],
+    }
+
+    result = await speech_agent(state)
+    response = result["response"]
+
+    # The response should be non-trivial
+    assert len(response) > 0 and response != "..."
+
+    # The directive text must NOT leak into the response
+    assert "Warmly acknowledge" not in response, (
+        f"Directive leaked into response: {response}"
+    )
+    assert "genuine delight" not in response, (
+        f"Directive leaked into response: {response}"
+    )
+    assert "playful comment" not in response, (
+        f"Directive leaked into response: {response}"
+    )
+    assert "INTERNAL guidance" not in response, (
+        f"Wrapper guard text leaked into response: {response}"
+    )
+    
+    # The LLM should not generate internal thought blocks or markdown headers
+    assert "Response Generation Analysis" not in response, (
+        f"LLM generated an internal thought block: {response}"
+    )
+    assert "# Response" not in response, (
+        f"LLM generated markdown headers: {response}"
+    )
