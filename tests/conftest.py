@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from state import BotState, CharacterState, ChatMessage, RagResult
+from kazusa_ai_chatbot.state import BotState, CharacterState, ChatMessage, RagResult
 
 
 @pytest.fixture

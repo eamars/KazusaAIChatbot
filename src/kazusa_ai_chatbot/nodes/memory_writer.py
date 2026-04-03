@@ -13,10 +13,10 @@ import logging
 from langchain_core.messages import HumanMessage
 from langchain_openai import ChatOpenAI
 
-from config import LLM_API_KEY, LLM_BASE_URL, LLM_MODEL
-from db import update_affinity, upsert_character_state, upsert_user_facts
-from state import BotState
-from utils import format_history_text
+from kazusa_ai_chatbot.config import LLM_API_KEY, LLM_BASE_URL, LLM_MODEL
+from kazusa_ai_chatbot.db import update_affinity, upsert_character_state, upsert_user_facts
+from kazusa_ai_chatbot.state import BotState
+from kazusa_ai_chatbot.utils import format_history_text
 
 logger = logging.getLogger(__name__)
 

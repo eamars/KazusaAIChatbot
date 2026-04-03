@@ -6,7 +6,7 @@ so the LLM knows what tools are available and how to call them.
 
 from __future__ import annotations
 
-from mcp_client import McpManager, ToolInfo
+from kazusa_ai_chatbot.mcp_client import McpManager, ToolInfo
 
 
 def build_tool_prompt_block(manager: McpManager) -> str:

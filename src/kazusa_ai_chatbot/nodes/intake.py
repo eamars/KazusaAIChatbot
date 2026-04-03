@@ -9,7 +9,7 @@ from __future__ import annotations
 import re
 from datetime import datetime, timezone
 
-from state import BotState
+from kazusa_ai_chatbot.state import BotState
 
 _MENTION_RE = re.compile(r"<@!?(\d+)>")
 

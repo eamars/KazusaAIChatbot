@@ -9,15 +9,15 @@ from __future__ import annotations
 
 import logging
 
-from config import CONVERSATION_HISTORY_LIMIT
-from db import (
+from kazusa_ai_chatbot.config import CONVERSATION_HISTORY_LIMIT
+from kazusa_ai_chatbot.db import (
     AFFINITY_DEFAULT,
     get_affinity,
     get_character_state,
     get_conversation_history,
     get_user_facts,
 )
-from state import BotState, CharacterState, ChatMessage
+from kazusa_ai_chatbot.state import BotState, CharacterState, ChatMessage
 
 logger = logging.getLogger(__name__)
 

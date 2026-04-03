@@ -1,6 +1,6 @@
 """Tests for Stage 1 — Message Intake."""
 
-from nodes.intake import intake
+from kazusa_ai_chatbot.nodes.intake import intake
 
 
 def test_intake_strips_mention_markup(base_state):

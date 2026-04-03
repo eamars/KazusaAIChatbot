@@ -13,17 +13,17 @@ from __future__ import annotations
 
 from langgraph.graph import END, START, StateGraph
 
-from agents.base import register_agent
-from agents.relevance_agent import RelevanceAgent
-from agents.speech_agent import speech_agent
-from agents.web_search_agent import WebSearchAgent
-from nodes.assembler import assembler
-from nodes.intake import intake
-from nodes.memory import memory_retriever
-from nodes.persona_supervisor import persona_supervisor
-from nodes.rag import rag_retriever
-from nodes.router import router
-from state import BotState
+from kazusa_ai_chatbot.agents.base import register_agent
+from kazusa_ai_chatbot.agents.relevance_agent import RelevanceAgent
+from kazusa_ai_chatbot.agents.speech_agent import speech_agent
+from kazusa_ai_chatbot.agents.web_search_agent import WebSearchAgent
+from kazusa_ai_chatbot.nodes.assembler import assembler
+from kazusa_ai_chatbot.nodes.intake import intake
+from kazusa_ai_chatbot.nodes.memory import memory_retriever
+from kazusa_ai_chatbot.nodes.persona_supervisor import persona_supervisor
+from kazusa_ai_chatbot.nodes.rag import rag_retriever
+from kazusa_ai_chatbot.nodes.router import router
+from kazusa_ai_chatbot.state import BotState
 
 # ── Register sub-agents ─────────────────────────────────────────────
 register_agent(RelevanceAgent())

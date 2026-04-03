@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
+import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-import db as db_module
-from db import (
+import kazusa_ai_chatbot.db as db_module
+from kazusa_ai_chatbot.db import (
     AFFINITY_DEFAULT,
     close_db,
     get_affinity,
@@ -15,7 +16,7 @@ from db import (
     get_conversation_history,
     get_db,
     get_user_facts,
-    save_message,
+    save_conversation,
     update_affinity,
     upsert_character_state,
     upsert_user_facts,
@@ -43,7 +44,7 @@ async def test_get_conversation_history():
     cursor.to_list = AsyncMock(return_value=mock_docs)
     db.conversation_history.find.return_value.sort.return_value.limit.return_value = cursor
 
-    with patch("db.get_db", new_callable=AsyncMock, return_value=db):
+    with patch("kazusa_ai_chatbot.db.get_db", new_callable=AsyncMock, return_value=db):
         result = await get_conversation_history("chan_1", limit=10)
 
     # Should be reversed (oldest first)
@@ -56,7 +57,7 @@ async def test_get_user_facts_found():
     db = _mock_db()
     db.user_facts.find_one = AsyncMock(return_value={"user_id": "u1", "facts": ["fact1", "fact2"]})
 
-    with patch("db.get_db", new_callable=AsyncMock, return_value=db):
+    with patch("kazusa_ai_chatbot.db.get_db", new_callable=AsyncMock, return_value=db):
         result = await get_user_facts("u1")
 
     assert result == ["fact1", "fact2"]
@@ -67,7 +68,7 @@ async def test_get_user_facts_not_found():
     db = _mock_db()
     db.user_facts.find_one = AsyncMock(return_value=None)
 
-    with patch("db.get_db", new_callable=AsyncMock, return_value=db):
+    with patch("kazusa_ai_chatbot.db.get_db", new_callable=AsyncMock, return_value=db):
         result = await get_user_facts("u1")
 
     assert result == []
@@ -79,7 +80,7 @@ async def test_upsert_user_facts_deduplicates():
     db.user_facts.find_one = AsyncMock(return_value={"user_id": "u1", "facts": ["fact1", "fact2"]})
     db.user_facts.update_one = AsyncMock()
 
-    with patch("db.get_db", new_callable=AsyncMock, return_value=db):
+    with patch("kazusa_ai_chatbot.db.get_db", new_callable=AsyncMock, return_value=db):
         await upsert_user_facts("u1", ["fact2", "fact3"])
 
     call_args = db.user_facts.update_one.call_args
@@ -100,7 +101,7 @@ async def test_get_character_state_found():
         "updated_at": "t1",
     })
 
-    with patch("db.get_db", new_callable=AsyncMock, return_value=db):
+    with patch("kazusa_ai_chatbot.db.get_db", new_callable=AsyncMock, return_value=db):
         result = await get_character_state()
 
     assert result["mood"] == "calm"
@@ -112,7 +113,7 @@ async def test_get_character_state_not_found():
     db = _mock_db()
     db.character_state.find_one = AsyncMock(return_value=None)
 
-    with patch("db.get_db", new_callable=AsyncMock, return_value=db):
+    with patch("kazusa_ai_chatbot.db.get_db", new_callable=AsyncMock, return_value=db):
         result = await get_character_state()
 
     assert result == {}
@@ -129,7 +130,7 @@ async def test_upsert_character_state_merges_events():
     })
     db.character_state.update_one = AsyncMock()
 
-    with patch("db.get_db", new_callable=AsyncMock, return_value=db):
+    with patch("kazusa_ai_chatbot.db.get_db", new_callable=AsyncMock, return_value=db):
         await upsert_character_state("happy", "warm", ["event3"], "t2")
 
     call_args = db.character_state.update_one.call_args
@@ -188,9 +189,30 @@ async def live_test_db():
 @pytest.mark.asyncio
 async def test_live_save_and_get_conversation_history(live_test_db):
     """Save messages and retrieve them in chronological order."""
-    await save_message("test_chan", "user", "user_100", "Alice", "Hello!", "2026-01-01T00:00:01Z")
-    await save_message("test_chan", "assistant", "bot_001", "bot", "Hi Alice!", "2026-01-01T00:00:02Z")
-    await save_message("test_chan", "user", "user_100", "Alice", "How are you?", "2026-01-01T00:00:03Z")
+    await save_conversation({
+        "channel_id": "test_chan",
+        "role": "user",
+        "user_id": "user_100",
+        "name": "Alice",
+        "content": "Hello!",
+        "timestamp": "2026-01-01T00:00:01Z"
+    })
+    await save_conversation({
+        "channel_id": "test_chan",
+        "role": "assistant",
+        "user_id": "bot_001",
+        "name": "bot",
+        "content": "Hi Alice!",
+        "timestamp": "2026-01-01T00:00:02Z"
+    })
+    await save_conversation({
+        "channel_id": "test_chan",
+        "role": "user",
+        "user_id": "user_100",
+        "name": "Alice",
+        "content": "How are you?",
+        "timestamp": "2026-01-01T00:00:03Z"
+    })
 
     history = await get_conversation_history("test_chan", limit=10)
 
@@ -211,7 +233,14 @@ async def test_live_save_and_get_conversation_history(live_test_db):
 async def test_live_conversation_history_respects_limit(live_test_db):
     """Only the most recent N messages are returned."""
     for i in range(10):
-        await save_message("test_chan", "user", "user_100", "Alice", f"msg_{i}", f"2026-01-01T00:00:{i:02d}Z")
+        await save_conversation({
+            "channel_id": "test_chan",
+            "role": "user",
+            "user_id": "user_100",
+            "name": "Alice",
+            "content": f"msg_{i}",
+            "timestamp": f"2026-01-01T00:00:{i:02d}Z"
+        })
 
     history = await get_conversation_history("test_chan", limit=3)
 
@@ -226,8 +255,22 @@ async def test_live_conversation_history_respects_limit(live_test_db):
 @pytest.mark.asyncio
 async def test_live_conversation_history_channel_isolation(live_test_db):
     """Messages from different channels don't mix."""
-    await save_message("chan_a", "user", "user_100", "Alice", "In channel A", "2026-01-01T00:00:01Z")
-    await save_message("chan_b", "user", "user_200", "Bob", "In channel B", "2026-01-01T00:00:02Z")
+    await save_conversation({
+        "channel_id": "chan_a",
+        "role": "user",
+        "user_id": "user_100",
+        "name": "Alice",
+        "content": "In channel A",
+        "timestamp": "2026-01-01T00:00:01Z"
+    })
+    await save_conversation({
+        "channel_id": "chan_b",
+        "role": "user",
+        "user_id": "user_200",
+        "name": "Bob",
+        "content": "In channel B",
+        "timestamp": "2026-01-01T00:00:02Z"
+    })
 
     history_a = await get_conversation_history("chan_a", limit=10)
     history_b = await get_conversation_history("chan_b", limit=10)
@@ -356,7 +399,7 @@ async def test_get_affinity_default_for_unknown_user():
     db = _mock_db()
     db.user_facts.find_one = AsyncMock(return_value=None)
 
-    with patch("db.get_db", new_callable=AsyncMock, return_value=db):
+    with patch("kazusa_ai_chatbot.db.get_db", new_callable=AsyncMock, return_value=db):
         result = await get_affinity("unknown_user")
 
     assert result == AFFINITY_DEFAULT
@@ -367,7 +410,7 @@ async def test_get_affinity_returns_stored_value():
     db = _mock_db()
     db.user_facts.find_one = AsyncMock(return_value={"user_id": "u1", "affinity": 750})
 
-    with patch("db.get_db", new_callable=AsyncMock, return_value=db):
+    with patch("kazusa_ai_chatbot.db.get_db", new_callable=AsyncMock, return_value=db):
         result = await get_affinity("u1")
 
     assert result == 750
@@ -379,7 +422,7 @@ async def test_update_affinity_clamps_to_max():
     db.user_facts.find_one = AsyncMock(return_value={"user_id": "u1", "affinity": 995})
     db.user_facts.update_one = AsyncMock()
 
-    with patch("db.get_db", new_callable=AsyncMock, return_value=db):
+    with patch("kazusa_ai_chatbot.db.get_db", new_callable=AsyncMock, return_value=db):
         result = await update_affinity("u1", 10)
 
     assert result == 1000
@@ -391,10 +434,153 @@ async def test_update_affinity_clamps_to_min():
     db.user_facts.find_one = AsyncMock(return_value={"user_id": "u1", "affinity": 5})
     db.user_facts.update_one = AsyncMock()
 
-    with patch("db.get_db", new_callable=AsyncMock, return_value=db):
+    with patch("kazusa_ai_chatbot.db.get_db", new_callable=AsyncMock, return_value=db):
         result = await update_affinity("u1", -20)
 
     assert result == 0
+
+
+@pytest.mark.asyncio
+async def test_enable_vector_index_mocked():
+    db = _mock_db()
+    
+    # Create a proper AsyncMock for the collection
+    collection = AsyncMock()
+    
+    # Mock list_search_indexes to simulate no existing index
+    async def mock_list_indexes():
+        return
+        yield  # This makes it an async generator that yields nothing
+    
+    collection.list_search_indexes = MagicMock(return_value=mock_list_indexes())
+    collection.create_search_index = AsyncMock()
+    db.__getitem__.return_value = collection
+
+    with patch("kazusa_ai_chatbot.db.get_db", new_callable=AsyncMock, return_value=db), \
+         patch("kazusa_ai_chatbot.db.get_text_embedding", new_callable=AsyncMock, return_value=[0.1, 0.2, 0.3]):
+        await db_module.enable_vector_index("conversation_history", "conversation_history_vector_index")
+    
+    collection.create_search_index.assert_called_once()
+    # Check the model definition
+    model = collection.create_search_index.call_args[0][0]
+    assert model.document["name"] == "conversation_history_vector_index"
+    assert model.document["type"] == "vectorSearch"
+    assert model.document["definition"]["fields"][0]["numDimensions"] == 3
+
+
+@pytest.mark.asyncio
+async def test_search_conversation_history_keyword_mocked():
+    """Keyword search uses regex and returns score -1.0."""
+    db = _mock_db()
+    cursor = AsyncMock()
+    cursor.to_list = AsyncMock(return_value=[
+        {"channel_id": "c1", "timestamp": "t1", "content": "keyword matched"},
+    ])
+    db.conversation_history.find.return_value.sort.return_value.limit.return_value = cursor
+
+    with patch("kazusa_ai_chatbot.db.get_db", new_callable=AsyncMock, return_value=db):
+        results = await db_module.search_conversation_history("keyword", method="keyword", limit=2)
+
+    assert len(results) == 1
+    assert results[0][0] == -1.0
+    assert results[0][1]["content"] == "keyword matched"
+    # Verify the regex filter was passed
+    call_filter = db.conversation_history.find.call_args[0][0]
+    assert "$regex" in call_filter["content"]
+
+
+@pytest.mark.asyncio
+async def test_search_conversation_history_keyword_with_filters_mocked():
+    """Keyword search applies channel_id and user_id filters."""
+    db = _mock_db()
+    cursor = AsyncMock()
+    cursor.to_list = AsyncMock(return_value=[])
+    db.conversation_history.find.return_value.sort.return_value.limit.return_value = cursor
+
+    with patch("kazusa_ai_chatbot.db.get_db", new_callable=AsyncMock, return_value=db):
+        await db_module.search_conversation_history(
+            "test", method="keyword", channel_id="ch1", user_id="u1"
+        )
+
+    call_filter = db.conversation_history.find.call_args[0][0]
+    assert call_filter["channel_id"] == "ch1"
+    assert call_filter["user_id"] == "u1"
+
+
+@pytest.mark.asyncio
+async def test_search_conversation_history_vector_mocked():
+    """Vector search uses $vectorSearch aggregation pipeline."""
+    db = _mock_db()
+    cursor = AsyncMock()
+    cursor.to_list = AsyncMock(return_value=[
+        {"channel_id": "c1", "content": "vector matched", "score": 0.95},
+    ])
+    db.conversation_history.aggregate = MagicMock(return_value=cursor)
+
+    with patch("kazusa_ai_chatbot.db.get_db", new_callable=AsyncMock, return_value=db), \
+         patch("kazusa_ai_chatbot.db.get_text_embedding", new_callable=AsyncMock, return_value=[0.1, 0.2, 0.3]):
+        results = await db_module.search_conversation_history("test query", method="vector", limit=2)
+
+    assert len(results) == 1
+    assert results[0][0] == 0.95
+    assert results[0][1]["content"] == "vector matched"
+    # Verify aggregate was called with $vectorSearch pipeline
+    pipeline = db.conversation_history.aggregate.call_args[0][0]
+    assert "$vectorSearch" in pipeline[0]
+    vs = pipeline[0]["$vectorSearch"]
+    assert vs["queryVector"] == [0.1, 0.2, 0.3]
+    assert vs["index"] == "conversation_history_vector_index"
+
+
+@pytest.mark.asyncio
+async def test_search_conversation_history_vector_with_filters_mocked():
+    """Vector search adds $match stage for channel_id/user_id post-filtering."""
+    db = _mock_db()
+    cursor = AsyncMock()
+    cursor.to_list = AsyncMock(return_value=[])
+    db.conversation_history.aggregate = MagicMock(return_value=cursor)
+
+    with patch("kazusa_ai_chatbot.db.get_db", new_callable=AsyncMock, return_value=db), \
+         patch("kazusa_ai_chatbot.db.get_text_embedding", new_callable=AsyncMock, return_value=[0.1, 0.2, 0.3]):
+        await db_module.search_conversation_history(
+            "test", method="vector", channel_id="ch1", user_id="u1", limit=3
+        )
+
+    pipeline = db.conversation_history.aggregate.call_args[0][0]
+    # Should contain a $match stage with both filters
+    match_stages = [s for s in pipeline if "$match" in s]
+    assert len(match_stages) == 1
+    assert match_stages[0]["$match"]["channel_id"] == "ch1"
+    assert match_stages[0]["$match"]["user_id"] == "u1"
+
+
+@pytest.mark.asyncio
+async def test_vector_search_mocked():
+    """vector_search uses $vectorSearch aggregation pipeline."""
+    db = _mock_db()
+    cursor = AsyncMock()
+    cursor.to_list = AsyncMock(return_value=[
+        {"text": "lore entry", "source": "lore/events", "score": 0.85},
+    ])
+    db.__getitem__ = MagicMock(return_value=MagicMock(aggregate=MagicMock(return_value=cursor)))
+
+    with patch("kazusa_ai_chatbot.db.get_db", new_callable=AsyncMock, return_value=db):
+        results = await db_module.vector_search(
+            collection_name="lore",
+            query_embedding=[0.1, 0.2],
+            top_k=3,
+            index_name="my_index",
+        )
+
+    assert len(results) == 1
+    assert results[0]["text"] == "lore entry"
+    assert results[0]["score"] == 0.85
+    # Verify aggregate pipeline
+    collection_mock = db.__getitem__.return_value
+    pipeline = collection_mock.aggregate.call_args[0][0]
+    assert "$vectorSearch" in pipeline[0]
+    assert pipeline[0]["$vectorSearch"]["index"] == "my_index"
+    assert pipeline[0]["$vectorSearch"]["queryVector"] == [0.1, 0.2]
 
 
 # ── Affinity (live) ──────────────────────────────────────────────────
@@ -451,3 +637,109 @@ async def test_live_affinity_coexists_with_facts(live_test_db):
 
     assert facts == ["Likes swords"]
     assert affinity == AFFINITY_DEFAULT + 50
+
+
+@live_db
+@pytest.mark.asyncio
+async def test_live_enable_conversation_history_vector_index(live_test_db):
+    """Ensure vector index creation works and doesn't fail on existing index.
+    
+    This actually hits the local embedding LLM to get the vector dimensions.
+    """
+    # Insert a dummy document to ensure the collection exists
+    await db_module.save_conversation({
+        "channel_id": "test_chan",
+        "role": "user",
+        "user_id": "user_100",
+        "name": "Alice",
+        "content": "test message for index creation",
+        "timestamp": "2026-01-01T00:00:01Z"
+    })
+    
+    # 1. Create the index
+    await db_module.enable_conversation_history_vector_index()
+    
+    # 2. Check that it exists
+    indexes = []
+    async for idx in live_test_db.conversation_history.list_search_indexes():
+        indexes.append(idx["name"])
+    
+    assert "conversation_history_vector_index" in indexes
+    
+    # 3. Running again shouldn't fail (it should log that it exists and return)
+    await db_module.enable_conversation_history_vector_index()
+
+
+@live_db
+@pytest.mark.asyncio
+async def test_live_search_conversation_history_keyword(live_test_db):
+    """Keyword search returns regex-matched messages with score -1."""
+    await db_module.save_conversation({
+        "channel_id": "test_search",
+        "role": "user",
+        "user_id": "user_100",
+        "name": "Alice",
+        "content": "I like the unique term FLUMMOXED today.",
+        "timestamp": "2026-01-01T00:00:01Z"
+    })
+    await db_module.save_conversation({
+        "channel_id": "test_search",
+        "role": "user",
+        "user_id": "user_200",
+        "name": "Bob",
+        "content": "Let's eat some pizza and watch a movie.",
+        "timestamp": "2026-01-01T00:00:02Z"
+    })
+
+    results = await db_module.search_conversation_history(
+        "FLUMMOXED", channel_id="test_search", method="keyword", limit=5
+    )
+
+    assert len(results) == 1
+    assert results[0][0] == -1.0
+    assert "FLUMMOXED" in results[0][1]["content"]
+
+
+@live_db
+@pytest.mark.asyncio
+async def test_live_search_conversation_history_vector(live_test_db):
+    """Vector search returns semantically similar messages via $vectorSearch."""
+    await db_module.save_conversation({
+        "channel_id": "test_search",
+        "role": "user",
+        "user_id": "user_100",
+        "name": "Alice",
+        "content": "The northern gate was attacked by shadow wolves last night.",
+        "timestamp": "2026-01-01T00:00:01Z"
+    })
+    await db_module.save_conversation({
+        "channel_id": "test_search",
+        "role": "user",
+        "user_id": "user_200",
+        "name": "Bob",
+        "content": "I would like chocolate cake with strawberries please.",
+        "timestamp": "2026-01-01T00:00:02Z"
+    })
+    await db_module.enable_conversation_history_vector_index()
+
+    # Wait for the vector search index to become queryable (builds asynchronously)
+    for _ in range(30):
+        ready = False
+        async for idx in live_test_db.conversation_history.list_search_indexes():
+            if idx.get("name") == "conversation_history_vector_index" and idx.get("status") == "READY":
+                ready = True
+                break
+        if ready:
+            break
+        await asyncio.sleep(1)
+
+    results = await db_module.search_conversation_history(
+        "wolves breached the gate", channel_id="test_search", method="vector", limit=2
+    )
+
+    # Should return results scored by vector similarity
+    assert len(results) >= 1
+    for score, doc in results:
+        assert isinstance(score, float)
+        assert score > 0.0
+        assert "embedding" not in doc  # embeddings should be $unset

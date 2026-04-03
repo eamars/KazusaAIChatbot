@@ -11,9 +11,9 @@ import json
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
-from config import TOKEN_BUDGET
-from state import BotState
-from utils import format_history_lines
+from kazusa_ai_chatbot.config import TOKEN_BUDGET
+from kazusa_ai_chatbot.state import BotState
+from kazusa_ai_chatbot.utils import format_history_lines
 
 # Rough estimate: 1 token ≈ 4 characters for English text
 CHARS_PER_TOKEN = 4

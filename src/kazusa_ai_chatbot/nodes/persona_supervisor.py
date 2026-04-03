@@ -19,9 +19,9 @@ import logging
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_openai import ChatOpenAI
 
-from agents.base import AGENT_REGISTRY, get_agent, list_agent_descriptions
-from config import LLM_API_KEY, LLM_BASE_URL, LLM_MODEL
-from state import AgentResult, BotState, SupervisorPlan
+from kazusa_ai_chatbot.agents.base import AGENT_REGISTRY, get_agent, list_agent_descriptions
+from kazusa_ai_chatbot.config import LLM_API_KEY, LLM_BASE_URL, LLM_MODEL
+from kazusa_ai_chatbot.state import AgentResult, BotState, SupervisorPlan
 
 logger = logging.getLogger(__name__)
 

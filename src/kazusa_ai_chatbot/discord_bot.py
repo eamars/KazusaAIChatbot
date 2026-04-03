@@ -15,12 +15,12 @@ from pathlib import Path
 
 import discord
 
-from config import DISCORD_TOKEN
-from db import close_db, save_message
-from graph import build_graph
-from mcp_client import mcp_manager
-from nodes.memory_writer import memory_writer
-from state import BotState
+from kazusa_ai_chatbot.config import DISCORD_TOKEN
+from kazusa_ai_chatbot.db import close_db, save_conversation
+from kazusa_ai_chatbot.graph import build_graph
+from kazusa_ai_chatbot.mcp_client import mcp_manager
+from kazusa_ai_chatbot.nodes.memory_writer import memory_writer
+from kazusa_ai_chatbot.state import BotState
 
 logger = logging.getLogger(__name__)
 
@@ -67,6 +67,7 @@ class RolePlayBot(discord.Client):
             await mcp_manager.start()
         except Exception:
             logger.exception("MCP manager failed to start — tools will be unavailable")
+
 
     async def on_message(self, message: discord.Message):
         # Ignore own messages
@@ -225,8 +226,26 @@ async def _save_exchange(
     """Save both sides of the exchange to MongoDB conversation history."""
     ts = datetime.now(timezone.utc).isoformat()
     try:
-        await save_message(channel_id, "user", user_id, user_name, user_message, ts)
-        await save_message(channel_id, "assistant", bot_id, "bot", bot_response, ts)
+        await save_conversation(
+            {
+                "channel_id": channel_id,
+                "role": "user",
+                "user_id": user_id,
+                "name": user_name,
+                "content": user_message,
+                "timestamp": ts,
+            }
+        )
+        await save_conversation(
+            {
+                "channel_id": channel_id,
+                "role": "assistant",
+                "user_id": bot_id,
+                "name": "bot",
+                "content": bot_response,
+                "timestamp": ts,
+            }
+        )
     except Exception:
         logger.exception("Failed to save exchange to conversation history")
 

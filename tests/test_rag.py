@@ -6,8 +6,8 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from db import _cosine_similarity
-from nodes.rag import _embed, rag_retriever
+from kazusa_ai_chatbot.db import _cosine_similarity, get_text_embedding
+from kazusa_ai_chatbot.nodes.rag import rag_retriever
 
 # Mark for tests that require a running LM Studio instance.
 # Run with:  pytest -m live_llm
@@ -37,8 +37,8 @@ async def test_rag_returns_results(routed_state):
     ]
 
     with (
-        patch("nodes.rag._embed", new_callable=AsyncMock, return_value=mock_embedding),
-        patch("nodes.rag.vector_search", new_callable=AsyncMock, return_value=mock_docs),
+        patch("kazusa_ai_chatbot.db.get_text_embedding", new_callable=AsyncMock, return_value=mock_embedding),
+        patch("kazusa_ai_chatbot.nodes.rag.vector_search", new_callable=AsyncMock, return_value=mock_docs),
     ):
         result = await rag_retriever(routed_state)
 
@@ -49,7 +49,7 @@ async def test_rag_returns_results(routed_state):
 
 @pytest.mark.asyncio
 async def test_rag_handles_embed_failure(routed_state):
-    with patch("nodes.rag._embed", new_callable=AsyncMock, side_effect=Exception("embed error")):
+    with patch("kazusa_ai_chatbot.db.get_text_embedding", new_callable=AsyncMock, side_effect=Exception("embed error")):
         result = await rag_retriever(routed_state)
 
     assert result["rag_results"] == []
@@ -58,8 +58,8 @@ async def test_rag_handles_embed_failure(routed_state):
 @pytest.mark.asyncio
 async def test_rag_handles_search_failure(routed_state):
     with (
-        patch("nodes.rag._embed", new_callable=AsyncMock, return_value=[0.1] * 128),
-        patch("nodes.rag.vector_search", new_callable=AsyncMock, side_effect=Exception("db error")),
+        patch("kazusa_ai_chatbot.db.get_text_embedding", new_callable=AsyncMock, return_value=[0.1] * 128),
+        patch("kazusa_ai_chatbot.nodes.rag.vector_search", new_callable=AsyncMock, side_effect=Exception("db error")),
     ):
         result = await rag_retriever(routed_state)
 
@@ -84,7 +84,7 @@ async def test_rag_returns_only_owned_fields(routed_state):
 @pytest.mark.asyncio
 async def test_live_embed_returns_valid_vector():
     """Call the real LM Studio embedding endpoint and validate the vector shape."""
-    embedding = await _embed("The northern gate was attacked by shadow wolves.")
+    embedding = await get_text_embedding("The northern gate was attacked by shadow wolves.")
 
     # Should be a non-empty list of floats
     assert isinstance(embedding, list)
@@ -102,9 +102,9 @@ async def test_live_embed_returns_valid_vector():
 @pytest.mark.asyncio
 async def test_live_embed_semantic_similarity():
     """Verify that semantically similar texts are closer than dissimilar ones."""
-    emb_gate_attack = await _embed("The northern gate was attacked by shadow wolves last night.")
-    emb_gate_breach = await _embed("Shadow wolves breached the north gate during the night.")
-    emb_dessert = await _embed("I would like a chocolate cake with strawberries please.")
+    emb_gate_attack = await get_text_embedding("The northern gate was attacked by shadow wolves last night.")
+    emb_gate_breach = await get_text_embedding("Shadow wolves breached the north gate during the night.")
+    emb_dessert = await get_text_embedding("I would like a chocolate cake with strawberries please.")
 
     sim_related = _cosine_similarity(emb_gate_attack, emb_gate_breach)
     sim_unrelated = _cosine_similarity(emb_gate_attack, emb_dessert)
@@ -121,9 +121,9 @@ async def test_live_embed_semantic_similarity():
 @pytest.mark.asyncio
 async def test_live_embed_sematic_similarity_chinese():
     """Verify that semantically similar texts in Chinese are closer than dissimilar ones."""
-    emb_question = await _embed("今天天气好么？")
-    emb_warnings = await _embed("Kazusa要一起去甜点店么？")
-    emb_command = await _embed("北门受到了攻击！")
+    emb_question = await get_text_embedding("今天天气好么？")
+    emb_warnings = await get_text_embedding("Kazusa要一起去甜点店么？")
+    emb_command = await get_text_embedding("北门受到了攻击！")
 
     sim_related = _cosine_similarity(emb_question, emb_warnings)
     sim_unrelated = _cosine_similarity(emb_question, emb_command)

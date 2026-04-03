@@ -1,6 +1,6 @@
 """Tests for Stage 2 — Rule-Based Router."""
 
-from nodes.router import router
+from kazusa_ai_chatbot.nodes.router import router
 
 
 def test_router_enables_rag_for_question(base_state):

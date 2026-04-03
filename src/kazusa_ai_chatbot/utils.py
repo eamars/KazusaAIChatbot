@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from state import ChatMessage
+from kazusa_ai_chatbot.state import ChatMessage
 
 
 def format_history_lines(

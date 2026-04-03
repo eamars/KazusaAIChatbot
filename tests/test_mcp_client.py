@@ -6,7 +6,7 @@ from dataclasses import dataclass
 
 import pytest
 
-from mcp_client import McpManager, ToolInfo
+from kazusa_ai_chatbot.mcp_client import McpManager, ToolInfo
 
 
 @dataclass

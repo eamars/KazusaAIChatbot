@@ -8,9 +8,9 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from langchain_core.messages import AIMessage
 
-from agents.relevance_agent import RelevanceAgent, _parse_relevance
-from state import ChatMessage
-from utils import format_history_text
+from kazusa_ai_chatbot.agents.relevance_agent import RelevanceAgent, _parse_relevance
+from kazusa_ai_chatbot.state import ChatMessage
+from kazusa_ai_chatbot.utils import format_history_text
 
 
 # ── _parse_relevance unit tests ──────────────────────────────────────
@@ -111,7 +111,7 @@ async def test_relevance_agent_returns_should_respond_true():
         }))
     )
 
-    with patch("agents.relevance_agent._get_llm", return_value=mock_llm):
+    with patch("kazusa_ai_chatbot.agents.relevance_agent._get_llm", return_value=mock_llm):
         result = await agent.run(state, "Hey there!")
 
     assert result["agent"] == "relevance_agent"
@@ -133,7 +133,7 @@ async def test_relevance_agent_returns_should_respond_false():
         }))
     )
 
-    with patch("agents.relevance_agent._get_llm", return_value=mock_llm):
+    with patch("kazusa_ai_chatbot.agents.relevance_agent._get_llm", return_value=mock_llm):
         result = await agent.run(state, "random noise")
 
     data = json.loads(result["summary"])
@@ -148,7 +148,7 @@ async def test_relevance_agent_llm_failure_defaults_to_respond():
     mock_llm = MagicMock()
     mock_llm.ainvoke = AsyncMock(side_effect=Exception("LLM down"))
 
-    with patch("agents.relevance_agent._get_llm", return_value=mock_llm):
+    with patch("kazusa_ai_chatbot.agents.relevance_agent._get_llm", return_value=mock_llm):
         result = await agent.run(state, "Hi")
 
     data = json.loads(result["summary"])

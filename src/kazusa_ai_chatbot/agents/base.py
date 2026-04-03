@@ -11,7 +11,7 @@ import abc
 import logging
 from typing import Any
 
-from state import AgentResult, BotState
+from kazusa_ai_chatbot.state import AgentResult, BotState
 
 logger = logging.getLogger(__name__)
 

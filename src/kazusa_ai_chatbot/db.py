@@ -21,10 +21,34 @@ import numpy as np
 
 from motor.motor_asyncio import AsyncIOMotorClient
 from pymongo.errors import ConnectionFailure
+from pymongo.operations import SearchIndexModel
 
-from config import MONGODB_URI, MONGODB_DB_NAME
+from kazusa_ai_chatbot.config import MONGODB_URI, MONGODB_DB_NAME, EMBEDDING_BASE_URL, EMBEDDING_MODEL, LLM_API_KEY, RAG_TOP_K
+from openai import AsyncOpenAI
+
 
 logger = logging.getLogger(__name__)
+
+
+# Lazily initialised embedding client
+_embed_client: AsyncOpenAI | None = None
+
+
+def _get_embed_client() -> AsyncOpenAI:
+    global _embed_client
+    if _embed_client is None:
+        _embed_client = AsyncOpenAI(
+            base_url=EMBEDDING_BASE_URL,
+            api_key=LLM_API_KEY,
+        )
+    return _embed_client
+
+
+async def get_text_embedding(text: str) -> list[float]:
+    """Get embedding vector for a single text string."""
+    client = _get_embed_client()
+    resp = await client.embeddings.create(input=[text], model=EMBEDDING_MODEL)
+    return resp.data[0].embedding
 
 
 # ── Document schemas (TypedDict) ──────────────────────────────────────
@@ -43,6 +67,7 @@ class ConversationMessageDoc(TypedDict):
     name: str            # display name (for prompt formatting)
     content: str         # message text
     timestamp: str       # ISO-8601 UTC timestamp
+    embedding: list[float]  # dense vector for similarity search
 
 
 class UserFactsDoc(TypedDict):
@@ -54,6 +79,7 @@ class UserFactsDoc(TypedDict):
     user_id: str         # Discord user ID (unique key)
     facts: list[str]     # extracted facts about this user
     affinity: int        # 0–1000 affinity score (default 500)
+    embedding: list[float]  # dense vector for similarity search
 
 
 class CharacterStateDoc(TypedDict):
@@ -108,7 +134,86 @@ async def close_db():
         _db = None
 
 
-# ── Collection helpers ──────────────────────────────────────────────
+async def vector_search(
+    collection_name: str,
+    query_embedding: list[float],
+    top_k: int = 3,
+    index_name: str = "default",
+) -> list[dict[str, Any]]:
+    """Atlas $vectorSearch: run a vector similarity query via aggregation pipeline.
+
+    Requires a vectorSearch index on the target collection's ``embedding`` field.
+    Returns up to ``top_k`` documents with ``text``, ``source``, and ``score`` keys.
+    """
+    db = await get_db()
+    collection = db[collection_name]
+
+    pipeline: list[dict[str, Any]] = [
+        {
+            "$vectorSearch": {
+                "index": index_name,
+                "path": "embedding",
+                "queryVector": query_embedding,
+                "numCandidates": top_k * 10,
+                "limit": top_k,
+            }
+        },
+        {"$addFields": {"score": {"$meta": "vectorSearchScore"}}},
+        {"$project": {"text": 1, "source": 1, "score": 1, "_id": 0}},
+    ]
+
+    cursor = collection.aggregate(pipeline)
+    docs = await cursor.to_list(length=top_k)
+    return docs
+
+
+async def enable_vector_index(collection_name: str, index_name: str) -> None:
+    """Create a vector search index on the specified collection for semantic search."""
+    db = await get_db()
+    collection = db[collection_name]
+
+    # Check if index exists
+    try:
+        async for index in collection.list_search_indexes():
+            if index.get("name") == index_name:
+                logger.info("Vector search index '%s' already exists.", index_name)
+                return
+    except Exception as e:
+        logger.debug("Could not list search indexes (might not exist yet or not supported): %s", e)
+
+    logger.info("Vector search index '%s' not found. Creating...", index_name)
+
+    # Determine dimension from the current text embedding model
+    sample_embedding = await get_text_embedding("test")
+    num_dimensions = len(sample_embedding)
+
+    search_index_model = SearchIndexModel(
+        definition={
+            "fields": [
+                {
+                    "type": "vector",
+                    "path": "embedding",
+                    "numDimensions": num_dimensions,
+                    "similarity": "cosine",
+                }
+            ]
+        },
+        name=index_name,
+        type="vectorSearch",
+    )
+
+    try:
+        await collection.create_search_index(search_index_model)
+        logger.info("Successfully created vector search index '%s' with %d dimensions.", index_name, num_dimensions)
+    except Exception as e:
+        logger.error("Failed to create vector search index '%s': %s", index_name, e)
+        raise
+
+
+
+# ----------------------------------------------------------------------------------------
+# Conversation history
+# Collection: conversation_history
 
 async def get_conversation_history(
     channel_id: str, limit: int = 20
@@ -126,26 +231,87 @@ async def get_conversation_history(
     return docs
 
 
-async def save_message(
-    channel_id: str,
-    role: str,
-    user_id: str,
-    name: str,
-    content: str,
-    timestamp: str,
-) -> None:
-    """Persist a single message to conversation history."""
+async def search_conversation_history(
+    query: str, 
+    channel_id: str | None = None,
+    user_id: str | None = None,
+    limit: int = 5,
+    method: str = "vector"  # "keyword", "vector"
+) -> list[tuple[float, ConversationMessageDoc]]:
+    """
+    Search conversation history using keyword or vector relevance.
+    
+    Args:
+        query: The search query string.
+        channel_id: Optional channel filter.
+        user_id: Optional user filter.
+        limit: Maximum number of results.
+        method: "keyword" for regex text search, "vector" for semantic search.
+        
+    Returns a list of tuples (similarity_score, message_doc).
+    Keyword search results always have similarity_score of -1.
+    """
     db = await get_db()
-    doc: ConversationMessageDoc = {
-        "channel_id": channel_id,
-        "role": role,
-        "user_id": user_id,
-        "name": name,
-        "content": content,
-        "timestamp": timestamp,
-    }
+    collection = db.conversation_history
+
+    if method == "keyword":
+        base_filter: dict[str, Any] = {"content": {"$regex": query, "$options": "i"}}
+        if channel_id:
+            base_filter["channel_id"] = channel_id
+        if user_id:
+            base_filter["user_id"] = user_id
+
+        cursor = collection.find(base_filter).sort("timestamp", -1).limit(limit)
+        docs = await cursor.to_list(length=limit)
+        return [(-1.0, doc) for doc in docs]
+
+    # method == "vector"
+    query_embedding = await get_text_embedding(query)
+    index_name = "conversation_history_vector_index"
+
+    pipeline: list[dict[str, Any]] = [
+        {
+            "$vectorSearch": {
+                "index": index_name,
+                "path": "embedding",
+                "queryVector": query_embedding,
+                "numCandidates": limit * 10,
+                "limit": limit,
+            }
+        },
+        {"$addFields": {"score": {"$meta": "vectorSearchScore"}}},
+    ]
+
+    # Apply post-filters for channel_id / user_id
+    match_filter: dict[str, Any] = {}
+    if channel_id:
+        match_filter["channel_id"] = channel_id
+    if user_id:
+        match_filter["user_id"] = user_id
+    if match_filter:
+        pipeline.append({"$match": match_filter})
+
+    pipeline.append({"$limit": limit})
+    pipeline.append({"$unset": "embedding"})
+
+    cursor = collection.aggregate(pipeline)
+    docs = await cursor.to_list(length=limit)
+    return [(doc.pop("score", 0.0), doc) for doc in docs]
+
+
+async def save_conversation(doc: ConversationMessageDoc) -> None:
+    """Persist a single message to conversation history, generating its embedding."""
+    db = await get_db()
+    
+    if "embedding" not in doc or not doc.get("embedding"):
+        doc["embedding"] = await get_text_embedding(doc["content"])
+        
     await db.conversation_history.insert_one(doc)
 
+
+# ----------------------------------------------------------------------------------------
+# User Fact
+# Collection: user_facts
 
 async def get_user_facts(user_id: str) -> list[str]:
     """Retrieve long-term memory facts for a user."""
@@ -199,6 +365,10 @@ async def upsert_user_facts(user_id: str, new_facts: list[str]) -> None:
     )
 
 
+
+# ----------------------------------------------------------------------------------------
+
+
 async def get_character_state() -> CharacterStateDoc | dict:
     """Retrieve the global character state (mood, tone, recent events).
 
@@ -246,32 +416,3 @@ def _cosine_similarity(a: list[float], b: list[float]) -> float:
     if norm_a == 0 or norm_b == 0:
         return 0.0
     return float(np.dot(va, vb) / (norm_a * norm_b))
-
-
-async def vector_search(
-    collection_name: str,
-    query_embedding: list[float],
-    top_k: int = 3,
-) -> list[dict[str, Any]]:
-    """Code-side vector search: fetch all docs with embeddings and rank by cosine similarity.
-
-    NOTE: This works on vanilla MongoDB (no Atlas required) but does not
-    scale well beyond a few thousand documents.
-    """
-    db = await get_db()
-    cursor = db[collection_name].find(
-        {"embedding": {"$exists": True}},
-        {"text": 1, "source": 1, "embedding": 1, "_id": 0},
-    )
-    docs = await cursor.to_list(length=None)
-
-    scored = []
-    for doc in docs:
-        emb = doc.get("embedding")
-        if not emb:
-            continue
-        score = _cosine_similarity(query_embedding, emb)
-        scored.append({"text": doc.get("text", ""), "source": doc.get("source", "unknown"), "score": score})
-
-    scored.sort(key=lambda d: d["score"], reverse=True)
-    return scored[:top_k]

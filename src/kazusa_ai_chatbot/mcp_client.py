@@ -14,7 +14,7 @@ from typing import Any
 from mcp import ClientSession
 from mcp.client.streamable_http import streamablehttp_client
 
-from config import MCP_SERVERS
+from kazusa_ai_chatbot.config import MCP_SERVERS
 
 logger = logging.getLogger(__name__)
 

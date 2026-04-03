@@ -8,13 +8,13 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from langchain_core.messages import AIMessage
 
-from nodes.persona_supervisor import (
+from kazusa_ai_chatbot.nodes.persona_supervisor import (
     _build_agent_catalog,
     _check_relevance,
     _parse_plan,
     persona_supervisor,
 )
-from state import AgentResult, SupervisorPlan
+from kazusa_ai_chatbot.state import AgentResult, SupervisorPlan
 
 
 # ── _parse_plan unit tests ──────────────────────────────────────────
@@ -27,7 +27,7 @@ class TestParsePlan:
             "speech_directive": "Summarize the search results casually.",
         })
         # Register a fake agent so validation passes
-        with patch("nodes.persona_supervisor.AGENT_REGISTRY", {"web_search_agent": True}):
+        with patch("kazusa_ai_chatbot.nodes.persona_supervisor.AGENT_REGISTRY", {"web_search_agent": True}):
             plan = _parse_plan(raw)
         assert plan["agents"] == ["web_search_agent"]
         assert "casually" in plan["speech_directive"]
@@ -46,7 +46,7 @@ class TestParsePlan:
             "agents": ["web_search_agent", "nonexistent_agent"],
             "speech_directive": "test",
         })
-        with patch("nodes.persona_supervisor.AGENT_REGISTRY", {"web_search_agent": True}):
+        with patch("kazusa_ai_chatbot.nodes.persona_supervisor.AGENT_REGISTRY", {"web_search_agent": True}):
             plan = _parse_plan(raw)
         assert plan["agents"] == ["web_search_agent"]
 
@@ -71,7 +71,7 @@ class TestParsePlan:
 
 
 def test_build_agent_catalog_empty():
-    with patch("nodes.persona_supervisor.list_agent_descriptions", return_value=[]):
+    with patch("kazusa_ai_chatbot.nodes.persona_supervisor.list_agent_descriptions", return_value=[]):
         assert _build_agent_catalog() == "(none)"
 
 
@@ -80,7 +80,7 @@ def test_build_agent_catalog_with_agents():
         {"name": "web_search_agent", "description": "Searches the web."},
         {"name": "db_agent", "description": "Queries the database."},
     ]
-    with patch("nodes.persona_supervisor.list_agent_descriptions", return_value=descs):
+    with patch("kazusa_ai_chatbot.nodes.persona_supervisor.list_agent_descriptions", return_value=descs):
         catalog = _build_agent_catalog()
     assert "web_search_agent" in catalog
     assert "db_agent" in catalog
@@ -92,7 +92,7 @@ def test_build_agent_catalog_excludes_auto_agents():
         {"name": "relevance_agent", "description": "Checks relevance."},
         {"name": "web_search_agent", "description": "Searches the web."},
     ]
-    with patch("nodes.persona_supervisor.list_agent_descriptions", return_value=descs):
+    with patch("kazusa_ai_chatbot.nodes.persona_supervisor.list_agent_descriptions", return_value=descs):
         catalog = _build_agent_catalog()
     assert "relevance_agent" not in catalog
     assert "web_search_agent" in catalog
@@ -122,8 +122,8 @@ async def test_supervisor_no_agents_needed():
     )
 
     with (
-        patch("nodes.persona_supervisor._get_llm", return_value=mock_llm),
-        patch("nodes.persona_supervisor.get_agent", side_effect=_no_relevance_agent),
+        patch("kazusa_ai_chatbot.nodes.persona_supervisor._get_llm", return_value=mock_llm),
+        patch("kazusa_ai_chatbot.nodes.persona_supervisor.get_agent", side_effect=_no_relevance_agent),
     ):
         result = await persona_supervisor(state)
 
@@ -159,9 +159,9 @@ async def test_supervisor_dispatches_agent():
         return mock_agent
 
     with (
-        patch("nodes.persona_supervisor._get_llm", return_value=mock_llm),
-        patch("nodes.persona_supervisor.get_agent", side_effect=_get_agent),
-        patch("nodes.persona_supervisor.AGENT_REGISTRY", {"web_search_agent": mock_agent}),
+        patch("kazusa_ai_chatbot.nodes.persona_supervisor._get_llm", return_value=mock_llm),
+        patch("kazusa_ai_chatbot.nodes.persona_supervisor.get_agent", side_effect=_get_agent),
+        patch("kazusa_ai_chatbot.nodes.persona_supervisor.AGENT_REGISTRY", {"web_search_agent": mock_agent}),
     ):
         result = await persona_supervisor(state)
 
@@ -193,9 +193,9 @@ async def test_supervisor_handles_agent_crash():
         return mock_agent
 
     with (
-        patch("nodes.persona_supervisor._get_llm", return_value=mock_llm),
-        patch("nodes.persona_supervisor.get_agent", side_effect=_get_agent),
-        patch("nodes.persona_supervisor.AGENT_REGISTRY", {"web_search_agent": mock_agent}),
+        patch("kazusa_ai_chatbot.nodes.persona_supervisor._get_llm", return_value=mock_llm),
+        patch("kazusa_ai_chatbot.nodes.persona_supervisor.get_agent", side_effect=_get_agent),
+        patch("kazusa_ai_chatbot.nodes.persona_supervisor.AGENT_REGISTRY", {"web_search_agent": mock_agent}),
     ):
         result = await persona_supervisor(state)
 
@@ -213,8 +213,8 @@ async def test_supervisor_handles_planning_llm_failure():
     mock_llm.ainvoke = AsyncMock(side_effect=Exception("LLM down"))
 
     with (
-        patch("nodes.persona_supervisor._get_llm", return_value=mock_llm),
-        patch("nodes.persona_supervisor.get_agent", side_effect=_no_relevance_agent),
+        patch("kazusa_ai_chatbot.nodes.persona_supervisor._get_llm", return_value=mock_llm),
+        patch("kazusa_ai_chatbot.nodes.persona_supervisor.get_agent", side_effect=_no_relevance_agent),
     ):
         result = await persona_supervisor(state)
 
@@ -237,9 +237,9 @@ async def test_supervisor_unknown_agent_in_plan():
 
     # nonexistent_agent is not in registry so _parse_plan filters it out
     with (
-        patch("nodes.persona_supervisor._get_llm", return_value=mock_llm),
-        patch("nodes.persona_supervisor.get_agent", side_effect=_no_relevance_agent),
-        patch("nodes.persona_supervisor.AGENT_REGISTRY", {}),
+        patch("kazusa_ai_chatbot.nodes.persona_supervisor._get_llm", return_value=mock_llm),
+        patch("kazusa_ai_chatbot.nodes.persona_supervisor.get_agent", side_effect=_no_relevance_agent),
+        patch("kazusa_ai_chatbot.nodes.persona_supervisor.AGENT_REGISTRY", {}),
     ):
         result = await persona_supervisor(state)
 
@@ -296,7 +296,7 @@ async def test_supervisor_relevance_rejects_message():
             return mock_relevance
         return None
 
-    with patch("nodes.persona_supervisor.get_agent", side_effect=_get_agent):
+    with patch("kazusa_ai_chatbot.nodes.persona_supervisor.get_agent", side_effect=_get_agent):
         result = await persona_supervisor(state)
 
     assert result["supervisor_plan"]["speech_directive"] == "Do not respond. Stay silent."
@@ -333,8 +333,8 @@ async def test_supervisor_relevance_approves_then_plans():
         return None
 
     with (
-        patch("nodes.persona_supervisor.get_agent", side_effect=_get_agent),
-        patch("nodes.persona_supervisor._get_llm", return_value=mock_llm),
+        patch("kazusa_ai_chatbot.nodes.persona_supervisor.get_agent", side_effect=_get_agent),
+        patch("kazusa_ai_chatbot.nodes.persona_supervisor._get_llm", return_value=mock_llm),
     ):
         result = await persona_supervisor(state)
 
@@ -366,8 +366,8 @@ async def test_supervisor_relevance_crash_defaults_to_respond():
         return None
 
     with (
-        patch("nodes.persona_supervisor.get_agent", side_effect=_get_agent),
-        patch("nodes.persona_supervisor._get_llm", return_value=mock_llm),
+        patch("kazusa_ai_chatbot.nodes.persona_supervisor.get_agent", side_effect=_get_agent),
+        patch("kazusa_ai_chatbot.nodes.persona_supervisor._get_llm", return_value=mock_llm),
     ):
         result = await persona_supervisor(state)
 
@@ -421,7 +421,7 @@ async def test_live_supervisor_calls_web_search_for_search_query():
             return real_relevance
         return mock_search
 
-    with patch("nodes.persona_supervisor.get_agent", side_effect=_get_agent):
+    with patch("kazusa_ai_chatbot.nodes.persona_supervisor.get_agent", side_effect=_get_agent):
         result = await persona_supervisor(state)
 
     plan = result["supervisor_plan"]

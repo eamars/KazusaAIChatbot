@@ -1,6 +1,6 @@
 """Tests for Stage 5 — Context Assembler."""
 
-from nodes.assembler import (
+from kazusa_ai_chatbot.nodes.assembler import (
     UNIVERSAL_RULES,
     _build_affinity_block,
     _build_character_state_block,

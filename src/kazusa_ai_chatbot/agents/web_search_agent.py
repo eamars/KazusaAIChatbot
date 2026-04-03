@@ -14,10 +14,10 @@ import re
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langchain_openai import ChatOpenAI
 
-from agents.base import BaseAgent
-from config import LLM_API_KEY, LLM_BASE_URL, LLM_MODEL, MAX_TOOL_ITERATIONS
-from mcp_client import mcp_manager
-from state import AgentResult, BotState, ToolCall
+from kazusa_ai_chatbot.agents.base import BaseAgent
+from kazusa_ai_chatbot.config import LLM_API_KEY, LLM_BASE_URL, LLM_MODEL, MAX_TOOL_ITERATIONS
+from kazusa_ai_chatbot.mcp_client import mcp_manager
+from kazusa_ai_chatbot.state import AgentResult, BotState, ToolCall
 
 logger = logging.getLogger(__name__)
 

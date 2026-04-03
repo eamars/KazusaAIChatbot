@@ -7,8 +7,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
-from agents.speech_agent import _build_agent_context, speech_agent
-from state import AgentResult, SupervisorPlan
+from kazusa_ai_chatbot.agents.speech_agent import _build_agent_context, speech_agent
+from kazusa_ai_chatbot.state import AgentResult, SupervisorPlan
 
 
 # ── _build_agent_context unit tests ─────────────────────────────────
@@ -76,7 +76,7 @@ async def test_speech_agent_basic_response():
         return_value=AIMessage(content="Hey there, Commander.")
     )
 
-    with patch("agents.speech_agent._get_llm", return_value=mock_llm):
+    with patch("kazusa_ai_chatbot.agents.speech_agent._get_llm", return_value=mock_llm):
         result = await speech_agent(state)
 
     assert result["response"] == "Hey there, Commander."
@@ -108,7 +108,7 @@ async def test_speech_agent_incorporates_agent_results():
         return_value=AIMessage(content="Hmm, 18 degrees in Tokyo. Not bad.")
     )
 
-    with patch("agents.speech_agent._get_llm", return_value=mock_llm):
+    with patch("kazusa_ai_chatbot.agents.speech_agent._get_llm", return_value=mock_llm):
         result = await speech_agent(state)
 
     assert result["response"] == "Hmm, 18 degrees in Tokyo. Not bad."
@@ -147,7 +147,7 @@ async def test_speech_agent_handles_error_result():
         return_value=AIMessage(content="I tried looking that up, but something went wrong. Sorry, Commander.")
     )
 
-    with patch("agents.speech_agent._get_llm", return_value=mock_llm):
+    with patch("kazusa_ai_chatbot.agents.speech_agent._get_llm", return_value=mock_llm):
         result = await speech_agent(state)
 
     assert "sorry" in result["response"].lower()
@@ -173,7 +173,7 @@ async def test_speech_agent_llm_failure():
     mock_llm = MagicMock()
     mock_llm.ainvoke = AsyncMock(side_effect=Exception("LLM down"))
 
-    with patch("agents.speech_agent._get_llm", return_value=mock_llm):
+    with patch("kazusa_ai_chatbot.agents.speech_agent._get_llm", return_value=mock_llm):
         result = await speech_agent(state)
 
     assert result["response"] == "*stays silent*"
@@ -194,7 +194,7 @@ async def test_speech_agent_no_supervisor_plan():
         return_value=AIMessage(content="Greetings.")
     )
 
-    with patch("agents.speech_agent._get_llm", return_value=mock_llm):
+    with patch("kazusa_ai_chatbot.agents.speech_agent._get_llm", return_value=mock_llm):
         result = await speech_agent(state)
 
     assert result["response"] == "Greetings."

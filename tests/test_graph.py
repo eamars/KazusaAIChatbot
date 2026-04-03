@@ -8,8 +8,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from langchain_core.messages import AIMessage
 
-from graph import build_graph
-from state import BotState, SupervisorPlan
+from kazusa_ai_chatbot.graph import build_graph
+from kazusa_ai_chatbot.state import BotState, SupervisorPlan
 
 
 @pytest.mark.asyncio
@@ -66,15 +66,15 @@ async def test_full_graph_question_flow(sample_personality):
     )
 
     with (
-        patch("nodes.rag._get_embed_client", return_value=mock_embed_client),
-        patch("nodes.rag.vector_search", new_callable=AsyncMock, return_value=mock_vector_results),
-        patch("nodes.memory.get_conversation_history", new_callable=AsyncMock, return_value=mock_history),
-        patch("nodes.memory.get_user_facts", new_callable=AsyncMock, return_value=["User goes by Commander"]),
-        patch("nodes.memory.get_character_state", new_callable=AsyncMock, return_value=mock_char_state),
-        patch("nodes.memory.get_affinity", new_callable=AsyncMock, return_value=500),
-        patch("agents.relevance_agent._get_llm", return_value=mock_relevance_llm),
-        patch("nodes.persona_supervisor._get_llm", return_value=mock_supervisor_llm),
-        patch("agents.speech_agent._get_llm", return_value=mock_speech_llm),
+        patch("kazusa_ai_chatbot.db.get_text_embedding", return_value=mock_embed_client),
+        patch("kazusa_ai_chatbot.nodes.rag.vector_search", new_callable=AsyncMock, return_value=mock_vector_results),
+        patch("kazusa_ai_chatbot.nodes.memory.get_conversation_history", new_callable=AsyncMock, return_value=mock_history),
+        patch("kazusa_ai_chatbot.nodes.memory.get_user_facts", new_callable=AsyncMock, return_value=["User goes by Commander"]),
+        patch("kazusa_ai_chatbot.nodes.memory.get_character_state", new_callable=AsyncMock, return_value=mock_char_state),
+        patch("kazusa_ai_chatbot.nodes.memory.get_affinity", new_callable=AsyncMock, return_value=500),
+        patch("kazusa_ai_chatbot.agents.relevance_agent._get_llm", return_value=mock_relevance_llm),
+        patch("kazusa_ai_chatbot.nodes.persona_supervisor._get_llm", return_value=mock_supervisor_llm),
+        patch("kazusa_ai_chatbot.agents.speech_agent._get_llm", return_value=mock_speech_llm),
     ):
         result = await graph.ainvoke(state)
 
@@ -121,13 +121,13 @@ async def test_full_graph_casual_greeting(sample_personality):
     )
 
     with (
-        patch("nodes.memory.get_conversation_history", new_callable=AsyncMock, return_value=[]),
-        patch("nodes.memory.get_user_facts", new_callable=AsyncMock, return_value=[]),
-        patch("nodes.memory.get_character_state", new_callable=AsyncMock, return_value={}),
-        patch("nodes.memory.get_affinity", new_callable=AsyncMock, return_value=500),
-        patch("agents.relevance_agent._get_llm", return_value=mock_relevance_llm),
-        patch("nodes.persona_supervisor._get_llm", return_value=mock_supervisor_llm),
-        patch("agents.speech_agent._get_llm", return_value=mock_speech_llm),
+        patch("kazusa_ai_chatbot.nodes.memory.get_conversation_history", new_callable=AsyncMock, return_value=[]),
+        patch("kazusa_ai_chatbot.nodes.memory.get_user_facts", new_callable=AsyncMock, return_value=[]),
+        patch("kazusa_ai_chatbot.nodes.memory.get_character_state", new_callable=AsyncMock, return_value={}),
+        patch("kazusa_ai_chatbot.nodes.memory.get_affinity", new_callable=AsyncMock, return_value=500),
+        patch("kazusa_ai_chatbot.agents.relevance_agent._get_llm", return_value=mock_relevance_llm),
+        patch("kazusa_ai_chatbot.nodes.persona_supervisor._get_llm", return_value=mock_supervisor_llm),
+        patch("kazusa_ai_chatbot.agents.speech_agent._get_llm", return_value=mock_speech_llm),
     ):
         result = await graph.ainvoke(state)
 
