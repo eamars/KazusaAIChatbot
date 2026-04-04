@@ -321,7 +321,6 @@ async def test_live_supervisor_calls_web_search_for_search_query():
         "assembler_output": AssemblerOutput(
             channel_topic="Python",
             user_topic="Search request",
-            latest_message="Search the internet for the latest news about Python 3.14",
             should_respond=True
         )
     }
@@ -363,7 +362,6 @@ async def test_live_supervisor_no_agents_for_unsupported_task():
         "assembler_output": AssemblerOutput(
             channel_topic="Database",
             user_topic="DB Query",
-            latest_message="Query the discord_bot database",
             should_respond=True
         )
     }
@@ -397,7 +395,6 @@ async def test_live_supervisor_no_agents_for_greeting():
         "assembler_output": AssemblerOutput(
             channel_topic="General",
             user_topic="Greeting",
-            latest_message="Hey, how are you doing today?",
             should_respond=True
         )
     }

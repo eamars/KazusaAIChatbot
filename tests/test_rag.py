@@ -1,14 +1,13 @@
-"""Tests for Stage 3 — RAG Retriever."""
+"""Tests for embedding utilities used by semantic search helpers."""
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
+
 
 import pytest
 
 from kazusa_ai_chatbot.db import _cosine_similarity, get_text_embedding
-from kazusa_ai_chatbot.nodes.rag import rag_retriever
-
 
 # Mark for tests that require a running LM Studio instance.
 # Run with:  pytest -m live_llm
@@ -16,87 +15,26 @@ live_llm = pytest.mark.live_llm
 
 
 @pytest.mark.asyncio
-async def test_rag_skipped_when_flag_false(routed_state):
-    routed_state["retrieve_rag"] = False
-    result = await rag_retriever(routed_state)
-    assert result["rag_results"] == []
+async def test_get_text_embedding_calls_embedding_client():
+    mock_response = MagicMock()
+    mock_response.data = [MagicMock(embedding=[0.1, 0.2, 0.3])]
+
+    mock_client = MagicMock()
+    mock_client.embeddings.create = AsyncMock(return_value=mock_response)
+
+    with patch("kazusa_ai_chatbot.db._get_embed_client", return_value=mock_client):
+        embedding = await get_text_embedding("hello")
+
+    assert embedding == [0.1, 0.2, 0.3]
+    mock_client.embeddings.create.assert_awaited_once_with(input=["hello"], model="text-embedding-model")
 
 
-@pytest.mark.asyncio
-async def test_rag_skipped_when_query_empty(routed_state):
-    routed_state["message_text"] = ""
-    result = await rag_retriever(routed_state)
-    assert result["rag_results"] == []
+def test_cosine_similarity_identical_vectors():
+    assert _cosine_similarity([1.0, 2.0], [1.0, 2.0]) == pytest.approx(1.0)
 
 
-@pytest.mark.asyncio
-async def test_rag_returns_results(routed_state):
-    mock_embedding = [0.1] * 128
-    mock_docs = [
-        {"text": "The gate was breached.", "source": "lore/events", "score": 0.9},
-        {"text": "Voss reported casualties.", "source": "lore/npcs", "score": 0.8},
-    ]
-
-
-    routed_state["message_text"] = "What happened at the northern gate?"
-
-
-    with (
-        patch("kazusa_ai_chatbot.nodes.rag.get_text_embedding", new_callable=AsyncMock, return_value=mock_embedding),
-        patch("kazusa_ai_chatbot.nodes.rag.search_lore", new_callable=AsyncMock, return_value=mock_docs),
-    ):
-        result = await rag_retriever(routed_state)
-
-
-    assert result["rag_results"][0]["text"] == "The gate was breached."
-    assert result["rag_results"][0]["score"] == 0.9
-
-
-@pytest.mark.asyncio
-async def test_rag_handles_embed_failure(routed_state):
-    routed_state["message_text"] = "What happened at the northern gate?"
-    with patch("kazusa_ai_chatbot.nodes.rag.get_text_embedding", new_callable=AsyncMock, side_effect=Exception("embed error")):
-        result = await rag_retriever(routed_state)
-
-
-    assert result["rag_results"] == []
-
-
-@pytest.mark.asyncio
-async def test_rag_handles_search_failure(routed_state):
-    routed_state["message_text"] = "What happened at the northern gate?"
-    with (
-        patch("kazusa_ai_chatbot.nodes.rag.get_text_embedding", new_callable=AsyncMock, return_value=[0.1] * 128),
-        patch("kazusa_ai_chatbot.nodes.rag.search_lore", new_callable=AsyncMock, side_effect=Exception("db error")),
-    ):
-        result = await rag_retriever(routed_state)
-
-
-    assert result["rag_results"] == []
-
-
-@pytest.mark.asyncio
-async def test_rag_returns_only_owned_fields(routed_state):
-    """Parallel fan-out safety: RAG should NOT return the full state."""
-    routed_state["message_text"] = "What happened at the northern gate?"
-
-
-    mock_docs = [{"text": "The gate was breached.", "source": "lore/events", "score": 0.9}]
-
-
-    with (
-        patch("kazusa_ai_chatbot.nodes.rag.get_text_embedding", new_callable=AsyncMock, return_value=[0.1] * 128),
-        patch("kazusa_ai_chatbot.nodes.rag.search_lore", new_callable=AsyncMock, return_value=mock_docs),
-    ):
-        result = await rag_retriever(routed_state)
-
-
-    # Assuming rag_retriever only returns the keys it updates, not the whole state.
-    # The current rag.py does: return {"rag_results": results} or {**state, "rag_results": []}
-    # Wait, rag.py returns {"rag_results": results} when successful, but {**state, ...} on early returns
-    # This assertion only works on the successful path.
-    assert "user_id" not in result
-    assert "rag_results" in result
+def test_cosine_similarity_zero_vector_returns_zero():
+    assert _cosine_similarity([0.0, 0.0], [1.0, 2.0]) == 0.0
 
 
 # ── Live LM Studio embedding tests ──────────────────────────────────

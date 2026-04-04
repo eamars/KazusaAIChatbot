@@ -24,14 +24,12 @@ EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "text-embedding-model")
 
 # Bot settings
 CONVERSATION_HISTORY_LIMIT = int(os.getenv("CONVERSATION_HISTORY_LIMIT", "20"))
-RAG_TOP_K = int(os.getenv("RAG_TOP_K", "3"))
 MAX_CONTEXT_TOKENS = int(os.getenv("MAX_CONTEXT_TOKENS", "28000"))
 
 # Token budget allocation (approximate)
 TOKEN_BUDGET = {
     "system_personality": 15000,
     "character_state": 500,
-    "rag_context": 2000,
     "user_memory": 500,
     "conversation_history": 4000,
     "current_message": 500,

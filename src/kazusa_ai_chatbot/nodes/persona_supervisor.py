@@ -20,7 +20,7 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_openai import ChatOpenAI
 
 from kazusa_ai_chatbot.agents.base import AGENT_REGISTRY, get_agent, list_agent_descriptions
-from kazusa_ai_chatbot.config import LLM_API_KEY, LLM_BASE_URL, LLM_MODEL, TOKEN_BUDGET
+from kazusa_ai_chatbot.config import LLM_API_KEY, LLM_BASE_URL, LLM_MODEL
 from kazusa_ai_chatbot.state import AgentResult, BotState, SupervisorPlan
 from kazusa_ai_chatbot.utils import format_history_lines
 
@@ -86,12 +86,6 @@ def _build_personality_block(personality: dict) -> dict:
         res["extra_traits"] = extras
         
     return res
-
-def _build_rag_block(rag_results: list[dict]) -> list[dict]:
-    formatted = []
-    for r in rag_results:
-        formatted.append({"text": r.get('text', ''), "source": r.get('source', 'unknown')})
-    return formatted
 
 def _build_character_state_block(character_state: dict) -> dict:
     if not character_state:
@@ -213,7 +207,6 @@ async def persona_supervisor(state: BotState) -> dict:
     # ── Step 1: Prepare Speech Agent Data Payload ───────────────
     # The speech agent expects `speech_human_data` to be built and provided in state
     personality = state.get("personality", {})
-    rag_results = state.get("rag_results", [])
     user_memory = state.get("user_memory", [])
     character_state = state.get("character_state", {})
     affinity = state.get("affinity", 500)
@@ -241,9 +234,6 @@ async def persona_supervisor(state: BotState) -> dict:
     if c_block: speech_human_data["context"]["character_state"] = c_block
     
     speech_human_data["context"]["affinity"] = _build_affinity_block(affinity)
-
-    r_block = _build_rag_block(rag_results)
-    if r_block: speech_human_data["context"]["rag"] = r_block
     
     if user_memory: speech_human_data["context"]["user_memory"] = user_memory
 
@@ -268,8 +258,7 @@ async def persona_supervisor(state: BotState) -> dict:
         },
         "context": {
             "channel_topic": assembler_output.get("channel_topic", "Unknown"),
-            "user_topic": assembler_output.get("user_topic", "Unknown"),
-            "latest_message_summary": assembler_output.get("latest_message", message_text)
+            "user_topic": assembler_output.get("user_topic", "Unknown")
         }
     }
     

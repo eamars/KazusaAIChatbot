@@ -1,32 +1,30 @@
 """Stage 5 — Context Relevance Agent.
 
-Analyzes the conversation history, RAG results, and user memory
+Loads conversational context from MongoDB, then analyzes that context
 to determine the current topics and whether the bot should respond at all.
 Outputs a structured JSON decision.
 """
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
-from typing import Any
 
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_openai import ChatOpenAI
 
-from kazusa_ai_chatbot.config import LLM_API_KEY, LLM_BASE_URL, LLM_MODEL, TOKEN_BUDGET
-from kazusa_ai_chatbot.state import AssemblerOutput, BotState
+from kazusa_ai_chatbot.config import CONVERSATION_HISTORY_LIMIT, LLM_API_KEY, LLM_BASE_URL, LLM_MODEL
+from kazusa_ai_chatbot.db import AFFINITY_DEFAULT, get_affinity, get_character_state, get_conversation_history, get_user_facts
+from kazusa_ai_chatbot.state import AssemblerOutput, BotState, CharacterState, ChatMessage
 from kazusa_ai_chatbot.utils import format_history_lines
 
 logger = logging.getLogger(__name__)
 
 _llm: ChatOpenAI | None = None
 
-# Rough estimate: 1 token ≈ 4 characters for English text
-CHARS_PER_TOKEN = 4
-
 _RELEVANCE_PROMPT = """\
-You are a context analysis engine. Your job is to analyze the conversation history, RAG context, and user memory, then output ONLY a JSON object.
+You are a context analysis engine. Your job is to analyze the conversation history, user memory, character state, and current message, then output ONLY a JSON object.
 
 You represent a Discord bot roleplaying as the character '{persona_name}'.
 Your Discord user ID is '{bot_id}'.
@@ -36,7 +34,6 @@ DO NOT write explanations, analysis, or commentary. Output ONLY the JSON object.
 Required fields:
 - channel_topic: General topic being discussed in the channel
 - user_topic: Specific topic/intent of user's latest message
-- latest_message: Concise summary of what user just said
 - should_respond: true if bot should reply, false otherwise
 
 Bot should respond when:
@@ -68,6 +65,63 @@ def _get_llm() -> ChatOpenAI:
             api_key=LLM_API_KEY,
         )
     return _llm
+
+
+async def _load_context(state: BotState) -> tuple[list[ChatMessage], list[str], CharacterState, int]:
+    channel_id = state.get("channel_id", "")
+    user_id = state.get("user_id", "")
+
+    history_task = get_conversation_history(channel_id, limit=CONVERSATION_HISTORY_LIMIT) if channel_id else asyncio.sleep(0, result=[])
+    facts_task = get_user_facts(user_id) if user_id else asyncio.sleep(0, result=[])
+    character_state_task = get_character_state()
+    affinity_task = get_affinity(user_id) if user_id else asyncio.sleep(0, result=AFFINITY_DEFAULT)
+
+    raw_history, raw_facts, raw_character_state, raw_affinity = await asyncio.gather(
+        history_task,
+        facts_task,
+        character_state_task,
+        affinity_task,
+        return_exceptions=True,
+    )
+
+    if isinstance(raw_history, Exception):
+        logger.exception("Failed to fetch conversation history", exc_info=raw_history)
+        history = []
+    else:
+        history = [
+            ChatMessage(
+                role=doc.get("role", "user"),
+                user_id=doc.get("user_id", ""),
+                name=doc.get("name", "unknown"),
+                content=doc.get("content", ""),
+            )
+            for doc in raw_history
+        ]
+
+    if isinstance(raw_facts, Exception):
+        logger.exception("Failed to fetch user facts", exc_info=raw_facts)
+        user_memory = []
+    else:
+        user_memory = [str(fact) for fact in raw_facts]
+
+    if isinstance(raw_character_state, Exception):
+        logger.exception("Failed to fetch character state", exc_info=raw_character_state)
+        character_state = CharacterState()
+    else:
+        character_state = CharacterState(
+            mood=raw_character_state.get("mood", "neutral"),
+            emotional_tone=raw_character_state.get("emotional_tone", "balanced"),
+            recent_events=raw_character_state.get("recent_events", []),
+            updated_at=raw_character_state.get("updated_at", ""),
+        )
+
+    if isinstance(raw_affinity, Exception):
+        logger.exception("Failed to fetch affinity", exc_info=raw_affinity)
+        affinity = AFFINITY_DEFAULT
+    else:
+        affinity = int(raw_affinity)
+
+    return history, user_memory, character_state, affinity
 
 
 def _parse_relevance_output(raw: str) -> AssemblerOutput:
@@ -108,25 +162,14 @@ def _build_history_json(
 async def relevance_agent(state: BotState) -> BotState:
     """Analyze context and determine relevance using LLM."""
     personality = state.get("personality", {})
-    rag_results = state.get("rag_results", [])
-    user_memory = state.get("user_memory", [])
-    history = state.get("conversation_history", [])
     message_text = state.get("message_text", "")
     user_name = state.get("user_name", "user")
     user_id = state.get("user_id", "unknown_user_id")
     persona_name = personality.get("name", "assistant")
     bot_id = state.get("bot_id", "unknown_bot_id")
+    history, user_memory, character_state, affinity = await _load_context(state)
 
     # ── Build Context Data ──────────────────────────────────────────
-    
-    # 1. Format RAG
-    formatted_rag = []
-    for r in rag_results:
-        formatted_rag.append({
-            "text": r.get('text', ''),
-            "source": r.get('source', 'unknown')
-        })
-        
     formatted_history = _build_history_json(history, persona_name, bot_id)
 
     # ── Build Human Message Data ───────────────────────────────────
@@ -137,9 +180,10 @@ async def relevance_agent(state: BotState) -> BotState:
             "message": message_text
         },
         "context": {
-            "rag": formatted_rag,
             "user_memory": user_memory,
-            "conversation_history": formatted_history
+            "conversation_history": formatted_history,
+            "character_state": character_state,
+            "affinity": affinity,
         }
     }
 
@@ -171,14 +215,16 @@ async def relevance_agent(state: BotState) -> BotState:
         assembler_output = AssemblerOutput(
             channel_topic="Unknown",
             user_topic="Unknown",
-            latest_message=message_text,
             should_respond=True
         )
 
     logger.info("Relevance Agent output: %s", assembler_output)
 
     return {
-        **state, 
+        "conversation_history": history,
+        "user_memory": user_memory,
+        "character_state": character_state,
+        "affinity": affinity,
         "assembler_output": assembler_output
     }
 

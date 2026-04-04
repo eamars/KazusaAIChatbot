@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from kazusa_ai_chatbot.state import BotState, CharacterState, ChatMessage, RagResult
+from kazusa_ai_chatbot.state import BotState, CharacterState, ChatMessage
 
 
 @pytest.fixture
@@ -35,25 +35,6 @@ def base_state(sample_personality) -> BotState:
 
 
 @pytest.fixture
-def routed_state(base_state) -> BotState:
-    """State after the router has run — both retrieval flags set."""
-    return {
-        **base_state,
-        "retrieve_rag": True,
-        "retrieve_memory": True,
-        "rag_query": "what happened at the northern gate",
-    }
-
-
-@pytest.fixture
-def sample_rag_results() -> list[RagResult]:
-    return [
-        RagResult(text="The northern gate was breached by shadow wolves.", source="lore/events", score=0.87),
-        RagResult(text="Captain Voss reported three casualties.", source="lore/npcs", score=0.82),
-    ]
-
-
-@pytest.fixture
 def sample_history() -> list[ChatMessage]:
     return [
         ChatMessage(role="user", user_id="user_123", name="TestUser", content="Is the gate safe?"),
@@ -69,20 +50,3 @@ def sample_character_state() -> CharacterState:
         recent_events=["Shadow wolves attacked the northern gate"],
         updated_at="2026-03-30T19:00:00Z",
     )
-
-
-@pytest.fixture
-def assembled_state(
-    routed_state,
-    sample_rag_results,
-    sample_history,
-    sample_character_state,
-) -> BotState:
-    """State ready for the assembler — all retrieval results populated."""
-    return {
-        **routed_state,
-        "rag_results": sample_rag_results,
-        "conversation_history": sample_history,
-        "user_memory": ["User goes by Commander"],
-        "character_state": sample_character_state,
-    }

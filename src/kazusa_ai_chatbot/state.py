@@ -3,12 +3,6 @@ from __future__ import annotations
 from typing import Any, TypedDict
 
 
-class RagResult(TypedDict):
-    text: str
-    source: str
-    score: float
-
-
 class ChatMessage(TypedDict):
     role: str        # "user" | "assistant"
     user_id: str     # unique identifier (Discord user/bot ID)
@@ -59,27 +53,24 @@ class BotState(TypedDict, total=False):
     timestamp: str
     should_respond: bool
 
-    # --- Stage 3: RAG ---
-    rag_results: list[RagResult]
-
-    # --- Stage 4: memory ---
+    # --- Stage 2: relevance_agent context loading ---
     conversation_history: list[ChatMessage]
     user_memory: list[str]
     character_state: CharacterState
     affinity: int  # 0–1000 affinity score toward current user
 
-    # --- Stage 5: relevance_agent ---
+    # --- Stage 2: relevance_agent analysis ---
     assembler_output: AssemblerOutput
 
-    # --- Stage 6a: persona_supervisor ---
+    # --- Stage 3: persona_supervisor ---
     supervisor_plan: SupervisorPlan
     agent_results: list[AgentResult]
     speech_human_data: dict
 
-    # --- Stage 6b: speech_agent ---
+    # --- Stage 4: speech_agent ---
     response: str
 
-    # --- Stage 7: memory writer ---
+    # --- Stage 5: memory writer ---
     new_facts: list[str]
 
     # --- metadata ---

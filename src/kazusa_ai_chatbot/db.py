@@ -9,7 +9,6 @@ Collections
 conversation_history  → ConversationMessageDoc
 user_facts            → UserFactsDoc
 character_state       → CharacterStateDoc
-lore                  → LoreDoc  (used by vector search)
 """
 
 from __future__ import annotations
@@ -18,12 +17,11 @@ import logging
 from typing import Any, TypedDict
 
 import numpy as np
-
 from motor.motor_asyncio import AsyncIOMotorClient
 from pymongo.errors import ConnectionFailure
 from pymongo.operations import SearchIndexModel
 
-from kazusa_ai_chatbot.config import MONGODB_URI, MONGODB_DB_NAME, EMBEDDING_BASE_URL, EMBEDDING_MODEL, LLM_API_KEY, RAG_TOP_K
+from kazusa_ai_chatbot.config import EMBEDDING_BASE_URL, EMBEDDING_MODEL, LLM_API_KEY, MONGODB_URI, MONGODB_DB_NAME
 from openai import AsyncOpenAI
 
 
@@ -94,17 +92,6 @@ class CharacterStateDoc(TypedDict):
     recent_events: list[str]  # short summaries, max 10
     updated_at: str         # ISO-8601 UTC timestamp of last update
 
-
-class LoreDoc(TypedDict):
-    """A lore entry in the ``lore`` collection (used by vector search).
-
-    The ``embedding`` field is indexed by a MongoDB Atlas vector search index.
-    """
-
-    text: str                  # lore content
-    source: str                # provenance tag, e.g. "lore/events", "lore/npcs"
-    embedding: list[float]     # dense vector for similarity search
-
 _client: AsyncIOMotorClient | None = None
 _db = None
 
@@ -132,38 +119,6 @@ async def close_db():
         _client.close()
         _client = None
         _db = None
-
-
-async def search_lore(
-    query_embedding: list[float],
-    top_k: int = 3,
-    index_name: str = "default",
-) -> list[dict[str, Any]]:
-    """Atlas $vectorSearch: run a vector similarity query via aggregation pipeline.
-
-    Requires a vectorSearch index on the target collection's ``embedding`` field.
-    Returns up to ``top_k`` documents with ``text``, ``source``, and ``score`` keys.
-    """
-    db = await get_db()
-    collection = db["lore"]
-
-    pipeline: list[dict[str, Any]] = [
-        {
-            "$vectorSearch": {
-                "index": index_name,
-                "path": "embedding",
-                "queryVector": query_embedding,
-                "numCandidates": top_k * 10,
-                "limit": top_k,
-            }
-        },
-        {"$addFields": {"score": {"$meta": "vectorSearchScore"}}},
-        {"$project": {"text": 1, "source": 1, "score": 1, "_id": 0}},
-    ]
-
-    cursor = collection.aggregate(pipeline)
-    docs = await cursor.to_list(length=top_k)
-    return docs
 
 
 async def enable_vector_index(collection_name: str, index_name: str) -> None:
@@ -231,7 +186,7 @@ async def get_conversation_history(
 
 
 async def search_conversation_history(
-    query: str, 
+    query: str,
     channel_id: str | None = None,
     user_id: str | None = None,
     limit: int = 5,
@@ -353,18 +308,17 @@ async def update_affinity(user_id: str, delta: int) -> int:
 
 
 async def upsert_user_facts(user_id: str, new_facts: list[str]) -> None:
-    """Add new facts to a user's memory, deduplicating and updating embeddings."""
+    """Add new facts to a user's memory, deduplicating while preserving order."""
     db = await get_db()
     existing = await get_user_facts(user_id)
     merged = list(dict.fromkeys(existing + new_facts))  # deduplicate, preserve order
-    
-    # Generate embedding based on all user facts
+
     if merged:
         combined_facts_text = "\n".join(merged)
         embedding = await get_text_embedding(combined_facts_text)
     else:
         embedding = []
-    
+
     await db.user_facts.update_one(
         {"user_id": user_id},
         {"$set": {"user_id": user_id, "facts": merged, "embedding": embedding}},
@@ -410,13 +364,13 @@ async def search_users_by_facts(
 
     cursor = collection.aggregate(pipeline)
     docs = await cursor.to_list(length=limit)
-    
+
     # Convert to (score, doc) tuples
     results = []
     for doc in docs:
         score = doc.pop("score")
         results.append((score, doc))
-    
+
     return results
 
 
