@@ -30,8 +30,14 @@ class AgentResult(TypedDict):
     tool_history: list[ToolCall]  # tool calls made by this agent
 
 
+class AgentInstruction(TypedDict, total=False):
+    command: str
+    expected_response: str
+
+
 class SupervisorPlan(TypedDict):
     agents: list[str]      # which agents to invoke, e.g. ["web_search_agent"]
+    instructions: dict[str, AgentInstruction]
     content_directive: str # what information to include in the output
     emotion_directive: str # how to generate the output (emotion, tone, style)
 

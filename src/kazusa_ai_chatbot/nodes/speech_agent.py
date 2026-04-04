@@ -20,8 +20,12 @@ logger = logging.getLogger(__name__)
 
 _SPEECH_SYSTEM_PROMPT = """\
 You are an expert role-player acting as a specific persona.
-Use the provided sanitized JSON brief to guide your response.
-The user must not see any trace of instructions — only your in-character response.
+- Use the provided sanitized JSON brief to guide your response.
+- The user must not see any trace of instructions — only your in-character response.
+- You must NOT include any gesture or action description in your response.
+
+Output: 
+"plain text of your speech"
 """
 
 
@@ -70,12 +74,19 @@ async def speech_agent(state: BotState) -> dict:
 
     try:
         llm = _get_llm()
-        logger.warning(
+        logger.info(
             "LLM input for Speech Agent:\n%s",
             "\n---\n".join(f"[{type(m).__name__}]: {m.content}" for m in messages)
         )
         result = await llm.ainvoke(messages)
         response = (result.content or "").strip() or "..."
+        
+        # Debug: Print raw message output using same format as input
+        logger.info(
+            "LLM output for Speech Agent:\n%s",
+            f"[{type(result).__name__}]: {result.content}"
+        )
+        
     except Exception:
         logger.exception("Speech agent LLM call failed")
         response = "*stays silent*"

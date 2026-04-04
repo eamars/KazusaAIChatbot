@@ -30,7 +30,13 @@ class BaseAgent(abc.ABC):
         """One-line description shown to the supervisor LLM for planning."""
 
     @abc.abstractmethod
-    async def run(self, state: BotState, user_query: str) -> AgentResult:
+    async def run(
+        self,
+        state: BotState,
+        user_query: str,
+        command: str = "",
+        expected_response: str = "",
+    ) -> AgentResult:
         """Execute the agent and return a structured result.
 
         Parameters
@@ -39,6 +45,11 @@ class BaseAgent(abc.ABC):
             The full bot state (agents may read but should not mutate it).
         user_query:
             The user's message text (convenience — also available in state).
+        command:
+            A supervisor-authored abstract task for the agent to carry out.
+        expected_response:
+            A supervisor-authored description of the shape and level of detail the
+            agent should return.
 
         Returns
         -------

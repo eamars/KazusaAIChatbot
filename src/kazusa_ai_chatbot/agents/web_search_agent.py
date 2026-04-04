@@ -21,6 +21,8 @@ from kazusa_ai_chatbot.state import AgentResult, BotState, ToolCall
 
 logger = logging.getLogger(__name__)
 
+_llm: ChatOpenAI | None = None
+
 _TOOL_CALL_RE = re.compile(
     r"<tool_call>\s*(\{.*?\})\s*</tool_call>",
     re.DOTALL,
@@ -81,6 +83,18 @@ def _strip_tool_call(text: str) -> str:
     return _TOOL_CALL_RE.sub("", text).strip()
 
 
+def _get_llm() -> ChatOpenAI:
+    global _llm
+    if _llm is None:
+        _llm = ChatOpenAI(
+            model=LLM_MODEL,
+            temperature=0.3,
+            base_url=LLM_BASE_URL,
+            api_key=LLM_API_KEY,
+        )
+    return _llm
+
+
 class WebSearchAgent(BaseAgent):
     """Agent that searches the web and summarises results."""
 
@@ -96,9 +110,16 @@ class WebSearchAgent(BaseAgent):
             "that requires up-to-date information not in the bot's knowledge base."
         )
 
-    async def run(self, state: BotState, user_query: str) -> AgentResult:
+    async def run(
+        self,
+        state: BotState,
+        user_query: str,
+        command: str = "",
+        expected_response: str = "",
+    ) -> AgentResult:
         """Execute the search tool loop and return a summarised result."""
         tool_history: list[ToolCall] = []
+        task = command.strip() or user_query
 
         tool_block = _build_tool_block()
         if not tool_block:
@@ -116,35 +137,30 @@ class WebSearchAgent(BaseAgent):
             f"{tool_block}"
         )
 
-        messages = [
-            SystemMessage(content=system_prompt),
-            HumanMessage(content=f"Search query: {user_query}"),
-        ]
+        if expected_response.strip():
+            system_prompt += f"\n\nExpected response: {expected_response.strip()}"
 
-        # Fold system into first human for Qwen compatibility
-        messages = _fold_system(messages)
+        llm_input_msgs = [
+            SystemMessage(content=system_prompt),
+            HumanMessage(content=f"Search query: {task}"),
+        ]
 
         logger.info(
             "Calling LLM for web search agent. Query: %s, Max iterations: %d",
-            user_query[:100] + "..." if len(user_query) > 100 else user_query,
+            task[:100] + "..." if len(task) > 100 else task,
             MAX_TOOL_ITERATIONS
         )
 
         try:
-            llm = ChatOpenAI(
-                model=LLM_MODEL,
-                temperature=0.3,
-                base_url=LLM_BASE_URL,
-                api_key=LLM_API_KEY,
-            )
+            llm = _get_llm()
 
             for iteration in range(MAX_TOOL_ITERATIONS + 1):
-                logger.warning(
+                logger.debug(
                     "LLM input for Web Search Agent (iteration %d):\n%s",
                     iteration,
-                    "\n---\n".join(f"[{type(m).__name__}]: {m.content}" for m in messages)
+                    "\n---\n".join(f"[{type(m).__name__}]: {m.content}" for m in llm_input_msgs)
                 )
-                result = await llm.ainvoke(messages)
+                result = await llm.ainvoke(llm_input_msgs)
                 raw_text = result.content or ""
 
                 tool_req = _parse_tool_call(raw_text)
@@ -167,8 +183,8 @@ class WebSearchAgent(BaseAgent):
                     result=tool_result,
                 ))
 
-                messages.append(AIMessage(content=raw_text))
-                messages.append(HumanMessage(
+                llm_input_msgs.append(AIMessage(content=raw_text))
+                llm_input_msgs.append(HumanMessage(
                     content=f"[Tool result for {tool_name}]:\n{tool_result}\n\n"
                     "Now provide a concise factual summary of the results.",
                 ))
@@ -190,22 +206,3 @@ class WebSearchAgent(BaseAgent):
                 summary=f"Web search failed: {exc}",
                 tool_history=tool_history,
             )
-
-
-def _fold_system(messages: list) -> list:
-    """Fold SystemMessage into the first HumanMessage for Qwen compatibility."""
-    system_parts = []
-    other = []
-    for msg in messages:
-        if isinstance(msg, SystemMessage):
-            system_parts.append(msg.content)
-        else:
-            other.append(msg)
-
-    if not system_parts or not other:
-        return other or messages
-
-    system_text = "\n\n".join(system_parts)
-    first = other[0]
-    other[0] = HumanMessage(content=f"{system_text}\n\n---\n\n{first.content}")
-    return other

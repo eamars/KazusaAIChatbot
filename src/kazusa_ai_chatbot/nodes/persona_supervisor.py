@@ -21,7 +21,7 @@ from langchain_openai import ChatOpenAI
 
 from kazusa_ai_chatbot.agents.base import AGENT_REGISTRY, get_agent, list_agent_descriptions
 from kazusa_ai_chatbot.config import LLM_API_KEY, LLM_BASE_URL, LLM_MODEL
-from kazusa_ai_chatbot.state import AgentResult, BotState, SupervisorPlan
+from kazusa_ai_chatbot.state import AgentInstruction, AgentResult, BotState, SupervisorPlan
 from kazusa_ai_chatbot.utils import format_history_lines
 
 logger = logging.getLogger(__name__)
@@ -42,12 +42,16 @@ Available agents:
 Rules:
 - Only request agents if user needs external information
 - Most messages need NO agents (empty list)
+- If you request an agent, provide an instructions entry for that specific agent
+- instructions[agent].command: a short task for the agent
+- instructions[agent].expected_response: how the agent should shape its response
 - content_directive: What facts/topics speech agent must include
 - emotion_directive: Tone, mood, style for speech agent
 
 Output format (ONLY this, nothing else):
 {{
     "agents": [],
+    "instructions": {{}},
     "content_directive": "string",
     "emotion_directive": "string"
 }}
@@ -231,8 +235,12 @@ def _parse_plan(raw: str) -> SupervisorPlan:
     try:
         data = json.loads(text)
         agents = data.get("agents", [])
+        instructions = data.get("instructions", {})
         content_dir = data.get("content_directive", "Respond to the user's latest message naturally.")
         emotion_dir = data.get("emotion_directive", "Maintain standard in-character tone.")
+
+        if not isinstance(instructions, dict):
+            instructions = {}
 
         # Validate agent names against registry
         valid_agents = [a for a in agents if a in AGENT_REGISTRY]
@@ -240,8 +248,22 @@ def _parse_plan(raw: str) -> SupervisorPlan:
             unknown = set(agents) - set(valid_agents)
             logger.warning("Supervisor requested unknown agents: %s", unknown)
 
+        valid_instructions: dict[str, AgentInstruction] = {}
+        for agent_name in valid_agents:
+            raw_instruction = instructions.get(agent_name, {})
+            if not isinstance(raw_instruction, dict):
+                continue
+            command = str(raw_instruction.get("command", "")).strip()
+            expected_response = str(raw_instruction.get("expected_response", "")).strip()
+            if command or expected_response:
+                valid_instructions[agent_name] = AgentInstruction(
+                    command=command,
+                    expected_response=expected_response,
+                )
+
         return SupervisorPlan(
             agents=valid_agents,
+            instructions=valid_instructions,
             content_directive=content_dir,
             emotion_directive=emotion_dir,
         )
@@ -249,6 +271,7 @@ def _parse_plan(raw: str) -> SupervisorPlan:
         logger.exception("Failed to parse supervisor plan: %s", raw[:200])
         return SupervisorPlan(
             agents=[],
+            instructions={},
             content_directive="Respond directly to the user.",
             emotion_directive="Standard in-character tone.",
         )
@@ -271,6 +294,7 @@ async def persona_supervisor(state: BotState) -> dict:
         logger.info("Assembler indicates no response needed. Short-circuiting.")
         plan = SupervisorPlan(
             agents=[],
+            instructions={},
             content_directive="Do not respond. Stay silent.",
             emotion_directive="N/A",
         )
@@ -344,6 +368,7 @@ async def persona_supervisor(state: BotState) -> dict:
         logger.exception("Supervisor planning LLM call failed")
         plan = SupervisorPlan(
             agents=[],
+            instructions={},
             content_directive="Respond directly to the user.",
             emotion_directive="Standard in-character tone.",
         )
@@ -351,6 +376,9 @@ async def persona_supervisor(state: BotState) -> dict:
     logger.info("Supervisor plan: agents=%s", plan["agents"])
 
     for agent_name in plan["agents"]:
+        instruction = plan.get("instructions", {}).get(agent_name, {})
+        command = instruction.get("command", "") if isinstance(instruction, dict) else ""
+        expected_response = instruction.get("expected_response", "") if isinstance(instruction, dict) else ""
         agent = get_agent(agent_name)
         if agent is None:
             logger.error("Agent '%s' not found in registry", agent_name)
@@ -364,7 +392,7 @@ async def persona_supervisor(state: BotState) -> dict:
 
         logger.info("Running agent: %s", agent_name)
         try:
-            result = await agent.run(state, message_text)
+            result = await agent.run(state, message_text, command, expected_response)
             agent_results.append(result)
         except Exception as exc:
             logger.exception("Agent '%s' crashed", agent_name)

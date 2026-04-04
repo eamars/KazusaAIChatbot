@@ -113,7 +113,7 @@ class RolePlayBot(discord.Client):
                 await message.reply("*something went wrong*")
                 return
 
-        response = _strip_actions(result.get("response", ""))
+        response = (result.get("response", "") or "").strip()
         if not response:
             return
 
@@ -176,23 +176,6 @@ class RolePlayBot(discord.Client):
         await mcp_manager.stop()
         await close_db()
         await super().close()
-
-
-_ACTION_PATTERNS = [
-    re.compile(r"<action>.*?</action>", re.DOTALL),   # <action>...</action>
-    re.compile(r"\uff08[^\uff09]*\uff09"),              # （...）
-    re.compile(r"\([^)]*\)"),                           # (...)
-    re.compile(r"\*[^*]+\*"),                           # *...*
-]
-
-
-def _strip_actions(text: str) -> str:
-    """Remove action/narration blocks from the bot response."""
-    for pattern in _ACTION_PATTERNS:
-        text = pattern.sub("", text)
-    # Collapse leftover blank lines and whitespace
-    text = re.sub(r"\n{3,}", "\n\n", text)
-    return text.strip()
 
 
 def _split_message(text: str, limit: int = 2000) -> list[str]:

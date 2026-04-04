@@ -166,6 +166,7 @@ async def test_supervisor_no_agents_needed(mock_assembler_state):
 
     plan = result["supervisor_plan"]
     assert plan["agents"] == []
+    assert plan["instructions"] == {}
     assert plan["content_directive"] == "Say hello back."
     assert len(result["agent_results"]) == 0
     speech_brief = result["speech_brief"]
@@ -183,6 +184,12 @@ async def test_supervisor_dispatches_agent(mock_assembler_state):
     mock_llm = MagicMock()
     mock_llm.ainvoke = AsyncMock(return_value=AIMessage(content=json.dumps({
         "agents": ["web_search_agent"],
+        "instructions": {
+            "web_search_agent": {
+                "command": "Search the web for the current weather.",
+                "expected_response": "Return a short factual summary with the current conditions.",
+            }
+        },
         "content_directive": "Report weather.",
         "emotion_directive": "Neutral."
     })))
@@ -203,11 +210,19 @@ async def test_supervisor_dispatches_agent(mock_assembler_state):
 
     plan = result["supervisor_plan"]
     assert plan["agents"] == ["web_search_agent"]
+    assert plan["instructions"]["web_search_agent"]["command"] == "Search the web for the current weather."
+    assert plan["instructions"]["web_search_agent"]["expected_response"] == "Return a short factual summary with the current conditions."
 
     assert len(result["agent_results"]) == 1
     assert result["agent_results"][0]["agent"] == "web_search_agent"
     assert result["agent_results"][0]["status"] == "success"
     assert "It is sunny." in result["speech_brief"]["response_brief"]["key_points_to_cover"]
+    mock_agent.run.assert_awaited_once_with(
+        mock_assembler_state,
+        "Hello bot",
+        "Search the web for the current weather.",
+        "Return a short factual summary with the current conditions.",
+    )
 
 
 @pytest.mark.asyncio
@@ -216,6 +231,12 @@ async def test_supervisor_handles_agent_crash(mock_assembler_state):
     mock_llm = MagicMock()
     mock_llm.ainvoke = AsyncMock(return_value=AIMessage(content=json.dumps({
         "agents": ["web_search_agent"],
+        "instructions": {
+            "web_search_agent": {
+                "command": "Find the relevant weather lookup.",
+                "expected_response": "Return the key weather facts only.",
+            }
+        },
         "content_directive": "Report weather.",
         "emotion_directive": "Neutral."
     })))
@@ -260,6 +281,16 @@ async def test_supervisor_unknown_agent_in_plan(mock_assembler_state):
     mock_llm = MagicMock()
     mock_llm.ainvoke = AsyncMock(return_value=AIMessage(content=json.dumps({
         "agents": ["web_search_agent", "hallucinated_agent"],
+        "instructions": {
+            "web_search_agent": {
+                "command": "Search the weather.",
+                "expected_response": "Return a concise weather brief.",
+            },
+            "hallucinated_agent": {
+                "command": "Do something impossible.",
+                "expected_response": "Return whatever.",
+            },
+        },
         "content_directive": "Report weather.",
         "emotion_directive": "Neutral."
     })))
@@ -269,6 +300,74 @@ async def test_supervisor_unknown_agent_in_plan(mock_assembler_state):
 
     plan = result["supervisor_plan"]
     assert "hallucinated_agent" not in plan["agents"]
+    assert "hallucinated_agent" not in plan["instructions"]
+
+
+def test_parse_plan_preserves_instructions():
+    raw = json.dumps({
+        "agents": ["db_lookup_agent"],
+        "instructions": {
+            "db_lookup_agent": {
+                "command": "Look up any remembered nickname for this user.",
+                "expected_response": "Return only a concise remembered nickname summary.",
+            }
+        },
+        "content_directive": "Use the remembered nickname if available.",
+        "emotion_directive": "Warm.",
+    })
+
+    with patch("kazusa_ai_chatbot.nodes.persona_supervisor.AGENT_REGISTRY", {"db_lookup_agent": True}):
+        plan = _parse_plan(raw)
+
+    assert plan["agents"] == ["db_lookup_agent"]
+    assert plan["instructions"] == {
+        "db_lookup_agent": {
+            "command": "Look up any remembered nickname for this user.",
+            "expected_response": "Return only a concise remembered nickname summary.",
+        }
+    }
+
+
+@pytest.mark.asyncio
+async def test_supervisor_dispatches_db_lookup_agent(mock_assembler_state):
+    mock_llm = MagicMock()
+    mock_llm.ainvoke = AsyncMock(return_value=AIMessage(content=json.dumps({
+        "agents": ["db_lookup_agent"],
+        "instructions": {
+            "db_lookup_agent": {
+                "command": "Look up recent conversation context about patrol routes and any remembered user preferences.",
+                "expected_response": "Return a short memory-oriented brief without raw transcripts.",
+            }
+        },
+        "content_directive": "Answer using relevant remembered details if any are found.",
+        "emotion_directive": "Thoughtful.",
+    })))
+
+    mock_agent = AsyncMock()
+    mock_agent.run = AsyncMock(return_value=AgentResult(
+        agent="db_lookup_agent", status="success", summary="The user prefers to be called Commander.", tool_history=[]
+    ))
+
+    def _get_agent(name):
+        return mock_agent if name == "db_lookup_agent" else None
+
+    with patch("kazusa_ai_chatbot.nodes.persona_supervisor._get_llm", return_value=mock_llm), \
+         patch("kazusa_ai_chatbot.nodes.persona_supervisor.get_agent", side_effect=_get_agent), \
+         patch("kazusa_ai_chatbot.nodes.persona_supervisor.AGENT_REGISTRY", {"db_lookup_agent": True}):
+
+        result = await persona_supervisor(mock_assembler_state)
+
+    plan = result["supervisor_plan"]
+    assert plan["agents"] == ["db_lookup_agent"]
+    assert "db_lookup_agent" in plan["instructions"]
+    assert result["agent_results"][0]["agent"] == "db_lookup_agent"
+    assert "Commander" in result["speech_brief"]["response_brief"]["key_points_to_cover"][-1]
+    mock_agent.run.assert_awaited_once_with(
+        mock_assembler_state,
+        "Hello bot",
+        "Look up recent conversation context about patrol routes and any remembered user preferences.",
+        "Return a short memory-oriented brief without raw transcripts.",
+    )
 
 
 @pytest.mark.asyncio
@@ -338,6 +437,7 @@ async def test_live_supervisor_calls_web_search_for_search_query():
     )
     assert isinstance(plan["content_directive"], str)
     assert len(plan["content_directive"]) > 0
+    assert isinstance(plan["instructions"], dict)
 
     agent_names = [r["agent"] for r in result["agent_results"]]
     assert "web_search_agent" in agent_names
@@ -346,13 +446,24 @@ async def test_live_supervisor_calls_web_search_for_search_query():
 
 @live_llm
 @pytest.mark.asyncio
-async def test_live_supervisor_no_agents_for_unsupported_task():
-    """Real LLM should return empty agent list when no agent can handle the task."""
+async def test_live_supervisor_calls_db_lookup_for_database_task():
+    """Real LLM should plan db_lookup_agent for a memory/database lookup request."""
     from kazusa_ai_chatbot.agents.base import AGENT_REGISTRY, register_agent
+    from kazusa_ai_chatbot.agents.db_lookup_agent import DBLookupAgent
     from kazusa_ai_chatbot.agents.web_search_agent import WebSearchAgent
 
     if "web_search_agent" not in AGENT_REGISTRY:
         register_agent(WebSearchAgent())
+    if "db_lookup_agent" not in AGENT_REGISTRY:
+        register_agent(DBLookupAgent())
+
+    mock_db = AsyncMock()
+    mock_db.run = AsyncMock(return_value=AgentResult(
+        agent="db_lookup_agent",
+        status="success",
+        summary="Database lookup placeholder.",
+        tool_history=[],
+    ))
 
     state = {
         "message_text": "Query the discord_bot database and check the kazusa_profile collection",
@@ -366,15 +477,19 @@ async def test_live_supervisor_no_agents_for_unsupported_task():
     import kazusa_ai_chatbot.nodes.persona_supervisor as sup
     sup._llm = None
 
-    result = await persona_supervisor(state)
+    def _get_agent(name):
+        return mock_db
+
+    with patch("kazusa_ai_chatbot.nodes.persona_supervisor.get_agent", side_effect=_get_agent):
+        result = await persona_supervisor(state)
 
     plan = result["supervisor_plan"]
-    assert plan["agents"] == [], (
-        f"Expected no agents for an unsupported task, got: {plan['agents']}"
+    assert "db_lookup_agent" in plan["agents"], (
+        f"Expected db_lookup_agent in plan, got: {plan['agents']}"
     )
     assert isinstance(plan["content_directive"], str)
     assert len(plan["content_directive"]) > 0
-    assert len(result["agent_results"]) == 0
+    assert len(result["agent_results"]) == 1
 
 
 @live_llm

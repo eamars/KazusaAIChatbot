@@ -8,7 +8,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
-from kazusa_ai_chatbot.agents.speech_agent import speech_agent
+from kazusa_ai_chatbot.nodes.speech_agent import speech_agent
 
 
 # ── speech_agent node tests ─────────────────────────────────────────
@@ -44,7 +44,7 @@ async def test_speech_agent_basic_response(sample_speech_state):
     mock_llm = MagicMock()
     mock_llm.ainvoke = AsyncMock(return_value=AIMessage(content="Hey there, Commander."))
 
-    with patch("kazusa_ai_chatbot.agents.speech_agent._get_llm", return_value=mock_llm):
+    with patch("kazusa_ai_chatbot.nodes.speech_agent._get_llm", return_value=mock_llm):
         result = await speech_agent(sample_speech_state)
 
     assert result["response"] == "Hey there, Commander."
@@ -70,7 +70,7 @@ async def test_speech_agent_receives_no_raw_message_or_internal_state(sample_spe
     mock_llm = MagicMock()
     mock_llm.ainvoke = AsyncMock(return_value=AIMessage(content="Hello there."))
 
-    with patch("kazusa_ai_chatbot.agents.speech_agent._get_llm", return_value=mock_llm):
+    with patch("kazusa_ai_chatbot.nodes.speech_agent._get_llm", return_value=mock_llm):
         await speech_agent(sample_speech_state)
 
     args, _ = mock_llm.ainvoke.call_args
@@ -93,7 +93,7 @@ async def test_speech_agent_includes_unknowns_and_limits(sample_speech_state):
     mock_llm = MagicMock()
     mock_llm.ainvoke = AsyncMock(return_value=AIMessage(content="I may be missing a detail, but here is what I can say."))
 
-    with patch("kazusa_ai_chatbot.agents.speech_agent._get_llm", return_value=mock_llm):
+    with patch("kazusa_ai_chatbot.nodes.speech_agent._get_llm", return_value=mock_llm):
         result = await speech_agent(sample_speech_state)
 
     assert len(result["response"]) > 0
@@ -120,7 +120,7 @@ async def test_speech_agent_short_circuits_silence():
 
     # Should not even try to call the LLM
     mock_llm = MagicMock()
-    with patch("kazusa_ai_chatbot.agents.speech_agent._get_llm", return_value=mock_llm):
+    with patch("kazusa_ai_chatbot.nodes.speech_agent._get_llm", return_value=mock_llm):
         result = await speech_agent(state)
 
     assert result["response"] == ""
@@ -133,7 +133,7 @@ async def test_speech_agent_llm_failure(sample_speech_state):
     mock_llm = MagicMock()
     mock_llm.ainvoke = AsyncMock(side_effect=Exception("API limit"))
 
-    with patch("kazusa_ai_chatbot.agents.speech_agent._get_llm", return_value=mock_llm):
+    with patch("kazusa_ai_chatbot.nodes.speech_agent._get_llm", return_value=mock_llm):
         result = await speech_agent(sample_speech_state)
 
     assert result["response"] == "*stays silent*"
@@ -174,7 +174,7 @@ async def test_speech_agent_without_supervisor_plan():
     mock_llm = MagicMock()
     mock_llm.ainvoke = AsyncMock(return_value=AIMessage(content="Greetings."))
 
-    with patch("kazusa_ai_chatbot.agents.speech_agent._get_llm", return_value=mock_llm):
+    with patch("kazusa_ai_chatbot.nodes.speech_agent._get_llm", return_value=mock_llm):
         result = await speech_agent(state)
 
     assert result["response"] == "Greetings."
@@ -196,7 +196,7 @@ async def test_live_directive_not_leaked_in_response():
     (e.g. multi-line response plans) were parroted verbatim before the
     actual in-character reply.
     """
-    import kazusa_ai_chatbot.agents.speech_agent as sa
+    import kazusa_ai_chatbot.nodes.speech_agent as sa
 
     # Reset cached LLM so a real one is created
     sa._llm = None

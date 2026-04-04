@@ -15,7 +15,8 @@ import logging
 from langgraph.graph import END, START, StateGraph
 
 from kazusa_ai_chatbot.agents.base import AGENT_REGISTRY, register_agent
-from kazusa_ai_chatbot.agents.speech_agent import speech_agent
+from kazusa_ai_chatbot.agents.db_lookup_agent import DBLookupAgent
+from kazusa_ai_chatbot.nodes.speech_agent import speech_agent
 from kazusa_ai_chatbot.agents.web_search_agent import WebSearchAgent
 from kazusa_ai_chatbot.nodes.intake import intake
 from kazusa_ai_chatbot.nodes.persona_supervisor import persona_supervisor
@@ -29,6 +30,9 @@ logger = logging.getLogger(__name__)
 
 if "web_search_agent" not in AGENT_REGISTRY:
     register_agent(WebSearchAgent())
+
+if "db_lookup_agent" not in AGENT_REGISTRY:
+    register_agent(DBLookupAgent())
 
 
 def _should_respond_after_intake(state: BotState) -> list[str]:
