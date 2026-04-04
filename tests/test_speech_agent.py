@@ -8,35 +8,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
-from kazusa_ai_chatbot.agents.speech_agent import _build_agent_context, speech_agent
-from kazusa_ai_chatbot.state import AgentResult, SupervisorPlan
-
-
-# ── _build_agent_context unit tests ─────────────────────────────────
-
-
-class TestBuildAgentContext:
-    def test_empty_results_and_directive(self):
-        assert _build_agent_context([], "", "") == {}
-
-    def test_directive_only(self):
-        ctx = _build_agent_context([], "Respond casually.", "Happy")
-        assert ctx["supervisor_directives"]["content"] == "Respond casually."
-        assert ctx["supervisor_directives"]["emotion_tone"] == "Happy"
-
-    def test_agent_results_success_and_error(self):
-        results = [
-            AgentResult(agent="a", status="success", summary="Result A", tool_history=[]),
-            AgentResult(agent="b", status="error", summary="Error B", tool_history=[]),
-        ]
-        ctx = _build_agent_context(results, "Combine both.", "")
-
-        assert ctx["supervisor_directives"]["content"] == "Combine both."
-        assert len(ctx["agent_results"]) == 2
-        assert ctx["agent_results"][0]["agent"] == "a"
-        assert ctx["agent_results"][0]["status"] == "success"
-        assert ctx["agent_results"][1]["agent"] == "b"
-        assert ctx["agent_results"][1]["status"] == "FAILED"
+from kazusa_ai_chatbot.agents.speech_agent import speech_agent
 
 
 # ── speech_agent node tests ─────────────────────────────────────────
@@ -44,27 +16,31 @@ class TestBuildAgentContext:
 @pytest.fixture
 def sample_speech_state():
     return {
-        "supervisor_plan": {
-            "agents": [],
-            "content_directive": "Acknowledge the user.",
-            "emotion_directive": "Warm and friendly."
-        },
-        "agent_results": [],
-        "speech_human_data": {
-            "current_message": {
-                "speaker": "Commander",
-                "message": "Hello"
+        "speech_brief": {
+            "personality": {"name": "Zara", "tone": "warm"},
+            "user_input_brief": {
+                "channel_topic": "Greeting",
+                "user_topic": "Hello",
+                "intent_summary": "The user is greeting Zara.",
             },
-            "context": {
-                "personality": {"name": "Zara"},
-            }
+            "response_brief": {
+                "should_respond": True,
+                "response_goal": "Acknowledge the user.",
+                "tone_guidance": "Warm and friendly.",
+                "relationship_guidance": "Be a little open and welcoming.",
+                "state_guidance": "Maintain a light and cheerful demeanor.",
+                "continuity_summary": "No additional recent continuity context is required.",
+                "key_points_to_cover": ["Greet the user back."],
+                "personalization_guidance": ["Use the remembered preferred title if it fits naturally."],
+                "unknowns_or_limits": [],
+            },
         }
     }
 
 
 @pytest.mark.asyncio
 async def test_speech_agent_basic_response(sample_speech_state):
-    """Speech agent should append agent context to the system prompt and return response."""
+    """Speech agent should pass the sanitized speech brief to the LLM and return the reply."""
     mock_llm = MagicMock()
     mock_llm.ainvoke = AsyncMock(return_value=AIMessage(content="Hey there, Commander."))
 
@@ -82,70 +58,63 @@ async def test_speech_agent_basic_response(sample_speech_state):
     assert isinstance(messages[1], HumanMessage)
 
     human_json = json.loads(messages[1].content)
-    assert "Acknowledge the user." in human_json["context"]["supervisor_directives"]["content"]
+    assert human_json["personality"]["name"] == "Zara"
+    assert human_json["response_brief"]["response_goal"] == "Acknowledge the user."
+    assert human_json["response_brief"]["key_points_to_cover"] == ["Greet the user back."]
 
 
 @pytest.mark.asyncio
-async def test_speech_agent_incorporates_agent_results(sample_speech_state):
-    """Speech agent should include agent results in the human context."""
-    sample_speech_state["supervisor_plan"]["content_directive"] = "Tell them the weather."
-    sample_speech_state["agent_results"] = [
-        AgentResult(
-            agent="web_search_agent",
-            status="success",
-            summary="It is 18 degrees in Tokyo.",
-            tool_history=[]
-        )
-    ]
+async def test_speech_agent_receives_no_raw_message_or_internal_state(sample_speech_state):
+    """The speech brief should stay sanitized and exclude raw message/internal state fields."""
 
     mock_llm = MagicMock()
-    mock_llm.ainvoke = AsyncMock(return_value=AIMessage(content="Hmm, 18 degrees in Tokyo. Not bad."))
+    mock_llm.ainvoke = AsyncMock(return_value=AIMessage(content="Hello there."))
 
     with patch("kazusa_ai_chatbot.agents.speech_agent._get_llm", return_value=mock_llm):
-        result = await speech_agent(sample_speech_state)
-
-    assert result["response"] == "Hmm, 18 degrees in Tokyo. Not bad."
+        await speech_agent(sample_speech_state)
 
     args, _ = mock_llm.ainvoke.call_args
     messages = args[0]
     human_json = json.loads(messages[1].content)
 
-    assert human_json["context"]["agent_results"][0]["summary"] == "It is 18 degrees in Tokyo."
+    assert "current_message" not in human_json
+    assert "conversation_history" not in human_json
+    assert "character_state" not in human_json
+    assert "affinity" not in human_json
 
 
 @pytest.mark.asyncio
-async def test_speech_agent_handles_error_result(sample_speech_state):
-    """Speech agent should handle FAILED agent states properly."""
-    sample_speech_state["agent_results"] = [
-        AgentResult(
-            agent="db_agent",
-            status="error",
-            summary="Database timeout.",
-            tool_history=[]
-        )
+async def test_speech_agent_includes_unknowns_and_limits(sample_speech_state):
+    """Speech agent should preserve supervisor-provided limits in the sanitized brief."""
+    sample_speech_state["speech_brief"]["response_brief"]["unknowns_or_limits"] = [
+        "Do not claim certainty about the weather forecast.",
     ]
 
     mock_llm = MagicMock()
-    mock_llm.ainvoke = AsyncMock(return_value=AIMessage(content="I am sorry, my memory failed me."))
+    mock_llm.ainvoke = AsyncMock(return_value=AIMessage(content="I may be missing a detail, but here is what I can say."))
 
     with patch("kazusa_ai_chatbot.agents.speech_agent._get_llm", return_value=mock_llm):
         result = await speech_agent(sample_speech_state)
 
-    assert "sorry" in result["response"].lower()
+    assert len(result["response"]) > 0
 
     args, _ = mock_llm.ainvoke.call_args
     messages = args[0]
     human_json = json.loads(messages[1].content)
 
-    assert human_json["context"]["agent_results"][0]["status"] == "FAILED"
+    assert human_json["response_brief"]["unknowns_or_limits"] == [
+        "Do not claim certainty about the weather forecast.",
+    ]
 
 
 @pytest.mark.asyncio
 async def test_speech_agent_short_circuits_silence():
-    """If the supervisor says 'Do not respond. Stay silent.', return empty string."""
+    """If the supervisor marks should_respond false, return empty string."""
     state = {
-        "supervisor_plan": {
-            "content_directive": "Do not respond. Stay silent."
+        "speech_brief": {
+            "response_brief": {
+                "should_respond": False,
+            }
         }
     }
 
@@ -172,10 +141,9 @@ async def test_speech_agent_llm_failure(sample_speech_state):
 
 @pytest.mark.asyncio
 async def test_speech_agent_empty_messages():
-    """If speech_human_data is missing, it should just return ..."""
+    """If speech_brief is missing, it should just return ..."""
     state = {
-        "speech_human_data": {},
-        "supervisor_plan": {}
+        "speech_brief": {},
     }
 
     result = await speech_agent(state)
@@ -183,11 +151,23 @@ async def test_speech_agent_empty_messages():
 
 
 @pytest.mark.asyncio
-async def test_speech_agent_no_supervisor_plan():
-    """Works fine if supervisor plan is missing but human_data exists."""
+async def test_speech_agent_without_supervisor_plan():
+    """Speech agent only needs speech_brief and should not depend on supervisor_plan."""
     state = {
-        "speech_human_data": {
-            "current_message": {"speaker": "u", "message": "hi"}
+        "speech_brief": {
+            "personality": {"name": "Zara"},
+            "user_input_brief": {"intent_summary": "The user is greeting Zara."},
+            "response_brief": {
+                "should_respond": True,
+                "response_goal": "Reply to the greeting.",
+                "tone_guidance": "Warm.",
+                "relationship_guidance": "Friendly.",
+                "state_guidance": "Calm.",
+                "continuity_summary": "No additional recent continuity context is required.",
+                "key_points_to_cover": ["Reply to the greeting."],
+                "personalization_guidance": [],
+                "unknowns_or_limits": [],
+            }
         }
     }
 
@@ -228,26 +208,34 @@ async def test_live_directive_not_leaked_in_response():
     )
 
     state = {
-        "llm_messages": [
-            SystemMessage(content=(
-                "You are Kazusa, a gentle and caring character.\n"
-                "Reply in the same language the user is writing in.\n"
-                "Reply with SPEECH ONLY - no action tags or stage directions.\n"
-                "Keep responses under 150 words.\n"
-                "NEVER generate markdown headers like '# Response' or '# Response Generation Analysis'."
-            )),
-            HumanMessage(content="你希望我叫你什么呢？", name="EAMARS"),
-            AIMessage(content="你可以直接叫'千纱'或者'kazuza'——这两个都可以的哦！", name="Kazusa"),
-            HumanMessage(content="小千纱可以叫我小企鹅哦", name="EAMARS"),
-            AIMessage(content="小企鹅……？！好可爱啊。嗯，那我以后就叫你'小企鹅'啦～", name="Kazusa"),
-            HumanMessage(content="那你觉得我的外表应该是怎么样的呢？", name="EAMARS"),
-        ],
-        "supervisor_plan": SupervisorPlan(
-            agents=[],
-            content_directive=content_directive,
-            emotion_directive="Warm and playful",
-        ),
-        "agent_results": [],
+        "speech_brief": {
+            "personality": {
+                "name": "Kazusa",
+                "description": "A gentle and caring character.",
+                "tone": "warm and playful",
+            },
+            "user_input_brief": {
+                "channel_topic": "Appearance",
+                "user_topic": "How Kazusa imagines the user's appearance",
+                "intent_summary": "The user wants an affectionate, imaginative answer about how Kazusa pictures their appearance.",
+            },
+            "response_brief": {
+                "should_respond": True,
+                "response_goal": content_directive,
+                "tone_guidance": "Warm and playful",
+                "relationship_guidance": "Be openly fond and affectionate.",
+                "state_guidance": "Maintain a delighted and gentle demeanor.",
+                "continuity_summary": "Kazusa and the user have already established cute nicknames and a warm rapport.",
+                "key_points_to_cover": [
+                    "Answer how Kazusa imagines the user's appearance.",
+                    "Keep the answer affectionate and playful.",
+                ],
+                "personalization_guidance": [
+                    "Reflect the warmth created by the nickname exchange if it fits naturally.",
+                ],
+                "unknowns_or_limits": [],
+            },
+        },
     }
 
     result = await speech_agent(state)

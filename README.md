@@ -28,7 +28,7 @@ The bot uses a **lean hybrid pipeline**: most stages are pure code (no LLM), wit
                     │  │ Agent Dispatch │  │  ★ LLM CALL × N (tool agents)
                     │  └────────────────┘  │
                     └──────────┬───────────┘
-                           │ supervisor_plan + agent_results + speech_human_data
+                           │ supervisor_plan + agent_results + speech_brief
                     ┌──────▼──────┐
                     │3b. Speech   │  ★ LLM CALL (in-character reply)
                     └──────┬──────┘
@@ -80,10 +80,10 @@ If the message is relevant:
    - `content_directive`: instruction for what factual info or topics to include in the reply
    - `emotion_directive`: instruction for what tone, mood, and style the speech agent should use
 3. Execute each requested agent sequentially in isolated contexts.
-4. Prepare `speech_human_data` (JSON payload) for the Speech Agent.
-5. Write `supervisor_plan`, `agent_results`, and `speech_human_data` to state.
+4. Synthesize a sanitized `speech_brief` for the Speech Agent.
+5. Write `supervisor_plan`, `agent_results`, and `speech_brief` to state.
 
-Each agent runs in its own LLM context with only the information it needs. If an agent crashes or hits a context limit, the supervisor catches the error and records it as `AgentResult(status="error")` — the speech agent can then apologize gracefully.
+Each agent runs in its own LLM context with only the information it needs. If an agent crashes or hits a context limit, the supervisor catches the error and records it as `AgentResult(status="error")`. The supervisor then converts internal context, memory, and tool output into a speech-safe brief rather than passing raw data to the speech agent.
 
 #### Available Agents
 
@@ -103,14 +103,15 @@ Configured via the `MCP_SERVERS` environment variable (JSON string):
 ```
 
 ### Stage 3b — Speech Agent (LLM call)
-Always runs last. Generates the final **in-character reply** from a native JSON HumanMessage payload combining:
-- Full personality context + conversation history
-- Agent result summaries (not raw tool output)
-- The supervisor's `content_directive` and `emotion_directive`
+Always runs last. Generates the final **in-character reply** from a native JSON HumanMessage `speech_brief` containing only:
+- Approved `personality` context
+- Supervisor-authored interpretation of user intent
+- Response guidance, continuity summary, and key points to cover
+- Allowed personalization hints and limits on what not to claim
 
-If the supervisor's directive is "Do not respond. Stay silent." (set by the relevance agent rejection), the speech agent **returns an empty response** without making an LLM call.
+The speech agent never receives raw conversation history, raw user memory, raw character state, raw affinity scores, or raw tool output. If the supervisor marks `should_respond: false` in the brief, the speech agent **returns an empty response** without making an LLM call.
 
-The speech agent's LLM context is free of tool descriptions, keeping the token budget focused on personality and conversation quality. The speech directive guides how results are presented — e.g. a non-tech-savvy character will summarize search results in simpler terms.
+The speech agent's LLM context is free of tool descriptions and internal state, keeping the token budget focused on personality and final expression quality. The supervisor is responsible for translating internal state into guidance such as relationship tone, continuity summary, and key points to cover.
 
 ### Stage 4 — Memory Writer (deferred LLM call)
 Runs **after** the reply is sent to Discord (fire-and-forget `asyncio.create_task`). Extracts from each exchange using a native JSON HumanMessage payload:
@@ -235,6 +236,6 @@ python src/kazusa_ai_chatbot/main.py --personality personalities/example.json --
 - **`_`-prefixed keys ignored** — personality JSON can store reference data (appearance, art notes) under `_reference` without wasting prompt tokens.
 - **Two-layer "should I reply?" system** — Layer 1 (intake) uses rule-based mention filtering (zero cost). Layer 2 (Relevance Agent) uses an LLM call to analyze the conversational context (topics, recent history) and decides if the bot should engage. Both are fail-open: if uncertain or if the LLM fails, the bot defaults to responding.
 - **Supervisor + sub-agent architecture** — the persona supervisor consumes the relevance agent's context analysis and plans which specialist agents to invoke. This provides failure isolation (a crashed agent doesn't kill the reply) and context separation (tool agents don't bloat the speech prompt).
-- **Split directives from supervisor** — the supervisor gives the speech agent a `content_directive` (what facts/topics to include) and an `emotion_directive` (what tone/mood to use). This cleanly separates the *what* from the *how*.
+- **Sanitized speech boundary** — the supervisor sees internal state, memory, and agent output, but the speech agent only receives a distilled `speech_brief` with `personality`, interpreted user intent, response guidance, and approved key points. This reduces accidental leakage of hidden state and tool output.
 - **Prompt-based `<tool_call>` tags** in tool agents — ensures compatibility with Qwen and other local models served via LM Studio that may not support the `tools` parameter.
 - **MCP for tooling** — tools are served by external MCP servers over HTTP, making them language-agnostic and independently deployable. New agents can be added by subclassing `BaseAgent` without changing existing code.

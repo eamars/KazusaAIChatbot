@@ -119,31 +119,19 @@ def test_build_agent_catalog_with_agents():
 
 
 @pytest.fixture
-def sample_speech_state():
-    return {
-        "supervisor_plan": {
-            "agents": [],
-            "content_directive": "Acknowledge the user.",
-            "emotion_directive": "Warm and friendly."
-        },
-        "agent_results": [],
-        "speech_human_data": {
-            "current_message": {
-                "speaker": "Commander",
-                "speaker_id": "user_123",
-                "message": "Hello"
-            },
-            "context": {
-                "personality": {"name": "Zara"},
-            }
-        }
-    }
-
-
-@pytest.fixture
 def mock_assembler_state():
     return {
         "message_text": "Hello bot",
+        "user_name": "Commander",
+        "bot_id": "bot_001",
+        "personality": {"name": "Zara", "description": "A calm strategist."},
+        "user_memory": ["The user prefers to be called Commander"],
+        "character_state": {"mood": "alert", "emotional_tone": "warm", "recent_events": ["Discussed patrol routes"]},
+        "affinity": 650,
+        "conversation_history": [
+            {"role": "user", "user_id": "user_123", "name": "Commander", "content": "How are the patrols going?"},
+            {"role": "assistant", "user_id": "bot_001", "name": "Zara", "content": "They are holding for now."},
+        ],
         "assembler_output": AssemblerOutput(
             channel_topic="General",
             user_topic="Greeting",
@@ -180,6 +168,12 @@ async def test_supervisor_no_agents_needed(mock_assembler_state):
     assert plan["agents"] == []
     assert plan["content_directive"] == "Say hello back."
     assert len(result["agent_results"]) == 0
+    speech_brief = result["speech_brief"]
+    assert speech_brief["personality"]["name"] == "Zara"
+    assert speech_brief["user_input_brief"]["user_topic"] == "Greeting"
+    assert speech_brief["response_brief"]["response_goal"] == "Say hello back."
+    assert speech_brief["response_brief"]["tone_guidance"] == "Warm."
+    assert "current_message" not in speech_brief
     mock_llm.ainvoke.assert_called_once()
 
 
@@ -213,6 +207,7 @@ async def test_supervisor_dispatches_agent(mock_assembler_state):
     assert len(result["agent_results"]) == 1
     assert result["agent_results"][0]["agent"] == "web_search_agent"
     assert result["agent_results"][0]["status"] == "success"
+    assert "It is sunny." in result["speech_brief"]["response_brief"]["key_points_to_cover"]
 
 
 @pytest.mark.asyncio
@@ -256,6 +251,7 @@ async def test_supervisor_handles_planning_llm_failure(mock_assembler_state):
     plan = result["supervisor_plan"]
     assert plan["agents"] == []
     assert "Respond directly" in plan["content_directive"]
+    assert result["speech_brief"]["response_brief"]["response_goal"].startswith("Respond directly")
 
 
 @pytest.mark.asyncio
@@ -286,6 +282,7 @@ async def test_supervisor_short_circuits_if_not_should_respond(mock_assembler_ig
     plan = result["supervisor_plan"]
     assert plan["agents"] == []
     assert plan["content_directive"] == "Do not respond. Stay silent."
+    assert result["speech_brief"]["response_brief"]["should_respond"] is False
     mock_llm.ainvoke.assert_not_called()  # No planning LLM call made
 
 

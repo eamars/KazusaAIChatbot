@@ -42,6 +42,30 @@ class AssemblerOutput(TypedDict):
     should_respond: bool
 
 
+class UserInputBrief(TypedDict, total=False):
+    channel_topic: str
+    user_topic: str
+    intent_summary: str
+
+
+class ResponseBrief(TypedDict, total=False):
+    should_respond: bool
+    response_goal: str
+    tone_guidance: str
+    relationship_guidance: str
+    state_guidance: str
+    continuity_summary: str
+    key_points_to_cover: list[str]
+    personalization_guidance: list[str]
+    unknowns_or_limits: list[str]
+
+
+class SpeechBrief(TypedDict, total=False):
+    personality: dict[str, Any]
+    user_input_brief: UserInputBrief
+    response_brief: ResponseBrief
+
+
 class BotState(TypedDict, total=False):
     # --- Stage 1: intake ---
     user_id: str
@@ -65,7 +89,7 @@ class BotState(TypedDict, total=False):
     # --- Stage 3: persona_supervisor ---
     supervisor_plan: SupervisorPlan
     agent_results: list[AgentResult]
-    speech_human_data: dict
+    speech_brief: SpeechBrief
 
     # --- Stage 4: speech_agent ---
     response: str

@@ -204,7 +204,7 @@ async def relevance_agent(state: BotState) -> BotState:
         
         analysis_messages = [analysis_prompt, current_human_msg]
         
-        logger.warning(
+        logger.debug(
             "LLM input for Relevance Agent analysis:\n%s",
             "\n---\n".join(f"[{type(m).__name__}]: {m.content}" for m in analysis_messages)
         )

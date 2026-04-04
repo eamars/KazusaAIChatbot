@@ -135,7 +135,7 @@ async def memory_writer(state: BotState) -> BotState:
             HumanMessage(content=human_content)
         ]
         
-        logger.warning(
+        logger.debug(
             "LLM input for Memory Writer:\n%s",
             "\n---\n".join(f"[{type(m).__name__}]: {m.content}" for m in llm_input_msgs)
         )

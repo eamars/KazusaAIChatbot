@@ -111,6 +111,82 @@ def _build_affinity_block(affinity: int) -> dict:
 
     return {"level": label, "instruction": instruction}
 
+
+def _build_state_guidance(character_state: dict) -> str:
+    if not character_state:
+        return "Maintain a steady in-character demeanor."
+
+    mood = character_state.get("mood")
+    emotional_tone = character_state.get("emotional_tone")
+    recent_events = character_state.get("recent_events") or []
+
+    parts: list[str] = []
+    if mood and emotional_tone:
+        parts.append(f"You currently feel {mood} with a {emotional_tone} emotional tone.")
+    elif mood:
+        parts.append(f"You currently feel {mood}.")
+    elif emotional_tone:
+        parts.append(f"Keep your emotional tone {emotional_tone}.")
+
+    if recent_events:
+        parts.append("Keep continuity with recent events that are already part of the ongoing interaction.")
+
+    return " ".join(parts) or "Maintain a steady in-character demeanor."
+
+
+def _build_continuity_summary(history: list[dict], persona_name: str) -> str:
+    if not history:
+        return "No additional recent continuity context is required."
+
+    prior_bot_replies = sum(1 for item in history if item.get("role") == "assistant")
+    prior_user_turns = sum(1 for item in history if item.get("role") == "user")
+
+    parts = [
+        f"There is recent channel context from {len(history)} prior messages.",
+    ]
+    if prior_bot_replies:
+        parts.append(f"Keep the reply consistent with {persona_name}'s earlier replies in this conversation.")
+    if prior_user_turns:
+        parts.append("Assume the user is continuing an ongoing exchange rather than starting from scratch.")
+
+    return " ".join(parts)
+
+
+def _build_personalization_guidance(user_memory: list[str]) -> list[str]:
+    if not user_memory:
+        return []
+    return [f"Use this remembered user context only if relevant: {fact}" for fact in user_memory[:3]]
+
+
+def _build_key_points_to_cover(content_directive: str, agent_results: list[AgentResult]) -> list[str]:
+    key_points: list[str] = []
+    if content_directive:
+        key_points.append(content_directive)
+
+    for result in agent_results:
+        if result.get("status") == "success" and result.get("summary"):
+            key_points.append(result["summary"])
+
+    return key_points[:5]
+
+
+def _build_unknowns_or_limits(agent_results: list[AgentResult]) -> list[str]:
+    limits: list[str] = []
+    for result in agent_results:
+        if result.get("status") != "success":
+            limits.append(f"Do not rely on unavailable or failed output from {result.get('agent', 'an internal agent')}.")
+    return limits
+
+
+def _build_intent_summary(channel_topic: str, user_topic: str, content_directive: str) -> str:
+    if user_topic != "Unknown" and channel_topic != "Unknown":
+        return f"The user is engaging about {user_topic} within the broader channel topic of {channel_topic}."
+    if user_topic != "Unknown":
+        return f"The user is engaging about {user_topic}."
+    if content_directive:
+        return content_directive
+    return "Respond to the user's latest conversational turn."
+
 def _build_history_json(
     history: list[dict], persona_name: str = "assistant", bot_id: str = "unknown_bot_id"
 ) -> list[dict]:
@@ -181,7 +257,7 @@ def _parse_plan(raw: str) -> SupervisorPlan:
 async def persona_supervisor(state: BotState) -> dict:
     """Plan which agents to call and execute them.
 
-    Writes ``supervisor_plan``, ``agent_results``, and ``speech_human_data`` to state.
+    Writes ``supervisor_plan``, ``agent_results``, and ``speech_brief`` to state.
     """
     message_text = state.get("message_text", "")
     user_name = state.get("user_name", "user")
@@ -201,11 +277,13 @@ async def persona_supervisor(state: BotState) -> dict:
         return {
             "supervisor_plan": plan,
             "agent_results": [],
-            "speech_human_data": {},
+            "speech_brief": {
+                "response_brief": {
+                    "should_respond": False,
+                }
+            },
         }
 
-    # ── Step 1: Prepare Speech Agent Data Payload ───────────────
-    # The speech agent expects `speech_human_data` to be built and provided in state
     personality = state.get("personality", {})
     user_memory = state.get("user_memory", [])
     character_state = state.get("character_state", {})
@@ -218,30 +296,8 @@ async def persona_supervisor(state: BotState) -> dict:
     if not clean_user_name:
         clean_user_name = "user"
 
-    speech_human_data = {
-        "current_message": {
-            "speaker": clean_user_name,
-            "speaker_id": user_id,
-            "message": message_text
-        },
-        "context": {}
-    }
-
-    p_block = _build_personality_block(personality)
-    if p_block: speech_human_data["context"]["personality"] = p_block
-
-    c_block = _build_character_state_block(character_state)
-    if c_block: speech_human_data["context"]["character_state"] = c_block
-    
-    speech_human_data["context"]["affinity"] = _build_affinity_block(affinity)
-    
-    if user_memory: speech_human_data["context"]["user_memory"] = user_memory
-
     bot_id = state.get("bot_id", "unknown_bot_id")
-    h_block = _build_history_json(history, persona_name, bot_id)
-    if h_block: speech_human_data["context"]["conversation_history"] = h_block
 
-    # ── Step 2: LLM planning call ───────────────────────────────────
     catalog = _build_agent_catalog()
     
     system_content = _PLANNING_SYSTEM.format(
@@ -294,7 +350,6 @@ async def persona_supervisor(state: BotState) -> dict:
 
     logger.info("Supervisor plan: agents=%s", plan["agents"])
 
-    # ── Step 3: Execute agents sequentially ─────────────────────────
     for agent_name in plan["agents"]:
         agent = get_agent(agent_name)
         if agent is None:
@@ -320,8 +375,33 @@ async def persona_supervisor(state: BotState) -> dict:
                 tool_history=[],
             ))
 
+    affinity_block = _build_affinity_block(affinity)
+    speech_brief = {
+        "personality": _build_personality_block(personality),
+        "user_input_brief": {
+            "channel_topic": assembler_output.get("channel_topic", "Unknown"),
+            "user_topic": assembler_output.get("user_topic", "Unknown"),
+            "intent_summary": _build_intent_summary(
+                assembler_output.get("channel_topic", "Unknown"),
+                assembler_output.get("user_topic", "Unknown"),
+                plan.get("content_directive", ""),
+            ),
+        },
+        "response_brief": {
+            "should_respond": True,
+            "response_goal": plan.get("content_directive", "Respond directly to the user."),
+            "tone_guidance": plan.get("emotion_directive", "Standard in-character tone."),
+            "relationship_guidance": affinity_block["instruction"],
+            "state_guidance": _build_state_guidance(character_state),
+            "continuity_summary": _build_continuity_summary(history, persona_name),
+            "key_points_to_cover": _build_key_points_to_cover(plan.get("content_directive", ""), agent_results),
+            "personalization_guidance": _build_personalization_guidance(user_memory),
+            "unknowns_or_limits": _build_unknowns_or_limits(agent_results),
+        },
+    }
+
     return {
         "supervisor_plan": plan,
         "agent_results": agent_results,
-        "speech_human_data": speech_human_data,
+        "speech_brief": speech_brief,
     }
