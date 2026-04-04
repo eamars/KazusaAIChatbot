@@ -10,20 +10,24 @@ from __future__ import annotations
 import json
 import logging
 
-from langchain_core.messages import HumanMessage
+from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_openai import ChatOpenAI
 
 from kazusa_ai_chatbot.config import LLM_API_KEY, LLM_BASE_URL, LLM_MODEL
 from kazusa_ai_chatbot.db import update_affinity, upsert_character_state, upsert_user_facts
 from kazusa_ai_chatbot.state import BotState
-from kazusa_ai_chatbot.utils import format_history_text
+from kazusa_ai_chatbot.utils import format_history_lines
 
 logger = logging.getLogger(__name__)
 
 _llm: ChatOpenAI | None = None
 
-EXTRACTION_PROMPT = """\
-Analyse this exchange between {user_name} and {persona_name}.
+_SYSTEM_PROMPT = """\
+Analyse the provided exchange between the user and the persona.
+
+You represent a Discord bot roleplaying as the character '{persona_name}'.
+Your Discord user ID is '{bot_id}'.
+
 Return ONLY a JSON object with three keys:
 
 1. "user_facts": array of short fact strings about the user. Return [] if nothing notable.
@@ -32,7 +36,7 @@ Return ONLY a JSON object with three keys:
    - "mood": the character's current mood after this exchange (e.g. "playful", "melancholic", "irritated", "content")
    - "emotional_tone": how the character is expressing themselves (e.g. "warm", "guarded", "teasing", "affectionate")
    - "event_summary": one short sentence summarising what happened in this exchange, or "" if nothing notable.
-     Use the actual names ({user_name} and {persona_name}), NOT generic words like "user" or "bot".
+     Use the actual names, NOT generic words like "user" or "bot".
 3. "affinity_delta": integer from -20 to +10 indicating how this exchange changes the character's feeling toward the user.
    - Actively engaging, emotionally warm, or thoughtful conversation: +5 to +10
    - Friendly and respectful conversation with substance: +3 to +5
@@ -42,23 +46,22 @@ Return ONLY a JSON object with three keys:
    - Rude, hostile, or deliberately hurtful behaviour from the user: -5 to -20
    - Default to 0 if the exchange is unremarkable
 
-Examples:
+Output format:
 {{
   "user_facts": ["User prefers to be called Commander"],
-  "character_state": {{"mood": "amused", "emotional_tone": "teasing", "event_summary": "{user_name} asked {persona_name} about the northern gate incident"}},
-
+  "character_state": {{"mood": "amused", "emotional_tone": "teasing", "event_summary": "User asked Persona about the northern gate incident"}},
   "affinity_delta": 5
 }}
+"""
 
-Recent conversation (for context):
-{history}
-
-Latest exchange (analyse THIS):
-{user_name}: {user_message}
-{persona_name}: {bot_response}
-
-JSON:"""
-
+def _build_history_json(
+    history: list[dict], persona_name: str = "assistant", bot_id: str = "unknown_bot_id"
+) -> list[dict]:
+    """Convert conversation history into a JSON structure."""
+    lines = []
+    for name, content, role, speaker_id in format_history_lines(history, persona_name, bot_id):
+        lines.append({"speaker": name, "speaker_id": speaker_id, "message": content})
+    return lines
 
 def _get_llm() -> ChatOpenAI:
     global _llm
@@ -89,27 +92,54 @@ async def memory_writer(state: BotState) -> BotState:
 
     try:
         llm = _get_llm()
+        bot_id = state.get("bot_id", "unknown_bot_id")
 
-        # Build exchange text, including agent results if any
-        exchange = f"{user_name}: {message_text}\n"
-        for ar in agent_results:
-            status = ar.get("status", "unknown")
-            summary = ar.get("summary", "")
-            exchange += f"[Agent: {ar['agent']} ({status}) → {summary}]\n"
-        exchange += f"{persona_name}: {response}"
+        human_data = {
+            "exchange": [
+                {"speaker": user_name, "speaker_id": user_id, "message": message_text},
+                {"speaker": persona_name, "speaker_id": bot_id, "message": response}
+            ]
+        }
+        
+        if agent_results:
+            human_data["agent_events"] = []
+            for ar in agent_results:
+                status = ar.get("status", "unknown")
+                summary = ar.get("summary", "")
+                human_data["agent_events"].append({
+                    "agent": ar["agent"],
+                    "status": status,
+                    "summary": summary
+                })
 
-        history_text = format_history_text(
-            conversation_history, persona_name, limit=10,
+        history_json = _build_history_json(conversation_history, persona_name, bot_id)
+        if history_json:
+            human_data["recent_history"] = history_json[-10:]
+
+        human_content = json.dumps(human_data, indent=2, ensure_ascii=False)
+
+        logger.info(
+            "Calling LLM for memory extraction. User: %s, Persona: %s",
+            user_name,
+            persona_name
         )
 
-        prompt = EXTRACTION_PROMPT.format(
-            user_name=user_name,
+        bot_id = state.get("bot_id", "unknown_bot_id")
+        formatted_prompt = _SYSTEM_PROMPT.format(
             persona_name=persona_name,
-            history=history_text or "(no prior conversation)",
-            user_message=exchange,
-            bot_response=response,
+            bot_id=bot_id
         )
-        result = await llm.ainvoke([HumanMessage(content=prompt)])
+
+        llm_input_msgs = [
+            SystemMessage(content=formatted_prompt),
+            HumanMessage(content=human_content)
+        ]
+        
+        logger.warning(
+            "LLM input for Memory Writer:\n%s",
+            "\n---\n".join(f"[{type(m).__name__}]: {m.content}" for m in llm_input_msgs)
+        )
+        result = await llm.ainvoke(llm_input_msgs)
         raw = result.content or "{}"
 
         # Parse JSON — tolerate markdown fences

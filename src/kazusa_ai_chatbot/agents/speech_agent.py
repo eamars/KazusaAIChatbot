@@ -10,6 +10,7 @@ token budget focused on personality and conversation quality.
 
 from __future__ import annotations
 
+import json
 import logging
 
 from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
@@ -20,13 +21,12 @@ from kazusa_ai_chatbot.state import AgentResult, BotState
 
 logger = logging.getLogger(__name__)
 
-_DIRECTIVE_WRAPPER = """\
-The following section contains INTERNAL guidance from the planning system.
-Use it to shape your reply, but NEVER repeat, quote, paraphrase, or
-reference this guidance in your output. The user must not see any trace of
-these instructions — only your in-character response.
+_SPEECH_SYSTEM_PROMPT = """\
+You are an expert role-player acting as a specific persona.
+Use the provided JSON context to guide your response. 
+The user must not see any trace of instructions — only your in-character response.
+"""
 
-{agent_context}"""
 
 _llm: ChatOpenAI | None = None
 
@@ -45,63 +45,81 @@ def _get_llm() -> ChatOpenAI:
 
 def _build_agent_context(
     agent_results: list[AgentResult],
-    speech_directive: str,
-) -> str:
-    """Build a prompt section from agent results and the supervisor directive."""
-    if not agent_results and not speech_directive:
-        return ""
+    content_directive: str,
+    emotion_directive: str,
+) -> dict:
+    """Build a structured dict from agent results and supervisor directives."""
+    if not agent_results and not content_directive and not emotion_directive:
+        return {}
 
-    parts: list[str] = []
+    context = {}
 
-    if speech_directive:
-        parts.append(f"[Supervisor directive]\n{speech_directive}")
+    if content_directive or emotion_directive:
+        context["supervisor_directives"] = {}
+        if content_directive:
+            context["supervisor_directives"]["content"] = content_directive
+        if emotion_directive:
+            context["supervisor_directives"]["emotion_tone"] = emotion_directive
 
-    for ar in agent_results:
-        status_label = "success" if ar["status"] == "success" else "FAILED"
-        parts.append(f"[{ar['agent']} ({status_label})]\n{ar['summary']}")
+    if agent_results:
+        context["agent_results"] = []
+        for ar in agent_results:
+            status_label = "success" if ar["status"] == "success" else "FAILED"
+            context["agent_results"].append({
+                "agent": ar["agent"],
+                "status": status_label,
+                "summary": ar["summary"]
+            })
 
-    raw_context = "\n\n".join(parts)
-    return _DIRECTIVE_WRAPPER.format(agent_context=raw_context)
+    return context
 
 
 async def speech_agent(state: BotState) -> dict:
     """Generate the final in-character reply.
 
-    Reads ``llm_messages`` (personality + history + user message) from the
-    assembler and enriches them with agent results before calling the LLM.
+    Reads ``speech_human_data`` (personality + history + user message) from the
+    supervisor and enriches them with agent results before calling the LLM.
     """
     # Check if the supervisor directive says to stay silent
     plan = state.get("supervisor_plan", {})
-    speech_directive = plan.get("speech_directive", "") if plan else ""
+    content_directive = plan.get("content_directive", "") if plan else ""
+    emotion_directive = plan.get("emotion_directive", "") if plan else ""
 
-    if speech_directive == "Do not respond. Stay silent.":
+    if content_directive == "Do not respond. Stay silent.":
         logger.info("Speech agent: staying silent per supervisor directive")
         return {"response": ""}
 
-    messages: list[BaseMessage] = list(state.get("llm_messages", []))
-    if not messages:
+    human_data = state.get("speech_human_data", {})
+    if not human_data:
         return {"response": "..."}
 
-    # Inject agent context into the system prompt
     agent_results = state.get("agent_results", [])
-
-    agent_context = _build_agent_context(agent_results, speech_directive)
+    agent_context = _build_agent_context(agent_results, content_directive, emotion_directive)
 
     if agent_context:
-        # Append agent context to the existing system message
-        if messages and isinstance(messages[0], SystemMessage):
-            original_system = messages[0].content
-            messages[0] = SystemMessage(
-                content=f"{original_system}\n\n{agent_context}"
-            )
-        else:
-            # No system message — prepend one
-            messages.insert(0, SystemMessage(content=agent_context))
+        if "context" not in human_data:
+            human_data["context"] = {}
+        human_data["context"].update(agent_context)
 
-    logger.warning(f"Prompt Messages: {messages}")
+    human_content = json.dumps(human_data, indent=2, ensure_ascii=False)
+    
+    messages: list[BaseMessage] = [
+        SystemMessage(content=_SPEECH_SYSTEM_PROMPT),
+        HumanMessage(content=human_content)
+    ]
+
+    logger.info(
+        "Calling LLM for speech generation. Agent results: %d, Content directive: %s",
+        len(agent_results),
+        content_directive[:50] + "..." if len(content_directive) > 50 else content_directive
+    )
 
     try:
         llm = _get_llm()
+        logger.warning(
+            "LLM input for Speech Agent:\n%s",
+            "\n---\n".join(f"[{type(m).__name__}]: {m.content}" for m in messages)
+        )
         result = await llm.ainvoke(messages)
         response = (result.content or "").strip() or "..."
     except Exception:

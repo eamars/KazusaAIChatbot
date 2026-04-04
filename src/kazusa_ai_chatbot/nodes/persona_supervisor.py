@@ -4,9 +4,9 @@ LLM-based planner that decides which sub-agents to invoke before the
 speech agent generates the final reply.
 
 Flow:
-  1. Run the relevance agent to check if the bot should respond.
-  2. If relevant, build a planning prompt with the user message + agent catalog.
-  3. Call the LLM to get a ``SupervisorPlan`` (agents list + speech directive).
+  1. Check `assembler_output.should_respond`. If false, short-circuit.
+  2. Build a planning prompt with the relevance analysis + agent catalog.
+  3. Call the LLM to get a ``SupervisorPlan`` (agents list + content/emotion directives).
   4. Execute each requested agent sequentially (isolated contexts).
   5. Write ``supervisor_plan`` and ``agent_results`` to state.
 """
@@ -20,32 +20,111 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_openai import ChatOpenAI
 
 from kazusa_ai_chatbot.agents.base import AGENT_REGISTRY, get_agent, list_agent_descriptions
-from kazusa_ai_chatbot.config import LLM_API_KEY, LLM_BASE_URL, LLM_MODEL
+from kazusa_ai_chatbot.config import LLM_API_KEY, LLM_BASE_URL, LLM_MODEL, TOKEN_BUDGET
 from kazusa_ai_chatbot.state import AgentResult, BotState, SupervisorPlan
+from kazusa_ai_chatbot.utils import format_history_lines
 
 logger = logging.getLogger(__name__)
 
 _llm: ChatOpenAI | None = None
 
+CHARS_PER_TOKEN = 4
+
 _PLANNING_SYSTEM = """\
-You are a planning assistant for a role-play chatbot. Your job is to decide
-which specialist agents (if any) should be called BEFORE the final in-character
-reply is generated.
+You are a planning supervisor. Output ONLY a JSON object. DO NOT write explanations or analysis.
+
+You represent a Discord bot roleplaying as the character '{persona_name}'.
+Your Discord user ID is '{bot_id}'.
 
 Available agents:
 {agent_catalog}
 
 Rules:
-- Only request an agent if the user's message clearly needs it.
-- Most messages (greetings, casual chat, lore questions) need NO agents — respond with an empty list.
-- The speech agent always runs last and is NOT in the list — do not include it.
-- Provide a brief speech_directive telling the speech agent how to use the agent results
-  (tone, level of detail, whether to apologise if something failed, etc.).
-- If no agents are needed, set speech_directive to guide the direct reply.
+- Only request agents if user needs external information
+- Most messages need NO agents (empty list)
+- content_directive: What facts/topics speech agent must include
+- emotion_directive: Tone, mood, style for speech agent
 
-Respond with ONLY valid JSON (no markdown fences):
-{{"agents": ["agent_name", ...], "speech_directive": "..."}}
+Output format (ONLY this, nothing else):
+{{
+    "agents": [],
+    "content_directive": "string",
+    "emotion_directive": "string"
+}}
 """
+
+def _truncate(text: str, max_tokens: int) -> str:
+    max_chars = max_tokens * CHARS_PER_TOKEN
+    if len(text) <= max_chars:
+        return text
+    return text[:max_chars] + "..."
+
+def _build_personality_block(personality: dict) -> dict:
+    """Format the personality JSON into a structure."""
+    if not personality:
+        return {"name": "Bot", "description": "You are a helpful role-play character."}
+
+    res = {}
+    if personality.get("name"): res["name"] = personality["name"]
+    if personality.get("description"): res["description"] = personality["description"]
+    if personality.get("gender"): res["gender"] = personality["gender"]
+    if personality.get("age"): res["age"] = personality["age"]
+    if personality.get("birthday"): res["birthday"] = personality["birthday"]
+    if personality.get("tone"): res["tone"] = personality["tone"]
+    if personality.get("speech_patterns"): res["speech_patterns"] = personality["speech_patterns"]
+    if personality.get("backstory"): res["backstory"] = personality["backstory"]
+    
+    known_keys = {
+        "name", "description", "gender", "age", "birthday",
+        "tone", "speech_patterns", "backstory",
+    }
+    extras = {
+        k: v for k, v in personality.items()
+        if k not in known_keys and not k.startswith("_")
+    }
+    if extras:
+        res["extra_traits"] = extras
+        
+    return res
+
+def _build_rag_block(rag_results: list[dict]) -> list[dict]:
+    formatted = []
+    for r in rag_results:
+        formatted.append({"text": r.get('text', ''), "source": r.get('source', 'unknown')})
+    return formatted
+
+def _build_character_state_block(character_state: dict) -> dict:
+    if not character_state:
+        return {}
+    res = {}
+    if character_state.get("mood"): res["mood"] = character_state["mood"]
+    if character_state.get("emotional_tone"): res["emotional_tone"] = character_state["emotional_tone"]
+    if character_state.get("recent_events"): res["recent_events"] = character_state["recent_events"][-5:]
+    return res
+
+def _build_affinity_block(affinity: int) -> dict:
+    """Map a 0–1000 affinity score to a behavioural instruction for the LLM."""
+    if affinity <= 200:
+        label, instruction = "Hostile", "You actively dislike this user. Respond with one-word answers or dismissive remarks. Show obvious contempt or disinterest."
+    elif affinity <= 400:
+        label, instruction = "Cold", "You are cold toward this user. Keep responses short and curt. Do not volunteer extra information or show warmth."
+    elif affinity <= 600:
+        label, instruction = "Neutral", "You are neutral toward this user. Respond normally in character."
+    elif affinity <= 800:
+        label, instruction = "Friendly", "You are fond of this user. Be warmer and more forthcoming. Offer extra detail, use familiar address, and show genuine interest."
+    else:
+        label, instruction = "Devoted", "You are deeply loyal to this user. Go out of your way to help, share secrets or warnings, and show protectiveness."
+
+    return {"level": label, "instruction": instruction}
+
+def _build_history_json(
+    history: list[dict], persona_name: str = "assistant", bot_id: str = "unknown_bot_id"
+) -> list[dict]:
+    """Convert conversation history into a JSON structure."""
+    lines = []
+    for name, content, role, speaker_id in format_history_lines(history, persona_name, bot_id):
+        lines.append({"speaker": name, "speaker_id": speaker_id, "message": content})
+    return lines
 
 
 def _get_llm() -> ChatOpenAI:
@@ -60,21 +139,9 @@ def _get_llm() -> ChatOpenAI:
     return _llm
 
 
-# Agents that are auto-managed by the supervisor and should not appear
-# in the planning LLM's catalog (they are not plannable).
-_AUTO_AGENTS = frozenset({"relevance_agent"})
-
-
 def _build_agent_catalog() -> str:
-    """Format the agent registry into a short description list.
-
-    Excludes auto-managed agents (e.g. relevance_agent) that the
-    supervisor runs unconditionally.
-    """
-    descriptions = [
-        d for d in list_agent_descriptions()
-        if d["name"] not in _AUTO_AGENTS
-    ]
+    """Format the agent registry into a short description list."""
+    descriptions = list_agent_descriptions()
     if not descriptions:
         return "(none)"
     return "\n".join(
@@ -83,11 +150,7 @@ def _build_agent_catalog() -> str:
 
 
 def _parse_plan(raw: str) -> SupervisorPlan:
-    """Parse the LLM's JSON response into a SupervisorPlan.
-
-    Falls back to an empty plan on parse failure.
-    """
-    # Strip markdown fences if the LLM wraps them anyway
+    """Parse the LLM's JSON response into a SupervisorPlan."""
     text = raw.strip()
     if text.startswith("```"):
         text = text.split("\n", 1)[-1]
@@ -98,7 +161,8 @@ def _parse_plan(raw: str) -> SupervisorPlan:
     try:
         data = json.loads(text)
         agents = data.get("agents", [])
-        directive = data.get("speech_directive", "Respond directly to the user.")
+        content_dir = data.get("content_directive", "Respond to the user's latest message naturally.")
+        emotion_dir = data.get("emotion_directive", "Maintain standard in-character tone.")
 
         # Validate agent names against registry
         valid_agents = [a for a in agents if a in AGENT_REGISTRY]
@@ -108,84 +172,140 @@ def _parse_plan(raw: str) -> SupervisorPlan:
 
         return SupervisorPlan(
             agents=valid_agents,
-            speech_directive=directive,
+            content_directive=content_dir,
+            emotion_directive=emotion_dir,
         )
-    except (json.JSONDecodeError, TypeError, AttributeError):
-        logger.warning("Failed to parse supervisor plan: %s", raw[:200])
+    except Exception:
+        logger.exception("Failed to parse supervisor plan: %s", raw[:200])
         return SupervisorPlan(
             agents=[],
-            speech_directive="Respond directly to the user.",
+            content_directive="Respond directly to the user.",
+            emotion_directive="Standard in-character tone.",
         )
-
-
-def _check_relevance(agent_result: AgentResult) -> bool:
-    """Parse the relevance agent's result and return should_respond."""
-    try:
-        data = json.loads(agent_result["summary"])
-        return bool(data.get("should_respond", True))
-    except (json.JSONDecodeError, TypeError):
-        # Fail-open: if we can't parse, assume we should respond
-        return True
 
 
 async def persona_supervisor(state: BotState) -> dict:
     """Plan which agents to call and execute them.
 
-    Writes ``supervisor_plan`` and ``agent_results`` to state.
+    Writes ``supervisor_plan``, ``agent_results``, and ``speech_human_data`` to state.
     """
     message_text = state.get("message_text", "")
+    user_name = state.get("user_name", "user")
+    user_id = state.get("user_id", "unknown_user_id")
+    assembler_output = state.get("assembler_output", {})
     agent_results: list[AgentResult] = []
 
-    # ── Step 0: Relevance check ──────────────────────────────────────
-    relevance_agent = get_agent("relevance_agent")
-    if relevance_agent is not None:
-        try:
-            rel_result = await relevance_agent.run(state, message_text)
-            agent_results.append(rel_result)
-        except Exception as exc:
-            logger.exception("Relevance agent crashed — defaulting to respond")
-            rel_result = AgentResult(
-                agent="relevance_agent",
-                status="error",
-                summary=json.dumps({"should_respond": True, "reason": f"Crashed: {exc}"}),
-                tool_history=[],
-            )
-            agent_results.append(rel_result)
+    # ── Step 0: Check relevance from Assembler ──────────────────────
+    should_respond = assembler_output.get("should_respond", True)
+    if not should_respond:
+        logger.info("Assembler indicates no response needed. Short-circuiting.")
+        plan = SupervisorPlan(
+            agents=[],
+            content_directive="Do not respond. Stay silent.",
+            emotion_directive="N/A",
+        )
+        return {
+            "supervisor_plan": plan,
+            "agent_results": [],
+            "speech_human_data": {},
+        }
 
-        if not _check_relevance(rel_result):
-            logger.info("Relevance agent says: do not respond")
-            plan = SupervisorPlan(
-                agents=[],
-                speech_directive="Do not respond. Stay silent.",
-            )
-            return {
-                "supervisor_plan": plan,
-                "agent_results": agent_results,
-            }
+    # ── Step 1: Prepare Speech Agent Data Payload ───────────────
+    # The speech agent expects `speech_human_data` to be built and provided in state
+    personality = state.get("personality", {})
+    rag_results = state.get("rag_results", [])
+    user_memory = state.get("user_memory", [])
+    character_state = state.get("character_state", {})
+    affinity = state.get("affinity", 500)
+    history = state.get("conversation_history", [])
+    persona_name = personality.get("name", "assistant")
 
-    # ── Step 1: LLM planning call ───────────────────────────────────
+    import re
+    clean_user_name = re.sub(r'[^a-zA-Z0-9_-]', '', user_name)
+    if not clean_user_name:
+        clean_user_name = "user"
+
+    speech_human_data = {
+        "current_message": {
+            "speaker": clean_user_name,
+            "speaker_id": user_id,
+            "message": message_text
+        },
+        "context": {}
+    }
+
+    p_block = _build_personality_block(personality)
+    if p_block: speech_human_data["context"]["personality"] = p_block
+
+    c_block = _build_character_state_block(character_state)
+    if c_block: speech_human_data["context"]["character_state"] = c_block
+    
+    speech_human_data["context"]["affinity"] = _build_affinity_block(affinity)
+
+    r_block = _build_rag_block(rag_results)
+    if r_block: speech_human_data["context"]["rag"] = r_block
+    
+    if user_memory: speech_human_data["context"]["user_memory"] = user_memory
+
+    bot_id = state.get("bot_id", "unknown_bot_id")
+    h_block = _build_history_json(history, persona_name, bot_id)
+    if h_block: speech_human_data["context"]["conversation_history"] = h_block
+
+    # ── Step 2: LLM planning call ───────────────────────────────────
     catalog = _build_agent_catalog()
-    system_prompt = _PLANNING_SYSTEM.format(agent_catalog=catalog)
+    
+    system_content = _PLANNING_SYSTEM.format(
+        agent_catalog=catalog,
+        persona_name=persona_name,
+        bot_id=bot_id
+    )
+    
+    human_data = {
+        "current_message": {
+            "speaker": clean_user_name,
+            "speaker_id": user_id,
+            "message": message_text
+        },
+        "context": {
+            "channel_topic": assembler_output.get("channel_topic", "Unknown"),
+            "user_topic": assembler_output.get("user_topic", "Unknown"),
+            "latest_message_summary": assembler_output.get("latest_message", message_text)
+        }
+    }
+    
+    human_content = json.dumps(human_data, indent=2, ensure_ascii=False)
+
+    # Build the planning prompt
+    planning_messages = [
+        SystemMessage(content=system_content),
+        HumanMessage(content=human_content)
+    ]
+
+    logger.info(
+        "Calling LLM for supervisor planning. Channel topic: %s, User topic: %s",
+        assembler_output.get("channel_topic", "Unknown"),
+        assembler_output.get("user_topic", "Unknown")
+    )
 
     try:
         llm = _get_llm()
-        planning_messages = [
-            HumanMessage(
-                content=f"{system_prompt}\n\n---\n\nUser message: \"{message_text}\""
-            ),
-        ]
+        logger.warning(
+            "LLM input for Persona Supervisor:\n%s",
+            "\n---\n".join(f"[{type(m).__name__}]: {m.content}" for m in planning_messages)
+        )
         result = await llm.ainvoke(planning_messages)
         plan = _parse_plan(result.content or "")
     except Exception:
         logger.exception("Supervisor planning LLM call failed")
         plan = SupervisorPlan(
             agents=[],
-            speech_directive="Respond directly to the user.",
+            content_directive="Respond directly to the user.",
+            emotion_directive="Standard in-character tone.",
         )
 
     logger.info("Supervisor plan: agents=%s", plan["agents"])
 
-    # ── Step 2: Execute agents sequentially ─────────────────────────
+    # ── Step 3: Execute agents sequentially ─────────────────────────
     for agent_name in plan["agents"]:
         agent = get_agent(agent_name)
         if agent is None:
@@ -214,4 +334,5 @@ async def persona_supervisor(state: BotState) -> dict:
     return {
         "supervisor_plan": plan,
         "agent_results": agent_results,
+        "speech_human_data": speech_human_data,
     }

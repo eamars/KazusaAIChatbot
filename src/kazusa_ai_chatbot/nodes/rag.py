@@ -19,15 +19,14 @@ logger = logging.getLogger(__name__)
 
 async def rag_retriever(state: BotState) -> BotState:
     """Retrieve relevant lore / knowledge chunks from MongoDB."""
-    if not state.get("retrieve_rag"):
-        return {"rag_results": []}
+    rag_query = state.get("message_text", "")
 
-    query = state.get("rag_query", "")
-    if not query:
-        return {"rag_results": []}
+    if not rag_query:
+        logger.debug("RAG Retriever: empty query. Skipping.")
+        return {**state, "rag_results": []}
 
     try:
-        embedding = await get_text_embedding(query)
+        embedding = await get_text_embedding(rag_query)
         raw_results = await search_lore(
             query_embedding=embedding,
             top_k=RAG_TOP_K,

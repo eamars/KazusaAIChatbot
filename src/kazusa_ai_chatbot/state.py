@@ -38,7 +38,14 @@ class AgentResult(TypedDict):
 
 class SupervisorPlan(TypedDict):
     agents: list[str]      # which agents to invoke, e.g. ["web_search_agent"]
-    speech_directive: str   # instruction for how speech_agent should respond
+    content_directive: str # what information to include in the output
+    emotion_directive: str # how to generate the output (emotion, tone, style)
+
+
+class AssemblerOutput(TypedDict):
+    channel_topic: str
+    user_topic: str
+    should_respond: bool
 
 
 class BotState(TypedDict, total=False):
@@ -52,11 +59,6 @@ class BotState(TypedDict, total=False):
     timestamp: str
     should_respond: bool
 
-    # --- Stage 2: router ---
-    retrieve_rag: bool
-    retrieve_memory: bool
-    rag_query: str
-
     # --- Stage 3: RAG ---
     rag_results: list[RagResult]
 
@@ -66,13 +68,13 @@ class BotState(TypedDict, total=False):
     character_state: CharacterState
     affinity: int  # 0–1000 affinity score toward current user
 
-    # --- Stage 5: assembler ---
-    llm_messages: list[dict]
-    tool_descriptions: str  # prompt block listing available tools
+    # --- Stage 5: relevance_agent ---
+    assembler_output: AssemblerOutput
 
     # --- Stage 6a: persona_supervisor ---
     supervisor_plan: SupervisorPlan
     agent_results: list[AgentResult]
+    speech_human_data: dict
 
     # --- Stage 6b: speech_agent ---
     response: str

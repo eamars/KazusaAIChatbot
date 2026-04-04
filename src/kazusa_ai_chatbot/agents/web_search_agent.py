@@ -124,6 +124,12 @@ class WebSearchAgent(BaseAgent):
         # Fold system into first human for Qwen compatibility
         messages = _fold_system(messages)
 
+        logger.info(
+            "Calling LLM for web search agent. Query: %s, Max iterations: %d",
+            user_query[:100] + "..." if len(user_query) > 100 else user_query,
+            MAX_TOOL_ITERATIONS
+        )
+
         try:
             llm = ChatOpenAI(
                 model=LLM_MODEL,
@@ -133,6 +139,11 @@ class WebSearchAgent(BaseAgent):
             )
 
             for iteration in range(MAX_TOOL_ITERATIONS + 1):
+                logger.warning(
+                    "LLM input for Web Search Agent (iteration %d):\n%s",
+                    iteration,
+                    "\n---\n".join(f"[{type(m).__name__}]: {m.content}" for m in messages)
+                )
                 result = await llm.ainvoke(messages)
                 raw_text = result.content or ""
 

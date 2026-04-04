@@ -1,19 +1,20 @@
-"""Script to create embeddings for existing conversation history messages.
+"""Script to create/overwrite embeddings for existing conversation history messages.
 
-This script reads all conversation history documents that don't have embeddings
-and generates embeddings for them using the configured embedding model.
+This script reads all conversation history documents and generates/overwrites
+embeddings for them using the configured embedding model.
 
 Typical Use Cases:
-    # Create embeddings for all conversation messages without embeddings
+    # Overwrite embeddings for all conversation messages
     create-embeddings
     
     # The script automatically:
-    # - Finds all documents missing embeddings
-    # - Generates embeddings using the configured model
+    # - Finds all conversation history documents
+    # - Generates/overwrites embeddings using the configured model
     # - Updates documents with embedding vectors
     # - Creates vector search index if needed
     
-    # Run after adding new conversation history or when changing embedding models
+    # Run after adding new conversation history, when changing embedding models,
+    # or when you need to refresh all embeddings
     create-embeddings
 """
 
@@ -41,29 +42,23 @@ logger = logging.getLogger(__name__)
 
 
 async def main():
-    """Create embeddings for conversation history messages that lack them."""
-    logger.info("Starting conversation history embedding creation...")
+    """Create/overwrite embeddings for all conversation history messages."""
+    logger.info("Starting conversation history embedding overwrite...")
     
     try:
         # Connect to database
         db = await get_db()
         collection = db.conversation_history
         
-        # Find all documents without embeddings or with empty embeddings
-        query = {
-            "$or": [
-                {"embedding": {"$exists": False}},
-                {"embedding": {"$size": 0}},
-                {"embedding": None}
-            ]
-        }
+        # Find all conversation history documents to overwrite embeddings
+        query = {}  # Match all documents
         
         # Count documents to process
         total_count = await collection.count_documents(query)
-        logger.info(f"Found {total_count} conversation messages without embeddings")
+        logger.info(f"Found {total_count} conversation messages to process")
         
         if total_count == 0:
-            logger.info("All conversation messages already have embeddings. Nothing to do.")
+            logger.info("No conversation messages found. Nothing to do.")
             return
         
         # Process documents in batches to avoid memory issues
@@ -102,7 +97,7 @@ async def main():
                 failed += 1
                 continue
         
-        logger.info(f"Embedding creation completed. Processed: {processed}, Failed: {failed}")
+        logger.info(f"Embedding overwrite completed. Processed: {processed}, Failed: {failed}")
         
         # Enable vector search index if it doesn't exist
         logger.info("Ensuring vector search index exists...")

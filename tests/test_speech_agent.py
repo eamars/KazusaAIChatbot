@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -16,190 +17,182 @@ from kazusa_ai_chatbot.state import AgentResult, SupervisorPlan
 
 class TestBuildAgentContext:
     def test_empty_results_and_directive(self):
-        assert _build_agent_context([], "") == ""
+        assert _build_agent_context([], "", "") == {}
 
     def test_directive_only(self):
-        ctx = _build_agent_context([], "Respond casually.")
-        assert "[Supervisor directive]" in ctx
-        assert "Respond casually." in ctx
+        ctx = _build_agent_context([], "Respond casually.", "Happy")
+        assert ctx["supervisor_directives"]["content"] == "Respond casually."
+        assert ctx["supervisor_directives"]["emotion_tone"] == "Happy"
 
-    def test_single_success_result(self):
-        results = [AgentResult(
-            agent="web_search_agent",
-            status="success",
-            summary="Tokyo is 18°C.",
-            tool_history=[],
-        )]
-        ctx = _build_agent_context(results, "Mention the weather.")
-        assert "web_search_agent (success)" in ctx
-        assert "Tokyo is 18°C." in ctx
-        assert "Mention the weather." in ctx
-
-    def test_error_result(self):
-        results = [AgentResult(
-            agent="web_search_agent",
-            status="error",
-            summary="Search failed: timeout",
-            tool_history=[],
-        )]
-        ctx = _build_agent_context(results, "Apologize for the failure.")
-        assert "web_search_agent (FAILED)" in ctx
-        assert "Search failed: timeout" in ctx
-
-    def test_multiple_results(self):
+    def test_agent_results_success_and_error(self):
         results = [
             AgentResult(agent="a", status="success", summary="Result A", tool_history=[]),
             AgentResult(agent="b", status="error", summary="Error B", tool_history=[]),
         ]
-        ctx = _build_agent_context(results, "Combine both.")
-        assert "a (success)" in ctx
-        assert "b (FAILED)" in ctx
+        ctx = _build_agent_context(results, "Combine both.", "")
 
-    def test_directive_wrapper_guard(self):
-        """Non-empty context is wrapped with an internal-only guard instruction."""
-        ctx = _build_agent_context([], "Be playful.")
-        assert "NEVER repeat, quote, paraphrase" in ctx
-        assert "INTERNAL guidance" in ctx
-        assert "Be playful." in ctx
+        assert ctx["supervisor_directives"]["content"] == "Combine both."
+        assert len(ctx["agent_results"]) == 2
+        assert ctx["agent_results"][0]["agent"] == "a"
+        assert ctx["agent_results"][0]["status"] == "success"
+        assert ctx["agent_results"][1]["agent"] == "b"
+        assert ctx["agent_results"][1]["status"] == "FAILED"
 
 
-# ── speech_agent integration tests ──────────────────────────────────
+# ── speech_agent node tests ─────────────────────────────────────────
+
+@pytest.fixture
+def sample_speech_state():
+    return {
+        "supervisor_plan": {
+            "agents": [],
+            "content_directive": "Acknowledge the user.",
+            "emotion_directive": "Warm and friendly."
+        },
+        "agent_results": [],
+        "speech_human_data": {
+            "current_message": {
+                "speaker": "Commander",
+                "message": "Hello"
+            },
+            "context": {
+                "personality": {"name": "Zara"},
+            }
+        }
+    }
 
 
 @pytest.mark.asyncio
-async def test_speech_agent_basic_response():
-    """Speech agent generates a reply from assembled messages."""
-    state = {
-        "llm_messages": [
-            SystemMessage(content="You are Zara."),
-            HumanMessage(content="Hello!"),
-        ],
-        "supervisor_plan": SupervisorPlan(agents=[], speech_directive="Respond casually."),
-        "agent_results": [],
-    }
-
+async def test_speech_agent_basic_response(sample_speech_state):
+    """Speech agent should append agent context to the system prompt and return response."""
     mock_llm = MagicMock()
-    mock_llm.ainvoke = AsyncMock(
-        return_value=AIMessage(content="Hey there, Commander.")
-    )
+    mock_llm.ainvoke = AsyncMock(return_value=AIMessage(content="Hey there, Commander."))
 
     with patch("kazusa_ai_chatbot.agents.speech_agent._get_llm", return_value=mock_llm):
-        result = await speech_agent(state)
+        result = await speech_agent(sample_speech_state)
 
     assert result["response"] == "Hey there, Commander."
-    mock_llm.ainvoke.assert_called_once()
+
+    # Check what was sent to LLM
+    args, _ = mock_llm.ainvoke.call_args
+    messages = args[0]
+
+    assert len(messages) == 2
+    assert isinstance(messages[0], SystemMessage)
+    assert isinstance(messages[1], HumanMessage)
+
+    human_json = json.loads(messages[1].content)
+    assert "Acknowledge the user." in human_json["context"]["supervisor_directives"]["content"]
 
 
 @pytest.mark.asyncio
-async def test_speech_agent_incorporates_agent_results():
-    """Agent results are injected into the system prompt."""
-    state = {
-        "llm_messages": [
-            SystemMessage(content="You are Zara."),
-            HumanMessage(content="What's the weather?"),
-        ],
-        "supervisor_plan": SupervisorPlan(
-            agents=["web_search_agent"],
-            speech_directive="Mention the weather casually.",
-        ),
-        "agent_results": [AgentResult(
+async def test_speech_agent_incorporates_agent_results(sample_speech_state):
+    """Speech agent should include agent results in the human context."""
+    sample_speech_state["supervisor_plan"]["content_directive"] = "Tell them the weather."
+    sample_speech_state["agent_results"] = [
+        AgentResult(
             agent="web_search_agent",
             status="success",
-            summary="Tokyo is 18°C, partly cloudy.",
-            tool_history=[],
-        )],
-    }
+            summary="It is 18 degrees in Tokyo.",
+            tool_history=[]
+        )
+    ]
 
     mock_llm = MagicMock()
-    mock_llm.ainvoke = AsyncMock(
-        return_value=AIMessage(content="Hmm, 18 degrees in Tokyo. Not bad.")
-    )
+    mock_llm.ainvoke = AsyncMock(return_value=AIMessage(content="Hmm, 18 degrees in Tokyo. Not bad."))
 
     with patch("kazusa_ai_chatbot.agents.speech_agent._get_llm", return_value=mock_llm):
-        result = await speech_agent(state)
+        result = await speech_agent(sample_speech_state)
 
     assert result["response"] == "Hmm, 18 degrees in Tokyo. Not bad."
 
-    # Verify the system prompt was enriched with agent context
-    call_args = mock_llm.ainvoke.call_args[0][0]
-    # Check the native SystemMessage content
-    merged_content = call_args[0].content
-    assert "web_search_agent (success)" in merged_content
-    assert "Tokyo is 18°C" in merged_content
-    assert "Mention the weather casually" in merged_content
+    args, _ = mock_llm.ainvoke.call_args
+    messages = args[0]
+    human_json = json.loads(messages[1].content)
+
+    assert human_json["context"]["agent_results"][0]["summary"] == "It is 18 degrees in Tokyo."
 
 
 @pytest.mark.asyncio
-async def test_speech_agent_handles_error_result():
-    """Speech agent should still generate a reply when an agent failed."""
-    state = {
-        "llm_messages": [
-            SystemMessage(content="You are Zara."),
-            HumanMessage(content="Search for news."),
-        ],
-        "supervisor_plan": SupervisorPlan(
-            agents=["web_search_agent"],
-            speech_directive="Apologize if the search failed.",
-        ),
-        "agent_results": [AgentResult(
-            agent="web_search_agent",
+async def test_speech_agent_handles_error_result(sample_speech_state):
+    """Speech agent should handle FAILED agent states properly."""
+    sample_speech_state["agent_results"] = [
+        AgentResult(
+            agent="db_agent",
             status="error",
-            summary="Web search failed: context limit exceeded",
-            tool_history=[],
-        )],
-    }
+            summary="Database timeout.",
+            tool_history=[]
+        )
+    ]
 
     mock_llm = MagicMock()
-    mock_llm.ainvoke = AsyncMock(
-        return_value=AIMessage(content="I tried looking that up, but something went wrong. Sorry, Commander.")
-    )
+    mock_llm.ainvoke = AsyncMock(return_value=AIMessage(content="I am sorry, my memory failed me."))
 
     with patch("kazusa_ai_chatbot.agents.speech_agent._get_llm", return_value=mock_llm):
-        result = await speech_agent(state)
+        result = await speech_agent(sample_speech_state)
 
     assert "sorry" in result["response"].lower()
 
+    args, _ = mock_llm.ainvoke.call_args
+    messages = args[0]
+    human_json = json.loads(messages[1].content)
+
+    assert human_json["context"]["agent_results"][0]["status"] == "FAILED"
+
 
 @pytest.mark.asyncio
-async def test_speech_agent_empty_messages():
-    state = {"llm_messages": []}
-    result = await speech_agent(state)
-    assert result["response"] == "..."
-
-
-@pytest.mark.asyncio
-async def test_speech_agent_llm_failure():
-    """LLM crash should result in a fallback response."""
+async def test_speech_agent_short_circuits_silence():
+    """If the supervisor says 'Do not respond. Stay silent.', return empty string."""
     state = {
-        "llm_messages": [
-            SystemMessage(content="You are Zara."),
-            HumanMessage(content="Hello!"),
-        ],
+        "supervisor_plan": {
+            "content_directive": "Do not respond. Stay silent."
+        }
     }
 
+    # Should not even try to call the LLM
     mock_llm = MagicMock()
-    mock_llm.ainvoke = AsyncMock(side_effect=Exception("LLM down"))
-
     with patch("kazusa_ai_chatbot.agents.speech_agent._get_llm", return_value=mock_llm):
         result = await speech_agent(state)
+
+    assert result["response"] == ""
+    mock_llm.ainvoke.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_speech_agent_llm_failure(sample_speech_state):
+    """If LLM fails, return fallback '*stays silent*' string."""
+    mock_llm = MagicMock()
+    mock_llm.ainvoke = AsyncMock(side_effect=Exception("API limit"))
+
+    with patch("kazusa_ai_chatbot.agents.speech_agent._get_llm", return_value=mock_llm):
+        result = await speech_agent(sample_speech_state)
 
     assert result["response"] == "*stays silent*"
 
 
 @pytest.mark.asyncio
-async def test_speech_agent_no_supervisor_plan():
-    """Speech agent works even without a supervisor plan (backward compat)."""
+async def test_speech_agent_empty_messages():
+    """If speech_human_data is missing, it should just return ..."""
     state = {
-        "llm_messages": [
-            SystemMessage(content="You are Zara."),
-            HumanMessage(content="Hello!"),
-        ],
+        "speech_human_data": {},
+        "supervisor_plan": {}
+    }
+
+    result = await speech_agent(state)
+    assert result["response"] == "..."
+
+
+@pytest.mark.asyncio
+async def test_speech_agent_no_supervisor_plan():
+    """Works fine if supervisor plan is missing but human_data exists."""
+    state = {
+        "speech_human_data": {
+            "current_message": {"speaker": "u", "message": "hi"}
+        }
     }
 
     mock_llm = MagicMock()
-    mock_llm.ainvoke = AsyncMock(
-        return_value=AIMessage(content="Greetings.")
-    )
+    mock_llm.ainvoke = AsyncMock(return_value=AIMessage(content="Greetings."))
 
     with patch("kazusa_ai_chatbot.agents.speech_agent._get_llm", return_value=mock_llm):
         result = await speech_agent(state)
@@ -228,7 +221,7 @@ async def test_live_directive_not_leaked_in_response():
     # Reset cached LLM so a real one is created
     sa._llm = None
 
-    directive = (
+    content_directive = (
         "Warmly acknowledge the affectionate way they called you.\n"
         "Show genuine delight at their cute self-given name.\n"
         "Maybe make a playful comment about how fitting that nickname is."
@@ -251,7 +244,8 @@ async def test_live_directive_not_leaked_in_response():
         ],
         "supervisor_plan": SupervisorPlan(
             agents=[],
-            speech_directive=directive,
+            content_directive=content_directive,
+            emotion_directive="Warm and playful",
         ),
         "agent_results": [],
     }

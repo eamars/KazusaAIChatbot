@@ -37,11 +37,11 @@ async def test_full_graph_question_flow(sample_personality):
     mock_supervisor_llm.ainvoke = AsyncMock(
         return_value=AIMessage(content=json.dumps({
             "agents": [],
-            "speech_directive": "Answer the lore question using context.",
+            "content_directive": "Answer the lore question using context.",
+            "emotion_directive": "Neutral"
         }))
     )
 
-    # Speech agent LLM: generate reply
     mock_speech_llm = MagicMock()
     mock_speech_llm.ainvoke = AsyncMock(
         return_value=AIMessage(content="The gate held, Commander.")
@@ -57,11 +57,14 @@ async def test_full_graph_question_flow(sample_personality):
 
     graph = build_graph()
 
-    # Relevance agent LLM: approve the message
+    # Relevance Agent LLM: analyze topics and decide to respond
     mock_relevance_llm = MagicMock()
     mock_relevance_llm.ainvoke = AsyncMock(
         return_value=AIMessage(content=json.dumps({
-            "should_respond": True, "reason": "Direct question.",
+            "channel_topic": "General",
+            "user_topic": "Question",
+            "latest_message": "What happened at the northern gate?",
+            "should_respond": True
         }))
     )
 
@@ -72,7 +75,7 @@ async def test_full_graph_question_flow(sample_personality):
         patch("kazusa_ai_chatbot.nodes.memory.get_user_facts", new_callable=AsyncMock, return_value=["User goes by Commander"]),
         patch("kazusa_ai_chatbot.nodes.memory.get_character_state", new_callable=AsyncMock, return_value=mock_char_state),
         patch("kazusa_ai_chatbot.nodes.memory.get_affinity", new_callable=AsyncMock, return_value=500),
-        patch("kazusa_ai_chatbot.agents.relevance_agent._get_llm", return_value=mock_relevance_llm),
+        patch("kazusa_ai_chatbot.nodes.relevance_agent._get_llm", return_value=mock_relevance_llm),
         patch("kazusa_ai_chatbot.nodes.persona_supervisor._get_llm", return_value=mock_supervisor_llm),
         patch("kazusa_ai_chatbot.agents.speech_agent._get_llm", return_value=mock_speech_llm),
     ):
@@ -80,12 +83,11 @@ async def test_full_graph_question_flow(sample_personality):
 
     assert result["response"] == "The gate held, Commander."
     assert result["should_respond"] is True
-    assert result["retrieve_rag"] is True
 
 
 @pytest.mark.asyncio
 async def test_full_graph_casual_greeting(sample_personality):
-    """A casual greeting skips RAG but still fetches memory."""
+    """A casual greeting fetches memory and RAG."""
     state: BotState = {
         "user_id": "user_123",
         "user_name": "TestUser",
@@ -101,7 +103,8 @@ async def test_full_graph_casual_greeting(sample_personality):
     mock_supervisor_llm.ainvoke = AsyncMock(
         return_value=AIMessage(content=json.dumps({
             "agents": [],
-            "speech_directive": "Respond with a casual greeting.",
+            "content_directive": "Respond with a casual greeting.",
+            "emotion_directive": "Casual"
         }))
     )
 
@@ -112,28 +115,43 @@ async def test_full_graph_casual_greeting(sample_personality):
 
     graph = build_graph()
 
-    # Relevance agent LLM: approve the message
     mock_relevance_llm = MagicMock()
     mock_relevance_llm.ainvoke = AsyncMock(
         return_value=AIMessage(content=json.dumps({
-            "should_respond": True, "reason": "Casual greeting.",
+            "channel_topic": "General",
+            "user_topic": "Greeting",
+            "should_respond": True
         }))
     )
 
     with (
+        patch("kazusa_ai_chatbot.nodes.rag.get_text_embedding", new_callable=AsyncMock, return_value=[0.1] * 128),
+        patch("kazusa_ai_chatbot.nodes.rag.search_lore", new_callable=AsyncMock, return_value=[]),
         patch("kazusa_ai_chatbot.nodes.memory.get_conversation_history", new_callable=AsyncMock, return_value=[]),
         patch("kazusa_ai_chatbot.nodes.memory.get_user_facts", new_callable=AsyncMock, return_value=[]),
         patch("kazusa_ai_chatbot.nodes.memory.get_character_state", new_callable=AsyncMock, return_value={}),
         patch("kazusa_ai_chatbot.nodes.memory.get_affinity", new_callable=AsyncMock, return_value=500),
-        patch("kazusa_ai_chatbot.agents.relevance_agent._get_llm", return_value=mock_relevance_llm),
+        patch("kazusa_ai_chatbot.nodes.relevance_agent._get_llm", return_value=mock_relevance_llm),
         patch("kazusa_ai_chatbot.nodes.persona_supervisor._get_llm", return_value=mock_supervisor_llm),
         patch("kazusa_ai_chatbot.agents.speech_agent._get_llm", return_value=mock_speech_llm),
     ):
         result = await graph.ainvoke(state)
 
     assert result["response"] == "Hey there."
-    assert result["retrieve_rag"] is False
-    assert result["retrieve_memory"] is True
+
+
+def test_should_respond_and_retrieve():
+    from kazusa_ai_chatbot.graph import _should_respond_and_retrieve
+    from kazusa_ai_chatbot.state import BotState
+    from langgraph.graph import END
+
+    # False -> END
+    state: BotState = {"should_respond": False}
+    assert _should_respond_and_retrieve(state) == [END]
+
+    # True -> Both RAG and Memory
+    state = {"should_respond": True}
+    assert set(_should_respond_and_retrieve(state)) == {"memory_retriever", "rag_retriever"}
 
 
 @pytest.mark.asyncio
@@ -151,7 +169,12 @@ async def test_full_graph_empty_message(sample_personality):
     }
 
     graph = build_graph()
-    result = await graph.ainvoke(state)
+    
+    # We only mock intake if we want it to strip to empty,
+    # or just rely on intake returning should_respond=False
+    with patch("kazusa_ai_chatbot.nodes.intake.intake") as mock_intake:
+        mock_intake.return_value = {**state, "should_respond": False}
+        result = await graph.ainvoke(state)
 
     assert result["should_respond"] is False
     assert "response" not in result or result.get("response", "") == ""
