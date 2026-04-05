@@ -79,9 +79,9 @@ async def _build_base_state(
     channel_topic: str,
     user_topic: str,
 ) -> BotState:
-    conversation_history = await get_conversation_history(channel_id, CONVERSATION_HISTORY_LIMIT) if channel_id else []
+    conversation_history = []
     user_memory = await get_user_facts(user_id) if user_id else []
-    affinity = await get_affinity(user_id) if user_id else 500
+    affinity = 1
     character_state = await get_character_state()
 
     state: BotState = {

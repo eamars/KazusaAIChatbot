@@ -142,12 +142,12 @@ Review the user's message AND the full agent work (results, tool calls, tool out
 ## Default to STORING: When in doubt, prefer to store the information. It's better to have too much context than too little.
 
 ## Output Format: (raw JSON text — no markdown wrapping)
-{{{{
+{{
     "should_store": true/false,
-    "command": "instruction for memory_agent describing what to store (empty string if should_store is false)",
+    "command": "instruction for memory_agent describing what to store. Include user details like user_id and user_name in the command if relevant (empty string if should_store is false)",
     "expected_response": "what the memory_agent should return (empty string if should_store is false)",
     "reason": "brief explanation"
-}}}}
+}}
 """
 
 _SYNTHESIS_SYSTEM = """\
@@ -619,6 +619,8 @@ async def _check_and_store_memory(
 
     check_data = {
         "user_message": message_text,
+        "user_id": state.get("user_id", ""),
+        "user_name": state.get("user_name", ""),
         "agent_results": [
             {
                 "agent": r.get("agent", "unknown"),
@@ -882,6 +884,7 @@ async def persona_supervisor(state: BotState) -> dict:
             "channel_topic": assembler_output.get("channel_topic", "Unknown"),
             "user_topic": assembler_output.get("user_topic", "Unknown"),
             "user_memory": user_memory,
+            # "conversation_history": state.get("conversation_history", [])
         }
     }
 

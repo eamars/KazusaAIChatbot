@@ -95,7 +95,7 @@ class BotState(TypedDict, total=False):
     should_respond: bool
 
     # --- Stage 2: relevance_agent context loading ---
-    conversation_history: list[ChatMessage]
+    conversation_history: list[dict[str, str]]
     user_memory: list[str]
     character_state: CharacterState
     affinity: int  # 0–1000 affinity score toward current user

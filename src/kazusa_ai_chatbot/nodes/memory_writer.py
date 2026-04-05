@@ -112,9 +112,8 @@ async def memory_writer(state: BotState) -> BotState:
                     "summary": summary
                 })
 
-        history_json = _build_history_json(conversation_history, persona_name, bot_id)
-        if history_json:
-            human_data["recent_history"] = history_json[-10:]
+        if conversation_history:
+            human_data["recent_history"] = conversation_history[-10:]
 
         human_content = json.dumps(human_data, indent=2, ensure_ascii=False)
 

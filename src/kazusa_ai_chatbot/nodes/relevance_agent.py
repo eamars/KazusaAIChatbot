@@ -32,9 +32,9 @@ Your Discord user ID is '{bot_id}'.
 DO NOT write explanations, analysis, or commentary. Output ONLY the JSON object.
 
 Required fields:
-- channel_topic: General topic being discussed in the channel
-- user_topic: Specific topic/intent of user's latest message
 - should_respond: true if bot should reply, false otherwise
+- channel_topic: General topic being discussed in the channel
+- user_topic: Specific topic/intent of user's recent conversation
 
 Bot should respond when:
 - Message directed at bot (greeting, question, conversation)
@@ -48,9 +48,9 @@ Bot should NOT respond when:
 
 Output format (raw JSON text — no markdown wrapping):
 {{
+    "should_respond": true / false,
     "channel_topic": "string",
-    "user_topic": "string",
-    "should_respond": true
+    "user_topic": "string"
 }}
 """
 
@@ -221,7 +221,7 @@ async def relevance_agent(state: BotState) -> BotState:
     logger.info("Relevance Agent output: %s", assembler_output)
 
     return {
-        "conversation_history": history,
+        "conversation_history": formatted_history,
         "user_memory": user_memory,
         "character_state": character_state,
         "affinity": affinity,
