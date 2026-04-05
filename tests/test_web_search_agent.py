@@ -38,9 +38,7 @@ async def test_web_search_agent_calls_search_tool_and_returns_summary():
          patch("kazusa_ai_chatbot.agents.web_search_agent._get_langchain_tools", return_value=[mock_search_tool]):
         result = await agent.run(
             {"user_id": "user_123", "channel_id": "chan_456"},
-            "What's the weather in Tokyo today?",
-            "Search for Tokyo weather today.",
-            "Return a concise factual weather summary.",
+            "Search for Tokyo weather today.\n\nExpected response: Return a concise factual weather summary.",
         )
 
     assert result["agent"] == "web_search_agent"

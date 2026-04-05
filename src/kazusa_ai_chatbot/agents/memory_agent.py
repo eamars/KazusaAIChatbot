@@ -158,12 +158,10 @@ class MemoryAgent(BaseAgent):
     async def run(
         self,
         state: BotState,
-        user_query: str,
-        command: str = "",
+        task: str,
         expected_response: str = "",
     ) -> AgentResult:
         tool_history: list[ToolCall] = []
-        task = command.strip() or user_query
 
         # Check if tools are available
         tools = _get_langchain_tools()

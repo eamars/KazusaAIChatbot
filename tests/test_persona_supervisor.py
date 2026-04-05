@@ -311,7 +311,6 @@ async def test_supervisor_dispatches_agent(mock_assembler_state):
     assert "It is currently sunny." in result["speech_brief"]["response_brief"]["facts_to_cover"]
     mock_agent.run.assert_awaited_once_with(
         mock_assembler_state,
-        "Hello bot",
         "Search the web for the current weather.",
         "Return a short factual summary with the current conditions.",
     )
@@ -672,7 +671,6 @@ async def test_supervisor_dispatches_conversation_history_agent(mock_assembler_s
     assert "patrol routes" in result["speech_brief"]["response_brief"]["facts_to_cover"][-1]
     mock_agent.run.assert_awaited_once_with(
         mock_assembler_state,
-        "Hello bot",
         "Look up recent conversation context about patrol routes from past chat history.",
         "Return a short memory-oriented brief without raw transcripts.",
     )
@@ -724,7 +722,6 @@ async def test_supervisor_dispatches_memory_agent(mock_assembler_state):
     assert "vector similarity" in result["speech_brief"]["response_brief"]["facts_to_cover"][-1]
     mock_agent.run.assert_awaited_once_with(
         mock_assembler_state,
-        "Hello bot",
         "Recall any stored memory about the previously shared embedding guide and save new details only if the current message adds better information.",
         "Return a concise memory brief describing what was recalled or saved without raw database fields.",
     )
@@ -964,18 +961,18 @@ async def test_supervisor_evaluate_retries_agent():
 
     call_count = 0
     mock_agent = AsyncMock()
-    async def _agent_run(state, user_query, command="", expected_response=""):
-        nonlocal call_count
-        call_count += 1
-        if call_count == 1:
+    async def _agent_run(state, task, expected_response=""):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                return AgentResult(
+                    agent="web_search_agent", status="needs_context",
+                    summary="No specific results found.", tool_history=[],
+                )
             return AgentResult(
-                agent="web_search_agent", status="needs_context",
-                summary="No specific results found.", tool_history=[],
+                agent="web_search_agent", status="success",
+                summary="Python 3.14 adds pattern matching improvements and JIT.", tool_history=[],
             )
-        return AgentResult(
-            agent="web_search_agent", status="success",
-            summary="Python 3.14 adds pattern matching improvements and JIT.", tool_history=[],
-        )
     mock_agent.run = AsyncMock(side_effect=_agent_run)
 
     def _get_agent(name):
@@ -994,7 +991,7 @@ async def test_supervisor_evaluate_retries_agent():
     assert result["agent_results"][1]["status"] == "success"
     # The retry instruction was used
     second_call_args = mock_agent.run.await_args_list[1]
-    assert "changelog" in second_call_args.args[2]  # command arg
+    assert "changelog" in second_call_args.args[1]  # task arg
     # 5 LLM calls: plan + evaluate + evaluate + memory_check + synthesis
     assert mock_llm.ainvoke.await_count == 5
 
@@ -1064,7 +1061,7 @@ async def test_supervisor_memory_check_triggers_store():
     # Memory agent was dispatched by the memory check step
     mock_memory_agent.run.assert_awaited_once()
     call_args = mock_memory_agent.run.await_args
-    assert "favorite color" in call_args.args[2]  # command arg
+    assert "favorite color" in call_args.args[1]  # task arg
 
     # The memory agent result appears in agent_results
     assert len(result["agent_results"]) == 1

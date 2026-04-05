@@ -158,13 +158,11 @@ class WebSearchAgent(BaseAgent):
     async def run(
         self,
         state: BotState,
-        user_query: str,
-        command: str = "",
+        task: str,
         expected_response: str = "",
     ) -> AgentResult:
         """Execute the search tool loop and return a summarised result."""
         tool_history: list[ToolCall] = []
-        task = command.strip() or user_query
 
         # Check if tools are available
         tools = _get_langchain_tools()

@@ -41,9 +41,7 @@ async def test_conversation_history_agent_searches_history_and_returns_summary()
                 "channel_id": "chan_456",
                 "message_text": "Do you remember what I said about the northern gate?",
             },
-            "Do you remember what I said about the northern gate?",
-            "Search conversation history for the user's earlier mention of the northern gate.",
-            "Return a concise continuity summary only.",
+            "Search conversation history for the user's earlier mention of the northern gate.\n\nExpected response: Return a concise continuity summary only.",
         )
 
     assert result["agent"] == "conversation_history_agent"

@@ -81,7 +81,7 @@ async def _build_base_state(
 ) -> BotState:
     conversation_history = []
     user_memory = await get_user_facts(user_id) if user_id else []
-    affinity = 1
+    affinity = 900
     character_state = await get_character_state()
 
     state: BotState = {

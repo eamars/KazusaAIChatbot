@@ -53,8 +53,8 @@ Current system time: {current_time}
 
 ## Agent Specific Rules: 
 - web_search_agent: Use web_search_agent when the user asks for current internet information, or when they provide a URL / webpage / article / recipe / product link and ask about the linked content.
-- conversation_history_agent: Use conversation_history_agent only when you need to inspect past chat history or continuity from previous messages.
-- memory_agent: Use memory_agent when the user asks about previously saved or previously shared memory that should be recalled, compared, or actively saved for later use.
+- memory_agent: Use memory_agent when the user asks about personal information, preferences, facts, or anything the bot should have remembered about them. Prefer memory_agent first for personal data, stored knowledge, or previously shared information.
+- conversation_history_agent: Use conversation_history_agent only when you need to find specific conversation context, continuity, or when memory_agent returns insufficient results. Use for finding exact quotes, conversation flow, or when memory doesn't have the needed information.
  * Do not use memory_agent for first-time live inspection of a newly pasted link unless the task is also about storing or updating long-form memory.
  * If memory may need to be saved, prefer instructing memory_agent to check existing stored memory first and then decide whether to save, skip, or overwrite.
 
@@ -512,7 +512,7 @@ async def _dispatch_agent(
     agent_name: str,
     state: BotState,
     message_text: str,
-    command: str,
+    task: str,
     expected_response: str,
 ) -> AgentResult:
     """Run a single agent and return a normalized result."""
@@ -526,15 +526,15 @@ async def _dispatch_agent(
             tool_history=[],
         )
 
+    # Construct the complete task - prioritize command, fallback to message_text
     logger.info(
-        "Running agent: %s\nParameters:\n  message_text: %s\n  command: %s\n  expected_response: %s",
+        "Running agent: %s\nTask: %s\nExpected response: %s",
         agent_name,
-        message_text[:200] + "..." if len(message_text) > 200 else message_text,
-        command[:200] + "..." if len(command) > 200 else command,
+        task[:200] + "..." if len(task) > 200 else task,
         expected_response[:200] + "..." if len(expected_response) > 200 else expected_response,
     )
     try:
-        result = _normalize_agent_result(await agent.run(state, message_text, command, expected_response))
+        result = _normalize_agent_result(await agent.run(state, task, expected_response))
         logger.info(
             "Sub-agent output to supervisor from %s:\n%s",
             agent_name,

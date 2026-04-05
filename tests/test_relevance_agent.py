@@ -100,7 +100,7 @@ async def test_relevance_agent_node():
     out = new_state["assembler_output"]
     assert out["channel_topic"] == "test"
     assert out["should_respond"] is True
-    assert new_state["conversation_history"][0]["content"] == "prev"
+    assert new_state["conversation_history"][0]["message"] == "prev"
     assert new_state["user_memory"] == ["likes cats"]
     assert new_state["character_state"]["mood"] == "happy"
     assert new_state["affinity"] == 600

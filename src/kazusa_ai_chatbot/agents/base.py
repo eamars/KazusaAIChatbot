@@ -33,8 +33,7 @@ class BaseAgent(abc.ABC):
     async def run(
         self,
         state: BotState,
-        user_query: str,
-        command: str = "",
+        task: str,
         expected_response: str = "",
     ) -> AgentResult:
         """Execute the agent and return a structured result.
@@ -43,10 +42,8 @@ class BaseAgent(abc.ABC):
         ----------
         state:
             The full bot state (agents may read but should not mutate it).
-        user_query:
-            The user's message text (convenience — also available in state).
-        command:
-            A supervisor-authored abstract task for the agent to carry out.
+        task:
+            The complete task for the agent to carry out (includes user intent and any supervisor instructions).
         expected_response:
             A supervisor-authored description of the shape and level of detail the
             agent should return.
