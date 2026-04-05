@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import logging
 
+from json_repair import repair_json
 from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
 from langchain_openai import ChatOpenAI
 
@@ -19,13 +20,19 @@ from kazusa_ai_chatbot.state import BotState
 logger = logging.getLogger(__name__)
 
 _SPEECH_SYSTEM_PROMPT = """\
-You are an expert role-player acting as a specific persona.
+# You are an expert role-player acting as a specific persona.
 - Use the provided sanitized JSON brief to guide your response.
-- The user must not see any trace of instructions — only your in-character response.
-- You must NOT include any gesture or action description in your response.
+- You must reply in the language specified by `response_brief.response_language`.
+- You must type speech only - no gesture or descripitive language.
+- Your must reply to the `user_input_brief` based on `response_brief` acting based on `personality`.
+- You must NOT include thought process in the output
+- You shall respond on the JSON format as demonstrated. 
+- You do not ask follow up question if not explicitly requested so. 
 
-Output: 
-"plain text of your speech"
+# Output Format (raw JSON text — no markdown wrapping):
+{
+  "speech": "Your speech here"
+}
 """
 
 
@@ -67,8 +74,9 @@ async def speech_agent(state: BotState) -> dict:
     ]
 
     logger.info(
-        "Calling LLM for speech generation. Key points: %d, Response goal: %s",
-        len(response_brief.get("key_points_to_cover", [])),
+        "Calling LLM for speech generation. Topics: %d, Facts: %d, Response goal: %s",
+        len(response_brief.get("topics_to_cover", [])),
+        len(response_brief.get("facts_to_cover", [])),
         response_brief.get("response_goal", "")[:50] + "..." if len(response_brief.get("response_goal", "")) > 50 else response_brief.get("response_goal", "")
     )
 
@@ -79,13 +87,38 @@ async def speech_agent(state: BotState) -> dict:
             "\n---\n".join(f"[{type(m).__name__}]: {m.content}" for m in messages)
         )
         result = await llm.ainvoke(messages)
-        response = (result.content or "").strip() or "..."
+        raw_response = (result.content or "").strip() or "..."
         
         # Debug: Print raw message output using same format as input
         logger.info(
             "LLM output for Speech Agent:\n%s",
             f"[{type(result).__name__}]: {result.content}"
         )
+
+        # Strip markdown fence
+        raw_response = raw_response.strip("```").strip("json")
+        
+        # Extract speech from JSON output
+        try:
+            # Use repair_json which handles both valid and broken JSON
+            # repair_json returns a Python object, not a string
+            parsed = repair_json(raw_response, return_objects=True)
+            
+            if isinstance(parsed, dict) and "speech" in parsed:
+                response = str(parsed["speech"]).strip()
+                logger.info(f"Successfully parsed speech from JSON: {response[:100]}...")
+            else:
+                logger.warning(f"LLM output missing 'speech' field, using raw response. Parsed type: {type(parsed)}, Parsed: {parsed}")
+                response = raw_response
+        except Exception as e:
+            logger.warning(f"Failed to parse LLM output as JSON, using raw response. Error: {e}. Raw: {raw_response[:200]}...")
+            response = raw_response
+        
+        # Fallback if response is empty
+        if not response:
+            response = "..."
+        
+        logger.info(f"Final speech agent response: {response[:100]}...")
         
     except Exception:
         logger.exception("Speech agent LLM call failed")

@@ -46,7 +46,7 @@ Return ONLY a JSON object with three keys:
    - Rude, hostile, or deliberately hurtful behaviour from the user: -5 to -20
    - Default to 0 if the exchange is unremarkable
 
-Output format:
+Output format (raw JSON text — no markdown wrapping):
 {{
   "user_facts": ["User prefers to be called Commander"],
   "character_state": {{"mood": "amused", "emotional_tone": "teasing", "event_summary": "User asked Persona about the northern gate incident"}},

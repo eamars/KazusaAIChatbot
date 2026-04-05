@@ -92,6 +92,15 @@ class CharacterStateDoc(TypedDict):
     recent_events: list[str]  # short summaries, max 10
     updated_at: str         # ISO-8601 UTC timestamp of last update
 
+
+class MemoryDoc(TypedDict):
+    """Memory base in the ``memory`` collection.
+    """
+    memory_name: str         # Name of the memory
+    content: str     # memory content
+    timestamp: str   # ISO-8601 UTC timestamp of when memory was created/updated
+    embedding: list[float]  # dense vector for similarity search
+
 _client: AsyncIOMotorClient | None = None
 _db = None
 
@@ -326,6 +335,7 @@ async def upsert_user_facts(user_id: str, new_facts: list[str]) -> None:
     )
 
 
+
 async def enable_user_facts_vector_index() -> None:
     """Create a vector search index on the user_facts collection for semantic user search."""
     await enable_vector_index("user_facts", "user_facts_vector_index")
@@ -417,10 +427,100 @@ async def upsert_character_state(
     )
 
 
-def _cosine_similarity(a: list[float], b: list[float]) -> float:
-    """Compute cosine similarity between two vectors."""
-    va, vb = np.array(a), np.array(b)
-    norm_a, norm_b = np.linalg.norm(va), np.linalg.norm(vb)
-    if norm_a == 0 or norm_b == 0:
-        return 0.0
-    return float(np.dot(va, vb) / (norm_a * norm_b))
+# ----------------------------------------------------------------------------------------
+# Memory
+# Collection: memory
+
+
+async def enable_memory_vector_index() -> None:
+    """Create a vector search index on the memory collection for semantic memory search."""
+    await enable_vector_index("memory", "memory_vector_index")
+
+
+async def save_memory(
+    memory_name: str,
+    content: str,
+    timestamp: str,
+) -> None:
+    """Save a memory entry with embedding to the memory collection.
+    
+    Args:
+        memory_name: Name/identifier for the memory
+        content: The memory content/text
+        timestamp: ISO-8601 UTC timestamp for when the memory was created or updated
+    """
+    db = await get_db()
+    
+    # Create embedding based on "memory_name: content"
+    combined_text = f"{memory_name}: {content}"
+    embedding = await get_text_embedding(combined_text)
+    
+    await db.memory.update_one(
+        {"memory_name": memory_name},
+        {
+            "$set": {
+                "memory_name": memory_name,
+                "content": content,
+                "timestamp": timestamp,
+                "embedding": embedding,
+            }
+        },
+        upsert=True,
+    )
+
+
+async def search_memory(
+    query: str,
+    limit: int = 5,
+    method: str = "vector",  # "keyword", "vector"
+) -> list[tuple[float, MemoryDoc]]:
+    """
+    Search memory collection using keyword or vector relevance.
+    
+    Args:
+        query: The search query string.
+        limit: Maximum number of results.
+        method: "keyword" for regex text search, "vector" for semantic search.
+        
+    Returns a list of tuples (similarity_score, memory_doc).
+    Keyword search results always have similarity_score of -1.
+    """
+    db = await get_db()
+    collection = db.memory
+
+    if method == "keyword":
+        base_filter: dict[str, Any] = {
+            "$or": [
+                {"memory_name": {"$regex": query, "$options": "i"}},
+                {"content": {"$regex": query, "$options": "i"}}
+            ]
+        }
+
+        cursor = collection.find(base_filter).limit(limit)
+        docs = await cursor.to_list(length=limit)
+        # Remove embedding field from results
+        for doc in docs:
+            doc.pop("embedding", None)
+        return [(-1.0, doc) for doc in docs]
+
+    # method == "vector"
+    query_embedding = await get_text_embedding(query)
+    index_name = "memory_vector_index"
+
+    pipeline: list[dict[str, Any]] = [
+        {
+            "$vectorSearch": {
+                "index": index_name,
+                "path": "embedding",
+                "queryVector": query_embedding,
+                "numCandidates": limit * 10,
+                "limit": limit,
+            }
+        },
+        {"$addFields": {"score": {"$meta": "vectorSearchScore"}}},
+        {"$unset": "embedding"},
+    ]
+
+    cursor = collection.aggregate(pipeline)
+    docs = await cursor.to_list(length=limit)
+    return [(doc.pop("score", 0.0), doc) for doc in docs]

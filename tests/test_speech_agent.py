@@ -26,12 +26,13 @@ def sample_speech_state():
             "response_brief": {
                 "should_respond": True,
                 "response_goal": "Acknowledge the user.",
+                "response_language": "English",
                 "tone_guidance": "Warm and friendly.",
                 "relationship_guidance": "Be a little open and welcoming.",
                 "state_guidance": "Maintain a light and cheerful demeanor.",
                 "continuity_summary": "No additional recent continuity context is required.",
-                "key_points_to_cover": ["Greet the user back."],
-                "personalization_guidance": ["Use the remembered preferred title if it fits naturally."],
+                "topics_to_cover": ["Greet the user back."],
+                "facts_to_cover": ["The user prefers to be called Commander."],
                 "unknowns_or_limits": [],
             },
         }
@@ -60,7 +61,9 @@ async def test_speech_agent_basic_response(sample_speech_state):
     human_json = json.loads(messages[1].content)
     assert human_json["personality"]["name"] == "Zara"
     assert human_json["response_brief"]["response_goal"] == "Acknowledge the user."
-    assert human_json["response_brief"]["key_points_to_cover"] == ["Greet the user back."]
+    assert human_json["response_brief"]["response_language"] == "English"
+    assert human_json["response_brief"]["topics_to_cover"] == ["Greet the user back."]
+    assert human_json["response_brief"]["facts_to_cover"] == ["The user prefers to be called Commander."]
 
 
 @pytest.mark.asyncio
@@ -160,12 +163,13 @@ async def test_speech_agent_without_supervisor_plan():
             "response_brief": {
                 "should_respond": True,
                 "response_goal": "Reply to the greeting.",
+                "response_language": "English",
                 "tone_guidance": "Warm.",
                 "relationship_guidance": "Friendly.",
                 "state_guidance": "Calm.",
                 "continuity_summary": "No additional recent continuity context is required.",
-                "key_points_to_cover": ["Reply to the greeting."],
-                "personalization_guidance": [],
+                "topics_to_cover": ["Reply to the greeting."],
+                "facts_to_cover": [],
                 "unknowns_or_limits": [],
             }
         }
@@ -222,16 +226,17 @@ async def test_live_directive_not_leaked_in_response():
             "response_brief": {
                 "should_respond": True,
                 "response_goal": content_directive,
+                "response_language": "English",
                 "tone_guidance": "Warm and playful",
                 "relationship_guidance": "Be openly fond and affectionate.",
                 "state_guidance": "Maintain a delighted and gentle demeanor.",
                 "continuity_summary": "Kazusa and the user have already established cute nicknames and a warm rapport.",
-                "key_points_to_cover": [
+                "topics_to_cover": [
                     "Answer how Kazusa imagines the user's appearance.",
                     "Keep the answer affectionate and playful.",
                 ],
-                "personalization_guidance": [
-                    "Reflect the warmth created by the nickname exchange if it fits naturally.",
+                "facts_to_cover": [
+                    "The user and Kazusa have already established cute nicknames.",
                 ],
                 "unknowns_or_limits": [],
             },

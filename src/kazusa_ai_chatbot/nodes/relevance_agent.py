@@ -46,7 +46,7 @@ Bot should NOT respond when:
 - System/bot command not for this bot
 - Irrelevant noise (random emoji, spam)
 
-Output format (ONLY this, nothing else):
+Output format (raw JSON text — no markdown wrapping):
 {{
     "channel_topic": "string",
     "user_topic": "string",

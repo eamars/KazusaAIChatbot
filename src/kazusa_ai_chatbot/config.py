@@ -44,3 +44,6 @@ MCP_SERVERS: dict[str, dict] = json.loads(mcp_servers_env)
 
 # Max tool-calling loop iterations in persona supervisor
 MAX_TOOL_ITERATIONS = int(os.getenv("MAX_TOOL_ITERATIONS", "3"))
+
+# Max supervisor evaluate-dispatch loop iterations
+MAX_SUPERVISOR_ITERATIONS = int(os.getenv("MAX_SUPERVISOR_ITERATIONS", "3"))

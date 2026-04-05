@@ -23,9 +23,9 @@ class ToolCall(TypedDict):
     result: str            # text result returned by the tool
 
 
-class AgentResult(TypedDict):
+class AgentResult(TypedDict, total=False):
     agent: str             # agent name, e.g. "web_search_agent"
-    status: str            # "success" | "error"
+    status: str            # agent-authored response code, e.g. "success", "needs_context", "needs_clarification", "error"
     summary: str           # condensed output for speech_agent
     tool_history: list[ToolCall]  # tool calls made by this agent
 
@@ -35,10 +35,20 @@ class AgentInstruction(TypedDict, total=False):
     expected_response: str
 
 
+class SupervisorAction(TypedDict, total=False):
+    """Decision from the supervisor's evaluate step."""
+    action: str            # "finish" | "retry" | "escalate"
+    agent: str             # target agent for retry/escalate
+    instruction: AgentInstruction  # new instruction for retry/escalate
+    reason: str            # why the supervisor chose this action
+
+
 class SupervisorPlan(TypedDict):
     agents: list[str]      # which agents to invoke, e.g. ["web_search_agent"]
     instructions: dict[str, AgentInstruction]
-    content_directive: str # what information to include in the output
+    response_language: str
+    topics_to_cover: list[str]
+    facts_to_cover: list[str]
     emotion_directive: str # how to generate the output (emotion, tone, style)
 
 
@@ -57,12 +67,13 @@ class UserInputBrief(TypedDict, total=False):
 class ResponseBrief(TypedDict, total=False):
     should_respond: bool
     response_goal: str
+    response_language: str
     tone_guidance: str
     relationship_guidance: str
     state_guidance: str
     continuity_summary: str
-    key_points_to_cover: list[str]
-    personalization_guidance: list[str]
+    topics_to_cover: list[str]
+    facts_to_cover: list[str]
     unknowns_or_limits: list[str]
 
 

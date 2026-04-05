@@ -1,14 +1,9 @@
-"""Web Search Agent — searches the internet via MCP search tools.
-
-Runs in its own LLM context with only the user query and search tool
-descriptions.  Executes the tool-calling loop, then summarises the raw
-search results into a concise paragraph for the speech agent.
-"""
-
 from __future__ import annotations
 
 import json
 import logging
+from datetime import datetime, timezone
+from typing import Any
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 from langchain_core.tools import tool
@@ -16,87 +11,95 @@ from langchain_openai import ChatOpenAI
 
 from kazusa_ai_chatbot.agents.base import BaseAgent
 from kazusa_ai_chatbot.config import LLM_API_KEY, LLM_BASE_URL, LLM_MODEL, MAX_TOOL_ITERATIONS
-from kazusa_ai_chatbot.mcp_client import mcp_manager
+from kazusa_ai_chatbot.db import save_memory, search_memory
 from kazusa_ai_chatbot.state import AgentResult, BotState, ToolCall
 
 logger = logging.getLogger(__name__)
 
 _llm: ChatOpenAI | None = None
 
-_WEB_SEARCH_SYSTEM_PROMPT = """\
-You are a web search assistant. Your job is to search the internet to answer the supervisor's query, then provide a concise factual summary of what you found.
-- Use `success` when the search answer is complete, `needs_context` when search results are missing or insufficient, and `needs_clarification` when the request is too ambiguous to search properly.
+_MEMORY_SYSTEM_PROMPT = """\
+You are a memory assistant. Your job is to actively decide when to recall stored memory and when to save or overwrite memory.
+- Do NOT invent facts.
+- Before saving new memory, prefer checking whether relevant memory already exists.
+- If existing memory already covers the same material, skip storing.
+- If the new material is a better or newer version of the same memory, you may overwrite it by saving under the most appropriate memory name.
+- Use `success` when the memory result is complete, `needs_context` when relevant memory is missing or insufficient, and `needs_clarification` when the user must specify what they meant more clearly.
 
-You have access to web search and URL reading tools. Use them to gather information, then provide your final summary.
+You have access to memory recall and storage tools. Use them to manage the bot's long-term memory.
 
 Output Format (raw JSON text — no markdown wrapping):
 {{
   "status": "success|needs_context|needs_clarification",
-  "summary": "Key facts from your web search here based on supervisor expected response."
+  "summary": "Key facts from your memory retrieval here based on supervisor expected response."
 }}
 """
 
-
 @tool
-async def searxng_web_search(
+async def recall_memory(
     query: str,
-    pageno: int = 1,
-    time_range: str = "",
-    language: str = ""
+    limit: int = 5,
+    method: str = "vector"
 ) -> str:
-    """Performs a web search using the SearXNG API.
+    """Recall previously stored memory relevant to a topic, link, document, or reference the user mentioned before.
     
     Args:
-        query: The search query string (required)
-        pageno: Search page number starting from 1 (default: 1)
-        time_range: Time filter for search results - use 'day', 'month', 'year' or leave empty for all time (default: "")
-        language: Language code for results (e.g., 'en', 'zh', 'fr') or leave empty for default (default: "")
+        query: What memory to look up (required)
+        limit: Maximum number of results to return, defaults to 5, max 10 (optional)
+        method: Search method - 'vector' for semantic search or 'keyword' for text search, defaults to 'vector' (optional)
     """
-    return await mcp_manager.call_tool("mcp-searxng__searxng_web_search", {
-        "query": query,
-        "pageno": pageno,
-        "time_range": time_range,
-        "language": language,
-        "safesearch": 0  # none
-    })
+    if not query:
+        raise ValueError("query is required")
+    limit = max(1, min(int(limit), 10))
+    if method not in {"keyword", "vector"}:
+        method = "vector"
+
+    rows = await search_memory(query=query, limit=limit, method=method)
+    payload = [
+        {
+            "score": score,
+            "memory_name": doc.get("memory_name"),
+            "content": doc.get("content"),
+        }
+        for score, doc in rows
+    ]
+    return json.dumps(payload, ensure_ascii=False)
 
 
 @tool
-async def web_url_read(
-    url: str,
-    startChar: int = 0,
-    maxLength: int = 10000,
-    section: str = "",
-    paragraphRange: str = "",
-    readHeadings: bool = False
+async def store_memory(
+    memory_name: str,
+    content: str,
+    _timestamp: str = ""
 ) -> str:
-    """Reads and extracts content from a specific URL.
+    """Save or overwrite a normalized memory entry when the content should be remembered for later recall.
     
     Args:
-        url: The complete URL to read content from (required)
-        startChar: Starting character position for content extraction (default: 0)
-        maxLength: Maximum number of characters to return, 0 for no limit (default: 10000)
-        section: Extract content under a specific heading text (default: "")
-        paragraphRange: Return specific paragraph ranges like '1-5', '3', or '10-' (default: "")
-        readHeadings: If True, returns only the list of headings instead of full content (default: False)
+        memory_name: Stable short name for the memory entry (required)
+        content: Concise normalized content to store (required)
+        _timestamp: Internal timestamp parameter (optional)
     """
-    # Handle maxLength=0 case by omitting it (MCP tool requires minimum: 1)
-    args = {
-        "url": url,
-        "startChar": startChar,
-        "section": section,
-        "paragraphRange": paragraphRange,
-        "readHeadings": readHeadings
-    }
-    if maxLength > 0:
-        args["maxLength"] = maxLength
-    
-    return await mcp_manager.call_tool("mcp-searxng__web_url_read", args)
+    if not memory_name:
+        raise ValueError("memory_name is required")
+    if not content:
+        raise ValueError("content is required")
+
+    # Use provided timestamp or generate new one
+    timestamp = _timestamp or datetime.now(timezone.utc).isoformat()
+    await save_memory(memory_name=memory_name, content=content, timestamp=timestamp)
+    return json.dumps(
+        {
+            "status": "saved",
+            "memory_name": memory_name,
+            "content": content,
+        },
+        ensure_ascii=False,
+    )
 
 
 def _get_langchain_tools() -> list:
     """Get LangChain tools for this agent."""
-    return [searxng_web_search, web_url_read]
+    return [recall_memory, store_memory]
 
 
 def _get_llm() -> ChatOpenAI:
@@ -104,7 +107,7 @@ def _get_llm() -> ChatOpenAI:
     if _llm is None:
         _llm = ChatOpenAI(
             model=LLM_MODEL,
-            temperature=0.3,
+            temperature=0.2,
             base_url=LLM_BASE_URL,
             api_key=LLM_API_KEY,
         )
@@ -136,23 +139,20 @@ def _parse_final_result(text: str, default_summary: str) -> AgentResult:
             if status and summary:
                 return AgentResult(status=status, summary=summary)  # success path
     except (json.JSONDecodeError, TypeError):
-        logger.warning("Failed to parse web search final JSON: %s", text)
+        logger.warning("Failed to parse memory final JSON: %s", text)
     return AgentResult(status="error", summary=text.strip())
 
 
-class WebSearchAgent(BaseAgent):
-    """Agent that searches the web and summarises results."""
-
+class MemoryAgent(BaseAgent):
     @property
     def name(self) -> str:
-        return "web_search_agent"
+        return "memory_agent"
 
     @property
     def description(self) -> str:
         return (
-            "Searches the internet for real-time information using web search tools. "
-            "Use when the user asks about current events, weather, news, or anything "
-            "that requires up-to-date information not in the bot's knowledge base."
+            "Recalls or stores detailed memory such as shared links, documents, notes, and reference material. "
+            "Use when the supervisor needs active long-form memory read/write beyond user facts or character state."
         )
 
     async def run(
@@ -162,7 +162,6 @@ class WebSearchAgent(BaseAgent):
         command: str = "",
         expected_response: str = "",
     ) -> AgentResult:
-        """Execute the search tool loop and return a summarised result."""
         tool_history: list[ToolCall] = []
         task = command.strip() or user_query
 
@@ -172,22 +171,22 @@ class WebSearchAgent(BaseAgent):
             return AgentResult(
                 agent=self.name,
                 status="error",
-                summary="No search tools available.",
+                summary="No memory tools available.",
                 tool_history=[],
             )
 
-        system_prompt = _WEB_SEARCH_SYSTEM_PROMPT
+        system_prompt = _MEMORY_SYSTEM_PROMPT
 
         if expected_response:
             task += f"\n\nExpected response: {expected_response}"
 
         llm_input_msgs = [
             SystemMessage(content=system_prompt),
-            HumanMessage(content=f"Search query: {task}"),
+            HumanMessage(content=task),
         ]
 
         logger.info(
-            "Calling LLM for web search agent. \nQuery: %s\nMax iterations: %d",
+            "Calling LLM for memory agent. \nTask: %s\nMax iterations: %d",
             task,
             MAX_TOOL_ITERATIONS
         )
@@ -197,7 +196,7 @@ class WebSearchAgent(BaseAgent):
 
             for iteration in range(MAX_TOOL_ITERATIONS + 1):
                 logger.debug(
-                    "LLM input for Web Search Agent (iteration %d):\n%s",
+                    "LLM input for Memory Agent (iteration %d):\n%s",
                     iteration,
                     "\n---\n".join(f"[{type(m).__name__}]: {m.content}" for m in llm_input_msgs)
                 )
@@ -213,7 +212,7 @@ class WebSearchAgent(BaseAgent):
                         tool_id = tool_call["id"]
                         
                         logger.info(
-                            "WebSearchAgent tool call [%d/%d]: %s(%s)",
+                            "MemoryAgent tool call [%d/%d]: %s(%s)",
                             iteration + 1, MAX_TOOL_ITERATIONS, tool_name, tool_args,
                         )
                         
@@ -250,7 +249,7 @@ class WebSearchAgent(BaseAgent):
                     ))
                 else:
                     # No tool calls, this should be the final result
-                    final_result = _parse_final_result(result.content, "No results found.")
+                    final_result = _parse_final_result(result.content, "No relevant memory results found.")
                     return AgentResult(
                         agent=self.name,
                         status=final_result.get("status"),
@@ -262,15 +261,15 @@ class WebSearchAgent(BaseAgent):
                     return AgentResult(
                         agent=self.name,
                         status="error",
-                        summary="Search timed out after maximum iterations.",
+                        summary="Memory action timed out after maximum iterations.",
                         tool_history=tool_history,
                     )
 
         except Exception as exc:
-            logger.exception("WebSearchAgent failed")
+            logger.exception("MemoryAgent failed")
             return AgentResult(
                 agent=self.name,
                 status="error",
-                summary=f"Web search failed: {exc}",
+                summary=f"Memory action failed: {exc}",
                 tool_history=tool_history,
             )
