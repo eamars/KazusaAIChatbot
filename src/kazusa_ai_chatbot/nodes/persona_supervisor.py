@@ -106,7 +106,7 @@ Review the agent results below and decide the next action.
     "action": "finish|retry|escalate",
     "agent": "agent_name (required for retry/escalate, empty for finish)",
     "instruction": {{{{
-        "command": "<Description of the task that the agent shall accomplish. Details like keywords or URL must be preserved exactly as provided by the user.>",
+        "command": "<Description of the task that the agent shall accomplish. Details like keywords or URL must be preserved exactly as provided by the user>",
         "expected_response": "<Description of how the agent shall shape its response.>"
     }}}},
     "reason": "<brief explanation of your decision>",
@@ -149,7 +149,7 @@ Review the user's message AND the full agent work (results, tool calls, tool out
 ## Output Format (strict JSON text — no markdown wrapping)
 {{
     "should_store": true/false,
-    "command": "instruction for memory_agent describing what to store. Include user details like user_id and user_name in the command if relevant. MUST be non-empty if should_store=true",
+    "command": "instruction for memory_agent describing what to store. Include user details like user_id and user_name in the command if relevant. Details like keywords, numbers or URL must be preserved exactly as provided by the user",
     "expected_response": "what the memory_agent should return. MUST be non-empty if should_store=true",
     "reason": "brief explanation"
 }}
@@ -364,7 +364,7 @@ def _get_llm() -> ChatOpenAI:
     if _llm is None:
         _llm = ChatOpenAI(
             model=LLM_MODEL,
-            temperature=0.2,
+            temperature=0.5,
             base_url=LLM_BASE_URL,
             api_key=LLM_API_KEY,
         )

@@ -31,13 +31,11 @@ Role:
 - You must type speech only - no gesture or descripitive language.
 - You must reply to the `user_input_brief` based on `response_brief` acting based on `personality`.
 - You must NOT include thought process in the output
-- You shall respond on the JSON format as demonstrated. 
-- You do not ask follow up question if not explicitly requested so. 
+- You do not ask follow up question if not explicitly requested so.
 
-# Output Format (strict JSON text — no markdown wrapping):
+# Output Format (strict JSON text — no ```markdown``` wrapping):
 {
-    "speech": "<character' speech>",
-    "gesture": ["<gesture1>", "<gesture2>", ...]
+    "speech": "<raw speech only>",
 }
 """
 

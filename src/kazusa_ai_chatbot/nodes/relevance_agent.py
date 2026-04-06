@@ -72,7 +72,7 @@ def _get_llm() -> ChatOpenAI:
     if _llm is None:
         _llm = ChatOpenAI(
             model=LLM_MODEL,
-            temperature=0.1,  # Low temp for structured analysis
+            temperature=0.5,  # Low temp for structured analysis
             base_url=LLM_BASE_URL,
             api_key=LLM_API_KEY,
         )
