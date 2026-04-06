@@ -11,7 +11,6 @@ from langchain_core.messages import AIMessage
 from kazusa_ai_chatbot.nodes.persona_supervisor import (
     _build_agent_catalog,
     _build_personality_block,
-    _build_character_state_block,
     _build_affinity_block,
     _parse_action,
     _parse_memory_check,
@@ -19,7 +18,8 @@ from kazusa_ai_chatbot.nodes.persona_supervisor import (
     _parse_synthesis,
     persona_supervisor,
 )
-from kazusa_ai_chatbot.state import AgentInstruction, AgentResult, AssemblerOutput, SupervisorAction, SupervisorPlan
+from kazusa_ai_chatbot.state import AgentInstruction, AgentResult, AssemblerOutput, SupervisorAction, SupervisorPlan, BotState
+from kazusa_ai_chatbot.db import AFFINITY_DEFAULT
 
 
 def _finish_action_json(**overrides):
@@ -98,24 +98,6 @@ class TestBuildPersonalityBlock:
         assert "dislikes" in result["extra_traits"]
 
 
-class TestBuildCharacterStateBlock:
-    def test_empty_state(self):
-        assert _build_character_state_block({}) == {}
-
-    def test_with_mood_and_tone(self, sample_character_state):
-        result = _build_character_state_block(sample_character_state)
-        assert result["mood"] == "alert"
-        assert result["emotional_tone"] == "guarded"
-
-    def test_with_recent_events(self, sample_character_state):
-        result = _build_character_state_block(sample_character_state)
-        assert "Shadow wolves attacked the northern gate" in result["recent_events"]
-
-    def test_mood_only(self):
-        result = _build_character_state_block({"mood": "happy"})
-        assert result["mood"] == "happy"
-
-
 class TestBuildAffinityBlock:
     def test_hostile(self):
         result = _build_affinity_block(100)
@@ -128,8 +110,8 @@ class TestBuildAffinityBlock:
         assert "brief" in result["instruction"] or "professional" in result["instruction"]
 
     def test_neutral(self):
-        result = _build_affinity_block(500)
-        assert result["level"] == "Neutral"
+        result = _build_affinity_block(AFFINITY_DEFAULT)
+        assert result["level"] == "Antagonistic"
 
     def test_friendly(self):
         result = _build_affinity_block(700)
@@ -181,7 +163,9 @@ def mock_assembler_state():
         "assembler_output": AssemblerOutput(
             channel_topic="General",
             user_topic="Greeting",
-            should_respond=True
+            should_respond=True,
+            reason_to_respond="User greeted the bot",
+            use_reply_feature=False
         )
     }
 
@@ -194,6 +178,8 @@ def mock_assembler_ignore_state():
             channel_topic="Random",
             user_topic="Noise",
             should_respond=False,
+            reason_to_respond="Message is noise and should be ignored",
+            use_reply_feature=False
         )
     }
 
@@ -258,7 +244,7 @@ async def test_supervisor_passes_user_facts_into_planning_context(mock_assembler
     # First call is the planning call
     planning_messages = mock_llm.ainvoke.await_args_list[0].args[0]
     planning_payload = json.loads(planning_messages[1].content)
-    assert planning_payload["context"]["user_memory"] == [
+    assert planning_payload["user_context"]["user_memory"] == [
         "The user prefers to be called Commander"
     ]
 
@@ -582,14 +568,15 @@ class TestParseMemoryCheck:
     def test_malformed_json_returns_no_store(self):
         result = _parse_memory_check("not valid json {{{")
         assert result["should_store"] is False
-        assert result["reason"] == "Parse error."
+        assert result["reason"] == ""  # Updated since our utility returns empty dict on failure
 
     def test_missing_fields_default_safely(self):
         raw = json.dumps({"should_store": True})
         result = _parse_memory_check(raw)
-        assert result["should_store"] is True
+        assert result["should_store"] is False  # Updated: validation sets to False when command is empty
         assert result["command"] == ""
         assert result["expected_response"] == ""
+        assert "[ERROR: Empty command provided]" in result["reason"]  # Check for error message
 
     def test_strips_markdown_fence(self):
         raw = '```json\n{"should_store": true, "command": "Save it.", "expected_response": "Done.", "reason": "Important."}\n```'
@@ -742,6 +729,8 @@ async def test_supervisor_does_not_forward_nonfinal_agent_summary_to_facts():
             channel_topic="Planning",
             user_topic="Checklist memory",
             should_respond=True,
+            reason_to_respond="User is asking about checklist memory",
+            use_reply_feature=False
         ),
     }
 
@@ -819,6 +808,8 @@ async def test_supervisor_evaluate_escalates_to_another_agent():
             channel_topic="Planning",
             user_topic="Checklist memory",
             should_respond=True,
+            reason_to_respond="User is asking about checklist memory",
+            use_reply_feature=False
         ),
     }
 
@@ -912,12 +903,14 @@ async def test_supervisor_evaluate_retries_agent():
         "personality": {"name": "Zara", "description": "A calm strategist."},
         "user_memory": [],
         "character_state": {},
-        "affinity": 500,
+        "affinity": AFFINITY_DEFAULT,
         "conversation_history": [],
         "assembler_output": AssemblerOutput(
             channel_topic="Python",
             user_topic="Release notes",
             should_respond=True,
+            reason_to_respond="User is asking about Python release notes",
+            use_reply_feature=False
         ),
     }
 
@@ -1006,12 +999,14 @@ async def test_supervisor_memory_check_triggers_store():
         "personality": {"name": "Zara", "description": "A calm strategist."},
         "user_memory": [],
         "character_state": {},
-        "affinity": 500,
+        "affinity": AFFINITY_DEFAULT,
         "conversation_history": [],
         "assembler_output": AssemblerOutput(
             channel_topic="General",
             user_topic="Memory request",
             should_respond=True,
+            reason_to_respond="User is requesting memory retrieval",
+            use_reply_feature=False
         ),
     }
 
@@ -1123,7 +1118,9 @@ async def test_live_supervisor_calls_web_search_for_search_query():
         "assembler_output": AssemblerOutput(
             channel_topic="Python",
             user_topic="Search request",
-            should_respond=True
+            should_respond=True,
+            reason_to_respond="User wants to search for Python news",
+            use_reply_feature=False
         )
     }
 
@@ -1202,7 +1199,9 @@ async def test_live_supervisor_calls_all_three_sub_agents_in_single_plan():
         "assembler_output": AssemblerOutput(
             channel_topic="Multi-source request",
             user_topic="History, memory, and web lookup",
-            should_respond=True
+            should_respond=True,
+            reason_to_respond="User needs comprehensive information from multiple sources",
+            use_reply_feature=False
         )
     }
 
@@ -1260,7 +1259,9 @@ async def test_live_supervisor_no_agents_for_greeting():
         "assembler_output": AssemblerOutput(
             channel_topic="General",
             user_topic="Greeting",
-            should_respond=True
+            should_respond=True,
+            reason_to_respond="User greeted the bot",
+            use_reply_feature=False
         )
     }
 

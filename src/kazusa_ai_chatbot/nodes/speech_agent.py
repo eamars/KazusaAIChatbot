@@ -36,7 +36,8 @@ Role:
 
 # Output Format (strict JSON text — no markdown wrapping):
 {
-  "speech": "Your speech here"
+    "speech": "<character' speech>",
+    "gesture": ["<gesture1>", "<gesture2>", ...]
 }
 """
 
@@ -87,7 +88,7 @@ async def speech_agent(state: BotState) -> dict:
 
     try:
         llm = _get_llm()
-        logger.info(
+        logger.debug(
             "LLM input for Speech Agent:\n%s",
             "\n---\n".join(f"[{type(m).__name__}]: {m.content}" for m in messages)
         )

@@ -14,7 +14,9 @@ import logging
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_openai import ChatOpenAI
 
-from kazusa_ai_chatbot.config import CONVERSATION_HISTORY_LIMIT, LLM_API_KEY, LLM_BASE_URL, LLM_MODEL
+from kazusa_ai_chatbot.config import LLM_API_KEY, LLM_BASE_URL, LLM_MODEL, CONVERSATION_HISTORY_LIMIT
+from kazusa_ai_chatbot.state import AssemblerOutput, BotState
+from kazusa_ai_chatbot.utils import parse_llm_json_output
 from kazusa_ai_chatbot.db import AFFINITY_DEFAULT, get_affinity, get_character_state, get_conversation_history, get_user_facts
 from kazusa_ai_chatbot.state import AssemblerOutput, BotState, CharacterState, ChatMessage
 from kazusa_ai_chatbot.utils import format_history_lines
@@ -23,35 +25,45 @@ logger = logging.getLogger(__name__)
 
 _llm: ChatOpenAI | None = None
 
-_RELEVANCE_PROMPT = """\
-You are a context analysis engine. Your job is to analyze the conversation history, user memory, character state, and current message, then output ONLY a JSON object.
+
+_RELEVANCE_SYSTEM_PROMPT = """\
+You are a Context Analysis Engine. Your goal is to analyze the conversation and output ONLY a JSON object.
 
 You represent a Discord bot roleplaying as the character '{persona_name}'.
 Your Discord user ID is '{bot_id}'.
 
-DO NOT write explanations, analysis, or commentary. Output ONLY the JSON object.
+# Response Decision Logic (Guidance)
+You must set "should_respond" to true if any of the following are met:
+- Direct Address: The message contains <@{bot_id}>, the name '{persona_name}', or a nickname like 'Teacher' or 'Teacher Kazusa'.
+- Active Thread: The bot was the last to speak, and the user's message is a direct follow-up or answer to the bot's previous statement.
+- Domain Expertise: The user is discussing core interests/roles of the character.
+- Emotional Cue: The user is expressing distress, seeking validation that triggers the character's nature.
 
-Required fields:
-- should_respond: true if bot should reply, false otherwise
-- channel_topic: General topic being discussed in the channel
-- user_topic: Specific topic/intent of user's recent conversation
+You must set "should_respond" to false if:
+- Inter-User Chat: The user is clearly addressing another human in the channel.
+- Transactional End: The user has provided a closing statement (e.g., "Thanks!", "Goodnight", "I'll try that") that does not require a follow-up.
+- Low Signal: The message is a reaction, a single emoji, or a system command.
 
-Bot should respond when:
-- Message directed at bot (greeting, question, conversation)
-- Continuation of ongoing conversation with bot
-- Casual chat where bot is expected to participate
+You must set "use_reply_feature" to true if:
+- Specific Question: The user asked a direct, technical, or personal question that requires a specific answer.
+- Delayed Response: There are messages from other users between the bot's last message and the user's current message (needs a "Reply" to maintain context).
+- Correction/Feedback: The bot is correcting a user's Python code or providing feedback on a specific task.
+- Old Context: The user is referencing something said several messages ago.
 
-Bot should NOT respond when:
-- Conversation between other users
-- System/bot command not for this bot
-- Irrelevant noise (random emoji, spam)
+You must set "use_reply_feature" to false if:
+- Flowing Conversation: The bot and user are in a rapid, 1-on-1 "back-and-forth" with no interruptions.
+- Ambient Comment: The bot is just chiming in on a general topic or reacting to the "vibe" of the channel.
+- Greeting: A simple "Hello" or "Good morning" to the room.
 
-Output format (strict JSON text — no markdown wrapping):
+Output format (strict JSON text — no ```markdown``` wrapping):
 {{
-    "should_respond": true / false,
-    "channel_topic": "string",
-    "user_topic": "string"
+    "should_respond": <boolean: should the bot respond to this message>,
+    "reason_to_respond": "<a short explaination of why, or why not respond to the message>",
+    "use_reply_feature": <boolean: should the bot use the reply feature>,
+    "channel_topic": "<General topic being discussed in the channel based on the context>",
+    "user_topic": "<Specific topic/intent of user's recent conversation based on the current_message>"
 }}
+
 """
 
 
@@ -125,28 +137,15 @@ async def _load_context(state: BotState) -> tuple[list[ChatMessage], list[str], 
 
 
 def _parse_relevance_output(raw: str) -> AssemblerOutput:
-    text = raw.strip()
-    if text.startswith("```"):
-        text = text.split("\n", 1)[-1]
-    if text.endswith("```"):
-        text = text.rsplit("```", 1)[0]
-    text = text.strip()
-
-    try:
-        data = json.loads(text)
-        return AssemblerOutput(
-            channel_topic=str(data.get("channel_topic", "Unknown")),
-            user_topic=str(data.get("user_topic", "Unknown")),
-            should_respond=bool(data.get("should_respond", True))
-        )
-    except Exception:
-        logger.exception("Failed to parse relevance LLM output: %s", raw[:200])
-        # Fail-open
-        return AssemblerOutput(
-            channel_topic="Unknown",
-            user_topic="Unknown",
-            should_respond=True
-        )
+    data = parse_llm_json_output(raw)
+    
+    return AssemblerOutput(
+        channel_topic=str(data.get("channel_topic", "Unknown")),
+        user_topic=str(data.get("user_topic", "Unknown")),
+        should_respond=bool(data.get("should_respond", True)),
+        reason_to_respond=str(data.get("reason_to_respond", "No reason provided")),
+        use_reply_feature=bool(data.get("use_reply_feature", False))
+    )
 
 
 def _build_history_json(
@@ -194,7 +193,7 @@ async def relevance_agent(state: BotState) -> BotState:
         llm = _get_llm()
         bot_id = state.get("bot_id", "unknown_bot_id")
         
-        formatted_prompt = _RELEVANCE_PROMPT.format(
+        formatted_prompt = _RELEVANCE_SYSTEM_PROMPT.format(
             persona_name=persona_name,
             bot_id=bot_id
         )
@@ -215,16 +214,24 @@ async def relevance_agent(state: BotState) -> BotState:
         assembler_output = AssemblerOutput(
             channel_topic="Unknown",
             user_topic="Unknown",
-            should_respond=True
+            should_respond=True,
+            reason_to_respond="LLM analysis failed - defaulting to respond",
+            use_reply_feature=False
         )
 
-    logger.info("Relevance Agent output: %s", assembler_output)
+    logger.info("Relevance Agent - should_respond: %s, reason: %s, use_reply_feature: %s, channel_topic: %s, user_topic: %s", 
+                assembler_output["should_respond"], 
+                assembler_output["reason_to_respond"], 
+                assembler_output["use_reply_feature"],
+                assembler_output["channel_topic"],
+                assembler_output["user_topic"])
 
     return {
         "conversation_history": formatted_history,
         "user_memory": user_memory,
         "character_state": character_state,
         "affinity": affinity,
-        "assembler_output": assembler_output
+        "assembler_output": assembler_output,
+        "use_reply_feature": assembler_output["use_reply_feature"]
     }
 

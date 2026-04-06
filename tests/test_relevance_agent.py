@@ -11,6 +11,7 @@ from kazusa_ai_chatbot.nodes.relevance_agent import (
     relevance_agent,
 )
 from kazusa_ai_chatbot.state import BotState
+from kazusa_ai_chatbot.db import AFFINITY_DEFAULT
 
 
 def test_parse_relevance_output_success():
@@ -142,7 +143,7 @@ async def test_relevance_agent_handles_context_fetch_failures():
     assert new_state["conversation_history"] == []
     assert new_state["user_memory"] == []
     assert new_state["character_state"] == {}
-    assert new_state["affinity"] == 500
+    assert new_state["affinity"] == 200
 
 
 @pytest.mark.asyncio
@@ -178,7 +179,7 @@ async def test_load_context_handles_history_failure(base_state):
         patch("kazusa_ai_chatbot.nodes.relevance_agent.get_conversation_history", new_callable=AsyncMock, side_effect=Exception("db error")),
         patch("kazusa_ai_chatbot.nodes.relevance_agent.get_user_facts", new_callable=AsyncMock, return_value=[]),
         patch("kazusa_ai_chatbot.nodes.relevance_agent.get_character_state", new_callable=AsyncMock, return_value={}),
-        patch("kazusa_ai_chatbot.nodes.relevance_agent.get_affinity", new_callable=AsyncMock, return_value=500),
+        patch("kazusa_ai_chatbot.nodes.relevance_agent.get_affinity", new_callable=AsyncMock, return_value=AFFINITY_DEFAULT),
     ):
         history, user_memory, character_state, affinity = await _load_context(base_state)
 
@@ -190,7 +191,7 @@ async def test_load_context_handles_history_failure(base_state):
         "recent_events": [],
         "updated_at": "",
     }
-    assert affinity == 500
+    assert affinity == AFFINITY_DEFAULT
 
 
 @pytest.mark.asyncio
@@ -201,7 +202,7 @@ async def test_load_context_handles_facts_failure(base_state):
         patch("kazusa_ai_chatbot.nodes.relevance_agent.get_conversation_history", new_callable=AsyncMock, return_value=[]),
         patch("kazusa_ai_chatbot.nodes.relevance_agent.get_user_facts", new_callable=AsyncMock, side_effect=Exception("db error")),
         patch("kazusa_ai_chatbot.nodes.relevance_agent.get_character_state", new_callable=AsyncMock, return_value={}),
-        patch("kazusa_ai_chatbot.nodes.relevance_agent.get_affinity", new_callable=AsyncMock, return_value=500),
+        patch("kazusa_ai_chatbot.nodes.relevance_agent.get_affinity", new_callable=AsyncMock, return_value=AFFINITY_DEFAULT),
     ):
         history, user_memory, character_state, affinity = await _load_context(base_state)
 
@@ -213,7 +214,7 @@ async def test_load_context_handles_facts_failure(base_state):
         "recent_events": [],
         "updated_at": "",
     }
-    assert affinity == 500
+    assert affinity == AFFINITY_DEFAULT
 
 
 @pytest.mark.asyncio
@@ -224,14 +225,14 @@ async def test_load_context_handles_character_state_failure(base_state):
         patch("kazusa_ai_chatbot.nodes.relevance_agent.get_conversation_history", new_callable=AsyncMock, return_value=[]),
         patch("kazusa_ai_chatbot.nodes.relevance_agent.get_user_facts", new_callable=AsyncMock, return_value=[]),
         patch("kazusa_ai_chatbot.nodes.relevance_agent.get_character_state", new_callable=AsyncMock, side_effect=Exception("db error")),
-        patch("kazusa_ai_chatbot.nodes.relevance_agent.get_affinity", new_callable=AsyncMock, return_value=500),
+        patch("kazusa_ai_chatbot.nodes.relevance_agent.get_affinity", new_callable=AsyncMock, return_value=AFFINITY_DEFAULT),
     ):
         history, user_memory, character_state, affinity = await _load_context(base_state)
 
     assert history == []
     assert user_memory == []
     assert character_state == {}
-    assert affinity == 500
+    assert affinity == AFFINITY_DEFAULT
 
 
 @pytest.mark.asyncio
@@ -254,4 +255,4 @@ async def test_load_context_handles_affinity_failure(base_state):
         "recent_events": [],
         "updated_at": "",
     }
-    assert affinity == 500
+    assert affinity == 200

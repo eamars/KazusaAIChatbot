@@ -1,8 +1,14 @@
-"""Shared utility helpers used across agents and nodes."""
+"""Shared utility functions for the Kazusa AI chatbot."""
 
 from __future__ import annotations
 
-from kazusa_ai_chatbot.state import ChatMessage
+import re
+from typing import TYPE_CHECKING
+
+from json_repair import repair_json
+
+if TYPE_CHECKING:
+    from kazusa_ai_chatbot.state import ChatMessage
 
 
 def format_history_lines(
@@ -30,7 +36,6 @@ def format_history_lines(
             speaker_id = msg.get("user_id", "unknown_user_id")
             
         # Clean the name to be alphanumeric/underscore only (OpenAI name requirement)
-        import re
         clean_name = re.sub(r'[^a-zA-Z0-9_-]', '', name)
         if not clean_name:
             clean_name = "user" if role == "user" else "assistant"
@@ -54,3 +59,33 @@ def format_history_text(
     if not lines:
         return ""
     return "\n".join(f"[{label}]: {content}" for label, content, _, _ in lines)
+
+
+def parse_llm_json_output(raw_output: str) -> dict:
+    """Parse LLM JSON output, handling markdown fences and malformed JSON.
+    
+    Args:
+        raw_output: Raw string output from LLM
+        
+    Returns:
+        Parsed JSON object as dict, or empty dict if parsing fails
+    """
+    if not raw_output:
+        return {}
+    
+    try:
+        # Strip markdown fences and clean up
+        raw = raw_output.strip().strip("`").strip()
+        if raw.startswith("json"):
+            raw = raw[4:].strip()
+        
+        # Use repair_json which handles both valid and broken JSON
+        parsed = repair_json(raw, return_objects=True)
+        
+        if isinstance(parsed, dict):
+            return parsed
+        else:
+            return {}
+            
+    except Exception:
+        return {}

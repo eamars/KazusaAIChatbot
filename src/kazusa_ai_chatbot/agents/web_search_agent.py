@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import logging
+from datetime import datetime, timezone
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 from langchain_core.tools import tool
@@ -26,8 +27,8 @@ _llm: ChatOpenAI | None = None
 _WEB_SEARCH_SYSTEM_PROMPT = """\
 You are a web search assistant. Your job is to search the internet to answer the supervisor's query, then provide a concise factual summary of what you found.
 - Use `success` when the search answer is complete, `needs_context` when search results are missing or insufficient, and `needs_clarification` when the request is too ambiguous to search properly.
-
-You have access to web search and URL reading tools. Use them to gather information, then provide your final summary.
+- The current date is {current_date}. When searching for news or recent events, prioritize current information and avoid defaulting to past years unless specifically requested.
+- You have access to web search and URL reading tools. Use them to gather information, then provide your final summary.
 
 Output Format (strict JSON text — no markdown wrapping):
 {{
@@ -174,7 +175,9 @@ class WebSearchAgent(BaseAgent):
                 tool_history=[],
             )
 
-        system_prompt = _WEB_SEARCH_SYSTEM_PROMPT
+        # Use raw timestamp for context
+        timestamp = state.get("timestamp", "")
+        system_prompt = _WEB_SEARCH_SYSTEM_PROMPT.format(current_date=timestamp)
 
         if expected_response:
             task += f"\n\nExpected response: {expected_response}"

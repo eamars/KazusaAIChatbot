@@ -10,6 +10,7 @@ from langchain_core.messages import AIMessage
 
 from kazusa_ai_chatbot.graph import build_graph
 from kazusa_ai_chatbot.state import BotState, SupervisorPlan
+from kazusa_ai_chatbot.db import AFFINITY_DEFAULT
 
 
 @pytest.mark.asyncio
@@ -67,7 +68,7 @@ async def test_full_graph_question_flow(sample_personality):
         patch("kazusa_ai_chatbot.nodes.relevance_agent.get_conversation_history", new_callable=AsyncMock, return_value=mock_history),
         patch("kazusa_ai_chatbot.nodes.relevance_agent.get_user_facts", new_callable=AsyncMock, return_value=["User goes by Commander"]),
         patch("kazusa_ai_chatbot.nodes.relevance_agent.get_character_state", new_callable=AsyncMock, return_value=mock_char_state),
-        patch("kazusa_ai_chatbot.nodes.relevance_agent.get_affinity", new_callable=AsyncMock, return_value=500),
+        patch("kazusa_ai_chatbot.nodes.relevance_agent.get_affinity", new_callable=AsyncMock, return_value=AFFINITY_DEFAULT),
         patch("kazusa_ai_chatbot.nodes.relevance_agent._get_llm", return_value=mock_relevance_llm),
         patch("kazusa_ai_chatbot.nodes.persona_supervisor._get_llm", return_value=mock_supervisor_llm),
         patch("kazusa_ai_chatbot.nodes.speech_agent._get_llm", return_value=mock_speech_llm),
@@ -126,7 +127,7 @@ async def test_full_graph_casual_greeting(sample_personality):
         patch("kazusa_ai_chatbot.nodes.relevance_agent.get_conversation_history", new_callable=AsyncMock, return_value=[]),
         patch("kazusa_ai_chatbot.nodes.relevance_agent.get_user_facts", new_callable=AsyncMock, return_value=[]),
         patch("kazusa_ai_chatbot.nodes.relevance_agent.get_character_state", new_callable=AsyncMock, return_value={}),
-        patch("kazusa_ai_chatbot.nodes.relevance_agent.get_affinity", new_callable=AsyncMock, return_value=500),
+        patch("kazusa_ai_chatbot.nodes.relevance_agent.get_affinity", new_callable=AsyncMock, return_value=AFFINITY_DEFAULT),
         patch("kazusa_ai_chatbot.nodes.relevance_agent._get_llm", return_value=mock_relevance_llm),
         patch("kazusa_ai_chatbot.nodes.persona_supervisor._get_llm", return_value=mock_supervisor_llm),
         patch("kazusa_ai_chatbot.nodes.speech_agent._get_llm", return_value=mock_speech_llm),
@@ -211,7 +212,7 @@ async def test_full_graph_conversation_history_flow(sample_personality):
         patch("kazusa_ai_chatbot.nodes.relevance_agent.get_conversation_history", new_callable=AsyncMock, return_value=[]),
         patch("kazusa_ai_chatbot.nodes.relevance_agent.get_user_facts", new_callable=AsyncMock, return_value=[]),
         patch("kazusa_ai_chatbot.nodes.relevance_agent.get_character_state", new_callable=AsyncMock, return_value={}),
-        patch("kazusa_ai_chatbot.nodes.relevance_agent.get_affinity", new_callable=AsyncMock, return_value=500),
+        patch("kazusa_ai_chatbot.nodes.relevance_agent.get_affinity", new_callable=AsyncMock, return_value=AFFINITY_DEFAULT),
         patch("kazusa_ai_chatbot.nodes.relevance_agent._get_llm", return_value=mock_relevance_llm),
         patch("kazusa_ai_chatbot.nodes.persona_supervisor._get_llm", return_value=mock_supervisor_llm),
         patch("kazusa_ai_chatbot.nodes.persona_supervisor.get_agent", return_value=mock_history_agent),
@@ -301,7 +302,7 @@ async def test_full_graph_memory_agent_flow(sample_personality):
         patch("kazusa_ai_chatbot.nodes.relevance_agent.get_conversation_history", new_callable=AsyncMock, return_value=[]),
         patch("kazusa_ai_chatbot.nodes.relevance_agent.get_user_facts", new_callable=AsyncMock, return_value=[]),
         patch("kazusa_ai_chatbot.nodes.relevance_agent.get_character_state", new_callable=AsyncMock, return_value={}),
-        patch("kazusa_ai_chatbot.nodes.relevance_agent.get_affinity", new_callable=AsyncMock, return_value=500),
+        patch("kazusa_ai_chatbot.nodes.relevance_agent.get_affinity", new_callable=AsyncMock, return_value=AFFINITY_DEFAULT),
         patch("kazusa_ai_chatbot.nodes.relevance_agent._get_llm", return_value=mock_relevance_llm),
         patch("kazusa_ai_chatbot.nodes.persona_supervisor._get_llm", return_value=mock_supervisor_llm),
         patch("kazusa_ai_chatbot.nodes.persona_supervisor.get_agent", return_value=mock_memory_agent),

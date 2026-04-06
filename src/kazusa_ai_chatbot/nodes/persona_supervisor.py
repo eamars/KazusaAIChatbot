@@ -25,7 +25,8 @@ from langchain_openai import ChatOpenAI
 
 from kazusa_ai_chatbot.agents.base import AGENT_REGISTRY, get_agent, list_agent_descriptions
 from kazusa_ai_chatbot.config import LLM_API_KEY, LLM_BASE_URL, LLM_MODEL, MAX_SUPERVISOR_ITERATIONS
-from kazusa_ai_chatbot.state import AgentInstruction, AgentResult, BotState, SupervisorAction, SupervisorPlan
+from kazusa_ai_chatbot.state import AgentInstruction, AgentResult, BotState, SupervisorPlan, SupervisorAction
+from kazusa_ai_chatbot.utils import parse_llm_json_output
 
 logger = logging.getLogger(__name__)
 
@@ -44,8 +45,6 @@ Current system time: {current_time}
 ## General Agent Calling Rules:
 - Only request agents if the user needs external information or if the reply depends on inspecting content outside the current message.
 - If you request an agent, provide an instructions entry for that specific agent
-- instructions[agent].command: a short task for the agent
-- instructions[agent].expected_response: how the agent should shape its response
 - response_language: the language the speech agent should reply in
 - topics_to_cover: short list of topics the speech agent must address
 - facts_to_cover: explicit factual points the speech agent should state or rely on
@@ -66,8 +65,14 @@ Current system time: {current_time}
 
 ### Output Format (strict JSON text — no markdown wrapping)
 {{
-    "agents": [],
-    "instructions": {{}},
+    "agents": ["name_of_agent", ...],
+    "instructions": {{
+        "name_of_agent": {{
+            "command": "<Description of the task that the agent shall accomplish. Details like keywords or URL must be preserved exactly as provided by the user>",
+            "expected_response": "<Description of how the agent shall shape its response>"
+        }},
+        ...
+    }},
     "response_language": "string",
     "topics_to_cover": [],
     "facts_to_cover": [],
@@ -101,10 +106,10 @@ Review the agent results below and decide the next action.
     "action": "finish|retry|escalate",
     "agent": "agent_name (required for retry/escalate, empty for finish)",
     "instruction": {{{{
-        "command": "refined task for the agent",
-        "expected_response": "what the agent should return"
+        "command": "<Description of the task that the agent shall accomplish. Details like keywords or URL must be preserved exactly as provided by the user.>",
+        "expected_response": "<Description of how the agent shall shape its response.>"
     }}}},
-    "reason": "brief explanation of your decision",
+    "reason": "<brief explanation of your decision>",
     "topics_to_cover": [],
     "facts_to_cover": [],
     "emotion_directive": "string"
@@ -144,10 +149,12 @@ Review the user's message AND the full agent work (results, tool calls, tool out
 ## Output Format (strict JSON text — no markdown wrapping)
 {{
     "should_store": true/false,
-    "command": "instruction for memory_agent describing what to store. Include user details like user_id and user_name in the command if relevant (empty string if should_store is false)",
-    "expected_response": "what the memory_agent should return (empty string if should_store is false)",
+    "command": "instruction for memory_agent describing what to store. Include user details like user_id and user_name in the command if relevant. MUST be non-empty if should_store=true",
+    "expected_response": "what the memory_agent should return. MUST be non-empty if should_store=true",
     "reason": "brief explanation"
 }}
+
+## IMPORTANT: If should_store=true, you MUST provide specific, non-empty command and expected_response fields. If should_store=false, these fields can be empty.
 """
 
 _SYNTHESIS_SYSTEM = """\
@@ -205,15 +212,6 @@ def _build_personality_block(personality: dict) -> dict:
     if extras:
         res["extra_traits"] = extras
         
-    return res
-
-def _build_character_state_block(character_state: dict) -> dict:
-    if not character_state:
-        return {}
-    res = {}
-    if character_state.get("mood"): res["mood"] = character_state["mood"]
-    if character_state.get("emotional_tone"): res["emotional_tone"] = character_state["emotional_tone"]
-    if character_state.get("recent_events"): res["recent_events"] = character_state["recent_events"][-5:]
     return res
 
 def _build_affinity_block(affinity: int) -> dict:
@@ -395,117 +393,98 @@ def _strip_markdown_fence(text: str) -> str:
 
 def _parse_plan(raw: str) -> SupervisorPlan:
     """Parse the LLM's JSON response into a SupervisorPlan."""
-    text = _strip_markdown_fence(raw)
+    data = parse_llm_json_output(raw)
+    
+    agents = data.get("agents", [])
+    instructions = data.get("instructions", {})
+    response_language = str(data.get("response_language", "Match the user's current language.")).strip() or "Match the user's current language."
+    topics_to_cover = data.get("topics_to_cover", [])
+    facts_to_cover = data.get("facts_to_cover", [])
+    emotion_directive = str(data.get("emotion_directive", "Standard in-character tone.")).strip() or "Standard in-character tone."
 
-    try:
-        data = json.loads(text)
-        agents = data.get("agents", [])
-        instructions = data.get("instructions", {})
-        response_language = str(data.get("response_language", "Match the user's current language.")).strip() or "Match the user's current language."
-        raw_topics = data.get("topics_to_cover", [])
-        raw_facts = data.get("facts_to_cover", [])
-        emotion_dir = data.get("emotion_directive", "Maintain standard in-character tone.")
-
-        if not isinstance(raw_topics, list):
-            raw_topics = [raw_topics] if raw_topics else []
-        if not isinstance(raw_facts, list):
-            raw_facts = [raw_facts] if raw_facts else []
-        topics_to_cover = _normalize_brief_list([str(item) for item in raw_topics])
-        facts_to_cover = _normalize_brief_list([str(item) for item in raw_facts])
-
-        if not isinstance(instructions, dict):
-            instructions = {}
-
-        # Validate agent names against registry
-        valid_agents = [a for a in agents if a in AGENT_REGISTRY]
-        if len(valid_agents) != len(agents):
-            unknown = set(agents) - set(valid_agents)
-            logger.warning("Supervisor requested unknown agents: %s", unknown)
-
-        valid_instructions: dict[str, AgentInstruction] = {}
-        for agent_name in valid_agents:
-            raw_instruction = instructions.get(agent_name, {})
-            if not isinstance(raw_instruction, dict):
-                continue
-            command = str(raw_instruction.get("command", "")).strip()
-            expected_response = str(raw_instruction.get("expected_response", "")).strip()
-            if command or expected_response:
-                valid_instructions[agent_name] = AgentInstruction(
-                    command=command,
-                    expected_response=expected_response,
-                )
-
-        return SupervisorPlan(
-            agents=valid_agents,
-            instructions=valid_instructions,
-            response_language=response_language,
-            topics_to_cover=topics_to_cover,
-            facts_to_cover=facts_to_cover,
-            emotion_directive=emotion_dir,
-        )
-    except Exception:
-        logger.exception("Failed to parse supervisor plan: %s", raw[:200])
-        return SupervisorPlan(
-            agents=[],
-            instructions={},
-            response_language="Match the user's current language.",
-            topics_to_cover=["Respond directly to the user's latest message."],
-            facts_to_cover=[],
-            emotion_directive="Standard in-character tone.",
-        )
+    # Validate agents
+    if not isinstance(agents, list):
+        agents = []
+    else:
+        # Filter out unknown agents
+        valid_agents = []
+        for agent in agents:
+            if agent not in AGENT_REGISTRY:
+                logger.warning("Unknown agent in plan: %s", agent)
+            else:
+                valid_agents.append(agent)
+        agents = valid_agents
+    
+    # Validate instructions
+    if not isinstance(instructions, dict):
+        instructions = {}
+    else:
+        # Filter out instructions for unknown agents
+        valid_instructions = {}
+        for agent_name, instruction in instructions.items():
+            if agent_name in AGENT_REGISTRY:
+                valid_instructions[agent_name] = instruction
+            else:
+                logger.warning("Unknown agent instruction filtered out: %s", agent_name)
+                logger.warning(f"Likely corrupted LLM planning: {data}")
+        instructions = valid_instructions
+    
+    return SupervisorPlan(
+        agents=agents,
+        instructions=instructions,
+        response_language=response_language,
+        topics_to_cover=topics_to_cover,
+        facts_to_cover=facts_to_cover,
+        emotion_directive=emotion_directive,
+    )
 
 
 def _parse_action(raw: str, plan: SupervisorPlan) -> SupervisorAction:
     """Parse the LLM's evaluate-step JSON into a SupervisorAction."""
-    text = _strip_markdown_fence(raw)
+    data = parse_llm_json_output(raw)
+    
+    action = str(data.get("action", "finish")).strip().lower()
+    if action not in ("finish", "retry", "escalate"):
+        action = "finish"
 
-    try:
-        data = json.loads(text)
-        action = str(data.get("action", "finish")).strip().lower()
-        if action not in ("finish", "retry", "escalate"):
+    agent = str(data.get("agent", "")).strip()
+    reason = str(data.get("reason", "")).strip()
+
+    raw_instruction = data.get("instruction", {})
+    instruction = AgentInstruction(
+        command=str(raw_instruction.get("command", "")).strip() if isinstance(raw_instruction, dict) else "",
+        expected_response=str(raw_instruction.get("expected_response", "")).strip() if isinstance(raw_instruction, dict) else "",
+    )
+
+    # Validate agent for retry/escalate
+    if action in ("retry", "escalate"):
+        if not agent or agent not in AGENT_REGISTRY:
+            logger.warning("Evaluate step referenced invalid agent '%s', falling back to finish", agent)
             action = "finish"
+            agent = ""
 
-        agent = str(data.get("agent", "")).strip()
-        reason = str(data.get("reason", "")).strip()
+    # Allow the evaluate step to refine plan directives
+    raw_topics = data.get("topics_to_cover")
+    raw_facts = data.get("facts_to_cover")
+    emotion_dir = data.get("emotion_directive")
 
-        raw_instruction = data.get("instruction", {})
-        instruction = AgentInstruction(
-            command=str(raw_instruction.get("command", "")).strip() if isinstance(raw_instruction, dict) else "",
-            expected_response=str(raw_instruction.get("expected_response", "")).strip() if isinstance(raw_instruction, dict) else "",
-        )
+    if raw_topics is not None:
+        if not isinstance(raw_topics, list):
+            raw_topics = [raw_topics] if raw_topics else []
+        plan["topics_to_cover"] = _normalize_brief_list([str(item) for item in raw_topics])
+    if raw_facts is not None:
+        if not isinstance(raw_facts, list):
+            raw_facts = [raw_facts] if raw_facts else []
+        plan["facts_to_cover"] = _normalize_brief_list([str(item) for item in raw_facts])
+    if emotion_dir is not None:
+        plan["emotion_directive"] = str(emotion_dir).strip()
 
-        # Validate agent for retry/escalate
-        if action in ("retry", "escalate"):
-            if not agent or agent not in AGENT_REGISTRY:
-                logger.warning("Evaluate step referenced invalid agent '%s', falling back to finish", agent)
-                action = "finish"
-                agent = ""
-
-        # Allow the evaluate step to refine plan directives
-        raw_topics = data.get("topics_to_cover")
-        raw_facts = data.get("facts_to_cover")
-        emotion_dir = data.get("emotion_directive")
-
-        if raw_topics is not None:
-            if not isinstance(raw_topics, list):
-                raw_topics = [raw_topics] if raw_topics else []
-            plan["topics_to_cover"] = _normalize_brief_list([str(item) for item in raw_topics])
-        if raw_facts is not None:
-            if not isinstance(raw_facts, list):
-                raw_facts = [raw_facts] if raw_facts else []
-            plan["facts_to_cover"] = _normalize_brief_list([str(item) for item in raw_facts])
-        if emotion_dir is not None:
-            plan["emotion_directive"] = str(emotion_dir).strip()
-
-        return SupervisorAction(
-            action=action,
-            agent=agent,
-            instruction=instruction,
-            reason=reason,
-        )
-    except Exception:
-        logger.exception("Failed to parse supervisor action: %s", raw[:200])
-        return SupervisorAction(action="finish", agent="", reason="Parse failure, finishing.")
+    return SupervisorAction(
+        action=action,
+        agent=agent,
+        instruction=instruction,
+        reason=reason,
+    )
 
 
 async def _dispatch_agent(
@@ -553,27 +532,22 @@ async def _dispatch_agent(
 
 def _parse_synthesis(raw: str, plan: SupervisorPlan) -> None:
     """Parse the synthesis LLM output and update the plan in-place."""
-    text = _strip_markdown_fence(raw)
+    data = parse_llm_json_output(raw)
 
-    try:
-        data = json.loads(text)
+    raw_topics = data.get("topics_to_cover")
+    raw_facts = data.get("facts_to_cover")
+    emotion_dir = data.get("emotion_directive")
 
-        raw_topics = data.get("topics_to_cover")
-        raw_facts = data.get("facts_to_cover")
-        emotion_dir = data.get("emotion_directive")
-
-        if raw_topics is not None:
-            if not isinstance(raw_topics, list):
-                raw_topics = [raw_topics] if raw_topics else []
-            plan["topics_to_cover"] = _normalize_brief_list([str(item) for item in raw_topics])
-        if raw_facts is not None:
-            if not isinstance(raw_facts, list):
-                raw_facts = [raw_facts] if raw_facts else []
-            plan["facts_to_cover"] = _normalize_brief_list([str(item) for item in raw_facts])
-        if emotion_dir is not None:
-            plan["emotion_directive"] = str(emotion_dir).strip()
-    except Exception:
-        logger.exception("Failed to parse synthesis output: %s", raw[:200])
+    if raw_topics is not None:
+        if not isinstance(raw_topics, list):
+            raw_topics = [raw_topics] if raw_topics else []
+        plan["topics_to_cover"] = _normalize_brief_list([str(item) for item in raw_topics])
+    if raw_facts is not None:
+        if not isinstance(raw_facts, list):
+            raw_facts = [raw_facts] if raw_facts else []
+        plan["facts_to_cover"] = _normalize_brief_list([str(item) for item in raw_facts])
+    if emotion_dir is not None:
+        plan["emotion_directive"] = str(emotion_dir).strip()
 
 
 def _parse_memory_check(raw: str) -> dict:
@@ -582,22 +556,25 @@ def _parse_memory_check(raw: str) -> dict:
     Returns a dict with ``should_store``, ``command``, ``expected_response``,
     and ``reason``.  On parse failure, returns ``should_store=False``.
     """
-    text = _strip_markdown_fence(raw)
-    try:
-        data = json.loads(text)
-        should_store = bool(data.get("should_store", False))
-        command = str(data.get("command") or "").strip()
-        expected_response = str(data.get("expected_response") or "").strip()
-        reason = str(data.get("reason") or "").strip()
-        return {
-            "should_store": should_store,
-            "command": command,
-            "expected_response": expected_response,
-            "reason": reason,
-        }
-    except Exception:
-        logger.exception("Failed to parse memory check output: %s", raw[:200])
-        return {"should_store": False, "command": "", "expected_response": "", "reason": "Parse error."}
+    data = parse_llm_json_output(raw)
+    
+    should_store = bool(data.get("should_store", False))
+    command = str(data.get("command") or "").strip()
+    expected_response = str(data.get("expected_response") or "").strip()
+    reason = str(data.get("reason") or "").strip()
+    
+    # Validation: if should_store is true, command must be provided
+    if should_store and not command:
+        logger.warning("Memory check returned should_store=true but empty command - defaulting to should_store=false")
+        should_store = False
+        reason += " [ERROR: Empty command provided]"
+    
+    return {
+        "should_store": should_store,
+        "command": command,
+        "expected_response": expected_response,
+        "reason": reason,
+    }
 
 
 async def _check_and_store_memory(
@@ -835,6 +812,8 @@ async def persona_supervisor(state: BotState) -> dict:
     assembler_output = state.get("assembler_output", {})
     agent_results: list[AgentResult] = []
 
+    chain_of_thought = []  # Capture the history of all LLM calls and reasons for each step
+
     # ── Step 0: Check relevance from Assembler ──────────────────────
     logger.info("Supervisor Step 0: Checking relevance from assembler")
     should_respond = assembler_output.get("should_respond", True)
@@ -900,12 +879,16 @@ async def persona_supervisor(state: BotState) -> dict:
 
     try:
         llm = _get_llm()
-        logger.info(
+        logger.debug(
             "LLM input for Persona Supervisor:\n%s",
             "\n---\n".join(f"[{type(m).__name__}]: {m.content}" for m in planning_messages)
         )
         result = await llm.ainvoke(planning_messages)
         plan = _parse_plan(result.content or "")
+        
+        # logger.info("Planning LLM raw output: %s", result.content)
+        # logger.info("Parsed plan: %s", plan)
+        # logger.info("Plan instructions: %s", plan.get("instructions", {}))
     except Exception:
         logger.exception("Supervisor planning LLM call failed")
         plan = SupervisorPlan(
@@ -918,15 +901,38 @@ async def persona_supervisor(state: BotState) -> dict:
         )
 
     logger.info("Supervisor plan: agents=%s", plan["agents"])
+    
+    # Add to chain of thought
+    chain_of_thought.append({
+        "step": 1,
+        "step_name": "initial_planning",
+        "input": human_data,
+        # "output": plan
+    })
 
+    
     # ── Step 2: Dispatch initial agents ─────────────────────────────
     logger.info("Supervisor Step 2: Dispatching initial agents")
     for agent_name in plan["agents"]:
         instruction = plan.get("instructions", {}).get(agent_name, {})
+        logger.info("Agent %s instruction: %s", agent_name, instruction)
+        
         command = instruction.get("command", "") if isinstance(instruction, dict) else ""
         expected_response = instruction.get("expected_response", "") if isinstance(instruction, dict) else ""
+        
+        logger.info("Agent %s extracted - command: '%s', expected_response: '%s'", 
+                    agent_name, command, expected_response)
+        
         agent_result = await _dispatch_agent(agent_name, state, message_text, command, expected_response)
         agent_results.append(agent_result)
+    
+    # Add to chain of thought
+    # chain_of_thought.append({
+    #     "step": 2,
+    #     "step_name": "agent_dispatch",
+    #     "input": {"agents": plan["agents"], "instructions": plan.get("instructions", {})},
+    #     "output": {"agent_results_count": len(agent_results), "agent_results": agent_results}
+    # })
 
     # ── Step 3: Evaluate-dispatch loop ──────────────────────────────
     logger.info("Supervisor Step 3: Evaluate-dispatch loop")
@@ -974,6 +980,14 @@ async def persona_supervisor(state: BotState) -> dict:
     )
     if memory_result is not None:
         agent_results.append(memory_result)
+    
+    # Add to chain of thought
+    # chain_of_thought.append({
+    #     "step": 4,
+    #     "step_name": "memory_check",
+    #     "input": {"agent_results_count": len(agent_results), "message_text": message_text},
+    #     "output": {"memory_stored": memory_result is not None, "memory_result": memory_result}
+    # })
 
     # ── Step 5: Synthesize agent results into speech-ready key points ─
     logger.info("Supervisor Step 5: Synthesizing agent results into speech-ready key points")
@@ -981,13 +995,30 @@ async def persona_supervisor(state: BotState) -> dict:
         await _synthesize_results(
             plan, agent_results, message_text, persona_name, bot_id, state
         )
+    
+    # Add to chain of thought
+    # chain_of_thought.append({
+    #     "step": 5,
+    #     "step_name": "synthesis",
+    #     "input": {"agent_results_count": len(agent_results), "plan": plan},
+    #     "output": {"synthesized": len(agent_results) > 0, "final_plan": plan}
+    # })
 
     # ── Step 6: Build speech brief ──────────────────────────────────
     logger.info("Supervisor Step 6: Building speech brief")
     speech_brief = _build_speech_brief(plan, agent_results, state)
+    
+    # Add to chain of thought
+    chain_of_thought.append({
+        "step": 6,
+        "step_name": "speech_brief",
+        # "input": {"plan": plan, "agent_results": agent_results},
+        "output": {"speech_brief": speech_brief}
+    })
 
     return {
         "supervisor_plan": plan,
         "agent_results": agent_results,
         "speech_brief": speech_brief,
+        "supervisor_chain_of_thought": chain_of_thought,
     }

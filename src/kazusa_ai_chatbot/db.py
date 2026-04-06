@@ -84,12 +84,12 @@ class CharacterStateDoc(TypedDict):
     """Global character mood/state in the ``character_state`` collection.
 
     There is exactly **one** document with ``_id: "global"``.
-    Recent events are capped at 10 (sliding window).
+    Recent events accumulate without limit.
     """
 
     mood: str               # e.g. "melancholic", "playful", "irritated"
     emotional_tone: str     # e.g. "warm", "guarded", "teasing"
-    recent_events: list[str]  # short summaries, max 10
+    recent_events: list[str]  # short summaries of recent notable interactions
     updated_at: str         # ISO-8601 UTC timestamp of last update
 
 
@@ -285,7 +285,7 @@ async def get_user_facts(user_id: str) -> list[str]:
     return doc.get("facts", [])
 
 
-AFFINITY_DEFAULT = 500
+AFFINITY_DEFAULT = 200
 AFFINITY_MIN = 0
 AFFINITY_MAX = 1000
 
@@ -334,6 +334,22 @@ async def upsert_user_facts(user_id: str, new_facts: list[str]) -> None:
         upsert=True,
     )
 
+
+async def overwrite_user_facts(user_id: str, facts: list[str]) -> None:
+    """Overwrite all user facts with a new list, replacing existing ones."""
+    db = await get_db()
+    
+    if facts:
+        combined_facts_text = "\n".join(facts)
+        embedding = await get_text_embedding(combined_facts_text)
+    else:
+        embedding = []
+
+    await db.user_facts.update_one(
+        {"user_id": user_id},
+        {"$set": {"user_id": user_id, "facts": facts, "embedding": embedding}},
+        upsert=True,
+    )
 
 
 async def enable_user_facts_vector_index() -> None:
@@ -406,12 +422,12 @@ async def upsert_character_state(
     recent_events: list[str],
     timestamp: str,
 ) -> None:
-    """Update the global character state. Keeps last 10 recent events."""
+    """Update the global character state."""
     db = await get_db()
-    # Fetch existing events and append, keeping a sliding window
+    # Fetch existing events and append
     existing = await get_character_state()
     old_events = existing.get("recent_events", [])
-    merged_events = (old_events + recent_events)[-10:]  # keep last 10
+    merged_events = old_events + recent_events  # No limit - keep all events
 
     await db.character_state.update_one(
         {"_id": "global"},
@@ -420,6 +436,29 @@ async def upsert_character_state(
                 "mood": mood,
                 "emotional_tone": emotional_tone,
                 "recent_events": merged_events,
+                "updated_at": timestamp,
+            }
+        },
+        upsert=True,
+    )
+
+
+async def overwrite_character_state_recent_events(recent_events: list[str], timestamp: str) -> None:
+    """Overwrite only the recent_events in character state, preserving mood and tone."""
+    db = await get_db()
+    
+    # Get existing state to preserve mood and tone
+    existing = await get_character_state()
+    current_mood = existing.get("mood", "")
+    current_tone = existing.get("emotional_tone", "")
+
+    await db.character_state.update_one(
+        {"_id": "global"},
+        {
+            "$set": {
+                "mood": current_mood,
+                "emotional_tone": current_tone,
+                "recent_events": recent_events,
                 "updated_at": timestamp,
             }
         },

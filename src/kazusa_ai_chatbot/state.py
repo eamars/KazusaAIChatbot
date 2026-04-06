@@ -56,6 +56,8 @@ class AssemblerOutput(TypedDict):
     channel_topic: str
     user_topic: str
     should_respond: bool
+    reason_to_respond: str
+    use_reply_feature: bool
 
 
 class UserInputBrief(TypedDict, total=False):
@@ -102,11 +104,13 @@ class BotState(TypedDict, total=False):
 
     # --- Stage 2: relevance_agent analysis ---
     assembler_output: AssemblerOutput
+    use_reply_feature: bool
 
     # --- Stage 3: persona_supervisor ---
     supervisor_plan: SupervisorPlan
     agent_results: list[AgentResult]
     speech_brief: SpeechBrief
+    supervisor_chain_of_thought: list[dict]
 
     # --- Stage 4: speech_agent ---
     response: str

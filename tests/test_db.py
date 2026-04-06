@@ -16,6 +16,8 @@ from kazusa_ai_chatbot.db import (
     get_conversation_history,
     get_db,
     get_user_facts,
+    overwrite_character_state_recent_events,
+    overwrite_user_facts,
     save_conversation,
     update_affinity,
     upsert_character_state,
@@ -135,6 +137,96 @@ async def test_enable_user_facts_vector_index_mocked():
     assert model.document["name"] == "user_facts_vector_index"
     assert model.document["type"] == "vectorSearch"
     assert model.document["definition"]["fields"][0]["numDimensions"] == 3
+
+
+@pytest.mark.asyncio
+async def test_overwrite_user_facts_replaces_existing():
+    """overwrite_user_facts should completely replace existing facts."""
+    db = _mock_db()
+    db.user_facts.update_one = AsyncMock()
+    
+    with patch("kazusa_ai_chatbot.db.get_db", new_callable=AsyncMock, return_value=db), \
+         patch("kazusa_ai_chatbot.db.get_text_embedding", new_callable=AsyncMock, return_value=[0.1, 0.2, 0.3]):
+        await overwrite_user_facts("user_1", ["New fact 1", "New fact 2"])
+    
+    # Verify update_one was called with the new facts (not merged)
+    db.user_facts.update_one.assert_called_once_with(
+        {"user_id": "user_1"},
+        {"$set": {"user_id": "user_1", "facts": ["New fact 1", "New fact 2"], "embedding": [0.1, 0.2, 0.3]}},
+        upsert=True,
+    )
+
+
+@pytest.mark.asyncio
+async def test_overwrite_user_facts_empty():
+    """overwrite_user_facts should handle empty facts list."""
+    db = _mock_db()
+    db.user_facts.update_one = AsyncMock()
+    
+    with patch("kazusa_ai_chatbot.db.get_db", new_callable=AsyncMock, return_value=db), \
+         patch("kazusa_ai_chatbot.db.get_text_embedding", new_callable=AsyncMock, return_value=[]):
+        await overwrite_user_facts("user_1", [])
+    
+    # Verify update_one was called with empty facts and empty embedding
+    db.user_facts.update_one.assert_called_once_with(
+        {"user_id": "user_1"},
+        {"$set": {"user_id": "user_1", "facts": [], "embedding": []}},
+        upsert=True,
+    )
+
+
+@pytest.mark.asyncio
+async def test_overwrite_character_state_recent_events_preserves_mood_tone():
+    """overwrite_character_state_recent_events should preserve existing mood and tone."""
+    db = _mock_db()
+    db.character_state.find_one = AsyncMock(return_value={
+        "mood": "happy",
+        "emotional_tone": "cheerful",
+        "recent_events": ["old event 1", "old event 2"]
+    })
+    db.character_state.update_one = AsyncMock()
+    
+    with patch("kazusa_ai_chatbot.db.get_db", new_callable=AsyncMock, return_value=db):
+        await overwrite_character_state_recent_events(["new event 1", "new event 2"], "2026-04-06T12:00:00Z")
+    
+    # Verify update_one was called with preserved mood/tone and new events
+    db.character_state.update_one.assert_called_once_with(
+        {"_id": "global"},
+        {
+            "$set": {
+                "mood": "happy",
+                "emotional_tone": "cheerful",
+                "recent_events": ["new event 1", "new event 2"],
+                "updated_at": "2026-04-06T12:00:00Z",
+            }
+        },
+        upsert=True,
+    )
+
+
+@pytest.mark.asyncio
+async def test_overwrite_character_state_recent_events_empty_existing():
+    """overwrite_character_state_recent_events should handle empty existing state."""
+    db = _mock_db()
+    db.character_state.find_one = AsyncMock(return_value={})
+    db.character_state.update_one = AsyncMock()
+    
+    with patch("kazusa_ai_chatbot.db.get_db", new_callable=AsyncMock, return_value=db):
+        await overwrite_character_state_recent_events(["new event"], "2026-04-06T12:00:00Z")
+    
+    # Verify update_one was called with empty mood/tone defaults and new events
+    db.character_state.update_one.assert_called_once_with(
+        {"_id": "global"},
+        {
+            "$set": {
+                "mood": "",
+                "emotional_tone": "",
+                "recent_events": ["new event"],
+                "updated_at": "2026-04-06T12:00:00Z",
+            }
+        },
+        upsert=True,
+    )
 
 
 @pytest.mark.asyncio
@@ -646,7 +738,7 @@ async def test_search_conversation_history_vector_with_filters_mocked():
 @live_db
 @pytest.mark.asyncio
 async def test_live_affinity_default_for_new_user(live_test_db):
-    """New users start at AFFINITY_DEFAULT (500)."""
+    """New users start at AFFINITY_DEFAULT (200)."""
     score = await get_affinity("new_user")
     assert score == AFFINITY_DEFAULT
 
@@ -674,11 +766,11 @@ async def test_live_update_affinity_negative(live_test_db):
 async def test_live_affinity_clamps_at_bounds(live_test_db):
     """Affinity cannot exceed 0–1000."""
     # Clamp at 0
-    await update_affinity("user_low", -600)  # 500 - 600 → 0
+    await update_affinity("user_low", -600)  # AFFINITY_DEFAULT - 600 → 0
     assert await get_affinity("user_low") == 0
 
     # Clamp at 1000
-    await update_affinity("user_high", 600)  # 500 + 600 → 1000
+    await update_affinity("user_high", 600)  # AFFINITY_DEFAULT + 600 → 1000
     assert await get_affinity("user_high") == 1000
 
 

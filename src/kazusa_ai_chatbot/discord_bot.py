@@ -117,8 +117,8 @@ class RolePlayBot(discord.Client):
         if not response:
             return
 
-        # Use reply() in noisy channels so context is clear; send() otherwise
-        use_reply = await self._should_reply(message)
+        # Use reply feature decision from relevance agent
+        use_reply = result.get("use_reply_feature", False)
 
         # Discord has a 2000 char limit; split if necessary
         for chunk in _split_message(response):
@@ -139,31 +139,6 @@ class RolePlayBot(discord.Client):
             )
         )
         asyncio.create_task(self._run_memory_writer(result))
-
-    async def _should_reply(self, message: discord.Message) -> bool:
-        """Decide whether to use reply() or send().
-
-        Uses reply() when:
-        - The bot was explicitly @mentioned (user expects a directed response)
-        - The channel is noisy (3+ distinct authors in the last 10 messages)
-
-        Otherwise uses a plain send() for a more natural conversation feel.
-        """
-        # Always reply when @mentioned
-        if self.user and self.user in message.mentions:
-            return True
-
-        # Check recent channel activity for noise
-        try:
-            recent_authors: set[int] = set()
-            async for msg in message.channel.history(limit=10, before=message):
-                recent_authors.add(msg.author.id)
-                if len(recent_authors) >= 3:
-                    return True
-        except Exception:
-            pass
-
-        return False
 
     async def _run_memory_writer(self, graph_result: dict) -> None:
         """Fire-and-forget: run memory writer after reply is sent."""
