@@ -34,7 +34,7 @@ Role:
 - You shall respond on the JSON format as demonstrated. 
 - You do not ask follow up question if not explicitly requested so. 
 
-# Output Format (raw JSON text — no markdown wrapping):
+# Output Format (strict JSON text — no markdown wrapping):
 {
   "speech": "Your speech here"
 }

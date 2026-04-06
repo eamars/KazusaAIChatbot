@@ -79,10 +79,75 @@ async def _build_base_state(
     channel_topic: str,
     user_topic: str,
 ) -> BotState:
-    conversation_history = []
-    user_memory = await get_user_facts(user_id) if user_id else []
-    affinity = 900
-    character_state = await get_character_state()
+    """Build base state with real conversation history and character stats from database."""
+    import asyncio
+    from kazusa_ai_chatbot.config import CONVERSATION_HISTORY_LIMIT
+    from kazusa_ai_chatbot.db import AFFINITY_DEFAULT, get_affinity, get_character_state, get_conversation_history, get_user_facts
+    from kazusa_ai_chatbot.state import CharacterState, ChatMessage
+    
+    # Load real data from database (borrowed from relevance_agent._load_context)
+    history_task = get_conversation_history(channel_id, limit=CONVERSATION_HISTORY_LIMIT) if channel_id else asyncio.sleep(0, result=[])
+    facts_task = get_user_facts(user_id) if user_id else asyncio.sleep(0, result=[])
+    character_state_task = get_character_state()
+    affinity_task = get_affinity(user_id) if user_id else asyncio.sleep(0, result=AFFINITY_DEFAULT)
+
+    raw_history, raw_facts, raw_character_state, raw_affinity = await asyncio.gather(
+        history_task,
+        facts_task,
+        character_state_task,
+        affinity_task,
+        return_exceptions=True,
+    )
+
+    # Process conversation history
+    if isinstance(raw_history, Exception):
+        print(f"Failed to fetch conversation history: {raw_history}")
+        conversation_history = []
+    else:
+        conversation_history = [
+            ChatMessage(
+                role=doc.get("role", "user"),
+                user_id=doc.get("user_id", ""),
+                name=doc.get("name", "unknown"),
+                content=doc.get("content", ""),
+            )
+            for doc in raw_history
+        ]
+
+    # Process user memory
+    if isinstance(raw_facts, Exception):
+        print(f"Failed to fetch user facts: {raw_facts}")
+        user_memory = []
+    else:
+        user_memory = [str(fact) for fact in raw_facts]
+
+    # Process character state
+    if isinstance(raw_character_state, Exception):
+        print(f"Failed to fetch character state: {raw_character_state}")
+        character_state = {"mood": "neutral", "emotional_tone": "balanced", "recent_events": [], "updated_at": ""}
+    elif isinstance(raw_character_state, dict):
+        # Handle case where DB returns a dict - CharacterState is a TypedDict
+        character_state = {
+            "mood": raw_character_state.get("mood", "neutral"),
+            "emotional_tone": raw_character_state.get("emotional_tone", "balanced"),
+            "recent_events": raw_character_state.get("recent_events", []),
+            "updated_at": raw_character_state.get("updated_at", ""),
+        }
+    else:
+        # Handle case where DB returns CharacterState object
+        character_state = raw_character_state
+
+    # Process affinity
+    if isinstance(raw_affinity, Exception):
+        print(f"Failed to fetch affinity: {raw_affinity}")
+        affinity = AFFINITY_DEFAULT
+    else:
+        affinity = int(raw_affinity)
+
+    print(f"Loaded {len(conversation_history)} conversation history messages")
+    print(f"Loaded {len(user_memory)} user facts")
+    print(f"Character state: mood={character_state.get('mood', 'neutral')}, events={len(character_state.get('recent_events') or [])}")
+    print(f"Affinity: {affinity}")
 
     state: BotState = {
         "user_id": user_id,

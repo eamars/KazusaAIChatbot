@@ -16,7 +16,7 @@ from langchain_openai import ChatOpenAI
 from kazusa_ai_chatbot.config import LLM_API_KEY, LLM_BASE_URL, LLM_MODEL
 from kazusa_ai_chatbot.db import update_affinity, upsert_character_state, upsert_user_facts
 from kazusa_ai_chatbot.state import BotState
-from kazusa_ai_chatbot.utils import format_history_lines
+
 
 logger = logging.getLogger(__name__)
 
@@ -46,7 +46,7 @@ Return ONLY a JSON object with three keys:
    - Rude, hostile, or deliberately hurtful behaviour from the user: -5 to -20
    - Default to 0 if the exchange is unremarkable
 
-Output format (raw JSON text — no markdown wrapping):
+Output format (strict JSON text — no markdown wrapping):
 {{
   "user_facts": ["User prefers to be called Commander"],
   "character_state": {{"mood": "amused", "emotional_tone": "teasing", "event_summary": "User asked Persona about the northern gate incident"}},
@@ -54,14 +54,6 @@ Output format (raw JSON text — no markdown wrapping):
 }}
 """
 
-def _build_history_json(
-    history: list[dict], persona_name: str = "assistant", bot_id: str = "unknown_bot_id"
-) -> list[dict]:
-    """Convert conversation history into a JSON structure."""
-    lines = []
-    for name, content, role, speaker_id in format_history_lines(history, persona_name, bot_id):
-        lines.append({"speaker": name, "speaker_id": speaker_id, "message": content})
-    return lines
 
 def _get_llm() -> ChatOpenAI:
     global _llm

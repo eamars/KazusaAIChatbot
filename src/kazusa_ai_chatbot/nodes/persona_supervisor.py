@@ -64,7 +64,7 @@ Current system time: {current_time}
 - facts_to_cover: explicit factual points the speech agent should state or rely on
 - emotion_directive: Tone, mood, style for speech agent
 
-### Output Format: (raw JSON text — no markdown wrapping)
+### Output Format (strict JSON text — no markdown wrapping)
 {{
     "agents": [],
     "instructions": {{}},
@@ -96,7 +96,7 @@ Review the agent results below and decide the next action.
 - Be conservative: prefer "finish" unless the result is clearly inadequate for generating a good reply.
 - A status of "needs_clarification" from an agent usually means the user's request is ambiguous — prefer "finish" and let the speech agent ask the user, rather than retrying.
 
-### Output Format: (raw JSON text — no markdown wrapping)
+### Output Format (strict JSON text — no markdown wrapping)
 {{{{
     "action": "finish|retry|escalate",
     "agent": "agent_name (required for retry/escalate, empty for finish)",
@@ -141,7 +141,7 @@ Review the user's message AND the full agent work (results, tool calls, tool out
 
 ## Default to STORING: When in doubt, prefer to store the information. It's better to have too much context than too little.
 
-## Output Format: (raw JSON text — no markdown wrapping)
+## Output Format (strict JSON text — no markdown wrapping)
 {{
     "should_store": true/false,
     "command": "instruction for memory_agent describing what to store. Include user details like user_id and user_name in the command if relevant (empty string if should_store is false)",
@@ -170,7 +170,7 @@ It needs short, digestible factual bullet points it can weave into a natural in-
 - Preserve the original plan's topics_to_cover and emotion_directive unless the agent results suggest changes.
 - facts_to_cover should contain ONLY distilled key points, not raw agent output.
 
-### Output Format: (raw JSON text — no markdown wrapping)
+### Output Format (strict JSON text — no markdown wrapping)
 {{{{
     "topics_to_cover": ["short topic strings"],
     "facts_to_cover": ["concise distilled fact 1", "concise distilled fact 2"],
@@ -880,11 +880,14 @@ async def persona_supervisor(state: BotState) -> dict:
             "speaker_id": user_id,
             "message": message_text
         },
-        "context": {
+        "user_context": {
             "channel_topic": assembler_output.get("channel_topic", "Unknown"),
             "user_topic": assembler_output.get("user_topic", "Unknown"),
             "user_memory": user_memory,
-            # "conversation_history": state.get("conversation_history", [])
+        },
+        "character_context": {
+            # "conversation_history": state.get("conversation_history", []),
+            "character_events": state["character_state"].get("recent_events") or [],
         }
     }
 
@@ -897,7 +900,7 @@ async def persona_supervisor(state: BotState) -> dict:
 
     try:
         llm = _get_llm()
-        logger.debug(
+        logger.info(
             "LLM input for Persona Supervisor:\n%s",
             "\n---\n".join(f"[{type(m).__name__}]: {m.content}" for m in planning_messages)
         )
