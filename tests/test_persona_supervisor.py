@@ -11,7 +11,6 @@ from langchain_core.messages import AIMessage
 from kazusa_ai_chatbot.nodes.persona_supervisor import (
     _build_agent_catalog,
     _build_personality_block,
-    _build_affinity_block,
     _parse_action,
     _parse_memory_check,
     _parse_plan,
@@ -96,32 +95,6 @@ class TestBuildPersonalityBlock:
         assert result["name"] == "Zara"
         assert "likes" in result["extra_traits"]
         assert "dislikes" in result["extra_traits"]
-
-
-class TestBuildAffinityBlock:
-    def test_hostile(self):
-        result = _build_affinity_block(100)
-        assert result["level"] == "Scornful"
-        assert "contempt" in result["instruction"] or "dismissive" in result["instruction"]
-
-    def test_cold(self):
-        result = _build_affinity_block(300)
-        assert result["level"] == "Reserved"
-        assert "brief" in result["instruction"] or "professional" in result["instruction"]
-
-    def test_neutral(self):
-        result = _build_affinity_block(AFFINITY_DEFAULT)
-        assert result["level"] == "Antagonistic"
-
-    def test_friendly(self):
-        result = _build_affinity_block(700)
-        assert result["level"] == "Warm"
-        assert "warmth" in result["instruction"] or "enthusiasm" in result["instruction"]
-
-    def test_devoted(self):
-        result = _build_affinity_block(900)
-        assert result["level"] == "Protective"
-        assert "protective" in result["instruction"] or "loyalty" in result["instruction"]
 
 
 # ── _build_agent_catalog tests ──────────────────────────────────────

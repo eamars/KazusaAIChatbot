@@ -22,6 +22,7 @@ from pymongo.errors import ConnectionFailure
 from pymongo.operations import SearchIndexModel
 
 from kazusa_ai_chatbot.config import EMBEDDING_BASE_URL, EMBEDDING_MODEL, LLM_API_KEY, MONGODB_URI, MONGODB_DB_NAME
+from kazusa_ai_chatbot.config import AFFINITY_DEFAULT, AFFINITY_MAX, AFFINITY_MIN
 from openai import AsyncOpenAI
 
 
@@ -283,11 +284,6 @@ async def get_user_facts(user_id: str) -> list[str]:
     if doc is None:
         return []
     return doc.get("facts", [])
-
-
-AFFINITY_DEFAULT = 200
-AFFINITY_MIN = 0
-AFFINITY_MAX = 1000
 
 
 async def get_affinity(user_id: str) -> int:

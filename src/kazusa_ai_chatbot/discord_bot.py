@@ -96,6 +96,7 @@ class RolePlayBot(discord.Client):
             "user_id": str(message.author.id),
             "user_name": message.author.display_name,
             "channel_id": str(message.channel.id),
+            "channel_name": str(message.channel.name),
             "guild_id": str(message.guild.id) if message.guild else "",
             "bot_id": str(self.user.id) if self.user else "",
             "message_text": message.content,
@@ -133,7 +134,8 @@ class RolePlayBot(discord.Client):
                 channel_id=str(message.channel.id),
                 user_id=str(message.author.id),
                 user_name=message.author.display_name,
-                bot_id=str(self.user.id) if self.user else "bot",
+                bot_id=str(self.user.id),
+                bot_name=str(self.user.name),
                 user_message=message.content,
                 bot_response=response,
             )
@@ -178,6 +180,7 @@ async def _save_exchange(
     user_id: str,
     user_name: str,
     bot_id: str,
+    bot_name: str,
     user_message: str,
     bot_response: str,
 ) -> None:
@@ -197,9 +200,9 @@ async def _save_exchange(
         await save_conversation(
             {
                 "channel_id": channel_id,
-                "role": "assistant",
+                "role": "bot",
                 "user_id": bot_id,
-                "name": "bot",
+                "name": bot_name,
                 "content": bot_response,
                 "timestamp": ts,
             }

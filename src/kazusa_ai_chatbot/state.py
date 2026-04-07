@@ -90,6 +90,7 @@ class BotState(TypedDict, total=False):
     user_id: str
     user_name: str
     channel_id: str
+    channel_name: str
     guild_id: str
     bot_id: str  # the bot's own Discord user ID (for mention filtering)
     message_text: str

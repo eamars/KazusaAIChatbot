@@ -48,7 +48,7 @@ def _get_llm() -> ChatOpenAI:
     if _llm is None:
         _llm = ChatOpenAI(
             model=LLM_MODEL,
-            temperature=LLM_TEMPERATURE,
+            temperature=0.9,
             base_url=LLM_BASE_URL,
             api_key=LLM_API_KEY,
         )

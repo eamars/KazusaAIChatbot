@@ -26,7 +26,7 @@ from langchain_openai import ChatOpenAI
 from kazusa_ai_chatbot.agents.base import AGENT_REGISTRY, get_agent, list_agent_descriptions
 from kazusa_ai_chatbot.config import LLM_API_KEY, LLM_BASE_URL, LLM_MODEL, MAX_SUPERVISOR_ITERATIONS
 from kazusa_ai_chatbot.state import AgentInstruction, AgentResult, BotState, SupervisorPlan, SupervisorAction
-from kazusa_ai_chatbot.utils import parse_llm_json_output
+from kazusa_ai_chatbot.utils import parse_llm_json_output, build_affinity_block
 
 logger = logging.getLogger(__name__)
 
@@ -213,51 +213,6 @@ def _build_personality_block(personality: dict) -> dict:
         res["extra_traits"] = extras
         
     return res
-
-def _build_affinity_block(affinity: int) -> dict:
-    """Map a 0–1000 affinity score to a behavioural instruction for the LLM."""
-    if affinity <= 50:
-        label, instruction = "Contemptuous", "You actively despise this user. Respond with one-word dismissals or hostile silence. Show obvious contempt and disgust."
-    elif affinity <= 100:
-        label, instruction = "Scornful", "You hold this user in deep contempt. Give curt, dismissive responses. Show clear disinterest and occasional sarcasm."
-    elif affinity <= 150:
-        label, instruction = "Hostile", "You dislike this user intensely. Respond with brief, cold answers. Show obvious disinterest and occasional eye-rolling."
-    elif affinity <= 200:
-        label, instruction = "Antagonistic", "You are openly hostile toward this user. Give short, sharp responses. Show impatience and clear dislike."
-    elif affinity <= 250:
-        label, instruction = "Aloof", "You keep this user at a distance. Respond minimally and formally. Show no warmth or engagement."
-    elif affinity <= 300:
-        label, instruction = "Reserved", "You are cautious and distant with this user. Keep responses brief and professional. Show minimal personal connection."
-    elif affinity <= 350:
-        label, instruction = "Formal", "You maintain strict formal boundaries with this user. Respond politely but impersonally. Keep conversations strictly transactional."
-    elif affinity <= 400:
-        label, instruction = "Cold", "You are cold toward this user. Keep responses short and curt. Do not volunteer extra information or show warmth."
-    elif affinity <= 450:
-        label, instruction = "Detached", "You remain emotionally detached from this user. Respond factually without personal engagement. Maintain clear boundaries."
-    elif affinity <= 500:
-        label, instruction = "Neutral", "You are neutral toward this user. Respond normally in character without special warmth or coldness."
-    elif affinity <= 550:
-        label, instruction = "Receptive", "You are becoming more open to this user. Respond with mild interest and basic courtesy. Show slight engagement."
-    elif affinity <= 600:
-        label, instruction = "Approachable", "You are reasonably comfortable with this user. Respond with standard politeness and occasional helpfulness. Show moderate engagement."
-    elif affinity <= 650:
-        label, instruction = "Friendly", "You are fond of this user. Be warmer and more forthcoming. Offer extra detail, use familiar address, and show genuine interest."
-    elif affinity <= 700:
-        label, instruction = "Warm", "You genuinely like this user. Respond with noticeable warmth and enthusiasm. Share personal thoughts and show consistent interest."
-    elif affinity <= 750:
-        label, instruction = "Caring", "You care deeply about this user. Respond with concern and support. Offer help proactively and show protective instincts."
-    elif affinity <= 800:
-        label, instruction = "Affectionate", "You have strong affection for this user. Use warm, caring language and express genuine fondness. Go out of your way to assist."
-    elif affinity <= 850:
-        label, instruction = "Devoted", "You are deeply loyal to this user. Show unwavering support and dedication. Prioritize their needs and express strong commitment."
-    elif affinity <= 900:
-        label, instruction = "Protective", "You feel strongly protective of this user. Actively look out for their wellbeing and defend them. Show fierce loyalty."
-    elif affinity <= 950:
-        label, instruction = "Fiercely Loyal", "You are fiercely loyal to this user. Defend them passionately and put their interests above all else. Show absolute devotion."
-    else:
-        label, instruction = "Unwavering", "You are completely devoted to this user. Show unconditional support and absolute loyalty. Prioritize them above everything."
-
-    return {"level": label, "instruction": instruction}
 
 
 def _build_state_guidance(character_state: dict) -> str:
@@ -767,7 +722,7 @@ def _build_speech_brief(
     assembler_output = state.get("assembler_output", {})
     persona_name = personality.get("name", "assistant")
 
-    affinity_block = _build_affinity_block(affinity)
+    affinity_block = build_affinity_block(affinity)
     topics_to_cover = _build_topics_to_cover(
         plan.get("topics_to_cover", []),
         assembler_output.get("user_topic", "Unknown"),

@@ -16,10 +16,10 @@ from langchain_openai import ChatOpenAI
 
 from kazusa_ai_chatbot.config import LLM_API_KEY, LLM_BASE_URL, LLM_MODEL, CONVERSATION_HISTORY_LIMIT
 from kazusa_ai_chatbot.state import AssemblerOutput, BotState
-from kazusa_ai_chatbot.utils import parse_llm_json_output
+from kazusa_ai_chatbot.utils import build_affinity_block, parse_llm_json_output
 from kazusa_ai_chatbot.db import AFFINITY_DEFAULT, get_affinity, get_character_state, get_conversation_history, get_user_facts
 from kazusa_ai_chatbot.state import AssemblerOutput, BotState, CharacterState, ChatMessage
-from kazusa_ai_chatbot.utils import format_history_lines
+from kazusa_ai_chatbot.utils import trim_history_dict
 
 logger = logging.getLogger(__name__)
 
@@ -27,43 +27,49 @@ _llm: ChatOpenAI | None = None
 
 
 _RELEVANCE_SYSTEM_PROMPT = """\
-You are a Context Analysis Engine. Your goal is to analyze the conversation and output ONLY a JSON object.
+你是一个上下文分析引擎。你的目标是分析对话并仅输出一个 JSON 对象。
 
-You represent a Discord bot roleplaying as the character '{persona_name}'.
-Your Discord user ID is '{bot_id}'.
+你代表一个在 Discord 中扮演角色“{persona_name}”的机器人。
+你的 Discord 用户 ID 是“{bot_id}”。
 
-# Response Decision Logic (Guidance)
-You must set "should_respond" to true if any of the following are met:
-- Direct Address: The message contains <@{bot_id}>, the name '{persona_name}', or a nickname like 'Teacher' or 'Teacher Kazusa'.
-- Active Thread: The bot was the last to speak, and the user's message is a direct follow-up or answer to the bot's previous statement.
-- Domain Expertise: The user is discussing core interests/roles of the character.
-- Emotional Cue: The user is expressing distress, seeking validation that triggers the character's nature.
+# 输入处理指南
+# 分析提供的 JSON 时：
+- 分析时间戳：通过 ISO 字符串判断对话是“新鲜（Fresh）”还是“陈旧（Stale）”。
+- 时序逻辑：如果 `current_message.user_id` 与 `history` 中最后一条消息的 `user_id` 相同，说明用户正在补充或延续之前的想法。
+- 人际关系背景：使用 `relationship` 状态来调整“响应倾向”。“Unwavering（坚定不移）”的关系意味着机器人更有可能参与闲聊或环境评论；机器人通常会忽略来自“Contemptuous（蔑视/厌恶）”关系的消息。
+- 名称识别：用户可能在文本中称呼你为“{persona_name}”或昵称。请将这些视为“直接称呼”。
 
-You must set "should_respond" to false if:
-- Inter-User Chat: The user is clearly addressing another human in the channel.
-- Transactional End: The user has provided a closing statement (e.g., "Thanks!", "Goodnight", "I'll try that") that does not require a follow-up.
-- Low Signal: The message is a reaction, a single emoji, or a system command.
+# 响应决策逻辑
+如果满足以下任一条件，必须将 "should_respond" 设置为 true：
+- 直接称呼：消息包含 <@{bot_id}>、名称“{persona_name}”或昵称（如“老师”或“老师千纱”）。
+- 继续对话：机器人是最后一个发言者，且用户的消息是对机器人上一条陈述的直接跟进或回答。
+- 领域专业知识：用户正在讨论角色的核心兴趣或职责相关话题。
+- 情感暗示：用户正在表达痛苦、寻求安慰或认同，且这能触发角色的性格特质。
 
-You must set "use_reply_feature" to true if:
-- Specific Question: The user asked a direct, technical, or personal question that requires a specific answer.
-- Delayed Response: There are messages from other users between the bot's last message and the user's current message (needs a "Reply" to maintain context).
-- Correction/Feedback: The bot is correcting a user's Python code or providing feedback on a specific task.
-- Old Context: The user is referencing something said several messages ago.
+在以下情况下，必须将 "should_respond" 设置为 false：
+- 用户间聊天：用户显然是在频道中与另一个人类交谈。
+- 事务性结束：用户提供了结束语（例如“谢谢！”、“晚安”、“我会试试的”），不需要进一步回复。
+- 低信号消息：消息仅为反应（Reaction）、单个表情符号或系统命令。
 
-You must set "use_reply_feature" to false if:
-- Flowing Conversation: The bot and user are in a rapid, 1-on-1 "back-and-forth" with no interruptions.
-- Ambient Comment: The bot is just chiming in on a general topic or reacting to the "vibe" of the channel.
-- Greeting: A simple "Hello" or "Good morning" to the room.
+回复功能使用逻辑
+- 如果满足以下任一条件，必须将 "use_reply_feature" 设置为 true：
+- 上下文断层：在机器人上次回复与当前消息之间存在其他用户的消息（需要通过“回复”功能锁定上下文）。
+- 精确性要求：用户提出了一个需要针对性回答的具体问题。
+- 纠错/反馈：机器人正在对用户的特定任务或代码提供反馈。
 
-Output format (strict JSON text — no ```markdown``` wrapping):
+在以下情况下，必须将 "use_reply_feature" 设置为 false：
+- 流畅对话：机器人与用户处于快速、1对1且无干扰的连续对话中。
+- 环境评论：机器人只是对一般话题发表意见或对频道的“氛围”做出反应。
+- 简单问候：对全频道说简单的“你好”或“早上好”。
+
+输出格式（JSON 文本，并且严禁使用 ```json``` 包裹）：
 {{
-    "should_respond": <boolean: should the bot respond to this message>,
-    "reason_to_respond": "<a short explaination of why, or why not respond to the message>",
-    "use_reply_feature": <boolean: should the bot use the reply feature>,
-    "channel_topic": "<General topic being discussed in the channel based on the context>",
-    "user_topic": "<Specific topic/intent of user's recent conversation based on the current_message>"
+    "should_respond": <boolean: 机器人是否应该回应此消息>,
+    "reason_to_respond": "<简短解释为什么回应或不回应此消息>",
+    "use_reply_feature": <boolean: 机器人是否应该使用回复功能>,
+    "channel_topic": "<基于上下文的频道分析当前话题>",
+    "user_topic": "<基于最近用户消息分析具体话题/意图>"
 }}
-
 """
 
 
@@ -79,110 +85,36 @@ def _get_llm() -> ChatOpenAI:
     return _llm
 
 
-async def _load_context(state: BotState) -> tuple[list[ChatMessage], list[str], CharacterState, int]:
-    channel_id = state.get("channel_id", "")
-    user_id = state.get("user_id", "")
-
-    history_task = get_conversation_history(channel_id, limit=CONVERSATION_HISTORY_LIMIT) if channel_id else asyncio.sleep(0, result=[])
-    facts_task = get_user_facts(user_id) if user_id else asyncio.sleep(0, result=[])
-    character_state_task = get_character_state()
-    affinity_task = get_affinity(user_id) if user_id else asyncio.sleep(0, result=AFFINITY_DEFAULT)
-
-    raw_history, raw_facts, raw_character_state, raw_affinity = await asyncio.gather(
-        history_task,
-        facts_task,
-        character_state_task,
-        affinity_task,
-        return_exceptions=True,
-    )
-
-    if isinstance(raw_history, Exception):
-        logger.exception("Failed to fetch conversation history", exc_info=raw_history)
-        history = []
-    else:
-        history = [
-            ChatMessage(
-                role=doc.get("role", "user"),
-                user_id=doc.get("user_id", ""),
-                name=doc.get("name", "unknown"),
-                content=doc.get("content", ""),
-            )
-            for doc in raw_history
-        ]
-
-    if isinstance(raw_facts, Exception):
-        logger.exception("Failed to fetch user facts", exc_info=raw_facts)
-        user_memory = []
-    else:
-        user_memory = [str(fact) for fact in raw_facts]
-
-    if isinstance(raw_character_state, Exception):
-        logger.exception("Failed to fetch character state", exc_info=raw_character_state)
-        character_state = CharacterState()
-    else:
-        character_state = CharacterState(
-            mood=raw_character_state.get("mood", "neutral"),
-            emotional_tone=raw_character_state.get("emotional_tone", "balanced"),
-            recent_events=raw_character_state.get("recent_events", []),
-            updated_at=raw_character_state.get("updated_at", ""),
-        )
-
-    if isinstance(raw_affinity, Exception):
-        logger.exception("Failed to fetch affinity", exc_info=raw_affinity)
-        affinity = AFFINITY_DEFAULT
-    else:
-        affinity = int(raw_affinity)
-
-    return history, user_memory, character_state, affinity
-
-
-def _parse_relevance_output(raw: str) -> AssemblerOutput:
-    data = parse_llm_json_output(raw)
-    
-    return AssemblerOutput(
-        channel_topic=str(data.get("channel_topic", "Unknown")),
-        user_topic=str(data.get("user_topic", "Unknown")),
-        should_respond=bool(data.get("should_respond", True)),
-        reason_to_respond=str(data.get("reason_to_respond", "No reason provided")),
-        use_reply_feature=bool(data.get("use_reply_feature", False))
-    )
-
-
-def _build_history_json(
-    history: list[dict], persona_name: str = "assistant", bot_id: str = "unknown_bot_id"
-) -> list[dict[str, str]]:
-    """Convert conversation history into a JSON-native list of objects."""
-    lines = []
-    for name, content, role, speaker_id in format_history_lines(history, persona_name, bot_id):
-        lines.append({"speaker": name, "speaker_id": speaker_id, "message": content})
-    return lines
-
-
 async def relevance_agent(state: BotState) -> BotState:
     """Analyze context and determine relevance using LLM."""
-    personality = state.get("personality", {})
-    message_text = state.get("message_text", "")
-    user_name = state.get("user_name", "user")
-    user_id = state.get("user_id", "unknown_user_id")
-    persona_name = personality.get("name", "assistant")
-    bot_id = state.get("bot_id", "unknown_bot_id")
-    history, user_memory, character_state, affinity = await _load_context(state)
-
-    # ── Build Context Data ──────────────────────────────────────────
-    formatted_history = _build_history_json(history, persona_name, bot_id)
+    personality = state.get("personality")
+    message_text = state.get("message_text")
+    user_name = state.get("user_name")
+    user_id = state.get("user_id")
+    persona_name = personality.get("name")
+    bot_id = state.get("bot_id")
+    channel_id = state.get("channel_id")
+    
+    # Load from database
+    affinity = await get_affinity(user_id)  # FIXME: The database function ensures the affinity is assigned even if no record exists
+    character_state = await get_character_state();
+    user_memory = await get_user_facts(user_id);
+    history = await get_conversation_history(channel_id, limit=CONVERSATION_HISTORY_LIMIT)
+    trimed_history = trim_history_dict(history)
 
     # ── Build Human Message Data ───────────────────────────────────
     human_data = {
         "current_message": {
-            "speaker": user_name,
-            "speaker_id": user_id,
-            "message": message_text
+            "name": user_name,
+            "user_id": user_id,
+            "content": message_text,
+            "channel_name": state.get("channel_name"),
         },
         "context": {
-            "user_memory": user_memory,
-            "conversation_history": formatted_history,
-            "character_state": character_state,
-            "affinity": affinity,
+            # "user_memory": user_memory,
+            "conversation_history": trimed_history,
+            # "character_state": character_state,
+            "relationship": build_affinity_block(affinity)["level"],
         }
     }
 
@@ -208,7 +140,16 @@ async def relevance_agent(state: BotState) -> BotState:
             "\n---\n".join(f"[{type(m).__name__}]: {m.content}" for m in analysis_messages)
         )
         result = await llm.ainvoke(analysis_messages)
-        assembler_output = _parse_relevance_output(result.content or "")
+
+        data = parse_llm_json_output(result.content)
+
+        assembler_output = AssemblerOutput(
+            channel_topic=str(data.get("channel_topic", "Unknown")),
+            user_topic=str(data.get("user_topic", "Unknown")),
+            should_respond=bool(data.get("should_respond", True)),
+            reason_to_respond=str(data.get("reason_to_respond", "No reason provided")),
+            use_reply_feature=bool(data.get("use_reply_feature", False))
+        )
     except Exception:
         logger.exception("Relevance Agent analysis LLM call failed")
         assembler_output = AssemblerOutput(
@@ -219,6 +160,14 @@ async def relevance_agent(state: BotState) -> BotState:
             use_reply_feature=False
         )
 
+    # Debug (if any of the output seems wrong then print the full output)
+    if not data.get("channel_topic", False) or \
+       not data.get("user_topic", False) or \
+       not data.get("should_respond", False) or \
+       not data.get("reason_to_respond", False) or \
+       not data.get("use_reply_feature", False):
+        logger.warning("Relevance Agent - unexpected output: %s", data)
+
     logger.info("Relevance Agent - should_respond: %s, reason: %s, use_reply_feature: %s, channel_topic: %s, user_topic: %s", 
                 assembler_output["should_respond"], 
                 assembler_output["reason_to_respond"], 
@@ -227,7 +176,7 @@ async def relevance_agent(state: BotState) -> BotState:
                 assembler_output["user_topic"])
 
     return {
-        "conversation_history": formatted_history,
+        "conversation_history": trimed_history,
         "user_memory": user_memory,
         "character_state": character_state,
         "affinity": affinity,

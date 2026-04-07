@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
+import os
 import pytest
-
 from kazusa_ai_chatbot.state import BotState, CharacterState, ChatMessage
 
 
@@ -50,3 +50,9 @@ def sample_character_state() -> CharacterState:
         recent_events=["Shadow wolves attacked the northern gate"],
         updated_at="2026-03-30T19:00:00Z",
     )
+
+# Disable langsmith in unit tests
+@pytest.fixture(scope="session", autouse=True)
+def disable_langsmith():
+    os.environ["LANGCHAIN_TRACING_V2"] = "false"
+    os.environ["LANGCHAIN_API_KEY"] = "" # Optional: clear the key

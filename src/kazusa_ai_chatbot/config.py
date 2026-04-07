@@ -47,3 +47,8 @@ MAX_TOOL_ITERATIONS = int(os.getenv("MAX_TOOL_ITERATIONS", "5"))
 
 # Max supervisor evaluate-dispatch loop iterations
 MAX_SUPERVISOR_ITERATIONS = int(os.getenv("MAX_SUPERVISOR_ITERATIONS", "3"))
+
+# Affinity system
+AFFINITY_DEFAULT = 200
+AFFINITY_MIN = 0
+AFFINITY_MAX = 1000
