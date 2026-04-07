@@ -33,10 +33,12 @@ _RELEVANCE_SYSTEM_PROMPT = """\
 你的 Discord 用户 ID 是“{bot_id}”。
 
 # 输入处理指南
-# 分析提供的 JSON 时：
-- 分析时间戳：通过 ISO 字符串判断对话是“新鲜（Fresh）”还是“陈旧（Stale）”。
+分析提供的 JSON 时：
+- 分析时间戳：通过 `timestamp` 字段判断对话顺序”。
 - 时序逻辑：如果 `current_message.user_id` 与 `history` 中最后一条消息的 `user_id` 相同，说明用户正在补充或延续之前的想法。
-- 人际关系背景：使用 `relationship` 状态来调整“响应倾向”。“Unwavering（坚定不移）”的关系意味着机器人更有可能参与闲聊或环境评论；机器人通常会忽略来自“Contemptuous（蔑视/厌恶）”关系的消息。
+- 人际关系背景：使用 `relationship` 状态来调整其响应倾向。字段范围为0 - 1000
+ * `relationship` < 200 时机器人通常会忽略其发言
+ * `relationship` > 800 时机器人更可能参与闲聊
 - 名称识别：用户可能在文本中称呼你为“{persona_name}”或昵称。请将这些视为“直接称呼”。
 
 # 响应决策逻辑
@@ -49,6 +51,7 @@ _RELEVANCE_SYSTEM_PROMPT = """\
 在以下情况下，必须将 "should_respond" 设置为 false：
 - 用户间聊天：用户显然是在频道中与另一个人类交谈。
 - 事务性结束：用户提供了结束语（例如“谢谢！”、“晚安”、“我会试试的”），不需要进一步回复。
+ * "事务性结束"优先于"直接称呼"的判断
 - 低信号消息：消息仅为反应（Reaction）、单个表情符号或系统命令。
 
 回复功能使用逻辑
@@ -62,14 +65,8 @@ _RELEVANCE_SYSTEM_PROMPT = """\
 - 环境评论：机器人只是对一般话题发表意见或对频道的“氛围”做出反应。
 - 简单问候：对全频道说简单的“你好”或“早上好”。
 
-输出格式（JSON 文本，并且严禁使用 ```json``` 包裹）：
-{{
-    "should_respond": <boolean: 机器人是否应该回应此消息>,
-    "reason_to_respond": "<简短解释为什么回应或不回应此消息>",
-    "use_reply_feature": <boolean: 机器人是否应该使用回复功能>,
-    "channel_topic": "<基于上下文的频道分析当前话题>",
-    "user_topic": "<基于最近用户消息分析具体话题/意图>"
-}}
+输出格式（以单行紧凑格式输出原始 JSON 字符串，并不要Markdown包裹）：
+{{"should_respond": <boolean: 机器人是否应该回应此消息>,"reason_to_respond": "<简短解释为什么回应或不回应此消息>","use_reply_feature": <boolean: 机器人是否应该使用回复功能>,"channel_topic": "<包括所有用户参与的宏观话题>","user_topic": "<当前用户的具体意图和细分话题>"}}
 """
 
 
@@ -114,7 +111,7 @@ async def relevance_agent(state: BotState) -> BotState:
             # "user_memory": user_memory,
             "conversation_history": trimed_history,
             # "character_state": character_state,
-            "relationship": build_affinity_block(affinity)["level"],
+            "relationship": affinity,
         }
     }
 
@@ -159,14 +156,13 @@ async def relevance_agent(state: BotState) -> BotState:
             reason_to_respond="LLM analysis failed - defaulting to respond",
             use_reply_feature=False
         )
+    else:
+        # Debug (if any of the output seems wrong then print the full output)
+        required_fields = ["channel_topic", "user_topic", "should_respond", 
+                        "reason_to_response", "use_reply_feature"]
+        if not all(field in data for field in required_fields):
+            logger.warning("Relevance Agent - unexpected output: %s", data)
 
-    # Debug (if any of the output seems wrong then print the full output)
-    if not data.get("channel_topic", False) or \
-       not data.get("user_topic", False) or \
-       not data.get("should_respond", False) or \
-       not data.get("reason_to_respond", False) or \
-       not data.get("use_reply_feature", False):
-        logger.warning("Relevance Agent - unexpected output: %s", data)
 
     logger.info("Relevance Agent - should_respond: %s, reason: %s, use_reply_feature: %s, channel_topic: %s, user_topic: %s", 
                 assembler_output["should_respond"], 

@@ -56,7 +56,8 @@ async def test_relevance_agent_node():
     assert human_json["context"]["conversation_history"][0]["user_id"] == "user_123"
     assert human_json["context"]["conversation_history"][0]["content"] == "prev"
     assert human_json["context"]["conversation_history"][0]["role"] == "user"
-    assert human_json["context"]["relationship"] == "Approachable"
+    # After fixing relationship input to pass raw affinity value
+    assert human_json["context"]["relationship"] == 600
 
     # Verify outputs
     out = new_state["assembler_output"]
