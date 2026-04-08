@@ -34,6 +34,7 @@ class BaseAgent(abc.ABC):
         self,
         state: BotState,
         task: str,
+        context: dict|None=None,
         expected_response: str = "",
     ) -> AgentResult:
         """Execute the agent and return a structured result.

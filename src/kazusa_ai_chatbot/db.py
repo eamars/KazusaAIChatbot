@@ -180,13 +180,35 @@ async def enable_vector_index(collection_name: str, index_name: str) -> None:
 # Collection: conversation_history
 
 async def get_conversation_history(
-    channel_id: str, limit: int = 20
+    channel_id: str | None = None,
+    limit: int = 20,
+    user_id: str | None = None,
+    name: str | None = None,
+    from_timestamp: str | None = None,
+    to_timestamp: str | None = None,
 ) -> list[ConversationMessageDoc]:
-    """Fetch the last `limit` messages for a channel, oldest first."""
+    """Fetch the last `limit` messages for a channel (or all channels if omitted), oldest first."""
     db = await get_db()
+    
+    query: dict[str, Any] = {}
+    if channel_id:
+        query["channel_id"] = channel_id
+        
+    if user_id:
+        query["user_id"] = user_id
+    elif name:
+        query["name"] = name
+        
+    if from_timestamp or to_timestamp:
+        query["timestamp"] = {}
+        if from_timestamp:
+            query["timestamp"]["$gte"] = from_timestamp
+        if to_timestamp:
+            query["timestamp"]["$lte"] = to_timestamp
+
     cursor = (
         db.conversation_history
-        .find({"channel_id": channel_id})
+        .find(query)
         .sort("timestamp", -1)
         .limit(limit)
     )

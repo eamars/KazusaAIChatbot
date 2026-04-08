@@ -48,10 +48,74 @@ async def test_get_conversation_history():
 
     with patch("kazusa_ai_chatbot.db.get_db", new_callable=AsyncMock, return_value=db):
         result = await get_conversation_history("chan_1", limit=10)
+        
+        # Verify basic find parameters
+        db.conversation_history.find.assert_called_with({"channel_id": "chan_1"})
+
+        # Verify sorting and limit
+        db.conversation_history.find.return_value.sort.assert_called_with("timestamp", -1)
+        db.conversation_history.find.return_value.sort.return_value.limit.assert_called_with(10)
 
     # Should be reversed (oldest first)
     assert result[0]["content"] == "Hi"
     assert result[1]["content"] == "Hello"
+
+
+@pytest.mark.asyncio
+async def test_get_conversation_history_filters():
+    db = _mock_db()
+    cursor = AsyncMock()
+    cursor.to_list = AsyncMock(return_value=[])
+    db.conversation_history.find.return_value.sort.return_value.limit.return_value = cursor
+
+    with patch("kazusa_ai_chatbot.db.get_db", new_callable=AsyncMock, return_value=db):
+        # test user_id filter
+        await get_conversation_history("chan_1", user_id="user_123")
+        db.conversation_history.find.assert_called_with({"channel_id": "chan_1", "user_id": "user_123"})
+        
+        # test name filter (should be used when user_id is missing)
+        await get_conversation_history("chan_1", name="Kira")
+        db.conversation_history.find.assert_called_with({"channel_id": "chan_1", "name": "Kira"})
+        
+        # test priority: user_id should be prioritized over name
+        await get_conversation_history("chan_1", user_id="user_123", name="Kira")
+        db.conversation_history.find.assert_called_with({"channel_id": "chan_1", "user_id": "user_123"})
+        
+        # test timestamp filter
+        await get_conversation_history(
+            "chan_1", 
+            from_timestamp="2025-01-01T00:00:00Z", 
+            to_timestamp="2025-01-02T00:00:00Z"
+        )
+        db.conversation_history.find.assert_called_with({
+            "channel_id": "chan_1",
+            "timestamp": {
+                "$gte": "2025-01-01T00:00:00Z",
+                "$lte": "2025-01-02T00:00:00Z"
+            }
+        })
+        
+        # test all combined
+        await get_conversation_history(
+            "chan_1", 
+            name="Kira", 
+            from_timestamp="2025-01-01T00:00:00Z"
+        )
+        db.conversation_history.find.assert_called_with({
+            "channel_id": "chan_1",
+            "name": "Kira",
+            "timestamp": {
+                "$gte": "2025-01-01T00:00:00Z"
+            }
+        })
+        
+        # test without channel_id
+        await get_conversation_history(
+            user_id="user_123"
+        )
+        db.conversation_history.find.assert_called_with({
+            "user_id": "user_123"
+        })
 
 
 @pytest.mark.asyncio

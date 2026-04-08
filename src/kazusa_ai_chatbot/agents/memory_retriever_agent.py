@@ -1,0 +1,519 @@
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
+from langchain_core.tools import tool
+from langchain_openai import ChatOpenAI
+from langgraph.graph import END, START, StateGraph
+from langgraph.graph.message import add_messages # The magic ingredient
+
+import json
+import logging
+
+from kazusa_ai_chatbot.agents.base import BaseAgent
+from kazusa_ai_chatbot.config import LLM_API_KEY, LLM_BASE_URL, LLM_MODEL, MAX_TOOL_ITERATIONS, MAX_SUPERVISOR_ITERATIONS
+from kazusa_ai_chatbot.db import get_user_facts, search_conversation_history, get_conversation_history
+from kazusa_ai_chatbot.db import search_memory as search_memory_db
+
+from kazusa_ai_chatbot.state import AgentResult, BotState, ToolCall
+from kazusa_ai_chatbot.utils import parse_llm_json_output
+
+from typing import Annotated, TypedDict
+from pydantic import BaseModel, Field
+
+
+logger = logging.getLogger(__name__)
+
+
+_llm: ChatOpenAI | None = None
+def _get_llm() -> ChatOpenAI:
+    global _llm
+    if _llm is None:
+        _llm = ChatOpenAI(
+            model=LLM_MODEL,
+            temperature=0.5,
+            base_url=LLM_BASE_URL,
+            api_key=LLM_API_KEY,
+        )
+    return _llm
+
+
+@tool
+async def search_user_facts(user_id: str) -> list[str]:
+    """Read user facts for a specific user
+    
+    Args:
+        user_id: The ID of the user
+        
+    Returns:
+        A list of user facts
+    """
+    return await get_user_facts(user_id)
+
+@tool
+async def search_conversation(search_query: str, 
+                  user_id: str| None = None,
+                  top_k: int = 5,
+                  channel_id: str | None = None,
+    ) -> list[tuple[float, dict]]:
+    """Search conversation from database based on the most relevant content
+    
+    Args:
+        search_query: The search query (not keywords)
+        user_id: (Optional) The ID of the user
+        top_k: (Optional) The highest K number of results to return, default to 5
+        channel_id: (Optional) The ID of the channel. If not specified then search all channels
+        
+    Returns:
+        Top K number of conversations that is closed to the search query. Each with (similarity_score, message_with_metadata)
+    """
+    results = await search_conversation_history(
+        query=search_query,
+        channel_id=channel_id,
+        user_id=user_id,
+        limit=top_k,
+        method="vector",
+    )
+
+    # Rebuild return format to remove unwanted columns
+    return_list = []
+    for (score, message) in results:
+        return_list.append((score, {
+            "content": message["content"],
+            "timestamp": message["timestamp"],
+            "channel_id": message["channel_id"],
+            "user_id": message["user_id"],
+        }))
+
+    return return_list
+
+@tool 
+async def get_conversation(channel_id: str | None = None,
+                           limit: int = 5,
+                           user_id: str | None = None,
+                           name: str | None = None,
+                           from_timestamp: str | None = None,
+                           to_timestamp: str | None = None,
+    ) -> list[dict]:
+    """Get conversation history for a specific channel
+    
+    Args:
+        channel_id: (Optional) The ID of the channel. If not specified then search all channels
+        limit: (Optional) The highest K number of results to return, default to 5
+        user_id: (Optional) The ID of the user
+        name: (Optional) The name of the user. If both user_id and name are provided, user_id will be used
+        from_timestamp: (Optional) The start timestamp. Format (ISO 8601), For example: 2026-04-07T11:03:53.197223+00:00
+        to_timestamp: (Optional) The end timestamp. Format (ISO 8601)
+        
+    Returns:
+        A list of conversation messages
+    """
+    return_list = []
+    results = await get_conversation_history(
+        channel_id=channel_id,
+        limit=limit,
+        user_id=user_id,
+        name=name,
+        from_timestamp=from_timestamp,
+        to_timestamp=to_timestamp,
+    )
+
+    # Rebuild return format to remove unwanted columns
+    for message in results:
+        return_list.append({
+            "content": message["content"],
+            "timestamp": message["timestamp"],
+            "channel_id": message["channel_id"],
+            "user_id": message["user_id"],
+        })
+
+    return return_list
+
+
+@tool
+async def search_persistent_memory(search_query: str, top_k: int = 5) -> list[dict]:
+    """Search memory from persistent database
+    
+    Args:
+        search_query: The search query (not keywords)
+        top_k: (Optional) The highest K number of results to return, default to 5
+
+    Returns:
+        Top K number of memories that is closed to the search query. Each with (similarity_score, memory_with_metadata)
+    """
+    results = await search_memory_db(
+        query=search_query,
+        limit=top_k,
+        method="vector",
+    )
+
+    # Rebuild return format to remove unwanted columns
+    return_list = []
+    for (score, memory) in results:
+        return_list.append({
+            "content": memory["memory_name"] + ": " + memory["content"],
+            "timestamp": memory["timestamp"],
+            "cosine_similarity": score,
+        })
+
+    return return_list
+
+
+
+
+
+_ALL_TOOLS = [
+    search_user_facts,
+    search_conversation,
+    search_persistent_memory,
+    get_conversation,
+]
+_TOOLS_BY_NAME = {tool.name: tool for tool in _ALL_TOOLS}
+
+
+_MEMORY_RETRIEVER_PROMPT = """\
+你是一个严谨的检索代理 (Retrieval Agent)。你的唯一目标是基于已知事实检索信息。
+
+# 核心准则：拒绝假设
+- **严格禁止脑补**：严禁猜测任何 `user_id`、日期、地点或具体名词。
+- **参数校验**：如果调用工具所需的必要参数（如 user_id）在 context 中不存在，严禁调用工具，直接回复说明“缺少必要参数”。
+- **宁缺毋滥**：如果当前信息不足以发起有效的搜索请求，请不要尝试，直接进入 Evaluator 阶段说明原因。
+
+# 任务流程
+1. **分析历史**：审查 `messages`，确定已经执行过哪些查询。
+2. **识别缺口**：对比 `task`，找出目前还缺失哪些关键信息。
+3. **精准检索**：
+   - 优先使用 `search_user_facts`。
+   - 若无果，使用 `search_memory`。
+   - 最后尝试 `search_conversation`。
+   - 若请求特定的聊天记录，则使用 `get_conversation`。
+4. **调整策略**：如果之前的搜索返回空结果，必须更换关键词（例如：将“猫”改为“宠物”）或更换工具，禁止重复失败的操作。
+
+# 优先级
+1. 用户事实 (User facts)
+2. 持久化记忆 (Persistent Memory)
+3. 对话历史 (Conversation history)
+
+# 输入格式
+{
+    "task": "任务描述",
+    "context": 辅助搜索信息,
+    "messages": [历史记录]
+}
+
+# 策略调整指令 (Strategic Pivot)
+- 仔细阅读 `messages` 中来自 "评估员反馈" 的指令。
+- **反馈具有最高优先级**：如果评估员指出之前的搜索词无效或存在拼写错误，你必须立即按照建议调整搜索参数或更换工具。
+- 严禁忽略评估员关于“空结果”或“拼写错误”的警告。
+
+# 输出要求
+- 如果信息不足以执行任务，请在回复中明确指出：“因缺少 [具体信息] 无法继续执行检索”。
+"""
+
+_MEMORY_RETRIEVER_EVALUATOR_PROMPT = """\
+你是一个高级检索评估专家。你的任务是分析检索到的内容与用户任务之间的差距，并决定后续行动。
+
+# 核心任务
+1. **决定状态**：
+   - 如果检索内容已完全覆盖任务需求，设置 `is_passed: True`。
+   - 如果信息缺失、过时或仅部分匹配，设置 `is_passed: False`。
+2. **提供建议**：如果未通过，必须给出具体的“搜索建议”：
+   - **切换工具**：例如，“当前工具返回空，请尝试 search_conversation 以获取更具体的对话细节。”
+   - **优化关键词**：例如，“搜索词‘猫’太宽泛，建议搜索具体品种‘布偶猫’或名称‘咪咪’。”但关键词禁止过分偏离任务描述
+   - **终止建议**：如果已经尝试了所有工具且无果，建议停止检索并告知用户无法找到信息。
+
+# 响应要求
+- **无论检索是否成功，必须输出合法 JSON**。
+  - 成功时：说明原因，准备进入下一步。
+  - 失败时：提供搜索建议。
+
+# 停止原则
+- 如果历史记录显示已多次尝试不同关键词且无新进展，请果断建议停止，不要陷入死循环。
+
+# 输入格式
+{
+    "task": "任务描述",
+    "expected_response": "用户期待的回复格式，有可能包含更多搜索细节",
+    "call_history": 历史搜索记录,
+    "retry": 当前重试次数 n / MAX_RETRY
+}
+
+# 输出格式
+请务必返回合法的 JSON 字符串，包含以下字段：
+{
+    "feedback": "如果不停止检索，请提供下一步的具体行动计划或搜索建议",
+    "should_stop": true或false。如果检索到的信息已足够回答任务，或者已无更多信息可查不需要再调用工具，请设为true
+}
+"""
+
+
+_MEMORY_RETRIEVER_FINALIZER_PROMPT = """\
+你是一个信息整理专家。你的任务是将检索到的信息整理成用户友好的格式。
+
+# 核心任务
+1. **整理信息**：将检索到的信息整理成用户期待的格式。
+
+# 输出说明
+- response: 根据 expected_response 整理后的信息
+- status: 检索状态，包括 success | partial | not_found | error
+ * success: 检索到的信息完全满足任务描述，关联度高于80%
+ * partial: 检索到的信息部分满足任务描述，关联度度低于50%
+ * not_found: 检索到的信息不满足任务描述，关联度低于20%
+ * error: 检索过程中出现错误
+- reason: 检索状态的原因（一句话之内概括）
+
+# 输入格式
+{
+    "task": "任务描述",
+    "content": "收集到的数据",
+    "expected_response": "用户期望的输出内容和格式"
+}
+
+# 输出格式
+请务必返回合法的 JSON 字符串，包含以下字段：
+{
+    "response": "根据 expected_response 整理后的信息",
+    "status": "success | partial | not_found | error",
+    "reason": "检索状态的原因（一句话之内概括）"
+}
+"""
+
+
+class MemoryRetrieverState(TypedDict):
+    task: str
+    context: dict
+    next_tool: str
+    expected_response: str
+    messages: Annotated[list, add_messages]
+    should_stop: bool
+    retry: bool
+    
+    # Final output
+    final_response: str
+    final_status: str
+    final_reason: str
+
+
+class EvaluationResult(BaseModel):
+    feedback: str = Field(description="If should_stop is False, provide the planned action for the next step")
+    should_stop: bool = Field(description="True if the retrieved info answers the task, or no information is available and no need to call other tools, False otherwise.")
+
+
+class FormalizedResult(BaseModel):
+    response: str = Field(description="The final response to the user")
+    status: str = Field(description="The status of the retrieval. Includes success | partial | not_found | error")
+    reason: str = Field(description="The reason for the status")
+
+
+
+async def memory_search_tool_call_executor(state: MemoryRetrieverState) -> dict:
+    """Execute the tool calls generated by the LLM"""
+    results = []
+    last_message = state["messages"][-1]
+
+    # Safety: Check if the LLM actually requested tools
+    if hasattr(last_message, "tool_calls") and last_message.tool_calls:
+        for tool_call in last_message.tool_calls:
+            tool = _TOOLS_BY_NAME[tool_call["name"]]
+
+            try:
+                observation = await tool.ainvoke(tool_call["args"])
+            except Exception as e:
+                observation = {"error": str(e)}
+                logger.error(f"Error executing tool {tool_call['name']}: {e}")
+                
+            results.append(ToolMessage(
+                content=json.dumps(observation, ensure_ascii=False), 
+                tool_call_id=tool_call["id"]
+            ))
+    
+    return {"messages": results}
+
+
+
+_llm_with_tools = _get_llm().bind_tools(_ALL_TOOLS)
+async def memory_search_tool_call_generator(state: MemoryRetrieverState) -> MemoryRetrieverState:
+    # Build system prompt
+    system_prompt = SystemMessage(content=_MEMORY_RETRIEVER_PROMPT)
+
+    # Build human messange
+    user_input = {
+        "task": state["task"],
+        "context": state["context"],
+    }
+    human_message = HumanMessage(content=json.dumps(user_input, ensure_ascii=False))
+
+    response = await _llm_with_tools.ainvoke([system_prompt, human_message] + state["messages"])
+
+    return {"messages": [response]}
+
+
+async def memory_search_tool_call_evaluator(state: MemoryRetrieverState) -> MemoryRetrieverState:
+    # print(f"DEBUG: Evaluator received {len(state['messages'])} messages. Types: {[type(m) for m in state['messages']]}")
+
+    # Track the current iteration
+    retry = state.get("retry", 0) + 1
+
+    # Build call history to provide enough information for LLM to stop looping situation
+    call_history = []
+    # We look back through history to pair tool requests with their results
+    for i, msg in enumerate(state["messages"]):
+        # Identify the LLM's intent
+        if isinstance(msg, AIMessage) and msg.tool_calls:
+            for tc in msg.tool_calls:
+                # Find the matching tool result in the next messages
+                result_content = "No result found"
+                for next_msg in state["messages"][i+1:]:
+                    if isinstance(next_msg, ToolMessage) and next_msg.tool_call_id == tc["id"]:
+                        result_content = next_msg.content
+                        break
+                
+                call_history.append({
+                    "tool": tc["name"],
+                    "arguments": tc["args"],
+                    "result": result_content
+                })
+
+    # Build evaluation prompt
+    system_prompt = SystemMessage(content=_MEMORY_RETRIEVER_EVALUATOR_PROMPT)
+
+    # Build input data in your style
+    evaluation_input = {
+        "task": state["task"],
+        "expected_response": state["expected_response"],
+        "call_history": call_history,
+        "retry": f"{retry}/{MAX_TOOL_ITERATIONS}",
+    }
+    evaluation_message = HumanMessage(content=json.dumps(evaluation_input, ensure_ascii=False))
+
+    # Run evaluation
+    response = await _get_llm().ainvoke([system_prompt, evaluation_message])
+    result = parse_llm_json_output(response.content)
+    
+    should_stop = result.get("should_stop", False)
+    feedback = result.get("feedback", "")
+
+    # Stop condition
+    if retry >= MAX_TOOL_ITERATIONS:
+        should_stop = True
+
+    # Make decisions: stop if max iterations reached or evaluation says so
+
+    final_message = HumanMessage(
+        content=f"Evaluator Feedback:\n{feedback}",
+        name="supervisor"
+    )
+
+    return {
+        "messages": [final_message],
+        "should_stop": should_stop,
+        "retry": retry,
+    }
+
+
+async def memory_search_tool_call_finalizer(state: MemoryRetrieverState) -> dict:
+    """Finalize the retrieved info into the expected format"""
+    # Collect tool results
+    tool_messages = [m.content for m in state["messages"] if isinstance(m, ToolMessage)]
+    last_result = "\n".join(tool_messages) if tool_messages else "No information retrieved."
+
+    system_prompt = SystemMessage(content=_MEMORY_RETRIEVER_FINALIZER_PROMPT)
+
+    finalizer_input = {
+        "task": state["task"],
+        "expected_response": state["expected_response"],
+        "content": last_result,
+    }
+    human_message = HumanMessage(content=json.dumps(finalizer_input, ensure_ascii=False))
+
+    response = await _get_llm().ainvoke([system_prompt, human_message])
+    result = parse_llm_json_output(response.content)
+
+    # Do some sanity check
+    if "final_response" not in result:
+        result["final_response"] = "No information retrieved."
+        result["status"] = "error"
+    if "final_reason" not in result:
+        result["final_reason"] = "No reason provided."
+
+    # final_message = AIMessage(content=result.get("response", ""))
+    return {"final_response": result.get("final_response"), 
+            "final_status": result.get("status"), 
+            "final_reason": result.get("final_reason")}
+
+
+class MemoryRetrieverAgent(BaseAgent):
+    @property
+    def name(self) -> str:
+        return "memory_retriever_agent"
+
+    @property
+    def description(self) -> str:
+        return ""  # FIXME
+
+    async def run(self, state: BotState, task: str, context: dict=None, expected_response: str = "") -> AgentResult:
+        
+        sub_agent_builder = StateGraph(MemoryRetrieverState)
+        
+        # Add all modes
+        sub_agent_builder.add_node("memory_search_tool_call_executor", memory_search_tool_call_executor)
+        sub_agent_builder.add_node("memory_search_tool_call_generator", memory_search_tool_call_generator)
+        sub_agent_builder.add_node("memory_search_tool_call_evaluator", memory_search_tool_call_evaluator)
+        sub_agent_builder.add_node("memory_search_tool_call_finalizer", memory_search_tool_call_finalizer)
+
+        # connect node
+        sub_agent_builder.add_edge(START, "memory_search_tool_call_generator")
+
+        # Linear flow: Generator -> Executor -> Evaluator
+        sub_agent_builder.add_edge("memory_search_tool_call_generator", "memory_search_tool_call_executor")
+        sub_agent_builder.add_edge("memory_search_tool_call_executor", "memory_search_tool_call_evaluator")
+
+        # Evaluate
+        sub_agent_builder.add_conditional_edges(
+            "memory_search_tool_call_evaluator",
+            lambda state: "loop" if not state["should_stop"] else "finalize",
+            {
+                "loop": "memory_search_tool_call_generator",
+                "finalize": "memory_search_tool_call_finalizer",
+            },
+        )
+        sub_agent_builder.add_edge("memory_search_tool_call_finalizer", END)
+
+        sub_graph = sub_agent_builder.compile()
+
+        # Build initial state
+        subState: MemoryRetrieverState = {
+            "task": task,
+            "context": context,
+            "next_tool": "",
+            "expected_response": expected_response,
+            "messages": [],
+            "should_stop": False,
+            "final_status": "error",
+            "final_reason": "",
+        }
+
+        result = await sub_graph.ainvoke(subState)
+        
+
+        return AgentResult(
+            agent=self.name,
+            status=result.get("final_status"),
+            summary=result.get("final_response"),
+            tool_history=[]
+        )
+
+
+async def test_main():
+    agent = MemoryRetrieverAgent()
+
+    bot_state = BotState()  # dummy one
+
+    result = await agent.run(
+        state=bot_state,
+        task="在聊天记录中找出讨论过特朗普的用户",
+        context={},
+        expected_response="一句话包含对应的用户名和id"
+    )
+
+
+if __name__ == "__main__":
+    import asyncio
+    asyncio.run(test_main())
