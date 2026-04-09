@@ -1,6 +1,7 @@
 import json
 import logging
 from typing import Annotated, TypedDict
+import datetime
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 from langchain_core.tools import tool
@@ -9,7 +10,7 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.graph.message import add_messages
 
 from kazusa_ai_chatbot.agents.base import BaseAgent
-from kazusa_ai_chatbot.config import LLM_API_KEY, LLM_BASE_URL, LLM_MODEL, MAX_TOOL_ITERATIONS
+from kazusa_ai_chatbot.config import LLM_API_KEY, LLM_BASE_URL, LLM_MODEL, MAX_WEB_SEARCH_AGENT_RETRY
 from kazusa_ai_chatbot.mcp_client import mcp_manager
 from kazusa_ai_chatbot.state import AgentResult, BotState
 from kazusa_ai_chatbot.utils import parse_llm_json_output
@@ -154,7 +155,7 @@ _WEB_SEARCH_EVALUATOR_PROMPT = """\
 # 输入格式
 {{
     "task": "任务描述",
-    "expected_response": "用户期待的回复格式，有可能包含更多搜索细节",
+    "expected_response": "用户期待的回复内容和格式，有可能包含更多搜索细节",
     "call_history": [已执行的工具、参数及结果摘要],
     "retry": 当前重试次数 n / MAX_RETRY
 }}
@@ -175,7 +176,7 @@ _WEB_SEARCH_FINALIZER_PROMPT = """\
 2. **评估信息**：根据评估者最终反馈评估检索到的信息是否满足任务描述的要求。
 
 # 输出说明
-- response: 根据 expected_response 整理后的信息
+- response: 根据 expected_response 整理后的信息，严禁输出非字符串内容
 - score: 评估分数，范围 0-100，表示检索到的信息满足任务描述的程度
 - reason: 评估原因（一句话之内概括）
 
@@ -190,9 +191,9 @@ _WEB_SEARCH_FINALIZER_PROMPT = """\
 # 输出格式
 请务必返回合法的 JSON 字符串，包含以下字段：
 {
-    "response": "根据 expected_response 整理后的信息",
+    "response": "string",
     "score": <int: 0-100>,
-    "reason": "评估原因（一句话之内概括）"
+    "reason": "string"
 }
 """
 
@@ -291,7 +292,7 @@ async def web_search_tool_call_evaluator(state: WebSearchState) -> dict:
         "task": state["task"],
         "expected_response": state["expected_response"],
         "call_history": call_history,
-        "retry": f"{retry}/{MAX_TOOL_ITERATIONS}",
+        "retry": f"{retry}/{MAX_WEB_SEARCH_AGENT_RETRY}",
     }
     evaluation_message = HumanMessage(content=json.dumps(evaluation_input, ensure_ascii=False))
 
@@ -301,7 +302,7 @@ async def web_search_tool_call_evaluator(state: WebSearchState) -> dict:
     should_stop = result.get("should_stop", False)
     feedback = result.get("feedback", "")
 
-    if retry >= MAX_TOOL_ITERATIONS:
+    if retry >= MAX_WEB_SEARCH_AGENT_RETRY:
         should_stop = True
 
     final_message = HumanMessage(
@@ -364,65 +365,62 @@ async def web_search_tool_call_finalizer(state: WebSearchState) -> dict:
     }
 
 
-class WebSearchAgent2(BaseAgent):
-    @property
-    def name(self) -> str:
-        return "web_search_agent2"
+async def web_search_agent(
+    task: str,
+    context: dict,
+    expected_response: str,
+    timestamp: str | None = None
+) -> dict:
 
-    @property
-    def description(self) -> str:
-        return "Searches the internet for real-time information using web search tools."
+    if timestamp is None:
+        # Fallback to UTC time
+        timestamp = datetime.datetime.now(datetime.timezone.utc).isoformat()
 
-    async def run(self, state: BotState, task: str, context: dict=None, expected_response: str = "") -> AgentResult:
-        if context is None:
-            context = {}
-            
-        sub_agent_builder = StateGraph(WebSearchState)
+    sub_agent_builder = StateGraph(WebSearchState)
         
-        sub_agent_builder.add_node("web_search_tool_call_executor", web_search_tool_call_executor)
-        sub_agent_builder.add_node("web_search_tool_call_generator", web_search_tool_call_generator)
-        sub_agent_builder.add_node("web_search_tool_call_evaluator", web_search_tool_call_evaluator)
-        sub_agent_builder.add_node("web_search_tool_call_finalizer", web_search_tool_call_finalizer)
+    sub_agent_builder.add_node("web_search_tool_call_executor", web_search_tool_call_executor)
+    sub_agent_builder.add_node("web_search_tool_call_generator", web_search_tool_call_generator)
+    sub_agent_builder.add_node("web_search_tool_call_evaluator", web_search_tool_call_evaluator)
+    sub_agent_builder.add_node("web_search_tool_call_finalizer", web_search_tool_call_finalizer)
 
-        sub_agent_builder.add_edge(START, "web_search_tool_call_generator")
+    sub_agent_builder.add_edge(START, "web_search_tool_call_generator")
 
-        sub_agent_builder.add_edge("web_search_tool_call_generator", "web_search_tool_call_executor")
-        sub_agent_builder.add_edge("web_search_tool_call_executor", "web_search_tool_call_evaluator")
+    sub_agent_builder.add_edge("web_search_tool_call_generator", "web_search_tool_call_executor")
+    sub_agent_builder.add_edge("web_search_tool_call_executor", "web_search_tool_call_evaluator")
 
-        sub_agent_builder.add_conditional_edges(
-            "web_search_tool_call_evaluator",
-            lambda s: "loop" if not s.get("should_stop", False) else "finalize",
-            {
-                "loop": "web_search_tool_call_generator",
-                "finalize": "web_search_tool_call_finalizer",
-            },
-        )
-        sub_agent_builder.add_edge("web_search_tool_call_finalizer", END)
+    sub_agent_builder.add_conditional_edges(
+        "web_search_tool_call_evaluator",
+        lambda s: "loop" if not s.get("should_stop", False) else "finalize",
+        {
+            "loop": "web_search_tool_call_generator",
+            "finalize": "web_search_tool_call_finalizer",
+        },
+    )
+    sub_agent_builder.add_edge("web_search_tool_call_finalizer", END)
 
-        sub_graph = sub_agent_builder.compile()
+    sub_graph = sub_agent_builder.compile()
 
-        subState: WebSearchState = {
-            "task": task,
-            "context": context,
-            "next_tool": "",
-            "expected_response": expected_response,
-            "messages": [],
-            "should_stop": False,
-            "retry": 0,
-            "final_status": "error",
-            "final_reason": "",
-            "final_response": "",
-            "timestamp": state["timestamp"]
-        }
+    subState: WebSearchState = {
+        "task": task,
+        "context": context,
+        "next_tool": "",
+        "expected_response": expected_response,
+        "messages": [],
+        "should_stop": False,
+        "retry": 0,
+        "final_status": "error",
+        "final_reason": "",
+        "final_response": "",
+        "timestamp": timestamp,
+    }
 
-        result = await sub_graph.ainvoke(subState)
-        
-        return AgentResult(
-            agent=self.name,
-            status=result.get("final_status"),
-            summary=result.get("final_response"),
-            tool_history=[]
-        )
+    result = await sub_graph.ainvoke(subState)
+
+    return {
+        "status": result.get("final_status"),
+        "reason": result.get("final_reason"),
+        "response": result.get("final_response")
+    }
 
 
 async def test_main():
@@ -434,20 +432,15 @@ async def test_main():
     except Exception:
         logger.exception("MCP manager failed to start — tools will be unavailable")
 
-    agent = WebSearchAgent2()
-
-    bot_state = BotState()  # dummy one
-    bot_state["timestamp"] = datetime.datetime.now().isoformat()
-
-    result = await agent.run(
-        state=bot_state,
+    result = await web_search_agent(
         task="杏山千纱的信息",
         context={},
         expected_response="相关来源链接"
     )
 
     print(result["status"])
-    print(result["summary"])
+    print(result["reason"])
+    print(result["response"])
 
     await mcp_manager.stop()
 

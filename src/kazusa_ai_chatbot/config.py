@@ -43,7 +43,7 @@ mcp_servers_env = mcp_servers_env.replace('\\"', '"')
 MCP_SERVERS: dict[str, dict] = json.loads(mcp_servers_env)
 
 # Max tool-calling loop iterations in persona supervisor
-MAX_TOOL_ITERATIONS = int(os.getenv("MAX_TOOL_ITERATIONS", "5"))
+MAX_TOOL_ITERATIONS = int(os.getenv("MAX_TOOL_ITERATIONS", "3"))
 
 # Max supervisor evaluate-dispatch loop iterations
 MAX_SUPERVISOR_ITERATIONS = int(os.getenv("MAX_SUPERVISOR_ITERATIONS", "3"))
@@ -52,3 +52,9 @@ MAX_SUPERVISOR_ITERATIONS = int(os.getenv("MAX_SUPERVISOR_ITERATIONS", "3"))
 AFFINITY_DEFAULT = 200
 AFFINITY_MIN = 0
 AFFINITY_MAX = 1000
+
+
+# Loop counts
+MAX_PERSONA_SUPERVISOR_STAGE1_RETRY = int(os.getenv("MAX_PERSONA_SUPERVISOR_STAGE1_RETRY", "2"))
+MAX_MEMORY_RETRIEVER_AGENT_RETRY = int(os.getenv("MAX_MEMORY_RETRIEVER_AGENT_RETRY", "2"))
+MAX_WEB_SEARCH_AGENT_RETRY = int(os.getenv("MAX_WEB_SEARCH_AGENT_RETRY", "2"))

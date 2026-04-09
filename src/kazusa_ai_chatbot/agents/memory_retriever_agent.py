@@ -8,7 +8,7 @@ import json
 import logging
 
 from kazusa_ai_chatbot.agents.base import BaseAgent
-from kazusa_ai_chatbot.config import LLM_API_KEY, LLM_BASE_URL, LLM_MODEL, MAX_TOOL_ITERATIONS, MAX_SUPERVISOR_ITERATIONS
+from kazusa_ai_chatbot.config import LLM_API_KEY, LLM_BASE_URL, LLM_MODEL, MAX_MEMORY_RETRIEVER_AGENT_RETRY
 from kazusa_ai_chatbot.db import get_user_facts, search_conversation_history, get_conversation_history
 from kazusa_ai_chatbot.db import search_memory as search_memory_db
 
@@ -235,7 +235,7 @@ _MEMORY_RETRIEVER_EVALUATOR_PROMPT = """\
 # 输入格式
 {{
     "task": "任务描述",
-    "expected_response": "用户期待的回复格式，有可能包含更多搜索细节",
+    "expected_response": "用户期待的回复内容和格式，有可能包含更多搜索细节",
     "call_history": [已执行的工具、参数及结果摘要],
     "retry": 当前重试次数 n / MAX_RETRY
 }}
@@ -257,7 +257,7 @@ _MEMORY_RETRIEVER_FINALIZER_PROMPT = """\
 2. **评估信息**：根据评估者最终反馈评估检索到的信息是否满足任务描述的要求。
 
 # 输出说明
-- response: 根据 expected_response 整理后的信息
+- response: 根据 expected_response 整理后的信息，严禁输出非字符串内容
 - score: 评估分数，范围 0-100，表示检索到的信息满足任务描述的程度
 - reason: 评估原因（一句话之内概括）
 
@@ -272,9 +272,9 @@ _MEMORY_RETRIEVER_FINALIZER_PROMPT = """\
 # 输出格式
 请务必返回合法的 JSON 字符串，包含以下字段：
 {
-    "response": "根据 expected_response 整理后的信息",
+    "response": "string",
     "score": <int: 0-100>,
-    "reason": "评估原因（一句话之内概括）"
+    "reason": "string"
 }
 """
 
@@ -286,24 +286,12 @@ class MemoryRetrieverState(TypedDict):
     expected_response: str
     messages: Annotated[list, add_messages]
     should_stop: bool
-    retry: bool
+    retry: int
     
     # Final output
     final_response: str
     final_status: str
     final_reason: str
-
-
-class EvaluationResult(BaseModel):
-    feedback: str = Field(description="If should_stop is False, provide the planned action for the next step")
-    should_stop: bool = Field(description="True if the retrieved info answers the task, or no information is available and no need to call other tools, False otherwise.")
-
-
-class FormalizedResult(BaseModel):
-    response: str = Field(description="The final response to the user")
-    status: str = Field(description="The status of the retrieval. Includes success | partial | not_found | error")
-    reason: str = Field(description="The reason for the status")
-
 
 
 async def memory_search_tool_call_executor(state: MemoryRetrieverState) -> dict:
@@ -393,7 +381,7 @@ async def memory_search_tool_call_evaluator(state: MemoryRetrieverState) -> Memo
         "task": state["task"],
         "expected_response": state["expected_response"],
         "call_history": call_history,
-        "retry": f"{retry}/{MAX_TOOL_ITERATIONS}",
+        "retry": f"{retry}/{MAX_MEMORY_RETRIEVER_AGENT_RETRY}",
     }
     evaluation_message = HumanMessage(content=json.dumps(evaluation_input, ensure_ascii=False))
 
@@ -405,7 +393,7 @@ async def memory_search_tool_call_evaluator(state: MemoryRetrieverState) -> Memo
     feedback = result.get("feedback", "")
 
     # Stop condition
-    if retry >= MAX_TOOL_ITERATIONS:
+    if retry >= MAX_MEMORY_RETRIEVER_AGENT_RETRY:
         should_stop = True
 
     # Make decisions: stop if max iterations reached or evaluation says so
@@ -474,82 +462,70 @@ async def memory_search_tool_call_finalizer(state: MemoryRetrieverState) -> dict
             "final_reason": result.get("reason")}
 
 
-class MemoryRetrieverAgent(BaseAgent):
-    @property
-    def name(self) -> str:
-        return "memory_retriever_agent"
-
-    @property
-    def description(self) -> str:
-        return ""  # FIXME
-
-    async def run(self, state: BotState, task: str, context: dict=None, expected_response: str = "") -> AgentResult:
+async def memory_retriever_agent(
+    task: str,
+    context: dict,
+    expected_response: str
+) -> dict:
+    sub_agent_builder = StateGraph(MemoryRetrieverState)
         
-        sub_agent_builder = StateGraph(MemoryRetrieverState)
-        
-        # Add all modes
-        sub_agent_builder.add_node("memory_search_tool_call_executor", memory_search_tool_call_executor)
-        sub_agent_builder.add_node("memory_search_tool_call_generator", memory_search_tool_call_generator)
-        sub_agent_builder.add_node("memory_search_tool_call_evaluator", memory_search_tool_call_evaluator)
-        sub_agent_builder.add_node("memory_search_tool_call_finalizer", memory_search_tool_call_finalizer)
+    # Add all modes
+    sub_agent_builder.add_node("memory_search_tool_call_executor", memory_search_tool_call_executor)
+    sub_agent_builder.add_node("memory_search_tool_call_generator", memory_search_tool_call_generator)
+    sub_agent_builder.add_node("memory_search_tool_call_evaluator", memory_search_tool_call_evaluator)
+    sub_agent_builder.add_node("memory_search_tool_call_finalizer", memory_search_tool_call_finalizer)
 
-        # connect node
-        sub_agent_builder.add_edge(START, "memory_search_tool_call_generator")
+    # connect node
+    sub_agent_builder.add_edge(START, "memory_search_tool_call_generator")
 
-        # Linear flow: Generator -> Executor -> Evaluator
-        sub_agent_builder.add_edge("memory_search_tool_call_generator", "memory_search_tool_call_executor")
-        sub_agent_builder.add_edge("memory_search_tool_call_executor", "memory_search_tool_call_evaluator")
+    # Linear flow: Generator -> Executor -> Evaluator
+    sub_agent_builder.add_edge("memory_search_tool_call_generator", "memory_search_tool_call_executor")
+    sub_agent_builder.add_edge("memory_search_tool_call_executor", "memory_search_tool_call_evaluator")
 
-        # Evaluate
-        sub_agent_builder.add_conditional_edges(
-            "memory_search_tool_call_evaluator",
-            lambda state: "loop" if not state["should_stop"] else "finalize",
-            {
-                "loop": "memory_search_tool_call_generator",
-                "finalize": "memory_search_tool_call_finalizer",
-            },
-        )
-        sub_agent_builder.add_edge("memory_search_tool_call_finalizer", END)
+    # Evaluate
+    sub_agent_builder.add_conditional_edges(
+        "memory_search_tool_call_evaluator",
+        lambda state: "loop" if not state["should_stop"] else "finalize",
+        {
+            "loop": "memory_search_tool_call_generator",
+            "finalize": "memory_search_tool_call_finalizer",
+        },
+    )
+    sub_agent_builder.add_edge("memory_search_tool_call_finalizer", END)
 
-        sub_graph = sub_agent_builder.compile()
+    sub_graph = sub_agent_builder.compile()
 
-        # Build initial state
-        subState: MemoryRetrieverState = {
-            "task": task,
-            "context": context,
-            "next_tool": "",
-            "expected_response": expected_response,
-            "messages": [],
-            "should_stop": False,
-            "final_status": "error",
-            "final_reason": "",
-        }
+    # Build initial state
+    subState: MemoryRetrieverState = {
+        "task": task,
+        "context": context,
+        "next_tool": "",
+        "expected_response": expected_response,
+        "messages": [],
+        "should_stop": False,
+        "final_status": "error",
+        "final_reason": "",
+    }
 
-        result = await sub_graph.ainvoke(subState)
-        
+    result = await sub_graph.ainvoke(subState)
 
-        return AgentResult(
-            agent=self.name,
-            status=result.get("final_status"),
-            summary=result.get("final_response"),
-            tool_history=[]
-        )
+    return {
+        "status": result.get("final_status"),
+        "reason": result.get("final_reason"),
+        "response": result.get("final_response"),
+    }
 
 
 async def test_main():
-    agent = MemoryRetrieverAgent()
-
-    bot_state = BotState()  # dummy one
-
-    result = await agent.run(
-        state=bot_state,
+    result = await memory_retriever_agent(
         task="判定千纱是否为真人",
         context={},
         expected_response="是/否以及简短的原因"
     )
 
     print(result["status"])
-    print(result["summary"])
+    print(result["reason"])
+    print(result["response"])
 
 
 if __name__ == "__main__":

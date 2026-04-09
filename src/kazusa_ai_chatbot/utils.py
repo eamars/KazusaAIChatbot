@@ -4,7 +4,11 @@ from __future__ import annotations
 
 from json_repair import repair_json
 from kazusa_ai_chatbot.config import AFFINITY_MIN, AFFINITY_MAX
+from pathlib import Path
+import logging
+import json
 
+logger = logging.getLogger(__name__)
 
 
 def trim_history_dict(history):
@@ -106,3 +110,12 @@ def build_affinity_block(affinity: int, affinity_min: int=AFFINITY_MIN, affinity
         label, instruction = "Unwavering", "You are completely devoted to this user. Show unconditional support and absolute loyalty. Prioritize them above everything."
 
     return {"level": label, "instruction": instruction}
+
+
+def load_personality(path: str | Path) -> dict:
+    path = Path(path)
+    if not path.exists():
+        logger.warning("Personality file %s not found, using empty personality", path)
+        return {}
+    with open(path, "r", encoding="utf-8") as f:
+        return json.load(f)
