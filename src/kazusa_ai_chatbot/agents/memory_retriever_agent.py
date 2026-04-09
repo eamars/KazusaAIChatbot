@@ -181,7 +181,7 @@ _MEMORY_RETRIEVER_PROMPT = """\
 2. **识别缺口**：对比 `task`，找出目前还缺失哪些关键信息。
 3. **精准检索**：
    - 优先使用 `search_user_facts`。
-   - 若无果，使用 `search_memory`。
+   - 若无果，使用 `search_persistent_memory`。
    - 最后尝试 `search_conversation`。
    - 若请求特定的聊天记录，则使用 `get_conversation`。
 4. **调整策略**：如果之前的搜索返回空结果，必须更换关键词（例如：将“猫”改为“宠物”）或更换工具，禁止重复失败的操作。
@@ -219,6 +219,11 @@ _MEMORY_RETRIEVER_EVALUATOR_PROMPT = """\
    - **优化关键词**：例如，“搜索词‘猫’太宽泛，建议搜索具体品种‘布偶猫’或名称‘咪咪’。”但关键词禁止过分偏离任务描述
    - **终止建议**：如果已经尝试了所有工具且无果，建议停止检索并告知用户无法找到信息。
 
+# 建议代理使用合理工具
+- 做出建议时不要超出这个范围
+- 评估专家禁止生成生成任何 tool_call
+{agent_tools}
+
 # 响应要求
 - **无论检索是否成功，必须输出合法 JSON**。
   - 成功时：说明原因，准备进入下一步。
@@ -228,19 +233,19 @@ _MEMORY_RETRIEVER_EVALUATOR_PROMPT = """\
 - 如果历史记录显示已多次尝试不同关键词且无新进展，请果断建议停止，不要陷入死循环。
 
 # 输入格式
-{
+{{
     "task": "任务描述",
     "expected_response": "用户期待的回复格式，有可能包含更多搜索细节",
-    "call_history": 历史搜索记录,
+    "call_history": [已执行的工具、参数及结果摘要],
     "retry": 当前重试次数 n / MAX_RETRY
-}
+}}
 
 # 输出格式
 请务必返回合法的 JSON 字符串，包含以下字段：
-{
+{{
     "feedback": "如果不停止检索，请提供下一步的具体行动计划或搜索建议",
     "should_stop": true或false。如果检索到的信息已足够回答任务，或者已无更多信息可查不需要再调用工具，请设为true
-}
+}}
 """
 
 
@@ -248,21 +253,19 @@ _MEMORY_RETRIEVER_FINALIZER_PROMPT = """\
 你是一个信息整理专家。你的任务是将检索到的信息整理成用户友好的格式。
 
 # 核心任务
-1. **整理信息**：将检索到的信息整理成用户期待的格式。
+1. **整理信息**：将检索到的关键信息根据**任务描述**整理成**用户期待的格式**。
+2. **评估信息**：根据评估者最终反馈评估检索到的信息是否满足任务描述的要求。
 
 # 输出说明
 - response: 根据 expected_response 整理后的信息
-- status: 检索状态，包括 success | partial | not_found | error
- * success: 检索到的信息完全满足任务描述，关联度高于80%
- * partial: 检索到的信息部分满足任务描述，关联度度低于50%
- * not_found: 检索到的信息不满足任务描述，关联度低于20%
- * error: 检索过程中出现错误
-- reason: 检索状态的原因（一句话之内概括）
+- score: 评估分数，范围 0-100，表示检索到的信息满足任务描述的程度
+- reason: 评估原因（一句话之内概括）
 
 # 输入格式
 {
     "task": "任务描述",
     "content": "收集到的数据",
+    "evaluator_feedback": "评估者最终反馈",
     "expected_response": "用户期望的输出内容和格式"
 }
 
@@ -270,8 +273,8 @@ _MEMORY_RETRIEVER_FINALIZER_PROMPT = """\
 请务必返回合法的 JSON 字符串，包含以下字段：
 {
     "response": "根据 expected_response 整理后的信息",
-    "status": "success | partial | not_found | error",
-    "reason": "检索状态的原因（一句话之内概括）"
+    "score": <int: 0-100>,
+    "reason": "评估原因（一句话之内概括）"
 }
 """
 
@@ -311,14 +314,16 @@ async def memory_search_tool_call_executor(state: MemoryRetrieverState) -> dict:
     # Safety: Check if the LLM actually requested tools
     if hasattr(last_message, "tool_calls") and last_message.tool_calls:
         for tool_call in last_message.tool_calls:
-            tool = _TOOLS_BY_NAME[tool_call["name"]]
-
             try:
+                tool = _TOOLS_BY_NAME[tool_call["name"]]
                 observation = await tool.ainvoke(tool_call["args"])
+            except KeyError:
+                observation = {"error": f"Incorrect tool was invoked: {tool_call['name']}"}
+                logger.error(f"Incorrect tool was invoked: {tool_call['name']}")
             except Exception as e:
                 observation = {"error": str(e)}
                 logger.error(f"Error executing tool {tool_call['name']}: {e}")
-                
+            
             results.append(ToolMessage(
                 content=json.dumps(observation, ensure_ascii=False), 
                 tool_call_id=tool_call["id"]
@@ -340,7 +345,15 @@ async def memory_search_tool_call_generator(state: MemoryRetrieverState) -> Memo
     }
     human_message = HumanMessage(content=json.dumps(user_input, ensure_ascii=False))
 
-    response = await _llm_with_tools.ainvoke([system_prompt, human_message] + state["messages"])
+    # Trim the amount of history into the generator
+    # This prevents the Generator from being distracted by "Attempt 1" if it's currently on "Attempt 4," 
+    #   while significantly cutting down on input tokens.
+    if len(state["messages"]) > 3:
+        relevant_history = [state["messages"][0]] + state["messages"][-3:]
+    else:
+        relevant_history = state["messages"]
+
+    response = await _llm_with_tools.ainvoke([system_prompt, human_message] + relevant_history)
 
     return {"messages": [response]}
 
@@ -372,7 +385,8 @@ async def memory_search_tool_call_evaluator(state: MemoryRetrieverState) -> Memo
                 })
 
     # Build evaluation prompt
-    system_prompt = SystemMessage(content=_MEMORY_RETRIEVER_EVALUATOR_PROMPT)
+    agent_tools = "\n".join([f"- {tool.name}: {tool.description}" for tool in _ALL_TOOLS])
+    system_prompt = SystemMessage(content=_MEMORY_RETRIEVER_EVALUATOR_PROMPT.format(agent_tools=agent_tools))
 
     # Build input data in your style
     evaluation_input = {
@@ -398,7 +412,7 @@ async def memory_search_tool_call_evaluator(state: MemoryRetrieverState) -> Memo
 
     final_message = HumanMessage(
         content=f"Evaluator Feedback:\n{feedback}",
-        name="supervisor"
+        name="evaluator"
     )
 
     return {
@@ -412,31 +426,52 @@ async def memory_search_tool_call_finalizer(state: MemoryRetrieverState) -> dict
     """Finalize the retrieved info into the expected format"""
     # Collect tool results
     tool_messages = [m.content for m in state["messages"] if isinstance(m, ToolMessage)]
-    last_result = "\n".join(tool_messages) if tool_messages else "No information retrieved."
+    tool_results = "\n".join(tool_messages) if tool_messages else "No information retrieved."
+
+    # Collect evaluator feedback (last one only)
+    evaluator_feedback = [
+        m.content for m in state["messages"] 
+        if isinstance(m, HumanMessage) and m.name == "evaluator"
+    ]
+    evaluator_feedback = evaluator_feedback[-1] if evaluator_feedback else ""
 
     system_prompt = SystemMessage(content=_MEMORY_RETRIEVER_FINALIZER_PROMPT)
 
     finalizer_input = {
         "task": state["task"],
         "expected_response": state["expected_response"],
-        "content": last_result,
+        "content": tool_results,
+        "evaluator_feedback": evaluator_feedback,
     }
     human_message = HumanMessage(content=json.dumps(finalizer_input, ensure_ascii=False))
 
     response = await _get_llm().ainvoke([system_prompt, human_message])
     result = parse_llm_json_output(response.content)
 
+    # Status generation
+    status = ""
+    if result["score"] > 80:
+        status = "complete"
+    elif result["score"] > 50:
+        status = "partial"
+    elif result["score"] > 0:
+        status = "incomplete"
+
     # Do some sanity check
-    if "final_response" not in result:
-        result["final_response"] = "No information retrieved."
-        result["status"] = "error"
-    if "final_reason" not in result:
-        result["final_reason"] = "No reason provided."
+    if "response" not in result:
+        result["response"] = "No information retrieved."
+        result["score"] = 0
+        status = "error"
+        logger.error(f"No response provided by finalizer, raw result: \n{result}")
+
+    if "reason" not in result:
+        result["reason"] = "No reason provided."
+    
 
     # final_message = AIMessage(content=result.get("response", ""))
-    return {"final_response": result.get("final_response"), 
-            "final_status": result.get("status"), 
-            "final_reason": result.get("final_reason")}
+    return {"final_response": result.get("response"), 
+            "final_status": status, 
+            "final_reason": result.get("reason")}
 
 
 class MemoryRetrieverAgent(BaseAgent):
@@ -508,10 +543,13 @@ async def test_main():
 
     result = await agent.run(
         state=bot_state,
-        task="在聊天记录中找出讨论过特朗普的用户",
+        task="判定千纱是否为真人",
         context={},
-        expected_response="一句话包含对应的用户名和id"
+        expected_response="是/否以及简短的原因"
     )
+
+    print(result["status"])
+    print(result["summary"])
 
 
 if __name__ == "__main__":
