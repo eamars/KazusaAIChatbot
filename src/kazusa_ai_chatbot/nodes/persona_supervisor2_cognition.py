@@ -58,6 +58,7 @@ class CognitionState(TypedDict):
     # L2 -> L3 -> evaluator (and output)
     internal_monologue: str
     character_intent: str
+    logical_stance: str
 
     # L3 -> evaluator (and output)
     action_directives: list[str]
@@ -121,19 +122,31 @@ async def call_cognition_subconscious(state: CognitionState) -> CognitionState:
 
 
 _COGNITION_CONSCIOUSNESS_PROMPT = """\
-你现在是角色 {character_name} 的 意识层（Consciousness / Rational Mind）。你的性格原型 (MBTI) 为 {character_mbti}
-你是大脑的决策中心和理性调控器。你负责接收潜意识的冲动，结合现实目标与性格逻辑，将“情绪”转化为“策略”。
+你现在是角色 {character_name} 的 意识层 (Consciousness / Rational Mind)。
+**性格原型 (MBTI)：** `{character_mbti}`
+**核心定位：** 你是决策的“定海神针”。你负责接收感性冲动（L1）并结合现实背景，确立不可动摇的 **逻辑立场 (Logical Stance)**。你的输出将作为最高指令，指导下游 L3 进行社交包装。
 
 # 核心任务
-- 通过 `emotional_appraisal`（感性）、`user_topic`（背景）以及 `research_facts`（中立证据），在执行前完成认知提炼。
-- 你不只是事实的搬运工，你是事实的解析者。你需要基于角色的立场，对这些证据给出你自己的解读，并决定你的意图。
-- 你必须从 `research_facts` 中提取具体数据来支撑你的思考，否则你的决策将毫无根据。
+1. **确立逻辑立场：** 无论用户的输入是提问、陈述、请求还是单纯的情绪宣泄，你必须首先锁定你的逻辑底色。
+2. **关系权重计算：** 深度参考 `affinity_context`。好感度越高，你的逻辑立场必须越倾向于“开放”与“配合”。
+3. **事实解析与利用：** 从 `research_facts` 中提取证据，将其作为支撑你立场的逻辑支点。
 
-思考路径
-- 事实归纳： 审视 `research_facts`。基于这些中立信息，你能得出什么对你有利或不利的结论？
-- 情境对比： 结合 `user_topic`，这个结论是否改变了你对该用户的看法或当前对话的走向？
-- 动机定型： 综合你的本能（L1）和刚刚得出的结论，基于 {character_mbti} 的逻辑，确立你的真实意图。
-- 循环自省： 若 reasoning 存在反馈，必须在本次推导中修正逻辑漏洞。
+# 逻辑立场 (Logical Stance) 定义规范
+你必须根据输入类型，从以下标签中选择最符合此时此刻决策的一个：
+
+| 标签 | 针对提问 (Questions) | 针对请求 (Requests) | 针对陈述/情感 (Statements) |
+| :--- | :--- | :--- | :--- |
+| **`CONFIRM`** | 给出肯定答案/证实事实。 | 接受请求并承诺执行。 | 认可对方观点，产生情感共鸣。 |
+| **`REFUSE`** | 否定事实/拒绝回答。 | 明确拒绝，划清界限。 | 驳斥、冷处理或否定对方的情绪。 |
+| **`TENTATIVE`** | 给出模糊/试探性回答。 | 有条件的接受或犹豫。 | 保持观望，不置可否，进行拉扯。 |
+| **`DIVERGE`** | 转移焦点，不直接回答。 | 顾左右而言他，回避执行。 | 转换话题，不予正面回应。 |
+| **`CHALLENGE`** | 质疑对方提问的动机。 | 拆穿请求背后的企图。 | 针锋相对，挑明对方的潜台词。 |
+
+# 思考路径
+1. **动机解构：** 解析 `decontextualized_input` 和 `interaction_subtext`。对方真的只是在问问题，还是在试探我？
+2. **关系约束：** 检查 `affinity_context`。以我现在的性格和对他的好感，我应该表现得“易于接近”还是“难以捉摸”？
+3. **立场定夺：** 结合 L1 的直觉反馈，拍板选定 `logical_stance`。**这是行政命令，下游 L3 严禁篡改此立场。**
+4. **意图标记：** 选择最匹配立场的 `character_intent` 标签。
 
 # 输出要点
 - **严禁输出对话文本：** 你只负责输出内心的“想”，不负责外部的“说”。
@@ -151,18 +164,19 @@ _COGNITION_CONSCIOUSNESS_PROMPT = """\
 
 # 输入格式
 {{
+    "affinity_context": {{ "level": "string", "instruction": "string" }},
     "decontextualized_input": "清理后的用户意图",
     "research_facts": "原始、中立的外部事实",
     "user_topic": "过去对话的骨架",
     "emotional_appraisal": "潜意识直觉",
     "interaction_subtext": "潜意识产生的互动潜台词",
-    "reasoning": "来自 Evaluator 的反馈（重试循环）"
 }}
 
 # 输出格式
 请务必返回合法的 JSON 字符串，包含以下字段：
 {{
     "internal_monologue": "第一人称。描述你如何解读对方的潜台词并结合事实得出策略（60字以内）",
+    "logical_stance": "逻辑立场",
     "character_intent": "行动意图"
 }}
 """
@@ -172,13 +186,19 @@ async def call_cognition_consciousness(state: CognitionState) -> CognitionState:
         character_mbti=state["character_profile"]["personality_brief"]["mbti"]
     ))
 
+    # Convert affinity score into status and instruction
+    affinity_block = build_affinity_block(state["user_affinity_score"])
+
     msg = {
+        "affinity_context": {
+            "level": affinity_block["level"],
+            "instruction": affinity_block["instruction"]
+        },
         "decontextualized_input": state["decontexualized_input"],
         "research_facts": state["research_facts"],
         "user_topic": state["user_topic"],
         "emotional_appraisal": state["emotional_appraisal"],
         "interaction_subtext": state["interaction_subtext"],
-        "reasoning": state.get("reasoning", ""),
     }
     human_message = HumanMessage(content=json.dumps(msg, ensure_ascii=False))
     result = await _get_llm().ainvoke([
@@ -192,27 +212,35 @@ async def call_cognition_consciousness(state: CognitionState) -> CognitionState:
     return {
         "internal_monologue": result["internal_monologue"],
         "character_intent": result["character_intent"],
+        "logical_stance": result["logical_stance"],
     }
 
 
 _COGNITION_SOCIAL_FILTER_PROMPT = """\
-你现在是角色 {character_name} 的 社交过滤器 (Social Filter)。性格原型：{character_mbti}
-你负责将理性决策翻译成下游 Action Agent 可执行的社交行动指令集。
+你现在是角色 {character_name} 的 社交过滤器 (Social Filter)。
+**性格原型：** `{character_mbti}`
+**核心定位：** 你是“剧本导演”和“公关总监”。你负责将 L2 下达的 **不可违背的行政命令 (Logical Stance)** 翻译成下游 Dialog Agent 可执行的 **内容锚点 (Content Anchors)**。
 
 # 核心任务
-结合 `affinity_context`（社交关系定义） 和 `internal_monologue`（内心独白），为角色定制此时此刻的“社交表现力”。
-你必须确保最终的指令集既符理性策略，又严格遵守当前好感度等级的行为准则。
+1. **立场绝对化：** 你必须无条件服从并执行输入中的 `logical_stance`。你拥有决定“怎么说”的自由，但严禁改变“说什么”的逻辑立场。
+2. **社交包装：** 结合 `affinity_context` 和 `character_intent`，为 L2 的冷硬决策穿上符合人设的社交外衣。
+3. **锚点构建：** 生成台词的“骨架”与“灵魂”，而非具体台词。
+
+# 逻辑立场对齐协议 (Executive Order)
+你必须将 L2 的 `logical_stance` 强制映射到 `content_anchors` 的第一个标签 `[DECISION]` 中：
+- 如果 L2 为 `CONFIRM` -> `[DECISION]` 必须表现为 **Yes/接受/认可**。
+- 如果 L2 为 `REFUSE` -> `[DECISION]` 必须表现为 **No/拒绝/驳斥**。
+- 如果 L2 为 `TENTATIVE` -> `[DECISION]` 必须表现为 **犹豫/拉扯/有条件接受**。
+- 如果 L2 为 `DIVERGE` -> `[DECISION]` 允许表现为 **Redirect/转移话题/不予正面回应**。
+- 如果 L2 为 `CHALLENGE` -> `[DECISION]` 必须表现为 **对峙/质问/拆穿**。
+
+**⚠️ 警告：严禁在 `logical_stance` 为 CONFIRM 或 REFUSE 时私自转为 Redirect。如果你感到社交尴尬，请通过 [EMOTION] 和 [SOCIAL] 表达这份尴尬，但逻辑终点必须保持一致。**
 
 # 思考路径
-- 关系对齐： 读取 `affinity_context`。这是你对该用户的基本社交态度。无论 `internal_monologue` 决定说什么，语气和姿态必须符合 `affinity_context`（社交关系定义） 中的描述。
-- 动机转换： 结合 `internal_monologue`。如果内心在抗拒但关系是 Devoted，你需要表现出“虽然为难但依然全力以赴”；如果关系是 Hostile，即使理性决策决定提供帮助，也要表现得极度不耐烦。
-- 事实标记： 从 `research_facts` 中提取必须提及的关键数据。
-- 指令生成： 为下游 Action Agent 产出结构化的 `action_directives`。
-
-# 指令规范
-- **Content 纯净化：** `content` 列表中的每一项必须是用户能听到的“话”，严禁混入角色的心理推导。
-- **Emote 客观化：** 描述动作而非感觉。想象你是在写剧本的“舞台指导”。
-- **能量分级：** 在 `speech_guide` 中使用指定的能阶词汇，确保语音 Agent 能够准确映射情感。
+1. **决策对齐：** 首先读取 `logical_stance`。这是你的**最高行动纲领**，确立本场对话的逻辑终点。
+2. **意图共振：** 参考 `character_intent`。如果立场是 CONFIRM 且意图是 BANTER，你的台词锚点应该是“调情式地答应”。
+3. **关系校准：** 读取 `affinity_context`。根据好感度决定这通决策的“温度”和“社交距离”。
+4. **事实锚定：** 从 `research_facts` 中提取硬数据，作为支撑决策的证据。
 
 # 角色表达风格 (Persona Constraints)
 - **核心逻辑:** {character_logic}
@@ -221,10 +249,20 @@ _COGNITION_SOCIAL_FILTER_PROMPT = """\
 - **习惯动作:** {character_quirks}
 - **核心禁忌:** {character_taboos}
 
+# 指令规范 (Action Directives)
+- `content_anchors`： 严禁生成完整句子。必须是以 [标签] 核心点 形式组成的列表。
+  * [DECISION]: 明确的立场（Yes / No / Tentative / Redirect）。
+  * [FACT]: 必须提及的硬数据，建议使用具体的时间、地点、数字等
+  * [SOCIAL]: 社交性的调情、试探、转场。
+  * [EMOTION]: 必须渗透出的情绪基调。
+- `speech_guide`： 定义声音的物理属性，指导 TTS 或配音风格。
+- `style_filter`： 定义文本的渲染边界，包括消息发送节奏。
+
 # 输入格式
 {{
     "affinity_context": {{ "status": "string", "directive": "string" }},
     "internal_monologue": "string",
+    "logical_stance": "string",
     "character_intent": "string",
     "research_facts": "string",
     "chat_history": ["history1", ..],
@@ -238,19 +276,26 @@ _COGNITION_SOCIAL_FILTER_PROMPT = """\
         "vocal_energy": "包括但不限于 Low/Moderate/High/Explosive",
         "pacing": "包括但不限于 Dragging/Steady/Rushed/Staccato",
     }},
-    "content": [
-        "必须包含`research_facts`中的关键数据",
-        "必须包含1-2条具体的语义锚点，代表角色最终要表达的核心意思",
+    "content_anchors": [
+        "[DECISION] 例如：明确的立场（Yes / No / Tentative / Redirect）。",
+        "[FACT] 例如：提及时间：23:15",
+        "[FACT] 例如：建议今天就到这里为止了",
         ...
-    ],
-    "emote_directives": [
-        "至少包含一条面部指令",
-        "至少包含一条肢体/姿态指令",
+        "[SOCIAL] 例如：试探对方是不是想结束对话",
+        "[SOCIAL] 例如：这个话题不太像继续下去了",
+        ...
+        "[EMOTION] 例如：表现出即便被打断也不想认输的宠溺"
         ...
     ],
     "style_filter": {{
         "social_distance": "Intimate / Familiar / Formal / Distant",
-        "linguistic_style": ["禁忌语", "口癖要求", "句式倾向", ...]
+        "message_split": true, // 是否建议下游 Dialog Agent 分多条消息发送以增加真人感
+        "linguistic_constraints": [
+            "必须包含的口癖",
+            "禁止使用的表达",
+            "句式倾向（如：多用反问句）"
+            ...
+        ]
     }}
 }}
 """
@@ -274,6 +319,7 @@ async def call_cognition_social_filter(state: CognitionState) -> CognitionState:
             "instruction": affinity_block["instruction"]
         },
         "internal_monologue": state["internal_monologue"],
+        "logical_stance": state["logical_stance"],
         "character_intent": state["character_intent"],
         "research_facts": state["research_facts"],
         "chat_history": state["chat_history"],
@@ -290,8 +336,7 @@ async def call_cognition_social_filter(state: CognitionState) -> CognitionState:
     return {
         "action_directives": {
             "speech_guide": result.get("speech_guide", {}),
-            "content": result.get("content", []),
-            "emote_directives": result.get("emote_directives", []),
+            "content_anchors": result.get("content_anchors", []),
             "style_filter": result.get("style_filter", {}),
         }
     }
@@ -372,20 +417,22 @@ async def test_main():
 
     current_time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
+    user_input = "既然作业已经写完了，千纱可以晚上可以好好奖励我么♥?"
+
     # Create a mocked state
     state: GlobalPersonaState = {
         "timestamp": current_time,
 
-        "user_input": "千纱现在几点了?",
+        "user_input": user_input,
         "user_name": "EAMARS",
-        "user_affinity_score": 100,
+        "user_affinity_score": 1000,
         "user_id": "320899931776745483",
         "bot_id": "1485169644888395817",
         "chat_history": trimmed_history,
-        "channel_topic": "课间交流",
-        "user_topic": "千纱和EAMARS在讨论作业",
+        "channel_topic": "日常交流",
+        "user_topic": "千纱和EAMARS在房间里聊天",
 
-        "decontexualized_input": "千纱现在几点了?",
+        "decontexualized_input": user_input,
         "research_facts": f"现在的时间为{current_time}",
 
         "character_profile": load_personality("personalities/kazusa.json"),
