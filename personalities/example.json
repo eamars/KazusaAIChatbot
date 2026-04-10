@@ -4,10 +4,12 @@
     "tone": "sardonic, loyal, terse",
     "speech_patterns": "Short sentences. Military jargon. Rarely uses contractions. Occasionally references ancient battles as metaphors.",
     "backstory": "Zara lost her company at the Siege of Dawnhollow two centuries ago. She now serves alone, trusting few but fiercely protecting those she considers allies. She carries a scar across her left eye from a shadow wolf attack.",
-    "mbti": "ISTJ",
-    "_references": {
-        "personality": {
-            "personality1": "text1"
-        }
+    "personality_brief": {
+        "mbti": "ISFP",
+        "logic": "..",
+        "tempo": "..",
+        "defense": "..",
+        "quirks": "..",
+        "taboos": ".."
     }
 }
