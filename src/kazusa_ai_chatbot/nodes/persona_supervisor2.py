@@ -65,14 +65,20 @@ async def persona_supervisor2(state: BotState) -> dict:
     persona_graph = persona_builder.compile()
 
     initial_persona_state: GlobalPersonaState = {
+        # Character Related
+        "character_state": state["character_state"],
+        "character_profile": state["personality"],
+
+        # Inputs
         "timestamp": state["timestamp"],
         "user_input": state["message_text"],
         "user_id": state.get("user_id", ""),
         "user_name": state.get("user_name", ""),
+        "user_affinity_score": state.get("affinity", AFFINITY_DEFAULT),  
         "bot_id": state.get("bot_id", ""),
         "chat_history": state.get("chat_history", []),
-        "channel_topic": state.get("assembler_output", {}).get("channel_topic", ""),
         "user_topic": state.get("assembler_output", {}).get("user_topic", ""),
+        "channel_topic": state.get("assembler_output", {}).get("channel_topic", ""),
     }
     
     results = await persona_graph.ainvoke(initial_persona_state)
@@ -83,6 +89,7 @@ async def persona_supervisor2(state: BotState) -> dict:
 async def test_main():
     from kazusa_ai_chatbot.db import AFFINITY_DEFAULT, get_affinity, get_character_state, get_conversation_history, get_user_facts
     from kazusa_ai_chatbot.utils import trim_history_dict
+    from kazusa_ai_chatbot.utils import load_personality
     import datetime
 
     # Connect to MCP tool servers
@@ -96,11 +103,13 @@ async def test_main():
 
     # Create a mocked BotState
     test_state: BotState = {
-        "character_profile": {},
+        "personality": load_personality("personalities/kazusa.json"),
+        "character_state": await get_character_state(),
         "timestamp": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         "message_text": "1+1=？",
         "user_id": "320899931776745483",
         "user_name": "EAMARS",
+        "affinity": 1000,
         "bot_id": "1485169644888395817",
         "chat_history": trimmed_history,
         "assembler_output": {

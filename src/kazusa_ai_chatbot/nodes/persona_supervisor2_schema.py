@@ -12,6 +12,7 @@ class GlobalPersonaState(TypedDict):
     user_input: str
     user_id: str
     user_name: str
+    user_affinity_score: int
     bot_id: str
     chat_history: list[dict]
     user_topic: str
@@ -21,9 +22,5 @@ class GlobalPersonaState(TypedDict):
     decontexualized_input: str  # from Stage 0
     research_facts: str       # From Stage 1
     internal_monologue: str   # From Stage 2
-    character_intent: str      # From Stage 2 (Directives for Stage 3)
-    final_speech: str         # From Stage 3
-    
-    # Persistent Persona Data
-    mood_state: dict          # Carry-over emotion (e.g., {"anger": 2, "energy": 8})
-    metadata: dict            # Search results, usage, etc.
+    action_directives: list[str]      # From Stage 2 (Directives for Stage 3)
+    final_action: str         # From Stage 3
