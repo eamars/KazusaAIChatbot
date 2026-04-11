@@ -334,6 +334,16 @@ async def update_affinity(user_id: str, delta: int) -> int:
     return new_value
 
 
+async def update_last_relationship_insight(user_id: str, insight: str) -> None:
+    """Update the last relationship insight for a user."""
+    db = await get_db()
+    await db.user_facts.update_one(
+        {"user_id": user_id},
+        {"$set": {"last_relationship_insight": insight}},
+        upsert=True,
+    )
+
+
 async def upsert_user_facts(user_id: str, new_facts: list[str]) -> None:
     """Add new facts to a user's memory, deduplicating while preserving order."""
     db = await get_db()
@@ -436,47 +446,30 @@ async def get_character_state() -> CharacterStateDoc | dict:
 
 async def upsert_character_state(
     mood: str,
-    emotional_tone: str,
-    recent_events: list[str],
+    global_vibe: str,
+    reflection_summary: str,
     timestamp: str,
 ) -> None:
     """Update the global character state."""
     db = await get_db()
     # Fetch existing events and append
     existing = await get_character_state()
-    old_events = existing.get("recent_events", [])
-    merged_events = old_events + recent_events  # No limit - keep all events
+    
+    # Don't update if the value is empty string
+    if mood == "":
+        mood = existing.get("mood", "")
+    if global_vibe == "":
+        global_vibe = existing.get("global_vibe", "")
+    if reflection_summary == "":
+        reflection_summary = existing.get("reflection_summary", "")
 
     await db.character_state.update_one(
         {"_id": "global"},
         {
             "$set": {
                 "mood": mood,
-                "emotional_tone": emotional_tone,
-                "recent_events": merged_events,
-                "updated_at": timestamp,
-            }
-        },
-        upsert=True,
-    )
-
-
-async def overwrite_character_state_recent_events(recent_events: list[str], timestamp: str) -> None:
-    """Overwrite only the recent_events in character state, preserving mood and tone."""
-    db = await get_db()
-    
-    # Get existing state to preserve mood and tone
-    existing = await get_character_state()
-    current_mood = existing.get("mood", "")
-    current_tone = existing.get("emotional_tone", "")
-
-    await db.character_state.update_one(
-        {"_id": "global"},
-        {
-            "$set": {
-                "mood": current_mood,
-                "emotional_tone": current_tone,
-                "recent_events": recent_events,
+                "global_vibe": global_vibe,
+                "reflection_summary": reflection_summary,
                 "updated_at": timestamp,
             }
         },
@@ -581,3 +574,4 @@ async def search_memory(
     cursor = collection.aggregate(pipeline)
     docs = await cursor.to_list(length=limit)
     return [(doc.pop("score", 0.0), doc) for doc in docs]
+

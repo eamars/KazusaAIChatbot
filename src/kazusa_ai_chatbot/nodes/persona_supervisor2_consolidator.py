@@ -317,7 +317,7 @@ async def call_consolidation_subgraph(
     return {
         "mood": result.get("mood", ""),
         "global_vibe": result.get("global_vibe", ""),
-        "reflected_summary": result.get("reflected_summary", ""),
+        "reflection_summary": result.get("reflection_summary", ""),
         "diary_entry": result.get("diary_entry", ""),
         "affinity_delta": result.get("affinity_delta", 0),
         "last_relationship_insight": result.get("last_relationship_insight", ""),

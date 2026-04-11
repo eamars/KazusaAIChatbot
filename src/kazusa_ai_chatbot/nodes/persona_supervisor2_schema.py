@@ -37,7 +37,7 @@ class GlobalPersonaState(TypedDict):
     logical_stance: str
 
     # Stage 3 output
-    final_dialog: []  # -> Will be used for dialog end point (e.g,. Discord)
+    final_dialog: [str]  # -> Will be used for dialog end point (e.g,. Discord)
     # Other outputs from here
 
     # Stage 4 output

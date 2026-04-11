@@ -20,7 +20,7 @@ from kazusa_ai_chatbot.agents.memory_agent import MemoryAgent
 from kazusa_ai_chatbot.nodes.speech_agent import speech_agent
 from kazusa_ai_chatbot.agents.web_search_agent import WebSearchAgent
 from kazusa_ai_chatbot.nodes.intake import intake
-from kazusa_ai_chatbot.nodes.persona_supervisor import persona_supervisor
+from kazusa_ai_chatbot.nodes.persona_supervisor2 import persona_supervisor2
 from kazusa_ai_chatbot.nodes.relevance_agent import relevance_agent
 from kazusa_ai_chatbot.state import BotState
 
@@ -53,8 +53,7 @@ def build_graph() -> StateGraph:
     # ── Register nodes ──────────────────────────────────────────────
     graph.add_node("intake", intake)
     graph.add_node("relevance_agent", relevance_agent)
-    graph.add_node("persona_supervisor", persona_supervisor)
-    graph.add_node("speech_agent", speech_agent)
+    graph.add_node("persona_supervisor2", persona_supervisor2)
 
     # ── Edges ───────────────────────────────────────────────────────
     # Entry
@@ -63,9 +62,8 @@ def build_graph() -> StateGraph:
     # After intake, check if we should respond
     graph.add_conditional_edges("intake", _should_respond_after_intake, ["relevance_agent", END])
 
-    # Relevance Agent → Supervisor → Speech Agent → END
-    graph.add_edge("relevance_agent", "persona_supervisor")
-    graph.add_edge("persona_supervisor", "speech_agent")
-    graph.add_edge("speech_agent", END)
+    # Relevance Agent → Supervisor → END
+    graph.add_edge("relevance_agent", "persona_supervisor2")
+    graph.add_edge("persona_supervisor2", END)
 
     return graph.compile()

@@ -98,6 +98,7 @@ class RolePlayBot(discord.Client):
             "channel_id": str(message.channel.id),
             "channel_name": str(message.channel.name),
             "guild_id": str(message.guild.id) if message.guild else "",
+            "bot_name": str(self.user.name) if self.user else "",
             "bot_id": str(self.user.id) if self.user else "",
             "message_text": message.content,
             "timestamp": datetime.now(timezone.utc).isoformat(),
@@ -114,32 +115,25 @@ class RolePlayBot(discord.Client):
                 await message.reply("*something went wrong*")
                 return
 
-        response = (result.get("response", "") or "").strip()
-        if not response:
+        # Read output from persona supervisor
+        final_dialog = result.get("final_dialog", [])
+        if not final_dialog:
             return
 
         # Use reply feature decision from relevance agent
         use_reply = result.get("use_reply_feature", False)
 
-        # Discord has a 2000 char limit; split if necessary
-        for chunk in _split_message(response):
-            if use_reply:
-                await message.reply(chunk)
-            else:
-                await message.channel.send(chunk)
+        # Send messages
+        for dialog in final_dialog:
+            # Discord has a 2000 char limit; split if necessary
+            for chunk in _split_message(dialog):
+                if use_reply:
+                    await message.reply(chunk)
+                    use_reply = False  # Only reply the first message
+                else:
+                    await message.channel.send(chunk)
 
         # Fire-and-forget: save conversation history + extract user facts
-        asyncio.create_task(
-            _save_exchange(
-                channel_id=str(message.channel.id),
-                user_id=str(message.author.id),
-                user_name=message.author.display_name,
-                bot_id=str(self.user.id),
-                bot_name=str(self.user.name),
-                user_message=message.content,
-                bot_response=response,
-            )
-        )
         asyncio.create_task(self._run_memory_writer(result))
 
     async def _run_memory_writer(self, graph_result: dict) -> None:
@@ -173,42 +167,6 @@ def _split_message(text: str, limit: int = 2000) -> list[str]:
         chunks.append(text[:split_at])
         text = text[split_at:].lstrip()
     return chunks
-
-
-async def _save_exchange(
-    channel_id: str,
-    user_id: str,
-    user_name: str,
-    bot_id: str,
-    bot_name: str,
-    user_message: str,
-    bot_response: str,
-) -> None:
-    """Save both sides of the exchange to MongoDB conversation history."""
-    ts = datetime.now(timezone.utc).isoformat()
-    try:
-        await save_conversation(
-            {
-                "channel_id": channel_id,
-                "role": "user",
-                "user_id": user_id,
-                "name": user_name,
-                "content": user_message,
-                "timestamp": ts,
-            }
-        )
-        await save_conversation(
-            {
-                "channel_id": channel_id,
-                "role": "bot",
-                "user_id": bot_id,
-                "name": bot_name,
-                "content": bot_response,
-                "timestamp": ts,
-            }
-        )
-    except Exception:
-        logger.exception("Failed to save exchange to conversation history")
 
 
 def run_bot(

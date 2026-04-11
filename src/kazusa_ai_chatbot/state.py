@@ -92,32 +92,35 @@ class BotState(TypedDict, total=False):
     channel_id: str
     channel_name: str
     guild_id: str
+    bot_name: str
     bot_id: str  # the bot's own Discord user ID (for mention filtering)
     message_text: str
     timestamp: str
     should_respond: bool
 
-    # --- Stage 2: relevance_agent context loading ---
+    # relevance_agent context loading ---
     conversation_history: list[dict[str, str]]
     user_memory: list[str]
     character_state: CharacterState
     affinity: int  # 0–1000 affinity score toward current user
 
-    # --- Stage 2: relevance_agent analysis ---
+    # relevance_agent analysis ---
     assembler_output: AssemblerOutput
     use_reply_feature: bool
 
-    # --- Stage 3: persona_supervisor ---
-    supervisor_plan: SupervisorPlan
-    agent_results: list[AgentResult]
-    speech_brief: SpeechBrief
-    supervisor_chain_of_thought: list[dict]
-
-    # --- Stage 4: speech_agent ---
-    response: str
-
-    # --- Stage 5: memory writer ---
-    new_facts: list[str]
+    # Persona supervisor output
+    final_dialog: [str]  # For discord
+    # global state updater
+    mood: str
+    global_vibe: str
+    reflection_summary: str
+    # Relationship recorder
+    diary_entry: [str]
+    affinity_delta: int
+    last_relationship_insight: str
+    # Facts harvester
+    new_facts: [str]
+    future_promises: [str]    
 
     # --- metadata ---
     personality: dict

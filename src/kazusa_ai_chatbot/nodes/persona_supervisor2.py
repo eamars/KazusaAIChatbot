@@ -75,7 +75,17 @@ async def persona_supervisor2(state: BotState) -> dict:
     
     results = await persona_graph.ainvoke(initial_persona_state)
     
-    return results
+    return {
+        "final_dialog": results["final_dialog"],
+        "mood": results["mood"],
+        "global_vibe": results["global_vibe"],
+        "reflection_summary": results["reflection_summary"],
+        "diary_entry": results["diary_entry"],
+        "affinity_delta": results["affinity_delta"],
+        "last_relationship_insight": results["last_relationship_insight"],
+        "new_facts": results["new_facts"],
+        "future_promises": results["future_promises"],
+    }
 
 
 async def test_main():
@@ -98,7 +108,7 @@ async def test_main():
         "personality": load_personality("personalities/kazusa.json"),
         "character_state": await get_character_state(),
         "timestamp": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-        "message_text": "千纱知道最近发生了什么大事么？考试要考哦",
+        "message_text": "千纱我爱你哟",
         "user_id": "320899931776745483",
         "user_name": "EAMARS",
         "affinity": 1000,
@@ -111,7 +121,7 @@ async def test_main():
     }
     
     result = await persona_supervisor2(test_state)
-    print(result["final_dialog"])
+    print(result)
 
     await mcp_manager.stop()
 

@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import json
 import logging
-
+from datetime import datetime, timezone
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_openai import ChatOpenAI
 
@@ -22,11 +22,11 @@ from kazusa_ai_chatbot.db import (
     AFFINITY_DEFAULT,
     get_character_state,
     get_conversation_history,
-    overwrite_character_state_recent_events,
     overwrite_user_facts,
     upsert_character_state,
     upsert_user_facts,
     update_affinity,
+    save_conversation,
 )
 from kazusa_ai_chatbot.utils import parse_llm_json_output
 from kazusa_ai_chatbot.state import BotState
@@ -510,97 +510,86 @@ async def character_memory_compactor_llm(
         logger.exception("Character memory compactor failed - returning empty list")
         return []
 
+
+async def _save_exchange(
+    channel_id: str,
+    user_id: str,
+    user_name: str,
+    bot_id: str,
+    bot_name: str,
+    user_message: str,
+    bot_response: str,
+) -> None:
+    """Save both sides of the exchange to MongoDB conversation history."""
+    ts = datetime.now(timezone.utc).isoformat()
+    try:
+        await save_conversation(
+            {
+                "channel_id": channel_id,
+                "role": "user",
+                "user_id": user_id,
+                "name": user_name,
+                "content": user_message,
+                "timestamp": ts,
+            }
+        )
+        await save_conversation(
+            {
+                "channel_id": channel_id,
+                "role": "bot",
+                "user_id": bot_id,
+                "name": bot_name,
+                "content": bot_response,
+                "timestamp": ts,
+            }
+        )
+    except Exception:
+        logger.exception("Failed to save exchange to conversation history")
+
+
+
 async def memory_writer(state: BotState) -> BotState:
-    """Extract user facts and character state update using new LLM functions. Best-effort — failures are silent."""
+    # Record mood, global_vibe and reflection_summary
+    await upsert_character_state(
+        mood=state.get("mood", ""),
+        global_vibe=state.get("global_vibe", ""),
+        reflection_summary=state.get("reflection_summary", ""),
+        timestamp=state.get("timestamp", "")
+    )
+
+    # Update with diary
     user_id = state.get("user_id", "")
-    message_text = state.get("message_text", "")
-    response = state.get("response", "")
-    timestamp = state.get("timestamp", "")
+    diary_entry = state.get("diary_entry", [])
 
-    if not user_id or not message_text:
-        return {**state, "new_facts": []}
+    if user_id and diary_entry:
+        await upsert_user_facts(user_id, diary_entry)
 
-    facts = []
-
-    # ── Social Archivist: User facts and affinity ──────────────────────
-    try:
-        social_result = await social_archivist_llm(state)
-        
-        # Extract user facts from social archivist
-        new_facts = social_result.get("new_facts", [])
-        if isinstance(new_facts, list):
-            facts = [fact.get("content", "") for fact in new_facts 
-                    if isinstance(fact, dict) and isinstance(fact.get("content"), str) and fact.get("content").strip()]
-        
-        if facts:
-            await upsert_user_facts(user_id, facts)
-            logger.info("Stored %d new facts for user %s", len(facts), user_id)
-
-        # Handle affinity delta from social archivist
-        affinity_delta = social_result.get("affinity_delta", 0)
-        if isinstance(affinity_delta, (int, float)):
-            # Apply non-linear processing to the raw delta
-            current_affinity = state.get("affinity", AFFINITY_DEFAULT)
-            raw_delta = int(affinity_delta)
-            processed_delta = process_affinity_delta(current_affinity, raw_delta)
-            
-            new_affinity = await update_affinity(user_id, processed_delta)
-            logger.info("Affinity for %s: raw=%+d, processed=%+d → %d", user_id, raw_delta, processed_delta, new_affinity)
-
-    except Exception:
-        logger.exception("Social archivist failed — skipping user facts and affinity")
-
-    # ── Ego Reflector: Character state ───────────────────────────────────
-    try:
-        ego_result = await ego_reflector_llm(state)
-        
-        # Update character state from ego reflector
-        if isinstance(ego_result, dict):
-            mood = ego_result.get("mood", "")
-            tone = ego_result.get("emotional_tone", "")
-            
-            # Create event summary from memories if available
-            memories = ego_result.get("memory", [])
-            if isinstance(memories, list) and memories:
-                # Use first memory as event summary, or create a summary
-                event = memories[0].get("content", "")
-            else:
-                event = ""
-            
-            if mood or tone:
-                recent = [event] if event else []
-                await upsert_character_state(mood, tone, recent, timestamp)
-                logger.info("Updated character state: mood=%s tone=%s", mood, tone)
-
-    except Exception:
-        logger.exception("Ego reflector failed — skipping character state")
-
-    # ── Character Memory Compactor: Compact character episodic memories ────────
-    personality = state.get("personality", {})
-    if personality:  # Only run if we have personality data
-        # Get current character memories from database
-        character_state = await get_character_state()
-        existing_memories = character_state.get("recent_events", [])
-        
-        # Only compact if we have memories and they exceed a threshold
-        if existing_memories and len(existing_memories) > 20:  # Threshold for character memories
-            try:
-                compacted_memories = await character_memory_compactor_llm(personality, existing_memories)
-                if compacted_memories:  # Only save if compaction succeeded
-                    await overwrite_character_state_recent_events(compacted_memories, timestamp)
-                    logger.info("Compacted character memories from %d to %d entries", len(existing_memories), len(compacted_memories))
-            except Exception:
-                logger.exception("Character memory compactor failed - continuing with original memories")
+    # Save conversation
+    channel_id = state.get("channel_id", "")
+    user_name = state.get("user_name", "")
+    bot_id = state.get("bot_id", "")
+    bot_name = state.get("bot_name", "")
+    user_message = state.get("message_text", "")
+    bot_response = "\n".join(state.get("final_dialog", []))
+    await _save_exchange(
+        channel_id=channel_id,
+        user_id=user_id,
+        user_name=user_name,
+        bot_id=bot_id,
+        bot_name=bot_name,
+        user_message=user_message,
+        bot_response=bot_response,
+    )
 
     # ── Memory Compactor: Short listing user_memory ─────────────────────────────
-    user_memory = state.get("user_memory", [])
-    if user_memory and len(user_memory) > 20:
-        try:
-            compacted_memories = await user_memory_compactor_llm(user_memory)
-            if compacted_memories:  # Only overwrite if compaction succeeded
-                await overwrite_user_facts(user_id, compacted_memories)
-                logger.info("Overwrote user memories with %d compacted entries for user %s", len(compacted_memories), user_id)
-        except Exception:
-            logger.exception("Memory compactor failed - continuing with original memories")
+    # user_memory = state.get("user_memory", [])
+    # if user_memory and len(user_memory) > 20:
+    #     try:
+    #         compacted_memories = await user_memory_compactor_llm(user_memory)
+    #         if compacted_memories:  # Only overwrite if compaction succeeded
+    #             await overwrite_user_facts(user_id, compacted_memories)
+    #             logger.info("Overwrote user memories with %d compacted entries for user %s", len(compacted_memories), user_id)
+    #     except Exception:
+    #         logger.exception("Memory compactor failed - continuing with original memories")
 
-    return {**state, "new_facts": facts}
+    return state
