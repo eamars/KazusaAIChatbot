@@ -18,16 +18,14 @@ import json
 logger = logging.getLogger(__name__)
 
 
-_llm: ChatOpenAI | None = None
-def _get_llm() -> ChatOpenAI:
-    global _llm
-    if _llm is None:
-        _llm = ChatOpenAI(
-            model=LLM_MODEL,
-            temperature=0.9,
-            base_url=LLM_BASE_URL,
-            api_key=LLM_API_KEY,
-        )
+def _get_llm(tempeature, top_p) -> ChatOpenAI:
+    _llm = ChatOpenAI(
+        model=LLM_MODEL,
+        temperature=tempeature,
+        top_p=top_p,
+        base_url=LLM_BASE_URL,
+        api_key=LLM_API_KEY,
+    )
     return _llm
 
 
@@ -94,6 +92,7 @@ _COGNITION_SUBCONSCIOUS_PROMPT = """\
     "interaction_subtext": "捕捉到的潜台词标签（如：隐蔽的羞辱、试探、求关注、施压）"
 }}
 """
+_subconscious_llm = _get_llm(tempeature=0.4, top_p=0.5)  # Stable subconscious
 async def call_cognition_subconscious(state: CognitionState) -> CognitionState:
     system_prompt = SystemMessage(content=_COGNITION_SUBCONSCIOUS_PROMPT.format(
         character_name=state["character_profile"]["name"],
@@ -106,18 +105,28 @@ async def call_cognition_subconscious(state: CognitionState) -> CognitionState:
         "user_topic": state["user_topic"],
     }
     human_message = HumanMessage(content=json.dumps(msg, ensure_ascii=False))
-    result = await _get_llm().ainvoke([
+    response = await _subconscious_llm.ainvoke([
         system_prompt,
         human_message,
     ])
-    result = parse_llm_json_output(result.content)
+    result = parse_llm_json_output(response.content)
 
-    logger.debug(f"Input: {state['user_input']}\nOutput: {result['emotional_appraisal']}")
-    print("subconscious result:", result)
+    logger.debug(f"Subconscious: {result}")
+
+    # In case AI make some spelling mistakes
+    emotional_appraisal = ""
+    interaction_subtext = ""
+    for key, value in result.items():
+        if key.startswith("emotional"):
+            emotional_appraisal = value
+        elif key.startswith("interaction"):
+            interaction_subtext = value
+        else:
+            logger.error(f"Unknown key: {key}: {value}")
 
     return {
-        "emotional_appraisal": result["emotional_appraisal"],
-        "interaction_subtext": result["interaction_subtext"],
+        "emotional_appraisal": emotional_appraisal,
+        "interaction_subtext": interaction_subtext,
     }
 
 
@@ -147,6 +156,22 @@ _COGNITION_CONSCIOUSNESS_PROMPT = """\
 2. **关系约束：** 检查 `affinity_context`。以我现在的性格和对他的好感，我应该表现得“易于接近”还是“难以捉摸”？
 3. **立场定夺：** 结合 L1 的直觉反馈，拍板选定 `logical_stance`。**这是行政命令，下游 L3 严禁篡改此立场。**
 4. **意图标记：** 选择最匹配立场的 `character_intent` 标签。
+
+# 决策博弈逻辑
+不要进行数字计算，而是进行以下【语义层级】的匹配：
+
+1. **场景分类 (Context Category)**: 
+   - [Routine]: 日常、无损的互动。
+   - [Intimate]: 涉及隐私、身体感官、情感承诺。
+   - [Sacrifice]: 涉及原则损毁、利益让渡、自我贬低。
+
+2. **逻辑匹配准则**:
+   - 如果是 [Routine]: 只要 Affinity 在 "友善中立" 以上，默认 CONFIRM。
+   - 如果是 [Intimate]: 必须 Affinity 在 "深厚信赖" 以上，且情感动机 (L1) 为正向，才允许 CONFIRM。
+   - 如果是 [Sacrifice]: 除非 Affinity 达到 "至死不渝" 且 `interaction_subtext` 显示出极高的必要性，否则一律 REFUSE。
+
+3. **性格偏移 (MBTI Offset)**:
+   - 作为 {character_mbti}，你对 [Sacrifice] 类请求的防御阈值是 [极高/中等/极低]。
 
 # 输出要点
 - **严禁输出对话文本：** 你只负责输出内心的“想”，不负责外部的“说”。
@@ -180,6 +205,7 @@ _COGNITION_CONSCIOUSNESS_PROMPT = """\
     "character_intent": "行动意图"
 }}
 """
+_conscious_llm = _get_llm(tempeature=0.2, top_p=0.1)  # Conscious deliberation
 async def call_cognition_consciousness(state: CognitionState) -> CognitionState:
     system_prompt = SystemMessage(content=_COGNITION_CONSCIOUSNESS_PROMPT.format(
         character_name=state["character_profile"]["name"],
@@ -201,18 +227,33 @@ async def call_cognition_consciousness(state: CognitionState) -> CognitionState:
         "interaction_subtext": state["interaction_subtext"],
     }
     human_message = HumanMessage(content=json.dumps(msg, ensure_ascii=False))
-    result = await _get_llm().ainvoke([
+    response = await _conscious_llm.ainvoke([
         system_prompt,
         human_message,
     ])
-    result = parse_llm_json_output(result.content)
 
-    print("consciousness result:", result)
+    result = parse_llm_json_output(response.content)
+
+    logger.debug(f"Consciousness: {result}")
+
+    # In case AI make some spelling mistakes...
+    internal_monologue = ""
+    character_intent = ""
+    logical_stance = ""
+    for key, value in result.items():
+        if key.startswith("internal"):
+            internal_monologue = value
+        elif key.startswith("character_intent"):
+            character_intent = value
+        elif key.startswith("logical_stance"):
+            logical_stance = value
+        else:
+            logger.error(f"Unknown key: {key}: {value}")
 
     return {
-        "internal_monologue": result["internal_monologue"],
-        "character_intent": result["character_intent"],
-        "logical_stance": result["logical_stance"],
+        "internal_monologue": internal_monologue,
+        "character_intent": character_intent,
+        "logical_stance": logical_stance,
     }
 
 
@@ -289,7 +330,6 @@ _COGNITION_SOCIAL_FILTER_PROMPT = """\
     ],
     "style_filter": {{
         "social_distance": "Intimate / Familiar / Formal / Distant",
-        "message_split": true, // 是否建议下游 Dialog Agent 分多条消息发送以增加真人感
         "linguistic_constraints": [
             "必须包含的口癖",
             "禁止使用的表达",
@@ -299,6 +339,7 @@ _COGNITION_SOCIAL_FILTER_PROMPT = """\
     }}
 }}
 """
+_social_filter_llm = _get_llm(tempeature=0.75, top_p=0.8)  # Social filter
 async def call_cognition_social_filter(state: CognitionState) -> CognitionState:
     system_prompt = SystemMessage(content=_COGNITION_SOCIAL_FILTER_PROMPT.format(
         character_name=state["character_profile"]["name"],
@@ -325,26 +366,34 @@ async def call_cognition_social_filter(state: CognitionState) -> CognitionState:
         "chat_history": state["chat_history"],
     }
     human_message = HumanMessage(content=json.dumps(msg, ensure_ascii=False))
-    result = await _get_llm().ainvoke([
+    response = await _social_filter_llm.ainvoke([
         system_prompt,
         human_message,
     ])
-    result = parse_llm_json_output(result.content)
+    result = parse_llm_json_output(response.content)
 
-    print("social filter result:", result)
+    logger.debug(f"Social Filter: {result}")
+
+    # In case AI make some spelling mistakes
+    speech_guide = {}
+    content_anchors = []
+    style_filter = {}
+    for key, value in result.items():
+        if key.startswith("speech"):
+            speech_guide = value
+        elif key.startswith("content"):
+            content_anchors = value
+        elif key.startswith("style"):
+            style_filter = value
+        else:
+            logger.error(f"Unknown key: {key}: {value}")
 
     return {
         "action_directives": {
-            "speech_guide": result.get("speech_guide", {}),
-            "content_anchors": result.get("content_anchors", []),
-            "style_filter": result.get("style_filter", {}),
+            "speech_guide": speech_guide,
+            "content_anchors": content_anchors,
+            "style_filter": style_filter,
         }
-    }
-
-
-async def call_cognition_evaluator(state: CognitionState) -> CognitionState:
-    return {
-        "should_stop": True,
     }
 
 
@@ -354,23 +403,13 @@ async def call_cognition_subgraph(state: GlobalPersonaState) -> dict:
     sub_agent_builder.add_node("l1_subconscious", call_cognition_subconscious)
     sub_agent_builder.add_node("l2_consciousness", call_cognition_consciousness)
     sub_agent_builder.add_node("l3_social_filter", call_cognition_social_filter)
-    sub_agent_builder.add_node("evaluator", call_cognition_evaluator)
 
     # Connect
     sub_agent_builder.add_edge(START, "l1_subconscious")
     sub_agent_builder.add_edge("l1_subconscious", "l2_consciousness")
     sub_agent_builder.add_edge("l2_consciousness", "l3_social_filter")
-    sub_agent_builder.add_edge("l3_social_filter", "evaluator")
-    
-    # Evaluate. If no good then loop back to L2 consciousness
-    sub_agent_builder.add_conditional_edges(
-        "evaluator",
-        lambda x: "loop" if not x["should_stop"] else "finish",
-        {
-            "loop": "l2_consciousness",
-            "finish": END,
-        }
-    )
+    sub_agent_builder.add_edge("l3_social_filter", END)
+
 
     cognition_subgraph = sub_agent_builder.compile()
 
@@ -397,10 +436,9 @@ async def call_cognition_subgraph(state: GlobalPersonaState) -> dict:
     
     result = await cognition_subgraph.ainvoke(initial_state)
 
-    # TODO:Implement this
     return {
-        "internal_monologue": "",
-        "action_directives": []
+        "internal_monologue": result.get("internal_monologue", ""),
+        "action_directives": result.get("action_directives", {}),
     }
 
 
@@ -425,7 +463,7 @@ async def test_main():
 
         "user_input": user_input,
         "user_name": "EAMARS",
-        "user_affinity_score": 1000,
+        "user_affinity_score": 900,
         "user_id": "320899931776745483",
         "bot_id": "1485169644888395817",
         "chat_history": trimmed_history,
@@ -440,8 +478,10 @@ async def test_main():
 
     }
     
-    result = await call_cognition_subgraph(state)
-    print(f"cognition output: {result}")
+    for affinity in range(0, 1001, 50):
+        state["user_affinity_score"] = affinity
+        result = await call_cognition_subgraph(state)
+        print(f"Cognition result for affinity {affinity}: {result}")
 
 if __name__ == "__main__":
     import asyncio
