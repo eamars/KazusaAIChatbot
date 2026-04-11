@@ -1,5 +1,3 @@
-
-
 from typing import TypedDict
 
 from kazusa_ai_chatbot.nodes.persona_supervisor2_schema import GlobalPersonaState
@@ -18,10 +16,10 @@ import json
 logger = logging.getLogger(__name__)
 
 
-def _get_llm(tempeature, top_p) -> ChatOpenAI:
+def _get_llm(temperature, top_p) -> ChatOpenAI:
     _llm = ChatOpenAI(
         model=LLM_MODEL,
-        temperature=tempeature,
+        temperature=temperature,
         top_p=top_p,
         base_url=LLM_BASE_URL,
         api_key=LLM_API_KEY,
@@ -49,17 +47,17 @@ class CognitionState(TypedDict):
     research_facts: str
 
     # --- INTERNAL DATA FLOW ---
-    # L1 -> L2
+    # Subconscious (L1) -> Conscious (L2)
     emotional_appraisal: str
     interaction_subtext: str
 
-    # L2 -> L3 -> evaluator (and output)
+    # Conscious (L2) -> Social Filter (L3) -> evaluator (and output)
     internal_monologue: str
     character_intent: str
     logical_stance: str
 
-    # L3 -> evaluator (and output)
-    action_directives: list[str]
+    # Social Filter (L3) -> evaluator (and output)
+    action_directives: dict
 
     # --- CONTROL SIGNALS ---
     should_stop: bool
@@ -92,7 +90,7 @@ _COGNITION_SUBCONSCIOUS_PROMPT = """\
     "interaction_subtext": "捕捉到的潜台词标签（如：隐蔽的羞辱、试探、求关注、施压）"
 }}
 """
-_subconscious_llm = _get_llm(tempeature=0.4, top_p=0.5)  # Stable subconscious
+_subconscious_llm = _get_llm(temperature=0.4, top_p=0.5)  # Stable subconscious
 async def call_cognition_subconscious(state: CognitionState) -> CognitionState:
     system_prompt = SystemMessage(content=_COGNITION_SUBCONSCIOUS_PROMPT.format(
         character_name=state["character_profile"]["name"],
@@ -205,7 +203,7 @@ _COGNITION_CONSCIOUSNESS_PROMPT = """\
     "character_intent": "行动意图"
 }}
 """
-_conscious_llm = _get_llm(tempeature=0.2, top_p=0.1)  # Conscious deliberation
+_conscious_llm = _get_llm(temperature=0.2, top_p=0.1)  # Conscious deliberation
 async def call_cognition_consciousness(state: CognitionState) -> CognitionState:
     system_prompt = SystemMessage(content=_COGNITION_CONSCIOUSNESS_PROMPT.format(
         character_name=state["character_profile"]["name"],
@@ -339,7 +337,7 @@ _COGNITION_SOCIAL_FILTER_PROMPT = """\
     }}
 }}
 """
-_social_filter_llm = _get_llm(tempeature=0.75, top_p=0.8)  # Social filter
+_social_filter_llm = _get_llm(temperature=0.75, top_p=0.8)  # Social filter
 async def call_cognition_social_filter(state: CognitionState) -> CognitionState:
     system_prompt = SystemMessage(content=_COGNITION_SOCIAL_FILTER_PROMPT.format(
         character_name=state["character_profile"]["name"],
@@ -397,7 +395,15 @@ async def call_cognition_social_filter(state: CognitionState) -> CognitionState:
     }
 
 
-async def call_cognition_subgraph(state: GlobalPersonaState) -> dict:
+async def call_cognition_subgraph(state: GlobalPersonaState) -> GlobalPersonaState:
+    """
+    Future development plans: 
+    
+    - Separate the global character mood with the user specific mood. 
+      * Global mood get update from all users' conversation
+      * User mood get update from this user's conversation (this is not affinity. The mood can change indenpendently from affinity in time)
+
+    """
     sub_agent_builder = StateGraph(CognitionState)
 
     sub_agent_builder.add_node("l1_subconscious", call_cognition_subconscious)
@@ -439,6 +445,12 @@ async def call_cognition_subgraph(state: GlobalPersonaState) -> dict:
     return {
         "internal_monologue": result.get("internal_monologue", ""),
         "action_directives": result.get("action_directives", {}),
+
+        # Other data to help with stage 4 consolidation
+        "interaction_subtext": result.get("interaction_subtext", ""),
+        "emotional_appraisal": result.get("emotional_appraisal", ""),
+        "character_intent": result.get("character_intent", ""),
+        "logical_stance": result.get("logical_stance", ""),
     }
 
 
@@ -463,7 +475,7 @@ async def test_main():
 
         "user_input": user_input,
         "user_name": "EAMARS",
-        "user_affinity_score": 900,
+        "user_affinity_score": 1000,
         "user_id": "320899931776745483",
         "bot_id": "1485169644888395817",
         "chat_history": trimmed_history,
@@ -477,11 +489,14 @@ async def test_main():
         "character_state": await get_character_state()
 
     }
+
+    result = await call_cognition_subgraph(state)
+    print(f"Cognition result: {result}")
     
-    for affinity in range(0, 1001, 50):
-        state["user_affinity_score"] = affinity
-        result = await call_cognition_subgraph(state)
-        print(f"Cognition result for affinity {affinity}: {result}")
+    # for affinity in range(0, 1001, 50):
+    #     state["user_affinity_score"] = affinity
+    #     result = await call_cognition_subgraph(state)
+    #     print(f"Cognition result for affinity {affinity}: {result}")
 
 if __name__ == "__main__":
     import asyncio

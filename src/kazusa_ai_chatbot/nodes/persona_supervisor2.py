@@ -6,6 +6,7 @@ from openai.types.shared import reasoning
 from kazusa_ai_chatbot.config import LLM_API_KEY, LLM_BASE_URL, LLM_MODEL, MAX_PERSONA_SUPERVISOR_STAGE1_RETRY
 from kazusa_ai_chatbot.state import AgentResult, BotState
 from kazusa_ai_chatbot.utils import parse_llm_json_output
+from kazusa_ai_chatbot.db import AFFINITY_DEFAULT
 
 from kazusa_ai_chatbot.mcp_client import mcp_manager
 
@@ -13,6 +14,8 @@ from kazusa_ai_chatbot.nodes.persona_supervisor2_schema import GlobalPersonaStat
 from kazusa_ai_chatbot.nodes.persona_supervisor2_msg_decontexualizer import call_msg_decontexualizer
 from kazusa_ai_chatbot.nodes.persona_supervisor2_research_subgraph import call_research_subgraph
 from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition import call_cognition_subgraph
+from kazusa_ai_chatbot.nodes.persona_supervisor2_consolidator import call_consolidation_subgraph
+from kazusa_ai_chatbot.agents.dialog_agent import dialog_agent
 
 from typing import Annotated, TypedDict, List
 import json
@@ -23,24 +26,13 @@ import logging
 logger = logging.getLogger(__name__)
 
 
-_llm: ChatOpenAI | None = None
-def _get_llm() -> ChatOpenAI:
-    global _llm
-    if _llm is None:
-        _llm = ChatOpenAI(
-            model=LLM_MODEL,
-            temperature=0.5,
-            base_url=LLM_BASE_URL,
-            api_key=LLM_API_KEY,
-        )
-    return _llm
+async def call_action_subgraph(state: GlobalPersonaState) -> dict:
+    # For now we will only keep dialog output. In the future we will add vocal, action and perhaps TaskDispatcher agent to handle other types of actions
+    result = await dialog_agent(state)
+    return {
+        "final_dialog": result.get("final_dialog", []),
+    }
 
-
-async def call_expression_subgraph(state: GlobalPersonaState) -> dict:
-    pass
-
-async def call_consolidation_subgraph(state: GlobalPersonaState) -> dict:
-    pass
 
 
 async def persona_supervisor2(state: BotState) -> dict:
@@ -50,15 +42,15 @@ async def persona_supervisor2(state: BotState) -> dict:
     persona_builder.add_node("stage_0_msg_decontexualizer", call_msg_decontexualizer)
     persona_builder.add_node("stage_1_research", call_research_subgraph)
     persona_builder.add_node("stage_2_cognition", call_cognition_subgraph)
-    persona_builder.add_node("stage_3_expression", call_expression_subgraph)
-    persona_builder.add_node("stage_4_consolidation", call_consolidation_subgraph)
+    persona_builder.add_node("stage_3_action", call_action_subgraph)  # perform action
+    persona_builder.add_node("stage_4_consolidation", call_consolidation_subgraph)  # memory saving
 
     # Build linear flow
     persona_builder.add_edge(START, "stage_0_msg_decontexualizer")
     persona_builder.add_edge("stage_0_msg_decontexualizer", "stage_1_research")
     persona_builder.add_edge("stage_1_research", "stage_2_cognition")
-    persona_builder.add_edge("stage_2_cognition", "stage_3_expression")
-    persona_builder.add_edge("stage_3_expression", "stage_4_consolidation")
+    persona_builder.add_edge("stage_2_cognition", "stage_3_action")
+    persona_builder.add_edge("stage_3_action", "stage_4_consolidation")
     persona_builder.add_edge("stage_4_consolidation", END)
 
     
@@ -106,7 +98,7 @@ async def test_main():
         "personality": load_personality("personalities/kazusa.json"),
         "character_state": await get_character_state(),
         "timestamp": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-        "message_text": "1+1=？",
+        "message_text": "千纱知道最近发生了什么大事么？考试要考哦",
         "user_id": "320899931776745483",
         "user_name": "EAMARS",
         "affinity": 1000,
@@ -119,7 +111,7 @@ async def test_main():
     }
     
     result = await persona_supervisor2(test_state)
-    print(result)
+    print(result["final_dialog"])
 
     await mcp_manager.stop()
 

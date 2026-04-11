@@ -19,8 +19,39 @@ class GlobalPersonaState(TypedDict):
     channel_topic: str
 
     # Bridge Variables (Outputs of stages)
-    decontexualized_input: str  # from Stage 0
-    research_facts: str       # From Stage 1
-    internal_monologue: str   # From Stage 2
-    action_directives: list[str]      # From Stage 2 (Directives for Stage 3)
-    final_action: str         # From Stage 3
+    # Stage 0 output
+    decontexualized_input: str
+
+    # Stage 1 output
+    research_facts: str
+    research_metadata: list[dict]
+
+    # Stage 2 output
+    internal_monologue: str
+    action_directives: dict
+
+    # Stage 2 output for stage 4 consolidation
+    interaction_subtext: str
+    emotional_appraisal: str
+    character_intent: str
+    logical_stance: str
+
+    # Stage 3 output
+    final_dialog: []  # -> Will be used for dialog end point (e.g,. Discord)
+    # Other outputs from here
+
+    # Stage 4 output
+    # global state updater
+    mood: str
+    global_vibe: str
+    reflection_summary: str
+
+    # Relationship recorder
+    diary_entry: [str]
+    affinity_delta: int
+    last_relationship_insight: str
+
+    # Facts harvester
+    new_facts: [str]
+    future_promises: [str]
+    

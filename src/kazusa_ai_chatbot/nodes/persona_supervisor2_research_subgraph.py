@@ -136,7 +136,12 @@ async def call_memory_retriever_agent(state: ResearchSubgraphState) -> dict:
     )
 
     prev_research_results = state.get("research_results", [])
-    current_research_result = results.get("response", "")
+
+    # Assemble new results
+    current_research_result = {
+        "fact": results.get("response", ""),
+        "metadata": results.get("knowledge_metadata", {})
+    }
 
     return {
         "research_results": prev_research_results + [current_research_result]
@@ -149,7 +154,12 @@ async def call_web_search2_agent(state: ResearchSubgraphState) -> dict:
         expected_response=state["expected_response"]
     )
     prev_research_results = state.get("research_results", [])
-    current_research_result = results.get("response", "")
+    
+    # Assemble new results
+    current_research_result = {
+        "fact": results.get("response", ""),
+        "metadata": results.get("knowledge_metadata", {})
+    }
 
     return {
         "research_results": prev_research_results + [current_research_result]
@@ -197,10 +207,11 @@ async def call_research_evaluator(state: ResearchSubgraphState) -> dict:
     system_prompt = SystemMessage(content=_RESEARCH_EVALUATOR_PROMPT.format(timestamp=timestamp))
 
     research_results = state.get("research_results", [])
+    result_facts = [r["fact"] for r in research_results]
     
     evaluation_input = {
         "user_input": state["user_input"],
-        "research_results": research_results,
+        "research_results": result_facts,
         "retry": f"{retry}/{MAX_PERSONA_SUPERVISOR_STAGE1_RETRY}"
     }
 
@@ -286,11 +297,14 @@ async def call_research_subgraph(state: GlobalPersonaState) -> dict:
     # If no knowledge is learned then pass the reasoning
     if not results.get("research_results", []):
         research_facts = results.get("evaluator_feedback", "No facts learned")
+        research_metadata = []
     else:
-        research_facts = "\n".join(results.get("research_results"))
+        research_facts = "\n".join([r["fact"] for r in results.get("research_results", [])])
+        research_metadata = [r["metadata"] for r in results.get("research_results", [])]
     
     return {
-        "research_facts": research_facts
+        "research_facts": research_facts,
+        "research_metadata": research_metadata,
     }
 
 
@@ -299,7 +313,7 @@ async def test_main():
 
     # Create a mocked state
     state: GlobalPersonaState = {
-        "decontexualized_input": "自然对数的一阶导数是什么",
+        "decontexualized_input": "千纱是真人么？",
         "timestamp": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
     }
     
