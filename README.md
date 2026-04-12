@@ -1,100 +1,106 @@
 # Role-Play Discord Chatbot
 
-A Discord chatbot that responds in-character using a configurable personality (JSON), long-term user memory, channel conversation history, and **MCP tool calling** — built with **LangGraph**, **LM Studio** (local Qwen 3.5 27B), and **MongoDB**.
+A Discord chatbot that responds in-character using a configurable personality (JSON), long-term user memory, channel conversation history, and **MCP tool calling** — built with **LangGraph**, **LM Studio** (OpenAI-compatible API), and **MongoDB**.
 
 ## Architecture
 
-The bot uses a **lean hybrid pipeline**: most stages are pure code (no LLM), with **3–5 synchronous LLM calls** per message (1 relevance check + 1 supervisor planning + 0–N tool agents + 1 speech agent) and **1 deferred LLM call** after the reply is sent. All generative LLM calls use a native JSON structure for passing context rather than string-concatenated prompt blocks.
+The bot uses a **multi-stage persona simulation pipeline**. When a message arrives, a **Relevance Agent** decides whether to respond, then a **Persona Supervisor** orchestrates a 5-stage cognitive pipeline — decontextualization, research, cognition, dialog generation, and consolidation — each stage backed by its own LLM subgraph. All generative LLM calls use native JSON structures for context passing.
 
 ```
                     ┌─────────────┐
                     │   Discord    │
                     └──────┬──────┘
-                           │ raw event
-                    ┌──────▼──────┐
-                    │  1. Intake   │  no LLM — mention filter
-                    └──────┬──────┘
-                           │ clean state (may exit early)
+                           │ raw event + context loading
                     ┌──────▼──────────┐
-                    │  2. Relevance   │  ★ LLM CALL + MongoDB context load
+                    │ Relevance Agent │  ★ LLM CALL (should I respond?)
                     └──────┬──────────┘
-                           │ conversation_history + user_memory + character_state + affinity + assembler_output
-                    ┌──────▼──────────────┐
-                    │3a. Supervisor        │
-                    │  ┌────────────────┐  │
-                    │  │ LLM Planning   │  │  ★ LLM CALL (which agents? content/emotion)
-                    │  └───────┬────────┘  │
-                    │  ┌────────────────┐  │
-                    │  │ Agent Dispatch │  │  ★ LLM CALL × N (tool agents)
-                    │  └────────────────┘  │
-                    └──────────┬───────────┘
-                           │ supervisor_plan + agent_results + speech_brief
+                           │ should_respond / channel_topic / user_topic
+                    ┌──────▼──────────────────────────────────────┐
+                    │         Persona Supervisor v2                │
+                    │                                              │
+                    │  Stage 0: Message Decontextualizer  ★ LLM   │
+                    │       ↓                                      │
+                    │  Stage 1: Research Subgraph     ★ LLM × N   │
+                    │       ↓                                      │
+                    │  Stage 2: Cognition Subgraph    ★ LLM × 3   │
+                    │   (subconscious → conscious → social filter) │
+                    │       ↓                                      │
+                    │  Stage 3: Dialog Agent          ★ LLM × 1-3 │
+                    │   (generator ↔ evaluator loop)               │
+                    │       ↓                                      │
+                    │  Stage 4: Consolidation Subgraph ★ LLM × 3+ │
+                    │   (state update, relationship, facts → DB)   │
+                    └──────────┬───────────────────────────────────┘
+                           │ final_dialog + future_promises
                     ┌──────▼──────┐
-                    │3b. Speech   │  ★ LLM CALL (in-character reply)
-                    └──────┬──────┘
-                           │ response (or silence)
-                    ┌──────▼──────┐
-                    │  Discord     │  send reply
-                    └──────┬──────┘
-                           │ fire-and-forget (user doesn't wait)
-                    ┌──────▼──────┐
-                    │ 4. Mem Write │  ★ LLM CALL (extract user facts)
-                    └──────────────┘
+                    │   Discord    │  send reply + save conversation
+                    └─────────────┘
 ```
 
 ### LangGraph Graph (compiled)
 
-Stages 1–3 are wired as a LangGraph `StateGraph`. Stage 4 (Memory Writer) runs **outside** the graph as an async task after the reply is sent.
+The top-level graph is two nodes with a conditional edge:
 
 ```
-START → intake → relevance_agent → persona_supervisor → speech_agent → END
+START → relevance_agent ─┬─ should_respond=true  → persona_supervisor2 → END
+                         └─ should_respond=false → END
 ```
+
+The Persona Supervisor internally builds a second `StateGraph` with 5 linear stages, each of which may contain nested subgraphs.
 
 ## Pipeline Stages
 
-### Stage 1 — Intake (no LLM)
-Normalises the raw Discord message: strips mention markup, extracts user/channel metadata, sets `should_respond` flag. Early exit if nothing to respond to.
-
-**Mention filtering** — if the message mentions other Discord users but *not* the bot, `should_respond` is set to `False` immediately, short-circuiting the entire graph with zero LLM calls. Messages with no mentions pass through normally.
-
-### Stage 2 — Relevance Agent (LLM call + context loading)
-Before calling the LLM, the relevance agent loads conversational context directly from MongoDB:
+### Relevance Agent (LLM call)
+The Discord bot (`discord_bot.py`) loads all context from MongoDB before invoking the graph:
 - **Conversation history** — last N messages for the channel
-- **User facts** — long-term memory extracted by previous Memory Writer runs (e.g., "User prefers to be called Commander")
-- **Character state** — current mood and emotional tone persisted across exchanges
-- **Affinity score** — per-user affinity (0–1000) that modulates the bot's warmth toward each user
+- **User profile** — facts, affinity score, last relationship insight
+- **Character state** — current mood, global vibe, reflection summary
 
-It then determines if the bot should engage in the conversation by analyzing the current message plus that loaded context. It outputs a JSON structure with `channel_topic`, `user_topic`, and `should_respond`.
+The relevance agent then analyzes the message + context to decide if the bot should engage. It outputs `should_respond`, `use_reply_feature`, `channel_topic`, and `user_topic`.
 
-If the relevance agent returns `should_respond: false`, the downstream supervisor **short-circuits** with an empty plan and a "stay silent" directive — no planning LLM call, no agents dispatched, and the speech agent returns an empty response. This is a **fail-open** design: parse failures or LLM crashes default to responding.
+If `should_respond: false`, the graph short-circuits to END — no further LLM calls.
 
-### Stage 3a — Persona Supervisor (LLM calls)
-The supervisor orchestrates the agent execution plan.
+### Persona Supervisor v2 — Stage 0: Message Decontextualizer (LLM call)
+Clarifies ambiguous user input by resolving pronouns, references, and implicit context from chat history. For example, "I saw him yesterday" → "I saw John yesterday". Outputs `decontexualized_input` for downstream stages.
 
-#### Phase 1 — Planning
-If the message is relevant:
-
-1. **Build a prompt** with the relevance agent's topic analysis and the available agent catalog.
-2. **Call the planning LLM** to return a JSON `SupervisorPlan` containing:
-   - `agents`: list of agent names to invoke (e.g. `["web_search_agent"]`, or `[]` if none needed)
-   - `content_directive`: instruction for what factual info or topics to include in the reply
-   - `emotion_directive`: instruction for what tone, mood, and style the speech agent should use
-3. Execute each requested agent sequentially in isolated contexts.
-4. Synthesize a sanitized `speech_brief` for the Speech Agent.
-5. Write `supervisor_plan`, `agent_results`, and `speech_brief` to state.
-
-Each agent runs in its own LLM context with only the information it needs. If an agent crashes or hits a context limit, the supervisor catches the error and records it as `AgentResult(status="error")`. The supervisor then converts internal context, memory, and tool output into a speech-safe brief rather than passing raw data to the speech agent.
-
-#### Available Agents
+### Persona Supervisor v2 — Stage 1: Research Subgraph (LLM calls)
+Dispatches research tasks to specialist agents based on the query nature:
 
 | Agent | Description |
 |-------|-------------|
-| `web_search_agent` | Searches the internet via MCP search tools. Gets only the user query + search tool descriptions. Runs its own `<tool_call>` loop, then summarises raw results. |
-| *(extensible)* | New agents are added by subclassing `BaseAgent` and calling `register_agent()` in `graph.py`. |
+| `memory_retriever_agent` | Searches conversation history, user facts, and persistent memory via MongoDB. Uses tool-calling with `search_user_facts`, `search_conversation`, `get_conversation`, `search_persistent_memory`. |
+| `web_search_agent` | Searches the internet via MCP tools (e.g., SearXNG). Multi-turn LLM loop with planning, execution, and evaluation. |
 
-#### MCP Tool Calling
+An **evaluator** determines if the retrieved information is sufficient or if another research iteration is needed (up to `MAX_PERSONA_SUPERVISOR_STAGE1_RETRY`).
 
-Tools are provided by external **MCP servers** (HTTP/SSE). At startup, the bot connects to all configured servers and discovers available tools. Tool names are namespaced as `{server}__{tool}` internally, but the original name is sent to the MCP server.
+### Persona Supervisor v2 — Stage 2: Cognition Subgraph (3 LLM calls)
+A 3-layer cognitive simulation:
+
+1. **Subconscious** — emotional appraisal and interaction subtext analysis
+2. **Consciousness** — internal monologue, logical stance, character intent
+3. **Social Filter** — action directives (speech guide, content anchors, style filter) that control how the character expresses itself
+
+Outputs: `internal_monologue`, `action_directives`, `emotional_appraisal`, `character_intent`, `logical_stance`, `interaction_subtext`.
+
+### Persona Supervisor v2 — Stage 3: Dialog Agent (1–3 LLM calls)
+A generator-evaluator loop that produces the final in-character reply:
+
+- **Generator** — converts cognition outputs into natural dialog, split into 1–2 message segments
+- **Evaluator** — checks for fatal errors (logic contradictions, missing facts, structure violations) and soft guideline adherence. Dynamically relaxes thresholds on retries.
+
+Loop runs up to `MAX_DIALOG_AGENT_RETRY` times. Outputs: `final_dialog` (list of message strings).
+
+### Persona Supervisor v2 — Stage 4: Consolidation Subgraph (3+ LLM calls)
+Runs inline (not deferred) after dialog generation to persist the interaction's effects:
+
+1. **Global State Updater** — updates mood, global vibe, and reflection summary
+2. **Relationship Recorder** — generates diary entry, affinity delta (with non-linear scaling breakpoints), and relationship insight
+3. **Facts Harvester** — extracts new user facts and future promises (with evaluator loop up to `MAX_FACT_HARVESTER_RETRY`)
+4. **DB Writer** — persists all outputs to MongoDB (character state, user facts, affinity, relationship insight, memory)
+
+### MCP Tool Calling
+
+Tools are provided by external **MCP servers** (Streamable HTTP). At startup, the bot connects to all configured servers and discovers available tools. Tool names are namespaced as `{server}__{tool}` internally, but the original name is sent to the MCP server.
 
 Configured via the `MCP_SERVERS` environment variable (JSON string):
 
@@ -102,53 +108,34 @@ Configured via the `MCP_SERVERS` environment variable (JSON string):
 {"mcp-searxng": {"url": "http://host:4001/mcp"}, "playwright": {"url": "http://host:8931/mcp"}}
 ```
 
-### Stage 3b — Speech Agent (LLM call)
-Always runs last. Generates the final **in-character reply** from a native JSON HumanMessage `speech_brief` containing only:
-- Approved `personality` context
-- Supervisor-authored interpretation of user intent
-- Response guidance, continuity summary, and key points to cover
-- Allowed personalization hints and limits on what not to claim
-
-The speech agent never receives raw conversation history, raw user memory, raw character state, raw affinity scores, or raw tool output. If the supervisor marks `should_respond: false` in the brief, the speech agent **returns an empty response** without making an LLM call.
-
-The speech agent's LLM context is free of tool descriptions and internal state, keeping the token budget focused on personality and final expression quality. The supervisor is responsible for translating internal state into guidance such as relationship tone, continuity summary, and key points to cover.
-
-### Stage 4 — Memory Writer (deferred LLM call)
-Runs **after** the reply is sent to Discord (fire-and-forget `asyncio.create_task`). Extracts from each exchange using a native JSON HumanMessage payload:
-- **User facts** — new facts about the user (e.g., preferred name)
-- **Character state** — updated mood and emotional tone
-- **Affinity delta** — integer (-20 to +10) indicating how the exchange changes the bot's feeling toward the user
-- **Agent results** — if agents were invoked during the turn, their names, status, and summaries are included in the extraction prompt so the LLM can reason about them
-
-All three are persisted to MongoDB. Affinity deltas are clamped to `[-20, +10]` by non-LLM code before applying. Best-effort — failures are logged and silently skipped.
-
 ## Project Structure
 
 ```
-src/
+src/kazusa_ai_chatbot/
   main.py                  # CLI entry point
-  config.py                # env vars, token budgets, MCP_SERVERS
-  state.py                 # BotState + AgentResult + SupervisorPlan TypedDicts
-  db.py                    # MongoDB async helpers + schema (TypedDict)
-  graph.py                 # LangGraph StateGraph wiring + agent registration
-  discord_bot.py           # Discord client, message handling, MCP lifecycle
+  config.py                # env vars, affinity breakpoints, retry limits
+  state.py                 # DiscordProcessState TypedDict
+  db.py                    # MongoDB async helpers + document schemas (TypedDict)
+  discord_bot.py           # Discord client, graph wiring, message handling
   mcp_client.py            # McpManager — MCP server connections + tool execution
-  tools.py                 # build_tool_prompt_block() for agent prompt injection
-  utils.py                 # Shared helpers (history formatting)
+  utils.py                 # Shared helpers (JSON parsing, affinity mapping, history trimming)
   agents/
-    __init__.py
-    base.py                # BaseAgent ABC + AGENT_REGISTRY
-    speech_agent.py        # Stage 3b — in-character reply generation
-    web_search_agent.py    # Web search via MCP (isolated context)
+    dialog_agent.py        # Stage 3 — generator/evaluator dialog loop
+    memory_retriever_agent.py  # Research agent — MongoDB memory/history search
+    web_search_agent2.py   # Research agent — web search via MCP tools
   nodes/
-    intake.py              # Stage 1 (mention filtering)
-    relevance_agent.py     # Stage 2 (context loading + relevance gate)
-    persona_supervisor.py  # Stage 3a (LLM planning + agent dispatch)
-    memory_writer.py       # Stage 4 (facts + character state + affinity + agent results)
+    relevance_agent.py             # Relevance gate (context analysis + should_respond)
+    persona_supervisor2.py         # Top-level 5-stage persona orchestrator
+    persona_supervisor2_schema.py  # GlobalPersonaState TypedDict
+    persona_supervisor2_msg_decontexualizer.py  # Stage 0
+    persona_supervisor2_research_subgraph.py    # Stage 1
+    persona_supervisor2_cognition.py            # Stage 2
+    persona_supervisor2_consolidator.py         # Stage 4
+src/scripts/               # Standalone utility scripts (embedding creation, search, debug)
 personalities/
-  example.json             # sample personality ("Zara")
+  example.json             # sample personality
   kazusa.json              # full personality with _reference section
-.env.example               # environment variable template
+tests/                     # pytest suite (mocked unit tests + live integration tests)
 requirements.txt
 ```
 
@@ -168,46 +155,37 @@ Copy `.env.example` to `.env` and fill in:
 DISCORD_TOKEN=your_discord_bot_token
 MONGODB_URI=mongodb://your_connection_string
 LLM_BASE_URL=http://localhost:1234/v1
+LLM_MODEL=your-model-name
+EMBEDDING_BASE_URL=http://localhost:1234/v1
 EMBEDDING_MODEL=your-embedding-model-name
 
 # Optional: MCP tool servers (JSON string)
 MCP_SERVERS={"mcp-searxng": {"url": "http://host:4001/mcp"}}
-MAX_TOOL_ITERATIONS=3
 ```
 
-### 3. LM Studio
+### 3. LLM Server
 
-Load two models in LM Studio:
-- **Chat model** — e.g., Qwen 3.5 27B (used by Supervisor, Speech Agent, Tool Agents, and Memory Writer)
-- **Embedding model** — e.g., nomic-embed-text (used for semantic search over stored conversation history and user facts)
+Run an OpenAI-compatible API server (e.g., LM Studio, vLLM, Ollama) with:
+- **Chat model** — used by all LLM stages (relevance, cognition, dialog, consolidation, research agents)
+- **Embedding model** — used for semantic search over conversation history, user facts, and memory
 
 ### 4. MongoDB
 
-Set up the following collections in your database:
-- **`conversation_history`** — auto-populated by the bot, with embeddings for semantic history search utilities
-- **`user_facts`** — auto-populated by the Memory Writer (facts + affinity score per user), with embeddings for semantic user-fact search utilities
-- **`character_state`** — auto-populated by the Memory Writer (mood, tone, recent events)
+Collections are auto-created on first use:
+- **`conversation_history`** — chat messages with embeddings for semantic search
+- **`user_facts`** — per-user facts, affinity score, relationship insight, with embeddings
+- **`character_state`** — single global document for mood, vibe, reflection summary
+- **`memory`** — persistent named memories with embeddings
+
+Vector search indexes can be created via the utility scripts in `src/scripts/`.
 
 ### 5. Create a personality
 
-Create a JSON file following the schema in `personalities/example.json`:
+Create a JSON file following the schema in `personalities/example.json`. The personality JSON should include at minimum:
+- `name`, `description`, `gender`, `age`, `birthday`
+- `personality_brief` with `logic`, `tempo`, `defense`, `quirks`, `taboos`, `mbti`
 
-```json
-{
-    "name": "Character Name",
-    "description": "Who this character is",
-    "gender": "Female",
-    "age": 25,
-    "birthday": "March 15",
-    "tone": "sardonic, loyal, terse",
-    "speech_patterns": "How the character talks",
-    "backstory": "Character history"
-}
-```
-
-The assembler reads these known keys: `name`, `description`, `gender`, `age`, `birthday`, `tone`, `speech_patterns`, `backstory`. Any other top-level keys are passed through as JSON.
-
-Keys prefixed with `_` (e.g., `_reference`) are **ignored** by the assembler — use this to store visual descriptions, appearance details, or other reference data that shouldn't be injected into the prompt. See `kazusa.json` for an example.
+Keys prefixed with `_` (e.g., `_reference`) are ignored — use these for visual descriptions or other non-prompt data. See `kazusa.json` for a full example.
 
 ## Usage
 
@@ -227,15 +205,12 @@ python src/kazusa_ai_chatbot/main.py --personality personalities/example.json --
 
 ## Design Decisions
 
-- **Context loading inside relevance agent** — conversation history, user facts, character state, and affinity are loaded in one place before relevance analysis. This keeps the graph linear and removes state merge complexity.
-- **Memory Writer outside the graph** — the user sees the reply after 1 LLM call; fact extraction happens in the background.
-- **Token budget system** — explicit allocation prevents context overflow on models with limited context windows (~32K for Qwen 3.5 27B).
-- **Embeddings retained for internal search utilities** — semantic embeddings are still stored for `conversation_history` and `user_facts` so local search scripts and retrieval utilities can query those collections, but lore-based RAG retrieval is no longer part of the chatbot response pipeline.
-- **Affinity system** — per-user 0–1000 score (default 500) that slowly shifts based on conversation quality. The LLM proposes a delta; non-LLM code clamps it. This avoids wild swings while letting the bot gradually warm up or cool down toward individual users.
-- **Universal rules in relevance agent** — behavioural rules ("never break character", etc.) are hardcoded rather than per-personality, ensuring consistency across all characters.
-- **`_`-prefixed keys ignored** — personality JSON can store reference data (appearance, art notes) under `_reference` without wasting prompt tokens.
-- **Two-layer "should I reply?" system** — Layer 1 (intake) uses rule-based mention filtering (zero cost). Layer 2 (Relevance Agent) uses an LLM call to analyze the conversational context (topics, recent history) and decides if the bot should engage. Both are fail-open: if uncertain or if the LLM fails, the bot defaults to responding.
-- **Supervisor + sub-agent architecture** — the persona supervisor consumes the relevance agent's context analysis and plans which specialist agents to invoke. This provides failure isolation (a crashed agent doesn't kill the reply) and context separation (tool agents don't bloat the speech prompt).
-- **Sanitized speech boundary** — the supervisor sees internal state, memory, and agent output, but the speech agent only receives a distilled `speech_brief` with `personality`, interpreted user intent, response guidance, and approved key points. This reduces accidental leakage of hidden state and tool output.
-- **Prompt-based `<tool_call>` tags** in tool agents — ensures compatibility with Qwen and other local models served via LM Studio that may not support the `tools` parameter.
-- **MCP for tooling** — tools are served by external MCP servers over HTTP, making them language-agnostic and independently deployable. New agents can be added by subclassing `BaseAgent` without changing existing code.
+- **5-stage cognitive pipeline** — separating decontextualization, research, cognition, dialog, and consolidation gives each stage a focused LLM context and allows independent iteration. The cognition layer (subconscious → conscious → social filter) models a human-like decision process rather than a single prompt.
+- **Generator-evaluator dialog loop** — the dialog agent generates candidate replies and an evaluator checks for fatal errors (logic contradictions, missing facts). This catches issues before sending while avoiding excessive retries via dynamic threshold relaxation.
+- **Inline consolidation** — unlike the previous deferred memory writer, consolidation now runs as part of the graph. This ensures character state, facts, and affinity are updated before the next message arrives.
+- **Non-linear affinity scaling** — affinity deltas are scaled by breakpoints: easy to gain/lose at extremes, normal in the middle, harder at high levels. This prevents runaway affinity while allowing meaningful relationship progression.
+- **Affinity system** — per-user 0–1000 score (default 500) with 21 behavioral tiers from "Contemptuous" to "Unwavering". The LLM proposes a delta; non-LLM code applies non-linear scaling and clamping.
+- **Research subgraph with evaluator** — the research stage can dispatch multiple specialist agents and re-evaluate whether enough information has been gathered, preventing premature or insufficient research.
+- **MCP for tooling** — tools are served by external MCP servers over Streamable HTTP, making them language-agnostic and independently deployable.
+- **Context loading in Discord bot** — conversation history, user profile, and character state are loaded once in `discord_bot.py` before graph invocation, keeping nodes stateless and testable.
+- **`_`-prefixed personality keys ignored** — personality JSON can store reference data (appearance, art notes) under `_reference` without wasting prompt tokens.

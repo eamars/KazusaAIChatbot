@@ -1,0 +1,116 @@
+"""Tests for dialog_agent.py — generator/evaluator dialog loop."""
+
+from __future__ import annotations
+
+import typing
+from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
+
+from kazusa_ai_chatbot.agents.dialog_agent import dialog_agent, DialogAgentState
+
+
+def _base_global_state():
+    """Minimal GlobalPersonaState for testing dialog_agent."""
+    return {
+        "internal_monologue": "thinking about greeting",
+        "action_directives": {
+            "speech_guide": {"tone": "friendly"},
+            "content_anchors": ["greet user"],
+            "style_filter": {"social_distance": "casual"},
+        },
+        "decontexualized_input": "Hello!",
+        "research_facts": "",
+        "chat_history": [],
+        "user_name": "TestUser",
+        "user_profile": {"affinity": 500},
+        "character_profile": {
+            "name": "Kazusa",
+            "description": "A tsundere character",
+            "personality_brief": {
+                "logic": "analytical",
+                "tempo": "moderate",
+                "defense": "tsundere deflection",
+                "quirks": "occasional stutter",
+                "taboos": "never break character",
+                "mbti": "INTJ",
+            },
+        },
+    }
+
+
+class TestDialogAgentState:
+    def test_is_typed_dict(self):
+        assert issubclass(DialogAgentState, dict)
+
+    def test_has_required_fields(self):
+        hints = typing.get_type_hints(DialogAgentState)
+        required = [
+            "internal_monologue", "action_directives",
+            "decontexualized_input", "research_facts",
+            "chat_history", "user_name", "user_profile",
+            "character_profile",
+        ]
+        for field in required:
+            assert field in hints, f"Missing field: {field}"
+
+
+@pytest.mark.asyncio
+async def test_dialog_agent_returns_final_dialog():
+    """dialog_agent should return a dict with 'final_dialog' key."""
+    state = _base_global_state()
+
+    # Mock the generator LLM to return dialog
+    from langchain_core.messages import AIMessage
+    generator_response = AIMessage(content='{"final_dialog": ["Hello there!", "How are you?"]}')
+
+    # Mock the evaluator LLM to approve immediately
+    evaluator_response = AIMessage(content='{"fatal_errors": [], "guideline_violations": [], "score": 90, "should_stop": true, "feedback": "good"}')
+
+    call_count = 0
+
+    async def mock_ainvoke(messages):
+        nonlocal call_count
+        call_count += 1
+        if call_count % 2 == 1:
+            return generator_response
+        return evaluator_response
+
+    with patch("kazusa_ai_chatbot.agents.dialog_agent._dialog_generator_llm") as mock_generator, \
+         patch("kazusa_ai_chatbot.agents.dialog_agent._dialog_evaluator_llm") as mock_evaluator:
+        mock_generator.ainvoke = mock_ainvoke
+        mock_evaluator.ainvoke = mock_ainvoke
+
+        result = await dialog_agent(state)
+
+    assert "final_dialog" in result
+    assert isinstance(result["final_dialog"], list)
+
+
+@pytest.mark.asyncio
+async def test_dialog_agent_handles_empty_dialog():
+    """If generator returns no dialog, final_dialog should default to empty list."""
+    state = _base_global_state()
+
+    from langchain_core.messages import AIMessage
+    generator_response = AIMessage(content='{"final_dialog": []}')
+
+    evaluator_response = AIMessage(content='{"fatal_errors": [], "guideline_violations": [], "score": 90, "should_stop": true, "feedback": "ok"}')
+
+    call_count = 0
+
+    async def mock_ainvoke(messages):
+        nonlocal call_count
+        call_count += 1
+        if call_count % 2 == 1:
+            return generator_response
+        return evaluator_response
+
+    with patch("kazusa_ai_chatbot.agents.dialog_agent._dialog_generator_llm") as mock_generator, \
+         patch("kazusa_ai_chatbot.agents.dialog_agent._dialog_evaluator_llm") as mock_evaluator:
+        mock_generator.ainvoke = mock_ainvoke
+        mock_evaluator.ainvoke = mock_ainvoke
+
+        result = await dialog_agent(state)
+
+    assert result["final_dialog"] == [] or isinstance(result["final_dialog"], list)

@@ -37,7 +37,7 @@ class TestBuildAffinityBlock:
 
     def test_neutral(self):
         result = build_affinity_block(AFFINITY_DEFAULT)
-        assert result["level"] == "Antagonistic"
+        assert result["level"] == "Neutral"
 
     def test_friendly(self):
         result = build_affinity_block(700)

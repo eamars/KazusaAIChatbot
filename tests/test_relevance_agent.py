@@ -1,78 +1,89 @@
-"""Tests for the relevance agent and its context-loading behavior."""
+"""Tests for relevance_agent.py — relevance gate logic."""
+
+from __future__ import annotations
+
+from unittest.mock import AsyncMock, patch, MagicMock
 
 import pytest
-from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
-import json
 
-from kazusa_ai_chatbot.nodes.relevance_agent import (
-    relevance_agent
-)
-from kazusa_ai_chatbot.state import BotState
-from kazusa_ai_chatbot.db import AFFINITY_DEFAULT
+from kazusa_ai_chatbot.nodes.relevance_agent import relevance_agent
+
+
+def _base_state():
+    """Minimal DiscordProcessState for testing relevance_agent."""
+    return {
+        "timestamp": "2024-01-01T00:00:00Z",
+        "user_name": "TestUser",
+        "user_id": "user_123",
+        "user_input": "Hello bot!",
+        "user_profile": {"affinity": 500, "last_relationship_insight": ""},
+        "bot_id": "bot_456",
+        "bot_name": "TestBot",
+        "character_profile": {"name": "Kazusa"},
+        "character_state": {
+            "mood": "neutral",
+            "global_vibe": "calm",
+            "reflection_summary": "nothing notable",
+        },
+        "channel_id": "chan_1",
+        "channel_name": "general",
+        "chat_history": [],
+        "conversation_history": [],
+    }
 
 
 @pytest.mark.asyncio
-async def test_relevance_agent_node():
-    """Test the full relevance_agent node execution."""
-    from unittest.mock import AsyncMock, patch
-    mock_llm = AsyncMock()
-    mock_llm.ainvoke.return_value.content = '{"channel_topic": "test", "user_topic": "t", "should_respond": true}'
-    
-    with (
-        patch("kazusa_ai_chatbot.nodes.relevance_agent.get_conversation_history", new_callable=AsyncMock, return_value=[
-            {"name": "Alice", "user_id": "user_123", "content": "prev", "role": "user"}
-        ]),
-        patch("kazusa_ai_chatbot.nodes.relevance_agent.get_user_facts", new_callable=AsyncMock, return_value=["likes cats"]),
-        patch("kazusa_ai_chatbot.nodes.relevance_agent.get_character_state", new_callable=AsyncMock, return_value={"mood": "happy"}),
-        patch("kazusa_ai_chatbot.nodes.relevance_agent.get_affinity", new_callable=AsyncMock, return_value=600),
-        patch("kazusa_ai_chatbot.nodes.relevance_agent._get_llm", return_value=mock_llm),
-    ):
-        state: BotState = {
-            "message_text": "Hello",
-            "user_name": "Alice",
-            "user_id": "user_123",
-            "channel_id": "channel_1",
-            "personality": {"name": "TestBot", "description": "A bot"},
-        }
+async def test_relevance_agent_returns_should_respond():
+    """LLM says should_respond=true → agent forwards that decision."""
+    llm_response = MagicMock()
+    llm_response.content = '{"should_respond": true, "reason_to_respond": "user greeted", "use_reply_feature": false, "channel_topic": "greetings", "user_topic": "hello"}'
 
-        new_state = await relevance_agent(state)
+    with patch("kazusa_ai_chatbot.nodes.relevance_agent._relevance_agent_llm") as mock_llm:
+        mock_llm.ainvoke = AsyncMock(return_value=llm_response)
+        result = await relevance_agent(_base_state())
 
-    # Verify LLM was called
-    assert mock_llm.ainvoke.called
-    
-    # Ensure correct structure was passed to the LLM (HumanMessage content)
-    args, kwargs = mock_llm.ainvoke.call_args
-    analysis_messages = args[0]
-    
-    assert len(analysis_messages) == 2
-    assert isinstance(analysis_messages[0], SystemMessage)
-    assert isinstance(analysis_messages[1], HumanMessage)
-    
-    human_json = json.loads(analysis_messages[1].content)
-    assert human_json["current_message"]["name"] == "Alice"
-    assert human_json["current_message"]["user_id"] == "user_123"
-    assert human_json["current_message"]["content"] == "Hello"
-    assert human_json["context"]["conversation_history"][0]["name"] == "Alice"
-    assert human_json["context"]["conversation_history"][0]["user_id"] == "user_123"
-    assert human_json["context"]["conversation_history"][0]["content"] == "prev"
-    assert human_json["context"]["conversation_history"][0]["role"] == "user"
-    # After fixing relationship input to pass raw affinity value
-    assert human_json["context"]["relationship"] == 600
+    assert result["should_respond"] is True
+    assert result["channel_topic"] == "greetings"
+    assert result["user_topic"] == "hello"
 
-    # Verify outputs
-    out = new_state["assembler_output"]
-    assert out["channel_topic"] == "test"
-    assert out["should_respond"] is True
-    assert new_state["conversation_history"][0]["content"] == "prev"
-    assert new_state["user_memory"] == ["likes cats"]
-    assert new_state["character_state"]["mood"] == "happy"
-    assert new_state["affinity"] == 600
 
-    # Verify types
-    assert isinstance(out["channel_topic"], str)
-    assert isinstance(out["user_topic"], str)
-    assert isinstance(out["should_respond"], bool)
+@pytest.mark.asyncio
+async def test_relevance_agent_should_not_respond():
+    """LLM says should_respond=false → agent forwards that decision."""
+    llm_response = MagicMock()
+    llm_response.content = '{"should_respond": false, "reason_to_respond": "third party conversation", "use_reply_feature": false, "channel_topic": "sports", "user_topic": "football"}'
 
-    # Verify non-empty strings
-    assert len(out["channel_topic"]) > 0
-    assert len(out["user_topic"]) > 0
+    with patch("kazusa_ai_chatbot.nodes.relevance_agent._relevance_agent_llm") as mock_llm:
+        mock_llm.ainvoke = AsyncMock(return_value=llm_response)
+        result = await relevance_agent(_base_state())
+
+    assert result["should_respond"] is False
+    assert result["reason_to_respond"] == "third party conversation"
+
+
+@pytest.mark.asyncio
+async def test_relevance_agent_malformed_json_defaults_to_not_respond():
+    """If LLM returns garbage JSON, parse_llm_json_output returns {} and should_respond defaults to False."""
+    llm_response = MagicMock()
+    llm_response.content = "this is not json at all"
+
+    with patch("kazusa_ai_chatbot.nodes.relevance_agent._relevance_agent_llm") as mock_llm:
+        mock_llm.ainvoke = AsyncMock(return_value=llm_response)
+        result = await relevance_agent(_base_state())
+
+    assert result["should_respond"] is False
+    assert result["channel_topic"] == ""
+    assert result["user_topic"] == ""
+
+
+@pytest.mark.asyncio
+async def test_relevance_agent_use_reply_feature():
+    """LLM says use_reply_feature=true → agent forwards it."""
+    llm_response = MagicMock()
+    llm_response.content = '{"should_respond": true, "reason_to_respond": "reply needed", "use_reply_feature": true, "channel_topic": "topic", "user_topic": "sub"}'
+
+    with patch("kazusa_ai_chatbot.nodes.relevance_agent._relevance_agent_llm") as mock_llm:
+        mock_llm.ainvoke = AsyncMock(return_value=llm_response)
+        result = await relevance_agent(_base_state())
+
+    assert result["use_reply_feature"] is True

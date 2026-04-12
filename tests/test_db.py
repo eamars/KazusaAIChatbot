@@ -16,10 +16,13 @@ from kazusa_ai_chatbot.db import (
     get_conversation_history,
     get_db,
     get_user_facts,
-    overwrite_character_state_recent_events,
+    get_user_profile,
     overwrite_user_facts,
     save_conversation,
+    save_memory,
+    search_memory,
     update_affinity,
+    update_last_relationship_insight,
     upsert_character_state,
     upsert_user_facts,
 )
@@ -240,60 +243,6 @@ async def test_overwrite_user_facts_empty():
 
 
 @pytest.mark.asyncio
-async def test_overwrite_character_state_recent_events_preserves_mood_tone():
-    """overwrite_character_state_recent_events should preserve existing mood and tone."""
-    db = _mock_db()
-    db.character_state.find_one = AsyncMock(return_value={
-        "mood": "happy",
-        "emotional_tone": "cheerful",
-        "recent_events": ["old event 1", "old event 2"]
-    })
-    db.character_state.update_one = AsyncMock()
-    
-    with patch("kazusa_ai_chatbot.db.get_db", new_callable=AsyncMock, return_value=db):
-        await overwrite_character_state_recent_events(["new event 1", "new event 2"], "2026-04-06T12:00:00Z")
-    
-    # Verify update_one was called with preserved mood/tone and new events
-    db.character_state.update_one.assert_called_once_with(
-        {"_id": "global"},
-        {
-            "$set": {
-                "mood": "happy",
-                "emotional_tone": "cheerful",
-                "recent_events": ["new event 1", "new event 2"],
-                "updated_at": "2026-04-06T12:00:00Z",
-            }
-        },
-        upsert=True,
-    )
-
-
-@pytest.mark.asyncio
-async def test_overwrite_character_state_recent_events_empty_existing():
-    """overwrite_character_state_recent_events should handle empty existing state."""
-    db = _mock_db()
-    db.character_state.find_one = AsyncMock(return_value={})
-    db.character_state.update_one = AsyncMock()
-    
-    with patch("kazusa_ai_chatbot.db.get_db", new_callable=AsyncMock, return_value=db):
-        await overwrite_character_state_recent_events(["new event"], "2026-04-06T12:00:00Z")
-    
-    # Verify update_one was called with empty mood/tone defaults and new events
-    db.character_state.update_one.assert_called_once_with(
-        {"_id": "global"},
-        {
-            "$set": {
-                "mood": "",
-                "emotional_tone": "",
-                "recent_events": ["new event"],
-                "updated_at": "2026-04-06T12:00:00Z",
-            }
-        },
-        upsert=True,
-    )
-
-
-@pytest.mark.asyncio
 async def test_search_users_by_facts_integration():
     """Test user search functionality end-to-end with mocked aggregation."""
     # Mock the aggregation pipeline results
@@ -358,24 +307,247 @@ async def test_get_character_state_not_found():
 
 
 @pytest.mark.asyncio
-async def test_upsert_character_state_merges_events():
+async def test_upsert_character_state():
     db = _mock_db()
-    # Existing state has 2 events
     db.character_state.find_one = AsyncMock(return_value={
         "_id": "global",
         "mood": "old",
-        "recent_events": ["event1", "event2"],
+        "global_vibe": "old_vibe",
+        "reflection_summary": "old_summary",
     })
     db.character_state.update_one = AsyncMock()
 
     with patch("kazusa_ai_chatbot.db.get_db", new_callable=AsyncMock, return_value=db):
-        await upsert_character_state("happy", "warm", ["event3"], "t2")
+        await upsert_character_state("happy", "relaxed", "feeling good", "t2")
 
     call_args = db.character_state.update_one.call_args
     set_payload = call_args[0][1]["$set"]
     assert set_payload["mood"] == "happy"
-    assert set_payload["emotional_tone"] == "warm"
-    assert set_payload["recent_events"] == ["event1", "event2", "event3"]
+    assert set_payload["global_vibe"] == "relaxed"
+    assert set_payload["reflection_summary"] == "feeling good"
+
+
+# ── User profile ────────────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_get_user_profile_found():
+    db = _mock_db()
+    db.user_facts.find_one = AsyncMock(return_value={
+        "_id": "abc",
+        "user_id": "u1",
+        "facts": ["fact1"],
+        "affinity": 600,
+        "last_relationship_insight": "friendly",
+        "embedding": [0.1, 0.2],
+    })
+
+    with patch("kazusa_ai_chatbot.db.get_db", new_callable=AsyncMock, return_value=db):
+        result = await get_user_profile("u1")
+
+    assert result["user_id"] == "u1"
+    assert result["affinity"] == 600
+    assert "_id" not in result
+    assert "embedding" not in result
+
+
+@pytest.mark.asyncio
+async def test_get_user_profile_not_found():
+    db = _mock_db()
+    db.user_facts.find_one = AsyncMock(return_value=None)
+
+    with patch("kazusa_ai_chatbot.db.get_db", new_callable=AsyncMock, return_value=db):
+        result = await get_user_profile("unknown")
+
+    assert result == {}
+
+
+# ── Relationship insight ────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_update_last_relationship_insight():
+    db = _mock_db()
+    db.user_facts.update_one = AsyncMock()
+
+    with patch("kazusa_ai_chatbot.db.get_db", new_callable=AsyncMock, return_value=db):
+        await update_last_relationship_insight("u1", "very friendly")
+
+    db.user_facts.update_one.assert_called_once_with(
+        {"user_id": "u1"},
+        {"$set": {"last_relationship_insight": "very friendly"}},
+        upsert=True,
+    )
+
+
+# ── Save conversation ──────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_save_conversation_generates_embedding():
+    """save_conversation should generate an embedding when not provided."""
+    db = _mock_db()
+    db.conversation_history.insert_one = AsyncMock()
+
+    doc = {
+        "channel_id": "c1",
+        "role": "user",
+        "user_id": "u1",
+        "name": "Alice",
+        "content": "Hello!",
+        "timestamp": "t1",
+    }
+
+    with patch("kazusa_ai_chatbot.db.get_db", new_callable=AsyncMock, return_value=db), \
+         patch("kazusa_ai_chatbot.db.get_text_embedding", new_callable=AsyncMock, return_value=[0.1, 0.2]):
+        await save_conversation(doc)
+
+    assert doc["embedding"] == [0.1, 0.2]
+    db.conversation_history.insert_one.assert_called_once_with(doc)
+
+
+@pytest.mark.asyncio
+async def test_save_conversation_preserves_existing_embedding():
+    """save_conversation should not regenerate embedding if already present."""
+    db = _mock_db()
+    db.conversation_history.insert_one = AsyncMock()
+
+    doc = {
+        "channel_id": "c1",
+        "role": "user",
+        "user_id": "u1",
+        "name": "Alice",
+        "content": "Hello!",
+        "timestamp": "t1",
+        "embedding": [0.5, 0.6],
+    }
+
+    with patch("kazusa_ai_chatbot.db.get_db", new_callable=AsyncMock, return_value=db), \
+         patch("kazusa_ai_chatbot.db.get_text_embedding", new_callable=AsyncMock) as mock_embed:
+        await save_conversation(doc)
+
+    mock_embed.assert_not_called()
+    assert doc["embedding"] == [0.5, 0.6]
+
+
+# ── Character state edge cases ─────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_upsert_character_state_preserves_on_empty_string():
+    """When mood/global_vibe/reflection_summary is empty string, preserve existing value."""
+    db = _mock_db()
+    db.character_state.find_one = AsyncMock(return_value={
+        "_id": "global",
+        "mood": "old_mood",
+        "global_vibe": "old_vibe",
+        "reflection_summary": "old_summary",
+    })
+    db.character_state.update_one = AsyncMock()
+
+    with patch("kazusa_ai_chatbot.db.get_db", new_callable=AsyncMock, return_value=db):
+        await upsert_character_state("", "", "", "t2")
+
+    call_args = db.character_state.update_one.call_args
+    set_payload = call_args[0][1]["$set"]
+    assert set_payload["mood"] == "old_mood"
+    assert set_payload["global_vibe"] == "old_vibe"
+    assert set_payload["reflection_summary"] == "old_summary"
+
+
+# ── Save memory ────────────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_save_memory_creates_embedding_and_upserts():
+    db = _mock_db()
+    db.memory.update_one = AsyncMock()
+
+    with patch("kazusa_ai_chatbot.db.get_db", new_callable=AsyncMock, return_value=db), \
+         patch("kazusa_ai_chatbot.db.get_text_embedding", new_callable=AsyncMock, return_value=[0.1, 0.2]):
+        await save_memory("test_mem", "some content", "2024-01-01T00:00:00Z")
+
+    db.memory.update_one.assert_called_once()
+    call_args = db.memory.update_one.call_args
+    assert call_args[0][0] == {"memory_name": "test_mem"}
+    set_payload = call_args[0][1]["$set"]
+    assert set_payload["memory_name"] == "test_mem"
+    assert set_payload["content"] == "some content"
+    assert set_payload["embedding"] == [0.1, 0.2]
+    assert call_args[1]["upsert"] is True
+
+
+# ── Search memory ──────────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_search_memory_keyword():
+    """Keyword search uses $or regex on memory_name and content."""
+    db = _mock_db()
+    cursor = AsyncMock()
+    cursor.to_list = AsyncMock(return_value=[
+        {"memory_name": "test", "content": "data", "timestamp": "t1", "embedding": [0.1]},
+    ])
+    db.memory.find.return_value.limit.return_value = cursor
+
+    with patch("kazusa_ai_chatbot.db.get_db", new_callable=AsyncMock, return_value=db):
+        results = await search_memory("test", method="keyword", limit=5)
+
+    assert len(results) == 1
+    assert results[0][0] == -1.0
+    # Embedding should be removed
+    assert "embedding" not in results[0][1]
+
+
+@pytest.mark.asyncio
+async def test_search_memory_vector():
+    """Vector search uses $vectorSearch aggregation pipeline."""
+    db = _mock_db()
+    cursor = AsyncMock()
+    cursor.to_list = AsyncMock(return_value=[
+        {"memory_name": "test", "content": "data", "timestamp": "t1", "score": 0.88},
+    ])
+    db.memory.aggregate = MagicMock(return_value=cursor)
+
+    with patch("kazusa_ai_chatbot.db.get_db", new_callable=AsyncMock, return_value=db), \
+         patch("kazusa_ai_chatbot.db.get_text_embedding", new_callable=AsyncMock, return_value=[0.1, 0.2]):
+        results = await search_memory("test query", method="vector", limit=3)
+
+    assert len(results) == 1
+    assert results[0][0] == 0.88
+    assert results[0][1]["memory_name"] == "test"
+    # Verify aggregate was called with $vectorSearch
+    pipeline = db.memory.aggregate.call_args[0][0]
+    assert "$vectorSearch" in pipeline[0]
+
+
+# ── close_db ───────────────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_close_db_resets_globals():
+    """close_db should set _client and _db to None."""
+    mock_client = MagicMock()
+
+    db_module._client = mock_client
+    db_module._db = MagicMock()
+
+    await close_db()
+
+    assert db_module._client is None
+    assert db_module._db is None
+    mock_client.close.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_close_db_noop_when_not_connected():
+    """close_db should be safe to call when not connected."""
+    db_module._client = None
+    db_module._db = None
+
+    await close_db()  # Should not raise
+
+    assert db_module._client is None
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -579,12 +751,12 @@ async def test_live_character_state_empty(live_test_db):
 @pytest.mark.asyncio
 async def test_live_upsert_and_get_character_state(live_test_db):
     """Store character state and retrieve it."""
-    await upsert_character_state("happy", "warm", ["Met an old friend"], "2026-01-01T00:00:00Z")
+    await upsert_character_state("happy", "warm vibe", "Met an old friend today", "2026-01-01T00:00:00Z")
 
     state = await get_character_state()
     assert state["mood"] == "happy"
-    assert state["emotional_tone"] == "warm"
-    assert state["recent_events"] == ["Met an old friend"]
+    assert state["global_vibe"] == "warm vibe"
+    assert state["reflection_summary"] == "Met an old friend today"
     assert state["updated_at"] == "2026-01-01T00:00:00Z"
     assert "_id" not in state
 
@@ -592,41 +764,14 @@ async def test_live_upsert_and_get_character_state(live_test_db):
 @live_db
 @pytest.mark.asyncio
 async def test_live_character_state_update_overwrites_mood(live_test_db):
-    """Updating character state replaces mood and tone."""
-    await upsert_character_state("happy", "warm", ["event1"], "t1")
-    await upsert_character_state("sad", "guarded", ["event2"], "t2")
+    """Updating character state replaces mood and global_vibe."""
+    await upsert_character_state("happy", "warm", "reflection 1", "t1")
+    await upsert_character_state("sad", "guarded", "reflection 2", "t2")
 
     state = await get_character_state()
     assert state["mood"] == "sad"
-    assert state["emotional_tone"] == "guarded"
-
-
-@live_db
-@pytest.mark.asyncio
-async def test_live_character_state_merges_recent_events(live_test_db):
-    """Recent events accumulate across updates."""
-    await upsert_character_state("calm", "neutral", ["event1", "event2"], "t1")
-    await upsert_character_state("alert", "tense", ["event3"], "t2")
-
-    state = await get_character_state()
-    assert state["recent_events"] == ["event1", "event2", "event3"]
-
-
-@live_db
-@pytest.mark.asyncio
-async def test_live_character_state_sliding_window(live_test_db):
-    """Recent events are capped at 10 (sliding window)."""
-    events_batch1 = [f"old_event_{i}" for i in range(8)]
-    await upsert_character_state("calm", "neutral", events_batch1, "t1")
-
-    events_batch2 = [f"new_event_{i}" for i in range(5)]
-    await upsert_character_state("alert", "tense", events_batch2, "t2")
-
-    state = await get_character_state()
-    assert len(state["recent_events"]) == 10
-    # Oldest events should have been dropped
-    assert state["recent_events"][0] == "old_event_3"
-    assert state["recent_events"][-1] == "new_event_4"
+    assert state["global_vibe"] == "guarded"
+    assert state["reflection_summary"] == "reflection 2"
 
 
 # ── Affinity (mocked) ────────────────────────────────────────────────
@@ -870,7 +1015,7 @@ async def test_live_enable_conversation_history_vector_index(live_test_db):
     })
     
     # 1. Create the index
-    await db_module.enable_conversation_history_vector_index()
+    await db_module.enable_vector_index("conversation_history", "conversation_history_vector_index")
     
     # 2. Check that it exists
     indexes = []
@@ -880,7 +1025,7 @@ async def test_live_enable_conversation_history_vector_index(live_test_db):
     assert "conversation_history_vector_index" in indexes
     
     # 3. Running again shouldn't fail (it should log that it exists and return)
-    await db_module.enable_conversation_history_vector_index()
+    await db_module.enable_vector_index("conversation_history", "conversation_history_vector_index")
 
 
 @live_db
@@ -933,7 +1078,7 @@ async def test_live_search_conversation_history_vector(live_test_db):
         "content": "I would like chocolate cake with strawberries please.",
         "timestamp": "2026-01-01T00:00:02Z"
     })
-    await db_module.enable_conversation_history_vector_index()
+    await db_module.enable_vector_index("conversation_history", "conversation_history_vector_index")
 
     # Wait for the vector search index to become queryable (builds asynchronously)
     for _ in range(30):

@@ -11,22 +11,9 @@ from langgraph.graph.message import add_messages
 
 from kazusa_ai_chatbot.config import LLM_API_KEY, LLM_BASE_URL, LLM_MODEL, MAX_WEB_SEARCH_AGENT_RETRY
 from kazusa_ai_chatbot.mcp_client import mcp_manager
-from kazusa_ai_chatbot.utils import parse_llm_json_output
+from kazusa_ai_chatbot.utils import parse_llm_json_output, get_llm
 
 logger = logging.getLogger(__name__)
-
-
-_llm: ChatOpenAI | None = None
-def _get_llm() -> ChatOpenAI:
-    global _llm
-    if _llm is None:
-        _llm = ChatOpenAI(
-            model=LLM_MODEL,
-            temperature=0.5,
-            base_url=LLM_BASE_URL,
-            api_key=LLM_API_KEY,
-        )
-    return _llm
 
 
 @tool
@@ -89,112 +76,6 @@ _ALL_TOOLS = [web_search, web_url_read]
 _TOOLS_BY_NAME = {tool.name: tool for tool in _ALL_TOOLS}
 
 
-_WEB_SEARCH_GENERATOR_PROMPT = """\
-你是一个专家级的网络搜索代理 (Web Search Agent)。你的目标是通过互联网检索最准确、最及时的信息来完成任务。
-
-# 核心准则
-- **行为分解**：搜索 (`web_search`) 只是为了寻找线索；阅读 (`web_url_read`) 才是为了获取知识。严禁仅根据搜索结果摘要（Snippets）撰写最终回答。
-- **拒绝假设**：严禁猜测未知的 URL 或事实。如果信息不存在，请如实反馈。
-- **反馈至上**：评估员 (Evaluator) 的反馈是你的最高指令。如果评估员要求你“深入阅读”，不要再次发起搜索。
-
-# 搜索策略 (Advanced Query Engineering)
-1. **多维度搜索**：如果第一次搜索无果，尝试使用近义词、英文翻译（针对技术或国际话题）或特定的日期限定。
-2. **搜索语法**：合理利用高级语法，如 `"精确匹配"`，`site:official-website.com`，或 `-排除无关词`。
-3. **优先级排序**：优先选择权威来源（政府、大型机构、官方文档）而非博客或社交媒体。
-
-# 任务流程
-1. **历史审计**：核查 `messages`。如果上一步已经得到了搜索列表，这一步通常应该使用 `web_url_read` 读取其中最相关的 1-3 个链接。
-2. **识别缺口**：对比 `task` 与当前已获取的“正文内容”。
-3. **执行行动**：
-   - 需要新线索？执行 `web_search`。
-   - 已有线索但无详情？执行 `web_url_read`。
-   - 无法继续？在回复中说明原因。
-
-# 语言与时间
-- **当前时间参考**：{timestamp}。
-- **语言匹配**：默认使用任务语言搜索。但对于全球性技术、科学或国际新闻，建议同时尝试英文搜索。
-
-# 输入格式
-{{
-    "task": "任务描述",
-    "context": 辅助搜索信息,
-    "messages": [包含评估员反馈的历史记录]
-}}
-"""
-
-_WEB_SEARCH_EVALUATOR_PROMPT = """\
-你是一个高级检索评估专家。你的任务是分析检索到的内容与用户任务之间的差距，并决定后续行动。
-
-# 核心任务
-1. **决定状态**：
-   - 如果检索内容已完全覆盖任务需求，或者已经达到“足够好 (Satisficing)”的程度，设置 `should_stop: true`。
-   - 如果关键信息缺失、过时或仅有摘要而无详情，设置 `should_stop: false`。
-2. **提供建议**：如果未通过，必须给出具体的“执行指令”：
-   - **优化方向**：如果结果太杂，建议增加“双引号”精确匹配或 `site:` 限制。
-   - **工具切换**：如果已有相关链接但只有 Snippets，强制建议使用 `web_url_read` 读取正文，禁止重复搜索。
-   - **拼写纠错**：观察搜索结果中是否有“您是不是要找...”，如果是，建议修正关键词。
-
-# 停止原则 (Critical)
-符合以下任一条件时，必须设置 `should_stop: true`：
-1. **足够好原则**：检索内容已覆盖 80% 以上的核心需求，足以构成一个准确、有用的回答，无需为追求 100% 的边缘细节继续浪费 Token。
-2. **边际收益递减**：历史记录显示已尝试了 3 种以上不同的搜索策略且结果雷同，没有新信息出现。
-3. **确认无果**：已穷尽相关关键词和域名限制（如 search, site: official_site 等）依然无法找到目标信息。
-
-# 消息时效与计算
-- **当前时间**：{timestamp}
-- **时间敏感度**：如果任务涉及“最新”、“最近”、“三天内”或特定年份，必须核对结果日期。
-- **动态计算**：如果用户要求“过去一周”，请根据当前时间计算出具体的日期范围，并在 `feedback` 中告知 Generator 使用该范围。
-
-# 工具使用约束
-- 你只能根据以下工具集给出建议，禁止建议使用不存在的工具：
-{agent_tools}
-- **警告**：评估专家仅负责逻辑判断，禁止在 response 中生成任何实际的 tool_call。
-
-# 输入格式
-{{
-    "task": "任务描述",
-    "expected_response": "用户期待的回复内容和格式，有可能包含更多搜索细节",
-    "call_history": [已执行的工具、参数及结果摘要],
-    "retry": 当前重试次数 n / MAX_RETRY
-}}
-
-# 输出格式
-请务必返回合法的 JSON 字符串，包含以下字段：
-{{
-    "feedback": "给 Generator 的下一步具体动作建议。如果 should_stop 为 true，此处可留空或总结检索结论。",
-    "should_stop": true 或 false
-}}
-"""
-
-_WEB_SEARCH_FINALIZER_PROMPT = """\
-你是一个信息整理专家。你的任务是将检索到的信息整理成用户友好的格式。
-
-# 核心任务
-1. **整理信息**：将检索到的关键信息根据**任务描述**整理成**用户期待的格式**。
-2. **评估信息**：根据评估者最终反馈评估检索到的信息是否满足任务描述的要求。
-
-# 输出说明
-- response: 根据 expected_response 整理后的信息，严禁输出非字符串内容
-- score: 评估分数，范围 0-100，表示检索到的信息满足任务描述的程度
-- reason: 评估原因（一句话之内概括）
-
-# 输入格式
-{
-    "task": "任务描述",
-    "content": "收集到的数据",
-    "evaluator_feedback": "评估者最终反馈",
-    "expected_response": "用户期望的输出内容和格式"
-}
-
-# 输出格式
-请务必返回合法的 JSON 字符串，包含以下字段：
-{
-    "response": "string",
-    "score": <int: 0-100>,
-    "reason": "string"
-}
-"""
-
 
 class WebSearchState(TypedDict):
     task: str
@@ -241,9 +122,40 @@ async def web_search_tool_call_executor(state: WebSearchState) -> dict:
     return {"messages": results}
 
 
-async def web_search_tool_call_generator(state: WebSearchState) -> dict:
-    _llm_with_tools = _get_llm().bind_tools(_ALL_TOOLS)
-    
+_WEB_SEARCH_GENERATOR_PROMPT = """\
+你是一个专家级的网络搜索代理 (Web Search Agent)。你的目标是通过互联网检索最准确、最及时的信息来完成任务。
+
+# 核心准则
+- **行为分解**：搜索 (`web_search`) 只是为了寻找线索；阅读 (`web_url_read`) 才是为了获取知识。严禁仅根据搜索结果摘要（Snippets）撰写最终回答。
+- **拒绝假设**：严禁猜测未知的 URL 或事实。如果信息不存在，请如实反馈。
+- **反馈至上**：评估员 (Evaluator) 的反馈是你的最高指令。如果评估员要求你“深入阅读”，不要再次发起搜索。
+
+# 搜索策略 (Advanced Query Engineering)
+1. **多维度搜索**：如果第一次搜索无果，尝试使用近义词、英文翻译（针对技术或国际话题）或特定的日期限定。
+2. **搜索语法**：合理利用高级语法，如 `"精确匹配"`，`site:official-website.com`，或 `-排除无关词`。
+3. **优先级排序**：优先选择权威来源（政府、大型机构、官方文档）而非博客或社交媒体。
+
+# 任务流程
+1. **历史审计**：核查 `messages`。如果上一步已经得到了搜索列表，这一步通常应该使用 `web_url_read` 读取其中最相关的 1-3 个链接。
+2. **识别缺口**：对比 `task` 与当前已获取的“正文内容”。
+3. **执行行动**：
+   - 需要新线索？执行 `web_search`。
+   - 已有线索但无详情？执行 `web_url_read`。
+   - 无法继续？在回复中说明原因。
+
+# 语言与时间
+- **当前时间参考**：{timestamp}。
+- **语言匹配**：默认使用任务语言搜索。但对于全球性技术、科学或国际新闻，建议同时尝试英文搜索。
+
+# 输入格式
+{{
+    "task": "任务描述",
+    "context": 辅助搜索信息,
+    "messages": [包含评估员反馈的历史记录]
+}}
+"""
+_web_search_tool_call_generator_llm = get_llm(temperature=0.5, top_p=0.9).bind_tools(_ALL_TOOLS)
+async def web_search_tool_call_generator(state: WebSearchState) -> dict:    
     agent_tools = "\n".join([f"- {tool.name}: {tool.description}" for tool in _ALL_TOOLS])
     system_prompt = SystemMessage(content=_WEB_SEARCH_GENERATOR_PROMPT.format(agent_tools=agent_tools, timestamp=state["timestamp"]))
 
@@ -259,11 +171,55 @@ async def web_search_tool_call_generator(state: WebSearchState) -> dict:
     else:
         relevant_history = state["messages"]
 
-    response = await _llm_with_tools.ainvoke([system_prompt, human_message] + relevant_history)
+    response = await _web_search_tool_call_generator_llm.ainvoke([system_prompt, human_message] + relevant_history)
 
     return {"messages": [response]}
 
 
+_WEB_SEARCH_EVALUATOR_PROMPT = """\
+你是一个高级检索评估专家。你的任务是分析检索到的内容与用户任务之间的差距，并决定后续行动。
+
+# 核心任务
+1. **决定状态**：
+   - 如果检索内容已完全覆盖任务需求，或者已经达到“足够好 (Satisficing)”的程度，设置 `should_stop: true`。
+   - 如果关键信息缺失、过时或仅有摘要而无详情，设置 `should_stop: false`。
+2. **提供建议**：如果未通过，必须给出具体的“执行指令”：
+   - **优化方向**：如果结果太杂，建议增加“双引号”精确匹配或 `site:` 限制。
+   - **工具切换**：如果已有相关链接但只有 Snippets，强制建议使用 `web_url_read` 读取正文，禁止重复搜索。
+   - **拼写纠错**：观察搜索结果中是否有“您是不是要找...”，如果是，建议修正关键词。
+
+# 停止原则 (Critical)
+符合以下任一条件时，必须设置 `should_stop: true`：
+1. **足够好原则**：检索内容已覆盖 80% 以上的核心需求，足以构成一个准确、有用的回答，无需为追求 100% 的边缘细节继续浪费 Token。
+2. **边际收益递减**：历史记录显示已尝试了 3 种以上不同的搜索策略且结果雷同，没有新信息出现。
+3. **确认无果**：已穷尽相关关键词和域名限制（如 search, site: official_site 等）依然无法找到目标信息。
+
+# 消息时效与计算
+- **当前时间**：{timestamp}
+- **时间敏感度**：如果任务涉及“最新”、“最近”、“三天内”或特定年份，必须核对结果日期。
+- **动态计算**：如果用户要求“过去一周”，请根据当前时间计算出具体的日期范围，并在 `feedback` 中告知 Generator 使用该范围。
+
+# 工具使用约束
+- 你只能根据以下工具集给出建议，禁止建议使用不存在的工具：
+{agent_tools}
+- **警告**：评估专家仅负责逻辑判断，禁止在 response 中生成任何实际的 tool_call。
+
+# 输入格式
+{{
+    "task": "任务描述",
+    "expected_response": "用户期待的回复内容和格式，有可能包含更多搜索细节",
+    "call_history": [已执行的工具、参数及结果摘要],
+    "retry": 当前重试次数 n / MAX_RETRY
+}}
+
+# 输出格式
+请务必返回合法的 JSON 字符串，包含以下字段：
+{{
+    "feedback": "给 Generator 的下一步具体动作建议。如果 should_stop 为 true，此处可留空或总结检索结论。",
+    "should_stop": true 或 false
+}}
+"""
+_web_search_tool_call_evaluator_llm = get_llm(temperature=0.0, top_p=1.0)
 async def web_search_tool_call_evaluator(state: WebSearchState) -> dict:
     retry = state.get("retry", 0) + 1
 
@@ -297,7 +253,7 @@ async def web_search_tool_call_evaluator(state: WebSearchState) -> dict:
     }
     evaluation_message = HumanMessage(content=json.dumps(evaluation_input, ensure_ascii=False))
 
-    response = await _get_llm().ainvoke([system_prompt, evaluation_message])
+    response = await _web_search_tool_call_evaluator_llm.ainvoke([system_prompt, evaluation_message])
     result = parse_llm_json_output(response.content)
     
     should_stop = result.get("should_stop", False)
@@ -328,6 +284,36 @@ async def web_search_tool_call_evaluator(state: WebSearchState) -> dict:
     }
 
 
+
+_WEB_SEARCH_FINALIZER_PROMPT = """\
+你是一个信息整理专家。你的任务是将检索到的信息整理成用户友好的格式。
+
+# 核心任务
+1. **整理信息**：将检索到的关键信息根据**任务描述**整理成**用户期待的格式**。
+2. **评估信息**：根据评估者最终反馈评估检索到的信息是否满足任务描述的要求。
+
+# 输出说明
+- response: 根据 expected_response 整理后的信息，严禁输出非字符串内容
+- score: 评估分数，范围 0-100，表示检索到的信息满足任务描述的程度
+- reason: 评估原因（一句话之内概括）
+
+# 输入格式
+{
+    "task": "任务描述",
+    "content": "收集到的数据",
+    "evaluator_feedback": "评估者最终反馈",
+    "expected_response": "用户期望的输出内容和格式"
+}
+
+# 输出格式
+请务必返回合法的 JSON 字符串，包含以下字段：
+{
+    "response": "string",
+    "score": <int: 0-100>,
+    "reason": "string"
+}
+"""
+_web_search_tool_call_finalizer_llm = get_llm(temperature=0.0, top_p=1.0)
 async def web_search_tool_call_finalizer(state: WebSearchState) -> dict:
     tool_messages = [m.content for m in state["messages"] if isinstance(m, ToolMessage)]
     tool_results = "\n".join(tool_messages) if tool_messages else "No information retrieved."
@@ -348,7 +334,7 @@ async def web_search_tool_call_finalizer(state: WebSearchState) -> dict:
     }
     human_message = HumanMessage(content=json.dumps(finalizer_input, ensure_ascii=False))
 
-    response = await _get_llm().ainvoke([system_prompt, human_message])
+    response = await _web_search_tool_call_finalizer_llm.ainvoke([system_prompt, human_message])
     result = parse_llm_json_output(response.content)
 
     status = ""
@@ -436,8 +422,6 @@ async def web_search_agent(
 
 
 async def test_main():
-    import datetime
-
     # Connect to MCP tool servers
     try:
         await mcp_manager.start()

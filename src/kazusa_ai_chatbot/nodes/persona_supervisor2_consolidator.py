@@ -1,34 +1,24 @@
-from ast import Global
-from typing import TypedDict, Annotated
+from typing import Annotated, TypedDict
 
 from kazusa_ai_chatbot.nodes.persona_supervisor2_schema import GlobalPersonaState
-from kazusa_ai_chatbot.config import LLM_API_KEY, LLM_BASE_URL, LLM_MODEL
-from kazusa_ai_chatbot.config import AFFINITY_DEFAULT, AFFINITY_MAX, AFFINITY_MIN, AFFINITY_INCREMENT_BREAKPOINTS, AFFINITY_DECREMENT_BREAKPOINTS, MAX_FACT_HARVESTER_RETRY
-from kazusa_ai_chatbot.utils import parse_llm_json_output, build_affinity_block
-from kazusa_ai_chatbot.db import upsert_character_state, upsert_user_facts, save_memory, update_affinity, update_last_relationship_insight
+from kazusa_ai_chatbot.config import LLM_API_KEY, LLM_BASE_URL, LLM_MODEL, MAX_FACT_HARVESTER_RETRY, AFFINITY_DEFAULT
+from kazusa_ai_chatbot.utils import parse_llm_json_output, build_affinity_block, get_llm
+from kazusa_ai_chatbot.nodes.persona_supervisor2_schema import GlobalPersonaState
 
-from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
-from langgraph.graph import StateGraph, START, END, add_messages
-from langchain_openai import ChatOpenAI
+from langchain_core.messages import HumanMessage, SystemMessage
+from langgraph.graph import StateGraph, START, END
+from langgraph.graph.message import add_messages
 
 import logging
 import json
 from datetime import datetime, timezone
 
-
 logger = logging.getLogger(__name__)
 
-
-def _get_llm(temperature, top_p) -> ChatOpenAI:
-    _llm = ChatOpenAI(
-        model=LLM_MODEL,
-        temperature=temperature,
-        top_p=top_p,
-        base_url=LLM_BASE_URL,
-        api_key=LLM_API_KEY,
-    )
-    return _llm
-
+_global_state_updater_llm = get_llm(temperature=0.4, top_p=0.8)
+_relationship_recorder_llm = get_llm(temperature=0.85, top_p=0.95)
+_facts_harvester_llm = get_llm(temperature=0.1, top_p=0.1)
+_fact_harvester_evaluator_llm = get_llm(temperature=0.1, top_p=0.2)
 
 class ConsolidatorState(TypedDict):
     # Inputs for db_writer
@@ -107,14 +97,13 @@ _GLOBAL_STATE_UPDATER_PROMPT = """\
 
 # 输出格式
 请务必返回合法的 JSON 字符串，包含以下字段：
-
 {{
     "mood": "string",
     "global_vibe": "string",
     "reflection_summary": "string"
 }}
 """
-_global_state_updater_llm = _get_llm(temperature=0.4, top_p=0.8)
+_global_state_updater_llm = get_llm(temperature=0.4, top_p=0.8)
 async def global_state_updater(state: ConsolidatorState):
     system_prompt = SystemMessage(_GLOBAL_STATE_UPDATER_PROMPT.format(character_name=state["character_profile"]["name"]))
 
@@ -172,7 +161,7 @@ _RELATIONSHIP_RECORDER_PROMPT = """\
     "last_relationship_insight": "此时此刻对他/她最核心的一个标签或看法"
 }}
 """
-_relationship_recorder_llm = _get_llm(temperature=0.85, top_p=0.95)
+_relationship_recorder_llm = get_llm(temperature=0.85, top_p=0.95)
 async def relationship_recorder(state: ConsolidatorState):
     system_prompt = SystemMessage(_RELATIONSHIP_RECORDER_PROMPT.format(
         character_name=state["character_profile"]["name"],
@@ -257,7 +246,7 @@ _FACTS_HARVESTER_PROMPT = """\
     ]
 }}
 """
-_facts_harvester_llm = _get_llm(temperature=0.1, top_p=0.1)
+_facts_harvester_llm = get_llm(temperature=0.1, top_p=0.1)
 async def facts_harvester(state: ConsolidatorState):
     system_prompt = SystemMessage(_FACTS_HARVESTER_PROMPT.format(
         character_name=state["character_profile"]["name"],
@@ -327,7 +316,7 @@ _FACT_HARVESTER_EVALUATOR_PROMPT = """\
     "feedback": "具体指明错误点。例如：‘原始输入只提到了[奖励]，但输出脑补了[晚餐]，请删除具体行为描述。’ 或 ‘请将[User]替换为 {user_name}’。"
 }}
 """
-_fact_harvester_evaluator_llm = _get_llm(temperature=0.1, top_p=0.2)
+_fact_harvester_evaluator_llm = get_llm(temperature=0.1, top_p=0.2)
 async def fact_harvester_evaluator(state: ConsolidatorState):
     system_prompt = SystemMessage(_FACT_HARVESTER_EVALUATOR_PROMPT.format(
         character_name=state["character_profile"]["name"],
@@ -524,17 +513,32 @@ async def call_consolidation_subgraph(
     
     # Run sub-graph
     result = await sub_graph.ainvoke(sub_state)
+
+    # Assemble output
+    mood = result.get("mood", "")
+    global_vibe = result.get("global_vibe", "")
+    reflection_summary = result.get("reflection_summary", "")
+    diary_entry = result.get("diary_entry", "")
+    affinity_delta = result.get("affinity_delta", 0)
+    last_relationship_insight = result.get("last_relationship_insight", "")
+    new_facts = result.get("new_facts", [])
+    future_promises = result.get("future_promises", [])
+
+    logger.info(
+        f"\nNew facts: {new_facts}\n"
+        f"Future promises: {future_promises}"
+    )
     
     # Return updated state
     return {
-        "mood": result.get("mood", ""),
-        "global_vibe": result.get("global_vibe", ""),
-        "reflection_summary": result.get("reflection_summary", ""),
-        "diary_entry": result.get("diary_entry", ""),
-        "affinity_delta": result.get("affinity_delta", 0),
-        "last_relationship_insight": result.get("last_relationship_insight", ""),
-        "new_facts": result.get("new_facts", []),
-        "future_promises": result.get("future_promises", []),
+        "mood": mood,
+        "global_vibe": global_vibe,
+        "reflection_summary": reflection_summary,
+        "diary_entry": diary_entry,
+        "affinity_delta": affinity_delta,
+        "last_relationship_insight": last_relationship_insight,
+        "new_facts": new_facts,
+        "future_promises": future_promises,
     }
 
 

@@ -1,15 +1,8 @@
-from langgraph.graph import StateGraph, START, END, add_messages
-from langchain_openai import ChatOpenAI
-from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
-from openai.types.shared import reasoning
-
-from kazusa_ai_chatbot.config import LLM_API_KEY, LLM_BASE_URL, LLM_MODEL, MAX_PERSONA_SUPERVISOR_STAGE1_RETRY
-from kazusa_ai_chatbot.state import AgentResult, BotState
-from kazusa_ai_chatbot.utils import parse_llm_json_output
-from kazusa_ai_chatbot.db import AFFINITY_DEFAULT
+from langgraph.graph import StateGraph, START, END
 
 from kazusa_ai_chatbot.mcp_client import mcp_manager
 
+from kazusa_ai_chatbot.state import DiscordProcessState
 from kazusa_ai_chatbot.nodes.persona_supervisor2_schema import GlobalPersonaState
 from kazusa_ai_chatbot.nodes.persona_supervisor2_msg_decontexualizer import call_msg_decontexualizer
 from kazusa_ai_chatbot.nodes.persona_supervisor2_research_subgraph import call_research_subgraph
@@ -17,8 +10,6 @@ from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition import call_cognition
 from kazusa_ai_chatbot.nodes.persona_supervisor2_consolidator import call_consolidation_subgraph
 from kazusa_ai_chatbot.agents.dialog_agent import dialog_agent
 
-from typing import Annotated, TypedDict, List
-import json
 import logging
 
 
@@ -35,7 +26,7 @@ async def call_action_subgraph(state: GlobalPersonaState) -> dict:
 
 
 
-async def persona_supervisor2(state: BotState) -> dict:
+async def persona_supervisor2(state: DiscordProcessState) -> dict:
 
     # Build the top level graph that connect stages
     persona_builder = StateGraph(GlobalPersonaState)
@@ -59,31 +50,31 @@ async def persona_supervisor2(state: BotState) -> dict:
     initial_persona_state: GlobalPersonaState = {
         # Character Related
         "character_state": state["character_state"],
-        "character_profile": state["personality"],
+        "character_profile": state["character_profile"],
 
         # Inputs
         "timestamp": state["timestamp"],
-        "user_input": state["message_text"],
-        "user_id": state.get("user_id", ""),
-        "user_name": state.get("user_name", ""),
-        "user_profile": state.get("user_profile", {}),  
-        "bot_id": state.get("bot_id", ""),
-        "chat_history": state.get("chat_history", []),
-        "user_topic": state.get("assembler_output", {}).get("user_topic", ""),
-        "channel_topic": state.get("assembler_output", {}).get("channel_topic", ""),
+        "user_input": state["user_input"],
+        "user_id": state["user_id"],
+        "user_name": state["user_name"],
+        "user_profile": state["user_profile"],
+        "bot_id": state["bot_id"],
+        "chat_history": state["chat_history"],
+        "user_topic": state["user_topic"],
+        "channel_topic": state["channel_topic"],
     }
     
     results = await persona_graph.ainvoke(initial_persona_state)
     
     return {
         "final_dialog": results["final_dialog"],
-        "mood": results["mood"],
-        "global_vibe": results["global_vibe"],
-        "reflection_summary": results["reflection_summary"],
-        "diary_entry": results["diary_entry"],
-        "affinity_delta": results["affinity_delta"],
-        "last_relationship_insight": results["last_relationship_insight"],
-        "new_facts": results["new_facts"],
+        # "mood": results["mood"],
+        # "global_vibe": results["global_vibe"],
+        # "reflection_summary": results["reflection_summary"],
+        # "diary_entry": results["diary_entry"],
+        # "affinity_delta": results["affinity_delta"],
+        # "last_relationship_insight": results["last_relationship_insight"],
+        # "new_facts": results["new_facts"],
         "future_promises": results["future_promises"],
     }
 
@@ -104,20 +95,27 @@ async def test_main():
     trimmed_history = trim_history_dict(history)
 
     # Create a mocked BotState
-    test_state: BotState = {
-        "personality": load_personality("personalities/kazusa.json"),
-        "character_state": await get_character_state(),
+    test_state: DiscordProcessState = {
         "timestamp": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-        "message_text": "既然作业已经写完了，千纱准备‘奖励’我了么♥",
-        "user_id": "320899931776745483",
         "user_name": "EAMARS",
+        "user_id": "320899931776745483",
+        "user_input": "既然作业已经写完了，千纱准备‘奖励’我了么♥",
         "user_profile": await get_user_profile("320899931776745483"),
+
         "bot_id": "1485169644888395817",
+        "bot_name": "KazusaBot",
+        "character_profile": load_personality("personalities/kazusa.json"),
+        "character_state": await get_character_state(),
+
+        "channel_id": "",
+        "channel_name": "",
         "chat_history": trimmed_history,
-        "assembler_output": {
-            "channel_topic": "课间交流",
-            "user_topic": "交流作业"
-        }
+
+        "should_respond": True,
+        "reason_to_respond": "User is asking a question",
+        "use_reply_feature": False,
+        "channel_topic": "General chat",
+        "user_topic": "作业交流",
     }
     
     result = await persona_supervisor2(test_state)

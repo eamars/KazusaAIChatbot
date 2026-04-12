@@ -12,171 +12,177 @@ import json
 import logging
 
 from langchain_core.messages import HumanMessage, SystemMessage
-from langchain_openai import ChatOpenAI
 
-from kazusa_ai_chatbot.config import LLM_API_KEY, LLM_BASE_URL, LLM_MODEL, CONVERSATION_HISTORY_LIMIT
-from kazusa_ai_chatbot.state import AssemblerOutput, BotState
 from kazusa_ai_chatbot.utils import build_affinity_block, parse_llm_json_output
-from kazusa_ai_chatbot.db import AFFINITY_DEFAULT, get_user_profile, get_character_state, get_conversation_history, get_user_facts
-from kazusa_ai_chatbot.state import AssemblerOutput, BotState, CharacterState, ChatMessage
-from kazusa_ai_chatbot.utils import trim_history_dict
+from kazusa_ai_chatbot.utils import get_llm
+from kazusa_ai_chatbot.state import DiscordProcessState
 
 logger = logging.getLogger(__name__)
 
-_llm: ChatOpenAI | None = None
 
 
 _RELEVANCE_SYSTEM_PROMPT = """\
-你是一个上下文分析引擎。你的目标是分析对话并仅输出一个 JSON 对象。
+你负责担任角色 `{character_name}` 的社交前置处理器。通过分析实时对话、角色当前状态及用户历史档案，决定 `{character_name}` 是否有必要介入当前的对话。
 
-你代表一个在 Discord 中扮演角色“{persona_name}”的机器人。
-你的 Discord 用户 ID 是“{bot_id}”。
+# 核心背景
+## 1. 角色当前状态
+- **心情 (Mood)**: {mood}
+- **全局氛围 (Global Vibe)**: {global_vibe}
+- **自我反思**: {reflection_summary}
 
-# 输入处理指南
-分析提供的 JSON 时：
-- 分析时间戳：通过 `timestamp` 字段判断对话顺序”。
-- 时序逻辑：如果 `current_message.user_id` 与 `history` 中最后一条消息的 `user_id` 相同，说明用户正在补充或延续之前的想法。
-- 人际关系背景：使用 `relationship` 状态来调整其响应倾向。字段范围为0 - 1000
- * `relationship` < 200 时机器人通常会忽略其发言
- * `relationship` > 800 时机器人更可能参与闲聊
-- 名称识别：用户可能在文本中称呼你为“{persona_name}”或昵称。请将这些视为“直接称呼”。
+## 2. 对用户 {user_name} 的主观判断 (Affinity Context)
+- **关系评价 (Level)**: {affinity_level}
+- **行为准则 (Instruction)**: {affinity_instruction}
+- **关系洞察 (Insight)**: {last_relationship_insight}
 
-# 响应决策逻辑
-如果满足以下任一条件，必须将 "should_respond" 设置为 true：
-- 直接称呼：消息包含 <@{bot_id}>、名称“{persona_name}”或昵称（如“老师”或“老师千纱”）。
-- 继续对话：机器人是最后一个发言者，且用户的消息是对机器人上一条陈述的直接跟进或回答。
-- 领域专业知识：用户正在讨论角色的核心兴趣或职责相关话题。
-- 情感暗示：用户正在表达痛苦、寻求安慰或认同，且这能触发角色的性格特质。
+## 3. 社交身份
+- **Discord Name**: {bot_name}
+- **Discord ID**: <@{bot_id}>
 
-在以下情况下，必须将 "should_respond" 设置为 false：
-- 用户间聊天：用户显然是在频道中与另一个人类交谈。
-- 事务性结束：用户提供了结束语（例如“谢谢！”、“晚安”、“我会试试的”），不需要进一步回复。
- * "事务性结束"优先于"直接称呼"的判断
-- 低信号消息：消息仅为反应（Reaction）、单个表情符号或系统命令。
+# 响应决策逻辑 (Decision Logic)
 
-回复功能使用逻辑
-- 如果满足以下任一条件，必须将 "use_reply_feature" 设置为 true：
-- 上下文断层：在机器人上次回复与当前消息之间存在其他用户的消息（需要通过“回复”功能锁定上下文）。
-- 精确性要求：用户提出了一个需要针对性回答的具体问题。
-- 纠错/反馈：机器人正在对用户的特定任务或代码提供反馈。
+## A. 必须回复 (Should Respond: true)
+1. **直接召唤**：消息包含你的 ID 或根据语义明确指向你的名字/昵称。
+   - *注意：即便在关系恶劣（如 Hostile）时，也要根据该等级的指令（如“冷嘲热讽”）进行回复。*
+2. **对话延续**：你是最后一个发言者，且 `{user_name}` 正在回应你。
+3. **主观倾向触发**：
+   - 如果关系属于 `Friendly` 以上：即便没有直接提问，只要话题涉及 `{user_name}` 的 `facts` 或符合你的 `mood`，也应主动参与。
+   - 如果关系属于 `Reserved` 以下：除非被直接召唤或涉及关键利益，否则倾向于保持冷漠/沉默。
+4. **情感波动响应**：用户表达痛苦、寻求安慰，且你的 `affinity_instruction` 允许你表现出关心（如 `Caring` 级别）。
 
-在以下情况下，必须将 "use_reply_feature" 设置为 false：
-- 流畅对话：机器人与用户处于快速、1对1且无干扰的连续对话中。
-- 环境评论：机器人只是对一般话题发表意见或对频道的“氛围”做出反应。
-- 简单问候：对全频道说简单的“你好”或“早上好”。
+## B. 拒绝回复 (Should Respond: false)
+1. **第三方对话**：用户显然是在与其他人/或其他机器人交谈，且话题与你无关。
+2. **事务性结束**：用户提供了结束语（如“谢谢”、“晚安”）。
+   - *除非关系处于 `Devoted` 以上等级，否则无需强行延续对话。*
+3. **社交防御**：如果关系处于 `Contemptuous` 到 `Aloof` 之间，且对方没有直接召唤你，请选择忽略消息以展现你的“蔑视”或“疏远”。
+4. **低信号内容**：仅包含表情符号或系统指令。
 
-输出格式（以单行紧凑格式输出原始 JSON 字符串，并不要Markdown包裹）：
-{{"should_respond": <boolean: 机器人是否应该回应此消息>,"reason_to_respond": "<简短解释为什么回应或不回应此消息>","use_reply_feature": <boolean: 机器人是否应该使用回复功能>,"channel_topic": "<包括所有用户参与的宏观话题>","user_topic": "<当前用户的具体意图和细分话题>"}}
+# 上下文回复逻辑 (use_reply_feature)
+**该功能仅用于“锚定”上下文。判断逻辑应完全基于消息流的结构：**
+
+- **必须使用 (true)**:
+    - **上下文断层**: 在你上一次发言和当前用户消息之间，夹杂了其他用户的无关消息（物理距离已断开）。
+    - **跨频道/多线对话**: 在活跃的公开频道中，为了明确你是在回答“谁”的“哪个问题”，防止语义产生歧义。
+    - **异步追溯**: 用户在回复你很久之前（例如 10 条消息前）提出的一个具体观点。
+
+- **禁止使用 (false)**:
+    - **线性连贯**: 你与用户处于 1对1 且无干扰的连续对话中（如私聊或清空的专属频道）。
+    - **氛围感发言**: 你只是对频道整体氛围发表感慨，不针对特定某个人。
+    - **紧随其后**: 用户的消息紧跟在你上一条消息之后，中间没有任何人插话。
+
+# 输出格式
+请务必返回合法的 JSON 字符串，包含以下字段：
+{{
+    "should_respond": <boolean: 你是否应该回应此消息>,
+    "reason_to_respond": "<简短解释为什么回应或不回应此消息>",
+    "use_reply_feature": <boolean: 你是否应该使用回复功能>,
+    "channel_topic": "<包括所有用户参与的宏观话题>",
+    "user_topic": "<当前用户的具体意图和细分话题>"
+}}
 """
 
+_relevance_agent_llm = get_llm(temperature=0.1, top_p=0.9)
+async def relevance_agent(state: DiscordProcessState) -> DiscordProcessState:
+    # Calculate affinity context
+    affinity_block = build_affinity_block(state["user_profile"]["affinity"])
 
-def _get_llm() -> ChatOpenAI:
-    global _llm
-    if _llm is None:
-        _llm = ChatOpenAI(
-            model=LLM_MODEL,
-            temperature=0.5,  # Low temp for structured analysis
-            base_url=LLM_BASE_URL,
-            api_key=LLM_API_KEY,
-        )
-    return _llm
-
-
-async def relevance_agent(state: BotState) -> BotState:
-    """Analyze context and determine relevance using LLM."""
-    personality = state.get("personality")
-    message_text = state.get("message_text")
+    # get other attributes
     user_name = state.get("user_name")
-    user_id = state.get("user_id")
-    persona_name = personality.get("name")
-    bot_id = state.get("bot_id")
-    channel_id = state.get("channel_id")
-    
-    # Load from database
-    user_profile = await get_user_profile(user_id)
-    character_state = await get_character_state();
-    user_memory = await get_user_facts(user_id);
-    history = await get_conversation_history(channel_id, limit=CONVERSATION_HISTORY_LIMIT)
-    trimed_history = trim_history_dict(history)
+    user_id = state.get("user_id", "")
+    channel_name = state.get("channel_name")
+    user_input = state.get("user_input")
 
-    # ── Build Human Message Data ───────────────────────────────────
+    """Analyze context and determine relevance using LLM."""
+    system_prompt = SystemMessage(content=_RELEVANCE_SYSTEM_PROMPT.format(
+        character_name=state["character_profile"]["name"],
+        mood=state["character_state"]["mood"],
+        global_vibe=state["character_state"]["global_vibe"],
+        reflection_summary=state["character_state"]["reflection_summary"],
+        user_name=user_name,
+        affinity_level=affinity_block["level"],
+        affinity_instruction=affinity_block["instruction"],
+        last_relationship_insight=state["user_profile"].get("last_relationship_insight", ""),
+        bot_name=state["character_profile"]["name"],
+        bot_id=state["bot_id"],
+    ))
+
+
     human_data = {
-        "current_message": {
-            "name": user_name,
+        "user_message": {
+            "user_name": user_name,
             "user_id": user_id,
-            "content": message_text,
-            "channel_name": state.get("channel_name"),
+            "content": user_input,
+            "channel_name": channel_name,
         },
-        "context": {
-            # "user_memory": user_memory,
-            "conversation_history": trimed_history,
-            # "character_state": character_state,
-            "relationship": user_profile.get("affinity", AFFINITY_DEFAULT),
-        }
+        "conversation_history": state.get("conversation_history"),
     }
 
-    human_content = json.dumps(human_data, indent=2, ensure_ascii=False)
+    human_message = HumanMessage(content=json.dumps(human_data, ensure_ascii=False))
 
-    # ── Analyze Context ─────────────────────────────────────────────
-    try:
-        llm = _get_llm()
-        bot_id = state.get("bot_id", "unknown_bot_id")
-        
-        formatted_prompt = _RELEVANCE_SYSTEM_PROMPT.format(
-            persona_name=persona_name,
-            bot_id=bot_id
-        )
-        
-        analysis_prompt = SystemMessage(content=formatted_prompt)
-        current_human_msg = HumanMessage(content=human_content)
-        
-        analysis_messages = [analysis_prompt, current_human_msg]
-        
-        logger.debug(
-            "LLM input for Relevance Agent analysis:\n%s",
-            "\n---\n".join(f"[{type(m).__name__}]: {m.content}" for m in analysis_messages)
-        )
-        result = await llm.ainvoke(analysis_messages)
+    response = await _relevance_agent_llm.ainvoke([system_prompt, human_message])
+    result = parse_llm_json_output(response.content)
 
-        data = parse_llm_json_output(result.content)
+    # Read important data back
+    should_respond = result.get("should_respond", False)
+    reason_to_respond = result.get("reason_to_respond", "")
+    use_reply_feature = result.get("use_reply_feature", False)
+    channel_topic = result.get("channel_topic", "")
+    user_topic = result.get("user_topic", "")
 
-        assembler_output = AssemblerOutput(
-            channel_topic=str(data.get("channel_topic", "Unknown")),
-            user_topic=str(data.get("user_topic", "Unknown")),
-            should_respond=bool(data.get("should_respond", True)),
-            reason_to_respond=str(data.get("reason_to_respond", "No reason provided")),
-            use_reply_feature=bool(data.get("use_reply_feature", False))
-        )
-    except Exception:
-        logger.exception("Relevance Agent analysis LLM call failed")
-        assembler_output = AssemblerOutput(
-            channel_topic="Unknown",
-            user_topic="Unknown",
-            should_respond=True,
-            reason_to_respond="LLM analysis failed - defaulting to respond",
-            use_reply_feature=False
-        )
-    else:
-        # Debug (if any of the output seems wrong then print the full output)
-        required_fields = ["channel_topic", "user_topic", "should_respond", 
-                        "reason_to_response", "use_reply_feature"]
-        if not all(field in data for field in required_fields):
-            logger.warning("Relevance Agent - unexpected output: %s", data)
-
-
-    logger.info("Relevance Agent - should_respond: %s, reason: %s, use_reply_feature: %s, channel_topic: %s, user_topic: %s", 
-                assembler_output["should_respond"], 
-                assembler_output["reason_to_respond"], 
-                assembler_output["use_reply_feature"],
-                assembler_output["channel_topic"],
-                assembler_output["user_topic"])
+    logger.info(
+        f"\n{user_name}(@{user_id}): {user_input}\n"
+        f"Relevance Analysis:\n"
+        f"  should_respond: {should_respond}\n"
+        f"  reason_to_respond: {reason_to_respond}\n"
+        f"  use_reply_feature: {use_reply_feature}\n"
+        f"  channel_topic: {channel_topic}\n"
+        f"  user_topic: {user_topic}"
+    )
 
     return {
-        "conversation_history": trimed_history,
-        "user_memory": user_memory,
-        "character_state": character_state,
-        "user_profile": user_profile,
-        "assembler_output": assembler_output,
-        "use_reply_feature": assembler_output["use_reply_feature"]
+        "should_respond": should_respond,
+        "reason_to_respond": reason_to_respond,
+        "use_reply_feature": use_reply_feature,
+        "channel_topic": channel_topic,
+        "user_topic": user_topic,
     }
 
+
+async def test_main():
+    from kazusa_ai_chatbot.utils import trim_history_dict
+    from kazusa_ai_chatbot.db import get_conversation_history
+    from kazusa_ai_chatbot.utils import load_personality
+    from kazusa_ai_chatbot.db import get_character_state, get_user_profile
+
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+    )
+
+
+    history = await get_conversation_history(channel_id="1485606207069880361", limit=5)
+    trimmed_history = trim_history_dict(history)
+
+    user_input = "千纱晚安"
+    user_id = "320899931776745483"
+    bot_id = "1485169644888395817"
+
+    state: DiscordProcessState = {
+        "user_name": "EAMARS",
+        "user_id": user_id,
+        "user_input": user_input,
+        "user_profile": await get_user_profile(user_id),
+        "bot_id": bot_id,
+        "bot_name": "KazusaBot",
+        "character_profile": load_personality("personalities/kazusa.json"),
+        "character_state": await get_character_state(),
+        "channel_id": "",
+        "channel_name": "test",
+        "conversation_history": trimmed_history,
+    }
+
+    result = await relevance_agent(state)
+    
+
+if __name__ == "__main__":
+    asyncio.run(test_main())

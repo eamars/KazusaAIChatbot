@@ -11,26 +11,11 @@ from kazusa_ai_chatbot.config import LLM_API_KEY, LLM_BASE_URL, LLM_MODEL, MAX_M
 from kazusa_ai_chatbot.db import get_user_facts, search_conversation_history, get_conversation_history
 from kazusa_ai_chatbot.db import search_memory as search_memory_db
 
-from kazusa_ai_chatbot.utils import parse_llm_json_output
+from kazusa_ai_chatbot.utils import parse_llm_json_output, get_llm
 
 from typing import Annotated, TypedDict
-from pydantic import BaseModel, Field
-
 
 logger = logging.getLogger(__name__)
-
-
-_llm: ChatOpenAI | None = None
-def _get_llm() -> ChatOpenAI:
-    global _llm
-    if _llm is None:
-        _llm = ChatOpenAI(
-            model=LLM_MODEL,
-            temperature=0.5,
-            base_url=LLM_BASE_URL,
-            api_key=LLM_API_KEY,
-        )
-    return _llm
 
 
 @tool
@@ -166,116 +151,6 @@ _ALL_TOOLS = [
 _TOOLS_BY_NAME = {tool.name: tool for tool in _ALL_TOOLS}
 
 
-_MEMORY_RETRIEVER_PROMPT = """\
-你是一个严谨的检索代理 (Retrieval Agent)。你的唯一目标是基于已知事实检索信息。
-
-# 核心准则：拒绝假设
-- **严格禁止脑补**：严禁猜测任何 `user_id`、日期、地点或具体名词。
-- **参数校验**：如果调用工具所需的必要参数（如 user_id）在 context 中不存在，严禁调用工具，直接回复说明“缺少必要参数”。
-- **宁缺毋滥**：如果当前信息不足以发起有效的搜索请求，请不要尝试，直接进入 Evaluator 阶段说明原因。
-
-# 任务流程
-1. **分析历史**：审查 `messages`，确定已经执行过哪些查询。
-2. **识别缺口**：对比 `task`，找出目前还缺失哪些关键信息。
-3. **精准检索**：
-   - 优先使用 `search_user_facts`。
-   - 若无果，使用 `search_persistent_memory`。
-   - 最后尝试 `search_conversation`。
-   - 若请求特定的聊天记录，则使用 `get_conversation`。
-4. **调整策略**：如果之前的搜索返回空结果，必须更换关键词（例如：将“猫”改为“宠物”）或更换工具，禁止重复失败的操作。
-
-# 优先级
-1. 用户事实 (User facts)
-2. 持久化记忆 (Persistent Memory)
-3. 对话历史 (Conversation history)
-
-# 输入格式
-{
-    "task": "任务描述",
-    "context": 辅助搜索信息,
-    "messages": [历史记录]
-}
-
-# 策略调整指令 (Strategic Pivot)
-- 仔细阅读 `messages` 中来自 "评估员反馈" 的指令。
-- **反馈具有最高优先级**：如果评估员指出之前的搜索词无效或存在拼写错误，你必须立即按照建议调整搜索参数或更换工具。
-- 严禁忽略评估员关于“空结果”或“拼写错误”的警告。
-
-# 输出要求
-- 如果信息不足以执行任务，请在回复中明确指出：“因缺少 [具体信息] 无法继续执行检索”。
-"""
-
-_MEMORY_RETRIEVER_EVALUATOR_PROMPT = """\
-你是一个高级检索评估专家。你的任务是分析检索到的内容与用户任务之间的差距，并决定后续行动。
-
-# 核心任务
-1. **决定状态**：
-   - 如果检索内容已完全覆盖任务需求，设置 `is_passed: True`。
-   - 如果信息缺失、过时或仅部分匹配，设置 `is_passed: False`。
-2. **提供建议**：如果未通过，必须给出具体的“搜索建议”：
-   - **切换工具**：例如，“当前工具返回空，请尝试 search_conversation 以获取更具体的对话细节。”
-   - **优化关键词**：例如，“搜索词‘猫’太宽泛，建议搜索具体品种‘布偶猫’或名称‘咪咪’。”但关键词禁止过分偏离任务描述
-   - **终止建议**：如果已经尝试了所有工具且无果，建议停止检索并告知用户无法找到信息。
-
-# 建议代理使用合理工具
-- 做出建议时不要超出这个范围
-- 评估专家禁止生成生成任何 tool_call
-{agent_tools}
-
-# 响应要求
-- **无论检索是否成功，必须输出合法 JSON**。
-  - 成功时：说明原因，准备进入下一步。
-  - 失败时：提供搜索建议。
-
-# 停止原则
-- 如果历史记录显示已多次尝试不同关键词且无新进展，请果断建议停止，不要陷入死循环。
-
-# 输入格式
-{{
-    "task": "任务描述",
-    "expected_response": "用户期待的回复内容和格式，有可能包含更多搜索细节",
-    "call_history": [已执行的工具、参数及结果摘要],
-    "retry": 当前重试次数 n / MAX_RETRY
-}}
-
-# 输出格式
-请务必返回合法的 JSON 字符串，包含以下字段：
-{{
-    "feedback": "如果不停止检索，请提供下一步的具体行动计划或搜索建议",
-    "should_stop": true或false。如果检索到的信息已足够回答任务，或者已无更多信息可查不需要再调用工具，请设为true
-}}
-"""
-
-
-_MEMORY_RETRIEVER_FINALIZER_PROMPT = """\
-你是一个信息整理专家。你的任务是将检索到的信息整理成用户友好的格式。
-
-# 核心任务
-1. **整理信息**：将检索到的关键信息根据**任务描述**整理成**用户期待的格式**。
-2. **评估信息**：根据评估者最终反馈评估检索到的信息是否满足任务描述的要求。
-
-# 输出说明
-- response: 根据 expected_response 整理后的信息，严禁输出非字符串内容
-- score: 评估分数，范围 0-100，表示检索到的信息满足任务描述的程度
-- reason: 评估原因（一句话之内概括）
-
-# 输入格式
-{
-    "task": "任务描述",
-    "content": "收集到的数据",
-    "evaluator_feedback": "评估者最终反馈",
-    "expected_response": "用户期望的输出内容和格式"
-}
-
-# 输出格式
-请务必返回合法的 JSON 字符串，包含以下字段：
-{
-    "response": "string",
-    "score": <int: 0-100>,
-    "reason": "string"
-}
-"""
-
 
 class MemoryRetrieverState(TypedDict):
     task: str
@@ -322,7 +197,45 @@ async def memory_search_tool_call_executor(state: MemoryRetrieverState) -> dict:
 
 
 
-_llm_with_tools = _get_llm().bind_tools(_ALL_TOOLS)
+_MEMORY_RETRIEVER_PROMPT = """\
+你是一个严谨的检索代理 (Retrieval Agent)。你的唯一目标是基于已知事实检索信息。
+
+# 核心准则：拒绝假设
+- **严格禁止脑补**：严禁猜测任何 `user_id`、日期、地点或具体名词。
+- **参数校验**：如果调用工具所需的必要参数（如 user_id）在 context 中不存在，严禁调用工具，直接回复说明“缺少必要参数”。
+- **宁缺毋滥**：如果当前信息不足以发起有效的搜索请求，请不要尝试，直接进入 Evaluator 阶段说明原因。
+
+# 任务流程
+1. **分析历史**：审查 `messages`，确定已经执行过哪些查询。
+2. **识别缺口**：对比 `task`，找出目前还缺失哪些关键信息。
+3. **精准检索**：
+   - 优先使用 `search_user_facts`。
+   - 若无果，使用 `search_persistent_memory`。
+   - 最后尝试 `search_conversation`。
+   - 若请求特定的聊天记录，则使用 `get_conversation`。
+4. **调整策略**：如果之前的搜索返回空结果，必须更换关键词（例如：将“猫”改为“宠物”）或更换工具，禁止重复失败的操作。
+
+# 优先级
+1. 用户事实 (User facts)
+2. 持久化记忆 (Persistent Memory)
+3. 对话历史 (Conversation history)
+
+# 输入格式
+{
+    "task": "任务描述",
+    "context": 辅助搜索信息,
+    "messages": [历史记录]
+}
+
+# 策略调整指令 (Strategic Pivot)
+- 仔细阅读 `messages` 中来自 "评估员反馈" 的指令。
+- **反馈具有最高优先级**：如果评估员指出之前的搜索词无效或存在拼写错误，你必须立即按照建议调整搜索参数或更换工具。
+- 严禁忽略评估员关于“空结果”或“拼写错误”的警告。
+
+# 输出要求
+- 如果信息不足以执行任务，请在回复中明确指出：“因缺少 [具体信息] 无法继续执行检索”。
+"""
+_memory_search_tool_call_generator_llm = get_llm(temperature=0.2, top_p=0.8).bind_tools(_ALL_TOOLS)
 async def memory_search_tool_call_generator(state: MemoryRetrieverState) -> MemoryRetrieverState:
     # Build system prompt
     system_prompt = SystemMessage(content=_MEMORY_RETRIEVER_PROMPT)
@@ -342,11 +255,53 @@ async def memory_search_tool_call_generator(state: MemoryRetrieverState) -> Memo
     else:
         relevant_history = state["messages"]
 
-    response = await _llm_with_tools.ainvoke([system_prompt, human_message] + relevant_history)
+    response = await _memory_search_tool_call_generator_llm.ainvoke([system_prompt, human_message] + relevant_history)
 
     return {"messages": [response]}
 
 
+
+_MEMORY_RETRIEVER_EVALUATOR_PROMPT = """\
+你是一个高级检索评估专家。你的任务是分析检索到的内容与用户任务之间的差距，并决定后续行动。
+
+# 核心任务
+1. **决定状态**：
+   - 如果检索内容已完全覆盖任务需求，设置 `is_passed: True`。
+   - 如果信息缺失、过时或仅部分匹配，设置 `is_passed: False`。
+2. **提供建议**：如果未通过，必须给出具体的“搜索建议”：
+   - **切换工具**：例如，“当前工具返回空，请尝试 search_conversation 以获取更具体的对话细节。”
+   - **优化关键词**：例如，“搜索词‘猫’太宽泛，建议搜索具体品种‘布偶猫’或名称‘咪咪’。”但关键词禁止过分偏离任务描述
+   - **终止建议**：如果已经尝试了所有工具且无果，建议停止检索并告知用户无法找到信息。
+
+# 建议代理使用合理工具
+- 做出建议时不要超出这个范围
+- 评估专家禁止生成生成任何 tool_call
+{agent_tools}
+
+# 响应要求
+- **无论检索是否成功，必须输出合法 JSON**。
+  - 成功时：说明原因，准备进入下一步。
+  - 失败时：提供搜索建议。
+
+# 停止原则
+- 如果历史记录显示已多次尝试不同关键词且无新进展，请果断建议停止，不要陷入死循环。
+
+# 输入格式
+{{
+    "task": "任务描述",
+    "expected_response": "用户期待的回复内容和格式，有可能包含更多搜索细节",
+    "call_history": [已执行的工具、参数及结果摘要],
+    "retry": 当前重试次数 n / MAX_RETRY
+}}
+
+# 输出格式
+请务必返回合法的 JSON 字符串，包含以下字段：
+{{
+    "feedback": "如果不停止检索，请提供下一步的具体行动计划或搜索建议",
+    "should_stop": true或false。如果检索到的信息已足够回答任务，或者已无更多信息可查不需要再调用工具，请设为true
+}}
+"""
+_memory_search_tool_call_evaluator_llm = get_llm(temperature=0.0, top_p=1.0)
 async def memory_search_tool_call_evaluator(state: MemoryRetrieverState) -> MemoryRetrieverState:
     # print(f"DEBUG: Evaluator received {len(state['messages'])} messages. Types: {[type(m) for m in state['messages']]}")
 
@@ -387,7 +342,7 @@ async def memory_search_tool_call_evaluator(state: MemoryRetrieverState) -> Memo
     evaluation_message = HumanMessage(content=json.dumps(evaluation_input, ensure_ascii=False))
 
     # Run evaluation
-    response = await _get_llm().ainvoke([system_prompt, evaluation_message])
+    response = await _memory_search_tool_call_evaluator_llm.ainvoke([system_prompt, evaluation_message])
     result = parse_llm_json_output(response.content)    
 
     should_stop = result.get("should_stop", False)
@@ -420,6 +375,36 @@ async def memory_search_tool_call_evaluator(state: MemoryRetrieverState) -> Memo
     }
 
 
+
+_MEMORY_RETRIEVER_FINALIZER_PROMPT = """\
+你是一个信息整理专家。你的任务是将检索到的信息整理成用户友好的格式。
+
+# 核心任务
+1. **整理信息**：将检索到的关键信息根据**任务描述**整理成**用户期待的格式**。
+2. **评估信息**：根据评估者最终反馈评估检索到的信息是否满足任务描述的要求。
+
+# 输出说明
+- response: 根据 expected_response 整理后的信息，严禁输出非字符串内容
+- score: 评估分数，范围 0-100，表示检索到的信息满足任务描述的程度
+- reason: 评估原因（一句话之内概括）
+
+# 输入格式
+{
+    "task": "任务描述",
+    "content": "收集到的数据",
+    "evaluator_feedback": "评估者最终反馈",
+    "expected_response": "用户期望的输出内容和格式"
+}
+
+# 输出格式
+请务必返回合法的 JSON 字符串，包含以下字段：
+{
+    "response": "string",
+    "score": <int: 0-100>,
+    "reason": "string"
+}
+"""
+_memory_search_tool_call_finalizer_llm = get_llm(temperature=0.0, top_p=1.0)
 async def memory_search_tool_call_finalizer(state: MemoryRetrieverState) -> dict:
     """Finalize the retrieved info into the expected format"""
     # Collect tool results
@@ -443,7 +428,7 @@ async def memory_search_tool_call_finalizer(state: MemoryRetrieverState) -> dict
     }
     human_message = HumanMessage(content=json.dumps(finalizer_input, ensure_ascii=False))
 
-    response = await _get_llm().ainvoke([system_prompt, human_message])
+    response = await _memory_search_tool_call_finalizer_llm.ainvoke([system_prompt, human_message])
     result = parse_llm_json_output(response.content)
 
     # Status generation

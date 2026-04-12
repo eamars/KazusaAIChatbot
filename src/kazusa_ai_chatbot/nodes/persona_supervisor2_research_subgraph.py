@@ -1,13 +1,13 @@
 from langgraph.graph import StateGraph, START, END
 from langchain_openai import ChatOpenAI
-from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
+from langchain_core.messages import HumanMessage, SystemMessage
 
 from kazusa_ai_chatbot.nodes.persona_supervisor2_schema import GlobalPersonaState
 from kazusa_ai_chatbot.agents.web_search_agent2 import web_search_agent
 from kazusa_ai_chatbot.agents.memory_retriever_agent import memory_retriever_agent
 from kazusa_ai_chatbot.config import LLM_API_KEY, LLM_BASE_URL, LLM_MODEL, MAX_PERSONA_SUPERVISOR_STAGE1_RETRY
-from kazusa_ai_chatbot.utils import parse_llm_json_output
 
+from kazusa_ai_chatbot.utils import parse_llm_json_output, get_llm
 
 import json
 import logging
@@ -16,18 +16,6 @@ from typing import TypedDict
 
 logger = logging.getLogger(__name__)
 
-
-_llm: ChatOpenAI | None = None
-def _get_llm() -> ChatOpenAI:
-    global _llm
-    if _llm is None:
-        _llm = ChatOpenAI(
-            model=LLM_MODEL,
-            temperature=0.5,
-            base_url=LLM_BASE_URL,
-            api_key=LLM_API_KEY,
-        )
-    return _llm
 
 
 class ResearchSubgraphState(TypedDict):
@@ -89,6 +77,7 @@ _RESEARCH_DISPATCHER_PROMPT = """\
     "expected_response": "string"
 }
 """
+_research_dispatcher_llm = get_llm(temperature=0.5, top_p=1.0)
 async def call_research_dispatcher(state: ResearchSubgraphState) -> dict:
     system_prompt = SystemMessage(content=_RESEARCH_DISPATCHER_PROMPT)
 
@@ -98,7 +87,7 @@ async def call_research_dispatcher(state: ResearchSubgraphState) -> dict:
     evaluator_feedback_message = HumanMessage(content=f"Evaluator feedback:\n{evaluator_feedback}", name="evaluator")
     
     # Call LLM
-    response = await _get_llm().ainvoke([
+    response = await _research_dispatcher_llm.ainvoke([
         system_prompt, 
         human_message,
         evaluator_feedback_message,
@@ -200,6 +189,7 @@ _RESEARCH_EVALUATOR_PROMPT = """
     "reasoning": "string"
 }}
 """
+_research_evaluator_llm = get_llm(temperature=0.5, top_p=1.0)
 async def call_research_evaluator(state: ResearchSubgraphState) -> dict:
     retry = state.get("retry", 0) + 1
     timestamp = state.get("timestamp")
@@ -218,7 +208,7 @@ async def call_research_evaluator(state: ResearchSubgraphState) -> dict:
     evaluation_message = HumanMessage(content=json.dumps(evaluation_input))
 
     # Call LLM
-    response = await _get_llm().ainvoke([
+    response = await _research_evaluator_llm.ainvoke([
         system_prompt, 
         evaluation_message,
     ])
@@ -278,10 +268,13 @@ async def call_research_subgraph(state: GlobalPersonaState) -> dict:
 
     research_subgraph = research_builder.compile()
 
+    # Get attributes
+    decontexualized_input = state["decontexualized_input"]
+
     # initial states
     initial_state = {
         "timestamp": state["timestamp"],
-        "user_input": state["decontexualized_input"],
+        "user_input": decontexualized_input,
         "context": {},
         "messages": [],
         "should_stop": False,
@@ -301,6 +294,11 @@ async def call_research_subgraph(state: GlobalPersonaState) -> dict:
     else:
         research_facts = "\n".join([r["fact"] for r in results.get("research_results", [])])
         research_metadata = [r["metadata"] for r in results.get("research_results", [])]
+
+    logger.info(
+        f"\nDecontexualized input: {decontexualized_input}\n"
+        f"  Research facts: {research_facts}\n"
+    )
     
     return {
         "research_facts": research_facts,

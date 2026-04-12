@@ -1,31 +1,21 @@
 from typing import TypedDict
 
 from kazusa_ai_chatbot.nodes.persona_supervisor2_schema import GlobalPersonaState
-from kazusa_ai_chatbot.config import LLM_API_KEY, LLM_BASE_URL, LLM_MODEL, MAX_PERSONA_SUPERVISOR_STAGE1_RETRY
-from kazusa_ai_chatbot.utils import parse_llm_json_output, build_affinity_block
+from kazusa_ai_chatbot.config import LLM_API_KEY, LLM_BASE_URL, LLM_MODEL, AFFINITY_DEFAULT
+from kazusa_ai_chatbot.utils import parse_llm_json_output, build_affinity_block, get_llm
 from kazusa_ai_chatbot.db import CharacterStateDoc, get_user_profile
 
-from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
+from langchain_core.messages import HumanMessage, SystemMessage
 from langgraph.graph import StateGraph, START, END
-from langchain_openai import ChatOpenAI
 
 import logging
 import json
 
-
 logger = logging.getLogger(__name__)
 
-
-def _get_llm(temperature, top_p) -> ChatOpenAI:
-    _llm = ChatOpenAI(
-        model=LLM_MODEL,
-        temperature=temperature,
-        top_p=top_p,
-        base_url=LLM_BASE_URL,
-        api_key=LLM_API_KEY,
-    )
-    return _llm
-
+_subconscious_llm = get_llm(temperature=0.4, top_p=0.5)
+_conscious_llm = get_llm(temperature=0.2, top_p=0.1)
+_social_filter_llm = get_llm(temperature=0.75, top_p=0.8)
 
 class CognitionState(TypedDict):
     character_state: CharacterStateDoc
@@ -95,7 +85,6 @@ _COGNITION_SUBCONSCIOUS_PROMPT = """\
     "interaction_subtext": "捕捉到的潜台词标签（如：隐蔽的羞辱、试探、求关注、施压）"
 }}
 """
-_subconscious_llm = _get_llm(temperature=0.4, top_p=0.5)  # Stable subconscious
 async def call_cognition_subconscious(state: CognitionState) -> CognitionState:
     """
     TODO: Update input to include not only mood, but global vibe and reflection summary
@@ -218,7 +207,7 @@ _COGNITION_CONSCIOUSNESS_PROMPT = """\
     "character_intent": "行动意图"
 }}
 """
-_conscious_llm = _get_llm(temperature=0.2, top_p=0.1)  # Conscious deliberation
+_conscious_llm = get_llm(temperature=0.2, top_p=0.1)  # Conscious deliberation
 async def call_cognition_consciousness(state: CognitionState) -> CognitionState:
     system_prompt = SystemMessage(content=_COGNITION_CONSCIOUSNESS_PROMPT.format(
         character_name=state["character_profile"]["name"],
@@ -253,7 +242,6 @@ async def call_cognition_consciousness(state: CognitionState) -> CognitionState:
         system_prompt,
         human_message,
     ])
-
     result = parse_llm_json_output(response.content)
 
     logger.debug(f"Consciousness: {result}")
@@ -365,7 +353,7 @@ _COGNITION_SOCIAL_FILTER_PROMPT = """\
     }}
 }}
 """
-_social_filter_llm = _get_llm(temperature=0.75, top_p=0.8)  # Social filter
+_social_filter_llm = get_llm(temperature=0.75, top_p=0.8)  # Social filter
 async def call_cognition_social_filter(state: CognitionState) -> CognitionState:
     system_prompt = SystemMessage(content=_COGNITION_SOCIAL_FILTER_PROMPT.format(
         character_name=state["character_profile"]["name"],
@@ -450,6 +438,9 @@ async def call_cognition_subgraph(state: GlobalPersonaState) -> GlobalPersonaSta
 
     cognition_subgraph = sub_agent_builder.compile()
 
+    # Get attributes
+    decontexualized_input = state["decontexualized_input"]
+
     initial_state: CognitionState = {
         "character_state": state["character_state"],
         "character_profile": state["character_profile"],
@@ -465,23 +456,40 @@ async def call_cognition_subgraph(state: GlobalPersonaState) -> GlobalPersonaSta
         "channel_topic": state["channel_topic"],
 
         # From previous stages
-        "decontexualized_input": state["decontexualized_input"],
+        "decontexualized_input": decontexualized_input,
         "research_facts": state["research_facts"],
     }
-
-    # print("Initial state:", initial_state)
     
     result = await cognition_subgraph.ainvoke(initial_state)
 
+    # Generate outputs
+    internal_monologue = result.get("internal_monologue", "")
+    action_directives = result.get("action_directives", {})
+    interaction_subtext = result.get("interaction_subtext", "")
+    emotional_appraisal = result.get("emotional_appraisal", "")
+    character_intent = result.get("character_intent", "")
+    logical_stance = result.get("logical_stance", "")
+
+    logger.info(
+        f"\nDecontexualized input: {state['decontexualized_input']}\n"
+        f"  Internal monologue: {internal_monologue}\n"
+        f"  Action directives: {action_directives}\n"
+        f"  Interaction subtext: {interaction_subtext}\n"
+        f"  Emotional appraisal: {emotional_appraisal}\n"
+        f"  Character intent: {character_intent}\n"
+        f"  Logical stance: {logical_stance}\n"
+    )
+
+
     return {
-        "internal_monologue": result.get("internal_monologue", ""),
-        "action_directives": result.get("action_directives", {}),
+        "internal_monologue": internal_monologue,
+        "action_directives": action_directives,
 
         # Other data to help with stage 4 consolidation
-        "interaction_subtext": result.get("interaction_subtext", ""),
-        "emotional_appraisal": result.get("emotional_appraisal", ""),
-        "character_intent": result.get("character_intent", ""),
-        "logical_stance": result.get("logical_stance", ""),
+        "interaction_subtext": interaction_subtext,
+        "emotional_appraisal": emotional_appraisal,
+        "character_intent": character_intent,
+        "logical_stance": logical_stance,
     }
 
 

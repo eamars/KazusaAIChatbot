@@ -1,27 +1,16 @@
 from langchain_core.messages import SystemMessage, HumanMessage
 from kazusa_ai_chatbot.utils import parse_llm_json_output
 from kazusa_ai_chatbot.nodes.persona_supervisor2_schema import GlobalPersonaState
-from kazusa_ai_chatbot.config import LLM_API_KEY, LLM_BASE_URL, LLM_MODEL, MAX_TOOL_ITERATIONS
+from kazusa_ai_chatbot.config import LLM_API_KEY, LLM_BASE_URL, LLM_MODEL
 
-from langchain_openai import ChatOpenAI
+from kazusa_ai_chatbot.utils import parse_llm_json_output, get_llm
 
 import json
 import logging
 
-
 logger = logging.getLogger(__name__)
 
-_llm: ChatOpenAI | None = None
-def _get_llm() -> ChatOpenAI:
-    global _llm
-    if _llm is None:
-        _llm = ChatOpenAI(
-            model=LLM_MODEL,
-            temperature=0.5,
-            base_url=LLM_BASE_URL,
-            api_key=LLM_API_KEY,
-        )
-    return _llm
+_msg_decontexualizer_llm = get_llm(temperature=0.5, top_p=1.0)
 
 
 _MSG_DECONTEXUALIZER_PROMPT = """\
@@ -86,19 +75,24 @@ async def call_msg_decontexualizer(state: GlobalPersonaState) -> dict:
     """
     system_prompt = SystemMessage(content=_MSG_DECONTEXUALIZER_PROMPT)
 
+    # get key attributes
+    user_name = state.get("user_name")
+    user_id = state.get("user_id")
+    user_input = state.get("user_input")
+
     input_msg = {
-        "user_input": state["user_input"],
-        "user_id": state.get("user_id", ""),
-        "user_name": state.get("user_name", ""),
-        "bot_id": state.get("bot_id", ""),
-        "chat_history": state.get("chat_history", []),
-        "channel_topic": state.get("channel_topic", ""),
-        "user_topic": state.get("user_topic", ""),
+        "user_input": user_input,
+        "user_id": user_id,
+        "user_name": user_name,
+        "bot_id": state.get("bot_id"),
+        "chat_history": state.get("chat_history"),
+        "channel_topic": state.get("channel_topic"),
+        "user_topic": state.get("user_topic"),
     }
     human_message = HumanMessage(content=json.dumps(input_msg, ensure_ascii=False))
 
     try:
-        result = await _get_llm().ainvoke([
+        result = await _msg_decontexualizer_llm.ainvoke([
             system_prompt, 
             human_message,
         ])
@@ -115,7 +109,12 @@ async def call_msg_decontexualizer(state: GlobalPersonaState) -> dict:
         reasoning = "Failed to parse LLM output"
         is_modified = False
 
-    logger.debug(f"Decontexualized input: {output}\nReason: {reasoning}")
+    logger.info(
+        f"\n{user_name}(@{user_id}): {user_input}\n"
+        f"  Decontexualized input: {output}\n"
+        f"  Reason: {reasoning}\n"
+        f"  Is modified: {is_modified}"
+    )
 
     if not is_modified:
         output = state["user_input"]

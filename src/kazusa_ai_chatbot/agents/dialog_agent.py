@@ -1,11 +1,12 @@
-from typing import TypedDict, Annotated
+from typing import Annotated, TypedDict
 
 from kazusa_ai_chatbot.nodes.persona_supervisor2_schema import GlobalPersonaState
 from kazusa_ai_chatbot.config import LLM_API_KEY, LLM_BASE_URL, LLM_MODEL, MAX_DIALOG_AGENT_RETRY, AFFINITY_DEFAULT
-from kazusa_ai_chatbot.utils import parse_llm_json_output, build_affinity_block
+from kazusa_ai_chatbot.utils import parse_llm_json_output, build_affinity_block, get_llm
 
-from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
-from langgraph.graph import StateGraph, START, END, add_messages
+from langchain_core.messages import HumanMessage, SystemMessage
+from langgraph.graph import StateGraph, START, END
+from langgraph.graph.message import add_messages
 from langchain_openai import ChatOpenAI
 
 import logging
@@ -13,17 +14,6 @@ import json
 
 
 logger = logging.getLogger(__name__)
-
-
-def _get_llm(temperature, top_p) -> ChatOpenAI:
-    _llm = ChatOpenAI(
-        model=LLM_MODEL,
-        temperature=temperature,
-        top_p=top_p,
-        base_url=LLM_BASE_URL,
-        api_key=LLM_API_KEY,
-    )
-    return _llm
 
 
 # Define DialogAgent state
@@ -160,7 +150,7 @@ _DIALOG_GENERATOR_PROMPT = """\
     ]
 }}
 """
-_dialog_generator_llm = _get_llm(temperature=0.95, top_p=0.9)
+_dialog_generator_llm = get_llm(temperature=0.95, top_p=0.9)
 async def dialog_generator(state: DialogAgentState) -> DialogAgentState:
 
     system_prompt = SystemMessage(content=_DIALOG_GENERATOR_PROMPT.format(
@@ -256,7 +246,7 @@ _DIALOG_EVALUATOR_PROMPT = """\
     "should_stop": boolean
 }}
 """
-_dialog_evaluator_llm = _get_llm(temperature=0.5, top_p=0.5)
+_dialog_evaluator_llm = get_llm(temperature=0.5, top_p=0.5)
 async def dialog_evaluator(state: DialogAgentState) -> DialogAgentState:
     system_prompt = SystemMessage(content=_DIALOG_EVALUATOR_PROMPT.format(
         character_mbti=state["character_profile"]["personality_brief"]["mbti"]
@@ -349,8 +339,15 @@ async def dialog_agent(
 
     result = await sub_graph.ainvoke(subState)
 
+    # Assmeble output
+    final_dialog = result.get("final_dialog", [])
+
+    logger.info(
+        f"\nFinal Dialog: {final_dialog}\n"
+    )
+
     return {
-        "final_dialog": result["final_dialog"]
+        "final_dialog": final_dialog
     }
 
 
@@ -359,7 +356,6 @@ async def test_main():
     from kazusa_ai_chatbot.utils import trim_history_dict
     from kazusa_ai_chatbot.db import get_conversation_history
     from kazusa_ai_chatbot.utils import load_personality
-    from kazusa_ai_chatbot.db import get_character_state
 
 
     history = await get_conversation_history(channel_id="1485606207069880361", limit=5)

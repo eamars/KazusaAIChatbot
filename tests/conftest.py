@@ -4,55 +4,10 @@ from __future__ import annotations
 
 import os
 import pytest
-from kazusa_ai_chatbot.state import BotState, CharacterState, ChatMessage
 
-
-@pytest.fixture
-def sample_personality() -> dict:
-    return {
-        "name": "Zara",
-        "description": "A battle-scarred elven sentinel.",
-        "tone": "sardonic, loyal, terse",
-        "speech_patterns": "Short sentences. Military jargon.",
-        "backstory": "Lost her company at the Siege of Dawnhollow.",
-    }
-
-
-@pytest.fixture
-def base_state(sample_personality) -> BotState:
-    """A minimal valid BotState with all Stage-1 fields populated."""
-    return BotState(
-        user_id="user_123",
-        user_name="TestUser",
-        channel_id="chan_456",
-        guild_id="guild_789",
-        bot_id="999888777",
-        message_text="Hello Zara, what happened at the northern gate?",
-        timestamp="2026-03-30T20:00:00Z",
-        should_respond=True,
-        personality=sample_personality,
-    )
-
-
-@pytest.fixture
-def sample_history() -> list[ChatMessage]:
-    return [
-        ChatMessage(role="user", user_id="user_123", name="TestUser", content="Is the gate safe?"),
-        ChatMessage(role="assistant", user_id="bot_001", name="bot", content="For now, Commander."),
-    ]
-
-
-@pytest.fixture
-def sample_character_state() -> CharacterState:
-    return CharacterState(
-        mood="alert",
-        emotional_tone="guarded",
-        recent_events=["Shadow wolves attacked the northern gate"],
-        updated_at="2026-03-30T19:00:00Z",
-    )
 
 # Disable langsmith in unit tests
 @pytest.fixture(scope="session", autouse=True)
 def disable_langsmith():
     os.environ["LANGCHAIN_TRACING_V2"] = "false"
-    os.environ["LANGCHAIN_API_KEY"] = "" # Optional: clear the key
+    os.environ["LANGCHAIN_API_KEY"] = ""

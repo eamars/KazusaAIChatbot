@@ -16,13 +16,13 @@ from __future__ import annotations
 import logging
 from typing import Any, TypedDict
 
-import numpy as np
 from motor.motor_asyncio import AsyncIOMotorClient
 from pymongo.errors import ConnectionFailure
 from pymongo.operations import SearchIndexModel
 
 from kazusa_ai_chatbot.config import EMBEDDING_BASE_URL, EMBEDDING_MODEL, LLM_API_KEY, MONGODB_URI, MONGODB_DB_NAME
 from kazusa_ai_chatbot.config import AFFINITY_DEFAULT, AFFINITY_MAX, AFFINITY_MIN
+from kazusa_ai_chatbot.config import CONVERSATION_HISTORY_LIMIT
 from openai import AsyncOpenAI
 
 
@@ -182,7 +182,7 @@ async def enable_vector_index(collection_name: str, index_name: str) -> None:
 
 async def get_conversation_history(
     channel_id: str | None = None,
-    limit: int = 20,
+    limit: int = CONVERSATION_HISTORY_LIMIT,
     user_id: str | None = None,
     name: str | None = None,
     from_timestamp: str | None = None,
@@ -360,7 +360,7 @@ async def upsert_user_facts(user_id: str, new_facts: list[str]) -> None:
     """Insert one character's view to the user to the top"""
     db = await get_db()
     existing = await get_user_facts(user_id)
-    merged = list(dict.fromkeys(new_facts, existing))
+    merged = list(dict.fromkeys(existing + new_facts))
 
     if merged:
         combined_facts_text = "\n".join(merged)

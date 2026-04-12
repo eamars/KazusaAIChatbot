@@ -7,20 +7,22 @@ Listens for messages in configured channels and invokes the graph.
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
-import re
 from datetime import datetime, timezone
 from pathlib import Path
 
 import discord
 
-from kazusa_ai_chatbot.config import DISCORD_TOKEN
-from kazusa_ai_chatbot.db import close_db, save_conversation
-from kazusa_ai_chatbot.graph import build_graph
+from kazusa_ai_chatbot.config import DISCORD_TOKEN, CONVERSATION_HISTORY_LIMIT
+from kazusa_ai_chatbot.db import close_db, get_conversation_history, save_conversation, get_user_profile, get_character_state
 from kazusa_ai_chatbot.mcp_client import mcp_manager
-from kazusa_ai_chatbot.nodes.memory_writer import memory_writer
-from kazusa_ai_chatbot.state import BotState
+from kazusa_ai_chatbot.state import DiscordProcessState
+from kazusa_ai_chatbot.utils import load_personality, trim_history_dict
+
+from langgraph.graph import END, START, StateGraph
+from kazusa_ai_chatbot.nodes.relevance_agent import relevance_agent
+from kazusa_ai_chatbot.nodes.persona_supervisor2 import persona_supervisor2
+
 
 logger = logging.getLogger(__name__)
 
@@ -39,19 +41,33 @@ class RolePlayBot(discord.Client):
         intents.message_content = True
         super().__init__(intents=intents, **kwargs)
 
-        self.personality = self._load_personality(personality_path)
+        self.personality = load_personality(personality_path)
         self.channel_ids = set(channel_ids) if channel_ids else None
         self.listen_all = listen_all
-        self.graph = build_graph()
+        self.graph = self.build_graph()
 
-    @staticmethod
-    def _load_personality(path: str | Path) -> dict:
-        path = Path(path)
-        if not path.exists():
-            logger.warning("Personality file %s not found, using empty personality", path)
-            return {}
-        with open(path, "r", encoding="utf-8") as f:
-            return json.load(f)
+    def build_graph(self):
+        graph = StateGraph(DiscordProcessState)
+
+        graph.add_node("relevance_agent", relevance_agent)
+        graph.add_node("persona_supervisor2", persona_supervisor2)
+
+        # Build edges
+        graph.add_edge(START, "relevance_agent")
+
+        # Stop early if relevance agent decide not to proceed
+        graph.add_conditional_edges(
+            "relevance_agent",
+            lambda state: "continue" if state["should_respond"] else "end",
+            {
+                "continue": "persona_supervisor2",
+                "end": END,
+            }
+        )
+        
+        graph.add_edge("persona_supervisor2", END)
+
+        return graph.compile()
 
     async def on_ready(self):
         logger.info("Logged in as %s (id=%s)", self.user, self.user.id)
@@ -75,8 +91,8 @@ class RolePlayBot(discord.Client):
             return
 
         # Ignore bot messages
-        if message.author.bot:
-            return
+        # if message.author.bot:
+        #     return
 
         # Determine whether to respond:
         # 1. listen_all=True → respond in every channel
@@ -92,27 +108,49 @@ class RolePlayBot(discord.Client):
                     return
 
         # Build initial state
-        state: BotState = {
-            "user_id": str(message.author.id),
-            "user_name": message.author.display_name,
-            "channel_id": str(message.channel.id),
-            "channel_name": str(message.channel.name),
-            "guild_id": str(message.guild.id) if message.guild else "",
-            "bot_name": str(self.user.name) if self.user else "",
-            "bot_id": str(self.user.id) if self.user else "",
-            "message_text": message.content,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-            "should_respond": True,
-            "personality": self.personality,
+        timestamp = datetime.now(timezone.utc).isoformat()
+        user_id = str(message.author.id)
+        user_name = message.author.display_name
+        user_profile = await get_user_profile(user_id)
+        bot_id = str(self.user.id) if self.user else ""
+        bot_name = str(self.user.name) if self.user else ""  # This is the displayed name from discord, not the character's real name
+        character_state = await get_character_state()  # The character state needed to be loaded every time to get latest update
+        channel_id = str(message.channel.id)
+
+        # Private message (DM)
+        if (message.guild is None):
+            channel_name = f"Private chat with {user_name}"
+        else:
+            channel_name = str(message.channel.name)
+
+        history = await get_conversation_history(channel_id=channel_id, limit=CONVERSATION_HISTORY_LIMIT)
+        trimmed_history = trim_history_dict(history)
+
+        initial_state: DiscordProcessState = {
+            "timestamp": timestamp,
+
+            "user_name": user_name,
+            "user_id": user_id,
+            "user_input": message.content,
+            "user_profile": user_profile,
+
+            "bot_id": bot_id,
+            "bot_name": bot_name,
+            "character_profile": self.personality,
+            "character_state": character_state,
+
+            "channel_id": channel_id,
+            "channel_name": channel_name,
+            "chat_history": trimmed_history,
         }
 
         # Show typing indicator while processing
         async with message.channel.typing():
             try:
-                result = await self.graph.ainvoke(state)
-            except Exception:
-                logger.exception("Graph invocation failed")
-                await message.reply("*something went wrong*")
+                result = await self.graph.ainvoke(initial_state)
+            except Exception as e:
+                logger.exception("Graph invocation failed: %s", e)
+                await message.reply(f"{bot_name} is busy right now, please try again later.")
                 return
 
         # Read output from persona supervisor
@@ -124,24 +162,57 @@ class RolePlayBot(discord.Client):
         use_reply = result.get("use_reply_feature", False)
 
         # Send messages
-        for dialog in final_dialog:
-            # Discord has a 2000 char limit; split if necessary
-            for chunk in _split_message(dialog):
-                if use_reply:
-                    await message.reply(chunk)
-                    use_reply = False  # Only reply the first message
-                else:
-                    await message.channel.send(chunk)
+        msg_to_send = "\n".join(final_dialog)
+        # Discord has a 2000 char limit; split if necessary
+        for chunk in _split_message(msg_to_send):
+            if use_reply:
+                await message.reply(chunk)
+                use_reply = False  # Only reply the first message
+            else:
+                await message.channel.send(chunk)
 
         # Fire-and-forget: save conversation history + extract user facts
-        asyncio.create_task(self._run_memory_writer(result))
+        asyncio.create_task(self.conversation_saver(result))
 
-    async def _run_memory_writer(self, graph_result: dict) -> None:
-        """Fire-and-forget: run memory writer after reply is sent."""
+    async def conversation_saver(self, graph_result: DiscordProcessState) -> None:
+        channel_id = graph_result.get("channel_id", "")
+        user_id = graph_result.get("user_id", "")
+        user_name = graph_result.get("user_name", "")
+        user_input = graph_result.get("user_input", "")
+        bot_id = graph_result.get("bot_id", "")
+        bot_name = graph_result.get("bot_name", "")
+        bot_input = graph_result.get("final_dialog", [])
+
+        # Save user message
         try:
-            await memory_writer(graph_result)
-        except Exception:
-            logger.exception("Deferred memory writer failed")
+            await save_conversation(
+                {
+                    "channel_id": channel_id,
+                    "role": "user",
+                    "user_id": user_id,
+                    "name": user_name,
+                    "content": user_input,
+                    "timestamp": graph_result.get("timestamp", ""),
+                }
+            )
+        except Exception as e:
+            logger.exception("Failed to save conversation from user: %s", e)
+
+        # save bot message
+        current_timestamp = datetime.now(timezone.utc).isoformat()
+        try:
+            await save_conversation(
+                {
+                    "channel_id": channel_id,
+                    "role": "bot",
+                    "user_id": bot_id,
+                    "name": bot_name,
+                    "content": "\n".join(bot_input),
+                    "timestamp": current_timestamp,
+                }
+            )
+        except Exception as e:
+            logger.exception("Failed to save conversation from bot: %s", e)
 
     async def close(self):
         await mcp_manager.stop()

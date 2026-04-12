@@ -3,12 +3,25 @@
 from __future__ import annotations
 
 from json_repair import repair_json
+from langchain_openai import ChatOpenAI
 from kazusa_ai_chatbot.config import AFFINITY_MIN, AFFINITY_MAX
+from kazusa_ai_chatbot.config import LLM_API_KEY, LLM_BASE_URL, LLM_MODEL
 from pathlib import Path
 import logging
 import json
 
 logger = logging.getLogger(__name__)
+
+
+def get_llm(temperature=0.7, top_p=1.0, model=LLM_MODEL, base_url=LLM_BASE_URL, api_key=LLM_API_KEY) -> ChatOpenAI:
+    _llm = ChatOpenAI(
+        model=model,
+        temperature=temperature,
+        top_p=top_p,
+        base_url=base_url,
+        api_key=api_key,
+    )
+    return _llm
 
 
 def trim_history_dict(history):
