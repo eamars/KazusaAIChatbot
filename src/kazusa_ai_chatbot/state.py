@@ -3,6 +3,12 @@ from __future__ import annotations
 from typing import TypedDict
 
 
+class MultiMediaDoc(TypedDict):
+    content_type: str  # e.g,. "image/png", "video/mp4"
+    base64_data: str
+    description: str
+
+
 class DiscordProcessState(TypedDict):
     timestamp: str
 
@@ -10,6 +16,7 @@ class DiscordProcessState(TypedDict):
     user_name: str  # read from discord
     user_id: str  # read from discord
     user_input: str  # Raw message provided by the user. Can input multimedia content
+    user_multimedia_input: list[MultiMediaDoc]
     user_profile: dict  # used to extract affinity score.
 
     bot_id: int

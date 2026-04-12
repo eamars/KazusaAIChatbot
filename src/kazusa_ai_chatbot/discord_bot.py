@@ -10,17 +10,19 @@ import asyncio
 import logging
 from datetime import datetime, timezone
 from pathlib import Path
+import httpx
+import base64
 
 import discord
 
 from kazusa_ai_chatbot.config import DISCORD_TOKEN, CONVERSATION_HISTORY_LIMIT, AFFINITY_DEFAULT
 from kazusa_ai_chatbot.db import close_db, get_conversation_history, save_conversation, get_user_profile, get_character_state, create_user_profile
 from kazusa_ai_chatbot.mcp_client import mcp_manager
-from kazusa_ai_chatbot.state import DiscordProcessState
+from kazusa_ai_chatbot.state import DiscordProcessState, MultiMediaDoc
 from kazusa_ai_chatbot.utils import load_personality, trim_history_dict
 
 from langgraph.graph import END, START, StateGraph
-from kazusa_ai_chatbot.nodes.relevance_agent import relevance_agent
+from kazusa_ai_chatbot.nodes.relevance_agent import relevance_agent, multimedia_descriptor_agent
 from kazusa_ai_chatbot.nodes.persona_supervisor2 import persona_supervisor2
 
 
@@ -50,10 +52,19 @@ class RolePlayBot(discord.Client):
         graph = StateGraph(DiscordProcessState)
 
         graph.add_node("relevance_agent", relevance_agent)
+        graph.add_node("multimedia_descriptor_agent", multimedia_descriptor_agent)
         graph.add_node("persona_supervisor2", persona_supervisor2)
 
         # Build edges
-        graph.add_edge(START, "relevance_agent")
+        graph.add_conditional_edges(
+            START,
+            lambda state: "multimedia" if state["user_multimedia_input"] else "skip",
+            {
+                "multimedia": "multimedia_descriptor_agent",
+                "skip": "relevance_agent",
+            }
+        )
+        graph.add_edge("multimedia_descriptor_agent", "relevance_agent")
 
         # Stop early if relevance agent decide not to proceed
         graph.add_conditional_edges(
@@ -107,6 +118,36 @@ class RolePlayBot(discord.Client):
                 if not bot_mentioned:
                     return
 
+        # Fetch attachment and encode into base64 format
+        user_input = message.content
+        multimedia_input = []
+
+        for attachment in message.attachments:
+            # Check attachment size
+            if attachment.size and attachment.size > (5 * 1024 * 1024):
+                logger.warning("Attachment size exceeds 5MB limit, skil")
+                continue
+
+            # Capture image
+            if attachment.content_type and attachment.content_type.startswith("image/"):
+                try:
+                    async with httpx.AsyncClient() as client:
+                        response = await client.get(attachment.url)
+                        response.raise_for_status()
+
+                        # Process content
+                        image_data = response.content
+                        image_base64 = base64.b64encode(image_data).decode("utf-8")
+                        
+                        # Append to the attachment list
+                        media: MultiMediaDoc = {
+                            "content_type": attachment.content_type,
+                            "base64_data": image_base64
+                        }
+                        multimedia_input.append(media)
+                except httpx.HTTPError as e:
+                    logger.error(f"Failed to fetch attachment {attachment.url}: {e}")
+
         # Build initial state
         timestamp = datetime.now(timezone.utc).isoformat()
         user_id = str(message.author.id)
@@ -143,7 +184,8 @@ class RolePlayBot(discord.Client):
 
             "user_name": user_name,
             "user_id": user_id,
-            "user_input": message.content,
+            "user_input": user_input,
+            "user_multimedia_input": multimedia_input,
             "user_profile": user_profile,
 
             "bot_id": bot_id,

@@ -5,7 +5,7 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from kazusa_ai_chatbot.nodes.persona_supervisor2_schema import GlobalPersonaState
 from kazusa_ai_chatbot.agents.web_search_agent2 import web_search_agent
 from kazusa_ai_chatbot.agents.memory_retriever_agent import memory_retriever_agent
-from kazusa_ai_chatbot.config import LLM_API_KEY, LLM_BASE_URL, LLM_MODEL, MAX_PERSONA_SUPERVISOR_STAGE1_RETRY
+from kazusa_ai_chatbot.config import LLM_API_KEY, LLM_BASE_URL, LLM_MODEL, MAX_RESEARCH_AGENT_RETRY
 
 from kazusa_ai_chatbot.utils import parse_llm_json_output, get_llm
 
@@ -202,7 +202,7 @@ async def call_research_evaluator(state: ResearchSubgraphState) -> dict:
     evaluation_input = {
         "user_input": state["user_input"],
         "research_results": result_facts,
-        "retry": f"{retry}/{MAX_PERSONA_SUPERVISOR_STAGE1_RETRY}"
+        "retry": f"{retry}/{MAX_RESEARCH_AGENT_RETRY}"
     }
 
     evaluation_message = HumanMessage(content=json.dumps(evaluation_input))
@@ -224,7 +224,7 @@ async def call_research_evaluator(state: ResearchSubgraphState) -> dict:
         reasoning = f"Failed to parse response, defaulting to false: {e}"
 
     # Check if stop
-    if retry >= MAX_PERSONA_SUPERVISOR_STAGE1_RETRY:
+    if retry >= MAX_RESEARCH_AGENT_RETRY:
         should_stop = True
 
     return {

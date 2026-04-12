@@ -148,6 +148,78 @@ async def relevance_agent(state: DiscordProcessState) -> DiscordProcessState:
     }
 
 
+
+_VISION_DESCRIPTOR_PROMPT = """\
+你负责将图片信息转化为详尽、客观的文字描述，作为后续逻辑节点理解视觉场景的唯一依据。
+
+# 任务目标
+请仔细观察图片，并提供一段包含以下细节的描述：
+
+1. **场景与氛围**：说明整体环境（例如：深夜的卧室、凌乱的桌面、光线明亮的教室）以及直观的氛围感。
+2. **核心主体与细节**：
+   - 图中有什么人或物？他们在做什么？
+   - 观察物体的颜色、材质、品牌或特殊标识（例如：一杯冒热气的星巴克咖啡、一张写满微积分公式的草稿纸）。
+3. **文字提取 (OCR)**：精准记录图中出现的任何文本（包括手写字、屏幕文字、衣服上的 Logo 等）。
+4. **空间关系**：描述各物体间的相对位置（例如：左上角有一只黑猫，正中心是打开的笔记本电脑）。
+5. **状态感知**：人物的表情、肢体语言，或物品所暗示的状态（例如：用户看起来很疲惫，或者作业已经全部勾选完成）。
+
+# 行为准则
+- **客观记录**：只描述你看到的。严禁代替角色抒情，严禁评价好坏。
+- **细节至上**：宁可描述得琐碎，也不要遗漏可能影响剧情判断的小细节（如纸张边缘的折痕）。
+- **严禁幻觉**：看不清的部分请直接标注“模糊”，不要推测。
+
+# 输出格式
+请务必返回合法的 JSON 字符串，包含以下字段：
+{{
+    "descrption": "逻辑清晰、细节饱满的文字描述，无需任何开场白。"
+}}
+"""
+_vision_descriptor_llm = get_llm(temperature=0.2, top_p=0.9)
+async def multimedia_descriptor_agent(state: DiscordProcessState) -> DiscordProcessState:
+    user_name = state.get("user_name")
+    user_id = state.get("user_id", "")
+
+    # Read the multi-media content
+    user_multimedia_input = state.get("user_multimedia_input", [])
+    output_multimedia_input = []
+
+    for piece in user_multimedia_input:
+        if piece["content_type"].startswith("image/"):
+            # Call vision descriptor
+            system_prompt = SystemMessage(content=_VISION_DESCRIPTOR_PROMPT)
+            human_message = HumanMessage(content=[
+                {
+                    "type": "image_url",
+                    "image_url": {
+                        # You must combine the mime_type and base64 into a Data URI string
+                        "url": f"data:{piece['content_type']};base64,{piece['base64_data']}"
+                    },
+                }
+            ])
+
+            response = await _vision_descriptor_llm.ainvoke([system_prompt, human_message])
+            result = parse_llm_json_output(response.content)
+
+            description = result.get("descrption", "")
+
+            logger.info(
+                f"\n{user_name}(@{user_id}): Image Description\n"
+                f"{description}"
+            )
+
+            output_multimedia_input.append({
+                "content_type": piece["content_type"],
+                "base64_data": piece["base64_data"],
+                "description": description,
+            })
+        else:
+            output_multimedia_input.append(piece)
+    
+    return {
+        "user_multimedia_input": output_multimedia_input,
+    }
+
+
 async def test_main():
     from kazusa_ai_chatbot.utils import trim_history_dict
     from kazusa_ai_chatbot.db import get_conversation_history
@@ -182,7 +254,25 @@ async def test_main():
     }
 
     result = await relevance_agent(state)
+
+
+async def test_main2():
+    import base64
+
+    # Open the image as b64 format
+    image_content: MultiMediaDoc = {
+        "content_type": "image/png",
+        "base64_data": base64.b64encode(open("personalities/kazusa.png", "rb").read()).decode("utf-8"),
+        "description": "",
+    }
+
+    state: DiscordProcessState = {
+        "user_multimedia_input": [image_content]
+    }
+
+    result = await multimedia_descriptor_agent(state)
+    print(result["user_multimedia_input"][0]["description"])
     
 
 if __name__ == "__main__":
-    asyncio.run(test_main())
+    asyncio.run(test_main2())

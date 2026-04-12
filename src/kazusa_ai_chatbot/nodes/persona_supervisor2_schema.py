@@ -1,4 +1,5 @@
 from typing import TypedDict
+from kazusa_ai_chatbot.state import MultiMediaDoc
 from kazusa_ai_chatbot.db import CharacterStateDoc, UserFactsDoc
 
 
@@ -10,6 +11,7 @@ class GlobalPersonaState(TypedDict):
     # Inputs
     timestamp: str
     user_input: str
+    user_multimedia_input: list[MultiMediaDoc]
     user_id: str
     user_name: str
     user_profile: UserFactsDoc

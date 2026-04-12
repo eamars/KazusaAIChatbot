@@ -44,7 +44,7 @@ async def web_search(
 async def web_url_read(
     url: str,
     startChar: int = 0,
-    maxLength: int = 1000,
+    maxLength: int = 5000,
     section: str = "",
     paragraphRange: str = "",
     readHeadings: bool = False
@@ -54,7 +54,7 @@ async def web_url_read(
     Args:
         url: The complete URL to read content from (required)
         startChar: Starting character position for content extraction (default: 0)
-        maxLength: Maximum number of characters to return, 0 for no limit (default: 1000)
+        maxLength: Maximum number of characters to return, 0 for no limit (default: 5000)
         section: Extract content under a specific heading text (default: "")
         paragraphRange: Return specific paragraph ranges like '1-5', '3', or '10-' (default: "")
         readHeadings: If True, returns only the list of headings instead of full content (default: False)
