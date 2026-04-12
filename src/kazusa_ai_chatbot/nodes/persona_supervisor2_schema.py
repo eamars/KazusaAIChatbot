@@ -1,5 +1,5 @@
 from typing import TypedDict
-from kazusa_ai_chatbot.db import CharacterStateDoc
+from kazusa_ai_chatbot.db import CharacterStateDoc, UserFactsDoc
 
 
 class GlobalPersonaState(TypedDict):
@@ -12,7 +12,7 @@ class GlobalPersonaState(TypedDict):
     user_input: str
     user_id: str
     user_name: str
-    user_affinity_score: int
+    user_profile: UserFactsDoc
     bot_id: str
     chat_history: list[dict]
     user_topic: str

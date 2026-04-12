@@ -17,7 +17,7 @@ from langchain_openai import ChatOpenAI
 from kazusa_ai_chatbot.config import LLM_API_KEY, LLM_BASE_URL, LLM_MODEL, CONVERSATION_HISTORY_LIMIT
 from kazusa_ai_chatbot.state import AssemblerOutput, BotState
 from kazusa_ai_chatbot.utils import build_affinity_block, parse_llm_json_output
-from kazusa_ai_chatbot.db import AFFINITY_DEFAULT, get_affinity, get_character_state, get_conversation_history, get_user_facts
+from kazusa_ai_chatbot.db import AFFINITY_DEFAULT, get_user_profile, get_character_state, get_conversation_history, get_user_facts
 from kazusa_ai_chatbot.state import AssemblerOutput, BotState, CharacterState, ChatMessage
 from kazusa_ai_chatbot.utils import trim_history_dict
 
@@ -93,7 +93,7 @@ async def relevance_agent(state: BotState) -> BotState:
     channel_id = state.get("channel_id")
     
     # Load from database
-    affinity = await get_affinity(user_id)  # FIXME: The database function ensures the affinity is assigned even if no record exists
+    user_profile = await get_user_profile(user_id)
     character_state = await get_character_state();
     user_memory = await get_user_facts(user_id);
     history = await get_conversation_history(channel_id, limit=CONVERSATION_HISTORY_LIMIT)
@@ -111,7 +111,7 @@ async def relevance_agent(state: BotState) -> BotState:
             # "user_memory": user_memory,
             "conversation_history": trimed_history,
             # "character_state": character_state,
-            "relationship": affinity,
+            "relationship": user_profile.get("affinity", AFFINITY_DEFAULT),
         }
     }
 
@@ -175,7 +175,7 @@ async def relevance_agent(state: BotState) -> BotState:
         "conversation_history": trimed_history,
         "user_memory": user_memory,
         "character_state": character_state,
-        "affinity": affinity,
+        "user_profile": user_profile,
         "assembler_output": assembler_output,
         "use_reply_feature": assembler_output["use_reply_feature"]
     }

@@ -27,6 +27,7 @@ from kazusa_ai_chatbot.db import (
     upsert_user_facts,
     update_affinity,
     save_conversation,
+    save_memory,
 )
 from kazusa_ai_chatbot.utils import parse_llm_json_output
 from kazusa_ai_chatbot.state import BotState
@@ -563,6 +564,18 @@ async def memory_writer(state: BotState) -> BotState:
 
     if user_id and diary_entry:
         await upsert_user_facts(user_id, diary_entry)
+
+    # Record facts and future_promises
+    ts = datetime.now(timezone.utc).isoformat()
+    user_name = state.get("user_name", "")
+    memory_name = f"New Facts with {user_name}"
+    content = "\n".join([f["description"] for f in state.get("new_facts", [])])
+    await save_memory(memory_name, content, ts)
+
+    memory_name = f"New Promise with {user_name}"
+    for promise in state.get("future_promises", []):
+        content = f"Target: {promise['target']}: Description: {promise['action']}, Due: {promise['due_time']}"
+        await save_memory(memory_name, content, ts)
 
     # Save conversation
     channel_id = state.get("channel_id", "")

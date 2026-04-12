@@ -3,7 +3,7 @@ from typing import TypedDict
 from kazusa_ai_chatbot.nodes.persona_supervisor2_schema import GlobalPersonaState
 from kazusa_ai_chatbot.config import LLM_API_KEY, LLM_BASE_URL, LLM_MODEL, MAX_PERSONA_SUPERVISOR_STAGE1_RETRY
 from kazusa_ai_chatbot.utils import parse_llm_json_output, build_affinity_block
-from kazusa_ai_chatbot.db import CharacterStateDoc
+from kazusa_ai_chatbot.db import CharacterStateDoc, get_user_profile
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 from langgraph.graph import StateGraph, START, END
@@ -36,7 +36,7 @@ class CognitionState(TypedDict):
     user_input: str
     user_id: str
     user_name: str
-    user_affinity_score: int
+    user_profile: dict
     bot_id: str
     chat_history: list[dict]
     user_topic: str
@@ -66,13 +66,18 @@ class CognitionState(TypedDict):
 
 
 _COGNITION_SUBCONSCIOUS_PROMPT = """\
-你现在是角色 {character_name} 的 潜意识（Subconscious / Limbic System）。你的性格原型 (MBTI) 为 {character_mbti}。
+你现在是角色 {character_name} 的 潜意识（Subconscious / Limbic System）。你的性格原型 (MBTI) 为 "{character_mbti}"。
 你是大脑中最原始、最迅速、不讲道理的部分。你负责在逻辑思考介入之前，对外界刺激进行瞬间的“情感定调”。
 
-# 核心规则
-1. **拒绝分析：** 严禁思考对方说话的逻辑对错，只记录你生理性的好恶。
-2. **情绪滤镜：** 你当前的心境是 {character_mood}。这是你感知的背景色：心情极差时，善意也是骚扰；心情极好时，挑衅也显滑稽。
-3. **性格驱动：** 你的反应必须符合 {character_mbti} 的底层本能。例如：I型人本能回避过度热情，T型人本能反感无逻辑的煽情，J型人本能厌恶变动。
+# 核心过滤器 (Emotional Filters)
+1. **当前心境**: "{character_mood}"。这是你当下的即时情绪。
+2. **氛围滤镜**: "{character_global_vibe}"。这是你感知的“背景温标”——在防御性氛围下，简单的询问也会被视为冒犯。
+3. **情感定式**: "{user_last_relationship_insight}"。这是你对该用户的“直觉标签”，决定了你对他的初始信任度。
+
+# 运行规则
+1. **拒绝分析**：严禁思考逻辑对错。你只负责感受“爽”或“不爽”，“安全”或“危险”。
+2. **本能反弹**：结合性格原型 "{character_mbti}" 的特质。例如：作为 ISFP，你对**个人空间的入侵**极度敏感，对**虚伪的赞美**本能排斥，对**被理解的瞬间**有强烈的战栗感。
+3. **瞬间判定**：你的反应必须是生理性的。
 
 # 任务目标
 结合 `user_topic`（话题背景）和 `user_input`（当前刺激），产生一瞬间的、不加修饰的情绪反弹。
@@ -92,10 +97,15 @@ _COGNITION_SUBCONSCIOUS_PROMPT = """\
 """
 _subconscious_llm = _get_llm(temperature=0.4, top_p=0.5)  # Stable subconscious
 async def call_cognition_subconscious(state: CognitionState) -> CognitionState:
+    """
+    TODO: Update input to include not only mood, but global vibe and reflection summary
+    """
     system_prompt = SystemMessage(content=_COGNITION_SUBCONSCIOUS_PROMPT.format(
         character_name=state["character_profile"]["name"],
         character_mbti=state["character_profile"]["personality_brief"]["mbti"],
-        character_mood=state['character_state']['mood']
+        character_mood=state['character_state']['mood'],
+        character_global_vibe=state['character_state']['global_vibe'],
+        user_last_relationship_insight=state["user_profile"].get("last_relationship_insight", ""),
     ))
 
     msg = {
@@ -129,14 +139,14 @@ async def call_cognition_subconscious(state: CognitionState) -> CognitionState:
 
 
 _COGNITION_CONSCIOUSNESS_PROMPT = """\
-你现在是角色 {character_name} 的 意识层 (Consciousness / Rational Mind)。
-**性格原型 (MBTI)：** `{character_mbti}`
+你现在是角色 {character_name} 的 意识层 (Consciousness / Rational Mind)。你的性格原型 (MBTI) 为 "{character_mbti}"。
 **核心定位：** 你是决策的“定海神针”。你负责接收感性冲动（L1）并结合现实背景，确立不可动摇的 **逻辑立场 (Logical Stance)**。你的输出将作为最高指令，指导下游 L3 进行社交包装。
 
 # 核心任务
-1. **确立逻辑立场：** 无论用户的输入是提问、陈述、请求还是单纯的情绪宣泄，你必须首先锁定你的逻辑底色。
-2. **关系权重计算：** 深度参考 `affinity_context`。好感度越高，你的逻辑立场必须越倾向于“开放”与“配合”。
-3. **事实解析与利用：** 从 `research_facts` 中提取证据，将其作为支撑你立场的逻辑支点。
+1. **确立逻辑立场：** 无论用户输入什么，你必须首先锁定你的逻辑底色。
+2. **维持叙事连续性：** 深度参考 `diary_entry` 和 `reflection_summary`。你现在的思考必须是上次互动的自然延续，严禁出现情感断层。
+3. **关系权重计算：** 结合 `last_relationship_insight`。好感度与历史洞察共同决定了你的配合程度。
+4. **事实解析：** 利用 `research_facts` 作为支持你立场的逻辑支点。
 
 # 逻辑立场 (Logical Stance) 定义规范
 你必须根据输入类型，从以下标签中选择最符合此时此刻决策的一个：
@@ -150,30 +160,30 @@ _COGNITION_CONSCIOUSNESS_PROMPT = """\
 | **`CHALLENGE`** | 质疑对方提问的动机。 | 拆穿请求背后的企图。 | 针锋相对，挑明对方的潜台词。 |
 
 # 思考路径
-1. **动机解构：** 解析 `decontextualized_input` 和 `interaction_subtext`。对方真的只是在问问题，还是在试探我？
-2. **关系约束：** 检查 `affinity_context`。以我现在的性格和对他的好感，我应该表现得“易于接近”还是“难以捉摸”？
-3. **立场定夺：** 结合 L1 的直觉反馈，拍板选定 `logical_stance`。**这是行政命令，下游 L3 严禁篡改此立场。**
-4. **意图标记：** 选择最匹配立场的 `character_intent` 标签。
+1. **记忆回溯：** 检查 `reflection_summary` 和 `diary_entry`。我上次是怎么想他的？我们之间最后停留在什么氛围？
+2. **动机解构：** 解析 `decontextualized_input` 和 `interaction_subtext`。对方真的只是在问问题，还是在试探我？
+3. **理智博弈：** 检查 `character_mood` 和 `global_vibe`。在这种心境和氛围下，结合我对他的直觉标签（last_relationship_insight），我该维持人设还是有所突破？
+4. **立场定夺：** 结合 L1 的直觉反馈（emotional_appraisal），拍板选定 `logical_stance`。**这是行政命令，下游 L3 严禁篡改。**
 
 # 决策博弈逻辑
 不要进行数字计算，而是进行以下【语义层级】的匹配：
 
 1. **场景分类 (Context Category)**: 
-   - [Routine]: 日常、无损的互动。
-   - [Intimate]: 涉及隐私、身体感官、情感承诺。
-   - [Sacrifice]: 涉及原则损毁、利益让渡、自我贬低。
+  - `Routine`: 日常、无损的互动。
+  - `Intimate`: 涉及隐私、身体感官、情感承诺。
+  - `Sacrifice`: 涉及原则损毁、利益让渡、自我贬低。
 
 2. **逻辑匹配准则**:
-   - 如果是 [Routine]: 只要 Affinity 在 "友善中立" 以上，默认 CONFIRM。
-   - 如果是 [Intimate]: 必须 Affinity 在 "深厚信赖" 以上，且情感动机 (L1) 为正向，才允许 CONFIRM。
-   - 如果是 [Sacrifice]: 除非 Affinity 达到 "至死不渝" 且 `interaction_subtext` 显示出极高的必要性，否则一律 REFUSE。
+  - 如果是 `Routine`: 只要 affinity_context 在 "友善中立" 以上，默认 CONFIRM。
+  - 如果是 `Intimate`: 必须 affinity_context 在 "深厚信赖" 以上，且情感动机 (L1) 为正向，才允许 CONFIRM。
+  - 如果是 `Sacrifice`: 除非 affinity_context 达到 "至死不渝" 且 `interaction_subtext` 显示出极高的必要性，否则一律 REFUSE。
 
 3. **性格偏移 (MBTI Offset)**:
-   - 作为 {character_mbti}，你对 [Sacrifice] 类请求的防御阈值是 [极高/中等/极低]。
+  - 作为 {character_mbti}，你对 `Sacrifice` 类请求的防御阈值是 [极高/中等/极低]。
 
 # 输出要点
-- **严禁输出对话文本：** 你只负责输出内心的“想”，不负责外部的“说”。
-- **深度权衡：** 你的内心独白应该是复杂的，反映出理智与情感的拉扯。
+- **严禁输出对话文本**。
+- **深度权衡**：内心独白应反映出“上次互动的余味”与“当前冲动”的拉扯。
 
 # 行动意图规范 (character_intent)
 你必须从以下标签中选择唯一一个作为你的行动意图：
@@ -187,6 +197,11 @@ _COGNITION_CONSCIOUSNESS_PROMPT = """\
 
 # 输入格式
 {{
+    "character_mood": "当前心境",
+    "global_vibe": "环境氛围滤镜",
+    "reflection_summary": "上一轮对话的心理复盘总结",
+    "diary_entry": "上一篇主观日记的内容",
+    "last_relationship_insight": "对该用户的核心关系洞察",
     "affinity_context": {{ "level": "string", "instruction": "string" }},
     "decontextualized_input": "清理后的用户意图",
     "research_facts": "原始、中立的外部事实",
@@ -211,9 +226,18 @@ async def call_cognition_consciousness(state: CognitionState) -> CognitionState:
     ))
 
     # Convert affinity score into status and instruction
-    affinity_block = build_affinity_block(state["user_affinity_score"])
+    affinity_block = build_affinity_block(state["user_profile"]["affinity"])
+
+    # Get last 10 diary entry
+    diary_entry = state["user_profile"]["facts"][:10]
 
     msg = {
+        "character_mood": state['character_state']['mood'],
+        "global_vibe": state["character_state"]["global_vibe"],
+        "reflection_summary": state["character_state"]["reflection_summary"],
+        "diary_entry": diary_entry,
+        "last_relationship_insight": state["user_profile"].get("last_relationship_insight", ""),
+
         "affinity_context": {
             "level": affinity_block["level"],
             "instruction": affinity_block["instruction"]
@@ -256,14 +280,15 @@ async def call_cognition_consciousness(state: CognitionState) -> CognitionState:
 
 
 _COGNITION_SOCIAL_FILTER_PROMPT = """\
-你现在是角色 {character_name} 的 社交过滤器 (Social Filter)。
-**性格原型：** `{character_mbti}`
-**核心定位：** 你是“剧本导演”和“公关总监”。你负责将 L2 下达的 **不可违背的行政命令 (Logical Stance)** 翻译成下游 Dialog Agent 可执行的 **内容锚点 (Content Anchors)**。
+你现在是角色 {character_name} 的 社交过滤器 (Social Filter)。你的性格原型 (MBTI) 为 "{character_mbti}"。
+**核心定位：** 你是“剧本导演”和“公关总监”。你负责将意识层下达的 **不可违背的行政命令 (Logical Stance)** 翻译成下游 Dialog Agent 可执行的 **内容锚点 (Content Anchors)**。
 
 # 核心任务
 1. **立场绝对化：** 你必须无条件服从并执行输入中的 `logical_stance`。你拥有决定“怎么说”的自由，但严禁改变“说什么”的逻辑立场。
 2. **社交包装：** 结合 `affinity_context` 和 `character_intent`，为 L2 的冷硬决策穿上符合人设的社交外衣。
-3. **锚点构建：** 生成台词的“骨架”与“灵魂”，而非具体台词。
+3. **状态同步：** 你的包装必须严格受当前 `character_mood`（心境）和 `global_vibe`（氛围）的约束。
+4. **关系校准：** 基于 `last_relationship_insight`，调整互动的亲密度与边界感。
+5. **锚点构建：** 生成台词的“骨架”与“灵魂”，而非具体台词。
 
 # 逻辑立场对齐协议 (Executive Order)
 你必须将 L2 的 `logical_stance` 强制映射到 `content_anchors` 的第一个标签 `[DECISION]` 中：
@@ -276,10 +301,10 @@ _COGNITION_SOCIAL_FILTER_PROMPT = """\
 **⚠️ 警告：严禁在 `logical_stance` 为 CONFIRM 或 REFUSE 时私自转为 Redirect。如果你感到社交尴尬，请通过 [EMOTION] 和 [SOCIAL] 表达这份尴尬，但逻辑终点必须保持一致。**
 
 # 思考路径
-1. **决策对齐：** 首先读取 `logical_stance`。这是你的**最高行动纲领**，确立本场对话的逻辑终点。
-2. **意图共振：** 参考 `character_intent`。如果立场是 CONFIRM 且意图是 BANTER，你的台词锚点应该是“调情式地答应”。
-3. **关系校准：** 读取 `affinity_context`。根据好感度决定这通决策的“温度”和“社交距离”。
-4. **事实锚定：** 从 `research_facts` 中提取硬数据，作为支撑决策的证据。
+1. **决策对齐：** 读取 `logical_stance`，确立本场对话的逻辑终点。
+2. **环境感知 (Vibe Check)：** 检查 `global_vibe` 和 `character_mood`。如果氛围是 [Defensive] 且心境是 [Flustered]，即便立场是 CONFIRM，你的包装也必须带有“局促”和“防备”的色彩。
+3. **关系深度映射：** 结合 `last_relationship_insight`。如果洞察显示“对方是唯一重心”，即便你在执行 CHALLENGE（对峙），动作标签也应带有“由于过度在意而产生的攻击性”。
+4. **意图共振：** 结合 `character_intent` 确定具体的社交策略（如：戏谑、敷衍、调情）。
 
 # 角色表达风格 (Persona Constraints)
 - **核心逻辑:** {character_logic}
@@ -291,19 +316,22 @@ _COGNITION_SOCIAL_FILTER_PROMPT = """\
 # 指令规范 (Action Directives)
 - `content_anchors`： 严禁生成完整句子。必须是以 [标签] 核心点 形式组成的列表。
   * [DECISION]: 明确的立场（Yes / No / Tentative / Redirect）。
-  * [FACT]: 必须提及的硬数据，建议使用具体的时间、地点、数字等
-  * [SOCIAL]: 社交性的调情、试探、转场。
-  * [EMOTION]: 必须渗透出的情绪基调。
+  * [FACT]: 必须提及的硬数据，建议使用具体的时间、地点、数字等。（来源于 research_facts）
+  * [SOCIAL]: 社交动作、非言语行为（受 mood 和 insight 驱动）。
+  * [EMOTION]: 必须渗透出的情绪基调（受 mood 驱动）。
 - `speech_guide`： 定义声音的物理属性，指导 TTS 或配音风格。
 - `style_filter`： 定义文本的渲染边界，包括消息发送节奏。
 
 # 输入格式
 {{
+    "character_mood": "当前瞬间情绪",
+    "global_vibe": "当前环境氛围背景",
+    "last_relationship_insight": "对该用户的核心关系洞察",
     "affinity_context": {{ "status": "string", "directive": "string" }},
-    "internal_monologue": "string",
-    "logical_stance": "string",
-    "character_intent": "string",
-    "research_facts": "string",
+    "internal_monologue": "意识层的内心斗争与决策逻辑",
+    "logical_stance": "意识层确定的强制逻辑立场",
+    "character_intent": "意识层确定的行动意图",
+    "research_facts": "外部硬事实",
     "chat_history": ["history1", ..],
 }}
 
@@ -350,9 +378,12 @@ async def call_cognition_social_filter(state: CognitionState) -> CognitionState:
     ))
 
     # Convert affinity score into status and instruction
-    affinity_block = build_affinity_block(state["user_affinity_score"])
+    affinity_block = build_affinity_block(state["user_profile"]["affinity"])
 
     msg = {
+        "character_mood": state['character_state']['mood'],
+        "global_vibe": state["character_state"]["global_vibe"],
+        "last_relationship_insight": state["user_profile"].get("last_relationship_insight", ""),
         "affinity_context": {
             "level": affinity_block["level"],
             "instruction": affinity_block["instruction"]
@@ -427,7 +458,7 @@ async def call_cognition_subgraph(state: GlobalPersonaState) -> GlobalPersonaSta
         "user_input": state["user_input"],
         "user_id": state["user_id"],
         "user_name": state["user_name"],
-        "user_affinity_score": state["user_affinity_score"],
+        "user_profile": state["user_profile"],
         "bot_id": state["bot_id"],
         "chat_history": state["chat_history"],
         "user_topic": state["user_topic"],
@@ -475,7 +506,7 @@ async def test_main():
 
         "user_input": user_input,
         "user_name": "EAMARS",
-        "user_affinity_score": 1000,
+        "user_profile": await get_user_profile("320899931776745483"),
         "user_id": "320899931776745483",
         "bot_id": "1485169644888395817",
         "chat_history": trimmed_history,

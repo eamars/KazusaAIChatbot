@@ -1,9 +1,8 @@
 from typing import TypedDict, Annotated
 
 from kazusa_ai_chatbot.nodes.persona_supervisor2_schema import GlobalPersonaState
-from kazusa_ai_chatbot.config import LLM_API_KEY, LLM_BASE_URL, LLM_MODEL, MAX_DIALOG_AGENT_RETRY
+from kazusa_ai_chatbot.config import LLM_API_KEY, LLM_BASE_URL, LLM_MODEL, MAX_DIALOG_AGENT_RETRY, AFFINITY_DEFAULT
 from kazusa_ai_chatbot.utils import parse_llm_json_output, build_affinity_block
-from kazusa_ai_chatbot.db import CharacterStateDoc
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 from langgraph.graph import StateGraph, START, END, add_messages
@@ -65,7 +64,7 @@ class DialogAgentState(TypedDict):
     # C: Social context
     chat_history: list[dict]
     user_name: str
-    user_affinity_score: int
+    user_profile: dict
 
     # D: Character soul
     character_profile: dict
@@ -173,7 +172,7 @@ async def dialog_generator(state: DialogAgentState) -> DialogAgentState:
         character_taboos=state["character_profile"]["personality_brief"]["taboos"]
     ))
 
-    affinity_block = build_affinity_block(state["user_affinity_score"])
+    affinity_block = build_affinity_block(state["user_profile"].get("affinity", AFFINITY_DEFAULT))
 
     msg = {
         "internal_monologue": state["internal_monologue"],
@@ -294,7 +293,8 @@ async def dialog_evaluator(state: DialogAgentState) -> DialogAgentState:
     
     return {
         "should_stop": should_stop,
-        "messages": [feedback_message]
+        "messages": [feedback_message],
+        "retry": retry
     }
 
 
@@ -341,7 +341,7 @@ async def dialog_agent(
         # C
         "chat_history": global_state["chat_history"],
         "user_name": global_state["user_name"],
-        "user_affinity_score": global_state["user_affinity_score"],
+        "user_profile": global_state["user_profile"],
         
         # D
         "character_profile": global_state["character_profile"],
@@ -401,7 +401,7 @@ async def test_main():
         "research_facts": f"现在的时间为{current_time}",
         "chat_history": trimmed_history,
         "user_name": "EAMARS",
-        "user_affinity_score": 950,
+        "user_profile": {"affinity": 950},
         "character_profile": load_personality("personalities/kazusa.json"),
     }
 

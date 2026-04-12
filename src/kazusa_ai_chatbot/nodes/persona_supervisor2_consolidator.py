@@ -1,10 +1,11 @@
 from ast import Global
-from typing import TypedDict
+from typing import TypedDict, Annotated
 
 from kazusa_ai_chatbot.nodes.persona_supervisor2_schema import GlobalPersonaState
-from kazusa_ai_chatbot.config import LLM_API_KEY, LLM_BASE_URL, LLM_MODEL, MAX_PERSONA_SUPERVISOR_STAGE1_RETRY
+from kazusa_ai_chatbot.config import LLM_API_KEY, LLM_BASE_URL, LLM_MODEL
+from kazusa_ai_chatbot.config import AFFINITY_DEFAULT, AFFINITY_MAX, AFFINITY_MIN, AFFINITY_INCREMENT_BREAKPOINTS, AFFINITY_DECREMENT_BREAKPOINTS, MAX_FACT_HARVESTER_RETRY
 from kazusa_ai_chatbot.utils import parse_llm_json_output, build_affinity_block
-from kazusa_ai_chatbot.db import CharacterStateDoc
+from kazusa_ai_chatbot.db import upsert_character_state, upsert_user_facts, save_memory, update_affinity, update_last_relationship_insight
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 from langgraph.graph import StateGraph, START, END, add_messages
@@ -12,6 +13,7 @@ from langchain_openai import ChatOpenAI
 
 import logging
 import json
+from datetime import datetime, timezone
 
 
 logger = logging.getLogger(__name__)
@@ -29,6 +31,12 @@ def _get_llm(temperature, top_p) -> ChatOpenAI:
 
 
 class ConsolidatorState(TypedDict):
+    # Inputs for db_writer
+    timestamp: str
+    user_id: str
+    user_name: str
+    user_profile: dict
+
     # Character related
     action_directives: dict
     internal_monologue: str
@@ -46,7 +54,6 @@ class ConsolidatorState(TypedDict):
 
     # User related
     decontexualized_input: str
-    user_affinity_score: str
     user_name: str
 
     # global state updater
@@ -62,7 +69,9 @@ class ConsolidatorState(TypedDict):
     # Facts harvester
     new_facts: [str]
     future_promises: [str]
-    
+    fact_harvester_retry: int
+    fact_harvester_feedback_message: Annotated[list, add_messages]
+    should_stop: bool
 
 
 
@@ -160,7 +169,7 @@ _RELATIONSHIP_RECORDER_PROMPT = """\
     "skip": boolean,
     "diary_entry": ["带有 {character_mbti} 风格的主观笔记（30字以内）", ...],
     "affinity_delta": int,
-    "last_relationship_insight": "此时此刻对他最核心的一个标签或看法"
+    "last_relationship_insight": "此时此刻对他/她最核心的一个标签或看法"
 }}
 """
 _relationship_recorder_llm = _get_llm(temperature=0.85, top_p=0.95)
@@ -172,7 +181,8 @@ async def relationship_recorder(state: ConsolidatorState):
     ))
 
     # Convert affinity score into status and instruction
-    affinity_block = build_affinity_block(state["user_affinity_score"])
+    user_affinity_score = state["user_profile"].get("affinity", AFFINITY_DEFAULT)
+    affinity_block = build_affinity_block(user_affinity_score)
 
     msg = {
         "internal_monologue": state["internal_monologue"],
@@ -200,52 +210,59 @@ async def relationship_recorder(state: ConsolidatorState):
 
 
 _FACTS_HARVESTER_PROMPT = """\
-你负责提取具备“长久检索价值”的信息。请严格区分【对话当下的互动姿态】与【未来可引用的客观事实】。
+你负责提取具备长期价值的**画像属性**（事实）和**未来约定**（承诺）。你必须严格区分哪些是“对话的复述”（禁止记录），哪些是“状态的改变”。
 
-# 核心输入
-- `decontexualized_input`: 经过解析的用户核心表达。
-- `research_facts`: 搜索记忆或者互联网获得的数据
-- `resarch_metadata`: 搜索记忆或者互联网获得的数据（包括来源）
-- `content_anchors`: 角色生成的行为指令，用于提取承诺。
-- `logical_stance`: 用于评估事实的置信度。
+# 背景信息
+- **对话主体 (Character)**: {character_name}
+- **对话对象 (User)**: {user_name}
 
-# 审计准则
-1. **拒绝记录“对话姿态”**: 
-   - 严禁记录：对方在调情、我在害羞、我们在开玩笑、我接受了对方的试探。这些是 Mood 和 Diary 负责的内容。
-2. **只记录“硬事实 (Hard Facts)”**:
-   - 关于用户的私人信息（职业、爱好、地址、人际关系）。
-   - 关于外部世界的变动（某店关门了、明天下雨）。
-3. **只记录“明确承诺”**:
-   - 必须是涉及【未来时间点】或【特定动作】的约定。
-   - ❌ 错误承诺：答应配合试探、决定保持温柔。
-   - ✅ 正确承诺：答应明晚 8 点上线、答应帮他修补那件蓝色衬衫。
-4. 严禁记录已知事实：
-   - 严禁记录来自于 `search_conversation`, `get_conversation`, `search_persistent_memory`, `search_user_facts` 等内部数据库中的信息。
+# 核心审计准则 (Audit Standards)
+1. **身份锚定 [必须执行]**:
+   - `decontexualized_input` 的内容始终是 **{user_name}** 在表达。
+   - `content_anchors` 的内容始终是 **{character_name}** 在做决定。
+   - 严禁出现身份倒置（如：将 {user_name} 写完作业记在 {character_name} 头上）。
 
-# 数据源优先级
-- **新事实源**: 仅限 `decontexualized_input` (用户说了什么新信息)。
-- **承诺源**: 仅限 `action_directives` 中带有明确【未来动作】的 `[DECISION]`。
-- **外部数据**： `research_facts` 和 `research_metadata` 中的信息，但仅当它们提供了新的、独立于用户输入的事实时, 例如数据来自于 {{'tool': 'web_search}}
+2. **事实 (new_facts) 判定标准**:
+   - **仅记录**：具有长期稳定性的属性（如：{user_name}的职业、住址、对某物的长期厌恶/偏好）。
+   - **严禁记录**：瞬态动作、对话内容、以及任何关于“奖励”、“打算”、“计划”的内容。
+   - **去重**：如果 `research_facts` 中已存在相似画像，严禁重复提取。
 
-# 输出要求
-- 如果本轮对话没有产生任何【持久性事实】或【明确未来约定】，请返回 `{"new_facts": [], "commitments": []}`。
-- **entity**: 必须是具体对象（User, Location, Item）。
-- **description**: 必须包含具体的【值】或【状态】。
+3. **承诺 (future_promises) 判定标准 [核心逻辑]**:
+   - **所有关于“以后、今晚、下次、奖励、惩罚”的内容，必须且只能记录在这里。**
+   - 必须包含：[触发条件] + [谁对谁做] + [具体动作]。
+   - 示例：`{{"target": "{character_name}", "action": "在{user_name}完成作业的情境下，给予其‘奖励’。"}}`
+
+4. **拒绝复读**: 
+   - 严禁记录“某人说了某话”。如果信息已经由对话历史承载，且不涉及长期画像更新，则返回空列表。
+
+# 闭环反馈指南
+- 在生成回复前，请检查输入信息列表中的最后一条来自 Evaluator 的消息 (Evaluator Feedback)。
+- 你需要根据 Evaluator Feedback 对输出做出相应的修正。
 
 # 输出格式 (JSON)
 请务必返回合法的 JSON 字符串，包含以下字段：
-{
+{{
     "new_facts": [
-        {"entity": "string", "description": "string", "confidence": 0-1.0}
+        {{
+            "entity": "{user_name} / {character_name} / 具体物品",
+            "description": "[姓名]在[具体情境]下做了[动作]，导致了[后果/影响]。",
+        }}
     ],
-    "commitments": [
-        {"target": "string", "action": "string", "due_time": "optional"}
+    "future_promises": [
+        {{
+            "target": "{user_name} / {character_name}",
+            "action": "[姓名]在[具体触发点]执行[具体任务]",
+            "due_time": "ISO 8601 格式或相对时间描述，如无则为 null"
+        }}
     ]
-}
+}}
 """
-_facts_harvester_llm = _get_llm(temperature=0.0, top_p=0.1)
+_facts_harvester_llm = _get_llm(temperature=0.1, top_p=0.1)
 async def facts_harvester(state: ConsolidatorState):
-    system_prompt = SystemMessage(_FACTS_HARVESTER_PROMPT)
+    system_prompt = SystemMessage(_FACTS_HARVESTER_PROMPT.format(
+        character_name=state["character_profile"]["name"],
+        user_name=state["user_name"],
+    ))
 
     msg = {
         "decontexualized_input": state["decontexualized_input"],
@@ -257,7 +274,14 @@ async def facts_harvester(state: ConsolidatorState):
 
     human_message = HumanMessage(content=json.dumps(msg))
 
-    response = await _facts_harvester_llm.ainvoke([system_prompt, human_message])
+    # Read evaluator feedback
+    # First trim the old message
+    if (len(state["fact_harvester_feedback_message"]) > 3):
+        recent_messages = [state["fact_harvester_feedback_message"][0]] + state["fact_harvester_feedback_message"][-3:]
+    else:
+        recent_messages = state["fact_harvester_feedback_message"]
+
+    response = await _facts_harvester_llm.ainvoke([system_prompt, human_message] + recent_messages)
 
     result = parse_llm_json_output(response.content)
     
@@ -269,6 +293,178 @@ async def facts_harvester(state: ConsolidatorState):
     }
 
 
+_FACT_HARVESTER_EVALUATOR_PROMPT = """\
+你负责审计 Fact Recorder 生成的 JSON 数据。你的核心目标是：**对比“基准源”，核查“候选结果”的准确性。**
+
+# 审计背景
+- **角色 (Character)**: {character_name}
+- **用户 (User)**: {user_name}
+
+# 1. 审计基准源 (不可修改的参照物)
+- **事实基准**: `decontexualized_input` (仅用于核对 {user_name} 的状态)
+- **承诺基准**: `content_anchors` (仅用于核对 {character_name} 的决定)
+- **历史基准**: `research_facts` (用于检查是否为旧闻)
+
+# 2. 候选结果 (这是你唯一需要审计的对象)
+- **待检事实**: `new_facts`
+- **待检承诺**: `future_promises`
+
+# 审计红线 (Red Lines)
+- **对象倒置**: `decontexualized_input` 里的动作必须记在 `{user_name}` 账上。如果 Recorder 记在 `{character_name}` 头上，立刻拦截。
+- **分类错误 [严重]**: 
+    - 带有“奖励”、“未来”、“打算”、“今晚”或任何 `[DECISION] Yes` 产生的动作，**必须**放入 `future_promises`。
+    - 严禁将上述内容存入 `new_facts`。
+- **冗余复读**: 
+    - 检查候选结果是否只是在复读对话（如“某人问...”）。
+    - 必须转换为客观陈述。*注意：不要审计输入源的语气，只审计候选结果的陈述方式。*
+- **旧闻复读**: 如果该信息在 `research_facts` 标记的内部库中已存在，判定为 FAIL。
+- **脑补事实**: 严禁出现基准源中没有的名词或事实
+
+# 输出格式 (JSON)
+请务必返回合法的 JSON 字符串：
+{{
+    "should_stop": "boolean (如果没有脑补且实名正确，返回 true；存在幻觉或泛称返回 false)",
+    "feedback": "具体指明错误点。例如：‘原始输入只提到了[奖励]，但输出脑补了[晚餐]，请删除具体行为描述。’ 或 ‘请将[User]替换为 {user_name}’。"
+}}
+"""
+_fact_harvester_evaluator_llm = _get_llm(temperature=0.1, top_p=0.2)
+async def fact_harvester_evaluator(state: ConsolidatorState):
+    system_prompt = SystemMessage(_FACT_HARVESTER_EVALUATOR_PROMPT.format(
+        character_name=state["character_profile"]["name"],
+        user_name=state["user_name"],
+    ))
+    
+    retry = state.get("fact_harvester_retry", 0) + 1
+    msg = {
+        "retry": f"{retry}/{MAX_FACT_HARVESTER_RETRY}",
+        "new_facts": state["new_facts"],
+        "future_promises": state["future_promises"],
+
+        "decontexualized_input": state["decontexualized_input"],
+        "research_facts": state["research_facts"],
+        "research_metadata": state["research_metadata"],
+        "content_anchors": state["action_directives"]["content_anchors"],
+        "logical_stance": state["logical_stance"],
+    }
+    
+    human_message = HumanMessage(content=json.dumps(msg))
+    
+    response = await _fact_harvester_evaluator_llm.ainvoke([system_prompt, human_message])
+    
+    result = parse_llm_json_output(response.content)
+    
+    logger.debug(f"Fact harvester evaluator result: {result}")
+
+    should_stop = result.get("should_stop", True)
+    if (retry >= MAX_FACT_HARVESTER_RETRY):
+        should_stop = True
+
+    feedback_message = HumanMessage(
+        content=f"Evaluator Feedback:\n{result.get('feedback', 'No feedback')}",
+        name="evaluator"
+    )
+    
+    return {
+        "should_stop": should_stop,
+        "fact_harvester_feedback_message": [feedback_message],
+        "fact_harvester_retry": retry
+    }
+
+
+def process_affinity_delta(current_affinity: int, raw_delta: int) -> int:
+    """Process affinity delta with direction-specific non-linear scaling.
+    
+    Args:
+        current_affinity: Current affinity score (0-1000)
+        raw_delta: Raw delta from social archivist (-10 to +10)
+        
+    Returns:
+        Processed delta with appropriate scaling based on direction
+    """
+    if raw_delta == 0:
+        return 0
+    
+    # Select appropriate breakpoints based on delta direction
+    if raw_delta > 0:
+        breakpoints = AFFINITY_INCREMENT_BREAKPOINTS
+    else:  # raw_delta < 0
+        breakpoints = AFFINITY_DECREMENT_BREAKPOINTS
+    
+    # Find the appropriate segment
+    for i in range(len(breakpoints) - 1):
+        x1, y1 = breakpoints[i]
+        x2, y2 = breakpoints[i + 1]
+        
+        if x1 <= current_affinity <= x2:
+            # Linear interpolation: y = y1 + (x - x1) * (y2 - y1) / (x2 - x1)
+            if x2 == x1:  # Vertical line (same point)
+                scaling_factor = y1
+            else:
+                scaling_factor = y1 + (current_affinity - x1) * (y2 - y1) / (x2 - x1)
+            break
+    else:
+        # Default case (shouldn't happen)
+        scaling_factor = 1.0
+    
+    # Apply scaling
+    processed_delta = int(round(raw_delta * scaling_factor, 0))
+    
+    return processed_delta
+
+
+async def db_writer(state: ConsolidatorState):
+    timestamp = state.get("timestamp", datetime.now(timezone.utc).isoformat())
+    user_id = state.get("user_id", "")
+    user_name = state.get("user_name", "")
+
+
+    # Step1: Update mood, global_vibe and reflection summary, those will be fed back to subconscious layer
+    mood = state.get("mood", "")
+    global_vibe = state.get("global_vibe", "")
+    reflection_summary = state.get("reflection_summary", "")
+    
+    # Note the upsert character state function will handle the empty string input 
+    await upsert_character_state(
+        mood=mood,
+        global_vibe=global_vibe,
+        reflection_summary=reflection_summary,
+        timestamp=timestamp
+    )
+
+    # Step 2a: Update diary. 
+    diary_entry = state.get("diary_entry", [])
+    if user_id and diary_entry:
+        await upsert_user_facts(user_id, diary_entry)
+
+    # Step 2b: Update last relationship insight
+    last_relationship_insight = state.get("last_relationship_insight", "")
+    if user_id and last_relationship_insight:
+        await update_last_relationship_insight(user_id, last_relationship_insight)
+
+    # Step 3: Record facts and future promises
+    new_facts = state.get("new_facts", [])
+    for fact in new_facts:
+        memory_name = f"New fact with {user_name}"
+        memory_content = fact["description"]
+        await save_memory(memory_name, memory_content, timestamp)
+
+    future_promises = state.get("future_promises", [])
+    for promise in future_promises:
+        memory_name = f"Future promise with {user_name}"
+        memory_content = f"Target: {promise['target']}: Description: {promise['action']}, Due: {promise['due_time']}"
+        await save_memory(memory_name, memory_content, timestamp)
+
+
+    # Step 4: caclualte new affinity
+    user_affinity_score = state.get("user_profile", {}).get("affinity", AFFINITY_DEFAULT)
+    affinity_delta = state.get("affinity_delta", 0)
+    new_affinity_delta = process_affinity_delta(user_affinity_score, affinity_delta)
+    await update_affinity(user_id, new_affinity_delta)
+
+    return state
+    
+
+
 async def call_consolidation_subgraph(
     global_state: GlobalPersonaState
 ):    
@@ -277,20 +473,37 @@ async def call_consolidation_subgraph(
     sub_agent_builder.add_node("global_state_updater", global_state_updater)
     sub_agent_builder.add_node("relationship_recorder", relationship_recorder)
     sub_agent_builder.add_node("facts_harvester", facts_harvester)
+    sub_agent_builder.add_node("fact_harvester_evaluator", fact_harvester_evaluator)
+    sub_agent_builder.add_node("db_writer", db_writer)
 
     # Connect (parallel)
     sub_agent_builder.add_edge(START, "global_state_updater")
     sub_agent_builder.add_edge(START, "relationship_recorder")
     sub_agent_builder.add_edge(START, "facts_harvester")
 
-    sub_agent_builder.add_edge("global_state_updater", END)
-    sub_agent_builder.add_edge("relationship_recorder", END)
-    sub_agent_builder.add_edge("facts_harvester", END)
+    sub_agent_builder.add_edge("global_state_updater", "db_writer")
+    sub_agent_builder.add_edge("relationship_recorder", "db_writer")
+    sub_agent_builder.add_edge("facts_harvester", "fact_harvester_evaluator")
+    sub_agent_builder.add_conditional_edges(
+        "fact_harvester_evaluator", 
+        lambda state: "loop" if not state["should_stop"] else "end",
+        {
+            "loop": "facts_harvester",
+            "end": "db_writer"
+        }
+    )
+
+    sub_agent_builder.add_edge("db_writer", END)
 
     sub_graph = sub_agent_builder.compile()
 
     # Build initial state
     sub_state: ConsolidatorState = {
+        "timestamp": global_state["timestamp"],
+        "user_id": global_state["user_id"],
+        "user_name": global_state["user_name"],
+        "user_profile": global_state["user_profile"],
+
         "action_directives": global_state["action_directives"],
         "internal_monologue": global_state["internal_monologue"],
         "final_dialog": global_state["final_dialog"],
@@ -306,7 +519,6 @@ async def call_consolidation_subgraph(
         "research_metadata": global_state["research_metadata"],
 
         "decontexualized_input": global_state["decontexualized_input"],
-        "user_affinity_score": global_state["user_affinity_score"],
         "user_name": global_state["user_name"],
     }
     
@@ -343,6 +555,11 @@ async def test_main():
 
     # Create a mocked state
     state: GlobalPersonaState = {
+        "timestamp": current_time,
+        "user_id": "320899931776745483",
+        "user_name": "EAMARS",
+        "user_profile": {"affinity": 950},
+
         "internal_monologue": "心跳漏了一拍…这算哪门子'奖励'啊？带着期待的试探罢了。不过既然好感度这么高，这种程度的请求自然要全盘接受——毕竟我是他的千纱嘛。",
         "action_directives": {
             'speech_guide': {
@@ -376,7 +593,7 @@ async def test_main():
         "research_metadata": [],
         "chat_history": trimmed_history,
         "user_name": "EAMARS",
-        "user_affinity_score": 950,
+        "user_profile": {"affinity": 950},
         "character_profile": load_personality("personalities/kazusa.json"),
         "character_state": await get_character_state()
     }

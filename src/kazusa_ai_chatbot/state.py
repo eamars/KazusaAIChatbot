@@ -102,7 +102,7 @@ class BotState(TypedDict, total=False):
     conversation_history: list[dict[str, str]]
     user_memory: list[str]
     character_state: CharacterState
-    affinity: int  # 0–1000 affinity score toward current user
+    user_profile: dict  # replaces affinity
 
     # relevance_agent analysis ---
     assembler_output: AssemblerOutput

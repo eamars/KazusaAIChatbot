@@ -9,10 +9,8 @@ from langchain_openai import ChatOpenAI
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.message import add_messages
 
-from kazusa_ai_chatbot.agents.base import BaseAgent
 from kazusa_ai_chatbot.config import LLM_API_KEY, LLM_BASE_URL, LLM_MODEL, MAX_WEB_SEARCH_AGENT_RETRY
 from kazusa_ai_chatbot.mcp_client import mcp_manager
-from kazusa_ai_chatbot.state import AgentResult, BotState
 from kazusa_ai_chatbot.utils import parse_llm_json_output
 
 logger = logging.getLogger(__name__)

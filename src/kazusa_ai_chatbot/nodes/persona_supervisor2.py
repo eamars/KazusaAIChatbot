@@ -66,7 +66,7 @@ async def persona_supervisor2(state: BotState) -> dict:
         "user_input": state["message_text"],
         "user_id": state.get("user_id", ""),
         "user_name": state.get("user_name", ""),
-        "user_affinity_score": state.get("affinity", AFFINITY_DEFAULT),  
+        "user_profile": state.get("user_profile", {}),  
         "bot_id": state.get("bot_id", ""),
         "chat_history": state.get("chat_history", []),
         "user_topic": state.get("assembler_output", {}).get("user_topic", ""),
@@ -89,7 +89,7 @@ async def persona_supervisor2(state: BotState) -> dict:
 
 
 async def test_main():
-    from kazusa_ai_chatbot.db import AFFINITY_DEFAULT, get_affinity, get_character_state, get_conversation_history, get_user_facts
+    from kazusa_ai_chatbot.db import AFFINITY_DEFAULT, get_affinity, get_character_state, get_conversation_history, get_user_profile
     from kazusa_ai_chatbot.utils import trim_history_dict
     from kazusa_ai_chatbot.utils import load_personality
     import datetime
@@ -108,10 +108,10 @@ async def test_main():
         "personality": load_personality("personalities/kazusa.json"),
         "character_state": await get_character_state(),
         "timestamp": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-        "message_text": "千纱我爱你哟",
+        "message_text": "既然作业已经写完了，千纱准备‘奖励’我了么♥",
         "user_id": "320899931776745483",
         "user_name": "EAMARS",
-        "affinity": 1000,
+        "user_profile": await get_user_profile("320899931776745483"),
         "bot_id": "1485169644888395817",
         "chat_history": trimmed_history,
         "assembler_output": {

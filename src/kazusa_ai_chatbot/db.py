@@ -76,8 +76,9 @@ class UserFactsDoc(TypedDict):
     """
 
     user_id: str         # Discord user ID (unique key)
-    facts: list[str]     # extracted facts about this user
+    facts: list[str]     # Character's diary about this user
     affinity: int        # 0–1000 affinity score (default 500)
+    last_relationship_insight: str  # Character's instantaneous impression of the user
     embedding: list[float]  # dense vector for similarity search
 
 
@@ -89,8 +90,8 @@ class CharacterStateDoc(TypedDict):
     """
 
     mood: str               # e.g. "melancholic", "playful", "irritated"
-    emotional_tone: str     # e.g. "warm", "guarded", "teasing"
-    recent_events: list[str]  # short summaries of recent notable interactions
+    global_vibe: str        # See Cognition Layer
+    reflection_summary: str # See Cognition Layer
     updated_at: str         # ISO-8601 UTC timestamp of last update
 
 
@@ -299,6 +300,17 @@ async def save_conversation(doc: ConversationMessageDoc) -> None:
 # User Fact
 # Collection: user_facts
 
+async def get_user_profile(user_id: str) -> UserFactsDoc:
+    """Retrieve user profile for a user."""
+    db = await get_db()
+    doc = await db.user_facts.find_one({"user_id": user_id})
+    if doc is None:
+        return {}
+    doc.pop("_id", None)
+    doc.pop("embedding", None)
+    return doc
+
+
 async def get_user_facts(user_id: str) -> list[str]:
     """Retrieve long-term memory facts for a user."""
     db = await get_db()
@@ -345,10 +357,10 @@ async def update_last_relationship_insight(user_id: str, insight: str) -> None:
 
 
 async def upsert_user_facts(user_id: str, new_facts: list[str]) -> None:
-    """Add new facts to a user's memory, deduplicating while preserving order."""
+    """Insert one character's view to the user to the top"""
     db = await get_db()
     existing = await get_user_facts(user_id)
-    merged = list(dict.fromkeys(existing + new_facts))  # deduplicate, preserve order
+    merged = list(dict.fromkeys(new_facts, existing))
 
     if merged:
         combined_facts_text = "\n".join(merged)
