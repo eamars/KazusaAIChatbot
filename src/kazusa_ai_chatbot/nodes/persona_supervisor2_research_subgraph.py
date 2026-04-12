@@ -77,7 +77,7 @@ _RESEARCH_DISPATCHER_PROMPT = """\
     "expected_response": "string"
 }
 """
-_research_dispatcher_llm = get_llm(temperature=0.5, top_p=1.0)
+_research_dispatcher_llm = get_llm(temperature=0.1, top_p=0.95)
 async def call_research_dispatcher(state: ResearchSubgraphState) -> dict:
     system_prompt = SystemMessage(content=_RESEARCH_DISPATCHER_PROMPT)
 
@@ -189,7 +189,7 @@ _RESEARCH_EVALUATOR_PROMPT = """
     "reasoning": "string"
 }}
 """
-_research_evaluator_llm = get_llm(temperature=0.5, top_p=1.0)
+_research_evaluator_llm = get_llm(temperature=0.0, top_p=1.0)
 async def call_research_evaluator(state: ResearchSubgraphState) -> dict:
     retry = state.get("retry", 0) + 1
     timestamp = state.get("timestamp")

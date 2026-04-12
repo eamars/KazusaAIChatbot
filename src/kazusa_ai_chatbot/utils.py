@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from json_repair import repair_json
 from langchain_openai import ChatOpenAI
+from langchain_core.messages import HumanMessage, SystemMessage
 from kazusa_ai_chatbot.config import AFFINITY_MIN, AFFINITY_MAX
 from kazusa_ai_chatbot.config import LLM_API_KEY, LLM_BASE_URL, LLM_MODEL
 from pathlib import Path
@@ -38,6 +39,29 @@ def trim_history_dict(history):
     return results
 
 
+
+
+_PARSE_JSON_WITH_LLM_PROMPT = """\
+"You are a JSON repair expert. Fix the provided malformed JSON string. "
+"Remove trailing commas, close unclosed brackets or strings, and ensure it is valid RFC 8259 JSON. "
+"Output ONLY the corrected JSON code and nothing else. Do not use code blocks or markdown fence."
+"""
+_parse_json_with_llm = get_llm(temperature=0, top_p=1.0)
+def parse_json_with_llm(broken_string: str) -> dict:
+    """Parse JSON with LLM as a fallback when repair_json fails."""
+    system_prompt = SystemMessage(content=_PARSE_JSON_WITH_LLM_PROMPT)
+    human_message = HumanMessage(content=broken_string)
+    response = _parse_json_with_llm.invoke([system_prompt, human_message])
+
+    # Strip the markdown fence just in case
+    json_string = response.content.strip().strip("```").strip("json")
+    
+    # Use repair_json which handles both valid and broken JSON
+    decoded_json_dict = repair_json(json_string, return_objects=True)   
+
+    return decoded_json_dict
+
+
 def parse_llm_json_output(raw_output: str) -> dict:
     """Parse LLM JSON output, handling markdown fences and malformed JSON.
     
@@ -49,23 +73,19 @@ def parse_llm_json_output(raw_output: str) -> dict:
     """
     if not raw_output:
         return {}
+
+    decoded_json_dict = {}
     
     try:
         # Strip markdown fences and clean up
-        raw = raw_output.strip().strip("`").strip()
-        if raw.startswith("json"):
-            raw = raw[4:].strip()
-        
+        raw = raw_output.strip().strip("```").strip("json")
+
         # Use repair_json which handles both valid and broken JSON
-        parsed = repair_json(raw, return_objects=True)
-        
-        if isinstance(parsed, dict):
-            return parsed
-        else:
-            return {}
-            
+        decoded_json_dict = repair_json(raw, return_objects=True)            
     except Exception:
-        return {}
+        decoded_json_dict = parse_json_with_llm(raw_output)
+
+    return decoded_json_dict
 
 
 def build_affinity_block(affinity: int, affinity_min: int=AFFINITY_MIN, affinity_max: int=AFFINITY_MAX) -> dict:
@@ -132,3 +152,14 @@ def load_personality(path: str | Path) -> dict:
         return {}
     with open(path, "r", encoding="utf-8") as f:
         return json.load(f)
+
+
+
+def test_main():
+    response = parse_llm_json_output(
+        """{\n    "speech_guide": {\n        "tone": "羞赧且带着一丝嗔怪的戏谑",\n        "vocal_energy": "Low",\n        "pacing": "Dragging",\n    },\n    "content_anchors": [\n        "[DECISION] Yes/认可 (虽然嘴上在推托，但实际上接受了关于‘奖励’话题的延续)",\n        "[FACT] 提到之前的约定内容：小蛋糕/奖励相关的暧昧暗示",\n        "[FACT] 意识到对方正在通过反问来掌控对话节奏",\n        "[SOCIAL] 指尖不安地摩挲着衣角或裙摆",\n        "[SOCIAL] 眼神躲闪，不敢直视对方那‘看穿一切’的目光",\n        "[EMOTION] 表现出被戳穿后的局促感 (Flust�'}"""
+    )
+    print(response)
+
+if __name__ == "__main__":
+    test_main()

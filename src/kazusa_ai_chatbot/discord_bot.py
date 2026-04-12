@@ -13,8 +13,8 @@ from pathlib import Path
 
 import discord
 
-from kazusa_ai_chatbot.config import DISCORD_TOKEN, CONVERSATION_HISTORY_LIMIT
-from kazusa_ai_chatbot.db import close_db, get_conversation_history, save_conversation, get_user_profile, get_character_state
+from kazusa_ai_chatbot.config import DISCORD_TOKEN, CONVERSATION_HISTORY_LIMIT, AFFINITY_DEFAULT
+from kazusa_ai_chatbot.db import close_db, get_conversation_history, save_conversation, get_user_profile, get_character_state, create_user_profile
 from kazusa_ai_chatbot.mcp_client import mcp_manager
 from kazusa_ai_chatbot.state import DiscordProcessState
 from kazusa_ai_chatbot.utils import load_personality, trim_history_dict
@@ -111,11 +111,23 @@ class RolePlayBot(discord.Client):
         timestamp = datetime.now(timezone.utc).isoformat()
         user_id = str(message.author.id)
         user_name = message.author.display_name
-        user_profile = await get_user_profile(user_id)
         bot_id = str(self.user.id) if self.user else ""
         bot_name = str(self.user.name) if self.user else ""  # This is the displayed name from discord, not the character's real name
-        character_state = await get_character_state()  # The character state needed to be loaded every time to get latest update
         channel_id = str(message.channel.id)
+        character_state = await get_character_state()
+
+        # Create a default profile if not exist
+        while True:
+            user_profile = await get_user_profile(user_id)
+            if user_profile:
+                break
+            await create_user_profile({
+                "user_id": user_id,
+                "facts": [],
+                "affinity": AFFINITY_DEFAULT,
+                "last_relationship_insight": "",
+            })
+            logger.info(f"Created default profile for user {user_id}")
 
         # Private message (DM)
         if (message.guild is None):

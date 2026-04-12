@@ -311,6 +311,17 @@ async def get_user_profile(user_id: str) -> UserFactsDoc:
     return doc
 
 
+async def create_user_profile(user_profile: UserFactsDoc) -> None:
+    """Create a user profile for a user."""
+    db = await get_db()
+    facts = user_profile.get("facts", [])
+    if facts:
+        user_profile["embedding"] = await get_text_embedding(facts)
+    else:
+        user_profile["embedding"] = []
+    await db.user_facts.insert_one(user_profile)
+
+
 async def get_user_facts(user_id: str) -> list[str]:
     """Retrieve long-term memory facts for a user."""
     db = await get_db()
