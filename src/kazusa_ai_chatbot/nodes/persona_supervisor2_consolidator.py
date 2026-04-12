@@ -1,9 +1,10 @@
 from typing import Annotated, TypedDict
 
 from kazusa_ai_chatbot.nodes.persona_supervisor2_schema import GlobalPersonaState
-from kazusa_ai_chatbot.config import LLM_API_KEY, LLM_BASE_URL, LLM_MODEL, MAX_FACT_HARVESTER_RETRY, AFFINITY_DEFAULT
+from kazusa_ai_chatbot.config import LLM_API_KEY, LLM_BASE_URL, LLM_MODEL, MAX_FACT_HARVESTER_RETRY, AFFINITY_DEFAULT, AFFINITY_INCREMENT_BREAKPOINTS, AFFINITY_DECREMENT_BREAKPOINTS
 from kazusa_ai_chatbot.utils import parse_llm_json_output, build_affinity_block, get_llm
 from kazusa_ai_chatbot.nodes.persona_supervisor2_schema import GlobalPersonaState
+from kazusa_ai_chatbot.db import upsert_character_state, upsert_user_facts, update_last_relationship_insight, save_memory, update_affinity
 
 from langchain_core.messages import HumanMessage, SystemMessage
 from langgraph.graph import StateGraph, START, END
@@ -15,10 +16,6 @@ from datetime import datetime, timezone
 
 logger = logging.getLogger(__name__)
 
-_global_state_updater_llm = get_llm(temperature=0.4, top_p=0.8)
-_relationship_recorder_llm = get_llm(temperature=0.85, top_p=0.95)
-_facts_harvester_llm = get_llm(temperature=0.1, top_p=0.1)
-_fact_harvester_evaluator_llm = get_llm(temperature=0.1, top_p=0.2)
 
 class ConsolidatorState(TypedDict):
     # Inputs for db_writer
