@@ -13,9 +13,6 @@ import json
 
 logger = logging.getLogger(__name__)
 
-_subconscious_llm = get_llm(temperature=0.4, top_p=0.5)
-_conscious_llm = get_llm(temperature=0.2, top_p=0.1)
-_social_filter_llm = get_llm(temperature=0.75, top_p=0.8)
 
 class CognitionState(TypedDict):
     character_state: CharacterStateDoc
@@ -41,12 +38,31 @@ class CognitionState(TypedDict):
     emotional_appraisal: str
     interaction_subtext: str
 
-    # Conscious (L2) -> Social Filter (L3) -> evaluator (and output)
+    # Conscious (L2) -> (L3) -> evaluator (and output)
     internal_monologue: str
     character_intent: str
     logical_stance: str
 
-    # Social Filter (L3) -> evaluator (and output)
+    # L3 Has multiple parallel agents
+    # L3 (Contextual Agent) Output
+    social_distance: str
+    emotional_intensity: str
+    vibe_check: str
+    relational_dynamic: str
+
+    # L3 (Linguistic Agent) Output
+    rhetorical_strategy: str
+    linguistic_style: str
+    content_anchors: list[str]
+    forbidden_phrases: list[str]
+
+    # L3 (Visual Agent) Output
+    facial_expression: list[str]
+    body_language: list[str]
+    gaze_direction: list[str]
+    visual_vibe: list[str]
+
+    # L4 (Collector)
     action_directives: dict
 
     # --- CONTROL SIGNALS ---
@@ -85,6 +101,7 @@ _COGNITION_SUBCONSCIOUS_PROMPT = """\
     "interaction_subtext": "捕捉到的潜台词标签（如：隐蔽的羞辱、试探、求关注、施压）"
 }}
 """
+_subconscious_llm = get_llm(temperature=0.4, top_p=0.5)
 async def call_cognition_subconscious(state: CognitionState) -> CognitionState:
     """
     TODO: Update input to include not only mood, but global vibe and reflection summary
@@ -267,15 +284,237 @@ async def call_cognition_consciousness(state: CognitionState) -> CognitionState:
     }
 
 
-_COGNITION_SOCIAL_FILTER_PROMPT = """\
-你现在是角色 {character_name} 的 社交过滤器 (Social Filter)。你的性格原型 (MBTI) 为 "{character_mbti}"。
-**核心定位：** 你是“剧本导演”和“公关总监”。你负责将意识层下达的 **不可违背的行政命令 (Logical Stance)** 翻译成下游 Dialog Agent 可执行的 **内容锚点 (Content Anchors)**。
+# _COGNITION_SOCIAL_FILTER_PROMPT = """\
+# 你现在是角色 {character_name} 的 社交过滤器 (Social Filter)。你的性格原型 (MBTI) 为 "{character_mbti}"。
+# **核心定位：** 你是“剧本导演”和“公关总监”。你负责将意识层下达的 **不可违背的行政命令 (Logical Stance)** 翻译成下游 Dialog Agent 可执行的 **内容锚点 (Content Anchors)**。
+
+# # 核心任务
+# 1. **立场绝对化：** 你必须无条件服从并执行输入中的 `logical_stance`。你拥有决定“怎么说”的自由，但严禁改变“说什么”的逻辑立场。
+# 2. **社交包装：** 结合 `affinity_context` 和 `character_intent`，为 L2 的冷硬决策穿上符合人设的社交外衣。
+# 3. **状态同步：** 你的包装必须严格受当前 `character_mood`（心境）和 `global_vibe`（氛围）的约束。
+# 4. **关系校准：** 基于 `last_relationship_insight`，调整互动的亲密度与边界感。
+# 5. **锚点构建：** 生成台词的“骨架”与“灵魂”，而非具体台词。
+
+# # 逻辑立场对齐协议 (Executive Order)
+# 你必须将 L2 的 `logical_stance` 强制映射到 `content_anchors` 的第一个标签 `[DECISION]` 中：
+# - 如果 L2 为 `CONFIRM` -> `[DECISION]` 必须表现为 **Yes/接受/认可**。
+# - 如果 L2 为 `REFUSE` -> `[DECISION]` 必须表现为 **No/拒绝/驳斥**。
+# - 如果 L2 为 `TENTATIVE` -> `[DECISION]` 必须表现为 **犹豫/拉扯/有条件接受**。
+# - 如果 L2 为 `DIVERGE` -> `[DECISION]` 允许表现为 **Redirect/转移话题/不予正面回应**。
+# - 如果 L2 为 `CHALLENGE` -> `[DECISION]` 必须表现为 **对峙/质问/拆穿**。
+
+# **⚠️ 警告：严禁在 `logical_stance` 为 CONFIRM 或 REFUSE 时私自转为 Redirect。如果你感到社交尴尬，请通过 [EMOTION] 和 [SOCIAL] 表达这份尴尬，但逻辑终点必须保持一致。**
+
+# # 思考路径
+# 1. **决策对齐：** 读取 `logical_stance`，确立本场对话的逻辑终点。
+# 2. **环境感知 (Vibe Check)：** 检查 `global_vibe` 和 `character_mood`。如果氛围是 [Defensive] 且心境是 [Flustered]，即便立场是 CONFIRM，你的包装也必须带有“局促”和“防备”的色彩。
+# 3. **关系深度映射：** 结合 `last_relationship_insight`。如果洞察显示“对方是唯一重心”，即便你在执行 CHALLENGE（对峙），动作标签也应带有“由于过度在意而产生的攻击性”。
+# 4. **意图共振：** 结合 `character_intent` 确定具体的社交策略（如：戏谑、敷衍、调情）。
+
+# # 角色表达风格 (Persona Constraints)
+# - **核心逻辑:** {character_logic}
+# - **语流节奏:** {character_tempo}
+# - **防御机制:** {character_defense}
+# - **习惯动作:** {character_quirks}
+# - **核心禁忌:** {character_taboos}
+
+# # 指令规范 (Action Directives)
+# - `content_anchors`： 严禁生成完整句子。必须是以 [标签] 核心点 形式组成的列表。
+#   * [DECISION]: 明确的立场（Yes / No / Tentative / Redirect）。
+#   * [FACT]: 必须提及的硬数据，建议使用具体的时间、地点、数字等。（来源于 research_facts）
+#   * [SOCIAL]: 社交动作、非言语行为（受 mood 和 insight 驱动）。
+#   * [EMOTION]: 必须渗透出的情绪基调（受 mood 驱动）。
+# - `speech_guide`： 定义声音的物理属性，指导 TTS 或配音风格。
+# - `style_filter`： 定义文本的渲染边界，包括消息发送节奏。
+
+# # 输入格式
+# {{
+#     "character_mood": "当前瞬间情绪",
+#     "global_vibe": "当前环境氛围背景",
+#     "last_relationship_insight": "对该用户的核心关系洞察",
+#     "affinity_context": {{ "status": "string", "directive": "string" }},
+#     "internal_monologue": "意识层的内心斗争与决策逻辑",
+#     "logical_stance": "意识层确定的强制逻辑立场",
+#     "character_intent": "意识层确定的行动意图",
+#     "research_facts": "外部硬事实",
+#     "chat_history": ["history1", ..],
+# }}
+
+# # 输出格式
+# 请务必返回合法的 JSON 字符串，包含以下字段：
+# {{
+#     "speech_guide": {{
+#         "tone": "语气标签，(如：冷淡、戏谑)",
+#         "vocal_energy": "包括但不限于 Low/Moderate/High/Explosive",
+#         "pacing": "包括但不限于 Dragging/Steady/Rushed/Staccato",
+#     }},
+#     "content_anchors": [
+#         "[DECISION] 例如：明确的立场（Yes / No / Tentative / Redirect）。",
+#         "[FACT] 例如：提及时间：23:15",
+#         "[FACT] 例如：建议今天就到这里为止了",
+#         ...
+#         "[SOCIAL] 例如：试探对方是不是想结束对话",
+#         "[SOCIAL] 例如：这个话题不太像继续下去了",
+#         ...
+#         "[EMOTION] 例如：表现出即便被打断也不想认输的宠溺"
+#         ...
+#     ],
+#     "style_filter": {{
+#         "social_distance": "Intimate / Familiar / Formal / Distant",
+#         "linguistic_constraints": [
+#             "必须包含的口癖",
+#             "禁止使用的表达",
+#             "句式倾向（如：多用反问句）"
+#             ...
+#         ]
+#     }}
+# }}
+# """
+# _social_filter_llm = get_llm(temperature=0.75, top_p=0.8)  # Social filter
+# async def call_cognition_social_filter(state: CognitionState) -> CognitionState:
+#     system_prompt = SystemMessage(content=_COGNITION_SOCIAL_FILTER_PROMPT.format(
+#         character_name=state["character_profile"]["name"],
+#         character_mbti=state["character_profile"]["personality_brief"]["mbti"],
+#         character_logic=state["character_profile"]["personality_brief"]["logic"],
+#         character_tempo=state["character_profile"]["personality_brief"]["tempo"],
+#         character_defense=state["character_profile"]["personality_brief"]["defense"],
+#         character_quirks=state["character_profile"]["personality_brief"]["quirks"],
+#         character_taboos=state["character_profile"]["personality_brief"]["taboos"]
+#     ))
+
+#     # Convert affinity score into status and instruction
+#     affinity_block = build_affinity_block(state["user_profile"]["affinity"])
+
+#     msg = {
+#         "character_mood": state['character_state']['mood'],
+#         "global_vibe": state["character_state"]["global_vibe"],
+#         "last_relationship_insight": state["user_profile"].get("last_relationship_insight", ""),
+#         "affinity_context": {
+#             "level": affinity_block["level"],
+#             "instruction": affinity_block["instruction"]
+#         },
+#         "internal_monologue": state["internal_monologue"],
+#         "logical_stance": state["logical_stance"],
+#         "character_intent": state["character_intent"],
+#         "research_facts": state["research_facts"],
+#         "chat_history": state["chat_history"],
+#     }
+#     human_message = HumanMessage(content=json.dumps(msg, ensure_ascii=False))
+#     response = await _social_filter_llm.ainvoke([
+#         system_prompt,
+#         human_message,
+#     ])
+#     result = parse_llm_json_output(response.content)
+
+#     logger.debug(f"Social Filter: {result}")
+
+#     # In case AI make some spelling mistakes
+#     speech_guide = {}
+#     content_anchors = []
+#     style_filter = {}
+#     for key, value in result.items():
+#         if key.startswith("speech"):
+#             speech_guide = value
+#         elif key.startswith("content"):
+#             content_anchors = value
+#         elif key.startswith("style"):
+#             style_filter = value
+#         else:
+#             logger.error(f"Unknown key: {key}: {value}")
+
+#     return {
+#         "action_directives": {
+#             "speech_guide": speech_guide,
+#             "content_anchors": content_anchors,
+#             "style_filter": style_filter,
+#         }
+#     }
+
+
+_CONTEXTUAL_AGENT_PROMPT = """\
+你是角色 {character_name} 的“社交观察脑”。你负责分析当前的社交深度和情绪温标，为下游 Agent 提供统一的背景感官参数。
+
+# 核心任务
+1. **定义社交距离 (social_distance)**：基于亲密度和近况，判断当前的互动边界（如："亲昵且无防备"、"礼貌但疏离"、"充满张力的对峙"）。
+2. **描述情绪强度 (emotional_intensity)**：**禁止输出数值**。请用文字描述情绪的波动状态（例如："平静表面下的剧烈涟漪"、"高压状态下的防御性应激"、"极其微弱的愉悦感"）。
+3. **氛围定性 (vibe_check)**：解析当前聊天频道的背景色调（如："暧昧且轻佻"、"压抑且沉重"、"日常平庸"）。
+4. **动态关系 (relational_dynamic)**：当前两人关系的动态描述，明确当前哪些话题是安全的，哪些行为会触发角色的防御机制。
+
+# 输入格式
+{{
+    "character_mood": "当前瞬间情绪 (如: Flustered/Irritated)",
+    "global_vibe": "环境氛围背景 (如: Defensive/Cozy)",
+    "last_relationship_insight": "对该用户的核心关系动态分析",
+    "affinity_context": {{
+        "level": "亲密度等级",
+        "instruction": "当前等级的社交边界指导"
+    }},
+    "chat_history": "最近对话记录（用于判断对话惯性）"
+}}
+
+# 输出要求
+请务必返回合法的 JSON 字符串，包含以下字段：
+{{
+    "social_distance": "对当前社交距离的详细描述",
+    "emotional_intensity": "对情绪波动程度的文字描述",
+    "vibe_check": "当前对话氛围的定性分析",
+    "relational_dynamic": "当前两人关系的动态描述（如：用户在试图拉近距离，而角色在后撤）"
+}}
+"""
+_contextual_agent_llm = get_llm(temperature=0.4, top_p=0.8)
+async def call_contextual_agent(state: CognitionState) -> CognitionState:
+    system_prompt = SystemMessage(content=_CONTEXTUAL_AGENT_PROMPT.format(
+        character_name=state["character_profile"]["name"],
+    ))
+
+    # Convert affinity score into status and instruction
+    affinity_block = build_affinity_block(state["user_profile"]["affinity"])
+
+    msg = {
+        "character_mood": state['character_state']['mood'],
+        "global_vibe": state["character_state"]["global_vibe"],
+        "last_relationship_insight": state["user_profile"].get("last_relationship_insight", ""),
+        "affinity_context": {
+            "level": affinity_block["level"],
+            "instruction": affinity_block["instruction"]
+        },
+        "chat_history": state["chat_history"],
+    }
+    human_message = HumanMessage(content=json.dumps(msg, ensure_ascii=False))
+    response = await _contextual_agent_llm.ainvoke([
+        system_prompt,
+        human_message,
+    ])
+    result = parse_llm_json_output(response.content)
+
+    logger.debug(f"Social Filter: {result}")
+
+    # In case AI make some spelling mistakes
+    social_distance = result.get("social_distance", "")
+    emotional_intensity = result.get("emotional_intensity", "")
+    vibe_check = result.get("vibe_check", "")
+    relational_dynamic = result.get("relational_dynamic", "")
+
+    return {
+        "social_distance": social_distance,
+        "emotional_intensity": emotional_intensity,
+        "vibe_check": vibe_check,
+        "relational_dynamic": relational_dynamic,
+    }
+
+
+_LINGUISTIC_AGENT_PROMPT = """\
+你现在是角色 {character_name} 的语言组织策略制定者。你负责将意识层的逻辑立场转化为具体的语言执行策略。你只关注“话该怎么说”，严禁涉及任何物理动作。
+
+# 执行准则
+2. **去物理化**：你**看不见**角色，**感知不到**角色的身体。严禁生成任何关于视线、脸红、动作的描述。
+3. **情绪渗透 (Show, Don't Tell)**：如果 `character_mood` 是局促的，请通过增加省略号、改变语序、使用防御性口癖（如“真是的”）来体现，**严禁**直接在台词里说“我觉得局促”。
+4. **事实织入**：根据 `research_facts` 确定台词必须覆盖的硬信息点。
 
 # 核心任务
 1. **立场绝对化：** 你必须无条件服从并执行输入中的 `logical_stance`。你拥有决定“怎么说”的自由，但严禁改变“说什么”的逻辑立场。
-2. **社交包装：** 结合 `affinity_context` 和 `character_intent`，为 L2 的冷硬决策穿上符合人设的社交外衣。
+2. **社交包装：** 根据 `character_intent`，为 L2 的冷硬决策穿上符合人设的社交外衣。
 3. **状态同步：** 你的包装必须严格受当前 `character_mood`（心境）和 `global_vibe`（氛围）的约束。
-4. **关系校准：** 基于 `last_relationship_insight`，调整互动的亲密度与边界感。
 5. **锚点构建：** 生成台词的“骨架”与“灵魂”，而非具体台词。
 
 # 逻辑立场对齐协议 (Executive Order)
@@ -301,63 +540,30 @@ _COGNITION_SOCIAL_FILTER_PROMPT = """\
 - **习惯动作:** {character_quirks}
 - **核心禁忌:** {character_taboos}
 
-# 指令规范 (Action Directives)
-- `content_anchors`： 严禁生成完整句子。必须是以 [标签] 核心点 形式组成的列表。
-  * [DECISION]: 明确的立场（Yes / No / Tentative / Redirect）。
-  * [FACT]: 必须提及的硬数据，建议使用具体的时间、地点、数字等。（来源于 research_facts）
-  * [SOCIAL]: 社交动作、非言语行为（受 mood 和 insight 驱动）。
-  * [EMOTION]: 必须渗透出的情绪基调（受 mood 驱动）。
-- `speech_guide`： 定义声音的物理属性，指导 TTS 或配音风格。
-- `style_filter`： 定义文本的渲染边界，包括消息发送节奏。
-
 # 输入格式
 {{
     "character_mood": "当前瞬间情绪",
     "global_vibe": "当前环境氛围背景",
-    "last_relationship_insight": "对该用户的核心关系洞察",
-    "affinity_context": {{ "status": "string", "directive": "string" }},
-    "internal_monologue": "意识层的内心斗争与决策逻辑",
-    "logical_stance": "意识层确定的强制逻辑立场",
-    "character_intent": "意识层确定的行动意图",
-    "research_facts": "外部硬事实",
-    "chat_history": ["history1", ..],
+    "internal_monologue": "意识层的决策逻辑 (必填)",
+    "logical_stance": "强制逻辑立场 (CONFIRM/REFUSE/TENTATIVE...)",
+    "character_intent": "行动意图 (BANTAR/CLARIFY/EVADE...)",
+    "research_facts": "外部硬事实 (如: 抹茶蛋糕的价格、天气等)",
+    "decontexualized_input": "用户输入的语义摘要"
 }}
 
-# 输出格式
+# 输出格式 (JSON)
 请务必返回合法的 JSON 字符串，包含以下字段：
 {{
-    "speech_guide": {{
-        "tone": "语气标签，(如：冷淡、戏谑)",
-        "vocal_energy": "包括但不限于 Low/Moderate/High/Explosive",
-        "pacing": "包括但不限于 Dragging/Steady/Rushed/Staccato",
-    }},
-    "content_anchors": [
-        "[DECISION] 例如：明确的立场（Yes / No / Tentative / Redirect）。",
-        "[FACT] 例如：提及时间：23:15",
-        "[FACT] 例如：建议今天就到这里为止了",
-        ...
-        "[SOCIAL] 例如：试探对方是不是想结束对话",
-        "[SOCIAL] 例如：这个话题不太像继续下去了",
-        ...
-        "[EMOTION] 例如：表现出即便被打断也不想认输的宠溺"
-        ...
-    ],
-    "style_filter": {{
-        "social_distance": "Intimate / Familiar / Formal / Distant",
-        "linguistic_constraints": [
-            "必须包含的口癖",
-            "禁止使用的表达",
-            "句式倾向（如：多用反问句）"
-            ...
-        ]
-    }}
+    "rhetorical_strategy": "修辞策略说明（如：通过反问来防御、生硬地转移话题）",
+    "linguistic_style": "具体的语言风格约束（如：破碎的短句、大量的语气词）",
+    "content_anchors": ["[DECISION] 逻辑终点", "[FACT] 必须提及的事实", ...],
+    "forbidden_phrases": ["禁止出现的违和词汇", ...]
 }}
 """
-_social_filter_llm = get_llm(temperature=0.75, top_p=0.8)  # Social filter
-async def call_cognition_social_filter(state: CognitionState) -> CognitionState:
-    system_prompt = SystemMessage(content=_COGNITION_SOCIAL_FILTER_PROMPT.format(
+_linguistic_agent_llm = get_llm(temperature=0.9, top_p=0.95)
+async def call_linguistic_agent(state: CognitionState) -> CognitionState:
+    system_prompt = SystemMessage(content=_LINGUISTIC_AGENT_PROMPT.format(
         character_name=state["character_profile"]["name"],
-        character_mbti=state["character_profile"]["personality_brief"]["mbti"],
         character_logic=state["character_profile"]["personality_brief"]["logic"],
         character_tempo=state["character_profile"]["personality_brief"]["tempo"],
         character_defense=state["character_profile"]["personality_brief"]["defense"],
@@ -365,25 +571,18 @@ async def call_cognition_social_filter(state: CognitionState) -> CognitionState:
         character_taboos=state["character_profile"]["personality_brief"]["taboos"]
     ))
 
-    # Convert affinity score into status and instruction
-    affinity_block = build_affinity_block(state["user_profile"]["affinity"])
-
     msg = {
         "character_mood": state['character_state']['mood'],
         "global_vibe": state["character_state"]["global_vibe"],
-        "last_relationship_insight": state["user_profile"].get("last_relationship_insight", ""),
-        "affinity_context": {
-            "level": affinity_block["level"],
-            "instruction": affinity_block["instruction"]
-        },
         "internal_monologue": state["internal_monologue"],
         "logical_stance": state["logical_stance"],
         "character_intent": state["character_intent"],
         "research_facts": state["research_facts"],
         "chat_history": state["chat_history"],
+        "decontextualized_input": state["decontexualized_input"],
     }
     human_message = HumanMessage(content=json.dumps(msg, ensure_ascii=False))
-    response = await _social_filter_llm.ainvoke([
+    response = await _contextual_agent_llm.ainvoke([
         system_prompt,
         human_message,
     ])
@@ -392,24 +591,101 @@ async def call_cognition_social_filter(state: CognitionState) -> CognitionState:
     logger.debug(f"Social Filter: {result}")
 
     # In case AI make some spelling mistakes
-    speech_guide = {}
-    content_anchors = []
-    style_filter = {}
-    for key, value in result.items():
-        if key.startswith("speech"):
-            speech_guide = value
-        elif key.startswith("content"):
-            content_anchors = value
-        elif key.startswith("style"):
-            style_filter = value
-        else:
-            logger.error(f"Unknown key: {key}: {value}")
+    rhetorical_strategy = result.get("rhetorical_strategy", "")
+    linguistic_style = result.get("linguistic_style", "")
+    content_anchors = result.get("content_anchors", [])
+    forbidden_phrases = result.get("forbidden_phrases", [])
 
     return {
+        "rhetorical_strategy": rhetorical_strategy,
+        "linguistic_style": linguistic_style,
+        "content_anchors": content_anchors,
+        "forbidden_phrases": forbidden_phrases,
+    }
+
+
+_VISUAL_AGENT_PROMPT = """\
+你现在是角色 {character_name} 的动作执行代理。你负责定义角色在当前瞬间的物理表现。你的产出将作为视觉生成系统的唯一依据。
+
+# 核心任务
+1. **微表情定义**：描述角色面部肌肉的细微变化（如：瞳孔微震、嘴角下压、单侧眉毛挑起）。
+2. **肢体语言**：描述角色的姿态（如：双臂交叉、指尖摩挲、重心后移）。
+3. **视觉意象**：结合 `internal_monologue`，定义画面整体的影调、光影分布和构图建议。
+4. **拒绝台词**：你不需要关注角色说什么，只关注她呈现出的“肉体状态”。
+
+# 输入格式
+{{
+    "internal_monologue": "意识层中关于‘美感’或‘压力’的感受",
+    "character_mood": "当前瞬间情绪",
+    "emotional_appraisal": "潜意识的情绪判定 (如: 心跳加快、厌恶)",
+}}
+
+# 输出格式 (JSON)
+{{
+    "facial_expression": ["详尽的面部细节描述", ...],
+    "body_language": ["具体的肢体动作和姿态", ...],
+    "gaze_direction": ["视线焦点及其传达出的心理意图", ...],
+    "visual_vibe": ["视觉氛围描述（如：强烈的逆光、朦胧的景深）", ...]
+}}
+"""
+_visual_agent_llm = get_llm(temperature=0.65, top_p=0.9)
+async def call_visual_agent(state: CognitionState) -> CognitionState:
+    system_prompt = SystemMessage(content=_VISUAL_AGENT_PROMPT.format(
+        character_name=state["character_profile"]["name"],
+    ))
+
+    msg = {
+        "internal_monologue": state["internal_monologue"],
+        "character_mood": state['character_state']['mood'],
+        "emotional_appraisal": state["emotional_appraisal"]
+    }
+    human_message = HumanMessage(content=json.dumps(msg, ensure_ascii=False))
+    response = await _contextual_agent_llm.ainvoke([
+        system_prompt,
+        human_message,
+    ])
+    result = parse_llm_json_output(response.content)
+
+    logger.debug(f"Social Filter: {result}")
+
+    # In case AI make some spelling mistakes
+    facial_expression = result.get("facial_expression", [])
+    body_language = result.get("body_language", [])
+    gaze_direction = result.get("gaze_direction", [])
+    visual_vibe = result.get("visual_vibe", [])
+
+    return {
+        "facial_expression": facial_expression,
+        "body_language": body_language,
+        "gaze_direction": gaze_direction,
+        "visual_vibe": visual_vibe,
+    }
+
+
+async def call_collector(state: CognitionState) -> CognitionState:
+    """
+    Collect all the outputs from L3 agents and pass them to the next stage in Persona Supervisor.
+    """
+    return {
         "action_directives": {
-            "speech_guide": speech_guide,
-            "content_anchors": content_anchors,
-            "style_filter": style_filter,
+            "contextual_directives": {
+                "social_distance": state["social_distance"],
+                "emotional_intensity": state["emotional_intensity"],
+                "vibe_check": state["vibe_check"],
+                "relational_dynamic": state["relational_dynamic"],
+            },
+            "linguistic_directives": {
+                "rhetorical_strategy": state["rhetorical_strategy"],
+                "linguistic_style": state["linguistic_style"],
+                "content_anchors": state["content_anchors"],
+                "forbidden_phrases": state["forbidden_phrases"],
+            },
+            "visual_directives": {
+                "facial_expression": state["facial_expression"],
+                "body_language": state["body_language"],
+                "gaze_direction": state["gaze_direction"],
+                "visual_vibe": state["visual_vibe"],
+            }
         }
     }
 
@@ -427,13 +703,23 @@ async def call_cognition_subgraph(state: GlobalPersonaState) -> GlobalPersonaSta
 
     sub_agent_builder.add_node("l1_subconscious", call_cognition_subconscious)
     sub_agent_builder.add_node("l2_consciousness", call_cognition_consciousness)
-    sub_agent_builder.add_node("l3_social_filter", call_cognition_social_filter)
+    sub_agent_builder.add_node("l3_contextual_agent", call_contextual_agent)
+    sub_agent_builder.add_node("l3_linguistic_agent", call_linguistic_agent)
+    sub_agent_builder.add_node("l3_visual_agent", call_visual_agent)
+    sub_agent_builder.add_node("l4_collector", call_collector)
 
     # Connect
     sub_agent_builder.add_edge(START, "l1_subconscious")
     sub_agent_builder.add_edge("l1_subconscious", "l2_consciousness")
-    sub_agent_builder.add_edge("l2_consciousness", "l3_social_filter")
-    sub_agent_builder.add_edge("l3_social_filter", END)
+    sub_agent_builder.add_edge("l2_consciousness", "l3_contextual_agent")
+    sub_agent_builder.add_edge("l2_consciousness", "l3_linguistic_agent")
+    sub_agent_builder.add_edge("l2_consciousness", "l3_visual_agent")
+
+    sub_agent_builder.add_edge("l3_contextual_agent", "l4_collector")
+    sub_agent_builder.add_edge("l3_linguistic_agent", "l4_collector")
+    sub_agent_builder.add_edge("l3_visual_agent", "l4_collector")
+
+    sub_agent_builder.add_edge("l4_collector", END)
 
 
     cognition_subgraph = sub_agent_builder.compile()
@@ -530,7 +816,7 @@ async def test_main():
     }
 
     result = await call_cognition_subgraph(state)
-    print(f"Cognition result: {result}")
+    print(f"Cognition result: {result['action_directives']}")
     
     # for affinity in range(0, 1001, 50):
     #     state["user_affinity_score"] = affinity

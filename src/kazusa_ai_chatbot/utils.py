@@ -14,13 +14,14 @@ import json
 logger = logging.getLogger(__name__)
 
 
-def get_llm(temperature=0.7, top_p=1.0, model=LLM_MODEL, base_url=LLM_BASE_URL, api_key=LLM_API_KEY) -> ChatOpenAI:
+def get_llm(temperature=0.7, top_p=1.0, model=LLM_MODEL, base_url=LLM_BASE_URL, api_key=LLM_API_KEY, **kwargs) -> ChatOpenAI:
     _llm = ChatOpenAI(
         model=model,
         temperature=temperature,
         top_p=top_p,
         base_url=base_url,
         api_key=api_key,
+        **kwargs,
     )
     return _llm
 

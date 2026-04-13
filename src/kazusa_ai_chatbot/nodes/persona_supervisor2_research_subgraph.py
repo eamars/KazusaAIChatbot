@@ -19,10 +19,17 @@ logger = logging.getLogger(__name__)
 
 
 class ResearchSubgraphState(TypedDict):
-    user_input: str
+    # Inputs
+    timestamp: str
+    decontexualized_input: str
+    user_name: str
+    bot_id: str
+    character_profile: dict
+
+    # Control variables
     should_stop: bool
     retry: int
-    timestamp: str
+    evaluator_feedback: str
 
     # dispatcher generated message
     next_action: str
@@ -34,8 +41,6 @@ class ResearchSubgraphState(TypedDict):
     # Agent generate message
     research_results: list
 
-    # Evaluator feedback
-    evaluator_feedback: str
 
 
 _RESEARCH_DISPATCHER_PROMPT = """\
@@ -81,8 +86,18 @@ _research_dispatcher_llm = get_llm(temperature=0.1, top_p=0.95)
 async def call_research_dispatcher(state: ResearchSubgraphState) -> dict:
     system_prompt = SystemMessage(content=_RESEARCH_DISPATCHER_PROMPT)
 
+    user_name = state["user_name"]
+    decontexualized_input = state["decontexualized_input"]
+    bot_id = state["bot_id"]
+    character_name = state["character_profile"]["name"]
+
     # Build human message
-    human_message = HumanMessage(content=state["user_input"])
+    # TODO: Separate the LLM into two stages. One for user RAG and one for fact research then join together.
+    human_message = HumanMessage(content=f"""\
+你需要搜索如下两个话题
+1. 以 {character_name}(@{bot_id}) 为视角描述有关于 "{user_name}" 的记忆。
+2. 搜索 "{user_name}" 跟 {character_name}(@{bot_id}) 发送的消息相关的事实/知识。消息如下:\n\n{decontexualized_input}
+    """)
     evaluator_feedback = state.get("evaluator_feedback", "")
     evaluator_feedback_message = HumanMessage(content=f"Evaluator feedback:\n{evaluator_feedback}", name="evaluator")
     
@@ -119,7 +134,7 @@ async def call_research_dispatcher(state: ResearchSubgraphState) -> dict:
 
 async def call_memory_retriever_agent(state: ResearchSubgraphState) -> dict:
     results = await memory_retriever_agent(
-        task=state["user_input"],
+        task=state["decontexualized_input"],
         context=state["context"],
         expected_response=state["expected_response"]
     )
@@ -138,7 +153,7 @@ async def call_memory_retriever_agent(state: ResearchSubgraphState) -> dict:
 
 async def call_web_search2_agent(state: ResearchSubgraphState) -> dict:
     results = await web_search_agent(
-        task=state["user_input"],
+        task=state["decontexualized_input"],
         context=state["context"],
         expected_response=state["expected_response"]
     )
@@ -200,7 +215,7 @@ async def call_research_evaluator(state: ResearchSubgraphState) -> dict:
     result_facts = [r["fact"] for r in research_results]
     
     evaluation_input = {
-        "user_input": state["user_input"],
+        "user_input": state["decontexualized_input"],
         "research_results": result_facts,
         "retry": f"{retry}/{MAX_RESEARCH_AGENT_RETRY}"
     }
@@ -268,13 +283,14 @@ async def call_research_subgraph(state: GlobalPersonaState) -> dict:
 
     research_subgraph = research_builder.compile()
 
-    # Get attributes
-    decontexualized_input = state["decontexualized_input"]
-
     # initial states
     initial_state = {
         "timestamp": state["timestamp"],
-        "user_input": decontexualized_input,
+        "decontexualized_input": state["decontexualized_input"],
+        "user_name": state["user_name"],
+        "bot_id": state["bot_id"],
+        "character_profile": state["character_profile"],
+
         "context": {},
         "messages": [],
         "should_stop": False,
@@ -296,7 +312,7 @@ async def call_research_subgraph(state: GlobalPersonaState) -> dict:
         research_metadata = [r["metadata"] for r in results.get("research_results", [])]
 
     logger.info(
-        f"\nDecontexualized input: {decontexualized_input}\n"
+        f"\nDecontexualized input: {state["decontexualized_input"]}\n"
         f"  Research facts: {research_facts}\n"
     )
     
@@ -308,11 +324,15 @@ async def call_research_subgraph(state: GlobalPersonaState) -> dict:
 
 async def test_main():
     import datetime
+    from kazusa_ai_chatbot.utils import load_personality
 
     # Create a mocked state
     state: GlobalPersonaState = {
-        "decontexualized_input": "千纱是真人么？",
+        "decontexualized_input": "特朗普的新闻",
+        "bot_id": "1485169644888395817",
+        "user_name": "EAMARS",
         "timestamp": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "character_profile": load_personality("personalities/kazusa.json"),
     }
     
     result = await call_research_subgraph(state)

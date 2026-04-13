@@ -254,7 +254,7 @@ async def facts_harvester(state: ConsolidatorState):
         "decontexualized_input": state["decontexualized_input"],
         "research_facts": state["research_facts"],
         "research_metadata": state["research_metadata"],
-        "content_anchors": state["action_directives"]["content_anchors"],
+        "content_anchors": state["action_directives"]["linguistic_directives"]["content_anchors"],
         "logical_stance": state["logical_stance"],
     }
 
@@ -329,7 +329,7 @@ async def fact_harvester_evaluator(state: ConsolidatorState):
         "decontexualized_input": state["decontexualized_input"],
         "research_facts": state["research_facts"],
         "research_metadata": state["research_metadata"],
-        "content_anchors": state["action_directives"]["content_anchors"],
+        "content_anchors": state["action_directives"]["linguistic_directives"]["content_anchors"],
         "logical_stance": state["logical_stance"],
     }
     
@@ -562,27 +562,7 @@ async def test_main():
         "user_profile": {"affinity": 950},
 
         "internal_monologue": "心跳漏了一拍…这算哪门子'奖励'啊？带着期待的试探罢了。不过既然好感度这么高，这种程度的请求自然要全盘接受——毕竟我是他的千纱嘛。",
-        "action_directives": {
-            'speech_guide': {
-                'tone': '宠溺中带着微妙的羞赧', 
-                'vocal_energy': 'Moderate-High (尾音上扬)', 
-                'pacing': 'Steady with slight pauses before key phrases'
-            }, 
-            'content_anchors': [
-                '[DECISION] 用指尖轻点对方胸口确认接受请求（Yes）', 
-                '[FACT] 提及当前时间2026年4月11日12:55的午休时段', 
-                '[SOCIAL] 提议共享刚出炉的可颂作为即时奖励', 
-                '[EMOTION] 展现既想维持傲娇人设又忍不住展露温柔的矛盾感'
-            ], 
-            'style_filter': {
-                'social_distance': 'Intimate', 
-                'linguistic_constraints': [
-                    '必须包含「嘛」「呢」等软化语气词', 
-                    '禁止使用完整陈述句，多用半截子话', 
-                    '在提及甜点时自动切换为气声语调'
-                ]
-            }
-        },
+        "action_directives": {'contextual_directives': {'social_distance': '维持着一种带有防御性的社交边界，虽然言语间透出些许不自然的局促，但物理与心理距离仍处于礼貌且克制的安全范围。', 'emotional_intensity': '表面试图维持平静，实则内心因突如其来的亲昵称呼而产生了剧烈的、难以掩饰的慌乱波动。', 'vibe_check': '充 满着一种由于被直球攻击而产生的尴尬与焦躁感，空气中弥漫着轻微的应激性防御氛围。', 'relational_dynamic': '用户正在尝试通过亲昵的称呼进行试探性的拉近，而角色正处于“受惊后的后撤”状态，试图用日常琐事（缝纫）作为挡箭牌来回避这种潜在的情绪张力。'}, 'linguistic_directives': {'rhetorical_strategy': '通过反问与 转移话题进行防御性回避。利用“任务未完成”作为挡箭牌，将对方带有暗示性的“奖励”请求转化为对日常事务的讨论，以此掩饰内心的局促感。', 'linguistic_style': '语序紊乱、破碎的短句；使用大量的语气词（如“唔”、“真是的”）来体现心境的不安；语调应呈现出一种试图维持冷淡却因情绪波动而显得不自然的紧绷感。', 'content_anchors': ['[DECISION] TENTATIVE: 拒绝正面回应关于‘奖励’的具体含义，仅表现出一种模棱胧胧的、带有防御性的拉扯。', '[FACT] 现在的时间是深夜（22:24），且处于处理缝纫/服装工作的语境中。', '[SOCIAL] 使用“胡闹”、“无理取闹”等词汇来定义对方的行为，以此建立社交距离感。'], 'forbidden_phrases': ['我愿意', '好的', ' 没问题', '我很期待', '（动作描述，如：低头、脸红）']}, 'visual_directives': {'facial_expression': ['双颊呈现出明显的绯红，热度仿佛要从皮肤下透出来', '瞳孔因局促不安而轻微收缩，眼神闪烁不定', '嘴唇紧抿成一条直线，试图掩饰由于呼吸急促带来的颤抖', '眉心微微蹙起，带着一丝防御性的、不自然的紧绷感'], 'body_language': ['肩膀不由自主地向上耸起，呈现出一种蜷缩的防御姿态', '双手紧紧攥着衣角或裙摆，指关节因用力而略显苍白', '身体重心不自觉地向后偏移，试图拉开与对方的物理距离', '胸口起伏频率加快，由于心跳过速导致的呼吸紊乱感清晰可见'], 'gaze_direction': ['视线处于游离状态，不敢与对方进行长时间的对视', '频繁地向 下瞥向地面或侧向一旁，试图通过回避目光来建立心理防线', '在不经意间偷瞄对方时，眼神中流露出一种被动且迷茫的惊惶'], 'visual_vibe': ['画面采用近景构图，强调角色局促不安的面部细节', '光影对比强烈，侧向的暖色调光线映射出皮肤表面的红晕与汗意', '背景呈现极浅的景深（Bokeh），营造出一种被突如其来的热度所包围的 封闭感和压迫感']}},
         "interaction_subtext": "带有暗示性的调情、索取关注",
         'emotional_appraisal': '心跳漏了一拍……这种轻浮的语气是怎么回事，好乱。',
         'character_intent': 'BANTAR', 
