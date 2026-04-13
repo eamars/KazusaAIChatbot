@@ -92,6 +92,12 @@ async def relevance_agent(state: DiscordProcessState) -> DiscordProcessState:
     channel_name = state.get("channel_name")
     user_input = state.get("user_input")
 
+    # TODO: Make the workflow taking the raw b64 image instead. For now we will only pass in the description. 
+    user_multimedia_input = state.get("user_multimedia_input", [])
+    for piece in user_multimedia_input:
+        if piece["description"]:
+            user_input += f"\nImage attachment: {piece['description']}"
+
     """Analyze context and determine relevance using LLM."""
     system_prompt = SystemMessage(content=_RELEVANCE_SYSTEM_PROMPT.format(
         character_name=state["character_profile"]["name"],
@@ -145,6 +151,9 @@ async def relevance_agent(state: DiscordProcessState) -> DiscordProcessState:
         "use_reply_feature": use_reply_feature,
         "channel_topic": channel_topic,
         "user_topic": user_topic,
+
+        # Update user input with optional image descriptions
+        "user_input": user_input
     }
 
 
