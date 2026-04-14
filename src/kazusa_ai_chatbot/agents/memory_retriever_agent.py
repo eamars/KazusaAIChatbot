@@ -343,7 +343,7 @@ async def memory_search_tool_call_evaluator(state: MemoryRetrieverState) -> Memo
 
     # Run evaluation
     response = await _memory_search_tool_call_evaluator_llm.ainvoke([system_prompt, evaluation_message])
-    result = parse_llm_json_output(response.content)    
+    result = parse_llm_json_output(response.content)
 
     should_stop = result.get("should_stop", False)
     feedback = result.get("feedback", "")

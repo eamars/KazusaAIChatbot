@@ -5,7 +5,7 @@ from kazusa_ai_chatbot.mcp_client import mcp_manager
 from kazusa_ai_chatbot.state import DiscordProcessState
 from kazusa_ai_chatbot.nodes.persona_supervisor2_schema import GlobalPersonaState
 from kazusa_ai_chatbot.nodes.persona_supervisor2_msg_decontexualizer import call_msg_decontexualizer
-from kazusa_ai_chatbot.nodes.persona_supervisor2_research_subgraph import call_research_subgraph
+from kazusa_ai_chatbot.nodes.persona_supervisor2_rag import call_rag_subgraph
 from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition import call_cognition_subgraph
 from kazusa_ai_chatbot.nodes.persona_supervisor2_consolidator import call_consolidation_subgraph
 from kazusa_ai_chatbot.agents.dialog_agent import dialog_agent
@@ -31,7 +31,7 @@ async def persona_supervisor2(state: DiscordProcessState) -> dict:
     # Build the top level graph that connect stages
     persona_builder = StateGraph(GlobalPersonaState)
     persona_builder.add_node("stage_0_msg_decontexualizer", call_msg_decontexualizer)
-    persona_builder.add_node("stage_1_research", call_research_subgraph)
+    persona_builder.add_node("stage_1_research", call_rag_subgraph)
     persona_builder.add_node("stage_2_cognition", call_cognition_subgraph)
     persona_builder.add_node("stage_3_action", call_action_subgraph)  # perform action
     persona_builder.add_node("stage_4_consolidation", call_consolidation_subgraph)  # memory saving

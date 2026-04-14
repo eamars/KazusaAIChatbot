@@ -43,8 +43,8 @@ def trim_history_dict(history):
 
 
 _PARSE_JSON_WITH_LLM_PROMPT = """\
-"You are a JSON repair expert. Fix the provided malformed JSON string. "
-"Remove trailing commas, close unclosed brackets or strings, and ensure it is valid RFC 8259 JSON. "
+"You are a JSON repair expert. Fix the provided malformed JSON string and return fixed dictionary."
+"You need to remove trailing commas, close unclosed brackets or strings, and ensure it is valid RFC 8259 JSON. "
 "Output ONLY the corrected JSON code and nothing else. Do not use code blocks or markdown fence."
 """
 _parse_json_with_llm = get_llm(temperature=0, top_p=1.0)
@@ -85,6 +85,11 @@ def parse_llm_json_output(raw_output: str) -> dict:
         decoded_json_dict = repair_json(raw, return_objects=True)            
     except Exception:
         decoded_json_dict = parse_json_with_llm(raw_output)
+
+    else:
+        # repair_json failed to do the work. Now try the LLM approach
+        if not isinstance(decoded_json_dict, dict):
+            decoded_json_dict = parse_json_with_llm(raw_output)
 
     return decoded_json_dict
 

@@ -36,8 +36,7 @@ class ConsolidatorState(TypedDict):
     character_profile: dict
 
     # Facts
-    research_facts: str
-    research_metadata: list[dict]
+    research_facts: dict
 
     # User related
     decontexualized_input: str
@@ -209,9 +208,10 @@ _FACTS_HARVESTER_PROMPT = """\
    - 严禁出现身份倒置（如：将 {user_name} 写完作业记在 {character_name} 头上）。
 
 2. **事实 (new_facts) 判定标准**:
-   - **仅记录**：具有长期稳定性的属性（如：{user_name}的职业、住址、对某物的长期厌恶/偏好）。
+   - **记录**：具有长期稳定性的属性（如：{user_name}的职业、住址、对某物的长期厌恶/偏好）。
+   - **记录**：从 `research_facts.external_rag_results` 中提取的**新**信息。
    - **严禁记录**：瞬态动作、对话内容、以及任何关于“奖励”、“打算”、“计划”的内容。
-   - **去重**：如果 `research_facts` 中已存在相似画像，严禁重复提取。
+   - **去重**：如果 `research_facts.user_rag_finalized` 或 `research_facts.internal_rag_results` 中已存在相似画像，严禁重复提取。
 
 3. **承诺 (future_promises) 判定标准 [核心逻辑]**:
    - **所有关于“以后、今晚、下次、奖励、惩罚”的内容，必须且只能记录在这里。**
@@ -253,7 +253,6 @@ async def facts_harvester(state: ConsolidatorState):
     msg = {
         "decontexualized_input": state["decontexualized_input"],
         "research_facts": state["research_facts"],
-        "research_metadata": state["research_metadata"],
         "content_anchors": state["action_directives"]["linguistic_directives"]["content_anchors"],
         "logical_stance": state["logical_stance"],
     }
@@ -303,7 +302,7 @@ _FACT_HARVESTER_EVALUATOR_PROMPT = """\
 - **冗余复读**: 
     - 检查候选结果是否只是在复读对话（如“某人问...”）。
     - 必须转换为客观陈述。*注意：不要审计输入源的语气，只审计候选结果的陈述方式。*
-- **旧闻复读**: 如果该信息在 `research_facts` 标记的内部库中已存在，判定为 FAIL。
+- **旧闻复读**: 如果该信息在 `research_facts.user_rag_finalized` 或 `research_facts.internal_rag_results` 标记的内部库中已存在，判定为 FAIL。
 - **脑补事实**: 严禁出现基准源中没有的名词或事实
 
 # 输出格式 (JSON)
@@ -328,7 +327,6 @@ async def fact_harvester_evaluator(state: ConsolidatorState):
 
         "decontexualized_input": state["decontexualized_input"],
         "research_facts": state["research_facts"],
-        "research_metadata": state["research_metadata"],
         "content_anchors": state["action_directives"]["linguistic_directives"]["content_anchors"],
         "logical_stance": state["logical_stance"],
     }
@@ -502,7 +500,6 @@ async def call_consolidation_subgraph(
         "character_profile": global_state["character_profile"],
 
         "research_facts": global_state["research_facts"],
-        "research_metadata": global_state["research_metadata"],
 
         "decontexualized_input": global_state["decontexualized_input"],
         "user_name": global_state["user_name"],
@@ -571,7 +568,6 @@ async def test_main():
         "final_dialog": ['唔……这种请求也算是一种奖励嘛……真是拿你没办法呢。', '不过，刚好午休时间没什么事……那个刚出炉的可颂，要一起分着吃吗？'],
         "decontexualized_input": user_input,
         "research_facts": f"现在的时间为{current_time}",
-        "research_metadata": [],
         "chat_history": trimmed_history,
         "user_name": "EAMARS",
         "user_profile": {"affinity": 950},

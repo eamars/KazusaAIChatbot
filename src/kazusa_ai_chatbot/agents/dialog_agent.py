@@ -133,7 +133,11 @@ _DIALOG_GENERATOR_PROMPT = """\
     }},
     "chat_history": list,
     "user_name": "string",
-    "research_facts": "string"
+    "research_facts": {{
+        "user_rag_finalized": "第三人称描述的与用户相关记忆",
+        "internal_rag_results": "{character_name} 主观记忆",
+        "external_rag_results": "外部知识库检索结果"
+    }},
 }}
 
 # 输出格式
