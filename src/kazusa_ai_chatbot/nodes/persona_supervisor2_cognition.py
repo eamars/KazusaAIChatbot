@@ -21,10 +21,10 @@ class CognitionState(TypedDict):
     # Input from global state
     timestamp: str
     user_input: str
-    user_id: str
+    global_user_id: str
     user_name: str
     user_profile: dict
-    bot_id: str
+    platform_bot_id: str
     chat_history: list[dict]
     user_topic: str
     channel_topic: str
@@ -603,10 +603,10 @@ async def call_cognition_subgraph(state: GlobalPersonaState) -> GlobalPersonaSta
         # Inputs
         "timestamp": state["timestamp"],
         "user_input": state["user_input"],
-        "user_id": state["user_id"],
+        "global_user_id": state["global_user_id"],
         "user_name": state["user_name"],
         "user_profile": state["user_profile"],
-        "bot_id": state["bot_id"],
+        "platform_bot_id": state["platform_bot_id"],
         "chat_history": state["chat_history"],
         "user_topic": state["user_topic"],
         "channel_topic": state["channel_topic"],
@@ -657,7 +657,7 @@ async def test_main():
     from kazusa_ai_chatbot.db import get_character_state
 
 
-    history = await get_conversation_history(channel_id="1485606207069880361", limit=5)
+    history = await get_conversation_history(platform="discord", platform_channel_id="1485606207069880361", limit=5)
     trimmed_history = trim_history_dict(history)
 
     current_time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -670,9 +670,9 @@ async def test_main():
 
         "user_input": user_input,
         "user_name": "EAMARS",
-        "user_profile": await get_user_profile("320899931776745483"),
-        "user_id": "320899931776745483",
-        "bot_id": "1485169644888395817",
+        "user_profile": await get_user_profile("test-uuid-placeholder"),
+        "global_user_id": "test-uuid-placeholder",
+        "platform_bot_id": "1485169644888395817",
         "chat_history": trimmed_history,
         "channel_topic": "日常交流",
         "user_topic": "千纱和EAMARS在房间里聊天",

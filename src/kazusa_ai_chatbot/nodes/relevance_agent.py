@@ -37,7 +37,7 @@ _RELEVANCE_SYSTEM_PROMPT = """\
 
 ## 3. 社交身份
 - **Discord Name**: {bot_name}
-- **Discord ID**: <@{bot_id}>
+- **Platform ID**: <@{platform_bot_id}>
 
 # 响应决策逻辑 (Decision Logic)
 
@@ -88,7 +88,7 @@ async def relevance_agent(state: DiscordProcessState) -> DiscordProcessState:
 
     # get other attributes
     user_name = state.get("user_name")
-    user_id = state.get("user_id", "")
+    platform_user_id = state.get("platform_user_id", "")
     channel_name = state.get("channel_name")
     user_input = state.get("user_input")
 
@@ -109,18 +109,18 @@ async def relevance_agent(state: DiscordProcessState) -> DiscordProcessState:
         affinity_instruction=affinity_block["instruction"],
         last_relationship_insight=state["user_profile"].get("last_relationship_insight", ""),
         bot_name=state["character_profile"]["name"],
-        bot_id=state["bot_id"],
+        platform_bot_id=state["platform_bot_id"],
     ))
 
 
     human_data = {
         "user_message": {
             "user_name": user_name,
-            "user_id": user_id,
+            "platform_user_id": platform_user_id,
             "content": user_input,
             "channel_name": channel_name,
         },
-        "conversation_history": state.get("conversation_history"),
+        "conversation_history": state.get("chat_history"),
     }
 
     human_message = HumanMessage(content=json.dumps(human_data, ensure_ascii=False))
@@ -136,7 +136,7 @@ async def relevance_agent(state: DiscordProcessState) -> DiscordProcessState:
     user_topic = result.get("user_topic", "")
 
     logger.info(
-        f"\n{user_name}(@{user_id}): {user_input}\n"
+        f"\n{user_name}(@{platform_user_id}): {user_input}\n"
         f"Relevance Analysis:\n"
         f"  should_respond: {should_respond}\n"
         f"  reason_to_respond: {reason_to_respond}\n"
@@ -186,7 +186,7 @@ _VISION_DESCRIPTOR_PROMPT = """\
 _vision_descriptor_llm = get_llm(temperature=0.2, top_p=0.9)
 async def multimedia_descriptor_agent(state: DiscordProcessState) -> DiscordProcessState:
     user_name = state.get("user_name")
-    user_id = state.get("user_id", "")
+    platform_user_id = state.get("platform_user_id", "")
 
     # Read the multi-media content
     user_multimedia_input = state.get("user_multimedia_input", [])
@@ -212,7 +212,7 @@ async def multimedia_descriptor_agent(state: DiscordProcessState) -> DiscordProc
             description = result.get("descrption", "")
 
             logger.info(
-                f"\n{user_name}(@{user_id}): Image Description\n"
+                f"\n{user_name}(@{platform_user_id}): Image Description\n"
                 f"{description}"
             )
 
@@ -241,25 +241,27 @@ async def test_main():
     )
 
 
-    history = await get_conversation_history(channel_id="1485606207069880361", limit=5)
+    history = await get_conversation_history(platform="discord", platform_channel_id="1485606207069880361", limit=5)
     trimmed_history = trim_history_dict(history)
 
     user_input = "千纱晚安"
-    user_id = "320899931776745483"
-    bot_id = "1485169644888395817"
+    platform_user_id = "320899931776745483"
+    platform_bot_id = "1485169644888395817"
 
     state: DiscordProcessState = {
+        "platform": "discord",
+        "platform_user_id": platform_user_id,
+        "global_user_id": "test-uuid-placeholder",
         "user_name": "EAMARS",
-        "user_id": user_id,
         "user_input": user_input,
-        "user_profile": await get_user_profile(user_id),
-        "bot_id": bot_id,
+        "user_profile": await get_user_profile("test-uuid-placeholder"),
+        "platform_bot_id": platform_bot_id,
         "bot_name": "KazusaBot",
         "character_profile": load_personality("personalities/kazusa.json"),
         "character_state": await get_character_state(),
-        "channel_id": "",
+        "platform_channel_id": "",
         "channel_name": "test",
-        "conversation_history": trimmed_history,
+        "chat_history": trimmed_history,
     }
 
     result = await relevance_agent(state)

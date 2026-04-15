@@ -45,9 +45,9 @@ _MSG_DECONTEXUALIZER_PROMPT = """\
 # 输入格式
 {
     "user_input": "string",
-    "user_id": "string",
+    "platform_user_id": "string",
     "user_name": "string",
-    "bot_id": "string",
+    "platform_bot_id": "string",
     "chat_history": [
         {"role": "user", "content": "string"},
         {"role": "assistant", "content": "string"},
@@ -77,14 +77,14 @@ async def call_msg_decontexualizer(state: GlobalPersonaState) -> dict:
 
     # get key attributes
     user_name = state.get("user_name")
-    user_id = state.get("user_id")
+    platform_user_id = state.get("platform_user_id")
     user_input = state.get("user_input")
 
     input_msg = {
         "user_input": user_input,
-        "user_id": user_id,
+        "platform_user_id": platform_user_id,
         "user_name": user_name,
-        "bot_id": state.get("bot_id"),
+        "platform_bot_id": state.get("platform_bot_id"),
         "chat_history": state.get("chat_history"),
         "channel_topic": state.get("channel_topic"),
         "user_topic": state.get("user_topic"),
@@ -110,7 +110,7 @@ async def call_msg_decontexualizer(state: GlobalPersonaState) -> dict:
         is_modified = False
 
     logger.info(
-        f"\n{user_name}(@{user_id}): {user_input}\n"
+        f"\n{user_name}(@{platform_user_id}): {user_input}\n"
         f"  Decontexualized input: {output}\n"
         f"  Reason: {reasoning}\n"
         f"  Is modified: {is_modified}"
@@ -126,17 +126,17 @@ async def call_msg_decontexualizer(state: GlobalPersonaState) -> dict:
 
 
 async def test_main():
-    from kazusa_ai_chatbot.db import AFFINITY_DEFAULT, get_affinity, get_character_state, get_conversation_history, get_user_facts
+    from kazusa_ai_chatbot.db import get_conversation_history
     from kazusa_ai_chatbot.utils import trim_history_dict
 
-    history = await get_conversation_history(channel_id="1485606207069880361", limit=5)
+    history = await get_conversation_history(platform="discord", platform_channel_id="1485606207069880361", limit=5)
     trimmed_history = trim_history_dict(history)
 
     # Create a mocked BotState
     test_state: GlobalPersonaState = {
         "user_input": "他在干啥？",
         "user_name": "EAMARS",
-        "bot_id": "1485169644888395817",
+        "platform_bot_id": "1485169644888395817",
         "chat_history": trimmed_history,
         "channel_topic": "课间交流",
         "user_topic": "交流作业"

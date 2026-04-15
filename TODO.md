@@ -5,10 +5,13 @@ The evolution of Kazusa is focused on transitioning from a platform-dependent bo
 ## Phase 1: Foundation & Architectural Decoupling
 **Goal:** Abstract the "Brain" from the interface and enable cross-platform awareness.
 
-- [ ] **Standalone Brain Service:** Extract the cognition and RAG logic into a dedicated microservice (FastAPI/Asynchronous Loop).
-- [ ] **Unified Message Schema:** Implement a platform-agnostic message protocol to handle interactions from Discord, QQ, and WeChat seamlessly.
-- [ ] **Global Identity Mapping:** Develop a system to link user identities across different platforms to a single `Global_User_ID` for unified memory.
+- [x] **Standalone Brain Service:** Extracted into `service.py` (FastAPI + uvicorn). Lifespan manages DB bootstrap, MCP, and scheduler. Deployable via Docker.
+- [x] **Unified Message Schema:** Platform-agnostic `POST /chat` contract with `platform`, `platform_channel_id`, `platform_user_id`, multimedia attachments. Response supports text + attachments.
+- [x] **Global Identity Mapping:** `resolve_global_user_id()` maps `(platform, platform_user_id)` → UUID4 `global_user_id` in `user_profiles`. Cross-platform aliasing via `suspected_aliases`.
 - [ ] **Platform-Scoped RAG:** Optimize the RAG layer to prioritize local platform history while allowing global memory access when contextually relevant.
+- [x] **Adapter Pattern:** Discord adapter (`adapters/discord_adapter.py`) and debug web adapter (`adapters/debug_adapter.py`) communicate with brain via HTTP.
+- [x] **Scheduled Events:** `scheduler.py` + `scheduled_events` collection for future follow-up messages. TODO: wire `future_promises` from consolidator.
+- [x] **DB Bootstrap:** `db_bootstrap()` ensures all collections and indexes exist on service startup.
 
 ## Phase 2: Psychological Modeling & Empathic Accuracy
 **Goal:** Move beyond reactive chat to proactive social intelligence and "mind-reading."

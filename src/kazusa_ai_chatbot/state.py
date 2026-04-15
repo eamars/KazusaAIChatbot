@@ -12,20 +12,24 @@ class MultiMediaDoc(TypedDict):
 class DiscordProcessState(TypedDict):
     timestamp: str
 
+    # Platform identity
+    platform: str                # "discord" | "qq" | "wechat" | etc.
+    platform_user_id: str        # Original platform user ID (e.g. Discord snowflake)
+    global_user_id: str          # Internal UUID4 from user_profiles collection
+
     # Input to Relevance Agent 
-    user_name: str  # read from discord
-    user_id: str  # read from discord
+    user_name: str  # display name from the platform
     user_input: str  # Raw message provided by the user. Can input multimedia content
     user_multimedia_input: list[MultiMediaDoc]
     user_profile: dict  # used to extract affinity score.
 
-    bot_id: int
+    platform_bot_id: str  # Bot's ID on the current platform (provided by the adapter)
     bot_name: str
     character_profile: dict
     character_state: dict
 
-    channel_id: str  # read from discord. Empty if it is private message
-    channel_name: str  # read from discord. empty if it is private message  (used to determine the context)
+    platform_channel_id: str  # Original channel/group ID from the platform. Empty for private messages
+    channel_name: str  # Display name of the channel (used to determine the context)
     chat_history: list[dict]  # Previous messages in the channel (short listed)
 
     # Output from Relevance Agent
@@ -41,10 +45,11 @@ class DiscordProcessState(TypedDict):
     # character_profile: dict  # Already requested
     # timestamp: str  # Already requested
     # user_input: str  # already requested
-    # user_id: str  # Already requested
+    # platform_user_id: str  # Already requested
+    # global_user_id: str  # Already requested
     # user_name: str  # Already requested
     # user_profile: dict  # Already requested
-    # bot_id: int  # Already requested
+    # platform_bot_id: str  # Already requested
     # chat_history: list[dict]  # Already requested
     # user_topic: str  # Already provided
     # channel_topic: str  # Already provided

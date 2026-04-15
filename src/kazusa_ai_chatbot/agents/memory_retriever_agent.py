@@ -19,38 +19,41 @@ logger = logging.getLogger(__name__)
 
 
 @tool
-async def search_user_facts(user_id: str) -> list[str]:
+async def search_user_facts(global_user_id: str) -> list[str]:
     """Read user facts for a specific user
     
     Args:
-        user_id: The ID of the user
+        global_user_id: The global user ID (UUID) of the user
         
     Returns:
         A list of user facts
     """
-    return await get_user_facts(user_id)
+    return await get_user_facts(global_user_id)
 
 @tool
 async def search_conversation(search_query: str, 
-                  user_id: str| None = None,
+                  global_user_id: str | None = None,
                   top_k: int = 5,
-                  channel_id: str | None = None,
+                  platform: str | None = None,
+                  platform_channel_id: str | None = None,
     ) -> list[tuple[float, dict]]:
     """Search conversation from database based on the most relevant content
     
     Args:
         search_query: The search query (not keywords)
-        user_id: (Optional) The ID of the user
+        global_user_id: (Optional) The global user ID (UUID) of the user
         top_k: (Optional) The highest K number of results to return, default to 5
-        channel_id: (Optional) The ID of the channel. If not specified then search all channels
+        platform: (Optional) The platform to filter by (e.g. "discord", "qq")
+        platform_channel_id: (Optional) The ID of the channel. If not specified then search all channels
         
     Returns:
         Top K number of conversations that is closed to the search query. Each with (similarity_score, message_with_metadata)
     """
     results = await search_conversation_history(
         query=search_query,
-        channel_id=channel_id,
-        user_id=user_id,
+        platform=platform,
+        platform_channel_id=platform_channel_id,
+        global_user_id=global_user_id,
         limit=top_k,
         method="vector",
     )
@@ -59,29 +62,32 @@ async def search_conversation(search_query: str,
     return_list = []
     for (score, message) in results:
         return_list.append((score, {
-            "content": message["content"],
-            "timestamp": message["timestamp"],
-            "channel_id": message["channel_id"],
-            "user_id": message["user_id"],
+            "content": message.get("content", ""),
+            "timestamp": message.get("timestamp", ""),
+            "platform": message.get("platform", ""),
+            "platform_channel_id": message.get("platform_channel_id", ""),
+            "global_user_id": message.get("global_user_id", ""),
         }))
 
     return return_list
 
 @tool 
-async def get_conversation(channel_id: str | None = None,
+async def get_conversation(platform: str | None = None,
+                           platform_channel_id: str | None = None,
                            limit: int = 5,
-                           user_id: str | None = None,
-                           name: str | None = None,
+                           global_user_id: str | None = None,
+                           display_name: str | None = None,
                            from_timestamp: str | None = None,
                            to_timestamp: str | None = None,
     ) -> list[dict]:
     """Get conversation history for a specific channel
     
     Args:
-        channel_id: (Optional) The ID of the channel. If not specified then search all channels
+        platform: (Optional) The platform to filter by (e.g. "discord", "qq")
+        platform_channel_id: (Optional) The ID of the channel. If not specified then search all channels
         limit: (Optional) The highest K number of results to return, default to 5
-        user_id: (Optional) The ID of the user
-        name: (Optional) The name of the user. If both user_id and name are provided, user_id will be used
+        global_user_id: (Optional) The global user ID (UUID) of the user
+        display_name: (Optional) The display name of the user. If both global_user_id and display_name are provided, global_user_id will be used
         from_timestamp: (Optional) The start timestamp. Format (ISO 8601), For example: 2026-04-07T11:03:53.197223+00:00
         to_timestamp: (Optional) The end timestamp. Format (ISO 8601)
         
@@ -90,10 +96,11 @@ async def get_conversation(channel_id: str | None = None,
     """
     return_list = []
     results = await get_conversation_history(
-        channel_id=channel_id,
+        platform=platform,
+        platform_channel_id=platform_channel_id,
         limit=limit,
-        user_id=user_id,
-        name=name,
+        global_user_id=global_user_id,
+        display_name=display_name,
         from_timestamp=from_timestamp,
         to_timestamp=to_timestamp,
     )
@@ -101,22 +108,24 @@ async def get_conversation(channel_id: str | None = None,
     # Rebuild return format to remove unwanted columns
     for message in results:
         return_list.append({
-            "content": message["content"],
-            "timestamp": message["timestamp"],
-            "channel_id": message["channel_id"],
-            "user_id": message["user_id"],
+            "content": message.get("content", ""),
+            "timestamp": message.get("timestamp", ""),
+            "platform": message.get("platform", ""),
+            "platform_channel_id": message.get("platform_channel_id", ""),
+            "global_user_id": message.get("global_user_id", ""),
         })
 
     return return_list
 
 
 @tool
-async def search_persistent_memory(search_query: str, top_k: int = 5) -> list[dict]:
+async def search_persistent_memory(search_query: str, top_k: int = 5, source_global_user_id: str | None = None) -> list[dict]:
     """Search memory from persistent database
     
     Args:
         search_query: The search query (not keywords)
         top_k: (Optional) The highest K number of results to return, default to 5
+        source_global_user_id: (Optional) The global user ID (UUID) to filter memories by. Only returns memories originating from this user.
 
     Returns:
         Top K number of memories that is closed to the search query. Each with (similarity_score, memory_with_metadata)
@@ -125,6 +134,7 @@ async def search_persistent_memory(search_query: str, top_k: int = 5) -> list[di
         query=search_query,
         limit=top_k,
         method="vector",
+        source_global_user_id=source_global_user_id,
     )
 
     # Rebuild return format to remove unwanted columns
@@ -133,6 +143,7 @@ async def search_persistent_memory(search_query: str, top_k: int = 5) -> list[di
         return_list.append({
             "content": memory["memory_name"] + ": " + memory["content"],
             "timestamp": memory["timestamp"],
+            "source_global_user_id": memory.get("source_global_user_id", ""),
             "cosine_similarity": score,
         })
 

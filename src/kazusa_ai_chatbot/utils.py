@@ -31,15 +31,14 @@ def trim_history_dict(history):
     results = []
     for msg in history:
         results.append({
-            "name": msg.get("name"),
-            "user_id": msg.get("user_id"),
+            "name": msg.get("display_name"),
+            "platform_user_id": msg.get("platform_user_id"),
+            "global_user_id": msg.get("global_user_id"),
             "role": msg.get("role"),
             "content": msg.get("content"),
             "timestamp": msg.get("timestamp")
         })
     return results
-
-
 
 
 _PARSE_JSON_WITH_LLM_PROMPT = """\

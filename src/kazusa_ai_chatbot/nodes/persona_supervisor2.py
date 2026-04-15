@@ -55,10 +55,12 @@ async def persona_supervisor2(state: DiscordProcessState) -> dict:
         # Inputs
         "timestamp": state["timestamp"],
         "user_input": state["user_input"],
-        "user_id": state["user_id"],
+        "platform": state["platform"],
+        "platform_user_id": state["platform_user_id"],
+        "global_user_id": state["global_user_id"],
         "user_name": state["user_name"],
         "user_profile": state["user_profile"],
-        "bot_id": state["bot_id"],
+        "platform_bot_id": state["platform_bot_id"],
         "chat_history": state["chat_history"],
         "user_topic": state["user_topic"],
         "channel_topic": state["channel_topic"],
@@ -80,7 +82,7 @@ async def persona_supervisor2(state: DiscordProcessState) -> dict:
 
 
 async def test_main():
-    from kazusa_ai_chatbot.db import AFFINITY_DEFAULT, get_affinity, get_character_state, get_conversation_history, get_user_profile
+    from kazusa_ai_chatbot.db import get_character_state, get_conversation_history, get_user_profile
     from kazusa_ai_chatbot.utils import trim_history_dict
     from kazusa_ai_chatbot.utils import load_personality
     import datetime
@@ -91,23 +93,25 @@ async def test_main():
     except Exception:
         logger.exception("MCP manager failed to start — tools will be unavailable")
 
-    history = await get_conversation_history(channel_id="1485606207069880361", limit=10)
+    history = await get_conversation_history(platform="discord", platform_channel_id="1485606207069880361", limit=10)
     trimmed_history = trim_history_dict(history)
 
     # Create a mocked BotState
     test_state: DiscordProcessState = {
         "timestamp": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "platform": "discord",
+        "platform_user_id": "320899931776745483",
+        "global_user_id": "test-uuid-placeholder",
         "user_name": "EAMARS",
-        "user_id": "320899931776745483",
-        "user_input": "既然作业已经写完了，千纱准备‘奖励’我了么♥",
-        "user_profile": await get_user_profile("320899931776745483"),
+        "user_input": "既然作业已经写完了，千纱准备'奖励'我了么♥",
+        "user_profile": await get_user_profile("test-uuid-placeholder"),
 
-        "bot_id": "1485169644888395817",
+        "platform_bot_id": "1485169644888395817",
         "bot_name": "KazusaBot",
         "character_profile": load_personality("personalities/kazusa.json"),
         "character_state": await get_character_state(),
 
-        "channel_id": "",
+        "platform_channel_id": "",
         "channel_name": "",
         "chat_history": trimmed_history,
 

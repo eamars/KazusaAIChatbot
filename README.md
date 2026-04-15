@@ -1,40 +1,38 @@
-# Role-Play Discord Chatbot
+# Kazusa AI Chatbot
 
-A Discord chatbot that responds in-character using a configurable personality (JSON), long-term user memory, channel conversation history, and **MCP tool calling** — built with **LangGraph**, **LM Studio** (OpenAI-compatible API), and **MongoDB**.
+A platform-agnostic AI chatbot that responds in-character using a configurable personality (JSON), long-term user memory, channel conversation history, and **MCP tool calling** — built with **FastAPI**, **LangGraph**, **LM Studio** (OpenAI-compatible API), and **MongoDB**.
+
+The brain runs as a standalone service; IM adapters (Discord, debug web UI, etc.) communicate via a simple HTTP API.
 
 ## Architecture
 
 The bot uses a **multi-stage persona simulation pipeline**. When a message arrives, a **Relevance Agent** decides whether to respond, then a **Persona Supervisor** orchestrates a 5-stage cognitive pipeline — decontextualization, research, cognition, dialog generation, and consolidation — each stage backed by its own LLM subgraph. All generative LLM calls use native JSON structures for context passing.
 
 ```
-                    ┌─────────────┐
-                    │   Discord    │
-                    └──────┬──────┘
-                           │ raw event + context loading
-                    ┌──────▼──────────┐
-                    │ Relevance Agent │  ★ LLM CALL (should I respond?)
-                    └──────┬──────────┘
-                           │ should_respond / channel_topic / user_topic
-                    ┌──────▼──────────────────────────────────────┐
-                    │         Persona Supervisor v2                │
-                    │                                              │
-                    │  Stage 0: Message Decontextualizer  ★ LLM   │
-                    │       ↓                                      │
-                    │  Stage 1: Research Subgraph     ★ LLM × N   │
-                    │       ↓                                      │
-                    │  Stage 2: Cognition Subgraph    ★ LLM × 3   │
-                    │   (subconscious → conscious → social filter) │
-                    │       ↓                                      │
-                    │  Stage 3: Dialog Agent          ★ LLM × 1-3 │
-                    │   (generator ↔ evaluator loop)               │
-                    │       ↓                                      │
-                    │  Stage 4: Consolidation Subgraph ★ LLM × 3+ │
-                    │   (state update, relationship, facts → DB)   │
-                    └──────────┬───────────────────────────────────┘
-                           │ final_dialog + future_promises
-                    ┌──────▼──────┐
-                    │   Discord    │  send reply + save conversation
-                    └─────────────┘
+┌──────────────────┐          ┌──────────────────┐
+│ Discord Adapter  │──HTTP──▶│                   │
+└──────────────────┘         │  Kazusa Brain     │       ┌──────────┐
+┌──────────────────┐         │  (FastAPI)        │◀─────▶│ MongoDB  │
+│ Debug Web UI     │──HTTP──▶│                   │       └──────────┘
+└──────────────────┘         │  POST /chat       │       ┌──────────┐
+┌──────────────────┐         │  GET  /health     │◀─────▶│ LLM API  │
+│ QQ / WeChat / …  │──HTTP──▶│  POST /event      │       └──────────┘
+└──────────────────┘         └────────┬──────────┘
+                                      │
+                              ┌───────▼────────┐
+                              │ LangGraph      │
+                              │ Pipeline       │
+                              └───────┬────────┘
+                                      │
+                    ┌─────────────────────────────────────────┐
+                    │         Persona Supervisor v2            │
+                    │                                          │
+                    │  Stage 0: Message Decontextualizer  ★    │
+                    │  Stage 1: Research Subgraph     ★ × N    │
+                    │  Stage 2: Cognition Subgraph    ★ × 3    │
+                    │  Stage 3: Dialog Agent          ★ × 1-3  │
+                    │  Stage 4: Consolidation         ★ × 3+   │
+                    └─────────────────────────────────────────┘
 ```
 
 ### LangGraph Graph (compiled)
@@ -111,31 +109,38 @@ Configured via the `MCP_SERVERS` environment variable (JSON string):
 ## Project Structure
 
 ```
-src/kazusa_ai_chatbot/
-  main.py                  # CLI entry point
-  config.py                # env vars, affinity breakpoints, retry limits
-  state.py                 # DiscordProcessState TypedDict
-  db.py                    # MongoDB async helpers + document schemas (TypedDict)
-  discord_bot.py           # Discord client, graph wiring, message handling
-  mcp_client.py            # McpManager — MCP server connections + tool execution
-  utils.py                 # Shared helpers (JSON parsing, affinity mapping, history trimming)
-  agents/
-    dialog_agent.py        # Stage 3 — generator/evaluator dialog loop
-    memory_retriever_agent.py  # Research agent — MongoDB memory/history search
-    web_search_agent2.py   # Research agent — web search via MCP tools
-  nodes/
-    relevance_agent.py             # Relevance gate (context analysis + should_respond)
-    persona_supervisor2.py         # Top-level 5-stage persona orchestrator
-    persona_supervisor2_schema.py  # GlobalPersonaState TypedDict
-    persona_supervisor2_msg_decontexualizer.py  # Stage 0
-    persona_supervisor2_research_subgraph.py    # Stage 1
-    persona_supervisor2_cognition.py            # Stage 2
-    persona_supervisor2_consolidator.py         # Stage 4
-src/scripts/               # Standalone utility scripts (embedding creation, search, debug)
+src/
+  kazusa_ai_chatbot/                 # Brain service package
+    service.py                       # FastAPI app — /chat, /health, /event routes
+    scheduler.py                     # Async event scheduler (MongoDB-backed)
+    config.py                        # env vars, affinity breakpoints, retry limits
+    state.py                         # DiscordProcessState TypedDict
+    db.py                            # MongoDB helpers + document schemas + db_bootstrap()
+    discord_bot.py                   # Legacy Discord client (kept for reference)
+    mcp_client.py                    # McpManager — MCP server connections + tool execution
+    utils.py                         # Shared helpers (JSON parsing, affinity, history trim)
+    agents/
+      dialog_agent.py                # Stage 3 — generator/evaluator dialog loop
+      memory_retriever_agent.py      # Research agent — MongoDB memory/history search
+      web_search_agent2.py           # Research agent — web search via MCP tools
+    nodes/
+      relevance_agent.py             # Relevance gate (context analysis + should_respond)
+      persona_supervisor2.py         # Top-level 5-stage persona orchestrator
+      persona_supervisor2_schema.py  # GlobalPersonaState TypedDict
+      persona_supervisor2_msg_decontexualizer.py  # Stage 0
+      persona_supervisor2_research_subgraph.py    # Stage 1
+      persona_supervisor2_cognition.py            # Stage 2
+      persona_supervisor2_consolidator.py         # Stage 4
+  adapters/                          # IM adapters (outside brain package)
+    discord_adapter.py               # Thin Discord→HTTP adapter
+    debug_adapter.py                 # Browser-based debug chat UI
+  scripts/                           # Standalone utility scripts
 personalities/
-  example.json             # sample personality
-  kazusa.json              # full personality with _reference section
-tests/                     # pytest suite (mocked unit tests + live integration tests)
+  example.json
+  kazusa.json
+tests/
+Dockerfile
+docker-compose.yml
 requirements.txt
 ```
 
@@ -144,7 +149,11 @@ requirements.txt
 ### 1. Install dependencies
 
 ```bash
+python -m venv venv
+venv\Scripts\activate    # Windows
+# source venv/bin/activate  # Linux/macOS
 pip install -r requirements.txt
+pip install -e .
 ```
 
 ### 2. Configure environment
@@ -152,12 +161,24 @@ pip install -r requirements.txt
 Copy `.env.example` to `.env` and fill in:
 
 ```env
-DISCORD_TOKEN=your_discord_bot_token
-MONGODB_URI=mongodb://your_connection_string
+# MongoDB
+MONGODB_URI=mongodb://localhost:27017
+MONGODB_DB_NAME=roleplay_bot
+
+# LLM (OpenAI-compatible)
 LLM_BASE_URL=http://localhost:1234/v1
+LLM_API_KEY=lm-studio
 LLM_MODEL=your-model-name
 EMBEDDING_BASE_URL=http://localhost:1234/v1
 EMBEDDING_MODEL=your-embedding-model-name
+
+# Brain service
+SERVICE_HOST=0.0.0.0
+SERVICE_PORT=8000
+PERSONALITY_PATH=personalities/kazusa.json
+
+# Discord adapter (only needed if running the Discord adapter)
+DISCORD_TOKEN=your_discord_bot_token
 
 # Optional: MCP tool servers (JSON string)
 MCP_SERVERS={"mcp-searxng": {"url": "http://host:4001/mcp"}}
@@ -171,13 +192,14 @@ Run an OpenAI-compatible API server (e.g., LM Studio, vLLM, Ollama) with:
 
 ### 4. MongoDB
 
-Collections are auto-created on first use:
+The brain service runs `db_bootstrap()` on startup which automatically creates all required collections and indexes:
 - **`conversation_history`** — chat messages with embeddings for semantic search
-- **`user_facts`** — per-user facts, affinity score, relationship insight, with embeddings
+- **`user_profiles`** — per-user facts, affinity score, platform accounts, relationship insight
 - **`character_state`** — single global document for mood, vibe, reflection summary
 - **`memory`** — persistent named memories with embeddings
+- **`scheduled_events`** — future events (follow-up messages, etc.)
 
-Vector search indexes can be created via the utility scripts in `src/scripts/`.
+Vector search indexes are created best-effort (requires MongoDB Atlas for full vector search).
 
 ### 5. Create a personality
 
@@ -187,20 +209,48 @@ Create a JSON file following the schema in `personalities/example.json`. The per
 
 Keys prefixed with `_` (e.g., `_reference`) are ignored — use these for visual descriptions or other non-prompt data. See `kazusa.json` for a full example.
 
-## Usage
+## Deployment
+
+### Local Development
 
 ```bash
-# Default: listen in ALL channels
+# 1. Start the brain service
+uvicorn kazusa_ai_chatbot.service:app --host 0.0.0.0 --port 8000
+
+# 2a. Debug adapter — browser chat at http://localhost:8080
+python -m adapters.debug_adapter --brain-url http://localhost:8000 --port 8080
+
+# 2b. Discord adapter
+python -m adapters.discord_adapter --brain-url http://localhost:8000
+
+# 2c. Discord adapter with channel filter
+python -m adapters.discord_adapter --brain-url http://localhost:8000 --channels 123456789
+```
+
+### Docker Deployment
+
+```bash
+# Start brain + MongoDB
+docker-compose up -d kazusa-brain mongo
+
+# Optionally, uncomment and start adapters in docker-compose.yml:
+# docker-compose up -d discord-adapter
+# docker-compose up -d debug-adapter
+```
+
+The `docker-compose.yml` defines:
+- **`kazusa-brain`** — the FastAPI service on port 8000
+- **`mongo`** — MongoDB 7 with persistent volume
+- **`discord-adapter`** (commented) — Discord client forwarding to brain
+- **`debug-adapter`** (commented) — Web chat UI on port 8080
+
+Environment variables are read from `.env` or can be set in the compose file.
+
+### Legacy Discord Bot (deprecated)
+
+```bash
+# Direct Discord bot (bypasses brain service — kept for reference)
 python src/kazusa_ai_chatbot/main.py --personality personalities/example.json
-
-# Listen in specific channels only
-python src/kazusa_ai_chatbot/main.py --personality personalities/example.json --channels 123456789 987654321
-
-# Respond to @mentions only
-python src/kazusa_ai_chatbot/main.py --personality personalities/example.json --no-listen-all
-
-# With debug logging
-python src/kazusa_ai_chatbot/main.py --personality personalities/example.json --log-level DEBUG
 ```
 
 ## Design Decisions
@@ -212,5 +262,7 @@ python src/kazusa_ai_chatbot/main.py --personality personalities/example.json --
 - **Affinity system** — per-user 0–1000 score (default 500) with 21 behavioral tiers from "Contemptuous" to "Unwavering". The LLM proposes a delta; non-LLM code applies non-linear scaling and clamping.
 - **Research subgraph with evaluator** — the research stage can dispatch multiple specialist agents and re-evaluate whether enough information has been gathered, preventing premature or insufficient research.
 - **MCP for tooling** — tools are served by external MCP servers over Streamable HTTP, making them language-agnostic and independently deployable.
-- **Context loading in Discord bot** — conversation history, user profile, and character state are loaded once in `discord_bot.py` before graph invocation, keeping nodes stateless and testable.
+- **Brain + adapter separation** — the brain service is platform-agnostic; IM adapters are thin HTTP clients. This enables multi-platform support (Discord, QQ, WeChat) without modifying the cognitive pipeline.
+- **Context loading in service** — conversation history, user profile, and character state are loaded once in the `/chat` handler before graph invocation, keeping nodes stateless and testable.
 - **`_`-prefixed personality keys ignored** — personality JSON can store reference data (appearance, art notes) under `_reference` without wasting prompt tokens.
+- **DB bootstrap on startup** — all collections and indexes are verified/created at service start, so deployment requires zero manual setup beyond the environment variables.
