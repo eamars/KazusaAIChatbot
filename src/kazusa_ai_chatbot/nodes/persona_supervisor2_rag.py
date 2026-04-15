@@ -5,7 +5,7 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from kazusa_ai_chatbot.nodes.persona_supervisor2_schema import GlobalPersonaState
 from kazusa_ai_chatbot.agents.web_search_agent2 import web_search_agent
 from kazusa_ai_chatbot.agents.memory_retriever_agent import memory_retriever_agent
-from kazusa_ai_chatbot.config import LLM_API_KEY, LLM_BASE_URL, LLM_MODEL, MAX_RESEARCH_AGENT_RETRY, AFFINITY_DEFAULT
+from kazusa_ai_chatbot.config import LLM_API_KEY, LLM_BASE_URL, LLM_MODEL, MAX_RESEARCH_AGENT_RETRY, AFFINITY_DEFAULT, AFFINITY_MIN, AFFINITY_MAX
 
 from kazusa_ai_chatbot.utils import parse_llm_json_output, get_llm, build_affinity_block
 
@@ -460,10 +460,6 @@ async def call_memory_retriever_agent_user_rag(state: RAGState) -> RAGState:
     }
 
 
-async def rag_diffuser(state: RAGState) -> RAGState:
-    return state
-
-
 async def call_rag_subgraph(state: GlobalPersonaState) -> GlobalPersonaState:
     
     rag_graph_builder = StateGraph(RAGState)
@@ -474,10 +470,26 @@ async def call_rag_subgraph(state: GlobalPersonaState) -> GlobalPersonaState:
     rag_graph_builder.add_node("call_memory_retriever_agent_internal_rag", call_memory_retriever_agent_internal_rag)
     rag_graph_builder.add_node("call_memory_retriever_agent_user_rag", call_memory_retriever_agent_user_rag)
     rag_graph_builder.add_node("call_user_fact_rag_finalizer", user_fact_rag_finalizer)
-    rag_graph_builder.add_node("rag_diffuser", rag_diffuser)
 
     # Build edges
-    rag_graph_builder.add_edge(START, "external_rag_dispatcher")
+    # Skip external_rag if the affinity score is too low
+    def conditional_skip_external_rag(state: RAGState) -> str:
+        # Get affinity score
+        affinity_score = state["user_profile"]["affinity"]
+        percent = ((affinity_score - AFFINITY_MIN) / (AFFINITY_MAX - AFFINITY_MIN)) * 100
+        if percent < 40:
+            return "skip"
+        else:
+            return "continue"
+    
+    rag_graph_builder.add_conditional_edges(
+        START,
+        conditional_skip_external_rag,
+        {
+            "skip": END,
+            "continue": "external_rag_dispatcher",
+        }
+    )
     rag_graph_builder.add_edge(START, "internal_rag_dispatcher")
     rag_graph_builder.add_edge(START, "user_rag_dispatcher")
 
@@ -487,7 +499,7 @@ async def call_rag_subgraph(state: GlobalPersonaState) -> GlobalPersonaState:
         lambda state: state["external_rag_next_action"],
         {
             "web_search_agent": "call_web_search_agent",
-            "end": "rag_diffuser",
+            "end": END,
         }
     )
     rag_graph_builder.add_conditional_edges(
@@ -495,7 +507,7 @@ async def call_rag_subgraph(state: GlobalPersonaState) -> GlobalPersonaState:
         lambda state: state["internal_rag_next_action"],
         {
             "memory_retriever_agent": "call_memory_retriever_agent_internal_rag",
-            "end": "rag_diffuser",
+            "end": END,
         }
     )
     rag_graph_builder.add_conditional_edges(
@@ -509,10 +521,9 @@ async def call_rag_subgraph(state: GlobalPersonaState) -> GlobalPersonaState:
     rag_graph_builder.add_edge("call_memory_retriever_agent_user_rag", "call_user_fact_rag_finalizer")
 
     # Fan in
-    rag_graph_builder.add_edge("call_web_search_agent", "rag_diffuser")
-    rag_graph_builder.add_edge("call_memory_retriever_agent_internal_rag", "rag_diffuser")
-    rag_graph_builder.add_edge("call_user_fact_rag_finalizer", "rag_diffuser")
-    rag_graph_builder.add_edge("rag_diffuser", END)
+    rag_graph_builder.add_edge("call_web_search_agent", END)
+    rag_graph_builder.add_edge("call_memory_retriever_agent_internal_rag", END)
+    rag_graph_builder.add_edge("call_user_fact_rag_finalizer", END)
     
     rag_graph = rag_graph_builder.compile()
 
@@ -535,6 +546,7 @@ async def call_rag_subgraph(state: GlobalPersonaState) -> GlobalPersonaState:
 
     result = await rag_graph.ainvoke(initial_state)
 
+    # I don't want to enforce the return type. It can be either a list of a string.
     user_rag_finalized = result.get("user_rag_finalized", "")
     internal_rag_results = result.get("internal_rag_results", "")
     external_rag_results = result.get("external_rag_results", "")
@@ -570,7 +582,7 @@ async def test_main():
         logger.exception("MCP manager failed to start — tools will be unavailable")
 
     state: GlobalPersonaState = {
-        "decontexualized_input": "上次的小蛋糕喜欢么？",
+        "decontexualized_input": "新西兰油价",
         "user_topic": "闲聊",
         "bot_id": "1485169644888395817",
         "user_id": "320899931776745483",
