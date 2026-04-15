@@ -130,7 +130,7 @@ async def external_rag_dispatcher(state: RAGState) -> RAGState:
 
     result = parse_llm_json_output(response.content)
 
-    logger.debug(f"Web search agent dispatcher result: {result}")
+    logger.debug(f"External RAG agent dispatcher result: {result}")
 
     next_action = result.get("next_action", "end")
     dispatcher_reasoning = result.get("reasoning", "")
@@ -236,7 +236,7 @@ async def internal_rag_dispatcher(state: RAGState) -> RAGState:
 
     result = parse_llm_json_output(response.content)
 
-    logger.debug(f"Web search agent dispatcher result: {result}")
+    logger.debug(f"Internal RAG agent dispatcher result: {result}")
 
     next_action = result.get("next_action", "end")
     dispatcher_reasoning = result.get("reasoning", "")
@@ -318,7 +318,7 @@ async def user_fact_rag_dispatcher(state: RAGState) -> RAGState:
 
     result = parse_llm_json_output(response.content)
 
-    logger.debug(f"Web search agent dispatcher result: {result}")
+    logger.debug(f"User Fact RAG dispatcher result: {result}")
 
     next_action = result.get("next_action", "end")
     dispatcher_reasoning = result.get("reasoning", "")
@@ -395,7 +395,7 @@ async def user_fact_rag_finalizer(state: RAGState) -> RAGState:
 
     result = parse_llm_json_output(response.content)
 
-    logger.debug(f"Web search agent dispatcher result: {result}")
+    logger.debug(f"User fact RAG finalizer result: {result}")
 
     user_rag_finalized = result.get("user_rag_finalized", "")
 
