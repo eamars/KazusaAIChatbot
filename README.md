@@ -163,7 +163,7 @@ Copy `.env.example` to `.env` and fill in:
 ```env
 # MongoDB
 MONGODB_URI=mongodb://localhost:27017
-MONGODB_DB_NAME=roleplay_bot
+MONGODB_DB_NAME=kazusa_bot_core
 
 # LLM (OpenAI-compatible)
 LLM_BASE_URL=http://localhost:1234/v1

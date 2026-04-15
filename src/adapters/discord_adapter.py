@@ -15,9 +15,10 @@ import base64
 import logging
 import sys
 from pathlib import Path
-
+import os
 import discord
 import httpx
+from dotenv import load_dotenv
 
 logger = logging.getLogger(__name__)
 
@@ -177,7 +178,9 @@ def main():
         format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
     )
 
-    token = __import__("os").getenv("DISCORD_TOKEN", "")
+    load_dotenv()
+
+    token = os.getenv("DISCORD_TOKEN", "")
     if not token:
         logger.error("DISCORD_TOKEN environment variable is required")
         sys.exit(1)
