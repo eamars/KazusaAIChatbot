@@ -46,20 +46,88 @@ START → relevance_agent ─┬─ should_respond=true  → persona_supervisor2
 
 The Persona Supervisor internally builds a second `StateGraph` with 5 linear stages, each of which may contain nested subgraphs.
 
+### State Passing (explicit contract)
+
+State is passed in two layers:
+
+1. **Top-level graph state**: `IMProcessState` (`state.py`)
+2. **Persona supervisor internal state**: `GlobalPersonaState` (`nodes/persona_supervisor2_schema.py`)
+
+`/chat` in `service.py` builds `IMProcessState`, then:
+
+- `relevance_agent` reads the message + context and writes routing/topic fields.
+- `persona_supervisor2` copies a selected subset of fields into `GlobalPersonaState` and runs Stage 0→4.
+- Stage outputs are accumulated in `GlobalPersonaState` and returned to top-level as `final_dialog` + `future_promises`.
+
+Top-level flow:
+
+```text
+ChatRequest
+  -> service.py builds IMProcessState
+  -> relevance_agent(IMProcessState) mutates:
+       should_respond, reason_to_respond, use_reply_feature, channel_topic, user_topic
+  -> if should_respond == false: END
+  -> persona_supervisor2(IMProcessState)
+       -> builds GlobalPersonaState (selected fields)
+       -> stage_0 -> stage_1 -> stage_2 -> stage_3 -> stage_4
+       -> returns {final_dialog, future_promises}
+  -> ChatResponse(messages=final_dialog, should_reply=use_reply_feature, scheduled_followups=future_promises)
+```
+
+`IMProcessState` keys used by top-level routing and supervisor handoff:
+
+```text
+timestamp, platform, platform_user_id, global_user_id,
+user_name, user_input, user_profile,
+platform_bot_id, bot_name,
+character_profile, character_state,
+platform_channel_id, channel_name, chat_history,
+should_respond, reason_to_respond, use_reply_feature,
+channel_topic, user_topic,
+final_dialog, future_promises
+```
+
+`persona_supervisor2` currently passes these keys from `IMProcessState` into `GlobalPersonaState`:
+
+```text
+character_state, character_profile,
+timestamp, user_input,
+platform, platform_user_id, global_user_id,
+user_name, user_profile,
+platform_bot_id,
+chat_history, user_topic, channel_topic
+```
+
 ## Pipeline Stages
 
 ### Relevance Agent (LLM call)
-The Discord bot (`discord_bot.py`) loads all context from MongoDB before invoking the graph:
+The brain service (`service.py`) loads all context from MongoDB before invoking the graph:
 - **Conversation history** — last N messages for the channel
 - **User profile** — facts, affinity score, last relationship insight
 - **Character state** — current mood, global vibe, reflection summary
 
 The relevance agent then analyzes the message + context to decide if the bot should engage. It outputs `should_respond`, `use_reply_feature`, `channel_topic`, and `user_topic`.
 
+**Reads from state**:
+- `user_input`, `user_multimedia_input`, `chat_history`
+- `user_profile`, `character_state`, `character_profile`
+- `platform_bot_id`, `bot_name`, `user_name`, `channel_name`
+
+**Writes to state**:
+- `should_respond`
+- `reason_to_respond`
+- `use_reply_feature`
+- `channel_topic`
+- `user_topic`
+
 If `should_respond: false`, the graph short-circuits to END — no further LLM calls.
 
 ### Persona Supervisor v2 — Stage 0: Message Decontextualizer (LLM call)
 Clarifies ambiguous user input by resolving pronouns, references, and implicit context from chat history. For example, "I saw him yesterday" → "I saw John yesterday". Outputs `decontexualized_input` for downstream stages.
+
+**Stage 0 input**: `user_input`, `chat_history`, `user_name`, `channel_topic`, `user_topic`
+
+**Stage 0 output**: `decontexualized_input`
 
 ### Persona Supervisor v2 — Stage 1: Research Subgraph (LLM calls)
 Dispatches research tasks to specialist agents based on the query nature:
@@ -69,7 +137,13 @@ Dispatches research tasks to specialist agents based on the query nature:
 | `memory_retriever_agent` | Searches conversation history, user facts, and persistent memory via MongoDB. Uses tool-calling with `search_user_facts`, `search_conversation`, `get_conversation`, `search_persistent_memory`. |
 | `web_search_agent` | Searches the internet via MCP tools (e.g., SearXNG). Multi-turn LLM loop with planning, execution, and evaluation. |
 
-An **evaluator** determines if the retrieved information is sufficient or if another research iteration is needed (up to `MAX_PERSONA_SUPERVISOR_STAGE1_RETRY`).
+An **evaluator** determines if the retrieved information is sufficient or if another research iteration is needed (up to `MAX_RESEARCH_AGENT_RETRY`).
+
+**Stage 1 input**: `decontexualized_input`, `user_profile`, `chat_history`, retrieval context
+
+**Stage 1 output**:
+- `research_facts`
+- `research_metadata`
 
 ### Persona Supervisor v2 — Stage 2: Cognition Subgraph (3 LLM calls)
 A 3-layer cognitive simulation:
@@ -80,6 +154,16 @@ A 3-layer cognitive simulation:
 
 Outputs: `internal_monologue`, `action_directives`, `emotional_appraisal`, `character_intent`, `logical_stance`, `interaction_subtext`.
 
+**Stage 2 input**: `decontexualized_input`, `research_facts`, `research_metadata`, `character_profile`, `character_state`, `user_profile`
+
+**Stage 2 output**:
+- `interaction_subtext`
+- `emotional_appraisal`
+- `character_intent`
+- `logical_stance`
+- `internal_monologue`
+- `action_directives`
+
 ### Persona Supervisor v2 — Stage 3: Dialog Agent (1–3 LLM calls)
 A generator-evaluator loop that produces the final in-character reply:
 
@@ -88,6 +172,10 @@ A generator-evaluator loop that produces the final in-character reply:
 
 Loop runs up to `MAX_DIALOG_AGENT_RETRY` times. Outputs: `final_dialog` (list of message strings).
 
+**Stage 3 input**: `internal_monologue`, `action_directives`, `chat_history`, `user_name`, `character_profile`, `user_profile`
+
+**Stage 3 output**: `final_dialog`
+
 ### Persona Supervisor v2 — Stage 4: Consolidation Subgraph (3+ LLM calls)
 Runs inline (not deferred) after dialog generation to persist the interaction's effects:
 
@@ -95,6 +183,13 @@ Runs inline (not deferred) after dialog generation to persist the interaction's 
 2. **Relationship Recorder** — generates diary entry, affinity delta (with non-linear scaling breakpoints), and relationship insight
 3. **Facts Harvester** — extracts new user facts and future promises (with evaluator loop up to `MAX_FACT_HARVESTER_RETRY`)
 4. **DB Writer** — persists all outputs to MongoDB (character state, user facts, affinity, relationship insight, memory)
+
+**Stage 4 input**: `final_dialog`, `interaction_subtext`, `emotional_appraisal`, `character_intent`, `logical_stance`, `user_profile`, `character_state`
+
+**Stage 4 output**:
+- `mood`, `global_vibe`, `reflection_summary`
+- `diary_entry`, `affinity_delta`, `last_relationship_insight`
+- `new_facts`, `future_promises`
 
 ### MCP Tool Calling
 
@@ -114,9 +209,8 @@ src/
     service.py                       # FastAPI app — /chat, /health, /event routes
     scheduler.py                     # Async event scheduler (MongoDB-backed)
     config.py                        # env vars, affinity breakpoints, retry limits
-    state.py                         # DiscordProcessState TypedDict
+    state.py                         # IMProcessState TypedDict
     db.py                            # MongoDB helpers + document schemas + db_bootstrap()
-    discord_bot.py                   # Legacy Discord client (kept for reference)
     mcp_client.py                    # McpManager — MCP server connections + tool execution
     utils.py                         # Shared helpers (JSON parsing, affinity, history trim)
     agents/
@@ -128,7 +222,7 @@ src/
       persona_supervisor2.py         # Top-level 5-stage persona orchestrator
       persona_supervisor2_schema.py  # GlobalPersonaState TypedDict
       persona_supervisor2_msg_decontexualizer.py  # Stage 0
-      persona_supervisor2_research_subgraph.py    # Stage 1
+      persona_supervisor2_rag.py                   # Stage 1
       persona_supervisor2_cognition.py            # Stage 2
       persona_supervisor2_consolidator.py         # Stage 4
   adapters/                          # IM adapters (outside brain package)
@@ -245,13 +339,6 @@ The `docker-compose.yml` defines:
 - **`debug-adapter`** (commented) — Web chat UI on port 8080
 
 Environment variables are read from `.env` or can be set in the compose file.
-
-### Legacy Discord Bot (deprecated)
-
-```bash
-# Direct Discord bot (bypasses brain service — kept for reference)
-python src/kazusa_ai_chatbot/main.py --personality personalities/example.json
-```
 
 ## Design Decisions
 
