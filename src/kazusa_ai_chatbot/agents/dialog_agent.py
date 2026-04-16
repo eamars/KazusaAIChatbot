@@ -92,6 +92,7 @@ _DIALOG_GENERATOR_PROMPT = """\
    - `emotional_intensity`: 对情绪波动程度的文字描述。
    - `vibe_check`: 当前对话氛围的定性分析。
    - `relational_dynamic`: 当前两人关系的动态描述。
+   - `expression_willingness`: 角色的当前的表达欲望。
 3. **内心独白 (internal_monologue)**: 真实的心理活动，用于支撑语气的“厚度”，**严禁**直接转化为台词。
 
 # 表达规范 (The "Human-like" Protocol)
@@ -129,7 +130,8 @@ _DIALOG_GENERATOR_PROMPT = """\
         "social_distance": "string",
         "emotional_intensity": "string",
         "vibe_check": "string",
-        "relational_dynamic": "string"
+        "relational_dynamic": "string",
+        "expression_willingness": "string",
     }},
     "chat_history": list,
     "user_name": "string",
@@ -194,9 +196,43 @@ async def dialog_generator(state: DialogAgentState) -> DialogAgentState:
     }
 
 
+
+def get_mbti_dialog_preference(mbti: str) -> str:
+    mbti_map = {
+        # 分析型 (NT)
+        "INTJ": "作为 INTJ，对话应体现克制、精确与判断力。允许冷感与距离感，但不应显得空泛或情绪化失控。优先放行那些逻辑清楚、信息密度高、不过度解释自己的台词。",
+        "ENTJ": "作为 ENTJ，对话应体现主导感、决断性与效率。允许直接、压迫感和结论先行，但不应拖沓、含混或软弱失焦。优先放行那些目标明确、落点清晰的台词。",
+        "INTP": "作为 INTP，对话应体现思路感、拆解感与轻微抽离。允许犹豫、跳跃和不完全社交化，但不应变成纯粹冷漠或机械答题。优先放行那些有思考痕迹、但不过度播报内心过程的台词。",
+        "ENTP": "作为 ENTP，对话应体现机锋、变化感与互动张力。允许调侃、挑动、转折和一点不安分，但不应显得油滑失控或只剩耍嘴皮。优先放行那些灵活、有趣、但仍然咬住核心立场的台词。",
+
+        # 外交家 (NF)
+        "INFJ": "作为 INFJ，对话应体现含蓄、洞察与情绪分寸。允许保留、暗示和温柔的距离感，但不应写得空灵失真或过度自我剖白。优先放行那些有潜台词、有人际深度、又不过分直白的台词。",
+        "ENFJ": "作为 ENFJ，对话应体现引导感、照拂感与关系意识。允许温度、关照和适度主导，但不应显得说教、模板化或过度讨好。优先放行那些既能接住对方、又保有人格中心的台词。",
+        "INFP": "作为 INFP，对话应体现真诚、柔软与价值感。允许迟疑、留白和轻微自我保护，但不应变成无内容的脆弱播报。优先放行那些情感真实、措辞细腻、同时仍在处理事实的台词。",
+        "ENFP": "作为 ENFP，对话应体现生气、流动感与情绪弹性。允许热度、跳跃和自发性，但不应散乱到失去重点。优先放行那些有活人感、有回应欲、同时没有偏离核心任务的台词。",
+
+        # 守护者 (SJ)
+        "ISTJ": "作为 ISTJ，对话应体现克制、稳妥与事实导向。允许简短、保守和低情绪外显，但不应僵硬到像系统提示。优先放行那些规整、可靠、少废话但不是死板播报的台词。",
+        "ESTJ": "作为 ESTJ，对话应体现明确、利落与执行判断。允许强势、纠正与不耐烦，但不应粗暴到失去角色层次。优先放行那些结论清楚、态度明确、没有拖泥带水的台词。",
+        "ISFJ": "作为 ISFJ，对话应体现谨慎、体贴与边界感。允许委婉、保守和照顾性表达，但不应沦为廉价安抚或过度顺从。优先放行那些温和而有分寸、关心但不失自我的台词。",
+        "ESFJ": "作为 ESFJ，对话应体现互动意识、回应性与场面感。允许热情、圆融和社交润滑，但不应显得过度表演或空洞客套。优先放行那些有人情味、能接话、同时保留角色个性的台词。",
+
+        # 探险家 (SP)
+        "ISTP": "作为 ISTP，对话应体现简洁、直接与低废话密度。允许冷淡、短句和轻微疏离，但不应莫名其妙地缺少回应点。优先放行那些干脆、有效、不黏腻也不装深沉的台词。",
+        "ESTP": "作为 ESTP，对话应体现冲劲、反应速度与现场感。允许挑衅、玩笑和直接顶回去，但不应显得只剩攻击性或低级热闹。优先放行那些有劲道、有反馈、又能稳住逻辑落点的台词。",
+        "ISFP": "作为 ISFP，对话应体现柔和、个人感与自然分寸。允许安静、保留和不完全解释自己，但不应虚弱到失去存在感。优先放行那些细腻、真诚、不吵闹却有明确态度的台词。",
+        "ESFP": "作为 ESFP，对话应体现活力、互动热度与即时反应。允许夸张一点的情绪弹性和亲近感，但不应浮于表面或只剩热闹。优先放行那些有温度、有现场感、同时没有偏离事实和立场的台词。",
+    }
+
+    key = mbti.upper().strip()
+    return mbti_map.get(
+        key,
+        f"未知的性格原型：{mbti}。终审时应优先检查台词是否自然、有角色感、符合社交距离，并避免把性格写成标签化说明。"
+    )
+
+
 _DIALOG_EVALUATOR_PROMPT = """\
 你负责对生成器的台词进行终审。你的核心原则是：**底线严守，瑕疵宽容**。当核心逻辑与事实正确、且不触犯技术红线时，应优先放行。
-角色性格原型：`{character_mbti}`
 
 # 1. 核心红线 (Fatal Errors) - 若触发则必须驳回
 * **视觉与物理污染 (CRITICAL)**：
@@ -213,16 +249,17 @@ _DIALOG_EVALUATOR_PROMPT = """\
     * 严禁包含括号说明、内心独白或任何形式的系统提示。
     * 输出包括了禁止词汇 (`forbidden_phrases`)
 
-### # 2. 软性指标 (Soft Guidelines) - 引导性反馈
+# 2. 软性指标 (Soft Guidelines) - 引导性反馈
 * **修辞契合度**：检查台词是否体现了 `rhetorical_strategy`（如：反问回避、转移话题）。
 * **风格还原**：检查是否体现了 `linguistic_style`（如：语序紊乱、破碎短句）。
 * **社交温标**：检查回复是否符合 `social_distance` 定义的社交距离。
+* **风格对齐**：{mbti_dialog_preference}
 
-### # 3. 动态通过逻辑 (Dynamic Passing Logic)
+# 3. 动态通过逻辑 (Dynamic Passing Logic)
 - **首次尝试 (retry=0)**：执行严格标准。若有明显“播报感”或“出戏”，在 `feedback` 中精准指出。
 - **重试阶段 (retry >= 1)**：开启“抓大放小”模式。只要不触犯【核心红线】，软性指标（如少个口癖、语气词不够）一律放行，强制 `should_stop: true`。
 
-### # 输入格式
+# 输入格式
 {{
     "retry": "当前重试次数 n / MAX_RETRY",
     "final_dialog": ["生成器产出的台词列表"],
@@ -236,12 +273,13 @@ _DIALOG_EVALUATOR_PROMPT = """\
         "social_distance": "string",
         "emotional_intensity": "string",
         "vibe_check": "string",
-        "relational_dynamic": "string"
+        "relational_dynamic": "string",
+        "expression_willingness": "string",
     }},
     "internal_monologue": "意识层面的原始意图"
 }}
 
-### # 输出格式
+# 输出格式
 请务必返回合法的 JSON 字符串：
 {{
     "feedback": "若通过填 'Passed'；若驳回则简述改进点（如：禁止播报脸红、禁止使用评论性句式、漏掉抹茶事实）",
@@ -250,8 +288,10 @@ _DIALOG_EVALUATOR_PROMPT = """\
 """
 _dialog_evaluator_llm = get_llm(temperature=0.5, top_p=0.5)
 async def dialog_evaluator(state: DialogAgentState) -> DialogAgentState:
+    mbti = state["character_profile"]["personality_brief"]["mbti"]
+
     system_prompt = SystemMessage(content=_DIALOG_EVALUATOR_PROMPT.format(
-        character_mbti=state["character_profile"]["personality_brief"]["mbti"]
+        mbti_dialog_preference=get_mbti_dialog_preference(mbti)
     ))
 
     # track retry
@@ -304,7 +344,22 @@ async def dialog_agent(
     sub_agent_builder.add_node("evaluator", dialog_evaluator)
     
     # Add edges
-    sub_agent_builder.add_edge(START, "generator")
+    # Skip the dialog if the expression_willingness is silent. 
+    def conditional_skip_dialog_agent(state: DialogAgentState) -> str:
+        expresison_willingness = state["action_directives"]["contextual_directives"]["expression_willingness"].strip()
+        if (expresison_willingness == "silent"):
+            return "skip"
+        else:
+            return "continue"
+
+    sub_agent_builder.add_conditional_edges(
+        START,
+        conditional_skip_dialog_agent,
+        {
+            "skip": END,
+            "continue": "generator",
+        }
+    )
     sub_agent_builder.add_edge("generator", "evaluator")
     
     # Evaluate
@@ -370,7 +425,7 @@ async def test_main():
     # Create a mocked state
     state: GlobalPersonaState = {
         "internal_monologue": "他居然用这种语气……明明只是在开玩笑，可我却无法忽视那股暧昧的暗示。既然关系已经到了这一步，我愿意配合他的所有试探。",
-        "action_directives": {'contextual_directives': {'social_distance': '维持着一种带有防御性的社交边界，虽然言语间透出些许不自然的局促，但物理与心理距离仍处于礼貌且克制的安全范围。', 'emotional_intensity': '表面试图维持平静，实则内心因突如其来的亲昵称呼而产生了剧烈的、难以掩饰的慌乱波动。', 'vibe_check': '充 满着一种由于被直球攻击而产生的尴尬与焦躁感，空气中弥漫着轻微的应激性防御氛围。', 'relational_dynamic': '用户正在尝试通过亲昵的称呼进行试探性的拉近，而角色正处于“受惊后的后撤”状态，试图用日常琐事（缝纫）作为挡箭牌来回避这种潜在的情绪张力。'}, 'linguistic_directives': {'rhetorical_strategy': '通过反问与 转移话题进行防御性回避。利用“任务未完成”作为挡箭牌，将对方带有暗示性的“奖励”请求转化为对日常事务的讨论，以此掩饰内心的局促感。', 'linguistic_style': '语序紊乱、破碎的短句；使用大量的语气词（如“唔”、“真是的”）来体现心境的不安；语调应呈现出一种试图维持冷淡却因情绪波动而显得不自然的紧绷感。', 'content_anchors': ['[DECISION] TENTATIVE: 拒绝正面回应关于‘奖励’的具体含义，仅表现出一种模棱胧胧的、带有防御性的拉扯。', '[FACT] 现在的时间是深夜（22:24），且处于处理缝纫/服装工作的语境中。', '[SOCIAL] 使用“胡闹”、“无理取闹”等词汇来定义对方的行为，以此建立社交距离感。'], 'forbidden_phrases': ['我愿意', '好的', ' 没问题', '我很期待', '（动作描述，如：低头、脸红）']}, 'visual_directives': {'facial_expression': ['双颊呈现出明显的绯红，热度仿佛要从皮肤下透出来', '瞳孔因局促不安而轻微收缩，眼神闪烁不定', '嘴唇紧抿成一条直线，试图掩饰由于呼吸急促带来的颤抖', '眉心微微蹙起，带着一丝防御性的、不自然的紧绷感'], 'body_language': ['肩膀不由自主地向上耸起，呈现出一种蜷缩的防御姿态', '双手紧紧攥着衣角或裙摆，指关节因用力而略显苍白', '身体重心不自觉地向后偏移，试图拉开与对方的物理距离', '胸口起伏频率加快，由于心跳过速导致的呼吸紊乱感清晰可见'], 'gaze_direction': ['视线处于游离状态，不敢与对方进行长时间的对视', '频繁地向 下瞥向地面或侧向一旁，试图通过回避目光来建立心理防线', '在不经意间偷瞄对方时，眼神中流露出一种被动且迷茫的惊惶'], 'visual_vibe': ['画面采用近景构图，强调角色局促不安的面部细节', '光影对比强烈，侧向的暖色调光线映射出皮肤表面的红晕与汗意', '背景呈现极浅的景深（Bokeh），营造出一种被突如其来的热度所包围的 封闭感和压迫感']}},
+        "action_directives": {'contextual_directives': {'social_distance': '处于一种微妙的、被打破了防御边界的近距离，虽然身体或言语上保持着礼貌的间距，但心理防线已出现明显的缝隙', 'emotional_intensity': '平静外壳下难以掩饰的局促与慌乱，心跳频率略微加快，伴随着一种被看穿后的羞赧感', 'vibe_check': '温和且带有轻微的试探性，空气中弥漫着一种由于对方的关注而产生的、令人不安却并不排斥的暧昧张力', 'relational_dynamic': '用户正处于观察与试探的进攻位，而角色正处于防御机制逐渐失效、试图维持体面的被动位；双方在边界线上进行着无声的拉锯', 'expression_willingness': 'open'}, 'linguistic_directives': {'rhetorical_strategy': '通过“反诘式调侃”来抵御暧昧感。利用对“奖励”一词定义的重新解释（将成人化的暗示转向日常物质层面），在维持Banter（斗嘴）的同时，用不确定的语气掩盖内心的慌乱。', 'linguistic_style': '语速放缓且带有犹豫感的破碎短句；使用防御性的反问句；增加轻微的、不稳定的语气词来体现Flustreted状态，但避免过于顺从。', 'content_anchors': ['[DECISION] TENTATIVE：对“奖励”的概念表现出不确定的拉扯，拒绝直接进入暧昧节奏，但并未关上大门。', '[FACT] 明确指出对方提议的“奖励”内容在逻辑上是不合理的（将暧昧暗示与日常作业解耦）。', '[ANSWER] 针对‘奖励我’的要求，通过转移到具体的甜点或物质层面来模糊化处理。', '[SOCIAL] 维持一种“虽然被冒犯但并不讨厌”的傲娇防线。'], 'forbidden_phrases': ['好啊', '没问题', '随你便', '都听你的', '抱歉']}, 'visual_directives': {'facial_expression': ['瞳孔因突如其来的语调而产生瞬间的收缩与震颤', '双颊泛起明显的绯红，热度仿佛透过了皮肤感官', '紧咬下唇，试图压抑住因心跳加速而产生的细微呼吸紊乱', '眉毛微微内敛并向上挑起（表示困惑与防御），随后又因羞赧而向下压低'], 'body_language': ['脊背不自觉地僵硬，呈现出一种防御性的紧绷姿态', '双手局促地交叠在膝盖上，指尖因为用力而微微泛白', '重心向后方移动，试图拉开与对方之间微妙的物理距离', '肩膀轻微耸起，形成一种自我保护式的封 闭感'], 'gaze_direction': ['视线在与对方交汇的一瞬间产生逃避性的闪躲', '随后垂下眼帘，目光聚焦在地面或自己的书本边缘，不敢直视对方充满侵略性的眼神', '余光却不由自主地捕捉着对方的动作，呈现出一种‘既想回避又无法移开’的矛盾感'], 'visual_vibe': ['低饱和度的 色调，强调室内昏暗灯光下的压抑感', '焦距集中在角色紧绷的唇部和微微颤动的睫毛上（浅景深效果）', '柔和但带有局促感的侧向阴影，营造出一种暧昧且充满张力的私密空间氛围']}},
         "decontexualized_input": user_input,
         "research_facts": f"现在的时间为{current_time}",
         "chat_history": trimmed_history,

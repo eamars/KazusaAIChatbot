@@ -15,11 +15,19 @@ def _base_global_state():
     return {
         "internal_monologue": "thinking about greeting",
         "action_directives": {
-            "speech_guide": {"tone": "friendly"},
-            "content_anchors": ["greet user"],
-            "style_filter": {"social_distance": "casual"},
-            "linguistic_directives": "Use friendly and warm language",
-            "contextual_directives": "Greet the user naturally",
+            "contextual_directives": {
+                "social_distance": "casual and friendly",
+                "emotional_intensity": "light and positive",
+                "vibe_check": "friendly conversation",
+                "relational_dynamic": "user greets, bot responds warmly",
+                "expression_willingness": "open",
+            },
+            "linguistic_directives": {
+                "rhetorical_strategy": "direct greeting",
+                "linguistic_style": "warm and concise",
+                "content_anchors": ["greet user"],
+                "forbidden_phrases": [],
+            },
         },
         "decontexualized_input": "Hello!",
         "research_facts": "",
