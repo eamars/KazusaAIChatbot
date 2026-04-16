@@ -2,7 +2,7 @@ from langgraph.graph import StateGraph, START, END
 
 from kazusa_ai_chatbot.mcp_client import mcp_manager
 
-from kazusa_ai_chatbot.state import DiscordProcessState
+from kazusa_ai_chatbot.state import IMProcessState
 from kazusa_ai_chatbot.nodes.persona_supervisor2_schema import GlobalPersonaState
 from kazusa_ai_chatbot.nodes.persona_supervisor2_msg_decontexualizer import call_msg_decontexualizer
 from kazusa_ai_chatbot.nodes.persona_supervisor2_rag import call_rag_subgraph
@@ -26,7 +26,7 @@ async def call_action_subgraph(state: GlobalPersonaState) -> dict:
 
 
 
-async def persona_supervisor2(state: DiscordProcessState) -> dict:
+async def persona_supervisor2(state: IMProcessState) -> dict:
 
     # Build the top level graph that connect stages
     persona_builder = StateGraph(GlobalPersonaState)
@@ -97,7 +97,7 @@ async def test_main():
     trimmed_history = trim_history_dict(history)
 
     # Create a mocked BotState
-    test_state: DiscordProcessState = {
+    test_state: IMProcessState = {
         "timestamp": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         "platform": "discord",
         "platform_user_id": "320899931776745483",

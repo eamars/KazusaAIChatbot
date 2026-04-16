@@ -1,28 +1,29 @@
-"""Tests for state.py — DiscordProcessState TypedDict structure."""
+"""Tests for state.py — IMProcessState TypedDict structure."""
 
 from __future__ import annotations
 
 import typing
 
-from kazusa_ai_chatbot.state import DiscordProcessState
+from kazusa_ai_chatbot.state import IMProcessState
 
 
-class TestDiscordProcessState:
+class TestIMProcessState:
     def test_is_typed_dict(self):
-        assert issubclass(DiscordProcessState, dict)
+        assert issubclass(IMProcessState, dict)
 
     def test_has_required_input_fields(self):
-        hints = typing.get_type_hints(DiscordProcessState)
+        hints = typing.get_type_hints(IMProcessState)
         required_fields = [
-            "timestamp", "user_name", "user_id", "user_input", "user_profile",
-            "bot_id", "bot_name", "character_profile", "character_state",
-            "channel_id", "channel_name", "chat_history",
+            "timestamp", "platform", "platform_user_id", "global_user_id",
+            "user_name", "user_input", "user_multimedia_input", "user_profile",
+            "platform_bot_id", "bot_name", "character_profile", "character_state",
+            "platform_channel_id", "channel_name", "chat_history",
         ]
         for field in required_fields:
             assert field in hints, f"Missing field: {field}"
 
     def test_has_relevance_output_fields(self):
-        hints = typing.get_type_hints(DiscordProcessState)
+        hints = typing.get_type_hints(IMProcessState)
         relevance_fields = [
             "should_respond", "reason_to_respond", "use_reply_feature",
             "channel_topic", "user_topic",
@@ -31,23 +32,26 @@ class TestDiscordProcessState:
             assert field in hints, f"Missing relevance field: {field}"
 
     def test_has_persona_supervisor_output_fields(self):
-        hints = typing.get_type_hints(DiscordProcessState)
+        hints = typing.get_type_hints(IMProcessState)
         output_fields = ["final_dialog", "future_promises"]
         for field in output_fields:
             assert field in hints, f"Missing output field: {field}"
 
     def test_can_instantiate(self):
-        state: DiscordProcessState = {
+        state: IMProcessState = {
             "timestamp": "2024-01-01T00:00:00Z",
+            "platform": "discord",
+            "platform_user_id": "123",
+            "global_user_id": "uuid-123",
             "user_name": "TestUser",
-            "user_id": "123",
             "user_input": "Hello",
+            "user_multimedia_input": [],
             "user_profile": {},
-            "bot_id": 456,
+            "platform_bot_id": "456",
             "bot_name": "Bot",
             "character_profile": {},
             "character_state": {},
-            "channel_id": "789",
+            "platform_channel_id": "789",
             "channel_name": "test",
             "chat_history": [],
             "should_respond": True,

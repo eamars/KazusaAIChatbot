@@ -50,10 +50,10 @@ async def test_get_conversation_history():
     db.conversation_history.find.return_value.sort.return_value.limit.return_value = cursor
 
     with patch("kazusa_ai_chatbot.db.get_db", new_callable=AsyncMock, return_value=db):
-        result = await get_conversation_history("chan_1", limit=10)
+        result = await get_conversation_history(platform="discord", platform_channel_id="chan_1", limit=10)
         
         # Verify basic find parameters
-        db.conversation_history.find.assert_called_with({"channel_id": "chan_1"})
+        db.conversation_history.find.assert_called_with({"platform": "discord", "platform_channel_id": "chan_1"})
 
         # Verify sorting and limit
         db.conversation_history.find.return_value.sort.assert_called_with("timestamp", -1)
@@ -72,26 +72,28 @@ async def test_get_conversation_history_filters():
     db.conversation_history.find.return_value.sort.return_value.limit.return_value = cursor
 
     with patch("kazusa_ai_chatbot.db.get_db", new_callable=AsyncMock, return_value=db):
-        # test user_id filter
-        await get_conversation_history("chan_1", user_id="user_123")
-        db.conversation_history.find.assert_called_with({"channel_id": "chan_1", "user_id": "user_123"})
+        # test global_user_id filter
+        await get_conversation_history(platform="discord", platform_channel_id="chan_1", global_user_id="user_123")
+        db.conversation_history.find.assert_called_with({"platform": "discord", "platform_channel_id": "chan_1", "global_user_id": "user_123"})
         
-        # test name filter (should be used when user_id is missing)
-        await get_conversation_history("chan_1", name="Kira")
-        db.conversation_history.find.assert_called_with({"channel_id": "chan_1", "name": "Kira"})
+        # test display_name filter (should be used when global_user_id is missing)
+        await get_conversation_history(platform="discord", platform_channel_id="chan_1", display_name="Kira")
+        db.conversation_history.find.assert_called_with({"platform": "discord", "platform_channel_id": "chan_1", "display_name": "Kira"})
         
-        # test priority: user_id should be prioritized over name
-        await get_conversation_history("chan_1", user_id="user_123", name="Kira")
-        db.conversation_history.find.assert_called_with({"channel_id": "chan_1", "user_id": "user_123"})
+        # test priority: global_user_id should be prioritized over display_name
+        await get_conversation_history(platform="discord", platform_channel_id="chan_1", global_user_id="user_123", display_name="Kira")
+        db.conversation_history.find.assert_called_with({"platform": "discord", "platform_channel_id": "chan_1", "global_user_id": "user_123"})
         
         # test timestamp filter
         await get_conversation_history(
-            "chan_1", 
+            platform="discord",
+            platform_channel_id="chan_1",
             from_timestamp="2025-01-01T00:00:00Z", 
             to_timestamp="2025-01-02T00:00:00Z"
         )
         db.conversation_history.find.assert_called_with({
-            "channel_id": "chan_1",
+            "platform": "discord",
+            "platform_channel_id": "chan_1",
             "timestamp": {
                 "$gte": "2025-01-01T00:00:00Z",
                 "$lte": "2025-01-02T00:00:00Z"
@@ -100,31 +102,33 @@ async def test_get_conversation_history_filters():
         
         # test all combined
         await get_conversation_history(
-            "chan_1", 
-            name="Kira", 
+            platform="discord",
+            platform_channel_id="chan_1",
+            display_name="Kira", 
             from_timestamp="2025-01-01T00:00:00Z"
         )
         db.conversation_history.find.assert_called_with({
-            "channel_id": "chan_1",
-            "name": "Kira",
+            "platform": "discord",
+            "platform_channel_id": "chan_1",
+            "display_name": "Kira",
             "timestamp": {
                 "$gte": "2025-01-01T00:00:00Z"
             }
         })
         
-        # test without channel_id
+        # test without platform_channel_id
         await get_conversation_history(
-            user_id="user_123"
+            global_user_id="user_123"
         )
         db.conversation_history.find.assert_called_with({
-            "user_id": "user_123"
+            "global_user_id": "user_123"
         })
 
 
 @pytest.mark.asyncio
 async def test_get_user_facts_found():
     db = _mock_db()
-    db.user_facts.find_one = AsyncMock(return_value={"user_id": "u1", "facts": ["fact1", "fact2"]})
+    db.user_profiles.find_one = AsyncMock(return_value={"global_user_id": "u1", "facts": ["fact1", "fact2"]})
 
     with patch("kazusa_ai_chatbot.db.get_db", new_callable=AsyncMock, return_value=db):
         result = await get_user_facts("u1")
@@ -135,7 +139,7 @@ async def test_get_user_facts_found():
 @pytest.mark.asyncio
 async def test_get_user_facts_not_found():
     db = _mock_db()
-    db.user_facts.find_one = AsyncMock(return_value=None)
+    db.user_profiles.find_one = AsyncMock(return_value=None)
 
     with patch("kazusa_ai_chatbot.db.get_db", new_callable=AsyncMock, return_value=db):
         result = await get_user_facts("u1")
@@ -146,36 +150,36 @@ async def test_get_user_facts_not_found():
 @pytest.mark.asyncio
 async def test_upsert_user_facts_deduplicates():
     db = _mock_db()
-    db.user_facts.find_one = AsyncMock(return_value={"user_id": "u1", "facts": ["fact1", "fact2"]})
-    db.user_facts.update_one = AsyncMock()
+    db.user_profiles.find_one = AsyncMock(return_value={"global_user_id": "u1", "facts": ["fact1", "fact2"]})
+    db.user_profiles.update_one = AsyncMock()
 
     with patch("kazusa_ai_chatbot.db.get_db", new_callable=AsyncMock, return_value=db), \
          patch("kazusa_ai_chatbot.db.get_text_embedding", new_callable=AsyncMock, return_value=[0.1, 0.2, 0.3]):
         await upsert_user_facts("u1", ["fact2", "fact3"])
 
-    call_args = db.user_facts.update_one.call_args
+    call_args = db.user_profiles.update_one.call_args
     # Check the $set payload
     set_payload = call_args[0][1]["$set"]
     assert set_payload["facts"] == ["fact1", "fact2", "fact3"]
     assert set_payload["embedding"] == [0.1, 0.2, 0.3]
-    assert set_payload["user_id"] == "u1"
+    assert set_payload["global_user_id"] == "u1"
 
 
 @pytest.mark.asyncio
 async def test_upsert_user_facts_empty_facts():
     db = _mock_db()
-    db.user_facts.find_one = AsyncMock(return_value={"user_id": "u1", "facts": []})
-    db.user_facts.update_one = AsyncMock()
+    db.user_profiles.find_one = AsyncMock(return_value={"global_user_id": "u1", "facts": []})
+    db.user_profiles.update_one = AsyncMock()
 
     with patch("kazusa_ai_chatbot.db.get_db", new_callable=AsyncMock, return_value=db):
         await upsert_user_facts("u1", [])
 
-    call_args = db.user_facts.update_one.call_args
+    call_args = db.user_profiles.update_one.call_args
     # Check the $set payload
     set_payload = call_args[0][1]["$set"]
     assert set_payload["facts"] == []
     assert set_payload["embedding"] == []
-    assert set_payload["user_id"] == "u1"
+    assert set_payload["global_user_id"] == "u1"
 
 
 @pytest.mark.asyncio
@@ -210,16 +214,16 @@ async def test_enable_user_facts_vector_index_mocked():
 async def test_overwrite_user_facts_replaces_existing():
     """overwrite_user_facts should completely replace existing facts."""
     db = _mock_db()
-    db.user_facts.update_one = AsyncMock()
+    db.user_profiles.update_one = AsyncMock()
     
     with patch("kazusa_ai_chatbot.db.get_db", new_callable=AsyncMock, return_value=db), \
          patch("kazusa_ai_chatbot.db.get_text_embedding", new_callable=AsyncMock, return_value=[0.1, 0.2, 0.3]):
         await overwrite_user_facts("user_1", ["New fact 1", "New fact 2"])
     
     # Verify update_one was called with the new facts (not merged)
-    db.user_facts.update_one.assert_called_once_with(
-        {"user_id": "user_1"},
-        {"$set": {"user_id": "user_1", "facts": ["New fact 1", "New fact 2"], "embedding": [0.1, 0.2, 0.3]}},
+    db.user_profiles.update_one.assert_called_once_with(
+        {"global_user_id": "user_1"},
+        {"$set": {"global_user_id": "user_1", "facts": ["New fact 1", "New fact 2"], "embedding": [0.1, 0.2, 0.3]}},
         upsert=True,
     )
 
@@ -228,16 +232,16 @@ async def test_overwrite_user_facts_replaces_existing():
 async def test_overwrite_user_facts_empty():
     """overwrite_user_facts should handle empty facts list."""
     db = _mock_db()
-    db.user_facts.update_one = AsyncMock()
+    db.user_profiles.update_one = AsyncMock()
     
     with patch("kazusa_ai_chatbot.db.get_db", new_callable=AsyncMock, return_value=db), \
          patch("kazusa_ai_chatbot.db.get_text_embedding", new_callable=AsyncMock, return_value=[]):
         await overwrite_user_facts("user_1", [])
     
     # Verify update_one was called with empty facts and empty embedding
-    db.user_facts.update_one.assert_called_once_with(
-        {"user_id": "user_1"},
-        {"$set": {"user_id": "user_1", "facts": [], "embedding": []}},
+    db.user_profiles.update_one.assert_called_once_with(
+        {"global_user_id": "user_1"},
+        {"$set": {"global_user_id": "user_1", "facts": [], "embedding": []}},
         upsert=True,
     )
 
@@ -257,8 +261,8 @@ async def test_search_users_by_facts_integration():
     collection = MagicMock()
     cursor = MagicMock()
     
-    # Set up the chain: db.user_facts.aggregate() -> cursor
-    db.user_facts = collection
+    # Set up the chain: db.user_profiles.aggregate() -> cursor
+    db.user_profiles = collection
     collection.aggregate.return_value = cursor
     cursor.to_list = AsyncMock(return_value=mock_docs)
     
@@ -333,9 +337,9 @@ async def test_upsert_character_state():
 @pytest.mark.asyncio
 async def test_get_user_profile_found():
     db = _mock_db()
-    db.user_facts.find_one = AsyncMock(return_value={
+    db.user_profiles.find_one = AsyncMock(return_value={
         "_id": "abc",
-        "user_id": "u1",
+        "global_user_id": "u1",
         "facts": ["fact1"],
         "affinity": 600,
         "last_relationship_insight": "friendly",
@@ -345,7 +349,7 @@ async def test_get_user_profile_found():
     with patch("kazusa_ai_chatbot.db.get_db", new_callable=AsyncMock, return_value=db):
         result = await get_user_profile("u1")
 
-    assert result["user_id"] == "u1"
+    assert result["global_user_id"] == "u1"
     assert result["affinity"] == 600
     assert "_id" not in result
     assert "embedding" not in result
@@ -354,7 +358,7 @@ async def test_get_user_profile_found():
 @pytest.mark.asyncio
 async def test_get_user_profile_not_found():
     db = _mock_db()
-    db.user_facts.find_one = AsyncMock(return_value=None)
+    db.user_profiles.find_one = AsyncMock(return_value=None)
 
     with patch("kazusa_ai_chatbot.db.get_db", new_callable=AsyncMock, return_value=db):
         result = await get_user_profile("unknown")
@@ -368,13 +372,13 @@ async def test_get_user_profile_not_found():
 @pytest.mark.asyncio
 async def test_update_last_relationship_insight():
     db = _mock_db()
-    db.user_facts.update_one = AsyncMock()
+    db.user_profiles.update_one = AsyncMock()
 
     with patch("kazusa_ai_chatbot.db.get_db", new_callable=AsyncMock, return_value=db):
         await update_last_relationship_insight("u1", "very friendly")
 
-    db.user_facts.update_one.assert_called_once_with(
-        {"user_id": "u1"},
+    db.user_profiles.update_one.assert_called_once_with(
+        {"global_user_id": "u1"},
         {"$set": {"last_relationship_insight": "very friendly"}},
         upsert=True,
     )
@@ -780,7 +784,7 @@ async def test_live_character_state_update_overwrites_mood(live_test_db):
 @pytest.mark.asyncio
 async def test_get_affinity_default_for_unknown_user():
     db = _mock_db()
-    db.user_facts.find_one = AsyncMock(return_value=None)
+    db.user_profiles.find_one = AsyncMock(return_value=None)
 
     with patch("kazusa_ai_chatbot.db.get_db", new_callable=AsyncMock, return_value=db):
         result = await get_affinity("unknown_user")
@@ -791,7 +795,7 @@ async def test_get_affinity_default_for_unknown_user():
 @pytest.mark.asyncio
 async def test_get_affinity_returns_stored_value():
     db = _mock_db()
-    db.user_facts.find_one = AsyncMock(return_value={"user_id": "u1", "affinity": 750})
+    db.user_profiles.find_one = AsyncMock(return_value={"user_id": "u1", "affinity": 750})
 
     with patch("kazusa_ai_chatbot.db.get_db", new_callable=AsyncMock, return_value=db):
         result = await get_affinity("u1")
@@ -802,8 +806,8 @@ async def test_get_affinity_returns_stored_value():
 @pytest.mark.asyncio
 async def test_update_affinity_clamps_to_max():
     db = _mock_db()
-    db.user_facts.find_one = AsyncMock(return_value={"user_id": "u1", "affinity": 995})
-    db.user_facts.update_one = AsyncMock()
+    db.user_profiles.find_one = AsyncMock(return_value={"user_id": "u1", "affinity": 995})
+    db.user_profiles.update_one = AsyncMock()
 
     with patch("kazusa_ai_chatbot.db.get_db", new_callable=AsyncMock, return_value=db):
         result = await update_affinity("u1", 10)
@@ -814,8 +818,8 @@ async def test_update_affinity_clamps_to_max():
 @pytest.mark.asyncio
 async def test_update_affinity_clamps_to_min():
     db = _mock_db()
-    db.user_facts.find_one = AsyncMock(return_value={"user_id": "u1", "affinity": 5})
-    db.user_facts.update_one = AsyncMock()
+    db.user_profiles.find_one = AsyncMock(return_value={"user_id": "u1", "affinity": 5})
+    db.user_profiles.update_one = AsyncMock()
 
     with patch("kazusa_ai_chatbot.db.get_db", new_callable=AsyncMock, return_value=db):
         result = await update_affinity("u1", -20)
@@ -874,7 +878,7 @@ async def test_search_conversation_history_keyword_mocked():
 
 @pytest.mark.asyncio
 async def test_search_conversation_history_keyword_with_filters_mocked():
-    """Keyword search applies channel_id and user_id filters."""
+    """Keyword search applies platform_channel_id and global_user_id filters."""
     db = _mock_db()
     cursor = AsyncMock()
     cursor.to_list = AsyncMock(return_value=[])
@@ -882,12 +886,12 @@ async def test_search_conversation_history_keyword_with_filters_mocked():
 
     with patch("kazusa_ai_chatbot.db.get_db", new_callable=AsyncMock, return_value=db):
         await db_module.search_conversation_history(
-            "test", method="keyword", channel_id="ch1", user_id="u1"
+            "test", method="keyword", platform_channel_id="ch1", global_user_id="u1"
         )
 
     call_filter = db.conversation_history.find.call_args[0][0]
-    assert call_filter["channel_id"] == "ch1"
-    assert call_filter["user_id"] == "u1"
+    assert call_filter["platform_channel_id"] == "ch1"
+    assert call_filter["global_user_id"] == "u1"
 
 
 @pytest.mark.asyncio
@@ -917,7 +921,7 @@ async def test_search_conversation_history_vector_mocked():
 
 @pytest.mark.asyncio
 async def test_search_conversation_history_vector_with_filters_mocked():
-    """Vector search adds $match stage for channel_id/user_id post-filtering."""
+    """Vector search adds $match stage for platform_channel_id/global_user_id post-filtering."""
     db = _mock_db()
     cursor = AsyncMock()
     cursor.to_list = AsyncMock(return_value=[])
@@ -926,15 +930,15 @@ async def test_search_conversation_history_vector_with_filters_mocked():
     with patch("kazusa_ai_chatbot.db.get_db", new_callable=AsyncMock, return_value=db), \
          patch("kazusa_ai_chatbot.db.get_text_embedding", new_callable=AsyncMock, return_value=[0.1, 0.2, 0.3]):
         await db_module.search_conversation_history(
-            "test", method="vector", channel_id="ch1", user_id="u1", limit=3
+            "test", method="vector", platform_channel_id="ch1", global_user_id="u1", limit=3
         )
 
     pipeline = db.conversation_history.aggregate.call_args[0][0]
     # Should contain a $match stage with both filters
     match_stages = [s for s in pipeline if "$match" in s]
     assert len(match_stages) == 1
-    assert match_stages[0]["$match"]["channel_id"] == "ch1"
-    assert match_stages[0]["$match"]["user_id"] == "u1"
+    assert match_stages[0]["$match"]["platform_channel_id"] == "ch1"
+    assert match_stages[0]["$match"]["global_user_id"] == "u1"
 
 
 # NOTE: test_search_lore_mocked removed due to async mock complexity

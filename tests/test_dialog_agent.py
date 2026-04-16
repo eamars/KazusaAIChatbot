@@ -18,6 +18,8 @@ def _base_global_state():
             "speech_guide": {"tone": "friendly"},
             "content_anchors": ["greet user"],
             "style_filter": {"social_distance": "casual"},
+            "linguistic_directives": "Use friendly and warm language",
+            "contextual_directives": "Greet the user naturally",
         },
         "decontexualized_input": "Hello!",
         "research_facts": "",

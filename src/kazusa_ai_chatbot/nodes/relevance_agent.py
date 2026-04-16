@@ -15,7 +15,7 @@ from langchain_core.messages import HumanMessage, SystemMessage
 
 from kazusa_ai_chatbot.utils import build_affinity_block, parse_llm_json_output
 from kazusa_ai_chatbot.utils import get_llm
-from kazusa_ai_chatbot.state import DiscordProcessState
+from kazusa_ai_chatbot.state import IMProcessState
 
 logger = logging.getLogger(__name__)
 
@@ -82,7 +82,7 @@ _RELEVANCE_SYSTEM_PROMPT = """\
 """
 
 _relevance_agent_llm = get_llm(temperature=0.1, top_p=0.9)
-async def relevance_agent(state: DiscordProcessState) -> DiscordProcessState:
+async def relevance_agent(state: IMProcessState) -> IMProcessState:
     # Calculate affinity context
     affinity_block = build_affinity_block(state["user_profile"]["affinity"])
 
@@ -184,7 +184,7 @@ _VISION_DESCRIPTOR_PROMPT = """\
 }}
 """
 _vision_descriptor_llm = get_llm(temperature=0.2, top_p=0.9)
-async def multimedia_descriptor_agent(state: DiscordProcessState) -> DiscordProcessState:
+async def multimedia_descriptor_agent(state: IMProcessState) -> IMProcessState:
     user_name = state.get("user_name")
     platform_user_id = state.get("platform_user_id", "")
 
@@ -248,7 +248,7 @@ async def test_main():
     platform_user_id = "320899931776745483"
     platform_bot_id = "1485169644888395817"
 
-    state: DiscordProcessState = {
+    state: IMProcessState = {
         "platform": "discord",
         "platform_user_id": platform_user_id,
         "global_user_id": "test-uuid-placeholder",
@@ -277,7 +277,7 @@ async def test_main2():
         "description": "",
     }
 
-    state: DiscordProcessState = {
+    state: IMProcessState = {
         "user_multimedia_input": [image_content]
     }
 

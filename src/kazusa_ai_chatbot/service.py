@@ -41,7 +41,7 @@ from kazusa_ai_chatbot.db import (
     save_conversation,
 )
 from kazusa_ai_chatbot.mcp_client import mcp_manager
-from kazusa_ai_chatbot.state import DiscordProcessState, MultiMediaDoc
+from kazusa_ai_chatbot.state import IMProcessState, MultiMediaDoc
 from kazusa_ai_chatbot.utils import load_personality, trim_history_dict
 from kazusa_ai_chatbot import scheduler
 
@@ -106,8 +106,8 @@ class HealthResponse(BaseModel):
 # ── Graph builder ───────────────────────────────────────────────────
 
 def _build_graph():
-    """Build the LangGraph pipeline (identical to discord_bot.build_graph)."""
-    graph = StateGraph(DiscordProcessState)
+    """Build the LangGraph pipeline for the brain service."""
+    graph = StateGraph(IMProcessState)
 
     graph.add_node("relevance_agent", relevance_agent)
     graph.add_node("multimedia_descriptor_agent", multimedia_descriptor_agent)
@@ -130,36 +130,16 @@ def _build_graph():
     return graph.compile()
 
 
-# ── Conversation saver (background task) ────────────────────────────
+# ── Bot message saver (background task) ──────────────────────────────
 
-async def _save_conversation(result: dict) -> None:
-    """Persist user and bot messages to conversation history."""
+async def _save_bot_message(result: dict) -> None:
+    """Persist the bot's response to conversation history (background task)."""
     platform = result.get("platform", "")
     platform_channel_id = result.get("platform_channel_id", "")
-    platform_user_id = result.get("platform_user_id", "")
-    global_user_id = result.get("global_user_id", "")
-    user_name = result.get("user_name", "")
-    user_input = result.get("user_input", "")
     platform_bot_id = result.get("platform_bot_id", "")
     bot_name = result.get("bot_name", "")
     bot_output = result.get("final_dialog", [])
 
-    # Save user message
-    try:
-        await save_conversation({
-            "platform": platform,
-            "platform_channel_id": platform_channel_id,
-            "role": "user",
-            "platform_user_id": platform_user_id,
-            "global_user_id": global_user_id,
-            "display_name": user_name,
-            "content": user_input,
-            "timestamp": result.get("timestamp", ""),
-        })
-    except Exception:
-        logger.exception("Failed to save user message")
-
-    # Save bot message
     if bot_output:
         try:
             await save_conversation({
@@ -274,7 +254,7 @@ async def chat(req: ChatRequest, background_tasks: BackgroundTasks):
     # Build the character bot identity
     bot_name = _personality.get("name", "KazusaBot")
 
-    initial_state: DiscordProcessState = {
+    initial_state: IMProcessState = {
         "timestamp": timestamp,
         "platform": req.platform,
         "platform_user_id": req.platform_user_id,
@@ -292,6 +272,21 @@ async def chat(req: ChatRequest, background_tasks: BackgroundTasks):
         "chat_history": trimmed_history,
     }
 
+    # Save user message immediately (before graph invocation)
+    try:
+        await save_conversation({
+            "platform": req.platform,
+            "platform_channel_id": req.platform_channel_id,
+            "role": "user",
+            "platform_user_id": req.platform_user_id,
+            "global_user_id": global_user_id,
+            "display_name": req.display_name,
+            "content": req.content,
+            "timestamp": timestamp,
+        })
+    except Exception:
+        logger.exception("Failed to save user message")
+
     # Invoke the graph
     try:
         result = await _graph.ainvoke(initial_state)
@@ -302,8 +297,9 @@ async def chat(req: ChatRequest, background_tasks: BackgroundTasks):
     final_dialog = result.get("final_dialog", [])
     should_reply = result.get("use_reply_feature", False)
 
-    # Save conversation in background
-    background_tasks.add_task(_save_conversation, result)
+    # Save bot message in background only if the bot actually responded
+    if final_dialog:
+        background_tasks.add_task(_save_bot_message, result)
 
     # TODO: Extract scheduled_followups from result["future_promises"] and schedule them
     scheduled_followups = 0

@@ -449,6 +449,10 @@ async def db_writer(state: ConsolidatorState):
     new_affinity_delta = process_affinity_delta(user_affinity_score, affinity_delta)
     await update_affinity(global_user_id, new_affinity_delta)
 
+    logger.debug(
+        f"User {user_name}(@{global_user_id}) affinity {user_affinity_score} -> {user_affinity_score + new_affinity_delta}."
+    )
+
     return state
     
 

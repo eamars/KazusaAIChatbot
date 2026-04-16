@@ -32,7 +32,7 @@ class TestToolRegistration:
 async def test_search_user_facts_tool():
     """search_user_facts tool should delegate to db.get_user_facts."""
     with patch("kazusa_ai_chatbot.agents.memory_retriever_agent.get_user_facts", new_callable=AsyncMock, return_value=["fact1", "fact2"]):
-        result = await search_user_facts.ainvoke({"user_id": "user_123"})
+        result = await search_user_facts.ainvoke({"global_user_id": "user_123"})
 
     assert result == ["fact1", "fact2"]
 

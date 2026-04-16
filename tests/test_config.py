@@ -51,13 +51,13 @@ class TestBreakpoints:
 class TestRetryLimits:
     def test_retry_limits_are_positive(self):
         from kazusa_ai_chatbot.config import (
-            MAX_PERSONA_SUPERVISOR_STAGE1_RETRY,
+            MAX_RESEARCH_AGENT_RETRY,
             MAX_MEMORY_RETRIEVER_AGENT_RETRY,
             MAX_WEB_SEARCH_AGENT_RETRY,
             MAX_DIALOG_AGENT_RETRY,
             MAX_FACT_HARVESTER_RETRY,
         )
-        assert MAX_PERSONA_SUPERVISOR_STAGE1_RETRY > 0
+        assert MAX_RESEARCH_AGENT_RETRY > 0
         assert MAX_MEMORY_RETRIEVER_AGENT_RETRY > 0
         assert MAX_WEB_SEARCH_AGENT_RETRY > 0
         assert MAX_DIALOG_AGENT_RETRY > 0

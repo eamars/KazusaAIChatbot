@@ -9,7 +9,7 @@ class MultiMediaDoc(TypedDict):
     description: str
 
 
-class DiscordProcessState(TypedDict):
+class IMProcessState(TypedDict):
     timestamp: str
 
     # Platform identity

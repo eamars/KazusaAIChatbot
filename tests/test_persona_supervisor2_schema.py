@@ -19,9 +19,9 @@ class TestGlobalPersonaState:
     def test_has_input_fields(self):
         hints = typing.get_type_hints(GlobalPersonaState)
         input_fields = [
-            "timestamp", "user_input", "user_id", "user_name",
-            "user_profile", "bot_id", "chat_history",
-            "user_topic", "channel_topic",
+            "timestamp", "user_input", "platform", "platform_user_id",
+            "global_user_id", "user_name", "user_profile", "platform_bot_id",
+            "chat_history", "user_topic", "channel_topic",
         ]
         for field in input_fields:
             assert field in hints, f"Missing input field: {field}"

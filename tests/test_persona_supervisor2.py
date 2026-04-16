@@ -10,14 +10,17 @@ from kazusa_ai_chatbot.nodes.persona_supervisor2 import persona_supervisor2, cal
 
 
 def _base_discord_state():
-    """Minimal DiscordProcessState with all required keys."""
+    """Minimal IMProcessState with all required keys."""
     return {
         "timestamp": "2024-01-01T00:00:00Z",
         "user_name": "TestUser",
-        "user_id": "user_123",
+        "platform": "discord",
+        "platform_user_id": "user_123",
+        "global_user_id": "uuid-123",
         "user_input": "Hello",
+        "user_multimedia_input": [],
         "user_profile": {"affinity": 500},
-        "bot_id": "bot_456",
+        "platform_bot_id": "bot_456",
         "bot_name": "TestBot",
         "character_profile": {"name": "Kazusa"},
         "character_state": {
@@ -25,7 +28,7 @@ def _base_discord_state():
             "global_vibe": "calm",
             "reflection_summary": "nothing notable",
         },
-        "channel_id": "chan_1",
+        "platform_channel_id": "chan_1",
         "channel_name": "general",
         "chat_history": [],
         "should_respond": True,
@@ -65,7 +68,7 @@ async def test_persona_supervisor2_returns_final_dialog_and_future_promises():
 
     # Mock all 5 stage functions to avoid real LLM calls
     with patch("kazusa_ai_chatbot.nodes.persona_supervisor2.call_msg_decontexualizer", new_callable=AsyncMock, return_value={"decontexualized_input": "Hello"}) as m_decon, \
-         patch("kazusa_ai_chatbot.nodes.persona_supervisor2.call_research_subgraph", new_callable=AsyncMock, return_value={"research_facts": "", "research_metadata": []}) as m_research, \
+         patch("kazusa_ai_chatbot.nodes.persona_supervisor2.call_rag_subgraph", new_callable=AsyncMock, return_value={"research_facts": "", "research_metadata": []}) as m_research, \
          patch("kazusa_ai_chatbot.nodes.persona_supervisor2.call_cognition_subgraph", new_callable=AsyncMock, return_value={
              "internal_monologue": "thinking...",
              "action_directives": {},

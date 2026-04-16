@@ -10,14 +10,17 @@ from kazusa_ai_chatbot.nodes.relevance_agent import relevance_agent
 
 
 def _base_state():
-    """Minimal DiscordProcessState for testing relevance_agent."""
+    """Minimal IMProcessState for testing relevance_agent."""
     return {
         "timestamp": "2024-01-01T00:00:00Z",
+        "platform": "discord",
+        "platform_user_id": "user_123",
+        "global_user_id": "uuid-123",
         "user_name": "TestUser",
-        "user_id": "user_123",
         "user_input": "Hello bot!",
+        "user_multimedia_input": [],
         "user_profile": {"affinity": 500, "last_relationship_insight": ""},
-        "bot_id": "bot_456",
+        "platform_bot_id": "bot_456",
         "bot_name": "TestBot",
         "character_profile": {"name": "Kazusa"},
         "character_state": {
@@ -25,10 +28,9 @@ def _base_state():
             "global_vibe": "calm",
             "reflection_summary": "nothing notable",
         },
-        "channel_id": "chan_1",
+        "platform_channel_id": "chan_1",
         "channel_name": "general",
         "chat_history": [],
-        "conversation_history": [],
     }
 
 
