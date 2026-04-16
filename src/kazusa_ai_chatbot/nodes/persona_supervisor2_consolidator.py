@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 class ConsolidatorState(TypedDict):
     # Inputs for db_writer
     timestamp: str
-    user_id: str
+    global_user_id: str
     user_name: str
     user_profile: dict
 
@@ -398,7 +398,7 @@ def process_affinity_delta(current_affinity: int, raw_delta: int) -> int:
 
 async def db_writer(state: ConsolidatorState):
     timestamp = state.get("timestamp", datetime.now(timezone.utc).isoformat())
-    user_id = state.get("user_id", "")
+    global_user_id = state.get("global_user_id", "")
     user_name = state.get("user_name", "")
 
 
@@ -417,33 +417,37 @@ async def db_writer(state: ConsolidatorState):
 
     # Step 2a: Update diary. 
     diary_entry = state.get("diary_entry", [])
-    if user_id and diary_entry:
-        await upsert_user_facts(user_id, diary_entry)
+    if global_user_id and diary_entry:
+        await upsert_user_facts(global_user_id, diary_entry)
 
     # Step 2b: Update last relationship insight
     last_relationship_insight = state.get("last_relationship_insight", "")
-    if user_id and last_relationship_insight:
-        await update_last_relationship_insight(user_id, last_relationship_insight)
+    if global_user_id and last_relationship_insight:
+        await update_last_relationship_insight(global_user_id, last_relationship_insight)
 
     # Step 3: Record facts and future promises
     new_facts = state.get("new_facts", [])
     for fact in new_facts:
         memory_name = f"New fact with {user_name}"
         memory_content = fact["description"]
-        await save_memory(memory_name, memory_content, timestamp)
+        await save_memory(memory_name, memory_content, timestamp, source_global_user_id=global_user_id)
 
     future_promises = state.get("future_promises", [])
     for promise in future_promises:
         memory_name = f"Future promise with {user_name}"
         memory_content = f"Target: {promise['target']}: Description: {promise['action']}, Due: {promise['due_time']}"
-        await save_memory(memory_name, memory_content, timestamp)
+        await save_memory(memory_name, memory_content, timestamp, source_global_user_id=global_user_id)
+
+    # TODO: Convert future_promises into scheduled events via kazusa_ai_chatbot.scheduler.schedule_event()
+    # Each promise with a concrete due_time should create a ScheduledEventDoc with
+    # event_type="followup_message" so the brain service can proactively deliver it.
 
 
     # Step 4: caclualte new affinity
     user_affinity_score = state.get("user_profile", {}).get("affinity", AFFINITY_DEFAULT)
     affinity_delta = state.get("affinity_delta", 0)
     new_affinity_delta = process_affinity_delta(user_affinity_score, affinity_delta)
-    await update_affinity(user_id, new_affinity_delta)
+    await update_affinity(global_user_id, new_affinity_delta)
 
     return state
     
@@ -484,7 +488,7 @@ async def call_consolidation_subgraph(
     # Build initial state
     sub_state: ConsolidatorState = {
         "timestamp": global_state["timestamp"],
-        "user_id": global_state["user_id"],
+        "global_user_id": global_state["global_user_id"],
         "user_name": global_state["user_name"],
         "user_profile": global_state["user_profile"],
 
@@ -544,7 +548,7 @@ async def test_main():
     from kazusa_ai_chatbot.db import get_character_state
 
 
-    history = await get_conversation_history(channel_id="1485606207069880361", limit=5)
+    history = await get_conversation_history(platform="discord", platform_channel_id="1485606207069880361", limit=5)
     trimmed_history = trim_history_dict(history)
 
     current_time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -554,7 +558,7 @@ async def test_main():
     # Create a mocked state
     state: GlobalPersonaState = {
         "timestamp": current_time,
-        "user_id": "320899931776745483",
+        "global_user_id": "320899931776745483",
         "user_name": "EAMARS",
         "user_profile": {"affinity": 950},
 

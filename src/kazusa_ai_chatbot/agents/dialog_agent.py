@@ -360,7 +360,7 @@ async def test_main():
     from kazusa_ai_chatbot.utils import load_personality
 
 
-    history = await get_conversation_history(channel_id="1485606207069880361", limit=5)
+    history = await get_conversation_history(platform="discord", platform_channel_id="1485606207069880361", limit=5)
     trimmed_history = trim_history_dict(history)
 
     current_time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")

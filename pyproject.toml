@@ -35,6 +35,9 @@ dependencies = [
     "numpy>=1.24",
     "mcp>=1.0.0",
     "json-repair>=0.58.0",
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.30",
+    "httpx>=0.27",
     "pydantic",
 ]
 
@@ -51,10 +54,13 @@ search-conversations = "scripts.search_conversation:async_main"
 search-user-facts = "scripts.search_user_facts:async_main"
 debug-supervisor-speech = "scripts.debug_supervisor_speech:async_main"
 kazusa-ai-chatbot = "kazusa_ai_chatbot.main:main"
+kazusa-brain = "kazusa_ai_chatbot.service:app"
+kazusa-discord-adapter = "adapters.discord_adapter:main"
+kazusa-debug-adapter = "adapters.debug_adapter:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
-include = ["kazusa_ai_chatbot*", "scripts*"]
+include = ["kazusa_ai_chatbot*", "scripts*", "adapters*"]
 
 [tool.setuptools.package-data]
 src = ["*.py"]

@@ -15,8 +15,8 @@ import base64
 
 import discord
 
-from kazusa_ai_chatbot.config import DISCORD_TOKEN, CONVERSATION_HISTORY_LIMIT, AFFINITY_DEFAULT
-from kazusa_ai_chatbot.db import close_db, get_conversation_history, save_conversation, get_user_profile, get_character_state, create_user_profile
+from kazusa_ai_chatbot.config import DISCORD_TOKEN, CONVERSATION_HISTORY_LIMIT
+from kazusa_ai_chatbot.db import close_db, get_conversation_history, save_conversation, get_user_profile, get_character_state, resolve_global_user_id
 from kazusa_ai_chatbot.mcp_client import mcp_manager
 from kazusa_ai_chatbot.state import DiscordProcessState, MultiMediaDoc
 from kazusa_ai_chatbot.utils import load_personality, trim_history_dict
@@ -149,26 +149,22 @@ class RolePlayBot(discord.Client):
                     logger.error(f"Failed to fetch attachment {attachment.url}: {e}")
 
         # Build initial state
+        platform = "discord"
         timestamp = datetime.now(timezone.utc).isoformat()
-        user_id = str(message.author.id)
+        platform_user_id = str(message.author.id)
         user_name = message.author.display_name
-        bot_id = str(self.user.id) if self.user else ""
+        platform_bot_id = str(self.user.id) if self.user else ""
         bot_name = str(self.user.name) if self.user else ""  # This is the displayed name from discord, not the character's real name
-        channel_id = str(message.channel.id)
+        platform_channel_id = str(message.channel.id)
         character_state = await get_character_state()
 
-        # Create a default profile if not exist
-        while True:
-            user_profile = await get_user_profile(user_id)
-            if user_profile:
-                break
-            await create_user_profile({
-                "user_id": user_id,
-                "facts": [],
-                "affinity": AFFINITY_DEFAULT,
-                "last_relationship_insight": "",
-            })
-            logger.info(f"Created default profile for user {user_id}")
+        # Resolve global user ID (auto-creates profile if not found)
+        global_user_id = await resolve_global_user_id(
+            platform=platform,
+            platform_user_id=platform_user_id,
+            display_name=user_name,
+        )
+        user_profile = await get_user_profile(global_user_id)
 
         # Private message (DM)
         if (message.guild is None):
@@ -176,24 +172,30 @@ class RolePlayBot(discord.Client):
         else:
             channel_name = str(message.channel.name)
 
-        history = await get_conversation_history(channel_id=channel_id, limit=CONVERSATION_HISTORY_LIMIT)
+        history = await get_conversation_history(
+            platform=platform,
+            platform_channel_id=platform_channel_id,
+            limit=CONVERSATION_HISTORY_LIMIT,
+        )
         trimmed_history = trim_history_dict(history)
 
         initial_state: DiscordProcessState = {
             "timestamp": timestamp,
 
+            "platform": platform,
+            "platform_user_id": platform_user_id,
+            "global_user_id": global_user_id,
             "user_name": user_name,
-            "user_id": user_id,
             "user_input": user_input,
             "user_multimedia_input": multimedia_input,
             "user_profile": user_profile,
 
-            "bot_id": bot_id,
+            "platform_bot_id": platform_bot_id,
             "bot_name": bot_name,
             "character_profile": self.personality,
             "character_state": character_state,
 
-            "channel_id": channel_id,
+            "platform_channel_id": platform_channel_id,
             "channel_name": channel_name,
             "chat_history": trimmed_history,
         }
@@ -229,11 +231,13 @@ class RolePlayBot(discord.Client):
         asyncio.create_task(self.conversation_saver(result))
 
     async def conversation_saver(self, graph_result: DiscordProcessState) -> None:
-        channel_id = graph_result.get("channel_id", "")
-        user_id = graph_result.get("user_id", "")
+        platform = graph_result.get("platform", "discord")
+        platform_channel_id = graph_result.get("platform_channel_id", "")
+        platform_user_id = graph_result.get("platform_user_id", "")
+        global_user_id = graph_result.get("global_user_id", "")
         user_name = graph_result.get("user_name", "")
         user_input = graph_result.get("user_input", "")
-        bot_id = graph_result.get("bot_id", "")
+        platform_bot_id = graph_result.get("platform_bot_id", "")
         bot_name = graph_result.get("bot_name", "")
         bot_input = graph_result.get("final_dialog", [])
 
@@ -241,10 +245,12 @@ class RolePlayBot(discord.Client):
         try:
             await save_conversation(
                 {
-                    "channel_id": channel_id,
+                    "platform": platform,
+                    "platform_channel_id": platform_channel_id,
                     "role": "user",
-                    "user_id": user_id,
-                    "name": user_name,
+                    "platform_user_id": platform_user_id,
+                    "global_user_id": global_user_id,
+                    "display_name": user_name,
                     "content": user_input,
                     "timestamp": graph_result.get("timestamp", ""),
                 }
@@ -257,10 +263,12 @@ class RolePlayBot(discord.Client):
         try:
             await save_conversation(
                 {
-                    "channel_id": channel_id,
-                    "role": "bot",
-                    "user_id": bot_id,
-                    "name": bot_name,
+                    "platform": platform,
+                    "platform_channel_id": platform_channel_id,
+                    "role": "assistant",
+                    "platform_user_id": platform_bot_id,
+                    "global_user_id": "",
+                    "display_name": bot_name,
                     "content": "\n".join(bot_input),
                     "timestamp": current_timestamp,
                 }

@@ -25,8 +25,8 @@ class RAGState(TypedDict):
 
     # Input facts
     user_name: str
-    user_id: str
-    bot_id: str
+    global_user_id: str
+    platform_bot_id: str
     character_profile: dict
     character_state: dict
     user_profile: dict
@@ -130,7 +130,7 @@ async def external_rag_dispatcher(state: RAGState) -> RAGState:
 
     result = parse_llm_json_output(response.content)
 
-    logger.debug(f"Web search agent dispatcher result: {result}")
+    logger.debug(f"External RAG agent dispatcher result: {result}")
 
     next_action = result.get("next_action", "end")
     dispatcher_reasoning = result.get("reasoning", "")
@@ -149,9 +149,9 @@ async def external_rag_dispatcher(state: RAGState) -> RAGState:
 
 _INTERNAL_RAG_DISPATCHER_PROMPT = """\
 你负责从角色 {character_name} 的记忆库中提取关联于用户输入的相关信息。
-- 你在社交平台的账号为 {bot_id}
+- 你在社交平台的账号为 {platform_bot_id}
 - 当前的系统时间为 {timestamp}
-- 消息 (`user_input`) 发送者为 {user_name}(@{user_id})
+- 消息 (`user_input`) 发送者为 {user_name}(global_user_id: {global_user_id})
 
 # 分析逻辑 (Priority)：
 1. 外部知识：
@@ -212,15 +212,15 @@ async def internal_rag_dispatcher(state: RAGState) -> RAGState:
     user_topic = state["user_topic"]
     timestamp = state["timestamp"]
     character_name=state["character_profile"]["name"],
-    bot_id = state["bot_id"]
-    user_id = state["user_id"]
+    platform_bot_id = state["platform_bot_id"]
+    global_user_id = state["global_user_id"]
     user_name = state["user_name"]
 
     system_prompt = SystemMessage(content=_INTERNAL_RAG_DISPATCHER_PROMPT.format(
         timestamp=timestamp,
         character_name=character_name,
-        bot_id=bot_id,
-        user_id=user_id,
+        platform_bot_id=platform_bot_id,
+        global_user_id=global_user_id,
         user_name=user_name
     ))
 
@@ -236,7 +236,7 @@ async def internal_rag_dispatcher(state: RAGState) -> RAGState:
 
     result = parse_llm_json_output(response.content)
 
-    logger.debug(f"Web search agent dispatcher result: {result}")
+    logger.debug(f"Internal RAG agent dispatcher result: {result}")
 
     next_action = result.get("next_action", "end")
     dispatcher_reasoning = result.get("reasoning", "")
@@ -318,7 +318,7 @@ async def user_fact_rag_dispatcher(state: RAGState) -> RAGState:
 
     result = parse_llm_json_output(response.content)
 
-    logger.debug(f"Web search agent dispatcher result: {result}")
+    logger.debug(f"User Fact RAG dispatcher result: {result}")
 
     next_action = result.get("next_action", "end")
     dispatcher_reasoning = result.get("reasoning", "")
@@ -395,7 +395,7 @@ async def user_fact_rag_finalizer(state: RAGState) -> RAGState:
 
     result = parse_llm_json_output(response.content)
 
-    logger.debug(f"Web search agent dispatcher result: {result}")
+    logger.debug(f"User fact RAG finalizer result: {result}")
 
     user_rag_finalized = result.get("user_rag_finalized", "")
 
@@ -529,7 +529,7 @@ async def call_rag_subgraph(state: GlobalPersonaState) -> GlobalPersonaState:
 
     # Variables
     user_name = state["user_name"]
-    user_id = state["user_id"]
+    global_user_id = state["global_user_id"]
     decontexualized_input = state["decontexualized_input"]
 
     initial_state: RAGState = {
@@ -537,8 +537,8 @@ async def call_rag_subgraph(state: GlobalPersonaState) -> GlobalPersonaState:
         "decontexualized_input": decontexualized_input,
         "user_topic": state["user_topic"],
         "user_name": user_name,
-        "user_id": user_id,
-        "bot_id": state["bot_id"],
+        "global_user_id": global_user_id,
+        "platform_bot_id": state["platform_bot_id"],
         "character_profile": state["character_profile"],
         "character_state": state["character_state"],
         "user_profile": state["user_profile"],
@@ -552,7 +552,7 @@ async def call_rag_subgraph(state: GlobalPersonaState) -> GlobalPersonaState:
     external_rag_results = result.get("external_rag_results", "")
 
     logger.info(
-        f"\n{user_name}(@{user_id}): {decontexualized_input}\n"
+        f"\n{user_name}(@{global_user_id}): {decontexualized_input}\n"
         f"User RAG finalized: {user_rag_finalized}\n"
         f"Internal RAG results: {internal_rag_results}\n"
         f"External RAG results: {external_rag_results}"
@@ -584,8 +584,8 @@ async def test_main():
     state: GlobalPersonaState = {
         "decontexualized_input": "新西兰油价",
         "user_topic": "闲聊",
-        "bot_id": "1485169644888395817",
-        "user_id": "320899931776745483",
+        "platform_bot_id": "1485169644888395817",
+        "global_user_id": "320899931776745483",
         "user_name": "EAMARS",
         "timestamp": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         "character_profile": load_personality("personalities/kazusa.json"),
