@@ -3,7 +3,7 @@ from typing import TypedDict
 from kazusa_ai_chatbot.nodes.persona_supervisor2_schema import GlobalPersonaState
 from kazusa_ai_chatbot.config import LLM_API_KEY, LLM_BASE_URL, LLM_MODEL, AFFINITY_DEFAULT
 from kazusa_ai_chatbot.utils import parse_llm_json_output, build_affinity_block, get_llm
-from kazusa_ai_chatbot.db import CharacterStateDoc, get_user_profile
+from kazusa_ai_chatbot.db import CharacterProfileDoc, get_user_profile
 
 from langchain_core.messages import HumanMessage, SystemMessage
 from langgraph.graph import StateGraph, START, END
@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 
 
 class CognitionState(TypedDict):
-    character_state: CharacterStateDoc
+    character_state: CharacterProfileDoc
     character_profile: dict
 
     # Input from global state

@@ -229,9 +229,10 @@ src/
     discord_adapter.py               # Thin Discord→HTTP adapter
     debug_adapter.py                 # Browser-based debug chat UI
   scripts/                           # Standalone utility scripts
+    load_character_profile.py        # Load personality JSON into MongoDB
 personalities/
-  example.json
-  kazusa.json
+  example.json                       # Template personality JSON
+  kazusa.json                        # Default character profile
 tests/
 Dockerfile
 docker-compose.yml
@@ -269,7 +270,6 @@ EMBEDDING_MODEL=your-embedding-model-name
 # Brain service
 SERVICE_HOST=0.0.0.0
 SERVICE_PORT=8000
-PERSONALITY_PATH=personalities/kazusa.json
 
 # Discord adapter (only needed if running the Discord adapter)
 DISCORD_TOKEN=your_discord_bot_token
@@ -289,15 +289,27 @@ Run an OpenAI-compatible API server (e.g., LM Studio, vLLM, Ollama) with:
 The brain service runs `db_bootstrap()` on startup which automatically creates all required collections and indexes:
 - **`conversation_history`** — chat messages with embeddings for semantic search
 - **`user_profiles`** — per-user facts, affinity score, platform accounts, relationship insight
-- **`character_state`** — single global document for mood, vibe, reflection summary
+- **`character_state`** — single global document for mood, vibe, reflection summary, and the **character profile**
 - **`memory`** — persistent named memories with embeddings
 - **`scheduled_events`** — future events (follow-up messages, etc.)
 
 Vector search indexes are created best-effort (requires MongoDB Atlas for full vector search).
 
-### 5. Create a personality
+### 5. Load a character profile
 
-Create a JSON file following the schema in `personalities/example.json`. The personality JSON should include at minimum:
+The character personality profile is stored in MongoDB (in the `character_state` collection, `_id: "global"`, fields at the top level alongside runtime state). **The brain service will refuse to start if no profile is loaded.**
+
+Create a JSON file following the schema in `personalities/example.json`, then load it:
+
+```bash
+# First time (mandatory before starting the brain service)
+python -m scripts.load_character_profile personalities/kazusa.json
+
+# Re-load / overwrite an existing profile
+python -m scripts.load_character_profile personalities/kazusa.json --force
+```
+
+The personality JSON should include at minimum:
 - `name`, `description`, `gender`, `age`, `birthday`
 - `personality_brief` with `logic`, `tempo`, `defense`, `quirks`, `taboos`, `mbti`
 
@@ -353,3 +365,4 @@ Environment variables are read from `.env` or can be set in the compose file.
 - **Context loading in service** — conversation history, user profile, and character state are loaded once in the `/chat` handler before graph invocation, keeping nodes stateless and testable.
 - **`_`-prefixed personality keys ignored** — personality JSON can store reference data (appearance, art notes) under `_reference` without wasting prompt tokens.
 - **DB bootstrap on startup** — all collections and indexes are verified/created at service start, so deployment requires zero manual setup beyond the environment variables.
+- **Character profile in MongoDB** — the personality profile is stored at the top level of the `character_state` collection’s `_id: "global"` document, alongside runtime state fields (mood, global_vibe, etc.). This decouples the brain service from the filesystem and enables future consolidator-driven profile evolution. The service crashes on startup if no profile is found, enforcing a mandatory one-time load via `scripts.load_character_profile`.

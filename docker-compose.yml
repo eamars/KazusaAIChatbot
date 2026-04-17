@@ -14,10 +14,7 @@ services:
       - LLM_MODEL=${LLM_MODEL:-local-model}
       - EMBEDDING_BASE_URL=${EMBEDDING_BASE_URL:-http://host.docker.internal:1234/v1}
       - EMBEDDING_MODEL=${EMBEDDING_MODEL:-text-embedding-model}
-      - PERSONALITY_PATH=${PERSONALITY_PATH:-personalities/kazusa.json}
       - MCP_SERVERS=${MCP_SERVERS:-{}}
-    volumes:
-      - ./personalities:/app/personalities:ro
     depends_on:
       mongo:
         condition: service_healthy

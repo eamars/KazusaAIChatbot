@@ -12,12 +12,14 @@ from kazusa_ai_chatbot.db import (
     AFFINITY_DEFAULT,
     close_db,
     get_affinity,
+    get_character_profile,
     get_character_state,
     get_conversation_history,
     get_db,
     get_user_facts,
     get_user_profile,
     overwrite_user_facts,
+    save_character_profile,
     save_conversation,
     save_memory,
     search_memory,
@@ -457,6 +459,75 @@ async def test_upsert_character_state_preserves_on_empty_string():
     assert set_payload["mood"] == "old_mood"
     assert set_payload["global_vibe"] == "old_vibe"
     assert set_payload["reflection_summary"] == "old_summary"
+
+
+# ── Character profile ─────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_get_character_profile_found():
+    """All top-level fields (minus _id) are returned."""
+    db = _mock_db()
+    db.character_state.find_one = AsyncMock(return_value={
+        "_id": "global",
+        "mood": "calm",
+        "name": "Kazusa",
+        "age": 15,
+    })
+
+    with patch("kazusa_ai_chatbot.db.get_db", new_callable=AsyncMock, return_value=db):
+        result = await get_character_profile()
+
+    assert result == {"mood": "calm", "name": "Kazusa", "age": 15}
+    assert "_id" not in result
+
+
+@pytest.mark.asyncio
+async def test_get_character_profile_not_found():
+    """Returns empty dict when no global doc exists."""
+    db = _mock_db()
+    db.character_state.find_one = AsyncMock(return_value=None)
+
+    with patch("kazusa_ai_chatbot.db.get_db", new_callable=AsyncMock, return_value=db):
+        result = await get_character_profile()
+
+    assert result == {}
+
+
+@pytest.mark.asyncio
+async def test_save_character_profile():
+    """Each profile key is $set at the top level."""
+    db = _mock_db()
+    db.character_state.update_one = AsyncMock()
+
+    profile = {"name": "Kazusa", "age": 15, "tone": "warm"}
+
+    with patch("kazusa_ai_chatbot.db.get_db", new_callable=AsyncMock, return_value=db):
+        await save_character_profile(profile)
+
+    db.character_state.update_one.assert_called_once_with(
+        {"_id": "global"},
+        {"$set": profile},
+        upsert=True,
+    )
+
+
+@pytest.mark.asyncio
+async def test_get_character_state_returns_same_as_profile():
+    """get_character_state is an alias for get_character_profile."""
+    db = _mock_db()
+    db.character_state.find_one = AsyncMock(return_value={
+        "_id": "global",
+        "mood": "happy",
+        "name": "Kazusa",
+        "global_vibe": "warm",
+    })
+
+    with patch("kazusa_ai_chatbot.db.get_db", new_callable=AsyncMock, return_value=db):
+        result = await get_character_state()
+
+    assert result == {"mood": "happy", "name": "Kazusa", "global_vibe": "warm"}
+    assert "_id" not in result
 
 
 # ── Save memory ────────────────────────────────────────────────────

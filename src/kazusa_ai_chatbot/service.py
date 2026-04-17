@@ -29,11 +29,11 @@ for _quiet in ("pymongo", "httpx", "httpcore", "hpack", "urllib3", "openai", "la
 
 from kazusa_ai_chatbot.config import (
     CONVERSATION_HISTORY_LIMIT,
-    PERSONALITY_PATH,
 )
 from kazusa_ai_chatbot.db import (
     close_db,
     db_bootstrap,
+    get_character_profile,
     get_character_state,
     get_conversation_history,
     get_user_profile,
@@ -42,7 +42,7 @@ from kazusa_ai_chatbot.db import (
 )
 from kazusa_ai_chatbot.mcp_client import mcp_manager
 from kazusa_ai_chatbot.state import IMProcessState, MultiMediaDoc
-from kazusa_ai_chatbot.utils import load_personality, trim_history_dict
+from kazusa_ai_chatbot.utils import trim_history_dict
 from kazusa_ai_chatbot import scheduler
 
 from langgraph.graph import END, START, StateGraph
@@ -169,10 +169,14 @@ async def lifespan(app: FastAPI):
     # 1. Database bootstrap
     await db_bootstrap()
 
-    # 2. Load personality
-    _personality = load_personality(PERSONALITY_PATH)
-    if not _personality:
-        logger.warning("Personality file '%s' is empty or missing", PERSONALITY_PATH)
+    # 2. Load character profile from database
+    _personality = await get_character_profile()
+    if not _personality.get("name"):
+        raise RuntimeError(
+            "No character profile found in the database. "
+            "Please load one first with:  "
+            "python -m scripts.load_character_profile personalities/kazusa.json"
+        )
 
     # 3. Build the LangGraph pipeline
     _graph = _build_graph()

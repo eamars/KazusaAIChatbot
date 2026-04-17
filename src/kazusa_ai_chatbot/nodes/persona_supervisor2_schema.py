@@ -1,11 +1,11 @@
 from typing import TypedDict
 from kazusa_ai_chatbot.state import MultiMediaDoc
-from kazusa_ai_chatbot.db import CharacterStateDoc, UserProfileDoc
+from kazusa_ai_chatbot.db import CharacterProfileDoc, UserProfileDoc
 
 
 class GlobalPersonaState(TypedDict):
     # Character related
-    character_state: CharacterStateDoc
+    character_state: CharacterProfileDoc
     character_profile: dict
 
     # Inputs

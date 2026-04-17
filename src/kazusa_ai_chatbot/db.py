@@ -8,7 +8,7 @@ Collections
 -----------
 conversation_history  → ConversationMessageDoc
 user_profiles         → UserProfileDoc
-character_state       → CharacterStateDoc
+character_state       → CharacterProfileDoc
 memory                → MemoryDoc
 """
 
@@ -108,13 +108,28 @@ class UserProfileDoc(TypedDict, total=False):
     embedding: list[float]                 # Dense vector for similarity search
 
 
-class CharacterStateDoc(TypedDict):
-    """Global character mood/state in the ``character_state`` collection.
+class CharacterProfileDoc(TypedDict, total=False):
+    """All fields of the singleton ``_id: "global"`` document in
+    the ``character_state`` collection.
 
-    There is exactly **one** document with ``_id: "global"``.
-    Recent events accumulate without limit.
+    Both personality profile fields **and** runtime state fields live
+    at the top level.  The schema is intentionally open-ended
+    (``total=False``) so new fields can be added without migration.
     """
 
+    # ── personality profile ────────────────────────────────────────
+    name: str
+    description: str
+    gender: str
+    age: int
+    birthday: str
+    tone: str
+    speech_patterns: str
+    backstory: str
+    personality_brief: dict
+    boundary_profile: dict
+
+    # ── runtime state ─────────────────────────────────────────────
     mood: str               # e.g. "melancholic", "playful", "irritated"
     global_vibe: str        # See Cognition Layer
     reflection_summary: str # See Cognition Layer
@@ -670,10 +685,11 @@ async def search_users_by_facts(
 # ----------------------------------------------------------------------------------------
 
 
-async def get_character_state() -> CharacterStateDoc | dict:
-    """Retrieve the global character state (mood, tone, recent events).
+async def get_character_profile() -> CharacterProfileDoc | dict:
+    """Retrieve the full global document (profile + runtime state).
 
-    There is only ONE character state doc — it is shared across all channels.
+    All fields live at the top level of ``_id: "global"``.
+    Returns an empty dict if the document does not exist.
     """
     db = await get_db()
     doc = await db.character_state.find_one({"_id": "global"})
@@ -681,6 +697,29 @@ async def get_character_state() -> CharacterStateDoc | dict:
         return {}
     doc.pop("_id", None)
     return doc
+
+
+async def save_character_profile(profile: dict) -> None:
+    """Persist character personality profile fields to the global document.
+
+    Each key in *profile* is written as a top-level field on the
+    ``_id: "global"`` document.  Runtime state fields are untouched.
+    """
+    db = await get_db()
+    await db.character_state.update_one(
+        {"_id": "global"},
+        {"$set": profile},
+        upsert=True,
+    )
+
+
+async def get_character_state() -> CharacterProfileDoc | dict:
+    """Retrieve the global character state document.
+
+    This returns the same data as :func:`get_character_profile` — all
+    top-level fields of ``_id: "global"`` minus ``_id`` itself.
+    """
+    return await get_character_profile()
 
 
 async def upsert_character_state(
