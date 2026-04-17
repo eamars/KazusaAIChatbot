@@ -101,9 +101,9 @@ async def relevance_agent(state: IMProcessState) -> IMProcessState:
     """Analyze context and determine relevance using LLM."""
     system_prompt = SystemMessage(content=_RELEVANCE_SYSTEM_PROMPT.format(
         character_name=state["character_profile"]["name"],
-        mood=state["character_state"]["mood"],
-        global_vibe=state["character_state"]["global_vibe"],
-        reflection_summary=state["character_state"]["reflection_summary"],
+        mood=state["character_profile"]["mood"],
+        global_vibe=state["character_profile"]["global_vibe"],
+        reflection_summary=state["character_profile"]["reflection_summary"],
         user_name=user_name,
         affinity_level=affinity_block["level"],
         affinity_instruction=affinity_block["instruction"],
@@ -233,7 +233,7 @@ async def test_main():
     from kazusa_ai_chatbot.utils import trim_history_dict
     from kazusa_ai_chatbot.db import get_conversation_history
     from kazusa_ai_chatbot.utils import load_personality
-    from kazusa_ai_chatbot.db import get_character_state, get_user_profile
+    from kazusa_ai_chatbot.db import get_character_profile, get_user_profile
 
     logging.basicConfig(
         level=logging.INFO,
@@ -257,8 +257,7 @@ async def test_main():
         "user_profile": await get_user_profile("test-uuid-placeholder"),
         "platform_bot_id": platform_bot_id,
         "bot_name": "KazusaBot",
-        "character_profile": load_personality("personalities/kazusa.json"),
-        "character_state": await get_character_state(),
+        "character_profile": await get_character_profile(),
         "platform_channel_id": "",
         "channel_name": "test",
         "chat_history": trimmed_history,

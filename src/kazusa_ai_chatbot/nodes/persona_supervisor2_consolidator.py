@@ -32,7 +32,6 @@ class ConsolidatorState(TypedDict):
     emotional_appraisal: str
     character_intent: str
     logical_stance: str
-    character_state: dict
     character_profile: dict
 
     # Facts
@@ -504,7 +503,6 @@ async def call_consolidation_subgraph(
         "character_intent": global_state["character_intent"],
         "logical_stance": global_state["logical_stance"],
 
-        "character_state": global_state["character_state"],
         "character_profile": global_state["character_profile"],
 
         "research_facts": global_state["research_facts"],
@@ -549,7 +547,7 @@ async def test_main():
     from kazusa_ai_chatbot.utils import trim_history_dict
     from kazusa_ai_chatbot.db import get_conversation_history
     from kazusa_ai_chatbot.utils import load_personality
-    from kazusa_ai_chatbot.db import get_character_state
+    from kazusa_ai_chatbot.db import get_character_profile
 
 
     history = await get_conversation_history(platform="discord", platform_channel_id="1485606207069880361", limit=5)
@@ -579,8 +577,7 @@ async def test_main():
         "chat_history": trimmed_history,
         "user_name": "EAMARS",
         "user_profile": {"affinity": 950},
-        "character_profile": load_personality("personalities/kazusa.json"),
-        "character_state": await get_character_state()
+        "character_profile": await get_character_profile(),
     }
 
     result = await call_consolidation_subgraph(state)

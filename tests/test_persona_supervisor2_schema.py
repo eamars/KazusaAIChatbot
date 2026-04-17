@@ -13,7 +13,6 @@ class TestGlobalPersonaState:
 
     def test_has_character_fields(self):
         hints = typing.get_type_hints(GlobalPersonaState)
-        assert "character_state" in hints
         assert "character_profile" in hints
 
     def test_has_input_fields(self):

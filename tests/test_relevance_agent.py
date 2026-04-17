@@ -22,8 +22,8 @@ def _base_state():
         "user_profile": {"affinity": 500, "last_relationship_insight": ""},
         "platform_bot_id": "bot_456",
         "bot_name": "TestBot",
-        "character_profile": {"name": "Kazusa"},
-        "character_state": {
+        "character_profile": {
+            "name": "Kazusa",
             "mood": "neutral",
             "global_vibe": "calm",
             "reflection_summary": "nothing notable",

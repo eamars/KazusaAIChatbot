@@ -49,7 +49,6 @@ async def persona_supervisor2(state: IMProcessState) -> dict:
 
     initial_persona_state: GlobalPersonaState = {
         # Character Related
-        "character_state": state["character_state"],
         "character_profile": state["character_profile"],
 
         # Inputs
@@ -82,7 +81,7 @@ async def persona_supervisor2(state: IMProcessState) -> dict:
 
 
 async def test_main():
-    from kazusa_ai_chatbot.db import get_character_state, get_conversation_history, get_user_profile
+    from kazusa_ai_chatbot.db import get_character_profile, get_conversation_history, get_user_profile
     from kazusa_ai_chatbot.utils import trim_history_dict
     from kazusa_ai_chatbot.utils import load_personality
     import datetime
@@ -108,8 +107,7 @@ async def test_main():
 
         "platform_bot_id": "1485169644888395817",
         "bot_name": "KazusaBot",
-        "character_profile": load_personality("personalities/kazusa.json"),
-        "character_state": await get_character_state(),
+        "character_profile": await get_character_profile(),
 
         "platform_channel_id": "",
         "channel_name": "",

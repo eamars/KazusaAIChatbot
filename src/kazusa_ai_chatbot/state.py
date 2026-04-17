@@ -26,7 +26,6 @@ class IMProcessState(TypedDict):
     platform_bot_id: str  # Bot's ID on the current platform (provided by the adapter)
     bot_name: str
     character_profile: dict
-    character_state: dict
 
     platform_channel_id: str  # Original channel/group ID from the platform. Empty for private messages
     channel_name: str  # Display name of the channel (used to determine the context)
@@ -41,7 +40,6 @@ class IMProcessState(TypedDict):
 
 
     # Input to Persona Supervisor
-    # character_state: str  # Already requested
     # character_profile: dict  # Already requested
     # timestamp: str  # Already requested
     # user_input: str  # already requested

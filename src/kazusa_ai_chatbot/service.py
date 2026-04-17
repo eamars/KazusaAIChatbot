@@ -34,7 +34,6 @@ from kazusa_ai_chatbot.db import (
     close_db,
     db_bootstrap,
     get_character_profile,
-    get_character_state,
     get_conversation_history,
     get_user_profile,
     resolve_global_user_id,
@@ -235,7 +234,6 @@ async def chat(req: ChatRequest, background_tasks: BackgroundTasks):
         display_name=req.display_name,
     )
     user_profile = await get_user_profile(global_user_id)
-    character_state = await get_character_state()
 
     # Convert attachments to MultiMediaDoc list
     multimedia_input: list[MultiMediaDoc] = []
@@ -270,7 +268,6 @@ async def chat(req: ChatRequest, background_tasks: BackgroundTasks):
         "platform_bot_id": req.platform_bot_id,
         "bot_name": bot_name,
         "character_profile": _personality,
-        "character_state": character_state,
         "platform_channel_id": req.platform_channel_id,
         "channel_name": req.channel_name,
         "chat_history": trimmed_history,

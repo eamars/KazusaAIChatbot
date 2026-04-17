@@ -28,7 +28,6 @@ class RAGState(TypedDict):
     global_user_id: str
     platform_bot_id: str
     character_profile: dict
-    character_state: dict
     user_profile: dict
 
     # External RAG Dispatcher output
@@ -304,7 +303,7 @@ async def user_fact_rag_dispatcher(state: RAGState) -> RAGState:
     user_prompt = HumanMessage(content=json.dumps({
         "user_input": decontexualized_input,
         "user_topic": user_topic,
-        "character_mood": state["character_state"]["mood"],
+        "character_mood": state["character_profile"]["mood"],
         "affinity_context": {
             "level": affinity_block["level"],
             "instruction": affinity_block["instruction"]
@@ -540,7 +539,6 @@ async def call_rag_subgraph(state: GlobalPersonaState) -> GlobalPersonaState:
         "global_user_id": global_user_id,
         "platform_bot_id": state["platform_bot_id"],
         "character_profile": state["character_profile"],
-        "character_state": state["character_state"],
         "user_profile": state["user_profile"],
     }
 
@@ -572,7 +570,7 @@ async def test_main():
     import datetime
     from kazusa_ai_chatbot.mcp_client import mcp_manager
     from kazusa_ai_chatbot.utils import load_personality
-    from kazusa_ai_chatbot.db import get_character_state
+    from kazusa_ai_chatbot.db import get_character_profile
 
 
     # Connect to MCP tool servers
@@ -589,7 +587,6 @@ async def test_main():
         "user_name": "EAMARS",
         "timestamp": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         "character_profile": load_personality("personalities/kazusa.json"),
-        "character_state": await get_character_state(),
         "user_profile": {"affinity": 950},
     }
 

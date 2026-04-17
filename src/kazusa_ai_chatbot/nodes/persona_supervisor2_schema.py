@@ -5,8 +5,7 @@ from kazusa_ai_chatbot.db import CharacterProfileDoc, UserProfileDoc
 
 class GlobalPersonaState(TypedDict):
     # Character related
-    character_state: CharacterProfileDoc
-    character_profile: dict
+    character_profile: CharacterProfileDoc
 
     # Inputs
     timestamp: str
