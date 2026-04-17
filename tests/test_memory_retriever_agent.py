@@ -79,5 +79,6 @@ async def test_search_persistent_memory_tool():
 
     assert isinstance(result, list)
     assert len(result) == 1
-    assert "cosine_similarity" in result[0]
     assert result[0]["cosine_similarity"] == 0.85
+    assert result[0]["memory_name"] == "test_mem"
+    assert result[0]["content"] == "some data"

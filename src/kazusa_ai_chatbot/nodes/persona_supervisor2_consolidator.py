@@ -4,7 +4,7 @@ from kazusa_ai_chatbot.nodes.persona_supervisor2_schema import GlobalPersonaStat
 from kazusa_ai_chatbot.config import LLM_API_KEY, LLM_BASE_URL, LLM_MODEL, MAX_FACT_HARVESTER_RETRY, AFFINITY_DEFAULT, AFFINITY_INCREMENT_BREAKPOINTS, AFFINITY_DECREMENT_BREAKPOINTS
 from kazusa_ai_chatbot.utils import parse_llm_json_output, build_affinity_block, get_llm
 from kazusa_ai_chatbot.nodes.persona_supervisor2_schema import GlobalPersonaState
-from kazusa_ai_chatbot.db import upsert_character_state, upsert_user_facts, update_last_relationship_insight, save_memory, update_affinity
+from kazusa_ai_chatbot.db import upsert_character_state, upsert_user_facts, update_last_relationship_insight, save_memory, build_memory_doc, update_affinity
 
 from langchain_core.messages import HumanMessage, SystemMessage
 from langgraph.graph import StateGraph, START, END
@@ -199,6 +199,7 @@ _FACTS_HARVESTER_PROMPT = """\
 # 背景信息
 - **对话主体 (Character)**: {character_name}
 - **对话对象 (User)**: {user_name}
+- **系统时间**: {timestamp}
 
 # 核心审计准则 (Audit Standards)
 1. **身份锚定 [必须执行]**:
@@ -207,7 +208,7 @@ _FACTS_HARVESTER_PROMPT = """\
    - 严禁出现身份倒置（如：将 {user_name} 写完作业记在 {character_name} 头上）。
 
 2. **事实 (new_facts) 判定标准**:
-   - **记录**：具有长期稳定性的属性（如：{user_name}的职业、住址、对某物的长期厌恶/偏好）。
+   - **记录**：具有长期稳定性的**属性级陈述**（如：{user_name}的职业、住址、对某物的长期厌恶/偏好）。
    - **记录**：从 `research_facts.external_rag_results` 中提取的**新**信息。
    - **严禁记录**：瞬态动作、对话内容、以及任何关于“奖励”、“打算”、“计划”的内容。
    - **去重**：如果 `research_facts.user_rag_finalized` 或 `research_facts.internal_rag_results` 中已存在相似画像，严禁重复提取。
@@ -215,29 +216,57 @@ _FACTS_HARVESTER_PROMPT = """\
 3. **承诺 (future_promises) 判定标准 [核心逻辑]**:
    - **所有关于“以后、今晚、下次、奖励、惩罚”的内容，必须且只能记录在这里。**
    - 必须包含：[触发条件] + [谁对谁做] + [具体动作]。
-   - 示例：`{{"target": "{character_name}", "action": "在{user_name}完成作业的情境下，给予其‘奖励’。"}}`
+   - 承诺时间计算：若角色提出，或者答应了一个将来会发生的事件，则需要根据当前时间推算 `due_time`。
+   - `due_time` 推算规则：若输入出现明确时间线索（如“今晚/明早/明天早上/下周末”），必须换算为 ISO 8601 时间戳；仅在完全缺失时间线索时才允许 `null`。
+   - **硬约束**：当 `decontexualized_input` 或 `content_anchors` 含有“今晚/晚上/明天/明早/早上/下午/下周”等时间词时，`due_time` 禁止为 `null`。
+   - 相对时间默认映射（用于降低歧义）：
+     - “今晚/晚上” -> 当日 21:00（若当前已过 21:00，则次日 21:00）
+     - “明早/明天早上” -> 次日 08:00
+     - “明天下午” -> 次日 15:00
+     - “明天晚上” -> 次日 21:00
+   - 计算时区使用系统时间 `{timestamp}` 的本地时区；输出必须为 ISO 8601。
+   - 若 `decontexualized_input` 是用户对未来行为的请求（如“晚上奖励我”），且 `logical_stance` 为 `CONFIRM`（或等价的认可态），默认视为可落库的“待履行承诺”，不要漏记。
+   - 若出现冲突信号（如 `content_anchors` 明确拒绝且 `logical_stance` 非确认），再选择不记录。
+   - 对“软性答应/模糊同意”（例如“拿你没办法”“那就这样吧”）也可记录为 promise，动作写成中性可执行表述。
+   - `action` 只写“可执行承诺本体”，不得写时间推测或计划态词汇。**禁止出现**：`计划`、`打算`、`准备`、`想要`、`可能`、`也许`、`明天`、`今晚`、`下次` 等时间/意图词。
+   - 时间信息统一写入 `due_time`；若无法确定具体时间可为 `null`，但不要把时间短语塞进 `action`。
+   - `action` 必须是去叙事的承诺句，推荐模板：`[执行者]在[触发条件]对[对象]执行[动作]` 或 `[执行者]将对[对象]执行[动作]`。
+   - `action` 的触发条件允许写“完成作业后/满足约定后”等条件，但不允许写具体时间点。
+   - 若同时存在“触发条件 + 时间线索”，两者都保留：触发条件留在 `action`，时间线索写入 `due_time`。
+   - 只有在“纯提问且无任何认可信号（含 logical_stance 与 content_anchors）”时，才不要生成 promise。
 
-4. **拒绝复读**: 
+5. **future_promises 示例（必须遵守）**:
+   - ✅ 正确：
+     - `action`: `杏山千纱在EAMARS完成作业后对EAMARS执行奖励`
+     - `due_time`: `2026-04-19T06:00:00+12:00`
+   - ❌ 错误：
+     - `action`: `杏山千纱今晚对EAMARS执行奖励`
+     - `action`: `杏山千纱计划于明天早上奖励EAMARS`
+     - `action`: `杏山千纱打算下次奖励EAMARS`
+
+6. **拒绝复读**: 
    - 严禁记录“某人说了某话”。如果信息已经由对话历史承载，且不涉及长期画像更新，则返回空列表。
 
 # 闭环反馈指南
 - 在生成回复前，请检查输入信息列表中的最后一条来自 Evaluator 的消息 (Evaluator Feedback)。
 - 你需要根据 Evaluator Feedback 对输出做出相应的修正。
+- 对未提及内容不要做修改
 
 # 输出格式 (JSON)
 请务必返回合法的 JSON 字符串，包含以下字段：
 {{
     "new_facts": [
         {{
-            "entity": "{user_name} / {character_name} / 具体物品",
-            "description": "[姓名]在[具体情境]下做了[动作]，导致了[后果/影响]。",
+            "entity": "事实所属的主语实名（如 {user_name}、{character_name}、或具体物品/地点名）",
+            "category": "事实类别标签（如 occupation、location、preference、hobby、relationship、health、schedule、personality 等）",
+            "description": "属性级的客观陈述。格式：'[主语] + [属性/状态]'。示例：'{user_name}住在新西兰奥克兰' 或 '{user_name}对猫毛过敏'。严禁使用叙事句式（如'在某情境下做了某事'）。"
         }}
     ],
     "future_promises": [
         {{
             "target": "{user_name} / {character_name}",
-            "action": "[姓名]在[具体触发点]执行[具体任务]",
-            "due_time": "ISO 8601 格式或相对时间描述，如无则为 null"
+            "action": "[姓名]将对[对象]执行[具体动作]（仅承诺本体，不含计划/时间词）",
+            "due_time": "ISO 8601 时间戳（如 2026-04-19T06:00:00+12:00），无法确定则为 null"
         }}
     ]
 }}
@@ -247,6 +276,7 @@ async def facts_harvester(state: ConsolidatorState):
     system_prompt = SystemMessage(_FACTS_HARVESTER_PROMPT.format(
         character_name=state["character_profile"]["name"],
         user_name=state["user_name"],
+        timestamp = state["timestamp"]
     ))
 
     msg = {
@@ -278,7 +308,7 @@ async def facts_harvester(state: ConsolidatorState):
 
 
 _FACT_HARVESTER_EVALUATOR_PROMPT = """\
-你负责审计 Fact Recorder 生成的 JSON 数据。你的核心目标是：**对比“基准源”，核查“候选结果”的准确性。**
+你负责审计 Fact Recorder 生成的 JSON 数据。你的核心目标是：**对比“基准源”，核查“候选结果”的准确性和格式合规性。**
 
 # 审计背景
 - **角色 (Character)**: {character_name}
@@ -293,22 +323,41 @@ _FACT_HARVESTER_EVALUATOR_PROMPT = """\
 - **待检事实**: `new_facts`
 - **待检承诺**: `future_promises`
 
+# 2.1 与 Harvester 对齐的判定口径（必须遵守）
+- `new_facts` 与 `future_promises` 是两个独立通道：
+  - `new_facts` 要求“属性级事实陈述”。
+  - `future_promises.action` 要求“可执行承诺陈述”，**不适用** `new_facts.description` 的属性句式审计规则。
+- 当输入没有新增稳定事实时，`new_facts: []` 是合法结果，**不得仅因为空判定失败**。
+- 当输入没有明确未来承诺时，`future_promises: []` 也是合法结果。
+
 # 审计红线 (Red Lines)
-- **对象倒置**: `decontexualized_input` 里的动作必须记在 `{user_name}` 账上。如果 Recorder 记在 `{character_name}` 头上，立刻拦截。
+- **对象倒置**: 
+  * `decontexualized_input` 里的动作必须记在 `{user_name}` 账上。如果 Recorder 记在 `{character_name}` 头上，立刻拦截。
 - **分类错误 [严重]**: 
-    - 带有“奖励”、“未来”、“打算”、“今晚”或任何 `[DECISION] Yes` 产生的动作，**必须**放入 `future_promises`。
-    - 严禁将上述内容存入 `new_facts`。
+    - 例如：将带有 “未来”、“打算”、“今晚”或任何有许诺时间性质的行为作为 `new_facts`。这是禁止的行为。
+    - 例如：将过去发生的事实存入 `future_promises` 也同样是禁止的行为
 - **冗余复读**: 
     - 检查候选结果是否只是在复读对话（如“某人问...”）。
     - 必须转换为客观陈述。*注意：不要审计输入源的语气，只审计候选结果的陈述方式。*
 - **旧闻复读**: 如果该信息在 `research_facts.user_rag_finalized` 或 `research_facts.internal_rag_results` 标记的内部库中已存在，判定为 FAIL。
 - **脑补事实**: 严禁出现基准源中没有的名词或事实
+- **描述格式违规**: `new_facts` 中的 `description` 必须是属性级陈述（如 '{user_name}住在奥克兰'），严禁使用叙事句式（如 '在某情境下做了某事'）。若发现叙事句式，要求改写为属性陈述。
+- **类别缺失或不当**: `new_facts` 中的 `category` 必须是有意义的英文标签（如 occupation、location、preference、hobby 等）。若缺失、为空、或为无意义的 "general"，要求补充具体类别。
+- **承诺 action 审计标准（专用于 `future_promises`）**:
+  - 合格条件：表达“谁对谁做什么”的可执行承诺，不是对话复读（如“他说/她问/我觉得”）。
+  - 可以接受两种写法：
+    1) 不含时间词的承诺本体（推荐）；
+    2) 含时间词（如“今晚/明早”）的承诺句，但语义仍是承诺执行动作。
+  - 仅在以下情况判 FAIL：
+    - `action` 是纯计划/猜测（如“可能、也许、打算、准备”）且无明确执行动作；
+    - `action` 只是复述对话或主观感受；
+    - `action` 与 `target`/基准源主体明显不一致。
 
 # 输出格式 (JSON)
 请务必返回合法的 JSON 字符串：
 {{
-    "should_stop": "boolean (如果没有脑补且实名正确，返回 true；存在幻觉或泛称返回 false)",
-    "feedback": "具体指明错误点。例如：‘原始输入只提到了[奖励]，但输出脑补了[晚餐]，请删除具体行为描述。’ 或 ‘请将[User]替换为 {user_name}’。"
+    "should_stop": "boolean (如果没有脑补且实名正确且格式合规，返回 true；仅在违反上述明确红线时返回 false。注意：new_facts 为空本身不构成错误。)",
+    "feedback": "具体指明错误点。若无实质错误，返回 '通过审计，无需修改'。禁止输出'请确认是否没有新事实'这类非错误性质建议。"
 }}
 """
 _fact_harvester_evaluator_llm = get_llm(temperature=0.1, top_p=0.2)
@@ -427,15 +476,34 @@ async def db_writer(state: ConsolidatorState):
     # Step 3: Record facts and future promises
     new_facts = state.get("new_facts", [])
     for fact in new_facts:
-        memory_name = f"New fact with {user_name}"
-        memory_content = fact["description"]
-        await save_memory(memory_name, memory_content, timestamp, source_global_user_id=global_user_id)
+        entity = fact.get("entity", user_name)
+        category = fact.get("category", "general")
+        description = fact.get("description", "")
+        doc = build_memory_doc(
+            memory_name=f"[{entity}] {category}",
+            content=description,
+            source_global_user_id=global_user_id,
+            memory_type="fact",
+            source_kind="conversation_extracted",
+            confidence_note="This is extracted as a stable factual memory and may be used as background support.",
+        )
+        await save_memory(doc, timestamp)
 
     future_promises = state.get("future_promises", [])
     for promise in future_promises:
-        memory_name = f"Future promise with {user_name}"
-        memory_content = f"Target: {promise['target']}: Description: {promise['action']}, Due: {promise['due_time']}"
-        await save_memory(memory_name, memory_content, timestamp, source_global_user_id=global_user_id)
+        target = promise.get("target", user_name)
+        action = promise.get("action", "")
+        due_time = promise.get("due_time")
+        doc = build_memory_doc(
+            memory_name=f"[Promise] {target}",
+            content=action,
+            source_global_user_id=global_user_id,
+            memory_type="promise",
+            source_kind="conversation_extracted",
+            confidence_note="This is an unfulfilled or future-oriented commitment and should be treated as pending until resolved.",
+            expiry_timestamp=due_time,
+        )
+        await save_memory(doc, timestamp)
 
     # TODO: Convert future_promises into scheduled events via kazusa_ai_chatbot.scheduler.schedule_event()
     # Each promise with a concrete due_time should create a ScheduledEventDoc with

@@ -10,6 +10,7 @@ import pytest
 import kazusa_ai_chatbot.db as db_module
 from kazusa_ai_chatbot.db import (
     AFFINITY_DEFAULT,
+    build_memory_doc,
     close_db,
     get_affinity,
     get_character_profile,
@@ -533,23 +534,72 @@ async def test_get_character_state_returns_same_as_profile():
 # ── Save memory ────────────────────────────────────────────────────
 
 
+def test_build_memory_doc_defaults():
+    doc = build_memory_doc(
+        memory_name="test_mem",
+        content="some content",
+        source_global_user_id="user-123",
+        memory_type="fact",
+        source_kind="conversation_extracted",
+        confidence_note="stable fact",
+    )
+    assert doc["memory_name"] == "test_mem"
+    assert doc["content"] == "some content"
+    assert doc["source_global_user_id"] == "user-123"
+    assert doc["memory_type"] == "fact"
+    assert doc["source_kind"] == "conversation_extracted"
+    assert doc["confidence_note"] == "stable fact"
+    assert doc["status"] == "active"
+    assert doc["expiry_timestamp"] is None
+
+
+def test_build_memory_doc_with_expiry():
+    doc = build_memory_doc(
+        memory_name="promise",
+        content="will do X",
+        source_global_user_id="user-456",
+        memory_type="promise",
+        source_kind="conversation_extracted",
+        confidence_note="pending",
+        status="active",
+        expiry_timestamp="2026-04-20T10:00:00Z",
+    )
+    assert doc["expiry_timestamp"] == "2026-04-20T10:00:00Z"
+    assert doc["status"] == "active"
+
+
 @pytest.mark.asyncio
-async def test_save_memory_creates_embedding_and_upserts():
+async def test_save_memory_creates_embedding_and_inserts():
     db = _mock_db()
-    db.memory.update_one = AsyncMock()
+    db.memory.insert_one = AsyncMock()
 
+    doc = build_memory_doc(
+        memory_name="test_mem",
+        content="some content",
+        source_global_user_id="",
+        memory_type="fact",
+        source_kind="conversation_extracted",
+        confidence_note="stable fact",
+    )
+
+    mock_embed = AsyncMock(return_value=[0.1, 0.2])
     with patch("kazusa_ai_chatbot.db.get_db", new_callable=AsyncMock, return_value=db), \
-         patch("kazusa_ai_chatbot.db.get_text_embedding", new_callable=AsyncMock, return_value=[0.1, 0.2]):
-        await save_memory("test_mem", "some content", "2024-01-01T00:00:00Z")
+         patch("kazusa_ai_chatbot.db.get_text_embedding", mock_embed):
+        await save_memory(doc, "2024-01-01T00:00:00Z")
 
-    db.memory.update_one.assert_called_once()
-    call_args = db.memory.update_one.call_args
-    assert call_args[0][0] == {"memory_name": "test_mem"}
-    set_payload = call_args[0][1]["$set"]
-    assert set_payload["memory_name"] == "test_mem"
-    assert set_payload["content"] == "some content"
-    assert set_payload["embedding"] == [0.1, 0.2]
-    assert call_args[1]["upsert"] is True
+    # Verify structured embedding text
+    expected_text = "type:fact\nsource:conversation_extracted\ntitle:test_mem\ncontent:some content"
+    mock_embed.assert_called_once_with(expected_text)
+
+    db.memory.insert_one.assert_called_once()
+    payload = db.memory.insert_one.call_args[0][0]
+    assert payload["memory_name"] == "test_mem"
+    assert payload["content"] == "some content"
+    assert payload["embedding"] == [0.1, 0.2]
+    assert payload["memory_type"] == "fact"
+    assert payload["source_kind"] == "conversation_extracted"
+    assert payload["status"] == "active"
+    assert payload["timestamp"] == "2024-01-01T00:00:00Z"
 
 
 # ── Search memory ──────────────────────────────────────────────────

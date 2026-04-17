@@ -12,6 +12,11 @@ The evolution of Kazusa is focused on transitioning from a platform-dependent bo
 - [x] **Adapter Pattern:** Discord adapter (`adapters/discord_adapter.py`) and debug web adapter (`adapters/debug_adapter.py`) communicate with brain via HTTP.
 - [x] **Scheduled Events:** `scheduler.py` + `scheduled_events` collection for future follow-up messages. TODO: wire `future_promises` from consolidator.
 - [x] **DB Bootstrap:** `db_bootstrap()` ensures all collections and indexes exist on service startup.
+- [x] **Structured Memory Schema:** `MemoryDoc` with `memory_type`, `source_kind`, `confidence_note`, `status`, `expiry_timestamp`. Append-only `save_memory()` via `insert_one`. `build_memory_doc()` helper for consistent document construction.
+- [x] **Cognition Layer Modularization:** Stage 2 cognition split into L1 (subconscious), L2 (consciousness/boundary/judgment), L3 (contextual/linguistic/visual + collector) with independent `test_main` functions.
+- [ ] **Memory Lifecycle Management:** Implement background job or consolidator step to mark memories as `expired` / `superseded` based on `expiry_timestamp` and deduplication heuristics.
+- [ ] **Memory Deduplication at Query Time:** When `search_memory` returns results, apply post-processing to merge or rank near-duplicate memories (same entity, similar content, different timestamps).
+- [ ] **Wire `future_promises` → Scheduled Events:** Convert promises with concrete `due_time` into `ScheduledEventDoc` entries for proactive follow-up delivery.
 
 ## Phase 2: Psychological Modeling & Empathic Accuracy
 **Goal:** Move beyond reactive chat to proactive social intelligence and "mind-reading."

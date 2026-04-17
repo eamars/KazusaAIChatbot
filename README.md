@@ -145,12 +145,24 @@ An **evaluator** determines if the retrieved information is sufficient or if ano
 - `research_facts`
 - `research_metadata`
 
-### Persona Supervisor v2 — Stage 2: Cognition Subgraph (3 LLM calls)
-A 3-layer cognitive simulation:
+### Persona Supervisor v2 — Stage 2: Cognition Subgraph (7+ LLM calls)
+A 3-layer cognitive simulation split into modular files:
 
-1. **Subconscious** — emotional appraisal and interaction subtext analysis
-2. **Consciousness** — internal monologue, logical stance, character intent
-3. **Social Filter** — action directives (speech guide, content anchors, style filter) that control how the character expresses itself
+**Layer 1 — Subconscious** (`persona_supervisor2_cognition_l1.py`)
+- Emotional appraisal and interaction subtext analysis
+
+**Layer 2 — Consciousness / Boundary / Judgment** (`persona_supervisor2_cognition_l2.py`)
+- Internal monologue, logical stance, character intent
+- Boundary core — relationship boundary enforcement
+- Judgment core — stance refinement and intent arbitration
+
+**Layer 3 — Contextual / Linguistic / Visual + Collector** (`persona_supervisor2_cognition_l3.py`)
+- Contextual agent — social distance, emotional intensity, relational dynamics
+- Linguistic agent — rhetorical strategy, style, content anchors, forbidden phrases
+- Visual agent — facial expression, body language, gaze direction
+- Collector — assembles all layer outputs into structured `action_directives`
+
+The main orchestrator (`persona_supervisor2_cognition.py`) runs all layers sequentially via `call_cognition_subgraph()`.
 
 Outputs: `internal_monologue`, `action_directives`, `emotional_appraisal`, `character_intent`, `logical_stance`, `interaction_subtext`.
 
@@ -210,12 +222,12 @@ src/
     scheduler.py                     # Async event scheduler (MongoDB-backed)
     config.py                        # env vars, affinity breakpoints, retry limits
     state.py                         # IMProcessState TypedDict
-    db.py                            # MongoDB helpers + document schemas + db_bootstrap()
+    db.py                            # MongoDB helpers + document schemas (MemoryDoc, build_memory_doc, etc.)
     mcp_client.py                    # McpManager — MCP server connections + tool execution
     utils.py                         # Shared helpers (JSON parsing, affinity, history trim)
     agents/
       dialog_agent.py                # Stage 3 — generator/evaluator dialog loop
-      memory_retriever_agent.py      # Research agent — MongoDB memory/history search
+      memory_retriever_agent.py      # Research agent — MongoDB memory/history/fact search
       web_search_agent2.py           # Research agent — web search via MCP tools
     nodes/
       relevance_agent.py             # Relevance gate (context analysis + should_respond)
@@ -223,13 +235,20 @@ src/
       persona_supervisor2_schema.py  # GlobalPersonaState TypedDict
       persona_supervisor2_msg_decontexualizer.py  # Stage 0
       persona_supervisor2_rag.py                   # Stage 1
-      persona_supervisor2_cognition.py            # Stage 2
+      persona_supervisor2_cognition.py            # Stage 2 — orchestrator
+      persona_supervisor2_cognition_l1.py         # Stage 2 — L1 subconscious
+      persona_supervisor2_cognition_l2.py         # Stage 2 — L2 consciousness/boundary/judgment
+      persona_supervisor2_cognition_l3.py         # Stage 2 — L3 contextual/linguistic/visual + collector
       persona_supervisor2_consolidator.py         # Stage 4
   adapters/                          # IM adapters (outside brain package)
     discord_adapter.py               # Thin Discord→HTTP adapter
     debug_adapter.py                 # Browser-based debug chat UI
   scripts/                           # Standalone utility scripts
     load_character_profile.py        # Load personality JSON into MongoDB
+    insert_memory.py                 # CLI tool to insert a memory entry
+    search_memory.py                 # CLI tool to search memories
+    search_user_facts.py             # CLI tool to search user facts
+    search_conversation.py           # CLI tool to search conversation history
 personalities/
   example.json                       # Template personality JSON
   kazusa.json                        # Default character profile
@@ -290,8 +309,38 @@ The brain service runs `db_bootstrap()` on startup which automatically creates a
 - **`conversation_history`** — chat messages with embeddings for semantic search
 - **`user_profiles`** — per-user facts, affinity score, platform accounts, relationship insight
 - **`character_state`** — single global document for mood, vibe, reflection summary, and the **character profile**
-- **`memory`** — persistent named memories with embeddings
+- **`memory`** — persistent memories with structured metadata and embeddings (see Memory Schema below)
+- **`knowledge`** — detailed knowledge entries (links, documents, reference material)
 - **`scheduled_events`** — future events (follow-up messages, etc.)
+
+#### Memory Schema (`MemoryDoc`)
+
+Each document in the `memory` collection has:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `memory_name` | `str` | Descriptive title, e.g. `[EAMARS] Lives in Auckland` |
+| `content` | `str` | Full memory content |
+| `source_global_user_id` | `str` | UUID4 of the user who triggered this memory |
+| `timestamp` | `str` | ISO-8601 UTC creation timestamp |
+| `embedding` | `list[float]` | Dense vector for similarity search |
+| `memory_type` | `str` | `fact` \| `promise` \| `impression` \| `narrative` \| `defense_rule` |
+| `source_kind` | `str` | `conversation_extracted` \| `relationship_inferred` \| `reflection_inferred` \| `seeded_manual` \| `external_imported` |
+| `confidence_note` | `str` | How downstream should treat this memory |
+| `status` | `str` | `active` \| `fulfilled` \| `expired` \| `superseded` |
+| `expiry_timestamp` | `str \| None` | ISO-8601 expiry or `None` (never expires) |
+
+**Append-only**: `save_memory()` always inserts a new document (never overwrites). Deduplication and lifecycle management are handled at query time via `status` filtering.
+
+**Embedding format**: Embeddings are generated from structured text:
+```
+type:{memory_type}
+source:{source_kind}
+title:{memory_name}
+content:{content}
+```
+
+**Search filters**: `search_memory()` and the `search_persistent_memory` tool support optional filtering by `memory_type`, `source_kind`, `status`, `expiry_before`, and `expiry_after`.
 
 Vector search indexes are created best-effort (requires MongoDB Atlas for full vector search).
 
@@ -357,6 +406,9 @@ Environment variables are read from `.env` or can be set in the compose file.
 - **5-stage cognitive pipeline** — separating decontextualization, research, cognition, dialog, and consolidation gives each stage a focused LLM context and allows independent iteration. The cognition layer (subconscious → conscious → social filter) models a human-like decision process rather than a single prompt.
 - **Generator-evaluator dialog loop** — the dialog agent generates candidate replies and an evaluator checks for fatal errors (logic contradictions, missing facts). This catches issues before sending while avoiding excessive retries via dynamic threshold relaxation.
 - **Inline consolidation** — unlike the previous deferred memory writer, consolidation now runs as part of the graph. This ensures character state, facts, and affinity are updated before the next message arrives.
+- **Append-only memory** — `save_memory()` uses `insert_one` (never `update_one`), so every memory is a permanent record. Lifecycle is managed via the `status` field (`active` → `fulfilled` / `expired` / `superseded`). This prevents accidental overwrites and preserves the full history of extracted facts and promises.
+- **Structured memory metadata** — each memory carries `memory_type`, `source_kind`, `confidence_note`, `status`, and `expiry_timestamp`. This enables filtered retrieval (e.g., only active promises for a specific user) and gives downstream consumers trust signals about how to weight each memory.
+- **Structured embedding text** — memory embeddings encode `type`, `source`, `title`, and `content` as a structured block rather than a flat concatenation. This improves semantic search precision by allowing the embedding model to weight metadata alongside content.
 - **Non-linear affinity scaling** — affinity deltas are scaled by breakpoints: easy to gain/lose at extremes, normal in the middle, harder at high levels. This prevents runaway affinity while allowing meaningful relationship progression.
 - **Affinity system** — per-user 0–1000 score (default 500) with 21 behavioral tiers from "Contemptuous" to "Unwavering". The LLM proposes a delta; non-LLM code applies non-linear scaling and clamping.
 - **Research subgraph with evaluator** — the research stage can dispatch multiple specialist agents and re-evaluate whether enough information has been gathered, preventing premature or insufficient research.

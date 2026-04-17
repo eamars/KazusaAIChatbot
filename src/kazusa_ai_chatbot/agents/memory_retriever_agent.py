@@ -119,13 +119,27 @@ async def get_conversation(platform: str | None = None,
 
 
 @tool
-async def search_persistent_memory(search_query: str, top_k: int = 5, source_global_user_id: str | None = None) -> list[dict]:
+async def search_persistent_memory(
+    search_query: str,
+    top_k: int = 5,
+    source_global_user_id: str | None = None,
+    memory_type: str | None = None,
+    source_kind: str | None = None,
+    status: str | None = None,
+    expiry_before: str | None = None,
+    expiry_after: str | None = None,
+) -> list[dict]:
     """Search memory from persistent database
     
     Args:
         search_query: The search query (not keywords)
         top_k: (Optional) The highest K number of results to return, default to 5
         source_global_user_id: (Optional) The global user ID (UUID) to filter memories by. Only returns memories originating from this user.
+        memory_type: (Optional) Filter by memory type, e.g. "fact", "promise", "impression", "narrative", "defense_rule"
+        source_kind: (Optional) Filter by source kind, e.g. "conversation_extracted", "seeded_manual"
+        status: (Optional) Filter by status, e.g. "active", "fulfilled", "expired", "superseded"
+        expiry_before: (Optional) ISO-8601 upper bound for expiry_timestamp (exclusive <)
+        expiry_after: (Optional) ISO-8601 lower bound for expiry_timestamp (exclusive >)
 
     Returns:
         Top K number of memories that is closed to the search query. Each with (similarity_score, memory_with_metadata)
@@ -135,15 +149,26 @@ async def search_persistent_memory(search_query: str, top_k: int = 5, source_glo
         limit=top_k,
         method="vector",
         source_global_user_id=source_global_user_id,
+        memory_type=memory_type,
+        source_kind=source_kind,
+        status=status,
+        expiry_before=expiry_before,
+        expiry_after=expiry_after,
     )
 
     # Rebuild return format to remove unwanted columns
     return_list = []
     for (score, memory) in results:
         return_list.append({
-            "content": memory["memory_name"] + ": " + memory["content"],
+            "memory_name": memory.get("memory_name", ""),
+            "content": memory["content"],
             "timestamp": memory["timestamp"],
             "source_global_user_id": memory.get("source_global_user_id", ""),
+            "memory_type": memory.get("memory_type", ""),
+            "source_kind": memory.get("source_kind", ""),
+            "status": memory.get("status", ""),
+            "confidence_note": memory.get("confidence_note", ""),
+            "expiry_timestamp": memory.get("expiry_timestamp"),
             "cosine_similarity": score,
         })
 

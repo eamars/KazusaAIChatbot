@@ -145,6 +145,40 @@ class MemoryDoc(TypedDict, total=False):
     timestamp: str                  # ISO-8601 UTC timestamp of when memory was created/updated
     embedding: list[float]          # dense vector for similarity search
 
+    # --- Structured metadata ---
+    memory_type: str                # "fact" | "promise" | "impression" | "narrative" | "defense_rule"
+    source_kind: str                # "conversation_extracted" | "relationship_inferred" | "reflection_inferred" | "seeded_manual" | "external_imported"
+    confidence_note: str            # free-form note on how downstream should treat this memory
+    status: str                     # "active" | "fulfilled" | "expired" | "superseded"
+    expiry_timestamp: str | None    # ISO-8601 or None (never expires)
+
+
+def build_memory_doc(
+    memory_name: str,
+    content: str,
+    source_global_user_id: str,
+    memory_type: str,
+    source_kind: str,
+    confidence_note: str,
+    status: str = "active",
+    expiry_timestamp: str | None = None,
+) -> dict:
+    """Build a memory document dict ready for ``save_memory``.
+
+    This is the single place to construct a well-formed memory payload so that
+    every caller produces consistent documents.
+    """
+    return {
+        "memory_name": memory_name,
+        "content": content,
+        "source_global_user_id": source_global_user_id,
+        "memory_type": memory_type,
+        "source_kind": source_kind,
+        "confidence_note": confidence_note,
+        "status": status,
+        "expiry_timestamp": expiry_timestamp,
+    }
+
 
 class ScheduledEventDoc(TypedDict, total=False):
     """A scheduled future event in the ``scheduled_events`` collection.
@@ -765,39 +799,37 @@ async def enable_memory_vector_index() -> None:
     await enable_vector_index("memory", "memory_vector_index")
 
 
-async def save_memory(
-    memory_name: str,
-    content: str,
-    timestamp: str,
-    source_global_user_id: str = "",
-) -> None:
-    """Save a memory entry with embedding to the memory collection.
-    
+async def save_memory(doc: MemoryDoc, timestamp: str) -> None:
+    """Save a memory entry (always insert, never overwrite) to the memory collection.
+
+    Each call creates a new document.  Memories are append-only; deduplication
+    and superseding are handled at query time via the ``status`` field.
+
     Args:
-        memory_name: Name/identifier for the memory
-        content: The memory content/text
-        timestamp: ISO-8601 UTC timestamp for when the memory was created or updated
-        source_global_user_id: UUID4 of the user who triggered this memory (empty for non-user-specific)
+        doc: A dict produced by :func:`build_memory_doc`.
+        timestamp: ISO-8601 UTC timestamp for when the memory was created or updated.
     """
     db = await get_db()
-    
-    # Create embedding based on "memory_name: content"
-    combined_text = f"{memory_name}: {content}"
-    embedding = await get_text_embedding(combined_text)
-    
-    await db.memory.update_one(
-        {"memory_name": memory_name},
-        {
-            "$set": {
-                "memory_name": memory_name,
-                "content": content,
-                "source_global_user_id": source_global_user_id,
-                "timestamp": timestamp,
-                "embedding": embedding,
-            }
-        },
-        upsert=True,
+
+    memory_name = doc["memory_name"]
+    content = doc["content"]
+
+    # Create embedding from structured text
+    combined_text = (
+        f"type:{doc.get('memory_type', '')}\n"
+        f"source:{doc.get('source_kind', '')}\n"
+        f"title:{memory_name}\n"
+        f"content:{content}"
     )
+    embedding = await get_text_embedding(combined_text)
+
+    payload = {
+        **doc,
+        "timestamp": timestamp,
+        "embedding": embedding,
+    }
+
+    await db.memory.insert_one(payload)
 
 
 async def search_memory(
@@ -805,6 +837,11 @@ async def search_memory(
     limit: int = 5,
     method: str = "vector",  # "keyword", "vector"
     source_global_user_id: str | None = None,
+    memory_type: str | None = None,
+    source_kind: str | None = None,
+    status: str | None = None,
+    expiry_before: str | None = None,
+    expiry_after: str | None = None,
 ) -> list[tuple[float, MemoryDoc]]:
     """
     Search memory collection using keyword or vector relevance.
@@ -814,12 +851,35 @@ async def search_memory(
         limit: Maximum number of results.
         method: "keyword" for regex text search, "vector" for semantic search.
         source_global_user_id: Optional UUID4 to filter memories originating from a specific user.
+        memory_type: Optional filter by memory_type (e.g. "fact", "promise").
+        source_kind: Optional filter by source_kind (e.g. "conversation_extracted").
+        status: Optional filter by status (e.g. "active", "fulfilled").
+        expiry_before: Optional ISO-8601 upper bound for expiry_timestamp (<).
+        expiry_after: Optional ISO-8601 lower bound for expiry_timestamp (>).
         
     Returns a list of tuples (similarity_score, memory_doc).
     Keyword search results always have similarity_score of -1.
     """
     db = await get_db()
     collection = db.memory
+
+    # Build a reusable match filter from the optional arguments
+    extra_filter: dict[str, Any] = {}
+    if source_global_user_id:
+        extra_filter["source_global_user_id"] = source_global_user_id
+    if memory_type:
+        extra_filter["memory_type"] = memory_type
+    if source_kind:
+        extra_filter["source_kind"] = source_kind
+    if status:
+        extra_filter["status"] = status
+    if expiry_before or expiry_after:
+        expiry_cond: dict[str, str] = {}
+        if expiry_before:
+            expiry_cond["$lt"] = expiry_before
+        if expiry_after:
+            expiry_cond["$gt"] = expiry_after
+        extra_filter["expiry_timestamp"] = expiry_cond
 
     if method == "keyword":
         base_filter: dict[str, Any] = {
@@ -828,8 +888,7 @@ async def search_memory(
                 {"content": {"$regex": query, "$options": "i"}}
             ]
         }
-        if source_global_user_id:
-            base_filter["source_global_user_id"] = source_global_user_id
+        base_filter.update(extra_filter)
 
         cursor = collection.find(base_filter).limit(limit)
         docs = await cursor.to_list(length=limit)
@@ -855,9 +914,9 @@ async def search_memory(
         {"$addFields": {"score": {"$meta": "vectorSearchScore"}}},
     ]
 
-    # Post-filter by source user if specified
-    if source_global_user_id:
-        pipeline.append({"$match": {"source_global_user_id": source_global_user_id}})
+    # Post-filter
+    if extra_filter:
+        pipeline.append({"$match": extra_filter})
 
     pipeline.append({"$unset": "embedding"})
 

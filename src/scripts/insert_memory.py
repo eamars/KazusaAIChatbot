@@ -23,6 +23,7 @@ from kazusa_ai_chatbot.db import (
     get_db,
     close_db,
     save_memory,
+    build_memory_doc,
 )
 
 # Configure logging
@@ -38,6 +39,9 @@ async def main():
     parser = argparse.ArgumentParser(description="Insert memory entry")
     parser.add_argument("memory_name", help="Name/identifier for the memory")
     parser.add_argument("content", help="The memory content/text")
+    parser.add_argument("--memory-type", default="fact", help="Memory type (fact, promise, impression, narrative, defense_rule)")
+    parser.add_argument("--source-kind", default="seeded_manual", help="Source kind")
+    parser.add_argument("--confidence-note", default="Manually inserted memory.", help="Confidence note")
     
     args = parser.parse_args()
     
@@ -49,11 +53,15 @@ async def main():
         await get_db()
         
         # Save memory
-        await save_memory(
+        doc = build_memory_doc(
             memory_name=args.memory_name,
             content=args.content,
-            timestamp=datetime.now(timezone.utc).isoformat(),
+            source_global_user_id="",
+            memory_type=args.memory_type,
+            source_kind=args.source_kind,
+            confidence_note=args.confidence_note,
         )
+        await save_memory(doc, datetime.now(timezone.utc).isoformat())
         
         logger.info("Memory entry saved successfully!")
         print(f"✓ Memory '{args.memory_name}' has been saved.")
