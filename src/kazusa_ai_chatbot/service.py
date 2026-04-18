@@ -28,6 +28,7 @@ for _quiet in ("pymongo", "httpx", "httpcore", "hpack", "urllib3", "openai", "la
     logging.getLogger(_quiet).setLevel(logging.WARNING)
 
 from kazusa_ai_chatbot.config import (
+    BRAIN_EXECUTOR_COUNT,
     CONVERSATION_HISTORY_LIMIT,
 )
 from kazusa_ai_chatbot.db import (
@@ -159,11 +160,16 @@ async def _save_bot_message(result: dict) -> None:
 
 _personality: dict = {}
 _graph = None
+_chat_executor_semaphore: asyncio.Semaphore | None = None
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global _personality, _graph
+    global _personality, _graph, _chat_executor_semaphore
+
+    executor_count = max(1, BRAIN_EXECUTOR_COUNT)
+    _chat_executor_semaphore = asyncio.Semaphore(executor_count)
+    logger.info("Chat executor limit set to %s", executor_count)
 
     # 1. Database bootstrap
     await db_bootstrap()
@@ -225,93 +231,98 @@ async def health():
 
 @app.post("/chat", response_model=ChatResponse)
 async def chat(req: ChatRequest, background_tasks: BackgroundTasks):
-    timestamp = req.timestamp or datetime.now(timezone.utc).isoformat()
+    semaphore = _chat_executor_semaphore
+    if semaphore is None:
+        semaphore = asyncio.Semaphore(1)
 
-    # Resolve global user ID
-    global_user_id = await resolve_global_user_id(
-        platform=req.platform,
-        platform_user_id=req.platform_user_id,
-        display_name=req.display_name,
-    )
-    user_profile = await get_user_profile(global_user_id)
+    async with semaphore:
+        timestamp = req.timestamp or datetime.now(timezone.utc).isoformat()
 
-    # Convert attachments to MultiMediaDoc list
-    multimedia_input: list[MultiMediaDoc] = []
-    for att in req.attachments:
-        if att.media_type.startswith("image/") and att.base64_data:
-            multimedia_input.append({
-                "content_type": att.media_type,
-                "base64_data": att.base64_data,
-                "description": att.description,
-            })
+        # Resolve global user ID
+        global_user_id = await resolve_global_user_id(
+            platform=req.platform,
+            platform_user_id=req.platform_user_id,
+            display_name=req.display_name,
+        )
+        user_profile = await get_user_profile(global_user_id)
 
-    # Fetch conversation history
-    history = await get_conversation_history(
-        platform=req.platform,
-        platform_channel_id=req.platform_channel_id,
-        limit=CONVERSATION_HISTORY_LIMIT,
-    )
-    trimmed_history = trim_history_dict(history)
+        # Convert attachments to MultiMediaDoc list
+        multimedia_input: list[MultiMediaDoc] = []
+        for att in req.attachments:
+            if att.media_type.startswith("image/") and att.base64_data:
+                multimedia_input.append({
+                    "content_type": att.media_type,
+                    "base64_data": att.base64_data,
+                    "description": att.description,
+                })
 
-    # Build the character bot identity
-    bot_name = _personality.get("name", "KazusaBot")
+        # Fetch conversation history
+        history = await get_conversation_history(
+            platform=req.platform,
+            platform_channel_id=req.platform_channel_id,
+            limit=CONVERSATION_HISTORY_LIMIT,
+        )
+        trimmed_history = trim_history_dict(history)
 
-    initial_state: IMProcessState = {
-        "timestamp": timestamp,
-        "platform": req.platform,
-        "platform_user_id": req.platform_user_id,
-        "global_user_id": global_user_id,
-        "user_name": req.display_name,
-        "user_input": req.content,
-        "user_multimedia_input": multimedia_input,
-        "user_profile": user_profile,
-        "platform_bot_id": req.platform_bot_id,
-        "bot_name": bot_name,
-        "character_profile": _personality,
-        "platform_channel_id": req.platform_channel_id,
-        "channel_name": req.channel_name,
-        "chat_history": trimmed_history,
-    }
+        # Build the character bot identity
+        bot_name = _personality.get("name", "KazusaBot")
 
-    # Save user message immediately (before graph invocation)
-    try:
-        await save_conversation({
+        initial_state: IMProcessState = {
+            "timestamp": timestamp,
             "platform": req.platform,
-            "platform_channel_id": req.platform_channel_id,
-            "role": "user",
             "platform_user_id": req.platform_user_id,
             "global_user_id": global_user_id,
-            "display_name": req.display_name,
-            "content": req.content,
-            "timestamp": timestamp,
-        })
-    except Exception:
-        logger.exception("Failed to save user message")
+            "user_name": req.display_name,
+            "user_input": req.content,
+            "user_multimedia_input": multimedia_input,
+            "user_profile": user_profile,
+            "platform_bot_id": req.platform_bot_id,
+            "bot_name": bot_name,
+            "character_profile": _personality,
+            "platform_channel_id": req.platform_channel_id,
+            "channel_name": req.channel_name,
+            "chat_history": trimmed_history,
+        }
 
-    # Invoke the graph
-    try:
-        result = await _graph.ainvoke(initial_state)
-    except Exception:
-        logger.exception("Graph invocation failed")
-        return ChatResponse(messages=[f"{bot_name} is busy right now, please try again later."])
+        # Save user message immediately (before graph invocation)
+        try:
+            await save_conversation({
+                "platform": req.platform,
+                "platform_channel_id": req.platform_channel_id,
+                "role": "user",
+                "platform_user_id": req.platform_user_id,
+                "global_user_id": global_user_id,
+                "display_name": req.display_name,
+                "content": req.content,
+                "timestamp": timestamp,
+            })
+        except Exception:
+            logger.exception("Failed to save user message")
 
-    final_dialog = result.get("final_dialog", [])
-    should_reply = result.get("use_reply_feature", False)
+        # Invoke the graph
+        try:
+            result = await _graph.ainvoke(initial_state)
+        except Exception:
+            logger.exception("Graph invocation failed")
+            return ChatResponse(messages=[f"{bot_name} is busy right now, please try again later."])
 
-    # Save bot message in background only if the bot actually responded
-    if final_dialog:
-        background_tasks.add_task(_save_bot_message, result)
+        final_dialog = result.get("final_dialog", [])
+        should_reply = result.get("use_reply_feature", False)
 
-    # TODO: Extract scheduled_followups from result["future_promises"] and schedule them
-    scheduled_followups = 0
+        # Save bot message in background only if the bot actually responded
+        if final_dialog:
+            background_tasks.add_task(_save_bot_message, result)
 
-    return ChatResponse(
-        messages=final_dialog,
-        content_type="text",
-        attachments=[],
-        should_reply=should_reply,
-        scheduled_followups=scheduled_followups,
-    )
+        # TODO: Extract scheduled_followups from result["future_promises"] and schedule them
+        scheduled_followups = 0
+
+        return ChatResponse(
+            messages=final_dialog,
+            content_type="text",
+            attachments=[],
+            should_reply=should_reply,
+            scheduled_followups=scheduled_followups,
+        )
 
 
 @app.post("/event")

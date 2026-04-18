@@ -82,5 +82,6 @@ MAX_FACT_HARVESTER_RETRY = int(os.getenv("MAX_FACT_HARVESTER_RETRY", "3"))
 # Brain service
 SERVICE_HOST = os.getenv("SERVICE_HOST", "0.0.0.0")
 SERVICE_PORT = int(os.getenv("SERVICE_PORT", "8000"))
+BRAIN_EXECUTOR_COUNT = int(os.getenv("BRAIN_EXECUTOR_COUNT", "1"))
 # PERSONALITY_PATH removed — character profile is now loaded from MongoDB.
 # Use: python -m scripts.load_character_profile personalities/kazusa.json

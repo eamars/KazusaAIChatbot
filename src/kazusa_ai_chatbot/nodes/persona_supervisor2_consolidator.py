@@ -271,7 +271,7 @@ _FACTS_HARVESTER_PROMPT = """\
     ]
 }}
 """
-_facts_harvester_llm = get_llm(temperature=0.1, top_p=0.1)
+_facts_harvester_llm = get_llm(temperature=0.0, top_p=0.95)
 async def facts_harvester(state: ConsolidatorState):
     system_prompt = SystemMessage(_FACTS_HARVESTER_PROMPT.format(
         character_name=state["character_profile"]["name"],
@@ -360,7 +360,7 @@ _FACT_HARVESTER_EVALUATOR_PROMPT = """\
     "feedback": "具体指明错误点。若无实质错误，返回 '通过审计，无需修改'。禁止输出'请确认是否没有新事实'这类非错误性质建议。"
 }}
 """
-_fact_harvester_evaluator_llm = get_llm(temperature=0.1, top_p=0.2)
+_fact_harvester_evaluator_llm = get_llm(temperature=0.1, top_p=0.5)
 async def fact_harvester_evaluator(state: ConsolidatorState):
     system_prompt = SystemMessage(_FACT_HARVESTER_EVALUATOR_PROMPT.format(
         character_name=state["character_profile"]["name"],

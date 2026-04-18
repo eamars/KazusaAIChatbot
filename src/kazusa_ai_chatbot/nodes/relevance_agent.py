@@ -36,14 +36,16 @@ _RELEVANCE_SYSTEM_PROMPT = """\
 - **关系洞察 (Insight)**: {last_relationship_insight}
 
 ## 3. 社交身份
-- **Discord Name**: {bot_name}
+- **Name**: {bot_name}
 - **Platform ID**: <@{platform_bot_id}>
 
 # 响应决策逻辑 (Decision Logic)
 
 ## A. 必须回复 (Should Respond: true)
 1. **直接召唤**：消息包含你的 ID 或根据语义明确指向你的名字/昵称。
-   - *注意：即便在关系恶劣（如 Hostile）时，也要根据该等级的指令（如“冷嘲热讽”）进行回复。*
+   - **注意**：如果消息中使用了 `@` 或 `reply`（如 QQ 的 `[CQ:at,qq=...]`，或 Discord 的 `<@...>`），你必须检查其引用的目标是否真的是你本人的平台 ID（`<@{platform_bot_id}>`）。
+   - 如果消息指向的是**其他人**（例如：`[CQ:at,qq=其他人的QQ号]` 或 `<@其他人的DiscordID>`），即使提到你，这属于“与他人交谈”，绝不是在召唤你！
+   - 注意：即便在关系恶劣（如 Hostile）时，也要根据该等级的指令（如“冷嘲热讽”）进行回复。*
 2. **对话延续**：你是最后一个发言者，且 `{user_name}` 正在回应你。
 3. **主观倾向触发**：
    - 如果关系属于 `Friendly` 以上：即便没有直接提问，只要话题涉及 `{user_name}` 的 `facts` 或符合你的 `mood`，也应主动参与。
@@ -51,7 +53,7 @@ _RELEVANCE_SYSTEM_PROMPT = """\
 4. **情感波动响应**：用户表达痛苦、寻求安慰，且你的 `affinity_instruction` 允许你表现出关心（如 `Caring` 级别）。
 
 ## B. 拒绝回复 (Should Respond: false)
-1. **第三方对话**：用户显然是在与其他人/或其他机器人交谈，且话题与你无关。
+1. **第三方对话**：用户显然是在与其他人/或其他机器人交谈（例如：消息中明确 `@` 了别人（如 `[CQ:at,qq=别人]` 或 `<@别人>`），而非你本人）。就算消息中抱怨或提到了你的名字或“我的机器人”，只要其主要互动对象是别人，你也应保持沉默旁观。
 2. **事务性结束**：用户提供了结束语（如“谢谢”、“晚安”）。
    - *除非关系处于 `Devoted` 以上等级，否则无需强行延续对话。*
 3. **社交防御**：如果关系处于 `Contemptuous` 到 `Aloof` 之间，且对方没有直接召唤你，请选择忽略消息以展现你的“蔑视”或“疏远”。
@@ -81,6 +83,52 @@ _RELEVANCE_SYSTEM_PROMPT = """\
 }}
 """
 
+_RELEVANCE_SYSTEM_NOISY_PROMPT = """\
+你负责担任角色 `{character_name}` 的社交前置处理器。当前处于【高噪音群聊环境】，你需要极其谨慎地决定 `{character_name}` 是否介入当前对话。
+
+# 核心背景
+## 1. 角色当前状态
+- **心情 (Mood)**: {mood}
+- **全局氛围 (Global Vibe)**: {global_vibe}
+- **自我反思**: {reflection_summary}
+
+## 2. 对用户 {user_name} 的主观判断 (Affinity Context)
+- **关系评价 (Level)**: {affinity_level}
+- **行为准则 (Instruction)**: {affinity_instruction}
+- **关系洞察 (Insight)**: {last_relationship_insight}
+
+## 3. 社交身份
+- **Name**: {bot_name}
+- **Platform ID**: <@{platform_bot_id}>
+
+# 响应决策逻辑 (Decision Logic) - 【群聊严苛版】
+
+## A. 必须回复 (Should Respond: true)
+1. **明确直接召唤**：消息明确且**仅**包含你的 ID、名字或昵称（如：`{bot_name}` 或 `@{platform_bot_id}`）。
+   - **注意**：如果消息中使用了 `@` 或 `reply`（如 QQ 的 `[CQ:at,qq=...]`，或 Discord 的 `<@...>`），你必须检查其引用的目标是否真的是你本人的平台 ID（`<@{platform_bot_id}>`）。如果消息指向的是**其他人**，即使提到你的名字，这也属于“与他人交谈”，绝不是在召唤你！
+2. **极其明确的对话延续**：通过分析【历史记录】，你是最后一个被回复的发言者，且 `{user_name}` 当前的话题与你上一条消息紧密相连，明显是在等你的回应。
+
+## B. 拒绝回复 (Should Respond: false) [优先判定]
+1. **无明确指向的闲聊**：用户没有直接称呼你，也没有明确引用你的消息。即使话题似乎和你有关，只要对方没有明确指向你，在群聊中一律旁观。
+2. **第三方对话**：用户显然是在与群里的其他人/或其他机器人交谈（例如：消息中明确 `@` 或 `reply` 了别人）。就算消息中提到了你的名字或抱怨“我的机器人”，只要其主要互动对象是别人，你必须保持沉默。
+3. **模棱两可**：如果不确定用户是不是在和你说话，一律当做不是，选择不回复。
+4. **事务性结束**：用户提供了结束语（如“谢谢”、“晚安”）。
+
+# 上下文回复逻辑 (use_reply_feature)
+**当前处于群聊环境，为了避免消息错乱并明确回复对象：**
+- 你**必须**使用回复功能。因此 `use_reply_feature` 必须始终设置为 `true`。
+
+# 输出格式
+请务必返回合法的 JSON 字符串，包含以下字段：
+{{
+    "should_respond": <boolean: 你是否应该回应此消息>,
+    "reason_to_respond": "<简短解释为什么回应或不回应此消息>",
+    "use_reply_feature": true,
+    "channel_topic": "<包括所有用户参与的宏观话题>",
+    "user_topic": "<当前用户的具体意图和细分话题>"
+}}
+"""
+
 _relevance_agent_llm = get_llm(temperature=0.1, top_p=0.9)
 async def relevance_agent(state: IMProcessState) -> IMProcessState:
     # Calculate affinity context
@@ -89,7 +137,7 @@ async def relevance_agent(state: IMProcessState) -> IMProcessState:
     # get other attributes
     user_name = state.get("user_name")
     platform_user_id = state.get("platform_user_id", "")
-    channel_name = state.get("channel_name")
+    channel_name = state.get("channel_name", "")
     user_input = state.get("user_input")
 
     # TODO: Make the workflow taking the raw b64 image instead. For now we will only pass in the description. 
@@ -98,8 +146,13 @@ async def relevance_agent(state: IMProcessState) -> IMProcessState:
         if piece["description"]:
             user_input += f"\nImage attachment: {piece['description']}"
 
+    # Determine if this is a noisy group environment
+    channel_name_lower = channel_name.lower()
+    is_noisy_environment = channel_name_lower not in ["", "private", "dm", "direct message"]
+    prompt_template = _RELEVANCE_SYSTEM_NOISY_PROMPT if is_noisy_environment else _RELEVANCE_SYSTEM_PROMPT
+
     """Analyze context and determine relevance using LLM."""
-    system_prompt = SystemMessage(content=_RELEVANCE_SYSTEM_PROMPT.format(
+    system_prompt = SystemMessage(content=prompt_template.format(
         character_name=state["character_profile"]["name"],
         mood=state["character_profile"]["mood"],
         global_vibe=state["character_profile"]["global_vibe"],

@@ -20,13 +20,17 @@ logger = logging.getLogger(__name__)
 
 @tool
 async def search_user_facts(global_user_id: str) -> list[str]:
-    """Read user facts for a specific user
+    """Read user facts for a specific user.
+
+    Mandatory argument rules:
+    - global_user_id must be provided.
+    - global_user_id must be the user's stable UUID string.
     
     Args:
-        global_user_id: The global user ID (UUID) of the user
+        global_user_id (Mandatory): The global user ID (UUID) of the user.
         
     Returns:
-        A list of user facts
+        A list of user facts.
     """
     return await get_user_facts(global_user_id)
 
@@ -37,17 +41,22 @@ async def search_conversation(search_query: str,
                   platform: str | None = None,
                   platform_channel_id: str | None = None,
     ) -> list[tuple[float, dict]]:
-    """Search conversation from database based on the most relevant content
+    """Search conversation history by semantic similarity.
+
+    Mandatory argument rules:
+    - search_query must be provided.
+    - search_query must be a natural-language semantic query (not a keyword list).
+    - Do not pass an empty string.
     
     Args:
-        search_query: The search query (not keywords)
-        global_user_id: (Optional) The global user ID (UUID) of the user
-        top_k: (Optional) The highest K number of results to return, default to 5
-        platform: (Optional) The platform to filter by (e.g. "discord", "qq")
-        platform_channel_id: (Optional) The ID of the channel. If not specified then search all channels
+        search_query (Mandatory): Semantic query sentence used for vector retrieval.
+        global_user_id (Optional): Filter results to one user UUID.
+        top_k (Optional): Maximum number of results to return. Default is 5.
+        platform (Optional): Platform filter, e.g. "discord", "qq".
+        platform_channel_id (Optional): Channel ID filter; if omitted, search all channels.
         
     Returns:
-        Top K number of conversations that is closed to the search query. Each with (similarity_score, message_with_metadata)
+        Top-K conversations close to the query, each as (similarity_score, message_with_metadata).
     """
     results = await search_conversation_history(
         query=search_query,
@@ -80,19 +89,24 @@ async def get_conversation(platform: str | None = None,
                            from_timestamp: str | None = None,
                            to_timestamp: str | None = None,
     ) -> list[dict]:
-    """Get conversation history for a specific channel
+    """Get conversation history using structured filters.
+
+    Usage rules:
+    - At least one filter should be provided (for example platform_channel_id, global_user_id, or time range).
+    - If both global_user_id and display_name are provided, global_user_id takes priority.
+    - from_timestamp / to_timestamp should be ISO 8601 strings.
     
     Args:
-        platform: (Optional) The platform to filter by (e.g. "discord", "qq")
-        platform_channel_id: (Optional) The ID of the channel. If not specified then search all channels
-        limit: (Optional) The highest K number of results to return, default to 5
-        global_user_id: (Optional) The global user ID (UUID) of the user
-        display_name: (Optional) The display name of the user. If both global_user_id and display_name are provided, global_user_id will be used
-        from_timestamp: (Optional) The start timestamp. Format (ISO 8601), For example: 2026-04-07T11:03:53.197223+00:00
-        to_timestamp: (Optional) The end timestamp. Format (ISO 8601)
+        platform (Optional): Platform filter, e.g. "discord", "qq".
+        platform_channel_id (Optional): Channel ID filter.
+        limit (Optional): Maximum number of rows to return. Default is 5.
+        global_user_id (Optional): User UUID filter.
+        display_name (Optional): User display name filter (fallback if global_user_id is absent).
+        from_timestamp (Optional): Start timestamp (ISO 8601), e.g. 2026-04-07T11:03:53.197223+00:00.
+        to_timestamp (Optional): End timestamp (ISO 8601).
         
     Returns:
-        A list of conversation messages
+        A list of conversation messages.
     """
     return_list = []
     results = await get_conversation_history(
@@ -129,20 +143,25 @@ async def search_persistent_memory(
     expiry_before: str | None = None,
     expiry_after: str | None = None,
 ) -> list[dict]:
-    """Search memory from persistent database
+    """Search persistent memory by semantic similarity and optional metadata filters.
+
+    Mandatory argument rules:
+    - search_query must be provided.
+    - search_query must be a natural-language semantic query (not a keyword list).
+    - Do not call this tool with only filters and no search_query.
     
     Args:
-        search_query: The search query (not keywords)
-        top_k: (Optional) The highest K number of results to return, default to 5
-        source_global_user_id: (Optional) The global user ID (UUID) to filter memories by. Only returns memories originating from this user.
-        memory_type: (Optional) Filter by memory type, e.g. "fact", "promise", "impression", "narrative", "defense_rule"
-        source_kind: (Optional) Filter by source kind, e.g. "conversation_extracted", "seeded_manual"
-        status: (Optional) Filter by status, e.g. "active", "fulfilled", "expired", "superseded"
-        expiry_before: (Optional) ISO-8601 upper bound for expiry_timestamp (exclusive <)
-        expiry_after: (Optional) ISO-8601 lower bound for expiry_timestamp (exclusive >)
+        search_query (Mandatory): Semantic query sentence for vector retrieval.
+        top_k (Optional): Maximum number of results to return. Default is 5.
+        source_global_user_id (Optional): Filter by source user UUID.
+        memory_type (Optional): Filter by type, e.g. "fact", "promise", "impression", "narrative", "defense_rule".
+        source_kind (Optional): Filter by source kind, e.g. "conversation_extracted", "seeded_manual".
+        status (Optional): Filter by status, e.g. "active", "fulfilled", "expired", "superseded".
+        expiry_before (Optional): ISO-8601 upper bound for expiry_timestamp (exclusive <).
+        expiry_after (Optional): ISO-8601 lower bound for expiry_timestamp (exclusive >).
 
     Returns:
-        Top K number of memories that is closed to the search query. Each with (similarity_score, memory_with_metadata)
+        Top-K memories close to the query, each with metadata and cosine similarity.
     """
     results = await search_memory_db(
         query=search_query,

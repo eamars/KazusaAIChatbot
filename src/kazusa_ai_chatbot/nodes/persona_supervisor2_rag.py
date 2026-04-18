@@ -11,8 +11,8 @@ from kazusa_ai_chatbot.utils import parse_llm_json_output, get_llm, build_affini
 
 import json
 import logging
-from typing import TypedDict
-
+import operator
+from typing import TypedDict, Annotated
 
 logger = logging.getLogger(__name__)
 
@@ -37,7 +37,7 @@ class RAGState(TypedDict):
     external_rag_expected_response: str
 
     # External RAG output
-    external_rag_results: list[dict]
+    external_rag_results: Annotated[list[str], operator.add]
 
     # Internal RAG dispatcher output
     internal_rag_next_action: str
@@ -46,7 +46,7 @@ class RAGState(TypedDict):
     internal_rag_expected_response: str
 
     # Internal RAG output
-    internal_rag_results: list[dict]
+    internal_rag_results: Annotated[list[str], operator.add]
 
     # User RAG dispatcher output
     user_rag_next_action: str
@@ -55,7 +55,7 @@ class RAGState(TypedDict):
     user_rag_expected_response: str
 
     # User RAG output
-    user_rag_results: list[dict]
+    user_rag_results: Annotated[list[str], operator.add]
     user_rag_finalized: str
 
 
@@ -434,11 +434,8 @@ async def call_web_search_agent(state: RAGState) -> RAGState:
     # Only take the response part
     processed_response = result.get("response", "")
 
-    # Merge with last results
-    internal_rag_results = state.get("internal_rag_results", [])
-
     return {
-        "internal_rag_results": internal_rag_results + [processed_response]
+        "external_rag_results": [processed_response]
     }
 
 
@@ -452,11 +449,8 @@ async def call_memory_retriever_agent_internal_rag(state: RAGState) -> RAGState:
     # Only take the response part
     processed_response = result.get("response", "")
 
-    # Merge with last results
-    internal_rag_results = state.get("internal_rag_results", [])
-
     return {
-        "internal_rag_results": internal_rag_results + [processed_response]
+        "internal_rag_results": [processed_response]
     }
 
 
@@ -470,11 +464,8 @@ async def call_memory_retriever_agent_user_rag(state: RAGState) -> RAGState:
     # Only take the response part
     processed_response = result.get("response", "")
 
-    # Merge with last results
-    internal_rag_results = state.get("user_rag_results", [])
-
     return {
-        "user_rag_results": internal_rag_results + [processed_response]
+        "user_rag_results": [processed_response]
     }
 
 
