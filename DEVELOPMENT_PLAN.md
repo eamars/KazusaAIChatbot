@@ -475,6 +475,79 @@ If something breaks post-deployment:
 
 ---
 
+## Part 9: Unified Metadata Thread (Flows Through All 5 Phases)
+
+The system uses a single metadata bundle that accumulates information as it flows through all phases. This enables complete visibility into decision-making and future analytics.
+
+### Metadata Structure
+```python
+{
+  "embedding": [...],              # 768-dim embedding of input
+  "depth": "SHALLOW|MEDIUM|DEEP",  # Query complexity classification
+  "cache_hit": bool,               # Was result from cache?
+  "confidence_scores": {           # Per-dispatcher confidence
+    "user_rag": float,
+    "internal_rag": float,
+    "external_rag": float
+  },
+  "rag_sources_used": [...],       # Which dispatchers actually ran
+  "extraction_results": {          # From consolidator phase
+    "attempt": int,                # Harvester attempt count
+    "evaluator_passes": int,       # Evaluator feedback loops
+    "contradiction_flags": [...]   # What was rejected
+  },
+  "write_success": bool,           # Did atomic write commit?
+  "cache_invalidation": {          # What was invalidated
+    "patterns_cleared": [...],
+    "scope": "pattern|user|all"
+  }
+}
+```
+
+### Flow Through Phases
+1. **Phase 0 (Input Analysis)**: Create metadata with embedding
+2. **Phase 1 (Cache Check)**: Add cache_hit flag
+3. **Phase 2 (RAG)**: Add depth, dispatcher scores, sources_used
+4. **Phase 3 (Response)**: Pass metadata through (no changes)
+5. **Phase 4 (Consolidation)**: Add extraction_results, write_success, cache_invalidation
+6. **Return**: Final metadata available for logging/analytics
+
+This unified approach ensures no information is lost between phases and enables future adaptation.
+
+---
+
+## Part 10: Before/After Metrics (See TEST_PLAN.md for Details)
+
+### What to Measure BEFORE Implementation
+Collect baseline metrics from current system (before any code changes):
+- **RAG Latency**: Average & p95 dispatcher round-time
+- **Dispatcher Calls**: Average per conversation
+- **Database Load**: Query count, write count, transaction duration
+- **Error Rate**: Extraction failures, contradictions, retries
+- **Memory**: Cache misses (baseline = 0% hit rate)
+- **Consistency**: Fact contradiction rate in existing memory
+
+### What to Measure AFTER Deployment
+Collected same metrics from new system (after all 5 stages deployed):
+- **RAG Latency**: Should be 25% faster (1200ms → 900ms)
+- **Dispatcher Calls**: Should drop 50% (3.0 → 1.5)
+- **Cache Hit Rate**: Should reach 60-70% (from 0%)
+- **Cache Lookup**: Should be <15ms (new capability)
+- **Error Rate**: Should drop to <0.5% (from 1-2%)
+- **Consolidator Time**: Should stay <4000ms (acceptable +33%)
+- **Load**: 10 concurrent conversations at p95 <3000ms
+
+### Comparison Approach
+Run TEST_PLAN.md comprehensive suite covering:
+- 40+ unit tests (per-component validation)
+- 12+ integration tests (interaction validation)
+- 3 E2E scenarios (full conversation flow)
+- Performance benchmarks (cache, depth routing, RAG)
+- Load tests (10 concurrent users)
+- Generate before/after visual comparison
+
+---
+
 ## Summary: What Gets Built
 
 ```
