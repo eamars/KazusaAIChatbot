@@ -29,111 +29,322 @@ This plan details **what files to modify, in what order**, to implement the 5-ph
 
 ### Stage 1: Foundation Modules (No dependencies, can implement in parallel)
 
-#### 1a. Create `kazusa_ai_chatbot/cache.py` (NEW FILE)
-**Purpose**: RAGCache class for semantic caching
-**Changes** in this file:
-- [ ] RAGCache class with methods:
-  - `__init__(backend_type)` - Support "redis" or "memory"
-  - `async retrieve_if_similar(embedding, cache_type, threshold)` - Vector similarity lookup
-  - `async store(embedding, results, cache_type, ttl_seconds, metadata)` - Store results
-  - `async invalidate_pattern(cache_type, global_user_id, trigger)` - Selective invalidation
-  - `async clear_all_user(global_user_id)` - Full user cache clear
-  - `get_stats()` - Cache stats (hits, misses, size)
-- [ ] Backend implementations:
-  - Redis backend (if chosen) with connection pooling
-  - In-memory LRU backend with thread safety
-- [ ] Embedding similarity computation (cosine, threshold-based)
-- [ ] TTL management (expiry checking)
+**Stage 1 Goal**: Implement and self-test all foundation modules in isolation. No module is plugged into the main workflow yet. Each file must include an `async def test_main()` function and `if __name__ == "__main__": asyncio.run(test_main())` block at the bottom — following the exact pattern used in `persona_supervisor2_rag.py` and other existing modules — so each file can be run standalone to inspect output values before integration.
 
-**Dependencies**: None (standalone module)
-**Lines of code**: ~300-400
-**Test file**: `tests/unit/test_rag_cache.py` (will be created during testing)
+New RAG-related files live under `src/kazusa_ai_chatbot/rag/` (new subfolder).
 
 ---
 
-#### 1b. Create `kazusa_ai_chatbot/depth_classifier.py` (NEW FILE)
-**Purpose**: Classify query depth (SHALLOW/MEDIUM/DEEP)
+#### 1a. Create `kazusa_ai_chatbot/rag/cache.py` (NEW FILE)
+**Purpose**: RAGCache class for semantic caching with crash resilience
 **Changes** in this file:
-- [ ] InputDepthClassifier class:
+
+**Core Methods**:
+- [ ] `__init__()` - Initialize in-memory LRU cache (no external dependencies)
+  - In-memory store: Typed dict with LRU eviction (built-in Python)
+  - No Redis/external service required
+  - Load persisted entries from MongoDB on startup
+- [ ] `async retrieve_if_similar(embedding, cache_type, threshold)` - Vector similarity lookup
+  - Check in-memory cache first (fast path)
+  - Fallback to MongoDB if not in memory (recovery path)
+- [ ] `async store(embedding, results, cache_type, ttl_seconds, metadata)` - Cache storage
+  - Store in-memory immediately
+  - Persist to MongoDB asynchronously (for recovery)
+- [ ] `async invalidate_pattern(cache_type, global_user_id, trigger)` - Selective invalidation
+  - Remove from in-memory cache
+  - Mark as deleted in MongoDB (soft delete) for audit trail
+- [ ] `async clear_all_user(global_user_id)` - Full user cache clear
+  - Clear from in-memory
+  - Mark deleted in MongoDB
+- [ ] `get_stats()` - Cache stats (hits, misses, size, memory)
+  - Track in-memory performance metrics
+  - Return hit rate, eviction count, current size
+
+**Embedding Similarity** (Cosine Distance):
+- [ ] Compute cosine similarity between embeddings
+- [ ] Threshold-based matching (default 0.82)
+- [ ] Pre-computed norms for performance
+
+**Crash Resilience** (CRITICAL - Addresses failure mode):
+- [ ] On startup: Load persisted cache entries from `rag_cache_index` MongoDB collection
+  - Query entries with `ttl_expires_at > now` (skip expired)
+  - Reconstruct in-memory LRU from persisted entries
+  - Result: Cache warm-starts after crash, no cold-start latency penalty
+- [ ] During operation: Async write to MongoDB after each store
+  - If write fails, log error but continue (in-memory cache still works)
+  - Next restart will replay from MongoDB (eventual consistency)
+- [ ] Graceful shutdown: Flush all in-memory entries to MongoDB
+  - Stop accepting new cache requests
+  - Complete pending writes before shutdown
+  - Next startup: Full cache populated and ready
+
+**TTL Management**:
+- [ ] In-memory: Check expiry on lookup (lazy deletion)
+- [ ] MongoDB: TTL index handles automatic cleanup (expireAfterSeconds=0)
+- [ ] Periodic: Optional background cleanup task (future)
+
+**Dependencies**: None (uses built-in Python LRU, MongoDB already in project - NO NEW EXTERNAL SERVICES)
+**Lines of code**: ~350-450
+**test_main()**: Instantiate `RAGCache`, store a dummy embedding + result, retrieve by similar embedding, print hit/miss result and stats. Run standalone to verify cache round-trip works.
+
+---
+
+#### 1b. Create `kazusa_ai_chatbot/rag/depth_classifier.py` (NEW FILE)
+**Purpose**: Classify query into two depths (SHALLOW/DEEP) via embedding similarity, with LLM fallback
+**Rationale**: Two layers map naturally to the two storage layers — SHALLOW serves from cache + user_rag only; DEEP triggers full database search across all dispatchers. Bot is multilingual (Chinese/English minimum), so keyword sets are enumerated in both languages and matched via text embedding + cosine similarity. LLM fallback handles ambiguous inputs that don't match either keyword centroid confidently.
+
+**Changes** in this file:
+- [ ] Two enumerated keyword sets (Chinese + English):
+  - `SHALLOW_KEYWORDS`: greetings, simple preferences, yes/no facts
+    - EN: `["what", "who", "do you like", "your name", "favorite", ...]`
+    - ZH: `["喜欢", "叫什么", "你是", "好不好", "什么颜色", ...]`
+  - `DEEP_KEYWORDS`: emotional history, temporal references, contradictions, complex reasoning
+    - EN: `["always", "why do you", "remember when", "last time", "you said", ...]`
+    - ZH: `["你为什么总是", "以前", "你说过", "上次", "为什么", "记得吗", ...]`
+  - Keyword embeddings pre-computed at module load time (one-time cost, both sets merged per depth)
+- [ ] `InputDepthClassifier` class:
   - `async classify(input, user_topic, affinity)` - Main classification method
-  - Heuristic engine (temporal keywords, pronouns, emotional words)
-  - Optional light LLM for ambiguous cases (disabled by default)
-  - Fallback to MEDIUM for edge cases
-- [ ] Output structure: `{depth, trigger_dispatchers, confidence_threshold}`
-- [ ] Affinity-aware routing (low affinity → DEEP for careful retrieval)
-- [ ] Contradiction detection heuristics
+  - **Fast path**: Compute embedding of input, cosine similarity against SHALLOW and DEEP centroids
+    - If `sim(SHALLOW) > 0.75` and `sim(SHALLOW) > sim(DEEP)` → return `SHALLOW`
+    - If `sim(DEEP) > 0.75` and `sim(DEEP) > sim(SHALLOW)` → return `DEEP`
+  - **Fallback path**: If neither centroid scores above 0.75, call LLM:
+    ```python
+    _depth_classifier_llm = get_llm(temperature=0.0, top_p=1.0)
+    response = await _depth_classifier_llm.ainvoke([system_prompt, user_prompt])
+    result = parse_llm_json_output(response.content)
+    ```
+  - **Affinity override**: if `affinity < 400`, always return `DEEP` regardless of classification
+  - **Final fallback**: if LLM output is unparseable, default to `DEEP` (safer — better to over-retrieve than miss context)
+- [ ] LLM system prompt (fallback path) must specify:
+  - **Input format**:
+    ```
+    Input JSON fields:
+    - user_input (string): the user's message, may be in Chinese or English
+    - user_topic (string): topic category derived from the conversation
+    - affinity (integer): relationship score 0–1000 between user and bot
+    ```
+  - **Output format** (strict JSON, no extra keys):
+    ```json
+    {
+      "depth": "SHALLOW or DEEP",
+      "reasoning": "one sentence explaining why"
+    }
+    ```
+  - **Classification rules** explained to LLM:
+    - `SHALLOW`: input is a simple factual question, greeting, or preference check that requires no deep memory retrieval — cache or basic user profile is sufficient
+    - `DEEP`: input references past events, emotional context, asks "why" about behaviour, or involves temporal reasoning — requires full memory search
+    - If `affinity` in the input is below 400, always output `DEEP`
+    - Input language may be Chinese or English — classify based on meaning, not language
+- [ ] Output structure: `{depth, trigger_dispatchers, confidence}`
+  - `SHALLOW` → `trigger_dispatchers: ["user_rag"]`
+  - `DEEP` → `trigger_dispatchers: ["user_rag", "internal_rag", "external_rag"]`
 
-**Dependencies**: None (standalone module)
-**Lines of code**: ~200-300
-**Test file**: `tests/unit/test_depth_classifier.py`
+**Dependencies**: `utils.get_llm`, `utils.parse_llm_json_output`, `config.LLM_*` (all already in project)
+**Lines of code**: ~200-250
+**test_main()**: Run `classify()` against 4 sample inputs — one clear SHALLOW (EN), one clear SHALLOW (ZH), one clear DEEP (EN), one ambiguous (triggers LLM fallback). Print depth + trigger_dispatchers for each.
 
 ---
 
-#### 1c. Update `kazusa_ai_chatbot/scheduler.py` (EXISTING FILE - REFACTOR)
-**Purpose**: Extract and generalize scheduler for all async tasks
-**Current state**: Promise scheduling embedded in consolidator
-**Changes**:
-- [ ] Extract scheduler logic to standalone module
-- [ ] Create `ScheduledTask` dataclass (task_id, task_type, global_user_id, due_time, metadata, status)
-- [ ] Create `TaskScheduler` class:
-  - `async schedule_task(task_type, global_user_id, due_time, metadata)` - Schedule
-  - `async cancel_task(task_id)` - Cancel
-  - `async list_pending()` - List pending tasks
-  - Task execution handlers (extensible)
-- [ ] Database storage for task state (scheduled_tasks collection)
-- [ ] Task recovery on restart (query pending from DB)
-- [ ] Integration with FastAPI background tasks or APScheduler
+#### 1c. Update `kazusa_ai_chatbot/scheduler.py` (EXISTING FILE - EXTEND)
+**Purpose**: Extend the existing scheduler to support `future_promise` event type from the consolidator
+**Current state**: `scheduler.py` already exists and is well-structured. `ScheduledEventDoc` TypedDict is defined in `db.py`. The `scheduled_events` MongoDB collection already exists with `schedule_event`, `cancel_event`, `load_pending_events`, `shutdown` functions. Only `followup_message` event type is currently implemented.
 
-**Dependencies**: None (may import DB utility)
-**Lines of code**: ~200-300
-**Test file**: `tests/unit/test_scheduler.py`
+**What already works (do not touch)**:
+- `schedule_event(event)` — persists + registers asyncio task
+- `cancel_event(event_id)` — cancels and marks as "cancelled" in DB
+- `load_pending_events()` — crash recovery on startup
+- `shutdown()` — graceful cleanup
+- Handler registry (`register_handler`, `_handlers`)
+
+**Changes needed**:
+
+**1. Fix `ScheduledEventDoc` in `db.py`** — add missing `"cancelled"` to status comment (code already sets it, TypedDict comment omits it):
+```python
+class ScheduledEventDoc(TypedDict, total=False):
+    event_id: str               # UUID4
+    event_type: str             # "followup_message" | "future_promise" | ...
+    target_platform: str        # Platform to deliver on
+    target_channel_id: str      # Channel/group to deliver to
+    target_global_user_id: str  # User the event relates to
+    payload: dict               # Event-specific data — schema varies by event_type (see below)
+    scheduled_at: str           # ISO-8601 UTC when to fire
+    created_at: str             # ISO-8601 UTC when the event was created
+    status: str                 # "pending" | "running" | "completed" | "failed" | "cancelled"
+    cancelled_at: str           # ISO-8601 UTC — set when status becomes "cancelled"
+```
+
+**2. Define `payload` sub-schema per event_type**:
+
+`followup_message` payload (existing):
+```python
+{
+    "message": str,           # Text to send
+    "platform": str,          # Target platform
+    "channel_id": str,        # Target channel
+}
+```
+
+`future_promise` payload (NEW — from consolidator future_promises):
+```python
+{
+    "promise_text": str,       # What was promised, verbatim from extraction
+    "memory_id": str,          # ID of the MemoryDoc saved for this promise (memory_type="promise")
+    "original_input": str,     # The user message that triggered the promise
+    "context_summary": str,    # Brief context so bot can recall why the promise was made
+}
+```
+
+**3. Register `future_promise` handler in `scheduler.py`**:
+- [ ] Add `async def _handle_future_promise(event: ScheduledEventDoc)` stub
+  - Logs the firing (full implementation deferred to Stage 4 consolidator refactor)
+  - Marks promise `MemoryDoc` status as `"fulfilled"` in DB
+- [ ] Call `register_handler("future_promise", _handle_future_promise)`
+
+**Collection**: Reuses existing `scheduled_events` — no new collection needed.
+
+**Indices** (verify exist, create if missing):
+- `{ "status": 1, "scheduled_at": 1 }` — for `load_pending_events` query
+- `{ "target_global_user_id": 1 }` — for per-user event lookup
+- `{ "event_id": 1 }` — unique, for update/cancel operations
+
+**Dependencies**: `db.ScheduledEventDoc`, `db.get_db` (already imported)
+**Lines of code**: ~30-50 lines added to existing file
+**test_main()**: Schedule one `followup_message` and one `future_promise` event (future-dated), call `load_pending_events()`, print both docs from DB, cancel one, verify status updated to `"cancelled"` in DB.
 
 ---
 
 ### Stage 2: Database Layer (After Stage 1 foundation)
 
-#### 2a. Update `kazusa_ai_chatbot/db.py` (EXISTING FILE - ADD FUNCTIONS)
-**Purpose**: New database operations for cache and metadata
-**Current state**: Existing queries for memory, user_profiles, etc.
-**Changes** (ADD, don't remove):
-- [ ] New collection operations:
-  - `async insert_cache_entry(embedding, cache_type, ttl_seconds, metadata)` - Cache storage
-  - `async find_similar_embeddings(embedding, cache_type, similarity_threshold)` - Vector search
-  - `async invalidate_cache_pattern(cache_type, global_user_id, trigger)` - Invalidation
-  - `async clear_cache_for_user(global_user_id)` - Full user clear
-  - `async increment_rag_version(global_user_id)` - Version tracking
-  - `async get_rag_version(global_user_id)` - Version retrieval
-  - `async create_scheduled_task(task_doc)` - Schedule task storage
-  - `async update_task_status(task_id, status)` - Task state update
+#### 2a. Restructure `kazusa_ai_chatbot/db.py` → `kazusa_ai_chatbot/db/` (SPLIT INTO SUBMODULES)
+**Purpose**: `db.py` is too large. Split by responsibility into a `db/` package. Backward compatibility is preserved — all existing `from kazusa_ai_chatbot.db import ...` imports continue to work via `__init__.py` re-exports.
 
-- [ ] Verify/create indices:
-  - On `rag_cache_index`: `(embedding, cache_type, ttl_expires_at)`
-  - On `rag_metadata_index`: `(global_user_id, rag_version)`
-  - Ensure `memory.embedding` has vector index (768-dim, cosine)
-  - Ensure `user_profiles.embedding` has vector index
+**New folder structure**:
+```
+src/kazusa_ai_chatbot/db/
+    __init__.py         ← re-exports everything (backward compat)
+    _client.py          ← connection + embedding (shared by all submodules)
+    schemas.py          ← all TypedDict document schemas
+    bootstrap.py        ← db_bootstrap() startup logic
+    conversation.py     ← conversation_history collection
+    users.py            ← user_profiles collection (identity + profile + facts + affinity)
+    character.py        ← character_state collection
+    memory.py           ← memory collection
+    rag_cache.py        ← NEW: rag_cache_index + rag_metadata_index collections
+```
 
-- [ ] Update existing functions (non-breaking):
-  - `save_memory()` - Add optional metadata parameter
-  - `update_affinity()` - Return delta applied
-  - `upsert_user_facts()` - Return count
+**Submodule breakdown** (what moves where from current `db.py`):
 
-**Dependencies**: Stage 1 (may need constants from cache/scheduler modules)
-**Lines of code**: ~400-500
-**No test file created** (tested in integration)
+`db/_client.py` — Connection + shared utilities (imported by every other submodule):
+- `_get_embed_client()`, `get_text_embedding()`
+- `get_db()`, `close_db()`
+- `enable_vector_index()`
+
+`db/schemas.py` — All TypedDict document schemas (no logic):
+- `AttachmentDoc`
+- `ConversationMessageDoc`, `PlatformAccountDoc`
+- `UserProfileDoc`
+- `CharacterProfileDoc`
+- `MemoryDoc`, `build_memory_doc()`
+- `ScheduledEventDoc`
+
+`db/bootstrap.py` — Startup and index creation:
+- `db_bootstrap()` — creates collections, seeds character_state, creates all indices
+
+`db/conversation.py` — `conversation_history` collection:
+- `get_conversation_history()`
+- `search_conversation_history()`
+- `save_conversation()`
+
+`db/users.py` — `user_profiles` collection (identity resolution, profile, facts, affinity):
+- `resolve_global_user_id()`, `link_platform_account()`, `add_suspected_alias()`
+- `get_user_profile()`, `create_user_profile()`
+- `get_user_facts()`, `upsert_user_facts()`, `overwrite_user_facts()`
+- `get_affinity()`, `update_affinity()`, `update_last_relationship_insight()`
+- `enable_user_facts_vector_index()`, `search_users_by_facts()`
+
+`db/character.py` — `character_state` collection:
+- `get_character_profile()`, `save_character_profile()`
+- `get_character_state()`, `upsert_character_state()`
+
+`db/memory.py` — `memory` collection:
+- `enable_memory_vector_index()`
+- `save_memory()`, `search_memory()`
+
+`db/rag_cache.py` — NEW: `rag_cache_index` + `rag_metadata_index` collections:
+
+*Collections and schemas*:
+```python
+# rag_cache_index document
+{
+    "cache_id": str,             # UUID4
+    "cache_type": str,           # "user_facts" | "internal_memory"
+    "global_user_id": str,       # Owner (for scoped invalidation)
+    "embedding": list[float],    # Query embedding that produced these results
+    "results": dict,             # Cached RAG results payload
+    "ttl_expires_at": datetime,  # TTL — MongoDB TTL index auto-deletes after this
+    "created_at": str,           # ISO-8601 UTC
+    "deleted": bool,             # Soft-delete flag (set by invalidate before TTL fires)
+}
+
+# rag_metadata_index document (one doc per global_user_id)
+{
+    "global_user_id": str,       # UUID4 — unique key
+    "rag_version": int,          # Incremented on every successful DB write (cache bust signal)
+    "last_rag_run": str,         # ISO-8601 UTC of last RAG execution
+}
+```
+
+*Indices on `rag_cache_index`*:
+- `{ "ttl_expires_at": 1 }` with `expireAfterSeconds=0` — auto-deletion
+- `{ "cache_type": 1, "global_user_id": 1, "deleted": 1 }` — scoped invalidation queries
+- Vector search index on `embedding` (cosine, same dim as other collections)
+
+*Indices on `rag_metadata_index`*:
+- `{ "global_user_id": 1 }` unique
+
+*New functions in `db/rag_cache.py`*:
+- [ ] `async insert_cache_entry(cache_type, global_user_id, embedding, results, ttl_seconds)` → `str` (cache_id)
+- [ ] `async find_cache_entries(cache_type, global_user_id)` → `list[dict]` (non-expired, non-deleted, with embeddings)
+- [ ] `async soft_delete_cache_entries(cache_type, global_user_id)` — sets `deleted=True`
+- [ ] `async clear_all_cache_for_user(global_user_id)` — soft-deletes all cache_types for user
+- [ ] `async get_rag_version(global_user_id)` → `int` (0 if not found)
+- [ ] `async increment_rag_version(global_user_id)` — upserts, increments by 1
+
+`db/__init__.py` — Re-export all public symbols for backward compatibility:
+```python
+from kazusa_ai_chatbot.db._client import get_db, close_db, get_text_embedding, enable_vector_index
+from kazusa_ai_chatbot.db.schemas import (
+    AttachmentDoc, ConversationMessageDoc, PlatformAccountDoc,
+    UserProfileDoc, CharacterProfileDoc, MemoryDoc, ScheduledEventDoc, build_memory_doc
+)
+from kazusa_ai_chatbot.db.bootstrap import db_bootstrap
+from kazusa_ai_chatbot.db.conversation import get_conversation_history, search_conversation_history, save_conversation
+from kazusa_ai_chatbot.db.users import (
+    resolve_global_user_id, link_platform_account, add_suspected_alias,
+    get_user_profile, create_user_profile, get_user_facts, upsert_user_facts,
+    overwrite_user_facts, get_affinity, update_affinity,
+    update_last_relationship_insight, enable_user_facts_vector_index, search_users_by_facts
+)
+from kazusa_ai_chatbot.db.character import (
+    get_character_profile, save_character_profile, get_character_state, upsert_character_state
+)
+from kazusa_ai_chatbot.db.memory import enable_memory_vector_index, save_memory, search_memory
+from kazusa_ai_chatbot.db.rag_cache import (
+    insert_cache_entry, find_cache_entries, soft_delete_cache_entries,
+    clear_all_cache_for_user, get_rag_version, increment_rag_version
+)
+```
+
+**Dependencies**: None (all internal)
+**Lines of code**: ~100 lines reorganised + ~150 new lines in `rag_cache.py`
+**No test_main()** (covered by integration tests and used by cache.py test_main)
 
 ---
 
-#### 2b. Create migration script `migrations/001_add_cache_metadata_collections.py` (NEW FILE)
-**Purpose**: MongoDB schema changes
-**Changes** (this is a one-time migration):
-- [ ] Create `rag_cache_index` collection with schema
-- [ ] Create `rag_metadata_index` collection with schema
-- [ ] Create TTL index on `rag_cache_index.ttl_expires_at`
-- [ ] Verify vector indices on `memory.embedding` and `user_profiles.embedding`
-- [ ] Rollback function (drop collections, restore indices)
-
-**Dependencies**: Database module
-**Lines of code**: ~100-150
+#### 2b. Update `db/bootstrap.py` — add new collections to startup
+- [ ] Add `rag_cache_index` and `rag_metadata_index` to `db_bootstrap()` required collections list
+- [ ] Add TTL + vector indices for `rag_cache_index` to bootstrap
+- [ ] Add unique index for `rag_metadata_index.global_user_id` to bootstrap
 
 ---
 
