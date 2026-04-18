@@ -31,8 +31,7 @@ class DiscordAdapter(discord.Client):
     def __init__(
         self,
         brain_url: str,
-        channel_ids: list[int] | None = None,
-        listen_all: bool = False,
+        channel_ids: list[str] | None = None,
         debug_modes: dict | None = None,
         **kwargs,
     ):
@@ -41,33 +40,40 @@ class DiscordAdapter(discord.Client):
         super().__init__(intents=intents, **kwargs)
 
         self.brain_url = brain_url.rstrip("/")
-        self.channel_ids = set(channel_ids) if channel_ids else None
-        self.listen_all = listen_all
+        self.channel_ids = set(channel_ids) if channel_ids is not None else None
         self.debug_modes = debug_modes or {}
         self._http_client = httpx.AsyncClient(timeout=120.0)
 
     async def on_ready(self):
         logger.info("Discord adapter logged in as %s (id=%s)", self.user, self.user.id)
-        if self.listen_all:
-            logger.info("Listening in ALL channels")
-        elif self.channel_ids:
-            logger.info("Listening in channels: %s", self.channel_ids)
+        if self.channel_ids is not None:
+            logger.info("Active in channels: %s. Other channels are listen-only.", self.channel_ids)
         else:
-            logger.info("No channels configured — responding to @mentions only")
+            logger.info("No active channels configured — all channels are listen-only (DMs are active).")
 
     async def on_message(self, message: discord.Message):
         if message.author == self.user:
             return
 
-        # Channel filtering
-        if not self.listen_all:
-            if self.channel_ids:
-                if message.channel.id not in self.channel_ids:
-                    return
-            else:
-                bot_mentioned = self.user in message.mentions if self.user else False
-                if not bot_mentioned:
-                    return
+        is_dm = message.guild is None
+        channel_id_str = str(message.channel.id)
+
+        message_debug_modes = dict(self.debug_modes)
+        is_active = is_dm or (self.channel_ids is not None and channel_id_str in self.channel_ids)
+        
+        if not is_active:
+            message_debug_modes["listen_only"] = True
+            
+        mode_label = "LISTEN-ONLY" if message_debug_modes.get("listen_only") else "ACTIVE"
+
+        logger.info(
+            "[%s] Incoming Discord message: channel_id=%s is_dm=%s author=%s content=%s",
+            mode_label,
+            channel_id_str,
+            is_dm,
+            message.author.display_name,
+            message.content,
+        )
 
         # Build attachments
         attachments = []
@@ -107,22 +113,30 @@ class DiscordAdapter(discord.Client):
             "content": message.content,
             "content_type": "text",
             "attachments": attachments,
-            "debug_modes": self.debug_modes,
+            "debug_modes": message_debug_modes,
         }
 
-        # Send to brain with typing indicator
-        async with message.channel.typing():
-            try:
+        try:
+            # Only show typing indicator if the bot is actually going to think and reply
+            if not message_debug_modes.get("listen_only"):
+                async with message.channel.typing():
+                    resp = await self._http_client.post(
+                        f"{self.brain_url}/chat",
+                        json=payload,
+                    )
+            else:
                 resp = await self._http_client.post(
                     f"{self.brain_url}/chat",
                     json=payload,
                 )
-                resp.raise_for_status()
-                data = resp.json()
-            except Exception:
-                logger.exception("Brain service request failed")
+            
+            resp.raise_for_status()
+            data = resp.json()
+        except Exception:
+            logger.exception("Brain service request failed")
+            if not message_debug_modes.get("listen_only"):
                 await message.reply("I'm having trouble thinking right now, please try again later.")
-                return
+            return
 
         # Send response messages
         messages = data.get("messages", [])
@@ -170,13 +184,8 @@ def _split_message(text: str, limit: int = 2000) -> list[str]:
 
 def main():
     parser = argparse.ArgumentParser(description="Discord adapter for Kazusa Brain Service")
-    parser.add_argument("--brain-url", type=str, default="http://localhost:8000", help="Brain service URL")
-    parser.add_argument("--channels", type=int, nargs="*", default=None, help="Discord channel IDs to listen in")
-    parser.add_argument("--no-listen-all", action="store_true", default=False, help="Disable listening in all channels")
+    parser.add_argument("--channels", type=str, nargs="*", default=None, help="Discord channel IDs to actively participate in. Other channels will be listen-only.")
     parser.add_argument("--log-level", type=str, default="INFO", choices=["DEBUG", "INFO", "WARNING", "ERROR"])
-    parser.add_argument("--listen-only", action="store_true", default=False, help="Debug: record data but skip thinking")
-    parser.add_argument("--think-only", action="store_true", default=False, help="Debug: full pipeline but suppress dialog")
-    parser.add_argument("--no-remember", action="store_true", default=False, help="Debug: skip consolidation stage")
     args = parser.parse_args()
 
     logging.basicConfig(
@@ -191,19 +200,15 @@ def main():
         logger.error("DISCORD_TOKEN environment variable is required")
         sys.exit(1)
 
-    listen_all = not args.no_listen_all and args.channels is None
-
-    debug_modes = {
-        "listen_only": args.listen_only,
-        "think_only": args.think_only,
-        "no_remember": args.no_remember,
-    }
+    brain_url = os.getenv("BRAIN_URL")
+    if not brain_url:
+        logger.error("BRAIN_URL environment variable is required")
+        sys.exit(1)
 
     adapter = DiscordAdapter(
-        brain_url=args.brain_url,
+        brain_url=brain_url,
         channel_ids=args.channels,
-        listen_all=listen_all,
-        debug_modes=debug_modes,
+        debug_modes={},
     )
     adapter.run(token, log_handler=None)
 

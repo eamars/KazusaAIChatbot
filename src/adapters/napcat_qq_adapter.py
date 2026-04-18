@@ -21,12 +21,14 @@ class NapCatWSAdapter:
         ws_token: str,
         brain_url: str, 
         brain_response_timeout: int,
+        channel_ids: list[str] | None = None,
         debug_modes: dict | None = None,
     ):
         # User arguments
         self.ws_url: str = ws_url   
         self.ws_token = ws_token
         self.brain_url = brain_url.rstrip("/")
+        self.channel_ids = set(channel_ids) if channel_ids is not None else None
 
         # The following will be populated on connect
         self.bot_id: Optional[str] = None
@@ -48,6 +50,10 @@ class NapCatWSAdapter:
                     # 1. Sync Bot Info immediately after connecting
                     await self._fetch_bot_info(ws)
                     logger.info(f"Logged in as {self.bot_name} (ID: {self.bot_id})")
+                    if self.channel_ids is not None:
+                        logger.info("Active in groups: %s. Other groups are listen-only.", self.channel_ids)
+                    else:
+                        logger.info("No active groups configured — all groups are listen-only (Private chats are active).")
                     
                     # 2. Main Event Loop
                     while True:
@@ -102,9 +108,17 @@ class NapCatWSAdapter:
         is_group = data.get("message_type") == "group"
         channel_id = str(group_id) if is_group else user_id
 
+        message_debug_modes = dict(self.debug_modes)
+        is_active = (not is_group) or (self.channel_ids is not None and str(group_id) in self.channel_ids)
+        
+        if not is_active:
+            message_debug_modes["listen_only"] = True
+            
+        mode_label = "LISTEN-ONLY" if message_debug_modes.get("listen_only") else "ACTIVE"
+
         logger.info(
-            "Incoming QQ message: user_id=%s channel_id=%s is_group=%s sender=%s content=%s",
-            user_id,
+            "[%s] Incoming QQ message: channel_id=%s is_group=%s sender=%s content=%s",
+            mode_label,
             channel_id,
             is_group,
             sender_name,
@@ -138,7 +152,7 @@ class NapCatWSAdapter:
             "content": raw_content,
             "content_type": "text",
             "attachments": attachments,
-            "debug_modes": self.debug_modes,
+            "debug_modes": message_debug_modes,
         }
 
         logger.info(
@@ -190,13 +204,9 @@ class NapCatWSAdapter:
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Discord adapter for Kazusa Brain Service")
+    parser = argparse.ArgumentParser(description="NapCat QQ adapter for Kazusa Brain Service")
+    parser.add_argument("--channels", type=str, nargs="*", default=None, help="QQ Group IDs to actively participate in. Other groups will be listen-only.")
     parser.add_argument("--log-level", type=str, default="INFO", choices=["DEBUG", "INFO", "WARNING", "ERROR"])
-    parser.add_argument("--listen-only", action="store_true", default=False, help="Debug: record data but skip thinking")
-    parser.add_argument("--think-only", action="store_true", default=False, help="Debug: full pipeline but suppress dialog")
-    parser.add_argument("--no-remember", action="store_true", default=False, help="Debug: skip consolidation stage")
-
-    # Todo: Add channel filter
 
     args = parser.parse_args()
 
@@ -226,18 +236,13 @@ def main():
     brain_response_timeout = os.getenv("BRAIN_RESPONSE_TIMEOUT", "120")
     brain_response_timeout = int(brain_response_timeout)
 
-    debug_modes = {
-        "listen_only": args.listen_only,
-        "think_only": args.think_only,
-        "no_remember": args.no_remember,
-    }
-
     adapter = NapCatWSAdapter(
         ws_url=ws_url,
         ws_token=ws_token,
         brain_url=brain_url,
         brain_response_timeout=brain_response_timeout,
-        debug_modes=debug_modes,
+        channel_ids=args.channels,
+        debug_modes={},
     )
 
     try:

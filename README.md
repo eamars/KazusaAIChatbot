@@ -122,19 +122,11 @@ The `/chat` endpoint accepts an optional `debug_modes` object in the request bod
 | `think_only` | Runs the full pipeline (including consolidation) but **suppresses** the dialog in the HTTP response. The bot's reply is still saved internally. | Response-level suppression in `service.py` |
 | `no_remember` | Runs the full pipeline and returns dialog but **skips Stage 4** (consolidation). No mood/fact/affinity updates are persisted. | Conditional edge after `stage_3_action` → `END` |
 
-### Adapter CLI flags
+### Adapter configurations
 
-All adapters support `--listen-only`, `--think-only`, and `--no-remember` CLI flags that set the corresponding debug modes for all messages processed by that adapter instance.
+Both `discord_adapter` and `napcat_qq_adapter` support a `--channels` argument to specify which channels/groups the bot should actively participate in. Any channel not included in this list will automatically be treated as **`listen_only`** (except for direct messages/private chats, which are always active).
 
-```bash
-# Discord adapter in listen-only mode
-python -m adapters.discord_adapter --brain-url http://localhost:8000 --listen-only
-
-# NapCat QQ adapter with no consolidation
-python -m adapters.napcat_qq_adapter --no-remember
-```
-
-The **debug web UI** (`debug_adapter.py`) provides checkboxes in the header bar to toggle each mode per-message.
+The **debug web UI** (`debug_adapter.py`) provides checkboxes in the header bar to toggle each debug mode per-message for quick testing.
 
 ## Pipeline Stages
 
