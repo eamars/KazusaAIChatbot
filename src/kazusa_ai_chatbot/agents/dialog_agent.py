@@ -107,7 +107,6 @@ _DIALOG_GENERATOR_PROMPT = """\
    - 模拟打字感：短句为主，多用省略号，合理嵌入语气词。
    - 在保持句意相似的情况下压缩长度。`final_dialog`应满足以下条件：
      * 数量：通常为1句/段。除非情绪极度激动（如触发核心禁忌）
-     * 长度：通常每句不过20字且总长度不超过60字（除非转述 research_facts)
 
 # 输出要求
 - 只返回台词，
@@ -173,7 +172,7 @@ async def dialog_generator(state: DialogAgentState) -> DialogAgentState:
         "contextual_directives": state["action_directives"]["contextual_directives"],
         "chat_history": state["chat_history"],
         "user_name": state["user_name"],
-        "research_facts": state["user_name"],
+        "research_facts": state["research_facts"],
     }
 
     human_message = HumanMessage(content=json.dumps(msg, ensure_ascii=False))

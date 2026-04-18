@@ -35,7 +35,7 @@ async def search_user_facts(global_user_id: str) -> list[str]:
     return await get_user_facts(global_user_id)
 
 @tool
-async def search_conversation(search_query: str, 
+async def search_conversation(search_query: str = "", 
                   global_user_id: str | None = None,
                   top_k: int = 5,
                   platform: str | None = None,
@@ -58,6 +58,9 @@ async def search_conversation(search_query: str,
     Returns:
         Top-K conversations close to the query, each as (similarity_score, message_with_metadata).
     """
+    if not search_query or not search_query.strip():
+        return [(-1.0, {"error": "search_query is mandatory and must not be empty. Please provide a natural-language semantic query."})]
+
     results = await search_conversation_history(
         query=search_query,
         platform=platform,
