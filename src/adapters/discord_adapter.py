@@ -33,6 +33,7 @@ class DiscordAdapter(discord.Client):
         brain_url: str,
         channel_ids: list[int] | None = None,
         listen_all: bool = False,
+        debug_modes: dict | None = None,
         **kwargs,
     ):
         intents = discord.Intents.default()
@@ -42,6 +43,7 @@ class DiscordAdapter(discord.Client):
         self.brain_url = brain_url.rstrip("/")
         self.channel_ids = set(channel_ids) if channel_ids else None
         self.listen_all = listen_all
+        self.debug_modes = debug_modes or {}
         self._http_client = httpx.AsyncClient(timeout=120.0)
 
     async def on_ready(self):
@@ -105,6 +107,7 @@ class DiscordAdapter(discord.Client):
             "content": message.content,
             "content_type": "text",
             "attachments": attachments,
+            "debug_modes": self.debug_modes,
         }
 
         # Send to brain with typing indicator
@@ -171,6 +174,9 @@ def main():
     parser.add_argument("--channels", type=int, nargs="*", default=None, help="Discord channel IDs to listen in")
     parser.add_argument("--no-listen-all", action="store_true", default=False, help="Disable listening in all channels")
     parser.add_argument("--log-level", type=str, default="INFO", choices=["DEBUG", "INFO", "WARNING", "ERROR"])
+    parser.add_argument("--listen-only", action="store_true", default=False, help="Debug: record data but skip thinking")
+    parser.add_argument("--think-only", action="store_true", default=False, help="Debug: full pipeline but suppress dialog")
+    parser.add_argument("--no-remember", action="store_true", default=False, help="Debug: skip consolidation stage")
     args = parser.parse_args()
 
     logging.basicConfig(
@@ -187,10 +193,17 @@ def main():
 
     listen_all = not args.no_listen_all and args.channels is None
 
+    debug_modes = {
+        "listen_only": args.listen_only,
+        "think_only": args.think_only,
+        "no_remember": args.no_remember,
+    }
+
     adapter = DiscordAdapter(
         brain_url=args.brain_url,
         channel_ids=args.channels,
         listen_all=listen_all,
+        debug_modes=debug_modes,
     )
     adapter.run(token, log_handler=None)
 

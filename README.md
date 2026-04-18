@@ -62,15 +62,19 @@ State is passed in two layers:
 Top-level flow:
 
 ```text
-ChatRequest
+ChatRequest (+ optional debug_modes)
   -> service.py builds IMProcessState
   -> relevance_agent(IMProcessState) mutates:
        should_respond, reason_to_respond, use_reply_feature, channel_topic, user_topic
   -> if should_respond == false: END
+  -> if debug_modes.listen_only: END  (record data only, skip thinking)
   -> persona_supervisor2(IMProcessState)
-       -> builds GlobalPersonaState (selected fields)
-       -> stage_0 -> stage_1 -> stage_2 -> stage_3 -> stage_4
+       -> builds GlobalPersonaState (selected fields + debug_modes)
+       -> stage_0 -> stage_1 -> stage_2 -> stage_3
+       -> if debug_modes.no_remember: END  (skip consolidation)
+       -> stage_4
        -> returns {final_dialog, future_promises}
+  -> if debug_modes.think_only: suppress final_dialog in response
   -> ChatResponse(messages=final_dialog, should_reply=use_reply_feature, scheduled_followups=future_promises)
 ```
 
@@ -97,6 +101,40 @@ user_name, user_profile,
 platform_bot_id,
 chat_history, user_topic, channel_topic
 ```
+
+## Debug Modes
+
+The `/chat` endpoint accepts an optional `debug_modes` object in the request body to control pipeline behavior for testing and debugging. All three flags default to `false` and can be **compounded** (e.g., `think_only + no_remember`).
+
+```json
+{
+  "debug_modes": {
+    "listen_only": false,
+    "think_only": false,
+    "no_remember": false
+  }
+}
+```
+
+| Flag | Behavior | Implementation |
+|------|----------|----------------|
+| `listen_only` | Records the user message to DB but skips all LLM processing (persona pipeline). Relevance agent still runs. | Conditional edge after `relevance_agent` → `END` |
+| `think_only` | Runs the full pipeline (including consolidation) but **suppresses** the dialog in the HTTP response. The bot's reply is still saved internally. | Response-level suppression in `service.py` |
+| `no_remember` | Runs the full pipeline and returns dialog but **skips Stage 4** (consolidation). No mood/fact/affinity updates are persisted. | Conditional edge after `stage_3_action` → `END` |
+
+### Adapter CLI flags
+
+All adapters support `--listen-only`, `--think-only`, and `--no-remember` CLI flags that set the corresponding debug modes for all messages processed by that adapter instance.
+
+```bash
+# Discord adapter in listen-only mode
+python -m adapters.discord_adapter --brain-url http://localhost:8000 --listen-only
+
+# NapCat QQ adapter with no consolidation
+python -m adapters.napcat_qq_adapter --no-remember
+```
+
+The **debug web UI** (`debug_adapter.py`) provides checkboxes in the header bar to toggle each mode per-message.
 
 ## Pipeline Stages
 

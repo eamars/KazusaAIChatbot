@@ -1,5 +1,5 @@
 from typing import TypedDict
-from kazusa_ai_chatbot.state import MultiMediaDoc
+from kazusa_ai_chatbot.state import MultiMediaDoc, DebugModes
 from kazusa_ai_chatbot.db import CharacterProfileDoc, UserProfileDoc
 
 
@@ -20,6 +20,9 @@ class GlobalPersonaState(TypedDict):
     chat_history: list[dict]
     user_topic: str
     channel_topic: str
+
+    # Debug
+    debug_modes: DebugModes
 
     # Bridge Variables (Outputs of stages)
     # Stage 0 output

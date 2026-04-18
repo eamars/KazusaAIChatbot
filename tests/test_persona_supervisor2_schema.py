@@ -25,6 +25,10 @@ class TestGlobalPersonaState:
         for field in input_fields:
             assert field in hints, f"Missing input field: {field}"
 
+    def test_has_debug_modes_field(self):
+        hints = typing.get_type_hints(GlobalPersonaState)
+        assert "debug_modes" in hints, "Missing field: debug_modes"
+
     def test_has_stage_output_fields(self):
         hints = typing.get_type_hints(GlobalPersonaState)
         # Stage 0

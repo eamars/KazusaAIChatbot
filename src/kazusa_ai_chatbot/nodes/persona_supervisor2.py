@@ -36,12 +36,24 @@ async def persona_supervisor2(state: IMProcessState) -> dict:
     persona_builder.add_node("stage_3_action", call_action_subgraph)  # perform action
     persona_builder.add_node("stage_4_consolidation", call_consolidation_subgraph)  # memory saving
 
-    # Build linear flow
+    # Build flow with conditional edge for no_remember debug mode
     persona_builder.add_edge(START, "stage_0_msg_decontexualizer")
     persona_builder.add_edge("stage_0_msg_decontexualizer", "stage_1_research")
     persona_builder.add_edge("stage_1_research", "stage_2_cognition")
     persona_builder.add_edge("stage_2_cognition", "stage_3_action")
-    persona_builder.add_edge("stage_3_action", "stage_4_consolidation")
+
+    def _route_after_action(state):
+        debug = state.get("debug_modes") or {}
+        if debug.get("no_remember"):
+            logger.info("no_remember active — skipping consolidation (stage 4)")
+            return "end"
+        return "consolidate"
+
+    persona_builder.add_conditional_edges(
+        "stage_3_action",
+        _route_after_action,
+        {"consolidate": "stage_4_consolidation", "end": END},
+    )
     persona_builder.add_edge("stage_4_consolidation", END)
 
     
@@ -63,12 +75,13 @@ async def persona_supervisor2(state: IMProcessState) -> dict:
         "chat_history": state["chat_history"],
         "user_topic": state["user_topic"],
         "channel_topic": state["channel_topic"],
+        "debug_modes": state.get("debug_modes", {}),
     }
     
     results = await persona_graph.ainvoke(initial_persona_state)
     
     return {
-        "final_dialog": results["final_dialog"],
+        "final_dialog": results.get("final_dialog", []),
         # "mood": results["mood"],
         # "global_vibe": results["global_vibe"],
         # "reflection_summary": results["reflection_summary"],
@@ -76,7 +89,7 @@ async def persona_supervisor2(state: IMProcessState) -> dict:
         # "affinity_delta": results["affinity_delta"],
         # "last_relationship_insight": results["last_relationship_insight"],
         # "new_facts": results["new_facts"],
-        "future_promises": results["future_promises"],
+        "future_promises": results.get("future_promises", []),
     }
 
 

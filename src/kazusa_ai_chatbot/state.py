@@ -9,6 +9,12 @@ class MultiMediaDoc(TypedDict):
     description: str
 
 
+class DebugModes(TypedDict, total=False):
+    listen_only: bool      # Record data but skip thinking (no LLM calls beyond relevance)
+    think_only: bool       # Full pipeline but suppress dialog in response
+    no_remember: bool      # Full pipeline but skip consolidation (stage 4)
+
+
 class IMProcessState(TypedDict):
     timestamp: str
 
@@ -52,6 +58,9 @@ class IMProcessState(TypedDict):
     # user_topic: str  # Already provided
     # channel_topic: str  # Already provided
     
+    # Debug modes (optional, passed from ChatRequest)
+    debug_modes: DebugModes
+
     # Output from Persona Supervisor
     final_dialog: list[str]
     future_promises: list[dict]

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import typing
 
-from kazusa_ai_chatbot.state import IMProcessState
+from kazusa_ai_chatbot.state import IMProcessState, DebugModes
 
 
 class TestIMProcessState:
@@ -30,6 +30,10 @@ class TestIMProcessState:
         ]
         for field in relevance_fields:
             assert field in hints, f"Missing relevance field: {field}"
+
+    def test_has_debug_modes_field(self):
+        hints = typing.get_type_hints(IMProcessState)
+        assert "debug_modes" in hints, "Missing field: debug_modes"
 
     def test_has_persona_supervisor_output_fields(self):
         hints = typing.get_type_hints(IMProcessState)
@@ -58,8 +62,25 @@ class TestIMProcessState:
             "use_reply_feature": False,
             "channel_topic": "",
             "user_topic": "",
+            "debug_modes": {},
             "final_dialog": [],
             "future_promises": [],
         }
         assert state["user_name"] == "TestUser"
         assert state["should_respond"] is True
+
+
+class TestDebugModes:
+    def test_debug_modes_all_false(self):
+        modes: DebugModes = {"listen_only": False, "think_only": False, "no_remember": False}
+        assert modes["listen_only"] is False
+
+    def test_debug_modes_partial(self):
+        modes: DebugModes = {"listen_only": True}
+        assert modes["listen_only"] is True
+        assert modes.get("think_only") is None
+
+    def test_debug_modes_compound(self):
+        modes: DebugModes = {"listen_only": True, "no_remember": True}
+        assert modes["listen_only"] is True
+        assert modes["no_remember"] is True

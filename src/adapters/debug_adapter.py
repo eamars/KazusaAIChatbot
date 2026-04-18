@@ -73,6 +73,10 @@ _HTML_PAGE = r"""<!DOCTYPE html>
     <input id="cfg-name" value="DebugUser" style="width:100px"/>
     <label>Channel:</label>
     <input id="cfg-channel" value="debug-channel" style="width:120px"/>
+    <span style="border-left:1px solid #444;margin:0 6px"></span>
+    <label><input type="checkbox" id="dbg-listen"/> Listen Only</label>
+    <label><input type="checkbox" id="dbg-think"/> Think Only</label>
+    <label><input type="checkbox" id="dbg-noremember"/> No Remember</label>
   </div>
 </header>
 <div id="chat"></div>
@@ -118,6 +122,11 @@ async function sendMessage() {
     content: text,
     content_type: 'text',
     attachments: [],
+    debug_modes: {
+      listen_only: document.getElementById('dbg-listen').checked,
+      think_only: document.getElementById('dbg-think').checked,
+      no_remember: document.getElementById('dbg-noremember').checked,
+    },
   };
 
   try {
@@ -140,6 +149,12 @@ async function sendMessage() {
 </html>"""
 
 
+class DebugModesIn(BaseModel):
+    listen_only: bool = False
+    think_only: bool = False
+    no_remember: bool = False
+
+
 class DebugChatRequest(BaseModel):
     platform: str = "debug"
     platform_channel_id: str = ""
@@ -150,6 +165,7 @@ class DebugChatRequest(BaseModel):
     content: str = ""
     content_type: str = "text"
     attachments: list = Field(default_factory=list)
+    debug_modes: DebugModesIn = Field(default_factory=DebugModesIn)
 
 
 @debug_app.get("/", response_class=HTMLResponse)

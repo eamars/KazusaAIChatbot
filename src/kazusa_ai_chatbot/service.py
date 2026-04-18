@@ -41,7 +41,7 @@ from kazusa_ai_chatbot.db import (
     save_conversation,
 )
 from kazusa_ai_chatbot.mcp_client import mcp_manager
-from kazusa_ai_chatbot.state import IMProcessState, MultiMediaDoc
+from kazusa_ai_chatbot.state import IMProcessState, MultiMediaDoc, DebugModes
 from kazusa_ai_chatbot.utils import trim_history_dict
 from kazusa_ai_chatbot import scheduler
 
@@ -62,6 +62,12 @@ class AttachmentIn(BaseModel):
     description: str = ""
 
 
+class DebugModesIn(BaseModel):
+    listen_only: bool = False
+    think_only: bool = False
+    no_remember: bool = False
+
+
 class ChatRequest(BaseModel):
     platform: str
     platform_channel_id: str = ""
@@ -74,6 +80,7 @@ class ChatRequest(BaseModel):
     attachments: list[AttachmentIn] = Field(default_factory=list)
     timestamp: str = ""
     reply_to_message_id: str | None = None
+    debug_modes: DebugModesIn = Field(default_factory=DebugModesIn)
 
 
 class AttachmentOut(BaseModel):
@@ -120,9 +127,17 @@ def _build_graph():
     )
     graph.add_edge("multimedia_descriptor_agent", "relevance_agent")
 
+    def _route_after_relevance(state):
+        if not state.get("should_respond"):
+            return "end"
+        debug = state.get("debug_modes") or {}
+        if debug.get("listen_only"):
+            return "end"
+        return "continue"
+
     graph.add_conditional_edges(
         "relevance_agent",
-        lambda state: "continue" if state.get("should_respond") else "end",
+        _route_after_relevance,
         {"continue": "persona_supervisor2", "end": END},
     )
     graph.add_edge("persona_supervisor2", END)
@@ -267,6 +282,15 @@ async def chat(req: ChatRequest, background_tasks: BackgroundTasks):
         # Build the character bot identity
         bot_name = _personality.get("name", "KazusaBot")
 
+        debug_modes: DebugModes = {
+            "listen_only": req.debug_modes.listen_only,
+            "think_only": req.debug_modes.think_only,
+            "no_remember": req.debug_modes.no_remember,
+        }
+        active_flags = [k for k, v in debug_modes.items() if v]
+        if active_flags:
+            logger.info("Debug modes active: %s", active_flags)
+
         initial_state: IMProcessState = {
             "timestamp": timestamp,
             "platform": req.platform,
@@ -282,6 +306,7 @@ async def chat(req: ChatRequest, background_tasks: BackgroundTasks):
             "platform_channel_id": req.platform_channel_id,
             "channel_name": req.channel_name,
             "chat_history": trimmed_history,
+            "debug_modes": debug_modes,
         }
 
         # Save user message immediately (before graph invocation)
@@ -308,6 +333,11 @@ async def chat(req: ChatRequest, background_tasks: BackgroundTasks):
 
         final_dialog = result.get("final_dialog", [])
         should_reply = result.get("use_reply_feature", False)
+
+        # think_only: suppress dialog in response but still save internally
+        if debug_modes.get("think_only"):
+            logger.info("think_only active — suppressing %d dialog message(s)", len(final_dialog))
+            final_dialog = []
 
         # Save bot message in background only if the bot actually responded
         if final_dialog:

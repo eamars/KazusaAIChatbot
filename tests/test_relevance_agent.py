@@ -31,6 +31,7 @@ def _base_state():
         "platform_channel_id": "chan_1",
         "channel_name": "general",
         "chat_history": [],
+        "debug_modes": {},
     }
 
 

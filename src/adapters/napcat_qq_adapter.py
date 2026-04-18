@@ -21,6 +21,7 @@ class NapCatWSAdapter:
         ws_token: str,
         brain_url: str, 
         brain_response_timeout: int,
+        debug_modes: dict | None = None,
     ):
         # User arguments
         self.ws_url: str = ws_url   
@@ -30,6 +31,8 @@ class NapCatWSAdapter:
         # The following will be populated on connect
         self.bot_id: Optional[str] = None
         self.bot_name: Optional[str] = None
+
+        self.debug_modes = debug_modes or {}
 
         # Initialize connection
         self.brain_client = httpx.AsyncClient(base_url=self.brain_url, timeout=brain_response_timeout)
@@ -135,6 +138,7 @@ class NapCatWSAdapter:
             "content": raw_content,
             "content_type": "text",
             "attachments": attachments,
+            "debug_modes": self.debug_modes,
         }
 
         logger.info(
@@ -188,6 +192,9 @@ class NapCatWSAdapter:
 def main():
     parser = argparse.ArgumentParser(description="Discord adapter for Kazusa Brain Service")
     parser.add_argument("--log-level", type=str, default="INFO", choices=["DEBUG", "INFO", "WARNING", "ERROR"])
+    parser.add_argument("--listen-only", action="store_true", default=False, help="Debug: record data but skip thinking")
+    parser.add_argument("--think-only", action="store_true", default=False, help="Debug: full pipeline but suppress dialog")
+    parser.add_argument("--no-remember", action="store_true", default=False, help="Debug: skip consolidation stage")
 
     # Todo: Add channel filter
 
@@ -219,11 +226,18 @@ def main():
     brain_response_timeout = os.getenv("BRAIN_RESPONSE_TIMEOUT", "120")
     brain_response_timeout = int(brain_response_timeout)
 
+    debug_modes = {
+        "listen_only": args.listen_only,
+        "think_only": args.think_only,
+        "no_remember": args.no_remember,
+    }
+
     adapter = NapCatWSAdapter(
         ws_url=ws_url,
         ws_token=ws_token,
         brain_url=brain_url,
         brain_response_timeout=brain_response_timeout,
+        debug_modes=debug_modes,
     )
 
     try:

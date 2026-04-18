@@ -36,6 +36,7 @@ def _base_discord_state():
         "use_reply_feature": False,
         "channel_topic": "greetings",
         "user_topic": "hello",
+        "debug_modes": {},
     }
 
 
@@ -93,3 +94,29 @@ async def test_persona_supervisor2_returns_final_dialog_and_future_promises():
     assert "final_dialog" in result
     assert "future_promises" in result
     assert result["final_dialog"] == ["Hi there!"]
+
+
+@pytest.mark.asyncio
+async def test_persona_supervisor2_no_remember_skips_consolidation():
+    """no_remember debug mode skips stage 4 (consolidation)."""
+    state = _base_discord_state()
+    state["debug_modes"] = {"no_remember": True}
+
+    with patch("kazusa_ai_chatbot.nodes.persona_supervisor2.call_msg_decontexualizer", new_callable=AsyncMock, return_value={"decontexualized_input": "Hello"}) as m_decon, \
+         patch("kazusa_ai_chatbot.nodes.persona_supervisor2.call_rag_subgraph", new_callable=AsyncMock, return_value={"research_facts": "", "research_metadata": []}) as m_research, \
+         patch("kazusa_ai_chatbot.nodes.persona_supervisor2.call_cognition_subgraph", new_callable=AsyncMock, return_value={
+             "internal_monologue": "thinking...",
+             "action_directives": {},
+             "interaction_subtext": "",
+             "emotional_appraisal": "",
+             "character_intent": "",
+             "logical_stance": "",
+         }) as m_cognition, \
+         patch("kazusa_ai_chatbot.nodes.persona_supervisor2.dialog_agent", new_callable=AsyncMock, return_value={"final_dialog": ["Hi there!"]}) as m_dialog, \
+         patch("kazusa_ai_chatbot.nodes.persona_supervisor2.call_consolidation_subgraph", new_callable=AsyncMock) as m_consol:
+        result = await persona_supervisor2(state)
+
+    # Consolidation should NOT have been called
+    m_consol.assert_not_called()
+    assert result["final_dialog"] == ["Hi there!"]
+    assert result["future_promises"] == []
