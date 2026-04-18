@@ -98,7 +98,9 @@ _EXTERNAL_RAG_DISPATCHER_PROMPT = """\
     "next_action": "web_search_agent" | "end",
     "task": "string",
     "context": {{
-        "key": "value",
+        "target_user_input": "string",  // Transcribe what user says
+        "target_user_topic": "string",  // Trasncribe the user topics in your own words
+        "key": "value",  // other context
         ...
     }},
     "expected_response": "string"
@@ -195,6 +197,8 @@ _INTERNAL_RAG_DISPATCHER_PROMPT = """\
     "context": {{
         "entities": ["实体关键词"],  // Example
         "time_horizon": "Last 3 Months",  // Example
+        "target_user_input": "string",  // Transcribe what user says
+        "target_user_topic": "string",  // Trasncribe the user topics in your own words
         "status_filter": {{
             "include": ["pending", "active", "unfulfilled"],  // Example
             "exclude": ["accomplished", "expired", "past_due"],  // Example
@@ -256,10 +260,23 @@ _USER_FACT_RAG_DISPATCHER_PROMPT = """\
 你负责从角色 {character_name} 的记忆库中提取关于 {user_name} 的原始素材。你需要通过多路查询确保覆盖“当前事实对齐”与“历史情感锚点”。
 - 当前的系统时间为 {timestamp}
 
+# 身份锚定 (Identity Anchor)
+- 当前检索对象固定为：`{user_name}`。
+- 只允许检索“该用户本人”的历史事实、行为记录、承诺状态与关系变化。
+- 若 `user_input` 没有明确实体，优先围绕该用户最近互动、最近承诺、最近情绪波动进行检索。
+- 严禁把任务扩展为“泛人格分析”或“抽象心理画像”（如“掌控欲/意志力/支配型人格”）除非输入中出现可验证证据。
+- 严禁把检索主体漂移到其他用户。
+
 # 检索策略 (Search Strategy)：
-1. **语义对齐 (Fact Match)**：提取 `user_input` 中的实体（如：礼物、承诺、地点），生成针对性查询。
-2. **情感对齐 (Sentiment Match)**：根据 `user_topic` 检索历史上好感度波动剧烈（High Variance）的记忆片段。
-3. **关系定性 (Status Match)**：检索最近 3 条关于用户性格特质的记录（User Impression）。
+1. **语义对齐 (Fact Match)**：提取 `user_input` 中与该用户相关的具体实体（如：礼物、承诺、地点、时间），生成针对性查询。
+2. **承诺对齐 (Promise Match)**：优先检索与该用户有关的未完成约定、未来承诺、状态变更（active/unfulfilled）。
+3. **关系证据 (Evidence Match)**：检索可验证的互动证据（原话、时间戳、行为、好感变化），避免抽象标签化描述。
+
+# 任务生成约束 (Critical)
+- `task` 必须包含 `{user_name}`，并明确写出“检索该用户相关记录”。
+- `task` 与 `context.entities` 必须优先使用输入中的原词，不要凭空引入新概念。
+- 当输入是日常请求或具体事件时，不要升级为“人格审讯式”任务。
+- 优先时间范围：最近 90 天；如证据不足再放宽。
 
 # 输入格式 (Input Format)：
 {{
@@ -275,12 +292,14 @@ _USER_FACT_RAG_DISPATCHER_PROMPT = """\
     "next_action": "memory_retriever_agent",
     "task": "基于输入事实与重大情感转折点的复合检索指令",
     "context": {{
+        "target_user_name": "{user_name}",
+        "target_global_user_id": "{global_user_id}",
         "entities": ["关键实体词"],
-        "search_logic": "multi_track",
+        "search_logic": "user_anchored_multi_track",
         "high_intensity_mode": true,
-        "time_range": "unlimited"
+        "time_range": "last_90_days_then_expand"
     }},
-    "expected_response": "包含具体时间戳，用户名称 ({user_name}) 、原始行为描述及好感度变动值的原始记录清单"
+    "expected_response": "仅返回与 {user_name} 相关的原始记录清单：包含时间戳、用户名称、原始行为描述、好感度变动；禁止输出无证据的人格推断"
 }}
 """
 _user_fact_rag_dispatcher_llm = get_llm(temperature=0.1, top_p=0.95)
@@ -298,7 +317,8 @@ async def user_fact_rag_dispatcher(state: RAGState) -> RAGState:
         character_name=character_name,
         user_name=user_name,
         timestamp=timestamp,
-    ))    
+        global_user_id=state["global_user_id"],
+    ))
 
     user_prompt = HumanMessage(content=json.dumps({
         "user_input": decontexualized_input,
@@ -353,7 +373,6 @@ _USER_FACT_RAG_FINALIZER_PROMPT = """\
 {{
     "user_rag_results": ["..."],
     "affinity_context": dict,  // "当前{user_name}在{character_name}心中的好感度描述"
-
 }}
 
 # 输出要求：
@@ -569,7 +588,6 @@ async def call_rag_subgraph(state: GlobalPersonaState) -> GlobalPersonaState:
 async def test_main():
     import datetime
     from kazusa_ai_chatbot.mcp_client import mcp_manager
-    from kazusa_ai_chatbot.utils import load_personality
     from kazusa_ai_chatbot.db import get_character_profile
 
 
@@ -586,7 +604,7 @@ async def test_main():
         "global_user_id": "320899931776745483",
         "user_name": "EAMARS",
         "timestamp": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-        "character_profile": load_personality("personalities/kazusa.json"),
+        "character_profile": await get_character_profile(),
         "user_profile": {"affinity": 950},
     }
 
