@@ -8,6 +8,7 @@ from __future__ import annotations
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from openai import OpenAIError
 
 import kazusa_ai_chatbot.rag.depth_classifier as dc
 from kazusa_ai_chatbot.rag.depth_classifier import (
@@ -46,7 +47,7 @@ def _install_fake_centroids(monkeypatch,
 
 def _patch_embedding(value: list[float]):
     return patch(
-        "kazusa_ai_chatbot.db.get_text_embedding",
+        "kazusa_ai_chatbot.rag.depth_classifier.get_text_embedding",
         AsyncMock(return_value=value),
     )
 
@@ -159,8 +160,8 @@ class TestFailureFallback:
         fake_response.content = '{"depth": "DEEP", "reasoning": "fallback"}'
         fake_llm.ainvoke = AsyncMock(return_value=fake_response)
 
-        with patch("kazusa_ai_chatbot.db.get_text_embedding",
-                   AsyncMock(side_effect=RuntimeError("network down"))), \
+        with patch("kazusa_ai_chatbot.rag.depth_classifier.get_text_embedding",
+                   AsyncMock(side_effect=OpenAIError("network down"))), \
              patch("kazusa_ai_chatbot.rag.depth_classifier._get_llm", return_value=fake_llm):
             result = await classifier.classify(
                 user_input="hello",
@@ -176,10 +177,10 @@ class TestFailureFallback:
         classifier = InputDepthClassifier()
 
         fake_llm = MagicMock()
-        fake_llm.ainvoke = AsyncMock(side_effect=RuntimeError("llm down"))
+        fake_llm.ainvoke = AsyncMock(side_effect=OpenAIError("llm down"))
 
-        with patch("kazusa_ai_chatbot.db.get_text_embedding",
-                   AsyncMock(side_effect=RuntimeError("embed down"))), \
+        with patch("kazusa_ai_chatbot.rag.depth_classifier.get_text_embedding",
+                   AsyncMock(side_effect=OpenAIError("embed down"))), \
              patch("kazusa_ai_chatbot.rag.depth_classifier._get_llm", return_value=fake_llm):
             result = await classifier.classify(
                 user_input="?",

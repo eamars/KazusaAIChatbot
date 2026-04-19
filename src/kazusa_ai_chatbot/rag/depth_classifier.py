@@ -38,107 +38,104 @@ DEEP_DISPATCHERS = ["user_rag", "internal_rag", "external_rag"]
 
 # ── Thresholds ─────────────────────────────────────────────────────
 
-SIMILARITY_THRESHOLD = 0.75
+SIMILARITY_THRESHOLD = 0.60
 AFFINITY_DEEP_THRESHOLD = 400
 
 
 # ── Keyword sets (Chinese + English, enumerated for embedding centroid) ──
 
 SHALLOW_KEYWORDS: list[str] = [
-    # English
-    "what is your name",
-    "who are you",
-    "how old are you",
-    "what is your favorite color",
-    "what do you like",
-    "do you like",
-    "are you",
+    # English — simple greetings, direct yes/no, basic facts
     "hello",
-    "hi there",
+    "hi",
+    "hey",
     "good morning",
     "good night",
     "thanks",
     "thank you",
-    "yes or no",
+    "what is your name",
+    "who are you",
+    "are you here",
+    "you there",
     "what time is it",
-    # Chinese
-    "你叫什么名字",
-    "你是谁",
-    "你几岁",
-    "你多大",
-    "你喜欢什么颜色",
-    "你喜欢什么",
-    "你是不是",
+    "what day is it",
+    "how are you",
+    "do you like",
+    "what color",
+    "what is",
+    "yes or no",
+    "right",
+    "okay",
+    # Chinese — simple greetings, direct acknowledgments
     "你好",
+    "你在么",
+    "你在吗",
     "早上好",
     "晚安",
     "谢谢",
+    "好的",
+    "明白",
+    "知道了",
+    "你叫什么",
+    "你是谁",
+    "你几岁",
+    "你喜欢什么颜色",
+    "是吗",
+    "对吗",
     "好不好",
     "现在几点",
-    "什么颜色",
-    "是吗",
 ]
 
 DEEP_KEYWORDS: list[str] = [
-    # English
-    "why do you always",
+    # English — past experiences, relationships, reasoning, contradictions
     "remember when",
-    "last time we",
-    "you said before",
-    "based on our",
-    "how has your feeling changed",
+    "i told you",
+    "i told you about",
+    "i visited",
+    "i got back from",
+    "i love the",
     "what did i tell you",
-    "do you remember the promise",
-    "why did you",
-    "how do you really feel about",
-    "compared to before",
-    "what have we been through",
-    # Chinese
-    "你为什么总是",
-    "你以前",
-    "你说过",
-    "上次",
-    "为什么",
+    "do you remember",
+    "do i like",
+    "what kind of",
+    "what have i",
+    "compared to",
+    "but you said",
+    "you promised",
+    "why did",
+    "why are you",
+    "how do you feel",
+    "what about me",
+    "remember my",
+    "last time",
+    "before",
+    "what is my favorite",
+    "do you remember my",
+    # Chinese — past conversations, personal facts, emotional context
     "你还记得吗",
     "记得吗",
-    "我之前告诉你",
-    "你之前说",
-    "你对我的感觉有没有变",
-    "和以前相比",
-    "我们之间",
-    "你答应过",
+    "我之前",
+    "我以前",
+    "我去过",
+    "我刚从",
+    "我访问过",
+    "我喜欢",
+    "我喜欢的",
+    "我告诉你",
+    "我说过",
+    "对比一下",
+    "但你说",
+    "你答应",
+    "你承诺",
+    "为什么",
+    "你怎么感觉",
+    "你对我",
+    "我的爱好",
+    "我最喜欢",
+    "关于我",
+    "上次",
 ]
 
-
-# ── LLM system prompt (fallback path) ──────────────────────────────
-
-_DEPTH_CLASSIFIER_SYSTEM_PROMPT = """\
-You are a depth classifier for a bilingual (Chinese/English) roleplay chatbot.
-Your job is to label each user input as either SHALLOW or DEEP.
-
-# Input format
-You will receive a JSON object with these fields:
-- user_input (string): the user's message, may be in Chinese or English
-- user_topic (string): topic category derived from the conversation
-- affinity (integer): relationship score 0–1000 between user and bot
-
-# Output format (strict JSON, no extra keys, no markdown fence)
-{{
-    "depth": "SHALLOW" | "DEEP",
-    "reasoning": "one sentence explaining why"
-}}
-
-# Classification rules
-- SHALLOW: the input is a simple factual question, greeting, preference check,
-  or yes/no query that requires no deep memory retrieval — cache or the basic
-  user profile is sufficient.
-- DEEP: the input references past events, emotional context, asks "why" about
-  behaviour, involves temporal reasoning, or asks about contradictions /
-  promises — full memory search is required.
-- If `affinity` is strictly less than {affinity_threshold}, output DEEP regardless of content.
-- Input language may be Chinese or English — classify based on meaning, not language.
-- When in doubt, prefer DEEP (over-retrieval is safer than missed context).
-"""
 
 
 # ── Module-level lazy state ────────────────────────────────────────
@@ -346,21 +343,50 @@ class InputDepthClassifier:
             "reasoning": reasoning,
         }
 
+
+    # ── LLM system prompt (fallback path) ──────────────────────────────
+    # Note: affinity threshold is checked deterministically before LLM is called,
+    # so the LLM only receives inputs with affinity >= threshold.
+
+    _DEPTH_CLASSIFIER_SYSTEM_PROMPT = """\
+You are a depth classifier for a bilingual (Chinese/English) roleplay chatbot.
+Your job is to label each user input as either SHALLOW or DEEP.
+
+# Input format
+You will receive a JSON object with these fields:
+- user_input (string): the user's message, may be in Chinese or English
+- user_topic (string): topic category derived from the conversation
+- affinity (integer): relationship score 0–1000 between user and bot
+
+# Output format (strict JSON, no extra keys, no markdown fence)
+{
+    "depth": "SHALLOW" | "DEEP",
+    "reasoning": "one sentence explaining why"
+}
+
+# Classification rules
+- SHALLOW: the input is a simple factual question, greeting, preference check,
+or yes/no query that requires no deep memory retrieval — cache or the basic
+user profile is sufficient.
+- DEEP: the input references past events, emotional context, asks "why" about
+behaviour, involves temporal reasoning, or asks about contradictions /
+promises — full memory search is required.
+- Input language may be Chinese or English — classify based on meaning, not language.
+- When in doubt, prefer DEEP (over-retrieval is safer than missed context).
+"""
     async def _llm_classify(self, user_input: str, user_topic: str, affinity: int) -> tuple[str, str]:
         """Call the LLM to classify ambiguous inputs.
 
         Args:
             user_input: The raw user message.
             user_topic: Topic label for context.
-            affinity: Current affinity score.
+            affinity: Current affinity score (already validated to be >= threshold).
 
         Returns:
             Tuple of (``"SHALLOW"`` or ``"DEEP"``, reasoning string).
         """
         llm = _get_llm()
-        system_prompt = SystemMessage(content=_DEPTH_CLASSIFIER_SYSTEM_PROMPT.format(
-            affinity_threshold=self._affinity_deep_threshold,
-        ))
+        system_prompt = SystemMessage(content=self._DEPTH_CLASSIFIER_SYSTEM_PROMPT)
         human_message = HumanMessage(content=json.dumps({
             "user_input": user_input,
             "user_topic": user_topic,
@@ -404,5 +430,47 @@ async def test_main() -> None:
         print(json.dumps(result, indent=2, ensure_ascii=False))
 
 
+async def test_main2() -> None:
+    """Test cases designed to trigger the LLM fallback path.
+    
+    These inputs are deliberately ambiguous (low embedding similarity) to force
+    the classifier to use the LLM instead of the fast embedding path.
+    """
+    logging.basicConfig(level=logging.INFO)
+
+    classifier = InputDepthClassifier()
+
+    # Cases designed to trigger LLM path (ambiguous / low embedding similarity)
+    cases = [
+        # Ambiguous: Could be SHALLOW (simple greeting) or DEEP (context-dependent)
+        {"user_input": "Is it really you?", "user_topic": "relationship", "affinity": 700},
+        # Ambiguous: Generic phrase, unclear intent
+        {"user_input": "怎么样", "user_topic": "chitchat", "affinity": 700},
+        # Ambiguous: Mixed signals (greeting + emotional)
+        {"user_input": "Hello, how have things been since we last talked?",
+         "user_topic": "relationship", "affinity": 700},
+        # Ambiguous: Deliberate LLM prompt (not in keyword list)
+        {"user_input": "Tell me something interesting", "user_topic": "creative", "affinity": 700},
+        # Ambiguous: Abstract question
+        {"user_input": "What does loyalty mean to you?", "user_topic": "philosophy", "affinity": 700},
+        # Ambiguous: Chinese mixed signals
+        {"user_input": "你最近怎么样？我们聊好久没有聊天了",
+         "user_topic": "relationship", "affinity": 700},
+    ]
+
+    print("\n" + "="*70)
+    print("TEST_MAIN2: LLM Fallback Path Cases")
+    print("="*70)
+    
+    for i, case in enumerate(cases, 1):
+        print(f"\n[case {i}] input={case['user_input']!r} affinity={case['affinity']}")
+        print(f"         topic={case['user_topic']!r}")
+        result = await classifier.classify(**case)
+        # Highlight that LLM path was used (reasoning contains "llm→")
+        is_llm_path = "llm→" in result.get("reasoning", "")
+        print(f"         [{'LLM PATH ✓' if is_llm_path else 'fast path'}]")
+        print(json.dumps(result, indent=2, ensure_ascii=False))
+
+
 if __name__ == "__main__":
-    asyncio.run(test_main())
+    asyncio.run(test_main2())

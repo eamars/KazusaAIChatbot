@@ -12,6 +12,7 @@ import time
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from pymongo.errors import PyMongoError
 
 from kazusa_ai_chatbot.rag.cache import (
     DEFAULT_SIMILARITY_THRESHOLD,
@@ -83,7 +84,7 @@ class TestCosineSimilarity:
 class TestRAGCacheStoreAndRetrieve:
     async def test_store_and_exact_retrieve(self):
         mock_db = _make_mock_db()
-        with patch("kazusa_ai_chatbot.db.get_db", AsyncMock(return_value=mock_db)):
+        with patch("kazusa_ai_chatbot.rag.cache.get_db", AsyncMock(return_value=mock_db)):
             cache = RAGCache()
             emb = [0.1, 0.2, 0.3, 0.4]
             await cache.store(
@@ -105,7 +106,7 @@ class TestRAGCacheStoreAndRetrieve:
 
     async def test_miss_below_threshold(self):
         mock_db = _make_mock_db()
-        with patch("kazusa_ai_chatbot.db.get_db", AsyncMock(return_value=mock_db)):
+        with patch("kazusa_ai_chatbot.rag.cache.get_db", AsyncMock(return_value=mock_db)):
             cache = RAGCache(similarity_threshold=0.99)
             await cache.store(
                 embedding=[1.0, 0.0, 0.0],
@@ -124,7 +125,7 @@ class TestRAGCacheStoreAndRetrieve:
 
     async def test_cache_type_isolation(self):
         mock_db = _make_mock_db()
-        with patch("kazusa_ai_chatbot.db.get_db", AsyncMock(return_value=mock_db)):
+        with patch("kazusa_ai_chatbot.rag.cache.get_db", AsyncMock(return_value=mock_db)):
             cache = RAGCache()
             emb = [0.5, 0.5, 0.5]
             await cache.store(
@@ -142,7 +143,7 @@ class TestRAGCacheStoreAndRetrieve:
 
     async def test_user_isolation(self):
         mock_db = _make_mock_db()
-        with patch("kazusa_ai_chatbot.db.get_db", AsyncMock(return_value=mock_db)):
+        with patch("kazusa_ai_chatbot.rag.cache.get_db", AsyncMock(return_value=mock_db)):
             cache = RAGCache()
             emb = [0.5, 0.5, 0.5]
             await cache.store(
@@ -161,7 +162,7 @@ class TestRAGCacheStoreAndRetrieve:
 class TestRAGCacheTTL:
     async def test_expired_entry_is_miss(self):
         mock_db = _make_mock_db()
-        with patch("kazusa_ai_chatbot.db.get_db", AsyncMock(return_value=mock_db)):
+        with patch("kazusa_ai_chatbot.rag.cache.get_db", AsyncMock(return_value=mock_db)):
             cache = RAGCache()
             await cache.store(
                 embedding=[1.0, 0.0],
@@ -181,7 +182,7 @@ class TestRAGCacheTTL:
 
     async def test_expired_entry_lazy_deleted(self):
         mock_db = _make_mock_db()
-        with patch("kazusa_ai_chatbot.db.get_db", AsyncMock(return_value=mock_db)):
+        with patch("kazusa_ai_chatbot.rag.cache.get_db", AsyncMock(return_value=mock_db)):
             cache = RAGCache()
             await cache.store(
                 embedding=[1.0, 0.0],
@@ -202,7 +203,7 @@ class TestRAGCacheTTL:
 class TestRAGCacheInvalidation:
     async def test_invalidate_pattern_removes_matching(self):
         mock_db = _make_mock_db()
-        with patch("kazusa_ai_chatbot.db.get_db", AsyncMock(return_value=mock_db)):
+        with patch("kazusa_ai_chatbot.rag.cache.get_db", AsyncMock(return_value=mock_db)):
             cache = RAGCache()
             emb = [0.5, 0.5]
             await cache.store(embedding=emb, results={"x": 1},
@@ -225,7 +226,7 @@ class TestRAGCacheInvalidation:
 
     async def test_clear_all_user_removes_everything(self):
         mock_db = _make_mock_db()
-        with patch("kazusa_ai_chatbot.db.get_db", AsyncMock(return_value=mock_db)):
+        with patch("kazusa_ai_chatbot.rag.cache.get_db", AsyncMock(return_value=mock_db)):
             cache = RAGCache()
             emb = [0.5, 0.5]
             await cache.store(embedding=emb, results={"x": 1},
@@ -244,7 +245,7 @@ class TestRAGCacheInvalidation:
 class TestRAGCacheStats:
     async def test_hit_miss_stats(self):
         mock_db = _make_mock_db()
-        with patch("kazusa_ai_chatbot.db.get_db", AsyncMock(return_value=mock_db)):
+        with patch("kazusa_ai_chatbot.rag.cache.get_db", AsyncMock(return_value=mock_db)):
             cache = RAGCache()
             emb = [1.0, 0.0]
             await cache.store(embedding=emb, results={"x": 1},
@@ -266,7 +267,7 @@ class TestRAGCacheStats:
 class TestRAGCacheLRU:
     async def test_eviction_at_max_size(self):
         mock_db = _make_mock_db()
-        with patch("kazusa_ai_chatbot.db.get_db", AsyncMock(return_value=mock_db)):
+        with patch("kazusa_ai_chatbot.rag.cache.get_db", AsyncMock(return_value=mock_db)):
             cache = RAGCache(max_size=2)
             await cache.store(embedding=[1.0, 0.0], results={"x": 1},
                               cache_type="user_facts", global_user_id="u1", ttl_seconds=60)
@@ -290,8 +291,8 @@ class TestRAGCachePersistFailureNonFatal:
     async def test_persist_failure_keeps_in_memory_entry(self):
         """Writes that fail at the DB layer must not prevent in-memory storage."""
         # Mock get_db to raise
-        with patch("kazusa_ai_chatbot.db.get_db",
-                   AsyncMock(side_effect=RuntimeError("db down"))):
+        with patch("kazusa_ai_chatbot.rag.cache.get_db",
+                   AsyncMock(side_effect=PyMongoError("db down"))):
             cache = RAGCache()
             cid = await cache.store(
                 embedding=[1.0, 0.0], results={"x": 1},
