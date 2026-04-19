@@ -491,12 +491,16 @@ async def memory_search_tool_call_finalizer(state: MemoryRetrieverState) -> dict
 
     # Status generation
     status = ""
-    if result["score"] > 80:
-        status = "complete"
-    elif result["score"] > 50:
-        status = "partial"
-    elif result["score"] > 0:
-        status = "incomplete"
+    if "score" in result:
+        if result["score"] > 80:
+            status = "complete"
+        elif result["score"] > 50:
+            status = "partial"
+        elif result["score"] > 0:
+            status = "incomplete"
+    else:
+        # Handle the case where status is not returned
+        status = "error"
 
     # Do some sanity check
     if "response" not in result:
