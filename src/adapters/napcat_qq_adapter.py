@@ -11,6 +11,8 @@ import websockets
 from typing import Optional
 
 
+import re
+
 logger = logging.getLogger(__name__)
 
 
@@ -102,7 +104,35 @@ class NapCatWSAdapter:
 
         user_id = str(data.get("user_id"))
         group_id = data.get("group_id")
-        raw_content = data.get("raw_message", "")
+        
+        message_data = data.get("message", [])
+
+        # Preprocess QQ message to a format that is recognized by the brain
+        if isinstance(message_data, str):
+            # If it's a raw string, normalize CQ codes
+            raw_content = re.sub(r'\[CQ:at,qq=([^\]]+)\]', r'<@\1>', message_data)
+            raw_content = re.sub(r'\[CQ:reply,id=([^\]]+)\]', r'[Reply to message] ', raw_content)
+            raw_content = re.sub(r'\[CQ:[^\]]+\]', r'', raw_content) # Strip others
+        else:
+            # If it's a segment list, rebuild it to text
+            raw_content = ""
+            for seg in message_data:
+                if not isinstance(seg, dict):
+                    continue
+                seg_type = seg.get("type")
+                seg_data = seg.get("data", {})
+                if seg_type == "text":
+                    raw_content += seg_data.get("text", "")
+                elif seg_type == "at":
+                    qq = seg_data.get("qq")
+                    raw_content += f"<@{qq}> "
+                elif seg_type == "reply":
+                    raw_content += f"[Reply to message] "
+                elif seg_type == "face":
+                    raw_content += f"[Face] "
+                # image/video etc. are handled by attachments array, so we omit them from raw text
+        
+        raw_content = raw_content.strip()
         sender_name = data.get("sender", {}).get("nickname", f"User {user_id}")
         
         is_group = data.get("message_type") == "group"
