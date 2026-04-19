@@ -30,6 +30,7 @@ for _quiet in ("pymongo", "httpx", "httpcore", "hpack", "urllib3", "openai", "la
 from kazusa_ai_chatbot.config import (
     BRAIN_EXECUTOR_COUNT,
     CONVERSATION_HISTORY_LIMIT,
+    SCHEDULED_TASKS_ENABLED,
 )
 from kazusa_ai_chatbot.db import (
     close_db,
@@ -48,6 +49,7 @@ from kazusa_ai_chatbot import scheduler
 from langgraph.graph import END, START, StateGraph
 from kazusa_ai_chatbot.nodes.relevance_agent import relevance_agent, multimedia_descriptor_agent
 from kazusa_ai_chatbot.nodes.persona_supervisor2 import persona_supervisor2
+from kazusa_ai_chatbot.nodes.persona_supervisor2_rag import _get_rag_cache
 
 logger = logging.getLogger(__name__)
 
@@ -120,18 +122,23 @@ def _build_graph():
     graph.add_node("multimedia_descriptor_agent", multimedia_descriptor_agent)
     graph.add_node("persona_supervisor2", persona_supervisor2)
 
+    def _start_router(state):
+        debug = state.get("debug_modes") or {}
+        if debug.get("listen_only"):
+            return "end"
+        if state.get("user_multimedia_input"):
+            return "multimedia"
+        return "skip"
+
     graph.add_conditional_edges(
         START,
-        lambda state: "multimedia" if state.get("user_multimedia_input") else "skip",
-        {"multimedia": "multimedia_descriptor_agent", "skip": "relevance_agent"},
+        _start_router,
+        {"multimedia": "multimedia_descriptor_agent", "skip": "relevance_agent", "end": END},
     )
     graph.add_edge("multimedia_descriptor_agent", "relevance_agent")
 
     def _route_after_relevance(state):
         if not state.get("should_respond"):
-            return "end"
-        debug = state.get("debug_modes") or {}
-        if debug.get("listen_only"):
             return "end"
         return "continue"
 
@@ -207,15 +214,28 @@ async def lifespan(app: FastAPI):
     except Exception:
         logger.exception("MCP manager failed to start — tools will be unavailable")
 
-    # 5. Load pending scheduled events
-    await scheduler.load_pending_events()
+    # 5. Warm-start the RAG cache from MongoDB (Stage 5b).
+    rag_cache = await _get_rag_cache()
+    logger.info("RAG cache warm-started: %s", rag_cache.get_stats())
+
+    # 6. Load pending scheduled events
+    if SCHEDULED_TASKS_ENABLED:
+        await scheduler.load_pending_events()
+    else:
+        logger.info("Scheduler disabled via SCHEDULED_TASKS_ENABLED=false — skipping load_pending_events")
 
     logger.info("Kazusa brain service is ready")
 
     yield
 
     # Shutdown
-    await scheduler.shutdown()
+    if SCHEDULED_TASKS_ENABLED:
+        await scheduler.shutdown()
+    try:
+        cache = await _get_rag_cache()
+        await cache.shutdown()
+    except Exception:
+        logger.exception("RAG cache shutdown failed")
     await mcp_manager.stop()
     await close_db()
     logger.info("Kazusa brain service shut down")
@@ -334,14 +354,14 @@ async def chat(req: ChatRequest, background_tasks: BackgroundTasks):
         final_dialog = result.get("final_dialog", [])
         should_reply = result.get("use_reply_feature", False)
 
-        # think_only: suppress dialog in response but still save internally
-        if debug_modes.get("think_only"):
-            logger.info("think_only active — suppressing %d dialog message(s)", len(final_dialog))
-            final_dialog = []
-
-        # Save bot message in background only if the bot actually responded
+        # Save bot message in background only if the bot actually generated a response
         if final_dialog:
             background_tasks.add_task(_save_bot_message, result)
+
+        # think_only: suppress dialog in response but still save internally
+        if debug_modes.get("think_only"):
+            logger.info("think_only active — suppressing %d dialog message(s) from user output", len(final_dialog))
+            final_dialog = []
 
         # TODO: Extract scheduled_followups from result["future_promises"] and schedule them
         scheduled_followups = 0

@@ -1,20 +1,73 @@
-from typing import Annotated, TypedDict
+"""Stage 4: consolidator subgraph.
 
-from kazusa_ai_chatbot.nodes.persona_supervisor2_schema import GlobalPersonaState
-from kazusa_ai_chatbot.config import LLM_API_KEY, LLM_BASE_URL, LLM_MODEL, MAX_FACT_HARVESTER_RETRY, AFFINITY_DEFAULT, AFFINITY_INCREMENT_BREAKPOINTS, AFFINITY_DECREMENT_BREAKPOINTS
-from kazusa_ai_chatbot.utils import parse_llm_json_output, build_affinity_block, get_llm
-from kazusa_ai_chatbot.nodes.persona_supervisor2_schema import GlobalPersonaState
-from kazusa_ai_chatbot.db import upsert_character_state, upsert_user_facts, update_last_relationship_insight, save_memory, build_memory_doc, update_affinity
+Wraps the post-dialog reflection pipeline. Runs three parallel reflection
+nodes (``global_state_updater``, ``relationship_recorder``, ``facts_harvester``),
+an evaluator loop over ``facts_harvester``, and a single ``db_writer`` that
+commits everything to MongoDB and invalidates the RAG cache.
+
+Stage-4a additions:
+
+* A unified ``metadata`` bundle threaded through every node, seeded from
+  the RAG metadata produced in Stage 3 and accumulated at each step.
+* The ``db_writer`` now routes diary entries / objective facts through the
+  new structured helpers (``upsert_character_diary`` / ``upsert_objective_facts``),
+  invalidates the matching RAG cache namespaces after a successful commit,
+  bumps the per-user RAG version, and schedules ``future_promise`` events
+  through ``kazusa_ai_chatbot.scheduler`` so the bot can act on promises when
+  they come due.
+"""
+
+from __future__ import annotations
+
+import json
+import logging
+from datetime import datetime, timezone
+from typing import Annotated, TypedDict, cast
 
 from langchain_core.messages import HumanMessage, SystemMessage
-from langgraph.graph import StateGraph, START, END
+from langgraph.graph import END, START, StateGraph
 from langgraph.graph.message import add_messages
+from pymongo.errors import PyMongoError
 
-import logging
-import json
-from datetime import datetime, timezone
+from kazusa_ai_chatbot.config import (
+    AFFINITY_DECREMENT_BREAKPOINTS,
+    AFFINITY_DEFAULT,
+    AFFINITY_INCREMENT_BREAKPOINTS,
+    MAX_FACT_HARVESTER_RETRY,
+)
+from kazusa_ai_chatbot.db import (
+    CharacterDiaryEntry,
+    MemoryDoc,
+    ObjectiveFactEntry,
+    ScheduledEventDoc,
+    build_memory_doc,
+    increment_rag_version,
+    save_memory,
+    update_affinity,
+    update_last_relationship_insight,
+    upsert_character_diary,
+    upsert_character_state,
+    upsert_objective_facts,
+)
+from kazusa_ai_chatbot.nodes.persona_supervisor2_rag import _get_rag_cache
+from kazusa_ai_chatbot.nodes.persona_supervisor2_schema import GlobalPersonaState
+from kazusa_ai_chatbot.scheduler import schedule_event
+from kazusa_ai_chatbot.utils import build_affinity_block, get_llm, parse_llm_json_output
 
 logger = logging.getLogger(__name__)
+
+
+# ── Cache-invalidation thresholds ───────────────────────────────────
+# |affinity_delta| > this clears all of the user's cache entries (major mood
+# shift → every cached view is now suspect).
+AFFINITY_CACHE_NUKE_THRESHOLD = 50
+
+
+def _merge_dicts(a: dict, b: dict) -> dict:
+    """Merge two dicts, with b's values overwriting a's."""
+    result = dict(a)
+    result.update(b)
+    return result
 
 
 class ConsolidatorState(TypedDict):
@@ -39,7 +92,9 @@ class ConsolidatorState(TypedDict):
 
     # User related
     decontexualized_input: str
-    user_name: str
+
+    # Stage-4a metadata bundle (seeded from RAG metadata, accumulated per node).
+    metadata: Annotated[dict, _merge_dicts]
 
     # global state updater
     mood: str
@@ -47,13 +102,13 @@ class ConsolidatorState(TypedDict):
     reflection_summary: str
 
     # Relationship recorder
-    diary_entry: [str]
+    diary_entry: list[str]
     affinity_delta: int
     last_relationship_insight: str
 
     # Facts harvester
-    new_facts: [str]
-    future_promises: [str]
+    new_facts: list[dict]
+    future_promises: list[dict]
     fact_harvester_retry: int
     fact_harvester_feedback_message: Annotated[list, add_messages]
     should_stop: bool
@@ -78,14 +133,14 @@ _GLOBAL_STATE_UPDATER_PROMPT = """\
 }}
 
 # 逻辑准则
-1. 情感沉淀 `mood`: 
+1. 情感沉淀 `mood`:
    - 对比 `emotional_appraisal` (起因) 与 `internal_monologue` (结果)。即便对话以愉快结束，若独白中透露出“疲惫”或“勉强”，则 `mood` 应反映真实内质。
    - 例如：包括但不限于["Shy", "Angry", "Confused", "Neutral", "Radiant", "Agitated", "Distrustful", "Distressed", "Annoyed", "Flustered",
            "Blissful", "Melancholy", "Aggressive"] 等等
-2. 心理惯性 `global_vibe`: 
+2. 心理惯性 `global_vibe`:
    - 提取一个不针对特定用户的心理底色。
    - 例如：包括但不限于["Radiant", "Defensive", "Distrustful", "Wistful", "Agitated", "Softened", "Apathetic"] 等等
-3. 复盘总结 `reflection_summary`: 
+3. 复盘总结 `reflection_summary`:
    - 结合 `character_intent` 的达成情况，以{character_name}的第一人称写下一句话复盘。
    - 这是她此时此刻脑子里挥之不去的“念头”，决定了她下一轮对话的潜台词。
    - 例如：'刚才那个笨蛋居然怀疑我的缝纫技术，真是气死我了。'
@@ -99,7 +154,7 @@ _GLOBAL_STATE_UPDATER_PROMPT = """\
 }}
 """
 _global_state_updater_llm = get_llm(temperature=0.4, top_p=0.8)
-async def global_state_updater(state: ConsolidatorState):
+async def global_state_updater(state: ConsolidatorState) -> dict:
     system_prompt = SystemMessage(_GLOBAL_STATE_UPDATER_PROMPT.format(character_name=state["character_profile"]["name"]))
 
     msg = {
@@ -112,9 +167,9 @@ async def global_state_updater(state: ConsolidatorState):
     response = await _global_state_updater_llm.ainvoke([system_prompt, human_message])
 
     result = parse_llm_json_output(response.content)
-    
+
     logger.debug(f"Global state updater result: {result}")
-    
+
     return {
         "mood": result.get("mood"),
         "global_vibe": result.get("global_vibe"),
@@ -157,7 +212,7 @@ _RELATIONSHIP_RECORDER_PROMPT = """\
 }}
 """
 _relationship_recorder_llm = get_llm(temperature=0.85, top_p=0.95)
-async def relationship_recorder(state: ConsolidatorState):
+async def relationship_recorder(state: ConsolidatorState) -> dict:
     system_prompt = SystemMessage(_RELATIONSHIP_RECORDER_PROMPT.format(
         character_name=state["character_profile"]["name"],
         user_name=state["user_name"],
@@ -183,9 +238,9 @@ async def relationship_recorder(state: ConsolidatorState):
     response = await _relationship_recorder_llm.ainvoke([system_prompt, human_message])
 
     result = parse_llm_json_output(response.content)
-    
+
     logger.debug(f"Relationship recorder result: {result}")
-    
+
     return {
         "diary_entry": result.get("diary_entry"),
         "affinity_delta": result.get("affinity_delta"),
@@ -244,13 +299,16 @@ _FACTS_HARVESTER_PROMPT = """\
      - `action`: `杏山千纱计划于明天早上奖励EAMARS`
      - `action`: `杏山千纱打算下次奖励EAMARS`
 
-6. **拒绝复读**: 
+6. **拒绝复读**:
    - 严禁记录“某人说了某话”。如果信息已经由对话历史承载，且不涉及长期画像更新，则返回空列表。
 
 # 闭环反馈指南
 - 在生成回复前，请检查输入信息列表中的最后一条来自 Evaluator 的消息 (Evaluator Feedback)。
 - 你需要根据 Evaluator Feedback 对输出做出相应的修正。
 - 对未提及内容不要做修改
+
+# RAG 元信息（仅供参考）
+- `rag_metadata` 提供了上游 RAG 的 cache_hit / depth / confidence 等信号。当 `cache_hit=true` 或 `depth=SHALLOW` 时，`research_facts` 的覆盖面可能有限，谨慎判断是否“已知画像”。
 
 # 输出格式 (JSON)
 请务必返回合法的 JSON 字符串，包含以下字段：
@@ -272,35 +330,43 @@ _FACTS_HARVESTER_PROMPT = """\
 }}
 """
 _facts_harvester_llm = get_llm(temperature=0.0, top_p=0.95)
-async def facts_harvester(state: ConsolidatorState):
+async def facts_harvester(state: ConsolidatorState) -> dict:
     system_prompt = SystemMessage(_FACTS_HARVESTER_PROMPT.format(
         character_name=state["character_profile"]["name"],
         user_name=state["user_name"],
-        timestamp = state["timestamp"]
+        timestamp=state["timestamp"],
     ))
 
+    metadata = state.get("metadata", {}) or {}
     msg = {
         "decontexualized_input": state["decontexualized_input"],
         "research_facts": state["research_facts"],
         "content_anchors": state["action_directives"]["linguistic_directives"]["content_anchors"],
         "logical_stance": state["logical_stance"],
+        "rag_metadata": {
+            "cache_hit": metadata.get("cache_hit", False),
+            "depth": metadata.get("depth", "DEEP"),
+            "depth_confidence": metadata.get("depth_confidence", 0.0),
+            "rag_sources_used": metadata.get("rag_sources_used", []),
+            "response_confidence": metadata.get("response_confidence", {}),
+        },
     }
 
     human_message = HumanMessage(content=json.dumps(msg))
 
-    # Read evaluator feedback
-    # First trim the old message
-    if (len(state["fact_harvester_feedback_message"]) > 3):
-        recent_messages = [state["fact_harvester_feedback_message"][0]] + state["fact_harvester_feedback_message"][-3:]
+    # Trim evaluator feedback to the first + latest three messages.
+    feedback = state.get("fact_harvester_feedback_message", []) or []
+    if len(feedback) > 3:
+        recent_messages = [feedback[0]] + feedback[-3:]
     else:
-        recent_messages = state["fact_harvester_feedback_message"]
+        recent_messages = feedback
 
     response = await _facts_harvester_llm.ainvoke([system_prompt, human_message] + recent_messages)
 
     result = parse_llm_json_output(response.content)
-    
+
     logger.debug(f"Facts harvester result: {result}")
-    
+
     return {
         "new_facts": result.get("new_facts", []),
         "future_promises": result.get("future_promises", []),
@@ -331,12 +397,12 @@ _FACT_HARVESTER_EVALUATOR_PROMPT = """\
 - 当输入没有明确未来承诺时，`future_promises: []` 也是合法结果。
 
 # 审计红线 (Red Lines)
-- **对象倒置**: 
+- **对象倒置**:
   * `decontexualized_input` 里的动作必须记在 `{user_name}` 账上。如果 Recorder 记在 `{character_name}` 头上，立刻拦截。
-- **分类错误 [严重]**: 
+- **分类错误 [严重]**:
     - 例如：将带有 “未来”、“打算”、“今晚”或任何有许诺时间性质的行为作为 `new_facts`。这是禁止的行为。
     - 例如：将过去发生的事实存入 `future_promises` 也同样是禁止的行为
-- **冗余复读**: 
+- **冗余复读**:
     - 检查候选结果是否只是在复读对话（如“某人问...”）。
     - 必须转换为客观陈述。*注意：不要审计输入源的语气，只审计候选结果的陈述方式。*
 - **旧闻复读**: 如果该信息在 `research_facts.user_rag_finalized` 或 `research_facts.internal_rag_results` 标记的内部库中已存在，判定为 FAIL。
@@ -357,16 +423,17 @@ _FACT_HARVESTER_EVALUATOR_PROMPT = """\
 请务必返回合法的 JSON 字符串：
 {{
     "should_stop": "boolean (如果没有脑补且实名正确且格式合规，返回 true；仅在违反上述明确红线时返回 false。注意：new_facts 为空本身不构成错误。)",
-    "feedback": "具体指明错误点。若无实质错误，返回 '通过审计，无需修改'。禁止输出'请确认是否没有新事实'这类非错误性质建议。"
+    "feedback": "具体指明错误点。若无实质错误，返回 '通过审计，无需修改'。禁止输出'请确认是否没有新事实'这类非错误性质建议。",
+    "contradiction_flags": "可选字符串列表，列举与 research_facts 直接冲突的条目 id 或描述；无冲突则返回 []"
 }}
 """
 _fact_harvester_evaluator_llm = get_llm(temperature=0.1, top_p=0.5)
-async def fact_harvester_evaluator(state: ConsolidatorState):
+async def fact_harvester_evaluator(state: ConsolidatorState) -> dict:
     system_prompt = SystemMessage(_FACT_HARVESTER_EVALUATOR_PROMPT.format(
         character_name=state["character_profile"]["name"],
         user_name=state["user_name"],
     ))
-    
+
     retry = state.get("fact_harvester_retry", 0) + 1
     msg = {
         "retry": f"{retry}/{MAX_FACT_HARVESTER_RETRY}",
@@ -378,107 +445,231 @@ async def fact_harvester_evaluator(state: ConsolidatorState):
         "content_anchors": state["action_directives"]["linguistic_directives"]["content_anchors"],
         "logical_stance": state["logical_stance"],
     }
-    
+
     human_message = HumanMessage(content=json.dumps(msg))
-    
+
     response = await _fact_harvester_evaluator_llm.ainvoke([system_prompt, human_message])
-    
+
     result = parse_llm_json_output(response.content)
-    
+
     logger.debug(f"Fact harvester evaluator result: {result}")
 
     should_stop = result.get("should_stop", True)
-    if (retry >= MAX_FACT_HARVESTER_RETRY):
+    if retry >= MAX_FACT_HARVESTER_RETRY:
         should_stop = True
 
     feedback_message = HumanMessage(
         content=f"Evaluator Feedback:\n{result.get('feedback', 'No feedback')}",
-        name="evaluator"
+        name="evaluator",
     )
-    
+
+    # Propagate evaluator metadata so db_writer can see contradiction flags + retry count.
+    contradiction_flags = result.get("contradiction_flags") or []
+    existing_meta = state.get("metadata", {}) or {}
+    metadata = {
+        **existing_meta,
+        "fact_harvester_retry": retry,
+        "evaluator_passes": existing_meta.get("evaluator_passes", 0) + 1,
+        "contradiction_flags": contradiction_flags,
+    }
+
     return {
         "should_stop": should_stop,
         "fact_harvester_feedback_message": [feedback_message],
-        "fact_harvester_retry": retry
+        "fact_harvester_retry": retry,
+        "metadata": metadata,
     }
 
 
 def process_affinity_delta(current_affinity: int, raw_delta: int) -> int:
-    """Process affinity delta with direction-specific non-linear scaling.
-    
+    """Scale a raw affinity delta by direction-specific breakpoints.
+
     Args:
-        current_affinity: Current affinity score (0-1000)
-        raw_delta: Raw delta from social archivist (-10 to +10)
-        
+        current_affinity: Current affinity score (0-1000).
+        raw_delta: Raw delta from the relationship recorder (-10..+10).
+
     Returns:
-        Processed delta with appropriate scaling based on direction
+        Scaled delta with sign preserved.
     """
     if raw_delta == 0:
         return 0
-    
-    # Select appropriate breakpoints based on delta direction
+
     if raw_delta > 0:
         breakpoints = AFFINITY_INCREMENT_BREAKPOINTS
-    else:  # raw_delta < 0
+    else:
         breakpoints = AFFINITY_DECREMENT_BREAKPOINTS
-    
-    # Find the appropriate segment
+
+    scaling_factor = 1.0
     for i in range(len(breakpoints) - 1):
         x1, y1 = breakpoints[i]
         x2, y2 = breakpoints[i + 1]
-        
+
         if x1 <= current_affinity <= x2:
-            # Linear interpolation: y = y1 + (x - x1) * (y2 - y1) / (x2 - x1)
-            if x2 == x1:  # Vertical line (same point)
+            if x2 == x1:
                 scaling_factor = y1
             else:
                 scaling_factor = y1 + (current_affinity - x1) * (y2 - y1) / (x2 - x1)
             break
-    else:
-        # Default case (shouldn't happen)
-        scaling_factor = 1.0
-    
-    # Apply scaling
-    processed_delta = int(round(raw_delta * scaling_factor, 0))
-    
-    return processed_delta
+
+    return int(round(raw_delta * scaling_factor, 0))
 
 
-async def db_writer(state: ConsolidatorState):
-    timestamp = state.get("timestamp", datetime.now(timezone.utc).isoformat())
+def _build_diary_entries(
+    diary_strings: list[str],
+    *,
+    timestamp: str,
+    interaction_subtext: str,
+) -> list[CharacterDiaryEntry]:
+    """Convert raw diary strings into ``CharacterDiaryEntry`` dicts."""
+    entries: list[CharacterDiaryEntry] = []
+    for text in diary_strings or []:
+        if not text:
+            continue
+        entry: CharacterDiaryEntry = {
+            "entry": text,
+            "timestamp": timestamp,
+            "confidence": 0.8,
+            "context": interaction_subtext or "",
+        }
+        entries.append(entry)
+    return entries
+
+
+def _build_objective_fact_entries(
+    new_facts: list[dict],
+    *,
+    timestamp: str,
+) -> list[ObjectiveFactEntry]:
+    """Convert harvester ``new_facts`` rows into ``ObjectiveFactEntry`` dicts."""
+    entries: list[ObjectiveFactEntry] = []
+    for fact in new_facts or []:
+        description = fact.get("description", "")
+        if not description:
+            continue
+        entry: ObjectiveFactEntry = {
+            "fact": description,
+            "category": fact.get("category", "general"),
+            "timestamp": timestamp,
+            "source": "conversation_extracted",
+            "confidence": 0.85,
+        }
+        entries.append(entry)
+    return entries
+
+
+async def _schedule_future_promises(
+    promises: list[dict],
+    *,
+    global_user_id: str,
+    user_name: str,
+    character_name: str,
+    decontexualized_input: str,
+) -> list[str]:
+    """Persist each promise as a ``future_promise`` scheduled event.
+
+    Returns the list of event_ids scheduled. Events with no ``due_time`` are
+    skipped — there's nothing to fire on.
+    """
+    scheduled: list[str] = []
+    for promise in promises or []:
+        due_time = promise.get("due_time")
+        if not due_time:
+            continue
+        try:
+            datetime.fromisoformat(due_time)
+        except ValueError:
+            logger.warning("Skipping promise with unparseable due_time: %r", due_time)
+            continue
+
+        event: ScheduledEventDoc = {
+            "event_type": "future_promise",
+            "target_platform": "",
+            "target_channel_id": "",
+            "target_global_user_id": global_user_id,
+            "payload": {
+                "promise_text": promise.get("action", ""),
+                "target": promise.get("target", user_name),
+                "character_name": character_name,
+                "original_input": decontexualized_input,
+                "context_summary": f"promise by {character_name} to {promise.get('target', user_name)}",
+            },
+            "scheduled_at": due_time,
+        }
+        try:
+            event_id = await schedule_event(event)
+            scheduled.append(event_id)
+        except PyMongoError:
+            logger.exception("Failed to persist future_promise event for user %s", global_user_id)
+    return scheduled
+
+
+async def db_writer(state: ConsolidatorState) -> dict:
+    timestamp = state.get("timestamp") or datetime.now(timezone.utc).isoformat()
     global_user_id = state.get("global_user_id", "")
     user_name = state.get("user_name", "")
+    character_name = state.get("character_profile", {}).get("name", "")
 
+    metadata = dict(state.get("metadata", {}) or {})
+    write_log: dict[str, bool] = {}
+    cache_invalidated: list[str] = []
 
-    # Step1: Update mood, global_vibe and reflection summary, those will be fed back to subconscious layer
+    # ── Step 1: character_state (mood / vibe / reflection) ──────────
     mood = state.get("mood", "")
     global_vibe = state.get("global_vibe", "")
     reflection_summary = state.get("reflection_summary", "")
-    
-    # Note the upsert character state function will handle the empty string input 
-    await upsert_character_state(
-        mood=mood,
-        global_vibe=global_vibe,
-        reflection_summary=reflection_summary,
-        timestamp=timestamp
+    try:
+        await upsert_character_state(
+            mood=mood,
+            global_vibe=global_vibe,
+            reflection_summary=reflection_summary,
+            timestamp=timestamp,
+        )
+        write_log["character_state"] = True
+    except PyMongoError:
+        logger.exception("db_writer: failed to upsert character_state")
+        write_log["character_state"] = False
+
+    # ── Step 2a: character diary (subjective per-user notes) ────────
+    diary_entries = _build_diary_entries(
+        state.get("diary_entry") or [],
+        timestamp=timestamp,
+        interaction_subtext=state.get("interaction_subtext", ""),
     )
+    if global_user_id and diary_entries:
+        try:
+            await upsert_character_diary(global_user_id, diary_entries)
+            write_log["character_diary"] = True
+        except PyMongoError:
+            logger.exception("db_writer: failed to upsert character_diary")
+            write_log["character_diary"] = False
 
-    # Step 2a: Update diary. 
-    diary_entry = state.get("diary_entry", [])
-    if global_user_id and diary_entry:
-        await upsert_user_facts(global_user_id, diary_entry)
-
-    # Step 2b: Update last relationship insight
+    # ── Step 2b: last relationship insight ──────────────────────────
     last_relationship_insight = state.get("last_relationship_insight", "")
     if global_user_id and last_relationship_insight:
-        await update_last_relationship_insight(global_user_id, last_relationship_insight)
+        try:
+            await update_last_relationship_insight(global_user_id, last_relationship_insight)
+            write_log["relationship_insight"] = True
+        except PyMongoError:
+            logger.exception("db_writer: failed to update_last_relationship_insight")
+            write_log["relationship_insight"] = False
 
-    # Step 3: Record facts and future promises
-    new_facts = state.get("new_facts", [])
+    # ── Step 3a: objective facts (structured) + memory (searchable) ─
+    new_facts = state.get("new_facts") or []
+    objective_facts = _build_objective_fact_entries(new_facts, timestamp=timestamp)
+    if global_user_id and objective_facts:
+        try:
+            await upsert_objective_facts(global_user_id, objective_facts)
+            write_log["objective_facts"] = True
+        except PyMongoError:
+            logger.exception("db_writer: failed to upsert_objective_facts")
+            write_log["objective_facts"] = False
+
     for fact in new_facts:
         entity = fact.get("entity", user_name)
         category = fact.get("category", "general")
         description = fact.get("description", "")
+        if not description:
+            continue
         doc = build_memory_doc(
             memory_name=f"[{entity}] {category}",
             content=description,
@@ -487,13 +678,19 @@ async def db_writer(state: ConsolidatorState):
             source_kind="conversation_extracted",
             confidence_note="This is extracted as a stable factual memory and may be used as background support.",
         )
-        await save_memory(doc, timestamp)
+        try:
+            await save_memory(cast(MemoryDoc, doc), timestamp)
+        except PyMongoError:
+            logger.exception("db_writer: failed to save fact memory")
 
-    future_promises = state.get("future_promises", [])
+    # ── Step 3b: future promises (memory + scheduled event) ─────────
+    future_promises = state.get("future_promises") or []
     for promise in future_promises:
         target = promise.get("target", user_name)
         action = promise.get("action", "")
         due_time = promise.get("due_time")
+        if not action:
+            continue
         doc = build_memory_doc(
             memory_name=f"[Promise] {target}",
             content=action,
@@ -503,30 +700,81 @@ async def db_writer(state: ConsolidatorState):
             confidence_note="This is an unfulfilled or future-oriented commitment and should be treated as pending until resolved.",
             expiry_timestamp=due_time,
         )
-        await save_memory(doc, timestamp)
+        try:
+            await save_memory(cast(MemoryDoc, doc), timestamp)
+        except PyMongoError:
+            logger.exception("db_writer: failed to save promise memory")
 
-    # TODO: Convert future_promises into scheduled events via kazusa_ai_chatbot.scheduler.schedule_event()
-    # Each promise with a concrete due_time should create a ScheduledEventDoc with
-    # event_type="followup_message" so the brain service can proactively deliver it.
-
-
-    # Step 4: caclualte new affinity
-    user_affinity_score = state.get("user_profile", {}).get("affinity", AFFINITY_DEFAULT)
-    affinity_delta = state.get("affinity_delta", 0)
-    new_affinity_delta = process_affinity_delta(user_affinity_score, affinity_delta)
-    await update_affinity(global_user_id, new_affinity_delta)
-
-    logger.debug(
-        f"User {user_name}(@{global_user_id}) affinity {user_affinity_score} -> {user_affinity_score + new_affinity_delta}."
+    scheduled_event_ids = await _schedule_future_promises(
+        future_promises,
+        global_user_id=global_user_id,
+        user_name=user_name,
+        character_name=character_name,
+        decontexualized_input=state.get("decontexualized_input", ""),
     )
 
-    return state
-    
+    # ── Step 4: affinity (direction-scaled) ─────────────────────────
+    user_affinity_score = state.get("user_profile", {}).get("affinity", AFFINITY_DEFAULT)
+    raw_affinity_delta = state.get("affinity_delta", 0) or 0
+    processed_affinity_delta = process_affinity_delta(user_affinity_score, raw_affinity_delta)
+    if global_user_id:
+        try:
+            await update_affinity(global_user_id, processed_affinity_delta)
+            write_log["affinity"] = True
+        except PyMongoError:
+            logger.exception("db_writer: failed to update_affinity")
+            write_log["affinity"] = False
+
+    logger.debug(
+        "User %s(@%s) affinity %s -> %s",
+        user_name, global_user_id,
+        user_affinity_score, user_affinity_score + processed_affinity_delta,
+    )
+
+    # ── Step 5: cache invalidation (best-effort, after writes) ──────
+    # The RAG cache is the hot read-path; stale entries now outweigh recency.
+    if global_user_id:
+        try:
+            rag_cache = await _get_rag_cache()
+            if diary_entries:
+                await rag_cache.invalidate_pattern(
+                    cache_type="character_diary",
+                    global_user_id=global_user_id,
+                )
+                cache_invalidated.append("character_diary")
+            if objective_facts:
+                await rag_cache.invalidate_pattern(
+                    cache_type="objective_user_facts",
+                    global_user_id=global_user_id,
+                )
+                cache_invalidated.append("objective_user_facts")
+            if future_promises:
+                await rag_cache.invalidate_pattern(
+                    cache_type="user_promises",
+                    global_user_id=global_user_id,
+                )
+                cache_invalidated.append("user_promises")
+            if abs(processed_affinity_delta) > AFFINITY_CACHE_NUKE_THRESHOLD:
+                await rag_cache.clear_all_user(global_user_id)
+                cache_invalidated.append("ALL_USER")
+
+            if cache_invalidated:
+                await increment_rag_version(global_user_id)
+        except PyMongoError:
+            logger.exception("db_writer: cache invalidation failed")
+
+    metadata.update({
+        "write_success": write_log,
+        "cache_invalidation_scope": cache_invalidated,
+        "scheduled_event_ids": scheduled_event_ids,
+        "affinity_before": user_affinity_score,
+        "affinity_delta_processed": processed_affinity_delta,
+    })
+
+    return {"metadata": metadata}
 
 
-async def call_consolidation_subgraph(
-    global_state: GlobalPersonaState
-):    
+async def call_consolidation_subgraph(global_state: GlobalPersonaState):
     sub_agent_builder = StateGraph(ConsolidatorState)
 
     sub_agent_builder.add_node("global_state_updater", global_state_updater)
@@ -535,7 +783,6 @@ async def call_consolidation_subgraph(
     sub_agent_builder.add_node("fact_harvester_evaluator", fact_harvester_evaluator)
     sub_agent_builder.add_node("db_writer", db_writer)
 
-    # Connect (parallel)
     sub_agent_builder.add_edge(START, "global_state_updater")
     sub_agent_builder.add_edge(START, "relationship_recorder")
     sub_agent_builder.add_edge(START, "facts_harvester")
@@ -544,19 +791,29 @@ async def call_consolidation_subgraph(
     sub_agent_builder.add_edge("relationship_recorder", "db_writer")
     sub_agent_builder.add_edge("facts_harvester", "fact_harvester_evaluator")
     sub_agent_builder.add_conditional_edges(
-        "fact_harvester_evaluator", 
+        "fact_harvester_evaluator",
         lambda state: "loop" if not state["should_stop"] else "end",
         {
             "loop": "facts_harvester",
-            "end": "db_writer"
-        }
+            "end": "db_writer",
+        },
     )
 
     sub_agent_builder.add_edge("db_writer", END)
 
     sub_graph = sub_agent_builder.compile()
 
-    # Build initial state
+    # Seed the metadata bundle from Stage 3's research_metadata (may be a list
+    # of dicts or a single dict — normalise to one flat dict here).
+    raw_meta = global_state.get("research_metadata")
+    seeded_metadata: dict = {}
+    if isinstance(raw_meta, list):
+        for m in raw_meta:
+            if isinstance(m, dict):
+                seeded_metadata.update(m)
+    elif isinstance(raw_meta, dict):
+        seeded_metadata = dict(raw_meta)
+
     sub_state: ConsolidatorState = {
         "timestamp": global_state["timestamp"],
         "global_user_id": global_state["global_user_id"],
@@ -576,13 +833,12 @@ async def call_consolidation_subgraph(
         "research_facts": global_state["research_facts"],
 
         "decontexualized_input": global_state["decontexualized_input"],
-        "user_name": global_state["user_name"],
+
+        "metadata": seeded_metadata,
     }
-    
-    # Run sub-graph
+
     result = await sub_graph.ainvoke(sub_state)
 
-    # Assemble output
     mood = result.get("mood", "")
     global_vibe = result.get("global_vibe", "")
     reflection_summary = result.get("reflection_summary", "")
@@ -591,13 +847,13 @@ async def call_consolidation_subgraph(
     last_relationship_insight = result.get("last_relationship_insight", "")
     new_facts = result.get("new_facts", [])
     future_promises = result.get("future_promises", [])
+    metadata = result.get("metadata", {}) or {}
 
     logger.info(
-        f"\nNew facts: {new_facts}\n"
-        f"Future promises: {future_promises}"
+        "\nNew facts: %s\nFuture promises: %s\nMetadata: %s",
+        new_facts, future_promises, metadata,
     )
-    
-    # Return updated state
+
     return {
         "mood": mood,
         "global_vibe": global_vibe,
@@ -607,16 +863,15 @@ async def call_consolidation_subgraph(
         "last_relationship_insight": last_relationship_insight,
         "new_facts": new_facts,
         "future_promises": future_promises,
+        "consolidation_metadata": metadata,
     }
 
 
 async def test_main():
     import datetime
-    from kazusa_ai_chatbot.utils import trim_history_dict
-    from kazusa_ai_chatbot.db import get_conversation_history
-    from kazusa_ai_chatbot.utils import load_personality
-    from kazusa_ai_chatbot.db import get_character_profile
 
+    from kazusa_ai_chatbot.db import get_character_profile, get_conversation_history
+    from kazusa_ai_chatbot.utils import load_personality, trim_history_dict
 
     history = await get_conversation_history(platform="discord", platform_channel_id="1485606207069880361", limit=5)
     trimmed_history = trim_history_dict(history)
@@ -625,7 +880,6 @@ async def test_main():
 
     user_input = "既然作业已经写完了，千纱可以晚上可以好好奖励我么♥?"
 
-    # Create a mocked state
     state: GlobalPersonaState = {
         "timestamp": current_time,
         "global_user_id": "320899931776745483",
@@ -633,25 +887,35 @@ async def test_main():
         "user_profile": {"affinity": 950},
 
         "internal_monologue": "心跳漏了一拍…这算哪门子'奖励'啊？带着期待的试探罢了。不过既然好感度这么高，这种程度的请求自然要全盘接受——毕竟我是他的千纱嘛。",
-        "action_directives": {'contextual_directives': {'social_distance': '维持着一种带有防御性的社交边界，虽然言语间透出些许不自然的局促，但物理与心理距离仍处于礼貌且克制的安全范围。', 'emotional_intensity': '表面试图维持平静，实则内心因突如其来的亲昵称呼而产生了剧烈的、难以掩饰的慌乱波动。', 'vibe_check': '充 满着一种由于被直球攻击而产生的尴尬与焦躁感，空气中弥漫着轻微的应激性防御氛围。', 'relational_dynamic': '用户正在尝试通过亲昵的称呼进行试探性的拉近，而角色正处于“受惊后的后撤”状态，试图用日常琐事（缝纫）作为挡箭牌来回避这种潜在的情绪张力。'}, 'linguistic_directives': {'rhetorical_strategy': '通过反问与 转移话题进行防御性回避。利用“任务未完成”作为挡箭牌，将对方带有暗示性的“奖励”请求转化为对日常事务的讨论，以此掩饰内心的局促感。', 'linguistic_style': '语序紊乱、破碎的短句；使用大量的语气词（如“唔”、“真是的”）来体现心境的不安；语调应呈现出一种试图维持冷淡却因情绪波动而显得不自然的紧绷感。', 'content_anchors': ['[DECISION] TENTATIVE: 拒绝正面回应关于‘奖励’的具体含义，仅表现出一种模棱胧胧的、带有防御性的拉扯。', '[FACT] 现在的时间是深夜（22:24），且处于处理缝纫/服装工作的语境中。', '[SOCIAL] 使用“胡闹”、“无理取闹”等词汇来定义对方的行为，以此建立社交距离感。'], 'forbidden_phrases': ['我愿意', '好的', ' 没问题', '我很期待', '（动作描述，如：低头、脸红）']}, 'visual_directives': {'facial_expression': ['双颊呈现出明显的绯红，热度仿佛要从皮肤下透出来', '瞳孔因局促不安而轻微收缩，眼神闪烁不定', '嘴唇紧抿成一条直线，试图掩饰由于呼吸急促带来的颤抖', '眉心微微蹙起，带着一丝防御性的、不自然的紧绷感'], 'body_language': ['肩膀不由自主地向上耸起，呈现出一种蜷缩的防御姿态', '双手紧紧攥着衣角或裙摆，指关节因用力而略显苍白', '身体重心不自觉地向后偏移，试图拉开与对方的物理距离', '胸口起伏频率加快，由于心跳过速导致的呼吸紊乱感清晰可见'], 'gaze_direction': ['视线处于游离状态，不敢与对方进行长时间的对视', '频繁地向 下瞥向地面或侧向一旁，试图通过回避目光来建立心理防线', '在不经意间偷瞄对方时，眼神中流露出一种被动且迷茫的惊惶'], 'visual_vibe': ['画面采用近景构图，强调角色局促不安的面部细节', '光影对比强烈，侧向的暖色调光线映射出皮肤表面的红晕与汗意', '背景呈现极浅的景深（Bokeh），营造出一种被突如其来的热度所包围的 封闭感和压迫感']}},
+        "action_directives": {
+            "contextual_directives": {},
+            "linguistic_directives": {
+                "rhetorical_strategy": "",
+                "linguistic_style": "",
+                "content_anchors": [
+                    "[DECISION] TENTATIVE: 拒绝正面回应关于‘奖励’的具体含义",
+                    "[FACT] 现在的时间是深夜（22:24）",
+                ],
+                "forbidden_phrases": [],
+            },
+            "visual_directives": {},
+        },
         "interaction_subtext": "带有暗示性的调情、索取关注",
-        'emotional_appraisal': '心跳漏了一拍……这种轻浮的语气是怎么回事，好乱。',
-        'character_intent': 'BANTAR', 
-        'logical_stance': 'CONFIRM',
+        "emotional_appraisal": "心跳漏了一拍……这种轻浮的语气是怎么回事，好乱。",
+        "character_intent": "BANTAR",
+        "logical_stance": "CONFIRM",
 
-        "final_dialog": ['唔……这种请求也算是一种奖励嘛……真是拿你没办法呢。', '不过，刚好午休时间没什么事……那个刚出炉的可颂，要一起分着吃吗？'],
+        "final_dialog": ["唔……这种请求也算是一种奖励嘛……真是拿你没办法呢。"],
         "decontexualized_input": user_input,
         "research_facts": f"现在的时间为{current_time}",
+        "research_metadata": [{"cache_hit": False, "depth": "DEEP", "depth_confidence": 0.9}],
         "chat_history": trimmed_history,
-        "user_name": "EAMARS",
-        "user_profile": {"affinity": 950},
         "character_profile": await get_character_profile(),
     }
 
     result = await call_consolidation_subgraph(state)
-
     print(result)
-    
+
 
 if __name__ == "__main__":
     import asyncio

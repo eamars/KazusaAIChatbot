@@ -12,7 +12,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Callable, Awaitable
 
 from kazusa_ai_chatbot.db import ScheduledEventDoc, get_db
@@ -137,7 +137,10 @@ async def cancel_event(event_id: str) -> bool:
     db = await get_db()
     result = await db.scheduled_events.update_one(
         {"event_id": event_id, "status": "pending"},
-        {"$set": {"status": "cancelled"}},
+        {"$set": {
+            "status": "cancelled",
+            "cancelled_at": datetime.now(timezone.utc).isoformat(),
+        }},
     )
     return result.modified_count > 0
 
@@ -160,4 +163,113 @@ async def _handle_followup_message(event: ScheduledEventDoc) -> None:
     await _callback(event)
 
 
+async def _handle_future_promise(event: ScheduledEventDoc) -> None:
+    """Fire when a previously-recorded promise comes due.
+
+    Marks the associated MemoryDoc as ``fulfilled`` (full "did the bot act on
+    the promise?" reasoning lives in the Stage 4 consolidator refactor — this
+    handler is intentionally a minimal stub for Stage 1 so the scheduler can
+    accept the event type and persist completion).
+    """
+    payload = event.get("payload") or {}
+    memory_id = payload.get("memory_id")
+    promise_text = payload.get("promise_text", "")
+    logger.info(
+        "future_promise fired — event_id=%s user=%s memory_id=%s promise=%r",
+        event.get("event_id"),
+        event.get("target_global_user_id"),
+        memory_id,
+        promise_text,
+    )
+
+    if not memory_id:
+        logger.warning("future_promise event %s has no memory_id — nothing to mark fulfilled", event.get("event_id"))
+        return
+
+    db = await get_db()
+    await db.memory.update_one(
+        {"_id": memory_id},
+        {"$set": {"status": "fulfilled"}},
+    )
+
+
 register_handler("followup_message", _handle_followup_message)
+register_handler("future_promise", _handle_future_promise)
+
+
+# ── Standalone test harness ────────────────────────────────────────
+
+
+async def test_main() -> None:
+    """Round-trip: schedule followup + future_promise, reload, cancel.
+
+    Requires MongoDB to be running (scheduler persists events to the
+    ``scheduled_events`` collection).  Intended for manual inspection.
+    """
+    import logging as _logging
+
+    _logging.basicConfig(level=_logging.INFO)
+
+    db = await get_db()
+
+    # Clean prior test events
+    await db.scheduled_events.delete_many({"target_global_user_id": "user-scheduler-test"})
+
+    future_ts = (datetime.now(timezone.utc) + timedelta(days=365)).isoformat()
+
+    followup_event: ScheduledEventDoc = {
+        "event_type": "followup_message",
+        "target_platform": "discord",
+        "target_channel_id": "test-channel-001",
+        "target_global_user_id": "user-scheduler-test",
+        "payload": {
+            "message": "hey, just checking in",
+            "platform": "discord",
+            "channel_id": "test-channel-001",
+        },
+        "scheduled_at": future_ts,
+    }
+
+    promise_event: ScheduledEventDoc = {
+        "event_type": "future_promise",
+        "target_platform": "discord",
+        "target_channel_id": "test-channel-001",
+        "target_global_user_id": "user-scheduler-test",
+        "payload": {
+            "promise_text": "我明天会告诉你答案",
+            "memory_id": "mem-test-001",
+            "original_input": "你明天能告诉我吗？",
+            "context_summary": "user asked bot for answer tomorrow",
+        },
+        "scheduled_at": future_ts,
+    }
+
+    fid = await schedule_event(followup_event)
+    pid = await schedule_event(promise_event)
+    print(f"[schedule] followup={fid}  future_promise={pid}")
+
+    # Simulate a restart: clear in-memory tasks and reload from DB
+    for task in _pending_tasks.values():
+        task.cancel()
+    _pending_tasks.clear()
+    loaded = await load_pending_events()
+    print(f"[load_pending_events] loaded={loaded}")
+
+    followup_doc = await db.scheduled_events.find_one({"event_id": fid})
+    promise_doc = await db.scheduled_events.find_one({"event_id": pid})
+    print(f"[db followup] {followup_doc}")
+    print(f"[db promise ] {promise_doc}")
+
+    # Cancel one and verify
+    cancelled = await cancel_event(fid)
+    print(f"[cancel_event followup] cancelled={cancelled}")
+    followup_doc = await db.scheduled_events.find_one({"event_id": fid})
+    print(f"[db followup after cancel] status={followup_doc.get('status')} cancelled_at={followup_doc.get('cancelled_at')}")
+
+    # Cleanup
+    await db.scheduled_events.delete_many({"target_global_user_id": "user-scheduler-test"})
+    await shutdown()
+
+
+if __name__ == "__main__":
+    asyncio.run(test_main())

@@ -79,6 +79,36 @@ MAX_WEB_SEARCH_AGENT_RETRY = int(os.getenv("MAX_WEB_SEARCH_AGENT_RETRY", "2"))
 MAX_DIALOG_AGENT_RETRY = int(os.getenv("MAX_DIALOG_AGENT_RETRY", "3"))
 MAX_FACT_HARVESTER_RETRY = int(os.getenv("MAX_FACT_HARVESTER_RETRY", "3"))
 
+# ── Stage 5a: RAG cache, depth classifier, consolidator, scheduler ──
+# RAG cache (semantic LRU + MongoDB write-through). TTLs override the
+# per-type defaults inside ``rag.cache.DEFAULT_TTL_SECONDS`` when the cache
+# is constructed via ``build_rag_cache()``.
+RAG_CACHE_SIMILARITY_THRESHOLD = float(os.getenv("RAG_CACHE_SIMILARITY_THRESHOLD", "0.65"))
+RAG_CACHE_MAX_SIZE = int(os.getenv("RAG_CACHE_MAX_SIZE", "100000"))
+RAG_CACHE_TTL_SECONDS = {
+    "character_diary": int(os.getenv("RAG_CACHE_CHARACTER_DIARY_TTL", "1800")),
+    "objective_user_facts": int(os.getenv("RAG_CACHE_OBJECTIVE_USER_FACTS_TTL", "3600")),
+    "user_promises": int(os.getenv("RAG_CACHE_USER_PROMISES_TTL", "900")),
+    "internal_memory": int(os.getenv("RAG_CACHE_INTERNAL_MEMORY_TTL", "900")),
+    "external_knowledge": int(os.getenv("RAG_CACHE_EXTERNAL_KNOWLEDGE_TTL", "3600")),
+    "user_facts": int(os.getenv("RAG_CACHE_USER_FACTS_TTL", "1800")),  # legacy
+}
+
+# Depth classifier (SHALLOW vs DEEP routing for the RAG dispatcher).
+DEPTH_CLASSIFIER_USE_LIGHT_LLM = os.getenv("DEPTH_CLASSIFIER_USE_LIGHT_LLM", "false").lower() in ("1", "true", "yes")
+DEPTH_CLASSIFIER_THRESHOLDS = {
+    "shallow_max_chars": int(os.getenv("DEPTH_SHALLOW_MAX_CHARS", "60")),
+    "embedding_confidence_min": float(os.getenv("DEPTH_EMBEDDING_CONFIDENCE_MIN", "0.55")),
+}
+
+# Consolidator (Stage 4a evaluator + cache invalidation).
+EVALUATOR_CONSISTENCY_CHECK = os.getenv("EVALUATOR_CONSISTENCY_CHECK", "true").lower() in ("1", "true", "yes")
+AFFINITY_CACHE_NUKE_THRESHOLD = int(os.getenv("AFFINITY_CACHE_NUKE_THRESHOLD", "50"))
+
+# Scheduler (future_promise + followup_message events).
+SCHEDULED_TASKS_ENABLED = os.getenv("SCHEDULED_TASKS_ENABLED", "true").lower() in ("1", "true", "yes")
+
+
 # Brain service
 SERVICE_HOST = os.getenv("SERVICE_HOST", "0.0.0.0")
 SERVICE_PORT = int(os.getenv("SERVICE_PORT", "8000"))
