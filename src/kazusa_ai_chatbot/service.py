@@ -120,18 +120,23 @@ def _build_graph():
     graph.add_node("multimedia_descriptor_agent", multimedia_descriptor_agent)
     graph.add_node("persona_supervisor2", persona_supervisor2)
 
+    def _start_router(state):
+        debug = state.get("debug_modes") or {}
+        if debug.get("listen_only"):
+            return "end"
+        if state.get("user_multimedia_input"):
+            return "multimedia"
+        return "skip"
+
     graph.add_conditional_edges(
         START,
-        lambda state: "multimedia" if state.get("user_multimedia_input") else "skip",
-        {"multimedia": "multimedia_descriptor_agent", "skip": "relevance_agent"},
+        _start_router,
+        {"multimedia": "multimedia_descriptor_agent", "skip": "relevance_agent", "end": END},
     )
     graph.add_edge("multimedia_descriptor_agent", "relevance_agent")
 
     def _route_after_relevance(state):
         if not state.get("should_respond"):
-            return "end"
-        debug = state.get("debug_modes") or {}
-        if debug.get("listen_only"):
             return "end"
         return "continue"
 
@@ -334,14 +339,14 @@ async def chat(req: ChatRequest, background_tasks: BackgroundTasks):
         final_dialog = result.get("final_dialog", [])
         should_reply = result.get("use_reply_feature", False)
 
-        # think_only: suppress dialog in response but still save internally
-        if debug_modes.get("think_only"):
-            logger.info("think_only active — suppressing %d dialog message(s)", len(final_dialog))
-            final_dialog = []
-
-        # Save bot message in background only if the bot actually responded
+        # Save bot message in background only if the bot actually generated a response
         if final_dialog:
             background_tasks.add_task(_save_bot_message, result)
+
+        # think_only: suppress dialog in response but still save internally
+        if debug_modes.get("think_only"):
+            logger.info("think_only active — suppressing %d dialog message(s) from user output", len(final_dialog))
+            final_dialog = []
 
         # TODO: Extract scheduled_followups from result["future_promises"] and schedule them
         scheduled_followups = 0
