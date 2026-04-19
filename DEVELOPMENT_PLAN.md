@@ -27,60 +27,77 @@ This plan details **what files to modify, in what order**, to implement the 5-ph
 
 ## Part 1: Implementation Sequence (Dependency Order)
 
-### Stage 1: Foundation Modules (No dependencies, can implement in parallel)
+### Stage 1: Foundation Modules (No dependencies, can implement in parallel) ✅ COMPLETE
 
 **Stage 1 Goal**: Implement and self-test all foundation modules in isolation. No module is plugged into the main workflow yet. Each file must include an `async def test_main()` function and `if __name__ == "__main__": asyncio.run(test_main())` block at the bottom — following the exact pattern used in `persona_supervisor2_rag.py` and other existing modules — so each file can be run standalone to inspect output values before integration.
 
 New RAG-related files live under `src/kazusa_ai_chatbot/rag/` (new subfolder).
 
+**Stage 1 Status (2026-04-19)**:
+- ✅ `src/kazusa_ai_chatbot/rag/__init__.py` created
+- ✅ `src/kazusa_ai_chatbot/rag/cache.py` — RAGCache with in-memory LRU + MongoDB write-through
+- ✅ `src/kazusa_ai_chatbot/rag/depth_classifier.py` — SHALLOW/DEEP via embedding + LLM fallback
+- ✅ `src/kazusa_ai_chatbot/scheduler.py` extended — `future_promise` handler registered
+- ✅ `src/kazusa_ai_chatbot/db.py` — `ScheduledEventDoc` updated (adds `future_promise`,
+  `cancelled`, `cancelled_at`)
+- ✅ Unit tests added under `tests/` — 34 tests, all passing:
+    - `tests/test_rag_cache.py` (16 tests)
+    - `tests/test_depth_classifier.py` (10 tests)
+    - `tests/test_scheduler_future_promise.py` (8 tests)
+- ✅ Full test suite green: 138 passed, 18 deselected
+
 ---
 
-#### 1a. Create `kazusa_ai_chatbot/rag/cache.py` (NEW FILE)
+#### 1a. Create `kazusa_ai_chatbot/rag/cache.py` (NEW FILE) ✅ IMPLEMENTED
 **Purpose**: RAGCache class for semantic caching with crash resilience
 **Changes** in this file:
 
 **Core Methods**:
-- [ ] `__init__()` - Initialize in-memory LRU cache (no external dependencies)
+- [x] `__init__()` - Initialize in-memory LRU cache (no external dependencies)
   - In-memory store: Typed dict with LRU eviction (built-in Python)
   - No Redis/external service required
   - Load persisted entries from MongoDB on startup
-- [ ] `async retrieve_if_similar(embedding, cache_type, threshold)` - Vector similarity lookup
+- [x] `async retrieve_if_similar(embedding, cache_type, threshold)` - Vector similarity lookup
   - Check in-memory cache first (fast path)
   - Fallback to MongoDB if not in memory (recovery path)
-- [ ] `async store(embedding, results, cache_type, ttl_seconds, metadata)` - Cache storage
+- [x] `async store(embedding, results, cache_type, ttl_seconds, metadata)` - Cache storage
   - Store in-memory immediately
   - Persist to MongoDB asynchronously (for recovery)
-- [ ] `async invalidate_pattern(cache_type, global_user_id, trigger)` - Selective invalidation
+- [x] `async invalidate_pattern(cache_type, global_user_id, trigger)` - Selective invalidation
   - Remove from in-memory cache
   - Mark as deleted in MongoDB (soft delete) for audit trail
-- [ ] `async clear_all_user(global_user_id)` - Full user cache clear
+- [x] `async clear_all_user(global_user_id)` - Full user cache clear
   - Clear from in-memory
   - Mark deleted in MongoDB
-- [ ] `get_stats()` - Cache stats (hits, misses, size, memory)
+- [x] `get_stats()` - Cache stats (hits, misses, size, memory)
   - Track in-memory performance metrics
   - Return hit rate, eviction count, current size
 
 **Embedding Similarity** (Cosine Distance):
-- [ ] Compute cosine similarity between embeddings
-- [ ] Threshold-based matching (default 0.82)
-- [ ] Pre-computed norms for performance
+- [x] Compute cosine similarity between embeddings
+- [x] Threshold-based matching (default 0.82)
+- [x] Pre-computed norms for performance
 
 **Crash Resilience** (CRITICAL - Addresses failure mode):
-- [ ] On startup: Load persisted cache entries from `rag_cache_index` MongoDB collection
+- [x] On startup: Load persisted cache entries from `rag_cache_index` MongoDB collection
   - Query entries with `ttl_expires_at > now` (skip expired)
   - Reconstruct in-memory LRU from persisted entries
   - Result: Cache warm-starts after crash, no cold-start latency penalty
-- [ ] During operation: Async write to MongoDB after each store
+- [x] During operation: Async write to MongoDB after each store
   - If write fails, log error but continue (in-memory cache still works)
   - Next restart will replay from MongoDB (eventual consistency)
-- [ ] Graceful shutdown: Flush all in-memory entries to MongoDB
+- [x] Graceful shutdown: Flush all in-memory entries to MongoDB
   - Stop accepting new cache requests
   - Complete pending writes before shutdown
   - Next startup: Full cache populated and ready
+  - Note: every `store()` is write-through, so `shutdown()` only logs stats —
+    the DB is already up-to-date.
 
 **TTL Management**:
-- [ ] In-memory: Check expiry on lookup (lazy deletion)
-- [ ] MongoDB: TTL index handles automatic cleanup (expireAfterSeconds=0)
+- [x] In-memory: Check expiry on lookup (lazy deletion)
+- [x] MongoDB: TTL index handles automatic cleanup (expireAfterSeconds=0) — index will be
+  created in Stage 2b (`db/bootstrap.py`). For Stage 1, documents expire only on
+  in-memory lookup; MongoDB-side TTL starts working once the index is added.
 - [ ] Periodic: Optional background cleanup task (future)
 
 **Dependencies**: None (uses built-in Python LRU, MongoDB already in project - NO NEW EXTERNAL SERVICES)
@@ -89,12 +106,12 @@ New RAG-related files live under `src/kazusa_ai_chatbot/rag/` (new subfolder).
 
 ---
 
-#### 1b. Create `kazusa_ai_chatbot/rag/depth_classifier.py` (NEW FILE)
+#### 1b. Create `kazusa_ai_chatbot/rag/depth_classifier.py` (NEW FILE) ✅ IMPLEMENTED
 **Purpose**: Classify query into two depths (SHALLOW/DEEP) via embedding similarity, with LLM fallback
 **Rationale**: Two layers map naturally to the two storage layers — SHALLOW serves from cache + user_rag only; DEEP triggers full database search across all dispatchers. Bot is multilingual (Chinese/English minimum), so keyword sets are enumerated in both languages and matched via text embedding + cosine similarity. LLM fallback handles ambiguous inputs that don't match either keyword centroid confidently.
 
 **Changes** in this file:
-- [ ] Two enumerated keyword sets (Chinese + English):
+- [x] Two enumerated keyword sets (Chinese + English):
   - `SHALLOW_KEYWORDS`: greetings, simple preferences, yes/no facts
     - EN: `["what", "who", "do you like", "your name", "favorite", ...]`
     - ZH: `["喜欢", "叫什么", "你是", "好不好", "什么颜色", ...]`
@@ -102,7 +119,7 @@ New RAG-related files live under `src/kazusa_ai_chatbot/rag/` (new subfolder).
     - EN: `["always", "why do you", "remember when", "last time", "you said", ...]`
     - ZH: `["你为什么总是", "以前", "你说过", "上次", "为什么", "记得吗", ...]`
   - Keyword embeddings pre-computed at module load time (one-time cost, both sets merged per depth)
-- [ ] `InputDepthClassifier` class:
+- [x] `InputDepthClassifier` class:
   - `async classify(input, user_topic, affinity)` - Main classification method
   - **Fast path**: Compute embedding of input, cosine similarity against SHALLOW and DEEP centroids
     - If `sim(SHALLOW) > 0.75` and `sim(SHALLOW) > sim(DEEP)` → return `SHALLOW`
@@ -115,7 +132,7 @@ New RAG-related files live under `src/kazusa_ai_chatbot/rag/` (new subfolder).
     ```
   - **Affinity override**: if `affinity < 400`, always return `DEEP` regardless of classification
   - **Final fallback**: if LLM output is unparseable, default to `DEEP` (safer — better to over-retrieve than miss context)
-- [ ] LLM system prompt (fallback path) must specify:
+- [x] LLM system prompt (fallback path) must specify:
   - **Input format**:
     ```
     Input JSON fields:
@@ -135,7 +152,7 @@ New RAG-related files live under `src/kazusa_ai_chatbot/rag/` (new subfolder).
     - `DEEP`: input references past events, emotional context, asks "why" about behaviour, or involves temporal reasoning — requires full memory search
     - If `affinity` in the input is below 400, always output `DEEP`
     - Input language may be Chinese or English — classify based on meaning, not language
-- [ ] Output structure: `{depth, trigger_dispatchers, confidence}`
+- [x] Output structure: `{depth, trigger_dispatchers, confidence}`
   - `SHALLOW` → `trigger_dispatchers: ["user_rag"]`
   - `DEEP` → `trigger_dispatchers: ["user_rag", "internal_rag", "external_rag"]`
 
@@ -145,7 +162,7 @@ New RAG-related files live under `src/kazusa_ai_chatbot/rag/` (new subfolder).
 
 ---
 
-#### 1c. Update `kazusa_ai_chatbot/scheduler.py` (EXISTING FILE - EXTEND)
+#### 1c. Update `kazusa_ai_chatbot/scheduler.py` (EXISTING FILE - EXTEND) ✅ IMPLEMENTED
 **Purpose**: Extend the existing scheduler to support `future_promise` event type from the consolidator
 **Current state**: `scheduler.py` already exists and is well-structured. `ScheduledEventDoc` TypedDict is defined in `db.py`. The `scheduled_events` MongoDB collection already exists with `schedule_event`, `cancel_event`, `load_pending_events`, `shutdown` functions. Only `followup_message` event type is currently implemented.
 
@@ -195,10 +212,12 @@ class ScheduledEventDoc(TypedDict, total=False):
 ```
 
 **3. Register `future_promise` handler in `scheduler.py`**:
-- [ ] Add `async def _handle_future_promise(event: ScheduledEventDoc)` stub
+- [x] Add `async def _handle_future_promise(event: ScheduledEventDoc)` stub
   - Logs the firing (full implementation deferred to Stage 4 consolidator refactor)
   - Marks promise `MemoryDoc` status as `"fulfilled"` in DB
-- [ ] Call `register_handler("future_promise", _handle_future_promise)`
+- [x] Call `register_handler("future_promise", _handle_future_promise)`
+- [x] `cancel_event()` now also stamps `cancelled_at` (ISO-8601) alongside setting
+  status to `cancelled`.
 
 **Collection**: Reuses existing `scheduled_events` — no new collection needed.
 

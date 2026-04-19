@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python -m pytest tests/unit/test_rag_cache.py -v)",
+      "Bash(python -m pytest tests/unit/test_depth_classifier.py -v)",
+      "Bash(python -m pytest tests/unit/test_scheduler_future_promise.py -v)",
+      "Read(//c/Users/Ran Bao/.claude/**)",
+      "Read(//c/Users/Ran Bao/**)"
+    ]
+  }
+}

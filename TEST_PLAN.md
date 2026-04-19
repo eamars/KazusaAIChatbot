@@ -84,7 +84,7 @@ After all implementation changes are deployed, this test plan validates:
 
 ### 2.1 RAGCache Unit Tests
 
-**File**: `tests/unit/test_rag_cache.py` (10 tests)
+**File**: `tests/test_rag_cache.py` (16 tests)
 
 ```python
 def test_cache_store_and_retrieve():
@@ -150,7 +150,7 @@ def test_cache_performance():
 
 ### 2.2 InputDepthClassifier Unit Tests
 
-**File**: `tests/unit/test_depth_classifier.py` (8 tests)
+**File**: `tests/test_depth_classifier.py` (10 tests)
 
 ```python
 def test_classify_shallow():
@@ -316,7 +316,7 @@ def test_max_retries():
 
 ### 2.4 Database Operations Unit Tests
 
-**File**: `tests/unit/test_db_operations.py` (6 tests)
+**File**: `tests/test_db_operations.py` (6 tests)
 
 ```python
 def test_insert_cache_entry():
