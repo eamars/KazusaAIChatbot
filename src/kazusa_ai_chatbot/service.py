@@ -30,6 +30,7 @@ for _quiet in ("pymongo", "httpx", "httpcore", "hpack", "urllib3", "openai", "la
 from kazusa_ai_chatbot.config import (
     BRAIN_EXECUTOR_COUNT,
     CONVERSATION_HISTORY_LIMIT,
+    SCHEDULED_TASKS_ENABLED,
 )
 from kazusa_ai_chatbot.db import (
     close_db,
@@ -48,6 +49,7 @@ from kazusa_ai_chatbot import scheduler
 from langgraph.graph import END, START, StateGraph
 from kazusa_ai_chatbot.nodes.relevance_agent import relevance_agent, multimedia_descriptor_agent
 from kazusa_ai_chatbot.nodes.persona_supervisor2 import persona_supervisor2
+from kazusa_ai_chatbot.nodes.persona_supervisor2_rag import _get_rag_cache
 
 logger = logging.getLogger(__name__)
 
@@ -212,15 +214,28 @@ async def lifespan(app: FastAPI):
     except Exception:
         logger.exception("MCP manager failed to start — tools will be unavailable")
 
-    # 5. Load pending scheduled events
-    await scheduler.load_pending_events()
+    # 5. Warm-start the RAG cache from MongoDB (Stage 5b).
+    rag_cache = await _get_rag_cache()
+    logger.info("RAG cache warm-started: %s", rag_cache.get_stats())
+
+    # 6. Load pending scheduled events
+    if SCHEDULED_TASKS_ENABLED:
+        await scheduler.load_pending_events()
+    else:
+        logger.info("Scheduler disabled via SCHEDULED_TASKS_ENABLED=false — skipping load_pending_events")
 
     logger.info("Kazusa brain service is ready")
 
     yield
 
     # Shutdown
-    await scheduler.shutdown()
+    if SCHEDULED_TASKS_ENABLED:
+        await scheduler.shutdown()
+    try:
+        cache = await _get_rag_cache()
+        await cache.shutdown()
+    except Exception:
+        logger.exception("RAG cache shutdown failed")
     await mcp_manager.stop()
     await close_db()
     logger.info("Kazusa brain service shut down")

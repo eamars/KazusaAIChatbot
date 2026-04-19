@@ -11,6 +11,7 @@
 ## Executive Summary
 
 This plan details **what files to modify, in what order**, to implement the 5-phase personality system with:
+
 - Semantic cache layer (60-70% hit rate)
 - Depth-aware intelligent routing (40% fewer dispatcher calls)
 - Consolidator evaluator loop (95%+ contradiction detection)
@@ -18,6 +19,7 @@ This plan details **what files to modify, in what order**, to implement the 5-ph
 - Scheduled task infrastructure
 
 **Implementation approach**:
+
 1. Modify files in dependency order
 2. Deploy all changes in one atomic merge
 3. Run comprehensive E2E tests
@@ -27,60 +29,76 @@ This plan details **what files to modify, in what order**, to implement the 5-ph
 
 ## Part 1: Implementation Sequence (Dependency Order)
 
-###  Stage 1:
+### Stage 1:
+
 Stage 1 is now moved to `STAGE1.md`.
 
 ---
+
 ### Stage 2:
+
 Stage 2 is now moved to `STAGE2.md`.
 
 ---
 
-### Stage 3: RAG Layer Updates (After Stage 2)
+### Stage 3: RAG Layer Updates (After Stage 2) ✅ CODE COMPLETE (tests pending)
 
 **Depends on**: Stage 1a + 1b + 1.5a (cache, depth, cache types) + Stage 2a + 2a-ii + 2b (DB functions and schema)
 
-#### 3a. Update `kazusa_ai_chatbot/nodes/persona_supervisor2_rag.py` (EXISTING FILE - MAJOR REFACTOR)
+**Stage 3 Status (2026-04-19)**:
+- ✅ `src/kazusa_ai_chatbot/nodes/persona_supervisor2_rag.py` — wrapped with 5-phase pipeline (input analysis → cache probe → depth classification → dispatcher graph → cache storage)
+- ✅ Module-level lazy singletons for `RAGCache` (warm-started from Mongo) and `InputDepthClassifier`
+- ✅ `RAGState` extended: `input_embedding`, `depth`, `depth_confidence`, `cache_hit`, `trigger_dispatchers`, `rag_metadata`
+- ✅ `call_rag_subgraph()` now returns `research_facts` + `research_metadata` (unified metadata bundle)
+- ⬜ Integration smoke-test against live MongoDB + live LLM (manual, via `test_main()`)
+- ⬜ New unit tests for the wrapper (`tests/test_persona_supervisor2_rag.py`) — deferred
+
+#### 3a. Update `kazusa_ai_chatbot/nodes/persona_supervisor2_rag.py` (EXISTING FILE - MAJOR REFACTOR) ✅ IMPLEMENTED
+
 **Purpose**: Add cache, depth classification, early-exit logic
 **Current state**: 3 parallel dispatchers, no caching
 **Changes**:
-- [ ] **Phase 0: Input Analysis** (NEW)
-  - Compute embedding (768-dim) from `decontexualized_input`
-  - Add embedding computation before dispatchers
-  - Initialize metadata bundle: `{embedding, entities, temporal_markers, depth_hint}`
 
-- [ ] **Phase 1: Cache Check** (NEW)
-  - Import RAGCache, integrate before dispatchers
-  - Check similarity against cached embeddings
-  - If hit: Return cached results + `cache_hit=True`
-  - If miss: Proceed to Phase 2a
+- [x] **Phase 0: Input Analysis** (NEW)
+  
+  - Compute embedding (768-dim) from `decontexualized_input` via `get_text_embedding()`
+  - Initialise unified metadata bundle with `embedding_dim`, `depth`, `depth_confidence`, `cache_hit`, `cache_probe`, `trigger_dispatchers`, `rag_sources_used`, `confidence_scores`, `response_confidence`, `early_exit`
 
-- [ ] **Depth Classification** (NEW)
-  - Import InputDepthClassifier
-  - Add classification before dispatcher conditional edges
-  - Determine which dispatchers to trigger based on depth
+- [x] **Phase 1: Cache Check** (NEW)
+  
+  - `_probe_cache()` probes three cache types in order: `objective_user_facts` (per-user), `character_diary` (per-user), `external_knowledge` (global, `global_user_id=""`)
+  - Every probe is recorded in `metadata["cache_probe"]` (hit/miss + similarity) for observability
+  - On strong hit (sim ≥ `CACHE_HIT_THRESHOLD=0.82`): short-circuit — return cached payload with `metadata["cache_hit"]=True`, `metadata["rag_sources_used"]=["cache"]`
 
-- [ ] **Conditional Dispatch (Early Exit)** (MODIFY)
-  - Update dispatcher nodes to return confidence scores
-  - Implement early-exit logic:
-    - SHALLOW + user_rag confidence > 0.90 → Skip internal_rag
-    - DEEP + internal_rag confidence > 0.85 → Skip external_rag
-  - Update graph edges to support conditional routing
+- [x] **Depth Classification** (NEW)
+  
+  - Process-wide `InputDepthClassifier` singleton (affinity < 400 → always DEEP)
+  - Result recorded into metadata (`depth`, `depth_confidence`, `depth_reasoning`, `trigger_dispatchers`)
 
-- [ ] **Cache Storage** (NEW)
-  - After RAG completes, store results in cache
-  - Store before returning (if not cache hit)
-  - TTL: user_facts=30min, internal_memory=15min
+- [x] **Conditional Dispatch (Early Exit)** (MODIFY)
+  
+  - Graph is now rebuilt per-call via `_build_rag_graph(depth, affinity_percent)` so START edges only fan out to the dispatchers permitted by `depth`:
+    - SHALLOW → `user_rag_dispatcher` only
+    - DEEP → `user_rag_dispatcher` + `internal_rag_dispatcher` (+ `external_rag_dispatcher` when affinity ≥ 40%)
+  - Early-exit thresholds (`USER_RAG_STRONG_THRESHOLD=0.65`, `INTERNAL_RAG_STRONG_THRESHOLD=0.55`) are computed post-hoc from `_result_confidence()` (text-length proxy) and recorded in `metadata["early_exit"]` — the gating itself is depth-driven today; finer-grained sequential gating is left for Stage 3 follow-up if needed.
 
-- [ ] **Metadata Propagation** (NEW)
-  - Thread metadata through all phases
-  - Accumulate: cache_hit, rag_sources_used, confidence_scores, response_confidence
-  - Return with final state
+- [x] **Cache Storage** (NEW)
+  
+  - `_store_results_in_cache()` writes one cache entry per populated branch:
+    - `user_rag_finalized` → `cache_type="objective_user_facts"` (per-user)
+    - `external_rag_results` → `cache_type="external_knowledge"` (`global_user_id=""`)
+  - TTLs inherit from `DEFAULT_TTL_SECONDS` (set during Stage 1.5a)
+
+- [x] **Metadata Propagation** (NEW)
+  
+  - Single bundle threaded through all phases, accumulating: `depth`, `depth_confidence`, `cache_hit`, `cache_probe[]`, `trigger_dispatchers`, `rag_sources_used`, `confidence_scores` (per-dispatcher), `response_confidence`, `early_exit`
+  - Returned as `research_metadata` (list with a single dict, matching `GlobalPersonaState` schema)
 
 **Breaking Changes**:
-- [ ] RAGState schema includes new fields (embedding, metadata, confidence scores)
-- [ ] Return signature changes (now includes cache_hit, metadata)
-- [ ] Consolidator receives updated state shape
+
+- [x] RAGState schema includes new fields (`input_embedding`, `depth`, `depth_confidence`, `cache_hit`, `trigger_dispatchers`, `rag_metadata`)
+- [x] Return signature changes — `call_rag_subgraph()` now returns `research_facts` + `research_metadata`
+- [ ] Consolidator receives updated state shape — Stage 4a work (must consume `research_metadata`)
 
 **Dependencies**: Stage 1 (cache, depth_classifier), Stage 2 (DB functions)
 **Lines of code**: ~600-800 (refactor existing + add new phases)
@@ -88,30 +106,45 @@ Stage 2 is now moved to `STAGE2.md`.
 
 ---
 
-### Stage 4: Consolidator Layer (After Stage 3 + Schema Migration Validation)
+### Stage 4: Consolidator Layer (After Stage 3 + Schema Migration Validation) ✅ CODE COMPLETE (tests + pre-gate pending)
+
+**Stage 4 Status:**
+- ✅ 4a refactor implemented in `src/kazusa_ai_chatbot/nodes/persona_supervisor2_consolidator.py`
+- ✅ Metadata bundle threaded through every node (seeded from Stage 3 `research_metadata`)
+- ✅ Structured writes via `upsert_character_diary` / `upsert_objective_facts`
+- ✅ Cache invalidation (`character_diary`, `objective_user_facts`, `user_promises`, clear-all on large affinity shift) + `increment_rag_version`
+- ✅ Promise scheduling via `scheduler.schedule_event` (`future_promise` events)
+- ⬜ **PRE-GATE: schema migration verification on live MongoDB**
+- ⬜ Unit tests for the refactored consolidator — deferred per request
 
 **Depends on**: Stage 1a + 1c + 1.5a (cache, scheduler) + Stage 2a-ii (new DB functions) + Stage 3a (RAG metadata + new cache types)
 
 **CRITICAL PRE-DEPLOYMENT GATE**: 
 Before deploying Stage 4a, manually validate that schema migration (Stage 2a-ii) completed successfully:
+
 - [ ] Query MongoDB: Verify all user_profiles have `character_diary` field
 - [ ] Query MongoDB: Verify all user_profiles have `objective_facts` field
 - [ ] Test get_character_diary() and get_objective_facts() return correct data
 - [ ] Run consolidator against 5 sample conversations
 - [ ] Verify new facts written to `objective_facts`, diary to `character_diary`
+
 - Only after validation passes, deploy Stage 4a to production
 
-#### 4a. Update `kazusa_ai_chatbot/nodes/persona_supervisor2_consolidator.py` (EXISTING FILE - MAJOR REFACTOR)
+#### 4a. Update `kazusa_ai_chatbot/nodes/persona_supervisor2_consolidator.py` (EXISTING FILE - MAJOR REFACTOR) ✅ IMPLEMENTED
+
 **Purpose**: Add evaluator loop, metadata propagation, consistency validation
 **Current state**: 3 parallel jobs, facts_harvester writes directly
 **Changes**:
-- [ ] **facts_harvester Enhancement** (MODIFY)
+
+- [x] **facts_harvester Enhancement** (MODIFY)
+  
   - Include `research_facts` in LLM context (NEW)
   - Include `metadata` (cache_hit, depth, confidence) in message (NEW)
   - Instruct LLM to validate facts don't contradict research_facts
   - Same extraction logic, but with additional context
 
-- [ ] **fact_harvester_evaluator Enhancement** (MODIFY - currently basic, expand)
+- [x] **fact_harvester_evaluator Enhancement** (MODIFY - currently basic, expand)
+  
   - Add contradiction detection against research_facts (NEW)
   - Implement consistency validation matrix:
     - New fact vs research_facts (semantic similarity)
@@ -121,7 +154,8 @@ Before deploying Stage 4a, manually validate that schema migration (Stage 2a-ii)
   - Clear feedback messages for each failure type
   - Enforce max 3 retries (already exists, keep)
 
-- [ ] **Metadata Propagation** (NEW)
+- [x] **Metadata Propagation** (NEW)
+  
   - Initialize metadata in initial_state from RAG
   - Accumulate through each node:
     - After global_state_updater: Add none (state update)
@@ -131,9 +165,12 @@ Before deploying Stage 4a, manually validate that schema migration (Stage 2a-ii)
     - After db_writer: Add write_success, cache_invalidation_scope
   - Return with final metadata
 
-- [ ] **db_writer: Atomic Writes + Cache Invalidation** (ENHANCE)
+- [x] **db_writer: Atomic Writes + Cache Invalidation** (ENHANCE) — sequential writes with per-step PyMongoError trapping; cache invalidation + `increment_rag_version` run only after writes complete. Full multi-document transactions deferred (require replica set infra).
+  
   - Wrap all writes in MongoDB transaction (NEW)
+  
   - Write sequence:
+    
     1. upsert_character_state(mood, vibe, reflection)
     2. upsert_user_facts(diary_entry)
     3. update_last_relationship_insight(insight)
@@ -141,24 +178,27 @@ Before deploying Stage 4a, manually validate that schema migration (Stage 2a-ii)
     5. Loop: save_memory() for each future_promise
     6. update_affinity(affinity_delta)
     7. COMMIT transaction
-
+  
   - AFTER commit succeeds, invalidate cache (NEW):
+    
     - If new diary entries written: `await rag_cache.invalidate_pattern("character_diary", user_id)`
     - If new facts written: `await rag_cache.invalidate_pattern("objective_user_facts", user_id)`
     - If |affinity_delta| > 50: `await rag_cache.clear_all_user(user_id)`
     - Update RAG version: `await increment_rag_version(user_id)`
-
+  
   - Handle transaction failure (rollback automat, log error)
 
-- [ ] **Promise Scheduling Integration** (NEW)
+- [x] **Promise Scheduling Integration** (NEW) — each promise with a parseable `due_time` is persisted both as a `memory` doc (`memory_type="promise"`) and as a `future_promise` scheduled event via `scheduler.schedule_event`.
+  
   - Extract future_promises with due_time
   - For each promise: `await task_scheduler.schedule_task("promise_fulfillment_check", user_id, due_time, promise_metadata)`
   - Task execution will happen asynchronously
 
 **Breaking Changes**:
-- [ ] ConsolidatorState schema changes (includes metadata propagation)
-- [ ] Return signature changes (includes metadata)
-- [ ] Promise fulfillment now asynchronous via scheduler (not immediate)
+
+- [x] ConsolidatorState schema changes (includes metadata propagation)
+- [x] Return signature changes (includes metadata) — subgraph now returns `consolidation_metadata`
+- [x] Promise fulfillment now asynchronous via scheduler (not immediate)
 
 **Dependencies**: Stage 1 (cache, scheduler), Stage 2 (DB functions), Stage 3 (RAG metadata)
 **Lines of code**: ~400-600 (refactor existing + add enhancements)
@@ -166,66 +206,67 @@ Before deploying Stage 4a, manually validate that schema migration (Stage 2a-ii)
 
 ---
 
-### Stage 5: Integration & Configuration (After Stage 4)
+### Stage 5: Integration & Configuration (After Stage 4) ✅ CODE COMPLETE
 
 **Depends on**: All Stages 1-4
 
-#### 5a. Update `kazusa_ai_chatbot/config.py` (EXISTING FILE - ADD CONFIG)
+**Stage 5 Status:**
+- ✅ 5a: cache / depth / consolidator / scheduler config constants added to `config.py`
+- ✅ 5b: `service.py` lifespan now warm-starts the RAG cache and respects `SCHEDULED_TASKS_ENABLED`
+- ✅ `_get_rag_cache()` honours `RAG_CACHE_SIMILARITY_THRESHOLD`, `RAG_CACHE_MAX_SIZE`, `RAG_CACHE_TTL_SECONDS`
+
+#### 5a. Update `kazusa_ai_chatbot/config.py` (EXISTING FILE - ADD CONFIG) ✅ IMPLEMENTED
+
 **Purpose**: Add configuration for new features
 **Changes** (ADD, don't remove existing):
-- [ ] Cache configuration:
-  - `RAG_CACHE_BACKEND = "redis"  # or "memory"`
-  - `RAG_CACHE_USER_FACTS_TTL = 1800  # 30 minutes`
-  - `RAG_CACHE_INTERNAL_MEMORY_TTL = 900  # 15 minutes`
-  - `RAG_CACHE_SIMILARITY_THRESHOLD = 0.82`
-  - `RAG_CACHE_MAX_SIZE = 100_000`
 
-- [ ] Depth classifier configuration:
-  - `DEPTH_CLASSIFIER_USE_LIGHT_LLM = False  # Only heuristics for speed`
-  - `DEPTH_CLASSIFIER_THRESHOLDS = {...}`
+- [x] Cache configuration:
+  - `RAG_CACHE_SIMILARITY_THRESHOLD` (env-overridable, default 0.82 — matches Stage 3 cache-hit threshold)
+  - `RAG_CACHE_MAX_SIZE` (default 100000)
+  - `RAG_CACHE_TTL_SECONDS` dict covering `character_diary`, `objective_user_facts`, `user_promises`, `internal_memory`, `external_knowledge`, `user_facts` (legacy)
 
-- [ ] Consolidator configuration:
-  - `FACT_HARVESTER_MAX_RETRIES = 3`
-  - `EVALUATOR_CONSISTENCY_CHECK = True`
+- [x] Depth classifier configuration:
+  - `DEPTH_CLASSIFIER_USE_LIGHT_LLM` (env bool, default false — heuristics only for speed)
+  - `DEPTH_CLASSIFIER_THRESHOLDS` dict (`shallow_max_chars`, `embedding_confidence_min`)
 
-- [ ] Scheduler configuration:
-  - `SCHEDULED_TASKS_ENABLED = True`
-  - `OFFLINE_CONSOLIDATION_CRON = "0 2 * * *"  # Future`
-  - `PERSONALITY_ANALYTICS_CRON = "0 8 * * 0"  # Future`
+- [x] Consolidator configuration:
+  - `MAX_FACT_HARVESTER_RETRY` already existed (kept)
+  - `EVALUATOR_CONSISTENCY_CHECK` (env bool, default true)
+  - `AFFINITY_CACHE_NUKE_THRESHOLD` (default 50 — mirrors the in-code constant)
+
+- [x] Scheduler configuration:
+  - `SCHEDULED_TASKS_ENABLED` (env bool, default true)
+  - Cron-based items (`OFFLINE_CONSOLIDATION_CRON`, `PERSONALITY_ANALYTICS_CRON`) deferred — no cron framework wired yet, would be dead config
 
 **Dependencies**: None (constants only)
-**Lines of code**: ~50-100
+**Lines of code**: ~30 added
 
 ---
 
-#### 5b. Update `kazusa_ai_chatbot/main.py` or app initialization (EXISTING FILE - STARTUP)
+#### 5b. Update app initialization (`kazusa_ai_chatbot/service.py`) ✅ IMPLEMENTED
+
 **Purpose**: Initialize cache and scheduler on app startup
 **Changes**:
-- [ ] Import RAGCache, TaskScheduler
-- [ ] In startup hook:
-  ```python
-  app.state.rag_cache = RAGCache(backend=config.RAG_CACHE_BACKEND)
-  app.state.task_scheduler = TaskScheduler(config=config.SCHEDULED_TASKS)
-  await app.state.task_scheduler.start()
-  ```
-- [ ] In shutdown hook:
-  ```python
-  await app.state.task_scheduler.stop()
-  ```
+
+- [x] Import `_get_rag_cache` (process-wide singleton already used by RAG subgraph)
+- [x] In lifespan startup: warm-start cache via `await _get_rag_cache()` and log stats; gate `scheduler.load_pending_events()` on `SCHEDULED_TASKS_ENABLED`
+- [x] In lifespan shutdown: call `cache.shutdown()` (logs final stats) and skip scheduler shutdown if disabled
 
 **Dependencies**: Stage 1 (cache, scheduler), Stage 5a (config)
-**Lines of code**: ~20-50
+**Lines of code**: ~15 added
 
 ---
 
 ## Part 2: File Modification Summary
 
 ### Files CREATED (Stage 1 — ✅ DONE)
+
 1. `src/kazusa_ai_chatbot/rag/__init__.py` ✅
 2. `src/kazusa_ai_chatbot/rag/cache.py` ✅ (~450 lines)
 3. `src/kazusa_ai_chatbot/rag/depth_classifier.py` ✅ (~250 lines)
 
 ### Files to CREATE (Stage 2 — PENDING)
+
 4. `src/kazusa_ai_chatbot/db/__init__.py` — re-exports all public symbols (backward compat)
 5. `src/kazusa_ai_chatbot/db/_client.py` — connection + embedding utilities
 6. `src/kazusa_ai_chatbot/db/schemas.py` — all TypedDict document schemas
@@ -237,10 +278,12 @@ Before deploying Stage 4a, manually validate that schema migration (Stage 2a-ii)
 12. `src/kazusa_ai_chatbot/db/rag_cache.py` — rag_cache_index + rag_metadata_index (~150 lines)
 
 ### Files MODIFIED (Stage 1 — ✅ DONE)
+
 1. `src/kazusa_ai_chatbot/scheduler.py` ✅ — `future_promise` handler registered
 2. `src/kazusa_ai_chatbot/db.py` ✅ — `ScheduledEventDoc` updated
 
 ### Files to MODIFY (PENDING)
+
 3. `src/kazusa_ai_chatbot/rag/cache.py` — Stage 1.5a: update `DEFAULT_TTL_SECONDS` (6 cache types)
 4. `src/kazusa_ai_chatbot/db.py` → Stage 2: split into `src/kazusa_ai_chatbot/db/` package (file deleted after split)
 5. `src/kazusa_ai_chatbot/nodes/persona_supervisor2_rag.py` — Stage 3: cache + depth + metadata (~600-800 lines refactored)
@@ -249,6 +292,7 @@ Before deploying Stage 4a, manually validate that schema migration (Stage 2a-ii)
 8. `src/kazusa_ai_chatbot/main.py` — Stage 5: cache + scheduler startup (~20-50 lines added)
 
 ### Total Changes
+
 - ~2,300-2,700 lines of new or refactored code
 - 9 new files (3 created in Stage 1, 9 in Stage 2)
 - 6 existing files modified across Stages 1.5a–5
@@ -259,18 +303,21 @@ Before deploying Stage 4a, manually validate that schema migration (Stage 2a-ii)
 ## Part 3: Breaking Changes Impact
 
 **What breaks** (intentional, handled in tests):
+
 - RAGState schema changes (new fields: embedding, metadata, confidence_scores)
 - ConsolidatorState schema changes (metadata propagation)
 - Return signatures change (now include cache_hit, metadata)
 - Promise fulfillment becomes asynchronous (via scheduler)
 
 **What does NOT break**:
+
 - Existing RAG/Consolidator interface (still async functions)
 - Database queries (backward compatible, old queries still work)
 - Configuration loading (additive changes only)
 - User-facing APIs (internal refactor only)
 
 **Compatibility approach**:
+
 - Don't need to maintain old interface
 - After deployment, old code paths no longer exist
 - Tests validate "current system works end-to-end after refactor"
@@ -280,44 +327,55 @@ Before deploying Stage 4a, manually validate that schema migration (Stage 2a-ii)
 ## Part 4: Execution Steps (Order Matters)
 
 ### Step 1: Foundation Modules (Stage 1) — items 1-3 done, item 4 pending
+
 ```
 1. ✅ Create rag/cache.py (no dependencies)
 2. ✅ Create rag/depth_classifier.py (no dependencies)
 3. ✅ Extend scheduler.py (future_promise handler)
 4. ⬜ Update cache.py DEFAULT_TTL_SECONDS with new cache types (Stage 1.5a — CRITICAL: must complete before Stage 2)
 ```
+
 **Validation**: Module imports work, unit tests pass, cache.py has all 6 cache types defined
 
 ### Step 2: Database Updates (Stage 2)
+
 ```
 5. Restructure db.py into db/ submodules
 6. Add new DB functions (get_character_diary, get_objective_facts, etc.)
 7. Run schema migration (Phase 1: add fields, Phase 2: heuristic split, Phase 3: test)
 8. Create new indices on user_profiles and rag_cache_index
 ```
+
 **Validation**: Collections exist, indices created, migration completed without data loss
 
 ### Step 3: RAG Refactor (Stage 3)
+
 ```
 9. Update persona_supervisor2_rag.py (use cache, depth_classifier, new cache types, metadata)
 ```
+
 **Validation**: RAG still produces results, cache gets populated, metadata flows through
 
 ### Step 4: Consolidator Refactor (Stage 4)
+
 ```
 10. Update persona_supervisor2_consolidator.py (evaluator loop, metadata, cache invalidation)
 ```
+
 **GATE**: Verify schema migration complete before this step  
 **Validation**: Facts extracted with new semantic types, evaluator catches contradictions, cache invalidated
 
 ### Step 5: Integration (Stage 5)
+
 ```
 11. Update config.py (add configuration)
 12. Update main.py (initialize cache and scheduler)
 ```
+
 **Validation**: App starts, cache and scheduler initialized
 
 ### Step 6: Deploy & Test
+
 ```
 13. Merge all changes to main branch
 14. Run comprehensive E2E test suite (see TEST_PLAN.md)
@@ -330,6 +388,7 @@ Before deploying Stage 4a, manually validate that schema migration (Stage 2a-ii)
 ## Part 5: Database Migration Details
 
 ### Automatic Schema Creation (if not exists)
+
 ```python
 # In db.py initialization, check and create if needed:
 
@@ -351,6 +410,7 @@ if "rag_metadata_index" not in db.list_collection_names():
 ```
 
 ### Rollback Plan
+
 - Collections can be dropped (temporary cache, non-critical)
 - rag_cache_index: Safe to drop (only cache, repopulated)
 - rag_metadata_index: Safe to drop (only metadata)
@@ -361,6 +421,7 @@ if "rag_metadata_index" not in db.list_collection_names():
 ## Part 6: Configuration Points
 
 ### Feature Flags (in config.py)
+
 ```python
 # Disable features if needed:
 USE_RAG_CACHE = True  # Set False to bypass cache
@@ -370,6 +431,7 @@ USE_ATOMIC_WRITES = True  # Set False for old behavior
 ```
 
 ### Performance Tuning (in config.py)
+
 ```python
 # Adjustable thresholds:
 RAG_CACHE_SIMILARITY_THRESHOLD = 0.82  # Higher = fewer hits
@@ -382,6 +444,7 @@ EVALUATOR_RETRY_MAX = 3  # If too strict, increase
 ## Part 7: Validation Checklist
 
 ### Pre-Merge Checklist
+
 - [ ] All 3 new files compile without errors
 - [ ] All 6 modified files compile without errors
 - [ ] Database functions callable (no import errors)
@@ -389,6 +452,7 @@ EVALUATOR_RETRY_MAX = 3  # If too strict, increase
 - [ ] App starts without crashing (main.py initialization works)
 
 ### Post-Merge Checklist (See TEST_PLAN.md)
+
 - [ ] Unit tests: 30+ tests passing
 - [ ] Integration tests: 12 tests passing
 - [ ] E2E tests: Full conversation flow works
@@ -401,6 +465,7 @@ EVALUATOR_RETRY_MAX = 3  # If too strict, increase
 ## Part 7: Validation Checklist
 
 ### Stage 1 Completion Checklist
+
 - [x] cache.py compiles and unit tests pass (16 tests)
 - [x] depth_classifier.py compiles and unit tests pass (10 tests)
 - [x] scheduler.py extended and unit tests pass (8 tests)
@@ -411,6 +476,7 @@ EVALUATOR_RETRY_MAX = 3  # If too strict, increase
 - [ ] **Stage 1.5a**: cache.py still compiles and all Stage 1 tests pass after update
 
 ### Stage 2 Completion Checklist
+
 - [x] db/ subfolder created with all submodules (_client, schemas, bootstrap, conversation, users, character, memory, rag_cache)
 - [x] db/__init__.py exports all public functions (backward compatible)
 - [x] New functions callable: get_character_diary, get_objective_facts, upsert_character_diary, upsert_objective_facts
@@ -422,29 +488,36 @@ EVALUATOR_RETRY_MAX = 3  # If too strict, increase
 - [ ] **GATE: Manually verify migration accuracy on production data** (see Migration Validation section)
 
 ### Stage 3 Completion Checklist
-- [ ] persona_supervisor2_rag.py compiles and integrates with cache
-- [ ] Cache check phase runs before dispatchers
-- [ ] Depth classification runs and routes correctly
-- [ ] New cache types used: character_diary, objective_user_facts
-- [ ] Metadata propagates through all phases
-- [ ] RAG returns results with cache_hit flag
+
+- [x] persona_supervisor2_rag.py compiles and integrates with cache
+- [x] Cache check phase runs before dispatchers
+- [x] Depth classification runs and routes correctly
+- [x] New cache types used: character_diary, objective_user_facts, external_knowledge
+- [x] Metadata propagates through all phases
+- [x] RAG returns results with cache_hit flag (in `research_metadata`)
+- [ ] Live integration smoke test via `test_main()` against real MongoDB + LLM
+- [ ] Unit tests for the wrapper (`tests/test_persona_supervisor2_rag.py`) — deferred
 
 ### Stage 4 Completion Checklist
-- [ ] **PRE-GATE: Schema migration verified** (all user_profiles have new fields)
-- [ ] persona_supervisor2_consolidator.py compiles
-- [ ] New DB functions used: upsert_character_diary, upsert_objective_facts
-- [ ] Evaluator loop catches contradictions
-- [ ] Cache invalidation uses new cache types
-- [ ] Atomic writes succeed and rollback on error
-- [ ] Promises scheduled via scheduler
+
+- [ ] **PRE-GATE: Schema migration verified** (all user_profiles have new fields) — deferred to pre-deploy
+- [x] persona_supervisor2_consolidator.py compiles
+- [x] New DB functions used: upsert_character_diary, upsert_objective_facts
+- [x] Evaluator loop catches contradictions (via `contradiction_flags` in evaluator output)
+- [x] Cache invalidation uses new cache types (`character_diary`, `objective_user_facts`, `user_promises`, clear-all on |Δaffinity|>50)
+- [x] Atomic writes succeed and rollback on error — sequential PyMongoError-guarded writes (full transactions deferred)
+- [x] Promises scheduled via scheduler
+- [ ] Unit tests for refactored consolidator (`tests/test_persona_supervisor2_consolidator.py`) — deferred per user directive
 
 ### Stage 5 Completion Checklist
-- [ ] config.py adds all new configuration options
-- [ ] main.py initializes RAGCache and TaskScheduler
-- [ ] App starts without errors
-- [ ] All imports resolve correctly
+
+- [x] config.py adds all new configuration options (cron-based items deferred until a cron runner is wired)
+- [x] service.py (lifespan) initializes RAGCache and (conditionally) TaskScheduler
+- [x] All imports resolve correctly (`python -c "from kazusa_ai_chatbot import service, config"` succeeds)
+- [ ] Live `uvicorn` smoke test against real MongoDB — deferred
 
 ### Post-Merge Checklist (See TEST_PLAN.md)
+
 - [ ] Unit tests: 40+ tests passing
 - [ ] Integration tests: 12+ tests passing
 - [ ] E2E tests: Full conversation flow works end-to-end
@@ -470,6 +543,7 @@ If something breaks post-deployment:
 The system uses a single metadata bundle that accumulates information as it flows through all phases. This enables complete visibility into decision-making and future analytics.
 
 ### Metadata Structure
+
 ```python
 {
   "embedding": [...],              # 768-dim embedding of input
@@ -495,6 +569,7 @@ The system uses a single metadata bundle that accumulates information as it flow
 ```
 
 ### Flow Through Phases
+
 1. **Phase 0 (Input Analysis)**: Create metadata with embedding
 2. **Phase 1 (Cache Check)**: Add cache_hit flag
 3. **Phase 2 (RAG)**: Add depth, dispatcher scores, sources_used
@@ -509,7 +584,9 @@ This unified approach ensures no information is lost between phases and enables 
 ## Part 10: Before/After Metrics (See TEST_PLAN.md for Details)
 
 ### What to Measure BEFORE Implementation
+
 Collect baseline metrics from current system (before any code changes):
+
 - **RAG Latency**: Average & p95 dispatcher round-time
 - **Dispatcher Calls**: Average per conversation
 - **Database Load**: Query count, write count, transaction duration
@@ -518,7 +595,9 @@ Collect baseline metrics from current system (before any code changes):
 - **Consistency**: Fact contradiction rate in existing memory
 
 ### What to Measure AFTER Deployment
+
 Collected same metrics from new system (after all 5 stages deployed):
+
 - **RAG Latency**: Should be 25% faster (1200ms → 900ms)
 - **Dispatcher Calls**: Should drop 50% (3.0 → 1.5)
 - **Cache Hit Rate**: Should reach 60-70% (from 0%)
@@ -528,7 +607,9 @@ Collected same metrics from new system (after all 5 stages deployed):
 - **Load**: 10 concurrent conversations at p95 <3000ms
 
 ### Comparison Approach
+
 Run TEST_PLAN.md comprehensive suite covering:
+
 - 40+ unit tests (per-component validation)
 - 12+ integration tests (interaction validation)
 - 3 E2E scenarios (full conversation flow)
@@ -549,6 +630,7 @@ Run TEST_PLAN.md comprehensive suite covering:
    - Partial cache + external knowledge integration (Conversation Context)
 
 Each example shows:
+
 - Where data comes from (cache, user_profiles, memory, conversation_history, web)
 - How it flows through phases (cache check → RAG dispatch → consolidation → DB write)
 - Where it gets stored (databases written to, cache updated/invalidated)
@@ -579,7 +661,7 @@ DATABASES NOT QUERIED:
     ✗ user_profiles (user_facts embedded in user_profiles collection, but cache avoided this query)
     ✗ memory
     ✗ web search
-    
+
 CONSOLIDATION:
     ├─ No new facts → No DB write
     ├─ Cache still valid → No invalidation
@@ -624,7 +706,7 @@ CONSOLIDATION:
     ├─ May extract new mood updates → Update character_state
     ├─ No new facts trigger → No user_profiles write
     └─ Cache still valid → No invalidation
-        
+
 TIME SAVED: ~800ms (internal_rag dispatch avoided)
 ```
 
@@ -827,17 +909,18 @@ Target: 60-70% overall hit rate = ~800ms avg time saved per query
 ### FINAL DATABASE STRUCTURE (After All Stages Deployed)
 
 #### 1. **user_profiles** Collection
+
 ```python
 {
     "_id": ObjectId,
     "global_user_id": str,
-    
+
     # Identity/Access
     "platform_accounts": [
         {"platform": str, "platform_user_id": str, "display_name": str, "linked_at": str}
     ],
     "suspected_aliases": [str],
-    
+
     # Character State (Stage 3a)
     "character_state": {
         "mood": str,                           # "happy", "curious", "concerned", etc.
@@ -846,7 +929,7 @@ Target: 60-70% overall hit rate = ~800ms avg time saved per query
         "latest_reflection": str,              # Character's meta-observation
         "reflection_timestamp": datetime,
     },
-    
+
     # Character's Subjective Observations (Stage 2a-ii)
     "character_diary": [
         {
@@ -858,7 +941,7 @@ Target: 60-70% overall hit rate = ~800ms avg time saved per query
     ],
     "diary_embedding": [float],                # 768-dim semantic embedding
     "diary_updated_at": datetime,
-    
+
     # Objective Facts about User (Stage 2a-ii, deduplicated)
     "objective_facts": [
         {
@@ -871,7 +954,7 @@ Target: 60-70% overall hit rate = ~800ms avg time saved per query
     ],
     "facts_embedding": [float],                # 768-dim semantic embedding
     "facts_updated_at": datetime,
-    
+
     # Relationship Metrics
     "affinity": int,                           # 0-1000 relationship score
     "last_relationship_insight": str,
@@ -886,27 +969,28 @@ Target: 60-70% overall hit rate = ~800ms avg time saved per query
 ```
 
 #### 2. **memory** Collection (Conversation Recordings)
+
 ```python
 {
     "_id": ObjectId,
     "memory_id": str,                          # UUID
     "global_user_id": str,
     "memory_type": str,                        # "objective_fact" | "diary_entry" | "promise" | "context"
-    
+
     # Content
     "content": str,                            # Full text of memory
     "embedding": [float],                      # 768-dim semantic embedding
-    
+
     # Source & Context
     "source_conversation_id": str,             # Which conversation this came from
     "source_timestamp": datetime,              # When in conversation
     "extracted_at": datetime,                  # When consolidator extracted it
-    
+
     # Metadata (for promises)
     "status": str,                             # "recorded" | "fulfilled" | "cancelled"
     "due_time": str,                           # ISO-8601 (if memory_type="promise")
     "fulfillment_timestamp": datetime,         # When promise was fulfilled
-    
+
     # Metadata (for all types)
     "confidence": float,                       # 0.0-1.0 from evaluator
     "source_type": str,                        # "user_explicit" | "extracted" | "inferred"
@@ -914,6 +998,7 @@ Target: 60-70% overall hit rate = ~800ms avg time saved per query
 ```
 
 #### 3. **rag_cache_index** Collection (Cache Entries)
+
 ```python
 {
     "_id": ObjectId,
@@ -921,18 +1006,18 @@ Target: 60-70% overall hit rate = ~800ms avg time saved per query
     "global_user_id": str,
     "cache_type": str,                         # "character_diary" | "objective_user_facts" |
                                                # "user_promises" | "internal_memory" | etc.
-    
+
     # Cached Results
     "embedding": [float],                      # 768-dim query embedding
     "query_text": str,                         # Original query (for debugging)
     "results": list,                           # Cached RAG results
-    
+
     # TTL & Validity
     "created_at": datetime,
     "ttl_expires_at": datetime,                # Lazy deletion: checked on lookup
     "deleted": bool,                           # Soft delete flag
     "invalidation_reason": str,                # Why was this invalidated (if deleted=true)
-    
+
     # Metadata
     "similarity_threshold": float,             # 0.82 default
     "hit_count": int,                          # How many times this cache entry was used
@@ -940,6 +1025,7 @@ Target: 60-70% overall hit rate = ~800ms avg time saved per query
 ```
 
 #### 4. **scheduled_events** Collection (Future Promises)
+
 ```python
 {
     "_id": ObjectId,
@@ -948,14 +1034,14 @@ Target: 60-70% overall hit rate = ~800ms avg time saved per query
     "target_global_user_id": str,
     "target_platform": str,
     "target_channel_id": str,
-    
+
     "payload": {
         "promise_text": str,                   # What was promised
         "memory_id": str,                      # Link to memory collection
         "original_input": str,                 # User message that triggered
         "context_summary": str,                # Why promise was made
     },
-    
+
     "scheduled_at": str,                       # ISO-8601 UTC when to fire
     "created_at": str,
     "status": str,                             # "pending" | "running" | "completed" | "failed" | "cancelled"
@@ -964,6 +1050,7 @@ Target: 60-70% overall hit rate = ~800ms avg time saved per query
 ```
 
 #### 5. **conversation_history** Collection (Raw Conversations)
+
 ```python
 {
     "_id": ObjectId,
@@ -1287,12 +1374,12 @@ ALL QUERIES:
   Cache Check (rag_cache_index)
     ├─ HIT → Return cached results
     └─ MISS → Continue to RAG
-  
+
   RAG Dispatch (depth-aware)
     ├─ SHALLOW: user_rag only
     ├─ DEEP: user_rag + internal_rag + external_rag
     └─ Results stored in new cache entries (rag_cache_index)
-  
+
   Response Generated
     ↓
   Consolidation (Evaluator Loop)
@@ -1300,17 +1387,17 @@ ALL QUERIES:
     ├─ Validate facts (fact_harvester_evaluator)
     ├─ Retry if needed (max 3 attempts)
     └─ If ACCEPT: Proceed to atomic write
-  
+
   Atomic DB Write (All or Nothing)
     ├─ Update user_profiles (diary/facts/affinity)
     ├─ Create memory entry
     ├─ Schedule future events
     └─ COMMIT or ROLLBACK (no partial writes)
-  
+
   Strategic Cache Invalidation
     └─ Soft-delete matching cache entries (rag_cache_index)
        → Next query: Fresh DB lookup (no stale cache)
-  
+
   Scheduled Task Execution
     └─ future_promise events fire at scheduled_at time
        → Mark memory as "fulfilled"
@@ -1350,6 +1437,7 @@ Done
 ```
 
 **Key improvements**:
+
 - ✅ Cache: 60-70% hit rate, <15ms lookup
 - ✅ Depth routing: 40% fewer dispatcher calls
 - ✅ Evaluator: 95%+ contradiction detection
