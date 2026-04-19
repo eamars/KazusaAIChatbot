@@ -73,6 +73,38 @@ class ObjectiveFactEntry(TypedDict, total=False):
     confidence: float   # 0.0–1.0 confidence level
 
 
+class BoundaryProfileDoc(TypedDict, total=False):
+    """Character's psychological boundary parameters.
+    
+    Controls how the character handles relationships, control, and emotional vulnerability.
+    """
+    self_integrity: float              # 0.0–1.0: how firmly character maintains their sense of self
+    control_sensitivity: float         # 0.0–1.0: how strongly character notices/reacts to control
+    compliance_strategy: str           # "resist" | "evade" | "comply"
+    relational_override: float         # 0.0–1.0: how much relationship importance overrides boundaries
+    control_intimacy_misread: float    # 0.0–1.0: risk of mistaking control for affection
+    boundary_recovery: str             # "rebound" | "delayed_rebound" | "decay" | "detach"
+    authority_skepticism: float        # 0.0–1.0: distrust of authority & power structures
+
+
+class LinguisticTextureProfileDoc(TypedDict, total=False):
+    """Character's linguistic and speech pattern parameters.
+    
+    Controls how the character sounds: verbal patterns, hesitations, assertiveness, emotional presence.
+    All parameters are floats from 0.0–1.0.
+    """
+    fragmentation: float               # 0.0–1.0: choppy vs fluent speech
+    hesitation_density: float          # 0.0–1.0: filler words and pauses
+    counter_questioning: float         # 0.0–1.0: responds with questions back
+    softener_density: float            # 0.0–1.0: hedging language like "maybe", "I think"
+    formalism_avoidance: float         # 0.0–1.0: casual vs polite language
+    abstraction_reframing: float       # 0.0–1.0: intellectualizing vs concrete speech
+    direct_assertion: float            # 0.0–1.0: confident statements vs hedging
+    emotional_leakage: float           # 0.0–1.0: emotion visible in speech
+    rhythmic_bounce: float             # 0.0–1.0: playful vs flat cadence
+    self_deprecation: float            # 0.0–1.0: self-critical humor and language
+
+
 class UserProfileDoc(TypedDict, total=False):
     """Long-term memory about a single user in the ``user_profiles`` collection.
 
@@ -124,7 +156,8 @@ class CharacterProfileDoc(TypedDict, total=False):
     speech_patterns: str
     backstory: str
     personality_brief: dict
-    boundary_profile: dict
+    boundary_profile: BoundaryProfileDoc
+    linguistic_texture_profile: LinguisticTextureProfileDoc
 
     # ── runtime state ─────────────────────────────────────────────
     mood: str               # e.g. "melancholic", "playful", "irritated"

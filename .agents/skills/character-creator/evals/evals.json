@@ -1,0 +1,380 @@
+{
+  "testScenarios": [
+    {
+      "id": "scenario_1_coherence_check",
+      "title": "Psychological Coherence Test — Contradictory Parameters",
+      "description": "Validate that boundary_profile parameters tell a coherent psychological story. A character should not have contradictory traits.",
+      "testData": {
+        "characterName": "Test Character A",
+        "profile": {
+          "self_integrity": 0.9,
+          "control_sensitivity": 0.7,
+          "compliance_strategy": "comply",
+          "relational_override": 0.2,
+          "boundary_recovery": "rebound"
+        }
+      },
+      "assertions": [
+        {
+          "name": "High self_integrity contradicts comply strategy",
+          "rule": "If self_integrity > 0.7 AND compliance_strategy == 'comply', raise contradiction",
+          "expected": "CONTRADICTION_DETECTED",
+          "rationale": "High self_integrity means character preserves themselves; 'comply' means they give in. These contradict unless character has low self_integrity (0.3-0.5) or different compliance strategy."
+        },
+        {
+          "name": "Low relational_override + rebound recovery is consistent",
+          "rule": "If relational_override < 0.3 AND boundary_recovery == 'rebound', this is coherent",
+          "expected": "COHERENT",
+          "rationale": "Character who won't sacrifice boundaries for relationships AND responds quickly to violations = consistent pattern (boundary keeper)"
+        }
+      ],
+      "tags": ["coherence", "validation", "boundary_profile"]
+    },
+    {
+      "id": "scenario_2_linguistic_distinctiveness",
+      "title": "Linguistic Texture Distinctiveness Test",
+      "description": "Validate that a character has distinctive linguistic traits, not all parameters at 0.5 (neutral).",
+      "testData": {
+        "characterName": "Test Character B — All Neutral",
+        "linguisticProfile": {
+          "fragmentation": 0.5,
+          "hesitation_density": 0.5,
+          "counter_questioning": 0.5,
+          "softener_density": 0.5,
+          "formalism_avoidance": 0.5,
+          "abstraction_reframing": 0.5,
+          "direct_assertion": 0.5,
+          "emotional_leakage": 0.5,
+          "rhythmic_bounce": 0.5,
+          "self_deprecation": 0.5
+        }
+      },
+      "assertions": [
+        {
+          "name": "Count traits at extreme ranges (0.0-0.3 or 0.7-1.0)",
+          "rule": "Number of HIGH (0.7+) or LOW (0.0-0.3) traits should be >= 2",
+          "expected": "0",
+          "severity": "WARNING",
+          "rationale": "All traits at 0.5 means character sounds generic. Every character should have 2-3 distinctively high or low traits to sound unique."
+        }
+      ],
+      "tags": ["linguistic", "distinctiveness"]
+    },
+    {
+      "id": "scenario_3_kazusa_reference",
+      "title": "Kazusa Reference Profile Validation",
+      "description": "Validate the Kazusa character profile against known correct values.",
+      "testData": {
+        "characterName": "杏山千纱 (Kyōyama Kazusa)",
+        "boundaryProfile": {
+          "self_integrity": 0.5,
+          "control_sensitivity": 0.8,
+          "compliance_strategy": "comply",
+          "relational_override": 0.5,
+          "control_intimacy_misread": 0.7,
+          "boundary_recovery": "delayed_rebound",
+          "authority_skepticism": 0.6
+        },
+        "linguisticProfile": {
+          "emotional_leakage": 0.5,
+          "hesitation_density": 0.5,
+          "counter_questioning": 0.5,
+          "softener_density": 0.5,
+          "formalism_avoidance": 0.5,
+          "abstraction_reframing": 0.5,
+          "direct_assertion": 0.5,
+          "rhythmic_bounce": 0.5,
+          "self_deprecation": 0.5,
+          "fragmentation": 0.5
+        }
+      },
+      "assertions": [
+        {
+          "name": "Kazusa control_sensitivity is high (former delinquent, sensitive to being managed)",
+          "rule": "control_sensitivity >= 0.75",
+          "expected": 0.8,
+          "actual": 0.8,
+          "status": "PASS"
+        },
+        {
+          "name": "Kazusa compliance_strategy is 'comply' (goes along for normalcy, processes later)",
+          "rule": "compliance_strategy == 'comply'",
+          "expected": "comply",
+          "actual": "comply",
+          "status": "PASS"
+        },
+        {
+          "name": "Kazusa boundary_recovery is 'delayed_rebound' (tolerates violations, then suddenly cold)",
+          "rule": "boundary_recovery == 'delayed_rebound'",
+          "expected": "delayed_rebound",
+          "actual": "delayed_rebound",
+          "status": "PASS"
+        },
+        {
+          "name": "Kazusa control_intimacy_misread is moderate-high (vulnerable in relationships)",
+          "rule": "control_intimacy_misread >= 0.65",
+          "expected": 0.7,
+          "actual": 0.7,
+          "status": "PASS"
+        },
+        {
+          "name": "Kazusa has psychological coherence",
+          "rule": "All boundary parameters form coherent pattern",
+          "description": "High control_sensitivity (0.8) + comply strategy = she tolerates control initially. Moderate self_integrity (0.5) = adaptable but not erasable. Delayed_rebound + moderate control_intimacy_misread = vulnerable in relationships but eventually resistant.",
+          "status": "PASS",
+          "notes": "Character arc: compliant rebel who tracks violations, vulnerable to intimacy confusion, but maintains resilient core."
+        }
+      ],
+      "tags": ["reference", "validation", "kazusa"]
+    },
+    {
+      "id": "scenario_4_enum_validation",
+      "title": "Enum Value Validation",
+      "description": "Validate that enum parameters use only valid values.",
+      "testData": {
+        "characterName": "Test Character C",
+        "boundaryProfile": {
+          "compliance_strategy": "ignore",
+          "boundary_recovery": "fast"
+        }
+      },
+      "assertions": [
+        {
+          "name": "compliance_strategy must be one of: 'resist', 'evade', 'comply'",
+          "rule": "compliance_strategy IN ['resist', 'evade', 'comply']",
+          "testValue": "ignore",
+          "expected": "INVALID_ENUM",
+          "status": "FAIL",
+          "fixSuggestion": "Change 'ignore' to 'evade' or 'comply'"
+        },
+        {
+          "name": "boundary_recovery must be one of: 'rebound', 'delayed_rebound', 'decay', 'detach'",
+          "rule": "boundary_recovery IN ['rebound', 'delayed_rebound', 'decay', 'detach']",
+          "testValue": "fast",
+          "expected": "INVALID_ENUM",
+          "status": "FAIL",
+          "fixSuggestion": "Change 'fast' to 'rebound'"
+        }
+      ],
+      "tags": ["validation", "enum"]
+    },
+    {
+      "id": "scenario_5_boundary_float_ranges",
+      "title": "Float Range Validation — Boundary Profile",
+      "description": "Validate that all float parameters in boundary_profile are within 0.0-1.0.",
+      "testData": {
+        "characterName": "Test Character D",
+        "boundaryProfile": {
+          "self_integrity": 1.5,
+          "control_sensitivity": -0.1,
+          "relational_override": 0.5,
+          "control_intimacy_misread": 0.7,
+          "authority_skepticism": 0.8
+        }
+      },
+      "assertions": [
+        {
+          "name": "self_integrity out of range (1.5 > 1.0)",
+          "rule": "0.0 <= self_integrity <= 1.0",
+          "testValue": 1.5,
+          "expected": "OUT_OF_RANGE",
+          "status": "FAIL",
+          "fixSuggestion": "Reduce to 1.0 or lower if character is less than absolute"
+        },
+        {
+          "name": "control_sensitivity out of range (-0.1 < 0.0)",
+          "rule": "0.0 <= control_sensitivity <= 1.0",
+          "testValue": -0.1,
+          "expected": "OUT_OF_RANGE",
+          "status": "FAIL",
+          "fixSuggestion": "Increase to 0.0 or higher"
+        }
+      ],
+      "tags": ["validation", "float_ranges", "boundary_profile"]
+    },
+    {
+      "id": "scenario_6_linguistic_float_ranges",
+      "title": "Float Range Validation — Linguistic Profile",
+      "description": "Validate that all float parameters in linguistic_texture_profile are within 0.0-1.0.",
+      "testData": {
+        "characterName": "Test Character E",
+        "linguisticProfile": {
+          "fragmentation": 0.5,
+          "hesitation_density": 2.0,
+          "counter_questioning": 0.5,
+          "softener_density": 0.5,
+          "formalism_avoidance": 0.5,
+          "abstraction_reframing": 0.5,
+          "direct_assertion": 0.5,
+          "emotional_leakage": 0.5,
+          "rhythmic_bounce": 0.5,
+          "self_deprecation": -0.5
+        }
+      },
+      "assertions": [
+        {
+          "name": "hesitation_density out of range (2.0 > 1.0)",
+          "rule": "0.0 <= hesitation_density <= 1.0",
+          "testValue": 2.0,
+          "expected": "OUT_OF_RANGE",
+          "status": "FAIL"
+        },
+        {
+          "name": "self_deprecation out of range (-0.5 < 0.0)",
+          "rule": "0.0 <= self_deprecation <= 1.0",
+          "testValue": -0.5,
+          "expected": "OUT_OF_RANGE",
+          "status": "FAIL"
+        }
+      ],
+      "tags": ["validation", "float_ranges", "linguistic_profile"]
+    },
+    {
+      "id": "scenario_7_character_completeness",
+      "title": "Character Profile Completeness Check",
+      "description": "Validate that all required fields are present in a character profile.",
+      "testData": {
+        "characterName": "Test Character F — Incomplete",
+        "profile": {
+          "name": "John Doe",
+          "age": 20,
+          "personality_brief": {
+            "mbti": "ENFP"
+          }
+        },
+        "missingFields": [
+          "description",
+          "gender",
+          "birthday",
+          "backstory",
+          "personality_brief.logic",
+          "personality_brief.tempo",
+          "personality_brief.defense",
+          "personality_brief.quirks",
+          "personality_brief.taboos",
+          "boundary_profile (entire section)",
+          "linguistic_texture_profile (entire section)"
+        ]
+      },
+      "assertions": [
+        {
+          "name": "Required demographics present",
+          "rule": "name, age, gender, birthday, description, backstory all present",
+          "expected": "All present",
+          "actual": "Missing: description, gender, birthday, backstory",
+          "status": "FAIL",
+          "severity": "CRITICAL"
+        },
+        {
+          "name": "personality_brief complete",
+          "rule": "personality_brief has all 5 fields: mbti, logic, tempo, defense, quirks, taboos",
+          "expected": "All 5 fields",
+          "actual": "Only mbti present",
+          "status": "FAIL",
+          "severity": "CRITICAL"
+        },
+        {
+          "name": "boundary_profile complete",
+          "rule": "All 7 fields: self_integrity, control_sensitivity, compliance_strategy, relational_override, control_intimacy_misread, boundary_recovery, authority_skepticism",
+          "expected": "All 7 fields",
+          "actual": "Section missing",
+          "status": "FAIL",
+          "severity": "CRITICAL"
+        },
+        {
+          "name": "linguistic_texture_profile complete",
+          "rule": "All 10 fields present",
+          "expected": "All 10 fields",
+          "actual": "Section missing",
+          "status": "FAIL",
+          "severity": "CRITICAL"
+        }
+      ],
+      "tags": ["completeness", "validation"]
+    },
+    {
+      "id": "scenario_8_pattern_matching_resist_type",
+      "title": "Character Type Test — The 'Resistant Boundary Keeper'",
+      "description": "Create and validate a character with 'resist' compliance strategy. Validate that all parameters cohere with this archetype.",
+      "testData": {
+        "characterName": "Sample Resistant Character",
+        "boundaryProfile": {
+          "self_integrity": 0.85,
+          "control_sensitivity": 0.8,
+          "compliance_strategy": "resist",
+          "relational_override": 0.2,
+          "control_intimacy_misread": 0.2,
+          "boundary_recovery": "rebound",
+          "authority_skepticism": 0.85
+        }
+      },
+      "assertions": [
+        {
+          "name": "High self_integrity matches resist strategy",
+          "rule": "self_integrity >= 0.75 AND compliance_strategy == 'resist'",
+          "actual": "COHERENT",
+          "status": "PASS"
+        },
+        {
+          "name": "Low relational_override matches resist strategy",
+          "rule": "relational_override < 0.4 AND compliance_strategy == 'resist'",
+          "actual": "COHERENT",
+          "status": "PASS",
+          "note": "Character won't compromise boundaries for relationships"
+        },
+        {
+          "name": "Immediate rebound recovery matches resist strategy",
+          "rule": "boundary_recovery == 'rebound' AND compliance_strategy == 'resist'",
+          "actual": "COHERENT",
+          "status": "PASS",
+          "note": "Quick backlash when boundaries crossed"
+        },
+        {
+          "name": "Low control_intimacy_misread matches resist strategy",
+          "rule": "control_intimacy_misread < 0.4 AND compliance_strategy == 'resist'",
+          "actual": "COHERENT",
+          "status": "PASS",
+          "note": "Clearly distinguishes control from intimacy; won't be confused"
+        },
+        {
+          "name": "High authority_skepticism matches resist strategy",
+          "rule": "authority_skepticism >= 0.75 AND compliance_strategy == 'resist'",
+          "actual": "COHERENT",
+          "status": "PASS",
+          "note": "Reflexively opposes authority"
+        },
+        {
+          "name": "Character archetype identified",
+          "archetype": "Resistant Boundary Keeper",
+          "characteristics": "High self-integrity, rejects control, won't compromise for relationships, quick to resist authority",
+          "status": "PASS"
+        }
+      ],
+      "tags": ["archetype", "validation", "resistant_type"]
+    }
+  ],
+  "runTests": {
+    "description": "To run these tests, create a character profile and validate against each scenario. Use the assertions to check for coherence and correctness.",
+    "procedure": [
+      "1. Extract character information from source material (wiki, game, novel, etc.)",
+      "2. Map qualitative traits to quantitative parameters",
+      "3. Run each test scenario against your character",
+      "4. Address any FAIL assertions before finalizing",
+      "5. Verify PASS on coherence and completeness tests"
+    ]
+  },
+  "metadata": {
+    "version": "1.0",
+    "createdDate": "2026-04-19",
+    "skillName": "character-creator",
+    "testCategories": [
+      "coherence",
+      "validation",
+      "enum",
+      "float_ranges",
+      "completeness",
+      "archetype",
+      "reference"
+    ]
+  }
+}
