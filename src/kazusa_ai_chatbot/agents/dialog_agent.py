@@ -70,12 +70,6 @@ class DialogAgentState(TypedDict):
 _DIALOG_GENERATOR_PROMPT = """\
 你现在是角色 `{character_name}` 的 **表达执行官**。你接收来自`linguistic_directives`的修辞指令和`contextual_directives`的社交参数，将它们转化为自然的聊天文本。
 
-# ⚠️ 最高优先级规则：指令优先于对话历史
-**`content_anchors` 定义你本次回复的核心话题，此规则凌驾于所有其他输入之上。**
-- `chat_history` 末尾的消息仅提供**语气参考**和**情绪底色**，不决定你回复的话题。
-- 若 `chat_history` 末尾消息的话题与 `content_anchors` 不一致，**必须以 `content_anchors` 为准**。
-- 示例：若 `content_anchors` 是关于”称呼”的回应，但 `chat_history` 末尾在聊”好感度”，你的回复话题仍然是”称呼”，用”好感度”话题的情绪氛围作为语气底色即可。
-
 # 核心任务
 - **纯粹表达**：你是一个**纯文字**交互接口，只负责”说话”。你看不见角色的身体，也感觉不到物理反应。
 - **去中介化**：严禁通过台词评论对话本身或解释自己的情绪，必须直接通过话术展现性格。
@@ -139,7 +133,7 @@ _DIALOG_GENERATOR_PROMPT = """\
         "relational_dynamic": "string",
         "expression_willingness": "string",
     }},
-    "chat_history": list,
+    "tone_history": "已完成的历史轮次（至上一条 assistant 回复为止），仅供语气节奏参考",
     "user_name": "string",
     "research_facts": {{
         "user_rag_finalized": "第三人称描述的与用户相关记忆",
@@ -171,11 +165,18 @@ async def dialog_generator(state: DialogAgentState) -> DialogAgentState:
 
     affinity_block = build_affinity_block(state["user_profile"].get("affinity", AFFINITY_DEFAULT))
 
+    history = state["chat_history"]
+    last_assistant_idx = next(
+        (i for i in range(len(history) - 1, -1, -1) if history[i].get("role") == "assistant"),
+        -1
+    )
+    tone_history = history[: last_assistant_idx + 1] if last_assistant_idx >= 0 else []
+
     msg = {
         "internal_monologue": state["internal_monologue"],
         "linguistic_directives": state["action_directives"]["linguistic_directives"],
         "contextual_directives": state["action_directives"]["contextual_directives"],
-        "chat_history": state["chat_history"],
+        "tone_history": tone_history,
         "user_name": state["user_name"],
         "research_facts": state["research_facts"],
     }
@@ -250,7 +251,6 @@ _DIALOG_EVALUATOR_PROMPT = """\
     * `final_dialog` 的核心主题必须与 `content_anchors` 中的 `[FACT]` 或 `[ANSWER]` 对齐。
     * 若回复的核心话题与 content_anchors 定义的话题完全不同（如 content_anchors 关于"称呼/喊我"，但回复只说"好感度"），必须驳回，无论语气多么符合角色。
     * 判断方式：提取 `final_dialog` 的核心词，与 `content_anchors` 的 `[FACT]`/`[ANSWER]` 中的核心实体比对；若零重叠，判定为话题偏离。
-    * **chat_history 泄漏检测**：若 `last_user_message` 的话题与 `content_anchors` 不同，且 `final_dialog` 明显在直接回应 `last_user_message` 的关键词（例如直接重复或直接针对该词表态），则判定为话题偏离，必须驳回。
 * **逻辑与事实违背**：
     * 必须执行 `linguistic_directives` 中的 `[DECISION]` 立场。
     * 必须提及 `content_anchors` 中的核心 `[FACT]`（允许自然、模糊地织入）。
