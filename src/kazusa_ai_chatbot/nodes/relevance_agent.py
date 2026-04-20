@@ -44,8 +44,8 @@ _RELEVANCE_SYSTEM_PROMPT = """\
 ## A. 必须回复 (Should Respond: true)
 1. **直接召唤**：消息包含你的 ID 或根据语义明确指向你的名字/昵称。
    - **注意**：如果消息中使用了 `@` 或 `reply`（呈现为 `<@...>`），你必须检查其引用的目标是否真的是你本人的平台 ID（`<@{platform_bot_id}>`）。
-   - 如果消息指向的是**其他人**（例如：`<@其他人的ID>`），即使提到你，这属于“与他人交谈”，绝不是在召唤你！
-   - 注意：即便在关系恶劣（如 Hostile）时，也要根据该等级的指令（如“冷嘲热讽”）进行回复。*
+   - 如果消息指向的是**其他人**（例如：`<@其他人的ID>`），即使提到你，这属于”与他人交谈”，绝不是在召唤你！
+   - 注意：即便在关系恶劣（如 Hostile）时，也要根据该等级的指令（如”冷嘲热讽”）进行回复。*
 2. **对话延续**：你是最后一个发言者，且 `{user_name}` 正在回应你。
 3. **主观倾向触发**：
    - 如果关系属于 `Friendly` 以上：即便没有直接提问，只要话题涉及 `{user_name}` 的 `facts` 或符合你的 `mood`，也应主动参与。
@@ -72,14 +72,27 @@ _RELEVANCE_SYSTEM_PROMPT = """\
     - **氛围感发言**: 你只是对频道整体氛围发表感慨，不针对特定某个人。
     - **紧随其后**: 用户的消息紧跟在你上一条消息之后，中间没有任何人插话。
 
+# 输出规则
+
+## user_topic 生成规则
+在写入 `user_topic` 前，必须先检查消息正文的语法人称，再按以下逻辑分类：
+
+- **情况 A — 直接对{character_name}说**：正文使用第二人称"你"指向{character_name}，或直接命令/质问{character_name}本人。
+  - 示例："你真是个怪叔叔" / "你在搞什么鬼"
+  - 写法：描述{character_name}作为直接受话人所承受的意图。
+
+- **情况 B — 向群内其他人谈论{character_name}**：正文使用第三人称"他"/"她"指代{character_name}，且包含面向他人的命令句（如"不要"/"别"/"小心"）警告他人注意{character_name}的行为；此时{character_name}是话题对象而非受话人。
+  - 示例："他是怪叔叔，不要跟着他的圈套走"（reply/@{character_name} 仅提供线程上下文）
+  - 写法：明确说明实际听众为其他群员，以及{character_name}在消息中的角色（被讨论的对象）。
+
 # 输出格式
 请务必返回合法的 JSON 字符串，包含以下字段：
 {{
-    "should_respond": <boolean: 你是否应该回应此消息>,
-    "reason_to_respond": "<简短解释为什么回应或不回应此消息>",
-    "use_reply_feature": <boolean: 你是否应该使用回复功能>,
-    "channel_topic": "<包括所有用户参与的宏观话题>",
-    "user_topic": "<当前用户的具体意图和细分话题>"
+    "should_respond": boolean,
+    "reason_to_respond": string,
+    "use_reply_feature": boolean,
+    "channel_topic": string,
+    "user_topic": string
 }}
 """
 
@@ -105,7 +118,7 @@ _RELEVANCE_SYSTEM_NOISY_PROMPT = """\
 
 ## A. 必须回复 (Should Respond: true)
 1. **明确直接召唤**：消息明确且**仅**包含你的 ID、名字或昵称（如：`{bot_name}` 或 `@{platform_bot_id}`）。
-   - **注意**：如果消息中使用了 `@` 或 `reply`（呈现为 `<@...>`），你必须检查其引用的目标是否真的是你本人的平台 ID（`<@{platform_bot_id}>`）。如果消息指向的是**其他人**，即使提到你的名字，这也属于“与他人交谈”，绝不是在召唤你！
+   - **注意**：如果消息中使用了 `@` 或 `reply`（呈现为 `<@...>`），你必须检查其引用的目标是否真的是你本人的平台 ID（`<@{platform_bot_id}>`）。如果消息指向的是**其他人**，即使提到你的名字，这也属于”与他人交谈”，绝不是在召唤你！
 2. **极其明确的对话延续**：通过分析【历史记录】，你是最后一个被回复的发言者，且 `{user_name}` 当前的话题与你上一条消息紧密相连，明显是在等你的回应。
 
 ## B. 拒绝回复 (Should Respond: false) [优先判定]
@@ -118,14 +131,27 @@ _RELEVANCE_SYSTEM_NOISY_PROMPT = """\
 **当前处于群聊环境，为了避免消息错乱并明确回复对象：**
 - 你**必须**使用回复功能。因此 `use_reply_feature` 必须始终设置为 `true`。
 
+# 输出规则
+
+## user_topic 生成规则
+在写入 `user_topic` 前，必须先检查消息正文的语法人称，再按以下逻辑分类：
+
+- **情况 A — 直接对{character_name}说**：正文使用第二人称"你"指向{character_name}，或直接命令/质问{character_name}本人。
+  - 示例："你真是个怪叔叔" / "你在搞什么鬼"
+  - 写法：描述{character_name}作为直接受话人所承受的意图。
+
+- **情况 B — 向群内其他人谈论{character_name}**：正文使用第三人称"他"/"她"指代{character_name}，且包含面向他人的命令句（如"不要"/"别"/"小心"）警告他人注意{character_name}的行为；此时{character_name}是话题对象而非受话人。
+  - 示例："他是怪叔叔，不要跟着他的圈套走"（reply/@{character_name} 仅提供线程上下文）
+  - 写法：明确说明实际听众为其他群员，以及{character_name}在消息中的角色（被讨论的对象）。
+
 # 输出格式
 请务必返回合法的 JSON 字符串，包含以下字段：
 {{
-    "should_respond": <boolean: 你是否应该回应此消息>,
-    "reason_to_respond": "<简短解释为什么回应或不回应此消息>",
+    "should_respond": boolean,
+    "reason_to_respond": string,
     "use_reply_feature": true,
-    "channel_topic": "<包括所有用户参与的宏观话题>",
-    "user_topic": "<当前用户的具体意图和细分话题>"
+    "channel_topic": string,
+    "user_topic": string
 }}
 """
 
