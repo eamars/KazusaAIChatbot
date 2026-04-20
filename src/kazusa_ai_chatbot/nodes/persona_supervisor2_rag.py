@@ -536,9 +536,15 @@ async def call_web_search_agent(state: RAGState) -> dict:
 
 
 async def call_memory_retriever_agent_internal_rag(state: RAGState) -> dict:
+    context = dict(state["internal_rag_context"])
+    # Override identity fields with ground-truth from pipeline state to prevent
+    # the dispatcher LLM from injecting platform IDs (e.g. bot ID) as user UUID.
+    context["target_user_name"] = state["user_name"]
+    context["target_global_user_id"] = state["global_user_id"]
+
     result = await memory_retriever_agent(
         task=state["internal_rag_task"],
-        context=state["internal_rag_context"],
+        context=context,
         expected_response=state["internal_rag_expected_response"]
     )
 
