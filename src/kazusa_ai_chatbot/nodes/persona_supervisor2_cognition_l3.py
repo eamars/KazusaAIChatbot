@@ -177,19 +177,35 @@ def get_fragmentation_description(score: float) -> str:
 
 
 def get_hesitation_density_description(score: float) -> str:
-    """Map hesitation_density score (0.0–1.0) to a Chinese descriptor."""
+    """Map hesitation_density score (0.0–1.0) to a Chinese descriptor.
+
+    Modern online chat style: hesitation is expressed through message structure
+    (short messages, re-sends, trailing off) NOT punctuation chains like '……'.
+    '……' should be used very sparingly even at high hesitation scores.
+    """
     descriptions = [
-        "你的语句清脆利落，不要使用「那个」「嗯」「呃」「……」等任何迟疑性填充词。",
-        "你的语气几乎都是干净利落的，极少出现犹豫性填充词。仅在极特殊的情绪瞬间才会出现一次「嗯」或「……」。",
-        "你的语气以清晰为主，大约每十句话里出现一次「那个」「嗯」之类的犹豫标记。",
-        "你的表达以稳定为主，偶有迟疑。大约每五六句话出现一次犹豫标记（「那个……」「嗯」）。",
-        "你的说话节奏略带犹豫。大约每三四句出现一次「那个」「嗯」「……」。",
-        "你说话带有明显的迟疑感，每两三句出现一次「那个」「嗯」「呃」或拖尾「……」。",
-        "你经常在句首或句中插入犹豫标记。几乎每一两句就有一个「那个」「嗯」「……」。",
-        "你的说话方式充满迟疑。很多句子开头就带「那个……」「嗯……」，多处出现拖尾省略号。",
-        "你的表达大量依赖迟疑标记。几乎每句都有「那个」「嗯」「呃」或省略号，显得非常踌躇。",
-        "你的话总是被填充词和停顿充斥。每句话都挂着「那个……」「嗯……」「……」，语气非常不确定。",
-        "你几乎无法连说一整句话而不被填充词打断，「那个」「嗯」「呃」「……」密集到几乎盖过实际内容。",
+        # 0 — zero hesitation
+        "你的表达直接、干脆。每句话都是完整的结论，不带任何迟疑色彩，也不用填充词或语气助词拖沓。",
+        # 1
+        "你说话几乎不犹豫。偶尔在语气末尾加一个「哈」或「诶」，但整体仍然利落，没有停顿或拖泥带水。",
+        # 2
+        "你的表达大体直接，极少出现迟疑。偶尔会把一件事拆成两条消息发出，或在结尾加「吧」「嘛」等语气词，但不是习惯性的。",
+        # 3
+        "你会偶尔表现出轻微犹豫——比如把意思分成两条消息，或在一句话里重复一个词（「就是……就是那个感觉」），但不频繁。",
+        # 4
+        "你有时会把原本一句话的内容分开发送，前一条留白让对方等一下再看下文。「那个」「哦对」这类口语词偶尔出现，不是每句都有。",
+        # 5 — Kazusa's level (hesitation_density=0.5)
+        "你说话节奏有点犹豫，但用的不是省略号——而是把句子拆短、分条发送，或在语气末尾加「啊」「诶」「嗯」来软化语气。整条回复里「……」最多出现一次，不要连续叠用。",
+        # 6
+        "你经常把一个想法切成几条短消息，让对方感觉你在边想边说。偶尔在句尾用「哦」「哈」「嗯」，或重复某个词来缓冲。整条回复里「……」不超过一次。",
+        # 7
+        "你说话明显犹豫，常用短句打头、再补充，像是说了一半又改口。「那个」「就是」「哦对」这类词频率较高。省略号很少出现，犹豫感主要靠句子结构而非标点表达。",
+        # 8
+        "你的表达高度碎片化：一句话分两三条发出，前几个字像试探性的开头，后面才说正题。「嗯」「哦」「啊」作为独立短句出现，起到停顿和缓冲的作用。",
+        # 9
+        "你几乎每句话都拆开发送，中间留出停顿感。「那个」「等一下」「就是说」高频出现。你用消息结构本身表达不确定，而不是靠标点符号。",
+        # 10 — maximum hesitation
+        "你的表达完全由短消息碎片构成。「嗯」「哦」「就是」单独成条；每次说完一小段就停，像是在等对方反应再决定下一步说什么。省略号几乎不用——停顿靠换行和分条来体现。",
     ]
     return descriptions[_pick_level(score)]
 
@@ -369,7 +385,9 @@ _LINGUISTIC_AGENT_PROMPT = """\
 3. **关系深度映射：** 结合 `last_relationship_insight`。如果洞察显示“对方是唯一重心”，即便你在执行 CHALLENGE（对峙），动作标签也应带有“由于过度在意而产生的攻击性”。
 4. **意图共振：** 结合 `character_intent` 确定具体的社交策略（如：戏谑、敷衍、调情）。
 5. **情绪渗透 (Show, Don't Tell)**：如果 `character_mood` 是局促的，请通过增加省略号、改变语序、使用防御性口癖（如“真是的”）来体现，**严禁**直接在台词里说“我觉得局促”。
-6. **事实织入**：根据 `research_facts` 确定台词必须覆盖的硬信息点。
+6. **事实织入（相关性优先）**：`research_facts` 提供背景资料，但只有与 `decontexualized_input` **直接相关**的内容才能进入 `[FACT]` 锚点。
+   - 判断标准：该事实是否能被当前 `decontexualized_input` 的话题"自然引用"？若否，**不得**将其列为 `[FACT]`。
+   - 避免将与当前话题无关的历史记忆（如用户在另一个场合提到的话题）错误地植入本次回应的硬信息点。
 7. **句式破局：** 检查 `chat_history` 的最近交流。例如如果上一句是“反问句”，本轮即便策略是防御，也严禁再次使用“反问”作为核心修辞，改用“敷衍”或“破碎短句”。
 8. **开场白多样性：** 严禁连续两句回复都以相同的语气助词（如：唔、那个、哼）开头。
 9. **词汇降级*：* 对多轮连续（连续两次）使用的词汇，本轮将强制放入 `forbidden_phrases`。
@@ -440,18 +458,6 @@ _LINGUISTIC_AGENT_PROMPT = """\
 _linguistic_agent_llm = get_llm(temperature=0.9, top_p=0.95)
 async def call_linguistic_agent(state: CognitionState) -> CognitionState:
     character_profile = state["character_profile"]
-    ltp = character_profile.get("linguistic_texture_profile") or {}
-    if not ltp:
-        logger.warning(
-            "No linguistic_texture_profile found in character_profile; "
-            "defaulting all 10 parameters to 0.5"
-        )
-
-    def _ltp(key: str, fn) -> str:
-        score = float(ltp.get(key, 0.5))
-        desc = fn(score)
-        logger.debug(f"  {key} ({score:.2f}): {desc}")
-        return desc
 
     system_prompt = SystemMessage(content=_LINGUISTIC_AGENT_PROMPT.format(
         character_name=character_profile["name"],
@@ -460,16 +466,16 @@ async def call_linguistic_agent(state: CognitionState) -> CognitionState:
         character_defense=character_profile["personality_brief"]["defense"],
         character_quirks=character_profile["personality_brief"]["quirks"],
         character_taboos=character_profile["personality_brief"]["taboos"],
-        ltp_fragmentation=_ltp("fragmentation", get_fragmentation_description),
-        ltp_hesitation_density=_ltp("hesitation_density", get_hesitation_density_description),
-        ltp_counter_questioning=_ltp("counter_questioning", get_counter_questioning_description),
-        ltp_softener_density=_ltp("softener_density", get_softener_density_description),
-        ltp_formalism_avoidance=_ltp("formalism_avoidance", get_formalism_avoidance_description),
-        ltp_abstraction_reframing=_ltp("abstraction_reframing", get_abstraction_reframing_description),
-        ltp_direct_assertion=_ltp("direct_assertion", get_direct_assertion_description),
-        ltp_emotional_leakage=_ltp("emotional_leakage", get_emotional_leakage_description),
-        ltp_rhythmic_bounce=_ltp("rhythmic_bounce", get_rhythmic_bounce_description),
-        ltp_self_deprecation=_ltp("self_deprecation", get_self_deprecation_description),
+        ltp_fragmentation=get_fragmentation_description(character_profile["linguistic_texture_profile"]["fragmentation"]),
+        ltp_hesitation_density=get_hesitation_density_description(character_profile["linguistic_texture_profile"]["hesitation_density"]),
+        ltp_counter_questioning=get_counter_questioning_description(character_profile["linguistic_texture_profile"]["counter_questioning"]),
+        ltp_softener_density=get_softener_density_description(character_profile["linguistic_texture_profile"]["softener_density"]),
+        ltp_formalism_avoidance=get_formalism_avoidance_description(character_profile["linguistic_texture_profile"]["formalism_avoidance"]),
+        ltp_abstraction_reframing=get_abstraction_reframing_description(character_profile["linguistic_texture_profile"]["abstraction_reframing"]),
+        ltp_direct_assertion=get_direct_assertion_description(character_profile["linguistic_texture_profile"]["direct_assertion"]),
+        ltp_emotional_leakage=get_emotional_leakage_description(character_profile["linguistic_texture_profile"]["emotional_leakage"]),
+        ltp_rhythmic_bounce=get_rhythmic_bounce_description(character_profile["linguistic_texture_profile"]["rhythmic_bounce"]),
+        ltp_self_deprecation=get_self_deprecation_description(character_profile["linguistic_texture_profile"]["self_deprecation"]),
     ))
 
     msg = {
