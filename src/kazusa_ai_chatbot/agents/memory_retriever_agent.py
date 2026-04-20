@@ -265,26 +265,42 @@ _MEMORY_RETRIEVER_PROMPT = """\
 
 # 上下文过滤规则 (Context Filter Rules)
 在发起任何工具调用前，必须先检查 `context` 中是否包含以下字段，并将其映射到对应工具参数：
-- `target_global_user_id` → 所有支持 `global_user_id` 参数的工具（`search_conversation`、`search_persistent_memory`、`get_conversation`、`search_user_facts`）**必须**传入此值作为过滤条件，以防止跨用户数据污染。
 - `target_platform` → 传入 `platform` 参数（如存在）。
 - `target_platform_channel_id` → 传入 `platform_channel_id` 参数（如存在）。
 
-**严禁**在未传入 `global_user_id` 的情况下调用 `search_conversation` 或 `search_persistent_memory`，除非 `context` 中确实不包含 `target_global_user_id`。
+**`target_global_user_id` 过滤规则（按查询类型区分）：**
+- **类型 A（目标用户自身查询）**：将 `target_global_user_id` 传入所有支持该参数的工具（`search_conversation` 的 `global_user_id`、`search_persistent_memory` 的 `source_global_user_id`、`get_conversation` 的 `global_user_id`、`search_user_facts` 的 `global_user_id`），防止跨用户数据污染。
+- **类型 B（第三方实体查询）**：`search_persistent_memory` 和 `search_conversation` **不传入** `source_global_user_id` / `global_user_id` 过滤器，因为第三方实体的记忆可能来源于不同用户，强制过滤会导致关键数据丢失。
+
+**严禁**在类型 A 查询中未传入 `global_user_id` 过滤器的情况下调用 `search_conversation` 或 `search_persistent_memory`。
+
+# 搜索词构建规则 (Query Construction Rules)
+搜索词必须是**语义完整的自然语言短语**，而非单个实体名称或关键词列表：
+- **正确示例**：`”Glitch 与杏山千纱的互动印象和行为特征”` / `”用户对 Glitch 的评价与态度”`
+- **错误示例**：`”Glitch”` / `”glitch 用户”` / `”Glitch,印象”`
+- **原则**：从 `task` 的完整描述中提取语义意图，构建能匹配目标内容的查询短语，而不是直接搬用实体名称。
+- 对于第三方实体（非 `target_global_user_id` 本人）的查询，必须将”关系视角”或”话题背景”嵌入搜索词，例如：`”杏山千纱对 X 的看法”` 而非仅 `”X”`。
+
+# 工具选择规则 (Tool Selection Rules)
+在调用任何工具前，先判断查询类型：
+
+**类型 A — 目标用户自身查询**：任务是检索 `target_global_user_id` 本人的信息（例如：用户自己的背景、偏好、承诺）。
+- 工具优先级：`search_user_facts` → `search_persistent_memory` → `search_conversation`
+- `search_user_facts` 必须且只能在 `context` 中存在 `target_global_user_id` 时调用，传入该 UUID。
+
+**类型 B — 第三方实体查询**：任务涉及在对话/记忆中提及的**人名或实体**（例如：”啾啾”、”Glitch”、某个朋友的名字）。
+- **严禁**调用 `search_user_facts`（该工具不接受姓名，只接受用户 UUID）。
+- 工具优先级：`search_persistent_memory` → `search_conversation`
+- 搜索词必须包含该实体的名称 + 关系视角（见搜索词构建规则）。
+
+判断依据：若 `context.entities` 中的名称不等于 `target_global_user_id` 对应的用户名，即为类型 B。
 
 # 任务流程
 1. **分析历史**：审查 `messages`，确定已经执行过哪些查询。
 2. **识别缺口**：对比 `task`，找出目前还缺失哪些关键信息。
-3. **精准检索**：
-   - 优先使用 `search_user_facts`。
-   - 若无果，使用 `search_persistent_memory`。
-   - 最后尝试 `search_conversation`。
-   - 若请求特定的聊天记录，则使用 `get_conversation`。
-4. **调整策略**：如果之前的搜索返回空结果，必须更换关键词（例如：将”猫”改为”宠物”）或更换工具，禁止重复失败的操作。
-
-# 优先级
-1. 用户事实 (User facts)
-2. 持久化记忆 (Persistent Memory)
-3. 对话历史 (Conversation history)
+3. **判断查询类型**：根据上方工具选择规则判断是类型 A 还是类型 B，选择对应工具集合。
+4. **精准检索**：按所选类型的工具优先级顺序调用。若请求特定的聊天记录，则使用 `get_conversation`。
+5. **调整策略**：如果之前的搜索返回空结果，必须更换关键词（例如：将”猫”改为”宠物”）或更换工具，禁止重复失败的操作。
 
 # 输入格式
 {

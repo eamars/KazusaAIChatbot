@@ -236,8 +236,8 @@ async def external_rag_dispatcher(state: RAGState) -> dict:
 
 
 _INTERNAL_RAG_DISPATCHER_PROMPT = """\
-你负责从角色 {character_name} 的记忆库中提取关联于用户输入的相关信息。
-- 你在社交平台的账号为 {platform_bot_id}
+你负责判断是否需要检索记忆库，并生成客观的检索任务。
+- 你在社交平台的账号为 {platform_bot_id}，角色名为 {character_name}
 - 当前的系统时间为 {timestamp}
 - 消息 (`user_input`) 发送者为 {user_name}(global_user_id: {global_user_id})
 
@@ -263,12 +263,14 @@ _INTERNAL_RAG_DISPATCHER_PROMPT = """\
    * "next_action": "memory_retriever_agent"
 
 # 任务指派信息
-- "task": "具体要检索的任务描述"
+- "task": 用客观语言描述要检索的内容。**不要**带入角色视角或与角色的关系——只描述要找的是什么信息（谁、什么事、何时）。
+  * 正确示例："检索关于'啾啾'的身份描述、行为特征及最后提及时间"
+  * 错误示例："检索'啾啾'与杏山千纱的关系"（不要加入角色名作为参照物）
 - "context": (可选) 在 context 中提取关键实体（人物、时间、地点）。若不提供则默认为空字典 {{}}
 - "expected_response": 包括以下
   * 明确要求返回事实细节。例如："具体的口味名称及对话时间"、"关于任务进度的最后一次描述"。
   * 期望的返回格式（例如表格，长文本，短文本， YY/MM/DD, Yes/No），具体内容和长度（例如<60字）
-  * 返回格式应陈述事实，禁止包含第一人称描述。例如："{user_name}提到..."、"{character_name} 对XX话题表示..."等。
+  * 返回格式应陈述客观事实，不要使用角色名或第一人称作为语境锚点。例如："{user_name} 提到..."，而非 "{character_name} 认为..."。
 
 # 输入格式
 {{
