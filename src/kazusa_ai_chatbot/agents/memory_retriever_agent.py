@@ -11,7 +11,7 @@ from kazusa_ai_chatbot.config import LLM_API_KEY, LLM_BASE_URL, LLM_MODEL, MAX_M
 from kazusa_ai_chatbot.db import get_user_facts, search_conversation_history, get_conversation_history
 from kazusa_ai_chatbot.db import search_memory as search_memory_db
 
-from kazusa_ai_chatbot.utils import parse_llm_json_output, get_llm
+from kazusa_ai_chatbot.utils import parse_llm_json_output, get_llm, sanitize_llm_text
 
 from typing import Annotated, TypedDict
 
@@ -263,6 +263,14 @@ _MEMORY_RETRIEVER_PROMPT = """\
 - **参数校验**：如果调用工具所需的必要参数（如 user_id）在 context 中不存在，严禁调用工具，直接回复说明“缺少必要参数”。
 - **宁缺毋滥**：如果当前信息不足以发起有效的搜索请求，请不要尝试，直接进入 Evaluator 阶段说明原因。
 
+# 上下文过滤规则 (Context Filter Rules)
+在发起任何工具调用前，必须先检查 `context` 中是否包含以下字段，并将其映射到对应工具参数：
+- `target_global_user_id` → 所有支持 `global_user_id` 参数的工具（`search_conversation`、`search_persistent_memory`、`get_conversation`、`search_user_facts`）**必须**传入此值作为过滤条件，以防止跨用户数据污染。
+- `target_platform` → 传入 `platform` 参数（如存在）。
+- `target_platform_channel_id` → 传入 `platform_channel_id` 参数（如存在）。
+
+**严禁**在未传入 `global_user_id` 的情况下调用 `search_conversation` 或 `search_persistent_memory`，除非 `context` 中确实不包含 `target_global_user_id`。
+
 # 任务流程
 1. **分析历史**：审查 `messages`，确定已经执行过哪些查询。
 2. **识别缺口**：对比 `task`，找出目前还缺失哪些关键信息。
@@ -271,7 +279,7 @@ _MEMORY_RETRIEVER_PROMPT = """\
    - 若无果，使用 `search_persistent_memory`。
    - 最后尝试 `search_conversation`。
    - 若请求特定的聊天记录，则使用 `get_conversation`。
-4. **调整策略**：如果之前的搜索返回空结果，必须更换关键词（例如：将“猫”改为“宠物”）或更换工具，禁止重复失败的操作。
+4. **调整策略**：如果之前的搜索返回空结果，必须更换关键词（例如：将”猫”改为”宠物”）或更换工具，禁止重复失败的操作。
 
 # 优先级
 1. 用户事实 (User facts)
@@ -435,23 +443,26 @@ async def memory_search_tool_call_evaluator(state: MemoryRetrieverState) -> Memo
 
 
 _MEMORY_RETRIEVER_FINALIZER_PROMPT = """\
-你是一个信息整理专家。你的任务是将检索到的信息整理成用户友好的格式。
+你是一个上下文整合专家。你的输出将直接作为下游 LLM 代理的输入上下文，因此信息完整性优先于简洁性。
 
 # 核心任务
-1. **整理信息**：将检索到的关键信息根据**任务描述**整理成**用户期待的格式**。
-2. **评估信息**：根据评估者最终反馈评估检索到的信息是否满足任务描述的要求。
+1. **完整保留**：将所有与任务相关的检索内容完整写入 `response`。严禁以"简洁"为由丢弃有效信息——下游代理需要原始事实，而不是你的摘要。
+2. **清理噪音**：过滤掉明显与任务无关的内容（例如：与 Kazusa 完全无关的群聊闲聊），但保留所有与目标用户和 Kazusa 互动相关的记录。
+3. **解析标识符**：将 `content` 中出现的平台 ID（如 `<@3768713357>`、UUID 格式的用户 ID）替换为可读名称。规则：若 UUID 与 `context.target_global_user_id` 匹配，替换为 `context.target_user_name`；若 ID 与平台 bot ID 匹配，替换为 "Kazusa"。
+4. **评估完整度**：根据评估者最终反馈与任务要求，客观评分。
 
 # 输出说明
-- response: 根据 expected_response 整理后的信息，严禁输出非字符串内容
-- score: 评估分数，范围 0-100，表示检索到的信息满足任务描述的程度
-- reason: 评估原因（一句话之内概括）
+- response: 整合后的完整上下文字符串，供下游 LLM 代理直接使用。包含所有相关事实、对话记录和记忆条目，并附带时间戳和来源说明。
+- score: 0-100，表示检索内容满足任务需求的程度
+- reason: 一句话说明评分依据
 
 # 输入格式
 {
     "task": "任务描述",
-    "content": "收集到的数据",
+    "content": "所有工具返回的原始数据",
     "evaluator_feedback": "评估者最终反馈",
-    "expected_response": "用户期望的输出内容和格式"
+    "expected_response": "下游代理期望的输出内容和格式",
+    "context": { "target_user_name": "目标用户可读名称", "target_global_user_id": "目标用户 UUID", ... }
 }
 
 # 输出格式
@@ -463,15 +474,21 @@ _MEMORY_RETRIEVER_FINALIZER_PROMPT = """\
 }
 """
 _memory_search_tool_call_finalizer_llm = get_llm(temperature=0.0, top_p=1.0)
+_MAX_TOOL_RESULTS_CHARS = 12_000
+
 async def memory_search_tool_call_finalizer(state: MemoryRetrieverState) -> dict:
     """Finalize the retrieved info into the expected format"""
-    # Collect tool results
-    tool_messages = [m.content for m in state["messages"] if isinstance(m, ToolMessage)]
+    # Collect tool results — sanitize control chars that cause API 400 rejections
+    tool_messages = [sanitize_llm_text(m.content) for m in state["messages"] if isinstance(m, ToolMessage)]
     tool_results = "\n".join(tool_messages) if tool_messages else "No information retrieved."
+
+    # Cap size to avoid exceeding API limits
+    if len(tool_results) > _MAX_TOOL_RESULTS_CHARS:
+        tool_results = tool_results[:_MAX_TOOL_RESULTS_CHARS] + "\n...[truncated]"
 
     # Collect evaluator feedback (last one only)
     evaluator_feedback = [
-        m.content for m in state["messages"] 
+        m.content for m in state["messages"]
         if isinstance(m, HumanMessage) and m.name == "evaluator"
     ]
     evaluator_feedback = evaluator_feedback[-1] if evaluator_feedback else ""
@@ -483,11 +500,20 @@ async def memory_search_tool_call_finalizer(state: MemoryRetrieverState) -> dict
         "expected_response": state["expected_response"],
         "content": tool_results,
         "evaluator_feedback": evaluator_feedback,
+        "context": state.get("context", {}),
     }
     human_message = HumanMessage(content=json.dumps(finalizer_input, ensure_ascii=False))
 
-    response = await _memory_search_tool_call_finalizer_llm.ainvoke([system_prompt, human_message])
-    result = parse_llm_json_output(response.content)
+    try:
+        response = await _memory_search_tool_call_finalizer_llm.ainvoke([system_prompt, human_message])
+        result = parse_llm_json_output(response.content)
+    except Exception as e:
+        logger.error(f"Finalizer LLM call failed: {e}")
+        return {
+            "final_response": "No information retrieved.",
+            "final_status": "error",
+            "final_reason": f"Finalizer failed: {type(e).__name__}",
+        }
 
     # Status generation
     status = ""

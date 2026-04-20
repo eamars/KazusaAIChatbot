@@ -10,7 +10,7 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-_msg_decontexualizer_llm = get_llm(temperature=0.5, top_p=1.0)
+_msg_decontexualizer_llm = get_llm(temperature=0.1, top_p=0.8)
 
 
 _MSG_DECONTEXUALIZER_PROMPT = """\

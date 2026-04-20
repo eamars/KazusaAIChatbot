@@ -76,7 +76,7 @@ _COGNITION_SUBCONSCIOUS_PROMPT = """\
     "interaction_subtext": "捕捉到的潜台词标签（如：隐蔽的羞辱、试探、求关注、施压）"
 }}
 """
-_subconscious_llm = get_llm(temperature=0.4, top_p=0.5)
+_subconscious_llm = get_llm(temperature=0.4, top_p=0.7)
 async def call_cognition_subconscious(state: CognitionState) -> CognitionState:
     mbti = state["character_profile"]["personality_brief"]["mbti"]
     

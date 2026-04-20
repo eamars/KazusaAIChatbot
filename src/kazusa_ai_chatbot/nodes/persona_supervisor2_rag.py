@@ -182,6 +182,7 @@ _EXTERNAL_RAG_DISPATCHER_PROMPT = """\
 请务必返回合法的 JSON 字符串，包含以下字段：
 {{
     "next_action": "web_search_agent" | "end",
+    "reasoning": "string",
     "task": "string",
     "context": {{
         "target_user_input": "string",  // Transcribe what user says
@@ -192,7 +193,7 @@ _EXTERNAL_RAG_DISPATCHER_PROMPT = """\
     "expected_response": "string"
 }}
 """
-_external_rag_dispatcher_llm = get_llm(temperature=0.1, top_p=0.95)
+_external_rag_dispatcher_llm = get_llm(temperature=0, top_p=1.0)
 async def external_rag_dispatcher(state: RAGState) -> dict:
     decontexualized_input = state["decontexualized_input"]
     user_topic = state["user_topic"]
@@ -279,6 +280,7 @@ _INTERNAL_RAG_DISPATCHER_PROMPT = """\
 请务必返回合法的 JSON 字符串，包含以下字段：
 {{
     "next_action": "memory_retriever_agent" | "end",
+    "reasoning": "string",
     "task": "string",
     "context": {{
         "entities": ["实体关键词"],  // Example
@@ -295,7 +297,7 @@ _INTERNAL_RAG_DISPATCHER_PROMPT = """\
     "expected_response": "string"
 }}
 """
-_internal_rag_dispatcher_llm = get_llm(temperature=0.1, top_p=0.95)
+_internal_rag_dispatcher_llm = get_llm(temperature=0, top_p=1.0)
 async def internal_rag_dispatcher(state: RAGState) -> dict:
     decontexualized_input = state["decontexualized_input"]
     user_topic = state["user_topic"]
@@ -376,6 +378,7 @@ _USER_FACT_RAG_DISPATCHER_PROMPT = """\
 请务必返回合法的 JSON 字符串，包含以下字段：
 {{
     "next_action": "memory_retriever_agent",
+    "reasoning": "string",
     "task": "基于输入事实与重大情感转折点的复合检索指令",
     "context": {{
         "target_user_name": "{user_name}",
@@ -388,7 +391,7 @@ _USER_FACT_RAG_DISPATCHER_PROMPT = """\
     "expected_response": "仅返回与 {user_name} 相关的原始记录清单：包含时间戳、用户名称、原始行为描述、好感度变动；禁止输出无证据的人格推断"
 }}
 """
-_user_fact_rag_dispatcher_llm = get_llm(temperature=0.1, top_p=0.95)
+_user_fact_rag_dispatcher_llm = get_llm(temperature=0, top_p=1.0)
 async def user_fact_rag_dispatcher(state: RAGState) -> dict:
     decontexualized_input = state["decontexualized_input"]
     user_topic = state["user_topic"]
@@ -430,6 +433,11 @@ async def user_fact_rag_dispatcher(state: RAGState) -> dict:
     task = result.get("task", "")
     context = result.get("context", {})
     expected_response = result.get("expected_response", "")
+
+    # Override identity fields with ground truth from state — never trust the LLM
+    # to copy strings verbatim; tokenizer artifacts can corrupt them (e.g. "蚝爹\t油").
+    context["target_user_name"] = user_name
+    context["target_global_user_id"] = state["global_user_id"]
 
     return {
         "user_rag_next_action": next_action,

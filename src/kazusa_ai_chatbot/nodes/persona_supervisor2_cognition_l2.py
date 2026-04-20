@@ -256,7 +256,7 @@ _COGNITION_CONSCIOUSNESS_PROMPT = """\
     "character_intent": "行动意图"
 }}
 """
-_conscious_llm = get_llm(temperature=0.2, top_p=0.1)  # Conscious deliberation
+_conscious_llm = get_llm(temperature=0.2, top_p=0.8)  # Conscious deliberation
 async def call_cognition_consciousness(state: CognitionState) -> CognitionState:
     system_prompt = SystemMessage(content=_COGNITION_CONSCIOUSNESS_PROMPT.format(
         character_name=state["character_profile"]["name"],
@@ -450,7 +450,7 @@ Note:
   "trajectory": "string"
 }}
 """
-_boundary_core_llm = get_llm(temperature=0.1, top_p=0.95)
+_boundary_core_llm = get_llm(temperature=0, top_p=1.0)
 async def call_boundary_core_agent(state: CognitionState) -> CognitionState:
     # Get attributes
     character_profile = state["character_profile"]
@@ -504,8 +504,8 @@ async def call_boundary_core_agent(state: CognitionState) -> CognitionState:
     acceptance = result.get("acceptance", "")
     stance_bias = result.get("stance_bias", "")
     identity_policy = result.get("identity_policy", "")
-    pressure_policy = result.get("identity_policy", "")
-    trajectory = result.get("identity_policy", "")
+    pressure_policy = result.get("pressure_policy", "")
+    trajectory = result.get("trajectory", "")
 
 
     return {
@@ -632,7 +632,7 @@ behavioral_primary + behavioral_secondary 必须被体现。例如：
   "judgment_note": "一句话说明裁决逻辑"
 }}
 """
-_judgement_core_llm = get_llm(temperature=0.1, top_p=0.9)
+_judgement_core_llm = get_llm(temperature=0.1, top_p=0.7)
 async def call_judgment_core_agent(state: CognitionState) -> CognitionState:
     system_prompt = SystemMessage(content=_JUDGEMENT_CORE_PROMPT.format(
         character_name=state["character_profile"]["name"],

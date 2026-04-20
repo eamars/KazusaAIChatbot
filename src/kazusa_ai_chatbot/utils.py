@@ -10,6 +10,7 @@ from kazusa_ai_chatbot.config import LLM_API_KEY, LLM_BASE_URL, LLM_MODEL
 from pathlib import Path
 import logging
 import json
+import re
 
 logger = logging.getLogger(__name__)
 
@@ -41,6 +42,17 @@ def trim_history_dict(history):
     return results
 
 
+def sanitize_llm_text(text: str) -> str:
+    """Strip control characters that cause API JSON parsing failures.
+
+    Keeps printable ASCII, standard whitespace (newline, tab, carriage return),
+    and all non-ASCII Unicode (Chinese, etc.). Removes C0/C1 control characters
+    and lone surrogates that some LLMs insert as tokenizer artifacts.
+    """
+    # Remove C0 controls (except \t \n \r) and C1 controls and lone surrogates
+    return re.sub(r'[\x00-\x08\x0B\x0C\x0E-\x1F\x7F\x80-\x9F]', '', text)
+
+
 _PARSE_JSON_WITH_LLM_PROMPT = """\
 "You are a JSON repair expert. Fix the provided malformed JSON string and return fixed dictionary."
 "You need to remove trailing commas, close unclosed brackets or strings, and ensure it is valid RFC 8259 JSON. "
@@ -50,14 +62,14 @@ _parse_json_with_llm = get_llm(temperature=0, top_p=1.0)
 def parse_json_with_llm(broken_string: str) -> dict:
     """Parse JSON with LLM as a fallback when repair_json fails."""
     system_prompt = SystemMessage(content=_PARSE_JSON_WITH_LLM_PROMPT)
-    human_message = HumanMessage(content=broken_string)
+    human_message = HumanMessage(content=sanitize_llm_text(broken_string))
     response = _parse_json_with_llm.invoke([system_prompt, human_message])
 
     # Strip the markdown fence just in case
     json_string = response.content.strip().strip("```").strip("json")
-    
+
     # Use repair_json which handles both valid and broken JSON
-    decoded_json_dict = repair_json(json_string, return_objects=True)   
+    decoded_json_dict = repair_json(json_string, return_objects=True)
 
     return decoded_json_dict
 

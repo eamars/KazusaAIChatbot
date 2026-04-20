@@ -154,7 +154,7 @@ _WEB_SEARCH_GENERATOR_PROMPT = """\
     "messages": [包含评估员反馈的历史记录]
 }}
 """
-_web_search_tool_call_generator_llm = get_llm(temperature=0.5, top_p=0.9).bind_tools(_ALL_TOOLS)
+_web_search_tool_call_generator_llm = get_llm(temperature=0.3, top_p=0.9).bind_tools(_ALL_TOOLS)
 async def web_search_tool_call_generator(state: WebSearchState) -> dict:    
     agent_tools = "\n".join([f"- {tool.name}: {tool.description}" for tool in _ALL_TOOLS])
     system_prompt = SystemMessage(content=_WEB_SEARCH_GENERATOR_PROMPT.format(agent_tools=agent_tools, timestamp=state["timestamp"]))

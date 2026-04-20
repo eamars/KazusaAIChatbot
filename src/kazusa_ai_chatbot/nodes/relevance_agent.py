@@ -155,7 +155,7 @@ _RELEVANCE_SYSTEM_NOISY_PROMPT = """\
 }}
 """
 
-_relevance_agent_llm = get_llm(temperature=0.1, top_p=0.9)
+_relevance_agent_llm = get_llm(temperature=0, top_p=1.0)
 async def relevance_agent(state: IMProcessState) -> IMProcessState:
     # Calculate affinity context
     affinity_block = build_affinity_block(state["user_profile"]["affinity"])
@@ -259,10 +259,10 @@ _VISION_DESCRIPTOR_PROMPT = """\
 # 输出格式
 请务必返回合法的 JSON 字符串，包含以下字段：
 {{
-    "descrption": "逻辑清晰、细节饱满的文字描述，无需任何开场白。"
+    "description": "逻辑清晰、细节饱满的文字描述，无需任何开场白。"
 }}
 """
-_vision_descriptor_llm = get_llm(temperature=0.2, top_p=0.9)
+_vision_descriptor_llm = get_llm(temperature=0, top_p=1.0)
 async def multimedia_descriptor_agent(state: IMProcessState) -> IMProcessState:
     user_name = state.get("user_name")
     platform_user_id = state.get("platform_user_id", "")
@@ -288,7 +288,7 @@ async def multimedia_descriptor_agent(state: IMProcessState) -> IMProcessState:
             response = await _vision_descriptor_llm.ainvoke([system_prompt, human_message])
             result = parse_llm_json_output(response.content)
 
-            description = result.get("descrption", "")
+            description = result.get("description", "")
 
             logger.info(
                 f"\n{user_name}(@{platform_user_id}): Image Description\n"

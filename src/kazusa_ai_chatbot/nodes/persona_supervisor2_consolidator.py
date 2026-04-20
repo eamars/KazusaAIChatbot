@@ -211,7 +211,7 @@ _RELATIONSHIP_RECORDER_PROMPT = """\
     "last_relationship_insight": "此时此刻对他/她最核心的一个标签或看法"
 }}
 """
-_relationship_recorder_llm = get_llm(temperature=0.85, top_p=0.95)
+_relationship_recorder_llm = get_llm(temperature=0.4, top_p=0.9)
 async def relationship_recorder(state: ConsolidatorState) -> dict:
     system_prompt = SystemMessage(_RELATIONSHIP_RECORDER_PROMPT.format(
         character_name=state["character_profile"]["name"],
@@ -329,7 +329,7 @@ _FACTS_HARVESTER_PROMPT = """\
     ]
 }}
 """
-_facts_harvester_llm = get_llm(temperature=0.0, top_p=0.95)
+_facts_harvester_llm = get_llm(temperature=0.0, top_p=1.0)
 async def facts_harvester(state: ConsolidatorState) -> dict:
     system_prompt = SystemMessage(_FACTS_HARVESTER_PROMPT.format(
         character_name=state["character_profile"]["name"],

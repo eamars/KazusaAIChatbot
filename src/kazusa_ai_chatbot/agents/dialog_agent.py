@@ -289,7 +289,7 @@ _DIALOG_EVALUATOR_PROMPT = """\
     "should_stop": boolean
 }}
 """
-_dialog_evaluator_llm = get_llm(temperature=0.5, top_p=0.5)
+_dialog_evaluator_llm = get_llm(temperature=0.1, top_p=0.7)
 async def dialog_evaluator(state: DialogAgentState) -> DialogAgentState:
     mbti = state["character_profile"]["personality_brief"]["mbti"]
 
