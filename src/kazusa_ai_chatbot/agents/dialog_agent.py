@@ -3,6 +3,18 @@ from typing import Annotated, TypedDict
 from kazusa_ai_chatbot.nodes.persona_supervisor2_schema import GlobalPersonaState
 from kazusa_ai_chatbot.config import LLM_API_KEY, LLM_BASE_URL, LLM_MODEL, MAX_DIALOG_AGENT_RETRY, AFFINITY_DEFAULT
 from kazusa_ai_chatbot.utils import parse_llm_json_output, build_affinity_block, get_llm
+from kazusa_ai_chatbot.nodes.linguistic_texture import (
+    get_hesitation_density_description,
+    get_fragmentation_description,
+    get_counter_questioning_description,
+    get_softener_density_description,
+    get_formalism_avoidance_description,
+    get_abstraction_reframing_description,
+    get_direct_assertion_description,
+    get_emotional_leakage_description,
+    get_rhythmic_bounce_description,
+    get_self_deprecation_description,
+)
 
 from langchain_core.messages import HumanMessage, SystemMessage
 from langgraph.graph import StateGraph, START, END
@@ -82,6 +94,19 @@ _DIALOG_GENERATOR_PROMPT = """\
 - **习惯动作:** {character_quirks}
 - **核心禁忌:** {character_taboos}
 
+# 角色声纹约束 (Character Voice — immutable)
+以下约束来自角色的固有语言质感，**优先级高于 `linguistic_style`**，任何情况下不可覆盖：
+- **hesitation_density:** {ltp_hesitation_density}
+- **fragmentation:** {ltp_fragmentation}
+- **emotional_leakage:** {ltp_emotional_leakage}
+- **rhythmic_bounce:** {ltp_rhythmic_bounce}
+- **direct_assertion:** {ltp_direct_assertion}
+- **softener_density:** {ltp_softener_density}
+- **counter_questioning:** {ltp_counter_questioning}
+- **formalism_avoidance:** {ltp_formalism_avoidance}
+- **abstraction_reframing:** {ltp_abstraction_reframing}
+- **self_deprecation:** {ltp_self_deprecation}
+
 # 核心输入
 1. **语言指令 (Linguistic Directives)**:
    - `rhetorical_strategy`: 修辞策略说明。
@@ -104,7 +129,7 @@ _DIALOG_GENERATOR_PROMPT = """\
    - 严禁使用“我会...”、“我决定...”或“你为什么...”这种评论性句子。
    - 情绪必须**溶解**在对事实（FACT）的处理中。如果你感到慌乱，应表现为回复事实时语无伦次，而不是说“我好慌乱”。
 3. **呼吸感与切分**: 
-   - 模拟打字感：短句为主，合理嵌入语气词；标点节奏由 `linguistic_style` 决定。
+   - 模拟打字感：短句为主，合理嵌入语气词；标点节奏由【角色声纹约束】决定，`linguistic_style` 在不与声纹冲突时有效。
    - **表达量参考**：若 `content_anchors` 含 `[SCOPE]`，以其字数范围和锚点覆盖要求为基准，允许 ±30% 弹性；无 `[SCOPE]` 时默认保持简短。
 
 # 输出要求
@@ -154,13 +179,24 @@ _DIALOG_GENERATOR_PROMPT = """\
 _dialog_generator_llm = get_llm(temperature=0.9, top_p=0.9, presence_penalty=0.4)
 async def dialog_generator(state: DialogAgentState) -> DialogAgentState:
 
+    ltp = state["character_profile"]["linguistic_texture_profile"]
     system_prompt = SystemMessage(content=_DIALOG_GENERATOR_PROMPT.format(
         character_name=state["character_profile"]["name"],
         character_logic=state["character_profile"]["personality_brief"]["logic"],
         character_tempo=state["character_profile"]["personality_brief"]["tempo"],
         character_defense=state["character_profile"]["personality_brief"]["defense"],
         character_quirks=state["character_profile"]["personality_brief"]["quirks"],
-        character_taboos=state["character_profile"]["personality_brief"]["taboos"]
+        character_taboos=state["character_profile"]["personality_brief"]["taboos"],
+        ltp_hesitation_density=get_hesitation_density_description(ltp["hesitation_density"]),
+        ltp_fragmentation=get_fragmentation_description(ltp["fragmentation"]),
+        ltp_emotional_leakage=get_emotional_leakage_description(ltp["emotional_leakage"]),
+        ltp_rhythmic_bounce=get_rhythmic_bounce_description(ltp["rhythmic_bounce"]),
+        ltp_direct_assertion=get_direct_assertion_description(ltp["direct_assertion"]),
+        ltp_softener_density=get_softener_density_description(ltp["softener_density"]),
+        ltp_counter_questioning=get_counter_questioning_description(ltp["counter_questioning"]),
+        ltp_formalism_avoidance=get_formalism_avoidance_description(ltp["formalism_avoidance"]),
+        ltp_abstraction_reframing=get_abstraction_reframing_description(ltp["abstraction_reframing"]),
+        ltp_self_deprecation=get_self_deprecation_description(ltp["self_deprecation"]),
     ))
 
     affinity_block = build_affinity_block(state["user_profile"].get("affinity", AFFINITY_DEFAULT))
@@ -255,6 +291,7 @@ _DIALOG_EVALUATOR_PROMPT = """\
     * 必须执行 `linguistic_directives` 中的 `[DECISION]` 立场。
     * 必须提及 `content_anchors` 中的核心 `[FACT]`（允许自然、模糊地织入）。
 * **结构禁忌**：
+    * **声纹违规 (`hesitation_density`)**：{ltp_hesitation_density_rule} 若 `final_dialog` 中「……」出现次数明显超出上述约束，必须驳回。此检查在所有重试次数均强制执行。
     * **`[SCOPE]` 消费检测**：若 `content_anchors` 含 `[SCOPE]`，检查 `final_dialog` 是否大致在其字数范围内：
         * 软性指标：±30% 以内偏差可接受，在 `feedback` 中注明即可，不触发驳回。
         * 致命违规（任何重试次数均适用）：字数偏差超过 2× 上限，**且** `[SCOPE]` 指定的锚点未被覆盖——两项同时成立才判定为违规。
@@ -306,8 +343,10 @@ _dialog_evaluator_llm = get_llm(temperature=0.1, top_p=0.7)
 async def dialog_evaluator(state: DialogAgentState) -> DialogAgentState:
     mbti = state["character_profile"]["personality_brief"]["mbti"]
 
+    ltp_eval = state["character_profile"]["linguistic_texture_profile"]
     system_prompt = SystemMessage(content=_DIALOG_EVALUATOR_PROMPT.format(
-        mbti_dialog_preference=get_mbti_dialog_preference(mbti)
+        mbti_dialog_preference=get_mbti_dialog_preference(mbti),
+        ltp_hesitation_density_rule=get_hesitation_density_description(ltp_eval["hesitation_density"]),
     ))
 
     # track retry
