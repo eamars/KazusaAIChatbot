@@ -92,7 +92,7 @@ _DIALOG_GENERATOR_PROMPT = """\
 1. **语言指令 (Linguistic Directives)**:
    - `rhetorical_strategy`: 修辞策略说明。
    - `linguistic_style`: 具体的语言风格约束。
-   - `content_anchors`: 逻辑终点 `[DECISION]` 与必须提及的事实 `[FACT]`。
+   - `content_anchors`: 逻辑终点 `[DECISION]`、必须提及的事实 `[FACT]`、用户问题的正面回复 `[ANSWER]`（可选）、表达量参考 `[SCOPE]`（字数范围+需覆盖的锚点，必填）。
 2. **社交上下文 (Contextual Directives)**:
    - `social_distance`: 对当前社交距离的详细描述。
    - `emotional_intensity`: 对情绪波动程度的文字描述。
@@ -110,9 +110,8 @@ _DIALOG_GENERATOR_PROMPT = """\
    - 严禁使用“我会...”、“我决定...”或“你为什么...”这种评论性句子。
    - 情绪必须**溶解**在对事实（FACT）的处理中。如果你感到慌乱，应表现为回复事实时语无伦次，而不是说“我好慌乱”。
 3. **呼吸感与切分**: 
-   - 模拟打字感：短句为主，多用省略号，合理嵌入语气词。
-   - 在保持句意相似的情况下压缩长度。`final_dialog`应满足以下条件：
-     * 数量：通常为1句/段。除非情绪极度激动（如触发核心禁忌）
+   - 模拟打字感：短句为主，合理嵌入语气词；标点节奏由 `linguistic_style` 决定。
+   - **表达量参考**：若 `content_anchors` 含 `[SCOPE]`，以其字数范围和锚点覆盖要求为基准，允许 ±30% 弹性；无 `[SCOPE]` 时默认保持简短。
 
 # 输出要求
 - 只返回台词，
@@ -256,7 +255,9 @@ _DIALOG_EVALUATOR_PROMPT = """\
     * 必须执行 `linguistic_directives` 中的 `[DECISION]` 立场。
     * 必须提及 `content_anchors` 中的核心 `[FACT]`（允许自然、模糊地织入）。
 * **结构禁忌**：
-    * `final_dialog` 原则上禁止超过1句/段落（除非触发核心禁忌）。
+    * **`[SCOPE]` 消费检测**：若 `content_anchors` 含 `[SCOPE]`，检查 `final_dialog` 是否大致在其字数范围内：
+        * 软性指标：±30% 以内偏差可接受，在 `feedback` 中注明即可，不触发驳回。
+        * 致命违规（任何重试次数均适用）：字数偏差超过 2× 上限，**且** `[SCOPE]` 指定的锚点未被覆盖——两项同时成立才判定为违规。
     * 严禁包含括号说明、内心独白或任何形式的系统提示。
     * 输出包括了禁止词汇 (`forbidden_phrases`)
 
