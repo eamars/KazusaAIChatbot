@@ -213,7 +213,7 @@ _WEB_SEARCH_EVALUATOR_PROMPT = """\
 }}
 
 # 输出格式
-请务必返回合法的 JSON 字符串，包含以下字段：
+请务必返回合法的 JSON 字符串，仅包含以下字段：
 {{
     "feedback": "给 Generator 的下一步具体动作建议。如果 should_stop 为 true，此处可留空或总结检索结论。",
     "should_stop": true 或 false
@@ -306,7 +306,7 @@ _WEB_SEARCH_FINALIZER_PROMPT = """\
 }
 
 # 输出格式
-请务必返回合法的 JSON 字符串，包含以下字段：
+请务必返回合法的 JSON 字符串，仅包含以下字段：
 {
     "response": "string",
     "score": <int: 0-100>,

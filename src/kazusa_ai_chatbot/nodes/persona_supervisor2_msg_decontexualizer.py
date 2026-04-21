@@ -60,7 +60,7 @@ _MSG_DECONTEXUALIZER_PROMPT = """\
 }
 
 # 输出要求：
-请务必返回合法的 JSON 字符串，包含以下字段：
+请务必返回合法的 JSON 字符串，仅包含以下字段：
 {
     "output": "重写后的用户信息，或原句",
     "is_modified": true/false,

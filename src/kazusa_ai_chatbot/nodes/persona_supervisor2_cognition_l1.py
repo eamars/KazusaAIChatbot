@@ -70,7 +70,7 @@ _COGNITION_SUBCONSCIOUS_PROMPT = """\
 }}
 
 # 输出格式
-请务必返回合法的 JSON 字符串，包含以下字段：
+请务必返回合法的 JSON 字符串，仅包含以下字段：
 {{
     "emotional_appraisal": "第一人称描述本能感受，极其口语化，如：‘啧，真烦’、‘心里一颤’（30字以内）",
     "interaction_subtext": "捕捉到的潜台词标签（如：隐蔽的羞辱、试探、求关注、施压）"

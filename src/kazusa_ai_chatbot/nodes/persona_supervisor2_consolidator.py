@@ -146,7 +146,7 @@ _GLOBAL_STATE_UPDATER_PROMPT = """\
    - 例如：'刚才那个笨蛋居然怀疑我的缝纫技术，真是气死我了。'
 
 # 输出格式
-请务必返回合法的 JSON 字符串，包含以下字段：
+请务必返回合法的 JSON 字符串，仅包含以下字段：
 {{
     "mood": "string",
     "global_vibe": "string",
@@ -203,7 +203,7 @@ _RELATIONSHIP_RECORDER_PROMPT = """\
 3. 静默检查: 若 `internal_monologue` 中未见明显情感起伏，返回 `{{"skip": true}}`。
 
 # 输出格式
-请务必返回合法的 JSON 字符串，包含以下字段：
+请务必返回合法的 JSON 字符串，仅包含以下字段：
 {{
     "skip": boolean,
     "diary_entry": ["带有 {character_mbti} 风格的主观笔记（30字以内）", ...],
@@ -311,7 +311,7 @@ _FACTS_HARVESTER_PROMPT = """\
 - `rag_metadata` 提供了上游 RAG 的 cache_hit / depth / confidence 等信号。当 `cache_hit=true` 或 `depth=SHALLOW` 时，`research_facts` 的覆盖面可能有限，谨慎判断是否“已知画像”。
 
 # 输出格式 (JSON)
-请务必返回合法的 JSON 字符串，包含以下字段：
+请务必返回合法的 JSON 字符串，仅包含以下字段：
 {{
     "new_facts": [
         {{
@@ -420,7 +420,7 @@ _FACT_HARVESTER_EVALUATOR_PROMPT = """\
     - `action` 与 `target`/基准源主体明显不一致。
 
 # 输出格式 (JSON)
-请务必返回合法的 JSON 字符串：
+请务必返回合法的 JSON 字符串，仅包含以下字段：
 {{
     "should_stop": "boolean (如果没有脑补且实名正确且格式合规，返回 true；仅在违反上述明确红线时返回 false。注意：new_facts 为空本身不构成错误。)",
     "feedback": "具体指明错误点。若无实质错误，返回 '通过审计，无需修改'。禁止输出'请确认是否没有新事实'这类非错误性质建议。",

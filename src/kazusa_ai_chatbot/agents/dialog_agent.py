@@ -168,7 +168,7 @@ _DIALOG_GENERATOR_PROMPT = """\
 }}
 
 # 输出格式
-请务必返回合法的 JSON 字符串，包含以下字段：
+请务必返回合法的 JSON 字符串，仅包含以下字段：
 {{
     "final_dialog": [
         "段落1",
@@ -333,7 +333,7 @@ _DIALOG_EVALUATOR_PROMPT = """\
 }}
 
 # 输出格式
-请务必返回合法的 JSON 字符串：
+请务必返回合法的 JSON 字符串，仅包含以下字段：
 {{
     "feedback": "若通过填 'Passed'；若驳回则简述改进点（如：禁止播报脸红、禁止使用评论性句式、漏掉抹茶事实）",
     "should_stop": boolean

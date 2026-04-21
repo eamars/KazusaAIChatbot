@@ -377,7 +377,7 @@ _MEMORY_RETRIEVER_EVALUATOR_PROMPT = """\
 }}
 
 # 输出格式
-请务必返回合法的 JSON 字符串，包含以下字段：
+请务必返回合法的 JSON 字符串，仅包含以下字段：
 {{
     "feedback": "如果不停止检索，请提供下一步的具体行动计划或搜索建议",
     "should_stop": true或false。如果检索到的信息已足够回答任务，或者已无更多信息可查不需要再调用工具，请设为true
@@ -482,7 +482,7 @@ _MEMORY_RETRIEVER_FINALIZER_PROMPT = """\
 }
 
 # 输出格式
-请务必返回合法的 JSON 字符串，包含以下字段：
+请务必返回合法的 JSON 字符串，仅包含以下字段：
 {
     "response": "string",
     "score": <int: 0-100>,

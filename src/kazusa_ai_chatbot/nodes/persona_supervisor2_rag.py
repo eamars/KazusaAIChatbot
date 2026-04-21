@@ -179,7 +179,7 @@ _EXTERNAL_RAG_DISPATCHER_PROMPT = """\
 }}
 
 # 输出要求：
-请务必返回合法的 JSON 字符串，包含以下字段：
+请务必返回合法的 JSON 字符串，包含但不限于以下字段：
 {{
     "next_action": "web_search_agent" | "end",
     "reasoning": "string",
@@ -279,7 +279,7 @@ _INTERNAL_RAG_DISPATCHER_PROMPT = """\
 }}
 
 # 输出要求：
-请务必返回合法的 JSON 字符串，包含以下字段：
+请务必返回合法的 JSON 字符串，包含但不限于以下字段：
 {{
     "next_action": "memory_retriever_agent" | "end",
     "reasoning": "string",
@@ -377,7 +377,7 @@ _USER_FACT_RAG_DISPATCHER_PROMPT = """\
 }}
 
 # 输出要求：
-请务必返回合法的 JSON 字符串，包含以下字段：
+请务必返回合法的 JSON 字符串，仅包含以下字段：
 {{
     "next_action": "memory_retriever_agent",
     "reasoning": "string",
@@ -472,7 +472,7 @@ _USER_FACT_RAG_FINALIZER_PROMPT = """\
 }}
 
 # 输出要求：
-请务必返回合法的 JSON 字符串，包含以下字段：
+请务必返回合法的 JSON 字符串，仅包含以下字段：
 {{
     "user_rag_finalized": ["..."]  // 保留与 `user_rag_results` 相同结构，但已根据好感度滤镜和时间衰减处理
 }}

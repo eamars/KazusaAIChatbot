@@ -79,7 +79,7 @@ _CONTEXTUAL_AGENT_PROMPT = """\
 }}
 
 # 输出要求
-请务必返回合法的 JSON 字符串，包含以下字段：
+请务必返回合法的 JSON 字符串，仅包含以下字段：
 {{
     "social_distance": "对当前社交距离的详尽描述",
     "emotional_intensity": "对情绪波动程度的文字描述",
@@ -389,7 +389,12 @@ _LINGUISTIC_AGENT_PROMPT = """\
    - 判断标准：该事实是否能被当前 `decontexualized_input` 的话题"自然引用"？若否，**不得**将其列为 `[FACT]`。
    - 避免将与当前话题无关的历史记忆（如用户在另一个场合提到的话题）错误地植入本次回应的硬信息点。
 7. **反重复三原则：** 基于 `chat_history` 最近交流：①上一句用了”反问”，本轮改用”敷衍”或”破碎短句”；②严禁连续两句以相同语气助词（唔、那个、哼）开头；③对连续两次出现的词汇，本轮强制放入 `forbidden_phrases`。
-8. **表达量校准（[SCOPE]）：** 基于已填充的锚点数量与 `logical_stance`，生成一条 `[SCOPE]` 锚点：仅有 `[DECISION]` → `~15字，说完[DECISION]即止`；含 `[FACT]` 或 `[ANSWER]` → `~20-40字，[ANSWER]/[FACT]到位即可`；触发禁忌或含多个实质性锚点 → `~50字以上，[DECISION]、[FACT]、[ANSWER]均需覆盖`。
+8. **表达量校准（[SCOPE]）：** 基于已填充的锚点数量与 `logical_stance`，生成一条 `[SCOPE]` 锚点。
+  例如：
+  * 仅有 `[DECISION]` → `~15字，说完[DECISION]即止`；
+  * 含 `[FACT]` 或 `[ANSWER]` → `~20-40字，[ANSWER]/[FACT]到位即可`；
+  * 触发禁忌或含多个实质性锚点 → `~50字以上，[DECISION]、[FACT]、[ANSWER]均需覆盖`。
+  [SCOPE] 禁止生成实质性的输出指导。必须，且仅包含如上内容。
 
 
 # 角色表达风格 (Persona Constraints)
@@ -415,12 +420,12 @@ _LINGUISTIC_AGENT_PROMPT = """\
 - **self_deprecation:** {ltp_self_deprecation}
 
 # 应用方式 (How to Apply)
-1. 语言质感应当通过以下载体体现：标点（……、——、！！）、语气助词、句式碎片、语序变化、反问/直陈的比例、具体 vs 抽象用词、软化词频率。
+1. 语言质感应当通过以下载体体现：标点（?, !）、语气助词、句式碎片、语序变化、反问/直陈的比例、具体 vs 抽象用词、软化词频率。
 2. **示例：**
-   - `logical_stance = CONFIRM` + 高 `fragmentation` + 高 `emotional_leakage` → 「嗯，我……其实想说……对，我答应了……就这样。」
-   - `logical_stance = REFUSE` + 低 `direct_assertion` + 高 `counter_questioning` → 「这种事……你自己不是很清楚吗？非要我说出来？」
+   - `logical_stance = CONFIRM` + 高 `fragmentation` + 高 `emotional_leakage` → 「嗯，我,其实想说……对，我答应了, 就这样。」
+   - `logical_stance = REFUSE` + 低 `direct_assertion` + 高 `counter_questioning` → 「这种事你自己不是很清楚吗？非要我说出来？」
    - 高 `abstraction_reframing` → 把"我很难过"写成"胸口好像压着一块湿毛巾"。
-3. 这些质感描述须在 `linguistic_style` 字段中被具体落实（例如："大量省略号 + 低自贬 + 高感官化比喻"）。
+3. 这些质感描述须在 `linguistic_style` 字段中被具体落实（例如："大量标点 + 低自贬 + 高感官化比喻"）。
 
 # 输入格式
 {{
@@ -440,7 +445,7 @@ _LINGUISTIC_AGENT_PROMPT = """\
 }}
 
 # 输出格式 (JSON)
-请务必返回合法的 JSON 字符串，包含以下字段：
+请务必返回合法的 JSON 字符串，仅包含以下字段：
 {{
     "rhetorical_strategy": "修辞策略说明（如：通过反问来防御、生硬地转移话题）",
     "linguistic_style": "具体的语言风格约束（如：破碎的短句、大量的语气词）",
@@ -495,7 +500,7 @@ async def call_linguistic_agent(state: CognitionState) -> CognitionState:
     ])
     result = parse_llm_json_output(response.content)
 
-    logger.debug(f"Social Filter: {result}")
+    logger.debug(f"Linguistic Agent: {result}")
 
     # In case AI make some spelling mistakes
     rhetorical_strategy = result.get("rhetorical_strategy", "")
@@ -533,6 +538,7 @@ _VISUAL_AGENT_PROMPT = """\
 }}
 
 # 输出格式 (JSON)
+请务必返回合法的 JSON 字符串，仅包含以下字段：
 {{
     "facial_expression": ["详尽的面部细节描述", ...],
     "body_language": ["具体的肢体动作和姿态", ...],

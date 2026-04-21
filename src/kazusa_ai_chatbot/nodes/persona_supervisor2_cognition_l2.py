@@ -249,7 +249,7 @@ _COGNITION_CONSCIOUSNESS_PROMPT = """\
 }}
 
 # 输出格式
-请务必返回合法的 JSON 字符串，包含以下字段：
+请务必返回合法的 JSON 字符串，仅包含以下字段：
 {{
     "internal_monologue": "第一人称。描述你如何解读对方的潜台词并结合事实得出策略",
     "logical_stance": "逻辑立场",

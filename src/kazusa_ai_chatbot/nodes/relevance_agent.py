@@ -86,7 +86,7 @@ _RELEVANCE_SYSTEM_PROMPT = """\
   - 写法：明确说明实际听众为其他群员，以及{character_name}在消息中的角色（被讨论的对象）。
 
 # 输出格式
-请务必返回合法的 JSON 字符串，包含以下字段：
+请务必返回合法的 JSON 字符串，仅包含以下字段：
 {{
     "should_respond": boolean,
     "reason_to_respond": string,
@@ -145,7 +145,7 @@ _RELEVANCE_SYSTEM_NOISY_PROMPT = """\
   - 写法：明确说明实际听众为其他群员，以及{character_name}在消息中的角色（被讨论的对象）。
 
 # 输出格式
-请务必返回合法的 JSON 字符串，包含以下字段：
+请务必返回合法的 JSON 字符串，仅包含以下字段：
 {{
     "should_respond": boolean,
     "reason_to_respond": string,
@@ -257,7 +257,7 @@ _VISION_DESCRIPTOR_PROMPT = """\
 - **严禁幻觉**：看不清的部分请直接标注“模糊”，不要推测。
 
 # 输出格式
-请务必返回合法的 JSON 字符串，包含以下字段：
+请务必返回合法的 JSON 字符串，仅包含以下字段：
 {{
     "description": "逻辑清晰、细节饱满的文字描述，无需任何开场白。"
 }}
