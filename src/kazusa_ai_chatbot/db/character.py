@@ -39,6 +39,22 @@ async def get_character_state() -> CharacterProfileDoc | dict:
     return await get_character_profile()
 
 
+async def upsert_character_self_image(image_doc: dict) -> None:
+    """Persist the three-tier character self-image document to ``character_state``.
+
+    Args:
+        image_doc: The full three-tier image document to write.
+    """
+    if not image_doc:
+        return
+    db = await get_db()
+    await db.character_state.update_one(
+        {"_id": "global"},
+        {"$set": {"self_image": image_doc}},
+        upsert=True,
+    )
+
+
 async def upsert_character_state(
     mood: str,
     global_vibe: str,

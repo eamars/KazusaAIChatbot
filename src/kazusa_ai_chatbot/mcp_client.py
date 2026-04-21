@@ -44,6 +44,10 @@ class McpManager:
     _cleanup_fns: list = field(default_factory=list)
     _tools: dict[str, ToolInfo] = field(default_factory=dict)
 
+    @staticmethod
+    async def _run_cleanup(cleanup) -> None:
+        await cleanup(None, None, None)
+
     # ── Public API ───────────────────────────────────────────────────
 
     async def start(self) -> None:
@@ -115,11 +119,11 @@ class McpManager:
         # enter the context and keep it alive for the session's lifetime.
         cm = streamablehttp_client(url)
         read_stream, write_stream, _ = await cm.__aenter__()
-        self._cleanup_fns.append(cm.__aexit__)
+        self._cleanup_fns.append(lambda cm=cm: self._run_cleanup(cm.__aexit__))
 
         session = ClientSession(read_stream, write_stream)
         await session.__aenter__()
-        self._cleanup_fns.append(session.__aexit__)
+        self._cleanup_fns.append(lambda session=session: self._run_cleanup(session.__aexit__))
 
         await session.initialize()
         self._sessions[server_name] = session

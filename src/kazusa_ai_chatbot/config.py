@@ -91,7 +91,7 @@ RAG_CACHE_TTL_SECONDS = {
     "user_promises": int(os.getenv("RAG_CACHE_USER_PROMISES_TTL", "900")),
     "internal_memory": int(os.getenv("RAG_CACHE_INTERNAL_MEMORY_TTL", "900")),
     "external_knowledge": int(os.getenv("RAG_CACHE_EXTERNAL_KNOWLEDGE_TTL", "3600")),
-    "user_facts": int(os.getenv("RAG_CACHE_USER_FACTS_TTL", "1800")),  # legacy
+    "knowledge_base": int(os.getenv("RAG_CACHE_KNOWLEDGE_BASE_TTL", "2592000")),  # 30 days
 }
 
 # Depth classifier (SHALLOW vs DEEP routing for the RAG dispatcher).
@@ -113,5 +113,3 @@ SCHEDULED_TASKS_ENABLED = os.getenv("SCHEDULED_TASKS_ENABLED", "true").lower() i
 SERVICE_HOST = os.getenv("SERVICE_HOST", "0.0.0.0")
 SERVICE_PORT = int(os.getenv("SERVICE_PORT", "8000"))
 BRAIN_EXECUTOR_COUNT = int(os.getenv("BRAIN_EXECUTOR_COUNT", "1"))
-# PERSONALITY_PATH removed — character profile is now loaded from MongoDB.
-# Use: python -m scripts.load_character_profile personalities/kazusa.json

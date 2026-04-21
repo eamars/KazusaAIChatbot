@@ -128,6 +128,9 @@ class UserProfileDoc(TypedDict, total=False):
     facts_embedding: list[float]                 # Embedding of all objective facts combined
     facts_updated_at: str                        # ISO-8601 UTC
 
+    # ── Three-tier user image (NEW) ────────────────────────────
+    user_image: dict                             # {milestones, recent_window, historical_summary, meta}
+
     # ── Relationship metrics ───────────────────────────────────
     affinity: int                                # 0–1000 affinity score (default 500)
     last_relationship_insight: str               # Character's instantaneous impression of the user
@@ -164,6 +167,9 @@ class CharacterProfileDoc(TypedDict, total=False):
     global_vibe: str        # See Cognition Layer
     reflection_summary: str # See Cognition Layer
     updated_at: str         # ISO-8601 UTC timestamp of last update
+
+    # ── Three-tier character self-image (NEW) ─────────────────
+    self_image: dict        # {milestones, recent_window, historical_summary, meta}
 
 
 class MemoryDoc(TypedDict, total=False):

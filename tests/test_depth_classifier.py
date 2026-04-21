@@ -12,7 +12,6 @@ from openai import OpenAIError
 
 import kazusa_ai_chatbot.rag.depth_classifier as dc
 from kazusa_ai_chatbot.rag.depth_classifier import (
-    AFFINITY_DEEP_THRESHOLD,
     DEEP,
     DEEP_DISPATCHERS,
     InputDepthClassifier,
@@ -53,31 +52,6 @@ def _patch_embedding(value: list[float]):
 
 
 # ── Tests ──────────────────────────────────────────────────────────
-
-
-class TestAffinityOverride:
-    async def test_low_affinity_forces_deep(self):
-        classifier = InputDepthClassifier()
-        result = await classifier.classify(
-            user_input="hi",
-            user_topic="greeting",
-            affinity=AFFINITY_DEEP_THRESHOLD - 1,
-        )
-        assert result["depth"] == DEEP
-        assert result["trigger_dispatchers"] == DEEP_DISPATCHERS
-
-    async def test_at_threshold_does_not_force_deep(self, monkeypatch):
-        """Affinity >= threshold does NOT auto-force DEEP."""
-        _install_fake_centroids(monkeypatch)
-        classifier = InputDepthClassifier()
-        # Input embedding matches SHALLOW centroid
-        with _patch_embedding([1.0, 0.0, 0.0]):
-            result = await classifier.classify(
-                user_input="what is your name",
-                user_topic="",
-                affinity=AFFINITY_DEEP_THRESHOLD,
-            )
-        assert result["depth"] == SHALLOW
 
 
 class TestFastPathShallow:
@@ -191,23 +165,3 @@ class TestFailureFallback:
         assert result["depth"] == DEEP
 
 
-class TestDispatcherRouting:
-    async def test_shallow_returns_user_rag_only(self, monkeypatch):
-        _install_fake_centroids(monkeypatch)
-        classifier = InputDepthClassifier(similarity_threshold=0.5)
-        with _patch_embedding([1.0, 0.1, 0.0]):
-            result = await classifier.classify(
-                user_input="you like cats?",
-                user_topic="", affinity=700,
-            )
-        assert result["trigger_dispatchers"] == ["user_rag"]
-
-    async def test_deep_returns_all_three(self, monkeypatch):
-        _install_fake_centroids(monkeypatch)
-        classifier = InputDepthClassifier(similarity_threshold=0.5)
-        with _patch_embedding([0.1, 1.0, 0.0]):
-            result = await classifier.classify(
-                user_input="why did you lie to me last time",
-                user_topic="", affinity=700,
-            )
-        assert set(result["trigger_dispatchers"]) == {"user_rag", "internal_rag", "external_rag"}

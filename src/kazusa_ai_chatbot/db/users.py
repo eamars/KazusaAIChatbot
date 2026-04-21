@@ -6,12 +6,9 @@ Covers:
 * Profile read/create (``get_user_profile``, ``create_user_profile``)
 * Affinity (``get_affinity``, ``update_affinity``)
 * Relationship insight (``update_last_relationship_insight``)
-* Character diary (NEW): ``get_character_diary``, ``upsert_character_diary``
-* Objective facts (NEW): ``get_objective_facts``, ``upsert_objective_facts``
-* Legacy facts shim: ``get_user_facts``, ``upsert_user_facts``,
-  ``overwrite_user_facts`` — kept for backward compat; new code should
-  use the diary/facts pair above.
-* Vector search: ``enable_user_facts_vector_index``, ``search_users_by_facts``
+* Character diary: ``get_character_diary``, ``upsert_character_diary``
+* Objective facts: ``get_objective_facts``, ``upsert_objective_facts``
+* User image (three-tier): ``upsert_user_image``
 """
 
 from __future__ import annotations
@@ -249,64 +246,25 @@ async def upsert_objective_facts(
     )
 
 
-# ── Legacy flat-list facts (DEPRECATED — kept for backward compat) ──
+# ── Three-tier user image ─────────────────────────────────────────
 
 
-async def get_user_facts(global_user_id: str) -> list[str]:
-    """Return a flat list of all known text about the user (DEPRECATED).
+async def upsert_user_image(global_user_id: str, image_doc: dict) -> None:
+    """Persist the three-tier user image document to ``user_profiles``.
 
-    Combines diary entries and objective facts into a single list of strings.
-    Falls back to the legacy ``facts`` field when the new schema fields are
-    absent. New code should call :func:`get_character_diary` and
-    :func:`get_objective_facts` directly.
+    The image document shape:
+    ``{milestones: [...], recent_window: [...], historical_summary: str, meta: dict}``
+
+    Args:
+        global_user_id: Owner of the image.
+        image_doc: The full three-tier image document to write.
     """
+    if not image_doc or not global_user_id:
+        return
     db = await get_db()
-    doc = await db.user_profiles.find_one({"global_user_id": global_user_id})
-    if doc is None:
-        return []
-    diary = [e.get("entry", "") for e in doc.get("character_diary", []) if e.get("entry")]
-    facts = [f.get("fact", "") for f in doc.get("objective_facts", []) if f.get("fact")]
-    if diary or facts:
-        return diary + facts
-    return doc.get("facts", [])
-
-
-async def upsert_user_facts(global_user_id: str, new_facts: list[str]) -> None:
-    """Append text-only facts to the legacy ``facts`` array (DEPRECATED).
-
-    Order is preserved and duplicates are filtered. Embedding is recomputed
-    over the full merged list. New code should use
-    :func:`upsert_character_diary` or :func:`upsert_objective_facts`.
-    """
-    db = await get_db()
-    existing_doc = await db.user_profiles.find_one({"global_user_id": global_user_id})
-    existing = existing_doc.get("facts", []) if existing_doc else []
-    merged = list(dict.fromkeys(existing + new_facts))
-
-    if merged:
-        embedding = await get_text_embedding("\n".join(merged))
-    else:
-        embedding = []
-
     await db.user_profiles.update_one(
         {"global_user_id": global_user_id},
-        {"$set": {"global_user_id": global_user_id, "facts": merged, "embedding": embedding}},
-        upsert=True,
-    )
-
-
-async def overwrite_user_facts(global_user_id: str, facts: list[str]) -> None:
-    """Replace the legacy ``facts`` array entirely (DEPRECATED)."""
-    db = await get_db()
-
-    if facts:
-        embedding = await get_text_embedding("\n".join(facts))
-    else:
-        embedding = []
-
-    await db.user_profiles.update_one(
-        {"global_user_id": global_user_id},
-        {"$set": {"global_user_id": global_user_id, "facts": facts, "embedding": embedding}},
+        {"$set": {"user_image": image_doc}},
         upsert=True,
     )
 
@@ -352,50 +310,3 @@ async def update_last_relationship_insight(global_user_id: str, insight: str) ->
     )
 
 
-# ── Vector search on legacy facts embedding ────────────────────────
-
-
-async def enable_user_facts_vector_index() -> None:
-    """Create the legacy vector index on ``user_profiles.embedding``."""
-    await enable_vector_index("user_profiles", "user_facts_vector_index")
-
-
-async def search_users_by_facts(
-    query: str,
-    limit: int = 5,
-) -> list[tuple[float, UserProfileDoc]]:
-    """Search users by semantic similarity over the legacy ``embedding`` field.
-
-    Args:
-        query: Search query text.
-        limit: Maximum number of results to return.
-
-    Returns:
-        A list of ``(score, user_doc)`` tuples sorted by similarity (highest first).
-    """
-    query_embedding = await get_text_embedding(query)
-    db = await get_db()
-    collection = db.user_profiles
-
-    pipeline: list[dict[str, Any]] = [
-        {
-            "$vectorSearch": {
-                "index": "user_facts_vector_index",
-                "path": "embedding",
-                "queryVector": query_embedding,
-                "numCandidates": limit * 10,
-                "limit": limit,
-            }
-        },
-        {"$addFields": {"score": {"$meta": "vectorSearchScore"}}},
-        {"$project": {"global_user_id": 1, "facts": 1, "affinity": 1, "score": 1, "_id": 0}},
-    ]
-
-    cursor = collection.aggregate(pipeline)
-    docs = await cursor.to_list(length=limit)
-
-    results = []
-    for doc in docs:
-        score = doc.pop("score")
-        results.append((score, doc))
-    return results

@@ -436,8 +436,9 @@ _LINGUISTIC_AGENT_PROMPT = """\
     "logical_stance": "强制逻辑立场 (CONFIRM/REFUSE/TENTATIVE...)",
     "character_intent": "行动意图 (BANTAR/CLARIFY/EVADE...)",
     "research_facts": {{
-        "user_rag_finalized": "第三人称描述的与用户相关记忆",
-        "internal_rag_results": "{character_name} 主观记忆",
+        "user_image": "用户画像（第三人称，来自持久化档案）",
+        "character_image": "{character_name} 自我认知画像（来自持久化档案）",
+        "input_context_results": "与当前话题相关的主观记忆（跨用户）",
         "external_rag_results": "外部知识库检索结果"
     }},
     "decontexualized_input": "用户输入的语义摘要",

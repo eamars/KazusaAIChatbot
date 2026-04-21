@@ -46,9 +46,8 @@ DEFAULT_TTL_SECONDS = {
 
     # External, GLOBAL scope (shared across users — use global_user_id="")
     "external_knowledge": 3600,     # 1 hour — web search / shared knowledge
+    "knowledge_base": 2592000,      # 30 days — accumulated cross-session topic knowledge
 
-    # Legacy (kept for backward compat with Stage 1 entries; remove after Stage 4a)
-    "user_facts": 1800,             # DEPRECATED: see character_diary + objective_user_facts
 }
 
 
@@ -594,19 +593,6 @@ async def test_main() -> None:
         print(json.dumps(hit, indent=2, default=str))
     else:
         print("Misses")
-
-    # removed = await cache.invalidate_pattern(
-    #     cache_type="user_facts",
-    #     global_user_id="user-test-001",
-    # )
-    # print(f"[invalidate_pattern] removed={removed}")
-
-    # miss_after_invalidate = await cache.retrieve_if_similar(
-    #     embedding=emb_a_similar,
-    #     cache_type="user_facts",
-    #     global_user_id="user-test-001",
-    # )
-    # print(f"[retrieve_if_similar after invalidate] hit={miss_after_invalidate is not None}")
 
     print(f"[get_stats] {cache.get_stats()}")
 

@@ -41,16 +41,20 @@ from kazusa_ai_chatbot.db import (
     ObjectiveFactEntry,
     ScheduledEventDoc,
     build_memory_doc,
+    get_text_embedding,
     increment_rag_version,
     save_memory,
     update_affinity,
     update_last_relationship_insight,
     upsert_character_diary,
+    upsert_character_self_image,
     upsert_character_state,
     upsert_objective_facts,
+    upsert_user_image,
 )
 from kazusa_ai_chatbot.nodes.persona_supervisor2_rag import _get_rag_cache
 from kazusa_ai_chatbot.nodes.persona_supervisor2_schema import GlobalPersonaState
+from kazusa_ai_chatbot.rag.depth_classifier import DEEP
 from kazusa_ai_chatbot.scheduler import schedule_event
 from kazusa_ai_chatbot.utils import build_affinity_block, get_llm, parse_llm_json_output
 
@@ -61,6 +65,12 @@ logger = logging.getLogger(__name__)
 # |affinity_delta| > this clears all of the user's cache entries (major mood
 # shift → every cached view is now suspect).
 AFFINITY_CACHE_NUKE_THRESHOLD = 50
+
+# ── Image bookkeeping constants ──────────────────────────────────────
+_USER_IMAGE_MAX_RECENT_WINDOW = 6       # sessions to keep before overflow to historical
+_USER_IMAGE_HISTORICAL_MAX_CHARS = 1500 # compress historical_summary when above this
+_CHARACTER_IMAGE_MAX_RECENT_WINDOW = 6
+_CHARACTER_IMAGE_HISTORICAL_MAX_CHARS = 1500
 
 
 def _merge_dicts(a: dict, b: dict) -> dict:
@@ -113,6 +123,363 @@ class ConsolidatorState(TypedDict):
     fact_harvester_feedback_message: Annotated[list, add_messages]
     should_stop: bool
 
+
+
+# ── Image synthesizer prompts ────────────────────────────────────────
+
+_USER_IMAGE_SESSION_SUMMARY_PROMPT = """\
+你负责将本轮对话中新出现的用户信息压缩为一条简洁的会话摘要，追加到角色对用户的滚动印象记录中。
+
+# 背景信息
+- 角色：{character_name}
+- 用户：{user_name}
+
+# 处理准则
+1. 仅记录**新增或发生变化**的内容——不要复述已知印象。
+2. 以第三人称视角描述用户本轮的表现及角色对其的感知变化。
+3. 保持简洁（100字以内）。
+4. 里程碑事件（由 `milestone_facts` 字段提供）已单独记录，本摘要无需重复。
+
+# 输入格式
+{{
+    "diary_entries": ["角色本轮的主观日记条目"],
+    "non_milestone_facts": ["本轮提取的非里程碑用户事实"],
+    "last_relationship_insight": "本轮角色对用户的最核心印象",
+    "affinity_delta": int
+}}
+
+# 输出格式
+请务必返回合法的 JSON 字符串，仅包含以下字段：
+{{
+    "session_summary": "一段简洁的第三人称叙述（≤100字），描述本轮对话中用户的新表现与角色感知的变化"
+}}
+"""
+_user_image_session_summary_llm = get_llm(temperature=0.3, top_p=0.9)
+
+
+_USER_IMAGE_COMPRESS_PROMPT = """\
+你负责对角色对用户的历史印象摘要进行压缩，在字数减半的前提下保留最具辨识度的核心特征。
+
+# 压缩准则
+1. 保留：稳定的个性特征、关系弧线中的重要转折、反复出现的行为模式。
+2. 删减：一次性情绪波动、过于具体的单次事件细节、与核心性格无关的冗余描述。
+3. 保持第三人称叙述，字数控制在500字以内。
+4. 禁止增加新内容或推断原文未提及的信息。
+
+# 输入格式
+{{
+    "historical_summary": "当前历史摘要（待压缩）"
+}}
+
+# 输出格式
+请务必返回合法的 JSON 字符串，仅包含以下字段：
+{{
+    "compressed_summary": "压缩后的历史摘要（≤500字）"
+}}
+"""
+_user_image_compress_llm = get_llm(temperature=0.2, top_p=0.9)
+
+
+_CHARACTER_IMAGE_SESSION_SUMMARY_PROMPT = """\
+你负责将本轮对话结束后角色的自我反馈压缩为一条简洁的自我印象摘要，追加到角色自我认知的滚动记录中。
+
+# 背景信息
+- 角色：{character_name}
+
+# 处理准则
+1. 以第三人称视角描述角色本轮对话后的心理状态变化与自我认知。
+2. 聚焦于持续性影响（如情绪沉淀、自我认知更新），避免记录一次性的心情波动。
+3. 保持简洁（80字以内）。
+
+# 输入格式
+{{
+    "mood": "本轮情绪沉淀",
+    "global_vibe": "本轮心理底色",
+    "reflection_summary": "本轮复盘总结（角色第一人称）"
+}}
+
+# 输出格式
+请务必返回合法的 JSON 字符串，仅包含以下字段：
+{{
+    "session_summary": "一段简洁的第三人称描述（≤80字），反映角色本轮对话后的自我认知变化"
+}}
+"""
+_character_image_session_summary_llm = get_llm(temperature=0.3, top_p=0.9)
+
+
+_CHARACTER_IMAGE_COMPRESS_PROMPT = """\
+你负责对角色的自我认知历史摘要进行压缩，保留最稳定的核心特征，删减重复或过时的细节。
+
+# 压缩准则
+1. 保留：稳定的自我认知、反复出现的情感基调、对关系与自身的持久性认识。
+2. 删减：一次性情绪波动、与核心自我认知无关的冗余描述。
+3. 保持第三人称叙述，字数控制在500字以内。
+
+# 输入格式
+{{
+    "historical_summary": "当前历史摘要（待压缩）"
+}}
+
+# 输出格式
+请务必返回合法的 JSON 字符串，仅包含以下字段：
+{{
+    "compressed_summary": "压缩后的历史摘要（≤500字）"
+}}
+"""
+_character_image_compress_llm = get_llm(temperature=0.2, top_p=0.9)
+
+
+_KNOWLEDGE_BASE_DISTILL_PROMPT = """\
+你负责从本轮对话的信息检索结果中提取具有通用参考价值的知识条目，以便未来相似话题的对话可以复用。
+
+# 提取准则
+1. 仅保留**客观事实性知识**，不包含用户个人信息或角色主观看法。
+2. 每条知识应能独立成立，脱离当前对话上下文仍有意义。
+3. 避免提取已经是常识的信息。
+4. 每条知识简洁陈述（60字以内）。
+5. 若无值得提取的知识，返回空列表。
+
+# 输入格式
+{{
+    "input_context_results": "本轮话题相关记忆检索结果",
+    "external_rag_results": "本轮外部知识检索结果"
+}}
+
+# 输出格式
+请务必返回合法的 JSON 字符串，仅包含以下字段：
+{{
+    "knowledge_entries": [
+        "客观知识条目1",
+        "客观知识条目2"
+    ]
+}}
+"""
+_knowledge_base_distill_llm = get_llm(temperature=0.0, top_p=1.0)
+
+
+# ── Image synthesizer helpers ────────────────────────────────────────
+
+
+async def _update_user_image(
+    state: "ConsolidatorState",
+    *,
+    timestamp: str,
+    processed_affinity_delta: int,
+) -> dict | None:
+    """Build an updated user image document using the rolling three-tier mechanism.
+
+    Appends milestone facts directly to the milestones list and generates a
+    session summary for non-milestone data.  Overflows the oldest recent-window
+    entry into historical_summary when the window is full, compressing the
+    historical summary when it exceeds the character budget.
+
+    Args:
+        state: Current consolidator state (diary, facts, insight, user_profile).
+        timestamp: ISO-8601 UTC timestamp for this session.
+        processed_affinity_delta: Scaled affinity delta for this session.
+
+    Returns:
+        Updated image document dict, or ``None`` if nothing changed this session.
+    """
+    diary_entries = state.get("diary_entry") or []
+    new_facts = state.get("new_facts") or []
+    last_relationship_insight = state.get("last_relationship_insight") or ""
+
+    if not diary_entries and not new_facts and not last_relationship_insight:
+        return None
+
+    character_name = (state.get("character_profile") or {}).get("name", "")
+    user_name = state.get("user_name", "")
+
+    milestone_facts = [f for f in new_facts if f.get("is_milestone")]
+    non_milestone_facts = [f for f in new_facts if not f.get("is_milestone")]
+
+    existing_image = (state.get("user_profile") or {}).get("user_image") or {}
+    milestones = list(existing_image.get("milestones") or [])
+    recent_window = list(existing_image.get("recent_window") or [])
+    historical_summary = existing_image.get("historical_summary") or ""
+    synthesis_count = (existing_image.get("meta") or {}).get("synthesis_count", 0)
+
+    for fact in milestone_facts:
+        milestones.append({
+            "event": fact.get("description", ""),
+            "timestamp": timestamp,
+            "category": fact.get("milestone_category", ""),
+            "superseded_by": None,
+        })
+
+    has_session_content = bool(diary_entries or non_milestone_facts or last_relationship_insight)
+    session_summary = ""
+    if has_session_content:
+        system_prompt = SystemMessage(_USER_IMAGE_SESSION_SUMMARY_PROMPT.format(
+            character_name=character_name,
+            user_name=user_name,
+        ))
+        user_prompt = HumanMessage(content=json.dumps({
+            "diary_entries": diary_entries,
+            "non_milestone_facts": [f.get("description", "") for f in non_milestone_facts],
+            "last_relationship_insight": last_relationship_insight,
+            "affinity_delta": processed_affinity_delta,
+        }, ensure_ascii=False))
+        response = await _user_image_session_summary_llm.ainvoke([system_prompt, user_prompt])
+        result = parse_llm_json_output(response.content)
+        session_summary = result.get("session_summary", "")
+
+    if session_summary:
+        recent_window.append({"timestamp": timestamp, "summary": session_summary})
+
+        if len(recent_window) > _USER_IMAGE_MAX_RECENT_WINDOW:
+            oldest = recent_window.pop(0)
+            historical_summary = (
+                (historical_summary + "\n" + oldest["summary"]).strip()
+                if historical_summary
+                else oldest["summary"]
+            )
+
+            if len(historical_summary) > _USER_IMAGE_HISTORICAL_MAX_CHARS:
+                sys_p = SystemMessage(_USER_IMAGE_COMPRESS_PROMPT)
+                usr_p = HumanMessage(content=json.dumps(
+                    {"historical_summary": historical_summary}, ensure_ascii=False
+                ))
+                compress_response = await _user_image_compress_llm.ainvoke([sys_p, usr_p])
+                compress_result = parse_llm_json_output(compress_response.content)
+                historical_summary = compress_result.get("compressed_summary", historical_summary)
+
+    return {
+        "milestones": milestones,
+        "recent_window": recent_window,
+        "historical_summary": historical_summary,
+        "meta": {"synthesis_count": synthesis_count + 1, "last_updated": timestamp},
+    }
+
+
+async def _update_character_image(
+    state: "ConsolidatorState",
+    *,
+    timestamp: str,
+) -> dict | None:
+    """Build an updated character self-image document using the rolling three-tier mechanism.
+
+    Args:
+        state: Current consolidator state (mood, global_vibe, reflection_summary,
+            character_profile with existing self_image).
+        timestamp: ISO-8601 UTC timestamp for this session.
+
+    Returns:
+        Updated image document dict, or ``None`` if no reflection was produced.
+    """
+    reflection_summary = state.get("reflection_summary") or ""
+    if not reflection_summary:
+        return None
+
+    mood = state.get("mood") or ""
+    global_vibe = state.get("global_vibe") or ""
+    character_profile = state.get("character_profile") or {}
+    character_name = character_profile.get("name", "")
+
+    existing_image = character_profile.get("self_image") or {}
+    milestones = list(existing_image.get("milestones") or [])
+    recent_window = list(existing_image.get("recent_window") or [])
+    historical_summary = existing_image.get("historical_summary") or ""
+    synthesis_count = (existing_image.get("meta") or {}).get("synthesis_count", 0)
+
+    system_prompt = SystemMessage(_CHARACTER_IMAGE_SESSION_SUMMARY_PROMPT.format(
+        character_name=character_name,
+    ))
+    user_prompt = HumanMessage(content=json.dumps({
+        "mood": mood,
+        "global_vibe": global_vibe,
+        "reflection_summary": reflection_summary,
+    }, ensure_ascii=False))
+    response = await _character_image_session_summary_llm.ainvoke([system_prompt, user_prompt])
+    result = parse_llm_json_output(response.content)
+    session_summary = result.get("session_summary", "")
+
+    if session_summary:
+        recent_window.append({"timestamp": timestamp, "summary": session_summary})
+
+        if len(recent_window) > _CHARACTER_IMAGE_MAX_RECENT_WINDOW:
+            oldest = recent_window.pop(0)
+            historical_summary = (
+                (historical_summary + "\n" + oldest["summary"]).strip()
+                if historical_summary
+                else oldest["summary"]
+            )
+
+            if len(historical_summary) > _CHARACTER_IMAGE_HISTORICAL_MAX_CHARS:
+                sys_p = SystemMessage(_CHARACTER_IMAGE_COMPRESS_PROMPT)
+                usr_p = HumanMessage(content=json.dumps(
+                    {"historical_summary": historical_summary}, ensure_ascii=False
+                ))
+                compress_response = await _character_image_compress_llm.ainvoke([sys_p, usr_p])
+                compress_result = parse_llm_json_output(compress_response.content)
+                historical_summary = compress_result.get("compressed_summary", historical_summary)
+
+    return {
+        "milestones": milestones,
+        "recent_window": recent_window,
+        "historical_summary": historical_summary,
+        "meta": {"synthesis_count": synthesis_count + 1, "last_updated": timestamp},
+    }
+
+
+async def _update_knowledge_base(
+    state: "ConsolidatorState",
+) -> int:
+    """Distil topic knowledge from this session's deep RAG results into the knowledge base.
+
+    Only runs when the RAG metadata records a DEEP dispatch, and only when
+    there is non-empty retrieval content to distil.
+
+    Args:
+        state: Consolidator state carrying ``metadata`` (with ``depth`` field
+            from the RAG pass) and ``research_facts``.
+
+    Returns:
+        Number of knowledge entries stored (0 if nothing was written).
+    """
+    metadata = state.get("metadata") or {}
+    if metadata.get("depth") != DEEP:
+        return 0
+
+    research_facts = state.get("research_facts") or {}
+    input_context_results = research_facts.get("input_context_results") or ""
+    external_results = research_facts.get("external_rag_results") or ""
+
+    if not input_context_results and not external_results:
+        return 0
+
+    system_prompt = SystemMessage(_KNOWLEDGE_BASE_DISTILL_PROMPT)
+    user_prompt = HumanMessage(content=json.dumps({
+        "input_context_results": input_context_results,
+        "external_rag_results": external_results,
+    }, ensure_ascii=False))
+    response = await _knowledge_base_distill_llm.ainvoke([system_prompt, user_prompt])
+    result = parse_llm_json_output(response.content)
+    entries: list[str] = result.get("knowledge_entries") or []
+
+    if not entries:
+        return 0
+
+    rag_cache = await _get_rag_cache()
+    stored = 0
+    for entry in entries:
+        if not entry:
+            continue
+        try:
+            embedding = await get_text_embedding(entry)
+            await rag_cache.store(
+                embedding=embedding,
+                results={"knowledge_base_results": entry},
+                cache_type="knowledge_base",
+                global_user_id="",
+                metadata={"source": "knowledge_base_updater"},
+            )
+            stored += 1
+        except Exception:
+            logger.exception("_update_knowledge_base: failed to store entry")
+
+    return stored
 
 
 _GLOBAL_STATE_UPDATER_PROMPT = """\
@@ -266,7 +633,7 @@ _FACTS_HARVESTER_PROMPT = """\
    - **记录**：具有长期稳定性的**属性级陈述**（如：{user_name}的职业、住址、对某物的长期厌恶/偏好）。
    - **记录**：从 `research_facts.external_rag_results` 中提取的**新**信息。
    - **严禁记录**：瞬态动作、对话内容、以及任何关于“奖励”、“打算”、“计划”的内容。
-   - **去重**：如果 `research_facts.user_rag_finalized` 或 `research_facts.internal_rag_results` 中已存在相似画像，严禁重复提取。
+   - **去重**：如果 `research_facts.user_image` 或 `research_facts.input_context_results` 中已存在相似画像，严禁重复提取。
 
 3. **承诺 (future_promises) 判定标准 [核心逻辑]**:
    - **所有关于“以后、今晚、下次、奖励、惩罚”的内容，必须且只能记录在这里。**
@@ -290,6 +657,15 @@ _FACTS_HARVESTER_PROMPT = """\
    - 若同时存在“触发条件 + 时间线索”，两者都保留：触发条件留在 `action`，时间线索写入 `due_time`。
    - 只有在“纯提问且无任何认可信号（含 logical_stance 与 content_anchors）”时，才不要生成 promise。
 
+4. **里程碑标记 (is_milestone)**:
+   - 若事实属于以下类别之一，则将 `is_milestone` 置为 `true`，否则为 `false`：
+     - `preference`（明确偏好）: 用户明确、持久表达”喜欢/讨厌/永远不/一直”等偏好陈述（如”{user_name}永远不吃辣”）。
+     - `relationship_state`（关系状态）: 双方关系发生明确变化（如”我们现在是朋友了”、”我信任{character_name}”）。
+     - `permission`（许可/禁止）: 用户对 {character_name} 授权或限制的明确声明（如”你可以叫我小名”、”不许再提这件事”）。
+     - `revelation`（重大披露）: 用户首次透露的重要身份/健康/隐私信息（如职业、重大疾病、秘密）。
+   - 命中任意类别时，`milestone_category` 填写对应英文键（`preference` / `relationship_state` / `permission` / `revelation`）。
+   - 普通事实（临时状态、日常行程等）设 `is_milestone: false`，`milestone_category: “”`。
+
 5. **future_promises 示例（必须遵守）**:
    - ✅ 正确：
      - `action`: `杏山千纱在EAMARS完成作业后对EAMARS执行奖励`
@@ -300,7 +676,7 @@ _FACTS_HARVESTER_PROMPT = """\
      - `action`: `杏山千纱打算下次奖励EAMARS`
 
 6. **拒绝复读**:
-   - 严禁记录“某人说了某话”。如果信息已经由对话历史承载，且不涉及长期画像更新，则返回空列表。
+   - 严禁记录”某人说了某话”。如果信息已经由对话历史承载，且不涉及长期画像更新，则返回空列表。
 
 # 闭环反馈指南
 - 在生成回复前，请检查输入信息列表中的最后一条来自 Evaluator 的消息 (Evaluator Feedback)。
@@ -317,7 +693,9 @@ _FACTS_HARVESTER_PROMPT = """\
         {{
             "entity": "事实所属的主语实名（如 {user_name}、{character_name}、或具体物品/地点名）",
             "category": "事实类别标签（如 occupation、location、preference、hobby、relationship、health、schedule、personality 等）",
-            "description": "属性级的客观陈述。格式：'[主语] + [属性/状态]'。示例：'{user_name}住在新西兰奥克兰' 或 '{user_name}对猫毛过敏'。严禁使用叙事句式（如'在某情境下做了某事'）。"
+            "description": "属性级的客观陈述。格式：'[主语] + [属性/状态]'。示例：'{user_name}住在新西兰奥克兰' 或 '{user_name}对猫毛过敏'。严禁使用叙事句式（如'在某情境下做了某事'）。",
+            "is_milestone": false,
+            "milestone_category": ""
         }}
     ],
     "future_promises": [
@@ -405,7 +783,7 @@ _FACT_HARVESTER_EVALUATOR_PROMPT = """\
 - **冗余复读**:
     - 检查候选结果是否只是在复读对话（如“某人问...”）。
     - 必须转换为客观陈述。*注意：不要审计输入源的语气，只审计候选结果的陈述方式。*
-- **旧闻复读**: 如果该信息在 `research_facts.user_rag_finalized` 或 `research_facts.internal_rag_results` 标记的内部库中已存在，判定为 FAIL。
+- **旧闻复读**: 如果该信息在 `research_facts.user_image` 或 `research_facts.input_context_results` 标记的内部库中已存在，判定为 FAIL。
 - **脑补事实**: 严禁出现基准源中没有的名词或事实
 - **描述格式违规**: `new_facts` 中的 `description` 必须是属性级陈述（如 '{user_name}住在奥克兰'），严禁使用叙事句式（如 '在某情境下做了某事'）。若发现叙事句式，要求改写为属性陈述。
 - **类别缺失或不当**: `new_facts` 中的 `category` 必须是有意义的英文标签（如 occupation、location、preference、hobby 等）。若缺失、为空、或为无意义的 "general"，要求补充具体类别。
@@ -763,12 +1141,47 @@ async def db_writer(state: ConsolidatorState) -> dict:
         except PyMongoError:
             logger.exception("db_writer: cache invalidation failed")
 
+    # ── Step 6: user image (three-tier rolling) ─────────────────────
+    if global_user_id:
+        try:
+            user_image_doc = await _update_user_image(
+                state,
+                timestamp=timestamp,
+                processed_affinity_delta=processed_affinity_delta,
+            )
+            if user_image_doc is not None:
+                await upsert_user_image(global_user_id, user_image_doc)
+                write_log["user_image"] = True
+        except Exception:
+            logger.exception("db_writer: failed to update user_image")
+            write_log["user_image"] = False
+
+    # ── Step 7: character self-image (three-tier rolling) ────────────
+    try:
+        character_image_doc = await _update_character_image(state, timestamp=timestamp)
+        if character_image_doc is not None:
+            await upsert_character_self_image(character_image_doc)
+            write_log["character_image"] = True
+    except Exception:
+        logger.exception("db_writer: failed to update character_image")
+        write_log["character_image"] = False
+
+    # ── Step 8: knowledge-base distillation (DEEP passes only) ───────
+    kb_count = 0
+    try:
+        kb_count = await _update_knowledge_base(state)
+        write_log["knowledge_base"] = kb_count > 0
+    except Exception:
+        logger.exception("db_writer: failed to update knowledge_base")
+        write_log["knowledge_base"] = False
+
     metadata.update({
         "write_success": write_log,
         "cache_invalidation_scope": cache_invalidated,
         "scheduled_event_ids": scheduled_event_ids,
         "affinity_before": user_affinity_score,
         "affinity_delta_processed": processed_affinity_delta,
+        "knowledge_base_entries_written": kb_count,
     })
 
     return {"metadata": metadata}

@@ -59,21 +59,17 @@ from kazusa_ai_chatbot.db.conversation import (
 from kazusa_ai_chatbot.db.users import (
     add_suspected_alias,
     create_user_profile,
-    enable_user_facts_vector_index,
     get_affinity,
     get_character_diary,
     get_objective_facts,
-    get_user_facts,
     get_user_profile,
     link_platform_account,
-    overwrite_user_facts,
     resolve_global_user_id,
-    search_users_by_facts,
     update_affinity,
     update_last_relationship_insight,
     upsert_character_diary,
     upsert_objective_facts,
-    upsert_user_facts,
+    upsert_user_image,
 )
 
 # ── Character state ───────────────────────────────────────────────
@@ -81,6 +77,7 @@ from kazusa_ai_chatbot.db.character import (
     get_character_profile,
     get_character_state,
     save_character_profile,
+    upsert_character_self_image,
     upsert_character_state,
 )
 
@@ -116,15 +113,15 @@ __all__ = [
     # Conversation
     "get_conversation_history", "save_conversation", "search_conversation_history",
     # Users
-    "add_suspected_alias", "create_user_profile", "enable_user_facts_vector_index",
-    "get_affinity", "get_character_diary", "get_objective_facts", "get_user_facts",
-    "get_user_profile", "link_platform_account", "overwrite_user_facts",
-    "resolve_global_user_id", "search_users_by_facts", "update_affinity",
+    "add_suspected_alias", "create_user_profile",
+    "get_affinity", "get_character_diary", "get_objective_facts",
+    "get_user_profile", "link_platform_account",
+    "resolve_global_user_id", "update_affinity",
     "update_last_relationship_insight", "upsert_character_diary",
-    "upsert_objective_facts", "upsert_user_facts",
+    "upsert_objective_facts", "upsert_user_image",
     # Character
     "get_character_profile", "get_character_state", "save_character_profile",
-    "upsert_character_state",
+    "upsert_character_self_image", "upsert_character_state",
     # Memory
     "enable_memory_vector_index", "save_memory", "search_memory",
     # RAG cache

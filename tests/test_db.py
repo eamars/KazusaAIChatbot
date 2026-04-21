@@ -17,9 +17,7 @@ from kazusa_ai_chatbot.db import (
     get_character_state,
     get_conversation_history,
     get_db,
-    get_user_facts,
     get_user_profile,
-    overwrite_user_facts,
     save_character_profile,
     save_conversation,
     save_memory,
@@ -27,7 +25,6 @@ from kazusa_ai_chatbot.db import (
     update_affinity,
     update_last_relationship_insight,
     upsert_character_state,
-    upsert_user_facts,
 )
 
 # Mark for tests that require a running MongoDB instance.
@@ -126,162 +123,6 @@ async def test_get_conversation_history_filters():
         db.conversation_history.find.assert_called_with({
             "global_user_id": "user_123"
         })
-
-
-@pytest.mark.asyncio
-async def test_get_user_facts_found():
-    db = _mock_db()
-    db.user_profiles.find_one = AsyncMock(return_value={"global_user_id": "u1", "facts": ["fact1", "fact2"]})
-
-    with patch("kazusa_ai_chatbot.db.get_db", new_callable=AsyncMock, return_value=db):
-        result = await get_user_facts("u1")
-
-    assert result == ["fact1", "fact2"]
-
-
-@pytest.mark.asyncio
-async def test_get_user_facts_not_found():
-    db = _mock_db()
-    db.user_profiles.find_one = AsyncMock(return_value=None)
-
-    with patch("kazusa_ai_chatbot.db.get_db", new_callable=AsyncMock, return_value=db):
-        result = await get_user_facts("u1")
-
-    assert result == []
-
-
-@pytest.mark.asyncio
-async def test_upsert_user_facts_deduplicates():
-    db = _mock_db()
-    db.user_profiles.find_one = AsyncMock(return_value={"global_user_id": "u1", "facts": ["fact1", "fact2"]})
-    db.user_profiles.update_one = AsyncMock()
-
-    with patch("kazusa_ai_chatbot.db.get_db", new_callable=AsyncMock, return_value=db), \
-         patch("kazusa_ai_chatbot.db.get_text_embedding", new_callable=AsyncMock, return_value=[0.1, 0.2, 0.3]):
-        await upsert_user_facts("u1", ["fact2", "fact3"])
-
-    call_args = db.user_profiles.update_one.call_args
-    # Check the $set payload
-    set_payload = call_args[0][1]["$set"]
-    assert set_payload["facts"] == ["fact1", "fact2", "fact3"]
-    assert set_payload["embedding"] == [0.1, 0.2, 0.3]
-    assert set_payload["global_user_id"] == "u1"
-
-
-@pytest.mark.asyncio
-async def test_upsert_user_facts_empty_facts():
-    db = _mock_db()
-    db.user_profiles.find_one = AsyncMock(return_value={"global_user_id": "u1", "facts": []})
-    db.user_profiles.update_one = AsyncMock()
-
-    with patch("kazusa_ai_chatbot.db.get_db", new_callable=AsyncMock, return_value=db):
-        await upsert_user_facts("u1", [])
-
-    call_args = db.user_profiles.update_one.call_args
-    # Check the $set payload
-    set_payload = call_args[0][1]["$set"]
-    assert set_payload["facts"] == []
-    assert set_payload["embedding"] == []
-    assert set_payload["global_user_id"] == "u1"
-
-
-@pytest.mark.asyncio
-async def test_enable_user_facts_vector_index_mocked():
-    db = _mock_db()
-    
-    # Create a proper AsyncMock for the collection
-    collection = AsyncMock()
-    
-    # Mock list_search_indexes to simulate no existing index
-    async def mock_list_indexes():
-        return
-        yield  # This makes it an async generator that yields nothing
-    
-    collection.list_search_indexes = MagicMock(return_value=mock_list_indexes())
-    collection.create_search_index = AsyncMock()
-    db.__getitem__.return_value = collection
-
-    with patch("kazusa_ai_chatbot.db.get_db", new_callable=AsyncMock, return_value=db), \
-         patch("kazusa_ai_chatbot.db.get_text_embedding", new_callable=AsyncMock, return_value=[0.1, 0.2, 0.3]):
-        await db_module.enable_user_facts_vector_index()
-    
-    collection.create_search_index.assert_called_once()
-    # Check the model definition
-    model = collection.create_search_index.call_args[0][0]
-    assert model.document["name"] == "user_facts_vector_index"
-    assert model.document["type"] == "vectorSearch"
-    assert model.document["definition"]["fields"][0]["numDimensions"] == 3
-
-
-@pytest.mark.asyncio
-async def test_overwrite_user_facts_replaces_existing():
-    """overwrite_user_facts should completely replace existing facts."""
-    db = _mock_db()
-    db.user_profiles.update_one = AsyncMock()
-    
-    with patch("kazusa_ai_chatbot.db.get_db", new_callable=AsyncMock, return_value=db), \
-         patch("kazusa_ai_chatbot.db.get_text_embedding", new_callable=AsyncMock, return_value=[0.1, 0.2, 0.3]):
-        await overwrite_user_facts("user_1", ["New fact 1", "New fact 2"])
-    
-    # Verify update_one was called with the new facts (not merged)
-    db.user_profiles.update_one.assert_called_once_with(
-        {"global_user_id": "user_1"},
-        {"$set": {"global_user_id": "user_1", "facts": ["New fact 1", "New fact 2"], "embedding": [0.1, 0.2, 0.3]}},
-        upsert=True,
-    )
-
-
-@pytest.mark.asyncio
-async def test_overwrite_user_facts_empty():
-    """overwrite_user_facts should handle empty facts list."""
-    db = _mock_db()
-    db.user_profiles.update_one = AsyncMock()
-    
-    with patch("kazusa_ai_chatbot.db.get_db", new_callable=AsyncMock, return_value=db), \
-         patch("kazusa_ai_chatbot.db.get_text_embedding", new_callable=AsyncMock, return_value=[]):
-        await overwrite_user_facts("user_1", [])
-    
-    # Verify update_one was called with empty facts and empty embedding
-    db.user_profiles.update_one.assert_called_once_with(
-        {"global_user_id": "user_1"},
-        {"$set": {"global_user_id": "user_1", "facts": [], "embedding": []}},
-        upsert=True,
-    )
-
-
-@pytest.mark.asyncio
-async def test_search_users_by_facts_integration():
-    """Test user search functionality end-to-end with mocked aggregation."""
-    # Mock the aggregation pipeline results
-    mock_docs = [
-        {"user_id": "u1", "facts": ["likes music", "plays guitar"], "affinity": 750, "score": 0.85},
-        {"user_id": "u2", "facts": ["enjoys reading"], "affinity": 500, "score": 0.72},
-    ]
-    
-    # Create a complete mock setup
-    from unittest.mock import MagicMock
-    db = MagicMock()
-    collection = MagicMock()
-    cursor = MagicMock()
-    
-    # Set up the chain: db.user_profiles.aggregate() -> cursor
-    db.user_profiles = collection
-    collection.aggregate.return_value = cursor
-    cursor.to_list = AsyncMock(return_value=mock_docs)
-    
-    with patch("kazusa_ai_chatbot.db.get_db", new_callable=AsyncMock, return_value=db), \
-         patch("kazusa_ai_chatbot.db.get_text_embedding", new_callable=AsyncMock, return_value=[0.1, 0.2, 0.3]):
-        results = await db_module.search_users_by_facts("musical person", limit=5)
-    
-    # Verify the aggregation pipeline was called
-    collection.aggregate.assert_called_once()
-    
-    # Verify results
-    assert len(results) == 2
-    assert results[0][0] == 0.85  # score
-    assert results[0][1]["user_id"] == "u1"
-    assert results[1][0] == 0.72  # score
-    assert results[1][1]["user_id"] == "u2"
 
 
 @pytest.mark.asyncio
@@ -816,51 +657,6 @@ async def test_live_conversation_history_channel_isolation(live_test_db):
     assert history_b[0]["content"] == "In channel B"
 
 
-# ── User facts ────────────────────────────────────────────────────────
-
-
-@live_db
-@pytest.mark.asyncio
-async def test_live_user_facts_empty(live_test_db):
-    """No facts for a new user."""
-    facts = await get_user_facts("nonexistent_user")
-    assert facts == []
-
-
-@live_db
-@pytest.mark.asyncio
-async def test_live_upsert_and_get_user_facts(live_test_db):
-    """Store facts and retrieve them."""
-    await upsert_user_facts("user_1", ["Likes swords", "Goes by Commander"])
-    facts = await get_user_facts("user_1")
-
-    assert "Likes swords" in facts
-    assert "Goes by Commander" in facts
-    assert len(facts) == 2
-
-
-@live_db
-@pytest.mark.asyncio
-async def test_live_user_facts_deduplication(live_test_db):
-    """Upserting duplicate facts should not create duplicates."""
-    await upsert_user_facts("user_1", ["Likes swords", "Goes by Commander"])
-    await upsert_user_facts("user_1", ["Goes by Commander", "Allied with North"])
-
-    facts = await get_user_facts("user_1")
-    assert facts == ["Likes swords", "Goes by Commander", "Allied with North"]
-
-
-@live_db
-@pytest.mark.asyncio
-async def test_live_user_facts_isolation(live_test_db):
-    """Different users have separate fact stores."""
-    await upsert_user_facts("user_a", ["Fact A"])
-    await upsert_user_facts("user_b", ["Fact B"])
-
-    assert await get_user_facts("user_a") == ["Fact A"]
-    assert await get_user_facts("user_b") == ["Fact B"]
-
-
 # ── Character state ──────────────────────────────────────────────────
 
 
@@ -1106,20 +902,6 @@ async def test_live_affinity_clamps_at_bounds(live_test_db):
     # Clamp at 1000
     await update_affinity("user_high", 600)  # AFFINITY_DEFAULT + 600 → 1000
     assert await get_affinity("user_high") == 1000
-
-
-@live_db
-@pytest.mark.asyncio
-async def test_live_affinity_coexists_with_facts(live_test_db):
-    """Affinity and facts live on the same user_facts doc without clobbering."""
-    await upsert_user_facts("user_combo", ["Likes swords"])
-    await update_affinity("user_combo", 50)
-
-    facts = await get_user_facts("user_combo")
-    affinity = await get_affinity("user_combo")
-
-    assert facts == ["Likes swords"]
-    assert affinity == AFFINITY_DEFAULT + 50
 
 
 @live_db

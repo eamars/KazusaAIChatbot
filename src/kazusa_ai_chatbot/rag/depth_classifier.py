@@ -1,13 +1,11 @@
 """Input depth classifier — SHALLOW vs. DEEP.
 
-Two depth layers map naturally to the two storage layers:
-  * SHALLOW → cache + user_rag only
-  * DEEP    → full DB search across all dispatchers
+Two depth layers map naturally to the two pipeline phases:
+  * SHALLOW → cache only; user_image + character_image come from the profile
+  * DEEP    → input_context_rag_dispatcher + optional external_rag_dispatcher
 
 Classification is embedding-first (fast path, multilingual) with an LLM
-fallback for ambiguous inputs.  If affinity is low, the classifier always
-returns DEEP (the bot should not over-trust shallow heuristics for users it
-does not know well yet).
+fallback for ambiguous inputs.
 """
 
 from __future__ import annotations
@@ -32,14 +30,13 @@ logger = logging.getLogger(__name__)
 SHALLOW = "SHALLOW"
 DEEP = "DEEP"
 
-SHALLOW_DISPATCHERS = ["user_rag"]
-DEEP_DISPATCHERS = ["user_rag", "internal_rag", "external_rag"]
+SHALLOW_DISPATCHERS: list[str] = []
+DEEP_DISPATCHERS = ["input_context_rag", "external_rag"]
 
 
 # ── Thresholds ─────────────────────────────────────────────────────
 
 SIMILARITY_THRESHOLD = 0.60
-AFFINITY_DEEP_THRESHOLD = 400
 
 
 # ── Keyword sets (Chinese + English, enumerated for embedding centroid) ──
@@ -241,15 +238,13 @@ class InputDepthClassifier:
     """Classify user input into SHALLOW or DEEP retrieval depth.
 
     Uses an embedding-based fast path (cosine similarity against pre-computed
-    keyword centroids) and an LLM fallback for ambiguous inputs. Low-affinity
-    users always get DEEP regardless of input content.
+    keyword centroids) and an LLM fallback for ambiguous inputs.
     """
 
     def __init__(
         self,
         *,
         similarity_threshold: float = SIMILARITY_THRESHOLD,
-        affinity_deep_threshold: int = AFFINITY_DEEP_THRESHOLD,
     ) -> None:
         """Initialise the classifier with configurable thresholds.
 
@@ -257,11 +252,8 @@ class InputDepthClassifier:
             similarity_threshold: Minimum cosine similarity for the fast path
                 to commit to a SHALLOW or DEEP label. Inputs below this threshold
                 fall through to the LLM.
-            affinity_deep_threshold: Affinity scores strictly below this value
-                always produce a DEEP result, bypassing all other checks.
         """
         self._threshold = similarity_threshold
-        self._affinity_deep_threshold = affinity_deep_threshold
 
     async def classify(
         self,
@@ -285,14 +277,6 @@ class InputDepthClassifier:
             ``trigger_dispatchers`` (list of dispatcher names), ``confidence``
             (float 0–1), and ``reasoning`` (one-sentence explanation).
         """
-        # Affinity override — always go DEEP if relationship is weak
-        if affinity < self._affinity_deep_threshold:
-            return self._result(
-                DEEP,
-                confidence=1.0,
-                reasoning=f"affinity {affinity} < {self._affinity_deep_threshold} → DEEP",
-            )
-
         # Fast path: embedding cosine similarity against centroids
         try:
             await _ensure_centroids()
@@ -420,8 +404,6 @@ async def test_main() -> None:
          "user_topic": "关系", "affinity": 700},
         # Expected: DEEP (ambiguous / nonsense — tests LLM fallback path OR default)
         {"user_input": "xyzabc !@#", "user_topic": "", "affinity": 700},
-        # Expected: DEEP (affinity override)
-        {"user_input": "你好", "user_topic": "greeting", "affinity": 300},
     ]
 
     for i, case in enumerate(cases, 1):

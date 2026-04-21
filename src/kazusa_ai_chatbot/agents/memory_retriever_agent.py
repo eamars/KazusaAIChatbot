@@ -8,7 +8,7 @@ import json
 import logging
 
 from kazusa_ai_chatbot.config import LLM_API_KEY, LLM_BASE_URL, LLM_MODEL, MAX_MEMORY_RETRIEVER_AGENT_RETRY
-from kazusa_ai_chatbot.db import get_user_facts, search_conversation_history, get_conversation_history
+from kazusa_ai_chatbot.db import get_character_diary, get_objective_facts, search_conversation_history, get_conversation_history
 from kazusa_ai_chatbot.db import search_memory as search_memory_db
 
 from kazusa_ai_chatbot.utils import parse_llm_json_output, get_llm, sanitize_llm_text
@@ -32,7 +32,10 @@ async def search_user_facts(global_user_id: str) -> list[str]:
     Returns:
         A list of user facts.
     """
-    return await get_user_facts(global_user_id)
+    diary = await get_character_diary(global_user_id)
+    facts = await get_objective_facts(global_user_id)
+    return [e.get("entry", "") for e in diary if e.get("entry")] + \
+           [f.get("fact", "") for f in facts if f.get("fact")]
 
 @tool
 async def search_conversation(search_query: str = "", 

@@ -19,8 +19,6 @@ from kazusa_ai_chatbot.nodes.linguistic_texture import (
 from langchain_core.messages import HumanMessage, SystemMessage
 from langgraph.graph import StateGraph, START, END
 from langgraph.graph.message import add_messages
-from langchain_openai import ChatOpenAI
-
 import logging
 import json
 
@@ -161,8 +159,9 @@ _DIALOG_GENERATOR_PROMPT = """\
     "tone_history": "已完成的历史轮次（至上一条 assistant 回复为止），仅供语气节奏参考",
     "user_name": "string",
     "research_facts": {{
-        "user_rag_finalized": "第三人称描述的与用户相关记忆",
-        "internal_rag_results": "{character_name} 主观记忆",
+        "user_image": "用户画像（第三人称，来自持久化档案）",
+        "character_image": "{character_name} 自我认知画像（来自持久化档案）",
+        "input_context_results": "与当前话题相关的主观记忆（跨用户）",
         "external_rag_results": "外部知识库检索结果"
     }},
 }}

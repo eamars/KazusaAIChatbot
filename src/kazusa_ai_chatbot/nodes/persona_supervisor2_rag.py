@@ -8,7 +8,7 @@ The subgraph has five wrapper phases on top of the existing dispatchers:
   ``character_diary`` and ``external_knowledge`` matches. A strong hit short-
   circuits the rest of the pipeline.
 * **Phase 2 — Depth classification**: ``InputDepthClassifier`` selects
-  ``SHALLOW`` (user_rag only) or ``DEEP`` (all three dispatchers).
+  ``SHALLOW`` (no dispatchers; images from profile) or ``DEEP`` (input_context + optional external).
 * **Phase 3 — Conditional dispatch**: START edges fan out only to the
   dispatchers permitted by the chosen depth (and the existing affinity gate
   for external).
@@ -37,10 +37,9 @@ from kazusa_ai_chatbot.db import get_text_embedding
 from kazusa_ai_chatbot.rag.cache import RAGCache
 from kazusa_ai_chatbot.rag.depth_classifier import (
     DEEP,
-    SHALLOW,
     InputDepthClassifier,
 )
-from kazusa_ai_chatbot.utils import parse_llm_json_output, get_llm, build_affinity_block
+from kazusa_ai_chatbot.utils import parse_llm_json_output, get_llm
 
 import json
 import logging
@@ -55,9 +54,9 @@ logger = logging.getLogger(__name__)
 # The thresholds below live here until Stage 5 moves them into config.py.
 
 CACHE_HIT_THRESHOLD = 0.82            # similarity required to serve from cache
-USER_RAG_STRONG_THRESHOLD = 0.65      # user_rag deemed sufficient for SHALLOW
-INTERNAL_RAG_STRONG_THRESHOLD = 0.55  # internal_rag deemed sufficient for DEEP
+INTERNAL_RAG_STRONG_THRESHOLD = 0.55  # input_context_rag deemed sufficient for DEEP
 EXTERNAL_AFFINITY_SKIP_PERCENT = 40   # skip external_rag below this affinity %
+KNOWLEDGE_BASE_PROBE_THRESHOLD = 0.72 # similarity to include knowledge_base results
 
 
 # ── Lazy singletons ────────────────────────────────────────────────
@@ -125,24 +124,14 @@ class RAGState(TypedDict):
     # External RAG output
     external_rag_results: Annotated[list[str], operator.add]
 
-    # Internal RAG dispatcher output
-    internal_rag_next_action: str
-    internal_rag_task: str
-    internal_rag_context: dict
-    internal_rag_expected_response: str
+    # Input-Context RAG dispatcher output (was: Internal RAG)
+    input_context_next_action: str
+    input_context_task: str
+    input_context_context: dict
+    input_context_expected_response: str
 
-    # Internal RAG output
-    internal_rag_results: Annotated[list[str], operator.add]
-
-    # User RAG dispatcher output
-    user_rag_next_action: str
-    user_rag_task: str
-    user_rag_context: dict
-    user_rag_expected_response: str
-
-    # User RAG output
-    user_rag_results: Annotated[list[str], operator.add]
-    user_rag_finalized: str
+    # Input-Context RAG output
+    input_context_results: Annotated[list[str], operator.add]
 
 
 _EXTERNAL_RAG_DISPATCHER_PROMPT = """\
@@ -235,7 +224,7 @@ async def external_rag_dispatcher(state: RAGState) -> dict:
     }
 
 
-_INTERNAL_RAG_DISPATCHER_PROMPT = """\
+_INPUT_CONTEXT_RAG_DISPATCHER_PROMPT = """\
 你负责判断是否需要检索记忆库，并生成客观的检索任务。
 - 你在社交平台的账号为 {platform_bot_id}，角色名为 {character_name}
 - 当前的系统时间为 {timestamp}
@@ -299,8 +288,8 @@ _INTERNAL_RAG_DISPATCHER_PROMPT = """\
     "expected_response": "string"
 }}
 """
-_internal_rag_dispatcher_llm = get_llm(temperature=0, top_p=1.0)
-async def internal_rag_dispatcher(state: RAGState) -> dict:
+_input_context_rag_dispatcher_llm = get_llm(temperature=0, top_p=1.0)
+async def input_context_rag_dispatcher(state: RAGState) -> dict:
     decontexualized_input = state["decontexualized_input"]
     user_topic = state["user_topic"]
     timestamp = state["timestamp"]
@@ -309,7 +298,7 @@ async def internal_rag_dispatcher(state: RAGState) -> dict:
     global_user_id = state["global_user_id"]
     user_name = state["user_name"]
 
-    system_prompt = SystemMessage(content=_INTERNAL_RAG_DISPATCHER_PROMPT.format(
+    system_prompt = SystemMessage(content=_INPUT_CONTEXT_RAG_DISPATCHER_PROMPT.format(
         timestamp=timestamp,
         character_name=character_name,
         platform_bot_id=platform_bot_id,
@@ -322,14 +311,14 @@ async def internal_rag_dispatcher(state: RAGState) -> dict:
         "user_topic": user_topic
     }, ensure_ascii=False))
 
-    response = await _internal_rag_dispatcher_llm.ainvoke([
+    response = await _input_context_rag_dispatcher_llm.ainvoke([
         system_prompt,
         user_prompt
     ])
 
     result = parse_llm_json_output(response.content)
 
-    logger.debug(f"Internal RAG agent dispatcher result: {result}")
+    logger.debug(f"Input-context RAG dispatcher result: {result}")
 
     next_action = result.get("next_action", "end")
     dispatcher_reasoning = result.get("reasoning", "")
@@ -338,186 +327,12 @@ async def internal_rag_dispatcher(state: RAGState) -> dict:
     expected_response = result.get("expected_response", "")
 
     return {
-        "internal_rag_next_action": next_action,
-        "internal_rag_dispatcher_reasoning": dispatcher_reasoning,
-        "internal_rag_task": task,
-        "internal_rag_context": context,
-        "internal_rag_expected_response": expected_response
+        "input_context_next_action": next_action,
+        "input_context_dispatcher_reasoning": dispatcher_reasoning,
+        "input_context_task": task,
+        "input_context_context": context,
+        "input_context_expected_response": expected_response
     }
-
-
-_USER_FACT_RAG_DISPATCHER_PROMPT = """\
-你负责从角色 {character_name} 的记忆库中提取关于 {user_name} 的原始素材。你需要通过多路查询确保覆盖"当前事实对齐"与"历史情感锚点"。
-- 当前的系统时间为 {timestamp}
-
-# 身份锚定 (Identity Anchor)
-- 当前检索对象固定为：`{user_name}`。
-- 只允许检索"该用户本人"的历史事实、行为记录、承诺状态与关系变化。
-- 若 `user_input` 没有明确实体，优先围绕该用户最近互动、最近承诺、最近情绪波动进行检索。
-- 严禁把任务扩展为"泛人格分析"或"抽象心理画像"（如"掌控欲/意志力/支配型人格"）除非输入中出现可验证证据。
-- 严禁把检索主体漂移到其他用户。
-
-# 检索策略 (Search Strategy)：
-1. **语义对齐 (Fact Match)**：提取 `user_input` 中与该用户相关的具体实体（如：礼物、承诺、地点、时间），生成针对性查询。
-2. **承诺对齐 (Promise Match)**：优先检索与该用户有关的未完成约定、未来承诺、状态变更（active/unfulfilled）。
-3. **关系证据 (Evidence Match)**：检索可验证的互动证据（原话、时间戳、行为、好感变化），避免抽象标签化描述。
-
-# 任务生成约束 (Critical)
-- `task` 必须包含 `{user_name}`，并明确写出"检索该用户相关记录"。
-- `task` 与 `context.entities` 必须优先使用输入中的原词，不要凭空引入新概念。
-- 当输入是日常请求或具体事件时，不要升级为"人格审讯式"任务。
-- 优先时间范围：最近 90 天；如证据不足再放宽。
-
-# 输入格式 (Input Format)：
-{{
-    "user_input": "用户当前的发言内容",
-    "user_topic": "当前对话的主题摘要",
-    "character_mood": "角色的即时情绪",
-    "affinity_context": dict,  // "当前{user_name}在{character_name}心中的好感度描述"
-}}
-
-# 输出要求：
-请务必返回合法的 JSON 字符串，仅包含以下字段：
-{{
-    "next_action": "memory_retriever_agent",
-    "reasoning": "string",
-    "task": "基于输入事实与重大情感转折点的复合检索指令",
-    "context": {{
-        "target_user_name": "{user_name}",
-        "target_global_user_id": "{global_user_id}",
-        "entities": ["关键实体词"],
-        "search_logic": "user_anchored_multi_track",
-        "high_intensity_mode": true,
-        "time_range": "last_90_days_then_expand"
-    }},
-    "expected_response": "仅返回与 {user_name} 相关的原始记录清单：包含时间戳、用户名称、原始行为描述、好感度变动；禁止输出无证据的人格推断"
-}}
-"""
-_user_fact_rag_dispatcher_llm = get_llm(temperature=0, top_p=1.0)
-async def user_fact_rag_dispatcher(state: RAGState) -> dict:
-    decontexualized_input = state["decontexualized_input"]
-    user_topic = state["user_topic"]
-    timestamp = state["timestamp"]
-    character_name = state["character_profile"]["name"],
-    user_name = state["user_name"]
-
-    user_affinity_score = state["user_profile"].get("affinity", AFFINITY_DEFAULT)
-    affinity_block = build_affinity_block(user_affinity_score)
-
-    system_prompt = SystemMessage(content=_USER_FACT_RAG_DISPATCHER_PROMPT.format(
-        character_name=character_name,
-        user_name=user_name,
-        timestamp=timestamp,
-        global_user_id=state["global_user_id"],
-    ))
-
-    user_prompt = HumanMessage(content=json.dumps({
-        "user_input": decontexualized_input,
-        "user_topic": user_topic,
-        "character_mood": state["character_profile"]["mood"],
-        "affinity_context": {
-            "level": affinity_block["level"],
-            "instruction": affinity_block["instruction"]
-        },
-    }, ensure_ascii=False))
-
-    response = await _user_fact_rag_dispatcher_llm.ainvoke([
-        system_prompt,
-        user_prompt
-    ])
-
-    result = parse_llm_json_output(response.content)
-
-    logger.debug(f"User Fact RAG dispatcher result: {result}")
-
-    next_action = result.get("next_action", "end")
-    dispatcher_reasoning = result.get("reasoning", "")
-    task = result.get("task", "")
-    context = result.get("context", {})
-    expected_response = result.get("expected_response", "")
-
-    # Override identity fields with ground truth from state — never trust the LLM
-    # to copy strings verbatim; tokenizer artifacts can corrupt them (e.g. "蚝爹\t油").
-    context["target_user_name"] = user_name
-    context["target_global_user_id"] = state["global_user_id"]
-
-    return {
-        "user_rag_next_action": next_action,
-        "user_rag_dispatcher_reasoning": dispatcher_reasoning,
-        "user_rag_task": task,
-        "user_rag_context": context,
-        "user_rag_expected_response": expected_response
-    }
-
-
-
-_USER_FACT_RAG_FINALIZER_PROMPT = """\
-你负责处理 {character_name} 脑内检索回来的原始碎片。你需要模拟人类大脑，根据当前好感度对记忆进行"主观扭曲"，并执行人工时间衰减。
-- 当前的系统时间为 {timestamp}
-- 对方用户名为 {user_name}
-
-# 核心处理协议：
-1. **好感度滤镜 (affinity_context.lebel)**：
-   - **正面词汇**：优先高亮用户的善意。将负面记忆处理为"可原谅的失误"或"傲娇的抱怨点"。
-   - **负面词汇**：优先高亮用户的冒犯。将正面记忆处理为"虚伪的讨好"或"值得警惕的异常"。
-2. **人工时间衰减 (Temporal Decay Processing)**：
-   - **近期 (0-7 days)**：保留高保真细节（具体台词、精确动作）。
-   - **中期 (8-60 days)**：压缩为具体事件（发生了什么，结果如何）。
-   - **远期 (> 60 days)**：完全抽象化为性格印象（他是个什么样的人）。
-
-# 输入格式 (Input Format)：
-{{
-    "user_rag_results": ["..."],
-    "affinity_context": dict,  // "当前{user_name}在{character_name}心中的好感度描述"
-}}
-
-# 输出要求：
-请务必返回合法的 JSON 字符串，仅包含以下字段：
-{{
-    "user_rag_finalized": ["..."]  // 保留与 `user_rag_results` 相同结构，但已根据好感度滤镜和时间衰减处理
-}}
-"""
-_user_fact_rag_finalizer_llm = get_llm(temperature=0.2, top_p=0.9)
-async def user_fact_rag_finalizer(state: RAGState) -> dict:
-    decontexualized_input = state["decontexualized_input"]
-    user_topic = state["user_topic"]
-    timestamp = state["timestamp"]
-    character_name = state["character_profile"]["name"],
-    user_name = state["user_name"]
-
-    user_affinity_score = state["user_profile"].get("affinity", AFFINITY_DEFAULT)
-    affinity_block = build_affinity_block(user_affinity_score)
-
-    system_prompt = SystemMessage(content=_USER_FACT_RAG_FINALIZER_PROMPT.format(
-        character_name=character_name,
-        user_name=user_name,
-        timestamp=timestamp,
-    ))
-
-    user_prompt = HumanMessage(content=json.dumps({
-        "user_rag_results": state["user_rag_results"],
-        "affinity_context": {
-            "level": affinity_block["level"],
-            "instruction": affinity_block["instruction"]
-        },
-    }, ensure_ascii=False))
-
-    response = await _user_fact_rag_finalizer_llm.ainvoke([
-        system_prompt,
-        user_prompt
-    ])
-
-    result = parse_llm_json_output(response.content)
-
-    logger.debug(f"User fact RAG finalizer result: {result}")
-
-    user_rag_finalized = result.get("user_rag_finalized", "")
-
-    return {
-        "user_rag_finalized": user_rag_finalized
-    }
-
-
 
 
 async def call_web_search_agent(state: RAGState) -> dict:
@@ -535,40 +350,29 @@ async def call_web_search_agent(state: RAGState) -> dict:
     }
 
 
-async def call_memory_retriever_agent_internal_rag(state: RAGState) -> dict:
-    context = dict(state["internal_rag_context"])
+async def call_memory_retriever_agent_input_context_rag(state: RAGState) -> dict:
+    context = dict(state["input_context_context"])
     # Override identity fields with ground-truth from pipeline state to prevent
     # the dispatcher LLM from injecting platform IDs (e.g. bot ID) as user UUID.
     context["target_user_name"] = state["user_name"]
     context["target_global_user_id"] = state["global_user_id"]
 
     result = await memory_retriever_agent(
-        task=state["internal_rag_task"],
+        task=state["input_context_task"],
         context=context,
-        expected_response=state["internal_rag_expected_response"]
+        expected_response=state["input_context_expected_response"]
     )
 
     # Only take the response part
     processed_response = result.get("response", "")
 
     return {
-        "internal_rag_results": [processed_response]
+        "input_context_results": [processed_response]
     }
 
 
-async def call_memory_retriever_agent_user_rag(state: RAGState) -> dict:
-    result = await memory_retriever_agent(
-        task=state["user_rag_task"],
-        context=state["user_rag_context"],
-        expected_response=state["user_rag_expected_response"]
-    )
-
-    # Only take the response part
-    processed_response = result.get("response", "")
-
-    return {
-        "user_rag_results": [processed_response]
-    }
+async def _rag_noop(_: RAGState) -> dict:
+    return {}
 
 
 # ── Phase helpers ──────────────────────────────────────────────────
@@ -599,6 +403,38 @@ def _result_confidence(value: Any) -> float:
         return 0.0
     # Length-based proxy: 120 chars ≈ 0.5, 600+ chars ≈ 1.0
     return min(1.0, len(text) / 600.0 + 0.2)
+
+
+async def _probe_knowledge_base(
+    cache: RAGCache,
+    embedding: list[float],
+) -> str:
+    """Probe the global knowledge_base cache and return any matching distillation.
+
+    This is a supplementary probe for DEEP passes only — it never short-circuits
+    the dispatcher pipeline; it only enriches ``research_facts`` with cached
+    cross-session topic knowledge.
+
+    Args:
+        cache: Process-wide ``RAGCache`` instance.
+        embedding: Query embedding of ``decontexualized_input``.
+
+    Returns:
+        The ``knowledge_base_results`` string from the best matching cache entry,
+        or an empty string if no entry meets the similarity threshold.
+    """
+    hit = await cache.retrieve_if_similar(
+        embedding=embedding,
+        cache_type="knowledge_base",
+        global_user_id="",
+        threshold=KNOWLEDGE_BASE_PROBE_THRESHOLD,
+    )
+    if hit is None:
+        return ""
+    results = hit.get("results") or {}
+    kb_text = results.get("knowledge_base_results", "")
+    logger.info("Knowledge-base cache HIT (sim=%.3f)", float(hit.get("similarity", 0.0)))
+    return kb_text
 
 
 async def _probe_cache(
@@ -659,21 +495,19 @@ def _build_rag_graph(depth: str, affinity_percent: float):
     """
     builder = StateGraph(RAGState)
     builder.add_node("external_rag_dispatcher", external_rag_dispatcher)
-    builder.add_node("internal_rag_dispatcher", internal_rag_dispatcher)
-    builder.add_node("user_rag_dispatcher", user_fact_rag_dispatcher)
+    builder.add_node("input_context_rag_dispatcher", input_context_rag_dispatcher)
     builder.add_node("call_web_search_agent", call_web_search_agent)
-    builder.add_node("call_memory_retriever_agent_internal_rag", call_memory_retriever_agent_internal_rag)
-    builder.add_node("call_memory_retriever_agent_user_rag", call_memory_retriever_agent_user_rag)
-    builder.add_node("call_user_fact_rag_finalizer", user_fact_rag_finalizer)
+    builder.add_node("call_memory_retriever_agent_input_context_rag", call_memory_retriever_agent_input_context_rag)
+    builder.add_node("rag_noop", _rag_noop)
 
-    # user_rag always runs — it is the only dispatcher allowed in SHALLOW.
-    builder.add_edge(START, "user_rag_dispatcher")
-
-    # internal_rag + external_rag only when DEEP.
+    # DEEP: input_context_rag + (optionally) external_rag. SHALLOW: no dispatchers.
+    has_entry_edge = depth == DEEP
     if depth == DEEP:
-        builder.add_edge(START, "internal_rag_dispatcher")
+        builder.add_edge(START, "input_context_rag_dispatcher")
         if affinity_percent >= EXTERNAL_AFFINITY_SKIP_PERCENT:
             builder.add_edge(START, "external_rag_dispatcher")
+    if not has_entry_edge:
+        builder.add_edge(START, "rag_noop")
 
     # Dispatcher → retriever conditional edges
     builder.add_conditional_edges(
@@ -682,24 +516,15 @@ def _build_rag_graph(depth: str, affinity_percent: float):
         {"web_search_agent": "call_web_search_agent", "end": END},
     )
     builder.add_conditional_edges(
-        "internal_rag_dispatcher",
-        lambda state: state["internal_rag_next_action"],
-        {"memory_retriever_agent": "call_memory_retriever_agent_internal_rag", "end": END},
+        "input_context_rag_dispatcher",
+        lambda state: state["input_context_next_action"],
+        {"memory_retriever_agent": "call_memory_retriever_agent_input_context_rag", "end": END},
     )
-    builder.add_conditional_edges(
-        "user_rag_dispatcher",
-        lambda state: state["user_rag_next_action"],
-        {
-            "memory_retriever_agent": "call_memory_retriever_agent_user_rag",
-            "end": "call_user_fact_rag_finalizer",
-        },
-    )
-    builder.add_edge("call_memory_retriever_agent_user_rag", "call_user_fact_rag_finalizer")
 
     # Fan-in
     builder.add_edge("call_web_search_agent", END)
-    builder.add_edge("call_memory_retriever_agent_internal_rag", END)
-    builder.add_edge("call_user_fact_rag_finalizer", END)
+    builder.add_edge("call_memory_retriever_agent_input_context_rag", END)
+    builder.add_edge("rag_noop", END)
 
     return builder.compile()
 
@@ -707,33 +532,18 @@ def _build_rag_graph(depth: str, affinity_percent: float):
 async def _store_results_in_cache(
     cache: RAGCache,
     embedding: list[float],
-    global_user_id: str,
     research_facts: dict,
-    metadata: dict,
 ) -> None:
     """Write the produced RAG results back into the cache.
 
-    One entry per populated branch — user_rag_finalized as
-    ``objective_user_facts``, external_rag_results as global
-    ``external_knowledge``, so each can be invalidated independently.
+    Stores external_rag_results as global ``external_knowledge`` so it can
+    be invalidated independently of per-user data.
 
     Args:
         cache: Process-wide cache instance.
         embedding: Query embedding of the current input.
-        global_user_id: Current user's internal UUID.
         research_facts: Dict returned to the caller — branch payloads.
-        metadata: The metadata bundle to store alongside each entry.
     """
-    user_rag = research_facts.get("user_rag_finalized")
-    if user_rag:
-        await cache.store(
-            embedding=embedding,
-            results={"user_rag_finalized": user_rag},
-            cache_type="objective_user_facts",
-            global_user_id=global_user_id,
-            metadata={"source": "rag_subgraph", "depth": metadata.get("depth")},
-        )
-
     external = research_facts.get("external_rag_results")
     if external:
         await cache.store(
@@ -743,6 +553,49 @@ async def _store_results_in_cache(
             global_user_id="",
             metadata={"source": "rag_subgraph"},
         )
+
+
+# ── Image assembly helper ──────────────────────────────────────────
+
+
+def _assemble_image_text(image_doc: dict) -> str:
+    """Render a three-tier image document into a compact text block for LLM context.
+
+    Milestone entries are listed first (never compacted), followed by
+    ``historical_summary`` (compressed older history), then ``recent_window``
+    (most recent session observations).
+
+    Args:
+        image_doc: Three-tier image dict with keys ``milestones``,
+            ``recent_window``, ``historical_summary``, and ``meta``.
+
+    Returns:
+        A formatted text block, or an empty string if the document is empty.
+    """
+    if not image_doc:
+        return ""
+    parts: list[str] = []
+    milestones = image_doc.get("milestones") or []
+    if milestones:
+        parts.append("## Milestones")
+        for m in milestones:
+            cat = m.get("milestone_category", "")
+            desc = m.get("description", "")
+            superseded = m.get("superseded_by", "")
+            if superseded:
+                parts.append(f"- [{cat}] {desc} (superseded by: {superseded})")
+            else:
+                parts.append(f"- [{cat}] {desc}")
+    historical_summary = image_doc.get("historical_summary", "")
+    if historical_summary:
+        parts.append("## Historical Summary")
+        parts.append(historical_summary)
+    recent_window = image_doc.get("recent_window") or []
+    if recent_window:
+        parts.append("## Recent Observations")
+        for obs in recent_window:
+            parts.append(f"- {obs}")
+    return "\n".join(parts)
 
 
 # ── Main entry point ───────────────────────────────────────────────
@@ -774,6 +627,11 @@ async def call_rag_subgraph(state: GlobalPersonaState) -> GlobalPersonaState:
     affinity_score = user_profile.get("affinity", AFFINITY_DEFAULT)
     affinity_percent = ((affinity_score - AFFINITY_MIN) / max(1, AFFINITY_MAX - AFFINITY_MIN)) * 100
 
+    user_image_text = _assemble_image_text(user_profile.get("user_image") or {})
+    character_image_text = _assemble_image_text(
+        state["character_profile"].get("self_image") or {}
+    )
+
     # ── Phase 0: Input analysis ────────────────────────────────
     input_embedding = await get_text_embedding(decontexualized_input)
     metadata: dict = {
@@ -798,9 +656,10 @@ async def call_rag_subgraph(state: GlobalPersonaState) -> GlobalPersonaState:
         metadata["rag_sources_used"] = ["cache"]
         metadata["response_confidence"] = 1.0
         research_facts = {
-            "user_rag_finalized": cached.get("user_rag_finalized", ""),
-            "internal_rag_results": cached.get("internal_rag_results", ""),
+            "input_context_results": cached.get("input_context_results", ""),
             "external_rag_results": cached.get("external_rag_results", ""),
+            "user_image": user_image_text,
+            "character_image": character_image_text,
         }
         logger.info(
             f"\n{user_name}(@{global_user_id}): {decontexualized_input}\n"
@@ -824,6 +683,11 @@ async def call_rag_subgraph(state: GlobalPersonaState) -> GlobalPersonaState:
     metadata["depth_reasoning"] = depth_result["reasoning"]
     metadata["trigger_dispatchers"] = list(depth_result["trigger_dispatchers"])
 
+    # ── Phase 2.5: Knowledge-base pre-probe (DEEP only) ───────
+    knowledge_base_results = ""
+    if depth == DEEP:
+        knowledge_base_results = await _probe_knowledge_base(cache, input_embedding)
+
     # ── Phase 3: Dispatcher graph ──────────────────────────────
     rag_graph = _build_rag_graph(depth, affinity_percent)
 
@@ -846,54 +710,47 @@ async def call_rag_subgraph(state: GlobalPersonaState) -> GlobalPersonaState:
 
     result = await rag_graph.ainvoke(initial_state)
 
-    user_rag_finalized = result.get("user_rag_finalized", "")
-    internal_rag_results = result.get("internal_rag_results", "")
+    input_context_results = result.get("input_context_results", "")
     external_rag_results = result.get("external_rag_results", "")
 
     # Confidence scoring — proxy signal until dispatchers emit explicit scores.
-    user_conf = _result_confidence(user_rag_finalized)
-    internal_conf = _result_confidence(internal_rag_results)
+    input_context_conf = _result_confidence(input_context_results)
     external_conf = _result_confidence(external_rag_results)
     metadata["confidence_scores"] = {
-        "user_rag": user_conf,
-        "internal_rag": internal_conf,
+        "input_context_rag": input_context_conf,
         "external_rag": external_conf,
     }
     sources_used = []
-    if user_conf > 0.0:
-        sources_used.append("user_rag")
-    if internal_conf > 0.0:
-        sources_used.append("internal_rag")
+    if input_context_conf > 0.0:
+        sources_used.append("input_context_rag")
     if external_conf > 0.0:
         sources_used.append("external_rag")
     metadata["rag_sources_used"] = sources_used
-    metadata["response_confidence"] = max([user_conf, internal_conf, external_conf] + [0.0])
+    metadata["response_confidence"] = max([input_context_conf, external_conf] + [0.0])
 
     # Record the early-exit decisions implied by the confidence signals.
-    # These are descriptive (documenting what the plan's thresholds would gate
-    # on), since depth already controlled which dispatchers actually ran.
     metadata["early_exit"] = {
-        "shallow_user_rag_sufficient": depth == SHALLOW and user_conf >= USER_RAG_STRONG_THRESHOLD,
-        "deep_internal_rag_sufficient": depth == DEEP and internal_conf >= INTERNAL_RAG_STRONG_THRESHOLD,
+        "deep_input_context_sufficient": depth == DEEP and input_context_conf >= INTERNAL_RAG_STRONG_THRESHOLD,
     }
 
     research_facts = {
-        "user_rag_finalized": user_rag_finalized,
-        "internal_rag_results": internal_rag_results,
+        "input_context_results": input_context_results,
         "external_rag_results": external_rag_results,
+        "user_image": user_image_text,
+        "character_image": character_image_text,
+        "knowledge_base_results": knowledge_base_results,
     }
 
     logger.info(
         f"\n{user_name}(@{global_user_id}): {decontexualized_input}\n"
         f"Depth: {depth} (conf={depth_result['confidence']:.2f})\n"
-        f"User RAG finalized: {user_rag_finalized}\n"
-        f"Internal RAG results: {internal_rag_results}\n"
+        f"Input context results: {input_context_results}\n"
         f"External RAG results: {external_rag_results}"
     )
 
     # ── Phase 4: Cache storage ─────────────────────────────────
     await _store_results_in_cache(
-        cache, input_embedding, global_user_id, research_facts, metadata,
+        cache, input_embedding, research_facts,
     )
 
     return {

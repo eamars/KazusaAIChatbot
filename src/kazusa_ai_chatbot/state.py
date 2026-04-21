@@ -45,19 +45,6 @@ class IMProcessState(TypedDict):
     user_topic: str
 
 
-    # Input to Persona Supervisor
-    # character_profile: dict  # Already requested
-    # timestamp: str  # Already requested
-    # user_input: str  # already requested
-    # platform_user_id: str  # Already requested
-    # global_user_id: str  # Already requested
-    # user_name: str  # Already requested
-    # user_profile: dict  # Already requested
-    # platform_bot_id: str  # Already requested
-    # chat_history: list[dict]  # Already requested
-    # user_topic: str  # Already provided
-    # channel_topic: str  # Already provided
-    
     # Debug modes (optional, passed from ChatRequest)
     debug_modes: DebugModes
 
