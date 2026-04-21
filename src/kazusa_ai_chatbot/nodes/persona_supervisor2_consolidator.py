@@ -33,6 +33,7 @@ from kazusa_ai_chatbot.config import (
     AFFINITY_DECREMENT_BREAKPOINTS,
     AFFINITY_DEFAULT,
     AFFINITY_INCREMENT_BREAKPOINTS,
+    AFFINITY_RAW_DEAD_ZONE,
     MAX_FACT_HARVESTER_RETRY,
 )
 from kazusa_ai_chatbot.db import (
@@ -511,6 +512,7 @@ _GLOBAL_STATE_UPDATER_PROMPT = """\
    - 结合 `character_intent` 的达成情况，以{character_name}的第一人称写下一句话复盘。
    - 这是她此时此刻脑子里挥之不去的“念头”，决定了她下一轮对话的潜台词。
    - 例如：'刚才那个笨蛋居然怀疑我的缝纫技术，真是气死我了。'
+4. 中性守恒：若 `internal_monologue` 与 `final_dialog` 没有明确显示被冒犯、被威胁、被调情或被越界，禁止把普通问候、图片描述请求、事实分享、日常约定升级为 `Distrustful`、`Agitated`、`Defensive` 等强烈负面状态。
 
 # 输出格式
 请务必返回合法的 JSON 字符串，仅包含以下字段：
@@ -552,6 +554,7 @@ _RELATIONSHIP_RECORDER_PROMPT = """\
 
 # 核心输入
 - `internal_monologue`: 揭示了{character_name}对用户的真实喜好和内心波动。
+- `emotional_appraisal`: 捕捉了{character_name}当下最原始、最直接的情绪反应。
 - `interaction_subtext`: 捕捉了对话表面下的张力（如：暧昧、怀疑、博弈）。
 - `affinity_context`: 当前{user_name}在{character_name}的好感度描述。
 - `logical_stance`: {character_name}对{user_name}言行的逻辑认可度。
@@ -559,6 +562,7 @@ _RELATIONSHIP_RECORDER_PROMPT = """\
 # 输入格式
 {{
     "internal_monologue": "string",
+    "emotional_appraisal": "string",
     "interaction_subtext": "string",
     "affinity_context": dict,
     "logical_stance": "string",
@@ -566,8 +570,17 @@ _RELATIONSHIP_RECORDER_PROMPT = """\
 
 # 记录准则
 1. 日记条目: 以{character_name}的主观视角书写。利用 `interaction_subtext` 中的暗示，描述“我”对 他/她 这种行为的真实看法。
-2. 分值修正 `affinity_delta`: 根据 `internal_monologue` 的愉悦度及 `logical_stance` 的一致性进行加减分（-5 到 +5）。
-3. 静默检查: 若 `internal_monologue` 中未见明显情感起伏，返回 `{{"skip": true}}`。
+2. 分值修正 `affinity_delta`: 只根据 `internal_monologue` 与 `emotional_appraisal` 中**可直接观察到**的主观好恶来加减分（-5 到 +5）。
+3. **默认值规则：** 大多数普通对话都应输出 `affinity_delta = 0`。只有当内心证据明确显示“这次互动让我明显更舒服/更开心/更被理解/更信任对方”时才给正分；只有当内心证据明确显示“这次互动让我明显更烦躁/更压迫/更反感/更受伤”时才给负分。
+4. **静默检查：** 若 `internal_monologue` 与 `emotional_appraisal` 中未见明显情感起伏，返回 `{{"skip": true, "affinity_delta": 0}}`。
+5. **证据约束：** 若 `interaction_subtext`、`internal_monologue` 与 `emotional_appraisal` 中缺乏明确证据，禁止把普通问候、图片描述请求、事实分享、日常约定、简短感谢写成“危险”“调情”“博弈”“操控”类标签；此类中性互动的 `affinity_delta` 默认必须为 0。
+6. **打分刻度：**
+   - `0`: 普通对话、事务问答、轻量闲聊、证据不足。
+   - `+1` 到 `+2`: 明确轻度好感上升，如感到放松、被尊重、被理解、稍微开心。
+   - `+3` 到 `+5`: 明确强正向波动，如明显开心、安心、被打动、强信任感。
+   - `-1` 到 `-2`: 明确轻度负面波动，如烦躁、不适、被打扰、轻度警惕。
+   - `-3` 到 `-5`: 明确强负向波动，如强烈厌烦、受压迫、被冒犯、明显受伤或反感。
+7. **不确定时选 0**：若你需要猜测，说明证据不够，直接输出 0。
 
 # 输出格式
 请务必返回合法的 JSON 字符串，仅包含以下字段：
@@ -592,6 +605,7 @@ async def relationship_recorder(state: ConsolidatorState) -> dict:
 
     msg = {
         "internal_monologue": state["internal_monologue"],
+        "emotional_appraisal": state["emotional_appraisal"],
         "interaction_subtext": state["interaction_subtext"],
         "affinity_context": {
             "level": affinity_block["level"],
@@ -608,9 +622,27 @@ async def relationship_recorder(state: ConsolidatorState) -> dict:
 
     logger.debug(f"Relationship recorder result: {result}")
 
+    raw_affinity_delta = result.get("affinity_delta", 0)
+    if isinstance(raw_affinity_delta, bool):
+        raw_affinity_delta = 0
+    elif isinstance(raw_affinity_delta, str):
+        try:
+            raw_affinity_delta = int(raw_affinity_delta.strip() or 0)
+        except ValueError:
+            raw_affinity_delta = 0
+    elif not isinstance(raw_affinity_delta, int):
+        try:
+            raw_affinity_delta = int(raw_affinity_delta)
+        except (TypeError, ValueError):
+            raw_affinity_delta = 0
+    raw_affinity_delta = max(-5, min(5, raw_affinity_delta))
+
+    if result.get("skip"):
+        raw_affinity_delta = 0
+
     return {
         "diary_entry": result.get("diary_entry"),
-        "affinity_delta": result.get("affinity_delta"),
+        "affinity_delta": raw_affinity_delta,
         "last_relationship_insight": result.get("last_relationship_insight"),
     }
 
@@ -634,6 +666,7 @@ _FACTS_HARVESTER_PROMPT = """\
    - **记录**：从 `research_facts.external_rag_results` 中提取的**新**信息。
    - **严禁记录**：瞬态动作、对话内容、以及任何关于“奖励”、“打算”、“计划”的内容。
    - **去重**：如果 `research_facts.user_image` 或 `research_facts.input_context_results` 中已存在相似画像，严禁重复提取。
+   - **语义保真 [必须执行]**：若用户明确说了“喜欢/不喜欢/永远不/一直不/过敏/害怕”等偏好或禁忌，`description` 必须尽量保留原谓词与宾语，不得改写成更宽泛、不同义或模糊的概括。例如“永远不吃辣椒”不能改写为“不喜欢吃杂乱的食物”。
 
 3. **承诺 (future_promises) 判定标准 [核心逻辑]**:
    - **所有关于“以后、今晚、下次、奖励、惩罚”的内容，必须且只能记录在这里。**
@@ -787,6 +820,7 @@ _FACT_HARVESTER_EVALUATOR_PROMPT = """\
 - **脑补事实**: 严禁出现基准源中没有的名词或事实
 - **描述格式违规**: `new_facts` 中的 `description` 必须是属性级陈述（如 '{user_name}住在奥克兰'），严禁使用叙事句式（如 '在某情境下做了某事'）。若发现叙事句式，要求改写为属性陈述。
 - **类别缺失或不当**: `new_facts` 中的 `category` 必须是有意义的英文标签（如 occupation、location、preference、hobby 等）。若缺失、为空、或为无意义的 "general"，要求补充具体类别。
+- **语义漂移 [严重]**: 若 `new_facts.description` 改写后改变了用户原意（尤其是偏好、禁忌、过敏、承诺条件等），必须判 FAIL 并要求使用更贴近原句的表述。
 - **承诺 action 审计标准（专用于 `future_promises`）**:
   - 合格条件：表达“谁对谁做什么”的可执行承诺，不是对话复读（如“他说/她问/我觉得”）。
   - 可以接受两种写法：
@@ -864,12 +898,15 @@ def process_affinity_delta(current_affinity: int, raw_delta: int) -> int:
 
     Args:
         current_affinity: Current affinity score (0-1000).
-        raw_delta: Raw delta from the relationship recorder (-10..+10).
+        raw_delta: Raw delta from the relationship recorder (-5..+5).
 
     Returns:
         Scaled delta with sign preserved.
     """
     if raw_delta == 0:
+        return 0
+
+    if abs(raw_delta) <= AFFINITY_RAW_DEAD_ZONE:
         return 0
 
     if raw_delta > 0:

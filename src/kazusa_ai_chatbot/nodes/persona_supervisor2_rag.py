@@ -628,6 +628,11 @@ async def call_rag_subgraph(state: GlobalPersonaState) -> GlobalPersonaState:
     affinity_percent = ((affinity_score - AFFINITY_MIN) / max(1, AFFINITY_MAX - AFFINITY_MIN)) * 100
 
     user_image_text = _assemble_image_text(user_profile.get("user_image") or {})
+    objective_facts_text = "\n".join(
+        str(item.get("fact", item.get("description", "")))
+        for item in (user_profile.get("objective_facts") or [])
+        if str(item.get("fact", item.get("description", ""))).strip()
+    )
     character_image_text = _assemble_image_text(
         state["character_profile"].get("self_image") or {}
     )
@@ -658,6 +663,7 @@ async def call_rag_subgraph(state: GlobalPersonaState) -> GlobalPersonaState:
         research_facts = {
             "input_context_results": cached.get("input_context_results", ""),
             "external_rag_results": cached.get("external_rag_results", ""),
+            "objective_facts": objective_facts_text,
             "user_image": user_image_text,
             "character_image": character_image_text,
         }
@@ -736,6 +742,7 @@ async def call_rag_subgraph(state: GlobalPersonaState) -> GlobalPersonaState:
     research_facts = {
         "input_context_results": input_context_results,
         "external_rag_results": external_rag_results,
+        "objective_facts": objective_facts_text,
         "user_image": user_image_text,
         "character_image": character_image_text,
         "knowledge_base_results": knowledge_base_results,

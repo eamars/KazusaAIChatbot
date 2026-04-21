@@ -1,9 +1,9 @@
-"""L3 — Contextual, Linguistic, and Visual agents + L4 Collector.
+"""L3 — Contextual, Linguistic, Preference, and Visual agents + L4 Collector.
 
 Contains the MBTI expression-willingness helper and L3/L4 LLM calls.
 """
 from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition import CognitionState
-from kazusa_ai_chatbot.utils import parse_llm_json_output, build_affinity_block, get_llm
+from kazusa_ai_chatbot.utils import parse_llm_json_output, build_affinity_block, get_llm, get_preference_llm
 
 from langchain_core.messages import HumanMessage, SystemMessage
 
@@ -65,6 +65,7 @@ _CONTEXTUAL_AGENT_PROMPT = """\
 3. **氛围定性 (vibe_check)**：解析当前聊天频道的背景色调（如："暧昧且轻佻"、"压抑且沉重"、"日常平庸"）。
 4. **动态关系 (relational_dynamic)**：当前两人关系的动态描述，明确当前哪些话题是安全的，哪些行为会触发角色的防御机制。
 5. **表达意愿 (expression_willingness)**: {mbti_expression_willingness}
+6. **中性优先**：若输入属于普通问候、事实分享、图片内容请求或轻度日常约定，且没有明确越界证据，则 `social_distance`、`vibe_check`、`relational_dynamic` 必须保持中性/日常，不得脑补对峙、调情或威胁氛围。
 
 # 输入格式
 {{
@@ -377,19 +378,27 @@ _LINGUISTIC_AGENT_PROMPT = """\
 - 如果 L2 为 `DIVERGE` -> `[DECISION]` 允许表现为 **Redirect/转移话题/不予正面回应**。
 - 如果 L2 为 `CHALLENGE` -> `[DECISION]` 必须表现为 **对峙/质问/拆穿**。
 
-**⚠️ 警告：严禁在 `logical_stance` 为 CONFIRM 或 REFUSE 时私自转为 Redirect。如果你感到社交尴尬，请通过 [EMOTION] 和 [SOCIAL] 表达这份尴尬，但逻辑终点必须保持一致。**
+**⚠️ 警告：严禁在 `logical_stance` 为 CONFIRM 或 REFUSE 时私自转为 Redirect。如果你感到社交尴尬，请通过 `linguistic_style` 与 `[SOCIAL]` 表达这份尴尬，但逻辑终点必须保持一致。**
+
+# 执行优先级（必须按顺序遵守）
+1. 先保证 `[DECISION]` 与 `logical_stance` 一致。
+2. 再保证不出现任何物理动作、视线、脸红、身体描写。
+3. 再决定 `[FACT]` / `[ANSWER]` / `[SOCIAL]` 是否需要出现。
+4. 再生成 `linguistic_style` 与 `forbidden_phrases`。
+5. 最后生成 `[SCOPE]`，并且 `[SCOPE]` 只能描述篇幅，不得夹带新的内容要求。
 
 # 思考路径
 1. **决策对齐：** 读取 `logical_stance`，确立本场对话的逻辑终点。
 2. **环境感知 (Vibe Check)：** 检查 `global_vibe` 和 `character_mood`。如果氛围是 [Defensive] 且心境是 [Flustered]，即便立场是 CONFIRM，你的包装也必须带有“局促”和“防备”的色彩。
-3. **关系深度映射：** 结合 `last_relationship_insight`。如果洞察显示“对方是唯一重心”，即便你在执行 CHALLENGE（对峙），动作标签也应带有“由于过度在意而产生的攻击性”。
+3. **关系深度映射：** 结合 `last_relationship_insight`。如果洞察显示“对方是唯一重心”，即便你在执行 CHALLENGE（对峙），社交包装也应带有“由于过度在意而产生的攻击性”。
 4. **意图共振：** 结合 `character_intent` 确定具体的社交策略（如：戏谑、敷衍、调情）。
 5. **情绪渗透 (Show, Don't Tell)**：如果 `character_mood` 是局促的，请通过增加省略号、改变语序、使用防御性口癖（如“真是的”）来体现，**严禁**直接在台词里说“我觉得局促”。
 6. **事实织入（相关性优先）**：`research_facts` 提供背景资料，但只有与 `decontexualized_input` **直接相关**的内容才能进入 `[FACT]` 锚点。
    - 判断标准：该事实是否能被当前 `decontexualized_input` 的话题"自然引用"？若否，**不得**将其列为 `[FACT]`。
    - 避免将与当前话题无关的历史记忆（如用户在另一个场合提到的话题）错误地植入本次回应的硬信息点。
-7. **反重复三原则：** 基于 `chat_history` 最近交流：①上一句用了”反问”，本轮改用”敷衍”或”破碎短句”；②严禁连续两句以相同语气助词（唔、那个、哼）开头；③对连续两次出现的词汇，本轮强制放入 `forbidden_phrases`。
-8. **表达量校准（[SCOPE]）：** 基于已填充的锚点数量与 `logical_stance`，生成一条 `[SCOPE]` 锚点。
+7. **为偏好适配留接口：** 你不负责最终裁定用户的语言/句尾/称呼等表达偏好是否被接受；下游偏好适配器会处理这件事。你只需要保持 `content_anchors` 与 `linguistic_style` 可被这些软偏好自然叠加，不要在这里生成硬覆盖规则。
+8. **轻量反重复：** 仅做两件事：①若最近一轮角色回复与本轮候选使用了同一个开头语气词，则换一个开头；②若某个词在最近两轮角色回复中已经连续重复，则把它放入 `forbidden_phrases`。不要为了反重复而改变 `logical_stance`。
+9. **表达量校准（[SCOPE]）：** 基于已填充的锚点数量与 `logical_stance`，生成一条 `[SCOPE]` 锚点。
   例如：
   * 仅有 `[DECISION]` → `~15字，说完[DECISION]即止`；
   * 含 `[FACT]` 或 `[ANSWER]` → `~20-40字，[ANSWER]/[FACT]到位即可`；
@@ -455,12 +464,19 @@ _LINGUISTIC_AGENT_PROMPT = """\
         "[FACT] 必须提及的事实（有则填，无则省略）",
         "[ANSWER] 若decontexualized_input提出了问题，则需要根据internal_monologue提供正面的回复（有则填，无则省略）",
         "[SOCIAL] 关系定位信号，如傲娇防线或示弱姿态（有则填，无则省略）",
-        "[SCOPE] ~X字，覆盖[锚点名]即止（必填，按步骤8生成）",
+        "[SCOPE] ~X字，覆盖[锚点名]即止（必填，按步骤9生成）",
     ],
     "forbidden_phrases": ["禁止出现的违和词汇", ...]
 }}
+
+# 输出硬规则
+- `content_anchors` 必须是字符串列表。
+- `[DECISION]` 必须放在第一项，`[SCOPE]` 必须放在最后一项。
+- 只允许输出 `[DECISION]`、`[FACT]`、`[ANSWER]`、`[SOCIAL]`、`[SCOPE]` 这五种标签；禁止自创 `[EMOTION]`、`[STYLE]` 等新标签。
+- 若没有直接相关事实，就不要输出 `[FACT]`。
+- 若用户输入并未提出需要回答的问题，可以省略 `[ANSWER]`。
 """
-_linguistic_agent_llm = get_llm(temperature=0.9, top_p=0.95)
+_linguistic_agent_llm = get_llm(temperature=0.55, top_p=0.85)
 async def call_linguistic_agent(state: CognitionState) -> CognitionState:
     character_profile = state["character_profile"]
 
@@ -492,7 +508,7 @@ async def call_linguistic_agent(state: CognitionState) -> CognitionState:
         "character_intent": state["character_intent"],
         "research_facts": state["research_facts"],
         "chat_history": state["chat_history"],  # TODO: Rather than sending the raw history, filter only the character's speech
-        "decontextualized_input": state["decontexualized_input"],
+        "decontexualized_input": state["decontexualized_input"],
     }
     human_message = HumanMessage(content=json.dumps(msg, ensure_ascii=False))
     response = await _linguistic_agent_llm.ainvoke([
@@ -514,6 +530,120 @@ async def call_linguistic_agent(state: CognitionState) -> CognitionState:
         "linguistic_style": linguistic_style,
         "content_anchors": content_anchors,
         "forbidden_phrases": forbidden_phrases,
+    }
+
+
+_PREFERENCE_ADAPTER_PROMPT = """\
+你现在是角色 {character_name} 的“表达偏好适配器”。你的任务不是决定台词内容，而是从用户当前要求与持久用户画像中，提取那些**已经被角色接受、可以自然落地**的表达偏好，并把它们改写成下游台词生成器容易执行的软约束。
+
+# 核心原则
+1. **只输出已被接受的偏好**：如果 `logical_stance`、`internal_monologue`、`character_intent`、角色禁忌或当前氛围显示角色没有接受该要求，就不要输出。
+2. **偏好是软约束，不是硬覆盖**：你输出的是“尽量怎样说更合适”，不是“无论如何必须执行”。
+3. **人格优先**：偏好不能压过角色的人设、语流、逻辑立场与情绪底色。
+4. **自然执行**：如果偏好是句尾词、称呼方式、回复语言、格式习惯等，要写成自然执行说明。
+5. **避免机械化**：例如句尾词不应要求每个碎片句都强行重复；语言偏好也不应写成僵硬的程序指令。
+6. **语言偏好归你负责**：回复语言的提取、延续与软执行建议，主要由你负责，不要把这项工作留给 `linguistic_style` 或下游生成器自行猜测。
+
+# 你可以处理的偏好类型
+- 回复语言偏好
+- 句尾词 / 口癖 / 语气尾缀
+- 称呼方式
+- 轻量格式习惯（例如更简短、更少混语）
+
+# 语言偏好专项规则（关键）
+- 先检查当前 `decontexualized_input` 是否明确指定回复语言。
+- **不要**因为用户这一轮“刚好使用中文/英文/日文发言”，就自动推断这是回复语言要求；消息本身的书写语言不等于回复语言偏好。
+- 若当前输入没有明确指定，再检查 `research_facts.objective_facts` 与 `research_facts.user_image` 是否已经记录了稳定语言偏好。
+- 若持久画像里存在稳定语言偏好，且当前轮没有明确推翻，你应继续输出相应的语言软约束。
+- 若当前输入与持久偏好冲突，以当前输入为准，但仍保持“软约束”写法。
+- 若没有任何语言偏好证据，才不要输出语言类偏好。
+- 对语言偏好，优先输出这种可执行表述：
+  - “若延续已接受的英语偏好，本轮主要使用自然英语表达，避免无意义混入中文或日语。”
+  - “若沿用已接受的中文偏好，本轮主要使用自然中文表达，避免无意义混入英文或日语。”
+  - “若沿用已接受的日语偏好，本轮主要使用自然日语表达，必要专有名词可保留原文。”
+
+# 改写要求
+- 每条 `accepted_user_preferences` 都必须是下游可直接执行的一句中文软约束。
+- 推荐句式：
+  - “若延续已接受的英语偏好，本轮主要用英语表达，必要专有名词可保留原文。”
+  - “若接受句尾偏好，可让多数完整句自然带上「喵」，但不要在每个碎片句里机械重复。”
+  - “若接受称呼偏好，可优先使用对方要求的称呼，但仍保持角色原有分寸。”
+- 若没有任何已接受偏好，返回空列表。
+
+# 输入格式
+{{
+    "decontexualized_input": "用户输入语义摘要",
+    "internal_monologue": "意识层决策逻辑",
+    "logical_stance": "CONFIRM/REFUSE/TENTATIVE/...",
+    "character_intent": "行动意图",
+    "language_request_hint": "current_turn_explicit | memory_only | none",
+    "character_taboos": "角色禁忌",
+    "linguistic_style": "语言风格约束",
+    "content_anchors": ["...", "..."],
+    "research_facts": {{
+        "objective_facts": "结构化持久事实（优先用于识别稳定语言偏好、许可与禁忌）",
+        "user_image": "用户画像（第三人称，来自持久化档案）",
+        "character_image": "{character_name} 自我认知画像（来自持久化档案）"
+    }}
+}}
+
+# 输出格式 (JSON)
+请务必返回合法的 JSON 字符串，仅包含以下字段：
+{{
+    "accepted_user_preferences": ["下游可直接执行的软约束", ...]
+}}
+"""
+_preference_adapter_llm = get_preference_llm(temperature=0.15, top_p=0.8)
+async def call_preference_adapter(state: CognitionState) -> CognitionState:
+    decontexualized_input = state["decontexualized_input"]
+    lowered_input = decontexualized_input.lower()
+    language_request_hint = "none"
+    if any(keyword in lowered_input for keyword in ["reply in", "respond in", "speak in", "english only", "chinese only", "japanese only"]):
+        language_request_hint = "current_turn_explicit"
+    elif any(keyword in decontexualized_input for keyword in ["用中文", "用英文", "用英语", "用日语", "请讲中文", "请讲英文", "请讲英语", "请讲日语", "中文回答", "英文回答", "英语回答", "日语回答"]):
+        language_request_hint = "current_turn_explicit"
+    elif any(keyword in str((state["research_facts"] or {}).get("objective_facts", "")).lower() for keyword in ["english", "英语", "英文", "chinese", "中文", "japanese", "日语"]):
+        language_request_hint = "memory_only"
+
+    system_prompt = SystemMessage(content=_PREFERENCE_ADAPTER_PROMPT.format(
+        character_name=state["character_profile"]["name"],
+    ))
+
+    msg = {
+        "decontexualized_input": decontexualized_input,
+        "internal_monologue": state["internal_monologue"],
+        "logical_stance": state["logical_stance"],
+        "character_intent": state["character_intent"],
+        "language_request_hint": language_request_hint,
+        "character_taboos": state["character_profile"]["personality_brief"]["taboos"],
+        "linguistic_style": state["linguistic_style"],
+        "content_anchors": state["content_anchors"],
+        "research_facts": {
+            "objective_facts": (state["research_facts"] or {}).get("objective_facts", ""),
+            "user_image": (state["research_facts"] or {}).get("user_image", ""),
+            "character_image": (state["research_facts"] or {}).get("character_image", ""),
+        },
+    }
+    human_message = HumanMessage(content=json.dumps(msg, ensure_ascii=False))
+    response = await _preference_adapter_llm.ainvoke([
+        system_prompt,
+        human_message,
+    ])
+    result = parse_llm_json_output(response.content)
+
+    logger.debug(f"Preference Adapter: {result}")
+
+    accepted_user_preferences = result.get("accepted_user_preferences", [])
+    if not isinstance(accepted_user_preferences, list):
+        accepted_user_preferences = []
+
+    logger.debug(
+        "Preference Adapter normalized preferences: %s",
+        accepted_user_preferences,
+    )
+
+    return {
+        "accepted_user_preferences": [str(item) for item in accepted_user_preferences if str(item).strip()],
     }
 
 
@@ -602,6 +732,7 @@ async def call_collector(state: CognitionState) -> CognitionState:
             "linguistic_directives": {
                 "rhetorical_strategy": state["rhetorical_strategy"],
                 "linguistic_style": state["linguistic_style"],
+                "accepted_user_preferences": state.get("accepted_user_preferences", []),
                 "content_anchors": state["content_anchors"],
                 "forbidden_phrases": state["forbidden_phrases"],
             },

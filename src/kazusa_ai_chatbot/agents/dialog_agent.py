@@ -59,7 +59,7 @@ class DialogAgentState(TypedDict):
 
     # B: Facts
     decontexualized_input: str
-    research_facts: str
+    research_facts: dict
 
     # C: Social context
     chat_history: list[dict]
@@ -109,6 +109,7 @@ _DIALOG_GENERATOR_PROMPT = """\
 1. **语言指令 (Linguistic Directives)**:
    - `rhetorical_strategy`: 修辞策略说明。
    - `linguistic_style`: 具体的语言风格约束。
+   - `accepted_user_preferences`: 上游已经判定“可接受、可自然落地”的用户表达偏好软约束，例如回复语言、句尾词、称呼方式、轻量格式习惯。
    - `content_anchors`: 逻辑终点 `[DECISION]`、必须提及的事实 `[FACT]`、用户问题的正面回复 `[ANSWER]`（可选）、表达量参考 `[SCOPE]`（字数范围+需覆盖的锚点，必填）。
 2. **社交上下文 (Contextual Directives)**:
    - `social_distance`: 对当前社交距离的详细描述。
@@ -129,6 +130,12 @@ _DIALOG_GENERATOR_PROMPT = """\
 3. **呼吸感与切分**: 
    - 模拟打字感：短句为主，合理嵌入语气词；标点节奏由【角色声纹约束】决定，`linguistic_style` 在不与声纹冲突时有效。
    - **表达量参考**：若 `content_anchors` 含 `[SCOPE]`，以其字数范围和锚点覆盖要求为基准，允许 ±30% 弹性；无 `[SCOPE]` 时默认保持简短。
+4. **已接受偏好执行 (Soft-Strong)**:
+   - `accepted_user_preferences` 是上游已经过滤过的表达偏好；若存在，请**优先尝试自然落实**。
+   - 偏好是软约束，不得压过角色人设、逻辑立场、声纹与自然度。
+   - 对于回复语言、句尾词、称呼方式等容易执行的偏好，若已被接受，应让读者在 `final_dialog` 中明显感受到。
+   - 对于句尾词或口癖类偏好，优先在完整句中自然体现，避免每个碎片句都机械重复。
+   - 除用户明确要求或偏好已被接受外，不要无意义地混用多种语言或额外添加口癖。
 
 # 输出要求
 - 只返回台词，
@@ -146,6 +153,7 @@ _DIALOG_GENERATOR_PROMPT = """\
     "linguistic_directives": {{
         "rhetorical_strategy": "string",
         "linguistic_style": "string",
+        "accepted_user_preferences": ["...", "..."],
         "content_anchors": ["...", "..."],
         "forbidden_phrases": ["...", "..."]
     }},
@@ -158,12 +166,6 @@ _DIALOG_GENERATOR_PROMPT = """\
     }},
     "tone_history": "已完成的历史轮次（至上一条 assistant 回复为止），仅供语气节奏参考",
     "user_name": "string",
-    "research_facts": {{
-        "user_image": "用户画像（第三人称，来自持久化档案）",
-        "character_image": "{character_name} 自我认知画像（来自持久化档案）",
-        "input_context_results": "与当前话题相关的主观记忆（跨用户）",
-        "external_rag_results": "外部知识库检索结果"
-    }},
 }}
 
 # 输出格式
@@ -175,7 +177,7 @@ _DIALOG_GENERATOR_PROMPT = """\
     ]
 }}
 """
-_dialog_generator_llm = get_llm(temperature=0.9, top_p=0.9, presence_penalty=0.4)
+_dialog_generator_llm = get_llm(temperature=0.75, top_p=0.85, presence_penalty=0.35)
 async def dialog_generator(state: DialogAgentState) -> DialogAgentState:
 
     ltp = state["character_profile"]["linguistic_texture_profile"]
@@ -213,7 +215,6 @@ async def dialog_generator(state: DialogAgentState) -> DialogAgentState:
         "contextual_directives": state["action_directives"]["contextual_directives"],
         "tone_history": tone_history,
         "user_name": state["user_name"],
-        "research_facts": state["research_facts"],
     }
 
     human_message = HumanMessage(content=json.dumps(msg, ensure_ascii=False))
@@ -249,7 +250,7 @@ def get_mbti_dialog_preference(mbti: str) -> str:
         # 外交家 (NF)
         "INFJ": "作为 INFJ，对话应体现含蓄、洞察与情绪分寸。允许保留、暗示和温柔的距离感，但不应写得空灵失真或过度自我剖白。优先放行那些有潜台词、有人际深度、又不过分直白的台词。",
         "ENFJ": "作为 ENFJ，对话应体现引导感、照拂感与关系意识。允许温度、关照和适度主导，但不应显得说教、模板化或过度讨好。优先放行那些既能接住对方、又保有人格中心的台词。",
-        "INFP": "作为 INFP，对话应体现真诚、柔软与价值感。允许迟疑、留白和轻微自我保护，但不应变成无内容的脆弱播报。优先放行那些情感真实、措辞细腻、同时仍在处理事实的台词。",
+        "INFP": "作为 INFP，对话应体现真诚、柔软与价值感。允许迟疑、留白和轻微自我保护，但不应虚弱到失去存在感。优先放行那些情感真实、措辞细腻、同时仍在处理事实的台词。",
         "ENFP": "作为 ENFP，对话应体现生气、流动感与情绪弹性。允许热度、跳跃和自发性，但不应散乱到失去重点。优先放行那些有活人感、有回应欲、同时没有偏离核心任务的台词。",
 
         # 守护者 (SJ)
@@ -290,7 +291,7 @@ _DIALOG_EVALUATOR_PROMPT = """\
     * 必须执行 `linguistic_directives` 中的 `[DECISION]` 立场。
     * 必须提及 `content_anchors` 中的核心 `[FACT]`（允许自然、模糊地织入）。
 * **结构禁忌**：
-    * **声纹违规 (`hesitation_density`)**：{ltp_hesitation_density_rule} 若 `final_dialog` 中「……」出现次数明显超出上述约束，必须驳回。此检查在所有重试次数均强制执行。
+    * **声纹违规 (`hesitation_density`)**：{ltp_hesitation_density_rule} 若 `final_dialog` 中“……”出现次数明显超出上述约束，必须驳回。此检查在所有重试次数均强制执行。
     * **`[SCOPE]` 消费检测**：若 `content_anchors` 含 `[SCOPE]`，检查 `final_dialog` 是否大致在其字数范围内：
         * 软性指标：±30% 以内偏差可接受，在 `feedback` 中注明即可，不触发驳回。
         * 致命违规（任何重试次数均适用）：字数偏差超过 2× 上限，**且** `[SCOPE]` 指定的锚点未被覆盖——两项同时成立才判定为违规。
@@ -300,6 +301,7 @@ _DIALOG_EVALUATOR_PROMPT = """\
 # 2. 软性指标 (Soft Guidelines) - 引导性反馈
 * **修辞契合度**：检查台词是否体现了 `rhetorical_strategy`（如：反问回避、转移话题）。
 * **风格还原**：检查是否体现了 `linguistic_style`（如：语序紊乱、破碎短句）。
+* **偏好落地度**：若 `accepted_user_preferences` 非空，检查台词是否以自然方式体现这些已接受偏好；若完全缺失，应在 `feedback` 中指出，但除非同时造成明显出戏或违背当前立场，否则优先视为软性问题。
 * **社交温标**：检查回复是否符合 `social_distance` 定义的社交距离。
 * **风格对齐**：{mbti_dialog_preference}
 
@@ -317,6 +319,7 @@ _DIALOG_EVALUATOR_PROMPT = """\
     "linguistic_directives": {{
         "rhetorical_strategy": "string",
         "linguistic_style": "string",
+        "accepted_user_preferences": ["...", "..."],
         "content_anchors": ["...", "..."],
         "forbidden_phrases": ["...", "..."]
     }},
@@ -344,6 +347,7 @@ async def dialog_evaluator(state: DialogAgentState) -> DialogAgentState:
 
     ltp_eval = state["character_profile"]["linguistic_texture_profile"]
     system_prompt = SystemMessage(content=_DIALOG_EVALUATOR_PROMPT.format(
+        character_name=state["character_profile"]["name"],
         mbti_dialog_preference=get_mbti_dialog_preference(mbti),
         ltp_hesitation_density_rule=get_hesitation_density_description(ltp_eval["hesitation_density"]),
     ))

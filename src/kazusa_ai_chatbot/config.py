@@ -18,6 +18,17 @@ LLM_API_KEY = os.getenv("LLM_API_KEY", "lm-studio")
 LLM_MODEL = os.getenv("LLM_MODEL", "local-model")
 LLM_TEMPERATURE = float(os.getenv("LLM_TEMPERATURE", "0.7"))
 
+# Optional secondary / specialized LLM routing.
+# These default back to the primary model so deployments without a second model
+# keep working unchanged.
+SECONDARY_LLM_BASE_URL = os.getenv("SECONDARY_LLM_BASE_URL", LLM_BASE_URL)
+SECONDARY_LLM_API_KEY = os.getenv("SECONDARY_LLM_API_KEY", LLM_API_KEY)
+SECONDARY_LLM_MODEL = os.getenv("SECONDARY_LLM_MODEL", LLM_MODEL)
+
+PREFERENCE_LLM_BASE_URL = os.getenv("PREFERENCE_LLM_BASE_URL", SECONDARY_LLM_BASE_URL)
+PREFERENCE_LLM_API_KEY = os.getenv("PREFERENCE_LLM_API_KEY", SECONDARY_LLM_API_KEY)
+PREFERENCE_LLM_MODEL = os.getenv("PREFERENCE_LLM_MODEL", SECONDARY_LLM_MODEL)
+
 # Embedding model (LM Studio)
 EMBEDDING_BASE_URL = os.getenv("EMBEDDING_BASE_URL", "http://localhost:1234/v1")
 EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "text-embedding-model")
@@ -70,7 +81,7 @@ AFFINITY_DECREMENT_BREAKPOINTS = [
 AFFINITY_DEFAULT = 500
 AFFINITY_MIN = 0
 AFFINITY_MAX = 1000
-
+AFFINITY_RAW_DEAD_ZONE = int(os.getenv("AFFINITY_RAW_DEAD_ZONE", "1"))
 
 # Loop counts
 MAX_RESEARCH_AGENT_RETRY = int(os.getenv("MAX_RESEARCH_AGENT_RETRY", "2"))

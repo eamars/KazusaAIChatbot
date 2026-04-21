@@ -6,7 +6,17 @@ from json_repair import repair_json
 from langchain_openai import ChatOpenAI
 from langchain_core.messages import HumanMessage, SystemMessage
 from kazusa_ai_chatbot.config import AFFINITY_MIN, AFFINITY_MAX
-from kazusa_ai_chatbot.config import LLM_API_KEY, LLM_BASE_URL, LLM_MODEL
+from kazusa_ai_chatbot.config import (
+    LLM_API_KEY,
+    LLM_BASE_URL,
+    LLM_MODEL,
+    SECONDARY_LLM_API_KEY,
+    SECONDARY_LLM_BASE_URL,
+    SECONDARY_LLM_MODEL,
+    PREFERENCE_LLM_API_KEY,
+    PREFERENCE_LLM_BASE_URL,
+    PREFERENCE_LLM_MODEL,
+)
 from pathlib import Path
 import logging
 import json
@@ -25,6 +35,28 @@ def get_llm(temperature=0.7, top_p=1.0, model=LLM_MODEL, base_url=LLM_BASE_URL, 
         **kwargs,
     )
     return _llm
+
+
+def get_secondary_llm(temperature=0.7, top_p=1.0, **kwargs) -> ChatOpenAI:
+    return get_llm(
+        temperature=temperature,
+        top_p=top_p,
+        model=SECONDARY_LLM_MODEL,
+        base_url=SECONDARY_LLM_BASE_URL,
+        api_key=SECONDARY_LLM_API_KEY,
+        **kwargs,
+    )
+
+
+def get_preference_llm(temperature=0.2, top_p=0.8, **kwargs) -> ChatOpenAI:
+    return get_llm(
+        temperature=temperature,
+        top_p=top_p,
+        model=PREFERENCE_LLM_MODEL,
+        base_url=PREFERENCE_LLM_BASE_URL,
+        api_key=PREFERENCE_LLM_API_KEY,
+        **kwargs,
+    )
 
 
 def trim_history_dict(history):

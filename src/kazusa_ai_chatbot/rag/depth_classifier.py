@@ -134,6 +134,42 @@ DEEP_KEYWORDS: list[str] = [
 ]
 
 
+TIME_SENSITIVE_TERMS: tuple[str, ...] = (
+    "今天",
+    "今日",
+    "现在",
+    "当前",
+    "实时",
+    "最新",
+    "刚刚",
+    "today",
+    "current",
+    "latest",
+    "real-time",
+    "right now",
+    "now",
+)
+
+EXTERNAL_INFO_TERMS: tuple[str, ...] = (
+    "天气",
+    "新闻",
+    "股价",
+    "汇率",
+    "比分",
+    "路况",
+    "航班",
+    "油价",
+    "气温",
+    "weather",
+    "news",
+    "stock",
+    "price",
+    "traffic",
+    "flight",
+    "temperature",
+)
+
+
 
 # ── Module-level lazy state ────────────────────────────────────────
 
@@ -209,6 +245,24 @@ def _mean_vector(vectors: list[list[float]]) -> list[float]:
     return [t / n for t in total]
 
 
+def _looks_time_sensitive_external_query(user_input: str, user_topic: str) -> bool:
+    """Return True when the input obviously asks for live external information.
+
+    Args:
+        user_input: Raw user message.
+        user_topic: Optional topic label derived upstream.
+
+    Returns:
+        True when the combined text contains both a time-sensitive signal and an
+        external-information signal such as weather or news.
+    """
+    combined = f"{user_input}\n{user_topic}".lower()
+    has_time_signal = any(term in combined for term in TIME_SENSITIVE_TERMS)
+    if not has_time_signal:
+        return False
+    return any(term in combined for term in EXTERNAL_INFO_TERMS)
+
+
 async def _ensure_centroids() -> None:
     """Pre-compute SHALLOW and DEEP keyword centroids once per process.
 
@@ -277,6 +331,13 @@ class InputDepthClassifier:
             ``trigger_dispatchers`` (list of dispatcher names), ``confidence``
             (float 0–1), and ``reasoning`` (one-sentence explanation).
         """
+        if _looks_time_sensitive_external_query(user_input, user_topic):
+            return self._result(
+                DEEP,
+                confidence=1.0,
+                reasoning="rule→DEEP: live external-information query (time-sensitive + external domain)",
+            )
+
         # Fast path: embedding cosine similarity against centroids
         try:
             await _ensure_centroids()

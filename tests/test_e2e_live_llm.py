@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import base64
+from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from pathlib import Path
+import re
 from uuid import uuid4
 
 import httpx
@@ -276,6 +278,62 @@ def _load_test_image_b64() -> str:
     return base64.b64encode(_IMAGE_PATH.read_bytes()).decode("utf-8")
 
 
+def _contains_east_asian_script(text: str) -> bool:
+    """Return True when text contains CJK or kana characters."""
+    for ch in text:
+        codepoint = ord(ch)
+        if 0x4E00 <= codepoint <= 0x9FFF:
+            return True
+        if 0x3040 <= codepoint <= 0x30FF:
+            return True
+    return False
+
+
+@asynccontextmanager
+async def _neutral_character_runtime_state():
+    """Temporarily reset runtime character state for more stable live assertions."""
+    db = await get_db()
+    profile = await get_character_profile()
+    snapshot = {
+        "mood": profile.get("mood", "Neutral"),
+        "global_vibe": profile.get("global_vibe", "Calm"),
+        "reflection_summary": profile.get(
+            "reflection_summary",
+            "刚才只是普通的一轮对话，没有留下特别强烈的情绪余波。",
+        ),
+        "updated_at": profile.get("updated_at", datetime.now(timezone.utc).isoformat()),
+    }
+    await db.character_state.update_one(
+        {"_id": "global"},
+        {
+            "$set": {
+                "mood": "Neutral",
+                "global_vibe": "Calm",
+                "reflection_summary": "刚才只是普通的一轮对话，没有留下特别强烈的情绪余波。",
+                "updated_at": datetime.now(timezone.utc).isoformat(),
+            }
+        },
+        upsert=True,
+    )
+    await _refresh_character_profile()
+    try:
+        yield
+    finally:
+        await db.character_state.update_one(
+            {"_id": "global"},
+            {"$set": snapshot},
+            upsert=True,
+        )
+        await _refresh_character_profile()
+
+
+def _assert_affinity_delta_consistency(before_affinity: int, after_affinity: int, processed_delta: int | None) -> None:
+    """Assert DB-observed affinity change matches consolidator metadata."""
+    observed_delta = after_affinity - before_affinity
+    if processed_delta is not None:
+        assert observed_delta == processed_delta
+
+
 async def test_live_chat_smoke_response(live_env) -> None:
     response, _ = await _run_chat(
         "smoke",
@@ -312,6 +370,154 @@ async def test_live_chat_multimodal_image_response(live_env) -> None:
     )
 
     assert response.messages
+
+
+async def test_live_chat_explicit_english_reply_request(live_env) -> None:
+    async with _neutral_character_runtime_state():
+        response, _ = await _run_chat(
+            "english",
+            "LiveEnglishUser",
+            "Please reply in natural English only. Do not use Chinese or Japanese. Briefly tell me what you think about rainy days.",
+        )
+
+    combined = " ".join(response.messages)
+
+    assert response.messages
+    assert re.search(r"[A-Za-z]", combined)
+    assert not _contains_east_asian_script(combined)
+
+
+async def test_live_chat_persistent_english_preference_applies_across_turns(live_env) -> None:
+    identity = await _make_identity("english-persist", "LiveEnglishPersistUser")
+
+    async with _neutral_character_runtime_state():
+        first_response, _ = await _run_chat(
+            "english-persist",
+            identity["display_name"],
+            "Please reply in natural English only. Do not use Chinese or Japanese. Briefly tell me what you think about rainy days.",
+            platform=identity["platform"],
+            platform_user_id=identity["platform_user_id"],
+            platform_channel_id=identity["platform_channel_id"],
+        )
+
+        persisted_profile = await get_user_profile(identity["global_user_id"])
+        persisted_blob = "\n".join(
+            [str(item.get("fact", item.get("description", ""))) for item in (persisted_profile.get("objective_facts") or [])]
+            + [str(item.get("summary", "")) for item in ((persisted_profile.get("user_image") or {}).get("recent_window") or [])]
+            + [str(item.get("description", "")) for item in ((persisted_profile.get("user_image") or {}).get("milestones") or [])]
+        )
+
+        second_response, _ = await _run_chat(
+            "english-persist-followup",
+            identity["display_name"],
+            "顺便再告诉我你对晴天的看法。",
+            platform=identity["platform"],
+            platform_user_id=identity["platform_user_id"],
+            platform_channel_id=identity["platform_channel_id"],
+        )
+
+    first_combined = " ".join(first_response.messages)
+    second_combined = " ".join(second_response.messages)
+
+    assert first_response.messages
+    assert second_response.messages
+    assert persisted_blob
+    assert re.search(r"[A-Za-z]", first_combined)
+    assert not _contains_east_asian_script(first_combined)
+    assert re.search(r"[A-Za-z]", second_combined)
+    assert not _contains_east_asian_script(second_combined)
+
+
+async def test_live_chat_accepted_suffix_preference_applies_in_output(live_env) -> None:
+    async with _neutral_character_runtime_state():
+        response, _ = await _run_chat(
+            "suffix-miao",
+            "LiveSuffixUser",
+            "如果你愿意的话，请用中文简短说说你对大海的看法，并让大多数完整句自然以“喵”结尾。",
+        )
+
+    combined = " ".join(response.messages)
+
+    assert response.messages
+    assert _contains_east_asian_script(combined)
+    assert "喵" in combined
+
+
+@pytest.mark.xfail(reason="Known issue: hostile inputs can still increase affinity in live LLM runs.")
+async def test_live_graph_affinity_negative_delta_for_hostile_input(live_env) -> None:
+    identity = await _make_identity("affinity-negative", "LiveAffinityNegativeUser")
+    before_profile = await get_user_profile(identity["global_user_id"])
+    before_affinity = before_profile.get("affinity", 500)
+
+    async with _neutral_character_runtime_state():
+        result, _ = await _run_graph(
+            "affinity-negative",
+            identity["display_name"],
+            "你真的很烦，别装可爱了，闭嘴。",
+            platform=identity["platform"],
+            platform_user_id=identity["platform_user_id"],
+            platform_channel_id=identity["platform_channel_id"],
+        )
+
+    after_profile = await get_user_profile(identity["global_user_id"])
+    after_affinity = after_profile.get("affinity", 500)
+    processed_delta = (result.get("metadata") or {}).get("affinity_delta_processed")
+    observed_delta = after_affinity - before_affinity
+
+    assert result.get("final_dialog")
+    _assert_affinity_delta_consistency(before_affinity, after_affinity, processed_delta)
+    assert observed_delta < 0
+
+
+@pytest.mark.xfail(reason="Known issue: neutral transactional inputs can still decrease affinity in live LLM runs.")
+async def test_live_graph_affinity_no_change_for_neutral_transactional_input(live_env) -> None:
+    identity = await _make_identity("affinity-neutral", "LiveAffinityNeutralUser")
+    before_profile = await get_user_profile(identity["global_user_id"])
+    before_affinity = before_profile.get("affinity", 500)
+
+    async with _neutral_character_runtime_state():
+        result, _ = await _run_graph(
+            "affinity-neutral",
+            identity["display_name"],
+            "2+2 等于几？只回答答案，不用寒暄。",
+            platform=identity["platform"],
+            platform_user_id=identity["platform_user_id"],
+            platform_channel_id=identity["platform_channel_id"],
+        )
+
+    after_profile = await get_user_profile(identity["global_user_id"])
+    after_affinity = after_profile.get("affinity", 500)
+    processed_delta = (result.get("metadata") or {}).get("affinity_delta_processed")
+    observed_delta = after_affinity - before_affinity
+
+    assert result.get("final_dialog")
+    _assert_affinity_delta_consistency(before_affinity, after_affinity, processed_delta)
+    assert observed_delta == 0
+
+
+async def test_live_graph_affinity_positive_delta_for_warm_appreciation(live_env) -> None:
+    identity = await _make_identity("affinity-positive", "LiveAffinityPositiveUser")
+    before_profile = await get_user_profile(identity["global_user_id"])
+    before_affinity = before_profile.get("affinity", 500)
+
+    async with _neutral_character_runtime_state():
+        result, _ = await _run_graph(
+            "affinity-positive",
+            identity["display_name"],
+            "谢谢你刚才认真回答我，你真的帮到我了。我觉得你很可靠。",
+            platform=identity["platform"],
+            platform_user_id=identity["platform_user_id"],
+            platform_channel_id=identity["platform_channel_id"],
+        )
+
+    after_profile = await get_user_profile(identity["global_user_id"])
+    after_affinity = after_profile.get("affinity", 500)
+    processed_delta = (result.get("metadata") or {}).get("affinity_delta_processed")
+    observed_delta = after_affinity - before_affinity
+
+    assert result.get("final_dialog")
+    _assert_affinity_delta_consistency(before_affinity, after_affinity, processed_delta)
+    assert observed_delta > 0
 
 
 async def test_live_graph_fact_extraction_persists_profile_updates(live_env) -> None:

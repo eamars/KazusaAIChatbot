@@ -33,7 +33,7 @@ class CognitionState(TypedDict):
 
     # Input from previous stage
     decontexualized_input: str
-    research_facts: str
+    research_facts: dict
 
     # --- INTERNAL DATA FLOW ---
     # L1 Subconscious (L1) -> Conscious (L2)
@@ -60,6 +60,7 @@ class CognitionState(TypedDict):
     # L3 (Linguistic Agent) Output
     rhetorical_strategy: str
     linguistic_style: str
+    accepted_user_preferences: list[str]
     content_anchors: list[str]
     forbidden_phrases: list[str]
 
@@ -92,6 +93,7 @@ from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition_l2 import (  # noqa: 
 from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition_l3 import (  # noqa: E402
     call_contextual_agent,
     call_linguistic_agent,
+    call_preference_adapter,
     call_visual_agent,
     call_collector,
 )
@@ -115,6 +117,7 @@ async def call_cognition_subgraph(state: GlobalPersonaState) -> GlobalPersonaSta
 
     sub_agent_builder.add_node("l3_contextual_agent", call_contextual_agent)
     sub_agent_builder.add_node("l3_linguistic_agent", call_linguistic_agent)
+    sub_agent_builder.add_node("l3_preference_adapter", call_preference_adapter)
     sub_agent_builder.add_node("l3_visual_agent", call_visual_agent)
     sub_agent_builder.add_node("l4_collector", call_collector)
 
@@ -131,7 +134,8 @@ async def call_cognition_subgraph(state: GlobalPersonaState) -> GlobalPersonaSta
     sub_agent_builder.add_edge("l2c_judgment_core", "l3_visual_agent")
 
     sub_agent_builder.add_edge("l3_contextual_agent", "l4_collector")
-    sub_agent_builder.add_edge("l3_linguistic_agent", "l4_collector")
+    sub_agent_builder.add_edge("l3_linguistic_agent", "l3_preference_adapter")
+    sub_agent_builder.add_edge("l3_preference_adapter", "l4_collector")
     sub_agent_builder.add_edge("l3_visual_agent", "l4_collector")
 
     sub_agent_builder.add_edge("l4_collector", END)

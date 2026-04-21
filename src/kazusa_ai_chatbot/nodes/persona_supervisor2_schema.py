@@ -29,7 +29,7 @@ class GlobalPersonaState(TypedDict):
     decontexualized_input: str
 
     # Stage 1 output
-    research_facts: str
+    research_facts: dict
     research_metadata: list[dict]
 
     # Stage 2 output

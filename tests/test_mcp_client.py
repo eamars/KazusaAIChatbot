@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass
 
 import pytest
 
+from kazusa_ai_chatbot import mcp_client as mcp_client_module
 from kazusa_ai_chatbot.mcp_client import McpManager, ToolInfo
 
 
@@ -144,3 +146,174 @@ def test_get_tool_by_namespaced_name():
     manager._tools["srv__func"] = info
     assert manager.get_tool("srv__func") is info
     assert manager.get_tool("func") is None
+
+
+@pytest.mark.asyncio
+async def test_start_stop_sequence_keeps_async_context_cleanup_in_server_task(monkeypatch):
+    """Regression: MCP async contexts must exit in the same task that entered them."""
+
+    class FakeStreamContext:
+        """Fake streamable HTTP context that enforces same-task enter/exit."""
+
+        def __init__(self):
+            self.enter_task: asyncio.Task | None = None
+            self.exit_task: asyncio.Task | None = None
+
+        async def __aenter__(self):
+            self.enter_task = asyncio.current_task()
+            return (object(), object(), "http://fake")
+
+        async def __aexit__(self, exc_type, exc, tb):
+            self.exit_task = asyncio.current_task()
+            assert self.exit_task is self.enter_task
+
+    class FakeManagedSession:
+        """Fake client session that exposes one tool and checks same-task exit."""
+
+        def __init__(self, read_stream, write_stream):
+            self.enter_task: asyncio.Task | None = None
+            self.exit_task: asyncio.Task | None = None
+
+        async def __aenter__(self):
+            self.enter_task = asyncio.current_task()
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            self.exit_task = asyncio.current_task()
+            assert self.exit_task is self.enter_task
+
+        async def initialize(self):
+            return None
+
+        async def list_tools(self):
+            tool = type(
+                "FakeTool",
+                (),
+                {"name": "ping", "description": "Ping", "inputSchema": {}},
+            )()
+            return type("FakeToolsResult", (), {"tools": [tool]})()
+
+    stream_contexts: list[FakeStreamContext] = []
+
+    def fake_streamablehttp_client(url: str):
+        ctx = FakeStreamContext()
+        stream_contexts.append(ctx)
+        return ctx
+
+    monkeypatch.setattr(mcp_client_module, "MCP_SERVERS", {"fake": {"url": "http://fake"}})
+    monkeypatch.setattr(mcp_client_module, "streamablehttp_client", fake_streamablehttp_client)
+    monkeypatch.setattr(mcp_client_module, "ClientSession", FakeManagedSession)
+
+    manager = McpManager()
+
+    await manager.start()
+
+    assert "fake" in manager._sessions
+    assert manager.get_tool("fake__ping") is not None
+
+    await manager.stop()
+
+    assert not manager._sessions
+    assert not manager._tools
+    assert stream_contexts
+    assert stream_contexts[0].enter_task is not None
+    assert stream_contexts[0].exit_task is not None
+
+
+@pytest.mark.asyncio
+async def test_stop_is_idempotent_after_full_shutdown(monkeypatch):
+    """Calling stop twice should be harmless after all MCP tasks are closed."""
+
+    class FakeStreamContext:
+        """Minimal stream context for idempotent stop testing."""
+
+        async def __aenter__(self):
+            return (object(), object(), "http://fake")
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return None
+
+    class FakeManagedSession:
+        """Minimal client session for idempotent stop testing."""
+
+        def __init__(self, read_stream, write_stream):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return None
+
+        async def initialize(self):
+            return None
+
+        async def list_tools(self):
+            return type("FakeToolsResult", (), {"tools": []})()
+
+    monkeypatch.setattr(mcp_client_module, "MCP_SERVERS", {"fake": {"url": "http://fake"}})
+    monkeypatch.setattr(mcp_client_module, "streamablehttp_client", lambda url: FakeStreamContext())
+    monkeypatch.setattr(mcp_client_module, "ClientSession", FakeManagedSession)
+
+    manager = McpManager()
+    await manager.start()
+    await manager.stop()
+    await manager.stop()
+
+    assert not manager._sessions
+    assert not manager._tools
+    assert not manager._server_connections
+
+
+@pytest.mark.asyncio
+async def test_manager_can_restart_after_stop(monkeypatch):
+    """A manager should support a fresh start after a full shutdown cycle."""
+
+    class FakeStreamContext:
+        """Minimal stream context for restart testing."""
+
+        async def __aenter__(self):
+            return (object(), object(), "http://fake")
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return None
+
+    class FakeManagedSession:
+        """Fake session that returns a stable tool list across restarts."""
+
+        def __init__(self, read_stream, write_stream):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return None
+
+        async def initialize(self):
+            return None
+
+        async def list_tools(self):
+            tool = type(
+                "FakeTool",
+                (),
+                {"name": "ping", "description": "Ping", "inputSchema": {}},
+            )()
+            return type("FakeToolsResult", (), {"tools": [tool]})()
+
+    monkeypatch.setattr(mcp_client_module, "MCP_SERVERS", {"fake": {"url": "http://fake"}})
+    monkeypatch.setattr(mcp_client_module, "streamablehttp_client", lambda url: FakeStreamContext())
+    monkeypatch.setattr(mcp_client_module, "ClientSession", FakeManagedSession)
+
+    manager = McpManager()
+
+    await manager.start()
+    first_tools = {tool.name for tool in manager.list_tools()}
+    await manager.stop()
+
+    await manager.start()
+    second_tools = {tool.name for tool in manager.list_tools()}
+    await manager.stop()
+
+    assert first_tools == {"fake__ping"}
+    assert second_tools == {"fake__ping"}
