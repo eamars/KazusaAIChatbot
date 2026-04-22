@@ -531,7 +531,7 @@ async def global_state_updater(state: ConsolidatorState) -> dict:
         "final_dialog": state["final_dialog"],
     }
 
-    human_message = HumanMessage(content=json.dumps(msg))
+    human_message = HumanMessage(content=json.dumps(msg, ensure_ascii=False))
 
     response = await _global_state_updater_llm.ainvoke([system_prompt, human_message])
 
@@ -614,7 +614,7 @@ async def relationship_recorder(state: ConsolidatorState) -> dict:
         "logical_stance": state["logical_stance"],
     }
 
-    human_message = HumanMessage(content=json.dumps(msg))
+    human_message = HumanMessage(content=json.dumps(msg, ensure_ascii=False))
 
     response = await _relationship_recorder_llm.ainvoke([system_prompt, human_message])
 
@@ -763,7 +763,7 @@ async def facts_harvester(state: ConsolidatorState) -> dict:
         },
     }
 
-    human_message = HumanMessage(content=json.dumps(msg))
+    human_message = HumanMessage(content=json.dumps(msg, ensure_ascii=False))
 
     # Trim evaluator feedback to the first + latest three messages.
     feedback = state.get("fact_harvester_feedback_message", []) or []
@@ -858,7 +858,7 @@ async def fact_harvester_evaluator(state: ConsolidatorState) -> dict:
         "logical_stance": state["logical_stance"],
     }
 
-    human_message = HumanMessage(content=json.dumps(msg))
+    human_message = HumanMessage(content=json.dumps(msg, ensure_ascii=False))
 
     response = await _fact_harvester_evaluator_llm.ainvoke([system_prompt, human_message])
 
