@@ -30,12 +30,13 @@ def _base_discord_state():
         },
         "platform_channel_id": "chan_1",
         "channel_name": "general",
-        "chat_history": [],
+        "chat_history_wide": [],
+        "chat_history_recent": [],
         "should_respond": True,
         "reason_to_respond": "user greeted",
         "use_reply_feature": False,
         "channel_topic": "greetings",
-        "user_topic": "hello",
+        "indirect_speech_context": "",
         "debug_modes": {},
     }
 

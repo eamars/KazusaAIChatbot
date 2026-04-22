@@ -1363,7 +1363,7 @@ async def test_main():
         "decontexualized_input": user_input,
         "research_facts": f"现在的时间为{current_time}",
         "research_metadata": [{"cache_hit": False, "depth": "DEEP", "depth_confidence": 0.9}],
-        "chat_history": trimmed_history,
+        "chat_history_recent": trimmed_history[-5:],
         "character_profile": await get_character_profile(),
     }
 

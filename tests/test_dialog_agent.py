@@ -29,9 +29,7 @@ def _base_global_state():
                 "forbidden_phrases": [],
             },
         },
-        "decontexualized_input": "Hello!",
-        "research_facts": "",
-        "chat_history": [],
+        "chat_history_recent": [],
         "user_name": "TestUser",
         "user_profile": {"affinity": 500},
         "character_profile": {
@@ -45,6 +43,18 @@ def _base_global_state():
                 "taboos": "never break character",
                 "mbti": "INTJ",
             },
+            "linguistic_texture_profile": {
+                "hesitation_density": 0.4,
+                "fragmentation": 0.4,
+                "emotional_leakage": 0.4,
+                "rhythmic_bounce": 0.4,
+                "direct_assertion": 0.4,
+                "softener_density": 0.4,
+                "counter_questioning": 0.4,
+                "formalism_avoidance": 0.4,
+                "abstraction_reframing": 0.4,
+                "self_deprecation": 0.4,
+            },
         },
     }
 
@@ -57,8 +67,7 @@ class TestDialogAgentState:
         hints = typing.get_type_hints(DialogAgentState)
         required = [
             "internal_monologue", "action_directives",
-            "decontexualized_input", "research_facts",
-            "chat_history", "user_name", "user_profile",
+            "chat_history_recent", "user_name", "user_profile",
             "character_profile",
         ]
         for field in required:

@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import typing
+import pytest
 
-from kazusa_ai_chatbot.nodes.persona_supervisor2_schema import GlobalPersonaState
+from kazusa_ai_chatbot.nodes.persona_supervisor2_schema import GlobalPersonaState, CognitionState
 
 
 class TestGlobalPersonaState:
@@ -20,7 +21,7 @@ class TestGlobalPersonaState:
         input_fields = [
             "timestamp", "user_input", "platform", "platform_user_id",
             "global_user_id", "user_name", "user_profile", "platform_bot_id",
-            "chat_history", "user_topic", "channel_topic",
+            "chat_history_wide", "chat_history_recent", "indirect_speech_context", "channel_topic",
         ]
         for field in input_fields:
             assert field in hints, f"Missing input field: {field}"
@@ -53,3 +54,20 @@ class TestGlobalPersonaState:
         assert "last_relationship_insight" in hints
         assert "new_facts" in hints
         assert "future_promises" in hints
+
+
+class TestCognitionState:
+    def test_has_core_cognition_fields(self):
+        hints = typing.get_type_hints(CognitionState)
+        required = [
+            "character_profile",
+            "user_input",
+            "chat_history_recent",
+            "indirect_speech_context",
+            "decontexualized_input",
+            "research_facts",
+            "internal_monologue",
+            "action_directives",
+        ]
+        for field in required:
+            assert field in hints, f"Missing cognition field: {field}"

@@ -35,15 +35,15 @@ class IMProcessState(TypedDict):
 
     platform_channel_id: str  # Original channel/group ID from the platform. Empty for private messages
     channel_name: str  # Display name of the channel (used to determine the context)
-    chat_history: list[dict]  # Previous messages in the channel (short listed)
+    chat_history_wide: list[dict]   # Full history slice (CONVERSATION_HISTORY_LIMIT, used by Relevance Agent)
+    chat_history_recent: list[dict] # Recent slice (CHAT_HISTORY_RECENT_LIMIT, used by downstream stages)
 
     # Output from Relevance Agent
     should_respond: bool
     reason_to_respond: str
     use_reply_feature: bool
     channel_topic: str
-    user_topic: str
-
+    indirect_speech_context: str  # Only populated for Situation B (user talks about the character to others)
 
     # Debug modes (optional, passed from ChatRequest)
     debug_modes: DebugModes

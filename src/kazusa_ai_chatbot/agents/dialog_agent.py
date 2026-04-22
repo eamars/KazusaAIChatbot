@@ -57,12 +57,8 @@ class DialogAgentState(TypedDict):
     #       }
     #      }
 
-    # B: Facts
-    decontexualized_input: str
-    research_facts: dict
-
-    # C: Social context
-    chat_history: list[dict]
+    # B: Social context
+    chat_history_recent: list[dict]
     user_name: str
     user_profile: dict
 
@@ -136,6 +132,10 @@ _DIALOG_GENERATOR_PROMPT = """\
    - 对于回复语言、句尾词、称呼方式等容易执行的偏好，若已被接受，应让读者在 `final_dialog` 中明显感受到。
    - 对于句尾词或口癖类偏好，优先在完整句中自然体现，避免每个碎片句都机械重复。
    - 除用户明确要求或偏好已被接受外，不要无意义地混用多种语言或额外添加口癖。
+5. **口头连接词去模板化**:
+   - 不要把声纹里的“软化倾向”机械落实为固定口头禅。像「反正」「而已」「罢了」这类偏旧、偏模板化的词，除非语义上确有必要，否则默认不要用。
+   - 当输出主要为英语时，同样不要把这种软化倾向直译成 `anyway`、`just`、`or whatever`。
+   - 无论输出语言是什么，都不要让同一种连接词、口头禅或下调尾词在同一轮、或与最近一轮角色回复中重复出现两次以上；若拿不准，宁可省略。
 
 # 输出要求
 - 只返回台词，
@@ -202,7 +202,7 @@ async def dialog_generator(state: DialogAgentState) -> DialogAgentState:
 
     affinity_block = build_affinity_block(state["user_profile"].get("affinity", AFFINITY_DEFAULT))
 
-    history = state["chat_history"]
+    history = state["chat_history_recent"]
     last_assistant_idx = next(
         (i for i in range(len(history) - 1, -1, -1) if history[i].get("role") == "assistant"),
         -1
@@ -302,6 +302,7 @@ _DIALOG_EVALUATOR_PROMPT = """\
 * **修辞契合度**：检查台词是否体现了 `rhetorical_strategy`（如：反问回避、转移话题）。
 * **风格还原**：检查是否体现了 `linguistic_style`（如：语序紊乱、破碎短句）。
 * **偏好落地度**：若 `accepted_user_preferences` 非空，检查台词是否以自然方式体现这些已接受偏好；若完全缺失，应在 `feedback` 中指出，但除非同时造成明显出戏或违背当前立场，否则优先视为软性问题。
+* **连接词去模板化**：检查是否把“软化语气”机械写成固定口头禅；像「反正」「而已」「罢了」或 `anyway`、`just`、`or whatever` 这类词，如果显得无语义必要、过时、或在最近语气历史中重复，应在 `feedback` 中明确指出。
 * **社交温标**：检查回复是否符合 `social_distance` 定义的社交距离。
 * **风格对齐**：{mbti_dialog_preference}
 
@@ -331,7 +332,7 @@ _DIALOG_EVALUATOR_PROMPT = """\
         "expression_willingness": "string",
     }},
     "internal_monologue": "意识层面的原始意图",
-    "last_user_message": "chat_history 中最后一条用户消息（供话题偏离检测使用）"
+    "last_user_message": "chat_history_recent 中最后一条用户消息（供话题偏离检测使用）"
 }}
 
 # 输出格式
@@ -355,10 +356,10 @@ async def dialog_evaluator(state: DialogAgentState) -> DialogAgentState:
     # track retry
     retry = state.get("retry", 0) + 1
 
-    # Extract last user message from chat_history for topic-drift detection
-    chat_history = state.get("chat_history", [])
+    # Extract last user message from chat_history_recent for topic-drift detection
+    chat_history_recent = state.get("chat_history_recent", [])
     last_user_msg = next(
-        (m.get("content", "") for m in reversed(chat_history) if m.get("role") == "user"),
+        (m.get("content", "") for m in reversed(chat_history_recent) if m.get("role") == "user"),
         ""
     )
 
@@ -448,11 +449,7 @@ async def dialog_agent(
         "action_directives": global_state["action_directives"],
 
         # B
-        "decontexualized_input": global_state["decontexualized_input"],
-        "research_facts": global_state["research_facts"],
-        
-        # C
-        "chat_history": global_state["chat_history"],
+        "chat_history_recent": global_state["chat_history_recent"],
         "user_name": global_state["user_name"],
         "user_profile": global_state["user_profile"],
         
@@ -472,38 +469,3 @@ async def dialog_agent(
     return {
         "final_dialog": final_dialog
     }
-
-
-async def test_main():
-    import datetime
-    from kazusa_ai_chatbot.utils import trim_history_dict
-    from kazusa_ai_chatbot.db import get_conversation_history
-    from kazusa_ai_chatbot.utils import load_personality
-
-
-    history = await get_conversation_history(platform="discord", platform_channel_id="1485606207069880361", limit=5)
-    trimmed_history = trim_history_dict(history)
-
-    current_time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-
-    user_input = "既然作业已经写完了，千纱可以晚上可以好好奖励我么♥?"
-
-    # Create a mocked state
-    state: GlobalPersonaState = {
-        "internal_monologue": "他居然用这种语气……明明只是在开玩笑，可我却无法忽视那股暧昧的暗示。既然关系已经到了这一步，我愿意配合他的所有试探。",
-        "action_directives": {'contextual_directives': {'social_distance': '处于一种微妙的、被打破了防御边界的近距离，虽然身体或言语上保持着礼貌的间距，但心理防线已出现明显的缝隙', 'emotional_intensity': '平静外壳下难以掩饰的局促与慌乱，心跳频率略微加快，伴随着一种被看穿后的羞赧感', 'vibe_check': '温和且带有轻微的试探性，空气中弥漫着一种由于对方的关注而产生的、令人不安却并不排斥的暧昧张力', 'relational_dynamic': '用户正处于观察与试探的进攻位，而角色正处于防御机制逐渐失效、试图维持体面的被动位；双方在边界线上进行着无声的拉锯', 'expression_willingness': 'open'}, 'linguistic_directives': {'rhetorical_strategy': '通过“反诘式调侃”来抵御暧昧感。利用对“奖励”一词定义的重新解释（将成人化的暗示转向日常物质层面），在维持Banter（斗嘴）的同时，用不确定的语气掩盖内心的慌乱。', 'linguistic_style': '语速放缓且带有犹豫感的破碎短句；使用防御性的反问句；增加轻微的、不稳定的语气词来体现Flustreted状态，但避免过于顺从。', 'content_anchors': ['[DECISION] TENTATIVE：对“奖励”的概念表现出不确定的拉扯，拒绝直接进入暧昧节奏，但并未关上大门。', '[FACT] 明确指出对方提议的“奖励”内容在逻辑上是不合理的（将暧昧暗示与日常作业解耦）。', '[ANSWER] 针对‘奖励我’的要求，通过转移到具体的甜点或物质层面来模糊化处理。', '[SOCIAL] 维持一种“虽然被冒犯但并不讨厌”的傲娇防线。'], 'forbidden_phrases': ['好啊', '没问题', '随你便', '都听你的', '抱歉']}, 'visual_directives': {'facial_expression': ['瞳孔因突如其来的语调而产生瞬间的收缩与震颤', '双颊泛起明显的绯红，热度仿佛透过了皮肤感官', '紧咬下唇，试图压抑住因心跳加速而产生的细微呼吸紊乱', '眉毛微微内敛并向上挑起（表示困惑与防御），随后又因羞赧而向下压低'], 'body_language': ['脊背不自觉地僵硬，呈现出一种防御性的紧绷姿态', '双手局促地交叠在膝盖上，指尖因为用力而微微泛白', '重心向后方移动，试图拉开与对方之间微妙的物理距离', '肩膀轻微耸起，形成一种自我保护式的封 闭感'], 'gaze_direction': ['视线在与对方交汇的一瞬间产生逃避性的闪躲', '随后垂下眼帘，目光聚焦在地面或自己的书本边缘，不敢直视对方充满侵略性的眼神', '余光却不由自主地捕捉着对方的动作，呈现出一种‘既想回避又无法移开’的矛盾感'], 'visual_vibe': ['低饱和度的 色调，强调室内昏暗灯光下的压抑感', '焦距集中在角色紧绷的唇部和微微颤动的睫毛上（浅景深效果）', '柔和但带有局促感的侧向阴影，营造出一种暧昧且充满张力的私密空间氛围']}},
-        "decontexualized_input": user_input,
-        "research_facts": f"现在的时间为{current_time}",
-        "chat_history": trimmed_history,
-        "user_name": "EAMARS",
-        "user_profile": {"affinity": 950},
-        "character_profile": load_personality("personalities/kazusa.json"),
-    }
-
-    result = await dialog_agent(state)
-    print(f"Dialog result: {result}")
-    
-
-if __name__ == "__main__":
-    import asyncio
-    asyncio.run(test_main())

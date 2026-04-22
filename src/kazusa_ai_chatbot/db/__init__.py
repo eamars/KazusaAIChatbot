@@ -27,6 +27,7 @@ from kazusa_ai_chatbot.db._client import (
     enable_vector_index,
     get_db,
     get_text_embedding,
+    get_text_embeddings_batch,
 )
 
 # ── Schemas ────────────────────────────────────────────────────────
@@ -102,7 +103,7 @@ __all__ = [
     # Config
     "AFFINITY_DEFAULT", "AFFINITY_MAX", "AFFINITY_MIN",
     # Client
-    "close_db", "enable_vector_index", "get_db", "get_text_embedding",
+    "close_db", "enable_vector_index", "get_db", "get_text_embedding", "get_text_embeddings_batch",
     # Schemas
     "AttachmentDoc", "CharacterDiaryEntry", "CharacterProfileDoc",
     "ConversationMessageDoc", "MemoryDoc", "ObjectiveFactEntry",

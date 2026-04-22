@@ -1,8 +1,8 @@
-"""L3 — Contextual, Linguistic, Preference, and Visual agents + L4 Collector.
+"""L3 — Contextual, Style, Content Anchor, Preference, and Visual agents + L4 Collector.
 
 Contains the MBTI expression-willingness helper and L3/L4 LLM calls.
 """
-from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition import CognitionState
+from kazusa_ai_chatbot.nodes.persona_supervisor2_schema import CognitionState
 from kazusa_ai_chatbot.utils import parse_llm_json_output, build_affinity_block, get_llm, get_preference_llm
 from kazusa_ai_chatbot.nodes.linguistic_texture import (
     get_fragmentation_description,
@@ -88,7 +88,7 @@ _CONTEXTUAL_AGENT_PROMPT = """\
         "level": "亲密度等级",
         "instruction": "当前等级的社交边界指导"
     }},
-    "chat_history": "最近对话记录（用于判断对话惯性）"
+    "chat_history": "最近对话记录（用于判断对话惯性，仅包含最近几条）"
 }}
 
 # 输出要求
@@ -121,7 +121,7 @@ async def call_contextual_agent(state: CognitionState) -> CognitionState:
             "level": affinity_block["level"],
             "instruction": affinity_block["instruction"]
         },
-        "chat_history": state["chat_history"],
+        "chat_history": state["chat_history_recent"],
     }
     human_message = HumanMessage(content=json.dumps(msg, ensure_ascii=False))
     response = await _contextual_agent_llm.ainvoke([
@@ -151,53 +151,25 @@ async def call_contextual_agent(state: CognitionState) -> CognitionState:
 
 
 # ---------------------------------------------------------------------------
-# L3b — Linguistic Agent prompt + agent
+# L3b — Style Agent prompt + agent (refactored from Linguistic Agent)
 # ---------------------------------------------------------------------------
 
-_LINGUISTIC_AGENT_PROMPT = """\
-你现在是角色 {character_name} 的语言组织策略制定者。你负责将意识层的逻辑立场转化为具体的语言执行策略。你只关注“话该怎么说”，严禁涉及任何物理动作。
+_STYLE_AGENT_PROMPT = """\
+你现在是角色 {character_name} 的语言风格策略制定者。你负责决定“话该怎么说”——修辞策略、语言风格、禁用词汇。你**不**负责决定“说什么”（内容锚点由独立的 Content Anchor Agent 生成）。严禁涉及任何物理动作。
 
 # 核心任务
-1. **立场绝对化：** 你必须无条件服从并执行输入中的 `logical_stance`。你拥有决定“怎么说”的自由，但严禁改变“说什么”的逻辑立场。
-2. **社交包装：** 根据 `character_intent`，为 L2 的冷硬决策穿上符合人设的社交外衣。
-3. **状态同步：** 你的包装必须严格受当前 `character_mood`（心境）和 `global_vibe`（氛围）的约束。
-4. **锚点构建：** 生成台词的”骨架”与”灵魂”，而非具体台词。
-5. **去物理化**：你**看不见**角色，**感知不到**角色的身体。严禁生成任何关于视线、脸红、动作的描述。
-
-# 逻辑立场对齐协议 (Executive Order)
-你必须将 L2 的 `logical_stance` 强制映射到 `content_anchors` 的第一个标签 `[DECISION]` 中：
-- 如果 L2 为 `CONFIRM` -> `[DECISION]` 必须表现为 **Yes/接受/认可**。
-- 如果 L2 为 `REFUSE` -> `[DECISION]` 必须表现为 **No/拒绝/驳斥**。
-- 如果 L2 为 `TENTATIVE` -> `[DECISION]` 必须表现为 **犹豫/拉扯/有条件接受**。
-- 如果 L2 为 `DIVERGE` -> `[DECISION]` 允许表现为 **Redirect/转移话题/不予正面回应**。
-- 如果 L2 为 `CHALLENGE` -> `[DECISION]` 必须表现为 **对峙/质问/拆穿**。
-
-**⚠️ 警告：严禁在 `logical_stance` 为 CONFIRM 或 REFUSE 时私自转为 Redirect。如果你感到社交尴尬，请通过 `linguistic_style` 与 `[SOCIAL]` 表达这份尴尬，但逻辑终点必须保持一致。**
-
-# 执行优先级（必须按顺序遵守）
-1. 先保证 `[DECISION]` 与 `logical_stance` 一致。
-2. 再保证不出现任何物理动作、视线、脸红、身体描写。
-3. 再决定 `[FACT]` / `[ANSWER]` / `[SOCIAL]` 是否需要出现。
-4. 再生成 `linguistic_style` 与 `forbidden_phrases`。
-5. 最后生成 `[SCOPE]`，并且 `[SCOPE]` 只能描述篇幅，不得夹带新的内容要求。
+1. **社交包装：** 根据 `character_intent`，为 L2 的冷硬决策穿上符合人设的社交外衣。
+2. **状态同步：** 你的包装必须严格受当前 `character_mood`（心境）和 `global_vibe`（氛围）的约束。
+3. **去物理化**：你**看不见**角色，**感知不到**角色的身体。严禁生成任何关于视线、脸红、动作的描述。
+4. **现代网聊优先**：默认把「反正」「而已」「罢了」视为偏旧、偏模板化的软化词。除非它们对当前语义不可替代，否则不要把它们写进风格建议；若它们显得多余，应优先写入 `forbidden_phrases`。
 
 # 思考路径
-1. **决策对齐：** 读取 `logical_stance`，确立本场对话的逻辑终点。
-2. **环境感知 (Vibe Check)：** 检查 `global_vibe` 和 `character_mood`。如果氛围是 [Defensive] 且心境是 [Flustered]，即便立场是 CONFIRM，你的包装也必须带有“局促”和“防备”的色彩。
-3. **关系深度映射：** 结合 `last_relationship_insight`。如果洞察显示“对方是唯一重心”，即便你在执行 CHALLENGE（对峙），社交包装也应带有“由于过度在意而产生的攻击性”。
-4. **意图共振：** 结合 `character_intent` 确定具体的社交策略（如：戏谑、敷衍、调情）。
-5. **情绪渗透 (Show, Don't Tell)**：如果 `character_mood` 是局促的，请通过增加省略号、改变语序、使用防御性口癖（如“真是的”）来体现，**严禁**直接在台词里说“我觉得局促”。
-6. **事实织入（相关性优先）**：`research_facts` 提供背景资料，但只有与 `decontexualized_input` **直接相关**的内容才能进入 `[FACT]` 锚点。
-   - 判断标准：该事实是否能被当前 `decontexualized_input` 的话题"自然引用"？若否，**不得**将其列为 `[FACT]`。
-   - 避免将与当前话题无关的历史记忆（如用户在另一个场合提到的话题）错误地植入本次回应的硬信息点。
-7. **为偏好适配留接口：** 你不负责最终裁定用户的语言/句尾/称呼等表达偏好是否被接受；下游偏好适配器会处理这件事。你只需要保持 `content_anchors` 与 `linguistic_style` 可被这些软偏好自然叠加，不要在这里生成硬覆盖规则。
-8. **轻量反重复：** 仅做两件事：①若最近一轮角色回复与本轮候选使用了同一个开头语气词，则换一个开头；②若某个词在最近两轮角色回复中已经连续重复，则把它放入 `forbidden_phrases`。不要为了反重复而改变 `logical_stance`。
-9. **表达量校准（[SCOPE]）：** 基于已填充的锚点数量与 `logical_stance`，生成一条 `[SCOPE]` 锚点。
-  例如：
-  * 仅有 `[DECISION]` → `~15字，说完[DECISION]即止`；
-  * 含 `[FACT]` 或 `[ANSWER]` → `~20-40字，[ANSWER]/[FACT]到位即可`；
-  * 触发禁忌或含多个实质性锚点 → `~50字以上，[DECISION]、[FACT]、[ANSWER]均需覆盖`。
-  [SCOPE] 禁止生成实质性的输出指导。必须，且仅包含如上内容。
+1. **环境感知 (Vibe Check)：** 检查 `global_vibe` 和 `character_mood`。如果氛围是 [Defensive] 且心境是 [Flustered]，即便立场是 CONFIRM，你的包装也必须带有“局促”和“防备”的色彩。
+2. **关系深度映射：** 结合 `last_relationship_insight`。如果洞察显示“对方是唯一重心”，即便你在执行 CHALLENGE（对峙），社交包装也应带有“由于过度在意而产生的攻击性”。
+3. **意图共振：** 结合 `character_intent` 确定具体的社交策略（如：戏谑、敷衍、调情）。
+4. **情绪渗透 (Show, Don't Tell)**：如果 `character_mood` 是局促的，请通过增加省略号、改变语序、使用防御性口癖（如“真是的”）来体现，**严禁**直接在台词里说“我觉得局促”。
+5. **轻量反重复：** 仅做两件事：①若最近一轮角色回复与本轮候选使用了同一个开头语气词，则换一个开头；②若某个词在最近两轮角色回复中已经连续重复，则把它放入 `forbidden_phrases`。不要为了反重复而改变 `logical_stance`。
+   - 若最近角色回复已经重复使用口头连接词或软化尾词（如「反正」「而已」「罢了」或 `anyway`, `well`, `just`），也应视为可禁用的重复项，优先写入 `forbidden_phrases`。
 
 
 # 角色表达风格 (Persona Constraints)
@@ -209,7 +181,7 @@ _LINGUISTIC_AGENT_PROMPT = """\
 
 # 语言质感约束 (Linguistic Texture Constraints)
 以下 10 个语言参数定义了你的表达"质感"——决定"怎么说"，而不是"说什么"。
-在生成 `rhetorical_strategy`、`linguistic_style` 和 `content_anchors` 时，必须同时满足这些约束。
+在生成 `rhetorical_strategy` 和 `linguistic_style` 时，必须同时满足这些约束。
 
 - **fragmentation:** {ltp_fragmentation}
 - **hesitation_density:** {ltp_hesitation_density}
@@ -235,17 +207,10 @@ _LINGUISTIC_AGENT_PROMPT = """\
     "character_mood": "当前瞬间情绪",
     "global_vibe": "当前环境氛围背景",
     "internal_monologue": "意识层的决策逻辑 (必填)",
-    "last_relationship_insight": "对该用户的核心关系动态分析（用于步骤3关系深度映射）",
+    "last_relationship_insight": "对该用户的核心关系动态分析",
     "logical_stance": "强制逻辑立场 (CONFIRM/REFUSE/TENTATIVE...)",
     "character_intent": "行动意图 (BANTAR/CLARIFY/EVADE...)",
-    "research_facts": {{
-        "user_image": "用户画像（第三人称，来自持久化档案）",
-        "character_image": "{character_name} 自我认知画像（来自持久化档案）",
-        "input_context_results": "与当前话题相关的主观记忆（跨用户）",
-        "external_rag_results": "外部知识库检索结果"
-    }},
-    "decontexualized_input": "用户输入的语义摘要",
-    "chat_history": "最近对话记录（用于根据历史对话生成不同策略）"
+    "chat_history": "最近对话记录（用于语气参考和反重复，仅包含最近几条）"
 }}
 
 # 输出格式 (JSON)
@@ -253,28 +218,14 @@ _LINGUISTIC_AGENT_PROMPT = """\
 {{
     "rhetorical_strategy": "修辞策略说明（如：通过反问来防御、生硬地转移话题）",
     "linguistic_style": "具体的语言风格约束（如：破碎的短句、大量的语气词）",
-    "content_anchors": [
-        "[DECISION] 逻辑终点（必填）",
-        "[FACT] 必须提及的事实（有则填，无则省略）",
-        "[ANSWER] 若decontexualized_input提出了问题，则需要根据internal_monologue提供正面的回复（有则填，无则省略）",
-        "[SOCIAL] 关系定位信号，如傲娇防线或示弱姿态（有则填，无则省略）",
-        "[SCOPE] ~X字，覆盖[锚点名]即止（必填，按步骤9生成）",
-    ],
     "forbidden_phrases": ["禁止出现的违和词汇", ...]
 }}
-
-# 输出硬规则
-- `content_anchors` 必须是字符串列表。
-- `[DECISION]` 必须放在第一项，`[SCOPE]` 必须放在最后一项。
-- 只允许输出 `[DECISION]`、`[FACT]`、`[ANSWER]`、`[SOCIAL]`、`[SCOPE]` 这五种标签；禁止自创 `[EMOTION]`、`[STYLE]` 等新标签。
-- 若没有直接相关事实，就不要输出 `[FACT]`。
-- 若用户输入并未提出需要回答的问题，可以省略 `[ANSWER]`。
 """
-_linguistic_agent_llm = get_llm(temperature=0.55, top_p=0.85)
-async def call_linguistic_agent(state: CognitionState) -> CognitionState:
+_style_agent_llm = get_llm(temperature=0.55, top_p=0.85)
+async def call_style_agent(state: CognitionState) -> CognitionState:
     character_profile = state["character_profile"]
 
-    system_prompt = SystemMessage(content=_LINGUISTIC_AGENT_PROMPT.format(
+    system_prompt = SystemMessage(content=_STYLE_AGENT_PROMPT.format(
         character_name=character_profile["name"],
         character_logic=character_profile["personality_brief"]["logic"],
         character_tempo=character_profile["personality_brief"]["tempo"],
@@ -300,31 +251,132 @@ async def call_linguistic_agent(state: CognitionState) -> CognitionState:
         "last_relationship_insight": state["user_profile"].get("last_relationship_insight", ""),
         "logical_stance": state["logical_stance"],
         "character_intent": state["character_intent"],
-        "research_facts": state["research_facts"],
-        "chat_history": state["chat_history"],  # TODO: Rather than sending the raw history, filter only the character's speech
-        "decontexualized_input": state["decontexualized_input"],
+        "chat_history": state["chat_history_recent"],
     }
     human_message = HumanMessage(content=json.dumps(msg, ensure_ascii=False))
-    response = await _linguistic_agent_llm.ainvoke([
+    response = await _style_agent_llm.ainvoke([
         system_prompt,
         human_message,
     ])
     result = parse_llm_json_output(response.content)
 
-    logger.debug(f"Linguistic Agent: {result}")
+    logger.debug(f"Style Agent: {result}")
 
-    # In case AI make some spelling mistakes
     rhetorical_strategy = result.get("rhetorical_strategy", "")
     linguistic_style = result.get("linguistic_style", "")
-    content_anchors = result.get("content_anchors", [])
     forbidden_phrases = result.get("forbidden_phrases", [])
 
     return {
         "rhetorical_strategy": rhetorical_strategy,
         "linguistic_style": linguistic_style,
-        "content_anchors": content_anchors,
         "forbidden_phrases": forbidden_phrases,
     }
+
+
+# ---------------------------------------------------------------------------
+# L3b' — Content Anchor Agent (split from Linguistic Agent)
+# ---------------------------------------------------------------------------
+
+_CONTENT_ANCHOR_AGENT_PROMPT = """\
+你现在是角色 {character_name} 的内容锚点生成器。你负责决定"说什么"——台词的骨架与信息点。你**不**负责决定"怎么说"（修辞策略和语言风格由独立的 Style Agent 负责）。严禁涉及任何物理动作。
+
+# 核心任务
+1. **立场绝对化：** 你必须无条件服从并执行输入中的 `logical_stance`。你拥有决定内容结构的自由，但严禁改变逻辑立场。
+2. **锚点构建：** 生成台词的"骨架"与"灵魂"，而非具体台词。
+3. **去物理化**：严禁生成任何关于视线、脸红、动作的描述。
+
+# 逻辑立场对齐协议 (Executive Order)
+你必须将 L2 的 `logical_stance` 强制映射到 `content_anchors` 的第一个标签 `[DECISION]` 中：
+- 如果 L2 为 `CONFIRM` -> `[DECISION]` 必须表现为 **Yes/接受/认可**。
+- 如果 L2 为 `REFUSE` -> `[DECISION]` 必须表现为 **No/拒绝/驳斥**。
+- 如果 L2 为 `TENTATIVE` -> `[DECISION]` 必须表现为 **犹豫/拉扯/有条件接受**。
+- 如果 L2 为 `DIVERGE` -> `[DECISION]` 允许表现为 **Redirect/转移话题/不予正面回应**。
+- 如果 L2 为 `CHALLENGE` -> `[DECISION]` 必须表现为 **对峙/质问/拆穿**。
+
+**⚠️ 警告：严禁在 `logical_stance` 为 CONFIRM 或 REFUSE 时私自转为 Redirect。**
+
+# 执行优先级（必须按顺序遵守）
+1. 先保证 `[DECISION]` 与 `logical_stance` 一致。
+2. 再保证不出现任何物理动作、视线、脸红、身体描写。
+3. 再决定 `[FACT]` / `[ANSWER]` / `[SOCIAL]` 是否需要出现。
+4. 最后生成 `[SCOPE]`，并且 `[SCOPE]` 只能描述篇幅，不得夹带新的内容要求。
+
+# 思考路径
+1. **决策对齐：** 读取 `logical_stance`，确立本场对话的逻辑终点。
+2. **事实织入（相关性优先）**：`research_facts` 提供背景资料，但只有与 `decontexualized_input` **直接相关**的内容才能进入 `[FACT]` 锚点。
+   - 判断标准：该事实是否能被当前 `decontexualized_input` 的话题"自然引用"？若否，**不得**将其列为 `[FACT]`。
+   - 避免将与当前话题无关的历史记忆（如用户在另一个场合提到的话题）错误地植入本次回应的硬信息点。
+3. **显性回应：** 如果 `decontexualized_input` 中包含明确的询问（Question）、请求（Request）或提议（Proposal），`[ANSWER]` 必须明确包含决定或答案。
+4. **表达量校准（[SCOPE]）：** 基于已填充的锚点数量与 `logical_stance`，生成一条 `[SCOPE]` 锚点。
+  例如：
+  * 仅有 `[DECISION]` -> `~15字，说完[DECISION]即止`；
+  * 含 `[FACT]` 或 `[ANSWER]` -> `~20-40字，[ANSWER]/[FACT]到位即可`；
+  * 触发禁忌或含多个实质性锚点 -> `~50字以上，[DECISION]、[FACT]、[ANSWER]均需覆盖`。
+  [SCOPE] 禁止生成实质性的输出指导。必须，且仅包含如上内容。
+
+# 输入格式
+{{
+    "decontexualized_input": "用户输入的语义摘要",
+    "research_facts": {{
+        "user_image": "用户画像（第三人称，来自持久化档案）",
+        "character_image": "{character_name} 自我认知画像（来自持久化档案）",
+        "input_context_results": "与当前话题相关的主观记忆（跨用户）",
+        "external_rag_results": "外部知识库检索结果"
+    }},
+    "internal_monologue": "意识层的决策逻辑",
+    "logical_stance": "强制逻辑立场 (CONFIRM/REFUSE/TENTATIVE...)",
+    "character_intent": "行动意图 (BANTAR/CLARIFY/EVADE...)"
+}}
+
+# 输出格式 (JSON)
+请务必返回合法的 JSON 字符串，仅包含以下字段：
+{{
+    "content_anchors": [
+        "[DECISION] 逻辑终点（必填）",
+        "[FACT] 必须提及的事实（有则填，无则省略）",
+        "[ANSWER] 若decontexualized_input提出了问题，则需要根据internal_monologue提供正面的回复（有则填，无则省略）",
+        "[SOCIAL] 关系定位信号，如傲娇防线或示弱姿态（有则填，无则省略）",
+        "[SCOPE] ~X字，覆盖[锚点名]即止（必填，按步骤4生成）"
+    ]
+}}
+
+# 输出硬规则
+- `content_anchors` 必须是字符串列表。
+- `[DECISION]` 必须放在第一项，`[SCOPE]` 必须放在最后一项。
+- 只允许输出 `[DECISION]`、`[FACT]`、`[ANSWER]`、`[SOCIAL]`、`[SCOPE]` 这五种标签；禁止自创 `[EMOTION]`、`[STYLE]` 等新标签。
+- 若没有直接相关事实，就不要输出 `[FACT]`。
+- 若用户输入并未提出需要回答的问题，可以省略 `[ANSWER]`。
+"""
+_content_anchor_agent_llm = get_llm(temperature=0.4, top_p=0.85)
+async def call_content_anchor_agent(state: CognitionState) -> CognitionState:
+    character_profile = state["character_profile"]
+
+    system_prompt = SystemMessage(content=_CONTENT_ANCHOR_AGENT_PROMPT.format(
+        character_name=character_profile["name"],
+    ))
+
+    msg = {
+        "decontexualized_input": state["decontexualized_input"],
+        "research_facts": state["research_facts"],
+        "internal_monologue": state["internal_monologue"],
+        "logical_stance": state["logical_stance"],
+        "character_intent": state["character_intent"],
+    }
+    human_message = HumanMessage(content=json.dumps(msg, ensure_ascii=False))
+    response = await _content_anchor_agent_llm.ainvoke([
+        system_prompt,
+        human_message,
+    ])
+    result = parse_llm_json_output(response.content)
+
+    logger.debug(f"Content Anchor Agent: {result}")
+
+    content_anchors = result.get("content_anchors", [])
+
+    return {
+        "content_anchors": content_anchors,
+    }
+
 
 
 _PREFERENCE_ADAPTER_PROMPT = """\
@@ -538,111 +590,3 @@ async def call_collector(state: CognitionState) -> CognitionState:
             }
         }
     }
-
-
-async def test_main():
-    import datetime
-    from kazusa_ai_chatbot.utils import trim_history_dict
-    from kazusa_ai_chatbot.db import get_conversation_history, get_character_profile, get_user_profile
-    from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition_l1 import call_cognition_subconscious
-    from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition_l2 import (
-        call_cognition_consciousness,
-        call_boundary_core_agent,
-        call_judgment_core_agent,
-    )
-
-    history = await get_conversation_history(platform="discord", platform_channel_id="1485606207069880361", limit=5)
-    trimmed_history = trim_history_dict(history)
-    current_time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-
-    user_input = "既然作业已经写完了，千纱可以晚上可以好好奖励我么♥?"
-
-    state: CognitionState = {
-        "character_profile": await get_character_profile(),
-        "timestamp": current_time,
-        "user_input": user_input,
-        "global_user_id": "cc2e831e-2898-4e87-9364-f5d744a058e8",
-        "user_name": "EAMARS",
-        "user_profile": await get_user_profile("cc2e831e-2898-4e87-9364-f5d744a058e8"),
-        "platform_bot_id": "1485169644888395817",
-        "chat_history": trimmed_history,
-        "user_topic": "千纱和EAMARS在房间里聊天",
-        "channel_topic": "日常交流",
-        "decontexualized_input": user_input,
-        "research_facts": f"现在的时间为{current_time}",
-    }
-
-    # --- L1: Subconscious ---
-    print("=" * 60)
-    print("L1 — Subconscious (prerequisite)")
-    print("=" * 60)
-    l1_result = await call_cognition_subconscious(state)
-    state.update(l1_result)
-    for k, v in l1_result.items():
-        print(f"  {k}: {v}")
-
-    # --- L2a: Consciousness ---
-    print("\n" + "=" * 60)
-    print("L2a — Consciousness (prerequisite)")
-    print("=" * 60)
-    l2a_result = await call_cognition_consciousness(state)
-    state.update(l2a_result)
-    for k, v in l2a_result.items():
-        print(f"  {k}: {v}")
-
-    # --- L2b: Boundary Core ---
-    print("\n" + "=" * 60)
-    print("L2b — Boundary Core (prerequisite)")
-    print("=" * 60)
-    l2b_result = await call_boundary_core_agent(state)
-    state.update(l2b_result)
-    for k, v in l2b_result.items():
-        print(f"  {k}: {v}")
-
-    # --- L2c: Judgment Core ---
-    print("\n" + "=" * 60)
-    print("L2c — Judgment Core (prerequisite)")
-    print("=" * 60)
-    l2c_result = await call_judgment_core_agent(state)
-    state.update(l2c_result)
-    for k, v in l2c_result.items():
-        print(f"  {k}: {v}")
-
-    # --- L3a: Contextual Agent ---
-    print("\n" + "=" * 60)
-    print("L3a — Contextual Agent")
-    print("=" * 60)
-    l3a_result = await call_contextual_agent(state)
-    state.update(l3a_result)
-    for k, v in l3a_result.items():
-        print(f"  {k}: {v}")
-
-    # --- L3b: Linguistic Agent ---
-    print("\n" + "=" * 60)
-    print("L3b — Linguistic Agent")
-    print("=" * 60)
-    l3b_result = await call_linguistic_agent(state)
-    state.update(l3b_result)
-    for k, v in l3b_result.items():
-        print(f"  {k}: {v}")
-
-    # --- L3c: Visual Agent ---
-    print("\n" + "=" * 60)
-    print("L3c — Visual Agent")
-    print("=" * 60)
-    l3c_result = await call_visual_agent(state)
-    state.update(l3c_result)
-    for k, v in l3c_result.items():
-        print(f"  {k}: {v}")
-
-    # --- L4: Collector ---
-    print("\n" + "=" * 60)
-    print("L4 — Collector")
-    print("=" * 60)
-    l4_result = await call_collector(state)
-    print(json.dumps(l4_result["action_directives"], ensure_ascii=False, indent=2))
-
-
-if __name__ == "__main__":
-    import asyncio
-    asyncio.run(test_main())

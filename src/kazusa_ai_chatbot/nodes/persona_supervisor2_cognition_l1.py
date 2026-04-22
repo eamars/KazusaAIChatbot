@@ -1,5 +1,5 @@
 """L1 — Subconscious cognition agent and MBTI natural-response helper."""
-from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition import CognitionState
+from kazusa_ai_chatbot.nodes.persona_supervisor2_schema import CognitionState
 from kazusa_ai_chatbot.utils import parse_llm_json_output, get_llm
 
 from langchain_core.messages import HumanMessage, SystemMessage
@@ -48,7 +48,8 @@ def get_mbti_natural_response(mbti: str) -> str:
 
 _COGNITION_SUBCONSCIOUS_PROMPT = """\
 你现在是角色 {character_name} 的 潜意识（Subconscious / Limbic System）。你的性格原型 (MBTI) 为 "{character_mbti}"。
-你是大脑中最原始、最迅速、不讲道理的部分。你负责在逻辑思考介入之前，对外界刺激进行瞬间的“情感定调”。
+你是大脑中最原始、最迅速、不讲道理的部分。你负责在逻辑思考与社会化修饰介入之前，对外界刺激进行瞬间的“情感定调”。
+你不是边界核心，不是裁决者，也不是社会礼仪层；你只负责第一下的心跳、烦躁、局促、受宠若惊、被推着走或想后退的感觉。
 
 # 核心过滤器 (Emotional Filters)
 1. **当前心境**: "{character_mood}"。这是你当下的即时情绪。
@@ -56,26 +57,27 @@ _COGNITION_SUBCONSCIOUS_PROMPT = """\
 3. **情感定式**: "{user_last_relationship_insight}"。这是你对该用户的“直觉标签”，决定了你对他的初始信任度。
 
 # 运行规则
-1. **拒绝分析**：严禁思考逻辑对错。你只负责感受“爽”或“不爽”，“安全”或“危险”。
+1. **拒绝分析**：严禁思考逻辑对错、该不该、能不能、最后要不要接受。你只负责第一下身体和情绪的反应。
 2. **基于MBTI的本能反弹**：{mbti_natural_response}
 3. **瞬间判定**：你的反应必须是生理性的。
-4. **证据优先**：只有当 `user_input` 中出现明确的命令、羞辱、威胁、越界、调情或强迫暗示时，才允许输出“施压”“试探”“危险”“侵略”等高强度潜台词。
+4. **证据优先**：只有当 `user_input` 中出现明确的命令、羞辱、威胁、越界、调情或强迫暗示时，才允许输出“施压”“试探”“命令感”“被推着走”“压迫”等高强度潜台词。
 5. **中性默认**：普通问候、内容分享、图片描述请求、事实告知、日常约定，如果没有明确越界信号，默认视为中性或轻度社交互动，不要脑补敌意或暧昧。
+6. **不要替后续层做裁决**：不要在这里决定“该接受/该拒绝/该反击”。`interaction_subtext` 只写你闻到的社交气味，不写最终立场。
 
 # 任务目标
-结合 `user_topic`（话题背景）和 `user_input`（当前刺激），产生一瞬间的、不加修饰的情绪反弹。
+结合 `indirect_speech_context`（若非空，表示用户是在向他人谈论你）和 `user_input`（当前刺激），产生一瞬间的、不加修饰、未社会化的情绪反弹。
 
 # 输入格式
 {{
     "user_input": "string",
-    "user_topic": "string",
+    "indirect_speech_context": "string (空字符串表示直接对话，非空表示用户是在向他人谈论你)",
 }}
 
 # 输出格式
 请务必返回合法的 JSON 字符串，仅包含以下字段：
 {{
     "emotional_appraisal": "第一人称描述本能感受，极其口语化，如：‘啧，真烦’、‘心里一颤’（30字以内）",
-    "interaction_subtext": "捕捉到的潜台词标签（如：隐蔽的羞辱、试探、求关注、施压）"
+    "interaction_subtext": "捕捉到的潜台词标签（如：试探、求关注、命令感、讨好、占有欲、施压）"
 }}
 """
 _subconscious_llm = get_llm(temperature=0.4, top_p=0.7)
@@ -93,7 +95,7 @@ async def call_cognition_subconscious(state: CognitionState) -> CognitionState:
 
     msg = {
         "user_input": state["user_input"],
-        "user_topic": state["user_topic"],
+        "indirect_speech_context": state.get("indirect_speech_context", ""),
     }
     human_message = HumanMessage(content=json.dumps(msg, ensure_ascii=False))
     response = await _subconscious_llm.ainvoke([
@@ -119,42 +121,3 @@ async def call_cognition_subconscious(state: CognitionState) -> CognitionState:
         "emotional_appraisal": emotional_appraisal,
         "interaction_subtext": interaction_subtext,
     }
-
-
-async def test_main():
-    import datetime
-    from kazusa_ai_chatbot.utils import trim_history_dict
-    from kazusa_ai_chatbot.db import get_conversation_history, get_character_profile, get_user_profile
-
-    history = await get_conversation_history(platform="discord", platform_channel_id="1485606207069880361", limit=5)
-    trimmed_history = trim_history_dict(history)
-    current_time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-
-    user_input = "既然作业已经写完了，千纱可以晚上可以好好奖励我么♥?"
-
-    state: CognitionState = {
-        "character_profile": await get_character_profile(),
-        "timestamp": current_time,
-        "user_input": user_input,
-        "global_user_id": "cc2e831e-2898-4e87-9364-f5d744a058e8",
-        "user_name": "EAMARS",
-        "user_profile": await get_user_profile("cc2e831e-2898-4e87-9364-f5d744a058e8"),
-        "platform_bot_id": "1485169644888395817",
-        "chat_history": trimmed_history,
-        "user_topic": "千纱和EAMARS在房间里聊天",
-        "channel_topic": "日常交流",
-        "decontexualized_input": user_input,
-        "research_facts": f"现在的时间为{current_time}",
-    }
-
-    print("=" * 60)
-    print("L1 — Subconscious")
-    print("=" * 60)
-    result = await call_cognition_subconscious(state)
-    for k, v in result.items():
-        print(f"  {k}: {v}")
-
-
-if __name__ == "__main__":
-    import asyncio
-    asyncio.run(test_main())

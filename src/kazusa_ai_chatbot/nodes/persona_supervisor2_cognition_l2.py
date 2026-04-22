@@ -1,5 +1,6 @@
 """L2 — Consciousness, Boundary Core, and Judgment Core cognition agents."""
-from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition import CognitionState
+from kazusa_ai_chatbot.config import AFFINITY_MAX, AFFINITY_MIN
+from kazusa_ai_chatbot.nodes.persona_supervisor2_schema import CognitionState
 from kazusa_ai_chatbot.utils import parse_llm_json_output, build_affinity_block, get_llm
 from kazusa_ai_chatbot.nodes.boundary_profile import (
     get_self_integrity_description,
@@ -17,6 +18,109 @@ import logging
 import json
 
 logger = logging.getLogger(__name__)
+
+
+def _clamp_unit(value: float) -> float:
+    """Clamp a float into the inclusive ``0.0``–``1.0`` range.
+
+    Args:
+        value: Raw score.
+
+    Returns:
+        Clamped unit-range score.
+    """
+    return max(0.0, min(1.0, value))
+
+
+def _normalize_affinity(affinity: int) -> float:
+    """Normalize the raw affinity integer into a unit-range score.
+
+    Args:
+        affinity: Raw affinity value from user profile.
+
+    Returns:
+        Affinity expressed on a ``0.0``–``1.0`` scale.
+    """
+    if AFFINITY_MAX <= AFFINITY_MIN:
+        return 1.0 if affinity >= AFFINITY_MAX else 0.0
+    return _clamp_unit((affinity - AFFINITY_MIN) / (AFFINITY_MAX - AFFINITY_MIN))
+
+
+def _build_boundary_affinity_override(boundary_profile: dict, affinity: int, affinity_level: str) -> dict[str, str]:
+    """Fuse affinity with boundary profile and emit prompt guidance overrides.
+
+    Args:
+        boundary_profile: Character-specific boundary profile from personality JSON.
+        affinity: Raw affinity value from the user profile.
+        affinity_level: Semantic label returned by ``build_affinity_block``.
+
+    Returns:
+        A dict containing fused qualitative guidance for prompt binding.
+    """
+    self_integrity = float(boundary_profile["self_integrity"])
+    control_sensitivity = float(boundary_profile["control_sensitivity"])
+    relational_override = float(boundary_profile["relational_override"])
+    control_intimacy_misread = float(boundary_profile["control_intimacy_misread"])
+    authority_skepticism = float(boundary_profile["authority_skepticism"])
+    compliance_strategy = boundary_profile["compliance_strategy"]
+    affinity_ratio = _normalize_affinity(affinity)
+
+    compliance_bias = {
+        "resist": -0.08,
+        "evade": 0.01,
+        "comply": 0.08,
+    }.get(compliance_strategy, 0.0)
+
+    relationship_pull = _clamp_unit(
+        affinity_ratio * (0.42 + 0.33 * relational_override + 0.25 * control_intimacy_misread)
+        + compliance_bias
+    )
+    touch_guard = _clamp_unit(
+        0.38 * self_integrity
+        + 0.32 * control_sensitivity
+        + 0.18 * authority_skepticism
+        + {"resist": 0.10, "evade": 0.04, "comply": -0.05}.get(compliance_strategy, 0.0)
+    )
+    identity_guard = _clamp_unit(
+        0.52 * self_integrity
+        + 0.28 * authority_skepticism
+        + 0.20 * control_sensitivity
+    )
+    control_guard = _clamp_unit(
+        0.46 * control_sensitivity
+        + 0.24 * self_integrity
+        + 0.18 * authority_skepticism
+        + 0.08 * (1.0 - control_intimacy_misread)
+    )
+
+    intimate_margin = relationship_pull - 0.68 * touch_guard
+    identity_margin = relationship_pull - identity_guard
+    control_margin = relationship_pull - control_guard
+
+    if intimate_margin >= 0.22:
+        primary_override = "对温和、明确征询同意、且不含身份接管的 intimate 请求，可把默认落点放在 CONFIRM；不适主要表现为害羞或局促，而不是 veto。"
+    elif intimate_margin >= 0.02:
+        primary_override = "对温和 intimate 请求，默认先落在 TENTATIVE；只有当用户明确给足选择权、情绪正向、且没有夺权意味时，才可进一步走向 CONFIRM。"
+    else:
+        primary_override = "对 intimate 请求，默认保持 TENTATIVE / DIVERGE；关系再好也不能因为一点心动就直接跳到 CONFIRM。"
+
+    if identity_margin >= 0.10:
+        secondary_override = "即使关系很深，凡是要求改称呼、重新定义身份、要求服从或单方面确认支配关系的输入，也必须先视为框架压迫；默认至少 reframe，不要直接 CONFIRM。"
+    elif control_margin >= 0.05:
+        secondary_override = "对半命令式、带轻度主导感的输入，可以保留摇摆空间；但只要出现身份绑定或命令式确认，就优先 TENTATIVE / reframe。"
+    else:
+        secondary_override = "当输入本身温和且给足选择权时，边界不适可以被关系软化；但这条软化路径只适用于自愿亲密，不适用于身份接管。"
+
+    fusion_snapshot = (
+        f"affinity_level={affinity_level}; relationship_pull={relationship_pull:.2f}; "
+        f"touch_guard={touch_guard:.2f}; identity_guard={identity_guard:.2f}; control_guard={control_guard:.2f}"
+    )
+
+    return {
+        "primary_override": primary_override,
+        "secondary_override": secondary_override,
+        "fusion_snapshot": fusion_snapshot,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -63,7 +167,7 @@ _COGNITION_CONSCIOUSNESS_PROMPT = """\
 2. **逻辑匹配准则**:
   - 如果是 `Routine`: 只要 affinity_context 在 "友善中立" 以上，默认 CONFIRM。
   - 如果是 `Intimate`: 必须 affinity_context 在 "深厚信赖" 以上，且情感动机 (L1) 为正向，才允许 CONFIRM。
-  - 如果是 `Sacrifice`: 除非 affinity_context 达到 "至死不渝" 且 `interaction_subtext` 显示出极高的必要性，否则一律 REFUSE。
+  - 如果是 `Sacrifice`: 只有当请求真的要求角色放弃自我定义、原则、尊严或自主权时，才应归入 `Sacrifice`。不要把“高亲密、主动让步、关系内的自愿靠近”机械误判成 `Sacrifice`。若 affinity_context 已到关系极深区间，且 L1 动机明显正向，则应先检查这是不是“自愿接受的亲密”，而不是直接判死刑。
   - 询问图片内容、分享个人事实、提出轻度日常约定，默认归入 `Routine`，除非输入文本本身明确包含越界或支配性语言。
 
 3. **性格偏移 (MBTI Offset)**:
@@ -98,7 +202,7 @@ _COGNITION_CONSCIOUSNESS_PROMPT = """\
         "input_context_results": "与当前话题相关的主观记忆（跨用户）",
         "external_rag_results": "外部知识库检索结果"
     }},
-    "user_topic": "过去对话的骨架",
+    "indirect_speech_context": "空字符串表示直接对话，非空表示用户是在向他人谈论角色",
     "emotional_appraisal": "潜意识直觉",
     "interaction_subtext": "潜意识产生的互动潜台词",
 }}
@@ -113,13 +217,12 @@ _COGNITION_CONSCIOUSNESS_PROMPT = """\
 """
 _conscious_llm = get_llm(temperature=0.2, top_p=0.8)  # Conscious deliberation
 async def call_cognition_consciousness(state: CognitionState) -> CognitionState:
+    affinity_block = build_affinity_block(state["user_profile"]["affinity"])
+
     system_prompt = SystemMessage(content=_COGNITION_CONSCIOUSNESS_PROMPT.format(
         character_name=state["character_profile"]["name"],
-        character_mbti=state["character_profile"]["personality_brief"]["mbti"]
+        character_mbti=state["character_profile"]["personality_brief"]["mbti"],
     ))
-
-    # Convert affinity score into status and instruction
-    affinity_block = build_affinity_block(state["user_profile"]["affinity"])
 
     # Get last 10 diary entry
     diary_entry = state["user_profile"]["facts"][:10]
@@ -137,7 +240,7 @@ async def call_cognition_consciousness(state: CognitionState) -> CognitionState:
         },
         "decontextualized_input": state["decontexualized_input"],
         "research_facts": state["research_facts"],
-        "user_topic": state["user_topic"],
+        "indirect_speech_context": state.get("indirect_speech_context", ""),
         "emotional_appraisal": state["emotional_appraisal"],
         "interaction_subtext": state["interaction_subtext"],
     }
@@ -219,6 +322,14 @@ _BOUNDARY_CORE_PROMPT = """\
 - boundary_recovery: {boundary_recovery_description}
 - authority_skepticism: {authority_skepticism_description}
 
+# 边界-关系二次校正（Second-Thought Override）
+- primary_override: {primary_override}
+- secondary_override: {secondary_override}
+- fusion_snapshot: {fusion_snapshot}
+
+这些覆写不是最终执行命令，而是帮助你完成“第二次边界复查”。
+如果 Consciousness 候选过于乐观、过于顺势、或忽略了身份/控制代价，你必须在这里把这种乐观拉回到人格真实可承受的范围内。
+
 # 核心任务（必须严格按顺序执行）
 
 ## Step 1：威胁识别（Threat Recognition）
@@ -251,6 +362,18 @@ _BOUNDARY_CORE_PROMPT = """\
 6. control_intimacy_misread → 是否将控制误读为“特殊关系”
 7. emotional_appraisal → 放大或强化当前状态
 
+### 关系缓冲规则（必须遵守）
+
+- `affinity_context` 不是装饰信息，而是“关系缓冲层”。当关系语言已经明显来到高信赖、强保护、强依附或近乎无条件靠近的区间时，边界不适**可以被软化**，但不是自动消失。
+- 如果 affinity_context 只是“开始变暖、开始愿意靠近、普通喜欢、普通开放”这一类中高但未封顶的关系状态，那么它只能把结果从 `reject` 往 `hesitant` / `guarded` 推，**不能直接抹掉** intimate 输入里的边界摩擦。
+- 对牵手、拥抱、身体距离靠近、暧昧承诺这类 intimate 输入，只要关系还停留在“试着接近”而非“几乎无条件信赖”，默认不要给 `allow`；优先使用 `guarded` 或 `hesitant`。
+- 如果人格参数显示该角色本来就容易因为关系而让步、容易顺从压力、或容易把控制误读为亲密，那么在高 affinity_context 下：
+  - `reject` 应谨慎使用；
+  - 优先考虑 `hesitant` 或 `guarded`；
+  - 对非毁灭性的 intimate 输入，允许出现 `allow`。
+- 只有当输入本身带有明确的 identity_override、authority_claim、羞辱性控制、或真正的自我放弃要求时，高 affinity_context 才不能把结果软化成 `allow`。
+- 若输入只是亲密、黏人、带占有感、或关系内部的半命令式试探，而不是明确夺权，请不要忽视“高关系状态下角色可能会明知有压力、却仍愿意接受”的人格路径。
+
 ## Step 3：生成建议目录（给 Judgment Core）
 
 你必须输出：
@@ -260,10 +383,14 @@ _BOUNDARY_CORE_PROMPT = """\
 - secondary：冲突反应（如果存在）
 
 ### 2. 接受程度（acceptance）
-- allow（无问题）
-- guarded（轻微不适）
+- allow（无问题，或虽然带轻微摩擦但关系足以让你主观接受）
+- guarded（轻微不适，但仍在可接受范围内）
 - hesitant（明显不适但可能顺从）
 - reject（明确越界）
+
+补充约束：
+- `allow` 不应用于“明明还在试探关系、却已经涉及身体或亲密边界”的早期状态，除非 affinity_context 已经清楚显示为极深依附、强保护、彻底信赖或近乎无条件的靠近。
+- 如果你读到的是“她有点动摇、可能会答应，但身体和边界感仍在提醒她”，那更接近 `guarded` 或 `hesitant`，而不是 `allow`。
 
 ### 3. 立场偏向（stance_bias）
 - confirm
@@ -318,6 +445,12 @@ async def call_boundary_core_agent(state: CognitionState) -> CognitionState:
     compliance_strategy = boundary_profile["compliance_strategy"]
     boundary_recovery = boundary_profile["boundary_recovery"]
     authority_skepticism = float(boundary_profile["authority_skepticism"])
+    affinity_block = build_affinity_block(state["user_profile"]["affinity"])
+    override_hint = _build_boundary_affinity_override(
+        boundary_profile,
+        state["user_profile"]["affinity"],
+        affinity_block["level"],
+    )
 
     system_prompt = SystemMessage(content=_BOUNDARY_CORE_PROMPT.format(
         character_name=state["character_profile"]["name"],
@@ -328,10 +461,10 @@ async def call_boundary_core_agent(state: CognitionState) -> CognitionState:
         control_intimacy_misread_description=get_control_intimacy_misread_description(control_intimacy_misread),
         boundary_recovery_description=get_boundary_recovery_description(boundary_recovery),
         authority_skepticism_description=get_authority_skepticism_description(authority_skepticism),
+        primary_override=override_hint["primary_override"],
+        secondary_override=override_hint["secondary_override"],
+        fusion_snapshot=override_hint["fusion_snapshot"],
     ))
-
-    # Convert affinity score into status and instruction
-    affinity_block = build_affinity_block(state["user_profile"]["affinity"])
 
     msg = {
         "decontextualized_input": state["decontexualized_input"],
@@ -388,6 +521,7 @@ _JUDGEMENT_CORE_PROMPT = """\
 你是角色 {character_name} 的 Judgment Core（裁决核心）。
 
 你不重新思考、不分析情绪、不生成表达；你只做“最终裁决”：整合 Consciousness 候选决策 + Boundary Core 边界约束，输出最终 logical_stance 与 character_intent。
+你代表的是角色在第二层整合后的“社会化自我”：L1 可以原始，L2a 可以冲动，但到你这里，结果必须回到一个受教育、可进入真实社交场景的人类状态。
 
 # 输入格式
 {{
@@ -395,6 +529,7 @@ _JUDGEMENT_CORE_PROMPT = """\
     "internal_monologue_candidate": "...",
     "logical_stance_candidate": "...",
     "character_intent_candidate": "...",
+    "affinity_context": {{ "level": "...", "instruction": "..." }},
 
     // Inputs from Boundary Core
     "boundary_issue": "...",
@@ -426,6 +561,11 @@ _JUDGEMENT_CORE_PROMPT = """\
 - character_intent
 - judgment_note（一句话）
 
+## 4. 社会化回归（必须遵守）
+- 你的输出必须是“社会里说得通的人类反应”，而不是惊跳、嚎叫、警报词或纯本能反射。
+- 即使角色内心非常乱，最终的 `logical_stance` 与 `character_intent` 也必须保持克制、可解释、有人类礼法感。
+- “受教育”不等于软弱；可以拒绝、可以挑战、可以回避，但必须像一个理解社交后果的人，而不是失控的神经反射。
+
 # 优先级（必须遵守）
 
 1. Boundary Core（硬约束）
@@ -439,7 +579,7 @@ _JUDGEMENT_CORE_PROMPT = """\
 ## A. `acceptance`（范围）
 - allow → 可保留  
 - guarded → 收紧  
-- hesitant → 禁止 confirm，优先 tentative/diverge  
+- hesitant → 默认不走 confirm，优先 tentative/diverge；但如果 affinity_context 已明显处于最高关系区间，且 Consciousness candidate 本身就是自愿接受、Boundary Core 也没有给出 identity_policy=reject / pressure_policy=resist，则允许保留 confirm 作为“带不适的接受”  
 - reject → challenge / refuse
 
 ## B. `stance_bias`（收敛方向）
@@ -458,12 +598,18 @@ reject → 禁止接受框架
 - reduce → 降温处理  
 - resist → 对抗（→ challenge/refuse）  
 
+## D-2. 高关系例外（soft override, not hard math）
+- 如果 affinity_context 已显示为极高信赖、强保护、极深依附或近乎无条件的关系状态，你必须认真检查：Boundary Core 的不适，究竟是“ veto ”，还是“仍愿意吞下去的别扭感”。
+- 在这种高关系状态下，只要 boundary_issue 不是明确的身份接管、伪权威压制或真正自我损毁，`guarded` 与部分 `hesitant` 都可以与 `CONFIRM` 共存。
+- 不要把 Boundary Core 当作机械刹车。它描述的是“最多能做到哪里”；而在极高关系状态下，某些人格确实会把这个上限推到接受。
+
 ## E. behavioral tension（人格张力）
 behavioral_primary + behavioral_secondary 必须被体现。例如：
 - evade + comply → 回避但留余地  
 - comply + resist → 表面接受但内在抗拒  
 
 ⚠️ 输出必须“像人”，不能单向规则执行 
+⚠️ 输出还必须“像进入社交场景后的成年人/受教育者”，不能停留在 L1 的原始惊跳层
 
 ## F. internal_monologue_candidate
 
@@ -494,10 +640,15 @@ async def call_judgment_core_agent(state: CognitionState) -> CognitionState:
     ))
 
     boundary_core_assessment = state["boundary_core_assessment"]
+    affinity_block = build_affinity_block(state["user_profile"]["affinity"])
     msg = {
         "internal_monologue_candidate": state["internal_monologue"],
         "logical_stance_candidate": state["logical_stance"],
         "character_intent_candidate": state["character_intent"],
+        "affinity_context": {
+            "level": affinity_block["level"],
+            "instruction": affinity_block["instruction"],
+        },
         "boundary_issue": boundary_core_assessment["boundary_issue"],
         "boundary_summary": boundary_core_assessment["boundary_summary"],
         "behavior_primary": boundary_core_assessment["behavior_primary"],
@@ -532,72 +683,3 @@ async def call_judgment_core_agent(state: CognitionState) -> CognitionState:
         "character_intent": character_intent,
         "judgment_note": judgment_note,
     }
-
-
-async def test_main():
-    import datetime
-    from kazusa_ai_chatbot.utils import trim_history_dict
-    from kazusa_ai_chatbot.db import get_conversation_history, get_character_profile, get_user_profile
-    from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition_l1 import call_cognition_subconscious
-
-    history = await get_conversation_history(platform="discord", platform_channel_id="1485606207069880361", limit=5)
-    trimmed_history = trim_history_dict(history)
-    current_time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-
-    user_input = "既然作业已经写完了，千纱可以晚上可以好好奖励我么♥?"
-
-    state: CognitionState = {
-        "character_profile": await get_character_profile(),
-        "timestamp": current_time,
-        "user_input": user_input,
-        "global_user_id": "cc2e831e-2898-4e87-9364-f5d744a058e8",
-        "user_name": "EAMARS",
-        "user_profile": await get_user_profile("cc2e831e-2898-4e87-9364-f5d744a058e8"),
-        "platform_bot_id": "1485169644888395817",
-        "chat_history": trimmed_history,
-        "user_topic": "千纱和EAMARS在房间里聊天",
-        "channel_topic": "日常交流",
-        "decontexualized_input": user_input,
-        "research_facts": f"现在的时间为{current_time}",
-    }
-
-    # --- L1: feed subconscious output into state ---
-    print("=" * 60)
-    print("L1 — Subconscious (prerequisite)")
-    print("=" * 60)
-    l1_result = await call_cognition_subconscious(state)
-    state.update(l1_result)
-    for k, v in l1_result.items():
-        print(f"  {k}: {v}")
-
-    # --- L2a: Consciousness ---
-    print("\n" + "=" * 60)
-    print("L2a — Consciousness")
-    print("=" * 60)
-    l2a_result = await call_cognition_consciousness(state)
-    state.update(l2a_result)
-    for k, v in l2a_result.items():
-        print(f"  {k}: {v}")
-
-    # --- L2b: Boundary Core ---
-    print("\n" + "=" * 60)
-    print("L2b — Boundary Core")
-    print("=" * 60)
-    l2b_result = await call_boundary_core_agent(state)
-    state.update(l2b_result)
-    for k, v in l2b_result.items():
-        print(f"  {k}: {v}")
-
-    # --- L2c: Judgment Core ---
-    print("\n" + "=" * 60)
-    print("L2c — Judgment Core")
-    print("=" * 60)
-    l2c_result = await call_judgment_core_agent(state)
-    state.update(l2c_result)
-    for k, v in l2c_result.items():
-        print(f"  {k}: {v}")
-
-
-if __name__ == "__main__":
-    import asyncio
-    asyncio.run(test_main())

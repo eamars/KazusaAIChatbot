@@ -22,14 +22,17 @@ _MSG_DECONTEXUALIZER_PROMPT = """\
 
 # 核心要求：
 - 宁可不做修改，也不要“脑补”意图。
-- 严禁将社交辞令（如“你好”）强制与 channel_topic/user_topic 合并。
+- 严禁将社交辞令（如“你好”）强制与 channel_topic/indirect_speech_context 合并。
 - 信息不足：如果无法确定具体实体，请保持原句，不要猜测，也不要假设。
 - 不要修改俚语
 
 # 修改规则：
 - 消除代词：将”他”、”那个东西”、”那里”等**指示性代词**替换为具体的实体名称。
+  * 当 `indirect_speech_context` 为空时，这条规则正常生效：如果 `chat_history` 已经明确给出最近被提及的人/物是谁，而当前句子的第三人称代词会造成歧义，就应补全该实体。
   * 严禁替换疑问代词（”谁”、”什么”、”哪里”、”哪个”、”怎么”等）——疑问代词是问句本身的核心，替换后会将开放式问题变成封闭确认句，彻底改变原意。
-  * 但若 `user_topic` 明确指出该消息是”向他人谈论某人”（即说话对象是群内其他人，被提及的人是话题而非受话人），则**禁止**将指代该话题人物的第三人称代词替换为其姓名——因为第三人称结构本身已正确反映其为话题对象，替换不改变语义，无意义。
+  * 但若 `indirect_speech_context` 非空（即说话对象是群内其他人，被提及的人是话题而非受话人），则**禁止**将指代该话题人物的第三人称代词替换为其姓名——因为第三人称结构本身已正确反映其为话题对象，替换不改变语义，无意义。
+  * 上述规则是**硬约束**：即使你能够从 `chat_history` 或 `indirect_speech_context` 明确识别此人是谁，只要第三人称结构已经成立，也必须保留「他 / 她 / 他们」而不是改写成人名。
+  * 上一条硬约束**只适用于 `indirect_speech_context` 非空的情况**。如果 `indirect_speech_context` 为空，就不要把这条保留规则误用到普通直接对话里。
 - 补全背景：如果用户是在追问上文，请将上文的主题合并到查询中。
 - 保持原意：不要改变用户的问题意图，仅增加必要的修饰词。
 - 保持语序：不要改变句子的语法结构。
@@ -37,12 +40,14 @@ _MSG_DECONTEXUALIZER_PROMPT = """\
 - 保持句子复杂程度：不要改变句子的复杂程度，不要精简句子。
 - 保持语气：不要改变句子的语气，比如疑问句、陈述句等。
 - 特殊情况：如果输入已经是完整的（如“北京天气”），则保持原样。
-- 辅助信息：channel_topic 和 user_topic 可以提供额外的上下文信息，帮助你更好地理解用户的意图。
- * 如果 chat_history 不足以提供足够的信息则可以考虑 user_topic 作为补充。
- * 如果 user_topic 也不足以提供足够的信息则可以考虑 channel_topic 作为补充。
+- 辅助信息：channel_topic 和 indirect_speech_context 可以提供额外的上下文信息，帮助你更好地理解用户的意图。
+ * 如果 chat_history 不足以提供足够的信息则可以考虑 indirect_speech_context 作为补充。
+ * 如果 indirect_speech_context 也不足以提供足够的信息则可以考虑 channel_topic 作为补充。
 
 # 示例
 - "I saw him yesterday" -> "I saw John yesterday"
+- `indirect_speech_context = ""` 且最近 `chat_history` 已明确提到「昨天在天台看书的那个同学」时，`user_input = "他今天是不是又在躲雨？"` -> 改写为「昨天在天台看书的那个同学今天是不是又在躲雨？」
+- `indirect_speech_context = "大家正在讨论学生会会长阿澈最近总提起旧事。"` 且 `user_input = "他是不是又提过那件事？"` -> 保持原句，不要改成「阿澈是不是又提过那件事？」
 
 # 输入格式
 {
@@ -56,7 +61,7 @@ _MSG_DECONTEXUALIZER_PROMPT = """\
         ...
     ],
     "channel_topic": "supplimentary information",
-    "user_topic": "string"
+    "indirect_speech_context": "string (empty if direct speech)"
 }
 
 # 输出要求：
@@ -87,9 +92,9 @@ async def call_msg_decontexualizer(state: GlobalPersonaState) -> dict:
         "platform_user_id": platform_user_id,
         "user_name": user_name,
         "platform_bot_id": state.get("platform_bot_id"),
-        "chat_history": state.get("chat_history"),
+        "chat_history": state.get("chat_history_recent"),
         "channel_topic": state.get("channel_topic"),
-        "user_topic": state.get("user_topic"),
+        "indirect_speech_context": state.get("indirect_speech_context", ""),
     }
     human_message = HumanMessage(content=json.dumps(input_msg, ensure_ascii=False))
 
@@ -124,30 +129,3 @@ async def call_msg_decontexualizer(state: GlobalPersonaState) -> dict:
     return {
         "decontexualized_input": output,
     }
-
-
-
-async def test_main():
-    from kazusa_ai_chatbot.db import get_conversation_history
-    from kazusa_ai_chatbot.utils import trim_history_dict
-
-    history = await get_conversation_history(platform="discord", platform_channel_id="1485606207069880361", limit=5)
-    trimmed_history = trim_history_dict(history)
-
-    # Create a mocked BotState
-    test_state: GlobalPersonaState = {
-        "user_input": "他在干啥？",
-        "user_name": "EAMARS",
-        "platform_bot_id": "1485169644888395817",
-        "chat_history": trimmed_history,
-        "channel_topic": "课间交流",
-        "user_topic": "交流作业"
-    }
-    
-    result = await call_msg_decontexualizer(test_state)
-    print(f"Input: {test_state['user_input']}")
-    print(f"Output: {result['decontexualized_input']}")
-
-if __name__ == "__main__":
-    import asyncio
-    asyncio.run(test_main())

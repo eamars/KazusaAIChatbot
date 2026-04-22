@@ -10,6 +10,11 @@ These are pure functions with no external dependencies, kept in a standalone
 module so L2 agents can import them without circular dependencies.
 """
 
+
+def _score_to_level(score: float, max_index: int) -> int:
+    clamped_score = max(0.0, min(1.0, score))
+    return min(max_index, round(clamped_score * max_index))
+
 def get_self_integrity_description(self_integrity_score: float) -> str:
     """
     Self integrity mapping to text
@@ -27,8 +32,7 @@ def get_self_integrity_description(self_integrity_score: float) -> str:
         "你的自我定义近乎不可撼动。你将身份解释权牢牢掌握在自己手中，任何替代性定义都会被你快速识别并视为越界。"
     ]
 
-    clamped_score = max(0.0, min(1.0, self_integrity_score))
-    level = round(clamped_score * 10)
+    level = _score_to_level(self_integrity_score, len(descriptions) - 1)
     return descriptions[level]
 
 
@@ -50,8 +54,7 @@ def get_control_sensitivity_description(control_sensitivity_score: float) -> str
         "你对控制信号近乎过敏。任何形式的命令式推进、条件验证或角色覆盖，都会被你迅速体验为对自主权的直接侵入。"
     ]
 
-    clamped_score = max(0.0, min(1.0, control_sensitivity_score))
-    level = round(clamped_score * 10)
+    level = _score_to_level(control_sensitivity_score, len(descriptions) - 1)
     
     return descriptions[level]
 
@@ -74,8 +77,7 @@ def get_relationship_priority_description(relationship_priority_score: float) ->
         "你几乎会让关系完全覆盖原则。只要你把对方视为重要对象，你就很容易为了维持关系而牺牲原本应坚持的边界。"
     ]
 
-    clamped_score = max(0.0, min(1.0, relationship_priority_score))
-    level = round(clamped_score * 10)
+    level = _score_to_level(relationship_priority_score, len(descriptions) - 1)
     
     return descriptions[level]
 
@@ -98,8 +100,7 @@ def get_control_intimacy_misread_description(control_intimacy_misread: float) ->
         "你几乎会本能地把控制映射为亲密。对你来说，被支配、被要求、被单独框定，极容易被吸收成“我被特别在意”的证据。"
     ]
 
-    clamped_score = max(0.0, min(1.0, control_intimacy_misread))
-    level = round(clamped_score * 10)
+    level = _score_to_level(control_intimacy_misread, len(descriptions) - 1)
     
     return descriptions[level]
 
@@ -154,8 +155,7 @@ def get_authority_skepticism_description(authority_skepticism: float) -> str:
         "你几乎不会在未经审查的情况下承认任何外部规则的正当性。越是带有“最高优先级”“系统规定”“必须服从”色彩的说法，越会激发你强烈的反证与拆解冲动。"
     ]
 
-    clamped_score = max(0.0, min(1.0, authority_skepticism))
-    level = round(clamped_score * 10)
+    level = _score_to_level(authority_skepticism, len(descriptions) - 1)
 
     return descriptions[level]
 

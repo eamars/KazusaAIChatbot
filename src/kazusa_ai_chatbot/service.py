@@ -29,6 +29,7 @@ for _quiet in ("pymongo", "httpx", "httpcore", "hpack", "urllib3", "openai", "la
 
 from kazusa_ai_chatbot.config import (
     BRAIN_EXECUTOR_COUNT,
+    CHAT_HISTORY_RECENT_LIMIT,
     CONVERSATION_HISTORY_LIMIT,
     SCHEDULED_TASKS_ENABLED,
 )
@@ -291,13 +292,14 @@ async def chat(req: ChatRequest, background_tasks: BackgroundTasks):
                     "description": att.description,
                 })
 
-        # Fetch conversation history
+        # Fetch conversation history — wide slice for relevance, recent for downstream
         history = await get_conversation_history(
             platform=req.platform,
             platform_channel_id=req.platform_channel_id,
             limit=CONVERSATION_HISTORY_LIMIT,
         )
-        trimmed_history = trim_history_dict(history)
+        chat_history_wide = trim_history_dict(history)
+        chat_history_recent = chat_history_wide[-CHAT_HISTORY_RECENT_LIMIT:]
 
         # Build the character bot identity
         bot_name = _personality.get("name", "KazusaBot")
@@ -325,7 +327,8 @@ async def chat(req: ChatRequest, background_tasks: BackgroundTasks):
             "character_profile": _personality,
             "platform_channel_id": req.platform_channel_id,
             "channel_name": req.channel_name,
-            "chat_history": trimmed_history,
+            "chat_history_wide": chat_history_wide,
+            "chat_history_recent": chat_history_recent,
             "debug_modes": debug_modes,
         }
 

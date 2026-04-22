@@ -74,16 +74,16 @@ _RELEVANCE_SYSTEM_PROMPT = """\
 
 # 输出规则
 
-## user_topic 生成规则
-在写入 `user_topic` 前，必须先检查消息正文的语法人称，再按以下逻辑分类：
+## indirect_speech_context 生成规则
+在写入 `indirect_speech_context` 前，必须先检查消息正文的语法人称，再按以下逻辑分类：
 
 - **情况 A — 直接对{character_name}说**：正文使用第二人称"你"指向{character_name}，或直接命令/质问{character_name}本人。
   - 示例："你真是个怪叔叔" / "你在搞什么鬼"
-  - 写法：描述{character_name}作为直接受话人所承受的意图。
+  - `indirect_speech_context` 输出空字符串 ""（无需间接语境描述）。
 
 - **情况 B — 向群内其他人谈论{character_name}**：正文使用第三人称"他"/"她"指代{character_name}，且包含面向他人的命令句（如"不要"/"别"/"小心"）警告他人注意{character_name}的行为；此时{character_name}是话题对象而非受话人。
   - 示例："他是怪叔叔，不要跟着他的圈套走"（reply/@{character_name} 仅提供线程上下文）
-  - 写法：明确说明实际听众为其他群员，以及{character_name}在消息中的角色（被讨论的对象）。
+  - `indirect_speech_context` 输出：明确说明实际听众为其他群员，以及{character_name}在消息中的角色（被讨论的对象）。
 
 # 输出格式
 请务必返回合法的 JSON 字符串，仅包含以下字段：
@@ -92,7 +92,7 @@ _RELEVANCE_SYSTEM_PROMPT = """\
     "reason_to_respond": string,
     "use_reply_feature": boolean,
     "channel_topic": string,
-    "user_topic": string
+    "indirect_speech_context": string
 }}
 """
 
@@ -133,16 +133,16 @@ _RELEVANCE_SYSTEM_NOISY_PROMPT = """\
 
 # 输出规则
 
-## user_topic 生成规则
-在写入 `user_topic` 前，必须先检查消息正文的语法人称，再按以下逻辑分类：
+## indirect_speech_context 生成规则
+在写入 `indirect_speech_context` 前，必须先检查消息正文的语法人称，再按以下逻辑分类：
 
 - **情况 A — 直接对{character_name}说**：正文使用第二人称"你"指向{character_name}，或直接命令/质问{character_name}本人。
   - 示例："你真是个怪叔叔" / "你在搞什么鬼"
-  - 写法：描述{character_name}作为直接受话人所承受的意图。
+  - `indirect_speech_context` 输出空字符串 ""（无需间接语境描述）。
 
 - **情况 B — 向群内其他人谈论{character_name}**：正文使用第三人称"他"/"她"指代{character_name}，且包含面向他人的命令句（如"不要"/"别"/"小心"）警告他人注意{character_name}的行为；此时{character_name}是话题对象而非受话人。
   - 示例："他是怪叔叔，不要跟着他的圈套走"（reply/@{character_name} 仅提供线程上下文）
-  - 写法：明确说明实际听众为其他群员，以及{character_name}在消息中的角色（被讨论的对象）。
+  - `indirect_speech_context` 输出：明确说明实际听众为其他群员，以及{character_name}在消息中的角色（被讨论的对象）。
 
 # 输出格式
 请务必返回合法的 JSON 字符串，仅包含以下字段：
@@ -151,7 +151,7 @@ _RELEVANCE_SYSTEM_NOISY_PROMPT = """\
     "reason_to_respond": string,
     "use_reply_feature": true,
     "channel_topic": string,
-    "user_topic": string
+    "indirect_speech_context": string
 }}
 """
 
@@ -199,7 +199,7 @@ async def relevance_agent(state: IMProcessState) -> IMProcessState:
             "content": user_input,
             "channel_name": channel_name,
         },
-        "conversation_history": state.get("chat_history"),
+        "conversation_history": state.get("chat_history_wide"),
     }
 
     human_message = HumanMessage(content=json.dumps(human_data, ensure_ascii=False))
@@ -212,7 +212,7 @@ async def relevance_agent(state: IMProcessState) -> IMProcessState:
     reason_to_respond = result.get("reason_to_respond", "")
     use_reply_feature = result.get("use_reply_feature", False)
     channel_topic = result.get("channel_topic", "")
-    user_topic = result.get("user_topic", "")
+    indirect_speech_context = result.get("indirect_speech_context", "")
 
     logger.info(
         f"\n{user_name}(@{platform_user_id}): {user_input}\n"
@@ -221,7 +221,7 @@ async def relevance_agent(state: IMProcessState) -> IMProcessState:
         f"  reason_to_respond: {reason_to_respond}\n"
         f"  use_reply_feature: {use_reply_feature}\n"
         f"  channel_topic: {channel_topic}\n"
-        f"  user_topic: {user_topic}"
+        f"  indirect_speech_context: {indirect_speech_context}"
     )
 
     return {
@@ -229,7 +229,7 @@ async def relevance_agent(state: IMProcessState) -> IMProcessState:
         "reason_to_respond": reason_to_respond,
         "use_reply_feature": use_reply_feature,
         "channel_topic": channel_topic,
-        "user_topic": user_topic,
+        "indirect_speech_context": indirect_speech_context,
 
         # Update user input with optional image descriptions
         "user_input": user_input
@@ -339,7 +339,8 @@ async def test_main():
         "character_profile": await get_character_profile(),
         "platform_channel_id": "",
         "channel_name": "test",
-        "chat_history": trimmed_history,
+        "chat_history_wide": trimmed_history,
+        "chat_history_recent": trimmed_history[-5:],
     }
 
     result = await relevance_agent(state)

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -21,6 +22,8 @@ from kazusa_ai_chatbot.agents.memory_retriever_agent import (
     _ALL_TOOLS,
     _TOOLS_BY_NAME,
 )
+
+logger = logging.getLogger(__name__)
 
 
 class TestToolRegistration:
@@ -126,6 +129,10 @@ def _first_tool_call(result: MemoryRetrieverState) -> ToolCall:
     return ai_msg.tool_calls[0]
 
 
+def _log_live_routing(task: str, tool_call: ToolCall) -> None:
+    logger.info("memory_retriever task=%r tool_call=%r", task, tool_call)
+
+
 @pytest.mark.live_llm
 class TestGeneratorToolRoutingLive:
     """Validate that the real LLM routes to keyword vs. vector tools correctly."""
@@ -138,6 +145,7 @@ class TestGeneratorToolRoutingLive:
         )
         result = await memory_search_tool_call_generator(state)
         tc = _first_tool_call(result)
+        _log_live_routing(state["task"], tc)
 
         assert tc["name"] in ("search_conversation_keyword", "search_persistent_memory_keyword"), (
             f"Expected keyword tool, got '{tc['name']}' with args {tc['args']}"
@@ -158,6 +166,7 @@ class TestGeneratorToolRoutingLive:
         )
         result = await memory_search_tool_call_generator(state)
         tc = _first_tool_call(result)
+        _log_live_routing(state["task"], tc)
 
         assert tc["name"] in ("search_conversation_keyword", "search_persistent_memory_keyword"), (
             f"Expected keyword tool for product name, got '{tc['name']}'"
@@ -175,6 +184,7 @@ class TestGeneratorToolRoutingLive:
         )
         result = await memory_search_tool_call_generator(state)
         tc = _first_tool_call(result)
+        _log_live_routing(state["task"], tc)
 
         assert tc["name"] in ("search_conversation", "search_persistent_memory"), (
             f"Expected vector tool for semantic query, got '{tc['name']}'"
@@ -193,6 +203,7 @@ class TestGeneratorToolRoutingLive:
         messages = result.get("messages", [])
         ai_msg = messages[-1]
         called = [tc["name"] for tc in (ai_msg.tool_calls or [])]
+        logger.info("memory_retriever task=%r tool_calls=%r", state["task"], ai_msg.tool_calls)
 
         assert "search_user_facts" not in called, (
             f"search_user_facts must not be called for third-party name entities; calls: {called}"
@@ -211,6 +222,7 @@ class TestGeneratorToolRoutingLive:
         )
         result = await memory_search_tool_call_generator(state)
         tc = _first_tool_call(result)
+        _log_live_routing(state["task"], tc)
 
         assert tc["name"] in ("search_conversation_keyword", "search_persistent_memory_keyword"), (
             f"Expected keyword tool for specific-term user lookup, got '{tc['name']}' args={tc['args']}"

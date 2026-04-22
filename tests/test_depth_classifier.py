@@ -6,6 +6,7 @@ services and are excluded from the default pytest run.
 
 from __future__ import annotations
 
+import logging
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -20,13 +21,18 @@ from kazusa_ai_chatbot.rag.depth_classifier import (
     SHALLOW_DISPATCHERS,
 )
 
+logger = logging.getLogger(__name__)
+
 
 # ── Fixtures ───────────────────────────────────────────────────────
 
 
 @pytest.fixture(autouse=True)
-def _reset_centroid_cache(monkeypatch):
+def _reset_centroid_cache(monkeypatch, request):
     """Force each test to install its own centroid pair."""
+    if request.node.get_closest_marker("live_llm") is not None:
+        yield
+        return
     monkeypatch.setattr(dc, "_shallow_centroid", None)
     monkeypatch.setattr(dc, "_deep_centroid", None)
     monkeypatch.setattr(dc, "_shallow_centroid_norm", 0.0)
@@ -49,6 +55,16 @@ def _patch_embedding(value: list[float]):
     return patch(
         "kazusa_ai_chatbot.rag.depth_classifier.get_text_embedding",
         AsyncMock(return_value=value),
+    )
+
+
+def _log_live_case(case_name: str, *, user_input: str, user_topic: str, result: dict) -> None:
+    logger.info(
+        "depth_classifier.%s input=%r topic=%r output=%r",
+        case_name,
+        user_input,
+        user_topic,
+        result,
     )
 
 
@@ -182,11 +198,14 @@ class TestSearchIntentLive:
     async def test_case_a_explicit_search_with_product_price(self):
         """'搜一下现在DDR5内存价格' must be DEEP via search-intent rule."""
         classifier = InputDepthClassifier()
+        user_input = "小钳子(@974a5aa4-d67b-4adb-8b0a-eea6cfb9297e): 搜一下现在DDR5内存价格】"
+        user_topic = "hardware"
         result = await classifier.classify(
-            user_input="小钳子(@974a5aa4-d67b-4adb-8b0a-eea6cfb9297e): 搜一下现在DDR5内存价格】",
-            user_topic="hardware",
+            user_input=user_input,
+            user_topic=user_topic,
             affinity=700,
         )
+        _log_live_case("case_a", user_input=user_input, user_topic=user_topic, result=result)
         assert result["depth"] == DEEP, f"Expected DEEP, got: {result}"
         assert result["confidence"] == 1.0, "Rule-based exit must produce conf=1.0"
         assert "search" in result["reasoning"].lower() or "搜" in result["reasoning"]
@@ -194,11 +213,14 @@ class TestSearchIntentLive:
     async def test_case_b_did_you_find_price(self):
         """'搜到ddr5的价格了么' must be DEEP via search-intent rule ('搜到' term)."""
         classifier = InputDepthClassifier()
+        user_input = "蚝爹油(@76a37e60-982e-45cb-af28-6d8c6b533297): 千纱搜到ddr5的价格了么？"
+        user_topic = "hardware"
         result = await classifier.classify(
-            user_input="蚝爹油(@76a37e60-982e-45cb-af28-6d8c6b533297): 千纱搜到ddr5的价格了么？",
-            user_topic="hardware",
+            user_input=user_input,
+            user_topic=user_topic,
             affinity=700,
         )
+        _log_live_case("case_b", user_input=user_input, user_topic=user_topic, result=result)
         assert result["depth"] == DEEP, f"Expected DEEP, got: {result}"
         assert result["confidence"] == 1.0, "Rule-based exit must produce conf=1.0"
 
@@ -209,11 +231,14 @@ class TestSearchIntentLive:
         external price queries as DEEP.
         """
         classifier = InputDepthClassifier()
+        user_input = "DDR5内存现在多少钱"
+        user_topic = "hardware"
         result = await classifier.classify(
-            user_input="DDR5内存现在多少钱",
-            user_topic="hardware",
+            user_input=user_input,
+            user_topic=user_topic,
             affinity=700,
         )
+        _log_live_case("case_c", user_input=user_input, user_topic=user_topic, result=result)
         assert result["depth"] == DEEP, f"Expected DEEP, got: {result}"
 
 

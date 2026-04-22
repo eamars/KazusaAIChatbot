@@ -19,7 +19,7 @@ from typing import Any
 from langchain_core.messages import HumanMessage, SystemMessage
 from openai import OpenAIError
 
-from kazusa_ai_chatbot.db import get_text_embedding
+from kazusa_ai_chatbot.db import get_text_embedding, get_text_embeddings_batch
 from kazusa_ai_chatbot.utils import get_llm, parse_llm_json_output
 
 logger = logging.getLogger(__name__)
@@ -313,8 +313,8 @@ async def _ensure_centroids() -> None:
             return
         logger.info("Pre-computing depth classifier keyword centroids (SHALLOW=%d, DEEP=%d)",
                     len(SHALLOW_KEYWORDS), len(DEEP_KEYWORDS))
-        shallow_vecs = await asyncio.gather(*(get_text_embedding(k) for k in SHALLOW_KEYWORDS))
-        deep_vecs = await asyncio.gather(*(get_text_embedding(k) for k in DEEP_KEYWORDS))
+        shallow_vecs = await get_text_embeddings_batch(SHALLOW_KEYWORDS)
+        deep_vecs = await get_text_embeddings_batch(DEEP_KEYWORDS)
         _shallow_centroid = _mean_vector(shallow_vecs)
         _deep_centroid = _mean_vector(deep_vecs)
         _shallow_centroid_norm = _vec_norm(_shallow_centroid)
@@ -351,6 +351,7 @@ class InputDepthClassifier:
         user_input: str,
         user_topic: str = "",
         affinity: int = 500,
+        input_embedding: list[float] | None = None,
     ) -> dict[str, Any]:
         """Classify a user message into SHALLOW or DEEP retrieval depth.
 
@@ -361,6 +362,9 @@ class InputDepthClassifier:
             user_input: The raw user message (Chinese or English).
             user_topic: Optional topic label for the current conversation thread.
             affinity: Current affinity score (0–1000) between user and bot.
+            input_embedding: Optional precomputed embedding for ``user_input``.
+                When provided, the fast path reuses it instead of making a second
+                embedding API call.
 
         Returns:
             Dict with keys ``depth`` (``"SHALLOW"`` or ``"DEEP"``),
@@ -384,7 +388,10 @@ class InputDepthClassifier:
         # Fast path: embedding cosine similarity against centroids
         try:
             await _ensure_centroids()
-            input_emb = await get_text_embedding(user_input)
+            if input_embedding is None:
+                input_emb = await get_text_embedding(user_input)
+            else:
+                input_emb = input_embedding
         except OpenAIError:
             logger.exception("Fast-path embedding classification failed — falling back to LLM")
         else:

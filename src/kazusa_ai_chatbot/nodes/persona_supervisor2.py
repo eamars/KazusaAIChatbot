@@ -1,7 +1,5 @@
 from langgraph.graph import StateGraph, START, END
 
-from kazusa_ai_chatbot.mcp_client import mcp_manager
-
 from kazusa_ai_chatbot.state import IMProcessState
 from kazusa_ai_chatbot.nodes.persona_supervisor2_schema import GlobalPersonaState
 from kazusa_ai_chatbot.nodes.persona_supervisor2_msg_decontexualizer import call_msg_decontexualizer
@@ -72,8 +70,9 @@ async def persona_supervisor2(state: IMProcessState) -> dict:
         "user_name": state["user_name"],
         "user_profile": state["user_profile"],
         "platform_bot_id": state["platform_bot_id"],
-        "chat_history": state["chat_history"],
-        "user_topic": state["user_topic"],
+        "chat_history_wide": state["chat_history_wide"],
+        "chat_history_recent": state["chat_history_recent"],
+        "indirect_speech_context": state.get("indirect_speech_context", ""),
         "channel_topic": state["channel_topic"],
         "debug_modes": state.get("debug_modes", {}),
     }
@@ -91,53 +90,3 @@ async def persona_supervisor2(state: IMProcessState) -> dict:
         # "new_facts": results["new_facts"],
         "future_promises": results.get("future_promises", []),
     }
-
-
-async def test_main():
-    from kazusa_ai_chatbot.db import get_character_profile, get_conversation_history, get_user_profile
-    from kazusa_ai_chatbot.utils import trim_history_dict
-    from kazusa_ai_chatbot.utils import load_personality
-    import datetime
-
-    # Connect to MCP tool servers
-    try:
-        await mcp_manager.start()
-    except Exception:
-        logger.exception("MCP manager failed to start — tools will be unavailable")
-
-    history = await get_conversation_history(platform="discord", platform_channel_id="1485606207069880361", limit=10)
-    trimmed_history = trim_history_dict(history)
-
-    # Create a mocked BotState
-    test_state: IMProcessState = {
-        "timestamp": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-        "platform": "discord",
-        "platform_user_id": "320899931776745483",
-        "global_user_id": "test-uuid-placeholder",
-        "user_name": "EAMARS",
-        "user_input": "既然作业已经写完了，千纱准备'奖励'我了么♥",
-        "user_profile": await get_user_profile("test-uuid-placeholder"),
-
-        "platform_bot_id": "1485169644888395817",
-        "bot_name": "KazusaBot",
-        "character_profile": await get_character_profile(),
-
-        "platform_channel_id": "",
-        "channel_name": "",
-        "chat_history": trimmed_history,
-
-        "should_respond": True,
-        "reason_to_respond": "User is asking a question",
-        "use_reply_feature": False,
-        "channel_topic": "General chat",
-        "user_topic": "作业交流",
-    }
-    
-    result = await persona_supervisor2(test_state)
-    print(result)
-
-    await mcp_manager.stop()
-
-if __name__ == "__main__":
-    import asyncio
-    asyncio.run(test_main())

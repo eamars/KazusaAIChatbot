@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import json
+import logging
 
 import pytest
 
 from kazusa_ai_chatbot.config import AFFINITY_RAW_DEAD_ZONE
-from kazusa_ai_chatbot.nodes import persona_supervisor2_cognition as cognition_module
+from kazusa_ai_chatbot.nodes import persona_supervisor2_cognition_l3 as cognition_l3_module
 from kazusa_ai_chatbot.nodes import persona_supervisor2_consolidator as consolidator_module
+
+logger = logging.getLogger(__name__)
 
 
 class _DummyResponse:
@@ -29,53 +32,27 @@ class _CapturingAsyncLLM:
 
 
 @pytest.mark.asyncio
-async def test_call_linguistic_agent_sends_decontexualized_input_key(monkeypatch):
-    """The L3 linguistic-agent payload should match the prompt's input-key contract."""
+async def test_call_content_anchor_agent_sends_decontexualized_input_key(monkeypatch):
+    """The L3 content-anchor payload should match the prompt's input-key contract."""
     llm = _CapturingAsyncLLM(
         {
-            "rhetorical_strategy": "plain",
-            "linguistic_style": "brief",
             "content_anchors": ["[DECISION] 接受", "[SCOPE] ~15字，说完[DECISION]即止"],
-            "forbidden_phrases": [],
         }
     )
-    monkeypatch.setitem(cognition_module.call_linguistic_agent.__globals__, "_linguistic_agent_llm", llm)
+    monkeypatch.setitem(cognition_l3_module.call_content_anchor_agent.__globals__, "_content_anchor_agent_llm", llm)
 
     state = {
         "character_profile": {
             "name": "Kazusa",
-            "mood": "Neutral",
-            "global_vibe": "Calm",
-            "personality_brief": {
-                "logic": "guarded",
-                "tempo": "slow",
-                "defense": "reserved",
-                "quirks": "minimal",
-                "taboos": "none",
-            },
-            "linguistic_texture_profile": {
-                "fragmentation": 0.4,
-                "hesitation_density": 0.4,
-                "counter_questioning": 0.4,
-                "softener_density": 0.4,
-                "formalism_avoidance": 0.4,
-                "abstraction_reframing": 0.4,
-                "direct_assertion": 0.4,
-                "emotional_leakage": 0.4,
-                "rhythmic_bounce": 0.4,
-                "self_deprecation": 0.4,
-            },
         },
-        "user_profile": {"last_relationship_insight": "neutral stranger"},
         "internal_monologue": "Just answer simply.",
         "logical_stance": "CONFIRM",
         "character_intent": "PROVIDE",
         "research_facts": {},
-        "chat_history": [],
         "decontexualized_input": "Tell me your opinion.",
     }
 
-    await cognition_module.call_linguistic_agent(state)
+    await cognition_l3_module.call_content_anchor_agent(state)
 
     human_payload = json.loads(llm.messages[1].content)
     assert human_payload["decontexualized_input"] == "Tell me your opinion."
@@ -208,6 +185,7 @@ class TestUnconfirmedClaimNotStoredLive:
         """facts_harvester must return empty new_facts when intent=EVADE, stance=TENTATIVE."""
         state = _evade_state()
         result = await consolidator_module.facts_harvester(state)
+        logger.info("facts_harvester input=%r output=%r", state, result)
 
         relationship_facts = [
             f for f in result.get("new_facts", [])
@@ -231,6 +209,7 @@ class TestUnconfirmedClaimNotStoredLive:
         }]
 
         result = await consolidator_module.fact_harvester_evaluator(state)
+        logger.info("fact_harvester_evaluator input=%r output=%r", state, result)
 
         assert result["should_stop"] is False, (
             f"Evaluator should reject the unconfirmed claim; feedback: {result.get('feedback')}"

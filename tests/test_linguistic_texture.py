@@ -12,12 +12,7 @@ from __future__ import annotations
 
 import pytest
 
-# Pre-import the parent cognition module first so that CognitionState is already
-# defined when cognition_l3 (imported below) in turn imports it, breaking the
-# circular import that would otherwise arise.
-import kazusa_ai_chatbot.nodes.persona_supervisor2_cognition  # noqa: F401
-
-from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition_l3 import (
+from kazusa_ai_chatbot.nodes.linguistic_texture import (
     _pick_level,
     get_abstraction_reframing_description,
     get_counter_questioning_description,

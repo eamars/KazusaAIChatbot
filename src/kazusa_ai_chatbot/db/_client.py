@@ -6,6 +6,7 @@ on first use and reused for the lifetime of the process.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 
 from motor.motor_asyncio import AsyncIOMotorClient
@@ -27,6 +28,8 @@ logger = logging.getLogger(__name__)
 # ── Embedding client (lazy) ────────────────────────────────────────
 
 _embed_client: AsyncOpenAI | None = None
+_EMBEDDING_REQUEST_SEMAPHORE = asyncio.Semaphore(10)
+_EMBEDDING_BATCH_SIZE = 10
 
 
 def _get_embed_client() -> AsyncOpenAI:
@@ -51,8 +54,32 @@ async def get_text_embedding(text: str) -> list[float]:
         The embedding as a list of floats.
     """
     client = _get_embed_client()
-    resp = await client.embeddings.create(input=[text], model=EMBEDDING_MODEL)
+    async with _EMBEDDING_REQUEST_SEMAPHORE:
+        resp = await client.embeddings.create(input=[text], model=EMBEDDING_MODEL)
     return resp.data[0].embedding
+
+
+async def get_text_embeddings_batch(texts: list[str]) -> list[list[float]]:
+    """Compute embedding vectors for multiple texts in a single API call.
+
+    Args:
+        texts: List of source texts. The OpenAI embeddings endpoint accepts
+            up to ~2048 inputs per request (model-dependent).
+
+    Returns:
+        List of embedding vectors, one per input text, in the same order.
+    """
+    if not texts:
+        return []
+    client = _get_embed_client()
+    all_embeddings: list[list[float]] = []
+    for start in range(0, len(texts), _EMBEDDING_BATCH_SIZE):
+        chunk = texts[start:start + _EMBEDDING_BATCH_SIZE]
+        async with _EMBEDDING_REQUEST_SEMAPHORE:
+            resp = await client.embeddings.create(input=chunk, model=EMBEDDING_MODEL)
+        sorted_data = sorted(resp.data, key=lambda d: d.index)
+        all_embeddings.extend(d.embedding for d in sorted_data)
+    return all_embeddings
 
 
 # ── MongoDB client (lazy) ──────────────────────────────────────────

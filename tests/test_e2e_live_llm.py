@@ -142,6 +142,8 @@ async def _make_initial_state(
         platform=identity["platform"],
         platform_channel_id=identity["platform_channel_id"],
     )
+    chat_history_wide = trim_history_dict(history)
+    chat_history_recent = chat_history_wide[-5:]
 
     state = {
         "timestamp": datetime.now(timezone.utc).isoformat(),
@@ -157,7 +159,9 @@ async def _make_initial_state(
         "character_profile": character_profile,
         "platform_channel_id": identity["platform_channel_id"],
         "channel_name": channel_name,
-        "chat_history": trim_history_dict(history),
+        "chat_history_wide": chat_history_wide,
+        "chat_history_recent": chat_history_recent,
+        "indirect_speech_context": "",
         "debug_modes": {
             "listen_only": False,
             "think_only": False,
@@ -623,12 +627,13 @@ async def test_live_rag_subgraph_retrieves_seeded_context(live_env) -> None:
             "character_profile": character_profile,
             "platform_channel_id": identity["platform_channel_id"],
             "channel_name": "dm",
-            "chat_history": [],
+            "chat_history_wide": [],
+            "chat_history_recent": [],
             "should_respond": True,
             "reason_to_respond": "live_e2e",
             "use_reply_feature": False,
             "channel_topic": "啾啾",
-            "user_topic": "询问关于啾啾的记忆",
+            "indirect_speech_context": "",
             "debug_modes": {},
             "decontexualized_input": "你还记得啾啾吗？",
         }
@@ -666,12 +671,13 @@ async def test_live_rag_subgraph_dispatches_external_search(live_env) -> None:
             "character_profile": character_profile,
             "platform_channel_id": identity["platform_channel_id"],
             "channel_name": "dm",
-            "chat_history": [],
+            "chat_history_wide": [],
+            "chat_history_recent": [],
             "should_respond": True,
             "reason_to_respond": "live_e2e",
             "use_reply_feature": False,
             "channel_topic": "今日天气",
-            "user_topic": "查询今天奥克兰的实时天气",
+            "indirect_speech_context": "",
             "debug_modes": {},
             "decontexualized_input": "查一下今天奥克兰的天气。",
         }

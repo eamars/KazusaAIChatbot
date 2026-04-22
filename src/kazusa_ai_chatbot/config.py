@@ -35,6 +35,8 @@ EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "text-embedding-model")
 
 # Bot settings
 CONVERSATION_HISTORY_LIMIT = int(os.getenv("CONVERSATION_HISTORY_LIMIT", "10"))
+# Recent history depth for downstream stages (hard-coded based on LLM performance)
+CHAT_HISTORY_RECENT_LIMIT = 5
 MAX_CONTEXT_TOKENS = int(os.getenv("MAX_CONTEXT_TOKENS", "28000"))
 
 # Token budget allocation (approximate)

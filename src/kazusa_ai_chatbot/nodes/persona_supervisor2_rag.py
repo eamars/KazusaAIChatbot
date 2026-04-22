@@ -98,7 +98,7 @@ class RAGState(TypedDict):
     # Inputs
     timestamp: str
     decontexualized_input: str
-    user_topic: str
+    channel_topic: str
 
     # Input facts
     user_name: str
@@ -164,7 +164,7 @@ _EXTERNAL_RAG_DISPATCHER_PROMPT = """\
 # 输入格式
 {{
     "user_input": "用户给你发送的信息",
-    "user_topic": "用户当前上下文的话题（仅供参考，不建议直接加入搜索任务）",
+    "channel_topic": "用户当前上下文的话题（仅供参考，不建议直接加入搜索任务）",
 }}
 
 # 输出要求：
@@ -185,7 +185,7 @@ _EXTERNAL_RAG_DISPATCHER_PROMPT = """\
 _external_rag_dispatcher_llm = get_llm(temperature=0, top_p=1.0)
 async def external_rag_dispatcher(state: RAGState) -> dict:
     decontexualized_input = state["decontexualized_input"]
-    user_topic = state["user_topic"]
+    channel_topic = state["channel_topic"]
     timestamp = state["timestamp"]
     character_name=state["character_profile"]["name"],
 
@@ -197,7 +197,7 @@ async def external_rag_dispatcher(state: RAGState) -> dict:
 
     user_prompt = HumanMessage(content=json.dumps({
         "user_input": decontexualized_input,
-        "user_topic": user_topic
+        "channel_topic": channel_topic
     }, ensure_ascii=False))
 
     response = await _external_rag_dispatcher_llm.ainvoke([
@@ -264,7 +264,7 @@ _INPUT_CONTEXT_RAG_DISPATCHER_PROMPT = """\
 # 输入格式
 {{
     "user_input": "用户给你发送的信息",
-    "user_topic": "用户当前上下文的话题（仅供参考，不建议直接加入搜索任务）"
+    "channel_topic": "用户当前上下文的话题（仅供参考，不建议直接加入搜索任务）"
 }}
 
 # 输出要求：
@@ -291,7 +291,7 @@ _INPUT_CONTEXT_RAG_DISPATCHER_PROMPT = """\
 _input_context_rag_dispatcher_llm = get_llm(temperature=0, top_p=1.0)
 async def input_context_rag_dispatcher(state: RAGState) -> dict:
     decontexualized_input = state["decontexualized_input"]
-    user_topic = state["user_topic"]
+    channel_topic = state["channel_topic"]
     timestamp = state["timestamp"]
     character_name=state["character_profile"]["name"],
     platform_bot_id = state["platform_bot_id"]
@@ -308,7 +308,7 @@ async def input_context_rag_dispatcher(state: RAGState) -> dict:
 
     user_prompt = HumanMessage(content=json.dumps({
         "user_input": decontexualized_input,
-        "user_topic": user_topic
+        "channel_topic": channel_topic
     }, ensure_ascii=False))
 
     response = await _input_context_rag_dispatcher_llm.ainvoke([
@@ -680,8 +680,9 @@ async def call_rag_subgraph(state: GlobalPersonaState) -> GlobalPersonaState:
     classifier = _get_depth_classifier()
     depth_result = await classifier.classify(
         user_input=decontexualized_input,
-        user_topic=state.get("user_topic", ""),
+        user_topic=state.get("channel_topic", ""),
         affinity=affinity_score,
+        input_embedding=input_embedding,
     )
     depth = depth_result["depth"]
     metadata["depth"] = depth
@@ -700,7 +701,7 @@ async def call_rag_subgraph(state: GlobalPersonaState) -> GlobalPersonaState:
     initial_state: RAGState = {
         "timestamp": state["timestamp"],
         "decontexualized_input": decontexualized_input,
-        "user_topic": state["user_topic"],
+        "channel_topic": state["channel_topic"],
         "user_name": user_name,
         "global_user_id": global_user_id,
         "platform_bot_id": state["platform_bot_id"],
@@ -780,7 +781,7 @@ async def test_main():
 
     state: GlobalPersonaState = {
         "decontexualized_input": "千纱晚上要记得奖励我哦♥",
-        "user_topic": "闲聊",
+        "channel_topic": "闲聊",
         "platform_bot_id": "1485169644888395817",
         "global_user_id": "320899931776745483",
         "user_name": "EAMARS",

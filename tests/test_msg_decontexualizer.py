@@ -14,13 +14,13 @@ def _base_state():
     return {
         "user_input": "他在干啥？",
         "user_name": "TestUser",
-        "user_id": "user_123",
-        "bot_id": "bot_456",
-        "chat_history": [
+        "platform_user_id": "user_123",
+        "platform_bot_id": "bot_456",
+        "chat_history_recent": [
             {"name": "Alice", "user_id": "u1", "content": "Bob is cooking", "role": "user", "timestamp": "t1"},
         ],
         "channel_topic": "general chat",
-        "user_topic": "asking about someone",
+        "indirect_speech_context": "",
     }
 
 

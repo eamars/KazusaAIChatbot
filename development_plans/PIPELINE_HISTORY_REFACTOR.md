@@ -25,12 +25,14 @@ Additionally, `user_topic` conflates two distinct purposes: a general paraphrase
 
 Replace the single fixed history limit with two slices loaded before the pipeline starts:
 
-| Slice | Depth | Used By |
-|---|---|---|
-| `chat_history_wide` | 10 messages | Relevance Agent only |
+| Slice                 | Depth        | Used By                                   |
+| --------------------- | ------------ | ----------------------------------------- |
+| `chat_history_wide`   | 10 messages  | Relevance Agent only                      |
 | `chat_history_recent` | 3–5 messages | Decontextualizer, L3 agents, Dialog Agent |
 
-The `GlobalPersonaState` carries both. Stages explicitly declare which slice they consume.
+The `GlobalPersonaState` carries both. Stages explicitly declare which slice they consume. 
+
+chat_history_recent can be generated based on chat_history_wide without needing to query the database. chat_history_wide should be read from the config, while chat_history_recent shoudl be hard coded based on LLM performance. 
 
 ---
 
@@ -44,6 +46,7 @@ Remove the generic `user_topic` paraphrase. Replace with:
 **Relevance agent prompt change:** remove the generic Situation A `user_topic` generation rule. Only populate `indirect_speech_context` when the pronoun/addressee analysis confirms Situation B.
 
 **Downstream consumption:**
+
 - `indirect_speech_context` is passed to L1 Subconscious and L2 Consciousness only when non-null, providing the framing "this message is about the character, not to them"
 - `channel_topic` continues to flow to decontextualizer and L3 Contextual Agent as supplementary background
 
@@ -54,6 +57,7 @@ Remove the generic `user_topic` paraphrase. Replace with:
 L1 receives **raw `user_input`** by design. The subconscious reacts to surface form before cognitive processing — this correctly mimics the limbic system's pre-rational stimulus response. `indirect_speech_context` is added when non-null.
 
 **L1 input contract:**
+
 ```
 user_input                  (raw — intentional)
 indirect_speech_context     (Situation B framing, nullable)
@@ -79,6 +83,7 @@ L2 and all subsequent cognition stages receive `decontextualized_input` (the pro
 **Responsibility:** HOW the character speaks
 
 **Inputs:**
+
 ```
 social_distance             (from L3 Contextual)
 emotional_intensity         (from L3 Contextual)
@@ -97,6 +102,7 @@ channel_topic               (register calibration)
 **Responsibility:** WHAT the character says — fully resolved content
 
 **Inputs:**
+
 ```
 decontextualized_input      (what was asked/said)
 research_facts              (from RAG stage)
@@ -106,6 +112,7 @@ internal_monologue          (from L2 — emotional framing)
 ```
 
 **Outputs:** `content_anchors` with fully resolved content per anchor type:
+
 - `[ANSWER]` — actual answer to the user's question, not a directive to answer it
 - `[FACT]` — specific fact to reference
 - `[DECISION]` — character's concrete decision, derived from `logical_stance`
@@ -124,6 +131,7 @@ internal_monologue          (from L2 — emotional framing)
 With fully resolved `content_anchors`, the dialog agent is a **pure renderer**. It has no need to re-read what the user said.
 
 **Dialog Agent input contract:**
+
 ```
 action_directives           (assembled by L4 Collector from Style + Content + Contextual outputs)
 character_profile           (immutable voice constraints: linguistic texture, taboos, tempo, defense)
@@ -205,6 +213,8 @@ user_input + chat_history_wide
 5. **Refactor Style Agent** — strip content anchor responsibility from current linguistic agent; rename and trim its input contract.
 
 6. **Remove `user_input`/`decontextualized_input` from Dialog Agent** — verify `action_directives` quality is sufficient before cutting; run parallel A/B if uncertain.
+
+7. Use real LLM tests to verify the workflow. Recommended to remove all unit tests that doesn't invoke LLM, and use LLM tests as default unit test to verify the most important factor: the prompt quality and effect. 
 
 ---
 

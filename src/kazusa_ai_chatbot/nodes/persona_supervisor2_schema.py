@@ -17,8 +17,9 @@ class GlobalPersonaState(TypedDict):
     user_name: str
     user_profile: UserProfileDoc
     platform_bot_id: str
-    chat_history: list[dict]
-    user_topic: str
+    chat_history_wide: list[dict]
+    chat_history_recent: list[dict]
+    indirect_speech_context: str
     channel_topic: str
 
     # Debug
@@ -61,3 +62,53 @@ class GlobalPersonaState(TypedDict):
     new_facts: [str]
     future_promises: [str]
     
+
+class CognitionState(TypedDict):
+    character_profile: CharacterProfileDoc
+
+    timestamp: str
+    user_input: str
+    global_user_id: str
+    user_name: str
+    user_profile: UserProfileDoc
+    platform_bot_id: str
+    chat_history_recent: list[dict]
+    indirect_speech_context: str
+    channel_topic: str
+
+    decontexualized_input: str
+    research_facts: dict
+
+    emotional_appraisal: str
+    interaction_subtext: str
+
+    internal_monologue: str
+    character_intent: str
+    logical_stance: str
+    judgment_note: str
+
+    boundary_core_assessment: dict
+
+    social_distance: str
+    emotional_intensity: str
+    vibe_check: str
+    relational_dynamic: str
+    expression_willingness: str
+
+    rhetorical_strategy: str
+    linguistic_style: str
+    accepted_user_preferences: list[str]
+    forbidden_phrases: list[str]
+
+    content_anchors: list[str]
+
+    facial_expression: list[str]
+    body_language: list[str]
+    gaze_direction: list[str]
+    visual_vibe: list[str]
+
+    action_directives: dict
+
+    should_stop: bool
+    reasoning: str
+    retry: int
