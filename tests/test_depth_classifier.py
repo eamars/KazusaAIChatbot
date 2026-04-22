@@ -1,6 +1,7 @@
 """Unit tests for ``kazusa_ai_chatbot.rag.depth_classifier``.
 
-Embedding and LLM calls are mocked so the tests run fully offline.
+Offline tests mock embeddings and LLM. Tests marked ``live_llm`` call real
+services and are excluded from the default pytest run.
 """
 
 from __future__ import annotations
@@ -163,5 +164,56 @@ class TestFailureFallback:
             )
 
         assert result["depth"] == DEEP
+
+
+# ── Live LLM integration tests ─────────────────────────────────────
+# Run with: pytest -m live_llm
+
+
+@pytest.mark.live_llm
+class TestSearchIntentLive:
+    """Verify bug-report inputs are classified DEEP with a real backend.
+
+    Case A & B hit the rule-based early exit (conf=1.0, no LLM call).
+    Case C has no explicit search keyword and falls through to the real LLM,
+    verifying the updated prompt classifies price/market queries as DEEP.
+    """
+
+    async def test_case_a_explicit_search_with_product_price(self):
+        """'搜一下现在DDR5内存价格' must be DEEP via search-intent rule."""
+        classifier = InputDepthClassifier()
+        result = await classifier.classify(
+            user_input="小钳子(@974a5aa4-d67b-4adb-8b0a-eea6cfb9297e): 搜一下现在DDR5内存价格】",
+            user_topic="hardware",
+            affinity=700,
+        )
+        assert result["depth"] == DEEP, f"Expected DEEP, got: {result}"
+        assert result["confidence"] == 1.0, "Rule-based exit must produce conf=1.0"
+        assert "search" in result["reasoning"].lower() or "搜" in result["reasoning"]
+
+    async def test_case_b_did_you_find_price(self):
+        """'搜到ddr5的价格了么' must be DEEP via search-intent rule ('搜到' term)."""
+        classifier = InputDepthClassifier()
+        result = await classifier.classify(
+            user_input="蚝爹油(@76a37e60-982e-45cb-af28-6d8c6b533297): 千纱搜到ddr5的价格了么？",
+            user_topic="hardware",
+            affinity=700,
+        )
+        assert result["depth"] == DEEP, f"Expected DEEP, got: {result}"
+        assert result["confidence"] == 1.0, "Rule-based exit must produce conf=1.0"
+
+    async def test_case_c_price_query_no_explicit_search_keyword_llm_path(self):
+        """'DDR5内存现在多少钱' — no explicit search keyword, time-sensitive + no EXTERNAL_INFO match.
+
+        Falls through to the real LLM; verifies the updated prompt classifies
+        external price queries as DEEP.
+        """
+        classifier = InputDepthClassifier()
+        result = await classifier.classify(
+            user_input="DDR5内存现在多少钱",
+            user_topic="hardware",
+            affinity=700,
+        )
+        assert result["depth"] == DEEP, f"Expected DEEP, got: {result}"
 
 

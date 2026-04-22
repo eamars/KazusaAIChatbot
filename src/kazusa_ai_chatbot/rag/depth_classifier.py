@@ -131,6 +131,8 @@ DEEP_KEYWORDS: list[str] = [
     "我最喜欢",
     "关于我",
     "上次",
+    "搜一下",
+    "查一查",
 ]
 
 
@@ -160,6 +162,10 @@ EXTERNAL_INFO_TERMS: tuple[str, ...] = (
     "航班",
     "油价",
     "气温",
+    "股市",
+    "A股",
+    "价格",
+    "行情",
     "weather",
     "news",
     "stock",
@@ -167,6 +173,23 @@ EXTERNAL_INFO_TERMS: tuple[str, ...] = (
     "traffic",
     "flight",
     "temperature",
+)
+
+SEARCH_INTENT_TERMS: tuple[str, ...] = (
+    "搜一下",
+    "搜搜",
+    "搜索",
+    "查一查",
+    "查一下",
+    "帮我查",
+    "帮我搜",
+    "找一下",
+    "查查",
+    "search for",
+    "look up",
+    "find out",
+    "google",
+    "搜到",
 )
 
 
@@ -243,6 +266,19 @@ def _mean_vector(vectors: list[list[float]]) -> list[float]:
             total[i] += x
     n = len(vectors)
     return [t / n for t in total]
+
+
+def _is_explicit_search_request(user_input: str) -> bool:
+    """Return True when the user explicitly asks to search or look something up.
+
+    Args:
+        user_input: Raw user message.
+
+    Returns:
+        True when the input contains a direct search-intent phrase.
+    """
+    lowered = user_input.lower()
+    return any(term in lowered for term in SEARCH_INTENT_TERMS)
 
 
 def _looks_time_sensitive_external_query(user_input: str, user_topic: str) -> bool:
@@ -331,6 +367,13 @@ class InputDepthClassifier:
             ``trigger_dispatchers`` (list of dispatcher names), ``confidence``
             (float 0–1), and ``reasoning`` (one-sentence explanation).
         """
+        if _is_explicit_search_request(user_input):
+            return self._result(
+                DEEP,
+                confidence=1.0,
+                reasoning="rule→DEEP: explicit search/lookup intent detected",
+            )
+
         if _looks_time_sensitive_external_query(user_input, user_topic):
             return self._result(
                 DEEP,
@@ -413,9 +456,13 @@ You will receive a JSON object with these fields:
 - SHALLOW: the input is a simple factual question, greeting, preference check,
 or yes/no query that requires no deep memory retrieval — cache or the basic
 user profile is sufficient.
-- DEEP: the input references past events, emotional context, asks "why" about
-behaviour, involves temporal reasoning, or asks about contradictions /
-promises — full memory search is required.
+- DEEP: any of the following apply:
+  * The input references past events, emotional context, asks "why" about
+    behaviour, involves temporal reasoning, or asks about contradictions / promises.
+  * The input explicitly asks to search, look up, or retrieve external information
+    (e.g. prices, news, weather, product specs) — even without memory context.
+  * The input contains search intent phrases like "搜一下", "查一查", "search for",
+    "look up", "find out".
 - Input language may be Chinese or English — classify based on meaning, not language.
 - When in doubt, prefer DEEP (over-retrieval is safer than missed context).
 """
