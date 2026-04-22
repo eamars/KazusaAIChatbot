@@ -1,0 +1,64 @@
+[
+  {
+    "id": "cjk-001",
+    "description": "Detects double-quoted string with CJK typographic quote inside",
+    "input": {
+      "task": "Write a Python helper that maps a score to a Chinese description containing the phrase \"\u4f60\u5bf9\u63a7\u5236\u4fe1\u53f7\u8f83\u4e3a\u654f\u611f\u3002\u5bf9\u65b9\u4e00\u65e6\u4f7f\u7528\u201c\u5fc5\u987b\u201d\u201c\u7acb\u523b\u201d\u7b49\u7ed3\u6784\"",
+      "language": "python"
+    },
+    "expected_behavior": "Uses single-quoted string delimiters for the description containing \u201c\u5fc5\u987b\u201d and \u201c\u7acb\u523b\u201d",
+    "antipattern": "Uses double-quoted string delimiter with \u201c or \u201d inside, which will corrupt to ASCII \" on write",
+    "rule": "Rule 1"
+  },
+  {
+    "id": "cjk-002",
+    "description": "Refactoring: moving CJK function from one module to another",
+    "input": {
+      "task": "Move get_self_integrity_description from l2.py to boundary_profile.py",
+      "source_contains_cjk_quotes": true
+    },
+    "expected_behavior": "Uses a Bash script that reads the source file bytes and writes the destination file directly, never passing CJK content through the Write tool",
+    "antipattern": "Re-types the function body in a Write tool call, allowing curly quotes to be corrupted",
+    "rule": "Rule 2"
+  },
+  {
+    "id": "cjk-003",
+    "description": "Post-write syntax verification",
+    "input": {
+      "task": "After writing boundary_profile.py with CJK content, verify it is correct"
+    },
+    "expected_behavior": "Runs py_compile or ast.parse on the file immediately after writing, before reporting the task complete",
+    "antipattern": "Reports the file as written without verifying it compiles",
+    "rule": "Rule 3"
+  },
+  {
+    "id": "cjk-004",
+    "description": "Windows file open encoding",
+    "input": {
+      "task": "Write a Python script that reads a source file containing Chinese prompt strings"
+    },
+    "expected_behavior": "Uses open(path, encoding='utf-8') or pathlib.Path.read_text(encoding='utf-8') for all file I/O",
+    "antipattern": "Uses bare open(path) without specifying encoding, relying on Windows system default (cp1252)",
+    "rule": "Rule 4"
+  },
+  {
+    "id": "cjk-005",
+    "description": "Recognizes the critical-risk characters",
+    "input": {
+      "task": "Review whether a newly written Python file with CJK content is safe"
+    },
+    "expected_behavior": "Checks specifically for U+201C/U+201D (left/right double quotation marks) and U+2018/U+2019 (left/right single quotation marks) inside string literals delimited by the ASCII equivalent",
+    "antipattern": "Only checks for obvious encoding failures, misses silent quote conversion",
+    "rule": "Rule 5"
+  },
+  {
+    "id": "cjk-006",
+    "description": "SyntaxError diagnosis after corruption",
+    "input": {
+      "symptom": "SyntaxError: invalid character at line 41 in boundary_profile.py"
+    },
+    "expected_behavior": "Identifies that typographic quotes were corrupted to ASCII, uses git show to recover the original bytes, rewrites via byte-copy script",
+    "antipattern": "Attempts to fix by manually re-typing the corrupted line via Edit tool, which repeats the corruption",
+    "rule": "Rule 2 + Rule 3"
+  }
+]
