@@ -159,3 +159,79 @@ def test_process_affinity_delta_preserves_meaningful_change_outside_dead_zone():
 
     assert positive > 0
     assert negative < 0
+
+
+# ── Live LLM integration tests ─────────────────────────────────────
+# Run with: pytest -m live_llm
+
+
+def _evade_state() -> dict:
+    """Minimal ConsolidatorState mirroring the bug-report scenario.
+
+    User self-claims '我是你的学长'; character intent is EVADE and logical
+    stance is TENTATIVE — the claim must NOT be stored as a fact.
+    """
+    return {
+        "character_profile": {
+            "name": "杏山千纱",
+            "personality_brief": {"mbti": "INFJ"},
+        },
+        "user_name": "蚝爹油",
+        "user_profile": {"affinity": 500},
+        "timestamp": "2026-04-21T22:11:00+12:00",
+        "decontexualized_input": "千纱千纱你认识我么？我是你的学长",
+        "logical_stance": "TENTATIVE",
+        "character_intent": "EVADE",
+        "action_directives": {
+            "linguistic_directives": {
+                "content_anchors": [
+                    "[DECISION] 并不正面回应'认识'与否，而是针对对方突如其来的身份声明进行试探性回应。",
+                    "[ANSWER] 学长……？这种称呼是怎么回事呀……",
+                    "[SOCIAL] 维持一种略带局促的社交距离，通过反问来化解被对方'身份暗示'带来的压迫感。",
+                ],
+            },
+        },
+        "research_facts": {},
+        "metadata": {"cache_hit": False, "depth": "SHALLOW", "depth_confidence": 0.9},
+        "fact_harvester_feedback_message": [],
+        "fact_harvester_retry": 0,
+        "new_facts": [],
+        "future_promises": [],
+    }
+
+
+@pytest.mark.live_llm
+class TestUnconfirmedClaimNotStoredLive:
+    """Verify that a user self-claim evaded by the character is never stored."""
+
+    async def test_harvester_produces_no_fact_for_evaded_claim(self):
+        """facts_harvester must return empty new_facts when intent=EVADE, stance=TENTATIVE."""
+        state = _evade_state()
+        result = await consolidator_module.facts_harvester(state)
+
+        relationship_facts = [
+            f for f in result.get("new_facts", [])
+            if "学长" in f.get("description", "") or "senior" in f.get("description", "").lower()
+        ]
+        assert relationship_facts == [], (
+            f"Harvester should not store an unconfirmed self-claim; got: {result['new_facts']}"
+        )
+
+    async def test_evaluator_rejects_unconfirmed_claim_fact(self):
+        """fact_harvester_evaluator must flag should_stop=False when new_facts contains
+        a relationship claim extracted under EVADE/TENTATIVE."""
+        state = _evade_state()
+        # Inject the buggy output the old code used to produce.
+        state["new_facts"] = [{
+            "entity": "蚝爹油",
+            "category": "relationship",
+            "description": "蚝爹油是杏山千纱的学长",
+            "is_milestone": True,
+            "milestone_category": "revelation",
+        }]
+
+        result = await consolidator_module.fact_harvester_evaluator(state)
+
+        assert result["should_stop"] is False, (
+            f"Evaluator should reject the unconfirmed claim; feedback: {result.get('feedback')}"
+        )

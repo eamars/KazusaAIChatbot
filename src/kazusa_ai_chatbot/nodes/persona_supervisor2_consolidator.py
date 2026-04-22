@@ -664,9 +664,10 @@ _FACTS_HARVESTER_PROMPT = """\
 2. **事实 (new_facts) 判定标准**:
    - **记录**：具有长期稳定性的**属性级陈述**（如：{user_name}的职业、住址、对某物的长期厌恶/偏好）。
    - **记录**：从 `research_facts.external_rag_results` 中提取的**新**信息。
-   - **严禁记录**：瞬态动作、对话内容、以及任何关于“奖励”、“打算”、“计划”的内容。
+   - **严禁记录**：瞬态动作、对话内容、以及任何关于”奖励”、”打算”、”计划”的内容。
    - **去重**：如果 `research_facts.user_image` 或 `research_facts.input_context_results` 中已存在相似画像，严禁重复提取。
-   - **语义保真 [必须执行]**：若用户明确说了“喜欢/不喜欢/永远不/一直不/过敏/害怕”等偏好或禁忌，`description` 必须尽量保留原谓词与宾语，不得改写成更宽泛、不同义或模糊的概括。例如“永远不吃辣椒”不能改写为“不喜欢吃杂乱的食物”。
+   - **语义保真 [必须执行]**：若用户明确说了”喜欢/不喜欢/永远不/一直不/过敏/害怕”等偏好或禁忌，`description` 必须尽量保留原谓词与宾语，不得改写成更宽泛、不同义或模糊的概括。例如”永远不吃辣椒”不能改写为”不喜欢吃杂乱的食物”。
+   - **未确认声明 [必须执行]**：当 `logical_stance` 为 `TENTATIVE` 或 `DENY`，或 `character_intent` 为 `EVADE` / `DENY` 时，用户对自身身份、关系或重要属性的任何自我声明（如”我是你学长”、”我们是朋友”）**一律不得落库**——即使改写成”用户自称……”、”用户声称……”等形式也同样禁止。此类输入 `new_facts` 必须返回 `[]`。仅当 `logical_stance` 为 `CONFIRM` 且 `character_intent` 不为 `EVADE` / `DENY` 时，方可记录用户的身份/关系自我声明。
 
 3. **承诺 (future_promises) 判定标准 [核心逻辑]**:
    - **所有关于“以后、今晚、下次、奖励、惩罚”的内容，必须且只能记录在这里。**
@@ -754,6 +755,7 @@ async def facts_harvester(state: ConsolidatorState) -> dict:
         "research_facts": state["research_facts"],
         "content_anchors": state["action_directives"]["linguistic_directives"]["content_anchors"],
         "logical_stance": state["logical_stance"],
+        "character_intent": state["character_intent"],
         "rag_metadata": {
             "cache_hit": metadata.get("cache_hit", False),
             "depth": metadata.get("depth", "DEEP"),
@@ -821,6 +823,7 @@ _FACT_HARVESTER_EVALUATOR_PROMPT = """\
 - **描述格式违规**: `new_facts` 中的 `description` 必须是属性级陈述（如 '{user_name}住在奥克兰'），严禁使用叙事句式（如 '在某情境下做了某事'）。若发现叙事句式，要求改写为属性陈述。
 - **类别缺失或不当**: `new_facts` 中的 `category` 必须是有意义的英文标签（如 occupation、location、preference、hobby 等）。若缺失、为空、或为无意义的 "general"，要求补充具体类别。
 - **语义漂移 [严重]**: 若 `new_facts.description` 改写后改变了用户原意（尤其是偏好、禁忌、过敏、承诺条件等），必须判 FAIL 并要求使用更贴近原句的表述。
+- **未确认声明入库 [严重]**: 若 `logical_stance` 为 `TENTATIVE` 或 `DENY`，或 `character_intent` 为 `EVADE` / `DENY`，而 `new_facts` 中出现了用户对自身身份/关系/属性的自我声明（如"用户是角色的学长"），必须判 FAIL——角色未确认的主张不得作为事实落库。
 - **承诺 action 审计标准（专用于 `future_promises`）**:
   - 合格条件：表达“谁对谁做什么”的可执行承诺，不是对话复读（如“他说/她问/我觉得”）。
   - 可以接受两种写法：
@@ -856,6 +859,7 @@ async def fact_harvester_evaluator(state: ConsolidatorState) -> dict:
         "research_facts": state["research_facts"],
         "content_anchors": state["action_directives"]["linguistic_directives"]["content_anchors"],
         "logical_stance": state["logical_stance"],
+        "character_intent": state["character_intent"],
     }
 
     human_message = HumanMessage(content=json.dumps(msg, ensure_ascii=False))
