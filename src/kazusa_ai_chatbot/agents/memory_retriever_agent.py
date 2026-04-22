@@ -86,7 +86,108 @@ async def search_conversation(search_query: str = "",
 
     return return_list
 
-@tool 
+@tool
+async def search_conversation_keyword(
+    keyword: str,
+    global_user_id: str | None = None,
+    top_k: int = 5,
+    platform: str | None = None,
+    platform_channel_id: str | None = None,
+) -> list[dict]:
+    """Search conversation history by exact keyword/phrase match (regex, case-insensitive).
+
+    Use this tool when the search target is a specific term, technical phrase, or
+    proper noun that must appear literally in the text (e.g. "指令跟随逻辑", "DDR5").
+    Prefer this over search_conversation when you know the exact wording.
+
+    Mandatory argument rules:
+    - keyword must be provided and should be the shortest unambiguous term or phrase.
+    - Do not pass a full sentence — use the core noun/phrase only.
+
+    Args:
+        keyword (Mandatory): Exact term or short phrase to match (regex, case-insensitive).
+        global_user_id (Optional): Filter results to one user UUID.
+        top_k (Optional): Maximum number of results. Default is 5.
+        platform (Optional): Platform filter, e.g. "discord", "qq".
+        platform_channel_id (Optional): Channel ID filter.
+
+    Returns:
+        Matching conversations ordered by recency, each as a message dict.
+    """
+    if not keyword or not keyword.strip():
+        return [{"error": "keyword is mandatory and must not be empty."}]
+
+    results = await search_conversation_history(
+        query=keyword,
+        platform=platform,
+        platform_channel_id=platform_channel_id,
+        global_user_id=global_user_id,
+        limit=top_k,
+        method="keyword",
+    )
+    return [
+        {
+            "content": msg.get("content", ""),
+            "timestamp": msg.get("timestamp", ""),
+            "platform": msg.get("platform", ""),
+            "platform_channel_id": msg.get("platform_channel_id", ""),
+            "global_user_id": msg.get("global_user_id", ""),
+        }
+        for _, msg in results
+    ]
+
+
+@tool
+async def search_persistent_memory_keyword(
+    keyword: str,
+    top_k: int = 5,
+    source_global_user_id: str | None = None,
+    memory_type: str | None = None,
+) -> list[dict]:
+    """Search persistent memory by exact keyword/phrase match (regex, case-insensitive).
+
+    Use this tool when the search target is a specific term, technical phrase, or
+    proper noun that must appear literally in the stored memory content or name
+    (e.g. "DDR5", "指令跟随逻辑"). Prefer this over search_persistent_memory when
+    you know the exact wording.
+
+    Mandatory argument rules:
+    - keyword must be provided and should be the shortest unambiguous term or phrase.
+    - Do not pass a full sentence — use the core noun/phrase only.
+
+    Args:
+        keyword (Mandatory): Exact term or short phrase to match (regex, case-insensitive).
+        top_k (Optional): Maximum number of results. Default is 5.
+        source_global_user_id (Optional): Filter by source user UUID.
+        memory_type (Optional): Filter by type, e.g. "fact", "promise".
+
+    Returns:
+        Matching memory entries with metadata.
+    """
+    if not keyword or not keyword.strip():
+        return [{"error": "keyword is mandatory and must not be empty."}]
+
+    results = await search_memory_db(
+        query=keyword,
+        limit=top_k,
+        method="keyword",
+        source_global_user_id=source_global_user_id,
+        memory_type=memory_type,
+    )
+    return [
+        {
+            "memory_name": mem.get("memory_name", ""),
+            "content": mem.get("content", ""),
+            "timestamp": mem.get("timestamp", ""),
+            "source_global_user_id": mem.get("source_global_user_id", ""),
+            "memory_type": mem.get("memory_type", ""),
+            "status": mem.get("status", ""),
+        }
+        for _, mem in results
+    ]
+
+
+@tool
 async def get_conversation(platform: str | None = None,
                            platform_channel_id: str | None = None,
                            limit: int = 5,
@@ -206,7 +307,9 @@ async def search_persistent_memory(
 _ALL_TOOLS = [
     search_user_facts,
     search_conversation,
+    search_conversation_keyword,
     search_persistent_memory,
+    search_persistent_memory_keyword,
     get_conversation,
 ]
 _TOOLS_BY_NAME = {tool.name: tool for tool in _ALL_TOOLS}
@@ -277,24 +380,36 @@ _MEMORY_RETRIEVER_PROMPT = """\
 
 **严禁**在类型 A 查询中未传入 `global_user_id` 过滤器的情况下调用 `search_conversation` 或 `search_persistent_memory`。
 
-# 搜索词构建规则 (Query Construction Rules)
-搜索词必须是**语义完整的自然语言短语**，而非单个实体名称或关键词列表：
-- **正确示例**：`”Glitch 与杏山千纱的互动印象和行为特征”` / `”用户对 Glitch 的评价与态度”`
-- **错误示例**：`”Glitch”` / `”glitch 用户”` / `”Glitch,印象”`
-- **原则**：从 `task` 的完整描述中提取语义意图，构建能匹配目标内容的查询短语，而不是直接搬用实体名称。
-- 对于第三方实体（非 `target_global_user_id` 本人）的查询，必须将”关系视角”或”话题背景”嵌入搜索词，例如：`”杏山千纱对 X 的看法”` 而非仅 `”X”`。
+# 搜索方式选择规则 (Search Mode Rules)
+每次搜索前，先判断使用**关键词搜索**还是**向量语义搜索**：
+
+**关键词搜索** (`search_conversation_keyword` / `search_persistent_memory_keyword`)：
+- 适用场景：目标是**确定存在于文本中的具体词语**，例如技术术语、专有名词、特定短语（”指令跟随逻辑”、”DDR5”、”学长”）。
+- `keyword` 参数：尽量短且精确，只取核心名词/短语，**不得传入完整句子**。
+- 正确示例：`keyword=”指令跟随逻辑”` / `keyword=”DDR5”`
+- 错误示例：`keyword=”用户关于指令跟随逻辑的言论与观点”` （太长，应用向量搜索）
+
+**向量语义搜索** (`search_conversation` / `search_persistent_memory`)：
+- 适用场景：目标是**语义意图或印象**，例如用户的情感、态度、对某事物的看法，或无法确定用户是否用了准确词汇时。
+- `search_query` 参数：用自然语言短语描述语义意图，嵌入”关系视角”或”话题背景”。
+- 正确示例：`”用户对指令跟随逻辑的看法”` / `”Glitch 与杏山千纱的互动印象”`
+- 错误示例：`”指令跟随逻辑”` （纯实体名词，应用关键词搜索）
+
+**推荐策略**：
+- 当 `task` 中出现明确的技术术语、专有名词或特定主题词时，**优先关键词搜索**；若关键词搜索无结果，再降级到向量搜索。
+- 当 `task` 描述的是”印象”、”看法”、”评价”等语义内容时，直接使用向量搜索。
+- 对于第三方实体（非 `target_global_user_id` 本人），关键词搜索时直接传入实体名称；向量搜索时必须将关系视角嵌入查询词（例如：`”杏山千纱对 X 的看法”` 而非仅 `”X”`）。
 
 # 工具选择规则 (Tool Selection Rules)
 在调用任何工具前，先判断查询类型：
 
 **类型 A — 目标用户自身查询**：任务是检索 `target_global_user_id` 本人的信息（例如：用户自己的背景、偏好、承诺）。
-- 工具优先级：`search_user_facts` → `search_persistent_memory` → `search_conversation`
+- 工具优先级：`search_user_facts` → `search_conversation_keyword` / `search_persistent_memory_keyword` → `search_conversation` / `search_persistent_memory`
 - `search_user_facts` 必须且只能在 `context` 中存在 `target_global_user_id` 时调用，传入该 UUID。
 
 **类型 B — 第三方实体查询**：任务涉及在对话/记忆中提及的**人名或实体**（例如：”啾啾”、”Glitch”、某个朋友的名字）。
 - **严禁**调用 `search_user_facts`（该工具不接受姓名，只接受用户 UUID）。
-- 工具优先级：`search_persistent_memory` → `search_conversation`
-- 搜索词必须包含该实体的名称 + 关系视角（见搜索词构建规则）。
+- 工具优先级：`search_conversation_keyword` / `search_persistent_memory_keyword` → `search_conversation` / `search_persistent_memory`
 
 判断依据：若 `context.entities` 中的名称不等于 `target_global_user_id` 对应的用户名，即为类型 B。
 
