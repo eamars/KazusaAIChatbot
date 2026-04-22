@@ -103,13 +103,18 @@ class NapCatWSAdapter:
             return
 
         user_id = str(data.get("user_id"))
+        message_id = str(data.get("message_id", ""))
         group_id = data.get("group_id")
         
         message_data = data.get("message", [])
+        reply_context: dict[str, str | bool] = {}
 
         # Preprocess QQ message to a format that is recognized by the brain
         if isinstance(message_data, str):
             # If it's a raw string, normalize CQ codes
+            reply_match = re.search(r'\[CQ:reply,id=([^\]]+)\]', message_data)
+            if reply_match is not None:
+                reply_context["reply_to_message_id"] = reply_match.group(1)
             raw_content = re.sub(r'\[CQ:at,qq=([^\]]+)\]', r'<@\1>', message_data)
             raw_content = re.sub(r'\[CQ:reply,id=([^\]]+)\]', r'[Reply to message] ', raw_content)
             raw_content = re.sub(r'\[CQ:[^\]]+\]', r'', raw_content) # Strip others
@@ -127,6 +132,16 @@ class NapCatWSAdapter:
                     qq = seg_data.get("qq")
                     raw_content += f"<@{qq}> "
                 elif seg_type == "reply":
+                    reply_context["reply_to_message_id"] = str(seg_data.get("id", ""))
+                    reply_sender_id = seg_data.get("user_id")
+                    if reply_sender_id is not None:
+                        reply_context["reply_to_platform_user_id"] = str(reply_sender_id)
+                    reply_sender_name = seg_data.get("nickname")
+                    if reply_sender_name:
+                        reply_context["reply_to_display_name"] = str(reply_sender_name)
+                    reply_text = seg_data.get("text")
+                    if reply_text:
+                        reply_context["reply_excerpt"] = str(reply_text)[:200]
                     raw_content += f"[Reply to message] "
                 elif seg_type == "face":
                     raw_content += f"[Face] "
@@ -175,6 +190,7 @@ class NapCatWSAdapter:
         payload = {
             "platform": "qq",
             "platform_channel_id": channel_id,
+            "platform_message_id": message_id,
             "platform_user_id": user_id,
             "platform_bot_id": self.bot_id,
             "display_name": sender_name,
@@ -182,6 +198,7 @@ class NapCatWSAdapter:
             "content": raw_content,
             "content_type": "text",
             "attachments": attachments,
+            "reply_context": reply_context,
             "debug_modes": message_debug_modes,
         }
 

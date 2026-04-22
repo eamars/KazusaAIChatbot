@@ -119,6 +119,7 @@ async def _make_initial_state(
     platform: str | None = None,
     platform_user_id: str | None = None,
     platform_channel_id: str | None = None,
+    reply_context: dict | None = None,
 ) -> tuple[dict, dict]:
     if platform is None or platform_user_id is None or platform_channel_id is None:
         identity = await _make_identity(label, display_name)
@@ -148,6 +149,7 @@ async def _make_initial_state(
     state = {
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "platform": identity["platform"],
+        "platform_message_id": f"live-state-{uuid4().hex[:10]}",
         "platform_user_id": identity["platform_user_id"],
         "global_user_id": identity["global_user_id"],
         "user_name": identity["display_name"],
@@ -161,6 +163,7 @@ async def _make_initial_state(
         "channel_name": channel_name,
         "chat_history_wide": chat_history_wide,
         "chat_history_recent": chat_history_recent,
+        "reply_context": reply_context or {},
         "indirect_speech_context": "",
         "debug_modes": {
             "listen_only": False,
@@ -181,6 +184,7 @@ async def _run_graph(
     platform: str | None = None,
     platform_user_id: str | None = None,
     platform_channel_id: str | None = None,
+    reply_context: dict | None = None,
 ) -> tuple[dict, dict]:
     state, identity = await _make_initial_state(
         label,
@@ -191,6 +195,7 @@ async def _run_graph(
         platform=platform,
         platform_user_id=platform_user_id,
         platform_channel_id=platform_channel_id,
+        reply_context=reply_context,
     )
     result = await brain_service._graph.ainvoke(state)
     return result, identity
@@ -206,6 +211,8 @@ async def _run_chat(
     platform: str | None = None,
     platform_user_id: str | None = None,
     platform_channel_id: str | None = None,
+    platform_message_id: str | None = None,
+    reply_context: dict | None = None,
 ) -> tuple[brain_service.ChatResponse, dict]:
     if platform is None or platform_user_id is None or platform_channel_id is None:
         identity = await _make_identity(label, display_name)
@@ -228,12 +235,14 @@ async def _run_chat(
     request = brain_service.ChatRequest(
         platform=identity["platform"],
         platform_channel_id=identity["platform_channel_id"],
+        platform_message_id=platform_message_id or f"live-chat-{uuid4().hex[:10]}",
         platform_user_id=identity["platform_user_id"],
         platform_bot_id=_BOT_ID,
         display_name=display_name,
         channel_name=channel_name,
         content=content,
         attachments=attachments or [],
+        reply_context=brain_service.ReplyContextIn(**(reply_context or {})),
     )
     response = await brain_service.chat(request, background_tasks)
     for task in background_tasks.tasks:
@@ -250,16 +259,20 @@ async def _seed_conversation(
     content: str,
     role: str,
     platform_user_id: str,
+    platform_message_id: str | None = None,
+    reply_context: dict | None = None,
 ) -> None:
     await save_conversation(
         {
             "platform": platform,
             "platform_channel_id": platform_channel_id,
             "role": role,
+            "platform_message_id": platform_message_id or f"seed-{uuid4().hex[:10]}",
             "platform_user_id": platform_user_id,
             "global_user_id": global_user_id,
             "display_name": display_name,
             "content": content,
+            "reply_context": reply_context or {},
             "timestamp": datetime.now(timezone.utc).isoformat(),
         }
     )
@@ -358,6 +371,79 @@ async def test_live_chat_third_party_mention_stays_silent(live_env) -> None:
     )
 
     assert response.messages == []
+
+
+async def test_live_chat_structured_third_party_reply_stays_silent(live_env) -> None:
+    identity = await _make_identity("third-party-reply", "LiveThirdPartyReplyUser")
+    other_user_id = "live-other-user"
+    other_message_id = f"seed-other-{uuid4().hex[:8]}"
+
+    await _seed_conversation(
+        platform=identity["platform"],
+        platform_channel_id=identity["platform_channel_id"],
+        global_user_id=identity["global_user_id"],
+        display_name="OtherParticipant",
+        content='我同事上下班是不用加油的。',
+        role="user",
+        platform_user_id=other_user_id,
+        platform_message_id=other_message_id,
+    )
+
+    response, _ = await _run_chat(
+        "third-party-reply",
+        identity["display_name"],
+        '[Reply to message] <@live-other-user> 我同事上下班是不用加油的',
+        channel_name="general",
+        platform=identity["platform"],
+        platform_user_id=identity["platform_user_id"],
+        platform_channel_id=identity["platform_channel_id"],
+        reply_context={
+            "reply_to_message_id": other_message_id,
+            "reply_to_platform_user_id": other_user_id,
+            "reply_to_display_name": "OtherParticipant",
+            "reply_to_current_bot": False,
+            "reply_excerpt": '我同事上下班是不用加油的。',
+        },
+    )
+
+    assert response.messages == []
+
+
+async def test_live_chat_structured_third_party_reply_with_explicit_bot_address_can_respond(live_env) -> None:
+    identity = await _make_identity("third-party-reply-addressed", "LiveThirdPartyReplyAddressedUser")
+    other_user_id = "live-other-user-2"
+    other_message_id = f"seed-other-{uuid4().hex[:8]}"
+
+    await _seed_conversation(
+        platform=identity["platform"],
+        platform_channel_id=identity["platform_channel_id"],
+        global_user_id=identity["global_user_id"],
+        display_name="OtherParticipant",
+        content='混动通勤其实看使用场景。',
+        role="user",
+        platform_user_id=other_user_id,
+        platform_message_id=other_message_id,
+    )
+
+    async with _neutral_character_runtime_state():
+        response, _ = await _run_chat(
+            "third-party-reply-addressed",
+            identity["display_name"],
+            '<@pytest-live-bot> 你怎么看他刚才那句？',
+            channel_name="general",
+            platform=identity["platform"],
+            platform_user_id=identity["platform_user_id"],
+            platform_channel_id=identity["platform_channel_id"],
+            reply_context={
+                "reply_to_message_id": other_message_id,
+                "reply_to_platform_user_id": other_user_id,
+                "reply_to_display_name": "OtherParticipant",
+                "reply_to_current_bot": False,
+                "reply_excerpt": '混动通勤其实看使用场景。',
+            },
+        )
+
+    assert response.messages
 
 
 async def test_live_chat_multimodal_image_response(live_env) -> None:

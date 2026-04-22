@@ -65,10 +65,13 @@ def trim_history_dict(history):
     for msg in history:
         results.append({
             "name": msg.get("display_name"),
+            "display_name": msg.get("display_name"),
+            "platform_message_id": msg.get("platform_message_id", ""),
             "platform_user_id": msg.get("platform_user_id"),
             "global_user_id": msg.get("global_user_id"),
             "role": msg.get("role"),
             "content": msg.get("content"),
+            "reply_context": msg.get("reply_context", {}),
             "timestamp": msg.get("timestamp")
         })
     return results

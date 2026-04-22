@@ -19,6 +19,15 @@ class AttachmentDoc(TypedDict, total=False):
     size_bytes: int       # File size
 
 
+class ReplyContextDoc(TypedDict, total=False):
+    """Structured reply metadata for a conversation message."""
+    reply_to_message_id: str
+    reply_to_platform_user_id: str
+    reply_to_display_name: str
+    reply_to_current_bot: bool
+    reply_excerpt: str
+
+
 class ConversationMessageDoc(TypedDict, total=False):
     """A single chat message in the ``conversation_history`` collection.
 
@@ -30,12 +39,14 @@ class ConversationMessageDoc(TypedDict, total=False):
     platform_channel_id: str   # Original channel/group ID from the platform
     channel_type: str          # "group" | "private" | "system"
     role: str                  # "user" | "assistant"
+    platform_message_id: str   # Original platform message ID when available
     platform_user_id: str      # Original user/bot ID from the platform
     global_user_id: str        # Our internal UUID key
     display_name: str          # Display name at time of message
     content: str               # Text content
     content_type: str          # "text" | "image" | "voice" | "mixed"
     attachments: list[AttachmentDoc]  # Images, voice, files
+    reply_context: ReplyContextDoc     # Structured reply-to metadata when available
     timestamp: str             # ISO-8601 UTC timestamp
     embedding: list[float]     # Dense vector (on text content only)
 

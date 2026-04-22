@@ -14,10 +14,10 @@ class TestIMProcessState:
     def test_has_required_input_fields(self):
         hints = typing.get_type_hints(IMProcessState)
         required_fields = [
-            "timestamp", "platform", "platform_user_id", "global_user_id",
+            "timestamp", "platform", "platform_message_id", "platform_user_id", "global_user_id",
             "user_name", "user_input", "user_multimedia_input", "user_profile",
             "platform_bot_id", "bot_name", "character_profile",
-            "platform_channel_id", "channel_name", "chat_history",
+            "platform_channel_id", "channel_name", "chat_history_wide", "chat_history_recent", "reply_context",
         ]
         for field in required_fields:
             assert field in hints, f"Missing field: {field}"
@@ -26,7 +26,7 @@ class TestIMProcessState:
         hints = typing.get_type_hints(IMProcessState)
         relevance_fields = [
             "should_respond", "reason_to_respond", "use_reply_feature",
-            "channel_topic", "user_topic",
+            "channel_topic", "indirect_speech_context",
         ]
         for field in relevance_fields:
             assert field in hints, f"Missing relevance field: {field}"
@@ -45,6 +45,7 @@ class TestIMProcessState:
         state: IMProcessState = {
             "timestamp": "2024-01-01T00:00:00Z",
             "platform": "discord",
+            "platform_message_id": "message-123",
             "platform_user_id": "123",
             "global_user_id": "uuid-123",
             "user_name": "TestUser",
@@ -56,12 +57,14 @@ class TestIMProcessState:
             "character_profile": {},
             "platform_channel_id": "789",
             "channel_name": "test",
-            "chat_history": [],
+            "chat_history_wide": [],
+            "chat_history_recent": [],
+            "reply_context": {},
             "should_respond": True,
             "reason_to_respond": "",
             "use_reply_feature": False,
             "channel_topic": "",
-            "user_topic": "",
+            "indirect_speech_context": "",
             "debug_modes": {},
             "final_dialog": [],
             "future_promises": [],

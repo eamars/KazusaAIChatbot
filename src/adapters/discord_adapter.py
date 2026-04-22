@@ -57,6 +57,17 @@ class DiscordAdapter(discord.Client):
 
         is_dm = message.guild is None
         channel_id_str = str(message.channel.id)
+        reply_context: dict[str, str | bool] = {}
+
+        if message.reference is not None and message.reference.message_id is not None:
+            reply_context["reply_to_message_id"] = str(message.reference.message_id)
+
+        referenced_message = message.reference.resolved if message.reference is not None else None
+        if isinstance(referenced_message, discord.Message):
+            reply_context["reply_to_platform_user_id"] = str(referenced_message.author.id)
+            reply_context["reply_to_display_name"] = referenced_message.author.display_name
+            reply_context["reply_to_current_bot"] = bool(self.user and referenced_message.author.id == self.user.id)
+            reply_context["reply_excerpt"] = referenced_message.content[:200]
 
         message_debug_modes = dict(self.debug_modes)
         is_active = is_dm or (self.channel_ids is not None and channel_id_str in self.channel_ids)
@@ -106,6 +117,7 @@ class DiscordAdapter(discord.Client):
         payload = {
             "platform": "discord",
             "platform_channel_id": str(message.channel.id),
+            "platform_message_id": str(message.id),
             "platform_user_id": str(message.author.id),
             "platform_bot_id": str(self.user.id) if self.user else "",
             "display_name": message.author.display_name,
@@ -113,6 +125,7 @@ class DiscordAdapter(discord.Client):
             "content": message.content,
             "content_type": "text",
             "attachments": attachments,
+            "reply_context": reply_context,
             "debug_modes": message_debug_modes,
         }
 

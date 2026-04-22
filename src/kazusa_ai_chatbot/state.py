@@ -9,6 +9,14 @@ class MultiMediaDoc(TypedDict):
     description: str
 
 
+class ReplyContext(TypedDict, total=False):
+    reply_to_message_id: str
+    reply_to_platform_user_id: str
+    reply_to_display_name: str
+    reply_to_current_bot: bool
+    reply_excerpt: str
+
+
 class DebugModes(TypedDict, total=False):
     listen_only: bool      # Record data but skip thinking (no LLM calls beyond relevance)
     think_only: bool       # Full pipeline but suppress dialog in response
@@ -20,6 +28,7 @@ class IMProcessState(TypedDict):
 
     # Platform identity
     platform: str                # "discord" | "qq" | "wechat" | etc.
+    platform_message_id: str     # Original platform message ID when available
     platform_user_id: str        # Original platform user ID (e.g. Discord snowflake)
     global_user_id: str          # Internal UUID4 from user_profiles collection
 
@@ -37,6 +46,7 @@ class IMProcessState(TypedDict):
     channel_name: str  # Display name of the channel (used to determine the context)
     chat_history_wide: list[dict]   # Full history slice (CONVERSATION_HISTORY_LIMIT, used by Relevance Agent)
     chat_history_recent: list[dict] # Recent slice (CHAT_HISTORY_RECENT_LIMIT, used by downstream stages)
+    reply_context: ReplyContext
 
     # Output from Relevance Agent
     should_respond: bool

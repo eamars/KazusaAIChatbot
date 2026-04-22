@@ -38,12 +38,13 @@ from kazusa_ai_chatbot.db import (
     db_bootstrap,
     get_character_profile,
     get_conversation_history,
+    get_db,
     get_user_profile,
     resolve_global_user_id,
     save_conversation,
 )
 from kazusa_ai_chatbot.mcp_client import mcp_manager
-from kazusa_ai_chatbot.state import IMProcessState, MultiMediaDoc, DebugModes
+from kazusa_ai_chatbot.state import IMProcessState, MultiMediaDoc, DebugModes, ReplyContext
 from kazusa_ai_chatbot.utils import trim_history_dict
 from kazusa_ai_chatbot import scheduler
 
@@ -71,9 +72,18 @@ class DebugModesIn(BaseModel):
     no_remember: bool = False
 
 
+class ReplyContextIn(BaseModel):
+    reply_to_message_id: str = ""
+    reply_to_platform_user_id: str = ""
+    reply_to_display_name: str = ""
+    reply_to_current_bot: bool | None = None
+    reply_excerpt: str = ""
+
+
 class ChatRequest(BaseModel):
     platform: str
     platform_channel_id: str = ""
+    platform_message_id: str = ""
     platform_user_id: str
     platform_bot_id: str = ""  # Bot's ID on this platform (e.g. Discord snowflake)
     display_name: str = ""
@@ -83,6 +93,7 @@ class ChatRequest(BaseModel):
     attachments: list[AttachmentIn] = Field(default_factory=list)
     timestamp: str = ""
     reply_to_message_id: str | None = None
+    reply_context: ReplyContextIn = Field(default_factory=ReplyContextIn)
     debug_modes: DebugModesIn = Field(default_factory=DebugModesIn)
 
 
@@ -151,6 +162,48 @@ def _build_graph():
     graph.add_edge("persona_supervisor2", END)
 
     return graph.compile()
+
+
+def _compact_reply_context(reply_context: ReplyContext) -> ReplyContext:
+    compacted: ReplyContext = {}
+    for key, value in reply_context.items():
+        if value in ("", None):
+            continue
+        compacted[key] = value
+    return compacted
+
+
+async def _hydrate_reply_context(req: ChatRequest) -> ReplyContext:
+    reply_context: ReplyContext = req.reply_context.model_dump(exclude_none=True)
+
+    if req.reply_to_message_id and not reply_context.get("reply_to_message_id"):
+        reply_context["reply_to_message_id"] = req.reply_to_message_id
+
+    reply_to_message_id = reply_context.get("reply_to_message_id", "")
+    if reply_to_message_id and not reply_context.get("reply_to_platform_user_id"):
+        db = await get_db()
+        reply_doc = await db.conversation_history.find_one(
+            {
+                "platform": req.platform,
+                "platform_channel_id": req.platform_channel_id,
+                "platform_message_id": reply_to_message_id,
+            },
+            projection={
+                "platform_user_id": 1,
+                "display_name": 1,
+                "content": 1,
+            },
+        )
+        if reply_doc is not None:
+            reply_context["reply_to_platform_user_id"] = reply_doc.get("platform_user_id", "")
+            reply_context["reply_to_display_name"] = reply_doc.get("display_name", "")
+            reply_context["reply_excerpt"] = reply_doc.get("content", "")[:200]
+
+    reply_to_platform_user_id = reply_context.get("reply_to_platform_user_id", "")
+    if reply_to_platform_user_id:
+        reply_context["reply_to_current_bot"] = reply_to_platform_user_id == req.platform_bot_id
+
+    return _compact_reply_context(reply_context)
 
 
 # ── Bot message saver (background task) ──────────────────────────────
@@ -300,6 +353,7 @@ async def chat(req: ChatRequest, background_tasks: BackgroundTasks):
         )
         chat_history_wide = trim_history_dict(history)
         chat_history_recent = chat_history_wide[-CHAT_HISTORY_RECENT_LIMIT:]
+        reply_context = await _hydrate_reply_context(req)
 
         # Build the character bot identity
         bot_name = _personality.get("name", "KazusaBot")
@@ -316,6 +370,7 @@ async def chat(req: ChatRequest, background_tasks: BackgroundTasks):
         initial_state: IMProcessState = {
             "timestamp": timestamp,
             "platform": req.platform,
+            "platform_message_id": req.platform_message_id,
             "platform_user_id": req.platform_user_id,
             "global_user_id": global_user_id,
             "user_name": req.display_name,
@@ -329,6 +384,7 @@ async def chat(req: ChatRequest, background_tasks: BackgroundTasks):
             "channel_name": req.channel_name,
             "chat_history_wide": chat_history_wide,
             "chat_history_recent": chat_history_recent,
+            "reply_context": reply_context,
             "debug_modes": debug_modes,
         }
 
@@ -338,10 +394,12 @@ async def chat(req: ChatRequest, background_tasks: BackgroundTasks):
                 "platform": req.platform,
                 "platform_channel_id": req.platform_channel_id,
                 "role": "user",
+                "platform_message_id": req.platform_message_id,
                 "platform_user_id": req.platform_user_id,
                 "global_user_id": global_user_id,
                 "display_name": req.display_name,
                 "content": req.content,
+                "reply_context": reply_context,
                 "timestamp": timestamp,
             })
         except Exception:

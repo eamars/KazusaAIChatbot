@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 
 from langchain_core.messages import HumanMessage, SystemMessage
 
@@ -18,6 +19,62 @@ from kazusa_ai_chatbot.utils import get_llm
 from kazusa_ai_chatbot.state import IMProcessState
 
 logger = logging.getLogger(__name__)
+
+
+_MENTION_RE = re.compile(r"<@([^>]+)>")
+
+
+def _extract_mention_ids(text: str) -> list[str]:
+    return _MENTION_RE.findall(text)
+
+
+def _extract_legacy_reply_target_id(text: str) -> str:
+    if not text.startswith("[Reply to message]"):
+        return ""
+    mention_ids = _extract_mention_ids(text)
+    if not mention_ids:
+        return ""
+    return mention_ids[0]
+
+
+def _contains_explicit_bot_address(text: str, platform_bot_id: str, character_name: str, bot_name: str) -> bool:
+    mention_ids = _extract_mention_ids(text)
+    if platform_bot_id and platform_bot_id in mention_ids:
+        return True
+
+    candidate_names = {name.strip() for name in (character_name, bot_name) if name and name.strip()}
+    return any(name in text for name in candidate_names)
+
+
+def _should_ignore_third_party_reply(
+    *,
+    user_input: str,
+    reply_context: dict,
+    platform_bot_id: str,
+    character_name: str,
+    bot_name: str,
+    is_noisy_environment: bool,
+) -> bool:
+    if not is_noisy_environment:
+        return False
+
+    if _contains_explicit_bot_address(user_input, platform_bot_id, character_name, bot_name):
+        return False
+
+    reply_to_current_bot = reply_context.get("reply_to_current_bot")
+    if reply_to_current_bot is False:
+        return True
+    if reply_to_current_bot is True:
+        return False
+
+    reply_target_id = reply_context.get("reply_to_platform_user_id", "")
+    if not reply_target_id:
+        reply_target_id = _extract_legacy_reply_target_id(user_input)
+
+    if not reply_target_id:
+        return False
+
+    return reply_target_id != platform_bot_id
 
 
 
@@ -176,6 +233,32 @@ async def relevance_agent(state: IMProcessState) -> IMProcessState:
     channel_name_lower = channel_name.lower()
     is_noisy_environment = channel_name_lower not in ["", "private", "dm", "direct message"]
     prompt_template = _RELEVANCE_SYSTEM_NOISY_PROMPT if is_noisy_environment else _RELEVANCE_SYSTEM_PROMPT
+    reply_context = dict(state.get("reply_context") or {})
+
+    if _should_ignore_third_party_reply(
+        user_input=user_input,
+        reply_context=reply_context,
+        platform_bot_id=state.get("platform_bot_id", ""),
+        character_name=state["character_profile"]["name"],
+        bot_name=state.get("bot_name", ""),
+        is_noisy_environment=is_noisy_environment,
+    ):
+        reason_to_respond = "structured reply target points to another participant without an explicit bot address"
+        logger.info(
+            "\n%s(@%s): %s\nRelevance Analysis:\n  should_respond: False\n  reason_to_respond: %s\n  use_reply_feature: False\n  channel_topic: \n  indirect_speech_context: ",
+            user_name,
+            platform_user_id,
+            user_input,
+            reason_to_respond,
+        )
+        return {
+            "should_respond": False,
+            "reason_to_respond": reason_to_respond,
+            "use_reply_feature": False,
+            "channel_topic": "",
+            "indirect_speech_context": "",
+            "user_input": user_input,
+        }
 
     """Analyze context and determine relevance using LLM."""
     system_prompt = SystemMessage(content=prompt_template.format(
@@ -198,6 +281,7 @@ async def relevance_agent(state: IMProcessState) -> IMProcessState:
             "platform_user_id": platform_user_id,
             "content": user_input,
             "channel_name": channel_name,
+            "reply_context": reply_context,
         },
         "conversation_history": state.get("chat_history_wide"),
     }
