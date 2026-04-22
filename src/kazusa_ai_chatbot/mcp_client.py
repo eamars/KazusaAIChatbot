@@ -15,7 +15,7 @@ from typing import Any
 from mcp import ClientSession
 from mcp.client.streamable_http import streamablehttp_client
 
-from kazusa_ai_chatbot.config import MCP_SERVERS
+from kazusa_ai_chatbot.config import MCP_CALL_TIMEOUT, MCP_CONNECT_TIMEOUT, MCP_SERVERS
 
 logger = logging.getLogger(__name__)
 
@@ -158,13 +158,19 @@ class McpManager:
             return f"Error: server '{tool.server}' not connected"
 
         try:
-            result = await session.call_tool(tool.original_name, arguments or {})
+            result = await asyncio.wait_for(
+                session.call_tool(tool.original_name, arguments or {}),
+                timeout=MCP_CALL_TIMEOUT,
+            )
             # Concatenate all text content blocks
             parts = []
             for block in result.content:
                 if hasattr(block, "text"):
                     parts.append(block.text)
             return "\n".join(parts) if parts else "(no output)"
+        except asyncio.TimeoutError:
+            logger.error("Tool call %s timed out after %.0fs", name, MCP_CALL_TIMEOUT)
+            return f"Error calling {name}: timed out after {MCP_CALL_TIMEOUT:.0f}s"
         except Exception as exc:
             logger.exception("Tool call %s failed", name)
             return f"Error calling {name}: {exc}"
@@ -185,10 +191,12 @@ class McpManager:
             async with streamablehttp_client(connection.url) as streams:
                 read_stream, write_stream, _ = streams
                 async with ClientSession(read_stream, write_stream) as session:
-                    await session.initialize()
+                    await asyncio.wait_for(session.initialize(), timeout=MCP_CONNECT_TIMEOUT)
                     self._sessions[connection.name] = session
 
-                    tools_result = await session.list_tools()
+                    tools_result = await asyncio.wait_for(
+                        session.list_tools(), timeout=MCP_CONNECT_TIMEOUT
+                    )
                     for tool in tools_result.tools:
                         qualified_name = f"{connection.name}__{tool.name}"
                         connection.tool_names.append(qualified_name)
@@ -207,6 +215,15 @@ class McpManager:
                     )
                     connection.ready_event.set()
                     await connection.stop_event.wait()
+        except asyncio.TimeoutError:
+            connection.error = asyncio.TimeoutError(
+                f"MCP server {connection.name!r} did not respond within {MCP_CONNECT_TIMEOUT:.0f}s"
+            )
+            logger.error(
+                "MCP server %s timed out during connect/discovery (limit %.0fs)",
+                connection.name,
+                MCP_CONNECT_TIMEOUT,
+            )
         except Exception as exc:
             connection.error = exc
             if connection.stop_event.is_set():

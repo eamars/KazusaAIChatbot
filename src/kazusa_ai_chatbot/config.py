@@ -53,6 +53,11 @@ mcp_servers_env = os.getenv("MCP_SERVERS", "{}")
 mcp_servers_env = mcp_servers_env.replace('\\"', '"')
 MCP_SERVERS: dict[str, dict] = json.loads(mcp_servers_env)
 
+# Seconds to wait for a single tool call before giving up.
+MCP_CALL_TIMEOUT: float = float(os.getenv("MCP_CALL_TIMEOUT", "30"))
+# Seconds to wait for server initialisation and tool-list discovery at startup.
+MCP_CONNECT_TIMEOUT: float = float(os.getenv("MCP_CONNECT_TIMEOUT", "10"))
+
 # Max tool-calling loop iterations in persona supervisor
 MAX_TOOL_ITERATIONS = int(os.getenv("MAX_TOOL_ITERATIONS", "3"))
 
