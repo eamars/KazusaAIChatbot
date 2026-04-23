@@ -159,6 +159,7 @@ def _evade_state() -> dict:
         "decontexualized_input": "千纱千纱你认识我么？我是你的学长",
         "logical_stance": "TENTATIVE",
         "character_intent": "EVADE",
+        "final_dialog": ["学长……？这种称呼是怎么回事呀……"],
         "action_directives": {
             "linguistic_directives": {
                 "content_anchors": [
@@ -175,6 +176,147 @@ def _evade_state() -> dict:
         "new_facts": [],
         "future_promises": [],
     }
+
+
+def _fact_harvest_state(
+    *,
+    decontexualized_input: str,
+    content_anchors: list[str],
+    final_dialog: list[str],
+    logical_stance: str = "CONFIRM",
+    character_intent: str = "PROVIDE",
+) -> dict:
+    """Build a minimal ConsolidatorState for fact harvester tests."""
+    return {
+        "character_profile": {
+            "name": "杏山千纱",
+            "personality_brief": {"mbti": "INFJ"},
+        },
+        "user_name": "提拉米苏",
+        "user_profile": {"affinity": 500},
+        "timestamp": "2026-04-23T06:11:28+12:00",
+        "decontexualized_input": decontexualized_input,
+        "logical_stance": logical_stance,
+        "character_intent": character_intent,
+        "final_dialog": final_dialog,
+        "action_directives": {
+            "linguistic_directives": {
+                "content_anchors": content_anchors,
+            },
+        },
+        "research_facts": {},
+        "metadata": {"cache_hit": False, "depth": "SHALLOW", "depth_confidence": 0.9},
+        "fact_harvester_feedback_message": [],
+        "fact_harvester_retry": 0,
+        "new_facts": [],
+        "future_promises": [],
+    }
+
+
+@pytest.mark.asyncio
+async def test_facts_harvester_sends_final_dialog_in_payload(monkeypatch):
+    """Harvester payload must include final_dialog so promise extraction uses final speech evidence."""
+    llm = _CapturingAsyncLLM(
+        {
+            "new_facts": [],
+            "future_promises": [],
+        }
+    )
+    monkeypatch.setattr(consolidator_module, "_facts_harvester_llm", llm)
+
+    state = _fact_harvest_state(
+        decontexualized_input="明天早上记得叫我起床。",
+        content_anchors=["[DECISION] 答应明早叫他起床。"],
+        final_dialog=["好，明早八点我叫你起床。"],
+    )
+
+    await consolidator_module.facts_harvester(state)
+
+    human_payload = json.loads(llm.messages[1].content)
+    assert human_payload["final_dialog"] == ["好，明早八点我叫你起床。"]
+
+
+@pytest.mark.live_llm
+class TestFactHarvesterPromiseAccuracyLive:
+    """Live LLM checks for false-positive and true-positive promise extraction."""
+
+    async def test_noncommittal_banter_does_not_create_promise(self):
+        """Future-oriented teasing without acceptance must not be stored as a promise."""
+        state = _fact_harvest_state(
+            decontexualized_input="太晚了，睡了。回头你再弄点新鲜的，再放出来调戏",
+            content_anchors=[
+                "[DECISION] 接受并带有试探性的回应",
+                "[ANSWER] 表示会根据心情准备，并不保证下次的内容一定会让他满意",
+                "[SOCIAL] 维持一种半推半就、略带轻佻的防线松动感",
+            ],
+            final_dialog=["诶~", "那也要看心情啦。", "下次会不会让你满意，谁知道呢？"],
+            logical_stance="TENTATIVE",
+            character_intent="BANTAR",
+        )
+
+        result = await consolidator_module.facts_harvester(state)
+        logger.info("facts_harvester.noncommittal_banter input=%r output=%r", state, result)
+
+        assert result.get("future_promises") == []
+
+    async def test_explicit_accepted_wake_up_request_creates_promise(self):
+        """A clearly accepted future request should be harvested as a promise."""
+        state = _fact_harvest_state(
+            decontexualized_input="明天早上记得叫我起床。",
+            content_anchors=[
+                "[DECISION] 明确答应明早叫醒对方。",
+                "[ANSWER] 说明会在明早叫他起床。",
+            ],
+            final_dialog=["好，明早八点我叫你起床。"],
+            logical_stance="CONFIRM",
+            character_intent="PROVIDE",
+        )
+
+        result = await consolidator_module.facts_harvester(state)
+        logger.info("facts_harvester.wake_up_request input=%r output=%r", state, result)
+
+        promises = result.get("future_promises") or []
+        assert promises, f"Expected a promise, got: {result}"
+        assert any("叫" in promise.get("action", "") for promise in promises)
+        assert any(promise.get("due_time") for promise in promises)
+
+    async def test_user_future_plan_without_character_commitment_is_not_promise(self):
+        """User-only future plans must not be converted into character promises."""
+        state = _fact_harvest_state(
+            decontexualized_input="明天我要去医院复诊。",
+            content_anchors=[
+                "[DECISION] 表达关心并提醒对方路上小心。",
+                "[ANSWER] 简短关心对方明天去复诊的安排。",
+            ],
+            final_dialog=["嗯，路上小心。"],
+            logical_stance="CONFIRM",
+            character_intent="PROVIDE",
+        )
+
+        result = await consolidator_module.facts_harvester(state)
+        logger.info("facts_harvester.user_future_plan input=%r output=%r", state, result)
+
+        assert result.get("future_promises") == []
+
+    async def test_conditional_reward_acceptance_creates_promise(self):
+        """A conditional accepted reward should be harvested as a future promise."""
+        state = _fact_harvest_state(
+            decontexualized_input="要是我今晚写完作业，你明早奖励我。",
+            content_anchors=[
+                "[DECISION] 接受这个条件式约定。",
+                "[ANSWER] 若他今晚写完作业，明早会奖励他。",
+            ],
+            final_dialog=["行，你今晚写完的话，我明早奖励你。"],
+            logical_stance="CONFIRM",
+            character_intent="PROVIDE",
+        )
+
+        result = await consolidator_module.facts_harvester(state)
+        logger.info("facts_harvester.conditional_reward input=%r output=%r", state, result)
+
+        promises = result.get("future_promises") or []
+        assert promises, f"Expected a conditional reward promise, got: {result}"
+        assert any("奖励" in promise.get("action", "") for promise in promises)
 
 
 @pytest.mark.live_llm

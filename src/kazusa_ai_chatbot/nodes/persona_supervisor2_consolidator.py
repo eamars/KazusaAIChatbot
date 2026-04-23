@@ -655,6 +655,12 @@ _FACTS_HARVESTER_PROMPT = """\
 - **对话对象 (User)**: {user_name}
 - **系统时间**: {timestamp}
 
+# 证据分层（必须遵守）
+- `decontexualized_input`：用户这一轮真正表达的内容，常包含请求、愿望、试探、调侃。
+- `content_anchors`：角色在生成回复前的草案意图，只能视为“候选计划”，**不能单独证明承诺已经成立**。
+- `final_dialog`：角色本轮最终实际说出口的话，是判断“是否真的接受/承诺/拒绝”的最高优先级证据。
+- 当三者冲突时，优先级固定为：`final_dialog` > `content_anchors` > `decontexualized_input`。
+
 # 核心审计准则 (Audit Standards)
 1. **身份锚定 [必须执行]**:
    - `decontexualized_input` 的内容始终是 **{user_name}** 在表达。
@@ -670,7 +676,11 @@ _FACTS_HARVESTER_PROMPT = """\
    - **未确认声明 [必须执行]**：当 `logical_stance` 为 `TENTATIVE` 或 `DENY`，或 `character_intent` 为 `EVADE` / `DENY` 时，用户对自身身份、关系或重要属性的任何自我声明（如”我是你学长”、”我们是朋友”）**一律不得落库**——即使改写成”用户自称……”、”用户声称……”等形式也同样禁止。此类输入 `new_facts` 必须返回 `[]`。仅当 `logical_stance` 为 `CONFIRM` 且 `character_intent` 不为 `EVADE` / `DENY` 时，方可记录用户的身份/关系自我声明。
 
 3. **承诺 (future_promises) 判定标准 [核心逻辑]**:
-   - **所有关于“以后、今晚、下次、奖励、惩罚”的内容，必须且只能记录在这里。**
+   - `future_promises` 只记录“**已经被角色采纳的未来义务/约定**”，而不是所有带未来色彩的话题。
+   - 先识别 `decontexualized_input` 中的“候选未来事项”，再用 `final_dialog` 判断角色是否真的接下了这件事。
+   - **只有当 `final_dialog` 明确体现出接受、答应、确认履行、或形成双方约定时，才能生成 promise。**
+   - `content_anchors` 仅用于补足 `final_dialog` 里省略的主语、对象、触发条件；**不得在 `final_dialog` 没有承诺证据时单独创造 promise。**
+   - 用户的请求、愿望、挑逗、建议、命令、试探，**本身不是 promise**。如果角色最终只是敷衍、保留选择权、继续调情、表达不确定，返回 `future_promises: []`。
    - 必须包含：[触发条件] + [谁对谁做] + [具体动作]。
    - 承诺时间计算：若角色提出，或者答应了一个将来会发生的事件，则需要根据当前时间推算 `due_time`。
    - `due_time` 推算规则：若输入出现明确时间线索（如“今晚/明早/明天早上/下周末”），必须换算为 ISO 8601 时间戳；仅在完全缺失时间线索时才允许 `null`。
@@ -681,9 +691,9 @@ _FACTS_HARVESTER_PROMPT = """\
      - “明天下午” -> 次日 15:00
      - “明天晚上” -> 次日 21:00
    - 计算时区使用系统时间 `{timestamp}` 的本地时区；输出必须为 ISO 8601。
-   - 若 `decontexualized_input` 是用户对未来行为的请求（如“晚上奖励我”），且 `logical_stance` 为 `CONFIRM`（或等价的认可态），默认视为可落库的“待履行承诺”，不要漏记。
-   - 若出现冲突信号（如 `content_anchors` 明确拒绝且 `logical_stance` 非确认），再选择不记录。
-   - 对“软性答应/模糊同意”（例如“拿你没办法”“那就这样吧”）也可记录为 promise，动作写成中性可执行表述。
+   - 若 `decontexualized_input` 是用户对未来行为的请求（如“晚上奖励我”），只有在 `final_dialog` 中被角色明确接纳时，才视为可落库的“待履行承诺”。
+   - 若出现冲突信号（如 `content_anchors` 倾向接受，但 `final_dialog` 保留选择权或明显拒绝），以 `final_dialog` 为准并不记录。
+   - 对“软性答应/模糊同意”，只有在 `final_dialog` 仍然体现出角色已经接下义务时才可记录；若 `final_dialog` 只是延续氛围、试探、调侃或保留决定权，则不记录。
    - `action` 只写“可执行承诺本体”，不得写时间推测或计划态词汇。**禁止出现**：`计划`、`打算`、`准备`、`想要`、`可能`、`也许`、`明天`、`今晚`、`下次` 等时间/意图词。
    - 时间信息统一写入 `due_time`；若无法确定具体时间可为 `null`，但不要把时间短语塞进 `action`。
    - `action` 必须是去叙事的承诺句，推荐模板：`[执行者]在[触发条件]对[对象]执行[动作]` 或 `[执行者]将对[对象]执行[动作]`。
@@ -754,6 +764,7 @@ async def facts_harvester(state: ConsolidatorState) -> dict:
         "decontexualized_input": state["decontexualized_input"],
         "research_facts": state["research_facts"],
         "content_anchors": state["action_directives"]["linguistic_directives"]["content_anchors"],
+        "final_dialog": state["final_dialog"],
         "logical_stance": state["logical_stance"],
         "character_intent": state["character_intent"],
         "rag_metadata": {
@@ -795,7 +806,8 @@ _FACT_HARVESTER_EVALUATOR_PROMPT = """\
 
 # 1. 审计基准源 (不可修改的参照物)
 - **事实基准**: `decontexualized_input` (仅用于核对 {user_name} 的状态)
-- **承诺基准**: `content_anchors` (仅用于核对 {character_name} 的决定)
+- **承诺基准**: `final_dialog` (角色最终实际说出口的话，优先级最高)
+- **承诺辅助基准**: `content_anchors` (仅用于补足 final_dialog 中省略的对象/条件，不能单独制造承诺)
 - **历史基准**: `research_facts` (用于检查是否为旧闻)
 
 # 2. 候选结果 (这是你唯一需要审计的对象)
@@ -825,11 +837,13 @@ _FACT_HARVESTER_EVALUATOR_PROMPT = """\
 - **语义漂移 [严重]**: 若 `new_facts.description` 改写后改变了用户原意（尤其是偏好、禁忌、过敏、承诺条件等），必须判 FAIL 并要求使用更贴近原句的表述。
 - **未确认声明入库 [严重]**: 若 `logical_stance` 为 `TENTATIVE` 或 `DENY`，或 `character_intent` 为 `EVADE` / `DENY`，而 `new_facts` 中出现了用户对自身身份/关系/属性的自我声明（如"用户是角色的学长"），必须判 FAIL——角色未确认的主张不得作为事实落库。
 - **承诺 action 审计标准（专用于 `future_promises`）**:
-  - 合格条件：表达“谁对谁做什么”的可执行承诺，不是对话复读（如“他说/她问/我觉得”）。
+  - 合格条件：表达“谁对谁做什么”的可执行承诺，不是对话复读（如“他说/她问/我觉得”），且能在 `final_dialog` 中找到角色已经接下该义务的证据。
   - 可以接受两种写法：
     1) 不含时间词的承诺本体（推荐）；
     2) 含时间词（如“今晚/明早”）的承诺句，但语义仍是承诺执行动作。
   - 仅在以下情况判 FAIL：
+    - 候选 promise 只得到 `decontexualized_input` 或 `content_anchors` 支持，但 `final_dialog` 没有承诺证据；
+    - `final_dialog` 表达的是保留选择权、继续试探/调情、模糊敷衍或不确定，而不是接下义务；
     - `action` 是纯计划/猜测（如“可能、也许、打算、准备”）且无明确执行动作；
     - `action` 只是复述对话或主观感受；
     - `action` 与 `target`/基准源主体明显不一致。
@@ -858,6 +872,7 @@ async def fact_harvester_evaluator(state: ConsolidatorState) -> dict:
         "decontexualized_input": state["decontexualized_input"],
         "research_facts": state["research_facts"],
         "content_anchors": state["action_directives"]["linguistic_directives"]["content_anchors"],
+        "final_dialog": state["final_dialog"],
         "logical_stance": state["logical_stance"],
         "character_intent": state["character_intent"],
     }
