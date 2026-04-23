@@ -45,6 +45,41 @@ async def save_memory(doc: MemoryDoc, timestamp: str) -> None:
     await db.memory.insert_one(payload)
 
 
+async def get_active_promises(
+    source_global_user_id: str,
+    now_timestamp: str,
+    limit: int = 10,
+) -> list[MemoryDoc]:
+    """Return active, non-expired promise memories for a single user.
+
+    Args:
+        source_global_user_id: Internal UUID of the user whose promises should be
+            loaded.
+        now_timestamp: ISO-8601 timestamp used as the freshness cutoff.
+        limit: Maximum number of promises to return, newest first.
+
+    Returns:
+        A list of promise memory documents without embeddings.
+    """
+    db = await get_db()
+    cursor = db.memory.find(
+        {
+            "source_global_user_id": source_global_user_id,
+            "memory_type": "promise",
+            "status": "active",
+            "$or": [
+                {"expiry_timestamp": None},
+                {"expiry_timestamp": {"$exists": False}},
+                {"expiry_timestamp": {"$gt": now_timestamp}},
+            ],
+        }
+    ).sort("timestamp", -1).limit(limit)
+    docs = await cursor.to_list(length=limit)
+    for doc in docs:
+        doc.pop("embedding", None)
+    return docs
+
+
 async def search_memory(
     query: str,
     limit: int = 5,

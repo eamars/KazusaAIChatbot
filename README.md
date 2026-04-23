@@ -57,7 +57,7 @@ State is passed in two layers:
 
 - `relevance_agent` reads the message + context and writes routing/topic fields.
 - `persona_supervisor2` copies a selected subset of fields into `GlobalPersonaState` and runs Stage 0→4.
-- Stage outputs are accumulated in `GlobalPersonaState` and returned to top-level as `final_dialog` + `future_promises`.
+- Stage outputs are accumulated in `GlobalPersonaState` and returned to top-level as `final_dialog` + `future_promises`, while durable next-turn commitments are persisted authoritatively in `user_profile.active_commitments`.
 
 Top-level flow:
 
@@ -175,6 +175,8 @@ An **evaluator** determines if the retrieved information is sufficient or if ano
 - `research_facts`
 - `research_metadata`
 
+`research_facts` carries objective facts, user image, character image, input-context recall, and external knowledge. Immediate commitment continuity is **not** threaded through a temporary RAG-only lane; the authoritative fresh-read source is `user_profile.active_commitments`.
+
 ### Persona Supervisor v2 — Stage 2: Cognition Subgraph (7+ LLM calls)
 A 3-layer cognitive simulation split into modular files:
 
@@ -189,6 +191,7 @@ A 3-layer cognitive simulation split into modular files:
 **Layer 3 — Contextual / Linguistic / Visual + Collector** (`persona_supervisor2_cognition_l3.py`)
 - Contextual agent — social distance, emotional intensity, relational dynamics
 - Linguistic agent — rhetorical strategy, style, content anchors, forbidden phrases
+- Preference adapter — extracts accepted soft user preferences (reply language, suffixes, address style, formatting habits) from the same evidence bundle as other preferences; reply language is handled by the LLM as a normal soft preference, not by a deterministic post-processor
 - Visual agent — facial expression, body language, gaze direction
 - Collector — assembles all layer outputs into structured `action_directives`
 
@@ -224,7 +227,7 @@ Runs inline (not deferred) after dialog generation to persist the interaction's 
 1. **Global State Updater** — updates mood, global vibe, and reflection summary
 2. **Relationship Recorder** — generates diary entry, affinity delta (with non-linear scaling breakpoints), and relationship insight
 3. **Facts Harvester** — extracts new user facts and future promises (with evaluator loop up to `MAX_FACT_HARVESTER_RETRY`)
-4. **DB Writer** — persists all outputs to MongoDB (character state, user facts, affinity, relationship insight, memory)
+4. **DB Writer** — persists all outputs to MongoDB (character state, user facts, affinity, relationship insight, memory, authoritative active commitments)
 
 **Stage 4 input**: `final_dialog`, `interaction_subtext`, `emotional_appraisal`, `character_intent`, `logical_stance`, `user_profile`, `character_state`
 
@@ -232,6 +235,12 @@ Runs inline (not deferred) after dialog generation to persist the interaction's 
 - `mood`, `global_vibe`, `reflection_summary`
 - `diary_entry`, `affinity_delta`, `last_relationship_insight`
 - `new_facts`, `future_promises`
+
+Important consolidation rules:
+
+- **Authoritative commitment lane** — accepted future promises are written through immediately into `user_profile.active_commitments` so the next turn reads a fresh profile-backed source of truth.
+- **Persistence gate** — permission-like facts and future promises are only allowed to persist for explicit accepted states (currently a narrow allowlist over `logical_stance` + `character_intent`), preventing evasive / tentative boundary cases from leaking into durable memory.
+- **Milestone lifecycle** — `user_image.milestones` supports supersedence metadata. New milestones can supersede older open milestones on the same lifecycle scope (for example, relationship addressing changes), while already superseded or unrelated-scope milestones remain untouched.
 
 ### MCP Tool Calling
 
@@ -252,7 +261,7 @@ src/
     scheduler.py                     # Async event scheduler (MongoDB-backed)
     config.py                        # env vars, affinity breakpoints, retry limits
     state.py                         # IMProcessState TypedDict
-    db.py                            # MongoDB helpers + document schemas (MemoryDoc, build_memory_doc, etc.)
+    db/                              # MongoDB package (schemas, bootstrap, users, memory, character, conversation, rag_cache)
     mcp_client.py                    # McpManager — MCP server connections + tool execution
     utils.py                         # Shared helpers (JSON parsing, affinity, history trim)
     agents/
@@ -337,7 +346,7 @@ Run an OpenAI-compatible API server (e.g., LM Studio, vLLM, Ollama) with:
 
 The brain service runs `db_bootstrap()` on startup which automatically creates all required collections and indexes:
 - **`conversation_history`** — chat messages with embeddings for semantic search
-- **`user_profiles`** — per-user facts, affinity score, platform accounts, relationship insight
+- **`user_profiles`** — per-user objective facts, `active_commitments`, affinity score, platform accounts, relationship insight, and user image milestones
 - **`character_state`** — single global document for mood, vibe, reflection summary, and the **character profile**
 - **`memory`** — persistent memories with structured metadata and embeddings (see Memory Schema below)
 - **`knowledge`** — detailed knowledge entries (links, documents, reference material)
@@ -436,6 +445,10 @@ Environment variables are read from `.env` or can be set in the compose file.
 - **5-stage cognitive pipeline** — separating decontextualization, research, cognition, dialog, and consolidation gives each stage a focused LLM context and allows independent iteration. The cognition layer (subconscious → conscious → social filter) models a human-like decision process rather than a single prompt.
 - **Generator-evaluator dialog loop** — the dialog agent generates candidate replies and an evaluator checks for fatal errors (logic contradictions, missing facts). This catches issues before sending while avoiding excessive retries via dynamic threshold relaxation.
 - **Inline consolidation** — unlike the previous deferred memory writer, consolidation now runs as part of the graph. This ensures character state, facts, and affinity are updated before the next message arrives.
+- **Authoritative active commitments** — immediate next-turn commitments live in `user_profile.active_commitments`, not in a temporary RAG facts lane. Consolidation writes accepted commitments through immediately; cognition reads the fresh profile state on the next turn; the scheduler updates commitment lifecycle when due events fire.
+- **LLM-only soft language preferences** — reply language is handled by the preference adapter the same way as suffixes, address style, and formatting preferences. The adapter receives facts, commitments, and current-turn evidence, but no deterministic language fallback or post-processing bridge is applied.
+- **Persistence gating by character decision state** — durable permission-like facts and promises are gated by the authoritative character decision (`logical_stance` + `character_intent`) rather than by user-input heuristics. This reduces false positives where evasive or tentative roleplay pressure could otherwise leak into memory.
+- **Milestone supersedence lifecycle** — `user_image.milestones` is not append-only. New milestones can supersede older open milestones on the same lifecycle scope, preserving narrative history while keeping the latest relationship state authoritative.
 - **Append-only memory** — `save_memory()` uses `insert_one` (never `update_one`), so every memory is a permanent record. Lifecycle is managed via the `status` field (`active` → `fulfilled` / `expired` / `superseded`). This prevents accidental overwrites and preserves the full history of extracted facts and promises.
 - **Structured memory metadata** — each memory carries `memory_type`, `source_kind`, `confidence_note`, `status`, and `expiry_timestamp`. This enables filtered retrieval (e.g., only active promises for a specific user) and gives downstream consumers trust signals about how to weight each memory.
 - **Structured embedding text** — memory embeddings encode `type`, `source`, `title`, and `content` as a structured block rather than a flat concatenation. This improves semantic search precision by allowing the embedding model to weight metadata alongside content.

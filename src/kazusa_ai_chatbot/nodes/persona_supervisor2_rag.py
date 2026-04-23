@@ -608,8 +608,8 @@ def _assemble_image_text(image_doc: dict) -> str:
     if milestones:
         parts.append("## Milestones")
         for m in milestones:
-            cat = m.get("milestone_category", "")
-            desc = m.get("description", "")
+            cat = m.get("category", m.get("milestone_category", ""))
+            desc = m.get("event", m.get("description", ""))
             superseded = m.get("superseded_by", "")
             if superseded:
                 parts.append(f"- [{cat}] {desc} (superseded by: {superseded})")

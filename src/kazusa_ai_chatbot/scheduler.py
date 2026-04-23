@@ -12,10 +12,10 @@ from __future__ import annotations
 import asyncio
 import logging
 import uuid
-from datetime import datetime, timedelta, timezone
-from typing import Any, Callable, Awaitable
+from datetime import datetime, timezone, timedelta
+from typing import Awaitable, Callable
 
-from kazusa_ai_chatbot.db import ScheduledEventDoc, get_db
+from kazusa_ai_chatbot.db import ScheduledEventDoc, get_db, update_active_commitment_status
 
 logger = logging.getLogger(__name__)
 
@@ -173,14 +173,19 @@ async def _handle_future_promise(event: ScheduledEventDoc) -> None:
     """
     payload = event.get("payload") or {}
     memory_id = payload.get("memory_id")
+    commitment_id = payload.get("commitment_id")
     promise_text = payload.get("promise_text", "")
+    global_user_id = event.get("target_global_user_id", "")
     logger.info(
         "future_promise fired — event_id=%s user=%s memory_id=%s promise=%r",
         event.get("event_id"),
-        event.get("target_global_user_id"),
+        global_user_id,
         memory_id,
         promise_text,
     )
+
+    if commitment_id and global_user_id:
+        await update_active_commitment_status(global_user_id, commitment_id, "fulfilled")
 
     if not memory_id:
         logger.warning("future_promise event %s has no memory_id — nothing to mark fulfilled", event.get("event_id"))

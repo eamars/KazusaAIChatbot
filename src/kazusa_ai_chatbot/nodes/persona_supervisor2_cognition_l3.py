@@ -390,7 +390,7 @@ _PREFERENCE_ADAPTER_PROMPT = """\
 3. **人格优先**：偏好不能压过角色的人设、语流、逻辑立场与情绪底色。
 4. **自然执行**：如果偏好是句尾词、称呼方式、回复语言、格式习惯等，要写成自然执行说明。
 5. **避免机械化**：例如句尾词不应要求每个碎片句都强行重复；语言偏好也不应写成僵硬的程序指令。
-6. **语言偏好归你负责**：回复语言的提取、延续与软执行建议，主要由你负责，不要把这项工作留给 `linguistic_style` 或下游生成器自行猜测。
+6. **统一处理**：回复语言也只是偏好的一种，应与称呼、句尾词、格式习惯一样，基于当前输入、承诺、事实与画像综合判断，不要依赖额外硬编码桥接。
 
 # 你可以处理的偏好类型
 - 回复语言偏好
@@ -398,22 +398,10 @@ _PREFERENCE_ADAPTER_PROMPT = """\
 - 称呼方式
 - 轻量格式习惯（例如更简短、更少混语）
 
-# 语言偏好专项规则（关键）
-- 先检查当前 `decontexualized_input` 是否明确指定回复语言。
-- **不要**因为用户这一轮“刚好使用中文/英文/日文发言”，就自动推断这是回复语言要求；消息本身的书写语言不等于回复语言偏好。
-- 若当前输入没有明确指定，再检查 `research_facts.objective_facts` 与 `research_facts.user_image` 是否已经记录了稳定语言偏好。
-- 若持久画像里存在稳定语言偏好，且当前轮没有明确推翻，你应继续输出相应的语言软约束。
-- 若当前输入与持久偏好冲突，以当前输入为准，但仍保持“软约束”写法。
-- 若没有任何语言偏好证据，才不要输出语言类偏好。
-- 对语言偏好，优先输出这种可执行表述：
-  - “若延续已接受的英语偏好，本轮主要使用自然英语表达，避免无意义混入中文或日语。”
-  - “若沿用已接受的中文偏好，本轮主要使用自然中文表达，避免无意义混入英文或日语。”
-  - “若沿用已接受的日语偏好，本轮主要使用自然日语表达，必要专有名词可保留原文。”
-
 # 改写要求
 - 每条 `accepted_user_preferences` 都必须是下游可直接执行的一句中文软约束。
 - 推荐句式：
-  - “若延续已接受的英语偏好，本轮主要用英语表达，必要专有名词可保留原文。”
+  - “若接受回复语言偏好，可优先使用对方要求的语言表达，但仍保持自然语流。”
   - “若接受句尾偏好，可让多数完整句自然带上「喵」，但不要在每个碎片句里机械重复。”
   - “若接受称呼偏好，可优先使用对方要求的称呼，但仍保持角色原有分寸。”
 - 若没有任何已接受偏好，返回空列表。
@@ -424,7 +412,7 @@ _PREFERENCE_ADAPTER_PROMPT = """\
     "internal_monologue": "意识层决策逻辑",
     "logical_stance": "CONFIRM/REFUSE/TENTATIVE/...",
     "character_intent": "行动意图",
-    "language_request_hint": "current_turn_explicit | memory_only | none",
+    "active_commitments": [{{"action": "仍在生效的承诺/约定"}}],
     "character_taboos": "角色禁忌",
     "linguistic_style": "语言风格约束",
     "content_anchors": ["...", "..."],
@@ -442,16 +430,47 @@ _PREFERENCE_ADAPTER_PROMPT = """\
 }}
 """
 _preference_adapter_llm = get_preference_llm(temperature=0.15, top_p=0.8)
+
+
+_AUTHORITATIVE_ACCEPTANCE_STANCES = {"CONFIRM"}
+_AUTHORITATIVE_ACCEPTANCE_INTENTS = {"PROVIDE", "BANTAR"}
+
+
+def _allows_authoritative_acceptance(logical_stance: str, character_intent: str) -> bool:
+    """Return whether the turn clearly accepted a request strongly enough to persist.
+
+    Args:
+        logical_stance: L2 logical stance for the turn.
+        character_intent: Final action intent for the turn.
+
+    Returns:
+        ``True`` only for explicit accepted states that are safe to persist.
+    """
+    return (
+        logical_stance in _AUTHORITATIVE_ACCEPTANCE_STANCES
+        and character_intent in _AUTHORITATIVE_ACCEPTANCE_INTENTS
+    )
+
+
+def _should_strip_address_preferences(state: CognitionState) -> bool:
+    """Return whether address-style preferences should be stripped post-LLM.
+
+    Args:
+        state: Full cognition state for the current turn.
+
+    Returns:
+        ``True`` when the turn did not clearly accept address preference adoption.
+    """
+    return not _allows_authoritative_acceptance(
+        state["logical_stance"],
+        state["character_intent"],
+    )
+
+
 async def call_preference_adapter(state: CognitionState) -> CognitionState:
     decontexualized_input = state["decontexualized_input"]
-    lowered_input = decontexualized_input.lower()
-    language_request_hint = "none"
-    if any(keyword in lowered_input for keyword in ["reply in", "respond in", "speak in", "english only", "chinese only", "japanese only"]):
-        language_request_hint = "current_turn_explicit"
-    elif any(keyword in decontexualized_input for keyword in ["用中文", "用英文", "用英语", "用日语", "请讲中文", "请讲英文", "请讲英语", "请讲日语", "中文回答", "英文回答", "英语回答", "日语回答"]):
-        language_request_hint = "current_turn_explicit"
-    elif any(keyword in str((state["research_facts"] or {}).get("objective_facts", "")).lower() for keyword in ["english", "英语", "英文", "chinese", "中文", "japanese", "日语"]):
-        language_request_hint = "memory_only"
+    research_facts = state["research_facts"] or {}
+    user_profile = state["user_profile"]
 
     system_prompt = SystemMessage(content=_PREFERENCE_ADAPTER_PROMPT.format(
         character_name=state["character_profile"]["name"],
@@ -462,14 +481,14 @@ async def call_preference_adapter(state: CognitionState) -> CognitionState:
         "internal_monologue": state["internal_monologue"],
         "logical_stance": state["logical_stance"],
         "character_intent": state["character_intent"],
-        "language_request_hint": language_request_hint,
+        "active_commitments": user_profile.get("active_commitments", []),
         "character_taboos": state["character_profile"]["personality_brief"]["taboos"],
         "linguistic_style": state["linguistic_style"],
         "content_anchors": state["content_anchors"],
         "research_facts": {
-            "objective_facts": (state["research_facts"] or {}).get("objective_facts", ""),
-            "user_image": (state["research_facts"] or {}).get("user_image", ""),
-            "character_image": (state["research_facts"] or {}).get("character_image", ""),
+            "objective_facts": research_facts.get("objective_facts", ""),
+            "user_image": research_facts.get("user_image", ""),
+            "character_image": research_facts.get("character_image", ""),
         },
     }
     human_message = HumanMessage(content=json.dumps(msg, ensure_ascii=False))
@@ -489,6 +508,13 @@ async def call_preference_adapter(state: CognitionState) -> CognitionState:
         "Preference Adapter normalized preferences: %s",
         accepted_user_preferences,
     )
+
+    if _should_strip_address_preferences(state):
+        accepted_user_preferences = [
+            item
+            for item in accepted_user_preferences
+            if not any(token in item for token in ["称呼偏好", "叫我", "主人", "杏奴", "奴"])
+        ]
 
     return {
         "accepted_user_preferences": [str(item) for item in accepted_user_preferences if str(item).strip()],

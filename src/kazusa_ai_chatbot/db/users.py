@@ -21,6 +21,7 @@ from typing import Any
 from kazusa_ai_chatbot.config import AFFINITY_DEFAULT, AFFINITY_MAX, AFFINITY_MIN
 from kazusa_ai_chatbot.db._client import enable_vector_index, get_db, get_text_embedding
 from kazusa_ai_chatbot.db.schemas import (
+    ActiveCommitmentDoc,
     CharacterDiaryEntry,
     ObjectiveFactEntry,
     UserProfileDoc,
@@ -65,6 +66,7 @@ async def resolve_global_user_id(
         }],
         "suspected_aliases": [],
         "facts": [],
+        "active_commitments": [],
         "affinity": AFFINITY_DEFAULT,
         "last_relationship_insight": "",
         "embedding": [],
@@ -142,6 +144,7 @@ async def create_user_profile(user_profile: UserProfileDoc) -> None:
     user_profile.setdefault("platform_accounts", [])
     user_profile.setdefault("suspected_aliases", [])
     user_profile.setdefault("affinity", AFFINITY_DEFAULT)
+    user_profile.setdefault("active_commitments", [])
     user_profile.setdefault("last_relationship_insight", "")
     await db.user_profiles.insert_one(user_profile)
 
@@ -243,6 +246,96 @@ async def upsert_objective_facts(
             "facts_updated_at": _now_iso(),
         }},
         upsert=True,
+    )
+
+
+async def upsert_active_commitments(
+    global_user_id: str,
+    new_commitments: list[ActiveCommitmentDoc],
+) -> None:
+    """Merge active commitments into ``user_profiles`` by ``action`` text.
+
+    Args:
+        global_user_id: Owner of the commitments.
+        new_commitments: New or updated commitment rows to merge.
+
+    Returns:
+        None.
+    """
+    if not new_commitments:
+        return
+    db = await get_db()
+    existing_profile = await get_user_profile(global_user_id)
+    existing = existing_profile.get("active_commitments") or []
+
+    by_action: dict[str, ActiveCommitmentDoc] = {
+        item.get("action", "").lower(): item
+        for item in existing
+        if item.get("action")
+    }
+    for commitment in new_commitments:
+        action = commitment.get("action", "")
+        if not action:
+            continue
+        previous = by_action.get(action.lower(), {})
+        by_action[action.lower()] = {
+            **previous,
+            **commitment,
+            "updated_at": commitment.get("updated_at", _now_iso()),
+        }
+
+    await db.user_profiles.update_one(
+        {"global_user_id": global_user_id},
+        {"$set": {
+            "global_user_id": global_user_id,
+            "active_commitments": list(by_action.values()),
+            "active_commitments_updated_at": _now_iso(),
+        }},
+        upsert=True,
+    )
+
+
+async def update_active_commitment_status(
+    global_user_id: str,
+    commitment_id: str,
+    status: str,
+) -> None:
+    """Update the lifecycle status of one active commitment in ``user_profiles``.
+
+    Args:
+        global_user_id: Owner of the commitment.
+        commitment_id: Stable commitment identifier.
+        status: New lifecycle status.
+
+    Returns:
+        None.
+    """
+    if not global_user_id or not commitment_id:
+        return
+    profile = await get_user_profile(global_user_id)
+    commitments = list(profile.get("active_commitments") or [])
+    if not commitments:
+        return
+
+    updated = False
+    now_iso = _now_iso()
+    for item in commitments:
+        if item.get("commitment_id") != commitment_id:
+            continue
+        item["status"] = status
+        item["updated_at"] = now_iso
+        updated = True
+
+    if not updated:
+        return
+
+    db = await get_db()
+    await db.user_profiles.update_one(
+        {"global_user_id": global_user_id},
+        {"$set": {
+            "active_commitments": commitments,
+            "active_commitments_updated_at": now_iso,
+        }},
     )
 
 

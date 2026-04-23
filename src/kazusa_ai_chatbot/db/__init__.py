@@ -32,6 +32,7 @@ from kazusa_ai_chatbot.db._client import (
 
 # ── Schemas ────────────────────────────────────────────────────────
 from kazusa_ai_chatbot.db.schemas import (
+    ActiveCommitmentDoc,
     AttachmentDoc,
     CharacterDiaryEntry,
     CharacterProfileDoc,
@@ -67,7 +68,9 @@ from kazusa_ai_chatbot.db.users import (
     link_platform_account,
     resolve_global_user_id,
     update_affinity,
+    update_active_commitment_status,
     update_last_relationship_insight,
+    upsert_active_commitments,
     upsert_character_diary,
     upsert_objective_facts,
     upsert_user_image,
@@ -85,6 +88,7 @@ from kazusa_ai_chatbot.db.character import (
 # ── Memory ────────────────────────────────────────────────────────
 from kazusa_ai_chatbot.db.memory import (
     enable_memory_vector_index,
+    get_active_promises,
     save_memory,
     search_memory,
 )
@@ -105,7 +109,7 @@ __all__ = [
     # Client
     "close_db", "enable_vector_index", "get_db", "get_text_embedding", "get_text_embeddings_batch",
     # Schemas
-    "AttachmentDoc", "CharacterDiaryEntry", "CharacterProfileDoc",
+    "ActiveCommitmentDoc", "AttachmentDoc", "CharacterDiaryEntry", "CharacterProfileDoc",
     "ConversationMessageDoc", "MemoryDoc", "ObjectiveFactEntry",
     "PlatformAccountDoc", "RagCacheIndexDoc", "RagMetadataIndexDoc",
     "ScheduledEventDoc", "UserProfileDoc", "build_memory_doc",
@@ -118,13 +122,14 @@ __all__ = [
     "get_affinity", "get_character_diary", "get_objective_facts",
     "get_user_profile", "link_platform_account",
     "resolve_global_user_id", "update_affinity",
-    "update_last_relationship_insight", "upsert_character_diary",
+    "update_active_commitment_status", "update_last_relationship_insight",
+    "upsert_active_commitments", "upsert_character_diary",
     "upsert_objective_facts", "upsert_user_image",
     # Character
     "get_character_profile", "get_character_state", "save_character_profile",
     "upsert_character_self_image", "upsert_character_state",
     # Memory
-    "enable_memory_vector_index", "save_memory", "search_memory",
+    "enable_memory_vector_index", "get_active_promises", "save_memory", "search_memory",
     # RAG cache
     "clear_all_cache_for_user", "find_cache_entries", "get_rag_version",
     "increment_rag_version", "insert_cache_entry", "soft_delete_cache_entries",

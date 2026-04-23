@@ -139,6 +139,10 @@ class UserProfileDoc(TypedDict, total=False):
     facts_embedding: list[float]                 # Embedding of all objective facts combined
     facts_updated_at: str                        # ISO-8601 UTC
 
+    # ── Active commitments / preferences (authoritative immediate state) ──
+    active_commitments: list["ActiveCommitmentDoc"]
+    active_commitments_updated_at: str           # ISO-8601 UTC
+
     # ── Three-tier user image (NEW) ────────────────────────────
     user_image: dict                             # {milestones, recent_window, historical_summary, meta}
 
@@ -197,6 +201,25 @@ class MemoryDoc(TypedDict, total=False):
     confidence_note: str            # free-form note on how downstream should treat this memory
     status: str                     # "active" | "fulfilled" | "expired" | "superseded"
     expiry_timestamp: str | None    # ISO-8601 or None (never expires)
+
+
+class ActiveCommitmentDoc(TypedDict, total=False):
+    """A currently active user-scoped commitment or accepted preference.
+
+    This lives on ``user_profiles`` as the authoritative fresh read path for the
+    next turn. It is separate from ``user_image`` because it models operational
+    state with explicit lifecycle, not the character's narrative impression.
+    """
+
+    commitment_id: str              # stable UUID or memory_id for synchronization
+    target: str                     # who the commitment is about / directed to
+    action: str                     # normalized commitment body
+    commitment_type: str            # e.g. "language_preference", "address_preference", "future_promise"
+    status: str                     # "active" | "fulfilled" | "expired" | "superseded"
+    source: str                     # "conversation_extracted" | "seeded_manual"
+    created_at: str                 # ISO-8601 UTC
+    updated_at: str                 # ISO-8601 UTC
+    due_time: str | None            # ISO-8601 or None
 
 
 def build_memory_doc(

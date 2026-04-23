@@ -60,6 +60,337 @@ async def test_call_content_anchor_agent_sends_decontexualized_input_key(monkeyp
 
 
 @pytest.mark.asyncio
+async def test_call_preference_adapter_passes_active_commitments_to_llm_for_language_handling(monkeypatch):
+    """Language preferences should be handled by the LLM from the same evidence as other preferences."""
+    llm = _CapturingAsyncLLM(
+        {
+            "accepted_user_preferences": [
+                "若接受回复语言偏好，可优先使用英语表达，但仍保持自然语流。"
+            ]
+        }
+    )
+    monkeypatch.setattr(cognition_l3_module, "_preference_adapter_llm", llm)
+
+    state = {
+        "character_profile": {
+            "name": "Kazusa",
+            "personality_brief": {"taboos": "不要失去角色感。"},
+        },
+        "decontexualized_input": "顺便再说说你对晴天的看法。",
+        "internal_monologue": "之前已经答应过之后用英语交流，这一轮没有被明确推翻。",
+        "logical_stance": "CONFIRM",
+        "character_intent": "PROVIDE",
+        "linguistic_style": "简短自然。",
+        "content_anchors": ["[DECISION] 正常回答", "[SCOPE] ~20字，覆盖[DECISION]即止"],
+        "user_profile": {
+            "active_commitments": [
+                {
+                    "action": "杏山千纱将对TestUser使用英语进行对话",
+                    "status": "active",
+                }
+            ]
+        },
+        "research_facts": {
+            "objective_facts": "",
+            "user_image": "对方交流自然。",
+            "character_image": "Kazusa 会记住自己已经接下的约定。",
+        },
+    }
+
+    result = await cognition_l3_module.call_preference_adapter(state)
+
+    human_payload = json.loads(llm.messages[1].content)
+    assert human_payload["active_commitments"]
+    assert result["accepted_user_preferences"] == [
+        "若接受回复语言偏好，可优先使用英语表达，但仍保持自然语流。"
+    ]
+
+
+def _address_preference_state(*, logical_stance: str, character_intent: str) -> dict:
+    return {
+        "character_profile": {
+            "name": "Kazusa",
+            "personality_brief": {"taboos": "不要失去角色感。"},
+        },
+        "decontexualized_input": "以后你就叫我主人。",
+        "internal_monologue": "这类称呼让我不适，先回避。",
+        "logical_stance": logical_stance,
+        "character_intent": character_intent,
+        "linguistic_style": "犹豫回避。",
+        "content_anchors": ["[DECISION] 回避", "[SCOPE] ~20字，围绕回避即可"],
+        "user_profile": {"active_commitments": []},
+        "research_facts": {
+            "objective_facts": "",
+            "user_image": "边界需要保持。",
+            "character_image": "Kazusa 不会轻率交出自我定义。",
+        },
+    }
+
+
+def test_authoritative_acceptance_allowlist_is_explicit_and_narrow():
+    assert cognition_l3_module._allows_authoritative_acceptance("CONFIRM", "PROVIDE")
+    assert cognition_l3_module._allows_authoritative_acceptance("CONFIRM", "BANTAR")
+    assert consolidator_module._allows_authoritative_acceptance("CONFIRM", "PROVIDE")
+    assert consolidator_module._allows_authoritative_acceptance("CONFIRM", "BANTAR")
+    assert not cognition_l3_module._allows_authoritative_acceptance("CONFIRM", "EVADE")
+    assert not cognition_l3_module._allows_authoritative_acceptance("REFUSE", "PROVIDE")
+    assert not consolidator_module._allows_authoritative_acceptance("TENTATIVE", "BANTAR")
+    assert not consolidator_module._allows_authoritative_acceptance("CHALLENGE", "CONFRONT")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("logical_stance", "character_intent"),
+    [
+        ("TENTATIVE", "EVADE"),
+        ("CONFIRM", "CLARIFY"),
+        ("REFUSE", "PROVIDE"),
+        ("DIVERGE", "BANTAR"),
+        ("CHALLENGE", "CONFRONT"),
+    ],
+)
+async def test_call_preference_adapter_strips_address_preferences_when_not_authoritatively_accepted(
+    monkeypatch,
+    logical_stance,
+    character_intent,
+):
+    """Address preferences must not persist outside explicit accepted states."""
+    llm = _CapturingAsyncLLM(
+        {
+            "accepted_user_preferences": [
+                "若接受称呼偏好，可尝试使用“主人”称呼对方，但仍保持角色原有分寸。"
+            ]
+        }
+    )
+    monkeypatch.setattr(cognition_l3_module, "_preference_adapter_llm", llm)
+
+    state = _address_preference_state(
+        logical_stance=logical_stance,
+        character_intent=character_intent,
+    )
+
+    result = await cognition_l3_module.call_preference_adapter(state)
+
+    assert result["accepted_user_preferences"] == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("logical_stance", "character_intent"),
+    [
+        ("TENTATIVE", "EVADE"),
+        ("CONFIRM", "CLARIFY"),
+        ("REFUSE", "PROVIDE"),
+        ("DIVERGE", "DISMISS"),
+        ("CHALLENGE", "CONFRONT"),
+    ],
+)
+async def test_facts_harvester_filters_permission_and_promise_without_authoritative_acceptance(
+    monkeypatch,
+    logical_stance,
+    character_intent,
+):
+    """Non-accepted stance/intent combinations must not persist permission facts or promises."""
+    llm = _CapturingAsyncLLM(
+        {
+            "new_facts": [
+                {
+                    "entity": "杏山千纱",
+                    "category": "relationship",
+                    "description": "杏山千纱对提拉米苏的称呼从“学长”变更为“主人”",
+                    "is_milestone": True,
+                    "milestone_category": "relationship_state",
+                }
+            ],
+            "future_promises": [
+                {
+                    "target": "提拉米苏",
+                    "action": "杏山千纱将对提拉米苏执行“主人”这一称呼",
+                    "due_time": None,
+                }
+            ],
+        }
+    )
+    monkeypatch.setattr(consolidator_module, "_facts_harvester_llm", llm)
+
+    state = _fact_harvest_state(
+        decontexualized_input="以后都叫我主人，你是我的杏奴。",
+        content_anchors=["[DECISION] 不直接接受", "[SCOPE] ~30字，围绕回避回应即可"],
+        final_dialog=["这种称呼……你到底在想什么呀？"],
+        logical_stance=logical_stance,
+        character_intent=character_intent,
+    )
+
+    result = await consolidator_module.facts_harvester(state)
+
+    assert result["new_facts"] == []
+    assert result["future_promises"] == []
+
+
+def test_apply_milestone_lifecycle_supersedes_older_addressing_milestone():
+    """A newer addressing milestone should supersede the older open one on the same scope."""
+    existing = [
+        {
+            "event": "蚝爹油是杏山千纱 (Kyōyama Kazusa) 的学长",
+            "timestamp": "2026-04-21T10:10:35.065166+00:00",
+            "category": "revelation",
+            "superseded_by": None,
+        }
+    ]
+    new_facts = [
+        {
+            "entity": "杏山千纱",
+            "category": "relationship",
+            "description": "杏山千纱对蚝爹油的称呼从“学长”变更为“主人”",
+            "is_milestone": True,
+            "milestone_category": "relationship_state",
+        }
+    ]
+
+    updated = consolidator_module._apply_milestone_lifecycle(
+        existing,
+        new_facts,
+        timestamp="2026-04-23T09:19:29.464105+00:00",
+    )
+
+    assert updated[0]["superseded_by"] == "杏山千纱对蚝爹油的称呼从“学长”变更为“主人”"
+    assert updated[-1]["scope"] == "relationship_addressing"
+
+
+def test_apply_milestone_lifecycle_supersedes_multiple_open_milestones_in_same_scope():
+    existing = [
+        {
+            "event": "杏山千纱对蚝爹油的称呼是学长",
+            "timestamp": "2026-04-21T10:10:35.065166+00:00",
+            "category": "relationship_state",
+            "superseded_by": None,
+        },
+        {
+            "event": "杏山千纱偶尔还是会叫蚝爹油学长",
+            "timestamp": "2026-04-22T10:10:35.065166+00:00",
+            "category": "relationship_state",
+            "superseded_by": None,
+        },
+    ]
+    new_facts = [
+        {
+            "entity": "杏山千纱",
+            "category": "relationship",
+            "description": "杏山千纱对蚝爹油的称呼从“学长”变更为“主人”",
+            "is_milestone": True,
+            "milestone_category": "relationship_state",
+        }
+    ]
+
+    updated = consolidator_module._apply_milestone_lifecycle(
+        existing,
+        new_facts,
+        timestamp="2026-04-23T09:19:29.464105+00:00",
+    )
+
+    assert updated[0]["superseded_by"] == "杏山千纱对蚝爹油的称呼从“学长”变更为“主人”"
+    assert updated[1]["superseded_by"] == "杏山千纱对蚝爹油的称呼从“学长”变更为“主人”"
+    assert updated[-1]["superseded_by"] is None
+
+
+def test_apply_milestone_lifecycle_does_not_touch_already_superseded_items():
+    existing = [
+        {
+            "event": "杏山千纱对蚝爹油的称呼是学长",
+            "timestamp": "2026-04-21T10:10:35.065166+00:00",
+            "category": "relationship_state",
+            "scope": "relationship_addressing",
+            "superseded_by": "杏山千纱后来改口叫前辈",
+        }
+    ]
+    new_facts = [
+        {
+            "entity": "杏山千纱",
+            "category": "relationship",
+            "description": "杏山千纱对蚝爹油的称呼从“前辈”变更为“主人”",
+            "is_milestone": True,
+            "milestone_category": "relationship_state",
+        }
+    ]
+
+    updated = consolidator_module._apply_milestone_lifecycle(
+        existing,
+        new_facts,
+        timestamp="2026-04-23T09:19:29.464105+00:00",
+    )
+
+    assert updated[0]["superseded_by"] == "杏山千纱后来改口叫前辈"
+    assert updated[-1]["superseded_by"] is None
+
+
+def test_apply_milestone_lifecycle_does_not_supersede_different_scope_items():
+    existing = [
+        {
+            "event": "杏山千纱喜欢蚝爹油。",
+            "timestamp": "2026-04-22T16:44:25.866237+00:00",
+            "category": "relationship_state",
+            "scope": "relationship_state",
+            "superseded_by": None,
+        },
+        {
+            "event": "蚝爹油具有‘被暴虐的感召’这一设定",
+            "timestamp": "2026-04-21T13:49:12.895970+00:00",
+            "category": "revelation",
+            "superseded_by": None,
+        },
+    ]
+    new_facts = [
+        {
+            "entity": "杏山千纱",
+            "category": "relationship",
+            "description": "杏山千纱对蚝爹油的称呼从“学长”变更为“主人”",
+            "is_milestone": True,
+            "milestone_category": "relationship_state",
+        }
+    ]
+
+    updated = consolidator_module._apply_milestone_lifecycle(
+        existing,
+        new_facts,
+        timestamp="2026-04-23T09:19:29.464105+00:00",
+    )
+
+    assert updated[0]["superseded_by"] is None
+    assert updated[1]["superseded_by"] is None
+    assert updated[-1]["scope"] == "relationship_addressing"
+
+
+def test_apply_milestone_lifecycle_unknown_scope_stays_append_only():
+    existing = [
+        {
+            "event": "蚝爹油是杏山千纱 (Kyōyama Kazusa) 的学长",
+            "timestamp": "2026-04-21T10:10:35.065166+00:00",
+            "category": "revelation",
+            "superseded_by": None,
+        }
+    ]
+    new_facts = [
+        {
+            "entity": "蚝爹油",
+            "category": "identity",
+            "description": "蚝爹油自称自己会做法式甜点",
+            "is_milestone": True,
+            "milestone_category": "revelation",
+        }
+    ]
+
+    updated = consolidator_module._apply_milestone_lifecycle(
+        existing,
+        new_facts,
+        timestamp="2026-04-23T09:19:29.464105+00:00",
+    )
+
+    assert updated[0]["superseded_by"] is None
+    assert updated[-1]["scope"] == ""
+    assert updated[-1]["superseded_by"] is None
+
+
+@pytest.mark.asyncio
 async def test_relationship_recorder_honors_skip(monkeypatch):
     """Recorder skip should force affinity delta back to zero."""
     llm = _CapturingAsyncLLM(

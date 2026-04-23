@@ -23,6 +23,7 @@ import json
 import logging
 from datetime import datetime, timezone
 from typing import Annotated, TypedDict, cast
+from uuid import uuid4
 
 from langchain_core.messages import HumanMessage, SystemMessage
 from langgraph.graph import END, START, StateGraph
@@ -37,6 +38,7 @@ from kazusa_ai_chatbot.config import (
     MAX_FACT_HARVESTER_RETRY,
 )
 from kazusa_ai_chatbot.db import (
+    ActiveCommitmentDoc,
     CharacterDiaryEntry,
     MemoryDoc,
     ObjectiveFactEntry,
@@ -50,6 +52,7 @@ from kazusa_ai_chatbot.db import (
     upsert_character_diary,
     upsert_character_self_image,
     upsert_character_state,
+    upsert_active_commitments,
     upsert_objective_facts,
     upsert_user_image,
 )
@@ -72,6 +75,8 @@ _USER_IMAGE_MAX_RECENT_WINDOW = 6       # sessions to keep before overflow to hi
 _USER_IMAGE_HISTORICAL_MAX_CHARS = 1500 # compress historical_summary when above this
 _CHARACTER_IMAGE_MAX_RECENT_WINDOW = 6
 _CHARACTER_IMAGE_HISTORICAL_MAX_CHARS = 1500
+_AUTHORITATIVE_ACCEPTANCE_STANCES = {"CONFIRM"}
+_AUTHORITATIVE_ACCEPTANCE_INTENTS = {"PROVIDE", "BANTAR"}
 
 
 def _merge_dicts(a: dict, b: dict) -> dict:
@@ -79,6 +84,81 @@ def _merge_dicts(a: dict, b: dict) -> dict:
     result = dict(a)
     result.update(b)
     return result
+
+
+def _infer_milestone_scope(fact: dict) -> str:
+    """Infer a lifecycle scope for milestone supersedence.
+
+    Args:
+        fact: Harvester fact row.
+
+    Returns:
+        A scope key shared by milestones that should supersede one another.
+        Empty string means "no automatic supersedence".
+    """
+    description = str(fact.get("description", ""))
+    milestone_category = str(fact.get("milestone_category", ""))
+    category = str(fact.get("category", ""))
+    lowered = description.lower()
+    if any(token in description for token in ["称呼", "叫", "学长", "主人", "杏奴"]):
+        return "relationship_addressing"
+    if milestone_category == "relationship_state" and category == "relationship":
+        return "relationship_state"
+    if milestone_category == "permission" and any(token in lowered for token in ["english", "chinese", "japanese", "英语", "英文", "中文", "日语"]):
+        return "language_permission"
+    return ""
+
+
+def _apply_milestone_lifecycle(
+    existing_milestones: list[dict],
+    new_facts: list[dict],
+    *,
+    timestamp: str,
+) -> list[dict]:
+    """Append milestone facts and supersede older open milestones on the same scope.
+
+    Args:
+        existing_milestones: Current milestone list from ``user_image``.
+        new_facts: Newly extracted milestone facts.
+        timestamp: Current turn timestamp.
+
+    Returns:
+        Updated milestone list with supersedence metadata maintained.
+    """
+    milestones = list(existing_milestones)
+    for fact in new_facts:
+        event = fact.get("description", "")
+        if not event:
+            continue
+        scope = _infer_milestone_scope(fact)
+        if scope:
+            for item in milestones:
+                item_scope = item.get("scope") or ""
+                if not item_scope:
+                    item_scope = _infer_milestone_scope(
+                        {
+                            "description": item.get("event", item.get("description", "")),
+                            "milestone_category": item.get("category", item.get("milestone_category", "")),
+                            "category": item.get("fact_category", ""),
+                        }
+                    )
+                    if item_scope:
+                        item["scope"] = item_scope
+                if item_scope != scope or item.get("superseded_by"):
+                    continue
+                item["superseded_by"] = event
+
+        milestones.append(
+            {
+                "event": event,
+                "timestamp": timestamp,
+                "category": fact.get("milestone_category", ""),
+                "fact_category": fact.get("category", ""),
+                "scope": scope,
+                "superseded_by": None,
+            }
+        )
+    return milestones
 
 
 class ConsolidatorState(TypedDict):
@@ -301,13 +381,11 @@ async def _update_user_image(
     historical_summary = existing_image.get("historical_summary") or ""
     synthesis_count = (existing_image.get("meta") or {}).get("synthesis_count", 0)
 
-    for fact in milestone_facts:
-        milestones.append({
-            "event": fact.get("description", ""),
-            "timestamp": timestamp,
-            "category": fact.get("milestone_category", ""),
-            "superseded_by": None,
-        })
+    milestones = _apply_milestone_lifecycle(
+        milestones,
+        milestone_facts,
+        timestamp=timestamp,
+    )
 
     has_session_content = bool(diary_entries or non_milestone_facts or last_relationship_insight)
     session_summary = ""
@@ -788,6 +866,7 @@ async def facts_harvester(state: ConsolidatorState) -> dict:
     response = await _facts_harvester_llm.ainvoke([system_prompt, human_message] + recent_messages)
 
     result = parse_llm_json_output(response.content)
+    result = _filter_harvested_results(state, result)
 
     logger.debug(f"Facts harvester result: {result}")
 
@@ -969,6 +1048,104 @@ def _build_diary_entries(
     return entries
 
 
+def _allows_authoritative_acceptance(logical_stance: str, character_intent: str) -> bool:
+    """Return whether the turn clearly accepts a request strongly enough to persist.
+
+    Args:
+        logical_stance: The L2 logical stance chosen for the turn.
+        character_intent: The downstream action intent chosen for the turn.
+
+    Returns:
+        ``True`` only for explicit accepted states that are safe to persist.
+    """
+    return (
+        logical_stance in _AUTHORITATIVE_ACCEPTANCE_STANCES
+        and character_intent in _AUTHORITATIVE_ACCEPTANCE_INTENTS
+    )
+
+
+def _filter_harvested_results(state: "ConsolidatorState", result: dict) -> dict:
+    """Apply deterministic acceptance gates to harvester output.
+
+    Args:
+        state: Consolidator state carrying stance and intent signals.
+        result: Raw LLM harvester JSON output.
+
+    Returns:
+        A sanitized ``{"new_facts": ..., "future_promises": ...}`` dict.
+    """
+    allow_acceptance = _allows_authoritative_acceptance(
+        state.get("logical_stance", ""),
+        state.get("character_intent", ""),
+    )
+    new_facts = result.get("new_facts", [])
+    future_promises = result.get("future_promises", [])
+    if not isinstance(new_facts, list):
+        new_facts = []
+    if not isinstance(future_promises, list):
+        future_promises = []
+
+    filtered_facts: list[dict] = []
+    for fact in new_facts:
+        if not isinstance(fact, dict):
+            continue
+        milestone_category = str(fact.get("milestone_category", ""))
+        if milestone_category in {"permission", "relationship_state"} and not allow_acceptance:
+            continue
+        filtered_facts.append(fact)
+
+    filtered_promises = future_promises if allow_acceptance else []
+    return {
+        "new_facts": filtered_facts,
+        "future_promises": [item for item in filtered_promises if isinstance(item, dict)],
+    }
+
+
+def _infer_commitment_type(action: str) -> str:
+    """Infer a coarse commitment type from the normalized action text."""
+    lowered = action.lower()
+    if any(token in lowered for token in ["english", "英语", "英文", "chinese", "中文", "japanese", "日语"]):
+        return "language_preference"
+    if any(token in action for token in ["叫我", "称呼", "主人", "小名"]):
+        return "address_preference"
+    return "future_promise"
+
+
+def _build_active_commitment_entries(
+    future_promises: list[dict],
+    *,
+    timestamp: str,
+) -> list[ActiveCommitmentDoc]:
+    """Convert accepted future promises into authoritative active commitments.
+
+    Args:
+        future_promises: Sanitized harvester promise rows.
+        timestamp: Current turn timestamp.
+
+    Returns:
+        A list of structured commitment rows for ``user_profile.active_commitments``.
+    """
+    commitments: list[ActiveCommitmentDoc] = []
+    for promise in future_promises:
+        action = str(promise.get("action", "")).strip()
+        if not action:
+            continue
+        commitments.append(
+            {
+                "commitment_id": uuid4().hex,
+                "target": str(promise.get("target", "")).strip(),
+                "action": action,
+                "commitment_type": _infer_commitment_type(action),
+                "status": "active",
+                "source": "conversation_extracted",
+                "created_at": timestamp,
+                "updated_at": timestamp,
+                "due_time": promise.get("due_time"),
+            }
+        )
+    return commitments
+
+
 def _build_objective_fact_entries(
     new_facts: list[dict],
     *,
@@ -994,6 +1171,7 @@ def _build_objective_fact_entries(
 async def _schedule_future_promises(
     promises: list[dict],
     *,
+    active_commitments: list[ActiveCommitmentDoc],
     global_user_id: str,
     user_name: str,
     character_name: str,
@@ -1005,6 +1183,11 @@ async def _schedule_future_promises(
     skipped — there's nothing to fire on.
     """
     scheduled: list[str] = []
+    commitment_by_action = {
+        str(item.get("action", "")): item
+        for item in active_commitments
+        if item.get("action")
+    }
     for promise in promises or []:
         due_time = promise.get("due_time")
         if not due_time:
@@ -1022,6 +1205,7 @@ async def _schedule_future_promises(
             "target_global_user_id": global_user_id,
             "payload": {
                 "promise_text": promise.get("action", ""),
+                "commitment_id": (commitment_by_action.get(promise.get("action", "")) or {}).get("commitment_id", ""),
                 "target": promise.get("target", user_name),
                 "character_name": character_name,
                 "original_input": decontexualized_input,
@@ -1119,6 +1303,14 @@ async def db_writer(state: ConsolidatorState) -> dict:
 
     # ── Step 3b: future promises (memory + scheduled event) ─────────
     future_promises = state.get("future_promises") or []
+    active_commitments = _build_active_commitment_entries(future_promises, timestamp=timestamp)
+    if global_user_id and active_commitments:
+        try:
+            await upsert_active_commitments(global_user_id, active_commitments)
+            write_log["active_commitments"] = True
+        except PyMongoError:
+            logger.exception("db_writer: failed to upsert_active_commitments")
+            write_log["active_commitments"] = False
     for promise in future_promises:
         target = promise.get("target", user_name)
         action = promise.get("action", "")
@@ -1141,6 +1333,7 @@ async def db_writer(state: ConsolidatorState) -> dict:
 
     scheduled_event_ids = await _schedule_future_promises(
         future_promises,
+        active_commitments=active_commitments,
         global_user_id=global_user_id,
         user_name=user_name,
         character_name=character_name,

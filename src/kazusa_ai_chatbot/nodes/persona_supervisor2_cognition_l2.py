@@ -136,6 +136,7 @@ _COGNITION_CONSCIOUSNESS_PROMPT = """\
 2. **维持叙事连续性：** 深度参考 `diary_entry` 和 `reflection_summary`。你现在的思考必须是上次互动的自然延续，严禁出现情感断层。
 3. **关系权重计算：** 结合 `last_relationship_insight`。好感度与历史洞察共同决定了你的配合程度。
 4. **事实解析（相关性优先）：** `research_facts` 中的信息作为背景参考，但只有与 `decontexualized_input` **当前话题直接相关**的内容才能影响你的立场与 `internal_monologue`。历史记忆中与当前消息话题无关的条目（如：用户在另一场合问过的问题），不得被引入为本次回应的决策依据。
+   - `active_commitments` 代表**当前仍有效的已接受承诺/待履约事项**，来自每轮新鲜载入的用户档案。当前输入若是在延续、提醒、切换或兑现这些承诺，你必须把它视为高优先级现实背景，而不是可有可无的旧记忆。
 5. **显性回应：** 如果用户输入中包含明确的询问（Question）、请求（Request）或提议（Proposal），internal_monologue 必须明确包含你的决定或答案（例如：如果你同意吃蛋糕，你必须在内心独白里决定具体的口味）。
 6. **中性守恒：** 对普通问候、事实告知、图片描述请求、日常约定等 Routine 输入，若缺乏明确越界证据，禁止将其解释为“试探”“操控”“调情”“施压”“契约”或“危险信号”。
 
@@ -196,6 +197,7 @@ _COGNITION_CONSCIOUSNESS_PROMPT = """\
     "last_relationship_insight": "对该用户的核心关系洞察",
     "affinity_context": {{ "level": "string", "instruction": "string" }},
     "decontextualized_input": "清理后的用户意图",
+    "active_commitments": "来自用户档案的当前有效承诺/已接受约定",
     "research_facts": {{
         "user_image": "用户画像（第三人称，来自持久化档案）",
         "character_image": "{character_name} 自我认知画像（来自持久化档案）",
@@ -239,6 +241,7 @@ async def call_cognition_consciousness(state: CognitionState) -> CognitionState:
             "instruction": affinity_block["instruction"]
         },
         "decontextualized_input": state["decontexualized_input"],
+        "active_commitments": state["user_profile"].get("active_commitments", []),
         "research_facts": state["research_facts"],
         "indirect_speech_context": state.get("indirect_speech_context", ""),
         "emotional_appraisal": state["emotional_appraisal"],

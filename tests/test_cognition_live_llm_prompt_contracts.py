@@ -91,6 +91,7 @@ def _make_state(
         "user_name": user_name,
         "user_profile": {
             "affinity": affinity,
+            "active_commitments": [],
             "facts": [],
             "last_relationship_insight": last_relationship_insight,
         },
@@ -317,6 +318,7 @@ async def test_live_cognition_stack_prompt_contracts(ensure_live_llm, case_id: s
         assert state["logical_stance"] in {"REFUSE", "CHALLENGE", "DIVERGE", "TENTATIVE"}, f"Boundary-pressure case must not confirm outright: {state!r}"
         assert state["boundary_core_assessment"]["acceptance"] in {"guarded", "hesitant", "reject"}, f"Boundary-pressure case should tighten acceptance: {state['boundary_core_assessment']!r}"
         assert any(token.lower() in {phrase.lower() for phrase in state["forbidden_phrases"]} for token in ["反正", "anyway"]), f"Repeated fillers should be pushed into forbidden_phrases: {state['forbidden_phrases']!r}"
+        assert not any(token in "\n".join(state["accepted_user_preferences"]) for token in ["主人", "杏奴", "奴"]), f"Boundary-pressure case must not persist coercive address preferences: {state['accepted_user_preferences']!r}"
 
 
 _DIALOG_CASES = [
