@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from kazusa_ai_chatbot.agents.dialog_agent import dialog_agent, DialogAgentState
+from kazusa_ai_chatbot.agents.dialog_agent import _DIALOG_EVALUATOR_PROMPT, dialog_agent, DialogAgentState
 from kazusa_ai_chatbot.utils import build_interaction_history_recent
 
 
@@ -76,6 +76,14 @@ class TestDialogAgentState:
         ]
         for field in required:
             assert field in hints, f"Missing field: {field}"
+
+
+def test_dialog_evaluator_prompt_preserves_concise_safe_dialog() -> None:
+    """Evaluator prompt should not force rewrites of short safe on-topic dialog."""
+    assert "简短、克制、贴题的台词可以直接通过" in _DIALOG_EVALUATOR_PROMPT
+    assert "`……`、`?`、停顿型语气词本身不构成动作描写" in _DIALOG_EVALUATOR_PROMPT
+    assert "不要为了追求“抽象重构”或“感官化比喻”而鼓励引入身体接触" in _DIALOG_EVALUATOR_PROMPT
+    assert "若只有软性问题（如修辞展开不足、句子偏短、比喻不够浓），但核心逻辑正确、话题贴合、且未触犯物理污染红线，则仍应 `should_stop: true`" in _DIALOG_EVALUATOR_PROMPT
 
 
 def test_build_interaction_history_recent_excludes_other_user_messages():
