@@ -703,6 +703,22 @@ async def test_live_chat_multimodal_image_response(live_env) -> None:
     assert response.messages
 
 
+async def test_live_graph_vague_meaning_question_prefers_clarification(live_env) -> None:
+    async with _neutral_character_runtime_state():
+        result, _ = await _run_graph(
+            "vague-meaning-clarify",
+            "LiveVagueMeaningUser",
+            f"<@{_BOT_ID}> 那个是什么意思？",
+        )
+
+    final_dialog = "\n".join(result.get("final_dialog") or [])
+
+    assert result.get("final_dialog")
+    assert re.search(r"(哪[个句部分]|是指|是在说|什么意思|什么呀|具体指)", final_dialog)
+    assert "大概" not in final_dialog
+    assert "机器人" not in final_dialog
+
+
 async def test_live_chat_explicit_english_reply_request(live_env) -> None:
     async with _neutral_character_runtime_state():
         response, _ = await _run_chat(

@@ -306,17 +306,18 @@ _CONTENT_ANCHOR_AGENT_PROMPT = """\
 2. **事实织入（相关性优先）**：`research_facts` 提供背景资料，但只有与 `decontexualized_input` **直接相关**的内容才能进入 `[FACT]` 锚点。
    - 判断标准：该事实是否能被当前 `decontexualized_input` 的话题"自然引用"？若否，**不得**将其列为 `[FACT]`。
    - 避免将与当前话题无关的历史记忆（如用户在另一个场合提到的话题）错误地植入本次回应的硬信息点。
-3. **显性回应：** 如果 `decontexualized_input` 中包含明确的询问（Question）、请求（Request）或提议（Proposal），`[ANSWER]` 必须明确包含决定或答案。
-4. **表达量校准（[SCOPE]）：** 基于已填充的锚点数量与 `logical_stance`，生成一条 `[SCOPE]` 锚点。
+3. **低置信度优先澄清：** 如果 `character_intent` 为 `CLARIFY`，则 `[DECISION]` 必须落在“信息不足 / 需要对方补全”上，`[ANSWER]` 必须是缩小歧义范围的追问，禁止替用户脑补缺失对象。
+   - 若 `decontexualized_input` 仍含未解析指代或省略对象（如「这个 / 那个 / 这句 / 那句 / 这个意思 / 怎么说 / 这个呢」），且 `research_facts` 没有唯一可锚定对象，必须追问“具体指哪一个 / 哪一句 / 哪部分”，不得猜测定义、原因、身份或类别。
+4. **显性回应：** 如果 `decontexualized_input` 中包含明确的询问（Question）、请求（Request）或提议（Proposal），且 `character_intent` 不是 `CLARIFY`，`[ANSWER]` 必须明确包含决定或答案；若 `character_intent` 为 `CLARIFY`，`[ANSWER]` 必须明确包含澄清问题。
+5. **表达量校准（[SCOPE]）：** 基于已填充的锚点数量与 `logical_stance`，生成一条 `[SCOPE]` 锚点。
   例如：
   * 仅有 `[DECISION]` -> `~15字，说完[DECISION]即止`；
   * 含 `[FACT]` 或 `[ANSWER]` -> `~20-40字，[ANSWER]/[FACT]到位即可`；
   * 触发禁忌或含多个实质性锚点 -> `~50字以上，[DECISION]、[FACT]、[ANSWER]均需覆盖`。
-  [SCOPE] 禁止生成实质性的输出指导。必须，且仅包含如上内容。
-
+ 
 # 输入格式
 {{
-    "decontexualized_input": "用户输入的语义摘要",
+    "decontexualized_input": "用户输入语义摘要",
     "research_facts": {{
         "user_image": "用户画像（第三人称，来自持久化档案）",
         "character_image": "{character_name} 自我认知画像（来自持久化档案）",
@@ -334,7 +335,7 @@ _CONTENT_ANCHOR_AGENT_PROMPT = """\
     "content_anchors": [
         "[DECISION] 逻辑终点（必填）",
         "[FACT] 必须提及的事实（有则填，无则省略）",
-        "[ANSWER] 若decontexualized_input提出了问题，则需要根据internal_monologue提供正面的回复（有则填，无则省略）",
+        "[ANSWER] 若decontexualized_input提出了问题，则需要根据internal_monologue提供回答；当 character_intent = CLARIFY 时，这里必须是澄清追问而不是具体答案（有则填，无则省略）",
         "[SOCIAL] 关系定位信号，如傲娇防线或示弱姿态（有则填，无则省略）",
         "[SCOPE] ~X字，覆盖[锚点名]即止（必填，按步骤4生成）"
     ]
@@ -345,6 +346,7 @@ _CONTENT_ANCHOR_AGENT_PROMPT = """\
 - `[DECISION]` 必须放在第一项，`[SCOPE]` 必须放在最后一项。
 - 只允许输出 `[DECISION]`、`[FACT]`、`[ANSWER]`、`[SOCIAL]`、`[SCOPE]` 这五种标签；禁止自创 `[EMOTION]`、`[STYLE]` 等新标签。
 - 若没有直接相关事实，就不要输出 `[FACT]`。
+- 当 `character_intent` 为 `CLARIFY` 时，`[ANSWER]` 必须是追问；禁止输出补全后的具体答案、定义或猜测。
 - 若用户输入并未提出需要回答的问题，可以省略 `[ANSWER]`。
 """
 _content_anchor_agent_llm = get_llm(temperature=0.4, top_p=0.85)
