@@ -85,7 +85,8 @@ timestamp, platform, platform_user_id, global_user_id,
 user_name, user_input, user_profile,
 platform_bot_id, bot_name,
 character_profile, character_state,
-platform_channel_id, channel_name, chat_history,
+platform_channel_id, platform_message_id, channel_name,
+chat_history_wide, chat_history_recent,
 should_respond, reason_to_respond, use_reply_feature,
 channel_topic, user_topic,
 final_dialog, future_promises
@@ -97,9 +98,11 @@ final_dialog, future_promises
 character_state, character_profile,
 timestamp, user_input,
 platform, platform_user_id, global_user_id,
+platform_channel_id, platform_message_id,
 user_name, user_profile,
 platform_bot_id,
-chat_history, user_topic, channel_topic
+chat_history_wide, chat_history_recent,
+indirect_speech_context, user_topic, channel_topic, debug_modes
 ```
 
 ## Debug Modes
@@ -139,7 +142,7 @@ The brain service (`service.py`) loads all context from MongoDB before invoking 
 The relevance agent then analyzes the message + context to decide if the bot should engage. It outputs `should_respond`, `use_reply_feature`, `channel_topic`, and `user_topic`.
 
 **Reads from state**:
-- `user_input`, `user_multimedia_input`, `chat_history`
+- `user_input`, `user_multimedia_input`, `chat_history_wide`, `chat_history_recent`
 - `user_profile`, `character_state`, `character_profile`
 - `platform_bot_id`, `bot_name`, `user_name`, `channel_name`
 
@@ -155,7 +158,7 @@ If `should_respond: false`, the graph short-circuits to END — no further LLM c
 ### Persona Supervisor v2 — Stage 0: Message Decontextualizer (LLM call)
 Clarifies ambiguous user input by resolving pronouns, references, and implicit context from chat history. For example, "I saw him yesterday" → "I saw John yesterday". Outputs `decontexualized_input` for downstream stages.
 
-**Stage 0 input**: `user_input`, `chat_history`, `user_name`, `channel_topic`, `user_topic`
+**Stage 0 input**: `user_input`, `chat_history_wide`, `chat_history_recent`, `user_name`, `channel_topic`, `user_topic`
 
 **Stage 0 output**: `decontexualized_input`
 
@@ -169,7 +172,7 @@ Dispatches research tasks to specialist agents based on the query nature:
 
 An **evaluator** determines if the retrieved information is sufficient or if another research iteration is needed (up to `MAX_RESEARCH_AGENT_RETRY`).
 
-**Stage 1 input**: `decontexualized_input`, `user_profile`, `chat_history`, retrieval context
+**Stage 1 input**: `decontexualized_input`, `user_profile`, `chat_history_wide`, `chat_history_recent`, retrieval context
 
 **Stage 1 output**:
 - `research_facts`
@@ -217,7 +220,7 @@ A generator-evaluator loop that produces the final in-character reply:
 
 Loop runs up to `MAX_DIALOG_AGENT_RETRY` times. Outputs: `final_dialog` (list of message strings).
 
-**Stage 3 input**: `internal_monologue`, `action_directives`, `chat_history`, `user_name`, `character_profile`, `user_profile`
+**Stage 3 input**: `internal_monologue`, `action_directives`, `chat_history_wide`, `chat_history_recent`, `user_name`, `character_profile`, `user_profile`
 
 **Stage 3 output**: `final_dialog`
 

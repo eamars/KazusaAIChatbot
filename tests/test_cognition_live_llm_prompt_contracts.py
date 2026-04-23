@@ -89,6 +89,7 @@ def _make_state(
         "user_input": user_input,
         "global_user_id": global_user_id,
         "user_name": user_name,
+        "platform_user_id": "live-user",
         "user_profile": {
             "affinity": affinity,
             "active_commitments": [],
@@ -96,6 +97,7 @@ def _make_state(
             "last_relationship_insight": last_relationship_insight,
         },
         "platform_bot_id": "live-bot",
+        "chat_history_wide": list(chat_history_recent),
         "chat_history_recent": chat_history_recent,
         "indirect_speech_context": indirect_speech_context,
         "channel_topic": channel_topic,

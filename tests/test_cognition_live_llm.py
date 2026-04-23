@@ -92,22 +92,25 @@ def _build_character_profile() -> dict:
 
 def _build_base_state() -> dict:
     user_input = "Please reply in natural English only. Briefly tell me what you think about rainy days."
+    chat_history_recent = [
+        {"role": "assistant", "content": "Rain again? You always notice the gloomy weather first."},
+        {"role": "user", "content": "Yeah, I do. So what do you think about rainy days?"},
+    ]
     return {
         "character_profile": _build_character_profile(),
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "user_input": user_input,
         "global_user_id": "live-cognition-user",
         "user_name": "LiveCognitionUser",
+        "platform_user_id": "live-user",
         "user_profile": {
             "affinity": 680,
             "facts": [],
             "last_relationship_insight": "对方目前让人放松，可以正常交流。",
         },
         "platform_bot_id": "live-bot",
-        "chat_history_recent": [
-            {"role": "assistant", "content": "Rain again? You always notice the gloomy weather first."},
-            {"role": "user", "content": "Yeah, I do. So what do you think about rainy days?"},
-        ],
+        "chat_history_wide": list(chat_history_recent),
+        "chat_history_recent": chat_history_recent,
         "indirect_speech_context": "",
         "channel_topic": "weather talk",
         "decontexualized_input": user_input,
