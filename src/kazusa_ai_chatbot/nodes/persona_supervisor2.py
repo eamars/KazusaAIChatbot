@@ -65,6 +65,7 @@ async def persona_supervisor2(state: IMProcessState) -> dict:
         "timestamp": state["timestamp"],
         "user_input": state["user_input"],
         "platform": state["platform"],
+        "platform_message_id": state["platform_message_id"],
         "platform_user_id": state["platform_user_id"],
         "global_user_id": state["global_user_id"],
         "user_name": state["user_name"],

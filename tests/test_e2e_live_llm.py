@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import base64
 from contextlib import asynccontextmanager
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 import re
 from uuid import uuid4
@@ -261,6 +261,7 @@ async def _seed_conversation(
     platform_user_id: str,
     platform_message_id: str | None = None,
     reply_context: dict | None = None,
+    timestamp: str | None = None,
 ) -> None:
     await save_conversation(
         {
@@ -273,7 +274,7 @@ async def _seed_conversation(
             "display_name": display_name,
             "content": content,
             "reply_context": reply_context or {},
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": timestamp or datetime.now(timezone.utc).isoformat(),
         }
     )
 
@@ -702,6 +703,7 @@ async def test_live_rag_subgraph_retrieves_seeded_context(live_env) -> None:
         {
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "platform": identity["platform"],
+            "platform_message_id": f"live-rag-{uuid4().hex[:10]}",
             "platform_user_id": identity["platform_user_id"],
             "global_user_id": identity["global_user_id"],
             "user_name": identity["display_name"],
@@ -746,6 +748,7 @@ async def test_live_rag_subgraph_dispatches_external_search(live_env) -> None:
         {
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "platform": identity["platform"],
+            "platform_message_id": f"live-rag-{uuid4().hex[:10]}",
             "platform_user_id": identity["platform_user_id"],
             "global_user_id": identity["global_user_id"],
             "user_name": identity["display_name"],
@@ -796,6 +799,167 @@ async def test_live_memory_retriever_agent_reads_seeded_memory(live_env) -> None
     assert result["status"] in {"complete", "partial", "incomplete"}
     assert result["response"]
     assert "啾啾" in result["response"]
+
+
+async def test_live_memory_retriever_preserves_conversation_sender_metadata(live_env) -> None:
+    identity = await _make_identity("memory-speaker", "EchoFenceSpeaker")
+    quote = "[Reply to message] <@3768713357> 这种事情不要学，学会了就没人要你了。"
+    await _seed_conversation(
+        platform=identity["platform"],
+        platform_channel_id=identity["platform_channel_id"],
+        global_user_id=identity["global_user_id"],
+        display_name=identity["display_name"],
+        content=quote,
+        role="user",
+        platform_user_id=identity["platform_user_id"],
+        timestamp=(datetime.now(timezone.utc) - timedelta(minutes=5)).isoformat(),
+    )
+
+    result = await memory_retriever_agent(
+        task="检索关于‘这种事情不要学’这句话的原话记录和说话者。",
+        context={
+            "entities": ["这种事情不要学"],
+            "target_user_name": identity["display_name"],
+            "target_global_user_id": identity["global_user_id"],
+            "target_platform": identity["platform"],
+            "target_platform_channel_id": identity["platform_channel_id"],
+        },
+        expected_response="返回原话和说话者，保留时间戳。",
+    )
+
+    assert result["response"]
+    assert identity["display_name"] in result["response"]
+    assert "这种事情不要学" in result["response"]
+
+
+async def test_live_rag_subgraph_excludes_current_turn_echo_from_input_context(live_env) -> None:
+    identity = await _make_identity("rag-no-echo", "LiveNoEchoUser")
+    character_profile = await _refresh_character_profile()
+    user_profile = await get_user_profile(identity["global_user_id"])
+    current_timestamp = datetime.now(timezone.utc).isoformat()
+    current_message_id = f"live-current-{uuid4().hex[:10]}"
+    current_input = "[Reply to message] <@3768713357> 这种事情不要学，学会了就没人要你了。"
+
+    await save_conversation(
+        {
+            "platform": identity["platform"],
+            "platform_channel_id": identity["platform_channel_id"],
+            "role": "user",
+            "platform_message_id": current_message_id,
+            "platform_user_id": identity["platform_user_id"],
+            "global_user_id": identity["global_user_id"],
+            "display_name": identity["display_name"],
+            "content": current_input,
+            "reply_context": {},
+            "timestamp": current_timestamp,
+        }
+    )
+
+    rag_result = await call_rag_subgraph(
+        {
+            "timestamp": current_timestamp,
+            "platform": identity["platform"],
+            "platform_message_id": current_message_id,
+            "platform_user_id": identity["platform_user_id"],
+            "global_user_id": identity["global_user_id"],
+            "user_name": identity["display_name"],
+            "user_input": current_input,
+            "user_multimedia_input": [],
+            "user_profile": user_profile,
+            "platform_bot_id": _BOT_ID,
+            "bot_name": character_profile.get("name", _BOT_NAME),
+            "character_profile": character_profile,
+            "platform_channel_id": identity["platform_channel_id"],
+            "channel_name": "dm",
+            "chat_history_wide": [],
+            "chat_history_recent": [],
+            "should_respond": True,
+            "reason_to_respond": "live_e2e",
+            "use_reply_feature": False,
+            "channel_topic": "回复调侃",
+            "indirect_speech_context": "",
+            "debug_modes": {},
+            "decontexualized_input": current_input,
+        }
+    )
+
+    input_context_results = str((rag_result.get("research_facts") or {}).get("input_context_results", ""))
+
+    assert "这种事情不要学，学会了就没人要你了" not in input_context_results
+
+
+async def test_live_rag_subgraph_retrieves_older_context_but_not_recent_window(live_env) -> None:
+    identity = await _make_identity("rag-cutoff", "LiveCutoffUser")
+    older_timestamp = (datetime.now(timezone.utc) - timedelta(minutes=10)).isoformat()
+    recent_timestamp = (datetime.now(timezone.utc) - timedelta(minutes=1)).isoformat()
+    character_profile = await _refresh_character_profile()
+    user_profile = await get_user_profile(identity["global_user_id"])
+
+    await _seed_conversation(
+        platform=identity["platform"],
+        platform_channel_id=identity["platform_channel_id"],
+        global_user_id=identity["global_user_id"],
+        display_name=identity["display_name"],
+        content="啾啾昨天又把我的饼干偷走了。",
+        role="user",
+        platform_user_id=identity["platform_user_id"],
+        timestamp=older_timestamp,
+    )
+    await _seed_conversation(
+        platform=identity["platform"],
+        platform_channel_id=identity["platform_channel_id"],
+        global_user_id=identity["global_user_id"],
+        display_name=identity["display_name"],
+        content="刚才只是随口一提，不用翻这句。",
+        role="user",
+        platform_user_id=identity["platform_user_id"],
+        timestamp=recent_timestamp,
+    )
+
+    rag_result = await call_rag_subgraph(
+        {
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "platform": identity["platform"],
+            "platform_message_id": f"live-rag-{uuid4().hex[:10]}",
+            "platform_user_id": identity["platform_user_id"],
+            "global_user_id": identity["global_user_id"],
+            "user_name": identity["display_name"],
+            "user_input": "你还记得啾啾吗？",
+            "user_multimedia_input": [],
+            "user_profile": user_profile,
+            "platform_bot_id": _BOT_ID,
+            "bot_name": character_profile.get("name", _BOT_NAME),
+            "character_profile": character_profile,
+            "platform_channel_id": identity["platform_channel_id"],
+            "channel_name": "dm",
+            "chat_history_wide": [],
+            "chat_history_recent": [
+                {
+                    "display_name": identity["display_name"],
+                    "name": identity["display_name"],
+                    "platform_message_id": "recent-window-1",
+                    "platform_user_id": identity["platform_user_id"],
+                    "global_user_id": identity["global_user_id"],
+                    "role": "user",
+                    "content": "刚才只是随口一提，不用翻这句。",
+                    "reply_context": {},
+                    "timestamp": recent_timestamp,
+                }
+            ],
+            "should_respond": True,
+            "reason_to_respond": "live_e2e",
+            "use_reply_feature": False,
+            "channel_topic": "啾啾",
+            "indirect_speech_context": "",
+            "debug_modes": {},
+            "decontexualized_input": "你还记得啾啾吗？",
+        }
+    )
+
+    input_context_results = str((rag_result.get("research_facts") or {}).get("input_context_results", ""))
+
+    assert "啾啾" in input_context_results
+    assert "刚才只是随口一提" not in input_context_results
 
 
 async def test_live_web_search_agent_returns_live_result(live_env) -> None:

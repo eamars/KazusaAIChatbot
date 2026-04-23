@@ -97,8 +97,12 @@ def _get_depth_classifier() -> InputDepthClassifier:
 class RAGState(TypedDict):
     # Inputs
     timestamp: str
+    platform: str
+    platform_channel_id: str
+    platform_message_id: str
     decontexualized_input: str
     channel_topic: str
+    input_context_to_timestamp: str
 
     # Input facts
     user_name: str
@@ -356,6 +360,10 @@ async def call_memory_retriever_agent_input_context_rag(state: RAGState) -> dict
     # the dispatcher LLM from injecting platform IDs (e.g. bot ID) as user UUID.
     context["target_user_name"] = state["user_name"]
     context["target_global_user_id"] = state["global_user_id"]
+    context["target_platform"] = state["platform"]
+    context["target_platform_channel_id"] = state["platform_channel_id"]
+    context["target_to_timestamp"] = state["input_context_to_timestamp"]
+    context["target_platform_bot_id"] = state["platform_bot_id"]
 
     result = await memory_retriever_agent(
         task=state["input_context_task"],
@@ -373,6 +381,27 @@ async def call_memory_retriever_agent_input_context_rag(state: RAGState) -> dict
 
 async def _rag_noop(_: RAGState) -> dict:
     return {}
+
+
+def _input_context_to_timestamp(chat_history_recent: list[dict], current_timestamp: str) -> str:
+    """Return the automatic upper timestamp bound for input-context retrieval.
+
+    Args:
+        chat_history_recent: Immediate recent-history window already passed directly
+            to downstream cognition.
+        current_timestamp: Timestamp of the current in-flight turn.
+
+    Returns:
+        The earliest timestamp in ``chat_history_recent`` when present, otherwise
+        the current turn timestamp. Conversation retrieval uses this as its
+        automatic ``to_timestamp`` bound to avoid re-fetching the short-term
+        window or the just-written current message.
+    """
+    if chat_history_recent:
+        earliest_recent_timestamp = chat_history_recent[0].get("timestamp", "")
+        if earliest_recent_timestamp:
+            return earliest_recent_timestamp
+    return current_timestamp
 
 
 # ── Phase helpers ──────────────────────────────────────────────────
@@ -626,6 +655,10 @@ async def call_rag_subgraph(state: GlobalPersonaState) -> GlobalPersonaState:
     user_profile = state["user_profile"]
     affinity_score = user_profile.get("affinity", AFFINITY_DEFAULT)
     affinity_percent = ((affinity_score - AFFINITY_MIN) / max(1, AFFINITY_MAX - AFFINITY_MIN)) * 100
+    input_context_to_timestamp = _input_context_to_timestamp(
+        state.get("chat_history_recent") or [],
+        state["timestamp"],
+    )
 
     user_image_text = _assemble_image_text(user_profile.get("user_image") or {})
     objective_facts_text = "\n".join(
@@ -700,8 +733,12 @@ async def call_rag_subgraph(state: GlobalPersonaState) -> GlobalPersonaState:
 
     initial_state: RAGState = {
         "timestamp": state["timestamp"],
+        "platform": state["platform"],
+        "platform_channel_id": state["platform_channel_id"],
+        "platform_message_id": state["platform_message_id"],
         "decontexualized_input": decontexualized_input,
         "channel_topic": state["channel_topic"],
+        "input_context_to_timestamp": input_context_to_timestamp,
         "user_name": user_name,
         "global_user_id": global_user_id,
         "platform_bot_id": state["platform_bot_id"],

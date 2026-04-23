@@ -43,6 +43,8 @@ async def search_conversation(search_query: str = "",
                   top_k: int = 5,
                   platform: str | None = None,
                   platform_channel_id: str | None = None,
+                  from_timestamp: str | None = None,
+                  to_timestamp: str | None = None,
     ) -> list[tuple[float, dict]]:
     """Search conversation history by semantic similarity.
 
@@ -57,6 +59,8 @@ async def search_conversation(search_query: str = "",
         top_k (Optional): Maximum number of results to return. Default is 5.
         platform (Optional): Platform filter, e.g. "discord", "qq".
         platform_channel_id (Optional): Channel ID filter; if omitted, search all channels.
+        from_timestamp (Optional): Start timestamp (ISO 8601).
+        to_timestamp (Optional): End timestamp (ISO 8601).
         
     Returns:
         Top-K conversations close to the query, each as (similarity_score, message_with_metadata).
@@ -71,6 +75,8 @@ async def search_conversation(search_query: str = "",
         global_user_id=global_user_id,
         limit=top_k,
         method="vector",
+        from_timestamp=from_timestamp,
+        to_timestamp=to_timestamp,
     )
 
     # Rebuild return format to remove unwanted columns
@@ -79,9 +85,14 @@ async def search_conversation(search_query: str = "",
         return_list.append((score, {
             "content": message.get("content", ""),
             "timestamp": message.get("timestamp", ""),
+            "display_name": message.get("display_name", ""),
+            "role": message.get("role", ""),
             "platform": message.get("platform", ""),
             "platform_channel_id": message.get("platform_channel_id", ""),
+            "platform_message_id": message.get("platform_message_id", ""),
+            "platform_user_id": message.get("platform_user_id", ""),
             "global_user_id": message.get("global_user_id", ""),
+            "reply_context": message.get("reply_context", {}),
         }))
 
     return return_list
@@ -93,6 +104,8 @@ async def search_conversation_keyword(
     top_k: int = 5,
     platform: str | None = None,
     platform_channel_id: str | None = None,
+    from_timestamp: str | None = None,
+    to_timestamp: str | None = None,
 ) -> list[dict]:
     """Search conversation history by exact keyword/phrase match (regex, case-insensitive).
 
@@ -110,6 +123,8 @@ async def search_conversation_keyword(
         top_k (Optional): Maximum number of results. Default is 5.
         platform (Optional): Platform filter, e.g. "discord", "qq".
         platform_channel_id (Optional): Channel ID filter.
+        from_timestamp (Optional): Start timestamp (ISO 8601).
+        to_timestamp (Optional): End timestamp (ISO 8601).
 
     Returns:
         Matching conversations ordered by recency, each as a message dict.
@@ -124,14 +139,22 @@ async def search_conversation_keyword(
         global_user_id=global_user_id,
         limit=top_k,
         method="keyword",
+        from_timestamp=from_timestamp,
+        to_timestamp=to_timestamp,
     )
+
     return [
         {
             "content": msg.get("content", ""),
             "timestamp": msg.get("timestamp", ""),
+            "display_name": msg.get("display_name", ""),
+            "role": msg.get("role", ""),
             "platform": msg.get("platform", ""),
             "platform_channel_id": msg.get("platform_channel_id", ""),
+            "platform_message_id": msg.get("platform_message_id", ""),
+            "platform_user_id": msg.get("platform_user_id", ""),
             "global_user_id": msg.get("global_user_id", ""),
+            "reply_context": msg.get("reply_context", {}),
         }
         for _, msg in results
     ]
@@ -231,9 +254,14 @@ async def get_conversation(platform: str | None = None,
         return_list.append({
             "content": message.get("content", ""),
             "timestamp": message.get("timestamp", ""),
+            "display_name": message.get("display_name", ""),
+            "role": message.get("role", ""),
             "platform": message.get("platform", ""),
             "platform_channel_id": message.get("platform_channel_id", ""),
+            "platform_message_id": message.get("platform_message_id", ""),
+            "platform_user_id": message.get("platform_user_id", ""),
             "global_user_id": message.get("global_user_id", ""),
+            "reply_context": message.get("reply_context", {}),
         })
 
     return return_list
@@ -301,9 +329,6 @@ async def search_persistent_memory(
     return return_list
 
 
-
-
-
 _ALL_TOOLS = [
     search_user_facts,
     search_conversation,
@@ -314,6 +339,34 @@ _ALL_TOOLS = [
 ]
 _TOOLS_BY_NAME = {tool.name: tool for tool in _ALL_TOOLS}
 
+
+def _inject_context_filters(tool_name: str, tool_args: dict, context: dict) -> dict:
+    """Apply deterministic retrieval-scope filters from agent context to tool args.
+
+    Args:
+        tool_name: Name of the tool the LLM selected.
+        tool_args: Raw tool arguments proposed by the LLM.
+        context: Memory-retriever context dict supplied by the caller.
+
+    Returns:
+        A copy of ``tool_args`` with platform/channel/time-bound filters injected
+        for conversation-history tools when the caller provided them.
+    """
+    args = dict(tool_args)
+    if tool_name in {"search_conversation", "search_conversation_keyword", "get_conversation"}:
+        target_platform = context.get("target_platform")
+        if target_platform and "platform" not in args:
+            args["platform"] = target_platform
+
+        target_channel_id = context.get("target_platform_channel_id")
+        if target_channel_id and "platform_channel_id" not in args:
+            args["platform_channel_id"] = target_channel_id
+
+        target_to_timestamp = context.get("target_to_timestamp")
+        if target_to_timestamp and "to_timestamp" not in args:
+            args["to_timestamp"] = target_to_timestamp
+
+    return args
 
 
 class MemoryRetrieverState(TypedDict):
@@ -338,13 +391,15 @@ async def memory_search_tool_call_executor(state: MemoryRetrieverState) -> dict:
     """Execute the tool calls generated by the LLM"""
     results = []
     last_message = state["messages"][-1]
+    context = state.get("context", {}) or {}
 
     # Safety: Check if the LLM actually requested tools
     if hasattr(last_message, "tool_calls") and last_message.tool_calls:
         for tool_call in last_message.tool_calls:
             try:
                 tool = _TOOLS_BY_NAME[tool_call["name"]]
-                observation = await tool.ainvoke(tool_call["args"])
+                tool_args = _inject_context_filters(tool_call["name"], tool_call["args"], context)
+                observation = await tool.ainvoke(tool_args)
             except KeyError:
                 observation = {"error": f"Incorrect tool was invoked: {tool_call['name']}"}
                 logger.error(f"Incorrect tool was invoked: {tool_call['name']}")
@@ -582,14 +637,14 @@ _MEMORY_RETRIEVER_FINALIZER_PROMPT = """\
 # 核心任务
 1. **完整保留**：将所有与任务相关的检索内容完整写入 `response`。严禁以"简洁"为由丢弃有效信息——下游代理需要原始事实，而不是你的摘要。
 2. **清理噪音**：过滤掉明显与任务无关的内容（例如：与 Kazusa 完全无关的群聊闲聊），但保留所有与目标用户和 Kazusa 互动相关的记录。
-3. **解析标识符**：将 `content` 中出现的平台 ID（如 `<@3768713357>`、UUID 格式的用户 ID）替换为可读名称。规则：若 UUID 与 `context.target_global_user_id` 匹配，替换为 `context.target_user_name`；若 ID 与平台 bot ID 匹配，替换为 "Kazusa"。
-4. **评估完整度**：根据评估者最终反馈与任务要求，客观评分。
+3. **保留说话者元数据**：如果检索结果中提供了 `display_name` / `role` / `platform_user_id`，渲染对话记录时必须优先使用这些显式字段标注说话者；**禁止**根据 `content` 中出现的 `<@...>` 提及、reply 目标或其它文本线索去猜测说话者身份。
+4. **解析标识符**：你只能替换 `content` 正文中出现的平台 ID（如 `<@3768713357>`、UUID 格式的用户 ID）为可读名称。规则：若 UUID 与 `context.target_global_user_id` 匹配，替换为 `context.target_user_name`；若 ID 与平台 bot ID 匹配，替换为 "Kazusa"。这条规则只作用于消息正文，不作用于说话者标签。
+5. **评估完整度**：根据评估者最终反馈与任务要求，客观评分。
 
 # 输出说明
 - response: 整合后的完整上下文字符串，供下游 LLM 代理直接使用。包含所有相关事实、对话记录和记忆条目，并附带时间戳和来源说明。
 - score: 0-100，表示检索内容满足任务需求的程度
 - reason: 一句话说明评分依据
-
 # 输入格式
 {
     "task": "任务描述",

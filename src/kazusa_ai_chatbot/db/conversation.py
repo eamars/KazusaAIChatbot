@@ -57,6 +57,8 @@ async def search_conversation_history(
     global_user_id: str | None = None,
     limit: int = 5,
     method: str = "vector",  # "keyword", "vector"
+    from_timestamp: str | None = None,
+    to_timestamp: str | None = None,
 ) -> list[tuple[float, ConversationMessageDoc]]:
     """Search conversation history using keyword or vector relevance.
 
@@ -83,6 +85,12 @@ async def search_conversation_history(
             base_filter["platform_channel_id"] = platform_channel_id
         if global_user_id:
             base_filter["global_user_id"] = global_user_id
+        if from_timestamp or to_timestamp:
+            base_filter["timestamp"] = {}
+            if from_timestamp:
+                base_filter["timestamp"]["$gte"] = from_timestamp
+            if to_timestamp:
+                base_filter["timestamp"]["$lte"] = to_timestamp
 
         cursor = collection.find(base_filter).sort("timestamp", -1).limit(limit)
         docs = await cursor.to_list(length=limit)
@@ -112,6 +120,12 @@ async def search_conversation_history(
         match_filter["platform_channel_id"] = platform_channel_id
     if global_user_id:
         match_filter["global_user_id"] = global_user_id
+    if from_timestamp or to_timestamp:
+        match_filter["timestamp"] = {}
+        if from_timestamp:
+            match_filter["timestamp"]["$gte"] = from_timestamp
+        if to_timestamp:
+            match_filter["timestamp"]["$lte"] = to_timestamp
     if match_filter:
         pipeline.append({"$match": match_filter})
 

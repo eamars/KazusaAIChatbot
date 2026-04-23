@@ -12,6 +12,7 @@ class GlobalPersonaState(TypedDict):
     user_input: str
     user_multimedia_input: list[MultiMediaDoc]
     platform: str
+    platform_message_id: str
     platform_user_id: str
     global_user_id: str
     user_name: str
