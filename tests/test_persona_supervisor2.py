@@ -15,6 +15,7 @@ def _base_discord_state():
         "timestamp": "2024-01-01T00:00:00Z",
         "user_name": "TestUser",
         "platform": "discord",
+        "platform_message_id": "msg_123",
         "platform_user_id": "user_123",
         "global_user_id": "uuid-123",
         "user_input": "Hello",

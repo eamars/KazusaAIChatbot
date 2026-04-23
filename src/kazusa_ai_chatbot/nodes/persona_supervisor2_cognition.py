@@ -6,6 +6,7 @@ Agent implementations live in the layer-specific submodules:
   - persona_supervisor2_cognition_l3  (L3 contextual / linguistic / visual + L4 collector)
 """
 from kazusa_ai_chatbot.nodes.persona_supervisor2_schema import GlobalPersonaState, CognitionState
+from kazusa_ai_chatbot.utils import build_interaction_history_recent
 
 from langgraph.graph import StateGraph, START, END
 
@@ -84,6 +85,11 @@ async def call_cognition_subgraph(state: GlobalPersonaState) -> GlobalPersonaSta
 
     # Get attributes
     decontexualized_input = state["decontexualized_input"]
+    interaction_history_recent = build_interaction_history_recent(
+        state["chat_history_wide"],
+        state["platform_user_id"],
+        state["platform_bot_id"],
+    )
 
     initial_state: CognitionState = {
         "character_profile": state["character_profile"],
@@ -94,7 +100,7 @@ async def call_cognition_subgraph(state: GlobalPersonaState) -> GlobalPersonaSta
         "user_name": state["user_name"],
         "user_profile": state["user_profile"],
         "platform_bot_id": state["platform_bot_id"],
-        "chat_history_recent": state["chat_history_recent"],
+        "chat_history_recent": interaction_history_recent,
         "indirect_speech_context": state.get("indirect_speech_context", ""),
         "channel_topic": state["channel_topic"],
 

@@ -77,6 +77,61 @@ def trim_history_dict(history):
     return results
 
 
+def build_interaction_history_recent(
+    chat_history_recent: list[dict],
+    current_platform_user_id: str,
+    platform_bot_id: str,
+) -> list[dict]:
+    """Return the recent history slice scoped to the current user-bot interaction.
+
+    Args:
+        chat_history_recent: Shared recent channel history, typically from a group
+            conversation window.
+        current_platform_user_id: Platform user ID for the in-flight user turn.
+        platform_bot_id: Platform user ID for the bot persona in the same channel.
+
+    Returns:
+        A filtered recent-history list for the current user-bot subthread. The
+        slice begins at the first current-user message after the most recent
+        other-user turn, then keeps only the current user's messages and the
+        bot's assistant replies. If no such slice can be formed, returns the
+        original recent window unchanged.
+    """
+    last_other_user_idx = -1
+    for index, msg in enumerate(chat_history_recent):
+        if (
+            msg.get("role") == "user"
+            and msg.get("platform_user_id") != current_platform_user_id
+        ):
+            last_other_user_idx = index
+
+    candidate_history = chat_history_recent[last_other_user_idx + 1:]
+    first_current_user_idx = next(
+        (
+            index for index, msg in enumerate(candidate_history)
+            if msg.get("role") == "user"
+            and msg.get("platform_user_id") == current_platform_user_id
+        ),
+        -1,
+    )
+    if first_current_user_idx >= 0:
+        candidate_history = candidate_history[first_current_user_idx:]
+
+    interaction_history = [
+        msg for msg in candidate_history
+        if (
+            msg.get("role") == "user"
+            and msg.get("platform_user_id") == current_platform_user_id
+        ) or (
+            msg.get("role") == "assistant"
+            and msg.get("platform_user_id") == platform_bot_id
+        )
+    ]
+    if interaction_history:
+        return interaction_history
+    return chat_history_recent
+
+
 def sanitize_llm_text(text: str) -> str:
     """Strip control characters that cause API JSON parsing failures.
 

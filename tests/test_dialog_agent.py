@@ -8,6 +8,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from kazusa_ai_chatbot.agents.dialog_agent import dialog_agent, DialogAgentState
+from kazusa_ai_chatbot.utils import build_interaction_history_recent
 
 
 def _base_global_state():
@@ -29,7 +30,10 @@ def _base_global_state():
                 "forbidden_phrases": [],
             },
         },
+        "chat_history_wide": [],
         "chat_history_recent": [],
+        "platform_user_id": "user_123",
+        "platform_bot_id": "bot_456",
         "user_name": "TestUser",
         "user_profile": {"affinity": 500},
         "character_profile": {
@@ -67,11 +71,28 @@ class TestDialogAgentState:
         hints = typing.get_type_hints(DialogAgentState)
         required = [
             "internal_monologue", "action_directives",
-            "chat_history_recent", "user_name", "user_profile",
+            "chat_history_wide", "chat_history_recent", "platform_user_id", "platform_bot_id", "user_name", "user_profile",
             "character_profile",
         ]
         for field in required:
             assert field in hints, f"Missing field: {field}"
+
+
+def test_build_interaction_history_recent_excludes_other_user_messages():
+    """Scoped history should keep only the current user's turns and bot replies."""
+    history = [
+        {"role": "user", "platform_user_id": "user_a", "content": "这是千纱你的照片"},
+        {"role": "assistant", "platform_user_id": "bot_456", "content": "明明就是想看我出糗吧，学长。"},
+        {"role": "user", "platform_user_id": "user_b", "content": "你照片真涩情"},
+        {"role": "assistant", "platform_user_id": "bot_456", "content": "学长看照片的眼神，感觉有点过分了啊。"},
+    ]
+
+    scoped = build_interaction_history_recent(history, "user_b", "bot_456")
+
+    assert scoped == [
+        {"role": "user", "platform_user_id": "user_b", "content": "你照片真涩情"},
+        {"role": "assistant", "platform_user_id": "bot_456", "content": "学长看照片的眼神，感觉有点过分了啊。"},
+    ]
 
 
 @pytest.mark.asyncio

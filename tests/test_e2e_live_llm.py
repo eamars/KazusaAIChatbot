@@ -442,9 +442,6 @@ async def test_live_chat_multi_user_photo_thread_keeps_user_intents_separated(li
             {"role": "user", "speaker": "蚝爹油", "content": f"[Reply to message] <@{_BOT_ID}> 这是千纱你的照片"},
             {"role": "assistant", "content": "诶……\n这种照片你也看得下去啊？\n明明就是想看我出糗吧，学长。"},
             {"role": "user", "speaker": "猎明", "content": f"<@{_BOT_ID}> [Face] 你照片真涩情"},
-            {"role": "assistant", "content": "诶……\n学长看照片的眼神，感觉有点过分了啊。\n明明没说什么，怎么会觉得这种表情很色呢？\n你是在故意逗我吗……"},
-            {"role": "user", "speaker": "猎明", "content": f"[Reply to message] <@{_BOT_ID}> [Face] 没有"},
-            {"role": "assistant", "content": "不是不是……\n没、没有啦。\n怎么会觉得这种感觉啊？\n学长又在乱说了……"},
         ],
         bot_display_name,
     )
@@ -496,6 +493,43 @@ async def test_live_chat_multi_user_photo_thread_keeps_user_intents_separated(li
     assert second_dialog
     assert "busy right now" not in "\n".join(second_dialog)
     assert "\n".join(second_dialog) != "\n".join(first_dialog)
+    assert "学长" not in "\n".join(second_dialog)
+
+
+async def test_live_chat_multi_user_quantization_thread_keeps_xuezhang_bound_to_haodieyou(live_env) -> None:
+    character_profile = await _refresh_character_profile()
+    bot_display_name = character_profile.get("name", _BOT_NAME)
+    identities = await _make_group_identities(
+        "quantization-thread",
+        ["蚝爹油", "C"],
+    )
+    await _seed_group_series(
+        identities,
+        [
+            {"role": "user", "speaker": "C", "content": "好想要快网速"},
+            {"role": "user", "speaker": "C", "content": "好痛苦】"},
+            {"role": "user", "speaker": "蚝爹油", "content": f"[Reply to message] <@{_BOT_ID}> 千纱怎么知道量化这种词的？"},
+            {"role": "assistant", "content": "诶？刚才那个词……\n学长怎么突然问起那个呀。\n我其实也没专门去研究过啦，只是觉得听起来好像很沉重一样……"},
+            {"role": "user", "speaker": "蚝爹油", "content": f"[Reply to message] <@{identities['C']['platform_user_id']}> 刚刚居然为了你这句话去google了，怪不得千纱知道量化这种东西"},
+        ],
+        bot_display_name,
+    )
+
+    async with _neutral_character_runtime_state():
+        second_result, _ = await _run_graph(
+            "quantization-thread-c",
+            identities["C"]["display_name"],
+            f"<@{_BOT_ID}> 你还接网了？",
+            channel_name="general",
+            platform=identities["C"]["platform"],
+            platform_user_id=identities["C"]["platform_user_id"],
+            platform_channel_id=identities["C"]["platform_channel_id"],
+        )
+
+    second_dialog = second_result.get("final_dialog", [])
+    assert second_dialog
+    assert "busy right now" not in "\n".join(second_dialog)
+    assert "学长" not in "\n".join(second_dialog)
 
 
 async def test_live_chat_multi_user_understanding_thread_keeps_joke_and_self_definition_separate(live_env) -> None:

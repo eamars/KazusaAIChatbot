@@ -2,7 +2,12 @@ from typing import Annotated, TypedDict
 
 from kazusa_ai_chatbot.nodes.persona_supervisor2_schema import GlobalPersonaState
 from kazusa_ai_chatbot.config import LLM_API_KEY, LLM_BASE_URL, LLM_MODEL, MAX_DIALOG_AGENT_RETRY, AFFINITY_DEFAULT
-from kazusa_ai_chatbot.utils import parse_llm_json_output, build_affinity_block, get_llm
+from kazusa_ai_chatbot.utils import (
+    parse_llm_json_output,
+    build_affinity_block,
+    build_interaction_history_recent,
+    get_llm,
+)
 from kazusa_ai_chatbot.nodes.linguistic_texture import (
     get_hesitation_density_description,
     get_fragmentation_description,
@@ -58,7 +63,10 @@ class DialogAgentState(TypedDict):
     #      }
 
     # B: Social context
+    chat_history_wide: list[dict]
     chat_history_recent: list[dict]
+    platform_user_id: str
+    platform_bot_id: str
     user_name: str
     user_profile: dict
 
@@ -202,7 +210,11 @@ async def dialog_generator(state: DialogAgentState) -> DialogAgentState:
 
     affinity_block = build_affinity_block(state["user_profile"].get("affinity", AFFINITY_DEFAULT))
 
-    history = state["chat_history_recent"]
+    history = build_interaction_history_recent(
+        state["chat_history_wide"],
+        state["platform_user_id"],
+        state["platform_bot_id"],
+    )
     last_assistant_idx = next(
         (i for i in range(len(history) - 1, -1, -1) if history[i].get("role") == "assistant"),
         -1
@@ -357,7 +369,11 @@ async def dialog_evaluator(state: DialogAgentState) -> DialogAgentState:
     retry = state.get("retry", 0) + 1
 
     # Extract last user message from chat_history_recent for topic-drift detection
-    chat_history_recent = state.get("chat_history_recent", [])
+    chat_history_recent = build_interaction_history_recent(
+        state.get("chat_history_wide", []),
+        state["platform_user_id"],
+        state["platform_bot_id"],
+    )
     last_user_msg = next(
         (m.get("content", "") for m in reversed(chat_history_recent) if m.get("role") == "user"),
         ""
@@ -449,7 +465,10 @@ async def dialog_agent(
         "action_directives": global_state["action_directives"],
 
         # B
+        "chat_history_wide": global_state["chat_history_wide"],
         "chat_history_recent": global_state["chat_history_recent"],
+        "platform_user_id": global_state["platform_user_id"],
+        "platform_bot_id": global_state["platform_bot_id"],
         "user_name": global_state["user_name"],
         "user_profile": global_state["user_profile"],
         
