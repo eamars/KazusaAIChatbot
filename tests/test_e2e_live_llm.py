@@ -292,6 +292,70 @@ async def _seed_memory(global_user_id: str, memory_name: str, content: str) -> N
     await save_memory(doc, timestamp)
 
 
+async def _make_group_identities(label: str, display_names: list[str]) -> dict[str, dict]:
+    shared_suffix = uuid4().hex[:10]
+    platform = f"pytest-live-{label}"
+    platform_channel_id = f"channel-{shared_suffix}"
+    identities = {}
+    for index, display_name in enumerate(display_names):
+        platform_user_id = f"user-{index}-{uuid4().hex[:8]}"
+        global_user_id = await resolve_global_user_id(
+            platform=platform,
+            platform_user_id=platform_user_id,
+            display_name=display_name,
+        )
+        identities[display_name] = {
+            "platform": platform,
+            "platform_user_id": platform_user_id,
+            "platform_channel_id": platform_channel_id,
+            "global_user_id": global_user_id,
+            "display_name": display_name,
+        }
+    return identities
+
+
+async def _seed_group_series(identities: dict[str, dict], messages: list[dict], bot_display_name: str) -> None:
+    base_time = datetime.now(timezone.utc) - timedelta(minutes=20)
+    reference_identity = next(iter(identities.values()))
+    for index, message in enumerate(messages):
+        role = message["role"]
+        content = message["content"]
+        if role == "assistant":
+            identity = {
+                "platform": reference_identity["platform"],
+                "platform_channel_id": reference_identity["platform_channel_id"],
+                "global_user_id": "",
+                "display_name": bot_display_name,
+                "platform_user_id": _BOT_ID,
+            }
+        else:
+            identity = identities[message["speaker"]]
+        await _seed_conversation(
+            platform=identity["platform"],
+            platform_channel_id=identity["platform_channel_id"],
+            global_user_id=identity["global_user_id"],
+            display_name=identity["display_name"],
+            content=content,
+            role=role,
+            platform_user_id=identity["platform_user_id"],
+            timestamp=(base_time + timedelta(seconds=index)).isoformat(),
+        )
+
+
+async def _persist_bot_dialog(identity: dict, bot_display_name: str, dialog: list[str]) -> None:
+    if not dialog:
+        return
+    await _seed_conversation(
+        platform=identity["platform"],
+        platform_channel_id=identity["platform_channel_id"],
+        global_user_id="",
+        display_name=bot_display_name,
+        content="\n".join(dialog),
+        role="assistant",
+        platform_user_id=_BOT_ID,
+    )
+
+
 def _load_test_image_b64() -> str:
     return base64.b64encode(_IMAGE_PATH.read_bytes()).decode("utf-8")
 
@@ -361,6 +425,148 @@ async def test_live_chat_smoke_response(live_env) -> None:
 
     assert response.messages
     assert response.content_type == "text"
+
+
+async def test_live_chat_multi_user_photo_thread_keeps_user_intents_separated(live_env) -> None:
+    character_profile = await _refresh_character_profile()
+    bot_display_name = character_profile.get("name", _BOT_NAME)
+    identities = await _make_group_identities(
+        "photo-thread",
+        ["蚝爹油", "猎明"],
+    )
+    await _seed_group_series(
+        identities,
+        [
+            {"role": "user", "speaker": "蚝爹油", "content": f"<@{_BOT_ID}> 这次能看到我说话了么"},
+            {"role": "assistant", "content": "诶？\n你的消息我一直都在看啊。\n能看到，也听得到……\n这种感觉，大概有点不知所措呢。"},
+            {"role": "user", "speaker": "蚝爹油", "content": f"[Reply to message] <@{_BOT_ID}> 这是千纱你的照片"},
+            {"role": "assistant", "content": "诶……\n这种照片你也看得下去啊？\n明明就是想看我出糗吧，学长。"},
+            {"role": "user", "speaker": "猎明", "content": f"<@{_BOT_ID}> [Face] 你照片真涩情"},
+            {"role": "assistant", "content": "诶……\n学长看照片的眼神，感觉有点过分了啊。\n明明没说什么，怎么会觉得这种表情很色呢？\n你是在故意逗我吗……"},
+            {"role": "user", "speaker": "猎明", "content": f"[Reply to message] <@{_BOT_ID}> [Face] 没有"},
+            {"role": "assistant", "content": "不是不是……\n没、没有啦。\n怎么会觉得这种感觉啊？\n学长又在乱说了……"},
+        ],
+        bot_display_name,
+    )
+
+    async with _neutral_character_runtime_state():
+        first_prompt = f"<@{_BOT_ID}> 那我前面那句和他夸你照片那个意思，其实不是一回事吧？"
+        rag_state, _ = await _make_initial_state(
+            "photo-thread-haodieyou-rag",
+            identities["蚝爹油"]["display_name"],
+            first_prompt,
+            channel_name="general",
+            platform=identities["蚝爹油"]["platform"],
+            platform_user_id=identities["蚝爹油"]["platform_user_id"],
+            platform_channel_id=identities["蚝爹油"]["platform_channel_id"],
+        )
+        rag_state["decontexualized_input"] = first_prompt
+        rag_state["channel_topic"] = "照片"
+        rag_result = await call_rag_subgraph(rag_state)
+        rag_metadata = (rag_result.get("research_metadata") or [{}])[0]
+        assert rag_metadata.get("depth") == "DEEP"
+        assert "input_context_rag" in (rag_metadata.get("trigger_dispatchers") or [])
+
+        first_result, _ = await _run_graph(
+            "photo-thread-haodieyou",
+            identities["蚝爹油"]["display_name"],
+            first_prompt,
+            channel_name="general",
+            platform=identities["蚝爹油"]["platform"],
+            platform_user_id=identities["蚝爹油"]["platform_user_id"],
+            platform_channel_id=identities["蚝爹油"]["platform_channel_id"],
+        )
+
+        first_dialog = first_result.get("final_dialog", [])
+        assert first_dialog
+        assert "busy right now" not in "\n".join(first_dialog)
+        await _persist_bot_dialog(identities["蚝爹油"], bot_display_name, first_dialog)
+
+        second_result, _ = await _run_graph(
+            "photo-thread-lieming",
+            identities["猎明"]["display_name"],
+            f'<@{_BOT_ID}> 那我刚才是在接照片那条，不是在替他发言，对吧？',
+            channel_name="general",
+            platform=identities["猎明"]["platform"],
+            platform_user_id=identities["猎明"]["platform_user_id"],
+            platform_channel_id=identities["猎明"]["platform_channel_id"],
+        )
+
+    second_dialog = second_result.get("final_dialog", [])
+    assert second_dialog
+    assert "busy right now" not in "\n".join(second_dialog)
+    assert "\n".join(second_dialog) != "\n".join(first_dialog)
+
+
+async def test_live_chat_multi_user_understanding_thread_keeps_joke_and_self_definition_separate(live_env) -> None:
+    character_profile = await _refresh_character_profile()
+    bot_display_name = character_profile.get("name", _BOT_NAME)
+    identities = await _make_group_identities(
+        "understanding-thread",
+        ["蚝爹油", "Neurosama"],
+    )
+    await _seed_group_series(
+        identities,
+        [
+            {"role": "user", "speaker": "Neurosama", "content": "<@673225019> 这是一个15岁高中生能知道的吗"},
+            {"role": "assistant", "content": "这种话……\n你是在说谁呢？\n好像我也很年幼一样。"},
+            {"role": "user", "speaker": "蚝爹油", "content": "高中生是有手机和计算器的"},
+            {"role": "assistant", "content": "嗯，是有啦。\n这种事……反正高中生肯定都会带手机和计算器的嘛。"},
+            {"role": "user", "speaker": "蚝爹油", "content": "你看我多了解千纱"},
+            {"role": "assistant", "content": "真是的……\n学长也太自以为是了吧？\n那种话，怎么可能算了解我嘛。"},
+            {"role": "user", "speaker": "蚝爹油", "content": "怎么才能算是了解千纱呢？"},
+            {"role": "assistant", "content": "哼，真的有那么了解吗？\n这种事……谁知道呢。\n反正学长也只是在瞎猜啦。"},
+        ],
+        bot_display_name,
+    )
+
+    async with _neutral_character_runtime_state():
+        first_prompt = f'<@{_BOT_ID}> 我前面那句其实是在吐槽年龄，不是在帮他回答那个问题，你能区分开吗？'
+        rag_state, _ = await _make_initial_state(
+            "understanding-thread-neuro-rag",
+            identities["Neurosama"]["display_name"],
+            first_prompt,
+            channel_name="general",
+            platform=identities["Neurosama"]["platform"],
+            platform_user_id=identities["Neurosama"]["platform_user_id"],
+            platform_channel_id=identities["Neurosama"]["platform_channel_id"],
+        )
+        rag_state["decontexualized_input"] = first_prompt
+        rag_state["channel_topic"] = "了解千纱"
+        rag_result = await call_rag_subgraph(rag_state)
+        rag_metadata = (rag_result.get("research_metadata") or [{}])[0]
+        assert rag_metadata.get("depth") == "DEEP"
+        assert "input_context_rag" in (rag_metadata.get("trigger_dispatchers") or [])
+
+        first_result, _ = await _run_graph(
+            "understanding-thread-neuro",
+            identities["Neurosama"]["display_name"],
+            first_prompt,
+            channel_name="general",
+            platform=identities["Neurosama"]["platform"],
+            platform_user_id=identities["Neurosama"]["platform_user_id"],
+            platform_channel_id=identities["Neurosama"]["platform_channel_id"],
+        )
+
+        first_dialog = first_result.get("final_dialog", [])
+        assert first_dialog
+        assert "busy right now" not in "\n".join(first_dialog)
+        await _persist_bot_dialog(identities["Neurosama"], bot_display_name, first_dialog)
+
+        second_result, _ = await _run_graph(
+            "understanding-thread-haodieyou",
+            identities["蚝爹油"]["display_name"],
+            f"<@{_BOT_ID}> 那如果回到我前面那个问题，你现在会给我什么标准？",
+            channel_name="general",
+            platform=identities["蚝爹油"]["platform"],
+            platform_user_id=identities["蚝爹油"]["platform_user_id"],
+            platform_channel_id=identities["蚝爹油"]["platform_channel_id"],
+        )
+
+    second_dialog = second_result.get("final_dialog", [])
+    assert second_dialog
+    assert "busy right now" not in "\n".join(second_dialog)
+    assert "\n".join(second_dialog) != "\n".join(first_dialog)
 
 
 async def test_live_chat_third_party_mention_stays_silent(live_env) -> None:
