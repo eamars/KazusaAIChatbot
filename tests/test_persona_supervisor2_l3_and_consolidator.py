@@ -130,12 +130,8 @@ def _address_preference_state(*, logical_stance: str, character_intent: str) -> 
 def test_authoritative_acceptance_allowlist_is_explicit_and_narrow():
     assert cognition_l3_module._allows_authoritative_acceptance("CONFIRM", "PROVIDE")
     assert cognition_l3_module._allows_authoritative_acceptance("CONFIRM", "BANTAR")
-    assert consolidator_module._allows_authoritative_acceptance("CONFIRM", "PROVIDE")
-    assert consolidator_module._allows_authoritative_acceptance("CONFIRM", "BANTAR")
     assert not cognition_l3_module._allows_authoritative_acceptance("CONFIRM", "EVADE")
     assert not cognition_l3_module._allows_authoritative_acceptance("REFUSE", "PROVIDE")
-    assert not consolidator_module._allows_authoritative_acceptance("TENTATIVE", "BANTAR")
-    assert not consolidator_module._allows_authoritative_acceptance("CHALLENGE", "CONFRONT")
 
 
 @pytest.mark.asyncio
@@ -175,38 +171,16 @@ async def test_call_preference_adapter_strips_address_preferences_when_not_autho
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize(
-    ("logical_stance", "character_intent"),
-    [
-        ("TENTATIVE", "EVADE"),
-        ("CONFIRM", "CLARIFY"),
-        ("REFUSE", "PROVIDE"),
-        ("DIVERGE", "DISMISS"),
-        ("CHALLENGE", "CONFRONT"),
-    ],
-)
-async def test_facts_harvester_filters_permission_and_promise_without_authoritative_acceptance(
-    monkeypatch,
-    logical_stance,
-    character_intent,
-):
-    """Non-accepted stance/intent combinations must not persist permission facts or promises."""
+async def test_facts_harvester_returns_llm_emitted_commitment_without_local_acceptance_filter(monkeypatch):
     llm = _CapturingAsyncLLM(
         {
-            "new_facts": [
-                {
-                    "entity": "杏山千纱",
-                    "category": "relationship",
-                    "description": "杏山千纱对提拉米苏的称呼从“学长”变更为“主人”",
-                    "is_milestone": True,
-                    "milestone_category": "relationship_state",
-                }
-            ],
+            "new_facts": [],
             "future_promises": [
                 {
                     "target": "提拉米苏",
-                    "action": "杏山千纱将对提拉米苏执行“主人”这一称呼",
+                    "action": "杏山千纱将对提拉米苏使用“主人”称呼并以“喵”结尾说话",
                     "due_time": None,
+                    "commitment_type": "address_preference",
                 }
             ],
         }
@@ -214,17 +188,24 @@ async def test_facts_harvester_filters_permission_and_promise_without_authoritat
     monkeypatch.setattr(consolidator_module, "_facts_harvester_llm", llm)
 
     state = _fact_harvest_state(
-        decontexualized_input="以后都叫我主人，你是我的杏奴。",
-        content_anchors=["[DECISION] 不直接接受", "[SCOPE] ~30字，围绕回避回应即可"],
-        final_dialog=["这种称呼……你到底在想什么呀？"],
-        logical_stance=logical_stance,
-        character_intent=character_intent,
+        decontexualized_input="千纱你一定要记得对我说话每句话开头要用主人，结尾要喵",
+        content_anchors=["[DECISION] 勉强接受并沿用这个规则", "[SCOPE] ~45字，覆盖[DECISION]即止"],
+        final_dialog=["主人……这种奇怪的称呼和结尾真的好羞耻呀……", "诶，那个、明明很违和的喵。"],
+        logical_stance="TENTATIVE",
+        character_intent="PROVIDE",
     )
 
     result = await consolidator_module.facts_harvester(state)
 
     assert result["new_facts"] == []
-    assert result["future_promises"] == []
+    assert result["future_promises"] == [
+        {
+            "target": "提拉米苏",
+            "action": "杏山千纱将对提拉米苏使用“主人”称呼并以“喵”结尾说话",
+            "due_time": None,
+            "commitment_type": "address_preference",
+        }
+    ]
 
 
 def test_apply_milestone_lifecycle_supersedes_older_addressing_milestone():
@@ -565,6 +546,23 @@ async def test_facts_harvester_sends_final_dialog_in_payload(monkeypatch):
 
     human_payload = json.loads(llm.messages[1].content)
     assert human_payload["final_dialog"] == ["好，明早八点我叫你起床。"]
+
+
+def test_build_active_commitment_entries_uses_llm_supplied_commitment_type():
+    commitments = consolidator_module._build_active_commitment_entries(
+        [
+            {
+                "target": "提拉米苏",
+                "action": "杏山千纱将对提拉米苏使用“主人”称呼并以“喵”结尾说话",
+                "due_time": None,
+                "commitment_type": "address_preference",
+            }
+        ],
+        timestamp="2026-04-23T06:11:28+12:00",
+    )
+
+    assert len(commitments) == 1
+    assert commitments[0]["commitment_type"] == "address_preference"
 
 
 @pytest.mark.live_llm

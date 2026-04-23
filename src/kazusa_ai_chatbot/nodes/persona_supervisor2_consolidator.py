@@ -75,8 +75,6 @@ _USER_IMAGE_MAX_RECENT_WINDOW = 6       # sessions to keep before overflow to hi
 _USER_IMAGE_HISTORICAL_MAX_CHARS = 1500 # compress historical_summary when above this
 _CHARACTER_IMAGE_MAX_RECENT_WINDOW = 6
 _CHARACTER_IMAGE_HISTORICAL_MAX_CHARS = 1500
-_AUTHORITATIVE_ACCEPTANCE_STANCES = {"CONFIRM"}
-_AUTHORITATIVE_ACCEPTANCE_INTENTS = {"PROVIDE", "BANTAR"}
 
 
 def _merge_dicts(a: dict, b: dict) -> dict:
@@ -761,13 +759,15 @@ _FACTS_HARVESTER_PROMPT = """\
    - **去重**：如果 `research_facts.user_image` 或 `research_facts.input_context_results` 中已存在相似画像，严禁重复提取。
    - **语义保真 [必须执行]**：若用户明确说了”喜欢/不喜欢/永远不/一直不/过敏/害怕”等偏好或禁忌，`description` 必须尽量保留原谓词与宾语，不得改写成更宽泛、不同义或模糊的概括。例如”永远不吃辣椒”不能改写为”不喜欢吃杂乱的食物”。
    - **未确认声明 [必须执行]**：当 `logical_stance` 为 `TENTATIVE` 或 `DENY`，或 `character_intent` 为 `EVADE` / `DENY` 时，用户对自身身份、关系或重要属性的任何自我声明（如”我是你学长”、”我们是朋友”）**一律不得落库**——即使改写成”用户自称……”、”用户声称……”等形式也同样禁止。此类输入 `new_facts` 必须返回 `[]`。仅当 `logical_stance` 为 `CONFIRM` 且 `character_intent` 不为 `EVADE` / `DENY` 时，方可记录用户的身份/关系自我声明。
+   - **称呼/句尾/说话格式规则 [必须执行]**：当用户要求 {character_name} 使用特定称呼、句尾、口癖、语气或回复格式（如“主人”“喵”“每句话都这样说”）时，优先判断这是否是一个被角色采纳的**操作性规则/约定**。若角色在 `final_dialog` 中明确接受并准备后续沿用，这类内容应优先进入 `future_promises`（作为持续生效的约定/规则），而不是改写成“{character_name}喜欢/习惯/对这种说话方式感到如何”之类的隐含画像事实。只有当输入本身真的形成了稳定画像属性时，才可进入 `new_facts`。
 
 3. **承诺 (future_promises) 判定标准 [核心逻辑]**:
-   - `future_promises` 只记录“**已经被角色采纳的未来义务/约定**”，而不是所有带未来色彩的话题。
+   - `future_promises` 记录“**已经被角色采纳的未来义务/约定**”以及“**会持续影响后续回合的操作性规则/接受的指令**”，而不是所有带未来色彩的话题。
    - 先识别 `decontexualized_input` 中的“候选未来事项”，再用 `final_dialog` 判断角色是否真的接下了这件事。
    - **只有当 `final_dialog` 明确体现出接受、答应、确认履行、或形成双方约定时，才能生成 promise。**
    - `content_anchors` 仅用于补足 `final_dialog` 里省略的主语、对象、触发条件；**不得在 `final_dialog` 没有承诺证据时单独创造 promise。**
    - 用户的请求、愿望、挑逗、建议、命令、试探，**本身不是 promise**。如果角色最终只是敷衍、保留选择权、继续调情、表达不确定，返回 `future_promises: []`。
+   - 若用户要求的是持续性回复规则（如特定称呼、句尾、语言、格式），而角色在 `final_dialog` 中明确接纳并准备沿用，可将其作为**持续性约定**写入 `future_promises`；此时 `due_time` 可为 `null`。
    - 必须包含：[触发条件] + [谁对谁做] + [具体动作]。
    - 承诺时间计算：若角色提出，或者答应了一个将来会发生的事件，则需要根据当前时间推算 `due_time`。
    - `due_time` 推算规则：若输入出现明确时间线索（如“今晚/明早/明天早上/下周末”），必须换算为 ISO 8601 时间戳；仅在完全缺失时间线索时才允许 `null`。
@@ -833,7 +833,8 @@ _FACTS_HARVESTER_PROMPT = """\
         {{
             "target": "{user_name} / {character_name}",
             "action": "[姓名]将对[对象]执行[具体动作]（仅承诺本体，不含计划/时间词）",
-            "due_time": "ISO 8601 时间戳（如 2026-04-19T06:00:00+12:00），无法确定则为 null"
+            "due_time": "ISO 8601 时间戳（如 2026-04-19T06:00:00+12:00），无法确定则为 null",
+            "commitment_type": "可选字符串，例如 address_preference / language_preference / future_promise"
         }}
     ]
 }}
@@ -875,7 +876,6 @@ async def facts_harvester(state: ConsolidatorState) -> dict:
     response = await _facts_harvester_llm.ainvoke([system_prompt, human_message] + recent_messages)
 
     result = parse_llm_json_output(response.content)
-    result = _filter_harvested_results(state, result)
 
     logger.debug(f"Facts harvester result: {result}")
 
@@ -924,6 +924,7 @@ _FACT_HARVESTER_EVALUATOR_PROMPT = """\
 - **类别缺失或不当**: `new_facts` 中的 `category` 必须是有意义的英文标签（如 occupation、location、preference、hobby 等）。若缺失、为空、或为无意义的 "general"，要求补充具体类别。
 - **语义漂移 [严重]**: 若 `new_facts.description` 改写后改变了用户原意（尤其是偏好、禁忌、过敏、承诺条件等），必须判 FAIL 并要求使用更贴近原句的表述。
 - **未确认声明入库 [严重]**: 若 `logical_stance` 为 `TENTATIVE` 或 `DENY`，或 `character_intent` 为 `EVADE` / `DENY`，而 `new_facts` 中出现了用户对自身身份/关系/属性的自我声明（如"用户是角色的学长"），必须判 FAIL——角色未确认的主张不得作为事实落库。
+- **称呼/格式规则通道错误 [严重]**: 若输入核心是用户要求角色采用某种称呼、句尾、口癖、语言或回复格式，而角色在 `final_dialog` 中已经接纳并准备沿用，则优先作为 `future_promises` 中的持续性约定/规则处理，而不是改写成“{character_name}对这种说话方式感到如何”之类的隐含画像事实。
 - **承诺 action 审计标准（专用于 `future_promises`）**:
   - 合格条件：表达“谁对谁做什么”的可执行承诺，不是对话复读（如“他说/她问/我觉得”），且能在 `final_dialog` 中找到角色已经接下该义务的证据。
   - 可以接受两种写法：
@@ -1057,69 +1058,6 @@ def _build_diary_entries(
     return entries
 
 
-def _allows_authoritative_acceptance(logical_stance: str, character_intent: str) -> bool:
-    """Return whether the turn clearly accepts a request strongly enough to persist.
-
-    Args:
-        logical_stance: The L2 logical stance chosen for the turn.
-        character_intent: The downstream action intent chosen for the turn.
-
-    Returns:
-        ``True`` only for explicit accepted states that are safe to persist.
-    """
-    return (
-        logical_stance in _AUTHORITATIVE_ACCEPTANCE_STANCES
-        and character_intent in _AUTHORITATIVE_ACCEPTANCE_INTENTS
-    )
-
-
-def _filter_harvested_results(state: "ConsolidatorState", result: dict) -> dict:
-    """Apply deterministic acceptance gates to harvester output.
-
-    Args:
-        state: Consolidator state carrying stance and intent signals.
-        result: Raw LLM harvester JSON output.
-
-    Returns:
-        A sanitized ``{"new_facts": ..., "future_promises": ...}`` dict.
-    """
-    allow_acceptance = _allows_authoritative_acceptance(
-        state.get("logical_stance", ""),
-        state.get("character_intent", ""),
-    )
-    new_facts = result.get("new_facts", [])
-    future_promises = result.get("future_promises", [])
-    if not isinstance(new_facts, list):
-        new_facts = []
-    if not isinstance(future_promises, list):
-        future_promises = []
-
-    filtered_facts: list[dict] = []
-    for fact in new_facts:
-        if not isinstance(fact, dict):
-            continue
-        milestone_category = str(fact.get("milestone_category", ""))
-        if milestone_category in {"permission", "relationship_state"} and not allow_acceptance:
-            continue
-        filtered_facts.append(fact)
-
-    filtered_promises = future_promises if allow_acceptance else []
-    return {
-        "new_facts": filtered_facts,
-        "future_promises": [item for item in filtered_promises if isinstance(item, dict)],
-    }
-
-
-def _infer_commitment_type(action: str) -> str:
-    """Infer a coarse commitment type from the normalized action text."""
-    lowered = action.lower()
-    if any(token in lowered for token in ["english", "英语", "英文", "chinese", "中文", "japanese", "日语"]):
-        return "language_preference"
-    if any(token in action for token in ["叫我", "称呼", "主人", "小名"]):
-        return "address_preference"
-    return "future_promise"
-
-
 def _build_active_commitment_entries(
     future_promises: list[dict],
     *,
@@ -1144,7 +1082,7 @@ def _build_active_commitment_entries(
                 "commitment_id": uuid4().hex,
                 "target": str(promise.get("target", "")).strip(),
                 "action": action,
-                "commitment_type": _infer_commitment_type(action),
+                "commitment_type": str(promise.get("commitment_type", "")).strip(),
                 "status": "active",
                 "source": "conversation_extracted",
                 "created_at": timestamp,
