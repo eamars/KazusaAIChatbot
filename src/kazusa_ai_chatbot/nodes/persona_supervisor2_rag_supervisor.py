@@ -25,6 +25,11 @@ logger = logging.getLogger(__name__)
 
 MAX_REPAIR_PASSES = 1
 
+
+def _normalize_surface_form(value: str) -> str:
+    """Normalize an entity surface form for repair-pass deduplication."""
+    return str(value or "").strip().lower()
+
 _RAG_EVALUATOR_PROMPT = """\
 你是一个检索结果评估器。你的任务是判断当前的检索结果是否足以回答用户的查询，或者是否需要进行一次补充检索。
 
@@ -168,15 +173,26 @@ async def rag_supervisor_evaluator(state: RAGState) -> dict:
     needs_repair = verdict == "needs_repair"
     missing_entities = result.get("missing_entities", [])
     repair_sources = result.get("repair_sources", [])
+    planned_entities = {
+        _normalize_surface_form(entity.get("surface_form", ""))
+        for entity in retrieval_plan.get("entities", [])
+    }
 
-    # Enforce: no repair if no new entities found
-    if needs_repair and not missing_entities:
+    # Enforce the Phase-5 contract: repair may only target newly revealed entities.
+    filtered_entities = [
+        entity for entity in missing_entities
+        if _normalize_surface_form(entity) not in planned_entities
+    ]
+    if needs_repair and not filtered_entities:
         needs_repair = False
-        result["reasoning"] = (result.get("reasoning", "") + " (overridden: no missing entities specified)")
+        result["reasoning"] = (
+            result.get("reasoning", "")
+            + " (overridden: repair requires newly revealed entities)"
+        )
 
     # Enforce: don't re-fetch ledger keys
     filtered_entities = [
-        e for e in missing_entities
+        e for e in filtered_entities
         if not any(e.lower() in k.lower() for k in ledger)
     ]
     if needs_repair and not filtered_entities:

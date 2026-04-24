@@ -8,6 +8,7 @@ from kazusa_ai_chatbot.nodes import persona_supervisor2_cognition_l2 as cognitio
 from kazusa_ai_chatbot.nodes import persona_supervisor2_rag as rag_module
 from kazusa_ai_chatbot.nodes import persona_supervisor2_rag_executors as rag_executors_module
 from kazusa_ai_chatbot.nodes import persona_supervisor2_rag_resolution as rag_resolution_module
+from kazusa_ai_chatbot.nodes import persona_supervisor2_rag_supervisor as rag_supervisor_module
 
 
 class _DummyResponse:
@@ -123,6 +124,46 @@ async def test_call_memory_retriever_agent_preserves_explicit_empty_flag(monkeyp
     assert result["input_context_is_empty_result"] is True
 
 
+@pytest.mark.asyncio
+async def test_call_memory_retriever_agent_keeps_dispatcher_subject_scope(monkeypatch):
+    captured: dict = {}
+
+    async def _fake_memory_retriever_agent(*, task: str, context: dict, expected_response: str):
+        captured["task"] = task
+        captured["context"] = dict(context)
+        captured["expected_response"] = expected_response
+        return {
+            "response": "ok",
+            "is_empty_result": False,
+        }
+
+    monkeypatch.setattr(rag_executors_module, "memory_retriever_agent", _fake_memory_retriever_agent)
+
+    await rag_module.call_memory_retriever_agent_input_context_rag(
+        {
+            "input_context_context": {
+                "target_user_name": "ThirdParty",
+                "target_global_user_id": "uuid-third-party",
+                "entities": ["ThirdParty"],
+            },
+            "user_name": "CurrentUser",
+            "global_user_id": "uuid-current-user",
+            "platform": "discord",
+            "platform_channel_id": "chan-1",
+            "input_context_to_timestamp": "2026-04-24T00:00:00+00:00",
+            "platform_bot_id": "bot-1",
+            "input_context_task": "查第三方最近聊过什么",
+            "input_context_expected_response": "简短回答",
+        }
+    )
+
+    assert captured["context"]["target_user_name"] == "ThirdParty"
+    assert captured["context"]["target_global_user_id"] == "uuid-third-party"
+    assert captured["context"]["target_platform"] == "discord"
+    assert captured["context"]["target_platform_channel_id"] == "chan-1"
+    assert captured["context"]["target_to_timestamp"] == "2026-04-24T00:00:00+00:00"
+
+
 # ── Phase 7 — Third-Party Recall unit tests ──────────────────────
 
 
@@ -221,6 +262,64 @@ async def test_rag_planner_emits_channel_recent_entity(monkeypatch):
     assert "CHANNEL_RECENT_ENTITY" in plan["active_sources"]
     assert len(plan["entities"]) == 1
     assert plan["entities"][0]["surface_form"] == "好笛有"
+
+
+@pytest.mark.asyncio
+async def test_input_context_dispatcher_uses_resolved_task(monkeypatch):
+    llm = _CapturingAsyncLLM({
+        "next_action": "memory_retriever_agent",
+        "reasoning": "需要内部记忆",
+        "task": "检索这条链接之前的讨论",
+        "context": {"target_user_input": "用户在确认之前的链接"},
+        "expected_response": "简短回答",
+    })
+    monkeypatch.setattr(rag_executors_module, "_input_context_rag_dispatcher_llm", llm)
+
+    state = _make_rag_state(
+        decontexualized_input="这个 https://example.com/page",
+        continuation_context={
+            "needs_context_resolution": True,
+            "resolved_task": "用户在确认是否记得这条链接及其之前讨论内容：https://example.com/page",
+            "known_slots": {},
+            "missing_slots": [],
+            "confidence": 0.9,
+            "evidence": ["recent_turn"],
+        },
+    )
+    await rag_executors_module.input_context_rag_dispatcher(state)
+
+    payload = json.loads(llm.messages[1].content)
+    assert payload["user_input"] == state["continuation_context"]["resolved_task"]
+    assert payload["raw_user_input"] == "这个 https://example.com/page"
+
+
+@pytest.mark.asyncio
+async def test_external_dispatcher_uses_resolved_task(monkeypatch):
+    llm = _CapturingAsyncLLM({
+        "next_action": "web_search_agent",
+        "reasoning": "需要外部知识",
+        "task": "查询该链接对应页面的公开资料",
+        "context": {"target_user_input": "链接页面"},
+        "expected_response": "简短回答",
+    })
+    monkeypatch.setattr(rag_executors_module, "_external_rag_dispatcher_llm", llm)
+
+    state = _make_rag_state(
+        decontexualized_input="这个 https://example.com/page",
+        continuation_context={
+            "needs_context_resolution": True,
+            "resolved_task": "用户在确认是否记得这条链接及其之前讨论内容：https://example.com/page",
+            "known_slots": {},
+            "missing_slots": [],
+            "confidence": 0.9,
+            "evidence": ["recent_turn"],
+        },
+    )
+    await rag_executors_module.external_rag_dispatcher(state)
+
+    payload = json.loads(llm.messages[1].content)
+    assert payload["user_input"] == state["continuation_context"]["resolved_task"]
+    assert payload["raw_user_input"] == "这个 https://example.com/page"
 
 
 @pytest.mark.asyncio
@@ -374,8 +473,99 @@ def test_tier_gate_should_run_tier2():
     assert rag_executors_module._should_run_tier2(state) == "skip"
 
 
+def test_tier_gate_should_run_input_context():
+    state = _make_rag_state(retrieval_plan={"retrieval_mode": "CASCADED", "active_sources": ["EXTERNAL_KNOWLEDGE"]})
+    assert rag_executors_module._should_run_input_context(state) == "run"
+    state = _make_rag_state(retrieval_plan={"retrieval_mode": "EXTERNAL_KNOWLEDGE", "active_sources": ["EXTERNAL_KNOWLEDGE"]})
+    assert rag_executors_module._should_run_input_context(state) == "skip"
+    state = _make_rag_state(retrieval_plan={"retrieval_mode": "THIRD_PARTY_PROFILE", "active_sources": ["THIRD_PARTY_PROFILE"]})
+    assert rag_executors_module._should_run_input_context(state) == "skip"
+
+
 def test_tier_gate_should_run_tier3():
     state = _make_rag_state(retrieval_plan={"active_sources": ["EXTERNAL_KNOWLEDGE"]})
     assert rag_executors_module._should_run_tier3(state) == "run"
     state = _make_rag_state(retrieval_plan={"active_sources": ["CHANNEL_RECENT_ENTITY"]})
     assert rag_executors_module._should_run_tier3(state) == "skip"
+
+
+@pytest.mark.asyncio
+async def test_evaluator_repair_requires_newly_revealed_entity(monkeypatch):
+    llm = _CapturingAsyncLLM({
+        "verdict": "needs_repair",
+        "reasoning": "原实体缺失",
+        "coverage_score": 0.5,
+        "missing_entities": ["好笛有"],
+        "repair_sources": ["CHANNEL_RECENT_ENTITY"],
+    })
+    monkeypatch.setattr(rag_supervisor_module, "_evaluator_llm", llm)
+
+    state = _make_rag_state(
+        continuation_context={"resolved_task": "好笛有最近聊了什么？"},
+        retrieval_plan={
+            "retrieval_mode": "CASCADED",
+            "active_sources": ["CHANNEL_RECENT_ENTITY"],
+            "entities": [{"surface_form": "好笛有", "entity_type": "person"}],
+        },
+        resolved_entities=[
+            {
+                "surface_form": "好笛有",
+                "entity_type": "person",
+                "resolved_global_user_id": "",
+                "resolution_confidence": 0.0,
+                "resolution_method": "unresolved",
+            }
+        ],
+    )
+
+    result = await rag_supervisor_module.rag_supervisor_evaluator(state)
+    assert result["needs_repair"] is False
+    assert result["repair_entities"] == []
+
+
+@pytest.mark.asyncio
+async def test_deep_retrieval_graph_runs_external_without_tier2(monkeypatch):
+    call_order: list[str] = []
+
+    async def _fake_input_context_dispatcher(state):
+        call_order.append("input_context")
+        return {
+            "input_context_next_action": "end",
+            "input_context_task": "",
+            "input_context_context": {},
+            "input_context_expected_response": "",
+        }
+
+    async def _fake_external_dispatcher(state):
+        call_order.append("external_dispatcher")
+        return {
+            "external_rag_next_action": "web_search_agent",
+            "external_rag_task": "查外部资料",
+            "external_rag_context": {},
+            "external_rag_expected_response": "简短回答",
+        }
+
+    async def _fake_web_search_agent(state):
+        call_order.append("web_search")
+        return {
+            "external_rag_results": ["外部结果"],
+            "external_rag_is_empty_result": False,
+        }
+
+    monkeypatch.setattr(rag_module, "input_context_rag_dispatcher", _fake_input_context_dispatcher)
+    monkeypatch.setattr(rag_module, "external_rag_dispatcher", _fake_external_dispatcher)
+    monkeypatch.setattr(rag_module, "call_web_search_agent", _fake_web_search_agent)
+
+    graph = rag_module._build_retrieval_graph("DEEP", 80)
+    result = await graph.ainvoke(
+        _make_rag_state(
+            retrieval_plan={
+                "retrieval_mode": "EXTERNAL_KNOWLEDGE",
+                "active_sources": ["EXTERNAL_KNOWLEDGE"],
+                "entities": [],
+            }
+        )
+    )
+
+    assert call_order == ["external_dispatcher", "web_search"]
+    assert result["external_rag_results"] == ["外部结果"]

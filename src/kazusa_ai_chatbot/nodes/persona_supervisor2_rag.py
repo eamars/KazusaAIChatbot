@@ -102,6 +102,7 @@ from kazusa_ai_chatbot.nodes.persona_supervisor2_rag_resolution import (  # noqa
     rag_planner,
 )
 from kazusa_ai_chatbot.nodes.persona_supervisor2_rag_executors import (  # noqa: E402, F401
+    _should_run_input_context,
     _should_run_tier2,
     _should_run_tier3,
     call_memory_retriever_agent_input_context_rag,
@@ -363,7 +364,11 @@ def _build_retrieval_graph(depth: str, affinity_percent: float):
     builder.add_node("rag_noop", _rag_noop)
 
     if depth == DEEP:
-        builder.add_edge(START, "input_context_rag_dispatcher")
+        builder.add_conditional_edges(
+            START,
+            _should_run_input_context,
+            {"run": "input_context_rag_dispatcher", "skip": "tier_1_join"},
+        )
 
         builder.add_conditional_edges(
             "input_context_rag_dispatcher",
@@ -377,6 +382,14 @@ def _build_retrieval_graph(depth: str, affinity_percent: float):
             _should_run_tier2,
             {
                 "run": "channel_recent_entity_rag",
+                "skip": "rag_noop",
+            },
+        )
+        builder.add_conditional_edges(
+            "rag_noop",
+            _should_run_tier3,
+            {
+                "run": "external_rag_dispatcher",
                 "skip": END,
             },
         )
@@ -464,6 +477,14 @@ def _build_rag_graph(depth: str, affinity_percent: float):
             _should_run_tier2,
             {
                 "run": "channel_recent_entity_rag",
+                "skip": "rag_noop",
+            },
+        )
+        builder.add_conditional_edges(
+            "rag_noop",
+            _should_run_tier3,
+            {
+                "run": "external_rag_dispatcher",
                 "skip": END,
             },
         )
@@ -794,37 +815,30 @@ async def call_rag_subgraph(state: GlobalPersonaState) -> GlobalPersonaState:
             repair_entities,
         )
 
-        # Build synthetic resolved_entities for the repair scope
-        repair_resolved = [
-            {
-                "surface_form": e,
-                "entity_type": "unknown",
-                "resolved_global_user_id": "",
-                "resolution_confidence": 0.0,
-                "resolution_method": "repair_pass",
-            }
-            for e in repair_entities
-        ]
-
-        # Merge repair entities into existing resolution result
         repair_state = dict(result)
-        existing_entities = list(repair_state.get("resolved_entities") or [])
-        existing_surfaces = {e.get("surface_form", "").lower() for e in existing_entities}
-        for re_ent in repair_resolved:
-            if re_ent["surface_form"].lower() not in existing_surfaces:
-                existing_entities.append(re_ent)
-        repair_state["resolved_entities"] = existing_entities
 
-        # Add repair sources to active_sources if not present
+        # Repair runs a fresh resolution step scoped only to the newly revealed
+        # entities, matching the Phase-5 design contract.
         repair_plan = dict(repair_state.get("retrieval_plan") or {})
         repair_sources = eval_result.get("repair_sources", [])
         existing_sources = set(repair_plan.get("active_sources", []))
         for src in repair_sources:
             existing_sources.add(src)
         repair_plan["active_sources"] = sorted(existing_sources)
+        repair_plan["entities"] = [
+            {
+                "surface_form": entity,
+                "entity_type": "unknown",
+                "resolution_confidence": 0.0,
+            }
+            for entity in repair_entities
+        ]
         repair_state["retrieval_plan"] = repair_plan
 
-        # Clear ledger keys for repair entities only (allow re-fetch)
+        grounded_repair = await entity_grounder(repair_state)
+        repair_state["resolved_entities"] = grounded_repair["resolved_entities"]
+        repair_state["entity_resolution_notes"] = grounded_repair["entity_resolution_notes"]
+
         repair_ledger = dict(repair_state.get("retrieval_ledger") or {})
         for re_ent in repair_entities:
             keys_to_remove = [k for k in repair_ledger if re_ent.lower() in k.lower()]

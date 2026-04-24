@@ -28,6 +28,19 @@ _CONTINUATION_RESOLVER_PROMPT = """\
 - 如果用户输入已经是完整的查询（包含明确主语和宾语），则 `needs_context_resolution` 为 false
 - 如果能从 `chat_history_recent` 确定被省略的对象/任务，则补全并输出 `resolved_task`
 - 如果无法确定，则保持低置信度，不要猜测
+- 如果输入中包含 URL、文件名、引用文本、专有名词等字面锚点，必须原样保留这些锚点，不得替换成猜测出的别名或相近实体
+- `resolved_task` 必须表达用户想检索/确认的任务，不能改写成助手视角的追问、澄清问题或反问句
+- 如果你只能看出"用户在指这个链接/这个对象"，但无法确定具体想问哪一部分，应保留原始锚点并降低置信度，而不是把 `resolved_task` 改写成"是指哪一部分？"这类问题
+
+# URL / 字面锚点示例
+- 输入：`这个 https://example.com/page`
+  错误输出：`这个链接是哪个页面？`
+  错误原因：把用户任务改写成了助手澄清问题
+  正确输出示例 1：`用户在提及这条链接：https://example.com/page`
+  正确输出示例 2：`用户在确认是否记得这条链接及其相关内容：https://example.com/page`
+- 输入：`这个文件 README.md`
+  错误输出：`README.md 是什么内容？`
+  正确输出：`用户在提及 README.md 这个文件`
 
 # 输入格式
 {{
@@ -102,6 +115,16 @@ _RAG_PLANNER_PROMPT = """\
 
 # 实体识别
 从输入中提取所有提及的人物/实体（不含当前用户和角色本身），并标注其类型。
+- 如果输入或 `resolved_task` 含有 URL、引用文本、文件名、页面标题等字面锚点，必须优先保留这些锚点；不要把它们替换成猜测出的相近实体名
+- 只有当实体在输入、`resolved_task` 或最近历史里有明确依据时，才允许写入 `entities`
+- 如果 `continuation_confidence` 偏低或 `missing_slots` 非空，且任务仍不具备可检索性，应选择 `NONE`，让主回复阶段进行澄清，而不是硬启动检索
+
+# URL / 字面锚点示例
+- 若 `resolved_task` 是 `用户在确认是否记得这条链接及其相关内容：https://example.com/page`
+  则允许把 URL 原样写入 `task`、`entities.surface_form` 或 `external_task_hint`
+- 禁止把它改写成猜测出的近似实体名、近音名或错别字
+- 当页面真实标题不确定时，宁可保留 URL，也不要输出一个看似具体但缺乏依据的人名
+- 当 `subject.primary_entity` 没有来自用户输入、最近历史或其他明确证据时，应填写原始 URL 锚点或空字符串；不要仅凭 URL 编码内容猜测页面标题
 
 # 输入格式
 {{
@@ -109,6 +132,7 @@ _RAG_PLANNER_PROMPT = """\
     "resolved_task": "延续解析器补全后的任务（如果没有补全则与 decontextualized_input 相同）",
     "continuation_needs_resolution": true或false,
     "continuation_confidence": 0.0到1.0,
+    "continuation_missing_slots": ["仍然缺失的信息"],
     "user_name": "当前用户名",
     "channel_topic": "频道话题",
     "chat_history_recent_speakers": ["最近对话中出现的发言者名称"],
@@ -164,6 +188,7 @@ async def rag_planner(state: RAGState) -> dict:
         "resolved_task": resolved_task,
         "continuation_needs_resolution": continuation_context.get("needs_context_resolution", False),
         "continuation_confidence": continuation_context.get("confidence", 0.0),
+        "continuation_missing_slots": continuation_context.get("missing_slots", []),
         "user_name": state["user_name"],
         "channel_topic": state.get("channel_topic", ""),
         "chat_history_recent_speakers": sorted(recent_speakers),

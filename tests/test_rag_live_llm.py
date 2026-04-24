@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime, timezone
+from typing import Any
 
 import httpx
 import pytest
@@ -105,6 +106,30 @@ def _log_result(label: str, result: dict) -> None:
     logger.info("%s => %r", label, result)
 
 
+def _collect_strings(value: Any) -> list[str]:
+    """Collect every string leaf from a nested dict/list structure.
+
+    Args:
+        value: Arbitrary nested test payload.
+
+    Returns:
+        A flat list of string leaves found inside ``value``.
+    """
+    if isinstance(value, str):
+        return [value]
+    if isinstance(value, dict):
+        strings: list[str] = []
+        for item in value.values():
+            strings.extend(_collect_strings(item))
+        return strings
+    if isinstance(value, list):
+        strings: list[str] = []
+        for item in value:
+            strings.extend(_collect_strings(item))
+        return strings
+    return []
+
+
 # ══════════════════════════════════════════════════════════════════
 # Phase 1 — Continuation Resolver
 # ══════════════════════════════════════════════════════════════════
@@ -150,6 +175,54 @@ async def test_continuation_resolver_bare_fragment(ensure_live_llm) -> None:
     )
     assert ctx["resolved_task"].strip(), f"resolved_task should be non-empty: {ctx}"
     assert ctx["confidence"] >= 0.3, f"Confidence too low: {ctx}"
+
+
+async def test_live_url_anchor_preserved_across_resolution_and_planner(ensure_live_llm) -> None:
+    """URL-bearing follow-up keeps its literal anchor and avoids entity drift."""
+    url = "https://zh.moegirl.org.cn/%E6%9D%8F%E5%B1%B1%E5%8D%83%E7%BA%B1"
+    state = _make_rag_state(
+        f"这个 {url}",
+        chat_history_recent=[
+            {"role": "user", "content": "你还记得我刚才发的那个链接吗？", "display_name": "TestUser"},
+            {"role": "assistant", "content": "记得，是你刚发来的页面链接。"},
+            {"role": "user", "content": "就是那个页面。", "display_name": "TestUser"},
+        ],
+        channel_topic="闲聊",
+    )
+
+    cr_result = await continuation_resolver(state)
+    _log_result("chain.url_anchor.continuation", cr_result)
+    state.update(cr_result)
+
+    ctx = cr_result["continuation_context"]
+    resolved_task = ctx["resolved_task"]
+    assert url in resolved_task, (
+        f"Continuation resolver must preserve the literal URL anchor: {ctx}"
+    )
+    assistant_clarification_patterns = ("哪一部分", "哪个页面", "是什么页面", "指什么页面")
+    assert not any(pattern in resolved_task for pattern in assistant_clarification_patterns), (
+        f"Resolver should not rewrite the task into an assistant clarification: {ctx}"
+    )
+
+    planner_result = await rag_planner(state)
+    _log_result("chain.url_anchor.planner", planner_result)
+
+    plan = planner_result["retrieval_plan"]
+    plan_strings = _collect_strings(plan)
+    assert any(url in text for text in plan_strings), (
+        f"Planner output should still preserve the URL anchor somewhere in the plan: {plan}"
+    )
+    primary_entity = str((plan.get("subject") or {}).get("primary_entity") or "")
+    assert primary_entity in ("", url), (
+        f"Planner should keep primary_entity as the URL anchor or leave it empty when title is uncertain: {plan}"
+    )
+
+    known_wrong_entities = ("柊山千纺", "柊山千束", "柊山千枝")
+    assert not any(
+        wrong_name in text
+        for text in plan_strings
+        for wrong_name in known_wrong_entities
+    ), f"Planner drifted into known wrong entities: {plan}"
 
 
 # ══════════════════════════════════════════════════════════════════

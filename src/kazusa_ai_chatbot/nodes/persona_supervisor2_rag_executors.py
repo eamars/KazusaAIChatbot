@@ -56,10 +56,12 @@ _EXTERNAL_RAG_DISPATCHER_PROMPT = """\
 - "expected_response":
   * 期望的返回格式（例如表格，长文本，短文本， YY/MM/DD, Yes/No），内容（包含的具体，或者宽泛的信息）和长度（例如<60字）
   * 返回格式应陈述事实，禁止包含第一人称描述。
+- 如果 `user_input` 中含有 URL、引用文本、文件名、页面标题等字面锚点，`task` 和 `context` 必须保留这些锚点，不能替换为猜测出的相近实体名
 
 # 输入格式
 {{
     "user_input": "用户给你发送的信息",
+    "raw_user_input": "用户原始输入",
     "channel_topic": "用户当前上下文的话题（仅供参考，不建议直接加入搜索任务）"
 }}
 
@@ -79,8 +81,28 @@ _EXTERNAL_RAG_DISPATCHER_PROMPT = """\
 }}
 """
 _external_rag_dispatcher_llm = get_llm(temperature=0, top_p=1.0)
+
+
+def _resolved_retrieval_input(state: RAGState) -> str:
+    """Return the resolution-aware retrieval query for downstream dispatchers.
+
+    Args:
+        state: Full RAG state carrying both the raw input and continuation
+            resolver output.
+
+    Returns:
+        ``continuation_context.resolved_task`` when available, otherwise the
+        raw ``decontexualized_input``.
+    """
+    continuation_context = state.get("continuation_context") or {}
+    resolved_task = str(continuation_context.get("resolved_task") or "").strip()
+    if resolved_task:
+        return resolved_task
+    return state["decontexualized_input"]
+
+
 async def external_rag_dispatcher(state: RAGState) -> dict:
-    decontexualized_input = state["decontexualized_input"]
+    retrieval_input = _resolved_retrieval_input(state)
     channel_topic = state["channel_topic"]
     timestamp = state["timestamp"]
     character_name = state["character_profile"]["name"]
@@ -91,7 +113,8 @@ async def external_rag_dispatcher(state: RAGState) -> dict:
     ))
 
     user_prompt = HumanMessage(content=json.dumps({
-        "user_input": decontexualized_input,
+        "user_input": retrieval_input,
+        "raw_user_input": state["decontexualized_input"],
         "channel_topic": channel_topic
     }, ensure_ascii=False))
 
@@ -165,10 +188,12 @@ _INPUT_CONTEXT_RAG_DISPATCHER_PROMPT = """\
   * 明确要求返回事实细节。例如："具体的口味名称及对话时间"、"关于任务进度的最后一次描述"。
   * 期望的返回格式（例如表格，长文本，短文本， YY/MM/DD, Yes/No），具体内容和长度（例如<60字）
   * 返回格式应陈述客观事实，不要使用角色名或第一人称作为语境锚点。例如："{user_name} 提到..."，而非 "{character_name} 认为..."。
+- 如果 `user_input` 中含有 URL、引用文本、文件名、页面标题等字面锚点，`task` 和 `context` 必须保留这些锚点，不能替换为猜测出的相近实体名
 
 # 输入格式
 {{
     "user_input": "用户给你发送的信息",
+    "raw_user_input": "用户原始输入",
     "channel_topic": "用户当前上下文的话题（仅供参考，不建议直接加入搜索任务）"
 }}
 
@@ -195,7 +220,7 @@ _INPUT_CONTEXT_RAG_DISPATCHER_PROMPT = """\
 """
 _input_context_rag_dispatcher_llm = get_llm(temperature=0, top_p=1.0)
 async def input_context_rag_dispatcher(state: RAGState) -> dict:
-    decontexualized_input = state["decontexualized_input"]
+    retrieval_input = _resolved_retrieval_input(state)
     channel_topic = state["channel_topic"]
     timestamp = state["timestamp"]
     character_name = state["character_profile"]["name"]
@@ -212,7 +237,8 @@ async def input_context_rag_dispatcher(state: RAGState) -> dict:
     ))
 
     user_prompt = HumanMessage(content=json.dumps({
-        "user_input": decontexualized_input,
+        "user_input": retrieval_input,
+        "raw_user_input": state["decontexualized_input"],
         "channel_topic": channel_topic
     }, ensure_ascii=False))
 
@@ -268,14 +294,11 @@ async def call_web_search_agent(state: RAGState) -> dict:
 
 async def call_memory_retriever_agent_input_context_rag(state: RAGState) -> dict:
     context = dict(state["input_context_context"])
-    # Override identity fields with ground-truth from pipeline state to prevent
-    # the dispatcher LLM from injecting platform IDs (e.g. bot ID) as user UUID.
-    context["target_user_name"] = state["user_name"]
-    context["target_global_user_id"] = state["global_user_id"]
-    context["target_platform"] = state["platform"]
-    context["target_platform_channel_id"] = state["platform_channel_id"]
-    context["target_to_timestamp"] = state["input_context_to_timestamp"]
-    context["target_platform_bot_id"] = state["platform_bot_id"]
+    # Only inject structural bounds here. Semantic target selection stays in the
+    # dispatcher / planner contract so we do not silently rewrite the subject.
+    context.setdefault("target_platform", state["platform"])
+    context.setdefault("target_platform_channel_id", state["platform_channel_id"])
+    context.setdefault("target_to_timestamp", state["input_context_to_timestamp"])
 
     result = await memory_retriever_agent(
         task=state["input_context_task"],
@@ -753,6 +776,27 @@ def _should_run_tier2(state: RAGState) -> str:
     active_sources = retrieval_plan.get("active_sources", [])
     has_tier2_source = any(s in active_sources for s in ("CHANNEL_RECENT_ENTITY", "THIRD_PARTY_PROFILE"))
     if has_tier2_source:
+        return "run"
+    return "skip"
+
+
+def _should_run_input_context(state: RAGState) -> str:
+    """Return whether the Tier-1 input-context dispatcher should execute.
+
+    Args:
+        state: Full RAG state containing the planner output.
+
+    Returns:
+        ``"run"`` when the retrieval mode requires Tier-1 internal recall,
+        otherwise ``"skip"``.
+    """
+    retrieval_plan = state.get("retrieval_plan") or {}
+    mode = str(retrieval_plan.get("retrieval_mode", "NONE"))
+    active_sources = set(retrieval_plan.get("active_sources", []))
+
+    if mode in {"CASCADED", "CHANNEL_RECENT_ENTITY", "GLOBAL_ENTITY_KNOWLEDGE"}:
+        return "run"
+    if "CHANNEL_RECENT_ENTITY" in active_sources:
         return "run"
     return "skip"
 
