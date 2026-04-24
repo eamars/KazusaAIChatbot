@@ -23,6 +23,9 @@ _MSG_DECONTEXUALIZER_PROMPT = """\
 - 严禁将社交辞令（如“你好”）强制与 channel_topic/indirect_speech_context 合并。
 - 信息不足：如果无法确定具体实体，请保持原句，不要猜测，也不要假设。
 - 不要修改俚语
+- 如果输入中出现 URL、文件名、引用文本、专有名词等**字面锚点**，必须原样保留这些锚点，禁止替换成猜测出的页面标题、人物名、别名或近似实体。
+- `channel_topic` 和 `indirect_speech_context` 只能帮助你理解代词/省略指代，**不能覆盖或改写**用户输入里已经出现的字面锚点。
+- 如果 `channel_topic` / `indirect_speech_context` 中出现了一个名字，但该名字并未出现在 `user_input` 或 `chat_history` 的明确文字里，则不要把这个名字注入到输出中。
 
 # 修改规则：
 - 消除代词：将”他”、”那个东西”、”那里”等**指示性代词**替换为具体的实体名称。
@@ -41,11 +44,15 @@ _MSG_DECONTEXUALIZER_PROMPT = """\
 - 辅助信息：channel_topic 和 indirect_speech_context 可以提供额外的上下文信息，帮助你更好地理解用户的意图。
  * 如果 chat_history 不足以提供足够的信息则可以考虑 indirect_speech_context 作为补充。
  * 如果 indirect_speech_context 也不足以提供足够的信息则可以考虑 channel_topic 作为补充。
+ * 但当 `user_input` 已经包含 URL、文件名、引用文本等字面锚点时，`chat_history` / `indirect_speech_context` / `channel_topic` 都**不能**把这些锚点改写成猜测出的标题或实体名。
 
 # 示例
 - "I saw him yesterday" -> "I saw John yesterday"
 - `indirect_speech_context = ""` 且最近 `chat_history` 已明确提到「昨天在天台看书的那个同学」时，`user_input = "他今天是不是又在躲雨？"` -> 改写为「昨天在天台看书的那个同学今天是不是又在躲雨？」
 - `indirect_speech_context = "大家正在讨论学生会会长阿澈最近总提起旧事。"` 且 `user_input = "他是不是又提过那件事？"` -> 保持原句，不要改成「阿澈是不是又提过那件事？」
+- `user_input = "https://example.com/page"` -> 保持原句，不要改成「某某角色的百科页面」
+- `user_input = "这个 https://example.com/page"` 且 `channel_topic = "用户在发某角色的百科链接"` -> 可以保留原句，或改成「这个 https://example.com/page」，但不要改成「这个某某角色的百科页面链接」
+- `user_input = "这个 README.md"` 且 `channel_topic` 提到某个功能模块 -> 不要改成「这个某功能模块的说明文档」，应保留 `README.md`
 
 # 输入格式
 {

@@ -244,6 +244,22 @@ _DECONTEXT_CASES = [
         "preserve_third_person_in_indirect_speech",
         id="decontext-preserve-third-person-in-indirect-speech",
     ),
+    pytest.param(
+        {
+            "user_input": "https://zh.moegirl.org.cn/%E6%9D%8F%E5%B1%B1%E5%8D%83%E7%BA%B1",
+            "user_name": "LiveDecontextUser",
+            "platform_user_id": "live-user",
+            "platform_bot_id": "live-bot",
+            "chat_history_recent": [
+                {"role": "assistant", "content": "你发了一个萌娘百科链接。"},
+                {"role": "user", "content": "嗯，就是这个。"},
+            ],
+            "channel_topic": "用户向杏山千纱展示并要求查看一个关于‘柊山千纺’的百科页面链接",
+            "indirect_speech_context": "",
+        },
+        "preserve_literal_url_anchor",
+        id="decontext-preserve-literal-url-anchor",
+    ),
 ]
 
 
@@ -260,6 +276,9 @@ async def test_live_msg_decontexualizer_prompt_contracts(ensure_live_llm, state:
         assert "昨天在天台看书的那个同学" in output, f"Failed to resolve referent: {output!r}"
     elif case_id == "keep_complete_sentence":
         assert output == state["user_input"], f"Should preserve already-complete sentence: {output!r}"
+    elif case_id == "preserve_literal_url_anchor":
+        assert state["user_input"] in output, f"URL anchor should be preserved literally: {output!r}"
+        assert "柊山千纺" not in output, f"Decontextualizer should not inject topic-only guessed names: {output!r}"
     else:
         assert "阿澈" not in output, f"Indirect speech should preserve third-person structure: {output!r}"
         assert "他" in output, f"Indirect speech case should keep third-person pronoun: {output!r}"
