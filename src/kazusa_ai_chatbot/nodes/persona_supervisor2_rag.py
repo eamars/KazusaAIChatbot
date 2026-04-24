@@ -20,11 +20,12 @@ new ``research_metadata`` key carries the trace from all five phases.
 """
 
 from langgraph.graph import StateGraph, START, END
-from langchain_core.messages import HumanMessage, SystemMessage
 
 from kazusa_ai_chatbot.nodes.persona_supervisor2_schema import GlobalPersonaState
-from kazusa_ai_chatbot.agents.web_search_agent2 import web_search_agent
-from kazusa_ai_chatbot.agents.memory_retriever_agent import memory_retriever_agent
+from kazusa_ai_chatbot.nodes.persona_supervisor2_rag_schema import (  # noqa: F401
+    RAGState,
+    _build_image_context,
+)
 from kazusa_ai_chatbot.config import (
     AFFINITY_DEFAULT,
     AFFINITY_MIN,
@@ -39,12 +40,13 @@ from kazusa_ai_chatbot.rag.depth_classifier import (
     DEEP,
     InputDepthClassifier,
 )
-from kazusa_ai_chatbot.utils import get_llm, log_dict_subset, log_preview, parse_llm_json_output
+from kazusa_ai_chatbot.utils import log_preview
 
+import hashlib
 import json
 import logging
-import operator
-from typing import TypedDict, Annotated, Any
+from datetime import datetime, timedelta, timezone
+from typing import Any
 
 
 logger = logging.getLogger(__name__)
@@ -93,312 +95,29 @@ def _get_depth_classifier() -> InputDepthClassifier:
     return _depth_classifier
 
 
-class RAGState(TypedDict):
-    # Inputs
-    timestamp: str
-    platform: str
-    platform_channel_id: str
-    platform_message_id: str
-    decontexualized_input: str
-    channel_topic: str
-    input_context_to_timestamp: str
-
-    # Input facts
-    user_name: str
-    global_user_id: str
-    platform_bot_id: str
-    character_profile: dict
-    user_profile: dict
-
-    # Stage-3 metadata thread (carried through every phase)
-    input_embedding: list[float]
-    depth: str                         # "SHALLOW" | "DEEP"
-    depth_confidence: float
-    cache_hit: bool
-    trigger_dispatchers: list[str]
-    rag_metadata: dict
-
-    # External RAG Dispatcher output
-    external_rag_next_action: str
-    external_rag_task: str
-    external_rag_context: dict
-    external_rag_expected_response: str
-
-    # External RAG output
-    external_rag_results: Annotated[list[str], operator.add]
-    external_rag_is_empty_result: bool
-
-    # Input-Context RAG dispatcher output (was: Internal RAG)
-    input_context_next_action: str
-    input_context_task: str
-    input_context_context: dict
-    input_context_expected_response: str
-
-    # Input-Context RAG output
-    input_context_results: Annotated[list[str], operator.add]
-    input_context_is_empty_result: bool
+# ── Phase 6 — re-exports from decomposed submodules ──────────
+from kazusa_ai_chatbot.nodes.persona_supervisor2_rag_resolution import (  # noqa: E402, F401
+    continuation_resolver,
+    entity_grounder,
+    rag_planner,
+)
+from kazusa_ai_chatbot.nodes.persona_supervisor2_rag_executors import (  # noqa: E402, F401
+    _should_run_tier2,
+    _should_run_tier3,
+    call_memory_retriever_agent_input_context_rag,
+    call_web_search_agent,
+    channel_recent_entity_rag,
+    entity_knowledge_rag,
+    external_rag_dispatcher,
+    input_context_rag_dispatcher,
+    third_party_profile_rag,
+)
+from kazusa_ai_chatbot.nodes.persona_supervisor2_rag_supervisor import (  # noqa: E402, F401
+    rag_supervisor_evaluator,
+)
 
 
-_EXTERNAL_RAG_DISPATCHER_PROMPT = """\
-你是角色 {character_name} 的外部感知中枢。你的目标是判断为了让角色做出真实的回应，我们需要检索哪些背景信息。
-- 当前的系统时间为 {timestamp}
 
-# 分析逻辑 (Priority)：
-1. 外部知识：
-   * 触发条件：
-     a) 具有强时效性（如：今天的新闻、当下的天气、即时股价）。
-     b) 极度专业/冷门（如：某个特定API的报错文档、特定经纬度的地图）。
-     c) 认知模型知识截止日期之后发生的事件。
-   * "next_action": "web_search_agent"
-2. 认知模型处理：
-   * 触发条件：大模型通过自身权重即可完美回答。
-   * 包括：常识（如：天空颜色、科学定律）、逻辑推理、数学计算、语言翻译、情感安抚、日常寒暄、系统时间查询。
-   * "next_action": "end"
-3. 内部记忆：
-   * 触发条件：涉及用户个人历史、之前的对话约定、角色私有的秘密或特定人际关系。
-   * 你的工作不是获取内部记忆，所以你不需要做任何事情。
-   * "next_action": "end"
-
-# 任务指派信息
-- "task": "具体要检索的任务描述"
-- "context": (可选) 在 context 中提取关键实体（人物、时间、地点）。若不提供则默认为空字典 {{}}
-- "expected_response":
-  * 期望的返回格式（例如表格，长文本，短文本， YY/MM/DD, Yes/No），内容（包含的具体，或者宽泛的信息）和长度（例如<60字）
-  * 返回格式应陈述事实，禁止包含第一人称描述。
-
-# 输入格式
-{{
-    "user_input": "用户给你发送的信息",
-    "channel_topic": "用户当前上下文的话题（仅供参考，不建议直接加入搜索任务）"
-}}
-
-# 输出要求：
-请务必返回合法的 JSON 字符串，包含但不限于以下字段：
-{{
-    "next_action": "web_search_agent" | "end",
-    "reasoning": "string",
-    "task": "string",
-    "context": {{
-        "target_user_input": "string",  // Transcribe what user says
-        "target_user_topic": "string",  // Trasncribe the user topics in your own words
-        "key": "value",  // other context
-        ...
-    }},
-    "expected_response": "string"
-}}
-"""
-_external_rag_dispatcher_llm = get_llm(temperature=0, top_p=1.0)
-async def external_rag_dispatcher(state: RAGState) -> dict:
-    decontexualized_input = state["decontexualized_input"]
-    channel_topic = state["channel_topic"]
-    timestamp = state["timestamp"]
-    character_name = state["character_profile"]["name"]
-
-    system_prompt = SystemMessage(content=_EXTERNAL_RAG_DISPATCHER_PROMPT.format(
-        timestamp=timestamp,
-        character_name=character_name
-    ))
-
-    user_prompt = HumanMessage(content=json.dumps({
-        "user_input": decontexualized_input,
-        "channel_topic": channel_topic
-    }, ensure_ascii=False))
-
-    response = await _external_rag_dispatcher_llm.ainvoke([
-        system_prompt,
-        user_prompt
-    ])
-
-    result = parse_llm_json_output(response.content)
-
-    next_action = result.get("next_action", "end")
-    dispatcher_reasoning = result.get("reasoning", "")
-    task = result.get("task", "")
-    context = result.get("context", {})
-    expected_response = result.get("expected_response", "")
-
-    logger.debug(
-        "External RAG dispatcher: action=%s task=%s expected=%s context=%s reasoning=%s",
-        next_action,
-        log_preview(task),
-        log_preview(expected_response),
-        log_dict_subset(
-            context if isinstance(context, dict) else {},
-            ["target_user_input", "target_user_topic", "entities", "referenced_event"],
-        ),
-        log_preview(dispatcher_reasoning),
-    )
-
-    return {
-        "external_rag_next_action": next_action,
-        "external_rag_dispatcher_reasoning": dispatcher_reasoning,
-        "external_rag_task": task,
-        "external_rag_context": context,
-        "external_rag_expected_response": expected_response
-    }
-
-
-_INPUT_CONTEXT_RAG_DISPATCHER_PROMPT = """\
-你负责判断是否需要检索记忆库，并生成客观的检索任务。
-- 你在社交平台的账号为 {platform_bot_id}，角色名为 {character_name}
-- 当前的系统时间为 {timestamp}
-- 消息 (`user_input`) 发送者为 {user_name}(global_user_id: {global_user_id})
-
-# 分析逻辑 (Priority)：
-1. 外部知识：
-   * 触发条件：
-     a) 具有强时效性（如：今天的新闻、当下的天气、即时股价）。
-     b) 极度专业/冷门（如：某个特定API的报错文档、特定经纬度的地图）。
-     c) 认知模型知识截止日期之后发生的事件。
-   * 你的工作不是获取外部搜索，所以你不需要做任何事情。
-   * "next_action": "end"
-2. 认知模型处理：
-   * 触发条件：大模型通过自身权重即可完美回答。
-   * 包括：常识（如：天空颜色、科学定律）、逻辑推理、数学计算、语言翻译、情感安抚、日常寒暄、系统时间查询。
-   * "next_action": "end"
-3. 内部记忆：
-   * 触发条件：用户输入中提到了**具体的名词、未完成的约定、之前的选择、或暗示过往背景的指代**。
-   * 核心重心：**不再侧重"用户是个什么样的人"，而侧重"这件事/这个东西我们之前是怎么定的"**。
-   * **过滤准则 (CRITICAL)：**
-     a) **时间局部性**：优先检索 **3个月内** 创建的事实或承诺。
-     b) **有效性过滤**：自动忽略"已完成" 或 "已过期" 的条目。
-     c) **状态优先**：重点寻找 "进行中" 、"待定" 或 "未兑现" 的承诺（如：未送出的蛋糕、未完成的缝纫工作）。
-   * "next_action": "memory_retriever_agent"
-
-# 任务指派信息
-- "task": 用客观语言描述要检索的内容。**不要**带入角色视角或与角色的关系——只描述要找的是什么信息（谁、什么事、何时）。
-  * 正确示例："检索关于'啾啾'的身份描述、行为特征及最后提及时间"
-  * 错误示例："检索'啾啾'与杏山千纱的关系"（不要加入角色名作为参照物）
-- "context": (可选) 在 context 中提取关键实体（人物、时间、地点）。若不提供则默认为空字典 {{}}
-- "expected_response": 包括以下
-  * 明确要求返回事实细节。例如："具体的口味名称及对话时间"、"关于任务进度的最后一次描述"。
-  * 期望的返回格式（例如表格，长文本，短文本， YY/MM/DD, Yes/No），具体内容和长度（例如<60字）
-  * 返回格式应陈述客观事实，不要使用角色名或第一人称作为语境锚点。例如："{user_name} 提到..."，而非 "{character_name} 认为..."。
-
-# 输入格式
-{{
-    "user_input": "用户给你发送的信息",
-    "channel_topic": "用户当前上下文的话题（仅供参考，不建议直接加入搜索任务）"
-}}
-
-# 输出要求：
-请务必返回合法的 JSON 字符串，包含但不限于以下字段：
-{{
-    "next_action": "memory_retriever_agent" | "end",
-    "reasoning": "string",
-    "task": "string",
-    "context": {{
-        "entities": ["实体关键词"],  // Example
-        "time_horizon": "Last 3 Months",  // Example
-        "target_user_input": "string",  // Transcribe what user says
-        "target_user_topic": "string",  // Trasncribe the user topics in your own words
-        "status_filter": {{
-            "include": ["pending", "active", "unfulfilled"],  // Example
-            "exclude": ["accomplished", "expired", "past_due"],  // Example
-            ...
-        }},
-        "referenced_event": "string"  // Example
-    }},
-    "expected_response": "string"
-}}
-"""
-_input_context_rag_dispatcher_llm = get_llm(temperature=0, top_p=1.0)
-async def input_context_rag_dispatcher(state: RAGState) -> dict:
-    decontexualized_input = state["decontexualized_input"]
-    channel_topic = state["channel_topic"]
-    timestamp = state["timestamp"]
-    character_name = state["character_profile"]["name"]
-    platform_bot_id = state["platform_bot_id"]
-    global_user_id = state["global_user_id"]
-    user_name = state["user_name"]
-
-    system_prompt = SystemMessage(content=_INPUT_CONTEXT_RAG_DISPATCHER_PROMPT.format(
-        timestamp=timestamp,
-        character_name=character_name,
-        platform_bot_id=platform_bot_id,
-        global_user_id=global_user_id,
-        user_name=user_name
-    ))
-
-    user_prompt = HumanMessage(content=json.dumps({
-        "user_input": decontexualized_input,
-        "channel_topic": channel_topic
-    }, ensure_ascii=False))
-
-    response = await _input_context_rag_dispatcher_llm.ainvoke([
-        system_prompt,
-        user_prompt
-    ])
-
-    result = parse_llm_json_output(response.content)
-
-    next_action = result.get("next_action", "end")
-    dispatcher_reasoning = result.get("reasoning", "")
-    task = result.get("task", "")
-    context = result.get("context", {})
-    expected_response = result.get("expected_response", "")
-
-    logger.debug(
-        "Input-context dispatcher: action=%s task=%s expected=%s context=%s reasoning=%s",
-        next_action,
-        log_preview(task),
-        log_preview(expected_response),
-        log_dict_subset(
-            context if isinstance(context, dict) else {},
-            ["target_user_input", "target_user_topic", "entities", "time_horizon", "referenced_event"],
-        ),
-        log_preview(dispatcher_reasoning),
-    )
-
-    return {
-        "input_context_next_action": next_action,
-        "input_context_dispatcher_reasoning": dispatcher_reasoning,
-        "input_context_task": task,
-        "input_context_context": context,
-        "input_context_expected_response": expected_response
-    }
-
-
-async def call_web_search_agent(state: RAGState) -> dict:
-    result = await web_search_agent(
-        task=state["external_rag_task"],
-        context=state["external_rag_context"],
-        expected_response=state["external_rag_expected_response"]
-    )
-
-    # Only take the response part
-    processed_response = result.get("response", "")
-
-    return {
-        "external_rag_results": [processed_response],
-        "external_rag_is_empty_result": bool(result.get("is_empty_result", False)),
-    }
-
-
-async def call_memory_retriever_agent_input_context_rag(state: RAGState) -> dict:
-    context = dict(state["input_context_context"])
-    # Override identity fields with ground-truth from pipeline state to prevent
-    # the dispatcher LLM from injecting platform IDs (e.g. bot ID) as user UUID.
-    context["target_user_name"] = state["user_name"]
-    context["target_global_user_id"] = state["global_user_id"]
-    context["target_platform"] = state["platform"]
-    context["target_platform_channel_id"] = state["platform_channel_id"]
-    context["target_to_timestamp"] = state["input_context_to_timestamp"]
-    context["target_platform_bot_id"] = state["platform_bot_id"]
-
-    result = await memory_retriever_agent(
-        task=state["input_context_task"],
-        context=context,
-        expected_response=state["input_context_expected_response"]
-    )
-
-    # Only take the response part
-    processed_response = result.get("response", "")
-
-    return {
-        "input_context_results": [processed_response],
-        "input_context_is_empty_result": bool(result.get("is_empty_result", False)),
-    }
 
 
 async def _rag_noop(_: RAGState) -> dict:
@@ -545,46 +264,244 @@ async def _probe_cache(
     return results, trace
 
 
-def _build_rag_graph(depth: str, affinity_percent: float):
-    """Compile a dispatcher graph whose START edges match the chosen depth.
+# ── Phase 8 — Cache key construction ─────────────────────────────
+
+
+def _build_cache_key(resolution_result: dict) -> str:
+    """Build a stable hash key from resolution outputs.
+
+    The key captures every dimension that makes two queries semantically
+    distinct: resolved task text, resolved entity IDs, active retrieval
+    sources, and the time-scope lookback window.
+
+    Args:
+        resolution_result: The RAGState after the resolution subgraph has run,
+            containing ``continuation_context``, ``resolved_entities``,
+            and ``retrieval_plan``.
+
+    Returns:
+        A hex-digest string suitable as a cache lookup key.
+    """
+    continuation = resolution_result.get("continuation_context") or {}
+    entities = resolution_result.get("resolved_entities") or []
+    plan = resolution_result.get("retrieval_plan") or {}
+
+    key_dict = {
+        "resolved_task": continuation.get("resolved_task", ""),
+        "entity_ids": sorted(
+            e.get("resolved_global_user_id") or e.get("surface_form", "")
+            for e in entities
+        ),
+        "active_sources": sorted(plan.get("active_sources", [])),
+        "lookback_hours": plan.get("time_scope", {}).get("lookback_hours", 72),
+    }
+    raw = json.dumps(key_dict, sort_keys=True, ensure_ascii=False)
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+
+# ── Phase 8 — Resolution + Retrieval subgraph builders ──────────
+
+
+def _build_resolution_graph():
+    """Compile the resolution subgraph (cheap, always runs).
+
+    Topology:
+      START → continuation_resolver → rag_planner → entity_grounder → END
+
+    Returns:
+        A compiled langgraph ``StateGraph`` for resolution.
+    """
+    builder = StateGraph(RAGState)
+    builder.add_node("continuation_resolver", continuation_resolver)
+    builder.add_node("rag_planner", rag_planner)
+    builder.add_node("entity_grounder", entity_grounder)
+    builder.add_edge(START, "continuation_resolver")
+    builder.add_edge("continuation_resolver", "rag_planner")
+    builder.add_edge("rag_planner", "entity_grounder")
+    builder.add_edge("entity_grounder", END)
+    return builder.compile()
+
+
+def _build_retrieval_graph(depth: str, affinity_percent: float):
+    """Compile the retrieval subgraph (expensive, only on cache miss).
+
+    Topology (DEEP):
+      START → input_context_rag_dispatcher
+        → [Tier 1: call_memory_retriever_agent_input_context_rag]
+        → tier_1_join → tier_2_gate
+            "run"  → channel_recent_entity_rag → third_party_profile_rag
+            "skip" → END
+        → tier_3_gate
+            "run"  → external_rag_dispatcher → call_web_search_agent
+            "skip" → END
+
+    Topology (SHALLOW):
+      START → tier_2_gate
+            "run"  → channel_recent_entity_rag → third_party_profile_rag → END
+            "skip" → END
 
     Args:
         depth: ``"SHALLOW"`` or ``"DEEP"`` from the classifier.
-        affinity_percent: User affinity normalised into a 0–100 band; used to
-            reproduce the existing affinity-based external_rag skip.
+        affinity_percent: User affinity normalised into a 0–100 band.
 
     Returns:
-        A compiled langgraph ``StateGraph`` ready for ``ainvoke``.
+        A compiled langgraph ``StateGraph`` for retrieval.
     """
     builder = StateGraph(RAGState)
-    builder.add_node("external_rag_dispatcher", external_rag_dispatcher)
+
+    # Tier 1: existing dispatchers
     builder.add_node("input_context_rag_dispatcher", input_context_rag_dispatcher)
-    builder.add_node("call_web_search_agent", call_web_search_agent)
     builder.add_node("call_memory_retriever_agent_input_context_rag", call_memory_retriever_agent_input_context_rag)
+    builder.add_node("entity_knowledge_rag", entity_knowledge_rag)
+    builder.add_node("external_rag_dispatcher", external_rag_dispatcher)
+    builder.add_node("call_web_search_agent", call_web_search_agent)
+
+    # Tier 2: third-party backends
+    builder.add_node("channel_recent_entity_rag", channel_recent_entity_rag)
+    builder.add_node("third_party_profile_rag", third_party_profile_rag)
+
+    # Joining / noop nodes
+    builder.add_node("tier_1_join", _rag_noop)
     builder.add_node("rag_noop", _rag_noop)
 
-    has_entry_edge = depth == DEEP
     if depth == DEEP:
         builder.add_edge(START, "input_context_rag_dispatcher")
-        if affinity_percent >= EXTERNAL_AFFINITY_SKIP_PERCENT:
-            builder.add_edge(START, "external_rag_dispatcher")
-    if not has_entry_edge:
-        builder.add_edge(START, "rag_noop")
 
-    builder.add_conditional_edges(
-        "external_rag_dispatcher",
-        lambda state: state["external_rag_next_action"],
-        {"web_search_agent": "call_web_search_agent", "end": END},
-    )
-    builder.add_conditional_edges(
-        "input_context_rag_dispatcher",
-        lambda state: state["input_context_next_action"],
-        {"memory_retriever_agent": "call_memory_retriever_agent_input_context_rag", "end": END},
-    )
+        builder.add_conditional_edges(
+            "input_context_rag_dispatcher",
+            lambda state: state.get("input_context_next_action", "end"),
+            {"memory_retriever_agent": "call_memory_retriever_agent_input_context_rag", "end": "tier_1_join"},
+        )
+        builder.add_edge("call_memory_retriever_agent_input_context_rag", "tier_1_join")
 
-    builder.add_edge("call_web_search_agent", END)
-    builder.add_edge("call_memory_retriever_agent_input_context_rag", END)
-    builder.add_edge("rag_noop", END)
+        # Tier 1 also includes entity_knowledge_rag (Phase 3)
+        builder.add_edge("tier_1_join", "entity_knowledge_rag")
+
+        builder.add_conditional_edges(
+            "entity_knowledge_rag",
+            _should_run_tier2,
+            {
+                "run": "channel_recent_entity_rag",
+                "skip": END,
+            },
+        )
+
+        builder.add_edge("channel_recent_entity_rag", "third_party_profile_rag")
+        builder.add_conditional_edges(
+            "third_party_profile_rag",
+            _should_run_tier3,
+            {
+                "run": "external_rag_dispatcher",
+                "skip": END,
+            },
+        )
+
+        builder.add_conditional_edges(
+            "external_rag_dispatcher",
+            lambda state: state.get("external_rag_next_action", "end"),
+            {"web_search_agent": "call_web_search_agent", "end": END},
+        )
+        builder.add_edge("call_web_search_agent", END)
+
+    else:
+        # SHALLOW: entity_knowledge_rag runs first, then tier 2 gate
+        builder.add_edge(START, "entity_knowledge_rag")
+        builder.add_conditional_edges(
+            "entity_knowledge_rag",
+            _should_run_tier2,
+            {
+                "run": "channel_recent_entity_rag",
+                "skip": "rag_noop",
+            },
+        )
+        builder.add_edge("channel_recent_entity_rag", "third_party_profile_rag")
+        builder.add_edge("third_party_profile_rag", END)
+        builder.add_edge("rag_noop", END)
+
+    return builder.compile()
+
+
+def _build_rag_graph(depth: str, affinity_percent: float):
+    """Compile a full tiered dispatcher graph (resolution + retrieval).
+
+    Kept for backward compatibility. Phase 8 uses the split subgraphs
+    (``_build_resolution_graph`` + ``_build_retrieval_graph``) directly.
+    """
+    builder = StateGraph(RAGState)
+
+    # Pre-Tier-1: sequential resolution nodes
+    builder.add_node("continuation_resolver", continuation_resolver)
+    builder.add_node("rag_planner", rag_planner)
+    builder.add_node("entity_grounder", entity_grounder)
+
+    # Tier 1: existing dispatchers
+    builder.add_node("input_context_rag_dispatcher", input_context_rag_dispatcher)
+    builder.add_node("call_memory_retriever_agent_input_context_rag", call_memory_retriever_agent_input_context_rag)
+    builder.add_node("external_rag_dispatcher", external_rag_dispatcher)
+    builder.add_node("call_web_search_agent", call_web_search_agent)
+
+    # Tier 2: third-party backends
+    builder.add_node("channel_recent_entity_rag", channel_recent_entity_rag)
+    builder.add_node("third_party_profile_rag", third_party_profile_rag)
+
+    # Joining / noop nodes
+    builder.add_node("tier_1_join", _rag_noop)
+    builder.add_node("rag_noop", _rag_noop)
+
+    # --- Edges ---
+    # Pre-Tier-1: sequential chain
+    builder.add_edge(START, "continuation_resolver")
+    builder.add_edge("continuation_resolver", "rag_planner")
+    builder.add_edge("rag_planner", "entity_grounder")
+
+    if depth == DEEP:
+        builder.add_edge("entity_grounder", "input_context_rag_dispatcher")
+
+        builder.add_conditional_edges(
+            "input_context_rag_dispatcher",
+            lambda state: state.get("input_context_next_action", "end"),
+            {"memory_retriever_agent": "call_memory_retriever_agent_input_context_rag", "end": "tier_1_join"},
+        )
+        builder.add_edge("call_memory_retriever_agent_input_context_rag", "tier_1_join")
+
+        builder.add_conditional_edges(
+            "tier_1_join",
+            _should_run_tier2,
+            {
+                "run": "channel_recent_entity_rag",
+                "skip": END,
+            },
+        )
+
+        builder.add_edge("channel_recent_entity_rag", "third_party_profile_rag")
+        builder.add_conditional_edges(
+            "third_party_profile_rag",
+            _should_run_tier3,
+            {
+                "run": "external_rag_dispatcher",
+                "skip": END,
+            },
+        )
+
+        builder.add_conditional_edges(
+            "external_rag_dispatcher",
+            lambda state: state.get("external_rag_next_action", "end"),
+            {"web_search_agent": "call_web_search_agent", "end": END},
+        )
+        builder.add_edge("call_web_search_agent", END)
+
+    else:
+        builder.add_conditional_edges(
+            "entity_grounder",
+            _should_run_tier2,
+            {
+                "run": "channel_recent_entity_rag",
+                "skip": "rag_noop",
+            },
+        )
+        builder.add_edge("channel_recent_entity_rag", "third_party_profile_rag")
+        builder.add_edge("third_party_profile_rag", END)
+        builder.add_edge("rag_noop", END)
 
     return builder.compile()
 
@@ -621,64 +538,17 @@ async def _store_results_in_cache(
         )
 
 
-def _build_image_context(image_doc: dict) -> dict:
-    """Build structured three-tier image context for downstream JSON prompts.
-
-    Args:
-        image_doc: Three-tier image dict with keys ``milestones``,
-            ``recent_window``, ``historical_summary``, and ``meta``.
-
-    Returns:
-        A nested dict with ``milestones``, ``historical_summary``, and
-        ``recent_observations``, or an empty dict if the image doc is empty.
-    """
-    if not image_doc:
-        return {}
-
-    milestones: list[dict[str, Any]] = []
-    for milestone in image_doc.get("milestones") or []:
-        category = str(
-            milestone.get("category", milestone.get("milestone_category", ""))
-        ).strip()
-        event = str(milestone.get("event", milestone.get("description", ""))).strip()
-        if not event:
-            continue
-        superseded_by = milestone.get("superseded_by")
-        if isinstance(superseded_by, str):
-            superseded_by = superseded_by.strip() or None
-        milestones.append(
-            {
-                "event": event,
-                "category": category,
-                "superseded_by": superseded_by,
-            }
-        )
-
-    recent_observations: list[str] = []
-    for observation in image_doc.get("recent_window") or []:
-        if isinstance(observation, dict):
-            summary = str(observation.get("summary") or "").strip()
-        else:
-            summary = str(observation).strip()
-        if summary:
-            recent_observations.append(summary)
-
-    return {
-        "milestones": milestones,
-        "historical_summary": str(image_doc.get("historical_summary") or "").strip(),
-        "recent_observations": recent_observations,
-    }
-
-
 async def call_rag_subgraph(state: GlobalPersonaState) -> GlobalPersonaState:
-    """Execute the five-phase RAG pipeline and return research_facts + metadata.
+    """Execute the RAG pipeline with Phase 8 boundary cache.
 
-    Phases:
-      0. Embed the decontextualised input, initialise the metadata bundle.
-      1. Probe the cache — a strong match short-circuits the rest.
-      2. Classify depth (SHALLOW vs DEEP) via ``InputDepthClassifier``.
-      3. Compile + run the dispatcher graph (routes selected by depth + affinity).
-      4. Store the produced results back into the cache.
+    Architecture (Phase 8):
+      0. Embed, classify depth, initialise metadata.
+      1. Probe the legacy embedding-similarity cache (short-circuits everything).
+      2. Run the **resolution subgraph** (cheap: 2 LLM calls + deterministic lookup).
+      3. Build a **structured cache key** from resolution outputs.
+      4. Probe the **boundary cache** with the structured key — on hit, skip retrieval.
+      5. On miss, run the **retrieval subgraph** (expensive: DB queries, LLM calls, web).
+      6. Store results in both the boundary cache and the legacy embedding cache.
 
     Args:
         state: The ``GlobalPersonaState`` carrying the current user, character,
@@ -727,6 +597,7 @@ async def call_rag_subgraph(state: GlobalPersonaState) -> GlobalPersonaState:
         "depth_confidence": 0.0,
         "depth_reasoning": "",
         "cache_hit": False,
+        "boundary_cache_hit": False,
         "cache_probe": [],
         "trigger_dispatchers": [],
         "rag_sources_used": [],
@@ -735,6 +606,8 @@ async def call_rag_subgraph(state: GlobalPersonaState) -> GlobalPersonaState:
     }
 
     cache = await _get_rag_cache()
+
+    # ── Legacy embedding-similarity cache probe ───────────────
     cached, probe_trace = await _probe_cache(cache, input_embedding, global_user_id)
     metadata["cache_probe"] = probe_trace
     if cached is not None:
@@ -787,6 +660,7 @@ async def call_rag_subgraph(state: GlobalPersonaState) -> GlobalPersonaState:
             "research_metadata": [metadata],
         }
 
+    # ── Depth classification ──────────────────────────────────
     classifier = _get_depth_classifier()
     depth_result = await classifier.classify(
         user_input=decontexualized_input,
@@ -804,16 +678,16 @@ async def call_rag_subgraph(state: GlobalPersonaState) -> GlobalPersonaState:
     if depth == DEEP:
         knowledge_base_results = await _probe_knowledge_base(cache, input_embedding)
 
-    rag_graph = _build_rag_graph(depth, affinity_percent)
-
+    # ── Phase A: Resolution subgraph (cheap, always runs) ─────
     initial_state: RAGState = {
         "timestamp": state["timestamp"],
         "platform": state["platform"],
         "platform_channel_id": state["platform_channel_id"],
-        "platform_message_id": state["platform_message_id"],
+        "platform_message_id": state.get("platform_message_id", ""),
         "decontexualized_input": decontexualized_input,
-        "channel_topic": state["channel_topic"],
+        "channel_topic": state.get("channel_topic", ""),
         "input_context_to_timestamp": input_context_to_timestamp,
+        "chat_history_recent": state.get("chat_history_recent") or [],
         "user_name": user_name,
         "global_user_id": global_user_id,
         "platform_bot_id": state["platform_bot_id"],
@@ -825,14 +699,173 @@ async def call_rag_subgraph(state: GlobalPersonaState) -> GlobalPersonaState:
         "cache_hit": False,
         "trigger_dispatchers": list(depth_result["trigger_dispatchers"]),
         "rag_metadata": metadata,
+        # Phase 1 fields — initialised empty, populated by resolution nodes
+        "continuation_context": {},
+        "retrieval_plan": {},
+        "resolved_entities": [],
+        "retrieval_ledger": {},
+        "channel_recent_entity_results": "",
+        "third_party_profile_results": "",
+        "entity_knowledge_results": "",
+        "entity_resolution_notes": "",
     }
 
-    result = await rag_graph.ainvoke(initial_state)
+    resolution_graph = _build_resolution_graph()
+    resolution_result = await resolution_graph.ainvoke(initial_state)
+
+    # Phase 1 metadata enrichment (from resolution)
+    metadata["retrieval_plan"] = resolution_result.get("retrieval_plan") or {}
+    metadata["resolved_entities"] = resolution_result.get("resolved_entities") or []
+    metadata["continuation_context"] = resolution_result.get("continuation_context") or {}
+
+    # ── Phase 8: Boundary cache — probe with structured key ───
+    boundary_cache_key = _build_cache_key(resolution_result)
+    boundary_hit = await cache.retrieve_if_similar_by_key(boundary_cache_key)
+    if boundary_hit is not None:
+        metadata["boundary_cache_hit"] = True
+        metadata["cache_hit"] = True
+        cached_results = boundary_hit["results"]
+
+        input_context_results = _normalize_retrieval_output(cached_results.get("input_context_results", ""))
+        external_rag_results = _normalize_retrieval_output(cached_results.get("external_rag_results", ""))
+        input_context_is_empty = bool(cached_results.get("input_context_is_empty_result", False))
+        external_is_empty = bool(cached_results.get("external_rag_is_empty_result", False))
+        channel_recent_entity_results = str(cached_results.get("channel_recent_entity_results") or "")
+        third_party_profile_results = str(cached_results.get("third_party_profile_results") or "")
+        entity_knowledge_results = str(cached_results.get("entity_knowledge_results") or "")
+        entity_resolution_notes = str(cached_results.get("entity_resolution_notes") or "")
+
+        input_context_conf = _result_confidence(input_context_results, is_empty_result=input_context_is_empty)
+        external_conf = _result_confidence(external_rag_results, is_empty_result=external_is_empty)
+
+        sources_used = ["boundary_cache"]
+        if input_context_conf > 0.0:
+            sources_used.append("input_context_rag")
+        if external_conf > 0.0:
+            sources_used.append("external_rag")
+        if channel_recent_entity_results:
+            sources_used.append("channel_recent_entity")
+        if third_party_profile_results:
+            sources_used.append("third_party_profile")
+        if entity_knowledge_results:
+            sources_used.append("entity_knowledge")
+        metadata["rag_sources_used"] = sources_used
+        metadata["confidence_scores"] = {
+            "input_context_rag": input_context_conf,
+            "external_rag": external_conf,
+        }
+        metadata["response_confidence"] = max([input_context_conf, external_conf] + [0.0])
+
+        research_facts = {
+            "input_context_results": input_context_results,
+            "external_rag_results": external_rag_results,
+            "objective_facts": objective_facts_text,
+            "user_image": user_image_context,
+            "character_image": character_image_context,
+            "knowledge_base_results": knowledge_base_results,
+            "input_context_is_empty_result": input_context_is_empty,
+            "external_rag_is_empty_result": external_is_empty,
+            "third_party_profile_results": third_party_profile_results,
+            "channel_recent_entity_results": channel_recent_entity_results,
+            "entity_knowledge_results": entity_knowledge_results,
+            "entity_resolution_notes": entity_resolution_notes,
+        }
+        logger.info(
+            "RAG summary: user=%s global_user=%s boundary_cache_hit=%s depth=%s sources=%s input=%s",
+            user_name,
+            global_user_id,
+            True,
+            depth,
+            sources_used,
+            log_preview(decontexualized_input, max_length=160),
+        )
+        return {
+            "research_facts": research_facts,
+            "research_metadata": [metadata],
+        }
+
+    # ── Phase B: Retrieval subgraph (expensive, only on miss) ─
+    retrieval_graph = _build_retrieval_graph(depth, affinity_percent)
+    result = await retrieval_graph.ainvoke(resolution_result)
+
+    # ── Phase 5: Bounded evaluator + optional repair pass ────
+    metadata["repair_pass"] = 0
+    eval_result = await rag_supervisor_evaluator(result)
+    metadata["evaluation"] = eval_result.get("evaluation", {})
+
+    if eval_result.get("needs_repair") and eval_result.get("repair_entities"):
+        metadata["repair_pass"] = 1
+        repair_entities = eval_result["repair_entities"]
+        logger.info(
+            "RAG evaluator requested repair pass for entities: %s",
+            repair_entities,
+        )
+
+        # Build synthetic resolved_entities for the repair scope
+        repair_resolved = [
+            {
+                "surface_form": e,
+                "entity_type": "unknown",
+                "resolved_global_user_id": "",
+                "resolution_confidence": 0.0,
+                "resolution_method": "repair_pass",
+            }
+            for e in repair_entities
+        ]
+
+        # Merge repair entities into existing resolution result
+        repair_state = dict(result)
+        existing_entities = list(repair_state.get("resolved_entities") or [])
+        existing_surfaces = {e.get("surface_form", "").lower() for e in existing_entities}
+        for re_ent in repair_resolved:
+            if re_ent["surface_form"].lower() not in existing_surfaces:
+                existing_entities.append(re_ent)
+        repair_state["resolved_entities"] = existing_entities
+
+        # Add repair sources to active_sources if not present
+        repair_plan = dict(repair_state.get("retrieval_plan") or {})
+        repair_sources = eval_result.get("repair_sources", [])
+        existing_sources = set(repair_plan.get("active_sources", []))
+        for src in repair_sources:
+            existing_sources.add(src)
+        repair_plan["active_sources"] = sorted(existing_sources)
+        repair_state["retrieval_plan"] = repair_plan
+
+        # Clear ledger keys for repair entities only (allow re-fetch)
+        repair_ledger = dict(repair_state.get("retrieval_ledger") or {})
+        for re_ent in repair_entities:
+            keys_to_remove = [k for k in repair_ledger if re_ent.lower() in k.lower()]
+            for k in keys_to_remove:
+                del repair_ledger[k]
+        repair_state["retrieval_ledger"] = repair_ledger
+
+        # Run repair retrieval
+        repair_graph = _build_retrieval_graph(depth, affinity_percent)
+        repair_result = await repair_graph.ainvoke(repair_state)
+
+        # Merge repair results — append, don't replace
+        for key in ("channel_recent_entity_results", "third_party_profile_results",
+                     "entity_knowledge_results", "entity_resolution_notes"):
+            existing_val = str(result.get(key) or "")
+            repair_val = str(repair_result.get(key) or "")
+            if repair_val and repair_val not in existing_val:
+                result[key] = (existing_val + "\n\n" + repair_val).strip() if existing_val else repair_val
+
+        # Merge ledger
+        merged_ledger = dict(result.get("retrieval_ledger") or {})
+        merged_ledger.update(repair_result.get("retrieval_ledger") or {})
+        result["retrieval_ledger"] = merged_ledger
+
+        logger.info("RAG repair pass completed, merged results")
 
     input_context_results = _normalize_retrieval_output(result.get("input_context_results"))
     external_rag_results = _normalize_retrieval_output(result.get("external_rag_results"))
     input_context_is_empty_result = bool(result.get("input_context_is_empty_result", False))
     external_rag_is_empty_result = bool(result.get("external_rag_is_empty_result", False))
+    channel_recent_entity_results = str(result.get("channel_recent_entity_results") or "")
+    third_party_profile_results = str(result.get("third_party_profile_results") or "")
+    entity_knowledge_results = str(result.get("entity_knowledge_results") or "")
+    entity_resolution_notes = str(result.get("entity_resolution_notes") or "")
 
     input_context_conf = _result_confidence(
         input_context_results,
@@ -851,8 +884,15 @@ async def call_rag_subgraph(state: GlobalPersonaState) -> GlobalPersonaState:
         sources_used.append("input_context_rag")
     if external_conf > 0.0:
         sources_used.append("external_rag")
+    if channel_recent_entity_results:
+        sources_used.append("channel_recent_entity")
+    if third_party_profile_results:
+        sources_used.append("third_party_profile")
+    if entity_knowledge_results:
+        sources_used.append("entity_knowledge")
     metadata["rag_sources_used"] = sources_used
     metadata["response_confidence"] = max([input_context_conf, external_conf] + [0.0])
+    metadata["retrieval_ledger"] = result.get("retrieval_ledger") or {}
 
     logger.debug(
         "RAG metadata: depth=%s confidence=%.3f cache_probe=%s trigger_dispatchers=%s response_confidence=%.3f sources=%s",
@@ -873,10 +913,15 @@ async def call_rag_subgraph(state: GlobalPersonaState) -> GlobalPersonaState:
         "knowledge_base_results": knowledge_base_results,
         "input_context_is_empty_result": input_context_is_empty_result,
         "external_rag_is_empty_result": external_rag_is_empty_result,
+        # Phase 4 — new research_facts keys
+        "third_party_profile_results": third_party_profile_results,
+        "channel_recent_entity_results": channel_recent_entity_results,
+        "entity_knowledge_results": entity_knowledge_results,
+        "entity_resolution_notes": entity_resolution_notes,
     }
 
     logger.info(
-        "RAG summary: user=%s global_user=%s cache_hit=%s depth=%s depth_conf=%.2f sources=%s kb_hit=%s input_context=%s external=%s input=%s",
+        "RAG summary: user=%s global_user=%s cache_hit=%s depth=%s depth_conf=%.2f sources=%s kb_hit=%s input_context=%s external=%s tp_profile=%s ch_entity=%s input=%s",
         user_name,
         global_user_id,
         False,
@@ -886,11 +931,33 @@ async def call_rag_subgraph(state: GlobalPersonaState) -> GlobalPersonaState:
         bool(knowledge_base_results),
         log_preview(input_context_results, max_length=140),
         log_preview(external_rag_results, max_length=140),
+        log_preview(third_party_profile_results, max_length=100),
+        log_preview(channel_recent_entity_results, max_length=100),
         log_preview(decontexualized_input, max_length=160),
     )
 
+    # ── Phase 8: Store in both caches ─────────────────────────
     await _store_results_in_cache(
         cache, input_embedding, research_facts,
+    )
+
+    # Boundary cache: store retrieval results keyed on resolution hash
+    retrieval_payload = {
+        "input_context_results": input_context_results,
+        "external_rag_results": external_rag_results,
+        "input_context_is_empty_result": input_context_is_empty_result,
+        "external_rag_is_empty_result": external_rag_is_empty_result,
+        "third_party_profile_results": third_party_profile_results,
+        "channel_recent_entity_results": channel_recent_entity_results,
+        "entity_knowledge_results": entity_knowledge_results,
+        "entity_resolution_notes": entity_resolution_notes,
+    }
+    await cache.store_by_key(
+        cache_key=boundary_cache_key,
+        results=retrieval_payload,
+        cache_type="boundary_cache",
+        global_user_id=global_user_id,
+        metadata={"depth": depth, "sources_used": sources_used},
     )
 
     return {

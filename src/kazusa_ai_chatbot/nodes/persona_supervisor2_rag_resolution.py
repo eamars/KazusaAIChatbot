@@ -1,0 +1,327 @@
+"""Pre-retrieval resolution layer: continuation resolver, RAG planner, entity grounder.
+
+These three nodes run sequentially before the tiered retrieval dispatchers.
+They produce the ``continuation_context``, ``retrieval_plan``, and
+``resolved_entities`` that gate and parameterize all downstream retrieval.
+
+Moved from ``persona_supervisor2_rag.py`` during Phase 6 decomposition.
+"""
+
+from langchain_core.messages import HumanMessage, SystemMessage
+
+from kazusa_ai_chatbot.db.entity_memory import get_entity_by_key, get_entity_by_resolved_id
+from kazusa_ai_chatbot.nodes.persona_supervisor2_rag_schema import RAGState
+from kazusa_ai_chatbot.utils import get_llm, log_preview, parse_llm_json_output
+
+import json
+import logging
+
+logger = logging.getLogger(__name__)
+
+
+# ── Phase 1 — Continuation Resolver ───────────────────────────────
+
+_CONTINUATION_RESOLVER_PROMPT = """\
+你是一个上下文延续解析器。你的任务是判断用户的输入是否是一个"延续性话语"（continuation / follow-up / reply-only），如果是，则从最近的对话历史中补全被省略的对象或任务。
+
+# 判断标准
+- 延续性话语的特征：缺乏独立语义，依赖上文才能理解（如："那后来呢？"、"然后呢？"、"这个呢？"）
+- 如果用户输入已经是完整的查询（包含明确主语和宾语），则 `needs_context_resolution` 为 false
+- 如果能从 `chat_history_recent` 确定被省略的对象/任务，则补全并输出 `resolved_task`
+- 如果无法确定，则保持低置信度，不要猜测
+
+# 输入格式
+{{
+    "decontextualized_input": "消歧后的用户输入",
+    "chat_history_recent": [最近对话记录],
+    "channel_topic": "频道话题"
+}}
+
+# 输出格式
+请务必返回合法的 JSON 字符串：
+{{
+    "needs_context_resolution": true或false,
+    "resolved_task": "补全后的完整查询任务（如果 needs_context_resolution 为 false 则填原始输入）",
+    "known_slots": {{"被识别出的实体或对象": "值"}},
+    "missing_slots": ["仍然缺失的信息"],
+    "confidence": 0.0到1.0,
+    "evidence": ["reply_target", "recent_turn", "channel_topic 等使用的线索来源"]
+}}
+"""
+_continuation_resolver_llm = get_llm(temperature=0.1, top_p=0.85)
+
+
+async def continuation_resolver(state: RAGState) -> dict:
+    system_prompt = SystemMessage(content=_CONTINUATION_RESOLVER_PROMPT)
+    user_input = {
+        "decontextualized_input": state["decontexualized_input"],
+        "chat_history_recent": (state.get("chat_history_recent") or [])[-6:],
+        "channel_topic": state.get("channel_topic", ""),
+    }
+    human_message = HumanMessage(content=json.dumps(user_input, ensure_ascii=False))
+
+    response = await _continuation_resolver_llm.ainvoke([system_prompt, human_message])
+    result = parse_llm_json_output(response.content)
+
+    continuation_context = {
+        "needs_context_resolution": bool(result.get("needs_context_resolution", False)),
+        "resolved_task": str(result.get("resolved_task", state["decontexualized_input"])),
+        "known_slots": result.get("known_slots", {}),
+        "missing_slots": result.get("missing_slots", []),
+        "confidence": float(result.get("confidence", 0.0)),
+        "evidence": result.get("evidence", []),
+    }
+
+    logger.debug(
+        "Continuation resolver: needs_resolution=%s confidence=%.2f resolved_task=%s",
+        continuation_context["needs_context_resolution"],
+        continuation_context["confidence"],
+        log_preview(continuation_context["resolved_task"]),
+    )
+
+    return {"continuation_context": continuation_context}
+
+
+# ── Phase 1 — RAG Planner ────────────────────────────────────────
+
+_RAG_PLANNER_PROMPT = """\
+你是检索计划生成器。你的任务是根据用户的输入，决定需要激活哪些检索源来帮助角色生成准确的回应。
+
+# 可用的检索源
+- `CURRENT_USER_STABLE`: 当前用户的稳定画像信息（已预加载，通常不需要额外检索）
+- `CHANNEL_RECENT_ENTITY`: 同频道近期提到的第三方实体/人物的对话记录
+- `THIRD_PARTY_PROFILE`: 已知其他用户的持久画像/印象
+- `EXTERNAL_KNOWLEDGE`: 外部知识（新闻、专业知识等）
+
+# 检索模式 (retrieval_mode)
+- `NONE`: 不需要任何检索（日常问候、简单情感互动）
+- `CURRENT_USER_STABLE`: 只需要当前用户自身信息
+- `THIRD_PARTY_PROFILE`: 关于特定已知第三方的持久印象
+- `CHANNEL_RECENT_ENTITY`: 关于频道近期提到的人/事
+- `EXTERNAL_KNOWLEDGE`: 需要外部知识
+- `CASCADED`: 需要组合多个检索源
+
+# 实体识别
+从输入中提取所有提及的人物/实体（不含当前用户和角色本身），并标注其类型。
+
+# 输入格式
+{{
+    "decontextualized_input": "用户输入",
+    "resolved_task": "延续解析器补全后的任务（如果没有补全则与 decontextualized_input 相同）",
+    "continuation_needs_resolution": true或false,
+    "continuation_confidence": 0.0到1.0,
+    "user_name": "当前用户名",
+    "channel_topic": "频道话题",
+    "chat_history_recent_speakers": ["最近对话中出现的发言者名称"],
+    "timestamp": "当前时间"
+}}
+
+# 输出格式
+请务必返回合法的 JSON 字符串：
+{{
+    "retrieval_mode": "NONE | CURRENT_USER_STABLE | THIRD_PARTY_PROFILE | CHANNEL_RECENT_ENTITY | EXTERNAL_KNOWLEDGE | CASCADED",
+    "active_sources": ["需要激活的检索源列表"],
+    "task": "检索任务描述",
+    "entities": [
+        {{
+            "surface_form": "实体表面形式",
+            "entity_type": "person | group | topic | unknown",
+            "resolution_confidence": 0.0到1.0
+        }}
+    ],
+    "subject": {{
+        "kind": "current_user | third_party_user | entity | topic | mixed",
+        "primary_entity": "主要实体名称（可选）"
+    }},
+    "time_scope": {{
+        "kind": "recent | explicit_range | none",
+        "lookback_hours": 72
+    }},
+    "search_scope": {{
+        "same_channel": true,
+        "cross_channel": false,
+        "current_user_only": false
+    }},
+    "external_task_hint": "外部搜索提示（可选）",
+    "expected_response": "期望的检索结果描述"
+}}
+"""
+_rag_planner_llm = get_llm(temperature=0.1, top_p=0.85)
+
+
+async def rag_planner(state: RAGState) -> dict:
+    continuation_context = state.get("continuation_context") or {}
+    resolved_task = continuation_context.get("resolved_task", state["decontexualized_input"])
+
+    recent_speakers = set()
+    for msg in (state.get("chat_history_recent") or []):
+        name = msg.get("display_name", "")
+        if name:
+            recent_speakers.add(name)
+
+    system_prompt = SystemMessage(content=_RAG_PLANNER_PROMPT)
+    user_input = {
+        "decontextualized_input": state["decontexualized_input"],
+        "resolved_task": resolved_task,
+        "continuation_needs_resolution": continuation_context.get("needs_context_resolution", False),
+        "continuation_confidence": continuation_context.get("confidence", 0.0),
+        "user_name": state["user_name"],
+        "channel_topic": state.get("channel_topic", ""),
+        "chat_history_recent_speakers": sorted(recent_speakers),
+        "timestamp": state["timestamp"],
+    }
+    human_message = HumanMessage(content=json.dumps(user_input, ensure_ascii=False))
+
+    response = await _rag_planner_llm.ainvoke([system_prompt, human_message])
+    result = parse_llm_json_output(response.content)
+
+    retrieval_plan = {
+        "retrieval_mode": str(result.get("retrieval_mode", "NONE")),
+        "active_sources": result.get("active_sources", []),
+        "task": str(result.get("task", "")),
+        "entities": result.get("entities", []),
+        "subject": result.get("subject", {}),
+        "time_scope": result.get("time_scope", {"kind": "none", "lookback_hours": 72}),
+        "search_scope": result.get("search_scope", {"same_channel": True, "cross_channel": False, "current_user_only": False}),
+        "external_task_hint": str(result.get("external_task_hint", "")),
+        "expected_response": str(result.get("expected_response", "")),
+    }
+
+    logger.debug(
+        "RAG planner: mode=%s sources=%s entities=%s subject=%s",
+        retrieval_plan["retrieval_mode"],
+        retrieval_plan["active_sources"],
+        [e.get("surface_form") for e in retrieval_plan["entities"]],
+        retrieval_plan.get("subject", {}),
+    )
+
+    return {"retrieval_plan": retrieval_plan}
+
+
+# ── Phase 1 — Entity Grounder ─────────────────────────────────────
+
+_ENTITY_GROUNDER_LLM_PROMPT = """\
+你是一个实体消歧器。给定一个表面形式和候选匹配列表，判断最可能的匹配。
+
+# 输入
+{{
+    "surface_form": "待解析的名称",
+    "candidates": [
+        {{"display_name": "候选名称", "global_user_id": "UUID", "similarity": "匹配理由"}}
+    ]
+}}
+
+# 输出
+请务必返回合法的 JSON 字符串：
+{{
+    "resolved_global_user_id": "匹配的 UUID 或空字符串",
+    "confidence": 0.0到1.0,
+    "reasoning": "判断理由"
+}}
+"""
+_entity_grounder_llm = get_llm(temperature=0.0, top_p=1.0)
+
+
+async def entity_grounder(state: RAGState) -> dict:
+    retrieval_plan = state.get("retrieval_plan") or {}
+    entities = retrieval_plan.get("entities", [])
+    if not entities:
+        return {
+            "resolved_entities": [],
+            "entity_resolution_notes": "",
+        }
+
+    chat_history_recent = state.get("chat_history_recent") or []
+    participants: dict[str, str] = {}
+    for msg in chat_history_recent:
+        display_name = msg.get("display_name", "")
+        global_user_id = msg.get("global_user_id", "")
+        if display_name and global_user_id:
+            participants[display_name.lower()] = global_user_id
+
+    resolved_entities: list[dict] = []
+    resolution_notes: list[str] = []
+
+    for entity in entities:
+        surface_form = str(entity.get("surface_form", ""))
+        entity_type = str(entity.get("entity_type", "unknown"))
+
+        resolved_id = ""
+        confidence = 0.0
+        method = "unresolved"
+
+        # Step 1: Deterministic match against recent history participants
+        lower_surface = surface_form.lower()
+        if lower_surface in participants:
+            resolved_id = participants[lower_surface]
+            confidence = 0.95
+            method = "exact_display_name"
+        else:
+            for name, uid in participants.items():
+                if lower_surface in name or name in lower_surface:
+                    resolved_id = uid
+                    confidence = 0.80
+                    method = "partial_display_name"
+                    break
+
+        # Step 1.5: Check durable entity_memory (Phase 3)
+        if not resolved_id:
+            try:
+                em_doc = await get_entity_by_key(lower_surface)
+                if em_doc and em_doc.get("resolved_global_user_id"):
+                    resolved_id = em_doc["resolved_global_user_id"]
+                    confidence = 0.85
+                    method = "entity_memory_key"
+            except Exception:
+                logger.warning("Entity memory lookup failed for %s", surface_form, exc_info=True)
+
+        # Step 2: If still unresolved and entity type is person, try LLM fallback
+        if not resolved_id and entity_type == "person" and participants:
+            candidates = [
+                {"display_name": name, "global_user_id": uid, "similarity": "chat participant"}
+                for name, uid in participants.items()
+            ]
+            try:
+                system_prompt = SystemMessage(content=_ENTITY_GROUNDER_LLM_PROMPT)
+                human_message = HumanMessage(content=json.dumps({
+                    "surface_form": surface_form,
+                    "candidates": candidates,
+                }, ensure_ascii=False))
+                response = await _entity_grounder_llm.ainvoke([system_prompt, human_message])
+                llm_result = parse_llm_json_output(response.content)
+                llm_resolved_id = str(llm_result.get("resolved_global_user_id", ""))
+                llm_confidence = float(llm_result.get("confidence", 0.0))
+                if llm_resolved_id and llm_confidence >= 0.6:
+                    resolved_id = llm_resolved_id
+                    confidence = llm_confidence
+                    method = "llm_disambiguation"
+            except Exception:
+                logger.warning("Entity grounder LLM fallback failed for %s", surface_form, exc_info=True)
+
+        resolved_entity = {
+            "surface_form": surface_form,
+            "entity_type": entity_type,
+            "resolved_global_user_id": resolved_id,
+            "resolution_confidence": confidence,
+            "resolution_method": method,
+        }
+        resolved_entities.append(resolved_entity)
+
+        if resolved_id:
+            resolution_notes.append(f"{surface_form} → resolved (method={method}, confidence={confidence:.2f})")
+        else:
+            resolution_notes.append(f"{surface_form} → unresolved (type={entity_type})")
+
+    entity_resolution_notes = "; ".join(resolution_notes) if resolution_notes else ""
+
+    logger.debug(
+        "Entity grounder: resolved=%d/%d notes=%s",
+        sum(1 for e in resolved_entities if e["resolved_global_user_id"]),
+        len(resolved_entities),
+        log_preview(entity_resolution_notes),
+    )
+
+    return {
+        "resolved_entities": resolved_entities,
+        "entity_resolution_notes": entity_resolution_notes,
+    }

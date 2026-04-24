@@ -27,13 +27,14 @@ This is a **retrieval scoping problem**, not just a prompt problem.
 
 | Phase | Description                                                                     | Status        |
 | ----- | ------------------------------------------------------------------------------- | ------------- |
-| 1     | Planner refactor — continuation resolver + enriched retrieval plan fields       | ⬜ NOT STARTED |
-| 2     | Retriever refactor — plan-driven scopes, third-party backends, retrieval ledger | ⬜ NOT STARTED |
-| 3     | Entity memory layer — durable entity/topic memory substrate                     | ⬜ DEFERRED    |
-| 4     | Dialog surface upgrade — research_facts extension for third-party results       | ⬜ NOT STARTED |
-| 5     | Bounded supervisor centralization — rag_supervisor_planner / evaluator          | ⬜ DEFERRED    |
-| 6     | RAG module decomposition — split into focused submodules                        | ⬜ DEFERRED    |
-| 7     | Evaluation — test coverage for third-party recall scenarios                     | ⬜ NOT STARTED |
+| 1     | Planner refactor — continuation resolver + enriched retrieval plan fields       | ✅ DONE        |
+| 2     | Retriever refactor — plan-driven scopes, third-party backends, retrieval ledger | ✅ DONE        |
+| 3     | Entity memory layer — durable entity/topic memory substrate                     | ✅ DONE        |
+| 4     | Dialog surface upgrade — research_facts extension for third-party results       | ✅ DONE        |
+| 5     | Bounded supervisor centralization — rag_supervisor_planner / evaluator          | ✅ DONE        |
+| 6     | RAG module decomposition — split into focused submodules                        | ✅ DONE        |
+| 7     | Evaluation — test coverage for third-party recall scenarios                     | ✅ DONE        |
+| 8     | Transparent cache layer — boundary cache between resolution and retrieval phases | ✅ DONE        |
 
 ---
 
@@ -82,8 +83,10 @@ message
        current_user_image                     ← Phase 0 ✅
        character_image                        ← Phase 0 ✅
 
+  [Pre-Tier-1 — sequential]
+       entity_grounder                        ← Phase 1 (resolves entities; output gates Tier 2)
+
   [Tier 1 — parallel, no internal dependencies]
-       entity_resolution                      ← Phase 1 (gates Tier 2)
        input_context_rag                      ← existing
        knowledge_base_rag                     ← existing
 
@@ -148,7 +151,7 @@ In CASCADED mode, sources compose via the three-tier model. The planner output f
 
 **The planner does not specify order.** Tier membership is deterministic:
 
-- Modes in Tier 1 always run before modes in Tier 2 — because Tier 2 needs resolved entity IDs from Tier 1's entity_resolution step.
+- `entity_grounder` (pre-Tier-1) always completes before Tier 2 fires — because Tier 2 needs resolved entity IDs that `entity_grounder` produces.
 - Modes in Tier 3 always run after all internal tiers — so external search is informed by what internal sources already found.
 
 ---
@@ -159,16 +162,17 @@ Execution order is **not decided by the planner**. It is a fixed structural prop
 
 ### Tier membership
 
-| Tier | Sources                                                        | Runs when                         | Can run in parallel with               |
-| ---- | -------------------------------------------------------------- | --------------------------------- | -------------------------------------- |
-| 0    | `current_user_image`, `character_image`                        | Always, zero cost                 | Everything                             |
-| 1    | `entity_resolution`, `input_context_rag`, `knowledge_base_rag` | Immediately after planner         | Each other                             |
-| 2    | `third_party_profile_rag`, `channel_recent_entity_rag`         | After Tier 1 completes            | Each other; repeat per resolved entity |
-| 3    | `external_rag`                                                 | After all internal tiers complete | Nothing                                |
+| Tier  | Sources                                                | Runs when                              | Can run in parallel with               |
+| ----- | ------------------------------------------------------ | -------------------------------------- | -------------------------------------- |
+| 0     | `current_user_image`, `character_image`                | Always, zero cost                      | Everything                             |
+| pre-1 | `entity_grounder`                                      | Sequential, after planner              | Nothing (gates Tier 2)                 |
+| 1     | `input_context_rag`, `knowledge_base_rag`              | Parallel with entity_grounder          | Each other                             |
+| 2     | `third_party_profile_rag`, `channel_recent_entity_rag` | After Tier 1 AND entity_grounder       | Each other; repeat per resolved entity |
+| 3     | `external_rag`                                         | After all internal tiers complete      | Nothing                                |
 
 ### Why this ordering
 
-**Tier 1 gates Tier 2.** `THIRD_PARTY_PROFILE` and `CHANNEL_RECENT_ENTITY` both need a resolved entity ID to be precise. Without it, profile retrieval has no target and channel search falls back to surface-form keyword matching. Entity resolution runs in Tier 1 so Tier 2 gets the confirmed ID before fetching.
+**`entity_grounder` gates Tier 2.** `THIRD_PARTY_PROFILE` and `CHANNEL_RECENT_ENTITY` both need a resolved entity ID to be precise. Without it, profile retrieval has no target and channel search falls back to surface-form keyword matching. `entity_grounder` runs sequentially before Tier 1 so its output is already in state when Tier 1 starts. Tier 2 waits for both `entity_grounder` AND Tier 1 to complete before firing — it needs the resolved ID from the former and the internal context from the latter.
 
 **Tier 3 is always last.** External search is most useful when it knows what internal sources already found — it searches for what the character doesn't already remember. Running external in parallel with internal means the external dispatcher builds its query blind.
 
@@ -178,7 +182,7 @@ Execution order is **not decided by the planner**. It is a fixed structural prop
 
 | Type                  | Description                                                                | Handled by                                       |
 | --------------------- | -------------------------------------------------------------------------- | ------------------------------------------------ |
-| Resolution dependency | Profile/channel needs entity ID before fetching                            | Tier 1 → Tier 2 gate                             |
+| Resolution dependency | Profile/channel needs entity ID before fetching                            | pre-Tier-1 `entity_grounder` → Tier 2 gate      |
 | Scope dependency      | External needs internal context to build a targeted query                  | Tier 1+2 → Tier 3 gate                           |
 | Validation dependency | Multiple internal sources cross-referenced                                 | Parallel within Tier 2, synthesis after          |
 | Cascading dependency  | Result of retrieval reveals a new retrieval target unknowable at plan time | Phase 5 evaluator repair pass (one pass maximum) |
@@ -284,6 +288,64 @@ Failed grounding affects source choice:
 - resolved stable known user → `THIRD_PARTY_PROFILE` may be allowed
 - unresolved world topic → prefer `GLOBAL_ENTITY_KNOWLEDGE` or `EXTERNAL_KNOWLEDGE`
 
+### Implementation Specifics
+
+**Node identity and file location**
+
+Three new nodes, all initially in `persona_supervisor2_rag.py` (move to `persona_supervisor2_rag_resolution.py` at Phase 6):
+
+| Node | Type | Purpose |
+|------|------|---------|
+| `continuation_resolver` | LLM, single structured-output call | Decides whether input is retrieval-ready; produces resolved task |
+| `rag_planner` | LLM, single structured-output call (supervisor) | Decides which sources activate and identifies surface-form entities |
+| `entity_grounder` | Deterministic-first, LLM fallback only | Resolves surface forms to known identifiers |
+
+**Why `rag_planner` is supervisor-type but not a full agentic loop**
+
+`rag_planner` uses LLM intelligence to decide downstream routing — it is a supervisor in the LangGraph sense. However, it makes that decision in a **single structured-output call**, not an iterative tool-use loop. The iterative repair supervisor is Phase 5.
+
+Keeping Phase 1 to two sequential LLM calls (`continuation_resolver` → `rag_planner`) is load-bearing for chat latency: every extra LLM round before retrieval begins costs 500ms–2s. `with_structured_output(RetrievalPlanSchema)` is the right implementation pattern — not a tool-calling agent.
+
+**Entity grounder implementation order**
+
+1. Deterministic pass: match surface forms against `chat_history_recent` participant display names
+2. DB lookup: check platform-linked identities and alias tables
+3. LLM pass (only if genuinely ambiguous after steps 1–2): small structured-output call to disambiguate
+
+Steps 1–2 cover the common case (user names someone who appeared in recent history) with zero LLM cost.
+
+**RAGState additions**
+
+```python
+"continuation_context": dict     # continuation_resolver output
+"retrieval_plan": dict           # rag_planner structured output
+"resolved_entities": list[dict]  # entity_grounder output: surface_form → resolved_global_user_id
+"retrieval_ledger": dict         # key (source_type, subject_key, purpose) → cached result summary
+```
+
+**LangGraph topology change**
+
+Current (inferred):
+```
+START → [parallel dispatchers] → finalizer → END
+```
+
+Target:
+```
+START → continuation_resolver → rag_planner → entity_grounder   ← sequential pre-Tier-1
+  → [Tier 1: input_context_rag || knowledge_base_rag]           ← parallel (entity_grounder runs concurrently)
+  → tier_2_gate  ← waits for entity_grounder AND Tier 1; conditional edge (deterministic, no LLM)
+      "skip" → tier_3_gate
+      "run"  → [Tier 2: third_party_profile_rag || channel_recent_entity_rag]  ← parallel, per entity via Send
+  → tier_3_gate  ← conditional edge
+      "skip" → rag_finalizer
+      "run"  → external_rag
+  → rag_finalizer → END
+```
+
+Gate functions check `state["retrieval_plan"]["active_sources"]` and `state["resolved_entities"]` — deterministic, no LLM.
+Tier 2 dynamic fan-out (one invocation per resolved entity) uses LangGraph's `Send` API.
+
 ---
 
 ## Phase 2 — Retriever Refactor
@@ -337,6 +399,27 @@ This backend answers:
 - "what happened with that person from earlier?"
 
 **This is the highest-priority backend to implement** — it requires no new storage and directly addresses the core problem.
+
+**DB query spec**
+
+Primary query against `conversation_history` collection:
+
+```python
+{
+    "platform": state["platform"],
+    "platform_channel_id": state["platform_channel_id"],
+    "timestamp": {"$gte": utcnow() - timedelta(hours=lookback_hours)},
+    "$or": [
+        {"global_user_id": entity["resolved_global_user_id"]},       # precise match when resolved
+        {"content": {"$regex": entity["surface_form"], "$options": "i"}},  # surface-form fallback
+    ]
+}
+# Sort: {timestamp: -1}   Limit: 20
+```
+
+Semantic fallback: if result count < 3, run embedding similarity search against `entity["surface_form"]` expanded with entity type context.
+
+Result contract: returns `list[dict]` with `{timestamp, speaker, content}`; the executor formats to prose summary before inserting into `research_facts["channel_recent_entity_results"]`. Multiple entities each produce their own keyed entry.
 
 ### D. Global entity knowledge backend
 
@@ -439,11 +522,18 @@ research_facts = {
 }
 ```
 
-Downstream prompt updates to:
+Downstream prompt updates required in:
 
-- explain source priority to cognition layers
-- guide the character on how to weight stable anchors vs retrieved context
-- prevent conflation of "what I remember durably" with "what was said recently about X"
+| File | Location | Change needed |
+|------|----------|---------------|
+| `persona_supervisor2_cognition_l3.py` | Lines 382–388, 526–529 | Add new keys to the `research_facts` dict passed to prompt: `third_party_profile_results`, `channel_recent_entity_results`, `entity_resolution_notes`. Update the prompt schema at lines 333 and 449 to explain source priority and weight stable anchors vs recent entity context. |
+| `persona_supervisor2_cognition_l2.py` | Line 201 | Update prompt schema for `research_facts` to reference new keys. |
+
+Prompt guidance additions:
+
+- explain source priority (preloaded anchors > durable entity memory > recent channel context > external)
+- distinguish "what I remember durably about X" (entity_memory / profile) from "what was said about X recently" (channel_recent_entity)
+- prevent the character from treating a third-party recall result as if it were the current user's profile
 
 ---
 
@@ -523,40 +613,330 @@ Plus all executor wrappers, state schemas, cache helpers, and image context buil
 
 ## Phase 7 — Evaluation
 
-Add tests incrementally as each phase ships.
+Add tests incrementally as each phase ships. The integration scenarios below are LLM-in-the-loop tests — they exercise the real planner and retriever chain against a seeded conversation history fixture.
 
-Test scenarios by phase:
+### Unit test checklist (per phase)
 
-**Phase 1:**
+**Phase 1:** continuation-like messages repaired before retrieval; planner emits `CHANNEL_RECENT_ENTITY` for implicit third-party references; entity grounding resolves known display names from recent history.
 
-- Continuation-like messages that need pre-retrieval repair
-- Planner correctly emits `CHANNEL_RECENT_ENTITY` for implicit third-party references
-- Entity grounding resolves known display names from recent history
+**Phase 2:** implicit third-party recall via `CHANNEL_RECENT_ENTITY`; explicit name recall resolving to `THIRD_PARTY_PROFILE`; mixed self + third-party; unresolved entity surface-form fallback; no cross-user leakage; duplicate-profile suppression via retrieval ledger; external search receives only resolved task, not raw continuation fragment.
 
-**Phase 2:**
+**Phase 3 (if implemented):** entity memory populated correctly on consolidator pass; retrieved correctly for recurring people/entities.
 
-- Implicit third-party recent mention recall (`CHANNEL_RECENT_ENTITY` backend)
-- Explicit name recall resolving to `THIRD_PARTY_PROFILE`
-- Mixed self + third-party recall
-- Unresolved entity fallback to surface-form search
-- No cross-user leakage when scope should stay local
-- Duplicate-profile suppression via retrieval ledger
-- External search receiving only resolved tasks, not raw continuation fragments
+**Phase 5 (if implemented):** bounded supervisor stays within max LLM round limits; evaluator triggers at most one repair pass.
 
-**Phase 3 (if implemented):**
+**Phase 6:** all nodes importable from their respective submodules without circular dependencies; `call_rag_subgraph` behaviour identical before and after the split.
 
-- Entity memory populated correctly from consolidator pass
-- Entity memory retrieved correctly for recurring people/entities
+---
 
-**Phase 5 (if implemented):**
+### RAG Integration Test Scenarios
 
-- Bounded supervisor stays within max LLM round limits
-- Evaluator triggers at most one repair pass
+Each scenario: input → expected planner output → tier execution sequence → `research_facts` assertions.
 
-**Phase 6:**
+---
 
-- All nodes importable from their respective submodules without circular dependencies
-- `call_rag_subgraph` behaviour identical before and after the split (no golden-path regression)
+**S1 — Explicit named third-party, entity resolves** *(CASCADED)*
+
+Input: `"啾啾之前跟你说过什么有趣的？"`
+
+```
+Planner: CASCADED | active_sources=[CHANNEL_RECENT_ENTITY, THIRD_PARTY_PROFILE] | entities=[啾啾]
+
+Tier 0: current_user_image, character_image
+pre-1:  entity_grounder("啾啾") → resolved_id
+Tier 1: input_context_rag  ||  knowledge_base_rag
+Tier 2: channel_recent_entity_rag(subject_id)  ||  third_party_profile_rag(subject_id)
+Tier 3: SKIP
+```
+
+Assert: `channel_recent_entity_results` non-empty; `entity_resolution_notes` contains resolved ID.
+
+---
+
+**S2 — Implicit pronoun, entity ambiguous** *(CASCADED)*
+
+Input: `"她之前说的那个你还记得吗？"`
+
+```
+Planner: CASCADED | active_sources=[CHANNEL_RECENT_ENTITY] | entities=[她, resolution_confidence=0]
+
+Tier 0: preloaded
+pre-1:  entity_grounder("她") → UNRESOLVED
+Tier 1: input_context_rag  ||  knowledge_base_rag
+Tier 2: channel_recent_entity_rag(surface_form="她", semantic_fallback=true)
+        third_party_profile_rag → SKIP (no resolved ID)
+Tier 3: SKIP
+```
+
+Assert: Tier 2 fires with surface-form fallback; no profile retrieval attempted; `entity_resolution_notes` records unresolved.
+
+---
+
+**S3 — Self + third-party mixed** *(CASCADED)*
+
+Input: `"我之前跟你说过的那个项目，啾啾知道吗？"`
+
+```
+Planner: CASCADED | active_sources=[CHANNEL_RECENT_ENTITY, THIRD_PARTY_PROFILE, GLOBAL_ENTITY_KNOWLEDGE]
+         subject.kind=mixed | entities=[啾啾]
+
+Tier 0: preloaded
+pre-1:  entity_grounder("啾啾") → resolved_id
+Tier 1: input_context_rag(current_user scope)  ||  knowledge_base_rag
+Tier 2: channel_recent_entity_rag(subject_id)  ||  third_party_profile_rag(subject_id)
+Tier 3: SKIP
+```
+
+Assert: `input_context_results` carries project context from current-user scope; `channel_recent_entity_results` carries 啾啾's activity — two distinct keys, not merged.
+
+---
+
+**S4 — Multi-entity group chat, `Send` fan-out** *(CASCADED)*
+
+Input: `"小明和啾啾最近有没有一起找你聊过什么？"`
+
+```
+Planner: CASCADED | active_sources=[CHANNEL_RECENT_ENTITY, THIRD_PARTY_PROFILE]
+         entities=[小明, 啾啾]
+
+Tier 0: preloaded
+pre-1:  entity_grounder("小明")→id_A, entity_grounder("啾啾")→id_B
+Tier 1: input_context_rag  ||  knowledge_base_rag
+Tier 2: channel_recent_entity_rag(id_A)  ||  channel_recent_entity_rag(id_B)   ← Send, per entity
+        third_party_profile_rag(id_A)    ||  third_party_profile_rag(id_B)     ← Send, per entity
+Tier 3: SKIP
+```
+
+Assert: exactly 4 Tier 2 calls fire; results keyed by subject; retrieval ledger prevents any subject fetched twice.
+
+---
+
+**S5 — Cascading dependency, repair pass** *(CASCADED + Phase 5)*
+
+Input: `"你之前说会帮她找的那个人，找到了吗？"`
+
+```
+Planner: CASCADED | active_sources=[CHANNEL_RECENT_ENTITY] | entities=[她]
+
+Tier 0: preloaded
+pre-1:  entity_grounder("她") → id_her
+Tier 1: input_context_rag → finds commitment mentioning "小李"  ||  knowledge_base_rag
+Tier 2: channel_recent_entity_rag(id_her) → result reveals "小李" as search target
+                                             ↑ cascading gap detected by Phase 5 evaluator
+[Repair pass — one pass only]
+pre-1': entity_grounder("小李") → id_xiaoli
+Tier 2': channel_recent_entity_rag(id_xiaoli)
+Tier 3: SKIP
+```
+
+Assert: two Tier 2 rounds fire; evaluator does NOT trigger a third pass; ledger contains entries for both `id_her` and `id_xiaoli`.
+
+---
+
+**S6 — Internal primes external search** *(CASCADED, scope dependency)*
+
+Input: `"啾啾之前提到的那个游戏，你觉得好玩吗？"`
+
+```
+Planner: CASCADED | active_sources=[CHANNEL_RECENT_ENTITY, EXTERNAL_KNOWLEDGE]
+         entities=[啾啾] | external_task_hint="search for the game Jiujiu mentioned recently"
+
+Tier 0: preloaded
+pre-1:  entity_grounder("啾啾") → id
+Tier 1: input_context_rag  ||  knowledge_base_rag
+Tier 2: channel_recent_entity_rag(id) → reveals game title "星露谷物语"
+Tier 3: external_rag(query="星露谷物语 gameplay review")
+        ↑ uses actual Tier 2 result; external_task_hint used only if Tier 2 returned empty
+```
+
+Assert: Tier 3 query contains game title from Tier 2 result; if Tier 2 mocked empty, Tier 3 falls back to `external_task_hint`.
+
+---
+
+**S7 — Bare continuation fragment** *(continuation_resolver gates retrieval)*
+
+Input: `"那后来呢？"`
+
+```
+continuation_resolver: needs_context_resolution=true | resolved_task="..." | confidence=0.72
+
+Tier 0: preloaded
+pre-1:  entity_grounder → conditional on entities found by resolver
+Tier 1: input_context_rag(query=resolved_task)  ← resolved task replaces raw input  ||  knowledge_base_rag
+Tier 2: conditional on entity_grounder output
+Tier 3: SKIP
+```
+
+Assert: `input_context_rag` is queried with resolved task string, not `"那后来呢？"`; `continuation_context.confidence` ≥ clarification threshold (0.7).
+
+---
+
+**S8 — Pure current-user, no retrieval** *(CURRENT_USER_STABLE, negative control)*
+
+Input: `"你最近心情怎么样？"`
+
+```
+Planner: CURRENT_USER_STABLE | active_sources=[] | entities=[]
+
+Tier 0: preloaded (sufficient)
+Tier 1–3: SKIP
+```
+
+Assert: no Tier 1-3 calls fire; `channel_recent_entity_results` absent from `research_facts`.
+
+---
+
+**S9 — Stable profile recall, no recent context needed** *(THIRD_PARTY_PROFILE standalone)*
+
+Input: `"你对啾啾的整体印象是什么？"`
+
+The question is about enduring character traits, not recent events. Planner does NOT activate `CHANNEL_RECENT_ENTITY`.
+
+```
+Planner: THIRD_PARTY_PROFILE | active_sources=[THIRD_PARTY_PROFILE] | entities=[啾啾]
+
+Tier 0: preloaded
+pre-1:  entity_grounder("啾啾") → resolved_id
+Tier 1: SKIP (no active Tier 1 sources)
+Tier 2: third_party_profile_rag(subject_id=resolved_id)
+        channel_recent_entity_rag → SKIP
+Tier 3: SKIP
+```
+
+Assert: only `entity_grounder` fires pre-Tier-1 (Tier 1 skipped); `third_party_profile_results` populated; `channel_recent_entity_results` absent; if resolved ID matches current user, ledger suppresses the fetch.
+
+---
+
+**S10 — Pure external knowledge, Tier 1-2 skipped** *(EXTERNAL_KNOWLEDGE standalone)*
+
+Input: `"你知道量子纠缠是什么意思吗？"`
+
+No entities, no internal context required. The decontextualized input is already the full task.
+
+```
+Planner: EXTERNAL_KNOWLEDGE | active_sources=[EXTERNAL_KNOWLEDGE] | entities=[]
+
+Tier 0: preloaded
+Tier 1: SKIP (no entities, no active Tier 1 sources)
+Tier 2: SKIP
+Tier 3: external_rag(query="量子纠缠 quantum entanglement")
+```
+
+Assert: no Tier 1 or Tier 2 calls fire; `external_rag_results` populated; `channel_recent_entity_results` and `third_party_profile_results` absent.
+
+---
+
+### Cross-scenario invariants
+
+| Invariant | How to assert |
+|-----------|--------------|
+| Tier 2 never starts before Tier 1 completes | mock Tier 1 with 100ms delay; assert Tier 2 start ≥ Tier 1 end |
+| Tier 3 never starts before Tier 2 completes | same pattern |
+| Retrieval ledger prevents duplicate subject fetch | S4: assert exactly 4 Tier 2 calls, not 8 |
+| Repair pass capped at 1 | S5: mock Tier 2 to always return a new entity name; assert evaluator stops after one repair |
+| External uses hint only when internal empty | S6: mock Tier 2 empty; assert Tier 3 query equals `external_task_hint` |
+| Continuation resolver gates on resolved task | S7: assert `input_context_rag` never receives the raw input string |
+| Standalone mode does not activate sibling sources | S9: assert `channel_recent_entity_rag` not called; S10: assert no Tier 1-2 calls |
+
+---
+
+## Phase 8 — Transparent Cache Layer (Deferred)
+
+**Defer until Phase 6 is complete.** The two-phase split (resolution vs retrieval) that Phase 6 formalizes is the same boundary the cache uses. Implement Phase 8 immediately after Phase 6.
+
+**Goal:** no RAG node imports or calls any cache function. Cache is purely an orchestration concern at the `call_rag` entry point and at the `external_rag` executor wrapper.
+
+### Design
+
+The new architecture naturally splits into two phases with different cost profiles:
+
+| Phase | Nodes | Cost |
+|-------|-------|------|
+| Resolution | `continuation_resolver`, `rag_planner`, `entity_grounder` | Low — 2 LLM calls + deterministic lookup |
+| Retrieval | Tier 1 + Tier 2 + Tier 3 + finalizer | High — DB queries, LLM calls, optional web fetch |
+
+The cache sits at the boundary between them. Resolution always runs (it's cheap and produces the cache key). Retrieval only runs on a cache miss.
+
+```python
+async def call_rag(global_state: GlobalPersonaState) -> dict:
+    # Phase A: always runs — produces the cache key
+    resolution = await call_resolution_subgraph(global_state)
+
+    # Boundary cache — neither subgraph sees this
+    key = _build_cache_key(resolution)
+    cached = await rag_cache.probe(key)
+    if cached:
+        return cached
+
+    # Phase B: only on cache miss
+    result = await call_retrieval_subgraph(global_state, resolution)
+    await rag_cache.write(key, result)
+    return result
+```
+
+### Cache key construction
+
+The key must include all dimensions that make two queries semantically distinct:
+
+```python
+def _build_cache_key(resolution: dict) -> str:
+    return hash_stable({
+        "resolved_task":   resolution["continuation_context"]["resolved_task"],
+        "entity_ids":      sorted(e["resolved_global_user_id"] or e["surface_form"]
+                                  for e in resolution["resolved_entities"]),
+        "active_sources":  sorted(resolution["retrieval_plan"]["active_sources"]),
+        "lookback_hours":  resolution["retrieval_plan"]["time_scope"]["lookback_hours"],
+    })
+```
+
+Query text alone is insufficient: the same text with different resolved entity IDs, different source sets, or different time windows must produce different cache entries.
+
+### `external_rag` independent cache
+
+Web calls are expensive and independently invalidated. Wrap the executor with a decorator — the node logic stays clean:
+
+```python
+# in rag/cache.py — infrastructure, not a RAG node
+def cached_node(key_fn):
+    def decorator(fn):
+        async def wrapper(state):
+            key = key_fn(state)
+            hit = await rag_cache.probe(key)
+            if hit:
+                return hit
+            result = await fn(state)
+            await rag_cache.write(key, result)
+            return result
+        return wrapper
+    return decorator
+
+# in persona_supervisor2_rag_executors.py
+@cached_node(key_fn=lambda state: state["retrieval_plan"].get("external_query", ""))
+async def external_rag(state: RAGState) -> dict:
+    # purely retrieval logic — no cache awareness
+    ...
+```
+
+### Scoped cache invalidation
+
+**Current behaviour:** `db_writer` invalidates the whole RAG cache namespace after every write. This becomes a problem when multiple source types exist — writing a third-party profile for user B must not evict a cached `CHANNEL_RECENT_ENTITY` result for user A.
+
+**Target behaviour:** `db_writer` calls source-scoped invalidation based on what it actually wrote:
+
+| What was written | Cache scope to invalidate |
+|-----------------|--------------------------|
+| Current user facts / diary | Full-plan entries where `entity_ids` includes current user as primary subject |
+| Third-party profile for user X | `THIRD_PARTY_PROFILE` entries keyed on X's `resolved_global_user_id` |
+| New conversation history for channel C | `CHANNEL_RECENT_ENTITY` entries keyed on channel C |
+| `knowledge_base` entry for subject K | `GLOBAL_ENTITY_KNOWLEDGE` entries keyed on K's `subject_key` |
+
+Implement as a `CacheInvalidationScope` dataclass produced by `db_writer` and consumed by a `cache_invalidator` helper in `rag/cache.py`. The consolidator never imports the cache directly — it produces a scope descriptor and the cache module acts on it.
+
+### Dependencies
+
+- Requires **Phase 6** (module decomposition) — `call_resolution_subgraph` and `call_retrieval_subgraph` must exist as distinct callable boundaries before the cache can sit between them.
+- `cached_node` decorator lives in `rag/cache.py` (already planned as part of the `rag/` subpackage in Phase 6).
+- Phase 8 is **behavior-neutral**: cache hits must produce results identical to cache misses. Phase 7 integration tests (S1–S10) must pass unchanged whether the cache is warm or cold.
 
 ---
 
@@ -591,21 +971,28 @@ Deterministic code may only inject **structural bounds**: platform, safe time ra
 
 ---
 
-## Open Design Decisions
+## Resolved Design Decisions
 
-### knowledge_base vs entity_memory
+### knowledge_base vs entity_memory — Option B chosen
 
-**Option A — Keep both concepts separate**
+**Decision:** one storage substrate, separate logical source types at retrieval time.
 
-- `knowledge_base` = generic durable internal topic knowledge
-- `entity_memory` = subject-aware third-party person/entity memory
-- Pros: conceptually clean, easier policy separation
-- Cons: more write/update logic, more retrieval arbitration
+**Rationale:** both options require the LLM to make the same discrimination ("is this about a person or a topic?") at write time. In Option A the LLM routes to the wrong collection; in Option B it sets the wrong `subject_kind` tag. The error is equivalent in both cases, so the "blurred boundary" risk is not a differentiator. Option B removes the duplicate write path, compaction logic, embedding index, and cache invalidation that Option A would require for each substrate.
 
-**Option B — Merge into one durable internal memory substrate**
+Option B is also more recoverable: a mislabelled `subject_kind` is corrected with a single update query; a wrong-collection write in Option A requires document migration.
 
-- Unified schema with `subject_kind`, `subject_key`, `memory_scope`, `recent_window`, `historical_summary`, embeddings
-- Pros: one storage/update framework, shared compaction logic, easier unified retrieval contracts
-- Cons: policy mistakes can blur profile memory vs event memory if schema discipline is weak
+**Constraint on the write path:** `subject_kind` must be validated before any write reaches the substrate. The LLM output must include an explicit `subject_kind` value from a closed enum (`topic`, `person`, `group`, `event`). A missing or unrecognised value must fail loudly — not default silently — so type errors surface immediately rather than accumulating as retrieval noise.
 
-**Recommendation:** merge at the storage-framework level; keep them distinct at the planner / research-facts / prompt level. One storage substrate, separate logical source types at retrieval time.
+**Schema:**
+```json
+{
+  "subject_kind": "topic | person | group | event",
+  "subject_key": "normalized identifier",
+  "memory_scope": "global | platform | channel",
+  "recent_window": [{"timestamp": "...", "summary": "..."}],
+  "historical_summary": "...",
+  "embedding": []
+}
+```
+
+At retrieval time, planners filter by `subject_kind` to get the correct logical view. The planner and `research_facts` surface treat `topic` results and `person` results as distinct source types — the unified substrate is invisible above the executor layer.

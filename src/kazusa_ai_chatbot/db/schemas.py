@@ -203,6 +203,24 @@ class MemoryDoc(TypedDict, total=False):
     expiry_timestamp: str | None    # ISO-8601 or None (never expires)
 
 
+class EntityMemoryDoc(TypedDict, total=False):
+    """A durable entity/topic memory entry in the ``entity_memory`` collection.
+
+    Phase 3 — Option B unified substrate: ``subject_kind`` discriminates
+    at retrieval time between persons, groups, topics, and events.
+    """
+    subject_key: str                    # normalised identifier (lowercase, stripped)
+    subject_kind: str                   # "topic" | "person" | "group" | "event"
+    display_names: list[str]            # known surface forms / aliases
+    resolved_global_user_id: str        # linked platform user ID (empty if unresolved)
+    memory_scope: str                   # "global" | "platform" | "channel"
+    recent_mentions: list[dict]         # bounded window: [{timestamp, platform, platform_channel_id, summary}]
+    historical_summary: str             # compressed long-term summary
+    embedding: list[float]              # dense vector for similarity search
+    created_at: str                     # ISO-8601 UTC
+    updated_at: str                     # ISO-8601 UTC
+
+
 class ActiveCommitmentDoc(TypedDict, total=False):
     """A currently active user-scoped commitment or accepted preference.
 

@@ -171,11 +171,15 @@ async def relationship_recorder(state: ConsolidatorState) -> dict:
 
     result = parse_llm_json_output(response.content)
 
+    # Just for debugging purpose
+    diary_entry = result.get("diary_entry", []) or []
+    if isinstance(diary_entry, str):
+        diary_entry = [diary_entry]
     logger.debug(
         "Relationship recorder: skip=%s affinity_delta=%s diary=%s insight=%s",
         result.get("skip", False),
         result.get("affinity_delta", 0),
-        log_list_preview(result.get("diary_entry", []) or []),
+        log_list_preview(diary_entry),
         log_preview(result.get("last_relationship_insight", "")),
     )
 

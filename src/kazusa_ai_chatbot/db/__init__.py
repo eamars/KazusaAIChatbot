@@ -37,6 +37,7 @@ from kazusa_ai_chatbot.db.schemas import (
     CharacterDiaryEntry,
     CharacterProfileDoc,
     ConversationMessageDoc,
+    EntityMemoryDoc,
     MemoryDoc,
     ObjectiveFactEntry,
     PlatformAccountDoc,
@@ -93,6 +94,15 @@ from kazusa_ai_chatbot.db.memory import (
     search_memory,
 )
 
+# ── Entity Memory (Phase 3) ──────────────────────────────────────
+from kazusa_ai_chatbot.db.entity_memory import (
+    enable_entity_memory_vector_index,
+    get_entity_by_key,
+    get_entity_by_resolved_id,
+    search_entity_memory,
+    upsert_entity_memory,
+)
+
 # ── RAG cache (NEW) ───────────────────────────────────────────────
 from kazusa_ai_chatbot.db.rag_cache import (
     clear_all_cache_for_user,
@@ -110,7 +120,7 @@ __all__ = [
     "close_db", "enable_vector_index", "get_db", "get_text_embedding", "get_text_embeddings_batch",
     # Schemas
     "ActiveCommitmentDoc", "AttachmentDoc", "CharacterDiaryEntry", "CharacterProfileDoc",
-    "ConversationMessageDoc", "MemoryDoc", "ObjectiveFactEntry",
+    "ConversationMessageDoc", "EntityMemoryDoc", "MemoryDoc", "ObjectiveFactEntry",
     "PlatformAccountDoc", "RagCacheIndexDoc", "RagMetadataIndexDoc",
     "ScheduledEventDoc", "UserProfileDoc", "build_memory_doc",
     # Bootstrap
@@ -130,6 +140,9 @@ __all__ = [
     "upsert_character_self_image", "upsert_character_state",
     # Memory
     "enable_memory_vector_index", "get_active_promises", "save_memory", "search_memory",
+    # Entity Memory
+    "enable_entity_memory_vector_index", "get_entity_by_key", "get_entity_by_resolved_id",
+    "search_entity_memory", "upsert_entity_memory",
     # RAG cache
     "clear_all_cache_for_user", "find_cache_entries", "get_rag_version",
     "increment_rag_version", "insert_cache_entry", "soft_delete_cache_entries",

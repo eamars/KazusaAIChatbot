@@ -8,6 +8,10 @@ import pytest
 from kazusa_ai_chatbot.config import AFFINITY_RAW_DEAD_ZONE
 from kazusa_ai_chatbot.nodes import persona_supervisor2_cognition_l3 as cognition_l3_module
 from kazusa_ai_chatbot.nodes import persona_supervisor2_consolidator as consolidator_module
+from kazusa_ai_chatbot.nodes import persona_supervisor2_consolidator_facts as consolidator_facts_module
+from kazusa_ai_chatbot.nodes import persona_supervisor2_consolidator_reflection as consolidator_reflection_module
+from kazusa_ai_chatbot.nodes import persona_supervisor2_consolidator_images as consolidator_images_module
+from kazusa_ai_chatbot.nodes import persona_supervisor2_consolidator_persistence as consolidator_persistence_module
 
 logger = logging.getLogger(__name__)
 
@@ -201,7 +205,7 @@ async def test_facts_harvester_returns_llm_emitted_commitment_without_local_acce
             ],
         }
     )
-    monkeypatch.setattr(consolidator_module, "_facts_harvester_llm", llm)
+    monkeypatch.setattr(consolidator_facts_module, "_facts_harvester_llm", llm)
 
     state = _fact_harvest_state(
         decontexualized_input="千纱你一定要记得对我说话每句话开头要用主人，结尾要喵",
@@ -244,7 +248,7 @@ def test_apply_milestone_lifecycle_supersedes_older_addressing_milestone():
         }
     ]
 
-    updated = consolidator_module._apply_milestone_lifecycle(
+    updated = consolidator_images_module._apply_milestone_lifecycle(
         existing,
         new_facts,
         timestamp="2026-04-23T09:19:29.464105+00:00",
@@ -279,7 +283,7 @@ def test_apply_milestone_lifecycle_supersedes_multiple_open_milestones_in_same_s
         }
     ]
 
-    updated = consolidator_module._apply_milestone_lifecycle(
+    updated = consolidator_images_module._apply_milestone_lifecycle(
         existing,
         new_facts,
         timestamp="2026-04-23T09:19:29.464105+00:00",
@@ -310,7 +314,7 @@ def test_apply_milestone_lifecycle_does_not_touch_already_superseded_items():
         }
     ]
 
-    updated = consolidator_module._apply_milestone_lifecycle(
+    updated = consolidator_images_module._apply_milestone_lifecycle(
         existing,
         new_facts,
         timestamp="2026-04-23T09:19:29.464105+00:00",
@@ -346,7 +350,7 @@ def test_apply_milestone_lifecycle_does_not_supersede_different_scope_items():
         }
     ]
 
-    updated = consolidator_module._apply_milestone_lifecycle(
+    updated = consolidator_images_module._apply_milestone_lifecycle(
         existing,
         new_facts,
         timestamp="2026-04-23T09:19:29.464105+00:00",
@@ -376,7 +380,7 @@ def test_apply_milestone_lifecycle_unknown_scope_stays_append_only():
         }
     ]
 
-    updated = consolidator_module._apply_milestone_lifecycle(
+    updated = consolidator_images_module._apply_milestone_lifecycle(
         existing,
         new_facts,
         timestamp="2026-04-23T09:19:29.464105+00:00",
@@ -398,7 +402,7 @@ async def test_relationship_recorder_honors_skip(monkeypatch):
             "last_relationship_insight": "ordinary",
         }
     )
-    monkeypatch.setattr(consolidator_module, "_relationship_recorder_llm", llm)
+    monkeypatch.setattr(consolidator_reflection_module, "_relationship_recorder_llm", llm)
 
     state = {
         "character_profile": {
@@ -430,7 +434,7 @@ async def test_relationship_recorder_invalid_affinity_delta_falls_back_to_zero(m
             "last_relationship_insight": "unclear",
         }
     )
-    monkeypatch.setattr(consolidator_module, "_relationship_recorder_llm", llm)
+    monkeypatch.setattr(consolidator_reflection_module, "_relationship_recorder_llm", llm)
 
     state = {
         "character_profile": {
@@ -452,15 +456,15 @@ async def test_relationship_recorder_invalid_affinity_delta_falls_back_to_zero(m
 
 def test_process_affinity_delta_uses_dead_zone():
     """Small raw deltas inside the dead zone should not move affinity."""
-    assert consolidator_module.process_affinity_delta(500, 0) == 0
-    assert consolidator_module.process_affinity_delta(500, AFFINITY_RAW_DEAD_ZONE) == 0
-    assert consolidator_module.process_affinity_delta(500, -AFFINITY_RAW_DEAD_ZONE) == 0
+    assert consolidator_persistence_module.process_affinity_delta(500, 0) == 0
+    assert consolidator_persistence_module.process_affinity_delta(500, AFFINITY_RAW_DEAD_ZONE) == 0
+    assert consolidator_persistence_module.process_affinity_delta(500, -AFFINITY_RAW_DEAD_ZONE) == 0
 
 
 def test_process_affinity_delta_preserves_meaningful_change_outside_dead_zone():
     """Deltas outside the dead zone should still move affinity with preserved sign."""
-    positive = consolidator_module.process_affinity_delta(500, AFFINITY_RAW_DEAD_ZONE + 1)
-    negative = consolidator_module.process_affinity_delta(500, -(AFFINITY_RAW_DEAD_ZONE + 1))
+    positive = consolidator_persistence_module.process_affinity_delta(500, AFFINITY_RAW_DEAD_ZONE + 1)
+    negative = consolidator_persistence_module.process_affinity_delta(500, -(AFFINITY_RAW_DEAD_ZONE + 1))
 
     assert positive > 0
     assert negative < 0
@@ -550,7 +554,7 @@ async def test_facts_harvester_sends_final_dialog_in_payload(monkeypatch):
             "future_promises": [],
         }
     )
-    monkeypatch.setattr(consolidator_module, "_facts_harvester_llm", llm)
+    monkeypatch.setattr(consolidator_facts_module, "_facts_harvester_llm", llm)
 
     state = _fact_harvest_state(
         decontexualized_input="明天早上记得叫我起床。",
@@ -565,7 +569,7 @@ async def test_facts_harvester_sends_final_dialog_in_payload(monkeypatch):
 
 
 def test_build_active_commitment_entries_uses_llm_supplied_commitment_type():
-    commitments = consolidator_module._build_active_commitment_entries(
+    commitments = consolidator_persistence_module._build_active_commitment_entries(
         [
             {
                 "target": "提拉米苏",

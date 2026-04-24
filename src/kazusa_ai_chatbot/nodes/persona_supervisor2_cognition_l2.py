@@ -210,7 +210,10 @@ _COGNITION_CONSCIOUSNESS_PROMPT = """\
             "recent_observations": ["{character_name} 最近几次互动后的自我状态"]
         }},
         "input_context_results": "与当前话题相关的主观记忆（跨用户）",
-        "external_rag_results": "外部知识库检索结果"
+        "external_rag_results": "外部知识库检索结果",
+        "third_party_profile_results": "第三方用户的持久画像——注意：这是关于'他人'的记忆，不要混淆为当前用户",
+        "channel_recent_entity_results": "频道近期提到的第三方实体的对话记录——这是'最近发生的事'",
+        "entity_resolution_notes": "实体解析备注"
     }},
     "indirect_speech_context": "空字符串表示直接对话，非空表示用户是在向他人谈论角色",
     "emotional_appraisal": "潜意识直觉",

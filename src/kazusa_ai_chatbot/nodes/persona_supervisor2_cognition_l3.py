@@ -342,7 +342,10 @@ _CONTENT_ANCHOR_AGENT_PROMPT = """\
             "recent_observations": ["{character_name} 最近几次互动后的自我状态"]
         }},
         "input_context_results": "与当前话题相关的主观记忆（跨用户）",
-        "external_rag_results": "外部知识库检索结果"
+        "external_rag_results": "外部知识库检索结果",
+        "third_party_profile_results": "第三方用户的持久画像（里程碑、日记等）——注意区分：这是关于'他人'的记忆，不是当前用户",
+        "channel_recent_entity_results": "频道近期提到的第三方实体/人物的对话记录——注意：这是'最近发生的事'，不是持久印象",
+        "entity_resolution_notes": "实体解析备注（哪些名称被解析为已知用户）"
     }},
     "internal_monologue": "意识层的决策逻辑",
     "logical_stance": "强制逻辑立场 (CONFIRM/REFUSE/TENTATIVE...)",
@@ -386,6 +389,9 @@ async def call_content_anchor_agent(state: CognitionState) -> CognitionState:
             "input_context_results": state["research_facts"].get("input_context_results", ""),
             "external_rag_results": state["research_facts"].get("external_rag_results", ""),
             "knowledge_base_results": state["research_facts"].get("knowledge_base_results", ""),
+            "third_party_profile_results": state["research_facts"].get("third_party_profile_results", ""),
+            "channel_recent_entity_results": state["research_facts"].get("channel_recent_entity_results", ""),
+            "entity_resolution_notes": state["research_facts"].get("entity_resolution_notes", ""),
         },
         "internal_monologue": state["internal_monologue"],
         "logical_stance": state["logical_stance"],

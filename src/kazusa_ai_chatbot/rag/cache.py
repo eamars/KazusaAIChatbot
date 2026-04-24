@@ -18,6 +18,7 @@ import logging
 import math
 import uuid
 from collections import OrderedDict
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -48,6 +49,8 @@ DEFAULT_TTL_SECONDS = {
     "external_knowledge": 3600,     # 1 hour — web search / shared knowledge
     "knowledge_base": 2592000,      # 30 days — accumulated cross-session topic knowledge
 
+    # Phase 8 — Boundary cache (resolution→retrieval boundary)
+    "boundary_cache": 900,          # 15 min — keyed on resolution hash
 }
 
 
@@ -94,6 +97,105 @@ def _vec_norm(v: list[float]) -> float:
 def _now_utc() -> datetime:
     """Current UTC time as a timezone-aware datetime."""
     return datetime.now(timezone.utc)
+
+
+# ── Phase 8: Scoped cache invalidation ────────────────────────────
+
+
+@dataclass
+class CacheInvalidationScope:
+    """Descriptor produced by the write path to specify which cache entries
+    should be invalidated when new data is written.
+
+    The fields act as **AND** filters — only entries matching all non-empty
+    fields are removed. Empty/None fields are treated as wildcards.
+
+    Attributes:
+        cache_type: Restrict invalidation to a specific cache namespace
+            (e.g. ``"boundary_cache"``, ``"external_knowledge"``).
+        global_user_id: Restrict to entries owned by a specific user.
+            ``None`` means "match any user".
+        boundary_key: Restrict to entries with a specific boundary cache key.
+        channel_id: Restrict to entries associated with a specific channel.
+        reason: Human-readable description of why invalidation was triggered.
+    """
+    cache_type: str = ""
+    global_user_id: str | None = None
+    boundary_key: str = ""
+    channel_id: str = ""
+    reason: str = ""
+
+
+# ── Phase 8: cached_node decorator ───────────────────────────────
+
+
+def cached_node(key_fn, *, cache_type: str = "external_knowledge"):
+    """Decorator that wraps a RAG executor node with per-node caching.
+
+    The wrapped node checks the process-wide ``RAGCache`` for a boundary-key
+    match before executing. On a hit, it returns the cached result directly.
+    On a miss, it runs the node and stores the result.
+
+    The ``key_fn`` receives the RAGState and must return a string cache key.
+    The node function itself stays cache-unaware.
+
+    Args:
+        key_fn: Callable ``(state) -> str`` producing the cache key.
+        cache_type: Cache namespace for the entry (default ``"external_knowledge"``).
+
+    Returns:
+        A decorator that wraps an async node function.
+    """
+    import functools
+
+    def decorator(fn):
+        @functools.wraps(fn)
+        async def wrapper(state):
+            cache = _get_cached_node_cache()
+            if cache is None:
+                return await fn(state)
+
+            key = key_fn(state)
+            if not key:
+                return await fn(state)
+
+            hit = await cache.retrieve_if_similar_by_key(key)
+            if hit is not None:
+                logger.debug("cached_node hit for %s key=%s…", fn.__name__, key[:16])
+                return hit["results"]
+
+            result = await fn(state)
+            await cache.store_by_key(
+                cache_key=key,
+                results=result,
+                cache_type=cache_type,
+                global_user_id=state.get("global_user_id", ""),
+                metadata={"node": fn.__name__},
+            )
+            return result
+        return wrapper
+    return decorator
+
+
+_cached_node_cache_ref: RAGCache | None = None
+
+
+def _get_cached_node_cache() -> RAGCache | None:
+    """Return the process-wide RAGCache singleton, if initialised.
+
+    The singleton is set by ``RAGCache.start()`` — before that, decorated
+    nodes fall through to the uncached path.
+    """
+    return _cached_node_cache_ref
+
+
+def set_cached_node_cache(cache: RAGCache) -> None:
+    """Register the process-wide RAGCache for ``cached_node`` decorators.
+
+    Called once during application startup after the cache is initialised.
+    """
+    global _cached_node_cache_ref
+    _cached_node_cache_ref = cache
 
 
 # ── Cache entry ────────────────────────────────────────────────────
@@ -425,6 +527,132 @@ class RAGCache:
             "threshold": self._threshold,
         }
 
+    # ── Phase 8: key-based boundary cache ─────────────────────
+
+    async def retrieve_if_similar_by_key(
+        self,
+        cache_key: str,
+    ) -> dict | None:
+        """Retrieve a cached result by exact structured key match.
+
+        Unlike ``retrieve_if_similar``, this does **not** compare embeddings.
+        The ``cache_key`` is a pre-computed hash from resolution outputs
+        (see ``_build_cache_key``).  Scans **all** cache types for a matching
+        ``boundary_key`` in metadata.
+
+        Args:
+            cache_key: Hex-digest string that uniquely identifies the
+                resolution context (resolved task, entity IDs, active sources,
+                lookback hours).
+
+        Returns:
+            A dict with keys ``cache_id``, ``results``, and ``metadata``
+            if a non-expired match is found; ``None`` on a miss.
+        """
+        now = _now_utc()
+        for cid, entry in self._store.items():
+            if entry.metadata.get("boundary_key") != cache_key:
+                continue
+            if entry.is_expired(now):
+                self._store.pop(cid, None)
+                continue
+            self._store.move_to_end(cid)
+            self._hits += 1
+            return {
+                "cache_id": entry.cache_id,
+                "results": entry.results,
+                "metadata": entry.metadata,
+            }
+        self._misses += 1
+        return None
+
+    async def store_by_key(
+        self,
+        *,
+        cache_key: str,
+        results: dict,
+        cache_type: str,
+        global_user_id: str,
+        ttl_seconds: int | None = None,
+        metadata: dict | None = None,
+    ) -> str:
+        """Store a cache entry keyed by a structured hash (not embedding).
+
+        The ``cache_key`` is stored inside ``metadata["boundary_key"]`` so
+        ``retrieve_if_similar_by_key`` can look it up by exact match.
+
+        Args:
+            cache_key: Pre-computed hash from resolution outputs.
+            results: RAG output payload to cache.
+            cache_type: Namespace key (typically ``"boundary_cache"``).
+            global_user_id: Owner of the entry.
+            ttl_seconds: Validity window. Defaults to per-type TTL or 600s.
+            metadata: Optional auxiliary data; ``boundary_key`` is injected
+                automatically.
+
+        Returns:
+            The newly assigned ``cache_id`` (UUID4 string).
+        """
+        ttl = ttl_seconds if ttl_seconds is not None else self._ttl.get(cache_type, 600)
+        expires_at = _now_utc() + timedelta(seconds=ttl)
+        meta = dict(metadata or {})
+        meta["boundary_key"] = cache_key
+        entry = _CacheEntry(
+            cache_id=str(uuid.uuid4()),
+            cache_type=cache_type,
+            global_user_id=global_user_id,
+            embedding=[],
+            results=results,
+            ttl_expires_at=expires_at,
+            metadata=meta,
+        )
+        self._store[entry.cache_id] = entry
+        self._store.move_to_end(entry.cache_id)
+        self._evict_if_needed()
+
+        try:
+            await self._persist(entry)
+        except PyMongoError:
+            logger.exception("Failed to persist boundary cache entry %s — in-memory still valid", entry.cache_id)
+
+        return entry.cache_id
+
+    async def invalidate_scoped(self, scope: "CacheInvalidationScope") -> int:
+        """Invalidate cache entries matching a scoped descriptor.
+
+        This is the Phase 8 replacement for blanket invalidation.
+        ``db_writer`` produces a ``CacheInvalidationScope`` describing what
+        was written, and this method removes only the affected entries.
+
+        Args:
+            scope: Descriptor produced by the write path.
+
+        Returns:
+            Number of in-memory entries removed.
+        """
+        removed: list[str] = []
+        for cid, entry in list(self._store.items()):
+            if scope.cache_type and entry.cache_type != scope.cache_type:
+                continue
+            if scope.global_user_id is not None and entry.global_user_id != scope.global_user_id:
+                continue
+            if scope.boundary_key and entry.metadata.get("boundary_key") != scope.boundary_key:
+                continue
+            if scope.channel_id and entry.metadata.get("channel_id") != scope.channel_id:
+                continue
+            removed.append(cid)
+
+        for cid in removed:
+            self._store.pop(cid, None)
+
+        if removed:
+            try:
+                await self._soft_delete_scoped(scope)
+            except PyMongoError:
+                logger.exception("Failed to soft-delete scoped cache entries for %s", scope)
+
+        return len(removed)
+
     # ── internal: LRU eviction ─────────────────────────────────
 
     def _evict_if_needed(self) -> None:
@@ -467,6 +695,28 @@ class RAGCache:
         query: dict[str, Any] = {"global_user_id": global_user_id, "deleted": False}
         if cache_type is not None:
             query["cache_type"] = cache_type
+        await db[_CACHE_COLLECTION].update_many(
+            query,
+            {"$set": {"deleted": True}},
+        )
+
+    async def _soft_delete_scoped(self, scope: CacheInvalidationScope) -> None:
+        """Soft-delete MongoDB entries matching a scoped invalidation descriptor.
+
+        Args:
+            scope: The invalidation scope. Only non-empty fields are added
+                to the query filter.
+        """
+        db = await get_db()
+        query: dict[str, Any] = {"deleted": False}
+        if scope.cache_type:
+            query["cache_type"] = scope.cache_type
+        if scope.global_user_id is not None:
+            query["global_user_id"] = scope.global_user_id
+        if scope.boundary_key:
+            query["metadata.boundary_key"] = scope.boundary_key
+        if scope.channel_id:
+            query["metadata.channel_id"] = scope.channel_id
         await db[_CACHE_COLLECTION].update_many(
             query,
             {"$set": {"deleted": True}},
