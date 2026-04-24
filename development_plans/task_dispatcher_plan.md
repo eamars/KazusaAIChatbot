@@ -55,57 +55,95 @@ Cognition nodes produce data; the dispatcher owns execution policy.
 
 ## Core Data Schema (`actions.py`)
 
+The schema separates three concerns: the **envelope** (when), the **target** (who/where), and the
+**params** (what). Targets and params are polymorphic — not every action involves a channel or text.
+
+### Envelope
+
 ```python
-class ActionType(str, Enum):
-    # ── Tier 1: MVP (implemented in core steps below) ──────────────────────
-    SEND_MESSAGE    = "send_message"      # text → channel
-    SEND_DM         = "send_dm"           # text → user DM
-    RECALL_PROMISE  = "recall_promise"    # re-surface a commitment to the user
-
-    # ── Tier 2: Near-term expansions (pick from menu below) ────────────────
-    REACT_MESSAGE   = "react_message"     # emoji reaction on a message
-    EDIT_MESSAGE    = "edit_message"      # edit a previously sent message
-    SEND_MEDIA      = "send_media"        # image / audio / file attachment
-    BROADCAST       = "broadcast"         # fan-out one message to N targets
-
-    # ── Tier 3: Agentic expansions (further out) ───────────────────────────
-    MCP_TOOL_CALL   = "mcp_tool_call"     # deferred MCP tool invocation
-    CHAIN_ACTION    = "chain_action"      # action that schedules follow-up actions
-    REGISTER_WATCH  = "register_watch"    # listen for a reply within a time window
-
-
-@dataclass
-class ActionTarget:
-    platform: str                         # "discord", "napcat", "debug"
-    channel_id: str                       # platform-native channel ID; "" for DM
-    global_user_id: Optional[str] = None  # required for SEND_DM / BROADCAST
-
-
 @dataclass
 class ActionRequest:
     action_type: ActionType
-    target: ActionTarget
-    payload: dict
+    target: "ChannelTarget | UserTarget | MessageTarget | GuildTarget"
+    params: dict                            # action-specific; validated by dispatcher
     execute_at: Optional[datetime] = None   # None → immediate
     source_event_id: Optional[str] = None   # originating chat event (tracing)
-    follow_up: Optional["ActionRequest"] = None  # for CHAIN_ACTION
+    follow_up: Optional["ActionRequest"] = None  # for CHAIN_ACTION (T3-B)
     tags: list[str] = field(default_factory=list)
 ```
 
-**Payload schemas:**
+### Target types
 
-| `action_type`     | Required payload keys              | Optional                        |
-|-------------------|------------------------------------|---------------------------------|
-| `send_message`    | `text: str`                        | `reply_to_msg_id: str`          |
-| `send_dm`         | `text: str`                        | —                               |
-| `recall_promise`  | `promise_text: str`                | `original_due_time: str`        |
-| `react_message`   | `message_id: str`, `emoji: str`    | —                               |
-| `edit_message`    | `message_id: str`, `new_text: str` | —                               |
-| `send_media`      | `text: str`, `media_url: str`      | `media_type: str`               |
-| `broadcast`       | `text: str`, `targets: list[dict]` | —                               |
-| `mcp_tool_call`   | `tool_name: str`, `args: dict`     | `result_action: ActionRequest`  |
-| `chain_action`    | (delegates to `follow_up` field)   | `condition: str`                |
-| `register_watch`  | `expect_reply_within_minutes: int` | `on_timeout: ActionRequest`     |
+```python
+@dataclass
+class ChannelTarget:
+    """Delivery to a channel. Used by: send_message, send_media, broadcast."""
+    platform: str
+    channel_id: str                         # "" means "same as originating event"
+
+@dataclass
+class UserTarget:
+    """Delivery to or action on a specific user. Used by: send_dm, mute_user, ban_user."""
+    platform: str
+    global_user_id: str
+
+@dataclass
+class MessageTarget:
+    """Action on an existing message. Used by: react_message, edit_message, delete_message."""
+    platform: str
+    channel_id: str
+    message_id: str
+
+@dataclass
+class GuildTarget:
+    """Server/guild-level action. Used by: create_role, set_slowmode, etc."""
+    platform: str
+    guild_id: str
+```
+
+### Action types
+
+```python
+class ActionType(str, Enum):
+    # ── Tier 1: MVP ────────────────────────────────────────────────────────
+    SEND_MESSAGE    = "send_message"      # ChannelTarget
+    SEND_DM         = "send_dm"           # UserTarget
+    RECALL_PROMISE  = "recall_promise"    # ChannelTarget
+
+    # ── Tier 2: Near-term (pick from menu below) ───────────────────────────
+    REACT_MESSAGE   = "react_message"     # MessageTarget
+    EDIT_MESSAGE    = "edit_message"      # MessageTarget
+    DELETE_MESSAGE  = "delete_message"    # MessageTarget
+    SEND_MEDIA      = "send_media"        # ChannelTarget
+    BROADCAST       = "broadcast"         # list[ChannelTarget | UserTarget]
+    MUTE_USER       = "mute_user"         # UserTarget
+    BAN_USER        = "ban_user"          # UserTarget
+
+    # ── Tier 3: Agentic (further out) ──────────────────────────────────────
+    MCP_TOOL_CALL   = "mcp_tool_call"     # no target (tool-directed)
+    CHAIN_ACTION    = "chain_action"      # delegates to follow_up field
+    REGISTER_WATCH  = "register_watch"    # UserTarget + ChannelTarget
+```
+
+### Params schemas
+
+Params are action-specific. The dispatcher validates required keys before routing.
+
+| `action_type`     | Target type      | Required params                         | Optional params                  |
+|-------------------|------------------|-----------------------------------------|----------------------------------|
+| `send_message`    | ChannelTarget    | `text: str`                             | `reply_to_msg_id: str`           |
+| `send_dm`         | UserTarget       | `text: str`                             | —                                |
+| `recall_promise`  | ChannelTarget    | `promise_text: str`                     | `original_due_time: str`         |
+| `react_message`   | MessageTarget    | `emoji: str`                            | —                                |
+| `edit_message`    | MessageTarget    | `new_text: str`                         | —                                |
+| `delete_message`  | MessageTarget    | —                                       | `reason: str`                    |
+| `send_media`      | ChannelTarget    | `media_url: str`                        | `text: str`, `media_type: str`   |
+| `broadcast`       | list of targets  | `text: str`, `targets: list[dict]`      | —                                |
+| `mute_user`       | UserTarget       | `duration_minutes: int`                 | `reason: str`                    |
+| `ban_user`        | UserTarget       | —                                       | `reason: str`, `delete_days: int`|
+| `mcp_tool_call`   | —                | `tool_name: str`, `args: dict`          | `result_action: dict`            |
+| `chain_action`    | —                | (delegates to `follow_up` field)        | `condition: str`                 |
+| `register_watch`  | UserTarget       | `expect_reply_within_minutes: int`      | `on_timeout: dict`               |
 
 ---
 
@@ -135,16 +173,23 @@ Routing rules:
 
 ## LLM-Driven Action Generation
 
-The consolidator LLM gains a `schedule_action` tool call:
+One tool per action type. Each tool has only the parameters it actually needs — the LLM gets
+precise guidance and never has to guess at a generic `params` dict.
 
 ```
-schedule_action(
-  action_type: "send_message" | "send_dm" | "recall_promise" | ...,
-  target_channel: "same" | "<explicit id>",
-  text: str,
-  delay_minutes: int   # 0 = immediate
-)
+send_message(target_channel: "same"|"<id>", text: str, delay_minutes: int)
+send_dm(global_user_id: str, text: str, delay_minutes: int)
+recall_promise(promise_text: str, delay_minutes: int)
+react_message(message_id: str, emoji: str, delay_minutes: int)
+mute_user(global_user_id: str, duration_minutes: int, reason: str, delay_minutes: int)
+ban_user(global_user_id: str, reason: str, delay_minutes: int)
+send_media(target_channel: "same"|"<id>", media_url: str, text: str, delay_minutes: int)
+...
 ```
+
+The consolidator registers only the tools appropriate for Kazusa's current permission level
+(e.g., moderation tools only if the bot has mod rights in that guild). This keeps the LLM's
+tool surface small and prevents hallucinated moderation calls in normal chat.
 
 Consolidator maps `delay_minutes` → `execute_at = now() + timedelta(minutes=delay_minutes)`,
 collects all tool calls → `list[ActionRequest]`, calls `dispatcher.dispatch(requests)`.
@@ -160,10 +205,12 @@ and can be picked in any order.
 
 ### CORE — Must implement first
 
-#### C1. Action schema (`actions.py`) — ~80 lines
+#### C1. Action schema (`actions.py`) — ~110 lines
 - `ActionType` enum (all tiers defined upfront as strings; handlers registered lazily).
-- `ActionTarget`, `ActionRequest` dataclasses.
-- `to_scheduler_payload()` / `from_scheduler_payload()` round-trip helpers.
+- `ChannelTarget`, `UserTarget`, `MessageTarget`, `GuildTarget` dataclasses.
+- `ActionRequest` with polymorphic `target` union type.
+- `to_scheduler_payload()` / `from_scheduler_payload()` round-trip helpers (serialize target type tag alongside data).
+- Dispatcher-side `validate_params(action_type, params)` that checks required keys per action.
 
 #### C2. Task dispatcher (`dispatcher.py`) — ~120 lines
 - `TaskDispatcher.__init__`, `dispatch()`, `_execute_now()`, `_defer()`.
@@ -177,8 +224,9 @@ and can be picked in any order.
 #### C4. Service wiring (`service.py` ~10 lines)
 - Instantiate `TaskDispatcher` in lifespan; inject into consolidator node.
 
-#### C5. Consolidator integration (~50 lines changed)
-- Add `schedule_action` tool definition to consolidator prompt.
+#### C5. Consolidator integration (~60 lines changed)
+- Register one tool definition per enabled action type; filter by bot permission level.
+- Each tool call maps directly to one `ActionRequest` (no type discriminator needed — tool name is the type).
 - Parse tool calls → `ActionRequest` list → `dispatcher.dispatch()`.
 - Replace existing ad-hoc `schedule_event()` calls.
 
@@ -223,6 +271,22 @@ Required for `send_dm` to work end-to-end (currently unimplemented in adapters).
 - Discord: fetch `User` object → `user.send(text)`.
 - NapCat: `send_private_msg` API with `user_id`.
 - Prerequisite for any DM-based future promise.
+
+#### T2-F. `mute_user` / `ban_user` — ~80 lines
+Moderation actions on a `UserTarget`. No text or channel involved.
+- Params: `duration_minutes`, `reason` (mute); `reason`, `delete_days` (ban).
+- Discord: `member.timeout(duration)` / `member.ban(reason=reason)`.
+- NapCat: `set_group_ban` API.
+- Dispatcher validates bot has mod permission for the guild before scheduling; raises
+  `InsufficientPermissionError` otherwise (never silently drops).
+- Consolidator only exposes these tools when `bot_role >= moderator` flag is set in config.
+
+#### T2-G. `delete_message` — ~40 lines
+Delete an existing message by `MessageTarget`.
+- No required params (reason is optional).
+- Discord: `message.delete()`.
+- NapCat: `delete_msg` API.
+- Useful for Kazusa retracting a sent message she "regrets" (future personality feature).
 
 ---
 
