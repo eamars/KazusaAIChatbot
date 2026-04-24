@@ -273,7 +273,13 @@ async def web_search_tool_call_evaluator(state: WebSearchState) -> dict:
         should_stop = True
 
     final_message = HumanMessage(
-        content=f"Evaluator Feedback:\n{feedback}",
+        content=json.dumps(
+            {
+                "feedback": feedback,
+                "source": "evaluator",
+            },
+            ensure_ascii=False,
+        ),
         name="evaluator"
     )
 

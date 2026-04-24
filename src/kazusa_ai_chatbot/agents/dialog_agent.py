@@ -417,7 +417,13 @@ async def dialog_evaluator(state: DialogAgentState) -> DialogAgentState:
 
     # Generate feedback message
     feedback_message = HumanMessage(
-        content=f"Evaluator Feedback:\n{result.get('feedback', 'No feedback')}",
+        content=json.dumps(
+            {
+                "feedback": result.get("feedback", "No feedback"),
+                "source": "evaluator",
+            },
+            ensure_ascii=False,
+        ),
         name="evaluator"
     )
     

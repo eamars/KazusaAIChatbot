@@ -69,6 +69,38 @@ async def test_call_cognition_consciousness_uses_character_diary_not_legacy_fact
     assert "这是旧 facts，不应再被读取。" not in human_payload["diary_entry"]
 
 
+def test_build_character_profile_results_uses_strict_allowlist():
+    profile_results = rag_module._build_character_profile_results(
+        {
+            "name": "杏山千纱",
+            "description": "公开描述",
+            "gender": "女",
+            "age": 15,
+            "birthday": "8月5日",
+            "backstory": "公开背景",
+            "boundary_profile": {"self_integrity": 0.6},
+            "linguistic_texture_profile": {"fragmentation": 0.3},
+        }
+    )
+
+    assert "### 角色公开资料" in profile_results
+    assert "- 姓名: 杏山千纱" in profile_results
+    assert "- 年龄: 15" in profile_results
+    assert "boundary_profile" not in profile_results
+    assert "linguistic_texture_profile" not in profile_results
+
+
+def test_merge_objective_facts_appends_character_profile_results():
+    merged = rag_module._merge_objective_facts(
+        "用户住在奥克兰",
+        "### 角色公开资料\n- 年龄: 15",
+    )
+
+    assert "用户住在奥克兰" in merged
+    assert "### 角色公开资料" in merged
+    assert "- 年龄: 15" in merged
+
+
 def test_result_confidence_honors_explicit_empty_flag():
     assert rag_module._result_confidence("This branch returned real-looking text.", is_empty_result=True) == 0.0
     assert rag_module._result_confidence("This branch returned real-looking text.", is_empty_result=False) > 0.0
@@ -262,6 +294,87 @@ async def test_rag_planner_emits_channel_recent_entity(monkeypatch):
     assert "CHANNEL_RECENT_ENTITY" in plan["active_sources"]
     assert len(plan["entities"]) == 1
     assert plan["entities"][0]["surface_form"] == "好笛有"
+
+
+@pytest.mark.asyncio
+async def test_rag_planner_receives_character_name_in_system_prompt(monkeypatch):
+    llm = _CapturingAsyncLLM({
+        "retrieval_mode": "NONE",
+        "active_sources": [],
+        "task": "回答角色自己的公开资料",
+        "entities": [],
+        "subject": {"kind": "character_self", "primary_entity": "Kazusa"},
+        "time_scope": {"kind": "none", "lookback_hours": 72},
+        "search_scope": {"same_channel": True, "cross_channel": False, "current_user_only": False},
+        "external_task_hint": "",
+        "expected_response": "角色公开资料",
+    })
+    monkeypatch.setattr(rag_resolution_module, "_rag_planner_llm", llm)
+
+    state = _make_rag_state(
+        character_profile={"name": "Kazusa"},
+        decontexualized_input="你几岁了？",
+        continuation_context={
+            "needs_context_resolution": False,
+            "resolved_task": "你几岁了？",
+            "known_slots": {},
+            "missing_slots": [],
+            "confidence": 1.0,
+            "evidence": [],
+        },
+    )
+
+    result = await rag_resolution_module.rag_planner(state)
+
+    system_prompt = llm.messages[0].content
+    payload = json.loads(llm.messages[1].content)
+    assert "当前固定扮演的角色名为：Kazusa" in system_prompt
+    assert "character_name" not in payload
+    assert result["retrieval_plan"]["subject"]["kind"] == "character_self"
+
+
+@pytest.mark.asyncio
+async def test_call_cognition_consciousness_passes_objective_facts(monkeypatch):
+    llm = _CapturingAsyncLLM(
+        {
+            "internal_monologue": "这些属于我可以公开说的资料。",
+            "logical_stance": "CONFIRM",
+            "character_intent": "PROVIDE",
+        }
+    )
+    monkeypatch.setattr(cognition_l2_module, "_conscious_llm", llm)
+
+    state = {
+        "character_profile": {
+            "name": "Kazusa",
+            "personality_brief": {"mbti": "INTJ"},
+            "mood": "calm",
+            "global_vibe": "quiet",
+            "reflection_summary": "一切正常。",
+        },
+        "user_profile": {
+            "affinity": 650,
+            "character_diary": [],
+            "active_commitments": [],
+            "last_relationship_insight": "关系稳定。",
+        },
+        "research_facts": {
+            "objective_facts": "### 角色公开资料\n- 姓名: Kazusa\n- 年龄: 15\n- 生日: 8月5日"
+        },
+        "decontexualized_input": "你几岁了，生日是什么时候？",
+        "indirect_speech_context": "",
+        "emotional_appraisal": "平静。",
+        "interaction_subtext": "对方在询问公开资料。",
+        "internal_monologue": "这些属于我可以公开说的资料。",
+        "logical_stance": "CONFIRM",
+        "character_intent": "PROVIDE",
+    }
+
+    await cognition_l2_module.call_cognition_consciousness(state)
+
+    payload = json.loads(llm.messages[1].content)
+    assert "角色公开资料" in payload["research_facts"]["objective_facts"]
+    assert "年龄: 15" in payload["research_facts"]["objective_facts"]
 
 
 @pytest.mark.asyncio

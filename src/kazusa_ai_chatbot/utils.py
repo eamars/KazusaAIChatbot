@@ -240,7 +240,14 @@ _parse_json_with_llm = get_llm(temperature=0, top_p=1.0)
 def parse_json_with_llm(broken_string: str) -> dict:
     """Parse JSON with LLM as a fallback when repair_json fails."""
     system_prompt = SystemMessage(content=_PARSE_JSON_WITH_LLM_PROMPT)
-    human_message = HumanMessage(content=sanitize_llm_text(broken_string))
+    human_message = HumanMessage(
+        content=json.dumps(
+            {
+                "broken_json": sanitize_llm_text(broken_string),
+            },
+            ensure_ascii=False,
+        )
+    )
     response = _parse_json_with_llm.invoke([system_prompt, human_message])
 
     # Strip the markdown fence just in case

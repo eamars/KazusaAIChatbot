@@ -273,7 +273,13 @@ async def fact_harvester_evaluator(state: ConsolidatorState) -> dict:
         should_stop = True
 
     feedback_message = HumanMessage(
-        content=f"Evaluator Feedback:\n{result.get('feedback', 'No feedback')}",
+        content=json.dumps(
+            {
+                "feedback": result.get("feedback", "No feedback"),
+                "source": "evaluator",
+            },
+            ensure_ascii=False,
+        ),
         name="evaluator",
     )
 

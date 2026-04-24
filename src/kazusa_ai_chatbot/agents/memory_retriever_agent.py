@@ -615,7 +615,13 @@ async def memory_search_tool_call_evaluator(state: MemoryRetrieverState) -> Memo
 
     # Make decisions: stop if max iterations reached or evaluation says so
     feedback_message = HumanMessage(
-        content=f"Evaluator Feedback:\n{feedback}",
+        content=json.dumps(
+            {
+                "feedback": feedback,
+                "source": "evaluator",
+            },
+            ensure_ascii=False,
+        ),
         name="evaluator"
     )
 

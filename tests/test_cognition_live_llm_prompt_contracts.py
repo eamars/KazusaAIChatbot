@@ -195,6 +195,34 @@ def _assert_no_legacy_fillers(text: str) -> None:
         assert token not in lowered, f"Legacy English filler leaked into dialog: {text!r}"
 
 
+_CHARACTER_PUBLIC_FACTS_DATA = {
+    "name": "杏山千纱 (Kyōyama Kazusa)",
+    "description": "杏山千纱是三一综合学园15岁的学生，放学后甜点部成员及'Sugar Rush'乐队主唱兼贝斯手。",
+    "gender": "女",
+    "age": 15,
+    "birthday": "8月5日 (狮子座)",
+    "backstory": "中学时期是令人畏惧的不良少女'凯茜·帕鲁格'，如今努力过上普通高中生活。",
+}
+
+
+def _build_character_public_facts_text() -> str:
+    lines = ["### 角色公开资料"]
+    labels = {
+        "name": "姓名",
+        "description": "角色描述",
+        "gender": "性别",
+        "age": "年龄",
+        "birthday": "生日",
+        "backstory": "背景故事",
+    }
+    for key in ("name", "description", "gender", "age", "birthday", "backstory"):
+        lines.append(f"- {labels[key]}: {_CHARACTER_PUBLIC_FACTS_DATA[key]}")
+    return "\n".join(lines)
+
+
+_CHARACTER_PUBLIC_FACTS = _build_character_public_facts_text()
+
+
 _DECONTEXT_CASES = [
     pytest.param(
         {
@@ -282,6 +310,61 @@ async def test_live_msg_decontexualizer_prompt_contracts(ensure_live_llm, state:
     else:
         assert "阿澈" not in output, f"Indirect speech should preserve third-person structure: {output!r}"
         assert "他" in output, f"Indirect speech case should keep third-person pronoun: {output!r}"
+
+
+async def test_live_content_anchor_uses_character_public_facts_for_birthday_question(ensure_live_llm) -> None:
+    state = _make_state(
+        user_input="千纱你的生日是什么时候？",
+        chat_history_recent=[
+            {"role": "assistant", "content": "突然问这个做什么？"},
+            {"role": "user", "content": "想提前准备一下。"},
+        ],
+        channel_topic="询问角色公开资料",
+        objective_facts=_CHARACTER_PUBLIC_FACTS,
+        input_context_results="",
+    )
+    state.update(
+        {
+            "internal_monologue": "这是可以公开回答的基本资料，直接说生日就好。",
+            "logical_stance": "CONFIRM",
+            "character_intent": "PROVIDE",
+        }
+    )
+
+    result = await call_content_anchor_agent(state)
+    _debug_snapshot("prompt_contracts.content_anchor.self_birthday_positive", result)
+
+    anchors = result["content_anchors"]
+    joined = "\n".join(anchors)
+    assert "8月5" in joined, f"Birthday question should anchor the seeded public birthday: {anchors!r}"
+
+
+async def test_live_content_anchor_does_not_leak_character_public_facts_on_unrelated_question(ensure_live_llm) -> None:
+    state = _make_state(
+        user_input="你今天心情怎么样？",
+        chat_history_recent=[
+            {"role": "assistant", "content": "怎么突然关心起这个？"},
+            {"role": "user", "content": "就是想问问你。"},
+        ],
+        channel_topic="日常关心",
+        objective_facts=_CHARACTER_PUBLIC_FACTS,
+        input_context_results="最近聊天主要围绕日常状态和轻松闲聊。",
+    )
+    state.update(
+        {
+            "internal_monologue": "对方是在问我现在的状态，不需要扯到生日或年龄这些公开资料。",
+            "logical_stance": "CONFIRM",
+            "character_intent": "PROVIDE",
+        }
+    )
+
+    result = await call_content_anchor_agent(state)
+    _debug_snapshot("prompt_contracts.content_anchor.self_birthday_negative", result)
+
+    anchors = result["content_anchors"]
+    joined = "\n".join(anchors)
+    assert "8月5" not in joined, f"Unrelated mood question should not leak birthday facts: {anchors!r}"
+    assert "狮子座" not in joined, f"Unrelated mood question should not leak birthday facts: {anchors!r}"
 
 
 _STACK_CASES = [

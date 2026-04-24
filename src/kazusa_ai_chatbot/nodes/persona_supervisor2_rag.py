@@ -183,6 +183,64 @@ def _normalize_retrieval_output(value: Any) -> str:
     return str(value)
 
 
+def _build_character_profile_results(character_profile: dict) -> str:
+    """Render the safe public subset of ``character_profile`` into RAG text.
+
+    Args:
+        character_profile: Full runtime character config, which may contain
+            private steering and control fields not suitable for self-answers.
+
+    Returns:
+        A formatted text block containing only the allowlisted public
+        self-knowledge fields that the character may naturally disclose
+        in-world. Returns an empty string when nothing public is available.
+    """
+    labels = {
+        "name": "姓名",
+        "description": "角色描述",
+        "gender": "性别",
+        "age": "年龄",
+        "birthday": "生日",
+        "backstory": "背景故事",
+    }
+    lines: list[str] = []
+    for key in ("name", "description", "gender", "age", "birthday", "backstory"):
+        value = character_profile.get(key)
+        if value is None:
+            continue
+        if isinstance(value, str):
+            value = value.strip()
+            if not value:
+                continue
+        lines.append(f"- {labels[key]}: {value}")
+    if not lines:
+        return ""
+    return "### 角色公开资料\n" + "\n".join(lines)
+
+
+def _merge_objective_facts(
+    user_objective_facts_text: str,
+    character_profile_results: str,
+) -> str:
+    """Merge user objective facts with the character's public fact block.
+
+    Args:
+        user_objective_facts_text: Existing objective-facts text derived from
+            the user profile.
+        character_profile_results: Public character facts rendered as RAG text.
+
+    Returns:
+        A single objective-facts text payload that preserves both sources
+        without introducing a new downstream fact channel.
+    """
+    chunks = [
+        chunk.strip()
+        for chunk in (user_objective_facts_text, character_profile_results)
+        if chunk and chunk.strip()
+    ]
+    return "\n\n".join(chunks)
+
+
 async def _probe_knowledge_base(
     cache: RAGCache,
     embedding: list[float],
@@ -587,13 +645,20 @@ async def call_rag_subgraph(state: GlobalPersonaState) -> GlobalPersonaState:
     )
 
     user_image_context = _build_image_context(user_profile.get("user_image") or {})
-    objective_facts_text = "\n".join(
+    user_objective_facts_text = "\n".join(
         str(item.get("fact", item.get("description", "")))
         for item in (user_profile.get("objective_facts") or [])
         if str(item.get("fact", item.get("description", ""))).strip()
     )
     character_image_context = _build_image_context(
         state["character_profile"].get("self_image") or {}
+    )
+    character_profile_results = _build_character_profile_results(
+        state["character_profile"]
+    )
+    objective_facts_text = _merge_objective_facts(
+        user_objective_facts_text,
+        character_profile_results,
     )
 
     logger.debug(

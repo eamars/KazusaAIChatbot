@@ -99,8 +99,12 @@ async def continuation_resolver(state: RAGState) -> dict:
 _RAG_PLANNER_PROMPT = """\
 你是检索计划生成器。你的任务是根据用户的输入，决定需要激活哪些检索源来帮助角色生成准确的回应。
 
+当前固定扮演的角色名为：{character_name}
+当前角色在平台上的账号 ID 为：<@{platform_bot_id}>
+
 # 可用的检索源
 - `CURRENT_USER_STABLE`: 当前用户的稳定画像信息（已预加载，通常不需要额外检索）
+- `CHARACTER_SELF_KNOWLEDGE`: 角色自身可公开表达的稳定资料（运行时注入，无需额外检索）
 - `CHANNEL_RECENT_ENTITY`: 同频道近期提到的第三方实体/人物的对话记录
 - `THIRD_PARTY_PROFILE`: 已知其他用户的持久画像/印象
 - `EXTERNAL_KNOWLEDGE`: 外部知识（新闻、专业知识等）
@@ -118,6 +122,9 @@ _RAG_PLANNER_PROMPT = """\
 - 如果输入或 `resolved_task` 含有 URL、引用文本、文件名、页面标题等字面锚点，必须优先保留这些锚点；不要把它们替换成猜测出的相近实体名
 - 只有当实体在输入、`resolved_task` 或最近历史里有明确依据时，才允许写入 `entities`
 - 如果 `continuation_confidence` 偏低或 `missing_slots` 非空，且任务仍不具备可检索性，应选择 `NONE`，让主回复阶段进行澄清，而不是硬启动检索
+- 如果用户问的是角色自己可公开回答的资料（如名字、角色描述、性别、年龄、生日、公开背景），通常应选择 `retrieval_mode=NONE`、`active_sources=[]`，并把 `subject.kind` 标记为 `character_self`。这类信息不属于第三方检索，也不应放入 `entities`
+- 不要把角色自己误判成 `third_party_user`；角色名或其常用简称若是在问“你/千纱/你自己”的资料，应归到 `character_self`
+- 如果输入中出现 `<@...>` 形式的 mention，必须结合角色平台 ID `<@{platform_bot_id}>` 判断它是不是角色本人；命中角色本人时，应优先视为 `character_self` / 受话对象，而不是第三方实体
 
 # URL / 字面锚点示例
 - 若 `resolved_task` 是 `用户在确认是否记得这条链接及其相关内容：https://example.com/page`
@@ -153,7 +160,7 @@ _RAG_PLANNER_PROMPT = """\
         }}
     ],
     "subject": {{
-        "kind": "current_user | third_party_user | entity | topic | mixed",
+        "kind": "current_user | character_self | third_party_user | entity | topic | mixed",
         "primary_entity": "主要实体名称（可选）"
     }},
     "time_scope": {{
@@ -182,7 +189,12 @@ async def rag_planner(state: RAGState) -> dict:
         if name:
             recent_speakers.add(name)
 
-    system_prompt = SystemMessage(content=_RAG_PLANNER_PROMPT)
+    system_prompt = SystemMessage(
+        content=_RAG_PLANNER_PROMPT.format(
+            character_name=state["character_profile"]["name"],
+            platform_bot_id=state["platform_bot_id"],
+        )
+    )
     user_input = {
         "decontextualized_input": state["decontexualized_input"],
         "resolved_task": resolved_task,
