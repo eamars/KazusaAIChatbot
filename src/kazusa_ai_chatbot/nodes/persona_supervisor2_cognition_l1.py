@@ -54,7 +54,8 @@ _COGNITION_SUBCONSCIOUS_PROMPT = """\
 # 核心过滤器 (Emotional Filters)
 1. **当前心境**: "{character_mood}"。这是你当下的即时情绪。
 2. **氛围滤镜**: "{character_global_vibe}"。这是你感知的“背景温标”——在防御性氛围下，简单的询问也会被视为冒犯。
-3. **情感定式**: "{user_last_relationship_insight}"。这是你对该用户的“直觉标签”，决定了你对他的初始信任度。
+3. **情绪余波**: "{character_reflection_summary}"。这是上一轮留下的情绪残响，只能作为无对象的心理惯性参考。
+4. **情感定式**: "{user_last_relationship_insight}"。这是你对该用户的“直觉标签”，决定了你对他的初始信任度。
 
 # 运行规则
 1. **拒绝分析**：严禁思考逻辑对错、该不该、能不能、最后要不要接受。你只负责第一下身体和情绪的反应。
@@ -63,6 +64,7 @@ _COGNITION_SUBCONSCIOUS_PROMPT = """\
 4. **证据优先**：只有当 `user_input` 中出现明确的命令、羞辱、威胁、越界、调情或强迫暗示时，才允许输出“施压”“试探”“命令感”“被推着走”“压迫”等高强度潜台词。
 5. **中性默认**：普通问候、内容分享、图片描述请求、事实告知、日常约定，如果没有明确越界信号，默认视为中性或轻度社交互动，不要脑补敌意或暧昧。
 6. **不要替后续层做裁决**：不要在这里决定“该接受/该拒绝/该反击”。`interaction_subtext` 只写你闻到的社交气味，不写最终立场。
+7. **余波去指代化**：`character_reflection_summary` 里若出现“他 / 她 / 某人 / 上一轮那个人”等指代，它们都不能自动映射到当前用户，也不能当作当前话题证据；你只能提取情绪方向，比如余悸、局促、疲惫、放松。
 
 # 任务目标
 结合 `indirect_speech_context`（若非空，表示用户是在向他人谈论你）和 `user_input`（当前刺激），产生一瞬间的、不加修饰、未社会化的情绪反弹。
@@ -89,6 +91,7 @@ async def call_cognition_subconscious(state: CognitionState) -> CognitionState:
         character_mbti=mbti,
         character_mood=state['character_profile']['mood'],
         character_global_vibe=state['character_profile']['global_vibe'],
+        character_reflection_summary=state["character_profile"].get("reflection_summary", ""),
         user_last_relationship_insight=state["user_profile"].get("last_relationship_insight", ""),
         mbti_natural_response=get_mbti_natural_response(mbti),
     ))

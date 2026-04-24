@@ -62,8 +62,7 @@ class PlatformAccountDoc(TypedDict, total=False):
 class CharacterDiaryEntry(TypedDict, total=False):
     """One subjective observation the character made about the user.
 
-    Stored inside ``UserProfileDoc.character_diary``. Many entries combine
-    into a single ``diary_embedding`` for semantic lookup.
+    Stored inside ``UserProfileDoc.character_diary``.
     """
     entry: str          # e.g. "User seems excited about their new job"
     timestamp: str      # ISO-8601 UTC when the observation was recorded
@@ -74,8 +73,7 @@ class CharacterDiaryEntry(TypedDict, total=False):
 class ObjectiveFactEntry(TypedDict, total=False):
     """One verified, objective fact about the user.
 
-    Stored inside ``UserProfileDoc.objective_facts``. Many entries combine
-    into a single ``facts_embedding`` for semantic lookup.
+    Stored inside ``UserProfileDoc.objective_facts``.
     """
     fact: str           # e.g. "User lives in Tokyo"
     category: str       # "occupation" | "location" | "hobby" | "relationship" | "general"
@@ -119,10 +117,9 @@ class LinguisticTextureProfileDoc(TypedDict, total=False):
 class UserProfileDoc(TypedDict, total=False):
     """Long-term memory about a single user in the ``user_profiles`` collection.
 
-    Keyed by ``global_user_id`` (UUID4). The legacy ``facts`` and ``embedding``
-    fields are retained for backward compatibility; new code should write to
-    ``character_diary`` + ``diary_embedding`` and ``objective_facts`` +
-    ``facts_embedding`` instead.
+    Keyed by ``global_user_id`` (UUID4). New profile memory should write to
+    ``character_diary`` and ``objective_facts`` instead of the deprecated flat
+    ``facts`` list.
     """
 
     global_user_id: str                          # UUID4 — our internal unique key
@@ -131,12 +128,10 @@ class UserProfileDoc(TypedDict, total=False):
 
     # ── Character's subjective observations (NEW) ──────────────
     character_diary: list[CharacterDiaryEntry]
-    diary_embedding: list[float]                 # Embedding of all diary entries combined
     diary_updated_at: str                        # ISO-8601 UTC
 
     # ── Objective verified facts (NEW) ─────────────────────────
     objective_facts: list[ObjectiveFactEntry]
-    facts_embedding: list[float]                 # Embedding of all objective facts combined
     facts_updated_at: str                        # ISO-8601 UTC
 
     # ── Active commitments / preferences (authoritative immediate state) ──
@@ -150,9 +145,8 @@ class UserProfileDoc(TypedDict, total=False):
     affinity: int                                # 0–1000 affinity score (default 500)
     last_relationship_insight: str               # Character's instantaneous impression of the user
 
-    # ── Legacy (retained for backward compat — see character_diary/objective_facts) ──
+    # ── Legacy (deprecated — see character_diary/objective_facts) ──
     facts: list[str]                             # DEPRECATED flat list of diary+facts text
-    embedding: list[float]                       # DEPRECATED single-vector for legacy facts
 
 
 class CharacterProfileDoc(TypedDict, total=False):

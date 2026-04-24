@@ -9,7 +9,7 @@ from __future__ import annotations
 import logging
 from datetime import datetime, timezone
 
-from kazusa_ai_chatbot.db._client import enable_vector_index, get_db, get_text_embedding
+from kazusa_ai_chatbot.db._client import enable_vector_index, get_db
 
 logger = logging.getLogger(__name__)
 
@@ -131,9 +131,6 @@ async def db_bootstrap() -> None:
     # ── Vector search indexes (best-effort — requires Atlas) ──────
     for collection, index_name, path in (
         ("conversation_history", "conversation_history_vector_index", "embedding"),
-        ("user_profiles",        "user_facts_vector_index",          "embedding"),
-        ("user_profiles",        "user_diary_vector_index",          "diary_embedding"),    # NEW
-        ("user_profiles",        "user_objective_facts_vector_index","facts_embedding"),    # NEW
         ("memory",               "memory_vector_index",              "embedding"),
         ("rag_cache_index",      "rag_cache_vector_index",           "embedding"),          # NEW
     ):
@@ -156,10 +153,6 @@ async def _migrate_user_profiles_legacy_facts() -> None:
 
     Runs once per profile — only touches docs where ``facts`` exists and
     ``character_diary`` is absent. Safe to run repeatedly.
-
-    The legacy ``facts`` and ``embedding`` fields are LEFT IN PLACE for
-    backward compatibility with old code paths; they should be removed in
-    a future cleanup pass once all readers migrate.
     """
     db = await get_db()
     cursor = db.user_profiles.find({
@@ -197,19 +190,12 @@ async def _migrate_user_profiles_legacy_facts() -> None:
                     "confidence": 0.8,
                 })
 
-        diary_text = "\n".join(e["entry"] for e in diary_entries)
-        facts_text = "\n".join(f["fact"] for f in fact_entries)
-        diary_embedding = await get_text_embedding(diary_text) if diary_text else []
-        facts_embedding = await get_text_embedding(facts_text) if facts_text else []
-
         await db.user_profiles.update_one(
             {"_id": doc["_id"]},
             {"$set": {
                 "character_diary": diary_entries,
-                "diary_embedding": diary_embedding,
                 "diary_updated_at": ts,
                 "objective_facts": fact_entries,
-                "facts_embedding": facts_embedding,
                 "facts_updated_at": ts,
             }},
         )

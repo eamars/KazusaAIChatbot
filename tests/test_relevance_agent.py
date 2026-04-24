@@ -148,3 +148,18 @@ async def test_relevance_agent_legacy_reply_marker_still_blocks_third_party_repl
 
     assert result["should_respond"] is False
     mock_llm.ainvoke.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_relevance_agent_does_not_expose_reflection_summary_in_prompt() -> None:
+    """Global reflection summaries should not be injected into relevance reasoning."""
+    llm_response = MagicMock()
+    llm_response.content = '{"should_respond": true, "reason_to_respond": "user greeted", "use_reply_feature": false, "channel_topic": "greetings", "indirect_speech_context": ""}'
+
+    with patch("kazusa_ai_chatbot.nodes.relevance_agent._relevance_agent_llm") as mock_llm:
+        mock_llm.ainvoke = AsyncMock(return_value=llm_response)
+        await relevance_agent(_base_state())
+
+    rendered_prompt = mock_llm.ainvoke.await_args.args[0][0].content
+    assert "自我反思" not in rendered_prompt
+    assert "nothing notable" not in rendered_prompt

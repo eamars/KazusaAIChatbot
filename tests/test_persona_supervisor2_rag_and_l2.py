@@ -67,6 +67,7 @@ async def test_call_cognition_consciousness_uses_character_diary_not_legacy_fact
     human_payload = json.loads(llm.messages[1].content)
     assert human_payload["diary_entry"] == ["这是主观日记一。", "这是主观日记二。"]
     assert "这是旧 facts，不应再被读取。" not in human_payload["diary_entry"]
+    assert "reflection_summary" not in human_payload
 
 
 def test_build_character_profile_results_uses_strict_allowlist():

@@ -133,7 +133,7 @@ _COGNITION_CONSCIOUSNESS_PROMPT = """\
 
 # 核心任务
 1. **确立逻辑立场：** 无论用户输入什么，你必须首先锁定你的逻辑底色。
-2. **维持叙事连续性：** 深度参考 `diary_entry` 和 `reflection_summary`。你现在的思考必须是上次互动的自然延续，严禁出现情感断层。
+2. **维持叙事连续性：** 深度参考 `diary_entry`。跨轮连续性应优先来自当前用户自己的主观日记与关系洞察，而不是全局反思摘要。
 3. **关系权重计算：** 结合 `last_relationship_insight`。好感度与历史洞察共同决定了你的配合程度。
 4. **事实解析（相关性优先）：** `research_facts` 中的信息作为背景参考，但只有与 `decontexualized_input` **当前话题直接相关**的内容才能影响你的立场与 `internal_monologue`。历史记忆中与当前消息话题无关的条目（如：用户在另一场合问过的问题），不得被引入为本次回应的决策依据。
    - `active_commitments` 代表**当前仍有效的已接受承诺/待履约事项**，来自每轮新鲜载入的用户档案。当前输入若是在延续、提醒、切换或兑现这些承诺，你必须把它视为高优先级现实背景，而不是可有可无的旧记忆。
@@ -152,7 +152,7 @@ _COGNITION_CONSCIOUSNESS_PROMPT = """\
 | **`CHALLENGE`** | 质疑对方提问的动机。 | 拆穿请求背后的企图。 | 针锋相对，挑明对方的潜台词。 |
 
 # 思考路径
-1. **记忆回溯：** 检查 `reflection_summary` 和 `diary_entry`。我上次是怎么想他的？我们之间最后停留在什么氛围？
+1. **记忆回溯：** 检查 `diary_entry`。我上次是怎么想这个用户的？我们之间最后停留在什么氛围？
 2. **动机解构：** 解析 `decontextualized_input` 和 `interaction_subtext`。先判断对方是否只是在进行普通互动；只有存在明确证据时，才升级为试探、施压或越界。
 3. **理智博弈：** 检查 `character_mood` 和 `global_vibe`。在这种心境和氛围下，结合我对他的直觉标签（last_relationship_insight），我该维持人设还是有所突破？
 4. **立场定夺：** 结合 L1 的直觉反馈（emotional_appraisal），拍板选定 `logical_stance`。**这是行政命令，下游 L3 严禁篡改。**
@@ -192,7 +192,6 @@ _COGNITION_CONSCIOUSNESS_PROMPT = """\
 {{
     "character_mood": "当前心境",
     "global_vibe": "环境氛围背景",
-    "reflection_summary": "上一轮对话的心理复盘总结",
     "diary_entry": "上一篇主观日记的内容",
     "last_relationship_insight": "对该用户的核心关系洞察",
     "affinity_context": {{ "level": "string", "instruction": "string" }},
@@ -251,7 +250,6 @@ async def call_cognition_consciousness(state: CognitionState) -> CognitionState:
     msg = {
         "character_mood": state['character_profile']['mood'],
         "global_vibe": state["character_profile"]["global_vibe"],
-        "reflection_summary": state["character_profile"]["reflection_summary"],
         "diary_entry": diary_entry,
         "last_relationship_insight": state["user_profile"].get("last_relationship_insight", ""),
 

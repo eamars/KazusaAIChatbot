@@ -229,7 +229,7 @@ The current authoritative fields are:
 - `affinity`
 - `last_relationship_insight`
 
-Legacy flat `facts` and `embedding` fields still exist for compatibility, but new code is centered on `character_diary` and `objective_facts`.
+Legacy flat `facts` may still appear on older documents after migration, but user profiles no longer store combined text embeddings. New code is centered on `character_diary` and `objective_facts`.
 
 ### `character_state`
 
@@ -274,7 +274,6 @@ src/
     insert_memory.py
     search_conversation.py
     search_memory.py
-    search_user_facts.py
 personalities/
   kazusa.json
   asuna.json

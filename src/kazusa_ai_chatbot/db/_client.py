@@ -129,9 +129,7 @@ async def enable_vector_index(
     Args:
         collection_name: Target collection.
         index_name: Name to assign to the search index.
-        path: Field that holds the embedding array. Defaults to ``"embedding"``;
-            override for collections with multiple embedding fields
-            (e.g. ``"diary_embedding"``, ``"facts_embedding"``).
+        path: Field that holds the embedding array. Defaults to ``"embedding"``.
     """
     db = await get_db()
     collection = db[collection_name]

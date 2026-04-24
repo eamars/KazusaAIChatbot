@@ -85,7 +85,6 @@ _RELEVANCE_SYSTEM_PROMPT = """\
 ## 1. 角色当前状态
 - **心情 (Mood)**: {mood}
 - **全局氛围 (Global Vibe)**: {global_vibe}
-- **自我反思**: {reflection_summary}
 
 ## 2. 对用户 {user_name} 的主观判断 (Affinity Context)
 - **关系评价 (Level)**: {affinity_level}
@@ -160,7 +159,6 @@ _RELEVANCE_SYSTEM_NOISY_PROMPT = """\
 ## 1. 角色当前状态
 - **心情 (Mood)**: {mood}
 - **全局氛围 (Global Vibe)**: {global_vibe}
-- **自我反思**: {reflection_summary}
 
 ## 2. 对用户 {user_name} 的主观判断 (Affinity Context)
 - **关系评价 (Level)**: {affinity_level}
@@ -291,7 +289,6 @@ async def relevance_agent(state: IMProcessState) -> IMProcessState:
         character_name=state["character_profile"]["name"],
         mood=state["character_profile"]["mood"],
         global_vibe=state["character_profile"]["global_vibe"],
-        reflection_summary=state["character_profile"]["reflection_summary"],
         user_name=user_name,
         affinity_level=affinity_block["level"],
         affinity_instruction=affinity_block["instruction"],

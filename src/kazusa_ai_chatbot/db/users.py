@@ -16,10 +16,9 @@ from __future__ import annotations
 import logging
 import uuid
 from datetime import datetime, timezone
-from typing import Any
 
 from kazusa_ai_chatbot.config import AFFINITY_DEFAULT, AFFINITY_MAX, AFFINITY_MIN
-from kazusa_ai_chatbot.db._client import enable_vector_index, get_db, get_text_embedding
+from kazusa_ai_chatbot.db._client import get_db
 from kazusa_ai_chatbot.db.schemas import (
     ActiveCommitmentDoc,
     CharacterDiaryEntry,
@@ -69,7 +68,6 @@ async def resolve_global_user_id(
         "active_commitments": [],
         "affinity": AFFINITY_DEFAULT,
         "last_relationship_insight": "",
-        "embedding": [],
     }
     await db.user_profiles.insert_one(new_profile)
     logger.info("Created new user profile %s for %s/%s", new_id, platform, platform_user_id)
@@ -115,7 +113,7 @@ async def add_suspected_alias(
 
 
 async def get_user_profile(global_user_id: str) -> UserProfileDoc:
-    """Retrieve a user profile, stripping ``_id`` and bulky embedding fields.
+    """Retrieve a user profile, stripping the MongoDB internal ``_id`` field.
 
     Authoritative field split:
     - ``character_diary`` stores the character's subjective per-user diary notes.
@@ -128,25 +126,20 @@ async def get_user_profile(global_user_id: str) -> UserProfileDoc:
     if doc is None:
         return {}
     doc.pop("_id", None)
-    doc.pop("embedding", None)
-    doc.pop("diary_embedding", None)
-    doc.pop("facts_embedding", None)
     return doc
 
 
 async def create_user_profile(user_profile: UserProfileDoc) -> None:
     """Create a user profile document.
 
-    Computes the legacy ``embedding`` from ``facts`` if provided, so old
-    callers continue to work. Diary/facts embeddings should be set via
-    ``upsert_character_diary``/``upsert_objective_facts``.
+    Args:
+        user_profile: Profile document to insert. Defaults for core identity,
+            affinity, and memory fields are filled before persistence.
+
+    Returns:
+        None.
     """
     db = await get_db()
-    facts = user_profile.get("facts", [])
-    if facts:
-        user_profile["embedding"] = await get_text_embedding("\n".join(facts))
-    else:
-        user_profile["embedding"] = []
     user_profile.setdefault("global_user_id", str(uuid.uuid4()))
     user_profile.setdefault("platform_accounts", [])
     user_profile.setdefault("suspected_aliases", [])
@@ -172,15 +165,17 @@ async def upsert_character_diary(
     global_user_id: str,
     new_entries: list[CharacterDiaryEntry],
 ) -> None:
-    """Append diary entries and recompute ``diary_embedding``.
+    """Append diary entries to the user's subjective diary stream.
 
     Existing entries are preserved in chronological order; new entries are
-    appended at the end. The combined ``entry`` text of every diary item is
-    embedded as a single vector for semantic search.
+    appended at the end.
 
     Args:
         global_user_id: Owner of the diary.
         new_entries: List of ``CharacterDiaryEntry`` dicts to append.
+
+    Returns:
+        None.
     """
     if not new_entries:
         return
@@ -188,15 +183,11 @@ async def upsert_character_diary(
     existing = await get_character_diary(global_user_id)
     merged = list(existing) + list(new_entries)
 
-    diary_text = "\n".join(e.get("entry", "") for e in merged if e.get("entry"))
-    diary_embedding = await get_text_embedding(diary_text) if diary_text else []
-
     await db.user_profiles.update_one(
         {"global_user_id": global_user_id},
         {"$set": {
             "global_user_id": global_user_id,
             "character_diary": merged,
-            "diary_embedding": diary_embedding,
             "diary_updated_at": _now_iso(),
         }},
         upsert=True,
@@ -219,15 +210,17 @@ async def upsert_objective_facts(
     global_user_id: str,
     new_facts: list[ObjectiveFactEntry],
 ) -> None:
-    """Add objective facts (case-insensitive dedup on ``fact``) and recompute embedding.
+    """Add objective facts with case-insensitive deduplication on ``fact``.
 
     A new entry with the same fact text (case-insensitive) overwrites any
-    existing entry. The combined ``fact`` text of every entry is embedded
-    as a single vector.
+    existing entry.
 
     Args:
         global_user_id: Owner of the facts.
         new_facts: List of ``ObjectiveFactEntry`` dicts to merge in.
+
+    Returns:
+        None.
     """
     if not new_facts:
         return
@@ -241,15 +234,12 @@ async def upsert_objective_facts(
             by_text[text.lower()] = nf
 
     merged = list(by_text.values())
-    facts_text = "\n".join(f.get("fact", "") for f in merged if f.get("fact"))
-    facts_embedding = await get_text_embedding(facts_text) if facts_text else []
 
     await db.user_profiles.update_one(
         {"global_user_id": global_user_id},
         {"$set": {
             "global_user_id": global_user_id,
             "objective_facts": merged,
-            "facts_embedding": facts_embedding,
             "facts_updated_at": _now_iso(),
         }},
         upsert=True,

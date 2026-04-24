@@ -187,7 +187,6 @@ async def test_get_user_profile_found():
         "facts": ["fact1"],
         "affinity": 600,
         "last_relationship_insight": "friendly",
-        "embedding": [0.1, 0.2],
     })
 
     with patch("kazusa_ai_chatbot.db.get_db", new_callable=AsyncMock, return_value=db):
@@ -196,7 +195,6 @@ async def test_get_user_profile_found():
     assert result["global_user_id"] == "u1"
     assert result["affinity"] == 600
     assert "_id" not in result
-    assert "embedding" not in result
 
 
 @pytest.mark.asyncio
