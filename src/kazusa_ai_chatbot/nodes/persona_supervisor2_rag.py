@@ -39,7 +39,7 @@ from kazusa_ai_chatbot.rag.depth_classifier import (
     DEEP,
     InputDepthClassifier,
 )
-from kazusa_ai_chatbot.utils import parse_llm_json_output, get_llm
+from kazusa_ai_chatbot.utils import get_llm, log_dict_subset, log_preview, parse_llm_json_output
 
 import json
 import logging
@@ -211,13 +211,24 @@ async def external_rag_dispatcher(state: RAGState) -> dict:
 
     result = parse_llm_json_output(response.content)
 
-    logger.debug(f"External RAG agent dispatcher result: {result}")
-
     next_action = result.get("next_action", "end")
     dispatcher_reasoning = result.get("reasoning", "")
     task = result.get("task", "")
     context = result.get("context", {})
     expected_response = result.get("expected_response", "")
+
+    logger.debug(
+        "External RAG dispatcher: action=%s task=%s expected=%s context=%s reasoning=%s",
+        next_action,
+        log_preview(task, max_length=140),
+        log_preview(expected_response, max_length=120),
+        log_dict_subset(
+            context if isinstance(context, dict) else {},
+            ["target_user_input", "target_user_topic", "entities", "referenced_event"],
+            value_length=80,
+        ),
+        log_preview(dispatcher_reasoning, max_length=140),
+    )
 
     return {
         "external_rag_next_action": next_action,
@@ -322,13 +333,24 @@ async def input_context_rag_dispatcher(state: RAGState) -> dict:
 
     result = parse_llm_json_output(response.content)
 
-    logger.debug(f"Input-context RAG dispatcher result: {result}")
-
     next_action = result.get("next_action", "end")
     dispatcher_reasoning = result.get("reasoning", "")
     task = result.get("task", "")
     context = result.get("context", {})
     expected_response = result.get("expected_response", "")
+
+    logger.debug(
+        "Input-context dispatcher: action=%s task=%s expected=%s context=%s reasoning=%s",
+        next_action,
+        log_preview(task, max_length=140),
+        log_preview(expected_response, max_length=120),
+        log_dict_subset(
+            context if isinstance(context, dict) else {},
+            ["target_user_input", "target_user_topic", "entities", "time_horizon", "referenced_event"],
+            value_length=80,
+        ),
+        log_preview(dispatcher_reasoning, max_length=140),
+    )
 
     return {
         "input_context_next_action": next_action,
@@ -462,7 +484,11 @@ async def _probe_knowledge_base(
         return ""
     results = hit.get("results") or {}
     kb_text = results.get("knowledge_base_results", "")
-    logger.info("Knowledge-base cache HIT (sim=%.3f)", float(hit.get("similarity", 0.0)))
+    logger.debug(
+        "Knowledge-base cache hit: similarity=%.3f preview=%s",
+        float(hit.get("similarity", 0.0)),
+        log_preview(kb_text, max_length=160),
+    )
     return kb_text
 
 
@@ -507,7 +533,7 @@ async def _probe_cache(
     if best is None:
         return None, trace
     sim, results, cache_type = best
-    logger.info("RAG cache HIT on %s (sim=%.3f)", cache_type, sim)
+    logger.debug("RAG cache hit: cache_type=%s similarity=%.3f", cache_type, sim)
     return results, trace
 
 
@@ -670,6 +696,16 @@ async def call_rag_subgraph(state: GlobalPersonaState) -> GlobalPersonaState:
         state["character_profile"].get("self_image") or {}
     )
 
+    logger.debug(
+        "RAG input: user=%s global_user=%s channel=%s affinity=%s recent_history=%d input=%s",
+        user_name,
+        global_user_id,
+        state["platform_channel_id"] or "<dm>",
+        affinity_score,
+        len(state.get("chat_history_recent") or []),
+        log_preview(decontexualized_input, max_length=180),
+    )
+
     # ── Phase 0: Input analysis ────────────────────────────────
     input_embedding = await get_text_embedding(decontexualized_input)
     metadata: dict = {
@@ -701,8 +737,15 @@ async def call_rag_subgraph(state: GlobalPersonaState) -> GlobalPersonaState:
             "character_image": character_image_text,
         }
         logger.info(
-            f"\n{user_name}(@{global_user_id}): {decontexualized_input}\n"
-            f"[CACHE HIT] research_facts served from cache"
+            "RAG summary: user=%s global_user=%s cache_hit=%s depth=%s sources=%s input_context=%s external=%s input=%s",
+            user_name,
+            global_user_id,
+            True,
+            metadata.get("depth"),
+            metadata.get("rag_sources_used", []),
+            log_preview(research_facts["input_context_results"], max_length=140),
+            log_preview(research_facts["external_rag_results"], max_length=140),
+            log_preview(decontexualized_input, max_length=160),
         )
         return {
             "research_facts": research_facts,
@@ -777,6 +820,16 @@ async def call_rag_subgraph(state: GlobalPersonaState) -> GlobalPersonaState:
         "deep_input_context_sufficient": depth == DEEP and input_context_conf >= INTERNAL_RAG_STRONG_THRESHOLD,
     }
 
+    logger.debug(
+        "RAG metadata: depth=%s confidence=%.3f cache_probe=%s trigger_dispatchers=%s response_confidence=%.3f sources=%s",
+        depth,
+        depth_result["confidence"],
+        metadata.get("cache_probe", []),
+        metadata.get("trigger_dispatchers", []),
+        metadata.get("response_confidence", 0.0),
+        metadata.get("rag_sources_used", []),
+    )
+
     research_facts = {
         "input_context_results": input_context_results,
         "external_rag_results": external_rag_results,
@@ -787,10 +840,17 @@ async def call_rag_subgraph(state: GlobalPersonaState) -> GlobalPersonaState:
     }
 
     logger.info(
-        f"\n{user_name}(@{global_user_id}): {decontexualized_input}\n"
-        f"Depth: {depth} (conf={depth_result['confidence']:.2f})\n"
-        f"Input context results: {input_context_results}\n"
-        f"External RAG results: {external_rag_results}"
+        "RAG summary: user=%s global_user=%s cache_hit=%s depth=%s depth_conf=%.2f sources=%s kb_hit=%s input_context=%s external=%s input=%s",
+        user_name,
+        global_user_id,
+        False,
+        depth,
+        depth_result["confidence"],
+        sources_used,
+        bool(knowledge_base_results),
+        log_preview(input_context_results, max_length=140),
+        log_preview(external_rag_results, max_length=140),
+        log_preview(decontexualized_input, max_length=160),
     )
 
     # ── Phase 4: Cache storage ─────────────────────────────────

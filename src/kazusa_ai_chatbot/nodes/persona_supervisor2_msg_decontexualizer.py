@@ -1,9 +1,7 @@
 from langchain_core.messages import SystemMessage, HumanMessage
-from kazusa_ai_chatbot.utils import parse_llm_json_output
-from kazusa_ai_chatbot.nodes.persona_supervisor2_schema import GlobalPersonaState
-from kazusa_ai_chatbot.config import LLM_API_KEY, LLM_BASE_URL, LLM_MODEL
 
-from kazusa_ai_chatbot.utils import parse_llm_json_output, get_llm
+from kazusa_ai_chatbot.nodes.persona_supervisor2_schema import GlobalPersonaState
+from kazusa_ai_chatbot.utils import get_llm, log_preview, parse_llm_json_output
 
 import json
 import logging
@@ -98,6 +96,16 @@ async def call_msg_decontexualizer(state: GlobalPersonaState) -> dict:
     }
     human_message = HumanMessage(content=json.dumps(input_msg, ensure_ascii=False))
 
+    logger.debug(
+        "Decontextualizer input: user=%s platform_user=%s history=%d topic=%s indirect=%s input=%s",
+        user_name,
+        platform_user_id,
+        len(state.get("chat_history_recent") or []),
+        log_preview(state.get("channel_topic", ""), max_length=100),
+        log_preview(state.get("indirect_speech_context", ""), max_length=100),
+        log_preview(user_input, max_length=180),
+    )
+
     try:
         result = await _msg_decontexualizer_llm.ainvoke([
             system_prompt, 
@@ -117,10 +125,13 @@ async def call_msg_decontexualizer(state: GlobalPersonaState) -> dict:
         is_modified = False
 
     logger.info(
-        f"\n{user_name}(@{platform_user_id}): {user_input}\n"
-        f"  Decontexualized input: {output}\n"
-        f"  Reason: {reasoning}\n"
-        f"  Is modified: {is_modified}"
+        "Decontextualizer result: user=%s platform_user=%s modified=%s reason=%s input=%s output=%s",
+        user_name,
+        platform_user_id,
+        is_modified,
+        log_preview(reasoning, max_length=140),
+        log_preview(user_input, max_length=160),
+        log_preview(output, max_length=160),
     )
 
     if not is_modified:

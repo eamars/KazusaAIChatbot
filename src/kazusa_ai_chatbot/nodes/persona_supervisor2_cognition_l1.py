@@ -1,6 +1,6 @@
 """L1 — Subconscious cognition agent and MBTI natural-response helper."""
 from kazusa_ai_chatbot.nodes.persona_supervisor2_schema import CognitionState
-from kazusa_ai_chatbot.utils import parse_llm_json_output, get_llm
+from kazusa_ai_chatbot.utils import get_llm, log_preview, parse_llm_json_output
 
 from langchain_core.messages import HumanMessage, SystemMessage
 
@@ -104,7 +104,11 @@ async def call_cognition_subconscious(state: CognitionState) -> CognitionState:
     ])
     result = parse_llm_json_output(response.content)
 
-    logger.debug(f"Subconscious: {result}")
+    logger.debug(
+        "Subconscious: appraisal=%s subtext=%s",
+        log_preview(result.get("emotional_appraisal", ""), max_length=100),
+        log_preview(result.get("interaction_subtext", ""), max_length=100),
+    )
 
     # In case AI make some spelling mistakes
     emotional_appraisal = ""

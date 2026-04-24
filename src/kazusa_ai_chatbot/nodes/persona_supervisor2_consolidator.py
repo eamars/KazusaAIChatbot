@@ -60,7 +60,7 @@ from kazusa_ai_chatbot.nodes.persona_supervisor2_rag import _get_rag_cache
 from kazusa_ai_chatbot.nodes.persona_supervisor2_schema import GlobalPersonaState
 from kazusa_ai_chatbot.rag.depth_classifier import DEEP
 from kazusa_ai_chatbot.scheduler import schedule_event
-from kazusa_ai_chatbot.utils import build_affinity_block, get_llm, parse_llm_json_output
+from kazusa_ai_chatbot.utils import build_affinity_block, get_llm, log_dict_subset, log_list_preview, log_preview, parse_llm_json_output
 
 logger = logging.getLogger(__name__)
 
@@ -613,7 +613,12 @@ async def global_state_updater(state: ConsolidatorState) -> dict:
 
     result = parse_llm_json_output(response.content)
 
-    logger.debug(f"Global state updater result: {result}")
+    logger.debug(
+        "Global state updater: mood=%s global_vibe=%s reflection=%s",
+        log_preview(result.get("mood"), max_length=80),
+        log_preview(result.get("global_vibe"), max_length=80),
+        log_preview(result.get("reflection_summary"), max_length=140),
+    )
 
     return {
         "mood": result.get("mood"),
@@ -705,7 +710,13 @@ async def relationship_recorder(state: ConsolidatorState) -> dict:
 
     result = parse_llm_json_output(response.content)
 
-    logger.debug(f"Relationship recorder result: {result}")
+    logger.debug(
+        "Relationship recorder: skip=%s affinity_delta=%s diary=%s insight=%s",
+        result.get("skip", False),
+        result.get("affinity_delta", 0),
+        log_list_preview(result.get("diary_entry", []) or [], max_items=2, item_length=100),
+        log_preview(result.get("last_relationship_insight", ""), max_length=120),
+    )
 
     raw_affinity_delta = result.get("affinity_delta", 0)
     if isinstance(raw_affinity_delta, bool):
@@ -877,7 +888,13 @@ async def facts_harvester(state: ConsolidatorState) -> dict:
 
     result = parse_llm_json_output(response.content)
 
-    logger.debug(f"Facts harvester result: {result}")
+    logger.debug(
+        "Facts harvester: facts=%d promises=%d fact_preview=%s promise_preview=%s",
+        len(result.get("new_facts", []) or []),
+        len(result.get("future_promises", []) or []),
+        log_list_preview(result.get("new_facts", []) or [], max_items=2, item_length=100),
+        log_list_preview(result.get("future_promises", []) or [], max_items=2, item_length=100),
+    )
 
     return {
         "new_facts": result.get("new_facts", []),
@@ -972,7 +989,13 @@ async def fact_harvester_evaluator(state: ConsolidatorState) -> dict:
 
     result = parse_llm_json_output(response.content)
 
-    logger.debug(f"Fact harvester evaluator result: {result}")
+    logger.debug(
+        "Fact harvester evaluator: retry=%d should_stop=%s contradictions=%s feedback=%s",
+        retry,
+        result.get("should_stop", True),
+        result.get("contradiction_flags", []),
+        log_preview(result.get("feedback", ""), max_length=160),
+    )
 
     should_stop = result.get("should_stop", True)
     if retry >= MAX_FACT_HARVESTER_RETRY:
@@ -1380,6 +1403,18 @@ async def db_writer(state: ConsolidatorState) -> dict:
         "knowledge_base_entries_written": kb_count,
     })
 
+    logger.debug(
+        "db_writer summary: user=%s global_user=%s writes=%s cache_invalidated=%s scheduled=%d affinity_before=%s affinity_delta=%s kb_written=%d",
+        user_name,
+        global_user_id,
+        write_log,
+        cache_invalidated,
+        len(scheduled_event_ids),
+        user_affinity_score,
+        processed_affinity_delta,
+        kb_count,
+    )
+
     return {"metadata": metadata}
 
 
@@ -1459,8 +1494,31 @@ async def call_consolidation_subgraph(global_state: GlobalPersonaState):
     metadata = result.get("metadata", {}) or {}
 
     logger.info(
-        "\nNew facts: %s\nFuture promises: %s\nMetadata: %s",
-        new_facts, future_promises, metadata,
+        "Consolidation summary: facts=%d promises=%d affinity_delta=%s mood=%s vibe=%s writes=%s cache_invalidated=%s",
+        len(new_facts),
+        len(future_promises),
+        affinity_delta,
+        log_preview(mood, max_length=60),
+        log_preview(global_vibe, max_length=60),
+        log_dict_subset(metadata, ["write_success"], value_length=220),
+        metadata.get("cache_invalidation_scope", []),
+    )
+
+    logger.debug(
+        "Consolidation detail: facts=%s promises=%s metadata=%s",
+        log_list_preview(new_facts, max_items=3, item_length=120),
+        log_list_preview(future_promises, max_items=3, item_length=120),
+        log_dict_subset(
+            metadata,
+            [
+                "scheduled_event_ids",
+                "contradiction_flags",
+                "affinity_before",
+                "affinity_delta_processed",
+                "knowledge_base_entries_written",
+            ],
+            value_length=120,
+        ),
     )
 
     return {

@@ -1,7 +1,7 @@
 """L2 — Consciousness, Boundary Core, and Judgment Core cognition agents."""
 from kazusa_ai_chatbot.config import AFFINITY_MAX, AFFINITY_MIN
 from kazusa_ai_chatbot.nodes.persona_supervisor2_schema import CognitionState
-from kazusa_ai_chatbot.utils import parse_llm_json_output, build_affinity_block, get_llm
+from kazusa_ai_chatbot.utils import build_affinity_block, get_llm, log_preview, parse_llm_json_output
 from kazusa_ai_chatbot.nodes.boundary_profile import (
     get_self_integrity_description,
     get_control_sensitivity_description,
@@ -254,7 +254,12 @@ async def call_cognition_consciousness(state: CognitionState) -> CognitionState:
     ])
     result = parse_llm_json_output(response.content)
 
-    logger.debug(f"Consciousness: {result}")
+    logger.debug(
+        "Consciousness: stance=%s intent=%s monologue=%s",
+        result.get("logical_stance", ""),
+        result.get("character_intent", ""),
+        log_preview(result.get("internal_monologue", ""), max_length=160),
+    )
 
     # In case AI make some spelling mistakes...
     internal_monologue = ""
@@ -486,7 +491,15 @@ async def call_boundary_core_agent(state: CognitionState) -> CognitionState:
 
     result = parse_llm_json_output(response.content)
 
-    logger.debug(f"Boundary Core: {result}")
+    logger.debug(
+        "Boundary core: issue=%s acceptance=%s stance_bias=%s identity_policy=%s pressure_policy=%s summary=%s",
+        result.get("boundary_issue", ""),
+        result.get("acceptance", ""),
+        result.get("stance_bias", ""),
+        result.get("identity_policy", ""),
+        result.get("pressure_policy", ""),
+        log_preview(result.get("boundary_summary", ""), max_length=140),
+    )
 
     boundary_issue = result.get("boundary_issue", "")
     boundary_summary = result.get("boundary_summary", "")
@@ -669,7 +682,12 @@ async def call_judgment_core_agent(state: CognitionState) -> CognitionState:
     ])
     result = parse_llm_json_output(response.content)
 
-    logger.debug(f"Judgment Core: {result}")
+    logger.debug(
+        "Judgment core: stance=%s intent=%s note=%s",
+        result.get("logical_stance", ""),
+        result.get("character_intent", ""),
+        log_preview(result.get("judgment_note", ""), max_length=140),
+    )
 
     logical_stance = result.get("logical_stance")
     character_intent = result.get("character_intent")

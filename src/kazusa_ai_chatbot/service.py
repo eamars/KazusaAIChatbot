@@ -45,7 +45,7 @@ from kazusa_ai_chatbot.db import (
 )
 from kazusa_ai_chatbot.mcp_client import mcp_manager
 from kazusa_ai_chatbot.state import IMProcessState, MultiMediaDoc, DebugModes, ReplyContext
-from kazusa_ai_chatbot.utils import trim_history_dict
+from kazusa_ai_chatbot.utils import log_dict_subset, log_preview, trim_history_dict
 from kazusa_ai_chatbot import scheduler
 
 from langgraph.graph import END, START, StateGraph
@@ -367,6 +367,33 @@ async def chat(req: ChatRequest, background_tasks: BackgroundTasks):
         if active_flags:
             logger.info("Debug modes active: %s", active_flags)
 
+        logger.debug(
+            "Chat request: platform=%s channel=%s message=%s user=%s global_user=%s content_type=%s attachments=%d image_attachments=%d history_wide=%d history_recent=%d reply_context=%s debug_modes=%s content=%s",
+            req.platform,
+            req.platform_channel_id or "<dm>",
+            req.platform_message_id or "<none>",
+            req.platform_user_id,
+            global_user_id,
+            req.content_type,
+            len(req.attachments),
+            len(multimedia_input),
+            len(chat_history_wide),
+            len(chat_history_recent),
+            log_dict_subset(
+                reply_context,
+                [
+                    "reply_to_message_id",
+                    "reply_to_platform_user_id",
+                    "reply_to_display_name",
+                    "reply_to_current_bot",
+                    "reply_excerpt",
+                ],
+                value_length=80,
+            ),
+            active_flags,
+            log_preview(req.content, max_length=180),
+        )
+
         initial_state: IMProcessState = {
             "timestamp": timestamp,
             "platform": req.platform,
@@ -414,6 +441,19 @@ async def chat(req: ChatRequest, background_tasks: BackgroundTasks):
 
         final_dialog = result.get("final_dialog", [])
         should_reply = result.get("use_reply_feature", False)
+
+        logger.debug(
+            "Chat result: platform=%s channel=%s message=%s user=%s should_respond=%s should_reply=%s final_dialog_count=%d future_promises=%d dialog_preview=%s",
+            req.platform,
+            req.platform_channel_id or "<dm>",
+            req.platform_message_id or "<none>",
+            req.platform_user_id,
+            result.get("should_respond"),
+            should_reply,
+            len(final_dialog),
+            len(result.get("future_promises", [])),
+            log_preview(" | ".join(final_dialog), max_length=200),
+        )
 
         # Save bot message in background only if the bot actually generated a response
         if final_dialog:

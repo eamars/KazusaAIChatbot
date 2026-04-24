@@ -7,6 +7,8 @@ from kazusa_ai_chatbot.utils import (
     build_affinity_block,
     build_interaction_history_recent,
     get_llm,
+    log_list_preview,
+    log_preview,
 )
 from kazusa_ai_chatbot.nodes.linguistic_texture import (
     get_hesitation_density_description,
@@ -242,7 +244,12 @@ async def dialog_generator(state: DialogAgentState) -> DialogAgentState:
     response = await _dialog_generator_llm.ainvoke([system_prompt, human_message] + recent_messages)
 
     result = parse_llm_json_output(response.content)
-    logger.debug(f"Generator: {result}")
+    generated_dialog = result.get("final_dialog", [])
+    logger.debug(
+        "Dialog generator: fragments=%d preview=%s",
+        len(generated_dialog) if isinstance(generated_dialog, list) else 0,
+        log_list_preview(generated_dialog if isinstance(generated_dialog, list) else [], max_items=3, item_length=100),
+    )
 
     return {
         "final_dialog": result["final_dialog"],
@@ -396,7 +403,12 @@ async def dialog_evaluator(state: DialogAgentState) -> DialogAgentState:
     response = await _dialog_evaluator_llm.ainvoke([system_prompt, human_message])
 
     result = parse_llm_json_output(response.content)
-    logger.debug(f"Evaluator: {result}")
+    logger.debug(
+        "Dialog evaluator: retry=%d should_stop=%s feedback=%s",
+        retry,
+        result.get("should_stop", True),
+        log_preview(result.get("feedback", ""), max_length=160),
+    )
 
     # Determine stop condition
     should_stop = result.get("should_stop", True)
@@ -485,7 +497,10 @@ async def dialog_agent(
     final_dialog = result.get("final_dialog", [])
 
     logger.info(
-        f"\nFinal Dialog: {final_dialog}\n"
+        "Dialog summary: fragments=%d retry=%s preview=%s",
+        len(final_dialog),
+        result.get("retry", 0),
+        log_list_preview(final_dialog, max_items=3, item_length=120),
     )
 
     return {

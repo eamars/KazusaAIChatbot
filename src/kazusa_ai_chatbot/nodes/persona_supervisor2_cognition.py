@@ -6,7 +6,7 @@ Agent implementations live in the layer-specific submodules:
   - persona_supervisor2_cognition_l3  (L3 contextual / linguistic / visual + L4 collector)
 """
 from kazusa_ai_chatbot.nodes.persona_supervisor2_schema import GlobalPersonaState, CognitionState
-from kazusa_ai_chatbot.utils import build_interaction_history_recent
+from kazusa_ai_chatbot.utils import build_interaction_history_recent, log_preview
 
 from langgraph.graph import StateGraph, START, END
 
@@ -120,13 +120,14 @@ async def call_cognition_subgraph(state: GlobalPersonaState) -> GlobalPersonaSta
     logical_stance = result.get("logical_stance", "")
 
     logger.info(
-        f"\nDecontexualized input: {state['decontexualized_input']}\n"
-        f"  Internal monologue: {internal_monologue}\n"
-        f"  Action directives: {action_directives}\n"
-        f"  Interaction subtext: {interaction_subtext}\n"
-        f"  Emotional appraisal: {emotional_appraisal}\n"
-        f"  Character intent: {character_intent}\n"
-        f"  Logical stance: {logical_stance}\n"
+        "Cognition summary: input=%s stance=%s intent=%s appraisal=%s subtext=%s directives=%s monologue=%s",
+        log_preview(state["decontexualized_input"], max_length=140),
+        logical_stance,
+        character_intent,
+        log_preview(emotional_appraisal, max_length=100),
+        log_preview(interaction_subtext, max_length=100),
+        list(action_directives.keys()),
+        log_preview(internal_monologue, max_length=180),
     )
 
 

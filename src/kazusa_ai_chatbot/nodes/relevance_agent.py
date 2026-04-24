@@ -14,7 +14,7 @@ import re
 
 from langchain_core.messages import HumanMessage, SystemMessage
 
-from kazusa_ai_chatbot.utils import build_affinity_block, parse_llm_json_output
+from kazusa_ai_chatbot.utils import build_affinity_block, log_dict_subset, log_preview, parse_llm_json_output
 from kazusa_ai_chatbot.utils import get_llm
 from kazusa_ai_chatbot.state import IMProcessState
 
@@ -234,6 +234,29 @@ async def relevance_agent(state: IMProcessState) -> IMProcessState:
     is_noisy_environment = channel_name_lower not in ["", "private", "dm", "direct message"]
     prompt_template = _RELEVANCE_SYSTEM_NOISY_PROMPT if is_noisy_environment else _RELEVANCE_SYSTEM_PROMPT
     reply_context = dict(state.get("reply_context") or {})
+    mention_ids = _extract_mention_ids(user_input)
+
+    logger.debug(
+        "Relevance input: user=%s platform_user=%s channel=%s noisy=%s history=%d mentions=%s reply_context=%s content=%s",
+        user_name,
+        platform_user_id,
+        channel_name or "<dm>",
+        is_noisy_environment,
+        len(state.get("chat_history_wide") or []),
+        mention_ids,
+        log_dict_subset(
+            reply_context,
+            [
+                "reply_to_message_id",
+                "reply_to_platform_user_id",
+                "reply_to_display_name",
+                "reply_to_current_bot",
+                "reply_excerpt",
+            ],
+            value_length=80,
+        ),
+        log_preview(user_input, max_length=180),
+    )
 
     if _should_ignore_third_party_reply(
         user_input=user_input,
@@ -245,11 +268,15 @@ async def relevance_agent(state: IMProcessState) -> IMProcessState:
     ):
         reason_to_respond = "structured reply target points to another participant without an explicit bot address"
         logger.info(
-            "\n%s(@%s): %s\nRelevance Analysis:\n  should_respond: False\n  reason_to_respond: %s\n  use_reply_feature: False\n  channel_topic: \n  indirect_speech_context: ",
+            "Relevance decision: user=%s platform_user=%s should_respond=%s use_reply_feature=%s noisy=%s reason=%s reply_target=%s content=%s",
             user_name,
             platform_user_id,
-            user_input,
+            False,
+            False,
+            is_noisy_environment,
             reason_to_respond,
+            reply_context.get("reply_to_platform_user_id", ""),
+            log_preview(user_input, max_length=180),
         )
         return {
             "should_respond": False,
@@ -299,13 +326,16 @@ async def relevance_agent(state: IMProcessState) -> IMProcessState:
     indirect_speech_context = result.get("indirect_speech_context", "")
 
     logger.info(
-        f"\n{user_name}(@{platform_user_id}): {user_input}\n"
-        f"Relevance Analysis:\n"
-        f"  should_respond: {should_respond}\n"
-        f"  reason_to_respond: {reason_to_respond}\n"
-        f"  use_reply_feature: {use_reply_feature}\n"
-        f"  channel_topic: {channel_topic}\n"
-        f"  indirect_speech_context: {indirect_speech_context}"
+        "Relevance decision: user=%s platform_user=%s should_respond=%s use_reply_feature=%s noisy=%s reason=%s topic=%s indirect=%s content=%s",
+        user_name,
+        platform_user_id,
+        should_respond,
+        use_reply_feature,
+        is_noisy_environment,
+        log_preview(reason_to_respond, max_length=160),
+        log_preview(channel_topic, max_length=100),
+        log_preview(indirect_speech_context, max_length=100),
+        log_preview(user_input, max_length=180),
     )
 
     return {
@@ -374,9 +404,12 @@ async def multimedia_descriptor_agent(state: IMProcessState) -> IMProcessState:
 
             description = result.get("description", "")
 
-            logger.info(
-                f"\n{user_name}(@{platform_user_id}): Image Description\n"
-                f"{description}"
+            logger.debug(
+                "Image description: user=%s platform_user=%s media_type=%s description=%s",
+                user_name,
+                platform_user_id,
+                piece["content_type"],
+                log_preview(description, max_length=220),
             )
 
             output_multimedia_input.append({

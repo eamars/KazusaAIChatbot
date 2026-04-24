@@ -21,6 +21,7 @@ from pathlib import Path
 import logging
 import json
 import re
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -141,6 +142,75 @@ def sanitize_llm_text(text: str) -> str:
     """
     # Remove C0 controls (except \t \n \r) and C1 controls and lone surrogates
     return re.sub(r'[\x00-\x08\x0B\x0C\x0E-\x1F\x7F\x80-\x9F]', '', text)
+
+
+def log_preview(value: Any, max_length: int = 160) -> str:
+    """Return a compact single-line preview suitable for logs.
+
+    Args:
+        value: Arbitrary value to preview.
+        max_length: Maximum number of characters to emit.
+
+    Returns:
+        A whitespace-collapsed string preview truncated to ``max_length``.
+    """
+    if value is None:
+        return ""
+
+    if isinstance(value, str):
+        text = value
+    elif isinstance(value, dict):
+        try:
+            text = json.dumps(value, ensure_ascii=False, sort_keys=True, default=str)
+        except TypeError:
+            text = repr(value)
+    else:
+        text = str(value)
+
+    text = re.sub(r"\s+", " ", text).strip()
+    if len(text) <= max_length:
+        return text
+    return text[: max_length - 1] + "…"
+
+
+def log_list_preview(values: list[Any], max_items: int = 3, item_length: int = 80) -> list[str]:
+    """Return a compact preview list for log output.
+
+    Args:
+        values: Sequence of values to preview.
+        max_items: Maximum number of items to include.
+        item_length: Maximum length for each rendered item.
+
+    Returns:
+        A list of preview strings, with an overflow marker when truncated.
+    """
+    preview = [log_preview(item, max_length=item_length) for item in values[:max_items]]
+    remaining = len(values) - len(preview)
+    if remaining > 0:
+        preview.append(f"... (+{remaining} more)")
+    return preview
+
+
+def log_dict_subset(mapping: dict[str, Any], keys: list[str], value_length: int = 120) -> dict[str, str]:
+    """Return a filtered, compact subset of a mapping for log output.
+
+    Args:
+        mapping: Source mapping to filter.
+        keys: Keys to include when present and non-empty.
+        value_length: Maximum preview length for each value.
+
+    Returns:
+        A dict of compact previews for the requested keys.
+    """
+    subset: dict[str, str] = {}
+    for key in keys:
+        if key not in mapping:
+            continue
+        value = mapping[key]
+        if value in ("", None, [], {}):
+            continue
+        subset[key] = log_preview(value, max_length=value_length)
+    return subset
 
 
 _PARSE_JSON_WITH_LLM_PROMPT = """\

@@ -3,7 +3,7 @@
 Contains the MBTI expression-willingness helper and L3/L4 LLM calls.
 """
 from kazusa_ai_chatbot.nodes.persona_supervisor2_schema import CognitionState
-from kazusa_ai_chatbot.utils import parse_llm_json_output, build_affinity_block, get_llm, get_preference_llm
+from kazusa_ai_chatbot.utils import build_affinity_block, get_llm, get_preference_llm, log_list_preview, log_preview, parse_llm_json_output
 from kazusa_ai_chatbot.nodes.linguistic_texture import (
     get_fragmentation_description,
     get_hesitation_density_description,
@@ -130,7 +130,14 @@ async def call_contextual_agent(state: CognitionState) -> CognitionState:
     ])
     result = parse_llm_json_output(response.content)
 
-    logger.debug(f"Social Filter: {result}")
+    logger.debug(
+        "Contextual agent: distance=%s intensity=%s vibe=%s dynamic=%s willingness=%s",
+        log_preview(result.get("social_distance", ""), max_length=100),
+        log_preview(result.get("emotional_intensity", ""), max_length=100),
+        log_preview(result.get("vibe_check", ""), max_length=100),
+        log_preview(result.get("relational_dynamic", ""), max_length=120),
+        result.get("expression_willingness", ""),
+    )
 
     # In case AI make some spelling mistakes
     social_distance = result.get("social_distance", "")
@@ -260,7 +267,12 @@ async def call_style_agent(state: CognitionState) -> CognitionState:
     ])
     result = parse_llm_json_output(response.content)
 
-    logger.debug(f"Style Agent: {result}")
+    logger.debug(
+        "Style agent: rhetorical=%s linguistic=%s forbidden=%s",
+        log_preview(result.get("rhetorical_strategy", ""), max_length=120),
+        log_preview(result.get("linguistic_style", ""), max_length=120),
+        log_list_preview(result.get("forbidden_phrases", []) or [], max_items=3, item_length=60),
+    )
 
     rhetorical_strategy = result.get("rhetorical_strategy", "")
     linguistic_style = result.get("linguistic_style", "")
@@ -371,7 +383,10 @@ async def call_content_anchor_agent(state: CognitionState) -> CognitionState:
     ])
     result = parse_llm_json_output(response.content)
 
-    logger.debug(f"Content Anchor Agent: {result}")
+    logger.debug(
+        "Content anchor agent: anchors=%s",
+        log_list_preview(result.get("content_anchors", []) or [], max_items=4, item_length=120),
+    )
 
     content_anchors = result.get("content_anchors", [])
 
@@ -498,15 +513,18 @@ async def call_preference_adapter(state: CognitionState) -> CognitionState:
     ])
     result = parse_llm_json_output(response.content)
 
-    logger.debug(f"Preference Adapter: {result}")
+    logger.debug(
+        "Preference adapter raw: preferences=%s",
+        log_list_preview(result.get("accepted_user_preferences", []) or [], max_items=4, item_length=120),
+    )
 
     accepted_user_preferences = result.get("accepted_user_preferences", [])
     if not isinstance(accepted_user_preferences, list):
         accepted_user_preferences = []
 
     logger.debug(
-        "Preference Adapter normalized preferences: %s",
-        accepted_user_preferences,
+        "Preference adapter normalized: preferences=%s",
+        log_list_preview(accepted_user_preferences, max_items=4, item_length=120),
     )
 
     if _should_strip_address_preferences(state):
@@ -569,7 +587,13 @@ async def call_visual_agent(state: CognitionState) -> CognitionState:
     ])
     result = parse_llm_json_output(response.content)
 
-    logger.debug(f"Social Filter: {result}")
+    logger.debug(
+        "Visual agent: facial=%d body=%d gaze=%d vibe=%d",
+        len(result.get("facial_expression", []) or []),
+        len(result.get("body_language", []) or []),
+        len(result.get("gaze_direction", []) or []),
+        len(result.get("visual_vibe", []) or []),
+    )
 
     # In case AI make some spelling mistakes
     facial_expression = result.get("facial_expression", [])
