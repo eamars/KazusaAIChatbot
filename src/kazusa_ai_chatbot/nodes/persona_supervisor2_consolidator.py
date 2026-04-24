@@ -32,37 +32,48 @@ from kazusa_ai_chatbot.nodes.persona_supervisor2_consolidator_reflection import 
     global_state_updater,
     relationship_recorder,
 )
-from kazusa_ai_chatbot.nodes.persona_supervisor2_consolidator_schema import ConsolidatorState
+from kazusa_ai_chatbot.nodes.persona_supervisor2_consolidator_schema import (
+    ConsolidatorState,
+    normalize_diary_entries,
+)
 from kazusa_ai_chatbot.nodes.persona_supervisor2_schema import GlobalPersonaState
 from kazusa_ai_chatbot.utils import log_dict_subset, log_list_preview, log_preview
 
 logger = logging.getLogger(__name__)
 
 
+async def _consolidator_noop(_: ConsolidatorState) -> dict:
+    return {}
+
+
 async def call_consolidation_subgraph(global_state: GlobalPersonaState):
     sub_agent_builder = StateGraph(ConsolidatorState)
+    reflection_barrier = "reflection_done"
+    facts_barrier = "facts_done"
 
     sub_agent_builder.add_node("global_state_updater", global_state_updater)
     sub_agent_builder.add_node("relationship_recorder", relationship_recorder)
     sub_agent_builder.add_node("facts_harvester", facts_harvester)
     sub_agent_builder.add_node("fact_harvester_evaluator", fact_harvester_evaluator)
+    sub_agent_builder.add_node(reflection_barrier, _consolidator_noop)
+    sub_agent_builder.add_node(facts_barrier, _consolidator_noop)
     sub_agent_builder.add_node("db_writer", db_writer)
 
     sub_agent_builder.add_edge(START, "global_state_updater")
     sub_agent_builder.add_edge(START, "relationship_recorder")
     sub_agent_builder.add_edge(START, "facts_harvester")
 
-    sub_agent_builder.add_edge("global_state_updater", "db_writer")
-    sub_agent_builder.add_edge("relationship_recorder", "db_writer")
+    sub_agent_builder.add_edge(["global_state_updater", "relationship_recorder"], reflection_barrier)
     sub_agent_builder.add_edge("facts_harvester", "fact_harvester_evaluator")
     sub_agent_builder.add_conditional_edges(
         "fact_harvester_evaluator",
         lambda state: "loop" if not state["should_stop"] else "end",
         {
             "loop": "facts_harvester",
-            "end": "db_writer",
+            "end": facts_barrier,
         },
     )
+    sub_agent_builder.add_edge([reflection_barrier, facts_barrier], "db_writer")
 
     sub_agent_builder.add_edge("db_writer", END)
 
@@ -100,7 +111,7 @@ async def call_consolidation_subgraph(global_state: GlobalPersonaState):
     mood = result.get("mood", "")
     global_vibe = result.get("global_vibe", "")
     reflection_summary = result.get("reflection_summary", "")
-    diary_entry = result.get("diary_entry", "")
+    diary_entry = normalize_diary_entries(result.get("diary_entry"))
     affinity_delta = result.get("affinity_delta", 0)
     last_relationship_insight = result.get("last_relationship_insight", "")
     new_facts = result.get("new_facts", [])

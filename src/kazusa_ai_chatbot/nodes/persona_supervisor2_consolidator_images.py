@@ -6,7 +6,10 @@ import json
 
 from langchain_core.messages import HumanMessage, SystemMessage
 
-from kazusa_ai_chatbot.nodes.persona_supervisor2_consolidator_schema import ConsolidatorState
+from kazusa_ai_chatbot.nodes.persona_supervisor2_consolidator_schema import (
+    ConsolidatorState,
+    normalize_diary_entries,
+)
 from kazusa_ai_chatbot.utils import get_llm, parse_llm_json_output
 
 
@@ -214,7 +217,7 @@ async def _update_user_image(
     Returns:
         Updated image document dict, or ``None`` if nothing changed this session.
     """
-    diary_entries = state.get("diary_entry") or []
+    diary_entries = normalize_diary_entries(state.get("diary_entry"))
     new_facts = state.get("new_facts") or []
     last_relationship_insight = state.get("last_relationship_insight") or ""
 

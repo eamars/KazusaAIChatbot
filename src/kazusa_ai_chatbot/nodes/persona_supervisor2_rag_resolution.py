@@ -9,7 +9,6 @@ Moved from ``persona_supervisor2_rag.py`` during Phase 6 decomposition.
 
 from langchain_core.messages import HumanMessage, SystemMessage
 
-from kazusa_ai_chatbot.db.entity_memory import get_entity_by_key, get_entity_by_resolved_id
 from kazusa_ai_chatbot.nodes.persona_supervisor2_rag_schema import RAGState
 from kazusa_ai_chatbot.utils import get_llm, log_preview, parse_llm_json_output
 
@@ -263,17 +262,6 @@ async def entity_grounder(state: RAGState) -> dict:
                     confidence = 0.80
                     method = "partial_display_name"
                     break
-
-        # Step 1.5: Check durable entity_memory (Phase 3)
-        if not resolved_id:
-            try:
-                em_doc = await get_entity_by_key(lower_surface)
-                if em_doc and em_doc.get("resolved_global_user_id"):
-                    resolved_id = em_doc["resolved_global_user_id"]
-                    confidence = 0.85
-                    method = "entity_memory_key"
-            except Exception:
-                logger.warning("Entity memory lookup failed for %s", surface_form, exc_info=True)
 
         # Step 2: If still unresolved and entity type is person, try LLM fallback
         if not resolved_id and entity_type == "person" and participants:

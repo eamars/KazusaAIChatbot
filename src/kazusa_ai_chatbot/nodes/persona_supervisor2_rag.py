@@ -107,7 +107,6 @@ from kazusa_ai_chatbot.nodes.persona_supervisor2_rag_executors import (  # noqa:
     call_memory_retriever_agent_input_context_rag,
     call_web_search_agent,
     channel_recent_entity_rag,
-    entity_knowledge_rag,
     external_rag_dispatcher,
     input_context_rag_dispatcher,
     third_party_profile_rag,
@@ -352,7 +351,6 @@ def _build_retrieval_graph(depth: str, affinity_percent: float):
     # Tier 1: existing dispatchers
     builder.add_node("input_context_rag_dispatcher", input_context_rag_dispatcher)
     builder.add_node("call_memory_retriever_agent_input_context_rag", call_memory_retriever_agent_input_context_rag)
-    builder.add_node("entity_knowledge_rag", entity_knowledge_rag)
     builder.add_node("external_rag_dispatcher", external_rag_dispatcher)
     builder.add_node("call_web_search_agent", call_web_search_agent)
 
@@ -374,11 +372,8 @@ def _build_retrieval_graph(depth: str, affinity_percent: float):
         )
         builder.add_edge("call_memory_retriever_agent_input_context_rag", "tier_1_join")
 
-        # Tier 1 also includes entity_knowledge_rag (Phase 3)
-        builder.add_edge("tier_1_join", "entity_knowledge_rag")
-
         builder.add_conditional_edges(
-            "entity_knowledge_rag",
+            "tier_1_join",
             _should_run_tier2,
             {
                 "run": "channel_recent_entity_rag",
@@ -404,10 +399,10 @@ def _build_retrieval_graph(depth: str, affinity_percent: float):
         builder.add_edge("call_web_search_agent", END)
 
     else:
-        # SHALLOW: entity_knowledge_rag runs first, then tier 2 gate
-        builder.add_edge(START, "entity_knowledge_rag")
+        # SHALLOW: tier 2 gate runs first
+        builder.add_edge(START, "tier_1_join")
         builder.add_conditional_edges(
-            "entity_knowledge_rag",
+            "tier_1_join",
             _should_run_tier2,
             {
                 "run": "channel_recent_entity_rag",
@@ -732,7 +727,7 @@ async def call_rag_subgraph(state: GlobalPersonaState) -> GlobalPersonaState:
         external_is_empty = bool(cached_results.get("external_rag_is_empty_result", False))
         channel_recent_entity_results = str(cached_results.get("channel_recent_entity_results") or "")
         third_party_profile_results = str(cached_results.get("third_party_profile_results") or "")
-        entity_knowledge_results = str(cached_results.get("entity_knowledge_results") or "")
+        entity_knowledge_results = ""
         entity_resolution_notes = str(cached_results.get("entity_resolution_notes") or "")
 
         input_context_conf = _result_confidence(input_context_results, is_empty_result=input_context_is_empty)
@@ -747,8 +742,6 @@ async def call_rag_subgraph(state: GlobalPersonaState) -> GlobalPersonaState:
             sources_used.append("channel_recent_entity")
         if third_party_profile_results:
             sources_used.append("third_party_profile")
-        if entity_knowledge_results:
-            sources_used.append("entity_knowledge")
         metadata["rag_sources_used"] = sources_used
         metadata["confidence_scores"] = {
             "input_context_rag": input_context_conf,
@@ -844,8 +837,7 @@ async def call_rag_subgraph(state: GlobalPersonaState) -> GlobalPersonaState:
         repair_result = await repair_graph.ainvoke(repair_state)
 
         # Merge repair results — append, don't replace
-        for key in ("channel_recent_entity_results", "third_party_profile_results",
-                     "entity_knowledge_results", "entity_resolution_notes"):
+        for key in ("channel_recent_entity_results", "third_party_profile_results", "entity_resolution_notes"):
             existing_val = str(result.get(key) or "")
             repair_val = str(repair_result.get(key) or "")
             if repair_val and repair_val not in existing_val:
@@ -864,7 +856,7 @@ async def call_rag_subgraph(state: GlobalPersonaState) -> GlobalPersonaState:
     external_rag_is_empty_result = bool(result.get("external_rag_is_empty_result", False))
     channel_recent_entity_results = str(result.get("channel_recent_entity_results") or "")
     third_party_profile_results = str(result.get("third_party_profile_results") or "")
-    entity_knowledge_results = str(result.get("entity_knowledge_results") or "")
+    entity_knowledge_results = ""
     entity_resolution_notes = str(result.get("entity_resolution_notes") or "")
 
     input_context_conf = _result_confidence(
@@ -888,8 +880,6 @@ async def call_rag_subgraph(state: GlobalPersonaState) -> GlobalPersonaState:
         sources_used.append("channel_recent_entity")
     if third_party_profile_results:
         sources_used.append("third_party_profile")
-    if entity_knowledge_results:
-        sources_used.append("entity_knowledge")
     metadata["rag_sources_used"] = sources_used
     metadata["response_confidence"] = max([input_context_conf, external_conf] + [0.0])
     metadata["retrieval_ledger"] = result.get("retrieval_ledger") or {}

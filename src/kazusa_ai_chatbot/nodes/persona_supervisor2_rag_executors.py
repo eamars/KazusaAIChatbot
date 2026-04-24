@@ -19,7 +19,6 @@ from kazusa_ai_chatbot.db.conversation import (
     get_conversation_history,
     search_conversation_history,
 )
-from kazusa_ai_chatbot.db.entity_memory import search_entity_memory
 from kazusa_ai_chatbot.nodes.persona_supervisor2_rag_schema import RAGState, _build_image_context
 from kazusa_ai_chatbot.utils import (
     get_llm,
@@ -742,83 +741,6 @@ async def third_party_profile_rag(state: RAGState) -> dict:
 
     return {
         "third_party_profile_results": third_party_profile_results,
-        "retrieval_ledger": ledger,
-    }
-
-
-# ── Phase 3 — Entity Knowledge RAG ───────────────────────────────
-
-
-async def entity_knowledge_rag(state: RAGState) -> dict:
-    """Retrieve durable entity/topic knowledge from the entity_memory collection.
-
-    Queries entity memory for each entity mentioned in the retrieval plan
-    when ``GLOBAL_ENTITY_KNOWLEDGE`` is among the active sources.
-    """
-    retrieval_plan = state.get("retrieval_plan") or {}
-    active_sources = retrieval_plan.get("active_sources", [])
-    resolved_entities = state.get("resolved_entities") or []
-    ledger = dict(state.get("retrieval_ledger") or {})
-
-    if "GLOBAL_ENTITY_KNOWLEDGE" not in active_sources:
-        return {"entity_knowledge_results": "", "retrieval_ledger": ledger}
-
-    all_results: list[str] = []
-
-    for entity in resolved_entities:
-        surface_form = entity.get("surface_form", "")
-        resolved_id = entity.get("resolved_global_user_id", "")
-        ledger_key = f"entity_knowledge:{surface_form}"
-
-        if ledger_key in ledger:
-            continue
-
-        # Try keyword search first, then vector if needed
-        try:
-            results = await search_entity_memory(
-                query=surface_form,
-                limit=3,
-                method="keyword",
-            )
-        except Exception:
-            logger.warning("Entity memory keyword search failed for %s", surface_form, exc_info=True)
-            results = []
-
-        if not results:
-            try:
-                results = await search_entity_memory(
-                    query=surface_form,
-                    limit=3,
-                    method="vector",
-                )
-            except Exception:
-                logger.warning("Entity memory vector search failed for %s", surface_form, exc_info=True)
-                results = []
-
-        for _score, doc in results:
-            lines = [f"### {doc.get('subject_key', surface_form)} ({doc.get('subject_kind', 'unknown')})"]
-            if doc.get("historical_summary"):
-                lines.append(f"历史总结: {doc['historical_summary']}")
-            recent = doc.get("recent_mentions") or []
-            if recent:
-                recent_lines = []
-                for m in recent[-5:]:
-                    recent_lines.append(f"[{m.get('timestamp', '')}] {m.get('summary', '')}")
-                lines.append(f"近期提及:\n" + "\n".join(recent_lines))
-            all_results.append("\n".join(lines))
-
-        ledger[ledger_key] = {"found": len(results), "method": "entity_memory"}
-
-    entity_knowledge_results = "\n\n".join(all_results) if all_results else ""
-
-    logger.debug(
-        "Entity knowledge RAG: entities=%d results_len=%d",
-        len(resolved_entities),
-        len(entity_knowledge_results),
-    )
-
-    return {
-        "entity_knowledge_results": entity_knowledge_results,
         "retrieval_ledger": ledger,
     }
 

@@ -110,15 +110,11 @@ async def search_conversation_keyword(
     """Search conversation history by exact keyword/phrase match (regex, case-insensitive).
 
     Use this tool when the search target is a specific term, technical phrase, or
-    proper noun that must appear literally in the text (e.g. "指令跟随逻辑", "DDR5").
+    proper noun that must appear literally in the text (e.g. "HTTP", "DDR5").
     Prefer this over search_conversation when you know the exact wording.
 
-    Mandatory argument rules:
-    - keyword must be provided and should be the shortest unambiguous term or phrase.
-    - Do not pass a full sentence — use the core noun/phrase only.
-
     Args:
-        keyword (Mandatory): Exact term or short phrase to match (regex, case-insensitive).
+        keyword (Mandatory): Exact term or short phrase to match (regex, case-insensitive). Do not pass a full sentence — use the core noun/phrase only.
         global_user_id (Optional): Filter results to one user UUID.
         top_k (Optional): Maximum number of results. Default is 5.
         platform (Optional): Platform filter, e.g. "discord", "qq".

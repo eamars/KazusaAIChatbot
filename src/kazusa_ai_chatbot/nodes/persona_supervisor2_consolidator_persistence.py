@@ -38,7 +38,10 @@ from kazusa_ai_chatbot.nodes.persona_supervisor2_consolidator_images import (
     _update_user_image,
 )
 from kazusa_ai_chatbot.nodes.persona_supervisor2_consolidator_knowledge import _update_knowledge_base
-from kazusa_ai_chatbot.nodes.persona_supervisor2_consolidator_schema import ConsolidatorState
+from kazusa_ai_chatbot.nodes.persona_supervisor2_consolidator_schema import (
+    ConsolidatorState,
+    normalize_diary_entries,
+)
 from kazusa_ai_chatbot.nodes.persona_supervisor2_rag import _get_rag_cache
 from kazusa_ai_chatbot.scheduler import schedule_event
 
@@ -242,7 +245,7 @@ async def db_writer(state: ConsolidatorState) -> dict:
 
     # ── Step 2a: character diary (subjective per-user notes) ────────
     diary_entries = _build_diary_entries(
-        state.get("diary_entry") or [],
+        normalize_diary_entries(state.get("diary_entry")),
         timestamp=timestamp,
         interaction_subtext=state.get("interaction_subtext", ""),
     )

@@ -8,7 +8,10 @@ import logging
 from langchain_core.messages import HumanMessage, SystemMessage
 
 from kazusa_ai_chatbot.config import AFFINITY_DEFAULT
-from kazusa_ai_chatbot.nodes.persona_supervisor2_consolidator_schema import ConsolidatorState
+from kazusa_ai_chatbot.nodes.persona_supervisor2_consolidator_schema import (
+    ConsolidatorState,
+    normalize_diary_entries,
+)
 from kazusa_ai_chatbot.utils import (
     build_affinity_block,
     get_llm,
@@ -171,10 +174,7 @@ async def relationship_recorder(state: ConsolidatorState) -> dict:
 
     result = parse_llm_json_output(response.content)
 
-    # Just for debugging purpose
-    diary_entry = result.get("diary_entry", []) or []
-    if isinstance(diary_entry, str):
-        diary_entry = [diary_entry]
+    diary_entry = normalize_diary_entries(result.get("diary_entry"))
     logger.debug(
         "Relationship recorder: skip=%s affinity_delta=%s diary=%s insight=%s",
         result.get("skip", False),
@@ -202,7 +202,7 @@ async def relationship_recorder(state: ConsolidatorState) -> dict:
         raw_affinity_delta = 0
 
     return {
-        "diary_entry": result.get("diary_entry"),
+        "diary_entry": diary_entry,
         "affinity_delta": raw_affinity_delta,
         "last_relationship_insight": result.get("last_relationship_insight"),
     }

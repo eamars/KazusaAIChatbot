@@ -13,6 +13,35 @@ def _merge_dicts(a: dict, b: dict) -> dict:
     result.update(b)
     return result
 
+
+def normalize_diary_entries(value: object) -> list[str]:
+    """Normalize a diary payload into a clean ``list[str]``.
+
+    Args:
+        value: Raw diary payload from state or LLM output.
+
+    Returns:
+        A list of non-empty diary entry strings.
+    """
+    if value is None:
+        return []
+    if isinstance(value, str):
+        text = value.strip()
+        return [text] if text else []
+    if isinstance(value, tuple):
+        items = list(value)
+    elif isinstance(value, list):
+        items = value
+    else:
+        return []
+
+    normalized: list[str] = []
+    for item in items:
+        text = str(item).strip()
+        if text:
+            normalized.append(text)
+    return normalized
+
 class ConsolidatorState(TypedDict):
     # Inputs for db_writer
     timestamp: str

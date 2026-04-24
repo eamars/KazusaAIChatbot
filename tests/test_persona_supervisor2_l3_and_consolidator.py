@@ -454,6 +454,157 @@ async def test_relationship_recorder_invalid_affinity_delta_falls_back_to_zero(m
     assert result["affinity_delta"] == 0
 
 
+@pytest.mark.asyncio
+async def test_relationship_recorder_wraps_single_string_diary_entry(monkeypatch):
+    """A single diary string from the LLM must remain one diary entry downstream."""
+    llm = _CapturingAsyncLLM(
+        {
+            "skip": False,
+            "diary_entry": "A full diary sentence.",
+            "affinity_delta": 1,
+            "last_relationship_insight": "curious",
+        }
+    )
+    monkeypatch.setattr(consolidator_reflection_module, "_relationship_recorder_llm", llm)
+
+    state = {
+        "character_profile": {
+            "name": "Kazusa",
+            "personality_brief": {"mbti": "INTJ"},
+        },
+        "user_name": "TestUser",
+        "user_profile": {"affinity": 500},
+        "internal_monologue": "That caught my attention.",
+        "emotional_appraisal": "A little curious.",
+        "interaction_subtext": "routine",
+        "logical_stance": "CONFIRM",
+    }
+
+    result = await consolidator_module.relationship_recorder(state)
+
+    assert result["diary_entry"] == ["A full diary sentence."]
+    assert result["affinity_delta"] == 1
+
+
+@pytest.mark.asyncio
+async def test_update_user_image_treats_string_diary_as_single_entry(monkeypatch):
+    """User-image synthesis should never explode a string diary payload into characters."""
+    llm = _CapturingAsyncLLM(
+        {
+            "session_summary": "The session summary stays normal.",
+        }
+    )
+    monkeypatch.setattr(consolidator_images_module, "_user_image_session_summary_llm", llm)
+
+    state = {
+        "diary_entry": "A full diary sentence.",
+        "new_facts": [],
+        "last_relationship_insight": "",
+        "character_profile": {"name": "Kazusa"},
+        "user_name": "TestUser",
+        "user_profile": {},
+    }
+
+    result = await consolidator_images_module._update_user_image(
+        state,
+        timestamp="2026-04-24T10:48:45.880057+00:00",
+        processed_affinity_delta=0,
+    )
+
+    human_payload = json.loads(llm.messages[1].content)
+    assert human_payload["diary_entries"] == ["A full diary sentence."]
+    assert result is not None
+    assert result["recent_window"][0]["summary"] == "The session summary stays normal."
+
+
+@pytest.mark.asyncio
+async def test_call_consolidation_subgraph_invokes_db_writer_once(monkeypatch):
+    """The consolidator should persist exactly once after both upstream branches finish."""
+    calls = {"db_writer": 0, "facts_harvester": 0, "fact_harvester_evaluator": 0}
+
+    async def _global_state_updater(_state):
+        return {
+            "mood": "steady",
+            "global_vibe": "calm",
+            "reflection_summary": "All good.",
+        }
+
+    async def _relationship_recorder(_state):
+        return {
+            "diary_entry": ["One diary note."],
+            "affinity_delta": 1,
+            "last_relationship_insight": "friendly",
+        }
+
+    async def _facts_harvester(_state):
+        calls["facts_harvester"] += 1
+        return {
+            "new_facts": [],
+            "future_promises": [
+                {
+                    "target": "TestUser",
+                    "action": "Kazusa will remember this promise",
+                    "due_time": None,
+                    "commitment_type": "future_promise",
+                }
+            ],
+        }
+
+    async def _fact_harvester_evaluator(_state):
+        calls["fact_harvester_evaluator"] += 1
+        return {
+            "should_stop": True,
+            "fact_harvester_feedback_message": [],
+            "fact_harvester_retry": 1,
+            "metadata": {},
+        }
+
+    async def _db_writer(state):
+        calls["db_writer"] += 1
+        assert state["diary_entry"] == ["One diary note."]
+        assert state["future_promises"] == [
+            {
+                "target": "TestUser",
+                "action": "Kazusa will remember this promise",
+                "due_time": None,
+                "commitment_type": "future_promise",
+            }
+        ]
+        return {
+            "metadata": {"write_success": {"character_diary": True, "active_commitments": True}},
+        }
+
+    monkeypatch.setattr(consolidator_module, "global_state_updater", _global_state_updater)
+    monkeypatch.setattr(consolidator_module, "relationship_recorder", _relationship_recorder)
+    monkeypatch.setattr(consolidator_module, "facts_harvester", _facts_harvester)
+    monkeypatch.setattr(consolidator_module, "fact_harvester_evaluator", _fact_harvester_evaluator)
+    monkeypatch.setattr(consolidator_module, "db_writer", _db_writer)
+
+    state = {
+        "timestamp": "2026-04-24T11:05:04.305350+00:00",
+        "global_user_id": "user-1",
+        "user_name": "TestUser",
+        "user_profile": {"affinity": 500},
+        "action_directives": {"linguistic_directives": {"content_anchors": []}},
+        "internal_monologue": "Internal thought.",
+        "final_dialog": ["Final response."],
+        "interaction_subtext": "routine",
+        "emotional_appraisal": "neutral",
+        "character_intent": "PROVIDE",
+        "logical_stance": "CONFIRM",
+        "character_profile": {"name": "Kazusa", "personality_brief": {"mbti": "INTJ"}},
+        "research_facts": {},
+        "decontexualized_input": "Please remember this.",
+        "research_metadata": {"cache_hit": False, "depth": "SHALLOW", "depth_confidence": 0.9},
+    }
+
+    await consolidator_module.call_consolidation_subgraph(state)
+
+    assert calls["facts_harvester"] == 1
+    assert calls["fact_harvester_evaluator"] == 1
+    assert calls["db_writer"] == 1
+
+
 def test_process_affinity_delta_uses_dead_zone():
     """Small raw deltas inside the dead zone should not move affinity."""
     assert consolidator_persistence_module.process_affinity_delta(500, 0) == 0
