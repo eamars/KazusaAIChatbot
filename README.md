@@ -1,12 +1,10 @@
 # Kazusa AI Chatbot
 
-A platform-agnostic AI chatbot that responds in-character using a configurable personality (JSON), long-term user memory, channel conversation history, and **MCP tool calling** — built with **FastAPI**, **LangGraph**, **LM Studio** (OpenAI-compatible API), and **MongoDB**.
+Kazusa AI Chatbot is a platform-agnostic character chatbot "brain" built with FastAPI, LangGraph, MongoDB, and OpenAI-compatible chat and embedding APIs. It keeps per-user memory, channel history, reply context, and character state in MongoDB, then runs a staged persona pipeline to decide whether to respond, what to retrieve, and how to answer in character.
 
-The brain runs as a standalone service; IM adapters (Discord, debug web UI, etc.) communicate via a simple HTTP API.
+The core service is separate from platform adapters. Discord, the browser debug UI, and NapCat QQ all forward messages into the same `/chat` API.
 
-## Architecture
-
-The bot uses a **multi-stage persona simulation pipeline**. When a message arrives, a **Relevance Agent** decides whether to respond, then a **Persona Supervisor** orchestrates a 5-stage cognitive pipeline — decontextualization, research, cognition, dialog generation, and consolidation — each stage backed by its own LLM subgraph. All generative LLM calls use native JSON structures for context passing.
+## Current Architecture
 
 ```
 ┌──────────────────┐          ┌──────────────────┐
@@ -35,432 +33,450 @@ The bot uses a **multi-stage persona simulation pipeline**. When a message arriv
                     └─────────────────────────────────────────┘
 ```
 
-### LangGraph Graph (compiled)
+### Service startup
 
-The top-level graph is two nodes with a conditional edge:
+When `kazusa_ai_chatbot.service:app` starts, it:
 
-```
-START → relevance_agent ─┬─ should_respond=true  → persona_supervisor2 → END
-                         └─ should_respond=false → END
-```
+1. Runs `db_bootstrap()` to create collections, indexes, and seed the singleton character state document.
+2. Loads the active character profile from MongoDB.
+3. Compiles the top-level LangGraph pipeline.
+4. Starts configured MCP servers.
+5. Warm-starts the in-memory RAG cache from MongoDB.
+6. Loads pending scheduled events if scheduling is enabled.
 
-The Persona Supervisor internally builds a second `StateGraph` with 5 linear stages, each of which may contain nested subgraphs.
-
-### State Passing (explicit contract)
-
-State is passed in two layers:
-
-1. **Top-level graph state**: `IMProcessState` (`state.py`)
-2. **Persona supervisor internal state**: `GlobalPersonaState` (`nodes/persona_supervisor2_schema.py`)
-
-`/chat` in `service.py` builds `IMProcessState`, then:
-
-- `relevance_agent` reads the message + context and writes routing/topic fields.
-- `persona_supervisor2` copies a selected subset of fields into `GlobalPersonaState` and runs Stage 0→4.
-- Stage outputs are accumulated in `GlobalPersonaState` and returned to top-level as `final_dialog` + `future_promises`, while durable next-turn commitments are persisted authoritatively in `user_profile.active_commitments`.
-
-Top-level flow:
+### Top-level graph
 
 ```text
-ChatRequest (+ optional debug_modes)
-  -> service.py builds IMProcessState
-  -> relevance_agent(IMProcessState) mutates:
-       should_respond, reason_to_respond, use_reply_feature, channel_topic, user_topic
-  -> if should_respond == false: END
-  -> if debug_modes.listen_only: END  (record data only, skip thinking)
-  -> persona_supervisor2(IMProcessState)
-       -> builds GlobalPersonaState (selected fields + debug_modes)
-       -> stage_0 -> stage_1 -> stage_2 -> stage_3
-       -> if debug_modes.no_remember: END  (skip consolidation)
-       -> stage_4
-       -> returns {final_dialog, future_promises}
-  -> if debug_modes.think_only: suppress final_dialog in response
-  -> ChatResponse(messages=final_dialog, should_reply=use_reply_feature, scheduled_followups=future_promises)
+START
+  -> listen_only? END
+  -> image attachments? multimedia_descriptor_agent
+  -> relevance_agent
+  -> should_respond? persona_supervisor2 : END
+  -> END
 ```
 
-`IMProcessState` keys used by top-level routing and supervisor handoff:
+Important details:
+
+- `listen_only` now short-circuits before relevance and supervisor work. The message is still saved to MongoDB, but the graph does not think.
+- Image attachments are described first by `multimedia_descriptor_agent`, and that description is appended to the text input before relevance and downstream stages.
+- `/chat` saves the incoming user message before invoking the graph and saves the bot reply in a background task afterward.
+
+### Persona supervisor
+
+`persona_supervisor2` is the main staged pipeline:
 
 ```text
-timestamp, platform, platform_user_id, global_user_id,
-user_name, user_input, user_profile,
-platform_bot_id, bot_name,
-character_profile, character_state,
-platform_channel_id, platform_message_id, channel_name,
-chat_history_wide, chat_history_recent,
-should_respond, reason_to_respond, use_reply_feature,
-channel_topic, user_topic,
-final_dialog, future_promises
+Stage 0  Message decontextualizer
+Stage 1  RAG / research subgraph
+Stage 2  Cognition subgraph
+Stage 3  Dialog agent
+Stage 4  Consolidation subgraph
 ```
 
-`persona_supervisor2` currently passes these keys from `IMProcessState` into `GlobalPersonaState`:
+`no_remember` skips Stage 4. `think_only` still runs the pipeline but suppresses the visible reply from the HTTP response.
+
+## Request Lifecycle
+
+1. `POST /chat` resolves `global_user_id`, loads `user_profile`, loads recent channel history, hydrates reply metadata, and builds `IMProcessState`.
+2. The service writes the raw user message into `conversation_history`.
+3. `relevance_agent` decides:
+   - `should_respond`
+   - `use_reply_feature`
+   - `channel_topic`
+   - `indirect_speech_context`
+4. If the message should be answered, `persona_supervisor2` runs:
+   - Stage 0 rewrites ambiguous references into `decontexualized_input`.
+   - Stage 1 gathers memory, conversation, entity, and optional web context.
+   - Stage 2 produces internal reasoning plus structured action directives.
+   - Stage 3 generates the final dialog with a generator/evaluator loop.
+   - Stage 4 persists the turn's effects into MongoDB and invalidates relevant cache entries.
+5. The service returns `messages`, `should_reply`, and a placeholder `scheduled_followups` field.
+
+Notes:
+
+- `POST /event` currently accepts and logs events but does not dispatch real handlers yet.
+- Response `attachments` are reserved for future multimodal output and are not currently populated by the brain.
+- `scheduled_followups` is currently returned as `0`; actual future-promise scheduling happens inside the consolidator.
+
+## Stage Breakdown
+
+### Stage 0: Message decontextualizer
+
+`persona_supervisor2_msg_decontexualizer.py` resolves ambiguous references using recent history, `channel_topic`, and `indirect_speech_context`, but it is deliberately conservative:
+
+- It preserves literal anchors like URLs and filenames.
+- It avoids changing already-complete inputs.
+- It does not inject names from thin air.
+
+### Stage 1: RAG / research
+
+The current RAG stack is more than a simple memory lookup. It includes:
+
+- Query embedding for the decontextualized input.
+- Semantic cache probes against:
+  - `objective_user_facts`
+  - `character_diary`
+  - `external_knowledge`
+- A SHALLOW vs DEEP depth classifier in `rag/depth_classifier.py`.
+- A resolution subgraph:
+  - `continuation_resolver`
+  - `rag_planner`
+  - `entity_grounder`
+- A retrieval subgraph that may call:
+  - `memory_retriever_agent`
+  - tier-2 third-party/entity retrieval nodes
+  - `web_search_agent2`
+- A bounded evaluator that can request one repair pass for newly revealed entities only.
+- Write-through caching into the RAG cache layer plus a second boundary-key cache.
+
+`research_facts` currently carries:
+
+- `objective_facts`
+- `user_image`
+- `character_image`
+- `input_context_results`
+- `external_rag_results`
+- `knowledge_base_results`
+- `third_party_profile_results`
+- `channel_recent_entity_results`
+- `entity_resolution_notes`
+
+`research_metadata` carries the trace for depth, cache hits, sources used, confidence, retrieval plans, and repair-pass outcomes.
+
+### Stage 2: Cognition
+
+The cognition subgraph is split across three layers:
+
+- L1 subconscious:
+  - emotional appraisal
+  - interaction subtext
+- L2 consciousness / boundary / judgment:
+  - internal monologue
+  - logical stance
+  - character intent
+- L3 and collector:
+  - contextual agent
+  - style agent
+  - content-anchor agent
+  - preference adapter
+  - visual agent
+  - collector
+
+The output is a structured `action_directives` bundle with:
+
+- `contextual_directives`
+- `linguistic_directives`
+- `visual_directives`
+
+The preference adapter now treats reply language like any other accepted soft preference. Immediate accepted preferences and promises are meant to become authoritative through `user_profile.active_commitments`, not through a post-hoc rule layer.
+
+### Stage 3: Dialog
+
+`agents/dialog_agent.py` runs a generator/evaluator loop:
+
+- The generator turns cognition output into one or more chat messages.
+- The evaluator checks for hard failures such as topic drift, forbidden structure, or physical-action leakage.
+- Retries are capped by `MAX_DIALOG_AGENT_RETRY`.
+
+If `expression_willingness` comes back as `silent`, the dialog stage can intentionally emit no reply.
+
+### Stage 4: Consolidation
+
+The consolidator runs three branches, then commits through one writer:
+
+- `global_state_updater`
+- `relationship_recorder`
+- `facts_harvester` with its own evaluator loop
+- `db_writer`
+
+The persistence layer currently updates:
+
+- `character_state` mood, global vibe, reflection summary
+- `user_profiles.character_diary`
+- `user_profiles.objective_facts`
+- `user_profiles.active_commitments`
+- `user_profiles.user_image`
+- `character_state.self_image`
+- `memory` append-only fact and promise entries
+- `scheduled_events` for due `future_promise` items
+- `rag_cache_index` invalidation and `rag_metadata_index` version bumps
+
+There is no separate `knowledge` collection anymore. Cross-session distilled topic knowledge is stored in the RAG cache layer under `cache_type="knowledge_base"`.
+
+## Data Model
+
+### Collections created by `db_bootstrap()`
+
+| Collection | Purpose |
+| --- | --- |
+| `conversation_history` | Stored user and assistant messages plus embeddings |
+| `user_profiles` | Identity mapping, diary, objective facts, commitments, affinity, user image |
+| `character_state` | Singleton global character profile plus runtime state |
+| `memory` | Append-only long-term memories and promises |
+| `scheduled_events` | Pending future events |
+| `rag_cache_index` | Persistent write-through cache entries with TTL |
+| `rag_metadata_index` | Per-user RAG version metadata |
+
+### `user_profiles`
+
+The current authoritative fields are:
+
+- `platform_accounts`
+- `character_diary`
+- `objective_facts`
+- `active_commitments`
+- `user_image`
+- `affinity`
+- `last_relationship_insight`
+
+Legacy flat `facts` and `embedding` fields still exist for compatibility, but new code is centered on `character_diary` and `objective_facts`.
+
+### `character_state`
+
+`character_state` is a singleton document with `_id: "global"`. It stores both:
+
+- personality/profile fields like `name`, `personality_brief`, `boundary_profile`, and `linguistic_texture_profile`
+- runtime fields like `mood`, `global_vibe`, `reflection_summary`, and `self_image`
+
+### `memory`
+
+`memory` is append-only. Each entry carries:
+
+- `memory_type`
+- `source_kind`
+- `confidence_note`
+- `status`
+- `expiry_timestamp`
+
+Promises are stored here and also mirrored into `user_profiles.active_commitments` for the next-turn authoritative read path.
+
+## Repository Layout
 
 ```text
-character_state, character_profile,
-timestamp, user_input,
-platform, platform_user_id, global_user_id,
-platform_channel_id, platform_message_id,
-user_name, user_profile,
-platform_bot_id,
-chat_history_wide, chat_history_recent,
-indirect_speech_context, user_topic, channel_topic, debug_modes
-```
-
-## Debug Modes
-
-The `/chat` endpoint accepts an optional `debug_modes` object in the request body to control pipeline behavior for testing and debugging. All three flags default to `false` and can be **compounded** (e.g., `think_only + no_remember`).
-
-```json
-{
-  "debug_modes": {
-    "listen_only": false,
-    "think_only": false,
-    "no_remember": false
-  }
-}
-```
-
-| Flag | Behavior | Implementation |
-|------|----------|----------------|
-| `listen_only` | Records the user message to DB but skips all LLM processing (persona pipeline). Relevance agent still runs. | Conditional edge after `relevance_agent` → `END` |
-| `think_only` | Runs the full pipeline (including consolidation) but **suppresses** the dialog in the HTTP response. The bot's reply is still saved internally. | Response-level suppression in `service.py` |
-| `no_remember` | Runs the full pipeline and returns dialog but **skips Stage 4** (consolidation). No mood/fact/affinity updates are persisted. | Conditional edge after `stage_3_action` → `END` |
-
-### Adapter configurations
-
-Both `discord_adapter` and `napcat_qq_adapter` support a `--channels` argument to specify which channels/groups the bot should actively participate in. Any channel not included in this list will automatically be treated as **`listen_only`** (except for direct messages/private chats, which are always active).
-
-The **debug web UI** (`debug_adapter.py`) provides checkboxes in the header bar to toggle each debug mode per-message for quick testing.
-
-## Pipeline Stages
-
-### Relevance Agent (LLM call)
-The brain service (`service.py`) loads all context from MongoDB before invoking the graph:
-- **Conversation history** — last N messages for the channel
-- **User profile** — facts, affinity score, last relationship insight
-- **Character state** — current mood, global vibe, reflection summary
-
-The relevance agent then analyzes the message + context to decide if the bot should engage. It outputs `should_respond`, `use_reply_feature`, `channel_topic`, and `user_topic`.
-
-**Reads from state**:
-- `user_input`, `user_multimedia_input`, `chat_history_wide`, `chat_history_recent`
-- `user_profile`, `character_state`, `character_profile`
-- `platform_bot_id`, `bot_name`, `user_name`, `channel_name`
-
-**Writes to state**:
-- `should_respond`
-- `reason_to_respond`
-- `use_reply_feature`
-- `channel_topic`
-- `user_topic`
-
-If `should_respond: false`, the graph short-circuits to END — no further LLM calls.
-
-### Persona Supervisor v2 — Stage 0: Message Decontextualizer (LLM call)
-Clarifies ambiguous user input by resolving pronouns, references, and implicit context from chat history. For example, "I saw him yesterday" → "I saw John yesterday". Outputs `decontexualized_input` for downstream stages.
-
-**Stage 0 input**: `user_input`, `chat_history_wide`, `chat_history_recent`, `user_name`, `channel_topic`, `user_topic`
-
-**Stage 0 output**: `decontexualized_input`
-
-### Persona Supervisor v2 — Stage 1: Research Subgraph (LLM calls)
-Dispatches research tasks to specialist agents based on the query nature:
-
-| Agent | Description |
-|-------|-------------|
-| `memory_retriever_agent` | Searches conversation history, user facts, and persistent memory via MongoDB. Uses tool-calling with `search_user_facts`, `search_conversation`, `get_conversation`, `search_persistent_memory`. |
-| `web_search_agent` | Searches the internet via MCP tools (e.g., SearXNG). Multi-turn LLM loop with planning, execution, and evaluation. |
-
-An **evaluator** determines if the retrieved information is sufficient or if another research iteration is needed (up to `MAX_RESEARCH_AGENT_RETRY`).
-
-**Stage 1 input**: `decontexualized_input`, `user_profile`, `chat_history_wide`, `chat_history_recent`, retrieval context
-
-**Stage 1 output**:
-- `research_facts`
-- `research_metadata`
-
-`research_facts` carries objective facts, user image, character image, input-context recall, and external knowledge. Immediate commitment continuity is **not** threaded through a temporary RAG-only lane; the authoritative fresh-read source is `user_profile.active_commitments`.
-
-### Persona Supervisor v2 — Stage 2: Cognition Subgraph (7+ LLM calls)
-A 3-layer cognitive simulation split into modular files:
-
-**Layer 1 — Subconscious** (`persona_supervisor2_cognition_l1.py`)
-- Emotional appraisal and interaction subtext analysis
-
-**Layer 2 — Consciousness / Boundary / Judgment** (`persona_supervisor2_cognition_l2.py`)
-- Internal monologue, logical stance, character intent
-- Boundary core — relationship boundary enforcement
-- Judgment core — stance refinement and intent arbitration
-
-**Layer 3 — Contextual / Linguistic / Visual + Collector** (`persona_supervisor2_cognition_l3.py`)
-- Contextual agent — social distance, emotional intensity, relational dynamics
-- Linguistic agent — rhetorical strategy, style, content anchors, forbidden phrases
-- Preference adapter — extracts accepted soft user preferences (reply language, suffixes, address style, formatting habits) from the same evidence bundle as other preferences; reply language is handled by the LLM as a normal soft preference, not by a deterministic post-processor
-- Visual agent — facial expression, body language, gaze direction
-- Collector — assembles all layer outputs into structured `action_directives`
-
-The main orchestrator (`persona_supervisor2_cognition.py`) runs all layers sequentially via `call_cognition_subgraph()`.
-
-Outputs: `internal_monologue`, `action_directives`, `emotional_appraisal`, `character_intent`, `logical_stance`, `interaction_subtext`.
-
-**Stage 2 input**: `decontexualized_input`, `research_facts`, `research_metadata`, `character_profile`, `character_state`, `user_profile`
-
-**Stage 2 output**:
-- `interaction_subtext`
-- `emotional_appraisal`
-- `character_intent`
-- `logical_stance`
-- `internal_monologue`
-- `action_directives`
-
-### Persona Supervisor v2 — Stage 3: Dialog Agent (1–3 LLM calls)
-A generator-evaluator loop that produces the final in-character reply:
-
-- **Generator** — converts cognition outputs into natural dialog, split into 1–2 message segments
-- **Evaluator** — checks for fatal errors (logic contradictions, missing facts, structure violations) and soft guideline adherence. Dynamically relaxes thresholds on retries.
-
-Loop runs up to `MAX_DIALOG_AGENT_RETRY` times. Outputs: `final_dialog` (list of message strings).
-
-**Stage 3 input**: `internal_monologue`, `action_directives`, `chat_history_wide`, `chat_history_recent`, `user_name`, `character_profile`, `user_profile`
-
-**Stage 3 output**: `final_dialog`
-
-### Persona Supervisor v2 — Stage 4: Consolidation Subgraph (3+ LLM calls)
-Runs inline (not deferred) after dialog generation to persist the interaction's effects:
-
-1. **Global State Updater** — updates mood, global vibe, and reflection summary
-2. **Relationship Recorder** — generates diary entry, affinity delta (with non-linear scaling breakpoints), and relationship insight
-3. **Facts Harvester** — extracts new user facts and future promises (with evaluator loop up to `MAX_FACT_HARVESTER_RETRY`)
-4. **DB Writer** — persists all outputs to MongoDB (character state, user facts, affinity, relationship insight, memory, authoritative active commitments)
-
-**Stage 4 input**: `final_dialog`, `interaction_subtext`, `emotional_appraisal`, `character_intent`, `logical_stance`, `user_profile`, `character_state`
-
-**Stage 4 output**:
-- `mood`, `global_vibe`, `reflection_summary`
-- `diary_entry`, `affinity_delta`, `last_relationship_insight`
-- `new_facts`, `future_promises`
-
-Important consolidation rules:
-
-- **Authoritative commitment lane** — accepted future promises are written through immediately into `user_profile.active_commitments` so the next turn reads a fresh profile-backed source of truth.
-- **Persistence gate** — permission-like facts and future promises are only allowed to persist for explicit accepted states (currently a narrow allowlist over `logical_stance` + `character_intent`), preventing evasive / tentative boundary cases from leaking into durable memory.
-- **Milestone lifecycle** — `user_image.milestones` supports supersedence metadata. New milestones can supersede older open milestones on the same lifecycle scope (for example, relationship addressing changes), while already superseded or unrelated-scope milestones remain untouched.
-
-### MCP Tool Calling
-
-Tools are provided by external **MCP servers** (Streamable HTTP). At startup, the bot connects to all configured servers and discovers available tools. Tool names are namespaced as `{server}__{tool}` internally, but the original name is sent to the MCP server.
-
-Configured via the `MCP_SERVERS` environment variable (JSON string):
-
-```json
-{"mcp-searxng": {"url": "http://host:4001/mcp"}, "playwright": {"url": "http://host:8931/mcp"}}
-```
-
-## Project Structure
-
-```
 src/
-  kazusa_ai_chatbot/                 # Brain service package
-    service.py                       # FastAPI app — /chat, /health, /event routes
-    scheduler.py                     # Async event scheduler (MongoDB-backed)
-    config.py                        # env vars, affinity breakpoints, retry limits
-    state.py                         # IMProcessState TypedDict
-    db/                              # MongoDB package (schemas, bootstrap, users, memory, character, conversation, rag_cache)
-    mcp_client.py                    # McpManager — MCP server connections + tool execution
-    utils.py                         # Shared helpers (JSON parsing, affinity, history trim)
+  adapters/
+    debug_adapter.py
+    discord_adapter.py
+    napcat_qq_adapter.py
+  kazusa_ai_chatbot/
+    service.py
+    config.py
+    state.py
+    scheduler.py
+    utils.py
+    mcp_client.py
     agents/
-      dialog_agent.py                # Stage 3 — generator/evaluator dialog loop
-      memory_retriever_agent.py      # Research agent — MongoDB memory/history/fact search
-      web_search_agent2.py           # Research agent — web search via MCP tools
+    db/
     nodes/
-      relevance_agent.py             # Relevance gate (context analysis + should_respond)
-      persona_supervisor2.py         # Top-level 5-stage persona orchestrator
-      persona_supervisor2_schema.py  # GlobalPersonaState TypedDict
-      persona_supervisor2_msg_decontexualizer.py  # Stage 0
-      persona_supervisor2_rag.py                   # Stage 1
-      persona_supervisor2_cognition.py            # Stage 2 — orchestrator
-      persona_supervisor2_cognition_l1.py         # Stage 2 — L1 subconscious
-      persona_supervisor2_cognition_l2.py         # Stage 2 — L2 consciousness/boundary/judgment
-      persona_supervisor2_cognition_l3.py         # Stage 2 — L3 contextual/linguistic/visual + collector
-      persona_supervisor2_consolidator.py         # Stage 4
-  adapters/                          # IM adapters (outside brain package)
-    discord_adapter.py               # Thin Discord→HTTP adapter
-    debug_adapter.py                 # Browser-based debug chat UI
-  scripts/                           # Standalone utility scripts
-    load_character_profile.py        # Load personality JSON into MongoDB
-    insert_memory.py                 # CLI tool to insert a memory entry
-    search_memory.py                 # CLI tool to search memories
-    search_user_facts.py             # CLI tool to search user facts
-    search_conversation.py           # CLI tool to search conversation history
+    rag/
+  scripts/
+    load_character_profile.py
+    insert_memory.py
+    search_conversation.py
+    search_memory.py
+    search_user_facts.py
 personalities/
-  example.json                       # Template personality JSON
-  kazusa.json                        # Default character profile
+  kazusa.json
+  asuna.json
+  qingche.json
+  example.json
 tests/
-Dockerfile
-docker-compose.yml
-requirements.txt
+scripts/
+  inject_knowledge.py
 ```
 
-## Setup
+## Local Development
 
-### 1. Install dependencies
+### 1. Install the package
+
+`requirements.txt` is no longer the canonical install source for this repo. Use the package metadata in `pyproject.toml`.
 
 ```bash
 python -m venv venv
-venv\Scripts\activate    # Windows
-# source venv/bin/activate  # Linux/macOS
-pip install -r requirements.txt
-pip install -e .
+venv\Scripts\activate
+pip install -U pip
+pip install -e ".[dev]"
 ```
 
-### 2. Configure environment
+### 2. Create `.env`
 
-Copy `.env.example` to `.env` and fill in:
+There is no `.env.example` in the repo right now, so create `.env` manually.
 
 ```env
 # MongoDB
 MONGODB_URI=mongodb://localhost:27017
-MONGODB_DB_NAME=kazusa_bot_core
+MONGODB_DB_NAME=roleplay_bot
 
-# LLM (OpenAI-compatible)
+# Primary chat model
 LLM_BASE_URL=http://localhost:1234/v1
 LLM_API_KEY=lm-studio
-LLM_MODEL=your-model-name
+LLM_MODEL=your-chat-model
+
+# Embeddings
 EMBEDDING_BASE_URL=http://localhost:1234/v1
-EMBEDDING_MODEL=your-embedding-model-name
+EMBEDDING_MODEL=your-embedding-model
+
+# Optional specialized models
+SECONDARY_LLM_BASE_URL=http://localhost:1234/v1
+SECONDARY_LLM_API_KEY=lm-studio
+SECONDARY_LLM_MODEL=your-secondary-model
+PREFERENCE_LLM_BASE_URL=http://localhost:1234/v1
+PREFERENCE_LLM_API_KEY=lm-studio
+PREFERENCE_LLM_MODEL=your-preference-model
 
 # Brain service
 SERVICE_HOST=0.0.0.0
 SERVICE_PORT=8000
+BRAIN_EXECUTOR_COUNT=1
+SCHEDULED_TASKS_ENABLED=true
 
-# Discord adapter (only needed if running the Discord adapter)
-DISCORD_TOKEN=your_discord_bot_token
+# Optional MCP servers
+MCP_SERVERS={"mcp-searxng":{"url":"http://localhost:4001/mcp"}}
 
-# Optional: MCP tool servers (JSON string)
-MCP_SERVERS={"mcp-searxng": {"url": "http://host:4001/mcp"}}
+# Adapter-specific
+BRAIN_URL=http://localhost:8000
+DISCORD_TOKEN=
+NAPCAT_WS_URL=
+NAPCAT_WS_TOKEN=
 ```
 
-### 3. LLM Server
+Notes:
 
-Run an OpenAI-compatible API server (e.g., LM Studio, vLLM, Ollama) with:
-- **Chat model** — used by all LLM stages (relevance, cognition, dialog, consolidation, research agents)
-- **Embedding model** — used for semantic search over conversation history, user facts, and memory
+- If you omit the secondary and preference model variables, they fall back to the primary model.
+- The current web-search agent assumes an MCP server named `mcp-searxng` exposing `searxng_web_search` and `web_url_read`.
 
-### 4. MongoDB
+### 3. Start dependencies
 
-The brain service runs `db_bootstrap()` on startup which automatically creates all required collections and indexes:
-- **`conversation_history`** — chat messages with embeddings for semantic search
-- **`user_profiles`** — per-user objective facts, `active_commitments`, affinity score, platform accounts, relationship insight, and user image milestones
-- **`character_state`** — single global document for mood, vibe, reflection summary, and the **character profile**
-- **`memory`** — persistent memories with structured metadata and embeddings (see Memory Schema below)
-- **`knowledge`** — detailed knowledge entries (links, documents, reference material)
-- **`scheduled_events`** — future events (follow-up messages, etc.)
+You need:
 
-#### Memory Schema (`MemoryDoc`)
+- MongoDB
+- an OpenAI-compatible chat completion endpoint
+- an OpenAI-compatible embeddings endpoint
 
-Each document in the `memory` collection has:
+LM Studio works, but the code is not limited to LM Studio as long as the endpoints are OpenAI-compatible.
 
-| Field | Type | Description |
-|-------|------|-------------|
-| `memory_name` | `str` | Descriptive title, e.g. `[EAMARS] Lives in Auckland` |
-| `content` | `str` | Full memory content |
-| `source_global_user_id` | `str` | UUID4 of the user who triggered this memory |
-| `timestamp` | `str` | ISO-8601 UTC creation timestamp |
-| `embedding` | `list[float]` | Dense vector for similarity search |
-| `memory_type` | `str` | `fact` \| `promise` \| `impression` \| `narrative` \| `defense_rule` |
-| `source_kind` | `str` | `conversation_extracted` \| `relationship_inferred` \| `reflection_inferred` \| `seeded_manual` \| `external_imported` |
-| `confidence_note` | `str` | How downstream should treat this memory |
-| `status` | `str` | `active` \| `fulfilled` \| `expired` \| `superseded` |
-| `expiry_timestamp` | `str \| None` | ISO-8601 expiry or `None` (never expires) |
+### 4. Load a character profile
 
-**Append-only**: `save_memory()` always inserts a new document (never overwrites). Deduplication and lifecycle management are handled at query time via `status` filtering.
-
-**Embedding format**: Embeddings are generated from structured text:
-```
-type:{memory_type}
-source:{source_kind}
-title:{memory_name}
-content:{content}
-```
-
-**Search filters**: `search_memory()` and the `search_persistent_memory` tool support optional filtering by `memory_type`, `source_kind`, `status`, `expiry_before`, and `expiry_after`.
-
-Vector search indexes are created best-effort (requires MongoDB Atlas for full vector search).
-
-### 5. Load a character profile
-
-The character personality profile is stored in MongoDB (in the `character_state` collection, `_id: "global"`, fields at the top level alongside runtime state). **The brain service will refuse to start if no profile is loaded.**
-
-Create a JSON file following the schema in `personalities/example.json`, then load it:
+The brain refuses to start until a character profile exists in MongoDB.
 
 ```bash
-# First time (mandatory before starting the brain service)
 python -m scripts.load_character_profile personalities/kazusa.json
+```
 
-# Re-load / overwrite an existing profile
+To overwrite an existing profile:
+
+```bash
 python -m scripts.load_character_profile personalities/kazusa.json --force
 ```
 
-The personality JSON should include at minimum:
-- `name`, `description`, `gender`, `age`, `birthday`
-- `personality_brief` with `logic`, `tempo`, `defense`, `quirks`, `taboos`, `mbti`
+Use `personalities/kazusa.json` or `personalities/asuna.json` as the real schema reference. `personalities/example.json` is only a minimal skeleton and does not reflect every field the current prompts expect.
 
-Keys prefixed with `_` (e.g., `_reference`) are ignored — use these for visual descriptions or other non-prompt data. See `kazusa.json` for a full example.
+At minimum, a working profile should include:
 
-## Deployment
+- `name`
+- `description`
+- `gender`
+- `age`
+- `birthday`
+- `backstory`
+- `personality_brief`
+- `boundary_profile`
+- `linguistic_texture_profile`
 
-### Local Development
+### 5. Run the brain service
 
 ```bash
-# 1. Start the brain service
 uvicorn kazusa_ai_chatbot.service:app --host 0.0.0.0 --port 8000
-
-# 2a. Debug adapter — browser chat at http://localhost:8080
-python -m adapters.debug_adapter --brain-url http://localhost:8000 --port 8080
-
-# 2b. Discord adapter
-python -m adapters.discord_adapter --brain-url http://localhost:8000
-
-# 2c. Discord adapter with channel filter
-python -m adapters.discord_adapter --brain-url http://localhost:8000 --channels 123456789
 ```
 
-### Docker Deployment
+## Adapters
+
+### Debug web UI
 
 ```bash
-# Start brain + MongoDB
-docker-compose up -d kazusa-brain mongo
-
-# Optionally, uncomment and start adapters in docker-compose.yml:
-# docker-compose up -d discord-adapter
-# docker-compose up -d debug-adapter
+python -m adapters.debug_adapter --brain-url http://localhost:8000 --port 8080
 ```
 
-The `docker-compose.yml` defines:
-- **`kazusa-brain`** — the FastAPI service on port 8000
-- **`mongo`** — MongoDB 7 with persistent volume
-- **`discord-adapter`** (commented) — Discord client forwarding to brain
-- **`debug-adapter`** (commented) — Web chat UI on port 8080
+Open `http://localhost:8080`.
 
-Environment variables are read from `.env` or can be set in the compose file.
+The debug UI exposes per-message toggles for:
 
-## Design Decisions
+- `listen_only`
+- `think_only`
+- `no_remember`
 
-- **5-stage cognitive pipeline** — separating decontextualization, research, cognition, dialog, and consolidation gives each stage a focused LLM context and allows independent iteration. The cognition layer (subconscious → conscious → social filter) models a human-like decision process rather than a single prompt.
-- **Generator-evaluator dialog loop** — the dialog agent generates candidate replies and an evaluator checks for fatal errors (logic contradictions, missing facts). This catches issues before sending while avoiding excessive retries via dynamic threshold relaxation.
-- **Inline consolidation** — unlike the previous deferred memory writer, consolidation now runs as part of the graph. This ensures character state, facts, and affinity are updated before the next message arrives.
-- **Authoritative active commitments** — immediate next-turn commitments live in `user_profile.active_commitments`, not in a temporary RAG facts lane. Consolidation writes accepted commitments through immediately; cognition reads the fresh profile state on the next turn; the scheduler updates commitment lifecycle when due events fire.
-- **LLM-only soft language preferences** — reply language is handled by the preference adapter the same way as suffixes, address style, and formatting preferences. The adapter receives facts, commitments, and current-turn evidence, but no deterministic language fallback or post-processing bridge is applied.
-- **Persistence gating by character decision state** — durable permission-like facts and promises are gated by the authoritative character decision (`logical_stance` + `character_intent`) rather than by user-input heuristics. This reduces false positives where evasive or tentative roleplay pressure could otherwise leak into memory.
-- **Milestone supersedence lifecycle** — `user_image.milestones` is not append-only. New milestones can supersede older open milestones on the same lifecycle scope, preserving narrative history while keeping the latest relationship state authoritative.
-- **Append-only memory** — `save_memory()` uses `insert_one` (never `update_one`), so every memory is a permanent record. Lifecycle is managed via the `status` field (`active` → `fulfilled` / `expired` / `superseded`). This prevents accidental overwrites and preserves the full history of extracted facts and promises.
-- **Structured memory metadata** — each memory carries `memory_type`, `source_kind`, `confidence_note`, `status`, and `expiry_timestamp`. This enables filtered retrieval (e.g., only active promises for a specific user) and gives downstream consumers trust signals about how to weight each memory.
-- **Structured embedding text** — memory embeddings encode `type`, `source`, `title`, and `content` as a structured block rather than a flat concatenation. This improves semantic search precision by allowing the embedding model to weight metadata alongside content.
-- **Non-linear affinity scaling** — affinity deltas are scaled by breakpoints: easy to gain/lose at extremes, normal in the middle, harder at high levels. This prevents runaway affinity while allowing meaningful relationship progression.
-- **Affinity system** — per-user 0–1000 score (default 500) with 21 behavioral tiers from "Contemptuous" to "Unwavering". The LLM proposes a delta; non-LLM code applies non-linear scaling and clamping.
-- **Research subgraph with evaluator** — the research stage can dispatch multiple specialist agents and re-evaluate whether enough information has been gathered, preventing premature or insufficient research.
-- **MCP for tooling** — tools are served by external MCP servers over Streamable HTTP, making them language-agnostic and independently deployable.
-- **Brain + adapter separation** — the brain service is platform-agnostic; IM adapters are thin HTTP clients. This enables multi-platform support (Discord, QQ, WeChat) without modifying the cognitive pipeline.
-- **Context loading in service** — conversation history, user profile, and character state are loaded once in the `/chat` handler before graph invocation, keeping nodes stateless and testable.
-- **`_`-prefixed personality keys ignored** — personality JSON can store reference data (appearance, art notes) under `_reference` without wasting prompt tokens.
-- **DB bootstrap on startup** — all collections and indexes are verified/created at service start, so deployment requires zero manual setup beyond the environment variables.
-- **Character profile in MongoDB** — the personality profile is stored at the top level of the `character_state` collection’s `_id: "global"` document, alongside runtime state fields (mood, global_vibe, etc.). This decouples the brain service from the filesystem and enables future consolidator-driven profile evolution. The service crashes on startup if no profile is found, enforcing a mandatory one-time load via `scripts.load_character_profile`.
+### Discord
+
+The Discord adapter reads `BRAIN_URL` and `DISCORD_TOKEN` from the environment.
+
+```bash
+python -m adapters.discord_adapter --channels 123456789012345678
+```
+
+- Listed channels are active.
+- Non-listed guild channels become listen-only.
+- DMs are always active.
+
+### NapCat QQ
+
+The NapCat adapter reads `BRAIN_URL`, `NAPCAT_WS_URL`, and `NAPCAT_WS_TOKEN` from the environment.
+
+```bash
+python -m adapters.napcat_qq_adapter --channels 987654321
+```
+
+- Listed groups are active.
+- Non-listed groups become listen-only.
+- Private chats are always active.
+
+## HTTP API
+
+### `GET /health`
+
+Returns service health and Mongo reachability.
+
+### `POST /chat`
+
+Primary brain entrypoint.
+
+Important request fields:
+
+- `platform`
+- `platform_channel_id`
+- `platform_message_id`
+- `platform_user_id`
+- `platform_bot_id`
+- `display_name`
+- `channel_name`
+- `content`
+- `attachments`
+- `reply_context`
+- `debug_modes`
+
+Current attachment behavior:
+
+- inbound image attachments with inline base64 are supported
+- image descriptions are generated before relevance
+- output attachments are not wired yet
+
+### `POST /event`
+
+Currently a placeholder endpoint that accepts platform events and logs them.
+
+## Testing
+
+Useful test commands:
+
+```bash
+pytest -m "not live_db and not live_llm" -q
+pytest -m live_llm -q
+pytest -m live_db -q
+```
+
+The repository default in `pytest.ini` excludes `live_db`, but it does not exclude `live_llm`, so an unqualified `pytest` may still expect a reachable model backend.
+
+## Current Notes
+
+- The supported documented run path is local editable install plus `uvicorn`.
+- `Dockerfile` and `docker-compose.yml` are present, but they still reference `requirements.txt`, which is no longer part of this repo, so they are not the canonical setup path today.
+- Some older utility scripts still reflect pre-refactor DB helpers. The required provisioning script is `src/scripts/load_character_profile.py`.
