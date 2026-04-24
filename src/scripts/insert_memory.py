@@ -4,14 +4,14 @@ This script provides a command-line interface to store memory entries
 with embeddings for semantic search.
 
 Typical Use Cases:
-    # Store a simple memory entry
+    # Store a non-user-specific world knowledge entry in the memory collection
     insert-memory "Embedding Guide" "Use vector search for semantic recall and keyword search as fallback"
     
-    # Store a detailed article summary
+    # Store a detailed article summary as shared/world knowledge
     insert-memory "LangGraph Supervisor" "Source: https://example.com/langgraph. The article explains the supervisor plus sub-agent pattern, emphasizes isolated agent contexts, and recommends explicit supervisor-authored instructions."
     
-    # Store a technical note
-    insert-memory "Python 3.14 Features" "Python 3.14 introduces new pattern matching syntax, improved error messages, and performance optimizations."
+    # Store a user-scoped memory entry
+    insert-memory "Python 3.14 Features" "User asked about new language features." --source-global-user-id 123e4567-e89b-12d3-a456-426614174000
 """
 
 import asyncio
@@ -42,6 +42,14 @@ async def main():
     parser.add_argument("--memory-type", default="fact", help="Memory type (fact, promise, impression, narrative, defense_rule)")
     parser.add_argument("--source-kind", default="seeded_manual", help="Source kind")
     parser.add_argument("--confidence-note", default="Manually inserted memory.", help="Confidence note")
+    parser.add_argument(
+        "--source-global-user-id",
+        default="",
+        help=(
+            "Internal user UUID for user-scoped memory. "
+            "Leave empty to store non-user-specific/world knowledge in the memory collection."
+        ),
+    )
     
     args = parser.parse_args()
     
@@ -56,7 +64,7 @@ async def main():
         doc = build_memory_doc(
             memory_name=args.memory_name,
             content=args.content,
-            source_global_user_id="",
+            source_global_user_id=args.source_global_user_id,
             memory_type=args.memory_type,
             source_kind=args.source_kind,
             confidence_note=args.confidence_note,

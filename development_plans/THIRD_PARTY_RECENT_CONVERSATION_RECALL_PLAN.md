@@ -29,7 +29,7 @@ This is a **retrieval scoping problem**, not just a prompt problem.
 | ----- | ------------------------------------------------------------------------------- | ------------- |
 | 1     | Planner refactor — continuation resolver + enriched retrieval plan fields       | ✅ DONE        |
 | 2     | Retriever refactor — plan-driven scopes, third-party backends, retrieval ledger | ✅ DONE        |
-| 3     | Entity memory layer — durable entity/topic memory substrate                     | ✅ DONE        |
+| 3     | Entity memory layer — durable entity/topic memory substrate                     | Undone - Need rethink        |
 | 4     | Dialog surface upgrade — research_facts extension for third-party results       | ✅ DONE        |
 | 5     | Bounded supervisor centralization — rag_supervisor_planner / evaluator          | ✅ DONE        |
 | 6     | RAG module decomposition — split into focused submodules                        | ✅ DONE        |
