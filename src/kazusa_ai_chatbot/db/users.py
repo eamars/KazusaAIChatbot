@@ -115,7 +115,14 @@ async def add_suspected_alias(
 
 
 async def get_user_profile(global_user_id: str) -> UserProfileDoc:
-    """Retrieve a user profile, stripping ``_id`` and bulky embedding fields."""
+    """Retrieve a user profile, stripping ``_id`` and bulky embedding fields.
+
+    Authoritative field split:
+    - ``character_diary`` stores the character's subjective per-user diary notes.
+    - ``objective_facts`` stores verified objective facts about the user.
+    - ``facts`` is a deprecated compatibility field and must not be treated as
+      the canonical source for either category in new cognition code.
+    """
     db = await get_db()
     doc = await db.user_profiles.find_one({"global_user_id": global_user_id})
     if doc is None:

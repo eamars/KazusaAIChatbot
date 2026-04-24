@@ -113,9 +113,16 @@ def _make_state(
     last_relationship_insight: str,
     boundary_profile: dict | None = None,
     objective_facts: str,
-    user_image: str,
+    user_image: dict | str,
     channel_topic: str = "放学后的私人相处",
 ) -> dict:
+    if isinstance(user_image, str):
+        user_image = {
+            "milestones": [],
+            "historical_summary": "",
+            "recent_observations": [user_image],
+        }
+
     return {
         "character_profile": _build_character_profile(boundary_profile),
         "timestamp": datetime.now(timezone.utc).isoformat(),
@@ -138,7 +145,11 @@ def _make_state(
         "research_facts": {
             "objective_facts": objective_facts,
             "user_image": user_image,
-            "character_image": "她在安全关系里会害羞，也会犹豫，但不是完全不能接受亲密接触。",
+            "character_image": {
+                "milestones": [],
+                "historical_summary": "",
+                "recent_observations": ["她在安全关系里会害羞，也会犹豫，但不是完全不能接受亲密接触。"],
+            },
             "input_context_results": "最近互动总体平和，重点在关系距离与是否愿意更靠近。",
             "external_rag_results": "",
         },

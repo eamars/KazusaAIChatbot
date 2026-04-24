@@ -73,8 +73,8 @@ def _make_state(
     chat_history_recent: list[dict],
     channel_topic: str,
     objective_facts: str = "",
-    user_image: str = "对方说话直接，但没有越界。",
-    character_image: str = "千纱平时会保留一点防备，但在安全话题下愿意正常回应。",
+    user_image: dict | str | None = None,
+    character_image: dict | str | None = None,
     input_context_results: str = "最近聊天主要围绕日常和轻度社交互动。",
     external_rag_results: str = "",
     indirect_speech_context: str = "",
@@ -83,6 +83,32 @@ def _make_state(
     user_name: str = "LivePromptUser",
     global_user_id: str = "live-prompt-user",
 ) -> dict:
+    if user_image is None:
+        user_image = {
+            "milestones": [],
+            "historical_summary": "",
+            "recent_observations": ["对方说话直接，但没有越界。"],
+        }
+    elif isinstance(user_image, str):
+        user_image = {
+            "milestones": [],
+            "historical_summary": "",
+            "recent_observations": [user_image],
+        }
+
+    if character_image is None:
+        character_image = {
+            "milestones": [],
+            "historical_summary": "",
+            "recent_observations": ["千纱平时会保留一点防备，但在安全话题下愿意正常回应。"],
+        }
+    elif isinstance(character_image, str):
+        character_image = {
+            "milestones": [],
+            "historical_summary": "",
+            "recent_observations": [character_image],
+        }
+
     return {
         "character_profile": _build_character_profile(),
         "timestamp": datetime.now(timezone.utc).isoformat(),

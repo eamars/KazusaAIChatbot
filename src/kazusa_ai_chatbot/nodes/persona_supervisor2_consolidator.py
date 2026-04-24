@@ -23,13 +23,15 @@ import logging
 
 from langgraph.graph import END, START, StateGraph
 
-from kazusa_ai_chatbot.nodes.persona_supervisor2_consolidator_l2 import (
+from kazusa_ai_chatbot.nodes.persona_supervisor2_consolidator_facts import (
     fact_harvester_evaluator,
     facts_harvester,
+)
+from kazusa_ai_chatbot.nodes.persona_supervisor2_consolidator_persistence import db_writer
+from kazusa_ai_chatbot.nodes.persona_supervisor2_consolidator_reflection import (
     global_state_updater,
     relationship_recorder,
 )
-from kazusa_ai_chatbot.nodes.persona_supervisor2_consolidator_l3 import db_writer
 from kazusa_ai_chatbot.nodes.persona_supervisor2_consolidator_schema import ConsolidatorState
 from kazusa_ai_chatbot.nodes.persona_supervisor2_schema import GlobalPersonaState
 from kazusa_ai_chatbot.utils import log_dict_subset, log_list_preview, log_preview
@@ -118,8 +120,8 @@ async def call_consolidation_subgraph(global_state: GlobalPersonaState):
 
     logger.debug(
         "Consolidation detail: facts=%s promises=%s metadata=%s",
-        log_list_preview(new_facts, max_items=3, item_length=120),
-        log_list_preview(future_promises, max_items=3, item_length=120),
+        log_list_preview(new_facts),
+        log_list_preview(future_promises),
         log_dict_subset(
             metadata,
             [
@@ -129,7 +131,6 @@ async def call_consolidation_subgraph(global_state: GlobalPersonaState):
                 "affinity_delta_processed",
                 "knowledge_base_entries_written",
             ],
-            value_length=120,
         ),
     )
 

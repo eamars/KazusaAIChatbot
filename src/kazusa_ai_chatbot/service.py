@@ -388,10 +388,9 @@ async def chat(req: ChatRequest, background_tasks: BackgroundTasks):
                     "reply_to_current_bot",
                     "reply_excerpt",
                 ],
-                value_length=80,
             ),
             active_flags,
-            log_preview(req.content, max_length=180),
+            log_preview(req.content),
         )
 
         initial_state: IMProcessState = {
@@ -452,7 +451,7 @@ async def chat(req: ChatRequest, background_tasks: BackgroundTasks):
             should_reply,
             len(final_dialog),
             len(result.get("future_promises", [])),
-            log_preview(" | ".join(final_dialog), max_length=200),
+            log_preview(" | ".join(final_dialog)),
         )
 
         # Save bot message in background only if the bot actually generated a response

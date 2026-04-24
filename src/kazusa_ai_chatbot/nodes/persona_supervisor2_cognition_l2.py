@@ -199,8 +199,16 @@ _COGNITION_CONSCIOUSNESS_PROMPT = """\
     "decontextualized_input": "清理后的用户意图",
     "active_commitments": "来自用户档案的当前有效承诺/已接受约定",
     "research_facts": {{
-        "user_image": "用户画像（第三人称，来自持久化档案）",
-        "character_image": "{character_name} 自我认知画像（来自持久化档案）",
+        "user_image": {{
+            "milestones": [{{"event": "里程碑事件", "category": "类别", "superseded_by": null}}],
+            "historical_summary": "较早阶段的综合画像",
+            "recent_observations": ["最近几次互动形成的观察"]
+        }},
+        "character_image": {{
+            "milestones": [{{"event": "{character_name} 的关键自我认知", "category": "类别", "superseded_by": null}}],
+            "historical_summary": "{character_name} 的较早自我总结",
+            "recent_observations": ["{character_name} 最近几次互动后的自我状态"]
+        }},
         "input_context_results": "与当前话题相关的主观记忆（跨用户）",
         "external_rag_results": "外部知识库检索结果"
     }},
@@ -226,8 +234,16 @@ async def call_cognition_consciousness(state: CognitionState) -> CognitionState:
         character_mbti=state["character_profile"]["personality_brief"]["mbti"],
     ))
 
-    # Get last 10 diary entry
-    diary_entry = state["user_profile"]["facts"][:10]
+    # ``diary_entry`` is the character's subjective per-user diary stream.
+    # The authoritative persisted source is ``user_profile["character_diary"]``
+    # (written by consolidator persistence via ``upsert_character_diary``).
+    # ``user_profile["facts"]`` is a deprecated compatibility field that mixes
+    # subjective and objective content and must not be used for cognition.
+    diary_entry = [
+        str(entry.get("entry", "")).strip()
+        for entry in (state["user_profile"].get("character_diary") or [])[-10:]
+        if str(entry.get("entry", "")).strip()
+    ]
 
     msg = {
         "character_mood": state['character_profile']['mood'],
@@ -258,7 +274,7 @@ async def call_cognition_consciousness(state: CognitionState) -> CognitionState:
         "Consciousness: stance=%s intent=%s monologue=%s",
         result.get("logical_stance", ""),
         result.get("character_intent", ""),
-        log_preview(result.get("internal_monologue", ""), max_length=160),
+        log_preview(result.get("internal_monologue", "")),
     )
 
     # In case AI make some spelling mistakes...
@@ -498,7 +514,7 @@ async def call_boundary_core_agent(state: CognitionState) -> CognitionState:
         result.get("stance_bias", ""),
         result.get("identity_policy", ""),
         result.get("pressure_policy", ""),
-        log_preview(result.get("boundary_summary", ""), max_length=140),
+        log_preview(result.get("boundary_summary", "")),
     )
 
     boundary_issue = result.get("boundary_issue", "")
@@ -686,7 +702,7 @@ async def call_judgment_core_agent(state: CognitionState) -> CognitionState:
         "Judgment core: stance=%s intent=%s note=%s",
         result.get("logical_stance", ""),
         result.get("character_intent", ""),
-        log_preview(result.get("judgment_note", ""), max_length=140),
+        log_preview(result.get("judgment_note", "")),
     )
 
     logical_stance = result.get("logical_stance")

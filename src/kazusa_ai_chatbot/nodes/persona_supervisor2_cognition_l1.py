@@ -106,8 +106,8 @@ async def call_cognition_subconscious(state: CognitionState) -> CognitionState:
 
     logger.debug(
         "Subconscious: appraisal=%s subtext=%s",
-        log_preview(result.get("emotional_appraisal", ""), max_length=100),
-        log_preview(result.get("interaction_subtext", ""), max_length=100),
+        log_preview(result.get("emotional_appraisal", "")),
+        log_preview(result.get("interaction_subtext", "")),
     )
 
     # In case AI make some spelling mistakes

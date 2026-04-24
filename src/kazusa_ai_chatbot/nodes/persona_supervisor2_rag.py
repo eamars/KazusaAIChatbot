@@ -54,7 +54,6 @@ logger = logging.getLogger(__name__)
 # The thresholds below live here until Stage 5 moves them into config.py.
 
 CACHE_HIT_THRESHOLD = 0.82            # similarity required to serve from cache
-INTERNAL_RAG_STRONG_THRESHOLD = 0.55  # input_context_rag deemed sufficient for DEEP
 EXTERNAL_AFFINITY_SKIP_PERCENT = 40   # skip external_rag below this affinity %
 KNOWLEDGE_BASE_PROBE_THRESHOLD = 0.72 # similarity to include knowledge_base results
 
@@ -127,6 +126,7 @@ class RAGState(TypedDict):
 
     # External RAG output
     external_rag_results: Annotated[list[str], operator.add]
+    external_rag_is_empty_result: bool
 
     # Input-Context RAG dispatcher output (was: Internal RAG)
     input_context_next_action: str
@@ -136,6 +136,7 @@ class RAGState(TypedDict):
 
     # Input-Context RAG output
     input_context_results: Annotated[list[str], operator.add]
+    input_context_is_empty_result: bool
 
 
 _EXTERNAL_RAG_DISPATCHER_PROMPT = """\
@@ -168,7 +169,7 @@ _EXTERNAL_RAG_DISPATCHER_PROMPT = """\
 # 输入格式
 {{
     "user_input": "用户给你发送的信息",
-    "channel_topic": "用户当前上下文的话题（仅供参考，不建议直接加入搜索任务）",
+    "channel_topic": "用户当前上下文的话题（仅供参考，不建议直接加入搜索任务）"
 }}
 
 # 输出要求：
@@ -191,8 +192,7 @@ async def external_rag_dispatcher(state: RAGState) -> dict:
     decontexualized_input = state["decontexualized_input"]
     channel_topic = state["channel_topic"]
     timestamp = state["timestamp"]
-    character_name=state["character_profile"]["name"],
-
+    character_name = state["character_profile"]["name"]
 
     system_prompt = SystemMessage(content=_EXTERNAL_RAG_DISPATCHER_PROMPT.format(
         timestamp=timestamp,
@@ -220,14 +220,13 @@ async def external_rag_dispatcher(state: RAGState) -> dict:
     logger.debug(
         "External RAG dispatcher: action=%s task=%s expected=%s context=%s reasoning=%s",
         next_action,
-        log_preview(task, max_length=140),
-        log_preview(expected_response, max_length=120),
+        log_preview(task),
+        log_preview(expected_response),
         log_dict_subset(
             context if isinstance(context, dict) else {},
             ["target_user_input", "target_user_topic", "entities", "referenced_event"],
-            value_length=80,
         ),
-        log_preview(dispatcher_reasoning, max_length=140),
+        log_preview(dispatcher_reasoning),
     )
 
     return {
@@ -308,7 +307,7 @@ async def input_context_rag_dispatcher(state: RAGState) -> dict:
     decontexualized_input = state["decontexualized_input"]
     channel_topic = state["channel_topic"]
     timestamp = state["timestamp"]
-    character_name=state["character_profile"]["name"],
+    character_name = state["character_profile"]["name"]
     platform_bot_id = state["platform_bot_id"]
     global_user_id = state["global_user_id"]
     user_name = state["user_name"]
@@ -342,14 +341,13 @@ async def input_context_rag_dispatcher(state: RAGState) -> dict:
     logger.debug(
         "Input-context dispatcher: action=%s task=%s expected=%s context=%s reasoning=%s",
         next_action,
-        log_preview(task, max_length=140),
-        log_preview(expected_response, max_length=120),
+        log_preview(task),
+        log_preview(expected_response),
         log_dict_subset(
             context if isinstance(context, dict) else {},
             ["target_user_input", "target_user_topic", "entities", "time_horizon", "referenced_event"],
-            value_length=80,
         ),
-        log_preview(dispatcher_reasoning, max_length=140),
+        log_preview(dispatcher_reasoning),
     )
 
     return {
@@ -372,7 +370,8 @@ async def call_web_search_agent(state: RAGState) -> dict:
     processed_response = result.get("response", "")
 
     return {
-        "external_rag_results": [processed_response]
+        "external_rag_results": [processed_response],
+        "external_rag_is_empty_result": bool(result.get("is_empty_result", False)),
     }
 
 
@@ -397,7 +396,8 @@ async def call_memory_retriever_agent_input_context_rag(state: RAGState) -> dict
     processed_response = result.get("response", "")
 
     return {
-        "input_context_results": [processed_response]
+        "input_context_results": [processed_response],
+        "input_context_is_empty_result": bool(result.get("is_empty_result", False)),
     }
 
 
@@ -428,32 +428,40 @@ def _input_context_to_timestamp(chat_history_recent: list[dict], current_timesta
 
 # ── Phase helpers ──────────────────────────────────────────────────
 
-
-def _result_confidence(value: Any) -> float:
+def _result_confidence(value: Any, *, is_empty_result: bool = False) -> float:
     """Estimate how informative a dispatcher's result is.
 
-    A proxy for confidence until dispatchers emit one explicitly — used to
-    drive the "internal_rag strong → skip external" early-exit decision and
-    populate the metadata bundle.
+    A proxy for confidence until dispatchers emit one explicitly — used only
+    for metadata and cache-storage heuristics.
 
     Args:
         value: A dispatcher result; may be ``str``, ``list`` of strings, or ``None``.
+        is_empty_result: Explicit emptiness flag emitted by the retrieval agent.
 
     Returns:
-        ``0.0`` when empty / missing, scaling up with non-whitespace length,
-        capped at ``1.0`` once the payload passes ~600 characters.
+        ``0.0`` when empty / missing or when the retrieval agent explicitly
+        marks the result empty, otherwise a length-based proxy capped at ``1.0``.
     """
+    if is_empty_result:
+        return 0.0
     if value is None:
         return 0.0
     if isinstance(value, list):
-        text = " ".join(str(v) for v in value if v)
+        text = "\n".join(str(v) for v in value if v)
     else:
         text = str(value)
-    text = text.strip()
-    if not text:
+    if not text.strip():
         return 0.0
-    # Length-based proxy: 120 chars ≈ 0.5, 600+ chars ≈ 1.0
-    return min(1.0, len(text) / 600.0 + 0.2)
+    return min(1.0, len(text.strip()) / 600.0 + 0.2)
+
+
+def _normalize_retrieval_output(value: Any) -> str:
+    """Normalize cached or live retrieval payloads into a single string."""
+    if value is None:
+        return ""
+    if isinstance(value, list):
+        return "\n".join(str(item) for item in value if str(item).strip())
+    return str(value)
 
 
 async def _probe_knowledge_base(
@@ -487,7 +495,7 @@ async def _probe_knowledge_base(
     logger.debug(
         "Knowledge-base cache hit: similarity=%.3f preview=%s",
         float(hit.get("similarity", 0.0)),
-        log_preview(kb_text, max_length=160),
+        log_preview(kb_text),
     )
     return kb_text
 
@@ -555,7 +563,6 @@ def _build_rag_graph(depth: str, affinity_percent: float):
     builder.add_node("call_memory_retriever_agent_input_context_rag", call_memory_retriever_agent_input_context_rag)
     builder.add_node("rag_noop", _rag_noop)
 
-    # DEEP: input_context_rag + (optionally) external_rag. SHALLOW: no dispatchers.
     has_entry_edge = depth == DEEP
     if depth == DEEP:
         builder.add_edge(START, "input_context_rag_dispatcher")
@@ -564,7 +571,6 @@ def _build_rag_graph(depth: str, affinity_percent: float):
     if not has_entry_edge:
         builder.add_edge(START, "rag_noop")
 
-    # Dispatcher → retriever conditional edges
     builder.add_conditional_edges(
         "external_rag_dispatcher",
         lambda state: state["external_rag_next_action"],
@@ -576,7 +582,6 @@ def _build_rag_graph(depth: str, affinity_percent: float):
         {"memory_retriever_agent": "call_memory_retriever_agent_input_context_rag", "end": END},
     )
 
-    # Fan-in
     builder.add_edge("call_web_search_agent", END)
     builder.add_edge("call_memory_retriever_agent_input_context_rag", END)
     builder.add_edge("rag_noop", END)
@@ -603,57 +608,66 @@ async def _store_results_in_cache(
     if external:
         await cache.store(
             embedding=embedding,
-            results={"external_rag_results": external},
+            results={
+                "external_rag_results": external,
+                "external_rag_is_empty_result": research_facts.get(
+                    "external_rag_is_empty_result",
+                    False,
+                ),
+            },
             cache_type="external_knowledge",
             global_user_id="",
             metadata={"source": "rag_subgraph"},
         )
 
 
-# ── Image assembly helper ──────────────────────────────────────────
-
-
-def _assemble_image_text(image_doc: dict) -> str:
-    """Render a three-tier image document into a compact text block for LLM context.
-
-    Milestone entries are listed first (never compacted), followed by
-    ``historical_summary`` (compressed older history), then ``recent_window``
-    (most recent session observations).
+def _build_image_context(image_doc: dict) -> dict:
+    """Build structured three-tier image context for downstream JSON prompts.
 
     Args:
         image_doc: Three-tier image dict with keys ``milestones``,
             ``recent_window``, ``historical_summary``, and ``meta``.
 
     Returns:
-        A formatted text block, or an empty string if the document is empty.
+        A nested dict with ``milestones``, ``historical_summary``, and
+        ``recent_observations``, or an empty dict if the image doc is empty.
     """
     if not image_doc:
-        return ""
-    parts: list[str] = []
-    milestones = image_doc.get("milestones") or []
-    if milestones:
-        parts.append("## Milestones")
-        for m in milestones:
-            cat = m.get("category", m.get("milestone_category", ""))
-            desc = m.get("event", m.get("description", ""))
-            superseded = m.get("superseded_by", "")
-            if superseded:
-                parts.append(f"- [{cat}] {desc} (superseded by: {superseded})")
-            else:
-                parts.append(f"- [{cat}] {desc}")
-    historical_summary = image_doc.get("historical_summary", "")
-    if historical_summary:
-        parts.append("## Historical Summary")
-        parts.append(historical_summary)
-    recent_window = image_doc.get("recent_window") or []
-    if recent_window:
-        parts.append("## Recent Observations")
-        for obs in recent_window:
-            parts.append(f"- {obs}")
-    return "\n".join(parts)
+        return {}
 
+    milestones: list[dict[str, Any]] = []
+    for milestone in image_doc.get("milestones") or []:
+        category = str(
+            milestone.get("category", milestone.get("milestone_category", ""))
+        ).strip()
+        event = str(milestone.get("event", milestone.get("description", ""))).strip()
+        if not event:
+            continue
+        superseded_by = milestone.get("superseded_by")
+        if isinstance(superseded_by, str):
+            superseded_by = superseded_by.strip() or None
+        milestones.append(
+            {
+                "event": event,
+                "category": category,
+                "superseded_by": superseded_by,
+            }
+        )
 
-# ── Main entry point ───────────────────────────────────────────────
+    recent_observations: list[str] = []
+    for observation in image_doc.get("recent_window") or []:
+        if isinstance(observation, dict):
+            summary = str(observation.get("summary") or "").strip()
+        else:
+            summary = str(observation).strip()
+        if summary:
+            recent_observations.append(summary)
+
+    return {
+        "milestones": milestones,
+        "historical_summary": str(image_doc.get("historical_summary") or "").strip(),
+        "recent_observations": recent_observations,
+    }
 
 
 async def call_rag_subgraph(state: GlobalPersonaState) -> GlobalPersonaState:
@@ -686,13 +700,13 @@ async def call_rag_subgraph(state: GlobalPersonaState) -> GlobalPersonaState:
         state["timestamp"],
     )
 
-    user_image_text = _assemble_image_text(user_profile.get("user_image") or {})
+    user_image_context = _build_image_context(user_profile.get("user_image") or {})
     objective_facts_text = "\n".join(
         str(item.get("fact", item.get("description", "")))
         for item in (user_profile.get("objective_facts") or [])
         if str(item.get("fact", item.get("description", ""))).strip()
     )
-    character_image_text = _assemble_image_text(
+    character_image_context = _build_image_context(
         state["character_profile"].get("self_image") or {}
     )
 
@@ -703,10 +717,9 @@ async def call_rag_subgraph(state: GlobalPersonaState) -> GlobalPersonaState:
         state["platform_channel_id"] or "<dm>",
         affinity_score,
         len(state.get("chat_history_recent") or []),
-        log_preview(decontexualized_input, max_length=180),
+        log_preview(decontexualized_input),
     )
 
-    # ── Phase 0: Input analysis ────────────────────────────────
     input_embedding = await get_text_embedding(decontexualized_input)
     metadata: dict = {
         "embedding_dim": len(input_embedding),
@@ -721,20 +734,42 @@ async def call_rag_subgraph(state: GlobalPersonaState) -> GlobalPersonaState:
         "response_confidence": 0.0,
     }
 
-    # ── Phase 1: Cache check ───────────────────────────────────
     cache = await _get_rag_cache()
     cached, probe_trace = await _probe_cache(cache, input_embedding, global_user_id)
     metadata["cache_probe"] = probe_trace
     if cached is not None:
+        cached_input_context = _normalize_retrieval_output(cached.get("input_context_results", ""))
+        cached_external = _normalize_retrieval_output(cached.get("external_rag_results", ""))
+        cached_input_context_is_empty = bool(cached.get("input_context_is_empty_result", False))
+        cached_external_is_empty = bool(cached.get("external_rag_is_empty_result", False))
+        cached_input_context_conf = _result_confidence(
+            cached_input_context,
+            is_empty_result=cached_input_context_is_empty,
+        )
+        cached_external_conf = _result_confidence(
+            cached_external,
+            is_empty_result=cached_external_is_empty,
+        )
+        sources_used = []
+        if cached_input_context_conf > 0.0:
+            sources_used.append("input_context_rag")
+        if cached_external_conf > 0.0:
+            sources_used.append("external_rag")
         metadata["cache_hit"] = True
-        metadata["rag_sources_used"] = ["cache"]
-        metadata["response_confidence"] = 1.0
+        metadata["rag_sources_used"] = ["cache"] if not sources_used else ["cache", *sources_used]
+        metadata["confidence_scores"] = {
+            "input_context_rag": cached_input_context_conf,
+            "external_rag": cached_external_conf,
+        }
+        metadata["response_confidence"] = max([cached_input_context_conf, cached_external_conf] + [0.0])
         research_facts = {
-            "input_context_results": cached.get("input_context_results", ""),
-            "external_rag_results": cached.get("external_rag_results", ""),
+            "input_context_results": cached_input_context,
+            "external_rag_results": cached_external,
             "objective_facts": objective_facts_text,
-            "user_image": user_image_text,
-            "character_image": character_image_text,
+            "user_image": user_image_context,
+            "character_image": character_image_context,
+            "input_context_is_empty_result": cached_input_context_is_empty,
+            "external_rag_is_empty_result": cached_external_is_empty,
         }
         logger.info(
             "RAG summary: user=%s global_user=%s cache_hit=%s depth=%s sources=%s input_context=%s external=%s input=%s",
@@ -752,7 +787,6 @@ async def call_rag_subgraph(state: GlobalPersonaState) -> GlobalPersonaState:
             "research_metadata": [metadata],
         }
 
-    # ── Phase 2: Depth classification ──────────────────────────
     classifier = _get_depth_classifier()
     depth_result = await classifier.classify(
         user_input=decontexualized_input,
@@ -766,12 +800,10 @@ async def call_rag_subgraph(state: GlobalPersonaState) -> GlobalPersonaState:
     metadata["depth_reasoning"] = depth_result["reasoning"]
     metadata["trigger_dispatchers"] = list(depth_result["trigger_dispatchers"])
 
-    # ── Phase 2.5: Knowledge-base pre-probe (DEEP only) ───────
     knowledge_base_results = ""
     if depth == DEEP:
         knowledge_base_results = await _probe_knowledge_base(cache, input_embedding)
 
-    # ── Phase 3: Dispatcher graph ──────────────────────────────
     rag_graph = _build_rag_graph(depth, affinity_percent)
 
     initial_state: RAGState = {
@@ -797,12 +829,19 @@ async def call_rag_subgraph(state: GlobalPersonaState) -> GlobalPersonaState:
 
     result = await rag_graph.ainvoke(initial_state)
 
-    input_context_results = result.get("input_context_results", "")
-    external_rag_results = result.get("external_rag_results", "")
+    input_context_results = _normalize_retrieval_output(result.get("input_context_results"))
+    external_rag_results = _normalize_retrieval_output(result.get("external_rag_results"))
+    input_context_is_empty_result = bool(result.get("input_context_is_empty_result", False))
+    external_rag_is_empty_result = bool(result.get("external_rag_is_empty_result", False))
 
-    # Confidence scoring — proxy signal until dispatchers emit explicit scores.
-    input_context_conf = _result_confidence(input_context_results)
-    external_conf = _result_confidence(external_rag_results)
+    input_context_conf = _result_confidence(
+        input_context_results,
+        is_empty_result=input_context_is_empty_result,
+    )
+    external_conf = _result_confidence(
+        external_rag_results,
+        is_empty_result=external_rag_is_empty_result,
+    )
     metadata["confidence_scores"] = {
         "input_context_rag": input_context_conf,
         "external_rag": external_conf,
@@ -814,11 +853,6 @@ async def call_rag_subgraph(state: GlobalPersonaState) -> GlobalPersonaState:
         sources_used.append("external_rag")
     metadata["rag_sources_used"] = sources_used
     metadata["response_confidence"] = max([input_context_conf, external_conf] + [0.0])
-
-    # Record the early-exit decisions implied by the confidence signals.
-    metadata["early_exit"] = {
-        "deep_input_context_sufficient": depth == DEEP and input_context_conf >= INTERNAL_RAG_STRONG_THRESHOLD,
-    }
 
     logger.debug(
         "RAG metadata: depth=%s confidence=%.3f cache_probe=%s trigger_dispatchers=%s response_confidence=%.3f sources=%s",
@@ -834,9 +868,11 @@ async def call_rag_subgraph(state: GlobalPersonaState) -> GlobalPersonaState:
         "input_context_results": input_context_results,
         "external_rag_results": external_rag_results,
         "objective_facts": objective_facts_text,
-        "user_image": user_image_text,
-        "character_image": character_image_text,
+        "user_image": user_image_context,
+        "character_image": character_image_context,
         "knowledge_base_results": knowledge_base_results,
+        "input_context_is_empty_result": input_context_is_empty_result,
+        "external_rag_is_empty_result": external_rag_is_empty_result,
     }
 
     logger.info(
@@ -853,7 +889,6 @@ async def call_rag_subgraph(state: GlobalPersonaState) -> GlobalPersonaState:
         log_preview(decontexualized_input, max_length=160),
     )
 
-    # ── Phase 4: Cache storage ─────────────────────────────────
     await _store_results_in_cache(
         cache, input_embedding, research_facts,
     )
@@ -868,7 +903,6 @@ async def test_main():
     import datetime
     from kazusa_ai_chatbot.mcp_client import mcp_manager
     from kazusa_ai_chatbot.db import get_character_profile
-
 
     # Connect to MCP tool servers
     try:

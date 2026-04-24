@@ -1,4 +1,4 @@
-"""Stage 4 consolidator layer 3 — persistence, scheduling, and cache updates."""
+"""Stage 4 consolidator persistence and scheduling helpers."""
 
 from __future__ import annotations
 
@@ -33,17 +33,18 @@ from kazusa_ai_chatbot.db import (
     upsert_objective_facts,
     upsert_user_image,
 )
-from kazusa_ai_chatbot.nodes.persona_supervisor2_consolidator_l1 import (
-    AFFINITY_CACHE_NUKE_THRESHOLD,
+from kazusa_ai_chatbot.nodes.persona_supervisor2_consolidator_images import (
     _update_character_image,
-    _update_knowledge_base,
     _update_user_image,
 )
+from kazusa_ai_chatbot.nodes.persona_supervisor2_consolidator_knowledge import _update_knowledge_base
 from kazusa_ai_chatbot.nodes.persona_supervisor2_consolidator_schema import ConsolidatorState
 from kazusa_ai_chatbot.nodes.persona_supervisor2_rag import _get_rag_cache
 from kazusa_ai_chatbot.scheduler import schedule_event
 
 logger = logging.getLogger(__name__)
+
+AFFINITY_CACHE_NUKE_THRESHOLD = 50
 
 
 def process_affinity_delta(current_affinity: int, raw_delta: int) -> int:

@@ -132,10 +132,10 @@ async def call_contextual_agent(state: CognitionState) -> CognitionState:
 
     logger.debug(
         "Contextual agent: distance=%s intensity=%s vibe=%s dynamic=%s willingness=%s",
-        log_preview(result.get("social_distance", ""), max_length=100),
-        log_preview(result.get("emotional_intensity", ""), max_length=100),
-        log_preview(result.get("vibe_check", ""), max_length=100),
-        log_preview(result.get("relational_dynamic", ""), max_length=120),
+        log_preview(result.get("social_distance", "")),
+        log_preview(result.get("emotional_intensity", "")),
+        log_preview(result.get("vibe_check", "")),
+        log_preview(result.get("relational_dynamic", "")),
         result.get("expression_willingness", ""),
     )
 
@@ -269,9 +269,9 @@ async def call_style_agent(state: CognitionState) -> CognitionState:
 
     logger.debug(
         "Style agent: rhetorical=%s linguistic=%s forbidden=%s",
-        log_preview(result.get("rhetorical_strategy", ""), max_length=120),
-        log_preview(result.get("linguistic_style", ""), max_length=120),
-        log_list_preview(result.get("forbidden_phrases", []) or [], max_items=3, item_length=60),
+        log_preview(result.get("rhetorical_strategy", "")),
+        log_preview(result.get("linguistic_style", "")),
+        log_list_preview(result.get("forbidden_phrases", []) or []),
     )
 
     rhetorical_strategy = result.get("rhetorical_strategy", "")
@@ -331,8 +331,16 @@ _CONTENT_ANCHOR_AGENT_PROMPT = """\
 {{
     "decontexualized_input": "用户输入语义摘要",
     "research_facts": {{
-        "user_image": "用户画像（第三人称，来自持久化档案）",
-        "character_image": "{character_name} 自我认知画像（来自持久化档案）",
+        "user_image": {{
+            "milestones": [{{"event": "里程碑事件", "category": "类别", "superseded_by": null}}],
+            "historical_summary": "较早阶段的综合画像",
+            "recent_observations": ["最近几次互动形成的观察"]
+        }},
+        "character_image": {{
+            "milestones": [{{"event": "{character_name} 的关键自我认知", "category": "类别", "superseded_by": null}}],
+            "historical_summary": "{character_name} 的较早自我总结",
+            "recent_observations": ["{character_name} 最近几次互动后的自我状态"]
+        }},
         "input_context_results": "与当前话题相关的主观记忆（跨用户）",
         "external_rag_results": "外部知识库检索结果"
     }},
@@ -371,7 +379,14 @@ async def call_content_anchor_agent(state: CognitionState) -> CognitionState:
 
     msg = {
         "decontexualized_input": state["decontexualized_input"],
-        "research_facts": state["research_facts"],
+        "research_facts": {
+            "objective_facts": state["research_facts"].get("objective_facts", ""),
+            "user_image": state["research_facts"].get("user_image", {}),
+            "character_image": state["research_facts"].get("character_image", {}),
+            "input_context_results": state["research_facts"].get("input_context_results", ""),
+            "external_rag_results": state["research_facts"].get("external_rag_results", ""),
+            "knowledge_base_results": state["research_facts"].get("knowledge_base_results", ""),
+        },
         "internal_monologue": state["internal_monologue"],
         "logical_stance": state["logical_stance"],
         "character_intent": state["character_intent"],
@@ -385,7 +400,7 @@ async def call_content_anchor_agent(state: CognitionState) -> CognitionState:
 
     logger.debug(
         "Content anchor agent: anchors=%s",
-        log_list_preview(result.get("content_anchors", []) or [], max_items=4, item_length=120),
+        log_list_preview(result.get("content_anchors", []) or []),
     )
 
     content_anchors = result.get("content_anchors", [])
@@ -433,8 +448,16 @@ _PREFERENCE_ADAPTER_PROMPT = """\
     "content_anchors": ["...", "..."],
     "research_facts": {{
         "objective_facts": "结构化持久事实（优先用于识别稳定语言偏好、许可与禁忌）",
-        "user_image": "用户画像（第三人称，来自持久化档案）",
-        "character_image": "{character_name} 自我认知画像（来自持久化档案）"
+        "user_image": {{
+            "milestones": [{{"event": "里程碑事件", "category": "类别", "superseded_by": null}}],
+            "historical_summary": "较早阶段的综合画像",
+            "recent_observations": ["最近几次互动形成的观察"]
+        }},
+        "character_image": {{
+            "milestones": [{{"event": "{character_name} 的关键自我认知", "category": "类别", "superseded_by": null}}],
+            "historical_summary": "{character_name} 的较早自我总结",
+            "recent_observations": ["{character_name} 最近几次互动后的自我状态"]
+        }}
     }}
 }}
 
@@ -502,8 +525,8 @@ async def call_preference_adapter(state: CognitionState) -> CognitionState:
         "content_anchors": state["content_anchors"],
         "research_facts": {
             "objective_facts": research_facts.get("objective_facts", ""),
-            "user_image": research_facts.get("user_image", ""),
-            "character_image": research_facts.get("character_image", ""),
+            "user_image": research_facts.get("user_image", {}),
+            "character_image": research_facts.get("character_image", {}),
         },
     }
     human_message = HumanMessage(content=json.dumps(msg, ensure_ascii=False))
@@ -515,7 +538,7 @@ async def call_preference_adapter(state: CognitionState) -> CognitionState:
 
     logger.debug(
         "Preference adapter raw: preferences=%s",
-        log_list_preview(result.get("accepted_user_preferences", []) or [], max_items=4, item_length=120),
+        log_list_preview(result.get("accepted_user_preferences", []) or []),
     )
 
     accepted_user_preferences = result.get("accepted_user_preferences", [])
@@ -524,7 +547,7 @@ async def call_preference_adapter(state: CognitionState) -> CognitionState:
 
     logger.debug(
         "Preference adapter normalized: preferences=%s",
-        log_list_preview(accepted_user_preferences, max_items=4, item_length=120),
+        log_list_preview(accepted_user_preferences),
     )
 
     if _should_strip_address_preferences(state):

@@ -253,9 +253,8 @@ async def relevance_agent(state: IMProcessState) -> IMProcessState:
                 "reply_to_current_bot",
                 "reply_excerpt",
             ],
-            value_length=80,
         ),
-        log_preview(user_input, max_length=180),
+        log_preview(user_input),
     )
 
     if _should_ignore_third_party_reply(
@@ -409,7 +408,7 @@ async def multimedia_descriptor_agent(state: IMProcessState) -> IMProcessState:
                 user_name,
                 platform_user_id,
                 piece["content_type"],
-                log_preview(description, max_length=220),
+                log_preview(description),
             )
 
             output_multimedia_input.append({

@@ -101,9 +101,9 @@ async def call_msg_decontexualizer(state: GlobalPersonaState) -> dict:
         user_name,
         platform_user_id,
         len(state.get("chat_history_recent") or []),
-        log_preview(state.get("channel_topic", ""), max_length=100),
-        log_preview(state.get("indirect_speech_context", ""), max_length=100),
-        log_preview(user_input, max_length=180),
+        log_preview(state.get("channel_topic", "")),
+        log_preview(state.get("indirect_speech_context", "")),
+        log_preview(user_input),
     )
 
     try:

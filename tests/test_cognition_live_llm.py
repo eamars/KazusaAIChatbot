@@ -116,8 +116,16 @@ def _build_base_state() -> dict:
         "decontexualized_input": user_input,
         "research_facts": {
             "objective_facts": "用户曾明确要求若被接受则优先使用自然英语回复。",
-            "user_image": "对方说话直接，但没有越界。",
-            "character_image": "千纱平时会保留一点防备，但在安全话题下愿意正常回应。",
+            "user_image": {
+                "milestones": [],
+                "historical_summary": "",
+                "recent_observations": ["对方说话直接，但没有越界。"],
+            },
+            "character_image": {
+                "milestones": [],
+                "historical_summary": "",
+                "recent_observations": ["千纱平时会保留一点防备，但在安全话题下愿意正常回应。"],
+            },
             "input_context_results": "最近聊天主要围绕天气和日常感受。",
             "external_rag_results": "",
         },

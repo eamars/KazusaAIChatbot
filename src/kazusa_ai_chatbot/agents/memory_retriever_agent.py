@@ -385,6 +385,7 @@ class MemoryRetrieverState(TypedDict):
     final_response: str
     final_status: str
     final_reason: str
+    final_is_empty_result: bool
 
 
 async def memory_search_tool_call_executor(state: MemoryRetrieverState) -> dict:
@@ -645,6 +646,7 @@ _MEMORY_RETRIEVER_FINALIZER_PROMPT = """\
 - response: 整合后的完整上下文字符串，供下游 LLM 代理直接使用。包含所有相关事实、对话记录和记忆条目，并附带时间戳和来源说明。
 - score: 0-100，表示检索内容满足任务需求的程度
 - reason: 一句话说明评分依据
+- is_empty_result: 布尔值。仅当最终确认没有任何任务相关检索内容可供下游使用时为 true；只要存在任何任务相关事实，即使数量很少，也必须为 false。
 # 输入格式
 {
     "task": "任务描述",
@@ -659,7 +661,8 @@ _MEMORY_RETRIEVER_FINALIZER_PROMPT = """\
 {
     "response": "string",
     "score": <int: 0-100>,
-    "reason": "string"
+    "reason": "string",
+    "is_empty_result": true or false
 }
 """
 _memory_search_tool_call_finalizer_llm = get_llm(temperature=0.0, top_p=1.0)
@@ -702,6 +705,7 @@ async def memory_search_tool_call_finalizer(state: MemoryRetrieverState) -> dict
             "final_response": "No information retrieved.",
             "final_status": "error",
             "final_reason": f"Finalizer failed: {type(e).__name__}",
+            "final_is_empty_result": True,
         }
 
     # Status generation
@@ -729,9 +733,19 @@ async def memory_search_tool_call_finalizer(state: MemoryRetrieverState) -> dict
     
 
     # final_message = AIMessage(content=result.get("response", ""))
+    is_empty_result = result.get("is_empty_result")
+    if not isinstance(is_empty_result, bool):
+        logger.error(
+            "Memory retriever finalizer omitted is_empty_result; raw result=%s",
+            result,
+        )
+        is_empty_result = False
+     
+ 
     return {"final_response": result.get("response"), 
             "final_status": status, 
-            "final_reason": result.get("reason")}
+            "final_reason": result.get("reason"),
+            "final_is_empty_result": is_empty_result}
 
 
 async def memory_retriever_agent(
@@ -777,6 +791,7 @@ async def memory_retriever_agent(
         "should_stop": False,
         "final_status": "error",
         "final_reason": "",
+        "final_is_empty_result": False,
     }
 
     result = await sub_graph.ainvoke(subState)
@@ -785,6 +800,7 @@ async def memory_retriever_agent(
         "status": result.get("final_status"),
         "reason": result.get("final_reason"),
         "response": result.get("final_response"),
+        "is_empty_result": result.get("final_is_empty_result", False),
         "knowledge_metadata": result.get("knowledge_metadata", {}),
     }
 

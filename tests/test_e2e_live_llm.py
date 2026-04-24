@@ -1141,10 +1141,16 @@ async def test_live_rag_subgraph_retrieves_seeded_context(live_env) -> None:
         }
     )
 
-    input_context_results = str((rag_result.get("research_facts") or {}).get("input_context_results", ""))
+    research_facts = rag_result.get("research_facts") or {}
+    rag_metadata = (rag_result.get("research_metadata") or [{}])[0]
+    input_context_results = research_facts.get("input_context_results", "")
 
+    assert isinstance(input_context_results, str)
     assert input_context_results
     assert "啾啾" in input_context_results
+    assert isinstance(research_facts.get("user_image"), dict)
+    assert isinstance(research_facts.get("character_image"), dict)
+    assert "early_exit" not in rag_metadata
 
 
 async def test_live_rag_subgraph_dispatches_external_search(live_env) -> None:
@@ -1186,10 +1192,16 @@ async def test_live_rag_subgraph_dispatches_external_search(live_env) -> None:
         }
     )
 
-    external_rag_results = str((rag_result.get("research_facts") or {}).get("external_rag_results", ""))
+    research_facts = rag_result.get("research_facts") or {}
+    rag_metadata = (rag_result.get("research_metadata") or [{}])[0]
+    external_rag_results = research_facts.get("external_rag_results", "")
 
+    assert isinstance(external_rag_results, str)
     assert external_rag_results
     assert "奥克兰" in external_rag_results or "Auckland" in external_rag_results
+    assert isinstance(research_facts.get("user_image"), dict)
+    assert isinstance(research_facts.get("character_image"), dict)
+    assert "early_exit" not in rag_metadata
 
 
 async def test_live_memory_retriever_agent_reads_seeded_memory(live_env) -> None:

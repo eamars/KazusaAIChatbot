@@ -92,8 +92,16 @@ async def test_call_preference_adapter_passes_active_commitments_to_llm_for_lang
         },
         "research_facts": {
             "objective_facts": "",
-            "user_image": "对方交流自然。",
-            "character_image": "Kazusa 会记住自己已经接下的约定。",
+            "user_image": {
+                "milestones": [],
+                "historical_summary": "",
+                "recent_observations": ["对方交流自然。"],
+            },
+            "character_image": {
+                "milestones": [],
+                "historical_summary": "",
+                "recent_observations": ["Kazusa 会记住自己已经接下的约定。"],
+            },
         },
     }
 
@@ -121,8 +129,16 @@ def _address_preference_state(*, logical_stance: str, character_intent: str) -> 
         "user_profile": {"active_commitments": []},
         "research_facts": {
             "objective_facts": "",
-            "user_image": "边界需要保持。",
-            "character_image": "Kazusa 不会轻率交出自我定义。",
+            "user_image": {
+                "milestones": [],
+                "historical_summary": "",
+                "recent_observations": ["边界需要保持。"],
+            },
+            "character_image": {
+                "milestones": [],
+                "historical_summary": "",
+                "recent_observations": ["Kazusa 不会轻率交出自我定义。"],
+            },
         },
     }
 

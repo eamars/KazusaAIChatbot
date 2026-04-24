@@ -94,6 +94,7 @@ class WebSearchState(TypedDict):
     final_response: str
     final_status: str
     final_reason: str
+    final_is_empty_result: bool
 
 
 async def web_search_tool_call_executor(state: WebSearchState) -> dict:
@@ -126,7 +127,7 @@ _WEB_SEARCH_GENERATOR_PROMPT = """\
 你是一个专家级的网络搜索代理 (Web Search Agent)。你的目标是通过互联网检索最准确、最及时的信息来完成任务。
 
 # 核心准则
-- **行为分解**：搜索 (`web_search`) 只是为了寻找线索；阅读 (`web_url_read`) 才是为了获取知识。严禁仅根据搜索结果摘要（Snippets）撰写最终回答。
+- **行为分解**：搜索 (`web_search`) 只是为了寻找线索；阅读 (`web_url_read`) 才是为了获取知识。严禁仅根据搜索结果摘要（Snippets）撰写最终答案。
 - **拒绝假设**：严禁猜测未知的 URL 或事实。如果信息不存在，请如实反馈。
 - **反馈至上**：评估员 (Evaluator) 的反馈是你的最高指令。如果评估员要求你“深入阅读”，不要再次发起搜索。
 
@@ -190,12 +191,12 @@ _WEB_SEARCH_EVALUATOR_PROMPT = """\
 
 # 停止原则 (Critical)
 符合以下任一条件时，必须设置 `should_stop: true`：
-1. **足够好原则**：检索内容已覆盖 80% 以上的核心需求，足以构成一个准确、有用的回答，无需为追求 100% 的边缘细节继续浪费 Token。
+1. **足够好原则**：检索内容已覆盖 80% 以上的核心需求，足以构成一个准确、有用的答案，无需为追求 100% 的边缘细节继续浪费 Token。
 2. **边际收益递减**：历史记录显示已尝试了 3 种以上不同的搜索策略且结果雷同，没有新信息出现。
 3. **确认无果**：已穷尽相关关键词和域名限制（如 search, site: official_site 等）依然无法找到目标信息。
 
 # 消息时效与计算
-- **当前时间**：{timestamp}
+- **当前时间**：{timestamp}。
 - **时间敏感度**：如果任务涉及“最新”、“最近”、“三天内”或特定年份，必须核对结果日期。
 - **动态计算**：如果用户要求“过去一周”，请根据当前时间计算出具体的日期范围，并在 `feedback` 中告知 Generator 使用该范围。
 
@@ -296,6 +297,7 @@ _WEB_SEARCH_FINALIZER_PROMPT = """\
 - response: 根据 expected_response 整理后的信息，严禁输出非字符串内容
 - score: 评估分数，范围 0-100，表示检索到的信息满足任务描述的程度
 - reason: 评估原因（一句话之内概括）
+- is_empty_result: 布尔值。仅当最终确认没有任何任务相关外部信息可供下游使用时为 true；只要存在任何任务相关信息，即使不完整，也必须为 false。
 
 # 输入格式
 {
@@ -310,10 +312,12 @@ _WEB_SEARCH_FINALIZER_PROMPT = """\
 {
     "response": "string",
     "score": <int: 0-100>,
-    "reason": "string"
+    "reason": "string",
+    "is_empty_result": true or false
 }
 """
 _web_search_tool_call_finalizer_llm = get_llm(temperature=0.0, top_p=1.0)
+
 async def web_search_tool_call_finalizer(state: WebSearchState) -> dict:
     tool_messages = [m.content for m in state["messages"] if isinstance(m, ToolMessage)]
     tool_results = "\n".join(tool_messages) if tool_messages else "No information retrieved."
@@ -354,11 +358,20 @@ async def web_search_tool_call_finalizer(state: WebSearchState) -> dict:
 
     if "reason" not in result:
         result["reason"] = "No reason provided."
-    
+ 
+    is_empty_result = result.get("is_empty_result")
+    if not isinstance(is_empty_result, bool):
+        logger.error(
+            "Web search finalizer omitted is_empty_result; raw result=%s",
+            result,
+        )
+        is_empty_result = False
+     
     return {
         "final_response": result.get("response"), 
         "final_status": status, 
-        "final_reason": result.get("reason")
+        "final_reason": result.get("reason"),
+        "final_is_empty_result": is_empty_result,
     }
 
 
@@ -408,6 +421,7 @@ async def web_search_agent(
         "final_status": "error",
         "final_reason": "",
         "final_response": "",
+        "final_is_empty_result": False,
         "timestamp": timestamp,
     }
 
@@ -417,6 +431,7 @@ async def web_search_agent(
         "status": result.get("final_status"),
         "reason": result.get("final_reason"),
         "response": result.get("final_response"),
+        "is_empty_result": result.get("final_is_empty_result", False),
         "knowledge_metadata": result.get("knowledge_metadata", {}),
     }
 

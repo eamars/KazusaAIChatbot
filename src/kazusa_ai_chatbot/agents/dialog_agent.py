@@ -248,7 +248,7 @@ async def dialog_generator(state: DialogAgentState) -> DialogAgentState:
     logger.debug(
         "Dialog generator: fragments=%d preview=%s",
         len(generated_dialog) if isinstance(generated_dialog, list) else 0,
-        log_list_preview(generated_dialog if isinstance(generated_dialog, list) else [], max_items=3, item_length=100),
+        log_list_preview(generated_dialog if isinstance(generated_dialog, list) else []),
     )
 
     return {
@@ -407,7 +407,7 @@ async def dialog_evaluator(state: DialogAgentState) -> DialogAgentState:
         "Dialog evaluator: retry=%d should_stop=%s feedback=%s",
         retry,
         result.get("should_stop", True),
-        log_preview(result.get("feedback", ""), max_length=160),
+        log_preview(result.get("feedback", "")),
     )
 
     # Determine stop condition

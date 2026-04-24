@@ -144,15 +144,17 @@ def sanitize_llm_text(text: str) -> str:
     return re.sub(r'[\x00-\x08\x0B\x0C\x0E-\x1F\x7F\x80-\x9F]', '', text)
 
 
-def log_preview(value: Any, max_length: int = 160) -> str:
-    """Return a compact single-line preview suitable for logs.
+def log_preview(value: Any, max_length: int | None = None) -> str:
+    """Return a single-line preview suitable for logs.
 
     Args:
         value: Arbitrary value to preview.
-        max_length: Maximum number of characters to emit.
+        max_length: Optional maximum number of characters to emit. ``None`` keeps
+            the full value.
 
     Returns:
-        A whitespace-collapsed string preview truncated to ``max_length``.
+        A whitespace-collapsed string preview, optionally truncated to
+        ``max_length``.
     """
     if value is None:
         return ""
@@ -168,22 +170,32 @@ def log_preview(value: Any, max_length: int = 160) -> str:
         text = str(value)
 
     text = re.sub(r"\s+", " ", text).strip()
+    if max_length is None or max_length <= 0:
+        return text
     if len(text) <= max_length:
         return text
     return text[: max_length - 1] + "…"
 
 
-def log_list_preview(values: list[Any], max_items: int = 3, item_length: int = 80) -> list[str]:
-    """Return a compact preview list for log output.
+def log_list_preview(
+    values: list[Any],
+    max_items: int | None = None,
+    item_length: int | None = None,
+) -> list[str]:
+    """Return a preview list for log output.
 
     Args:
         values: Sequence of values to preview.
-        max_items: Maximum number of items to include.
-        item_length: Maximum length for each rendered item.
+        max_items: Optional maximum number of items to include. ``None`` keeps
+            all items.
+        item_length: Optional maximum length for each rendered item. ``None``
+            keeps full item content.
 
     Returns:
         A list of preview strings, with an overflow marker when truncated.
     """
+    if max_items is None or max_items <= 0:
+        max_items = len(values)
     preview = [log_preview(item, max_length=item_length) for item in values[:max_items]]
     remaining = len(values) - len(preview)
     if remaining > 0:
@@ -191,18 +203,24 @@ def log_list_preview(values: list[Any], max_items: int = 3, item_length: int = 8
     return preview
 
 
-def log_dict_subset(mapping: dict[str, Any], keys: list[str], value_length: int = 120) -> dict[str, str]:
-    """Return a filtered, compact subset of a mapping for log output.
+def log_dict_subset(
+    mapping: dict[str, Any],
+    keys: list[str],
+    value_length: int | None = None,
+) -> dict[str, str]:
+    """Return a filtered subset of a mapping for log output.
 
     Args:
         mapping: Source mapping to filter.
         keys: Keys to include when present and non-empty.
-        value_length: Maximum preview length for each value.
+        value_length: Optional maximum preview length for each value. ``None``
+            keeps full values.
 
     Returns:
         A dict of compact previews for the requested keys.
     """
     subset: dict[str, str] = {}
+
     for key in keys:
         if key not in mapping:
             continue
