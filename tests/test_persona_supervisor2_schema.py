@@ -21,7 +21,7 @@ class TestGlobalPersonaState:
         input_fields = [
             "timestamp", "user_input", "platform", "platform_user_id",
             "global_user_id", "user_name", "user_profile", "platform_bot_id",
-            "chat_history_wide", "chat_history_recent", "indirect_speech_context", "channel_topic",
+            "chat_history_wide", "chat_history_recent", "reply_context", "indirect_speech_context", "channel_topic",
         ]
         for field in input_fields:
             assert field in hints, f"Missing input field: {field}"
@@ -63,6 +63,7 @@ class TestCognitionState:
             "character_profile",
             "user_input",
             "chat_history_recent",
+            "reply_context",
             "indirect_speech_context",
             "decontexualized_input",
             "research_facts",

@@ -1,5 +1,5 @@
 from typing import TypedDict
-from kazusa_ai_chatbot.state import MultiMediaDoc, DebugModes
+from kazusa_ai_chatbot.state import MultiMediaDoc, DebugModes, ReplyContext
 from kazusa_ai_chatbot.db import CharacterProfileDoc, UserProfileDoc
 
 
@@ -22,6 +22,7 @@ class GlobalPersonaState(TypedDict):
     platform_bot_id: str
     chat_history_wide: list[dict]
     chat_history_recent: list[dict]
+    reply_context: ReplyContext
     indirect_speech_context: str
     channel_topic: str
 
@@ -76,6 +77,7 @@ class CognitionState(TypedDict):
     user_profile: UserProfileDoc
     platform_bot_id: str
     chat_history_recent: list[dict]
+    reply_context: ReplyContext
     indirect_speech_context: str
     channel_topic: str
 

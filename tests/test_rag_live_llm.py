@@ -55,6 +55,7 @@ def _make_rag_state(
     global_user_id: str = "test-user-id-001",
     channel_topic: str = "",
     chat_history_recent: list[dict] | None = None,
+    reply_context: dict | None = None,
     continuation_context: dict | None = None,
     retrieval_plan: dict | None = None,
     resolved_entities: list[dict] | None = None,
@@ -68,6 +69,7 @@ def _make_rag_state(
         "channel_topic": channel_topic,
         "input_context_to_timestamp": datetime.now(timezone.utc).isoformat(),
         "chat_history_recent": chat_history_recent or [],
+        "reply_context": reply_context or {},
         "user_name": user_name,
         "global_user_id": global_user_id,
         "platform_bot_id": "test-bot-001",
@@ -175,6 +177,37 @@ async def test_continuation_resolver_bare_fragment(ensure_live_llm) -> None:
     )
     assert ctx["resolved_task"].strip(), f"resolved_task should be non-empty: {ctx}"
     assert ctx["confidence"] >= 0.3, f"Confidence too low: {ctx}"
+
+
+async def test_continuation_resolver_reply_only_confirmation_preserves_flow(ensure_live_llm) -> None:
+    """Reply-only confirmation to a clarification should resolve to the underlying request."""
+    state = _make_rag_state(
+        "是的",
+        chat_history_recent=[
+            {"role": "user", "content": "千纱你觉得我是怎样的人？", "display_name": "TestUser"},
+            {"role": "assistant", "content": "诶……这种问题……你是想让我怎么定义你呀？是想要一个具体的评价，还是仅仅在随口试探……唔。"},
+            {"role": "user", "content": "要千纱的具体评价", "display_name": "TestUser"},
+            {"role": "assistant", "content": "评价这种事……你是说，要我说明白对你的看法吗？唔……突然问这些，感觉胸口闷闷的。"},
+        ],
+        reply_context={
+            "reply_to_current_bot": True,
+            "reply_to_display_name": "千纱",
+            "reply_excerpt": "评价这种事……你是说，要我说明白对你的看法吗？唔……突然问这些，感觉胸口闷闷的。",
+        },
+        channel_topic="私聊中的自我评价追问",
+    )
+    result = await continuation_resolver(state)
+    _log_result("continuation_resolver.reply_only_confirmation", result)
+
+    ctx = result["continuation_context"]
+    assert ctx["needs_context_resolution"] is True, (
+        f"Reply-only confirmation should be treated as continuation: {ctx}"
+    )
+    resolved_task = ctx["resolved_task"]
+    assert any(token in resolved_task for token in ("评价", "看法", "怎样的人")), (
+        f"Resolved task should recover the self-evaluation request rather than stay as bare confirmation: {ctx}"
+    )
+    assert "是的" != resolved_task.strip(), f"Resolved task should not stay as a bare confirmation: {ctx}"
 
 
 async def test_live_url_anchor_preserved_across_resolution_and_planner(ensure_live_llm) -> None:

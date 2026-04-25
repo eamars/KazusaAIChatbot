@@ -211,6 +211,7 @@ def _make_rag_state(**overrides) -> dict:
         "channel_topic": "闲聊",
         "input_context_to_timestamp": "2026-04-24T12:00:00+00:00",
         "chat_history_recent": [],
+        "reply_context": {},
         "user_name": "TestUser",
         "global_user_id": "uuid-self",
         "platform_bot_id": "bot-1",
@@ -266,6 +267,40 @@ async def test_continuation_resolver_continuation_input(monkeypatch):
     result = await rag_resolution_module.continuation_resolver(state)
     assert result["continuation_context"]["needs_context_resolution"] is True
     assert "量化" in result["continuation_context"]["resolved_task"]
+
+
+@pytest.mark.asyncio
+async def test_continuation_resolver_includes_reply_context_for_reply_only_confirmation(monkeypatch):
+    llm = _CapturingAsyncLLM({
+        "needs_context_resolution": True,
+        "resolved_task": "用户确认自己是在要求千纱说明白对自己的具体评价。",
+        "known_slots": {"target": "current_user", "task": "specific_self_evaluation"},
+        "missing_slots": [],
+        "confidence": 0.92,
+        "evidence": ["reply_context", "recent_turn"],
+    })
+    monkeypatch.setattr(rag_resolution_module, "_continuation_resolver_llm", llm)
+
+    state = _make_rag_state(
+        decontexualized_input="是的",
+        chat_history_recent=[
+            {"role": "assistant", "content": "你是想让我怎么定义你呀？是想要一个具体的评价，还是仅仅在随口试探……唔。"},
+            {"role": "user", "content": "要千纱的具体评价", "display_name": "TestUser"},
+            {"role": "assistant", "content": "评价这种事……你是说，要我说明白对你的看法吗？唔……突然问这些，感觉胸口闷闷的。"},
+        ],
+        reply_context={
+            "reply_to_current_bot": True,
+            "reply_to_display_name": "Kazusa",
+            "reply_excerpt": "评价这种事……你是说，要我说明白对你的看法吗？唔……突然问这些，感觉胸口闷闷的。",
+        },
+    )
+    result = await rag_resolution_module.continuation_resolver(state)
+
+    payload = json.loads(llm.messages[1].content)
+    assert payload["reply_context"]["reply_to_current_bot"] is True
+    assert "说明白对你的看法" in payload["reply_context"]["reply_excerpt"]
+    assert result["continuation_context"]["needs_context_resolution"] is True
+    assert "具体评价" in result["continuation_context"]["resolved_task"]
 
 
 @pytest.mark.asyncio

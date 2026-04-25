@@ -9,6 +9,8 @@ from __future__ import annotations
 import operator
 from typing import Annotated, Any, TypedDict
 
+from kazusa_ai_chatbot.state import ReplyContext
+
 
 class RAGState(TypedDict):
     # Inputs
@@ -20,6 +22,7 @@ class RAGState(TypedDict):
     channel_topic: str
     input_context_to_timestamp: str
     chat_history_recent: list[dict]
+    reply_context: ReplyContext
 
     # Input facts
     user_name: str

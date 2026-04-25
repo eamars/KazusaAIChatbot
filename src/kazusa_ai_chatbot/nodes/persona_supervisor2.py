@@ -59,6 +59,7 @@ async def persona_supervisor2(state: IMProcessState) -> dict:
         "platform_bot_id": state["platform_bot_id"],
         "chat_history_wide": state["chat_history_wide"],
         "chat_history_recent": state["chat_history_recent"],
+        "reply_context": state.get("reply_context", {}),
         "indirect_speech_context": state.get("indirect_speech_context", ""),
         "channel_topic": state["channel_topic"],
         "debug_modes": state.get("debug_modes", {}),

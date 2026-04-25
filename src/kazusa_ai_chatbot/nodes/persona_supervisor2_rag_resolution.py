@@ -26,6 +26,7 @@ _CONTINUATION_RESOLVER_PROMPT = """\
 
 # 判断标准
 - 延续性话语的特征：缺乏独立语义，依赖上文才能理解（如："那后来呢？"、"然后呢？"、"这个呢？"）
+- 如果用户输入只是对上一条 assistant 的澄清/追问做出的简短确认、否认、选择或补充（如："是的"、"不是"、"对"、"前者"、"后者"、"就这个"），也属于延续性话语；此时应优先结合 `reply_context.reply_excerpt` 与最近 assistant 回合恢复用户真正确认的任务。
 - 如果用户输入已经是完整的查询（包含明确主语和宾语），则 `needs_context_resolution` 为 false
 - 如果能从 `chat_history_recent` 确定被省略的对象/任务，则补全并输出 `resolved_task`
 - 如果无法确定，则保持低置信度，不要猜测
@@ -47,7 +48,12 @@ _CONTINUATION_RESOLVER_PROMPT = """\
 {{
     "decontextualized_input": "消歧后的用户输入",
     "chat_history_recent": [最近对话记录],
-    "channel_topic": "频道话题"
+    "channel_topic": "频道话题",
+    "reply_context": {
+        "reply_to_current_bot": true,
+        "reply_to_display_name": "string",
+        "reply_excerpt": "string"
+    }
 }}
 
 # 输出格式
@@ -70,6 +76,7 @@ async def continuation_resolver(state: RAGState) -> dict:
         "decontextualized_input": state["decontexualized_input"],
         "chat_history_recent": (state.get("chat_history_recent") or [])[-6:],
         "channel_topic": state.get("channel_topic", ""),
+        "reply_context": state.get("reply_context", {}),
     }
     human_message = HumanMessage(content=json.dumps(user_input, ensure_ascii=False))
 

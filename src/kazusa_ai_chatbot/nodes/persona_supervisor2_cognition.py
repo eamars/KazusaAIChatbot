@@ -101,6 +101,7 @@ async def call_cognition_subgraph(state: GlobalPersonaState) -> GlobalPersonaSta
         "user_profile": state["user_profile"],
         "platform_bot_id": state["platform_bot_id"],
         "chat_history_recent": interaction_history_recent,
+        "reply_context": state.get("reply_context", {}),
         "indirect_speech_context": state.get("indirect_speech_context", ""),
         "channel_topic": state["channel_topic"],
 

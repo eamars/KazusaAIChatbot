@@ -841,7 +841,7 @@ async def call_rag_subgraph(state: GlobalPersonaState) -> GlobalPersonaState:
         knowledge_base_results = await _probe_knowledge_base(cache, input_embedding)
 
     # ── Phase A: Resolution subgraph (cheap, always runs) ─────
-    initial_state: RAGState = {
+    rag_state: RAGState = {
         "timestamp": state["timestamp"],
         "platform": state["platform"],
         "platform_channel_id": state["platform_channel_id"],
@@ -849,7 +849,8 @@ async def call_rag_subgraph(state: GlobalPersonaState) -> GlobalPersonaState:
         "decontexualized_input": decontexualized_input,
         "channel_topic": state.get("channel_topic", ""),
         "input_context_to_timestamp": input_context_to_timestamp,
-        "chat_history_recent": state.get("chat_history_recent") or [],
+        "chat_history_recent": state.get("chat_history_recent", []),
+        "reply_context": state.get("reply_context", {}),
         "user_name": user_name,
         "global_user_id": global_user_id,
         "platform_bot_id": state["platform_bot_id"],

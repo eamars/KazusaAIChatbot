@@ -33,6 +33,7 @@ def _base_discord_state():
         "channel_name": "general",
         "chat_history_wide": [],
         "chat_history_recent": [],
+        "reply_context": {},
         "should_respond": True,
         "reason_to_respond": "user greeted",
         "use_reply_feature": False,
@@ -89,6 +90,7 @@ async def test_persona_supervisor2_returns_final_dialog_and_consolidation_state(
     assert result["future_promises"] == []
     assert result["consolidation_state"]["decontexualized_input"] == "Hello"
     assert result["consolidation_state"]["final_dialog"] == ["Hi there!"]
+    assert result["consolidation_state"]["reply_context"] == {}
 
 
 @pytest.mark.asyncio

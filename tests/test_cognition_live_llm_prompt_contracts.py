@@ -288,6 +288,29 @@ _DECONTEXT_CASES = [
         "preserve_literal_url_anchor",
         id="decontext-preserve-literal-url-anchor",
     ),
+    pytest.param(
+        {
+            "user_input": "是的",
+            "user_name": "LiveDecontextUser",
+            "platform_user_id": "live-user",
+            "platform_bot_id": "live-bot",
+            "chat_history_recent": [
+                {"role": "user", "content": "千纱你觉得我是怎样的人？"},
+                {"role": "assistant", "content": "诶……这种问题……你是想让我怎么定义你呀？是想要一个具体的评价，还是仅仅在随口试探……唔。"},
+                {"role": "user", "content": "要千纱的具体评价"},
+                {"role": "assistant", "content": "评价这种事……你是说，要我说明白对你的看法吗？唔……突然问这些，感觉胸口闷闷的。"},
+            ],
+            "channel_topic": "私聊中的自我评价追问",
+            "indirect_speech_context": "",
+            "reply_context": {
+                "reply_to_current_bot": True,
+                "reply_to_display_name": "千纱",
+                "reply_excerpt": "评价这种事……你是说，要我说明白对你的看法吗？唔……突然问这些，感觉胸口闷闷的。",
+            },
+        },
+        "reply_only_confirmation_flow",
+        id="decontext-reply-only-confirmation-flow",
+    ),
 ]
 
 
@@ -307,6 +330,11 @@ async def test_live_msg_decontexualizer_prompt_contracts(ensure_live_llm, state:
     elif case_id == "preserve_literal_url_anchor":
         assert state["user_input"] in output, f"URL anchor should be preserved literally: {output!r}"
         assert "柊山千纺" not in output, f"Decontextualizer should not inject topic-only guessed names: {output!r}"
+    elif case_id == "reply_only_confirmation_flow":
+        assert any(token in output for token in ("评价", "看法", "怎样的人")), (
+            f"Reply-only confirmation should recover the underlying self-evaluation task: {output!r}"
+        )
+        assert output != state["user_input"], f"Reply-only confirmation should not remain bare: {output!r}"
     else:
         assert "阿澈" not in output, f"Indirect speech should preserve third-person structure: {output!r}"
         assert "他" in output, f"Indirect speech case should keep third-person pronoun: {output!r}"
