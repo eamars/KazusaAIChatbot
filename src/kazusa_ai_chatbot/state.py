@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from typing import Any
 from typing import TypedDict
 
 
@@ -62,3 +63,4 @@ class IMProcessState(TypedDict):
     # Output from Persona Supervisor
     final_dialog: list[str]
     future_promises: list[dict]
+    consolidation_state: dict[str, Any]

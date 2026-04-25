@@ -100,3 +100,57 @@ async def test_chat_queues_background_consolidation_for_mapping_state(monkeypatc
 
     assert response.messages == ["好呀。"]
     assert len(background_tasks.tasks) == 2
+
+
+@pytest.mark.asyncio
+async def test_build_graph_preserves_consolidation_state_from_supervisor(monkeypatch):
+    """The top-level service graph should retain supervisor consolidation_state."""
+
+    async def _relevance_agent(_state):
+        return {
+            "should_respond": True,
+            "reason_to_respond": "test",
+            "use_reply_feature": False,
+            "channel_topic": "test",
+            "indirect_speech_context": "",
+        }
+
+    async def _persona_supervisor(_state):
+        return {
+            "final_dialog": ["好呀。"],
+            "future_promises": [],
+            "consolidation_state": {
+                "timestamp": "2026-04-25T18:07:24+12:00",
+                "final_dialog": ["好呀。"],
+                "decontexualized_input": "一分钟后发消息",
+            },
+        }
+
+    monkeypatch.setattr(service_module, "relevance_agent", _relevance_agent)
+    monkeypatch.setattr(service_module, "persona_supervisor2", _persona_supervisor)
+
+    graph = service_module._build_graph()
+    result = await graph.ainvoke({
+        "timestamp": "2026-04-25T18:07:24+12:00",
+        "platform": "qq",
+        "platform_message_id": "268099968",
+        "platform_user_id": "673225019",
+        "global_user_id": "global-user-1",
+        "user_name": "蚝爹油",
+        "user_input": "一分钟后发消息",
+        "user_multimedia_input": [],
+        "user_profile": {"affinity": 500},
+        "platform_bot_id": "bot-id",
+        "bot_name": "Kazusa",
+        "character_profile": {"name": "杏山千纱"},
+        "platform_channel_id": "673225019",
+        "channel_type": "private",
+        "channel_name": "Private",
+        "chat_history_wide": [],
+        "chat_history_recent": [],
+        "reply_context": {},
+        "debug_modes": {},
+    })
+
+    assert result["final_dialog"] == ["好呀。"]
+    assert result["consolidation_state"]["decontexualized_input"] == "一分钟后发消息"
