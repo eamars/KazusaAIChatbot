@@ -49,6 +49,8 @@ import logging
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
+from pymongo.errors import PyMongoError
+
 
 logger = logging.getLogger(__name__)
 
@@ -96,6 +98,42 @@ def _get_depth_classifier() -> InputDepthClassifier:
     return _depth_classifier
 
 
+_USER_PROFILE_MEMORIES_CACHE_TYPE = "user_profile_memories"
+_USER_PROFILE_MEMORIES_KEY_VERSION = "v1"
+
+
+def _user_profile_memories_cache_key(
+    global_user_id: str,
+    input_embedding: list[float],
+    depth: str,
+) -> str:
+    """Build a stable cache key for hydrated user-profile memory blocks.
+
+    For DEEP passes the topic embedding affects the merged result (via vector
+    recall), so the key folds in a hash of the embedding. For SHALLOW the
+    result depends only on the user, so the key collapses across topics and
+    every shallow turn for the same user can share one cache entry.
+    """
+    if depth == DEEP and input_embedding:
+        topic_hash = hashlib.sha256(
+            json.dumps(input_embedding, separators=(",", ":")).encode("utf-8")
+        ).hexdigest()[:16]
+    else:
+        topic_hash = "shallow"
+    raw = f"{_USER_PROFILE_MEMORIES_CACHE_TYPE}|{_USER_PROFILE_MEMORIES_KEY_VERSION}|{global_user_id}|{topic_hash}"
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+
+def _strip_memory_embeddings(blocks: dict) -> dict:
+    """Drop embedding floats from ``memories`` so the cache payload stays lean."""
+    stripped = dict(blocks)
+    stripped["memories"] = [
+        {k: v for k, v in mem.items() if k != "embedding"}
+        for mem in blocks.get("memories") or []
+    ]
+    return stripped
+
+
 async def _hydrate_user_profile_from_memories(
     user_profile: dict,
     global_user_id: str,
@@ -115,12 +153,37 @@ async def _hydrate_user_profile_from_memories(
         ``(hydrated_profile, memory_blocks)`` where hydrated_profile preserves
         old downstream keys without making ``user_profiles`` authoritative.
     """
-    memory_blocks = await query_user_profile_memory_blocks(
-        global_user_id,
-        topic_embedding=input_embedding,
-        include_semantic=depth == DEEP,
-        budget=PROFILE_MEMORY_BUDGET,
-    )
+    memory_blocks: dict | None = None
+    cache_key = _user_profile_memories_cache_key(global_user_id, input_embedding, depth)
+    cache: RAGCache | None = None
+    if global_user_id:
+        try:
+            cache = await _get_rag_cache()
+            hit = await cache.retrieve_if_similar_by_key(cache_key)
+            if hit is not None:
+                memory_blocks = hit.get("results") or None
+        except PyMongoError:
+            logger.exception("user_profile_memories cache probe failed for %s", global_user_id)
+
+    if memory_blocks is None:
+        memory_blocks = await query_user_profile_memory_blocks(
+            global_user_id,
+            topic_embedding=input_embedding,
+            include_semantic=depth == DEEP,
+            budget=PROFILE_MEMORY_BUDGET,
+        )
+        if cache is not None and global_user_id:
+            try:
+                await cache.store_by_key(
+                    cache_key=cache_key,
+                    results=_strip_memory_embeddings(memory_blocks),
+                    cache_type=_USER_PROFILE_MEMORIES_CACHE_TYPE,
+                    global_user_id=global_user_id,
+                    metadata={"depth": depth},
+                )
+            except PyMongoError:
+                logger.exception("user_profile_memories cache store failed for %s", global_user_id)
+
     hydrated = dict(user_profile)
     hydrated["character_diary"] = memory_blocks["character_diary"]
     hydrated["objective_facts"] = memory_blocks["objective_facts"]

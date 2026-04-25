@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from kazusa_ai_chatbot.db import MemoryType
+from kazusa_ai_chatbot.db import bootstrap as bootstrap_module
 from kazusa_ai_chatbot.db import users as users_module
 from kazusa_ai_chatbot.nodes import persona_supervisor2_rag as rag_module
 from kazusa_ai_chatbot.nodes import persona_supervisor2_consolidator_persistence as persistence_module
@@ -244,6 +245,33 @@ async def test_query_user_profile_memory_blocks_preserves_named_prompt_shapes(mo
     assert blocks["active_commitments"][0]["action"] == "Kazusa will reply in English"
 
 
+def test_build_memory_docs_stores_milestone_facts_only_once():
+    memories = persistence_module._build_memory_docs(
+        diary_entries=[],
+        objective_facts=[{
+            "fact": "User changed the preferred form of address",
+            "category": "relationship",
+            "timestamp": "2026-04-25T00:00:00+00:00",
+            "source": "conversation_extracted",
+            "confidence": 0.9,
+        }],
+        active_commitments=[],
+        new_facts=[{
+            "description": "User changed the preferred form of address",
+            "is_milestone": True,
+            "milestone_category": "relationship_state",
+            "scope": "relationship_addressing",
+            "dedup_key": "addressing_change",
+        }],
+        timestamp="2026-04-25T00:00:00+00:00",
+    )
+
+    assert len(memories) == 1
+    assert memories[0]["memory_type"] == MemoryType.MILESTONE
+    assert memories[0]["scope"] == "relationship_addressing"
+    assert memories[0]["dedup_key"] == "addressing_change"
+
+
 @pytest.mark.asyncio
 async def test_expire_overdue_profile_memories_marks_active_commitments(monkeypatch):
     db = _mock_db()
@@ -261,12 +289,16 @@ async def test_expire_overdue_profile_memories_marks_active_commitments(monkeypa
 
 @pytest.mark.asyncio
 async def test_rag_hydrates_profile_memory_blocks_without_prompt_shape_changes(monkeypatch):
+    fake_cache = MagicMock()
+    fake_cache.retrieve_if_similar_by_key = AsyncMock(return_value=None)
+    fake_cache.store_by_key = AsyncMock()
+    monkeypatch.setattr(rag_module, "_get_rag_cache", AsyncMock(return_value=fake_cache))
     monkeypatch.setattr(rag_module, "query_user_profile_memory_blocks", AsyncMock(return_value={
         "character_diary": [{"entry": "User sounded excited"}],
         "objective_facts": [{"fact": "User lives in Auckland"}],
         "active_commitments": [{"action": "Kazusa will reply in English"}],
         "milestones": [{"event": "User allowed English replies"}],
-        "memories": [{"memory_id": "m1"}],
+        "memories": [{"memory_id": "m1", "embedding": [0.1, 0.2]}],
     }))
 
     hydrated, blocks = await rag_module._hydrate_user_profile_from_memories(
@@ -280,7 +312,40 @@ async def test_rag_hydrates_profile_memory_blocks_without_prompt_shape_changes(m
     assert hydrated["objective_facts"][0]["fact"] == "User lives in Auckland"
     assert hydrated["active_commitments"][0]["action"] == "Kazusa will reply in English"
     assert hydrated["user_image"]["milestones"][0]["event"] == "User allowed English replies"
-    assert blocks["memories"][0]["memory_id"] == "m1"
+    assert blocks["memories"][0]["embedding"] == [0.1, 0.2]
+    fake_cache.store_by_key.assert_awaited_once()
+    store_kwargs = fake_cache.store_by_key.await_args.kwargs
+    assert store_kwargs["cache_type"] == "user_profile_memories"
+    assert store_kwargs["results"]["memories"] == [{"memory_id": "m1"}]
+
+
+@pytest.mark.asyncio
+async def test_rag_profile_memory_hydration_uses_cache_hit(monkeypatch):
+    cached_blocks = {
+        "character_diary": [{"entry": "Cached diary"}],
+        "objective_facts": [{"fact": "Cached fact"}],
+        "active_commitments": [{"action": "Cached commitment"}],
+        "milestones": [{"event": "Cached milestone"}],
+        "memories": [{"memory_id": "cached"}],
+    }
+    fake_cache = MagicMock()
+    fake_cache.retrieve_if_similar_by_key = AsyncMock(return_value={"results": cached_blocks})
+    fake_cache.store_by_key = AsyncMock()
+    query_blocks = AsyncMock(return_value={})
+    monkeypatch.setattr(rag_module, "_get_rag_cache", AsyncMock(return_value=fake_cache))
+    monkeypatch.setattr(rag_module, "query_user_profile_memory_blocks", query_blocks)
+
+    hydrated, blocks = await rag_module._hydrate_user_profile_from_memories(
+        {"affinity": 500, "user_image": {}},
+        "u1",
+        input_embedding=[0.1],
+        depth="SHALLOW",
+    )
+
+    query_blocks.assert_not_awaited()
+    fake_cache.store_by_key.assert_not_awaited()
+    assert hydrated["character_diary"][0]["entry"] == "Cached diary"
+    assert blocks["memories"] == [{"memory_id": "cached"}]
 
 
 @pytest.mark.asyncio
@@ -327,12 +392,84 @@ async def test_db_writer_invalidates_profile_memory_cache_namespaces(monkeypatch
 
 
 @pytest.mark.asyncio
+async def test_bootstrap_adds_active_commitment_hot_path_index(monkeypatch):
+    db = MagicMock()
+    db.list_collection_names = AsyncMock(return_value=[
+        "conversation_history",
+        "user_profiles",
+        "character_state",
+        "memory",
+        "user_profile_memories",
+        "scheduled_events",
+        "rag_cache_index",
+        "rag_metadata_index",
+    ])
+    db.character_state.find_one = AsyncMock(return_value={"_id": "global"})
+    db.character_state.insert_one = AsyncMock()
+    for collection_name in (
+        "conversation_history",
+        "user_profiles",
+        "scheduled_events",
+        "memory",
+        "user_profile_memories",
+        "rag_cache_index",
+        "rag_metadata_index",
+    ):
+        getattr(db, collection_name).create_index = AsyncMock()
+    monkeypatch.setattr(bootstrap_module, "get_db", AsyncMock(return_value=db))
+    monkeypatch.setattr(bootstrap_module, "enable_vector_index", AsyncMock())
+
+    await bootstrap_module.db_bootstrap()
+
+    index_calls = db.user_profile_memories.create_index.await_args_list
+    assert any(
+        call.args[0] == [
+            ("global_user_id", 1),
+            ("memory_type", 1),
+            ("status", 1),
+            ("deleted", 1),
+            ("created_at", -1),
+            ("expires_at", 1),
+        ]
+        and call.kwargs["name"] == "user_profile_memory_active_commitments"
+        for call in index_calls
+    )
+
+
+def test_migration_builder_promotes_legacy_milestones_and_future_defaults_commitments():
+    memories = migrate_module._build_memories_from_profile(
+        {
+            "user_image": {
+                "milestones": [{
+                    "event": "Legacy milestone",
+                    "timestamp": "2025-11-01T00:00:00+00:00",
+                    "category": "relationship_state",
+                    "scope": "relationship_addressing",
+                }]
+            },
+            "active_commitments": [{
+                "action": "Kazusa will remember the request",
+                "created_at": "2025-11-01T00:00:00+00:00",
+            }],
+        },
+        "2026-04-25T00:00:00+00:00",
+    )
+
+    milestone = next(memory for memory in memories if memory["memory_type"] == MemoryType.MILESTONE)
+    commitment = next(memory for memory in memories if memory["memory_type"] == MemoryType.COMMITMENT)
+    assert milestone["content"] == "Legacy milestone"
+    assert milestone["scope"] == "relationship_addressing"
+    assert commitment["due_time"] == "2026-05-05T00:00:00+00:00"
+
+
+@pytest.mark.asyncio
 async def test_migration_script_dry_run_counts_fixture_memories(monkeypatch, capsys):
     db = MagicMock()
     db.user_profiles.find.return_value = _Cursor([{
         "global_user_id": "u1",
         "character_diary": [{"entry": "User sounded excited"}],
         "objective_facts": [{"fact": "User lives in Auckland"}],
+        "user_image": {"milestones": [{"event": "User allowed English replies"}]},
         "active_commitments": [{"action": "Kazusa will reply in English"}],
     }])
     monkeypatch.setattr(migrate_module, "get_db", AsyncMock(return_value=db))
@@ -346,5 +483,5 @@ async def test_migration_script_dry_run_counts_fixture_memories(monkeypatch, cap
 
     out = capsys.readouterr().out
     assert "scanned_profiles=1" in out
-    assert "would_write:3" in out
+    assert "would_write:4" in out
     migrate_module.insert_profile_memories.assert_not_called()

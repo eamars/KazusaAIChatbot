@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -228,175 +229,44 @@ async def test_facts_harvester_returns_llm_emitted_commitment_without_local_acce
     ]
 
 
-def test_apply_milestone_lifecycle_supersedes_older_addressing_milestone():
-    """A newer addressing milestone should supersede the older open one on the same scope."""
-    existing = [
-        {
-            "event": "蚝爹油是杏山千纱 (Kyōyama Kazusa) 的学长",
-            "timestamp": "2026-04-21T10:10:35.065166+00:00",
-            "category": "revelation",
-            "scope": "relationship_addressing",
-            "superseded_by": None,
-        }
-    ]
-    new_facts = [
-        {
-            "entity": "杏山千纱",
-            "category": "relationship",
-            "description": "杏山千纱对蚝爹油的称呼从“学长”变更为“主人”",
-            "is_milestone": True,
-            "milestone_category": "relationship_state",
-            "scope": "relationship_addressing",
-        }
-    ]
+@pytest.mark.asyncio
+async def test_update_user_image_reads_milestones_from_profile_memories(monkeypatch):
+    """User-image milestones should be hydrated from the authoritative memory collection."""
+    llm = _CapturingAsyncLLM({"session_summary": "The session summary stays normal."})
+    query_blocks = AsyncMock(return_value={
+        "milestones": [{"event": "Profile-memory milestone", "scope": "relationship_state"}],
+    })
+    monkeypatch.setattr(consolidator_images_module, "_user_image_session_summary_llm", llm)
+    monkeypatch.setattr(consolidator_images_module, "query_user_profile_memory_blocks", query_blocks)
 
-    updated = consolidator_images_module._apply_milestone_lifecycle(
-        existing,
-        new_facts,
-        timestamp="2026-04-23T09:19:29.464105+00:00",
+    state = {
+        "global_user_id": "u1",
+        "diary_entry": ["A full diary sentence."],
+        "new_facts": [
+            {
+                "description": "Fresh milestone fact stored elsewhere.",
+                "is_milestone": True,
+                "milestone_category": "relationship_state",
+                "scope": "relationship_state",
+            }
+        ],
+        "last_relationship_insight": "",
+        "character_profile": {"name": "Kazusa"},
+        "user_name": "TestUser",
+        "user_profile": {"user_image": {"milestones": [{"event": "Stale embedded milestone"}]}},
+    }
+
+    result = await consolidator_images_module._update_user_image(
+        state,
+        timestamp="2026-04-24T10:48:45.880057+00:00",
+        processed_affinity_delta=0,
     )
 
-    assert updated[0]["superseded_by"] == "杏山千纱对蚝爹油的称呼从“学长”变更为“主人”"
-    assert updated[-1]["scope"] == "relationship_addressing"
-
-
-def test_apply_milestone_lifecycle_supersedes_multiple_open_milestones_in_same_scope():
-    existing = [
-        {
-            "event": "杏山千纱对蚝爹油的称呼是学长",
-            "timestamp": "2026-04-21T10:10:35.065166+00:00",
-            "category": "relationship_state",
-            "scope": "relationship_addressing",
-            "superseded_by": None,
-        },
-        {
-            "event": "杏山千纱偶尔还是会叫蚝爹油学长",
-            "timestamp": "2026-04-22T10:10:35.065166+00:00",
-            "category": "relationship_state",
-            "scope": "relationship_addressing",
-            "superseded_by": None,
-        },
-    ]
-    new_facts = [
-        {
-            "entity": "杏山千纱",
-            "category": "relationship",
-            "description": "杏山千纱对蚝爹油的称呼从“学长”变更为“主人”",
-            "is_milestone": True,
-            "milestone_category": "relationship_state",
-            "scope": "relationship_addressing",
-        }
-    ]
-
-    updated = consolidator_images_module._apply_milestone_lifecycle(
-        existing,
-        new_facts,
-        timestamp="2026-04-23T09:19:29.464105+00:00",
-    )
-
-    assert updated[0]["superseded_by"] == "杏山千纱对蚝爹油的称呼从“学长”变更为“主人”"
-    assert updated[1]["superseded_by"] == "杏山千纱对蚝爹油的称呼从“学长”变更为“主人”"
-    assert updated[-1]["superseded_by"] is None
-
-
-def test_apply_milestone_lifecycle_does_not_touch_already_superseded_items():
-    existing = [
-        {
-            "event": "杏山千纱对蚝爹油的称呼是学长",
-            "timestamp": "2026-04-21T10:10:35.065166+00:00",
-            "category": "relationship_state",
-            "scope": "relationship_addressing",
-            "superseded_by": "杏山千纱后来改口叫前辈",
-        }
-    ]
-    new_facts = [
-        {
-            "entity": "杏山千纱",
-            "category": "relationship",
-            "description": "杏山千纱对蚝爹油的称呼从“前辈”变更为“主人”",
-            "is_milestone": True,
-            "milestone_category": "relationship_state",
-            "scope": "relationship_addressing",
-        }
-    ]
-
-    updated = consolidator_images_module._apply_milestone_lifecycle(
-        existing,
-        new_facts,
-        timestamp="2026-04-23T09:19:29.464105+00:00",
-    )
-
-    assert updated[0]["superseded_by"] == "杏山千纱后来改口叫前辈"
-    assert updated[-1]["superseded_by"] is None
-
-
-def test_apply_milestone_lifecycle_does_not_supersede_different_scope_items():
-    existing = [
-        {
-            "event": "杏山千纱喜欢蚝爹油。",
-            "timestamp": "2026-04-22T16:44:25.866237+00:00",
-            "category": "relationship_state",
-            "scope": "relationship_state",
-            "superseded_by": None,
-        },
-        {
-            "event": "蚝爹油具有‘被暴虐的感召’这一设定",
-            "timestamp": "2026-04-21T13:49:12.895970+00:00",
-            "category": "revelation",
-            "scope": "character_setting",
-            "superseded_by": None,
-        },
-    ]
-    new_facts = [
-        {
-            "entity": "杏山千纱",
-            "category": "relationship",
-            "description": "杏山千纱对蚝爹油的称呼从“学长”变更为“主人”",
-            "is_milestone": True,
-            "milestone_category": "relationship_state",
-            "scope": "relationship_addressing",
-        }
-    ]
-
-    updated = consolidator_images_module._apply_milestone_lifecycle(
-        existing,
-        new_facts,
-        timestamp="2026-04-23T09:19:29.464105+00:00",
-    )
-
-    assert updated[0]["superseded_by"] is None
-    assert updated[1]["superseded_by"] is None
-    assert updated[-1]["scope"] == "relationship_addressing"
-
-
-def test_apply_milestone_lifecycle_unknown_scope_stays_append_only():
-    existing = [
-        {
-            "event": "蚝爹油是杏山千纱 (Kyōyama Kazusa) 的学长",
-            "timestamp": "2026-04-21T10:10:35.065166+00:00",
-            "category": "revelation",
-            "superseded_by": None,
-        }
-    ]
-    new_facts = [
-        {
-            "entity": "蚝爹油",
-            "category": "identity",
-            "description": "蚝爹油自称自己会做法式甜点",
-            "is_milestone": True,
-            "milestone_category": "revelation",
-        }
-    ]
-
-    updated = consolidator_images_module._apply_milestone_lifecycle(
-        existing,
-        new_facts,
-        timestamp="2026-04-23T09:19:29.464105+00:00",
-    )
-
-    assert updated[0]["superseded_by"] is None
-    assert updated[-1]["scope"] == ""
-    assert updated[-1]["superseded_by"] is None
+    query_blocks.assert_awaited_once_with("u1", include_semantic=False)
+    human_payload = json.loads(llm.messages[1].content)
+    assert human_payload["non_milestone_facts"] == []
+    assert result is not None
+    assert result["milestones"] == [{"event": "Profile-memory milestone", "scope": "relationship_state"}]
 
 
 @pytest.mark.asyncio

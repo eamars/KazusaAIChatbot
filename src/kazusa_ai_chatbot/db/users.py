@@ -490,6 +490,10 @@ async def query_user_profile_memory_blocks(
             merged.append(memory)
 
     all_memories = merged + commitments
+    # Milestones are a kind of fact; the write path stores each milestone
+    # exactly once under MemoryType.MILESTONE and the read path surfaces it
+    # in both the milestone timeline and the objective_facts block so
+    # downstream prompts still see it as a fact.
     return {
         "character_diary": [
             _memory_to_diary(memory)
@@ -499,7 +503,7 @@ async def query_user_profile_memory_blocks(
         "objective_facts": [
             _memory_to_fact(memory)
             for memory in all_memories
-            if memory.get("memory_type") == MemoryType.OBJECTIVE_FACT
+            if memory.get("memory_type") in (MemoryType.OBJECTIVE_FACT, MemoryType.MILESTONE)
         ],
         "active_commitments": [
             _memory_to_commitment(memory)

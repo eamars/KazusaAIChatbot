@@ -4,13 +4,26 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from kazusa_ai_chatbot.db import MemoryType, get_db, insert_profile_memories
+
+LEGACY_COMMITMENT_DEFAULT_DUE_DAYS = 10
 
 
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def _default_due_time(reference_iso: str) -> str:
+    """Compute the 10-day fallback ``due_time`` from a reference timestamp.
+
+    Used so legacy commitments without an explicit due date are reachable by
+    the expiry sweep instead of inheriting an already-elapsed window from
+    their original creation date.
+    """
+    reference = datetime.fromisoformat(reference_iso.replace("Z", "+00:00"))
+    return (reference + timedelta(days=LEGACY_COMMITMENT_DEFAULT_DUE_DAYS)).isoformat()
 
 
 def _build_memories_from_profile(profile: dict, timestamp: str) -> list[dict]:
@@ -50,23 +63,51 @@ def _build_memories_from_profile(profile: dict, timestamp: str) -> list[dict]:
                 "dedup_key": content.lower(),
             })
 
+    # Legacy milestones lived inside ``user_image.milestones`` (appended by
+    # the now-removed ``_apply_milestone_lifecycle``). They must be promoted
+    # to ``user_profile_memories`` or the user's milestone history is lost.
+    legacy_milestones = (profile.get("user_image") or {}).get("milestones") or []
+    for milestone in legacy_milestones:
+        content = str(milestone.get("event", "")).strip()
+        if not content:
+            continue
+        memories.append({
+            "memory_type": MemoryType.MILESTONE,
+            "content": content,
+            "created_at": milestone.get("timestamp") or timestamp,
+            "updated_at": timestamp,
+            "event_category": str(milestone.get("category", "")).strip(),
+            "category": str(milestone.get("fact_category", "")).strip() or "general",
+            "scope": str(milestone.get("scope", "")).strip(),
+            "superseded_by": milestone.get("superseded_by"),
+            "source": "legacy_migration",
+            "confidence": 0.8,
+            "dedup_key": content.lower(),
+        })
+
     for commitment in profile.get("active_commitments") or []:
         action = str(commitment.get("action", "")).strip()
-        if action:
-            memories.append({
-                "memory_type": MemoryType.COMMITMENT,
-                "content": action,
-                "action": action,
-                "commitment_id": commitment.get("commitment_id", ""),
-                "target": commitment.get("target", ""),
-                "commitment_type": commitment.get("commitment_type", ""),
-                "status": commitment.get("status", "active"),
-                "source": commitment.get("source", "legacy_migration"),
-                "created_at": commitment.get("created_at") or timestamp,
-                "updated_at": timestamp,
-                "due_time": commitment.get("due_time"),
-                "dedup_key": str(commitment.get("dedup_key") or action).strip().lower(),
-            })
+        if not action:
+            continue
+        # Commitments without an explicit due_time would otherwise inherit a
+        # TTL window starting at their original creation date — for legacy
+        # rows that's often already in the past. Anchor the default window
+        # to the migration timestamp instead.
+        due_time = commitment.get("due_time") or _default_due_time(timestamp)
+        memories.append({
+            "memory_type": MemoryType.COMMITMENT,
+            "content": action,
+            "action": action,
+            "commitment_id": commitment.get("commitment_id", ""),
+            "target": commitment.get("target", ""),
+            "commitment_type": commitment.get("commitment_type", ""),
+            "status": commitment.get("status", "active"),
+            "source": commitment.get("source", "legacy_migration"),
+            "created_at": commitment.get("created_at") or timestamp,
+            "updated_at": timestamp,
+            "due_time": due_time,
+            "dedup_key": str(commitment.get("dedup_key") or action).strip().lower(),
+        })
     return memories
 
 

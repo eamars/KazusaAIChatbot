@@ -21,47 +21,6 @@ _CHARACTER_IMAGE_MAX_RECENT_WINDOW = 6
 _CHARACTER_IMAGE_HISTORICAL_MAX_CHARS = 1500
 
 
-def _apply_milestone_lifecycle(
-    existing_milestones: list[dict],
-    new_facts: list[dict],
-    *,
-    timestamp: str,
-) -> list[dict]:
-    """Append milestone facts and supersede older open milestones on the same scope.
-
-    Args:
-        existing_milestones: Current milestone list from ``user_image``.
-        new_facts: Newly extracted milestone facts.
-        timestamp: Current turn timestamp.
-
-    Returns:
-        Updated milestone list with supersedence metadata maintained.
-    """
-    milestones = list(existing_milestones)
-    for fact in new_facts:
-        event = fact.get("description", "")
-        if not event:
-            continue
-        scope = str(fact.get("scope", "")).strip()
-        if scope:
-            for item in milestones:
-                item_scope = item.get("scope") or ""
-                if item_scope != scope or item.get("superseded_by"):
-                    continue
-                item["superseded_by"] = event
-
-        milestones.append(
-            {
-                "event": event,
-                "timestamp": timestamp,
-                "category": fact.get("milestone_category", ""),
-                "fact_category": fact.get("category", ""),
-                "scope": scope,
-                "superseded_by": None,
-            }
-        )
-    return milestones
-
 # ── Image synthesizer prompts ────────────────────────────────────────
 
 _USER_IMAGE_SESSION_SUMMARY_PROMPT = """\

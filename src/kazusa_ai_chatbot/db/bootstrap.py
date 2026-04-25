@@ -103,6 +103,21 @@ async def db_bootstrap() -> None:
         [("memory_type", 1), ("status", 1), ("expires_at", 1)],
         name="user_profile_memory_expiry_sweep",
     )
+    await db.user_profile_memories.create_index(
+        [("global_user_id", 1), ("memory_type", 1), ("status", 1), ("created_at", -1)],
+        name="user_profile_memory_status_recent",
+    )
+    await db.user_profile_memories.create_index(
+        [
+            ("global_user_id", 1),
+            ("memory_type", 1),
+            ("status", 1),
+            ("deleted", 1),
+            ("created_at", -1),
+            ("expires_at", 1),
+        ],
+        name="user_profile_memory_active_commitments",
+    )
 
     # ── NEW: rag_cache_index indexes ──────────────────────────────
     # TTL — auto-delete expired entries. expireAfterSeconds=0 means

@@ -207,17 +207,10 @@ def _build_memory_docs(
             continue
         raw_fact = fact_by_description.get(content, {})
         dedup_key = str(raw_fact.get("dedup_key") or content).strip().lower()
-        memories.append({
-            "memory_type": MemoryType.OBJECTIVE_FACT,
-            "content": content,
-            "created_at": fact.get("timestamp") or timestamp,
-            "updated_at": timestamp,
-            "category": fact.get("category", "general"),
-            "source": fact.get("source", "conversation_extracted"),
-            "confidence": fact.get("confidence", 0.85),
-            "dedup_key": dedup_key,
-            "scope": str(raw_fact.get("scope", "")).strip(),
-        })
+        scope = str(raw_fact.get("scope", "")).strip()
+        # A milestone fact is stored ONLY as a MILESTONE memory. The read
+        # layer folds milestones into the objective_facts block so prompt-
+        # facing fact lists still include them — no need to duplicate-write.
         if raw_fact.get("is_milestone"):
             memories.append({
                 "memory_type": MemoryType.MILESTONE,
@@ -228,9 +221,21 @@ def _build_memory_docs(
                 "source": fact.get("source", "conversation_extracted"),
                 "confidence": fact.get("confidence", 0.85),
                 "event_category": str(raw_fact.get("milestone_category", "")).strip(),
-                "scope": str(raw_fact.get("scope", "")).strip(),
+                "scope": scope,
                 "dedup_key": dedup_key,
                 "superseded_by": None,
+            })
+        else:
+            memories.append({
+                "memory_type": MemoryType.OBJECTIVE_FACT,
+                "content": content,
+                "created_at": fact.get("timestamp") or timestamp,
+                "updated_at": timestamp,
+                "category": fact.get("category", "general"),
+                "source": fact.get("source", "conversation_extracted"),
+                "confidence": fact.get("confidence", 0.85),
+                "dedup_key": dedup_key,
+                "scope": scope,
             })
 
     for commitment in active_commitments:
