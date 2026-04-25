@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 
 from langchain_core.messages import HumanMessage, SystemMessage
@@ -177,7 +177,11 @@ async def _generate_raw_tool_calls(
         return []
 
     available_tools = _task_registry.filter(ctx)
-    if not available_tools or not (state.get("future_promises") or []):
+    future_promises = _normalize_future_promises(
+        state.get("future_promises") or [],
+        timestamp=ctx.now.isoformat(),
+    )
+    if not available_tools or not future_promises:
         return []
 
     msg = {
@@ -190,7 +194,7 @@ async def _generate_raw_tool_calls(
         "decontexualized_input": state.get("decontexualized_input", ""),
         "final_dialog": state.get("final_dialog", []),
         "content_anchors": state.get("action_directives", {}).get("linguistic_directives", {}).get("content_anchors", []),
-        "future_promises": state.get("future_promises", []),
+        "future_promises": future_promises,
         "available_tools": [
             {
                 "name": spec.name,
@@ -285,6 +289,60 @@ def _build_diary_entries(
     return entries
 
 
+def _default_future_promise_due_time(timestamp: str) -> str:
+    """Return the immediate fallback due time for untimed future promises.
+
+    Args:
+        timestamp: Turn timestamp used as the reference clock.
+
+    Returns:
+        ISO-8601 UTC timestamp for now or the next minute boundary.
+    """
+
+    try:
+        reference_time = parse_iso_datetime(timestamp)
+    except ValueError:
+        reference_time = datetime.now(timezone.utc)
+
+    if reference_time.second == 0 and reference_time.microsecond == 0:
+        return reference_time.isoformat()
+
+    next_minute = reference_time.replace(second=0, microsecond=0) + timedelta(minutes=1)
+    return next_minute.isoformat()
+
+
+def _normalize_future_promises(
+    future_promises: list[dict],
+    *,
+    timestamp: str,
+) -> list[dict]:
+    """Fill deterministic due-time defaults for actionable future promises.
+
+    Args:
+        future_promises: Raw promise rows from the harvester.
+        timestamp: Turn timestamp used to resolve immediate fallbacks.
+
+    Returns:
+        Promise rows with ``future_promise`` due times normalized.
+    """
+
+    fallback_due_time = _default_future_promise_due_time(timestamp)
+    normalized: list[dict] = []
+
+    for promise in future_promises:
+        normalized_promise = dict(promise)
+        commitment_type = str(normalized_promise.get("commitment_type", "")).strip()
+        due_time = normalized_promise.get("due_time")
+        due_time_is_missing = due_time is None or (isinstance(due_time, str) and not due_time.strip())
+
+        if commitment_type == "future_promise" and due_time_is_missing:
+            normalized_promise["due_time"] = fallback_due_time
+
+        normalized.append(normalized_promise)
+
+    return normalized
+
+
 def _build_active_commitment_entries(
     future_promises: list[dict],
     *,
@@ -300,7 +358,8 @@ def _build_active_commitment_entries(
         A list of structured commitment rows for ``user_profile.active_commitments``.
     """
     commitments: list[ActiveCommitmentDoc] = []
-    for promise in future_promises:
+    normalized_promises = _normalize_future_promises(future_promises, timestamp=timestamp)
+    for promise in normalized_promises:
         action = str(promise.get("action", "")).strip()
         if not action:
             continue
@@ -487,7 +546,10 @@ async def db_writer(state: ConsolidatorState) -> dict:
     # ── Step 3a: objective facts and commitments as profile memories ─
     new_facts = state.get("new_facts") or []
     objective_facts = _build_objective_fact_entries(new_facts, timestamp=timestamp)
-    future_promises = state.get("future_promises") or []
+    future_promises = _normalize_future_promises(
+        state.get("future_promises") or [],
+        timestamp=timestamp,
+    )
     active_commitments = _build_active_commitment_entries(future_promises, timestamp=timestamp)
     profile_memories = _build_memory_docs(
         diary_entries=diary_entries,
@@ -509,7 +571,11 @@ async def db_writer(state: ConsolidatorState) -> dict:
     dispatcher = _get_task_dispatcher()
     if dispatcher is not None:
         dispatch_ctx = _build_dispatch_context(state, timestamp=timestamp)
-        raw_calls = await _generate_raw_tool_calls(state, dispatch_ctx)
+        dispatch_state = {
+            **state,
+            "future_promises": future_promises,
+        }
+        raw_calls = await _generate_raw_tool_calls(dispatch_state, dispatch_ctx)
         dispatch_result = await dispatcher.dispatch(
             raw_calls,
             dispatch_ctx,

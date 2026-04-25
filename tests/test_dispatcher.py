@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock, patch
 
@@ -22,6 +23,25 @@ from kazusa_ai_chatbot.dispatcher import (
 )
 from kazusa_ai_chatbot.dispatcher.task import parse_iso_datetime
 from kazusa_ai_chatbot.nodes import persona_supervisor2_consolidator_persistence as persistence_module
+
+
+class _DummyResponse:
+    """Minimal async LLM response wrapper for dispatcher unit tests."""
+
+    def __init__(self, content: str):
+        self.content = content
+
+
+class _CapturingAsyncLLM:
+    """Capture the last prompt payload and return a fixed response."""
+
+    def __init__(self, response_payload: dict):
+        self.messages = None
+        self._response_payload = response_payload
+
+    async def ainvoke(self, messages):
+        self.messages = messages
+        return _DummyResponse(json.dumps(self._response_payload, ensure_ascii=False))
 
 
 class _NoopAdapter:
@@ -261,6 +281,36 @@ async def test_dispatcher_rejects_duplicate_task_in_batch():
     assert len(result.scheduled) == 1
     assert len(result.rejected) == 1
     assert result.rejected[0][1] == "duplicate task"
+
+
+@pytest.mark.asyncio
+async def test_generate_raw_tool_calls_defaults_missing_future_promise_due_time(monkeypatch):
+    tool_registry = ToolRegistry()
+    tool_registry.register(build_send_message_tool())
+    monkeypatch.setattr(persistence_module, "_task_registry", tool_registry)
+    llm = _CapturingAsyncLLM({"tool_calls": []})
+    monkeypatch.setattr(persistence_module, "_task_dispatcher_llm", llm)
+
+    await persistence_module._generate_raw_tool_calls(
+        _dispatch_generation_state(
+            future_promises=[
+                {
+                    "target": "提拉米苏",
+                    "action": "杏山千纱将对提拉米苏询问glitch是否在线",
+                    "due_time": None,
+                    "commitment_type": "future_promise",
+                    "dedup_key": "ask_glitch_online",
+                }
+            ],
+            decontexualized_input="你去问一下glitch在不在。",
+            content_anchors=["[DECISION] 接受并立刻去问。"],
+            final_dialog=["好，我现在去问一下。"],
+        ),
+        _live_dispatch_ctx(),
+    )
+
+    human_payload = json.loads(llm.messages[1].content)
+    assert human_payload["future_promises"][0]["due_time"] == "2026-04-22T18:12:00+00:00"
 
 
 @pytest.mark.live_llm

@@ -26,7 +26,10 @@ from kazusa_ai_chatbot.nodes.persona_supervisor2_consolidator_facts import (
     fact_harvester_evaluator,
     facts_harvester,
 )
-from kazusa_ai_chatbot.nodes.persona_supervisor2_consolidator_persistence import db_writer
+from kazusa_ai_chatbot.nodes.persona_supervisor2_consolidator_persistence import (
+    _normalize_future_promises,
+    db_writer,
+)
 from kazusa_ai_chatbot.nodes.persona_supervisor2_consolidator_reflection import (
     global_state_updater,
     relationship_recorder,
@@ -118,7 +121,10 @@ async def call_consolidation_subgraph(global_state: GlobalPersonaState):
     affinity_delta = result.get("affinity_delta", 0)
     last_relationship_insight = result.get("last_relationship_insight", "")
     new_facts = result.get("new_facts", [])
-    future_promises = result.get("future_promises", [])
+    future_promises = _normalize_future_promises(
+        result.get("future_promises", []),
+        timestamp=result.get("timestamp", global_state["timestamp"]),
+    )
     metadata = result.get("metadata", {}) or {}
 
     logger.info(

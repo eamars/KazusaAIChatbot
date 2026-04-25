@@ -479,11 +479,12 @@ async def test_call_consolidation_subgraph_invokes_db_writer_once(monkeypatch):
         "research_metadata": {"cache_hit": False, "depth": "SHALLOW", "depth_confidence": 0.9},
     }
 
-    await consolidator_module.call_consolidation_subgraph(state)
+    result = await consolidator_module.call_consolidation_subgraph(state)
 
     assert calls["facts_harvester"] == 1
     assert calls["fact_harvester_evaluator"] == 1
     assert calls["db_writer"] == 1
+    assert result["future_promises"][0]["due_time"] == "2026-04-24T11:06:00+00:00"
 
 
 def test_process_affinity_delta_uses_dead_zone():
@@ -615,6 +616,23 @@ def test_build_active_commitment_entries_uses_llm_supplied_commitment_type():
 
     assert len(commitments) == 1
     assert commitments[0]["commitment_type"] == "address_preference"
+
+
+def test_build_active_commitment_entries_defaults_future_promise_due_time_to_next_minute():
+    commitments = consolidator_persistence_module._build_active_commitment_entries(
+        [
+            {
+                "target": "提拉米苏",
+                "action": "杏山千纱将对提拉米苏询问glitch是否在线",
+                "due_time": None,
+                "commitment_type": "future_promise",
+            }
+        ],
+        timestamp="2026-04-25T18:18:32+12:00",
+    )
+
+    assert len(commitments) == 1
+    assert commitments[0]["due_time"] == "2026-04-25T06:19:00+00:00"
 
 
 @pytest.mark.live_llm
