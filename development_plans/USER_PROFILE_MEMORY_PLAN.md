@@ -394,46 +394,46 @@ Phases M1 → M4 are deployed as separate releases, each behind a feature flag i
 
 ### Schema & DB
 
-- [ ] **T1** — Add `UserProfileMemoryDoc` TypedDict to `db/schemas.py`
-- [ ] **T2** — Add `MemoryType` string enum constants to `db/schemas.py`
-- [ ] **T3** — Add MongoDB index declarations to `db/indexes.py` (or equivalent init script)
-- [ ] **T4** — Add Atlas Search vector index definition for `user_profile_memories`
-- [ ] **T5** — Remove array fields from `UserProfileDoc` (Phase M4 only)
+- [x] **T1** — Add `UserProfileMemoryDoc` TypedDict to `db/schemas.py`
+- [x] **T2** — Add `MemoryType` string enum constants to `db/schemas.py`
+- [x] **T3** — Add MongoDB index declarations to `db/indexes.py` (or equivalent init script)
+- [x] **T4** — Add Atlas Search vector index definition for `user_profile_memories`
+- [x] **T5** — Remove array fields from `UserProfileDoc` (Phase M4 only)
 
 ### Persistence Layer
 
-- [ ] **T6** — Add `insert_profile_memories(global_user_id, memories, db)` to `db/users.py`; resolve `due_time` default (created_at + 10 days) for commitments with no explicit due date
-- [ ] **T7** — Add `query_profile_memories_recent(global_user_id, limits, db)` to `db/users.py`; exclude commitments where `due_time` < now
-- [ ] **T8** — Add `query_profile_memories_vector(global_user_id, embedding, limits, thresholds, db)` to `db/users.py`; accept per-type threshold dict from `settings.json`
-- [ ] **T9** — Add `update_commitment_status(global_user_id, commitment_id, new_status, db)` to `db/users.py`
-- [ ] **T10** — Add background sweep `expire_overdue_commitments(db)` that sets `status=expired` on commitment docs where `due_time` < now and `status=active`; run on scheduler heartbeat
+- [x] **T6** — Add `insert_profile_memories(global_user_id, memories, db)` to `db/users.py`; resolve `due_time` default (created_at + 10 days) for commitments with no explicit due date
+- [x] **T7** — Add `query_profile_memories_recent(global_user_id, limits, db)` to `db/users.py`; exclude commitments where `due_time` < now
+- [x] **T8** — Add `query_profile_memories_vector(global_user_id, embedding, limits, thresholds, db)` to `db/users.py`; accept per-type threshold dict from `settings.json`
+- [x] **T9** — Add `update_commitment_status(global_user_id, commitment_id, new_status, db)` to `db/users.py`
+- [x] **T10** — Add background sweep `expire_overdue_commitments(db)` that sets `status=expired` on commitment docs where `due_time` < now and `status=active`; run on scheduler heartbeat
 
 ### Consolidation
 
-- [ ] **T11** — Refactor `_build_objective_fact_entries()` and `_build_active_commitment_entries()` in `persona_supervisor2_consolidator_persistence.py` into `_build_memory_docs()` returning `list[UserProfileMemoryDoc]`
-- [ ] **T12** — Update `db_writer` node to call `insert_profile_memories()` (dual-write in M1, replace in M4)
-- [ ] **T13** — Update `consolidator_images.py` `_apply_milestone_lifecycle()` to read from `user_profile_memories`
+- [x] **T11** — Refactor `_build_objective_fact_entries()` and `_build_active_commitment_entries()` in `persona_supervisor2_consolidator_persistence.py` into `_build_memory_docs()` returning `list[UserProfileMemoryDoc]`
+- [x] **T12** — Update `db_writer` node to call `insert_profile_memories()` (dual-write in M1, replace in M4)
+- [x] **T13** — Update `consolidator_images.py` `_apply_milestone_lifecycle()` to read from `user_profile_memories`
 
 ### RAG Layer
 
-- [ ] **T14** — Add `_load_user_memories(global_user_id, topic_context, db, depth)` to `persona_supervisor2_rag.py`
-- [ ] **T15** — Add `"user_profile_memories"` cache namespace with TTL=900 to `rag/cache.py`
-- [ ] **T16** — Wire `_load_user_memories()` into the RAG dispatcher (replace direct profile array reads)
-- [ ] **T17** — Update depth classifier: SHALLOW path calls Steps A+C; DEEP path calls A+B+C
-- [ ] **T18** — Expose `SEMANTIC_THRESHOLDS` and `RECENT_LIMITS` in `settings.json` under `rag.user_profile_memories`
+- [x] **T14** — Add `_load_user_memories(global_user_id, topic_context, db, depth)` to `persona_supervisor2_rag.py`
+- [x] **T15** — Add `"user_profile_memories"` cache namespace with TTL=900 to `rag/cache.py`
+- [x] **T16** — Wire `_load_user_memories()` into the RAG dispatcher (replace direct profile array reads)
+- [x] **T17** — Update depth classifier: SHALLOW path calls Steps A+C; DEEP path calls A+B+C
+- [x] **T18** — Expose `SEMANTIC_THRESHOLDS` and `RECENT_LIMITS` in `settings.json` under `rag.user_profile_memories` — implemented as env-backed constants in `config.py` per final plan.
 
 ### Migration
 
-- [ ] **T19** — Write `scripts/migrate_user_profile_memories.py` with `--dry-run` + `--batch-size`; backfill `due_time` for existing commitments using `created_at + 10 days` where null
-- [ ] **T20** — Add feature flags to `settings.json`
+- [x] **T19** — Write `scripts/migrate_user_profile_memories.py` with `--dry-run` + `--batch-size`; backfill `due_time` for existing commitments using `created_at + 10 days` where null
+- [x] **T20** — Add feature flags to `settings.json` — intentionally replaced by big-bang implementation with no feature flags and env-backed config.
 
 ### Tests
 
-- [ ] **T21** — Unit tests for `insert_profile_memories()`: dedup rules per type, `due_time` defaulting
-- [ ] **T22** — Unit tests for `_load_user_memories()`: budget cap, dedup, SHALLOW (A+C) vs DEEP (A+B+C) paths, expired commitment exclusion
-- [ ] **T23** — Unit tests for `expire_overdue_commitments()`: transitions active→expired at due_time boundary
-- [ ] **T24** — Integration test for full write→read round-trip (consolidator → memories → RAG → image)
-- [ ] **T25** — Migration script dry-run test against fixture data
+- [x] **T21** — Unit tests for `insert_profile_memories()`: dedup rules per type, `due_time` defaulting
+- [x] **T22** — Unit tests for `_load_user_memories()`: budget cap, dedup, SHALLOW (A+C) vs DEEP (A+B+C) paths, expired commitment exclusion
+- [x] **T23** — Unit tests for `expire_overdue_commitments()`: transitions active→expired at due_time boundary
+- [x] **T24** — Integration test for full write→read round-trip (consolidator → memories → RAG → image)
+- [x] **T25** — Migration script dry-run test against fixture data
 
 ---
 

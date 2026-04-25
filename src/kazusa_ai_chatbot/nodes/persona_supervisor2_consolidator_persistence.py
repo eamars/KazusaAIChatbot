@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime, timezone
-from typing import cast
 from uuid import uuid4
 
 from pymongo.errors import PyMongoError
@@ -18,20 +17,17 @@ from kazusa_ai_chatbot.config import (
 from kazusa_ai_chatbot.db import (
     ActiveCommitmentDoc,
     CharacterDiaryEntry,
-    MemoryDoc,
+    MemoryType,
     ObjectiveFactEntry,
     ScheduledEventDoc,
-    build_memory_doc,
     increment_rag_version,
-    save_memory,
+    insert_profile_memories,
     update_affinity,
     update_last_relationship_insight,
-    upsert_active_commitments,
-    upsert_character_diary,
     upsert_character_self_image,
     upsert_character_state,
-    upsert_objective_facts,
     upsert_user_image,
+    UserProfileMemoryDoc,
 )
 from kazusa_ai_chatbot.nodes.persona_supervisor2_consolidator_images import (
     _update_character_image,
@@ -137,6 +133,7 @@ def _build_active_commitment_entries(
                 "created_at": timestamp,
                 "updated_at": timestamp,
                 "due_time": promise.get("due_time"),
+                "dedup_key": str(promise.get("dedup_key") or action).strip().lower(),
             }
         )
     return commitments
@@ -162,6 +159,100 @@ def _build_objective_fact_entries(
         }
         entries.append(entry)
     return entries
+
+
+def _build_memory_docs(
+    *,
+    diary_entries: list[CharacterDiaryEntry],
+    objective_facts: list[ObjectiveFactEntry],
+    active_commitments: list[ActiveCommitmentDoc],
+    new_facts: list[dict],
+    timestamp: str,
+) -> list[UserProfileMemoryDoc]:
+    """Build unified profile-memory docs from consolidator outputs.
+
+    Args:
+        diary_entries: Subjective diary entries from the relationship recorder.
+        objective_facts: Objective facts built from the facts harvester output.
+        active_commitments: Accepted future promises in prompt-facing shape.
+        new_facts: Raw fact rows, used to preserve LLM-emitted milestone fields.
+        timestamp: Current turn timestamp.
+
+    Returns:
+        Memory docs ready for ``insert_profile_memories``.
+    """
+    memories: list[UserProfileMemoryDoc] = []
+
+    for entry in diary_entries:
+        content = str(entry.get("entry", "")).strip()
+        if not content:
+            continue
+        memories.append({
+            "memory_type": MemoryType.DIARY_ENTRY,
+            "content": content,
+            "created_at": entry.get("timestamp") or timestamp,
+            "updated_at": timestamp,
+            "confidence": entry.get("confidence", 0.8),
+            "context": entry.get("context", ""),
+        })
+
+    fact_by_description = {
+        str(fact.get("description", "")).strip(): fact
+        for fact in new_facts or []
+        if str(fact.get("description", "")).strip()
+    }
+    for fact in objective_facts:
+        content = str(fact.get("fact", "")).strip()
+        if not content:
+            continue
+        raw_fact = fact_by_description.get(content, {})
+        dedup_key = str(raw_fact.get("dedup_key") or content).strip().lower()
+        memories.append({
+            "memory_type": MemoryType.OBJECTIVE_FACT,
+            "content": content,
+            "created_at": fact.get("timestamp") or timestamp,
+            "updated_at": timestamp,
+            "category": fact.get("category", "general"),
+            "source": fact.get("source", "conversation_extracted"),
+            "confidence": fact.get("confidence", 0.85),
+            "dedup_key": dedup_key,
+            "scope": str(raw_fact.get("scope", "")).strip(),
+        })
+        if raw_fact.get("is_milestone"):
+            memories.append({
+                "memory_type": MemoryType.MILESTONE,
+                "content": content,
+                "created_at": fact.get("timestamp") or timestamp,
+                "updated_at": timestamp,
+                "category": fact.get("category", "general"),
+                "source": fact.get("source", "conversation_extracted"),
+                "confidence": fact.get("confidence", 0.85),
+                "event_category": str(raw_fact.get("milestone_category", "")).strip(),
+                "scope": str(raw_fact.get("scope", "")).strip(),
+                "dedup_key": dedup_key,
+                "superseded_by": None,
+            })
+
+    for commitment in active_commitments:
+        action = str(commitment.get("action", "")).strip()
+        if not action:
+            continue
+        memories.append({
+            "memory_type": MemoryType.COMMITMENT,
+            "content": action,
+            "action": action,
+            "commitment_id": commitment.get("commitment_id", ""),
+            "target": commitment.get("target", ""),
+            "commitment_type": commitment.get("commitment_type", ""),
+            "status": commitment.get("status", "active"),
+            "source": commitment.get("source", "conversation_extracted"),
+            "created_at": commitment.get("created_at") or timestamp,
+            "updated_at": commitment.get("updated_at") or timestamp,
+            "due_time": commitment.get("due_time"),
+            "dedup_key": str(commitment.get("dedup_key") or action).strip().lower(),
+        })
+
+    return memories
 
 
 async def _schedule_future_promises(
@@ -243,19 +334,12 @@ async def db_writer(state: ConsolidatorState) -> dict:
         logger.exception("db_writer: failed to upsert character_state")
         write_log["character_state"] = False
 
-    # ── Step 2a: character diary (subjective per-user notes) ────────
+    # ── Step 2a: build character diary (subjective per-user notes) ──
     diary_entries = _build_diary_entries(
         normalize_diary_entries(state.get("diary_entry")),
         timestamp=timestamp,
         interaction_subtext=state.get("interaction_subtext", ""),
     )
-    if global_user_id and diary_entries:
-        try:
-            await upsert_character_diary(global_user_id, diary_entries)
-            write_log["character_diary"] = True
-        except PyMongoError:
-            logger.exception("db_writer: failed to upsert character_diary")
-            write_log["character_diary"] = False
 
     # ── Step 2b: last relationship insight ──────────────────────────
     last_relationship_insight = state.get("last_relationship_insight", "")
@@ -267,65 +351,25 @@ async def db_writer(state: ConsolidatorState) -> dict:
             logger.exception("db_writer: failed to update_last_relationship_insight")
             write_log["relationship_insight"] = False
 
-    # ── Step 3a: objective facts (structured) + memory (searchable) ─
+    # ── Step 3a: objective facts and commitments as profile memories ─
     new_facts = state.get("new_facts") or []
     objective_facts = _build_objective_fact_entries(new_facts, timestamp=timestamp)
-    if global_user_id and objective_facts:
-        try:
-            await upsert_objective_facts(global_user_id, objective_facts)
-            write_log["objective_facts"] = True
-        except PyMongoError:
-            logger.exception("db_writer: failed to upsert_objective_facts")
-            write_log["objective_facts"] = False
-
-    for fact in new_facts:
-        entity = fact.get("entity", user_name)
-        category = fact.get("category", "general")
-        description = fact.get("description", "")
-        if not description:
-            continue
-        doc = build_memory_doc(
-            memory_name=f"[{entity}] {category}",
-            content=description,
-            source_global_user_id=global_user_id,
-            memory_type="fact",
-            source_kind="conversation_extracted",
-            confidence_note="This is extracted as a stable factual memory and may be used as background support.",
-        )
-        try:
-            await save_memory(cast(MemoryDoc, doc), timestamp)
-        except PyMongoError:
-            logger.exception("db_writer: failed to save fact memory")
-
-    # ── Step 3b: future promises (memory + scheduled event) ─────────
     future_promises = state.get("future_promises") or []
     active_commitments = _build_active_commitment_entries(future_promises, timestamp=timestamp)
-    if global_user_id and active_commitments:
+    profile_memories = _build_memory_docs(
+        diary_entries=diary_entries,
+        objective_facts=objective_facts,
+        active_commitments=active_commitments,
+        new_facts=new_facts,
+        timestamp=timestamp,
+    )
+    if global_user_id and profile_memories:
         try:
-            await upsert_active_commitments(global_user_id, active_commitments)
-            write_log["active_commitments"] = True
+            await insert_profile_memories(global_user_id, profile_memories)
+            write_log["user_profile_memories"] = True
         except PyMongoError:
-            logger.exception("db_writer: failed to upsert_active_commitments")
-            write_log["active_commitments"] = False
-    for promise in future_promises:
-        target = promise.get("target", user_name)
-        action = promise.get("action", "")
-        due_time = promise.get("due_time")
-        if not action:
-            continue
-        doc = build_memory_doc(
-            memory_name=f"[Promise] {target}",
-            content=action,
-            source_global_user_id=global_user_id,
-            memory_type="promise",
-            source_kind="conversation_extracted",
-            confidence_note="This is an unfulfilled or future-oriented commitment and should be treated as pending until resolved.",
-            expiry_timestamp=due_time,
-        )
-        try:
-            await save_memory(cast(MemoryDoc, doc), timestamp)
-        except PyMongoError:
-            logger.exception("db_writer: failed to save promise memory")
+            logger.exception("db_writer: failed to insert_profile_memories")
+            write_log["user_profile_memories"] = False
 
     scheduled_event_ids = await _schedule_future_promises(
         future_promises,
@@ -359,24 +403,19 @@ async def db_writer(state: ConsolidatorState) -> dict:
     if global_user_id:
         try:
             rag_cache = await _get_rag_cache()
-            if diary_entries:
-                await rag_cache.invalidate_pattern(
-                    cache_type="character_diary",
-                    global_user_id=global_user_id,
-                )
-                cache_invalidated.append("character_diary")
-            if objective_facts:
-                await rag_cache.invalidate_pattern(
-                    cache_type="objective_user_facts",
-                    global_user_id=global_user_id,
-                )
-                cache_invalidated.append("objective_user_facts")
-            if future_promises:
-                await rag_cache.invalidate_pattern(
-                    cache_type="user_promises",
-                    global_user_id=global_user_id,
-                )
-                cache_invalidated.append("user_promises")
+            if profile_memories:
+                for cache_type in (
+                    "user_profile_memories",
+                    "character_diary",
+                    "objective_user_facts",
+                    "user_promises",
+                    "boundary_cache",
+                ):
+                    await rag_cache.invalidate_pattern(
+                        cache_type=cache_type,
+                        global_user_id=global_user_id,
+                    )
+                    cache_invalidated.append(cache_type)
             if abs(processed_affinity_delta) > AFFINITY_CACHE_NUKE_THRESHOLD:
                 await rag_cache.clear_all_user(global_user_id)
                 cache_invalidated.append("ALL_USER")

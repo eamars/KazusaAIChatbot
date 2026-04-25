@@ -30,11 +30,12 @@ from kazusa_ai_chatbot.config import (
     AFFINITY_DEFAULT,
     AFFINITY_MIN,
     AFFINITY_MAX,
+    PROFILE_MEMORY_BUDGET,
     RAG_CACHE_MAX_SIZE,
     RAG_CACHE_SIMILARITY_THRESHOLD,
     RAG_CACHE_TTL_SECONDS,
 )
-from kazusa_ai_chatbot.db import get_text_embedding
+from kazusa_ai_chatbot.db import get_text_embedding, query_user_profile_memory_blocks
 from kazusa_ai_chatbot.rag.cache import RAGCache
 from kazusa_ai_chatbot.rag.depth_classifier import (
     DEEP,
@@ -93,6 +94,41 @@ def _get_depth_classifier() -> InputDepthClassifier:
     if _depth_classifier is None:
         _depth_classifier = InputDepthClassifier()
     return _depth_classifier
+
+
+async def _hydrate_user_profile_from_memories(
+    user_profile: dict,
+    global_user_id: str,
+    *,
+    input_embedding: list[float],
+    depth: str,
+) -> tuple[dict, dict]:
+    """Hydrate prompt-facing profile blocks from ``user_profile_memories``.
+
+    Args:
+        user_profile: Lightweight profile header from ``user_profiles``.
+        global_user_id: Current user's internal UUID.
+        input_embedding: Embedding of ``decontexualized_input``.
+        depth: RAG depth, controlling whether semantic recall augments recency.
+
+    Returns:
+        ``(hydrated_profile, memory_blocks)`` where hydrated_profile preserves
+        old downstream keys without making ``user_profiles`` authoritative.
+    """
+    memory_blocks = await query_user_profile_memory_blocks(
+        global_user_id,
+        topic_embedding=input_embedding,
+        include_semantic=depth == DEEP,
+        budget=PROFILE_MEMORY_BUDGET,
+    )
+    hydrated = dict(user_profile)
+    hydrated["character_diary"] = memory_blocks["character_diary"]
+    hydrated["objective_facts"] = memory_blocks["objective_facts"]
+    hydrated["active_commitments"] = memory_blocks["active_commitments"]
+    image_doc = dict(hydrated.get("user_image") or {})
+    image_doc["milestones"] = memory_blocks["milestones"]
+    hydrated["user_image"] = image_doc
+    return hydrated, memory_blocks
 
 
 # ── Phase 6 — re-exports from decomposed submodules ──────────
@@ -643,22 +679,11 @@ async def call_rag_subgraph(state: GlobalPersonaState) -> GlobalPersonaState:
         state.get("chat_history_recent") or [],
         state["timestamp"],
     )
-
-    user_image_context = _build_image_context(user_profile.get("user_image") or {})
-    user_objective_facts_text = "\n".join(
-        str(item.get("fact", item.get("description", "")))
-        for item in (user_profile.get("objective_facts") or [])
-        if str(item.get("fact", item.get("description", ""))).strip()
-    )
     character_image_context = _build_image_context(
         state["character_profile"].get("self_image") or {}
     )
     character_profile_results = _build_character_profile_results(
         state["character_profile"]
-    )
-    objective_facts_text = _merge_objective_facts(
-        user_objective_facts_text,
-        character_profile_results,
     )
 
     logger.debug(
@@ -687,6 +712,38 @@ async def call_rag_subgraph(state: GlobalPersonaState) -> GlobalPersonaState:
     }
 
     cache = await _get_rag_cache()
+
+    # ── Depth classification ──────────────────────────────────
+    classifier = _get_depth_classifier()
+    depth_result = await classifier.classify(
+        user_input=decontexualized_input,
+        user_topic=state.get("channel_topic", ""),
+        affinity=affinity_score,
+        input_embedding=input_embedding,
+    )
+    depth = depth_result["depth"]
+    metadata["depth"] = depth
+    metadata["depth_confidence"] = depth_result["confidence"]
+    metadata["depth_reasoning"] = depth_result["reasoning"]
+    metadata["trigger_dispatchers"] = list(depth_result["trigger_dispatchers"])
+
+    user_profile, memory_blocks = await _hydrate_user_profile_from_memories(
+        user_profile,
+        global_user_id,
+        input_embedding=input_embedding,
+        depth=depth,
+    )
+    metadata["user_profile_memory_count"] = len(memory_blocks.get("memories") or [])
+    user_image_context = _build_image_context(user_profile.get("user_image") or {})
+    user_objective_facts_text = "\n".join(
+        str(item.get("fact", item.get("description", "")))
+        for item in (user_profile.get("objective_facts") or [])
+        if str(item.get("fact", item.get("description", ""))).strip()
+    )
+    objective_facts_text = _merge_objective_facts(
+        user_objective_facts_text,
+        character_profile_results,
+    )
 
     # ── Legacy embedding-similarity cache probe ───────────────
     cached, probe_trace = await _probe_cache(cache, input_embedding, global_user_id)
@@ -737,23 +794,10 @@ async def call_rag_subgraph(state: GlobalPersonaState) -> GlobalPersonaState:
             log_preview(decontexualized_input, max_length=160),
         )
         return {
+            "user_profile": user_profile,
             "research_facts": research_facts,
             "research_metadata": [metadata],
         }
-
-    # ── Depth classification ──────────────────────────────────
-    classifier = _get_depth_classifier()
-    depth_result = await classifier.classify(
-        user_input=decontexualized_input,
-        user_topic=state.get("channel_topic", ""),
-        affinity=affinity_score,
-        input_embedding=input_embedding,
-    )
-    depth = depth_result["depth"]
-    metadata["depth"] = depth
-    metadata["depth_confidence"] = depth_result["confidence"]
-    metadata["depth_reasoning"] = depth_result["reasoning"]
-    metadata["trigger_dispatchers"] = list(depth_result["trigger_dispatchers"])
 
     knowledge_base_results = ""
     if depth == DEEP:
@@ -859,6 +903,7 @@ async def call_rag_subgraph(state: GlobalPersonaState) -> GlobalPersonaState:
             log_preview(decontexualized_input, max_length=160),
         )
         return {
+            "user_profile": user_profile,
             "research_facts": research_facts,
             "research_metadata": [metadata],
         }
@@ -1030,6 +1075,7 @@ async def call_rag_subgraph(state: GlobalPersonaState) -> GlobalPersonaState:
     )
 
     return {
+        "user_profile": user_profile,
         "research_facts": research_facts,
         "research_metadata": [metadata],
     }

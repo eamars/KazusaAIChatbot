@@ -63,12 +63,14 @@ _FACTS_HARVESTER_PROMPT = """\
    - 若 `decontexualized_input` 是用户对未来行为的请求（如“晚上奖励我”），只有在 `final_dialog` 中被角色明确接纳时，才视为可落库的“待履行承诺”。
    - 若出现冲突信号（如 `content_anchors` 倾向接受，但 `final_dialog` 保留选择权或明显拒绝），以 `final_dialog` 为准并不记录。
    - 对“软性答应/模糊同意”，只有在 `final_dialog` 仍然体现出角色已经接下义务时才可记录；若 `final_dialog` 只是延续氛围、试探、调侃或保留决定权，则不记录。
+   - 若 `logical_stance=TENTATIVE` 或 `character_intent=BANTAR/EVADE`，且 `final_dialog` 出现“看心情/谁知道/不保证/也许/可能/下次再说”等保留决定权信号，必须返回 `future_promises: []`。
    - `action` 只写“可执行承诺本体”，不得写时间推测或计划态词汇。**禁止出现**：`计划`、`打算`、`准备`、`想要`、`可能`、`也许`、`明天`、`今晚`、`下次` 等时间/意图词。
    - 时间信息统一写入 `due_time`；若无法确定具体时间可为 `null`，但不要把时间短语塞进 `action`。
    - `action` 必须是去叙事的承诺句，推荐模板：`[执行者]在[触发条件]对[对象]执行[动作]` 或 `[执行者]将对[对象]执行[动作]`。
    - `action` 的触发条件允许写“完成作业后/满足约定后”等条件，但不允许写具体时间点。
    - 若同时存在“触发条件 + 时间线索”，两者都保留：触发条件留在 `action`，时间线索写入 `due_time`。
    - 只有在“纯提问且无任何认可信号（含 logical_stance 与 content_anchors）”时，才不要生成 promise。
+   - 所有承诺都填写 `dedup_key`：代表同一承诺或持续规则的稳定英文或原文短键，后续更新同一承诺时必须使用同一个键。
 
 4. **里程碑标记 (is_milestone)**:
    - 若事实属于以下类别之一，则将 `is_milestone` 置为 `true`，否则为 `false`：
@@ -78,6 +80,8 @@ _FACTS_HARVESTER_PROMPT = """\
      - `revelation`（重大披露）: 用户首次透露的重要身份/健康/隐私信息（如职业、重大疾病、秘密）。
    - 命中任意类别时，`milestone_category` 填写对应英文键（`preference` / `relationship_state` / `permission` / `revelation`）。
    - 普通事实（临时状态、日常行程等）设 `is_milestone: false`，`milestone_category: “”`。
+   - 若 `is_milestone=true`，必须填写 `scope`：代表同一生命周期主题的稳定英文键，例如 `language_preference`、`relationship_state`、`health_disclosure`。只有同一 `scope` 的新里程碑会替代旧里程碑。
+   - 所有事实都填写 `dedup_key`：用于去重的稳定英文或原文短键，语义相同的事实必须使用同一个键。
 
 5. **future_promises 示例（必须遵守）**:
    - ✅ 正确：
@@ -108,7 +112,9 @@ _FACTS_HARVESTER_PROMPT = """\
             "category": "事实类别标签（如 occupation、location、preference、hobby、relationship、health、schedule、personality 等）",
             "description": "属性级的客观陈述。格式：'[主语] + [属性/状态]'。示例：'{user_name}住在新西兰奥克兰' 或 '{user_name}对猫毛过敏'。严禁使用叙事句式（如'在某情境下做了某事'）。",
             "is_milestone": false,
-            "milestone_category": ""
+            "milestone_category": "",
+            "scope": "稳定生命周期主题；非里程碑可为空字符串",
+            "dedup_key": "稳定去重键"
         }}
     ],
     "future_promises": [
@@ -116,7 +122,8 @@ _FACTS_HARVESTER_PROMPT = """\
             "target": "{user_name} / {character_name}",
             "action": "[姓名]将对[对象]执行[具体动作]（仅承诺本体，不含计划/时间词）",
             "due_time": "ISO 8601 时间戳（如 2026-04-19T06:00:00+12:00），无法确定则为 null",
-            "commitment_type": "可选字符串，例如 address_preference / language_preference / future_promise"
+            "commitment_type": "可选字符串，例如 address_preference / language_preference / future_promise",
+            "dedup_key": "稳定承诺更新键"
         }}
     ]
 }}

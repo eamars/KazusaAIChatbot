@@ -15,7 +15,7 @@ import uuid
 from datetime import datetime, timezone, timedelta
 from typing import Awaitable, Callable
 
-from kazusa_ai_chatbot.db import ScheduledEventDoc, get_db, update_active_commitment_status
+from kazusa_ai_chatbot.db import ScheduledEventDoc, get_db, update_commitment_status
 
 logger = logging.getLogger(__name__)
 
@@ -166,10 +166,7 @@ async def _handle_followup_message(event: ScheduledEventDoc) -> None:
 async def _handle_future_promise(event: ScheduledEventDoc) -> None:
     """Fire when a previously-recorded promise comes due.
 
-    Marks the associated MemoryDoc as ``fulfilled`` (full "did the bot act on
-    the promise?" reasoning lives in the Stage 4 consolidator refactor — this
-    handler is intentionally a minimal stub for Stage 1 so the scheduler can
-    accept the event type and persist completion).
+    Marks the associated profile-memory commitment as ``fulfilled``.
     """
     payload = event.get("payload") or {}
     memory_id = payload.get("memory_id")
@@ -185,17 +182,7 @@ async def _handle_future_promise(event: ScheduledEventDoc) -> None:
     )
 
     if commitment_id and global_user_id:
-        await update_active_commitment_status(global_user_id, commitment_id, "fulfilled")
-
-    if not memory_id:
-        logger.warning("future_promise event %s has no memory_id — nothing to mark fulfilled", event.get("event_id"))
-        return
-
-    db = await get_db()
-    await db.memory.update_one(
-        {"_id": memory_id},
-        {"$set": {"status": "fulfilled"}},
-    )
+        await update_commitment_status(global_user_id, commitment_id, "fulfilled")
 
 
 register_handler("followup_message", _handle_followup_message)

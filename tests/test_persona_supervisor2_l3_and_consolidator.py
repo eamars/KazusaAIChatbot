@@ -235,6 +235,7 @@ def test_apply_milestone_lifecycle_supersedes_older_addressing_milestone():
             "event": "蚝爹油是杏山千纱 (Kyōyama Kazusa) 的学长",
             "timestamp": "2026-04-21T10:10:35.065166+00:00",
             "category": "revelation",
+            "scope": "relationship_addressing",
             "superseded_by": None,
         }
     ]
@@ -245,6 +246,7 @@ def test_apply_milestone_lifecycle_supersedes_older_addressing_milestone():
             "description": "杏山千纱对蚝爹油的称呼从“学长”变更为“主人”",
             "is_milestone": True,
             "milestone_category": "relationship_state",
+            "scope": "relationship_addressing",
         }
     ]
 
@@ -264,12 +266,14 @@ def test_apply_milestone_lifecycle_supersedes_multiple_open_milestones_in_same_s
             "event": "杏山千纱对蚝爹油的称呼是学长",
             "timestamp": "2026-04-21T10:10:35.065166+00:00",
             "category": "relationship_state",
+            "scope": "relationship_addressing",
             "superseded_by": None,
         },
         {
             "event": "杏山千纱偶尔还是会叫蚝爹油学长",
             "timestamp": "2026-04-22T10:10:35.065166+00:00",
             "category": "relationship_state",
+            "scope": "relationship_addressing",
             "superseded_by": None,
         },
     ]
@@ -280,6 +284,7 @@ def test_apply_milestone_lifecycle_supersedes_multiple_open_milestones_in_same_s
             "description": "杏山千纱对蚝爹油的称呼从“学长”变更为“主人”",
             "is_milestone": True,
             "milestone_category": "relationship_state",
+            "scope": "relationship_addressing",
         }
     ]
 
@@ -311,6 +316,7 @@ def test_apply_milestone_lifecycle_does_not_touch_already_superseded_items():
             "description": "杏山千纱对蚝爹油的称呼从“前辈”变更为“主人”",
             "is_milestone": True,
             "milestone_category": "relationship_state",
+            "scope": "relationship_addressing",
         }
     ]
 
@@ -337,6 +343,7 @@ def test_apply_milestone_lifecycle_does_not_supersede_different_scope_items():
             "event": "蚝爹油具有‘被暴虐的感召’这一设定",
             "timestamp": "2026-04-21T13:49:12.895970+00:00",
             "category": "revelation",
+            "scope": "character_setting",
             "superseded_by": None,
         },
     ]
@@ -347,6 +354,7 @@ def test_apply_milestone_lifecycle_does_not_supersede_different_scope_items():
             "description": "杏山千纱对蚝爹油的称呼从“学长”变更为“主人”",
             "is_milestone": True,
             "milestone_category": "relationship_state",
+            "scope": "relationship_addressing",
         }
     ]
 

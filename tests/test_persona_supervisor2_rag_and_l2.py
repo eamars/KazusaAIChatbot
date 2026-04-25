@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -549,16 +550,25 @@ async def test_third_party_profile_rag_fetches_profile(monkeypatch):
     async def _fake_get_user_profile(global_user_id):
         return {
             "user_image": {
-                "milestones": [{"event": "Met Kazusa", "category": "social"}],
                 "historical_summary": "一个量化爱好者",
                 "recent_observations": ["最近在讨论模型"],
             },
-            "character_diary": [
-                {"entry": "好笛有让千纱教他编程。"},
-            ],
         }
 
     monkeypatch.setattr(rag_executors_module, "get_user_profile", _fake_get_user_profile)
+    monkeypatch.setattr(
+        rag_executors_module,
+        "query_user_profile_memory_blocks",
+        AsyncMock(return_value={
+            "milestones": [{"event": "Met Kazusa", "category": "social"}],
+            "character_diary": [
+                {"entry": "好笛有让千纱教他编程。"},
+            ],
+            "objective_facts": [],
+            "active_commitments": [],
+            "memories": [],
+        }),
+    )
 
     state = _make_rag_state(
         retrieval_plan={"active_sources": ["THIRD_PARTY_PROFILE"]},

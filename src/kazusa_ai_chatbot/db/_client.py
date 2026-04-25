@@ -123,6 +123,7 @@ async def enable_vector_index(
     index_name: str,
     *,
     path: str = "embedding",
+    filter_paths: list[str] | None = None,
 ) -> None:
     """Create a cosine vector-search index on ``collection_name`` if missing.
 
@@ -130,6 +131,7 @@ async def enable_vector_index(
         collection_name: Target collection.
         index_name: Name to assign to the search index.
         path: Field that holds the embedding array. Defaults to ``"embedding"``.
+        filter_paths: Optional scalar fields to index for vector pre-filtering.
     """
     db = await get_db()
     collection = db[collection_name]
@@ -147,16 +149,20 @@ async def enable_vector_index(
     sample_embedding = await get_text_embedding("test")
     num_dimensions = len(sample_embedding)
 
+    fields = [
+        {
+            "type": "vector",
+            "path": path,
+            "numDimensions": num_dimensions,
+            "similarity": "cosine",
+        }
+    ]
+    for filter_path in filter_paths or []:
+        fields.append({"type": "filter", "path": filter_path})
+
     search_index_model = SearchIndexModel(
         definition={
-            "fields": [
-                {
-                    "type": "vector",
-                    "path": path,
-                    "numDimensions": num_dimensions,
-                    "similarity": "cosine",
-                }
-            ]
+            "fields": fields
         },
         name=index_name,
         type="vectorSearch",

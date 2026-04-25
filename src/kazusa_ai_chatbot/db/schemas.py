@@ -10,6 +10,15 @@ from __future__ import annotations
 from typing import TypedDict
 
 
+class MemoryType:
+    """String constants for ``user_profile_memories.memory_type``."""
+
+    DIARY_ENTRY = "diary_entry"
+    OBJECTIVE_FACT = "objective_fact"
+    MILESTONE = "milestone"
+    COMMITMENT = "commitment"
+
+
 class AttachmentDoc(TypedDict, total=False):
     """Multimedia attachment embedded in a conversation message."""
     media_type: str       # MIME type: "image/png", "audio/ogg", etc.
@@ -62,7 +71,7 @@ class PlatformAccountDoc(TypedDict, total=False):
 class CharacterDiaryEntry(TypedDict, total=False):
     """One subjective observation the character made about the user.
 
-    Stored inside ``UserProfileDoc.character_diary``.
+    Hydrated from ``user_profile_memories`` for downstream prompts.
     """
     entry: str          # e.g. "User seems excited about their new job"
     timestamp: str      # ISO-8601 UTC when the observation was recorded
@@ -73,7 +82,7 @@ class CharacterDiaryEntry(TypedDict, total=False):
 class ObjectiveFactEntry(TypedDict, total=False):
     """One verified, objective fact about the user.
 
-    Stored inside ``UserProfileDoc.objective_facts``.
+    Hydrated from ``user_profile_memories`` for downstream prompts.
     """
     fact: str           # e.g. "User lives in Tokyo"
     category: str       # "occupation" | "location" | "hobby" | "relationship" | "general"
@@ -117,36 +126,59 @@ class LinguisticTextureProfileDoc(TypedDict, total=False):
 class UserProfileDoc(TypedDict, total=False):
     """Long-term memory about a single user in the ``user_profiles`` collection.
 
-    Keyed by ``global_user_id`` (UUID4). New profile memory should write to
-    ``character_diary`` and ``objective_facts`` instead of the deprecated flat
-    ``facts`` list.
+    Keyed by ``global_user_id`` (UUID4). Durable user facts, diary entries,
+    milestones, and commitments live in ``user_profile_memories`` and are
+    hydrated into prompt-facing blocks by the RAG layer.
     """
 
     global_user_id: str                          # UUID4 — our internal unique key
     platform_accounts: list[PlatformAccountDoc]  # All linked accounts
     suspected_aliases: list[str]                 # Other global_user_ids suspected to be same person
 
-    # ── Character's subjective observations (NEW) ──────────────
-    character_diary: list[CharacterDiaryEntry]
-    diary_updated_at: str                        # ISO-8601 UTC
-
-    # ── Objective verified facts (NEW) ─────────────────────────
-    objective_facts: list[ObjectiveFactEntry]
-    facts_updated_at: str                        # ISO-8601 UTC
-
-    # ── Active commitments / preferences (authoritative immediate state) ──
-    active_commitments: list["ActiveCommitmentDoc"]
-    active_commitments_updated_at: str           # ISO-8601 UTC
-
-    # ── Three-tier user image (NEW) ────────────────────────────
+    # ── Three-tier user image ──────────────────────────────────
     user_image: dict                             # {milestones, recent_window, historical_summary, meta}
 
     # ── Relationship metrics ───────────────────────────────────
     affinity: int                                # 0–1000 affinity score (default 500)
     last_relationship_insight: str               # Character's instantaneous impression of the user
 
-    # ── Legacy (deprecated — see character_diary/objective_facts) ──
+    # ── Legacy (deprecated — see user_profile_memories) ─────────
     facts: list[str]                             # DEPRECATED flat list of diary+facts text
+
+
+class UserProfileMemoryDoc(TypedDict, total=False):
+    """One atomic, addressable memory for a single user profile.
+
+    Documents live in ``user_profile_memories`` and are the authoritative
+    source for diary entries, objective facts, milestones, and commitments.
+    """
+
+    memory_id: str
+    global_user_id: str
+    memory_type: str
+    content: str
+    embedding: list[float]
+    created_at: str
+    updated_at: str
+    expires_at: str
+    deleted: bool
+    dedup_key: str
+    scope: str
+
+    category: str
+    source: str
+    confidence: float
+    context: str
+
+    commitment_id: str
+    commitment_type: str
+    target: str
+    action: str
+    status: str
+    due_time: str | None
+
+    event_category: str
+    superseded_by: str | None
 
 
 class CharacterProfileDoc(TypedDict, total=False):

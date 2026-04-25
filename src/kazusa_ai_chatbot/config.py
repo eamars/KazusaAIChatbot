@@ -107,10 +107,33 @@ RAG_CACHE_TTL_SECONDS = {
     "character_diary": int(os.getenv("RAG_CACHE_CHARACTER_DIARY_TTL", "1800")),
     "objective_user_facts": int(os.getenv("RAG_CACHE_OBJECTIVE_USER_FACTS_TTL", "3600")),
     "user_promises": int(os.getenv("RAG_CACHE_USER_PROMISES_TTL", "900")),
+    "user_profile_memories": int(os.getenv("RAG_CACHE_USER_PROFILE_MEMORIES_TTL", "900")),
     "internal_memory": int(os.getenv("RAG_CACHE_INTERNAL_MEMORY_TTL", "900")),
     "external_knowledge": int(os.getenv("RAG_CACHE_EXTERNAL_KNOWLEDGE_TTL", "3600")),
     "knowledge_base": int(os.getenv("RAG_CACHE_KNOWLEDGE_BASE_TTL", "2592000")),  # 30 days
 }
+
+# Persistent user-profile memory expiry defaults.
+PROFILE_MEMORY_TTL_SECONDS = {
+    "diary_entry": int(os.getenv("PROFILE_MEMORY_DIARY_TTL_SECONDS", str(90 * 24 * 60 * 60))),
+    "objective_fact": int(os.getenv("PROFILE_MEMORY_FACT_TTL_SECONDS", str(365 * 24 * 60 * 60))),
+    "milestone": int(os.getenv("PROFILE_MEMORY_MILESTONE_TTL_SECONDS", str(1095 * 24 * 60 * 60))),
+    "commitment": int(os.getenv("PROFILE_MEMORY_COMMITMENT_TTL_SECONDS", str(10 * 24 * 60 * 60))),
+}
+
+PROFILE_MEMORY_RECENT_LIMITS = {
+    "diary_entry": int(os.getenv("PROFILE_MEMORY_RECENT_DIARY_LIMIT", "6")),
+    "objective_fact": int(os.getenv("PROFILE_MEMORY_RECENT_FACT_LIMIT", "8")),
+    "milestone": int(os.getenv("PROFILE_MEMORY_RECENT_MILESTONE_LIMIT", "10")),
+}
+
+PROFILE_MEMORY_SEMANTIC_THRESHOLDS = {
+    "diary_entry": float(os.getenv("PROFILE_MEMORY_DIARY_SEMANTIC_THRESHOLD", "0.75")),
+    "objective_fact": float(os.getenv("PROFILE_MEMORY_FACT_SEMANTIC_THRESHOLD", "0.72")),
+    "milestone": float(os.getenv("PROFILE_MEMORY_MILESTONE_SEMANTIC_THRESHOLD", "0.72")),
+}
+
+PROFILE_MEMORY_BUDGET = int(os.getenv("PROFILE_MEMORY_BUDGET", "40"))
 
 # Depth classifier (SHALLOW vs DEEP routing for the RAG dispatcher).
 DEPTH_CLASSIFIER_USE_LIGHT_LLM = os.getenv("DEPTH_CLASSIFIER_USE_LIGHT_LLM", "false").lower() in ("1", "true", "yes")

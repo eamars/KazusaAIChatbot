@@ -51,6 +51,7 @@ dev = [
 create-embeddings = "scripts.create_conversation_history_embedding:async_main"
 search-conversations = "scripts.search_conversation:async_main"
 debug-supervisor-speech = "scripts.debug_supervisor_speech:async_main"
+migrate-user-profile-memories = "scripts.migrate_user_profile_memories:main"
 kazusa-ai-chatbot = "kazusa_ai_chatbot.main:main"
 kazusa-brain = "kazusa_ai_chatbot.service:app"
 kazusa-discord-adapter = "adapters.discord_adapter:main"

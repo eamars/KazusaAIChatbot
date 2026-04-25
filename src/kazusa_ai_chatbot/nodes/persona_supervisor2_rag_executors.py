@@ -14,7 +14,7 @@ from langchain_core.messages import HumanMessage, SystemMessage
 
 from kazusa_ai_chatbot.agents.memory_retriever_agent import memory_retriever_agent
 from kazusa_ai_chatbot.agents.web_search_agent2 import web_search_agent
-from kazusa_ai_chatbot.db import get_user_profile
+from kazusa_ai_chatbot.db import get_user_profile, query_user_profile_memory_blocks
 from kazusa_ai_chatbot.db.conversation import (
     get_conversation_history,
     search_conversation_history,
@@ -735,7 +735,14 @@ async def third_party_profile_rag(state: RAGState) -> dict:
             ledger[ledger_key] = {"found": False}
             continue
 
-        profile_image = _build_image_context(profile.get("user_image") or {})
+        memory_blocks = await query_user_profile_memory_blocks(resolved_id, include_semantic=False)
+        profile_with_memories = dict(profile)
+        image_doc = dict(profile_with_memories.get("user_image") or {})
+        image_doc["milestones"] = memory_blocks["milestones"]
+        profile_with_memories["user_image"] = image_doc
+        profile_with_memories["character_diary"] = memory_blocks["character_diary"]
+
+        profile_image = _build_image_context(profile_with_memories.get("user_image") or {})
 
         profile_lines = [f"### {surface_form} 的用户画像"]
         if profile_image.get("milestones"):
@@ -745,7 +752,7 @@ async def third_party_profile_rag(state: RAGState) -> dict:
         if profile_image.get("recent_observations"):
             profile_lines.append(f"近期观察: {', '.join(profile_image['recent_observations'])}")
 
-        diary = profile.get("character_diary") or []
+        diary = profile_with_memories.get("character_diary") or []
         if diary:
             recent_diary = [str(e.get("entry", "")).strip() for e in diary[-5:] if str(e.get("entry", "")).strip()]
             if recent_diary:

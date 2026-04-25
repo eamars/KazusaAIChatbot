@@ -6,6 +6,7 @@ import json
 
 from langchain_core.messages import HumanMessage, SystemMessage
 
+from kazusa_ai_chatbot.db import query_user_profile_memory_blocks
 from kazusa_ai_chatbot.nodes.persona_supervisor2_consolidator_schema import (
     ConsolidatorState,
     normalize_diary_entries,
@@ -18,28 +19,6 @@ _USER_IMAGE_MAX_RECENT_WINDOW = 6       # sessions to keep before overflow to hi
 _USER_IMAGE_HISTORICAL_MAX_CHARS = 1500 # compress historical_summary when above this
 _CHARACTER_IMAGE_MAX_RECENT_WINDOW = 6
 _CHARACTER_IMAGE_HISTORICAL_MAX_CHARS = 1500
-
-def _infer_milestone_scope(fact: dict) -> str:
-    """Infer a lifecycle scope for milestone supersedence.
-
-    Args:
-        fact: Harvester fact row.
-
-    Returns:
-        A scope key shared by milestones that should supersede one another.
-        Empty string means "no automatic supersedence".
-    """
-    description = str(fact.get("description", ""))
-    milestone_category = str(fact.get("milestone_category", ""))
-    category = str(fact.get("category", ""))
-    lowered = description.lower()
-    if any(token in description for token in ["称呼", "叫", "学长", "主人", "杏奴"]):
-        return "relationship_addressing"
-    if milestone_category == "relationship_state" and category == "relationship":
-        return "relationship_state"
-    if milestone_category == "permission" and any(token in lowered for token in ["english", "chinese", "japanese", "英语", "英文", "中文", "日语"]):
-        return "language_permission"
-    return ""
 
 
 def _apply_milestone_lifecycle(
@@ -63,20 +42,10 @@ def _apply_milestone_lifecycle(
         event = fact.get("description", "")
         if not event:
             continue
-        scope = _infer_milestone_scope(fact)
+        scope = str(fact.get("scope", "")).strip()
         if scope:
             for item in milestones:
                 item_scope = item.get("scope") or ""
-                if not item_scope:
-                    item_scope = _infer_milestone_scope(
-                        {
-                            "description": item.get("event", item.get("description", "")),
-                            "milestone_category": item.get("category", item.get("milestone_category", "")),
-                            "category": item.get("fact_category", ""),
-                        }
-                    )
-                    if item_scope:
-                        item["scope"] = item_scope
                 if item_scope != scope or item.get("superseded_by"):
                     continue
                 item["superseded_by"] = event
@@ -227,20 +196,18 @@ async def _update_user_image(
     character_name = (state.get("character_profile") or {}).get("name", "")
     user_name = state.get("user_name", "")
 
-    milestone_facts = [f for f in new_facts if f.get("is_milestone")]
     non_milestone_facts = [f for f in new_facts if not f.get("is_milestone")]
 
     existing_image = (state.get("user_profile") or {}).get("user_image") or {}
-    milestones = list(existing_image.get("milestones") or [])
+    global_user_id = state.get("global_user_id", "")
+    if global_user_id:
+        memory_blocks = await query_user_profile_memory_blocks(global_user_id, include_semantic=False)
+        milestones = list(memory_blocks.get("milestones") or [])
+    else:
+        milestones = list(existing_image.get("milestones") or [])
     recent_window = list(existing_image.get("recent_window") or [])
     historical_summary = existing_image.get("historical_summary") or ""
     synthesis_count = (existing_image.get("meta") or {}).get("synthesis_count", 0)
-
-    milestones = _apply_milestone_lifecycle(
-        milestones,
-        milestone_facts,
-        timestamp=timestamp,
-    )
 
     has_session_content = bool(diary_entries or non_milestone_facts or last_relationship_insight)
     session_summary = ""

@@ -1,5 +1,5 @@
 """One-shot startup routine that ensures collections, indices, and seeded
-documents exist. Also runs the user_profiles legacy → diary/facts migration.
+documents exist.
 
 All operations are idempotent — safe to run on every service start.
 """
@@ -14,26 +14,8 @@ from kazusa_ai_chatbot.db._client import enable_vector_index, get_db
 logger = logging.getLogger(__name__)
 
 
-# Heuristic markers used by the legacy → new schema migration. A fact whose
-# text contains any of these phrases is more likely a subjective observation
-# (diary) than an objective verifiable fact.
-_DIARY_MARKERS = (
-    "think", "feel", "seem", "feels like",
-    "我觉得", "我想", "似乎", "好像", "感觉",
-)
-
-
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
-
-
-def _classify_legacy_fact(text: str) -> str:
-    """Return ``"diary"`` if the text reads like a subjective note, else ``"fact"``."""
-    lowered = text.lower()
-    for marker in _DIARY_MARKERS:
-        if marker in lowered:
-            return "diary"
-    return "fact"
 
 
 async def db_bootstrap() -> None:
@@ -49,6 +31,7 @@ async def db_bootstrap() -> None:
         "user_profiles",
         "character_state",
         "memory",
+        "user_profile_memories",
         "scheduled_events",
         "rag_cache_index",        # NEW (Stage 2)
         "rag_metadata_index",     # NEW (Stage 2)
@@ -96,15 +79,29 @@ async def db_bootstrap() -> None:
         "source_global_user_id", name="memory_source_user_idx",
     )
 
-    # ── NEW: user_profiles structured-field indexes ───────────────
-    await db.user_profiles.create_index(
-        [("character_diary.timestamp", -1)], name="user_diary_ts",
+    # ── user_profile_memories indexes ─────────────────────────────
+    await db.user_profile_memories.create_index(
+        "memory_id", unique=True, name="user_profile_memory_id_unique",
     )
-    await db.user_profiles.create_index(
-        [("objective_facts.timestamp", -1)], name="user_facts_ts",
+    await db.user_profile_memories.create_index(
+        [("global_user_id", 1), ("memory_type", 1), ("created_at", -1)],
+        name="user_profile_memory_owner_type_recent",
     )
-    await db.user_profiles.create_index(
-        [("objective_facts.category", 1)], name="user_facts_category",
+    await db.user_profile_memories.create_index(
+        [("global_user_id", 1), ("deleted", 1), ("expires_at", 1)],
+        name="user_profile_memory_live_lookup",
+    )
+    await db.user_profile_memories.create_index(
+        [("global_user_id", 1), ("commitment_id", 1)],
+        name="user_profile_memory_commitment_id",
+    )
+    await db.user_profile_memories.create_index(
+        [("global_user_id", 1), ("memory_type", 1), ("dedup_key", 1)],
+        name="user_profile_memory_dedup",
+    )
+    await db.user_profile_memories.create_index(
+        [("memory_type", 1), ("status", 1), ("expires_at", 1)],
+        name="user_profile_memory_expiry_sweep",
     )
 
     # ── NEW: rag_cache_index indexes ──────────────────────────────
@@ -133,76 +130,17 @@ async def db_bootstrap() -> None:
         ("conversation_history", "conversation_history_vector_index", "embedding"),
         ("memory",               "memory_vector_index",              "embedding"),
         ("rag_cache_index",      "rag_cache_vector_index",           "embedding"),          # NEW
+        ("user_profile_memories", "user_profile_memories_vector",     "embedding"),
     ):
         try:
-            await enable_vector_index(collection, index_name, path=path)
+            filter_paths = None
+            if collection == "user_profile_memories":
+                filter_paths = ["global_user_id", "memory_type", "deleted", "status"]
+            await enable_vector_index(collection, index_name, path=path, filter_paths=filter_paths)
         except Exception:
             logger.warning(
                 "Could not create vector index '%s' on %s.%s (requires Atlas)",
                 index_name, collection, path,
             )
 
-    # ── Schema migration: legacy facts → character_diary + objective_facts ──
-    await _migrate_user_profiles_legacy_facts()
-
     logger.info("Database bootstrap complete")
-
-
-async def _migrate_user_profiles_legacy_facts() -> None:
-    """Split each legacy ``facts: list[str]`` into ``character_diary`` and ``objective_facts``.
-
-    Runs once per profile — only touches docs where ``facts`` exists and
-    ``character_diary`` is absent. Safe to run repeatedly.
-    """
-    db = await get_db()
-    cursor = db.user_profiles.find({
-        "facts": {"$exists": True, "$ne": []},
-        "character_diary": {"$exists": False},
-    })
-
-    migrated = 0
-    async for doc in cursor:
-        legacy_facts = doc.get("facts") or []
-        if not isinstance(legacy_facts, list) or not legacy_facts:
-            continue
-
-        diary_entries: list[dict] = []
-        fact_entries: list[dict] = []
-        ts = _now_iso()
-
-        for text in legacy_facts:
-            if not isinstance(text, str) or not text.strip():
-                continue
-            kind = _classify_legacy_fact(text)
-            if kind == "diary":
-                diary_entries.append({
-                    "entry": text,
-                    "timestamp": ts,
-                    "confidence": 0.7,
-                    "context": "migrated_from_legacy_facts",
-                })
-            else:
-                fact_entries.append({
-                    "fact": text,
-                    "category": "general",
-                    "timestamp": ts,
-                    "source": "migrated_from_legacy_facts",
-                    "confidence": 0.8,
-                })
-
-        await db.user_profiles.update_one(
-            {"_id": doc["_id"]},
-            {"$set": {
-                "character_diary": diary_entries,
-                "diary_updated_at": ts,
-                "objective_facts": fact_entries,
-                "facts_updated_at": ts,
-            }},
-        )
-        migrated += 1
-
-    if migrated:
-        logger.info(
-            "Migrated %d user_profiles document(s): legacy facts → character_diary + objective_facts",
-            migrated,
-        )

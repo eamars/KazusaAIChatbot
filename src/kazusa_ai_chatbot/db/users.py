@@ -6,8 +6,7 @@ Covers:
 * Profile read/create (``get_user_profile``, ``create_user_profile``)
 * Affinity (``get_affinity``, ``update_affinity``)
 * Relationship insight (``update_last_relationship_insight``)
-* Character diary: ``get_character_diary``, ``upsert_character_diary``
-* Objective facts: ``get_objective_facts``, ``upsert_objective_facts``
+* Profile memories: ``insert_profile_memories``, ``query_user_profile_memory_blocks``
 * User image (three-tier): ``upsert_user_image``
 """
 
@@ -15,14 +14,24 @@ from __future__ import annotations
 
 import logging
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
-from kazusa_ai_chatbot.config import AFFINITY_DEFAULT, AFFINITY_MAX, AFFINITY_MIN
-from kazusa_ai_chatbot.db._client import get_db
+from kazusa_ai_chatbot.config import (
+    AFFINITY_DEFAULT,
+    AFFINITY_MAX,
+    AFFINITY_MIN,
+    PROFILE_MEMORY_BUDGET,
+    PROFILE_MEMORY_RECENT_LIMITS,
+    PROFILE_MEMORY_SEMANTIC_THRESHOLDS,
+    PROFILE_MEMORY_TTL_SECONDS,
+)
+from kazusa_ai_chatbot.db._client import get_db, get_text_embedding
 from kazusa_ai_chatbot.db.schemas import (
     ActiveCommitmentDoc,
     CharacterDiaryEntry,
+    MemoryType,
     ObjectiveFactEntry,
+    UserProfileMemoryDoc,
     UserProfileDoc,
 )
 
@@ -32,6 +41,98 @@ logger = logging.getLogger(__name__)
 def _now_iso() -> str:
     """Current UTC timestamp as ISO-8601 string."""
     return datetime.now(timezone.utc).isoformat()
+
+
+def _parse_iso(value: str) -> datetime:
+    """Parse an ISO-8601 timestamp into an aware UTC ``datetime``.
+
+    Args:
+        value: Timestamp string emitted by internal code or the LLM.
+
+    Returns:
+        A timezone-aware UTC datetime.
+    """
+    parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def _expiry_from(created_at: str, memory_type: str) -> str:
+    """Return the default expiry timestamp for a profile memory.
+
+    Args:
+        created_at: Memory creation time as ISO-8601.
+        memory_type: One of the ``MemoryType`` string constants.
+
+    Returns:
+        ISO-8601 UTC timestamp after the configured per-type TTL.
+    """
+    ttl_seconds = PROFILE_MEMORY_TTL_SECONDS[memory_type]
+    return (_parse_iso(created_at) + timedelta(seconds=ttl_seconds)).isoformat()
+
+
+def _active_memory_filter(now_iso: str) -> dict:
+    """Build the common non-deleted, non-expired profile-memory filter.
+
+    Args:
+        now_iso: Current UTC timestamp as ISO-8601.
+
+    Returns:
+        MongoDB filter fragment for live memories.
+    """
+    return {
+        "deleted": {"$ne": True},
+        "expires_at": {"$gt": now_iso},
+    }
+
+
+def _memory_to_diary(memory: UserProfileMemoryDoc) -> CharacterDiaryEntry:
+    """Convert a diary memory document into the existing prompt-facing shape."""
+    return {
+        "entry": memory.get("content", ""),
+        "timestamp": memory.get("created_at", ""),
+        "confidence": float(memory.get("confidence", 0.8)),
+        "context": memory.get("context", ""),
+    }
+
+
+def _memory_to_fact(memory: UserProfileMemoryDoc) -> ObjectiveFactEntry:
+    """Convert an objective fact memory into the existing prompt-facing shape."""
+    return {
+        "fact": memory.get("content", ""),
+        "category": memory.get("category", "general"),
+        "timestamp": memory.get("created_at", ""),
+        "source": memory.get("source", "conversation_extracted"),
+        "confidence": float(memory.get("confidence", 0.85)),
+    }
+
+
+def _memory_to_commitment(memory: UserProfileMemoryDoc) -> ActiveCommitmentDoc:
+    """Convert a commitment memory into the existing prompt-facing shape."""
+    return {
+        "commitment_id": memory.get("commitment_id", ""),
+        "target": memory.get("target", ""),
+        "action": memory.get("action", memory.get("content", "")),
+        "commitment_type": memory.get("commitment_type", ""),
+        "status": memory.get("status", "active"),
+        "source": memory.get("source", "conversation_extracted"),
+        "created_at": memory.get("created_at", ""),
+        "updated_at": memory.get("updated_at", ""),
+        "due_time": memory.get("due_time"),
+    }
+
+
+def _memory_to_milestone(memory: UserProfileMemoryDoc) -> dict:
+    """Convert a milestone memory into the generated-image milestone shape."""
+    return {
+        "event": memory.get("content", ""),
+        "timestamp": memory.get("created_at", ""),
+        "category": memory.get("event_category", memory.get("category", "")),
+        "fact_category": memory.get("category", ""),
+        "scope": memory.get("scope", ""),
+        "superseded_by": memory.get("superseded_by"),
+    }
 
 
 # ── Identity resolution ────────────────────────────────────────────
@@ -65,7 +166,6 @@ async def resolve_global_user_id(
         }],
         "suspected_aliases": [],
         "facts": [],
-        "active_commitments": [],
         "affinity": AFFINITY_DEFAULT,
         "last_relationship_insight": "",
     }
@@ -126,6 +226,15 @@ async def get_user_profile(global_user_id: str) -> UserProfileDoc:
     if doc is None:
         return {}
     doc.pop("_id", None)
+    for legacy_field in (
+        "character_diary",
+        "diary_updated_at",
+        "objective_facts",
+        "facts_updated_at",
+        "active_commitments",
+        "active_commitments_updated_at",
+    ):
+        doc.pop(legacy_field, None)
     return doc
 
 
@@ -144,113 +253,376 @@ async def create_user_profile(user_profile: UserProfileDoc) -> None:
     user_profile.setdefault("platform_accounts", [])
     user_profile.setdefault("suspected_aliases", [])
     user_profile.setdefault("affinity", AFFINITY_DEFAULT)
-    user_profile.setdefault("active_commitments", [])
     user_profile.setdefault("last_relationship_insight", "")
     await db.user_profiles.insert_one(user_profile)
 
 
-# ── Character diary (NEW — subjective observations) ────────────────
+# ── Profile memories ───────────────────────────────────────────────
+
+
+async def insert_profile_memories(
+    global_user_id: str,
+    memories: list[UserProfileMemoryDoc],
+) -> list[UserProfileMemoryDoc]:
+    """Persist profile memories into ``user_profile_memories``.
+
+    Args:
+        global_user_id: Owner of the memories.
+        memories: Memory docs already classified by the LLM/persistence builder.
+
+    Returns:
+        The inserted or updated memory docs with generated identifiers,
+        embeddings, and expiry fields populated.
+    """
+    if not global_user_id or not memories:
+        return []
+
+    db = await get_db()
+    now_iso = _now_iso()
+    persisted: list[UserProfileMemoryDoc] = []
+
+    for memory in memories:
+        content = str(memory.get("content", "")).strip()
+        memory_type = str(memory.get("memory_type", "")).strip()
+        if not content or memory_type not in PROFILE_MEMORY_TTL_SECONDS:
+            continue
+
+        created_at = memory.get("created_at") or now_iso
+        expires_at = memory.get("expires_at") or _expiry_from(created_at, memory_type)
+        if memory_type == MemoryType.COMMITMENT:
+            due_time = memory.get("due_time") or expires_at
+            try:
+                expires_at = _parse_iso(str(due_time)).isoformat()
+            except ValueError:
+                expires_at = _expiry_from(created_at, memory_type)
+            memory["due_time"] = expires_at
+
+        doc: UserProfileMemoryDoc = {
+            **memory,
+            "memory_id": memory.get("memory_id") or str(uuid.uuid4()),
+            "global_user_id": global_user_id,
+            "memory_type": memory_type,
+            "content": content,
+            "created_at": created_at,
+            "updated_at": memory.get("updated_at") or now_iso,
+            "expires_at": expires_at,
+            "deleted": bool(memory.get("deleted", False)),
+            "embedding": memory.get("embedding") or await get_text_embedding(content),
+        }
+
+        if memory_type == MemoryType.COMMITMENT:
+            commitment_id = doc.get("commitment_id") or str(uuid.uuid4())
+            doc["commitment_id"] = commitment_id
+            doc["status"] = doc.get("status") or "active"
+            duplicate_terms = [{"commitment_id": commitment_id}]
+            if doc.get("dedup_key"):
+                duplicate_terms.append({"dedup_key": doc["dedup_key"]})
+            existing = await db.user_profile_memories.find_one({
+                "global_user_id": global_user_id,
+                "memory_type": MemoryType.COMMITMENT,
+                "deleted": {"$ne": True},
+                "$or": duplicate_terms,
+            })
+            if existing is not None:
+                doc["memory_id"] = existing["memory_id"]
+                doc["created_at"] = existing.get("created_at", created_at)
+                await db.user_profile_memories.update_one(
+                    {"memory_id": existing["memory_id"]},
+                    {"$set": doc},
+                )
+                persisted.append(doc)
+                continue
+
+        if memory_type == MemoryType.OBJECTIVE_FACT and doc.get("dedup_key"):
+            existing_fact = await db.user_profile_memories.find_one({
+                "global_user_id": global_user_id,
+                "memory_type": MemoryType.OBJECTIVE_FACT,
+                "deleted": {"$ne": True},
+                "dedup_key": doc["dedup_key"],
+            })
+            if existing_fact is not None:
+                persisted.append(existing_fact)
+                continue
+
+        if memory_type == MemoryType.MILESTONE and doc.get("scope"):
+            await db.user_profile_memories.update_many(
+                {
+                    "global_user_id": global_user_id,
+                    "memory_type": MemoryType.MILESTONE,
+                    "scope": doc["scope"],
+                    "deleted": {"$ne": True},
+                    "superseded_by": {"$in": [None, ""]},
+                },
+                {"$set": {"superseded_by": doc["memory_id"], "updated_at": now_iso}},
+            )
+
+        await db.user_profile_memories.insert_one(doc)
+        persisted.append(doc)
+
+    return persisted
+
+
+async def query_profile_memories_recent(
+    global_user_id: str,
+    limits: dict[str, int] | None = None,
+) -> list[UserProfileMemoryDoc]:
+    """Load recent profile memories plus all active commitments.
+
+    Args:
+        global_user_id: Owner of the memories.
+        limits: Per-type limits for diary, objective facts, and milestones.
+
+    Returns:
+        Recent live memories sorted within each type by newest first.
+    """
+    if not global_user_id:
+        return []
+
+    db = await get_db()
+    now_iso = _now_iso()
+    effective_limits = limits or PROFILE_MEMORY_RECENT_LIMITS
+    results: list[UserProfileMemoryDoc] = []
+
+    for memory_type, limit in effective_limits.items():
+        cursor = db.user_profile_memories.find({
+            "global_user_id": global_user_id,
+            "memory_type": memory_type,
+            **_active_memory_filter(now_iso),
+        }).sort("created_at", -1).limit(limit)
+        results.extend(await cursor.to_list(length=limit))
+
+    commitment_cursor = db.user_profile_memories.find({
+        "global_user_id": global_user_id,
+        "memory_type": MemoryType.COMMITMENT,
+        "status": "active",
+        **_active_memory_filter(now_iso),
+    }).sort("created_at", -1)
+    results.extend(await commitment_cursor.to_list(length=None))
+    return results
+
+
+async def query_profile_memories_vector(
+    global_user_id: str,
+    embedding: list[float],
+    thresholds: dict[str, float] | None = None,
+    limit_per_type: int = 25,
+) -> list[UserProfileMemoryDoc]:
+    """Run vector recall over diary, objective fact, and milestone memories.
+
+    Args:
+        global_user_id: Owner of the memories.
+        embedding: Query embedding for the current topic.
+        thresholds: Per-type minimum vector score.
+        limit_per_type: Maximum hits to request per searchable type.
+
+    Returns:
+        Live semantic hits with embeddings removed.
+    """
+    if not global_user_id or not embedding:
+        return []
+
+    db = await get_db()
+    now_iso = _now_iso()
+    effective_thresholds = thresholds or PROFILE_MEMORY_SEMANTIC_THRESHOLDS
+    results: list[UserProfileMemoryDoc] = []
+
+    for memory_type, threshold in effective_thresholds.items():
+        cursor = db.user_profile_memories.aggregate([
+            {
+                "$vectorSearch": {
+                    "index": "user_profile_memories_vector",
+                    "path": "embedding",
+                    "queryVector": embedding,
+                    "numCandidates": 100,
+                    "limit": limit_per_type,
+                    "filter": {
+                        "global_user_id": global_user_id,
+                        "memory_type": memory_type,
+                        "deleted": False,
+                    },
+                }
+            },
+            {"$match": {"expires_at": {"$gt": now_iso}}},
+            {"$addFields": {"score": {"$meta": "vectorSearchScore"}}},
+            {"$match": {"score": {"$gte": threshold}}},
+            {"$unset": "embedding"},
+        ])
+        results.extend(await cursor.to_list(length=limit_per_type))
+    return results
+
+
+async def query_user_profile_memory_blocks(
+    global_user_id: str,
+    *,
+    topic_embedding: list[float] | None = None,
+    include_semantic: bool = False,
+    budget: int = PROFILE_MEMORY_BUDGET,
+) -> dict:
+    """Return prompt-facing named memory blocks for a user.
+
+    Args:
+        global_user_id: Owner of the memories.
+        topic_embedding: Current-topic embedding for DEEP semantic recall.
+        include_semantic: Whether vector recall should augment recent memories.
+        budget: Maximum non-commitment memories after merge and dedup.
+
+    Returns:
+        Dict with ``character_diary``, ``objective_facts``,
+        ``active_commitments``, ``milestones``, and raw ``memories``.
+    """
+    recent = await query_profile_memories_recent(global_user_id)
+    semantic = []
+    if include_semantic and topic_embedding:
+        semantic = await query_profile_memories_vector(global_user_id, topic_embedding)
+
+    seen_ids: set[str] = set()
+    merged: list[UserProfileMemoryDoc] = []
+    commitments: list[UserProfileMemoryDoc] = []
+    for memory in recent + semantic:
+        memory_id = memory.get("memory_id", "")
+        if not memory_id or memory_id in seen_ids:
+            continue
+        seen_ids.add(memory_id)
+        if memory.get("memory_type") == MemoryType.COMMITMENT:
+            commitments.append(memory)
+            continue
+        if len(merged) < budget:
+            merged.append(memory)
+
+    all_memories = merged + commitments
+    return {
+        "character_diary": [
+            _memory_to_diary(memory)
+            for memory in all_memories
+            if memory.get("memory_type") == MemoryType.DIARY_ENTRY
+        ],
+        "objective_facts": [
+            _memory_to_fact(memory)
+            for memory in all_memories
+            if memory.get("memory_type") == MemoryType.OBJECTIVE_FACT
+        ],
+        "active_commitments": [
+            _memory_to_commitment(memory)
+            for memory in commitments
+        ],
+        "milestones": [
+            _memory_to_milestone(memory)
+            for memory in all_memories
+            if memory.get("memory_type") == MemoryType.MILESTONE
+        ],
+        "memories": all_memories,
+    }
+
+
+async def update_commitment_status(
+    global_user_id: str,
+    commitment_id: str,
+    new_status: str,
+) -> None:
+    """Update one profile-memory commitment status.
+
+    Args:
+        global_user_id: Owner of the commitment.
+        commitment_id: Stable commitment identifier.
+        new_status: New lifecycle status.
+
+    Returns:
+        None.
+    """
+    if not global_user_id or not commitment_id:
+        return
+    db = await get_db()
+    await db.user_profile_memories.update_one(
+        {
+            "global_user_id": global_user_id,
+            "memory_type": MemoryType.COMMITMENT,
+            "commitment_id": commitment_id,
+        },
+        {"$set": {"status": new_status, "updated_at": _now_iso()}},
+    )
+
+
+async def expire_overdue_profile_memories() -> int:
+    """Mark active commitments past expiry as expired.
+
+    Returns:
+        Number of commitment docs updated.
+    """
+    db = await get_db()
+    result = await db.user_profile_memories.update_many(
+        {
+            "memory_type": MemoryType.COMMITMENT,
+            "status": "active",
+            "expires_at": {"$lte": _now_iso()},
+        },
+        {"$set": {"status": "expired", "updated_at": _now_iso()}},
+    )
+    return int(result.modified_count)
+
+
+# ── Prompt-shape compatibility helpers backed by user_profile_memories ──
 
 
 async def get_character_diary(global_user_id: str) -> list[CharacterDiaryEntry]:
-    """Retrieve the character's subjective diary entries about ``global_user_id``."""
-    db = await get_db()
-    doc = await db.user_profiles.find_one({"global_user_id": global_user_id})
-    if doc is None:
-        return []
-    return doc.get("character_diary", [])
+    """Retrieve prompt-facing diary entries from ``user_profile_memories``."""
+    blocks = await query_user_profile_memory_blocks(global_user_id, include_semantic=False)
+    return blocks["character_diary"]
 
 
 async def upsert_character_diary(
     global_user_id: str,
     new_entries: list[CharacterDiaryEntry],
 ) -> None:
-    """Append diary entries to the user's subjective diary stream.
-
-    Existing entries are preserved in chronological order; new entries are
-    appended at the end.
-
-    Args:
-        global_user_id: Owner of the diary.
-        new_entries: List of ``CharacterDiaryEntry`` dicts to append.
-
-    Returns:
-        None.
-    """
-    if not new_entries:
-        return
-    db = await get_db()
-    existing = await get_character_diary(global_user_id)
-    merged = list(existing) + list(new_entries)
-
-    await db.user_profiles.update_one(
-        {"global_user_id": global_user_id},
-        {"$set": {
-            "global_user_id": global_user_id,
-            "character_diary": merged,
-            "diary_updated_at": _now_iso(),
-        }},
-        upsert=True,
-    )
+    """Insert diary entries into ``user_profile_memories``."""
+    memories = [
+        {
+            "memory_type": MemoryType.DIARY_ENTRY,
+            "content": entry.get("entry", ""),
+            "created_at": entry.get("timestamp") or _now_iso(),
+            "updated_at": _now_iso(),
+            "confidence": entry.get("confidence", 0.8),
+            "context": entry.get("context", ""),
+        }
+        for entry in new_entries
+    ]
+    await insert_profile_memories(global_user_id, memories)
 
 
 # ── Objective facts (NEW — verified facts) ─────────────────────────
 
 
 async def get_objective_facts(global_user_id: str) -> list[ObjectiveFactEntry]:
-    """Retrieve the verified objective facts about ``global_user_id``."""
-    db = await get_db()
-    doc = await db.user_profiles.find_one({"global_user_id": global_user_id})
-    if doc is None:
-        return []
-    return doc.get("objective_facts", [])
+    """Retrieve prompt-facing objective facts from ``user_profile_memories``."""
+    blocks = await query_user_profile_memory_blocks(global_user_id, include_semantic=False)
+    return blocks["objective_facts"]
 
 
 async def upsert_objective_facts(
     global_user_id: str,
     new_facts: list[ObjectiveFactEntry],
 ) -> None:
-    """Add objective facts with case-insensitive deduplication on ``fact``.
-
-    A new entry with the same fact text (case-insensitive) overwrites any
-    existing entry.
-
-    Args:
-        global_user_id: Owner of the facts.
-        new_facts: List of ``ObjectiveFactEntry`` dicts to merge in.
-
-    Returns:
-        None.
-    """
-    if not new_facts:
-        return
-    db = await get_db()
-    existing = await get_objective_facts(global_user_id)
-
-    by_text: dict[str, ObjectiveFactEntry] = {f.get("fact", "").lower(): f for f in existing if f.get("fact")}
-    for nf in new_facts:
-        text = nf.get("fact", "")
-        if text:
-            by_text[text.lower()] = nf
-
-    merged = list(by_text.values())
-
-    await db.user_profiles.update_one(
-        {"global_user_id": global_user_id},
-        {"$set": {
-            "global_user_id": global_user_id,
-            "objective_facts": merged,
-            "facts_updated_at": _now_iso(),
-        }},
-        upsert=True,
-    )
+    """Insert objective facts into ``user_profile_memories``."""
+    memories = [
+        {
+            "memory_type": MemoryType.OBJECTIVE_FACT,
+            "content": fact.get("fact", ""),
+            "created_at": fact.get("timestamp") or _now_iso(),
+            "updated_at": _now_iso(),
+            "category": fact.get("category", "general"),
+            "source": fact.get("source", "conversation_extracted"),
+            "confidence": fact.get("confidence", 0.85),
+            "dedup_key": str(fact.get("fact", "")).strip().lower(),
+        }
+        for fact in new_facts
+    ]
+    await insert_profile_memories(global_user_id, memories)
 
 
 async def upsert_active_commitments(
     global_user_id: str,
     new_commitments: list[ActiveCommitmentDoc],
 ) -> None:
-    """Merge active commitments into ``user_profiles`` by ``action`` text.
+    """Merge active commitments into ``user_profile_memories`` by dedup key.
 
     Args:
         global_user_id: Owner of the commitments.
@@ -259,37 +631,24 @@ async def upsert_active_commitments(
     Returns:
         None.
     """
-    if not new_commitments:
-        return
-    db = await get_db()
-    existing_profile = await get_user_profile(global_user_id)
-    existing = existing_profile.get("active_commitments") or []
-
-    by_action: dict[str, ActiveCommitmentDoc] = {
-        item.get("action", "").lower(): item
-        for item in existing
-        if item.get("action")
-    }
-    for commitment in new_commitments:
-        action = commitment.get("action", "")
-        if not action:
-            continue
-        previous = by_action.get(action.lower(), {})
-        by_action[action.lower()] = {
-            **previous,
-            **commitment,
-            "updated_at": commitment.get("updated_at", _now_iso()),
+    memories = [
+        {
+            "memory_type": MemoryType.COMMITMENT,
+            "content": commitment.get("action", ""),
+            "action": commitment.get("action", ""),
+            "commitment_id": commitment.get("commitment_id", ""),
+            "target": commitment.get("target", ""),
+            "commitment_type": commitment.get("commitment_type", ""),
+            "status": commitment.get("status", "active"),
+            "source": commitment.get("source", "conversation_extracted"),
+            "created_at": commitment.get("created_at") or _now_iso(),
+            "updated_at": commitment.get("updated_at") or _now_iso(),
+            "due_time": commitment.get("due_time"),
+            "dedup_key": str(commitment.get("action", "")).strip().lower(),
         }
-
-    await db.user_profiles.update_one(
-        {"global_user_id": global_user_id},
-        {"$set": {
-            "global_user_id": global_user_id,
-            "active_commitments": list(by_action.values()),
-            "active_commitments_updated_at": _now_iso(),
-        }},
-        upsert=True,
-    )
+        for commitment in new_commitments
+    ]
+    await insert_profile_memories(global_user_id, memories)
 
 
 async def update_active_commitment_status(
@@ -297,7 +656,7 @@ async def update_active_commitment_status(
     commitment_id: str,
     status: str,
 ) -> None:
-    """Update the lifecycle status of one active commitment in ``user_profiles``.
+    """Update the lifecycle status of one active commitment.
 
     Args:
         global_user_id: Owner of the commitment.
@@ -307,33 +666,7 @@ async def update_active_commitment_status(
     Returns:
         None.
     """
-    if not global_user_id or not commitment_id:
-        return
-    profile = await get_user_profile(global_user_id)
-    commitments = list(profile.get("active_commitments") or [])
-    if not commitments:
-        return
-
-    updated = False
-    now_iso = _now_iso()
-    for item in commitments:
-        if item.get("commitment_id") != commitment_id:
-            continue
-        item["status"] = status
-        item["updated_at"] = now_iso
-        updated = True
-
-    if not updated:
-        return
-
-    db = await get_db()
-    await db.user_profiles.update_one(
-        {"global_user_id": global_user_id},
-        {"$set": {
-            "active_commitments": commitments,
-            "active_commitments_updated_at": now_iso,
-        }},
-    )
+    await update_commitment_status(global_user_id, commitment_id, status)
 
 
 # ── Three-tier user image ─────────────────────────────────────────

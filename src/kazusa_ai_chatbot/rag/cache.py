@@ -41,6 +41,7 @@ DEFAULT_TTL_SECONDS = {
     "character_diary": 1800,        # 30 min — character's subjective observations
     "objective_user_facts": 3600,   # 60 min — verified facts about the user
     "user_promises": 900,           # 15 min — time-sensitive commitments
+    "user_profile_memories": 900,   # 15 min — hydrated durable user memory blocks
 
     # Conversation-related, per-user scoped
     "internal_memory": 900,         # 15 min — conversation history snippets
