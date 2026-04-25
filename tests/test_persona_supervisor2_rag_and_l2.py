@@ -379,6 +379,23 @@ async def test_call_cognition_consciousness_passes_objective_facts(monkeypatch):
     assert "年龄: 15" in payload["research_facts"]["objective_facts"]
 
 
+def test_evidence_presentation_level_is_branch_based_only():
+    assert rag_executors_module._select_evidence_presentation_level("input_context") == "raw_evidence"
+    assert rag_executors_module._select_evidence_presentation_level("external") == "source_brief"
+    assert rag_executors_module._select_evidence_presentation_level("third_party_profile") == "structured_facts"
+
+
+def test_merge_expected_response_contract_preserves_existing_contract():
+    merged = rag_executors_module._merge_expected_response_contract(
+        branch="input_context",
+        expected_response="返回最近相关记录",
+    )
+
+    assert "返回最近相关记录" in merged
+    assert "附加约束" in merged
+    assert "不要替角色回答" in merged
+
+
 @pytest.mark.asyncio
 async def test_input_context_dispatcher_uses_resolved_task(monkeypatch):
     llm = _CapturingAsyncLLM({
@@ -406,6 +423,11 @@ async def test_input_context_dispatcher_uses_resolved_task(monkeypatch):
     payload = json.loads(llm.messages[1].content)
     assert payload["user_input"] == state["continuation_context"]["resolved_task"]
     assert payload["raw_user_input"] == "这个 https://example.com/page"
+
+    result = await rag_executors_module.input_context_rag_dispatcher(state)
+    assert "简短回答" in result["input_context_expected_response"]
+    assert "附加约束" in result["input_context_expected_response"]
+    assert "不要替角色回答" in result["input_context_expected_response"]
 
 
 @pytest.mark.asyncio
@@ -435,6 +457,11 @@ async def test_external_dispatcher_uses_resolved_task(monkeypatch):
     payload = json.loads(llm.messages[1].content)
     assert payload["user_input"] == state["continuation_context"]["resolved_task"]
     assert payload["raw_user_input"] == "这个 https://example.com/page"
+
+    result = await rag_executors_module.external_rag_dispatcher(state)
+    assert "简短回答" in result["external_rag_expected_response"]
+    assert "附加约束" in result["external_rag_expected_response"]
+    assert "不要替角色回答" in result["external_rag_expected_response"]
 
 
 @pytest.mark.asyncio
@@ -515,8 +542,9 @@ async def test_channel_recent_entity_rag_fetches_by_id(monkeypatch):
         }],
     )
     result = await rag_executors_module.channel_recent_entity_rag(state)
-    assert "好笛有" in result["channel_recent_entity_results"]
-    assert "这是好笛有的消息" in result["channel_recent_entity_results"]
+    payload = json.loads(result["channel_recent_entity_results"])
+    assert payload[0]["entity"] == "好笛有"
+    assert payload[0]["messages"][0]["content"] == "这是好笛有的消息"
 
 
 @pytest.mark.asyncio
@@ -547,31 +575,44 @@ async def test_third_party_profile_rag_skips_current_user():
 
 @pytest.mark.asyncio
 async def test_third_party_profile_rag_fetches_profile(monkeypatch):
-    async def _fake_get_user_profile(global_user_id):
-        return {
-            "user_image": {
-                "historical_summary": "一个量化爱好者",
-                "recent_observations": ["最近在讨论模型"],
-            },
-        }
-
-    monkeypatch.setattr(rag_executors_module, "get_user_profile", _fake_get_user_profile)
+    retriever = AsyncMock(return_value=({
+        "user_image": {
+            "milestones": [{"event": "Met Kazusa", "category": "social"}],
+            "recent_window": [{"summary": "最近在讨论模型"}],
+            "historical_summary": "一个量化爱好者",
+        },
+        "character_diary": [{"entry": "好笛有让千纱教他编程。"}],
+        "last_relationship_insight": "擅长提技术问题的人",
+    }, {
+        "milestones": [{"event": "Met Kazusa", "category": "social"}],
+        "character_diary": [{"entry": "好笛有让千纱教他编程。"}],
+        "objective_facts": [],
+        "active_commitments": [],
+        "memories": [],
+    }))
     monkeypatch.setattr(
         rag_executors_module,
-        "query_user_profile_memory_blocks",
-        AsyncMock(return_value={
-            "milestones": [{"event": "Met Kazusa", "category": "social"}],
-            "character_diary": [
-                {"entry": "好笛有让千纱教他编程。"},
-            ],
-            "objective_facts": [],
-            "active_commitments": [],
-            "memories": [],
+        "user_image_retriever_agent",
+        retriever,
+    )
+    monkeypatch.setattr(
+        rag_executors_module,
+        "_third_party_profile_finalizer_llm",
+        _CapturingAsyncLLM({
+            "response": "好笛有是一个量化爱好者，擅长提技术问题，最近还会来找千纱讨论模型和编程。",
+            "is_empty_result": False,
+            "reason": "资料足够概括稳定画像。",
         }),
     )
 
     state = _make_rag_state(
-        retrieval_plan={"active_sources": ["THIRD_PARTY_PROFILE"]},
+        input_embedding=[0.2, 0.3],
+        depth="DEEP",
+        retrieval_plan={
+            "active_sources": ["THIRD_PARTY_PROFILE"],
+            "task": "检索关于好笛有的持久画像/印象信息",
+            "expected_response": "中文80-120字总结该人物的稳定画像，突出2-3个特征；若证据有限，只写已知印象，不补全。",
+        },
         resolved_entities=[{
             "surface_form": "好笛有",
             "entity_type": "person",
@@ -581,9 +622,28 @@ async def test_third_party_profile_rag_fetches_profile(monkeypatch):
         }],
     )
     result = await rag_executors_module.third_party_profile_rag(state)
-    assert "好笛有" in result["third_party_profile_results"]
-    assert "量化爱好者" in result["third_party_profile_results"]
-    assert "编程" in result["third_party_profile_results"]
+    retriever.assert_awaited_once_with(
+        "uuid-haodieyou",
+        input_embedding=[0.2, 0.3],
+        depth="DEEP",
+    )
+    assert result["third_party_profile_results"] == (
+        "好笛有是一个量化爱好者，擅长提技术问题，最近还会来找千纱讨论模型和编程。"
+    )
+
+
+def test_metadata_confidence_bundle_counts_third_party_profile_results():
+    confidence_scores, response_confidence = rag_module._metadata_confidence_bundle(
+        input_context_results="",
+        input_context_is_empty_result=False,
+        external_rag_results="",
+        external_rag_is_empty_result=False,
+        channel_recent_entity_results="",
+        third_party_profile_results='[{"entity":"小钳子","historical_summary":"量化爱好者"}]',
+    )
+
+    assert confidence_scores["third_party_profile"] > 0.0
+    assert response_confidence == confidence_scores["third_party_profile"]
 
 
 def test_tier_gate_should_run_tier2():

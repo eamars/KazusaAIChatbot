@@ -13,8 +13,8 @@ from datetime import datetime, timedelta, timezone
 from langchain_core.messages import HumanMessage, SystemMessage
 
 from kazusa_ai_chatbot.agents.memory_retriever_agent import memory_retriever_agent
+from kazusa_ai_chatbot.agents.user_image_retriever_agent import user_image_retriever_agent
 from kazusa_ai_chatbot.agents.web_search_agent2 import web_search_agent
-from kazusa_ai_chatbot.db import get_user_profile, query_user_profile_memory_blocks
 from kazusa_ai_chatbot.db.conversation import (
     get_conversation_history,
     search_conversation_history,
@@ -101,6 +101,94 @@ def _resolved_retrieval_input(state: RAGState) -> str:
     return state["decontexualized_input"]
 
 
+def _select_evidence_presentation_level(branch: str) -> str:
+    """Choose a branch-level evidence packaging style.
+
+    Args:
+        branch: Retrieval branch name, typically ``"input_context"`` or
+            ``"external"``.
+
+    Returns:
+        One of ``"raw_evidence"``, ``"structured_facts"``, or
+        ``"source_brief"``.
+    """
+    if branch == "input_context":
+        return "raw_evidence"
+    if branch == "external":
+        return "source_brief"
+    return "structured_facts"
+
+
+def _merge_expected_response_contract(
+    *,
+    branch: str,
+    expected_response: str,
+) -> str:
+    """Append an evidence-packaging rule onto the existing response interface.
+
+    Args:
+        branch: Retrieval branch name, typically ``"input_context"`` or
+            ``"external"``.
+        expected_response: Existing branch-local response contract returned by
+            the dispatcher LLM.
+
+    Returns:
+        A single response contract string that preserves the dispatcher's intent
+        while making clear that RAG must package evidence rather than answer for
+        downstream cognition.
+    """
+    presentation_level = _select_evidence_presentation_level(branch)
+    if presentation_level == "raw_evidence":
+        contract = (
+            "返回给下游认知的证据包，不要替角色回答。优先保留原话、时间、说话者、来源与候选片段；"
+            "如有多条证据，按相关性或时间排序列出，禁止压缩成替角色下结论的一段话。"
+        )
+    elif presentation_level == "structured_facts":
+        contract = (
+            "返回给下游认知的结构化事实包，不要替角色回答。优先列出事实点、对象、时间、状态与来源；"
+            "允许短标题或短分段，但禁止第一人称口吻、禁止建议、禁止主观代答。"
+        )
+    else:
+        contract = (
+            "返回给下游认知的来源扎根证据包，不要替角色回答。输出 3-6 条与任务直接相关的事实要点，"
+            "并为每条注明来源 URL / 页面 / 时间；未知信息必须显式写未知，禁止猜测。"
+        )
+
+    cleaned_expected_response = str(expected_response or "").strip()
+    if not cleaned_expected_response:
+        return contract
+    return f"{cleaned_expected_response}\n附加约束：{contract}"
+
+
+_THIRD_PARTY_PROFILE_FINALIZER_PROMPT = """\
+你是一个人物画像整理器。你的任务是把检索到的第三方人物资料整理成给下游认知使用的中间结果，而不是直接替角色回答用户。
+
+# 核心要求
+1. 严格遵守 `expected_response`，把它当作中间结果的格式契约。
+2. 只能使用 `content` 中已经给出的资料；禁止脑补、禁止补完未知经历。
+3. 优先提炼稳定画像，再补充最近观察；如果证据有限，就明确保持在“已知印象”层面。
+4. 输出必须是单个字符串，适合直接交给下游认知继续推理。
+5. 若 `content` 中已能识别具体 referent，必须显式点名该对象，并直接写出“关于这个对象已知什么”；不要把结果写成对名字本身的疑惑、旁白式观察，或把对象重新写成未知物。
+6. 当资料同时包含稳定画像、近期观察、关系线索时，默认顺序为：稳定画像 → 近期观察 → 关系线索。
+
+# 输入格式
+{{
+    "task": "检索任务",
+    "expected_response": "下游需要的中间结果格式",
+    "content": "第三方人物资料原始包"
+}}
+
+# 输出格式
+请务必返回合法的 JSON 字符串，仅包含以下字段：
+{{
+    "response": "string",
+    "is_empty_result": true or false,
+    "reason": "string"
+}}
+"""
+_third_party_profile_finalizer_llm = get_llm(temperature=0.0, top_p=1.0)
+
+
 async def external_rag_dispatcher(state: RAGState) -> dict:
     retrieval_input = _resolved_retrieval_input(state)
     channel_topic = state["channel_topic"]
@@ -129,7 +217,10 @@ async def external_rag_dispatcher(state: RAGState) -> dict:
     dispatcher_reasoning = result.get("reasoning", "")
     task = result.get("task", "")
     context = result.get("context", {})
-    expected_response = result.get("expected_response", "")
+    expected_response = _merge_expected_response_contract(
+        branch="external",
+        expected_response=str(result.get("expected_response", "")),
+    )
 
     logger.debug(
         "External RAG dispatcher: action=%s task=%s expected=%s context=%s reasoning=%s",
@@ -253,7 +344,10 @@ async def input_context_rag_dispatcher(state: RAGState) -> dict:
     dispatcher_reasoning = result.get("reasoning", "")
     task = result.get("task", "")
     context = result.get("context", {})
-    expected_response = result.get("expected_response", "")
+    expected_response = _merge_expected_response_contract(
+        branch="input_context",
+        expected_response=str(result.get("expected_response", "")),
+    )
 
     logger.debug(
         "Input-context dispatcher: action=%s task=%s expected=%s context=%s reasoning=%s",
@@ -632,7 +726,7 @@ async def channel_recent_entity_rag(state: RAGState) -> dict:
     lookback_hours = retrieval_plan.get("time_scope", {}).get("lookback_hours", CHANNEL_RECENT_ENTITY_LOOKBACK_HOURS)
     time_threshold = (datetime.now(timezone.utc) - timedelta(hours=lookback_hours)).isoformat()
 
-    all_results: list[str] = []
+    all_results: list[dict[str, object]] = []
 
     for entity in resolved_entities:
         surface_form = entity.get("surface_form", "")
@@ -669,19 +763,23 @@ async def channel_recent_entity_rag(state: RAGState) -> dict:
                     messages.append(msg)
 
         if messages:
-            formatted_lines = []
+            formatted_messages = []
             for msg in messages[-CHANNEL_RECENT_ENTITY_MAX_RESULTS:]:
-                speaker = msg.get("display_name", "unknown")
-                content = msg.get("content", "")
-                ts = msg.get("timestamp", "")
-                formatted_lines.append(f"[{ts}] {speaker}: {content}")
+                formatted_messages.append({
+                    "timestamp": str(msg.get("timestamp", "")),
+                    "speaker": str(msg.get("display_name", "unknown")),
+                    "content": str(msg.get("content", "")),
+                })
 
-            entity_summary = f"### {surface_form} 的近期频道记录\n" + "\n".join(formatted_lines)
-            all_results.append(entity_summary)
+            all_results.append({
+                "entity": surface_form,
+                "resolved_global_user_id": resolved_id,
+                "messages": formatted_messages,
+            })
 
         ledger[ledger_key] = {"found": len(messages), "method": "id+keyword" if resolved_id else "keyword"}
 
-    channel_recent_entity_results = "\n\n".join(all_results) if all_results else ""
+    channel_recent_entity_results = json.dumps(all_results, ensure_ascii=False) if all_results else ""
 
     logger.debug(
         "Channel recent entity RAG: entities=%d results_len=%d",
@@ -703,12 +801,14 @@ async def third_party_profile_rag(state: RAGState) -> dict:
     retrieval_plan = state.get("retrieval_plan") or {}
     active_sources = retrieval_plan.get("active_sources", [])
     ledger = dict(state.get("retrieval_ledger") or {})
+    input_embedding = state.get("input_embedding") or []
+    depth = str(state.get("depth") or "")
 
     if "THIRD_PARTY_PROFILE" not in active_sources:
         return {"third_party_profile_results": "", "retrieval_ledger": ledger}
 
     current_user_id = state["global_user_id"]
-    all_results: list[str] = []
+    all_results: list[dict] = []
 
     for entity in resolved_entities:
         resolved_id = entity.get("resolved_global_user_id", "")
@@ -725,43 +825,60 @@ async def third_party_profile_rag(state: RAGState) -> dict:
         if ledger_key in ledger:
             continue
 
-        try:
-            profile = await get_user_profile(resolved_id)
-        except Exception:
-            logger.warning("Failed to fetch third-party profile for %s", resolved_id, exc_info=True)
-            profile = {}
+        profile_with_memories, memory_blocks = await user_image_retriever_agent(
+            resolved_id,
+            input_embedding=input_embedding,
+            depth=depth,
+        )
 
-        if not profile:
+        if not profile_with_memories:
             ledger[ledger_key] = {"found": False}
             continue
 
-        memory_blocks = await query_user_profile_memory_blocks(resolved_id, include_semantic=False)
-        profile_with_memories = dict(profile)
-        image_doc = dict(profile_with_memories.get("user_image") or {})
-        image_doc["milestones"] = memory_blocks["milestones"]
-        profile_with_memories["user_image"] = image_doc
-        profile_with_memories["character_diary"] = memory_blocks["character_diary"]
-
         profile_image = _build_image_context(profile_with_memories.get("user_image") or {})
-
-        profile_lines = [f"### {surface_form} 的用户画像"]
-        if profile_image.get("milestones"):
-            profile_lines.append(f"里程碑: {json.dumps(profile_image['milestones'], ensure_ascii=False)}")
-        if profile_image.get("historical_summary"):
-            profile_lines.append(f"历史总结: {profile_image['historical_summary']}")
-        if profile_image.get("recent_observations"):
-            profile_lines.append(f"近期观察: {', '.join(profile_image['recent_observations'])}")
-
         diary = profile_with_memories.get("character_diary") or []
+        recent_diary: list[str] = []
         if diary:
             recent_diary = [str(e.get("entry", "")).strip() for e in diary[-5:] if str(e.get("entry", "")).strip()]
-            if recent_diary:
-                profile_lines.append(f"主观日记: {'; '.join(recent_diary)}")
 
-        all_results.append("\n".join(profile_lines))
+        objective_facts = [
+            str(entry.get("fact", "")).strip()
+            for entry in (memory_blocks.get("objective_facts") or [])[-8:]
+            if str(entry.get("fact", "")).strip()
+        ]
+
+        all_results.append({
+            "entity": surface_form,
+            "resolved_global_user_id": resolved_id,
+            "relationship_insight": str(profile_with_memories.get("last_relationship_insight") or "").strip(),
+            "milestones": profile_image.get("milestones") or [],
+            "historical_summary": str(profile_image.get("historical_summary") or "").strip(),
+            "recent_observations": profile_image.get("recent_observations") or [],
+            "objective_facts": objective_facts,
+            "recent_diary": recent_diary,
+        })
         ledger[ledger_key] = {"found": True}
 
-    third_party_profile_results = "\n\n".join(all_results) if all_results else ""
+    third_party_profile_results = ""
+    if all_results:
+        expected_response = _merge_expected_response_contract(
+            branch="third_party_profile",
+            expected_response=str(retrieval_plan.get("expected_response", "")),
+        )
+        system_prompt = SystemMessage(content=_THIRD_PARTY_PROFILE_FINALIZER_PROMPT)
+        user_prompt = HumanMessage(content=json.dumps({
+            "task": str(retrieval_plan.get("task", "")),
+            "expected_response": expected_response,
+            "content": all_results,
+        }, ensure_ascii=False))
+        try:
+            response = await _third_party_profile_finalizer_llm.ainvoke([system_prompt, user_prompt])
+            result = parse_llm_json_output(response.content)
+            if not bool(result.get("is_empty_result", False)):
+                third_party_profile_results = str(result.get("response", "")).strip()
+        except Exception:
+            logger.exception("Third party profile finalizer failed")
+            third_party_profile_results = json.dumps(all_results, ensure_ascii=False)
 
     logger.debug(
         "Third party profile RAG: profiles_found=%d results_len=%d",

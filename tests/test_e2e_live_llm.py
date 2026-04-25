@@ -33,6 +33,7 @@ from kazusa_ai_chatbot.db import (
 from kazusa_ai_chatbot.mcp_client import mcp_manager
 from kazusa_ai_chatbot.nodes import persona_supervisor2_rag as rag_module
 from kazusa_ai_chatbot.nodes.persona_supervisor2_rag import _get_rag_cache, call_rag_subgraph
+from kazusa_ai_chatbot.rag.cache import CacheInvalidationScope
 from kazusa_ai_chatbot.utils import trim_history_dict
 
 pytestmark = [pytest.mark.asyncio, pytest.mark.live_llm, pytest.mark.live_db]
@@ -1151,6 +1152,79 @@ async def test_live_rag_subgraph_retrieves_seeded_context(live_env) -> None:
     assert isinstance(research_facts.get("user_image"), dict)
     assert isinstance(research_facts.get("character_image"), dict)
     assert "early_exit" not in rag_metadata
+
+
+async def test_live_real_case_third_party_impression_uses_resolved_profile_evidence(live_env) -> None:
+    target_input = "千纱你觉得小钳子这个人怎么样"
+    history = await get_conversation_history(
+        platform="qq",
+        platform_channel_id="673225019",
+        limit=80,
+    )
+    if not any(str(message.get("content", "")).strip() == target_input for message in history):
+        pytest.skip("Real-case 小钳子 conversation is not present in this DB snapshot.")
+
+    global_user_id = await resolve_global_user_id(
+        platform="qq",
+        platform_user_id="673225019",
+        display_name="蚝爹油",
+    )
+    cache = await _get_rag_cache()
+    await cache.invalidate_scoped(
+        CacheInvalidationScope(
+            cache_type="boundary_cache",
+            global_user_id=global_user_id,
+            reason="refresh real-case third-party impression regression",
+        )
+    )
+    character_profile = await _refresh_character_profile()
+    user_profile = await get_user_profile(global_user_id)
+    rag_result = await call_rag_subgraph(
+        {
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "platform": "qq",
+            "platform_message_id": f"live-rag-real-{uuid4().hex[:10]}",
+            "platform_user_id": "673225019",
+            "global_user_id": global_user_id,
+            "user_name": "蚝爹油",
+            "user_input": target_input,
+            "user_multimedia_input": [],
+            "user_profile": user_profile,
+            "platform_bot_id": _BOT_ID,
+            "bot_name": character_profile.get("name", _BOT_NAME),
+            "character_profile": character_profile,
+            "platform_channel_id": "673225019",
+            "channel_name": "Private",
+            "chat_history_wide": trim_history_dict(history),
+            "chat_history_recent": trim_history_dict(history)[-5:],
+            "should_respond": True,
+            "reason_to_respond": "live_real_case",
+            "use_reply_feature": False,
+            "channel_topic": "询问对‘小钳子’的印象",
+            "indirect_speech_context": "",
+            "debug_modes": {},
+            "decontexualized_input": target_input,
+        }
+    )
+
+    research_facts = rag_result.get("research_facts") or {}
+    third_party_raw = str(research_facts.get("third_party_profile_results") or "")
+    assert third_party_raw
+    assert "小钳子" in third_party_raw
+
+    result, _ = await _run_graph(
+        "real-third-party-impression",
+        "蚝爹油",
+        target_input,
+        channel_name="Private",
+        platform="qq",
+        platform_user_id="673225019",
+        platform_channel_id="673225019",
+    )
+
+    final_dialog = "\n".join(result.get("final_dialog") or [])
+    assert final_dialog
+    assert "小钳子" in final_dialog
 
 
 async def test_live_rag_subgraph_dispatches_external_search(live_env) -> None:

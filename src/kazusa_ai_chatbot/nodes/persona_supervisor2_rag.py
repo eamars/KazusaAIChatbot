@@ -21,6 +21,7 @@ new ``research_metadata`` key carries the trace from all five phases.
 
 from langgraph.graph import StateGraph, START, END
 
+from kazusa_ai_chatbot.agents.user_image_retriever_agent import user_image_retriever_agent
 from kazusa_ai_chatbot.nodes.persona_supervisor2_schema import GlobalPersonaState
 from kazusa_ai_chatbot.nodes.persona_supervisor2_rag_schema import (  # noqa: F401
     RAGState,
@@ -35,10 +36,11 @@ from kazusa_ai_chatbot.config import (
     RAG_CACHE_SIMILARITY_THRESHOLD,
     RAG_CACHE_TTL_SECONDS,
 )
-from kazusa_ai_chatbot.db import get_text_embedding, query_user_profile_memory_blocks
+from kazusa_ai_chatbot.db import get_text_embedding
 from kazusa_ai_chatbot.rag.cache import RAGCache
 from kazusa_ai_chatbot.rag.depth_classifier import (
     DEEP,
+    SHALLOW,
     InputDepthClassifier,
 )
 from kazusa_ai_chatbot.utils import log_preview
@@ -48,8 +50,6 @@ import json
 import logging
 from datetime import datetime, timedelta, timezone
 from typing import Any
-
-from pymongo.errors import PyMongoError
 
 
 logger = logging.getLogger(__name__)
@@ -98,42 +98,6 @@ def _get_depth_classifier() -> InputDepthClassifier:
     return _depth_classifier
 
 
-_USER_PROFILE_MEMORIES_CACHE_TYPE = "user_profile_memories"
-_USER_PROFILE_MEMORIES_KEY_VERSION = "v1"
-
-
-def _user_profile_memories_cache_key(
-    global_user_id: str,
-    input_embedding: list[float],
-    depth: str,
-) -> str:
-    """Build a stable cache key for hydrated user-profile memory blocks.
-
-    For DEEP passes the topic embedding affects the merged result (via vector
-    recall), so the key folds in a hash of the embedding. For SHALLOW the
-    result depends only on the user, so the key collapses across topics and
-    every shallow turn for the same user can share one cache entry.
-    """
-    if depth == DEEP and input_embedding:
-        topic_hash = hashlib.sha256(
-            json.dumps(input_embedding, separators=(",", ":")).encode("utf-8")
-        ).hexdigest()[:16]
-    else:
-        topic_hash = "shallow"
-    raw = f"{_USER_PROFILE_MEMORIES_CACHE_TYPE}|{_USER_PROFILE_MEMORIES_KEY_VERSION}|{global_user_id}|{topic_hash}"
-    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
-
-
-def _strip_memory_embeddings(blocks: dict) -> dict:
-    """Drop embedding floats from ``memories`` so the cache payload stays lean."""
-    stripped = dict(blocks)
-    stripped["memories"] = [
-        {k: v for k, v in mem.items() if k != "embedding"}
-        for mem in blocks.get("memories") or []
-    ]
-    return stripped
-
-
 async def _hydrate_user_profile_from_memories(
     user_profile: dict,
     global_user_id: str,
@@ -153,45 +117,15 @@ async def _hydrate_user_profile_from_memories(
         ``(hydrated_profile, memory_blocks)`` where hydrated_profile preserves
         old downstream keys without making ``user_profiles`` authoritative.
     """
-    memory_blocks: dict | None = None
-    cache_key = _user_profile_memories_cache_key(global_user_id, input_embedding, depth)
-    cache: RAGCache | None = None
-    if global_user_id:
-        try:
-            cache = await _get_rag_cache()
-            hit = await cache.retrieve_if_similar_by_key(cache_key)
-            if hit is not None:
-                memory_blocks = hit.get("results") or None
-        except PyMongoError:
-            logger.exception("user_profile_memories cache probe failed for %s", global_user_id)
-
-    if memory_blocks is None:
-        memory_blocks = await query_user_profile_memory_blocks(
-            global_user_id,
-            topic_embedding=input_embedding,
-            include_semantic=depth == DEEP,
-            budget=PROFILE_MEMORY_BUDGET,
-        )
-        if cache is not None and global_user_id:
-            try:
-                await cache.store_by_key(
-                    cache_key=cache_key,
-                    results=_strip_memory_embeddings(memory_blocks),
-                    cache_type=_USER_PROFILE_MEMORIES_CACHE_TYPE,
-                    global_user_id=global_user_id,
-                    metadata={"depth": depth},
-                )
-            except PyMongoError:
-                logger.exception("user_profile_memories cache store failed for %s", global_user_id)
-
-    hydrated = dict(user_profile)
-    hydrated["character_diary"] = memory_blocks["character_diary"]
-    hydrated["objective_facts"] = memory_blocks["objective_facts"]
-    hydrated["active_commitments"] = memory_blocks["active_commitments"]
-    image_doc = dict(hydrated.get("user_image") or {})
-    image_doc["milestones"] = memory_blocks["milestones"]
-    hydrated["user_image"] = image_doc
-    return hydrated, memory_blocks
+    cache = await _get_rag_cache() if global_user_id else None
+    return await user_image_retriever_agent(
+        global_user_id,
+        user_profile=user_profile,
+        input_embedding=input_embedding,
+        depth=depth,
+        cache=cache,
+        budget=PROFILE_MEMORY_BUDGET,
+    )
 
 
 # ── Phase 6 — re-exports from decomposed submodules ──────────
@@ -280,6 +214,46 @@ def _normalize_retrieval_output(value: Any) -> str:
     if isinstance(value, list):
         return "\n".join(str(item) for item in value if str(item).strip())
     return str(value)
+
+
+def _metadata_confidence_bundle(
+    *,
+    input_context_results: str,
+    input_context_is_empty_result: bool,
+    external_rag_results: str,
+    external_rag_is_empty_result: bool,
+    channel_recent_entity_results: str,
+    third_party_profile_results: str,
+) -> tuple[dict[str, float], float]:
+    """Compute per-branch confidence scores and a combined response confidence.
+
+    Args:
+        input_context_results: Normalized input-context branch payload.
+        input_context_is_empty_result: Explicit emptiness flag for input-context retrieval.
+        external_rag_results: Normalized external branch payload.
+        external_rag_is_empty_result: Explicit emptiness flag for external retrieval.
+        channel_recent_entity_results: Normalized channel recent entity payload.
+        third_party_profile_results: Normalized third-party profile payload.
+
+    Returns:
+        ``(confidence_scores, response_confidence)`` where ``confidence_scores``
+        contains one numeric score per retrieval branch and
+        ``response_confidence`` is the max non-empty branch score.
+    """
+    confidence_scores = {
+        "input_context_rag": _result_confidence(
+            input_context_results,
+            is_empty_result=input_context_is_empty_result,
+        ),
+        "external_rag": _result_confidence(
+            external_rag_results,
+            is_empty_result=external_rag_is_empty_result,
+        ),
+        "channel_recent_entity": _result_confidence(channel_recent_entity_results),
+        "third_party_profile": _result_confidence(third_party_profile_results),
+    }
+    response_confidence = max(confidence_scores.values(), default=0.0)
+    return confidence_scores, response_confidence
 
 
 def _build_character_profile_results(character_profile: dict) -> str:
@@ -923,24 +897,27 @@ async def call_rag_subgraph(state: GlobalPersonaState) -> GlobalPersonaState:
         entity_knowledge_results = ""
         entity_resolution_notes = str(cached_results.get("entity_resolution_notes") or "")
 
-        input_context_conf = _result_confidence(input_context_results, is_empty_result=input_context_is_empty)
-        external_conf = _result_confidence(external_rag_results, is_empty_result=external_is_empty)
+        confidence_scores, response_confidence = _metadata_confidence_bundle(
+            input_context_results=input_context_results,
+            input_context_is_empty_result=input_context_is_empty,
+            external_rag_results=external_rag_results,
+            external_rag_is_empty_result=external_is_empty,
+            channel_recent_entity_results=channel_recent_entity_results,
+            third_party_profile_results=third_party_profile_results,
+        )
 
         sources_used = ["boundary_cache"]
-        if input_context_conf > 0.0:
+        if confidence_scores["input_context_rag"] > 0.0:
             sources_used.append("input_context_rag")
-        if external_conf > 0.0:
+        if confidence_scores["external_rag"] > 0.0:
             sources_used.append("external_rag")
         if channel_recent_entity_results:
             sources_used.append("channel_recent_entity")
         if third_party_profile_results:
             sources_used.append("third_party_profile")
         metadata["rag_sources_used"] = sources_used
-        metadata["confidence_scores"] = {
-            "input_context_rag": input_context_conf,
-            "external_rag": external_conf,
-        }
-        metadata["response_confidence"] = max([input_context_conf, external_conf] + [0.0])
+        metadata["confidence_scores"] = confidence_scores
+        metadata["response_confidence"] = response_confidence
 
         research_facts = {
             "input_context_results": input_context_results,
@@ -1046,29 +1023,26 @@ async def call_rag_subgraph(state: GlobalPersonaState) -> GlobalPersonaState:
     entity_knowledge_results = ""
     entity_resolution_notes = str(result.get("entity_resolution_notes") or "")
 
-    input_context_conf = _result_confidence(
-        input_context_results,
-        is_empty_result=input_context_is_empty_result,
+    confidence_scores, response_confidence = _metadata_confidence_bundle(
+        input_context_results=input_context_results,
+        input_context_is_empty_result=input_context_is_empty_result,
+        external_rag_results=external_rag_results,
+        external_rag_is_empty_result=external_rag_is_empty_result,
+        channel_recent_entity_results=channel_recent_entity_results,
+        third_party_profile_results=third_party_profile_results,
     )
-    external_conf = _result_confidence(
-        external_rag_results,
-        is_empty_result=external_rag_is_empty_result,
-    )
-    metadata["confidence_scores"] = {
-        "input_context_rag": input_context_conf,
-        "external_rag": external_conf,
-    }
+    metadata["confidence_scores"] = confidence_scores
     sources_used = []
-    if input_context_conf > 0.0:
+    if confidence_scores["input_context_rag"] > 0.0:
         sources_used.append("input_context_rag")
-    if external_conf > 0.0:
+    if confidence_scores["external_rag"] > 0.0:
         sources_used.append("external_rag")
     if channel_recent_entity_results:
         sources_used.append("channel_recent_entity")
     if third_party_profile_results:
         sources_used.append("third_party_profile")
     metadata["rag_sources_used"] = sources_used
-    metadata["response_confidence"] = max([input_context_conf, external_conf] + [0.0])
+    metadata["response_confidence"] = response_confidence
     metadata["retrieval_ledger"] = result.get("retrieval_ledger") or {}
 
     logger.debug(

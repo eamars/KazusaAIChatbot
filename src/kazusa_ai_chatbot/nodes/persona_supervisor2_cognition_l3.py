@@ -318,6 +318,8 @@ _CONTENT_ANCHOR_AGENT_PROMPT = """\
 2. **事实织入（相关性优先）**：`research_facts` 提供背景资料，但只有与 `decontexualized_input` **直接相关**的内容才能进入 `[FACT]` 锚点。
    - 判断标准：该事实是否能被当前 `decontexualized_input` 的话题"自然引用"？若否，**不得**将其列为 `[FACT]`。
    - 避免将与当前话题无关的历史记忆（如用户在另一个场合提到的话题）错误地植入本次回应的硬信息点。
+   - 如果 `research_facts` 已经提供了与当前问题直接对应的对象画像、事实摘要或答案线索，优先把这些内容写进 `[FACT]` 或 `[ANSWER]`，而不是退回到对名字本身、称呼本身或语气本身的元评论。
+   - 只要检索证据足以支持围绕该对象/事实作答，就不要把 `[ANSWER]` 写成“这是什么”“这名字好怪”“你指的是谁”这类回避式内容；只有在证据本身真的不足时，才允许转入澄清。
 3. **低置信度优先澄清：** 如果 `character_intent` 为 `CLARIFY`，则 `[DECISION]` 必须落在“信息不足 / 需要对方补全”上，`[ANSWER]` 必须是缩小歧义范围的追问，禁止替用户脑补缺失对象。
    - 若 `decontexualized_input` 仍含未解析指代或省略对象（如「这个 / 那个 / 这句 / 那句 / 这个意思 / 怎么说 / 这个呢」），且 `research_facts` 没有唯一可锚定对象，必须追问“具体指哪一个 / 哪一句 / 哪部分”，不得猜测定义、原因、身份或类别。
 4. **显性回应：** 如果 `decontexualized_input` 中包含明确的询问（Question）、请求（Request）或提议（Proposal），且 `character_intent` 不是 `CLARIFY`，`[ANSWER]` 必须明确包含决定或答案；若 `character_intent` 为 `CLARIFY`，`[ANSWER]` 必须明确包含澄清问题。

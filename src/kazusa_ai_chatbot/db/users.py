@@ -13,6 +13,7 @@ Covers:
 from __future__ import annotations
 
 import logging
+import re
 import uuid
 from datetime import datetime, timedelta, timezone
 
@@ -135,6 +136,177 @@ def _memory_to_milestone(memory: UserProfileMemoryDoc) -> dict:
     }
 
 
+def _empty_memory_blocks() -> dict:
+    """Return the canonical empty prompt-facing memory block bundle.
+
+    Returns:
+        A dict containing the same top-level keys as
+        ``query_user_profile_memory_blocks`` with empty values.
+    """
+    return {
+        "character_diary": [],
+        "objective_facts": [],
+        "active_commitments": [],
+        "milestones": [],
+        "memories": [],
+    }
+
+
+_RECALL_IMAGE_MAX_RECENT_WINDOW = 6
+_RECALL_IMAGE_HISTORY_FALLBACK_LIMIT = 3
+
+
+def _memory_to_recall_observation(memory: UserProfileMemoryDoc) -> dict | None:
+    """Convert a recalled profile memory into a recall-time image observation.
+
+    Args:
+        memory: Raw profile-memory document selected for the current recall pass.
+
+    Returns:
+        ``{"timestamp": ..., "summary": ...}`` for non-empty non-commitment
+        memories, otherwise ``None``.
+    """
+    if memory.get("memory_type") == MemoryType.COMMITMENT:
+        return None
+
+    summary = str(memory.get("content", "")).strip()
+    if not summary:
+        return None
+
+    return {
+        "timestamp": str(memory.get("created_at", "")),
+        "summary": summary,
+    }
+
+
+def _build_recall_image_doc(user_profile: UserProfileDoc, memory_blocks: dict) -> dict:
+    """Build a recall-time image view from merged profile memories.
+
+    Args:
+        user_profile: Lightweight profile header with the stored generated image
+            artifact, if any.
+        memory_blocks: Prompt-facing memory block bundle produced by the recall
+            loader.
+
+    Returns:
+        An image document in the existing ``user_image`` shape whose
+        ``milestones`` come from the authoritative memory collection and whose
+        recent/history sections are refreshed from the recalled memory set.
+    """
+    existing_image = dict((user_profile or {}).get("user_image") or {})
+
+    recall_recent = [
+        observation
+        for observation in (
+            _memory_to_recall_observation(memory)
+            for memory in (memory_blocks.get("memories") or [])
+        )
+        if observation is not None
+    ]
+    existing_recent = [
+        {
+            "timestamp": str(observation.get("timestamp", "")),
+            "summary": str(observation.get("summary", "")).strip(),
+        }
+        for observation in (existing_image.get("recent_window") or [])
+        if isinstance(observation, dict) and str(observation.get("summary", "")).strip()
+    ]
+
+    recent_window: list[dict[str, str]] = []
+    seen_summaries: set[str] = set()
+    for observation in recall_recent + existing_recent:
+        summary = observation["summary"]
+        if summary in seen_summaries:
+            continue
+        seen_summaries.add(summary)
+        recent_window.append(observation)
+        if len(recent_window) >= _RECALL_IMAGE_MAX_RECENT_WINDOW:
+            break
+
+    historical_summary = str(existing_image.get("historical_summary") or "").strip()
+    if not historical_summary:
+        fact_summaries: list[str] = []
+        for fact_entry in memory_blocks.get("objective_facts") or []:
+            fact_text = str(fact_entry.get("fact", "")).strip()
+            if not fact_text or fact_text in fact_summaries:
+                continue
+            fact_summaries.append(fact_text)
+            if len(fact_summaries) >= _RECALL_IMAGE_HISTORY_FALLBACK_LIMIT:
+                break
+
+        if fact_summaries:
+            historical_summary = "；".join(fact_summaries)
+        else:
+            historical_summary = str((user_profile or {}).get("last_relationship_insight") or "").strip()
+
+    image_doc = dict(existing_image)
+    image_doc["milestones"] = memory_blocks["milestones"]
+    image_doc["recent_window"] = recent_window
+    image_doc["historical_summary"] = historical_summary
+    return image_doc
+
+
+def hydrate_user_profile_with_memory_blocks(
+    user_profile: UserProfileDoc,
+    memory_blocks: dict,
+) -> UserProfileDoc:
+    """Merge prompt-facing memory blocks into a lightweight profile header.
+
+    Args:
+        user_profile: Header document from ``user_profiles``.
+        memory_blocks: Prompt-facing blocks returned by
+            ``query_user_profile_memory_blocks`` or cache.
+
+    Returns:
+        A hydrated profile dict containing ``character_diary``,
+        ``objective_facts``, ``active_commitments``, and a ``user_image`` whose
+        recall-time sections come from the authoritative memory collection.
+    """
+    hydrated = dict(user_profile)
+    hydrated["character_diary"] = memory_blocks["character_diary"]
+    hydrated["objective_facts"] = memory_blocks["objective_facts"]
+    hydrated["active_commitments"] = memory_blocks["active_commitments"]
+    hydrated["user_image"] = _build_recall_image_doc(hydrated, memory_blocks)
+    return hydrated
+
+
+async def build_user_profile_recall_bundle(
+    global_user_id: str,
+    *,
+    user_profile: UserProfileDoc | None = None,
+    topic_embedding: list[float] | None = None,
+    include_semantic: bool = False,
+    budget: int = PROFILE_MEMORY_BUDGET,
+) -> tuple[UserProfileDoc, dict]:
+    """Build a hydrated recall bundle for a user from profile header + memories.
+
+    Args:
+        global_user_id: Owner of the profile and memory blocks.
+        user_profile: Optional already-fetched lightweight profile header.
+        topic_embedding: Current-topic embedding for semantic recall.
+        include_semantic: Whether vector recall should augment recency.
+        budget: Maximum non-commitment memory count after merge and dedup.
+
+    Returns:
+        ``(hydrated_profile, memory_blocks)`` where ``hydrated_profile`` keeps
+        the prompt-facing compatibility fields while ``memory_blocks`` preserves
+        the raw block structure for downstream consumers.
+    """
+    if not global_user_id:
+        empty_blocks = _empty_memory_blocks()
+        return hydrate_user_profile_with_memory_blocks({}, empty_blocks), empty_blocks
+
+    profile_header = dict(user_profile) if user_profile is not None else await get_user_profile(global_user_id)
+    memory_blocks = await query_user_profile_memory_blocks(
+        global_user_id,
+        topic_embedding=topic_embedding,
+        include_semantic=include_semantic,
+        budget=budget,
+    )
+    hydrated_profile = hydrate_user_profile_with_memory_blocks(profile_header, memory_blocks)
+    return hydrated_profile, memory_blocks
+
+
 # ── Identity resolution ────────────────────────────────────────────
 
 
@@ -191,6 +363,39 @@ async def link_platform_account(
             "linked_at": _now_iso(),
         }}},
     )
+
+
+async def search_users_by_display_name(name: str, limit: int = 5) -> list[dict]:
+    """Search user profiles whose platform display_name partially matches name.
+
+    Args:
+        name: Display name string to search for (case-insensitive partial match).
+        limit: Maximum number of distinct users to return.
+
+    Returns:
+        List of dicts, each containing ``global_user_id``, ``display_name``,
+        and ``platform`` for the first matching platform account of each user.
+    """
+    stripped = name.strip()
+    if not stripped:
+        return []
+    db = await get_db()
+    pattern = {"$regex": re.escape(stripped), "$options": "i"}
+    cursor = db.user_profiles.find(
+        {"platform_accounts": {"$elemMatch": {"display_name": pattern}}},
+        {"global_user_id": 1, "platform_accounts": 1},
+    ).limit(limit)
+    results: list[dict] = []
+    async for doc in cursor:
+        for acct in doc.get("platform_accounts", []):
+            if re.search(re.escape(stripped), acct.get("display_name", ""), re.IGNORECASE):
+                results.append({
+                    "global_user_id": doc["global_user_id"],
+                    "display_name": acct["display_name"],
+                    "platform": acct.get("platform", ""),
+                })
+                break
+    return results
 
 
 async def add_suspected_alias(

@@ -300,16 +300,21 @@ async def test_expire_overdue_profile_memories_marks_active_commitments(monkeypa
 @pytest.mark.asyncio
 async def test_rag_hydrates_profile_memory_blocks_without_prompt_shape_changes(monkeypatch):
     fake_cache = MagicMock()
-    fake_cache.retrieve_if_similar_by_key = AsyncMock(return_value=None)
-    fake_cache.store_by_key = AsyncMock()
     monkeypatch.setattr(rag_module, "_get_rag_cache", AsyncMock(return_value=fake_cache))
-    monkeypatch.setattr(rag_module, "query_user_profile_memory_blocks", AsyncMock(return_value={
+    retriever = AsyncMock(return_value=({
+        "affinity": 500,
+        "user_image": {"recent_window": [], "milestones": [{"event": "User allowed English replies"}]},
+        "character_diary": [{"entry": "User sounded excited"}],
+        "objective_facts": [{"fact": "User lives in Auckland"}],
+        "active_commitments": [{"action": "Kazusa will reply in English"}],
+    }, {
         "character_diary": [{"entry": "User sounded excited"}],
         "objective_facts": [{"fact": "User lives in Auckland"}],
         "active_commitments": [{"action": "Kazusa will reply in English"}],
         "milestones": [{"event": "User allowed English replies"}],
         "memories": [{"memory_id": "m1", "embedding": [0.1, 0.2]}],
     }))
+    monkeypatch.setattr(rag_module, "user_image_retriever_agent", retriever)
 
     hydrated, blocks = await rag_module._hydrate_user_profile_from_memories(
         {"affinity": 500, "user_image": {"recent_window": []}},
@@ -323,27 +328,29 @@ async def test_rag_hydrates_profile_memory_blocks_without_prompt_shape_changes(m
     assert hydrated["active_commitments"][0]["action"] == "Kazusa will reply in English"
     assert hydrated["user_image"]["milestones"][0]["event"] == "User allowed English replies"
     assert blocks["memories"][0]["embedding"] == [0.1, 0.2]
-    fake_cache.store_by_key.assert_awaited_once()
-    store_kwargs = fake_cache.store_by_key.await_args.kwargs
-    assert store_kwargs["cache_type"] == "user_profile_memories"
-    assert store_kwargs["results"]["memories"] == [{"memory_id": "m1"}]
+    retriever.assert_awaited_once_with(
+        "u1",
+        user_profile={"affinity": 500, "user_image": {"recent_window": []}},
+        input_embedding=[0.1],
+        depth="DEEP",
+        cache=fake_cache,
+        budget=rag_module.PROFILE_MEMORY_BUDGET,
+    )
 
 
 @pytest.mark.asyncio
 async def test_rag_profile_memory_hydration_uses_cache_hit(monkeypatch):
-    cached_blocks = {
+    fake_cache = MagicMock()
+    monkeypatch.setattr(rag_module, "_get_rag_cache", AsyncMock(return_value=fake_cache))
+    retriever = AsyncMock(return_value=({
         "character_diary": [{"entry": "Cached diary"}],
         "objective_facts": [{"fact": "Cached fact"}],
         "active_commitments": [{"action": "Cached commitment"}],
-        "milestones": [{"event": "Cached milestone"}],
+        "user_image": {"milestones": [{"event": "Cached milestone"}]},
+    }, {
         "memories": [{"memory_id": "cached"}],
-    }
-    fake_cache = MagicMock()
-    fake_cache.retrieve_if_similar_by_key = AsyncMock(return_value={"results": cached_blocks})
-    fake_cache.store_by_key = AsyncMock()
-    query_blocks = AsyncMock(return_value={})
-    monkeypatch.setattr(rag_module, "_get_rag_cache", AsyncMock(return_value=fake_cache))
-    monkeypatch.setattr(rag_module, "query_user_profile_memory_blocks", query_blocks)
+    }))
+    monkeypatch.setattr(rag_module, "user_image_retriever_agent", retriever)
 
     hydrated, blocks = await rag_module._hydrate_user_profile_from_memories(
         {"affinity": 500, "user_image": {}},
@@ -352,10 +359,76 @@ async def test_rag_profile_memory_hydration_uses_cache_hit(monkeypatch):
         depth="SHALLOW",
     )
 
-    query_blocks.assert_not_awaited()
-    fake_cache.store_by_key.assert_not_awaited()
     assert hydrated["character_diary"][0]["entry"] == "Cached diary"
     assert blocks["memories"] == [{"memory_id": "cached"}]
+    retriever.assert_awaited_once_with(
+        "u1",
+        user_profile={"affinity": 500, "user_image": {}},
+        input_embedding=[0.1],
+        depth="SHALLOW",
+        cache=fake_cache,
+        budget=rag_module.PROFILE_MEMORY_BUDGET,
+    )
+
+
+def test_hydrate_user_profile_with_memory_blocks_uses_memory_milestones():
+    hydrated = users_module.hydrate_user_profile_with_memory_blocks(
+        {
+            "affinity": 500,
+            "user_image": {"milestones": [{"event": "stale"}], "recent_window": [{"summary": "kept"}]},
+        },
+        {
+            "character_diary": [{"entry": "Diary"}],
+            "objective_facts": [{"fact": "Fact"}],
+            "active_commitments": [{"action": "Promise"}],
+            "milestones": [{"event": "fresh milestone"}],
+            "memories": [
+                {
+                    "memory_id": "m1",
+                    "memory_type": MemoryType.DIARY_ENTRY,
+                    "content": "Diary",
+                    "created_at": "2026-04-25T00:00:00+00:00",
+                },
+                {
+                    "memory_id": "m2",
+                    "memory_type": MemoryType.OBJECTIVE_FACT,
+                    "content": "Fact",
+                    "created_at": "2026-04-24T00:00:00+00:00",
+                },
+            ],
+        },
+    )
+
+    assert hydrated["character_diary"][0]["entry"] == "Diary"
+    assert hydrated["objective_facts"][0]["fact"] == "Fact"
+    assert hydrated["active_commitments"][0]["action"] == "Promise"
+    assert hydrated["user_image"]["milestones"] == [{"event": "fresh milestone"}]
+    assert hydrated["user_image"]["recent_window"] == [
+        {"timestamp": "2026-04-25T00:00:00+00:00", "summary": "Diary"},
+        {"timestamp": "2026-04-24T00:00:00+00:00", "summary": "Fact"},
+        {"timestamp": "", "summary": "kept"},
+    ]
+    assert hydrated["user_image"]["historical_summary"] == "Fact"
+
+
+def test_hydrate_user_profile_with_memory_blocks_falls_back_to_relationship_history():
+    hydrated = users_module.hydrate_user_profile_with_memory_blocks(
+        {
+            "affinity": 500,
+            "last_relationship_insight": "这是关系洞察。",
+            "user_image": {"milestones": [], "recent_window": []},
+        },
+        {
+            "character_diary": [],
+            "objective_facts": [],
+            "active_commitments": [],
+            "milestones": [],
+            "memories": [],
+        },
+    )
+
+    assert hydrated["user_image"]["recent_window"] == []
+    assert hydrated["user_image"]["historical_summary"] == "这是关系洞察。"
 
 
 @pytest.mark.asyncio

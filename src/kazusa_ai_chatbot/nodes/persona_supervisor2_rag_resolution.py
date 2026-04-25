@@ -9,6 +9,7 @@ Moved from ``persona_supervisor2_rag.py`` during Phase 6 decomposition.
 
 from langchain_core.messages import HumanMessage, SystemMessage
 
+from kazusa_ai_chatbot.db import search_users_by_display_name
 from kazusa_ai_chatbot.nodes.persona_supervisor2_rag_schema import RAGState
 from kazusa_ai_chatbot.utils import get_llm, log_preview, parse_llm_json_output
 
@@ -175,6 +176,17 @@ _RAG_PLANNER_PROMPT = """\
     "external_task_hint": "外部搜索提示（可选）",
     "expected_response": "期望的检索结果描述"
 }}
+
+# `expected_response` 设计要求
+- `expected_response` 是给下游认知用的**中间结果格式契约**，不是对 `task` 的改写，也不是最终对用户说的话。
+- 必须尽量写清：
+  - 产物类型（如：摘要、时间线、要点列表、原话摘录、表格、Yes/No）
+  - 长度约束（如：50字以内、80-120字、3条以内）
+  - 信息焦点（如：稳定画像、最近变化、原话证据、来源）
+  - 表达限制（如：客观陈述、不要第一人称、不补全未知信息）
+- 若 `retrieval_mode=THIRD_PARTY_PROFILE`，优先把 `expected_response` 写成**该对象的聚焦画像摘要格式**，例如：`中文80-120字总结该人物的稳定画像，突出2-3个特征；若证据有限，只写已知印象，不补全。`
+- 若 `retrieval_mode=CHANNEL_RECENT_ENTITY`，优先写成最近事件/原话摘录格式。
+- 若 `retrieval_mode=EXTERNAL_KNOWLEDGE`，优先写成来源简报或事实要点格式。
 """
 _rag_planner_llm = get_llm(temperature=0.1, top_p=0.85)
 
@@ -277,6 +289,7 @@ async def entity_grounder(state: RAGState) -> dict:
 
     resolved_entities: list[dict] = []
     resolution_notes: list[str] = []
+    has_unresolved_person = False
 
     for entity in entities:
         surface_form = str(entity.get("surface_form", ""))
@@ -300,28 +313,49 @@ async def entity_grounder(state: RAGState) -> dict:
                     method = "partial_display_name"
                     break
 
-        # Step 2: If still unresolved and entity type is person, try LLM fallback
-        if not resolved_id and entity_type == "person" and participants:
-            candidates = [
+        # Step 2: DB display-name lookup against platform_accounts
+        db_candidates: list[dict] = []
+        if not resolved_id and entity_type in ("person", "unknown"):
+            try:
+                db_results = await search_users_by_display_name(surface_form)
+                for row in db_results:
+                    if row["display_name"].lower() == lower_surface:
+                        resolved_id = row["global_user_id"]
+                        confidence = 0.90
+                        method = "db_exact_display_name"
+                        break
+                    db_candidates.append({
+                        "display_name": row["display_name"],
+                        "global_user_id": row["global_user_id"],
+                        "similarity": f"db display_name match (platform={row['platform']})",
+                    })
+            except Exception:
+                logger.warning("Entity grounder DB lookup failed for %s", surface_form, exc_info=True)
+
+        # Step 3: LLM disambiguation over combined chat + DB candidates
+        if not resolved_id and entity_type == "person":
+            chat_candidates = [
                 {"display_name": name, "global_user_id": uid, "similarity": "chat participant"}
                 for name, uid in participants.items()
             ]
-            try:
-                system_prompt = SystemMessage(content=_ENTITY_GROUNDER_LLM_PROMPT)
-                human_message = HumanMessage(content=json.dumps({
-                    "surface_form": surface_form,
-                    "candidates": candidates,
-                }, ensure_ascii=False))
-                response = await _entity_grounder_llm.ainvoke([system_prompt, human_message])
-                llm_result = parse_llm_json_output(response.content)
-                llm_resolved_id = str(llm_result.get("resolved_global_user_id", ""))
-                llm_confidence = float(llm_result.get("confidence", 0.0))
-                if llm_resolved_id and llm_confidence >= 0.6:
-                    resolved_id = llm_resolved_id
-                    confidence = llm_confidence
-                    method = "llm_disambiguation"
-            except Exception:
-                logger.warning("Entity grounder LLM fallback failed for %s", surface_form, exc_info=True)
+            all_candidates = chat_candidates + db_candidates
+            if all_candidates:
+                try:
+                    system_prompt = SystemMessage(content=_ENTITY_GROUNDER_LLM_PROMPT)
+                    human_message = HumanMessage(content=json.dumps({
+                        "surface_form": surface_form,
+                        "candidates": all_candidates,
+                    }, ensure_ascii=False))
+                    response = await _entity_grounder_llm.ainvoke([system_prompt, human_message])
+                    llm_result = parse_llm_json_output(str(response.content))
+                    llm_resolved_id = str(llm_result.get("resolved_global_user_id", ""))
+                    llm_confidence = float(llm_result.get("confidence", 0.0))
+                    if llm_resolved_id and llm_confidence >= 0.6:
+                        resolved_id = llm_resolved_id
+                        confidence = llm_confidence
+                        method = "llm_disambiguation"
+                except Exception:
+                    logger.warning("Entity grounder LLM fallback failed for %s", surface_form, exc_info=True)
 
         resolved_entity = {
             "surface_form": surface_form,
@@ -336,6 +370,8 @@ async def entity_grounder(state: RAGState) -> dict:
             resolution_notes.append(f"{surface_form} → resolved (method={method}, confidence={confidence:.2f})")
         else:
             resolution_notes.append(f"{surface_form} → unresolved (type={entity_type})")
+            if entity_type == "person":
+                has_unresolved_person = True
 
     entity_resolution_notes = "; ".join(resolution_notes) if resolution_notes else ""
 
@@ -346,7 +382,22 @@ async def entity_grounder(state: RAGState) -> dict:
         log_preview(entity_resolution_notes),
     )
 
-    return {
+    result: dict = {
         "resolved_entities": resolved_entities,
         "entity_resolution_notes": entity_resolution_notes,
     }
+
+    # Source downgrade: unresolved person + THIRD_PARTY_PROFILE planned → add
+    # CHANNEL_RECENT_ENTITY so surface-form keyword fallback can still fire.
+    if has_unresolved_person:
+        active_sources = list(retrieval_plan.get("active_sources", []))
+        if "THIRD_PARTY_PROFILE" in active_sources and "CHANNEL_RECENT_ENTITY" not in active_sources:
+            active_sources.append("CHANNEL_RECENT_ENTITY")
+            updated_plan = dict(retrieval_plan)
+            updated_plan["active_sources"] = active_sources
+            result["retrieval_plan"] = updated_plan
+            logger.debug(
+                "Entity grounder: added CHANNEL_RECENT_ENTITY fallback for unresolved person entities"
+            )
+
+    return result

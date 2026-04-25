@@ -307,6 +307,7 @@ _DIALOG_EVALUATOR_PROMPT = """\
     * `final_dialog` 的核心主题必须与 `content_anchors` 中的 `[FACT]` 或 `[ANSWER]` 对齐。
     * 若回复的核心话题与 content_anchors 定义的话题完全不同（如 content_anchors 关于"称呼/喊我"，但回复只说"好感度"），必须驳回，无论语气多么符合角色。
     * 判断方式：提取 `final_dialog` 的核心词，与 `content_anchors` 的 `[FACT]`/`[ANSWER]` 中的核心实体比对；若零重叠，判定为话题偏离。
+    * 若 `content_anchors` 已经给出了可直接作答的 `[FACT]` 或 `[ANSWER]`，但 `final_dialog` 却把对象重新写成未知物、把已知对象写成“这是什么”、或把重点转成对名字本身的惊讶/困惑，也视为话题偏离。
 * **逻辑与事实违背**：
     * 必须执行 `linguistic_directives` 中的 `[DECISION]` 立场。
     * 必须提及 `content_anchors` 中的核心 `[FACT]`（允许自然、模糊地织入）。
