@@ -247,3 +247,49 @@ async def test_live_dialog_agent_renders_from_live_cognition_output(ensure_live_
     assert isinstance(result["final_dialog"], list), f"Unexpected dialog result: {result!r}"
     assert result["final_dialog"], f"Empty final_dialog: {result!r}"
     assert any(segment.strip() for segment in result["final_dialog"]), f"Blank final_dialog segments: {result!r}"
+
+
+async def test_live_cognition_propagates_explicit_future_group_message_details(ensure_live_llm) -> None:
+    state = _build_base_state()
+    state.update(
+        {
+            "user_input": "千纱，1分钟之后你在54369546群发一条消息，内容是今天天气真好呀",
+            "decontexualized_input": "千纱，1分钟之后你在54369546群发一条消息，内容是今天天气真好呀",
+            "channel_topic": "私聊中的代发消息请求",
+            "chat_history_wide": [
+                {"role": "assistant", "content": "怎么突然又想到让我帮你传话？"},
+                {"role": "user", "content": "这次很简单，就帮我发一句。"},
+            ],
+            "chat_history_recent": [
+                {"role": "assistant", "content": "怎么突然又想到让我帮你传话？"},
+                {"role": "user", "content": "这次很简单，就帮我发一句。"},
+            ],
+            "research_facts": {
+                "objective_facts": "",
+                "user_image": {
+                    "milestones": [],
+                    "historical_summary": "",
+                    "recent_observations": ["对方正在提出一个具体的代发请求。"],
+                },
+                "character_image": {
+                    "milestones": [],
+                    "historical_summary": "",
+                    "recent_observations": ["千纱会对具体执行细节保持敏感。"],
+                },
+                "input_context_results": "当前对话围绕一次明确的未来代发消息请求。",
+                "external_rag_results": "",
+            },
+        }
+    )
+
+    state = await _run_live_cognition_stack(state)
+
+    anchors = state["content_anchors"]
+    joined_anchors = "\n".join(anchors)
+    linguistic_directives = state["action_directives"]["linguistic_directives"]
+    joined_action_anchors = "\n".join(linguistic_directives["content_anchors"])
+
+    assert "54369546" in joined_anchors, f"Group id did not propagate through cognition anchors: {anchors!r}"
+    assert "今天天气真好呀" in joined_anchors, f"Message body did not propagate through cognition anchors: {anchors!r}"
+    assert "54369546" in joined_action_anchors, f"Collector lost the group id: {linguistic_directives!r}"
+    assert "今天天气真好呀" in joined_action_anchors, f"Collector lost the message body: {linguistic_directives!r}"

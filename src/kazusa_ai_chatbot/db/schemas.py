@@ -278,30 +278,21 @@ def build_memory_doc(
 class ScheduledEventDoc(TypedDict, total=False):
     """A scheduled future event in the ``scheduled_events`` collection.
 
-    Used by the scheduler to persist pending jobs across restarts.
-
-    ``payload`` is an event_type-specific sub-document:
-
-    * ``followup_message`` payload fields:
-        - message (str)       : text to send
-        - platform (str)      : target platform
-        - channel_id (str)    : target channel
-    * ``future_promise`` payload fields:
-        - promise_text (str)      : verbatim promise text
-        - memory_id (str)         : ID of the MemoryDoc saved for this promise
-        - original_input (str)    : user message that triggered the promise
-        - context_summary (str)   : brief context so the bot can recall the promise
+    Used by the scheduler to persist pending tool calls across restarts.
     """
-    event_id: str               # UUID4
-    event_type: str             # "followup_message" | "future_promise" | "mood_decay" | "reflection" | ...
-    target_platform: str        # Platform to deliver on
-    target_channel_id: str      # Channel/group to deliver to
-    target_global_user_id: str  # User the event relates to
-    payload: dict               # Event-specific data — schema varies by event_type (see docstring)
-    scheduled_at: str           # ISO-8601 UTC when to fire
-    created_at: str             # ISO-8601 UTC when the event was created
-    status: str                 # "pending" | "running" | "completed" | "failed" | "cancelled"
-    cancelled_at: str           # ISO-8601 UTC — set when status becomes "cancelled"
+    event_id: str
+    tool: str
+    args: dict
+    execute_at: str
+    created_at: str
+    status: str
+    cancelled_at: str
+    source_platform: str
+    source_channel_id: str
+    source_user_id: str
+    source_message_id: str
+    guild_id: str | None
+    bot_role: str
 
 
 class RagCacheIndexDoc(TypedDict, total=False):

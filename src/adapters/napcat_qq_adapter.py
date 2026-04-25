@@ -2,27 +2,87 @@ import os
 import argparse
 import asyncio
 import sys
+from datetime import datetime, timezone
 from dotenv import load_dotenv
 import json
 import base64
 import logging
 import httpx
+import uvicorn
 import websockets
 from typing import Optional
 
+from fastapi import FastAPI, Header, HTTPException
+from pydantic import BaseModel
 
 import re
 
+from kazusa_ai_chatbot.dispatcher import SendResult
+
 logger = logging.getLogger(__name__)
+
+runtime_app = FastAPI(title="Kazusa NapCat Runtime Adapter")
+_runtime_adapter: "NapCatWSAdapter | None" = None
+
+
+class RuntimeSendMessageRequest(BaseModel):
+    channel_id: str
+    text: str
+    reply_to_msg_id: str | None = None
+
+
+class RuntimeSendMessageResponse(BaseModel):
+    platform: str
+    channel_id: str
+    message_id: str
+    sent_at: str
+
+
+@runtime_app.post("/send_message", response_model=RuntimeSendMessageResponse)
+async def send_message_endpoint(
+    req: RuntimeSendMessageRequest,
+    authorization: str = Header(default=""),
+):
+    """Deliver one scheduled outbound message through the live NapCat adapter."""
+
+    if _runtime_adapter is None:
+        raise HTTPException(status_code=503, detail="Runtime adapter is not ready")
+    if _runtime_adapter.runtime_shared_secret:
+        expected = f"Bearer {_runtime_adapter.runtime_shared_secret}"
+        if authorization != expected:
+            raise HTTPException(status_code=401, detail="Unauthorized")
+
+    try:
+        result = await _runtime_adapter.send_message(
+            channel_id=req.channel_id,
+            text=req.text,
+            reply_to_msg_id=req.reply_to_msg_id,
+        )
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+    return RuntimeSendMessageResponse(
+        platform=result.platform,
+        channel_id=result.channel_id,
+        message_id=result.message_id,
+        sent_at=result.sent_at.isoformat(),
+    )
 
 
 class NapCatWSAdapter:
+    platform = "qq"
+
     def __init__(
         self,
         ws_url: str, 
         ws_token: str,
         brain_url: str, 
         brain_response_timeout: int,
+        runtime_host: str,
+        runtime_port: int,
+        runtime_public_url: str,
+        runtime_shared_secret: str = "",
+        heartbeat_seconds: float = 30.0,
         channel_ids: list[str] | None = None,
         debug_modes: dict | None = None,
     ):
@@ -31,10 +91,19 @@ class NapCatWSAdapter:
         self.ws_token = ws_token
         self.brain_url = brain_url.rstrip("/")
         self.channel_ids = set(channel_ids) if channel_ids is not None else None
+        self.runtime_host = runtime_host
+        self.runtime_port = runtime_port
+        self.runtime_public_url = runtime_public_url.rstrip("/")
+        self.runtime_shared_secret = runtime_shared_secret
+        self.heartbeat_seconds = heartbeat_seconds
 
         # The following will be populated on connect
         self.bot_id: Optional[str] = None
         self.bot_name: Optional[str] = None
+        self._ws = None
+        self._runtime_server: uvicorn.Server | None = None
+        self._runtime_server_task: asyncio.Task | None = None
+        self._heartbeat_task: asyncio.Task | None = None
 
         self.debug_modes = debug_modes or {}
 
@@ -49,8 +118,12 @@ class NapCatWSAdapter:
             try:
                 logger.info(f"Connecting to NapCat at {self.ws_url}...")
                 async with websockets.connect(self.ws_url, additional_headers=headers) as ws:
+                    self._ws = ws
                     # 1. Sync Bot Info immediately after connecting
                     await self._fetch_bot_info(ws)
+                    await self._ensure_runtime_server_started()
+                    await self._register_with_brain()
+                    self._ensure_heartbeat_started()
                     logger.info(f"Logged in as {self.bot_name} (ID: {self.bot_id})")
                     if self.channel_ids is not None:
                         logger.info("Active in groups: %s. Other groups are listen-only.", self.channel_ids)
@@ -66,7 +139,86 @@ class NapCatWSAdapter:
                         asyncio.create_task(self.handle_event(data, ws))
             except Exception as e:
                 logger.error(f"Connection lost: {e}. Retrying in 5s...")
+                self._ws = None
                 await asyncio.sleep(5)
+
+    async def _ensure_runtime_server_started(self) -> None:
+        """Start the adapter callback server exactly once for brain-side sends."""
+
+        global _runtime_adapter
+
+        _runtime_adapter = self
+        if self._runtime_server_task is not None:
+            return
+
+        config = uvicorn.Config(
+            runtime_app,
+            host=self.runtime_host,
+            port=self.runtime_port,
+            log_level="warning",
+        )
+        self._runtime_server = uvicorn.Server(config)
+        self._runtime_server_task = asyncio.create_task(self._runtime_server.serve())
+        logger.info(
+            "NapCat runtime callback listening on %s:%s",
+            self.runtime_host,
+            self.runtime_port,
+        )
+
+    async def _register_with_brain(self) -> None:
+        """Register this adapter's outbound callback URL with the brain service."""
+
+        payload = self._runtime_registration_payload()
+        response = await self.brain_client.post(
+            f"{self.brain_url}/runtime/adapters/register",
+            json=payload,
+        )
+        response.raise_for_status()
+        logger.info(
+            "Registered NapCat runtime adapter with brain: callback_url=%s",
+            self.runtime_public_url,
+        )
+
+    def _runtime_registration_payload(self) -> dict:
+        """Return the shared registration payload for startup and heartbeat."""
+
+        return {
+            "platform": self.platform,
+            "callback_url": self.runtime_public_url,
+            "shared_secret": self.runtime_shared_secret,
+            "timeout_seconds": 10.0,
+        }
+
+    async def _send_heartbeat_once(self) -> None:
+        """Refresh the adapter registration in the brain service."""
+
+        response = await self.brain_client.post(
+            f"{self.brain_url}/runtime/adapters/heartbeat",
+            json=self._runtime_registration_payload(),
+        )
+        response.raise_for_status()
+
+    def _ensure_heartbeat_started(self) -> None:
+        """Start the re-registration heartbeat exactly once."""
+
+        if self._heartbeat_task is not None:
+            return
+        self._heartbeat_task = asyncio.create_task(self._run_brain_heartbeat())
+
+    async def _run_brain_heartbeat(self) -> None:
+        """Keep refreshing adapter registration so brain restarts self-heal."""
+
+        while True:
+            await asyncio.sleep(self.heartbeat_seconds)
+            try:
+                await self._send_heartbeat_once()
+            except httpx.HTTPError as exc:
+                logger.warning("NapCat runtime heartbeat failed: %s", exc)
+            else:
+                logger.debug(
+                    "NapCat runtime heartbeat ok: callback_url=%s",
+                    self.runtime_public_url,
+                )
 
     async def _fetch_bot_info(self, ws):
         """Calls get_login_info to retrieve the bot's QQ ID and Nickname."""
@@ -190,6 +342,7 @@ class NapCatWSAdapter:
         payload = {
             "platform": "qq",
             "platform_channel_id": channel_id,
+            "channel_type": "group" if is_group else "private",
             "platform_message_id": message_id,
             "platform_user_id": user_id,
             "platform_bot_id": self.bot_id,
@@ -246,13 +399,69 @@ class NapCatWSAdapter:
             await ws.send(json.dumps({"action": "send_msg", "params": msg_params}))
 
     async def close(self):
+        """Close adapter-owned network clients and callback server."""
+
+        if self._heartbeat_task is not None:
+            self._heartbeat_task.cancel()
+            try:
+                await self._heartbeat_task
+            except asyncio.CancelledError:
+                pass
         await self.brain_client.aclose()
+        if self._runtime_server is not None:
+            self._runtime_server.should_exit = True
+        if self._runtime_server_task is not None:
+            await self._runtime_server_task
+
+    async def send_message(
+        self,
+        channel_id: str,
+        text: str,
+        *,
+        reply_to_msg_id: str | None = None,
+    ) -> SendResult:
+        """Send one outbound message through NapCat's ``send_msg`` action.
+
+        Args:
+            channel_id: QQ group or private-chat identifier.
+            text: Message body to send.
+            reply_to_msg_id: Optional quoted message id.
+
+        Returns:
+            Structured send result for the dispatcher.
+        """
+
+        if self._ws is None:
+            raise RuntimeError("NapCat websocket is not connected")
+
+        message = text
+        if reply_to_msg_id:
+            message = f"[CQ:reply,id={reply_to_msg_id}]{message}"
+
+        params = {
+            "message_type": "group",
+            "group_id": int(channel_id),
+            "message": message,
+        }
+        await self._ws.send(json.dumps({"action": "send_msg", "params": params}))
+        return SendResult(
+            platform=self.platform,
+            channel_id=channel_id,
+            message_id="",
+            sent_at=datetime.now(timezone.utc),
+        )
 
 
 
 def main():
+    load_dotenv()
+
     parser = argparse.ArgumentParser(description="NapCat QQ adapter for Kazusa Brain Service")
     parser.add_argument("--channels", type=str, nargs="*", default=None, help="QQ Group IDs to actively participate in. Other groups will be listen-only.")
+    parser.add_argument("--runtime-host", type=str, default=os.getenv("ADAPTER_RUNTIME_HOST", "127.0.0.1"))
+    parser.add_argument("--runtime-port", type=int, default=int(os.getenv("NAPCAT_RUNTIME_PORT", "8011")))
+    parser.add_argument("--runtime-public-url", type=str, default=os.getenv("ADAPTER_RUNTIME_PUBLIC_URL", ""))
+    parser.add_argument("--heartbeat-seconds", type=float, default=float(os.getenv("ADAPTER_HEARTBEAT_SECONDS", "30")))
     parser.add_argument("--log-level", type=str, default="INFO", choices=["DEBUG", "INFO", "WARNING", "ERROR"])
 
     args = parser.parse_args()
@@ -261,9 +470,6 @@ def main():
         level=getattr(logging, args.log_level),
         format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
     )
-
-    # Load dotenv
-    load_dotenv()
 
     ws_url = os.getenv("NAPCAT_WS_URL")
     if not ws_url:
@@ -282,12 +488,19 @@ def main():
 
     brain_response_timeout = os.getenv("BRAIN_RESPONSE_TIMEOUT", "120")
     brain_response_timeout = int(brain_response_timeout)
+    runtime_public_url = args.runtime_public_url or f"http://127.0.0.1:{args.runtime_port}"
+    runtime_shared_secret = os.getenv("ADAPTER_RUNTIME_SHARED_SECRET", "")
 
     adapter = NapCatWSAdapter(
         ws_url=ws_url,
         ws_token=ws_token,
         brain_url=brain_url,
         brain_response_timeout=brain_response_timeout,
+        runtime_host=args.runtime_host,
+        runtime_port=args.runtime_port,
+        runtime_public_url=runtime_public_url,
+        runtime_shared_secret=runtime_shared_secret,
+        heartbeat_seconds=args.heartbeat_seconds,
         channel_ids=args.channels,
         debug_modes={},
     )

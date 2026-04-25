@@ -48,6 +48,10 @@ class ConsolidatorState(TypedDict):
     global_user_id: str
     user_name: str
     user_profile: dict
+    platform: str
+    platform_channel_id: str
+    channel_type: str
+    platform_message_id: str
 
     # Character related
     action_directives: dict

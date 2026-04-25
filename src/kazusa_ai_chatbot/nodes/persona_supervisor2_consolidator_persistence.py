@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import json
 import logging
 from datetime import datetime, timezone
 from uuid import uuid4
 
+from langchain_core.messages import HumanMessage, SystemMessage
 from pymongo.errors import PyMongoError
 
 from kazusa_ai_chatbot.config import (
@@ -19,7 +21,6 @@ from kazusa_ai_chatbot.db import (
     CharacterDiaryEntry,
     MemoryType,
     ObjectiveFactEntry,
-    ScheduledEventDoc,
     increment_rag_version,
     insert_profile_memories,
     update_affinity,
@@ -38,12 +39,193 @@ from kazusa_ai_chatbot.nodes.persona_supervisor2_consolidator_schema import (
     ConsolidatorState,
     normalize_diary_entries,
 )
+from kazusa_ai_chatbot.dispatcher import (
+    DispatchContext,
+    RawToolCall,
+    TaskDispatcher,
+    ToolRegistry,
+)
+from kazusa_ai_chatbot.dispatcher.task import parse_iso_datetime
 from kazusa_ai_chatbot.nodes.persona_supervisor2_rag import _get_rag_cache
-from kazusa_ai_chatbot.scheduler import schedule_event
+from kazusa_ai_chatbot.utils import get_llm, log_list_preview, parse_llm_json_output
 
 logger = logging.getLogger(__name__)
 
 AFFINITY_CACHE_NUKE_THRESHOLD = 50
+_task_dispatcher: TaskDispatcher | None = None
+_task_registry: ToolRegistry | None = None
+
+_TASK_DISPATCHER_PROMPT = """\
+你负责把角色已经接受的未来约定，转换成可执行的工具调用。
+
+# 目标
+- 输入是角色本轮最终说出口的话、已提取的 `future_promises`、来源平台上下文，以及当前可用工具。
+- 输出必须是零个或多个工具调用；若没有把握，就输出空列表。
+
+# 规则
+1. 只能使用 `available_tools` 中出现的工具名与参数字段。
+2. 所有延迟执行任务都必须使用绝对 UTC 时间 `execute_at`（ISO 8601）；禁止输出相对时间字段。
+2a. 输入里的 `source_channel_type` 表示来源会话类型，常见值有 `group` 和 `private`。
+2b. 如果某个 `future_promises` 已经给出 `due_time`，那就是权威执行时间；`execute_at` 必须与该 `due_time` 表示同一个精确时刻，不能改写时区含义，不能把本地时间原样误写成 UTC。
+3. 若要回到原会话发送消息，使用 `target_channel: "same"`。
+4. 若目标平台与来源平台相同，可以省略 `target_platform`。
+4a. 如果用户明确指定了另一个群/频道/房间 ID（例如 `54369546群`），`target_channel` 必须写那个明确的 ID，而不是 `"same"`。
+4b. 若来源是私聊/DM，但用户要求发到另一个群或频道，仍然按用户指定的目标 ID 填写 `target_channel`；不要因为来源是私聊就回退到 `"same"`。
+4c. `target_channel` 必须是平台实际使用的纯 ID 字符串；不要保留“群”“频道”“房间”“#”之类的人类描述后缀。
+5. 对“持续生效的回复规则/称呼规则/语言偏好/格式约定”这类承诺，如果 `due_time` 为 null，说明它属于长期状态，不是未来某个时刻要发送的新消息。此时必须返回空列表。
+5a. 但如果 `commitment_type` 是 `future_promise`，且语义是模糊但明确的近未来（例如 `later`、`一会儿`、`待会`、`稍后`），并且 `due_time` 为 null，你可以默认 `execute_at = current_utc + 5 minutes`。仍然必须输出绝对 UTC 时间，不能输出相对时间。
+6. 只有“未来某个时刻真的要额外发送一条消息”时，才生成 `send_message`。
+7. 若无法形成可靠工具调用，返回空列表，不要解释。
+8. `text` 是届时角色真正要发送的消息正文，不要只是复述 promise 字段。
+
+# 输出格式
+请只返回合法 JSON：
+{{
+  "tool_calls": [
+    {{
+      "tool": "工具名",
+      "args": {{
+        "参数名": "参数值"
+      }}
+    }}
+  ]
+}}
+"""
+_task_dispatcher_llm = get_llm(temperature=0.0, top_p=1.0)
+
+
+def configure_task_dispatcher(dispatcher: TaskDispatcher, tool_registry: ToolRegistry) -> None:
+    """Install the runtime dispatcher used by the consolidator background path.
+
+    Args:
+        dispatcher: Task dispatcher instance shared by the service runtime.
+        tool_registry: Tool registry used to expose visible tool specs to the LLM.
+    """
+
+    global _task_dispatcher, _task_registry
+    _task_dispatcher = dispatcher
+    _task_registry = tool_registry
+
+
+def _get_task_dispatcher() -> TaskDispatcher | None:
+    """Return the configured task dispatcher, if the service installed one."""
+
+    return _task_dispatcher
+
+
+def _build_dispatch_context(state: ConsolidatorState, *, timestamp: str) -> DispatchContext:
+    """Build the dispatcher context from consolidator state.
+
+    Args:
+        state: Consolidator state for the current turn.
+        timestamp: Current turn timestamp.
+
+    Returns:
+        Source-side dispatch context.
+    """
+
+    try:
+        now = parse_iso_datetime(timestamp)
+    except ValueError:
+        now = datetime.now(timezone.utc)
+
+    return DispatchContext(
+        source_platform=state.get("platform", ""),
+        source_channel_id=state.get("platform_channel_id", ""),
+        source_user_id=state.get("global_user_id", ""),
+        source_message_id=state.get("platform_message_id", ""),
+        guild_id=None,
+        bot_role="user",
+        now=now,
+    )
+
+
+def _build_dispatch_instruction(state: ConsolidatorState) -> str:
+    """Summarize the current turn intent for tracing and task generation.
+
+    Args:
+        state: Consolidator state for the current turn.
+
+    Returns:
+        Natural-language instruction summary.
+    """
+
+    character_name = state.get("character_profile", {}).get("name", "Kazusa")
+    user_name = state.get("user_name", "user")
+    promise_count = len(state.get("future_promises") or [])
+    return (
+        f"{character_name} should follow through on {promise_count} accepted promise(s)"
+        f" for {user_name} based on the finalized dialog."
+    )
+
+
+async def _generate_raw_tool_calls(
+    state: ConsolidatorState,
+    ctx: DispatchContext,
+) -> list[RawToolCall]:
+    """Ask the LLM to convert accepted promises into raw tool calls.
+
+    Args:
+        state: Consolidator state containing finalized dialog and harvested promises.
+        ctx: Dispatch context used to expose source defaults and visible tools.
+
+    Returns:
+        Zero or more raw tool calls emitted by the LLM.
+    """
+
+    if _task_registry is None:
+        return []
+
+    available_tools = _task_registry.filter(ctx)
+    if not available_tools or not (state.get("future_promises") or []):
+        return []
+
+    msg = {
+        "instruction": _build_dispatch_instruction(state),
+        "current_utc": ctx.now.isoformat(),
+        "source_platform": ctx.source_platform,
+        "source_channel_id": ctx.source_channel_id,
+        "source_channel_type": state.get("channel_type", "group"),
+        "source_message_id": ctx.source_message_id,
+        "decontexualized_input": state.get("decontexualized_input", ""),
+        "final_dialog": state.get("final_dialog", []),
+        "content_anchors": state.get("action_directives", {}).get("linguistic_directives", {}).get("content_anchors", []),
+        "future_promises": state.get("future_promises", []),
+        "available_tools": [
+            {
+                "name": spec.name,
+                "description": spec.description,
+                "args_schema": spec.args_schema,
+            }
+            for spec in available_tools
+        ],
+    }
+    response = await _task_dispatcher_llm.ainvoke(
+        [
+            SystemMessage(content=_TASK_DISPATCHER_PROMPT),
+            HumanMessage(content=json.dumps(msg, ensure_ascii=False)),
+        ]
+    )
+    result = parse_llm_json_output(response.content)
+    tool_calls = result.get("tool_calls", [])
+    if not isinstance(tool_calls, list):
+        return []
+
+    raw_calls: list[RawToolCall] = []
+    for item in tool_calls:
+        if not isinstance(item, dict):
+            continue
+        tool_name = str(item.get("tool", "")).strip()
+        args = item.get("args")
+        if not tool_name or not isinstance(args, dict):
+            continue
+        raw_calls.append(RawToolCall(tool=tool_name, args=args))
+
+    logger.debug(
+        "Task dispatcher LLM: raw_calls=%s",
+        log_list_preview([{"tool": raw.tool, "args": raw.args} for raw in raw_calls], max_items=5, item_length=220),
+    )
+    return raw_calls
 
 
 def process_affinity_delta(current_affinity: int, raw_delta: int) -> int:
@@ -260,64 +442,10 @@ def _build_memory_docs(
     return memories
 
 
-async def _schedule_future_promises(
-    promises: list[dict],
-    *,
-    active_commitments: list[ActiveCommitmentDoc],
-    global_user_id: str,
-    user_name: str,
-    character_name: str,
-    decontexualized_input: str,
-) -> list[str]:
-    """Persist each promise as a ``future_promise`` scheduled event.
-
-    Returns the list of event_ids scheduled. Events with no ``due_time`` are
-    skipped — there's nothing to fire on.
-    """
-    scheduled: list[str] = []
-    commitment_by_action = {
-        str(item.get("action", "")): item
-        for item in active_commitments
-        if item.get("action")
-    }
-    for promise in promises or []:
-        due_time = promise.get("due_time")
-        if not due_time:
-            continue
-        try:
-            datetime.fromisoformat(due_time)
-        except ValueError:
-            logger.warning("Skipping promise with unparseable due_time: %r", due_time)
-            continue
-
-        event: ScheduledEventDoc = {
-            "event_type": "future_promise",
-            "target_platform": "",
-            "target_channel_id": "",
-            "target_global_user_id": global_user_id,
-            "payload": {
-                "promise_text": promise.get("action", ""),
-                "commitment_id": (commitment_by_action.get(promise.get("action", "")) or {}).get("commitment_id", ""),
-                "target": promise.get("target", user_name),
-                "character_name": character_name,
-                "original_input": decontexualized_input,
-                "context_summary": f"promise by {character_name} to {promise.get('target', user_name)}",
-            },
-            "scheduled_at": due_time,
-        }
-        try:
-            event_id = await schedule_event(event)
-            scheduled.append(event_id)
-        except PyMongoError:
-            logger.exception("Failed to persist future_promise event for user %s", global_user_id)
-    return scheduled
-
-
 async def db_writer(state: ConsolidatorState) -> dict:
     timestamp = state.get("timestamp") or datetime.now(timezone.utc).isoformat()
     global_user_id = state.get("global_user_id", "")
     user_name = state.get("user_name", "")
-    character_name = state.get("character_profile", {}).get("name", "")
 
     metadata = dict(state.get("metadata", {}) or {})
     write_log: dict[str, bool] = {}
@@ -376,14 +504,38 @@ async def db_writer(state: ConsolidatorState) -> dict:
             logger.exception("db_writer: failed to insert_profile_memories")
             write_log["user_profile_memories"] = False
 
-    scheduled_event_ids = await _schedule_future_promises(
-        future_promises,
-        active_commitments=active_commitments,
-        global_user_id=global_user_id,
-        user_name=user_name,
-        character_name=character_name,
-        decontexualized_input=state.get("decontexualized_input", ""),
-    )
+    scheduled_event_ids: list[str] = []
+    dispatch_rejections: list[str] = []
+    dispatcher = _get_task_dispatcher()
+    if dispatcher is not None:
+        dispatch_ctx = _build_dispatch_context(state, timestamp=timestamp)
+        raw_calls = await _generate_raw_tool_calls(state, dispatch_ctx)
+        dispatch_result = await dispatcher.dispatch(
+            raw_calls,
+            dispatch_ctx,
+            instruction=_build_dispatch_instruction(state),
+        )
+        scheduled_event_ids = [event_id for _task, event_id in dispatch_result.scheduled]
+        dispatch_rejections = [
+            f"{raw.tool}: {reason}"
+            for raw, reason in dispatch_result.rejected
+        ]
+        if dispatch_rejections:
+            if any("no adapters registered" in rejection for rejection in dispatch_rejections):
+                logger.warning(
+                    "Task dispatch unavailable: raw_calls=%d platform=%s channel=%s future_promises=%d rejections=%s",
+                    len(raw_calls),
+                    dispatch_ctx.source_platform,
+                    dispatch_ctx.source_channel_id,
+                    len(future_promises),
+                    dispatch_rejections,
+                )
+            else:
+                logger.debug(
+                    "Task dispatch rejected %d call(s): %s",
+                    len(dispatch_rejections),
+                    dispatch_rejections,
+                )
 
     # ── Step 4: affinity (direction-scaled) ─────────────────────────
     user_affinity_score = state.get("user_profile", {}).get("affinity", AFFINITY_DEFAULT)
@@ -468,6 +620,7 @@ async def db_writer(state: ConsolidatorState) -> dict:
         "write_success": write_log,
         "cache_invalidation_scope": cache_invalidated,
         "scheduled_event_ids": scheduled_event_ids,
+        "task_dispatch_rejected": dispatch_rejections,
         "affinity_before": user_affinity_score,
         "affinity_delta_processed": processed_affinity_delta,
         "knowledge_base_entries_written": kb_count,

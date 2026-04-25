@@ -42,7 +42,8 @@ class IMProcessState(TypedDict):
     bot_name: str
     character_profile: dict
 
-    platform_channel_id: str  # Original channel/group ID from the platform. Empty for private messages
+    platform_channel_id: str  # Original channel/group/DM ID from the platform
+    channel_type: str  # "group" | "private" | "system"
     channel_name: str  # Display name of the channel (used to determine the context)
     chat_history_wide: list[dict]   # Full history slice (CONVERSATION_HISTORY_LIMIT, used by Relevance Agent)
     chat_history_recent: list[dict] # Recent slice (CHAT_HISTORY_RECENT_LIMIT, used by downstream stages)

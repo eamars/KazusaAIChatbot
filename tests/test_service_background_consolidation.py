@@ -1,0 +1,102 @@
+"""Unit tests for background consolidation scheduling in the service layer."""
+
+from __future__ import annotations
+
+from collections.abc import Mapping
+from unittest.mock import AsyncMock
+
+import pytest
+from fastapi import BackgroundTasks
+
+from kazusa_ai_chatbot import service as service_module
+
+
+class _MappingState(Mapping):
+    """Small mapping-like wrapper that is not a literal ``dict``."""
+
+    def __init__(self, payload: dict):
+        self._payload = payload
+
+    def __getitem__(self, key):
+        return self._payload[key]
+
+    def __iter__(self):
+        return iter(self._payload)
+
+    def __len__(self):
+        return len(self._payload)
+
+    def get(self, key, default=None):
+        return self._payload.get(key, default)
+
+
+class _FakeGraph:
+    """Return a fixed graph result for one service.chat invocation."""
+
+    def __init__(self, result: dict):
+        self._result = result
+
+    async def ainvoke(self, _state):
+        return self._result
+
+
+@pytest.mark.asyncio
+async def test_chat_queues_background_consolidation_for_mapping_state(monkeypatch):
+    """Mapping-like consolidation state should still queue the background task."""
+
+    monkeypatch.setattr(service_module, "_chat_executor_semaphore", None)
+    monkeypatch.setattr(service_module, "_personality", {"name": "Kazusa"})
+    monkeypatch.setattr(service_module, "resolve_global_user_id", AsyncMock(return_value="global-user-1"))
+    monkeypatch.setattr(service_module, "get_user_profile", AsyncMock(return_value={"affinity": 500}))
+    monkeypatch.setattr(service_module, "get_conversation_history", AsyncMock(return_value=[]))
+    monkeypatch.setattr(service_module, "_hydrate_reply_context", AsyncMock(return_value={}))
+    monkeypatch.setattr(service_module, "save_conversation", AsyncMock())
+
+    consolidation_state = _MappingState({
+        "timestamp": "2026-04-25T18:00:58+12:00",
+        "platform": "qq",
+        "platform_channel_id": "673225019",
+        "platform_message_id": "2073572281",
+        "global_user_id": "global-user-1",
+        "user_name": "蚝爹油",
+        "user_profile": {"affinity": 500},
+        "character_profile": {"name": "杏山千纱"},
+        "action_directives": {"linguistic_directives": {"content_anchors": []}},
+        "internal_monologue": "test",
+        "final_dialog": ["好呀。"],
+        "interaction_subtext": "",
+        "emotional_appraisal": "",
+        "character_intent": "PROVIDE",
+        "logical_stance": "CONFIRM",
+        "research_facts": {},
+        "decontexualized_input": "一分钟后发消息",
+    })
+    monkeypatch.setattr(
+        service_module,
+        "_graph",
+        _FakeGraph({
+            "should_respond": True,
+            "use_reply_feature": False,
+            "final_dialog": ["好呀。"],
+            "future_promises": [],
+            "consolidation_state": consolidation_state,
+        }),
+    )
+
+    background_tasks = BackgroundTasks()
+    response = await service_module.chat(
+        service_module.ChatRequest(
+            platform="qq",
+            platform_channel_id="673225019",
+            channel_type="private",
+            platform_message_id="2073572281",
+            platform_user_id="673225019",
+            display_name="蚝爹油",
+            channel_name="Private",
+            content="咱们再试试，千纱酱一分钟之后能去902317662群里发个消息，内容是今天天气真好呀",
+        ),
+        background_tasks,
+    )
+
+    assert response.messages == ["好呀。"]
+    assert len(background_tasks.tasks) == 2

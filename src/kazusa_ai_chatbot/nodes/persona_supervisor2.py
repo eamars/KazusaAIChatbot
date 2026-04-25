@@ -32,27 +32,11 @@ async def persona_supervisor2(state: IMProcessState) -> dict:
     persona_builder.add_node("stage_1_research", call_rag_subgraph)
     persona_builder.add_node("stage_2_cognition", call_cognition_subgraph)
     persona_builder.add_node("stage_3_action", call_action_subgraph)  # perform action
-    persona_builder.add_node("stage_4_consolidation", call_consolidation_subgraph)  # memory saving
-
-    # Build flow with conditional edge for no_remember debug mode
     persona_builder.add_edge(START, "stage_0_msg_decontexualizer")
     persona_builder.add_edge("stage_0_msg_decontexualizer", "stage_1_research")
     persona_builder.add_edge("stage_1_research", "stage_2_cognition")
     persona_builder.add_edge("stage_2_cognition", "stage_3_action")
-
-    def _route_after_action(state):
-        debug = state.get("debug_modes") or {}
-        if debug.get("no_remember"):
-            logger.info("no_remember active — skipping consolidation (stage 4)")
-            return "end"
-        return "consolidate"
-
-    persona_builder.add_conditional_edges(
-        "stage_3_action",
-        _route_after_action,
-        {"consolidate": "stage_4_consolidation", "end": END},
-    )
-    persona_builder.add_edge("stage_4_consolidation", END)
+    persona_builder.add_edge("stage_3_action", END)
 
     
     persona_graph = persona_builder.compile()
@@ -66,6 +50,7 @@ async def persona_supervisor2(state: IMProcessState) -> dict:
         "user_input": state["user_input"],
         "platform": state["platform"],
         "platform_channel_id": state["platform_channel_id"],
+        "channel_type": state.get("channel_type", "group"),
         "platform_message_id": state["platform_message_id"],
         "platform_user_id": state["platform_user_id"],
         "global_user_id": state["global_user_id"],
@@ -83,12 +68,6 @@ async def persona_supervisor2(state: IMProcessState) -> dict:
     
     return {
         "final_dialog": results.get("final_dialog", []),
-        # "mood": results["mood"],
-        # "global_vibe": results["global_vibe"],
-        # "reflection_summary": results["reflection_summary"],
-        # "diary_entry": results["diary_entry"],
-        # "affinity_delta": results["affinity_delta"],
-        # "last_relationship_insight": results["last_relationship_insight"],
-        # "new_facts": results["new_facts"],
-        "future_promises": results.get("future_promises", []),
+        "future_promises": [],
+        "consolidation_state": results,
     }

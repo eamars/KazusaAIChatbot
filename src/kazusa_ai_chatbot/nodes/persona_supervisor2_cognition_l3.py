@@ -321,6 +321,7 @@ _CONTENT_ANCHOR_AGENT_PROMPT = """\
 3. **低置信度优先澄清：** 如果 `character_intent` 为 `CLARIFY`，则 `[DECISION]` 必须落在“信息不足 / 需要对方补全”上，`[ANSWER]` 必须是缩小歧义范围的追问，禁止替用户脑补缺失对象。
    - 若 `decontexualized_input` 仍含未解析指代或省略对象（如「这个 / 那个 / 这句 / 那句 / 这个意思 / 怎么说 / 这个呢」），且 `research_facts` 没有唯一可锚定对象，必须追问“具体指哪一个 / 哪一句 / 哪部分”，不得猜测定义、原因、身份或类别。
 4. **显性回应：** 如果 `decontexualized_input` 中包含明确的询问（Question）、请求（Request）或提议（Proposal），且 `character_intent` 不是 `CLARIFY`，`[ANSWER]` 必须明确包含决定或答案；若 `character_intent` 为 `CLARIFY`，`[ANSWER]` 必须明确包含澄清问题。
+4a. **操作细节保真：** 如果用户请求里包含未来操作的关键细节，例如明确的群/频道/房间 ID、被要求发送的消息正文、引用内容、提醒对象或其他执行参数，这些细节必须在 `content_anchors` 中被保留下来，优先写进 `[ANSWER]`，必要时可辅以 `[FACT]`。不要把 `54369546群` 简化成“某个群”，也不要把“今天天气真好呀”改写成泛泛的“那句话”。
 5. **表达量校准（[SCOPE]）：** 基于已填充的锚点数量与 `logical_stance`，生成一条 `[SCOPE]` 锚点。
   例如：
   * 仅有 `[DECISION]` -> `~15字，说完[DECISION]即止`；

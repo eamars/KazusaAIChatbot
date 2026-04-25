@@ -12,9 +12,8 @@ Stage-4a additions:
 * The ``db_writer`` now routes diary entries / objective facts through the
   new structured helpers (``upsert_character_diary`` / ``upsert_objective_facts``),
   invalidates the matching RAG cache namespaces after a successful commit,
-  bumps the per-user RAG version, and schedules ``future_promise`` events
-  through ``kazusa_ai_chatbot.scheduler`` so the bot can act on promises when
-  they come due.
+  bumps the per-user RAG version, and hands accepted future obligations to the
+  task dispatcher so tool calls can be scheduled through the shared scheduler.
 """
 
 from __future__ import annotations
@@ -93,6 +92,10 @@ async def call_consolidation_subgraph(global_state: GlobalPersonaState):
         "global_user_id": global_state["global_user_id"],
         "user_name": global_state["user_name"],
         "user_profile": global_state["user_profile"],
+        "platform": global_state["platform"],
+        "platform_channel_id": global_state["platform_channel_id"],
+        "channel_type": global_state.get("channel_type", "group"),
+        "platform_message_id": global_state["platform_message_id"],
         "action_directives": global_state["action_directives"],
         "internal_monologue": global_state["internal_monologue"],
         "final_dialog": global_state["final_dialog"],

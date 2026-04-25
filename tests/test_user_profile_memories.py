@@ -2,11 +2,21 @@
 
 from __future__ import annotations
 
+import logging
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
 from kazusa_ai_chatbot.db import MemoryType
+from kazusa_ai_chatbot.dispatcher import (
+    AdapterRegistry,
+    PendingTaskIndex,
+    RawToolCall,
+    TaskDispatcher,
+    ToolCallEvaluator,
+    ToolRegistry,
+    build_send_message_tool,
+)
 from kazusa_ai_chatbot.db import bootstrap as bootstrap_module
 from kazusa_ai_chatbot.db import users as users_module
 from kazusa_ai_chatbot.nodes import persona_supervisor2_rag as rag_module
@@ -364,7 +374,8 @@ async def test_db_writer_invalidates_profile_memory_cache_namespaces(monkeypatch
     monkeypatch.setattr(persistence_module, "_update_user_image", AsyncMock(return_value=None))
     monkeypatch.setattr(persistence_module, "_update_character_image", AsyncMock(return_value=None))
     monkeypatch.setattr(persistence_module, "_update_knowledge_base", AsyncMock(return_value=0))
-    monkeypatch.setattr(persistence_module, "_schedule_future_promises", AsyncMock(return_value=[]))
+    monkeypatch.setattr(persistence_module, "_task_dispatcher", None)
+    monkeypatch.setattr(persistence_module, "_task_registry", None)
 
     result = await persistence_module.db_writer({
         "timestamp": "2026-04-25T00:00:00+00:00",
@@ -389,6 +400,86 @@ async def test_db_writer_invalidates_profile_memory_cache_namespaces(monkeypatch
     assert "user_profile_memories" in invalidated
     assert "boundary_cache" in invalidated
     persistence_module.increment_rag_version.assert_awaited_once_with("u1")
+
+
+@pytest.mark.asyncio
+async def test_db_writer_records_dispatch_rejection_when_no_runtime_adapter_is_registered(
+    monkeypatch,
+    caplog,
+):
+    """Accepted outbound tasks should stay unscheduled when the brain has no runtime adapter."""
+
+    fake_cache = MagicMock()
+    fake_cache.invalidate_pattern = AsyncMock()
+    fake_cache.clear_all_user = AsyncMock()
+    monkeypatch.setattr(persistence_module, "_get_rag_cache", AsyncMock(return_value=fake_cache))
+    monkeypatch.setattr(persistence_module, "insert_profile_memories", AsyncMock(return_value=[]))
+    monkeypatch.setattr(persistence_module, "increment_rag_version", AsyncMock())
+    monkeypatch.setattr(persistence_module, "update_affinity", AsyncMock())
+    monkeypatch.setattr(persistence_module, "update_last_relationship_insight", AsyncMock())
+    monkeypatch.setattr(persistence_module, "upsert_character_state", AsyncMock())
+    monkeypatch.setattr(persistence_module, "upsert_user_image", AsyncMock())
+    monkeypatch.setattr(persistence_module, "upsert_character_self_image", AsyncMock())
+    monkeypatch.setattr(persistence_module, "_update_user_image", AsyncMock(return_value=None))
+    monkeypatch.setattr(persistence_module, "_update_character_image", AsyncMock(return_value=None))
+    monkeypatch.setattr(persistence_module, "_update_knowledge_base", AsyncMock(return_value=0))
+
+    tool_registry = ToolRegistry()
+    tool_registry.register(build_send_message_tool())
+    dispatcher = TaskDispatcher(
+        ToolCallEvaluator(tool_registry, AdapterRegistry()),
+        PendingTaskIndex(),
+    )
+    monkeypatch.setattr(persistence_module, "_task_dispatcher", dispatcher)
+    monkeypatch.setattr(persistence_module, "_task_registry", tool_registry)
+    monkeypatch.setattr(
+        persistence_module,
+        "_generate_raw_tool_calls",
+        AsyncMock(return_value=[
+            RawToolCall(
+                tool="send_message",
+                args={
+                    "target_channel": "54369546",
+                    "text": "今天天气真好呀",
+                    "execute_at": "2026-04-25T05:39:33+00:00",
+                },
+            )
+        ]),
+    )
+
+    with caplog.at_level(logging.WARNING, logger=persistence_module.__name__):
+        result = await persistence_module.db_writer({
+            "timestamp": "2026-04-25T17:38:33+12:00",
+            "global_user_id": "u1",
+            "user_name": "蚝爹油",
+            "platform": "qq",
+            "platform_channel_id": "673225019",
+            "platform_message_id": "1615877136",
+            "character_profile": {"name": "杏山千纱"},
+            "metadata": {},
+            "mood": "neutral",
+            "global_vibe": "",
+            "reflection_summary": "",
+            "diary_entry": ["接受了在别的群发消息的请求。"],
+            "interaction_subtext": "test",
+            "last_relationship_insight": "",
+            "new_facts": [],
+            "future_promises": [{
+                "target": "54369546群",
+                "action": "杏山千纱将对54369546群发送“今天天气真好呀”",
+                "due_time": "2026-04-25T05:39:33+00:00",
+                "commitment_type": "future_promise",
+                "dedup_key": "send_group_weather_message",
+            }],
+            "user_profile": {"affinity": 500},
+            "affinity_delta": 0,
+            "decontexualized_input": "千纱酱一分钟之后能去54369546群里发个消息，内容是今天天气真好呀",
+        })
+
+    assert result["metadata"]["scheduled_event_ids"] == []
+    assert result["metadata"]["task_dispatch_rejected"] == ["send_message: no adapters registered"]
+    assert "Task dispatch unavailable" in caplog.text
+    assert "no adapters registered" in caplog.text
 
 
 @pytest.mark.asyncio

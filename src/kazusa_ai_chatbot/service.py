@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections.abc import Mapping
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from typing import Any
@@ -47,10 +48,21 @@ from kazusa_ai_chatbot.mcp_client import mcp_manager
 from kazusa_ai_chatbot.state import IMProcessState, MultiMediaDoc, DebugModes, ReplyContext
 from kazusa_ai_chatbot.utils import log_dict_subset, log_preview, trim_history_dict
 from kazusa_ai_chatbot import scheduler
+from kazusa_ai_chatbot.dispatcher import (
+    AdapterRegistry,
+    PendingTaskIndex,
+    RemoteHttpAdapter,
+    TaskDispatcher,
+    ToolCallEvaluator,
+    ToolRegistry,
+    build_send_message_tool,
+)
 
 from langgraph.graph import END, START, StateGraph
 from kazusa_ai_chatbot.nodes.relevance_agent import relevance_agent, multimedia_descriptor_agent
 from kazusa_ai_chatbot.nodes.persona_supervisor2 import persona_supervisor2
+from kazusa_ai_chatbot.nodes.persona_supervisor2_consolidator import call_consolidation_subgraph
+from kazusa_ai_chatbot.nodes.persona_supervisor2_consolidator_persistence import configure_task_dispatcher
 from kazusa_ai_chatbot.nodes.persona_supervisor2_rag import _get_rag_cache
 
 logger = logging.getLogger(__name__)
@@ -83,6 +95,7 @@ class ReplyContextIn(BaseModel):
 class ChatRequest(BaseModel):
     platform: str
     platform_channel_id: str = ""
+    channel_type: str = "group"
     platform_message_id: str = ""
     platform_user_id: str
     platform_bot_id: str = ""  # Bot's ID on this platform (e.g. Discord snowflake)
@@ -122,6 +135,53 @@ class HealthResponse(BaseModel):
     status: str
     db: bool
     scheduler: bool
+
+
+class RuntimeAdapterRegistrationRequest(BaseModel):
+    platform: str
+    callback_url: str
+    shared_secret: str = ""
+    timeout_seconds: float = 10.0
+
+
+class RuntimeAdapterRegistrationResponse(BaseModel):
+    status: str
+    platform: str
+    callback_url: str
+
+
+def _register_runtime_adapter_payload(
+    req: RuntimeAdapterRegistrationRequest,
+    *,
+    status: str,
+) -> RuntimeAdapterRegistrationResponse:
+    """Register one remote adapter payload and return a normalized response.
+
+    Args:
+        req: Remote adapter registration or heartbeat payload.
+        status: Response status string to return to the caller.
+
+    Returns:
+        Structured confirmation for the adapter process.
+    """
+
+    register_remote_runtime_adapter(
+        platform=req.platform,
+        callback_url=req.callback_url,
+        shared_secret=req.shared_secret,
+        timeout_seconds=req.timeout_seconds,
+    )
+    logger.info(
+        "Registered remote runtime adapter: platform=%s callback_url=%s status=%s",
+        req.platform,
+        req.callback_url,
+        status,
+    )
+    return RuntimeAdapterRegistrationResponse(
+        status=status,
+        platform=req.platform,
+        callback_url=req.callback_url,
+    )
 
 
 # ── Graph builder ───────────────────────────────────────────────────
@@ -221,6 +281,7 @@ async def _save_bot_message(result: dict) -> None:
             await save_conversation({
                 "platform": platform,
                 "platform_channel_id": platform_channel_id,
+                "channel_type": result.get("channel_type", "group"),
                 "role": "assistant",
                 "platform_user_id": platform_bot_id,
                 "global_user_id": "",
@@ -237,11 +298,64 @@ async def _save_bot_message(result: dict) -> None:
 _personality: dict = {}
 _graph = None
 _chat_executor_semaphore: asyncio.Semaphore | None = None
+_task_dispatcher: TaskDispatcher | None = None
+_adapter_registry: AdapterRegistry | None = None
+
+
+async def _run_consolidation_background(state: dict) -> None:
+    """Run stage-4 consolidation after the dialog has already been returned.
+
+    Args:
+        state: Stage-0..3 persona state snapshot needed by the consolidator.
+    """
+
+    try:
+        await call_consolidation_subgraph(state)
+    except Exception:
+        logger.exception("Background consolidation failed")
+
+
+def register_runtime_adapter(adapter) -> None:
+    """Register a live messaging adapter for scheduled tool delivery.
+
+    Args:
+        adapter: Adapter implementing the dispatcher messaging protocol.
+    """
+
+    if _adapter_registry is None:
+        raise RuntimeError("Adapter registry is not initialized yet")
+    _adapter_registry.register(adapter)
+
+
+def register_remote_runtime_adapter(
+    *,
+    platform: str,
+    callback_url: str,
+    shared_secret: str = "",
+    timeout_seconds: float = 10.0,
+) -> None:
+    """Register a cross-process adapter callback for scheduled delivery.
+
+    Args:
+        platform: Platform key such as ``qq`` or ``discord``.
+        callback_url: Base callback URL exposed by the adapter process.
+        shared_secret: Optional bearer token used when the brain calls back.
+        timeout_seconds: Timeout for one outbound callback request.
+    """
+
+    register_runtime_adapter(
+        RemoteHttpAdapter(
+            platform=platform,
+            callback_url=callback_url,
+            shared_secret=shared_secret,
+            timeout_seconds=timeout_seconds,
+        )
+    )
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global _personality, _graph, _chat_executor_semaphore
+    global _personality, _graph, _chat_executor_semaphore, _task_dispatcher, _adapter_registry
 
     executor_count = max(1, BRAIN_EXECUTOR_COUNT)
     _chat_executor_semaphore = asyncio.Semaphore(executor_count)
@@ -272,7 +386,23 @@ async def lifespan(app: FastAPI):
     rag_cache = await _get_rag_cache()
     logger.info("RAG cache warm-started: %s", rag_cache.get_stats())
 
-    # 6. Load pending scheduled events
+    # 6. Build the task-dispatch runtime
+    tool_registry = ToolRegistry()
+    tool_registry.register(build_send_message_tool())
+    adapter_registry = AdapterRegistry()
+    _adapter_registry = adapter_registry
+    pending_index = PendingTaskIndex()
+    await pending_index.rebuild_from_db()
+    evaluator = ToolCallEvaluator(tool_registry, adapter_registry)
+    _task_dispatcher = TaskDispatcher(evaluator, pending_index)
+    configure_task_dispatcher(_task_dispatcher, tool_registry)
+    scheduler.configure_runtime(
+        tool_registry=tool_registry,
+        adapter_registry=adapter_registry,
+        pending_index=pending_index,
+    )
+
+    # 7. Load pending scheduled events
     if SCHEDULED_TASKS_ENABLED:
         await scheduler.load_pending_events()
     else:
@@ -315,6 +445,40 @@ async def health():
         status="ok" if db_ok else "degraded",
         db=db_ok,
         scheduler=True,
+    )
+
+
+@app.post("/runtime/adapters/register", response_model=RuntimeAdapterRegistrationResponse)
+async def register_runtime_adapter_endpoint(req: RuntimeAdapterRegistrationRequest):
+    """Register one cross-process adapter callback for scheduler delivery.
+
+    Args:
+        req: Remote adapter registration payload sent by an adapter process.
+
+    Returns:
+        Confirmation payload describing the registered callback.
+    """
+
+    return _register_runtime_adapter_payload(
+        req,
+        status="registered",
+    )
+
+
+@app.post("/runtime/adapters/heartbeat", response_model=RuntimeAdapterRegistrationResponse)
+async def runtime_adapter_heartbeat_endpoint(req: RuntimeAdapterRegistrationRequest):
+    """Refresh one adapter registration so the brain can recover after restarts.
+
+    Args:
+        req: Adapter heartbeat payload describing the callback endpoint.
+
+    Returns:
+        Confirmation payload describing the refreshed callback.
+    """
+
+    return _register_runtime_adapter_payload(
+        req,
+        status="heartbeat_ok",
     )
 
 
@@ -407,6 +571,7 @@ async def chat(req: ChatRequest, background_tasks: BackgroundTasks):
             "bot_name": bot_name,
             "character_profile": _personality,
             "platform_channel_id": req.platform_channel_id,
+            "channel_type": req.channel_type,
             "channel_name": req.channel_name,
             "chat_history_wide": chat_history_wide,
             "chat_history_recent": chat_history_recent,
@@ -424,6 +589,7 @@ async def chat(req: ChatRequest, background_tasks: BackgroundTasks):
                 "platform_user_id": req.platform_user_id,
                 "global_user_id": global_user_id,
                 "display_name": req.display_name,
+                "channel_type": req.channel_type,
                 "content": req.content,
                 "reply_context": reply_context,
                 "timestamp": timestamp,
@@ -440,6 +606,7 @@ async def chat(req: ChatRequest, background_tasks: BackgroundTasks):
 
         final_dialog = result.get("final_dialog", [])
         should_reply = result.get("use_reply_feature", False)
+        consolidation_state = result.get("consolidation_state")
 
         logger.debug(
             "Chat result: platform=%s channel=%s message=%s user=%s should_respond=%s should_reply=%s final_dialog_count=%d future_promises=%d dialog_preview=%s",
@@ -458,12 +625,29 @@ async def chat(req: ChatRequest, background_tasks: BackgroundTasks):
         if final_dialog:
             background_tasks.add_task(_save_bot_message, result)
 
+        if debug_modes.get("no_remember"):
+            logger.debug("Background consolidation skipped: no_remember is active")
+        elif isinstance(consolidation_state, Mapping):
+            background_tasks.add_task(_run_consolidation_background, dict(consolidation_state))
+            logger.debug(
+                "Background consolidation queued: platform=%s channel=%s message=%s",
+                req.platform,
+                req.platform_channel_id or "<dm>",
+                req.platform_message_id or "<none>",
+            )
+        else:
+            logger.warning(
+                "Background consolidation skipped: unexpected consolidation_state type=%s",
+                type(consolidation_state).__name__,
+            )
+
         # think_only: suppress dialog in response but still save internally
         if debug_modes.get("think_only"):
             logger.info("think_only active — suppressing %d dialog message(s) from user output", len(final_dialog))
             final_dialog = []
 
-        # TODO: Extract scheduled_followups from result["future_promises"] and schedule them
+        # The dispatcher now runs in the background consolidator path, so the
+        # synchronous /chat response no longer waits on scheduling.
         scheduled_followups = 0
 
         return ChatResponse(

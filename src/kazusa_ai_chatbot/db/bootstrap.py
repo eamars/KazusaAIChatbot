@@ -67,10 +67,10 @@ async def db_bootstrap() -> None:
         "event_id", unique=True, name="event_id_unique",
     )
     await db.scheduled_events.create_index(
-        [("status", 1), ("scheduled_at", 1)], name="event_status_scheduled",
+        [("status", 1), ("execute_at", 1)], name="event_status_execute_at",
     )
     await db.scheduled_events.create_index(
-        "target_global_user_id", name="event_target_user",
+        "source_user_id", name="event_source_user",
     )
     await db.memory.create_index(
         "memory_name", name="memory_name_idx",
