@@ -63,8 +63,10 @@ from kazusa_ai_chatbot.db.conversation import (
 # ── Users (identity + profile + diary + facts + affinity) ─────────
 from kazusa_ai_chatbot.db.users import (
     add_suspected_alias,
+    backfill_character_conversation_identity,
     build_user_profile_recall_bundle,
     create_user_profile,
+    ensure_character_identity,
     expire_overdue_profile_memories,
     get_affinity,
     get_character_diary,
@@ -132,8 +134,10 @@ __all__ = [
     "aggregate_conversation_by_user", "get_conversation_history", "save_conversation",
     "search_conversation_history",
     # Users
-    "add_suspected_alias", "build_user_profile_recall_bundle", "create_user_profile",
-    "expire_overdue_profile_memories", "get_affinity", "get_character_diary", "get_objective_facts",
+    "add_suspected_alias", "backfill_character_conversation_identity",
+    "build_user_profile_recall_bundle", "create_user_profile",
+    "ensure_character_identity", "expire_overdue_profile_memories",
+    "get_affinity", "get_character_diary", "get_objective_facts",
     "get_user_profile", "hydrate_user_profile_with_memory_blocks", "insert_profile_memories", "link_platform_account",
     "list_users_by_display_name", "query_profile_memories_recent", "query_profile_memories_vector",
     "query_user_profile_memory_blocks",

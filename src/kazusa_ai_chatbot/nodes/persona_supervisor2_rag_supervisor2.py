@@ -42,28 +42,16 @@ from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.message import add_messages
 
-from kazusa_ai_chatbot.agents.conversation_aggregate_agent import (
-    conversation_aggregate_agent,
-)
-from kazusa_ai_chatbot.agents.conversation_filter_agent import (
-    conversation_filter_agent,
-)
-from kazusa_ai_chatbot.agents.conversation_keyword_agent import (
-    conversation_keyword_agent,
-)
-from kazusa_ai_chatbot.agents.conversation_search_agent import (
-    conversation_search_agent,
-)
-from kazusa_ai_chatbot.agents.persistent_memory_keyword_agent import (
-    persistent_memory_keyword_agent,
-)
-from kazusa_ai_chatbot.agents.persistent_memory_search_agent import (
-    persistent_memory_search_agent,
-)
-from kazusa_ai_chatbot.agents.user_list_agent import user_list_agent
-from kazusa_ai_chatbot.agents.user_lookup_agent import user_lookup_agent
-from kazusa_ai_chatbot.agents.user_profile_agent import user_profile_agent
-from kazusa_ai_chatbot.agents.web_search_agent2 import web_search_agent
+from kazusa_ai_chatbot.rag.conversation_aggregate_agent import ConversationAggregateAgent
+from kazusa_ai_chatbot.rag.conversation_filter_agent import ConversationFilterAgent
+from kazusa_ai_chatbot.rag.conversation_keyword_agent import ConversationKeywordAgent
+from kazusa_ai_chatbot.rag.conversation_search_agent import ConversationSearchAgent
+from kazusa_ai_chatbot.rag.persistent_memory_keyword_agent import PersistentMemoryKeywordAgent
+from kazusa_ai_chatbot.rag.persistent_memory_search_agent import PersistentMemorySearchAgent
+from kazusa_ai_chatbot.rag.user_list_agent import UserListAgent
+from kazusa_ai_chatbot.rag.user_lookup_agent import UserLookupAgent
+from kazusa_ai_chatbot.rag.user_profile_agent import UserProfileAgent
+from kazusa_ai_chatbot.rag.web_search_agent import WebSearchAgent
 from kazusa_ai_chatbot.mcp_client import mcp_manager
 from kazusa_ai_chatbot.utils import get_llm, parse_llm_json_output
 
@@ -119,35 +107,7 @@ class RAGAgentRegistryEntry(TypedDict):
     fact_source: RAGFactSource
 
 
-# A helper to wrap the existing agent
-async def _run_web_search_agent(
-    task: str,
-    context: dict,
-    max_attempts: int = 3,
-) -> dict:
-    """Adapt the existing web-search agent to the supervisor2 agent contract.
 
-    Args:
-        task: Slot description selected by the outer-loop dispatcher.
-        context: Runtime hints plus known facts collected so far.
-        max_attempts: Unused compatibility parameter for the shared contract.
-
-    Returns:
-        A dict matching the supervisor2 inner-loop agent contract.
-    """
-    del max_attempts
-
-    result = await web_search_agent(
-        task=task,
-        context=context,
-        expected_response="返回能直接解决当前槽位的来源扎根网页证据。",
-        timestamp=str(context.get("current_timestamp", "")).strip() or None,
-    )
-    return {
-        "resolved": not bool(result.get("is_empty_result", False)),
-        "result": str(result.get("response", "")),
-        "attempts": 1,
-    }
 
 
 # ── Initializer ────────────────────────────────────────────────────
@@ -174,6 +134,8 @@ Only create a slot for {character_name} when it IS the subject of data being ret
 - Stop when all required facts are accounted for. The next model answers.
 - One fact per slot — no "and / then / also" inside a single slot. Split if needed.
 - Never invent facts absent from original_query.
+- Preserve explicit count limits from original_query, such as "3条", "last 5",
+  or "recent 10", inside the conversation slot text.
 - RAG gathers evidence only. Do not create slots for final judgment, persona stance, or answer wording.
 
 ## Rule 1b — No retrieval when facts are already provided
@@ -280,6 +242,11 @@ Query: "蚝爹油最近在聊什么"
   → Named person → identity-first, then recent messages.
   ["Identity: look up display name '蚝爹油' to get global_user_id",
    "Conversation-filter: retrieve recent messages from the user resolved in slot 1"]
+
+Query: "千纱的最近3条发言"
+  → Character is the subject of retrieval, so identity-first. Preserve the count.
+  ["Identity: look up display name '千纱' to get global_user_id",
+   "Conversation-filter: retrieve recent 3 messages from the user resolved in slot 1"]
 
 ### 3. Named person → specific past quote (2 slots)
 Query: "小钳子昨天说的AI那句是什么"
@@ -399,7 +366,7 @@ async def rag_initializer(state: ProgressiveRAGState) -> dict:
 # ── Dispatcher ─────────────────────────────────────────────────────
 _RAG_SUPERVISOR_AGENT_REGISTRY: dict[str, RAGAgentRegistryEntry] = {
     "user_lookup_agent": {
-        "agent": user_lookup_agent,
+        "agent": UserLookupAgent().run,
         "fact_source": {
             "source_kind": "internal",
             "source_system": "user_profiles",
@@ -408,7 +375,7 @@ _RAG_SUPERVISOR_AGENT_REGISTRY: dict[str, RAGAgentRegistryEntry] = {
         },
     },
     "user_list_agent": {
-        "agent": user_list_agent,
+        "agent": UserListAgent().run,
         "fact_source": {
             "source_kind": "internal",
             "source_system": "user_profiles_or_conversation_history",
@@ -417,7 +384,7 @@ _RAG_SUPERVISOR_AGENT_REGISTRY: dict[str, RAGAgentRegistryEntry] = {
         },
     },
     "user_profile_agent": {
-        "agent": user_profile_agent,
+        "agent": UserProfileAgent().run,
         "fact_source": {
             "source_kind": "internal",
             "source_system": "user_profiles",
@@ -426,7 +393,7 @@ _RAG_SUPERVISOR_AGENT_REGISTRY: dict[str, RAGAgentRegistryEntry] = {
         },
     },
     "web_search_agent2": {
-        "agent": _run_web_search_agent,
+        "agent": WebSearchAgent().run,
         "fact_source": {
             "source_kind": "external",
             "source_system": "web",
@@ -435,7 +402,7 @@ _RAG_SUPERVISOR_AGENT_REGISTRY: dict[str, RAGAgentRegistryEntry] = {
         },
     },
     "conversation_aggregate_agent": {
-        "agent": conversation_aggregate_agent,
+        "agent": ConversationAggregateAgent().run,
         "fact_source": {
             "source_kind": "internal",
             "source_system": "conversation_history",
@@ -444,7 +411,7 @@ _RAG_SUPERVISOR_AGENT_REGISTRY: dict[str, RAGAgentRegistryEntry] = {
         },
     },
     "conversation_filter_agent": {
-        "agent": conversation_filter_agent,
+        "agent": ConversationFilterAgent().run,
         "fact_source": {
             "source_kind": "internal",
             "source_system": "conversation_history",
@@ -453,7 +420,7 @@ _RAG_SUPERVISOR_AGENT_REGISTRY: dict[str, RAGAgentRegistryEntry] = {
         },
     },
     "conversation_keyword_agent": {
-        "agent": conversation_keyword_agent,
+        "agent": ConversationKeywordAgent().run,
         "fact_source": {
             "source_kind": "internal",
             "source_system": "conversation_history",
@@ -462,7 +429,7 @@ _RAG_SUPERVISOR_AGENT_REGISTRY: dict[str, RAGAgentRegistryEntry] = {
         },
     },
     "conversation_search_agent": {
-        "agent": conversation_search_agent,
+        "agent": ConversationSearchAgent().run,
         "fact_source": {
             "source_kind": "internal",
             "source_system": "conversation_history",
@@ -471,7 +438,7 @@ _RAG_SUPERVISOR_AGENT_REGISTRY: dict[str, RAGAgentRegistryEntry] = {
         },
     },
     "persistent_memory_keyword_agent": {
-        "agent": persistent_memory_keyword_agent,
+        "agent": PersistentMemoryKeywordAgent().run,
         "fact_source": {
             "source_kind": "internal",
             "source_system": "memory",
@@ -480,7 +447,7 @@ _RAG_SUPERVISOR_AGENT_REGISTRY: dict[str, RAGAgentRegistryEntry] = {
         },
     },
     "persistent_memory_search_agent": {
-        "agent": persistent_memory_search_agent,
+        "agent": PersistentMemorySearchAgent().run,
         "fact_source": {
             "source_kind": "internal",
             "source_system": "memory",
@@ -670,6 +637,8 @@ def _build_delegate_context(state: ProgressiveRAGState, dispatch: dict) -> dict:
     if isinstance(raw_dispatch_context, dict):
         delegate_context.update(raw_dispatch_context)
     delegate_context["known_facts"] = list(state.get("known_facts", []))
+    delegate_context["original_query"] = state.get("original_query", "")
+    delegate_context["current_slot"] = state.get("current_slot", "")
     return delegate_context
 
 

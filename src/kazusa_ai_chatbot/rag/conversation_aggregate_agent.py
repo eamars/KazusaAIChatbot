@@ -1,16 +1,17 @@
-"""Inner-loop agent for factual conversation-history aggregates."""
+"""RAG helper agent: factual conversation-history aggregates."""
 
 from __future__ import annotations
 
 import datetime
 import json
 import re
+from typing import Any
 
 from langchain_core.messages import HumanMessage, SystemMessage
 
 from kazusa_ai_chatbot.db import aggregate_conversation_by_user
+from kazusa_ai_chatbot.rag.helper_agent import BaseRAGHelperAgent
 from kazusa_ai_chatbot.utils import get_llm, parse_llm_json_output
-
 
 _EXTRACTOR_PROMPT = """\
 You are a parameter extractor for `aggregate_conversation_by_user`.
@@ -58,7 +59,7 @@ def _normalize_limit(raw_limit: object) -> int:
     return 10
 
 
-def _normalize_args(raw_args: dict) -> dict:
+def _normalize_args(raw_args: dict[str, Any]) -> dict[str, Any]:
     """Normalize extractor output into safe aggregate arguments.
 
     Args:
@@ -79,7 +80,7 @@ def _normalize_args(raw_args: dict) -> dict:
     }
 
 
-async def _extract_aggregate_args(task: str, context: dict) -> dict:
+async def _extract_aggregate_args(task: str, context: dict[str, Any]) -> dict[str, Any]:
     """Extract constrained aggregate parameters from a slot description.
 
     Args:
@@ -100,7 +101,7 @@ async def _extract_aggregate_args(task: str, context: dict) -> dict:
     return _normalize_args(result)
 
 
-def _parse_current_timestamp(context: dict) -> datetime.datetime:
+def _parse_current_timestamp(context: dict[str, Any]) -> datetime.datetime:
     """Parse current timestamp from context, falling back to current UTC time.
 
     Args:
@@ -123,7 +124,9 @@ def _parse_current_timestamp(context: dict) -> datetime.datetime:
     return parsed.astimezone(datetime.timezone.utc)
 
 
-def _time_bounds(time_window: str, context: dict) -> tuple[str | None, str | None]:
+def _time_bounds(
+    time_window: str, context: dict[str, Any]
+) -> tuple[str | None, str | None]:
     """Convert a coarse time-window label into ISO timestamp bounds.
 
     Args:
@@ -162,7 +165,7 @@ def _slot_number(task: str) -> int | None:
     return int(match.group(1))
 
 
-def _global_user_id_from_known_fact(fact: dict) -> str:
+def _global_user_id_from_known_fact(fact: dict[str, Any]) -> str:
     """Extract a global_user_id from a known fact payload.
 
     Args:
@@ -179,7 +182,7 @@ def _global_user_id_from_known_fact(fact: dict) -> str:
     return ""
 
 
-def _resolved_global_user_id(task: str, context: dict) -> str | None:
+def _resolved_global_user_id(task: str, context: dict[str, Any]) -> str | None:
     """Resolve an optional user filter from context or referenced known facts.
 
     Args:
@@ -205,58 +208,76 @@ def _resolved_global_user_id(task: str, context: dict) -> str | None:
     return user_id or None
 
 
-async def conversation_aggregate_agent(
-    task: str,
-    context: dict,
-    max_attempts: int = 3,
-) -> dict:
-    """Compute factual aggregates over conversation history.
+class ConversationAggregateAgent(BaseRAGHelperAgent):
+    """RAG helper agent that computes factual aggregates over conversation history.
 
     Args:
-        task: Slot description containing the aggregate request.
-        context: Runtime hints supplying platform, channel, timestamp, and known facts.
-        max_attempts: Unused; kept for supervisor2 agent interface compatibility.
-
-    Returns:
-        Dict with resolved (bool), result payload, and attempts count.
+        cache_runtime: Optional cache runtime override for tests or local tools.
     """
-    del max_attempts
 
-    args = await _extract_aggregate_args(task, context)
-    from_timestamp, to_timestamp = _time_bounds(args["time_window"], context)
-    platform = str(context.get("platform") or "").strip() or None
-    platform_channel_id = str(context.get("platform_channel_id") or "").strip() or None
-    global_user_id = _resolved_global_user_id(task, context)
-    keyword = args["keyword"] or None
+    def __init__(self, *, cache_runtime=None) -> None:
+        super().__init__(
+            name="conversation_aggregate_agent",
+            cache_name="",
+            cache_runtime=cache_runtime,
+        )
 
-    result = await aggregate_conversation_by_user(
-        platform=platform,
-        platform_channel_id=platform_channel_id,
-        global_user_id=global_user_id,
-        keyword=keyword,
-        from_timestamp=from_timestamp,
-        to_timestamp=to_timestamp,
-        limit=args["limit"],
-    )
+    async def run(
+        self,
+        task: str,
+        context: dict[str, Any],
+        max_attempts: int = 3,
+    ) -> dict[str, Any]:
+        """Compute factual aggregates over conversation history.
 
-    return {
-        "resolved": bool(result["rows"]),
-        "result": {
-            "aggregate": args["aggregate"],
-            "time_window": args["time_window"],
-            **result,
-        },
-        "attempts": 1,
-    }
+        Args:
+            task: Slot description containing the aggregate request.
+            context: Runtime hints supplying platform, channel, timestamp, and known facts.
+            max_attempts: Unused; kept for interface compatibility.
+
+        Returns:
+            Dict with resolved (bool), result payload, and attempts count.
+        """
+        del max_attempts
+
+        args = await _extract_aggregate_args(task, context)
+        from_timestamp, to_timestamp = _time_bounds(args["time_window"], context)
+        platform = str(context.get("platform") or "").strip() or None
+        platform_channel_id = str(context.get("platform_channel_id") or "").strip() or None
+        global_user_id = _resolved_global_user_id(task, context)
+        keyword = args["keyword"] or None
+
+        result = await aggregate_conversation_by_user(
+            platform=platform,
+            platform_channel_id=platform_channel_id,
+            global_user_id=global_user_id,
+            keyword=keyword,
+            from_timestamp=from_timestamp,
+            to_timestamp=to_timestamp,
+            limit=args["limit"],
+        )
+
+        return self.with_cache_status(
+            {
+                "resolved": bool(result["rows"]),
+                "result": {
+                    "aggregate": args["aggregate"],
+                    "time_window": args["time_window"],
+                    **result,
+                },
+                "attempts": 1,
+            },
+            hit=False,
+            reason="agent_not_cacheable",
+        )
 
 
-async def test_main() -> None:
-    """Run a manual smoke check for the conversation aggregate agent."""
-    result = await conversation_aggregate_agent(
+async def _test_main() -> None:
+    """Run a manual smoke check for ConversationAggregateAgent."""
+    agent = ConversationAggregateAgent()
+    result = await agent.run(
         task="Conversation-aggregate: count recent messages by user",
-        context={
-            "platform": "qq",
-        },
+        context={"platform": "qq"},
     )
     print(json.dumps(result, ensure_ascii=False, indent=2))
 
@@ -264,4 +285,4 @@ async def test_main() -> None:
 if __name__ == "__main__":
     import asyncio
 
-    asyncio.run(test_main())
+    asyncio.run(_test_main())

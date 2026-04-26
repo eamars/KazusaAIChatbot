@@ -12,6 +12,7 @@ import json
 import logging
 import os
 from collections import OrderedDict
+from copy import deepcopy
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any
@@ -124,7 +125,7 @@ class Cache2Entry:
 
     cache_key: str
     cache_name: str
-    result: dict[str, Any]
+    result: Any
     dependencies: list[CacheDependency]
     metadata: dict[str, Any] = field(default_factory=dict)
     created_at: datetime = field(default_factory=_now_utc)
@@ -148,7 +149,7 @@ class RAGCache2Runtime:
         self._invalidations = 0
         self._evictions = 0
 
-    async def get(self, cache_key: str) -> dict[str, Any] | None:
+    async def get(self, cache_key: str) -> Any | None:
         """Retrieve a cached result by exact key.
 
         Args:
@@ -166,14 +167,14 @@ class RAGCache2Runtime:
         entry.last_hit_at = _now_utc()
         self._entries.move_to_end(cache_key)
         self._hits += 1
-        return dict(entry.result)
+        return deepcopy(entry.result)
 
     async def store(
         self,
         *,
         cache_key: str,
         cache_name: str,
-        result: dict[str, Any],
+        result: Any,
         dependencies: list[CacheDependency],
         metadata: dict[str, Any] | None = None,
     ) -> None:
@@ -189,7 +190,7 @@ class RAGCache2Runtime:
         self._entries[cache_key] = Cache2Entry(
             cache_key=cache_key,
             cache_name=cache_name,
-            result=dict(result),
+            result=deepcopy(result),
             dependencies=list(dependencies),
             metadata=dict(metadata or {}),
         )

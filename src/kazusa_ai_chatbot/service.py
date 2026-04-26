@@ -30,13 +30,16 @@ for _quiet in ("pymongo", "httpx", "httpcore", "hpack", "urllib3", "openai", "la
 
 from kazusa_ai_chatbot.config import (
     BRAIN_EXECUTOR_COUNT,
+    CHARACTER_GLOBAL_USER_ID,
     CHAT_HISTORY_RECENT_LIMIT,
     CONVERSATION_HISTORY_LIMIT,
     SCHEDULED_TASKS_ENABLED,
 )
 from kazusa_ai_chatbot.db import (
+    backfill_character_conversation_identity,
     close_db,
     db_bootstrap,
+    ensure_character_identity,
     get_character_profile,
     get_conversation_history,
     get_db,
@@ -268,6 +271,47 @@ async def _hydrate_reply_context(req: ChatRequest) -> ReplyContext:
 
 # ── Bot message saver (background task) ──────────────────────────────
 
+async def _ensure_character_global_identity(
+    *,
+    platform: str,
+    platform_bot_id: str,
+    bot_name: str,
+) -> str:
+    """Ensure the character identity exists and old assistant rows are addressable.
+
+    Args:
+        platform: Runtime platform for the current request.
+        platform_bot_id: Bot account ID on that platform.
+        bot_name: Character display name used by the platform adapter.
+
+    Returns:
+        The configured stable character ``global_user_id``.
+    """
+    character_global_user_id = await ensure_character_identity(
+        platform=platform,
+        platform_user_id=platform_bot_id,
+        display_name=bot_name,
+        global_user_id=CHARACTER_GLOBAL_USER_ID,
+    )
+
+    backfill_key = (platform, platform_bot_id, character_global_user_id)
+    if platform and platform_bot_id and backfill_key not in _character_identity_backfilled:
+        updated_count = await backfill_character_conversation_identity(
+            platform=platform,
+            platform_user_id=platform_bot_id,
+            global_user_id=character_global_user_id,
+        )
+        _character_identity_backfilled.add(backfill_key)
+        if updated_count:
+            logger.info(
+                "Backfilled %d assistant conversation rows with character global_user_id=%s",
+                updated_count,
+                character_global_user_id,
+            )
+
+    return character_global_user_id
+
+
 async def _save_bot_message(result: dict) -> None:
     """Persist the bot's response to conversation history (background task)."""
     platform = result.get("platform", "")
@@ -278,13 +322,18 @@ async def _save_bot_message(result: dict) -> None:
 
     if bot_output:
         try:
+            character_global_user_id = await _ensure_character_global_identity(
+                platform=platform,
+                platform_bot_id=platform_bot_id,
+                bot_name=bot_name,
+            )
             await save_conversation({
                 "platform": platform,
                 "platform_channel_id": platform_channel_id,
                 "channel_type": result.get("channel_type", "group"),
                 "role": "assistant",
                 "platform_user_id": platform_bot_id,
-                "global_user_id": "",
+                "global_user_id": character_global_user_id,
                 "display_name": bot_name,
                 "content": "\n".join(bot_output),
                 "timestamp": datetime.now(timezone.utc).isoformat(),
@@ -300,6 +349,7 @@ _graph = None
 _chat_executor_semaphore: asyncio.Semaphore | None = None
 _task_dispatcher: TaskDispatcher | None = None
 _adapter_registry: AdapterRegistry | None = None
+_character_identity_backfilled: set[tuple[str, str, str]] = set()
 
 
 async def _run_consolidation_background(state: dict) -> None:
@@ -491,6 +541,14 @@ async def chat(req: ChatRequest, background_tasks: BackgroundTasks):
     async with semaphore:
         timestamp = req.timestamp or datetime.now(timezone.utc).isoformat()
 
+        # Ensure the character is addressable by global_user_id before RAG.
+        bot_name = _personality.get("name", "KazusaBot")
+        await _ensure_character_global_identity(
+            platform=req.platform,
+            platform_bot_id=req.platform_bot_id,
+            bot_name=bot_name,
+        )
+
         # Resolve global user ID
         global_user_id = await resolve_global_user_id(
             platform=req.platform,
@@ -518,9 +576,6 @@ async def chat(req: ChatRequest, background_tasks: BackgroundTasks):
         chat_history_wide = trim_history_dict(history)
         chat_history_recent = chat_history_wide[-CHAT_HISTORY_RECENT_LIMIT:]
         reply_context = await _hydrate_reply_context(req)
-
-        # Build the character bot identity
-        bot_name = _personality.get("name", "KazusaBot")
 
         debug_modes: DebugModes = {
             "listen_only": req.debug_modes.listen_only,

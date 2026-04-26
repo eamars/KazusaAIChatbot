@@ -1,19 +1,25 @@
-"""Inner-loop agent for semantic persistent-memory search."""
+"""RAG helper agent: semantic persistent-memory search."""
 
 from __future__ import annotations
 
 import json
 import logging
 import re
+from typing import Any
 
 from langchain_core.messages import HumanMessage, SystemMessage
 from pydantic import ValidationError
 
 from kazusa_ai_chatbot.agents.memory_retriever_agent import search_persistent_memory
+from kazusa_ai_chatbot.rag.cache2_policy import (
+    PERSISTENT_MEMORY_SEARCH_CACHE_NAME,
+    build_persistent_memory_search_cache_key,
+    build_persistent_memory_search_dependencies,
+)
+from kazusa_ai_chatbot.rag.helper_agent import BaseRAGHelperAgent
 from kazusa_ai_chatbot.utils import get_llm, parse_llm_json_output
 
 logger = logging.getLogger(__name__)
-
 
 _GENERATOR_PROMPT = """\
 你是一个只负责 `search_persistent_memory` 的检索参数生成器。
@@ -21,7 +27,7 @@ _GENERATOR_PROMPT = """\
 # 你的唯一职责
 - 只为 `search_persistent_memory` 生成参数。
 - `search_query` 必须写成自然语言的记忆查询，不要退化成关键词列表。
-- 这类查询要偏向”印象 / 事实 / 看法 / 关系线索”的 framing，例如”千纱对 X 的看法””关于 X 的已知承诺”。
+- 这类查询要偏向"印象 / 事实 / 看法 / 关系线索"的 framing，例如"千纱对 X 的看法""关于 X 的已知承诺"。
 - 如果 `context` 或 `known_facts` 明确给出 `memory_type`、`status` 或来源用户，请使用这些过滤条件。
 - 如果 `feedback` 指出记忆类型不对、查询太抽象或没有相关记忆，下一轮必须改写。
 
@@ -34,14 +40,14 @@ _GENERATOR_PROMPT = """\
 # 输出格式
 请只返回合法 JSON：
 {
-  “search_query”: “string”,
-  “top_k”: 5,
-  “source_global_user_id”: “UUID string or omitted”,
-  “memory_type”: “fact|promise|impression|narrative|defense_rule or omitted”,
-  “source_kind”: “string or omitted”,
-  “status”: “string or omitted”,
-  “expiry_before”: “ISO-8601 or omitted”,
-  “expiry_after”: “ISO-8601 or omitted”
+  "search_query": "string",
+  "top_k": 5,
+  "source_global_user_id": "UUID string or omitted",
+  "memory_type": "fact|promise|impression|narrative|defense_rule or omitted",
+  "source_kind": "string or omitted",
+  "status": "string or omitted",
+  "expiry_before": "ISO-8601 or omitted",
+  "expiry_after": "ISO-8601 or omitted"
 }
 """
 _generator_llm = get_llm(temperature=0.0, top_p=1.0)
@@ -69,9 +75,16 @@ _JUDGE_PROMPT = """\
 _judge_llm = get_llm(temperature=0.0, top_p=1.0)
 
 
-def _normalize_args(raw_args: dict) -> dict:
-    """Keep only valid `search_persistent_memory` arguments."""
-    args: dict[str, object] = {}
+def _normalize_args(raw_args: dict[str, Any]) -> dict[str, Any]:
+    """Keep only valid `search_persistent_memory` arguments.
+
+    Args:
+        raw_args: Raw dict from the generator LLM.
+
+    Returns:
+        Validated argument dict for ``search_persistent_memory``.
+    """
+    args: dict[str, Any] = {}
 
     search_query = str(raw_args.get("search_query", "")).strip()
     if search_query:
@@ -116,7 +129,7 @@ def _slot_number(task: str) -> int | None:
     return int(match.group(1))
 
 
-def _resolved_user_from_known_facts(task: str, context: dict) -> dict:
+def _resolved_user_from_known_facts(task: str, context: dict[str, Any]) -> dict[str, Any]:
     """Find the user resolved by the slot referenced in the memory-search task.
 
     Args:
@@ -160,19 +173,14 @@ def _is_about_resolved_user_search(task: str) -> bool:
     references_resolved_user = "user resolved in slot" in task_lower
     asks_about_subject = any(
         marker in task_lower
-        for marker in (
-            "about",
-            "impression",
-            "opinion",
-            "看法",
-            "印象",
-            "评价",
-        )
+        for marker in ("about", "impression", "opinion", "看法", "印象", "评价")
     )
     return references_resolved_user and asks_about_subject
 
 
-def _apply_resolved_subject_user(args: dict, task: str, context: dict) -> dict:
+def _apply_resolved_subject_user(
+    args: dict[str, Any], task: str, context: dict[str, Any]
+) -> dict[str, Any]:
     """Adjust memory-search args for third-party subject-user queries.
 
     ``source_global_user_id`` means the user who sourced/triggered a memory, not
@@ -210,21 +218,25 @@ def _apply_resolved_subject_user(args: dict, task: str, context: dict) -> dict:
     return adjusted_args
 
 
-async def _generator(task: str, context: dict, feedback: str) -> dict:
-    """Generate one `search_persistent_memory` argument dict."""
+async def _generator(task: str, context: dict[str, Any], feedback: str) -> dict[str, Any]:
+    """Generate one `search_persistent_memory` argument dict.
+
+    Args:
+        task: Slot description produced by the outer-loop dispatcher.
+        context: Known facts and runtime hints.
+        feedback: Judge feedback from the previous attempt, or empty string.
+
+    Returns:
+        Normalized arguments for ``search_persistent_memory``.
+    """
     system_prompt = SystemMessage(content=_GENERATOR_PROMPT)
     human_message = HumanMessage(
         content=json.dumps(
-            {
-                "task": task,
-                "context": context,
-                "feedback": feedback,
-            },
+            {"task": task, "context": context, "feedback": feedback},
             ensure_ascii=False,
             default=str,
         )
     )
-
     response = await _generator_llm.ainvoke([system_prompt, human_message])
     result = parse_llm_json_output(str(response.content))
     if not isinstance(result, dict):
@@ -232,29 +244,36 @@ async def _generator(task: str, context: dict, feedback: str) -> dict:
     return _normalize_args(result)
 
 
-async def _tool(args: dict) -> object:
-    """Execute `search_persistent_memory` exactly once."""
+async def _tool(args: dict[str, Any]) -> object:
+    """Execute `search_persistent_memory` exactly once.
+
+    Args:
+        args: Normalized arguments for the tool.
+
+    Returns:
+        Tool result or an error dict on invalid arguments.
+    """
     try:
-        result = await search_persistent_memory.ainvoke(args)
+        return await search_persistent_memory.ainvoke(args)
     except (TypeError, ValueError, ValidationError) as exc:
         logger.info("persistent_memory_search_agent invalid args: %s", exc)
         return {"error": f"{type(exc).__name__}: {exc}"}
-    return result
 
 
 async def _judge(task: str, result: object) -> tuple[bool, str]:
-    """Judge whether the latest semantic memory-search result resolves the slot."""
+    """Judge whether the latest semantic memory-search result resolves the slot.
+
+    Args:
+        task: Slot description produced by the outer-loop dispatcher.
+        result: Tool result from the current attempt.
+
+    Returns:
+        Tuple of (resolved, feedback).
+    """
     system_prompt = SystemMessage(content=_JUDGE_PROMPT)
     human_message = HumanMessage(
-        content=json.dumps(
-            {
-                "task": task,
-                "result": result,
-            },
-            ensure_ascii=False,
-        )
+        content=json.dumps({"task": task, "result": result}, ensure_ascii=False)
     )
-
     response = await _judge_llm.ainvoke([system_prompt, human_message])
     verdict = parse_llm_json_output(str(response.content))
     if not isinstance(verdict, dict):
@@ -265,46 +284,100 @@ async def _judge(task: str, result: object) -> tuple[bool, str]:
     return resolved, feedback
 
 
-async def persistent_memory_search_agent(
-    task: str,
-    context: dict,
-    max_attempts: int = 3,
-) -> dict:
-    """Resolve one slot through iterative semantic search over persistent memories.
+class PersistentMemorySearchAgent(BaseRAGHelperAgent):
+    """RAG helper agent that resolves a slot through iterative semantic search over persistent memories.
 
     Args:
-        task: Slot description produced by the outer-loop supervisor.
-        context: Known facts and runtime hints that may constrain the search.
-        max_attempts: Maximum generator-tool-judge iterations to attempt.
-
-    Returns:
-        A dict containing whether the slot was resolved, the last serialized
-        tool result, and the number of attempts consumed.
+        cache_runtime: Optional cache runtime override for tests or local tools.
     """
-    feedback = ""
-    result = None
-    resolved = False
-    attempt = 0
 
-    for attempt in range(max_attempts):
-        args = await _generator(task, context, feedback)
-        args = _apply_resolved_subject_user(args, task, context)
-        result = await _tool(args)
-        resolved, feedback = await _judge(task, result)
+    def __init__(self, *, cache_runtime=None) -> None:
+        super().__init__(
+            name="persistent_memory_search_agent",
+            cache_name=PERSISTENT_MEMORY_SEARCH_CACHE_NAME,
+            cache_runtime=cache_runtime,
+        )
+
+    async def run(
+        self,
+        task: str,
+        context: dict[str, Any],
+        max_attempts: int = 3,
+    ) -> dict[str, Any]:
+        """Resolve one slot through iterative semantic search over persistent memories.
+
+        Args:
+            task: Slot description produced by the outer-loop supervisor.
+            context: Known facts and runtime hints that may constrain the search.
+            max_attempts: Maximum generator-tool-judge iterations to attempt.
+
+        Returns:
+            Dict with resolved (bool), result (last tool result), and attempts count.
+        """
+        cache_key = build_persistent_memory_search_cache_key(task, context)
+        cached = await self.read_cache(cache_key)
+        if cached is not None:
+            return self.with_cache_status(
+                {"resolved": True, "result": cached, "attempts": 0},
+                hit=True,
+                reason="hit",
+                cache_key=cache_key,
+            )
+
+        feedback = ""
+        result = None
+        resolved = False
+        attempt = 0
+        args: dict[str, Any] = {}
+        cache_stored = False
+
+        for attempt in range(max_attempts):
+            args = await _generator(task, context, feedback)
+            args = _apply_resolved_subject_user(args, task, context)
+            result = await _tool(args)
+            resolved, feedback = await _judge(task, result)
+            if resolved:
+                break
+
         if resolved:
-            break
+            await self.write_cache(
+                cache_key=cache_key,
+                result=result,
+                dependencies=build_persistent_memory_search_dependencies(args),
+                metadata={},
+            )
+            cache_stored = True
 
-    return {
-        "resolved": resolved,
-        "result": result,
-        "attempts": attempt + 1,
-    }
+        if cache_stored:
+            cache_reason = "miss_stored"
+        elif resolved:
+            cache_reason = "miss_not_cacheable"
+        else:
+            cache_reason = "miss_unresolved"
+
+        return self.with_cache_status(
+            {
+                "resolved": resolved,
+                "result": result,
+                "attempts": attempt + 1,
+            },
+            hit=False,
+            reason=cache_reason,
+            cache_key=cache_key,
+        )
 
 
-async def test_main() -> None:
-    """Run a manual smoke check for the semantic persistent-memory agent."""
-    result = await persistent_memory_search_agent(
-        task="映像",
+async def _test_main() -> None:
+    """Run a manual smoke check for PersistentMemorySearchAgent."""
+    agent = PersistentMemorySearchAgent()
+    result = await agent.run(
+        task="找出和'洗车'有关的持久记忆条目",
+        context={"known_facts": []},
+    )
+    print(json.dumps(result, ensure_ascii=False, indent=2))
+
+    result = await agent.run(
+        task="找出和'洗车'有关的持久记忆条目",
         context={"known_facts": []},
     )
     print(json.dumps(result, ensure_ascii=False, indent=2))
@@ -313,4 +386,4 @@ async def test_main() -> None:
 if __name__ == "__main__":
     import asyncio
 
-    asyncio.run(test_main())
+    asyncio.run(_test_main())

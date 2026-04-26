@@ -21,6 +21,7 @@ from kazusa_ai_chatbot.config import (
     AFFINITY_DEFAULT,
     AFFINITY_MAX,
     AFFINITY_MIN,
+    CHARACTER_GLOBAL_USER_ID,
     PROFILE_MEMORY_BUDGET,
     PROFILE_MEMORY_RECENT_LIMITS,
     PROFILE_MEMORY_SEMANTIC_THRESHOLDS,
@@ -363,6 +364,137 @@ async def link_platform_account(
             "linked_at": _now_iso(),
         }}},
     )
+
+
+async def ensure_character_identity(
+    *,
+    platform: str,
+    platform_user_id: str,
+    display_name: str,
+    global_user_id: str = CHARACTER_GLOBAL_USER_ID,
+) -> str:
+    """Ensure the character has a first-class identity in ``user_profiles``.
+
+    Args:
+        platform: Platform where the character bot account is active.
+        platform_user_id: Bot account ID on that platform.
+        display_name: Current character display name.
+        global_user_id: Stable internal character UUID.
+
+    Returns:
+        The stable character ``global_user_id``.
+    """
+    clean_global_id = global_user_id.strip()
+    clean_platform = platform.strip()
+    clean_platform_user_id = platform_user_id.strip()
+    clean_display_name = display_name.strip()
+    if not clean_global_id:
+        raise ValueError("character global_user_id must not be empty")
+
+    db = await get_db()
+    now = _now_iso()
+
+    if clean_platform and clean_platform_user_id:
+        await db.user_profiles.update_many(
+            {"global_user_id": {"$ne": clean_global_id}},
+            {
+                "$pull": {
+                    "platform_accounts": {
+                        "platform": clean_platform,
+                        "platform_user_id": clean_platform_user_id,
+                    }
+                }
+            },
+        )
+
+    await db.user_profiles.update_one(
+        {"global_user_id": clean_global_id},
+        {
+            "$setOnInsert": {
+                "global_user_id": clean_global_id,
+                "platform_accounts": [],
+                "suspected_aliases": [],
+                "facts": [],
+                "affinity": AFFINITY_DEFAULT,
+                "last_relationship_insight": "",
+            }
+        },
+        upsert=True,
+    )
+
+    if clean_display_name:
+        account = {
+            "platform": clean_platform,
+            "platform_user_id": clean_platform_user_id,
+            "display_name": clean_display_name,
+            "linked_at": now,
+        }
+        match_filter = {
+            "global_user_id": clean_global_id,
+            "platform_accounts": {
+                "$elemMatch": {
+                    "platform": clean_platform,
+                    "platform_user_id": clean_platform_user_id,
+                }
+            },
+        }
+        existing_account = await db.user_profiles.find_one(match_filter)
+        if existing_account is not None:
+            await db.user_profiles.update_one(
+                match_filter,
+                {
+                    "$set": {
+                        "platform_accounts.$.display_name": clean_display_name,
+                        "platform_accounts.$.linked_at": now,
+                    }
+                },
+            )
+        else:
+            await db.user_profiles.update_one(
+                {"global_user_id": clean_global_id},
+                {"$push": {"platform_accounts": account}},
+            )
+
+    return clean_global_id
+
+
+async def backfill_character_conversation_identity(
+    *,
+    platform: str,
+    platform_user_id: str,
+    global_user_id: str = CHARACTER_GLOBAL_USER_ID,
+) -> int:
+    """Attach the character global ID to historical assistant messages.
+
+    Args:
+        platform: Platform where the character bot account is active.
+        platform_user_id: Bot account ID on that platform.
+        global_user_id: Stable internal character UUID.
+
+    Returns:
+        Number of conversation rows updated.
+    """
+    clean_global_id = global_user_id.strip()
+    clean_platform = platform.strip()
+    clean_platform_user_id = platform_user_id.strip()
+    if not clean_global_id or not clean_platform or not clean_platform_user_id:
+        return 0
+
+    db = await get_db()
+    result = await db.conversation_history.update_many(
+        {
+            "platform": clean_platform,
+            "platform_user_id": clean_platform_user_id,
+            "role": "assistant",
+            "$or": [
+                {"global_user_id": ""},
+                {"global_user_id": None},
+                {"global_user_id": {"$exists": False}},
+            ],
+        },
+        {"$set": {"global_user_id": clean_global_id}},
+    )
+    return int(result.modified_count)
 
 
 async def search_users_by_display_name(name: str, limit: int = 5) -> list[dict]:
@@ -1084,4 +1216,3 @@ async def update_last_relationship_insight(global_user_id: str, insight: str) ->
         {"$set": {"last_relationship_insight": insight}},
         upsert=True,
     )
-

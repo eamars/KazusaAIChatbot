@@ -285,6 +285,15 @@ async def test_call_rag_supervisor_live_additional_4(live_supervisor2_env: dict)
         note="Generic",
     )
 
+async def test_call_rag_supervisor_live_additional_5(live_supervisor2_env: dict) -> None:
+    await _run_live_supervisor2_case(
+        live_supervisor2_env,
+        case_id="",
+        channel_id="",
+        query="千纱的最近10条发言",
+        note="Generic",
+    )
+
 
 async def test_call_rag_supervisor_live_common_sense_1(live_supervisor2_env: dict) -> None:
     await _run_live_supervisor2_case(

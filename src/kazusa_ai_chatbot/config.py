@@ -34,6 +34,10 @@ EMBEDDING_BASE_URL = os.getenv("EMBEDDING_BASE_URL", "http://localhost:1234/v1")
 EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "text-embedding-model")
 
 # Bot settings
+CHARACTER_GLOBAL_USER_ID = os.getenv(
+    "CHARACTER_GLOBAL_USER_ID",
+    "00000000-0000-4000-8000-000000000001",
+)
 CONVERSATION_HISTORY_LIMIT = int(os.getenv("CONVERSATION_HISTORY_LIMIT", "10"))
 # Recent history depth for downstream stages (hard-coded based on LLM performance)
 CHAT_HISTORY_RECENT_LIMIT = 5
