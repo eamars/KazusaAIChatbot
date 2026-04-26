@@ -874,7 +874,7 @@ async def call_rag_subgraph(state: GlobalPersonaState) -> GlobalPersonaState:
     }
 
     resolution_graph = _build_resolution_graph()
-    resolution_result = await resolution_graph.ainvoke(initial_state)
+    resolution_result = await resolution_graph.ainvoke(rag_state)
 
     # Phase 1 metadata enrichment (from resolution)
     metadata["retrieval_plan"] = resolution_result.get("retrieval_plan") or {}

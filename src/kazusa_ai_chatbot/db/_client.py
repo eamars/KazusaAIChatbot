@@ -28,18 +28,21 @@ logger = logging.getLogger(__name__)
 # ── Embedding client (lazy) ────────────────────────────────────────
 
 _embed_client: AsyncOpenAI | None = None
+_embed_client_loop: asyncio.AbstractEventLoop | None = None
 _EMBEDDING_REQUEST_SEMAPHORE = asyncio.Semaphore(10)
 _EMBEDDING_BATCH_SIZE = 10
 
 
 def _get_embed_client() -> AsyncOpenAI:
     """Return a lazily-initialised AsyncOpenAI client for embeddings."""
-    global _embed_client
-    if _embed_client is None:
+    global _embed_client, _embed_client_loop
+    current_loop = asyncio.get_running_loop()
+    if _embed_client is None or _embed_client_loop is not current_loop:
         _embed_client = AsyncOpenAI(
             base_url=EMBEDDING_BASE_URL,
             api_key=LLM_API_KEY,
         )
+        _embed_client_loop = current_loop
     return _embed_client
 
 
@@ -86,6 +89,7 @@ async def get_text_embeddings_batch(texts: list[str]) -> list[list[float]]:
 
 _client: AsyncIOMotorClient | None = None
 _db = None
+_db_loop: asyncio.AbstractEventLoop | None = None
 
 
 async def get_db():
@@ -94,10 +98,20 @@ async def get_db():
     Raises:
         ConnectionFailure: If the initial ping to MongoDB fails.
     """
-    global _client, _db
+    global _client, _db, _db_loop
+    current_loop = asyncio.get_running_loop()
+
+    if _db is not None and _db_loop is not current_loop:
+        if _client is not None:
+            _client.close()
+        _client = None
+        _db = None
+        _db_loop = None
+
     if _db is None:
         _client = AsyncIOMotorClient(MONGODB_URI)
         _db = _client[MONGODB_DB_NAME]
+        _db_loop = current_loop
         try:
             await _client.admin.command("ping")
             logger.info("Connected to MongoDB at %s", MONGODB_URI)
@@ -109,11 +123,12 @@ async def get_db():
 
 async def close_db() -> None:
     """Close the MongoDB client connection if open."""
-    global _client, _db
+    global _client, _db, _db_loop
     if _client is not None:
         _client.close()
         _client = None
         _db = None
+        _db_loop = None
 
 
 # ── Vector search index helper ─────────────────────────────────────

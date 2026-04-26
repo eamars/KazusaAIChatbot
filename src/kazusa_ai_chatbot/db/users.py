@@ -398,6 +398,150 @@ async def search_users_by_display_name(name: str, limit: int = 5) -> list[dict]:
     return results
 
 
+def _display_name_regex(value: str, operator: str) -> str:
+    """Build a safe MongoDB regex for an allowed display-name predicate.
+
+    Args:
+        value: Literal display-name fragment to match.
+        operator: One of equals, contains, starts_with, or ends_with.
+
+    Returns:
+        Regex string with user text escaped.
+    """
+    escaped = re.escape(value)
+    if operator == "equals":
+        return f"^{escaped}$"
+    if operator == "starts_with":
+        return f"^{escaped}"
+    if operator == "ends_with":
+        return f"{escaped}$"
+    return escaped
+
+
+async def list_users_by_display_name(
+    value: str,
+    operator: str = "contains",
+    *,
+    source: str = "user_profiles",
+    platform: str | None = None,
+    platform_channel_id: str | None = None,
+    limit: int = 20,
+) -> list[dict]:
+    """List users whose display names match a constrained predicate.
+
+    Args:
+        value: Literal display-name value or fragment to match.
+        operator: Match operation: equals, contains, starts_with, or ends_with.
+        source: Data source to enumerate: user_profiles, conversation_participants, or both.
+        platform: Optional platform filter.
+        platform_channel_id: Optional conversation channel filter. Only applies to
+            conversation_participants.
+        limit: Maximum number of unique users to return.
+
+    Returns:
+        List of user dicts with stable identifiers and source metadata.
+    """
+    stripped = value.strip()
+    if not stripped or limit <= 0:
+        return []
+
+    allowed_sources = {"user_profiles", "conversation_participants", "both"}
+    if source not in allowed_sources:
+        source = "user_profiles"
+
+    allowed_operators = {"equals", "contains", "starts_with", "ends_with"}
+    if operator not in allowed_operators:
+        operator = "contains"
+
+    db = await get_db()
+    pattern = _display_name_regex(stripped, operator)
+    results: list[dict] = []
+    seen: set[tuple[str, str, str]] = set()
+
+    if source in {"user_profiles", "both"}:
+        elem_match: dict[str, object] = {
+            "display_name": {"$regex": pattern, "$options": "i"},
+        }
+        if platform:
+            elem_match["platform"] = platform
+
+        cursor = db.user_profiles.find(
+            {"platform_accounts": {"$elemMatch": elem_match}},
+            {"_id": 0, "global_user_id": 1, "platform_accounts": 1},
+        ).limit(limit)
+        async for doc in cursor:
+            for acct in doc.get("platform_accounts", []):
+                display_name = str(acct.get("display_name", ""))
+                account_platform = str(acct.get("platform", ""))
+                if platform and account_platform != platform:
+                    continue
+                if not re.search(pattern, display_name, re.IGNORECASE):
+                    continue
+
+                key = (str(doc["global_user_id"]), display_name, account_platform)
+                if key in seen:
+                    continue
+                seen.add(key)
+                results.append({
+                    "global_user_id": doc["global_user_id"],
+                    "display_name": display_name,
+                    "platform": account_platform,
+                    "platform_user_id": str(acct.get("platform_user_id", "")),
+                    "source": "user_profiles",
+                })
+                break
+            if len(results) >= limit:
+                return results
+
+    if source in {"conversation_participants", "both"} and len(results) < limit:
+        match_filter: dict[str, object] = {
+            "display_name": {"$regex": pattern, "$options": "i"},
+            "role": "user",
+        }
+        if platform:
+            match_filter["platform"] = platform
+        if platform_channel_id:
+            match_filter["platform_channel_id"] = platform_channel_id
+
+        pipeline = [
+            {"$match": match_filter},
+            {
+                "$group": {
+                    "_id": {
+                        "global_user_id": "$global_user_id",
+                        "display_name": "$display_name",
+                        "platform": "$platform",
+                        "platform_user_id": "$platform_user_id",
+                    },
+                    "message_count": {"$sum": 1},
+                    "last_timestamp": {"$max": "$timestamp"},
+                }
+            },
+            {"$sort": {"message_count": -1, "last_timestamp": -1}},
+            {"$limit": limit - len(results)},
+        ]
+        docs = await db.conversation_history.aggregate(pipeline).to_list(length=limit - len(results))
+        for doc in docs:
+            identity = doc["_id"]
+            display_name = str(identity.get("display_name", ""))
+            account_platform = str(identity.get("platform", ""))
+            key = (str(identity.get("global_user_id", "")), display_name, account_platform)
+            if key in seen:
+                continue
+            seen.add(key)
+            results.append({
+                "global_user_id": str(identity.get("global_user_id", "")),
+                "display_name": display_name,
+                "platform": account_platform,
+                "platform_user_id": str(identity.get("platform_user_id", "")),
+                "source": "conversation_history",
+                "message_count": int(doc.get("message_count", 0)),
+                "last_timestamp": str(doc.get("last_timestamp", "")),
+            })
+
+    return results
+
+
 async def add_suspected_alias(
     global_user_id: str,
     other_global_user_id: str,
@@ -940,5 +1084,4 @@ async def update_last_relationship_insight(global_user_id: str, insight: str) ->
         {"$set": {"last_relationship_insight": insight}},
         upsert=True,
     )
-
 

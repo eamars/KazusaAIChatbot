@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
 from kazusa_ai_chatbot.config import CONVERSATION_HISTORY_LIMIT
@@ -135,6 +136,100 @@ async def search_conversation_history(
     cursor = collection.aggregate(pipeline)
     docs = await cursor.to_list(length=limit)
     return [(doc.pop("score", 0.0), doc) for doc in docs]
+
+
+async def aggregate_conversation_by_user(
+    *,
+    platform: str | None = None,
+    platform_channel_id: str | None = None,
+    global_user_id: str | None = None,
+    keyword: str | None = None,
+    from_timestamp: str | None = None,
+    to_timestamp: str | None = None,
+    limit: int = 10,
+) -> dict:
+    """Compute factual message counts grouped by user.
+
+    Args:
+        platform: Optional platform filter.
+        platform_channel_id: Optional channel filter.
+        global_user_id: Optional user UUID filter.
+        keyword: Optional literal content keyword to count only matching messages.
+        from_timestamp: Optional inclusive start timestamp.
+        to_timestamp: Optional inclusive end timestamp.
+        limit: Maximum number of grouped rows to return.
+
+    Returns:
+        Dict containing total matched messages and ranked per-user counts.
+    """
+    effective_limit = max(1, min(limit, 50))
+    db = await get_db()
+
+    match_filter: dict[str, Any] = {"role": "user"}
+    if platform:
+        match_filter["platform"] = platform
+    if platform_channel_id:
+        match_filter["platform_channel_id"] = platform_channel_id
+    if global_user_id:
+        match_filter["global_user_id"] = global_user_id
+    if keyword:
+        match_filter["content"] = {"$regex": re.escape(keyword), "$options": "i"}
+    if from_timestamp or to_timestamp:
+        match_filter["timestamp"] = {}
+        if from_timestamp:
+            match_filter["timestamp"]["$gte"] = from_timestamp
+        if to_timestamp:
+            match_filter["timestamp"]["$lte"] = to_timestamp
+
+    pipeline: list[dict[str, Any]] = [
+        {"$match": match_filter},
+        {
+            "$group": {
+                "_id": {
+                    "global_user_id": "$global_user_id",
+                    "platform_user_id": "$platform_user_id",
+                    "platform": "$platform",
+                },
+                "display_names": {"$addToSet": "$display_name"},
+                "message_count": {"$sum": 1},
+                "first_timestamp": {"$min": "$timestamp"},
+                "last_timestamp": {"$max": "$timestamp"},
+            }
+        },
+        {"$sort": {"message_count": -1, "last_timestamp": -1}},
+        {"$limit": effective_limit},
+    ]
+    rows = await db.conversation_history.aggregate(pipeline).to_list(length=effective_limit)
+    total_count = await db.conversation_history.count_documents(match_filter)
+
+    return {
+        "total_count": total_count,
+        "rows": [
+            {
+                "global_user_id": str(row["_id"].get("global_user_id", "")),
+                "platform_user_id": str(row["_id"].get("platform_user_id", "")),
+                "platform": str(row["_id"].get("platform", "")),
+                "display_names": [
+                    str(name)
+                    for name in row.get("display_names", [])
+                    if str(name).strip()
+                ],
+                "message_count": int(row.get("message_count", 0)),
+                "first_timestamp": str(row.get("first_timestamp", "")),
+                "last_timestamp": str(row.get("last_timestamp", "")),
+            }
+            for row in rows
+        ],
+        "query": {
+            "platform": platform,
+            "platform_channel_id": platform_channel_id,
+            "global_user_id": global_user_id,
+            "keyword": keyword,
+            "from_timestamp": from_timestamp,
+            "to_timestamp": to_timestamp,
+            "limit": effective_limit,
+        },
+    }
 
 
 async def save_conversation(doc: ConversationMessageDoc) -> None:
