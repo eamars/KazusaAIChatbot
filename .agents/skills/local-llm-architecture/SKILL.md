@@ -16,6 +16,7 @@ The goal is to avoid designs that look elegant with a frontier model but become 
 - Chatbot responses need bounded latency. Multi-minute agent loops are unacceptable for normal user messages.
 - The system should degrade gracefully when a query falls outside supported capabilities.
 - The LLM should reason over semantic concepts, not raw database structure or implementation-specific schemas.
+- NEVER send raw data to the LLM and expect it to infer the operational meaning. Local LLMs cannot reliably interpret numerical values without longer explanations that bloat prompts and still remain brittle. Always use a helper function to convert raw measurements into descriptive words before they enter the model context, for example `messages_per_minute=6.2` -> `noise_level="high"` or `distinct_speakers=5` -> `speaker_diversity="many"`.
 
 ## Design Posture
 
@@ -27,6 +28,34 @@ Prefer bounded, inspectable architecture:
 - Specialized agents own low-level parameter generation for their domain.
 - Deterministic code owns validation, permissions, limits, schema mapping, and execution.
 - The planner/initializer should decide what information is needed, not how to query every storage backend.
+
+## LLM Input Shaping
+
+Before sending context to a local LLM, translate machine-facing data into semantic descriptors. The model should receive the interpretation it needs, not the raw telemetry it would have to calibrate from scratch.
+
+Good payloads:
+
+```json
+{
+  "noise_level": "high",
+  "speaker_diversity": "many",
+  "reply_thread_fragmentation": "multiple_parallel_threads",
+  "bot_turn_recency": "recent"
+}
+```
+
+Risky payloads:
+
+```json
+{
+  "messages_per_minute": 6.2,
+  "distinct_speakers": 5,
+  "reply_target_count": 4,
+  "messages_since_bot_last_spoke": 2
+}
+```
+
+If numeric thresholds matter, keep them in deterministic helper functions where they are inspectable and testable. Pass only the resulting labels and short explanations to the LLM, such as `"high_noise: many speakers and several parallel reply threads in the recent window"`.
 
 Avoid designs where:
 
