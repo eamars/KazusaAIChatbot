@@ -57,6 +57,7 @@ from kazusa_ai_chatbot.rag.conversation_keyword_agent import ConversationKeyword
 from kazusa_ai_chatbot.rag.conversation_search_agent import ConversationSearchAgent
 from kazusa_ai_chatbot.rag.persistent_memory_keyword_agent import PersistentMemoryKeywordAgent
 from kazusa_ai_chatbot.rag.persistent_memory_search_agent import PersistentMemorySearchAgent
+from kazusa_ai_chatbot.rag.relationship_agent import RelationshipAgent
 from kazusa_ai_chatbot.rag.user_list_agent import UserListAgent
 from kazusa_ai_chatbot.rag.user_lookup_agent import UserLookupAgent
 from kazusa_ai_chatbot.rag.user_profile_agent import UserProfileAgent
@@ -139,7 +140,12 @@ do NOT create a slot for that name.
 Only create a slot for {character_name} when it IS the subject of data being retrieved
 (e.g. "what did {character_name} say about…").
 
-## Rule 0b — Character self-profile requests
+## Rule 0b — Character relationship preference / ranking
+Use Relationship only for character-to-users preference/ranking queries over unnamed
+users ("who do you like most", "has someone liked", "most hated", "top N").
+Named-person relationship reads remain Identity → Profile under Rule 3.
+
+## Rule 0c — Character self-profile requests
 If the user asks {character_name} to talk about herself / themselves / "you" / "yourself"
 as the DATA SUBJECT, retrieve the character's own profile. This includes Chinese phrasing
 such as "你自己", "聊聊你自己", "介绍一下你自己", "说说你自己", or "你是什么样的人".
@@ -226,6 +232,7 @@ These slots compute evidence only; do not use them for opinions or persona inter
 
 ## Conflict resolution — choose the structural evidence source
 When two patterns seem possible, choose the more structural source:
+- Character relationship preference/ranking over users → Relationship, not Profile.
 - Display-name or user metadata predicates → User-list, not Conversation-keyword.
 - Counts, totals, rankings, "most", or "least" → Conversation-aggregate, not Conversation-keyword/semantic.
 - Person is primary relational subject → Identity + Profile always (Rule 3), then secondary slots; never Memory-search for person-relationship data.
@@ -239,6 +246,7 @@ When a slot depends on a specific earlier slot, write "resolved in slot N" (e.g.
 
 - "Identity: look up display name '<name>' to get global_user_id"
 - "User-list: list users whose display names <equals / contain / start with / end with> '<value>' [from known profiles / observed conversation participants / both]"
+- "Relationship: rank users by character relationship [top / bottom] [limit N / existence check]"
 - "Profile: retrieve full user profile for the user resolved in slot N"
 - "Conversation-aggregate: count/rank messages by user [containing '<literal term>'] [from the user resolved in slot N] [recent / today / yesterday / all]"
 - "Conversation-filter: retrieve [recent / yesterday's / last N] messages from the user resolved in slot N"
@@ -248,6 +256,12 @@ When a slot depends on a specific earlier slot, write "resolved in slot N" (e.g.
 - "Web-search: search the web for <description of target URL or topic from slot N>"
 
 ## Pattern gallery
+
+### 0. Character relationship preference / ranking (1 slot)
+Queries: "千纱你最喜欢谁？", "你最喜欢谁？", "千纱有喜欢的人了么", "千纱最讨厌谁？", "千纱最喜欢的三个人"
+  → Relationship over users; top means high affinity, bottom means low affinity; preserve count.
+  ["Relationship: rank users by character relationship from top, limit 1"]
+  ["Relationship: check whether a top-ranked relationship candidate exists"]
 
 ### 1. Named person → impression or compatibility (2 slots)
 Query: "千纱你觉得小钳子这个人怎么样"  (character_name=千纱)
@@ -555,6 +569,15 @@ _RAG_SUPERVISOR_AGENT_REGISTRY: dict[str, RAGAgentRegistryEntry] = {
             "can_consolidate_as_new_knowledge": False,
         },
     },
+    "relationship_agent": {
+        "agent": RelationshipAgent().run,
+        "fact_source": {
+            "source_kind": "internal",
+            "source_system": "user_profiles",
+            "consolidation_policy": "do_not_write_knowledge",
+            "can_consolidate_as_new_knowledge": False,
+        },
+    },
     "web_search_agent2": {
         "agent": WebSearchAgent().run,
         "fact_source": {
@@ -636,6 +659,9 @@ You are a RAG Dispatcher. For each slot, select exactly one inner-loop retrieval
 - `user_profile_agent`: Reads a user's full profile from the user-profile store.
   Use ONLY when global_user_id is already present in known_facts. Never for unknown identities.
 
+- `relationship_agent`: Ranks profiled users by the character's relationship data.
+  Use for `Relationship:` slots. The agent extracts its own ranking parameters.
+
 - `conversation_filter_agent`: Structured filter over conversation history.
   Handles: fetching messages from a known user (by global_user_id); filtering by channel, time range, or message count.
   Prefer over search agents whenever structural filters are available.
@@ -670,6 +696,7 @@ Match the prefix literally and use the mapped agent without further deliberation
 |------------------------------|----------------------------------|
 | "Identity: ..."              | `user_lookup_agent`              |
 | "User-list: ..."             | `user_list_agent`                |
+| "Relationship: ..."          | `relationship_agent`             |
 | "Profile: ..."               | `user_profile_agent`             |
 | "Conversation-aggregate: ..."| `conversation_aggregate_agent`   |
 | "Conversation-filter: ..."   | `conversation_filter_agent`      |
@@ -909,11 +936,32 @@ _EVALUATOR_SUMMARIZER_PROMPT = '''\
 - 如果 raw_result 为空，不要推断先前槽位失败；只有 known_facts 明确显示先前槽位 unresolved 时才可这样说
 - 不超过 200 字，纯文本，无 JSON 外壳
 '''
-_evaluator_summarizer_llm = get_llm(temperature=0.0, top_p=1.0)
 
+_EVALUATOR_SUMMARIZER_USER_PROFILE_PROMPT = '''\
+你是一个用户/角色画像槽位结果提炼器。给定 Profile 槽位、原始画像结果、以及先前身份解析结果，提炼一段简洁中文事实摘要。
+
+# 字段语义（必须遵守）
+- 如果 raw_result 包含 character_diary：这些是角色写在目标用户档案下的主观日记，作者/感受主体是角色，不是目标用户。
+  - 可以写“角色日记显示，角色对该用户/这次互动感到……”
+  - 禁止写成“该用户感到心虚/防线动摇/尴尬/不安”，除非日记原文明确说这是用户的感受。
+- objective_facts：关于目标用户的客观事实。
+- active_commitments：与目标用户相关、已被接受的承诺或持续规则。
+- user_image：第三人称滚动画像，描述目标用户表现以及角色对目标用户的感知。
+- 如果 raw_result 包含 name/description/gender/age/birthday/backstory/self_image，且不包含 character_diary/objective_facts/active_commitments/user_image：
+  这是角色自己的公开资料或自我画像。按“角色自身资料”总结，不要当成第三方用户画像。
+
+# 摘要要求
+- 保留 global_user_id、display_name 等对后续步骤有用的标识。
+- 明确区分“目标用户是谁”和“角色日记是谁的主观视角”。
+- 只总结 raw_result 中已有的信息，不要补全未知信息。
+- 不超过 220 字，纯文本，无 JSON 外壳。
+'''
+
+_evaluator_summarizer_llm = get_llm(temperature=0.0, top_p=1.0)
 
 async def _summarize_agent_result(
     slot: str,
+    agent_name: str,
     resolved: bool,
     raw_result: object,
     known_facts: list[dict],
@@ -925,6 +973,7 @@ async def _summarize_agent_result(
 
     Args:
         slot: The slot description that was being resolved.
+        agent_name: Inner-loop agent that produced the raw result.
         resolved: Whether the inner-loop agent judged the slot as resolved.
         raw_result: Native tool output from the inner-loop agent (dict, list, str, or None).
         known_facts: Facts resolved before this slot.
@@ -932,11 +981,17 @@ async def _summarize_agent_result(
     Returns:
         A concise Chinese-language summary of the key facts extracted.
     """
-    system_prompt = SystemMessage(content=_EVALUATOR_SUMMARIZER_PROMPT)
+    if agent_name == "user_profile_agent":
+        prompt = _EVALUATOR_SUMMARIZER_USER_PROFILE_PROMPT
+    else:
+        prompt = _EVALUATOR_SUMMARIZER_PROMPT
+
+    system_prompt = SystemMessage(content=prompt)
     human_message = HumanMessage(
         content=json.dumps(
             {
                 "slot": slot,
+                "agent": agent_name,
                 "resolved": resolved,
                 "raw_result": raw_result,
                 "known_facts": known_facts,
@@ -971,15 +1026,22 @@ async def rag_evaluator(state: ProgressiveRAGState) -> dict:
     resolved = bool(agent_result.get("resolved", False))
     raw_result = agent_result.get("result")
     known_facts = state.get("known_facts", [])
+    agent_name = str(agent_result.get("agent", ""))
 
     if resolved:
-        summary = await _summarize_agent_result(slot, resolved, raw_result, known_facts)
+        summary = await _summarize_agent_result(
+            slot,
+            agent_name,
+            resolved,
+            raw_result,
+            known_facts,
+        )
     else:
         summary = f"检索未返回相关结果。槽位: {slot}"
 
     new_fact = {
         "slot": slot,
-        "agent": str(agent_result.get("agent", "")),
+        "agent": agent_name,
         "resolved": resolved,
         "summary": summary,
         "raw_result": raw_result,
@@ -1005,6 +1067,11 @@ _FINALIZER_PROMPT = '''\
 - 如果某个槽位未能解决（resolved: false），如实告知缺少哪一部分信息。
 - 不要把某个来源没有检索结果扩大成“没有任何记录/没有互动记录”；只能说明实际查询过的来源没有返回结果。
 - 引用来源 URL 或对话来源时尽量保留。
+- 当 known_facts 中 agent="user_profile_agent" 且 raw_result 包含 character_diary：
+  character_diary 是角色写在目标用户档案下的主观日记，作者/感受主体是角色，不是目标用户。
+  禁止把日记里的“心虚、防线动摇、尴尬、不安”等感受归因给目标用户，除非原文明确说这是目标用户的感受。
+- 当 known_facts 中 agent="user_profile_agent" 且 raw_result 是角色自身公开资料或 self_image：
+  这是角色自己的资料。回答角色自我资料问题时，可以使用这些公开资料；不要误写成第三方用户画像。
 
 # 输入格式
 {

@@ -27,6 +27,9 @@ USER_LIST_POLICY_VERSION = "user_list:v1"
 USER_PROFILE_CACHE_NAME = "rag2_user_profile_agent"
 USER_PROFILE_POLICY_VERSION = "user_profile:v1"
 
+RELATIONSHIP_CACHE_NAME = "rag2_relationship_agent"
+RELATIONSHIP_POLICY_VERSION = "relationship:v1"
+
 CONVERSATION_FILTER_CACHE_NAME = "rag2_conversation_filter_agent"
 CONVERSATION_FILTER_POLICY_VERSION = "conversation_filter:v1"
 
@@ -326,6 +329,55 @@ def build_user_profile_dependencies(global_user_id: str) -> list[CacheDependency
         Single dependency on user-profile writes for that UUID.
     """
     return [CacheDependency(source="user_profile", global_user_id=global_user_id.strip())]
+
+
+# ---------------------------------------------------------------------------
+# relationship_agent
+# ---------------------------------------------------------------------------
+
+
+def build_relationship_cache_key(args: dict[str, Any], context: dict[str, Any]) -> str:
+    """Build the exact cache key for relationship ranking results.
+
+    Args:
+        args: Normalized relationship args including mode, rank_order, and limit.
+        context: Runtime hints passed to ``relationship_agent``.
+
+    Returns:
+        Stable exact-match cache key.
+    """
+    scope = _context_scope(context)
+    return stable_cache_key(
+        RELATIONSHIP_CACHE_NAME,
+        {
+            "policy_version": RELATIONSHIP_POLICY_VERSION,
+            "mode": str(args.get("mode", "")),
+            "rank_order": str(args.get("rank_order", "top")),
+            "limit": int(args.get("limit", 1)),
+            "platform": scope["platform"],
+            "platform_channel_id": scope["platform_channel_id"],
+        },
+    )
+
+
+def build_relationship_dependencies(context: dict[str, Any]) -> list[CacheDependency]:
+    """Build invalidation dependencies for relationship ranking results.
+
+    Args:
+        context: Runtime hints passed to ``relationship_agent``.
+
+    Returns:
+        A user-profile dependency scoped to the current runtime platform/channel
+        where available. Any profile or affinity update can affect the ranking.
+    """
+    scope = _context_scope(context)
+    return [
+        CacheDependency(
+            source="user_profile",
+            platform=scope["platform"],
+            platform_channel_id=scope["platform_channel_id"],
+        )
+    ]
 
 
 # ---------------------------------------------------------------------------

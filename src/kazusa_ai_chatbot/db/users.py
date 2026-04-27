@@ -674,6 +674,85 @@ async def list_users_by_display_name(
     return results
 
 
+def _preferred_platform_account(
+    platform_accounts: list[dict],
+    platform: str | None,
+) -> dict:
+    """Choose the account used to display a user in relationship rankings.
+
+    Args:
+        platform_accounts: Linked account records from ``user_profiles``.
+        platform: Optional preferred platform from the current runtime context.
+
+    Returns:
+        The preferred account dict, or an empty dict when no account exists.
+    """
+    if platform:
+        for account in platform_accounts:
+            if str(account.get("platform", "")) == platform:
+                return account
+    if platform_accounts:
+        return platform_accounts[0]
+    return {}
+
+
+async def list_users_by_affinity(
+    *,
+    rank_order: str = "top",
+    platform: str | None = None,
+    limit: int = 5,
+) -> list[dict]:
+    """List profiled users ordered by relationship affinity.
+
+    Args:
+        rank_order: ``"top"`` for highest-affinity users, ``"bottom"`` for
+            lowest-affinity users.
+        platform: Optional preferred platform for choosing display names.
+        limit: Maximum number of users to return.
+
+    Returns:
+        User dicts containing identity fields, raw affinity for internal agent
+        ranking. Callers that expose results to an LLM must remove the raw
+        affinity value.
+    """
+    if limit <= 0:
+        return []
+
+    sort_direction = 1 if rank_order == "bottom" else -1
+    db = await get_db()
+    cursor = (
+        db.user_profiles.find(
+            {
+                "global_user_id": {"$ne": CHARACTER_GLOBAL_USER_ID},
+                "affinity": {"$exists": True},
+                "platform_accounts.0": {"$exists": True},
+            },
+            {
+                "_id": 0,
+                "global_user_id": 1,
+                "platform_accounts": 1,
+                "affinity": 1,
+            },
+        )
+        .sort("affinity", sort_direction)
+        .limit(limit)
+    )
+
+    results: list[dict] = []
+    async for doc in cursor:
+        account = _preferred_platform_account(doc["platform_accounts"], platform)
+        results.append(
+            {
+                "global_user_id": doc["global_user_id"],
+                "display_name": str(account.get("display_name", "")),
+                "platform": str(account.get("platform", "")),
+                "platform_user_id": str(account.get("platform_user_id", "")),
+                "affinity": doc["affinity"],
+            }
+        )
+    return results
+
+
 async def add_suspected_alias(
     global_user_id: str,
     other_global_user_id: str,

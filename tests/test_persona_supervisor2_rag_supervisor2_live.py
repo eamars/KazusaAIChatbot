@@ -160,6 +160,15 @@ async def test_call_rag_supervisor_live_opinion_small_pliers2(live_supervisor2_e
         live_supervisor2_env,
         case_id="opinion_small_pliers",
         channel_id="54369546",
+        query="小钳子前两天欺负千纱了么",
+        note="典型第三方人物印象查询。",
+    )
+
+async def test_call_rag_supervisor_live_opinion_small_pliers2a(live_supervisor2_env: dict) -> None:
+    await _run_live_supervisor2_case(
+        live_supervisor2_env,
+        case_id="opinion_small_pliers",
+        channel_id="54369546",
         query="小钳子前两天欺负你了么",
         note="典型第三方人物印象查询。",
     )
@@ -390,5 +399,41 @@ async def test_call_rag_supervisor_live_common_sense_2a(live_supervisor2_env: di
         case_id="",
         channel_id="",
         query="根据你的记忆回答：我想洗车，我家距离洗车店只有 50 米，请问你推荐我走路去还是开车去呢？",
+        note="Generic",
+    )
+
+async def test_call_rag_supervisor_live_1(live_supervisor2_env: dict) -> None:
+    await _run_live_supervisor2_case(
+        live_supervisor2_env,
+        case_id="",
+        channel_id="",
+        query="千纱有喜欢的人了么",
+        note="Generic",
+    )
+
+async def test_call_rag_supervisor_live_2(live_supervisor2_env: dict) -> None:
+    await _run_live_supervisor2_case(
+        live_supervisor2_env,
+        case_id="",
+        channel_id="",
+        query="你最喜欢谁",
+        note="Generic",
+    )
+
+async def test_call_rag_supervisor_live_3(live_supervisor2_env: dict) -> None:
+    await _run_live_supervisor2_case(
+        live_supervisor2_env,
+        case_id="",
+        channel_id="",
+        query="想起小钳子我就觉得心里不舒服，我以前为什么讨厌他？",
+        note="Generic",
+    )
+
+async def test_call_rag_supervisor_live_4(live_supervisor2_env: dict) -> None:
+    await _run_live_supervisor2_case(
+        live_supervisor2_env,
+        case_id="",
+        channel_id="",
+        query="蚝爹油经常聊的话题有哪些",
         note="Generic",
     )
