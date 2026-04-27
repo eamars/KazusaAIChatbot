@@ -94,6 +94,7 @@ class ChatRequest(BaseModel):
     channel_name: str = ""
     content: str = ""
     content_type: str = "text"
+    mentioned_bot: bool = False
     attachments: list[AttachmentIn] = Field(default_factory=list)
     timestamp: str = ""
     reply_to_message_id: str | None = None
@@ -604,6 +605,7 @@ async def chat(req: ChatRequest, background_tasks: BackgroundTasks):
             "user_multimedia_input": multimedia_input,
             "user_profile": user_profile,
             "platform_bot_id": req.platform_bot_id,
+            "mentioned_bot": req.mentioned_bot,
             "bot_name": bot_name,
             "character_profile": _personality,
             "platform_channel_id": req.platform_channel_id,
@@ -627,6 +629,7 @@ async def chat(req: ChatRequest, background_tasks: BackgroundTasks):
                 "display_name": req.display_name,
                 "channel_type": req.channel_type,
                 "content": req.content,
+                "mentioned_bot": req.mentioned_bot,
                 "reply_context": reply_context,
                 "timestamp": timestamp,
             })

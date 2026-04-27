@@ -40,6 +40,7 @@ class IMProcessState(TypedDict):
     user_profile: dict  # used to extract affinity score.
 
     platform_bot_id: str  # Bot's ID on the current platform (provided by the adapter)
+    mentioned_bot: bool  # Whether the platform structurally mentioned the bot in this message
     bot_name: str
     character_profile: dict
 

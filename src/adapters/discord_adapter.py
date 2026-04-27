@@ -221,6 +221,10 @@ class DiscordAdapter(discord.Client):
             reply_context["reply_to_display_name"] = referenced_message.author.display_name
             reply_context["reply_to_current_bot"] = bool(self.user and referenced_message.author.id == self.user.id)
             reply_context["reply_excerpt"] = referenced_message.content
+        mentioned_bot = bool(
+            self.user is not None
+            and any(mentioned_user.id == self.user.id for mentioned_user in message.mentions)
+        )
 
         message_debug_modes = dict(self.debug_modes)
         is_active = is_dm or (self.channel_ids is not None and channel_id_str in self.channel_ids)
@@ -278,6 +282,7 @@ class DiscordAdapter(discord.Client):
             "channel_name": channel_name,
             "content": message.content,
             "content_type": "text",
+            "mentioned_bot": mentioned_bot,
             "attachments": attachments,
             "reply_context": reply_context,
             "debug_modes": message_debug_modes,

@@ -54,6 +54,7 @@ class ConversationMessageDoc(TypedDict, total=False):
     display_name: str          # Display name at time of message
     content: str               # Text content
     content_type: str          # "text" | "image" | "voice" | "mixed"
+    mentioned_bot: bool        # Whether the platform structurally mentioned the bot
     attachments: list[AttachmentDoc]  # Images, voice, files
     reply_context: ReplyContextDoc     # Structured reply-to metadata when available
     timestamp: str             # ISO-8601 UTC timestamp

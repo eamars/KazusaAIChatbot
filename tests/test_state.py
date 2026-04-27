@@ -16,7 +16,7 @@ class TestIMProcessState:
         required_fields = [
             "timestamp", "platform", "platform_message_id", "platform_user_id", "global_user_id",
             "user_name", "user_input", "user_multimedia_input", "user_profile",
-            "platform_bot_id", "bot_name", "character_profile",
+            "platform_bot_id", "mentioned_bot", "bot_name", "character_profile",
             "platform_channel_id", "channel_name", "chat_history_wide", "chat_history_recent", "reply_context",
         ]
         for field in required_fields:
@@ -53,6 +53,7 @@ class TestIMProcessState:
             "user_multimedia_input": [],
             "user_profile": {},
             "platform_bot_id": "456",
+            "mentioned_bot": False,
             "bot_name": "Bot",
             "character_profile": {},
             "platform_channel_id": "789",

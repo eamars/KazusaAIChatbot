@@ -72,6 +72,7 @@ def trim_history_dict(history):
             "global_user_id": msg.get("global_user_id"),
             "role": msg.get("role"),
             "content": msg.get("content"),
+            "mentioned_bot": bool(msg.get("mentioned_bot", False)),
             "reply_context": msg.get("reply_context", {}),
             "timestamp": msg.get("timestamp")
         })

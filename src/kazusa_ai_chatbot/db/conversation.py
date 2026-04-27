@@ -250,6 +250,7 @@ async def save_conversation(doc: ConversationMessageDoc) -> None:
     db = await get_db()
 
     doc.setdefault("content_type", "text")
+    doc.setdefault("mentioned_bot", False)
     doc.setdefault("attachments", [])
     doc.setdefault("channel_type", "group")
 

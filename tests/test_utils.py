@@ -8,7 +8,7 @@ def test_trim_history_dict():
     from kazusa_ai_chatbot.utils import trim_history_dict
     
     history = [
-        {"display_name": "Alice", "platform_user_id": "user_123", "global_user_id": "uuid-1", "content": "Hello", "role": "user", "timestamp": "t1"},
+        {"display_name": "Alice", "platform_user_id": "user_123", "global_user_id": "uuid-1", "content": "Hello", "role": "user", "timestamp": "t1", "mentioned_bot": True},
         {"display_name": "Bob", "platform_user_id": "user_456", "global_user_id": "uuid-2", "content": "Hi", "role": "user", "timestamp": "t2"},
     ]
     
@@ -17,10 +17,12 @@ def test_trim_history_dict():
     assert trimmed[0]["name"] == "Alice"
     assert trimmed[0]["platform_user_id"] == "user_123"
     assert trimmed[0]["content"] == "Hello"
+    assert trimmed[0]["mentioned_bot"] is True
     assert trimmed[0]["role"] == "user"
     assert trimmed[1]["name"] == "Bob"
     assert trimmed[1]["platform_user_id"] == "user_456"
     assert trimmed[1]["content"] == "Hi"
+    assert trimmed[1]["mentioned_bot"] is False
     assert trimmed[1]["role"] == "user"
 
 

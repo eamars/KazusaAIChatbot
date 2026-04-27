@@ -247,6 +247,18 @@ class NapCatWSAdapter:
             if response.get("echo") == echo_id:
                 return response
 
+    def _is_bot_mentioned(self, mentioned_ids: list[str]) -> bool:
+        """Return whether native message metadata mentioned this bot.
+
+        Args:
+            mentioned_ids: Platform user IDs extracted from native mention
+                segments or CQ at codes by the adapter.
+
+        Returns:
+            True when this adapter's bot id is present.
+        """
+        return bool(self.bot_id and self.bot_id in mentioned_ids)
+
     async def handle_event(self, data: dict, ws):
         """Processes incoming messages (only if we are identified)."""
         if data.get("post_type") != "message" or not self.bot_id:
@@ -258,6 +270,7 @@ class NapCatWSAdapter:
         
         message_data = data.get("message", [])
         reply_context: dict[str, str | bool] = {}
+        mentioned_ids: list[str] = []
 
         # Preprocess QQ message to a format that is recognized by the brain
         if isinstance(message_data, str):
@@ -265,6 +278,7 @@ class NapCatWSAdapter:
             reply_match = re.search(r'\[CQ:reply,id=([^\]]+)\]', message_data)
             if reply_match is not None:
                 reply_context["reply_to_message_id"] = reply_match.group(1)
+            mentioned_ids = re.findall(r'\[CQ:at,qq=([^\]]+)\]', message_data)
             raw_content = re.sub(r'\[CQ:at,qq=([^\]]+)\]', r'<@\1>', message_data)
             raw_content = re.sub(r'\[CQ:reply,id=([^\]]+)\]', r'[Reply to message] ', raw_content)
             raw_content = re.sub(r'\[CQ:[^\]]+\]', r'', raw_content) # Strip others
@@ -280,6 +294,8 @@ class NapCatWSAdapter:
                     raw_content += seg_data.get("text", "")
                 elif seg_type == "at":
                     qq = seg_data.get("qq")
+                    if qq is not None:
+                        mentioned_ids.append(str(qq))
                     raw_content += f"<@{qq}> "
                 elif seg_type == "reply":
                     reply_context["reply_to_message_id"] = str(seg_data.get("id", ""))
@@ -298,6 +314,7 @@ class NapCatWSAdapter:
                 # image/video etc. are handled by attachments array, so we omit them from raw text
         
         raw_content = raw_content.strip()
+        mentioned_bot = self._is_bot_mentioned(mentioned_ids)
         sender_name = data.get("sender", {}).get("nickname", f"User {user_id}")
         
         is_group = data.get("message_type") == "group"
@@ -348,6 +365,7 @@ class NapCatWSAdapter:
             "channel_name": f"Group {group_id}" if is_group else "Private",
             "content": raw_content,
             "content_type": "text",
+            "mentioned_bot": mentioned_bot,
             "attachments": attachments,
             "reply_context": reply_context,
             "debug_modes": message_debug_modes,

@@ -8,9 +8,9 @@ Outputs a structured JSON decision.
 from __future__ import annotations
 
 import asyncio
+from datetime import datetime, timezone
 import json
 import logging
-import re
 
 from langchain_core.messages import HumanMessage, SystemMessage
 
@@ -21,44 +21,181 @@ from kazusa_ai_chatbot.state import IMProcessState
 logger = logging.getLogger(__name__)
 
 
-_MENTION_RE = re.compile(r"<@([^>]+)>")
+_GROUP_ATTENTION_LOW = "low_noise"
+_GROUP_ATTENTION_MEDIUM = "medium_noise"
+_GROUP_ATTENTION_HIGH = "high_noise"
+_GROUP_ATTENTION_CHAOTIC = "chaotic_noise"
+_ACTIVE_WINDOW_SECONDS = 180
+_QUICK_COLLISION_SECONDS = 90
+_ACTIVE_WINDOW_MAX_MESSAGES = 10
 
 
-def _extract_mention_ids(text: str) -> list[str]:
-    return _MENTION_RE.findall(text)
+def _parse_history_timestamp(value: object) -> datetime | None:
+    """Parse a conversation-history timestamp for structural windowing.
+
+    Args:
+        value: Raw timestamp value from a conversation-history row.
+
+    Returns:
+        A timezone-aware datetime, or None when the value cannot be parsed.
+    """
+    if not isinstance(value, str) or not value.strip():
+        return None
+
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
 
 
-def _extract_legacy_reply_target_id(text: str) -> str:
-    if not text.startswith("[Reply to message]"):
-        return ""
-    mention_ids = _extract_mention_ids(text)
-    if not mention_ids:
-        return ""
-    return mention_ids[0]
+def _active_history_window(chat_history_wide: list[dict]) -> list[dict]:
+    """Return the active recent group-history suffix used for noise scoring.
+
+    Args:
+        chat_history_wide: Recent channel history in chronological order.
+
+    Returns:
+        Last at-most-ten rows within three minutes of the newest row. If any
+        timestamp needed for the window is missing or invalid, returns the last
+        ten rows without time filtering.
+    """
+    capped = list(chat_history_wide[-_ACTIVE_WINDOW_MAX_MESSAGES:])
+    if not capped:
+        return []
+
+    newest_timestamp = _parse_history_timestamp(capped[-1].get("timestamp"))
+    if newest_timestamp is None:
+        return capped
+
+    active_reversed: list[dict] = []
+    for row in reversed(capped):
+        timestamp = _parse_history_timestamp(row.get("timestamp"))
+        if timestamp is None:
+            return capped
+
+        delta_seconds = (newest_timestamp - timestamp).total_seconds()
+        if delta_seconds <= _ACTIVE_WINDOW_SECONDS:
+            active_reversed.append(row)
+            continue
+        break
+
+    return list(reversed(active_reversed))
 
 
-def _contains_explicit_bot_address(text: str, platform_bot_id: str, character_name: str, bot_name: str) -> bool:
-    mention_ids = _extract_mention_ids(text)
-    if platform_bot_id and platform_bot_id in mention_ids:
-        return True
+def _is_directly_addressed_to_bot(row: dict) -> bool:
+    """Return whether a history row has structural bot-address metadata.
 
-    candidate_names = {name.strip() for name in (character_name, bot_name) if name and name.strip()}
-    return any(name in text for name in candidate_names)
+    Args:
+        row: Trimmed conversation-history row.
+
+    Returns:
+        True when the row replied to or structurally mentioned the bot.
+    """
+    reply_context = row.get("reply_context") or {}
+    return reply_context.get("reply_to_current_bot") is True or row.get("mentioned_bot") is True
+
+
+def _is_non_bot_user_row(row: dict, platform_bot_id: str) -> bool:
+    """Return whether a row is a user message from someone other than the bot.
+
+    Args:
+        row: Trimmed conversation-history row.
+        platform_bot_id: Bot's platform user id for the current channel.
+
+    Returns:
+        True for non-bot user rows.
+    """
+    return row.get("role") == "user" and row.get("platform_user_id") != platform_bot_id
+
+
+def build_group_attention_context(
+    *,
+    chat_history_wide: list[dict],
+    platform_bot_id: str,
+) -> dict[str, str]:
+    """Describe group attention state from recent history metadata only.
+
+    Args:
+        chat_history_wide: Recent channel history in chronological order.
+        platform_bot_id: Bot's platform user id for the current channel.
+
+    Returns:
+        Dict containing exactly one LLM-facing label, ``group_attention``.
+    """
+    active_window = _active_history_window(chat_history_wide)
+    non_bot_rows = [
+        row for row in active_window
+        if _is_non_bot_user_row(row, platform_bot_id)
+    ]
+    if not non_bot_rows:
+        return {"group_attention": _GROUP_ATTENTION_LOW}
+
+    has_direct_address = any(_is_directly_addressed_to_bot(row) for row in active_window)
+    if has_direct_address:
+        return {"group_attention": _GROUP_ATTENTION_LOW}
+
+    unaddressed_rows = [
+        row for row in non_bot_rows
+        if not _is_directly_addressed_to_bot(row)
+    ]
+    distinct_speakers = {
+        row.get("platform_user_id")
+        for row in unaddressed_rows
+        if row.get("platform_user_id")
+    }
+    newest_timestamp = _parse_history_timestamp(active_window[-1].get("timestamp"))
+    quick_rows = unaddressed_rows
+    if newest_timestamp is not None:
+        timestamped_rows = []
+        for row in unaddressed_rows:
+            timestamp = _parse_history_timestamp(row.get("timestamp"))
+            if timestamp is None:
+                timestamped_rows = []
+                break
+            if (newest_timestamp - timestamp).total_seconds() <= _QUICK_COLLISION_SECONDS:
+                timestamped_rows.append(row)
+        if timestamped_rows:
+            quick_rows = timestamped_rows
+
+    quick_speakers = {
+        row.get("platform_user_id")
+        for row in quick_rows
+        if row.get("platform_user_id")
+    }
+    quick_reply_to_other_count = sum(
+        1
+        for row in quick_rows
+        if (row.get("reply_context") or {}).get("reply_to_current_bot") is False
+    )
+
+    if len(distinct_speakers) >= 3 and len(unaddressed_rows) >= 4:
+        return {"group_attention": _GROUP_ATTENTION_CHAOTIC}
+    if len(quick_speakers) >= 2 and len(quick_rows) >= 2 and quick_reply_to_other_count >= 1:
+        return {"group_attention": _GROUP_ATTENTION_CHAOTIC}
+    if len(distinct_speakers) >= 2 and len(unaddressed_rows) >= 2:
+        return {"group_attention": _GROUP_ATTENTION_HIGH}
+    if len(unaddressed_rows) >= 4:
+        return {"group_attention": _GROUP_ATTENTION_HIGH}
+    if unaddressed_rows:
+        return {"group_attention": _GROUP_ATTENTION_MEDIUM}
+    return {"group_attention": _GROUP_ATTENTION_LOW}
 
 
 def _should_ignore_third_party_reply(
     *,
-    user_input: str,
     reply_context: dict,
     platform_bot_id: str,
-    character_name: str,
-    bot_name: str,
     is_noisy_environment: bool,
+    mentioned_bot: bool,
 ) -> bool:
     if not is_noisy_environment:
         return False
 
-    if _contains_explicit_bot_address(user_input, platform_bot_id, character_name, bot_name):
+    if mentioned_bot:
         return False
 
     reply_to_current_bot = reply_context.get("reply_to_current_bot")
@@ -68,9 +205,6 @@ def _should_ignore_third_party_reply(
         return False
 
     reply_target_id = reply_context.get("reply_to_platform_user_id", "")
-    if not reply_target_id:
-        reply_target_id = _extract_legacy_reply_target_id(user_input)
-
     if not reply_target_id:
         return False
 
@@ -153,58 +287,74 @@ _RELEVANCE_SYSTEM_PROMPT = """\
 """
 
 _RELEVANCE_SYSTEM_NOISY_PROMPT = """\
-你负责担任角色 `{character_name}` 的社交前置处理器。当前处于【高噪音群聊环境】，你需要极其谨慎地决定 `{character_name}` 是否介入当前对话。
+你负责担任角色 `{character_name}` 的群聊相关性判断器。你的任务不是聊天，而是在生成回复之前判断 `{character_name}` 是否应该介入当前这一条群聊消息。
 
-# 核心背景
-## 1. 角色当前状态
-- **心情 (Mood)**: {mood}
-- **全局氛围 (Global Vibe)**: {global_vibe}
+# 背景
+- 角色名: {bot_name}
+- 平台账号 ID: {platform_bot_id}
+- 当前心情: {mood}
+- 当前全局氛围: {global_vibe}
+- 当前发言者: {user_name}
+- 对当前发言者的关系等级: {affinity_level}
+- 关系行为准则: {affinity_instruction}
+- 关系洞察: {last_relationship_insight}
 
-## 2. 对用户 {user_name} 的主观判断 (Affinity Context)
-- **关系评价 (Level)**: {affinity_level}
-- **行为准则 (Instruction)**: {affinity_instruction}
-- **关系洞察 (Insight)**: {last_relationship_insight}
+# 输入 JSON 契约
+你会收到一个 JSON，其中包含 `user_message`、`conversation_history` 和 `group_attention`。
 
-## 3. 社交身份
-- **Name**: {bot_name}
-- **Platform ID**: <@{platform_bot_id}>
+`user_message` 中最重要的结构化字段是:
+- `mentioned_bot`: 如果为 `true`，表示平台原生 mention 元数据明确提到了你的平台账号。这是强直接指向。
+- `reply_context.reply_to_current_bot`: 如果为 `true`，表示当前消息是平台原生 reply 到你的消息。这是强直接指向。
+- `reply_context.reply_to_current_bot`: 如果为 `false`，表示当前消息是平台原生 reply 到其他人的消息。这是强反证；除非 `mentioned_bot=true`，否则通常不应该回复。
+- `content`: 当前消息文本。它只能用于理解话题和语气，不能当作平台结构化指向证据。
 
-# 响应决策逻辑 (Decision Logic) - 【群聊严苛版】
+`group_attention` 是唯一的群聊噪音梯度标签，取值只会是:
+- `low_noise`: 群聊窗口干净，或最近有明确指向你的结构化信号。
+- `medium_noise`: 有一些群聊活动，但尚未明显混乱。
+- `high_noise`: 多人或多条未指向你的消息正在发生，介入门槛很高。
+- `chaotic_noise`: 群聊快速、多线或明显混乱。若你看到此标签，通常说明代码层已经确认存在 reply 或 mention 这类结构化指向，否则请求会在 LLM 前被跳过。
 
-## A. 必须回复 (Should Respond: true)
-1. **明确直接召唤**：消息明确且**仅**包含你的 ID、名字或昵称（如：`{bot_name}` 或 `@{platform_bot_id}`）。
-   - **注意**：如果消息中使用了 `@` 或 `reply`（呈现为 `<@...>`），你必须检查其引用的目标是否真的是你本人的平台 ID（`<@{platform_bot_id}>`）。如果消息指向的是**其他人**，即使提到你的名字，这也属于”与他人交谈”，绝不是在召唤你！
-2. **极其明确的对话延续**：通过分析【历史记录】，你是最后一个被回复的发言者，且 `{user_name}` 当前的话题与你上一条消息紧密相连，明显是在等你的回应。
+# 关键原则
+1. 平台结构化元数据优先。`mentioned_bot=true` 和 `reply_context.reply_to_current_bot=true` 比正文措辞更可靠。
+2. 正文里的名字、昵称、第二人称、话题相关性、可见的 mention 样式文本，都只是语义线索，不能单独证明当前消息是在对你说。
+3. 在 `medium_noise`、`high_noise`、`chaotic_noise` 中，如果没有结构化直接指向，模糊第二人称或只是在谈论 `{bot_name}` 通常不足以回复。
+4. 如果 `reply_context.reply_to_current_bot=false` 且 `mentioned_bot=false`，应默认这是发给其他人的线程，不要介入。
+5. 历史连续性可以作为辅助证据，但必须非常清楚: 当前发言者正在延续你上一轮相关发言，且窗口里没有明显竞争线程。
+6. 关系亲密度、心情和话题兴趣只能在确认消息可能是对你说之后影响是否回复；它们不能替代指向证据。
 
-## B. 拒绝回复 (Should Respond: false) [优先判定]
-1. **无明确指向的闲聊**：用户没有直接称呼你，也没有明确引用你的消息。即使话题似乎和你有关，只要对方没有明确指向你，在群聊中一律旁观。
-2. **第三方对话**：用户显然是在与群里的其他人/或其他机器人交谈（例如：消息中明确 `@` 或 `reply` 了别人）。就算消息中提到了你的名字或抱怨“我的机器人”，只要其主要互动对象是别人，你必须保持沉默。
-3. **模棱两可**：如果不确定用户是不是在和你说话，一律当做不是，选择不回复。
-4. **事务性结束**：用户提供了结束语（如“谢谢”、“晚安”）。
+# 噪音梯度决策
+- `low_noise`: 可以按普通群聊相关性判断；仍然要区分"对你说"和"谈到你"。
+- `medium_noise`: 需要清楚的结构化指向或非常清楚的历史连续性；否则倾向不回复。
+- `high_noise`: 只有结构化指向或极强历史连续性才回复；普通提问、第二人称、名字出现、话题相关都不够。
+- `chaotic_noise`: 几乎只在结构化 reply/mention 指向你时回复；不要用正文措辞补足缺失的指向证据。
 
-# 上下文回复逻辑 (use_reply_feature)
-**当前处于群聊环境，为了避免消息错乱并明确回复对象：**
-- 你**必须**使用回复功能。因此 `use_reply_feature` 必须始终设置为 `true`。
+# should_respond 判断
+返回 `true` 的常见条件:
+- `mentioned_bot=true`，且消息内容需要或邀请你回应。
+- `reply_context.reply_to_current_bot=true`，且消息内容是在延续或回应你的发言。
+- 没有结构化指向，但 `group_attention=low_noise`，历史连续性非常清楚，并且当前消息明显期待你的回应。
 
-# 输出规则
+返回 `false` 的常见条件:
+- 当前消息结构化 reply 到其他人，且没有结构化 mention 你。
+- 当前消息像是群内其他人的相互交流、插话、玩笑、讨论你、评价你，或询问另一个人对你的看法。
+- 噪音为 `medium_noise` 或更高，而指向证据只来自正文里的名字、第二人称或话题相关性。
+- 你无法确定这条消息是不是对你说。
 
-## indirect_speech_context 生成规则
-在写入 `indirect_speech_context` 前，必须先检查消息正文的语法人称，再按以下逻辑分类：
+# use_reply_feature 判断
+如果 `should_respond=false`，`use_reply_feature` 也应为 `false`。
+如果 `should_respond=true`，群聊中通常应使用 reply 功能来锚定回复对象；只有在明确是面向全群的氛围性发言时才可为 `false`。
 
-- **情况 A — 直接对{character_name}说**：正文使用第二人称"你"指向{character_name}，或直接命令/质问{character_name}本人。
-  - 示例："你真是个怪叔叔" / "你在搞什么鬼"
-  - `indirect_speech_context` 输出空字符串 ""（无需间接语境描述）。
-
-- **情况 B — 向群内其他人谈论{character_name}**：正文使用第三人称"他"/"她"指代{character_name}，且包含面向他人的命令句（如"不要"/"别"/"小心"）警告他人注意{character_name}的行为；此时{character_name}是话题对象而非受话人。
-  - 示例："他是怪叔叔，不要跟着他的圈套走"（reply/@{character_name} 仅提供线程上下文）
-  - `indirect_speech_context` 输出：明确说明实际听众为其他群员，以及{character_name}在消息中的角色（被讨论的对象）。
+# indirect_speech_context 判断
+- 如果当前消息是对你说，输出空字符串。
+- 如果当前消息是在向别人谈论你，但你仍决定回复，简短说明实际听众是谁、你在消息里是被讨论对象还是被请求回应者。
+- 不要仅凭第二人称代词判断实际听众；必须结合结构化 reply/mention 和历史连续性。
 
 # 输出格式
 请务必返回合法的 JSON 字符串，仅包含以下字段：
 {{
     "should_respond": boolean,
     "reason_to_respond": string,
-    "use_reply_feature": true,
+    "use_reply_feature": boolean,
     "channel_topic": string,
     "indirect_speech_context": string
 }}
@@ -219,7 +369,9 @@ async def relevance_agent(state: IMProcessState) -> IMProcessState:
     user_name = state.get("user_name")
     platform_user_id = state.get("platform_user_id", "")
     channel_name = state.get("channel_name", "")
+    channel_type = state.get("channel_type", "")
     user_input = state.get("user_input")
+    mentioned_bot = bool(state.get("mentioned_bot", False))
 
     # TODO: Make the workflow taking the raw b64 image instead. For now we will only pass in the description. 
     user_multimedia_input = state.get("user_multimedia_input", [])
@@ -228,20 +380,29 @@ async def relevance_agent(state: IMProcessState) -> IMProcessState:
             user_input += f"\nImage attachment: {piece['description']}"
 
     # Determine if this is a noisy group environment
-    channel_name_lower = channel_name.lower()
-    is_noisy_environment = channel_name_lower not in ["", "private", "dm", "direct message"]
+    is_noisy_environment = channel_type == "group"
     prompt_template = _RELEVANCE_SYSTEM_NOISY_PROMPT if is_noisy_environment else _RELEVANCE_SYSTEM_PROMPT
     reply_context = dict(state.get("reply_context") or {})
-    mention_ids = _extract_mention_ids(user_input)
+    group_attention_context = (
+        build_group_attention_context(
+            chat_history_wide=state.get("chat_history_wide") or [],
+            platform_bot_id=state.get("platform_bot_id", ""),
+        )
+        if is_noisy_environment
+        else {}
+    )
+    group_attention = group_attention_context.get("group_attention", _GROUP_ATTENTION_LOW)
 
     logger.debug(
-        "Relevance input: user=%s platform_user=%s channel=%s noisy=%s history=%d mentions=%s reply_context=%s content=%s",
+        "Relevance input: user=%s platform_user=%s channel=%s channel_type=%s noisy=%s history=%d mentioned_bot=%s group_attention=%s reply_context=%s content=%s",
         user_name,
         platform_user_id,
         channel_name or "<dm>",
+        channel_type or "<unknown>",
         is_noisy_environment,
         len(state.get("chat_history_wide") or []),
-        mention_ids,
+        mentioned_bot,
+        group_attention,
         log_dict_subset(
             reply_context,
             [
@@ -256,12 +417,10 @@ async def relevance_agent(state: IMProcessState) -> IMProcessState:
     )
 
     if _should_ignore_third_party_reply(
-        user_input=user_input,
         reply_context=reply_context,
         platform_bot_id=state.get("platform_bot_id", ""),
-        character_name=state["character_profile"]["name"],
-        bot_name=state.get("bot_name", ""),
         is_noisy_environment=is_noisy_environment,
+        mentioned_bot=mentioned_bot,
     ):
         reason_to_respond = "structured reply target points to another participant without an explicit bot address"
         logger.info(
@@ -273,6 +432,34 @@ async def relevance_agent(state: IMProcessState) -> IMProcessState:
             is_noisy_environment,
             reason_to_respond,
             reply_context.get("reply_to_platform_user_id", ""),
+            log_preview(user_input),
+        )
+        return {
+            "should_respond": False,
+            "reason_to_respond": reason_to_respond,
+            "use_reply_feature": False,
+            "channel_topic": "",
+            "indirect_speech_context": "",
+            "user_input": user_input,
+        }
+
+    if (
+        is_noisy_environment
+        and group_attention == _GROUP_ATTENTION_CHAOTIC
+        and reply_context.get("reply_to_current_bot") is not True
+        and mentioned_bot is not True
+    ):
+        reason_to_respond = "chaotic group noise without platform-level bot address metadata"
+        logger.info(
+            "Relevance decision: user=%s platform_user=%s should_respond=%s use_reply_feature=%s noisy=%s reason=%s group_attention=%s mentioned_bot=%s content=%s",
+            user_name,
+            platform_user_id,
+            False,
+            False,
+            is_noisy_environment,
+            reason_to_respond,
+            group_attention,
+            mentioned_bot,
             log_preview(user_input),
         )
         return {
@@ -308,6 +495,9 @@ async def relevance_agent(state: IMProcessState) -> IMProcessState:
         },
         "conversation_history": state.get("chat_history_wide"),
     }
+    if is_noisy_environment:
+        human_data["user_message"]["mentioned_bot"] = mentioned_bot
+        human_data["group_attention"] = group_attention
 
     human_message = HumanMessage(content=json.dumps(human_data, ensure_ascii=False))
 

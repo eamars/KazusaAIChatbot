@@ -125,6 +125,7 @@ async function sendMessage() {
     channel_name: document.getElementById('cfg-channel').value,
     content: text,
     content_type: 'text',
+    mentioned_bot: false,
     attachments: [],
     debug_modes: {
       listen_only: document.getElementById('dbg-listen').checked,
@@ -168,6 +169,7 @@ class DebugChatRequest(BaseModel):
     channel_name: str = ""
     content: str = ""
     content_type: str = "text"
+    mentioned_bot: bool = False
     attachments: list = Field(default_factory=list)
     debug_modes: DebugModesIn = Field(default_factory=DebugModesIn)
 
