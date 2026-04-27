@@ -163,6 +163,22 @@ Generate:
   or "recent 10", inside the conversation slot text.
 - RAG gathers evidence only. Do not create slots for final judgment, persona stance, or answer wording.
 
+## Rule 1a — Evidence-dependency gate
+Before adding any slot, ask: "Would the next cognition/action stage be unable to respond safely
+without this fetched evidence?"
+
+If the answer is no, return an empty slot list. Do not retrieve Profile, Identity, Memory-search,
+or Conversation evidence just because the query contains a name, greeting, praise, welcome,
+thanks, social acknowledgement, or other interaction act.
+
+Use Profile only when the follow-up answer needs profile-derived evidence, such as:
+- character self-description or self-introduction
+- opinion, relationship, compatibility, or impression about a person
+- remembered facts, commitments, diaries, user image, or stable profile facts
+
+Do not use Profile for routine interaction acts where the response can be produced from the
+conversation act itself.
+
 ## Rule 1b — Default Memory-search for self-contained queries
 If original_query already contains all factual premises needed and the remaining work is
 common sense, planning, preference, recommendation, or opinion, generate one Memory-search
@@ -281,6 +297,20 @@ Query: "千纱聊聊你自己"  (character_name=千纱)
   → 千纱 is addressed, but "你自己" is also the data subject. Retrieve the character's profile.
   ["Identity: look up display name '千纱' to get global_user_id",
    "Profile: retrieve full user profile for the user resolved in slot 1"]
+
+Query: "千纱能做一个自我介绍么"  (character_name=千纱)
+  → The requested action needs character self-profile evidence. Retrieve the character's profile.
+  ["Identity: look up display name '千纱' to get global_user_id",
+   "Profile: retrieve full user profile for the user resolved in slot 1"]
+
+### 1e. Routine interaction act with no evidence dependency (0 slots)
+Query: "千纱千纱欢迎回来"  (character_name=千纱)
+  → Greeting/welcome interaction. No profile, memory, identity, or conversation evidence is needed.
+  []
+
+Query: "千纱辛苦啦"  (character_name=千纱)
+  → Social acknowledgement. The next stage can respond directly without retrieval.
+  []
 
 ### 2. Named person → event or message history (3 slots)
 Query: "小钳子前两天欺负你了么"
@@ -1230,7 +1260,7 @@ async def test_main():
     }
 
     result = await call_rag_supervisor(
-        original_query="千纱聊聊你自己",
+        original_query="千纱千纱欢迎回来",
         character_name=character_profile["name"],
         context={
             "platform": "qq",

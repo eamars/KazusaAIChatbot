@@ -161,12 +161,6 @@ def _register_runtime_adapter_payload(
         shared_secret=req.shared_secret,
         timeout_seconds=req.timeout_seconds,
     )
-    logger.info(
-        "Registered remote runtime adapter: platform=%s callback_url=%s status=%s",
-        req.platform,
-        req.callback_url,
-        status,
-    )
     return RuntimeAdapterRegistrationResponse(
         status=status,
         platform=req.platform,

@@ -114,7 +114,7 @@ async def _run_live_supervisor2_case(
     channel_id: str,
     query: str,
     note: str,
-) -> None:
+) -> dict:
     """Run supervisor2 on real historical-style prompts for manual inspection.
 
     This test intentionally does not encode semantic pass/fail criteria. It is
@@ -157,6 +157,7 @@ async def _run_live_supervisor2_case(
         json.dumps(result.get("unknown_slots", []), ensure_ascii=False, default=str),
         json.dumps(result.get("known_facts", []), ensure_ascii=False, default=str, indent=2),
     )
+    return result
 
 
 async def test_call_rag_supervisor_live_opinion_small_pliers(live_supervisor2_env: dict) -> None:
@@ -450,3 +451,17 @@ async def test_call_rag_supervisor_live_4(live_supervisor2_env: dict) -> None:
         query="蚝爹油经常聊的话题有哪些",
         note="Generic",
     )
+
+
+async def test_call_rag_supervisor_live_5(live_supervisor2_env: dict) -> None:
+    result = await _run_live_supervisor2_case(
+        live_supervisor2_env,
+        case_id="",
+        channel_id="",
+        query="千纱千纱欢迎回来",
+        note="Generic",
+    )
+
+    assert result["known_facts"] == []
+    assert result["unknown_slots"] == []
+    assert result["loop_count"] == 0

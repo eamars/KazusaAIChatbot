@@ -217,11 +217,6 @@ class NapCatWSAdapter:
                 await self._send_heartbeat_once()
             except httpx.HTTPError as exc:
                 logger.warning("NapCat runtime heartbeat failed: %s", exc)
-            else:
-                logger.debug(
-                    "NapCat runtime heartbeat ok: callback_url=%s",
-                    self.runtime_public_url,
-                )
 
     async def _fetch_bot_info(self, ws):
         """Calls get_login_info to retrieve the bot's QQ ID and Nickname."""

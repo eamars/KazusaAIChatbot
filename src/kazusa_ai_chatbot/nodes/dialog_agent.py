@@ -245,11 +245,11 @@ async def dialog_generator(state: DialogAgentState) -> DialogAgentState:
 
     result = parse_llm_json_output(response.content)
     generated_dialog = result.get("final_dialog", [])
-    logger.debug(
-        "Dialog generator: fragments=%d dialog=%s",
-        len(generated_dialog) if isinstance(generated_dialog, list) else 0,
-        log_list_preview(generated_dialog if isinstance(generated_dialog, list) else []),
-    )
+    # logger.debug(
+    #     "Dialog generator: fragments=%d dialog=%s",
+    #     len(generated_dialog) if isinstance(generated_dialog, list) else 0,
+    #     log_list_preview(generated_dialog if isinstance(generated_dialog, list) else []),
+    # )
 
     return {
         "final_dialog": result["final_dialog"],
@@ -404,12 +404,13 @@ async def dialog_evaluator(state: DialogAgentState) -> DialogAgentState:
     response = await _dialog_evaluator_llm.ainvoke([system_prompt, human_message])
 
     result = parse_llm_json_output(response.content)
-    logger.debug(
-        "Dialog evaluator: retry=%d should_stop=%s feedback=%s",
-        retry,
-        result.get("should_stop", True),
-        log_preview(result.get("feedback", "")),
-    )
+    if not result.get("should_stop", True) or result.get("feedback", "") != "Passed":
+        logger.debug(
+            "Dialog evaluator: retry=%d should_stop=%s feedback=%s",
+            retry,
+            result.get("should_stop", True),
+            log_preview(result.get("feedback", "")),
+        )
 
     # Determine stop condition
     should_stop = result.get("should_stop", True)

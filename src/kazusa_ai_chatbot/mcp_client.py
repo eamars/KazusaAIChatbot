@@ -108,8 +108,6 @@ class McpManager:
             len(self._tools),
             len(self._sessions),
         )
-        logger.debug("MCP tools: %s", ", ".join(self._tools.keys()) or "(none)")
-
     async def stop(self) -> None:
         """Shut down all MCP connections.
 
@@ -208,11 +206,6 @@ class McpManager:
                             parameters=tool.inputSchema if hasattr(tool, "inputSchema") else {},
                         )
 
-                    logger.info(
-                        "Connected to MCP server %s — %d tool(s)",
-                        connection.name,
-                        len(tools_result.tools),
-                    )
                     connection.ready_event.set()
                     await connection.stop_event.wait()
         except asyncio.TimeoutError:

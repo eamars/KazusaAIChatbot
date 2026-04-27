@@ -203,11 +203,6 @@ class DiscordAdapter(discord.Client):
                 await self._send_heartbeat_once()
             except httpx.HTTPError as exc:
                 logger.warning("Discord runtime heartbeat failed: %s", exc)
-            else:
-                logger.debug(
-                    "Discord runtime heartbeat ok: callback_url=%s",
-                    self.runtime_public_url,
-                )
 
     async def on_message(self, message: discord.Message):
         if message.author == self.user:

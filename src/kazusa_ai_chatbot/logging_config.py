@@ -16,10 +16,15 @@ QUIET_LOGGERS = (
     "httpcore",
     "httpx",
     "langsmith",
+    "mcp",
+    "mcp.client",
+    "mcp.client.streamable_http",
     "openai",
     "pymongo",
     "urllib3",
+    "uvicorn",
     "uvicorn.access",
+    "uvicorn.error",
 )
 
 _configured_profile: str | None = None

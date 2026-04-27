@@ -73,6 +73,17 @@ def test_initializer_cache_key_ignores_volatile_timestamp() -> None:
     assert key_a == key_b
 
 
+def test_initializer_prompt_documents_profile_evidence_dependency() -> None:
+    """Initializer prompt should distinguish profile-needed and no-retrieval acts."""
+    rendered_prompt = supervisor2_module._INITIALIZER_PROMPT.format(character_name="千纱")
+
+    assert "Evidence-dependency gate" in rendered_prompt
+    assert "千纱能做一个自我介绍么" in rendered_prompt
+    assert "Profile: retrieve full user profile" in rendered_prompt
+    assert "千纱千纱欢迎回来" in rendered_prompt
+    assert "No profile, memory, identity, or conversation evidence is needed" in rendered_prompt
+
+
 @pytest.mark.asyncio
 async def test_rag_initializer_serves_second_identical_call_from_cache(monkeypatch) -> None:
     """A repeated initializer call should reuse Cache 2 and skip the LLM."""

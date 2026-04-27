@@ -126,17 +126,20 @@ async def facts_harvester(state: ConsolidatorState) -> dict:
 
     result = parse_llm_json_output(response.content)
 
-    logger.debug(
-        "Facts harvester: facts=%d promises=%d facts=%s promises=%s",
-        len(result.get("new_facts", []) or []),
-        len(result.get("future_promises", []) or []),
-        log_list_preview(result.get("new_facts", []) or []),
-        log_list_preview(result.get("future_promises", []) or []),
-    )
+    new_facts = result.get("new_facts", []) or []
+    future_promises = result.get("future_promises", []) or []
+    if new_facts or future_promises:
+        logger.debug(
+            "Facts harvester: facts=%d promises=%d facts=%s promises=%s",
+            len(new_facts),
+            len(future_promises),
+            log_list_preview(new_facts),
+            log_list_preview(future_promises),
+        )
 
     return {
-        "new_facts": result.get("new_facts", []),
-        "future_promises": result.get("future_promises", []),
+        "new_facts": new_facts,
+        "future_promises": future_promises,
     }
 
 

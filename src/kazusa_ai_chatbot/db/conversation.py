@@ -265,10 +265,11 @@ async def save_conversation(doc: ConversationMessageDoc) -> None:
         timestamp=doc.get("timestamp", ""),
         reason="save_conversation",
     ))
-    logger.info(
-        "Cache2 invalidation event source=conversation_history platform=%s channel=%s global_user=%s evicted=%d",
-        doc.get("platform", ""),
-        doc.get("platform_channel_id", ""),
-        doc.get("global_user_id", ""),
-        evicted_count,
-    )
+    if evicted_count:
+        logger.debug(
+            "Cache2 invalidation source=conversation_history platform=%s channel=%s global_user=%s evicted=%d",
+            doc.get("platform", ""),
+            doc.get("platform_channel_id", ""),
+            doc.get("global_user_id", ""),
+            evicted_count,
+        )

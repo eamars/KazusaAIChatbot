@@ -152,7 +152,8 @@ async def load_pending_events() -> int:
         _pending_tasks[doc["event_id"]] = task
         count += 1
 
-    logger.info("Loaded %d pending scheduled events", count)
+    if count:
+        logger.info("Loaded %d pending scheduled events", count)
     return count
 
 
