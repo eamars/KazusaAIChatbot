@@ -26,11 +26,6 @@ from kazusa_ai_chatbot.db import (
     build_memory_doc,
 )
 
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-)
 logger = logging.getLogger(__name__)
 
 

@@ -35,8 +35,7 @@ class TestGlobalPersonaState:
         # Stage 0
         assert "decontexualized_input" in hints
         # Stage 1
-        assert "research_facts" in hints
-        assert "research_metadata" in hints
+        assert "rag_result" in hints
         # Stage 2
         assert "internal_monologue" in hints
         assert "action_directives" in hints
@@ -66,7 +65,7 @@ class TestCognitionState:
             "reply_context",
             "indirect_speech_context",
             "decontexualized_input",
-            "research_facts",
+            "rag_result",
             "internal_monologue",
             "action_directives",
         ]

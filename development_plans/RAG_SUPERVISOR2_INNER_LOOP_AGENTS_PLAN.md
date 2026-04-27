@@ -21,11 +21,11 @@ argument quality for exactly one tool.
 
 | File                                        | Wraps                              |
 | ------------------------------------------- | ---------------------------------- |
-| `agents/conversation_search_agent.py`       | `search_conversation`              |
-| `agents/conversation_keyword_agent.py`      | `search_conversation_keyword`      |
-| `agents/conversation_filter_agent.py`       | `get_conversation`                 |
-| `agents/persistent_memory_search_agent.py`  | `search_persistent_memory`         |
-| `agents/persistent_memory_keyword_agent.py` | `search_persistent_memory_keyword` |
+| `rag/conversation_search_agent.py`       | `search_conversation`              |
+| `rag/conversation_keyword_agent.py`      | `search_conversation_keyword`      |
+| `rag/conversation_filter_agent.py`       | `get_conversation`                 |
+| `rag/persistent_memory_search_agent.py`  | `search_persistent_memory`         |
+| `rag/persistent_memory_keyword_agent.py` | `search_persistent_memory_keyword` |
 
 `web_search_agent2.py` already exists and is not duplicated.
 

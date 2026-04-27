@@ -246,7 +246,7 @@ async def dialog_generator(state: DialogAgentState) -> DialogAgentState:
     result = parse_llm_json_output(response.content)
     generated_dialog = result.get("final_dialog", [])
     logger.debug(
-        "Dialog generator: fragments=%d preview=%s",
+        "Dialog generator: fragments=%d dialog=%s",
         len(generated_dialog) if isinstance(generated_dialog, list) else 0,
         log_list_preview(generated_dialog if isinstance(generated_dialog, list) else []),
     )
@@ -504,10 +504,10 @@ async def dialog_agent(
     final_dialog = result.get("final_dialog", [])
 
     logger.info(
-        "Dialog summary: fragments=%d retry=%s preview=%s",
+        "Dialog summary: fragments=%d retry=%s dialog=%s",
         len(final_dialog),
         result.get("retry", 0),
-        log_list_preview(final_dialog, max_items=3, item_length=120),
+        log_list_preview(final_dialog),
     )
 
     return {

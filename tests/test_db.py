@@ -3,11 +3,17 @@
 from __future__ import annotations
 
 import asyncio
+from contextlib import contextmanager
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
 import kazusa_ai_chatbot.db as db_module
+import kazusa_ai_chatbot.db._client as db_client_module
+import kazusa_ai_chatbot.db.character as db_character_module
+import kazusa_ai_chatbot.db.conversation as db_conversation_module
+import kazusa_ai_chatbot.db.memory as db_memory_module
+import kazusa_ai_chatbot.db.users as db_users_module
 from kazusa_ai_chatbot.db import (
     AFFINITY_DEFAULT,
     build_memory_doc,
@@ -38,6 +44,31 @@ def _mock_db():
     return db
 
 
+@contextmanager
+def _patched_get_db(db):
+    """Patch every DB submodule binding used by re-exported helper functions."""
+    mock_get_db = AsyncMock(return_value=db)
+    with patch.object(db_module, "get_db", mock_get_db), \
+         patch.object(db_client_module, "get_db", mock_get_db), \
+         patch.object(db_character_module, "get_db", mock_get_db), \
+         patch.object(db_conversation_module, "get_db", mock_get_db), \
+         patch.object(db_memory_module, "get_db", mock_get_db), \
+         patch.object(db_users_module, "get_db", mock_get_db):
+        yield mock_get_db
+
+
+@contextmanager
+def _patched_embedding(return_value=None, mock=None):
+    """Patch every embedding binding used by DB helpers under test."""
+    mock_embed = mock or AsyncMock(return_value=return_value)
+    with patch.object(db_module, "get_text_embedding", mock_embed), \
+         patch.object(db_client_module, "get_text_embedding", mock_embed), \
+         patch.object(db_conversation_module, "get_text_embedding", mock_embed), \
+         patch.object(db_memory_module, "get_text_embedding", mock_embed), \
+         patch.object(db_users_module, "get_text_embedding", mock_embed):
+        yield mock_embed
+
+
 @pytest.mark.asyncio
 async def test_get_conversation_history():
     mock_docs = [
@@ -49,7 +80,7 @@ async def test_get_conversation_history():
     cursor.to_list = AsyncMock(return_value=mock_docs)
     db.conversation_history.find.return_value.sort.return_value.limit.return_value = cursor
 
-    with patch("kazusa_ai_chatbot.db.get_db", new_callable=AsyncMock, return_value=db):
+    with _patched_get_db(db):
         result = await get_conversation_history(platform="discord", platform_channel_id="chan_1", limit=10)
         
         # Verify basic find parameters
@@ -71,7 +102,7 @@ async def test_get_conversation_history_filters():
     cursor.to_list = AsyncMock(return_value=[])
     db.conversation_history.find.return_value.sort.return_value.limit.return_value = cursor
 
-    with patch("kazusa_ai_chatbot.db.get_db", new_callable=AsyncMock, return_value=db):
+    with _patched_get_db(db):
         # test global_user_id filter
         await get_conversation_history(platform="discord", platform_channel_id="chan_1", global_user_id="user_123")
         db.conversation_history.find.assert_called_with({"platform": "discord", "platform_channel_id": "chan_1", "global_user_id": "user_123"})
@@ -136,7 +167,7 @@ async def test_get_character_state_found():
         "updated_at": "t1",
     })
 
-    with patch("kazusa_ai_chatbot.db.get_db", new_callable=AsyncMock, return_value=db):
+    with _patched_get_db(db):
         result = await get_character_state()
 
     assert result["mood"] == "calm"
@@ -148,7 +179,7 @@ async def test_get_character_state_not_found():
     db = _mock_db()
     db.character_state.find_one = AsyncMock(return_value=None)
 
-    with patch("kazusa_ai_chatbot.db.get_db", new_callable=AsyncMock, return_value=db):
+    with _patched_get_db(db):
         result = await get_character_state()
 
     assert result == {}
@@ -165,7 +196,7 @@ async def test_upsert_character_state():
     })
     db.character_state.update_one = AsyncMock()
 
-    with patch("kazusa_ai_chatbot.db.get_db", new_callable=AsyncMock, return_value=db):
+    with _patched_get_db(db):
         await upsert_character_state("happy", "relaxed", "feeling good", "t2")
 
     call_args = db.character_state.update_one.call_args
@@ -189,7 +220,7 @@ async def test_get_user_profile_found():
         "last_relationship_insight": "friendly",
     })
 
-    with patch("kazusa_ai_chatbot.db.get_db", new_callable=AsyncMock, return_value=db):
+    with _patched_get_db(db):
         result = await get_user_profile("u1")
 
     assert result["global_user_id"] == "u1"
@@ -202,7 +233,7 @@ async def test_get_user_profile_not_found():
     db = _mock_db()
     db.user_profiles.find_one = AsyncMock(return_value=None)
 
-    with patch("kazusa_ai_chatbot.db.get_db", new_callable=AsyncMock, return_value=db):
+    with _patched_get_db(db):
         result = await get_user_profile("unknown")
 
     assert result == {}
@@ -216,7 +247,7 @@ async def test_update_last_relationship_insight():
     db = _mock_db()
     db.user_profiles.update_one = AsyncMock()
 
-    with patch("kazusa_ai_chatbot.db.get_db", new_callable=AsyncMock, return_value=db):
+    with _patched_get_db(db):
         await update_last_relationship_insight("u1", "very friendly")
 
     db.user_profiles.update_one.assert_called_once_with(
@@ -244,8 +275,7 @@ async def test_save_conversation_generates_embedding():
         "timestamp": "t1",
     }
 
-    with patch("kazusa_ai_chatbot.db.get_db", new_callable=AsyncMock, return_value=db), \
-         patch("kazusa_ai_chatbot.db.get_text_embedding", new_callable=AsyncMock, return_value=[0.1, 0.2]):
+    with _patched_get_db(db), _patched_embedding(return_value=[0.1, 0.2]):
         await save_conversation(doc)
 
     assert doc["embedding"] == [0.1, 0.2]
@@ -268,8 +298,7 @@ async def test_save_conversation_preserves_existing_embedding():
         "embedding": [0.5, 0.6],
     }
 
-    with patch("kazusa_ai_chatbot.db.get_db", new_callable=AsyncMock, return_value=db), \
-         patch("kazusa_ai_chatbot.db.get_text_embedding", new_callable=AsyncMock) as mock_embed:
+    with _patched_get_db(db), _patched_embedding(mock=AsyncMock()) as mock_embed:
         await save_conversation(doc)
 
     mock_embed.assert_not_called()
@@ -291,7 +320,7 @@ async def test_upsert_character_state_preserves_on_empty_string():
     })
     db.character_state.update_one = AsyncMock()
 
-    with patch("kazusa_ai_chatbot.db.get_db", new_callable=AsyncMock, return_value=db):
+    with _patched_get_db(db):
         await upsert_character_state("", "", "", "t2")
 
     call_args = db.character_state.update_one.call_args
@@ -315,7 +344,7 @@ async def test_get_character_profile_found():
         "age": 15,
     })
 
-    with patch("kazusa_ai_chatbot.db.get_db", new_callable=AsyncMock, return_value=db):
+    with _patched_get_db(db):
         result = await get_character_profile()
 
     assert result == {"mood": "calm", "name": "Kazusa", "age": 15}
@@ -328,7 +357,7 @@ async def test_get_character_profile_not_found():
     db = _mock_db()
     db.character_state.find_one = AsyncMock(return_value=None)
 
-    with patch("kazusa_ai_chatbot.db.get_db", new_callable=AsyncMock, return_value=db):
+    with _patched_get_db(db):
         result = await get_character_profile()
 
     assert result == {}
@@ -342,7 +371,7 @@ async def test_save_character_profile():
 
     profile = {"name": "Kazusa", "age": 15, "tone": "warm"}
 
-    with patch("kazusa_ai_chatbot.db.get_db", new_callable=AsyncMock, return_value=db):
+    with _patched_get_db(db):
         await save_character_profile(profile)
 
     db.character_state.update_one.assert_called_once_with(
@@ -363,7 +392,7 @@ async def test_get_character_state_returns_same_as_profile():
         "global_vibe": "warm",
     })
 
-    with patch("kazusa_ai_chatbot.db.get_db", new_callable=AsyncMock, return_value=db):
+    with _patched_get_db(db):
         result = await get_character_state()
 
     assert result == {"mood": "happy", "name": "Kazusa", "global_vibe": "warm"}
@@ -422,8 +451,7 @@ async def test_save_memory_creates_embedding_and_inserts():
     )
 
     mock_embed = AsyncMock(return_value=[0.1, 0.2])
-    with patch("kazusa_ai_chatbot.db.get_db", new_callable=AsyncMock, return_value=db), \
-         patch("kazusa_ai_chatbot.db.get_text_embedding", mock_embed):
+    with _patched_get_db(db), _patched_embedding(mock=mock_embed):
         await save_memory(doc, "2024-01-01T00:00:00Z")
 
     # Verify structured embedding text
@@ -454,7 +482,7 @@ async def test_search_memory_keyword():
     ])
     db.memory.find.return_value.limit.return_value = cursor
 
-    with patch("kazusa_ai_chatbot.db.get_db", new_callable=AsyncMock, return_value=db):
+    with _patched_get_db(db):
         results = await search_memory("test", method="keyword", limit=5)
 
     assert len(results) == 1
@@ -473,8 +501,7 @@ async def test_search_memory_vector():
     ])
     db.memory.aggregate = MagicMock(return_value=cursor)
 
-    with patch("kazusa_ai_chatbot.db.get_db", new_callable=AsyncMock, return_value=db), \
-         patch("kazusa_ai_chatbot.db.get_text_embedding", new_callable=AsyncMock, return_value=[0.1, 0.2]):
+    with _patched_get_db(db), _patched_embedding(return_value=[0.1, 0.2]):
         results = await search_memory("test query", method="vector", limit=3)
 
     assert len(results) == 1
@@ -493,25 +520,28 @@ async def test_close_db_resets_globals():
     """close_db should set _client and _db to None."""
     mock_client = MagicMock()
 
-    db_module._client = mock_client
-    db_module._db = MagicMock()
+    db_client_module._client = mock_client
+    db_client_module._db = MagicMock()
+    db_client_module._db_loop = None
 
     await close_db()
 
-    assert db_module._client is None
-    assert db_module._db is None
+    assert db_client_module._client is None
+    assert db_client_module._db is None
+    assert db_client_module._db_loop is None
     mock_client.close.assert_called_once()
 
 
 @pytest.mark.asyncio
 async def test_close_db_noop_when_not_connected():
     """close_db should be safe to call when not connected."""
-    db_module._client = None
-    db_module._db = None
+    db_client_module._client = None
+    db_client_module._db = None
+    db_client_module._db_loop = None
 
     await close_db()  # Should not raise
 
-    assert db_module._client is None
+    assert db_client_module._client is None
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -532,12 +562,13 @@ async def live_test_db():
     All collections are dropped after each test.
     """
     # Reset the db module singleton so get_db() creates a fresh connection
-    db_module._client = None
-    db_module._db = None
+    db_client_module._client = None
+    db_client_module._db = None
+    db_client_module._db_loop = None
 
     # Patch the module-level binding that get_db() reads on line 22 of db.py
-    original_db_name = db_module.MONGODB_DB_NAME
-    db_module.MONGODB_DB_NAME = TEST_DB_NAME
+    original_db_name = db_client_module.MONGODB_DB_NAME
+    db_client_module.MONGODB_DB_NAME = TEST_DB_NAME
 
     # Force connection to the test database
     db = await get_db()
@@ -554,7 +585,7 @@ async def live_test_db():
 
     # Close and restore original DB name
     await close_db()
-    db_module.MONGODB_DB_NAME = original_db_name
+    db_client_module.MONGODB_DB_NAME = original_db_name
 
 
 # ── Conversation history ──────────────────────────────────────────────
@@ -701,7 +732,7 @@ async def test_get_affinity_default_for_unknown_user():
     db = _mock_db()
     db.user_profiles.find_one = AsyncMock(return_value=None)
 
-    with patch("kazusa_ai_chatbot.db.get_db", new_callable=AsyncMock, return_value=db):
+    with _patched_get_db(db):
         result = await get_affinity("unknown_user")
 
     assert result == AFFINITY_DEFAULT
@@ -712,7 +743,7 @@ async def test_get_affinity_returns_stored_value():
     db = _mock_db()
     db.user_profiles.find_one = AsyncMock(return_value={"user_id": "u1", "affinity": 750})
 
-    with patch("kazusa_ai_chatbot.db.get_db", new_callable=AsyncMock, return_value=db):
+    with _patched_get_db(db):
         result = await get_affinity("u1")
 
     assert result == 750
@@ -724,7 +755,7 @@ async def test_update_affinity_clamps_to_max():
     db.user_profiles.find_one = AsyncMock(return_value={"user_id": "u1", "affinity": 995})
     db.user_profiles.update_one = AsyncMock()
 
-    with patch("kazusa_ai_chatbot.db.get_db", new_callable=AsyncMock, return_value=db):
+    with _patched_get_db(db):
         result = await update_affinity("u1", 10)
 
     assert result == 1000
@@ -736,7 +767,7 @@ async def test_update_affinity_clamps_to_min():
     db.user_profiles.find_one = AsyncMock(return_value={"user_id": "u1", "affinity": 5})
     db.user_profiles.update_one = AsyncMock()
 
-    with patch("kazusa_ai_chatbot.db.get_db", new_callable=AsyncMock, return_value=db):
+    with _patched_get_db(db):
         result = await update_affinity("u1", -20)
 
     assert result == 0
@@ -758,8 +789,7 @@ async def test_enable_vector_index_mocked():
     collection.create_search_index = AsyncMock()
     db.__getitem__.return_value = collection
 
-    with patch("kazusa_ai_chatbot.db.get_db", new_callable=AsyncMock, return_value=db), \
-         patch("kazusa_ai_chatbot.db.get_text_embedding", new_callable=AsyncMock, return_value=[0.1, 0.2, 0.3]):
+    with _patched_get_db(db), _patched_embedding(return_value=[0.1, 0.2, 0.3]):
         await db_module.enable_vector_index("conversation_history", "conversation_history_vector_index")
     
     collection.create_search_index.assert_called_once()
@@ -780,7 +810,7 @@ async def test_search_conversation_history_keyword_mocked():
     ])
     db.conversation_history.find.return_value.sort.return_value.limit.return_value = cursor
 
-    with patch("kazusa_ai_chatbot.db.get_db", new_callable=AsyncMock, return_value=db):
+    with _patched_get_db(db):
         results = await db_module.search_conversation_history("keyword", method="keyword", limit=2)
 
     assert len(results) == 1
@@ -799,7 +829,7 @@ async def test_search_conversation_history_keyword_with_filters_mocked():
     cursor.to_list = AsyncMock(return_value=[])
     db.conversation_history.find.return_value.sort.return_value.limit.return_value = cursor
 
-    with patch("kazusa_ai_chatbot.db.get_db", new_callable=AsyncMock, return_value=db):
+    with _patched_get_db(db):
         await db_module.search_conversation_history(
             "test", method="keyword", platform_channel_id="ch1", global_user_id="u1"
         )
@@ -819,8 +849,7 @@ async def test_search_conversation_history_vector_mocked():
     ])
     db.conversation_history.aggregate = MagicMock(return_value=cursor)
 
-    with patch("kazusa_ai_chatbot.db.get_db", new_callable=AsyncMock, return_value=db), \
-         patch("kazusa_ai_chatbot.db.get_text_embedding", new_callable=AsyncMock, return_value=[0.1, 0.2, 0.3]):
+    with _patched_get_db(db), _patched_embedding(return_value=[0.1, 0.2, 0.3]):
         results = await db_module.search_conversation_history("test query", method="vector", limit=2)
 
     assert len(results) == 1
@@ -842,8 +871,7 @@ async def test_search_conversation_history_vector_with_filters_mocked():
     cursor.to_list = AsyncMock(return_value=[])
     db.conversation_history.aggregate = MagicMock(return_value=cursor)
 
-    with patch("kazusa_ai_chatbot.db.get_db", new_callable=AsyncMock, return_value=db), \
-         patch("kazusa_ai_chatbot.db.get_text_embedding", new_callable=AsyncMock, return_value=[0.1, 0.2, 0.3]):
+    with _patched_get_db(db), _patched_embedding(return_value=[0.1, 0.2, 0.3]):
         await db_module.search_conversation_history(
             "test", method="vector", platform_channel_id="ch1", global_user_id="u1", limit=3
         )

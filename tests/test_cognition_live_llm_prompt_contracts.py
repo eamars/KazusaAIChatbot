@@ -7,7 +7,7 @@ import logging
 import httpx
 import pytest
 
-from kazusa_ai_chatbot.agents.dialog_agent import dialog_agent
+from kazusa_ai_chatbot.nodes.dialog_agent import dialog_agent
 from kazusa_ai_chatbot.config import LLM_BASE_URL
 from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition_l1 import call_cognition_subconscious
 from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition_l2 import (
@@ -25,6 +25,7 @@ from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition_l3 import (
 )
 from kazusa_ai_chatbot.nodes.persona_supervisor2_msg_decontexualizer import call_msg_decontexualizer
 from kazusa_ai_chatbot.utils import load_personality
+from tests.llm_trace import write_llm_trace
 
 
 logger = logging.getLogger(__name__)
@@ -57,6 +58,15 @@ async def ensure_live_llm() -> None:
 
 def _debug_snapshot(label: str, payload: object) -> None:
     logger.info("%s => %r", label, payload)
+    write_llm_trace(
+        "cognition_prompt_contracts_live",
+        label,
+        {
+            "label": label,
+            "payload": payload,
+            "judgment": "snapshot_for_manual_live_llm_prompt_contract_review",
+        },
+    )
 
 
 def _build_character_profile() -> dict:
@@ -67,6 +77,30 @@ def _build_character_profile() -> dict:
     return profile
 
 
+def _rag_result(
+    *,
+    objective_facts: str,
+    user_image: dict,
+    character_image: dict,
+    memory_evidence: str,
+    external_evidence: str,
+) -> dict:
+    """Build the RAG2 projection fixture used by prompt-contract tests."""
+    return {
+        "answer": "",
+        "user_image": {
+            "objective_facts": [{"fact": objective_facts}] if objective_facts else [],
+            "user_image": user_image,
+        },
+        "character_image": {"self_image": character_image},
+        "third_party_profiles": [],
+        "memory_evidence": [{"summary": memory_evidence, "content": memory_evidence}] if memory_evidence else [],
+        "conversation_evidence": [],
+        "external_evidence": [{"summary": external_evidence, "content": external_evidence, "url": ""}] if external_evidence else [],
+        "supervisor_trace": {"loop_count": 0, "unknown_slots": [], "dispatched": []},
+    }
+
+
 def _make_state(
     *,
     user_input: str,
@@ -75,8 +109,8 @@ def _make_state(
     objective_facts: str = "",
     user_image: dict | str | None = None,
     character_image: dict | str | None = None,
-    input_context_results: str = "最近聊天主要围绕日常和轻度社交互动。",
-    external_rag_results: str = "",
+    memory_evidence_text: str = "最近聊天主要围绕日常和轻度社交互动。",
+    external_evidence_text: str = "",
     indirect_speech_context: str = "",
     affinity: int = 680,
     last_relationship_insight: str = "对方目前让人放松，可以正常交流。",
@@ -87,26 +121,26 @@ def _make_state(
         user_image = {
             "milestones": [],
             "historical_summary": "",
-            "recent_observations": ["对方说话直接，但没有越界。"],
+            "recent_window": [{"summary": "对方说话直接，但没有越界。"}],
         }
     elif isinstance(user_image, str):
         user_image = {
             "milestones": [],
             "historical_summary": "",
-            "recent_observations": [user_image],
+            "recent_window": [{"summary": user_image}],
         }
 
     if character_image is None:
         character_image = {
             "milestones": [],
             "historical_summary": "",
-            "recent_observations": ["千纱平时会保留一点防备，但在安全话题下愿意正常回应。"],
+            "recent_window": [{"summary": "千纱平时会保留一点防备，但在安全话题下愿意正常回应。"}],
         }
     elif isinstance(character_image, str):
         character_image = {
             "milestones": [],
             "historical_summary": "",
-            "recent_observations": [character_image],
+            "recent_window": [{"summary": character_image}],
         }
 
     return {
@@ -128,13 +162,13 @@ def _make_state(
         "indirect_speech_context": indirect_speech_context,
         "channel_topic": channel_topic,
         "decontexualized_input": user_input,
-        "research_facts": {
-            "objective_facts": objective_facts,
-            "user_image": user_image,
-            "character_image": character_image,
-            "input_context_results": input_context_results,
-            "external_rag_results": external_rag_results,
-        },
+        "rag_result": _rag_result(
+            objective_facts=objective_facts,
+            user_image=user_image,
+            character_image=character_image,
+            memory_evidence=memory_evidence_text,
+            external_evidence=external_evidence_text,
+        ),
     }
 
 
@@ -314,8 +348,19 @@ _DECONTEXT_CASES = [
 ]
 
 
-@pytest.mark.parametrize(("state", "case_id"), _DECONTEXT_CASES)
-async def test_live_msg_decontexualizer_prompt_contracts(ensure_live_llm, state: dict, case_id: str) -> None:
+def _decontext_case_by_id(case_id: str) -> dict:
+    """Return one named decontextualizer live case."""
+    for parameter_set in _DECONTEXT_CASES:
+        state, current_case_id = parameter_set.values
+        if current_case_id == case_id:
+            return state
+    raise AssertionError(f"Unknown decontext case: {case_id}")
+
+
+async def _assert_live_msg_decontexualizer_prompt_contract(ensure_live_llm, case_id: str) -> None:
+    """Run one inspectable decontextualizer live prompt-contract case."""
+    del ensure_live_llm
+    state = _decontext_case_by_id(case_id)
     _debug_snapshot(f"prompt_contracts.decontext.input.{case_id}", state)
     result = await call_msg_decontexualizer(state)
     _debug_snapshot(f"prompt_contracts.decontext.output.{case_id}", result)
@@ -340,6 +385,29 @@ async def test_live_msg_decontexualizer_prompt_contracts(ensure_live_llm, state:
         assert "他" in output, f"Indirect speech case should keep third-person pronoun: {output!r}"
 
 
+async def test_live_msg_decontexualizer_resolves_recent_referent(ensure_live_llm) -> None:
+    await _assert_live_msg_decontexualizer_prompt_contract(ensure_live_llm, "resolve_recent_referent")
+
+
+async def test_live_msg_decontexualizer_keeps_complete_sentence(ensure_live_llm) -> None:
+    await _assert_live_msg_decontexualizer_prompt_contract(ensure_live_llm, "keep_complete_sentence")
+
+
+async def test_live_msg_decontexualizer_preserves_third_person_indirect_speech(ensure_live_llm) -> None:
+    await _assert_live_msg_decontexualizer_prompt_contract(
+        ensure_live_llm,
+        "preserve_third_person_in_indirect_speech",
+    )
+
+
+async def test_live_msg_decontexualizer_preserves_literal_url_anchor(ensure_live_llm) -> None:
+    await _assert_live_msg_decontexualizer_prompt_contract(ensure_live_llm, "preserve_literal_url_anchor")
+
+
+async def test_live_msg_decontexualizer_recovers_reply_only_confirmation_flow(ensure_live_llm) -> None:
+    await _assert_live_msg_decontexualizer_prompt_contract(ensure_live_llm, "reply_only_confirmation_flow")
+
+
 async def test_live_content_anchor_uses_character_public_facts_for_birthday_question(ensure_live_llm) -> None:
     state = _make_state(
         user_input="千纱你的生日是什么时候？",
@@ -349,7 +417,7 @@ async def test_live_content_anchor_uses_character_public_facts_for_birthday_ques
         ],
         channel_topic="询问角色公开资料",
         objective_facts=_CHARACTER_PUBLIC_FACTS,
-        input_context_results="",
+        memory_evidence_text="",
     )
     state.update(
         {
@@ -376,7 +444,7 @@ async def test_live_content_anchor_does_not_leak_character_public_facts_on_unrel
         ],
         channel_topic="日常关心",
         objective_facts=_CHARACTER_PUBLIC_FACTS,
-        input_context_results="最近聊天主要围绕日常状态和轻松闲聊。",
+        memory_evidence_text="最近聊天主要围绕日常状态和轻松闲聊。",
     )
     state.update(
         {
@@ -406,7 +474,7 @@ _STACK_CASES = [
             ],
             channel_topic="weather talk",
             objective_facts="用户曾明确要求若被接受则优先使用自然英语回复。",
-            input_context_results="最近聊天主要围绕天气和日常感受。",
+            memory_evidence_text="最近聊天主要围绕天气和日常感受。",
         ),
         id="stack-weather-english",
     ),
@@ -420,7 +488,7 @@ _STACK_CASES = [
             ],
             channel_topic="照片闲聊",
             objective_facts="",
-            input_context_results="最近聊天主要围绕图片内容和日常观察。",
+            memory_evidence_text="最近聊天主要围绕图片内容和日常观察。",
             last_relationship_insight="对方只是轻松聊天，没有明显压迫感。",
         ),
         id="stack-photo-request-chinese",
@@ -436,7 +504,7 @@ _STACK_CASES = [
             ],
             channel_topic="边界施压",
             objective_facts="用户没有获得任何可强制改变称呼方式的许可。",
-            input_context_results="最近聊天出现了轻微的称呼施压。",
+            memory_evidence_text="最近聊天出现了轻微的称呼施压。",
             affinity=520,
             last_relationship_insight="对方最近有点试探边界，需要保持分寸。",
         ),
@@ -445,8 +513,19 @@ _STACK_CASES = [
 ]
 
 
-@pytest.mark.parametrize(("case_id", "state"), _STACK_CASES)
-async def test_live_cognition_stack_prompt_contracts(ensure_live_llm, case_id: str, state: dict) -> None:
+def _stack_case_by_id(case_id: str) -> dict:
+    """Return one named cognition-stack live case."""
+    for parameter_set in _STACK_CASES:
+        current_case_id, state = parameter_set.values
+        if current_case_id == case_id:
+            return state
+    raise AssertionError(f"Unknown cognition stack case: {case_id}")
+
+
+async def _assert_live_cognition_stack_prompt_contract(ensure_live_llm, case_id: str) -> None:
+    """Run one inspectable cognition-stack live prompt-contract case."""
+    del ensure_live_llm
+    state = _stack_case_by_id(case_id)
     state = await _run_live_cognition_stack(state)
 
     assert state["emotional_appraisal"].strip(), f"Missing L1 emotional_appraisal: {state!r}"
@@ -479,6 +558,18 @@ async def test_live_cognition_stack_prompt_contracts(ensure_live_llm, case_id: s
         assert not any(token in "\n".join(state["accepted_user_preferences"]) for token in ["主人", "杏奴", "奴"]), f"Boundary-pressure case must not persist coercive address preferences: {state['accepted_user_preferences']!r}"
 
 
+async def test_live_cognition_stack_weather_english(ensure_live_llm) -> None:
+    await _assert_live_cognition_stack_prompt_contract(ensure_live_llm, "weather_english")
+
+
+async def test_live_cognition_stack_photo_request_chinese(ensure_live_llm) -> None:
+    await _assert_live_cognition_stack_prompt_contract(ensure_live_llm, "photo_request_chinese")
+
+
+async def test_live_cognition_stack_boundary_command_repeated_fillers(ensure_live_llm) -> None:
+    await _assert_live_cognition_stack_prompt_contract(ensure_live_llm, "boundary_command_repeated_fillers")
+
+
 _DIALOG_CASES = [
     pytest.param(
         "weather_english",
@@ -490,7 +581,7 @@ _DIALOG_CASES = [
             ],
             channel_topic="weather talk",
             objective_facts="用户曾明确要求若被接受则优先使用自然英语回复。",
-            input_context_results="最近聊天主要围绕天气和日常感受。",
+            memory_evidence_text="最近聊天主要围绕天气和日常感受。",
         ),
         id="dialog-weather-english",
     ),
@@ -504,7 +595,7 @@ _DIALOG_CASES = [
             ],
             channel_topic="天气闲聊",
             objective_facts="",
-            input_context_results="最近聊天主要围绕天气和安静的日常。",
+            memory_evidence_text="最近聊天主要围绕天气和安静的日常。",
         ),
         id="dialog-casual-chinese",
     ),
@@ -519,7 +610,7 @@ _DIALOG_CASES = [
             ],
             channel_topic="边界施压",
             objective_facts="用户没有获得任何可强制改变称呼方式的许可。",
-            input_context_results="最近聊天出现了轻微的称呼施压。",
+            memory_evidence_text="最近聊天出现了轻微的称呼施压。",
             affinity=520,
             last_relationship_insight="对方最近有点试探边界，需要保持分寸。",
         ),
@@ -528,8 +619,19 @@ _DIALOG_CASES = [
 ]
 
 
-@pytest.mark.parametrize(("case_id", "state"), _DIALOG_CASES)
-async def test_live_dialog_prompt_contracts(ensure_live_llm, case_id: str, state: dict) -> None:
+def _dialog_case_by_id(case_id: str) -> dict:
+    """Return one named dialog live case."""
+    for parameter_set in _DIALOG_CASES:
+        current_case_id, state = parameter_set.values
+        if current_case_id == case_id:
+            return state
+    raise AssertionError(f"Unknown dialog case: {case_id}")
+
+
+async def _assert_live_dialog_prompt_contract(ensure_live_llm, case_id: str) -> None:
+    """Run one inspectable dialog live prompt-contract case."""
+    del ensure_live_llm
+    state = _dialog_case_by_id(case_id)
     state = await _run_live_cognition_stack(state)
     result = await dialog_agent(state)
     _debug_snapshot(f"prompt_contracts.dialog.output.{case_id}", result)
@@ -545,3 +647,15 @@ async def test_live_dialog_prompt_contracts(ensure_live_llm, case_id: str, state
         assert not any(token in dialog_text.lower() for token in ["anyway", "or whatever"]), f"Chinese case should not mix legacy English fillers: {dialog_text!r}"
     else:
         assert all(token not in dialog_text for token in ["好啊主人", "当然主人", "以后就这么叫"]) , f"Boundary case should not comply with the forced title: {dialog_text!r}"
+
+
+async def test_live_dialog_weather_english(ensure_live_llm) -> None:
+    await _assert_live_dialog_prompt_contract(ensure_live_llm, "weather_english")
+
+
+async def test_live_dialog_casual_chinese(ensure_live_llm) -> None:
+    await _assert_live_dialog_prompt_contract(ensure_live_llm, "casual_chinese")
+
+
+async def test_live_dialog_boundary_command_repeated_fillers(ensure_live_llm) -> None:
+    await _assert_live_dialog_prompt_contract(ensure_live_llm, "boundary_command_repeated_fillers")

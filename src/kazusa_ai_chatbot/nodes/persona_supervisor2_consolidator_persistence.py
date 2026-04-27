@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from datetime import datetime, timedelta, timezone
@@ -21,7 +22,6 @@ from kazusa_ai_chatbot.db import (
     CharacterDiaryEntry,
     MemoryType,
     ObjectiveFactEntry,
-    increment_rag_version,
     insert_profile_memories,
     update_affinity,
     update_last_relationship_insight,
@@ -34,7 +34,6 @@ from kazusa_ai_chatbot.nodes.persona_supervisor2_consolidator_images import (
     _update_character_image,
     _update_user_image,
 )
-from kazusa_ai_chatbot.nodes.persona_supervisor2_consolidator_knowledge import _update_knowledge_base
 from kazusa_ai_chatbot.nodes.persona_supervisor2_consolidator_schema import (
     ConsolidatorState,
     normalize_diary_entries,
@@ -46,12 +45,12 @@ from kazusa_ai_chatbot.dispatcher import (
     ToolRegistry,
 )
 from kazusa_ai_chatbot.dispatcher.task import parse_iso_datetime
-from kazusa_ai_chatbot.nodes.persona_supervisor2_rag import _get_rag_cache
+from kazusa_ai_chatbot.rag.cache2_events import CacheInvalidationEvent
+from kazusa_ai_chatbot.rag.cache2_runtime import get_rag_cache2_runtime
 from kazusa_ai_chatbot.utils import get_llm, log_list_preview, parse_llm_json_output
 
 logger = logging.getLogger(__name__)
 
-AFFINITY_CACHE_NUKE_THRESHOLD = 50
 _task_dispatcher: TaskDispatcher | None = None
 _task_registry: ToolRegistry | None = None
 
@@ -227,7 +226,7 @@ async def _generate_raw_tool_calls(
 
     logger.debug(
         "Task dispatcher LLM: raw_calls=%s",
-        log_list_preview([{"tool": raw.tool, "args": raw.args} for raw in raw_calls], max_items=5, item_length=220),
+        log_list_preview([{"tool": raw.tool, "args": raw.args} for raw in raw_calls]),
     )
     return raw_calls
 
@@ -621,79 +620,96 @@ async def db_writer(state: ConsolidatorState) -> dict:
         user_affinity_score, user_affinity_score + processed_affinity_delta,
     )
 
-    # ── Step 5: cache invalidation (best-effort, after writes) ──────
-    # The RAG cache is the hot read-path; stale entries now outweigh recency.
+    # ── Step 5: user / character images (three-tier rolling) ─────────
+    user_image_task = None
     if global_user_id:
-        try:
-            rag_cache = await _get_rag_cache()
-            if profile_memories:
-                for cache_type in (
-                    "user_profile_memories",
-                    "character_diary",
-                    "objective_user_facts",
-                    "user_promises",
-                    "boundary_cache",
-                ):
-                    await rag_cache.invalidate_pattern(
-                        cache_type=cache_type,
-                        global_user_id=global_user_id,
-                    )
-                    cache_invalidated.append(cache_type)
-            if abs(processed_affinity_delta) > AFFINITY_CACHE_NUKE_THRESHOLD:
-                await rag_cache.clear_all_user(global_user_id)
-                cache_invalidated.append("ALL_USER")
+        user_image_task = _update_user_image(
+            state,
+            timestamp=timestamp,
+            processed_affinity_delta=processed_affinity_delta,
+        )
+    image_results = await asyncio.gather(
+        user_image_task if user_image_task is not None else asyncio.sleep(0, result=None),
+        _update_character_image(state, timestamp=timestamp),
+        return_exceptions=True,
+    )
+    user_image_result, character_image_result = image_results
 
-            if cache_invalidated:
-                await increment_rag_version(global_user_id)
-        except PyMongoError:
-            logger.exception("db_writer: cache invalidation failed")
-
-    # ── Step 6: user image (three-tier rolling) ─────────────────────
     if global_user_id:
-        try:
-            user_image_doc = await _update_user_image(
-                state,
-                timestamp=timestamp,
-                processed_affinity_delta=processed_affinity_delta,
+        if isinstance(user_image_result, Exception):
+            logger.error(
+                "db_writer: failed to update user_image",
+                exc_info=(type(user_image_result), user_image_result, user_image_result.__traceback__),
             )
-            if user_image_doc is not None:
-                await upsert_user_image(global_user_id, user_image_doc)
-                write_log["user_image"] = True
-        except Exception:
-            logger.exception("db_writer: failed to update user_image")
             write_log["user_image"] = False
+        elif user_image_result is not None:
+            try:
+                await upsert_user_image(global_user_id, user_image_result)
+                write_log["user_image"] = True
+            except PyMongoError:
+                logger.exception("db_writer: failed to upsert_user_image")
+                write_log["user_image"] = False
 
-    # ── Step 7: character self-image (three-tier rolling) ────────────
-    try:
-        character_image_doc = await _update_character_image(state, timestamp=timestamp)
-        if character_image_doc is not None:
-            await upsert_character_self_image(character_image_doc)
-            write_log["character_image"] = True
-    except Exception:
-        logger.exception("db_writer: failed to update character_image")
+    if isinstance(character_image_result, Exception):
+        logger.error(
+            "db_writer: failed to update character_image",
+            exc_info=(
+                type(character_image_result),
+                character_image_result,
+                character_image_result.__traceback__,
+            ),
+        )
         write_log["character_image"] = False
+    elif character_image_result is not None:
+        try:
+            await upsert_character_self_image(character_image_result)
+            write_log["character_image"] = True
+        except PyMongoError:
+            logger.exception("db_writer: failed to upsert_character_self_image")
+            write_log["character_image"] = False
 
-    # ── Step 8: knowledge-base distillation (DEEP passes only) ───────
-    kb_count = 0
-    try:
-        kb_count = await _update_knowledge_base(state)
-        write_log["knowledge_base"] = kb_count > 0
-    except Exception:
-        logger.exception("db_writer: failed to update knowledge_base")
-        write_log["knowledge_base"] = False
+    # ── Step 6: Cache2 invalidation events (after persistence) ──────
+    runtime = get_rag_cache2_runtime()
+    events: list[CacheInvalidationEvent] = []
+
+    if global_user_id and (
+        write_log.get("user_profile_memories")
+        or write_log.get("affinity")
+        or write_log.get("relationship_insight")
+        or write_log.get("user_image")
+    ):
+        events.append(CacheInvalidationEvent(
+            source="user_profile",
+            platform=state["platform"],
+            platform_channel_id=state["platform_channel_id"],
+            global_user_id=global_user_id,
+            timestamp=timestamp,
+            reason="consolidator: user_profile",
+        ))
+
+    if write_log.get("character_state") or write_log.get("character_image"):
+        events.append(CacheInvalidationEvent(
+            source="character_state",
+            reason="consolidator: character_state",
+        ))
+
+    evicted_total = 0
+    for event in events:
+        evicted_total += await runtime.invalidate(event)
+    cache_invalidated = [event.source for event in events]
+    metadata["cache_evicted_count"] = evicted_total
 
     metadata.update({
         "write_success": write_log,
-        "cache_invalidation_scope": cache_invalidated,
+        "cache_invalidated": cache_invalidated,
         "scheduled_event_ids": scheduled_event_ids,
         "task_dispatch_rejected": dispatch_rejections,
         "affinity_before": user_affinity_score,
         "affinity_delta_processed": processed_affinity_delta,
-        "knowledge_base_entries_written": kb_count,
     })
 
     logger.debug(
-        "db_writer summary: user=%s global_user=%s writes=%s cache_invalidated=%s scheduled=%d affinity_before=%s affinity_delta=%s kb_written=%d",
+        "db_writer summary: user=%s global_user=%s writes=%s cache_invalidated=%s scheduled=%d affinity_before=%s affinity_delta=%s",
         user_name,
         global_user_id,
         write_log,
@@ -701,7 +717,6 @@ async def db_writer(state: ConsolidatorState) -> dict:
         len(scheduled_event_ids),
         user_affinity_score,
         processed_affinity_delta,
-        kb_count,
     )
 
     return {"metadata": metadata}

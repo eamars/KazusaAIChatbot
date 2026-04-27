@@ -61,6 +61,7 @@ htmlcov/
 coverage.xml
 *.cover
 .hypothesis/
+test_artifacts/
 
 # Logs
 *.log

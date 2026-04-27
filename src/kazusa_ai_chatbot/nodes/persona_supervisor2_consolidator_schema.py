@@ -64,7 +64,8 @@ class ConsolidatorState(TypedDict):
     character_profile: dict
 
     # Facts
-    research_facts: dict
+    rag_result: dict
+    existing_dedup_keys: set[str]
 
     # User related
     decontexualized_input: str

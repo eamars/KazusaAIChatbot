@@ -25,6 +25,9 @@ from fastapi import FastAPI, Header, HTTPException
 from pydantic import BaseModel
 
 from kazusa_ai_chatbot.dispatcher import SendResult
+from kazusa_ai_chatbot.logging_config import configure_adapter_logging
+
+configure_adapter_logging()
 
 logger = logging.getLogger(__name__)
 
@@ -222,7 +225,7 @@ class DiscordAdapter(discord.Client):
             reply_context["reply_to_platform_user_id"] = str(referenced_message.author.id)
             reply_context["reply_to_display_name"] = referenced_message.author.display_name
             reply_context["reply_to_current_bot"] = bool(self.user and referenced_message.author.id == self.user.id)
-            reply_context["reply_excerpt"] = referenced_message.content[:200]
+            reply_context["reply_excerpt"] = referenced_message.content
 
         message_debug_modes = dict(self.debug_modes)
         is_active = is_dm or (self.channel_ids is not None and channel_id_str in self.channel_ids)
@@ -409,13 +412,7 @@ def main():
     parser.add_argument("--runtime-port", type=int, default=int(os.getenv("DISCORD_RUNTIME_PORT", "8012")))
     parser.add_argument("--runtime-public-url", type=str, default=os.getenv("ADAPTER_RUNTIME_PUBLIC_URL", ""))
     parser.add_argument("--heartbeat-seconds", type=float, default=float(os.getenv("ADAPTER_HEARTBEAT_SECONDS", "30")))
-    parser.add_argument("--log-level", type=str, default="INFO", choices=["DEBUG", "INFO", "WARNING", "ERROR"])
     args = parser.parse_args()
-
-    logging.basicConfig(
-        level=getattr(logging, args.log_level),
-        format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-    )
 
     token = os.getenv("DISCORD_TOKEN", "")
     if not token:

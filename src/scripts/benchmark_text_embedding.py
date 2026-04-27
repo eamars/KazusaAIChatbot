@@ -17,10 +17,6 @@ import time
 from kazusa_ai_chatbot.config import EMBEDDING_BASE_URL, EMBEDDING_MODEL
 from kazusa_ai_chatbot.db import get_text_embedding, get_text_embeddings_batch
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-)
 logger = logging.getLogger(__name__)
 
 DEFAULT_QUERIES = [

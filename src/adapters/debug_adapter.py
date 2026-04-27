@@ -19,6 +19,10 @@ from pydantic import BaseModel, Field
 
 import httpx
 
+from kazusa_ai_chatbot.logging_config import configure_adapter_logging
+
+configure_adapter_logging()
+
 logger = logging.getLogger(__name__)
 
 BRAIN_URL = "http://localhost:8000"
@@ -197,19 +201,13 @@ def main():
     parser = argparse.ArgumentParser(description="Debug web adapter for Kazusa Brain Service")
     parser.add_argument("--brain-url", type=str, default="http://localhost:8000", help="Brain service URL")
     parser.add_argument("--port", type=int, default=8080, help="Port for the debug web UI")
-    parser.add_argument("--log-level", type=str, default="INFO", choices=["DEBUG", "INFO", "WARNING", "ERROR"])
     args = parser.parse_args()
-
-    logging.basicConfig(
-        level=getattr(logging, args.log_level),
-        format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-    )
 
     BRAIN_URL = args.brain_url.rstrip("/")
     logger.info("Debug adapter proxying to brain at %s", BRAIN_URL)
     logger.info("Open http://localhost:%d in your browser", args.port)
 
-    uvicorn.run(debug_app, host="0.0.0.0", port=args.port, log_level=args.log_level.lower())
+    uvicorn.run(debug_app, host="0.0.0.0", port=args.port, log_level="warning")
 
 
 if __name__ == "__main__":

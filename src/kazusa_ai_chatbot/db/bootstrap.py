@@ -26,6 +26,12 @@ async def db_bootstrap() -> None:
     db = await get_db()
     existing = set(await db.list_collection_names())
 
+    for legacy in ("rag_cache_index", "rag_metadata_index"):
+        if legacy in existing:
+            await db.drop_collection(legacy)
+            logger.info("Dropped legacy collection '%s'", legacy)
+            existing.discard(legacy)
+
     required_collections = [
         "conversation_history",
         "user_profiles",
@@ -33,8 +39,6 @@ async def db_bootstrap() -> None:
         "memory",
         "user_profile_memories",
         "scheduled_events",
-        "rag_cache_index",        # NEW (Stage 2)
-        "rag_metadata_index",     # NEW (Stage 2)
     ]
     for name in required_collections:
         if name not in existing:
@@ -119,32 +123,10 @@ async def db_bootstrap() -> None:
         name="user_profile_memory_active_commitments",
     )
 
-    # ── NEW: rag_cache_index indexes ──────────────────────────────
-    # TTL — auto-delete expired entries. expireAfterSeconds=0 means
-    # "expire when ttl_expires_at is in the past".
-    await db.rag_cache_index.create_index(
-        "ttl_expires_at",
-        expireAfterSeconds=0,
-        name="rag_cache_ttl",
-    )
-    await db.rag_cache_index.create_index(
-        [("cache_type", 1), ("global_user_id", 1), ("deleted", 1)],
-        name="rag_cache_lookup",
-    )
-    await db.rag_cache_index.create_index(
-        "cache_id", unique=True, name="rag_cache_id_unique",
-    )
-
-    # ── NEW: rag_metadata_index indexes ───────────────────────────
-    await db.rag_metadata_index.create_index(
-        "global_user_id", unique=True, name="rag_meta_user_unique",
-    )
-
     # ── Vector search indexes (best-effort — requires Atlas) ──────
     for collection, index_name, path in (
         ("conversation_history", "conversation_history_vector_index", "embedding"),
         ("memory",               "memory_vector_index",              "embedding"),
-        ("rag_cache_index",      "rag_cache_vector_index",           "embedding"),          # NEW
         ("user_profile_memories", "user_profile_memories_vector",     "embedding"),
     ):
         try:

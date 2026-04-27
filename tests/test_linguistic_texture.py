@@ -130,7 +130,7 @@ class TestSemanticContent:
 
     def test_hesitation_low_no_fillers(self):
         desc = get_hesitation_density_description(0.0)
-        assert "那个" in desc or "嗯" in desc  # mentioned as forbidden markers
+        assert "不用" in desc and "填充词" in desc
 
     def test_hesitation_high_has_fillers(self):
         assert "那个" in get_hesitation_density_description(1.0) or "嗯" in get_hesitation_density_description(1.0)
@@ -160,8 +160,8 @@ class TestSemanticContent:
         assert "直" in desc or "结论" in desc
 
     def test_kazusa_fragmentation_level(self):
-        """fragmentation=0.3 → level 3 → '五六句' expected."""
-        assert "五六句" in get_fragmentation_description(0.3)
+        """fragmentation=0.3 -> level 3 -> occasional split messages."""
+        assert "五六条" in get_fragmentation_description(0.3)
 
     def test_kazusa_emotional_leakage_level(self):
         """emotional_leakage=0.7 → level 7 → visible leakage description."""

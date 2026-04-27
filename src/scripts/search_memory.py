@@ -32,11 +32,6 @@ from kazusa_ai_chatbot.db import (
     MemoryDoc,
 )
 
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-)
 logger = logging.getLogger(__name__)
 
 
@@ -44,11 +39,7 @@ def format_memory(doc: MemoryDoc, score: float) -> str:
     """Format a memory entry for display."""
     memory_name = doc.get("memory_name", "Unknown memory")
     content = doc.get("content", "")
-    
-    # Truncate content if too long
-    if len(content) > 200:
-        content = content[:200] + "..."
-    
+
     return f"[Score: {score:.4f}] {memory_name}\n{content}\n{'-'*80}"
 
 

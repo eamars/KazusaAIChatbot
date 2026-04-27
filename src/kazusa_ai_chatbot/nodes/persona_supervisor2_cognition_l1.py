@@ -107,11 +107,11 @@ async def call_cognition_subconscious(state: CognitionState) -> CognitionState:
     ])
     result = parse_llm_json_output(response.content)
 
-    logger.debug(
-        "Subconscious: appraisal=%s subtext=%s",
-        log_preview(result.get("emotional_appraisal", "")),
-        log_preview(result.get("interaction_subtext", "")),
-    )
+    # logger.debug(
+    #     "Subconscious: appraisal=%s subtext=%s",
+    #     log_preview(result.get("emotional_appraisal", "")),
+    #     log_preview(result.get("interaction_subtext", "")),
+    # )
 
     # In case AI make some spelling mistakes
     emotional_appraisal = ""

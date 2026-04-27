@@ -273,7 +273,7 @@ async def relevance_agent(state: IMProcessState) -> IMProcessState:
             is_noisy_environment,
             reason_to_respond,
             reply_context.get("reply_to_platform_user_id", ""),
-            log_preview(user_input, max_length=180),
+            log_preview(user_input),
         )
         return {
             "should_respond": False,
@@ -328,10 +328,10 @@ async def relevance_agent(state: IMProcessState) -> IMProcessState:
         should_respond,
         use_reply_feature,
         is_noisy_environment,
-        log_preview(reason_to_respond, max_length=160),
-        log_preview(channel_topic, max_length=100),
-        log_preview(indirect_speech_context, max_length=100),
-        log_preview(user_input, max_length=180),
+        log_preview(reason_to_respond),
+        log_preview(channel_topic),
+        log_preview(indirect_speech_context),
+        log_preview(user_input),
     )
 
     return {
@@ -426,12 +426,6 @@ async def test_main():
     from kazusa_ai_chatbot.db import get_conversation_history
     from kazusa_ai_chatbot.utils import load_personality
     from kazusa_ai_chatbot.db import get_character_profile, get_user_profile
-
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-    )
-
 
     history = await get_conversation_history(platform="discord", platform_channel_id="1485606207069880361", limit=5)
     trimmed_history = trim_history_dict(history)

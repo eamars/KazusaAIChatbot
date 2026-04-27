@@ -1022,7 +1022,7 @@ async def query_user_profile_memory_blocks(
 
     Args:
         global_user_id: Owner of the memories.
-        topic_embedding: Current-topic embedding for DEEP semantic recall.
+        topic_embedding: Current-topic embedding for semantic recall.
         include_semantic: Whether vector recall should augment recent memories.
         budget: Maximum non-commitment memories after merge and dedup.
 

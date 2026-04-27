@@ -5,7 +5,8 @@
 - Cache expensive reusable retrieval work at the individual RAG helper-agent level.
 - Cache initializer search strategy separately so the system can learn better retrieval paths over time.
 - Keep result cache session-scoped and implementation-simple: cache entries may be discarded on Kazusa service reboot.
-- Remove cache ownership from the legacy RAG path. New cache runtime must not depend on `persona_supervisor2_rag._get_rag_cache`.
+- Keep cache ownership in the RAG2 helper-agent layer. Cache2 does not depend
+  on the removed RAG1 graph or any MongoDB write-through cache collection.
 
 ## What To Cache
 
@@ -64,7 +65,7 @@ Implementation may combine eager deletion with lazy invalidation. Lazy invalidat
 | `rag_finalizer`                   | N/A                                                                                                                                                                         | N/A                                                                                                                                                                                                                                                                                                         | N/A                                                                                |
 | `user_lookup_agent`               | Normalized display name + platform/channel scope                                                                                                                            | User profile write/rename for the **resolved** `global_user_id`. Dependency is keyed by resolved UUID (not query alias) so misspelled or aliased queries are invalidated correctly when the real profile changes. Both exact-profile and vector-search-fallback results are cached at the `run()` boundary. | Python in-memory session LRU                                                       |
 | `user_list_agent`                 | Normalized `display_name_value` + `operator` + `source` + platform + channel + `limit`                                                                                      | Depends on `source`: `"user_profiles"` → consolidator profile write (`"user_profile"` event); `"conversation_participants"` → `save_conversation` (`"conversation_history"` event); `"both"` → either event.                                                                                                | Python in-memory session LRU                                                       |
-| `user_profile_agent`              | `global_user_id` + requested profile bundle/projection + profile-memory version                                                                                             | Consolidator writes profile memories, objective facts, user image/profile fields for that user.                                                                                                                                                                                                             | Python in-memory session LRU                                                       |
+| `user_profile_agent`              | `global_user_id` + requested profile bundle/projection + profile-memory version                                                                                             | Consolidator writes profile memories, objective facts, user image/profile fields for that user. User image is nested in `user_profiles`, so the invalidation source is `"user_profile"`, not `"user_image"`.                                                                                                  | Python in-memory session LRU                                                       |
 | `conversation_filter_agent`       | Only for closed historical ranges: normalized filters + absolute `from_timestamp` + absolute `to_timestamp` + limit/sort                                                    | `save_conversation` invalidates overlapping channel/user/time range. Recent/open-ended/last-N queries are not cached.                                                                                                                                                                                       | Python in-memory session LRU                                                       |
 | `conversation_keyword_agent`      | Only for closed historical ranges: normalized keyword + platform/channel/user filters + absolute time range + `top_k`                                                       | `save_conversation` invalidates overlapping channel/user/time range. Recent/open-ended queries are not cached.                                                                                                                                                                                              | Python in-memory session LRU                                                       |
 | `conversation_search_agent`       | Only for closed historical ranges: normalized semantic query embedding/hash + platform/channel/user filters + absolute time range + `top_k` + embedding model/index version | `save_conversation` invalidates overlapping channel/user/time range. Also clear on embedding model/index change. Recent/open-ended queries are not cached.                                                                                                                                                  | Python in-memory session LRU                                                       |
@@ -91,7 +92,8 @@ New cache code should be path-neutral:
 - `kazusa_ai_chatbot/rag/cache2_policy.py`: per-agent cache policy definitions.
 - `kazusa_ai_chatbot/rag/cache2_events.py`: invalidation event types and dependency scopes.
 
-The existing `rag.cache.RAGCache` and legacy boundary cache can be referenced for lessons learned, but Cache 2 should not be owned by the old RAG graph because that path is planned for removal.
+Cache2 is owned by the RAG2 helper-agent layer and is independent of the
+deleted RAG1 graph and deleted Cache1 modules.
 
 ---
 
@@ -99,7 +101,10 @@ The existing `rag.cache.RAGCache` and legacy boundary cache can be referenced fo
 
 ### Context
 
-RAG1 (`rag.cache.RAGCache`, `persona_supervisor2_rag._get_rag_cache`) is planned for full removal. Cache 2 is its replacement. This section documents the concrete integration path and the decisions made before implementing it, so the work lands consistently.
+Cache2 is the only RAG helper-agent cache. The legacy RAG1 graph and Cache1
+MongoDB write-through collections have been removed. This section documents the
+implemented integration path and the decisions that keep cache invalidation
+aligned with durable writes.
 
 ### The Lifecycle Gap
 
@@ -109,17 +114,19 @@ Cache 2 has three phases:
 | ------------------------------------------- | ----------------------------------------------------------- | ----------------------- |
 | Write (miss → compute → store)              | `BaseRAGHelperAgent.run()` via `read_cache` / `write_cache` | `rag/helper_agent.py`   |
 | Serve (hit → return cached payload)         | `RAGCache2Runtime.get()`                                    | `rag/cache2_runtime.py` |
-| Invalidate (DB write → evict stale entries) | `db_writer` in consolidator                                 | **not yet wired**       |
+| Invalidate (DB write → evict stale entries) | `db_writer` in consolidator and `save_conversation` for conversation history | `nodes/persona_supervisor2_consolidator_persistence.py`, `db/conversation.py` |
 
-Until RAG1 is removed, Step 5 of `db_writer` calls `_get_rag_cache()`. Once RAG1 is removed, that block disappears and nothing signals Cache 2 that a domain write occurred. This section defines what replaces it.
+The consolidator emits domain events after successful durable writes.
+`save_conversation` emits the conversation-history event at the DB boundary so
+every call site gets the same cache-correctness behavior.
 
 ### Design Decision: db_writer emits domain events to Cache 2 runtime directly
 
 The end-to-end chain is:
 
 ```text
-RAG helper agents
-  -> research_facts / research_metadata
+RAG2 helper agents
+  -> rag_result
 Cognition
   -> internal_monologue / directives / stance / subtext
 Dialog
@@ -155,7 +162,7 @@ runtime:
   dependency/event overlap -> evict
 ```
 
-After each successful MongoDB write, `db_writer` calls:
+After successful profile or character writes, `db_writer` calls:
 
 ```python
 get_rag_cache2_runtime().invalidate(CacheInvalidationEvent(
@@ -174,10 +181,25 @@ The `dependency_matches_event` matching rule treats every empty field as a wildc
 | `db_writer` write                                               | Event `source=`     | Triggers invalidation for                                               |
 | --------------------------------------------------------------- | ------------------- | ----------------------------------------------------------------------- |
 | `insert_profile_memories` (diary, objective facts, commitments) | `"user_profile"`    | `user_lookup_agent`, `user_profile_agent`, `persistent_memory_*` agents |
-| `upsert_character_state`                                        | `"character_state"` | future character-state agents                                           |
-| `upsert_user_image` / `upsert_character_self_image`             | `"user_image"`      | future user/character image agents                                      |
+| Affinity, relationship insight, or nested `user_image` update    | `"user_profile"`    | user/profile and persistent-memory helper agents for that user          |
+| `upsert_character_state` or nested character self-image update   | `"character_state"` | character profile reads through `user_profile_agent`                    |
 
-Emit only for write steps that actually succeeded (check `write_log` before emitting).
+Emit only for write steps that actually succeeded (check `write_log` before
+emitting). Do not emit `"user_image"` today: no helper agent declares a
+`user_image` dependency, and user images are read through `user_profiles`.
+
+`save_conversation` emits:
+
+```python
+get_rag_cache2_runtime().invalidate(CacheInvalidationEvent(
+    source="conversation_history",
+    platform=doc.get("platform", ""),
+    platform_channel_id=doc.get("platform_channel_id", ""),
+    global_user_id=doc.get("global_user_id", ""),
+    timestamp=doc.get("timestamp", ""),
+    reason="save_conversation",
+))
+```
 
 ### Decisions and Rationale
 
@@ -206,8 +228,11 @@ The consolidator is a domain writer. It knows *what changed* (source + scope), n
 **Do not add a lifecycle registry or observer/event-bus pattern.**
 The `CacheInvalidationEvent` + `dependency_matches_event` scan already acts as the fan-out. A separate observer registry would replicate that mechanism without adding capability. Add one only if per-agent lifecycle hooks (e.g. "warm cache after invalidation") become necessary.
 
-**Do not put invalidation calls inside DB-layer functions** (`insert_profile_memories`, etc.).
-The DB layer should not know about cache topology. Invalidation is a consolidator concern triggered by the outcome of a write sequence, not a side-effect of an individual DB helper.
+**Keep profile and character invalidation in the consolidator.**
+DB helpers such as `insert_profile_memories` should not know about cache
+topology. The exception is `save_conversation`: conversation-history writes
+happen from multiple service paths, so the invalidation is intentionally wrapped
+at the DB layer to make the contract uniform.
 
 **No backward-compatibility shim layer for agents.**
 When an agent is migrated to `BaseRAGHelperAgent`, the old standalone function is removed. The supervisor registry is updated to reference the new class. There is no intermediate shim module.

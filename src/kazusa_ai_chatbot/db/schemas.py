@@ -293,33 +293,3 @@ class ScheduledEventDoc(TypedDict, total=False):
     source_message_id: str
     guild_id: str | None
     bot_role: str
-
-
-class RagCacheIndexDoc(TypedDict, total=False):
-    """A persisted RAG cache entry in the ``rag_cache_index`` collection.
-
-    The in-memory ``RAGCache`` writes through to this collection for
-    crash-resilience. TTL is enforced by a MongoDB TTL index on
-    ``ttl_expires_at``.
-    """
-    cache_id: str               # UUID4
-    cache_type: str             # "character_diary" | "objective_user_facts" | "user_promises" |
-                                #  "internal_memory" | "external_knowledge" | "user_facts" (legacy)
-    global_user_id: str         # Owner; empty string ("") for global/shared entries
-    embedding: list[float]      # Query embedding that produced the cached results
-    results: dict               # Cached RAG output payload
-    ttl_expires_at: str         # ISO-8601 UTC — TTL index drops the doc after this
-    created_at: str             # ISO-8601 UTC
-    deleted: bool               # Soft-delete flag set by invalidation
-    metadata: dict              # Optional auxiliary data
-
-
-class RagMetadataIndexDoc(TypedDict, total=False):
-    """Per-user RAG metadata in the ``rag_metadata_index`` collection.
-
-    One document per ``global_user_id``. ``rag_version`` is a monotonically
-    increasing counter that downstream services can use as a cache-bust signal.
-    """
-    global_user_id: str         # UUID4 — unique key
-    rag_version: int            # Bumped on every successful DB write
-    last_rag_run: str           # ISO-8601 UTC of the last RAG run

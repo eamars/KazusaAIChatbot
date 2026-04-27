@@ -68,7 +68,7 @@ async def test_chat_queues_background_consolidation_for_mapping_state(monkeypatc
         "emotional_appraisal": "",
         "character_intent": "PROVIDE",
         "logical_stance": "CONFIRM",
-        "research_facts": {},
+        "rag_result": {},
         "decontexualized_input": "一分钟后发消息",
     })
     monkeypatch.setattr(

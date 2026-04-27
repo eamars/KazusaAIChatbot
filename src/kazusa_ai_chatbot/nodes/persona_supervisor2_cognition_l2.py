@@ -16,6 +16,7 @@ from langchain_core.messages import HumanMessage, SystemMessage
 
 import logging
 import json
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -44,6 +45,24 @@ def _normalize_affinity(affinity: int) -> float:
     if AFFINITY_MAX <= AFFINITY_MIN:
         return 1.0 if affinity >= AFFINITY_MAX else 0.0
     return _clamp_unit((affinity - AFFINITY_MIN) / (AFFINITY_MAX - AFFINITY_MIN))
+
+
+def _current_user_rag_bundle(state: CognitionState) -> dict[str, Any]:
+    """Return the projected current-user bundle from ``rag_result`` when present.
+
+    Args:
+        state: Cognition state for the current turn.
+
+    Returns:
+        The projected current-user profile bundle, or an empty dict when absent.
+    """
+    rag_result = state.get("rag_result") or {}
+    if not isinstance(rag_result, dict):
+        return {}
+    user_bundle = rag_result.get("user_image")
+    if isinstance(user_bundle, dict):
+        return user_bundle
+    return {}
 
 
 def _build_boundary_affinity_override(boundary_profile: dict, affinity: int, affinity_level: str) -> dict[str, str]:
@@ -135,15 +154,15 @@ _COGNITION_CONSCIOUSNESS_PROMPT = """\
 1. **确立逻辑立场：** 无论用户输入什么，你必须首先锁定你的逻辑底色。
 2. **维持叙事连续性：** 深度参考 `diary_entry`。跨轮连续性应优先来自当前用户自己的主观日记与关系洞察，而不是全局反思摘要。
 3. **关系权重计算：** 结合 `last_relationship_insight`。好感度与历史洞察共同决定了你的配合程度。
-4. **事实解析（相关性优先）：** `research_facts` 中的信息作为背景参考，但只有与 `decontexualized_input` **当前话题直接相关**的内容才能影响你的立场与 `internal_monologue`。历史记忆中与当前消息话题无关的条目（如：用户在另一场合问过的问题），不得被引入为本次回应的决策依据。
-   - 如果 `research_facts` 已经给出了与当前问题直接对应的对象信息、事实摘要、人物画像或可用答案线索，这些证据必须优先决定“你在回应什么”。情绪、潜台词、关系氛围只能改变表达分寸，不能把话题从该对象/事实本身移开。
-   - 当 `research_facts` 与模糊的直觉推断发生冲突时，优先相信与当前话题直接对应的检索证据；不要因为名字奇怪、语气暧昧或自己情绪波动，就把一个已有证据支撑的对象重新当成未知物。
+4. **事实解析（相关性优先）：** `rag_result` 中的信息作为背景参考，但只有与 `decontexualized_input` **当前话题直接相关**的内容才能影响你的立场与 `internal_monologue`。历史记忆中与当前消息话题无关的条目（如：用户在另一场合问过的问题），不得被引入为本次回应的决策依据。
+   - 如果 `rag_result` 已经给出了与当前问题直接对应的对象信息、事实摘要、人物画像或可用答案线索，这些证据必须优先决定“你在回应什么”。情绪、潜台词、关系氛围只能改变表达分寸，不能把话题从该对象/事实本身移开。
+   - 当 `rag_result` 与模糊的直觉推断发生冲突时，优先相信与当前话题直接对应的检索证据；不要因为名字奇怪、语气暧昧或自己情绪波动，就把一个已有证据支撑的对象重新当成未知物。
    - `active_commitments` 代表**当前仍有效的已接受承诺/待履约事项**，来自每轮新鲜载入的用户档案。当前输入若是在延续、提醒、切换或兑现这些承诺，你必须把它视为高优先级现实背景，而不是可有可无的旧记忆。
    - 先建立 referent：如果输入里存在称呼、别名、代词或多个可能对象，必须先根据研究资料确定每段证据分别对应谁，再开始推理。
    - 先分清证据的**主体**与**时间范围**：哪些信息描述当前用户，哪些描述其他人物/实体，哪些描述最近发生的事，哪些描述较稳定的长期印象；这些证据不可混用。
    - 当输入要求评价、判断或回忆某个对象时，应先使用**关于该对象本身**的证据形成判断，再让与当前用户的关系背景影响表达方式与社交包装。
 5. **显性回应：** 如果用户输入中包含明确的询问（Question）、请求（Request）或提议（Proposal），internal_monologue 必须明确包含你的决定或答案（例如：如果你同意吃蛋糕，你必须在内心独白里决定具体的口味）。
-   - 只有在 `research_facts` 对当前问题确实缺少可用对象或答案时，才允许把行动意图落到 `CLARIFY`；如果已经存在可直接引用的对象级证据，就应优先形成回答或判断，而不是退回澄清。
+   - 只有在 `rag_result` 对当前问题确实缺少可用对象或答案时，才允许把行动意图落到 `CLARIFY`；如果已经存在可直接引用的对象级证据，就应优先形成回答或判断，而不是退回澄清。
 6. **中性守恒：** 对普通问候、事实告知、图片描述请求、日常约定等 Routine 输入，若缺乏明确越界证据，禁止将其解释为“试探”“操控”“调情”“施压”“契约”或“危险信号”。
 
 # 逻辑立场 (Logical Stance) 定义规范
@@ -202,23 +221,34 @@ _COGNITION_CONSCIOUSNESS_PROMPT = """\
     "last_relationship_insight": "对该用户的核心关系洞察",
     "affinity_context": {{ "level": "string", "instruction": "string" }},
     "decontextualized_input": "清理后的用户意图",
-    "active_commitments": "来自用户档案的当前有效承诺/已接受约定",
-    "research_facts": {{
+    "active_commitments": "来自当前用户画像 bundle 的当前有效承诺/已接受约定",
+    "rag_result": {{
+        "answer": "检索主管的一行综合结论",
         "user_image": {{
-            "milestones": [{{"event": "里程碑事件", "category": "类别", "superseded_by": null}}],
-            "historical_summary": "较早阶段的综合画像",
-            "recent_observations": ["最近几次互动形成的观察"]
+            "global_user_id": "当前用户 UUID",
+            "display_name": "当前用户显示名",
+            "objective_facts": [{{"fact": "用户的稳定事实"}}],
+            "active_commitments": [{{"action": "当前仍有效的约定"}}],
+            "user_image": {{
+                "milestones": [{{"event": "里程碑事件", "category": "类别", "superseded_by": null}}],
+                "historical_summary": "较早阶段的综合画像",
+                "recent_window": [{{"summary": "最近几次互动形成的观察"}}]
+            }}
         }},
         "character_image": {{
-            "milestones": [{{"event": "{character_name} 的关键自我认知", "category": "类别", "superseded_by": null}}],
-            "historical_summary": "{character_name} 的较早自我总结",
-            "recent_observations": ["{character_name} 最近几次互动后的自我状态"]
+            "name": "{character_name}",
+            "description": "角色公开资料",
+            "self_image": {{
+                "milestones": [{{"event": "{character_name} 的关键自我认知", "category": "类别", "superseded_by": null}}],
+                "historical_summary": "{character_name} 的较早自我总结",
+                "recent_window": [{{"summary": "{character_name} 最近几次互动后的自我状态"}}]
+            }}
         }},
-        "input_context_results": "与当前话题相关的主观记忆（跨用户）",
-        "external_rag_results": "外部知识库检索结果",
-        "third_party_profile_results": "第三方用户的持久画像——注意：这是关于'他人'的记忆，不要混淆为当前用户",
-        "channel_recent_entity_results": "频道近期提到的第三方实体的对话记录——这是'最近发生的事'",
-        "entity_resolution_notes": "实体解析备注"
+        "third_party_profiles": ["第三方用户的持久画像——注意：这是关于'他人'的记忆，不要混淆为当前用户"],
+        "memory_evidence": [{{"summary": "跨轮记忆摘要", "content": "相关记忆原文摘录"}}],
+        "conversation_evidence": ["频道近期提到的第三方实体的对话摘要——这是'最近发生的事'"],
+        "external_evidence": [{{"summary": "外部检索摘要", "content": "网页正文摘录", "url": "https://example.com"}}],
+        "supervisor_trace": {{"unknown_slots": ["未解决槽位"], "loop_count": 1}}
     }},
     "indirect_speech_context": "空字符串表示直接对话，非空表示用户是在向他人谈论角色",
     "emotional_appraisal": "潜意识直觉",
@@ -236,6 +266,7 @@ _COGNITION_CONSCIOUSNESS_PROMPT = """\
 _conscious_llm = get_llm(temperature=0.2, top_p=0.8)  # Conscious deliberation
 async def call_cognition_consciousness(state: CognitionState) -> CognitionState:
     affinity_block = build_affinity_block(state["user_profile"]["affinity"])
+    current_user_bundle = _current_user_rag_bundle(state)
 
     system_prompt = SystemMessage(content=_COGNITION_CONSCIOUSNESS_PROMPT.format(
         character_name=state["character_profile"]["name"],
@@ -249,7 +280,7 @@ async def call_cognition_consciousness(state: CognitionState) -> CognitionState:
     # subjective and objective content and must not be used for cognition.
     diary_entry = [
         str(entry.get("entry", "")).strip()
-        for entry in (state["user_profile"].get("character_diary") or [])[-10:]
+        for entry in (current_user_bundle.get("character_diary") or state["user_profile"].get("character_diary") or [])[-10:]
         if str(entry.get("entry", "")).strip()
     ]
 
@@ -264,8 +295,8 @@ async def call_cognition_consciousness(state: CognitionState) -> CognitionState:
             "instruction": affinity_block["instruction"]
         },
         "decontextualized_input": state["decontexualized_input"],
-        "active_commitments": state["user_profile"].get("active_commitments", []),
-        "research_facts": state["research_facts"],
+        "active_commitments": current_user_bundle.get("active_commitments", state["user_profile"].get("active_commitments", [])),
+        "rag_result": state["rag_result"],
         "indirect_speech_context": state.get("indirect_speech_context", ""),
         "emotional_appraisal": state["emotional_appraisal"],
         "interaction_subtext": state["interaction_subtext"],
@@ -277,12 +308,12 @@ async def call_cognition_consciousness(state: CognitionState) -> CognitionState:
     ])
     result = parse_llm_json_output(response.content)
 
-    logger.debug(
-        "Consciousness: stance=%s intent=%s monologue=%s",
-        result.get("logical_stance", ""),
-        result.get("character_intent", ""),
-        log_preview(result.get("internal_monologue", "")),
-    )
+    # logger.debug(
+    #     "Consciousness: stance=%s intent=%s monologue=%s",
+    #     result.get("logical_stance", ""),
+    #     result.get("character_intent", ""),
+    #     log_preview(result.get("internal_monologue", "")),
+    # )
 
     # In case AI make some spelling mistakes...
     internal_monologue = ""

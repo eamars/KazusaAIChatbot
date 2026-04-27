@@ -112,15 +112,15 @@ async def call_msg_decontexualizer(state: GlobalPersonaState) -> dict:
     }
     human_message = HumanMessage(content=json.dumps(input_msg, ensure_ascii=False))
 
-    logger.debug(
-        "Decontextualizer input: user=%s platform_user=%s history=%d topic=%s indirect=%s input=%s",
-        user_name,
-        platform_user_id,
-        len(state.get("chat_history_recent") or []),
-        log_preview(state.get("channel_topic", "")),
-        log_preview(state.get("indirect_speech_context", "")),
-        log_preview(user_input),
-    )
+    # logger.debug(
+    #     "Decontextualizer input: user=%s platform_user=%s history=%d topic=%s indirect=%s input=%s",
+    #     user_name,
+    #     platform_user_id,
+    #     len(state.get("chat_history_recent") or []),
+    #     log_preview(state.get("channel_topic", "")),
+    #     log_preview(state.get("indirect_speech_context", "")),
+    #     log_preview(user_input),
+    # )
 
     try:
         result = await _msg_decontexualizer_llm.ainvoke([
@@ -145,9 +145,9 @@ async def call_msg_decontexualizer(state: GlobalPersonaState) -> dict:
         user_name,
         platform_user_id,
         is_modified,
-        log_preview(reasoning, max_length=140),
-        log_preview(user_input, max_length=160),
-        log_preview(output, max_length=160),
+        log_preview(reasoning),
+        log_preview(user_input),
+        log_preview(output),
     )
 
     if not is_modified:

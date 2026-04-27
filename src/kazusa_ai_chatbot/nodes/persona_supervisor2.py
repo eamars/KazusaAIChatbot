@@ -1,16 +1,15 @@
-from langgraph.graph import StateGraph, START, END
-
-from kazusa_ai_chatbot.state import IMProcessState
-from kazusa_ai_chatbot.nodes.persona_supervisor2_schema import GlobalPersonaState
-from kazusa_ai_chatbot.nodes.persona_supervisor2_msg_decontexualizer import call_msg_decontexualizer
-from kazusa_ai_chatbot.nodes.persona_supervisor2_rag import call_rag_subgraph
-from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition import call_cognition_subgraph
-from kazusa_ai_chatbot.nodes.persona_supervisor2_consolidator import call_consolidation_subgraph
-from kazusa_ai_chatbot.agents.dialog_agent import dialog_agent
-
 import logging
 
+from langgraph.graph import END, START, StateGraph
 
+from kazusa_ai_chatbot.nodes.dialog_agent import dialog_agent
+from kazusa_ai_chatbot.state import IMProcessState
+from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition import call_cognition_subgraph
+from kazusa_ai_chatbot.nodes.persona_supervisor2_consolidator import call_consolidation_subgraph
+from kazusa_ai_chatbot.nodes.persona_supervisor2_msg_decontexualizer import call_msg_decontexualizer
+from kazusa_ai_chatbot.nodes.persona_supervisor2_rag_projection import project_known_facts
+from kazusa_ai_chatbot.nodes.persona_supervisor2_rag_supervisor2 import call_rag_supervisor
+from kazusa_ai_chatbot.nodes.persona_supervisor2_schema import GlobalPersonaState
 
 logger = logging.getLogger(__name__)
 
@@ -23,13 +22,52 @@ async def call_action_subgraph(state: GlobalPersonaState) -> dict:
     }
 
 
+async def stage_1_research(state: GlobalPersonaState) -> dict:
+    """Run RAG2 and project its facts into the persona-stage payload.
+
+    Args:
+        state: Current top-level persona graph state.
+
+    Returns:
+        A partial state update containing the projected ``rag_result``.
+    """
+    rag_supervisor_result = await call_rag_supervisor(
+        original_query=state["decontexualized_input"],
+        character_name=state["character_profile"].get("name", ""),
+        context={
+            "platform": state["platform"],
+            "platform_channel_id": state["platform_channel_id"],
+            "channel_type": state.get("channel_type", "group"),
+            "global_user_id": state["global_user_id"],
+            "user_name": state["user_name"],
+            "user_profile": state["user_profile"],
+            "current_timestamp": state["timestamp"],
+            "channel_topic": state.get("channel_topic", ""),
+            "chat_history_recent": state.get("chat_history_recent", []),
+            "chat_history_wide": state.get("chat_history_wide", []),
+            "reply_context": state.get("reply_context", {}),
+            "indirect_speech_context": state.get("indirect_speech_context", ""),
+        },
+    )
+    return {
+        "rag_result": project_known_facts(
+            rag_supervisor_result.get("known_facts", []),
+            current_user_id=state["global_user_id"],
+            character_user_id=state["character_profile"].get("global_user_id", ""),
+            answer=str(rag_supervisor_result.get("answer", "")),
+            unknown_slots=rag_supervisor_result.get("unknown_slots", []),
+            loop_count=int(rag_supervisor_result.get("loop_count", 0) or 0),
+        ),
+    }
+
+
 
 async def persona_supervisor2(state: IMProcessState) -> dict:
 
     # Build the top level graph that connect stages
     persona_builder = StateGraph(GlobalPersonaState)
     persona_builder.add_node("stage_0_msg_decontexualizer", call_msg_decontexualizer)
-    persona_builder.add_node("stage_1_research", call_rag_subgraph)
+    persona_builder.add_node("stage_1_research", stage_1_research)
     persona_builder.add_node("stage_2_cognition", call_cognition_subgraph)
     persona_builder.add_node("stage_3_action", call_action_subgraph)  # perform action
     persona_builder.add_edge(START, "stage_0_msg_decontexualizer")

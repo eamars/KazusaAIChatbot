@@ -12,8 +12,9 @@ from kazusa_ai_chatbot.config import LLM_BASE_URL
 from kazusa_ai_chatbot.db import close_db, db_bootstrap, get_character_profile, get_db
 from kazusa_ai_chatbot.mcp_client import mcp_manager
 from kazusa_ai_chatbot.nodes.persona_supervisor2_rag_supervisor2 import call_rag_supervisor
+from tests.llm_trace import write_llm_trace
 
-pytestmark = pytest.mark.asyncio
+pytestmark = [pytest.mark.asyncio, pytest.mark.live_llm, pytest.mark.live_db]
 
 logger = logging.getLogger(__name__)
 
@@ -132,10 +133,22 @@ async def _run_live_supervisor2_case(
     assert "known_facts" in result
     assert "unknown_slots" in result
     assert "loop_count" in result
+    trace_path = write_llm_trace(
+        "persona_supervisor2_rag_supervisor2_live",
+        case_id,
+        {
+            "query": query,
+            "channel_id": channel_id,
+            "note": note,
+            "result": result,
+            "judgment": "structured_result_returned_for_manual_rag_quality_review",
+        },
+    )
 
     logger.info(
-        "RAG_SUPERVISOR2_LIVE_CASE %s\nquery=%s\nchannel=%s\nnote=%s\nanswer=%s\nloop_count=%s\nunknown_slots=%s\nknown_facts=%s",
+        "RAG_SUPERVISOR2_LIVE_CASE %s\ntrace=%s\nquery=%s\nchannel=%s\nnote=%s\nanswer=%s\nloop_count=%s\nunknown_slots=%s\nknown_facts=%s",
         case_id,
+        trace_path,
         query,
         channel_id,
         note,

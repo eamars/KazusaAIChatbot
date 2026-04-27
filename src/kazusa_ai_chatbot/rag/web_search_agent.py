@@ -474,7 +474,7 @@ class WebSearchAgent(BaseRAGHelperAgent):
         Args:
             task: Slot description produced by the outer-loop supervisor.
             context: Runtime hints; ``current_timestamp`` is used as the reference clock.
-            max_attempts: Unused; retry depth is controlled by MAX_WEB_SEARCH_AGENT_RETRY.
+            max_attempts: Unused; retry count is controlled by MAX_WEB_SEARCH_AGENT_RETRY.
 
         Returns:
             Dict with resolved (bool), result (evidence string), and attempts count.

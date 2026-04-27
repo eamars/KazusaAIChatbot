@@ -16,18 +16,6 @@ from typing import Any
 from fastapi import FastAPI, BackgroundTasks
 from pydantic import BaseModel, Field
 
-import os
-
-# Configure root logger early so all application loggers respect the level.
-# Set LOG_LEVEL=DEBUG in .env or environment to see full pipeline detail.
-logging.basicConfig(
-    level=getattr(logging, os.environ.get("LOG_LEVEL", "INFO").upper(), logging.INFO),
-    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-)
-# Suppress noisy third-party debug logs
-for _quiet in ("pymongo", "httpx", "httpcore", "hpack", "urllib3", "openai", "langsmith"):
-    logging.getLogger(_quiet).setLevel(logging.WARNING)
-
 from kazusa_ai_chatbot.config import (
     BRAIN_EXECUTOR_COUNT,
     CHARACTER_GLOBAL_USER_ID,
@@ -49,7 +37,7 @@ from kazusa_ai_chatbot.db import (
 )
 from kazusa_ai_chatbot.mcp_client import mcp_manager
 from kazusa_ai_chatbot.state import IMProcessState, MultiMediaDoc, DebugModes, ReplyContext
-from kazusa_ai_chatbot.utils import log_dict_subset, log_preview, trim_history_dict
+from kazusa_ai_chatbot.utils import log_list_preview, log_preview, trim_history_dict
 from kazusa_ai_chatbot import scheduler
 from kazusa_ai_chatbot.dispatcher import (
     AdapterRegistry,
@@ -66,7 +54,6 @@ from kazusa_ai_chatbot.nodes.relevance_agent import relevance_agent, multimedia_
 from kazusa_ai_chatbot.nodes.persona_supervisor2 import persona_supervisor2
 from kazusa_ai_chatbot.nodes.persona_supervisor2_consolidator import call_consolidation_subgraph
 from kazusa_ai_chatbot.nodes.persona_supervisor2_consolidator_persistence import configure_task_dispatcher
-from kazusa_ai_chatbot.nodes.persona_supervisor2_rag import _get_rag_cache
 
 logger = logging.getLogger(__name__)
 
@@ -260,7 +247,7 @@ async def _hydrate_reply_context(req: ChatRequest) -> ReplyContext:
         if reply_doc is not None:
             reply_context["reply_to_platform_user_id"] = reply_doc.get("platform_user_id", "")
             reply_context["reply_to_display_name"] = reply_doc.get("display_name", "")
-            reply_context["reply_excerpt"] = reply_doc.get("content", "")[:200]
+            reply_context["reply_excerpt"] = reply_doc.get("content", "")
 
     reply_to_platform_user_id = reply_context.get("reply_to_platform_user_id", "")
     if reply_to_platform_user_id:
@@ -432,11 +419,7 @@ async def lifespan(app: FastAPI):
     except Exception:
         logger.exception("MCP manager failed to start — tools will be unavailable")
 
-    # 5. Warm-start the RAG cache from MongoDB (Stage 5b).
-    rag_cache = await _get_rag_cache()
-    logger.info("RAG cache warm-started: %s", rag_cache.get_stats())
-
-    # 6. Build the task-dispatch runtime
+    # 5. Build the task-dispatch runtime
     tool_registry = ToolRegistry()
     tool_registry.register(build_send_message_tool())
     adapter_registry = AdapterRegistry()
@@ -452,7 +435,7 @@ async def lifespan(app: FastAPI):
         pending_index=pending_index,
     )
 
-    # 7. Load pending scheduled events
+    # 6. Load pending scheduled events
     if SCHEDULED_TASKS_ENABLED:
         await scheduler.load_pending_events()
     else:
@@ -465,11 +448,6 @@ async def lifespan(app: FastAPI):
     # Shutdown
     if SCHEDULED_TASKS_ENABLED:
         await scheduler.shutdown()
-    try:
-        cache = await _get_rag_cache()
-        await cache.shutdown()
-    except Exception:
-        logger.exception("RAG cache shutdown failed")
     await mcp_manager.stop()
     await close_db()
     logger.info("Kazusa brain service shut down")
@@ -598,16 +576,7 @@ async def chat(req: ChatRequest, background_tasks: BackgroundTasks):
             len(multimedia_input),
             len(chat_history_wide),
             len(chat_history_recent),
-            log_dict_subset(
-                reply_context,
-                [
-                    "reply_to_message_id",
-                    "reply_to_platform_user_id",
-                    "reply_to_display_name",
-                    "reply_to_current_bot",
-                    "reply_excerpt",
-                ],
-            ),
+            log_preview(reply_context),
             active_flags,
             log_preview(req.content),
         )
@@ -664,7 +633,7 @@ async def chat(req: ChatRequest, background_tasks: BackgroundTasks):
         consolidation_state = result.get("consolidation_state")
 
         logger.debug(
-            "Chat result: platform=%s channel=%s message=%s user=%s should_respond=%s should_reply=%s final_dialog_count=%d future_promises=%d dialog_preview=%s",
+            "Chat result: platform=%s channel=%s message=%s user=%s should_respond=%s should_reply=%s final_dialog_count=%d future_promises=%d final_dialog=%s",
             req.platform,
             req.platform_channel_id or "<dm>",
             req.platform_message_id or "<none>",
@@ -673,7 +642,7 @@ async def chat(req: ChatRequest, background_tasks: BackgroundTasks):
             should_reply,
             len(final_dialog),
             len(result.get("future_promises", [])),
-            log_preview(" | ".join(final_dialog)),
+            log_list_preview(final_dialog),
         )
 
         # Save bot message in background only if the bot actually generated a response

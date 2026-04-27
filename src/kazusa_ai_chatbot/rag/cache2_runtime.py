@@ -1,8 +1,7 @@
 """Session-scoped RAG Cache 2 runtime.
 
-This module intentionally does not import or reuse the legacy ``rag.cache``
-implementation. Cache 2 is an in-memory, process-local LRU intended for helper
-agent retrieval results and initializer strategy hints.
+This module owns the in-memory, process-local LRU for helper agent retrieval
+results and initializer strategy hints.
 """
 
 from __future__ import annotations
@@ -10,13 +9,13 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
-import os
 from collections import OrderedDict
 from copy import deepcopy
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any
 
+from kazusa_ai_chatbot.config import RAG_CACHE2_MAX_ENTRIES
 from kazusa_ai_chatbot.rag.cache2_events import (
     CacheDependency,
     CacheInvalidationEvent,
@@ -24,7 +23,7 @@ from kazusa_ai_chatbot.rag.cache2_events import (
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_CACHE2_MAX_ENTRIES = int(os.getenv("RAG_CACHE2_MAX_ENTRIES", "5000"))
+DEFAULT_CACHE2_MAX_ENTRIES = RAG_CACHE2_MAX_ENTRIES
 
 
 def stable_cache_key(namespace: str, payload: dict[str, Any]) -> str:

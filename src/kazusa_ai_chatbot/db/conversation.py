@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import logging
 import re
 from typing import Any
 
 from kazusa_ai_chatbot.config import CONVERSATION_HISTORY_LIMIT
 from kazusa_ai_chatbot.db._client import get_db, get_text_embedding
 from kazusa_ai_chatbot.db.schemas import ConversationMessageDoc
+
+logger = logging.getLogger(__name__)
 
 
 async def get_conversation_history(
@@ -233,7 +236,17 @@ async def aggregate_conversation_by_user(
 
 
 async def save_conversation(doc: ConversationMessageDoc) -> None:
-    """Persist a single message to conversation history, generating its embedding."""
+    """Persist one conversation message and invalidate matching cache entries.
+
+    Args:
+        doc: Conversation-history row to store.
+
+    Returns:
+        None. The row is written and matching Cache2 entries are invalidated.
+    """
+    from kazusa_ai_chatbot.rag.cache2_events import CacheInvalidationEvent
+    from kazusa_ai_chatbot.rag.cache2_runtime import get_rag_cache2_runtime
+
     db = await get_db()
 
     doc.setdefault("content_type", "text")
@@ -244,3 +257,18 @@ async def save_conversation(doc: ConversationMessageDoc) -> None:
         doc["embedding"] = await get_text_embedding(doc.get("content", ""))
 
     await db.conversation_history.insert_one(doc)
+    evicted_count = await get_rag_cache2_runtime().invalidate(CacheInvalidationEvent(
+        source="conversation_history",
+        platform=doc.get("platform", ""),
+        platform_channel_id=doc.get("platform_channel_id", ""),
+        global_user_id=doc.get("global_user_id", ""),
+        timestamp=doc.get("timestamp", ""),
+        reason="save_conversation",
+    ))
+    logger.info(
+        "Cache2 invalidation event source=conversation_history platform=%s channel=%s global_user=%s evicted=%d",
+        doc.get("platform", ""),
+        doc.get("platform_channel_id", ""),
+        doc.get("global_user_id", ""),
+        evicted_count,
+    )

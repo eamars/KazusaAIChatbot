@@ -7,7 +7,7 @@ import logging
 import httpx
 import pytest
 
-from kazusa_ai_chatbot.agents.dialog_agent import dialog_agent
+from kazusa_ai_chatbot.nodes.dialog_agent import dialog_agent
 from kazusa_ai_chatbot.config import LLM_BASE_URL
 from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition_l1 import call_cognition_subconscious
 from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition_l2 import (
@@ -25,6 +25,7 @@ from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition_l3 import (
 )
 from kazusa_ai_chatbot.nodes.persona_supervisor2_msg_decontexualizer import call_msg_decontexualizer
 from kazusa_ai_chatbot.utils import load_personality
+from tests.llm_trace import write_llm_trace
 
 
 logger = logging.getLogger(__name__)
@@ -80,6 +81,15 @@ def _debug_snapshot(label: str, payload: object) -> None:
         None.
     """
     logger.info("%s => %r", label, payload)
+    write_llm_trace(
+        "cognition_live_llm",
+        label,
+        {
+            "label": label,
+            "payload": payload,
+            "judgment": "snapshot_for_manual_live_llm_contract_review",
+        },
+    )
 
 
 def _build_character_profile() -> dict:
@@ -88,6 +98,32 @@ def _build_character_profile() -> dict:
     profile.setdefault("global_vibe", "Calm")
     profile.setdefault("reflection_summary", "刚才只是普通的一轮对话，没有留下特别强烈的情绪余波。")
     return profile
+
+
+def _rag_result(
+    *,
+    objective_facts: str = "",
+    user_image: dict | None = None,
+    character_image: dict | None = None,
+    memory_evidence: str = "",
+    external_evidence: str = "",
+) -> dict:
+    """Build the RAG2 projection fixture used by live cognition tests."""
+    return {
+        "answer": "",
+        "user_image": {
+            "objective_facts": [{"fact": objective_facts}] if objective_facts else [],
+            "user_image": user_image or {"milestones": [], "historical_summary": "", "recent_window": []},
+        },
+        "character_image": {
+            "self_image": character_image or {"milestones": [], "historical_summary": "", "recent_window": []},
+        },
+        "third_party_profiles": [],
+        "memory_evidence": [{"summary": memory_evidence, "content": memory_evidence}] if memory_evidence else [],
+        "conversation_evidence": [],
+        "external_evidence": [{"summary": external_evidence, "content": external_evidence, "url": ""}] if external_evidence else [],
+        "supervisor_trace": {"loop_count": 0, "unknown_slots": [], "dispatched": []},
+    }
 
 
 def _build_base_state() -> dict:
@@ -114,21 +150,20 @@ def _build_base_state() -> dict:
         "indirect_speech_context": "",
         "channel_topic": "weather talk",
         "decontexualized_input": user_input,
-        "research_facts": {
-            "objective_facts": "用户曾明确要求若被接受则优先使用自然英语回复。",
-            "user_image": {
+        "rag_result": _rag_result(
+            objective_facts="用户曾明确要求若被接受则优先使用自然英语回复。",
+            user_image={
                 "milestones": [],
                 "historical_summary": "",
-                "recent_observations": ["对方说话直接，但没有越界。"],
+                "recent_window": [{"summary": "对方说话直接，但没有越界。"}],
             },
-            "character_image": {
+            character_image={
                 "milestones": [],
                 "historical_summary": "",
-                "recent_observations": ["千纱平时会保留一点防备，但在安全话题下愿意正常回应。"],
+                "recent_window": [{"summary": "千纱平时会保留一点防备，但在安全话题下愿意正常回应。"}],
             },
-            "input_context_results": "最近聊天主要围绕天气和日常感受。",
-            "external_rag_results": "",
-        },
+            memory_evidence="最近聊天主要围绕天气和日常感受。",
+        ),
     }
 
 
@@ -264,21 +299,19 @@ async def test_live_cognition_propagates_explicit_future_group_message_details(e
                 {"role": "assistant", "content": "怎么突然又想到让我帮你传话？"},
                 {"role": "user", "content": "这次很简单，就帮我发一句。"},
             ],
-            "research_facts": {
-                "objective_facts": "",
-                "user_image": {
+            "rag_result": _rag_result(
+                user_image={
                     "milestones": [],
                     "historical_summary": "",
-                    "recent_observations": ["对方正在提出一个具体的代发请求。"],
+                    "recent_window": [{"summary": "对方正在提出一个具体的代发请求。"}],
                 },
-                "character_image": {
+                character_image={
                     "milestones": [],
                     "historical_summary": "",
-                    "recent_observations": ["千纱会对具体执行细节保持敏感。"],
+                    "recent_window": [{"summary": "千纱会对具体执行细节保持敏感。"}],
                 },
-                "input_context_results": "当前对话围绕一次明确的未来代发消息请求。",
-                "external_rag_results": "",
-            },
+                memory_evidence="当前对话围绕一次明确的未来代发消息请求。",
+            ),
         }
     )
 

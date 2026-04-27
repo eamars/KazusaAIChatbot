@@ -7,19 +7,17 @@ commits everything to MongoDB and invalidates the RAG cache.
 
 Stage-4a additions:
 
-* A unified ``metadata`` bundle threaded through every node, seeded from
-  the RAG metadata produced in Stage 3 and accumulated at each step.
-* The ``db_writer`` now routes diary entries / objective facts through the
-  new structured helpers (``upsert_character_diary`` / ``upsert_objective_facts``),
-  invalidates the matching RAG cache namespaces after a successful commit,
-  bumps the per-user RAG version, and hands accepted future obligations to the
-  task dispatcher so tool calls can be scheduled through the shared scheduler.
+* A unified ``metadata`` bundle threaded through every node and accumulated
+  at each step.
+* The ``db_writer`` routes facts and accepted commitments through unified
+  profile memories, emits Cache2 invalidation events after successful writes,
+  and hands accepted future obligations to the task dispatcher so tool calls
+  can be scheduled through the shared scheduler.
 """
 
 from __future__ import annotations
 
 import logging
-
 from langgraph.graph import END, START, StateGraph
 
 from kazusa_ai_chatbot.nodes.persona_supervisor2_consolidator_facts import (
@@ -48,6 +46,48 @@ async def _consolidator_noop(_: ConsolidatorState) -> dict:
     return {}
 
 
+def _record_existing_dedup_key(row: object, dedup_keys: set[str]) -> None:
+    """Add a structured ``dedup_key`` from one profile row when present.
+
+    Args:
+        row: Candidate row from the hydrated user profile.
+        dedup_keys: Mutable set receiving normalized structured keys.
+    """
+    if not isinstance(row, dict):
+        return
+    dedup_key = str(row.get("dedup_key") or "").strip().lower()
+    if dedup_key:
+        dedup_keys.add(dedup_key)
+
+
+def _build_existing_dedup_keys(global_state: GlobalPersonaState) -> set[str]:
+    """Build exclusion keys from structured fields on ``state["user_profile"]``.
+
+    Args:
+        global_state: Top-level persona-supervisor state.
+
+    Returns:
+        Stable lower-cased dedup keys for known facts, milestones, and commitments.
+    """
+    user_profile = global_state["user_profile"]
+    dedup_keys: set[str] = set()
+
+    for fact in user_profile.get("objective_facts") or []:
+        _record_existing_dedup_key(fact, dedup_keys)
+
+    for commitment in user_profile.get("active_commitments") or []:
+        _record_existing_dedup_key(commitment, dedup_keys)
+
+    user_image = user_profile.get("user_image") or {}
+    for milestone in user_image.get("milestones") or []:
+        _record_existing_dedup_key(milestone, dedup_keys)
+
+    for milestone in user_profile.get("milestones") or []:
+        _record_existing_dedup_key(milestone, dedup_keys)
+
+    return dedup_keys
+
+
 async def call_consolidation_subgraph(global_state: GlobalPersonaState):
     sub_agent_builder = StateGraph(ConsolidatorState)
     reflection_barrier = "reflection_done"
@@ -66,7 +106,14 @@ async def call_consolidation_subgraph(global_state: GlobalPersonaState):
     sub_agent_builder.add_edge(START, "facts_harvester")
 
     sub_agent_builder.add_edge(["global_state_updater", "relationship_recorder"], reflection_barrier)
-    sub_agent_builder.add_edge("facts_harvester", "fact_harvester_evaluator")
+    sub_agent_builder.add_conditional_edges(
+        "facts_harvester",
+        lambda state: "skip_eval" if not state["new_facts"] and not state["future_promises"] else "evaluate",
+        {
+            "skip_eval": facts_barrier,
+            "evaluate": "fact_harvester_evaluator",
+        },
+    )
     sub_agent_builder.add_conditional_edges(
         "fact_harvester_evaluator",
         lambda state: "loop" if not state["should_stop"] else "end",
@@ -80,15 +127,6 @@ async def call_consolidation_subgraph(global_state: GlobalPersonaState):
     sub_agent_builder.add_edge("db_writer", END)
 
     sub_graph = sub_agent_builder.compile()
-
-    raw_meta = global_state.get("research_metadata")
-    seeded_metadata: dict = {}
-    if isinstance(raw_meta, list):
-        for m in raw_meta:
-            if isinstance(m, dict):
-                seeded_metadata.update(m)
-    elif isinstance(raw_meta, dict):
-        seeded_metadata = dict(raw_meta)
 
     sub_state: ConsolidatorState = {
         "timestamp": global_state["timestamp"],
@@ -107,9 +145,10 @@ async def call_consolidation_subgraph(global_state: GlobalPersonaState):
         "character_intent": global_state["character_intent"],
         "logical_stance": global_state["logical_stance"],
         "character_profile": global_state["character_profile"],
-        "research_facts": global_state["research_facts"],
+        "rag_result": global_state["rag_result"],
+        "existing_dedup_keys": _build_existing_dedup_keys(global_state),
         "decontexualized_input": global_state["decontexualized_input"],
-        "metadata": seeded_metadata,
+        "metadata": {},
     }
 
     result = await sub_graph.ainvoke(sub_state)
@@ -132,10 +171,10 @@ async def call_consolidation_subgraph(global_state: GlobalPersonaState):
         len(new_facts),
         len(future_promises),
         affinity_delta,
-        log_preview(mood, max_length=60),
-        log_preview(global_vibe, max_length=60),
-        log_dict_subset(metadata, ["write_success"], value_length=220),
-        metadata.get("cache_invalidation_scope", []),
+        log_preview(mood),
+        log_preview(global_vibe),
+        log_dict_subset(metadata, ["write_success"]),
+        metadata.get("cache_invalidated", []),
     )
 
     logger.debug(
@@ -149,7 +188,6 @@ async def call_consolidation_subgraph(global_state: GlobalPersonaState):
                 "contradiction_flags",
                 "affinity_before",
                 "affinity_delta_processed",
-                "knowledge_base_entries_written",
             ],
         ),
     )
@@ -207,8 +245,16 @@ async def test_main():
 
         "final_dialog": ["唔……这种请求也算是一种奖励嘛……真是拿你没办法呢。"],
         "decontexualized_input": user_input,
-        "research_facts": f"现在的时间为{current_time}",
-        "research_metadata": [{"cache_hit": False, "depth": "DEEP", "depth_confidence": 0.9}],
+        "rag_result": {
+            "answer": "",
+            "user_image": {},
+            "character_image": {},
+            "third_party_profiles": [],
+            "memory_evidence": [],
+            "conversation_evidence": [],
+            "external_evidence": [],
+            "supervisor_trace": {"loop_count": 0, "unknown_slots": [], "dispatched": []},
+        },
         "chat_history_recent": trimmed_history[-5:],
         "character_profile": await get_character_profile(),
     }

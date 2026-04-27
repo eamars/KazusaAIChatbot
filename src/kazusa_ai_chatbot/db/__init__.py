@@ -13,7 +13,6 @@ Submodule map:
 * ``users``        — ``user_profiles`` operations (identity, profile, diary, facts, affinity)
 * ``character``    — ``character_state`` operations
 * ``memory``       — ``memory`` operations
-* ``rag_cache``    — ``rag_cache_index`` + ``rag_metadata_index`` operations
 """
 
 from __future__ import annotations
@@ -41,8 +40,6 @@ from kazusa_ai_chatbot.db.schemas import (
     MemoryDoc,
     ObjectiveFactEntry,
     PlatformAccountDoc,
-    RagCacheIndexDoc,
-    RagMetadataIndexDoc,
     ScheduledEventDoc,
     UserProfileMemoryDoc,
     UserProfileDoc,
@@ -109,16 +106,6 @@ from kazusa_ai_chatbot.db.memory import (
     search_memory,
 )
 
-# ── RAG cache (NEW) ───────────────────────────────────────────────
-from kazusa_ai_chatbot.db.rag_cache import (
-    clear_all_cache_for_user,
-    find_cache_entries,
-    get_rag_version,
-    increment_rag_version,
-    insert_cache_entry,
-    soft_delete_cache_entries,
-)
-
 __all__ = [
     # Config
     "AFFINITY_DEFAULT", "AFFINITY_MAX", "AFFINITY_MIN",
@@ -127,7 +114,7 @@ __all__ = [
     # Schemas
     "ActiveCommitmentDoc", "AttachmentDoc", "CharacterDiaryEntry", "CharacterProfileDoc",
     "ConversationMessageDoc", "EntityMemoryDoc", "MemoryDoc", "MemoryType", "ObjectiveFactEntry",
-    "PlatformAccountDoc", "RagCacheIndexDoc", "RagMetadataIndexDoc",
+    "PlatformAccountDoc",
     "ScheduledEventDoc", "UserProfileDoc", "UserProfileMemoryDoc", "build_memory_doc",
     # Bootstrap
     "db_bootstrap",
@@ -151,7 +138,4 @@ __all__ = [
     "upsert_character_self_image", "upsert_character_state",
     # Memory
     "enable_memory_vector_index", "get_active_promises", "save_memory", "search_memory",
-    # RAG cache
-    "clear_all_cache_for_user", "find_cache_entries", "get_rag_version",
-    "increment_rag_version", "insert_cache_entry", "soft_delete_cache_entries",
 ]

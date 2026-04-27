@@ -9,7 +9,7 @@ from typing import Any
 from langchain_core.messages import HumanMessage, SystemMessage
 from pydantic import ValidationError
 
-from kazusa_ai_chatbot.agents.memory_retriever_agent import search_persistent_memory_keyword
+from kazusa_ai_chatbot.rag.memory_retrieval_tools import search_persistent_memory_keyword
 from kazusa_ai_chatbot.rag.cache2_policy import (
     PERSISTENT_MEMORY_KEYWORD_CACHE_NAME,
     build_persistent_memory_keyword_cache_key,

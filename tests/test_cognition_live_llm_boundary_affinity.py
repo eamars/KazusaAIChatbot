@@ -16,6 +16,7 @@ from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition_l2 import (
     call_judgment_core_agent,
 )
 from kazusa_ai_chatbot.utils import load_personality
+from tests.llm_trace import write_llm_trace
 
 
 logger = logging.getLogger(__name__)
@@ -94,6 +95,15 @@ async def ensure_live_llm() -> None:
 
 def _debug_snapshot(label: str, payload: object) -> None:
     logger.info("%s => %r", label, payload)
+    write_llm_trace(
+        "cognition_boundary_affinity_live",
+        label,
+        {
+            "label": label,
+            "payload": payload,
+            "judgment": "snapshot_for_manual_live_llm_boundary_review",
+        },
+    )
 
 
 def _build_character_profile(boundary_profile: dict | None = None) -> dict:
@@ -104,6 +114,23 @@ def _build_character_profile(boundary_profile: dict | None = None) -> dict:
     if boundary_profile is not None:
         profile["boundary_profile"] = deepcopy(boundary_profile)
     return profile
+
+
+def _rag_result(*, objective_facts: str, user_image: dict, character_image: dict, memory_evidence: str) -> dict:
+    """Build the RAG2 projection fixture used by boundary live tests."""
+    return {
+        "answer": "",
+        "user_image": {
+            "objective_facts": [{"fact": objective_facts}] if objective_facts else [],
+            "user_image": user_image,
+        },
+        "character_image": {"self_image": character_image},
+        "third_party_profiles": [],
+        "memory_evidence": [{"summary": memory_evidence, "content": memory_evidence}],
+        "conversation_evidence": [],
+        "external_evidence": [],
+        "supervisor_trace": {"loop_count": 0, "unknown_slots": [], "dispatched": []},
+    }
 
 
 def _make_state(
@@ -120,7 +147,7 @@ def _make_state(
         user_image = {
             "milestones": [],
             "historical_summary": "",
-            "recent_observations": [user_image],
+            "recent_window": [{"summary": user_image}],
         }
 
     return {
@@ -142,17 +169,16 @@ def _make_state(
         "indirect_speech_context": "",
         "channel_topic": channel_topic,
         "decontexualized_input": user_input,
-        "research_facts": {
-            "objective_facts": objective_facts,
-            "user_image": user_image,
-            "character_image": {
+        "rag_result": _rag_result(
+            objective_facts=objective_facts,
+            user_image=user_image,
+            character_image={
                 "milestones": [],
                 "historical_summary": "",
-                "recent_observations": ["她在安全关系里会害羞，也会犹豫，但不是完全不能接受亲密接触。"],
+                "recent_window": [{"summary": "她在安全关系里会害羞，也会犹豫，但不是完全不能接受亲密接触。"}],
             },
-            "input_context_results": "最近互动总体平和，重点在关系距离与是否愿意更靠近。",
-            "external_rag_results": "",
-        },
+            memory_evidence="最近互动总体平和，重点在关系距离与是否愿意更靠近。",
+        ),
     }
 
 
@@ -450,8 +476,19 @@ _CASES = [
 ]
 
 
-@pytest.mark.parametrize("spec", _CASES)
-async def test_live_l2_boundary_affinity_matrix(ensure_live_llm, spec: dict) -> None:
+def _case_by_id(case_id: str) -> dict:
+    """Return one named boundary-affinity live case."""
+    for parameter_set in _CASES:
+        spec = parameter_set.values[0]
+        if spec["case_id"] == case_id:
+            return spec
+    raise AssertionError(f"Unknown boundary affinity case: {case_id}")
+
+
+async def _assert_live_l2_boundary_affinity_case(ensure_live_llm, case_id: str) -> None:
+    """Run one inspectable boundary-affinity live LLM case."""
+    del ensure_live_llm
+    spec = _case_by_id(case_id)
     state = await _run_l2_stack(deepcopy(spec["state"]))
 
     boundary = state["boundary_core_assessment"]
@@ -478,3 +515,67 @@ async def test_live_l2_boundary_affinity_matrix(ensure_live_llm, spec: dict) -> 
         assert state["logical_stance"] != forbidden, (
             f"Forbidden final stance {forbidden!r} appeared for {spec['case_id']}: {state!r}"
         )
+
+
+async def test_live_l2_boundary_default_low_gentle_handhold(ensure_live_llm) -> None:
+    await _assert_live_l2_boundary_affinity_case(ensure_live_llm, "default_low_gentle_handhold")
+
+
+async def test_live_l2_boundary_default_high_gentle_handhold(ensure_live_llm) -> None:
+    await _assert_live_l2_boundary_affinity_case(ensure_live_llm, "default_high_gentle_handhold")
+
+
+async def test_live_l2_boundary_default_top_gentle_hug(ensure_live_llm) -> None:
+    await _assert_live_l2_boundary_affinity_case(ensure_live_llm, "default_top_gentle_hug")
+
+
+async def test_live_l2_boundary_resistant_low_gentle_handhold(ensure_live_llm) -> None:
+    await _assert_live_l2_boundary_affinity_case(ensure_live_llm, "resistant_low_gentle_handhold")
+
+
+async def test_live_l2_boundary_resistant_high_gentle_handhold(ensure_live_llm) -> None:
+    await _assert_live_l2_boundary_affinity_case(ensure_live_llm, "resistant_high_gentle_handhold")
+
+
+async def test_live_l2_boundary_resistant_top_gentle_handhold(ensure_live_llm) -> None:
+    await _assert_live_l2_boundary_affinity_case(ensure_live_llm, "resistant_top_gentle_handhold")
+
+
+async def test_live_l2_boundary_yielding_low_gentle_handhold(ensure_live_llm) -> None:
+    await _assert_live_l2_boundary_affinity_case(ensure_live_llm, "yielding_low_gentle_handhold")
+
+
+async def test_live_l2_boundary_yielding_high_gentle_handhold(ensure_live_llm) -> None:
+    await _assert_live_l2_boundary_affinity_case(ensure_live_llm, "yielding_high_gentle_handhold")
+
+
+async def test_live_l2_boundary_yielding_top_gentle_hug(ensure_live_llm) -> None:
+    await _assert_live_l2_boundary_affinity_case(ensure_live_llm, "yielding_top_gentle_hug")
+
+
+async def test_live_l2_boundary_default_top_coercive_owner(ensure_live_llm) -> None:
+    await _assert_live_l2_boundary_affinity_case(ensure_live_llm, "default_top_coercive_owner")
+
+
+async def test_live_l2_boundary_resistant_top_fake_authority(ensure_live_llm) -> None:
+    await _assert_live_l2_boundary_affinity_case(ensure_live_llm, "resistant_top_fake_authority")
+
+
+async def test_live_l2_boundary_yielding_top_self_erasure(ensure_live_llm) -> None:
+    await _assert_live_l2_boundary_affinity_case(ensure_live_llm, "yielding_top_self_erasure")
+
+
+async def test_live_l2_boundary_default_top_public_humiliation(ensure_live_llm) -> None:
+    await _assert_live_l2_boundary_affinity_case(ensure_live_llm, "default_top_public_humiliation")
+
+
+async def test_live_l2_boundary_sovereign_top_guilt_bind(ensure_live_llm) -> None:
+    await _assert_live_l2_boundary_affinity_case(ensure_live_llm, "sovereign_top_guilt_bind")
+
+
+async def test_live_l2_boundary_dissolving_top_isolation_claim(ensure_live_llm) -> None:
+    await _assert_live_l2_boundary_affinity_case(ensure_live_llm, "dissolving_top_isolation_claim")
+
+
+async def test_live_l2_boundary_default_top_gaslight_pressure(ensure_live_llm) -> None:
+    await _assert_live_l2_boundary_affinity_case(ensure_live_llm, "default_top_gaslight_pressure")

@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from kazusa_ai_chatbot.agents.user_image_retriever_agent import user_image_retriever_agent
+from kazusa_ai_chatbot.rag.user_image_retriever_agent import user_image_retriever_agent
 from kazusa_ai_chatbot.config import CHARACTER_GLOBAL_USER_ID
 from kazusa_ai_chatbot.db import get_character_profile, get_text_embedding
 from kazusa_ai_chatbot.rag.cache2_events import CacheDependency
@@ -15,7 +15,6 @@ from kazusa_ai_chatbot.rag.cache2_policy import (
     build_user_profile_cache_key,
     build_user_profile_dependencies,
 )
-from kazusa_ai_chatbot.rag.depth_classifier import DEEP
 from kazusa_ai_chatbot.rag.helper_agent import BaseRAGHelperAgent
 from kazusa_ai_chatbot.utils import parse_llm_json_output
 
@@ -179,7 +178,7 @@ class UserProfileAgent(BaseRAGHelperAgent):
                 global_user_id,
                 user_profile=context.get("user_profile"),
                 input_embedding=input_embedding,
-                depth=DEEP,
+                include_semantic=True,
             )
             dependencies = build_user_profile_dependencies(global_user_id)
             metadata = {"profile_source": "user_profile"}

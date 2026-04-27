@@ -145,90 +145,76 @@ def sanitize_llm_text(text: str) -> str:
 
 
 def log_preview(value: Any, max_length: int | None = None) -> str:
-    """Return a single-line preview suitable for logs.
+    """Return a complete JSON-safe rendering suitable for logs.
 
     Args:
-        value: Arbitrary value to preview.
-        max_length: Optional maximum number of characters to emit. ``None`` keeps
-            the full value.
+        value: Arbitrary value to render.
+        max_length: Deprecated compatibility parameter. It is intentionally
+            ignored because debug logs must not hide information.
 
     Returns:
-        A whitespace-collapsed string preview, optionally truncated to
-        ``max_length``.
+        The full value rendered without truncation. Strings are JSON-encoded so
+        newlines and control characters stay visible and machine-parseable.
     """
     if value is None:
-        return ""
+        return "null"
 
-    if isinstance(value, str):
-        text = value
-    elif isinstance(value, dict):
-        try:
-            text = json.dumps(value, ensure_ascii=False, sort_keys=True, default=str)
-        except TypeError:
-            text = repr(value)
-    else:
-        text = str(value)
-
-    text = re.sub(r"\s+", " ", text).strip()
-    if max_length is None or max_length <= 0:
-        return text
-    if len(text) <= max_length:
-        return text
-    return text[: max_length - 1] + "…"
+    try:
+        return json.dumps(value, ensure_ascii=False, sort_keys=True, default=str)
+    except TypeError:
+        return repr(value)
 
 
 def log_list_preview(
     values: list[Any],
     max_items: int | None = None,
     item_length: int | None = None,
-) -> list[str]:
-    """Return a preview list for log output.
+) -> str:
+    """Return a complete list rendering for log output.
 
     Args:
-        values: Sequence of values to preview.
-        max_items: Optional maximum number of items to include. ``None`` keeps
-            all items.
-        item_length: Optional maximum length for each rendered item. ``None``
-            keeps full item content.
+        values: Sequence of values to render.
+        max_items: Deprecated compatibility parameter. It is intentionally
+            ignored because debug logs must not hide list items.
+        item_length: Deprecated compatibility parameter. It is intentionally
+            ignored because debug logs must not hide item content.
 
     Returns:
-        A list of preview strings, with an overflow marker when truncated.
+        The full list as JSON text without synthetic overflow markers.
     """
-    if max_items is None or max_items <= 0:
-        max_items = len(values)
-    preview = [log_preview(item, max_length=item_length) for item in values[:max_items]]
-    remaining = len(values) - len(preview)
-    if remaining > 0:
-        preview.append(f"... (+{remaining} more)")
-    return preview
+    return log_preview(values)
 
 
 def log_dict_subset(
     mapping: dict[str, Any],
     keys: list[str],
     value_length: int | None = None,
-) -> dict[str, str]:
-    """Return a filtered subset of a mapping for log output.
+) -> str:
+    """Return a requested-key mapping for legacy log call sites.
 
     Args:
         mapping: Source mapping to filter.
-        keys: Keys to include when present and non-empty.
-        value_length: Optional maximum preview length for each value. ``None``
-            keeps full values.
+        keys: Keys to include. Missing and empty values are recorded explicitly
+            so the log does not hide their state.
+        value_length: Deprecated compatibility parameter. It is intentionally
+            ignored because debug logs must not hide value content.
 
     Returns:
-        A dict of compact previews for the requested keys.
+        JSON text describing each requested key without truncating values.
     """
-    subset: dict[str, str] = {}
+    subset: dict[str, Any] = {}
 
     for key in keys:
         if key not in mapping:
+            subset[key] = {"present": False, "value": None}
             continue
         value = mapping[key]
-        if value in ("", None, [], {}):
-            continue
-        subset[key] = log_preview(value, max_length=value_length)
-    return subset
+        subset[key] = {
+            "present": True,
+            "empty": value in ("", None, [], {}),
+            "value": value,
+        }
+    return log_preview(subset)
 
 
 _PARSE_JSON_WITH_LLM_PROMPT = """\

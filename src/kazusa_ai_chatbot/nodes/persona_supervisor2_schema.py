@@ -34,8 +34,7 @@ class GlobalPersonaState(TypedDict):
     decontexualized_input: str
 
     # Stage 1 output
-    research_facts: dict
-    research_metadata: list[dict]
+    rag_result: dict
 
     # Stage 2 output
     internal_monologue: str
@@ -82,7 +81,7 @@ class CognitionState(TypedDict):
     channel_topic: str
 
     decontexualized_input: str
-    research_facts: dict
+    rag_result: dict
 
     emotional_appraisal: str
     interaction_subtext: str

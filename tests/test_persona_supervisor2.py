@@ -72,7 +72,7 @@ async def test_persona_supervisor2_returns_final_dialog_and_consolidation_state(
 
     # Mock stages 0-3 to avoid real LLM calls.
     with patch("kazusa_ai_chatbot.nodes.persona_supervisor2.call_msg_decontexualizer", new_callable=AsyncMock, return_value={"decontexualized_input": "Hello"}) as m_decon, \
-         patch("kazusa_ai_chatbot.nodes.persona_supervisor2.call_rag_subgraph", new_callable=AsyncMock, return_value={"research_facts": "", "research_metadata": []}) as m_research, \
+         patch("kazusa_ai_chatbot.nodes.persona_supervisor2.stage_1_research", new_callable=AsyncMock, return_value={"rag_result": {}}) as m_research, \
          patch("kazusa_ai_chatbot.nodes.persona_supervisor2.call_cognition_subgraph", new_callable=AsyncMock, return_value={
              "internal_monologue": "thinking...",
              "action_directives": {},
@@ -100,7 +100,7 @@ async def test_persona_supervisor2_no_remember_skips_consolidation():
     state["debug_modes"] = {"no_remember": True}
 
     with patch("kazusa_ai_chatbot.nodes.persona_supervisor2.call_msg_decontexualizer", new_callable=AsyncMock, return_value={"decontexualized_input": "Hello"}) as m_decon, \
-         patch("kazusa_ai_chatbot.nodes.persona_supervisor2.call_rag_subgraph", new_callable=AsyncMock, return_value={"research_facts": "", "research_metadata": []}) as m_research, \
+         patch("kazusa_ai_chatbot.nodes.persona_supervisor2.stage_1_research", new_callable=AsyncMock, return_value={"rag_result": {}}) as m_research, \
          patch("kazusa_ai_chatbot.nodes.persona_supervisor2.call_cognition_subgraph", new_callable=AsyncMock, return_value={
              "internal_monologue": "thinking...",
              "action_directives": {},

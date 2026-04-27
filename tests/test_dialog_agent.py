@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from kazusa_ai_chatbot.agents.dialog_agent import _DIALOG_EVALUATOR_PROMPT, dialog_agent, DialogAgentState
+from kazusa_ai_chatbot.nodes.dialog_agent import _DIALOG_EVALUATOR_PROMPT, dialog_agent, DialogAgentState
 from kazusa_ai_chatbot.utils import build_interaction_history_recent
 
 
@@ -124,8 +124,8 @@ async def test_dialog_agent_returns_final_dialog():
             return generator_response
         return evaluator_response
 
-    with patch("kazusa_ai_chatbot.agents.dialog_agent._dialog_generator_llm") as mock_generator, \
-         patch("kazusa_ai_chatbot.agents.dialog_agent._dialog_evaluator_llm") as mock_evaluator:
+    with patch("kazusa_ai_chatbot.nodes.dialog_agent._dialog_generator_llm") as mock_generator, \
+         patch("kazusa_ai_chatbot.nodes.dialog_agent._dialog_evaluator_llm") as mock_evaluator:
         mock_generator.ainvoke = mock_ainvoke
         mock_evaluator.ainvoke = mock_ainvoke
 
@@ -154,8 +154,8 @@ async def test_dialog_agent_handles_empty_dialog():
             return generator_response
         return evaluator_response
 
-    with patch("kazusa_ai_chatbot.agents.dialog_agent._dialog_generator_llm") as mock_generator, \
-         patch("kazusa_ai_chatbot.agents.dialog_agent._dialog_evaluator_llm") as mock_evaluator:
+    with patch("kazusa_ai_chatbot.nodes.dialog_agent._dialog_generator_llm") as mock_generator, \
+         patch("kazusa_ai_chatbot.nodes.dialog_agent._dialog_evaluator_llm") as mock_evaluator:
         mock_generator.ainvoke = mock_ainvoke
         mock_evaluator.ainvoke = mock_ainvoke
 

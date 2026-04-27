@@ -18,6 +18,9 @@ from pydantic import BaseModel
 import re
 
 from kazusa_ai_chatbot.dispatcher import SendResult
+from kazusa_ai_chatbot.logging_config import configure_adapter_logging
+
+configure_adapter_logging()
 
 logger = logging.getLogger(__name__)
 
@@ -293,7 +296,7 @@ class NapCatWSAdapter:
                         reply_context["reply_to_display_name"] = str(reply_sender_name)
                     reply_text = seg_data.get("text")
                     if reply_text:
-                        reply_context["reply_excerpt"] = str(reply_text)[:200]
+                        reply_context["reply_excerpt"] = str(reply_text)
                     raw_content += f"[Reply to message] "
                 elif seg_type == "face":
                     raw_content += f"[Face] "
@@ -462,14 +465,8 @@ def main():
     parser.add_argument("--runtime-port", type=int, default=int(os.getenv("NAPCAT_RUNTIME_PORT", "8011")))
     parser.add_argument("--runtime-public-url", type=str, default=os.getenv("ADAPTER_RUNTIME_PUBLIC_URL", ""))
     parser.add_argument("--heartbeat-seconds", type=float, default=float(os.getenv("ADAPTER_HEARTBEAT_SECONDS", "30")))
-    parser.add_argument("--log-level", type=str, default="INFO", choices=["DEBUG", "INFO", "WARNING", "ERROR"])
 
     args = parser.parse_args()
-
-    logging.basicConfig(
-        level=getattr(logging, args.log_level),
-        format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-    )
 
     ws_url = os.getenv("NAPCAT_WS_URL")
     if not ws_url:

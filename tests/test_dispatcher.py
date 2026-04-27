@@ -23,6 +23,7 @@ from kazusa_ai_chatbot.dispatcher import (
 )
 from kazusa_ai_chatbot.dispatcher.task import parse_iso_datetime
 from kazusa_ai_chatbot.nodes import persona_supervisor2_consolidator_persistence as persistence_module
+from tests.llm_trace import write_llm_trace
 
 
 class _DummyResponse:
@@ -158,6 +159,19 @@ def _live_dispatch_ctx(
         guild_id=None,
         bot_role="user",
         now=datetime(2026, 4, 22, 18, 11, 28, tzinfo=timezone.utc),
+    )
+
+
+def _write_live_dispatch_trace(case_id: str, state: dict, raw_calls: list[RawToolCall]) -> None:
+    """Persist one live dispatcher generation trace for manual inspection."""
+    write_llm_trace(
+        "dispatcher_live_tool_call_generation",
+        case_id,
+        {
+            "input_state": state,
+            "raw_calls": raw_calls,
+            "judgment": "raw_calls_match_case_assertions_when_test_passes",
+        },
     )
 
 
@@ -343,6 +357,7 @@ async def test_live_dispatcher_generates_send_message_tool_call(ensure_live_llm,
     )
 
     raw_calls = await persistence_module._generate_raw_tool_calls(state, _live_dispatch_ctx())
+    _write_live_dispatch_trace("generates_send_message_tool_call", state, raw_calls)
 
     assert raw_calls, "Expected at least one tool call from the live dispatcher LLM."
     assert any(call.tool == "send_message" for call in raw_calls)
@@ -382,6 +397,7 @@ async def test_live_dispatcher_rejects_persistent_style_rule_as_tool_call(ensure
     )
 
     raw_calls = await persistence_module._generate_raw_tool_calls(state, _live_dispatch_ctx())
+    _write_live_dispatch_trace("rejects_persistent_style_rule_as_tool_call", state, raw_calls)
 
     assert raw_calls == [], f"Expected no tool calls for a persistent style rule, got: {raw_calls}"
 
@@ -425,6 +441,7 @@ async def test_live_dispatcher_generates_group_target_from_private_chat(ensure_l
             source_channel_id="10001",
         ),
     )
+    _write_live_dispatch_trace("generates_group_target_from_private_chat", state, raw_calls)
 
     assert raw_calls, "Expected at least one tool call from the live dispatcher LLM."
     assert any(call.tool == "send_message" for call in raw_calls)
@@ -467,6 +484,7 @@ async def test_live_dispatcher_assumes_five_minutes_for_implicit_near_future_tim
     )
 
     raw_calls = await persistence_module._generate_raw_tool_calls(state, ctx)
+    _write_live_dispatch_trace("assumes_five_minutes_for_implicit_near_future_time", state, raw_calls)
 
     assert raw_calls, "Expected at least one tool call from the live dispatcher LLM."
     assert any(call.tool == "send_message" for call in raw_calls)

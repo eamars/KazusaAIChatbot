@@ -2,11 +2,6 @@
 
 from __future__ import annotations
 
-import os
-from unittest.mock import patch
-
-import pytest
-
 
 class TestAffinityConstants:
     def test_affinity_default_within_bounds(self):
@@ -51,33 +46,24 @@ class TestBreakpoints:
 class TestRetryLimits:
     def test_retry_limits_are_positive(self):
         from kazusa_ai_chatbot.config import (
-            MAX_RESEARCH_AGENT_RETRY,
             MAX_MEMORY_RETRIEVER_AGENT_RETRY,
             MAX_WEB_SEARCH_AGENT_RETRY,
             MAX_DIALOG_AGENT_RETRY,
             MAX_FACT_HARVESTER_RETRY,
         )
-        assert MAX_RESEARCH_AGENT_RETRY > 0
         assert MAX_MEMORY_RETRIEVER_AGENT_RETRY > 0
         assert MAX_WEB_SEARCH_AGENT_RETRY > 0
         assert MAX_DIALOG_AGENT_RETRY > 0
         assert MAX_FACT_HARVESTER_RETRY > 0
 
 
-class TestTokenBudget:
-    def test_token_budget_has_expected_keys(self):
-        from kazusa_ai_chatbot.config import TOKEN_BUDGET
-        expected = {"system_personality", "character_state", "user_memory",
-                    "conversation_history", "current_message"}
-        assert set(TOKEN_BUDGET.keys()) == expected
-
-    def test_token_budget_values_positive(self):
-        from kazusa_ai_chatbot.config import TOKEN_BUDGET
-        for key, value in TOKEN_BUDGET.items():
-            assert value > 0, f"TOKEN_BUDGET[{key}] should be positive"
-
-
 class TestMcpServersDefault:
     def test_mcp_servers_is_dict(self):
         from kazusa_ai_chatbot.config import MCP_SERVERS
         assert isinstance(MCP_SERVERS, dict)
+
+
+class TestCache2Config:
+    def test_cache2_max_entries_is_positive(self):
+        from kazusa_ai_chatbot.config import RAG_CACHE2_MAX_ENTRIES
+        assert RAG_CACHE2_MAX_ENTRIES > 0

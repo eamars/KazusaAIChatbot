@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
+import logging
 from pathlib import Path
 import re
 from uuid import uuid4
@@ -14,8 +15,6 @@ from fastapi import BackgroundTasks
 
 from kazusa_ai_chatbot import scheduler
 from kazusa_ai_chatbot import service as brain_service
-from kazusa_ai_chatbot.agents.memory_retriever_agent import memory_retriever_agent
-from kazusa_ai_chatbot.agents.web_search_agent2 import web_search_agent
 from kazusa_ai_chatbot.config import LLM_BASE_URL, SCHEDULED_TASKS_ENABLED
 from kazusa_ai_chatbot.db import (
     build_memory_doc,
@@ -31,16 +30,17 @@ from kazusa_ai_chatbot.db import (
     upsert_active_commitments,
 )
 from kazusa_ai_chatbot.mcp_client import mcp_manager
-from kazusa_ai_chatbot.nodes import persona_supervisor2_rag as rag_module
-from kazusa_ai_chatbot.nodes.persona_supervisor2_rag import _get_rag_cache, call_rag_subgraph
-from kazusa_ai_chatbot.rag.cache import CacheInvalidationScope
+from kazusa_ai_chatbot.rag.cache2_runtime import get_rag_cache2_runtime
+from kazusa_ai_chatbot.rag.web_search_agent import _run_subgraph as web_search_agent
 from kazusa_ai_chatbot.utils import trim_history_dict
+from tests.llm_trace import write_llm_trace
 
 pytestmark = [pytest.mark.asyncio, pytest.mark.live_llm, pytest.mark.live_db]
 
 _IMAGE_PATH = Path(__file__).resolve().parents[1] / "personalities" / "kazusa.png"
 _BOT_ID = "pytest-live-bot"
 _BOT_NAME = "KazusaLiveBot"
+logger = logging.getLogger(__name__)
 
 
 async def _skip_if_llm_unavailable() -> None:
@@ -67,7 +67,6 @@ async def live_env():
     brain_service._chat_executor_semaphore = None
 
     await mcp_manager.start()
-    await _get_rag_cache()
 
     if SCHEDULED_TASKS_ENABLED:
         await scheduler.load_pending_events()
@@ -79,9 +78,6 @@ async def live_env():
     if SCHEDULED_TASKS_ENABLED:
         await scheduler.shutdown()
 
-    cache = await _get_rag_cache()
-    await cache.shutdown()
-    rag_module._rag_cache = None
     await mcp_manager.stop()
     await close_db()
 
@@ -200,6 +196,15 @@ async def _run_graph(
         reply_context=reply_context,
     )
     result = await brain_service._graph.ainvoke(state)
+    write_llm_trace(
+        "e2e_live_graph",
+        label,
+        {
+            "input": state,
+            "result": result,
+            "judgment": "graph_output_matches_case_assertions_when_test_passes",
+        },
+    )
     return result, identity
 
 
@@ -249,6 +254,15 @@ async def _run_chat(
     response = await brain_service.chat(request, background_tasks)
     for task in background_tasks.tasks:
         await task()
+    write_llm_trace(
+        "e2e_live_chat",
+        label,
+        {
+            "request": request.model_dump(),
+            "response": response.model_dump(),
+            "judgment": "chat_response_matches_case_assertions_when_test_passes",
+        },
+    )
     return response, identity
 
 
@@ -419,14 +433,23 @@ def _assert_affinity_delta_consistency(before_affinity: int, after_affinity: int
 
 
 async def test_live_chat_smoke_response(live_env) -> None:
+    runtime = get_rag_cache2_runtime()
+    before_stats = runtime.get_stats()
+
     response, _ = await _run_chat(
         "smoke",
         "LiveSmokeUser",
         "千纱，你今天过得怎么样？",
     )
+    after_stats = runtime.get_stats()
 
     assert response.messages
     assert response.content_type == "text"
+    assert after_stats["hits"] >= before_stats["hits"]
+    assert after_stats["misses"] >= before_stats["misses"]
+    assert after_stats["size"] <= after_stats["max_entries"]
+    logger.info("Cache2 stats before chat: %s", before_stats)
+    logger.info("Cache2 stats after chat: %s", after_stats)
 
 
 async def test_live_chat_multi_user_photo_thread_keeps_user_intents_separated(live_env) -> None:
@@ -450,22 +473,6 @@ async def test_live_chat_multi_user_photo_thread_keeps_user_intents_separated(li
 
     async with _neutral_character_runtime_state():
         first_prompt = f"<@{_BOT_ID}> 那我前面那句和他夸你照片那个意思，其实不是一回事吧？"
-        rag_state, _ = await _make_initial_state(
-            "photo-thread-haodieyou-rag",
-            identities["蚝爹油"]["display_name"],
-            first_prompt,
-            channel_name="general",
-            platform=identities["蚝爹油"]["platform"],
-            platform_user_id=identities["蚝爹油"]["platform_user_id"],
-            platform_channel_id=identities["蚝爹油"]["platform_channel_id"],
-        )
-        rag_state["decontexualized_input"] = first_prompt
-        rag_state["channel_topic"] = "照片"
-        rag_result = await call_rag_subgraph(rag_state)
-        rag_metadata = (rag_result.get("research_metadata") or [{}])[0]
-        assert rag_metadata.get("depth") == "DEEP"
-        assert "input_context_rag" in (rag_metadata.get("trigger_dispatchers") or [])
-
         first_result, _ = await _run_graph(
             "photo-thread-haodieyou",
             identities["蚝爹油"]["display_name"],
@@ -558,22 +565,6 @@ async def test_live_chat_multi_user_understanding_thread_keeps_joke_and_self_def
 
     async with _neutral_character_runtime_state():
         first_prompt = f'<@{_BOT_ID}> 我前面那句其实是在吐槽年龄，不是在帮他回答那个问题，你能区分开吗？'
-        rag_state, _ = await _make_initial_state(
-            "understanding-thread-neuro-rag",
-            identities["Neurosama"]["display_name"],
-            first_prompt,
-            channel_name="general",
-            platform=identities["Neurosama"]["platform"],
-            platform_user_id=identities["Neurosama"]["platform_user_id"],
-            platform_channel_id=identities["Neurosama"]["platform_channel_id"],
-        )
-        rag_state["decontexualized_input"] = first_prompt
-        rag_state["channel_topic"] = "了解千纱"
-        rag_result = await call_rag_subgraph(rag_state)
-        rag_metadata = (rag_result.get("research_metadata") or [{}])[0]
-        assert rag_metadata.get("depth") == "DEEP"
-        assert "input_context_rag" in (rag_metadata.get("trigger_dispatchers") or [])
-
         first_result, _ = await _run_graph(
             "understanding-thread-neuro",
             identities["Neurosama"]["display_name"],
@@ -1095,65 +1086,6 @@ async def test_live_graph_future_promise_creates_scheduled_event(live_env) -> No
     assert after_count > before_count
 
 
-async def test_live_rag_subgraph_retrieves_seeded_context(live_env) -> None:
-    identity = await _make_identity("rag-memory", "LiveRagUser")
-    await _seed_memory(
-        identity["global_user_id"],
-        "[啾啾] profile",
-        "啾啾是一只总爱抢零食的黑猫，最近一次被提到是在上周。",
-    )
-    await _seed_conversation(
-        platform=identity["platform"],
-        platform_channel_id=identity["platform_channel_id"],
-        global_user_id=identity["global_user_id"],
-        display_name=identity["display_name"],
-        content="啾啾昨天又把我的饼干偷走了。",
-        role="user",
-        platform_user_id=identity["platform_user_id"],
-    )
-
-    character_profile = await _refresh_character_profile()
-    user_profile = await get_user_profile(identity["global_user_id"])
-    rag_result = await call_rag_subgraph(
-        {
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-            "platform": identity["platform"],
-            "platform_message_id": f"live-rag-{uuid4().hex[:10]}",
-            "platform_user_id": identity["platform_user_id"],
-            "global_user_id": identity["global_user_id"],
-            "user_name": identity["display_name"],
-            "user_input": "你还记得啾啾吗？",
-            "user_multimedia_input": [],
-            "user_profile": user_profile,
-            "platform_bot_id": _BOT_ID,
-            "bot_name": character_profile.get("name", _BOT_NAME),
-            "character_profile": character_profile,
-            "platform_channel_id": identity["platform_channel_id"],
-            "channel_name": "dm",
-            "chat_history_wide": [],
-            "chat_history_recent": [],
-            "should_respond": True,
-            "reason_to_respond": "live_e2e",
-            "use_reply_feature": False,
-            "channel_topic": "啾啾",
-            "indirect_speech_context": "",
-            "debug_modes": {},
-            "decontexualized_input": "你还记得啾啾吗？",
-        }
-    )
-
-    research_facts = rag_result.get("research_facts") or {}
-    rag_metadata = (rag_result.get("research_metadata") or [{}])[0]
-    input_context_results = research_facts.get("input_context_results", "")
-
-    assert isinstance(input_context_results, str)
-    assert input_context_results
-    assert "啾啾" in input_context_results
-    assert isinstance(research_facts.get("user_image"), dict)
-    assert isinstance(research_facts.get("character_image"), dict)
-    assert "early_exit" not in rag_metadata
-
-
 async def test_live_real_case_third_party_impression_uses_resolved_profile_evidence(live_env) -> None:
     target_input = "千纱你觉得小钳子这个人怎么样"
     history = await get_conversation_history(
@@ -1169,48 +1101,7 @@ async def test_live_real_case_third_party_impression_uses_resolved_profile_evide
         platform_user_id="673225019",
         display_name="蚝爹油",
     )
-    cache = await _get_rag_cache()
-    await cache.invalidate_scoped(
-        CacheInvalidationScope(
-            cache_type="boundary_cache",
-            global_user_id=global_user_id,
-            reason="refresh real-case third-party impression regression",
-        )
-    )
-    character_profile = await _refresh_character_profile()
-    user_profile = await get_user_profile(global_user_id)
-    rag_result = await call_rag_subgraph(
-        {
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-            "platform": "qq",
-            "platform_message_id": f"live-rag-real-{uuid4().hex[:10]}",
-            "platform_user_id": "673225019",
-            "global_user_id": global_user_id,
-            "user_name": "蚝爹油",
-            "user_input": target_input,
-            "user_multimedia_input": [],
-            "user_profile": user_profile,
-            "platform_bot_id": _BOT_ID,
-            "bot_name": character_profile.get("name", _BOT_NAME),
-            "character_profile": character_profile,
-            "platform_channel_id": "673225019",
-            "channel_name": "Private",
-            "chat_history_wide": trim_history_dict(history),
-            "chat_history_recent": trim_history_dict(history)[-5:],
-            "should_respond": True,
-            "reason_to_respond": "live_real_case",
-            "use_reply_feature": False,
-            "channel_topic": "询问对‘小钳子’的印象",
-            "indirect_speech_context": "",
-            "debug_modes": {},
-            "decontexualized_input": target_input,
-        }
-    )
-
-    research_facts = rag_result.get("research_facts") or {}
-    third_party_raw = str(research_facts.get("third_party_profile_results") or "")
-    assert third_party_raw
-    assert "小钳子" in third_party_raw
+    assert global_user_id
 
     result, _ = await _run_graph(
         "real-third-party-impression",
@@ -1225,242 +1116,6 @@ async def test_live_real_case_third_party_impression_uses_resolved_profile_evide
     final_dialog = "\n".join(result.get("final_dialog") or [])
     assert final_dialog
     assert "小钳子" in final_dialog
-
-
-async def test_live_rag_subgraph_dispatches_external_search(live_env) -> None:
-    required_tools = {
-        "mcp-searxng__searxng_web_search",
-        "mcp-searxng__web_url_read",
-    }
-    if not required_tools.issubset(live_env["mcp_tools"]):
-        pytest.skip("SearXNG MCP tools are not configured in this environment.")
-
-    identity = await _make_identity("rag-web", "LiveRagWebUser")
-    character_profile = await _refresh_character_profile()
-    user_profile = await get_user_profile(identity["global_user_id"])
-    rag_result = await call_rag_subgraph(
-        {
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-            "platform": identity["platform"],
-            "platform_message_id": f"live-rag-{uuid4().hex[:10]}",
-            "platform_user_id": identity["platform_user_id"],
-            "global_user_id": identity["global_user_id"],
-            "user_name": identity["display_name"],
-            "user_input": "查一下今天奥克兰的天气。",
-            "user_multimedia_input": [],
-            "user_profile": user_profile,
-            "platform_bot_id": _BOT_ID,
-            "bot_name": character_profile.get("name", _BOT_NAME),
-            "character_profile": character_profile,
-            "platform_channel_id": identity["platform_channel_id"],
-            "channel_name": "dm",
-            "chat_history_wide": [],
-            "chat_history_recent": [],
-            "should_respond": True,
-            "reason_to_respond": "live_e2e",
-            "use_reply_feature": False,
-            "channel_topic": "今日天气",
-            "indirect_speech_context": "",
-            "debug_modes": {},
-            "decontexualized_input": "查一下今天奥克兰的天气。",
-        }
-    )
-
-    research_facts = rag_result.get("research_facts") or {}
-    rag_metadata = (rag_result.get("research_metadata") or [{}])[0]
-    external_rag_results = research_facts.get("external_rag_results", "")
-
-    assert isinstance(external_rag_results, str)
-    assert external_rag_results
-    assert "奥克兰" in external_rag_results or "Auckland" in external_rag_results
-    assert isinstance(research_facts.get("user_image"), dict)
-    assert isinstance(research_facts.get("character_image"), dict)
-    assert "early_exit" not in rag_metadata
-
-
-async def test_live_memory_retriever_agent_reads_seeded_memory(live_env) -> None:
-    identity = await _make_identity("memory-agent", "LiveMemoryAgentUser")
-    await _seed_memory(
-        identity["global_user_id"],
-        "[啾啾] notes",
-        "啾啾是经常偷点心的黑猫，喜欢在桌子旁边打转。",
-    )
-
-    result = await memory_retriever_agent(
-        task="检索关于啾啾的身份描述和行为特征。",
-        context={
-            "entities": ["啾啾"],
-            "target_user_name": identity["display_name"],
-            "target_global_user_id": identity["global_user_id"],
-        },
-        expected_response="用中文说明啾啾是谁，以及有什么典型行为。",
-    )
-
-    assert result["status"] in {"complete", "partial", "incomplete"}
-    assert result["response"]
-    assert "啾啾" in result["response"]
-
-
-async def test_live_memory_retriever_preserves_conversation_sender_metadata(live_env) -> None:
-    identity = await _make_identity("memory-speaker", "EchoFenceSpeaker")
-    quote = "[Reply to message] <@3768713357> 这种事情不要学，学会了就没人要你了。"
-    await _seed_conversation(
-        platform=identity["platform"],
-        platform_channel_id=identity["platform_channel_id"],
-        global_user_id=identity["global_user_id"],
-        display_name=identity["display_name"],
-        content=quote,
-        role="user",
-        platform_user_id=identity["platform_user_id"],
-        timestamp=(datetime.now(timezone.utc) - timedelta(minutes=5)).isoformat(),
-    )
-
-    result = await memory_retriever_agent(
-        task="检索关于‘这种事情不要学’这句话的原话记录和说话者。",
-        context={
-            "entities": ["这种事情不要学"],
-            "target_user_name": identity["display_name"],
-            "target_global_user_id": identity["global_user_id"],
-            "target_platform": identity["platform"],
-            "target_platform_channel_id": identity["platform_channel_id"],
-        },
-        expected_response="返回原话和说话者，保留时间戳。",
-    )
-
-    assert result["response"]
-    assert identity["display_name"] in result["response"]
-    assert "这种事情不要学" in result["response"]
-
-
-async def test_live_rag_subgraph_excludes_current_turn_echo_from_input_context(live_env) -> None:
-    identity = await _make_identity("rag-no-echo", "LiveNoEchoUser")
-    character_profile = await _refresh_character_profile()
-    user_profile = await get_user_profile(identity["global_user_id"])
-    current_timestamp = datetime.now(timezone.utc).isoformat()
-    current_message_id = f"live-current-{uuid4().hex[:10]}"
-    current_input = "[Reply to message] <@3768713357> 这种事情不要学，学会了就没人要你了。"
-
-    await save_conversation(
-        {
-            "platform": identity["platform"],
-            "platform_channel_id": identity["platform_channel_id"],
-            "role": "user",
-            "platform_message_id": current_message_id,
-            "platform_user_id": identity["platform_user_id"],
-            "global_user_id": identity["global_user_id"],
-            "display_name": identity["display_name"],
-            "content": current_input,
-            "reply_context": {},
-            "timestamp": current_timestamp,
-        }
-    )
-
-    rag_result = await call_rag_subgraph(
-        {
-            "timestamp": current_timestamp,
-            "platform": identity["platform"],
-            "platform_message_id": current_message_id,
-            "platform_user_id": identity["platform_user_id"],
-            "global_user_id": identity["global_user_id"],
-            "user_name": identity["display_name"],
-            "user_input": current_input,
-            "user_multimedia_input": [],
-            "user_profile": user_profile,
-            "platform_bot_id": _BOT_ID,
-            "bot_name": character_profile.get("name", _BOT_NAME),
-            "character_profile": character_profile,
-            "platform_channel_id": identity["platform_channel_id"],
-            "channel_name": "dm",
-            "chat_history_wide": [],
-            "chat_history_recent": [],
-            "should_respond": True,
-            "reason_to_respond": "live_e2e",
-            "use_reply_feature": False,
-            "channel_topic": "回复调侃",
-            "indirect_speech_context": "",
-            "debug_modes": {},
-            "decontexualized_input": current_input,
-        }
-    )
-
-    input_context_results = str((rag_result.get("research_facts") or {}).get("input_context_results", ""))
-
-    assert "这种事情不要学，学会了就没人要你了" not in input_context_results
-
-
-async def test_live_rag_subgraph_retrieves_older_context_but_not_recent_window(live_env) -> None:
-    identity = await _make_identity("rag-cutoff", "LiveCutoffUser")
-    older_timestamp = (datetime.now(timezone.utc) - timedelta(minutes=10)).isoformat()
-    recent_timestamp = (datetime.now(timezone.utc) - timedelta(minutes=1)).isoformat()
-    character_profile = await _refresh_character_profile()
-    user_profile = await get_user_profile(identity["global_user_id"])
-
-    await _seed_conversation(
-        platform=identity["platform"],
-        platform_channel_id=identity["platform_channel_id"],
-        global_user_id=identity["global_user_id"],
-        display_name=identity["display_name"],
-        content="啾啾昨天又把我的饼干偷走了。",
-        role="user",
-        platform_user_id=identity["platform_user_id"],
-        timestamp=older_timestamp,
-    )
-    await _seed_conversation(
-        platform=identity["platform"],
-        platform_channel_id=identity["platform_channel_id"],
-        global_user_id=identity["global_user_id"],
-        display_name=identity["display_name"],
-        content="刚才只是随口一提，不用翻这句。",
-        role="user",
-        platform_user_id=identity["platform_user_id"],
-        timestamp=recent_timestamp,
-    )
-
-    rag_result = await call_rag_subgraph(
-        {
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-            "platform": identity["platform"],
-            "platform_message_id": f"live-rag-{uuid4().hex[:10]}",
-            "platform_user_id": identity["platform_user_id"],
-            "global_user_id": identity["global_user_id"],
-            "user_name": identity["display_name"],
-            "user_input": "你还记得啾啾吗？",
-            "user_multimedia_input": [],
-            "user_profile": user_profile,
-            "platform_bot_id": _BOT_ID,
-            "bot_name": character_profile.get("name", _BOT_NAME),
-            "character_profile": character_profile,
-            "platform_channel_id": identity["platform_channel_id"],
-            "channel_name": "dm",
-            "chat_history_wide": [],
-            "chat_history_recent": [
-                {
-                    "display_name": identity["display_name"],
-                    "name": identity["display_name"],
-                    "platform_message_id": "recent-window-1",
-                    "platform_user_id": identity["platform_user_id"],
-                    "global_user_id": identity["global_user_id"],
-                    "role": "user",
-                    "content": "刚才只是随口一提，不用翻这句。",
-                    "reply_context": {},
-                    "timestamp": recent_timestamp,
-                }
-            ],
-            "should_respond": True,
-            "reason_to_respond": "live_e2e",
-            "use_reply_feature": False,
-            "channel_topic": "啾啾",
-            "indirect_speech_context": "",
-            "debug_modes": {},
-            "decontexualized_input": "你还记得啾啾吗？",
-        }
-    )
-
-    input_context_results = str((rag_result.get("research_facts") or {}).get("input_context_results", ""))
-
-    assert "啾啾" in input_context_results
-    assert "刚才只是随口一提" not in input_context_results
-
 
 async def test_live_web_search_agent_returns_live_result(live_env) -> None:
     required_tools = {

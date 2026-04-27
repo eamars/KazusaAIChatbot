@@ -21,6 +21,7 @@ from langchain_core.messages import HumanMessage, SystemMessage
 
 import logging
 import json
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -61,6 +62,24 @@ def get_mbti_expression_willingness(mbti: str) -> str:
         key,
         f"未知的性格原型：{mbti}。在这种情况下，你的表达行为应更多依赖当前情绪、关系距离与环境反馈，而不是固定倾向。"
     )
+
+
+def _current_user_rag_bundle(state: CognitionState) -> dict[str, Any]:
+    """Return the projected current-user bundle from ``rag_result`` when present.
+
+    Args:
+        state: Cognition state for the current turn.
+
+    Returns:
+        The projected current-user profile bundle, or an empty dict when absent.
+    """
+    rag_result = state.get("rag_result") or {}
+    if not isinstance(rag_result, dict):
+        return {}
+    user_bundle = rag_result.get("user_image")
+    if isinstance(user_bundle, dict):
+        return user_bundle
+    return {}
 
 
 
@@ -130,14 +149,14 @@ async def call_contextual_agent(state: CognitionState) -> CognitionState:
     ])
     result = parse_llm_json_output(response.content)
 
-    logger.debug(
-        "Contextual agent: distance=%s intensity=%s vibe=%s dynamic=%s willingness=%s",
-        log_preview(result.get("social_distance", "")),
-        log_preview(result.get("emotional_intensity", "")),
-        log_preview(result.get("vibe_check", "")),
-        log_preview(result.get("relational_dynamic", "")),
-        result.get("expression_willingness", ""),
-    )
+    # logger.debug(
+    #     "Contextual agent: distance=%s intensity=%s vibe=%s dynamic=%s willingness=%s",
+    #     log_preview(result.get("social_distance", "")),
+    #     log_preview(result.get("emotional_intensity", "")),
+    #     log_preview(result.get("vibe_check", "")),
+    #     log_preview(result.get("relational_dynamic", "")),
+    #     result.get("expression_willingness", ""),
+    # )
 
     # In case AI make some spelling mistakes
     social_distance = result.get("social_distance", "")
@@ -267,12 +286,12 @@ async def call_style_agent(state: CognitionState) -> CognitionState:
     ])
     result = parse_llm_json_output(response.content)
 
-    logger.debug(
-        "Style agent: rhetorical=%s linguistic=%s forbidden=%s",
-        log_preview(result.get("rhetorical_strategy", "")),
-        log_preview(result.get("linguistic_style", "")),
-        log_list_preview(result.get("forbidden_phrases", []) or []),
-    )
+    # logger.debug(
+    #     "Style agent: rhetorical=%s linguistic=%s forbidden=%s",
+    #     log_preview(result.get("rhetorical_strategy", "")),
+    #     log_preview(result.get("linguistic_style", "")),
+    #     log_list_preview(result.get("forbidden_phrases", []) or []),
+    # )
 
     rhetorical_strategy = result.get("rhetorical_strategy", "")
     linguistic_style = result.get("linguistic_style", "")
@@ -315,13 +334,13 @@ _CONTENT_ANCHOR_AGENT_PROMPT = """\
 
 # 思考路径
 1. **决策对齐：** 读取 `logical_stance`，确立本场对话的逻辑终点。
-2. **事实织入（相关性优先）**：`research_facts` 提供背景资料，但只有与 `decontexualized_input` **直接相关**的内容才能进入 `[FACT]` 锚点。
+2. **事实织入（相关性优先）**：`rag_result` 提供背景资料，但只有与 `decontexualized_input` **直接相关**的内容才能进入 `[FACT]` 锚点。
    - 判断标准：该事实是否能被当前 `decontexualized_input` 的话题"自然引用"？若否，**不得**将其列为 `[FACT]`。
    - 避免将与当前话题无关的历史记忆（如用户在另一个场合提到的话题）错误地植入本次回应的硬信息点。
-   - 如果 `research_facts` 已经提供了与当前问题直接对应的对象画像、事实摘要或答案线索，优先把这些内容写进 `[FACT]` 或 `[ANSWER]`，而不是退回到对名字本身、称呼本身或语气本身的元评论。
+   - 如果 `rag_result` 已经提供了与当前问题直接对应的对象画像、事实摘要或答案线索，优先把这些内容写进 `[FACT]` 或 `[ANSWER]`，而不是退回到对名字本身、称呼本身或语气本身的元评论。
    - 只要检索证据足以支持围绕该对象/事实作答，就不要把 `[ANSWER]` 写成“这是什么”“这名字好怪”“你指的是谁”这类回避式内容；只有在证据本身真的不足时，才允许转入澄清。
 3. **低置信度优先澄清：** 如果 `character_intent` 为 `CLARIFY`，则 `[DECISION]` 必须落在“信息不足 / 需要对方补全”上，`[ANSWER]` 必须是缩小歧义范围的追问，禁止替用户脑补缺失对象。
-   - 若 `decontexualized_input` 仍含未解析指代或省略对象（如「这个 / 那个 / 这句 / 那句 / 这个意思 / 怎么说 / 这个呢」），且 `research_facts` 没有唯一可锚定对象，必须追问“具体指哪一个 / 哪一句 / 哪部分”，不得猜测定义、原因、身份或类别。
+   - 若 `decontexualized_input` 仍含未解析指代或省略对象（如「这个 / 那个 / 这句 / 那句 / 这个意思 / 怎么说 / 这个呢」），且 `rag_result` 没有唯一可锚定对象，必须追问“具体指哪一个 / 哪一句 / 哪部分”，不得猜测定义、原因、身份或类别。
 4. **显性回应：** 如果 `decontexualized_input` 中包含明确的询问（Question）、请求（Request）或提议（Proposal），且 `character_intent` 不是 `CLARIFY`，`[ANSWER]` 必须明确包含决定或答案；若 `character_intent` 为 `CLARIFY`，`[ANSWER]` 必须明确包含澄清问题。
 4a. **操作细节保真：** 如果用户请求里包含未来操作的关键细节，例如明确的群/频道/房间 ID、被要求发送的消息正文、引用内容、提醒对象或其他执行参数，这些细节必须在 `content_anchors` 中被保留下来，优先写进 `[ANSWER]`，必要时可辅以 `[FACT]`。不要把 `54369546群` 简化成“某个群”，也不要把“今天天气真好呀”改写成泛泛的“那句话”。
 5. **表达量校准（[SCOPE]）：** 基于已填充的锚点数量与 `logical_stance`，生成一条 `[SCOPE]` 锚点。
@@ -333,22 +352,31 @@ _CONTENT_ANCHOR_AGENT_PROMPT = """\
 # 输入格式
 {{
     "decontexualized_input": "用户输入语义摘要",
-    "research_facts": {{
+    "rag_result": {{
+        "answer": "检索主管的一行综合结论",
         "user_image": {{
-            "milestones": [{{"event": "里程碑事件", "category": "类别", "superseded_by": null}}],
-            "historical_summary": "较早阶段的综合画像",
-            "recent_observations": ["最近几次互动形成的观察"]
+            "global_user_id": "当前用户 UUID",
+            "display_name": "当前用户显示名",
+            "objective_facts": [{{"fact": "用户的稳定事实"}}],
+            "user_image": {{
+                "milestones": [{{"event": "里程碑事件", "category": "类别", "superseded_by": null}}],
+                "historical_summary": "较早阶段的综合画像",
+                "recent_window": [{{"summary": "最近几次互动形成的观察"}}]
+            }}
         }},
         "character_image": {{
-            "milestones": [{{"event": "{character_name} 的关键自我认知", "category": "类别", "superseded_by": null}}],
-            "historical_summary": "{character_name} 的较早自我总结",
-            "recent_observations": ["{character_name} 最近几次互动后的自我状态"]
+            "name": "{character_name}",
+            "self_image": {{
+                "milestones": [{{"event": "{character_name} 的关键自我认知", "category": "类别", "superseded_by": null}}],
+                "historical_summary": "{character_name} 的较早自我总结",
+                "recent_window": [{{"summary": "{character_name} 最近几次互动后的自我状态"}}]
+            }}
         }},
-        "input_context_results": "与当前话题相关的主观记忆（跨用户）",
-        "external_rag_results": "外部知识库检索结果",
-        "third_party_profile_results": "第三方用户的持久画像（里程碑、日记等）——注意区分：这是关于'他人'的记忆，不是当前用户",
-        "channel_recent_entity_results": "频道近期提到的第三方实体/人物的对话记录——注意：这是'最近发生的事'，不是持久印象",
-        "entity_resolution_notes": "实体解析备注（哪些名称被解析为已知用户）"
+        "third_party_profiles": ["第三方用户的持久画像（里程碑、日记等）——注意区分：这是关于'他人'的记忆，不是当前用户"],
+        "memory_evidence": [{{"summary": "与当前话题相关的跨轮记忆摘要", "content": "相关记忆原文摘录"}}],
+        "conversation_evidence": ["频道近期提到的第三方实体/人物的对话摘要——这是'最近发生的事'，不是持久印象"],
+        "external_evidence": [{{"summary": "外部知识检索摘要", "content": "网页正文摘录", "url": "https://example.com"}}],
+        "supervisor_trace": {{"unknown_slots": ["未解决槽位"], "loop_count": 1}}
     }},
     "internal_monologue": "意识层的决策逻辑",
     "logical_stance": "强制逻辑立场 (CONFIRM/REFUSE/TENTATIVE...)",
@@ -385,17 +413,7 @@ async def call_content_anchor_agent(state: CognitionState) -> CognitionState:
 
     msg = {
         "decontexualized_input": state["decontexualized_input"],
-        "research_facts": {
-            "objective_facts": state["research_facts"].get("objective_facts", ""),
-            "user_image": state["research_facts"].get("user_image", {}),
-            "character_image": state["research_facts"].get("character_image", {}),
-            "input_context_results": state["research_facts"].get("input_context_results", ""),
-            "external_rag_results": state["research_facts"].get("external_rag_results", ""),
-            "knowledge_base_results": state["research_facts"].get("knowledge_base_results", ""),
-            "third_party_profile_results": state["research_facts"].get("third_party_profile_results", ""),
-            "channel_recent_entity_results": state["research_facts"].get("channel_recent_entity_results", ""),
-            "entity_resolution_notes": state["research_facts"].get("entity_resolution_notes", ""),
-        },
+        "rag_result": state["rag_result"],
         "internal_monologue": state["internal_monologue"],
         "logical_stance": state["logical_stance"],
         "character_intent": state["character_intent"],
@@ -407,10 +425,10 @@ async def call_content_anchor_agent(state: CognitionState) -> CognitionState:
     ])
     result = parse_llm_json_output(response.content)
 
-    logger.debug(
-        "Content anchor agent: anchors=%s",
-        log_list_preview(result.get("content_anchors", []) or []),
-    )
+    # logger.debug(
+    #     "Content anchor agent: anchors=%s",
+    #     log_list_preview(result.get("content_anchors", []) or []),
+    # )
 
     content_anchors = result.get("content_anchors", [])
 
@@ -453,17 +471,21 @@ _PREFERENCE_ADAPTER_PROMPT = """\
     "character_taboos": "角色禁忌",
     "linguistic_style": "语言风格约束",
     "content_anchors": ["...", "..."],
-    "research_facts": {{
-        "objective_facts": "结构化持久事实（优先用于识别稳定语言偏好、许可与禁忌）",
+    "rag_result": {{
         "user_image": {{
-            "milestones": [{{"event": "里程碑事件", "category": "类别", "superseded_by": null}}],
-            "historical_summary": "较早阶段的综合画像",
-            "recent_observations": ["最近几次互动形成的观察"]
+            "objective_facts": [{{"fact": "结构化持久事实（优先用于识别稳定语言偏好、许可与禁忌）"}}],
+            "user_image": {{
+                "milestones": [{{"event": "里程碑事件", "category": "类别", "superseded_by": null}}],
+                "historical_summary": "较早阶段的综合画像",
+                "recent_window": [{{"summary": "最近几次互动形成的观察"}}]
+            }}
         }},
         "character_image": {{
-            "milestones": [{{"event": "{character_name} 的关键自我认知", "category": "类别", "superseded_by": null}}],
-            "historical_summary": "{character_name} 的较早自我总结",
-            "recent_observations": ["{character_name} 最近几次互动后的自我状态"]
+            "self_image": {{
+                "milestones": [{{"event": "{character_name} 的关键自我认知", "category": "类别", "superseded_by": null}}],
+                "historical_summary": "{character_name} 的较早自我总结",
+                "recent_window": [{{"summary": "{character_name} 最近几次互动后的自我状态"}}]
+            }}
         }}
     }}
 }}
@@ -477,44 +499,9 @@ _PREFERENCE_ADAPTER_PROMPT = """\
 _preference_adapter_llm = get_preference_llm(temperature=0.15, top_p=0.8)
 
 
-_AUTHORITATIVE_ACCEPTANCE_STANCES = {"CONFIRM"}
-_AUTHORITATIVE_ACCEPTANCE_INTENTS = {"PROVIDE", "BANTAR"}
-
-
-def _allows_authoritative_acceptance(logical_stance: str, character_intent: str) -> bool:
-    """Return whether the turn clearly accepted a request strongly enough to persist.
-
-    Args:
-        logical_stance: L2 logical stance for the turn.
-        character_intent: Final action intent for the turn.
-
-    Returns:
-        ``True`` only for explicit accepted states that are safe to persist.
-    """
-    return (
-        logical_stance in _AUTHORITATIVE_ACCEPTANCE_STANCES
-        and character_intent in _AUTHORITATIVE_ACCEPTANCE_INTENTS
-    )
-
-
-def _should_strip_address_preferences(state: CognitionState) -> bool:
-    """Return whether address-style preferences should be stripped post-LLM.
-
-    Args:
-        state: Full cognition state for the current turn.
-
-    Returns:
-        ``True`` when the turn did not clearly accept address preference adoption.
-    """
-    return not _allows_authoritative_acceptance(
-        state["logical_stance"],
-        state["character_intent"],
-    )
-
-
 async def call_preference_adapter(state: CognitionState) -> CognitionState:
     decontexualized_input = state["decontexualized_input"]
-    research_facts = state["research_facts"] or {}
+    current_user_bundle = _current_user_rag_bundle(state)
     user_profile = state["user_profile"]
 
     system_prompt = SystemMessage(content=_PREFERENCE_ADAPTER_PROMPT.format(
@@ -526,15 +513,11 @@ async def call_preference_adapter(state: CognitionState) -> CognitionState:
         "internal_monologue": state["internal_monologue"],
         "logical_stance": state["logical_stance"],
         "character_intent": state["character_intent"],
-        "active_commitments": user_profile.get("active_commitments", []),
+        "active_commitments": current_user_bundle.get("active_commitments", user_profile.get("active_commitments", [])),
         "character_taboos": state["character_profile"]["personality_brief"]["taboos"],
         "linguistic_style": state["linguistic_style"],
         "content_anchors": state["content_anchors"],
-        "research_facts": {
-            "objective_facts": research_facts.get("objective_facts", ""),
-            "user_image": research_facts.get("user_image", {}),
-            "character_image": research_facts.get("character_image", {}),
-        },
+        "rag_result": state["rag_result"],
     }
     human_message = HumanMessage(content=json.dumps(msg, ensure_ascii=False))
     response = await _preference_adapter_llm.ainvoke([
@@ -543,26 +526,19 @@ async def call_preference_adapter(state: CognitionState) -> CognitionState:
     ])
     result = parse_llm_json_output(response.content)
 
-    logger.debug(
-        "Preference adapter raw: preferences=%s",
-        log_list_preview(result.get("accepted_user_preferences", []) or []),
-    )
+    # logger.debug(
+    #     "Preference adapter raw: preferences=%s",
+    #     log_list_preview(result.get("accepted_user_preferences", []) or []),
+    # )
 
     accepted_user_preferences = result.get("accepted_user_preferences", [])
     if not isinstance(accepted_user_preferences, list):
         accepted_user_preferences = []
 
-    logger.debug(
-        "Preference adapter normalized: preferences=%s",
-        log_list_preview(accepted_user_preferences),
-    )
-
-    if _should_strip_address_preferences(state):
-        accepted_user_preferences = [
-            item
-            for item in accepted_user_preferences
-            if not any(token in item for token in ["称呼偏好", "叫我", "主人", "杏奴", "奴"])
-        ]
+    # logger.debug(
+    #     "Preference adapter normalized: preferences=%s",
+    #     log_list_preview(accepted_user_preferences),
+    # )
 
     return {
         "accepted_user_preferences": [str(item) for item in accepted_user_preferences if str(item).strip()],
@@ -617,13 +593,13 @@ async def call_visual_agent(state: CognitionState) -> CognitionState:
     ])
     result = parse_llm_json_output(response.content)
 
-    logger.debug(
-        "Visual agent: facial=%d body=%d gaze=%d vibe=%d",
-        len(result.get("facial_expression", []) or []),
-        len(result.get("body_language", []) or []),
-        len(result.get("gaze_direction", []) or []),
-        len(result.get("visual_vibe", []) or []),
-    )
+    # logger.debug(
+    #     "Visual agent: facial=%d body=%d gaze=%d vibe=%d",
+    #     len(result.get("facial_expression", []) or []),
+    #     len(result.get("body_language", []) or []),
+    #     len(result.get("gaze_direction", []) or []),
+    #     len(result.get("visual_vibe", []) or []),
+    # )
 
     # In case AI make some spelling mistakes
     facial_expression = result.get("facial_expression", [])

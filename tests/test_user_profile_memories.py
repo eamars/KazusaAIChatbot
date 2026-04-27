@@ -19,7 +19,6 @@ from kazusa_ai_chatbot.dispatcher import (
 )
 from kazusa_ai_chatbot.db import bootstrap as bootstrap_module
 from kazusa_ai_chatbot.db import users as users_module
-from kazusa_ai_chatbot.nodes import persona_supervisor2_rag as rag_module
 from kazusa_ai_chatbot.nodes import persona_supervisor2_consolidator_persistence as persistence_module
 from scripts import migrate_user_profile_memories as migrate_module
 
@@ -297,80 +296,6 @@ async def test_expire_overdue_profile_memories_marks_active_commitments(monkeypa
     assert update_filter["status"] == "active"
 
 
-@pytest.mark.asyncio
-async def test_rag_hydrates_profile_memory_blocks_without_prompt_shape_changes(monkeypatch):
-    fake_cache = MagicMock()
-    monkeypatch.setattr(rag_module, "_get_rag_cache", AsyncMock(return_value=fake_cache))
-    retriever = AsyncMock(return_value=({
-        "affinity": 500,
-        "user_image": {"recent_window": [], "milestones": [{"event": "User allowed English replies"}]},
-        "character_diary": [{"entry": "User sounded excited"}],
-        "objective_facts": [{"fact": "User lives in Auckland"}],
-        "active_commitments": [{"action": "Kazusa will reply in English"}],
-    }, {
-        "character_diary": [{"entry": "User sounded excited"}],
-        "objective_facts": [{"fact": "User lives in Auckland"}],
-        "active_commitments": [{"action": "Kazusa will reply in English"}],
-        "milestones": [{"event": "User allowed English replies"}],
-        "memories": [{"memory_id": "m1", "embedding": [0.1, 0.2]}],
-    }))
-    monkeypatch.setattr(rag_module, "user_image_retriever_agent", retriever)
-
-    hydrated, blocks = await rag_module._hydrate_user_profile_from_memories(
-        {"affinity": 500, "user_image": {"recent_window": []}},
-        "u1",
-        input_embedding=[0.1],
-        depth="DEEP",
-    )
-
-    assert hydrated["character_diary"][0]["entry"] == "User sounded excited"
-    assert hydrated["objective_facts"][0]["fact"] == "User lives in Auckland"
-    assert hydrated["active_commitments"][0]["action"] == "Kazusa will reply in English"
-    assert hydrated["user_image"]["milestones"][0]["event"] == "User allowed English replies"
-    assert blocks["memories"][0]["embedding"] == [0.1, 0.2]
-    retriever.assert_awaited_once_with(
-        "u1",
-        user_profile={"affinity": 500, "user_image": {"recent_window": []}},
-        input_embedding=[0.1],
-        depth="DEEP",
-        cache=fake_cache,
-        budget=rag_module.PROFILE_MEMORY_BUDGET,
-    )
-
-
-@pytest.mark.asyncio
-async def test_rag_profile_memory_hydration_uses_cache_hit(monkeypatch):
-    fake_cache = MagicMock()
-    monkeypatch.setattr(rag_module, "_get_rag_cache", AsyncMock(return_value=fake_cache))
-    retriever = AsyncMock(return_value=({
-        "character_diary": [{"entry": "Cached diary"}],
-        "objective_facts": [{"fact": "Cached fact"}],
-        "active_commitments": [{"action": "Cached commitment"}],
-        "user_image": {"milestones": [{"event": "Cached milestone"}]},
-    }, {
-        "memories": [{"memory_id": "cached"}],
-    }))
-    monkeypatch.setattr(rag_module, "user_image_retriever_agent", retriever)
-
-    hydrated, blocks = await rag_module._hydrate_user_profile_from_memories(
-        {"affinity": 500, "user_image": {}},
-        "u1",
-        input_embedding=[0.1],
-        depth="SHALLOW",
-    )
-
-    assert hydrated["character_diary"][0]["entry"] == "Cached diary"
-    assert blocks["memories"] == [{"memory_id": "cached"}]
-    retriever.assert_awaited_once_with(
-        "u1",
-        user_profile={"affinity": 500, "user_image": {}},
-        input_embedding=[0.1],
-        depth="SHALLOW",
-        cache=fake_cache,
-        budget=rag_module.PROFILE_MEMORY_BUDGET,
-    )
-
-
 def test_hydrate_user_profile_with_memory_blocks_uses_memory_milestones():
     hydrated = users_module.hydrate_user_profile_with_memory_blocks(
         {
@@ -433,12 +358,10 @@ def test_hydrate_user_profile_with_memory_blocks_falls_back_to_relationship_hist
 
 @pytest.mark.asyncio
 async def test_db_writer_invalidates_profile_memory_cache_namespaces(monkeypatch):
-    fake_cache = MagicMock()
-    fake_cache.invalidate_pattern = AsyncMock()
-    fake_cache.clear_all_user = AsyncMock()
-    monkeypatch.setattr(persistence_module, "_get_rag_cache", AsyncMock(return_value=fake_cache))
+    fake_runtime = MagicMock()
+    fake_runtime.invalidate = AsyncMock(side_effect=[3, 1])
+    monkeypatch.setattr(persistence_module, "get_rag_cache2_runtime", MagicMock(return_value=fake_runtime))
     monkeypatch.setattr(persistence_module, "insert_profile_memories", AsyncMock(return_value=[]))
-    monkeypatch.setattr(persistence_module, "increment_rag_version", AsyncMock())
     monkeypatch.setattr(persistence_module, "update_affinity", AsyncMock())
     monkeypatch.setattr(persistence_module, "update_last_relationship_insight", AsyncMock())
     monkeypatch.setattr(persistence_module, "upsert_character_state", AsyncMock())
@@ -446,7 +369,6 @@ async def test_db_writer_invalidates_profile_memory_cache_namespaces(monkeypatch
     monkeypatch.setattr(persistence_module, "upsert_character_self_image", AsyncMock())
     monkeypatch.setattr(persistence_module, "_update_user_image", AsyncMock(return_value=None))
     monkeypatch.setattr(persistence_module, "_update_character_image", AsyncMock(return_value=None))
-    monkeypatch.setattr(persistence_module, "_update_knowledge_base", AsyncMock(return_value=0))
     monkeypatch.setattr(persistence_module, "_task_dispatcher", None)
     monkeypatch.setattr(persistence_module, "_task_registry", None)
 
@@ -467,12 +389,13 @@ async def test_db_writer_invalidates_profile_memory_cache_namespaces(monkeypatch
         "user_profile": {"affinity": 500},
         "affinity_delta": 0,
         "decontexualized_input": "hello",
+        "platform": "discord",
+        "platform_channel_id": "chan-1",
     })
 
-    invalidated = result["metadata"]["cache_invalidation_scope"]
-    assert "user_profile_memories" in invalidated
-    assert "boundary_cache" in invalidated
-    persistence_module.increment_rag_version.assert_awaited_once_with("u1")
+    invalidated = result["metadata"]["cache_invalidated"]
+    assert invalidated == ["user_profile", "character_state"]
+    assert result["metadata"]["cache_evicted_count"] == 4
 
 
 @pytest.mark.asyncio
@@ -482,12 +405,10 @@ async def test_db_writer_records_dispatch_rejection_when_no_runtime_adapter_is_r
 ):
     """Accepted outbound tasks should stay unscheduled when the brain has no runtime adapter."""
 
-    fake_cache = MagicMock()
-    fake_cache.invalidate_pattern = AsyncMock()
-    fake_cache.clear_all_user = AsyncMock()
-    monkeypatch.setattr(persistence_module, "_get_rag_cache", AsyncMock(return_value=fake_cache))
+    fake_runtime = MagicMock()
+    fake_runtime.invalidate = AsyncMock(return_value=0)
+    monkeypatch.setattr(persistence_module, "get_rag_cache2_runtime", MagicMock(return_value=fake_runtime))
     monkeypatch.setattr(persistence_module, "insert_profile_memories", AsyncMock(return_value=[]))
-    monkeypatch.setattr(persistence_module, "increment_rag_version", AsyncMock())
     monkeypatch.setattr(persistence_module, "update_affinity", AsyncMock())
     monkeypatch.setattr(persistence_module, "update_last_relationship_insight", AsyncMock())
     monkeypatch.setattr(persistence_module, "upsert_character_state", AsyncMock())
@@ -495,7 +416,6 @@ async def test_db_writer_records_dispatch_rejection_when_no_runtime_adapter_is_r
     monkeypatch.setattr(persistence_module, "upsert_character_self_image", AsyncMock())
     monkeypatch.setattr(persistence_module, "_update_user_image", AsyncMock(return_value=None))
     monkeypatch.setattr(persistence_module, "_update_character_image", AsyncMock(return_value=None))
-    monkeypatch.setattr(persistence_module, "_update_knowledge_base", AsyncMock(return_value=0))
 
     tool_registry = ToolRegistry()
     tool_registry.register(build_send_message_tool())
@@ -565,9 +485,8 @@ async def test_bootstrap_adds_active_commitment_hot_path_index(monkeypatch):
         "memory",
         "user_profile_memories",
         "scheduled_events",
-        "rag_cache_index",
-        "rag_metadata_index",
     ])
+    db.drop_collection = AsyncMock()
     db.character_state.find_one = AsyncMock(return_value={"_id": "global"})
     db.character_state.insert_one = AsyncMock()
     for collection_name in (
@@ -576,8 +495,6 @@ async def test_bootstrap_adds_active_commitment_hot_path_index(monkeypatch):
         "scheduled_events",
         "memory",
         "user_profile_memories",
-        "rag_cache_index",
-        "rag_metadata_index",
     ):
         getattr(db, collection_name).create_index = AsyncMock()
     monkeypatch.setattr(bootstrap_module, "get_db", AsyncMock(return_value=db))
@@ -585,6 +502,7 @@ async def test_bootstrap_adds_active_commitment_hot_path_index(monkeypatch):
 
     await bootstrap_module.db_bootstrap()
 
+    db.drop_collection.assert_not_awaited()
     index_calls = db.user_profile_memories.create_index.await_args_list
     assert any(
         call.args[0] == [
@@ -598,6 +516,39 @@ async def test_bootstrap_adds_active_commitment_hot_path_index(monkeypatch):
         and call.kwargs["name"] == "user_profile_memory_active_commitments"
         for call in index_calls
     )
+
+
+@pytest.mark.asyncio
+async def test_bootstrap_drops_legacy_rag_collections(monkeypatch):
+    db = MagicMock()
+    db.list_collection_names = AsyncMock(return_value=[
+        "conversation_history",
+        "user_profiles",
+        "character_state",
+        "memory",
+        "user_profile_memories",
+        "scheduled_events",
+        "rag_cache_index",
+        "rag_metadata_index",
+    ])
+    db.drop_collection = AsyncMock()
+    db.character_state.find_one = AsyncMock(return_value={"_id": "global"})
+    db.character_state.insert_one = AsyncMock()
+    for collection_name in (
+        "conversation_history",
+        "user_profiles",
+        "scheduled_events",
+        "memory",
+        "user_profile_memories",
+    ):
+        getattr(db, collection_name).create_index = AsyncMock()
+    monkeypatch.setattr(bootstrap_module, "get_db", AsyncMock(return_value=db))
+    monkeypatch.setattr(bootstrap_module, "enable_vector_index", AsyncMock())
+
+    await bootstrap_module.db_bootstrap()
+
+    assert db.drop_collection.await_args_list[0].args == ("rag_cache_index",)
+    assert db.drop_collection.await_args_list[1].args == ("rag_metadata_index",)
 
 
 def test_migration_builder_promotes_legacy_milestones_and_future_defaults_commitments():
