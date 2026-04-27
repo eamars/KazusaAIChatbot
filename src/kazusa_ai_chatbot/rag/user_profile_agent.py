@@ -6,9 +6,12 @@ import json
 from typing import Any
 
 from kazusa_ai_chatbot.agents.user_image_retriever_agent import user_image_retriever_agent
-from kazusa_ai_chatbot.db import get_text_embedding
+from kazusa_ai_chatbot.config import CHARACTER_GLOBAL_USER_ID
+from kazusa_ai_chatbot.db import get_character_profile, get_text_embedding
+from kazusa_ai_chatbot.rag.cache2_events import CacheDependency
 from kazusa_ai_chatbot.rag.cache2_policy import (
     USER_PROFILE_CACHE_NAME,
+    build_character_profile_cache_key,
     build_user_profile_cache_key,
     build_user_profile_dependencies,
 )
@@ -70,6 +73,37 @@ def _extract_global_user_id_from_known_facts(context: dict[str, Any]) -> str:
     return _walk_for_global_user_id(known_facts)
 
 
+def _public_character_profile(character_profile: dict[str, Any]) -> dict[str, Any]:
+    """Select character profile fields that are safe and useful for RAG.
+
+    Args:
+        character_profile: Full character profile/state document from the DB.
+
+    Returns:
+        Public character facts plus the character self-image when present.
+    """
+    public_fields = (
+        "name",
+        "description",
+        "gender",
+        "age",
+        "birthday",
+        "backstory",
+        "self_image",
+    )
+    public_profile: dict[str, Any] = {}
+    for key in public_fields:
+        value = character_profile.get(key)
+        if value is None:
+            continue
+        if isinstance(value, str):
+            value = value.strip()
+            if not value:
+                continue
+        public_profile[key] = value
+    return public_profile
+
+
 class UserProfileAgent(BaseRAGHelperAgent):
     """RAG helper agent that retrieves a hydrated user profile bundle.
 
@@ -118,7 +152,13 @@ class UserProfileAgent(BaseRAGHelperAgent):
                 reason="skipped_missing_global_user_id",
             )
 
-        cache_key = build_user_profile_cache_key(global_user_id)
+        # Dynamically switch the profile to fetch, as character's profile may include sensitive runtime data which is
+        #   not supposed to be disclosed to LLM. 
+        if global_user_id == CHARACTER_GLOBAL_USER_ID:
+            cache_key = build_character_profile_cache_key(global_user_id)
+        else:
+            cache_key = build_user_profile_cache_key(global_user_id)
+
         cached = await self.read_cache(cache_key)
         if cached is not None:
             return self.with_cache_status(
@@ -128,20 +168,28 @@ class UserProfileAgent(BaseRAGHelperAgent):
                 cache_key=cache_key,
             )
 
-        input_embedding = await get_text_embedding(task)
-        hydrated_profile, _memory_blocks = await user_image_retriever_agent(
-            global_user_id,
-            user_profile=context.get("user_profile"),
-            input_embedding=input_embedding,
-            depth=DEEP,
-        )
+        if global_user_id == CHARACTER_GLOBAL_USER_ID:
+            character_profile = await get_character_profile()
+            hydrated_profile = _public_character_profile(dict(character_profile))
+            dependencies = [CacheDependency(source="character_state")]
+            metadata = {"profile_source": "character_state"}
+        else:
+            input_embedding = await get_text_embedding(task)
+            hydrated_profile, _memory_blocks = await user_image_retriever_agent(
+                global_user_id,
+                user_profile=context.get("user_profile"),
+                input_embedding=input_embedding,
+                depth=DEEP,
+            )
+            dependencies = build_user_profile_dependencies(global_user_id)
+            metadata = {"profile_source": "user_profile"}
 
         if hydrated_profile and isinstance(hydrated_profile, dict):
             await self.write_cache(
                 cache_key=cache_key,
                 result=hydrated_profile,
-                dependencies=build_user_profile_dependencies(global_user_id),
-                metadata={},
+                dependencies=dependencies,
+                metadata=metadata,
             )
 
         return self.with_cache_status(

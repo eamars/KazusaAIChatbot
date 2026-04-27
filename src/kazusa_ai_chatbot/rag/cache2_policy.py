@@ -12,6 +12,12 @@ from kazusa_ai_chatbot.rag.cache2_runtime import stable_cache_key
 # Cache name and version constants
 # ---------------------------------------------------------------------------
 
+INITIALIZER_CACHE_NAME = "rag2_initializer"
+INITIALIZER_POLICY_VERSION = "initializer:v1"
+INITIALIZER_PROMPT_VERSION = "initializer_prompt:v1"
+INITIALIZER_AGENT_REGISTRY_VERSION = "rag_supervisor2_registry:v1"
+INITIALIZER_STRATEGY_SCHEMA_VERSION = "initializer_strategy_schema:v1"
+
 USER_LOOKUP_CACHE_NAME = "rag2_user_lookup_agent"
 USER_LOOKUP_POLICY_VERSION = "user_lookup:v2"
 
@@ -74,6 +80,56 @@ def _context_scope(context: dict[str, Any]) -> dict[str, str]:
         "platform": normalize_cache_text(platform),
         "platform_channel_id": normalize_cache_text(channel),
     }
+
+
+def _initializer_context_signature(context: dict[str, Any]) -> dict[str, str]:
+    """Build the initializer's cache-relevant context signature.
+
+    Args:
+        context: Runtime context passed into the progressive RAG supervisor.
+
+    Returns:
+        Stable subset of context fields that can affect slot planning.
+    """
+    return {
+        "platform": normalize_cache_text(context.get("platform", "")),
+        "platform_channel_id": normalize_cache_text(
+            context.get("platform_channel_id", "")
+        ),
+        "global_user_id": str(context.get("global_user_id", "")).strip(),
+        "user_name": normalize_cache_text(context.get("user_name", "")),
+    }
+
+
+def build_initializer_cache_key(
+    *,
+    original_query: str,
+    character_name: str,
+    context: dict[str, Any],
+) -> str:
+    """Build the exact cache key for a RAG initializer strategy.
+
+    Args:
+        original_query: User's normalized/decontextualized question.
+        character_name: Active character name used by the initializer prompt.
+        context: Runtime context that can affect planning, such as current user
+            identity for pronoun handling.
+
+    Returns:
+        Stable exact-match cache key for initializer strategy reuse.
+    """
+    return stable_cache_key(
+        INITIALIZER_CACHE_NAME,
+        {
+            "policy_version": INITIALIZER_POLICY_VERSION,
+            "initializer_prompt_version": INITIALIZER_PROMPT_VERSION,
+            "agent_registry_version": INITIALIZER_AGENT_REGISTRY_VERSION,
+            "strategy_schema_version": INITIALIZER_STRATEGY_SCHEMA_VERSION,
+            "original_query": normalize_cache_text(original_query),
+            "character_name": normalize_cache_text(character_name),
+            "context_signature": _initializer_context_signature(context),
+        },
+    )
 
 
 def is_closed_historical_range(args: dict[str, Any]) -> bool:
@@ -236,6 +292,25 @@ def build_user_profile_cache_key(global_user_id: str) -> str:
         USER_PROFILE_CACHE_NAME,
         {
             "policy_version": USER_PROFILE_POLICY_VERSION,
+            "global_user_id": global_user_id.strip(),
+        },
+    )
+
+
+def build_character_profile_cache_key(global_user_id: str) -> str:
+    """Build the exact cache key for the character profile bundle.
+
+    Args:
+        global_user_id: Stable character UUID used by the user/profile lookup path.
+
+    Returns:
+        Stable exact-match cache key isolated from ordinary user-image bundles.
+    """
+    return stable_cache_key(
+        USER_PROFILE_CACHE_NAME,
+        {
+            "policy_version": USER_PROFILE_POLICY_VERSION,
+            "profile_source": "character_state",
             "global_user_id": global_user_id.strip(),
         },
     )

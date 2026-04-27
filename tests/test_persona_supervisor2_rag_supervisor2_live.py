@@ -155,6 +155,24 @@ async def test_call_rag_supervisor_live_opinion_small_pliers(live_supervisor2_en
         note="典型第三方人物印象查询。",
     )
 
+async def test_call_rag_supervisor_live_opinion_small_pliers2(live_supervisor2_env: dict) -> None:
+    await _run_live_supervisor2_case(
+        live_supervisor2_env,
+        case_id="opinion_small_pliers",
+        channel_id="54369546",
+        query="小钳子前两天欺负你了么",
+        note="典型第三方人物印象查询。",
+    )
+
+async def test_call_rag_supervisor_live_opinion_small_pliers3(live_supervisor2_env: dict) -> None:
+    await _run_live_supervisor2_case(
+        live_supervisor2_env,
+        case_id="opinion_small_pliers",
+        channel_id="54369546",
+        query="千纱你觉得你和小钳子合得来么？",
+        note="典型第三方人物印象查询。",
+    )
+
 
 async def test_call_rag_supervisor_live_recent_small_pliers_topic(live_supervisor2_env: dict) -> None:
     await _run_live_supervisor2_case(
@@ -193,6 +211,15 @@ async def test_call_rag_supervisor_live_what_is_xhs_link(live_supervisor2_env: d
         channel_id="905393941",
         query="那条小红书链接讲的是什么",
         note="典型链接对象回忆。",
+    )
+
+async def test_call_rag_supervisor_live_who_posted_xhs_link_comb(live_supervisor2_env: dict) -> None:
+    await _run_live_supervisor2_case(
+        live_supervisor2_env,
+        case_id="who_posted_xhs_link",
+        channel_id="905393941",
+        query="谁发了那个小红书链接，讲的是什么？",
+        note="典型字面锚点链接检索。",
     )
 
 
@@ -235,6 +262,15 @@ async def test_call_rag_supervisor_live_who_said_5090_qwen27b(live_supervisor2_e
         note="典型按技术短语找人物。",
     )
 
+async def test_call_rag_supervisor_live_who_said_5090_qwen27b2(live_supervisor2_env: dict) -> None:
+    await _run_live_supervisor2_case(
+        live_supervisor2_env,
+        case_id="who_said_5090_qwen27b",
+        channel_id="902317662",
+        query="那个说5090跑qwen27b的人是谁，你对他的印象怎么样，你和他最近有互动吗？",
+        note="典型按技术短语找人物。",
+    )
+
 
 async def test_call_rag_supervisor_live_cookie_manager_mention(live_supervisor2_env: dict) -> None:
     await _run_live_supervisor2_case(
@@ -265,6 +301,22 @@ async def test_call_rag_supervisor_live_additional_2(live_supervisor2_env: dict)
         note="Generic",
     )
 
+    await _run_live_supervisor2_case(
+        live_supervisor2_env,
+        case_id="",
+        channel_id="",
+        query="千纱能和我说说你自己是谁么",
+        note="Generic",
+    )
+
+    await _run_live_supervisor2_case(
+        live_supervisor2_env,
+        case_id="",
+        channel_id="",
+        query="千纱能做一个自我介绍么",
+        note="Generic",
+    )
+
 
 async def test_call_rag_supervisor_live_additional_3(live_supervisor2_env: dict) -> None:
     await _run_live_supervisor2_case(
@@ -282,6 +334,24 @@ async def test_call_rag_supervisor_live_additional_4(live_supervisor2_env: dict)
         case_id="",
         channel_id="",
         query="千纱你如何看待vibe coding？",
+        note="Generic",
+    )
+
+async def test_call_rag_supervisor_live_additional_4a(live_supervisor2_env: dict) -> None:
+    await _run_live_supervisor2_case(
+        live_supervisor2_env,
+        case_id="",
+        channel_id="",
+        query="你觉得vibe coding以后会成为主流么？",
+        note="Generic",
+    )
+
+async def test_call_rag_supervisor_live_additional_4b(live_supervisor2_env: dict) -> None:
+    await _run_live_supervisor2_case(
+        live_supervisor2_env,
+        case_id="",
+        channel_id="",
+        query="根据最近的聊天记录来看，你觉得vibe coding以后会成为主流么？",
         note="Generic",
     )
 
@@ -311,5 +381,14 @@ async def test_call_rag_supervisor_live_common_sense_2(live_supervisor2_env: dic
         case_id="",
         channel_id="",
         query="我想洗车，我家距离洗车店只有 50 米，请问你推荐我走路去还是开车去呢？",
+        note="Generic",
+    )
+
+async def test_call_rag_supervisor_live_common_sense_2a(live_supervisor2_env: dict) -> None:
+    await _run_live_supervisor2_case(
+        live_supervisor2_env,
+        case_id="",
+        channel_id="",
+        query="根据你的记忆回答：我想洗车，我家距离洗车店只有 50 米，请问你推荐我走路去还是开车去呢？",
         note="Generic",
     )

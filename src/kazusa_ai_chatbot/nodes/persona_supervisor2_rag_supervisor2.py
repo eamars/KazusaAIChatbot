@@ -42,6 +42,15 @@ from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.message import add_messages
 
+from kazusa_ai_chatbot.mcp_client import mcp_manager
+from kazusa_ai_chatbot.rag.cache2_policy import (
+    INITIALIZER_AGENT_REGISTRY_VERSION,
+    INITIALIZER_CACHE_NAME,
+    INITIALIZER_PROMPT_VERSION,
+    INITIALIZER_STRATEGY_SCHEMA_VERSION,
+    build_initializer_cache_key,
+)
+from kazusa_ai_chatbot.rag.cache2_runtime import get_rag_cache2_runtime
 from kazusa_ai_chatbot.rag.conversation_aggregate_agent import ConversationAggregateAgent
 from kazusa_ai_chatbot.rag.conversation_filter_agent import ConversationFilterAgent
 from kazusa_ai_chatbot.rag.conversation_keyword_agent import ConversationKeywordAgent
@@ -52,7 +61,6 @@ from kazusa_ai_chatbot.rag.user_list_agent import UserListAgent
 from kazusa_ai_chatbot.rag.user_lookup_agent import UserLookupAgent
 from kazusa_ai_chatbot.rag.user_profile_agent import UserProfileAgent
 from kazusa_ai_chatbot.rag.web_search_agent import WebSearchAgent
-from kazusa_ai_chatbot.mcp_client import mcp_manager
 from kazusa_ai_chatbot.utils import get_llm, parse_llm_json_output
 
 logger = logging.getLogger(__name__)
@@ -71,6 +79,7 @@ class ProgressiveRAGState(TypedDict):
         current_slot: The slot being targeted in the current iteration.
         known_facts: Slot results; each entry has slot, agent, resolved, summary, raw_result, attempts.
         messages: LangGraph message log — tool-call protocol only.
+        initializer_cache: Cache metadata for the initializer strategy lookup.
         loop_count: Safety cap counter.
         final_answer: Synthesised answer from the finalizer.
     """
@@ -82,6 +91,7 @@ class ProgressiveRAGState(TypedDict):
     current_slot: str
     known_facts: list[dict]
     messages: Annotated[list, add_messages]
+    initializer_cache: dict
     current_dispatch: dict
     last_agent_result: dict
     loop_count: int
@@ -129,6 +139,15 @@ do NOT create a slot for that name.
 Only create a slot for {character_name} when it IS the subject of data being retrieved
 (e.g. "what did {character_name} say about…").
 
+## Rule 0b — Character self-profile requests
+If the user asks {character_name} to talk about herself / themselves / "you" / "yourself"
+as the DATA SUBJECT, retrieve the character's own profile. This includes Chinese phrasing
+such as "你自己", "聊聊你自己", "介绍一下你自己", "说说你自己", or "你是什么样的人".
+Do NOT treat these as already-known conversational requests.
+Generate:
+  Slot 1: "Identity: look up display name '{character_name}' to get global_user_id"
+  Slot 2: "Profile: retrieve full user profile for the user resolved in slot 1"
+
 ## Rule 1 — Hard constraints
 - Slots are data targets only. No drafting, summarising, analysing, or reasoning.
 - Stop when all required facts are accounted for. The next model answers.
@@ -138,33 +157,42 @@ Only create a slot for {character_name} when it IS the subject of data being ret
   or "recent 10", inside the conversation slot text.
 - RAG gathers evidence only. Do not create slots for final judgment, persona stance, or answer wording.
 
-## Rule 1b — No retrieval when facts are already provided
-If original_query already contains all factual premises needed, and the remaining work is
-common sense, simple arithmetic, planning, preference, recommendation, or a trick question,
-return an empty slot list.
-Do not create Web-search or other slots merely because the query mentions location,
-distance, travel, shopping, recommendation, or a real-world action.
-Only retrieve when a concrete missing fact must be fetched from an internal or external source.
+## Rule 1b — Default Memory-search for self-contained queries
+If original_query already contains all factual premises needed and the remaining work is
+common sense, planning, preference, recommendation, or opinion, generate one Memory-search
+slot targeting the query's main topic.
+
+The character may hold relevant world knowledge, safety rules, or personal experience in
+persistent memory that enriches the answer. Always check, regardless of whether the user
+explicitly asks to recall memory.
+The Memory-search slot should target the topic, not restate the common-sense question itself.
+
+Do NOT add Web-search or structured-data slots (Identity, Profile, Conversation-*) merely
+because the query mentions location, distance, travel, shopping, or a real-world action.
+
+Exception — return empty slots only when the query is pure arithmetic, a tautology, or a
+trick question where memory is structurally irrelevant (e.g. "what is 2+2").
 
 ## Rule 2 — Context pre-check
 Read the context object before generating any slot.
 If global_user_id is already present in context, skip the Identity slot for that person.
 If a pronoun (他/她/你/他们) clearly refers to the person in context user_name, treat user_name as the resolved display name and generate an Identity slot for it.
 
-## Rule 3 — Identity-first pattern
-Use this when a NAMED PERSON (nickname or display name) is the known starting point:
-  Slot 1: "Identity: look up display name '<name>' to get global_user_id"
-  Slot 2+: content slots referencing "the user resolved in slot 1"
+## Rule 3 — Identity-first, Profile-always for person subjects
+When a NAMED PERSON is the starting point, begin with Identity.
+When that person is the primary relational subject (their behavior, interactions,
+events, impressions, or relationship with the character), insert Profile immediately
+after Identity and before any secondary slots.
 
-## Rule 4 — Profile-first relationship evidence pattern
-Use this when the query asks whether the character and a named/resolved user
-would get along, be compatible, have good chemistry, or otherwise needs a
-general relationship-facing read of that user.
-Generate a Profile slot after Identity. The profile/user-image agent is the
-dedicated source for compact relationship evidence. For this query class, the
-Profile slot is sufficient RAG evidence. Do not add Memory-search unless the
-query explicitly asks to search memories, remembered impressions, remembered
-opinions, or specific past memory records.
+Standard order: Identity → Profile → [secondary slots if needed]
+
+For pure impression or relationship-read queries ("怎么样", "合得来么", "what do you
+think of X"), Profile alone is sufficient — no secondary slot needed.
+Never use Memory-search for person-relationship data; relationship data lives in
+the profile, not in persistent memory.
+
+Exception: when the person is purely a content filter to locate a URL or exact
+quoted phrase with no relational dimension, the Profile slot may be omitted.
 
 ## Rule 5 — User-list pattern
 Use this when the query asks to enumerate users by display-name pattern, profile/user metadata,
@@ -182,7 +210,7 @@ If the query asks for MORE about that identified speaker, append Identity + cont
 If the query asks for counts, rankings, totals, or "most/least", use Rule 7 instead.
 
   Applies to:
-  - "Who said <exact phrase>?" → Conversation-keyword [→ Identity → Memory/Filter if follow-up needed]
+  - "Who said <exact phrase>?" → Conversation-keyword [→ Identity → Profile → Filter if follow-up needed]
   - "Who posted that <link type>?" → Conversation-keyword
   - "Who has been talking about <topic>?" → Conversation-semantic [→ Identity → more if needed]
   - "Has anyone mentioned <term>?" → Conversation-keyword
@@ -200,8 +228,9 @@ These slots compute evidence only; do not use them for opinions or persona inter
 When two patterns seem possible, choose the more structural source:
 - Display-name or user metadata predicates → User-list, not Conversation-keyword.
 - Counts, totals, rankings, "most", or "least" → Conversation-aggregate, not Conversation-keyword/semantic.
-- Generic compatibility / get-along / chemistry with a named user → Identity + Profile, not Memory-search.
-- Explicit remembered impressions, opinions, or past memory records → Memory-search.
+- Person is primary relational subject → Identity + Profile always (Rule 3), then secondary slots; never Memory-search for person-relationship data.
+- Impression or opinion about an OBJECT, concept, or non-human topic → Memory-search.
+- All facts provided, common-sense or opinion query → Memory-search on the topic (Rule 1b default); empty slots only for pure arithmetic or tautologies.
 - Exact quoted phrases, URLs, filenames, or literal content anchors → Conversation-keyword.
 - Fuzzy topics without exact wording → Conversation-semantic.
 
@@ -215,43 +244,48 @@ When a slot depends on a specific earlier slot, write "resolved in slot N" (e.g.
 - "Conversation-filter: retrieve [recent / yesterday's / last N] messages from the user resolved in slot N"
 - "Conversation-keyword: find messages containing <exact phrase or term> [from the user resolved in slot N]"
 - "Conversation-semantic: find recent messages about <topic> [from the user resolved in slot N]"
-- "Memory-search: search persistent memory for impressions or opinions about the user resolved in slot N"
+- "Memory-search: search persistent memory for impressions or opinions about a topic, concept, or non-human subject"
 - "Web-search: search the web for <description of target URL or topic from slot N>"
 
 ## Pattern gallery
 
-### 1. Named person → opinion (2 slots)
+### 1. Named person → impression or compatibility (2 slots)
 Query: "千纱你觉得小钳子这个人怎么样"  (character_name=千纱)
-  → 千纱 is addressee, skip. 小钳子 is named → identity-first.
+  → 千纱 is addressee, skip. Impression/compatibility read → Identity + Profile only (Rule 3).
+  → Same routing for "合得来么", "什么印象", "怎么样" — no secondary slot, no Memory-search.
   ["Identity: look up display name '小钳子' to get global_user_id",
-   "Memory-search: search persistent memory for impressions or opinions about the user resolved in slot 1"]
-
-### 1b. Named person → relationship compatibility (2 slots)
-Query: "千纱你觉得你能跟蚝爹油合得来么"  (character_name=千纱)
-  → 千纱 is addressee, skip. 合得来 is a generic relationship-facing read, so use Profile/user-image evidence.
-  ["Identity: look up display name '蚝爹油' to get global_user_id",
    "Profile: retrieve full user profile for the user resolved in slot 1"]
 
-### 1c. Provided facts → common-sense answer (0 slots)
+### 1c. Provided facts → Memory-search on topic (1 slot)
 Query: "我想洗车，我家距离洗车店只有 50 米，请问你推荐我走路去还是开车去呢？"
-  → The distance and destination are already provided. The remaining work is recommendation/common sense.
-  []
+  → All facts provided. Common-sense recommendation → default Memory-search on the topic (Rule 1b).
+  → Explicit hints ("根据你的记忆回答") and no-hint queries route identically.
+  ["Memory-search: search persistent memory for experiences or impressions related to 洗车 or nearby activities"]
 
-### 2. Named person → recent chat (2 slots)
+### 1d. Character self-profile request (2 slots)
+Query: "千纱聊聊你自己"  (character_name=千纱)
+  → 千纱 is addressed, but "你自己" is also the data subject. Retrieve the character's profile.
+  ["Identity: look up display name '千纱' to get global_user_id",
+   "Profile: retrieve full user profile for the user resolved in slot 1"]
+
+### 2. Named person → event or message history (3 slots)
+Query: "小钳子前两天欺负你了么"
+  → Specific past event: Identity → Profile (Rule 3) → time-bounded Conversation-filter.
+  ["Identity: look up display name '小钳子' to get global_user_id",
+   "Profile: retrieve full user profile for the user resolved in slot 1",
+   "Conversation-filter: retrieve messages from the user resolved in slot 1 from 2 days ago"]
+
 Query: "蚝爹油最近在聊什么"
-  → Named person → identity-first, then recent messages.
+  → Recent messages: same structure, open-ended filter. Preserve explicit counts if present.
   ["Identity: look up display name '蚝爹油' to get global_user_id",
+   "Profile: retrieve full user profile for the user resolved in slot 1",
    "Conversation-filter: retrieve recent messages from the user resolved in slot 1"]
 
-Query: "千纱的最近3条发言"
-  → Character is the subject of retrieval, so identity-first. Preserve the count.
-  ["Identity: look up display name '千纱' to get global_user_id",
-   "Conversation-filter: retrieve recent 3 messages from the user resolved in slot 1"]
-
-### 3. Named person → specific past quote (2 slots)
+### 3. Named person → specific past quote (3 slots)
 Query: "小钳子昨天说的AI那句是什么"
-  → Named person → identity-first, then keyword search restricted to that user.
+  → Named person → identity-first, then profile (Rule 3), then keyword search.
   ["Identity: look up display name '小钳子' to get global_user_id",
+   "Profile: retrieve full user profile for the user resolved in slot 1",
    "Conversation-keyword: find messages from the user resolved in slot 1 containing 'AI', sent yesterday"]
 
 ### 4. Direct content search, no follow-up (1 slot)
@@ -277,18 +311,20 @@ Query: "最近谁提到cookie管理器最多"
   → Count messages containing the literal term by user.
   ["Conversation-aggregate: count recent messages by user containing 'cookie管理器'"]
 
-### 5. Find speaker by exact phrase → get their impressions (3 slots)
+### 5. Find speaker by exact phrase → get their profile (3 slots)
 Query: "那个说5090能跑qwen27b的人，你对他有什么印象"
-  → Find message first (no named person), then resolve speaker identity, then memory.
+  → Find message first (no named person), then resolve speaker identity, then profile.
+  → Human subject: impression always resolves to Profile, not Memory-search.
   ["Conversation-keyword: find messages containing '5090' and 'qwen27b' to identify the speaker",
    "Identity: look up display name of the person found in slot 1 to get global_user_id",
-   "Memory-search: search persistent memory for impressions about the user resolved in slot 2"]
+   "Profile: retrieve full user profile for the user resolved in slot 2"]
 
-### 6. Find speaker by topic → get their full message history (3 slots)
+### 6. Find speaker by topic → get their profile and message history (4 slots)
 Query: "最近在聊版权保护的那个人，他平时都在群里聊些什么"
-  → Semantic search to find speaker, then identity, then pull all their recent messages.
+  → Semantic search to find speaker, then identity, then profile (Rule 3b), then messages.
   ["Conversation-semantic: find recent messages about 版权保护 to identify the speaker",
    "Identity: look up display name of the person identified in slot 1 to get global_user_id",
+   "Profile: retrieve full user profile for the user resolved in slot 2",
    "Conversation-filter: retrieve recent messages from the user resolved in slot 2"]
 
 ### 7. Named person → find their URL → fetch URL content (3 slots)
@@ -305,13 +341,14 @@ Query: "他上次说的那个链接里有什么信息"  (context has user_name='
    "Conversation-keyword: find messages from the user resolved in slot 1 containing a URL",
    "Web-search: retrieve the content at the URL found in slot 2"]
 
-### 9. Two named people → compare impressions (4 slots)
+### 9. Two named people → compare profiles (4 slots)
 Query: "小钳子和蚝爹油这两个人，你对他们各有什么印象"
-  → Two independent identity+memory chains. Slot 4 depends on slot 3, NOT slot 1.
+  → Two independent identity+profile chains (human subjects → Profile, not Memory-search).
+  → Slot 4 depends on slot 3, NOT slot 1.
   ["Identity: look up display name '小钳子' to get global_user_id",
-   "Memory-search: search persistent memory for impressions about '小钳子' (user resolved in slot 1)",
+   "Profile: retrieve full user profile for the user resolved in slot 1",
    "Identity: look up display name '蚝爹油' to get global_user_id",
-   "Memory-search: search persistent memory for impressions about '蚝爹油' (user resolved in slot 3)"]
+   "Profile: retrieve full user profile for the user resolved in slot 3"]
 
 ### 10. Find speaker by exact phrase → find their URL → fetch content (4 slots)
 Query: "说版权保护是play一环的那个人，他发过什么链接，链接里是什么内容"
@@ -334,6 +371,100 @@ Return valid JSON only:
 }}
 """
 _initializer_llm = get_llm(temperature=0.0, top_p=1.0)
+_MIN_INITIALIZER_CACHE_CONFIDENCE = 0.5
+
+
+def _initializer_cache_status(
+    *,
+    hit: bool,
+    reason: str,
+    cache_key: str,
+) -> dict[str, Any]:
+    """Build cache metadata for the RAG initializer.
+
+    Args:
+        hit: Whether the initializer strategy was served from cache.
+        reason: Machine-readable cache outcome.
+        cache_key: Exact Cache 2 key used for lookup.
+
+    Returns:
+        Metadata dict stored in progressive RAG state.
+    """
+    return {
+        "enabled": True,
+        "hit": hit,
+        "cache_name": INITIALIZER_CACHE_NAME,
+        "reason": reason,
+        "cache_key": cache_key,
+    }
+
+
+def _normalize_initializer_slots(raw_slots: object) -> list[str]:
+    """Normalize an initializer slot payload into a list of strings.
+
+    Args:
+        raw_slots: Value from LLM JSON or cached strategy payload.
+
+    Returns:
+        List of non-empty slot strings.
+    """
+    if not isinstance(raw_slots, list):
+        return []
+    return [str(slot).strip() for slot in raw_slots if str(slot).strip()]
+
+
+def _read_cached_initializer_slots(cached: object) -> list[str] | None:
+    """Validate a cached initializer strategy payload.
+
+    Args:
+        cached: Payload returned from Cache 2.
+
+    Returns:
+        Cached slots when the strategy is valid and confident enough, otherwise
+        None so the caller falls back to live initialization.
+    """
+    if not isinstance(cached, dict):
+        return None
+
+    raw_confidence = cached.get("confidence", 0.0)
+    if isinstance(raw_confidence, bool) or not isinstance(raw_confidence, (int, float)):
+        return None
+    if raw_confidence < _MIN_INITIALIZER_CACHE_CONFIDENCE:
+        return None
+
+    raw_slots = cached.get("unknown_slots")
+    if not isinstance(raw_slots, list):
+        return None
+    return _normalize_initializer_slots(raw_slots)
+
+
+async def _write_initializer_cache(
+    *,
+    cache_key: str,
+    unknown_slots: list[str],
+) -> None:
+    """Store one initializer strategy payload in Cache 2.
+
+    Args:
+        cache_key: Exact Cache 2 key for this query/context signature.
+        unknown_slots: Slot strategy produced by the live initializer.
+    """
+    await get_rag_cache2_runtime().store(
+        cache_key=cache_key,
+        cache_name=INITIALIZER_CACHE_NAME,
+        result={
+            "unknown_slots": list(unknown_slots),
+            "confidence": 1.0,
+        },
+        dependencies=[],
+        metadata={
+            "stage": "rag_initializer",
+            "initializer_prompt_version": INITIALIZER_PROMPT_VERSION,
+            "agent_registry_version": INITIALIZER_AGENT_REGISTRY_VERSION,
+            "strategy_schema_version": INITIALIZER_STRATEGY_SCHEMA_VERSION,
+        },
+    )
+
 
 async def rag_initializer(state: ProgressiveRAGState) -> dict:
     """Decompose original_query into an ordered list of unknown slots.
@@ -345,22 +476,54 @@ async def rag_initializer(state: ProgressiveRAGState) -> dict:
         Partial state update with unknown_slots populated.
     """
     character_name = state.get("character_name", "")
+    context = state.get("context", {})
+    cache_key = build_initializer_cache_key(
+        original_query=state["original_query"],
+        character_name=character_name,
+        context=context,
+    )
+    cached = await get_rag_cache2_runtime().get(cache_key)
+    cached_slots = _read_cached_initializer_slots(cached)
+    if cached_slots is not None:
+        logger.info("Initializer cache hit: %s", cached_slots)
+        return {
+            "unknown_slots": cached_slots,
+            "initializer_cache": _initializer_cache_status(
+                hit=True,
+                reason="hit",
+                cache_key=cache_key,
+            ),
+        }
+
     system_prompt = SystemMessage(content=_INITIALIZER_PROMPT.format(character_name=character_name))
     user_input = {
         "original_query": state["original_query"],
-        "context": state.get("context", {}),
+        "context": context,
     }
     human_message = HumanMessage(content=json.dumps(user_input, ensure_ascii=False))
 
     response = await _initializer_llm.ainvoke([system_prompt, human_message])
     result = parse_llm_json_output(str(response.content))
 
-    unknown_slots = result.get("unknown_slots", [])
-    if not isinstance(unknown_slots, list):
-        unknown_slots = []
+    cacheable_result = isinstance(result, dict) and isinstance(
+        result.get("unknown_slots"), list
+    )
+    if not isinstance(result, dict):
+        result = {}
+
+    unknown_slots = _normalize_initializer_slots(result.get("unknown_slots", []))
+    if cacheable_result:
+        await _write_initializer_cache(cache_key=cache_key, unknown_slots=unknown_slots)
 
     logger.info("Initializer slots: %s", unknown_slots)
-    return {"unknown_slots": unknown_slots}
+    return {
+        "unknown_slots": unknown_slots,
+        "initializer_cache": _initializer_cache_status(
+            hit=False,
+            reason="miss_stored" if cacheable_result else "miss_not_cacheable",
+            cache_key=cache_key,
+        ),
+    }
 
 
 # ── Dispatcher ─────────────────────────────────────────────────────
@@ -755,7 +918,10 @@ async def _summarize_agent_result(
     raw_result: object,
     known_facts: list[dict],
 ) -> str:
-    """Distil one agent result into a concise fact summary for downstream agents.
+    """Distil a resolved agent result into a concise fact summary for downstream agents.
+
+    Only called when resolved=True. Unresolved slots receive a deterministic
+    template in rag_evaluator and never reach this function.
 
     Args:
         slot: The slot description that was being resolved.
@@ -806,7 +972,10 @@ async def rag_evaluator(state: ProgressiveRAGState) -> dict:
     raw_result = agent_result.get("result")
     known_facts = state.get("known_facts", [])
 
-    summary = await _summarize_agent_result(slot, resolved, raw_result, known_facts)
+    if resolved:
+        summary = await _summarize_agent_result(slot, resolved, raw_result, known_facts)
+    else:
+        summary = f"检索未返回相关结果。槽位: {slot}"
 
     new_fact = {
         "slot": slot,
@@ -958,6 +1127,7 @@ async def call_rag_supervisor(
         "current_slot": "",
         "known_facts": [],
         "messages": [],
+        "initializer_cache": {},
         "current_dispatch": {},
         "last_agent_result": {},
         "loop_count": 0,
