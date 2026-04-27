@@ -526,7 +526,11 @@ async def rag_initializer(state: ProgressiveRAGState) -> dict:
         character_name=character_name,
         context=context,
     )
-    cached = await get_rag_cache2_runtime().get(cache_key)
+    cached = await get_rag_cache2_runtime().get(
+        cache_key,
+        cache_name=INITIALIZER_CACHE_NAME,
+        agent_name="rag_initializer",
+    )
     cached_slots = _read_cached_initializer_slots(cached)
     if cached_slots is not None:
         logger.info("Initializer cache hit: %s", cached_slots)

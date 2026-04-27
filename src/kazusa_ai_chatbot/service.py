@@ -54,6 +54,7 @@ from kazusa_ai_chatbot.nodes.relevance_agent import relevance_agent, multimedia_
 from kazusa_ai_chatbot.nodes.persona_supervisor2 import persona_supervisor2
 from kazusa_ai_chatbot.nodes.persona_supervisor2_consolidator import call_consolidation_subgraph
 from kazusa_ai_chatbot.nodes.persona_supervisor2_consolidator_persistence import configure_task_dispatcher
+from kazusa_ai_chatbot.rag.cache2_runtime import get_rag_cache2_runtime
 
 logger = logging.getLogger(__name__)
 
@@ -121,10 +122,22 @@ class EventRequest(BaseModel):
     payload: dict[str, Any] = Field(default_factory=dict)
 
 
+class Cache2AgentStatsResponse(BaseModel):
+    agent_name: str
+    hit_count: int
+    miss_count: int
+    hit_rate: float
+
+
+class Cache2HealthResponse(BaseModel):
+    agents: list[Cache2AgentStatsResponse] = Field(default_factory=list)
+
+
 class HealthResponse(BaseModel):
     status: str
     db: bool
     scheduler: bool
+    cache2: Cache2HealthResponse = Field(default_factory=Cache2HealthResponse)
 
 
 class RuntimeAdapterRegistrationRequest(BaseModel):
@@ -456,17 +469,22 @@ app = FastAPI(title="Kazusa Brain Service", lifespan=lifespan)
 async def health():
     db_ok = False
     try:
-        from kazusa_ai_chatbot.db import get_db
         db = await get_db()
         await db.client.admin.command("ping")
         db_ok = True
     except Exception:
-        pass
+        logger.debug("Health check database ping failed", exc_info=True)
 
     return HealthResponse(
         status="ok" if db_ok else "degraded",
         db=db_ok,
         scheduler=True,
+        cache2=Cache2HealthResponse(
+            agents=[
+                Cache2AgentStatsResponse(**row)
+                for row in get_rag_cache2_runtime().get_agent_stats()
+            ],
+        ),
     )
 
 

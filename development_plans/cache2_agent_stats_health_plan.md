@@ -4,7 +4,7 @@
 
 - Goal: Expose compact Cache2 per-agent hit/miss statistics through the existing `/health` data path.
 - Plan class: small
-- Status: draft
+- Status: completed
 - Overall cutover strategy: compatible
 - Highest-risk areas: preserving the existing `/health` contract; counting misses by agent without exposing cache keys, queries, user IDs, or cached results.
 - Acceptance criteria: `/health` still returns existing health fields and also returns `cache2.agents[]` rows with `agent_name`, `hit_count`, `miss_count`, and `hit_rate`.
@@ -218,8 +218,15 @@ This plan is complete when:
 
 ## Execution Evidence
 
-Fill this section only after implementation:
-
 - Static grep results:
+  - `rg "cache2.*agents|agent_name|hit_count|miss_count|hit_rate" src tests docs\HOWTO.md` found the implemented contract in service/runtime/tests/docs.
+  - `rg "raw_result|global_user_id|display_name|search_query|cache_key" src\kazusa_ai_chatbot\service.py src\kazusa_ai_chatbot\rag\cache2_runtime.py` found existing internal service/runtime fields and no added health payload fields beyond the approved four agent stats.
+- Compile check:
+  - `python -m py_compile src\kazusa_ai_chatbot\rag\cache2_runtime.py src\kazusa_ai_chatbot\rag\helper_agent.py src\kazusa_ai_chatbot\nodes\persona_supervisor2_rag_supervisor2.py src\kazusa_ai_chatbot\service.py tests\test_cache2_agent_stats.py tests\test_service_health.py` passed.
 - Test results:
+  - `pytest tests\test_cache2_agent_stats.py -q` passed.
+  - `pytest tests\test_service_health.py -q` passed.
+  - `pytest tests\test_rag_initializer_cache2.py -q` passed.
+  - `pytest tests\test_user_profile_agent.py -q` passed.
 - Health smoke response:
+  - Covered by `tests\test_service_health.py::test_health_includes_cache2_agent_stats`, which verifies existing fields plus `cache2.agents`.

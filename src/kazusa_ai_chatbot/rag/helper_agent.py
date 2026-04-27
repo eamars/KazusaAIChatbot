@@ -84,7 +84,11 @@ class BaseRAGHelperAgent(ABC):
         """
         if not self.cache_name or not cache_key:
             return None
-        return await self.cache_runtime().get(cache_key)
+        return await self.cache_runtime().get(
+            cache_key,
+            cache_name=self.cache_name,
+            agent_name=self.name,
+        )
 
     def cache_status(
         self,

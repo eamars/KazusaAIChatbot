@@ -195,6 +195,31 @@ chats are always active.
 
 Returns service health and Mongo reachability.
 
+The response also includes sanitized Cache2 agent-level lookup stats for
+display surfaces:
+
+```json
+{
+  "status": "ok",
+  "db": true,
+  "scheduler": true,
+  "cache2": {
+    "agents": [
+      {
+        "agent_name": "user_profile_agent",
+        "hit_count": 8,
+        "miss_count": 2,
+        "hit_rate": 0.8
+      }
+    ]
+  }
+}
+```
+
+The Cache2 block intentionally exposes only agent names and aggregate lookup
+counts. It does not include cache keys, user identifiers, queries, dependency
+scopes, or cached retrieval results.
+
 ### `POST /chat`
 
 Primary brain entrypoint.
