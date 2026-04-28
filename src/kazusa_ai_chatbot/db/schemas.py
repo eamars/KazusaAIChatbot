@@ -61,6 +61,35 @@ class ConversationMessageDoc(TypedDict, total=False):
     embedding: list[float]     # Dense vector (on text content only)
 
 
+class ConversationEpisodeEntryDoc(TypedDict, total=False):
+    """One short-term episode entry with first-seen metadata."""
+
+    text: str
+    first_seen_at: str
+
+
+class ConversationEpisodeStateDoc(TypedDict, total=False):
+    """Short-lived operational progress state for one user/channel episode."""
+
+    episode_state_id: str
+    platform: str
+    platform_channel_id: str
+    global_user_id: str
+    status: str
+    episode_label: str
+    continuity: str
+    user_state_updates: list[ConversationEpisodeEntryDoc]
+    assistant_moves: list[str]
+    overused_moves: list[str]
+    open_loops: list[ConversationEpisodeEntryDoc]
+    progression_guidance: str
+    turn_count: int
+    last_user_input: str
+    created_at: str
+    updated_at: str
+    expires_at: str
+
+
 class PlatformAccountDoc(TypedDict, total=False):
     """A linked platform account within a UserProfileDoc."""
     platform: str             # "discord" | "qq" | ...

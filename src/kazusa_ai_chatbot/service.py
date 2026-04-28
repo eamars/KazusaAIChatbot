@@ -23,6 +23,12 @@ from kazusa_ai_chatbot.config import (
     CONVERSATION_HISTORY_LIMIT,
     SCHEDULED_TASKS_ENABLED,
 )
+from kazusa_ai_chatbot.conversation_progress import (
+    ConversationProgressRecordInput,
+    ConversationProgressScope,
+    load_progress_context,
+    record_turn_progress,
+)
 from kazusa_ai_chatbot.db import (
     backfill_character_conversation_identity,
     close_db,
@@ -190,6 +196,7 @@ def _build_graph():
 
     graph.add_node("relevance_agent", relevance_agent)
     graph.add_node("multimedia_descriptor_agent", multimedia_descriptor_agent)
+    graph.add_node("load_conversation_episode_state", load_conversation_episode_state)
     graph.add_node("persona_supervisor2", persona_supervisor2)
 
     def _start_router(state):
@@ -215,11 +222,45 @@ def _build_graph():
     graph.add_conditional_edges(
         "relevance_agent",
         _route_after_relevance,
-        {"continue": "persona_supervisor2", "end": END},
+        {"continue": "load_conversation_episode_state", "end": END},
     )
+    graph.add_edge("load_conversation_episode_state", "persona_supervisor2")
     graph.add_edge("persona_supervisor2", END)
 
     return graph.compile()
+
+
+async def load_conversation_episode_state(state: IMProcessState) -> dict:
+    """Load prompt-facing conversation progress after relevance approves response.
+
+    Args:
+        state: Current service graph state after relevance.
+
+    Returns:
+        Partial state update containing stored episode state and compact progress.
+    """
+
+    scope = ConversationProgressScope(
+        platform=state["platform"],
+        platform_channel_id=state["platform_channel_id"],
+        global_user_id=state["global_user_id"],
+    )
+    load_result = await load_progress_context(
+        scope=scope,
+        current_timestamp=state["timestamp"],
+    )
+    logger.debug(
+        "Conversation progress loaded: platform=%s channel=%s user=%s source=%s turn_count=%d",
+        scope.platform,
+        scope.platform_channel_id or "<dm>",
+        scope.global_user_id,
+        load_result["source"],
+        load_result["conversation_progress"]["turn_count"],
+    )
+    return {
+        "conversation_episode_state": load_result["episode_state"],
+        "conversation_progress": load_result["conversation_progress"],
+    }
 
 
 def _compact_reply_context(reply_context: ReplyContext) -> ReplyContext:
@@ -358,6 +399,50 @@ async def _run_consolidation_background(state: dict) -> None:
         await call_consolidation_subgraph(state)
     except Exception:
         logger.exception("Background consolidation failed")
+
+
+async def _run_conversation_progress_record_background(state: dict) -> None:
+    """Record conversation progress after dialog output has been returned.
+
+    Args:
+        state: Stage-0..3 persona state snapshot needed by the progress recorder.
+
+    Returns:
+        None.
+    """
+
+    try:
+        linguistic_directives = state["action_directives"]["linguistic_directives"]
+        scope = ConversationProgressScope(
+            platform=state["platform"],
+            platform_channel_id=state["platform_channel_id"],
+            global_user_id=state["global_user_id"],
+        )
+        record_input: ConversationProgressRecordInput = {
+            "scope": scope,
+            "timestamp": state["timestamp"],
+            "prior_episode_state": state.get("conversation_episode_state"),
+            "decontexualized_input": state["decontexualized_input"],
+            "chat_history_recent": state["chat_history_recent"],
+            "content_anchors": linguistic_directives["content_anchors"],
+            "logical_stance": state["logical_stance"],
+            "character_intent": state["character_intent"],
+            "final_dialog": state["final_dialog"],
+        }
+        result = await record_turn_progress(record_input=record_input)
+        logger.debug(
+            "Conversation progress recorded: platform=%s channel=%s user=%s written=%s turn_count=%d continuity=%s status=%s cache_updated=%s",
+            scope.platform,
+            scope.platform_channel_id or "<dm>",
+            scope.global_user_id,
+            result["written"],
+            result["turn_count"],
+            result["continuity"],
+            result["status"],
+            result["cache_updated"],
+        )
+    except Exception:
+        logger.exception("Background conversation progress recording failed")
 
 
 def register_runtime_adapter(adapter) -> None:
@@ -668,6 +753,15 @@ async def chat(req: ChatRequest, background_tasks: BackgroundTasks):
         # Save bot message in background only if the bot actually generated a response
         if final_dialog:
             background_tasks.add_task(_save_bot_message, result)
+
+        if final_dialog and isinstance(consolidation_state, Mapping):
+            background_tasks.add_task(_run_conversation_progress_record_background, dict(consolidation_state))
+            logger.debug(
+                "Background conversation progress recorder queued: platform=%s channel=%s message=%s",
+                req.platform,
+                req.platform_channel_id or "<dm>",
+                req.platform_message_id or "<none>",
+            )
 
         if debug_modes.get("no_remember"):
             logger.debug("Background consolidation skipped: no_remember is active")

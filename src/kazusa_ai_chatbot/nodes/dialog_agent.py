@@ -311,6 +311,7 @@ _DIALOG_EVALUATOR_PROMPT = """\
 * **逻辑与事实违背**：
     * 必须执行 `linguistic_directives` 中的 `[DECISION]` 立场。
     * 必须提及 `content_anchors` 中的核心 `[FACT]`（允许自然、模糊地织入）。
+    * 若 `content_anchors` 含 `[AVOID_REPEAT]`，你必须判断 `final_dialog` 的主要回应动作是否仍然落在该避免动作上。若仍然重复，且没有满足 `[PROGRESSION]` 所要求的推进内容，必须驳回，并在 `feedback` 中写明被重复的避免动作标签。
 * **结构禁忌**：
     * **声纹违规 (`hesitation_density`)**：{ltp_hesitation_density_rule} 若 `final_dialog` 中“……”出现次数明显超出上述约束，必须驳回。此检查在所有重试次数均强制执行。
     * **`[SCOPE]` 消费检测**：若 `content_anchors` 含 `[SCOPE]`，检查 `final_dialog` 是否大致在其字数范围内：

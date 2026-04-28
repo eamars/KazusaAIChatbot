@@ -39,6 +39,7 @@ async def db_bootstrap() -> None:
         "memory",
         "user_profile_memories",
         "scheduled_events",
+        "conversation_episode_state",
     ]
     for name in required_collections:
         if name not in existing:
@@ -75,6 +76,16 @@ async def db_bootstrap() -> None:
     )
     await db.scheduled_events.create_index(
         "source_user_id", name="event_source_user",
+    )
+    await db.conversation_episode_state.create_index(
+        [("platform", 1), ("platform_channel_id", 1), ("global_user_id", 1)],
+        unique=True,
+        name="conversation_episode_scope_unique",
+    )
+    await db.conversation_episode_state.create_index(
+        "expires_at",
+        expireAfterSeconds=0,
+        name="conversation_episode_expires_at_ttl",
     )
     await db.memory.create_index(
         "memory_name", name="memory_name_idx",

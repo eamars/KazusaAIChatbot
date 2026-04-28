@@ -315,6 +315,7 @@ _CONTENT_ANCHOR_AGENT_PROMPT = """\
 1. **立场绝对化：** 你必须无条件服从并执行输入中的 `logical_stance`。你拥有决定内容结构的自由，但严禁改变逻辑立场。
 2. **锚点构建：** 生成台词的"骨架"与"灵魂"，而非具体台词。
 3. **去物理化**：严禁生成任何关于视线、脸红、动作的描述。
+4. **对话推进**：读取 `conversation_progress`，避免把已经过度使用的回应动作继续作为主动作；对仍未解决的用户状态使用 `age_hint` 理解其相对时间，不要把已披露的状态重新当成新信息追问。
 
 # 逻辑立场对齐协议 (Executive Order)
 你必须将 L2 的 `logical_stance` 强制映射到 `content_anchors` 的第一个标签 `[DECISION]` 中：
@@ -343,7 +344,8 @@ _CONTENT_ANCHOR_AGENT_PROMPT = """\
    - 若 `decontexualized_input` 仍含未解析指代或省略对象（如「这个 / 那个 / 这句 / 那句 / 这个意思 / 怎么说 / 这个呢」），且 `rag_result` 没有唯一可锚定对象，必须追问“具体指哪一个 / 哪一句 / 哪部分”，不得猜测定义、原因、身份或类别。
 4. **显性回应：** 如果 `decontexualized_input` 中包含明确的询问（Question）、请求（Request）或提议（Proposal），且 `character_intent` 不是 `CLARIFY`，`[ANSWER]` 必须明确包含决定或答案；若 `character_intent` 为 `CLARIFY`，`[ANSWER]` 必须明确包含澄清问题。
 4a. **操作细节保真：** 如果用户请求里包含未来操作的关键细节，例如明确的群/频道/房间 ID、被要求发送的消息正文、引用内容、提醒对象或其他执行参数，这些细节必须在 `content_anchors` 中被保留下来，优先写进 `[ANSWER]`，必要时可辅以 `[FACT]`。不要把 `54369546群` 简化成“某个群”，也不要把“今天天气真好呀”改写成泛泛的“那句话”。
-5. **表达量校准（[SCOPE]）：** 基于已填充的锚点数量与 `logical_stance`，生成一条 `[SCOPE]` 锚点。
+5. **进展记忆使用**：当 `conversation_progress.continuity` 是 `same_episode` 或 `related_shift` 时，必须参考 `overused_moves`、`open_loops`、`user_state_updates` 和 `progression_guidance`。如果 `overused_moves` 非空，且你本来会继续使用其中某个回应动作，必须输出一条 `[AVOID_REPEAT]`，并改用能推进对话的信息锚点。若当前轮确实需要承认同一个动作，也必须输出 `[PROGRESSION]` 说明本轮如何推进而不是重复。若 `continuity` 是 `sharp_transition`，忽略旧 episode obligations，只处理当前输入。
+6. **表达量校准（[SCOPE]）：** 基于已填充的锚点数量与 `logical_stance`，生成一条 `[SCOPE]` 锚点。
   例如：
   * 仅有 `[DECISION]` -> `~15字，说完[DECISION]即止`；
   * 含 `[FACT]` 或 `[ANSWER]` -> `~20-40字，[ANSWER]/[FACT]到位即可`；
@@ -380,7 +382,15 @@ _CONTENT_ANCHOR_AGENT_PROMPT = """\
     }},
     "internal_monologue": "意识层的决策逻辑",
     "logical_stance": "强制逻辑立场 (CONFIRM/REFUSE/TENTATIVE...)",
-    "character_intent": "行动意图 (BANTAR/CLARIFY/EVADE...)"
+    "character_intent": "行动意图 (BANTAR/CLARIFY/EVADE...)",
+    "conversation_progress": {{
+        "status": "active | new_episode | suspended | closed",
+        "continuity": "same_episode | related_shift | sharp_transition",
+        "user_state_updates": [{{"text": "用户已经披露的状态", "age_hint": "~3h ago"}}],
+        "overused_moves": ["已经过度使用的回应动作"],
+        "open_loops": [{{"text": "尚未解决的对话线程", "age_hint": "~3h ago"}}],
+        "progression_guidance": "下一轮应如何推进"
+    }}
 }}
 
 # 输出格式 (JSON)
@@ -391,14 +401,16 @@ _CONTENT_ANCHOR_AGENT_PROMPT = """\
         "[FACT] 必须提及的事实（有则填，无则省略）",
         "[ANSWER] 若decontexualized_input提出了问题，则需要根据internal_monologue提供回答；当 character_intent = CLARIFY 时，这里必须是澄清追问而不是具体答案（有则填，无则省略）",
         "[SOCIAL] 关系定位信号，如傲娇防线或示弱姿态（有则填，无则省略）",
-        "[SCOPE] ~X字，覆盖[锚点名]即止（必填，按步骤4生成）"
+        "[AVOID_REPEAT] 要避免作为主回应动作的过度使用动作（有则填，无则省略）",
+        "[PROGRESSION] 本轮相对于之前回应的推进方式（有则填，无则省略）",
+        "[SCOPE] ~X字，覆盖[锚点名]即止（必填，按步骤6生成）"
     ]
 }}
 
 # 输出硬规则
 - `content_anchors` 必须是字符串列表。
 - `[DECISION]` 必须放在第一项，`[SCOPE]` 必须放在最后一项。
-- 只允许输出 `[DECISION]`、`[FACT]`、`[ANSWER]`、`[SOCIAL]`、`[SCOPE]` 这五种标签；禁止自创 `[EMOTION]`、`[STYLE]` 等新标签。
+- 只允许输出 `[DECISION]`、`[FACT]`、`[ANSWER]`、`[SOCIAL]`、`[AVOID_REPEAT]`、`[PROGRESSION]`、`[SCOPE]` 这七种标签；禁止自创 `[EMOTION]`、`[STYLE]` 等新标签。
 - 若没有直接相关事实，就不要输出 `[FACT]`。
 - 当 `character_intent` 为 `CLARIFY` 时，`[ANSWER]` 必须是追问；禁止输出补全后的具体答案、定义或猜测。
 - 若用户输入并未提出需要回答的问题，可以省略 `[ANSWER]`。
@@ -417,6 +429,7 @@ async def call_content_anchor_agent(state: CognitionState) -> CognitionState:
         "internal_monologue": state["internal_monologue"],
         "logical_stance": state["logical_stance"],
         "character_intent": state["character_intent"],
+        "conversation_progress": state.get("conversation_progress"),
     }
     human_message = HumanMessage(content=json.dumps(msg, ensure_ascii=False))
     response = await _content_anchor_agent_llm.ainvoke([
@@ -448,6 +461,7 @@ _PREFERENCE_ADAPTER_PROMPT = """\
 4. **自然执行**：如果偏好是句尾词、称呼方式、回复语言、格式习惯等，要写成自然执行说明。
 5. **避免机械化**：例如句尾词不应要求每个碎片句都强行重复；语言偏好也不应写成僵硬的程序指令。
 6. **统一处理**：回复语言也只是偏好的一种，应与称呼、句尾词、格式习惯一样，基于当前输入、承诺、事实与画像综合判断，不要依赖额外硬编码桥接。
+7. **称呼/身份边界**：如果用户当前要求强加称呼、身份、主从关系或所有权语气，而 `internal_monologue`、`content_anchors`、`logical_stance` 或 `character_intent` 显示角色在回避、澄清、防备、犹豫、拒绝、重新框定或仅仅追问原因，不要把该称呼写入 `accepted_user_preferences`。只有当输入数据明确显示角色已经接受该称呼作为可持续表达偏好，或已有仍在生效的承诺/事实支持时，才可以输出。
 
 # 你可以处理的偏好类型
 - 回复语言偏好

@@ -171,6 +171,47 @@ def _base_state(
     }
 
 
+def _progress_doc_for_after_change(
+    *,
+    case: dict,
+    prior_user_disclosures: list[str],
+    user_turn_number: int,
+) -> dict | None:
+    """Build prompt-facing progress state for after-change live comparison.
+
+    Args:
+        case: Current diagnostic case.
+        prior_user_disclosures: Disclosures visible before this user turn.
+        user_turn_number: One-based user turn number within the diagnostic case.
+
+    Returns:
+        Compact conversation_progress payload for after-change runs, or ``None``
+        for before-change trace capture.
+    """
+
+    if _TRACE_PHASE == "before_change":
+        return None
+
+    user_state_updates = [
+        {"text": disclosure, "age_hint": "earlier in this episode"}
+        for disclosure in prior_user_disclosures
+    ]
+    return {
+        "status": "active",
+        "episode_label": case["case_id"],
+        "continuity": "same_episode",
+        "turn_count": user_turn_number,
+        "user_state_updates": user_state_updates[:8],
+        "assistant_moves": [case["overused_assistant_move"]],
+        "overused_moves": [case["overused_assistant_move"]],
+        "open_loops": user_state_updates[:5],
+        "progression_guidance": (
+            "Do not make the overused assistant move the main response again. "
+            "Use the prior disclosures as already-known context and advance the specific unresolved issue."
+        ),
+    }
+
+
 def _trim_message_for_prompt(message: dict) -> dict:
     """Keep only prompt-relevant fields from a conversation-history document."""
 
@@ -611,10 +652,16 @@ def _lexical_repetition_notes(
     }
 
 
-def _state_for_turn(case: dict, *, turn: dict, prior_history: list[dict]) -> dict:
+def _state_for_turn(
+    case: dict,
+    *,
+    turn: dict,
+    prior_history: list[dict],
+    prior_user_disclosures: list[str],
+) -> dict:
     """Build live cognition state for one user turn in a fixed sequence."""
 
-    return _base_state(
+    state = _base_state(
         user_input=turn["user_input"],
         chat_history_recent=prior_history,
         channel_topic=case["channel_topic"],
@@ -623,6 +670,14 @@ def _state_for_turn(case: dict, *, turn: dict, prior_history: list[dict]) -> dic
         user_name=case["user_name"],
         global_user_id=case["global_user_id"],
     )
+    conversation_progress = _progress_doc_for_after_change(
+        case=case,
+        prior_user_disclosures=prior_user_disclosures,
+        user_turn_number=int(turn["turn_index"]),
+    )
+    if conversation_progress is not None:
+        state["conversation_progress"] = conversation_progress
+    return state
 
 
 async def _record_progression_sequence(case: dict) -> None:
@@ -648,8 +703,18 @@ async def _record_progression_sequence(case: dict) -> None:
             "user_input": str(message.get("content", "")).strip(),
             "timestamp": message.get("timestamp", ""),
         }
+        conversation_progress = _progress_doc_for_after_change(
+            case=case,
+            prior_user_disclosures=prior_user_disclosures,
+            user_turn_number=user_turn_number,
+        )
         cognition_state, dialog = await _run_live_cognition_and_dialog(
-            _state_for_turn(case, turn=turn, prior_history=prior_history)
+            _state_for_turn(
+                case,
+                turn=turn,
+                prior_history=prior_history,
+                prior_user_disclosures=prior_user_disclosures,
+            )
         )
         final_dialog = dialog.get("final_dialog", [])
         assert isinstance(final_dialog, list), f"Unexpected dialog result: {dialog!r}"
@@ -666,6 +731,7 @@ async def _record_progression_sequence(case: dict) -> None:
         turn_trace = {
             **turn,
             "prior_user_disclosures": prior_user_disclosures,
+            "conversation_progress": conversation_progress,
             "content_anchors": cognition_state.get("content_anchors", []),
             "forbidden_phrases": cognition_state.get("forbidden_phrases", []),
             "logical_stance": cognition_state.get("logical_stance", ""),

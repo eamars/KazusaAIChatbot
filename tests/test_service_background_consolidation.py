@@ -99,7 +99,7 @@ async def test_chat_queues_background_consolidation_for_mapping_state(monkeypatc
     )
 
     assert response.messages == ["好呀。"]
-    assert len(background_tasks.tasks) == 2
+    assert len(background_tasks.tasks) == 3
 
 
 @pytest.mark.asyncio
@@ -128,6 +128,25 @@ async def test_build_graph_preserves_consolidation_state_from_supervisor(monkeyp
 
     monkeypatch.setattr(service_module, "relevance_agent", _relevance_agent)
     monkeypatch.setattr(service_module, "persona_supervisor2", _persona_supervisor)
+    monkeypatch.setattr(
+        service_module,
+        "load_progress_context",
+        AsyncMock(return_value={
+            "episode_state": None,
+            "conversation_progress": {
+                "status": "new_episode",
+                "episode_label": "",
+                "continuity": "sharp_transition",
+                "turn_count": 0,
+                "user_state_updates": [],
+                "assistant_moves": [],
+                "overused_moves": [],
+                "open_loops": [],
+                "progression_guidance": "",
+            },
+            "source": "empty",
+        }),
+    )
 
     graph = service_module._build_graph()
     result = await graph.ainvoke({
@@ -154,6 +173,50 @@ async def test_build_graph_preserves_consolidation_state_from_supervisor(monkeyp
 
     assert result["final_dialog"] == ["好呀。"]
     assert result["consolidation_state"]["decontexualized_input"] == "一分钟后发消息"
+
+
+@pytest.mark.asyncio
+async def test_build_graph_skips_episode_state_loader_when_relevance_declines(monkeypatch):
+    """Non-responsive turns exit before conversation progress is loaded."""
+
+    async def _relevance_agent(_state):
+        return {
+            "should_respond": False,
+            "reason_to_respond": "not addressed",
+            "use_reply_feature": False,
+            "channel_topic": "",
+            "indirect_speech_context": "",
+        }
+
+    load_progress_context = AsyncMock()
+    monkeypatch.setattr(service_module, "relevance_agent", _relevance_agent)
+    monkeypatch.setattr(service_module, "load_progress_context", load_progress_context)
+
+    graph = service_module._build_graph()
+    result = await graph.ainvoke({
+        "timestamp": "2026-04-25T18:07:24+12:00",
+        "platform": "qq",
+        "platform_message_id": "268099968",
+        "platform_user_id": "673225019",
+        "global_user_id": "global-user-1",
+        "user_name": "Test User",
+        "user_input": "third party chat",
+        "user_multimedia_input": [],
+        "user_profile": {"affinity": 500},
+        "platform_bot_id": "bot-id",
+        "bot_name": "Kazusa",
+        "character_profile": {"name": "Kazusa"},
+        "platform_channel_id": "673225019",
+        "channel_type": "group",
+        "channel_name": "Group",
+        "chat_history_wide": [],
+        "chat_history_recent": [],
+        "reply_context": {},
+        "debug_modes": {},
+    })
+
+    assert result["should_respond"] is False
+    load_progress_context.assert_not_awaited()
 
 
 @pytest.mark.asyncio

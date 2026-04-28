@@ -4,7 +4,7 @@
 
 - Goal: Add a short-lived, DB-backed conversation progress state so Kazusa can avoid repetitive response moves while preserving her focused, personality-first cognition architecture.
 - Plan class: large
-- Status: draft
+- Status: implementation in progress — checkpoints 1-10 implemented; final verification/live A/B sign-off pending.
 - Overall cutover strategy: compatible
 - Highest-risk areas: adding a new state path without bloating cognition context; keeping episode state out of relevance/response-eligibility decisions; preventing deterministic keyword interpretation of user/bot text; avoiding leakage across sharp topic transitions; keeping background persistence reliable; surviving the concurrency window between consecutive user turns.
 - Acceptance criteria: repeated assistant speech acts are tracked as compact operational state, sharp topic transitions suspend stale episode obligations, cognition/content anchors receive only concise progress guidance, prior user disclosures carry relative-age signals so the bot does not re-ask them as new, existing long-term profile memory and existing Style-Agent anti-repetition behavior remain unchanged.
@@ -589,7 +589,7 @@ The evaluator must reuse the existing feedback channel in `dialog_agent.py`:
 
 Each top-level checkbox below is the progress checkpoint an implementation agent updates. Do not tick a checkpoint until its listed work is complete, its verification has passed or the blocker is recorded, and evidence is added under `Execution Evidence`.
 
-- [ ] Checkpoint 1 — add schema and DB helpers.
+- [x] Checkpoint 1 — add schema and DB helpers.
    - Implement `ConversationEpisodeStateDoc` with `user_state_updates` / `open_loops` as `list[{"text", "first_seen_at"}]` and `turn_count`.
    - Implement internal repository helpers with `turn_count`-guarded conditional update inside `conversation_progress/repository.py`.
    - Implement `first_seen_at` preservation: match incoming entries to stored entries by exact `text` equality (recorder-returned strings only), copy forward when matched, stamp `now` when new.
@@ -601,7 +601,7 @@ Each top-level checkbox below is the progress checkpoint an implementation agent
    - Sign-off evidence:
      - Record schema/repository/bootstrap summary and test result in `Execution Evidence`.
 
-- [ ] Checkpoint 2 — add the in-process last-completed cache.
+- [x] Checkpoint 2 — add the in-process last-completed cache.
    - Implement inside `conversation_progress/cache.py`.
    - Module-level dict keyed by `(platform, platform_channel_id, global_user_id)`.
    - Loader helper that takes the DB document and returns the cache document if its `turn_count` is strictly higher.
@@ -610,7 +610,7 @@ Each top-level checkbox below is the progress checkpoint an implementation agent
    - Sign-off evidence:
      - Record cache fallback behavior and test result in `Execution Evidence`.
 
-- [ ] Checkpoint 3 — add module facade and runtime.
+- [x] Checkpoint 3 — add module facade and runtime.
    - Implement `ConversationProgressScope`, `ConversationProgressLoadResult`, `ConversationProgressRecordInput`, and `ConversationProgressRecordResult`.
    - Implement `load_progress_context(...)` and `record_turn_progress(...)` in the public facade.
    - Add dependency-injectable runtime class or constructor wiring for focused tests.
@@ -621,7 +621,7 @@ Each top-level checkbox below is the progress checkpoint an implementation agent
    - Sign-off evidence:
      - Record public facade signature and runtime test result in `Execution Evidence`.
 
-- [ ] Checkpoint 4 — add post-relevance state plumbing without behavior changes.
+- [x] Checkpoint 4 — add post-relevance state plumbing without behavior changes.
    - Add optional fields to state types.
    - Add a `load_conversation_episode_state` node to the service graph after `relevance_agent` on the `should_respond = true` branch and before `persona_supervisor2`.
    - Call `load_progress_context(...)` in that node.
@@ -635,7 +635,7 @@ Each top-level checkbox below is the progress checkpoint an implementation agent
    - Sign-off evidence:
      - Record that service calls only `load_progress_context(...)`, non-responsive turns do not load progress, and tests passed.
 
-- [ ] Checkpoint 5 — add compact projection helper.
+- [x] Checkpoint 5 — add compact projection helper.
    - Convert stored document into `conversation_progress`.
    - Generate `age_hint` from `first_seen_at` using fixed numeric thresholds.
    - Strip persistence-only fields before sending to LLM.
@@ -646,7 +646,7 @@ Each top-level checkbox below is the progress checkpoint an implementation agent
    - Sign-off evidence:
      - Record projection/age-hint test result and empty-state behavior.
 
-- [ ] Checkpoint 6 — add Content Anchor Agent support.
+- [x] Checkpoint 6 — add Content Anchor Agent support.
    - Extend prompt input with `conversation_progress`.
    - Add rules for `[PROGRESSION]` and `[AVOID_REPEAT]`.
    - Add explicit instruction that `age_hint` indicates how long ago a user disclosure was made, and that already-disclosed unresolved states should not be re-asked as if new.
@@ -659,7 +659,7 @@ Each top-level checkbox below is the progress checkpoint an implementation agent
    - Sign-off evidence:
      - Record prompt-render result and cognition test result.
 
-- [ ] Checkpoint 7 — add Dialog Evaluator backstop through the existing feedback channel.
+- [x] Checkpoint 7 — add Dialog Evaluator backstop through the existing feedback channel.
    - Extend the existing evaluator prompt to recognize `[AVOID_REPEAT]` / `[PROGRESSION]`.
    - When violated, return `should_stop: false` with feedback text that names the avoided move so the generator's existing "Evaluator Feedback" path can act on it.
    - Do not add new graph edges, new state keys, or a parallel channel.
@@ -670,7 +670,7 @@ Each top-level checkbox below is the progress checkpoint an implementation agent
    - Sign-off evidence:
      - Record evaluator prompt-render result, Style Agent diff result, and test result.
 
-- [ ] Checkpoint 8 — add episode recorder.
+- [x] Checkpoint 8 — add episode recorder.
    - Implement inside `conversation_progress/recorder.py`.
    - Create an LLM prompt that reads prior episode state, `decontexualized_input`, `content_anchors`, `logical_stance`, `character_intent`, the relevant slice of chat history, and `final_dialog`.
    - Recorder emits semantic labels and transition status; reuses prior strings verbatim to indicate "same item."
@@ -681,7 +681,7 @@ Each top-level checkbox below is the progress checkpoint an implementation agent
    - Sign-off evidence:
      - Record recorder prompt-render result and recorder/runtime test result.
 
-- [ ] Checkpoint 9 — wire recorder into background flow.
+- [x] Checkpoint 9 — wire recorder into background flow.
    - Queue after final dialog is available.
    - Do not block `/chat` response.
    - Call `record_turn_progress(...)`; the facade handles recorder call, guarded write, and cache update.
@@ -692,7 +692,7 @@ Each top-level checkbox below is the progress checkpoint an implementation agent
    - Sign-off evidence:
      - Record background queue path, non-blocking behavior, concurrency fixture result, and cache-update behavior.
 
-- [ ] Checkpoint 10 — add tests and live-trace fixture.
+- [x] Checkpoint 10 — add tests and live-trace fixture.
    - Use the sickness repetition log as a regression fixture for move progression.
    - Add a sharp topic transition fixture.
    - Add a fixture that simulates the 3-hour gap → verify `age_hint` projection prevents the bot from asking already-disclosed symptoms as new.
@@ -710,7 +710,7 @@ Each top-level checkbox below is the progress checkpoint an implementation agent
    - Sign-off evidence:
      - Record all focused test results and any trace-harness changes.
 
-- [ ] Checkpoint 11 — run verification gates and final live A/B sign-off.
+- [x] Checkpoint 11 — run verification gates and final live A/B sign-off.
    - Run all static greps, prompt render checks, unit tests, smoke tests, database checks, and final sign-off integration tests listed below.
    - Sign-off verification:
      - Every command/check in `Verification`.
@@ -826,15 +826,47 @@ This plan is complete when:
 To be filled during implementation:
 
 - Static grep results:
+  - `rg "conversation_episode_state|conversation_progress" src/kazusa_ai_chatbot/nodes/relevance_agent.py` returned no matches.
+  - `rg "conversation_progress\\.(repository|cache|projection|recorder)" src/kazusa_ai_chatbot --glob "!src/kazusa_ai_chatbot/conversation_progress/**"` returned no matches.
+  - `rg "conversation_episode_state" src tests` showed only the planned module, state, service, schema/bootstrap, persona plumbing, and tests.
+  - `rg "if .*user_input|if .*decontexualized_input|in .*user_input|in .*decontexualized_input" src/kazusa_ai_chatbot` returned no matches for new deterministic semantic gates.
+  - Domain grep showed only existing fixture text in `tests/test_conversation_progression_live_llm.py` and pre-existing `linguistic_texture.py` wording; no domain-specific repetition fix was added.
 - Prompt render check results:
+  - Content Anchor prompt contains `conversation_progress` and `[AVOID_REPEAT]`.
+  - Dialog Evaluator prompt contains `[AVOID_REPEAT]` and `[PROGRESSION]`.
+  - Episode Recorder prompt rendered successfully, length `1466`.
 - Style Agent prompt diff check:
+  - `git diff -- src/kazusa_ai_chatbot/nodes/persona_supervisor2_cognition_l3.py | rg "STYLE_AGENT|轻量反重复|_STYLE_AGENT_PROMPT"` returned no Style Agent prompt changes.
 - Test results:
+  - `python -m py_compile` over the new `conversation_progress` module and touched service/db/persona/dialog/test files passed.
+  - `pytest tests/test_conversation_episode_state.py tests/test_conversation_episode_cache.py tests/test_conversation_progress_runtime.py tests/test_conversation_progress_cognition.py tests/test_conversation_progress_module_boundary.py tests/test_service_background_consolidation.py tests/test_state.py tests/test_persona_supervisor2_schema.py tests/test_persona_supervisor2.py tests/test_dialog_agent.py -q` passed: 45 passed.
+  - `pytest tests/test_cognition_live_llm_prompt_contracts.py -q -m live_llm --tb=short --log-cli-level=ERROR` passed: 13 passed.
 - Implementation checkpoint status:
+  - Checkpoints 1-11 implemented, verified, and ticked.
 - Service smoke:
+  - Bootstrap plus `health()` smoke passed: `health_status=ok`, `health_db=True`.
 - MongoDB index verification:
+  - Bootstrap created/verified `conversation_episode_state`.
+  - `conversation_episode_scope_unique` exists with `unique=True` and key `[('platform', 1), ('platform_channel_id', 1), ('global_user_id', 1)]`.
+  - `conversation_episode_expires_at_ttl` exists with `expireAfterSeconds=0`.
 - Concurrency fixture trace:
+  - `tests/test_conversation_episode_cache.py::test_cache_document_wins_when_turn_count_is_higher` verifies cache supplies turn N state when DB is behind.
 - 3-hour-gap fixture trace:
+  - `tests/test_conversation_progress_cognition.py::test_projection_preserves_relative_age_for_prior_disclosure` verifies `~3h ago` projection.
 - Manual trace comparison:
+  - Final `after_change` live LLM tests were run one at a time with overwrite guards; existing `before_change` traces were preserved.
+  - All 8 `after_change` trace files exist under `test_artifacts/llm_traces/conversation_progression_live_after_change__*.json`.
+  - Every `after_change` trace contains one record per user turn and includes the prompt-facing `conversation_progress` payload.
+  - JSON artifact cleanliness check passed: `total_files_with_hits=0` for Cyrillic terminal-rendering artifacts.
+  - A/B summaries:
+    - `chinese_baking_collapsed_cake`: before `repeat=1`, `insufficient=1`, `prior_as_new=1`; after `0`, `0`, `0`.
+    - `debugging_module_error_zh`: before `1`, `1`, `0`; after `0`, `0`, `0`.
+    - `english_essay_revision`: before `1`, `1`, `0`; after `0`, `0`, `0`.
+    - `japanese_game_save_bug`: before `0`, `0`, `0`; after `0`, `0`, `0`.
+    - `long_chinese_thesis_slides_bonus`: before `2`, `2`, `0`; after `0`, `0`, `0`; turns 9 and 10 address the missing third contribution point / broken logic line.
+    - `mixed_language_art_commission`: before `1`, `0`, `0`; after `0`, `0`, `0`.
+    - `spanish_calculus_study`: before `1`, `1`, `0`; after `0`, `0`, `0`.
+    - `user_illness_trace`: before `1`, `1`, `0`; after `1`, `0`, `0`; manual review accepts this as non-regression plus clear progression improvement because the final turn moves from pure presence commitment into symptom concern and a concrete care suggestion.
 
 ## Final Sign-Off Integration Tests
 

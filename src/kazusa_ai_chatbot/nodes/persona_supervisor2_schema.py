@@ -1,6 +1,7 @@
-from typing import TypedDict
+from typing import NotRequired, TypedDict
+from kazusa_ai_chatbot.conversation_progress import ConversationProgressPromptDoc
 from kazusa_ai_chatbot.state import MultiMediaDoc, DebugModes, ReplyContext
-from kazusa_ai_chatbot.db import CharacterProfileDoc, UserProfileDoc
+from kazusa_ai_chatbot.db import CharacterProfileDoc, ConversationEpisodeStateDoc, UserProfileDoc
 
 
 class GlobalPersonaState(TypedDict):
@@ -25,6 +26,8 @@ class GlobalPersonaState(TypedDict):
     reply_context: ReplyContext
     indirect_speech_context: str
     channel_topic: str
+    conversation_episode_state: NotRequired[ConversationEpisodeStateDoc | None]
+    conversation_progress: NotRequired[ConversationProgressPromptDoc]
 
     # Debug
     debug_modes: DebugModes
@@ -79,6 +82,7 @@ class CognitionState(TypedDict):
     reply_context: ReplyContext
     indirect_speech_context: str
     channel_topic: str
+    conversation_progress: NotRequired[ConversationProgressPromptDoc]
 
     decontexualized_input: str
     rag_result: dict

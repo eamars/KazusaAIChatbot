@@ -1,7 +1,11 @@
 from __future__ import annotations
 
 from typing import Any
+from typing import NotRequired
 from typing import TypedDict
+
+from kazusa_ai_chatbot.conversation_progress import ConversationProgressPromptDoc
+from kazusa_ai_chatbot.db.schemas import ConversationEpisodeStateDoc
 
 
 class MultiMediaDoc(TypedDict):
@@ -57,6 +61,8 @@ class IMProcessState(TypedDict):
     use_reply_feature: bool
     channel_topic: str
     indirect_speech_context: str  # Only populated for Situation B (user talks about the character to others)
+    conversation_episode_state: NotRequired[ConversationEpisodeStateDoc | None]
+    conversation_progress: NotRequired[ConversationProgressPromptDoc]
 
     # Debug modes (optional, passed from ChatRequest)
     debug_modes: DebugModes

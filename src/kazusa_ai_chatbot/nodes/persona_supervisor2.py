@@ -100,6 +100,8 @@ async def persona_supervisor2(state: IMProcessState) -> dict:
         "reply_context": state.get("reply_context", {}),
         "indirect_speech_context": state.get("indirect_speech_context", ""),
         "channel_topic": state["channel_topic"],
+        "conversation_episode_state": state.get("conversation_episode_state"),
+        "conversation_progress": state.get("conversation_progress"),
         "debug_modes": state.get("debug_modes", {}),
     }
     
