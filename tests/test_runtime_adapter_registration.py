@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock
 
@@ -131,6 +132,119 @@ async def test_remote_http_adapter_posts_send_message_payload(monkeypatch):
     assert result.platform == "qq"
     assert result.channel_id == "54369546"
     assert result.message_id == "outbound-1"
+
+
+class _FakeNapCatWebSocket:
+    """Small websocket double for NapCat API response tests."""
+
+    def __init__(self, message_data: dict):
+        self._message_data = message_data
+        self.sent_payloads: list[dict] = []
+
+    async def send(self, payload: str) -> None:
+        """Capture the sent websocket frame."""
+
+        self.sent_payloads.append(json.loads(payload))
+
+    async def recv(self) -> str:
+        """Return a get_msg response matching the most recent echo id."""
+
+        echo_id = self.sent_payloads[-1]["echo"]
+        return json.dumps({
+            "echo": echo_id,
+            "status": "ok",
+            "data": self._message_data,
+        })
+
+
+@pytest.mark.asyncio
+async def test_napcat_hydrates_reply_target_from_platform_get_msg():
+    """QQ reply ids should resolve to hard reply-to-bot metadata in the adapter."""
+
+    adapter = NapCatWSAdapter(
+        ws_url="ws://napcat.local/ws",
+        ws_token="token",
+        brain_url="http://127.0.0.1:8000",
+        brain_response_timeout=30,
+        runtime_host="127.0.0.1",
+        runtime_port=8011,
+        runtime_public_url="http://127.0.0.1:8011",
+        channel_ids=["54369546"],
+        debug_modes={},
+    )
+    adapter.bot_id = "3768713357"
+    ws = _FakeNapCatWebSocket({
+        "message_id": 1733223276,
+        "user_id": 3768713357,
+        "sender": {"nickname": "杏山千纱"},
+        "raw_message": "上一条千纱消息",
+    })
+    reply_context = {"reply_to_message_id": "1733223276"}
+
+    await adapter._hydrate_reply_context_from_platform(reply_context, ws)
+    adapter._finalize_reply_target(reply_context)
+
+    assert reply_context == {
+        "reply_to_message_id": "1733223276",
+        "reply_to_platform_user_id": "3768713357",
+        "reply_to_display_name": "杏山千纱",
+        "reply_excerpt": "上一条千纱消息",
+        "reply_to_current_bot": True,
+    }
+    assert ws.sent_payloads[0]["action"] == "get_msg"
+    assert ws.sent_payloads[0]["params"] == {"message_id": 1733223276}
+    await adapter.close()
+
+
+@pytest.mark.asyncio
+async def test_napcat_handle_event_forwards_reply_to_current_bot_metadata():
+    """Inbound QQ replies to the bot should reach the brain with reply_to_current_bot=true."""
+
+    adapter = NapCatWSAdapter(
+        ws_url="ws://napcat.local/ws",
+        ws_token="token",
+        brain_url="http://127.0.0.1:8000",
+        brain_response_timeout=30,
+        runtime_host="127.0.0.1",
+        runtime_port=8011,
+        runtime_public_url="http://127.0.0.1:8011",
+        channel_ids=["1082431481"],
+        debug_modes={},
+    )
+    adapter.bot_id = "3768713357"
+    adapter.bot_name = "杏山千纱"
+    adapter.brain_client.post = AsyncMock(return_value=_DummyResponse({
+        "messages": [],
+        "should_reply": False,
+    }))
+    ws = _FakeNapCatWebSocket({
+        "message_id": 1733223276,
+        "user_id": 3768713357,
+        "sender": {"nickname": "杏山千纱"},
+        "raw_message": "上一条千纱消息",
+    })
+
+    await adapter.handle_event(
+        {
+            "post_type": "message",
+            "message_type": "group",
+            "message_id": 394466266,
+            "group_id": 1082431481,
+            "user_id": 3167827653,
+            "sender": {"nickname": "赛博马里奥"},
+            "message": [
+                {"type": "reply", "data": {"id": "1733223276"}},
+                {"type": "text", "data": {"text": "千纱さん，你来了呀"}},
+            ],
+        },
+        ws,
+    )
+
+    payload = adapter.brain_client.post.await_args.kwargs["json"]
+    assert payload["reply_context"]["reply_to_current_bot"] is True
+    assert payload["reply_context"]["reply_to_platform_user_id"] == "3768713357"
+    assert payload["reply_context"]["reply_to_message_id"] == "1733223276"
+    await adapter.close()
 
 
 @pytest.mark.asyncio

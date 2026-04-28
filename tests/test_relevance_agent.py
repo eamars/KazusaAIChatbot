@@ -370,6 +370,32 @@ async def test_relevance_chaotic_group_with_bot_mention_invokes_llm() -> None:
 
 
 @pytest.mark.asyncio
+async def test_relevance_chaotic_group_with_reply_to_bot_invokes_llm() -> None:
+    """Structured reply-to-bot metadata should override the chaotic skip."""
+    state = _base_state()
+    state["reply_context"] = {
+        "reply_to_message_id": "bot-msg",
+        "reply_to_platform_user_id": "bot_456",
+        "reply_to_current_bot": True,
+    }
+    state["chat_history_wide"] = [
+        _history_row(platform_user_id="user_1", timestamp="2026-04-27T10:00:00+00:00"),
+        _history_row(platform_user_id="user_2", timestamp="2026-04-27T10:00:10+00:00"),
+        _history_row(platform_user_id="user_3", timestamp="2026-04-27T10:00:20+00:00"),
+        _history_row(platform_user_id="user_1", timestamp="2026-04-27T10:00:30+00:00"),
+    ]
+    llm_response = _llm_response('{"should_respond": false, "reason_to_respond": "character declines", "use_reply_feature": false, "channel_topic": "", "indirect_speech_context": ""}')
+
+    with patch("kazusa_ai_chatbot.nodes.relevance_agent._relevance_agent_llm") as mock_llm:
+        mock_llm.ainvoke = AsyncMock(return_value=llm_response)
+        result = await relevance_agent(state)
+
+    assert result["should_respond"] is False
+    assert result["reason_to_respond"] == "character declines"
+    mock_llm.ainvoke.assert_called_once()
+
+
+@pytest.mark.asyncio
 async def test_relevance_regression_qq_ambiguous_you_in_reply_thread_skips_llm() -> None:
     """QQ-style ambiguous second-person message should not hijack a noisy thread."""
     state = _base_state()

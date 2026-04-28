@@ -104,6 +104,8 @@ class NapCatWSAdapter:
         self.bot_id: Optional[str] = None
         self.bot_name: Optional[str] = None
         self._ws = None
+        self._api_response_futures: dict[str, asyncio.Future] = {}
+        self._api_dispatch_enabled = False
         self._runtime_server: uvicorn.Server | None = None
         self._runtime_server_task: asyncio.Task | None = None
         self._heartbeat_task: asyncio.Task | None = None
@@ -134,14 +136,20 @@ class NapCatWSAdapter:
                         logger.info("No active groups configured — all groups are listen-only (Private chats are active).")
                     
                     # 2. Main Event Loop
+                    self._api_dispatch_enabled = True
                     while True:
                         message = await ws.recv()
                         data = json.loads(message)
+
+                        if self._resolve_api_response(data):
+                            continue
 
                         # Handle Events (messages, etc.)
                         asyncio.create_task(self.handle_event(data, ws))
             except Exception as e:
                 logger.error(f"Connection lost: {e}. Retrying in 5s...")
+                self._api_dispatch_enabled = False
+                self._reject_pending_api_responses(e)
                 self._ws = None
                 await asyncio.sleep(5)
 
@@ -230,6 +238,42 @@ class NapCatWSAdapter:
             self.bot_id = "unknown"
             self.bot_name = "NapCat Bot"
 
+    def _resolve_api_response(self, data: dict) -> bool:
+        """Resolve a pending websocket API call from a received echo response.
+
+        Args:
+            data: Decoded NapCat websocket frame.
+
+        Returns:
+            True when the frame was consumed as an API response.
+        """
+        echo_id = data.get("echo")
+        if not echo_id:
+            return False
+
+        future = self._api_response_futures.pop(echo_id, None)
+        if future is None:
+            return False
+
+        if not future.done():
+            future.set_result(data)
+        return True
+
+    def _reject_pending_api_responses(self, exc: BaseException) -> None:
+        """Fail all pending websocket API calls after the connection drops.
+
+        Args:
+            exc: Exception that caused the websocket connection to stop.
+
+        Returns:
+            None.
+        """
+        pending = list(self._api_response_futures.values())
+        self._api_response_futures.clear()
+        for future in pending:
+            if not future.done():
+                future.set_exception(exc)
+
     async def _call_api(self, ws, action: str, params: dict = None):
         """Helper to call OneBot APIs and wait for the specific response."""
         echo_id = f"sync_{action}_{asyncio.get_event_loop().time()}"
@@ -238,6 +282,16 @@ class NapCatWSAdapter:
             "params": params or {},
             "echo": echo_id
         }
+
+        if self._api_dispatch_enabled:
+            loop = asyncio.get_running_loop()
+            future = loop.create_future()
+            self._api_response_futures[echo_id] = future
+            await ws.send(json.dumps(payload))
+            try:
+                return await asyncio.wait_for(future, timeout=10.0)
+            finally:
+                self._api_response_futures.pop(echo_id, None)
 
         await ws.send(json.dumps(payload))
 
@@ -258,6 +312,89 @@ class NapCatWSAdapter:
             True when this adapter's bot id is present.
         """
         return bool(self.bot_id and self.bot_id in mentioned_ids)
+
+    def _apply_replied_message_metadata(self, reply_context: dict[str, str | bool], message_data: dict) -> None:
+        """Populate reply target fields from a NapCat/OneBot message document.
+
+        Args:
+            reply_context: Mutable reply context that will be forwarded to the
+                brain service.
+            message_data: Message document returned by the platform ``get_msg``
+                API for the replied-to message.
+
+        Returns:
+            None.
+        """
+        sender = message_data.get("sender")
+        if not isinstance(sender, dict):
+            sender = {}
+
+        target_user_id = message_data.get("user_id") or sender.get("user_id")
+        if target_user_id is not None:
+            reply_context["reply_to_platform_user_id"] = str(target_user_id)
+
+        target_name = sender.get("card") or sender.get("nickname")
+        if target_name:
+            reply_context["reply_to_display_name"] = str(target_name)
+
+        reply_excerpt = message_data.get("raw_message") or message_data.get("message")
+        if isinstance(reply_excerpt, str) and reply_excerpt:
+            reply_context["reply_excerpt"] = reply_excerpt
+
+    async def _hydrate_reply_context_from_platform(self, reply_context: dict[str, str | bool], ws) -> None:
+        """Resolve reply target metadata from NapCat before calling the brain.
+
+        Args:
+            reply_context: Mutable reply context extracted from the incoming
+                message event.
+            ws: Active NapCat websocket used for OneBot API calls.
+
+        Returns:
+            None. The context is updated in place when platform metadata is
+            available.
+        """
+        reply_to_message_id = reply_context.get("reply_to_message_id")
+        if not reply_to_message_id or reply_context.get("reply_to_platform_user_id"):
+            return
+
+        params: dict[str, int | str] = {"message_id": str(reply_to_message_id)}
+        if str(reply_to_message_id).isdigit():
+            params["message_id"] = int(str(reply_to_message_id))
+
+        try:
+            response = await self._call_api(ws, "get_msg", params)
+        except (asyncio.TimeoutError, websockets.exceptions.WebSocketException) as exc:
+            logger.warning("Failed to resolve QQ reply target message_id=%s: %s", reply_to_message_id, exc)
+            return
+
+        if response.get("status") != "ok":
+            logger.warning(
+                "QQ reply target lookup returned status=%s message_id=%s",
+                response.get("status"),
+                reply_to_message_id,
+            )
+            return
+
+        message_data = response.get("data", {})
+        if not isinstance(message_data, dict):
+            logger.warning("QQ reply target lookup returned non-dict data for message_id=%s", reply_to_message_id)
+            return
+
+        self._apply_replied_message_metadata(reply_context, message_data)
+
+    def _finalize_reply_target(self, reply_context: dict[str, str | bool]) -> None:
+        """Set whether the structured reply target is this bot.
+
+        Args:
+            reply_context: Mutable reply context that may contain
+                ``reply_to_platform_user_id``.
+
+        Returns:
+            None.
+        """
+        target_user_id = reply_context.get("reply_to_platform_user_id")
+        if target_user_id is not None:
+            reply_context["reply_to_current_bot"] = str(target_user_id) == self.bot_id
 
     async def handle_event(self, data: dict, ws):
         """Processes incoming messages (only if we are identified)."""
@@ -315,6 +452,8 @@ class NapCatWSAdapter:
         
         raw_content = raw_content.strip()
         mentioned_bot = self._is_bot_mentioned(mentioned_ids)
+        await self._hydrate_reply_context_from_platform(reply_context, ws)
+        self._finalize_reply_target(reply_context)
         sender_name = data.get("sender", {}).get("nickname", f"User {user_id}")
         
         is_group = data.get("message_type") == "group"
