@@ -188,6 +188,34 @@ _DIALOG_GENERATOR_PROMPT = """\
 }}
 """
 _dialog_generator_llm = get_llm(temperature=0.75, top_p=0.85, presence_penalty=0.35)
+
+
+def _tone_history_for_generator(history: list[dict]) -> list[dict]:
+    """Return the approved tiny tone buffer for dialog generation.
+
+    Args:
+        history: Current-user/bot interaction history.
+
+    Returns:
+        Last assistant message plus the immediately adjacent prior user message
+        when present. The buffer is capped at two messages.
+    """
+
+    last_assistant_idx = next(
+        (i for i in range(len(history) - 1, -1, -1) if history[i].get("role") == "assistant"),
+        -1,
+    )
+    if last_assistant_idx < 0:
+        return []
+    start_idx = last_assistant_idx
+    if (
+        last_assistant_idx > 0
+        and history[last_assistant_idx - 1].get("role") == "user"
+    ):
+        start_idx = last_assistant_idx - 1
+    return history[start_idx:last_assistant_idx + 1]
+
+
 async def dialog_generator(state: DialogAgentState) -> DialogAgentState:
 
     ltp = state["character_profile"]["linguistic_texture_profile"]
@@ -217,11 +245,7 @@ async def dialog_generator(state: DialogAgentState) -> DialogAgentState:
         state["platform_user_id"],
         state["platform_bot_id"],
     )
-    last_assistant_idx = next(
-        (i for i in range(len(history) - 1, -1, -1) if history[i].get("role") == "assistant"),
-        -1
-    )
-    tone_history = history[: last_assistant_idx + 1] if last_assistant_idx >= 0 else []
+    tone_history = _tone_history_for_generator(history)
 
     msg = {
         "internal_monologue": state["internal_monologue"],

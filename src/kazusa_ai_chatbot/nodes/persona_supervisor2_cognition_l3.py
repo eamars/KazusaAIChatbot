@@ -82,6 +82,34 @@ def _current_user_rag_bundle(state: CognitionState) -> dict[str, Any]:
     return {}
 
 
+def _surface_history_for_contextual(chat_history: list[dict]) -> list[dict]:
+    """Return the small social surface window for contextual analysis.
+
+    Args:
+        chat_history: Current-user/bot interaction history prepared by the
+            cognition entrypoint.
+
+    Returns:
+        At most four messages for local tone and social adjacency.
+    """
+
+    return chat_history[-4:]
+
+
+def _surface_history_for_style(chat_history: list[dict]) -> list[dict]:
+    """Return the tiny wording buffer for style analysis.
+
+    Args:
+        chat_history: Current-user/bot interaction history prepared by the
+            cognition entrypoint.
+
+    Returns:
+        At most two messages for phrase/cadence reference.
+    """
+
+    return chat_history[-2:]
+
+
 
 # ---------------------------------------------------------------------------
 # L3a — Contextual Agent prompt + agent
@@ -107,7 +135,7 @@ _CONTEXTUAL_AGENT_PROMPT = """\
         "level": "亲密度等级",
         "instruction": "当前等级的社交边界指导"
     }},
-    "chat_history": "最近对话记录（用于判断对话惯性，仅包含最近几条）"
+    "chat_history": "极短表层上下文（最多四条，仅用于最近语气、社交距离和相邻氛围；语义进展由 conversation_progress 承担）"
 }}
 
 # 输出要求
@@ -140,7 +168,7 @@ async def call_contextual_agent(state: CognitionState) -> CognitionState:
             "level": affinity_block["level"],
             "instruction": affinity_block["instruction"]
         },
-        "chat_history": state["chat_history_recent"],
+        "chat_history": _surface_history_for_contextual(state["chat_history_recent"]),
     }
     human_message = HumanMessage(content=json.dumps(msg, ensure_ascii=False))
     response = await _contextual_agent_llm.ainvoke([
@@ -236,7 +264,7 @@ _STYLE_AGENT_PROMPT = """\
     "last_relationship_insight": "对该用户的核心关系动态分析",
     "logical_stance": "强制逻辑立场 (CONFIRM/REFUSE/TENTATIVE...)",
     "character_intent": "行动意图 (BANTAR/CLARIFY/EVADE...)",
-    "chat_history": "最近对话记录（用于语气参考和反重复，仅包含最近几条）"
+    "chat_history": "极短语气缓冲（最多两条，仅用于措辞、开头和口头连接词参考；不要用它重建整个 episode）"
 }}
 
 # 输出格式 (JSON)
@@ -277,7 +305,7 @@ async def call_style_agent(state: CognitionState) -> CognitionState:
         "last_relationship_insight": state["user_profile"].get("last_relationship_insight", ""),
         "logical_stance": state["logical_stance"],
         "character_intent": state["character_intent"],
-        "chat_history": state["chat_history_recent"],
+        "chat_history": _surface_history_for_style(state["chat_history_recent"]),
     }
     human_message = HumanMessage(content=json.dumps(msg, ensure_ascii=False))
     response = await _style_agent_llm.ainvoke([
@@ -315,7 +343,7 @@ _CONTENT_ANCHOR_AGENT_PROMPT = """\
 1. **立场绝对化：** 你必须无条件服从并执行输入中的 `logical_stance`。你拥有决定内容结构的自由，但严禁改变逻辑立场。
 2. **锚点构建：** 生成台词的"骨架"与"灵魂"，而非具体台词。
 3. **去物理化**：严禁生成任何关于视线、脸红、动作的描述。
-4. **对话推进**：读取 `conversation_progress`，避免把已经过度使用的回应动作继续作为主动作；对仍未解决的用户状态使用 `age_hint` 理解其相对时间，不要把已披露的状态重新当成新信息追问。
+4. **对话推进**：读取 `conversation_progress`，避免把已经过度使用的回应动作继续作为主动作；对仍未解决的用户状态使用 `age_hint` 理解其相对时间，不要把已披露的状态重新当成新信息追问。`conversation_progress` 是语义短期记忆；不要依赖原始聊天记录来重建 episode。
 
 # 逻辑立场对齐协议 (Executive Order)
 你必须将 L2 的 `logical_stance` 强制映射到 `content_anchors` 的第一个标签 `[DECISION]` 中：
@@ -344,7 +372,7 @@ _CONTENT_ANCHOR_AGENT_PROMPT = """\
    - 若 `decontexualized_input` 仍含未解析指代或省略对象（如「这个 / 那个 / 这句 / 那句 / 这个意思 / 怎么说 / 这个呢」），且 `rag_result` 没有唯一可锚定对象，必须追问“具体指哪一个 / 哪一句 / 哪部分”，不得猜测定义、原因、身份或类别。
 4. **显性回应：** 如果 `decontexualized_input` 中包含明确的询问（Question）、请求（Request）或提议（Proposal），且 `character_intent` 不是 `CLARIFY`，`[ANSWER]` 必须明确包含决定或答案；若 `character_intent` 为 `CLARIFY`，`[ANSWER]` 必须明确包含澄清问题。
 4a. **操作细节保真：** 如果用户请求里包含未来操作的关键细节，例如明确的群/频道/房间 ID、被要求发送的消息正文、引用内容、提醒对象或其他执行参数，这些细节必须在 `content_anchors` 中被保留下来，优先写进 `[ANSWER]`，必要时可辅以 `[FACT]`。不要把 `54369546群` 简化成“某个群”，也不要把“今天天气真好呀”改写成泛泛的“那句话”。
-5. **进展记忆使用**：当 `conversation_progress.continuity` 是 `same_episode` 或 `related_shift` 时，必须参考 `overused_moves`、`open_loops`、`user_state_updates` 和 `progression_guidance`。如果 `overused_moves` 非空，且你本来会继续使用其中某个回应动作，必须输出一条 `[AVOID_REPEAT]`，并改用能推进对话的信息锚点。若当前轮确实需要承认同一个动作，也必须输出 `[PROGRESSION]` 说明本轮如何推进而不是重复。若 `continuity` 是 `sharp_transition`，忽略旧 episode obligations，只处理当前输入。
+5. **进展记忆使用**：当 `conversation_progress.continuity` 是 `same_episode` 或 `related_shift` 时，必须参考 `conversation_mode`、`episode_phase`、`topic_momentum`、`current_thread`、`user_goal`、`current_blocker`、`overused_moves`、`open_loops`、`resolved_threads`、`avoid_reopening`、`emotional_trajectory`、`next_affordances` 和 `progression_guidance`。如果 `next_affordances` 非空，优先从中选择一个自然的下一步对话动作，但不要照抄为台词。若 `avoid_reopening` 非空，避免把其中已经处理过的旧线程重新当成当前重点。若 `overused_moves` 非空，且你本来会继续使用其中某个回应动作，必须输出一条 `[AVOID_REPEAT]`，并改用能推进对话的信息锚点。若当前轮确实需要承认同一个动作，也必须输出 `[PROGRESSION]` 说明本轮如何推进而不是重复。若 `continuity` 是 `sharp_transition`，忽略旧 episode obligations，只处理当前输入。
 6. **表达量校准（[SCOPE]）：** 基于已填充的锚点数量与 `logical_stance`，生成一条 `[SCOPE]` 锚点。
   例如：
   * 仅有 `[DECISION]` -> `~15字，说完[DECISION]即止`；
@@ -386,9 +414,19 @@ _CONTENT_ANCHOR_AGENT_PROMPT = """\
     "conversation_progress": {{
         "status": "active | new_episode | suspended | closed",
         "continuity": "same_episode | related_shift | sharp_transition",
+        "conversation_mode": "task_support | emotional_support | casual_chat | playful_banter | meta_discussion | group_ambient | mixed",
+        "episode_phase": "opening | developing | deepening | pivoting | stuck_loop | resolving | cooling_down",
+        "topic_momentum": "stable | drifting | quick_pivot | fragmented | sharp_break",
+        "current_thread": "当前正在讨论的中性线程",
+        "user_goal": "当前目标；非目标型对话可为空",
+        "current_blocker": "当前阻碍；非问题解决型对话可为空",
         "user_state_updates": [{{"text": "用户已经披露的状态", "age_hint": "~3h ago"}}],
         "overused_moves": ["已经过度使用的回应动作"],
         "open_loops": [{{"text": "尚未解决的对话线程", "age_hint": "~3h ago"}}],
+        "resolved_threads": [{{"text": "已经处理过的线程", "age_hint": "~3h ago"}}],
+        "avoid_reopening": [{{"text": "不要主动重开的旧点", "age_hint": "~3h ago"}}],
+        "emotional_trajectory": "当前 episode 的情绪变化",
+        "next_affordances": ["自然下一步动作，例如 continue/deepen/clarify/resolve/cool_down"],
         "progression_guidance": "下一轮应如何推进"
     }}
 }}

@@ -37,10 +37,20 @@ class ConversationProgressPromptDoc(TypedDict):
     episode_label: str
     continuity: str
     turn_count: int
+    conversation_mode: str
+    episode_phase: str
+    topic_momentum: str
+    current_thread: str
+    user_goal: str
+    current_blocker: str
     user_state_updates: list[ConversationProgressEntry]
     assistant_moves: list[str]
     overused_moves: list[str]
     open_loops: list[ConversationProgressEntry]
+    resolved_threads: list[ConversationProgressEntry]
+    avoid_reopening: list[ConversationProgressEntry]
+    emotional_trajectory: str
+    next_affordances: list[str]
     progression_guidance: str
 
 

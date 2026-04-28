@@ -56,16 +56,28 @@ async def test_content_anchor_agent_receives_conversation_progress(monkeypatch) 
             "episode_label": "slides_help",
             "continuity": "same_episode",
             "turn_count": 8,
+            "conversation_mode": "task_support",
+            "episode_phase": "stuck_loop",
+            "topic_momentum": "stable",
+            "current_thread": "slides contribution page",
+            "user_goal": "write the missing third contribution point",
+            "current_blocker": "third point overlaps the second",
             "user_state_updates": [{"text": "user still lacks a third contribution point", "age_hint": "~3h ago"}],
             "assistant_moves": ["reassurance"],
             "overused_moves": ["reassurance"],
             "open_loops": [{"text": "third point missing", "age_hint": "~3h ago"}],
+            "resolved_threads": [{"text": "outline order already changed", "age_hint": "~2h ago"}],
+            "avoid_reopening": [{"text": "do not ask to redo the outline", "age_hint": "~2h ago"}],
+            "emotional_trajectory": "tired but still asking for help",
+            "next_affordances": ["give a concrete third contribution angle"],
             "progression_guidance": "address the missing third point",
         },
     })
 
     human_payload = json.loads(fake_llm.messages[1].content)
     assert human_payload["conversation_progress"]["overused_moves"] == ["reassurance"]
+    assert human_payload["conversation_progress"]["conversation_mode"] == "task_support"
+    assert human_payload["conversation_progress"]["next_affordances"] == ["give a concrete third contribution angle"]
     assert result["content_anchors"][1].startswith("[AVOID_REPEAT]")
 
 
@@ -75,6 +87,8 @@ def test_content_anchor_prompt_allows_progression_anchor_labels() -> None:
     assert "[AVOID_REPEAT]" in l3_module._CONTENT_ANCHOR_AGENT_PROMPT
     assert "[PROGRESSION]" in l3_module._CONTENT_ANCHOR_AGENT_PROMPT
     assert "conversation_progress" in l3_module._CONTENT_ANCHOR_AGENT_PROMPT
+    assert "next_affordances" in l3_module._CONTENT_ANCHOR_AGENT_PROMPT
+    assert "avoid_reopening" in l3_module._CONTENT_ANCHOR_AGENT_PROMPT
 
 
 def test_projection_preserves_relative_age_for_prior_disclosure() -> None:

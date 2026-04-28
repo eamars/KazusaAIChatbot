@@ -26,7 +26,7 @@ def write_llm_trace(test_name: str, case_id: str, payload: dict[str, Any]) -> Pa
     """
     _TRACE_DIR.mkdir(parents=True, exist_ok=True)
     safe_name = _safe_filename(f"{test_name}__{case_id}")
-    path = _TRACE_DIR / f"{safe_name}.json"
+    path = _unique_trace_path(safe_name)
     document = {
         "test_name": test_name,
         "case_id": case_id,
@@ -38,6 +38,24 @@ def write_llm_trace(test_name: str, case_id: str, payload: dict[str, Any]) -> Pa
         encoding="utf-8",
     )
     return path
+
+
+def _unique_trace_path(safe_name: str) -> Path:
+    """Return a trace path that preserves any existing artifact.
+
+    Args:
+        safe_name: Filesystem-safe trace filename stem.
+
+    Returns:
+        New trace path, using the stable name when free and a timestamp suffix
+        when the stable name already exists.
+    """
+
+    path = _TRACE_DIR / f"{safe_name}.json"
+    if not path.exists():
+        return path
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
+    return _TRACE_DIR / f"{safe_name}__{timestamp}.json"
 
 
 def _safe_filename(value: str) -> str:

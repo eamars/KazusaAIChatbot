@@ -8,7 +8,13 @@ from typing import Any
 from langchain_core.messages import HumanMessage, SystemMessage
 
 from kazusa_ai_chatbot.conversation_progress.models import ConversationProgressRecordInput
-from kazusa_ai_chatbot.conversation_progress.policy import VALID_CONTINUITY, VALID_STATUS
+from kazusa_ai_chatbot.conversation_progress.policy import (
+    VALID_CONTINUITY,
+    VALID_CONVERSATION_MODE,
+    VALID_EPISODE_PHASE,
+    VALID_STATUS,
+    VALID_TOPIC_MOMENTUM,
+)
 from kazusa_ai_chatbot.utils import get_llm, parse_llm_json_output
 
 _RECORDER_PROMPT = """\
@@ -17,6 +23,7 @@ You are the short-term conversation progress recorder for Kazusa.
 Your job is to update compact operational state for the next responsive turn.
 Do not write diary prose, relationship insight, medical advice, or long-term memory.
 Do not copy full assistant turns. Use short semantic labels.
+Do not generate Kazusa's next reply text.
 
 You decide semantic continuity:
 - same_episode: the user is continuing the same unresolved thread.
@@ -30,15 +37,35 @@ When an item no longer applies, omit it.
 For assistant_moves, emit compact free-form speech-act labels. Reuse a prior label exactly
 when the current assistant response repeated the same move. You own this semantic judgment.
 
+Also track flow state:
+- conversation_mode: task_support | emotional_support | casual_chat | playful_banter | meta_discussion | group_ambient | mixed
+- episode_phase: opening | developing | deepening | pivoting | stuck_loop | resolving | cooling_down
+- topic_momentum: stable | drifting | quick_pivot | fragmented | sharp_break
+
+Use current_thread for what is being discussed even when there is no task.
+Use user_goal and current_blocker only when the episode is goal-driven.
+Use next_affordances for natural next conversational moves, not exact dialog text.
+Use resolved_threads and avoid_reopening for items that should not be dragged back unless the user reopens them.
+
 Return strict JSON only:
 {
   "continuity": "same_episode | related_shift | sharp_transition",
   "status": "active | suspended | closed",
   "episode_label": "short semantic label",
+  "conversation_mode": "task_support | emotional_support | casual_chat | playful_banter | meta_discussion | group_ambient | mixed",
+  "episode_phase": "opening | developing | deepening | pivoting | stuck_loop | resolving | cooling_down",
+  "topic_momentum": "stable | drifting | quick_pivot | fragmented | sharp_break",
+  "current_thread": "one-line neutral current thread",
+  "user_goal": "optional goal, or empty string",
+  "current_blocker": "optional blocker, or empty string",
   "user_state_updates": ["compact user-state observation"],
   "assistant_moves": ["compact assistant speech-act label"],
   "overused_moves": ["assistant move label that has occurred too often"],
   "open_loops": ["unresolved thread"],
+  "resolved_threads": ["handled thread"],
+  "avoid_reopening": ["stale item not to reopen"],
+  "emotional_trajectory": "one-line emotional movement",
+  "next_affordances": ["natural next move available to Kazusa"],
   "progression_guidance": "one short instruction for the next turn"
 }
 """
@@ -60,6 +87,15 @@ def _string_list(value: Any, field_name: str) -> list[str]:
     if not isinstance(value, list):
         raise ValueError(f"{field_name} must be a list")
     return [str(item).strip() for item in value if str(item).strip()]
+
+
+def _validated_label(value: Any, field_name: str, allowed_values: set[str]) -> str:
+    label = str(value).strip()
+    if not label:
+        return ""
+    if label not in allowed_values:
+        raise ValueError(f"invalid {field_name}: {label}")
+    return label
 
 
 def validate_recorder_output(payload: dict) -> dict:
@@ -85,10 +121,32 @@ def validate_recorder_output(payload: dict) -> dict:
         "continuity": continuity,
         "status": status,
         "episode_label": str(payload.get("episode_label", "")).strip(),
+        "conversation_mode": _validated_label(
+            payload.get("conversation_mode", ""),
+            "conversation_mode",
+            VALID_CONVERSATION_MODE,
+        ),
+        "episode_phase": _validated_label(
+            payload.get("episode_phase", ""),
+            "episode_phase",
+            VALID_EPISODE_PHASE,
+        ),
+        "topic_momentum": _validated_label(
+            payload.get("topic_momentum", ""),
+            "topic_momentum",
+            VALID_TOPIC_MOMENTUM,
+        ),
+        "current_thread": str(payload.get("current_thread", "")).strip(),
+        "user_goal": str(payload.get("user_goal", "")).strip(),
+        "current_blocker": str(payload.get("current_blocker", "")).strip(),
         "user_state_updates": _string_list(payload.get("user_state_updates", []), "user_state_updates"),
         "assistant_moves": _string_list(payload.get("assistant_moves", []), "assistant_moves"),
         "overused_moves": _string_list(payload.get("overused_moves", []), "overused_moves"),
         "open_loops": _string_list(payload.get("open_loops", []), "open_loops"),
+        "resolved_threads": _string_list(payload.get("resolved_threads", []), "resolved_threads"),
+        "avoid_reopening": _string_list(payload.get("avoid_reopening", []), "avoid_reopening"),
+        "emotional_trajectory": str(payload.get("emotional_trajectory", "")).strip(),
+        "next_affordances": _string_list(payload.get("next_affordances", []), "next_affordances"),
         "progression_guidance": str(payload.get("progression_guidance", "")).strip(),
     }
 

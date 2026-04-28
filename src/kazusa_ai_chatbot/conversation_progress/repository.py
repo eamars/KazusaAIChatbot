@@ -9,10 +9,19 @@ from pymongo.errors import DuplicateKeyError
 from kazusa_ai_chatbot.conversation_progress.models import ConversationProgressScope
 from kazusa_ai_chatbot.conversation_progress.policy import (
     ASSISTANT_MOVES_LIMIT,
+    AVOID_REOPENING_LIMIT,
     COLLECTION_NAME,
+    MAX_ENTRY_CHARS,
+    MAX_GUIDANCE_CHARS,
+    MAX_LABEL_CHARS,
+    MAX_MOVE_CHARS,
+    MAX_THREAD_CHARS,
+    NEXT_AFFORDANCES_LIMIT,
     OPEN_LOOPS_LIMIT,
     OVERUSED_MOVES_LIMIT,
+    RESOLVED_THREADS_LIMIT,
     USER_STATE_UPDATES_LIMIT,
+    cap_text,
     expires_at_for,
 )
 from kazusa_ai_chatbot.db._client import get_db
@@ -44,8 +53,8 @@ async def load_episode_state(
     return doc
 
 
-def _cap_strings(values: list[str], limit: int) -> list[str]:
-    return [str(value) for value in values if str(value).strip()][:limit]
+def _cap_strings(values: list[str], limit: int, max_chars: int) -> list[str]:
+    return [cap_text(value, max_chars) for value in values if str(value).strip()][:limit]
 
 
 def preserve_first_seen_entries(
@@ -74,7 +83,7 @@ def preserve_first_seen_entries(
     }
     entries: list[ConversationEpisodeEntryDoc] = []
     for raw_text in new_texts:
-        text = str(raw_text).strip()
+        text = cap_text(raw_text, MAX_ENTRY_CHARS)
         if not text:
             continue
         entries.append({
@@ -116,23 +125,55 @@ def build_episode_state_doc(
         "platform_channel_id": scope.platform_channel_id,
         "global_user_id": scope.global_user_id,
         "status": str(recorder_output["status"]),
-        "episode_label": str(recorder_output["episode_label"]),
+        "episode_label": cap_text(recorder_output["episode_label"], MAX_LABEL_CHARS),
         "continuity": str(recorder_output["continuity"]),
+        "conversation_mode": cap_text(recorder_output.get("conversation_mode", ""), MAX_LABEL_CHARS),
+        "episode_phase": cap_text(recorder_output.get("episode_phase", ""), MAX_LABEL_CHARS),
+        "topic_momentum": cap_text(recorder_output.get("topic_momentum", ""), MAX_LABEL_CHARS),
+        "current_thread": cap_text(recorder_output.get("current_thread", ""), MAX_THREAD_CHARS),
+        "user_goal": cap_text(recorder_output.get("user_goal", ""), MAX_THREAD_CHARS),
+        "current_blocker": cap_text(recorder_output.get("current_blocker", ""), MAX_THREAD_CHARS),
         "user_state_updates": preserve_first_seen_entries(
             prior_entries=prior_state.get("user_state_updates", []),
             new_texts=recorder_output["user_state_updates"],
             current_timestamp=timestamp,
             limit=USER_STATE_UPDATES_LIMIT,
         ),
-        "assistant_moves": _cap_strings(recorder_output["assistant_moves"], ASSISTANT_MOVES_LIMIT),
-        "overused_moves": _cap_strings(recorder_output["overused_moves"], OVERUSED_MOVES_LIMIT),
+        "assistant_moves": _cap_strings(
+            recorder_output["assistant_moves"],
+            ASSISTANT_MOVES_LIMIT,
+            MAX_MOVE_CHARS,
+        ),
+        "overused_moves": _cap_strings(
+            recorder_output["overused_moves"],
+            OVERUSED_MOVES_LIMIT,
+            MAX_MOVE_CHARS,
+        ),
         "open_loops": preserve_first_seen_entries(
             prior_entries=prior_state.get("open_loops", []),
             new_texts=recorder_output["open_loops"],
             current_timestamp=timestamp,
             limit=OPEN_LOOPS_LIMIT,
         ),
-        "progression_guidance": str(recorder_output["progression_guidance"]),
+        "resolved_threads": preserve_first_seen_entries(
+            prior_entries=prior_state.get("resolved_threads", []),
+            new_texts=recorder_output.get("resolved_threads", []),
+            current_timestamp=timestamp,
+            limit=RESOLVED_THREADS_LIMIT,
+        ),
+        "avoid_reopening": preserve_first_seen_entries(
+            prior_entries=prior_state.get("avoid_reopening", []),
+            new_texts=recorder_output.get("avoid_reopening", []),
+            current_timestamp=timestamp,
+            limit=AVOID_REOPENING_LIMIT,
+        ),
+        "emotional_trajectory": cap_text(recorder_output.get("emotional_trajectory", ""), MAX_THREAD_CHARS),
+        "next_affordances": _cap_strings(
+            recorder_output.get("next_affordances", []),
+            NEXT_AFFORDANCES_LIMIT,
+            MAX_ENTRY_CHARS,
+        ),
+        "progression_guidance": cap_text(recorder_output["progression_guidance"], MAX_GUIDANCE_CHARS),
         "turn_count": next_turn_count,
         "last_user_input": last_user_input,
         "created_at": created_at,

@@ -78,10 +78,20 @@ class ConversationEpisodeStateDoc(TypedDict, total=False):
     status: str
     episode_label: str
     continuity: str
+    conversation_mode: str
+    episode_phase: str
+    topic_momentum: str
+    current_thread: str
+    user_goal: str
+    current_blocker: str
     user_state_updates: list[ConversationEpisodeEntryDoc]
     assistant_moves: list[str]
     overused_moves: list[str]
     open_loops: list[ConversationEpisodeEntryDoc]
+    resolved_threads: list[ConversationEpisodeEntryDoc]
+    avoid_reopening: list[ConversationEpisodeEntryDoc]
+    emotional_trajectory: str
+    next_affordances: list[str]
     progression_guidance: str
     turn_count: int
     last_user_input: str

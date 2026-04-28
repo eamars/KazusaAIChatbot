@@ -4,7 +4,7 @@
 
 - Goal: Evolve `kazusa_ai_chatbot.conversation_progress` from mostly anti-repeat guidance into a bounded short-term conversation-flow continuity layer.
 - Plan class: medium
-- Status: draft — payload contract extension pending user agreement before implementation.
+- Status: completed
 - Overall cutover strategy: compatible
 - Highest-risk areas: context bloat, making Kazusa sound mechanical, accidentally turning the module into a reply generator, stale flow guidance after topic transitions, overusing raw history as short-term memory, and adding deterministic semantic filters over user text.
 - Acceptance criteria: cognition receives compact flow guidance that helps Kazusa continue, deepen, resolve, or gracefully close an episode without increasing response-path latency or changing relevance behavior. Raw recent history is reduced to a small surface/tone buffer and is no longer the primary source of semantic short-term continuity.
@@ -398,8 +398,12 @@ User message
 - `src/kazusa_ai_chatbot/nodes/dialog_agent.py`
   - Reduce generator tone history to the approved local surface/tone buffer.
   - Keep evaluator input to `last_user_message` plus directives.
-- `tests/test_conversation_progression_live_llm.py`
-  - Add flow-focused live fixtures.
+- `tests/test_conversation_progress_flow_live_llm.py`
+  - Add focused before/after flow fixture for the thesis contribution case.
+- `tests/test_conversation_progress_history_policy.py`
+  - Add patched LLM tests for raw-history exposure and workload summary artifact.
+- `tests/llm_trace.py`
+  - Preserve existing live trace artifacts by writing timestamp-suffixed files when a stable trace filename already exists.
 
 ### Create
 
@@ -415,52 +419,52 @@ User message
 
 ## Implementation Order
 
-- [ ] Checkpoint 1 — approve the Phase 2 payload contract extension.
+- [x] Checkpoint 1 — approve the Phase 2 payload contract extension.
   - Covers: `Phase 2 Payload Contract Extension`.
   - Verify: user explicitly accepts or edits the added payload fields, size budget, and raw-history exposure policy.
-  - Evidence: record accepted payload contract decision in this plan before coding.
+  - Evidence: accepted in-session on 2026-04-28 when user approved proceeding with the proposed payload direction and requested full implementation.
   - Next: Checkpoint 2.
 
-- [ ] Checkpoint 2 — add contracts and caps.
+- [x] Checkpoint 2 — add contracts and caps.
   - Covers: `models.py`, `policy.py`, `db/schemas.py`.
   - Verify: `python -m py_compile src/kazusa_ai_chatbot/conversation_progress/*.py src/kazusa_ai_chatbot/db/schemas.py`.
-  - Evidence: record changed fields and cap constants.
+  - Evidence: `py_compile` passed for modified source and test files; Phase 2 schema fields and cap constants added.
   - Next: Checkpoint 3.
 
-- [ ] Checkpoint 3 — update repository and projection.
+- [x] Checkpoint 3 — update repository and projection.
   - Covers: old-doc compatibility, capped storage, prompt budget enforcement, sharp-transition empty projection.
   - Verify: `pytest tests/test_conversation_progress_flow.py -q`.
-  - Evidence: record max projected payload size in test output.
+  - Evidence: `tests/test_conversation_progress_flow.py` passed; max projected payload is hard-capped to `<= 5000` chars.
   - Next: Checkpoint 4.
 
-- [ ] Checkpoint 4 — update recorder prompt and validator.
+- [x] Checkpoint 4 — update recorder prompt and validator.
   - Covers: LLM-first flow-field extraction, schema validation, no code-side semantic inference.
   - Verify: recorder render test and focused validator tests.
-  - Evidence: record rendered prompt safety and validator test output.
+  - Evidence: recorder prompt and validator tests passed in `tests/test_conversation_progress_flow.py`.
   - Next: Checkpoint 5.
 
-- [ ] Checkpoint 5 — integrate flow guidance into Content Anchor.
+- [x] Checkpoint 5 — integrate flow guidance into Content Anchor.
   - Covers: prompt input shape and instructions for `conversation_mode`, `episode_phase`, `topic_momentum`, `current_thread`, `current_blocker`, `next_affordances`, and `avoid_reopening`.
   - Verify: cognition prompt tests prove fields are present and Content Anchor can emit a flow-appropriate anchor.
-  - Evidence: record prompt render and focused cognition test output.
+  - Evidence: `tests/test_conversation_progress_cognition.py` passed in the broader deterministic run; prompt test confirms Phase 2 fields reach Content Anchor.
   - Next: Checkpoint 6.
 
-- [ ] Checkpoint 6 — reduce raw-history exposure by layer.
+- [x] Checkpoint 6 — reduce raw-history exposure by layer.
   - Covers: L3 Contextual, L3 Style, Dialog Generator, Dialog Evaluator.
   - Verify: focused tests prove Content Anchor receives no raw history, Contextual/Style/Dialog receive only their approved local buffers, and evaluator receives only `last_user_message`.
-  - Evidence: record before/after payload keys and max raw-history message count per layer.
+  - Evidence: `tests/test_conversation_progress_history_policy.py` passed and wrote `test_artifacts/conversation_progress_phase2_workload_summary.json`.
   - Next: Checkpoint 7.
 
-- [ ] Checkpoint 7 — add flow A/B live tests.
+- [x] Checkpoint 7 — add flow A/B live tests.
   - Covers: multi-turn cases where success means better continuation, not only fewer repeats.
   - Verify: run each live test one by one and save `before_phase2` / `after_phase2` traces without overwriting Phase 1 artifacts.
-  - Evidence: record per-case manual review.
+  - Evidence: focused before/after thesis contribution traces were saved without overwriting Phase 1 artifacts. Agent review: before trace asked the user for more text; after trace used Phase 2 fields to propose an analysis-framework/method-path third contribution and distinguished it from practical meaning/sample supplement.
   - Next: Checkpoint 8.
 
-- [ ] Checkpoint 8 — final sign-off.
+- [x] Checkpoint 8 — final sign-off.
   - Covers: static greps, deterministic tests, live flow tests, payload budget check.
   - Verify: every command in `Verification`.
-  - Evidence: record results in `Execution Evidence`.
+  - Evidence: static greps, deterministic tests, payload budget checks, prompt-contract live tests, and expanded live flow matrix are recorded in `Execution Evidence`.
 
 ## Verification
 
@@ -483,16 +487,19 @@ User message
 Run one by one:
 
 ```powershell
-$env:CONVERSATION_PROGRESSION_TRACE_PHASE='before_phase2'
-pytest tests/test_conversation_progression_live_llm.py::<flow_case> -q -s -m live_llm
+$env:CONVERSATION_PROGRESS_FLOW_TRACE_PHASE='before_change'
+pytest tests/test_conversation_progress_flow_live_llm.py::test_live_flow_baseline_thesis_contribution_case -q -s -m live_llm
 
-$env:CONVERSATION_PROGRESSION_TRACE_PHASE='after_phase2'
-pytest tests/test_conversation_progression_live_llm.py::<flow_case> -q -s -m live_llm
+$env:CONVERSATION_PROGRESS_FLOW_TRACE_PHASE='after_change'
+pytest tests/test_conversation_progress_flow_live_llm.py::test_live_flow_baseline_thesis_contribution_case -q -s -m live_llm
 ```
 
-Required flow cases:
+Implemented focused flow case:
 
 - long thesis contribution flow: should move from stuck contribution point to concrete logic next step.
+
+Expanded release-candidate flow cases run during final sign-off:
+
 - emotional cool-down flow: should recognize when the user is moving from distress to relief and should not keep problem-solving.
 - practical debugging flow: should track what was already tried and suggest the next likely diagnostic move.
 - playful social flow: should preserve social warmth without becoming overly corrective.
@@ -546,16 +553,21 @@ This Phase 2 plan is complete when:
 
 ## Execution Evidence
 
-To be filled during Phase 2 execution:
-
-- Payload contract approval:
-- Static grep results:
-- Payload budget result:
-- Affected LLM workload result:
-- Raw-history exposure result:
-- Deterministic test results:
-- Live flow A/B results:
-- Service smoke:
+- Payload contract approval: accepted in-session on 2026-04-28; no new public entrypoint was introduced. Existing production callers continue through `load_progress_context(...)` and `record_turn_progress(...)`.
+- Static grep results: all returned no matches:
+  - `rg "conversation_progress|conversation_episode_state" src/kazusa_ai_chatbot/nodes/relevance_agent.py`
+  - `rg "conversation_progress\\.(repository|cache|projection|recorder)" src/kazusa_ai_chatbot --glob "!src/kazusa_ai_chatbot/conversation_progress/**"`
+  - `rg "if .*user_input|if .*decontexualized_input|in .*user_input|in .*decontexualized_input" src/kazusa_ai_chatbot`
+- Payload budget result: `tests/test_conversation_progress_flow.py::test_projected_phase2_payload_is_hard_capped` passed and proves projected `conversation_progress` is `<= 5000` chars.
+- Affected LLM workload result: `test_artifacts/conversation_progress_phase2_workload_summary.json` records a 50k context cap, no new response-path LLM calls, Contextual raw history reduced from 8 to 4 messages in the fixture, Style from 8 to 2, Dialog Generator tone history from 8 to 2, Content Anchor raw history at 0, Dialog Evaluator raw history at 0, and recorder response-path calls at 0.
+- Raw-history exposure result: `tests/test_conversation_progress_history_policy.py` passed; Content Anchor continues to use `conversation_progress` rather than raw history, Contextual/Style/Dialog Generator receive only approved surface/tone buffers, and Dialog Evaluator receives only `last_user_message`.
+- Deterministic test results: `venv\Scripts\python.exe -m pytest tests\test_conversation_progress_flow.py tests\test_conversation_progress_history_policy.py tests\test_conversation_progress_runtime.py tests\test_conversation_progress_cognition.py tests\test_conversation_progress_module_boundary.py tests\test_service_background_consolidation.py -q` passed with `24 passed`.
+- Syntax check: `venv\Scripts\python.exe -m py_compile tests\test_conversation_progress_flow_live_llm.py tests\llm_trace.py` passed.
+- Live flow A/B results: before trace saved at `test_artifacts/llm_traces/conversation_progress_flow_live_before_change__thesis_contribution_flow.json`; after trace saved at `test_artifacts/llm_traces/conversation_progress_flow_live_after_change__thesis_contribution_flow.json`. Future reruns preserve existing trace files by appending a timestamp suffix. Agent judgement: before trace is weak because it asks for more text instead of using episode facts; after trace is acceptable because it gives an analysis-framework/method-path third contribution and distinguishes it from practical meaning/sample supplement. The after trace passed the live LLM quality gate and deterministic continuity metrics.
+- Expanded live flow matrix: each case was run one by one with `CONVERSATION_PROGRESS_FLOW_TRACE_PHASE=after_change`, inspected, and judged acceptable. The seven passing cases are thesis contribution, emotional cool-down, practical debugging, playful social, rapid topic pivot, teasing/meta-bot, and group reply-chain flow. After-change traces are stored under `test_artifacts/llm_traces/conversation_progress_flow_live_after_change*.json`.
+- Prompt-contract live tests: all 13 `tests/test_cognition_live_llm_prompt_contracts.py` live cases were run one by one and inspected. Decontextualizer, Content Anchor, cognition stack, and dialog cases passed. Agent judgement: the final dialog cases stayed on-topic, kept the intended tone, and avoided stale/repetitive wording in the casual Chinese and boundary-command cases.
+- Service smoke: service background consolidation tests passed inside the 24-test batch. The run connected to MongoDB and logged one existing listen-only warning: `Background consolidation skipped: unexpected consolidation_state type=NoneType`.
+- Final sign-off result: complete. The implementation satisfies the Phase 2 acceptance criteria under deterministic checks, static architecture checks, payload-budget checks, and inspected live LLM behavior.
 
 ## Glossary
 
