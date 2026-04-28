@@ -249,13 +249,14 @@ async def load_conversation_episode_state(state: IMProcessState) -> dict:
         scope=scope,
         current_timestamp=state["timestamp"],
     )
-    logger.debug(
-        "Conversation progress loaded: platform=%s channel=%s user=%s source=%s turn_count=%d",
+    logger.info(
+        "Conversation progress loaded: platform=%s channel=%s user=%s source=%s turn_count=%d progress=%s",
         scope.platform,
         scope.platform_channel_id or "<dm>",
         scope.global_user_id,
         load_result["source"],
         load_result["conversation_progress"]["turn_count"],
+        log_preview(load_result["conversation_progress"]),
     )
     return {
         "conversation_episode_state": load_result["episode_state"],
@@ -429,8 +430,24 @@ async def _run_conversation_progress_record_background(state: dict) -> None:
             "character_intent": state["character_intent"],
             "final_dialog": state["final_dialog"],
         }
+        logger.info(
+            "Conversation progress record request: platform=%s channel=%s user=%s input=%s",
+            scope.platform,
+            scope.platform_channel_id or "<dm>",
+            scope.global_user_id,
+            log_preview({
+                "timestamp": record_input["timestamp"],
+                "prior_episode_state": record_input["prior_episode_state"],
+                "decontexualized_input": record_input["decontexualized_input"],
+                "chat_history_recent": record_input["chat_history_recent"],
+                "content_anchors": record_input["content_anchors"],
+                "logical_stance": record_input["logical_stance"],
+                "character_intent": record_input["character_intent"],
+                "final_dialog": record_input["final_dialog"],
+            }),
+        )
         result = await record_turn_progress(record_input=record_input)
-        logger.debug(
+        logger.info(
             "Conversation progress recorded: platform=%s channel=%s user=%s written=%s turn_count=%d continuity=%s status=%s cache_updated=%s",
             scope.platform,
             scope.platform_channel_id or "<dm>",
@@ -762,6 +779,19 @@ async def chat(req: ChatRequest, background_tasks: BackgroundTasks):
                 req.platform_channel_id or "<dm>",
                 req.platform_message_id or "<none>",
             )
+        elif not final_dialog:
+            logger.info(
+                "Background conversation progress recorder skipped: platform=%s channel=%s message=%s should_respond=%s final_dialog_count=0",
+                req.platform,
+                req.platform_channel_id or "<dm>",
+                req.platform_message_id or "<none>",
+                result.get("should_respond"),
+            )
+        else:
+            logger.warning(
+                "Background conversation progress recorder skipped: unexpected consolidation_state type=%s",
+                type(consolidation_state).__name__,
+            )
 
         if debug_modes.get("no_remember"):
             logger.debug("Background consolidation skipped: no_remember is active")
@@ -772,6 +802,14 @@ async def chat(req: ChatRequest, background_tasks: BackgroundTasks):
                 req.platform,
                 req.platform_channel_id or "<dm>",
                 req.platform_message_id or "<none>",
+            )
+        elif not final_dialog:
+            logger.info(
+                "Background consolidation skipped: platform=%s channel=%s message=%s should_respond=%s final_dialog_count=0",
+                req.platform,
+                req.platform_channel_id or "<dm>",
+                req.platform_message_id or "<none>",
+                result.get("should_respond"),
             )
         else:
             logger.warning(

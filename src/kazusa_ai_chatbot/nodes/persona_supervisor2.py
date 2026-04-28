@@ -10,6 +10,7 @@ from kazusa_ai_chatbot.nodes.persona_supervisor2_msg_decontexualizer import call
 from kazusa_ai_chatbot.nodes.persona_supervisor2_rag_projection import project_known_facts
 from kazusa_ai_chatbot.nodes.persona_supervisor2_rag_supervisor2 import call_rag_supervisor
 from kazusa_ai_chatbot.nodes.persona_supervisor2_schema import GlobalPersonaState
+from kazusa_ai_chatbot.utils import log_preview
 
 logger = logging.getLogger(__name__)
 
@@ -49,15 +50,33 @@ async def stage_1_research(state: GlobalPersonaState) -> dict:
             "indirect_speech_context": state.get("indirect_speech_context", ""),
         },
     )
+    rag_result = project_known_facts(
+        rag_supervisor_result.get("known_facts", []),
+        current_user_id=state["global_user_id"],
+        character_user_id=state["character_profile"].get("global_user_id", ""),
+        answer=str(rag_supervisor_result.get("answer", "")),
+        unknown_slots=rag_supervisor_result.get("unknown_slots", []),
+        loop_count=int(rag_supervisor_result.get("loop_count", 0) or 0),
+    )
+    trace = rag_result["supervisor_trace"]
+    logger.info(
+        "RAG2 projection: platform=%s channel=%s user=%s query=%s answer=%s dispatched=%d user_image=%s character_image=%s third_party_profiles=%d memory_evidence=%d conversation_evidence=%d external_evidence=%d rag_result=%s",
+        state["platform"],
+        state["platform_channel_id"] or "<dm>",
+        state["global_user_id"],
+        log_preview(state["decontexualized_input"]),
+        log_preview(rag_result["answer"]),
+        len(trace["dispatched"]),
+        bool(rag_result["user_image"]),
+        bool(rag_result["character_image"]),
+        len(rag_result["third_party_profiles"]),
+        len(rag_result["memory_evidence"]),
+        len(rag_result["conversation_evidence"]),
+        len(rag_result["external_evidence"]),
+        log_preview(rag_result),
+    )
     return {
-        "rag_result": project_known_facts(
-            rag_supervisor_result.get("known_facts", []),
-            current_user_id=state["global_user_id"],
-            character_user_id=state["character_profile"].get("global_user_id", ""),
-            answer=str(rag_supervisor_result.get("answer", "")),
-            unknown_slots=rag_supervisor_result.get("unknown_slots", []),
-            loop_count=int(rag_supervisor_result.get("loop_count", 0) or 0),
-        ),
+        "rag_result": rag_result,
     }
 
 

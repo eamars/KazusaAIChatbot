@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Awaitable, Callable
 
 from kazusa_ai_chatbot.conversation_progress import cache
@@ -14,6 +15,10 @@ from kazusa_ai_chatbot.conversation_progress.models import (
     ConversationProgressRecordResult,
     ConversationProgressScope,
 )
+from kazusa_ai_chatbot.utils import log_preview
+
+logger = logging.getLogger(__name__)
+
 RecorderCallable = Callable[[ConversationProgressRecordInput], Awaitable[dict]]
 
 
@@ -51,12 +56,22 @@ class ConversationProgressRuntime:
         source = "cache" if used_cache else "db"
         if selected_document is None:
             source = "empty"
+        prompt_doc = projection.project_prompt_doc(
+            document=selected_document,
+            current_timestamp=current_timestamp,
+        )
+        logger.info(
+            "Conversation progress load: platform=%s channel=%s user=%s source=%s episode_present=%s progress=%s",
+            scope.platform,
+            scope.platform_channel_id or "<dm>",
+            scope.global_user_id,
+            source,
+            selected_document is not None,
+            log_preview(prompt_doc),
+        )
         return {
             "episode_state": selected_document,
-            "conversation_progress": projection.project_prompt_doc(
-                document=selected_document,
-                current_timestamp=current_timestamp,
-            ),
+            "conversation_progress": prompt_doc,
             "source": source,
         }
 
@@ -75,6 +90,13 @@ class ConversationProgressRuntime:
         """
 
         recorder_output = await self._recorder_callable(record_input)
+        logger.info(
+            "Conversation progress recorder output: platform=%s channel=%s user=%s output=%s",
+            record_input["scope"].platform,
+            record_input["scope"].platform_channel_id or "<dm>",
+            record_input["scope"].global_user_id,
+            log_preview(recorder_output),
+        )
         document = repository.build_episode_state_doc(
             scope=record_input["scope"],
             timestamp=record_input["timestamp"],
@@ -90,6 +112,15 @@ class ConversationProgressRuntime:
                 document=document,
             )
             cache_updated = True
+        logger.info(
+            "Conversation progress write: platform=%s channel=%s user=%s written=%s cache_updated=%s document=%s",
+            record_input["scope"].platform,
+            record_input["scope"].platform_channel_id or "<dm>",
+            record_input["scope"].global_user_id,
+            written,
+            cache_updated,
+            log_preview(document),
+        )
         return {
             "written": written,
             "turn_count": int(document["turn_count"]),

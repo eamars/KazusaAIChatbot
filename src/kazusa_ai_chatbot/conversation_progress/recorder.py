@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from typing import Any
 
 from langchain_core.messages import HumanMessage, SystemMessage
@@ -20,7 +21,9 @@ from kazusa_ai_chatbot.conversation_progress.policy import (
     VALID_STATUS,
     VALID_TOPIC_MOMENTUM,
 )
-from kazusa_ai_chatbot.utils import get_llm, parse_llm_json_output
+from kazusa_ai_chatbot.utils import get_llm, log_preview, parse_llm_json_output
+
+logger = logging.getLogger(__name__)
 
 _RECORDER_PROMPT = """\
 You are the short-term conversation progress recorder for Kazusa.
@@ -181,9 +184,25 @@ async def record_with_llm(record_input: ConversationProgressRecordInput) -> dict
         "character_intent": record_input["character_intent"],
         "final_dialog": record_input["final_dialog"],
     }
+    logger.info(
+        "Conversation progress recorder input: platform=%s channel=%s user=%s payload=%s",
+        record_input["scope"].platform,
+        record_input["scope"].platform_channel_id or "<dm>",
+        record_input["scope"].global_user_id,
+        log_preview(human_payload),
+    )
     response = await _recorder_llm.ainvoke([
         SystemMessage(content=_RECORDER_PROMPT),
         HumanMessage(content=json.dumps(human_payload, ensure_ascii=False)),
     ])
     parsed = parse_llm_json_output(response.content)
-    return validate_recorder_output(parsed)
+    validated = validate_recorder_output(parsed)
+    logger.info(
+        "Conversation progress recorder parsed: platform=%s channel=%s user=%s raw=%s validated=%s",
+        record_input["scope"].platform,
+        record_input["scope"].platform_channel_id or "<dm>",
+        record_input["scope"].global_user_id,
+        log_preview(response.content),
+        log_preview(validated),
+    )
+    return validated
