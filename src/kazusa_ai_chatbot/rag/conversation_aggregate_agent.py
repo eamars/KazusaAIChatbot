@@ -12,7 +12,7 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from kazusa_ai_chatbot.config import RAG_SUBAGENT_LLM_API_KEY, RAG_SUBAGENT_LLM_BASE_URL, RAG_SUBAGENT_LLM_MODEL
 from kazusa_ai_chatbot.db import aggregate_conversation_by_user
 from kazusa_ai_chatbot.rag.helper_agent import BaseRAGHelperAgent
-from kazusa_ai_chatbot.utils import get_llm, parse_llm_json_output
+from kazusa_ai_chatbot.utils import get_llm, parse_llm_json_output, text_or_empty
 
 _EXTRACTOR_PROMPT = """\
 You are a parameter extractor for `aggregate_conversation_by_user`.
@@ -75,13 +75,13 @@ def _normalize_args(raw_args: dict[str, Any]) -> dict[str, Any]:
     Returns:
         Dict containing aggregate, keyword, time_window, and limit.
     """
-    time_window = str(raw_args.get("time_window", "recent")).strip()
+    time_window = text_or_empty(raw_args.get("time_window")) or "recent"
     if time_window not in _TIME_WINDOWS:
         time_window = "recent"
 
     return {
         "aggregate": "message_count_by_user",
-        "keyword": str(raw_args.get("keyword", "")).strip(),
+        "keyword": text_or_empty(raw_args.get("keyword")),
         "time_window": time_window,
         "limit": _normalize_limit(raw_args.get("limit", 10)),
     }

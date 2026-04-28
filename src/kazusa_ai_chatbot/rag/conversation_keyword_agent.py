@@ -18,7 +18,7 @@ from kazusa_ai_chatbot.rag.cache2_policy import (
     is_closed_historical_range,
 )
 from kazusa_ai_chatbot.rag.helper_agent import BaseRAGHelperAgent
-from kazusa_ai_chatbot.utils import get_llm, parse_llm_json_output
+from kazusa_ai_chatbot.utils import get_llm, parse_llm_json_output, text_or_empty
 
 logger = logging.getLogger(__name__)
 
@@ -108,7 +108,7 @@ def _normalize_args(raw_args: dict[str, Any]) -> dict[str, Any]:
     """
     args: dict[str, Any] = {}
 
-    keyword = str(raw_args.get("keyword", "")).strip()
+    keyword = text_or_empty(raw_args.get("keyword"))
     if keyword:
         args["keyword"] = keyword
 
@@ -128,7 +128,7 @@ def _normalize_args(raw_args: dict[str, Any]) -> dict[str, Any]:
         raw_val = raw_args.get(key)
         if raw_val is None:
             continue
-        value = str(raw_val).strip()
+        value = text_or_empty(raw_val)
         if value:
             args[key] = value
 

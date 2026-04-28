@@ -37,10 +37,13 @@ def normalize_diary_entries(value: object) -> list[str]:
 
     normalized: list[str] = []
     for item in items:
-        text = str(item).strip()
+        if not isinstance(item, str):
+            continue
+        text = item.strip()
         if text:
             normalized.append(text)
     return normalized
+
 
 class ConsolidatorState(TypedDict):
     # Inputs for db_writer

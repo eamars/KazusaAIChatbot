@@ -468,7 +468,7 @@ def _normalize_initializer_slots(raw_slots: object) -> list[str]:
     """
     if not isinstance(raw_slots, list):
         return []
-    return [str(slot).strip() for slot in raw_slots if str(slot).strip()]
+    return [slot.strip() for slot in raw_slots if isinstance(slot, str) and slot.strip()]
 
 
 def _read_cached_initializer_slots(cached: object) -> list[str] | None:
@@ -918,11 +918,15 @@ def _build_agent_name_union() -> str:
 
 def _normalize_dispatch(raw_dispatch: dict, current_slot: str) -> dict:
     """Normalize dispatcher JSON into a safe executable dispatch payload."""
-    agent_name = str(raw_dispatch.get("agent_name", "")).strip()
+    raw_agent_name = raw_dispatch.get("agent_name", "")
+    agent_name = raw_agent_name.strip() if isinstance(raw_agent_name, str) else ""
     if agent_name not in _RAG_SUPERVISOR_AGENT_REGISTRY:
         agent_name = ""
 
-    task = str(raw_dispatch.get("task", "")).strip() or current_slot
+    raw_task = raw_dispatch.get("task", "")
+    fallback_task = current_slot if isinstance(current_slot, str) else ""
+    task = raw_task.strip() if isinstance(raw_task, str) else ""
+    task = task or fallback_task
     context = raw_dispatch.get("context", {})
     if not isinstance(context, dict):
         context = {}
@@ -944,6 +948,7 @@ def _normalize_dispatch(raw_dispatch: dict, current_slot: str) -> dict:
 def _serialize_agent_result(result: dict) -> str:
     """Serialize one agent result for dispatcher history."""
     return json.dumps(result, ensure_ascii=False, default=str)
+
 
 async def rag_executor(state: ProgressiveRAGState) -> dict:
     """Execute the delegate-agent call produced by the dispatcher.

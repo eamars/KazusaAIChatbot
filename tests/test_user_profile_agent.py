@@ -7,7 +7,39 @@ import pytest
 from kazusa_ai_chatbot.config import CHARACTER_GLOBAL_USER_ID
 from kazusa_ai_chatbot.rag.cache2_policy import build_user_profile_cache_key
 from kazusa_ai_chatbot.rag.cache2_runtime import RAGCache2Runtime
-from kazusa_ai_chatbot.rag.user_profile_agent import UserProfileAgent
+from kazusa_ai_chatbot.rag.user_profile_agent import (
+    UserProfileAgent,
+    _extract_global_user_id_from_known_facts,
+)
+
+
+def test_extract_global_user_id_uses_native_known_facts_only() -> None:
+    """User-profile resolution should use native facts."""
+
+    context = {
+        "known_facts": [
+            {
+                "raw_result": {
+                    "global_user_id": "native-user-id",
+                    "display_name": "Native User",
+                }
+            }
+        ]
+    }
+
+    assert _extract_global_user_id_from_known_facts(context) == "native-user-id"
+
+
+def test_extract_global_user_id_does_not_parse_stringified_known_facts() -> None:
+    """Stringified native facts should not be repaired inside domain logic."""
+
+    context = {
+        "known_facts": [
+            '{"raw_result":{"global_user_id":"stringified-user-id"}}',
+        ]
+    }
+
+    assert _extract_global_user_id_from_known_facts(context) == ""
 
 
 @pytest.mark.asyncio

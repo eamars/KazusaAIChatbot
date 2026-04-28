@@ -15,7 +15,7 @@ from kazusa_ai_chatbot.rag.cache2_policy import (
     build_relationship_dependencies,
 )
 from kazusa_ai_chatbot.rag.helper_agent import BaseRAGHelperAgent
-from kazusa_ai_chatbot.utils import build_affinity_block, get_llm, parse_llm_json_output
+from kazusa_ai_chatbot.utils import build_affinity_block, get_llm, parse_llm_json_output, text_or_empty
 
 _MAX_RELATIONSHIP_LIMIT = 5
 _RELATIONSHIP_MODES = {"one", "n", "existence"}
@@ -96,8 +96,8 @@ def _normalize_relationship_args(raw_args: dict[str, Any]) -> dict[str, Any] | N
     Returns:
         Sanitized request dict, or ``None`` when required values are out of schema.
     """
-    mode = str(raw_args.get("mode", "")).strip()
-    rank_order = str(raw_args.get("rank_order", "")).strip()
+    mode = text_or_empty(raw_args.get("mode"))
+    rank_order = text_or_empty(raw_args.get("rank_order"))
     raw_limit = raw_args.get("limit")
     if mode not in _RELATIONSHIP_MODES or rank_order not in _RELATIONSHIP_RANK_ORDERS:
         return None

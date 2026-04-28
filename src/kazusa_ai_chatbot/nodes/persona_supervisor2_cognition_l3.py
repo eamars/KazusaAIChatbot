@@ -618,7 +618,11 @@ async def call_preference_adapter(state: CognitionState) -> CognitionState:
     # )
 
     return {
-        "accepted_user_preferences": [str(item) for item in accepted_user_preferences if str(item).strip()],
+        "accepted_user_preferences": [
+            item.strip()
+            for item in accepted_user_preferences
+            if isinstance(item, str) and item.strip()
+        ],
     }
 
 

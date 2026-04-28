@@ -93,3 +93,47 @@ def test_project_known_facts_groups_summarized_evidence() -> None:
     assert result["external_evidence"][0]["summary"] == "web summary"
     assert result["external_evidence"][0]["content"] == "https:/…"
     assert result["external_evidence"][0]["url"] == ""
+
+
+def test_project_known_facts_does_not_stringify_malformed_fact_values() -> None:
+    """RAG projection must not expose repr text from malformed fact rows."""
+
+    result = project_known_facts(
+        [
+            {
+                "slot": {"bad": "slot"},
+                "agent": "user_lookup_agent",
+                "resolved": True,
+                "summary": {"bad": "summary"},
+                "raw_result": {"global_user_id": "user-2"},
+            },
+            {
+                "slot": "memory",
+                "agent": "persistent_memory_search_agent",
+                "resolved": True,
+                "summary": "memory summary",
+                "raw_result": [{"content": {"bad": "content"}}],
+            },
+            {
+                "slot": "web",
+                "agent": "web_search_agent2",
+                "resolved": True,
+                "summary": "web summary",
+                "raw_result": {"bad": "external content"},
+            },
+        ],
+        current_user_id="user-1",
+        character_user_id="character-1",
+    )
+
+    rendered = repr(result)
+
+    assert "{'bad':" not in rendered
+    assert result["supervisor_trace"]["dispatched"] == [
+        {"slot": "", "agent": "user_lookup_agent", "resolved": True},
+        {"slot": "memory", "agent": "persistent_memory_search_agent", "resolved": True},
+        {"slot": "web", "agent": "web_search_agent2", "resolved": True},
+    ]
+    assert result["third_party_profiles"] == []
+    assert result["memory_evidence"] == [{"summary": "memory summary", "content": ""}]
+    assert result["external_evidence"] == [{"summary": "web summary", "content": "", "url": ""}]

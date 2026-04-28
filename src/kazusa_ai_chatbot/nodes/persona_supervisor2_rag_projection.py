@@ -5,14 +5,10 @@ from __future__ import annotations
 import re
 from typing import Any
 
+from kazusa_ai_chatbot.utils import text_or_empty
+
 _URL_RE = re.compile(r"https?://\S+")
 _SLOT_REF_RE = re.compile(r"slot\s+(\d+)", flags=re.IGNORECASE)
-
-
-def _normalize_text(value: object) -> str:
-    """Return a stripped string for optional scalar values."""
-    text = str(value or "").strip()
-    return text
 
 
 def _clip_text(text: str, *, limit: int) -> str:
@@ -64,11 +60,11 @@ def _resolve_profile_owner_id(fact: dict[str, Any], known_facts: list[dict[str, 
         The resolved owner UUID, or an empty string when unknown.
     """
     raw_result = _as_dict(fact.get("raw_result"))
-    direct_id = _normalize_text(raw_result.get("global_user_id"))
+    direct_id = text_or_empty(raw_result.get("global_user_id"))
     if direct_id:
         return direct_id
 
-    slot_reference = _extract_slot_reference(_normalize_text(fact.get("slot")))
+    slot_reference = _extract_slot_reference(text_or_empty(fact.get("slot")))
     if slot_reference is None:
         return ""
     if slot_reference < 1 or slot_reference > len(known_facts):
@@ -76,7 +72,7 @@ def _resolve_profile_owner_id(fact: dict[str, Any], known_facts: list[dict[str, 
 
     referenced = _as_dict(known_facts[slot_reference - 1])
     referenced_raw = _as_dict(referenced.get("raw_result"))
-    return _normalize_text(referenced_raw.get("global_user_id"))
+    return text_or_empty(referenced_raw.get("global_user_id"))
 
 
 def _extract_memory_content(raw_result: object, *, evidence_char_limit: int) -> str:
@@ -94,7 +90,7 @@ def _extract_memory_content(raw_result: object, *, evidence_char_limit: int) -> 
     for entry in entries[:5]:
         if not isinstance(entry, dict):
             continue
-        content = _normalize_text(entry.get("content"))
+        content = text_or_empty(entry.get("content"))
         if not content:
             continue
         snippets.append(_clip_text(content, limit=evidence_char_limit))
@@ -111,7 +107,7 @@ def _extract_external_content(raw_result: object, *, evidence_char_limit: int) -
     Returns:
         Tuple of clipped text and first detected URL, if any.
     """
-    text = _clip_text(_normalize_text(raw_result), limit=evidence_char_limit)
+    text = _clip_text(text_or_empty(raw_result), limit=evidence_char_limit)
     url_match = _URL_RE.search(text)
     return text, url_match.group(0) if url_match else ""
 
@@ -141,7 +137,7 @@ def project_known_facts(
         ``rag_result`` dict consumed by cognition and consolidation stages.
     """
     rag_result: dict[str, Any] = {
-        "answer": _normalize_text(answer),
+        "answer": text_or_empty(answer),
         "user_image": {},
         "character_image": {},
         "third_party_profiles": [],
@@ -165,10 +161,10 @@ def project_known_facts(
         if not isinstance(fact, dict):
             continue
 
-        slot = _normalize_text(fact.get("slot"))
-        agent = _normalize_text(fact.get("agent"))
+        slot = text_or_empty(fact.get("slot"))
+        agent = text_or_empty(fact.get("agent"))
         resolved = bool(fact.get("resolved", False))
-        summary = _normalize_text(fact.get("summary"))
+        summary = text_or_empty(fact.get("summary"))
         raw_result = fact.get("raw_result")
 
         dispatched.append({

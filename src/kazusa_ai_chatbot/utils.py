@@ -138,6 +138,20 @@ def sanitize_llm_text(text: str) -> str:
     return re.sub(r'[\x00-\x08\x0B\x0C\x0E-\x1F\x7F\x80-\x9F]', '', text)
 
 
+def text_or_empty(value: object) -> str:
+    """Return stripped text only when the value is already a string.
+
+    Args:
+        value: Candidate payload from a parsed workflow boundary.
+
+    Returns:
+        The stripped string, or an empty string for any non-string value.
+    """
+    if not isinstance(value, str):
+        return ""
+    return value.strip()
+
+
 def log_preview(value: Any, max_length: int | None = None) -> str:
     """Return a complete JSON-safe rendering suitable for logs.
 

@@ -16,7 +16,7 @@ from kazusa_ai_chatbot.rag.cache2_policy import (
     build_user_list_dependencies,
 )
 from kazusa_ai_chatbot.rag.helper_agent import BaseRAGHelperAgent
-from kazusa_ai_chatbot.utils import get_llm, parse_llm_json_output
+from kazusa_ai_chatbot.utils import get_llm, parse_llm_json_output, text_or_empty
 
 logger = logging.getLogger(__name__)
 
@@ -87,18 +87,18 @@ def _normalize_args(raw_args: dict[str, Any]) -> dict[str, Any]:
     Returns:
         Dict containing source, display_name_operator, display_name_value, and limit.
     """
-    source = str(raw_args.get("source", "user_profiles")).strip()
+    source = text_or_empty(raw_args.get("source")) or "user_profiles"
     if source not in _SOURCES:
         source = "user_profiles"
 
-    operator = str(raw_args.get("display_name_operator", "contains")).strip()
+    operator = text_or_empty(raw_args.get("display_name_operator")) or "contains"
     if operator not in _DISPLAY_NAME_OPERATORS:
         operator = "contains"
 
     return {
         "source": source,
         "display_name_operator": operator,
-        "display_name_value": str(raw_args.get("display_name_value", "")).strip(),
+        "display_name_value": text_or_empty(raw_args.get("display_name_value")),
         "limit": _normalize_limit(raw_args.get("limit", 20)),
     }
 

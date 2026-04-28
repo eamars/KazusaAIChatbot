@@ -50,7 +50,7 @@ from kazusa_ai_chatbot.dispatcher import (
 from kazusa_ai_chatbot.dispatcher.task import parse_iso_datetime
 from kazusa_ai_chatbot.rag.cache2_events import CacheInvalidationEvent
 from kazusa_ai_chatbot.rag.cache2_runtime import get_rag_cache2_runtime
-from kazusa_ai_chatbot.utils import get_llm, log_list_preview, parse_llm_json_output
+from kazusa_ai_chatbot.utils import get_llm, log_list_preview, parse_llm_json_output, text_or_empty
 
 logger = logging.getLogger(__name__)
 
@@ -319,6 +319,13 @@ def _default_future_promise_due_time(timestamp: str) -> str:
     return next_minute.isoformat()
 
 
+def _text_or_default(value: object, default: str) -> str:
+    text = text_or_empty(value)
+    if text:
+        return text
+    return default
+
+
 def _normalize_future_promises(
     future_promises: list[dict],
     *,
@@ -339,7 +346,7 @@ def _normalize_future_promises(
 
     for promise in future_promises:
         normalized_promise = dict(promise)
-        commitment_type = str(normalized_promise.get("commitment_type", "")).strip()
+        commitment_type = text_or_empty(normalized_promise.get("commitment_type"))
         due_time = normalized_promise.get("due_time")
         due_time_is_missing = due_time is None or (isinstance(due_time, str) and not due_time.strip())
 
@@ -368,21 +375,22 @@ def _build_active_commitment_entries(
     commitments: list[ActiveCommitmentDoc] = []
     normalized_promises = _normalize_future_promises(future_promises, timestamp=timestamp)
     for promise in normalized_promises:
-        action = str(promise.get("action", "")).strip()
+        action = text_or_empty(promise.get("action"))
         if not action:
             continue
+        dedup_key = text_or_empty(promise.get("dedup_key")) or action
         commitments.append(
             {
                 "commitment_id": uuid4().hex,
-                "target": str(promise.get("target", "")).strip(),
+                "target": text_or_empty(promise.get("target")),
                 "action": action,
-                "commitment_type": str(promise.get("commitment_type", "")).strip(),
+                "commitment_type": text_or_empty(promise.get("commitment_type")),
                 "status": "active",
                 "source": "conversation_extracted",
                 "created_at": timestamp,
                 "updated_at": timestamp,
                 "due_time": promise.get("due_time"),
-                "dedup_key": str(promise.get("dedup_key") or action).strip().lower(),
+                "dedup_key": dedup_key.lower(),
             }
         )
     return commitments
@@ -396,12 +404,12 @@ def _build_objective_fact_entries(
     """Convert harvester ``new_facts`` rows into ``ObjectiveFactEntry`` dicts."""
     entries: list[ObjectiveFactEntry] = []
     for fact in new_facts or []:
-        description = fact.get("description", "")
+        description = text_or_empty(fact.get("description"))
         if not description:
             continue
         entry: ObjectiveFactEntry = {
             "fact": description,
-            "category": fact.get("category", "general"),
+            "category": _text_or_default(fact.get("category"), "general"),
             "timestamp": timestamp,
             "source": "conversation_extracted",
             "confidence": 0.85,
@@ -433,30 +441,35 @@ def _build_memory_docs(
     memories: list[UserProfileMemoryDoc] = []
 
     for entry in diary_entries:
-        content = str(entry.get("entry", "")).strip()
+        content = text_or_empty(entry.get("entry"))
         if not content:
             continue
+        created_at = entry.get("timestamp")
+        context = entry.get("context")
         memories.append({
             "memory_type": MemoryType.DIARY_ENTRY,
             "content": content,
-            "created_at": entry.get("timestamp") or timestamp,
+            "created_at": created_at if isinstance(created_at, str) and created_at.strip() else timestamp,
             "updated_at": timestamp,
             "confidence": entry.get("confidence", 0.8),
-            "context": entry.get("context", ""),
+            "context": context if isinstance(context, str) else "",
         })
 
     fact_by_description = {
-        str(fact.get("description", "")).strip(): fact
+        text_or_empty(fact.get("description")): fact
         for fact in new_facts or []
-        if str(fact.get("description", "")).strip()
+        if text_or_empty(fact.get("description"))
     }
     for fact in objective_facts:
-        content = str(fact.get("fact", "")).strip()
+        content = text_or_empty(fact.get("fact"))
         if not content:
             continue
         raw_fact = fact_by_description.get(content, {})
-        dedup_key = str(raw_fact.get("dedup_key") or content).strip().lower()
-        scope = str(raw_fact.get("scope", "")).strip()
+        dedup_key = (text_or_empty(raw_fact.get("dedup_key")) or content).lower()
+        scope = text_or_empty(raw_fact.get("scope"))
+        created_at = fact.get("timestamp")
+        category = _text_or_default(fact.get("category"), "general")
+        source = _text_or_default(fact.get("source"), "conversation_extracted")
         # A milestone fact is stored ONLY as a MILESTONE memory. The read
         # layer folds milestones into the objective_facts block so prompt-
         # facing fact lists still include them — no need to duplicate-write.
@@ -464,12 +477,12 @@ def _build_memory_docs(
             memories.append({
                 "memory_type": MemoryType.MILESTONE,
                 "content": content,
-                "created_at": fact.get("timestamp") or timestamp,
+                "created_at": created_at if isinstance(created_at, str) and created_at.strip() else timestamp,
                 "updated_at": timestamp,
-                "category": fact.get("category", "general"),
-                "source": fact.get("source", "conversation_extracted"),
+                "category": category,
+                "source": source,
                 "confidence": fact.get("confidence", 0.85),
-                "event_category": str(raw_fact.get("milestone_category", "")).strip(),
+                "event_category": text_or_empty(raw_fact.get("milestone_category")),
                 "scope": scope,
                 "dedup_key": dedup_key,
                 "superseded_by": None,
@@ -478,32 +491,35 @@ def _build_memory_docs(
             memories.append({
                 "memory_type": MemoryType.OBJECTIVE_FACT,
                 "content": content,
-                "created_at": fact.get("timestamp") or timestamp,
+                "created_at": created_at if isinstance(created_at, str) and created_at.strip() else timestamp,
                 "updated_at": timestamp,
-                "category": fact.get("category", "general"),
-                "source": fact.get("source", "conversation_extracted"),
+                "category": category,
+                "source": source,
                 "confidence": fact.get("confidence", 0.85),
                 "dedup_key": dedup_key,
                 "scope": scope,
             })
 
     for commitment in active_commitments:
-        action = str(commitment.get("action", "")).strip()
+        action = text_or_empty(commitment.get("action"))
         if not action:
             continue
+        dedup_key = text_or_empty(commitment.get("dedup_key")) or action
+        created_at = commitment.get("created_at")
+        updated_at = commitment.get("updated_at")
         memories.append({
             "memory_type": MemoryType.COMMITMENT,
             "content": action,
             "action": action,
-            "commitment_id": commitment.get("commitment_id", ""),
-            "target": commitment.get("target", ""),
-            "commitment_type": commitment.get("commitment_type", ""),
-            "status": commitment.get("status", "active"),
-            "source": commitment.get("source", "conversation_extracted"),
-            "created_at": commitment.get("created_at") or timestamp,
-            "updated_at": commitment.get("updated_at") or timestamp,
+            "commitment_id": text_or_empty(commitment.get("commitment_id")),
+            "target": text_or_empty(commitment.get("target")),
+            "commitment_type": text_or_empty(commitment.get("commitment_type")),
+            "status": _text_or_default(commitment.get("status"), "active"),
+            "source": _text_or_default(commitment.get("source"), "conversation_extracted"),
+            "created_at": created_at if isinstance(created_at, str) and created_at.strip() else timestamp,
+            "updated_at": updated_at if isinstance(updated_at, str) and updated_at.strip() else timestamp,
             "due_time": commitment.get("due_time"),
-            "dedup_key": str(commitment.get("dedup_key") or action).strip().lower(),
+            "dedup_key": dedup_key.lower(),
         })
 
     return memories

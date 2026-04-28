@@ -5,6 +5,9 @@ from __future__ import annotations
 import typing
 import pytest
 
+from kazusa_ai_chatbot.nodes.persona_supervisor2_consolidator_schema import (
+    normalize_diary_entries,
+)
 from kazusa_ai_chatbot.nodes.persona_supervisor2_schema import GlobalPersonaState, CognitionState
 
 
@@ -71,3 +74,20 @@ class TestCognitionState:
         ]
         for field in required:
             assert field in hints, f"Missing cognition field: {field}"
+
+
+def test_normalize_diary_entries_accepts_string_and_string_list() -> None:
+    """Diary boundary accepts native strings and list[str] payloads."""
+
+    assert normalize_diary_entries("  one diary entry  ") == ["one diary entry"]
+    assert normalize_diary_entries([" first ", "", "second"]) == ["first", "second"]
+
+
+def test_normalize_diary_entries_does_not_stringify_container_items() -> None:
+    """Diary boundary must not turn dict/list items into repr text."""
+
+    assert normalize_diary_entries([
+        {"entry": "do not stringify"},
+        ["do not stringify"],
+        " keep me ",
+    ]) == ["keep me"]

@@ -16,21 +16,21 @@ from kazusa_ai_chatbot.rag.cache2_policy import (
     build_user_profile_dependencies,
 )
 from kazusa_ai_chatbot.rag.helper_agent import BaseRAGHelperAgent
-from kazusa_ai_chatbot.utils import parse_llm_json_output
 
 
 def _walk_for_global_user_id(value: Any) -> str:
     """Recursively scan nested values for the first non-empty ``global_user_id``.
 
     Args:
-        value: Arbitrary nested structure built from dicts, lists, or strings.
+        value: Arbitrary nested structure built from native dicts and lists.
 
     Returns:
         The first non-empty ``global_user_id`` found, otherwise an empty string.
     """
     if isinstance(value, dict):
-        candidate = str(value.get("global_user_id", "")).strip()
-        if candidate:
+        raw_candidate = value.get("global_user_id")
+        if isinstance(raw_candidate, str) and raw_candidate.strip():
+            candidate = raw_candidate.strip()
             return candidate
         for nested in value.values():
             resolved = _walk_for_global_user_id(nested)
@@ -43,16 +43,6 @@ def _walk_for_global_user_id(value: Any) -> str:
             resolved = _walk_for_global_user_id(item)
             if resolved:
                 return resolved
-        return ""
-
-    if isinstance(value, str):
-        stripped = value.strip()
-        if not stripped:
-            return ""
-        if stripped.startswith("{") or stripped.startswith("["):
-            parsed = parse_llm_json_output(stripped)
-            if parsed:
-                return _walk_for_global_user_id(parsed)
         return ""
 
     return ""

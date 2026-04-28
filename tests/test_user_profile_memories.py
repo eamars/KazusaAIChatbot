@@ -281,6 +281,60 @@ def test_build_memory_docs_stores_milestone_facts_only_once():
     assert memories[0]["dedup_key"] == "addressing_change"
 
 
+def test_build_memory_docs_does_not_stringify_malformed_content_fields():
+    """Durable profile memories must not store repr text from malformed fields."""
+
+    memories = persistence_module._build_memory_docs(
+        diary_entries=[
+            {"entry": {"text": "bad diary"}},
+            {"entry": "good diary", "timestamp": "2026-04-25T00:00:00+00:00"},
+        ],
+        objective_facts=[
+            {"fact": ["bad fact"], "timestamp": "2026-04-25T00:00:00+00:00"},
+            {
+                "fact": "good milestone",
+                "category": {"bad": "category"},
+                "timestamp": "2026-04-25T00:00:00+00:00",
+                "source": ["bad source"],
+                "confidence": 0.9,
+            },
+        ],
+        active_commitments=[
+            {"action": {"text": "bad commitment"}},
+            {"action": "good commitment", "dedup_key": {"bad": "dedup"}},
+        ],
+        new_facts=[
+            {
+                "description": ["bad fact"],
+                "dedup_key": {"bad": "dedup"},
+            },
+            {
+                "description": "good milestone",
+                "is_milestone": True,
+                "milestone_category": {"bad": "event"},
+                "scope": ["bad scope"],
+                "dedup_key": {"bad": "dedup"},
+            },
+        ],
+        timestamp="2026-04-25T00:00:00+00:00",
+    )
+
+    contents = [memory["content"] for memory in memories]
+
+    assert contents == ["good diary", "good milestone", "good commitment"]
+    assert all("{'" not in content and "[" not in content for content in contents)
+
+    milestone = next(memory for memory in memories if memory["memory_type"] == MemoryType.MILESTONE)
+    assert milestone["category"] == "general"
+    assert milestone["source"] == "conversation_extracted"
+    assert milestone["event_category"] == ""
+    assert milestone["scope"] == ""
+    assert milestone["dedup_key"] == "good milestone"
+
+    commitment = next(memory for memory in memories if memory["memory_type"] == MemoryType.COMMITMENT)
+    assert commitment["dedup_key"] == "good commitment"
+
+
 @pytest.mark.asyncio
 async def test_expire_overdue_profile_memories_marks_active_commitments(monkeypatch):
     db = _mock_db()

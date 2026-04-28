@@ -84,6 +84,60 @@ def test_initializer_prompt_documents_profile_evidence_dependency() -> None:
     assert "No profile, memory, identity, or conversation evidence is needed" in rendered_prompt
 
 
+def test_normalize_initializer_slots_does_not_stringify_container_items() -> None:
+    """Initializer slots should keep only native strings."""
+
+    slots = supervisor2_module._normalize_initializer_slots([
+        {"slot": "do not stringify"},
+        ["bad"],
+        " keep me ",
+    ])
+
+    assert slots == ["keep me"]
+
+
+def test_normalize_dispatch_does_not_stringify_task_or_agent() -> None:
+    """Dispatcher payloads should not turn malformed fields into executable work."""
+
+    dispatch = supervisor2_module._normalize_dispatch(
+        {
+            "agent_name": {"bad": "agent"},
+            "task": {"bad": "task"},
+            "context": '{"bad":"context"}',
+            "max_attempts": 2,
+        },
+        current_slot="fallback slot",
+    )
+
+    assert dispatch == {
+        "agent_name": "",
+        "task": "fallback slot",
+        "context": {},
+        "max_attempts": 2,
+    }
+
+
+def test_normalize_dispatch_accepts_valid_payload() -> None:
+    """Dispatcher payloads should preserve valid native fields."""
+
+    dispatch = supervisor2_module._normalize_dispatch(
+        {
+            "agent_name": "user_lookup_agent",
+            "task": " look up Alice ",
+            "context": {"known_facts": []},
+            "max_attempts": 2,
+        },
+        current_slot="fallback slot",
+    )
+
+    assert dispatch == {
+        "agent_name": "user_lookup_agent",
+        "task": "look up Alice",
+        "context": {"known_facts": []},
+        "max_attempts": 2,
+    }
+
+
 @pytest.mark.asyncio
 async def test_rag_initializer_serves_second_identical_call_from_cache(monkeypatch) -> None:
     """A repeated initializer call should reuse Cache 2 and skip the LLM."""
