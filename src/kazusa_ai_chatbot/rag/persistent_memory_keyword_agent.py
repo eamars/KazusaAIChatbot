@@ -29,15 +29,14 @@ _GENERATOR_PROMPT = """\
 - `keyword` 必须是最短且不歧义的核心词或短语，不能是完整句子。
 - 如果目标是专有名词、昵称、事件名、文件名或短标签，就优先保留字面锚点。
 - 如果 `feedback` 指出词太具体、无结果或需要更泛化的表达，下一轮必须显著调整。
-- 如果 `context` 明确给出来源用户或记忆类型，可以加上过滤。
+- 如果 `context` 明确给出来源用户，可以加上过滤。
 
 # 输出格式
 请只返回合法 JSON：
 {
   "keyword": "string",
   "top_k": 5,
-  "source_global_user_id": "string or omitted",
-  "memory_type": "string or omitted"
+  "source_global_user_id": "string or omitted"
 }
 """
 _generator_llm = get_llm(
@@ -59,7 +58,7 @@ _JUDGE_PROMPT = """\
 - 关键词太长，请收缩到核心词
 - 关键词太细，请换成更常见或更泛一点的叫法
 - 没有匹配，请换同义词或去掉多余修饰
-- 需要补充/移除 memory_type 过滤
+- 需要补充/移除来源用户过滤
 
 # 输出格式
 请只返回合法 JSON：
@@ -98,7 +97,7 @@ def _normalize_args(raw_args: dict[str, Any]) -> dict[str, Any]:
     else:
         args["top_k"] = 5
 
-    for key in ("source_global_user_id", "memory_type"):
+    for key in ("source_global_user_id",):
         raw_val = raw_args.get(key)
         if raw_val is None:
             continue

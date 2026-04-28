@@ -145,7 +145,8 @@ async def search_persistent_memory_keyword(
         keyword (Mandatory): Exact term or short phrase to match (regex, case-insensitive).
         top_k (Optional): Maximum number of results. Default is 5.
         source_global_user_id (Optional): Filter by source user UUID.
-        memory_type (Optional): Filter by type, e.g. "fact", "promise".
+        memory_type (Optional): Deprecated for RAG retrieval; retained for
+            compatibility and returned metadata, but not used as a search filter.
 
     Returns:
         Matching memory entries with metadata.
@@ -158,7 +159,7 @@ async def search_persistent_memory_keyword(
         limit=top_k,
         method="keyword",
         source_global_user_id=source_global_user_id,
-        memory_type=memory_type,
+        memory_type=None,
     )
     return [
         {
@@ -252,7 +253,8 @@ async def search_persistent_memory(
         search_query (Mandatory): Semantic query sentence for vector retrieval.
         top_k (Optional): Maximum number of results to return. Default is 5.
         source_global_user_id (Optional): Filter by source user UUID.
-        memory_type (Optional): Filter by type, e.g. "fact", "promise", "impression", "narrative", "defense_rule".
+        memory_type (Optional): Deprecated for RAG retrieval; retained for
+            compatibility and returned metadata, but not used as a search filter.
         source_kind (Optional): Filter by source kind, e.g. "conversation_extracted", "seeded_manual".
         status (Optional): Filter by status, e.g. "active", "fulfilled", "expired", "superseded".
         expiry_before (Optional): ISO-8601 upper bound for expiry_timestamp (exclusive <).
@@ -266,7 +268,7 @@ async def search_persistent_memory(
         limit=top_k,
         method="vector",
         source_global_user_id=source_global_user_id,
-        memory_type=memory_type,
+        memory_type=None,
         source_kind=source_kind,
         status=status,
         expiry_before=expiry_before,

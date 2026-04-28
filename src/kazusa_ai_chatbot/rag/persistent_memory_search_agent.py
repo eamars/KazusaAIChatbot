@@ -29,12 +29,11 @@ _GENERATOR_PROMPT = """\
 - 只为 `search_persistent_memory` 生成参数。
 - `search_query` 必须写成自然语言的记忆查询，不要退化成关键词列表。
 - 这类查询要偏向"印象 / 事实 / 看法 / 关系线索"的 framing，例如"千纱对 X 的看法""关于 X 的已知承诺"。
-- 如果 `context` 或 `known_facts` 明确给出 `memory_type`、`status` 或来源用户，请使用这些过滤条件。
-- 如果 `feedback` 指出记忆类型不对、查询太抽象或没有相关记忆，下一轮必须改写。
+- 如果 `context` 或 `known_facts` 明确给出 `status`、`source_kind` 或来源用户，请使用这些过滤条件。
+- 如果 `feedback` 指出过滤条件太窄、查询太抽象或没有相关记忆，下一轮必须改写。
 
 # 字段约束（严格遵守）
 - `source_global_user_id`：只有在 context 或 known_facts 中存在**明确的 UUID 格式**用户 ID 时才填写；平台频道 ID、用户名、昵称等均不是 UUID，一律省略。
-- `memory_type`：只能取以下枚举值之一，否则省略：fact | promise | impression | narrative | defense_rule
 - `status`：只能取 active | fulfilled | expired | superseded，否则省略。
 - `source_kind`：只能取 conversation_extracted | relationship_inferred | reflection_inferred | seeded_manual | external_imported，否则省略。
 
@@ -44,7 +43,6 @@ _GENERATOR_PROMPT = """\
   "search_query": "string",
   "top_k": 5,
   "source_global_user_id": "UUID string or omitted",
-  "memory_type": "fact|promise|impression|narrative|defense_rule or omitted",
   "source_kind": "string or omitted",
   "status": "string or omitted",
   "expiry_before": "ISO-8601 or omitted",
@@ -68,7 +66,7 @@ _JUDGE_PROMPT = """\
 
 # 常见反馈方向
 - 查询太抽象，需要改成某人的看法/承诺/事实
-- `memory_type` 错了，需要换 impression / fact / promise 等
+- 过滤条件太窄，需要移除来源、状态或来源类型过滤
 - 返回记忆不相关，需要换主题角度
 - 没有相关记忆，需要放宽过滤或改写查询
 
@@ -111,7 +109,6 @@ def _normalize_args(raw_args: dict[str, Any]) -> dict[str, Any]:
 
     for key in (
         "source_global_user_id",
-        "memory_type",
         "source_kind",
         "status",
         "expiry_before",
@@ -221,12 +218,6 @@ def _apply_resolved_subject_user(
     search_query = str(adjusted_args.get("search_query", "")).strip()
     if display_name and display_name not in search_query:
         adjusted_args["search_query"] = f"{search_query} {display_name}".strip()
-
-    if "memory_type" not in adjusted_args and any(
-        marker in task.lower()
-        for marker in ("impression", "opinion", "看法", "印象", "评价")
-    ):
-        adjusted_args["memory_type"] = "impression"
 
     return adjusted_args
 
