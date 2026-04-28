@@ -9,7 +9,12 @@ from typing import Any
 from langchain_core.messages import HumanMessage, SystemMessage
 from pydantic import ValidationError
 
-from kazusa_ai_chatbot.config import RAG_SUBAGENT_LLM_API_KEY, RAG_SUBAGENT_LLM_BASE_URL, RAG_SUBAGENT_LLM_MODEL
+from kazusa_ai_chatbot.config import (
+    CHARACTER_GLOBAL_USER_ID,
+    RAG_SUBAGENT_LLM_API_KEY,
+    RAG_SUBAGENT_LLM_BASE_URL,
+    RAG_SUBAGENT_LLM_MODEL,
+)
 from kazusa_ai_chatbot.rag.memory_retrieval_tools import search_persistent_memory_keyword
 from kazusa_ai_chatbot.rag.cache2_policy import (
     PERSISTENT_MEMORY_KEYWORD_CACHE_NAME,
@@ -29,7 +34,7 @@ _GENERATOR_PROMPT = """\
 - `keyword` 必须是最短且不歧义的核心词或短语，不能是完整句子。
 - 如果目标是专有名词、昵称、事件名、文件名或短标签，就优先保留字面锚点。
 - 如果 `feedback` 指出词太具体、无结果或需要更泛化的表达，下一轮必须显著调整。
-- 如果 `context` 明确给出来源用户，可以加上过滤。
+- `source_global_user_id` 是隐私边界，不是相关性提示。默认省略；只有任务明确要求查找"由某个用户触发/提供/承诺"的记忆时才填写。
 
 # 输出格式
 请只返回合法 JSON：
@@ -105,7 +110,19 @@ def _normalize_args(raw_args: dict[str, Any]) -> dict[str, Any]:
         if value:
             args[key] = value
 
+    _erase_character_source_global_user_id(args)
     return args
+
+
+def _erase_character_source_global_user_id(args: dict[str, Any]) -> None:
+    """Erase the character ID when it is used as a memory source filter.
+
+    Args:
+        args: Mutable normalized subagent arguments.
+    """
+    source_global_user_id = args.get("source_global_user_id")
+    if source_global_user_id == CHARACTER_GLOBAL_USER_ID:
+        args.pop("source_global_user_id")
 
 
 async def _generator(task: str, context: dict[str, Any], feedback: str) -> dict[str, Any]:

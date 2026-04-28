@@ -84,6 +84,22 @@ def test_initializer_prompt_documents_profile_evidence_dependency() -> None:
     assert "No profile, memory, identity, or conversation evidence is needed" in rendered_prompt
 
 
+def test_memory_search_prompt_uses_evidence_contract() -> None:
+    """Memory-search prompt wording should not pre-classify memory evidence."""
+    rendered_initializer = supervisor2_module._INITIALIZER_PROMPT.format(character_name="千纱")
+    rendered_dispatcher = supervisor2_module._DISPATCHER_PROMPT.format(
+        agent_name_union=supervisor2_module._build_agent_name_union(),
+    )
+
+    assert (
+        "Memory-search: search persistent memory for evidence relevant to answering"
+        in rendered_initializer
+    )
+    assert "Memory-search: search persistent memory for impressions or opinions" not in rendered_initializer
+    assert "Do not pre-classify the evidence as fact, impression, opinion" in rendered_initializer
+    assert "Handles durable memory evidence relevant to answering the slot" in rendered_dispatcher
+
+
 def test_normalize_initializer_slots_does_not_stringify_container_items() -> None:
     """Initializer slots should keep only native strings."""
 

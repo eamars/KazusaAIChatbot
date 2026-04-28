@@ -176,7 +176,7 @@ async def test_get_conversation_filters_and_strips_internal_fields() -> None:
 
 @pytest.mark.asyncio
 async def test_search_persistent_memory_delegates_to_vector_memory_search() -> None:
-    """search_persistent_memory should call vector search without type filtering."""
+    """search_persistent_memory should call vector search without type/source-kind filtering."""
     mock_results = [
         (
             0.85,
@@ -203,6 +203,7 @@ async def test_search_persistent_memory_delegates_to_vector_memory_search() -> N
                 "top_k": 4,
                 "source_global_user_id": "global-user-1",
                 "memory_type": "preference",
+                "source_kind": "conversation_extracted",
                 "status": "active",
             }
         )

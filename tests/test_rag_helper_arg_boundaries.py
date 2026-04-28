@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from kazusa_ai_chatbot.config import CHARACTER_GLOBAL_USER_ID
 from kazusa_ai_chatbot.rag import conversation_aggregate_agent
 from kazusa_ai_chatbot.rag import conversation_filter_agent
 from kazusa_ai_chatbot.rag import conversation_keyword_agent
@@ -116,7 +117,7 @@ def test_persistent_memory_search_args_do_not_stringify_container_fields() -> No
 
 
 def test_persistent_memory_search_args_accept_string_fields() -> None:
-    """Persistent-memory search args preserve valid string fields."""
+    """Persistent-memory search args preserve valid supported string fields."""
 
     args = persistent_memory_search_agent._normalize_args({
         "search_query": " tea preference ",
@@ -131,10 +132,24 @@ def test_persistent_memory_search_args_accept_string_fields() -> None:
     assert args == {
         "search_query": "tea preference",
         "source_global_user_id": "user-1",
-        "source_kind": "conversation_extracted",
         "status": "active",
         "expiry_before": "2026-04-29T00:00:00+00:00",
         "expiry_after": "2026-04-28T00:00:00+00:00",
+        "top_k": 3,
+    }
+
+
+def test_persistent_memory_search_args_erase_character_source_id() -> None:
+    """Persistent-memory semantic args treat the character source ID as generic."""
+
+    args = persistent_memory_search_agent._normalize_args({
+        "search_query": "Kazusa exclusive weapon",
+        "source_global_user_id": CHARACTER_GLOBAL_USER_ID,
+        "top_k": 3,
+    })
+
+    assert args == {
+        "search_query": "Kazusa exclusive weapon",
         "top_k": 3,
     }
 
@@ -153,6 +168,18 @@ def test_persistent_memory_keyword_args_do_not_stringify_container_fields() -> N
     })
 
     assert args == {"top_k": 3}
+
+
+def test_persistent_memory_keyword_args_erase_character_source_id() -> None:
+    """Persistent-memory keyword args treat the character source ID as generic."""
+
+    args = persistent_memory_keyword_agent._normalize_args({
+        "keyword": "专属武器",
+        "source_global_user_id": CHARACTER_GLOBAL_USER_ID,
+        "top_k": 3,
+    })
+
+    assert args == {"keyword": "专属武器", "top_k": 3}
 
 
 def test_user_list_args_do_not_stringify_container_fields() -> None:

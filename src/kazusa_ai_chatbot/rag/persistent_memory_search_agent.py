@@ -10,7 +10,12 @@ from typing import Any
 from langchain_core.messages import HumanMessage, SystemMessage
 from pydantic import ValidationError
 
-from kazusa_ai_chatbot.config import RAG_SUBAGENT_LLM_API_KEY, RAG_SUBAGENT_LLM_BASE_URL, RAG_SUBAGENT_LLM_MODEL
+from kazusa_ai_chatbot.config import (
+    CHARACTER_GLOBAL_USER_ID,
+    RAG_SUBAGENT_LLM_API_KEY,
+    RAG_SUBAGENT_LLM_BASE_URL,
+    RAG_SUBAGENT_LLM_MODEL,
+)
 from kazusa_ai_chatbot.rag.memory_retrieval_tools import search_persistent_memory
 from kazusa_ai_chatbot.rag.cache2_policy import (
     PERSISTENT_MEMORY_SEARCH_CACHE_NAME,
@@ -28,14 +33,14 @@ _GENERATOR_PROMPT = """\
 # 你的唯一职责
 - 只为 `search_persistent_memory` 生成参数。
 - `search_query` 必须写成自然语言的记忆查询，不要退化成关键词列表。
-- 这类查询要偏向"印象 / 事实 / 看法 / 关系线索"的 framing，例如"千纱对 X 的看法""关于 X 的已知承诺"。
-- 如果 `context` 或 `known_facts` 明确给出 `status`、`source_kind` 或来源用户，请使用这些过滤条件。
+- `search_query` 应围绕原问题所需的相关证据，不要预设记忆属于事实、印象、看法或特定来源。
+- 如果 `context` 或 `known_facts` 明确给出 `status`，可以使用该过滤条件。
+- `source_global_user_id` 是隐私边界，不是相关性提示。默认省略；只有任务明确要求查找"由某个用户触发/提供/承诺"的记忆时才填写。
 - 如果 `feedback` 指出过滤条件太窄、查询太抽象或没有相关记忆，下一轮必须改写。
 
 # 字段约束（严格遵守）
-- `source_global_user_id`：只有在 context 或 known_facts 中存在**明确的 UUID 格式**用户 ID 时才填写；平台频道 ID、用户名、昵称等均不是 UUID，一律省略。
+- `source_global_user_id`：只有任务明确要求按"记忆来源用户"过滤，且 context 或 known_facts 中存在**明确的 UUID 格式**来源用户 ID 时才填写；平台频道 ID、用户名、昵称、当前说话人、被查询对象均不是来源用户过滤理由，一律省略。
 - `status`：只能取 active | fulfilled | expired | superseded，否则省略。
-- `source_kind`：只能取 conversation_extracted | relationship_inferred | reflection_inferred | seeded_manual | external_imported，否则省略。
 
 # 输出格式
 请只返回合法 JSON：
@@ -43,7 +48,6 @@ _GENERATOR_PROMPT = """\
   "search_query": "string",
   "top_k": 5,
   "source_global_user_id": "UUID string or omitted",
-  "source_kind": "string or omitted",
   "status": "string or omitted",
   "expiry_before": "ISO-8601 or omitted",
   "expiry_after": "ISO-8601 or omitted"
@@ -65,8 +69,8 @@ _JUDGE_PROMPT = """\
 - 如果未解决，反馈必须具体可执行。
 
 # 常见反馈方向
-- 查询太抽象，需要改成某人的看法/承诺/事实
-- 过滤条件太窄，需要移除来源、状态或来源类型过滤
+- 查询太抽象，需要改成围绕原问题的具体证据查询
+- 过滤条件太窄，需要移除来源或状态过滤
 - 返回记忆不相关，需要换主题角度
 - 没有相关记忆，需要放宽过滤或改写查询
 
@@ -109,7 +113,6 @@ def _normalize_args(raw_args: dict[str, Any]) -> dict[str, Any]:
 
     for key in (
         "source_global_user_id",
-        "source_kind",
         "status",
         "expiry_before",
         "expiry_after",
@@ -121,7 +124,19 @@ def _normalize_args(raw_args: dict[str, Any]) -> dict[str, Any]:
         if value:
             args[key] = value
 
+    _erase_character_source_global_user_id(args)
     return args
+
+
+def _erase_character_source_global_user_id(args: dict[str, Any]) -> None:
+    """Erase the character ID when it is used as a memory source filter.
+
+    Args:
+        args: Mutable normalized subagent arguments.
+    """
+    source_global_user_id = args.get("source_global_user_id")
+    if source_global_user_id == CHARACTER_GLOBAL_USER_ID:
+        args.pop("source_global_user_id")
 
 
 def _slot_number(task: str) -> int | None:

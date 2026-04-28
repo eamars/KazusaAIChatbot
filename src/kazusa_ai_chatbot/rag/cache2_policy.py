@@ -14,7 +14,7 @@ from kazusa_ai_chatbot.rag.cache2_runtime import stable_cache_key
 
 INITIALIZER_CACHE_NAME = "rag2_initializer"
 INITIALIZER_POLICY_VERSION = "initializer:v1"
-INITIALIZER_PROMPT_VERSION = "initializer_prompt:v2"
+INITIALIZER_PROMPT_VERSION = "initializer_prompt:v3"
 INITIALIZER_AGENT_REGISTRY_VERSION = "rag_supervisor2_registry:v1"
 INITIALIZER_STRATEGY_SCHEMA_VERSION = "initializer_strategy_schema:v1"
 
@@ -40,10 +40,10 @@ CONVERSATION_SEARCH_CACHE_NAME = "rag2_conversation_search_agent"
 CONVERSATION_SEARCH_POLICY_VERSION = "conversation_search:v1"
 
 PERSISTENT_MEMORY_KEYWORD_CACHE_NAME = "rag2_persistent_memory_keyword_agent"
-PERSISTENT_MEMORY_KEYWORD_POLICY_VERSION = "persistent_memory_keyword:v1"
+PERSISTENT_MEMORY_KEYWORD_POLICY_VERSION = "persistent_memory_keyword:v2"
 
 PERSISTENT_MEMORY_SEARCH_CACHE_NAME = "rag2_persistent_memory_search_agent"
-PERSISTENT_MEMORY_SEARCH_POLICY_VERSION = "persistent_memory_search:v1"
+PERSISTENT_MEMORY_SEARCH_POLICY_VERSION = "persistent_memory_search:v2"
 
 # ---------------------------------------------------------------------------
 # Shared utilities

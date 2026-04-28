@@ -195,7 +195,8 @@ slot targeting the query's main topic.
 The character may hold relevant world knowledge, safety rules, or personal experience in
 persistent memory that enriches the answer. Always check, regardless of whether the user
 explicitly asks to recall memory.
-The Memory-search slot should target the topic, not restate the common-sense question itself.
+The Memory-search slot should request evidence relevant to answering the user's query.
+Do not pre-classify the evidence as fact, impression, opinion, mention, source kind, or memory type.
 
 Do NOT add Web-search or structured-data slots (Identity, Profile, Conversation-*) merely
 because the query mentions location, distance, travel, shopping, or a real-world action.
@@ -260,7 +261,7 @@ When two patterns seem possible, choose the more structural source:
 - Display-name or user metadata predicates → User-list, not Conversation-keyword.
 - Counts, totals, rankings, "most", or "least" → Conversation-aggregate, not Conversation-keyword/semantic.
 - Person is primary relational subject → Identity + Profile always (Rule 3), then secondary slots; never Memory-search for person-relationship data.
-- Impression or opinion about an OBJECT, concept, or non-human topic → Memory-search.
+- Evidence about an OBJECT, concept, or non-human topic → Memory-search.
 - All facts provided, common-sense or opinion query → Memory-search on the topic (Rule 1b default); empty slots only for pure arithmetic or tautologies.
 - Exact quoted phrases, URLs, filenames, or literal content anchors → Conversation-keyword.
 - Fuzzy topics without exact wording → Conversation-semantic.
@@ -276,7 +277,7 @@ When a slot depends on a specific earlier slot, write "resolved in slot N" (e.g.
 - "Conversation-filter: retrieve [recent / yesterday's / last N] messages from the user resolved in slot N"
 - "Conversation-keyword: find messages containing <exact phrase or term> [from the user resolved in slot N]"
 - "Conversation-semantic: find recent messages about <topic> [from the user resolved in slot N]"
-- "Memory-search: search persistent memory for impressions or opinions about a topic, concept, or non-human subject"
+- "Memory-search: search persistent memory for evidence relevant to answering a question about a topic, concept, or non-human subject"
 - "Web-search: search the web for <description of target URL or topic from slot N>"
 
 ## Pattern gallery
@@ -298,7 +299,7 @@ Query: "千纱你觉得小钳子这个人怎么样"  (character_name=千纱)
 Query: "我想洗车，我家距离洗车店只有 50 米，请问你推荐我走路去还是开车去呢？"
   → All facts provided. Common-sense recommendation → default Memory-search on the topic (Rule 1b).
   → Explicit hints ("根据你的记忆回答") and no-hint queries route identically.
-  ["Memory-search: search persistent memory for experiences or impressions related to 洗车 or nearby activities"]
+  ["Memory-search: search persistent memory for evidence relevant to answering the question about 洗车 or nearby activities"]
 
 ### 1d. Character self-profile request (2 slots)
 Query: "千纱聊聊你自己"  (character_name=千纱)
@@ -743,7 +744,7 @@ You are a RAG Dispatcher. For each slot, select exactly one inner-loop retrieval
   Handles: tags, event names, proper nouns that must appear verbatim.
 
 - `persistent_memory_search_agent`: Semantic search over persistent memories.
-  Handles: impressions, opinions, commitments, facts when exact wording is unknown.
+  Handles durable memory evidence relevant to answering the slot when exact wording is unknown.
 
 - `web_search_agent2`: Public internet search.
   Use ONLY when information cannot exist in local conversation history or persistent memory.

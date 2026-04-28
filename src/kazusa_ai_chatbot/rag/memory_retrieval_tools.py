@@ -255,7 +255,8 @@ async def search_persistent_memory(
         source_global_user_id (Optional): Filter by source user UUID.
         memory_type (Optional): Deprecated for RAG retrieval; retained for
             compatibility and returned metadata, but not used as a search filter.
-        source_kind (Optional): Filter by source kind, e.g. "conversation_extracted", "seeded_manual".
+        source_kind (Optional): Deprecated for RAG retrieval; retained for
+            compatibility and returned metadata, but not used as a search filter.
         status (Optional): Filter by status, e.g. "active", "fulfilled", "expired", "superseded".
         expiry_before (Optional): ISO-8601 upper bound for expiry_timestamp (exclusive <).
         expiry_after (Optional): ISO-8601 lower bound for expiry_timestamp (exclusive >).
@@ -269,7 +270,7 @@ async def search_persistent_memory(
         method="vector",
         source_global_user_id=source_global_user_id,
         memory_type=None,
-        source_kind=source_kind,
+        source_kind=None,
         status=status,
         expiry_before=expiry_before,
         expiry_after=expiry_after,
