@@ -134,6 +134,7 @@ Add these sections whenever relevant:
 ## Data Migration
 ## Rollback / Recovery
 ## Risks
+## LLM Call And Context Budget
 ## Operational Steps
 ## Execution Evidence
 ## Glossary
@@ -149,6 +150,7 @@ Include rules such as:
 - test execution rules
 - prompt safety rules
 - trusted vs untrusted prompt boundaries
+- LLM call and context budget rules for prompt, agent, RAG, cognition, dialog, evaluator, or background LLM changes
 - database safety rules
 - forbidden filtering or validation patterns
 - required skill-derived practices, copied into the plan
@@ -312,6 +314,14 @@ Do not preserve or recreate the legacy `research_facts` / `research_metadata` pa
 ```
 
 For new modules, include a dedicated interface contract. The interface can be code signatures, protocol messages, schemas, endpoint shapes, CLI commands, event payloads, or another concrete boundary appropriate to the codebase. The contract must be specific enough that existing code can integrate with the module without importing internals.
+
+## LLM Call And Context Budget
+
+If a plan adds, removes, rewires, or changes any prompt, model call, agent graph, evaluator, RAG/cognition/dialog stage, or background LLM job, include a before/after LLM budget before finalizing.
+
+Use `50k tokens` as the default context-window cap unless the user explicitly sets another cap.
+
+For each affected LLM call, state the before/after call count, whether it is response-path or background, the model/helper used if known, the context inputs before and after, the estimated maximum context use versus the cap, latency impact, blocking behavior, hard caps, truncation/drop policy, and verification tests. If exact tokenization is unavailable, use conservative character-based estimates and state the method. New response-path calls or cap increases require explicit user approval.
 
 ## Change Surface
 
