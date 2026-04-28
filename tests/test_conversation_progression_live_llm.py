@@ -13,7 +13,11 @@ import httpx
 import pytest
 from langchain_core.messages import HumanMessage, SystemMessage
 
-from kazusa_ai_chatbot.config import LLM_BASE_URL
+from kazusa_ai_chatbot.config import (
+    COGNITION_LLM_API_KEY,
+    COGNITION_LLM_BASE_URL,
+    COGNITION_LLM_MODEL,
+)
 from kazusa_ai_chatbot.nodes.dialog_agent import dialog_agent
 from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition_l1 import call_cognition_subconscious
 from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition_l2 import (
@@ -59,7 +63,13 @@ Definitions:
 - treats_prior_disclosure_as_new: true when the response asks for or reacts to a prior disclosed fact as if it had not already been disclosed.
 - progression_sufficient: true when the response acknowledges continuity and advances the episode beyond the repeated move.
 """
-_progression_judge_llm = get_llm(temperature=0.0, top_p=1.0)
+_progression_judge_llm = get_llm(
+    temperature=0.0,
+    top_p=1.0,
+    model=COGNITION_LLM_MODEL,
+    base_url=COGNITION_LLM_BASE_URL,
+    api_key=COGNITION_LLM_API_KEY,
+)
 
 
 async def _skip_if_llm_unavailable() -> None:
@@ -67,12 +77,12 @@ async def _skip_if_llm_unavailable() -> None:
 
     try:
         async with httpx.AsyncClient(timeout=3.0) as client:
-            response = await client.get(f"{LLM_BASE_URL.rstrip('/')}/models")
+            response = await client.get(f"{COGNITION_LLM_BASE_URL.rstrip('/')}/models")
     except httpx.HTTPError:
-        pytest.skip(f"LLM endpoint is unavailable: {LLM_BASE_URL}")
+        pytest.skip(f"LLM endpoint is unavailable: {COGNITION_LLM_BASE_URL}")
 
     if response.status_code >= 500:
-        pytest.skip(f"LLM endpoint returned server error {response.status_code}: {LLM_BASE_URL}")
+        pytest.skip(f"LLM endpoint returned server error {response.status_code}: {COGNITION_LLM_BASE_URL}")
 
 
 @pytest.fixture()

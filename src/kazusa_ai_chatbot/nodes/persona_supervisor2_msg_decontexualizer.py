@@ -1,5 +1,10 @@
 from langchain_core.messages import SystemMessage, HumanMessage
 
+from kazusa_ai_chatbot.config import (
+    MSG_DECONTEXTUALIZER_LLM_API_KEY,
+    MSG_DECONTEXTUALIZER_LLM_BASE_URL,
+    MSG_DECONTEXTUALIZER_LLM_MODEL,
+)
 from kazusa_ai_chatbot.nodes.persona_supervisor2_schema import GlobalPersonaState
 from kazusa_ai_chatbot.utils import get_llm, log_preview, parse_llm_json_output
 
@@ -8,7 +13,13 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-_msg_decontexualizer_llm = get_llm(temperature=0.1, top_p=0.8)
+_msg_decontexualizer_llm = get_llm(
+    temperature=0.1,
+    top_p=0.8,
+    model=MSG_DECONTEXTUALIZER_LLM_MODEL,
+    base_url=MSG_DECONTEXTUALIZER_LLM_BASE_URL,
+    api_key=MSG_DECONTEXTUALIZER_LLM_API_KEY,
+)
 
 
 _MSG_DECONTEXUALIZER_PROMPT = """\

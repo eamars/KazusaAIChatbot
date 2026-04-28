@@ -7,6 +7,11 @@ import logging
 
 from langchain_core.messages import HumanMessage, SystemMessage
 
+from kazusa_ai_chatbot.config import (
+    CONSOLIDATION_LLM_API_KEY,
+    CONSOLIDATION_LLM_BASE_URL,
+    CONSOLIDATION_LLM_MODEL,
+)
 from kazusa_ai_chatbot.config import MAX_FACT_HARVESTER_RETRY
 from kazusa_ai_chatbot.nodes.persona_supervisor2_consolidator_schema import ConsolidatorState
 from kazusa_ai_chatbot.utils import get_llm, log_list_preview, log_preview, parse_llm_json_output
@@ -93,7 +98,13 @@ _FACTS_HARVESTER_PROMPT = """\
     ]
 }}
 """
-_facts_harvester_llm = get_llm(temperature=0.0, top_p=1.0)
+_facts_harvester_llm = get_llm(
+    temperature=0.0,
+    top_p=1.0,
+    model=CONSOLIDATION_LLM_MODEL,
+    base_url=CONSOLIDATION_LLM_BASE_URL,
+    api_key=CONSOLIDATION_LLM_API_KEY,
+)
 async def facts_harvester(state: ConsolidatorState) -> dict:
     system_prompt = SystemMessage(_FACTS_HARVESTER_PROMPT.format(
         character_name=state["character_profile"]["name"],
@@ -205,7 +216,13 @@ _FACT_HARVESTER_EVALUATOR_PROMPT = """\
     "contradiction_flags": "可选字符串列表，列举与 rag_result 直接冲突的条目 id 或描述；无冲突则返回 []"
 }}
 """
-_fact_harvester_evaluator_llm = get_llm(temperature=0.1, top_p=0.5)
+_fact_harvester_evaluator_llm = get_llm(
+    temperature=0.1,
+    top_p=0.5,
+    model=CONSOLIDATION_LLM_MODEL,
+    base_url=CONSOLIDATION_LLM_BASE_URL,
+    api_key=CONSOLIDATION_LLM_API_KEY,
+)
 async def fact_harvester_evaluator(state: ConsolidatorState) -> dict:
     system_prompt = SystemMessage(_FACT_HARVESTER_EVALUATOR_PROMPT.format(
         character_name=state["character_profile"]["name"],

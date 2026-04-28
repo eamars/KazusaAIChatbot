@@ -1,7 +1,16 @@
 from typing import Annotated, TypedDict
 
 from kazusa_ai_chatbot.nodes.persona_supervisor2_schema import GlobalPersonaState
-from kazusa_ai_chatbot.config import LLM_API_KEY, LLM_BASE_URL, LLM_MODEL, MAX_DIALOG_AGENT_RETRY, AFFINITY_DEFAULT
+from kazusa_ai_chatbot.config import (
+    AFFINITY_DEFAULT,
+    DIALOG_EVALUATOR_LLM_API_KEY,
+    DIALOG_EVALUATOR_LLM_BASE_URL,
+    DIALOG_EVALUATOR_LLM_MODEL,
+    DIALOG_GENERATOR_LLM_API_KEY,
+    DIALOG_GENERATOR_LLM_BASE_URL,
+    DIALOG_GENERATOR_LLM_MODEL,
+    MAX_DIALOG_AGENT_RETRY,
+)
 from kazusa_ai_chatbot.utils import (
     parse_llm_json_output,
     build_affinity_block,
@@ -187,7 +196,14 @@ _DIALOG_GENERATOR_PROMPT = """\
     ]
 }}
 """
-_dialog_generator_llm = get_llm(temperature=0.75, top_p=0.85, presence_penalty=0.35)
+_dialog_generator_llm = get_llm(
+    temperature=0.75,
+    top_p=0.85,
+    model=DIALOG_GENERATOR_LLM_MODEL,
+    base_url=DIALOG_GENERATOR_LLM_BASE_URL,
+    api_key=DIALOG_GENERATOR_LLM_API_KEY,
+    presence_penalty=0.35,
+)
 
 
 def _tone_history_for_generator(history: list[dict]) -> list[dict]:
@@ -390,7 +406,13 @@ _DIALOG_EVALUATOR_PROMPT = """\
     "should_stop": boolean
 }}
 """
-_dialog_evaluator_llm = get_llm(temperature=0.1, top_p=0.7)
+_dialog_evaluator_llm = get_llm(
+    temperature=0.1,
+    top_p=0.7,
+    model=DIALOG_EVALUATOR_LLM_MODEL,
+    base_url=DIALOG_EVALUATOR_LLM_BASE_URL,
+    api_key=DIALOG_EVALUATOR_LLM_API_KEY,
+)
 async def dialog_evaluator(state: DialogAgentState) -> DialogAgentState:
     mbti = state["character_profile"]["personality_brief"]["mbti"]
 

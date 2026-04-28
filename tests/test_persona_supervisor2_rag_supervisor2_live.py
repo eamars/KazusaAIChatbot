@@ -8,7 +8,7 @@ import httpx
 import pytest
 import pytest_asyncio
 
-from kazusa_ai_chatbot.config import LLM_BASE_URL
+from kazusa_ai_chatbot.config import RAG_PLANNER_LLM_BASE_URL
 from kazusa_ai_chatbot.db import close_db, db_bootstrap, get_character_profile, get_db
 from kazusa_ai_chatbot.mcp_client import mcp_manager
 from kazusa_ai_chatbot.nodes.persona_supervisor2_rag_supervisor2 import call_rag_supervisor
@@ -23,12 +23,12 @@ async def _skip_if_llm_unavailable() -> None:
     """Skip the live test when the configured LLM endpoint is not reachable."""
     try:
         async with httpx.AsyncClient(timeout=3.0) as client:
-            response = await client.get(f"{LLM_BASE_URL.rstrip('/')}/models")
+            response = await client.get(f"{RAG_PLANNER_LLM_BASE_URL.rstrip('/')}/models")
     except httpx.HTTPError:
-        pytest.skip(f"LLM endpoint is unavailable: {LLM_BASE_URL}")
+        pytest.skip(f"LLM endpoint is unavailable: {RAG_PLANNER_LLM_BASE_URL}")
 
     if response.status_code >= 500:
-        pytest.skip(f"LLM endpoint returned server error {response.status_code}: {LLM_BASE_URL}")
+        pytest.skip(f"LLM endpoint returned server error {response.status_code}: {RAG_PLANNER_LLM_BASE_URL}")
 
 
 async def _skip_if_required_history_missing(channel_ids: list[str]) -> None:

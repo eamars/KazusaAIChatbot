@@ -7,6 +7,7 @@ from typing import Any
 
 from langchain_core.messages import HumanMessage, SystemMessage
 
+from kazusa_ai_chatbot.config import RAG_SUBAGENT_LLM_API_KEY, RAG_SUBAGENT_LLM_BASE_URL, RAG_SUBAGENT_LLM_MODEL
 from kazusa_ai_chatbot.db import list_users_by_affinity
 from kazusa_ai_chatbot.rag.cache2_policy import (
     RELATIONSHIP_CACHE_NAME,
@@ -77,7 +78,13 @@ Return valid JSON only:
 }
 """
 
-_extractor_llm = get_llm(temperature=0.0, top_p=1.0)
+_extractor_llm = get_llm(
+    temperature=0.0,
+    top_p=1.0,
+    model=RAG_SUBAGENT_LLM_MODEL,
+    base_url=RAG_SUBAGENT_LLM_BASE_URL,
+    api_key=RAG_SUBAGENT_LLM_API_KEY,
+)
 
 
 def _normalize_relationship_args(raw_args: dict[str, Any]) -> dict[str, Any] | None:

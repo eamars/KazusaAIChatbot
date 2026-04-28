@@ -7,15 +7,9 @@ from langchain_openai import ChatOpenAI
 from langchain_core.messages import HumanMessage, SystemMessage
 from kazusa_ai_chatbot.config import AFFINITY_MIN, AFFINITY_MAX
 from kazusa_ai_chatbot.config import (
-    LLM_API_KEY,
-    LLM_BASE_URL,
-    LLM_MODEL,
-    SECONDARY_LLM_API_KEY,
-    SECONDARY_LLM_BASE_URL,
-    SECONDARY_LLM_MODEL,
-    PREFERENCE_LLM_API_KEY,
-    PREFERENCE_LLM_BASE_URL,
-    PREFERENCE_LLM_MODEL,
+    JSON_REPAIR_LLM_API_KEY,
+    JSON_REPAIR_LLM_BASE_URL,
+    JSON_REPAIR_LLM_MODEL,
 )
 from pathlib import Path
 import logging
@@ -26,7 +20,28 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 
-def get_llm(temperature=0.7, top_p=1.0, model=LLM_MODEL, base_url=LLM_BASE_URL, api_key=LLM_API_KEY, **kwargs) -> ChatOpenAI:
+def get_llm(
+    *,
+    temperature: float = 0.7,
+    top_p: float = 1.0,
+    model: str,
+    base_url: str,
+    api_key: str,
+    **kwargs,
+) -> ChatOpenAI:
+    """Create a chat LLM client for an explicit configured route.
+
+    Args:
+        temperature: Sampling temperature for the model call.
+        top_p: Nucleus sampling value for the model call.
+        model: Route-specific model name.
+        base_url: Route-specific OpenAI-compatible base URL.
+        api_key: Route-specific API key.
+        **kwargs: Additional ChatOpenAI options.
+
+    Returns:
+        Configured ChatOpenAI client.
+    """
     _llm = ChatOpenAI(
         model=model,
         temperature=temperature,
@@ -36,28 +51,6 @@ def get_llm(temperature=0.7, top_p=1.0, model=LLM_MODEL, base_url=LLM_BASE_URL, 
         **kwargs,
     )
     return _llm
-
-
-def get_secondary_llm(temperature=0.7, top_p=1.0, **kwargs) -> ChatOpenAI:
-    return get_llm(
-        temperature=temperature,
-        top_p=top_p,
-        model=SECONDARY_LLM_MODEL,
-        base_url=SECONDARY_LLM_BASE_URL,
-        api_key=SECONDARY_LLM_API_KEY,
-        **kwargs,
-    )
-
-
-def get_preference_llm(temperature=0.2, top_p=0.8, **kwargs) -> ChatOpenAI:
-    return get_llm(
-        temperature=temperature,
-        top_p=top_p,
-        model=PREFERENCE_LLM_MODEL,
-        base_url=PREFERENCE_LLM_BASE_URL,
-        api_key=PREFERENCE_LLM_API_KEY,
-        **kwargs,
-    )
 
 
 def trim_history_dict(history):
@@ -223,7 +216,13 @@ _PARSE_JSON_WITH_LLM_PROMPT = """\
 "You need to remove trailing commas, close unclosed brackets or strings, and ensure it is valid RFC 8259 JSON. "
 "Output ONLY the corrected JSON code and nothing else. Do not use code blocks or markdown fence."
 """
-_parse_json_with_llm = get_llm(temperature=0, top_p=1.0)
+_parse_json_with_llm = get_llm(
+    temperature=0,
+    top_p=1.0,
+    model=JSON_REPAIR_LLM_MODEL,
+    base_url=JSON_REPAIR_LLM_BASE_URL,
+    api_key=JSON_REPAIR_LLM_API_KEY,
+)
 def parse_json_with_llm(broken_string: str) -> dict:
     """Parse JSON with LLM as a fallback when repair_json fails."""
     system_prompt = SystemMessage(content=_PARSE_JSON_WITH_LLM_PROMPT)

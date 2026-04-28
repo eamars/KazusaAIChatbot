@@ -1,4 +1,5 @@
 """L1 — Subconscious cognition agent and MBTI natural-response helper."""
+from kazusa_ai_chatbot.config import COGNITION_LLM_API_KEY, COGNITION_LLM_BASE_URL, COGNITION_LLM_MODEL
 from kazusa_ai_chatbot.nodes.persona_supervisor2_schema import CognitionState
 from kazusa_ai_chatbot.utils import get_llm, log_preview, parse_llm_json_output
 
@@ -82,7 +83,13 @@ _COGNITION_SUBCONSCIOUS_PROMPT = """\
     "interaction_subtext": "捕捉到的潜台词标签（如：试探、求关注、命令感、讨好、占有欲、施压）"
 }}
 """
-_subconscious_llm = get_llm(temperature=0.4, top_p=0.7)
+_subconscious_llm = get_llm(
+    temperature=0.4,
+    top_p=0.7,
+    model=COGNITION_LLM_MODEL,
+    base_url=COGNITION_LLM_BASE_URL,
+    api_key=COGNITION_LLM_API_KEY,
+)
 async def call_cognition_subconscious(state: CognitionState) -> CognitionState:
     mbti = state["character_profile"]["personality_brief"]["mbti"]
     

@@ -42,6 +42,14 @@ from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.message import add_messages
 
+from kazusa_ai_chatbot.config import (
+    RAG_PLANNER_LLM_API_KEY,
+    RAG_PLANNER_LLM_BASE_URL,
+    RAG_PLANNER_LLM_MODEL,
+    RAG_SUBAGENT_LLM_API_KEY,
+    RAG_SUBAGENT_LLM_BASE_URL,
+    RAG_SUBAGENT_LLM_MODEL,
+)
 from kazusa_ai_chatbot.mcp_client import mcp_manager
 from kazusa_ai_chatbot.rag.cache2_policy import (
     INITIALIZER_AGENT_REGISTRY_VERSION,
@@ -414,7 +422,13 @@ Return valid JSON only:
     "unknown_slots": ["slot 1", "slot 2", ...]
 }}
 """
-_initializer_llm = get_llm(temperature=0.0, top_p=1.0)
+_initializer_llm = get_llm(
+    temperature=0.0,
+    top_p=1.0,
+    model=RAG_PLANNER_LLM_MODEL,
+    base_url=RAG_PLANNER_LLM_BASE_URL,
+    api_key=RAG_PLANNER_LLM_API_KEY,
+)
 _MIN_INITIALIZER_CACHE_CONFIDENCE = 0.5
 
 
@@ -791,7 +805,13 @@ Return valid JSON only:
     "max_attempts": 3
 }}
 '''
-_dispatcher_llm = get_llm(temperature=0.0, top_p=1.0)
+_dispatcher_llm = get_llm(
+    temperature=0.0,
+    top_p=1.0,
+    model=RAG_PLANNER_LLM_MODEL,
+    base_url=RAG_PLANNER_LLM_BASE_URL,
+    api_key=RAG_PLANNER_LLM_API_KEY,
+)
 
 
 def build_rag_fact_source_map() -> dict[str, dict[str, Any]]:
@@ -991,7 +1011,13 @@ _EVALUATOR_SUMMARIZER_USER_PROFILE_PROMPT = '''\
 - 不超过 220 字，纯文本，无 JSON 外壳。
 '''
 
-_evaluator_summarizer_llm = get_llm(temperature=0.0, top_p=1.0)
+_evaluator_summarizer_llm = get_llm(
+    temperature=0.0,
+    top_p=1.0,
+    model=RAG_SUBAGENT_LLM_MODEL,
+    base_url=RAG_SUBAGENT_LLM_BASE_URL,
+    api_key=RAG_SUBAGENT_LLM_API_KEY,
+)
 
 async def _summarize_agent_result(
     slot: str,
@@ -1120,7 +1146,13 @@ _FINALIZER_PROMPT = '''\
 - no final answer
 - no broad interpretation beyond short extractive summaries
 '''
-_finalizer_llm = get_llm(temperature=0.2, top_p=0.9)
+_finalizer_llm = get_llm(
+    temperature=0.2,
+    top_p=0.9,
+    model=RAG_SUBAGENT_LLM_MODEL,
+    base_url=RAG_SUBAGENT_LLM_BASE_URL,
+    api_key=RAG_SUBAGENT_LLM_API_KEY,
+)
 
 
 async def rag_finalizer(state: ProgressiveRAGState) -> dict:

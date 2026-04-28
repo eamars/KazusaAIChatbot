@@ -13,7 +13,11 @@ import httpx
 import pytest
 from langchain_core.messages import HumanMessage, SystemMessage
 
-from kazusa_ai_chatbot.config import LLM_BASE_URL
+from kazusa_ai_chatbot.config import (
+    COGNITION_LLM_API_KEY,
+    COGNITION_LLM_BASE_URL,
+    COGNITION_LLM_MODEL,
+)
 from kazusa_ai_chatbot.nodes.dialog_agent import dialog_agent
 from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition_l3 import call_content_anchor_agent
 from kazusa_ai_chatbot.utils import get_llm, load_personality, parse_llm_json_output
@@ -57,7 +61,13 @@ Definitions:
   direction and uses the prior episode facts above. A generic plausible
   contribution angle without that distinction is not sufficient for this test.
 """
-_flow_judge_llm = get_llm(temperature=0.0, top_p=1.0)
+_flow_judge_llm = get_llm(
+    temperature=0.0,
+    top_p=1.0,
+    model=COGNITION_LLM_MODEL,
+    base_url=COGNITION_LLM_BASE_URL,
+    api_key=COGNITION_LLM_API_KEY,
+)
 
 _RELEASE_FLOW_JUDGE_PROMPT = """\
 You judge whether Kazusa follows the requested conversation-flow target.
@@ -100,12 +110,12 @@ async def _skip_if_llm_unavailable() -> None:
 
     try:
         async with httpx.AsyncClient(timeout=3.0) as client:
-            response = await client.get(f"{LLM_BASE_URL.rstrip('/')}/models")
+            response = await client.get(f"{COGNITION_LLM_BASE_URL.rstrip('/')}/models")
     except httpx.HTTPError:
-        pytest.skip(f"LLM endpoint is unavailable: {LLM_BASE_URL}")
+        pytest.skip(f"LLM endpoint is unavailable: {COGNITION_LLM_BASE_URL}")
 
     if response.status_code >= 500:
-        pytest.skip(f"LLM endpoint returned server error {response.status_code}: {LLM_BASE_URL}")
+        pytest.skip(f"LLM endpoint returned server error {response.status_code}: {COGNITION_LLM_BASE_URL}")
 
 
 @pytest.fixture()

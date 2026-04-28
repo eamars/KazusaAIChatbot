@@ -2,8 +2,9 @@
 
 Contains the MBTI expression-willingness helper and L3/L4 LLM calls.
 """
+from kazusa_ai_chatbot.config import COGNITION_LLM_API_KEY, COGNITION_LLM_BASE_URL, COGNITION_LLM_MODEL
 from kazusa_ai_chatbot.nodes.persona_supervisor2_schema import CognitionState
-from kazusa_ai_chatbot.utils import build_affinity_block, get_llm, get_preference_llm, log_list_preview, log_preview, parse_llm_json_output
+from kazusa_ai_chatbot.utils import build_affinity_block, get_llm, log_list_preview, log_preview, parse_llm_json_output
 from kazusa_ai_chatbot.nodes.linguistic_texture import (
     get_fragmentation_description,
     get_hesitation_density_description,
@@ -148,7 +149,13 @@ _CONTEXTUAL_AGENT_PROMPT = """\
     "expression_willingness": "eager | open | reserved | minimal | reluctant | avoidant | withholding | silent"
 }}
 """
-_contextual_agent_llm = get_llm(temperature=0.4, top_p=0.8)
+_contextual_agent_llm = get_llm(
+    temperature=0.4,
+    top_p=0.8,
+    model=COGNITION_LLM_MODEL,
+    base_url=COGNITION_LLM_BASE_URL,
+    api_key=COGNITION_LLM_API_KEY,
+)
 async def call_contextual_agent(state: CognitionState) -> CognitionState:
     mbti = state["character_profile"]["personality_brief"]["mbti"]
 
@@ -275,7 +282,13 @@ _STYLE_AGENT_PROMPT = """\
     "forbidden_phrases": ["禁止出现的违和词汇", ...]
 }}
 """
-_style_agent_llm = get_llm(temperature=0.55, top_p=0.85)
+_style_agent_llm = get_llm(
+    temperature=0.55,
+    top_p=0.85,
+    model=COGNITION_LLM_MODEL,
+    base_url=COGNITION_LLM_BASE_URL,
+    api_key=COGNITION_LLM_API_KEY,
+)
 async def call_style_agent(state: CognitionState) -> CognitionState:
     character_profile = state["character_profile"]
 
@@ -453,7 +466,13 @@ _CONTENT_ANCHOR_AGENT_PROMPT = """\
 - 当 `character_intent` 为 `CLARIFY` 时，`[ANSWER]` 必须是追问；禁止输出补全后的具体答案、定义或猜测。
 - 若用户输入并未提出需要回答的问题，可以省略 `[ANSWER]`。
 """
-_content_anchor_agent_llm = get_llm(temperature=0.4, top_p=0.85)
+_content_anchor_agent_llm = get_llm(
+    temperature=0.4,
+    top_p=0.85,
+    model=COGNITION_LLM_MODEL,
+    base_url=COGNITION_LLM_BASE_URL,
+    api_key=COGNITION_LLM_API_KEY,
+)
 async def call_content_anchor_agent(state: CognitionState) -> CognitionState:
     character_profile = state["character_profile"]
 
@@ -548,7 +567,13 @@ _PREFERENCE_ADAPTER_PROMPT = """\
     "accepted_user_preferences": ["下游可直接执行的软约束", ...]
 }}
 """
-_preference_adapter_llm = get_preference_llm(temperature=0.15, top_p=0.8)
+_preference_adapter_llm = get_llm(
+    temperature=0.15,
+    top_p=0.8,
+    model=COGNITION_LLM_MODEL,
+    base_url=COGNITION_LLM_BASE_URL,
+    api_key=COGNITION_LLM_API_KEY,
+)
 
 
 async def call_preference_adapter(state: CognitionState) -> CognitionState:
@@ -627,7 +652,13 @@ _VISUAL_AGENT_PROMPT = """\
     "visual_vibe": ["视觉氛围描述（如：强烈的逆光、朦胧的景深）", ...]
 }}
 """
-_visual_agent_llm = get_llm(temperature=0.65, top_p=0.9)
+_visual_agent_llm = get_llm(
+    temperature=0.65,
+    top_p=0.9,
+    model=COGNITION_LLM_MODEL,
+    base_url=COGNITION_LLM_BASE_URL,
+    api_key=COGNITION_LLM_API_KEY,
+)
 async def call_visual_agent(state: CognitionState) -> CognitionState:
     system_prompt = SystemMessage(content=_VISUAL_AGENT_PROMPT.format(
         character_name=state["character_profile"]["name"],

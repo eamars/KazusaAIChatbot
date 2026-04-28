@@ -9,7 +9,7 @@ from unittest.mock import AsyncMock, patch
 import httpx
 import pytest
 
-from kazusa_ai_chatbot.config import LLM_BASE_URL
+from kazusa_ai_chatbot.config import DIALOG_GENERATOR_LLM_BASE_URL
 from kazusa_ai_chatbot.dispatcher import (
     AdapterRegistry,
     DispatchContext,
@@ -69,12 +69,12 @@ async def _skip_if_llm_unavailable() -> None:
 
     try:
         async with httpx.AsyncClient(timeout=3.0) as client:
-            response = await client.get(f"{LLM_BASE_URL.rstrip('/')}/models")
+            response = await client.get(f"{DIALOG_GENERATOR_LLM_BASE_URL.rstrip('/')}/models")
     except httpx.HTTPError:
-        pytest.skip(f"LLM endpoint is unavailable: {LLM_BASE_URL}")
+        pytest.skip(f"LLM endpoint is unavailable: {DIALOG_GENERATOR_LLM_BASE_URL}")
 
     if response.status_code >= 500:
-        pytest.skip(f"LLM endpoint returned server error {response.status_code}: {LLM_BASE_URL}")
+        pytest.skip(f"LLM endpoint returned server error {response.status_code}: {DIALOG_GENERATOR_LLM_BASE_URL}")
 
 
 @pytest.fixture()

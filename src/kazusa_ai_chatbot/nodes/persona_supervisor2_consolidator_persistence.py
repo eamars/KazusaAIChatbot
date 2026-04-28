@@ -16,6 +16,9 @@ from kazusa_ai_chatbot.config import (
     AFFINITY_DEFAULT,
     AFFINITY_INCREMENT_BREAKPOINTS,
     AFFINITY_RAW_DEAD_ZONE,
+    CONSOLIDATION_LLM_API_KEY,
+    CONSOLIDATION_LLM_BASE_URL,
+    CONSOLIDATION_LLM_MODEL,
 )
 from kazusa_ai_chatbot.db import (
     ActiveCommitmentDoc,
@@ -90,7 +93,13 @@ _TASK_DISPATCHER_PROMPT = """\
   ]
 }}
 """
-_task_dispatcher_llm = get_llm(temperature=0.0, top_p=1.0)
+_task_dispatcher_llm = get_llm(
+    temperature=0.0,
+    top_p=1.0,
+    model=CONSOLIDATION_LLM_MODEL,
+    base_url=CONSOLIDATION_LLM_BASE_URL,
+    api_key=CONSOLIDATION_LLM_API_KEY,
+)
 
 
 def configure_task_dispatcher(dispatcher: TaskDispatcher, tool_registry: ToolRegistry) -> None:

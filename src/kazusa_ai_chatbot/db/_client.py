@@ -15,9 +15,9 @@ from pymongo.errors import ConnectionFailure
 from pymongo.operations import SearchIndexModel
 
 from kazusa_ai_chatbot.config import (
+    EMBEDDING_API_KEY,
     EMBEDDING_BASE_URL,
     EMBEDDING_MODEL,
-    LLM_API_KEY,
     MONGODB_DB_NAME,
     MONGODB_URI,
 )
@@ -40,7 +40,7 @@ def _get_embed_client() -> AsyncOpenAI:
     if _embed_client is None or _embed_client_loop is not current_loop:
         _embed_client = AsyncOpenAI(
             base_url=EMBEDDING_BASE_URL,
-            api_key=LLM_API_KEY,
+            api_key=EMBEDDING_API_KEY,
         )
         _embed_client_loop = current_loop
     return _embed_client

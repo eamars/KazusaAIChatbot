@@ -7,6 +7,11 @@ from typing import Any
 
 from langchain_core.messages import HumanMessage, SystemMessage
 
+from kazusa_ai_chatbot.config import (
+    CONSOLIDATION_LLM_API_KEY,
+    CONSOLIDATION_LLM_BASE_URL,
+    CONSOLIDATION_LLM_MODEL,
+)
 from kazusa_ai_chatbot.conversation_progress.models import ConversationProgressRecordInput
 from kazusa_ai_chatbot.conversation_progress.policy import (
     VALID_CONTINUITY,
@@ -70,7 +75,13 @@ Return strict JSON only:
 }
 """
 
-_recorder_llm = get_llm(temperature=0.2, top_p=0.75)
+_recorder_llm = get_llm(
+    temperature=0.2,
+    top_p=0.75,
+    model=CONSOLIDATION_LLM_MODEL,
+    base_url=CONSOLIDATION_LLM_BASE_URL,
+    api_key=CONSOLIDATION_LLM_API_KEY,
+)
 
 
 def render_recorder_prompt() -> str:

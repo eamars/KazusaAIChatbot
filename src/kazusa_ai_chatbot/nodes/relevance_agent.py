@@ -14,6 +14,14 @@ import logging
 
 from langchain_core.messages import HumanMessage, SystemMessage
 
+from kazusa_ai_chatbot.config import (
+    RELEVANCE_AGENT_LLM_API_KEY,
+    RELEVANCE_AGENT_LLM_BASE_URL,
+    RELEVANCE_AGENT_LLM_MODEL,
+    VISION_DESCRIPTOR_LLM_API_KEY,
+    VISION_DESCRIPTOR_LLM_BASE_URL,
+    VISION_DESCRIPTOR_LLM_MODEL,
+)
 from kazusa_ai_chatbot.utils import build_affinity_block, log_dict_subset, log_preview, parse_llm_json_output
 from kazusa_ai_chatbot.utils import get_llm
 from kazusa_ai_chatbot.state import IMProcessState
@@ -360,7 +368,13 @@ _RELEVANCE_SYSTEM_NOISY_PROMPT = """\
 }}
 """
 
-_relevance_agent_llm = get_llm(temperature=0, top_p=1.0)
+_relevance_agent_llm = get_llm(
+    temperature=0,
+    top_p=1.0,
+    model=RELEVANCE_AGENT_LLM_MODEL,
+    base_url=RELEVANCE_AGENT_LLM_BASE_URL,
+    api_key=RELEVANCE_AGENT_LLM_API_KEY,
+)
 async def relevance_agent(state: IMProcessState) -> IMProcessState:
     # Calculate affinity context
     affinity_block = build_affinity_block(state["user_profile"]["affinity"])
@@ -562,7 +576,13 @@ _VISION_DESCRIPTOR_PROMPT = """\
     "description": "逻辑清晰、细节饱满的文字描述，无需任何开场白。"
 }}
 """
-_vision_descriptor_llm = get_llm(temperature=0, top_p=1.0)
+_vision_descriptor_llm = get_llm(
+    temperature=0,
+    top_p=1.0,
+    model=VISION_DESCRIPTOR_LLM_MODEL,
+    base_url=VISION_DESCRIPTOR_LLM_BASE_URL,
+    api_key=VISION_DESCRIPTOR_LLM_API_KEY,
+)
 async def multimedia_descriptor_agent(state: IMProcessState) -> IMProcessState:
     user_name = state.get("user_name")
     platform_user_id = state.get("platform_user_id", "")

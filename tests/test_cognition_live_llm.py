@@ -8,7 +8,7 @@ import httpx
 import pytest
 
 from kazusa_ai_chatbot.nodes.dialog_agent import dialog_agent
-from kazusa_ai_chatbot.config import LLM_BASE_URL
+from kazusa_ai_chatbot.config import COGNITION_LLM_BASE_URL
 from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition_l1 import call_cognition_subconscious
 from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition_l2 import (
     call_boundary_core_agent,
@@ -49,12 +49,12 @@ async def _skip_if_llm_unavailable() -> None:
     """
     try:
         async with httpx.AsyncClient(timeout=3.0) as client:
-            response = await client.get(f"{LLM_BASE_URL.rstrip('/')}/models")
+            response = await client.get(f"{COGNITION_LLM_BASE_URL.rstrip('/')}/models")
     except httpx.HTTPError:
-        pytest.skip(f"LLM endpoint is unavailable: {LLM_BASE_URL}")
+        pytest.skip(f"LLM endpoint is unavailable: {COGNITION_LLM_BASE_URL}")
 
     if response.status_code >= 500:
-        pytest.skip(f"LLM endpoint returned server error {response.status_code}: {LLM_BASE_URL}")
+        pytest.skip(f"LLM endpoint returned server error {response.status_code}: {COGNITION_LLM_BASE_URL}")
 
 
 @pytest.fixture()

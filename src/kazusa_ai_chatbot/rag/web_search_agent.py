@@ -12,7 +12,12 @@ from langchain_core.tools import tool
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.message import add_messages
 
-from kazusa_ai_chatbot.config import LLM_API_KEY, LLM_BASE_URL, LLM_MODEL, MAX_WEB_SEARCH_AGENT_RETRY
+from kazusa_ai_chatbot.config import (
+    MAX_WEB_SEARCH_AGENT_RETRY,
+    WEB_SEARCH_LLM_API_KEY,
+    WEB_SEARCH_LLM_BASE_URL,
+    WEB_SEARCH_LLM_MODEL,
+)
 from kazusa_ai_chatbot.mcp_client import mcp_manager
 from kazusa_ai_chatbot.rag.helper_agent import BaseRAGHelperAgent
 from kazusa_ai_chatbot.utils import get_llm, parse_llm_json_output
@@ -131,7 +136,13 @@ _WEB_SEARCH_GENERATOR_PROMPT = """\
     "messages": [包含评估员反馈的历史记录]
 }}
 """
-_generator_llm = get_llm(temperature=0.3, top_p=0.9).bind_tools(_ALL_TOOLS)
+_generator_llm = get_llm(
+    temperature=0.3,
+    top_p=0.9,
+    model=WEB_SEARCH_LLM_MODEL,
+    base_url=WEB_SEARCH_LLM_BASE_URL,
+    api_key=WEB_SEARCH_LLM_API_KEY,
+).bind_tools(_ALL_TOOLS)
 
 _WEB_SEARCH_EVALUATOR_PROMPT = """\
 你是一个高级检索评估专家。你的任务是分析检索到的内容与用户任务之间的差距，并决定后续行动。
@@ -176,7 +187,13 @@ _WEB_SEARCH_EVALUATOR_PROMPT = """\
     "should_stop": true 或 false
 }}
 """
-_evaluator_llm = get_llm(temperature=0.0, top_p=1.0)
+_evaluator_llm = get_llm(
+    temperature=0.0,
+    top_p=1.0,
+    model=WEB_SEARCH_LLM_MODEL,
+    base_url=WEB_SEARCH_LLM_BASE_URL,
+    api_key=WEB_SEARCH_LLM_API_KEY,
+)
 
 _WEB_SEARCH_FINALIZER_PROMPT = """\
 你是一个信息整理专家。你的任务是将检索到的信息整理成供下游认知使用的证据包，而不是直接替角色回答用户。
@@ -213,7 +230,13 @@ _WEB_SEARCH_FINALIZER_PROMPT = """\
     "is_empty_result": true or false
 }
 """
-_finalizer_llm = get_llm(temperature=0.0, top_p=1.0)
+_finalizer_llm = get_llm(
+    temperature=0.0,
+    top_p=1.0,
+    model=WEB_SEARCH_LLM_MODEL,
+    base_url=WEB_SEARCH_LLM_BASE_URL,
+    api_key=WEB_SEARCH_LLM_API_KEY,
+)
 
 
 async def _tool_call_executor(state: WebSearchState) -> dict:

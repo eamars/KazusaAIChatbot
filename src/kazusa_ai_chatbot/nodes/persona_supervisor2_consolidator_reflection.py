@@ -7,7 +7,12 @@ import logging
 
 from langchain_core.messages import HumanMessage, SystemMessage
 
-from kazusa_ai_chatbot.config import AFFINITY_DEFAULT
+from kazusa_ai_chatbot.config import (
+    AFFINITY_DEFAULT,
+    CONSOLIDATION_LLM_API_KEY,
+    CONSOLIDATION_LLM_BASE_URL,
+    CONSOLIDATION_LLM_MODEL,
+)
 from kazusa_ai_chatbot.nodes.persona_supervisor2_consolidator_schema import (
     ConsolidatorState,
     normalize_diary_entries,
@@ -62,7 +67,13 @@ _GLOBAL_STATE_UPDATER_PROMPT = """\
     "reflection_summary": "string"
 }}
 """
-_global_state_updater_llm = get_llm(temperature=0.4, top_p=0.8)
+_global_state_updater_llm = get_llm(
+    temperature=0.4,
+    top_p=0.8,
+    model=CONSOLIDATION_LLM_MODEL,
+    base_url=CONSOLIDATION_LLM_BASE_URL,
+    api_key=CONSOLIDATION_LLM_API_KEY,
+)
 async def global_state_updater(state: ConsolidatorState) -> dict:
     system_prompt = SystemMessage(_GLOBAL_STATE_UPDATER_PROMPT.format(character_name=state["character_profile"]["name"]))
 
@@ -144,7 +155,13 @@ _RELATIONSHIP_RECORDER_PROMPT = """\
     "last_relationship_insight": "此时此刻对他/她最核心的一个标签或看法"
 }}
 """
-_relationship_recorder_llm = get_llm(temperature=0.4, top_p=0.9)
+_relationship_recorder_llm = get_llm(
+    temperature=0.4,
+    top_p=0.9,
+    model=CONSOLIDATION_LLM_MODEL,
+    base_url=CONSOLIDATION_LLM_BASE_URL,
+    api_key=CONSOLIDATION_LLM_API_KEY,
+)
 async def relationship_recorder(state: ConsolidatorState) -> dict:
     system_prompt = SystemMessage(_RELATIONSHIP_RECORDER_PROMPT.format(
         character_name=state["character_profile"]["name"],

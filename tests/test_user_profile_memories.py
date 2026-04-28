@@ -485,6 +485,7 @@ async def test_bootstrap_adds_active_commitment_hot_path_index(monkeypatch):
         "memory",
         "user_profile_memories",
         "scheduled_events",
+        "conversation_episode_state",
     ])
     db.drop_collection = AsyncMock()
     db.character_state.find_one = AsyncMock(return_value={"_id": "global"})
@@ -495,6 +496,7 @@ async def test_bootstrap_adds_active_commitment_hot_path_index(monkeypatch):
         "scheduled_events",
         "memory",
         "user_profile_memories",
+        "conversation_episode_state",
     ):
         getattr(db, collection_name).create_index = AsyncMock()
     monkeypatch.setattr(bootstrap_module, "get_db", AsyncMock(return_value=db))
@@ -528,6 +530,7 @@ async def test_bootstrap_drops_legacy_rag_collections(monkeypatch):
         "memory",
         "user_profile_memories",
         "scheduled_events",
+        "conversation_episode_state",
         "rag_cache_index",
         "rag_metadata_index",
     ])
@@ -540,6 +543,7 @@ async def test_bootstrap_drops_legacy_rag_collections(monkeypatch):
         "scheduled_events",
         "memory",
         "user_profile_memories",
+        "conversation_episode_state",
     ):
         getattr(db, collection_name).create_index = AsyncMock()
     monkeypatch.setattr(bootstrap_module, "get_db", AsyncMock(return_value=db))

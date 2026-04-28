@@ -8,6 +8,7 @@ from typing import Any
 
 from langchain_core.messages import HumanMessage, SystemMessage
 
+from kazusa_ai_chatbot.config import RAG_SUBAGENT_LLM_API_KEY, RAG_SUBAGENT_LLM_BASE_URL, RAG_SUBAGENT_LLM_MODEL
 from kazusa_ai_chatbot.db import search_conversation_history, search_users_by_display_name
 from kazusa_ai_chatbot.rag.cache2_events import CacheInvalidationEvent
 from kazusa_ai_chatbot.rag.cache2_policy import (
@@ -45,8 +46,20 @@ Valid JSON without markdown wrap. Only include the following keys
 }
 """
 
-_extractor_llm = get_llm(temperature=0.0, top_p=1.0)
-_picker_llm = get_llm(temperature=0.0, top_p=1.0)
+_extractor_llm = get_llm(
+    temperature=0.0,
+    top_p=1.0,
+    model=RAG_SUBAGENT_LLM_MODEL,
+    base_url=RAG_SUBAGENT_LLM_BASE_URL,
+    api_key=RAG_SUBAGENT_LLM_API_KEY,
+)
+_picker_llm = get_llm(
+    temperature=0.0,
+    top_p=1.0,
+    model=RAG_SUBAGENT_LLM_MODEL,
+    base_url=RAG_SUBAGENT_LLM_BASE_URL,
+    api_key=RAG_SUBAGENT_LLM_API_KEY,
+)
 
 
 class UserLookupAgent(BaseRAGHelperAgent):

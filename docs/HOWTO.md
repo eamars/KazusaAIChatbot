@@ -21,22 +21,45 @@ Create a local `.env` file:
 MONGODB_URI=mongodb://localhost:27017
 MONGODB_DB_NAME=roleplay_bot
 
-# Primary chat model
-LLM_BASE_URL=http://localhost:1234/v1
-LLM_API_KEY=lm-studio
-LLM_MODEL=your-chat-model
+# Route-specific chat models
+RELEVANCE_AGENT_LLM_BASE_URL=http://localhost:1234/v1
+RELEVANCE_AGENT_LLM_API_KEY=lm-studio
+RELEVANCE_AGENT_LLM_MODEL=your-chat-model
+VISION_DESCRIPTOR_LLM_BASE_URL=http://localhost:1234/v1
+VISION_DESCRIPTOR_LLM_API_KEY=lm-studio
+VISION_DESCRIPTOR_LLM_MODEL=your-chat-model
+MSG_DECONTEXTUALIZER_LLM_BASE_URL=http://localhost:1234/v1
+MSG_DECONTEXTUALIZER_LLM_API_KEY=lm-studio
+MSG_DECONTEXTUALIZER_LLM_MODEL=your-chat-model
+RAG_PLANNER_LLM_BASE_URL=http://localhost:1234/v1
+RAG_PLANNER_LLM_API_KEY=lm-studio
+RAG_PLANNER_LLM_MODEL=your-chat-model
+RAG_SUBAGENT_LLM_BASE_URL=http://localhost:1234/v1
+RAG_SUBAGENT_LLM_API_KEY=lm-studio
+RAG_SUBAGENT_LLM_MODEL=your-chat-model
+WEB_SEARCH_LLM_BASE_URL=http://localhost:1234/v1
+WEB_SEARCH_LLM_API_KEY=lm-studio
+WEB_SEARCH_LLM_MODEL=your-chat-model
+COGNITION_LLM_BASE_URL=http://localhost:1234/v1
+COGNITION_LLM_API_KEY=lm-studio
+COGNITION_LLM_MODEL=your-chat-model
+DIALOG_GENERATOR_LLM_BASE_URL=http://localhost:1234/v1
+DIALOG_GENERATOR_LLM_API_KEY=lm-studio
+DIALOG_GENERATOR_LLM_MODEL=your-chat-model
+DIALOG_EVALUATOR_LLM_BASE_URL=http://localhost:1234/v1
+DIALOG_EVALUATOR_LLM_API_KEY=lm-studio
+DIALOG_EVALUATOR_LLM_MODEL=your-chat-model
+CONSOLIDATION_LLM_BASE_URL=http://localhost:1234/v1
+CONSOLIDATION_LLM_API_KEY=lm-studio
+CONSOLIDATION_LLM_MODEL=your-chat-model
+JSON_REPAIR_LLM_BASE_URL=http://localhost:1234/v1
+JSON_REPAIR_LLM_API_KEY=lm-studio
+JSON_REPAIR_LLM_MODEL=your-chat-model
 
 # Embeddings
 EMBEDDING_BASE_URL=http://localhost:1234/v1
+EMBEDDING_API_KEY=lm-studio
 EMBEDDING_MODEL=your-embedding-model
-
-# Optional specialized models
-SECONDARY_LLM_BASE_URL=http://localhost:1234/v1
-SECONDARY_LLM_API_KEY=lm-studio
-SECONDARY_LLM_MODEL=your-secondary-model
-PREFERENCE_LLM_BASE_URL=http://localhost:1234/v1
-PREFERENCE_LLM_API_KEY=lm-studio
-PREFERENCE_LLM_MODEL=your-preference-model
 
 # Character and service behavior
 CHARACTER_GLOBAL_USER_ID=00000000-0000-4000-8000-000000000001
@@ -88,9 +111,11 @@ DISCORD_RUNTIME_PORT=8012
 NAPCAT_RUNTIME_PORT=8011
 ```
 
-If the secondary and preference model variables are omitted, they fall back to
-the primary model. The web-search helper expects an MCP server named
-`mcp-searxng` exposing `searxng_web_search` and `web_url_read`.
+All route-specific chat model variables are required. The generic
+`LLM_BASE_URL`, `LLM_API_KEY`, and `LLM_MODEL` variables are not used after the
+route migration. Missing route variables crash config loading instead of
+silently falling back to another endpoint. The web-search helper expects an MCP
+server named `mcp-searxng` exposing `searxng_web_search` and `web_url_read`.
 
 ## Dependencies
 

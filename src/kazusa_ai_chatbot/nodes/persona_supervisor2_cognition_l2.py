@@ -1,5 +1,11 @@
 """L2 — Consciousness, Boundary Core, and Judgment Core cognition agents."""
-from kazusa_ai_chatbot.config import AFFINITY_MAX, AFFINITY_MIN
+from kazusa_ai_chatbot.config import (
+    AFFINITY_MAX,
+    AFFINITY_MIN,
+    COGNITION_LLM_API_KEY,
+    COGNITION_LLM_BASE_URL,
+    COGNITION_LLM_MODEL,
+)
 from kazusa_ai_chatbot.nodes.persona_supervisor2_schema import CognitionState
 from kazusa_ai_chatbot.utils import build_affinity_block, get_llm, log_preview, parse_llm_json_output
 from kazusa_ai_chatbot.nodes.boundary_profile import (
@@ -263,7 +269,13 @@ _COGNITION_CONSCIOUSNESS_PROMPT = """\
     "character_intent": "行动意图"
 }}
 """
-_conscious_llm = get_llm(temperature=0.2, top_p=0.8)  # Conscious deliberation
+_conscious_llm = get_llm(
+    temperature=0.2,
+    top_p=0.8,
+    model=COGNITION_LLM_MODEL,
+    base_url=COGNITION_LLM_BASE_URL,
+    api_key=COGNITION_LLM_API_KEY,
+)  # Conscious deliberation
 async def call_cognition_consciousness(state: CognitionState) -> CognitionState:
     affinity_block = build_affinity_block(state["user_profile"]["affinity"])
     current_user_bundle = _current_user_rag_bundle(state)
@@ -494,7 +506,13 @@ Note:
   "trajectory": "string"
 }}
 """
-_boundary_core_llm = get_llm(temperature=0, top_p=1.0)
+_boundary_core_llm = get_llm(
+    temperature=0,
+    top_p=1.0,
+    model=COGNITION_LLM_MODEL,
+    base_url=COGNITION_LLM_BASE_URL,
+    api_key=COGNITION_LLM_API_KEY,
+)
 async def call_boundary_core_agent(state: CognitionState) -> CognitionState:
     # Get attributes
     character_profile = state["character_profile"]
@@ -703,7 +721,13 @@ behavioral_primary + behavioral_secondary 必须被体现。例如：
   "judgment_note": "一句话说明裁决逻辑"
 }}
 """
-_judgement_core_llm = get_llm(temperature=0.1, top_p=0.7)
+_judgement_core_llm = get_llm(
+    temperature=0.1,
+    top_p=0.7,
+    model=COGNITION_LLM_MODEL,
+    base_url=COGNITION_LLM_BASE_URL,
+    api_key=COGNITION_LLM_API_KEY,
+)
 async def call_judgment_core_agent(state: CognitionState) -> CognitionState:
     system_prompt = SystemMessage(content=_JUDGEMENT_CORE_PROMPT.format(
         character_name=state["character_profile"]["name"],

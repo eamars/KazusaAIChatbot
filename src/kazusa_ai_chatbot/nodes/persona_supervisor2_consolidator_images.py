@@ -6,6 +6,11 @@ import json
 
 from langchain_core.messages import HumanMessage, SystemMessage
 
+from kazusa_ai_chatbot.config import (
+    CONSOLIDATION_LLM_API_KEY,
+    CONSOLIDATION_LLM_BASE_URL,
+    CONSOLIDATION_LLM_MODEL,
+)
 from kazusa_ai_chatbot.db import query_user_profile_memory_blocks
 from kazusa_ai_chatbot.nodes.persona_supervisor2_consolidator_schema import (
     ConsolidatorState,
@@ -50,7 +55,13 @@ _USER_IMAGE_SESSION_SUMMARY_PROMPT = """\
     "session_summary": "一段简洁的第三人称叙述（≤100字），描述本轮对话中用户的新表现与角色感知的变化"
 }}
 """
-_user_image_session_summary_llm = get_llm(temperature=0.3, top_p=0.9)
+_user_image_session_summary_llm = get_llm(
+    temperature=0.3,
+    top_p=0.9,
+    model=CONSOLIDATION_LLM_MODEL,
+    base_url=CONSOLIDATION_LLM_BASE_URL,
+    api_key=CONSOLIDATION_LLM_API_KEY,
+)
 
 
 _USER_IMAGE_COMPRESS_PROMPT = """\
@@ -73,7 +84,13 @@ _USER_IMAGE_COMPRESS_PROMPT = """\
     "compressed_summary": "压缩后的历史摘要（≤500字）"
 }}
 """
-_user_image_compress_llm = get_llm(temperature=0.2, top_p=0.9)
+_user_image_compress_llm = get_llm(
+    temperature=0.2,
+    top_p=0.9,
+    model=CONSOLIDATION_LLM_MODEL,
+    base_url=CONSOLIDATION_LLM_BASE_URL,
+    api_key=CONSOLIDATION_LLM_API_KEY,
+)
 
 
 _CHARACTER_IMAGE_SESSION_SUMMARY_PROMPT = """\
@@ -100,7 +117,13 @@ _CHARACTER_IMAGE_SESSION_SUMMARY_PROMPT = """\
     "session_summary": "一段简洁的第三人称描述（≤80字），反映角色本轮对话后的自我认知变化"
 }}
 """
-_character_image_session_summary_llm = get_llm(temperature=0.3, top_p=0.9)
+_character_image_session_summary_llm = get_llm(
+    temperature=0.3,
+    top_p=0.9,
+    model=CONSOLIDATION_LLM_MODEL,
+    base_url=CONSOLIDATION_LLM_BASE_URL,
+    api_key=CONSOLIDATION_LLM_API_KEY,
+)
 
 
 _CHARACTER_IMAGE_COMPRESS_PROMPT = """\
@@ -122,7 +145,13 @@ _CHARACTER_IMAGE_COMPRESS_PROMPT = """\
     "compressed_summary": "压缩后的历史摘要（≤500字）"
 }}
 """
-_character_image_compress_llm = get_llm(temperature=0.2, top_p=0.9)
+_character_image_compress_llm = get_llm(
+    temperature=0.2,
+    top_p=0.9,
+    model=CONSOLIDATION_LLM_MODEL,
+    base_url=CONSOLIDATION_LLM_BASE_URL,
+    api_key=CONSOLIDATION_LLM_API_KEY,
+)
 
 async def _update_user_image(
     state: "ConsolidatorState",
