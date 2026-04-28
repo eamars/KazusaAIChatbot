@@ -154,3 +154,49 @@ async def test_build_graph_preserves_consolidation_state_from_supervisor(monkeyp
 
     assert result["final_dialog"] == ["好呀。"]
     assert result["consolidation_state"]["decontexualized_input"] == "一分钟后发消息"
+
+
+@pytest.mark.asyncio
+async def test_chat_listen_only_keeps_boolean_should_respond(monkeypatch):
+    """Listen-only requests should skip thinking while preserving state defaults."""
+
+    monkeypatch.setattr(service_module, "_chat_executor_semaphore", None)
+    monkeypatch.setattr(service_module, "_personality", {"name": "Kazusa"})
+    monkeypatch.setattr(service_module, "resolve_global_user_id", AsyncMock(return_value="global-user-1"))
+    monkeypatch.setattr(service_module, "get_user_profile", AsyncMock(return_value={"affinity": 500}))
+    monkeypatch.setattr(service_module, "get_conversation_history", AsyncMock(return_value=[]))
+    monkeypatch.setattr(service_module, "_hydrate_reply_context", AsyncMock(return_value={}))
+    monkeypatch.setattr(service_module, "save_conversation", AsyncMock())
+
+    captured_state = {}
+
+    class _CapturingGraph:
+        """Capture the initial state and emulate the listen-only graph result."""
+
+        async def ainvoke(self, state):
+            captured_state.update(state)
+            return state
+
+    monkeypatch.setattr(service_module, "_graph", _CapturingGraph())
+
+    background_tasks = BackgroundTasks()
+    response = await service_module.chat(
+        service_module.ChatRequest(
+            platform="qq",
+            platform_channel_id="227608960",
+            channel_type="group",
+            platform_message_id="394466266",
+            platform_user_id="876192223",
+            platform_bot_id="3768713357",
+            display_name="Test User",
+            channel_name="Group 227608960",
+            content="listen only fixture",
+            debug_modes=service_module.DebugModesIn(listen_only=True),
+        ),
+        background_tasks,
+    )
+
+    assert captured_state["should_respond"] is False
+    assert captured_state["use_reply_feature"] is False
+    assert response.messages == []
+    assert response.should_reply is False
