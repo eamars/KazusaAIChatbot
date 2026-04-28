@@ -1,140 +1,180 @@
 # Kazusa AI Chatbot
 
-Kazusa AI Chatbot is a platform-agnostic character chatbot brain built with
-FastAPI, LangGraph, MongoDB, and OpenAI-compatible chat and embedding APIs. It
-is designed for long-running character interaction: it remembers people, tracks
-conversation context, retrieves relevant evidence, reasons through a staged
-persona pipeline, and writes durable relationship state back after each turn.
+Kazusa AI Chatbot is a platform-agnostic character brain for long-running chat interaction.
 
-The brain is separate from its adapters. Discord, NapCat QQ, and the browser
-debug UI all talk to the same HTTP service, so the character logic stays in one
-place while platform code remains thin.
+The project is built around a simple idea: a character should not be a stateless prompt wrapped in a chat adapter. Kazusa has a service core that listens, decides whether to respond, recalls relevant context, reasons through her own stance, speaks in character, and then quietly updates durable memory after the turn is over.
 
-For setup, operations, API details, and test commands, see
-[docs/HOWTO.md](docs/HOWTO.md).
+The same brain can be reached from Discord, QQ, a browser debug UI, or another adapter that speaks the service API. Platform code stays thin; the character logic, memory, retrieval, and scheduling live in one place.
 
-## What It Does
+For setup, operations, environment variables, API details, and test commands, see [docs/HOWTO.md](docs/HOWTO.md).
 
-- Runs a staged LangGraph persona pipeline: relevance, decontextualization,
-  RAG2 research, cognition, dialog, and background consolidation.
-- Maintains durable character and user memory in MongoDB, including identity
-  links, diary-style relationship notes, objective facts, active commitments,
-  image summaries, channel history, and scheduled events.
-- Uses a progressive RAG2 supervisor with helper agents for profile recall,
-  conversation search, persistent memories, entity lookup, user lists, and
-  optional web search through MCP.
-- Caches helper-agent retrieval through Cache2, an in-memory session LRU with
-  dependency-aware invalidation from conversation saves and consolidator writes.
-- Keeps user-derived context out of system prompts: retrieved evidence, chat
-  history, dialog output, and consolidation payloads are carried in human
-  messages, preserving a clean trusted/untrusted prompt boundary.
-- Supports multimodal input by describing image attachments before relevance
-  and downstream persona stages.
+## What This Project Is
 
-## Architecture
+Kazusa is an experimental digital-character runtime with:
+
+- A staged conversation pipeline instead of a single giant prompt.
+- Long-term user and relationship memory.
+- Short-term conversation-flow continuity.
+- Evidence retrieval over profiles, memories, conversation history, and optional web sources.
+- Background consolidation that turns completed interactions into durable state.
+- Scheduled follow-through for accepted future promises.
+- Adapter-neutral deployment across chat platforms.
+
+The project is designed for local or OpenAI-compatible model runtimes, including weaker models with limited practical context-following ability. The architecture favors explicit boundaries, compact intermediate state, and specialist sub-systems over one prompt trying to infer everything.
+
+## What It Is Not
+
+Kazusa is not a generic assistant shell, a command router, or a tool-use demo.
+
+The core runtime is character-centered: retrieval provides evidence, cognition decides what that evidence means for Kazusa in the current moment, and dialog generation owns the final wording. Durable memory is written after the response path, not by interrupting the user-facing turn with a long agent loop.
+
+## High-Level Flow
 
 ```text
-Adapters
-  Discord / NapCat QQ / Debug UI
+Chat platform / debug client
         |
         v
-FastAPI brain service
-  POST /chat
-  GET  /health
-  POST /event
+Brain service
         |
         v
-Top-level LangGraph
-  listen_only gate
-  multimedia descriptor
-  relevance agent
-  persona_supervisor2
+Listen gate + perception
+  - normalize incoming message
+  - describe attachments when needed
+  - decide whether Kazusa should respond
         |
         v
-Persona supervisor v2
-  Stage 0: message decontextualizer
-  Stage 1: RAG2 research supervisor
-  Stage 2: cognition subgraph
-  Stage 3: dialog generator/evaluator
-  Stage 4: background consolidation
+Persona turn
+  - clarify the user's current message
+  - retrieve relevant evidence
+  - load short-term conversation flow
+  - reason through stance, intent, and response goals
+  - generate Kazusa's reply
+        |
+        +-------------------------> response to platform
         |
         v
-MongoDB + Cache2 + OpenAI-compatible model APIs
+Background consolidation
+  - record conversation progress
+  - update durable user/character memory
+  - update relationship state and image summaries
+  - schedule accepted future follow-through
 ```
 
-## Technical Highlights
+The response path is kept bounded. Heavier memory writes, image updates, cache invalidation, and scheduling happen after the user-facing reply is already available.
 
-**RAG2 as the only research path**
+## Memory Horizons
 
-RAG2 decomposes a turn into unknown slots, dispatches specialized helper
-agents, evaluates whether each result resolved the slot, and projects known
-facts into a compact `rag_result` payload. Structured profile and image bundles
-are preserved where cognition needs them; bulky evidence is summarized before
-it reaches later stages.
-
-**Cache2 with event-driven correctness**
-
-Cache2 caches helper-agent outputs at the agent boundary. Entries declare their
-data dependencies, and write paths emit `CacheInvalidationEvent` objects after
-durable changes. `save_conversation` invalidates conversation-history entries;
-the consolidator invalidates user-profile and character-state entries after
-successful writes. Cache2 is session-scoped and does not depend on MongoDB
-write-through cache collections.
-
-**LLM-first memory consolidation**
-
-The consolidator turns a completed interaction into persistent state: character
-mood, relationship observations, objective facts, commitments, user image
-updates, character self-image updates, and scheduled future events. Duplicate
-prevention is handled through LLM instructions plus database idempotency, not
-content heuristics over user text.
-
-**Prompt boundary discipline**
-
-Character configuration and agent instructions stay in system prompts.
-User-derived material, including retrieval evidence and prior dialog, is sent
-through human-message payloads. This keeps the prompt architecture easier to
-audit and reduces accidental elevation of retrieved or user-provided content.
-
-**Adapter-neutral service core**
-
-The brain exposes a compact HTTP surface while platform adapters handle the
-transport details. This keeps the character pipeline reusable across chat
-systems and makes local debugging possible through the same `/chat` contract
-used by production adapters.
-
-## Main Runtime Collections
-
-| Collection | Purpose |
-| --- | --- |
-| `conversation_history` | Stored user and assistant messages plus embeddings |
-| `user_profiles` | Identity mapping, profile memory, affinity, commitments, user image |
-| `character_state` | Singleton character profile, runtime mood/vibe, self image |
-| `memory` | Append-only long-term fact and promise records |
-| `scheduled_events` | Pending future events |
-
-Legacy write-through cache collections are intentionally absent from the
-runtime model.
-
-## Repository Map
+Kazusa uses several memory horizons rather than treating all context as one pile of chat history.
 
 ```text
-src/kazusa_ai_chatbot/
-  db/         MongoDB access, schemas, bootstrap, profile and memory operations
-  nodes/      LangGraph persona, cognition, dialog, consolidation, and RAG2 nodes
-  rag/        RAG2 helper agents, retrieval tools, image/profile retrieval, Cache2
-  service.py  FastAPI brain service
+Immediate surface
+  recent message text and local tone
 
-adapters/     Debug UI, Discord, and NapCat QQ adapters
-personalities/ Character profile examples and local personality data
-scripts/      Operational scripts such as legacy collection cleanup
-docs/         Setup and operational documentation
-tests/        Deterministic, live DB, and live LLM tests
+Short-term flow
+  current episode, open loops, topic momentum, repeated moves to avoid
+
+Retrieved evidence
+  profiles, memories, conversation history, user lookup, web facts when needed
+
+Durable memory
+  identity links, relationship notes, objective facts, milestones, commitments
+
+Scheduled future actions
+  accepted promises that should fire later through platform adapters
 ```
 
-## Documentation
+This separation matters. Recent chat helps Kazusa sound locally present, short-term flow helps her avoid looping or reopening stale threads, RAG provides factual grounding, and durable memory preserves relationship continuity across sessions.
 
-- [docs/HOWTO.md](docs/HOWTO.md): local setup, environment variables, service
-  startup, adapters, HTTP API, testing, and migration notes.
-- [development_plans/rag_cache2_design.md](development_plans/rag_cache2_design.md):
-  Cache2 architecture and invalidation model.
+## Core Subsystems
+
+**Brain Service**
+
+The service is the stable HTTP-facing core. It receives platform-neutral chat requests, runs the turn pipeline, persists conversation rows, exposes health data, and coordinates startup/shutdown work.
+
+**Persona Pipeline**
+
+The persona pipeline is the main response path. It separates relevance, message clarification, retrieval, cognition, and dialog generation so each stage has a narrower responsibility.
+
+**Conversation Progress**
+
+Conversation Progress is short-term operational memory. It tracks the current local episode so cognition can continue, deepen, pivot, or close a conversation naturally without rereading full raw history every turn.
+
+**RAG 2**
+
+RAG 2 is the evidence-retrieval system. It decomposes a query into missing facts, dispatches specialist retrieval agents, and returns compact evidence for cognition. It retrieves facts; it does not decide Kazusa's feelings or final wording.
+
+**Database Layer**
+
+The database layer stores conversation history, user identities, durable memories, character state, scheduled events, and short-lived episode state. It owns storage mechanics and embeddings, while higher-level modules own semantic interpretation.
+
+**Dispatcher And Scheduler**
+
+The dispatcher converts accepted future promises into validated scheduled tasks. The scheduler persists and fires them later through registered platform adapters. This is how Kazusa can follow through on a promised later message without blocking the current turn.
+
+**Adapters**
+
+Adapters connect chat platforms to the brain service. They translate platform events into the service API and deliver responses back to the platform.
+
+## Architectural Principles
+
+**LLM-first semantics, deterministic mechanics**
+
+LLMs decide semantic questions: whether Kazusa should answer, what evidence is needed, what a memory means, whether a user request became an accepted promise, and how Kazusa should frame her reply. Deterministic code handles structure: validation, persistence, limits, cache invalidation, scheduling, and adapter delivery.
+
+**Bounded response latency**
+
+The normal response path avoids unbounded multi-agent exploration. Retrieval and cognition are structured; consolidation and scheduling run in the background.
+
+**Evidence is not persona**
+
+RAG evidence answers "what is known?" Cognition answers "what does this mean for Kazusa right now?" Dialog answers "how does she say it?"
+
+**Memory has ownership**
+
+Short-term flow, retrieved evidence, durable memories, and scheduled commitments are separate systems. They overlap in purpose, but they do not replace each other.
+
+**Platform-neutral core**
+
+Kazusa's identity, cognition, memory, and retrieval do not belong to Discord, QQ, or any one adapter. Adapters are transport edges around the same brain.
+
+## Project Shape
+
+```text
+Adapters and clients
+        |
+        v
+Brain service
+        |
+        +-- turn pipeline
+        |     relevance -> retrieval -> cognition -> dialog
+        |
+        +-- short-term conversation progress
+        |
+        +-- RAG 2 evidence retrieval
+        |
+        +-- background consolidation
+        |
+        +-- dispatcher and scheduler
+        |
+        v
+MongoDB + model APIs + platform adapters
+```
+
+For deeper technical introductions:
+
+- [Conversation Progress](src/kazusa_ai_chatbot/conversation_progress/README.md)
+- [RAG 2](src/kazusa_ai_chatbot/rag/README.md)
+- [Dispatcher](src/kazusa_ai_chatbot/dispatcher/README.md)
+- [Database](src/kazusa_ai_chatbot/db/README.md)
+
+## Current Direction
+
+The project is moving toward an autonomous digital-life engine: a character that can maintain continuity, remember responsibly, retrieve evidence when needed, and follow through on accepted commitments while remaining platform independent.
+
+The goal is not maximal tool use. The goal is a believable, inspectable character runtime where each subsystem has a clear reason to exist.
+
+## Getting Started
+
+Use [docs/HOWTO.md](docs/HOWTO.md) for local setup and operation.
+
+That guide covers environment variables, model endpoints, MongoDB, service startup, adapters, API usage, and testing.
