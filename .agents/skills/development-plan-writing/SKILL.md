@@ -18,6 +18,26 @@ Every final plan must satisfy two audiences:
 
 If those audiences conflict, split the writing into human-readable rationale first and agent-executable instructions second. Do not bury decisions only inside prose.
 
+## Module-First Planning
+
+When a plan introduces a new feature, function group, subsystem, service boundary, data pipeline, or behavior that can reasonably be isolated, aim to design it as a module.
+
+This rule applies to new work. It does not force modularization for narrow bug fixes, refactors of existing code, or small improvements where the existing module already owns the behavior.
+
+For every new module, define the interface before finalizing the plan:
+
+- public functions, classes, methods, protocol, message shape, schema, CLI, endpoint, or event contract
+- input and output data shapes
+- ownership boundary: what the module owns and what existing code owns
+- allowed callers/importers from the existing codebase
+- hidden internals that callers must not reach into
+- dependency injection or test seams
+- integration points with existing modules
+- focused tests that prove the module works independently
+- integration tests that prove the existing code can call it correctly
+
+The final plan must not leave the module interface for the implementation agent to invent. If the interface affects architecture or future maintainability, get explicit user agreement during discovery before marking the plan final.
+
 ## Filename Rule
 
 Development plan filenames must be all lowercase.
@@ -163,6 +183,8 @@ Assumptions are allowed, but they must be fixed operating inputs:
 
 Do not write assumptions as disguised questions.
 
+For new modules, an unapproved or undefined public interface counts as an unresolved question. Do not finalize the plan until the module boundary and interface are accepted by the user.
+
 ## Must Do
 
 The `Must Do` section defines non-negotiable scope.
@@ -225,47 +247,7 @@ Each area must be marked exactly one of:
 
 The policy must be confirmed with the user before finalizing the plan.
 
-### Strategy Definitions
-
-Use these definitions verbatim or close to verbatim:
-
-- **migration:** Move from old behavior to new behavior through explicit transitional steps. Temporary coexistence is allowed only where the plan says so. Data migration or backfill may be required. Old paths are removed after migration is verified.
-- **compatible:** Preserve old and new behavior at the same time. Compatibility shims, adapters, fallback paths, dual reads/writes, or old API/state shapes are allowed only if explicitly listed.
-- **bigbang:** Replace old behavior with new behavior in one cutover. No compatibility shims, no adapters, no fallback to old behavior, no dual path, and no preservation of old state/API shapes unless explicitly listed as retained.
-
-### Policy Matrix
-
-Use a table like this:
-
-```md
-## Cutover Policy
-
-Overall strategy: bigbang
-
-| Area | Policy | Instruction |
-|---|---|---|
-| RAG supervisor entrypoint | bigbang | Replace RAG1 with RAG2 directly. No fallback. |
-| RAG state shape | bigbang | Remove `research_facts` and `research_metadata`. Do not preserve old state. |
-| MongoDB legacy collections | migration | Drop through the approved migration path. Do not delete ad hoc. |
-| Tests | bigbang | Delete obsolete RAG1 tests and create RAG2 replacement tests. |
-```
-
-If a local area policy conflicts with the overall strategy, the local area policy wins.
-
-### Enforcement
-
-Include enforcement language:
-
-```md
-## Cutover Policy Enforcement
-
-- The implementation agent must follow the selected policy for each area.
-- The agent must not choose a more conservative strategy by default.
-- If an area is `bigbang`, delete or rewrite legacy references instead of preserving them.
-- If an area is `migration`, follow the exact migration phases and cleanup gates listed in this plan.
-- If an area is `compatible`, preserve only the compatibility surfaces explicitly listed in this plan.
-- Any change to a cutover policy requires user approval before implementation.
-```
+For strategy definitions, a policy-matrix template, and enforcement language, read `references/cutover_policy.md`.
 
 ## Context And Target State
 
@@ -329,6 +311,8 @@ Define forbidden compatibility shapes when relevant:
 Do not preserve or recreate the legacy `research_facts` / `research_metadata` payload.
 ```
 
+For new modules, include a dedicated interface contract. The interface can be code signatures, protocol messages, schemas, endpoint shapes, CLI commands, event payloads, or another concrete boundary appropriate to the codebase. The contract must be specific enough that existing code can integrate with the module without importing internals.
+
 ## Change Surface
 
 Separate files into clear groups:
@@ -343,6 +327,8 @@ Separate files into clear groups:
 ```
 
 For each path, explain why it is in that group. Use stable file paths and symbols. Line numbers may be included as hints, but never rely on line numbers alone.
+
+When creating a new module, list the module's public entrypoint separately from its internals. Existing code should depend on the public entrypoint, not on private storage, prompt, cache, or helper files.
 
 ## Implementation Order
 
@@ -362,6 +348,36 @@ Include a short rationale when order matters:
 ```md
 Build the projection module first because it becomes the contract used by cognition, consolidation, and tests.
 ```
+
+## Tickable Implementation Checkpoints
+
+For medium, large, high-risk, multi-agent, or long-running plans, the implementation order must include tickable checkpoints using Markdown checkbox syntax (`- [ ]` or `1. [ ]`). These are the progress boxes implementation agents update as each function, module, integration step, or sign-off gate is completed.
+
+Checkpoints exist so multiple agents can resume the work without rediscovering state or guessing which partial changes are complete. They should be granular enough that an agent can finish one checkpoint, verify it, mark it complete, and hand off cleanly.
+
+Each tickable checkpoint must describe:
+
+- the function, module, interface, integration, or sign-off gate being completed
+- the files or modules expected to be touched
+- the verification commands or static checks to run before ticking the box
+- the evidence that must be recorded before ticking the box
+- the next checkpoint or next implementation step
+
+```md
+## Implementation Order
+
+- [ ] Checkpoint A — module contract established
+  - Covers: steps 1-3.
+  - Verify: `python -m py_compile ...`; focused module tests pass.
+  - Evidence: record changed files and test output in `Execution Evidence`.
+  - Checkpoint state: public interface exists; no production integration yet.
+- [ ] Checkpoint B — service integration complete
+  - Covers: step 4.
+  - Verify: service integration tests pass.
+  - Evidence: record test output before moving on.
+```
+
+Do not treat checked boxes as proof by themselves. An agent may tick a checkpoint only after running its verification and recording the result in `Execution Evidence` or a linked execution record. If verification is skipped or blocked, leave the box unchecked and record why.
 
 ## Verification
 
