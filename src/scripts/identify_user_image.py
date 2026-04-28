@@ -15,7 +15,12 @@ import logging
 import sys
 from typing import Any
 
-from kazusa_ai_chatbot.db import close_db, get_db
+from kazusa_ai_chatbot.db import (
+    close_db,
+    get_db,
+    hydrate_user_profile_with_memory_blocks,
+    query_user_profile_memory_blocks,
+)
 
 
 def _configure_stdout() -> None:
@@ -106,10 +111,10 @@ def _format_accounts(accounts: list[dict[str, Any]]) -> str:
 
 
 def _format_sequence(items: list[Any], *, label: str) -> str:
-    """Format a list of image observations or milestones.
+    """Format a list of prompt-facing profile entries.
 
     Args:
-        items: User-image sequence from MongoDB.
+        items: Profile sequence from MongoDB or hydrated memory blocks.
         label: Fallback label to show when an item lacks a known text field.
 
     Returns:
@@ -125,14 +130,35 @@ def _format_sequence(items: list[Any], *, label: str) -> str:
                 str(item.get("summary", "")).strip()
                 or str(item.get("event", "")).strip()
                 or str(item.get("description", "")).strip()
+                or str(item.get("entry", "")).strip()
+                or str(item.get("fact", "")).strip()
+                or str(item.get("action", "")).strip()
                 or _compact_json(item)
             )
-            timestamp = str(item.get("timestamp", "")).strip()
+            timestamp = str(item.get("timestamp", "")).strip() or str(item.get("created_at", "")).strip()
             prefix = f"{timestamp} | " if timestamp else ""
             lines.append(f"  {index}. {prefix}{text}")
         else:
             lines.append(f"  {index}. {label}: {item}")
     return "\n".join(lines)
+
+
+async def _hydrate_prompt_profile(profile: dict[str, Any]) -> dict[str, Any]:
+    """Hydrate a stored profile into the prompt-facing cognition bundle.
+
+    Args:
+        profile: Raw ``user_profiles`` document without ``_id``.
+
+    Returns:
+        Profile merged with prompt-facing memory blocks, matching the
+        deterministic nonsemantic shape used by the RAG profile read path.
+    """
+    global_user_id = str(profile.get("global_user_id", "")).strip()
+    if not global_user_id:
+        return profile
+
+    memory_blocks = await query_user_profile_memory_blocks(global_user_id, include_semantic=False)
+    return hydrate_user_profile_with_memory_blocks(profile, memory_blocks)
 
 
 def _format_profile(profile: dict[str, Any]) -> str:
@@ -168,6 +194,18 @@ def _format_profile(profile: dict[str, Any]) -> str:
     if not relationship:
         relationship = "none"
 
+    character_diary = profile.get("character_diary") or []
+    if not isinstance(character_diary, list):
+        character_diary = [character_diary]
+
+    objective_facts = profile.get("objective_facts") or []
+    if not isinstance(objective_facts, list):
+        objective_facts = [objective_facts]
+
+    active_commitments = profile.get("active_commitments") or []
+    if not isinstance(active_commitments, list):
+        active_commitments = [active_commitments]
+
     return "\n".join(
         [
             f"global_user_id: {profile.get('global_user_id', '')}",
@@ -184,6 +222,15 @@ def _format_profile(profile: dict[str, Any]) -> str:
             "",
             "user_image.milestones:",
             _format_sequence(milestones, label="milestone"),
+            "",
+            "character_diary:",
+            _format_sequence(character_diary, label="diary"),
+            "",
+            "objective_facts:",
+            _format_sequence(objective_facts, label="fact"),
+            "",
+            "active_commitments:",
+            _format_sequence(active_commitments, label="commitment"),
         ]
     )
 
@@ -242,6 +289,8 @@ async def main() -> None:
             lookup_hint = f"{platform}:{identifier}" if platform else identifier
             print(f"No user profile found for {lookup_hint}.")
             return
+
+        profile = await _hydrate_prompt_profile(dict(profile))
 
         if args.json:
             print(_compact_json(profile))
