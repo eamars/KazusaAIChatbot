@@ -55,23 +55,75 @@ def age_hint(*, first_seen_at: str, current_timestamp: str) -> str:
     return "earlier in this episode"
 
 
+def _project_entry(
+    *,
+    entry: ConversationEpisodeEntryDoc,
+    current_timestamp: str,
+) -> dict[str, str] | None:
+    """Project one stored entry when its shape is prompt-safe.
+
+    Args:
+        entry: Stored episode entry.
+        current_timestamp: Current turn timestamp for age hints.
+
+    Returns:
+        Prompt-facing entry, or ``None`` for malformed legacy data.
+    """
+
+    text = entry.get("text")
+    first_seen_at = entry.get("first_seen_at")
+    if not isinstance(text, str) or not text.strip() or not isinstance(first_seen_at, str) or not first_seen_at.strip():
+        return None
+    try:
+        relative_age = age_hint(
+            first_seen_at=first_seen_at,
+            current_timestamp=current_timestamp,
+        )
+    except ValueError:
+        return None
+    return {
+        "text": cap_text(text, MAX_ENTRY_CHARS),
+        "age_hint": relative_age,
+    }
+
+
 def _project_entries(
     *,
     entries: list[ConversationEpisodeEntryDoc],
     current_timestamp: str,
     limit: int,
 ) -> list[dict[str, str]]:
-    return [
-        {
-            "text": cap_text(entry["text"], MAX_ENTRY_CHARS),
-            "age_hint": age_hint(
-                first_seen_at=str(entry["first_seen_at"]),
-                current_timestamp=current_timestamp,
-            ),
-        }
-        for entry in entries
-        if str(entry.get("text", "")).strip() and str(entry.get("first_seen_at", "")).strip()
-    ][:limit]
+    result: list[dict[str, str]] = []
+    for entry in entries:
+        projected = _project_entry(entry=entry, current_timestamp=current_timestamp)
+        if projected is None:
+            continue
+        result.append(projected)
+        if len(result) >= limit:
+            break
+    return result
+
+
+def _project_string_list(*, values: list, limit: int, max_chars: int) -> list[str]:
+    """Project only clean string list items.
+
+    Args:
+        values: Stored list value.
+        limit: Maximum number of items to project.
+        max_chars: Maximum characters per projected item.
+
+    Returns:
+        Prompt-safe clean string list.
+    """
+
+    result: list[str] = []
+    for text_value in values:
+        if not isinstance(text_value, str) or not text_value.strip():
+            continue
+        result.append(cap_text(text_value, max_chars))
+        if len(result) >= limit:
+            break
+    return result
 
 
 def project_prompt_doc(
@@ -116,9 +168,9 @@ def project_prompt_doc(
         }
 
     prompt_doc: ConversationProgressPromptDoc = {
-        "status": str(document["status"]),
+        "status": cap_text(document["status"], MAX_LABEL_CHARS),
         "episode_label": cap_text(document["episode_label"], MAX_LABEL_CHARS),
-        "continuity": str(document["continuity"]),
+        "continuity": cap_text(document["continuity"], MAX_LABEL_CHARS),
         "turn_count": int(document["turn_count"]),
         "conversation_mode": cap_text(document.get("conversation_mode", ""), MAX_LABEL_CHARS),
         "episode_phase": cap_text(document.get("episode_phase", ""), MAX_LABEL_CHARS),
@@ -131,16 +183,16 @@ def project_prompt_doc(
             current_timestamp=current_timestamp,
             limit=USER_STATE_UPDATES_LIMIT,
         ),
-        "assistant_moves": [
-            cap_text(item, MAX_MOVE_CHARS)
-            for item in document.get("assistant_moves", [])
-            if str(item).strip()
-        ][:ASSISTANT_MOVES_LIMIT],
-        "overused_moves": [
-            cap_text(item, MAX_MOVE_CHARS)
-            for item in document.get("overused_moves", [])
-            if str(item).strip()
-        ][:OVERUSED_MOVES_LIMIT],
+        "assistant_moves": _project_string_list(
+            values=document.get("assistant_moves", []),
+            limit=ASSISTANT_MOVES_LIMIT,
+            max_chars=MAX_MOVE_CHARS,
+        ),
+        "overused_moves": _project_string_list(
+            values=document.get("overused_moves", []),
+            limit=OVERUSED_MOVES_LIMIT,
+            max_chars=MAX_MOVE_CHARS,
+        ),
         "open_loops": _project_entries(
             entries=document.get("open_loops", []),
             current_timestamp=current_timestamp,
@@ -157,11 +209,11 @@ def project_prompt_doc(
             limit=AVOID_REOPENING_LIMIT,
         ),
         "emotional_trajectory": cap_text(document.get("emotional_trajectory", ""), MAX_THREAD_CHARS),
-        "next_affordances": [
-            cap_text(item, MAX_ENTRY_CHARS)
-            for item in document.get("next_affordances", [])
-            if str(item).strip()
-        ][:NEXT_AFFORDANCES_LIMIT],
+        "next_affordances": _project_string_list(
+            values=document.get("next_affordances", []),
+            limit=NEXT_AFFORDANCES_LIMIT,
+            max_chars=MAX_ENTRY_CHARS,
+        ),
         "progression_guidance": cap_text(document.get("progression_guidance", ""), MAX_GUIDANCE_CHARS),
     }
     return enforce_progress_prompt_budget(prompt_doc)

@@ -124,8 +124,8 @@ class ConversationProgressRuntime:
         return {
             "written": written,
             "turn_count": int(document["turn_count"]),
-            "continuity": str(document["continuity"]),
-            "status": str(document["status"]),
+            "continuity": document["continuity"],
+            "status": document["status"],
             "cache_updated": cache_updated,
         }
 

@@ -54,7 +54,16 @@ async def load_episode_state(
 
 
 def _cap_strings(values: list[str], limit: int, max_chars: int) -> list[str]:
-    return [cap_text(value, max_chars) for value in values if str(value).strip()][:limit]
+    result: list[str] = []
+    for value in values:
+        if not isinstance(value, str):
+            raise TypeError("string list values must be strings")
+        if not value.strip():
+            continue
+        result.append(cap_text(value, max_chars))
+        if len(result) >= limit:
+            break
+    return result
 
 
 def preserve_first_seen_entries(
@@ -76,14 +85,20 @@ def preserve_first_seen_entries(
         Stored entry documents with preserved or newly stamped ``first_seen_at``.
     """
 
-    prior_first_seen = {
-        str(entry["text"]): str(entry["first_seen_at"])
-        for entry in prior_entries
-        if str(entry.get("text", "")).strip() and str(entry.get("first_seen_at", "")).strip()
-    }
+    prior_first_seen: dict[str, str] = {}
+    for entry in prior_entries:
+        text = entry.get("text")
+        first_seen_at = entry.get("first_seen_at")
+        if isinstance(text, str) and text.strip() and isinstance(first_seen_at, str) and first_seen_at.strip():
+            prior_first_seen[text.strip()] = first_seen_at.strip()
+
     entries: list[ConversationEpisodeEntryDoc] = []
-    for raw_text in new_texts:
-        text = cap_text(raw_text, MAX_ENTRY_CHARS)
+    for text_value in new_texts:
+        if not isinstance(text_value, str):
+            raise TypeError("entry text values must be strings")
+        if not text_value.strip():
+            continue
+        text = cap_text(text_value, MAX_ENTRY_CHARS)
         if not text:
             continue
         entries.append({
@@ -93,6 +108,26 @@ def preserve_first_seen_entries(
         if len(entries) >= limit:
             break
     return entries
+
+
+def _string_or_generated_id(value: object) -> str:
+    """Return an existing string id or a new generated episode id.
+
+    Args:
+        value: Existing episode-state id candidate.
+
+    Returns:
+        Existing non-empty string id, or a generated UUID hex string.
+    """
+
+    if value is None:
+        return uuid.uuid4().hex
+    if not isinstance(value, str):
+        raise TypeError("episode_state_id must be a string")
+    text = value.strip()
+    if not text:
+        return uuid.uuid4().hex
+    return text
 
 
 def build_episode_state_doc(
@@ -118,15 +153,18 @@ def build_episode_state_doc(
 
     prior_state = prior_episode_state or {}
     next_turn_count = int(prior_state.get("turn_count", 0)) + 1
-    created_at = str(prior_state.get("created_at", timestamp))
+    created_at_value = prior_state.get("created_at", timestamp)
+    if not isinstance(created_at_value, str):
+        raise TypeError("created_at must be a string")
+    created_at = created_at_value
     return {
-        "episode_state_id": str(prior_state.get("episode_state_id", uuid.uuid4().hex)),
+        "episode_state_id": _string_or_generated_id(prior_state.get("episode_state_id")),
         "platform": scope.platform,
         "platform_channel_id": scope.platform_channel_id,
         "global_user_id": scope.global_user_id,
-        "status": str(recorder_output["status"]),
+        "status": recorder_output["status"],
         "episode_label": cap_text(recorder_output["episode_label"], MAX_LABEL_CHARS),
-        "continuity": str(recorder_output["continuity"]),
+        "continuity": recorder_output["continuity"],
         "conversation_mode": cap_text(recorder_output.get("conversation_mode", ""), MAX_LABEL_CHARS),
         "episode_phase": cap_text(recorder_output.get("episode_phase", ""), MAX_LABEL_CHARS),
         "topic_momentum": cap_text(recorder_output.get("topic_momentum", ""), MAX_LABEL_CHARS),

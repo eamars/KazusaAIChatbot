@@ -71,18 +71,23 @@ def empty_progress_prompt_doc() -> ConversationProgressPromptDoc:
     }
 
 
-def cap_text(value: object, max_chars: int) -> str:
+def cap_text(value: str, max_chars: int) -> str:
     """Return stripped text capped to the provided character budget.
 
     Args:
-        value: Source value from storage, recorder output, or projection.
+        value: Source text from storage, recorder output, or projection.
         max_chars: Maximum characters to keep.
 
     Returns:
         Stripped and capped text.
+
+    Raises:
+        TypeError: If ``value`` is not a string.
     """
 
-    text = str(value).strip()
+    if not isinstance(value, str):
+        raise TypeError("cap_text value must be a string")
+    text = value.strip()
     if len(text) <= max_chars:
         return text
     return text[:max_chars].rstrip()
