@@ -1,6 +1,5 @@
-import pytest
-from kazusa_ai_chatbot.utils import build_affinity_block
 from kazusa_ai_chatbot.config import AFFINITY_DEFAULT
+from kazusa_ai_chatbot.utils import build_affinity_block, parse_llm_json_output
 
 
 def test_trim_history_dict():
@@ -24,6 +23,23 @@ def test_trim_history_dict():
     assert trimmed[1]["content"] == "Hi"
     assert trimmed[1]["mentioned_bot"] is False
     assert trimmed[1]["role"] == "user"
+
+
+def test_parse_llm_json_output_accepts_markdown_fenced_raw_output():
+    """Markdown fences are repaired from raw LLM text without escaped wrapping."""
+    raw_output = """```json
+{
+  "continuity": "related_shift",
+  "open_loops": ["follow up"]
+}
+```"""
+
+    result = parse_llm_json_output(raw_output)
+
+    assert result == {
+        "continuity": "related_shift",
+        "open_loops": ["follow up"],
+    }
 
 
 class TestBuildAffinityBlock:

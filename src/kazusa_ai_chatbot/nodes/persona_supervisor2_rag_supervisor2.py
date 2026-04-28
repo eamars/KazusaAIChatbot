@@ -571,7 +571,7 @@ async def rag_initializer(state: ProgressiveRAGState) -> dict:
     human_message = HumanMessage(content=json.dumps(user_input, ensure_ascii=False))
 
     response = await _initializer_llm.ainvoke([system_prompt, human_message])
-    result = parse_llm_json_output(str(response.content))
+    result = parse_llm_json_output(response.content)
 
     cacheable_result = isinstance(result, dict) and isinstance(
         result.get("unknown_slots"), list
@@ -872,7 +872,7 @@ async def rag_dispatcher(state: ProgressiveRAGState) -> dict:
     recent_messages = state["messages"][-2:] if len(state["messages"]) >= 2 else state["messages"]
 
     response = await _dispatcher_llm.ainvoke([system_prompt, human_message] + recent_messages)
-    dispatch = parse_llm_json_output(str(response.content))
+    dispatch = parse_llm_json_output(response.content)
     if not isinstance(dispatch, dict):
         dispatch = {}
     normalized_dispatch = _normalize_dispatch(dispatch, current_slot)
@@ -888,7 +888,7 @@ async def rag_dispatcher(state: ProgressiveRAGState) -> dict:
     )
 
     return {
-        "messages": [AIMessage(content=str(response.content))],
+        "messages": [AIMessage(content=response.content)],
         "current_slot": current_slot,
         "current_dispatch": dispatch,
         "loop_count": state.get("loop_count", 0) + 1,
@@ -1103,7 +1103,7 @@ async def _summarize_agent_result(
         )
     )
     response = await _evaluator_summarizer_llm.ainvoke([system_prompt, human_message])
-    return str(response.content).strip()
+    return response.content.strip()
 
 
 async def rag_evaluator(state: ProgressiveRAGState) -> dict:

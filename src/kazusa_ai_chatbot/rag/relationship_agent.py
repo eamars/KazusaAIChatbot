@@ -133,7 +133,7 @@ async def _extract_relationship_args(
         content=json.dumps({"task": task, "context": context}, ensure_ascii=False, default=str)
     )
     response = await _extractor_llm.ainvoke([system_prompt, human_message])
-    result = parse_llm_json_output(str(response.content))
+    result = parse_llm_json_output(response.content)
     if not isinstance(result, dict):
         return None
     return _normalize_relationship_args(result)

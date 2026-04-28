@@ -137,7 +137,7 @@ async def _generator(task: str, context: dict[str, Any], feedback: str) -> dict[
         )
     )
     response = await _generator_llm.ainvoke([system_prompt, human_message])
-    result = parse_llm_json_output(str(response.content))
+    result = parse_llm_json_output(response.content)
     if not isinstance(result, dict):
         return {}
     return _normalize_args(result)
@@ -174,7 +174,7 @@ async def _judge(task: str, result: object) -> tuple[bool, str]:
         content=json.dumps({"task": task, "result": result}, ensure_ascii=False)
     )
     response = await _judge_llm.ainvoke([system_prompt, human_message])
-    verdict = parse_llm_json_output(str(response.content))
+    verdict = parse_llm_json_output(response.content)
     if not isinstance(verdict, dict):
         return False, "评估输出无效，请调整时间范围或提高 limit。"
 

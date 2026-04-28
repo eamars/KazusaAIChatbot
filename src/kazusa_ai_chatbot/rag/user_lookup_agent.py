@@ -209,7 +209,7 @@ class UserLookupAgent(BaseRAGHelperAgent):
             )
         )
         response = await _extractor_llm.ainvoke([system_prompt, human_message])
-        result = parse_llm_json_output(str(response.content))
+        result = parse_llm_json_output(response.content)
         if not isinstance(result, dict):
             return ""
         return str(result.get("display_name", "")).strip()
@@ -238,7 +238,7 @@ class UserLookupAgent(BaseRAGHelperAgent):
             )
         )
         response = await _picker_llm.ainvoke([system_prompt, human_message])
-        result = parse_llm_json_output(str(response.content))
+        result = parse_llm_json_output(response.content)
         if not isinstance(result, dict):
             return None
 
