@@ -614,6 +614,11 @@ async def chat(req: ChatRequest, background_tasks: BackgroundTasks):
             "chat_history_wide": chat_history_wide,
             "chat_history_recent": chat_history_recent,
             "reply_context": reply_context,
+            "should_respond": False,
+            "reason_to_respond": "",
+            "use_reply_feature": False,
+            "channel_topic": "",
+            "indirect_speech_context": "",
             "debug_modes": debug_modes,
         }
 
