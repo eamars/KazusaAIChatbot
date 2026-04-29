@@ -143,13 +143,12 @@ async def test_user_profile_agent_ignores_stale_user_profile_cache_for_character
         cache_key=stale_user_profile_key,
         cache_name="rag2_user_profile_agent",
         result={
-            "character_diary": [],
-            "objective_facts": [],
-            "active_commitments": [],
-            "user_image": {
+            "user_memory_context": {
+                "stable_patterns": [],
+                "recent_shifts": [],
+                "objective_facts": [],
                 "milestones": [],
-                "recent_window": [],
-                "historical_summary": "",
+                "active_commitments": [],
             },
         },
         dependencies=[],

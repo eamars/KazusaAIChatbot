@@ -17,6 +17,7 @@ from kazusa_ai_chatbot.nodes.boundary_profile import (
     get_boundary_recovery_description,
     get_authority_skepticism_description,
 )
+from kazusa_ai_chatbot.rag.user_memory_unit_retrieval import empty_user_memory_context
 
 from langchain_core.messages import HumanMessage, SystemMessage
 
@@ -36,7 +37,8 @@ def _clamp_unit(value: float) -> float:
     Returns:
         Clamped unit-range score.
     """
-    return max(0.0, min(1.0, value))
+    clamped_value = max(0.0, min(1.0, value))
+    return clamped_value
 
 
 def _normalize_affinity(affinity: int) -> float:
@@ -49,8 +51,10 @@ def _normalize_affinity(affinity: int) -> float:
         Affinity expressed on a ``0.0``–``1.0`` scale.
     """
     if AFFINITY_MAX <= AFFINITY_MIN:
-        return 1.0 if affinity >= AFFINITY_MAX else 0.0
-    return _clamp_unit((affinity - AFFINITY_MIN) / (AFFINITY_MAX - AFFINITY_MIN))
+        affinity_weight = 1.0 if affinity >= AFFINITY_MAX else 0.0
+        return affinity_weight
+    affinity_weight = _clamp_unit((affinity - AFFINITY_MIN) / (AFFINITY_MAX - AFFINITY_MIN))
+    return affinity_weight
 
 
 def _current_user_rag_bundle(state: CognitionState) -> dict[str, Any]:
@@ -62,13 +66,33 @@ def _current_user_rag_bundle(state: CognitionState) -> dict[str, Any]:
     Returns:
         The projected current-user profile bundle, or an empty dict when absent.
     """
-    rag_result = state.get("rag_result") or {}
+    rag_result = state["rag_result"]
+    user_bundle = rag_result["user_image"]
+    if not isinstance(user_bundle, dict):
+        user_bundle = {}
+    if "user_memory_context" not in user_bundle:
+        user_bundle = {
+            **user_bundle,
+            "user_memory_context": empty_user_memory_context(),
+        }
+    return user_bundle
+
+
+def _cognition_rag_result(rag_result: object) -> dict[str, Any]:
+    """Return the RAG payload without consolidator-only internals.
+
+    Args:
+        rag_result: State RAG result.
+
+    Returns:
+        Dict suitable for cognition prompts.
+    """
+
     if not isinstance(rag_result, dict):
         return {}
-    user_bundle = rag_result.get("user_image")
-    if isinstance(user_bundle, dict):
-        return user_bundle
-    return {}
+    public_result = dict(rag_result)
+    public_result.pop("user_memory_unit_candidates", None)
+    return public_result
 
 
 def _build_boundary_affinity_override(boundary_profile: dict, affinity: int, affinity_level: str) -> dict[str, str]:
@@ -158,12 +182,12 @@ _COGNITION_CONSCIOUSNESS_PROMPT = """\
 
 # 核心任务
 1. **确立逻辑立场：** 无论用户输入什么，你必须首先锁定你的逻辑底色。
-2. **维持叙事连续性：** 深度参考 `diary_entry`。跨轮连续性应优先来自当前用户自己的主观日记与关系洞察，而不是全局反思摘要。
+2. **维持叙事连续性：** 深度参考 `user_memory_context`。跨轮连续性应来自 fact / subjective_appraisal / relationship_signal 三元组，而不是旧的情绪日记或滚动摘要。
 3. **关系权重计算：** 结合 `last_relationship_insight`。好感度与历史洞察共同决定了你的配合程度。
 4. **事实解析（相关性优先）：** `rag_result` 中的信息作为背景参考，但只有与 `decontexualized_input` **当前话题直接相关**的内容才能影响你的立场与 `internal_monologue`。历史记忆中与当前消息话题无关的条目（如：用户在另一场合问过的问题），不得被引入为本次回应的决策依据。
    - 如果 `rag_result` 已经给出了与当前问题直接对应的对象信息、事实摘要、人物画像或可用答案线索，这些证据必须优先决定“你在回应什么”。情绪、潜台词、关系氛围只能改变表达分寸，不能把话题从该对象/事实本身移开。
    - 当 `rag_result` 与模糊的直觉推断发生冲突时，优先相信与当前话题直接对应的检索证据；不要因为名字奇怪、语气暧昧或自己情绪波动，就把一个已有证据支撑的对象重新当成未知物。
-   - `active_commitments` 代表**当前仍有效的已接受承诺/待履约事项**，来自每轮新鲜载入的用户档案。当前输入若是在延续、提醒、切换或兑现这些承诺，你必须把它视为高优先级现实背景，而不是可有可无的旧记忆。
+   - `user_memory_context.active_commitments` 代表**当前仍有效的已接受承诺/待履约事项**，来自每轮新鲜载入的用户记忆单元。当前输入若是在延续、提醒、切换或兑现这些承诺，你必须把它视为高优先级现实背景，而不是可有可无的旧记忆。
    - 先建立 referent：如果输入里存在称呼、别名、代词或多个可能对象，必须先根据研究资料确定每段证据分别对应谁，再开始推理。
    - 先分清证据的**主体**与**时间范围**：哪些信息描述当前用户，哪些描述其他人物/实体，哪些描述最近发生的事，哪些描述较稳定的长期印象；这些证据不可混用。
    - 当输入要求评价、判断或回忆某个对象时，应先使用**关于该对象本身**的证据形成判断，再让与当前用户的关系背景影响表达方式与社交包装。
@@ -183,7 +207,7 @@ _COGNITION_CONSCIOUSNESS_PROMPT = """\
 | **`CHALLENGE`** | 质疑对方提问的动机。 | 拆穿请求背后的企图。 | 针锋相对，挑明对方的潜台词。 |
 
 # 思考路径
-1. **记忆回溯：** 检查 `diary_entry`。我上次是怎么想这个用户的？我们之间最后停留在什么氛围？
+1. **记忆回溯：** 检查 `user_memory_context`。先读事实锚点，再读 Kazusa 的主观评价和关系信号。
 2. **动机解构：** 解析 `decontextualized_input` 和 `interaction_subtext`。先判断对方是否只是在进行普通互动；只有存在明确证据时，才升级为试探、施压或越界。
 3. **理智博弈：** 检查 `character_mood` 和 `global_vibe`。在这种心境和氛围下，结合我对他的直觉标签（last_relationship_insight），我该维持人设还是有所突破？
 4. **立场定夺：** 结合 L1 的直觉反馈（emotional_appraisal），拍板选定 `logical_stance`。**这是行政命令，下游 L3 严禁篡改。**
@@ -223,23 +247,23 @@ _COGNITION_CONSCIOUSNESS_PROMPT = """\
 {{
     "character_mood": "当前心境",
     "global_vibe": "环境氛围背景",
-    "diary_entry": "上一篇主观日记的内容",
+    "user_memory_context": {{
+        "stable_patterns": [{{"fact": "重复出现的事实模式", "subjective_appraisal": "Kazusa 的主观评价", "relationship_signal": "未来互动信号", "updated_at": "ISO时间"}}],
+        "recent_shifts": [{{"fact": "最近变化或局部事件", "subjective_appraisal": "Kazusa 的主观评价", "relationship_signal": "未来互动信号", "updated_at": "ISO时间"}}],
+        "objective_facts": [{{"fact": "客观事实", "subjective_appraisal": "Kazusa 如何看待这个事实", "relationship_signal": "未来互动信号", "updated_at": "ISO时间"}}],
+        "milestones": [{{"fact": "里程碑事件", "subjective_appraisal": "Kazusa 如何看待这个事件", "relationship_signal": "未来互动信号", "updated_at": "ISO时间"}}],
+        "active_commitments": [{{"fact": "当前仍有效的承诺/约定", "subjective_appraisal": "Kazusa 如何看待这个承诺", "relationship_signal": "执行或表达上的注意点", "updated_at": "ISO时间"}}]
+    }},
     "last_relationship_insight": "对该用户的核心关系洞察",
     "affinity_context": {{ "level": "string", "instruction": "string" }},
     "decontextualized_input": "清理后的用户意图",
-    "active_commitments": "来自当前用户画像 bundle 的当前有效承诺/已接受约定",
+    "active_commitments": "来自 user_memory_context.active_commitments 的当前有效承诺/已接受约定",
     "rag_result": {{
         "answer": "检索主管的一行综合结论",
         "user_image": {{
             "global_user_id": "当前用户 UUID",
             "display_name": "当前用户显示名",
-            "objective_facts": [{{"fact": "用户的稳定事实"}}],
-            "active_commitments": [{{"action": "当前仍有效的约定"}}],
-            "user_image": {{
-                "milestones": [{{"event": "里程碑事件", "category": "类别", "superseded_by": null}}],
-                "historical_summary": "较早阶段的综合画像",
-                "recent_window": [{{"summary": "最近几次互动形成的观察"}}]
-            }}
+            "user_memory_context": "同上：五类 fact / subjective_appraisal / relationship_signal 三元组"
         }},
         "character_image": {{
             "name": "{character_name}",
@@ -279,36 +303,26 @@ _conscious_llm = get_llm(
 async def call_cognition_consciousness(state: CognitionState) -> CognitionState:
     affinity_block = build_affinity_block(state["user_profile"]["affinity"])
     current_user_bundle = _current_user_rag_bundle(state)
+    user_memory_context = current_user_bundle["user_memory_context"]
 
     system_prompt = SystemMessage(content=_COGNITION_CONSCIOUSNESS_PROMPT.format(
         character_name=state["character_profile"]["name"],
         character_mbti=state["character_profile"]["personality_brief"]["mbti"],
     ))
 
-    # ``diary_entry`` is the character's subjective per-user diary stream.
-    # The authoritative persisted source is ``user_profile["character_diary"]``
-    # (written by consolidator persistence via ``upsert_character_diary``).
-    # ``user_profile["facts"]`` is a deprecated compatibility field that mixes
-    # subjective and objective content and must not be used for cognition.
-    diary_entry = [
-        str(entry.get("entry", "")).strip()
-        for entry in (current_user_bundle.get("character_diary") or state["user_profile"].get("character_diary") or [])[-10:]
-        if str(entry.get("entry", "")).strip()
-    ]
-
     msg = {
         "character_mood": state['character_profile']['mood'],
         "global_vibe": state["character_profile"]["global_vibe"],
-        "diary_entry": diary_entry,
-        "last_relationship_insight": state["user_profile"].get("last_relationship_insight", ""),
+        "user_memory_context": user_memory_context,
+        "last_relationship_insight": state["user_profile"]["last_relationship_insight"],
 
         "affinity_context": {
             "level": affinity_block["level"],
             "instruction": affinity_block["instruction"]
         },
         "decontextualized_input": state["decontexualized_input"],
-        "active_commitments": current_user_bundle.get("active_commitments", state["user_profile"].get("active_commitments", [])),
-        "rag_result": state["rag_result"],
+        "active_commitments": user_memory_context["active_commitments"],
+        "rag_result": _cognition_rag_result(state["rag_result"]),
         "indirect_speech_context": state.get("indirect_speech_context", ""),
         "emotional_appraisal": state["emotional_appraisal"],
         "interaction_subtext": state["interaction_subtext"],

@@ -64,8 +64,7 @@ def _patched_embedding(return_value=None, mock=None):
     with patch.object(db_module, "get_text_embedding", mock_embed), \
          patch.object(db_client_module, "get_text_embedding", mock_embed), \
          patch.object(db_conversation_module, "get_text_embedding", mock_embed), \
-         patch.object(db_memory_module, "get_text_embedding", mock_embed), \
-         patch.object(db_users_module, "get_text_embedding", mock_embed):
+         patch.object(db_memory_module, "get_text_embedding", mock_embed):
         yield mock_embed
 
 

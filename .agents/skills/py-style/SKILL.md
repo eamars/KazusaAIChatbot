@@ -1,11 +1,13 @@
 ---
 name: py-style
-description: Enforce and review Python coding style for this project. Use this skill whenever you are writing new Python code, reviewing existing Python files, or responding to feedback about code quality. Trigger on any task that involves creating or modifying .py files, reviewing a function or class, or when the user asks about code style, best practices, or refactoring. Always apply these rules proactively — don't wait for the user to ask.
+description: Enforce and review Python coding style for this project. PEP 8 is the baseline, with the project's explicit rules applied on top. Use this skill whenever you are writing new Python code, reviewing existing Python files, or responding to feedback about code quality. Trigger on any task that involves creating or modifying .py files, reviewing a function or class, or when the user asks about code style, best practices, or refactoring. Always apply these rules proactively — don't wait for the user to ask.
 ---
 
 # Python Style Guide
 
-This skill defines and enforces the project's six coding standards. Apply them proactively when writing Python code, and surface every violation when reviewing code.
+PEP 8 is the baseline style guide for all Python code in this project. On top of PEP 8, this skill defines and enforces the project's nine explicit coding standards. Apply both layers proactively when writing Python code, and surface every violation when reviewing code.
+
+When PEP 8 and a project-specific rule overlap, follow the stricter project-specific rule. When PEP 8 covers an issue not mentioned here, follow PEP 8.
 
 The rules exist to keep code readable, debuggable, and honest about failure. Clever workarounds that hide bugs are more expensive than crashes that reveal them immediately.
 
@@ -225,17 +227,97 @@ When reviewing: for each `try-except`, ask whether the caught exception is cause
 
 ---
 
+## Rule 7 — Avoid nested dictionary retrieval chains
+
+Nested retrieval chains make code hard to inspect and debug because several lookups are compressed into one expression. One statement should perform at most one `.get(...)` lookup. Split chained retrieval into named intermediate variables so a debugger or log statement can inspect each layer directly.
+
+This rule does not make `.get(...)` acceptable for internal data that should always exist. Rule 5 still applies: use plain indexing for required internal fields so missing data crashes at the real bug site.
+
+**Wrong:**
+```python
+user_memory_context = (
+    (global_state.get("rag_result", {}).get("user_image") or {})
+    .get("user_memory_context")
+    or {}
+)
+```
+
+**Right:**
+```python
+rag_result = global_state["rag_result"]
+user_image = rag_result["user_image"]
+user_memory_context = user_image["user_memory_context"]
+```
+
+When reviewing: flag any statement that chains multiple `.get(...)` calls. Ask for intermediate variables with names that explain the shape being traversed.
+
+---
+
+## Rule 8 — Return values or attributes, not call expressions
+
+Returning a function call directly makes debugging harder because the produced value has no local name and cannot be inspected before leaving the function. Store the result in a clearly named local variable, then return that value or return a simple attribute/index access.
+
+**Wrong:**
+```python
+return project_user_memory_units(units, budget=budget)
+```
+
+**Right:**
+```python
+projected_units = project_user_memory_units(units, budget=budget)
+return projected_units
+```
+
+**Acceptable:**
+```python
+return profile.affinity
+return profile["affinity"]
+```
+
+When reviewing: flag `return some_function(...)`, `return await some_function(...)`, and other compound return expressions. Prefer assigning the expression to a named local before returning it.
+
+---
+
+## Rule 9 — Use `_` for unused tuple values
+
+When unpacking a tuple, use `_` for any value that is intentionally unused. A named variable signals that the value matters later; using `_` keeps the reader focused on the values that are actually part of the function's behavior.
+
+**Wrong:**
+```python
+hydrated_profile, _memory_blocks = await user_image_retriever_agent(
+    global_user_id,
+    user_profile=context.get("user_profile"),
+    input_embedding=input_embedding,
+    include_semantic=True,
+)
+```
+
+**Right:**
+```python
+hydrated_profile, _ = await user_image_retriever_agent(
+    global_user_id,
+    user_profile=context.get("user_profile"),
+    input_embedding=input_embedding,
+    include_semantic=True,
+)
+```
+
+When reviewing: after tuple unpacking, verify each named value is used. Replace intentionally unused values with `_`.
+
+---
+
 ## Review workflow
 
 When asked to review a file or selection:
 
 1. Read the code in full.
-2. For each rule, list every violation with the line reference, the rule number, and a one-sentence explanation of why it violates the rule.
-3. Propose the corrected version inline.
-4. If no violations are found, say so explicitly.
+2. First check for PEP 8 violations, then check the nine project-specific rules.
+3. For each violation, list the line reference, the violated standard, and a one-sentence explanation of why it violates the rule.
+4. Propose the corrected version inline.
+5. If no violations are found, say so explicitly.
 
 When writing new code:
 
-Apply all six rules before producing any output. If a rule conflict arises or a genuine exception is needed, surface it to the user with the reasoning rather than silently picking one path.
+Apply PEP 8 and all nine project-specific rules before producing any output. If a rule conflict arises or a genuine exception is needed, surface it to the user with the reasoning rather than silently picking one path.
 
 See `references/examples.md` for additional annotated before/after examples.

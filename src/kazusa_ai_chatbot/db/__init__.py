@@ -1,16 +1,12 @@
 """``kazusa_ai_chatbot.db`` — MongoDB layer.
 
-This package replaces the former monolithic ``db.py`` module. All previously
-public names are re-exported here so ``from kazusa_ai_chatbot.db import X``
-continues to work unchanged.
-
 Submodule map:
 
 * ``_client``      — MongoDB connection, embedding client, vector index helper
 * ``schemas``      — TypedDict document shapes
-* ``bootstrap``    — startup: collections, indices, schema migration
+* ``bootstrap``    — startup: collections, indices, seeded documents
 * ``conversation`` — ``conversation_history`` operations
-* ``users``        — ``user_profiles`` operations (identity, profile, diary, facts, affinity)
+* ``users``        — ``user_profiles`` operations (identity, profile, affinity)
 * ``character``    — ``character_state`` operations
 * ``memory``       — ``memory`` operations
 """
@@ -31,19 +27,21 @@ from kazusa_ai_chatbot.db._client import (
 
 # ── Schemas ────────────────────────────────────────────────────────
 from kazusa_ai_chatbot.db.schemas import (
-    ActiveCommitmentDoc,
     AttachmentDoc,
-    CharacterDiaryEntry,
     CharacterProfileDoc,
     ConversationEpisodeEntryDoc,
     ConversationEpisodeStateDoc,
     ConversationMessageDoc,
-    MemoryType,
     MemoryDoc,
-    ObjectiveFactEntry,
     PlatformAccountDoc,
     ScheduledEventDoc,
-    UserProfileMemoryDoc,
+    UserMemoryContextDoc,
+    UserMemoryContextEntry,
+    UserMemoryUnitDoc,
+    UserMemoryUnitMergeHistoryEntry,
+    UserMemoryUnitSourceRef,
+    UserMemoryUnitStatus,
+    UserMemoryUnitType,
     UserProfileDoc,
     build_memory_doc,
 )
@@ -59,36 +57,31 @@ from kazusa_ai_chatbot.db.conversation import (
     search_conversation_history,
 )
 
-# ── Users (identity + profile + diary + facts + affinity) ─────────
+# ── Users (identity + profile + affinity) ─────────────────────────
 from kazusa_ai_chatbot.db.users import (
     add_suspected_alias,
     backfill_character_conversation_identity,
-    build_user_profile_recall_bundle,
     create_user_profile,
     ensure_character_identity,
-    expire_overdue_profile_memories,
     get_affinity,
-    get_character_diary,
-    get_objective_facts,
     get_user_profile,
-    hydrate_user_profile_with_memory_blocks,
-    insert_profile_memories,
     link_platform_account,
     list_users_by_affinity,
     list_users_by_display_name,
-    query_profile_memories_recent,
-    query_profile_memories_vector,
-    query_user_profile_memory_blocks,
     resolve_global_user_id,
     search_users_by_display_name,
     update_affinity,
-    update_active_commitment_status,
-    update_commitment_status,
     update_last_relationship_insight,
-    upsert_active_commitments,
-    upsert_character_diary,
-    upsert_objective_facts,
-    upsert_user_image,
+)
+
+from kazusa_ai_chatbot.db.user_memory_units import (
+    build_user_memory_unit_doc,
+    insert_user_memory_units,
+    query_user_memory_units,
+    search_user_memory_units_by_vector,
+    update_user_memory_unit_semantics,
+    update_user_memory_unit_window,
+    validate_user_memory_unit_semantics,
 )
 
 # ── Character state ───────────────────────────────────────────────
@@ -114,11 +107,14 @@ __all__ = [
     # Client
     "close_db", "enable_vector_index", "get_db", "get_text_embedding", "get_text_embeddings_batch",
     # Schemas
-    "ActiveCommitmentDoc", "AttachmentDoc", "CharacterDiaryEntry", "CharacterProfileDoc",
+    "AttachmentDoc", "CharacterProfileDoc",
     "ConversationEpisodeEntryDoc", "ConversationEpisodeStateDoc",
-    "ConversationMessageDoc", "EntityMemoryDoc", "MemoryDoc", "MemoryType", "ObjectiveFactEntry",
+    "ConversationMessageDoc", "MemoryDoc",
     "PlatformAccountDoc",
-    "ScheduledEventDoc", "UserProfileDoc", "UserProfileMemoryDoc", "build_memory_doc",
+    "ScheduledEventDoc", "UserMemoryContextDoc", "UserMemoryContextEntry",
+    "UserMemoryUnitDoc", "UserMemoryUnitMergeHistoryEntry", "UserMemoryUnitSourceRef",
+    "UserMemoryUnitStatus", "UserMemoryUnitType",
+    "UserProfileDoc", "build_memory_doc",
     # Bootstrap
     "db_bootstrap",
     # Conversation
@@ -126,16 +122,17 @@ __all__ = [
     "search_conversation_history",
     # Users
     "add_suspected_alias", "backfill_character_conversation_identity",
-    "build_user_profile_recall_bundle", "create_user_profile",
-    "ensure_character_identity", "expire_overdue_profile_memories",
-    "get_affinity", "get_character_diary", "get_objective_facts",
-    "get_user_profile", "hydrate_user_profile_with_memory_blocks", "insert_profile_memories", "link_platform_account",
-    "list_users_by_affinity", "list_users_by_display_name", "query_profile_memories_recent", "query_profile_memories_vector",
-    "query_user_profile_memory_blocks",
+    "create_user_profile",
+    "ensure_character_identity",
+    "get_affinity",
+    "get_user_profile", "link_platform_account",
+    "list_users_by_affinity", "list_users_by_display_name",
     "resolve_global_user_id", "search_users_by_display_name", "update_affinity",
-    "update_active_commitment_status", "update_commitment_status", "update_last_relationship_insight",
-    "upsert_active_commitments", "upsert_character_diary",
-    "upsert_objective_facts", "upsert_user_image",
+    "update_last_relationship_insight",
+    "build_user_memory_unit_doc", "insert_user_memory_units", "query_user_memory_units",
+    "search_user_memory_units_by_vector",
+    "update_user_memory_unit_semantics", "update_user_memory_unit_window",
+    "validate_user_memory_unit_semantics",
     # Character
     "get_character_profile", "get_character_state", "save_character_profile",
     "upsert_character_self_image", "upsert_character_state",

@@ -14,11 +14,11 @@ def _merge_dicts(a: dict, b: dict) -> dict:
     return result
 
 
-def normalize_diary_entries(value: object) -> list[str]:
-    """Normalize a diary payload into a clean ``list[str]``.
+def normalize_subjective_appraisals(value: object) -> list[str]:
+    """Normalize a subjective-appraisal payload into a clean ``list[str]``.
 
     Args:
-        value: Raw diary payload from state or LLM output.
+        value: Raw subjective-appraisal payload from state or LLM output.
 
     Returns:
         A list of non-empty diary entry strings.
@@ -72,6 +72,7 @@ class ConsolidatorState(TypedDict):
 
     # User related
     decontexualized_input: str
+    chat_history_recent: list[dict]
 
     # Stage-4a metadata bundle (seeded from RAG metadata, accumulated per node).
     metadata: Annotated[dict, _merge_dicts]
@@ -82,7 +83,7 @@ class ConsolidatorState(TypedDict):
     reflection_summary: str
 
     # Relationship recorder
-    diary_entry: list[str]
+    subjective_appraisals: list[str]
     affinity_delta: int
     last_relationship_insight: str
 

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
-from kazusa_ai_chatbot.config import PROFILE_MEMORY_BUDGET
-from kazusa_ai_chatbot.db import build_user_profile_recall_bundle, hydrate_user_profile_with_memory_blocks
+from kazusa_ai_chatbot.rag.user_memory_unit_retrieval import build_user_memory_context_bundle
 
 
 async def user_image_retriever_agent(
@@ -10,27 +9,27 @@ async def user_image_retriever_agent(
     user_profile: dict | None = None,
     input_embedding: list[float],
     include_semantic: bool,
-    budget: int = PROFILE_MEMORY_BUDGET,
 ) -> tuple[dict, dict]:
-    """Hydrate one user profile with authoritative memory blocks.
+    """Hydrate one user profile with the unified memory-unit context.
 
     Args:
         global_user_id: Internal UUID for the user being read.
         user_profile: Optional base profile document already loaded by caller.
         input_embedding: Current-topic embedding for semantic memory recall.
         include_semantic: Whether to include vector memory recall.
-        budget: Per-type memory recall budget.
 
     Returns:
-        Tuple of hydrated profile and raw memory blocks used for hydration.
+        Tuple of hydrated profile and raw RAG memory context.
     """
-    _, memory_blocks = await build_user_profile_recall_bundle(
+    user_memory_context, source_units = await build_user_memory_context_bundle(
         global_user_id,
-        user_profile=user_profile,
-        topic_embedding=input_embedding,
+        query_embedding=input_embedding,
         include_semantic=include_semantic,
-        budget=budget,
     )
-
-    hydrated = hydrate_user_profile_with_memory_blocks(user_profile or {}, memory_blocks)
-    return hydrated, memory_blocks
+    hydrated = dict(user_profile or {})
+    hydrated["user_memory_context"] = user_memory_context
+    hydrated["_user_memory_units"] = source_units
+    return hydrated, {
+        "user_memory_context": user_memory_context,
+        "user_memory_units": source_units,
+    }

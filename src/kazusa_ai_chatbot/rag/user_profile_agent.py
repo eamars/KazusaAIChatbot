@@ -59,7 +59,8 @@ def _extract_global_user_id_from_known_facts(context: dict[str, Any]) -> str:
         empty string when no such identifier is available.
     """
     known_facts = context.get("known_facts", [])
-    return _walk_for_global_user_id(known_facts)
+    global_user_id = _walk_for_global_user_id(known_facts)
+    return global_user_id
 
 
 def _public_character_profile(character_profile: dict[str, Any]) -> dict[str, Any]:
@@ -94,10 +95,10 @@ def _public_character_profile(character_profile: dict[str, Any]) -> dict[str, An
 
 
 class UserProfileAgent(BaseRAGHelperAgent):
-    """RAG helper agent that retrieves a hydrated user profile bundle.
+    """RAG helper agent that retrieves a user profile memory-context bundle.
 
     Reads the ``global_user_id`` resolved by a prior slot from ``known_facts``
-    and returns the full user-image profile bundle.
+    and returns the identity header plus RAG-projected ``user_memory_context``.
 
     Args:
         cache_runtime: Optional cache runtime override for tests or local tools.
@@ -124,14 +125,14 @@ class UserProfileAgent(BaseRAGHelperAgent):
             max_attempts: Unused; kept for interface compatibility.
 
         Returns:
-            Dict with resolved (bool), result (hydrated profile or error string),
+            Dict with resolved (bool), result (profile bundle or error string),
             and attempts count.
         """
         del max_attempts
 
         global_user_id = _extract_global_user_id_from_known_facts(context)
         if not global_user_id:
-            return self.with_cache_status(
+            result = self.with_cache_status(
                 {
                     "resolved": False,
                     "result": "No resolved global_user_id found in context['known_facts'].",
@@ -140,6 +141,7 @@ class UserProfileAgent(BaseRAGHelperAgent):
                 hit=False,
                 reason="skipped_missing_global_user_id",
             )
+            return result
 
         # Dynamically switch the profile to fetch, as character's profile may include sensitive runtime data which is
         #   not supposed to be disclosed to LLM. 
@@ -150,12 +152,13 @@ class UserProfileAgent(BaseRAGHelperAgent):
 
         cached = await self.read_cache(cache_key)
         if cached is not None:
-            return self.with_cache_status(
+            result = self.with_cache_status(
                 {"resolved": True, "result": cached, "attempts": 0},
                 hit=True,
                 reason="hit",
                 cache_key=cache_key,
             )
+            return result
 
         if global_user_id == CHARACTER_GLOBAL_USER_ID:
             character_profile = await get_character_profile()
@@ -164,7 +167,7 @@ class UserProfileAgent(BaseRAGHelperAgent):
             metadata = {"profile_source": "character_state"}
         else:
             input_embedding = await get_text_embedding(task)
-            hydrated_profile, _memory_blocks = await user_image_retriever_agent(
+            hydrated_profile, _ = await user_image_retriever_agent(
                 global_user_id,
                 user_profile=context.get("user_profile"),
                 input_embedding=input_embedding,
@@ -181,7 +184,7 @@ class UserProfileAgent(BaseRAGHelperAgent):
                 metadata=metadata,
             )
 
-        return self.with_cache_status(
+        result = self.with_cache_status(
             {
                 "resolved": bool(hydrated_profile),
                 "result": hydrated_profile,
@@ -191,6 +194,7 @@ class UserProfileAgent(BaseRAGHelperAgent):
             reason="miss_stored" if hydrated_profile else "miss_unresolved",
             cache_key=cache_key,
         )
+        return result
 
 
 async def _test_main() -> None:

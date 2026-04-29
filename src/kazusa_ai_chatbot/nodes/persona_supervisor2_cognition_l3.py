@@ -17,6 +17,7 @@ from kazusa_ai_chatbot.nodes.linguistic_texture import (
     get_rhythmic_bounce_description,
     get_self_deprecation_description,
 )
+from kazusa_ai_chatbot.rag.user_memory_unit_retrieval import empty_user_memory_context
 
 from langchain_core.messages import HumanMessage, SystemMessage
 
@@ -59,10 +60,11 @@ def get_mbti_expression_willingness(mbti: str) -> str:
     }
  
     key = mbti.upper().strip()
-    return mbti_map.get(
+    willingness = mbti_map.get(
         key,
         f"未知的性格原型：{mbti}。在这种情况下，你的表达行为应更多依赖当前情绪、关系距离与环境反馈，而不是固定倾向。"
     )
+    return willingness
 
 
 def _current_user_rag_bundle(state: CognitionState) -> dict[str, Any]:
@@ -74,13 +76,33 @@ def _current_user_rag_bundle(state: CognitionState) -> dict[str, Any]:
     Returns:
         The projected current-user profile bundle, or an empty dict when absent.
     """
-    rag_result = state.get("rag_result") or {}
+    rag_result = state["rag_result"]
+    user_bundle = rag_result["user_image"]
+    if not isinstance(user_bundle, dict):
+        user_bundle = {}
+    if "user_memory_context" not in user_bundle:
+        user_bundle = {
+            **user_bundle,
+            "user_memory_context": empty_user_memory_context(),
+        }
+    return user_bundle
+
+
+def _cognition_rag_result(rag_result: object) -> dict[str, Any]:
+    """Return the RAG payload without consolidator-only internals.
+
+    Args:
+        rag_result: State RAG result.
+
+    Returns:
+        Dict suitable for cognition prompts.
+    """
+
     if not isinstance(rag_result, dict):
         return {}
-    user_bundle = rag_result.get("user_image")
-    if isinstance(user_bundle, dict):
-        return user_bundle
-    return {}
+    public_result = dict(rag_result)
+    public_result.pop("user_memory_unit_candidates", None)
+    return public_result
 
 
 def _surface_history_for_contextual(chat_history: list[dict]) -> list[dict]:
@@ -170,7 +192,7 @@ async def call_contextual_agent(state: CognitionState) -> CognitionState:
     msg = {
         "character_mood": state['character_profile']['mood'],
         "global_vibe": state["character_profile"]["global_vibe"],
-        "last_relationship_insight": state["user_profile"].get("last_relationship_insight", ""),
+        "last_relationship_insight": state["user_profile"]["last_relationship_insight"],
         "affinity_context": {
             "level": affinity_block["level"],
             "instruction": affinity_block["instruction"]
@@ -315,7 +337,7 @@ async def call_style_agent(state: CognitionState) -> CognitionState:
         "character_mood": state['character_profile']['mood'],
         "global_vibe": state["character_profile"]["global_vibe"],
         "internal_monologue": state["internal_monologue"],
-        "last_relationship_insight": state["user_profile"].get("last_relationship_insight", ""),
+        "last_relationship_insight": state["user_profile"]["last_relationship_insight"],
         "logical_stance": state["logical_stance"],
         "character_intent": state["character_intent"],
         "chat_history": _surface_history_for_style(state["chat_history_recent"]),
@@ -400,11 +422,12 @@ _CONTENT_ANCHOR_AGENT_PROMPT = """\
         "user_image": {{
             "global_user_id": "当前用户 UUID",
             "display_name": "当前用户显示名",
-            "objective_facts": [{{"fact": "用户的稳定事实"}}],
-            "user_image": {{
-                "milestones": [{{"event": "里程碑事件", "category": "类别", "superseded_by": null}}],
-                "historical_summary": "较早阶段的综合画像",
-                "recent_window": [{{"summary": "最近几次互动形成的观察"}}]
+            "user_memory_context": {{
+                "stable_patterns": [{{"fact": "重复出现的事实模式", "subjective_appraisal": "Kazusa 的主观评价", "relationship_signal": "未来互动信号", "updated_at": "ISO时间"}}],
+                "recent_shifts": [{{"fact": "最近变化或局部事件", "subjective_appraisal": "Kazusa 的主观评价", "relationship_signal": "未来互动信号", "updated_at": "ISO时间"}}],
+                "objective_facts": [{{"fact": "客观事实", "subjective_appraisal": "Kazusa 如何看待这个事实", "relationship_signal": "未来互动信号", "updated_at": "ISO时间"}}],
+                "milestones": [{{"fact": "里程碑事件", "subjective_appraisal": "Kazusa 如何看待这个事件", "relationship_signal": "未来互动信号", "updated_at": "ISO时间"}}],
+                "active_commitments": [{{"fact": "当前仍有效的承诺/约定", "subjective_appraisal": "Kazusa 如何看待这个承诺", "relationship_signal": "执行或表达上的注意点", "updated_at": "ISO时间"}}]
             }}
         }},
         "character_image": {{
@@ -415,7 +438,7 @@ _CONTENT_ANCHOR_AGENT_PROMPT = """\
                 "recent_window": [{{"summary": "{character_name} 最近几次互动后的自我状态"}}]
             }}
         }},
-        "third_party_profiles": ["第三方用户的持久画像（里程碑、日记等）——注意区分：这是关于'他人'的记忆，不是当前用户"],
+        "third_party_profiles": ["第三方用户的持久画像——注意区分：这是关于'他人'的记忆，不是当前用户"],
         "memory_evidence": [{{"summary": "与当前话题相关的跨轮记忆摘要", "content": "相关记忆原文摘录"}}],
         "conversation_evidence": ["频道近期提到的第三方实体/人物的对话摘要——这是'最近发生的事'，不是持久印象"],
         "external_evidence": [{{"summary": "外部知识检索摘要", "content": "网页正文摘录", "url": "https://example.com"}}],
@@ -482,7 +505,7 @@ async def call_content_anchor_agent(state: CognitionState) -> CognitionState:
 
     msg = {
         "decontexualized_input": state["decontexualized_input"],
-        "rag_result": state["rag_result"],
+        "rag_result": _cognition_rag_result(state["rag_result"]),
         "internal_monologue": state["internal_monologue"],
         "logical_stance": state["logical_stance"],
         "character_intent": state["character_intent"],
@@ -539,17 +562,19 @@ _PREFERENCE_ADAPTER_PROMPT = """\
     "logical_stance": "CONFIRM/REFUSE/TENTATIVE/...",
     "character_intent": "行动意图",
     "active_commitments": [{{"action": "仍在生效的承诺/约定"}}],
+    "user_memory_context": {{
+        "stable_patterns": [{{"fact": "重复出现的事实模式", "subjective_appraisal": "Kazusa 的主观评价", "relationship_signal": "未来互动信号", "updated_at": "ISO时间"}}],
+        "recent_shifts": [{{"fact": "最近变化或局部事件", "subjective_appraisal": "Kazusa 的主观评价", "relationship_signal": "未来互动信号", "updated_at": "ISO时间"}}],
+        "objective_facts": [{{"fact": "客观事实", "subjective_appraisal": "Kazusa 如何看待这个事实", "relationship_signal": "未来互动信号", "updated_at": "ISO时间"}}],
+        "milestones": [{{"fact": "里程碑事件", "subjective_appraisal": "Kazusa 如何看待这个事件", "relationship_signal": "未来互动信号", "updated_at": "ISO时间"}}],
+        "active_commitments": [{{"fact": "当前仍有效的承诺/约定", "subjective_appraisal": "Kazusa 如何看待这个承诺", "relationship_signal": "执行或表达上的注意点", "updated_at": "ISO时间"}}]
+    }},
     "character_taboos": "角色禁忌",
     "linguistic_style": "语言风格约束",
     "content_anchors": ["...", "..."],
     "rag_result": {{
         "user_image": {{
-            "objective_facts": [{{"fact": "结构化持久事实（优先用于识别稳定语言偏好、许可与禁忌）"}}],
-            "user_image": {{
-                "milestones": [{{"event": "里程碑事件", "category": "类别", "superseded_by": null}}],
-                "historical_summary": "较早阶段的综合画像",
-                "recent_window": [{{"summary": "最近几次互动形成的观察"}}]
-            }}
+            "user_memory_context": "同上：五类 fact / subjective_appraisal / relationship_signal 三元组"
         }},
         "character_image": {{
             "self_image": {{
@@ -579,7 +604,7 @@ _preference_adapter_llm = get_llm(
 async def call_preference_adapter(state: CognitionState) -> CognitionState:
     decontexualized_input = state["decontexualized_input"]
     current_user_bundle = _current_user_rag_bundle(state)
-    user_profile = state["user_profile"]
+    user_memory_context = current_user_bundle["user_memory_context"]
 
     system_prompt = SystemMessage(content=_PREFERENCE_ADAPTER_PROMPT.format(
         character_name=state["character_profile"]["name"],
@@ -590,11 +615,12 @@ async def call_preference_adapter(state: CognitionState) -> CognitionState:
         "internal_monologue": state["internal_monologue"],
         "logical_stance": state["logical_stance"],
         "character_intent": state["character_intent"],
-        "active_commitments": current_user_bundle.get("active_commitments", user_profile.get("active_commitments", [])),
+        "active_commitments": user_memory_context["active_commitments"],
+        "user_memory_context": user_memory_context,
         "character_taboos": state["character_profile"]["personality_brief"]["taboos"],
         "linguistic_style": state["linguistic_style"],
         "content_anchors": state["content_anchors"],
-        "rag_result": state["rag_result"],
+        "rag_result": _cognition_rag_result(state["rag_result"]),
     }
     human_message = HumanMessage(content=json.dumps(msg, ensure_ascii=False))
     response = await _preference_adapter_llm.ainvoke([

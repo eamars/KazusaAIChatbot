@@ -5,6 +5,7 @@ from __future__ import annotations
 import re
 from typing import Any
 
+from kazusa_ai_chatbot.rag.user_memory_unit_retrieval import empty_user_memory_context
 from kazusa_ai_chatbot.utils import text_or_empty
 
 _URL_RE = re.compile(r"https?://\S+")
@@ -24,7 +25,8 @@ def _clip_text(text: str, *, limit: int) -> str:
     clipped = text.strip()
     if len(clipped) <= limit:
         return clipped
-    return clipped[: limit - 1].rstrip() + "…"
+    clipped_text = clipped[: limit - 1].rstrip() + "…"
+    return clipped_text
 
 
 def _as_dict(value: object) -> dict[str, Any]:
@@ -41,12 +43,28 @@ def _as_list(value: object) -> list[Any]:
     return []
 
 
+def _strip_internal_profile_fields(profile: dict[str, Any]) -> dict[str, Any]:
+    """Remove RAG-internal helper fields before cognition sees a profile.
+
+    Args:
+        profile: Raw user-profile agent result.
+
+    Returns:
+        Public profile payload suitable for cognition prompts.
+    """
+
+    stripped = dict(profile)
+    stripped.pop("_user_memory_units", None)
+    return stripped
+
+
 def _extract_slot_reference(slot: str) -> int | None:
     """Parse a structured ``slot N`` reference from a RAG2 slot label."""
     match = _SLOT_REF_RE.search(slot or "")
     if match is None:
         return None
-    return int(match.group(1))
+    slot_reference = int(match.group(1))
+    return slot_reference
 
 
 def _resolve_profile_owner_id(fact: dict[str, Any], known_facts: list[dict[str, Any]]) -> str:
@@ -72,7 +90,8 @@ def _resolve_profile_owner_id(fact: dict[str, Any], known_facts: list[dict[str, 
 
     referenced = _as_dict(known_facts[slot_reference - 1])
     referenced_raw = _as_dict(referenced.get("raw_result"))
-    return text_or_empty(referenced_raw.get("global_user_id"))
+    owner_id = text_or_empty(referenced_raw.get("global_user_id"))
+    return owner_id
 
 
 def _extract_memory_content(raw_result: object, *, evidence_char_limit: int) -> str:
@@ -94,7 +113,8 @@ def _extract_memory_content(raw_result: object, *, evidence_char_limit: int) -> 
         if not content:
             continue
         snippets.append(_clip_text(content, limit=evidence_char_limit))
-    return "\n".join(snippets)
+    memory_content = "\n".join(snippets)
+    return memory_content
 
 
 def _extract_external_content(raw_result: object, *, evidence_char_limit: int) -> tuple[str, str]:
@@ -109,7 +129,9 @@ def _extract_external_content(raw_result: object, *, evidence_char_limit: int) -
     """
     text = _clip_text(text_or_empty(raw_result), limit=evidence_char_limit)
     url_match = _URL_RE.search(text)
-    return text, url_match.group(0) if url_match else ""
+    url = url_match.group(0) if url_match else ""
+    external_content = (text, url)
+    return external_content
 
 
 def project_known_facts(
@@ -138,7 +160,8 @@ def project_known_facts(
     """
     rag_result: dict[str, Any] = {
         "answer": text_or_empty(answer),
-        "user_image": {},
+        "user_image": {"user_memory_context": empty_user_memory_context()},
+        "user_memory_unit_candidates": [],
         "character_image": {},
         "third_party_profiles": [],
         "memory_evidence": [],
@@ -180,7 +203,10 @@ def project_known_facts(
             raw_profile = _as_dict(raw_result)
             owner_id = _resolve_profile_owner_id(fact, known_facts)
             if owner_id == current_user_id:
-                rag_result["user_image"] = raw_profile
+                rag_result["user_image"] = _strip_internal_profile_fields(raw_profile)
+                rag_result["user_memory_unit_candidates"] = _as_list(
+                    raw_profile.get("_user_memory_units")
+                )
                 continue
             if owner_id == character_user_id or (not owner_id and raw_profile.get("self_image") is not None):
                 rag_result["character_image"] = raw_profile

@@ -118,28 +118,6 @@ MAX_FACT_HARVESTER_RETRY = int(os.getenv("MAX_FACT_HARVESTER_RETRY", "3"))
 # RAG Cache2
 RAG_CACHE2_MAX_ENTRIES = int(os.getenv("RAG_CACHE2_MAX_ENTRIES", "5000"))
 
-# Persistent user-profile memory expiry defaults.
-PROFILE_MEMORY_TTL_SECONDS = {
-    "diary_entry": int(os.getenv("PROFILE_MEMORY_DIARY_TTL_SECONDS", str(90 * 24 * 60 * 60))),
-    "objective_fact": int(os.getenv("PROFILE_MEMORY_FACT_TTL_SECONDS", str(365 * 24 * 60 * 60))),
-    "milestone": int(os.getenv("PROFILE_MEMORY_MILESTONE_TTL_SECONDS", str(1095 * 24 * 60 * 60))),
-    "commitment": int(os.getenv("PROFILE_MEMORY_COMMITMENT_TTL_SECONDS", str(10 * 24 * 60 * 60))),
-}
-
-PROFILE_MEMORY_RECENT_LIMITS = {
-    "diary_entry": int(os.getenv("PROFILE_MEMORY_RECENT_DIARY_LIMIT", "6")),
-    "objective_fact": int(os.getenv("PROFILE_MEMORY_RECENT_FACT_LIMIT", "8")),
-    "milestone": int(os.getenv("PROFILE_MEMORY_RECENT_MILESTONE_LIMIT", "10")),
-}
-
-PROFILE_MEMORY_SEMANTIC_THRESHOLDS = {
-    "diary_entry": float(os.getenv("PROFILE_MEMORY_DIARY_SEMANTIC_THRESHOLD", "0.75")),
-    "objective_fact": float(os.getenv("PROFILE_MEMORY_FACT_SEMANTIC_THRESHOLD", "0.72")),
-    "milestone": float(os.getenv("PROFILE_MEMORY_MILESTONE_SEMANTIC_THRESHOLD", "0.72")),
-}
-
-PROFILE_MEMORY_BUDGET = int(os.getenv("PROFILE_MEMORY_BUDGET", "40"))
-
 # Scheduler (future_promise + followup_message events).
 SCHEDULED_TASKS_ENABLED = os.getenv("SCHEDULED_TASKS_ENABLED", "true").lower() in ("1", "true", "yes")
 

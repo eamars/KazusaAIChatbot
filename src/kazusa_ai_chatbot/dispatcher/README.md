@@ -314,6 +314,6 @@ Relevant tests:
 - `tests/test_dispatcher.py`
 - `tests/test_scheduler_future_promise.py`
 - `tests/test_runtime_adapter_registration.py`
-- dispatcher-related cases in `tests/test_user_profile_memories.py`
+- dispatcher-related cases in persistence and scheduler tests
 
 The live dispatcher tests are behavior evidence. They check that real LLM output can produce a valid `send_message` call for accepted future actions, avoid tool calls for ongoing style rules, target explicit group IDs from private chats, and normalize vague near-future promises into absolute execution times.

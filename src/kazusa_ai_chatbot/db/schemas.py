@@ -10,13 +10,23 @@ from __future__ import annotations
 from typing import TypedDict
 
 
-class MemoryType:
-    """String constants for ``user_profile_memories.memory_type``."""
+class UserMemoryUnitType:
+    """String constants for ``user_memory_units.unit_type``."""
 
-    DIARY_ENTRY = "diary_entry"
+    STABLE_PATTERN = "stable_pattern"
+    RECENT_SHIFT = "recent_shift"
     OBJECTIVE_FACT = "objective_fact"
     MILESTONE = "milestone"
-    COMMITMENT = "commitment"
+    ACTIVE_COMMITMENT = "active_commitment"
+
+
+class UserMemoryUnitStatus:
+    """String constants for ``user_memory_units.status``."""
+
+    ACTIVE = "active"
+    ARCHIVED = "archived"
+    COMPLETED = "completed"
+    CANCELLED = "cancelled"
 
 
 class AttachmentDoc(TypedDict, total=False):
@@ -108,29 +118,6 @@ class PlatformAccountDoc(TypedDict, total=False):
     linked_at: str            # ISO-8601 when this account was linked
 
 
-class CharacterDiaryEntry(TypedDict, total=False):
-    """One subjective observation the character made about the user.
-
-    Hydrated from ``user_profile_memories`` for downstream prompts.
-    """
-    entry: str          # e.g. "User seems excited about their new job"
-    timestamp: str      # ISO-8601 UTC when the observation was recorded
-    confidence: float   # 0.0–1.0, how confident the character is in the observation
-    context: str        # Brief context (e.g. "from conversation about hobbies")
-
-
-class ObjectiveFactEntry(TypedDict, total=False):
-    """One verified, objective fact about the user.
-
-    Hydrated from ``user_profile_memories`` for downstream prompts.
-    """
-    fact: str           # e.g. "User lives in Tokyo"
-    category: str       # "occupation" | "location" | "hobby" | "relationship" | "general"
-    timestamp: str      # ISO-8601 UTC when the fact was learned
-    source: str         # "user_stated" | "inferred" | "verified" | "conversation_extracted"
-    confidence: float   # 0.0–1.0 confidence level
-
-
 class BoundaryProfileDoc(TypedDict, total=False):
     """Character's psychological boundary parameters.
     
@@ -166,59 +153,79 @@ class LinguisticTextureProfileDoc(TypedDict, total=False):
 class UserProfileDoc(TypedDict, total=False):
     """Long-term memory about a single user in the ``user_profiles`` collection.
 
-    Keyed by ``global_user_id`` (UUID4). Durable user facts, diary entries,
-    milestones, and commitments live in ``user_profile_memories`` and are
-    hydrated into prompt-facing blocks by the RAG layer.
+    Keyed by ``global_user_id`` (UUID4). Cognition-facing user memory lives in
+    ``user_memory_units`` and is projected by the RAG layer.
     """
 
     global_user_id: str                          # UUID4 — our internal unique key
     platform_accounts: list[PlatformAccountDoc]  # All linked accounts
     suspected_aliases: list[str]                 # Other global_user_ids suspected to be same person
 
-    # ── Three-tier user image ──────────────────────────────────
-    user_image: dict                             # {milestones, recent_window, historical_summary, meta}
-
     # ── Relationship metrics ───────────────────────────────────
     affinity: int                                # 0–1000 affinity score (default 500)
     last_relationship_insight: str               # Character's instantaneous impression of the user
 
-    # ── Legacy (deprecated — see user_profile_memories) ─────────
-    facts: list[str]                             # DEPRECATED flat list of diary+facts text
+
+class UserMemoryUnitSourceRef(TypedDict, total=False):
+    """Source evidence reference attached to a user memory unit."""
+
+    source: str
+    timestamp: str
+    message_id: str
 
 
-class UserProfileMemoryDoc(TypedDict, total=False):
-    """One atomic, addressable memory for a single user profile.
+class UserMemoryUnitMergeHistoryEntry(TypedDict, total=False):
+    """One merge/evolve event in a user memory unit's lifecycle."""
 
-    Documents live in ``user_profile_memories`` and are the authoritative
-    source for diary entries, objective facts, milestones, and commitments.
+    timestamp: str
+    decision: str
+    candidate_id: str
+    reason: str
+
+
+class UserMemoryUnitDoc(TypedDict, total=False):
+    """A durable fact-anchored user memory unit.
+
+    Documents live in ``user_memory_units`` and replace prompt-facing
+    historical summary, recent-window, and character-diary user memory.
     """
 
-    memory_id: str
+    unit_id: str
     global_user_id: str
-    memory_type: str
-    content: str
-    embedding: list[float]
-    created_at: str
-    updated_at: str
-    expires_at: str
-    deleted: bool
-    dedup_key: str
-    scope: str
-
-    category: str
-    source: str
-    confidence: float
-    context: str
-
-    commitment_id: str
-    commitment_type: str
-    target: str
-    action: str
+    unit_type: str
+    fact: str
+    subjective_appraisal: str
+    relationship_signal: str
     status: str
-    due_time: str | None
+    count: int
+    first_seen_at: str
+    last_seen_at: str
+    updated_at: str
+    source_refs: list[UserMemoryUnitSourceRef]
+    embedding: list[float]
+    merge_history: list[UserMemoryUnitMergeHistoryEntry]
+    due_at: str | None
+    completed_at: str | None
+    cancelled_at: str | None
 
-    event_category: str
-    superseded_by: str | None
+
+class UserMemoryContextEntry(TypedDict, total=False):
+    """Prompt-facing projection of one user memory unit."""
+
+    fact: str
+    subjective_appraisal: str
+    relationship_signal: str
+    updated_at: str
+
+
+class UserMemoryContextDoc(TypedDict, total=False):
+    """Prompt-facing user memory context consumed by cognition."""
+
+    stable_patterns: list[UserMemoryContextEntry]
+    recent_shifts: list[UserMemoryContextEntry]
+    objective_facts: list[UserMemoryContextEntry]
+    milestones: list[UserMemoryContextEntry]
+    active_commitments: list[UserMemoryContextEntry]
 
 
 class CharacterProfileDoc(TypedDict, total=False):
@@ -267,25 +274,6 @@ class MemoryDoc(TypedDict, total=False):
     confidence_note: str            # free-form note on how downstream should treat this memory
     status: str                     # "active" | "fulfilled" | "expired" | "superseded"
     expiry_timestamp: str | None    # ISO-8601 or None (never expires)
-
-
-class ActiveCommitmentDoc(TypedDict, total=False):
-    """A currently active user-scoped commitment or accepted preference.
-
-    This lives on ``user_profiles`` as the authoritative fresh read path for the
-    next turn. It is separate from ``user_image`` because it models operational
-    state with explicit lifecycle, not the character's narrative impression.
-    """
-
-    commitment_id: str              # stable UUID or memory_id for synchronization
-    target: str                     # who the commitment is about / directed to
-    action: str                     # normalized commitment body
-    commitment_type: str            # e.g. "language_preference", "address_preference", "future_promise"
-    status: str                     # "active" | "fulfilled" | "expired" | "superseded"
-    source: str                     # "conversation_extracted" | "seeded_manual"
-    created_at: str                 # ISO-8601 UTC
-    updated_at: str                 # ISO-8601 UTC
-    due_time: str | None            # ISO-8601 or None
 
 
 def build_memory_doc(

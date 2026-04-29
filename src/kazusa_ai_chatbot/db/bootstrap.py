@@ -37,7 +37,7 @@ async def db_bootstrap() -> None:
         "user_profiles",
         "character_state",
         "memory",
-        "user_profile_memories",
+        "user_memory_units",
         "scheduled_events",
         "conversation_episode_state",
     ]
@@ -94,56 +94,30 @@ async def db_bootstrap() -> None:
         "source_global_user_id", name="memory_source_user_idx",
     )
 
-    # ── user_profile_memories indexes ─────────────────────────────
-    await db.user_profile_memories.create_index(
-        "memory_id", unique=True, name="user_profile_memory_id_unique",
+    await db.user_memory_units.create_index(
+        "unit_id",
+        unique=True,
+        name="user_memory_unit_id_unique",
     )
-    await db.user_profile_memories.create_index(
-        [("global_user_id", 1), ("memory_type", 1), ("created_at", -1)],
-        name="user_profile_memory_owner_type_recent",
+    await db.user_memory_units.create_index(
+        [("global_user_id", 1), ("unit_type", 1), ("status", 1), ("last_seen_at", -1)],
+        name="user_memory_unit_owner_type_status_recent",
     )
-    await db.user_profile_memories.create_index(
-        [("global_user_id", 1), ("deleted", 1), ("expires_at", 1)],
-        name="user_profile_memory_live_lookup",
-    )
-    await db.user_profile_memories.create_index(
-        [("global_user_id", 1), ("commitment_id", 1)],
-        name="user_profile_memory_commitment_id",
-    )
-    await db.user_profile_memories.create_index(
-        [("global_user_id", 1), ("memory_type", 1), ("dedup_key", 1)],
-        name="user_profile_memory_dedup",
-    )
-    await db.user_profile_memories.create_index(
-        [("memory_type", 1), ("status", 1), ("expires_at", 1)],
-        name="user_profile_memory_expiry_sweep",
-    )
-    await db.user_profile_memories.create_index(
-        [("global_user_id", 1), ("memory_type", 1), ("status", 1), ("created_at", -1)],
-        name="user_profile_memory_status_recent",
-    )
-    await db.user_profile_memories.create_index(
-        [
-            ("global_user_id", 1),
-            ("memory_type", 1),
-            ("status", 1),
-            ("deleted", 1),
-            ("created_at", -1),
-            ("expires_at", 1),
-        ],
-        name="user_profile_memory_active_commitments",
+    await db.user_memory_units.create_index(
+        [("global_user_id", 1), ("status", 1), ("updated_at", -1)],
+        name="user_memory_unit_owner_status_updated",
     )
 
     # ── Vector search indexes (best-effort — requires Atlas) ──────
     for collection, index_name, path in (
         ("conversation_history", "conversation_history_vector_index", "embedding"),
         ("memory",               "memory_vector_index",              "embedding"),
-        ("user_profile_memories", "user_profile_memories_vector",     "embedding"),
+        ("user_memory_units",     "user_memory_units_vector",         "embedding"),
     ):
         try:
             filter_paths = None
-            if collection == "user_profile_memories":
-                filter_paths = ["global_user_id", "memory_type", "deleted", "status"]
+            if collection == "user_memory_units":
+                filter_paths = ["global_user_id", "unit_type", "status"]
             await enable_vector_index(collection, index_name, path=path, filter_paths=filter_paths)
         except Exception:
             logger.warning(

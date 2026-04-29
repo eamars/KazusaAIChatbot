@@ -1,4 +1,4 @@
-"""CLI helper to inspect a user's stored image bundle.
+"""CLI helper to inspect a user's cognition-facing profile bundle.
 
 Typical use:
     python -m scripts.identify_user_image 3167827653 --platform qq
@@ -18,9 +18,8 @@ from typing import Any
 from kazusa_ai_chatbot.db import (
     close_db,
     get_db,
-    hydrate_user_profile_with_memory_blocks,
-    query_user_profile_memory_blocks,
 )
+from kazusa_ai_chatbot.rag.user_memory_unit_retrieval import build_user_memory_context
 
 
 def _configure_stdout() -> None:
@@ -157,8 +156,13 @@ async def _hydrate_prompt_profile(profile: dict[str, Any]) -> dict[str, Any]:
     if not global_user_id:
         return profile
 
-    memory_blocks = await query_user_profile_memory_blocks(global_user_id, include_semantic=False)
-    return hydrate_user_profile_with_memory_blocks(profile, memory_blocks)
+    hydrated = dict(profile)
+    hydrated["user_memory_context"] = await build_user_memory_context(
+        global_user_id,
+        query_text="",
+        include_semantic=False,
+    )
+    return hydrated
 
 
 def _format_profile(profile: dict[str, Any]) -> str:
@@ -170,41 +174,17 @@ def _format_profile(profile: dict[str, Any]) -> str:
     Returns:
         Human-readable profile and user-image summary.
     """
-    image = profile.get("user_image") or {}
-    if not isinstance(image, dict):
-        image = {"raw_user_image": image}
-
     accounts = profile.get("platform_accounts") or []
     if not isinstance(accounts, list):
         accounts = []
-
-    milestones = image.get("milestones") or []
-    if not isinstance(milestones, list):
-        milestones = [milestones]
-
-    recent_window = image.get("recent_window") or []
-    if not isinstance(recent_window, list):
-        recent_window = [recent_window]
-
-    historical_summary = str(image.get("historical_summary", "")).strip()
-    if not historical_summary:
-        historical_summary = "none"
 
     relationship = str(profile.get("last_relationship_insight", "")).strip()
     if not relationship:
         relationship = "none"
 
-    character_diary = profile.get("character_diary") or []
-    if not isinstance(character_diary, list):
-        character_diary = [character_diary]
-
-    objective_facts = profile.get("objective_facts") or []
-    if not isinstance(objective_facts, list):
-        objective_facts = [objective_facts]
-
-    active_commitments = profile.get("active_commitments") or []
-    if not isinstance(active_commitments, list):
-        active_commitments = [active_commitments]
+    user_memory_context = profile.get("user_memory_context") or {}
+    if not isinstance(user_memory_context, dict):
+        user_memory_context = {}
 
     return "\n".join(
         [
@@ -214,23 +194,20 @@ def _format_profile(profile: dict[str, Any]) -> str:
             f"affinity: {profile.get('affinity', '')}",
             f"last_relationship_insight: {relationship}",
             "",
-            "user_image.historical_summary:",
-            f"  {historical_summary}",
+            "user_memory_context.stable_patterns:",
+            _format_sequence(user_memory_context.get("stable_patterns") or [], label="stable"),
             "",
-            "user_image.recent_window:",
-            _format_sequence(recent_window, label="recent"),
+            "user_memory_context.recent_shifts:",
+            _format_sequence(user_memory_context.get("recent_shifts") or [], label="recent-shift"),
             "",
-            "user_image.milestones:",
-            _format_sequence(milestones, label="milestone"),
+            "user_memory_context.objective_facts:",
+            _format_sequence(user_memory_context.get("objective_facts") or [], label="fact"),
             "",
-            "character_diary:",
-            _format_sequence(character_diary, label="diary"),
+            "user_memory_context.milestones:",
+            _format_sequence(user_memory_context.get("milestones") or [], label="milestone"),
             "",
-            "objective_facts:",
-            _format_sequence(objective_facts, label="fact"),
-            "",
-            "active_commitments:",
-            _format_sequence(active_commitments, label="commitment"),
+            "user_memory_context.active_commitments:",
+            _format_sequence(user_memory_context.get("active_commitments") or [], label="commitment"),
         ]
     )
 

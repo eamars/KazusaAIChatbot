@@ -9,10 +9,10 @@ Stage-4a additions:
 
 * A unified ``metadata`` bundle threaded through every node and accumulated
   at each step.
-* The ``db_writer`` routes facts and accepted commitments through unified
-  profile memories, emits Cache2 invalidation events after successful writes,
-  and hands accepted future obligations to the task dispatcher so tool calls
-  can be scheduled through the shared scheduler.
+* The ``db_writer`` routes durable user memory through ``user_memory_units``,
+  emits Cache2 invalidation events after successful writes, and hands accepted
+  future obligations to the task dispatcher so tool calls can be scheduled
+  through the shared scheduler.
 """
 
 from __future__ import annotations
@@ -34,7 +34,7 @@ from kazusa_ai_chatbot.nodes.persona_supervisor2_consolidator_reflection import 
 )
 from kazusa_ai_chatbot.nodes.persona_supervisor2_consolidator_schema import (
     ConsolidatorState,
-    normalize_diary_entries,
+    normalize_subjective_appraisals,
 )
 from kazusa_ai_chatbot.nodes.persona_supervisor2_schema import GlobalPersonaState
 from kazusa_ai_chatbot.utils import log_dict_subset, log_list_preview, log_preview
@@ -61,7 +61,7 @@ def _record_existing_dedup_key(row: object, dedup_keys: set[str]) -> None:
 
 
 def _build_existing_dedup_keys(global_state: GlobalPersonaState) -> set[str]:
-    """Build exclusion keys from structured fields on ``state["user_profile"]``.
+    """Build exclusion keys from the RAG-projected user memory context.
 
     Args:
         global_state: Top-level persona-supervisor state.
@@ -69,21 +69,16 @@ def _build_existing_dedup_keys(global_state: GlobalPersonaState) -> set[str]:
     Returns:
         Stable lower-cased dedup keys for known facts, milestones, and commitments.
     """
-    user_profile = global_state["user_profile"]
+    rag_result = global_state["rag_result"]
+    user_image = rag_result["user_image"]
+    user_memory_context = user_image["user_memory_context"]
     dedup_keys: set[str] = set()
 
-    for fact in user_profile.get("objective_facts") or []:
-        _record_existing_dedup_key(fact, dedup_keys)
-
-    for commitment in user_profile.get("active_commitments") or []:
-        _record_existing_dedup_key(commitment, dedup_keys)
-
-    user_image = user_profile.get("user_image") or {}
-    for milestone in user_image.get("milestones") or []:
-        _record_existing_dedup_key(milestone, dedup_keys)
-
-    for milestone in user_profile.get("milestones") or []:
-        _record_existing_dedup_key(milestone, dedup_keys)
+    for entries in user_memory_context.values():
+        if not isinstance(entries, list):
+            continue
+        for entry in entries:
+            _record_existing_dedup_key(entry, dedup_keys)
 
     return dedup_keys
 
@@ -135,7 +130,7 @@ async def call_consolidation_subgraph(global_state: GlobalPersonaState):
         "user_profile": global_state["user_profile"],
         "platform": global_state["platform"],
         "platform_channel_id": global_state["platform_channel_id"],
-        "channel_type": global_state.get("channel_type", "group"),
+        "channel_type": global_state["channel_type"],
         "platform_message_id": global_state["platform_message_id"],
         "action_directives": global_state["action_directives"],
         "internal_monologue": global_state["internal_monologue"],
@@ -148,15 +143,16 @@ async def call_consolidation_subgraph(global_state: GlobalPersonaState):
         "rag_result": global_state["rag_result"],
         "existing_dedup_keys": _build_existing_dedup_keys(global_state),
         "decontexualized_input": global_state["decontexualized_input"],
+        "chat_history_recent": global_state["chat_history_recent"],
         "metadata": {},
-    }
+    } # pyright: ignore[reportAssignmentType]
 
     result = await sub_graph.ainvoke(sub_state)
 
     mood = result.get("mood", "")
     global_vibe = result.get("global_vibe", "")
     reflection_summary = result.get("reflection_summary", "")
-    diary_entry = normalize_diary_entries(result.get("diary_entry"))
+    subjective_appraisals = normalize_subjective_appraisals(result.get("subjective_appraisals"))
     affinity_delta = result.get("affinity_delta", 0)
     last_relationship_insight = result.get("last_relationship_insight", "")
     new_facts = result.get("new_facts", [])
@@ -196,7 +192,7 @@ async def call_consolidation_subgraph(global_state: GlobalPersonaState):
         "mood": mood,
         "global_vibe": global_vibe,
         "reflection_summary": reflection_summary,
-        "diary_entry": diary_entry,
+        "subjective_appraisals": subjective_appraisals,
         "affinity_delta": affinity_delta,
         "last_relationship_insight": last_relationship_insight,
         "new_facts": new_facts,

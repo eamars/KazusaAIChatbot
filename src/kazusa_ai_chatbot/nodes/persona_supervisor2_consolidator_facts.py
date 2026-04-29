@@ -20,7 +20,8 @@ logger = logging.getLogger(__name__)
 
 
 _FACTS_HARVESTER_PROMPT = """\
-你负责提取具备长期价值的**画像属性**（事实）和**未来约定**（承诺）。你必须严格区分哪些是“对话的复述”（禁止记录），哪些是“状态的改变”。
+你负责提取具备长期价值的**事实证据**和**未来约定**。这些结果不是最终画像；它们会作为下游 memory-unit consolidator 的证据输入。
+你必须严格区分哪些只是“对话复述”（禁止记录），哪些是“以后仍然有用的事实/事件/约定”。
 
 # 背景信息
 - **对话主体 (Character)**: {character_name}
@@ -29,7 +30,9 @@ _FACTS_HARVESTER_PROMPT = """\
 
 # 证据分层（必须遵守）
 - `decontexualized_input`：用户这一轮真正表达的内容，常包含请求、愿望、试探、调侃。
-- `rag_result`：RAG2 投影后的检索证据块，包含当前用户画像、第三方画像摘要、记忆证据、对话证据和外部证据。
+- `rag_result.user_image.user_memory_context`：RAG 投影给认知层的用户记忆摘要，按 recent_shifts/objective_facts/milestones/stable_patterns/active_commitments 分类。
+- `rag_result.user_memory_unit_candidates`：RAG 检索出的原始候选记忆单元，仅用于判断是否旧闻或语义重复。
+- `rag_result.memory_evidence` / `conversation_evidence` / `external_evidence`：其他检索证据。
 - `content_anchors`：角色在生成回复前的草案意图，只能视为“候选计划”，**不能单独证明承诺已经成立**。
 - `final_dialog`：角色本轮最终实际说出口的话，是判断“是否真的接受/承诺/拒绝”的最高优先级证据。
 - 当三者冲突时，优先级固定为：`final_dialog` > `content_anchors` > `decontexualized_input`。
@@ -40,15 +43,15 @@ _FACTS_HARVESTER_PROMPT = """\
    - `content_anchors` 的内容始终是 **{character_name}** 在做决定。
    - 严禁出现身份倒置（如：将用户写完作业记在 {character_name} 头上）。
 
-2. **事实 (new_facts) 判定标准**:
-   - **记录**：具有长期稳定性的**属性级陈述**（如：用户的职业、住址、对某物的长期厌恶/偏好）。
-   - **记录**：从 `rag_result.external_evidence` 中提取的**新**信息.
-   - **严禁记录**：瞬态动作、对话内容、以及任何关于”奖励”、”打算”、”计划”的内容.
-   - **去重**：如果 `rag_result.user_image` 或 `rag_result.memory_evidence` 中已存在相似画像，严禁重复提取.
+2. **事实证据 (new_facts) 判定标准**:
+   - **记录**：以后仍然有用的具体事实、偏好、禁忌、关系声明、重要事件、反复出现的互动模式，或从 `rag_result.external_evidence` 中提取的新信息。
+   - **记录粒度**：可以是属性，也可以是带上下文的事件锚点；必须保留足够细节，让下游能写出 fact / subjective_appraisal / relationship_signal。
+   - **严禁记录**：纯瞬态动作、空泛情绪、没有后续价值的对话复述，以及任何尚未被角色接下的“奖励”“打算”“计划”。
+   - **去重**：如果 `rag_result.user_image.user_memory_context`、`rag_result.user_memory_unit_candidates` 或 `rag_result.memory_evidence` 中已存在相似记忆，严禁重复提取。
    - **硬排除**：`existing_dedup_keys` 是上游给出的已存在事实/承诺键列表；如果候选事实或承诺语义上对应其中任一键，**不要输出**.
    - **语义保真 [必须执行]**：若用户明确说了”喜欢/不喜欢/永远不/一直不/过敏/害怕”等偏好或禁忌，`description` 必须尽量保留原谓词与宾语，不得改写成更宽泛、不同义或模糊的概括。例如”永远不吃辣椒”不能改写为”不喜欢吃杂乱的食物”.
-   - **未确认声明 [必须执行]**：当 `logical_stance` 为 `TENTATIVE` 或 `DENY`，或 `character_intent` 为 `EVADE` / `DENY` 时，用户对自身身份、关系或重要属性的任何自我声明（如”我是你学长”、”我们是朋友”）**一律不得落库**——即使改写成”用户自称……”、”用户声称……”等形式也同样禁止。此类输入 `new_facts` 必须返回 `[]`。仅当 `logical_stance` 为 `CONFIRM` 且 `character_intent` 不为 `EVADE` / `DENY` 时，方可记录用户的身份/关系自我声明.
-   - **称呼/句尾/说话格式规则 [必须执行]**：当用户要求 {character_name} 使用特定称呼、句尾、口癖、语气或回复格式（如“主人”“喵”“每句话都这样说”）时，优先判断这是否是一个被角色采纳的**操作性规则/约定**。若角色在 `final_dialog` 中明确接受并准备后续沿用，这类内容应优先进入 `future_promises`（作为持续生效的约定/规则），而不是改写成“{character_name}喜欢/习惯/对这种说话方式感到如何”之类的隐含画像事实。只有当输入本身真的形成了稳定画像属性时，才可进入 `new_facts`.
+   - **未确认声明 [必须执行]**：当 `logical_stance` 为 `TENTATIVE` 或 `REFUSE`，或 `character_intent` 为 `EVADE` / `REJECT` 时，用户对自身身份、关系或重要属性的任何自我声明（如”我是你学长”、”我们是朋友”）**一律不得落库**——即使改写成”用户自称……”、”用户声称……”等形式也同样禁止。此类输入 `new_facts` 必须返回 `[]`。仅当 `logical_stance` 为 `CONFIRM` 且 `character_intent` 不为 `EVADE` / `REJECT` 时，方可记录用户的身份/关系自我声明.
+   - **称呼/句尾/说话格式规则 [必须执行]**：当用户要求 {character_name} 使用特定称呼、句尾、口癖、语气或回复格式（如“主人”“喵”“每句话都这样说”）时，优先判断这是否是一个被角色采纳的**操作性规则/约定**。若角色在 `final_dialog` 中明确接受并准备后续沿用，这类内容应优先进入 `future_promises`（作为持续生效的约定/规则），而不是改写成“{character_name}喜欢/习惯/对这种说话方式感到如何”之类的隐含画像事实。只有当输入本身真的形成了稳定记忆事实时，才可进入 `new_facts`.
 
 
 3. **承诺 (future_promises) 判定标准 [核心逻辑]**:
@@ -80,7 +83,7 @@ _FACTS_HARVESTER_PROMPT = """\
         {{
             "entity": "事实所属的主语实名（如 human payload 中的 user_name、{character_name}、或具体物品/地点名）",
             "category": "事实类别标签（如 occupation、location、preference、hobby、relationship、health、schedule、personality 等）",
-            "description": "属性级的客观陈述。格式：'[主语] + [属性/状态]'。示例：'用户住在新西兰奥克兰' 或 '用户对猫毛过敏'。严禁使用叙事句式（如'在某情境下做了某事'）。",
+            "description": "具备长期价值的事实或事件证据。必须包含主语和足够上下文；可以是属性陈述，也可以是具体事件锚点。示例：'用户住在新西兰奥克兰'、'用户在多轮讨论中坚持用系统工程视角校正 Kazusa 记忆架构'。",
             "is_milestone": false,
             "milestone_category": "",
             "scope": "稳定生命周期主题；非里程碑可为空字符串",
@@ -174,7 +177,7 @@ _FACT_HARVESTER_EVALUATOR_PROMPT = """\
 
 # 2.1 与 Harvester 对齐的判定口径（必须遵守）
 - `new_facts` 与 `future_promises` 是两个独立通道：
-  - `new_facts` 要求“属性级事实陈述”。
+  - `new_facts` 要求“事实/事件证据陈述”，可以是属性，也可以是有上下文的事件锚点。
   - `future_promises.action` 要求“可执行承诺陈述”，**不适用** `new_facts.description` 的属性句式审计规则.
 - 当输入没有新增稳定事实时，`new_facts: []` 是合法结果，**不得仅因为空判定失败**.
 - 当输入没有明确未来承诺时，`future_promises: []` 也是合法结果.
@@ -188,12 +191,12 @@ _FACT_HARVESTER_EVALUATOR_PROMPT = """\
 - **冗余复读**:
     - 检查候选结果是否只是在复读对话（如“某人问...”).
     - 必须转换为客观陈述.*注意：不要审计输入源的语气，只审计候选结果的陈述方式.*
-- **旧闻复读**: 如果该信息在 `rag_result.user_image`、`rag_result.memory_evidence` 或 `rag_result.conversation_evidence` 标记的内部库中已存在，判定为 FAIL.
+- **旧闻复读**: 如果该信息在 `rag_result.user_image.user_memory_context`、`rag_result.user_memory_unit_candidates`、`rag_result.memory_evidence` 或 `rag_result.conversation_evidence` 标记的内部库中已存在，判定为 FAIL.
 - **脑补事实**: 严禁出现基准源中没有的名词或事实
-- **描述格式违规**: `new_facts` 中的 `description` 必须是属性级陈述（如 '用户住在奥克兰'），严禁使用叙事句式（如 '在某情境下做了某事'）.若发现叙事句式，要求改写为属性陈述.
+- **描述格式违规**: `new_facts` 中的 `description` 必须是事实/事件证据陈述，包含明确主语和可核对内容；不能只是情绪标签、泛泛评价或“某人问了一个问题”式复读。
 - **类别缺失或不当**: `new_facts` 中的 `category` 必须是有意义的英文标签（如 occupation、location、preference、hobby 等）.若缺失、为空、或为无意义的 "general"，要求补充具体类别.
 - **语义漂移 [严重]**: 若 `new_facts.description` 改写后改变了用户原意（尤其是偏好、禁忌、过敏、承诺条件等），必须判 FAIL 并要求使用更贴近原句的表述.
-- **未确认声明入库 [严重]**: 若 `logical_stance` 为 `TENTATIVE` 或 `DENY`，或 `character_intent` 为 `EVADE` / `DENY`，而 `new_facts` 中出现了用户对自身身份/关系/属性的自我声明（如"用户是角色的学长"），必须判 FAIL——角色未确认的主张不得作为事实落库.
+- **未确认声明入库 [严重]**: 若 `logical_stance` 为 `TENTATIVE` 或 `REFUSE`，或 `character_intent` 为 `EVADE` / `REJECT`，而 `new_facts` 中出现了用户对自身身份/关系/属性的自我声明（如"用户是角色的学长"），必须判 FAIL——角色未确认的主张不得作为事实落库.
 - **称呼/格式规则通道错误 [严重]**: 若输入核心是用户要求角色采用某种称呼、句尾、口癖、语言或回复格式，而角色在 `final_dialog` 中已经接纳并准备沿用，则优先作为 `future_promises` 中的持续性约定/规则处理，而不是改写成“{character_name}对这种说话方式感到如何”之类的隐含画像事实.
 - **承诺 action 审计标准（专用于 `future_promises`）**:
   - 合格条件：表达“谁对谁做什么”的可执行承诺，不是对话复读（如“他说/她问/我觉得”），且能在 `final_dialog` 中找到角色已经接下该义务的证据.

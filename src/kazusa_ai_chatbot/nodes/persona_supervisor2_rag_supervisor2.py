@@ -1038,18 +1038,14 @@ _EVALUATOR_SUMMARIZER_USER_PROFILE_PROMPT = '''\
 你是一个用户/角色画像槽位结果提炼器。给定 Profile 槽位、原始画像结果、以及先前身份解析结果，提炼一段简洁中文事实摘要。
 
 # 字段语义（必须遵守）
-- 如果 raw_result 包含 character_diary：这些是角色写在目标用户档案下的主观日记，作者/感受主体是角色，不是目标用户。
-  - 可以写“角色日记显示，角色对该用户/这次互动感到……”
-  - 禁止写成“该用户感到心虚/防线动摇/尴尬/不安”，除非日记原文明确说这是用户的感受。
-- objective_facts：关于目标用户的客观事实。
-- active_commitments：与目标用户相关、已被接受的承诺或持续规则。
-- user_image：第三人称滚动画像，描述目标用户表现以及角色对目标用户的感知。
-- 如果 raw_result 包含 name/description/gender/age/birthday/backstory/self_image，且不包含 character_diary/objective_facts/active_commitments/user_image：
+- user_memory_context：当前用户的统一记忆投影。每条记录都包含 fact、subjective_appraisal、relationship_signal，可分别作为事实锚点、Kazusa 的主观评价、未来互动信号。
+- objective_facts、milestones、active_commitments 若出现，应来自 user_memory_context 内部分类，不再作为旧的独立画像来源处理。
+- 如果 raw_result 包含 name/description/gender/age/birthday/backstory/self_image，且不包含 user_memory_context：
   这是角色自己的公开资料或自我画像。按“角色自身资料”总结，不要当成第三方用户画像。
 
 # 摘要要求
 - 保留 global_user_id、display_name 等对后续步骤有用的标识。
-- 明确区分“目标用户是谁”和“角色日记是谁的主观视角”。
+- 明确区分“目标用户是谁”、事实锚点是什么、Kazusa 的主观评价是什么。
 - 只总结 raw_result 中已有的信息，不要补全未知信息。
 - 不超过 220 字，纯文本，无 JSON 外壳。
 '''
@@ -1180,9 +1176,8 @@ _FINALIZER_PROMPT = '''\
 - 如果某个槽位未能解决（resolved: false），如实告知缺少哪一部分信息。
 - 不要把某个来源没有检索结果扩大成“没有任何记录/没有互动记录”；只能说明实际查询过的来源没有返回结果。
 - 引用来源 URL 或对话来源时尽量保留。
-- 当 known_facts 中 agent="user_profile_agent" 且 raw_result 包含 character_diary：
-  character_diary 是角色写在目标用户档案下的主观日记，作者/感受主体是角色，不是目标用户。
-  禁止把日记里的“心虚、防线动摇、尴尬、不安”等感受归因给目标用户，除非原文明确说这是目标用户的感受。
+- 当 known_facts 中 agent="user_profile_agent" 且 raw_result 包含 user_memory_context：
+  fact 是事实锚点，subjective_appraisal 是 Kazusa 的主观评价，relationship_signal 是未来互动信号。回答时不要把 Kazusa 的主观评价误写成目标用户自己的感受。
 - 当 known_facts 中 agent="user_profile_agent" 且 raw_result 是角色自身公开资料或 self_image：
   这是角色自己的资料。回答角色自我资料问题时，可以使用这些公开资料；不要误写成第三方用户画像。
 

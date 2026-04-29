@@ -6,7 +6,6 @@ import asyncio
 import json
 import logging
 from datetime import datetime, timedelta, timezone
-from uuid import uuid4
 
 from langchain_core.messages import HumanMessage, SystemMessage
 from pymongo.errors import PyMongoError
@@ -21,25 +20,19 @@ from kazusa_ai_chatbot.config import (
     CONSOLIDATION_LLM_MODEL,
 )
 from kazusa_ai_chatbot.db import (
-    ActiveCommitmentDoc,
-    CharacterDiaryEntry,
-    MemoryType,
-    ObjectiveFactEntry,
-    insert_profile_memories,
     update_affinity,
     update_last_relationship_insight,
     upsert_character_self_image,
     upsert_character_state,
-    upsert_user_image,
-    UserProfileMemoryDoc,
 )
 from kazusa_ai_chatbot.nodes.persona_supervisor2_consolidator_images import (
     _update_character_image,
-    _update_user_image,
+)
+from kazusa_ai_chatbot.nodes.persona_supervisor2_consolidator_memory_units import (
+    update_user_memory_units_from_state,
 )
 from kazusa_ai_chatbot.nodes.persona_supervisor2_consolidator_schema import (
     ConsolidatorState,
-    normalize_diary_entries,
 )
 from kazusa_ai_chatbot.dispatcher import (
     DispatchContext,
@@ -276,27 +269,6 @@ def process_affinity_delta(current_affinity: int, raw_delta: int) -> int:
     return int(round(raw_delta * scaling_factor, 0))
 
 
-def _build_diary_entries(
-    diary_strings: list[str],
-    *,
-    timestamp: str,
-    interaction_subtext: str,
-) -> list[CharacterDiaryEntry]:
-    """Convert raw diary strings into ``CharacterDiaryEntry`` dicts."""
-    entries: list[CharacterDiaryEntry] = []
-    for text in diary_strings or []:
-        if not text:
-            continue
-        entry: CharacterDiaryEntry = {
-            "entry": text,
-            "timestamp": timestamp,
-            "confidence": 0.8,
-            "context": interaction_subtext or "",
-        }
-        entries.append(entry)
-    return entries
-
-
 def _default_future_promise_due_time(timestamp: str) -> str:
     """Return the immediate fallback due time for untimed future promises.
 
@@ -317,13 +289,6 @@ def _default_future_promise_due_time(timestamp: str) -> str:
 
     next_minute = reference_time.replace(second=0, microsecond=0) + timedelta(minutes=1)
     return next_minute.isoformat()
-
-
-def _text_or_default(value: object, default: str) -> str:
-    text = text_or_empty(value)
-    if text:
-        return text
-    return default
 
 
 def _normalize_future_promises(
@@ -358,173 +323,6 @@ def _normalize_future_promises(
     return normalized
 
 
-def _build_active_commitment_entries(
-    future_promises: list[dict],
-    *,
-    timestamp: str,
-) -> list[ActiveCommitmentDoc]:
-    """Convert accepted future promises into authoritative active commitments.
-
-    Args:
-        future_promises: Sanitized harvester promise rows.
-        timestamp: Current turn timestamp.
-
-    Returns:
-        A list of structured commitment rows for ``user_profile.active_commitments``.
-    """
-    commitments: list[ActiveCommitmentDoc] = []
-    normalized_promises = _normalize_future_promises(future_promises, timestamp=timestamp)
-    for promise in normalized_promises:
-        action = text_or_empty(promise.get("action"))
-        if not action:
-            continue
-        dedup_key = text_or_empty(promise.get("dedup_key")) or action
-        commitments.append(
-            {
-                "commitment_id": uuid4().hex,
-                "target": text_or_empty(promise.get("target")),
-                "action": action,
-                "commitment_type": text_or_empty(promise.get("commitment_type")),
-                "status": "active",
-                "source": "conversation_extracted",
-                "created_at": timestamp,
-                "updated_at": timestamp,
-                "due_time": promise.get("due_time"),
-                "dedup_key": dedup_key.lower(),
-            }
-        )
-    return commitments
-
-
-def _build_objective_fact_entries(
-    new_facts: list[dict],
-    *,
-    timestamp: str,
-) -> list[ObjectiveFactEntry]:
-    """Convert harvester ``new_facts`` rows into ``ObjectiveFactEntry`` dicts."""
-    entries: list[ObjectiveFactEntry] = []
-    for fact in new_facts or []:
-        description = text_or_empty(fact.get("description"))
-        if not description:
-            continue
-        entry: ObjectiveFactEntry = {
-            "fact": description,
-            "category": _text_or_default(fact.get("category"), "general"),
-            "timestamp": timestamp,
-            "source": "conversation_extracted",
-            "confidence": 0.85,
-        }
-        entries.append(entry)
-    return entries
-
-
-def _build_memory_docs(
-    *,
-    diary_entries: list[CharacterDiaryEntry],
-    objective_facts: list[ObjectiveFactEntry],
-    active_commitments: list[ActiveCommitmentDoc],
-    new_facts: list[dict],
-    timestamp: str,
-) -> list[UserProfileMemoryDoc]:
-    """Build unified profile-memory docs from consolidator outputs.
-
-    Args:
-        diary_entries: Subjective diary entries from the relationship recorder.
-        objective_facts: Objective facts built from the facts harvester output.
-        active_commitments: Accepted future promises in prompt-facing shape.
-        new_facts: Raw fact rows, used to preserve LLM-emitted milestone fields.
-        timestamp: Current turn timestamp.
-
-    Returns:
-        Memory docs ready for ``insert_profile_memories``.
-    """
-    memories: list[UserProfileMemoryDoc] = []
-
-    for entry in diary_entries:
-        content = text_or_empty(entry.get("entry"))
-        if not content:
-            continue
-        created_at = entry.get("timestamp")
-        context = entry.get("context")
-        memories.append({
-            "memory_type": MemoryType.DIARY_ENTRY,
-            "content": content,
-            "created_at": created_at if isinstance(created_at, str) and created_at.strip() else timestamp,
-            "updated_at": timestamp,
-            "confidence": entry.get("confidence", 0.8),
-            "context": context if isinstance(context, str) else "",
-        })
-
-    fact_by_description = {
-        text_or_empty(fact.get("description")): fact
-        for fact in new_facts or []
-        if text_or_empty(fact.get("description"))
-    }
-    for fact in objective_facts:
-        content = text_or_empty(fact.get("fact"))
-        if not content:
-            continue
-        raw_fact = fact_by_description.get(content, {})
-        dedup_key = (text_or_empty(raw_fact.get("dedup_key")) or content).lower()
-        scope = text_or_empty(raw_fact.get("scope"))
-        created_at = fact.get("timestamp")
-        category = _text_or_default(fact.get("category"), "general")
-        source = _text_or_default(fact.get("source"), "conversation_extracted")
-        # A milestone fact is stored ONLY as a MILESTONE memory. The read
-        # layer folds milestones into the objective_facts block so prompt-
-        # facing fact lists still include them — no need to duplicate-write.
-        if raw_fact.get("is_milestone"):
-            memories.append({
-                "memory_type": MemoryType.MILESTONE,
-                "content": content,
-                "created_at": created_at if isinstance(created_at, str) and created_at.strip() else timestamp,
-                "updated_at": timestamp,
-                "category": category,
-                "source": source,
-                "confidence": fact.get("confidence", 0.85),
-                "event_category": text_or_empty(raw_fact.get("milestone_category")),
-                "scope": scope,
-                "dedup_key": dedup_key,
-                "superseded_by": None,
-            })
-        else:
-            memories.append({
-                "memory_type": MemoryType.OBJECTIVE_FACT,
-                "content": content,
-                "created_at": created_at if isinstance(created_at, str) and created_at.strip() else timestamp,
-                "updated_at": timestamp,
-                "category": category,
-                "source": source,
-                "confidence": fact.get("confidence", 0.85),
-                "dedup_key": dedup_key,
-                "scope": scope,
-            })
-
-    for commitment in active_commitments:
-        action = text_or_empty(commitment.get("action"))
-        if not action:
-            continue
-        dedup_key = text_or_empty(commitment.get("dedup_key")) or action
-        created_at = commitment.get("created_at")
-        updated_at = commitment.get("updated_at")
-        memories.append({
-            "memory_type": MemoryType.COMMITMENT,
-            "content": action,
-            "action": action,
-            "commitment_id": text_or_empty(commitment.get("commitment_id")),
-            "target": text_or_empty(commitment.get("target")),
-            "commitment_type": text_or_empty(commitment.get("commitment_type")),
-            "status": _text_or_default(commitment.get("status"), "active"),
-            "source": _text_or_default(commitment.get("source"), "conversation_extracted"),
-            "created_at": created_at if isinstance(created_at, str) and created_at.strip() else timestamp,
-            "updated_at": updated_at if isinstance(updated_at, str) and updated_at.strip() else timestamp,
-            "due_time": commitment.get("due_time"),
-            "dedup_key": dedup_key.lower(),
-        })
-
-    return memories
-
-
 async def db_writer(state: ConsolidatorState) -> dict:
     timestamp = state.get("timestamp") or datetime.now(timezone.utc).isoformat()
     global_user_id = state.get("global_user_id", "")
@@ -550,14 +348,7 @@ async def db_writer(state: ConsolidatorState) -> dict:
         logger.exception("db_writer: failed to upsert character_state")
         write_log["character_state"] = False
 
-    # ── Step 2a: build character diary (subjective per-user notes) ──
-    diary_entries = _build_diary_entries(
-        normalize_diary_entries(state.get("diary_entry")),
-        timestamp=timestamp,
-        interaction_subtext=state.get("interaction_subtext", ""),
-    )
-
-    # ── Step 2b: last relationship insight ──────────────────────────
+    # ── Step 2: last relationship insight ───────────────────────────
     last_relationship_insight = state.get("last_relationship_insight", "")
     if global_user_id and last_relationship_insight:
         try:
@@ -567,28 +358,20 @@ async def db_writer(state: ConsolidatorState) -> dict:
             logger.exception("db_writer: failed to update_last_relationship_insight")
             write_log["relationship_insight"] = False
 
-    # ── Step 3a: objective facts and commitments as profile memories ─
-    new_facts = state.get("new_facts") or []
-    objective_facts = _build_objective_fact_entries(new_facts, timestamp=timestamp)
+    # ── Step 3: unified user-memory units ────────────────────────────
     future_promises = _normalize_future_promises(
         state.get("future_promises") or [],
         timestamp=timestamp,
     )
-    active_commitments = _build_active_commitment_entries(future_promises, timestamp=timestamp)
-    profile_memories = _build_memory_docs(
-        diary_entries=diary_entries,
-        objective_facts=objective_facts,
-        active_commitments=active_commitments,
-        new_facts=new_facts,
-        timestamp=timestamp,
-    )
-    if global_user_id and profile_memories:
-        try:
-            await insert_profile_memories(global_user_id, profile_memories)
-            write_log["user_profile_memories"] = True
-        except PyMongoError:
-            logger.exception("db_writer: failed to insert_profile_memories")
-            write_log["user_profile_memories"] = False
+    try:
+        memory_unit_results = await update_user_memory_units_from_state(state)
+    except Exception:
+        logger.exception("db_writer: failed to update user_memory_units")
+        memory_unit_results = []
+        write_log["user_memory_units"] = False
+    else:
+        write_log["user_memory_units"] = bool(memory_unit_results)
+        metadata["user_memory_unit_results"] = memory_unit_results
 
     scheduled_event_ids: list[str] = []
     dispatch_rejections: list[str] = []
@@ -645,35 +428,12 @@ async def db_writer(state: ConsolidatorState) -> dict:
         user_affinity_score, user_affinity_score + processed_affinity_delta,
     )
 
-    # ── Step 5: user / character images (three-tier rolling) ─────────
-    user_image_task = None
-    if global_user_id:
-        user_image_task = _update_user_image(
-            state,
-            timestamp=timestamp,
-            processed_affinity_delta=processed_affinity_delta,
-        )
+    # ── Step 5: character image ──────────────────────────────────────
     image_results = await asyncio.gather(
-        user_image_task if user_image_task is not None else asyncio.sleep(0, result=None),
         _update_character_image(state, timestamp=timestamp),
         return_exceptions=True,
     )
-    user_image_result, character_image_result = image_results
-
-    if global_user_id:
-        if isinstance(user_image_result, Exception):
-            logger.error(
-                "db_writer: failed to update user_image",
-                exc_info=(type(user_image_result), user_image_result, user_image_result.__traceback__),
-            )
-            write_log["user_image"] = False
-        elif user_image_result is not None:
-            try:
-                await upsert_user_image(global_user_id, user_image_result)
-                write_log["user_image"] = True
-            except PyMongoError:
-                logger.exception("db_writer: failed to upsert_user_image")
-                write_log["user_image"] = False
+    character_image_result = image_results[0]
 
     if isinstance(character_image_result, Exception):
         logger.error(
@@ -698,10 +458,9 @@ async def db_writer(state: ConsolidatorState) -> dict:
     events: list[CacheInvalidationEvent] = []
 
     if global_user_id and (
-        write_log.get("user_profile_memories")
-        or write_log.get("affinity")
+        write_log.get("affinity")
         or write_log.get("relationship_insight")
-        or write_log.get("user_image")
+        or write_log.get("user_memory_units")
     ):
         events.append(CacheInvalidationEvent(
             source="user_profile",

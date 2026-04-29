@@ -24,10 +24,12 @@ from kazusa_ai_chatbot.db import (
     get_conversation_history,
     get_db,
     get_user_profile,
+    insert_user_memory_units,
+    query_user_memory_units,
     resolve_global_user_id,
     save_conversation,
     save_memory,
-    upsert_active_commitments,
+    UserMemoryUnitType,
 )
 from kazusa_ai_chatbot.mcp_client import mcp_manager
 from kazusa_ai_chatbot.rag.cache2_runtime import get_rag_cache2_runtime
@@ -740,11 +742,9 @@ async def test_live_chat_persistent_english_preference_applies_across_turns(live
             platform_channel_id=identity["platform_channel_id"],
         )
 
-        persisted_profile = await get_user_profile(identity["global_user_id"])
+        persisted_units = await query_user_memory_units(identity["global_user_id"])
         persisted_blob = "\n".join(
-            [str(item.get("fact", item.get("description", ""))) for item in (persisted_profile.get("objective_facts") or [])]
-            + [str(item.get("summary", "")) for item in ((persisted_profile.get("user_image") or {}).get("recent_window") or [])]
-            + [str(item.get("description", "")) for item in ((persisted_profile.get("user_image") or {}).get("milestones") or [])]
+            str(item.get("fact", "")) for item in persisted_units
         )
 
         second_response, _ = await _run_chat(
@@ -771,21 +771,20 @@ async def test_live_chat_persistent_english_preference_applies_across_turns(live
 async def test_live_graph_active_commitment_language_applies_on_next_turn(live_env) -> None:
     identity = await _make_identity("english-promise", "LiveEnglishPromiseUser")
     timestamp = datetime.now(timezone.utc).isoformat()
-    await upsert_active_commitments(
+    await insert_user_memory_units(
         identity["global_user_id"],
         [
             {
-                "commitment_id": f"live-english-{uuid4().hex[:8]}",
-                "target": identity["display_name"],
-                "action": "杏山千纱将对 LiveEnglishPromiseUser 主要使用英语交流",
-                "commitment_type": "language_preference",
+                "unit_type": UserMemoryUnitType.ACTIVE_COMMITMENT,
+                "fact": "杏山千纱将对 LiveEnglishPromiseUser 主要使用英语交流",
+                "subjective_appraisal": "这是已经接受的持续语言偏好。",
+                "relationship_signal": "与该用户后续对话应优先自然使用英语。",
                 "status": "active",
-                "source": "seeded_manual",
-                "created_at": timestamp,
                 "updated_at": timestamp,
-                "due_time": (datetime.now(timezone.utc) + timedelta(days=1)).isoformat(),
+                "due_at": (datetime.now(timezone.utc) + timedelta(days=1)).isoformat(),
             }
         ],
+        timestamp=timestamp,
     )
 
     async with _neutral_character_runtime_state():
@@ -1019,10 +1018,7 @@ async def test_live_graph_affinity_positive_delta_for_warm_appreciation(live_env
 
 async def test_live_graph_fact_extraction_persists_profile_updates(live_env) -> None:
     identity = await _make_identity("facts", "LiveFactsUser")
-    before_profile = await get_user_profile(identity["global_user_id"])
-    before_facts = list(before_profile.get("objective_facts") or [])
-    before_recent = list((before_profile.get("user_image") or {}).get("recent_window") or [])
-    before_milestones = list((before_profile.get("user_image") or {}).get("milestones") or [])
+    before_units = await query_user_memory_units(identity["global_user_id"])
 
     result, _ = await _run_graph(
         "facts",
@@ -1033,22 +1029,13 @@ async def test_live_graph_fact_extraction_persists_profile_updates(live_env) -> 
         platform_channel_id=identity["platform_channel_id"],
     )
 
-    after_profile = await get_user_profile(identity["global_user_id"])
-    after_facts = list(after_profile.get("objective_facts") or [])
-    after_recent = list((after_profile.get("user_image") or {}).get("recent_window") or [])
-    after_milestones = list((after_profile.get("user_image") or {}).get("milestones") or [])
+    after_units = await query_user_memory_units(identity["global_user_id"])
     persisted_blob = "\n".join(
-        [str(item.get("fact", "")) for item in after_facts]
-        + [str(item.get("summary", "")) for item in after_recent]
-        + [str(item.get("event", item.get("description", ""))) for item in after_milestones]
+        str(item.get("fact", "")) for item in after_units
     )
 
     assert result.get("final_dialog")
-    assert (
-        len(after_facts) > len(before_facts)
-        or len(after_recent) > len(before_recent)
-        or len(after_milestones) > len(before_milestones)
-    )
+    assert len(after_units) > len(before_units)
     assert any(keyword in persisted_blob for keyword in ("奥克兰", "软件工程师", "辣椒"))
 
 

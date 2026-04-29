@@ -6,7 +6,7 @@ import typing
 import pytest
 
 from kazusa_ai_chatbot.nodes.persona_supervisor2_consolidator_schema import (
-    normalize_diary_entries,
+    normalize_subjective_appraisals,
 )
 from kazusa_ai_chatbot.nodes.persona_supervisor2_schema import GlobalPersonaState, CognitionState
 
@@ -52,7 +52,7 @@ class TestGlobalPersonaState:
 
     def test_has_consolidation_fields(self):
         hints = typing.get_type_hints(GlobalPersonaState)
-        assert "diary_entry" in hints
+        assert "subjective_appraisals" in hints
         assert "last_relationship_insight" in hints
         assert "new_facts" in hints
         assert "future_promises" in hints
@@ -76,17 +76,17 @@ class TestCognitionState:
             assert field in hints, f"Missing cognition field: {field}"
 
 
-def test_normalize_diary_entries_accepts_string_and_string_list() -> None:
-    """Diary boundary accepts native strings and list[str] payloads."""
+def test_normalize_subjective_appraisals_accepts_string_and_string_list() -> None:
+    """Subjective appraisal boundary accepts native string payloads."""
 
-    assert normalize_diary_entries("  one diary entry  ") == ["one diary entry"]
-    assert normalize_diary_entries([" first ", "", "second"]) == ["first", "second"]
+    assert normalize_subjective_appraisals("  one appraisal  ") == ["one appraisal"]
+    assert normalize_subjective_appraisals([" first ", "", "second"]) == ["first", "second"]
 
 
-def test_normalize_diary_entries_does_not_stringify_container_items() -> None:
-    """Diary boundary must not turn dict/list items into repr text."""
+def test_normalize_subjective_appraisals_does_not_stringify_container_items() -> None:
+    """Subjective appraisal boundary must not turn dict/list items into repr text."""
 
-    assert normalize_diary_entries([
+    assert normalize_subjective_appraisals([
         {"entry": "do not stringify"},
         ["do not stringify"],
         " keep me ",

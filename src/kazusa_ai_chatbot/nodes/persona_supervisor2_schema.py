@@ -60,7 +60,7 @@ class GlobalPersonaState(TypedDict):
     reflection_summary: str
 
     # Relationship recorder
-    diary_entry: [str]
+    subjective_appraisals: [str]
     affinity_delta: int
     last_relationship_insight: str
 

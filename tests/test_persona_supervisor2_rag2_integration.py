@@ -23,7 +23,18 @@ async def test_stage_1_research_calls_rag2_and_projects_payload(monkeypatch) -> 
                     "agent": "user_profile_agent",
                     "resolved": True,
                     "summary": "profile",
-                    "raw_result": {"global_user_id": "user-1", "objective_facts": [{"fact": "User likes tea"}]},
+                    "raw_result": {
+                        "global_user_id": "user-1",
+                        "user_memory_context": {
+                            "objective_facts": [
+                                {
+                                    "fact": "User likes tea",
+                                    "subjective_appraisal": "Kazusa sees this as a stable preference.",
+                                    "relationship_signal": "Offer tea-related continuity.",
+                                }
+                            ]
+                        },
+                    },
                 }
             ],
             "unknown_slots": [],
@@ -54,4 +65,4 @@ async def test_stage_1_research_calls_rag2_and_projects_payload(monkeypatch) -> 
     assert captured["context"]["channel_type"] == "group"
     assert captured["context"]["chat_history_recent"] == []
     assert result["rag_result"]["answer"] == "resolved"
-    assert result["rag_result"]["user_image"]["objective_facts"][0]["fact"] == "User likes tea"
+    assert result["rag_result"]["user_image"]["user_memory_context"]["objective_facts"][0]["fact"] == "User likes tea"

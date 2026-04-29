@@ -1,4 +1,4 @@
-"""Export persistent profile memories for one user from MongoDB to JSON.
+"""Export persistent user memory units for one user from MongoDB to JSON.
 
 Typical use:
     python -m scripts.export_user_memories 263c883d-aeff-4e0b-a758-6f69186ae8ec
@@ -19,15 +19,14 @@ from scripts._db_export import (
     default_output_path,
     load_project_env,
     projection_from_exclusions,
-    utc_now,
     write_json_export,
 )
 from kazusa_ai_chatbot.db import (
     close_db,
     get_db,
     get_user_profile,
-    query_user_profile_memory_blocks,
 )
+from kazusa_ai_chatbot.rag.user_memory_unit_retrieval import build_user_memory_context
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -36,11 +35,11 @@ def _build_parser() -> argparse.ArgumentParser:
     Returns:
         Configured argument parser for user-memory export.
     """
-    parser = argparse.ArgumentParser(description="Export persistent user_profile_memories for one user.")
+    parser = argparse.ArgumentParser(description="Export persistent user_memory_units for one user.")
     parser.add_argument("identifier", help="Global user id, or platform user id when --platform is set.")
     parser.add_argument("--platform", help="Platform name for platform-account lookup.")
     parser.add_argument("--raw", action="store_true", help="Export raw memory documents instead of prompt-facing blocks.")
-    parser.add_argument("--include-expired", action="store_true", help="Include expired/deleted rows in raw mode.")
+    parser.add_argument("--include-inactive", action="store_true", help="Include archived/completed/cancelled rows in raw mode.")
     parser.add_argument("--include-embeddings", action="store_true", help="Include vector embeddings in raw output.")
     parser.add_argument("--limit", type=int, default=500, help="Maximum raw memory rows to export.")
     parser.add_argument("--output", type=Path, help="Destination JSON path.")
@@ -74,35 +73,32 @@ async def _resolve_identifier(identifier: str, platform: str | None) -> str:
     return str((profile or {}).get("global_user_id", ""))
 
 
-async def _load_raw_memories(
+async def _load_raw_units(
     global_user_id: str,
     *,
-    include_expired: bool,
+    include_inactive: bool,
     exclude_fields: list[str],
     limit: int,
 ) -> list[dict[str, Any]]:
-    """Load raw ``user_profile_memories`` rows.
+    """Load raw ``user_memory_units`` rows.
 
     Args:
-        global_user_id: Owner of the profile memories.
-        include_expired: Whether deleted and expired rows should be included.
+        global_user_id: Owner of the memory units.
+        include_inactive: Whether inactive rows should be included.
         exclude_fields: Field names to exclude from MongoDB projection.
         limit: Maximum number of rows.
 
     Returns:
-        Raw memory documents sorted by newest first.
+        Raw memory-unit documents sorted by newest first.
     """
     db = await get_db()
     query: dict[str, Any] = {"global_user_id": global_user_id}
-    if not include_expired:
-        query.update({
-            "deleted": {"$ne": True},
-            "expires_at": {"$gt": utc_now().isoformat()},
-        })
+    if not include_inactive:
+        query["status"] = "active"
     cursor = (
-        db.user_profile_memories
+        db.user_memory_units
         .find(query, projection_from_exclusions(exclude_fields))
-        .sort("created_at", -1)
+        .sort([("last_seen_at", -1), ("updated_at", -1)])
         .limit(limit)
     )
     return [dict(doc) for doc in await cursor.to_list(length=limit)]
@@ -129,25 +125,29 @@ async def main() -> None:
             records_key = "memories"
             records: list[dict[str, Any]] | dict[str, Any] = []
             if global_user_id:
-                records = await _load_raw_memories(
+                records = await _load_raw_units(
                     global_user_id,
-                    include_expired=args.include_expired,
+                    include_inactive=args.include_inactive,
                     exclude_fields=exclude_fields,
                     limit=args.limit,
                 )
         else:
-            records_key = "memory_blocks"
+            records_key = "user_memory_context"
             records = {}
             if global_user_id:
-                records = await query_user_profile_memory_blocks(global_user_id, include_semantic=False)
+                records = await build_user_memory_context(
+                    global_user_id,
+                    query_text="",
+                    include_semantic=False,
+                )
 
         query = {
-            "collection": "user_profile_memories",
+            "collection": "user_memory_units",
             "identifier": args.identifier,
             "platform": args.platform,
             "global_user_id": global_user_id,
             "raw": args.raw,
-            "include_expired": args.include_expired,
+            "include_inactive": args.include_inactive,
             "limit": args.limit,
         }
         write_json_export(
@@ -158,9 +158,9 @@ async def main() -> None:
             exclude_fields=exclude_fields,
         )
         if isinstance(records, list):
-            print(f"wrote {len(records)} memory row(s) to {output_path}")
+            print(f"wrote {len(records)} memory unit(s) to {output_path}")
         else:
-            print(f"wrote memory blocks to {output_path}")
+            print(f"wrote user memory context to {output_path}")
     finally:
         await close_db()
 

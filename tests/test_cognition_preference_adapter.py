@@ -22,8 +22,19 @@ def _preference_state() -> dict:
 
     return {
         "decontexualized_input": "please keep replies short",
-        "rag_result": {},
-        "user_profile": {"active_commitments": []},
+        "rag_result": {
+            "user_image": {
+                "user_memory_context": {
+                    "stable_patterns": [],
+                    "recent_shifts": [],
+                    "objective_facts": [],
+                    "milestones": [],
+                    "active_commitments": [],
+                },
+            },
+            "user_memory_unit_candidates": [],
+        },
+        "user_profile": {},
         "character_profile": {
             "name": "Kazusa",
             "personality_brief": {"taboos": []},

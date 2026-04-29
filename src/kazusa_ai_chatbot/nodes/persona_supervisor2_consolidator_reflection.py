@@ -15,7 +15,7 @@ from kazusa_ai_chatbot.config import (
 )
 from kazusa_ai_chatbot.nodes.persona_supervisor2_consolidator_schema import (
     ConsolidatorState,
-    normalize_diary_entries,
+    normalize_subjective_appraisals,
 )
 from kazusa_ai_chatbot.utils import (
     build_affinity_block,
@@ -103,10 +103,10 @@ async def global_state_updater(state: ConsolidatorState) -> dict:
 
 
 _RELATIONSHIP_RECORDER_PROMPT = """\
-你负责更新角色 `{character_name}` 与特定用户 `{user_name}` 的情感档案。重点在于“主观体感”，而非对话本身。
+你负责为角色 `{character_name}` 与特定用户 `{user_name}` 的用户记忆单元提取主观评价证据。重点在于“主观体感”，而非对话复述。
 
 # 核心任务
-将瞬时的思考转化为“长期情感印记”。
+将瞬时的思考转化为可被下游 memory-unit consolidator 使用的 `subjective_appraisals`。
 
 # 核心输入
 - `internal_monologue`: 揭示了{character_name}对用户的真实喜好和内心波动。
@@ -127,7 +127,7 @@ _RELATIONSHIP_RECORDER_PROMPT = """\
 }}
 
 # 记录准则
-1. 日记条目: 以{character_name}的主观视角书写。利用 `interaction_subtext` 中的暗示，描述“我”对 他/她 这种行为的真实看法。
+1. 主观评价证据: 以{character_name}的主观视角书写，描述“我”如何理解他/她这次行为背后的关系意义。不要写成日记，不要复述对话流程。
 2. 分值修正 `affinity_delta`: 只根据 `internal_monologue` 与 `emotional_appraisal` 中**可直接观察到**的主观好恶来加减分（-5 到 +5）。
 3. **默认值规则：** 大多数普通对话都应输出 `affinity_delta = 0`。只有当内心证据明确显示“这次互动让我明显更舒服/更开心/更被理解/更信任对方”时才给正分；只有当内心证据明确显示“这次互动让我明显更烦躁/更压迫/更反感/更受伤”时才给负分。
 4. **静默检查：** 若 `internal_monologue` 与 `emotional_appraisal` 中未见明显情感起伏，返回 `{{"skip": true, "affinity_delta": 0}}`。
@@ -150,7 +150,7 @@ _RELATIONSHIP_RECORDER_PROMPT = """\
 请务必返回合法的 JSON 字符串，仅包含以下字段：
 {{
     "skip": boolean,
-    "diary_entry": ["带有 {character_mbti} 风格的主观笔记（30字以内）", ...],
+    "subjective_appraisals": ["带有 {character_mbti} 风格的主观关系判断（30字以内）", ...],
     "affinity_delta": int,
     "last_relationship_insight": "此时此刻对他/她最核心的一个标签或看法"
 }}
@@ -170,7 +170,7 @@ async def relationship_recorder(state: ConsolidatorState) -> dict:
     ))
 
     # Convert affinity score into status and instruction
-    user_affinity_score = state["user_profile"].get("affinity", AFFINITY_DEFAULT)
+    user_affinity_score = state["user_profile"]["affinity"]
     affinity_block = build_affinity_block(user_affinity_score)
 
     msg = {
@@ -182,7 +182,7 @@ async def relationship_recorder(state: ConsolidatorState) -> dict:
             "instruction": affinity_block["instruction"]
         },
         "logical_stance": state["logical_stance"],
-        "character_intent": state.get("character_intent", ""),
+        "character_intent": state["character_intent"],
     }
 
     human_message = HumanMessage(content=json.dumps(msg, ensure_ascii=False))
@@ -191,12 +191,12 @@ async def relationship_recorder(state: ConsolidatorState) -> dict:
 
     result = parse_llm_json_output(response.content)
 
-    diary_entry = normalize_diary_entries(result.get("diary_entry"))
+    subjective_appraisals = normalize_subjective_appraisals(result.get("subjective_appraisals"))
     logger.debug(
-        "Relationship recorder: skip=%s affinity_delta=%s diary=%s insight=%s",
+        "Relationship recorder: skip=%s affinity_delta=%s appraisals=%s insight=%s",
         result.get("skip", False),
         result.get("affinity_delta", 0),
-        log_list_preview(diary_entry),
+        log_list_preview(subjective_appraisals),
         log_preview(result.get("last_relationship_insight", "")),
     )
 
@@ -219,7 +219,7 @@ async def relationship_recorder(state: ConsolidatorState) -> dict:
         raw_affinity_delta = 0
 
     return {
-        "diary_entry": diary_entry,
+        "subjective_appraisals": subjective_appraisals,
         "affinity_delta": raw_affinity_delta,
         "last_relationship_insight": result.get("last_relationship_insight"),
     }

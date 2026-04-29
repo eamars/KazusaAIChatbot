@@ -22,7 +22,7 @@ def _state() -> dict:
         "mood": "neutral",
         "global_vibe": "",
         "reflection_summary": "",
-        "diary_entry": ["User sounded happy"],
+        "subjective_appraisals": ["User sounded happy"],
         "interaction_subtext": "test",
         "last_relationship_insight": "friendly",
         "new_facts": [{
@@ -37,18 +37,16 @@ def _state() -> dict:
     }
 
 
-def _patch_writers(monkeypatch, *, user_image=None, character_image=None) -> MagicMock:
+def _patch_writers(monkeypatch, *, character_image=None) -> MagicMock:
     runtime = MagicMock()
     runtime.invalidate = AsyncMock(return_value=1)
     monkeypatch.setattr(persistence_module, "get_rag_cache2_runtime", MagicMock(return_value=runtime))
     monkeypatch.setattr(persistence_module, "upsert_character_state", AsyncMock())
     monkeypatch.setattr(persistence_module, "update_last_relationship_insight", AsyncMock())
-    monkeypatch.setattr(persistence_module, "insert_profile_memories", AsyncMock(return_value=[]))
     monkeypatch.setattr(persistence_module, "update_affinity", AsyncMock())
-    monkeypatch.setattr(persistence_module, "upsert_user_image", AsyncMock())
     monkeypatch.setattr(persistence_module, "upsert_character_self_image", AsyncMock())
-    monkeypatch.setattr(persistence_module, "_update_user_image", AsyncMock(return_value=user_image))
     monkeypatch.setattr(persistence_module, "_update_character_image", AsyncMock(return_value=character_image))
+    monkeypatch.setattr(persistence_module, "update_user_memory_units_from_state", AsyncMock(return_value=[]))
     monkeypatch.setattr(persistence_module, "_task_dispatcher", None)
     monkeypatch.setattr(persistence_module, "_task_registry", None)
     return runtime
@@ -58,7 +56,6 @@ def _patch_writers(monkeypatch, *, user_image=None, character_image=None) -> Mag
 async def test_db_writer_emits_user_profile_and_character_state_events(monkeypatch) -> None:
     runtime = _patch_writers(
         monkeypatch,
-        user_image={"recent_window": []},
         character_image={"recent_window": []},
     )
 
@@ -72,7 +69,7 @@ async def test_db_writer_emits_user_profile_and_character_state_events(monkeypat
 
 @pytest.mark.asyncio
 async def test_db_writer_never_emits_user_image_source(monkeypatch) -> None:
-    runtime = _patch_writers(monkeypatch, user_image={"recent_window": []})
+    runtime = _patch_writers(monkeypatch)
 
     await persistence_module.db_writer(_state())
 

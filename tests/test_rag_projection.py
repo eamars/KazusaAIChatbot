@@ -13,7 +13,15 @@ def test_project_known_facts_empty_payload() -> None:
     )
 
     assert result["answer"] == ""
-    assert result["user_image"] == {}
+    assert result["user_image"] == {
+        "user_memory_context": {
+            "stable_patterns": [],
+            "recent_shifts": [],
+            "objective_facts": [],
+            "milestones": [],
+            "active_commitments": [],
+        }
+    }
     assert result["character_image"] == {}
     assert result["supervisor_trace"]["dispatched"] == []
 
@@ -26,7 +34,27 @@ def test_project_known_facts_routes_current_and_character_profiles() -> None:
                 "agent": "user_profile_agent",
                 "resolved": True,
                 "summary": "current user",
-                "raw_result": {"global_user_id": "user-1", "objective_facts": [{"fact": "User likes tea"}]},
+                "raw_result": {
+                    "global_user_id": "user-1",
+                    "user_memory_context": {
+                        "objective_facts": [
+                            {
+                                "fact": "User likes tea",
+                                "subjective_appraisal": "Kazusa sees this as a stable preference.",
+                                "relationship_signal": "Offer tea-related continuity.",
+                            }
+                        ]
+                    },
+                    "_user_memory_units": [
+                        {
+                            "unit_id": "unit-1",
+                            "unit_type": "objective_fact",
+                            "fact": "User likes tea",
+                            "subjective_appraisal": "Kazusa sees this as a stable preference.",
+                            "relationship_signal": "Offer tea-related continuity.",
+                        }
+                    ],
+                },
             },
             {
                 "slot": "character profile",
@@ -44,7 +72,9 @@ def test_project_known_facts_routes_current_and_character_profiles() -> None:
     )
 
     assert result["answer"] == "done"
-    assert result["user_image"]["objective_facts"][0]["fact"] == "User likes tea"
+    assert result["user_image"]["user_memory_context"]["objective_facts"][0]["fact"] == "User likes tea"
+    assert "_user_memory_units" not in result["user_image"]
+    assert result["user_memory_unit_candidates"][0]["unit_id"] == "unit-1"
     assert result["character_image"]["self_image"]["historical_summary"] == "calm"
     assert result["supervisor_trace"]["loop_count"] == 2
     assert result["supervisor_trace"]["unknown_slots"] == ["missing"]

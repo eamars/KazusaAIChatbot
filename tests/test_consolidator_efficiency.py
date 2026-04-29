@@ -17,9 +17,6 @@ def _global_state() -> dict:
         "user_name": "User",
         "user_profile": {
             "affinity": 500,
-            "objective_facts": [{"dedup_key": "likes_tea", "fact": "User likes tea"}],
-            "active_commitments": [{"dedup_key": "reply_english", "action": "Kazusa will reply in English"}],
-            "user_image": {"milestones": [{"dedup_key": "met_kazusa", "event": "Met Kazusa"}]},
         },
         "platform": "qq",
         "platform_channel_id": "chan-1",
@@ -33,7 +30,15 @@ def _global_state() -> dict:
         "character_intent": "PROVIDE",
         "logical_stance": "CONFIRM",
         "character_profile": {"name": "Kazusa"},
-        "rag_result": {},
+        "rag_result": {
+            "user_image": {
+                "user_memory_context": {
+                    "objective_facts": [{"dedup_key": "likes_tea", "fact": "User likes tea"}],
+                    "active_commitments": [{"dedup_key": "reply_english", "fact": "Kazusa will reply in English"}],
+                    "milestones": [{"dedup_key": "met_kazusa", "fact": "Met Kazusa"}],
+                }
+            }
+        },
         "decontexualized_input": "hello",
     }
 
@@ -52,7 +57,7 @@ async def test_empty_harvester_output_skips_evaluator(monkeypatch) -> None:
         return {"mood": "", "global_vibe": "", "reflection_summary": ""}
 
     async def _relationship_recorder(_state):
-        return {"diary_entry": [], "affinity_delta": 0, "last_relationship_insight": ""}
+        return {"subjective_appraisals": [], "affinity_delta": 0, "last_relationship_insight": ""}
 
     async def _facts_harvester(state):
         assert state["existing_dedup_keys"] == {"likes_tea", "reply_english", "met_kazusa"}
@@ -93,12 +98,10 @@ async def test_db_writer_runs_image_updaters_through_gather(monkeypatch) -> None
     monkeypatch.setattr(persistence_module, "get_rag_cache2_runtime", MagicMock(return_value=MagicMock(invalidate=AsyncMock(return_value=0))))
     monkeypatch.setattr(persistence_module, "upsert_character_state", AsyncMock())
     monkeypatch.setattr(persistence_module, "update_last_relationship_insight", AsyncMock())
-    monkeypatch.setattr(persistence_module, "insert_profile_memories", AsyncMock(return_value=[]))
     monkeypatch.setattr(persistence_module, "update_affinity", AsyncMock())
-    monkeypatch.setattr(persistence_module, "upsert_user_image", AsyncMock())
     monkeypatch.setattr(persistence_module, "upsert_character_self_image", AsyncMock())
-    monkeypatch.setattr(persistence_module, "_update_user_image", AsyncMock(return_value=None))
     monkeypatch.setattr(persistence_module, "_update_character_image", AsyncMock(return_value=None))
+    monkeypatch.setattr(persistence_module, "update_user_memory_units_from_state", AsyncMock(return_value=[]))
     monkeypatch.setattr(persistence_module, "_task_dispatcher", None)
     monkeypatch.setattr(persistence_module, "_task_registry", None)
 
@@ -114,7 +117,7 @@ async def test_db_writer_runs_image_updaters_through_gather(monkeypatch) -> None
         "mood": "neutral",
         "global_vibe": "",
         "reflection_summary": "",
-        "diary_entry": [],
+        "subjective_appraisals": [],
         "interaction_subtext": "",
         "last_relationship_insight": "",
         "new_facts": [],
@@ -125,5 +128,5 @@ async def test_db_writer_runs_image_updaters_through_gather(monkeypatch) -> None
     })
 
     assert len(gather_calls) == 1
-    assert len(gather_calls[0][0]) == 2
+    assert len(gather_calls[0][0]) == 1
     assert gather_calls[0][1] is True
