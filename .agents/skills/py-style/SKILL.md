@@ -5,7 +5,7 @@ description: Enforce and review Python coding style for this project. PEP 8 is t
 
 # Python Style Guide
 
-PEP 8 is the baseline style guide for all Python code in this project. On top of PEP 8, this skill defines and enforces the project's twelve explicit coding standards. Apply both layers proactively when writing Python code, and surface every violation when reviewing code.
+PEP 8 is the baseline style guide for all Python code in this project. On top of PEP 8, this skill defines and enforces the project's fourteen explicit coding standards. Apply both layers proactively when writing Python code, and surface every violation when reviewing code.
 
 When PEP 8 and a project-specific rule overlap, follow the stricter project-specific rule. When PEP 8 covers an issue not mentioned here, follow PEP 8.
 
@@ -409,18 +409,76 @@ When reviewing: for every LLM-backed handler, verify the prompt, LLM object, and
 
 ---
 
+## Rule 13 — Search for existing functions before adding a new one
+
+Before adding any new function or method, search the project for similar behavior first, including private helpers prefixed with `_`. Reusing an existing function keeps behavior consistent, avoids parallel implementations drifting apart, and respects the local abstractions that already exist in the codebase.
+
+Use `rg` or another fast project-wide search to look for nearby concepts, verbs, return shapes, and domain nouns. Search outside the current file when the behavior is not obviously local. Prefer adapting the call site to an existing helper when the existing function already expresses the same concept, even if its name or privacy level means you need to read its callers before deciding.
+
+**Wrong:**
+```python
+def normalize_memory_text(text: str) -> str:
+    return " ".join(text.strip().split())
+```
+
+when the project already has:
+
+```python
+def _normalize_text_for_memory(text: str) -> str:
+    ...
+```
+
+**Right:**
+```python
+normalized_text = _normalize_text_for_memory(raw_text)
+```
+
+When reviewing: for each newly added function or method, ask what project search was done and whether an existing public or private function already covers the behavior. Flag duplicate implementations unless there is a clear reason the existing helper cannot be reused.
+
+---
+
+## Rule 14 — Add helper functions only when the abstraction earns its place
+
+Helper functions are not automatically cleaner. A small block of straightforward code is often easier to read inline than behind a new name, especially when it is used once or twice. Add a helper only when it removes real repetition or clarifies a genuinely complex operation.
+
+As a default threshold, require the same logic block to be used at least three times before extracting a helper. A helper used fewer than three times needs a concrete justification such as isolating a complex domain concept, giving a testable name to non-obvious behavior, or matching an established local pattern. Without that justification, keep the code direct and readable at the call site.
+
+**Wrong:**
+```python
+def _build_result(status: str, message: str) -> dict[str, str]:
+    return {"status": status, "message": message}
+
+result = _build_result("ok", "Saved")
+```
+
+**Right:**
+```python
+result = {"status": "ok", "message": "Saved"}
+```
+
+**Also right when repetition justifies it:**
+```python
+def _build_result(status: str, message: str) -> dict[str, str]:
+    """Build the status payload shared by save, delete, and refresh handlers."""
+    return {"status": status, "message": message}
+```
+
+When reviewing: challenge every newly added helper. If it is not used at least three times, require a clear readability, testability, or existing-pattern justification. Otherwise inline the logic and keep the code simple.
+
+---
+
 ## Review workflow
 
 When asked to review a file or selection:
 
 1. Read the code in full.
-2. First check for PEP 8 violations, then check the twelve project-specific rules.
+2. First check for PEP 8 violations, then check the fourteen project-specific rules.
 3. For each violation, list the line reference, the violated standard, and a one-sentence explanation of why it violates the rule.
 4. Propose the corrected version inline.
 5. If no violations are found, say so explicitly.
 
 When writing new code:
 
-Apply PEP 8 and all twelve project-specific rules before producing any output. If a rule conflict arises or a genuine exception is needed, surface it to the user with the reasoning rather than silently picking one path.
+Apply PEP 8 and all fourteen project-specific rules before producing any output. If a rule conflict arises or a genuine exception is needed, surface it to the user with the reasoning rather than silently picking one path.
 
 See `references/examples.md` for additional annotated before/after examples.

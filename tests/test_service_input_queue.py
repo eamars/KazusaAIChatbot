@@ -19,6 +19,8 @@ def _request(
     platform_channel_id: str = "chan-1",
     platform_user_id: str | None = None,
     content: str | None = None,
+    content_type: str = "text",
+    attachments: list[dict[str, object]] | None = None,
     mentioned_bot: bool = False,
     reply_to_current_bot: bool | None = None,
 ) -> service_module.ChatRequest:
@@ -26,6 +28,9 @@ def _request(
 
     Args:
         message_id: Platform message identifier.
+        content: Message body; empty string is preserved for media-only input.
+        content_type: Adapter-provided content type.
+        attachments: Adapter-provided attachment payloads.
         mentioned_bot: Whether the adapter marked a structural bot mention.
         reply_to_current_bot: Adapter-supplied bot-reply marker.
 
@@ -46,8 +51,13 @@ def _request(
         platform_bot_id="bot-1",
         display_name=f"User {message_id}",
         channel_name="Group",
-        content=content or f"message {message_id}",
+        content=f"message {message_id}" if content is None else content,
+        content_type=content_type,
         mentioned_bot=mentioned_bot,
+        attachments=[
+            service_module.AttachmentIn(**attachment)
+            for attachment in attachments or []
+        ],
         reply_context=reply_context,
     )
     return request
@@ -60,6 +70,8 @@ def _item(
     platform_channel_id: str = "chan-1",
     platform_user_id: str | None = None,
     content: str | None = None,
+    content_type: str = "text",
+    attachments: list[dict[str, object]] | None = None,
     timestamp: str | None = None,
     mentioned_bot: bool = False,
     reply_to_current_bot: bool | None = None,
@@ -68,6 +80,9 @@ def _item(
 
     Args:
         sequence: Queue sequence number.
+        content: Message body; empty string is preserved for media-only input.
+        content_type: Adapter-provided content type.
+        attachments: Adapter-provided attachment payloads.
         mentioned_bot: Whether the request is tagged.
         reply_to_current_bot: Adapter-supplied bot-reply marker.
 
@@ -86,6 +101,8 @@ def _item(
             platform_channel_id=platform_channel_id,
             platform_user_id=platform_user_id,
             content=content,
+            content_type=content_type,
+            attachments=attachments,
             mentioned_bot=mentioned_bot,
             reply_to_current_bot=reply_to_current_bot,
         ),
@@ -558,5 +575,100 @@ async def test_worker_saves_collapsed_messages_before_graph(monkeypatch) -> None
     assert call_order[:3] == ["save:2", "save:1", "graph"]
     assert captured_state["user_input"] == "first\nsecond"
     assert captured_state["use_reply_feature"] is False
+
+    await _reset_queue_state()
+
+
+@pytest.mark.asyncio
+async def test_worker_preserves_collapsed_image_input(monkeypatch) -> None:
+    """Collapsed image input should reach graph and persist safe metadata."""
+
+    await _reset_queue_state()
+    captured_state = {}
+    saved_docs = []
+
+    class _Graph:
+        """Capture graph state for the multimedia turn."""
+
+        async def ainvoke(self, state):
+            captured_state.update(state)
+            return {
+                "should_respond": False,
+                "use_reply_feature": False,
+                "final_dialog": [],
+                "future_promises": [],
+                "consolidation_state": None,
+            }
+
+    async def _save_conversation(doc):
+        saved_docs.append(doc)
+
+    monkeypatch.setattr(service_module, "save_conversation", _save_conversation)
+    _patch_common_dependencies(monkeypatch, _Graph())
+
+    first = _item(
+        1,
+        platform_user_id="user-1",
+        content="Kazusa, look",
+        content_type="mixed",
+        mentioned_bot=True,
+        attachments=[{
+            "media_type": "image/png",
+            "base64_data": "first-image-bytes",
+            "description": "first image",
+            "url": "https://example.test/first.png",
+            "size_bytes": 111,
+        }],
+    )
+    second = _item(
+        2,
+        platform_user_id="user-1",
+        content="",
+        content_type="image",
+        attachments=[{
+            "media_type": "image/jpeg",
+            "base64_data": "second-image-bytes",
+            "description": "second image",
+            "url": "https://example.test/second.jpg",
+            "size_bytes": 222,
+        }],
+    )
+    service_module._chat_input_queue.extend_for_test([first, second])
+
+    service_module._ensure_chat_input_worker_started()
+    await service_module._chat_input_queue.notify_for_test()
+
+    collapsed_response = await asyncio.wait_for(second.future, timeout=1.0)
+    survivor_response = await asyncio.wait_for(first.future, timeout=1.0)
+
+    assert collapsed_response.messages == []
+    assert survivor_response.messages == []
+    assert captured_state["user_multimedia_input"] == [
+        {
+            "content_type": "image/png",
+            "base64_data": "first-image-bytes",
+            "description": "first image",
+        },
+        {
+            "content_type": "image/jpeg",
+            "base64_data": "second-image-bytes",
+            "description": "second image",
+        },
+    ]
+
+    saved_by_message_id = {
+        doc["platform_message_id"]: doc
+        for doc in saved_docs
+    }
+    assert saved_by_message_id["2"]["content"] == ""
+    assert saved_by_message_id["2"]["content_type"] == "image"
+    assert saved_by_message_id["2"]["attachments"] == [{
+        "media_type": "image/jpeg",
+        "url": "https://example.test/second.jpg",
+        "description": "second image",
+        "size_bytes": 222,
+    }]
+    assert "base64_data" not in saved_by_message_id["1"]["attachments"][0]
+    assert "base64_data" not in saved_by_message_id["2"]["attachments"][0]
 
     await _reset_queue_state()

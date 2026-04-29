@@ -78,6 +78,7 @@ class AttachmentIn(BaseModel):
     url: str = ""
     base64_data: str = ""
     description: str = ""
+    size_bytes: int | None = None
 
 
 class DebugModesIn(BaseModel):
@@ -118,6 +119,7 @@ class AttachmentOut(BaseModel):
     url: str = ""
     base64_data: str = ""
     description: str = ""
+    size_bytes: int | None = None
 
 
 class ChatResponse(BaseModel):
@@ -393,6 +395,20 @@ async def _save_user_message_from_item(
     """
 
     req = item.request
+    attachment_docs: list[dict[str, Any]] = []
+    for attachment in req.attachments:
+        attachment_doc: dict[str, Any] = {}
+        if attachment.media_type:
+            attachment_doc["media_type"] = attachment.media_type
+        if attachment.url:
+            attachment_doc["url"] = attachment.url
+        if attachment.description:
+            attachment_doc["description"] = attachment.description
+        if attachment.size_bytes is not None:
+            attachment_doc["size_bytes"] = attachment.size_bytes
+        if attachment_doc:
+            attachment_docs.append(attachment_doc)
+
     try:
         await save_conversation({
             "platform": req.platform,
@@ -404,7 +420,9 @@ async def _save_user_message_from_item(
             "display_name": req.display_name,
             "channel_type": req.channel_type,
             "content": req.content,
+            "content_type": req.content_type,
             "mentioned_bot": req.mentioned_bot,
+            "attachments": attachment_docs,
             "reply_context": reply_context,
             "timestamp": item.timestamp,
         })
@@ -514,12 +532,16 @@ async def _process_queued_chat_item(item: QueuedChatItem) -> None:
         global_user_id, user_profile = await _resolve_queued_user(item)
 
         multimedia_input: list[MultiMediaDoc] = []
-        for att in req.attachments:
-            if att.media_type.startswith("image/") and att.base64_data:
+        for queued_item in [item, *item.collapsed_items]:
+            for attachment in queued_item.request.attachments:
+                if not attachment.media_type.startswith("image/"):
+                    continue
+                if not attachment.base64_data:
+                    continue
                 multimedia_input.append({
-                    "content_type": att.media_type,
-                    "base64_data": att.base64_data,
-                    "description": att.description,
+                    "content_type": attachment.media_type,
+                    "base64_data": attachment.base64_data,
+                    "description": attachment.description,
                 })
 
         history = await get_conversation_history(
