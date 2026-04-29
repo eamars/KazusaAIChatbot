@@ -159,6 +159,11 @@ def _require_string(value: Any, field_name: str, *, default: str = "") -> str:
 
 
 def _string_list(value: Any, field_name: str) -> list[str]:
+    if value is None:
+        return_value: list[str] = []
+        return return_value
+    if isinstance(value, str):
+        value = [value]
     if not isinstance(value, list):
         raise ValueError(f"{field_name} must be a list")
     result: list[str] = []
