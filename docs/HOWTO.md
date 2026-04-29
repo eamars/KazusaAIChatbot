@@ -64,7 +64,6 @@ EMBEDDING_MODEL=your-embedding-model
 # Character and service behavior
 CHARACTER_GLOBAL_USER_ID=00000000-0000-4000-8000-000000000001
 CONVERSATION_HISTORY_LIMIT=10
-BRAIN_EXECUTOR_COUNT=1
 SCHEDULED_TASKS_ENABLED=true
 
 # MCP servers and timeouts
@@ -249,6 +248,21 @@ scopes, or cached retrieval results.
 
 Primary brain entrypoint.
 
+The endpoint enqueues each request into the brain's process-local input queue
+and waits for the queued item's response. The queue worker processes one
+surviving item at a time. When bursts grow past the queue thresholds, plain
+unaddressed messages are pruned before relevance/RAG; pruned messages are still
+saved to `conversation_history` and return an empty `ChatResponse`.
+
+Adapters own platform-specific reply detection. The brain protects a queued
+reply only when `reply_context.reply_to_current_bot` is `true`; a raw
+`reply_to_message_id` alone is not enough.
+
+After a surviving turn produces its user-facing reply, the worker awaits bot
+message persistence, conversation-progress recording, consolidation, and the
+resulting Cache2 invalidation before consuming the next queued chat item. This
+keeps the next RAG pass from reading stale durable facts.
+
 Important request fields:
 
 - `platform`
@@ -262,6 +276,12 @@ Important request fields:
 - `attachments`
 - `reply_context`
 - `debug_modes`
+
+Useful drop-audit log line:
+
+```text
+Queued chat item dropped: sequence=... platform=... channel=... message=... user=... display_name=... tagged=... bot_reply=... content="..."
+```
 
 Current attachment behavior:
 

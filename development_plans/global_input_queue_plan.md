@@ -4,14 +4,14 @@
 
 - Goal: Add a global input queue so noisy message bursts are pruned before relevance/RAG, while preserving RAG-safe one-at-a-time processing.
 - Plan class: medium
-- Status: approved
+- Status: completed
 - Overall cutover strategy: compatible
 - Highest-risk areas: request lifecycle changes, dropped-message persistence, queue pruning correctness, adapter timeouts, and preserving the consolidation/RAG integrity gate.
 - Acceptance criteria: `/chat` enqueues requests, prunes queued noise by the approved policy, saves dropped user messages without character replies, and never starts the next RAG pass before the previous consumed turn's writes/consolidation finish.
 
 ## Context
 
-Current `/chat` processes one request through the service graph and uses the chat semaphore to prevent the next RAG pass from starting before previous post-response persistence/consolidation finishes.
+Before this plan, `/chat` processed one request through the service graph and used a chat semaphore to prevent the next RAG pass from starting before previous post-response persistence/consolidation finished.
 
 The new architecture must move from direct request processing to queued input processing:
 
@@ -105,20 +105,21 @@ A single global worker owns graph execution:
 
 ## Interface Contract
 
-Add an internal queued item shape with these fields:
+Add an internal queued item shape with these durable fields:
 
 ```python
 {
     "sequence": int,
     "request": ChatRequest,
     "timestamp": str,
-    "reply_context": ReplyContext,
-    "global_user_id": str,
-    "user_profile": dict,
-    "bot_name": str,
     "future": asyncio.Future[ChatResponse],
 }
 ```
+
+The worker resolves `reply_context`, `global_user_id`, `user_profile`, and
+`bot_name` lazily at drop/consume time. Pruning must use only the raw
+adapter-supplied request fields, and dropped-message persistence must complete
+before the next surviving item reaches graph/RAG.
 
 Queue policy helpers must be deterministic:
 
@@ -172,20 +173,30 @@ It must not call `_hydrate_reply_context(...)`, query `conversation_history`, co
   - resolve its response future,
   - await bot-save/progress/consolidation before the next loop.
 - Update lifespan startup/shutdown to start and cancel/drain the worker safely.
-- Keep the current semaphore behavior only if still useful as a defensive guard inside the worker; the queue worker becomes the primary one-at-a-time gate.
+- Remove obsolete semaphore behavior once the queue worker is the primary one-at-a-time gate.
 - Add tests.
 
 ## Verification
 
 ### Tests
 
-Run:
+Completed:
 
 ```powershell
 pytest tests\test_service_input_queue.py -q
 pytest tests\test_service_background_consolidation.py -q
 pytest tests\test_service_health.py tests\test_persona_supervisor2.py tests\test_consolidator_efficiency.py -q
 ```
+
+Execution evidence:
+
+- `python -m py_compile src\kazusa_ai_chatbot\service.py tests\test_service_input_queue.py tests\test_service_background_consolidation.py` passed.
+- `pytest tests\test_service_input_queue.py tests\test_service_background_consolidation.py -q` passed: 14 tests.
+- `pytest tests\test_service_health.py tests\test_persona_supervisor2.py tests\test_consolidator_efficiency.py -q` passed: 8 tests.
+- Follow-up cleanup removed the unused legacy chat semaphore and made worker
+  shutdown reset the local queue sequence counter.
+- Follow-up logging enriched each dropped-message log with platform message,
+  user, display name, tagged/bot-reply flags, and a content preview.
 
 ### Required Test Cases
 

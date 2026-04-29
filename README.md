@@ -16,6 +16,7 @@ Kazusa is an experimental digital-character runtime with:
 - Long-term user and relationship memory.
 - Short-term conversation-flow continuity.
 - Evidence retrieval over profiles, memories, conversation history, and optional web sources.
+- A process-local input queue that drops burst noise before RAG while preserving addressed messages.
 - Background consolidation that turns completed interactions into durable state.
 - Scheduled follow-through for accepted future promises.
 - Adapter-neutral deployment across chat platforms.
@@ -35,6 +36,9 @@ Chat platform / debug client
         |
         v
 Brain service
+  - enqueue inbound messages
+  - prune burst noise before RAG
+  - save dropped user messages without replying
         |
         v
 Listen gate + perception
@@ -60,7 +64,7 @@ Background consolidation
   - schedule accepted future follow-through
 ```
 
-The response path is kept bounded. Heavier memory writes, image updates, cache invalidation, and scheduling happen after the user-facing reply is already available.
+The response path is kept bounded. Heavier memory writes, image updates, cache invalidation, and scheduling happen after the user-facing reply is already available. The service still waits for those post-response writes before consuming the next queued chat item, so the next RAG pass does not read stale durable facts or stale Cache2 entries.
 
 ## Memory Horizons
 
@@ -89,7 +93,7 @@ This separation matters. Recent chat helps Kazusa sound locally present, short-t
 
 **Brain Service**
 
-The service is the stable HTTP-facing core. It receives platform-neutral chat requests, runs the turn pipeline, persists conversation rows, exposes health data, and coordinates startup/shutdown work.
+The service is the stable HTTP-facing core. It receives platform-neutral chat requests, queues them, prunes noisy bursts, runs the surviving turn pipeline, persists conversation rows, exposes health data, and coordinates startup/shutdown work. Dropped queued messages are still saved as user conversation rows, but they do not run relevance, RAG, cognition, dialog, or consolidation.
 
 **Persona Pipeline**
 
@@ -144,6 +148,9 @@ Adapters and clients
         |
         v
 Brain service
+        |
+        +-- global input queue
+        |     prune burst noise -> persist dropped messages
         |
         +-- turn pipeline
         |     relevance -> retrieval -> cognition -> dialog

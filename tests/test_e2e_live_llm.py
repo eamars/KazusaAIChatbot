@@ -66,7 +66,6 @@ async def live_env():
 
     brain_service._personality = character_profile
     brain_service._graph = brain_service._build_graph()
-    brain_service._chat_executor_semaphore = None
 
     await mcp_manager.start()
 

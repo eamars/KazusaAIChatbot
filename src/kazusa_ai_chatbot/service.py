@@ -8,8 +8,10 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections import deque
 from collections.abc import Mapping
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
 
@@ -17,7 +19,6 @@ from fastapi import FastAPI, BackgroundTasks
 from pydantic import BaseModel, Field
 
 from kazusa_ai_chatbot.config import (
-    BRAIN_EXECUTOR_COUNT,
     CHARACTER_GLOBAL_USER_ID,
     CHAT_HISTORY_RECENT_LIMIT,
     CONVERSATION_HISTORY_LIMIT,
@@ -270,34 +271,21 @@ def _compact_reply_context(reply_context: ReplyContext) -> ReplyContext:
 
 
 async def _hydrate_reply_context(req: ChatRequest) -> ReplyContext:
+    """Build service-facing reply context from adapter-supplied metadata only.
+
+    Args:
+        req: Incoming chat request from an adapter.
+
+    Returns:
+        Compact reply context. The brain service intentionally does not query
+        conversation history to infer reply ownership; adapters own that
+        platform-specific normalization.
+    """
+
     reply_context: ReplyContext = req.reply_context.model_dump(exclude_none=True)
 
     if req.reply_to_message_id and not reply_context.get("reply_to_message_id"):
         reply_context["reply_to_message_id"] = req.reply_to_message_id
-
-    reply_to_message_id = reply_context.get("reply_to_message_id", "")
-    if reply_to_message_id and not reply_context.get("reply_to_platform_user_id"):
-        db = await get_db()
-        reply_doc = await db.conversation_history.find_one(
-            {
-                "platform": req.platform,
-                "platform_channel_id": req.platform_channel_id,
-                "platform_message_id": reply_to_message_id,
-            },
-            projection={
-                "platform_user_id": 1,
-                "display_name": 1,
-                "content": 1,
-            },
-        )
-        if reply_doc is not None:
-            reply_context["reply_to_platform_user_id"] = reply_doc.get("platform_user_id", "")
-            reply_context["reply_to_display_name"] = reply_doc.get("display_name", "")
-            reply_context["reply_excerpt"] = reply_doc.get("content", "")
-
-    reply_to_platform_user_id = reply_context.get("reply_to_platform_user_id", "")
-    if reply_to_platform_user_id:
-        reply_context["reply_to_current_bot"] = reply_to_platform_user_id == req.platform_bot_id
 
     return_value = _compact_reply_context(reply_context)
     return return_value
@@ -377,10 +365,470 @@ async def _save_bot_message(result: dict) -> None:
 
 _personality: dict = {}
 _graph = None
-_chat_executor_semaphore: asyncio.Semaphore | None = None
 _task_dispatcher: TaskDispatcher | None = None
 _adapter_registry: AdapterRegistry | None = None
 _character_identity_backfilled: set[tuple[str, str, str]] = set()
+
+
+@dataclass
+class _QueuedChatItem:
+    """One pending chat request managed by the global input queue.
+
+    Args:
+        sequence: Monotonic brain-local arrival sequence.
+        request: Original chat request payload.
+        timestamp: Stable timestamp assigned at enqueue time.
+        future: Response future awaited by the `/chat` endpoint.
+    """
+
+    sequence: int
+    request: ChatRequest
+    timestamp: str
+    future: asyncio.Future[ChatResponse]
+
+
+_chat_input_queue: deque[_QueuedChatItem] = deque()
+_chat_queue_condition: asyncio.Condition | None = None
+_chat_queue_worker_task: asyncio.Task | None = None
+_chat_queue_sequence = 0
+
+
+def _get_chat_queue_condition() -> asyncio.Condition:
+    """Return the input-queue condition, creating it for the active loop.
+
+    Returns:
+        The condition used to wake the queue worker.
+    """
+
+    global _chat_queue_condition
+    if _chat_queue_condition is None:
+        _chat_queue_condition = asyncio.Condition()
+    return _chat_queue_condition
+
+
+def _is_tagged(item: _QueuedChatItem) -> bool:
+    """Return whether a queued request structurally mentioned the bot.
+
+    Args:
+        item: Queued chat item.
+
+    Returns:
+        True when the adapter marked the request as a bot mention.
+    """
+
+    return_value = item.request.mentioned_bot is True
+    return return_value
+
+
+def _is_bot_reply(item: _QueuedChatItem) -> bool:
+    """Return whether a queued request is an adapter-confirmed bot reply.
+
+    Args:
+        item: Queued chat item.
+
+    Returns:
+        True only when the adapter supplied `reply_to_current_bot=True`.
+    """
+
+    return_value = item.request.reply_context.reply_to_current_bot is True
+    return return_value
+
+
+def _prune_waiting_queue(
+    waiting_items: list[_QueuedChatItem],
+) -> tuple[list[_QueuedChatItem], list[_QueuedChatItem]]:
+    """Apply the global input-queue pruning policy to waiting items.
+
+    Args:
+        waiting_items: Ordered list of queued items that are not processing.
+
+    Returns:
+        Pair of surviving items and dropped items, both in arrival order.
+    """
+
+    survivors = list(waiting_items)
+    dropped: list[_QueuedChatItem] = []
+
+    if len(survivors) > 2:
+        kept = []
+        for item in survivors:
+            if _is_tagged(item) or _is_bot_reply(item):
+                kept.append(item)
+            else:
+                dropped.append(item)
+        survivors = kept
+
+    if len(survivors) > 5:
+        kept = []
+        for item in survivors:
+            if _is_bot_reply(item):
+                kept.append(item)
+            else:
+                dropped.append(item)
+        survivors = kept
+
+    if len(survivors) > 5:
+        dropped.extend(survivors[:-1])
+        survivors = survivors[-1:]
+
+    return_value = (survivors, dropped)
+    return return_value
+
+
+def _set_chat_item_response(item: _QueuedChatItem, response: ChatResponse) -> None:
+    """Complete a queued item if its caller is still waiting.
+
+    Args:
+        item: Queued chat item.
+        response: Response to return through the item's future.
+
+    Returns:
+        None.
+    """
+
+    if not item.future.done():
+        item.future.set_result(response)
+
+
+async def _save_user_message_from_item(
+    item: _QueuedChatItem,
+    *,
+    global_user_id: str,
+    reply_context: ReplyContext,
+) -> None:
+    """Persist one queued user message.
+
+    Args:
+        item: Queued chat item containing the request and timestamp.
+        global_user_id: Resolved global user identifier.
+        reply_context: Adapter-supplied reply metadata after compacting.
+
+    Returns:
+        None.
+    """
+
+    req = item.request
+    try:
+        await save_conversation({
+            "platform": req.platform,
+            "platform_channel_id": req.platform_channel_id,
+            "role": "user",
+            "platform_message_id": req.platform_message_id,
+            "platform_user_id": req.platform_user_id,
+            "global_user_id": global_user_id,
+            "display_name": req.display_name,
+            "channel_type": req.channel_type,
+            "content": req.content,
+            "mentioned_bot": req.mentioned_bot,
+            "reply_context": reply_context,
+            "timestamp": item.timestamp,
+        })
+    except Exception as exc:
+        logger.debug(f"Handled exception in _save_user_message_from_item: {exc}")
+        logger.exception("Failed to save queued user message")
+
+
+async def _resolve_queued_user(item: _QueuedChatItem) -> tuple[str, dict]:
+    """Resolve the user identity and profile for a queued item.
+
+    Args:
+        item: Queued chat item.
+
+    Returns:
+        Pair of global user ID and user profile.
+    """
+
+    req = item.request
+    global_user_id = await resolve_global_user_id(
+        platform=req.platform,
+        platform_user_id=req.platform_user_id,
+        display_name=req.display_name,
+    )
+    user_profile = await get_user_profile(global_user_id)
+    return_value = (global_user_id, user_profile)
+    return return_value
+
+
+async def _drop_queued_chat_item(item: _QueuedChatItem) -> None:
+    """Persist and complete one pruned queued item without running the graph.
+
+    Args:
+        item: Queued chat item selected for pruning.
+
+    Returns:
+        None.
+    """
+
+    try:
+        global_user_id, _ = await _resolve_queued_user(item)
+        reply_context = await _hydrate_reply_context(item.request)
+        await _save_user_message_from_item(
+            item,
+            global_user_id=global_user_id,
+            reply_context=reply_context,
+        )
+    except Exception as exc:
+        logger.debug(f"Handled exception in _drop_queued_chat_item: {exc}")
+        logger.exception("Failed to persist dropped queued message")
+
+    _set_chat_item_response(item, ChatResponse())
+    logger.info(f'Queued chat item dropped: sequence={item.sequence} platform={item.request.platform} channel={item.request.platform_channel_id or "<dm>"} message={item.request.platform_message_id or "<none>"} user={item.request.platform_user_id or "<none>"} display_name={item.request.display_name or "<none>"} tagged={_is_tagged(item)} bot_reply={_is_bot_reply(item)} content={log_preview(item.request.content)}')
+
+
+async def _process_queued_chat_item(item: _QueuedChatItem) -> None:
+    """Run one queued item through the existing chat graph and post-writes.
+
+    Args:
+        item: Oldest surviving queued item selected by the worker.
+
+    Returns:
+        None.
+    """
+
+    req = item.request
+    bot_name = _personality.get("name", "KazusaBot")
+
+    try:
+        await _ensure_character_global_identity(
+            platform=req.platform,
+            platform_bot_id=req.platform_bot_id,
+            bot_name=bot_name,
+        )
+        global_user_id, user_profile = await _resolve_queued_user(item)
+
+        multimedia_input: list[MultiMediaDoc] = []
+        for att in req.attachments:
+            if att.media_type.startswith("image/") and att.base64_data:
+                multimedia_input.append({
+                    "content_type": att.media_type,
+                    "base64_data": att.base64_data,
+                    "description": att.description,
+                })
+
+        history = await get_conversation_history(
+            platform=req.platform,
+            platform_channel_id=req.platform_channel_id,
+            limit=CONVERSATION_HISTORY_LIMIT,
+        )
+        chat_history_wide = trim_history_dict(history)
+        chat_history_recent = chat_history_wide[-CHAT_HISTORY_RECENT_LIMIT:]
+        reply_context = await _hydrate_reply_context(req)
+
+        debug_modes: DebugModes = {
+            "listen_only": req.debug_modes.listen_only,
+            "think_only": req.debug_modes.think_only,
+            "no_remember": req.debug_modes.no_remember,
+        }
+        active_flags = [key for key, value in debug_modes.items() if value]
+        if active_flags:
+            logger.info(f'Debug modes active: {active_flags}')
+
+        logger.debug(f'Chat request: platform={req.platform} channel={req.platform_channel_id or "<dm>"} message={req.platform_message_id or "<none>"} user={req.platform_user_id} global_user={global_user_id} content_type={req.content_type} attachments={len(req.attachments)} image_attachments={len(multimedia_input)} history_wide={len(chat_history_wide)} history_recent={len(chat_history_recent)} reply_context={log_preview(reply_context)} debug_modes={active_flags} content={log_preview(req.content)}')
+
+        initial_state: IMProcessState = {
+            "timestamp": item.timestamp,
+            "platform": req.platform,
+            "platform_message_id": req.platform_message_id,
+            "platform_user_id": req.platform_user_id,
+            "global_user_id": global_user_id,
+            "user_name": req.display_name,
+            "user_input": req.content,
+            "user_multimedia_input": multimedia_input,
+            "user_profile": user_profile,
+            "platform_bot_id": req.platform_bot_id,
+            "mentioned_bot": req.mentioned_bot,
+            "bot_name": bot_name,
+            "character_profile": _personality,
+            "platform_channel_id": req.platform_channel_id,
+            "channel_type": req.channel_type,
+            "channel_name": req.channel_name,
+            "chat_history_wide": chat_history_wide,
+            "chat_history_recent": chat_history_recent,
+            "reply_context": reply_context,
+            "should_respond": False,
+            "reason_to_respond": "",
+            "use_reply_feature": False,
+            "channel_topic": "",
+            "indirect_speech_context": "",
+            "debug_modes": debug_modes,
+        }
+
+        await _save_user_message_from_item(
+            item,
+            global_user_id=global_user_id,
+            reply_context=reply_context,
+        )
+
+        try:
+            result = await _graph.ainvoke(initial_state)
+        except Exception as exc:
+            logger.debug(f"Handled exception in _process_queued_chat_item: {exc}")
+            logger.exception("Graph invocation failed")
+            response = ChatResponse(
+                messages=[f"{bot_name} is busy right now, please try again later."]
+            )
+            _set_chat_item_response(item, response)
+            return
+
+        final_dialog = result.get("final_dialog", [])
+        should_reply = result.get("use_reply_feature", False)
+        consolidation_state = result.get("consolidation_state")
+
+        logger.debug(f'Chat result: platform={req.platform} channel={req.platform_channel_id or "<dm>"} message={req.platform_message_id or "<none>"} user={req.platform_user_id} should_respond={result.get("should_respond")} should_reply={should_reply} final_dialog_count={len(final_dialog)} future_promises={len(result.get("future_promises", []))} final_dialog={log_list_preview(final_dialog)}')
+
+        consolidation_state_dict: dict | None = None
+        if isinstance(consolidation_state, Mapping):
+            consolidation_state_dict = dict(consolidation_state)
+
+        should_record_progress = bool(final_dialog) and consolidation_state_dict is not None
+        if should_record_progress:
+            logger.debug(f'Background conversation progress recorder queued: platform={req.platform} channel={req.platform_channel_id or "<dm>"} message={req.platform_message_id or "<none>"}')
+        elif not final_dialog:
+            logger.info(f'Background conversation progress recorder skipped: platform={req.platform} channel={req.platform_channel_id or "<dm>"} message={req.platform_message_id or "<none>"} should_respond={result.get("should_respond")} final_dialog_count=0')
+        else:
+            logger.warning(f'Background conversation progress recorder skipped: unexpected consolidation_state type={type(consolidation_state).__name__}')
+
+        should_consolidate = False
+        if debug_modes.get("no_remember"):
+            logger.debug("Background consolidation skipped: no_remember is active")
+        elif consolidation_state_dict is not None:
+            should_consolidate = True
+            logger.debug(f'Background consolidation queued: platform={req.platform} channel={req.platform_channel_id or "<dm>"} message={req.platform_message_id or "<none>"}')
+        elif not final_dialog:
+            logger.info(f'Background consolidation skipped: platform={req.platform} channel={req.platform_channel_id or "<dm>"} message={req.platform_message_id or "<none>"} should_respond={result.get("should_respond")} final_dialog_count=0')
+        else:
+            logger.warning(f'Background consolidation skipped: unexpected consolidation_state type={type(consolidation_state).__name__}')
+
+        should_save_bot_message = bool(final_dialog)
+        response_dialog = final_dialog
+        if debug_modes.get("think_only"):
+            logger.info(f'think_only active — suppressing {len(final_dialog)} dialog message(s) from user output')
+            response_dialog = []
+
+        response = ChatResponse(
+            messages=response_dialog,
+            content_type="text",
+            attachments=[],
+            should_reply=should_reply,
+            scheduled_followups=0,
+        )
+        _set_chat_item_response(item, response)
+
+        if should_save_bot_message:
+            await _save_bot_message(result)
+        if should_record_progress and consolidation_state_dict is not None:
+            await _run_conversation_progress_record_background(
+                consolidation_state_dict,
+            )
+        if should_consolidate and consolidation_state_dict is not None:
+            await _run_consolidation_background(consolidation_state_dict)
+    except Exception as exc:
+        logger.debug(f"Handled exception in _process_queued_chat_item: {exc}")
+        logger.exception("Queued chat item failed")
+        response = ChatResponse(
+            messages=[f"{bot_name} is busy right now, please try again later."]
+        )
+        _set_chat_item_response(item, response)
+
+
+async def _chat_input_worker() -> None:
+    """Consume the global input queue one item at a time.
+
+    Returns:
+        None.
+    """
+
+    while True:
+        condition = _get_chat_queue_condition()
+        async with condition:
+            while not _chat_input_queue:
+                await condition.wait()
+
+            waiting_items = list(_chat_input_queue)
+            survivors, dropped = _prune_waiting_queue(waiting_items)
+            _chat_input_queue.clear()
+            _chat_input_queue.extend(survivors)
+
+            next_item: _QueuedChatItem | None = None
+            if _chat_input_queue:
+                next_item = _chat_input_queue.popleft()
+
+        for dropped_item in dropped:
+            await _drop_queued_chat_item(dropped_item)
+
+        if next_item is not None:
+            await _process_queued_chat_item(next_item)
+
+
+def _ensure_chat_input_worker_started() -> None:
+    """Ensure the process-local input worker exists for the current event loop.
+
+    Returns:
+        None.
+    """
+
+    global _chat_queue_worker_task
+    _get_chat_queue_condition()
+    if _chat_queue_worker_task is None or _chat_queue_worker_task.done():
+        _chat_queue_worker_task = asyncio.create_task(_chat_input_worker())
+
+
+async def _stop_chat_input_worker() -> None:
+    """Stop the process-local input worker and resolve pending requests.
+
+    Returns:
+        None.
+    """
+
+    global _chat_queue_condition, _chat_queue_sequence, _chat_queue_worker_task
+    task = _chat_queue_worker_task
+    _chat_queue_worker_task = None
+    if task is not None:
+        task.cancel()
+        with suppress(asyncio.CancelledError):
+            await task
+
+    condition = _get_chat_queue_condition()
+    async with condition:
+        pending_items = list(_chat_input_queue)
+        _chat_input_queue.clear()
+
+    for item in pending_items:
+        _set_chat_item_response(item, ChatResponse())
+
+    _chat_queue_condition = None
+    _chat_queue_sequence = 0
+
+
+async def _enqueue_chat_request(req: ChatRequest) -> ChatResponse:
+    """Enqueue one request and wait for the worker-produced response.
+
+    Args:
+        req: Incoming chat request.
+
+    Returns:
+        Chat response produced by the worker or drop policy.
+    """
+
+    global _chat_queue_sequence
+    _ensure_chat_input_worker_started()
+    condition = _get_chat_queue_condition()
+    future: asyncio.Future[ChatResponse] = asyncio.get_running_loop().create_future()
+    timestamp = req.timestamp or datetime.now(timezone.utc).isoformat()
+
+    async with condition:
+        _chat_queue_sequence += 1
+        item = _QueuedChatItem(
+            sequence=_chat_queue_sequence,
+            request=req,
+            timestamp=timestamp,
+            future=future,
+        )
+        _chat_input_queue.append(item)
+        condition.notify()
+
+    response = await future
+    return response
 
 
 async def _run_consolidation_background(state: dict) -> None:
@@ -482,11 +930,7 @@ def register_remote_runtime_adapter(
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global _personality, _graph, _chat_executor_semaphore, _task_dispatcher, _adapter_registry
-
-    executor_count = max(1, BRAIN_EXECUTOR_COUNT)
-    _chat_executor_semaphore = asyncio.Semaphore(executor_count)
-    logger.info(f'Chat executor limit set to {executor_count}')
+    global _personality, _graph, _task_dispatcher, _adapter_registry
 
     # 1. Database bootstrap
     await db_bootstrap()
@@ -533,11 +977,13 @@ async def lifespan(app: FastAPI):
         logger.info("Scheduler disabled via SCHEDULED_TASKS_ENABLED=false — skipping load_pending_events")
 
     logger.info(render_llm_route_table())
+    _ensure_chat_input_worker_started()
     logger.info("Kazusa brain service is ready")
 
     yield
 
     # Shutdown
+    await _stop_chat_input_worker()
     if SCHEDULED_TASKS_ENABLED:
         await scheduler.shutdown()
     await mcp_manager.stop()
@@ -613,202 +1059,20 @@ async def runtime_adapter_heartbeat_endpoint(req: RuntimeAdapterRegistrationRequ
 
 @app.post("/chat", response_model=ChatResponse)
 async def chat(req: ChatRequest, background_tasks: BackgroundTasks):
-    semaphore = _chat_executor_semaphore
-    if semaphore is None:
-        semaphore = asyncio.Semaphore(1)
+    """Enqueue an inbound chat message and wait for queue processing.
 
-    await semaphore.acquire()
-    semaphore_release_transferred = False
+    Args:
+        req: Incoming chat request from an adapter.
+        background_tasks: FastAPI background task container, unused because the
+            queue worker owns post-response processing.
 
-    try:
-        timestamp = req.timestamp or datetime.now(timezone.utc).isoformat()
+    Returns:
+        Chat response produced by the input queue worker.
+    """
 
-        # Ensure the character is addressable by global_user_id before RAG.
-        bot_name = _personality.get("name", "KazusaBot")
-        await _ensure_character_global_identity(
-            platform=req.platform,
-            platform_bot_id=req.platform_bot_id,
-            bot_name=bot_name,
-        )
-
-        # Resolve global user ID
-        global_user_id = await resolve_global_user_id(
-            platform=req.platform,
-            platform_user_id=req.platform_user_id,
-            display_name=req.display_name,
-        )
-        user_profile = await get_user_profile(global_user_id)
-
-        # Convert attachments to MultiMediaDoc list
-        multimedia_input: list[MultiMediaDoc] = []
-        for att in req.attachments:
-            if att.media_type.startswith("image/") and att.base64_data:
-                multimedia_input.append({
-                    "content_type": att.media_type,
-                    "base64_data": att.base64_data,
-                    "description": att.description,
-                })
-
-        # Fetch conversation history — wide slice for relevance, recent for downstream
-        history = await get_conversation_history(
-            platform=req.platform,
-            platform_channel_id=req.platform_channel_id,
-            limit=CONVERSATION_HISTORY_LIMIT,
-        )
-        chat_history_wide = trim_history_dict(history)
-        chat_history_recent = chat_history_wide[-CHAT_HISTORY_RECENT_LIMIT:]
-        reply_context = await _hydrate_reply_context(req)
-
-        debug_modes: DebugModes = {
-            "listen_only": req.debug_modes.listen_only,
-            "think_only": req.debug_modes.think_only,
-            "no_remember": req.debug_modes.no_remember,
-        }
-        active_flags = [k for k, v in debug_modes.items() if v]
-        if active_flags:
-            logger.info(f'Debug modes active: {active_flags}')
-
-        logger.debug(f'Chat request: platform={req.platform} channel={req.platform_channel_id or "<dm>"} message={req.platform_message_id or "<none>"} user={req.platform_user_id} global_user={global_user_id} content_type={req.content_type} attachments={len(req.attachments)} image_attachments={len(multimedia_input)} history_wide={len(chat_history_wide)} history_recent={len(chat_history_recent)} reply_context={log_preview(reply_context)} debug_modes={active_flags} content={log_preview(req.content)}')
-
-        initial_state: IMProcessState = {
-            "timestamp": timestamp,
-            "platform": req.platform,
-            "platform_message_id": req.platform_message_id,
-            "platform_user_id": req.platform_user_id,
-            "global_user_id": global_user_id,
-            "user_name": req.display_name,
-            "user_input": req.content,
-            "user_multimedia_input": multimedia_input,
-            "user_profile": user_profile,
-            "platform_bot_id": req.platform_bot_id,
-            "mentioned_bot": req.mentioned_bot,
-            "bot_name": bot_name,
-            "character_profile": _personality,
-            "platform_channel_id": req.platform_channel_id,
-            "channel_type": req.channel_type,
-            "channel_name": req.channel_name,
-            "chat_history_wide": chat_history_wide,
-            "chat_history_recent": chat_history_recent,
-            "reply_context": reply_context,
-            "should_respond": False,
-            "reason_to_respond": "",
-            "use_reply_feature": False,
-            "channel_topic": "",
-            "indirect_speech_context": "",
-            "debug_modes": debug_modes,
-        }
-
-        # Save user message immediately (before graph invocation)
-        try:
-            await save_conversation({
-                "platform": req.platform,
-                "platform_channel_id": req.platform_channel_id,
-                "role": "user",
-                "platform_message_id": req.platform_message_id,
-                "platform_user_id": req.platform_user_id,
-                "global_user_id": global_user_id,
-                "display_name": req.display_name,
-                "channel_type": req.channel_type,
-                "content": req.content,
-                "mentioned_bot": req.mentioned_bot,
-                "reply_context": reply_context,
-                "timestamp": timestamp,
-            })
-        except Exception as exc:
-            logger.debug(f"Handled exception in chat: {exc}")
-            logger.exception("Failed to save user message")
-
-        # Invoke the graph
-        try:
-            result = await _graph.ainvoke(initial_state)
-        except Exception as exc:
-            logger.debug(f"Handled exception in chat: {exc}")
-            logger.exception("Graph invocation failed")
-            return_value = ChatResponse(messages=[f"{bot_name} is busy right now, please try again later."])
-            return return_value
-
-        final_dialog = result.get("final_dialog", [])
-        should_reply = result.get("use_reply_feature", False)
-        consolidation_state = result.get("consolidation_state")
-
-        logger.debug(f'Chat result: platform={req.platform} channel={req.platform_channel_id or "<dm>"} message={req.platform_message_id or "<none>"} user={req.platform_user_id} should_respond={result.get("should_respond")} should_reply={should_reply} final_dialog_count={len(final_dialog)} future_promises={len(result.get("future_promises", []))} final_dialog={log_list_preview(final_dialog)}')
-
-        should_save_bot_message = bool(final_dialog)
-        consolidation_state_dict: dict | None = None
-        if isinstance(consolidation_state, Mapping):
-            consolidation_state_dict = dict(consolidation_state)
-
-        should_record_progress = bool(final_dialog) and consolidation_state_dict is not None
-        if should_record_progress:
-            logger.debug(f'Background conversation progress recorder queued: platform={req.platform} channel={req.platform_channel_id or "<dm>"} message={req.platform_message_id or "<none>"}')
-        elif not final_dialog:
-            logger.info(f'Background conversation progress recorder skipped: platform={req.platform} channel={req.platform_channel_id or "<dm>"} message={req.platform_message_id or "<none>"} should_respond={result.get("should_respond")} final_dialog_count=0')
-        else:
-            logger.warning(f'Background conversation progress recorder skipped: unexpected consolidation_state type={type(consolidation_state).__name__}')
-
-        should_consolidate = False
-        if debug_modes.get("no_remember"):
-            logger.debug("Background consolidation skipped: no_remember is active")
-        elif consolidation_state_dict is not None:
-            should_consolidate = True
-            logger.debug(f'Background consolidation queued: platform={req.platform} channel={req.platform_channel_id or "<dm>"} message={req.platform_message_id or "<none>"}')
-        elif not final_dialog:
-            logger.info(f'Background consolidation skipped: platform={req.platform} channel={req.platform_channel_id or "<dm>"} message={req.platform_message_id or "<none>"} should_respond={result.get("should_respond")} final_dialog_count=0')
-        else:
-            logger.warning(f'Background consolidation skipped: unexpected consolidation_state type={type(consolidation_state).__name__}')
-
-        # think_only: suppress dialog in response but still save internally
-        if debug_modes.get("think_only"):
-            logger.info(f'think_only active — suppressing {len(final_dialog)} dialog message(s) from user output')
-            final_dialog = []
-
-        # The dispatcher now runs in the background consolidator path, so the
-        # synchronous /chat response no longer waits on scheduling.
-        scheduled_followups = 0
-
-        return_value = ChatResponse(
-            messages=final_dialog,
-            content_type="text",
-            attachments=[],
-            should_reply=should_reply,
-            scheduled_followups=scheduled_followups,
-        )
-
-        has_post_response_work = (
-            should_save_bot_message
-            or should_record_progress
-            or should_consolidate
-        )
-        if has_post_response_work:
-            async def _run_post_response_background() -> None:
-                """Run post-response writes before allowing the next chat turn.
-
-                Returns:
-                    None. The acquired chat semaphore is always released.
-                """
-
-                try:
-                    if should_save_bot_message:
-                        await _save_bot_message(result)
-                    if should_record_progress and consolidation_state_dict is not None:
-                        await _run_conversation_progress_record_background(
-                            consolidation_state_dict,
-                        )
-                    if should_consolidate and consolidation_state_dict is not None:
-                        await _run_consolidation_background(consolidation_state_dict)
-                finally:
-                    semaphore.release()
-
-            background_tasks.add_task(_run_post_response_background)
-            semaphore_release_transferred = True
-        else:
-            semaphore.release()
-            semaphore_release_transferred = True
-
-        return return_value
-    finally:
-        if not semaphore_release_transferred:
-            semaphore.release()
+    _ = background_tasks
+    response = await _enqueue_chat_request(req)
+    return response
 
 
 @app.post("/event")

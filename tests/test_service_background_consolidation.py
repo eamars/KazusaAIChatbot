@@ -132,7 +132,7 @@ def _graph_result(consolidation_state: Mapping | dict | None = None) -> dict:
 
 
 def _patch_chat_dependencies(monkeypatch, graph) -> None:
-    """Patch service dependencies that are outside the semaphore behavior.
+    """Patch service dependencies that are outside queue-worker behavior.
 
     Args:
         monkeypatch: Pytest monkeypatch fixture.
@@ -172,14 +172,32 @@ def _patch_chat_dependencies(monkeypatch, graph) -> None:
     monkeypatch.setattr(service_module, "_graph", graph)
 
 
+async def _reset_queue_state() -> None:
+    """Reset global queue state between service endpoint tests.
+
+    Returns:
+        None.
+    """
+
+    await service_module._stop_chat_input_worker()
+    service_module._chat_input_queue.clear()
+    service_module._chat_queue_condition = None
+    service_module._chat_queue_worker_task = None
+    service_module._chat_queue_sequence = 0
+
+
 @pytest.mark.asyncio
 async def test_chat_queues_background_consolidation_for_mapping_state(monkeypatch):
     """Mapping-like consolidation state should still queue the background task."""
 
-    monkeypatch.setattr(service_module, "_chat_executor_semaphore", None)
+    await _reset_queue_state()
     save_bot_message = AsyncMock()
     progress_recorder = AsyncMock()
-    consolidation_runner = AsyncMock()
+    consolidation_done = asyncio.Event()
+
+    async def _consolidation_runner(_state):
+        consolidation_done.set()
+
     monkeypatch.setattr(service_module, "_save_bot_message", save_bot_message)
     monkeypatch.setattr(
         service_module,
@@ -189,7 +207,7 @@ async def test_chat_queues_background_consolidation_for_mapping_state(monkeypatc
     monkeypatch.setattr(
         service_module,
         "_run_consolidation_background",
-        consolidation_runner,
+        _consolidation_runner,
     )
     consolidation_state = _MappingState(_consolidation_state())
     _patch_chat_dependencies(monkeypatch, _FakeGraph(_graph_result(consolidation_state)))
@@ -201,23 +219,23 @@ async def test_chat_queues_background_consolidation_for_mapping_state(monkeypatc
     )
 
     assert response.messages == ["ok"]
-    assert len(background_tasks.tasks) == 1
-
-    await background_tasks()
+    assert len(background_tasks.tasks) == 0
+    await asyncio.wait_for(consolidation_done.wait(), timeout=1.0)
 
     save_bot_message.assert_awaited_once()
     progress_recorder.assert_awaited_once()
-    consolidation_runner.assert_awaited_once()
+    await _reset_queue_state()
 
 
 @pytest.mark.asyncio
 async def test_next_chat_waits_until_background_consolidation_finishes(monkeypatch):
     """The next chat request must not enter the graph while consolidation runs."""
 
-    semaphore = asyncio.Semaphore(1)
+    await _reset_queue_state()
     consolidation_started = asyncio.Event()
     consolidation_can_finish = asyncio.Event()
     graph_calls = 0
+    consolidation_calls = 0
 
     class _CountingGraph:
         """Count graph invocations while returning a successful result."""
@@ -228,10 +246,12 @@ async def test_next_chat_waits_until_background_consolidation_finishes(monkeypat
             return _graph_result()
 
     async def _blocked_consolidation(_state):
-        consolidation_started.set()
-        await consolidation_can_finish.wait()
+        nonlocal consolidation_calls
+        consolidation_calls += 1
+        if consolidation_calls == 1:
+            consolidation_started.set()
+            await consolidation_can_finish.wait()
 
-    monkeypatch.setattr(service_module, "_chat_executor_semaphore", semaphore)
     monkeypatch.setattr(service_module, "_save_bot_message", AsyncMock())
     monkeypatch.setattr(
         service_module,
@@ -274,23 +294,26 @@ async def test_next_chat_waits_until_background_consolidation_finishes(monkeypat
     assert graph_calls == 2
 
     await second_background_tasks()
+    await _reset_queue_state()
 
 
 @pytest.mark.asyncio
 async def test_no_remember_skips_consolidation_but_releases_after_other_writes(monkeypatch):
     """no_remember should skip consolidation and still release after save/progress."""
 
-    semaphore = asyncio.Semaphore(1)
+    await _reset_queue_state()
     save_bot_message = AsyncMock()
-    progress_recorder = AsyncMock()
+    progress_done = asyncio.Event()
     consolidation_runner = AsyncMock()
 
-    monkeypatch.setattr(service_module, "_chat_executor_semaphore", semaphore)
+    async def _progress_recorder(_state):
+        progress_done.set()
+
     monkeypatch.setattr(service_module, "_save_bot_message", save_bot_message)
     monkeypatch.setattr(
         service_module,
         "_run_conversation_progress_record_background",
-        progress_recorder,
+        _progress_recorder,
     )
     monkeypatch.setattr(
         service_module,
@@ -308,23 +331,19 @@ async def test_no_remember_skips_consolidation_but_releases_after_other_writes(m
     )
 
     assert response.messages == ["ok"]
-    assert len(background_tasks.tasks) == 1
+    assert len(background_tasks.tasks) == 0
 
-    await background_tasks()
+    await asyncio.wait_for(progress_done.wait(), timeout=1.0)
     save_bot_message.assert_awaited_once()
-    progress_recorder.assert_awaited_once()
     consolidation_runner.assert_not_awaited()
-
-    await asyncio.wait_for(semaphore.acquire(), timeout=1.0)
-    semaphore.release()
+    await _reset_queue_state()
 
 
 @pytest.mark.asyncio
-async def test_graph_failure_releases_chat_semaphore(monkeypatch):
-    """A graph failure should not leave the chat semaphore locked."""
+async def test_graph_failure_does_not_stop_queue_worker(monkeypatch):
+    """A graph failure should let the queue worker continue processing."""
 
-    semaphore = asyncio.Semaphore(1)
-    monkeypatch.setattr(service_module, "_chat_executor_semaphore", semaphore)
+    await _reset_queue_state()
     _patch_chat_dependencies(monkeypatch, _FailingGraph())
 
     background_tasks = BackgroundTasks()
@@ -332,9 +351,7 @@ async def test_graph_failure_releases_chat_semaphore(monkeypatch):
 
     assert response.messages == ["Kazusa is busy right now, please try again later."]
     assert len(background_tasks.tasks) == 0
-
-    await asyncio.wait_for(semaphore.acquire(), timeout=1.0)
-    semaphore.release()
+    await _reset_queue_state()
 
 
 @pytest.mark.asyncio
@@ -458,7 +475,7 @@ async def test_build_graph_skips_episode_state_loader_when_relevance_declines(mo
 async def test_chat_listen_only_keeps_boolean_should_respond(monkeypatch):
     """Listen-only requests should skip thinking while preserving state defaults."""
 
-    monkeypatch.setattr(service_module, "_chat_executor_semaphore", None)
+    await _reset_queue_state()
     monkeypatch.setattr(service_module, "_personality", {"name": "Kazusa"})
     monkeypatch.setattr(
         service_module,
@@ -503,3 +520,4 @@ async def test_chat_listen_only_keeps_boolean_should_respond(monkeypatch):
     assert captured_state["use_reply_feature"] is False
     assert response.messages == []
     assert response.should_reply is False
+    await _reset_queue_state()
