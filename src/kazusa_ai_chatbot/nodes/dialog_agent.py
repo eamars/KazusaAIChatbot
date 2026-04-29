@@ -306,14 +306,20 @@ async def dialog_generator(state: DialogAgentState) -> DialogAgentState:
 
     result = parse_llm_json_output(response.content)
     generated_dialog = result.get("final_dialog", [])
-    # logger.debug(
-    #     "Dialog generator: fragments=%d dialog=%s",
-    #     len(generated_dialog) if isinstance(generated_dialog, list) else 0,
-    #     log_list_preview(generated_dialog if isinstance(generated_dialog, list) else []),
-    # )
+    generated_dialog_preview = (
+        generated_dialog
+        if isinstance(generated_dialog, list)
+        else []
+    )
+    logger.debug(
+        f"Dialog generator: "
+        f"parsed_keys={list(result.keys())} "
+        f"fragments={len(generated_dialog_preview)} "
+        f"dialog={log_list_preview(generated_dialog_preview)}"
+    )
 
     return_value = {
-        "final_dialog": result["final_dialog"],
+        "final_dialog": generated_dialog,
         "messages": [response]
     }
     return return_value
