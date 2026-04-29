@@ -98,7 +98,9 @@ def test_initializer_cache_key_ignores_volatile_timestamp() -> None:
 
 def test_initializer_prompt_documents_profile_evidence_dependency() -> None:
     """Initializer prompt should distinguish profile-needed and no-retrieval acts."""
-    rendered_prompt = supervisor2_module._INITIALIZER_PROMPT.format(character_name="千纱")
+    rendered_prompt = supervisor2_module._INITIALIZER_PROMPT.format(
+        character_name="千纱",
+    )
 
     assert "Evidence-dependency gate" in rendered_prompt
     assert "千纱能做一个自我介绍么" in rendered_prompt
@@ -109,7 +111,9 @@ def test_initializer_prompt_documents_profile_evidence_dependency() -> None:
 
 def test_memory_search_prompt_uses_evidence_contract() -> None:
     """Memory-search prompt wording should not pre-classify memory evidence."""
-    rendered_initializer = supervisor2_module._INITIALIZER_PROMPT.format(character_name="千纱")
+    rendered_initializer = supervisor2_module._INITIALIZER_PROMPT.format(
+        character_name="千纱",
+    )
     rendered_dispatcher = supervisor2_module._DISPATCHER_PROMPT.format(
         agent_name_union=supervisor2_module._build_agent_name_union(),
     )
@@ -287,3 +291,9 @@ async def test_rag_initializer_miss_schedules_persistent_upsert(monkeypatch) -> 
     assert llm.calls == 1
     assert len(created_tasks) == 1
     assert runtime.get_stats()["size"] == 1
+
+
+def test_initializer_prompt_version_bumped_to_v4() -> None:
+    """The rollout should invalidate older persisted initializer rows."""
+
+    assert supervisor2_module.INITIALIZER_PROMPT_VERSION == "initializer_prompt:v4"

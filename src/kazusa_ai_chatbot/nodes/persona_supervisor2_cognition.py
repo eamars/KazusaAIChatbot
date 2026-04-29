@@ -108,6 +108,9 @@ async def call_cognition_subgraph(state: GlobalPersonaState) -> GlobalPersonaSta
 
         # From previous stages
         "decontexualized_input": decontexualized_input,
+        "reference_resolution_status": state.get("reference_resolution_status", "unchanged_clear"),
+        "needs_clarification": state.get("needs_clarification", False),
+        "clarification_reason": state.get("clarification_reason", ""),
         "rag_result": state["rag_result"],
     }
     

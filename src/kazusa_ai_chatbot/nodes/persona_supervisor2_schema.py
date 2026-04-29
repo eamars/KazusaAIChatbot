@@ -35,6 +35,9 @@ class GlobalPersonaState(TypedDict):
     # Bridge Variables (Outputs of stages)
     # Stage 0 output
     decontexualized_input: str
+    reference_resolution_status: NotRequired[str]
+    needs_clarification: NotRequired[bool]
+    clarification_reason: NotRequired[str]
 
     # Stage 1 output
     rag_result: dict
@@ -85,6 +88,9 @@ class CognitionState(TypedDict):
     conversation_progress: NotRequired[ConversationProgressPromptDoc]
 
     decontexualized_input: str
+    reference_resolution_status: NotRequired[str]
+    needs_clarification: NotRequired[bool]
+    clarification_reason: NotRequired[str]
     rag_result: dict
 
     emotional_appraisal: str

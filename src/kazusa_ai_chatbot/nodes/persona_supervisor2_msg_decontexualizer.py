@@ -1,4 +1,7 @@
-from langchain_core.messages import SystemMessage, HumanMessage
+import json
+import logging
+
+from langchain_core.messages import HumanMessage, SystemMessage
 
 from kazusa_ai_chatbot.config import (
     MSG_DECONTEXTUALIZER_LLM_API_KEY,
@@ -8,10 +11,13 @@ from kazusa_ai_chatbot.config import (
 from kazusa_ai_chatbot.nodes.persona_supervisor2_schema import GlobalPersonaState
 from kazusa_ai_chatbot.utils import get_llm, log_preview, parse_llm_json_output
 
-import json
-import logging
-
 logger = logging.getLogger(__name__)
+
+_REFERENCE_RESOLUTION_STATUSES = {
+    "resolved",
+    "unchanged_clear",
+    "unresolved_reference",
+}
 
 _msg_decontexualizer_llm = get_llm(
     temperature=0.1,
@@ -23,7 +29,7 @@ _msg_decontexualizer_llm = get_llm(
 
 
 _MSG_DECONTEXUALIZER_PROMPT = """\
-你是一个语义解析专家。你的任务是根据对话历史添加缺失的指代信息
+你是一个语义解析专家。你的任务是根据对话历史添加缺失的指代信息，并判断当前输入是否缺少回答所必需的指代对象。
 
 # 判定逻辑 (Priority): 在处理前，请先进行“必要性评估”：
 - 如果输入是单纯的招呼语、情感表达或已具备独立语义的句子，请执行“零修改”。
@@ -34,6 +40,7 @@ _MSG_DECONTEXUALIZER_PROMPT = """\
 - 宁可不做修改，也不要“脑补”意图。
 - 严禁将社交辞令（如“你好”）强制与 channel_topic/indirect_speech_context 合并。
 - 信息不足：如果无法确定具体实体，请保持原句，不要猜测，也不要假设。
+- 指代缺失：如果用户输入必须依赖某个“这个/这些/那个/它/上面那个”等对象才能回答，而该对象无法从 user_input、reply_context、chat_history、channel_topic 或 indirect_speech_context 中解析出来，则保持原句，并标记为需要澄清。
 - 不要修改俚语
 - 如果输入中出现 URL、文件名、引用文本、专有名词等**字面锚点**，必须原样保留这些锚点，禁止替换成猜测出的页面标题、人物名、别名或近似实体。
 - `channel_topic` 和 `indirect_speech_context` 只能帮助你理解代词/省略指代，**不能覆盖或改写**用户输入里已经出现的字面锚点。
@@ -67,13 +74,17 @@ _MSG_DECONTEXUALIZER_PROMPT = """\
 - `user_input = "这个 https://example.com/page"` 且 `channel_topic = "用户在发某角色的百科链接"` -> 可以保留原句，或改成「这个 https://example.com/page」，但不要改成「这个某某角色的百科页面链接」
 - `user_input = "这个 README.md"` 且 `channel_topic` 提到某个功能模块 -> 不要改成「这个某功能模块的说明文档」，应保留 `README.md`
 - `reply_context.reply_to_current_bot = true`，上一条 assistant 为「你是想让我怎么定义你呀？是想要一个具体的评价，还是仅仅在随口试探……唔。」；`user_input = "是的"` -> 应补全为类似「是的，我是想让千纱说明白对我的看法 / 给我具体评价」；不要保留成孤立的「是的」。
+- `user_input = "这些是什么意思？"`，且 reply_context、chat_history、channel_topic、indirect_speech_context 都没有可见对象 -> 保持原句，`reference_resolution_status = "unresolved_reference"`，`needs_clarification = true`。
+- `reply_context.reply_excerpt = "△ ○ □"` 且 `user_input = "这些是什么意思？"` -> 可解析为用户在问回复摘录里的符号，`reference_resolution_status = "resolved"`，`needs_clarification = false`。
+- `user_input = "这个 README.md 是什么意思？"` -> 输入自带字面对象，保持字面锚点，`reference_resolution_status = "unchanged_clear"`，`needs_clarification = false`。
 
 # 思考路径
 1. 先判断 `user_input` 是否已经具备独立语义；若具备，执行零修改。
 2. 检查 `reply_context`，尤其是当前消息是否在回复当前 bot 的澄清、选项或追问。
 3. 再使用 `chat_history`、`indirect_speech_context` 和 `channel_topic` 补全必要指代。
 4. 保留 URL、文件名、引用文本和专有名词等字面锚点。
-5. 最后确认没有改变问题意图、语气、主语或句子复杂度。
+5. 判断是否仍存在回答所必需但无法解析的指代对象。
+6. 最后确认没有改变问题意图、语气、主语或句子复杂度。
 
 # 输入格式
 {
@@ -101,8 +112,28 @@ _MSG_DECONTEXUALIZER_PROMPT = """\
     "output": "重写后的用户信息，或原句",
     "is_modified": true/false,
     "reasoning": "重写理由",
+    "reference_resolution_status": "resolved | unchanged_clear | unresolved_reference",
+    "needs_clarification": true/false,
+    "clarification_reason": "若需要澄清，用一句内部说明指出缺少哪个指代对象；否则为空字符串"
 }
 """
+
+
+def _normalize_reference_resolution_status(value: object) -> str:
+    """Normalize the decontextualizer's reference-resolution enum.
+
+    Args:
+        value: Raw LLM field value.
+
+    Returns:
+        A supported status string, defaulting to ``unchanged_clear``.
+    """
+    status = str(value or "").strip()
+    if status not in _REFERENCE_RESOLUTION_STATUSES:
+        status = "unchanged_clear"
+    return status
+
+
 async def call_msg_decontexualizer(state: GlobalPersonaState) -> dict:
     """This agent substitude relative message with concrete information
     
@@ -141,30 +172,79 @@ async def call_msg_decontexualizer(state: GlobalPersonaState) -> dict:
     # )
 
     try:
-        result = await _msg_decontexualizer_llm.ainvoke([
+        llm_response = await _msg_decontexualizer_llm.ainvoke([
             system_prompt, 
             human_message,
         ])
-
-        result = parse_llm_json_output(result.content)
-
-        output = result.get("output")
-        reasoning = result.get("reasoning")
-        is_modified = result.get("is_modified", False)
     except Exception as exc:
-        logger.debug(f"Handled exception in call_msg_decontexualizer: {exc}")
-        logger.exception("Failed to parse LLM output")
-
+        logger.warning(
+            f"Decontextualizer fallback after LLM exception: {exc} "
+            f"input={log_preview(user_input)}",
+            exc_info=True,
+        )
         output = state["user_input"]
-        reasoning = "Failed to parse LLM output"
+        reasoning = "Failed to call LLM"
         is_modified = False
+        reference_resolution_status = "unchanged_clear"
+        needs_clarification = False
+        clarification_reason = ""
+    else:
+        try:
+            result = parse_llm_json_output(llm_response.content)
+        except Exception as exc:
+            logger.warning(
+                f"Decontextualizer fallback after parse exception: {exc} "
+                f"input={log_preview(user_input)} raw={log_preview(llm_response.content)}",
+                exc_info=True,
+            )
+            output = state["user_input"]
+            reasoning = "Failed to parse LLM output"
+            is_modified = False
+            reference_resolution_status = "unchanged_clear"
+            needs_clarification = False
+            clarification_reason = ""
+        else:
+            if not isinstance(result, dict):
+                result = {}
 
-    logger.info(f'Decontextualizer result: user={user_name} platform_user={platform_user_id} modified={is_modified} reason={log_preview(reasoning)} input={log_preview(user_input)} output={log_preview(output)}')
+            output = result.get("output")
+            reasoning = result.get("reasoning", "")
+            is_modified = result.get("is_modified", False)
+            missing_fields = [
+                field_name
+                for field_name in (
+                    "reference_resolution_status",
+                    "needs_clarification",
+                    "clarification_reason",
+                )
+                if field_name not in result
+            ]
+            if missing_fields:
+                logger.warning(
+                    f"Decontextualizer missing ambiguity fields: fields={missing_fields} "
+                    f"input={log_preview(user_input)} raw={log_preview(result)}"
+                )
+            reference_resolution_status = _normalize_reference_resolution_status(
+                result.get("reference_resolution_status")
+            )
+            needs_clarification = result.get("needs_clarification", False)
+            if not isinstance(needs_clarification, bool):
+                needs_clarification = False
+            clarification_reason = result.get("clarification_reason", "")
+            if not isinstance(clarification_reason, str):
+                clarification_reason = ""
+            if needs_clarification:
+                reference_resolution_status = "unresolved_reference"
+
+    logger.info(f'Decontextualizer result: user={user_name} platform_user={platform_user_id} modified={is_modified} reference_status={reference_resolution_status} needs_clarification={needs_clarification} clarification_reason={log_preview(clarification_reason)} reason={log_preview(reasoning)} input={log_preview(user_input)} output={log_preview(output)}')
 
     if not is_modified:
         output = state["user_input"]
     
     return_value = {
         "decontexualized_input": output,
+        "reference_resolution_status": reference_resolution_status,
+        "needs_clarification": needs_clarification,
+        "clarification_reason": clarification_reason,
     }
     return return_value

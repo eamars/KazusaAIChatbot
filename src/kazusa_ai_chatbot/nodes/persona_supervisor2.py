@@ -33,6 +33,21 @@ async def stage_1_research(state: GlobalPersonaState) -> dict:
     Returns:
         A partial state update containing the projected ``rag_result``.
     """
+    if state.get("needs_clarification", False):
+        rag_result = project_known_facts(
+            [],
+            current_user_id=state["global_user_id"],
+            character_user_id=state["character_profile"].get("global_user_id", ""),
+            answer="",
+            unknown_slots=[],
+            loop_count=0,
+        )
+        logger.info(f'RAG2 skipped for unresolved reference: platform={state["platform"]} channel={state["platform_channel_id"] or "<dm>"} user={state["global_user_id"]} query={log_preview(state["decontexualized_input"])} reason={log_preview(state.get("clarification_reason", ""))} rag_result={log_preview(rag_result)}')
+        return_value = {
+            "rag_result": rag_result,
+        }
+        return return_value
+
     rag_supervisor_result = await call_rag_supervisor(
         original_query=state["decontexualized_input"],
         character_name=state["character_profile"].get("name", ""),
@@ -108,6 +123,9 @@ async def persona_supervisor2(state: IMProcessState) -> dict:
         "channel_topic": state["channel_topic"],
         "conversation_episode_state": state.get("conversation_episode_state"),
         "conversation_progress": state.get("conversation_progress"),
+        "reference_resolution_status": "unchanged_clear",
+        "needs_clarification": False,
+        "clarification_reason": "",
         "debug_modes": state.get("debug_modes", {}),
     }
     

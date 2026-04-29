@@ -361,6 +361,44 @@ _DECONTEXT_CASES = [
         "reply_only_confirmation_flow",
         id="decontext-reply-only-confirmation-flow",
     ),
+    pytest.param(
+        {
+            "user_input": "这些是什么意思？",
+            "user_name": "LiveDecontextUser",
+            "platform_user_id": "live-user",
+            "platform_bot_id": "live-bot",
+            "chat_history_recent": [
+                {"role": "user", "content": "晚上好"},
+                {"role": "assistant", "content": "晚上好。"},
+            ],
+            "channel_topic": "",
+            "indirect_speech_context": "",
+            "reply_context": {},
+        },
+        "unresolved_reference_needs_clarification",
+        id="decontext-unresolved-reference-needs-clarification",
+    ),
+    pytest.param(
+        {
+            "user_input": "这些是什么意思？",
+            "user_name": "LiveDecontextUser",
+            "platform_user_id": "live-user",
+            "platform_bot_id": "live-bot",
+            "chat_history_recent": [
+                {"role": "user", "content": "△ ○ □"},
+                {"role": "assistant", "content": "你是想问这些符号吗？"},
+            ],
+            "channel_topic": "",
+            "indirect_speech_context": "",
+            "reply_context": {
+                "reply_to_current_bot": False,
+                "reply_to_display_name": "LiveDecontextUser",
+                "reply_excerpt": "△ ○ □",
+            },
+        },
+        "reply_excerpt_resolves_reference",
+        id="decontext-reply-excerpt-resolves-reference",
+    ),
 ]
 
 
@@ -396,6 +434,20 @@ async def _assert_live_msg_decontexualizer_prompt_contract(ensure_live_llm, case
             f"Reply-only confirmation should recover the underlying self-evaluation task: {output!r}"
         )
         assert output != state["user_input"], f"Reply-only confirmation should not remain bare: {output!r}"
+    elif case_id == "unresolved_reference_needs_clarification":
+        assert result["needs_clarification"] is True, (
+            f"Unresolved reference should request clarification: {result!r}"
+        )
+        assert result["reference_resolution_status"] == "unresolved_reference", (
+            f"Unexpected reference status: {result!r}"
+        )
+    elif case_id == "reply_excerpt_resolves_reference":
+        assert result["needs_clarification"] is False, (
+            f"Reply excerpt should resolve the referent: {result!r}"
+        )
+        assert result["reference_resolution_status"] in {"resolved", "unchanged_clear"}, (
+            f"Unexpected reference status: {result!r}"
+        )
     else:
         assert "阿澈" not in output, f"Indirect speech should preserve third-person structure: {output!r}"
         assert "他" in output, f"Indirect speech case should keep third-person pronoun: {output!r}"
@@ -422,6 +474,20 @@ async def test_live_msg_decontexualizer_preserves_literal_url_anchor(ensure_live
 
 async def test_live_msg_decontexualizer_recovers_reply_only_confirmation_flow(ensure_live_llm) -> None:
     await _assert_live_msg_decontexualizer_prompt_contract(ensure_live_llm, "reply_only_confirmation_flow")
+
+
+async def test_live_msg_decontexualizer_marks_unresolved_reference(ensure_live_llm) -> None:
+    await _assert_live_msg_decontexualizer_prompt_contract(
+        ensure_live_llm,
+        "unresolved_reference_needs_clarification",
+    )
+
+
+async def test_live_msg_decontexualizer_resolves_reply_excerpt_reference(ensure_live_llm) -> None:
+    await _assert_live_msg_decontexualizer_prompt_contract(
+        ensure_live_llm,
+        "reply_excerpt_resolves_reference",
+    )
 
 
 async def test_live_content_anchor_uses_character_public_facts_for_birthday_question(ensure_live_llm) -> None:
