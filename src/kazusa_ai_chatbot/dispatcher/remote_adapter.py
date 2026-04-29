@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import logging
 from datetime import datetime, timezone
 
 import httpx
 
 from kazusa_ai_chatbot.dispatcher.adapter_iface import SendResult
 from kazusa_ai_chatbot.dispatcher.task import parse_iso_datetime
+
+logger = logging.getLogger(__name__)
 
 
 class RemoteHttpAdapter:
@@ -72,12 +75,14 @@ class RemoteHttpAdapter:
         sent_at_raw = str(data.get("sent_at") or datetime.now(timezone.utc).isoformat())
         try:
             sent_at = parse_iso_datetime(sent_at_raw)
-        except ValueError:
+        except ValueError as exc:
+            logger.debug(f"Handled exception in send_message: {exc}")
             sent_at = datetime.now(timezone.utc)
 
-        return SendResult(
+        return_value = SendResult(
             platform=str(data.get("platform") or self.platform),
             channel_id=str(data.get("channel_id") or channel_id),
             message_id=str(data.get("message_id") or ""),
             sent_at=sent_at,
         )
+        return return_value

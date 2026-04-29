@@ -121,19 +121,10 @@ async def call_cognition_subgraph(state: GlobalPersonaState) -> GlobalPersonaSta
     character_intent = result.get("character_intent", "")
     logical_stance = result.get("logical_stance", "")
 
-    logger.info(
-        "Cognition summary: input=%s stance=%s intent=%s appraisal=%s subtext=%s action_directives=%s monologue=%s",
-        log_preview(state["decontexualized_input"]),
-        logical_stance,
-        character_intent,
-        log_preview(emotional_appraisal),
-        log_preview(interaction_subtext),
-        log_preview(action_directives),
-        log_preview(internal_monologue),
-    )
+    logger.info(f'Cognition summary: input={log_preview(state["decontexualized_input"])} stance={logical_stance} intent={character_intent} appraisal={log_preview(emotional_appraisal)} subtext={log_preview(interaction_subtext)} action_directives={log_preview(action_directives)} monologue={log_preview(internal_monologue)}')
 
 
-    return {
+    return_value = {
         "internal_monologue": internal_monologue,
         "action_directives": action_directives,
 
@@ -143,3 +134,4 @@ async def call_cognition_subgraph(state: GlobalPersonaState) -> GlobalPersonaSta
         "character_intent": character_intent,
         "logical_stance": logical_stance,
     }
+    return return_value

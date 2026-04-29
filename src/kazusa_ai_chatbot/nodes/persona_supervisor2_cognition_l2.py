@@ -89,7 +89,8 @@ def _cognition_rag_result(rag_result: object) -> dict[str, Any]:
     """
 
     if not isinstance(rag_result, dict):
-        return {}
+        return_value = {}
+        return return_value
     public_result = dict(rag_result)
     public_result.pop("user_memory_unit_candidates", None)
     return public_result
@@ -165,11 +166,12 @@ def _build_boundary_affinity_override(boundary_profile: dict, affinity: int, aff
         f"touch_guard={touch_guard:.2f}; identity_guard={identity_guard:.2f}; control_guard={control_guard:.2f}"
     )
 
-    return {
+    return_value = {
         "primary_override": primary_override,
         "secondary_override": secondary_override,
         "fusion_snapshot": fusion_snapshot,
     }
+    return return_value
 
 
 # ---------------------------------------------------------------------------
@@ -355,11 +357,12 @@ async def call_cognition_consciousness(state: CognitionState) -> CognitionState:
         else:
             logger.error(f"Unknown key: {key}: {value}")
 
-    return {
+    return_value = {
         "internal_monologue": internal_monologue,
         "character_intent": character_intent,
         "logical_stance": logical_stance,
     }
+    return return_value
 
 
 
@@ -577,15 +580,7 @@ async def call_boundary_core_agent(state: CognitionState) -> CognitionState:
 
     result = parse_llm_json_output(response.content)
 
-    logger.debug(
-        "Boundary core: issue=%s acceptance=%s stance_bias=%s identity_policy=%s pressure_policy=%s summary=%s",
-        result.get("boundary_issue", ""),
-        result.get("acceptance", ""),
-        result.get("stance_bias", ""),
-        result.get("identity_policy", ""),
-        result.get("pressure_policy", ""),
-        log_preview(result.get("boundary_summary", "")),
-    )
+    logger.debug(f'Boundary core: issue={result.get("boundary_issue", "")} acceptance={result.get("acceptance", "")} stance_bias={result.get("stance_bias", "")} identity_policy={result.get("identity_policy", "")} pressure_policy={result.get("pressure_policy", "")} summary={log_preview(result.get("boundary_summary", ""))}')
 
     boundary_issue = result.get("boundary_issue", "")
     boundary_summary = result.get("boundary_summary", "")
@@ -598,7 +593,7 @@ async def call_boundary_core_agent(state: CognitionState) -> CognitionState:
     trajectory = result.get("trajectory", "")
 
 
-    return {
+    return_value = {
         "boundary_core_assessment": {
             "boundary_issue": boundary_issue,
             "boundary_summary": boundary_summary,
@@ -611,6 +606,7 @@ async def call_boundary_core_agent(state: CognitionState) -> CognitionState:
             "trajectory": trajectory,
         }
     }
+    return return_value
 
 
 
@@ -774,12 +770,7 @@ async def call_judgment_core_agent(state: CognitionState) -> CognitionState:
     ])
     result = parse_llm_json_output(response.content)
 
-    logger.debug(
-        "Judgment core: stance=%s intent=%s note=%s",
-        result.get("logical_stance", ""),
-        result.get("character_intent", ""),
-        log_preview(result.get("judgment_note", "")),
-    )
+    logger.debug(f'Judgment core: stance={result.get("logical_stance", "")} intent={result.get("character_intent", "")} note={log_preview(result.get("judgment_note", ""))}')
 
     logical_stance = result.get("logical_stance")
     character_intent = result.get("character_intent")
@@ -791,8 +782,9 @@ async def call_judgment_core_agent(state: CognitionState) -> CognitionState:
     if not character_intent:
         character_intent = state["character_intent"]
 
-    return {
+    return_value = {
         "logical_stance": logical_stance,
         "character_intent": character_intent,
         "judgment_note": judgment_note,
     }
+    return return_value

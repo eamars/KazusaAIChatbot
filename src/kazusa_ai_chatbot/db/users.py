@@ -70,7 +70,7 @@ async def resolve_global_user_id(
         "last_relationship_insight": "",
     }
     await db.user_profiles.insert_one(new_profile)
-    logger.info("Created new user profile %s for %s/%s", new_id, platform, platform_user_id)
+    logger.info(f'Created new user profile {new_id} for {platform}/{platform_user_id}')
     return new_id
 
 
@@ -238,7 +238,8 @@ async def search_users_by_display_name(name: str, limit: int = 5) -> list[dict]:
     """
     stripped = name.strip()
     if not stripped:
-        return []
+        return_value = []
+        return return_value
     db = await get_db()
     pattern = {"$regex": re.escape(stripped), "$options": "i"}
     cursor = db.user_profiles.find(
@@ -270,11 +271,14 @@ def _display_name_regex(value: str, operator: str) -> str:
     """
     escaped = re.escape(value)
     if operator == "equals":
-        return f"^{escaped}$"
+        return_value = f"^{escaped}$"
+        return return_value
     if operator == "starts_with":
-        return f"^{escaped}"
+        return_value = f"^{escaped}"
+        return return_value
     if operator == "ends_with":
-        return f"{escaped}$"
+        return_value = f"{escaped}$"
+        return return_value
     return escaped
 
 
@@ -303,7 +307,8 @@ async def list_users_by_display_name(
     """
     stripped = value.strip()
     if not stripped or limit <= 0:
-        return []
+        return_value = []
+        return return_value
 
     allowed_sources = {"user_profiles", "conversation_participants", "both"}
     if source not in allowed_sources:
@@ -421,7 +426,8 @@ def _preferred_platform_account(
                 return account
     if platform_accounts:
         return platform_accounts[0]
-    return {}
+    return_value = {}
+    return return_value
 
 
 async def list_users_by_affinity(
@@ -444,7 +450,8 @@ async def list_users_by_affinity(
         affinity value.
     """
     if limit <= 0:
-        return []
+        return_value = []
+        return return_value
 
     sort_direction = 1 if rank_order == "bottom" else -1
     db = await get_db()
@@ -510,7 +517,8 @@ async def get_user_profile(global_user_id: str) -> UserProfileDoc:
     db = await get_db()
     doc = await db.user_profiles.find_one({"global_user_id": global_user_id})
     if doc is None:
-        return {}
+        return_value = {}
+        return return_value
     doc.pop("_id", None)
     return doc
 

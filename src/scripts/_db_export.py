@@ -14,6 +14,8 @@ from dotenv import load_dotenv
 
 DEFAULT_EXCLUDED_FIELDS = ("_id", "embedding")
 
+logger = logging.getLogger(__name__)
+
 
 def configure_stdout() -> None:
     """Prefer UTF-8 terminal output when the active stream supports it.
@@ -59,7 +61,8 @@ def utc_now() -> datetime:
     Returns:
         Current time in UTC.
     """
-    return datetime.now(timezone.utc)
+    return_value = datetime.now(timezone.utc)
+    return return_value
 
 
 def timestamp_hours_ago(hours: float, *, now: datetime | None = None) -> str:
@@ -73,7 +76,8 @@ def timestamp_hours_ago(hours: float, *, now: datetime | None = None) -> str:
         ISO-8601 timestamp with a UTC offset.
     """
     reference = now or utc_now()
-    return (reference - timedelta(hours=hours)).isoformat()
+    return_value = (reference - timedelta(hours=hours)).isoformat()
+    return return_value
 
 
 def parse_json_object(raw: str, label: str) -> dict[str, Any]:
@@ -107,7 +111,8 @@ def projection_from_exclusions(exclude_fields: list[str]) -> dict[str, int]:
     Returns:
         MongoDB projection document.
     """
-    return {field: 0 for field in exclude_fields if field.strip()}
+    return_value = {field: 0 for field in exclude_fields if field.strip()}
+    return return_value
 
 
 def scrub_document(value: Any, exclude_fields: set[str]) -> Any:
@@ -121,13 +126,15 @@ def scrub_document(value: Any, exclude_fields: set[str]) -> Any:
         A recursively scrubbed value.
     """
     if isinstance(value, dict):
-        return {
+        return_value = {
             key: scrub_document(item, exclude_fields)
             for key, item in value.items()
             if key not in exclude_fields
         }
+        return return_value
     if isinstance(value, list):
-        return [scrub_document(item, exclude_fields) for item in value]
+        return_value = [scrub_document(item, exclude_fields) for item in value]
+        return return_value
     return value
 
 
@@ -184,7 +191,8 @@ def default_output_path(prefix: str, identifier: str, suffix: str = "json") -> P
         for char in identifier.strip()
     )
     timestamp = utc_now().strftime("%Y%m%dT%H%M%SZ")
-    return Path("test_artifacts") / f"{prefix}_{clean_identifier}_{timestamp}.{suffix}"
+    return_value = Path("test_artifacts") / f"{prefix}_{clean_identifier}_{timestamp}.{suffix}"
+    return return_value
 
 
 PROJECT_ENV_PATH = load_project_env()

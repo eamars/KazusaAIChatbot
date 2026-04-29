@@ -102,7 +102,7 @@ def build_user_memory_unit_doc(
     source_refs = unit.get("source_refs")
     merge_history = unit.get("merge_history")
 
-    return {
+    return_value = {
         "unit_id": unit_id or text_or_empty(unit.get("unit_id")) or uuid4().hex,
         "global_user_id": global_user_id,
         "unit_type": text_or_empty(unit["unit_type"]),
@@ -120,6 +120,7 @@ def build_user_memory_unit_doc(
         "completed_at": unit.get("completed_at"),
         "cancelled_at": unit.get("cancelled_at"),
     }
+    return return_value
 
 
 async def insert_user_memory_units(
@@ -146,7 +147,8 @@ async def insert_user_memory_units(
         for unit in units
     ]
     if not docs:
-        return []
+        return_value = []
+        return return_value
 
     if include_embeddings:
         for doc in docs:
@@ -188,7 +190,8 @@ async def query_user_memory_units(
         .sort([("last_seen_at", -1), ("updated_at", -1)])
         .limit(limit)
     )
-    return [doc async for doc in cursor]
+    return_value = [doc async for doc in cursor]
+    return return_value
 
 
 async def search_user_memory_units_by_vector(
@@ -215,7 +218,8 @@ async def search_user_memory_units_by_vector(
     """
 
     if not global_user_id or not embedding:
-        return []
+        return_value = []
+        return return_value
 
     vector_filter: dict = {
         "global_user_id": global_user_id,
@@ -240,10 +244,13 @@ async def search_user_memory_units_by_vector(
     ]
     try:
         cursor = db.user_memory_units.aggregate(pipeline)
-        return [doc async for doc in cursor]
-    except PyMongoError:
+        return_value = [doc async for doc in cursor]
+        return return_value
+    except PyMongoError as exc:
+        logger.debug(f"Handled exception in search_user_memory_units_by_vector: {exc}")
         logger.warning("user_memory_units vector search unavailable; falling back to recency")
-        return []
+        return_value = []
+        return return_value
 
 
 async def update_user_memory_unit_semantics(

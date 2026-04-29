@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from datetime import timedelta
 
 from kazusa_ai_chatbot.conversation_progress.models import ConversationProgressPromptDoc
@@ -25,6 +26,8 @@ from kazusa_ai_chatbot.conversation_progress.policy import (
 )
 from kazusa_ai_chatbot.db.schemas import ConversationEpisodeEntryDoc, ConversationEpisodeStateDoc
 
+logger = logging.getLogger(__name__)
+
 
 def age_hint(*, first_seen_at: str, current_timestamp: str) -> str:
     """Convert a first-seen timestamp into a compact relative-age label.
@@ -44,10 +47,12 @@ def age_hint(*, first_seen_at: str, current_timestamp: str) -> str:
         return "just now"
     if delta < timedelta(hours=1):
         minutes = max(5, round(delta.total_seconds() / 60 / 5) * 5)
-        return f"~{minutes}m ago"
+        return_value = f"~{minutes}m ago"
+        return return_value
     if delta < timedelta(hours=8):
         hours = max(1, round(delta.total_seconds() / 3600))
-        return f"~{hours}h ago"
+        return_value = f"~{hours}h ago"
+        return return_value
     if first_seen.date() == current.date():
         return "earlier today"
     if (current.date() - first_seen.date()).days == 1:
@@ -79,12 +84,14 @@ def _project_entry(
             first_seen_at=first_seen_at,
             current_timestamp=current_timestamp,
         )
-    except ValueError:
+    except ValueError as exc:
+        logger.debug(f"Handled exception in _project_entry: {exc}")
         return None
-    return {
+    return_value = {
         "text": cap_text(text, MAX_ENTRY_CHARS),
         "age_hint": relative_age,
     }
+    return return_value
 
 
 def _project_entries(
@@ -142,10 +149,11 @@ def project_prompt_doc(
     """
 
     if document is None:
-        return empty_progress_prompt_doc()
+        return_value = empty_progress_prompt_doc()
+        return return_value
 
     if document["continuity"] == "sharp_transition":
-        return {
+        return_value = {
             "status": "new_episode",
             "episode_label": cap_text(document.get("episode_label", ""), MAX_LABEL_CHARS),
             "continuity": "sharp_transition",
@@ -166,6 +174,7 @@ def project_prompt_doc(
             "next_affordances": [],
             "progression_guidance": "",
         }
+        return return_value
 
     prompt_doc: ConversationProgressPromptDoc = {
         "status": cap_text(document["status"], MAX_LABEL_CHARS),
@@ -216,4 +225,5 @@ def project_prompt_doc(
         ),
         "progression_guidance": cap_text(document.get("progression_guidance", ""), MAX_GUIDANCE_CHARS),
     }
-    return enforce_progress_prompt_budget(prompt_doc)
+    return_value = enforce_progress_prompt_budget(prompt_doc)
+    return return_value

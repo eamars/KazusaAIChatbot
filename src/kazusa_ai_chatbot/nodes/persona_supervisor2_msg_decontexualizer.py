@@ -144,26 +144,20 @@ async def call_msg_decontexualizer(state: GlobalPersonaState) -> dict:
         output = result.get("output")
         reasoning = result.get("reasoning")
         is_modified = result.get("is_modified", False)
-    except Exception as e:
-        logger.error(f"Failed to parse LLM output: {e}")
+    except Exception as exc:
+        logger.debug(f"Handled exception in call_msg_decontexualizer: {exc}")
+        logger.exception("Failed to parse LLM output")
 
         output = state["user_input"]
         reasoning = "Failed to parse LLM output"
         is_modified = False
 
-    logger.info(
-        "Decontextualizer result: user=%s platform_user=%s modified=%s reason=%s input=%s output=%s",
-        user_name,
-        platform_user_id,
-        is_modified,
-        log_preview(reasoning),
-        log_preview(user_input),
-        log_preview(output),
-    )
+    logger.info(f'Decontextualizer result: user={user_name} platform_user={platform_user_id} modified={is_modified} reason={log_preview(reasoning)} input={log_preview(user_input)} output={log_preview(output)}')
 
     if not is_modified:
         output = state["user_input"]
     
-    return {
+    return_value = {
         "decontexualized_input": output,
     }
+    return return_value

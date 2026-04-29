@@ -147,9 +147,10 @@ async def _update_character_image(
                 compress_result = parse_llm_json_output(compress_response.content)
                 historical_summary = compress_result.get("compressed_summary", historical_summary)
 
-    return {
+    return_value = {
         "milestones": milestones,
         "recent_window": recent_window,
         "historical_summary": historical_summary,
         "meta": {"synthesis_count": synthesis_count + 1, "last_updated": timestamp},
     }
+    return return_value

@@ -151,7 +151,8 @@ def _slot_number(task: str) -> int | None:
     match = re.search(r"slot\s+(\d+)", task, flags=re.IGNORECASE)
     if match is None:
         return None
-    return int(match.group(1))
+    return_value = int(match.group(1))
+    return return_value
 
 
 def _resolved_user_from_known_facts(task: str, context: dict[str, Any]) -> dict[str, Any]:
@@ -167,21 +168,26 @@ def _resolved_user_from_known_facts(task: str, context: dict[str, Any]) -> dict[
     slot_number = _slot_number(task)
     known_facts = context.get("known_facts", [])
     if slot_number is None or not isinstance(known_facts, list):
-        return {}
+        return_value = {}
+        return return_value
     if slot_number < 1 or slot_number > len(known_facts):
-        return {}
+        return_value = {}
+        return return_value
 
     fact = known_facts[slot_number - 1]
     if not isinstance(fact, dict):
-        return {}
+        return_value = {}
+        return return_value
 
     raw_result = fact.get("raw_result")
     if isinstance(raw_result, dict):
-        return {
+        return_value = {
             "global_user_id": str(raw_result.get("global_user_id", "")).strip(),
             "display_name": str(raw_result.get("display_name", "")).strip(),
         }
-    return {}
+        return return_value
+    return_value = {}
+    return return_value
 
 
 def _is_about_resolved_user_search(task: str) -> bool:
@@ -200,7 +206,8 @@ def _is_about_resolved_user_search(task: str) -> bool:
         marker in task_lower
         for marker in ("about", "impression", "opinion", "看法", "印象", "评价")
     )
-    return references_resolved_user and asks_about_subject
+    return_value = references_resolved_user and asks_about_subject
+    return return_value
 
 
 def _apply_resolved_subject_user(
@@ -259,8 +266,10 @@ async def _generator(task: str, context: dict[str, Any], feedback: str) -> dict[
     response = await _generator_llm.ainvoke([system_prompt, human_message])
     result = parse_llm_json_output(response.content)
     if not isinstance(result, dict):
-        return {}
-    return _normalize_args(result)
+        return_value = {}
+        return return_value
+    return_value = _normalize_args(result)
+    return return_value
 
 
 async def _tool(args: dict[str, Any]) -> object:
@@ -273,10 +282,12 @@ async def _tool(args: dict[str, Any]) -> object:
         Tool result or an error dict on invalid arguments.
     """
     try:
-        return await search_persistent_memory.ainvoke(args)
+        return_value = await search_persistent_memory.ainvoke(args)
+        return return_value
     except (TypeError, ValueError, ValidationError) as exc:
-        logger.info("persistent_memory_search_agent invalid args: %s", exc)
-        return {"error": f"{type(exc).__name__}: {exc}"}
+        logger.info(f'persistent_memory_search_agent invalid args: {exc}')
+        return_value = {"error": f"{type(exc).__name__}: {exc}"}
+        return return_value
 
 
 async def _judge(task: str, result: object) -> tuple[bool, str]:
@@ -296,11 +307,13 @@ async def _judge(task: str, result: object) -> tuple[bool, str]:
     response = await _judge_llm.ainvoke([system_prompt, human_message])
     verdict = parse_llm_json_output(response.content)
     if not isinstance(verdict, dict):
-        return False, "评估输出无效，请把查询改成更具体的记忆描述。"
+        return_value = False, "评估输出无效，请把查询改成更具体的记忆描述。"
+        return return_value
 
     resolved = bool(verdict.get("resolved", False))
     feedback = str(verdict.get("feedback", "")).strip()
-    return resolved, feedback
+    return_value = resolved, feedback
+    return return_value
 
 
 class PersistentMemorySearchAgent(BaseRAGHelperAgent):
@@ -336,12 +349,13 @@ class PersistentMemorySearchAgent(BaseRAGHelperAgent):
         cache_key = build_persistent_memory_search_cache_key(task, context)
         cached = await self.read_cache(cache_key)
         if cached is not None:
-            return self.with_cache_status(
+            return_value = self.with_cache_status(
                 {"resolved": True, "result": cached, "attempts": 0},
                 hit=True,
                 reason="hit",
                 cache_key=cache_key,
             )
+            return return_value
 
         feedback = ""
         result = None
@@ -374,7 +388,7 @@ class PersistentMemorySearchAgent(BaseRAGHelperAgent):
         else:
             cache_reason = "miss_unresolved"
 
-        return self.with_cache_status(
+        return_value = self.with_cache_status(
             {
                 "resolved": resolved,
                 "result": result,
@@ -384,6 +398,7 @@ class PersistentMemorySearchAgent(BaseRAGHelperAgent):
             reason=cache_reason,
             cache_key=cache_key,
         )
+        return return_value
 
 
 async def _test_main() -> None:

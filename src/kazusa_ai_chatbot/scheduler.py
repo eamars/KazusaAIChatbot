@@ -73,8 +73,9 @@ async def _fire_event(event: ScheduledEventDoc) -> None:
 
     try:
         await _handle_task(event)
-    except Exception:
-        logger.exception("Event %s failed", event_id)
+    except Exception as exc:
+        logger.debug(f"Handled exception in _fire_event: {exc}")
+        logger.exception(f'Event {event_id} failed')
         await db.scheduled_events.update_one(
             {"event_id": event_id},
             {"$set": {"status": "failed"}},
@@ -125,12 +126,7 @@ async def schedule_event(event: ScheduledEventDoc) -> str:
     task = asyncio.create_task(_schedule_task(dict(event)))
     _pending_tasks[event["event_id"]] = task
 
-    logger.info(
-        "Scheduled event %s (%s) at %s",
-        event["event_id"],
-        event["tool"],
-        event["execute_at"],
-    )
+    logger.info(f'Scheduled event {event["event_id"]} ({event["tool"]}) at {event["execute_at"]}')
     return event["event_id"]
 
 
@@ -146,14 +142,14 @@ async def load_pending_events() -> int:
     count = 0
     async for doc in cursor:
         if "tool" not in doc or "execute_at" not in doc:
-            logger.warning("Skipping legacy scheduled event without tool/execute_at: %s", doc.get("event_id"))
+            logger.warning(f'Skipping legacy scheduled event without tool/execute_at: {doc.get("event_id")}')
             continue
         task = asyncio.create_task(_schedule_task(doc))
         _pending_tasks[doc["event_id"]] = task
         count += 1
 
     if count:
-        logger.info("Loaded %d pending scheduled events", count)
+        logger.info(f'Loaded {count} pending scheduled events')
     return count
 
 
@@ -184,7 +180,8 @@ async def cancel_event(event_id: str) -> bool:
             }
         },
     )
-    return result.modified_count > 0
+    return_value = result.modified_count > 0
+    return return_value
 
 
 async def shutdown() -> None:

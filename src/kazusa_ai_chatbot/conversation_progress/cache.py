@@ -14,7 +14,8 @@ _last_completed_cache: dict[_CacheKey, dict] = {}
 
 
 def _cache_key(scope: ConversationProgressScope) -> _CacheKey:
-    return (scope.platform, scope.platform_channel_id, scope.global_user_id)
+    return_value = (scope.platform, scope.platform_channel_id, scope.global_user_id)
+    return return_value
 
 
 def clear_cache() -> None:
@@ -73,15 +74,19 @@ def select_latest_document(
     key = _cache_key(scope)
     cached = _last_completed_cache.get(key)
     if cached is None:
-        return db_document, False
+        return_value = db_document, False
+        return return_value
 
     completed_at = float(cached["completed_at"])
     if now - completed_at > CACHE_TTL_SECONDS:
         del _last_completed_cache[key]
-        return db_document, False
+        return_value = db_document, False
+        return return_value
 
     cached_turn_count = int(cached["turn_count"])
     db_turn_count = int(db_document["turn_count"]) if db_document is not None else 0
     if cached_turn_count > db_turn_count:
-        return dict(cached["document"]), True
-    return db_document, False
+        return_value = dict(cached["document"]), True
+        return return_value
+    return_value = db_document, False
+    return return_value

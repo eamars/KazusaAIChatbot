@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import datetime
 import json
+import logging
 import re
 from typing import Any
 
@@ -13,6 +14,8 @@ from kazusa_ai_chatbot.config import RAG_SUBAGENT_LLM_API_KEY, RAG_SUBAGENT_LLM_
 from kazusa_ai_chatbot.db import aggregate_conversation_by_user
 from kazusa_ai_chatbot.rag.helper_agent import BaseRAGHelperAgent
 from kazusa_ai_chatbot.utils import get_llm, parse_llm_json_output, text_or_empty
+
+logger = logging.getLogger(__name__)
 
 _EXTRACTOR_PROMPT = """\
 You are a parameter extractor for `aggregate_conversation_by_user`.
@@ -62,7 +65,8 @@ def _normalize_limit(raw_limit: object) -> int:
         Integer limit clamped to the aggregate result range.
     """
     if isinstance(raw_limit, int) and not isinstance(raw_limit, bool):
-        return max(1, min(raw_limit, 50))
+        return_value = max(1, min(raw_limit, 50))
+        return return_value
     return 10
 
 
@@ -79,12 +83,13 @@ def _normalize_args(raw_args: dict[str, Any]) -> dict[str, Any]:
     if time_window not in _TIME_WINDOWS:
         time_window = "recent"
 
-    return {
+    return_value = {
         "aggregate": "message_count_by_user",
         "keyword": text_or_empty(raw_args.get("keyword")),
         "time_window": time_window,
         "limit": _normalize_limit(raw_args.get("limit", 10)),
     }
+    return return_value
 
 
 async def _extract_aggregate_args(task: str, context: dict[str, Any]) -> dict[str, Any]:
@@ -104,8 +109,10 @@ async def _extract_aggregate_args(task: str, context: dict[str, Any]) -> dict[st
     response = await _extractor_llm.ainvoke([system_prompt, human_message])
     result = parse_llm_json_output(response.content)
     if not isinstance(result, dict):
-        return _normalize_args({})
-    return _normalize_args(result)
+        return_value = _normalize_args({})
+        return return_value
+    return_value = _normalize_args(result)
+    return return_value
 
 
 def _parse_current_timestamp(context: dict[str, Any]) -> datetime.datetime:
@@ -121,14 +128,16 @@ def _parse_current_timestamp(context: dict[str, Any]) -> datetime.datetime:
     if raw_timestamp:
         try:
             parsed = datetime.datetime.fromisoformat(raw_timestamp.replace("Z", "+00:00"))
-        except ValueError:
+        except ValueError as exc:
+            logger.debug(f"Handled exception in _parse_current_timestamp: {exc}")
             parsed = datetime.datetime.now(datetime.timezone.utc)
     else:
         parsed = datetime.datetime.now(datetime.timezone.utc)
 
     if parsed.tzinfo is None:
         parsed = parsed.replace(tzinfo=datetime.timezone.utc)
-    return parsed.astimezone(datetime.timezone.utc)
+    return_value = parsed.astimezone(datetime.timezone.utc)
+    return return_value
 
 
 def _time_bounds(
@@ -145,16 +154,20 @@ def _time_bounds(
     """
     now = _parse_current_timestamp(context)
     if time_window == "all":
-        return None, None
+        return_value = None, None
+        return return_value
     if time_window == "recent":
-        return (now - datetime.timedelta(days=7)).isoformat(), now.isoformat()
+        return_value = (now - datetime.timedelta(days=7)).isoformat(), now.isoformat()
+        return return_value
 
     start_of_today = now.replace(hour=0, minute=0, second=0, microsecond=0)
     if time_window == "today":
-        return start_of_today.isoformat(), now.isoformat()
+        return_value = start_of_today.isoformat(), now.isoformat()
+        return return_value
 
     start_of_yesterday = start_of_today - datetime.timedelta(days=1)
-    return start_of_yesterday.isoformat(), start_of_today.isoformat()
+    return_value = start_of_yesterday.isoformat(), start_of_today.isoformat()
+    return return_value
 
 
 def _slot_number(task: str) -> int | None:
@@ -169,7 +182,8 @@ def _slot_number(task: str) -> int | None:
     match = re.search(r"slot\s+(\d+)", task, flags=re.IGNORECASE)
     if match is None:
         return None
-    return int(match.group(1))
+    return_value = int(match.group(1))
+    return return_value
 
 
 def _global_user_id_from_known_fact(fact: dict[str, Any]) -> str:
@@ -185,7 +199,8 @@ def _global_user_id_from_known_fact(fact: dict[str, Any]) -> str:
     if isinstance(raw_result, dict):
         value = raw_result.get("global_user_id")
         if value:
-            return str(value)
+            return_value = str(value)
+            return return_value
     return ""
 
 
@@ -212,7 +227,8 @@ def _resolved_global_user_id(task: str, context: dict[str, Any]) -> str | None:
         return None
 
     user_id = _global_user_id_from_known_fact(known_facts[slot_number - 1])
-    return user_id or None
+    return_value = user_id or None
+    return return_value
 
 
 class ConversationAggregateAgent(BaseRAGHelperAgent):
@@ -264,7 +280,7 @@ class ConversationAggregateAgent(BaseRAGHelperAgent):
             limit=args["limit"],
         )
 
-        return self.with_cache_status(
+        return_value = self.with_cache_status(
             {
                 "resolved": bool(result["rows"]),
                 "result": {
@@ -277,6 +293,7 @@ class ConversationAggregateAgent(BaseRAGHelperAgent):
             hit=False,
             reason="agent_not_cacheable",
         )
+        return return_value
 
 
 async def _test_main() -> None:

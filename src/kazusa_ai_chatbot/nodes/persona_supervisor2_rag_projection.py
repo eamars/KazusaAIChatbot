@@ -33,14 +33,16 @@ def _as_dict(value: object) -> dict[str, Any]:
     """Return ``value`` when it is a dict, otherwise an empty dict."""
     if isinstance(value, dict):
         return value
-    return {}
+    return_value = {}
+    return return_value
 
 
 def _as_list(value: object) -> list[Any]:
     """Return ``value`` when it is a list, otherwise an empty list."""
     if isinstance(value, list):
         return value
-    return []
+    return_value = []
+    return return_value
 
 
 def _strip_internal_profile_fields(profile: dict[str, Any]) -> dict[str, Any]:

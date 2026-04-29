@@ -24,16 +24,19 @@ def normalize_subjective_appraisals(value: object) -> list[str]:
         A list of non-empty diary entry strings.
     """
     if value is None:
-        return []
+        return_value = []
+        return return_value
     if isinstance(value, str):
         text = value.strip()
-        return [text] if text else []
+        return_value = [text] if text else []
+        return return_value
     if isinstance(value, tuple):
         items = list(value)
     elif isinstance(value, list):
         items = value
     else:
-        return []
+        return_value = []
+        return return_value
 
     normalized: list[str] = []
     for item in items:

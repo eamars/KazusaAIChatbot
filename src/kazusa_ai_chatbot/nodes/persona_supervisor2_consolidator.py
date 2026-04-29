@@ -43,7 +43,8 @@ logger = logging.getLogger(__name__)
 
 
 async def _consolidator_noop(_: ConsolidatorState) -> dict:
-    return {}
+    return_value = {}
+    return return_value
 
 
 def _record_existing_dedup_key(row: object, dedup_keys: set[str]) -> None:
@@ -123,6 +124,8 @@ async def call_consolidation_subgraph(global_state: GlobalPersonaState):
 
     sub_graph = sub_agent_builder.compile()
 
+    chat_history_recent = global_state.get("chat_history_recent", [])
+
     sub_state: ConsolidatorState = {
         "timestamp": global_state["timestamp"],
         "global_user_id": global_state["global_user_id"],
@@ -143,7 +146,7 @@ async def call_consolidation_subgraph(global_state: GlobalPersonaState):
         "rag_result": global_state["rag_result"],
         "existing_dedup_keys": _build_existing_dedup_keys(global_state),
         "decontexualized_input": global_state["decontexualized_input"],
-        "chat_history_recent": global_state["chat_history_recent"],
+        "chat_history_recent": chat_history_recent,
         "metadata": {},
     } # pyright: ignore[reportAssignmentType]
 
@@ -162,22 +165,9 @@ async def call_consolidation_subgraph(global_state: GlobalPersonaState):
     )
     metadata = result.get("metadata", {}) or {}
 
-    logger.info(
-        "Consolidation summary: facts=%d promises=%d affinity_delta=%s mood=%s vibe=%s writes=%s cache_invalidated=%s",
-        len(new_facts),
-        len(future_promises),
-        affinity_delta,
-        log_preview(mood),
-        log_preview(global_vibe),
-        log_dict_subset(metadata, ["write_success"]),
-        metadata.get("cache_invalidated", []),
-    )
+    logger.info(f'Consolidation summary: facts={len(new_facts)} promises={len(future_promises)} affinity_delta={affinity_delta} mood={log_preview(mood)} vibe={log_preview(global_vibe)} writes={log_dict_subset(metadata, ["write_success"])} cache_invalidated={metadata.get("cache_invalidated", [])}')
 
-    logger.debug(
-        "Consolidation detail: facts=%s promises=%s metadata=%s",
-        log_list_preview(new_facts),
-        log_list_preview(future_promises),
-        log_dict_subset(
+    logger.debug(f'Consolidation detail: facts={log_list_preview(new_facts)} promises={log_list_preview(future_promises)} metadata={log_dict_subset(
             metadata,
             [
                 "scheduled_event_ids",
@@ -185,10 +175,9 @@ async def call_consolidation_subgraph(global_state: GlobalPersonaState):
                 "affinity_before",
                 "affinity_delta_processed",
             ],
-        ),
-    )
+        )}')
 
-    return {
+    return_value = {
         "mood": mood,
         "global_vibe": global_vibe,
         "reflection_summary": reflection_summary,
@@ -199,6 +188,7 @@ async def call_consolidation_subgraph(global_state: GlobalPersonaState):
         "future_promises": future_promises,
         "consolidation_metadata": metadata,
     }
+    return return_value
 
 
 async def test_main():

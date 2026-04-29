@@ -105,29 +105,32 @@ class UserLookupAgent(BaseRAGHelperAgent):
 
         display_name = await self._extract_display_name(task, context)
         if not display_name:
-            return self.with_cache_status(
+            return_value = self.with_cache_status(
                 {"resolved": False, "result": None, "attempts": 1},
                 hit=False,
                 reason="skipped_missing_display_name",
             )
+            return return_value
 
         cache_key = build_user_lookup_cache_key(display_name, context)
         cached = await self.read_cache(cache_key)
         if cached is not None:
-            return self.with_cache_status(
+            return_value = self.with_cache_status(
                 {"resolved": True, "result": cached, "attempts": 0},
                 hit=True,
                 reason="hit",
                 cache_key=cache_key,
             )
+            return return_value
 
         # Step 1: exact lookup in user_profiles
         best: dict[str, Any] | None = None
         attempts = 1
         try:
             exact_results = await search_users_by_display_name(display_name)
-        except Exception:
-            logger.exception("user_lookup_agent exact search failed for %r", display_name)
+        except Exception as exc:
+            logger.debug(f"Handled exception in run: {exc}")
+            logger.exception(f'user_lookup_agent exact search failed for {display_name!r}')
             exact_results = []
 
         if exact_results:
@@ -141,12 +144,13 @@ class UserLookupAgent(BaseRAGHelperAgent):
                 best = await self._pick_best(display_name, candidates)
 
         if best is None:
-            return self.with_cache_status(
+            return_value = self.with_cache_status(
                 {"resolved": False, "result": None, "attempts": attempts},
                 hit=False,
                 reason="miss_unresolved",
                 cache_key=cache_key,
             )
+            return return_value
 
         global_user_id = str(best.get("global_user_id", "")).strip()
         await self.write_cache(
@@ -155,12 +159,13 @@ class UserLookupAgent(BaseRAGHelperAgent):
             dependencies=build_user_lookup_dependencies(global_user_id, context),
             metadata={"lookup_mode": "profile" if attempts == 1 else "vector"},
         )
-        return self.with_cache_status(
+        return_value = self.with_cache_status(
             {"resolved": True, "result": best, "attempts": attempts},
             hit=False,
             reason="miss_stored",
             cache_key=cache_key,
         )
+        return return_value
 
     async def invalidate_for_profile(
         self,
@@ -182,7 +187,7 @@ class UserLookupAgent(BaseRAGHelperAgent):
         Returns:
             Number of Cache 2 entries invalidated.
         """
-        return await self.invalidate_cache(
+        return_value = await self.invalidate_cache(
             CacheInvalidationEvent(
                 source=_USER_PROFILE_CACHE_SOURCE,
                 platform=normalize_cache_text(platform),
@@ -191,6 +196,7 @@ class UserLookupAgent(BaseRAGHelperAgent):
                 reason=reason,
             )
         )
+        return return_value
 
     async def _extract_display_name(self, task: str, context: dict[str, Any]) -> str:
         """Extract the literal display name from the slot description.
@@ -212,7 +218,8 @@ class UserLookupAgent(BaseRAGHelperAgent):
         result = parse_llm_json_output(response.content)
         if not isinstance(result, dict):
             return ""
-        return str(result.get("display_name", "")).strip()
+        return_value = str(result.get("display_name", "")).strip()
+        return return_value
 
     async def _pick_best(
         self, target_name: str, candidates: list[dict[str, Any]]
@@ -278,9 +285,11 @@ class UserLookupAgent(BaseRAGHelperAgent):
                 limit=10,
                 method="vector",
             )
-        except Exception:
-            logger.exception("user_lookup_agent vector search failed for %r", display_name)
-            return []
+        except Exception as exc:
+            logger.debug(f"Handled exception in _vector_search_candidates: {exc}")
+            logger.exception(f'user_lookup_agent vector search failed for {display_name!r}')
+            return_value = []
+            return return_value
 
         seen: set[str] = set()
         candidates: list[dict[str, Any]] = []

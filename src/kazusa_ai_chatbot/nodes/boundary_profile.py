@@ -13,7 +13,8 @@ module so L2 agents can import them without circular dependencies.
 
 def _score_to_level(score: float, max_index: int) -> int:
     clamped_score = max(0.0, min(1.0, score))
-    return min(max_index, round(clamped_score * max_index))
+    return_value = min(max_index, round(clamped_score * max_index))
+    return return_value
 
 def get_self_integrity_description(self_integrity_score: float) -> str:
     """
@@ -117,7 +118,8 @@ def get_compliance_strategy_description(stress_strategy: str) -> str:
         "comply": "在压力下，你的默认策略是顺从。你更容易先完成对方要求、维持互动连续性，再慢慢消化自己的不适与边界受损感。"
     }
     
-    return strategies.get(stress_strategy, "根据输入自由决策")
+    return_value = strategies.get(stress_strategy, "根据输入自由决策")
+    return return_value
 
 
 def get_boundary_recovery_description(boundary_recovery: str) -> str:
@@ -133,7 +135,8 @@ def get_boundary_recovery_description(boundary_recovery: str) -> str:
         "detach": "一旦边界被触碰，你的恢复机制偏向抽离。你未必会激烈反击，但会逐渐降低投入、减少情绪连接，并把对方从心理上拉远。"
     }
     
-    return mechanisms.get(boundary_recovery, "未知机制")
+    return_value = mechanisms.get(boundary_recovery, "未知机制")
+    return return_value
 
 
 def get_authority_skepticism_description(authority_skepticism: float) -> str:

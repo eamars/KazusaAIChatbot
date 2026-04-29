@@ -18,7 +18,8 @@ All descriptions are calibrated to modern online Chinese chat norms:
 
 def _pick_level(score: float) -> int:
     clamped = max(0.0, min(1.0, score))
-    return round(clamped * 10)
+    return_value = round(clamped * 10)
+    return return_value
 
 
 def get_fragmentation_description(score: float) -> str:

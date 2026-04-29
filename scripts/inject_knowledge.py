@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import logging
 import sys
 from datetime import datetime, timezone
 
@@ -23,6 +24,8 @@ from kazusa_ai_chatbot.db.schemas import MemoryDoc
 _VALID_MEMORY_TYPES = ("fact", "narrative", "impression", "defense_rule")
 _DEFAULT_MEMORY_TYPE = "fact"
 _DEFAULT_SOURCE_KIND = "external_imported"
+
+logger = logging.getLogger(__name__)
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -74,6 +77,7 @@ async def _inject_memory(args: argparse.Namespace, timestamp: str) -> None:
     try:
         await save_memory(doc, timestamp)
     except Exception as exc:
+        logger.exception(f"Failed to save to memory collection: {exc}")
         raise RuntimeError(f"Failed to save to memory collection: {exc}") from exc
 
     print(f"[memory] Saved: '{args.name}'")

@@ -72,12 +72,13 @@ async def send_message_endpoint(
     except RuntimeError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 
-    return RuntimeSendMessageResponse(
+    return_value = RuntimeSendMessageResponse(
         platform=result.platform,
         channel_id=result.channel_id,
         message_id=result.message_id,
         sent_at=result.sent_at.isoformat(),
     )
+    return return_value
 
 
 class DiscordAdapter(discord.Client):
@@ -121,13 +122,13 @@ class DiscordAdapter(discord.Client):
         await self._ensure_runtime_server_started()
 
     async def on_ready(self):
-        logger.info("Discord adapter logged in as %s (id=%s)", self.user, self.user.id)
+        logger.info(f"Discord adapter logged in as {self.user} (id={self.user.id})")
         if not self._brain_registration_done:
             await self._register_with_brain()
             self._brain_registration_done = True
             self._ensure_heartbeat_started()
         if self.channel_ids is not None:
-            logger.info("Active in channels: %s. Other channels are listen-only.", self.channel_ids)
+            logger.info(f"Active in channels: {self.channel_ids}. Other channels are listen-only.")
         else:
             logger.info("No active channels configured — all channels are listen-only (DMs are active).")
 
@@ -148,11 +149,7 @@ class DiscordAdapter(discord.Client):
         )
         self._runtime_server = uvicorn.Server(config)
         self._runtime_server_task = asyncio.create_task(self._runtime_server.serve())
-        logger.info(
-            "Discord runtime callback listening on %s:%s",
-            self.runtime_host,
-            self.runtime_port,
-        )
+        logger.info(f"Discord runtime callback listening on {self.runtime_host}:{self.runtime_port}")
 
     async def _register_with_brain(self) -> None:
         """Register this adapter's outbound callback URL with the brain service."""
@@ -163,20 +160,18 @@ class DiscordAdapter(discord.Client):
             json=payload,
         )
         response.raise_for_status()
-        logger.info(
-            "Registered Discord runtime adapter with brain: callback_url=%s",
-            self.runtime_public_url,
-        )
+        logger.info(f"Registered Discord runtime adapter with brain: callback_url={self.runtime_public_url}")
 
     def _runtime_registration_payload(self) -> dict:
         """Return the shared registration payload for startup and heartbeat."""
 
-        return {
+        return_value = {
             "platform": self.platform,
             "callback_url": self.runtime_public_url,
             "shared_secret": self.runtime_shared_secret,
             "timeout_seconds": 10.0,
         }
+        return return_value
 
     async def _send_heartbeat_once(self) -> None:
         """Refresh the adapter registration in the brain service."""
@@ -202,7 +197,7 @@ class DiscordAdapter(discord.Client):
             try:
                 await self._send_heartbeat_once()
             except httpx.HTTPError as exc:
-                logger.warning("Discord runtime heartbeat failed: %s", exc)
+                logger.warning(f"Discord runtime heartbeat failed: {exc}")
 
     async def on_message(self, message: discord.Message):
         if message.author == self.user:
@@ -234,20 +229,13 @@ class DiscordAdapter(discord.Client):
             
         mode_label = "LISTEN-ONLY" if message_debug_modes.get("listen_only") else "ACTIVE"
 
-        logger.info(
-            "[%s] Incoming Discord message: channel_id=%s is_dm=%s author=%s content=%s",
-            mode_label,
-            channel_id_str,
-            is_dm,
-            message.author.display_name,
-            message.content,
-        )
+        logger.info(f"[{mode_label}] Incoming Discord message: channel_id={channel_id_str} is_dm={is_dm} author={message.author.display_name} content={message.content}")
 
         # Build attachments
         attachments = []
         for att in message.attachments:
             if att.size and att.size > (5 * 1024 * 1024):
-                logger.warning("Attachment %s exceeds 5MB — skipping", att.filename)
+                logger.warning(f"Attachment {att.filename} exceeds 5MB — skipping")
                 continue
 
             if att.content_type and att.content_type.startswith("image/"):
@@ -261,8 +249,9 @@ class DiscordAdapter(discord.Client):
                             "base64_data": b64,
                             "description": "",
                         })
-                except httpx.HTTPError:
-                    logger.exception("Failed to fetch attachment %s", att.url)
+                except httpx.HTTPError as exc:
+                    logger.debug(f"Handled exception in on_message: {exc}")
+                    logger.exception(f"Failed to fetch attachment {att.url}")
 
         # Determine channel name
         if message.guild is None:
@@ -304,7 +293,8 @@ class DiscordAdapter(discord.Client):
             
             resp.raise_for_status()
             data = resp.json()
-        except Exception:
+        except Exception as exc:
+            logger.debug(f"Handled exception in on_message: {exc}")
             logger.exception("Brain service request failed")
             if not message_debug_modes.get("listen_only"):
                 await message.reply("I'm having trouble thinking right now, please try again later.")
@@ -337,7 +327,8 @@ class DiscordAdapter(discord.Client):
             self._heartbeat_task.cancel()
             try:
                 await self._heartbeat_task
-            except asyncio.CancelledError:
+            except asyncio.CancelledError as exc:
+                logger.debug(f"Handled exception in close: {exc}")
                 pass
         await self._http_client.aclose()
         if self._runtime_server is not None:
@@ -376,18 +367,20 @@ class DiscordAdapter(discord.Client):
             )
 
         message = await channel.send(text, **send_kwargs)
-        return SendResult(
+        return_value = SendResult(
             platform=self.platform,
             channel_id=channel_id,
             message_id=str(message.id),
             sent_at=datetime.now(timezone.utc),
         )
+        return return_value
 
 
 def _split_message(text: str, limit: int = 2000) -> list[str]:
     """Split a message into chunks that fit within Discord's character limit."""
     if len(text) <= limit:
-        return [text]
+        return_value = [text]
+        return return_value
     chunks = []
     while text:
         if len(text) <= limit:

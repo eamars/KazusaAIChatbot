@@ -76,9 +76,11 @@ class AdapterRegistry:
     def has(self, platform: str) -> bool:
         """Return whether an adapter exists for one platform."""
 
-        return platform in self._by_platform
+        return_value = platform in self._by_platform
+        return return_value
 
     def platforms(self) -> set[str]:
         """Return the set of registered platform keys."""
 
-        return set(self._by_platform)
+        return_value = set(self._by_platform)
+        return return_value

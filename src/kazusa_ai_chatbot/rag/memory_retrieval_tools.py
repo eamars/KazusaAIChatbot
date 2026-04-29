@@ -33,7 +33,8 @@ async def search_conversation(search_query: str = "",
         Top-K conversations close to the query, each as (similarity_score, message_with_metadata).
     """
     if not search_query or not search_query.strip():
-        return [(-1.0, {"error": "search_query is mandatory and must not be empty. Please provide a natural-language semantic query."})]
+        return_value = [(-1.0, {"error": "search_query is mandatory and must not be empty. Please provide a natural-language semantic query."})]
+        return return_value
 
     results = await search_conversation_history(
         query=search_query,
@@ -93,7 +94,8 @@ async def search_conversation_keyword(
         Matching conversations ordered by recency, each as a message dict.
     """
     if not keyword or not keyword.strip():
-        return [{"error": "keyword is mandatory and must not be empty."}]
+        return_value = [{"error": "keyword is mandatory and must not be empty."}]
+        return return_value
 
     results = await search_conversation_history(
         query=keyword,
@@ -106,7 +108,7 @@ async def search_conversation_keyword(
         to_timestamp=to_timestamp,
     )
 
-    return [
+    return_value = [
         {
             "content": msg.get("content", ""),
             "timestamp": msg.get("timestamp", ""),
@@ -121,6 +123,7 @@ async def search_conversation_keyword(
         }
         for _, msg in results
     ]
+    return return_value
 
 
 @tool
@@ -152,7 +155,8 @@ async def search_persistent_memory_keyword(
         Matching memory entries with metadata.
     """
     if not keyword or not keyword.strip():
-        return [{"error": "keyword is mandatory and must not be empty."}]
+        return_value = [{"error": "keyword is mandatory and must not be empty."}]
+        return return_value
 
     results = await search_memory_db(
         query=keyword,
@@ -161,7 +165,7 @@ async def search_persistent_memory_keyword(
         source_global_user_id=source_global_user_id,
         memory_type=None,
     )
-    return [
+    return_value = [
         {
             "memory_name": mem.get("memory_name", ""),
             "content": mem.get("content", ""),
@@ -172,6 +176,7 @@ async def search_persistent_memory_keyword(
         }
         for _, mem in results
     ]
+    return return_value
 
 
 @tool

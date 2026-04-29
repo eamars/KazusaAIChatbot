@@ -87,8 +87,9 @@ async def main():
                 if processed % 10 == 0:
                     logger.info(f"Processed {processed}/{total_count} documents")
                 
-            except Exception as e:
-                logger.error(f"Failed to process document {doc['_id']}: {e}")
+            except Exception as exc:
+                logger.debug(f"Handled exception in main: {exc}")
+                logger.exception(f'Failed to process document {doc["_id"]}')
                 failed += 1
                 continue
         
@@ -99,8 +100,9 @@ async def main():
         await enable_vector_index("conversation_history", "conversation_history_vector_index")
         logger.info("Vector search index setup completed")
         
-    except Exception as e:
-        logger.error(f"Script failed: {e}")
+    except Exception as exc:
+        logger.debug(f"Handled exception in main: {exc}")
+        logger.exception("Script failed")
         raise
     finally:
         # Close database connection

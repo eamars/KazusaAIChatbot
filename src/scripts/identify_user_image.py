@@ -84,7 +84,8 @@ def _compact_json(value: Any) -> str:
     Returns:
         Pretty-printed JSON with non-ASCII text preserved.
     """
-    return json.dumps(value, ensure_ascii=False, indent=2, sort_keys=True)
+    return_value = json.dumps(value, ensure_ascii=False, indent=2, sort_keys=True)
+    return return_value
 
 
 def _format_accounts(accounts: list[dict[str, Any]]) -> str:
@@ -106,7 +107,8 @@ def _format_accounts(accounts: list[dict[str, Any]]) -> str:
         display_name = str(account.get("display_name", "")).strip()
         suffix = f" ({display_name})" if display_name else ""
         lines.append(f"  - {platform}:{platform_user_id}{suffix}")
-    return "\n".join(lines)
+    return_value = "\n".join(lines)
+    return return_value
 
 
 def _format_sequence(items: list[Any], *, label: str) -> str:
@@ -139,7 +141,8 @@ def _format_sequence(items: list[Any], *, label: str) -> str:
             lines.append(f"  {index}. {prefix}{text}")
         else:
             lines.append(f"  {index}. {label}: {item}")
-    return "\n".join(lines)
+    return_value = "\n".join(lines)
+    return return_value
 
 
 async def _hydrate_prompt_profile(profile: dict[str, Any]) -> dict[str, Any]:
@@ -186,7 +189,7 @@ def _format_profile(profile: dict[str, Any]) -> str:
     if not isinstance(user_memory_context, dict):
         user_memory_context = {}
 
-    return "\n".join(
+    return_value = "\n".join(
         [
             f"global_user_id: {profile.get('global_user_id', '')}",
             "platform_accounts:",
@@ -210,6 +213,7 @@ def _format_profile(profile: dict[str, Any]) -> str:
             _format_sequence(user_memory_context.get("active_commitments") or [], label="commitment"),
         ]
     )
+    return return_value
 
 
 async def _find_profile(identifier: str, platform: str | None) -> dict[str, Any] | None:
@@ -225,7 +229,7 @@ async def _find_profile(identifier: str, platform: str | None) -> dict[str, Any]
     db = await get_db()
     projection = {"_id": 0}
     if platform:
-        return await db.user_profiles.find_one(
+        return_value = await db.user_profiles.find_one(
             {
                 "platform_accounts": {
                     "$elemMatch": {
@@ -236,15 +240,17 @@ async def _find_profile(identifier: str, platform: str | None) -> dict[str, Any]
             },
             projection,
         )
+        return return_value
 
     profile = await db.user_profiles.find_one({"global_user_id": identifier}, projection)
     if profile is not None:
         return profile
 
-    return await db.user_profiles.find_one(
+    return_value = await db.user_profiles.find_one(
         {"platform_accounts": {"$elemMatch": {"platform_user_id": identifier}}},
         projection,
     )
+    return return_value
 
 
 async def main() -> None:

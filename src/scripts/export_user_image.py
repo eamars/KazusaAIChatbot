@@ -58,7 +58,8 @@ async def _find_profile_header(identifier: str, platform: str | None) -> dict[st
     if not platform:
         profile = await db.user_profiles.find_one({"global_user_id": identifier}, projection)
         if profile is not None:
-            return dict(profile)
+            return_value = dict(profile)
+            return return_value
 
     account_filter: dict[str, Any] = {"platform_user_id": identifier}
     if platform:
@@ -67,7 +68,8 @@ async def _find_profile_header(identifier: str, platform: str | None) -> dict[st
         {"platform_accounts": {"$elemMatch": account_filter}},
         projection,
     )
-    return dict(profile or {})
+    return_value = dict(profile or {})
+    return return_value
 
 
 async def main() -> None:

@@ -291,7 +291,7 @@ def build_memory_doc(
     Single place to construct a well-formed memory payload so every caller
     produces consistent documents.
     """
-    return {
+    return_value = {
         "memory_name": memory_name,
         "content": content,
         "source_global_user_id": source_global_user_id,
@@ -301,6 +301,7 @@ def build_memory_doc(
         "status": status,
         "expiry_timestamp": expiry_timestamp,
     }
+    return return_value
 
 
 class ScheduledEventDoc(TypedDict, total=False):

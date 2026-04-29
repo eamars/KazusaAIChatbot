@@ -31,7 +31,8 @@ class PendingTaskIndex:
             "args": task.args,
             "execute_at": task.execute_at.isoformat(),
         }
-        return json.dumps(payload, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
+        return_value = json.dumps(payload, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
+        return return_value
 
     def add(self, event_id: str, task: Task) -> None:
         """Add one persisted task to the in-memory index.
@@ -61,7 +62,8 @@ class PendingTaskIndex:
     def contains(self, task: Task) -> bool:
         """Return whether an equivalent task is already pending."""
 
-        return self.signature_for(task) in self._by_signature
+        return_value = self.signature_for(task) in self._by_signature
+        return return_value
 
     def find_by_target(self, tool: str, args: dict) -> list[tuple[str, Task]]:
         """Return pending tasks matching one tool name and exact args dict.
@@ -74,11 +76,12 @@ class PendingTaskIndex:
             Matching ``(event_id, task)`` pairs.
         """
 
-        return [
+        return_value = [
             (event_id, task)
             for event_id, task in self._by_event_id.items()
             if task.tool == tool and task.args == args
         ]
+        return return_value
 
     async def rebuild_from_db(self) -> int:
         """Rebuild the in-memory index from pending scheduler documents.

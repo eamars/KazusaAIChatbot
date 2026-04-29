@@ -99,7 +99,8 @@ def _cognition_rag_result(rag_result: object) -> dict[str, Any]:
     """
 
     if not isinstance(rag_result, dict):
-        return {}
+        return_value = {}
+        return return_value
     public_result = dict(rag_result)
     public_result.pop("user_memory_unit_candidates", None)
     return public_result
@@ -222,13 +223,14 @@ async def call_contextual_agent(state: CognitionState) -> CognitionState:
     relational_dynamic = result.get("relational_dynamic", "")
     expression_willingness = result.get("expression_willingness", "")
 
-    return {
+    return_value = {
         "social_distance": social_distance,
         "emotional_intensity": emotional_intensity,
         "vibe_check": vibe_check,
         "relational_dynamic": relational_dynamic,
         "expression_willingness": expression_willingness,
     }
+    return return_value
 
 
 
@@ -360,11 +362,12 @@ async def call_style_agent(state: CognitionState) -> CognitionState:
     linguistic_style = result.get("linguistic_style", "")
     forbidden_phrases = result.get("forbidden_phrases", [])
 
-    return {
+    return_value = {
         "rhetorical_strategy": rhetorical_strategy,
         "linguistic_style": linguistic_style,
         "forbidden_phrases": forbidden_phrases,
     }
+    return return_value
 
 
 # ---------------------------------------------------------------------------
@@ -525,9 +528,10 @@ async def call_content_anchor_agent(state: CognitionState) -> CognitionState:
 
     content_anchors = result.get("content_anchors", [])
 
-    return {
+    return_value = {
         "content_anchors": content_anchors,
     }
+    return return_value
 
 
 
@@ -643,13 +647,14 @@ async def call_preference_adapter(state: CognitionState) -> CognitionState:
     #     log_list_preview(accepted_user_preferences),
     # )
 
-    return {
+    return_value = {
         "accepted_user_preferences": [
             item.strip()
             for item in accepted_user_preferences
             if isinstance(item, str) and item.strip()
         ],
     }
+    return return_value
 
 
 
@@ -720,12 +725,13 @@ async def call_visual_agent(state: CognitionState) -> CognitionState:
     gaze_direction = result.get("gaze_direction", [])
     visual_vibe = result.get("visual_vibe", [])
 
-    return {
+    return_value = {
         "facial_expression": facial_expression,
         "body_language": body_language,
         "gaze_direction": gaze_direction,
         "visual_vibe": visual_vibe,
     }
+    return return_value
 
 
 
@@ -737,7 +743,7 @@ async def call_collector(state: CognitionState) -> CognitionState:
     """
     Collect all the outputs from L3 agents and pass them to the next stage in Persona Supervisor.
     """
-    return {
+    return_value = {
         "action_directives": {
             "contextual_directives": {
                 "social_distance": state["social_distance"],
@@ -761,3 +767,4 @@ async def call_collector(state: CognitionState) -> CognitionState:
             }
         }
     }
+    return return_value

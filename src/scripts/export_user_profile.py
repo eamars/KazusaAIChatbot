@@ -51,7 +51,8 @@ async def _find_profile(identifier: str, platform: str | None) -> dict[str, Any]
     if not platform:
         profile = await get_user_profile(identifier)
         if profile:
-            return dict(profile)
+            return_value = dict(profile)
+            return return_value
 
     db = await get_db()
     account_filter: dict[str, Any] = {"platform_user_id": identifier}
@@ -61,7 +62,8 @@ async def _find_profile(identifier: str, platform: str | None) -> dict[str, Any]
         {"platform_accounts": {"$elemMatch": account_filter}},
         {"_id": 0},
     )
-    return dict(doc or {})
+    return_value = dict(doc or {})
+    return return_value
 
 
 async def main() -> None:

@@ -17,14 +17,19 @@ import logging
 import sys
 from pathlib import Path
 
+from kazusa_ai_chatbot.db import (
+    close_db,
+    db_bootstrap,
+    get_character_profile,
+    save_character_profile,
+)
+
 logger = logging.getLogger(__name__)
 
 
 async def main(path: Path, force: bool) -> None:
-    from kazusa_ai_chatbot.db import db_bootstrap, get_character_profile, save_character_profile, close_db
-
     if not path.exists():
-        logger.error("File not found: %s", path)
+        logger.error(f'File not found: {path}')
         sys.exit(1)
 
     with open(path, "r", encoding="utf-8") as f:
@@ -38,14 +43,10 @@ async def main(path: Path, force: bool) -> None:
 
     existing = await get_character_profile()
     if existing.get("name") and not force:
-        logger.info(
-            "Character profile '%s' already exists in the database. "
-            "Use --force to overwrite.",
-            existing.get("name", "(unknown)"),
-        )
+        logger.info(f'Character profile \'{existing.get("name", "(unknown)")}\' already exists in the database. Use --force to overwrite.')
     else:
         await save_character_profile(profile)
-        logger.info("Character profile '%s' saved to database.", profile["name"])
+        logger.info(f'Character profile \'{profile["name"]}\' saved to database.')
 
     await close_db()
 

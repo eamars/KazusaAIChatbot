@@ -52,12 +52,15 @@ def _parse_history_timestamp(value: object) -> datetime | None:
 
     try:
         parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
-    except ValueError:
+    except ValueError as exc:
+        logger.debug(f"Handled exception in _parse_history_timestamp: {exc}")
         return None
 
     if parsed.tzinfo is None:
-        return parsed.replace(tzinfo=timezone.utc)
-    return parsed.astimezone(timezone.utc)
+        return_value = parsed.replace(tzinfo=timezone.utc)
+        return return_value
+    return_value = parsed.astimezone(timezone.utc)
+    return return_value
 
 
 def _active_history_window(chat_history_wide: list[dict]) -> list[dict]:
@@ -73,7 +76,8 @@ def _active_history_window(chat_history_wide: list[dict]) -> list[dict]:
     """
     capped = list(chat_history_wide[-_ACTIVE_WINDOW_MAX_MESSAGES:])
     if not capped:
-        return []
+        return_value = []
+        return return_value
 
     newest_timestamp = _parse_history_timestamp(capped[-1].get("timestamp"))
     if newest_timestamp is None:
@@ -91,7 +95,8 @@ def _active_history_window(chat_history_wide: list[dict]) -> list[dict]:
             continue
         break
 
-    return list(reversed(active_reversed))
+    return_value = list(reversed(active_reversed))
+    return return_value
 
 
 def _is_directly_addressed_to_bot(row: dict) -> bool:
@@ -104,7 +109,8 @@ def _is_directly_addressed_to_bot(row: dict) -> bool:
         True when the row replied to or structurally mentioned the bot.
     """
     reply_context = row.get("reply_context") or {}
-    return reply_context.get("reply_to_current_bot") is True or row.get("mentioned_bot") is True
+    return_value = reply_context.get("reply_to_current_bot") is True or row.get("mentioned_bot") is True
+    return return_value
 
 
 def _is_non_bot_user_row(row: dict, platform_bot_id: str) -> bool:
@@ -117,7 +123,8 @@ def _is_non_bot_user_row(row: dict, platform_bot_id: str) -> bool:
     Returns:
         True for non-bot user rows.
     """
-    return row.get("role") == "user" and row.get("platform_user_id") != platform_bot_id
+    return_value = row.get("role") == "user" and row.get("platform_user_id") != platform_bot_id
+    return return_value
 
 
 def build_group_attention_context(
@@ -140,11 +147,13 @@ def build_group_attention_context(
         if _is_non_bot_user_row(row, platform_bot_id)
     ]
     if not non_bot_rows:
-        return {"group_attention": _GROUP_ATTENTION_LOW}
+        return_value = {"group_attention": _GROUP_ATTENTION_LOW}
+        return return_value
 
     has_direct_address = any(_is_directly_addressed_to_bot(row) for row in active_window)
     if has_direct_address:
-        return {"group_attention": _GROUP_ATTENTION_LOW}
+        return_value = {"group_attention": _GROUP_ATTENTION_LOW}
+        return return_value
 
     unaddressed_rows = [
         row for row in non_bot_rows
@@ -181,16 +190,22 @@ def build_group_attention_context(
     )
 
     if len(distinct_speakers) >= 3 and len(unaddressed_rows) >= 4:
-        return {"group_attention": _GROUP_ATTENTION_CHAOTIC}
+        return_value = {"group_attention": _GROUP_ATTENTION_CHAOTIC}
+        return return_value
     if len(quick_speakers) >= 2 and len(quick_rows) >= 2 and quick_reply_to_other_count >= 1:
-        return {"group_attention": _GROUP_ATTENTION_CHAOTIC}
+        return_value = {"group_attention": _GROUP_ATTENTION_CHAOTIC}
+        return return_value
     if len(distinct_speakers) >= 2 and len(unaddressed_rows) >= 2:
-        return {"group_attention": _GROUP_ATTENTION_HIGH}
+        return_value = {"group_attention": _GROUP_ATTENTION_HIGH}
+        return return_value
     if len(unaddressed_rows) >= 4:
-        return {"group_attention": _GROUP_ATTENTION_HIGH}
+        return_value = {"group_attention": _GROUP_ATTENTION_HIGH}
+        return return_value
     if unaddressed_rows:
-        return {"group_attention": _GROUP_ATTENTION_MEDIUM}
-    return {"group_attention": _GROUP_ATTENTION_LOW}
+        return_value = {"group_attention": _GROUP_ATTENTION_MEDIUM}
+        return return_value
+    return_value = {"group_attention": _GROUP_ATTENTION_LOW}
+    return return_value
 
 
 def _should_ignore_third_party_reply(
@@ -216,7 +231,8 @@ def _should_ignore_third_party_reply(
     if not reply_target_id:
         return False
 
-    return reply_target_id != platform_bot_id
+    return_value = reply_target_id != platform_bot_id
+    return return_value
 
 
 
@@ -407,17 +423,7 @@ async def relevance_agent(state: IMProcessState) -> IMProcessState:
     )
     group_attention = group_attention_context.get("group_attention", _GROUP_ATTENTION_LOW)
 
-    logger.debug(
-        "Relevance input: user=%s platform_user=%s channel=%s channel_type=%s noisy=%s history=%d mentioned_bot=%s group_attention=%s reply_context=%s content=%s",
-        user_name,
-        platform_user_id,
-        channel_name or "<dm>",
-        channel_type or "<unknown>",
-        is_noisy_environment,
-        len(state.get("chat_history_wide") or []),
-        mentioned_bot,
-        group_attention,
-        log_dict_subset(
+    logger.debug(f'Relevance input: user={user_name} platform_user={platform_user_id} channel={channel_name or "<dm>"} channel_type={channel_type or "<unknown>"} noisy={is_noisy_environment} history={len(state.get("chat_history_wide") or [])} mentioned_bot={mentioned_bot} group_attention={group_attention} reply_context={log_dict_subset(
             reply_context,
             [
                 "reply_to_message_id",
@@ -426,9 +432,7 @@ async def relevance_agent(state: IMProcessState) -> IMProcessState:
                 "reply_to_current_bot",
                 "reply_excerpt",
             ],
-        ),
-        log_preview(user_input),
-    )
+        )} content={log_preview(user_input)}')
 
     if _should_ignore_third_party_reply(
         reply_context=reply_context,
@@ -437,18 +441,8 @@ async def relevance_agent(state: IMProcessState) -> IMProcessState:
         mentioned_bot=mentioned_bot,
     ):
         reason_to_respond = "structured reply target points to another participant without an explicit bot address"
-        logger.info(
-            "Relevance decision: user=%s platform_user=%s should_respond=%s use_reply_feature=%s noisy=%s reason=%s reply_target=%s content=%s",
-            user_name,
-            platform_user_id,
-            False,
-            False,
-            is_noisy_environment,
-            reason_to_respond,
-            reply_context.get("reply_to_platform_user_id", ""),
-            log_preview(user_input),
-        )
-        return {
+        logger.info(f'Relevance decision: user={user_name} platform_user={platform_user_id} should_respond={False} use_reply_feature={False} noisy={is_noisy_environment} reason={reason_to_respond} reply_target={reply_context.get("reply_to_platform_user_id", "")} content={log_preview(user_input)}')
+        return_value = {
             "should_respond": False,
             "reason_to_respond": reason_to_respond,
             "use_reply_feature": False,
@@ -456,6 +450,7 @@ async def relevance_agent(state: IMProcessState) -> IMProcessState:
             "indirect_speech_context": "",
             "user_input": user_input,
         }
+        return return_value
 
     if (
         is_noisy_environment
@@ -464,19 +459,8 @@ async def relevance_agent(state: IMProcessState) -> IMProcessState:
         and mentioned_bot is not True
     ):
         reason_to_respond = "chaotic group noise without platform-level bot address metadata"
-        logger.info(
-            "Relevance decision: user=%s platform_user=%s should_respond=%s use_reply_feature=%s noisy=%s reason=%s group_attention=%s mentioned_bot=%s content=%s",
-            user_name,
-            platform_user_id,
-            False,
-            False,
-            is_noisy_environment,
-            reason_to_respond,
-            group_attention,
-            mentioned_bot,
-            log_preview(user_input),
-        )
-        return {
+        logger.info(f'Relevance decision: user={user_name} platform_user={platform_user_id} should_respond={False} use_reply_feature={False} noisy={is_noisy_environment} reason={reason_to_respond} group_attention={group_attention} mentioned_bot={mentioned_bot} content={log_preview(user_input)}')
+        return_value = {
             "should_respond": False,
             "reason_to_respond": reason_to_respond,
             "use_reply_feature": False,
@@ -484,6 +468,7 @@ async def relevance_agent(state: IMProcessState) -> IMProcessState:
             "indirect_speech_context": "",
             "user_input": user_input,
         }
+        return return_value
 
     """Analyze context and determine relevance using LLM."""
     system_prompt = SystemMessage(content=prompt_template.format(
@@ -525,20 +510,9 @@ async def relevance_agent(state: IMProcessState) -> IMProcessState:
     channel_topic = result.get("channel_topic", "")
     indirect_speech_context = result.get("indirect_speech_context", "")
 
-    logger.info(
-        "Relevance decision: user=%s platform_user=%s should_respond=%s use_reply_feature=%s noisy=%s reason=%s topic=%s indirect=%s content=%s",
-        user_name,
-        platform_user_id,
-        should_respond,
-        use_reply_feature,
-        is_noisy_environment,
-        log_preview(reason_to_respond),
-        log_preview(channel_topic),
-        log_preview(indirect_speech_context),
-        log_preview(user_input),
-    )
+    logger.info(f'Relevance decision: user={user_name} platform_user={platform_user_id} should_respond={should_respond} use_reply_feature={use_reply_feature} noisy={is_noisy_environment} reason={log_preview(reason_to_respond)} topic={log_preview(channel_topic)} indirect={log_preview(indirect_speech_context)} content={log_preview(user_input)}')
 
-    return {
+    return_value = {
         "should_respond": should_respond,
         "reason_to_respond": reason_to_respond,
         "use_reply_feature": use_reply_feature,
@@ -548,6 +522,7 @@ async def relevance_agent(state: IMProcessState) -> IMProcessState:
         # Update user input with optional image descriptions
         "user_input": user_input
     }
+    return return_value
 
 
 
@@ -610,13 +585,7 @@ async def multimedia_descriptor_agent(state: IMProcessState) -> IMProcessState:
 
             description = result.get("description", "")
 
-            logger.debug(
-                "Image description: user=%s platform_user=%s media_type=%s description=%s",
-                user_name,
-                platform_user_id,
-                piece["content_type"],
-                log_preview(description),
-            )
+            logger.debug(f'Image description: user={user_name} platform_user={platform_user_id} media_type={piece["content_type"]} description={log_preview(description)}')
 
             output_multimedia_input.append({
                 "content_type": piece["content_type"],
@@ -626,9 +595,10 @@ async def multimedia_descriptor_agent(state: IMProcessState) -> IMProcessState:
         else:
             output_multimedia_input.append(piece)
     
-    return {
+    return_value = {
         "user_multimedia_input": output_multimedia_input,
     }
+    return return_value
 
 
 async def test_main():

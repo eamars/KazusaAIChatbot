@@ -64,10 +64,11 @@ def _project_unit(unit: dict) -> UserMemoryContextEntry:
 
 def _category_budget(category: str, budget: dict[str, dict[str, int]] | None) -> dict[str, int]:
     if budget and category in budget:
-        return {
+        return_value = {
             "max_items": int(budget[category].get("max_items", DEFAULT_USER_MEMORY_CONTEXT_BUDGET[category]["max_items"])),
             "max_chars": int(budget[category].get("max_chars", DEFAULT_USER_MEMORY_CONTEXT_BUDGET[category]["max_chars"])),
         }
+        return return_value
     return DEFAULT_USER_MEMORY_CONTEXT_BUDGET[category]
 
 
@@ -78,13 +79,14 @@ def empty_user_memory_context() -> UserMemoryContextDoc:
         A context dict with all expected categories present.
     """
 
-    return {
+    return_value = {
         "stable_patterns": [],
         "recent_shifts": [],
         "objective_facts": [],
         "milestones": [],
         "active_commitments": [],
     }
+    return return_value
 
 
 def project_user_memory_units(
@@ -216,7 +218,8 @@ async def build_user_memory_context_bundle(
         include_semantic=include_semantic,
     )
     user_memory_context = project_user_memory_units(units, budget=budget)
-    return user_memory_context, units
+    return_value = user_memory_context, units
+    return return_value
 
 
 async def build_user_memory_context(

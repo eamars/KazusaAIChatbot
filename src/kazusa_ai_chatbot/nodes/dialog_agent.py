@@ -222,7 +222,8 @@ def _tone_history_for_generator(history: list[dict]) -> list[dict]:
         -1,
     )
     if last_assistant_idx < 0:
-        return []
+        return_value = []
+        return return_value
     start_idx = last_assistant_idx
     if (
         last_assistant_idx > 0
@@ -291,10 +292,11 @@ async def dialog_generator(state: DialogAgentState) -> DialogAgentState:
     #     log_list_preview(generated_dialog if isinstance(generated_dialog, list) else []),
     # )
 
-    return {
+    return_value = {
         "final_dialog": result["final_dialog"],
         "messages": [response]
     }
+    return return_value
 
 
 
@@ -326,10 +328,11 @@ def get_mbti_dialog_preference(mbti: str) -> str:
     }
 
     key = mbti.upper().strip()
-    return mbti_map.get(
+    return_value = mbti_map.get(
         key,
         f"未知的性格原型：{mbti}。终审时应优先检查台词是否自然、有角色感、符合社交距离，并避免把性格写成标签化说明。"
     )
+    return return_value
 
 
 _DIALOG_EVALUATOR_PROMPT = """\
@@ -452,12 +455,7 @@ async def dialog_evaluator(state: DialogAgentState) -> DialogAgentState:
 
     result = parse_llm_json_output(response.content)
     if not result.get("should_stop", True) or result.get("feedback", "") != "Passed":
-        logger.debug(
-            "Dialog evaluator: retry=%d should_stop=%s feedback=%s",
-            retry,
-            result.get("should_stop", True),
-            log_preview(result.get("feedback", "")),
-        )
+        logger.debug(f'Dialog evaluator: retry={retry} should_stop={result.get("should_stop", True)} feedback={log_preview(result.get("feedback", ""))}')
 
     # Determine stop condition
     should_stop = result.get("should_stop", True)
@@ -476,11 +474,12 @@ async def dialog_evaluator(state: DialogAgentState) -> DialogAgentState:
         name="evaluator"
     )
     
-    return {
+    return_value = {
         "should_stop": should_stop,
         "messages": [feedback_message],
         "retry": retry
     }
+    return return_value
 
 
 async def dialog_agent(
@@ -551,13 +550,9 @@ async def dialog_agent(
     # Assmeble output
     final_dialog = result.get("final_dialog", [])
 
-    logger.info(
-        "Dialog summary: fragments=%d retry=%s dialog=%s",
-        len(final_dialog),
-        result.get("retry", 0),
-        log_list_preview(final_dialog),
-    )
+    logger.info(f'Dialog summary: fragments={len(final_dialog)} retry={result.get("retry", 0)} dialog={log_list_preview(final_dialog)}')
 
-    return {
+    return_value = {
         "final_dialog": final_dialog
     }
+    return return_value

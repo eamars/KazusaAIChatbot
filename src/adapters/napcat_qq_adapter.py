@@ -64,12 +64,13 @@ async def send_message_endpoint(
     except RuntimeError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 
-    return RuntimeSendMessageResponse(
+    return_value = RuntimeSendMessageResponse(
         platform=result.platform,
         channel_id=result.channel_id,
         message_id=result.message_id,
         sent_at=result.sent_at.isoformat(),
     )
+    return return_value
 
 
 class NapCatWSAdapter:
@@ -131,7 +132,7 @@ class NapCatWSAdapter:
                     self._ensure_heartbeat_started()
                     logger.info(f"Logged in as {self.bot_name} (ID: {self.bot_id})")
                     if self.channel_ids is not None:
-                        logger.info("Active in groups: %s. Other groups are listen-only.", self.channel_ids)
+                        logger.info(f'Active in groups: {self.channel_ids}. Other groups are listen-only.')
                     else:
                         logger.info("No active groups configured — all groups are listen-only (Private chats are active).")
                     
@@ -146,10 +147,11 @@ class NapCatWSAdapter:
 
                         # Handle Events (messages, etc.)
                         asyncio.create_task(self.handle_event(data, ws))
-            except Exception as e:
-                logger.error(f"Connection lost: {e}. Retrying in 5s...")
+            except Exception as exc:
+                logger.debug(f"Handled exception in connect: {exc}")
+                logger.exception(f"Connection lost. Retrying in 5s: {exc}")
                 self._api_dispatch_enabled = False
-                self._reject_pending_api_responses(e)
+                self._reject_pending_api_responses(exc)
                 self._ws = None
                 await asyncio.sleep(5)
 
@@ -170,11 +172,7 @@ class NapCatWSAdapter:
         )
         self._runtime_server = uvicorn.Server(config)
         self._runtime_server_task = asyncio.create_task(self._runtime_server.serve())
-        logger.info(
-            "NapCat runtime callback listening on %s:%s",
-            self.runtime_host,
-            self.runtime_port,
-        )
+        logger.info(f'NapCat runtime callback listening on {self.runtime_host}:{self.runtime_port}')
 
     async def _register_with_brain(self) -> None:
         """Register this adapter's outbound callback URL with the brain service."""
@@ -185,20 +183,18 @@ class NapCatWSAdapter:
             json=payload,
         )
         response.raise_for_status()
-        logger.info(
-            "Registered NapCat runtime adapter with brain: callback_url=%s",
-            self.runtime_public_url,
-        )
+        logger.info(f'Registered NapCat runtime adapter with brain: callback_url={self.runtime_public_url}')
 
     def _runtime_registration_payload(self) -> dict:
         """Return the shared registration payload for startup and heartbeat."""
 
-        return {
+        return_value = {
             "platform": self.platform,
             "callback_url": self.runtime_public_url,
             "shared_secret": self.runtime_shared_secret,
             "timeout_seconds": 10.0,
         }
+        return return_value
 
     async def _send_heartbeat_once(self) -> None:
         """Refresh the adapter registration in the brain service."""
@@ -224,7 +220,7 @@ class NapCatWSAdapter:
             try:
                 await self._send_heartbeat_once()
             except httpx.HTTPError as exc:
-                logger.warning("NapCat runtime heartbeat failed: %s", exc)
+                logger.warning(f'NapCat runtime heartbeat failed: {exc}')
 
     async def _fetch_bot_info(self, ws):
         """Calls get_login_info to retrieve the bot's QQ ID and Nickname."""
@@ -289,7 +285,8 @@ class NapCatWSAdapter:
             self._api_response_futures[echo_id] = future
             await ws.send(json.dumps(payload))
             try:
-                return await asyncio.wait_for(future, timeout=10.0)
+                return_value = await asyncio.wait_for(future, timeout=10.0)
+                return return_value
             finally:
                 self._api_response_futures.pop(echo_id, None)
 
@@ -311,7 +308,8 @@ class NapCatWSAdapter:
         Returns:
             True when this adapter's bot id is present.
         """
-        return bool(self.bot_id and self.bot_id in mentioned_ids)
+        return_value = bool(self.bot_id and self.bot_id in mentioned_ids)
+        return return_value
 
     def _apply_replied_message_metadata(self, reply_context: dict[str, str | bool], message_data: dict) -> None:
         """Populate reply target fields from a NapCat/OneBot message document.
@@ -364,20 +362,16 @@ class NapCatWSAdapter:
         try:
             response = await self._call_api(ws, "get_msg", params)
         except (asyncio.TimeoutError, websockets.exceptions.WebSocketException) as exc:
-            logger.warning("Failed to resolve QQ reply target message_id=%s: %s", reply_to_message_id, exc)
+            logger.warning(f'Failed to resolve QQ reply target message_id={reply_to_message_id}: {exc}')
             return
 
         if response.get("status") != "ok":
-            logger.warning(
-                "QQ reply target lookup returned status=%s message_id=%s",
-                response.get("status"),
-                reply_to_message_id,
-            )
+            logger.warning(f'QQ reply target lookup returned status={response.get("status")} message_id={reply_to_message_id}')
             return
 
         message_data = response.get("data", {})
         if not isinstance(message_data, dict):
-            logger.warning("QQ reply target lookup returned non-dict data for message_id=%s", reply_to_message_id)
+            logger.warning(f'QQ reply target lookup returned non-dict data for message_id={reply_to_message_id}')
             return
 
         self._apply_replied_message_metadata(reply_context, message_data)
@@ -454,7 +448,8 @@ class NapCatWSAdapter:
         mentioned_bot = self._is_bot_mentioned(mentioned_ids)
         await self._hydrate_reply_context_from_platform(reply_context, ws)
         self._finalize_reply_target(reply_context)
-        sender_name = data.get("sender", {}).get("nickname", f"User {user_id}")
+        sender = data.get("sender", {})
+        sender_name = sender.get("nickname", f"User {user_id}")
         
         is_group = data.get("message_type") == "group"
         channel_id = str(group_id) if is_group else user_id
@@ -467,14 +462,7 @@ class NapCatWSAdapter:
             
         mode_label = "LISTEN-ONLY" if message_debug_modes.get("listen_only") else "ACTIVE"
 
-        logger.info(
-            "[%s] Incoming QQ message: channel_id=%s is_group=%s sender=%s content=%s",
-            mode_label,
-            channel_id,
-            is_group,
-            sender_name,
-            raw_content,
-        )
+        logger.info(f'[{mode_label}] Incoming QQ message: channel_id={channel_id} is_group={is_group} sender={sender_name} content={raw_content}')
 
         # Attachments processing (same as before)
         attachments = []
@@ -489,8 +477,9 @@ class NapCatWSAdapter:
                             "base64_data": base64.b64encode(resp.content).decode("utf-8"),
                             "description": ""
                         })
-                    except Exception as e:
-                        logger.error(f"Image fetch error: {e}")
+                    except Exception as exc:
+                        logger.debug(f"Handled exception in handle_event: {exc}")
+                        logger.exception("Image fetch error")
 
         # Brain Forwarding
         payload = {
@@ -510,30 +499,20 @@ class NapCatWSAdapter:
             "debug_modes": message_debug_modes,
         }
 
-        logger.info(
-            "Forwarding to brain: channel_id=%s user_id=%s content=%s attachments=%s",
-            channel_id,
-            user_id,
-            raw_content,
-            len(attachments),
-        )
+        logger.info(f'Forwarding to brain: channel_id={channel_id} user_id={user_id} content={raw_content} attachments={len(attachments)}')
 
         try:
             resp = await self.brain_client.post(f"{self.brain_url}/chat", json=payload)
             resp.raise_for_status()
             brain_data = resp.json()
-        except Exception:
+        except Exception as exc:
+            logger.debug(f"Handled exception in handle_event: {exc}")
             logger.exception("Brain service failed")
             return
 
         # Response handling
         replies = brain_data.get("messages", [])
-        logger.info(
-            "Brain output: should_reply=%s message_count=%s messages=%s",
-            brain_data.get("should_reply"),
-            len(replies),
-            replies,
-        )
+        logger.info(f'Brain output: should_reply={brain_data.get("should_reply")} message_count={len(replies)} messages={replies}')
         if replies:
             combined = "\n".join(replies)
             msg_params = {
@@ -544,11 +523,7 @@ class NapCatWSAdapter:
             if brain_data.get("should_reply"):
                 msg_params["message"] = f"[CQ:reply,id={data['message_id']}]" + combined
 
-            logger.info(
-                "Sending QQ message: channel_id=%s message=%s",
-                channel_id,
-                msg_params["message"],
-            )
+            logger.info(f'Sending QQ message: channel_id={channel_id} message={msg_params["message"]}')
             
             # We don't need to wait for 'send_msg' response usually
             await ws.send(json.dumps({"action": "send_msg", "params": msg_params}))
@@ -560,7 +535,8 @@ class NapCatWSAdapter:
             self._heartbeat_task.cancel()
             try:
                 await self._heartbeat_task
-            except asyncio.CancelledError:
+            except asyncio.CancelledError as exc:
+                logger.debug(f"Handled exception in close: {exc}")
                 pass
         await self.brain_client.aclose()
         if self._runtime_server is not None:
@@ -599,12 +575,13 @@ class NapCatWSAdapter:
             "message": message,
         }
         await self._ws.send(json.dumps({"action": "send_msg", "params": params}))
-        return SendResult(
+        return_value = SendResult(
             platform=self.platform,
             channel_id=channel_id,
             message_id="",
             sent_at=datetime.now(timezone.utc),
         )
+        return return_value
 
 
 

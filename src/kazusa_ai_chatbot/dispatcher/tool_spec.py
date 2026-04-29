@@ -27,7 +27,8 @@ def _has_permission(bot_role: str, required: Optional[str]) -> bool:
 
     if required is None:
         return True
-    return _ROLE_ORDER.get(bot_role, 0) >= _ROLE_ORDER.get(required, 0)
+    return_value = _ROLE_ORDER.get(bot_role, 0) >= _ROLE_ORDER.get(required, 0)
+    return return_value
 
 
 @dataclass(frozen=True)
@@ -100,4 +101,5 @@ class ToolRegistry:
     def visible_names(self, ctx: "DispatchContext") -> set[str]:
         """Return the set of tool names visible in one context."""
 
-        return {spec.name for spec in self.filter(ctx)}
+        return_value = {spec.name for spec in self.filter(ctx)}
+        return return_value

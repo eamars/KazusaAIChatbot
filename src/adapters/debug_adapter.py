@@ -185,7 +185,8 @@ async def proxy_chat(req: DebugChatRequest):
     async with httpx.AsyncClient(timeout=120.0) as client:
         resp = await client.post(f"{BRAIN_URL}/chat", json=req.model_dump())
         resp.raise_for_status()
-        return resp.json()
+        return_value = resp.json()
+        return return_value
 
 
 @debug_app.get("/api/health")
@@ -194,7 +195,8 @@ async def proxy_health():
     async with httpx.AsyncClient(timeout=5.0) as client:
         resp = await client.get(f"{BRAIN_URL}/health")
         resp.raise_for_status()
-        return resp.json()
+        return_value = resp.json()
+        return return_value
 
 
 def main():
@@ -206,8 +208,8 @@ def main():
     args = parser.parse_args()
 
     BRAIN_URL = args.brain_url.rstrip("/")
-    logger.info("Debug adapter proxying to brain at %s", BRAIN_URL)
-    logger.info("Open http://localhost:%d in your browser", args.port)
+    logger.info(f"Debug adapter proxying to brain at {BRAIN_URL}")
+    logger.info(f"Open http://localhost:{args.port} in your browser")
 
     uvicorn.run(debug_app, host="0.0.0.0", port=args.port, log_level="warning")
 

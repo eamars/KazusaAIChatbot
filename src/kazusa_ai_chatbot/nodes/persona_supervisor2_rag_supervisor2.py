@@ -449,13 +449,14 @@ def _initializer_cache_status(
     Returns:
         Metadata dict stored in progressive RAG state.
     """
-    return {
+    return_value = {
         "enabled": True,
         "hit": hit,
         "cache_name": INITIALIZER_CACHE_NAME,
         "reason": reason,
         "cache_key": cache_key,
     }
+    return return_value
 
 
 def _normalize_initializer_slots(raw_slots: object) -> list[str]:
@@ -468,8 +469,10 @@ def _normalize_initializer_slots(raw_slots: object) -> list[str]:
         List of non-empty slot strings.
     """
     if not isinstance(raw_slots, list):
-        return []
-    return [slot.strip() for slot in raw_slots if isinstance(slot, str) and slot.strip()]
+        return_value = []
+        return return_value
+    return_value = [slot.strip() for slot in raw_slots if isinstance(slot, str) and slot.strip()]
+    return return_value
 
 
 def _read_cached_initializer_slots(cached: object) -> list[str] | None:
@@ -494,7 +497,8 @@ def _read_cached_initializer_slots(cached: object) -> list[str] | None:
     raw_slots = cached.get("unknown_slots")
     if not isinstance(raw_slots, list):
         return None
-    return _normalize_initializer_slots(raw_slots)
+    return_value = _normalize_initializer_slots(raw_slots)
+    return return_value
 
 
 async def _write_initializer_cache(
@@ -548,14 +552,8 @@ async def rag_initializer(state: ProgressiveRAGState) -> dict:
     )
     cached_slots = _read_cached_initializer_slots(cached)
     if cached_slots is not None:
-        logger.info(
-            "RAG2 initializer cache hit: query=%s slots=%d unknown_slots=%s cache_key=%s",
-            log_preview(state["original_query"]),
-            len(cached_slots),
-            log_list_preview(cached_slots),
-            cache_key,
-        )
-        return {
+        logger.info(f'RAG2 initializer cache hit: query={log_preview(state["original_query"])} slots={len(cached_slots)} unknown_slots={log_list_preview(cached_slots)} cache_key={cache_key}')
+        return_value = {
             "unknown_slots": cached_slots,
             "initializer_cache": _initializer_cache_status(
                 hit=True,
@@ -563,6 +561,7 @@ async def rag_initializer(state: ProgressiveRAGState) -> dict:
                 cache_key=cache_key,
             ),
         }
+        return return_value
 
     system_prompt = SystemMessage(content=_INITIALIZER_PROMPT.format(character_name=character_name))
     user_input = {
@@ -584,15 +583,8 @@ async def rag_initializer(state: ProgressiveRAGState) -> dict:
     if cacheable_result:
         await _write_initializer_cache(cache_key=cache_key, unknown_slots=unknown_slots)
 
-    logger.info(
-        "RAG2 initializer result: query=%s cacheable=%s slots=%d unknown_slots=%s raw=%s",
-        log_preview(state["original_query"]),
-        cacheable_result,
-        len(unknown_slots),
-        log_list_preview(unknown_slots),
-        log_preview(result),
-    )
-    return {
+    logger.info(f'RAG2 initializer result: query={log_preview(state["original_query"])} cacheable={cacheable_result} slots={len(unknown_slots)} unknown_slots={log_list_preview(unknown_slots)} raw={log_preview(result)}')
+    return_value = {
         "unknown_slots": unknown_slots,
         "initializer_cache": _initializer_cache_status(
             hit=False,
@@ -600,6 +592,7 @@ async def rag_initializer(state: ProgressiveRAGState) -> dict:
             cache_key=cache_key,
         ),
     }
+    return return_value
 
 
 # ── Dispatcher ─────────────────────────────────────────────────────
@@ -838,10 +831,11 @@ def build_rag_fact_source_map() -> dict[str, dict[str, Any]]:
     Returns:
         Dict keyed by agent name with source and consolidation policy metadata.
     """
-    return {
+    return_value = {
         agent_name: dict(entry["fact_source"])
         for agent_name, entry in _RAG_SUPERVISOR_AGENT_REGISTRY.items()
     }
+    return return_value
 
 
 async def rag_dispatcher(state: ProgressiveRAGState) -> dict:
@@ -877,23 +871,15 @@ async def rag_dispatcher(state: ProgressiveRAGState) -> dict:
     if not isinstance(dispatch, dict):
         dispatch = {}
     normalized_dispatch = _normalize_dispatch(dispatch, current_slot)
-    logger.info(
-        "RAG2 dispatch: loop=%d slot=%s agent=%s max_attempts=%d task=%s dispatch_context=%s raw=%s",
-        state.get("loop_count", 0) + 1,
-        log_preview(current_slot),
-        normalized_dispatch["agent_name"] or "<invalid>",
-        normalized_dispatch["max_attempts"],
-        log_preview(normalized_dispatch["task"]),
-        log_preview(normalized_dispatch["context"]),
-        log_preview(dispatch),
-    )
+    logger.info(f'RAG2 dispatch: loop={state.get("loop_count", 0) + 1} slot={log_preview(current_slot)} agent={normalized_dispatch["agent_name"] or "<invalid>"} max_attempts={normalized_dispatch["max_attempts"]} task={log_preview(normalized_dispatch["task"])} dispatch_context={log_preview(normalized_dispatch["context"])} raw={log_preview(dispatch)}')
 
-    return {
+    return_value = {
         "messages": [AIMessage(content=response.content)],
         "current_slot": current_slot,
         "current_dispatch": dispatch,
         "loop_count": state.get("loop_count", 0) + 1,
     }
+    return return_value
 
 
 # ── Executor ───────────────────────────────────────────────────────
@@ -914,7 +900,8 @@ def _build_delegate_context(state: ProgressiveRAGState, dispatch: dict) -> dict:
 
 def _build_agent_name_union() -> str:
     """Render the dispatcher's allowed ``agent_name`` values as a union string."""
-    return " | ".join(_RAG_SUPERVISOR_AGENT_REGISTRY)
+    return_value = " | ".join(_RAG_SUPERVISOR_AGENT_REGISTRY)
+    return return_value
 
 
 def _normalize_dispatch(raw_dispatch: dict, current_slot: str) -> dict:
@@ -938,17 +925,19 @@ def _normalize_dispatch(raw_dispatch: dict, current_slot: str) -> dict:
     else:
         max_attempts = 3
 
-    return {
+    return_value = {
         "agent_name": agent_name,
         "task": task,
         "context": context,
         "max_attempts": max_attempts,
     }
+    return return_value
 
 
 def _serialize_agent_result(result: dict) -> str:
     """Serialize one agent result for dispatcher history."""
-    return json.dumps(result, ensure_ascii=False, default=str)
+    return_value = json.dumps(result, ensure_ascii=False, default=str)
+    return return_value
 
 
 async def rag_executor(state: ProgressiveRAGState) -> dict:
@@ -973,15 +962,12 @@ async def rag_executor(state: ProgressiveRAGState) -> dict:
             "result": "Dispatcher failed to choose a valid agent.",
             "attempts": 0,
         }
-        logger.info(
-            "RAG2 agent result: slot=%s agent=<invalid> resolved=False attempts=0 result=%s",
-            log_preview(state.get("current_slot", "")),
-            log_preview(result),
-        )
-        return {
+        logger.info(f'RAG2 agent result: slot={log_preview(state.get("current_slot", ""))} agent=<invalid> resolved=False attempts=0 result={log_preview(result)}')
+        return_value = {
             "last_agent_result": result,
             "messages": [HumanMessage(content=_serialize_agent_result(result), name="agent_result")],
         }
+        return return_value
 
     agent = _RAG_SUPERVISOR_AGENT_REGISTRY[agent_name]["agent"]
     try:
@@ -998,7 +984,7 @@ async def rag_executor(state: ProgressiveRAGState) -> dict:
             }
         result.setdefault("agent", agent_name)
     except Exception as exc:
-        logger.exception("Error executing agent %s", agent_name)
+        logger.exception(f'Error executing agent {agent_name}')
         result = {
             "agent": agent_name,
             "resolved": False,
@@ -1006,18 +992,12 @@ async def rag_executor(state: ProgressiveRAGState) -> dict:
             "attempts": 0,
         }
 
-    logger.info(
-        "RAG2 agent result: slot=%s agent=%s resolved=%s attempts=%s result=%s",
-        log_preview(state.get("current_slot", "")),
-        agent_name,
-        bool(result.get("resolved", False)),
-        result.get("attempts", 0),
-        log_preview(result),
-    )
-    return {
+    logger.info(f'RAG2 agent result: slot={log_preview(state.get("current_slot", ""))} agent={agent_name} resolved={bool(result.get("resolved", False))} attempts={result.get("attempts", 0)} result={log_preview(result)}')
+    return_value = {
         "last_agent_result": result,
         "messages": [HumanMessage(content=_serialize_agent_result(result), name="agent_result")],
     }
+    return return_value
 
 
 # ── Evaluator ──────────────────────────────────────────────────────
@@ -1100,7 +1080,8 @@ async def _summarize_agent_result(
         )
     )
     response = await _evaluator_summarizer_llm.ainvoke([system_prompt, human_message])
-    return response.content.strip()
+    return_value = response.content.strip()
+    return return_value
 
 
 async def rag_evaluator(state: ProgressiveRAGState) -> dict:
@@ -1148,21 +1129,13 @@ async def rag_evaluator(state: ProgressiveRAGState) -> dict:
     }
 
     remaining_slots = list(state.get("unknown_slots", []))[1:]
-    logger.info(
-        "RAG2 fact: slot=%s agent=%s resolved=%s attempts=%d remaining_slots=%d summary=%s raw_result=%s",
-        log_preview(slot),
-        agent_name or "<none>",
-        resolved,
-        new_fact["attempts"],
-        len(remaining_slots),
-        log_preview(summary),
-        log_preview(raw_result),
-    )
+    logger.info(f'RAG2 fact: slot={log_preview(slot)} agent={agent_name or "<none>"} resolved={resolved} attempts={new_fact["attempts"]} remaining_slots={len(remaining_slots)} summary={log_preview(summary)} raw_result={log_preview(raw_result)}')
 
-    return {
+    return_value = {
         "unknown_slots": remaining_slots,
         "known_facts": known_facts + [new_fact],
     }
+    return return_value
 
 
 # ── Finalizer ──────────────────────────────────────────────────────
@@ -1220,20 +1193,17 @@ async def rag_finalizer(state: ProgressiveRAGState) -> dict:
     human_message = HumanMessage(content=json.dumps(finalizer_input, ensure_ascii=False, default=str))
 
     response = await _finalizer_llm.ainvoke([system_prompt, human_message])
-    logger.info(
-        "RAG2 finalizer: query=%s facts=%d answer=%s",
-        log_preview(state["original_query"]),
-        len(state.get("known_facts", [])),
-        log_preview(response.content),
-    )
-    return {"final_answer": response.content}
+    logger.info(f'RAG2 finalizer: query={log_preview(state["original_query"])} facts={len(state.get("known_facts", []))} answer={log_preview(response.content)}')
+    return_value = {"final_answer": response.content}
+    return return_value
 
 
 # ── Routing ────────────────────────────────────────────────────────
 
 def _route_after_initializer(state: ProgressiveRAGState) -> str:
     """Skip to finalizer if the initializer produced no slots."""
-    return "dispatch" if state.get("unknown_slots") else "finalize"
+    return_value = "dispatch" if state.get("unknown_slots") else "finalize"
+    return return_value
 
 
 def _route_after_dispatcher(state: ProgressiveRAGState) -> str:
@@ -1322,42 +1292,22 @@ async def call_rag_supervisor(
         "final_answer": "",
     }
 
-    logger.info(
-        "RAG2 request: platform=%s channel=%s user=%s character=%s history_recent=%d history_wide=%d query=%s context=%s",
-        runtime_context.get("platform", ""),
-        runtime_context.get("platform_channel_id", "") or "<dm>",
-        runtime_context.get("global_user_id", ""),
-        log_preview(character_name),
-        len(runtime_context.get("chat_history_recent", [])),
-        len(runtime_context.get("chat_history_wide", [])),
-        log_preview(original_query),
-        log_preview(runtime_context),
-    )
+    logger.info(f'RAG2 request: platform={runtime_context.get("platform", "")} channel={runtime_context.get("platform_channel_id", "") or "<dm>"} user={runtime_context.get("global_user_id", "")} character={log_preview(character_name)} history_recent={len(runtime_context.get("chat_history_recent", []))} history_wide={len(runtime_context.get("chat_history_wide", []))} query={log_preview(original_query)} context={log_preview(runtime_context)}')
     result = await graph.ainvoke(initial_state)
     known_facts = result.get("known_facts", [])
     unknown_slots = result.get("unknown_slots", [])
     loop_count = result.get("loop_count", 0)
     final_answer = result.get("final_answer", "")
 
-    logger.info(
-        "RAG2 summary: platform=%s channel=%s user=%s loop_count=%s known_facts=%d unknown_slots=%d answer=%s facts=%s remaining_slots=%s",
-        runtime_context.get("platform", ""),
-        runtime_context.get("platform_channel_id", "") or "<dm>",
-        runtime_context.get("global_user_id", ""),
-        loop_count,
-        len(known_facts),
-        len(unknown_slots),
-        log_preview(final_answer),
-        log_preview(known_facts),
-        log_list_preview(unknown_slots),
-    )
+    logger.info(f'RAG2 summary: platform={runtime_context.get("platform", "")} channel={runtime_context.get("platform_channel_id", "") or "<dm>"} user={runtime_context.get("global_user_id", "")} loop_count={loop_count} known_facts={len(known_facts)} unknown_slots={len(unknown_slots)} answer={log_preview(final_answer)} facts={log_preview(known_facts)} remaining_slots={log_list_preview(unknown_slots)}')
 
-    return {
+    return_value = {
         "answer": final_answer,
         "known_facts": known_facts,
         "unknown_slots": unknown_slots,
         "loop_count": loop_count,
     }
+    return return_value
 
 
 async def test_main():

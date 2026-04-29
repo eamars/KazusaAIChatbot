@@ -135,7 +135,8 @@ def sanitize_llm_text(text: str) -> str:
     and lone surrogates that some LLMs insert as tokenizer artifacts.
     """
     # Remove C0 controls (except \t \n \r) and C1 controls and lone surrogates
-    return re.sub(r'[\x00-\x08\x0B\x0C\x0E-\x1F\x7F\x80-\x9F]', '', text)
+    return_value = re.sub(r'[\x00-\x08\x0B\x0C\x0E-\x1F\x7F\x80-\x9F]', '', text)
+    return return_value
 
 
 def text_or_empty(value: object) -> str:
@@ -149,7 +150,8 @@ def text_or_empty(value: object) -> str:
     """
     if not isinstance(value, str):
         return ""
-    return value.strip()
+    return_value = value.strip()
+    return return_value
 
 
 def log_preview(value: Any, max_length: int | None = None) -> str:
@@ -168,9 +170,12 @@ def log_preview(value: Any, max_length: int | None = None) -> str:
         return "null"
 
     try:
-        return json.dumps(value, ensure_ascii=False, sort_keys=True, default=str)
-    except TypeError:
-        return repr(value)
+        return_value = json.dumps(value, ensure_ascii=False, sort_keys=True, default=str)
+        return return_value
+    except TypeError as exc:
+        logger.debug(f"Handled exception in log_preview: {exc}")
+        return_value = repr(value)
+        return return_value
 
 
 def log_list_preview(
@@ -190,7 +195,8 @@ def log_list_preview(
     Returns:
         The full list as JSON text without synthetic overflow markers.
     """
-    return log_preview(values)
+    return_value = log_preview(values)
+    return return_value
 
 
 def log_dict_subset(
@@ -222,7 +228,8 @@ def log_dict_subset(
             "empty": value in ("", None, [], {}),
             "value": value,
         }
-    return log_preview(subset)
+    return_value = log_preview(subset)
+    return return_value
 
 
 _PARSE_JSON_WITH_LLM_PROMPT = """\
@@ -269,7 +276,8 @@ def parse_llm_json_output(raw_output: str) -> dict:
         Parsed JSON object as dict, or empty dict if parsing fails
     """
     if not raw_output:
-        return {}
+        return_value = {}
+        return return_value
 
     decoded_json_dict = {}
     
@@ -279,7 +287,9 @@ def parse_llm_json_output(raw_output: str) -> dict:
 
         # Use repair_json which handles both valid and broken JSON
         decoded_json_dict = repair_json(raw, return_objects=True)            
-    except Exception:
+    except Exception as exc:
+        logger.debug(f"Handled exception in parse_llm_json_output: {exc}")
+        logger.exception("repair_json failed; falling back to LLM JSON repair")
         decoded_json_dict = parse_json_with_llm(raw_output)
 
     else:
@@ -344,16 +354,19 @@ def build_affinity_block(affinity: int, affinity_min: int=AFFINITY_MIN, affinity
     else:
         label, instruction = "Unwavering", "You are completely devoted to this user. Show unconditional support and absolute loyalty. Prioritize them above everything."
 
-    return {"level": label, "instruction": instruction}
+    return_value = {"level": label, "instruction": instruction}
+    return return_value
 
 
 def load_personality(path: str | Path) -> dict:
     path = Path(path)
     if not path.exists():
-        logger.warning("Personality file %s not found, using empty personality", path)
-        return {}
+        logger.warning(f'Personality file {path} not found, using empty personality')
+        return_value = {}
+        return return_value
     with open(path, "r", encoding="utf-8") as f:
-        return json.load(f)
+        return_value = json.load(f)
+        return return_value
 
 
 

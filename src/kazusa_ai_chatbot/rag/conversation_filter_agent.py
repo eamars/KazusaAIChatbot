@@ -139,8 +139,10 @@ async def _generator(task: str, context: dict[str, Any], feedback: str) -> dict[
     response = await _generator_llm.ainvoke([system_prompt, human_message])
     result = parse_llm_json_output(response.content)
     if not isinstance(result, dict):
-        return {}
-    return _normalize_args(result)
+        return_value = {}
+        return return_value
+    return_value = _normalize_args(result)
+    return return_value
 
 
 async def _tool(args: dict[str, Any]) -> object:
@@ -153,10 +155,12 @@ async def _tool(args: dict[str, Any]) -> object:
         Tool result or an error dict on invalid arguments.
     """
     try:
-        return await get_conversation.ainvoke(args)
+        return_value = await get_conversation.ainvoke(args)
+        return return_value
     except (TypeError, ValueError, ValidationError) as exc:
-        logger.info("conversation_filter_agent invalid args: %s", exc)
-        return {"error": f"{type(exc).__name__}: {exc}"}
+        logger.info(f'conversation_filter_agent invalid args: {exc}')
+        return_value = {"error": f"{type(exc).__name__}: {exc}"}
+        return return_value
 
 
 async def _judge(task: str, result: object) -> tuple[bool, str]:
@@ -176,11 +180,13 @@ async def _judge(task: str, result: object) -> tuple[bool, str]:
     response = await _judge_llm.ainvoke([system_prompt, human_message])
     verdict = parse_llm_json_output(response.content)
     if not isinstance(verdict, dict):
-        return False, "评估输出无效，请调整时间范围或提高 limit。"
+        return_value = False, "评估输出无效，请调整时间范围或提高 limit。"
+        return return_value
 
     resolved = bool(verdict.get("resolved", False))
     feedback = str(verdict.get("feedback", "")).strip()
-    return resolved, feedback
+    return_value = resolved, feedback
+    return return_value
 
 
 class ConversationFilterAgent(BaseRAGHelperAgent):
@@ -216,12 +222,13 @@ class ConversationFilterAgent(BaseRAGHelperAgent):
         cache_key = build_conversation_filter_cache_key(task, context)
         cached = await self.read_cache(cache_key)
         if cached is not None:
-            return self.with_cache_status(
+            return_value = self.with_cache_status(
                 {"resolved": True, "result": cached, "attempts": 0},
                 hit=True,
                 reason="hit",
                 cache_key=cache_key,
             )
+            return return_value
 
         feedback = ""
         result = None
@@ -253,7 +260,7 @@ class ConversationFilterAgent(BaseRAGHelperAgent):
         else:
             cache_reason = "miss_unresolved"
 
-        return self.with_cache_status(
+        return_value = self.with_cache_status(
             {
                 "resolved": resolved,
                 "result": result,
@@ -263,6 +270,7 @@ class ConversationFilterAgent(BaseRAGHelperAgent):
             reason=cache_reason,
             cache_key=cache_key,
         )
+        return return_value
 
 
 async def _test_main() -> None:

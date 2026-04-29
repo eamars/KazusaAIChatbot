@@ -73,7 +73,8 @@ async def get_text_embeddings_batch(texts: list[str]) -> list[list[float]]:
         List of embedding vectors, one per input text, in the same order.
     """
     if not texts:
-        return []
+        return_value = []
+        return return_value
     client = _get_embed_client()
     all_embeddings: list[list[float]] = []
     for start in range(0, len(texts), _EMBEDDING_BATCH_SIZE):
@@ -114,9 +115,10 @@ async def get_db():
         _db_loop = current_loop
         try:
             await _client.admin.command("ping")
-            logger.info("Connected to MongoDB at %s", MONGODB_URI)
-        except ConnectionFailure:
-            logger.error("Failed to connect to MongoDB at %s", MONGODB_URI)
+            logger.info(f'Connected to MongoDB at {MONGODB_URI}')
+        except ConnectionFailure as exc:
+            logger.debug(f"Handled exception in get_db: {exc}")
+            logger.error(f'Failed to connect to MongoDB at {MONGODB_URI}')
             raise
     return _db
 
@@ -154,12 +156,13 @@ async def enable_vector_index(
     try:
         async for index in collection.list_search_indexes():
             if index.get("name") == index_name:
-                logger.info("Vector search index '%s' already exists.", index_name)
+                logger.info(f'Vector search index \'{index_name}\' already exists.')
                 return
-    except Exception as e:
-        logger.debug("Could not list search indexes (might not exist yet or not supported): %s", e)
+    except Exception as exc:
+        logger.debug(f"Handled exception in enable_vector_index: {exc}")
+        logger.exception("Could not list search indexes (might not exist yet or not supported)")
 
-    logger.info("Vector search index '%s' not found. Creating...", index_name)
+    logger.info(f'Vector search index \'{index_name}\' not found. Creating...')
 
     sample_embedding = await get_text_embedding("test")
     num_dimensions = len(sample_embedding)
@@ -185,10 +188,8 @@ async def enable_vector_index(
 
     try:
         await collection.create_search_index(search_index_model)
-        logger.info(
-            "Successfully created vector search index '%s' on %s.%s with %d dimensions.",
-            index_name, collection_name, path, num_dimensions,
-        )
-    except Exception as e:
-        logger.error("Failed to create vector search index '%s': %s", index_name, e)
+        logger.info(f'Successfully created vector search index \'{index_name}\' on {collection_name}.{path} with {num_dimensions} dimensions.')
+    except Exception as exc:
+        logger.debug(f"Handled exception in enable_vector_index: {exc}")
+        logger.exception(f'Failed to create vector search index \'{index_name}\'')
         raise

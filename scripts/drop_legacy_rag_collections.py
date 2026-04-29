@@ -25,9 +25,9 @@ async def main() -> None:
     for name in ("rag_cache_index", "rag_metadata_index"):
         if name in existing:
             await db.drop_collection(name)
-            logger.info("Dropped collection '%s'", name)
+            logger.info(f'Dropped collection \'{name}\'')
         else:
-            logger.info("Collection '%s' not present; skipping", name)
+            logger.info(f'Collection \'{name}\' not present; skipping')
     await close_db()
 
 

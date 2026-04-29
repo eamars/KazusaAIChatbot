@@ -108,11 +108,12 @@ def _normalize_relationship_args(raw_args: dict[str, Any]) -> dict[str, Any] | N
     if mode == "one":
         limit = 1
 
-    return {
+    return_value = {
         "mode": mode,
         "rank_order": rank_order,
         "limit": limit,
     }
+    return return_value
 
 
 async def _extract_relationship_args(
@@ -136,7 +137,8 @@ async def _extract_relationship_args(
     result = parse_llm_json_output(response.content)
     if not isinstance(result, dict):
         return None
-    return _normalize_relationship_args(result)
+    return_value = _normalize_relationship_args(result)
+    return return_value
 
 
 def _relationship_band(label: str) -> str:
@@ -167,7 +169,7 @@ def _public_candidate(doc: dict[str, Any], rank: int) -> dict[str, Any]:
     """
     affinity_block = build_affinity_block(doc["affinity"])
     label = affinity_block["level"]
-    return {
+    return_value = {
         "rank": rank,
         "global_user_id": doc["global_user_id"],
         "display_name": doc["display_name"],
@@ -176,6 +178,7 @@ def _public_candidate(doc: dict[str, Any], rank: int) -> dict[str, Any]:
         "relationship_label": label,
         "relationship_band": _relationship_band(label),
     }
+    return return_value
 
 
 class RelationshipAgent(BaseRAGHelperAgent):
@@ -213,7 +216,7 @@ class RelationshipAgent(BaseRAGHelperAgent):
 
         args = await _extract_relationship_args(task, context)
         if args is None:
-            return self.with_cache_status(
+            return_value = self.with_cache_status(
                 {
                     "resolved": False,
                     "result": "Could not extract relationship ranking parameters from task.",
@@ -222,16 +225,18 @@ class RelationshipAgent(BaseRAGHelperAgent):
                 hit=False,
                 reason="skipped_unextractable_relationship_args",
             )
+            return return_value
 
         cache_key = build_relationship_cache_key(args, context)
         cached = await self.read_cache(cache_key)
         if cached is not None:
-            return self.with_cache_status(
+            return_value = self.with_cache_status(
                 {"resolved": True, "result": cached, "attempts": 0},
                 hit=True,
                 reason="hit",
                 cache_key=cache_key,
             )
+            return return_value
 
         platform = str(context.get("platform") or "").strip() or None
         rows = await list_users_by_affinity(
@@ -268,7 +273,7 @@ class RelationshipAgent(BaseRAGHelperAgent):
                 },
             )
 
-        return self.with_cache_status(
+        return_value = self.with_cache_status(
             {
                 "resolved": bool(candidates),
                 "result": result,
@@ -278,3 +283,4 @@ class RelationshipAgent(BaseRAGHelperAgent):
             reason="miss_stored" if candidates else "miss_unresolved",
             cache_key=cache_key,
         )
+        return return_value

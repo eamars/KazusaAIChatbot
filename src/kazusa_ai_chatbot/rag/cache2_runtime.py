@@ -42,17 +42,20 @@ def stable_cache_key(namespace: str, payload: dict[str, Any]) -> str:
         sort_keys=True,
         default=str,
     )
-    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+    return_value = hashlib.sha256(raw.encode("utf-8")).hexdigest()
+    return return_value
 
 
 def _now_utc() -> datetime:
     """Return the current UTC timestamp."""
-    return datetime.now(timezone.utc)
+    return_value = datetime.now(timezone.utc)
+    return return_value
 
 
 def _field_matches(entry_value: str, event_value: str) -> bool:
     """Return whether one dependency field is compatible with an event field."""
-    return not entry_value or not event_value or entry_value == event_value
+    return_value = not entry_value or not event_value or entry_value == event_value
+    return return_value
 
 
 def _timestamp_overlaps_dependency(
@@ -104,7 +107,8 @@ def dependency_matches_event(
     if not scoped_fields_match:
         return False
 
-    return _timestamp_overlaps_dependency(dependency, event)
+    return_value = _timestamp_overlaps_dependency(dependency, event)
+    return return_value
 
 
 @dataclass
@@ -153,12 +157,13 @@ class AgentCacheStats:
             Dict containing only sanitized scalar stats.
         """
         total = self.hit_count + self.miss_count
-        return {
+        return_value = {
             "agent_name": self.agent_name,
             "hit_count": self.hit_count,
             "miss_count": self.miss_count,
             "hit_rate": self.hit_count / total if total else 0.0,
         }
+        return return_value
 
 
 class RAGCache2Runtime:
@@ -221,7 +226,8 @@ class RAGCache2Runtime:
             ),
             hit=True,
         )
-        return deepcopy(entry.result)
+        return_value = deepcopy(entry.result)
+        return return_value
 
     async def store(
         self,
@@ -271,13 +277,9 @@ class RAGCache2Runtime:
 
         self._invalidations += len(keys_to_remove)
         if keys_to_remove:
-            logger.debug(
-                "RAG Cache 2 invalidated %d entries for source=%s reason=%s",
-                len(keys_to_remove),
-                event.source,
-                event.reason,
-            )
-        return len(keys_to_remove)
+            logger.debug(f'RAG Cache 2 invalidated {len(keys_to_remove)} entries for source={event.source} reason={event.reason}')
+        return_value = len(keys_to_remove)
+        return return_value
 
     async def clear(self) -> int:
         """Clear every session cache entry.
@@ -297,7 +299,7 @@ class RAGCache2Runtime:
             Dict with size, hit/miss, invalidation, and eviction counters.
         """
         total = self._hits + self._misses
-        return {
+        return_value = {
             "size": len(self._entries),
             "max_entries": self._max_entries,
             "hits": self._hits,
@@ -306,6 +308,7 @@ class RAGCache2Runtime:
             "invalidations": self._invalidations,
             "evictions": self._evictions,
         }
+        return return_value
 
     def get_agent_stats(self) -> list[dict[str, Any]]:
         """Return sanitized per-agent Cache 2 lookup counters.
@@ -314,13 +317,14 @@ class RAGCache2Runtime:
             List of dicts containing ``agent_name``, ``hit_count``,
             ``miss_count``, and ``hit_rate`` only.
         """
-        return [
+        return_value = [
             stats.as_dict()
             for stats in sorted(
                 self._agent_stats.values(),
                 key=lambda item: item.agent_name,
             )
         ]
+        return return_value
 
     def _record_agent_lookup(self, *, agent_name: str, hit: bool) -> None:
         """Increment the per-agent lookup counter when attribution exists.

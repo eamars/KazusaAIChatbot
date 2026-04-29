@@ -15,7 +15,8 @@ logger = logging.getLogger(__name__)
 
 
 def _now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return_value = datetime.now(timezone.utc).isoformat()
+    return return_value
 
 
 async def db_bootstrap() -> None:
@@ -29,7 +30,7 @@ async def db_bootstrap() -> None:
     for legacy in ("rag_cache_index", "rag_metadata_index"):
         if legacy in existing:
             await db.drop_collection(legacy)
-            logger.info("Dropped legacy collection '%s'", legacy)
+            logger.info(f'Dropped legacy collection \'{legacy}\'')
             existing.discard(legacy)
 
     required_collections = [
@@ -44,9 +45,9 @@ async def db_bootstrap() -> None:
     for name in required_collections:
         if name not in existing:
             await db.create_collection(name)
-            logger.info("Created collection '%s'", name)
+            logger.info(f'Created collection \'{name}\'')
         else:
-            logger.debug("Collection '%s' already exists", name)
+            logger.debug(f'Collection \'{name}\' already exists')
 
     # ── Seed singleton character_state ─────────────────────────────
     existing_state = await db.character_state.find_one({"_id": "global"})
@@ -119,10 +120,8 @@ async def db_bootstrap() -> None:
             if collection == "user_memory_units":
                 filter_paths = ["global_user_id", "unit_type", "status"]
             await enable_vector_index(collection, index_name, path=path, filter_paths=filter_paths)
-        except Exception:
-            logger.warning(
-                "Could not create vector index '%s' on %s.%s (requires Atlas)",
-                index_name, collection, path,
-            )
+        except Exception as exc:
+            logger.debug(f"Handled exception in db_bootstrap: {exc}")
+            logger.exception(f'Could not create vector index \'{index_name}\' on {collection}.{path} (requires Atlas)')
 
     logger.info("Database bootstrap complete")

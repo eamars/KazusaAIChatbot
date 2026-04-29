@@ -9,6 +9,8 @@ from typing import Any
 from kazusa_ai_chatbot.config import CONVERSATION_HISTORY_LIMIT
 from kazusa_ai_chatbot.db._client import get_db, get_text_embedding
 from kazusa_ai_chatbot.db.schemas import ConversationMessageDoc
+from kazusa_ai_chatbot.rag import cache2_runtime
+from kazusa_ai_chatbot.rag.cache2_events import CacheInvalidationEvent
 
 logger = logging.getLogger(__name__)
 
@@ -98,7 +100,8 @@ async def search_conversation_history(
 
         cursor = collection.find(base_filter).sort("timestamp", -1).limit(limit)
         docs = await cursor.to_list(length=limit)
-        return [(-1.0, doc) for doc in docs]
+        return_value = [(-1.0, doc) for doc in docs]
+        return return_value
 
     # method == "vector"
     query_embedding = await get_text_embedding(query)
@@ -138,7 +141,8 @@ async def search_conversation_history(
 
     cursor = collection.aggregate(pipeline)
     docs = await cursor.to_list(length=limit)
-    return [(doc.pop("score", 0.0), doc) for doc in docs]
+    return_value = [(doc.pop("score", 0.0), doc) for doc in docs]
+    return return_value
 
 
 async def aggregate_conversation_by_user(
@@ -205,7 +209,7 @@ async def aggregate_conversation_by_user(
     rows = await db.conversation_history.aggregate(pipeline).to_list(length=effective_limit)
     total_count = await db.conversation_history.count_documents(match_filter)
 
-    return {
+    return_value = {
         "total_count": total_count,
         "rows": [
             {
@@ -233,6 +237,7 @@ async def aggregate_conversation_by_user(
             "limit": effective_limit,
         },
     }
+    return return_value
 
 
 async def save_conversation(doc: ConversationMessageDoc) -> None:
@@ -244,9 +249,6 @@ async def save_conversation(doc: ConversationMessageDoc) -> None:
     Returns:
         None. The row is written and matching Cache2 entries are invalidated.
     """
-    from kazusa_ai_chatbot.rag.cache2_events import CacheInvalidationEvent
-    from kazusa_ai_chatbot.rag.cache2_runtime import get_rag_cache2_runtime
-
     db = await get_db()
 
     doc.setdefault("content_type", "text")
@@ -258,7 +260,7 @@ async def save_conversation(doc: ConversationMessageDoc) -> None:
         doc["embedding"] = await get_text_embedding(doc.get("content", ""))
 
     await db.conversation_history.insert_one(doc)
-    evicted_count = await get_rag_cache2_runtime().invalidate(CacheInvalidationEvent(
+    evicted_count = await cache2_runtime.get_rag_cache2_runtime().invalidate(CacheInvalidationEvent(
         source="conversation_history",
         platform=doc.get("platform", ""),
         platform_channel_id=doc.get("platform_channel_id", ""),
@@ -267,10 +269,4 @@ async def save_conversation(doc: ConversationMessageDoc) -> None:
         reason="save_conversation",
     ))
     if evicted_count:
-        logger.debug(
-            "Cache2 invalidation source=conversation_history platform=%s channel=%s global_user=%s evicted=%d",
-            doc.get("platform", ""),
-            doc.get("platform_channel_id", ""),
-            doc.get("global_user_id", ""),
-            evicted_count,
-        )
+        logger.debug(f'Cache2 invalidation source=conversation_history platform={doc.get("platform", "")} channel={doc.get("platform_channel_id", "")} global_user={doc.get("global_user_id", "")} evicted={evicted_count}')

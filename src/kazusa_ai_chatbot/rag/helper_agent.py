@@ -70,7 +70,8 @@ class BaseRAGHelperAgent(ABC):
         """
         if self._cache_runtime is not None:
             return self._cache_runtime
-        return get_rag_cache2_runtime()
+        return_value = get_rag_cache2_runtime()
+        return return_value
 
     async def read_cache(self, cache_key: str) -> Any | None:
         """Read one cached payload by exact key.
@@ -84,11 +85,12 @@ class BaseRAGHelperAgent(ABC):
         """
         if not self.cache_name or not cache_key:
             return None
-        return await self.cache_runtime().get(
+        return_value = await self.cache_runtime().get(
             cache_key,
             cache_name=self.cache_name,
             agent_name=self.name,
         )
+        return return_value
 
     def cache_status(
         self,
@@ -184,4 +186,5 @@ class BaseRAGHelperAgent(ABC):
         Returns:
             Number of Cache 2 entries invalidated.
         """
-        return await self.cache_runtime().invalidate(event)
+        return_value = await self.cache_runtime().invalidate(event)
+        return return_value

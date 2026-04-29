@@ -53,10 +53,11 @@ class KnowledgeEntry:
         Returns:
             Tuple of ``(memory_name, source_global_user_id)``.
         """
-        return (
+        return_value = (
             str(self.data["memory_name"]).strip(),
             str(self.data["source_global_user_id"]).strip(),
         )
+        return return_value
 
 
 def _now_iso() -> str:
@@ -65,7 +66,8 @@ def _now_iso() -> str:
     Returns:
         ISO-8601 UTC timestamp.
     """
-    return datetime.now(timezone.utc).isoformat()
+    return_value = datetime.now(timezone.utc).isoformat()
+    return return_value
 
 
 def _combined_embedding_text(entry: dict[str, Any]) -> str:
@@ -77,12 +79,13 @@ def _combined_embedding_text(entry: dict[str, Any]) -> str:
     Returns:
         Combined text used to produce the vector embedding.
     """
-    return (
+    return_value = (
         f"type:{entry.get('memory_type', '')}\n"
         f"source:{entry.get('source_kind', '')}\n"
         f"title:{entry['memory_name']}\n"
         f"content:{entry['content']}"
     )
+    return return_value
 
 
 def _managed_payload(entry: dict[str, Any]) -> dict[str, Any]:
@@ -94,7 +97,8 @@ def _managed_payload(entry: dict[str, Any]) -> dict[str, Any]:
     Returns:
         Dict containing only managed DB fields.
     """
-    return {field: entry[field] for field in MANAGED_FIELDS}
+    return_value = {field: entry[field] for field in MANAGED_FIELDS}
+    return return_value
 
 
 def _normalize_entry(raw: dict[str, Any], line_number: int) -> KnowledgeEntry:
@@ -117,7 +121,8 @@ def _normalize_entry(raw: dict[str, Any], line_number: int) -> KnowledgeEntry:
         "status": str(raw.get("status", "active")).strip(),
         "expiry_timestamp": raw.get("expiry_timestamp"),
     }
-    return KnowledgeEntry(data=data, line_number=line_number)
+    return_value = KnowledgeEntry(data=data, line_number=line_number)
+    return return_value
 
 
 def load_entries(path: Path) -> list[KnowledgeEntry]:
@@ -290,11 +295,12 @@ async def _payload_with_embedding(entry: dict[str, Any], timestamp: str) -> dict
         Full memory document payload.
     """
     embedding = await get_text_embedding(_combined_embedding_text(entry))
-    return {
+    return_value = {
         **_managed_payload(entry),
         "timestamp": timestamp,
         "embedding": embedding,
     }
+    return return_value
 
 
 async def sync_entries(

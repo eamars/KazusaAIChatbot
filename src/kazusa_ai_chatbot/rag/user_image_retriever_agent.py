@@ -29,7 +29,8 @@ async def user_image_retriever_agent(
     hydrated = dict(user_profile or {})
     hydrated["user_memory_context"] = user_memory_context
     hydrated["_user_memory_units"] = source_units
-    return hydrated, {
+    return_value = hydrated, {
         "user_memory_context": user_memory_context,
         "user_memory_units": source_units,
     }
+    return return_value

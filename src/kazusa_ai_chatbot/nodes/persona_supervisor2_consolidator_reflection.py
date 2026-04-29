@@ -88,18 +88,14 @@ async def global_state_updater(state: ConsolidatorState) -> dict:
 
     result = parse_llm_json_output(response.content)
 
-    logger.debug(
-        "Global state updater: mood=%s global_vibe=%s reflection=%s",
-        log_preview(result.get("mood")),
-        log_preview(result.get("global_vibe")),
-        log_preview(result.get("reflection_summary")),
-    )
+    logger.debug(f'Global state updater: mood={log_preview(result.get("mood"))} global_vibe={log_preview(result.get("global_vibe"))} reflection={log_preview(result.get("reflection_summary"))}')
 
-    return {
+    return_value = {
         "mood": result.get("mood"),
         "global_vibe": result.get("global_vibe"),
         "reflection_summary": result.get("reflection_summary"),
     }
+    return return_value
 
 
 _RELATIONSHIP_RECORDER_PROMPT = """\
@@ -192,13 +188,7 @@ async def relationship_recorder(state: ConsolidatorState) -> dict:
     result = parse_llm_json_output(response.content)
 
     subjective_appraisals = normalize_subjective_appraisals(result.get("subjective_appraisals"))
-    logger.debug(
-        "Relationship recorder: skip=%s affinity_delta=%s appraisals=%s insight=%s",
-        result.get("skip", False),
-        result.get("affinity_delta", 0),
-        log_list_preview(subjective_appraisals),
-        log_preview(result.get("last_relationship_insight", "")),
-    )
+    logger.debug(f'Relationship recorder: skip={result.get("skip", False)} affinity_delta={result.get("affinity_delta", 0)} appraisals={log_list_preview(subjective_appraisals)} insight={log_preview(result.get("last_relationship_insight", ""))}')
 
     raw_affinity_delta = result.get("affinity_delta", 0)
     if isinstance(raw_affinity_delta, bool):
@@ -206,20 +196,23 @@ async def relationship_recorder(state: ConsolidatorState) -> dict:
     elif isinstance(raw_affinity_delta, str):
         try:
             raw_affinity_delta = int(raw_affinity_delta.strip() or 0)
-        except ValueError:
+        except ValueError as exc:
+            logger.debug(f"Handled exception in relationship_recorder: {exc}")
             raw_affinity_delta = 0
     elif not isinstance(raw_affinity_delta, int):
         try:
             raw_affinity_delta = int(raw_affinity_delta)
-        except (TypeError, ValueError):
+        except (TypeError, ValueError) as exc:
+            logger.debug(f"Handled exception in relationship_recorder: {exc}")
             raw_affinity_delta = 0
     raw_affinity_delta = max(-5, min(5, raw_affinity_delta))
 
     if result.get("skip"):
         raw_affinity_delta = 0
 
-    return {
+    return_value = {
         "subjective_appraisals": subjective_appraisals,
         "affinity_delta": raw_affinity_delta,
         "last_relationship_insight": result.get("last_relationship_insight"),
     }
+    return return_value

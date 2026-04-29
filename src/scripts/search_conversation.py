@@ -42,7 +42,8 @@ def format_message(doc: ConversationMessageDoc, score: float) -> str:
     user_id = doc.get("user_id", "Unknown user")
     channel_id = doc.get("channel_id", "Unknown channel")
     
-    return f"[Score: {score:.4f}] {timestamp} | User: {user_id} | Channel: {channel_id}\n{content}\n{'-'*80}"
+    return_value = f"[Score: {score:.4f}] {timestamp} | User: {user_id} | Channel: {channel_id}\n{content}\n{'-'*80}"
+    return return_value
 
 
 async def main():
@@ -88,8 +89,9 @@ async def main():
         for score, doc in results:
             print(format_message(doc, score))
         
-    except Exception as e:
-        logger.error(f"Search failed: {e}")
+    except Exception as exc:
+        logger.debug(f"Handled exception in main: {exc}")
+        logger.exception("Search failed")
         raise
     finally:
         # Close database connection

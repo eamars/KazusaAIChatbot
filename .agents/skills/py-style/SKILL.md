@@ -5,7 +5,7 @@ description: Enforce and review Python coding style for this project. PEP 8 is t
 
 # Python Style Guide
 
-PEP 8 is the baseline style guide for all Python code in this project. On top of PEP 8, this skill defines and enforces the project's nine explicit coding standards. Apply both layers proactively when writing Python code, and surface every violation when reviewing code.
+PEP 8 is the baseline style guide for all Python code in this project. On top of PEP 8, this skill defines and enforces the project's eleven explicit coding standards. Apply both layers proactively when writing Python code, and surface every violation when reviewing code.
 
 When PEP 8 and a project-specific rule overlap, follow the stricter project-specific rule. When PEP 8 covers an issue not mentioned here, follow PEP 8.
 
@@ -46,7 +46,7 @@ A `try` block answers the question "what specifically might fail here?" Its scop
 ```python
 try:
     result = parse_llm_output(response)
-    logger.info("Parsed %d facts", len(result))   # cannot raise ParseError
+    logger.info(f"Parsed {len(result)} facts")    # cannot raise ParseError
     enriched = enrich(result)                      # unrelated concern
 except ParseError:
     result = {}
@@ -58,7 +58,7 @@ try:
     result = parse_llm_output(response)
 except ParseError:
     result = {}
-logger.info("Parsed %d facts", len(result))
+logger.info(f"Parsed {len(result)} facts")
 enriched = enrich(result)
 ```
 
@@ -212,8 +212,8 @@ except Exception:
 # LLM output is external; malformed JSON is a realistic and expected outcome
 try:
     parsed = json.loads(llm_response)
-except json.JSONDecodeError:
-    logger.exception("LLM returned non-JSON: %r", llm_response)
+except json.JSONDecodeError as exc:
+    logger.exception(f"LLM returned non-JSON: {exc}; raw={llm_response!r}")
     parsed = {}
 
 # Network I/O where transient failure is a normal operating condition
@@ -306,18 +306,70 @@ When reviewing: after tuple unpacking, verify each named value is used. Replace 
 
 ---
 
+## Rule 10 — Exception handlers must include the actual exception message
+
+Every `except` block that logs, prints, wraps, or otherwise reports a failure must include the actual exception message. Bind the exception with `as exc` and include `{exc}` in the emitted message. For broad boundary catches that use `logger.exception(...)`, still include `{exc}` in the message; the traceback alone is not enough for this project.
+
+**Wrong:**
+```python
+try:
+    await call_external_service()
+except TimeoutError:
+    logger.exception("External service failed")
+```
+
+**Right:**
+```python
+try:
+    await call_external_service()
+except TimeoutError as exc:
+    logger.exception(f"External service failed: {exc}")
+```
+
+**Also right when wrapping:**
+```python
+try:
+    await save_memory(doc)
+except PyMongoError as exc:
+    raise RuntimeError(f"Failed to save memory: {exc}") from exc
+```
+
+When reviewing: every `except` body must make the concrete exception text visible in logs, prints, or raised wrapper messages unless the exception is intentionally re-raised immediately with a bare `raise`.
+
+---
+
+## Rule 11 — Use f-strings instead of `%s`-style substitution
+
+Use f-strings for string interpolation. Do not use legacy `%` formatting, and do not rely on logging's comma-argument `%s` substitution style. This project prioritizes immediate readability over deferred logging interpolation.
+
+**Wrong:**
+```python
+logger.info("User %s affinity changed to %d", user_id, affinity)
+message = "User %s" % user_id
+```
+
+**Right:**
+```python
+logger.info(f"User {user_id} affinity changed to {affinity}")
+message = f"User {user_id}"
+```
+
+When reviewing: flag `%` string formatting and logging calls that pass a format string plus interpolation arguments. Rewrite them as f-strings.
+
+---
+
 ## Review workflow
 
 When asked to review a file or selection:
 
 1. Read the code in full.
-2. First check for PEP 8 violations, then check the nine project-specific rules.
+2. First check for PEP 8 violations, then check the eleven project-specific rules.
 3. For each violation, list the line reference, the violated standard, and a one-sentence explanation of why it violates the rule.
 4. Propose the corrected version inline.
 5. If no violations are found, say so explicitly.
 
 When writing new code:
 
-Apply PEP 8 and all nine project-specific rules before producing any output. If a rule conflict arises or a genuine exception is needed, surface it to the user with the reasoning rather than silently picking one path.
+Apply PEP 8 and all eleven project-specific rules before producing any output. If a rule conflict arises or a genuine exception is needed, surface it to the user with the reasoning rather than silently picking one path.
 
 See `references/examples.md` for additional annotated before/after examples.

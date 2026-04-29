@@ -54,7 +54,7 @@ async def handle_send_message(
 def build_send_message_tool() -> ToolSpec:
     """Return the MVP ``send_message`` tool registration."""
 
-    return ToolSpec(
+    return_value = ToolSpec(
         name="send_message",
         description=(
             "Send a message to a platform channel or the same channel as the"
@@ -64,3 +64,4 @@ def build_send_message_tool() -> ToolSpec:
         args_schema=SEND_MESSAGE_SCHEMA,
         handler=handle_send_message,
     )
+    return return_value

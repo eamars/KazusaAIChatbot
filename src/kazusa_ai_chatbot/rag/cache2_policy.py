@@ -61,7 +61,8 @@ def normalize_cache_text(value: object) -> str:
     Returns:
         A stripped, whitespace-collapsed, case-folded string.
     """
-    return _WHITESPACE_RE.sub(" ", str(value or "").strip()).casefold()
+    return_value = _WHITESPACE_RE.sub(" ", str(value or "").strip()).casefold()
+    return return_value
 
 
 def _context_scope(context: dict[str, Any]) -> dict[str, str]:
@@ -79,10 +80,11 @@ def _context_scope(context: dict[str, Any]) -> dict[str, str]:
         or context.get("target_platform_channel_id")
         or ""
     )
-    return {
+    return_value = {
         "platform": normalize_cache_text(platform),
         "platform_channel_id": normalize_cache_text(channel),
     }
+    return return_value
 
 
 def _initializer_context_signature(context: dict[str, Any]) -> dict[str, str]:
@@ -94,7 +96,7 @@ def _initializer_context_signature(context: dict[str, Any]) -> dict[str, str]:
     Returns:
         Stable subset of context fields that can affect slot planning.
     """
-    return {
+    return_value = {
         "platform": normalize_cache_text(context.get("platform", "")),
         "platform_channel_id": normalize_cache_text(
             context.get("platform_channel_id", "")
@@ -102,6 +104,7 @@ def _initializer_context_signature(context: dict[str, Any]) -> dict[str, str]:
         "global_user_id": str(context.get("global_user_id", "")).strip(),
         "user_name": normalize_cache_text(context.get("user_name", "")),
     }
+    return return_value
 
 
 def build_initializer_cache_key(
@@ -121,7 +124,7 @@ def build_initializer_cache_key(
     Returns:
         Stable exact-match cache key for initializer strategy reuse.
     """
-    return stable_cache_key(
+    return_value = stable_cache_key(
         INITIALIZER_CACHE_NAME,
         {
             "policy_version": INITIALIZER_POLICY_VERSION,
@@ -133,6 +136,7 @@ def build_initializer_cache_key(
             "context_signature": _initializer_context_signature(context),
         },
     )
+    return return_value
 
 
 def is_closed_historical_range(args: dict[str, Any]) -> bool:
@@ -145,7 +149,8 @@ def is_closed_historical_range(args: dict[str, Any]) -> bool:
         True when both ``from_timestamp`` and ``to_timestamp`` are present,
         meaning the query is anchored to a closed window safe for caching.
     """
-    return bool(args.get("from_timestamp") and args.get("to_timestamp"))
+    return_value = bool(args.get("from_timestamp") and args.get("to_timestamp"))
+    return return_value
 
 
 # ---------------------------------------------------------------------------
@@ -164,7 +169,7 @@ def build_user_lookup_cache_key(display_name: str, context: dict[str, Any]) -> s
         Stable exact-match cache key.
     """
     scope = _context_scope(context)
-    return stable_cache_key(
+    return_value = stable_cache_key(
         USER_LOOKUP_CACHE_NAME,
         {
             "policy_version": USER_LOOKUP_POLICY_VERSION,
@@ -173,6 +178,7 @@ def build_user_lookup_cache_key(display_name: str, context: dict[str, Any]) -> s
             "platform_channel_id": scope["platform_channel_id"],
         },
     )
+    return return_value
 
 
 def build_user_lookup_dependencies(
@@ -190,7 +196,7 @@ def build_user_lookup_dependencies(
         correctly regardless of what display-name alias was queried.
     """
     scope = _context_scope(context)
-    return [
+    return_value = [
         CacheDependency(
             source="user_profile",
             platform=scope["platform"],
@@ -198,6 +204,7 @@ def build_user_lookup_dependencies(
             global_user_id=global_user_id.strip(),
         )
     ]
+    return return_value
 
 
 # ---------------------------------------------------------------------------
@@ -218,7 +225,7 @@ def build_user_list_cache_key(args: dict[str, Any], context: dict[str, Any]) -> 
     scope = _context_scope(context)
     raw_limit = args.get("limit", 20)
     limit = int(raw_limit) if isinstance(raw_limit, int) and not isinstance(raw_limit, bool) else 20
-    return stable_cache_key(
+    return_value = stable_cache_key(
         USER_LIST_CACHE_NAME,
         {
             "policy_version": USER_LIST_POLICY_VERSION,
@@ -230,6 +237,7 @@ def build_user_list_cache_key(args: dict[str, Any], context: dict[str, Any]) -> 
             "platform_channel_id": scope["platform_channel_id"],
         },
     )
+    return return_value
 
 
 def build_user_list_dependencies(
@@ -291,13 +299,14 @@ def build_user_profile_cache_key(global_user_id: str) -> str:
     Returns:
         Stable exact-match cache key.
     """
-    return stable_cache_key(
+    return_value = stable_cache_key(
         USER_PROFILE_CACHE_NAME,
         {
             "policy_version": USER_PROFILE_POLICY_VERSION,
             "global_user_id": global_user_id.strip(),
         },
     )
+    return return_value
 
 
 def build_character_profile_cache_key(global_user_id: str) -> str:
@@ -309,7 +318,7 @@ def build_character_profile_cache_key(global_user_id: str) -> str:
     Returns:
         Stable exact-match cache key isolated from ordinary user-image bundles.
     """
-    return stable_cache_key(
+    return_value = stable_cache_key(
         USER_PROFILE_CACHE_NAME,
         {
             "policy_version": USER_PROFILE_POLICY_VERSION,
@@ -317,6 +326,7 @@ def build_character_profile_cache_key(global_user_id: str) -> str:
             "global_user_id": global_user_id.strip(),
         },
     )
+    return return_value
 
 
 def build_user_profile_dependencies(global_user_id: str) -> list[CacheDependency]:
@@ -328,7 +338,8 @@ def build_user_profile_dependencies(global_user_id: str) -> list[CacheDependency
     Returns:
         Single dependency on user-profile writes for that UUID.
     """
-    return [CacheDependency(source="user_profile", global_user_id=global_user_id.strip())]
+    return_value = [CacheDependency(source="user_profile", global_user_id=global_user_id.strip())]
+    return return_value
 
 
 # ---------------------------------------------------------------------------
@@ -347,7 +358,7 @@ def build_relationship_cache_key(args: dict[str, Any], context: dict[str, Any]) 
         Stable exact-match cache key.
     """
     scope = _context_scope(context)
-    return stable_cache_key(
+    return_value = stable_cache_key(
         RELATIONSHIP_CACHE_NAME,
         {
             "policy_version": RELATIONSHIP_POLICY_VERSION,
@@ -358,6 +369,7 @@ def build_relationship_cache_key(args: dict[str, Any], context: dict[str, Any]) 
             "platform_channel_id": scope["platform_channel_id"],
         },
     )
+    return return_value
 
 
 def build_relationship_dependencies(context: dict[str, Any]) -> list[CacheDependency]:
@@ -371,13 +383,14 @@ def build_relationship_dependencies(context: dict[str, Any]) -> list[CacheDepend
         where available. Any profile or affinity update can affect the ranking.
     """
     scope = _context_scope(context)
-    return [
+    return_value = [
         CacheDependency(
             source="user_profile",
             platform=scope["platform"],
             platform_channel_id=scope["platform_channel_id"],
         )
     ]
+    return return_value
 
 
 # ---------------------------------------------------------------------------
@@ -403,7 +416,7 @@ def _build_conversation_cache_key(
         Stable exact-match cache key.
     """
     scope = _context_scope(context)
-    return stable_cache_key(
+    return_value = stable_cache_key(
         cache_name,
         {
             "policy_version": policy_version,
@@ -412,6 +425,7 @@ def _build_conversation_cache_key(
             "platform_channel_id": scope["platform_channel_id"],
         },
     )
+    return return_value
 
 
 def _build_conversation_history_dependencies(
@@ -428,7 +442,7 @@ def _build_conversation_history_dependencies(
         Single dependency with the effective scope and time range.
     """
     scope = _context_scope(context)
-    return [
+    return_value = [
         CacheDependency(
             source="conversation_history",
             platform=str(args.get("platform", "")).strip() or scope["platform"],
@@ -439,6 +453,7 @@ def _build_conversation_history_dependencies(
             to_timestamp=str(args.get("to_timestamp", "")).strip(),
         )
     ]
+    return return_value
 
 
 # ---------------------------------------------------------------------------
@@ -456,9 +471,10 @@ def build_conversation_filter_cache_key(task: str, context: dict[str, Any]) -> s
     Returns:
         Stable exact-match cache key.
     """
-    return _build_conversation_cache_key(
+    return_value = _build_conversation_cache_key(
         CONVERSATION_FILTER_CACHE_NAME, CONVERSATION_FILTER_POLICY_VERSION, task, context
     )
+    return return_value
 
 
 def build_conversation_filter_dependencies(
@@ -473,7 +489,8 @@ def build_conversation_filter_dependencies(
     Returns:
         Single conversation-history dependency with the effective scope and range.
     """
-    return _build_conversation_history_dependencies(args, context)
+    return_value = _build_conversation_history_dependencies(args, context)
+    return return_value
 
 
 # ---------------------------------------------------------------------------
@@ -491,9 +508,10 @@ def build_conversation_keyword_cache_key(task: str, context: dict[str, Any]) -> 
     Returns:
         Stable exact-match cache key.
     """
-    return _build_conversation_cache_key(
+    return_value = _build_conversation_cache_key(
         CONVERSATION_KEYWORD_CACHE_NAME, CONVERSATION_KEYWORD_POLICY_VERSION, task, context
     )
+    return return_value
 
 
 def build_conversation_keyword_dependencies(
@@ -508,7 +526,8 @@ def build_conversation_keyword_dependencies(
     Returns:
         Single conversation-history dependency with the effective scope and range.
     """
-    return _build_conversation_history_dependencies(args, context)
+    return_value = _build_conversation_history_dependencies(args, context)
+    return return_value
 
 
 # ---------------------------------------------------------------------------
@@ -526,9 +545,10 @@ def build_conversation_search_cache_key(task: str, context: dict[str, Any]) -> s
     Returns:
         Stable exact-match cache key.
     """
-    return _build_conversation_cache_key(
+    return_value = _build_conversation_cache_key(
         CONVERSATION_SEARCH_CACHE_NAME, CONVERSATION_SEARCH_POLICY_VERSION, task, context
     )
+    return return_value
 
 
 def build_conversation_search_dependencies(
@@ -543,7 +563,8 @@ def build_conversation_search_dependencies(
     Returns:
         Single conversation-history dependency with the effective scope and range.
     """
-    return _build_conversation_history_dependencies(args, context)
+    return_value = _build_conversation_history_dependencies(args, context)
+    return return_value
 
 
 # ---------------------------------------------------------------------------
@@ -569,7 +590,7 @@ def _build_persistent_memory_cache_key(
         Stable exact-match cache key.
     """
     scope = _context_scope(context)
-    return stable_cache_key(
+    return_value = stable_cache_key(
         cache_name,
         {
             "policy_version": policy_version,
@@ -578,6 +599,7 @@ def _build_persistent_memory_cache_key(
             "platform_channel_id": scope["platform_channel_id"],
         },
     )
+    return return_value
 
 
 def _build_persistent_memory_dependencies(args: dict[str, Any]) -> list[CacheDependency]:
@@ -593,7 +615,8 @@ def _build_persistent_memory_dependencies(args: dict[str, Any]) -> list[CacheDep
         Single dependency on user-profile writes for the effective user scope.
     """
     global_user_id = str(args.get("source_global_user_id", "")).strip()
-    return [CacheDependency(source="user_profile", global_user_id=global_user_id)]
+    return_value = [CacheDependency(source="user_profile", global_user_id=global_user_id)]
+    return return_value
 
 
 # ---------------------------------------------------------------------------
@@ -611,12 +634,13 @@ def build_persistent_memory_keyword_cache_key(task: str, context: dict[str, Any]
     Returns:
         Stable exact-match cache key.
     """
-    return _build_persistent_memory_cache_key(
+    return_value = _build_persistent_memory_cache_key(
         PERSISTENT_MEMORY_KEYWORD_CACHE_NAME,
         PERSISTENT_MEMORY_KEYWORD_POLICY_VERSION,
         task,
         context,
     )
+    return return_value
 
 
 def build_persistent_memory_keyword_dependencies(args: dict[str, Any]) -> list[CacheDependency]:
@@ -628,7 +652,8 @@ def build_persistent_memory_keyword_dependencies(args: dict[str, Any]) -> list[C
     Returns:
         Single user-profile dependency scoped by the effective user filter.
     """
-    return _build_persistent_memory_dependencies(args)
+    return_value = _build_persistent_memory_dependencies(args)
+    return return_value
 
 
 # ---------------------------------------------------------------------------
@@ -646,12 +671,13 @@ def build_persistent_memory_search_cache_key(task: str, context: dict[str, Any])
     Returns:
         Stable exact-match cache key.
     """
-    return _build_persistent_memory_cache_key(
+    return_value = _build_persistent_memory_cache_key(
         PERSISTENT_MEMORY_SEARCH_CACHE_NAME,
         PERSISTENT_MEMORY_SEARCH_POLICY_VERSION,
         task,
         context,
     )
+    return return_value
 
 
 def build_persistent_memory_search_dependencies(args: dict[str, Any]) -> list[CacheDependency]:
@@ -663,4 +689,5 @@ def build_persistent_memory_search_dependencies(args: dict[str, Any]) -> list[Ca
     Returns:
         Single user-profile dependency scoped by the effective user filter.
     """
-    return _build_persistent_memory_dependencies(args)
+    return_value = _build_persistent_memory_dependencies(args)
+    return return_value

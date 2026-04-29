@@ -143,18 +143,13 @@ async def facts_harvester(state: ConsolidatorState) -> dict:
     new_facts = result.get("new_facts", []) or []
     future_promises = result.get("future_promises", []) or []
     if new_facts or future_promises:
-        logger.debug(
-            "Facts harvester: facts=%d promises=%d facts=%s promises=%s",
-            len(new_facts),
-            len(future_promises),
-            log_list_preview(new_facts),
-            log_list_preview(future_promises),
-        )
+        logger.debug(f'Facts harvester: facts={len(new_facts)} promises={len(future_promises)} facts={log_list_preview(new_facts)} promises={log_list_preview(future_promises)}')
 
-    return {
+    return_value = {
         "new_facts": new_facts,
         "future_promises": future_promises,
     }
+    return return_value
 
 
 _FACT_HARVESTER_EVALUATOR_PROMPT = """\
@@ -254,13 +249,7 @@ async def fact_harvester_evaluator(state: ConsolidatorState) -> dict:
 
     result = parse_llm_json_output(response.content)
 
-    logger.debug(
-        "Fact harvester evaluator: retry=%d should_stop=%s contradictions=%s feedback=%s",
-        retry,
-        result.get("should_stop", True),
-        result.get("contradiction_flags", []),
-        log_preview(result.get("feedback", "")),
-    )
+    logger.debug(f'Fact harvester evaluator: retry={retry} should_stop={result.get("should_stop", True)} contradictions={result.get("contradiction_flags", [])} feedback={log_preview(result.get("feedback", ""))}')
 
     should_stop = result.get("should_stop", True)
     if retry >= MAX_FACT_HARVESTER_RETRY:
@@ -287,9 +276,10 @@ async def fact_harvester_evaluator(state: ConsolidatorState) -> dict:
         "contradiction_flags": contradiction_flags,
     }
 
-    return {
+    return_value = {
         "should_stop": should_stop,
         "fact_harvester_feedback_message": [feedback_message],
         "fact_harvester_retry": retry,
         "metadata": metadata,
     }
+    return return_value

@@ -44,7 +44,8 @@ def get_mbti_natural_response(mbti: str) -> str:
 
     # 简单的大小写兼容处理
     key = mbti.upper().strip()
-    return mbti_map.get(key, f"未知的性格原型：{mbti}。即使是潜意识，也无法在迷雾中导航。")
+    return_value = mbti_map.get(key, f"未知的性格原型：{mbti}。即使是潜意识，也无法在迷雾中导航。")
+    return return_value
 
 
 _COGNITION_SUBCONSCIOUS_PROMPT = """\
@@ -131,7 +132,8 @@ async def call_cognition_subconscious(state: CognitionState) -> CognitionState:
         else:
             logger.error(f"Unknown key: {key}: {value}")
 
-    return {
+    return_value = {
         "emotional_appraisal": emotional_appraisal,
         "interaction_subtext": interaction_subtext,
     }
+    return return_value

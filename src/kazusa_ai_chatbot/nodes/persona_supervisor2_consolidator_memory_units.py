@@ -96,7 +96,7 @@ def _json_payload(state: ConsolidatorState) -> dict:
     user_image = rag_result["user_image"]
     rag_user_memory_context = user_image["user_memory_context"]
 
-    return {
+    return_value = {
         "timestamp": state["timestamp"],
         "global_user_id": state["global_user_id"],
         "user_name": state["user_name"],
@@ -113,6 +113,7 @@ def _json_payload(state: ConsolidatorState) -> dict:
         "future_promises_evidence": state["future_promises"],
         "subjective_appraisal_evidence": state["subjective_appraisals"],
     }
+    return return_value
 
 
 def _rag_surfaced_memory_units(state: ConsolidatorState) -> list[dict]:
@@ -128,7 +129,8 @@ def _rag_surfaced_memory_units(state: ConsolidatorState) -> list[dict]:
     rag_result = state["rag_result"]
     surfaced_units = rag_result["user_memory_unit_candidates"]
     if not isinstance(surfaced_units, list):
-        return []
+        return_value = []
+        return return_value
     valid_units = [unit for unit in surfaced_units if isinstance(unit, dict)]
     return valid_units
 
@@ -153,7 +155,8 @@ def _candidate_with_id(candidate: dict) -> dict:
 def _valid_candidates(result: dict) -> list[dict]:
     raw_candidates = result.get("memory_units", [])
     if not isinstance(raw_candidates, list):
-        return []
+        return_value = []
+        return return_value
 
     candidates: list[dict] = []
     for raw_candidate in raw_candidates[:MAX_MEMORY_UNIT_CANDIDATES_PER_TURN]:
@@ -184,12 +187,13 @@ def _validate_merge_result(result: dict, candidate: dict, candidate_clusters: li
     if decision in {"merge", "evolve"} and cluster_id not in valid_cluster_ids:
         raise ValueError("merge/evolve decision returned an unknown cluster_id")
 
-    return {
+    return_value = {
         "candidate_id": candidate_id,
         "decision": decision,
         "cluster_id": cluster_id,
         "reason": text_or_empty(result.get("reason")),
     }
+    return return_value
 
 
 def _validate_rewrite_result(result: dict, candidate: dict, cluster_id: str) -> dict:
@@ -200,11 +204,12 @@ def _validate_rewrite_result(result: dict, candidate: dict, cluster_id: str) -> 
     for field in ("fact", "subjective_appraisal", "relationship_signal"):
         if not text_or_empty(result.get(field)):
             raise ValueError(f"rewrite missing field: {field}")
-    return {
+    return_value = {
         "fact": text_or_empty(result["fact"]),
         "subjective_appraisal": text_or_empty(result["subjective_appraisal"]),
         "relationship_signal": text_or_empty(result["relationship_signal"]),
     }
+    return return_value
 
 
 def _validate_stability_result(result: dict, unit_id: str) -> dict:
@@ -213,11 +218,12 @@ def _validate_stability_result(result: dict, unit_id: str) -> dict:
     window = text_or_empty(result.get("window"))
     if window not in {"recent", "stable"}:
         raise ValueError(f"invalid stability window: {window!r}")
-    return {
+    return_value = {
         "unit_id": unit_id,
         "window": window,
         "reason": text_or_empty(result.get("reason")),
     }
+    return return_value
 
 
 async def extract_memory_unit_candidates(state: ConsolidatorState) -> list[dict]:
@@ -319,12 +325,13 @@ async def process_memory_unit_candidate(state: ConsolidatorState, candidate: dic
     else:
         stability_result = {}
 
-    return {
+    return_value = {
         "candidate_id": candidate["candidate_id"],
         "unit_id": unit_id,
         "decision": merge_result["decision"],
         "stability": stability_result,
     }
+    return return_value
 
 
 async def update_user_memory_units_from_state(state: ConsolidatorState) -> list[dict]:
@@ -338,7 +345,8 @@ async def update_user_memory_units_from_state(state: ConsolidatorState) -> list[
     """
 
     if not text_or_empty(state["global_user_id"]):
-        return []
+        return_value = []
+        return return_value
 
     candidates = await extract_memory_unit_candidates(state)
     results = []

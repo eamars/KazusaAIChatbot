@@ -60,7 +60,8 @@ async def _resolve_identifier(identifier: str, platform: str | None) -> str:
     if not platform:
         profile = await get_user_profile(identifier)
         if profile:
-            return str(profile["global_user_id"])
+            return_value = str(profile["global_user_id"])
+            return return_value
 
     db = await get_db()
     account_filter: dict[str, Any] = {"platform_user_id": identifier}
@@ -70,7 +71,8 @@ async def _resolve_identifier(identifier: str, platform: str | None) -> str:
         {"platform_accounts": {"$elemMatch": account_filter}},
         {"_id": 0, "global_user_id": 1},
     )
-    return str((profile or {}).get("global_user_id", ""))
+    return_value = str((profile or {}).get("global_user_id", ""))
+    return return_value
 
 
 async def _load_raw_units(
@@ -101,7 +103,8 @@ async def _load_raw_units(
         .sort([("last_seen_at", -1), ("updated_at", -1)])
         .limit(limit)
     )
-    return [dict(doc) for doc in await cursor.to_list(length=limit)]
+    return_value = [dict(doc) for doc in await cursor.to_list(length=limit)]
+    return return_value
 
 
 async def main() -> None:

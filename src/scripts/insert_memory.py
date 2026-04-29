@@ -69,8 +69,9 @@ async def main():
         logger.info("Memory entry saved successfully!")
         print(f"✓ Memory '{args.memory_name}' has been saved.")
         
-    except Exception as e:
-        logger.error(f"Insert failed: {e}")
+    except Exception as exc:
+        logger.debug(f"Handled exception in main: {exc}")
+        logger.exception("Insert failed")
         raise
     finally:
         # Close database connection

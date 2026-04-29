@@ -140,7 +140,8 @@ async def search_memory(
         docs = await cursor.to_list(length=limit)
         for doc in docs:
             doc.pop("embedding", None)
-        return [(-1.0, doc) for doc in docs]
+        return_value = [(-1.0, doc) for doc in docs]
+        return return_value
 
     # method == "vector"
     query_embedding = await get_text_embedding(query)
@@ -166,4 +167,5 @@ async def search_memory(
 
     cursor = collection.aggregate(pipeline)
     docs = await cursor.to_list(length=limit)
-    return [(doc.pop("score", 0.0), doc) for doc in docs]
+    return_value = [(doc.pop("score", 0.0), doc) for doc in docs]
+    return return_value

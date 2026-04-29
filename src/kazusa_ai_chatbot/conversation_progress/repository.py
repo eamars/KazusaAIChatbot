@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import uuid
 
 from pymongo.errors import DuplicateKeyError
@@ -26,6 +27,8 @@ from kazusa_ai_chatbot.conversation_progress.policy import (
 )
 from kazusa_ai_chatbot.db._client import get_db
 from kazusa_ai_chatbot.db.schemas import ConversationEpisodeEntryDoc, ConversationEpisodeStateDoc
+
+logger = logging.getLogger(__name__)
 
 
 async def load_episode_state(
@@ -157,7 +160,7 @@ def build_episode_state_doc(
     if not isinstance(created_at_value, str):
         raise TypeError("created_at must be a string")
     created_at = created_at_value
-    return {
+    return_value = {
         "episode_state_id": _string_or_generated_id(prior_state.get("episode_state_id")),
         "platform": scope.platform,
         "platform_channel_id": scope.platform_channel_id,
@@ -218,6 +221,7 @@ def build_episode_state_doc(
         "updated_at": timestamp,
         "expires_at": expires_at_for(timestamp),
     }
+    return return_value
 
 
 async def upsert_episode_state_guarded(
@@ -249,6 +253,8 @@ async def upsert_episode_state_guarded(
     update = {"$set": dict(document)}
     try:
         result = await db[COLLECTION_NAME].update_one(guarded_filter, update, upsert=True)
-    except DuplicateKeyError:
+    except DuplicateKeyError as exc:
+        logger.debug(f"Handled exception in upsert_episode_state_guarded: {exc}")
         return False
-    return bool(result.upserted_id is not None or result.modified_count)
+    return_value = bool(result.upserted_id is not None or result.modified_count)
+    return return_value

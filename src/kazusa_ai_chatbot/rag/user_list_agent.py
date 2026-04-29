@@ -74,7 +74,8 @@ def _normalize_limit(raw_limit: object) -> int:
         Integer limit clamped to a small enumeration-safe range.
     """
     if isinstance(raw_limit, int) and not isinstance(raw_limit, bool):
-        return max(1, min(raw_limit, 50))
+        return_value = max(1, min(raw_limit, 50))
+        return return_value
     return 20
 
 
@@ -95,12 +96,13 @@ def _normalize_args(raw_args: dict[str, Any]) -> dict[str, Any]:
     if operator not in _DISPLAY_NAME_OPERATORS:
         operator = "contains"
 
-    return {
+    return_value = {
         "source": source,
         "display_name_operator": operator,
         "display_name_value": text_or_empty(raw_args.get("display_name_value")),
         "limit": _normalize_limit(raw_args.get("limit", 20)),
     }
+    return return_value
 
 
 async def _extract_user_list_args(task: str, context: dict[str, Any]) -> dict[str, Any]:
@@ -120,8 +122,10 @@ async def _extract_user_list_args(task: str, context: dict[str, Any]) -> dict[st
     response = await _extractor_llm.ainvoke([system_prompt, human_message])
     result = parse_llm_json_output(response.content)
     if not isinstance(result, dict):
-        return _normalize_args({})
-    return _normalize_args(result)
+        return_value = _normalize_args({})
+        return return_value
+    return_value = _normalize_args(result)
+    return return_value
 
 
 class UserListAgent(BaseRAGHelperAgent):
@@ -159,7 +163,7 @@ class UserListAgent(BaseRAGHelperAgent):
         args = await _extract_user_list_args(task, context)
         display_name_value = args["display_name_value"]
         if not display_name_value:
-            return self.with_cache_status(
+            return_value = self.with_cache_status(
                 {
                     "resolved": False,
                     "result": {
@@ -171,16 +175,18 @@ class UserListAgent(BaseRAGHelperAgent):
                 hit=False,
                 reason="skipped_missing_display_name_value",
             )
+            return return_value
 
         cache_key = build_user_list_cache_key(args, context)
         cached = await self.read_cache(cache_key)
         if cached is not None:
-            return self.with_cache_status(
+            return_value = self.with_cache_status(
                 {"resolved": True, "result": cached, "attempts": 0},
                 hit=True,
                 reason="hit",
                 cache_key=cache_key,
             )
+            return return_value
 
         platform = str(context.get("platform") or "").strip() or None
         platform_channel_id = str(context.get("platform_channel_id") or "").strip() or None
@@ -202,7 +208,7 @@ class UserListAgent(BaseRAGHelperAgent):
                 metadata={"source": args.get("source", "user_profiles")},
             )
 
-        return self.with_cache_status(
+        return_value = self.with_cache_status(
             {
                 "resolved": bool(users),
                 "result": result,
@@ -212,6 +218,7 @@ class UserListAgent(BaseRAGHelperAgent):
             reason="miss_stored" if users else "miss_unresolved",
             cache_key=cache_key,
         )
+        return return_value
 
 
 async def _test_main() -> None:

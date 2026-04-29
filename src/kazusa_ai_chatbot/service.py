@@ -181,11 +181,12 @@ def _register_runtime_adapter_payload(
         shared_secret=req.shared_secret,
         timeout_seconds=req.timeout_seconds,
     )
-    return RuntimeAdapterRegistrationResponse(
+    return_value = RuntimeAdapterRegistrationResponse(
         status=status,
         platform=req.platform,
         callback_url=req.callback_url,
     )
+    return return_value
 
 
 # ── Graph builder ───────────────────────────────────────────────────
@@ -227,7 +228,8 @@ def _build_graph():
     graph.add_edge("load_conversation_episode_state", "persona_supervisor2")
     graph.add_edge("persona_supervisor2", END)
 
-    return graph.compile()
+    return_value = graph.compile()
+    return return_value
 
 
 async def load_conversation_episode_state(state: IMProcessState) -> dict:
@@ -249,19 +251,12 @@ async def load_conversation_episode_state(state: IMProcessState) -> dict:
         scope=scope,
         current_timestamp=state["timestamp"],
     )
-    logger.info(
-        "Conversation progress loaded: platform=%s channel=%s user=%s source=%s turn_count=%d progress=%s",
-        scope.platform,
-        scope.platform_channel_id or "<dm>",
-        scope.global_user_id,
-        load_result["source"],
-        load_result["conversation_progress"]["turn_count"],
-        log_preview(load_result["conversation_progress"]),
-    )
-    return {
+    logger.info(f'Conversation progress loaded: platform={scope.platform} channel={scope.platform_channel_id or "<dm>"} user={scope.global_user_id} source={load_result["source"]} turn_count={load_result["conversation_progress"]["turn_count"]} progress={log_preview(load_result["conversation_progress"])}')
+    return_value = {
         "conversation_episode_state": load_result["episode_state"],
         "conversation_progress": load_result["conversation_progress"],
     }
+    return return_value
 
 
 def _compact_reply_context(reply_context: ReplyContext) -> ReplyContext:
@@ -303,7 +298,8 @@ async def _hydrate_reply_context(req: ChatRequest) -> ReplyContext:
     if reply_to_platform_user_id:
         reply_context["reply_to_current_bot"] = reply_to_platform_user_id == req.platform_bot_id
 
-    return _compact_reply_context(reply_context)
+    return_value = _compact_reply_context(reply_context)
+    return return_value
 
 
 # ── Bot message saver (background task) ──────────────────────────────
@@ -340,11 +336,7 @@ async def _ensure_character_global_identity(
         )
         _character_identity_backfilled.add(backfill_key)
         if updated_count:
-            logger.info(
-                "Backfilled %d assistant conversation rows with character global_user_id=%s",
-                updated_count,
-                character_global_user_id,
-            )
+            logger.info(f'Backfilled {updated_count} assistant conversation rows with character global_user_id={character_global_user_id}')
 
     return character_global_user_id
 
@@ -375,7 +367,8 @@ async def _save_bot_message(result: dict) -> None:
                 "content": "\n".join(bot_output),
                 "timestamp": datetime.now(timezone.utc).isoformat(),
             })
-        except Exception:
+        except Exception as exc:
+            logger.debug(f"Handled exception in _save_bot_message: {exc}")
             logger.exception("Failed to save bot message")
 
 
@@ -398,7 +391,8 @@ async def _run_consolidation_background(state: dict) -> None:
 
     try:
         await call_consolidation_subgraph(state)
-    except Exception:
+    except Exception as exc:
+        logger.debug(f"Handled exception in _run_consolidation_background: {exc}")
         logger.exception("Background consolidation failed")
 
 
@@ -430,12 +424,7 @@ async def _run_conversation_progress_record_background(state: dict) -> None:
             "character_intent": state["character_intent"],
             "final_dialog": state["final_dialog"],
         }
-        logger.info(
-            "Conversation progress record request: platform=%s channel=%s user=%s input=%s",
-            scope.platform,
-            scope.platform_channel_id or "<dm>",
-            scope.global_user_id,
-            log_preview({
+        logger.info(f'Conversation progress record request: platform={scope.platform} channel={scope.platform_channel_id or "<dm>"} user={scope.global_user_id} input={log_preview({
                 "timestamp": record_input["timestamp"],
                 "prior_episode_state": record_input["prior_episode_state"],
                 "decontexualized_input": record_input["decontexualized_input"],
@@ -444,21 +433,11 @@ async def _run_conversation_progress_record_background(state: dict) -> None:
                 "logical_stance": record_input["logical_stance"],
                 "character_intent": record_input["character_intent"],
                 "final_dialog": record_input["final_dialog"],
-            }),
-        )
+            })}')
         result = await record_turn_progress(record_input=record_input)
-        logger.info(
-            "Conversation progress recorded: platform=%s channel=%s user=%s written=%s turn_count=%d continuity=%s status=%s cache_updated=%s",
-            scope.platform,
-            scope.platform_channel_id or "<dm>",
-            scope.global_user_id,
-            result["written"],
-            result["turn_count"],
-            result["continuity"],
-            result["status"],
-            result["cache_updated"],
-        )
-    except Exception:
+        logger.info(f'Conversation progress recorded: platform={scope.platform} channel={scope.platform_channel_id or "<dm>"} user={scope.global_user_id} written={result["written"]} turn_count={result["turn_count"]} continuity={result["continuity"]} status={result["status"]} cache_updated={result["cache_updated"]}')
+    except Exception as exc:
+        logger.debug(f"Handled exception in _run_conversation_progress_record_background: {exc}")
         logger.exception("Background conversation progress recording failed")
 
 
@@ -506,7 +485,7 @@ async def lifespan(app: FastAPI):
 
     executor_count = max(1, BRAIN_EXECUTOR_COUNT)
     _chat_executor_semaphore = asyncio.Semaphore(executor_count)
-    logger.info("Chat executor limit set to %s", executor_count)
+    logger.info(f'Chat executor limit set to {executor_count}')
 
     # 1. Database bootstrap
     await db_bootstrap()
@@ -526,7 +505,8 @@ async def lifespan(app: FastAPI):
     # 4. Start MCP tool servers
     try:
         await mcp_manager.start()
-    except Exception:
+    except Exception as exc:
+        logger.debug(f"Handled exception in lifespan: {exc}")
         logger.exception("MCP manager failed to start — tools will be unavailable")
 
     # 5. Build the task-dispatch runtime
@@ -575,10 +555,11 @@ async def health():
         db = await get_db()
         await db.client.admin.command("ping")
         db_ok = True
-    except Exception:
-        logger.debug("Health check database ping failed", exc_info=True)
+    except Exception as exc:
+        logger.debug(f"Handled exception in health: {exc}")
+        logger.exception("Health check database ping failed")
 
-    return HealthResponse(
+    return_value = HealthResponse(
         status="ok" if db_ok else "degraded",
         db=db_ok,
         scheduler=True,
@@ -589,6 +570,7 @@ async def health():
             ],
         ),
     )
+    return return_value
 
 
 @app.post("/runtime/adapters/register", response_model=RuntimeAdapterRegistrationResponse)
@@ -602,10 +584,11 @@ async def register_runtime_adapter_endpoint(req: RuntimeAdapterRegistrationReque
         Confirmation payload describing the registered callback.
     """
 
-    return _register_runtime_adapter_payload(
+    return_value = _register_runtime_adapter_payload(
         req,
         status="registered",
     )
+    return return_value
 
 
 @app.post("/runtime/adapters/heartbeat", response_model=RuntimeAdapterRegistrationResponse)
@@ -619,10 +602,11 @@ async def runtime_adapter_heartbeat_endpoint(req: RuntimeAdapterRegistrationRequ
         Confirmation payload describing the refreshed callback.
     """
 
-    return _register_runtime_adapter_payload(
+    return_value = _register_runtime_adapter_payload(
         req,
         status="heartbeat_ok",
     )
+    return return_value
 
 
 @app.post("/chat", response_model=ChatResponse)
@@ -677,24 +661,9 @@ async def chat(req: ChatRequest, background_tasks: BackgroundTasks):
         }
         active_flags = [k for k, v in debug_modes.items() if v]
         if active_flags:
-            logger.info("Debug modes active: %s", active_flags)
+            logger.info(f'Debug modes active: {active_flags}')
 
-        logger.debug(
-            "Chat request: platform=%s channel=%s message=%s user=%s global_user=%s content_type=%s attachments=%d image_attachments=%d history_wide=%d history_recent=%d reply_context=%s debug_modes=%s content=%s",
-            req.platform,
-            req.platform_channel_id or "<dm>",
-            req.platform_message_id or "<none>",
-            req.platform_user_id,
-            global_user_id,
-            req.content_type,
-            len(req.attachments),
-            len(multimedia_input),
-            len(chat_history_wide),
-            len(chat_history_recent),
-            log_preview(reply_context),
-            active_flags,
-            log_preview(req.content),
-        )
+        logger.debug(f'Chat request: platform={req.platform} channel={req.platform_channel_id or "<dm>"} message={req.platform_message_id or "<none>"} user={req.platform_user_id} global_user={global_user_id} content_type={req.content_type} attachments={len(req.attachments)} image_attachments={len(multimedia_input)} history_wide={len(chat_history_wide)} history_recent={len(chat_history_recent)} reply_context={log_preview(reply_context)} debug_modes={active_flags} content={log_preview(req.content)}')
 
         initial_state: IMProcessState = {
             "timestamp": timestamp,
@@ -740,32 +709,24 @@ async def chat(req: ChatRequest, background_tasks: BackgroundTasks):
                 "reply_context": reply_context,
                 "timestamp": timestamp,
             })
-        except Exception:
+        except Exception as exc:
+            logger.debug(f"Handled exception in chat: {exc}")
             logger.exception("Failed to save user message")
 
         # Invoke the graph
         try:
             result = await _graph.ainvoke(initial_state)
-        except Exception:
+        except Exception as exc:
+            logger.debug(f"Handled exception in chat: {exc}")
             logger.exception("Graph invocation failed")
-            return ChatResponse(messages=[f"{bot_name} is busy right now, please try again later."])
+            return_value = ChatResponse(messages=[f"{bot_name} is busy right now, please try again later."])
+            return return_value
 
         final_dialog = result.get("final_dialog", [])
         should_reply = result.get("use_reply_feature", False)
         consolidation_state = result.get("consolidation_state")
 
-        logger.debug(
-            "Chat result: platform=%s channel=%s message=%s user=%s should_respond=%s should_reply=%s final_dialog_count=%d future_promises=%d final_dialog=%s",
-            req.platform,
-            req.platform_channel_id or "<dm>",
-            req.platform_message_id or "<none>",
-            req.platform_user_id,
-            result.get("should_respond"),
-            should_reply,
-            len(final_dialog),
-            len(result.get("future_promises", [])),
-            log_list_preview(final_dialog),
-        )
+        logger.debug(f'Chat result: platform={req.platform} channel={req.platform_channel_id or "<dm>"} message={req.platform_message_id or "<none>"} user={req.platform_user_id} should_respond={result.get("should_respond")} should_reply={should_reply} final_dialog_count={len(final_dialog)} future_promises={len(result.get("future_promises", []))} final_dialog={log_list_preview(final_dialog)}')
 
         # Save bot message in background only if the bot actually generated a response
         if final_dialog:
@@ -773,71 +734,45 @@ async def chat(req: ChatRequest, background_tasks: BackgroundTasks):
 
         if final_dialog and isinstance(consolidation_state, Mapping):
             background_tasks.add_task(_run_conversation_progress_record_background, dict(consolidation_state))
-            logger.debug(
-                "Background conversation progress recorder queued: platform=%s channel=%s message=%s",
-                req.platform,
-                req.platform_channel_id or "<dm>",
-                req.platform_message_id or "<none>",
-            )
+            logger.debug(f'Background conversation progress recorder queued: platform={req.platform} channel={req.platform_channel_id or "<dm>"} message={req.platform_message_id or "<none>"}')
         elif not final_dialog:
-            logger.info(
-                "Background conversation progress recorder skipped: platform=%s channel=%s message=%s should_respond=%s final_dialog_count=0",
-                req.platform,
-                req.platform_channel_id or "<dm>",
-                req.platform_message_id or "<none>",
-                result.get("should_respond"),
-            )
+            logger.info(f'Background conversation progress recorder skipped: platform={req.platform} channel={req.platform_channel_id or "<dm>"} message={req.platform_message_id or "<none>"} should_respond={result.get("should_respond")} final_dialog_count=0')
         else:
-            logger.warning(
-                "Background conversation progress recorder skipped: unexpected consolidation_state type=%s",
-                type(consolidation_state).__name__,
-            )
+            logger.warning(f'Background conversation progress recorder skipped: unexpected consolidation_state type={type(consolidation_state).__name__}')
 
         if debug_modes.get("no_remember"):
             logger.debug("Background consolidation skipped: no_remember is active")
         elif isinstance(consolidation_state, Mapping):
             background_tasks.add_task(_run_consolidation_background, dict(consolidation_state))
-            logger.debug(
-                "Background consolidation queued: platform=%s channel=%s message=%s",
-                req.platform,
-                req.platform_channel_id or "<dm>",
-                req.platform_message_id or "<none>",
-            )
+            logger.debug(f'Background consolidation queued: platform={req.platform} channel={req.platform_channel_id or "<dm>"} message={req.platform_message_id or "<none>"}')
         elif not final_dialog:
-            logger.info(
-                "Background consolidation skipped: platform=%s channel=%s message=%s should_respond=%s final_dialog_count=0",
-                req.platform,
-                req.platform_channel_id or "<dm>",
-                req.platform_message_id or "<none>",
-                result.get("should_respond"),
-            )
+            logger.info(f'Background consolidation skipped: platform={req.platform} channel={req.platform_channel_id or "<dm>"} message={req.platform_message_id or "<none>"} should_respond={result.get("should_respond")} final_dialog_count=0')
         else:
-            logger.warning(
-                "Background consolidation skipped: unexpected consolidation_state type=%s",
-                type(consolidation_state).__name__,
-            )
+            logger.warning(f'Background consolidation skipped: unexpected consolidation_state type={type(consolidation_state).__name__}')
 
         # think_only: suppress dialog in response but still save internally
         if debug_modes.get("think_only"):
-            logger.info("think_only active — suppressing %d dialog message(s) from user output", len(final_dialog))
+            logger.info(f'think_only active — suppressing {len(final_dialog)} dialog message(s) from user output')
             final_dialog = []
 
         # The dispatcher now runs in the background consolidator path, so the
         # synchronous /chat response no longer waits on scheduling.
         scheduled_followups = 0
 
-        return ChatResponse(
+        return_value = ChatResponse(
             messages=final_dialog,
             content_type="text",
             attachments=[],
             should_reply=should_reply,
             scheduled_followups=scheduled_followups,
         )
+        return return_value
 
 
 @app.post("/event")
 async def event(req: EventRequest):
     """Receive a platform event (user joined, topic change, etc.)."""
-    logger.info("Received event: %s/%s", req.platform, req.event_type)
+    logger.info(f'Received event: {req.platform}/{req.event_type}')
     # TODO: dispatch to event handlers
-    return {"status": "accepted"}
+    return_value = {"status": "accepted"}
+    return return_value

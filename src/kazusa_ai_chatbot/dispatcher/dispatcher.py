@@ -65,8 +65,9 @@ class TaskDispatcher:
             event_doc = task.to_scheduler_doc(ctx)
             try:
                 event_id = await scheduler.schedule_event(event_doc)
-            except PyMongoError:
-                logger.exception("Failed to persist scheduled task for tool %s", task.tool)
+            except PyMongoError as exc:
+                logger.debug(f"Handled exception in dispatch: {exc}")
+                logger.exception(f'Failed to persist scheduled task for tool {task.tool}')
                 rejected.append((raw, "scheduler write failed"))
                 continue
 
@@ -74,4 +75,5 @@ class TaskDispatcher:
             seen_signatures.add(signature)
             scheduled.append((task, event_id))
 
-        return DispatchResult(scheduled=scheduled, rejected=rejected)
+        return_value = DispatchResult(scheduled=scheduled, rejected=rejected)
+        return return_value

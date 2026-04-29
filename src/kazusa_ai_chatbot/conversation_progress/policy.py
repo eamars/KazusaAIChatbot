@@ -48,7 +48,7 @@ def empty_progress_prompt_doc() -> ConversationProgressPromptDoc:
         Empty progress state used when no prior episode document exists.
     """
 
-    return {
+    return_value = {
         "status": "new_episode",
         "episode_label": "",
         "continuity": "sharp_transition",
@@ -69,6 +69,7 @@ def empty_progress_prompt_doc() -> ConversationProgressPromptDoc:
         "next_affordances": [],
         "progression_guidance": "",
     }
+    return return_value
 
 
 def cap_text(value: str, max_chars: int) -> str:
@@ -90,7 +91,8 @@ def cap_text(value: str, max_chars: int) -> str:
     text = value.strip()
     if len(text) <= max_chars:
         return text
-    return text[:max_chars].rstrip()
+    return_value = text[:max_chars].rstrip()
+    return return_value
 
 
 def prompt_payload_chars(payload: ConversationProgressPromptDoc) -> int:
@@ -103,7 +105,8 @@ def prompt_payload_chars(payload: ConversationProgressPromptDoc) -> int:
         Character count after JSON serialization with CJK preserved.
     """
 
-    return len(json.dumps(payload, ensure_ascii=False, separators=(",", ":")))
+    return_value = len(json.dumps(payload, ensure_ascii=False, separators=(",", ":")))
+    return return_value
 
 
 def enforce_progress_prompt_budget(payload: ConversationProgressPromptDoc) -> ConversationProgressPromptDoc:
@@ -151,7 +154,8 @@ def expires_at_for(timestamp: str) -> str:
     """
 
     current = parse_iso_datetime(timestamp)
-    return (current + EPISODE_TTL).isoformat()
+    return_value = (current + EPISODE_TTL).isoformat()
+    return return_value
 
 
 def parse_iso_datetime(value: str) -> datetime:
@@ -168,4 +172,5 @@ def parse_iso_datetime(value: str) -> datetime:
     parsed = datetime.fromisoformat(normalized)
     if parsed.tzinfo is None:
         parsed = parsed.replace(tzinfo=timezone.utc)
-    return parsed.astimezone(timezone.utc)
+    return_value = parsed.astimezone(timezone.utc)
+    return return_value

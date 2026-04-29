@@ -127,10 +127,11 @@ def _build_dispatch_context(state: ConsolidatorState, *, timestamp: str) -> Disp
 
     try:
         now = parse_iso_datetime(timestamp)
-    except ValueError:
+    except ValueError as exc:
+        logger.debug(f"Handled exception in _build_dispatch_context: {exc}")
         now = datetime.now(timezone.utc)
 
-    return DispatchContext(
+    return_value = DispatchContext(
         source_platform=state.get("platform", ""),
         source_channel_id=state.get("platform_channel_id", ""),
         source_user_id=state.get("global_user_id", ""),
@@ -139,6 +140,7 @@ def _build_dispatch_context(state: ConsolidatorState, *, timestamp: str) -> Disp
         bot_role="user",
         now=now,
     )
+    return return_value
 
 
 def _build_dispatch_instruction(state: ConsolidatorState) -> str:
@@ -151,13 +153,15 @@ def _build_dispatch_instruction(state: ConsolidatorState) -> str:
         Natural-language instruction summary.
     """
 
-    character_name = state.get("character_profile", {}).get("name", "Kazusa")
+    character_profile = state.get("character_profile", {})
+    character_name = character_profile.get("name", "Kazusa")
     user_name = state.get("user_name", "user")
     promise_count = len(state.get("future_promises") or [])
-    return (
+    return_value = (
         f"{character_name} should follow through on {promise_count} accepted promise(s)"
         f" for {user_name} based on the finalized dialog."
     )
+    return return_value
 
 
 async def _generate_raw_tool_calls(
@@ -175,7 +179,8 @@ async def _generate_raw_tool_calls(
     """
 
     if _task_registry is None:
-        return []
+        return_value = []
+        return return_value
 
     available_tools = _task_registry.filter(ctx)
     future_promises = _normalize_future_promises(
@@ -183,7 +188,12 @@ async def _generate_raw_tool_calls(
         timestamp=ctx.now.isoformat(),
     )
     if not available_tools or not future_promises:
-        return []
+        return_value = []
+        return return_value
+
+    action_directives = state.get("action_directives", {})
+    linguistic_directives = action_directives.get("linguistic_directives", {})
+    content_anchors = linguistic_directives.get("content_anchors", [])
 
     msg = {
         "instruction": _build_dispatch_instruction(state),
@@ -194,7 +204,7 @@ async def _generate_raw_tool_calls(
         "source_message_id": ctx.source_message_id,
         "decontexualized_input": state.get("decontexualized_input", ""),
         "final_dialog": state.get("final_dialog", []),
-        "content_anchors": state.get("action_directives", {}).get("linguistic_directives", {}).get("content_anchors", []),
+        "content_anchors": content_anchors,
         "future_promises": future_promises,
         "available_tools": [
             {
@@ -214,7 +224,8 @@ async def _generate_raw_tool_calls(
     result = parse_llm_json_output(response.content)
     tool_calls = result.get("tool_calls", [])
     if not isinstance(tool_calls, list):
-        return []
+        return_value = []
+        return return_value
 
     raw_calls: list[RawToolCall] = []
     for item in tool_calls:
@@ -226,10 +237,7 @@ async def _generate_raw_tool_calls(
             continue
         raw_calls.append(RawToolCall(tool=tool_name, args=args))
 
-    logger.debug(
-        "Task dispatcher LLM: raw_calls=%s",
-        log_list_preview([{"tool": raw.tool, "args": raw.args} for raw in raw_calls]),
-    )
+    logger.debug(f'Task dispatcher LLM: raw_calls={log_list_preview([{"tool": raw.tool, "args": raw.args} for raw in raw_calls])}')
     return raw_calls
 
 
@@ -266,7 +274,8 @@ def process_affinity_delta(current_affinity: int, raw_delta: int) -> int:
                 scaling_factor = y1 + (current_affinity - x1) * (y2 - y1) / (x2 - x1)
             break
 
-    return int(round(raw_delta * scaling_factor, 0))
+    return_value = int(round(raw_delta * scaling_factor, 0))
+    return return_value
 
 
 def _default_future_promise_due_time(timestamp: str) -> str:
@@ -281,14 +290,17 @@ def _default_future_promise_due_time(timestamp: str) -> str:
 
     try:
         reference_time = parse_iso_datetime(timestamp)
-    except ValueError:
+    except ValueError as exc:
+        logger.debug(f"Handled exception in _default_future_promise_due_time: {exc}")
         reference_time = datetime.now(timezone.utc)
 
     if reference_time.second == 0 and reference_time.microsecond == 0:
-        return reference_time.isoformat()
+        return_value = reference_time.isoformat()
+        return return_value
 
     next_minute = reference_time.replace(second=0, microsecond=0) + timedelta(minutes=1)
-    return next_minute.isoformat()
+    return_value = next_minute.isoformat()
+    return return_value
 
 
 def _normalize_future_promises(
@@ -344,7 +356,8 @@ async def db_writer(state: ConsolidatorState) -> dict:
             timestamp=timestamp,
         )
         write_log["character_state"] = True
-    except PyMongoError:
+    except PyMongoError as exc:
+        logger.debug(f"Handled exception in db_writer: {exc}")
         logger.exception("db_writer: failed to upsert character_state")
         write_log["character_state"] = False
 
@@ -354,7 +367,8 @@ async def db_writer(state: ConsolidatorState) -> dict:
         try:
             await update_last_relationship_insight(global_user_id, last_relationship_insight)
             write_log["relationship_insight"] = True
-        except PyMongoError:
+        except PyMongoError as exc:
+            logger.debug(f"Handled exception in db_writer: {exc}")
             logger.exception("db_writer: failed to update_last_relationship_insight")
             write_log["relationship_insight"] = False
 
@@ -365,7 +379,8 @@ async def db_writer(state: ConsolidatorState) -> dict:
     )
     try:
         memory_unit_results = await update_user_memory_units_from_state(state)
-    except Exception:
+    except Exception as exc:
+        logger.debug(f"Handled exception in db_writer: {exc}")
         logger.exception("db_writer: failed to update user_memory_units")
         memory_unit_results = []
         write_log["user_memory_units"] = False
@@ -395,38 +410,25 @@ async def db_writer(state: ConsolidatorState) -> dict:
         ]
         if dispatch_rejections:
             if any("no adapters registered" in rejection for rejection in dispatch_rejections):
-                logger.warning(
-                    "Task dispatch unavailable: raw_calls=%d platform=%s channel=%s future_promises=%d rejections=%s",
-                    len(raw_calls),
-                    dispatch_ctx.source_platform,
-                    dispatch_ctx.source_channel_id,
-                    len(future_promises),
-                    dispatch_rejections,
-                )
+                logger.warning(f'Task dispatch unavailable: raw_calls={len(raw_calls)} platform={dispatch_ctx.source_platform} channel={dispatch_ctx.source_channel_id} future_promises={len(future_promises)} rejections={dispatch_rejections}')
             else:
-                logger.debug(
-                    "Task dispatch rejected %d call(s): %s",
-                    len(dispatch_rejections),
-                    dispatch_rejections,
-                )
+                logger.debug(f'Task dispatch rejected {len(dispatch_rejections)} call(s): {dispatch_rejections}')
 
     # ── Step 4: affinity (direction-scaled) ─────────────────────────
-    user_affinity_score = state.get("user_profile", {}).get("affinity", AFFINITY_DEFAULT)
+    user_profile = state.get("user_profile", {})
+    user_affinity_score = user_profile.get("affinity", AFFINITY_DEFAULT)
     raw_affinity_delta = state.get("affinity_delta", 0) or 0
     processed_affinity_delta = process_affinity_delta(user_affinity_score, raw_affinity_delta)
     if global_user_id:
         try:
             await update_affinity(global_user_id, processed_affinity_delta)
             write_log["affinity"] = True
-        except PyMongoError:
+        except PyMongoError as exc:
+            logger.debug(f"Handled exception in db_writer: {exc}")
             logger.exception("db_writer: failed to update_affinity")
             write_log["affinity"] = False
 
-    logger.debug(
-        "User %s(@%s) affinity %s -> %s",
-        user_name, global_user_id,
-        user_affinity_score, user_affinity_score + processed_affinity_delta,
-    )
+    logger.debug(f'User {user_name}(@{global_user_id}) affinity {user_affinity_score} -> {user_affinity_score + processed_affinity_delta}')
 
     # ── Step 5: character image ──────────────────────────────────────
     image_results = await asyncio.gather(
@@ -449,7 +451,8 @@ async def db_writer(state: ConsolidatorState) -> dict:
         try:
             await upsert_character_self_image(character_image_result)
             write_log["character_image"] = True
-        except PyMongoError:
+        except PyMongoError as exc:
+            logger.debug(f"Handled exception in db_writer: {exc}")
             logger.exception("db_writer: failed to upsert_character_self_image")
             write_log["character_image"] = False
 
@@ -492,15 +495,7 @@ async def db_writer(state: ConsolidatorState) -> dict:
         "affinity_delta_processed": processed_affinity_delta,
     })
 
-    logger.debug(
-        "db_writer summary: user=%s global_user=%s writes=%s cache_invalidated=%s scheduled=%d affinity_before=%s affinity_delta=%s",
-        user_name,
-        global_user_id,
-        write_log,
-        cache_invalidated,
-        len(scheduled_event_ids),
-        user_affinity_score,
-        processed_affinity_delta,
-    )
+    logger.debug(f'db_writer summary: user={user_name} global_user={global_user_id} writes={write_log} cache_invalidated={cache_invalidated} scheduled={len(scheduled_event_ids)} affinity_before={user_affinity_score} affinity_delta={processed_affinity_delta}')
 
-    return {"metadata": metadata}
+    return_value = {"metadata": metadata}
+    return return_value

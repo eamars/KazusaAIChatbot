@@ -15,7 +15,8 @@ async def get_character_profile() -> CharacterProfileDoc | dict:
     db = await get_db()
     doc = await db.character_state.find_one({"_id": "global"})
     if doc is None:
-        return {}
+        return_value = {}
+        return return_value
     doc.pop("_id", None)
     return doc
 
@@ -36,7 +37,8 @@ async def save_character_profile(profile: dict) -> None:
 
 async def get_character_state() -> CharacterProfileDoc | dict:
     """Alias for :func:`get_character_profile` — returns the same document."""
-    return await get_character_profile()
+    return_value = await get_character_profile()
+    return return_value
 
 
 async def upsert_character_self_image(image_doc: dict) -> None:

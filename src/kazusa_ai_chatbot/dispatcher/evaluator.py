@@ -32,8 +32,10 @@ def _normalize_schema_types(schema_type: object) -> tuple[object, ...]:
     """
 
     if isinstance(schema_type, list):
-        return tuple(schema_type)
-    return (schema_type,)
+        return_value = tuple(schema_type)
+        return return_value
+    return_value = (schema_type,)
+    return return_value
 
 
 def _validate_value(field_name: str, value: object, schema: dict) -> list[str]:
@@ -51,7 +53,8 @@ def _validate_value(field_name: str, value: object, schema: dict) -> list[str]:
     errors: list[str] = []
     allowed_types = _normalize_schema_types(schema.get("type"))
     if "null" in allowed_types and value is None:
-        return []
+        return_value = []
+        return return_value
 
     if allowed_types and allowed_types != (None,):
         python_types = tuple(
@@ -83,7 +86,8 @@ def _validate_args(args: dict, schema: dict) -> list[str]:
 
     errors: list[str] = []
     if not isinstance(args, dict):
-        return ["args: expected object"]
+        return_value = ["args: expected object"]
+        return return_value
 
     for required in schema.get("required", []):
         if required not in args:
@@ -133,12 +137,14 @@ class ToolCallEvaluator:
 
         visible_names = self._registry.visible_names(ctx)
         if raw.tool not in visible_names:
-            return EvalResult(ok=False, task=None, errors=[f"unknown or unavailable tool: {raw.tool}"])
+            return_value = EvalResult(ok=False, task=None, errors=[f"unknown or unavailable tool: {raw.tool}"])
+            return return_value
 
         spec = self._registry.get(raw.tool)
         errors = _validate_args(raw.args, spec.args_schema)
         if errors:
-            return EvalResult(ok=False, task=None, errors=errors)
+            return_value = EvalResult(ok=False, task=None, errors=errors)
+            return return_value
 
         args = dict(raw.args)
         target_platform = str(args.get("target_platform") or ctx.source_platform).strip()
@@ -148,9 +154,11 @@ class ToolCallEvaluator:
 
         registered_platforms = self._adapters.platforms()
         if not registered_platforms:
-            return EvalResult(ok=False, task=None, errors=["no adapters registered"])
+            return_value = EvalResult(ok=False, task=None, errors=["no adapters registered"])
+            return return_value
         if target_platform not in registered_platforms:
-            return EvalResult(ok=False, task=None, errors=[f"unknown_platform: {target_platform}"])
+            return_value = EvalResult(ok=False, task=None, errors=[f"unknown_platform: {target_platform}"])
+            return return_value
 
         execute_at_raw = args.pop("execute_at", None)
         if execute_at_raw in (None, ""):
@@ -158,13 +166,16 @@ class ToolCallEvaluator:
         else:
             try:
                 execute_at = parse_iso_datetime(str(execute_at_raw))
-            except ValueError:
-                logger.warning("Rejecting tool call with unparseable execute_at: %r", execute_at_raw)
-                return EvalResult(
+            except ValueError as exc:
+                logger.debug(f"Handled exception in evaluate: {exc}")
+                logger.warning(f'Rejecting tool call with unparseable execute_at: {execute_at_raw!r}')
+                return_value = EvalResult(
                     ok=False,
                     task=None,
                     errors=["unparseable execute_at"],
                 )
+                return return_value
 
         task = Task(tool=raw.tool, args=args, execute_at=execute_at)
-        return EvalResult(ok=True, task=task, errors=[])
+        return_value = EvalResult(ok=True, task=task, errors=[])
+        return return_value

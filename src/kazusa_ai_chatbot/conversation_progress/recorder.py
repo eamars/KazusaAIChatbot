@@ -135,7 +135,8 @@ def _require_string(value: Any, field_name: str, *, default: str = "") -> str:
         return default
     if not isinstance(value, str):
         raise ValueError(f"{field_name} must be a string")
-    return value.strip()
+    return_value = value.strip()
+    return return_value
 
 
 def _string_list(value: Any, field_name: str) -> list[str]:
@@ -164,7 +165,8 @@ def _validated_label(value: Any, field_name: str, allowed_values: set[str]) -> s
 def _prior_entry_texts(prior_episode_state: ConversationEpisodeStateDoc, field_name: str) -> list[str]:
     values = prior_episode_state.get(field_name, [])
     if not isinstance(values, list):
-        return []
+        return_value = []
+        return return_value
     result: list[str] = []
     for entry in values:
         if not isinstance(entry, dict):
@@ -178,8 +180,10 @@ def _prior_entry_texts(prior_episode_state: ConversationEpisodeStateDoc, field_n
 def _prior_string_list(prior_episode_state: ConversationEpisodeStateDoc, field_name: str) -> list[str]:
     values = prior_episode_state.get(field_name, [])
     if not isinstance(values, list):
-        return []
-    return [item.strip() for item in values if isinstance(item, str) and item.strip()]
+        return_value = []
+        return return_value
+    return_value = [item.strip() for item in values if isinstance(item, str) and item.strip()]
+    return return_value
 
 
 def build_recorder_prior_state(
@@ -227,7 +231,7 @@ def validate_recorder_output(payload: dict) -> dict:
         raise ValueError(f"invalid continuity: {continuity}")
     if status not in VALID_STATUS:
         raise ValueError(f"invalid status: {status}")
-    return {
+    return_value = {
         "continuity": continuity,
         "status": status,
         "episode_label": _require_string(payload.get("episode_label", ""), "episode_label"),
@@ -265,6 +269,7 @@ def validate_recorder_output(payload: dict) -> dict:
             "progression_guidance",
         ),
     }
+    return return_value
 
 
 async def record_with_llm(record_input: ConversationProgressRecordInput) -> dict:
@@ -286,25 +291,12 @@ async def record_with_llm(record_input: ConversationProgressRecordInput) -> dict
         "character_intent": record_input["character_intent"],
         "final_dialog": record_input["final_dialog"],
     }
-    logger.info(
-        "Conversation progress recorder input: platform=%s channel=%s user=%s payload=%s",
-        record_input["scope"].platform,
-        record_input["scope"].platform_channel_id or "<dm>",
-        record_input["scope"].global_user_id,
-        log_preview(human_payload),
-    )
+    logger.info(f'Conversation progress recorder input: platform={record_input["scope"].platform} channel={record_input["scope"].platform_channel_id or "<dm>"} user={record_input["scope"].global_user_id} payload={log_preview(human_payload)}')
     response = await _recorder_llm.ainvoke([
         SystemMessage(content=_RECORDER_PROMPT),
         HumanMessage(content=json.dumps(human_payload, ensure_ascii=False)),
     ])
     parsed = parse_llm_json_output(response.content)
     validated = validate_recorder_output(parsed)
-    logger.info(
-        "Conversation progress recorder parsed: platform=%s channel=%s user=%s raw=%s validated=%s",
-        record_input["scope"].platform,
-        record_input["scope"].platform_channel_id or "<dm>",
-        record_input["scope"].global_user_id,
-        log_preview(response.content),
-        log_preview(validated),
-    )
+    logger.info(f'Conversation progress recorder parsed: platform={record_input["scope"].platform} channel={record_input["scope"].platform_channel_id or "<dm>"} user={record_input["scope"].global_user_id} raw={log_preview(response.content)} validated={log_preview(validated)}')
     return validated

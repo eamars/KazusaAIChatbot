@@ -42,13 +42,14 @@ async def web_search(
         time_range: Time filter for search results - use 'day', 'month', 'year' or leave empty for all time (default: "")
         language: Language code for results (e.g., 'en', 'zh', 'fr') or leave empty for default (default: "")
     """
-    return await mcp_manager.call_tool("mcp-searxng__searxng_web_search", {
+    return_value = await mcp_manager.call_tool("mcp-searxng__searxng_web_search", {
         "query": query,
         "pageno": pageno,
         "time_range": time_range,
         "language": language,
         "safesearch": 0,
     })
+    return return_value
 
 
 @tool
@@ -79,7 +80,8 @@ async def web_url_read(
     }
     if maxLength > 0:
         args["maxLength"] = maxLength
-    return await mcp_manager.call_tool("mcp-searxng__web_url_read", args)
+    return_value = await mcp_manager.call_tool("mcp-searxng__web_url_read", args)
+    return return_value
 
 
 _ALL_TOOLS = [web_search, web_url_read]
@@ -256,11 +258,13 @@ async def _tool_call_executor(state: WebSearchState) -> dict:
             try:
                 t = _TOOLS_BY_NAME[tool_call["name"]]
                 observation = await t.ainvoke(tool_call["args"])
-            except KeyError:
+            except KeyError as exc:
+                logger.debug(f"Handled exception in _tool_call_executor: {exc}")
                 observation = {"error": f"Incorrect tool was invoked: {tool_call['name']}"}
-                logger.error("Incorrect tool was invoked: %s", tool_call["name"])
-            except Exception:
-                logger.exception("Error executing tool %s", tool_call["name"])
+                logger.error(f'Incorrect tool was invoked: {tool_call["name"]}')
+            except Exception as exc:
+                logger.debug(f"Handled exception in _tool_call_executor: {exc}")
+                logger.exception(f'Error executing tool {tool_call["name"]}')
                 observation = {"error": "tool execution failed"}
 
             results.append(ToolMessage(
@@ -268,7 +272,8 @@ async def _tool_call_executor(state: WebSearchState) -> dict:
                 tool_call_id=tool_call["id"],
             ))
 
-    return {"messages": results}
+    return_value = {"messages": results}
+    return return_value
 
 
 async def _tool_call_generator(state: WebSearchState) -> dict:
@@ -293,7 +298,8 @@ async def _tool_call_generator(state: WebSearchState) -> dict:
         relevant_history = state["messages"]
 
     response = await _generator_llm.ainvoke([system_prompt, human_message] + relevant_history)
-    return {"messages": [response]}
+    return_value = {"messages": [response]}
+    return return_value
 
 
 async def _tool_call_evaluator(state: WebSearchState) -> dict:
@@ -348,7 +354,8 @@ async def _tool_call_evaluator(state: WebSearchState) -> dict:
         content=json.dumps({"feedback": feedback, "source": "evaluator"}, ensure_ascii=False),
         name="evaluator",
     )
-    return {"messages": [final_message], "should_stop": should_stop, "retry": retry, "knowledge_metadata": knowledge_metadata}
+    return_value = {"messages": [final_message], "should_stop": should_stop, "retry": retry, "knowledge_metadata": knowledge_metadata}
+    return return_value
 
 
 async def _tool_call_finalizer(state: WebSearchState) -> dict:
@@ -393,22 +400,23 @@ async def _tool_call_finalizer(state: WebSearchState) -> dict:
         result["response"] = "No information retrieved."
         result["score"] = 0
         status = "error"
-        logger.error("Web search finalizer omitted response; raw result: %s", result)
+        logger.error(f'Web search finalizer omitted response; raw result: {result}')
 
     if "reason" not in result:
         result["reason"] = "No reason provided."
 
     is_empty_result = result.get("is_empty_result")
     if not isinstance(is_empty_result, bool):
-        logger.error("Web search finalizer omitted is_empty_result; raw result=%s", result)
+        logger.error(f'Web search finalizer omitted is_empty_result; raw result={result}')
         is_empty_result = False
 
-    return {
+    return_value = {
         "final_response": result.get("response"),
         "final_status": status,
         "final_reason": result.get("reason"),
         "final_is_empty_result": is_empty_result,
     }
+    return return_value
 
 
 async def _run_subgraph(
@@ -461,13 +469,14 @@ async def _run_subgraph(
         "knowledge_metadata": {},
     }
     result = await sub_graph.ainvoke(sub_state)
-    return {
+    return_value = {
         "status": result.get("final_status"),
         "reason": result.get("final_reason"),
         "response": result.get("final_response"),
         "is_empty_result": result.get("final_is_empty_result", False),
         "knowledge_metadata": result.get("knowledge_metadata", {}),
     }
+    return return_value
 
 
 class WebSearchAgent(BaseRAGHelperAgent):
@@ -514,7 +523,7 @@ class WebSearchAgent(BaseRAGHelperAgent):
             expected_response=_DEFAULT_EXPECTED_RESPONSE,
             timestamp=timestamp,
         )
-        return self.with_cache_status(
+        return_value = self.with_cache_status(
             {
                 "resolved": not bool(raw.get("is_empty_result", False)),
                 "result": str(raw.get("response", "")),
@@ -523,6 +532,7 @@ class WebSearchAgent(BaseRAGHelperAgent):
             hit=False,
             reason="agent_not_cacheable",
         )
+        return return_value
 
 
 async def _test_main() -> None:

@@ -20,8 +20,10 @@ def _to_utc_datetime(value: datetime) -> datetime:
     """
 
     if value.tzinfo is None:
-        return value.replace(tzinfo=timezone.utc)
-    return value.astimezone(timezone.utc)
+        return_value = value.replace(tzinfo=timezone.utc)
+        return return_value
+    return_value = value.astimezone(timezone.utc)
+    return return_value
 
 
 def parse_iso_datetime(value: str) -> datetime:
@@ -35,7 +37,8 @@ def parse_iso_datetime(value: str) -> datetime:
     """
 
     normalized = value.replace("Z", "+00:00")
-    return _to_utc_datetime(datetime.fromisoformat(normalized))
+    return_value = _to_utc_datetime(datetime.fromisoformat(normalized))
+    return return_value
 
 
 @dataclass(frozen=True)
@@ -84,7 +87,7 @@ class DispatchContext:
             The dispatch context carried alongside the event.
         """
 
-        return cls(
+        return_value = cls(
             source_platform=doc["source_platform"],
             source_channel_id=doc["source_channel_id"],
             source_user_id=doc["source_user_id"],
@@ -93,6 +96,7 @@ class DispatchContext:
             bot_role=doc.get("bot_role", "user"),
             now=parse_iso_datetime(doc["execute_at"]),
         )
+        return return_value
 
 
 @dataclass(frozen=True)
@@ -123,7 +127,7 @@ class Task:
             A ``ScheduledEventDoc`` ready for ``scheduler.schedule_event``.
         """
 
-        return {
+        return_value = {
             "tool": self.tool,
             "args": self.args,
             "execute_at": _to_utc_datetime(self.execute_at).isoformat(),
@@ -135,6 +139,7 @@ class Task:
             "guild_id": ctx.guild_id,
             "bot_role": ctx.bot_role,
         }
+        return return_value
 
     @classmethod
     def from_scheduler_doc(cls, doc: ScheduledEventDoc) -> "Task":
@@ -147,11 +152,12 @@ class Task:
             Reconstructed task instance.
         """
 
-        return cls(
+        return_value = cls(
             tool=doc["tool"],
             args=dict(doc.get("args") or {}),
             execute_at=parse_iso_datetime(doc["execute_at"]),
         )
+        return return_value
 
 
 @dataclass(frozen=True)

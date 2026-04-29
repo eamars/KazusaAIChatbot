@@ -18,9 +18,10 @@ logger = logging.getLogger(__name__)
 async def call_action_subgraph(state: GlobalPersonaState) -> dict:
     # For now we will only keep dialog output. In the future we will add vocal, action and perhaps TaskDispatcher agent to handle other types of actions
     result = await dialog_agent(state)
-    return {
+    return_value = {
         "final_dialog": result.get("final_dialog", []),
     }
+    return return_value
 
 
 async def stage_1_research(state: GlobalPersonaState) -> dict:
@@ -59,25 +60,11 @@ async def stage_1_research(state: GlobalPersonaState) -> dict:
         loop_count=int(rag_supervisor_result.get("loop_count", 0) or 0),
     )
     trace = rag_result["supervisor_trace"]
-    logger.info(
-        "RAG2 projection: platform=%s channel=%s user=%s query=%s answer=%s dispatched=%d user_image=%s character_image=%s third_party_profiles=%d memory_evidence=%d conversation_evidence=%d external_evidence=%d rag_result=%s",
-        state["platform"],
-        state["platform_channel_id"] or "<dm>",
-        state["global_user_id"],
-        log_preview(state["decontexualized_input"]),
-        log_preview(rag_result["answer"]),
-        len(trace["dispatched"]),
-        bool(rag_result["user_image"]),
-        bool(rag_result["character_image"]),
-        len(rag_result["third_party_profiles"]),
-        len(rag_result["memory_evidence"]),
-        len(rag_result["conversation_evidence"]),
-        len(rag_result["external_evidence"]),
-        log_preview(rag_result),
-    )
-    return {
+    logger.info(f'RAG2 projection: platform={state["platform"]} channel={state["platform_channel_id"] or "<dm>"} user={state["global_user_id"]} query={log_preview(state["decontexualized_input"])} answer={log_preview(rag_result["answer"])} dispatched={len(trace["dispatched"])} user_image={bool(rag_result["user_image"])} character_image={bool(rag_result["character_image"])} third_party_profiles={len(rag_result["third_party_profiles"])} memory_evidence={len(rag_result["memory_evidence"])} conversation_evidence={len(rag_result["conversation_evidence"])} external_evidence={len(rag_result["external_evidence"])} rag_result={log_preview(rag_result)}')
+    return_value = {
         "rag_result": rag_result,
     }
+    return return_value
 
 
 
@@ -126,8 +113,9 @@ async def persona_supervisor2(state: IMProcessState) -> dict:
     
     results = await persona_graph.ainvoke(initial_persona_state)
     
-    return {
+    return_value = {
         "final_dialog": results.get("final_dialog", []),
         "future_promises": [],
         "consolidation_state": results,
     }
+    return return_value

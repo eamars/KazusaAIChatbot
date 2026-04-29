@@ -60,20 +60,13 @@ class ConversationProgressRuntime:
             document=selected_document,
             current_timestamp=current_timestamp,
         )
-        logger.info(
-            "Conversation progress load: platform=%s channel=%s user=%s source=%s episode_present=%s progress=%s",
-            scope.platform,
-            scope.platform_channel_id or "<dm>",
-            scope.global_user_id,
-            source,
-            selected_document is not None,
-            log_preview(prompt_doc),
-        )
-        return {
+        logger.info(f'Conversation progress load: platform={scope.platform} channel={scope.platform_channel_id or "<dm>"} user={scope.global_user_id} source={source} episode_present={selected_document is not None} progress={log_preview(prompt_doc)}')
+        return_value = {
             "episode_state": selected_document,
             "conversation_progress": prompt_doc,
             "source": source,
         }
+        return return_value
 
     async def record_turn_progress(
         self,
@@ -90,13 +83,7 @@ class ConversationProgressRuntime:
         """
 
         recorder_output = await self._recorder_callable(record_input)
-        logger.info(
-            "Conversation progress recorder output: platform=%s channel=%s user=%s output=%s",
-            record_input["scope"].platform,
-            record_input["scope"].platform_channel_id or "<dm>",
-            record_input["scope"].global_user_id,
-            log_preview(recorder_output),
-        )
+        logger.info(f'Conversation progress recorder output: platform={record_input["scope"].platform} channel={record_input["scope"].platform_channel_id or "<dm>"} user={record_input["scope"].global_user_id} output={log_preview(recorder_output)}')
         document = repository.build_episode_state_doc(
             scope=record_input["scope"],
             timestamp=record_input["timestamp"],
@@ -112,22 +99,15 @@ class ConversationProgressRuntime:
                 document=document,
             )
             cache_updated = True
-        logger.info(
-            "Conversation progress write: platform=%s channel=%s user=%s written=%s cache_updated=%s document=%s",
-            record_input["scope"].platform,
-            record_input["scope"].platform_channel_id or "<dm>",
-            record_input["scope"].global_user_id,
-            written,
-            cache_updated,
-            log_preview(document),
-        )
-        return {
+        logger.info(f'Conversation progress write: platform={record_input["scope"].platform} channel={record_input["scope"].platform_channel_id or "<dm>"} user={record_input["scope"].global_user_id} written={written} cache_updated={cache_updated} document={log_preview(document)}')
+        return_value = {
             "written": written,
             "turn_count": int(document["turn_count"]),
             "continuity": document["continuity"],
             "status": document["status"],
             "cache_updated": cache_updated,
         }
+        return return_value
 
 
 _default_runtime = ConversationProgressRuntime()
@@ -140,10 +120,11 @@ async def load_progress_context(
 ) -> ConversationProgressLoadResult:
     """Load and project progress state for one responsive turn."""
 
-    return await _default_runtime.load_progress_context(
+    return_value = await _default_runtime.load_progress_context(
         scope=scope,
         current_timestamp=current_timestamp,
     )
+    return return_value
 
 
 async def record_turn_progress(
@@ -152,4 +133,5 @@ async def record_turn_progress(
 ) -> ConversationProgressRecordResult:
     """Record progress after final dialog generation."""
 
-    return await _default_runtime.record_turn_progress(record_input=record_input)
+    return_value = await _default_runtime.record_turn_progress(record_input=record_input)
+    return return_value

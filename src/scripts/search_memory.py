@@ -40,7 +40,8 @@ def format_memory(doc: MemoryDoc, score: float) -> str:
     memory_name = doc.get("memory_name", "Unknown memory")
     content = doc.get("content", "")
 
-    return f"[Score: {score:.4f}] {memory_name}\n{content}\n{'-'*80}"
+    return_value = f"[Score: {score:.4f}] {memory_name}\n{content}\n{'-'*80}"
+    return return_value
 
 
 async def main():
@@ -77,8 +78,9 @@ async def main():
         for score, doc in results:
             print(format_memory(doc, score))
         
-    except Exception as e:
-        logger.error(f"Search failed: {e}")
+    except Exception as exc:
+        logger.debug(f"Handled exception in main: {exc}")
+        logger.exception("Search failed")
         raise
     finally:
         # Close database connection

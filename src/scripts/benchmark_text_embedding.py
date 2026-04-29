@@ -53,7 +53,8 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="After all single-query timings, run one batch timing over the same queries.",
     )
-    return parser.parse_args()
+    return_value = parser.parse_args()
+    return return_value
 
 
 async def benchmark_single_query(query: str, repeat: int) -> dict:
@@ -76,15 +77,9 @@ async def benchmark_single_query(query: str, repeat: int) -> dict:
         elapsed = time.perf_counter() - start
         embedding_dim = len(embedding)
         timings.append(elapsed)
-        logger.info(
-            "single query attempt=%d query=%r elapsed_seconds=%.3f embedding_dim=%d",
-            attempt,
-            query,
-            elapsed,
-            embedding_dim,
-        )
+        logger.info(f'single query attempt={attempt} query={query!r} elapsed_seconds={elapsed:.3f} embedding_dim={embedding_dim}')
 
-    return {
+    return_value = {
         "query": query,
         "embedding_dim": embedding_dim,
         "timings": timings,
@@ -92,6 +87,7 @@ async def benchmark_single_query(query: str, repeat: int) -> dict:
         "max_seconds": max(timings),
         "avg_seconds": statistics.mean(timings),
     }
+    return return_value
 
 
 async def benchmark_batch(queries: list[str]) -> dict:
@@ -108,18 +104,14 @@ async def benchmark_batch(queries: list[str]) -> dict:
     embeddings = await get_text_embeddings_batch(queries)
     elapsed = time.perf_counter() - start
     embedding_dims = [len(embedding) for embedding in embeddings]
-    logger.info(
-        "batch query_count=%d elapsed_seconds=%.3f embedding_dims=%r",
-        len(queries),
-        elapsed,
-        embedding_dims,
-    )
-    return {
+    logger.info(f'batch query_count={len(queries)} elapsed_seconds={elapsed:.3f} embedding_dims={embedding_dims!r}')
+    return_value = {
         "query_count": len(queries),
         "elapsed_seconds": elapsed,
         "per_item_seconds": elapsed / max(1, len(queries)),
         "embedding_dims": embedding_dims,
     }
+    return return_value
 
 
 def print_single_summary(results: list[dict]) -> None:
@@ -172,10 +164,10 @@ async def main() -> None:
     args = parse_args()
     queries = args.queries or list(DEFAULT_QUERIES)
 
-    logger.info("Embedding endpoint: %s", EMBEDDING_BASE_URL)
-    logger.info("Embedding model: %s", EMBEDDING_MODEL)
-    logger.info("Single-query benchmark count: %d", len(queries))
-    logger.info("Repeat per query: %d", args.repeat)
+    logger.info(f'Embedding endpoint: {EMBEDDING_BASE_URL}')
+    logger.info(f'Embedding model: {EMBEDDING_MODEL}')
+    logger.info(f'Single-query benchmark count: {len(queries)}')
+    logger.info(f'Repeat per query: {args.repeat}')
 
     single_results: list[dict] = []
     for query in queries:
