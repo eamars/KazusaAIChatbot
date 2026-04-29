@@ -9,6 +9,8 @@ Use this skill to create development plans that are pleasant for a human to read
 
 A final development plan is not a brainstorming document. It is an approved work contract.
 
+Completed plans are closed records. New scope must go into a new or superseding plan, never appended to the completed one.
+
 ## Core Standard
 
 Every final plan must satisfy two audiences:
@@ -66,6 +68,8 @@ Keep these stages separate:
 
 Do not mix final-plan content with unresolved design discussion.
 
+Treat completed plans as closed historical records. After a plan reaches `completed`, do not add newly requested work, follow-up ideas, expanded scope, or changed requirements to that completed plan. New work belongs in a new plan, a superseding plan, or a separate follow-up plan with its own status and checklist.
+
 ## Required Top Matter
 
 Start each plan with a compact human-readable summary:
@@ -110,7 +114,7 @@ If a plan exceeds the target, compress repetition, move examples to appendices, 
 
 ## Mandatory Sections
 
-Every final plan for a non-trivial change must include these sections:
+Every final plan must include these sections:
 
 ```md
 ## Summary
@@ -124,6 +128,7 @@ Every final plan for a non-trivial change must include these sections:
 ## Design Decisions
 ## Change Surface
 ## Implementation Order
+## Progress Checklist
 ## Verification
 ## Acceptance Criteria
 ```
@@ -359,35 +364,41 @@ Include a short rationale when order matters:
 Build the projection module first because it becomes the contract used by cognition, consolidation, and tests.
 ```
 
-## Tickable Implementation Checkpoints
+## Progress Checklist
 
-For medium, large, high-risk, multi-agent, or long-running plans, the implementation order must include tickable checkpoints using Markdown checkbox syntax (`- [ ]` or `1. [ ]`). These are the progress boxes implementation agents update as each function, module, integration step, or sign-off gate is completed.
+Every final plan must include a tickable progress checklist using Markdown checkbox syntax (`- [ ]` or `1. [ ]`). These are the progress boxes implementation agents update as each function, module, integration step, or sign-off gate is completed. Small plans may have a short checklist, but they still need one so progress and handoff state are visible.
 
 Checkpoints exist so multiple agents can resume the work without rediscovering state or guessing which partial changes are complete. They should be granular enough that an agent can finish one checkpoint, verify it, mark it complete, and hand off cleanly.
 
 Each tickable checkpoint must describe:
 
-- the function, module, interface, integration, or sign-off gate being completed
+- the stage, function, module, interface, integration, or sign-off gate being completed
 - the files or modules expected to be touched
 - the verification commands or static checks to run before ticking the box
 - the evidence that must be recorded before ticking the box
 - the next checkpoint or next implementation step
+- the sign-off line the agent must complete after that checkpoint is done
 
 ```md
-## Implementation Order
+## Progress Checklist
 
-- [ ] Checkpoint A — module contract established
+- [ ] Stage 1 — module contract established
   - Covers: steps 1-3.
   - Verify: `python -m py_compile ...`; focused module tests pass.
   - Evidence: record changed files and test output in `Execution Evidence`.
-  - Checkpoint state: public interface exists; no production integration yet.
-- [ ] Checkpoint B — service integration complete
+  - Handoff: next agent starts at Stage 2.
+  - Sign-off: `<agent/date>` after verification and evidence are recorded.
+- [ ] Stage 2 — service integration complete
   - Covers: step 4.
   - Verify: service integration tests pass.
   - Evidence: record test output before moving on.
+  - Handoff: next agent starts at Stage 3.
+  - Sign-off: `<agent/date>` after verification and evidence are recorded.
 ```
 
 Do not treat checked boxes as proof by themselves. An agent may tick a checkpoint only after running its verification and recording the result in `Execution Evidence` or a linked execution record. If verification is skipped or blocked, leave the box unchecked and record why.
+
+Agents must sign off stages one at a time, immediately after each stage is genuinely complete. Do not pre-fill sign-offs, do not sign off future stages, and do not batch multiple stage sign-offs at the end of a session. If handing off mid-plan, leave all unfinished stages unchecked and unsigned, and add a brief handoff note that points to the next unchecked stage.
 
 ## Verification
 
@@ -482,6 +493,8 @@ Do not treat checked boxes as proof. If the plan also records completion, add a 
 ```
 
 Pre-execution plans should use unchecked checklist items. If a plan is completed, either move checked items into an execution record or attach evidence for the checks.
+
+Never document scope creep in a completed plan. Once complete, the plan may receive only factual corrections to execution evidence or links to a new/superseding plan. If new requirements appear after completion, keep the completed plan unchanged and create a separate follow-up plan.
 
 ## Writing Style
 

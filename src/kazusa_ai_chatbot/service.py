@@ -8,10 +8,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from collections import deque
 from collections.abc import Mapping
 from contextlib import asynccontextmanager, suppress
-from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
 
@@ -45,6 +43,7 @@ from kazusa_ai_chatbot.db import (
 )
 from kazusa_ai_chatbot.mcp_client import mcp_manager
 from kazusa_ai_chatbot.state import IMProcessState, MultiMediaDoc, DebugModes, ReplyContext
+from kazusa_ai_chatbot.chat_input_queue import ChatInputQueue, QueuedChatItem
 from kazusa_ai_chatbot.utils import log_list_preview, log_preview, trim_history_dict
 from kazusa_ai_chatbot import scheduler
 from kazusa_ai_chatbot.dispatcher import (
@@ -368,130 +367,12 @@ _graph = None
 _task_dispatcher: TaskDispatcher | None = None
 _adapter_registry: AdapterRegistry | None = None
 _character_identity_backfilled: set[tuple[str, str, str]] = set()
-
-
-@dataclass
-class _QueuedChatItem:
-    """One pending chat request managed by the global input queue.
-
-    Args:
-        sequence: Monotonic brain-local arrival sequence.
-        request: Original chat request payload.
-        timestamp: Stable timestamp assigned at enqueue time.
-        future: Response future awaited by the `/chat` endpoint.
-    """
-
-    sequence: int
-    request: ChatRequest
-    timestamp: str
-    future: asyncio.Future[ChatResponse]
-
-
-_chat_input_queue: deque[_QueuedChatItem] = deque()
-_chat_queue_condition: asyncio.Condition | None = None
+_chat_input_queue = ChatInputQueue()
 _chat_queue_worker_task: asyncio.Task | None = None
-_chat_queue_sequence = 0
-
-
-def _get_chat_queue_condition() -> asyncio.Condition:
-    """Return the input-queue condition, creating it for the active loop.
-
-    Returns:
-        The condition used to wake the queue worker.
-    """
-
-    global _chat_queue_condition
-    if _chat_queue_condition is None:
-        _chat_queue_condition = asyncio.Condition()
-    return _chat_queue_condition
-
-
-def _is_tagged(item: _QueuedChatItem) -> bool:
-    """Return whether a queued request structurally mentioned the bot.
-
-    Args:
-        item: Queued chat item.
-
-    Returns:
-        True when the adapter marked the request as a bot mention.
-    """
-
-    return_value = item.request.mentioned_bot is True
-    return return_value
-
-
-def _is_bot_reply(item: _QueuedChatItem) -> bool:
-    """Return whether a queued request is an adapter-confirmed bot reply.
-
-    Args:
-        item: Queued chat item.
-
-    Returns:
-        True only when the adapter supplied `reply_to_current_bot=True`.
-    """
-
-    return_value = item.request.reply_context.reply_to_current_bot is True
-    return return_value
-
-
-def _prune_waiting_queue(
-    waiting_items: list[_QueuedChatItem],
-) -> tuple[list[_QueuedChatItem], list[_QueuedChatItem]]:
-    """Apply the global input-queue pruning policy to waiting items.
-
-    Args:
-        waiting_items: Ordered list of queued items that are not processing.
-
-    Returns:
-        Pair of surviving items and dropped items, both in arrival order.
-    """
-
-    survivors = list(waiting_items)
-    dropped: list[_QueuedChatItem] = []
-
-    if len(survivors) > 2:
-        kept = []
-        for item in survivors:
-            if _is_tagged(item) or _is_bot_reply(item):
-                kept.append(item)
-            else:
-                dropped.append(item)
-        survivors = kept
-
-    if len(survivors) > 5:
-        kept = []
-        for item in survivors:
-            if _is_bot_reply(item):
-                kept.append(item)
-            else:
-                dropped.append(item)
-        survivors = kept
-
-    if len(survivors) > 5:
-        dropped.extend(survivors[:-1])
-        survivors = survivors[-1:]
-
-    return_value = (survivors, dropped)
-    return return_value
-
-
-def _set_chat_item_response(item: _QueuedChatItem, response: ChatResponse) -> None:
-    """Complete a queued item if its caller is still waiting.
-
-    Args:
-        item: Queued chat item.
-        response: Response to return through the item's future.
-
-    Returns:
-        None.
-    """
-
-    if not item.future.done():
-        item.future.set_result(response)
 
 
 async def _save_user_message_from_item(
-    item: _QueuedChatItem,
+    item: QueuedChatItem,
     *,
     global_user_id: str,
     reply_context: ReplyContext,
@@ -528,7 +409,7 @@ async def _save_user_message_from_item(
         logger.exception("Failed to save queued user message")
 
 
-async def _resolve_queued_user(item: _QueuedChatItem) -> tuple[str, dict]:
+async def _resolve_queued_user(item: QueuedChatItem) -> tuple[str, dict]:
     """Resolve the user identity and profile for a queued item.
 
     Args:
@@ -549,7 +430,7 @@ async def _resolve_queued_user(item: _QueuedChatItem) -> tuple[str, dict]:
     return return_value
 
 
-async def _drop_queued_chat_item(item: _QueuedChatItem) -> None:
+async def _drop_queued_chat_item(item: QueuedChatItem) -> None:
     """Persist and complete one pruned queued item without running the graph.
 
     Args:
@@ -571,11 +452,43 @@ async def _drop_queued_chat_item(item: _QueuedChatItem) -> None:
         logger.debug(f"Handled exception in _drop_queued_chat_item: {exc}")
         logger.exception("Failed to persist dropped queued message")
 
-    _set_chat_item_response(item, ChatResponse())
-    logger.info(f'Queued chat item dropped: sequence={item.sequence} platform={item.request.platform} channel={item.request.platform_channel_id or "<dm>"} message={item.request.platform_message_id or "<none>"} user={item.request.platform_user_id or "<none>"} display_name={item.request.display_name or "<none>"} tagged={_is_tagged(item)} bot_reply={_is_bot_reply(item)} content={log_preview(item.request.content)}')
+    _chat_input_queue.complete(item, ChatResponse())
+    logger.info(f'Queued chat item dropped: sequence={item.sequence} platform={item.request.platform} channel={item.request.platform_channel_id or "<dm>"} message={item.request.platform_message_id or "<none>"} user={item.request.platform_user_id or "<none>"} display_name={item.request.display_name or "<none>"} tagged={_chat_input_queue.is_tagged(item)} bot_reply={_chat_input_queue.is_bot_reply(item)} content={log_preview(item.request.content)}')
 
 
-async def _process_queued_chat_item(item: _QueuedChatItem) -> None:
+async def _persist_collapsed_queued_chat_item(
+    item: QueuedChatItem,
+    survivor: QueuedChatItem,
+) -> None:
+    """Persist and complete one queued item collapsed into a surviving turn.
+
+    Args:
+        item: Queued chat item collapsed into another item.
+        survivor: Surviving queued item that will receive the character reply.
+
+    Returns:
+        None.
+    """
+
+    try:
+        global_user_id, _ = await _resolve_queued_user(item)
+        reply_context = await _hydrate_reply_context(item.request)
+        await _save_user_message_from_item(
+            item,
+            global_user_id=global_user_id,
+            reply_context=reply_context,
+        )
+    except Exception as exc:
+        logger.debug(
+            f"Handled exception in _persist_collapsed_queued_chat_item: {exc}"
+        )
+        logger.exception("Failed to persist collapsed queued message")
+
+    _chat_input_queue.complete(item, ChatResponse())
+    logger.info(f'Queued chat item collapsed: sequence={item.sequence} survivor_sequence={survivor.sequence} platform={item.request.platform} channel={item.request.platform_channel_id or "<dm>"} message={item.request.platform_message_id or "<none>"} survivor_message={survivor.request.platform_message_id or "<none>"} user={item.request.platform_user_id or "<none>"} display_name={item.request.display_name or "<none>"} tagged={_chat_input_queue.is_tagged(item)} bot_reply={_chat_input_queue.is_bot_reply(item)} content={log_preview(item.request.content)}')
+
+
+async def _process_queued_chat_item(item: QueuedChatItem) -> None:
     """Run one queued item through the existing chat graph and post-writes.
 
     Args:
@@ -623,7 +536,15 @@ async def _process_queued_chat_item(item: _QueuedChatItem) -> None:
         if active_flags:
             logger.info(f'Debug modes active: {active_flags}')
 
-        logger.debug(f'Chat request: platform={req.platform} channel={req.platform_channel_id or "<dm>"} message={req.platform_message_id or "<none>"} user={req.platform_user_id} global_user={global_user_id} content_type={req.content_type} attachments={len(req.attachments)} image_attachments={len(multimedia_input)} history_wide={len(chat_history_wide)} history_recent={len(chat_history_recent)} reply_context={log_preview(reply_context)} debug_modes={active_flags} content={log_preview(req.content)}')
+        user_input = item.combined_content or req.content
+        is_collapsed_turn = bool(item.collapsed_items)
+
+        logger.debug(f'Chat request: platform={req.platform} channel={req.platform_channel_id or "<dm>"} message={req.platform_message_id or "<none>"} user={req.platform_user_id} global_user={global_user_id} content_type={req.content_type} attachments={len(req.attachments)} image_attachments={len(multimedia_input)} history_wide={len(chat_history_wide)} history_recent={len(chat_history_recent)} reply_context={log_preview(reply_context)} debug_modes={active_flags} collapsed={is_collapsed_turn} collapsed_count={len(item.collapsed_items)} content={log_preview(user_input)}')
+
+        # Reply anchoring is a false-preserving graph latch. Normal turns start
+        # enabled; collapsed turns start disabled so no later stage can re-enable
+        # the platform reply feature for multi-message input.
+        initial_use_reply_feature = not is_collapsed_turn
 
         initial_state: IMProcessState = {
             "timestamp": item.timestamp,
@@ -632,7 +553,7 @@ async def _process_queued_chat_item(item: _QueuedChatItem) -> None:
             "platform_user_id": req.platform_user_id,
             "global_user_id": global_user_id,
             "user_name": req.display_name,
-            "user_input": req.content,
+            "user_input": user_input,
             "user_multimedia_input": multimedia_input,
             "user_profile": user_profile,
             "platform_bot_id": req.platform_bot_id,
@@ -647,7 +568,7 @@ async def _process_queued_chat_item(item: _QueuedChatItem) -> None:
             "reply_context": reply_context,
             "should_respond": False,
             "reason_to_respond": "",
-            "use_reply_feature": False,
+            "use_reply_feature": initial_use_reply_feature,
             "channel_topic": "",
             "indirect_speech_context": "",
             "debug_modes": debug_modes,
@@ -667,11 +588,13 @@ async def _process_queued_chat_item(item: _QueuedChatItem) -> None:
             response = ChatResponse(
                 messages=[f"{bot_name} is busy right now, please try again later."]
             )
-            _set_chat_item_response(item, response)
+            _chat_input_queue.complete(item, response)
             return
 
         final_dialog = result.get("final_dialog", [])
-        should_reply = result.get("use_reply_feature", False)
+        should_reply = bool(final_dialog) and bool(
+            result.get("use_reply_feature", False)
+        )
         consolidation_state = result.get("consolidation_state")
 
         logger.debug(f'Chat result: platform={req.platform} channel={req.platform_channel_id or "<dm>"} message={req.platform_message_id or "<none>"} user={req.platform_user_id} should_respond={result.get("should_respond")} should_reply={should_reply} final_dialog_count={len(final_dialog)} future_promises={len(result.get("future_promises", []))} final_dialog={log_list_preview(final_dialog)}')
@@ -712,7 +635,7 @@ async def _process_queued_chat_item(item: _QueuedChatItem) -> None:
             should_reply=should_reply,
             scheduled_followups=0,
         )
-        _set_chat_item_response(item, response)
+        _chat_input_queue.complete(item, response)
 
         if should_save_bot_message:
             await _save_bot_message(result)
@@ -728,36 +651,27 @@ async def _process_queued_chat_item(item: _QueuedChatItem) -> None:
         response = ChatResponse(
             messages=[f"{bot_name} is busy right now, please try again later."]
         )
-        _set_chat_item_response(item, response)
+        _chat_input_queue.complete(item, response)
 
 
 async def _chat_input_worker() -> None:
-    """Consume the global input queue one item at a time.
+    """Consume queue handoffs and run service-owned message actions.
 
     Returns:
         None.
     """
 
     while True:
-        condition = _get_chat_queue_condition()
-        async with condition:
-            while not _chat_input_queue:
-                await condition.wait()
+        dequeued_turn = await _chat_input_queue.wait_for_next()
 
-            waiting_items = list(_chat_input_queue)
-            survivors, dropped = _prune_waiting_queue(waiting_items)
-            _chat_input_queue.clear()
-            _chat_input_queue.extend(survivors)
-
-            next_item: _QueuedChatItem | None = None
-            if _chat_input_queue:
-                next_item = _chat_input_queue.popleft()
-
-        for dropped_item in dropped:
+        for dropped_item in dequeued_turn.dropped_items:
             await _drop_queued_chat_item(dropped_item)
 
-        if next_item is not None:
-            await _process_queued_chat_item(next_item)
+        for collapsed_item, survivor in dequeued_turn.collapsed_items:
+            await _persist_collapsed_queued_chat_item(collapsed_item, survivor)
+
+        if dequeued_turn.next_item is not None:
+            await _process_queued_chat_item(dequeued_turn.next_item)
 
 
 def _ensure_chat_input_worker_started() -> None:
@@ -768,7 +682,6 @@ def _ensure_chat_input_worker_started() -> None:
     """
 
     global _chat_queue_worker_task
-    _get_chat_queue_condition()
     if _chat_queue_worker_task is None or _chat_queue_worker_task.done():
         _chat_queue_worker_task = asyncio.create_task(_chat_input_worker())
 
@@ -780,7 +693,7 @@ async def _stop_chat_input_worker() -> None:
         None.
     """
 
-    global _chat_queue_condition, _chat_queue_sequence, _chat_queue_worker_task
+    global _chat_input_queue, _chat_queue_worker_task
     task = _chat_queue_worker_task
     _chat_queue_worker_task = None
     if task is not None:
@@ -788,16 +701,10 @@ async def _stop_chat_input_worker() -> None:
         with suppress(asyncio.CancelledError):
             await task
 
-    condition = _get_chat_queue_condition()
-    async with condition:
-        pending_items = list(_chat_input_queue)
-        _chat_input_queue.clear()
-
+    pending_items = await _chat_input_queue.drain()
     for item in pending_items:
-        _set_chat_item_response(item, ChatResponse())
-
-    _chat_queue_condition = None
-    _chat_queue_sequence = 0
+        _chat_input_queue.complete(item, ChatResponse())
+    _chat_input_queue = ChatInputQueue()
 
 
 async def _enqueue_chat_request(req: ChatRequest) -> ChatResponse:
@@ -807,27 +714,11 @@ async def _enqueue_chat_request(req: ChatRequest) -> ChatResponse:
         req: Incoming chat request.
 
     Returns:
-        Chat response produced by the worker or drop policy.
+        Chat response produced by the worker or drop/collapse policy.
     """
 
-    global _chat_queue_sequence
     _ensure_chat_input_worker_started()
-    condition = _get_chat_queue_condition()
-    future: asyncio.Future[ChatResponse] = asyncio.get_running_loop().create_future()
-    timestamp = req.timestamp or datetime.now(timezone.utc).isoformat()
-
-    async with condition:
-        _chat_queue_sequence += 1
-        item = _QueuedChatItem(
-            sequence=_chat_queue_sequence,
-            request=req,
-            timestamp=timestamp,
-            future=future,
-        )
-        _chat_input_queue.append(item)
-        condition.notify()
-
-    response = await future
+    response = await _chat_input_queue.enqueue(req)
     return response
 
 

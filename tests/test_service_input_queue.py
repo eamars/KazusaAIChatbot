@@ -8,12 +8,17 @@ from unittest.mock import AsyncMock
 import pytest
 from fastapi import BackgroundTasks
 
+from kazusa_ai_chatbot import chat_input_queue as queue_module
 from kazusa_ai_chatbot import service as service_module
 
 
 def _request(
     message_id: str,
     *,
+    channel_type: str = "group",
+    platform_channel_id: str = "chan-1",
+    platform_user_id: str | None = None,
+    content: str | None = None,
     mentioned_bot: bool = False,
     reply_to_current_bot: bool | None = None,
 ) -> service_module.ChatRequest:
@@ -34,14 +39,14 @@ def _request(
     )
     request = service_module.ChatRequest(
         platform="qq",
-        platform_channel_id="chan-1",
-        channel_type="group",
+        platform_channel_id=platform_channel_id,
+        channel_type=channel_type,
         platform_message_id=message_id,
-        platform_user_id=f"user-{message_id}",
+        platform_user_id=platform_user_id or f"user-{message_id}",
         platform_bot_id="bot-1",
         display_name=f"User {message_id}",
         channel_name="Group",
-        content=f"message {message_id}",
+        content=content or f"message {message_id}",
         mentioned_bot=mentioned_bot,
         reply_context=reply_context,
     )
@@ -51,9 +56,14 @@ def _request(
 def _item(
     sequence: int,
     *,
+    channel_type: str = "group",
+    platform_channel_id: str = "chan-1",
+    platform_user_id: str | None = None,
+    content: str | None = None,
+    timestamp: str | None = None,
     mentioned_bot: bool = False,
     reply_to_current_bot: bool | None = None,
-) -> service_module._QueuedChatItem:
+) -> queue_module.QueuedChatItem:
     """Build a queued item for deterministic pruning tests.
 
     Args:
@@ -68,14 +78,18 @@ def _item(
     future: asyncio.Future[service_module.ChatResponse] = (
         asyncio.get_running_loop().create_future()
     )
-    item = service_module._QueuedChatItem(
+    item = queue_module.QueuedChatItem(
         sequence=sequence,
         request=_request(
             str(sequence),
+            channel_type=channel_type,
+            platform_channel_id=platform_channel_id,
+            platform_user_id=platform_user_id,
+            content=content,
             mentioned_bot=mentioned_bot,
             reply_to_current_bot=reply_to_current_bot,
         ),
-        timestamp=f"2026-04-29T00:00:0{sequence}+00:00",
+        timestamp=timestamp or f"2026-04-29T00:00:{sequence:02d}+00:00",
         future=future,
     )
     return item
@@ -89,10 +103,7 @@ async def _reset_queue_state() -> None:
     """
 
     await service_module._stop_chat_input_worker()
-    service_module._chat_input_queue.clear()
-    service_module._chat_queue_condition = None
-    service_module._chat_queue_worker_task = None
-    service_module._chat_queue_sequence = 0
+    service_module._chat_input_queue.reset_for_test()
 
 
 def _patch_common_dependencies(monkeypatch, graph) -> None:
@@ -138,7 +149,8 @@ async def test_prune_over_two_drops_plain_messages() -> None:
     tagged = _item(2, mentioned_bot=True)
     bot_reply = _item(3, reply_to_current_bot=True)
 
-    survivors, dropped = service_module._prune_waiting_queue([
+    queue = queue_module.ChatInputQueue()
+    survivors, dropped = queue.prune([
         plain,
         tagged,
         bot_reply,
@@ -161,7 +173,8 @@ async def test_prune_over_five_keeps_only_bot_replies_after_first_stage() -> Non
         _item(6, reply_to_current_bot=True),
     ]
 
-    survivors, dropped = service_module._prune_waiting_queue(items)
+    queue = queue_module.ChatInputQueue()
+    survivors, dropped = queue.prune(items)
 
     assert [item.sequence for item in survivors] == [3, 4, 5, 6]
     assert [item.sequence for item in dropped] == [1, 2]
@@ -180,7 +193,8 @@ async def test_prune_still_over_five_keeps_latest_survivor() -> None:
         _item(6, reply_to_current_bot=True),
     ]
 
-    survivors, dropped = service_module._prune_waiting_queue(items)
+    queue = queue_module.ChatInputQueue()
+    survivors, dropped = queue.prune(items)
 
     assert [item.sequence for item in survivors] == [6]
     assert [item.sequence for item in dropped] == [1, 2, 3, 4, 5]
@@ -194,7 +208,8 @@ async def test_reply_id_without_adapter_bot_reply_marker_is_not_protected() -> N
     tagged = _item(2, mentioned_bot=True)
     bot_reply = _item(3, reply_to_current_bot=True)
 
-    survivors, dropped = service_module._prune_waiting_queue([
+    queue = queue_module.ChatInputQueue()
+    survivors, dropped = queue.prune([
         plain_reply,
         tagged,
         bot_reply,
@@ -202,6 +217,161 @@ async def test_reply_id_without_adapter_bot_reply_marker_is_not_protected() -> N
 
     assert [item.sequence for item in survivors] == [2, 3]
     assert [item.sequence for item in dropped] == [1]
+
+
+@pytest.mark.asyncio
+async def test_private_messages_are_not_pruned_as_group_noise() -> None:
+    """Private messages should survive group-noise pruning."""
+
+    plain_group = _item(1)
+    private_message = _item(
+        2,
+        channel_type="private",
+        platform_channel_id="dm-1",
+        platform_user_id="user-private",
+    )
+    tagged_group = _item(3, mentioned_bot=True)
+
+    queue = queue_module.ChatInputQueue()
+    survivors, dropped = queue.prune([
+        plain_group,
+        private_message,
+        tagged_group,
+    ])
+
+    assert [item.sequence for item in survivors] == [2, 3]
+    assert [item.sequence for item in dropped] == [1]
+
+
+@pytest.mark.asyncio
+async def test_private_messages_same_scope_coalesce() -> None:
+    """Private follow-ups in the same scope should collapse into the first item."""
+
+    first = _item(
+        1,
+        channel_type="private",
+        platform_channel_id="dm-1",
+        platform_user_id="user-1",
+        content="first",
+    )
+    second = _item(
+        2,
+        channel_type="private",
+        platform_channel_id="dm-1",
+        platform_user_id="user-1",
+        content="second",
+    )
+    third = _item(
+        3,
+        channel_type="private",
+        platform_channel_id="dm-2",
+        platform_user_id="user-1",
+        content="third",
+    )
+
+    queue = queue_module.ChatInputQueue()
+    survivors, collapsed = queue.coalesce_private([
+        first,
+        second,
+        third,
+    ])
+
+    assert [item.sequence for item in survivors] == [1, 3]
+    assert [(item.sequence, survivor.sequence) for item, survivor in collapsed] == [
+        (2, 1),
+    ]
+    assert first.combined_content == "first\nsecond"
+    assert [item.sequence for item in first.collapsed_items] == [2]
+
+
+@pytest.mark.asyncio
+async def test_addressed_group_followups_coalesce() -> None:
+    """Addressed-start same-author group follow-ups should collapse."""
+
+    first = _item(
+        1,
+        platform_user_id="user-1",
+        content="Kazusa,",
+        mentioned_bot=True,
+    )
+    second = _item(
+        2,
+        platform_user_id="user-1",
+        content="one more detail",
+    )
+    third = _item(
+        3,
+        platform_user_id="user-1",
+        content="and another",
+        reply_to_current_bot=True,
+    )
+
+    queue = queue_module.ChatInputQueue()
+    survivors, collapsed = queue.coalesce_addressed_group([
+        first,
+        second,
+        third,
+    ])
+
+    assert [item.sequence for item in survivors] == [1]
+    assert [(item.sequence, survivor.sequence) for item, survivor in collapsed] == [
+        (2, 1),
+        (3, 1),
+    ]
+    assert first.combined_content == "Kazusa,\none more detail\nand another"
+
+
+@pytest.mark.asyncio
+async def test_plain_group_runs_do_not_coalesce() -> None:
+    """Plain-start group runs should not collapse, even if a later item addresses."""
+
+    first = _item(1, platform_user_id="user-1")
+    second = _item(2, platform_user_id="user-1", mentioned_bot=True)
+
+    queue = queue_module.ChatInputQueue()
+    survivors, collapsed = queue.coalesce_addressed_group([
+        first,
+        second,
+    ])
+
+    assert [item.sequence for item in survivors] == [1, 2]
+    assert collapsed == []
+
+
+@pytest.mark.asyncio
+async def test_group_followups_require_same_author_adjacency_and_time_gap() -> None:
+    """Group coalescing should respect author adjacency and the time gap."""
+
+    first = _item(
+        1,
+        platform_user_id="user-1",
+        mentioned_bot=True,
+    )
+    other_author = _item(2, platform_user_id="user-2")
+    same_author_after_other = _item(3, platform_user_id="user-1")
+    late_followup = _item(
+        4,
+        platform_user_id="user-1",
+        mentioned_bot=True,
+        timestamp="2026-04-29T00:10:00+00:00",
+    )
+    too_late = _item(
+        5,
+        platform_user_id="user-1",
+        timestamp="2026-04-29T00:13:00+00:00",
+    )
+
+    queue = queue_module.ChatInputQueue()
+    survivors, collapsed = queue.coalesce_addressed_group([
+        first,
+        other_author,
+        same_author_after_other,
+        late_followup,
+        too_late,
+    ])
+
+    assert [item.sequence for item in survivors] == [1, 2, 3, 4, 5]
+    assert collapsed == []
 
 
 @pytest.mark.asyncio
@@ -214,7 +384,7 @@ async def test_chat_enqueue_path_does_not_save_directly(monkeypatch) -> None:
     monkeypatch.setattr(
         service_module,
         "_ensure_chat_input_worker_started",
-        lambda: None,
+        lambda **_kwargs: None,
     )
 
     chat_task = asyncio.create_task(service_module.chat(
@@ -223,10 +393,10 @@ async def test_chat_enqueue_path_does_not_save_directly(monkeypatch) -> None:
     ))
     await asyncio.sleep(0)
 
-    assert len(service_module._chat_input_queue) == 1
+    assert service_module._chat_input_queue.pending_count() == 1
     save_conversation.assert_not_awaited()
 
-    queued_item = service_module._chat_input_queue.popleft()
+    queued_item = service_module._chat_input_queue.pop_left_for_test()
     queued_item.future.set_result(service_module.ChatResponse())
     response = await asyncio.wait_for(chat_task, timeout=1.0)
 
@@ -268,12 +438,10 @@ async def test_worker_saves_dropped_messages_before_next_graph(monkeypatch) -> N
     dropped = _item(1)
     tagged = _item(2, mentioned_bot=True)
     bot_reply = _item(3, reply_to_current_bot=True)
-    service_module._chat_input_queue.extend([dropped, tagged, bot_reply])
+    service_module._chat_input_queue.extend_for_test([dropped, tagged, bot_reply])
 
     service_module._ensure_chat_input_worker_started()
-    condition = service_module._get_chat_queue_condition()
-    async with condition:
-        condition.notify()
+    await service_module._chat_input_queue.notify_for_test()
 
     dropped_response = await asyncio.wait_for(dropped.future, timeout=1.0)
     await asyncio.wait_for(graph_started.wait(), timeout=1.0)
@@ -319,12 +487,10 @@ async def test_dropped_message_never_invokes_graph(monkeypatch) -> None:
     dropped = _item(1)
     tagged = _item(2, mentioned_bot=True)
     bot_reply = _item(3, reply_to_current_bot=True)
-    service_module._chat_input_queue.extend([dropped, tagged, bot_reply])
+    service_module._chat_input_queue.extend_for_test([dropped, tagged, bot_reply])
 
     service_module._ensure_chat_input_worker_started()
-    condition = service_module._get_chat_queue_condition()
-    async with condition:
-        condition.notify()
+    await service_module._chat_input_queue.notify_for_test()
 
     response = await asyncio.wait_for(dropped.future, timeout=1.0)
 
@@ -334,4 +500,63 @@ async def test_dropped_message_never_invokes_graph(monkeypatch) -> None:
     assert graph_message_ids == ["2"]
 
     graph_can_finish.set()
+    await _reset_queue_state()
+
+
+@pytest.mark.asyncio
+async def test_worker_saves_collapsed_messages_before_graph(monkeypatch) -> None:
+    """Collapsed originals should persist before the surviving graph run."""
+
+    await _reset_queue_state()
+    call_order = []
+    captured_state = {}
+
+    class _Graph:
+        """Capture graph state for the collapsed survivor."""
+
+        async def ainvoke(self, state):
+            call_order.append("graph")
+            captured_state.update(state)
+            return {
+                "should_respond": False,
+                "use_reply_feature": True,
+                "final_dialog": [],
+                "future_promises": [],
+                "consolidation_state": None,
+            }
+
+    async def _save_conversation(doc):
+        call_order.append(f"save:{doc['platform_message_id']}")
+
+    monkeypatch.setattr(service_module, "save_conversation", _save_conversation)
+    _patch_common_dependencies(monkeypatch, _Graph())
+
+    first = _item(
+        1,
+        channel_type="private",
+        platform_channel_id="dm-1",
+        platform_user_id="user-1",
+        content="first",
+    )
+    second = _item(
+        2,
+        channel_type="private",
+        platform_channel_id="dm-1",
+        platform_user_id="user-1",
+        content="second",
+    )
+    service_module._chat_input_queue.extend_for_test([first, second])
+
+    service_module._ensure_chat_input_worker_started()
+    await service_module._chat_input_queue.notify_for_test()
+
+    collapsed_response = await asyncio.wait_for(second.future, timeout=1.0)
+    survivor_response = await asyncio.wait_for(first.future, timeout=1.0)
+
+    assert collapsed_response.messages == []
+    assert survivor_response.messages == []
+    assert call_order[:3] == ["save:2", "save:1", "graph"]
+    assert captured_state["user_input"] == "first\nsecond"
+    assert captured_state["use_reply_feature"] is False
+
     await _reset_queue_state()

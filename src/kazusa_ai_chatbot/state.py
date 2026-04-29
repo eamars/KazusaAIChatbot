@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from typing import Any
+from typing import Annotated
 from typing import NotRequired
 from typing import TypedDict
 
@@ -26,6 +27,26 @@ class DebugModes(TypedDict, total=False):
     listen_only: bool      # Record data but skip thinking (no LLM calls beyond relevance)
     think_only: bool       # Full pipeline but suppress dialog in response
     no_remember: bool      # Full pipeline but skip consolidation (stage 4)
+
+
+def keep_false(current: bool | None, update: bool | None) -> bool:
+    """Preserve a false value in monotonic permission-latch state.
+
+    Args:
+        current: Current graph-state value.
+        update: Incoming graph-node update.
+
+    Returns:
+        False once either side is false; otherwise true.
+    """
+
+    if current is False or update is False:
+        return_value = False
+    elif update is True:
+        return_value = True
+    else:
+        return_value = current is not False
+    return return_value
 
 
 class IMProcessState(TypedDict):
@@ -58,7 +79,12 @@ class IMProcessState(TypedDict):
     # Output from Relevance Agent
     should_respond: bool
     reason_to_respond: str
-    use_reply_feature: bool
+    # Origin contract: service.py seeds this true for normal turns and false
+    # for collapsed multi-message turns. LangGraph combines updates through
+    # keep_false so once any pipeline stage disables platform reply anchoring,
+    # no later stage can re-enable it. ChatResponse.should_reply is derived
+    # from this final latched value and must not add a fallback override.
+    use_reply_feature: Annotated[bool, keep_false]
     channel_topic: str
     indirect_speech_context: str  # Only populated for Situation B (user talks about the character to others)
     conversation_episode_state: NotRequired[ConversationEpisodeStateDoc | None]

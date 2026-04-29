@@ -180,10 +180,7 @@ async def _reset_queue_state() -> None:
     """
 
     await service_module._stop_chat_input_worker()
-    service_module._chat_input_queue.clear()
-    service_module._chat_queue_condition = None
-    service_module._chat_queue_worker_task = None
-    service_module._chat_queue_sequence = 0
+    service_module._chat_input_queue.reset_for_test()
 
 
 @pytest.mark.asyncio
@@ -517,7 +514,7 @@ async def test_chat_listen_only_keeps_boolean_should_respond(monkeypatch):
     )
 
     assert captured_state["should_respond"] is False
-    assert captured_state["use_reply_feature"] is False
+    assert captured_state["use_reply_feature"] is True
     assert response.messages == []
     assert response.should_reply is False
     await _reset_queue_state()

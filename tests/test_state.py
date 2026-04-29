@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import typing
 
-from kazusa_ai_chatbot.state import IMProcessState, DebugModes
+from kazusa_ai_chatbot.state import IMProcessState, DebugModes, keep_false
 
 
 class TestIMProcessState:
@@ -88,3 +88,10 @@ class TestDebugModes:
         modes: DebugModes = {"listen_only": True, "no_remember": True}
         assert modes["listen_only"] is True
         assert modes["no_remember"] is True
+
+
+class TestMonotonicLatches:
+    def test_keep_false_preserves_false(self):
+        assert keep_false(True, False) is False
+        assert keep_false(False, True) is False
+        assert keep_false(None, True) is True
