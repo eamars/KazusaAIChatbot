@@ -322,5 +322,5 @@ async def record_with_llm(record_input: ConversationProgressRecordInput) -> dict
     ])
     parsed = parse_llm_json_output(response.content)
     validated = validate_recorder_output(parsed)
-    logger.info(f'Conversation progress recorder parsed: platform={record_input["scope"].platform} channel={record_input["scope"].platform_channel_id or "<dm>"} user={record_input["scope"].global_user_id} raw={log_preview(response.content)} validated={log_preview(validated)}')
+    logger.info(f'Conversation progress recorder parsed: platform={record_input["scope"].platform} channel={record_input["scope"].platform_channel_id or "<dm>"} user={record_input["scope"].global_user_id} parsed={log_preview(parsed)} validated={log_preview(validated)}')
     return validated
