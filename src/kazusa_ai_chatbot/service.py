@@ -617,7 +617,10 @@ async def chat(req: ChatRequest, background_tasks: BackgroundTasks):
     if semaphore is None:
         semaphore = asyncio.Semaphore(1)
 
-    async with semaphore:
+    await semaphore.acquire()
+    semaphore_release_transferred = False
+
+    try:
         timestamp = req.timestamp or datetime.now(timezone.utc).isoformat()
 
         # Ensure the character is addressable by global_user_id before RAG.
@@ -730,22 +733,24 @@ async def chat(req: ChatRequest, background_tasks: BackgroundTasks):
 
         logger.debug(f'Chat result: platform={req.platform} channel={req.platform_channel_id or "<dm>"} message={req.platform_message_id or "<none>"} user={req.platform_user_id} should_respond={result.get("should_respond")} should_reply={should_reply} final_dialog_count={len(final_dialog)} future_promises={len(result.get("future_promises", []))} final_dialog={log_list_preview(final_dialog)}')
 
-        # Save bot message in background only if the bot actually generated a response
-        if final_dialog:
-            background_tasks.add_task(_save_bot_message, result)
+        should_save_bot_message = bool(final_dialog)
+        consolidation_state_dict: dict | None = None
+        if isinstance(consolidation_state, Mapping):
+            consolidation_state_dict = dict(consolidation_state)
 
-        if final_dialog and isinstance(consolidation_state, Mapping):
-            background_tasks.add_task(_run_conversation_progress_record_background, dict(consolidation_state))
+        should_record_progress = bool(final_dialog) and consolidation_state_dict is not None
+        if should_record_progress:
             logger.debug(f'Background conversation progress recorder queued: platform={req.platform} channel={req.platform_channel_id or "<dm>"} message={req.platform_message_id or "<none>"}')
         elif not final_dialog:
             logger.info(f'Background conversation progress recorder skipped: platform={req.platform} channel={req.platform_channel_id or "<dm>"} message={req.platform_message_id or "<none>"} should_respond={result.get("should_respond")} final_dialog_count=0')
         else:
             logger.warning(f'Background conversation progress recorder skipped: unexpected consolidation_state type={type(consolidation_state).__name__}')
 
+        should_consolidate = False
         if debug_modes.get("no_remember"):
             logger.debug("Background consolidation skipped: no_remember is active")
-        elif isinstance(consolidation_state, Mapping):
-            background_tasks.add_task(_run_consolidation_background, dict(consolidation_state))
+        elif consolidation_state_dict is not None:
+            should_consolidate = True
             logger.debug(f'Background consolidation queued: platform={req.platform} channel={req.platform_channel_id or "<dm>"} message={req.platform_message_id or "<none>"}')
         elif not final_dialog:
             logger.info(f'Background consolidation skipped: platform={req.platform} channel={req.platform_channel_id or "<dm>"} message={req.platform_message_id or "<none>"} should_respond={result.get("should_respond")} final_dialog_count=0')
@@ -768,7 +773,42 @@ async def chat(req: ChatRequest, background_tasks: BackgroundTasks):
             should_reply=should_reply,
             scheduled_followups=scheduled_followups,
         )
+
+        has_post_response_work = (
+            should_save_bot_message
+            or should_record_progress
+            or should_consolidate
+        )
+        if has_post_response_work:
+            async def _run_post_response_background() -> None:
+                """Run post-response writes before allowing the next chat turn.
+
+                Returns:
+                    None. The acquired chat semaphore is always released.
+                """
+
+                try:
+                    if should_save_bot_message:
+                        await _save_bot_message(result)
+                    if should_record_progress and consolidation_state_dict is not None:
+                        await _run_conversation_progress_record_background(
+                            consolidation_state_dict,
+                        )
+                    if should_consolidate and consolidation_state_dict is not None:
+                        await _run_consolidation_background(consolidation_state_dict)
+                finally:
+                    semaphore.release()
+
+            background_tasks.add_task(_run_post_response_background)
+            semaphore_release_transferred = True
+        else:
+            semaphore.release()
+            semaphore_release_transferred = True
+
         return return_value
+    finally:
+        if not semaphore_release_transferred:
+            semaphore.release()
 
 
 @app.post("/event")
