@@ -91,6 +91,26 @@ def test_content_anchor_prompt_allows_progression_anchor_labels() -> None:
     assert "avoid_reopening" in l3_module._CONTENT_ANCHOR_AGENT_PROMPT
 
 
+def test_content_anchor_prompt_requires_fact_based_answers_without_case_example() -> None:
+    """Prompt contract makes ANSWER obey direct facts without overfitting a case."""
+
+    prompt = l3_module._CONTENT_ANCHOR_AGENT_PROMPT
+
+    assert "事实型回答一致性" in prompt
+    assert "事实型回答必须以事实为准" in prompt
+    assert "`[FACT]` 和 `[ANSWER]` 都必须服从它" in prompt
+    assert "`rag_result.answer` 是当前轮最高优先级事实摘要" in prompt
+    assert "`TENTATIVE` 只能表现为语气上的保留、局促或委婉" in prompt
+    assert "禁止只输出 `CONFIRM`、`REFUSE`、`TENTATIVE`" in prompt
+    assert "不要把其中的事实类别压缩成“其他的”“那些东西”“之类的”" in prompt
+    assert "按“可回答事实是：A、B、C”的语义结构生成 `[ANSWER]`" in prompt
+    assert "不得改写成第一人称认知失败" in prompt
+    assert "不得改成责备、反问、防御、敷衍" in prompt
+    assert "不得把“事实里存在未知属性”改写成“角色不知道、记不清或无法回答”" in prompt
+    assert "充电线" not in prompt
+    assert "HDMI" not in prompt
+
+
 def test_projection_preserves_relative_age_for_prior_disclosure() -> None:
     """Stored first_seen_at becomes an LLM-facing age_hint."""
 

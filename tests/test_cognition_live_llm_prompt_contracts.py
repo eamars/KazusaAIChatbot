@@ -479,6 +479,105 @@ async def test_live_content_anchor_does_not_leak_character_public_facts_on_unrel
     assert "狮子座" not in joined, f"Unrelated mood question should not leak birthday facts: {anchors!r}"
 
 
+async def test_live_content_anchor_answers_from_direct_conversation_evidence(ensure_live_llm) -> None:
+    state = _make_state(
+        user_input="我确认一下，你还记得我刚刚说那堆充电线、HDMI 线，还有几根我自己都忘了用途的线里大概有哪些吗？记不全也没关系。",
+        chat_history_recent=[
+            {
+                "role": "user",
+                "content": "大概就是充电线、HDMI 线，还有几根我自己都忘了用途的线。你说得对，可能没那么容易分清，我先不急着处理。",
+            },
+            {
+                "role": "assistant",
+                "content": "哇，这也太有仪式感了吧！感觉你搞得像在进行什么考古挖掘现场一样，乱糟糟的也挺好嘛。",
+            },
+        ],
+        channel_topic="用户确认刚刚提到的旧线缆内容",
+        memory_evidence_text="",
+        last_relationship_insight="可以一起进行毫无意义的日常消磨。",
+    )
+    state.update(
+        {
+            "internal_monologue": "检索结果已经给出用户刚刚提到的线缆种类。虽然被检查细节有点局促，但回答应基于事实。",
+            "logical_stance": "TENTATIVE",
+            "character_intent": "PROVIDE",
+            "conversation_progress": {
+                "status": "active",
+                "continuity": "same_episode",
+                "conversation_mode": "casual_chat",
+                "episode_phase": "developing",
+                "topic_momentum": "stable",
+                "current_thread": "user discussing tidying up old cables",
+                "user_goal": "share daily trivialities",
+                "current_blocker": "",
+                "user_state_updates": [
+                    {"text": "user is sharing mundane life details", "age_hint": "just now"}
+                ],
+                "assistant_moves": ["playful_teasing", "metaphorical_comment", "playful_mockery"],
+                "overused_moves": ["probe_intent"],
+                "open_loops": [],
+                "resolved_threads": [],
+                "avoid_reopening": [{"text": "user's intent/motive", "age_hint": "just now"}],
+                "emotional_trajectory": "neutral to slightly sheepish/vague",
+                "next_affordances": ["answer the cable detail check"],
+                "progression_guidance": "Answer the factual detail check and avoid probing deeper.",
+            },
+        }
+    )
+    state["rag_result"]["answer"] = (
+        "在 2026-04-29 的消息中，用户提到过有一些充电线、HDMI 线，"
+        "以及几根自己都忘了用途的旧线缆，并表示目前不急着处理。"
+    )
+    state["rag_result"]["conversation_evidence"] = [
+        (
+            "用户在 2026-04-29 的消息中提到，有一些充电线、HDMI 线以及"
+            "用途不明的旧线缆，并表示目前不急着处理。"
+        )
+    ]
+    state["rag_result"]["supervisor_trace"] = {
+        "loop_count": 1,
+        "unknown_slots": [],
+        "dispatched": [
+            {
+                "agent": "conversation_keyword_agent",
+                "resolved": True,
+                "slot": "Conversation-keyword: find messages containing cable detail",
+            }
+        ],
+    }
+
+    result = await call_content_anchor_agent(state)
+    _debug_snapshot("prompt_contracts.content_anchor.fact_based_answer_from_conversation_evidence", result)
+
+    anchors = result["content_anchors"]
+    joined = "\n".join(anchors)
+    answer_anchors = [anchor for anchor in anchors if anchor.startswith("[ANSWER]")]
+    assert answer_anchors, f"Missing ANSWER anchor: {anchors!r}"
+    answer_text = "\n".join(answer_anchors)
+    assert "充电线" in answer_text, f"Direct evidence should be reflected in ANSWER: {anchors!r}"
+    assert "HDMI" in answer_text, f"Direct evidence should be reflected in ANSWER: {anchors!r}"
+    assert any(token in answer_text for token in ("用途不明", "忘了用途", "不清楚用途", "不知道用途", "不知道干什么")), (
+        f"Direct evidence should include the unknown-purpose cable detail: {anchors!r}"
+    )
+    forbidden_uncertainty = (
+        "记不清",
+        "记不起来",
+        "模糊",
+        "不确定",
+        "没印象",
+        "没法说清楚",
+        "没看清楚",
+        "无法回答",
+    )
+    assert not any(token in answer_text for token in forbidden_uncertainty), (
+        f"ANSWER contradicted direct evidence with uncertainty: {anchors!r}"
+    )
+    forbidden_deflection = ("怎么可能", "为什么要", "记得那么细", "你自己都")
+    assert not any(token in answer_text for token in forbidden_deflection), (
+        f"ANSWER deflected instead of restating direct evidence: {anchors!r}"
+    )
+
+
 _STACK_CASES = [
     pytest.param(
         "weather_english",

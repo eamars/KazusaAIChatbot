@@ -100,7 +100,7 @@ def _valid_candidates(result: dict) -> list[dict]:
 
 
 def _validate_merge_result(result: dict, candidate: dict, candidate_clusters: list[dict]) -> dict:
-    candidate_id = text_or_empty(result.get("candidate_id"))
+    expected_candidate_id = candidate["candidate_id"]
     decision = text_or_empty(result.get("decision"))
     cluster_id = text_or_empty(result.get("cluster_id"))
     valid_cluster_ids = {
@@ -109,8 +109,6 @@ def _validate_merge_result(result: dict, candidate: dict, candidate_clusters: li
         if text_or_empty(cluster.get("unit_id"))
     }
 
-    if candidate_id != candidate["candidate_id"]:
-        raise ValueError("merge judge returned an unknown candidate_id")
     if decision not in {"create", "merge", "evolve"}:
         raise ValueError(f"invalid merge decision: {decision!r}")
     if decision == "create" and cluster_id:
@@ -119,7 +117,7 @@ def _validate_merge_result(result: dict, candidate: dict, candidate_clusters: li
         raise ValueError("merge/evolve decision returned an unknown cluster_id")
 
     return_value = {
-        "candidate_id": candidate_id,
+        "candidate_id": expected_candidate_id,
         "decision": decision,
         "cluster_id": cluster_id,
         "reason": text_or_empty(result.get("reason")),
