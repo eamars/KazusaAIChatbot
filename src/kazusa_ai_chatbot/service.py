@@ -15,11 +15,13 @@ from typing import Any
 
 from fastapi import FastAPI, BackgroundTasks
 from pydantic import BaseModel, Field
+from pymongo.errors import PyMongoError
 
 from kazusa_ai_chatbot.config import (
     CHARACTER_GLOBAL_USER_ID,
     CHAT_HISTORY_RECENT_LIMIT,
     CONVERSATION_HISTORY_LIMIT,
+    RAG_CACHE2_MAX_ENTRIES,
     SCHEDULED_TASKS_ENABLED,
 )
 from kazusa_ai_chatbot.conversation_progress import (
@@ -38,6 +40,7 @@ from kazusa_ai_chatbot.db import (
     get_conversation_history,
     get_db,
     get_user_profile,
+    load_initializer_entries,
     resolve_global_user_id,
     save_conversation,
 )
@@ -61,6 +64,7 @@ from kazusa_ai_chatbot.nodes.relevance_agent import relevance_agent, multimedia_
 from kazusa_ai_chatbot.nodes.persona_supervisor2 import persona_supervisor2
 from kazusa_ai_chatbot.nodes.persona_supervisor2_consolidator import call_consolidation_subgraph
 from kazusa_ai_chatbot.nodes.persona_supervisor2_consolidator_persistence import configure_task_dispatcher
+from kazusa_ai_chatbot.rag.cache2_policy import INITIALIZER_CACHE_NAME
 from kazusa_ai_chatbot.rag.cache2_runtime import get_rag_cache2_runtime
 
 logger = logging.getLogger(__name__)
@@ -819,6 +823,43 @@ def register_remote_runtime_adapter(
     )
 
 
+async def _hydrate_rag_initializer_cache() -> int:
+    """Hydrate current-version persistent initializer cache rows into memory.
+
+    Returns:
+        Number of valid rows loaded into the process-local Cache2 runtime.
+    """
+
+    try:
+        rows = await load_initializer_entries(limit=RAG_CACHE2_MAX_ENTRIES)
+    except PyMongoError as exc:
+        logger.exception(f"Persistent initializer cache hydration failed: {exc}")
+        return 0
+
+    runtime = get_rag_cache2_runtime()
+    loaded_count = 0
+    for row in reversed(rows):
+        cache_key = row.get("_id")
+        result = row.get("result")
+        if not isinstance(cache_key, str) or not isinstance(result, dict):
+            logger.warning(f"Skipping malformed persistent initializer cache row: {log_preview(row)}")
+            continue
+
+        raw_metadata = row.get("metadata", {})
+        metadata = raw_metadata if isinstance(raw_metadata, dict) else {}
+        await runtime.store(
+            cache_key=cache_key,
+            cache_name=INITIALIZER_CACHE_NAME,
+            result=result,
+            dependencies=[],
+            metadata=metadata,
+        )
+        loaded_count += 1
+
+    logger.info(f"Hydrated {loaded_count} persistent RAG initializer cache entries")
+    return loaded_count
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     global _personality, _graph, _task_dispatcher, _adapter_registry
@@ -826,7 +867,10 @@ async def lifespan(app: FastAPI):
     # 1. Database bootstrap
     await db_bootstrap()
 
-    # 2. Load character profile from database
+    # 2. Hydrate persistent RAG initializer cache into the process-local LRU
+    await _hydrate_rag_initializer_cache()
+
+    # 3. Load character profile from database
     _personality = await get_character_profile()
     if not _personality.get("name"):
         raise RuntimeError(
@@ -835,17 +879,17 @@ async def lifespan(app: FastAPI):
             "python -m scripts.load_character_profile personalities/kazusa.json"
         )
 
-    # 3. Build the LangGraph pipeline
+    # 4. Build the LangGraph pipeline
     _graph = _build_graph()
 
-    # 4. Start MCP tool servers
+    # 5. Start MCP tool servers
     try:
         await mcp_manager.start()
     except Exception as exc:
         logger.debug(f"Handled exception in lifespan: {exc}")
         logger.exception("MCP manager failed to start — tools will be unavailable")
 
-    # 5. Build the task-dispatch runtime
+    # 6. Build the task-dispatch runtime
     tool_registry = ToolRegistry()
     tool_registry.register(build_send_message_tool())
     adapter_registry = AdapterRegistry()
@@ -861,7 +905,7 @@ async def lifespan(app: FastAPI):
         pending_index=pending_index,
     )
 
-    # 6. Load pending scheduled events
+    # 7. Load pending scheduled events
     if SCHEDULED_TASKS_ENABLED:
         await scheduler.load_pending_events()
     else:

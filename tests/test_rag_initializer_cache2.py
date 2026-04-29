@@ -9,6 +9,10 @@ from kazusa_ai_chatbot.rag.cache2_policy import build_initializer_cache_key
 from kazusa_ai_chatbot.rag.cache2_runtime import RAGCache2Runtime
 
 
+class _ClosedTask:
+    """Placeholder returned by a fake ``asyncio.create_task``."""
+
+
 class _DummyResponse:
     """Small LangChain-like response wrapper for initializer tests."""
 
@@ -44,6 +48,25 @@ class _CountingAsyncLLM:
         """
         self.calls += 1
         return _DummyResponse(json.dumps(self.payload))
+
+
+def _capture_create_task(created: list) -> object:
+    """Build a fake create_task function that records and closes coroutines.
+
+    Args:
+        created: List populated with received coroutine objects.
+
+    Returns:
+        Function compatible with ``asyncio.create_task`` for these tests.
+    """
+
+    def fake_create_task(coro):
+        created.append(coro)
+        coro.close()
+        return_value = _ClosedTask()
+        return return_value
+
+    return fake_create_task
 
 
 def test_initializer_cache_key_ignores_volatile_timestamp() -> None:
@@ -158,11 +181,17 @@ def test_normalize_dispatch_accepts_valid_payload() -> None:
 async def test_rag_initializer_serves_second_identical_call_from_cache(monkeypatch) -> None:
     """A repeated initializer call should reuse Cache 2 and skip the LLM."""
     runtime = RAGCache2Runtime(max_entries=10)
+    created_tasks: list = []
     llm = _CountingAsyncLLM({
         "unknown_slots": ["Identity: look up display name 'Alice' to get global_user_id"]
     })
     monkeypatch.setattr(supervisor2_module, "get_rag_cache2_runtime", lambda: runtime)
     monkeypatch.setattr(supervisor2_module, "_initializer_llm", llm)
+    monkeypatch.setattr(
+        supervisor2_module.asyncio,
+        "create_task",
+        _capture_create_task(created_tasks),
+    )
 
     state = {
         "original_query": "what did Alice say?",
@@ -182,3 +211,79 @@ async def test_rag_initializer_serves_second_identical_call_from_cache(monkeypat
     assert second["initializer_cache"]["hit"] is True
     assert llm.calls == 1
     assert runtime.get_stats()["hits"] == 1
+    assert len(created_tasks) == 2
+
+
+@pytest.mark.asyncio
+async def test_rag_initializer_hit_schedules_persistent_hit(monkeypatch) -> None:
+    """A memory cache hit should schedule hit recording without calling the LLM."""
+    runtime = RAGCache2Runtime(max_entries=10)
+    created_tasks: list = []
+    llm = _CountingAsyncLLM({"unknown_slots": ["should not run"]})
+    state = {
+        "original_query": "what did Alice say?",
+        "character_name": "Kazusa",
+        "context": {
+            "platform": "discord",
+            "platform_channel_id": "chan-1",
+            "user_name": "Alice",
+        },
+    }
+    cache_key = build_initializer_cache_key(
+        original_query=state["original_query"],
+        character_name=state["character_name"],
+        context=state["context"],
+    )
+    await runtime.store(
+        cache_key=cache_key,
+        cache_name=supervisor2_module.INITIALIZER_CACHE_NAME,
+        result={"unknown_slots": ["cached slot"], "confidence": 1.0},
+        dependencies=[],
+        metadata={"stage": "rag_initializer"},
+    )
+    monkeypatch.setattr(supervisor2_module, "get_rag_cache2_runtime", lambda: runtime)
+    monkeypatch.setattr(supervisor2_module, "_initializer_llm", llm)
+    monkeypatch.setattr(
+        supervisor2_module.asyncio,
+        "create_task",
+        _capture_create_task(created_tasks),
+    )
+
+    result = await supervisor2_module.rag_initializer(state)
+
+    assert result["unknown_slots"] == ["cached slot"]
+    assert result["initializer_cache"]["hit"] is True
+    assert llm.calls == 0
+    assert len(created_tasks) == 1
+
+
+@pytest.mark.asyncio
+async def test_rag_initializer_miss_schedules_persistent_upsert(monkeypatch) -> None:
+    """A cacheable miss should schedule write-through after memory store."""
+    runtime = RAGCache2Runtime(max_entries=10)
+    created_tasks: list = []
+    llm = _CountingAsyncLLM({"unknown_slots": ["fresh slot"]})
+    monkeypatch.setattr(supervisor2_module, "get_rag_cache2_runtime", lambda: runtime)
+    monkeypatch.setattr(supervisor2_module, "_initializer_llm", llm)
+    monkeypatch.setattr(
+        supervisor2_module.asyncio,
+        "create_task",
+        _capture_create_task(created_tasks),
+    )
+    state = {
+        "original_query": "what did Alice say?",
+        "character_name": "Kazusa",
+        "context": {
+            "platform": "discord",
+            "platform_channel_id": "chan-1",
+            "user_name": "Alice",
+        },
+    }
+
+    result = await supervisor2_module.rag_initializer(state)
+
+    assert result["unknown_slots"] == ["fresh slot"]
+    assert result["initializer_cache"]["hit"] is False
+    assert llm.calls == 1
+    assert len(created_tasks) == 1
+    assert runtime.get_stats()["size"] == 1

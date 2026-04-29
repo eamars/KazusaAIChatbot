@@ -276,6 +276,23 @@ class MemoryDoc(TypedDict, total=False):
     expiry_timestamp: str | None    # ISO-8601 or None (never expires)
 
 
+class RAGCache2PersistentEntryDoc(TypedDict, total=False):
+    """A durable backing row for selected Cache2 entries.
+
+    Rows are keyed by the stable cache key in ``_id``. The initial allowlisted
+    cache is only ``rag2_initializer``.
+    """
+
+    _id: str
+    cache_name: str
+    version_key: str
+    result: dict
+    metadata: dict
+    created_at: str
+    updated_at: str
+    hit_count: int
+
+
 def build_memory_doc(
     memory_name: str,
     content: str,

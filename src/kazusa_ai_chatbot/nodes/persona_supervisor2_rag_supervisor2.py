@@ -50,6 +50,10 @@ from kazusa_ai_chatbot.config import (
     RAG_SUBAGENT_LLM_BASE_URL,
     RAG_SUBAGENT_LLM_MODEL,
 )
+from kazusa_ai_chatbot.db.rag_cache2_persistent import (
+    record_initializer_hit,
+    upsert_initializer_entry,
+)
 from kazusa_ai_chatbot.mcp_client import mcp_manager
 from kazusa_ai_chatbot.rag.cache2_policy import (
     INITIALIZER_AGENT_REGISTRY_VERSION,
@@ -508,6 +512,39 @@ def _read_cached_initializer_slots(cached: object) -> list[str] | None:
     return return_value
 
 
+def _initializer_cache_result(unknown_slots: list[str]) -> dict[str, Any]:
+    """Build the persisted and in-memory initializer cache payload.
+
+    Args:
+        unknown_slots: Slot strategy produced by the live initializer.
+
+    Returns:
+        Cache payload containing slots and confidence.
+    """
+
+    return_value = {
+        "unknown_slots": list(unknown_slots),
+        "confidence": 1.0,
+    }
+    return return_value
+
+
+def _initializer_cache_metadata() -> dict[str, Any]:
+    """Build operational metadata for initializer cache entries.
+
+    Returns:
+        Metadata describing the initializer stage and version constants.
+    """
+
+    return_value = {
+        "stage": "rag_initializer",
+        "initializer_prompt_version": INITIALIZER_PROMPT_VERSION,
+        "agent_registry_version": INITIALIZER_AGENT_REGISTRY_VERSION,
+        "strategy_schema_version": INITIALIZER_STRATEGY_SCHEMA_VERSION,
+    }
+    return return_value
+
+
 async def _write_initializer_cache(
     *,
     cache_key: str,
@@ -522,17 +559,9 @@ async def _write_initializer_cache(
     await get_rag_cache2_runtime().store(
         cache_key=cache_key,
         cache_name=INITIALIZER_CACHE_NAME,
-        result={
-            "unknown_slots": list(unknown_slots),
-            "confidence": 1.0,
-        },
+        result=_initializer_cache_result(unknown_slots),
         dependencies=[],
-        metadata={
-            "stage": "rag_initializer",
-            "initializer_prompt_version": INITIALIZER_PROMPT_VERSION,
-            "agent_registry_version": INITIALIZER_AGENT_REGISTRY_VERSION,
-            "strategy_schema_version": INITIALIZER_STRATEGY_SCHEMA_VERSION,
-        },
+        metadata=_initializer_cache_metadata(),
     )
 
 
@@ -560,6 +589,7 @@ async def rag_initializer(state: ProgressiveRAGState) -> dict:
     cached_slots = _read_cached_initializer_slots(cached)
     if cached_slots is not None:
         logger.info(f'RAG2 initializer cache hit: query={log_preview(state["original_query"])} slots={len(cached_slots)} unknown_slots={log_list_preview(cached_slots)} cache_key={cache_key}')
+        asyncio.create_task(record_initializer_hit(cache_key))
         return_value = {
             "unknown_slots": cached_slots,
             "initializer_cache": _initializer_cache_status(
@@ -589,6 +619,13 @@ async def rag_initializer(state: ProgressiveRAGState) -> dict:
     unknown_slots = _normalize_initializer_slots(result.get("unknown_slots", []))
     if cacheable_result:
         await _write_initializer_cache(cache_key=cache_key, unknown_slots=unknown_slots)
+        asyncio.create_task(
+            upsert_initializer_entry(
+                cache_key=cache_key,
+                result=_initializer_cache_result(unknown_slots),
+                metadata=_initializer_cache_metadata(),
+            )
+        )
 
     logger.info(f'RAG2 initializer result: query={log_preview(state["original_query"])} cacheable={cacheable_result} slots={len(unknown_slots)} unknown_slots={log_list_preview(unknown_slots)} raw={log_preview(result)}')
     return_value = {

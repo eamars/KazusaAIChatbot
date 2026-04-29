@@ -9,7 +9,16 @@ from __future__ import annotations
 import logging
 from datetime import datetime, timezone
 
+from kazusa_ai_chatbot.config import RAG_CACHE2_MAX_ENTRIES
 from kazusa_ai_chatbot.db._client import enable_vector_index, get_db
+from kazusa_ai_chatbot.db.rag_cache2_persistent import (
+    INITIALIZER_CACHE_NAME,
+    PERSISTENT_CACHE_COLLECTION,
+    PERSISTENT_CACHE_LOOKUP_INDEX,
+    PERSISTENT_CACHE_LOOKUP_KEYS,
+    prune_persistent_entries,
+    purge_stale_initializer_entries,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -41,6 +50,7 @@ async def db_bootstrap() -> None:
         "user_memory_units",
         "scheduled_events",
         "conversation_episode_state",
+        PERSISTENT_CACHE_COLLECTION,
     ]
     for name in required_collections:
         if name not in existing:
@@ -107,6 +117,16 @@ async def db_bootstrap() -> None:
     await db.user_memory_units.create_index(
         [("global_user_id", 1), ("status", 1), ("updated_at", -1)],
         name="user_memory_unit_owner_status_updated",
+    )
+    await db[PERSISTENT_CACHE_COLLECTION].create_index(
+        PERSISTENT_CACHE_LOOKUP_KEYS,
+        name=PERSISTENT_CACHE_LOOKUP_INDEX,
+    )
+
+    await purge_stale_initializer_entries()
+    await prune_persistent_entries(
+        cache_name=INITIALIZER_CACHE_NAME,
+        max_entries=5 * RAG_CACHE2_MAX_ENTRIES,
     )
 
     # ── Vector search indexes (best-effort — requires Atlas) ──────

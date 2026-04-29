@@ -4,7 +4,7 @@
 
 - Cache expensive reusable retrieval work at the individual RAG helper-agent level.
 - Cache initializer search strategy separately so the system can learn better retrieval paths over time.
-- Keep result cache session-scoped and implementation-simple: cache entries may be discarded on Kazusa service reboot.
+- Keep helper-agent result cache session-scoped and implementation-simple: helper-agent result entries may be discarded on Kazusa service reboot.
 - Keep cache ownership in the RAG2 helper-agent layer. Cache2 does not depend
   on the removed RAG1 graph or any MongoDB write-through cache collection.
 
@@ -26,16 +26,17 @@ The initializer cache should not become deterministic hard routing too early. It
 
 ## Storage Location
 
-- Store actual RAG result cache in Python in-memory session LRU.
-- It is acceptable for all result-cache entries to disappear on Kazusa service reboot.
-- Do not use MongoDB or a dedicated vector database for helper-agent result cache initially.
-- Optional long-term initializer strategy memory may be persisted later, but it should be treated as learned strategy evidence, not as trusted cached output.
+- Store helper-agent RAG result cache in the Python in-memory session LRU.
+- It is acceptable for all helper-agent result-cache entries to disappear on Kazusa service reboot.
+- Do not use MongoDB or a dedicated vector database for helper-agent result cache.
+- Persist only current-version `rag_initializer` strategy entries in MongoDB collection `rag_cache2_persistent_entries`. Service startup clears stale-version initializer rows, loads up to `RAG_CACHE2_MAX_ENTRIES` rows ordered by `hit_count desc, updated_at desc`, and inserts them into the Python LRU in reverse order so the hottest row lands at the MRU end.
+- Normal request-path cache reads never query MongoDB. Cacheable initializer misses store in memory first and schedule a best-effort MongoDB upsert; initializer memory hits schedule a best-effort `hit_count`/`updated_at` update. LRU eviction never deletes persistent rows.
 
 ## TTL / Eviction Policy
 
 - No time-based TTL for session cache by default.
 - Evict by max size pressure, preferably LRU rather than pure oldest.
-- Clear all session cache on service restart.
+- Clear all session cache on service restart, then hydrate current-version initializer strategy rows from MongoDB.
 - Correctness during a session is handled by invalidation events, not expiry timers.
 
 ## Invalidation Model
@@ -59,7 +60,7 @@ Implementation may combine eager deletion with lazy invalidation. Lazy invalidat
 
 | Agent / Stage                     | Cache Key                                                                                                                                                                   | Invalidator                                                                                                                                                                                                                                                                                                 | Storage Location                                                                   |
 | --------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------- |
-| `rag_initializer`                 | Normalized/decontextualized query embedding + context signature + `initializer_prompt_version` + `agent_registry_version` + `strategy_schema_version`                       | Prompt/schema/agent-roster version mismatch. Not invalidated by normal DB writes.                                                                                                                                                                                                                           | Python in-memory session LRU; optional persistent strategy-memory collection later |
+| `rag_initializer`                 | Normalized/decontextualized query embedding + context signature + `initializer_prompt_version` + `agent_registry_version` + `strategy_schema_version`                       | Prompt/schema/agent-roster version mismatch. Stale MongoDB rows are purged during bootstrap before hydration. Not invalidated by normal DB writes.                                                                                                                                                          | Python in-memory LRU backed by `rag_cache2_persistent_entries` startup hydration and fire-and-forget write-through |
 | `rag_dispatcher`                  | N/A                                                                                                                                                                         | N/A                                                                                                                                                                                                                                                                                                         | N/A                                                                                |
 | `rag_evaluator`                   | N/A                                                                                                                                                                         | N/A                                                                                                                                                                                                                                                                                                         | N/A                                                                                |
 | `rag_finalizer`                   | N/A                                                                                                                                                                         | N/A                                                                                                                                                                                                                                                                                                         | N/A                                                                                |

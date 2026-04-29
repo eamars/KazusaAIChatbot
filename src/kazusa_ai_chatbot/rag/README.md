@@ -214,14 +214,23 @@ This keeps cognition grounded without flooding prompts with raw search hits.
 
 ## Cache 2
 
-Cache 2 is the only RAG cache. It is a process-local, session-scoped LRU used by the helper-agent layer and initializer strategy lookup.
+Cache 2 is the only RAG cache. Its hot serving layer is a process-local LRU used by the helper-agent layer and initializer strategy lookup.
 
-Cache 2 is intentionally not a durable memory store:
+Helper-agent result cache entries are intentionally session-local:
 
-- entries disappear on service restart,
-- there is no MongoDB write-through cache collection,
+- helper-agent entries disappear on service restart,
+- helper-agent results are not written through to MongoDB,
 - correctness depends on dependency-based invalidation rather than long TTLs,
 - web search and final answers are not cached.
+
+The `rag_initializer` strategy cache is the one durable exception. Current-version
+initializer rows are persisted in `rag_cache2_persistent_entries`, loaded into
+the Python LRU during service startup, and ranked by `hit_count desc,
+updated_at desc` so the most useful paths survive restart. Normal request-path
+cache reads still check only the Python LRU. A new cacheable initializer path
+stores in memory first and then schedules a best-effort MongoDB upsert; an
+initializer memory hit schedules a best-effort hit-count update. LRU eviction
+does not delete the persistent row.
 
 Cache entries declare the data scopes they depend on, such as `user_profile`, `character_state`, or `conversation_history`. Durable write paths emit invalidation events after successful writes. The runtime evicts cached entries whose dependencies overlap the event scope.
 
@@ -295,7 +304,7 @@ Cache 2 exposes per-agent hit/miss statistics through service health data. These
 The most important behavior checks are:
 
 - progressive supervisor integration,
-- initializer Cache 2 reuse,
+- initializer Cache 2 reuse, startup hydration, and persistent hit counting,
 - `rag_result` projection,
 - Cache 2 invalidation from conversation saves,
 - Cache 2 invalidation from consolidator writes,
