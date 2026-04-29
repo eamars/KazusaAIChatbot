@@ -33,9 +33,29 @@ def _global_state() -> dict:
         "rag_result": {
             "user_image": {
                 "user_memory_context": {
-                    "objective_facts": [{"dedup_key": "likes_tea", "fact": "User likes tea"}],
-                    "active_commitments": [{"dedup_key": "reply_english", "fact": "Kazusa will reply in English"}],
-                    "milestones": [{"dedup_key": "met_kazusa", "fact": "Met Kazusa"}],
+                    "stable_patterns": [],
+                    "recent_shifts": [],
+                    "objective_facts": [
+                        {
+                            "fact": "User likes tea",
+                            "subjective_appraisal": "Kazusa treats this as a preference.",
+                            "relationship_signal": "Offer tea-related continuity.",
+                        }
+                    ],
+                    "active_commitments": [
+                        {
+                            "fact": "Kazusa will reply in English",
+                            "subjective_appraisal": "Kazusa treats this as active preference context.",
+                            "relationship_signal": "Use English in future replies when relevant.",
+                        }
+                    ],
+                    "milestones": [
+                        {
+                            "fact": "Met Kazusa",
+                            "subjective_appraisal": "Kazusa treats this as relationship history.",
+                            "relationship_signal": "Keep light continuity.",
+                        }
+                    ],
                 }
             }
         },
@@ -43,10 +63,10 @@ def _global_state() -> dict:
     }
 
 
-def test_build_existing_dedup_keys_uses_structured_profile_fields() -> None:
+def test_build_existing_dedup_keys_ignores_memory_unit_context() -> None:
     keys = consolidator_module._build_existing_dedup_keys(_global_state())
 
-    assert keys == {"likes_tea", "reply_english", "met_kazusa"}
+    assert keys == set()
 
 
 @pytest.mark.asyncio
@@ -60,7 +80,7 @@ async def test_empty_harvester_output_skips_evaluator(monkeypatch) -> None:
         return {"subjective_appraisals": [], "affinity_delta": 0, "last_relationship_insight": ""}
 
     async def _facts_harvester(state):
-        assert state["existing_dedup_keys"] == {"likes_tea", "reply_english", "met_kazusa"}
+        assert state["existing_dedup_keys"] == set()
         return {"new_facts": [], "future_promises": []}
 
     async def _fact_harvester_evaluator(_state):

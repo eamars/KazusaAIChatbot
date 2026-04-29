@@ -35,7 +35,21 @@ def _state() -> dict:
         "timestamp": "2026-04-27T00:00:00+12:00",
         "decontexualized_input": "记住我喜欢红茶。",
         "rag_result": {
-            "user_image": {"objective_facts": [{"fact": "提拉米苏喜欢绿茶"}]},
+            "user_image": {
+                "user_memory_context": {
+                    "stable_patterns": [],
+                    "recent_shifts": [],
+                    "objective_facts": [
+                        {
+                            "fact": "提拉米苏喜欢绿茶",
+                            "subjective_appraisal": "这是已有饮品偏好。",
+                            "relationship_signal": "饮品相关回应可参考该事实。",
+                        }
+                    ],
+                    "milestones": [],
+                    "active_commitments": [],
+                }
+            },
             "character_image": {"self_image": {"historical_summary": "谨慎"}},
             "memory_evidence": [{"summary": "旧记忆", "content": "提拉米苏喜欢绿茶"}],
             "conversation_evidence": ["刚才聊到饮料"],
@@ -91,4 +105,5 @@ async def test_fact_harvester_evaluator_reads_rag2_field_names(monkeypatch) -> N
     assert "rag_result.user_image" in system_prompt
     assert "rag_result.memory_evidence" in system_prompt
     assert "research_facts" not in system_prompt
-    assert payload["rag_result"]["user_image"]["objective_facts"][0]["fact"] == "提拉米苏喜欢绿茶"
+    memory_context = payload["rag_result"]["user_image"]["user_memory_context"]
+    assert memory_context["objective_facts"][0]["fact"] == "提拉米苏喜欢绿茶"

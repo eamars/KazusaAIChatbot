@@ -209,7 +209,7 @@ _COGNITION_CONSCIOUSNESS_PROMPT = """\
 | **`CHALLENGE`** | 质疑对方提问的动机。 | 拆穿请求背后的企图。 | 针锋相对，挑明对方的潜台词。 |
 
 # 思考路径
-1. **记忆回溯：** 检查 `user_memory_context`。先读事实锚点，再读 Kazusa 的主观评价和关系信号。
+1. **记忆回溯：** 检查 `user_memory_context`。先读事实锚点，再读角色的主观评价和关系信号。
 2. **动机解构：** 解析 `decontextualized_input` 和 `interaction_subtext`。先判断对方是否只是在进行普通互动；只有存在明确证据时，才升级为试探、施压或越界。
 3. **理智博弈：** 检查 `character_mood` 和 `global_vibe`。在这种心境和氛围下，结合我对他的直觉标签（last_relationship_insight），我该维持人设还是有所突破？
 4. **立场定夺：** 结合 L1 的直觉反馈（emotional_appraisal），拍板选定 `logical_stance`。**这是行政命令，下游 L3 严禁篡改。**
@@ -250,11 +250,11 @@ _COGNITION_CONSCIOUSNESS_PROMPT = """\
     "character_mood": "当前心境",
     "global_vibe": "环境氛围背景",
     "user_memory_context": {{
-        "stable_patterns": [{{"fact": "重复出现的事实模式", "subjective_appraisal": "Kazusa 的主观评价", "relationship_signal": "未来互动信号", "updated_at": "ISO时间"}}],
-        "recent_shifts": [{{"fact": "最近变化或局部事件", "subjective_appraisal": "Kazusa 的主观评价", "relationship_signal": "未来互动信号", "updated_at": "ISO时间"}}],
-        "objective_facts": [{{"fact": "客观事实", "subjective_appraisal": "Kazusa 如何看待这个事实", "relationship_signal": "未来互动信号", "updated_at": "ISO时间"}}],
-        "milestones": [{{"fact": "里程碑事件", "subjective_appraisal": "Kazusa 如何看待这个事件", "relationship_signal": "未来互动信号", "updated_at": "ISO时间"}}],
-        "active_commitments": [{{"fact": "当前仍有效的承诺/约定", "subjective_appraisal": "Kazusa 如何看待这个承诺", "relationship_signal": "执行或表达上的注意点", "updated_at": "ISO时间"}}]
+        "stable_patterns": [{{"fact": "重复出现的事实模式", "subjective_appraisal": "角色的主观评价", "relationship_signal": "未来互动信号", "updated_at": "ISO时间"}}],
+        "recent_shifts": [{{"fact": "最近变化或局部事件", "subjective_appraisal": "角色的主观评价", "relationship_signal": "未来互动信号", "updated_at": "ISO时间"}}],
+        "objective_facts": [{{"fact": "客观事实", "subjective_appraisal": "角色如何看待这个事实", "relationship_signal": "未来互动信号", "updated_at": "ISO时间"}}],
+        "milestones": [{{"fact": "里程碑事件", "subjective_appraisal": "角色如何看待这个事件", "relationship_signal": "未来互动信号", "updated_at": "ISO时间"}}],
+        "active_commitments": [{{"fact": "当前仍有效的承诺/约定", "subjective_appraisal": "角色如何看待这个承诺", "relationship_signal": "执行或表达上的注意点", "updated_at": "ISO时间"}}]
     }},
     "last_relationship_insight": "对该用户的核心关系洞察",
     "affinity_context": {{ "level": "string", "instruction": "string" }},

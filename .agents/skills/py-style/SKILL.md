@@ -5,7 +5,7 @@ description: Enforce and review Python coding style for this project. PEP 8 is t
 
 # Python Style Guide
 
-PEP 8 is the baseline style guide for all Python code in this project. On top of PEP 8, this skill defines and enforces the project's eleven explicit coding standards. Apply both layers proactively when writing Python code, and surface every violation when reviewing code.
+PEP 8 is the baseline style guide for all Python code in this project. On top of PEP 8, this skill defines and enforces the project's twelve explicit coding standards. Apply both layers proactively when writing Python code, and surface every violation when reviewing code.
 
 When PEP 8 and a project-specific rule overlap, follow the stricter project-specific rule. When PEP 8 covers an issue not mentioned here, follow PEP 8.
 
@@ -358,18 +358,69 @@ When reviewing: flag `%` string formatting and logging calls that pass a format 
 
 ---
 
+## Rule 12 — Keep LLM prompt, instance, and handler adjacent
+
+For LLM-backed stages, keep the three stage-defining parts next to each other in this order:
+
+```text
+prompt constant
+LLM instance
+LLM handler function
+```
+
+This makes it possible to review a prompt together with the exact model configuration, payload construction, parser, and structural validation that consume it.
+
+Do not group unrelated prompt constants at the top of a file while placing the handlers far below. Do not route distinct LLM stages through a generic helper that hides the prompt/model/payload/parser relationship.
+
+Prompt constants for structured LLM stages must include explicit generation guidance plus `# Input Format` and `# Output Format` sections. Use a section such as `# Generation Procedure` or `# Thinking Steps` to tell the local LLM how to inspect inputs and choose output fields. The format sections must match the handler's actual JSON payload and the validator's expected parsed output. Treat missing or stale guidance/format sections as a style violation because they hide prompt/handler contract drift.
+
+Prompt constants must not hard-code a character's concrete name unless that exact name is part of a test fixture or fixed source text. For reusable runtime prompts, decide whether the LLM actually needs the character name:
+
+- If the prompt only needs role ownership, use role-neutral wording such as "the active character", "the character", or "the speaker". This is preferred for subjective appraisal fields, internal reasoning fields, memory schemas, RAG summaries, and dialog-adjacent instructions where a name can shift voice.
+- If identity distinction is required, use the runtime `.format(...)` variable such as `{character_name}` and pass `state["character_profile"]["name"]` in the handler, following existing cognition prompt style.
+- Do not put learned names from logs or examples into schema examples. Examples are sticky for local LLMs and can accidentally anchor persona voice or subject/object interpretation.
+
+**Wrong:**
+```python
+_FIRST_PROMPT = "..."
+_SECOND_PROMPT = "..."
+_shared_llm = get_llm(...)
+
+async def first_handler(state):
+    system_prompt = SystemMessage(content=_FIRST_PROMPT)
+    human_message = HumanMessage(content=json.dumps(state, ensure_ascii=False))
+    response = await _shared_llm.ainvoke([system_prompt, human_message])
+    result = parse_llm_json_output(response.content)
+```
+
+**Right:**
+```python
+_FIRST_PROMPT = "..."
+_first_llm = get_llm(...)
+async def first_handler(state):
+    system_prompt = SystemMessage(content=_FIRST_PROMPT)
+    human_message = HumanMessage(content=json.dumps(state, ensure_ascii=False))
+    response = await _first_llm.ainvoke([system_prompt, human_message])
+    result = parse_llm_json_output(response.content)
+    ...
+```
+
+When reviewing: for every LLM-backed handler, verify the prompt, LLM object, and handler are adjacent, verify structured JSON output uses the repo's established parser such as `parse_llm_json_output`, and scan prompt examples/instructions for hard-coded character names that should be role-neutral or runtime-formatted.
+
+---
+
 ## Review workflow
 
 When asked to review a file or selection:
 
 1. Read the code in full.
-2. First check for PEP 8 violations, then check the eleven project-specific rules.
+2. First check for PEP 8 violations, then check the twelve project-specific rules.
 3. For each violation, list the line reference, the violated standard, and a one-sentence explanation of why it violates the rule.
 4. Propose the corrected version inline.
 5. If no violations are found, say so explicitly.
 
 When writing new code:
 
-Apply PEP 8 and all eleven project-specific rules before producing any output. If a rule conflict arises or a genuine exception is needed, surface it to the user with the reasoning rather than silently picking one path.
+Apply PEP 8 and all twelve project-specific rules before producing any output. If a rule conflict arises or a genuine exception is needed, surface it to the user with the reasoning rather than silently picking one path.
 
 See `references/examples.md` for additional annotated before/after examples.

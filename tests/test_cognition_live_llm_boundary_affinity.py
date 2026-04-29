@@ -116,13 +116,39 @@ def _build_character_profile(boundary_profile: dict | None = None) -> dict:
     return profile
 
 
-def _rag_result(*, objective_facts: str, user_image: dict, character_image: dict, memory_evidence: str) -> dict:
+def _memory_entry(fact: str) -> dict:
+    """Build one cognition-facing memory context entry for live fixtures."""
+
+    return {
+        "fact": fact,
+        "subjective_appraisal": "Kazusa treats this as relevant context for the current turn.",
+        "relationship_signal": "Use this fact only when it is directly relevant.",
+    }
+
+
+def _user_memory_context(objective_facts: str, recent_shift: str) -> dict:
+    """Build the post-cutover user memory context fixture."""
+
+    context = {
+        "stable_patterns": [],
+        "recent_shifts": [],
+        "objective_facts": [],
+        "milestones": [],
+        "active_commitments": [],
+    }
+    if objective_facts:
+        context["objective_facts"].append(_memory_entry(objective_facts))
+    if recent_shift:
+        context["recent_shifts"].append(_memory_entry(recent_shift))
+    return context
+
+
+def _rag_result(*, objective_facts: str, user_image: str, character_image: dict, memory_evidence: str) -> dict:
     """Build the RAG2 projection fixture used by boundary live tests."""
     return {
         "answer": "",
         "user_image": {
-            "objective_facts": [{"fact": objective_facts}] if objective_facts else [],
-            "user_image": user_image,
+            "user_memory_context": _user_memory_context(objective_facts, user_image),
         },
         "character_image": {"self_image": character_image},
         "third_party_profiles": [],
@@ -140,16 +166,9 @@ def _make_state(
     last_relationship_insight: str,
     boundary_profile: dict | None = None,
     objective_facts: str,
-    user_image: dict | str,
+    user_image: str,
     channel_topic: str = "放学后的私人相处",
 ) -> dict:
-    if isinstance(user_image, str):
-        user_image = {
-            "milestones": [],
-            "historical_summary": "",
-            "recent_window": [{"summary": user_image}],
-        }
-
     return {
         "character_profile": _build_character_profile(boundary_profile),
         "timestamp": datetime.now(timezone.utc).isoformat(),

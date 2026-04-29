@@ -76,6 +76,44 @@ _FACTS_HARVESTER_PROMPT = """\
 - 你需要根据 Evaluator Feedback 对输出做出相应的修正。
 - 对未提及内容不要做修改
 
+# 生成步骤
+1. 先读取 `user_name`、`timestamp`、`decontexualized_input`，确认本轮是谁在表达、表达了什么。
+2. 再读取 `final_dialog`，判断 {character_name} 最终是否真的接受、拒绝、保留选择权或形成承诺。
+3. 检查 `rag_result.user_image.user_memory_context`、`rag_result.user_memory_unit_candidates`、`rag_result.memory_evidence` 与 `existing_dedup_keys`，过滤已经存在或语义重复的内容。
+4. 对仍然有长期价值的事实或事件，写入 `new_facts`，并保留足够上下文让下游生成 fact / subjective_appraisal / relationship_signal。
+5. 对已经被 {character_name} 接下、后续仍需执行或遵守的事项，写入 `future_promises`。
+6. 如果没有合格事实或承诺，对应字段返回空数组；不要为了填满输出而复述对话。
+
+# 输入格式
+human payload 是以下 JSON：
+{{
+    "user_name": "当前用户显示名",
+    "timestamp": "当前回合 ISO 时间",
+    "decontexualized_input": "用户本轮真实意图摘要",
+    "rag_result": {{
+        "user_image": {{
+            "user_memory_context": {{
+                "stable_patterns": [{{"fact": "...", "subjective_appraisal": "...", "relationship_signal": "...", "updated_at": "ISO时间"}}],
+                "recent_shifts": [{{"fact": "...", "subjective_appraisal": "...", "relationship_signal": "...", "updated_at": "ISO时间"}}],
+                "objective_facts": [{{"fact": "...", "subjective_appraisal": "...", "relationship_signal": "...", "updated_at": "ISO时间"}}],
+                "milestones": [{{"fact": "...", "subjective_appraisal": "...", "relationship_signal": "...", "updated_at": "ISO时间"}}],
+                "active_commitments": [{{"fact": "...", "subjective_appraisal": "...", "relationship_signal": "...", "updated_at": "ISO时间"}}]
+            }}
+        }},
+        "user_memory_unit_candidates": ["RAG 检索出的原始候选记忆单元"],
+        "memory_evidence": ["相关长期记忆证据"],
+        "conversation_evidence": ["相关近期对话证据"],
+        "external_evidence": ["相关外部证据"],
+        "supervisor_trace": {{"unknown_slots": ["未解决槽位"], "loop_count": 1}}
+    }},
+    "supervisor_trace": {{"unknown_slots": ["未解决槽位"], "loop_count": 1}},
+    "existing_dedup_keys": ["已存在事实或承诺的稳定去重键"],
+    "content_anchors": ["回复前的内容锚点"],
+    "final_dialog": ["{character_name} 本轮最终实际说出口的话"],
+    "logical_stance": "CONFIRM | REFUSE | TENTATIVE | DIVERGE | CHALLENGE",
+    "character_intent": "PROVIDE | BANTAR | REJECT | EVADE | CONFRONT | DISMISS | CLARIFY"
+}}
+
 # 输出格式 (JSON)
 请务必返回合法的 JSON 字符串，仅包含以下字段：
 {{
@@ -83,7 +121,7 @@ _FACTS_HARVESTER_PROMPT = """\
         {{
             "entity": "事实所属的主语实名（如 human payload 中的 user_name、{character_name}、或具体物品/地点名）",
             "category": "事实类别标签（如 occupation、location、preference、hobby、relationship、health、schedule、personality 等）",
-            "description": "具备长期价值的事实或事件证据。必须包含主语和足够上下文；可以是属性陈述，也可以是具体事件锚点。示例：'用户住在新西兰奥克兰'、'用户在多轮讨论中坚持用系统工程视角校正 Kazusa 记忆架构'。",
+            "description": "具备长期价值的事实或事件证据。必须包含主语和足够上下文；可以是属性陈述，也可以是具体事件锚点。示例：'用户住在新西兰奥克兰'、'用户在多轮讨论中坚持用系统工程视角校正角色记忆架构'。",
             "is_milestone": false,
             "milestone_category": "",
             "scope": "稳定生命周期主题；非里程碑可为空字符串",
@@ -109,7 +147,7 @@ _facts_harvester_llm = get_llm(
     api_key=CONSOLIDATION_LLM_API_KEY,
 )
 async def facts_harvester(state: ConsolidatorState) -> dict:
-    system_prompt = SystemMessage(_FACTS_HARVESTER_PROMPT.format(
+    system_prompt = SystemMessage(content=_FACTS_HARVESTER_PROMPT.format(
         character_name=state["character_profile"]["name"],
     ))
 
@@ -206,6 +244,54 @@ _FACT_HARVESTER_EVALUATOR_PROMPT = """\
     - `action` 只是复述对话或主观感受；
     - `action` 与 `target`/基准源主体明显不一致.
 
+# 审计步骤
+1. 先确认 `user_name`，再逐项检查 `new_facts` 和 `future_promises` 的主体是否倒置。
+2. 用 `decontexualized_input` 核对事实候选，用 `final_dialog` 核对承诺候选。
+3. 用 `rag_result.user_image.user_memory_context`、`rag_result.user_memory_unit_candidates`、`rag_result.memory_evidence` 与 `conversation_evidence` 检查旧闻复读。
+4. 检查 `logical_stance` 和 `character_intent` 是否允许记录用户自我声明或未来承诺。
+5. 只有发现明确红线时才返回 `should_stop: false`；空数组本身不是错误。
+
+# 输入格式
+human payload 是以下 JSON：
+{{
+    "retry": "当前重试次数/最大重试次数",
+    "user_name": "当前用户显示名",
+    "new_facts": [
+        {{
+            "entity": "事实所属主语",
+            "category": "事实类别标签",
+            "description": "事实或事件证据",
+            "is_milestone": false,
+            "milestone_category": "",
+            "scope": "",
+            "dedup_key": "稳定去重键"
+        }}
+    ],
+    "future_promises": [
+        {{
+            "target": "承诺目标",
+            "action": "可执行承诺本体",
+            "due_time": "ISO 时间或 null",
+            "commitment_type": "承诺类型",
+            "dedup_key": "稳定承诺更新键"
+        }}
+    ],
+    "decontexualized_input": "用户本轮真实意图摘要",
+    "rag_result": {{
+        "user_image": {{"user_memory_context": "五类用户记忆单元投影"}},
+        "user_memory_unit_candidates": ["RAG 检索出的原始候选记忆单元"],
+        "memory_evidence": ["相关长期记忆证据"],
+        "conversation_evidence": ["相关近期对话证据"],
+        "external_evidence": ["相关外部证据"],
+        "supervisor_trace": {{"unknown_slots": ["未解决槽位"], "loop_count": 1}}
+    }},
+    "supervisor_trace": {{"unknown_slots": ["未解决槽位"], "loop_count": 1}},
+    "content_anchors": ["回复前的内容锚点"],
+    "final_dialog": ["{character_name} 本轮最终实际说出口的话"],
+    "logical_stance": "CONFIRM | REFUSE | TENTATIVE | DIVERGE | CHALLENGE",
+    "character_intent": "PROVIDE | BANTAR | REJECT | EVADE | CONFRONT | DISMISS | CLARIFY"
+}}
+
 # 输出格式 (JSON)
 请务必返回合法的 JSON 字符串，仅包含以下字段：
 {{
@@ -222,7 +308,7 @@ _fact_harvester_evaluator_llm = get_llm(
     api_key=CONSOLIDATION_LLM_API_KEY,
 )
 async def fact_harvester_evaluator(state: ConsolidatorState) -> dict:
-    system_prompt = SystemMessage(_FACT_HARVESTER_EVALUATOR_PROMPT.format(
+    system_prompt = SystemMessage(content=_FACT_HARVESTER_EVALUATOR_PROMPT.format(
         character_name=state["character_profile"]["name"],
     ))
 

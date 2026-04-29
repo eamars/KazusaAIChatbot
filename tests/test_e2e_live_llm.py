@@ -817,20 +817,19 @@ async def test_live_graph_distorted_roleplay_evasive_turn_does_not_persist_permi
             platform_channel_id=identity["platform_channel_id"],
         )
 
-    profile = await get_user_profile(identity["global_user_id"])
-    persisted_facts = profile.get("objective_facts") or []
-    persisted_commitments = profile.get("active_commitments") or []
+    persisted_units = await query_user_memory_units(identity["global_user_id"])
 
     assert result.get("future_promises") == []
     assert not any(
-        fact.get("category") in {"relationship", "permission"}
-        and any(token in fact.get("fact", "") for token in ["主人", "杏奴", "奴"])
-        for fact in persisted_facts
+        unit.get("unit_type") == "objective_fact"
+        and any(token in unit.get("fact", "") for token in ["主人", "杏奴", "奴"])
+        for unit in persisted_units
     )
     assert not any(
-        commitment.get("status") == "active"
-        and any(token in commitment.get("action", "") for token in ["主人", "杏奴", "奴"])
-        for commitment in persisted_commitments
+        unit.get("unit_type") == "active_commitment"
+        and unit.get("status") == "active"
+        and any(token in unit.get("fact", "") for token in ["主人", "杏奴", "奴"])
+        for unit in persisted_units
     )
 
 

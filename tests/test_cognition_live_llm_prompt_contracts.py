@@ -69,6 +69,33 @@ def _debug_snapshot(label: str, payload: object) -> None:
     )
 
 
+def _memory_entry(fact: str) -> dict:
+    """Build one cognition-facing memory context entry for live fixtures."""
+
+    return {
+        "fact": fact,
+        "subjective_appraisal": "Kazusa treats this as relevant context for the current turn.",
+        "relationship_signal": "Use this fact only when it is directly relevant.",
+    }
+
+
+def _user_memory_context(objective_facts: str, recent_shift: str) -> dict:
+    """Build the post-cutover user memory context fixture."""
+
+    context = {
+        "stable_patterns": [],
+        "recent_shifts": [],
+        "objective_facts": [],
+        "milestones": [],
+        "active_commitments": [],
+    }
+    if objective_facts:
+        context["objective_facts"].append(_memory_entry(objective_facts))
+    if recent_shift:
+        context["recent_shifts"].append(_memory_entry(recent_shift))
+    return context
+
+
 def _build_character_profile() -> dict:
     profile = load_personality(_PERSONALITY_PATH)
     profile.setdefault("mood", "Neutral")
@@ -80,7 +107,7 @@ def _build_character_profile() -> dict:
 def _rag_result(
     *,
     objective_facts: str,
-    user_image: dict,
+    user_image: str,
     character_image: dict,
     memory_evidence: str,
     external_evidence: str,
@@ -89,8 +116,7 @@ def _rag_result(
     return {
         "answer": "",
         "user_image": {
-            "objective_facts": [{"fact": objective_facts}] if objective_facts else [],
-            "user_image": user_image,
+            "user_memory_context": _user_memory_context(objective_facts, user_image),
         },
         "character_image": {"self_image": character_image},
         "third_party_profiles": [],
@@ -107,7 +133,7 @@ def _make_state(
     chat_history_recent: list[dict],
     channel_topic: str,
     objective_facts: str = "",
-    user_image: dict | str | None = None,
+    user_image: str | None = None,
     character_image: dict | str | None = None,
     memory_evidence_text: str = "最近聊天主要围绕日常和轻度社交互动。",
     external_evidence_text: str = "",
@@ -118,17 +144,7 @@ def _make_state(
     global_user_id: str = "live-prompt-user",
 ) -> dict:
     if user_image is None:
-        user_image = {
-            "milestones": [],
-            "historical_summary": "",
-            "recent_window": [{"summary": "对方说话直接，但没有越界。"}],
-        }
-    elif isinstance(user_image, str):
-        user_image = {
-            "milestones": [],
-            "historical_summary": "",
-            "recent_window": [{"summary": user_image}],
-        }
+        user_image = "对方说话直接，但没有越界。"
 
     if character_image is None:
         character_image = {

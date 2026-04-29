@@ -171,6 +171,34 @@ When editing prompt strings embedded in code:
 - Escape literal braces in `.format(...)` templates, or avoid inserting inline JSON examples there.
 - Run a runtime prompt-render check, not only a syntax check. `py_compile` will not catch broken `.format(...)` placeholders.
 - Keep examples as semantic boundary anchors. Add an example only when it fixes a real routing boundary or recurring confusion.
+- Always state `# Input Format` and `# Output Format` for structured prompt stages. The examples must match the exact payload built by the handler and the exact parsed output expected by validators. If you cannot write those sections precisely, the prompt contract is not ready.
+- For local LLMs, also include explicit generation guidance such as `# Generation Procedure` or `# Thinking Steps` before the format sections. The guidance should tell the model how to inspect the input and choose the output fields; do not rely on the schema alone to imply the procedure.
+- Do not hard-code a character's concrete name in reusable prompt contracts. First decide whether the stage truly needs a name:
+  - If the stage only needs role ownership, use role-neutral wording such as "the active character", "the character", or "the speaker". This is preferred for memory schemas, subjective appraisals, internal reasoning fields, RAG summaries, and any stage that might affect voice.
+  - If the stage must distinguish the character from the user or resolve identity, inject the runtime value via a formatted variable such as `{character_name}`, following the local pattern used by cognition prompts. Never assume the character is always called by a name seen in logs or examples.
+  - Avoid concrete character names in schema examples. Local LLMs can treat examples as voice anchors and drift into the wrong perspective, especially around subjective thinking, speech, and dialog-adjacent fields.
+
+## LLM Node Code Layout
+
+When adding or editing LLM-backed nodes in this repo, keep each LLM stage readable as one local block:
+
+```text
+prompt constant
+LLM instance
+LLM handler function
+```
+
+Do not group several prompt constants at the top of a file and several handlers far below when the stages are distinct. Do not collapse distinct LLM calls through a generic invocation helper that hides which prompt, model instance, payload, and parser belong to the stage.
+
+Each handler should follow the established node style:
+
+- Build `SystemMessage(content=<PROMPT>)` inside the handler.
+- Build the `HumanMessage` from the stage payload with `json.dumps(..., ensure_ascii=False)`.
+- Call that stage's LLM with `await <stage_llm>.ainvoke([system_prompt, human_message])`.
+- Parse structured JSON with `parse_llm_json_output(response.content)` unless the existing local file has a stronger approved parser contract.
+- Run structural validation after parsing in ordinary Python.
+
+If multiple stages share the same model config, it is still acceptable and preferred to declare separate stage-named LLM variables next to their prompts when that makes the prompt/handler ownership clearer.
 
 ## Latency Strategy
 
@@ -212,6 +240,7 @@ Before recommending an architecture or prompt change, check:
 - Does the new capability follow the same contract shape as neighboring capabilities?
 - Can each agent reject out-of-domain work?
 - Are cardinality expectations explicit?
+- If a prompt mentions the character, did I verify that a concrete name is necessary? If not, use role-neutral wording; if yes, use runtime `{character_name}` formatting instead of a learned or hard-coded name.
 - Is the normal latency path acceptable for a chatbot?
 - Is there a deterministic validation layer before execution?
 - Does the design improve one semantic capability rather than adding accidental complexity?

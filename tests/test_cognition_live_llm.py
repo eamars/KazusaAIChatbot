@@ -92,6 +92,48 @@ def _debug_snapshot(label: str, payload: object) -> None:
     )
 
 
+def _memory_entry(fact: str) -> dict:
+    """Build one cognition-facing memory context entry for live fixtures.
+
+    Args:
+        fact: Concrete fact to expose through user memory context.
+
+    Returns:
+        Memory entry with the unified fact/appraisal/signal contract.
+    """
+
+    return {
+        "fact": fact,
+        "subjective_appraisal": "Kazusa treats this as relevant context for the current turn.",
+        "relationship_signal": "Use this fact only when it is directly relevant.",
+    }
+
+
+def _user_memory_context(objective_facts: str, recent_shift: str | None) -> dict:
+    """Build the post-cutover user memory context fixture.
+
+    Args:
+        objective_facts: Optional objective fact text for the current user.
+        recent_shift: Optional recent-shift fact for the current user.
+
+    Returns:
+        Category-balanced user memory context.
+    """
+
+    context = {
+        "stable_patterns": [],
+        "recent_shifts": [],
+        "objective_facts": [],
+        "milestones": [],
+        "active_commitments": [],
+    }
+    if objective_facts:
+        context["objective_facts"].append(_memory_entry(objective_facts))
+    if recent_shift:
+        context["recent_shifts"].append(_memory_entry(recent_shift))
+    return context
+
+
 def _build_character_profile() -> dict:
     profile = load_personality(_PERSONALITY_PATH)
     profile.setdefault("mood", "Neutral")
@@ -103,7 +145,7 @@ def _build_character_profile() -> dict:
 def _rag_result(
     *,
     objective_facts: str = "",
-    user_image: dict | None = None,
+    user_image: str | None = None,
     character_image: dict | None = None,
     memory_evidence: str = "",
     external_evidence: str = "",
@@ -112,8 +154,7 @@ def _rag_result(
     return {
         "answer": "",
         "user_image": {
-            "objective_facts": [{"fact": objective_facts}] if objective_facts else [],
-            "user_image": user_image or {"milestones": [], "historical_summary": "", "recent_window": []},
+            "user_memory_context": _user_memory_context(objective_facts, user_image),
         },
         "character_image": {
             "self_image": character_image or {"milestones": [], "historical_summary": "", "recent_window": []},
@@ -152,11 +193,7 @@ def _build_base_state() -> dict:
         "decontexualized_input": user_input,
         "rag_result": _rag_result(
             objective_facts="用户曾明确要求若被接受则优先使用自然英语回复。",
-            user_image={
-                "milestones": [],
-                "historical_summary": "",
-                "recent_window": [{"summary": "对方说话直接，但没有越界。"}],
-            },
+            user_image="对方说话直接，但没有越界。",
             character_image={
                 "milestones": [],
                 "historical_summary": "",
@@ -300,11 +337,7 @@ async def test_live_cognition_propagates_explicit_future_group_message_details(e
                 {"role": "user", "content": "这次很简单，就帮我发一句。"},
             ],
             "rag_result": _rag_result(
-                user_image={
-                    "milestones": [],
-                    "historical_summary": "",
-                    "recent_window": [{"summary": "对方正在提出一个具体的代发请求。"}],
-                },
+                user_image="对方正在提出一个具体的代发请求。",
                 character_image={
                     "milestones": [],
                     "historical_summary": "",

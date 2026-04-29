@@ -1005,12 +1005,30 @@ async def rag_executor(state: ProgressiveRAGState) -> dict:
 _EVALUATOR_SUMMARIZER_PROMPT = '''\
 你是一个槽位结果提炼器。给定槽位任务描述和原始工具结果，提炼出一段简洁的中文事实摘要，供后续检索代理和最终回答器使用。
 
+# 生成步骤
+1. 先读取 `slot` 和 `agent`，确认本次工具结果回答的是哪一个槽位。
+2. 读取 `raw_result`，只提炼其中已经存在的事实、标识符和可引用来源。
+3. 参考 `known_facts`，避免重复已经总结过的槽位结论。
+4. 如果 `resolved` 为 false 或 `raw_result` 缺少可用信息，只说明本次来源没有返回什么，不要扩大结论。
+
 # 摘要要求
 - 保留对后续步骤有用的关键标识符（global_user_id、display_name、URL 等）
 - 如果内容是对话记录，列出 1-5 条最相关的消息摘要（说话人 + 关键内容）
 - 如果内容是用户画像或持久记忆，提炼关键事实
 - 如果槽位未解决（resolved: false），简洁说明本次检索的来源没有返回什么
 - 如果 raw_result 为空，不要推断先前槽位失败；只有 known_facts 明确显示先前槽位 unresolved 时才可这样说
+
+# 输入格式
+human payload 是以下 JSON：
+{
+    "slot": "当前槽位任务描述",
+    "agent": "执行该槽位的 agent 名称",
+    "resolved": true,
+    "raw_result": "工具原始输出，可以是 dict/list/string/null",
+    "known_facts": [{"slot": "...", "agent": "...", "resolved": true, "summary": "...", "raw_result": "...", "attempts": 1}]
+}
+
+# 输出格式
 - 不超过 200 字，纯文本，无 JSON 外壳
 '''
 
@@ -1018,15 +1036,43 @@ _EVALUATOR_SUMMARIZER_USER_PROFILE_PROMPT = '''\
 你是一个用户/角色画像槽位结果提炼器。给定 Profile 槽位、原始画像结果、以及先前身份解析结果，提炼一段简洁中文事实摘要。
 
 # 字段语义（必须遵守）
-- user_memory_context：当前用户的统一记忆投影。每条记录都包含 fact、subjective_appraisal、relationship_signal，可分别作为事实锚点、Kazusa 的主观评价、未来互动信号。
+- user_memory_context：当前用户的统一记忆投影。每条记录都包含 fact、subjective_appraisal、relationship_signal，可分别作为事实锚点、角色的主观评价、未来互动信号。
 - objective_facts、milestones、active_commitments 若出现，应来自 user_memory_context 内部分类，不再作为旧的独立画像来源处理。
 - 如果 raw_result 包含 name/description/gender/age/birthday/backstory/self_image，且不包含 user_memory_context：
   这是角色自己的公开资料或自我画像。按“角色自身资料”总结，不要当成第三方用户画像。
 
+# 生成步骤
+1. 先读取 `slot`、`agent` 与 `known_facts`，确认本次 profile 结果对应当前用户、第三方用户还是角色自身。
+2. 如果 `raw_result` 包含 `user_memory_context`，按五类记忆单元总结：先写事实锚点，再写角色的主观评价和关系信号。
+3. 如果 `raw_result` 是角色公开资料或 `self_image`，按角色自身资料总结，不要写成用户画像。
+4. 只使用 `raw_result` 中已有的信息；未知字段保持未知，不要补全。
+
 # 摘要要求
 - 保留 global_user_id、display_name 等对后续步骤有用的标识。
-- 明确区分“目标用户是谁”、事实锚点是什么、Kazusa 的主观评价是什么。
+- 明确区分“目标用户是谁”、事实锚点是什么、角色的主观评价是什么。
 - 只总结 raw_result 中已有的信息，不要补全未知信息。
+
+# 输入格式
+human payload 是以下 JSON：
+{
+    "slot": "当前 Profile 槽位任务描述",
+    "agent": "user_profile_agent",
+    "resolved": true,
+    "raw_result": {
+        "global_user_id": "用户 UUID",
+        "display_name": "用户显示名",
+        "user_memory_context": {
+            "stable_patterns": [{"fact": "...", "subjective_appraisal": "...", "relationship_signal": "...", "updated_at": "ISO时间"}],
+            "recent_shifts": [{"fact": "...", "subjective_appraisal": "...", "relationship_signal": "...", "updated_at": "ISO时间"}],
+            "objective_facts": [{"fact": "...", "subjective_appraisal": "...", "relationship_signal": "...", "updated_at": "ISO时间"}],
+            "milestones": [{"fact": "...", "subjective_appraisal": "...", "relationship_signal": "...", "updated_at": "ISO时间"}],
+            "active_commitments": [{"fact": "...", "subjective_appraisal": "...", "relationship_signal": "...", "updated_at": "ISO时间"}]
+        }
+    },
+    "known_facts": [{"slot": "...", "agent": "...", "resolved": true, "summary": "...", "raw_result": "...", "attempts": 1}]
+}
+
+# 输出格式
 - 不超过 220 字，纯文本，无 JSON 外壳。
 '''
 
@@ -1143,6 +1189,13 @@ async def rag_evaluator(state: ProgressiveRAGState) -> dict:
 _FINALIZER_PROMPT = '''\
 你是一个总结员。请根据已收集的事实回答用户的原始问题。
 
+# 生成步骤
+1. 先读取 `original_query`，确认用户原始问题要的答案类型。
+2. 按顺序读取 `known_facts`，只使用 resolved 槽位中的 summary 和 raw_result。
+3. 如果 user_profile_agent 的 raw_result 包含 user_memory_context，区分 fact、subjective_appraisal、relationship_signal 三种语义。
+4. 如果某个必要槽位 unresolved，只说明缺少该槽位信息。
+5. 输出一段短的自然语言事实回答，不使用角色口吻。
+
 # 准则
 - 直接回答用户的原始问题，不要复述查找过程。
 - 如果 known_facts 为空，说明本次 RAG 没有需要检索的外部/内部事实；不要说“缺少关于该问题的具体信息”。
@@ -1150,7 +1203,7 @@ _FINALIZER_PROMPT = '''\
 - 不要把某个来源没有检索结果扩大成“没有任何记录/没有互动记录”；只能说明实际查询过的来源没有返回结果。
 - 引用来源 URL 或对话来源时尽量保留。
 - 当 known_facts 中 agent="user_profile_agent" 且 raw_result 包含 user_memory_context：
-  fact 是事实锚点，subjective_appraisal 是 Kazusa 的主观评价，relationship_signal 是未来互动信号。回答时不要把 Kazusa 的主观评价误写成目标用户自己的感受。
+  fact 是事实锚点，subjective_appraisal 是角色的主观评价，relationship_signal 是未来互动信号。回答时不要把角色的主观评价误写成目标用户自己的感受。
 - 当 known_facts 中 agent="user_profile_agent" 且 raw_result 是角色自身公开资料或 self_image：
   这是角色自己的资料。回答角色自我资料问题时，可以使用这些公开资料；不要误写成第三方用户画像。
 
@@ -1160,7 +1213,7 @@ _FINALIZER_PROMPT = '''\
     "known_facts": [{"slot": ..., "agent": ..., "resolved": ..., "summary": "简洁事实摘要", "raw_result": "原始工具输出（如需引用原文）", "attempts": ...}, ...]
 }
 
-# 输出
+# 输出格式
 请直接返回一段自然语言回复（纯文本，无 JSON 外壳）。
 - no markdown formatting
 - no persona voice

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+import json
 
 import httpx
 import pytest
@@ -13,6 +14,26 @@ from tests.llm_trace import write_llm_trace
 
 
 pytestmark = [pytest.mark.asyncio, pytest.mark.live_llm]
+
+
+class _CapturingAsyncLLM:
+    """Capture LLM calls while delegating to the real live model."""
+
+    def __init__(self, wrapped_llm, calls: list[dict]) -> None:
+        self._wrapped_llm = wrapped_llm
+        self._calls = calls
+
+    async def ainvoke(self, messages):
+        response = await self._wrapped_llm.ainvoke(messages)
+        payload = json.loads(messages[1].content)
+        parsed_response = memory_units_module.parse_llm_json_output(response.content)
+        self._calls.append({
+            "system_prompt": messages[0].content,
+            "payload": payload,
+            "raw_response": response.content,
+            "parsed_response": parsed_response,
+        })
+        return response
 
 
 async def _skip_if_llm_unavailable() -> None:
@@ -157,26 +178,9 @@ async def test_live_extractor_outputs_concrete_memory_unit(
     """
     del ensure_live_llm
 
-    captured: dict[str, object] = {}
-    original_invoke_json = memory_units_module._invoke_json
-
-    async def _capturing_invoke_json(system_prompt: str, payload: dict) -> dict:
-        """Capture the real LLM call while preserving live model behavior.
-
-        Args:
-            system_prompt: Prompt text sent to the consolidation LLM.
-            payload: JSON payload sent to the consolidation LLM.
-
-        Returns:
-            Parsed JSON returned by the live consolidation LLM.
-        """
-        captured["system_prompt"] = system_prompt
-        captured["payload"] = payload
-        parsed_response = await original_invoke_json(system_prompt, payload)
-        captured["parsed_response"] = parsed_response
-        return parsed_response
-
-    monkeypatch.setattr(memory_units_module, "_invoke_json", _capturing_invoke_json)
+    llm_calls: list[dict] = []
+    extractor_llm = _CapturingAsyncLLM(memory_units_module._extractor_llm, llm_calls)
+    monkeypatch.setattr(memory_units_module, "_extractor_llm", extractor_llm)
 
     state = _build_extractor_state()
     candidates = await memory_units_module.extract_memory_unit_candidates(state)
@@ -185,8 +189,9 @@ async def test_live_extractor_outputs_concrete_memory_unit(
         "extractor_concrete_architecture_decision",
         {
             "input_state": state,
-            "llm_payload": captured["payload"],
-            "parsed_response": captured["parsed_response"],
+            "llm_payload": llm_calls[0]["payload"],
+            "raw_response": llm_calls[0]["raw_response"],
+            "parsed_response": llm_calls[0]["parsed_response"],
             "validated_candidates": candidates,
             "judgment": (
                 "The extractor should preserve the architecture decision as a "
@@ -272,7 +277,6 @@ async def test_live_merge_rewrite_compacts_similar_memory_unit(
         "rag_result": {"user_memory_unit_candidates": [existing_unit]},
     }
     captured: dict[str, object] = {"llm_calls": []}
-    original_invoke_json = memory_units_module._invoke_json
 
     async def _retrieve_memory_unit_merge_candidates(global_user_id, **kwargs):
         captured["retrieval"] = {
@@ -281,15 +285,6 @@ async def test_live_merge_rewrite_compacts_similar_memory_unit(
             "surfaced_units": kwargs["surfaced_units"],
         }
         return [existing_unit]
-
-    async def _capturing_invoke_json(system_prompt: str, payload: dict) -> dict:
-        parsed_response = await original_invoke_json(system_prompt, payload)
-        captured["llm_calls"].append({
-            "system_prompt": system_prompt,
-            "payload": payload,
-            "parsed_response": parsed_response,
-        })
-        return parsed_response
 
     async def _insert_user_memory_units(global_user_id, units, **kwargs):
         pytest.fail(
@@ -307,7 +302,16 @@ async def test_live_merge_rewrite_compacts_similar_memory_unit(
         "retrieve_memory_unit_merge_candidates",
         _retrieve_memory_unit_merge_candidates,
     )
-    monkeypatch.setattr(memory_units_module, "_invoke_json", _capturing_invoke_json)
+    merge_judge_llm = _CapturingAsyncLLM(
+        memory_units_module._merge_judge_llm,
+        captured["llm_calls"],
+    )
+    rewrite_llm = _CapturingAsyncLLM(
+        memory_units_module._rewrite_llm,
+        captured["llm_calls"],
+    )
+    monkeypatch.setattr(memory_units_module, "_merge_judge_llm", merge_judge_llm)
+    monkeypatch.setattr(memory_units_module, "_rewrite_llm", rewrite_llm)
     monkeypatch.setattr(
         memory_units_module,
         "insert_user_memory_units",
@@ -349,4 +353,121 @@ async def test_live_merge_rewrite_compacts_similar_memory_unit(
     assert "subjective" in merged_fact.lower() or "feelings" in merged_fact.lower()
     assert len(merged_fact) < combined_source_length
     assert captured["update_kwargs"]["merge_history_entry"]["decision"] == result["decision"]
+    assert trace_path.exists()
+
+
+async def test_live_stability_judge_uses_session_spread_evidence(
+    ensure_live_llm,
+    monkeypatch,
+) -> None:
+    """Verify the live stability judge receives enough evidence to classify.
+
+    Args:
+        ensure_live_llm: Fixture that skips when the live endpoint is unavailable.
+        monkeypatch: Pytest helper used to capture the live stability call.
+
+    Returns:
+        None.
+    """
+    del ensure_live_llm
+
+    existing_unit = {
+        "unit_id": "existing-stability-pattern",
+        "unit_type": "recent_shift",
+        "fact": (
+            "The user repeatedly asks Kazusa to keep memory records fact-based "
+            "instead of diary-like emotional summaries."
+        ),
+        "subjective_appraisal": (
+            "Kazusa reads this as recurring architecture guidance rather than "
+            "a one-off wording preference."
+        ),
+        "relationship_signal": (
+            "Kazusa should continue grounding memory in concrete events."
+        ),
+        "count": 3,
+        "source_refs": [
+            {
+                "source": "chat",
+                "timestamp": "2026-04-27T10:00:00+12:00",
+                "message_id": "stability-1",
+            },
+            {
+                "source": "chat",
+                "timestamp": "2026-04-28T10:00:00+12:00",
+                "message_id": "stability-2",
+            },
+        ],
+        "updated_at": "2026-04-28T10:00:00+12:00",
+        "last_seen_at": "2026-04-28T10:00:00+12:00",
+    }
+    candidate = {
+        "candidate_id": "candidate-stability-repeat",
+        "unit_type": "recent_shift",
+        "fact": (
+            "The user again rejects overlapping emotional memory surfaces and "
+            "asks for factual event anchors."
+        ),
+        "subjective_appraisal": (
+            "Kazusa sees this as another instance of the same memory-quality "
+            "guidance."
+        ),
+        "relationship_signal": (
+            "Future consolidation should preserve factual anchors first."
+        ),
+        "evidence_refs": [
+            {
+                "source": "chat",
+                "timestamp": "2026-04-29T10:00:00+12:00",
+                "message_id": "stability-3",
+            }
+        ],
+    }
+    merge_result = {
+        "candidate_id": "candidate-stability-repeat",
+        "decision": "evolve",
+        "cluster_id": "existing-stability-pattern",
+        "reason": "same recurring memory architecture guidance",
+    }
+    state = {
+        "timestamp": "2026-04-29T10:00:00+12:00",
+        "global_user_id": "live-memory-unit-user",
+    }
+    payload = memory_units_module._stability_payload(
+        state,
+        unit_id="existing-stability-pattern",
+        candidate=candidate,
+        merge_result=merge_result,
+        candidate_clusters=[existing_unit],
+    )
+
+    llm_calls: list[dict] = []
+    stability_llm = _CapturingAsyncLLM(
+        memory_units_module._stability_llm,
+        llm_calls,
+    )
+    monkeypatch.setattr(memory_units_module, "_stability_llm", stability_llm)
+    stability_result = await memory_units_module._judge_memory_unit_stability(
+        state,
+        unit_id="existing-stability-pattern",
+        candidate=candidate,
+        merge_result=merge_result,
+        candidate_clusters=[existing_unit],
+    )
+    trace_path = write_llm_trace(
+        "user_memory_units_live_llm",
+        "stability_judge_session_spread_evidence",
+        {
+            "payload": payload,
+            "raw_response": llm_calls[0]["raw_response"],
+            "parsed_response": llm_calls[0]["parsed_response"],
+            "validated_result": stability_result,
+            "judgment": (
+                "The live stability judge should see multiple-session evidence "
+                "and classify the recurring pattern as stable."
+            ),
+        },
+    )
+
+    assert stability_result["window"] == "stable"
     assert trace_path.exists()

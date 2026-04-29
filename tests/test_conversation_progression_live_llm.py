@@ -108,8 +108,13 @@ def _rag_result() -> dict:
     return {
         "answer": "",
         "user_image": {
-            "objective_facts": [],
-            "user_image": {"milestones": [], "historical_summary": "", "recent_window": []},
+            "user_memory_context": {
+                "stable_patterns": [],
+                "recent_shifts": [],
+                "objective_facts": [],
+                "milestones": [],
+                "active_commitments": [],
+            },
         },
         "character_image": {
             "self_image": {"milestones": [], "historical_summary": "", "recent_window": []},

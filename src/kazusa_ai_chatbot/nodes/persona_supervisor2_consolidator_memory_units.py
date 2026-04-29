@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from uuid import uuid4
 
 from langchain_core.messages import HumanMessage, SystemMessage
@@ -27,68 +28,7 @@ from kazusa_ai_chatbot.utils import get_llm, parse_llm_json_output, text_or_empt
 MAX_MEMORY_UNIT_CANDIDATES_PER_TURN = 3
 MAX_MEMORY_UNIT_MERGE_CANDIDATES = 6
 
-_memory_unit_llm = get_llm(
-    temperature=0.2,
-    top_p=0.9,
-    model=CONSOLIDATION_LLM_MODEL,
-    base_url=CONSOLIDATION_LLM_BASE_URL,
-    api_key=CONSOLIDATION_LLM_API_KEY,
-)
-
-_EXTRACTOR_PROMPT = """You extract durable user memory units for Kazusa.
-
-Return strict JSON with:
-{"memory_units":[{"unit_type":"recent_shift|objective_fact|milestone|active_commitment","fact":"...","subjective_appraisal":"...","relationship_signal":"...","evidence_refs":[]}]}
-
-Rules:
-- fact must be a concrete event, decision, preference, commitment, or durable behavior anchored in the provided conversation.
-- Use chat_history_recent as evidence when the memory depends on multiple messages.
-- subjective_appraisal explains Kazusa's subjective interpretation of that fact.
-- relationship_signal explains how this should affect future interaction.
-- Do not output vague labels or only describe the latest message tone.
-- Preserve enough event detail to be useful later.
-- Do not decide merge/create/evolve.
-- If nothing durable should be remembered, return {"memory_units":[]}.
-"""
-
-_MERGE_JUDGE_PROMPT = """You judge whether one new memory unit matches existing candidate units.
-
-Return strict JSON with:
-{"candidate_id":"...","decision":"create|merge|evolve","cluster_id":"existing unit_id or empty","reason":"short reason"}
-
-Rules:
-- create: no existing candidate captures the same memory.
-- merge: same durable memory; wording can be compacted.
-- evolve: same memory cluster, but the new event changes the relationship meaning.
-- cluster_id must be empty for create.
-- cluster_id must be copied exactly from the provided candidates for merge/evolve.
-- Do not rewrite memory text.
-"""
-
-_REWRITE_PROMPT = """You rewrite one existing memory unit using one new candidate.
-
-Return strict JSON with:
-{"candidate_id":"...","cluster_id":"...","fact":"...","subjective_appraisal":"...","relationship_signal":"..."}
-
-Rules:
-- Update only the three semantic fields.
-- Preserve concrete event detail.
-- For merge, compact repeated evidence without losing the event anchor.
-- For evolve, explicitly update the relationship meaning.
-- Do not change the merge/evolve decision.
-"""
-
-_STABILITY_PROMPT = """You decide whether an interaction-pattern memory remains recent or is stable.
-
-Return strict JSON with:
-{"unit_id":"...","window":"recent|stable","reason":"short reason"}
-
-Rules:
-- Use count, session spread, and recency only as evidence.
-- Do not promote a single noisy session just because it repeated several times.
-- stable means this should be treated as a durable pattern.
-- recent means this is still an active shift or unresolved local pattern.
-"""
+logger = logging.getLogger(__name__)
 
 
 def _json_payload(state: ConsolidatorState) -> dict:
@@ -133,15 +73,6 @@ def _rag_surfaced_memory_units(state: ConsolidatorState) -> list[dict]:
         return return_value
     valid_units = [unit for unit in surfaced_units if isinstance(unit, dict)]
     return valid_units
-
-
-async def _invoke_json(system_prompt: str, payload: dict) -> dict:
-    response = await _memory_unit_llm.ainvoke([
-        SystemMessage(content=system_prompt),
-        HumanMessage(content=json.dumps(payload, ensure_ascii=False)),
-    ])
-    parsed_response = parse_llm_json_output(response.content)
-    return parsed_response
 
 
 def _candidate_with_id(candidate: dict) -> dict:
@@ -226,6 +157,237 @@ def _validate_stability_result(result: dict, unit_id: str) -> dict:
     return return_value
 
 
+def _matching_cluster(candidate_clusters: list[dict], unit_id: str) -> dict:
+    """Return the candidate cluster matching a stored memory-unit id.
+
+    Args:
+        candidate_clusters: Existing memory units surfaced for merge judgment.
+        unit_id: Stored unit id selected by merge/create handling.
+
+    Returns:
+        The matching cluster, or an empty dict when the unit was just created.
+    """
+
+    for cluster in candidate_clusters:
+        if text_or_empty(cluster.get("unit_id")) == unit_id:
+            return cluster
+    return_value = {}
+    return return_value
+
+
+def _count_description(count: int) -> str:
+    """Convert an occurrence count into a semantic label for local LLM input.
+
+    Args:
+        count: Number of observed occurrences attached to a memory unit.
+
+    Returns:
+        A short descriptor that helps the LLM interpret the raw count.
+    """
+
+    if count <= 1:
+        return "single_observation"
+    if count == 2:
+        return "two_observations"
+    if count <= 4:
+        return "several_observations"
+    return_value = "many_observations"
+    return return_value
+
+
+def _session_spread(source_refs: list[dict]) -> dict:
+    """Summarize source-reference spread for stability judging.
+
+    Args:
+        source_refs: Evidence references stored on the memory unit.
+
+    Returns:
+        A dict with both raw evidence and a semantic spread label.
+    """
+
+    timestamp_days = {
+        text_or_empty(ref.get("timestamp"))[:10]
+        for ref in source_refs
+        if text_or_empty(ref.get("timestamp"))
+    }
+    message_ids = {
+        text_or_empty(ref.get("message_id"))
+        for ref in source_refs
+        if text_or_empty(ref.get("message_id"))
+    }
+    distinct_day_count = len(timestamp_days)
+    if distinct_day_count == 0:
+        spread_label = "unknown_session_spread"
+    elif distinct_day_count == 1:
+        spread_label = "single_day_or_session"
+    else:
+        spread_label = "multiple_days_or_sessions"
+    return_value = {
+        "spread_label": spread_label,
+        "distinct_day_count": distinct_day_count,
+        "distinct_message_ref_count": len(message_ids),
+        "timestamps": sorted(timestamp_days),
+    }
+    return return_value
+
+
+def _recent_examples(candidate: dict, cluster: dict) -> list[dict]:
+    """Build compact example evidence for the stability judge.
+
+    Args:
+        candidate: Newly extracted memory unit candidate.
+        cluster: Existing stored memory unit when merge/evolve selected one.
+
+    Returns:
+        Recent example records with fact text and timestamps.
+    """
+
+    examples = []
+    if cluster:
+        examples.append({
+            "source": "existing_unit",
+            "fact": text_or_empty(cluster.get("fact")),
+            "updated_at": text_or_empty(cluster.get("updated_at")),
+        })
+    examples.append({
+        "source": "new_candidate",
+        "fact": text_or_empty(candidate.get("fact")),
+        "updated_at": "",
+    })
+    return examples[:3]
+
+
+def _stability_payload(
+    state: ConsolidatorState,
+    *,
+    unit_id: str,
+    candidate: dict,
+    merge_result: dict,
+    candidate_clusters: list[dict],
+) -> dict:
+    """Build the evidence payload consumed by the stability judge LLM.
+
+    Args:
+        state: Current consolidator state.
+        unit_id: Stored unit id to classify as recent or stable.
+        candidate: New candidate memory unit.
+        merge_result: Merge judge decision for the candidate.
+        candidate_clusters: Existing units shown to the merge judge.
+
+    Returns:
+        JSON payload with semantic evidence labels and raw support details.
+    """
+
+    cluster = _matching_cluster(candidate_clusters, unit_id)
+    existing_count = int(cluster.get("count", 0) or 0)
+    candidate_refs = candidate.get("evidence_refs")
+    if not isinstance(candidate_refs, list):
+        candidate_refs = []
+    source_refs = cluster.get("source_refs")
+    if not isinstance(source_refs, list):
+        source_refs = []
+    combined_count = max(existing_count, 1) + len(candidate_refs)
+    return_value = {
+        "unit_id": unit_id,
+        "candidate": candidate,
+        "merge_result": merge_result,
+        "stability_evidence": {
+            "occurrence_count": combined_count,
+            "occurrence_count_label": _count_description(combined_count),
+            "existing_unit_count": existing_count,
+            "new_evidence_ref_count": len(candidate_refs),
+            "session_spread": _session_spread(source_refs + candidate_refs),
+            "recency": {
+                "current_turn_timestamp": state["timestamp"],
+                "existing_updated_at": text_or_empty(cluster.get("updated_at")),
+                "existing_last_seen_at": text_or_empty(cluster.get("last_seen_at")),
+            },
+            "recent_examples": _recent_examples(candidate, cluster),
+        },
+    }
+    return return_value
+
+
+_EXTRACTOR_PROMPT = """\
+You extract durable user memory units for the active character.
+
+# Role
+You are the memory-unit extractor. You only identify new candidate memories from this consolidation turn.
+
+# Rules
+- fact must be a concrete event, decision, preference, commitment, or durable behavior anchored in the provided conversation.
+- Use chat_history_recent as evidence when the memory depends on multiple messages.
+- subjective_appraisal explains the active character's subjective interpretation of that fact.
+- relationship_signal explains how this should affect future interaction.
+- Do not output vague labels or only describe the latest message tone.
+- Preserve enough event detail to be useful later.
+- Do not decide merge/create/evolve.
+- If nothing durable should be remembered, return {"memory_units":[]}.
+
+# Generation Procedure
+1. Read chat_history_recent first and identify concrete events, decisions, preferences, commitments, or repeated behaviors.
+2. Use decontextualized_input, final_dialog, internal_monologue, and appraisal evidence only to clarify what happened and why it matters.
+3. Compare against rag_user_memory_context. Do not restate an existing memory unless this turn adds a new fact, sharper detail, or changed relationship meaning.
+4. For each candidate, choose exactly one unit_type:
+   - objective_fact: a factual user preference, identity fact, decision, or system instruction.
+   - milestone: a one-time important event or clear architecture/relationship turning point.
+   - active_commitment: an accepted ongoing promise, future action, or still-active preference to honor.
+   - recent_shift: a new local change or unresolved short-term pattern.
+   - stable_pattern: a durable repeated behavior only when the evidence already shows repetition across time.
+5. Write fact as the concrete event itself, not the active character's feeling about it.
+6. Write subjective_appraisal as the active character's interpretation of that fact.
+7. Write relationship_signal as the future interaction implication.
+8. Prefer one or two high-value memory units over many vague ones.
+9. If the only possible output is a mood label, tone label, or duplicate of existing memory, return an empty list.
+
+# Input Format
+{
+    "timestamp": "ISO timestamp for the current consolidation turn",
+    "global_user_id": "stable user UUID",
+    "user_name": "current user's display name",
+    "decontextualized_input": "current user message after decontextualization",
+    "final_dialog": ["active character's final response segment"],
+    "internal_monologue": "active character's cognition-stage internal monologue",
+    "emotional_appraisal": "active character's subjective emotional appraisal",
+    "interaction_subtext": "active character's reading of the interaction subtext",
+    "logical_stance": "CONFIRM | REFUSE | TENTATIVE | DIVERGE | CHALLENGE",
+    "character_intent": "PROVIDE | BANTAR | REJECT | EVADE | CONFRONT | DISMISS | CLARIFY",
+    "chat_history_recent": [{"role": "user|assistant", "display_name": "optional", "content": "message text"}],
+    "rag_user_memory_context": {
+        "stable_patterns": [{"fact": "...", "subjective_appraisal": "...", "relationship_signal": "...", "updated_at": "optional ISO timestamp"}],
+        "recent_shifts": [{"fact": "...", "subjective_appraisal": "...", "relationship_signal": "...", "updated_at": "optional ISO timestamp"}],
+        "objective_facts": [{"fact": "...", "subjective_appraisal": "...", "relationship_signal": "...", "updated_at": "optional ISO timestamp"}],
+        "milestones": [{"fact": "...", "subjective_appraisal": "...", "relationship_signal": "...", "updated_at": "optional ISO timestamp"}],
+        "active_commitments": [{"fact": "...", "subjective_appraisal": "...", "relationship_signal": "...", "updated_at": "optional ISO timestamp"}]
+    },
+    "new_facts_evidence": [{"fact": "fact harvester output"}],
+    "future_promises_evidence": [{"action": "future promise or scheduled action"}],
+    "subjective_appraisal_evidence": ["relationship/appraisal evidence text"]
+}
+
+# Output Format
+Return only valid JSON:
+{
+    "memory_units": [
+        {
+            "unit_type": "stable_pattern | recent_shift | objective_fact | milestone | active_commitment",
+            "fact": "concrete event, decision, preference, commitment, or behavior",
+            "subjective_appraisal": "active character's subjective interpretation of the fact",
+            "relationship_signal": "how this should affect future interaction",
+            "evidence_refs": [{"source": "chat", "timestamp": "optional ISO timestamp", "message_id": "optional platform message id"}]
+        }
+    ]
+}
+"""
+_extractor_llm = get_llm(
+    temperature=0.2,
+    top_p=0.9,
+    model=CONSOLIDATION_LLM_MODEL,
+    base_url=CONSOLIDATION_LLM_BASE_URL,
+    api_key=CONSOLIDATION_LLM_API_KEY,
+)
+
+
 async def extract_memory_unit_candidates(state: ConsolidatorState) -> list[dict]:
     """Extract candidate memory units from one consolidation state.
 
@@ -236,9 +398,312 @@ async def extract_memory_unit_candidates(state: ConsolidatorState) -> list[dict]
         Structurally valid candidate memory units.
     """
 
-    result = await _invoke_json(_EXTRACTOR_PROMPT, _json_payload(state))
+    system_prompt = SystemMessage(content=_EXTRACTOR_PROMPT)
+    human_message = HumanMessage(
+        content=json.dumps(_json_payload(state), ensure_ascii=False),
+    )
+    response = await _extractor_llm.ainvoke([
+        system_prompt,
+        human_message,
+    ])
+    result = parse_llm_json_output(response.content)
     candidates = _valid_candidates(result)
     return candidates
+
+
+_MERGE_JUDGE_PROMPT = """\
+You judge whether one new memory unit matches existing candidate units.
+
+# Role
+You are the memory-unit merge judge. You only decide create, merge, or evolve.
+
+# Rules
+- create: no existing candidate captures the same memory.
+- merge: same durable memory; wording can be compacted.
+- evolve: same memory cluster, but the new event changes the relationship meaning.
+- cluster_id must be empty for create.
+- cluster_id must be copied exactly from the provided candidates for merge/evolve.
+- Do not rewrite memory text.
+
+# Generation Procedure
+1. Read new_memory_unit.fact and decide what specific memory it is trying to preserve.
+2. Compare it with each candidate_clusters item by event meaning, not by wording similarity alone.
+3. Choose create if no existing unit captures the same durable memory.
+4. Choose merge if the existing unit already captures the same memory and the new candidate mainly repeats or adds wording/detail.
+5. Choose evolve if the existing unit is the same memory cluster but the new candidate changes the fact's relationship meaning, scope, or durability.
+6. For merge or evolve, copy cluster_id exactly from the selected candidate_clusters item.
+7. For create, set cluster_id to an empty string.
+8. Do not invent a cluster_id, do not choose a cluster outside the provided list, and do not rewrite the memory text.
+
+# Input Format
+{
+    "new_memory_unit": {
+        "candidate_id": "candidate id",
+        "unit_type": "stable_pattern | recent_shift | objective_fact | milestone | active_commitment",
+        "fact": "new candidate fact",
+        "subjective_appraisal": "new candidate appraisal",
+        "relationship_signal": "new candidate relationship signal",
+        "evidence_refs": [{"source": "chat", "timestamp": "optional ISO timestamp", "message_id": "optional platform message id"}]
+    },
+    "candidate_clusters": [
+        {
+            "unit_id": "existing unit id",
+            "unit_type": "existing unit type",
+            "fact": "existing fact",
+            "subjective_appraisal": "existing appraisal",
+            "relationship_signal": "existing relationship signal",
+            "updated_at": "optional ISO timestamp"
+        }
+    ]
+}
+
+# Output Format
+Return only valid JSON:
+{
+    "candidate_id": "candidate id copied from input",
+    "decision": "create | merge | evolve",
+    "cluster_id": "existing unit_id for merge/evolve, or empty string for create",
+    "reason": "short semantic reason"
+}
+"""
+_merge_judge_llm = get_llm(
+    temperature=0.2,
+    top_p=0.9,
+    model=CONSOLIDATION_LLM_MODEL,
+    base_url=CONSOLIDATION_LLM_BASE_URL,
+    api_key=CONSOLIDATION_LLM_API_KEY,
+)
+
+
+async def _judge_memory_unit_merge(candidate: dict, candidate_clusters: list[dict]) -> dict:
+    """Ask the merge judge whether a candidate creates, merges, or evolves.
+
+    Args:
+        candidate: New memory-unit candidate from the extractor.
+        candidate_clusters: Existing memory units retrieved by RAG.
+
+    Returns:
+        Structurally validated merge-judge decision.
+    """
+
+    msg = {
+        "new_memory_unit": candidate,
+        "candidate_clusters": candidate_clusters,
+    }
+    system_prompt = SystemMessage(content=_MERGE_JUDGE_PROMPT)
+    human_message = HumanMessage(content=json.dumps(msg, ensure_ascii=False))
+    response = await _merge_judge_llm.ainvoke([
+        system_prompt,
+        human_message,
+    ])
+    result = parse_llm_json_output(response.content)
+    merge_result = _validate_merge_result(result, candidate, candidate_clusters)
+    return merge_result
+
+
+_REWRITE_PROMPT = """\
+You rewrite one existing memory unit using one new candidate.
+
+# Role
+You are the memory-unit rewrite stage. You update only the semantic text fields.
+
+# Rules
+- Update only the three semantic fields.
+- Preserve concrete event detail.
+- For merge, compact repeated evidence without losing the event anchor.
+- For evolve, explicitly update the relationship meaning.
+- Do not change the merge/evolve decision.
+
+# Generation Procedure
+1. Read decision.decision first. Treat it as fixed.
+2. If decision is merge, compact repeated information from the existing unit and new candidate into one clearer memory.
+3. If decision is evolve, preserve the older memory and update the fact/appraisal/signal to reflect the new development.
+4. Keep the fact field concrete and event-based. Do not turn it into a mood summary.
+5. Keep subjective_appraisal about the active character's interpretation.
+6. Keep relationship_signal about future interaction.
+7. Copy candidate_id from new_memory_unit and cluster_id from decision.cluster_id.
+8. Output only the three updated semantic fields plus the two copied ids.
+
+# Input Format
+{
+    "existing_unit_id": "stored unit id selected by the merge judge",
+    "new_memory_unit": {
+        "candidate_id": "candidate id",
+        "unit_type": "candidate unit type",
+        "fact": "new candidate fact",
+        "subjective_appraisal": "new candidate appraisal",
+        "relationship_signal": "new candidate relationship signal",
+        "evidence_refs": [{"source": "chat", "timestamp": "optional ISO timestamp", "message_id": "optional platform message id"}]
+    },
+    "decision": {
+        "candidate_id": "candidate id",
+        "decision": "merge | evolve",
+        "cluster_id": "stored unit id",
+        "reason": "merge judge reason"
+    }
+}
+
+# Output Format
+Return only valid JSON:
+{
+    "candidate_id": "candidate id copied from input",
+    "cluster_id": "existing_unit_id copied from input",
+    "fact": "updated compact fact",
+    "subjective_appraisal": "updated active-character subjective appraisal",
+    "relationship_signal": "updated future interaction signal"
+}
+"""
+_rewrite_llm = get_llm(
+    temperature=0.2,
+    top_p=0.9,
+    model=CONSOLIDATION_LLM_MODEL,
+    base_url=CONSOLIDATION_LLM_BASE_URL,
+    api_key=CONSOLIDATION_LLM_API_KEY,
+)
+
+
+async def _rewrite_memory_unit(candidate: dict, merge_result: dict) -> dict:
+    """Rewrite an existing memory unit with a new candidate's evidence.
+
+    Args:
+        candidate: New memory-unit candidate.
+        merge_result: Validated merge/evolve decision.
+
+    Returns:
+        Validated replacement semantic fields for the stored unit.
+    """
+
+    msg = {
+        "existing_unit_id": merge_result["cluster_id"],
+        "new_memory_unit": candidate,
+        "decision": merge_result,
+    }
+    system_prompt = SystemMessage(content=_REWRITE_PROMPT)
+    human_message = HumanMessage(content=json.dumps(msg, ensure_ascii=False))
+    response = await _rewrite_llm.ainvoke([
+        system_prompt,
+        human_message,
+    ])
+    result = parse_llm_json_output(response.content)
+    rewrite_result = _validate_rewrite_result(
+        result,
+        candidate,
+        merge_result["cluster_id"],
+    )
+    return rewrite_result
+
+
+_STABILITY_PROMPT = """\
+You decide whether an interaction-pattern memory remains recent or is stable.
+
+# Role
+You are the memory-unit stability judge. You only choose recent or stable for interaction-pattern units.
+
+# Rules
+- Use count, session spread, and recency only as evidence.
+- Do not promote a single noisy session just because it repeated several times.
+- stable means this should be treated as a durable pattern.
+- recent means this is still an active shift or unresolved local pattern.
+
+# Generation Procedure
+1. Read stability_evidence before deciding. Treat occurrence_count_label and session_spread.spread_label as evidence explanations.
+2. Choose stable when the memory looks durable across sessions, days, or repeated meaningful examples.
+3. Choose recent when the memory is new, single-session, unresolved, or could still change soon.
+4. Do not choose stable only because occurrence_count is greater than one; check whether the examples represent a real durable pattern.
+5. Do not choose recent only because the event happened today; recent examples can still confirm a stable pattern.
+6. Copy unit_id exactly from input and provide a short reason based on the evidence.
+
+# Input Format
+{
+    "unit_id": "stored unit id being classified",
+    "candidate": {
+        "candidate_id": "candidate id",
+        "unit_type": "stable_pattern | recent_shift",
+        "fact": "candidate fact",
+        "subjective_appraisal": "candidate appraisal",
+        "relationship_signal": "candidate relationship signal",
+        "evidence_refs": [{"source": "chat", "timestamp": "optional ISO timestamp", "message_id": "optional platform message id"}]
+    },
+    "merge_result": {
+        "candidate_id": "candidate id",
+        "decision": "create | merge | evolve",
+        "cluster_id": "stored unit id or empty string",
+        "reason": "merge judge reason"
+    },
+    "stability_evidence": {
+        "occurrence_count": 3,
+        "occurrence_count_label": "single_observation | two_observations | several_observations | many_observations",
+        "existing_unit_count": 2,
+        "new_evidence_ref_count": 1,
+        "session_spread": {
+            "spread_label": "unknown_session_spread | single_day_or_session | multiple_days_or_sessions",
+            "distinct_day_count": 2,
+            "distinct_message_ref_count": 3,
+            "timestamps": ["YYYY-MM-DD"]
+        },
+        "recency": {
+            "current_turn_timestamp": "ISO timestamp",
+            "existing_updated_at": "optional ISO timestamp",
+            "existing_last_seen_at": "optional ISO timestamp"
+        },
+        "recent_examples": [{"source": "existing_unit|new_candidate", "fact": "example fact", "updated_at": "optional ISO timestamp"}]
+    }
+}
+
+# Output Format
+Return only valid JSON:
+{
+    "unit_id": "unit id copied from input",
+    "window": "recent | stable",
+    "reason": "short semantic reason"
+}
+"""
+_stability_llm = get_llm(
+    temperature=0.2,
+    top_p=0.9,
+    model=CONSOLIDATION_LLM_MODEL,
+    base_url=CONSOLIDATION_LLM_BASE_URL,
+    api_key=CONSOLIDATION_LLM_API_KEY,
+)
+
+
+async def _judge_memory_unit_stability(
+    state: ConsolidatorState,
+    *,
+    unit_id: str,
+    candidate: dict,
+    merge_result: dict,
+    candidate_clusters: list[dict],
+) -> dict:
+    """Ask whether an interaction-pattern unit belongs in recent or stable.
+
+    Args:
+        state: Current consolidator state.
+        unit_id: Stored memory-unit id being classified.
+        candidate: New candidate that created, merged, or evolved the unit.
+        merge_result: Validated merge/create/evolve decision.
+        candidate_clusters: Existing units shown to the merge judge.
+
+    Returns:
+        Validated stability decision.
+    """
+
+    msg = _stability_payload(
+        state,
+        unit_id=unit_id,
+        candidate=candidate,
+        merge_result=merge_result,
+        candidate_clusters=candidate_clusters,
+    )
+    system_prompt = SystemMessage(content=_STABILITY_PROMPT)
+    human_message = HumanMessage(content=json.dumps(msg, ensure_ascii=False))
+    response = await _stability_llm.ainvoke([
+        system_prompt,
+        human_message,
+    ])
+    result = parse_llm_json_output(response.content)
+    stability_result = _validate_stability_result(result, unit_id)
+    return stability_result
 
 
 async def process_memory_unit_candidate(state: ConsolidatorState, candidate: dict) -> dict:
@@ -259,14 +724,7 @@ async def process_memory_unit_candidate(state: ConsolidatorState, candidate: dic
         surfaced_units=_rag_surfaced_memory_units(state),
         limit=MAX_MEMORY_UNIT_MERGE_CANDIDATES,
     )
-    merge_result = _validate_merge_result(
-        await _invoke_json(
-            _MERGE_JUDGE_PROMPT,
-            {"new_memory_unit": candidate, "candidate_clusters": candidate_clusters},
-        ),
-        candidate,
-        candidate_clusters,
-    )
+    merge_result = await _judge_memory_unit_merge(candidate, candidate_clusters)
 
     timestamp = state["timestamp"]
     if merge_result["decision"] == "create":
@@ -277,18 +735,7 @@ async def process_memory_unit_candidate(state: ConsolidatorState, candidate: dic
         )
         unit_id = docs[0]["unit_id"]
     else:
-        rewrite_result = _validate_rewrite_result(
-            await _invoke_json(
-                _REWRITE_PROMPT,
-                {
-                    "existing_unit_id": merge_result["cluster_id"],
-                    "new_memory_unit": candidate,
-                    "decision": merge_result,
-                },
-            ),
-            candidate,
-            merge_result["cluster_id"],
-        )
+        rewrite_result = await _rewrite_memory_unit(candidate, merge_result)
         await update_user_memory_unit_semantics(
             merge_result["cluster_id"],
             rewrite_result,
@@ -306,16 +753,12 @@ async def process_memory_unit_candidate(state: ConsolidatorState, candidate: dic
         UserMemoryUnitType.STABLE_PATTERN,
         UserMemoryUnitType.RECENT_SHIFT,
     }:
-        stability_result = _validate_stability_result(
-            await _invoke_json(
-                _STABILITY_PROMPT,
-                {
-                    "unit_id": unit_id,
-                    "candidate": candidate,
-                    "merge_result": merge_result,
-                },
-            ),
-            unit_id,
+        stability_result = await _judge_memory_unit_stability(
+            state,
+            unit_id=unit_id,
+            candidate=candidate,
+            merge_result=merge_result,
+            candidate_clusters=candidate_clusters,
         )
         await update_user_memory_unit_window(
             unit_id,
@@ -348,8 +791,20 @@ async def update_user_memory_units_from_state(state: ConsolidatorState) -> list[
         return_value = []
         return return_value
 
-    candidates = await extract_memory_unit_candidates(state)
+    try:
+        candidates = await extract_memory_unit_candidates(state)
+    except (json.JSONDecodeError, TypeError, ValueError) as exc:
+        logger.exception(f"memory-unit extractor output dropped: {exc}")
+        return_value = []
+        return return_value
+
     results = []
     for candidate in candidates:
-        results.append(await process_memory_unit_candidate(state, candidate))
+        try:
+            result = await process_memory_unit_candidate(state, candidate)
+        except (json.JSONDecodeError, TypeError, ValueError) as exc:
+            candidate_id = text_or_empty(candidate.get("candidate_id"))
+            logger.exception(f"memory-unit candidate dropped: {candidate_id}: {exc}")
+            continue
+        results.append(result)
     return results

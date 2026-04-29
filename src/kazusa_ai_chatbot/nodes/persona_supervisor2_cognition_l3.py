@@ -426,11 +426,11 @@ _CONTENT_ANCHOR_AGENT_PROMPT = """\
             "global_user_id": "当前用户 UUID",
             "display_name": "当前用户显示名",
             "user_memory_context": {{
-                "stable_patterns": [{{"fact": "重复出现的事实模式", "subjective_appraisal": "Kazusa 的主观评价", "relationship_signal": "未来互动信号", "updated_at": "ISO时间"}}],
-                "recent_shifts": [{{"fact": "最近变化或局部事件", "subjective_appraisal": "Kazusa 的主观评价", "relationship_signal": "未来互动信号", "updated_at": "ISO时间"}}],
-                "objective_facts": [{{"fact": "客观事实", "subjective_appraisal": "Kazusa 如何看待这个事实", "relationship_signal": "未来互动信号", "updated_at": "ISO时间"}}],
-                "milestones": [{{"fact": "里程碑事件", "subjective_appraisal": "Kazusa 如何看待这个事件", "relationship_signal": "未来互动信号", "updated_at": "ISO时间"}}],
-                "active_commitments": [{{"fact": "当前仍有效的承诺/约定", "subjective_appraisal": "Kazusa 如何看待这个承诺", "relationship_signal": "执行或表达上的注意点", "updated_at": "ISO时间"}}]
+                "stable_patterns": [{{"fact": "重复出现的事实模式", "subjective_appraisal": "角色的主观评价", "relationship_signal": "未来互动信号", "updated_at": "ISO时间"}}],
+                "recent_shifts": [{{"fact": "最近变化或局部事件", "subjective_appraisal": "角色的主观评价", "relationship_signal": "未来互动信号", "updated_at": "ISO时间"}}],
+                "objective_facts": [{{"fact": "客观事实", "subjective_appraisal": "角色如何看待这个事实", "relationship_signal": "未来互动信号", "updated_at": "ISO时间"}}],
+                "milestones": [{{"fact": "里程碑事件", "subjective_appraisal": "角色如何看待这个事件", "relationship_signal": "未来互动信号", "updated_at": "ISO时间"}}],
+                "active_commitments": [{{"fact": "当前仍有效的承诺/约定", "subjective_appraisal": "角色如何看待这个承诺", "relationship_signal": "执行或表达上的注意点", "updated_at": "ISO时间"}}]
             }}
         }},
         "character_image": {{
@@ -553,6 +553,14 @@ _PREFERENCE_ADAPTER_PROMPT = """\
 - 称呼方式
 - 轻量格式习惯（例如更简短、更少混语）
 
+# 思考路径
+1. 先读取 `logical_stance`、`character_intent`、`internal_monologue` 与 `content_anchors`，确认角色是否已经接受用户偏好。
+2. 再读取 `user_memory_context.active_commitments`，寻找当前仍有效的已接受表达约定。
+3. 检查 `user_memory_context` 其他分类，只把已被事实或承诺支持的偏好当作软约束来源。
+4. 从输入中提取具体值，例如实际称呼、实际语言、实际尾缀词；找不到具体值时不要输出。
+5. 将合格偏好改写成下游可执行的自然语言软约束，并保留角色分寸。
+6. 如果偏好未被角色接受、会压过人格、缺少具体值或只是用户单方面施压，返回空列表。
+
 # 改写要求
 - 每条 `accepted_user_preferences` 都必须是下游可直接执行的一句软约束。
 - 每条约束必须包含**具体值**（如实际称呼词、实际语言、实际尾缀词），严禁使用占位符（如”对方要求的称呼”、”对方要求的语言”）。具体值必须来自输入数据，不可凭上下文推断或补全。
@@ -567,11 +575,11 @@ _PREFERENCE_ADAPTER_PROMPT = """\
     "character_intent": "行动意图",
     "active_commitments": [{{"action": "仍在生效的承诺/约定"}}],
     "user_memory_context": {{
-        "stable_patterns": [{{"fact": "重复出现的事实模式", "subjective_appraisal": "Kazusa 的主观评价", "relationship_signal": "未来互动信号", "updated_at": "ISO时间"}}],
-        "recent_shifts": [{{"fact": "最近变化或局部事件", "subjective_appraisal": "Kazusa 的主观评价", "relationship_signal": "未来互动信号", "updated_at": "ISO时间"}}],
-        "objective_facts": [{{"fact": "客观事实", "subjective_appraisal": "Kazusa 如何看待这个事实", "relationship_signal": "未来互动信号", "updated_at": "ISO时间"}}],
-        "milestones": [{{"fact": "里程碑事件", "subjective_appraisal": "Kazusa 如何看待这个事件", "relationship_signal": "未来互动信号", "updated_at": "ISO时间"}}],
-        "active_commitments": [{{"fact": "当前仍有效的承诺/约定", "subjective_appraisal": "Kazusa 如何看待这个承诺", "relationship_signal": "执行或表达上的注意点", "updated_at": "ISO时间"}}]
+        "stable_patterns": [{{"fact": "重复出现的事实模式", "subjective_appraisal": "角色的主观评价", "relationship_signal": "未来互动信号", "updated_at": "ISO时间"}}],
+        "recent_shifts": [{{"fact": "最近变化或局部事件", "subjective_appraisal": "角色的主观评价", "relationship_signal": "未来互动信号", "updated_at": "ISO时间"}}],
+        "objective_facts": [{{"fact": "客观事实", "subjective_appraisal": "角色如何看待这个事实", "relationship_signal": "未来互动信号", "updated_at": "ISO时间"}}],
+        "milestones": [{{"fact": "里程碑事件", "subjective_appraisal": "角色如何看待这个事件", "relationship_signal": "未来互动信号", "updated_at": "ISO时间"}}],
+        "active_commitments": [{{"fact": "当前仍有效的承诺/约定", "subjective_appraisal": "角色如何看待这个承诺", "relationship_signal": "执行或表达上的注意点", "updated_at": "ISO时间"}}]
     }},
     "character_taboos": "角色禁忌",
     "linguistic_style": "语言风格约束",
