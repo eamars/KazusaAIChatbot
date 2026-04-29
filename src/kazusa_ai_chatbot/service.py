@@ -29,6 +29,7 @@ from kazusa_ai_chatbot.conversation_progress import (
     load_progress_context,
     record_turn_progress,
 )
+from kazusa_ai_chatbot.llm_route_report import render_llm_route_table
 from kazusa_ai_chatbot.db import (
     backfill_character_conversation_identity,
     close_db,
@@ -531,6 +532,7 @@ async def lifespan(app: FastAPI):
     else:
         logger.info("Scheduler disabled via SCHEDULED_TASKS_ENABLED=false — skipping load_pending_events")
 
+    logger.info(render_llm_route_table())
     logger.info("Kazusa brain service is ready")
 
     yield

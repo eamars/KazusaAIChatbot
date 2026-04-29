@@ -325,4 +325,4 @@ def test_recorder_prompt_mentions_phase2_flow_contract() -> None:
     assert "episode_phase" in prompt
     assert "topic_momentum" in prompt
     assert "next_affordances" in prompt
-    assert "Do not generate Kazusa's next reply text" in prompt
+    assert "Do not generate the active character's next reply text" in prompt
