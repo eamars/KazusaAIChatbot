@@ -119,6 +119,8 @@ Do not make the initializer build backend parameters simply because it can. If e
 
 Do not add code-side repair, keyword routing, or semantic fallback in a shared orchestrator to compensate for a new agent. Put domain-specific extraction or refusal inside the specialist agent, and keep shared orchestration boring.
 
+For local-LLM JSON output failures, keep recovery simple and proportional. Use the repo's existing JSON parser/repair helper when the JSON string itself is malformed. Once JSON parses, do not build retry loops, repair prompts, or extra LLM calls for missing fields unless the user explicitly asks for that recovery path. If a generated optional field is absent, skip that field; if a generated row lacks required fields, drop that row/data with a clear log and continue when the stage can safely degrade.
+
 When the user says "put on the system engineer hat," treat that as a request to protect system contracts and minimize blast radius, not merely to make the new feature more structured.
 
 ## Capability Design

@@ -77,6 +77,10 @@ async def test_facts_harvester_receives_rag2_payload_and_dedup_keys(monkeypatch)
     payload = json.loads(llm.messages[1].content)
     assert "research_facts" not in system_prompt
     assert "RAG 元信息" not in system_prompt
+    assert "义务主体是不是" in system_prompt
+    assert "角色建议用户怎么做，不等于角色承诺自己会做" in system_prompt
+    assert "建议/方案不是承诺" in system_prompt
+    assert "主语替换自检" in system_prompt
     assert payload["rag_result"]["memory_evidence"][0]["summary"] == "旧记忆"
     assert payload["supervisor_trace"]["loop_count"] == 1
     assert payload["existing_dedup_keys"] == ["drink_preference_green_tea"]

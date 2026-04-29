@@ -54,11 +54,17 @@ _FACTS_HARVESTER_PROMPT = """\
    - **称呼/句尾/说话格式规则 [必须执行]**：当用户要求 {character_name} 使用特定称呼、句尾、口癖、语气或回复格式（如“主人”“喵”“每句话都这样说”）时，优先判断这是否是一个被角色采纳的**操作性规则/约定**。若角色在 `final_dialog` 中明确接受并准备后续沿用，这类内容应优先进入 `future_promises`（作为持续生效的约定/规则），而不是改写成“{character_name}喜欢/习惯/对这种说话方式感到如何”之类的隐含画像事实。只有当输入本身真的形成了稳定记忆事实时，才可进入 `new_facts`.
 
 
-3. **承诺 (future_promises) 判定标准 [核心逻辑]**:
+3. **承诺 (future_promises) 判定标准 [核心逻辑链]**:
    - `future_promises` 记录“**已经被角色采纳的未来义务/约定**”以及“**会持续影响后续回合的操作性规则/接受的指令**”，而不是所有带未来色彩的话题.
-   - 先识别 `decontexualized_input` 中的“候选未来事项”，再用 `final_dialog` 判断角色是否真的接下了这件事.
+   - 每个候选 promise 都必须通过以下四步；任一步失败就不要输出该 promise：
+     1) 从 `decontexualized_input` 或 `content_anchors` 识别一个“未来事项/持续规则候选”。
+     2) 判断这个候选的义务主体是不是 **{character_name}**。如果只是用户自己要做、用户计划做、或角色给出建议/评价/提醒，则不是角色承诺。
+     3) 在 `final_dialog` 中找到 {character_name} 明确接受、答应、确认后续履行、或形成双方约定的证据。
+     4) 将 `action` 写成 {character_name} 未来要执行或持续遵守的具体动作；不能写成建议、观察、复述、主观感受或用户自己的计划。
    - **只有当 `final_dialog` 明确体现出接受、答应、确认履行、或形成双方约定时，才能生成 promise。**
-   - **只有当 `final_dialog` 明确体现出接受、答应、确认履行、或形成双方约定时，才能生成 promise。**
+   - **角色建议用户怎么做，不等于角色承诺自己会做。**
+   - **建议/方案不是承诺 [必须执行]**：若 `final_dialog` 的语义是“建议用户采用某个做法”“认可用户自己的计划”“评价这样更稳妥/更合理”，则 `future_promises` 必须返回 `[]`。这类内容最多可能是事实证据，不能改写成 {character_name} 会替用户执行、记住或持续跟进。
+   - **主语替换自检 [必须执行]**：写出候选 `action` 前，先问“这件事在现实中是谁要做？”如果答案是用户、物品流程、或双方当前对话本身，而不是 {character_name} 未来要做/遵守的动作，则删除该候选。
    - **保留选择权不算承诺 [必须执行]**：若 `logical_stance` 不是 `CONFIRM`，且 `final_dialog` 仍在保留选择权、试探或吊胃口（如“看心情”“谁知道”“到时候再说”“也许吧”“再看”“下次不一定”），`future_promises` 必须返回 `[]`。即使出现“下次”“以后”“回头”等未来词，也不能因为话题带未来性就误判为已接受承诺.
    - 合格条件：表达“谁对谁做什么”的可执行承诺，不是对话复读（如“他说/她问/我觉得”），且能在 `final_dialog` 中找到角色已经接下该义务的证据。
    - 可以接受两种写法：
@@ -81,8 +87,9 @@ _FACTS_HARVESTER_PROMPT = """\
 2. 再读取 `final_dialog`，判断 {character_name} 最终是否真的接受、拒绝、保留选择权或形成承诺。
 3. 检查 `rag_result.user_image.user_memory_context`、`rag_result.user_memory_unit_candidates`、`rag_result.memory_evidence` 与 `existing_dedup_keys`，过滤已经存在或语义重复的内容。
 4. 对仍然有长期价值的事实或事件，写入 `new_facts`，并保留足够上下文让下游生成 fact / subjective_appraisal / relationship_signal。
-5. 对已经被 {character_name} 接下、后续仍需执行或遵守的事项，写入 `future_promises`。
-6. 如果没有合格事实或承诺，对应字段返回空数组；不要为了填满输出而复述对话。
+5. 对每个候选承诺执行“候选事项 -> 义务主体 -> final_dialog 接受证据 -> action 可执行性”的逻辑链检查；只有四步都成立才写入 `future_promises`。
+6. 对候选承诺执行主语替换自检：如果自然主语是用户或当前任务流程，清空该候选。
+7. 如果没有合格事实或承诺，对应字段返回空数组；不要为了填满输出而复述对话。
 
 # 输入格式
 human payload 是以下 JSON：

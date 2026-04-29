@@ -36,12 +36,14 @@ _GLOBAL_STATE_UPDATER_PROMPT = """\
 - `internal_monologue` : {character_name}最真实的情感波动和心理活动
 - `emotional_appraisal`: {character_name}对互动的最原始、直觉性的情感冲动
 - `character_intent`: {character_name}在互动中的核心意图
+- 该阶段不会收到完整角色资料；默认使用中性基线，不要凭空放大敏感、防御或暧昧倾向。
 
 # 生成步骤
 1. 先读取 `internal_monologue` 和 `emotional_appraisal`，分清一瞬间情绪与最终心理沉淀。
 2. 读取 `final_dialog` 与 `character_intent`，判断本轮是否真的留下持续心理惯性。
-3. 只提取下一轮初始化需要的非针对性心理背景，不要写用户画像或关系记忆。
-4. 若证据不足，保持中性，不要把普通互动升级为强烈负面状态。
+3. 读取 `logical_stance` 与 `decontexualized_input`，区分普通事务、事实澄清、用户解释、关系事件或边界冲突。
+4. 只提取下一轮初始化需要的非针对性心理背景，不要写用户画像或关系记忆。
+5. 若证据不足，保持中性，不要把普通互动升级为强烈负面状态。
 
 # 输入格式
 {{
@@ -49,6 +51,8 @@ _GLOBAL_STATE_UPDATER_PROMPT = """\
     "emotional_appraisal": "string",
     "interaction_subtext": "string",
     "character_intent": "string",
+    "logical_stance": "string",
+    "decontexualized_input": "string",
     "final_dialog": ["角色本轮最终实际说出口的话"]
 }}
 
@@ -64,7 +68,8 @@ _GLOBAL_STATE_UPDATER_PROMPT = """\
    - 结合 `character_intent` 的达成情况，以{character_name}的第一人称写下一句话复盘。
    - 这是她此时此刻脑子里挥之不去的“念头”，决定了她下一轮对话的潜台词。
    - 例如：'刚才那个笨蛋居然怀疑我的缝纫技术，真是气死我了。'
-4. 中性守恒：若 `internal_monologue` 与 `final_dialog` 没有明确显示被冒犯、被威胁、被调情或被越界，禁止把普通问候、图片描述请求、事实分享、日常约定升级为 `Distrustful`、`Agitated`、`Defensive` 等强烈负面状态。
+4. 中性守恒：若 `internal_monologue` 与 `final_dialog` 没有明确显示被冒犯、被威胁、被调情或被越界，禁止把普通问候、图片描述请求、事实分享、用户解释、事务协作、日常约定升级为 `Distrustful`、`Agitated`、`Defensive` 等强烈负面状态。
+5. 证据优先级：`final_dialog` 与 `logical_stance` 是是否留下持续心理惯性的硬约束；若最终回复平稳接住了普通任务，即使内部独白一度敏感，也只能写轻微或中性的沉淀。
 
 # 输出格式
 请务必返回合法的 JSON 字符串，仅包含以下字段：
@@ -91,6 +96,8 @@ async def global_state_updater(state: ConsolidatorState) -> dict:
         "emotional_appraisal": state["emotional_appraisal"],
         "interaction_subtext": state["interaction_subtext"],
         "character_intent": state["character_intent"],
+        "logical_stance": state["logical_stance"],
+        "decontexualized_input": state["decontexualized_input"],
         "final_dialog": state["final_dialog"],
     }
 
@@ -115,6 +122,7 @@ _RELATIONSHIP_RECORDER_PROMPT = """\
 
 # 核心任务
 将瞬时的思考转化为可被下游 memory-unit consolidator 使用的 `subjective_appraisals`。
+该阶段不会收到完整角色资料；默认使用中性基线。只有当输入、最终回复和认知证据共同支持关系意义时，才记录关系评价。
 
 # 核心输入
 - `internal_monologue`: 揭示了{character_name}对用户的真实喜好和内心波动。
@@ -123,13 +131,16 @@ _RELATIONSHIP_RECORDER_PROMPT = """\
 - `affinity_context`: 当前{user_name}在{character_name}的好感度描述。
 - `logical_stance`: {character_name}对{user_name}言行的逻辑认可度。
 - `character_intent`: {character_name}本轮最终选择的行动意图，说明她是在正常提供、调侃拉扯、回避、拒绝、澄清还是对抗。
+- `decontexualized_input`: 用户本轮真实表达，用于判断这是不是普通任务、事实澄清、用户解释或关系事件。
+- `final_dialog`: {character_name}本轮最终说出口的话，用于判断关系意义是否真的被接住。
 
 # 生成步骤
 1. 先检查 `internal_monologue`、`emotional_appraisal`、`interaction_subtext` 是否有明确主观关系证据。
-2. 再结合 `logical_stance`、`character_intent` 与 `affinity_context` 判断这份证据的关系方向。
-3. 若没有明确关系证据，输出 `skip: true` 且 `affinity_delta: 0`。
-4. 若有证据，写短主观评价证据，供下游 memory-unit consolidator 使用；不要复述对话。
-5. 最后选择 -5 到 +5 的 `affinity_delta`，不确定时选 0。
+2. 读取 `decontexualized_input` 与 `final_dialog`，确认本轮是否真的是关系事件，而不是普通任务、事实澄清、用户解释或事务协作。
+3. 再结合 `logical_stance`、`character_intent` 与 `affinity_context` 判断这份证据的关系方向。
+4. 若没有明确关系证据，输出 `skip: true` 且 `affinity_delta: 0`。
+5. 若有证据，写短主观评价证据，供下游 memory-unit consolidator 使用；不要复述对话。
+6. 最后选择 -5 到 +5 的 `affinity_delta`，不确定时选 0。
 
 # 输入格式
 {{
@@ -139,27 +150,30 @@ _RELATIONSHIP_RECORDER_PROMPT = """\
     "affinity_context": dict,
     "logical_stance": "string",
     "character_intent": "string",
+    "decontexualized_input": "string",
+    "final_dialog": ["角色本轮最终实际说出口的话"]
 }}
 
 # 记录准则
 1. 主观评价证据: 以{character_name}的主观视角书写，描述“我”如何理解他/她这次行为背后的关系意义。不要写成日记，不要复述对话流程。
 2. 分值修正 `affinity_delta`: 只根据 `internal_monologue` 与 `emotional_appraisal` 中**可直接观察到**的主观好恶来加减分（-5 到 +5）。
-3. **默认值规则：** 大多数普通对话都应输出 `affinity_delta = 0`。只有当内心证据明确显示“这次互动让我明显更舒服/更开心/更被理解/更信任对方”时才给正分；只有当内心证据明确显示“这次互动让我明显更烦躁/更压迫/更反感/更受伤”时才给负分。
+3. **默认值规则：** 大多数普通对话都应输出 `affinity_delta = 0`。只有当内心证据、用户输入与最终回复共同显示“这次互动让我明显更舒服/更开心/更被理解/更信任对方”时才给正分；只有当三者共同显示“这次互动让我明显更烦躁/更压迫/更反感/更受伤”时才给负分。
 4. **静默检查：** 若 `internal_monologue` 与 `emotional_appraisal` 中未见明显情感起伏，返回 `{{"skip": true, "affinity_delta": 0}}`。
-5. **证据约束：** 若 `interaction_subtext`、`internal_monologue` 与 `emotional_appraisal` 中缺乏明确证据，禁止把普通问候、图片描述请求、事实分享、日常约定、简短感谢写成“危险”“调情”“博弈”“操控”类标签；此类中性互动的 `affinity_delta` 默认必须为 0。
-6. **`character_intent` 解释规则：** `character_intent` 不是机械打分器，但它决定你该如何解读同一份情绪证据。
+5. **证据约束：** 若 `interaction_subtext`、`internal_monologue`、`emotional_appraisal`、`decontexualized_input` 与 `final_dialog` 中缺乏明确证据，禁止把普通问候、图片描述请求、事实分享、用户解释、事务协作、日常约定、简短感谢写成“危险”“调情”“博弈”“操控”“拉开距离”“温柔到心乱”等关系标签；此类中性互动的 `affinity_delta` 默认必须为 0。
+6. **输入纠偏规则：** 如果用户明确澄清“不是拉开距离/不是承诺/不用你记/只是顺手处理”，且 `final_dialog` 没有继续推进关系冲突或亲密关系，必须把这视为降压事实，不要反向写成用户在防御或暧昧靠近。
+7. **`character_intent` 解释规则：** `character_intent` 不是机械打分器，但它决定你该如何解读同一份情绪证据。
    - `PROVIDE`: 倾向说明角色愿意正常接住这轮互动。若 `internal_monologue` / `emotional_appraisal` 同时呈现安心、放松、被理解、愿意靠近，可给正分；若只是完成回答、并无额外情绪收益，仍应给 0。
    - `BANTAR`: 允许存在拉扯、害羞、试探、暧昧、嘴硬等复杂情绪。只有当证据明确显示角色**享受**这种互动、并把它体验为愉快或亲近时，才可给正分；若更多是局促、防御、被牵着走、半推半就、羞耻或不安，则应给 0 或负分，而不是因为“有张力”就默认加分。
    - `CLARIFY`: 说明角色仍在确认对方意思、尚未真正接住关系意义。默认应偏向 0；只有极少数情况下，若澄清过程本身明确带来被理解、被尊重感，才可轻微加分。
    - `EVADE` / `DISMISS`: 说明角色在后撤、降温或避免进入对方框架。默认不应给正分；除非证据非常明确显示这种回避本身让角色感到轻松和舒缓，否则应给 0 或负分。
    - `REJECT` / `CONFRONT`: 说明角色正在抗拒、设限或正面冲突。若伴随烦躁、压迫、受伤、被冒犯，应该给负分；通常不应给正分。
-7. **打分刻度：**
+8. **打分刻度：**
    - `0`: 普通对话、事务问答、轻量闲聊、证据不足。
    - `+1` 到 `+2`: 明确轻度好感上升，如感到放松、被尊重、被理解、稍微开心。
    - `+3` 到 `+5`: 明确强正向波动，如明显开心、安心、被打动、强信任感。
    - `-1` 到 `-2`: 明确轻度负面波动，如烦躁、不适、被打扰、轻度警惕。
    - `-3` 到 `-5`: 明确强负向波动，如强烈厌烦、受压迫、被冒犯、明显受伤或反感。
-8. **不确定时选 0**：若你需要猜测，说明证据不够，直接输出 0。
+9. **不确定时选 0**：若你需要猜测，说明证据不够，直接输出 0。
 
 # 输出格式
 请务必返回合法的 JSON 字符串，仅包含以下字段：
@@ -198,6 +212,8 @@ async def relationship_recorder(state: ConsolidatorState) -> dict:
         },
         "logical_stance": state["logical_stance"],
         "character_intent": state["character_intent"],
+        "decontexualized_input": state["decontexualized_input"],
+        "final_dialog": state["final_dialog"],
     }
 
     human_message = HumanMessage(content=json.dumps(msg, ensure_ascii=False))

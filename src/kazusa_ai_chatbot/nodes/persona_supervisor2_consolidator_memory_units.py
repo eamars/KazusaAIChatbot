@@ -18,7 +18,6 @@ from kazusa_ai_chatbot.db import (
     insert_user_memory_units,
     update_user_memory_unit_semantics,
     update_user_memory_unit_window,
-    validate_user_memory_unit_semantics,
 )
 from kazusa_ai_chatbot.nodes.persona_supervisor2_consolidator_schema import ConsolidatorState
 from kazusa_ai_chatbot.rag.user_memory_unit_retrieval import retrieve_memory_unit_merge_candidates
@@ -27,6 +26,14 @@ from kazusa_ai_chatbot.utils import get_llm, parse_llm_json_output, text_or_empt
 
 MAX_MEMORY_UNIT_CANDIDATES_PER_TURN = 3
 MAX_MEMORY_UNIT_MERGE_CANDIDATES = 6
+
+VALID_EXTRACTED_USER_MEMORY_UNIT_TYPES = {
+    UserMemoryUnitType.STABLE_PATTERN,
+    UserMemoryUnitType.RECENT_SHIFT,
+    UserMemoryUnitType.OBJECTIVE_FACT,
+    UserMemoryUnitType.MILESTONE,
+    UserMemoryUnitType.ACTIVE_COMMITMENT,
+}
 
 logger = logging.getLogger(__name__)
 
@@ -83,19 +90,80 @@ def _candidate_with_id(candidate: dict) -> dict:
     return item
 
 
-def _valid_candidates(result: dict) -> list[dict]:
+def _candidate_validation_errors(candidate: dict) -> list[str]:
+    """Return structural errors for an extractor-authored memory unit.
+
+    Args:
+        candidate: Candidate memory-unit dictionary after id normalization.
+
+    Returns:
+        Validation error strings. An empty list means the candidate is usable.
+    """
+
+    errors: list[str] = []
+    unit_type = text_or_empty(candidate.get("unit_type"))
+    if unit_type not in VALID_EXTRACTED_USER_MEMORY_UNIT_TYPES:
+        errors.append(f"invalid unit_type: {unit_type!r}")
+
+    for field in ("fact", "subjective_appraisal", "relationship_signal"):
+        if not text_or_empty(candidate.get(field)):
+            errors.append(f"missing field: {field}")
+
+    evidence_refs = candidate.get("evidence_refs")
+    if not isinstance(evidence_refs, list):
+        errors.append("evidence_refs must be a list")
+
+    return errors
+
+
+def _validated_candidates(result: dict) -> tuple[list[dict], list[dict]]:
+    """Split extractor output into usable candidates and validation errors.
+
+    Args:
+        result: Parsed JSON object returned by the extractor LLM.
+
+    Returns:
+        A pair of valid candidates and structured invalid-candidate records.
+    """
+
     raw_candidates = result.get("memory_units", [])
     if not isinstance(raw_candidates, list):
-        return_value = []
+        validation_errors = [{
+            "candidate_id": "",
+            "errors": ["memory_units must be a list"],
+        }]
+        return_value = ([], validation_errors)
         return return_value
 
     candidates: list[dict] = []
-    for raw_candidate in raw_candidates[:MAX_MEMORY_UNIT_CANDIDATES_PER_TURN]:
+    validation_errors: list[dict] = []
+    for index, raw_candidate in enumerate(raw_candidates[:MAX_MEMORY_UNIT_CANDIDATES_PER_TURN]):
         if not isinstance(raw_candidate, dict):
+            validation_errors.append({
+                "candidate_id": f"index-{index}",
+                "errors": ["candidate must be an object"],
+            })
             continue
+
         candidate = _candidate_with_id(raw_candidate)
-        validate_user_memory_unit_semantics(candidate)
+        candidate_errors = _candidate_validation_errors(candidate)
+        if candidate_errors:
+            validation_errors.append({
+                "candidate_id": candidate["candidate_id"],
+                "errors": candidate_errors,
+            })
+            continue
+
         candidates.append(candidate)
+
+    return_value = (candidates, validation_errors)
+    return return_value
+
+
+def _valid_candidates(result: dict) -> list[dict]:
+    candidates, validation_errors = _validated_candidates(result)
+    if validation_errors:
+        logger.warning(f"memory-unit extractor dropped invalid candidates: {validation_errors}")
     return candidates
 
 
@@ -315,8 +383,9 @@ You are the memory-unit extractor. You only identify new candidate memories from
 # Rules
 - fact must be a concrete event, decision, preference, commitment, or durable behavior anchored in the provided conversation.
 - Use chat_history_recent as evidence when the memory depends on multiple messages.
-- subjective_appraisal explains the active character's subjective interpretation of that fact.
-- relationship_signal explains how this should affect future interaction.
+- Every returned memory unit must include non-empty fact, subjective_appraisal, and relationship_signal.
+- subjective_appraisal explains the active character's subjective interpretation of that fact; it is required even for objective facts.
+- relationship_signal explains how this should affect future interaction; it is required for every unit.
 - Do not output vague labels or only describe the latest message tone.
 - Preserve enough event detail to be useful later.
 - Do not decide merge/create/evolve.

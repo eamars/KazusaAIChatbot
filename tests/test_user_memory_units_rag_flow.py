@@ -44,6 +44,35 @@ def _unit(unit_id: str, fact: str, *, unit_type: str = UserMemoryUnitType.OBJECT
     }
 
 
+def test_valid_candidates_drops_incomplete_memory_unit_rows(caplog) -> None:
+    caplog.set_level("WARNING", logger=memory_units_module.__name__)
+    result = {
+        "memory_units": [
+            {
+                "candidate_id": "missing-appraisal",
+                "unit_type": UserMemoryUnitType.OBJECTIVE_FACT,
+                "fact": "User is testing malformed memory output.",
+                "relationship_signal": "Use this only if structurally valid.",
+                "evidence_refs": [],
+            },
+            {
+                "candidate_id": "valid-candidate",
+                "unit_type": UserMemoryUnitType.OBJECTIVE_FACT,
+                "fact": "User asked the extractor to keep valid rows.",
+                "subjective_appraisal": "The character reads this as schema discipline.",
+                "relationship_signal": "Future memory extraction should keep all required fields.",
+                "evidence_refs": [],
+            },
+        ],
+    }
+
+    candidates = memory_units_module._valid_candidates(result)
+
+    assert [candidate["candidate_id"] for candidate in candidates] == ["valid-candidate"]
+    assert "missing-appraisal" in caplog.text
+    assert "subjective_appraisal" in caplog.text
+
+
 @pytest.mark.asyncio
 async def test_build_user_memory_context_bundle_merges_semantic_and_recent(monkeypatch) -> None:
     calls: dict[str, object] = {}
