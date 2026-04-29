@@ -128,6 +128,22 @@ def test_build_interaction_history_recent_excludes_other_user_messages():
     ]
 
 
+def test_build_interaction_history_recent_returns_empty_without_current_user():
+    """Ambiguous bot replies should not leak across group-chat users."""
+    history = [
+        {"role": "user", "platform_user_id": "user_a", "content": "prior thread"},
+        {
+            "role": "assistant",
+            "platform_user_id": "bot_456",
+            "content": "bot reply to prior thread",
+        },
+    ]
+
+    scoped = build_interaction_history_recent(history, "user_b", "bot_456")
+
+    assert scoped == []
+
+
 @pytest.mark.asyncio
 async def test_dialog_agent_returns_final_dialog():
     """dialog_agent should return a dict with 'final_dialog' key."""

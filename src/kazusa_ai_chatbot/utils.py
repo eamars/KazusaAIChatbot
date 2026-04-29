@@ -89,8 +89,9 @@ def build_interaction_history_recent(
         A filtered recent-history list for the current user-bot subthread. The
         slice begins at the first current-user message after the most recent
         other-user turn, then keeps only the current user's messages and the
-        bot's assistant replies. If no such slice can be formed, returns the
-        original recent window unchanged.
+        bot's assistant replies. If no such slice can be formed for the current
+        user, returns an empty list so unrelated group-chat turns do not leak
+        into persona context.
     """
     last_other_user_idx = -1
     for index, msg in enumerate(chat_history_recent):
@@ -111,6 +112,9 @@ def build_interaction_history_recent(
     )
     if first_current_user_idx >= 0:
         candidate_history = candidate_history[first_current_user_idx:]
+    else:
+        return_value: list[dict] = []
+        return return_value
 
     interaction_history = [
         msg for msg in candidate_history
@@ -124,7 +128,8 @@ def build_interaction_history_recent(
     ]
     if interaction_history:
         return interaction_history
-    return chat_history_recent
+    return_value = []
+    return return_value
 
 
 def sanitize_llm_text(text: str) -> str:
