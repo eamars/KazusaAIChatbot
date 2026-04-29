@@ -4,10 +4,10 @@
 
 - Goal: Replace overlapping `historical_summary`, `recent_window`, and `character_diary` with balanced, fact-anchored memory units for cognition.
 - Plan class: high_risk_migration.
-- Status: draft, decision-complete for implementation review.
-- Overall cutover strategy: big-bang schema and cognition-payload replacement after seeded test verification.
+- Status: completed.
+- Overall cutover strategy: big-bang schema and cognition-payload replacement has been executed; old paths are not restored.
 - Highest-risk areas: consolidator LLM reliability, RAG projection balance, and database reset order.
-- Acceptance criteria: cognition receives only category-balanced `user_memory_context`; repeated events compact into detailed memory units; no deterministic semantic path decides memory meaning.
+- Acceptance criteria: cognition receives only category-balanced `user_memory_context`; repeated events compact into detailed memory units; no deterministic semantic path decides memory meaning. Remaining hardening is forward-fix only.
 
 ## Context
 
@@ -27,9 +27,9 @@ The new architecture merges historical summary, recent window, and diary into a 
 - Do not feed `historical_summary`, `recent_window`, `character_diary`, or `diary_entry` into cognition after cutover.
 - Do not preserve diary-specific subject/object prompt conventions. All memory units use the same semantic voice.
 - Do not add deterministic semantic overrides. Code must not force `create`, `merge`, `evolve`, `stable`, unit type, commitment meaning, or memory meaning from cosine thresholds, keywords, counts, session frequency, or local classifiers.
-- LLMs own semantic interpretation. Code owns structural validation, persistence metadata, ID generation, timestamps, limits, retries, logging, and database writes.
+- LLMs own semantic interpretation. Code owns structural validation, persistence metadata, ID generation, timestamps, limits, logging, and database writes.
 - Structural validation may reject malformed JSON, unknown enum values, missing fields, invalid field types, unknown `cluster_id`, oversized fields, or invalid status transitions.
-- If an LLM output is structurally invalid, run at most one bounded LLM repair retry for that stage. If repair fails, skip and log the candidate. Do not reinterpret the failed output in code.
+- If an LLM output is structurally invalid, log the incident and drop the bad stage or candidate. Do not run a repair retry, do not reinterpret the failed output in code, and do not restore legacy fallback paths.
 - RAG may retrieve, rank, cache, and project candidate memory units. RAG must not semantically decide whether a candidate is the same event, an evolved event, or unrelated.
 - Counts, session spread, recency, retrieval scores, and similarity scores may be shown to LLMs as evidence labels. They must not directly decide memory meaning.
 - No new response-path LLM calls are allowed for this change. Consolidation LLM calls run in the background/write path.
@@ -45,7 +45,7 @@ The new architecture merges historical summary, recent window, and diary into a 
 - Route consolidator merge-candidate search through RAG-owned retrieval functions so Cache2 policy is shared.
 - Add per-category item caps and character budgets.
 - Add a regression test for the original symptom: projected memory imbalance.
-- Use a seeded test database before live reset so prompt and projection tests have data.
+- Use seeded tests and real-pipeline replay evidence to validate the completed cutover. The live reset has already happened.
 
 ## Deferred
 
@@ -58,13 +58,14 @@ The new architecture merges historical summary, recent window, and diary into a 
 
 ## Cutover Policy
 
-This is a big-bang cutover with seeded verification before live database reset.
+This is a completed big-bang cutover. The system now follows a no-turning-back policy.
 
-- Build the new schema, repository, RAG projection, consolidator pipeline, cognition integration, and CLI against seeded test data first.
+- The new schema, repository, RAG projection, consolidator pipeline, cognition integration, and CLI were built against seeded test data first.
 - Do not dual-read old and new memory formats in production cognition.
 - Do not keep legacy fields alive as a fallback cognition payload.
-- After seeded verification passes, export old data if desired, then clear/drop old user-image/profile-memory data and enable the new `user_memory_units` path.
-- During implementation, tests may use a dedicated seeded test database or fixture collection. Live reset happens only after the new path is verified end to end.
+- The live database cutover/reset has already been executed.
+- All failures after cutover are fixed forward in the new memory-unit architecture. Do not reintroduce the old `historical_summary`, `recent_window`, or `character_diary` path as a rollback mechanism.
+- Tests may use dedicated seeded fixtures or isolated replay channels, but production cognition must only read the new memory-unit projection.
 
 ## Agent Autonomy Boundaries
 
@@ -76,13 +77,14 @@ Implementation agents must not:
 - Add deterministic semantic gates or post-LLM reinterpretation.
 - Move RAG search/cache responsibility into the consolidator.
 - Keep old diary/recent/historical-summary payloads in cognition "just in case".
+- Restore legacy cognition fields, migration shims, or dual-read fallback paths.
 - Increase response-path LLM calls.
 - Collapse the four consolidator LLM stages into one call.
 
 Implementation agents may:
 
 - Add small structural validators.
-- Add one-stage repair prompts for invalid JSON.
+- Add structural JSON/schema enforcement and per-candidate logging for invalid LLM output.
 - Add metadata fields needed for persistence, indexes, and observability.
 - Add fixtures and seeded test utilities.
 
@@ -309,7 +311,7 @@ The only allowed code-side handling is structural:
 - `cluster_id` must be empty for `create`.
 - `cluster_id` must be in the provided candidate list for `merge` or `evolve`.
 
-If these checks fail, run one repair retry or skip/log.
+If these checks fail, skip and log the candidate or stage. Do not run a repair retry and do not make a code-side semantic substitute decision.
 
 #### Rewrite result shape
 
@@ -512,7 +514,7 @@ Rules:
 - This LLM only judges relation to existing units.
 - It must not rewrite memory text.
 - `cluster_id` must be one of the provided candidate IDs when decision is `merge` or `evolve`.
-- Unknown IDs are structural failures and trigger repair/skip, not code-side reinterpretation.
+- Unknown IDs are structural failures and trigger skip/log handling, not code-side reinterpretation.
 - Code must not force `create` because a similarity score is low or force `merge` because a score is high.
 
 #### 3. Rewrite LLM
@@ -617,7 +619,7 @@ Rules:
 
 1. Define final schema and projection contract in code.
 2. Add `user_memory_units` repository and indexes.
-3. Add seeded test database fixtures for the QQ test user before live reset.
+3. Add seeded test database fixtures for the QQ test user before live reset. This was done before the completed cutover.
 4. Add RAG memory-unit retrieval and Cache2 policy.
 5. Add extractor LLM prompt, prompt-render test, and structural validation.
 6. Add merge judge LLM prompt, prompt-render test, and structural validation.
@@ -628,10 +630,10 @@ Rules:
 11. Replace cognition L2/L3 prompt inputs with `user_memory_context`.
 12. Update CLI/export scripts to show the exact cognition-fed memory context.
 13. Run deterministic, patched LLM, and selected real LLM tests against seeded data.
-14. Perform big-bang live database reset/migration only after seeded verification passes.
+14. Perform big-bang live database reset/migration only after seeded verification passes. This has been completed.
 15. Run post-reset smoke tests and capture output from `python.exe -m scripts.identify_user_image 673225019 --platform qq`.
 
-This order avoids the earlier failure mode where prompt and projection tests require new memory data before the live database has been reset.
+This order avoided the earlier failure mode where prompt and projection tests require new memory data before the live database has been reset.
 
 ## LLM Call And Context Budget
 
@@ -653,22 +655,22 @@ Default limits:
 - Extractor: maximum 1 call per consolidation turn.
 - Candidate units processed: maximum 3 per turn.
 - Merge candidates per candidate unit: maximum 6.
-- Merge judge: maximum 1 call per candidate unit, plus 1 structural repair retry if needed.
-- Rewrite: only called for `merge` or `evolve`, plus 1 structural repair retry if needed.
-- Stability judge: only called for interaction-pattern units after create/merge/evolve, plus 1 structural repair retry if needed.
+- Merge judge: maximum 1 call per candidate unit. Structurally invalid output is logged and dropped.
+- Rewrite: only called for `merge` or `evolve`. Structurally invalid output is logged and dropped.
+- Stability judge: only called for interaction-pattern units after create/merge/evolve. Structurally invalid output is logged and dropped.
 - Merge candidate retrieval: 0 LLM calls; use RAG-owned deterministic/vector read APIs with Cache2.
 - Response path: 0 new LLM calls.
 
 ## Data Migration
 
-Use seeded test data before live reset.
+Seeded test data was used before live reset. The live reset has already happened.
 
-1. Create seed data for the QQ test user that represents the old observed profile content in new memory-unit form.
-2. Validate RAG projection, cognition prompt rendering, CLI output, and consolidator merge behavior against the seed.
-3. Export old live user memory/profile data if a backup is wanted.
-4. Clear/drop old user-image/profile-memory data that fed cognition.
-5. Enable the new `user_memory_units` collection and indexes.
-6. Run the post-reset smoke command for user `673225019` on platform `qq`.
+1. Seed data for the QQ test user represented the old observed profile content in new memory-unit form.
+2. RAG projection, cognition prompt rendering, CLI output, and consolidator merge behavior were validated against tests and replay artifacts.
+3. Old live user memory/profile data is obsolete for cognition after reset.
+4. Old user-image/profile-memory data that fed cognition was cleared/dropped as part of the big-bang reset.
+5. The new `user_memory_units` collection and indexes are the canonical durable memory path.
+6. Post-reset validation uses `python.exe -m scripts.identify_user_image 673225019 --platform qq` and the test commands listed below.
 
 No dual-read transitional period is planned.
 
@@ -895,7 +897,7 @@ Expected:
 - Merge judge `create`, `merge`, and `evolve` decisions route to the correct repository operation.
 - Rewrite output replaces only `fact`, `subjective_appraisal`, and `relationship_signal`.
 - Stability judge controls recent/stable placement.
-- Invalid merge judge output triggers repair/skip, not deterministic semantic fallback.
+- Invalid merge judge output triggers skip/log handling, not deterministic semantic fallback.
 
 ### Real LLM tests
 
@@ -932,29 +934,107 @@ This plan is implemented when:
 - Projection budgets prevent emotional context or fact-side context from dominating cognition.
 - The inspection script shows the same profile context that cognition receives.
 
+## Completion Evaluation
+
+Completion status: completed for the big-bang memory-unit cutover.
+
+The core architecture is complete:
+
+- `user_memory_units` is the canonical durable memory store.
+- Cognition receives `user_memory_context` instead of the old summary/window/diary surfaces.
+- Memory items use the unified `fact`, `subjective_appraisal`, `relationship_signal`, and `updated_at` contract.
+- The consolidator path exercises extraction, merge/evolve/create judging, rewriting, and persistence.
+- Real LLM tests and actual-pipeline replay demonstrate that concrete facts can be extracted and similar memory can be compacted.
+- No deterministic semantic path is allowed for memory meaning.
+- No rollback to the old memory architecture is allowed.
+
+The following are forward-fix stabilization items, not reasons to restore legacy paths:
+
+- Add explicit stability-judge evidence payloads: count, distinct-session evidence, recency, and recent examples.
+- Add per-candidate skip/log handling so one malformed LLM output does not drop an entire consolidation batch.
+- Add JSON schema response mode where supported by the local LLM endpoint.
+- Extend Cache2 policy for memory-unit candidate retrieval if shared cache invalidation needs finer granularity.
+- Wire or document `active_commitment` lifecycle updates from scheduler completion.
+
+## Execution Evidence
+
+Before/after projection regression:
+
+```powershell
+venv\Scripts\python.exe -m pytest tests\test_user_memory_context_before_after.py -q
+```
+
+Result: `1 passed`. Report written to `test_artifacts/user_memory_context_before_after_report.json`.
+
+Measured report values:
+
+- Source messages: `80`.
+- Legacy emotional/fact ratio: `70.52380952380952`.
+- New pattern/fact-side ratio: `0.8463855421686747`.
+- Ratio reduction: `98.79985844797149%`.
+- Missing required field count: `0`.
+- Legacy field leak count: `0`.
+- Verdict: `pass`.
+
+RAG projection and flow regression:
+
+```powershell
+venv\Scripts\python.exe -m pytest tests\test_user_memory_units_rag_flow.py tests\test_rag_projection.py -q
+```
+
+Result: `7 passed`.
+
+Live LLM extractor proof:
+
+```powershell
+venv\Scripts\python.exe -m pytest tests\test_user_memory_units_live_llm.py::test_live_extractor_outputs_concrete_memory_unit -q -s -m live_llm
+```
+
+Result: `1 passed`. Trace:
+`test_artifacts/llm_traces/user_memory_units_live_llm__extractor_concrete_architecture_decision__20260429T002109542490Z.json`.
+
+Live LLM merge/compaction proof:
+
+```powershell
+venv\Scripts\python.exe -m pytest tests\test_user_memory_units_live_llm.py::test_live_merge_rewrite_compacts_similar_memory_unit -q -s -m live_llm
+```
+
+Result: `1 passed`. Trace:
+`test_artifacts/llm_traces/user_memory_units_live_llm__merge_rewrite_compacts_similar_memory_unit.json`.
+
+Actual pipeline replay from real QQ history:
+
+- Source export: `test_artifacts/qq_1082431481_real_memory_pipeline_source.json`.
+- Final replay artifact: `test_artifacts/user_memory_units_actual_pipeline_run_after_history_patch.json`.
+- Replay seeded `23` real messages, processed the next real message through `brain_service.chat`, and executed background tasks.
+- Unit count changed from `2` to `3`.
+- One existing objective fact evolved to count `2`.
+- One new recent shift was created.
+
 ## Rollback / Recovery
 
-Because this is a big-bang migration, rollback is operational rather than compatibility-based.
+Because this is a completed big-bang migration, recovery is forward-fix only.
 
-- Before live reset, export old collections/fields used by user image and profile memories.
-- If the new path fails after cutover, disable the new memory-unit consolidation path and restore the exported database snapshot.
+- Do not disable the new memory-unit path to restore the old cognition memory model.
+- Do not restore old `historical_summary`, `recent_window`, `character_diary`, or diary-specific prompt contracts.
 - Do not keep hidden runtime dual-read fallback code in the application.
+- If a post-cutover issue is found, fix the new pipeline forward, repair or delete bad new memory units if needed, and add a regression or real LLM trace for the failure.
 
 ## Risks
 
 | Risk | Mitigation | Verification |
 |---|---|---|
 | Small local LLM collapses merge/evolve/create into one behavior | Split extractor, merge judge, rewrite, and stability judge into separate calls | Patched and real LLM tests with near/far examples |
-| LLM hallucinates candidate IDs | Structural validation rejects unknown `cluster_id`; one LLM repair retry, then skip/log | Invalid-ID tests |
+| LLM hallucinates candidate IDs | Structural validation rejects unknown `cluster_id`; skip/log the candidate or stage | Invalid-ID tests |
 | Memory facts become vague | Extractor prompt requires concrete event-grounded facts | Real LLM extractor tests |
 | Stable patterns absorb unrelated recent shifts | Merge judge and stability judge are separate; no threshold-forced promotion | Merge and stability tests |
 | Projection balance inverts the original bug | Per-category item caps and char budgets | Regression test for category character mass |
-| Seeded tests pass but live reset loses useful data | Export before reset | Operational backup evidence |
+| Seeded tests pass but live reset loses useful data | Fix forward in `user_memory_units`; do not restore legacy cognition path | Actual-pipeline replay and post-reset inspection |
 
 ## Assumptions
 
 - Character self-image remains out of scope.
 - The response path should not gain new LLM calls.
 - Consolidation can spend additional background LLM calls because it is outside normal response latency.
-- The live database may be reset after seeded verification passes.
+- The live database reset has already happened.
 - `updated_at` is always stored and may be omitted from the prompt projection only when RAG decides recency is not useful.
