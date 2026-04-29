@@ -92,21 +92,22 @@ def test_content_anchor_prompt_allows_progression_anchor_labels() -> None:
 
 
 def test_content_anchor_prompt_requires_fact_based_answers_without_case_example() -> None:
-    """Prompt contract makes ANSWER obey direct facts without overfitting a case."""
+    """Prompt keeps L3 bound to upstream stance while preserving direct facts."""
 
     prompt = l3_module._CONTENT_ANCHOR_AGENT_PROMPT
 
-    assert "事实型回答一致性" in prompt
-    assert "事实型回答必须以事实为准" in prompt
-    assert "`[FACT]` 和 `[ANSWER]` 都必须服从它" in prompt
-    assert "`rag_result.answer` 是当前轮最高优先级事实摘要" in prompt
-    assert "`TENTATIVE` 只能表现为语气上的保留、局促或委婉" in prompt
-    assert "禁止只输出 `CONFIRM`、`REFUSE`、`TENTATIVE`" in prompt
-    assert "不要把其中的事实类别压缩成“其他的”“那些东西”“之类的”" in prompt
-    assert "按“可回答事实是：A、B、C”的语义结构生成 `[ANSWER]`" in prompt
-    assert "不得改写成第一人称认知失败" in prompt
-    assert "不得改成责备、反问、防御、敷衍" in prompt
-    assert "不得把“事实里存在未知属性”改写成“角色不知道、记不清或无法回答”" in prompt
+    assert "依赖树（先解析上游，再生成下游）" in prompt
+    assert "logical_stance + character_intent" in prompt
+    assert "不能反向改变 `logical_stance`、`character_intent` 或已选 `[FACT]`" in prompt
+    assert "不要在这里修正上游立场" in prompt
+    assert "若 `rag_result.answer` 直接回答当前问题，它是最高优先级事实摘要" in prompt
+    assert "`[ANSWER]` 不得与 `[DECISION]` 或 `[FACT]` 矛盾" in prompt
+    assert "应保留这些具体内容，避免替换成泛称" in prompt
+    assert "`character_intent = CLARIFY` 时，`[ANSWER]` 必须是缩小歧义范围的追问" in prompt
+    assert "在服从[DECISION]的前提下" in prompt
+    assert "只按上方“依赖树”和“解析步骤”执行" in prompt
+    assert "`TENTATIVE` 不是事实不确定" not in prompt
+    assert "禁止把已知事实改写成第一人称认知失败" not in prompt
     assert "充电线" not in prompt
     assert "HDMI" not in prompt
 

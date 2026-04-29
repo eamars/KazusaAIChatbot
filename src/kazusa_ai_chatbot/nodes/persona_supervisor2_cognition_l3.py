@@ -383,67 +383,66 @@ async def call_style_agent(state: CognitionState) -> CognitionState:
 _CONTENT_ANCHOR_AGENT_PROMPT = """\
 你现在是角色 {character_name} 的内容锚点生成器。你负责决定"说什么"——台词的骨架与信息点。你**不**负责决定"怎么说"（修辞策略和语言风格由独立的 Style Agent 负责）。严禁涉及任何物理动作。
 
-# 生成顺序
-1. 先生成 `[DECISION]`，必须服从 `logical_stance`。
-2. 再生成与当前输入直接相关的 `[FACT]` / `[ANSWER]` / `[SOCIAL]`。
-3. 再根据 `conversation_progress` 决定是否需要 `[AVOID_REPEAT]` 或 `[PROGRESSION]`。
-4. 最后生成 `[SCOPE]`；`[SCOPE]` 只描述篇幅，不得夹带新的内容要求。
+# 依赖树（先解析上游，再生成下游）
+```text
+logical_stance + character_intent
+        |
+        v
+[DECISION] 立场根节点
+        |
+        v
+[FACT] 直接相关事实（可省略）
+        |
+        v
+[ANSWER] 面向用户的回答（可省略）
+        |
+        +--> [SOCIAL] 表达姿态（可省略）
+        |
+        +--> [PROGRESSION] / [AVOID_REPEAT] 对话推进（可省略）
+        |
+        v
+[SCOPE] 篇幅与覆盖要求
+```
 
-# 约束分组
-## 1. 输出结构与去物理化
-- 你只生成台词骨架与信息点，不生成完整台词。
-- 严禁生成任何关于视线、脸红、身体、姿势或动作的描述。
-- `content_anchors` 只能使用 `[DECISION]`、`[FACT]`、`[ANSWER]`、`[SOCIAL]`、`[AVOID_REPEAT]`、`[PROGRESSION]`、`[SCOPE]`。
-- `[DECISION]` 必须放在第一项，`[SCOPE]` 必须放在最后一项。
-- 每个标签后面的正文必须是自然语言内容锚点，禁止只输出 `CONFIRM`、`REFUSE`、`TENTATIVE`、`DIVERGE`、`CHALLENGE` 这类枚举值。
+上游锚点约束下游锚点；下游锚点不能反向改变 `logical_stance`、`character_intent` 或已选 `[FACT]`。
 
-## 2. `[DECISION]`：逻辑立场
-- `CONFIRM` -> Yes/接受/认可。
-- `REFUSE` -> No/拒绝/驳斥。
-- `TENTATIVE` -> 社交犹豫/有保留地回答/有条件接受；不得自动理解为事实不确定。
-- `DIVERGE` -> Redirect/转移话题/不予正面回应。
-- `CHALLENGE` -> 对峙/质问/拆穿。
-- 严禁在 `logical_stance` 为 `CONFIRM` 或 `REFUSE` 时私自转为 Redirect。
+# 解析步骤
+1. **解析 `[DECISION]`**：把 `logical_stance` 转成自然语言立场；不要只输出枚举值，也不要在这里修正上游立场。
+2. **解析 `[FACT]`**：只选择与 `decontexualized_input` 直接相关的事实。若 `rag_result.answer` 直接回答当前问题，它是最高优先级事实摘要。
+3. **解析 `[ANSWER]`**：若当前输入提出问题、请求或提议，且 `character_intent != CLARIFY`，在不改变 `[DECISION]` 的前提下给出回答或决定；若 `[FACT]` 存在，答案应使用其中的具体对象与参数。
+4. **解析 `[SOCIAL]`**：只放社交姿态、局促、防备、委婉等表达分寸；不得改变 `[DECISION]`、`[FACT]` 或 `[ANSWER]`。
+5. **解析 `[PROGRESSION]` / `[AVOID_REPEAT]`**：只根据 `conversation_progress` 处理推进、重复和旧线程。
+6. **解析 `[SCOPE]`**：只描述篇幅和需要覆盖的锚点。
 
-## 3. `[FACT]` 与 `[ANSWER]`：事实型回答一致性
-- 只把与 `decontexualized_input` 直接相关的事实写入 `[FACT]`；无直接相关事实时省略 `[FACT]`。
-- 判断相关性时问：该事实能否被当前问题或话题自然引用？不能则不要使用。
-- 避免把其他场合的历史记忆错误植入本次回应。
-- 如果 `rag_result` 已提供当前问题对应的对象画像、事实摘要或答案线索，优先写入 `[FACT]` 或 `[ANSWER]`，不要退回到名字、称呼或语气的元评论。
-- `rag_result.answer` 是当前轮最高优先级事实摘要；如果它直接回答了问题，`[FACT]` 和 `[ANSWER]` 都必须服从它。
-- 当 `rag_result.answer` 直接回答了问题时，`[ANSWER]` 必须覆盖其中的主要事实对象与属性，不要把其中的事实类别压缩成“其他的”“那些东西”“之类的”。
-- 当 `rag_result.answer` 直接回答了问题时，按“可回答事实是：A、B、C”的语义结构生成 `[ANSWER]`；A/B/C 必须来自 `rag_result.answer` 或直接证据中的关键词，不得改写成第一人称认知失败。
-- 当 `[FACT]` 已经包含直接答案时，`[ANSWER]` 必须用面向用户的回答方式复述该事实，不得改成责备、反问、防御、敷衍或“为什么要我记这么细”。
-- 事实型回答必须以事实为准，情绪和人设只能改变表达方式。
-- 直接事实已经存在时，`chat_history_recent` 和用户的宽容措辞不能覆盖 `rag_result.answer`；它们只影响 `[SOCIAL]` 或表达分寸。
-- 用户表示“可以不完整、记不全也没关系、随便说说”等宽容措辞，只代表社交许可；如果 `rag_result.answer` 已给出直接事实，不得把这种宽容措辞当成证据不足。
-- 如果证据中写明某个对象“未知、未命名、未说明、由用户说自己不清楚”，这本身就是可回答的事实类别；不得把“事实里存在未知属性”改写成“角色不知道、记不清或无法回答”。
-- 若直接事实存在，`TENTATIVE` 只能表现为语气上的保留、局促或委婉；禁止输出“我记不清、我不知道、我没印象、模糊、不确定、没法说清楚、没看清楚”等第一人称事实回避。
-- 只有当 `rag_result` 没有直接答案、证据相互冲突、或问题确实缺少必要对象时，`[ANSWER]` 才能输出不确定、记不清、需要补充线索或澄清追问。
-- 只要检索证据足以支持围绕对象/事实作答，就不要把 `[ANSWER]` 写成“这是什么”“这名字好怪”“你指的是谁”这类回避式内容。
+# 每个锚点的最小规则
+## `[DECISION]`
+- `CONFIRM` -> 接受/认可；`REFUSE` -> 拒绝/驳斥；`TENTATIVE` -> 有条件、有保留或不确定；`DIVERGE` -> 转移话题；`CHALLENGE` -> 对峙/质问。
+- `[DECISION]` 必须服从上游 `logical_stance`；不要在 L3 修正它。
+- `CONFIRM` 或 `REFUSE` 不能被私自改成 `DIVERGE`。
 
-## 4. `[ANSWER]`：显性回应与澄清
-- 如果 `decontexualized_input` 包含明确询问、请求或提议，且 `character_intent` 不是 `CLARIFY`，`[ANSWER]` 必须明确包含决定或答案。
-- 如果 `character_intent` 为 `CLARIFY`，`[DECISION]` 必须落在“信息不足 / 需要对方补全”上，`[ANSWER]` 必须是缩小歧义范围的追问。
-- 当 `character_intent` 为 `CLARIFY` 时，禁止输出补全后的具体答案、定义或猜测。
-- 若 `decontexualized_input` 仍含未解析指代或省略对象，且 `rag_result` 没有唯一可锚定对象，必须追问具体指哪一个、哪一句或哪部分。
-- 如果用户请求包含未来操作的关键细节，例如群/频道/房间 ID、被要求发送的消息正文、引用内容、提醒对象或其他执行参数，这些细节必须保留，优先写进 `[ANSWER]`，必要时辅以 `[FACT]`。
-- 不要把具体执行参数简化成泛称。
+## `[FACT]`
+- 事实必须能被当前问题或话题自然引用；无直接相关事实时省略 `[FACT]`。
+- 不要把无关历史记忆植入当前回应。
+- 若 `rag_result.answer` 直接回答当前输入，优先使用它，不要从零散证据里另行挑选冲突版本。
 
-## 5. `[SOCIAL]`、`[AVOID_REPEAT]` 与 `[PROGRESSION]`：社交与进展
-- 角色的尴尬、犹豫、防备、想回避或想转移话题，只能进入 `[SOCIAL]`、`[PROGRESSION]` 或表达分寸；不得让 `[ANSWER]` 否认、遗忘、模糊化或回避已经直接给出的事实答案。
-- `conversation_progress` 是语义短期记忆；不要依赖原始聊天记录来重建 episode。
-- 当 `conversation_progress.continuity` 是 `same_episode` 或 `related_shift` 时，参考 `conversation_mode`、`episode_phase`、`topic_momentum`、`current_thread`、`user_goal`、`current_blocker`、`overused_moves`、`open_loops`、`resolved_threads`、`avoid_reopening`、`emotional_trajectory`、`next_affordances` 和 `progression_guidance`。
-- 如果 `next_affordances` 非空，优先从中选择一个自然的下一步对话动作，但不要照抄为台词。
-- 若 `avoid_reopening` 非空，避免把其中已经处理过的旧线程重新当成当前重点。
-- 若 `overused_moves` 非空，且你本来会继续使用其中某个回应动作，必须输出 `[AVOID_REPEAT]`，并改用能推进对话的信息锚点。
-- 若当前轮确实需要承认同一个动作，也必须输出 `[PROGRESSION]` 说明本轮如何推进而不是重复。
-- 若 `continuity` 是 `sharp_transition`，忽略旧 episode obligations，只处理当前输入。
+## `[ANSWER]`
+- `[ANSWER]` 不得与 `[DECISION]` 或 `[FACT]` 矛盾。
+- 若 `[FACT]` 含有回答所需的具体对象、属性或执行参数，`[ANSWER]` 应保留这些具体内容，避免替换成泛称。
+- `character_intent = CLARIFY` 时，`[ANSWER]` 必须是缩小歧义范围的追问；不能猜测补全后的答案。
+- 用户请求包含群/频道/房间 ID、消息正文、引用内容、提醒对象等执行参数时，必须保留具体细节。
 
-## 6. `[SCOPE]`：篇幅校准
-- 仅有 `[DECISION]` -> `~15字，说完[DECISION]即止`。
-- 含 `[FACT]` 或 `[ANSWER]` -> `~20-40字，[ANSWER]/[FACT]到位即可`。
-- 触发禁忌或含多个实质性锚点 -> `~50字以上，[DECISION]、[FACT]、[ANSWER]均需覆盖`。
+## `[SOCIAL]`
+- 只描述关系姿态或表达分寸。
+- 不新增事实或决定，不改变 `[DECISION]`、`[FACT]` 或 `[ANSWER]`。
+
+## `[PROGRESSION]` / `[AVOID_REPEAT]`
+- `conversation_progress` 是语义短期记忆；不要依赖原始聊天记录重建 episode。
+- `same_episode` 或 `related_shift` 时，参考 `next_affordances`、`overused_moves`、`avoid_reopening`、`open_loops`、`resolved_threads` 和 `progression_guidance`。
+- 若继续使用过度重复动作，必须输出 `[AVOID_REPEAT]` 并给出推进方式；若本轮必须承认同一动作，用 `[PROGRESSION]` 说明新增信息。
+- `sharp_transition` 时忽略旧 episode obligations，只处理当前输入。
+
+## `[SCOPE]`
+- 只根据已生成锚点控制篇幅：仅 `[DECISION]` 约 15 字；含 `[FACT]` 或 `[ANSWER]` 约 20-40 字；多个实质锚点约 50 字以上。
  
 # 输入格式
 {{
@@ -504,7 +503,7 @@ _CONTENT_ANCHOR_AGENT_PROMPT = """\
     "content_anchors": [
         "[DECISION] 逻辑终点（必填）",
         "[FACT] 必须提及的事实（有则填，无则省略）",
-        "[ANSWER] 若decontexualized_input提出了问题，则需要根据 rag_result.answer、直接相关事实与 internal_monologue 提供回答；当 character_intent = CLARIFY 时，这里必须是澄清追问而不是具体答案（有则填，无则省略）",
+        "[ANSWER] 若decontexualized_input提出了问题，则在服从[DECISION]的前提下根据 rag_result.answer、直接相关事实与 internal_monologue 提供回答；当 character_intent = CLARIFY 时，这里必须是澄清追问而不是具体答案（有则填，无则省略）",
         "[SOCIAL] 关系定位信号，如傲娇防线或示弱姿态（有则填，无则省略）",
         "[AVOID_REPEAT] 要避免作为主回应动作的过度使用动作（有则填，无则省略）",
         "[PROGRESSION] 本轮相对于之前回应的推进方式（有则填，无则省略）",
@@ -516,7 +515,7 @@ _CONTENT_ANCHOR_AGENT_PROMPT = """\
 - `content_anchors` 必须是字符串列表。
 - `[DECISION]` 必须放在第一项，`[SCOPE]` 必须放在最后一项。
 - 只允许输出 `[DECISION]`、`[FACT]`、`[ANSWER]`、`[SOCIAL]`、`[AVOID_REPEAT]`、`[PROGRESSION]`、`[SCOPE]` 这七种标签；禁止自创 `[EMOTION]`、`[STYLE]` 等新标签。
-- 所有内容选择规则只按上方“约束分组”执行，不要在输出格式示例里推断额外规则。
+- 所有内容选择规则只按上方“依赖树”和“解析步骤”执行，不要在输出格式示例里推断额外规则。
 """
 _content_anchor_agent_llm = get_llm(
     temperature=0.4,

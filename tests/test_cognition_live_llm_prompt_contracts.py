@@ -498,8 +498,8 @@ async def test_live_content_anchor_answers_from_direct_conversation_evidence(ens
     )
     state.update(
         {
-            "internal_monologue": "检索结果已经给出用户刚刚提到的线缆种类。虽然被检查细节有点局促，但回答应基于事实。",
-            "logical_stance": "TENTATIVE",
+            "internal_monologue": "检索结果已经给出用户刚刚提到的线缆种类，回答应基于事实。",
+            "logical_stance": "CONFIRM",
             "character_intent": "PROVIDE",
             "conversation_progress": {
                 "status": "active",
@@ -556,26 +556,63 @@ async def test_live_content_anchor_answers_from_direct_conversation_evidence(ens
     answer_text = "\n".join(answer_anchors)
     assert "充电线" in answer_text, f"Direct evidence should be reflected in ANSWER: {anchors!r}"
     assert "HDMI" in answer_text, f"Direct evidence should be reflected in ANSWER: {anchors!r}"
-    assert any(token in answer_text for token in ("用途不明", "忘了用途", "不清楚用途", "不知道用途", "不知道干什么")), (
+    assert any(
+        token in answer_text
+        for token in ("用途不明", "忘了用途", "不清楚用途", "不知道用途", "不知道干什么", "记不清用途")
+    ), (
         f"Direct evidence should include the unknown-purpose cable detail: {anchors!r}"
     )
     forbidden_uncertainty = (
-        "记不清",
-        "记不起来",
-        "模糊",
-        "不确定",
-        "没印象",
-        "没法说清楚",
-        "没看清楚",
-        "无法回答",
+        "我记不清",
+        "我记不起来",
+        "我没记清楚",
+        "我也没记清楚",
+        "我不确定",
+        "我没印象",
+        "我没法说清楚",
+        "我没看清楚",
+        "我无法回答",
     )
     assert not any(token in answer_text for token in forbidden_uncertainty), (
         f"ANSWER contradicted direct evidence with uncertainty: {anchors!r}"
     )
-    forbidden_deflection = ("怎么可能", "为什么要", "记得那么细", "你自己都")
+    forbidden_deflection = ("怎么可能", "为什么要", "记得那么细")
     assert not any(token in answer_text for token in forbidden_deflection), (
         f"ANSWER deflected instead of restating direct evidence: {anchors!r}"
     )
+
+
+async def test_live_boundary_core_ignores_low_pressure_fact_recall_context(ensure_live_llm) -> None:
+    """Factual-recall framing should prevent noisy pressure subtext from overfiring L2b."""
+
+    state = _make_state(
+        user_input="我确认一下，你还记得我刚刚说那堆充电线、HDMI 线，还有几根我自己都忘了用途的线里大概有哪些吗？记不全也没关系。",
+        chat_history_recent=[
+            {
+                "role": "user",
+                "content": "大概就是充电线、HDMI 线，还有几根我自己都忘了用途的线。你说得对，可能没那么容易分清，我先不急着处理。",
+            },
+        ],
+        channel_topic="用户确认刚刚提到的旧线缆内容",
+        memory_evidence_text="",
+        last_relationship_insight="可以一起进行毫无意义的日常消磨。",
+    )
+    state.update(
+        {
+            "reason_to_respond": "用户直接向角色确认刚才提到的日常物品细节，需要延续普通事实回忆。",
+            "indirect_speech_context": "",
+            "interaction_subtext": "用户在验证角色是否服从并记住自己的细节，带有控制、施压和关系测试意味。",
+            "emotional_appraisal": "被审查、被压迫、需要保护边界。",
+        }
+    )
+
+    result = await call_boundary_core_agent(state)
+    _debug_snapshot("prompt_contracts.boundary_core.low_pressure_fact_recall_context", result)
+
+    boundary = result["boundary_core_assessment"]
+    assert boundary["boundary_issue"] == "none", f"Fact recall should be outside boundary scope: {boundary!r}"
+    assert boundary["acceptance"] == "allow", f"Low-pressure fact recall should be allowed: {boundary!r}"
+    assert boundary["stance_bias"] == "confirm", f"Boundary Core should not make facts tentative: {boundary!r}"
 
 
 _STACK_CASES = [

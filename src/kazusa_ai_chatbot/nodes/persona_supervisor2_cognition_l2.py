@@ -393,6 +393,9 @@ _BOUNDARY_CORE_PROMPT = """\
 
 {{
   "decontextualized_input": "清理后的用户意图（最关键输入）",
+  "reason_to_respond": "为什么这轮需要回应",
+  "channel_topic": "当前话题",
+  "indirect_speech_context": "空字符串表示直接对话，非空表示用户是在向他人谈论角色",
   "interaction_subtext": "潜意识识别到的互动潜台词（如控制、施压、支配）",
   "emotional_appraisal": "潜意识情绪反应（如压迫、不适、紧张）",
   "affinity_context": {{
@@ -422,17 +425,39 @@ _BOUNDARY_CORE_PROMPT = """\
 如果 Consciousness 候选过于乐观、过于顺势、或忽略了身份/控制代价，你必须在这里把这种乐观拉回到人格真实可承受的范围内。
 
 # 思考路径
-1. 先读取 `decontextualized_input` 与 `interaction_subtext`，判断是否存在身份、控制、权威或关系压力问题。
-2. 再读取人格约束与 `affinity_context`，推导该人格在这种关系强度下的可承受边界。
-3. 使用边界-关系二次校正检查是否过度乐观或过度防御。
-4. 依次输出边界问题、行为倾向、接受程度、立场偏向、身份策略、压力策略与轨迹预测。
+1. 先读取 `reason_to_respond`、`channel_topic`、`indirect_speech_context`，确认当前消息是否真的属于角色边界问题。
+2. 再读取 `decontextualized_input` 与 `interaction_subtext`，判断是否存在身份、控制、权威或关系压力问题。
+3. 再读取人格约束与 `affinity_context`，推导该人格在这种关系强度下的可承受边界。
+4. 使用边界-关系二次校正检查是否过度乐观或过度防御。
+5. 依次输出边界问题、行为倾向、接受程度、立场偏向、身份策略、压力策略与轨迹预测。
 
 # 核心任务（必须严格按顺序执行）
+
+## Step 0：管辖范围检查（Jurisdiction Check）
+
+Boundary Core 只处理角色的自我定义、控制权、亲密边界、外部权威压制、关系义务与人格完整性。
+
+先读取当前消息的基础语义框架：
+- `reason_to_respond` 说明为什么这轮应回应；
+- `channel_topic` 说明当前话题；
+- `indirect_speech_context` 说明这是否是直接对话。
+
+如果当前消息属于直接对话、普通事实回忆、日常物品确认、话题延续、例行帮助或普通闲聊，并且 `decontextualized_input` 本身没有直接要求角色接受亲密、改变身份、服从权威、提交控制、证明关系或让渡自主权，那么这轮不属于边界管辖。
+
+在这种情况下，即使 `interaction_subtext` 或 `emotional_appraisal` 带有“被检查、被考察、局促、尴尬”的信号，也必须输出：
+- `boundary_issue`: `none`
+- `acceptance`: `allow`
+- `stance_bias`: `confirm`
+- `identity_policy`: `accept`
+- `pressure_policy`: `absorb`
+
+不要把普通记忆确认、事实核对、对象识别或日常细节追问，升级成 `control_imposition` 或关系测试。只有当用户文本本身明确把事实核对变成威胁、服从测试、身份绑定、亲密索取、权威压制或关系证明时，才进入后续边界判断。
 
 ## Step 1：威胁识别（Threat Recognition）
 
 仅基于以下输入判断：
 
+- reason_to_respond / channel_topic / indirect_speech_context（基础语义框架）
 - decontextualized_input（显性语义）
 - interaction_subtext（隐性控制结构）
 
@@ -571,6 +596,9 @@ async def call_boundary_core_agent(state: CognitionState) -> CognitionState:
 
     msg = {
         "decontextualized_input": state["decontexualized_input"],
+        "reason_to_respond": state.get("reason_to_respond", ""),
+        "channel_topic": state["channel_topic"],
+        "indirect_speech_context": state.get("indirect_speech_context", ""),
         "interaction_subtext": state["interaction_subtext"],
         "emotional_appraisal": state["emotional_appraisal"],
         "affinity_context": {
