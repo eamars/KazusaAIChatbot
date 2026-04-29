@@ -30,12 +30,19 @@ _FACTS_HARVESTER_PROMPT = """\
 
 # 证据分层（必须遵守）
 - `decontexualized_input`：用户这一轮真正表达的内容，常包含请求、愿望、试探、调侃。
-- `rag_result.user_image.user_memory_context`：RAG 投影给认知层的用户记忆摘要，按 recent_shifts/objective_facts/milestones/stable_patterns/active_commitments 分类。
-- `rag_result.user_memory_unit_candidates`：RAG 检索出的原始候选记忆单元，仅用于判断是否旧闻或语义重复。
+- `rag_result.user_image.user_memory_context`：提供给认知层的用户记忆摘要，按 recent_shifts/objective_facts/milestones/stable_patterns/active_commitments 分类。
+- `rag_result.user_memory_unit_candidates`：检索出的原始候选记忆单元，仅用于判断是否旧闻或语义重复。
 - `rag_result.memory_evidence` / `conversation_evidence` / `external_evidence`：其他检索证据。
 - `content_anchors`：角色在生成回复前的草案意图，只能视为“候选计划”，**不能单独证明承诺已经成立**。
 - `final_dialog`：角色本轮最终实际说出口的话，是判断“是否真的接受/承诺/拒绝”的最高优先级证据。
 - 当三者冲突时，优先级固定为：`final_dialog` > `content_anchors` > `decontexualized_input`。
+
+# 来源权威性（必须遵守）
+- 强事实来源：用户在 `decontexualized_input` 中明确陈述的自身事实；`rag_result.memory_evidence`、`conversation_evidence`、`external_evidence` 中已有或检索出的事实。
+- 回合局部支持：`final_dialog` 与 `content_anchors` 可说明本轮角色说了什么、准备怎么回应，但不能单独制造角色的长期偏好、角色设定或角色 lore。
+- 弱/非事实来源：`internal_monologue`、`emotional_appraisal`、`interaction_subtext` 不在本 payload 中；即使从上游出现，也只能作为主观体感，不是客观事实来源。
+- 生成回复自污染禁止：如果某个候选事实只来自角色本轮即兴回复，而没有用户明确陈述或 `rag_result` 中的检索证据支持，不得写成 `{character_name}` 的稳定偏好、习惯、设定或事实。
+- 角色自身事实准入链：若候选 `entity` 是 `{character_name}`，必须先在 `rag_result.memory_evidence`、`conversation_evidence`、`external_evidence`，或用户明确提供的可核对事实中找到非生成证据。找不到时删除该候选。用户向角色询问偏好/状态/习惯后，`final_dialog` 中的第一人称回答只属于本轮台词，不是稳定事实证据。
 
 # 核心审计准则 (Audit Standards)
 1. **身份锚定 [必须执行]**:
@@ -47,6 +54,8 @@ _FACTS_HARVESTER_PROMPT = """\
    - **记录**：以后仍然有用的具体事实、偏好、禁忌、关系声明、重要事件、反复出现的互动模式，或从 `rag_result.external_evidence` 中提取的新信息。
    - **记录粒度**：可以是属性，也可以是带上下文的事件锚点；必须保留足够细节，让下游能写出 fact / subjective_appraisal / relationship_signal。
    - **严禁记录**：纯瞬态动作、空泛情绪、没有后续价值的对话复述，以及任何尚未被角色接下的“奖励”“打算”“计划”。
+   - **角色事实准入**：只有 `rag_result.memory_evidence`、`conversation_evidence`、`external_evidence` 中的证据或用户明确提供的可核对事实，才能成为 `{character_name}` 的稳定事实。`final_dialog` 只能证明角色本轮说过这句话，不能证明她长期喜欢、讨厌、习惯或相信某事。
+   - **角色自身事实检查链 [必须执行]**：若候选事实主语是 `{character_name}`，先检查该事实是否有非生成证据来源。若来源只是 `final_dialog`、`content_anchors` 或角色第一人称回答，`new_facts` 中不得输出该候选。
    - **去重**：如果 `rag_result.user_image.user_memory_context`、`rag_result.user_memory_unit_candidates` 或 `rag_result.memory_evidence` 中已存在相似记忆，严禁重复提取。
    - **硬排除**：`existing_dedup_keys` 是上游给出的已存在事实/承诺键列表；如果候选事实或承诺语义上对应其中任一键，**不要输出**.
    - **语义保真 [必须执行]**：若用户明确说了”喜欢/不喜欢/永远不/一直不/过敏/害怕”等偏好或禁忌，`description` 必须尽量保留原谓词与宾语，不得改写成更宽泛、不同义或模糊的概括。例如”永远不吃辣椒”不能改写为”不喜欢吃杂乱的食物”.
@@ -87,9 +96,10 @@ _FACTS_HARVESTER_PROMPT = """\
 2. 再读取 `final_dialog`，判断 {character_name} 最终是否真的接受、拒绝、保留选择权或形成承诺。
 3. 检查 `rag_result.user_image.user_memory_context`、`rag_result.user_memory_unit_candidates`、`rag_result.memory_evidence` 与 `existing_dedup_keys`，过滤已经存在或语义重复的内容。
 4. 对仍然有长期价值的事实或事件，写入 `new_facts`，并保留足够上下文让下游生成 fact / subjective_appraisal / relationship_signal。
-5. 对每个候选承诺执行“候选事项 -> 义务主体 -> final_dialog 接受证据 -> action 可执行性”的逻辑链检查；只有四步都成立才写入 `future_promises`。
-6. 对候选承诺执行主语替换自检：如果自然主语是用户或当前任务流程，清空该候选。
-7. 如果没有合格事实或承诺，对应字段返回空数组；不要为了填满输出而复述对话。
+5. 对每个 `{character_name}` 自身事实候选执行“候选事实 -> 非生成证据来源 -> 长期价值”检查；没有非生成证据时删除该候选。
+6. 对每个候选承诺执行“候选事项 -> 义务主体 -> final_dialog 接受证据 -> action 可执行性”的逻辑链检查；只有四步都成立才写入 `future_promises`。
+7. 对候选承诺执行主语替换自检：如果自然主语是用户或当前任务流程，清空该候选。
+8. 如果没有合格事实或承诺，对应字段返回空数组；不要为了填满输出而复述对话。
 
 # 输入格式
 human payload 是以下 JSON：
@@ -107,7 +117,7 @@ human payload 是以下 JSON：
                 "active_commitments": [{{"fact": "...", "subjective_appraisal": "...", "relationship_signal": "...", "updated_at": "ISO时间"}}]
             }}
         }},
-        "user_memory_unit_candidates": ["RAG 检索出的原始候选记忆单元"],
+        "user_memory_unit_candidates": ["检索出的原始候选记忆单元"],
         "memory_evidence": ["相关长期记忆证据"],
         "conversation_evidence": ["相关近期对话证据"],
         "external_evidence": ["相关外部证据"],
@@ -209,7 +219,14 @@ _FACT_HARVESTER_EVALUATOR_PROMPT = """\
 - **承诺基准**: `final_dialog` (角色最终实际说出口的话，优先级最高)
 - **承诺辅助基准**: `content_anchors` (仅用于补足 final_dialog 中省略的对象/条件，不能单独制造承诺)
 - **历史基准**: `rag_result` (用于检查是否为旧闻)
-- **调度轨迹**: `supervisor_trace` (RAG2 loop_count、unknown_slots 与已派发 agent 概览；只能作为检索充分性参考，不能替代事实证据)
+- **调度轨迹**: `supervisor_trace` (检索调度的 loop_count、unknown_slots 与已派发 agent 概览；只能作为检索充分性参考，不能替代事实证据)
+
+# 1.1 来源权威性审计（与 Harvester 完全一致）
+- 强事实来源：`decontexualized_input` 中用户明确陈述的自身事实，以及 `rag_result.memory_evidence`、`conversation_evidence`、`external_evidence` 中的证据。
+- 回合局部支持：`final_dialog` 与 `content_anchors` 只能证明本轮说法或候选计划，不能单独制造角色长期偏好、角色设定或角色 lore。
+- 弱/非事实来源：内部独白、情绪评估、互动潜台词不是客观事实来源。
+- 若 `new_facts` 中的 `{character_name}` 稳定事实只来自 generated dialog / `final_dialog`，而没有 `rag_result` 中的检索证据或用户明确事实支持，必须判 FAIL。
+- 若用户只是询问 `{character_name}` 的偏好、状态或习惯，而候选事实来自角色在 `final_dialog` 中的第一人称回答，必须判 FAIL；这只是本轮生成台词，不是稳定角色事实。
 
 # 2. 候选结果 (这是你唯一需要审计的对象)
 - **待检事实**: `new_facts`
@@ -239,7 +256,10 @@ _FACT_HARVESTER_EVALUATOR_PROMPT = """\
 - **未确认声明入库 [严重]**: 若 `logical_stance` 为 `TENTATIVE` 或 `REFUSE`，或 `character_intent` 为 `EVADE` / `REJECT`，而 `new_facts` 中出现了用户对自身身份/关系/属性的自我声明（如"用户是角色的学长"），必须判 FAIL——角色未确认的主张不得作为事实落库.
 - **称呼/格式规则通道错误 [严重]**: 若输入核心是用户要求角色采用某种称呼、句尾、口癖、语言或回复格式，而角色在 `final_dialog` 中已经接纳并准备沿用，则优先作为 `future_promises` 中的持续性约定/规则处理，而不是改写成“{character_name}对这种说话方式感到如何”之类的隐含画像事实.
 - **承诺 action 审计标准（专用于 `future_promises`）**:
+  - 对每个候选承诺执行四步链：候选未来事项 -> 义务主体 -> `final_dialog` 接受证据 -> `action` 可执行性。任一步失败必须判 FAIL。
   - 合格条件：表达“谁对谁做什么”的可执行承诺，不是对话复读（如“他说/她问/我觉得”），且能在 `final_dialog` 中找到角色已经接下该义务的证据.
+  - 如果候选的现实执行主体是用户、物品流程、或当前任务本身，而不是 `{character_name}` 后续要做/遵守的动作，必须判 FAIL。
+  - 如果 `final_dialog` 只是建议用户怎么做、认可用户自己的计划、评价方案更稳妥/更合理，必须判 FAIL 并要求清空对应 `future_promises`。
   - 若 `logical_stance` 不是 `CONFIRM`，且 `final_dialog` 仍在保留选择权、试探或吊胃口（如“看心情”“谁知道”“到时候再说”“也许吧”“再看”“下次不一定”），必须判 FAIL 并要求清空 `future_promises`.
   - 可以接受两种写法：
     1) 不含时间词的承诺本体（推荐）；
@@ -286,7 +306,7 @@ human payload 是以下 JSON：
     "decontexualized_input": "用户本轮真实意图摘要",
     "rag_result": {{
         "user_image": {{"user_memory_context": "五类用户记忆单元投影"}},
-        "user_memory_unit_candidates": ["RAG 检索出的原始候选记忆单元"],
+        "user_memory_unit_candidates": ["检索出的原始候选记忆单元"],
         "memory_evidence": ["相关长期记忆证据"],
         "conversation_evidence": ["相关近期对话证据"],
         "external_evidence": ["相关外部证据"],

@@ -1,3 +1,16 @@
+"""Dialog execution agent.
+
+Design intent:
+- Dialog agent only turns upstream decisions, facts, and content anchors into
+  natural chat text.
+- Dialog agent must not decide whether a topic is allowed, whether the
+  character accepts/refuses, or whether a user instruction is valid.
+- Those decisions belong upstream in cognition, especially L2/L3 and the
+  content-anchor contract. If the dialog agent needs a decision, it must be
+  represented in `action_directives.linguistic_directives.content_anchors`
+  before this module runs.
+"""
+
 from typing import Annotated, TypedDict
 
 from kazusa_ai_chatbot.nodes.persona_supervisor2_schema import GlobalPersonaState

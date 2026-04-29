@@ -44,6 +44,7 @@ _GLOBAL_STATE_UPDATER_PROMPT = """\
 3. 读取 `logical_stance` 与 `decontexualized_input`，区分普通事务、事实澄清、用户解释、关系事件或边界冲突。
 4. 只提取下一轮初始化需要的非针对性心理背景，不要写用户画像或关系记忆。
 5. 若证据不足，保持中性，不要把普通互动升级为强烈负面状态。
+6. 不要把弱证据当成持久心理事实：`internal_monologue`、`emotional_appraisal`、`interaction_subtext` 只能说明瞬时体感；必须由 `final_dialog`、`logical_stance` 或明确用户事实支持，才能写成强烈或持续的 `mood` / `global_vibe`。
 
 # 输入格式
 {{
@@ -70,6 +71,7 @@ _GLOBAL_STATE_UPDATER_PROMPT = """\
    - 例如：'刚才那个笨蛋居然怀疑我的缝纫技术，真是气死我了。'
 4. 中性守恒：若 `internal_monologue` 与 `final_dialog` 没有明确显示被冒犯、被威胁、被调情或被越界，禁止把普通问候、图片描述请求、事实分享、用户解释、事务协作、日常约定升级为 `Distrustful`、`Agitated`、`Defensive` 等强烈负面状态。
 5. 证据优先级：`final_dialog` 与 `logical_stance` 是是否留下持续心理惯性的硬约束；若最终回复平稳接住了普通任务，即使内部独白一度敏感，也只能写轻微或中性的沉淀。
+6. 强负面状态准入：`Defensive`、`Distrustful`、`Agitated`、`Distressed` 等强状态必须能在 `final_dialog` 或明确用户事实中找到持续原因；不能只因为瞬时独白有局促、迟疑或紧张就持久化。
 
 # 输出格式
 请务必返回合法的 JSON 字符串，仅包含以下字段：
@@ -133,6 +135,7 @@ _RELATIONSHIP_RECORDER_PROMPT = """\
 - `character_intent`: {character_name}本轮最终选择的行动意图，说明她是在正常提供、调侃拉扯、回避、拒绝、澄清还是对抗。
 - `decontexualized_input`: 用户本轮真实表达，用于判断这是不是普通任务、事实澄清、用户解释或关系事件。
 - `final_dialog`: {character_name}本轮最终说出口的话，用于判断关系意义是否真的被接住。
+- `content_anchors`: 回复前的内容锚点。只能作为中等强度证据，不能单独制造关系记忆。
 
 # 生成步骤
 1. 先检查 `internal_monologue`、`emotional_appraisal`、`interaction_subtext` 是否有明确主观关系证据。
@@ -141,6 +144,7 @@ _RELATIONSHIP_RECORDER_PROMPT = """\
 4. 若没有明确关系证据，输出 `skip: true` 且 `affinity_delta: 0`。
 5. 若有证据，写短主观评价证据，供下游 memory-unit consolidator 使用；不要复述对话。
 6. 最后选择 -5 到 +5 的 `affinity_delta`，不确定时选 0。
+7. 按证据强度排序：强证据是 `final_dialog`、用户明确陈述、RAG/既有事实；中证据是 `content_anchors`、`logical_stance`、`character_intent`；弱证据是 `internal_monologue`、`emotional_appraisal`、`interaction_subtext`。
 
 # 输入格式
 {{
@@ -151,7 +155,8 @@ _RELATIONSHIP_RECORDER_PROMPT = """\
     "logical_stance": "string",
     "character_intent": "string",
     "decontexualized_input": "string",
-    "final_dialog": ["角色本轮最终实际说出口的话"]
+    "final_dialog": ["角色本轮最终实际说出口的话"],
+    "content_anchors": ["回复前的内容锚点"]
 }}
 
 # 记录准则
@@ -161,19 +166,21 @@ _RELATIONSHIP_RECORDER_PROMPT = """\
 4. **静默检查：** 若 `internal_monologue` 与 `emotional_appraisal` 中未见明显情感起伏，返回 `{{"skip": true, "affinity_delta": 0}}`。
 5. **证据约束：** 若 `interaction_subtext`、`internal_monologue`、`emotional_appraisal`、`decontexualized_input` 与 `final_dialog` 中缺乏明确证据，禁止把普通问候、图片描述请求、事实分享、用户解释、事务协作、日常约定、简短感谢写成“危险”“调情”“博弈”“操控”“拉开距离”“温柔到心乱”等关系标签；此类中性互动的 `affinity_delta` 默认必须为 0。
 6. **输入纠偏规则：** 如果用户明确澄清“不是拉开距离/不是承诺/不用你记/只是顺手处理”，且 `final_dialog` 没有继续推进关系冲突或亲密关系，必须把这视为降压事实，不要反向写成用户在防御或暧昧靠近。
-7. **`character_intent` 解释规则：** `character_intent` 不是机械打分器，但它决定你该如何解读同一份情绪证据。
+7. **证据分层规则：** 弱证据不能单独生成 `subjective_appraisals`、`last_relationship_insight` 或非零 `affinity_delta`。中证据只能辅助解释强证据，不能单独制造关系事件。
+8. **普通任务默认跳过：** 当 `logical_stance` 接近确认/接纳、`character_intent` 接近正常提供/澄清、且 `final_dialog` 只是回答任务或事实问题时，默认返回 `skip: true`、`affinity_delta: 0`，不要写持久关系评价。
+9. **`character_intent` 解释规则：** `character_intent` 不是机械打分器，但它决定你该如何解读同一份情绪证据。
    - `PROVIDE`: 倾向说明角色愿意正常接住这轮互动。若 `internal_monologue` / `emotional_appraisal` 同时呈现安心、放松、被理解、愿意靠近，可给正分；若只是完成回答、并无额外情绪收益，仍应给 0。
    - `BANTAR`: 允许存在拉扯、害羞、试探、暧昧、嘴硬等复杂情绪。只有当证据明确显示角色**享受**这种互动、并把它体验为愉快或亲近时，才可给正分；若更多是局促、防御、被牵着走、半推半就、羞耻或不安，则应给 0 或负分，而不是因为“有张力”就默认加分。
    - `CLARIFY`: 说明角色仍在确认对方意思、尚未真正接住关系意义。默认应偏向 0；只有极少数情况下，若澄清过程本身明确带来被理解、被尊重感，才可轻微加分。
    - `EVADE` / `DISMISS`: 说明角色在后撤、降温或避免进入对方框架。默认不应给正分；除非证据非常明确显示这种回避本身让角色感到轻松和舒缓，否则应给 0 或负分。
    - `REJECT` / `CONFRONT`: 说明角色正在抗拒、设限或正面冲突。若伴随烦躁、压迫、受伤、被冒犯，应该给负分；通常不应给正分。
-8. **打分刻度：**
+10. **打分刻度：**
    - `0`: 普通对话、事务问答、轻量闲聊、证据不足。
    - `+1` 到 `+2`: 明确轻度好感上升，如感到放松、被尊重、被理解、稍微开心。
    - `+3` 到 `+5`: 明确强正向波动，如明显开心、安心、被打动、强信任感。
    - `-1` 到 `-2`: 明确轻度负面波动，如烦躁、不适、被打扰、轻度警惕。
    - `-3` 到 `-5`: 明确强负向波动，如强烈厌烦、受压迫、被冒犯、明显受伤或反感。
-9. **不确定时选 0**：若你需要猜测，说明证据不够，直接输出 0。
+11. **不确定时选 0**：若你需要猜测，说明证据不够，直接输出 0。
 
 # 输出格式
 请务必返回合法的 JSON 字符串，仅包含以下字段：
@@ -214,6 +221,7 @@ async def relationship_recorder(state: ConsolidatorState) -> dict:
         "character_intent": state["character_intent"],
         "decontexualized_input": state["decontexualized_input"],
         "final_dialog": state["final_dialog"],
+        "content_anchors": state["action_directives"]["linguistic_directives"]["content_anchors"],
     }
 
     human_message = HumanMessage(content=json.dumps(msg, ensure_ascii=False))
@@ -244,10 +252,14 @@ async def relationship_recorder(state: ConsolidatorState) -> dict:
 
     if result.get("skip"):
         raw_affinity_delta = 0
+        subjective_appraisals = []
+        last_relationship_insight = ""
+    else:
+        last_relationship_insight = result.get("last_relationship_insight")
 
     return_value = {
         "subjective_appraisals": subjective_appraisals,
         "affinity_delta": raw_affinity_delta,
-        "last_relationship_insight": result.get("last_relationship_insight"),
+        "last_relationship_insight": last_relationship_insight,
     }
     return return_value

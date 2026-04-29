@@ -46,6 +46,11 @@ def _state() -> dict:
         "logical_stance": "CONFIRM",
         "character_intent": "PROVIDE",
         "final_dialog": ["那就按你说的来吧。"],
+        "action_directives": {
+            "linguistic_directives": {
+                "content_anchors": ["[FACTUAL] 按普通事务回应。"],
+            },
+        },
     }
 
 
@@ -64,6 +69,8 @@ async def test_global_state_updater_receives_grounding_fields(monkeypatch) -> No
     payload = json.loads(llm.messages[1].content)
     assert "不会收到完整角色资料" in system_prompt
     assert "final_dialog" in system_prompt
+    assert "弱证据" in system_prompt
+    assert "强负面状态准入" in system_prompt
     assert payload["logical_stance"] == "CONFIRM"
     assert payload["decontexualized_input"] == "不是在拉开距离，只是顺手整理线材。"
 
@@ -72,9 +79,9 @@ async def test_global_state_updater_receives_grounding_fields(monkeypatch) -> No
 async def test_relationship_recorder_receives_reassurance_context(monkeypatch) -> None:
     llm = _CapturingAsyncLLM({
         "skip": True,
-        "subjective_appraisals": [],
+        "subjective_appraisals": ["should be dropped when skip is true"],
         "affinity_delta": 0,
-        "last_relationship_insight": "",
+        "last_relationship_insight": "should not persist",
     })
     monkeypatch.setattr(reflection_module, "_relationship_recorder_llm", llm)
 
@@ -84,6 +91,11 @@ async def test_relationship_recorder_receives_reassurance_context(monkeypatch) -
     payload = json.loads(llm.messages[1].content)
     assert "输入纠偏规则" in system_prompt
     assert "不会收到完整角色资料" in system_prompt
+    assert "证据分层规则" in system_prompt
+    assert "普通任务默认跳过" in system_prompt
     assert payload["decontexualized_input"] == "不是在拉开距离，只是顺手整理线材。"
     assert payload["final_dialog"] == ["那就按你说的来吧。"]
+    assert payload["content_anchors"] == ["[FACTUAL] 按普通事务回应。"]
     assert result["affinity_delta"] == 0
+    assert result["subjective_appraisals"] == []
+    assert result["last_relationship_insight"] == ""

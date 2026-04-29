@@ -76,8 +76,16 @@ async def test_facts_harvester_receives_rag2_payload_and_dedup_keys(monkeypatch)
     system_prompt = llm.messages[0].content
     payload = json.loads(llm.messages[1].content)
     assert "research_facts" not in system_prompt
+    assert "RAG" not in system_prompt
     assert "RAG 元信息" not in system_prompt
+    assert "提供给认知层的用户记忆摘要" in system_prompt
+    assert "`rag_result.memory_evidence`、`conversation_evidence`、`external_evidence`" in system_prompt
     assert "义务主体是不是" in system_prompt
+    assert "来源权威性" in system_prompt
+    assert "生成回复自污染禁止" in system_prompt
+    assert "角色事实准入" in system_prompt
+    assert "角色自身事实准入链" in system_prompt
+    assert "第一人称回答只属于本轮台词" in system_prompt
     assert "角色建议用户怎么做，不等于角色承诺自己会做" in system_prompt
     assert "建议/方案不是承诺" in system_prompt
     assert "主语替换自检" in system_prompt
@@ -108,6 +116,12 @@ async def test_fact_harvester_evaluator_reads_rag2_field_names(monkeypatch) -> N
     payload = json.loads(llm.messages[1].content)
     assert "rag_result.user_image" in system_prompt
     assert "rag_result.memory_evidence" in system_prompt
+    assert "RAG" not in system_prompt
+    assert "检索调度的 loop_count" in system_prompt
+    assert "来源权威性审计" in system_prompt
+    assert "第一人称回答" in system_prompt
+    assert "四步链" in system_prompt
+    assert "建议用户怎么做" in system_prompt
     assert "research_facts" not in system_prompt
     memory_context = payload["rag_result"]["user_image"]["user_memory_context"]
     assert memory_context["objective_facts"][0]["fact"] == "提拉米苏喜欢绿茶"

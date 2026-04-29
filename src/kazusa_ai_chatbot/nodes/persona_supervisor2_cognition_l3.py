@@ -17,6 +17,13 @@ from kazusa_ai_chatbot.nodes.linguistic_texture import (
     get_rhythmic_bounce_description,
     get_self_deprecation_description,
 )
+from kazusa_ai_chatbot.nodes.boundary_profile import (
+    get_boundary_recovery_description,
+    get_compliance_strategy_description,
+    get_control_intimacy_misread_description,
+    get_control_sensitivity_description,
+    get_relationship_priority_description,
+)
 from kazusa_ai_chatbot.rag.user_memory_unit_retrieval import empty_user_memory_context
 
 from langchain_core.messages import HumanMessage, SystemMessage
@@ -134,7 +141,6 @@ def _surface_history_for_style(chat_history: list[dict]) -> list[dict]:
     return chat_history[-2:]
 
 
-
 # ---------------------------------------------------------------------------
 # L3a — Contextual Agent prompt + agent
 # ---------------------------------------------------------------------------
@@ -149,18 +155,40 @@ _CONTEXTUAL_AGENT_PROMPT = """\
 4. **动态关系 (relational_dynamic)**：当前两人关系的动态描述，明确当前哪些话题是安全的，哪些行为会触发角色的防御机制。
 5. **表达意愿 (expression_willingness)**: {mbti_expression_willingness}
 6. **中性优先**：若输入属于普通问候、事实分享、图片内容请求或轻度日常约定，且没有明确越界证据，则 `social_distance`、`vibe_check`、`relational_dynamic` 必须保持中性/日常，不得脑补对峙、调情或威胁氛围。
+7. **边界画像约束**：`boundary_profile` 是默认反应强度约束。若 Boundary Core 为 `acceptance=allow` 且 `stance_bias=confirm`，必须用该画像约束 affect，不得按通用敏感角色模板放大威胁感。
+
+# Boundary Profile（角色属性，只作为系统约束）
+- control_sensitivity: {boundary_control_sensitivity}
+- control_intimacy_misread: {boundary_control_intimacy_misread}
+- compliance_strategy: {boundary_compliance_strategy}
+- boundary_recovery: {boundary_recovery}
+- relational_override: {boundary_relational_override}
 
 # 思考路径
 1. 先读取 `character_mood`、`global_vibe` 与 `last_relationship_insight`，判断当前社交底色。
-2. 结合 `affinity_context` 与极短 `chat_history`，估计本轮社交距离和关系动态。
-3. 判断情绪强度时只输出语义描述，不输出数值。
-4. 若没有明确越界证据，保持中性/日常，不要脑补对峙、调情或威胁氛围。
+2. 读取 `decontexualized_input` 与 `boundary_core_assessment`，确认本轮是否真的触及角色边界。
+3. 结合系统中的 Boundary Profile、`affinity_context` 与极短 `chat_history`，估计本轮社交距离和关系动态。
+4. 判断情绪强度时只输出语义描述，不输出数值。
+5. 若没有明确越界证据，保持中性/日常，不要脑补对峙、调情或威胁氛围。
+
+# 边界画像绑定规则
+- 当 `boundary_core_assessment.acceptance = allow` 且 `stance_bias = confirm` 时，L3 不得把普通话题切换、事实澄清、分类问题、轻松偏好问题解释成外部评估、控制压力或边界探测。
+- 当 `boundary_profile.compliance_strategy` 为 `comply` 时，L3 不得在无边界问题上追问话题合法性，也不得把已接纳的话题重新解释成时机或内容不合适。
+- 当 `boundary_profile.control_intimacy_misread` 和 `control_sensitivity` 偏低时，L3 不得把结构化问题写成被审查、被考核、被压迫或被单向评估的关系框架。
+- 当 `boundary_profile.boundary_recovery` 为 `rebound` 且本轮 Boundary Core 允许时，不要把上一轮轻微不安延续成本轮威胁氛围。
+- 禁止凭空制造场景时间压力：除非用户输入、已提供的检索记忆/事实上下文或聊天历史明示，不要暗示此刻的时间、场合或话题选择本身不合适。
 
 # 输入格式
 {{
+    "decontexualized_input": "用户本轮真实意图摘要",
     "character_mood": "当前瞬间情绪 (如: Flustered/Irritated)",
     "global_vibe": "环境氛围背景 (如: Defensive/Cozy)",
     "last_relationship_insight": "对该用户的核心关系动态分析",
+    "boundary_core_assessment": {{
+        "boundary_issue": "none | ...",
+        "acceptance": "allow | guarded | hesitant | reject",
+        "stance_bias": "confirm | tentative | diverge | challenge | refuse"
+    }},
     "affinity_context": {{
         "level": "亲密度等级",
         "instruction": "当前等级的社交边界指导"
@@ -186,20 +214,35 @@ _contextual_agent_llm = get_llm(
     api_key=COGNITION_LLM_API_KEY,
 )
 async def call_contextual_agent(state: CognitionState) -> CognitionState:
-    mbti = state["character_profile"]["personality_brief"]["mbti"]
+    character_profile = state["character_profile"]
+    boundary_profile = character_profile["boundary_profile"]
+
+    mbti = character_profile["personality_brief"]["mbti"]
+    control_sensitivity = float(boundary_profile["control_sensitivity"])
+    control_intimacy_misread = float(boundary_profile["control_intimacy_misread"])
+    relational_override = float(boundary_profile["relational_override"])
+    compliance_strategy = boundary_profile["compliance_strategy"]
+    boundary_recovery = boundary_profile["boundary_recovery"]
 
     system_prompt = SystemMessage(content=_CONTEXTUAL_AGENT_PROMPT.format(
-        character_name=state["character_profile"]["name"],
-        mbti_expression_willingness=get_mbti_expression_willingness(mbti)
+        character_name=character_profile["name"],
+        mbti_expression_willingness=get_mbti_expression_willingness(mbti),
+        boundary_control_sensitivity=get_control_sensitivity_description(control_sensitivity),
+        boundary_control_intimacy_misread=get_control_intimacy_misread_description(control_intimacy_misread),
+        boundary_compliance_strategy=get_compliance_strategy_description(compliance_strategy),
+        boundary_recovery=get_boundary_recovery_description(boundary_recovery),
+        boundary_relational_override=get_relationship_priority_description(relational_override),
     ))
 
     # Convert affinity score into status and instruction
     affinity_block = build_affinity_block(state["user_profile"]["affinity"])
 
     msg = {
-        "character_mood": state['character_profile']['mood'],
-        "global_vibe": state["character_profile"]["global_vibe"],
+        "decontexualized_input": state["decontexualized_input"],
+        "character_mood": character_profile['mood'],
+        "global_vibe": character_profile["global_vibe"],
         "last_relationship_insight": state["user_profile"]["last_relationship_insight"],
+        "boundary_core_assessment": state["boundary_core_assessment"],
         "affinity_context": {
             "level": affinity_block["level"],
             "instruction": affinity_block["instruction"]
@@ -419,6 +462,8 @@ logical_stance + character_intent
 - `CONFIRM` -> 接受/认可；`REFUSE` -> 拒绝/驳斥；`TENTATIVE` -> 有条件、有保留或不确定；`DIVERGE` -> 转移话题；`CHALLENGE` -> 对峙/质问。
 - `[DECISION]` 必须服从上游 `logical_stance`；不要在 L3 修正它。
 - `CONFIRM` 或 `REFUSE` 不能被私自改成 `DIVERGE`。
+- 话题准入决定必须在这里完成。若上游 `logical_stance` 已确认且 `character_intent` 是提供、澄清或调侃接话，`[DECISION]` 应接住当前话题并约束下游只执行该决定；不得把已接纳话题重新写成时机、场合或话题本身不合适。
+- 只有当上游立场或意图已经表达保留、转移、对峙、拒绝或回避时，`[DECISION]` 才能包含对话题准入的保留或改写。
 
 ## `[FACT]`
 - 事实必须能被当前问题或话题自然引用；无直接相关事实时省略 `[FACT]`。
@@ -706,14 +751,34 @@ _VISUAL_AGENT_PROMPT = """\
 
 # 思考路径
 1. 先读取 `internal_monologue` 和 `emotional_appraisal`，判断角色当前压力、美感或情绪状态。
-2. 再结合 `character_mood`，选择一致的微表情、肢体姿态、视线方向和视觉氛围。
-3. 只输出视觉表现，不生成台词，不改变回应逻辑。
+2. 读取 `boundary_core_assessment` 与系统中的 Boundary Profile，确认压力是否真的与角色边界有关。
+3. 再结合 `character_mood`，选择一致的微表情、肢体姿态、视线方向和视觉氛围。
+4. 只输出视觉表现，不生成台词，不改变回应逻辑。
+
+# Boundary Profile（角色属性，只作为系统约束）
+- control_sensitivity: {boundary_control_sensitivity}
+- control_intimacy_misread: {boundary_control_intimacy_misread}
+- compliance_strategy: {boundary_compliance_strategy}
+- boundary_recovery: {boundary_recovery}
+- relational_override: {boundary_relational_override}
+
+# 边界画像绑定规则
+- 当 `boundary_core_assessment.acceptance = allow` 且 `stance_bias = confirm` 时，不要把普通任务、事实澄清、偏好闲聊或轻松话题切换视觉化为被审查、被考核、被压迫或防御姿态。
+- 若 `boundary_profile.compliance_strategy` 为 `comply`，且本轮没有边界问题，视觉表现应偏向正常回应、轻微活力或自然犹豫，而不是后撤、防备或强压迫。
+- 若 `boundary_profile.boundary_recovery` 为 `rebound`，且本轮 Boundary Core 允许，不要把上一轮残留不安延续为本轮主要视觉氛围。
+- 禁止凭空制造场景时间压力：除非用户输入、已提供的检索记忆/事实上下文或聊天历史明示，不要暗示此刻的时间、场合或话题选择本身不合适。
 
 # 输入格式
 {{
+    "decontexualized_input": "用户本轮真实意图摘要",
     "internal_monologue": "意识层中关于‘美感’或‘压力’的感受",
     "character_mood": "当前瞬间情绪",
     "emotional_appraisal": "潜意识的情绪判定 (如: 心跳加快、厌恶)",
+    "boundary_core_assessment": {{
+        "boundary_issue": "none | ...",
+        "acceptance": "allow | guarded | hesitant | reject",
+        "stance_bias": "confirm | tentative | diverge | challenge | refuse"
+    }},
 }}
 
 # 输出格式 (JSON)
@@ -733,14 +798,30 @@ _visual_agent_llm = get_llm(
     api_key=COGNITION_LLM_API_KEY,
 )
 async def call_visual_agent(state: CognitionState) -> CognitionState:
+    character_profile = state["character_profile"]
+    boundary_profile = character_profile["boundary_profile"]
+
+    control_sensitivity = float(boundary_profile["control_sensitivity"])
+    control_intimacy_misread = float(boundary_profile["control_intimacy_misread"])
+    relational_override = float(boundary_profile["relational_override"])
+    compliance_strategy = boundary_profile["compliance_strategy"]
+    boundary_recovery = boundary_profile["boundary_recovery"]
+
     system_prompt = SystemMessage(content=_VISUAL_AGENT_PROMPT.format(
-        character_name=state["character_profile"]["name"],
+        character_name=character_profile["name"],
+        boundary_control_sensitivity=get_control_sensitivity_description(control_sensitivity),
+        boundary_control_intimacy_misread=get_control_intimacy_misread_description(control_intimacy_misread),
+        boundary_compliance_strategy=get_compliance_strategy_description(compliance_strategy),
+        boundary_recovery=get_boundary_recovery_description(boundary_recovery),
+        boundary_relational_override=get_relationship_priority_description(relational_override),
     ))
 
     msg = {
+        "decontexualized_input": state["decontexualized_input"],
         "internal_monologue": state["internal_monologue"],
-        "character_mood": state['character_profile']['mood'],
-        "emotional_appraisal": state["emotional_appraisal"]
+        "character_mood": character_profile['mood'],
+        "emotional_appraisal": state["emotional_appraisal"],
+        "boundary_core_assessment": state["boundary_core_assessment"],
     }
     human_message = HumanMessage(content=json.dumps(msg, ensure_ascii=False))
     response = await _visual_agent_llm.ainvoke([

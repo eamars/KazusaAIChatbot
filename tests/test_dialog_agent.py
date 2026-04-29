@@ -7,7 +7,13 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from kazusa_ai_chatbot.nodes.dialog_agent import _DIALOG_EVALUATOR_PROMPT, dialog_agent, DialogAgentState
+from kazusa_ai_chatbot.nodes import dialog_agent as dialog_module
+from kazusa_ai_chatbot.nodes.dialog_agent import (
+    _DIALOG_EVALUATOR_PROMPT,
+    _DIALOG_GENERATOR_PROMPT,
+    dialog_agent,
+    DialogAgentState,
+)
 from kazusa_ai_chatbot.utils import build_interaction_history_recent
 
 
@@ -59,6 +65,15 @@ def _base_global_state():
                 "abstraction_reframing": 0.4,
                 "self_deprecation": 0.4,
             },
+            "boundary_profile": {
+                "self_integrity": 0.7,
+                "control_sensitivity": 0.3,
+                "compliance_strategy": "comply",
+                "relational_override": 0.65,
+                "control_intimacy_misread": 0.35,
+                "boundary_recovery": "rebound",
+                "authority_skepticism": 0.35,
+            },
         },
     }
 
@@ -84,6 +99,16 @@ def test_dialog_evaluator_prompt_preserves_concise_safe_dialog() -> None:
     assert "`……`、`?`、停顿型语气词本身不构成动作描写" in _DIALOG_EVALUATOR_PROMPT
     assert "不要为了追求“抽象重构”或“感官化比喻”而鼓励引入身体接触" in _DIALOG_EVALUATOR_PROMPT
     assert "若只有软性问题（如修辞展开不足、句子偏短、比喻不够浓），但核心逻辑正确、话题贴合、且未触犯物理污染红线，则仍应 `should_stop: true`" in _DIALOG_EVALUATOR_PROMPT
+
+
+def test_dialog_generator_prompt_has_no_decision_ownership() -> None:
+    """Dialog generation stays an execution renderer, not a decision stage."""
+
+    assert "only turns upstream decisions" in (dialog_module.__doc__ or "")
+    assert "logical_stance" not in _DIALOG_GENERATOR_PROMPT
+    assert "character_intent" not in _DIALOG_GENERATOR_PROMPT
+    assert "boundary_profile" not in _DIALOG_GENERATOR_PROMPT
+    assert "话题合法性" not in _DIALOG_GENERATOR_PROMPT
 
 
 def test_build_interaction_history_recent_excludes_other_user_messages():

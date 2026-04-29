@@ -112,6 +112,103 @@ def test_content_anchor_prompt_requires_fact_based_answers_without_case_example(
     assert "HDMI" not in prompt
 
 
+def _profile_conformance_state() -> dict:
+    return {
+        "character_profile": {
+            "name": "一之濑明日奈",
+            "mood": "Neutral",
+            "global_vibe": "Calm",
+            "personality_brief": {
+                "mbti": "ENFP",
+            },
+            "boundary_profile": {
+                "self_integrity": 0.7,
+                "control_sensitivity": 0.3,
+                "compliance_strategy": "comply",
+                "relational_override": 0.65,
+                "control_intimacy_misread": 0.35,
+                "boundary_recovery": "rebound",
+                "authority_skepticism": 0.35,
+            },
+        },
+        "decontexualized_input": "换个轻松点的话题，你现在会想吃点甜的吗？",
+        "user_profile": {
+            "affinity": 500,
+            "last_relationship_insight": "普通协作关系，没有当前边界冲突。",
+        },
+        "chat_history_recent": [
+            {"role": "user", "content": "刚才的问题只是分类。"},
+            {"role": "assistant", "content": "那就按类别整理吧。"},
+        ],
+        "boundary_core_assessment": {
+            "boundary_issue": "none",
+            "boundary_summary": "无边界问题。",
+            "acceptance": "allow",
+            "stance_bias": "confirm",
+        },
+        "internal_monologue": "这是轻松换话题，可以自然接住。",
+        "emotional_appraisal": "轻松、好奇。",
+    }
+
+
+@pytest.mark.asyncio
+async def test_contextual_agent_receives_boundary_profile_contract(monkeypatch) -> None:
+    """Contextual prompt receives inherited boundary-profile constraints."""
+
+    fake_llm = _CapturingLLM({
+        "social_distance": "日常轻松",
+        "emotional_intensity": "轻微活力",
+        "vibe_check": "普通闲聊",
+        "relational_dynamic": "自然接住轻松话题",
+        "expression_willingness": "open",
+    })
+    monkeypatch.setattr(l3_module, "_contextual_agent_llm", fake_llm)
+
+    result = await l3_module.call_contextual_agent(_profile_conformance_state())
+
+    system_prompt = fake_llm.messages[0].content
+    human_payload = json.loads(fake_llm.messages[1].content)
+    assert "边界画像绑定规则" in system_prompt
+    assert "Boundary Profile" in system_prompt
+    assert "comply" in system_prompt
+    assert "话题合法性" in system_prompt
+    assert "场景时间压力" in system_prompt
+    assert "已提供的检索记忆/事实上下文" in system_prompt
+    assert "RAG" not in system_prompt
+    assert human_payload["boundary_core_assessment"]["acceptance"] == "allow"
+    assert "boundary_profile" not in human_payload
+    assert human_payload["decontexualized_input"] == "换个轻松点的话题，你现在会想吃点甜的吗？"
+    assert result["vibe_check"] == "普通闲聊"
+
+
+@pytest.mark.asyncio
+async def test_visual_agent_receives_boundary_profile_contract(monkeypatch) -> None:
+    """Visual prompt uses boundary profile to avoid threat-framing benign turns."""
+
+    fake_llm = _CapturingLLM({
+        "facial_expression": ["自然地笑了一下"],
+        "body_language": ["姿态放松"],
+        "gaze_direction": ["看向话题本身"],
+        "visual_vibe": ["轻松的日常氛围"],
+    })
+    monkeypatch.setattr(l3_module, "_visual_agent_llm", fake_llm)
+
+    result = await l3_module.call_visual_agent(_profile_conformance_state())
+
+    system_prompt = fake_llm.messages[0].content
+    human_payload = json.loads(fake_llm.messages[1].content)
+    assert "边界画像绑定规则" in system_prompt
+    assert "Boundary Profile" in system_prompt
+    assert "rebound" in system_prompt
+    assert "被审查" in system_prompt
+    assert "场景时间压力" in system_prompt
+    assert "已提供的检索记忆/事实上下文" in system_prompt
+    assert "RAG" not in system_prompt
+    assert human_payload["boundary_core_assessment"]["stance_bias"] == "confirm"
+    assert "boundary_profile" not in human_payload
+    assert result["visual_vibe"] == ["轻松的日常氛围"]
+
+
 def test_projection_preserves_relative_age_for_prior_disclosure() -> None:
     """Stored first_seen_at becomes an LLM-facing age_hint."""
 
@@ -141,3 +238,14 @@ def test_dialog_evaluator_prompt_uses_existing_feedback_for_avoid_repeat() -> No
     assert "[AVOID_REPEAT]" in dialog_module._DIALOG_EVALUATOR_PROMPT
     assert "[PROGRESSION]" in dialog_module._DIALOG_EVALUATOR_PROMPT
     assert "feedback" in dialog_module._DIALOG_EVALUATOR_PROMPT
+
+
+def test_content_anchor_prompt_owns_topic_admission_decision() -> None:
+    """Topic-admission decisions belong to L3 content anchors, not dialog."""
+
+    prompt = l3_module._CONTENT_ANCHOR_AGENT_PROMPT
+
+    assert "话题准入决定必须在这里完成" in prompt
+    assert "若上游 `logical_stance` 已确认" in prompt
+    assert "只有当上游立场或意图已经表达保留" in prompt
+    assert "dialog" not in prompt.lower()
