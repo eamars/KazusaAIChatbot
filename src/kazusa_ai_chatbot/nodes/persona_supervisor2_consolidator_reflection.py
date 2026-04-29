@@ -37,12 +37,19 @@ _GLOBAL_STATE_UPDATER_PROMPT = """\
 - `emotional_appraisal`: {character_name}对互动的最原始、直觉性的情感冲动
 - `character_intent`: {character_name}在互动中的核心意图
 
+# 生成步骤
+1. 先读取 `internal_monologue` 和 `emotional_appraisal`，分清一瞬间情绪与最终心理沉淀。
+2. 读取 `final_dialog` 与 `character_intent`，判断本轮是否真的留下持续心理惯性。
+3. 只提取下一轮初始化需要的非针对性心理背景，不要写用户画像或关系记忆。
+4. 若证据不足，保持中性，不要把普通互动升级为强烈负面状态。
+
 # 输入格式
 {{
     "internal_monologue": "string",
     "emotional_appraisal": "string",
     "interaction_subtext": "string",
     "character_intent": "string",
+    "final_dialog": ["角色本轮最终实际说出口的话"]
 }}
 
 # 逻辑准则
@@ -75,10 +82,15 @@ _global_state_updater_llm = get_llm(
     api_key=CONSOLIDATION_LLM_API_KEY,
 )
 async def global_state_updater(state: ConsolidatorState) -> dict:
-    system_prompt = SystemMessage(_GLOBAL_STATE_UPDATER_PROMPT.format(character_name=state["character_profile"]["name"]))
+    system_prompt = SystemMessage(content=_GLOBAL_STATE_UPDATER_PROMPT.format(
+        character_name=state["character_profile"]["name"],
+    ))
 
     msg = {
         "internal_monologue": state["internal_monologue"],
+        "emotional_appraisal": state["emotional_appraisal"],
+        "interaction_subtext": state["interaction_subtext"],
+        "character_intent": state["character_intent"],
         "final_dialog": state["final_dialog"],
     }
 
@@ -111,6 +123,13 @@ _RELATIONSHIP_RECORDER_PROMPT = """\
 - `affinity_context`: 当前{user_name}在{character_name}的好感度描述。
 - `logical_stance`: {character_name}对{user_name}言行的逻辑认可度。
 - `character_intent`: {character_name}本轮最终选择的行动意图，说明她是在正常提供、调侃拉扯、回避、拒绝、澄清还是对抗。
+
+# 生成步骤
+1. 先检查 `internal_monologue`、`emotional_appraisal`、`interaction_subtext` 是否有明确主观关系证据。
+2. 再结合 `logical_stance`、`character_intent` 与 `affinity_context` 判断这份证据的关系方向。
+3. 若没有明确关系证据，输出 `skip: true` 且 `affinity_delta: 0`。
+4. 若有证据，写短主观评价证据，供下游 memory-unit consolidator 使用；不要复述对话。
+5. 最后选择 -5 到 +5 的 `affinity_delta`，不确定时选 0。
 
 # 输入格式
 {{
@@ -159,7 +178,7 @@ _relationship_recorder_llm = get_llm(
     api_key=CONSOLIDATION_LLM_API_KEY,
 )
 async def relationship_recorder(state: ConsolidatorState) -> dict:
-    system_prompt = SystemMessage(_RELATIONSHIP_RECORDER_PROMPT.format(
+    system_prompt = SystemMessage(content=_RELATIONSHIP_RECORDER_PROMPT.format(
         character_name=state["character_profile"]["name"],
         user_name=state["user_name"],
         character_mbti=state["character_profile"]["personality_brief"]["mbti"],

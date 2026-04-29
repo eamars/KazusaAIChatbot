@@ -174,6 +174,12 @@ _WEB_SEARCH_EVALUATOR_PROMPT = """\
 {agent_tools}
 - **警告**：评估专家仅负责逻辑判断，禁止在 response 中生成任何实际的 tool_call。
 
+# 审计步骤
+1. 先读取 `task` 和 `expected_response`，确认需要满足的事实范围。
+2. 检查 `call_history` 中已搜索和已读取的内容，区分 snippet 与正文。
+3. 若已有相关链接但缺正文，建议读取正文；若关键词太泛，建议具体搜索策略。
+4. 若信息已足够或继续搜索收益低，设置 `should_stop: true`。
+
 # 输入格式
 {{
     "task": "任务描述",
@@ -214,6 +220,12 @@ _WEB_SEARCH_FINALIZER_PROMPT = """\
 - score: 评估分数，范围 0-100，表示检索到的信息满足任务描述的程度
 - reason: 评估原因（一句话之内概括）
 - is_empty_result: 布尔值。仅当最终确认没有任何任务相关外部信息可供下游使用时为 true；只要存在任何任务相关信息，即使不完整，也必须为 false。
+
+# 生成步骤
+1. 先读取 `task` 与 `expected_response`，确认下游需要什么证据包。
+2. 从 `content` 中提取有来源支撑的事实要点，保留 URL、标题、站点或时间。
+3. 结合 `evaluator_feedback` 判断完整度并给出 `score` 与 `reason`。
+4. 只有在确认没有任何相关信息时才设置 `is_empty_result: true`。
 
 # 输入格式
 {

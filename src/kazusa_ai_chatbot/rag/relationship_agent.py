@@ -69,7 +69,19 @@ It is for questions like:
   - Use 1 for mode="one".
   - Use 3 for mode="existence" unless the task explicitly requests another count.
 
-# Output format
+# Generation Procedure
+1. Read `task` and decide whether it asks for one user, a ranked list, or existence.
+2. Choose `rank_order`: top for liked/closest/favorite, bottom for disliked/hated.
+3. Preserve explicit count in `limit`; otherwise use the mode defaults.
+4. Ignore tasks that require conversation evidence or persona interpretation beyond relationship ranking.
+
+# Input Format
+{
+  "task": "slot description from the outer RAG supervisor",
+  "context": "known facts and runtime hints"
+}
+
+# Output Format
 Return valid JSON only:
 {
   "mode": "one | n | existence",

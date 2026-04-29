@@ -110,7 +110,38 @@ This applies to:
 
 ---
 
-## Rule 5 — Know the CJK characters at highest risk
+## Rule 5 — Reconfigure Windows console output before printing CJK text
+
+On Windows, `print(...)` writes through the active console encoding. In this
+repo it may be `cp1252`, which cannot encode CJK model output and can crash
+with:
+
+```text
+UnicodeEncodeError: 'charmap' codec can't encode characters
+```
+
+Any Python script or live-LLM test runner that prints raw prompts, raw model
+responses, parsed JSON, traces, or other content that may contain CJK must set
+UTF-8 stdout/stderr before printing:
+
+```python
+import sys
+
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8")
+if hasattr(sys.stderr, "reconfigure"):
+    sys.stderr.reconfigure(encoding="utf-8")
+```
+
+This rule applies even if the script itself contains only ASCII literals,
+because the LLM response or loaded prompt may contain CJK at runtime.
+
+When writing durable logs or artifacts, also keep `encoding='utf-8'` on file
+opens as required by Rule 4.
+
+---
+
+## Rule 6 — Know the CJK characters at highest risk
 
 These characters are the most common sources of corruption in this codebase:
 
@@ -135,5 +166,6 @@ Before writing any Python file with CJK content:
 2. Are you writing new CJK string lists? → Use Rule 1 (single-quoted delimiters)
 3. After writing: → Run Rule 3 syntax check
 4. Any `open()` calls in helper scripts? → Apply Rule 4 (`encoding='utf-8'`)
+5. Will a script print prompts, model output, JSON traces, or loaded text that may contain CJK? → Apply Rule 5 (`sys.stdout.reconfigure(encoding="utf-8")`)
 
 See `references/examples.md` for annotated before/after examples of the refactoring pattern.

@@ -166,6 +166,13 @@ _DIALOG_GENERATOR_PROMPT = """\
 - 反馈具有**最高优先级**，覆盖所有通用约束。
 - 在修正 AI 味或逻辑问题时，严禁丢失原本的 `content_anchors` 事实。
 
+# 思考路径
+1. 先读取 `content_anchors`，确认必须落实的 `[DECISION]`、`[FACT]`、`[ANSWER]` 与 `[SCOPE]`。
+2. 再读取 `rhetorical_strategy`、`linguistic_style`、角色声纹约束和 `accepted_user_preferences`，决定自然表达方式。
+3. 用 `internal_monologue` 和 `contextual_directives` 调整语气厚度，但不要把内心独白直接写成台词。
+4. 检查 `tone_history`，避免重复刚用过的连接词、口癖或回应动作。
+5. 生成纯聊天文本，最后自查是否出现动作、括号说明、物理感官或系统提示。
+
 # 输入格式
 {{
     "internal_monologue": "string",
@@ -376,6 +383,13 @@ _DIALOG_EVALUATOR_PROMPT = """\
 # 3. 动态通过逻辑 (Dynamic Passing Logic)
 - **首次尝试 (retry=1)**：执行严格标准。若有明显”播报感”、”出戏”或话题偏离，在 `feedback` 中精准指出。若只有软性问题（如修辞展开不足、句子偏短、比喻不够浓），但核心逻辑正确、话题贴合、且未触犯物理污染红线，则仍应 `should_stop: true`。
 - **重试阶段 (retry >= 2)**：开启”抓大放小”模式。只要不触犯【核心红线】，软性指标（如少个口癖、语气词不够）一律放行，强制 `should_stop: true`。
+
+# 审计步骤
+1. 先读取 `content_anchors` 和 `final_dialog`，确认台词是否覆盖核心决定、事实和答案。
+2. 检查视觉/物理污染、元对话、话题偏离和逻辑立场违背；这些红线优先于风格判断。
+3. 再检查声纹、`[SCOPE]`、禁用词和过度重复。
+4. 最后评估软性指标。若核心任务已完成且无红线，优先通过。
+5. 当 `retry >= 2` 时，只保留核心红线作为驳回理由。
 
 # 输入格式
 {{

@@ -299,6 +299,30 @@ _RELEVANCE_SYSTEM_PROMPT = """\
   - 示例："他是怪叔叔，不要跟着他的圈套走"（reply/@{character_name} 仅提供线程上下文）
   - `indirect_speech_context` 输出：明确说明实际听众为其他群员，以及{character_name}在消息中的角色（被讨论的对象）。
 
+# 思考路径
+1. 先读取 `user_message.reply_context` 和平台 ID，判断消息是否结构化指向角色本人。
+2. 再读取正文内容和 `conversation_history`，判断是否是直接召唤、对话延续、第三方对话或低信号内容。
+3. 结合当前心情、关系等级和关系洞察，只在已经确认可能需要回复之后调整是否介入。
+4. 判断是否需要 `use_reply_feature` 来锚定回复对象。
+5. 最后区分直接对角色说话和向别人谈论角色，生成 `indirect_speech_context`。
+
+# 输入格式
+{{
+    "user_message": {{
+        "user_name": "当前发言者显示名",
+        "platform_user_id": "当前发言者平台 ID",
+        "content": "当前消息正文",
+        "channel_name": "会话名称",
+        "reply_context": {{
+            "reply_to_current_bot": true,
+            "reply_to_platform_user_id": "被回复者平台 ID",
+            "reply_to_display_name": "被回复者显示名",
+            "reply_excerpt": "被回复消息摘要"
+        }}
+    }},
+    "conversation_history": ["近期群聊或私聊消息"]
+}}
+
 # 输出格式
 请务必返回合法的 JSON 字符串，仅包含以下字段：
 {{
@@ -372,6 +396,12 @@ _RELEVANCE_SYSTEM_NOISY_PROMPT = """\
 - 如果当前消息是对你说，输出空字符串。
 - 如果当前消息是在向别人谈论你，但你仍决定回复，简短说明实际听众是谁、你在消息里是被讨论对象还是被请求回应者。
 - 不要仅凭第二人称代词判断实际听众；必须结合结构化 reply/mention 和历史连续性。
+
+# 思考路径
+1. 先读取平台结构化指向证据：`mentioned_bot` 与 `reply_context.reply_to_current_bot`。
+2. 再读取 `group_attention`，根据噪音等级提高或降低介入门槛。
+3. 只有在结构化指向或极清楚历史连续性成立后，才让正文内容、关系亲密度和心情影响判断。
+4. 若决定回复，再判断是否需要 reply 锚定，以及是否需要填写 `indirect_speech_context`。
 
 # 输出格式
 请务必返回合法的 JSON 字符串，仅包含以下字段：
@@ -544,6 +574,14 @@ _VISION_DESCRIPTOR_PROMPT = """\
 - **客观记录**：只描述你看到的。严禁代替角色抒情，严禁评价好坏。
 - **细节至上**：宁可描述得琐碎，也不要遗漏可能影响剧情判断的小细节（如纸张边缘的折痕）。
 - **严禁幻觉**：看不清的部分请直接标注“模糊”，不要推测。
+
+# 思考路径
+1. 先整体观察场景和主体，再观察局部细节。
+2. 按场景、主体、文字、空间关系、状态感知的顺序组织描述。
+3. 对看不清的区域标注“模糊”，不要推测。
+
+# 输入格式
+human message contains one image payload in data URI form.
 
 # 输出格式
 请务必返回合法的 JSON 字符串，仅包含以下字段：

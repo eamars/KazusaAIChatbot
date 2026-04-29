@@ -35,7 +35,20 @@ relationship judgments, motives, or persona interpretation.
 - Who mentioned a literal term most often?
 - Which users talked about a known exact keyword?
 
-# Output format
+# Generation Procedure
+1. Read `task` and decide whether it asks for message-count aggregation.
+2. Read `context` for known users, channel, and current timestamp.
+3. Choose a literal `keyword` only when the task asks about mentions of an exact term.
+4. Choose the narrowest supported `time_window` that matches the task.
+5. Preserve explicit requested count in `limit`, capped by downstream validation.
+
+# Input Format
+{
+  "task": "slot description from the outer RAG supervisor",
+  "context": "known facts and runtime hints"
+}
+
+# Output Format
 Return valid JSON only:
 {
   "aggregate": "message_count_by_user",

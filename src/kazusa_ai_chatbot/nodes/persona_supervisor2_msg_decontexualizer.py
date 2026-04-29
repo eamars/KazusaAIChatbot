@@ -68,6 +68,13 @@ _MSG_DECONTEXUALIZER_PROMPT = """\
 - `user_input = "这个 README.md"` 且 `channel_topic` 提到某个功能模块 -> 不要改成「这个某功能模块的说明文档」，应保留 `README.md`
 - `reply_context.reply_to_current_bot = true`，上一条 assistant 为「你是想让我怎么定义你呀？是想要一个具体的评价，还是仅仅在随口试探……唔。」；`user_input = "是的"` -> 应补全为类似「是的，我是想让千纱说明白对我的看法 / 给我具体评价」；不要保留成孤立的「是的」。
 
+# 思考路径
+1. 先判断 `user_input` 是否已经具备独立语义；若具备，执行零修改。
+2. 检查 `reply_context`，尤其是当前消息是否在回复当前 bot 的澄清、选项或追问。
+3. 再使用 `chat_history`、`indirect_speech_context` 和 `channel_topic` 补全必要指代。
+4. 保留 URL、文件名、引用文本和专有名词等字面锚点。
+5. 最后确认没有改变问题意图、语气、主语或句子复杂度。
+
 # 输入格式
 {
     "user_input": "string",

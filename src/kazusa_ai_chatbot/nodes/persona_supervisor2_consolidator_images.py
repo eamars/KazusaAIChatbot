@@ -36,6 +36,12 @@ _CHARACTER_IMAGE_SESSION_SUMMARY_PROMPT = """\
 2. 聚焦于持续性影响（如情绪沉淀、自我认知更新），避免记录一次性的心情波动。
 3. 保持简洁（80字以内）。
 
+# 生成步骤
+1. 先读取 `reflection_summary`，理解角色本轮留下的第一人称心理残响。
+2. 结合 `mood` 和 `global_vibe`，提炼为第三人称的自我印象变化。
+3. 只保留会影响角色后续自我认知的内容；不要记录用户事实或一次性对话流程。
+4. 控制在 80 字以内。
+
 # 输入格式
 {{
     "mood": "本轮情绪沉淀",
@@ -65,6 +71,11 @@ _CHARACTER_IMAGE_COMPRESS_PROMPT = """\
 1. 保留：稳定的自我认知、反复出现的情感基调、对关系与自身的持久性认识。
 2. 删减：一次性情绪波动、与核心自我认知无关的冗余描述。
 3. 保持第三人称叙述，字数控制在500字以内。
+
+# 生成步骤
+1. 读取完整 `historical_summary`，识别重复、过时和一次性情绪内容。
+2. 保留稳定自我认知与长期心理基调。
+3. 删除冗余细节后输出第三人称压缩摘要。
 
 # 输入格式
 {{
@@ -115,7 +126,7 @@ async def _update_character_image(
     historical_summary = existing_image.get("historical_summary") or ""
     synthesis_count = (existing_image.get("meta") or {}).get("synthesis_count", 0)
 
-    system_prompt = SystemMessage(_CHARACTER_IMAGE_SESSION_SUMMARY_PROMPT.format(
+    system_prompt = SystemMessage(content=_CHARACTER_IMAGE_SESSION_SUMMARY_PROMPT.format(
         character_name=character_name,
     ))
     user_prompt = HumanMessage(content=json.dumps({
@@ -139,7 +150,7 @@ async def _update_character_image(
             )
 
             if len(historical_summary) > _CHARACTER_IMAGE_HISTORICAL_MAX_CHARS:
-                sys_p = SystemMessage(_CHARACTER_IMAGE_COMPRESS_PROMPT)
+                sys_p = SystemMessage(content=_CHARACTER_IMAGE_COMPRESS_PROMPT)
                 usr_p = HumanMessage(content=json.dumps(
                     {"historical_summary": historical_summary}, ensure_ascii=False
                 ))

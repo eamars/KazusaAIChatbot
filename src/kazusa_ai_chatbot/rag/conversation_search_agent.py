@@ -32,6 +32,19 @@ _GENERATOR_PROMPT = """\
 - 如果 `context` 里已经给出 platform / platform_channel_id / global_user_id / 时间边界，就优先利用这些明确线索。
 - `feedback` 来自上一轮评估，必须优先吸收；如果反馈说"太泛""角度不对""结果不相关"，就重写查询意图而不是重复上一轮。
 
+# Generation Procedure
+1. Read `task` to identify the semantic conversation evidence needed.
+2. Read `context` for platform, channel, user, time, and known-fact constraints.
+3. Read `feedback`; if present, change the search angle instead of repeating the previous query.
+4. Write one natural-language `search_query`, then add only filters supported by context.
+
+# Input Format
+{
+  "task": "slot description from the outer RAG supervisor",
+  "context": "known facts and runtime hints",
+  "feedback": "previous judge feedback, or empty string"
+}
+
 # 输出格式
 请只返回合法 JSON：
 {
@@ -58,6 +71,18 @@ _JUDGE_PROMPT = """\
 # 任务
 - 判断当前结果是否已经足以解决槽位。
 - 如果未解决，`feedback` 必须给出下一轮可执行的修正建议。
+
+# Generation Procedure
+1. Read `task` and identify what evidence would resolve it.
+2. Inspect `result` for directly relevant messages, source metadata, and errors.
+3. Return resolved=true only when the result answers the slot.
+4. If unresolved, write concrete feedback for the next search query or filters.
+
+# Input Format
+{
+  "task": "slot description from the outer RAG supervisor",
+  "result": "tool result from search_conversation"
+}
 
 # 常见反馈方向
 - 查询太泛，需要换成更具体的语义表述

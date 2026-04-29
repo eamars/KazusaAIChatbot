@@ -73,6 +73,41 @@ _TASK_DISPATCHER_PROMPT = """\
 7. 若无法形成可靠工具调用，返回空列表，不要解释。
 8. `text` 是届时角色真正要发送的消息正文，不要只是复述 promise 字段。
 
+# 生成步骤
+1. 先读取 `future_promises`，只保留仍然需要在未来某一刻额外执行的承诺。
+2. 对每个候选承诺，检查 `available_tools` 是否存在可执行工具及必要参数字段。
+3. 根据 `due_time` 或允许的近未来默认规则确定绝对 UTC `execute_at`。
+4. 根据来源会话和用户明确指定的目标，确定 `target_platform` 与 `target_channel`。
+5. 生成届时角色真正要发送的 `text`。如果无法可靠生成工具调用，返回空数组。
+
+# 输入格式
+{{
+  "instruction": "当前调度意图摘要",
+  "current_utc": "当前 UTC ISO 时间",
+  "source_platform": "来源平台",
+  "source_channel_id": "来源会话 ID",
+  "source_channel_type": "group | private",
+  "source_message_id": "来源消息 ID",
+  "decontexualized_input": "用户本轮真实意图摘要",
+  "final_dialog": ["角色本轮最终实际说出口的话"],
+  "content_anchors": ["回复前的内容锚点"],
+  "future_promises": [
+    {{
+      "target": "承诺目标",
+      "action": "可执行承诺本体",
+      "due_time": "ISO 时间或 null",
+      "commitment_type": "future_promise | language_preference | address_preference | other"
+    }}
+  ],
+  "available_tools": [
+    {{
+      "name": "工具名",
+      "description": "工具说明",
+      "args_schema": {{"参数名": "参数定义"}}
+    }}
+  ]
+}}
+
 # 输出格式
 请只返回合法 JSON：
 {{
@@ -154,7 +189,7 @@ def _build_dispatch_instruction(state: ConsolidatorState) -> str:
     """
 
     character_profile = state.get("character_profile", {})
-    character_name = character_profile.get("name", "Kazusa")
+    character_name = character_profile["name"]
     user_name = state.get("user_name", "user")
     promise_count = len(state.get("future_promises") or [])
     return_value = (

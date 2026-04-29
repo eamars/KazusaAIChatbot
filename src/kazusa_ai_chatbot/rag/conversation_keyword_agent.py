@@ -48,6 +48,19 @@ The tool accepts ONE keyword string and runs a case-insensitive regex match agai
 ## Context filters
 If context contains platform / platform_channel_id / global_user_id / time bounds, include them.
 
+# Generation Procedure
+1. Read `task` and identify the most distinctive literal anchor.
+2. Use `context` only for filters such as platform, channel, user, or time bounds.
+3. If `feedback` says no results or too many results, change the keyword or filters meaningfully.
+4. Output one keyword string; do not join multiple terms into a sentence.
+
+# Input Format
+{
+  "task": "slot description from the outer RAG supervisor",
+  "context": "known facts and runtime hints",
+  "feedback": "previous judge feedback, or empty string"
+}
+
 ## Output format
 Return valid JSON only:
 {
@@ -74,6 +87,18 @@ _JUDGE_PROMPT = """\
 # 任务
 - 判断结果是否已经解决槽位。
 - 如果未解决，必须输出可以立刻执行的反馈。
+
+# 生成步骤
+1. 先读取 `task`，确认需要命中的字面锚点。
+2. 检查 `result` 是否包含相关消息、错误或空结果。
+3. 只有结果足以解决槽位时才返回 `resolved: true`。
+4. 未解决时，给出下一轮关键词或过滤条件的具体修正。
+
+# 输入格式
+{
+  "task": "外层 RAG supervisor 生成的槽位描述",
+  "result": "search_conversation_keyword 的工具结果"
+}
 
 # 常见反馈方向
 - 关键词太长，请只保留核心 noun / phrase

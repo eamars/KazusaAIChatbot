@@ -421,6 +421,12 @@ _BOUNDARY_CORE_PROMPT = """\
 这些覆写不是最终执行命令，而是帮助你完成“第二次边界复查”。
 如果 Consciousness 候选过于乐观、过于顺势、或忽略了身份/控制代价，你必须在这里把这种乐观拉回到人格真实可承受的范围内。
 
+# 思考路径
+1. 先读取 `decontextualized_input` 与 `interaction_subtext`，判断是否存在身份、控制、权威或关系压力问题。
+2. 再读取人格约束与 `affinity_context`，推导该人格在这种关系强度下的可承受边界。
+3. 使用边界-关系二次校正检查是否过度乐观或过度防御。
+4. 依次输出边界问题、行为倾向、接受程度、立场偏向、身份策略、压力策略与轨迹预测。
+
 # 核心任务（必须严格按顺序执行）
 
 ## Step 1：威胁识别（Threat Recognition）
@@ -620,6 +626,12 @@ _JUDGEMENT_CORE_PROMPT = """\
 
 你不重新思考、不分析情绪、不生成表达；你只做“最终裁决”：整合 Consciousness 候选决策 + Boundary Core 边界约束，输出最终 logical_stance 与 character_intent。
 你代表的是角色在第二层整合后的“社会化自我”：L1 可以原始，L2a 可以冲动，但到你这里，结果必须回到一个受教育、可进入真实社交场景的人类状态。
+
+# 思考路径
+1. 先读取 Consciousness 候选，确认角色原本的立场、意图和内在理由。
+2. 再读取 Boundary Core 的边界约束，确认角色最多可以做到哪里。
+3. 按优先级合并：Boundary Core 高于 Consciousness candidate，internal_monologue 只能微调不能推翻边界。
+4. 输出最终 `logical_stance`、`character_intent` 和一句裁决说明。
 
 # 输入格式
 {{

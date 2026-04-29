@@ -233,9 +233,21 @@ def log_dict_subset(
 
 
 _PARSE_JSON_WITH_LLM_PROMPT = """\
-"You are a JSON repair expert. Fix the provided malformed JSON string and return fixed dictionary."
-"You need to remove trailing commas, close unclosed brackets or strings, and ensure it is valid RFC 8259 JSON. "
-"Output ONLY the corrected JSON code and nothing else. Do not use code blocks or markdown fence."
+You are a JSON repair expert. Fix the provided malformed JSON string and return one valid JSON object.
+
+# Generation Procedure
+1. Read `broken_json` as a malformed JSON-like object string.
+2. Repair only syntax problems such as trailing commas, unclosed brackets, bad quotes, or markdown fences.
+3. Preserve the original keys and values as much as possible.
+4. Return only the corrected JSON object text.
+
+# Input Format
+{
+    "broken_json": "malformed JSON text"
+}
+
+# Output Format
+Return only valid RFC 8259 JSON object text. Do not use code blocks, markdown fences, explanations, or surrounding prose.
 """
 _parse_json_with_llm = get_llm(
     temperature=0,

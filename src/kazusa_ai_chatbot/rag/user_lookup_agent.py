@@ -28,21 +28,21 @@ _USER_PROFILE_CACHE_SOURCE = "user_profile"
 _EXTRACTOR_PROMPT = """\
 Extract the exact display name to look up from the slot description below.
 
-# Return Format:
+# Generation Procedure
+1. Read `task` and find the literal display name being resolved.
+2. Use `context` only to disambiguate, not to invent a name.
+3. Output an empty string only when no display name is present.
+
+# Input Format
+{
+    "task": "slot description from the outer RAG supervisor",
+    "context": "known facts and runtime hints"
+}
+
+# Output Format:
 Valid JSON without markdown wrap. Only include the following keys
 {
     "display_name": "the name string"
-}
-"""
-
-_PICKER_PROMPT = """\
-You are matching a target display name against a list of candidates.
-Return the global_user_id of the best match, or null if none is close enough.
-
-# Return Format:
-Valid JSON without markdown wrap. Only include the following keys
-{
-    "global_user_id": "uuid" or null
 }
 """
 
@@ -53,6 +53,57 @@ _extractor_llm = get_llm(
     base_url=RAG_SUBAGENT_LLM_BASE_URL,
     api_key=RAG_SUBAGENT_LLM_API_KEY,
 )
+
+
+async def _extract_display_name_with_llm(
+    task: str, context: dict[str, Any]
+) -> str:
+    """Extract the literal display name from the slot description.
+
+    Args:
+        task: Slot description produced by the outer-loop dispatcher.
+        context: Runtime hints (passed for context only).
+
+    Returns:
+        The display name string to search for, or empty string on failure.
+    """
+    system_prompt = SystemMessage(content=_EXTRACTOR_PROMPT)
+    human_message = HumanMessage(
+        content=json.dumps(
+            {"task": task, "context": context}, ensure_ascii=False, default=str
+        )
+    )
+    response = await _extractor_llm.ainvoke([system_prompt, human_message])
+    result = parse_llm_json_output(response.content)
+    if not isinstance(result, dict):
+        return ""
+    return_value = str(result.get("display_name", "")).strip()
+    return return_value
+
+
+_PICKER_PROMPT = """\
+You are matching a target display name against a list of candidates.
+Return the global_user_id of the best match, or null if none is close enough.
+
+# Generation Procedure
+1. Read `target` as the name being resolved.
+2. Compare only against the provided `candidates`.
+3. Choose the closest candidate by display name and platform context.
+4. Return null if no candidate is close enough.
+
+# Input Format
+{
+    "target": "display name to resolve",
+    "candidates": [{"global_user_id": "uuid", "display_name": "candidate name", "platform": "optional platform"}]
+}
+
+# Output Format:
+Valid JSON without markdown wrap. Only include the following keys
+{
+    "global_user_id": "uuid" or null
+}
+"""
+
 _picker_llm = get_llm(
     temperature=0.0,
     top_p=1.0,
@@ -60,6 +111,44 @@ _picker_llm = get_llm(
     base_url=RAG_SUBAGENT_LLM_BASE_URL,
     api_key=RAG_SUBAGENT_LLM_API_KEY,
 )
+
+
+async def _pick_best_candidate_with_llm(
+    target_name: str, candidates: list[dict[str, Any]]
+) -> dict[str, Any] | None:
+    """Ask the LLM to pick the closest match from a list of candidates.
+
+    Args:
+        target_name: The display name we are trying to resolve.
+        candidates: List of dicts, each with global_user_id, display_name, platform.
+
+    Returns:
+        The best-matching candidate dict, or None if no close match found.
+    """
+    if len(candidates) == 1:
+        return candidates[0]
+
+    system_prompt = SystemMessage(content=_PICKER_PROMPT)
+    human_message = HumanMessage(
+        content=json.dumps(
+            {"target": target_name, "candidates": candidates},
+            ensure_ascii=False,
+            default=str,
+        )
+    )
+    response = await _picker_llm.ainvoke([system_prompt, human_message])
+    result = parse_llm_json_output(response.content)
+    if not isinstance(result, dict):
+        return None
+
+    chosen_id = result.get("global_user_id")
+    if not chosen_id:
+        return None
+
+    for candidate in candidates:
+        if candidate.get("global_user_id") == chosen_id:
+            return candidate
+    return None
 
 
 class UserLookupAgent(BaseRAGHelperAgent):
@@ -103,7 +192,7 @@ class UserLookupAgent(BaseRAGHelperAgent):
         """
         del max_attempts
 
-        display_name = await self._extract_display_name(task, context)
+        display_name = await _extract_display_name_with_llm(task, context)
         if not display_name:
             return_value = self.with_cache_status(
                 {"resolved": False, "result": None, "attempts": 1},
@@ -130,18 +219,20 @@ class UserLookupAgent(BaseRAGHelperAgent):
             exact_results = await search_users_by_display_name(display_name)
         except Exception as exc:
             logger.debug(f"Handled exception in run: {exc}")
-            logger.exception(f'user_lookup_agent exact search failed for {display_name!r}')
+            logger.exception(
+                f"user_lookup_agent exact search failed for {display_name!r}: {exc}"
+            )
             exact_results = []
 
         if exact_results:
-            best = await self._pick_best(display_name, exact_results)
+            best = await _pick_best_candidate_with_llm(display_name, exact_results)
 
         # Step 2: vector search fallback over conversation history
         if best is None:
             attempts = 2
             candidates = await self._vector_search_candidates(display_name, context)
             if candidates:
-                best = await self._pick_best(display_name, candidates)
+                best = await _pick_best_candidate_with_llm(display_name, candidates)
 
         if best is None:
             return_value = self.with_cache_status(
@@ -198,66 +289,6 @@ class UserLookupAgent(BaseRAGHelperAgent):
         )
         return return_value
 
-    async def _extract_display_name(self, task: str, context: dict[str, Any]) -> str:
-        """Extract the literal display name from the slot description.
-
-        Args:
-            task: Slot description produced by the outer-loop dispatcher.
-            context: Runtime hints (passed for context only).
-
-        Returns:
-            The display name string to search for, or empty string on failure.
-        """
-        system_prompt = SystemMessage(content=_EXTRACTOR_PROMPT)
-        human_message = HumanMessage(
-            content=json.dumps(
-                {"task": task, "context": context}, ensure_ascii=False, default=str
-            )
-        )
-        response = await _extractor_llm.ainvoke([system_prompt, human_message])
-        result = parse_llm_json_output(response.content)
-        if not isinstance(result, dict):
-            return ""
-        return_value = str(result.get("display_name", "")).strip()
-        return return_value
-
-    async def _pick_best(
-        self, target_name: str, candidates: list[dict[str, Any]]
-    ) -> dict[str, Any] | None:
-        """Ask the LLM to pick the closest match from a list of candidates.
-
-        Args:
-            target_name: The display name we are trying to resolve.
-            candidates: List of dicts, each with global_user_id, display_name, platform.
-
-        Returns:
-            The best-matching candidate dict, or None if no close match found.
-        """
-        if len(candidates) == 1:
-            return candidates[0]
-
-        system_prompt = SystemMessage(content=_PICKER_PROMPT)
-        human_message = HumanMessage(
-            content=json.dumps(
-                {"target": target_name, "candidates": candidates},
-                ensure_ascii=False,
-                default=str,
-            )
-        )
-        response = await _picker_llm.ainvoke([system_prompt, human_message])
-        result = parse_llm_json_output(response.content)
-        if not isinstance(result, dict):
-            return None
-
-        chosen_id = result.get("global_user_id")
-        if not chosen_id:
-            return None
-
-        for candidate in candidates:
-            if candidate.get("global_user_id") == chosen_id:
-                return candidate
-        return None
-
     async def _vector_search_candidates(
         self, display_name: str, context: dict[str, Any]
     ) -> list[dict[str, Any]]:
@@ -287,7 +318,9 @@ class UserLookupAgent(BaseRAGHelperAgent):
             )
         except Exception as exc:
             logger.debug(f"Handled exception in _vector_search_candidates: {exc}")
-            logger.exception(f'user_lookup_agent vector search failed for {display_name!r}')
+            logger.exception(
+                f"user_lookup_agent vector search failed for {display_name!r}: {exc}"
+            )
             return_value = []
             return return_value
 

@@ -42,6 +42,20 @@ _GENERATOR_PROMPT = """\
 - `source_global_user_id`：只有任务明确要求按"记忆来源用户"过滤，且 context 或 known_facts 中存在**明确的 UUID 格式**来源用户 ID 时才填写；平台频道 ID、用户名、昵称、当前说话人、被查询对象均不是来源用户过滤理由，一律省略。
 - `status`：只能取 active | fulfilled | expired | superseded，否则省略。
 
+# 生成步骤
+1. 先读取 `task`，判断需要哪类持久记忆证据。
+2. 读取 `context` 和 `known_facts`，只使用明确给出的过滤条件。
+3. 默认不要填写 `source_global_user_id`；只有任务明确按记忆来源用户过滤时才填写。
+4. 如果 `feedback` 指出过滤太窄或查询太抽象，改写查询并放宽不必要过滤。
+5. 输出自然语言 `search_query` 和必要过滤字段。
+
+# 输入格式
+{
+  "task": "外层 RAG supervisor 生成的槽位描述",
+  "context": "已知事实、known_facts 与运行时提示",
+  "feedback": "上一轮评估反馈，或空字符串"
+}
+
 # 输出格式
 请只返回合法 JSON：
 {
@@ -67,6 +81,18 @@ _JUDGE_PROMPT = """\
 # 任务
 - 判断当前结果是否已经足以解决槽位。
 - 如果未解决，反馈必须具体可执行。
+
+# 审计步骤
+1. 先读取 `task`，确认槽位需要的记忆证据。
+2. 检查 `result` 是否包含直接相关的持久记忆、错误或空结果。
+3. 只有结果足以解决槽位时才返回 `resolved: true`。
+4. 未解决时，明确说明下一轮应改写查询、放宽过滤还是换主题角度。
+
+# 输入格式
+{
+  "task": "外层 RAG supervisor 生成的槽位描述",
+  "result": "search_persistent_memory 的工具结果"
+}
 
 # 常见反馈方向
 - 查询太抽象，需要改成围绕原问题的具体证据查询

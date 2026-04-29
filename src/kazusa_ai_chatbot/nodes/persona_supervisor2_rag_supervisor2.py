@@ -417,6 +417,13 @@ Query: "说版权保护是play一环的那个人，他发过什么链接，链�
     "context": auxiliary info
 }}
 
+## Generation Procedure
+1. Read `original_query` and decide whether downstream cognition truly needs fetched evidence.
+2. If evidence is needed, identify atomic data targets and order dependencies.
+3. Apply the routing rules and conflict-resolution rules before writing slots.
+4. Use only the allowed slot prefixes and preserve explicit counts, names, times, URLs, and exact phrases.
+5. Return an empty list when the response can be handled without retrieval.
+
 ## Output format
 Return valid JSON only:
 {{
@@ -801,6 +808,12 @@ Evaluate top to bottom, pick the first match:
     "known_facts": [{{"slot": "...", "agent": "...", "resolved": true/false, "summary": "concise fact summary", "attempts": 1}}, ...],
     "context": runtime info (platform, channel, timestamp, etc.)
 }}
+
+## Generation Procedure
+1. Read `current_slot` and match its prefix against the prefix-to-agent table first.
+2. If there is no recognized prefix, use the fallback decision sequence.
+3. Build a concise task for the chosen inner-loop agent, preserving dependency references such as "slot N".
+4. Pass through only relevant context needed by the chosen agent.
 
 ## Output
 

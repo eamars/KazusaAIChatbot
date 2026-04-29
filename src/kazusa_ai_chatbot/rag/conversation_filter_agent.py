@@ -33,6 +33,19 @@ _GENERATOR_PROMPT = """\
 - 如果上一轮 `feedback` 说用户错了，就改 user filter；如果说时间错了，就改时间范围。
 - 不要凭空猜不存在的 UUID；没有就留空。
 
+# 生成步骤
+1. 先读取 `task`，确认需要拉取哪段结构化对话记录。
+2. 从 `context` 和 `known_facts` 提取明确的 platform、channel、user、display_name、time range 和 limit。
+3. 若 `feedback` 指出结果太少、用户错或时间错，调整对应过滤条件。
+4. 不要猜 UUID；没有明确 UUID 时使用 display_name 或省略用户过滤。
+
+# 输入格式
+{
+  "task": "外层 RAG supervisor 生成的槽位描述",
+  "context": "已知事实与运行时提示",
+  "feedback": "上一轮评估反馈，或空字符串"
+}
+
 # 输出格式
 请只返回合法 JSON：
 {
@@ -59,6 +72,18 @@ _JUDGE_PROMPT = """\
 # 任务
 - 判断当前结果是否已经足以解决槽位。
 - 如果未解决，反馈必须具体到下一轮该怎么调 filter。
+
+# 审计步骤
+1. 先读取 `task`，确认需要的对话记录范围。
+2. 检查 `result` 是否包含足够数量、正确用户和正确时间范围的记录。
+3. 结果足以解决槽位时返回 `resolved: true`。
+4. 未解决时，指出下一轮应放宽时间、提高 limit、换用户过滤或调整方向。
+
+# 输入格式
+{
+  "task": "外层 RAG supervisor 生成的槽位描述",
+  "result": "get_conversation 的工具结果"
+}
 
 # 常见反馈方向
 - 结果太少，请放宽时间范围或提高 limit

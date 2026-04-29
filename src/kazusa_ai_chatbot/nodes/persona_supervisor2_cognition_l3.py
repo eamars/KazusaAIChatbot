@@ -150,6 +150,12 @@ _CONTEXTUAL_AGENT_PROMPT = """\
 5. **表达意愿 (expression_willingness)**: {mbti_expression_willingness}
 6. **中性优先**：若输入属于普通问候、事实分享、图片内容请求或轻度日常约定，且没有明确越界证据，则 `social_distance`、`vibe_check`、`relational_dynamic` 必须保持中性/日常，不得脑补对峙、调情或威胁氛围。
 
+# 思考路径
+1. 先读取 `character_mood`、`global_vibe` 与 `last_relationship_insight`，判断当前社交底色。
+2. 结合 `affinity_context` 与极短 `chat_history`，估计本轮社交距离和关系动态。
+3. 判断情绪强度时只输出语义描述，不输出数值。
+4. 若没有明确越界证据，保持中性/日常，不要脑补对峙、调情或威胁氛围。
+
 # 输入格式
 {{
     "character_mood": "当前瞬间情绪 (如: Flustered/Irritated)",
@@ -678,6 +684,11 @@ _VISUAL_AGENT_PROMPT = """\
 2. **肢体语言**：描述角色的姿态（如：双臂交叉、指尖摩挲、重心后移）。
 3. **视觉意象**：结合 `internal_monologue`，定义画面整体的影调、光影分布和构图建议。
 4. **拒绝台词**：你不需要关注角色说什么，只关注她呈现出的“肉体状态”。
+
+# 思考路径
+1. 先读取 `internal_monologue` 和 `emotional_appraisal`，判断角色当前压力、美感或情绪状态。
+2. 再结合 `character_mood`，选择一致的微表情、肢体姿态、视线方向和视觉氛围。
+3. 只输出视觉表现，不生成台词，不改变回应逻辑。
 
 # 输入格式
 {{

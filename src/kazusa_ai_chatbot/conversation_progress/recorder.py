@@ -27,12 +27,12 @@ from kazusa_ai_chatbot.utils import get_llm, log_preview, parse_llm_json_output
 logger = logging.getLogger(__name__)
 
 _RECORDER_PROMPT = """\
-You are the short-term conversation progress recorder for Kazusa.
+You are the short-term conversation progress recorder for the active character.
 
 Your job is to update compact operational state for the next responsive turn.
 Do not write diary prose, relationship insight, medical advice, or long-term memory.
 Do not copy full assistant turns. Use short semantic labels.
-Do not generate Kazusa's next reply text.
+Do not generate the active character's next reply text.
 
 You decide semantic continuity:
 - same_episode: the user is continuing the same unresolved thread.
@@ -58,6 +58,25 @@ Use user_goal and current_blocker only when the episode is goal-driven.
 Use next_affordances for natural next conversational moves, not exact dialog text.
 Use resolved_threads and avoid_reopening for items that should not be dragged back unless the user reopens them.
 
+# Generation Procedure
+1. Read prior_episode_state first and identify which prior user-state items or open loops still apply.
+2. Read decontexualized_input, content_anchors, logical_stance, character_intent, and final_dialog to understand what actually happened this turn.
+3. Decide continuity before choosing any other state labels.
+4. Preserve still-valid prior list items by copying the exact old text; omit stale items instead of rewriting them.
+5. Emit short operational labels only. Do not create diary prose, long-term memory, or next-reply text.
+
+# Input Format
+{
+  "prior_episode_state": "previous compact episode state, or null",
+  "decontexualized_input": "current user message after decontextualization",
+  "chat_history_recent": ["recent messages for local continuity"],
+  "content_anchors": ["content plan used by the just-finished response"],
+  "logical_stance": "CONFIRM | REFUSE | TENTATIVE | DIVERGE | CHALLENGE",
+  "character_intent": "PROVIDE | BANTAR | REJECT | EVADE | CONFRONT | DISMISS | CLARIFY",
+  "final_dialog": ["active character's final response text"]
+}
+
+# Output Format
 Return strict JSON only:
 {
   "continuity": "same_episode | related_shift | sharp_transition",
@@ -76,7 +95,7 @@ Return strict JSON only:
   "resolved_threads": ["handled thread"],
   "avoid_reopening": ["stale item not to reopen"],
   "emotional_trajectory": "one-line emotional movement",
-  "next_affordances": ["natural next move available to Kazusa"],
+  "next_affordances": ["natural next move available to the active character"],
   "progression_guidance": "one short instruction for the next turn"
 }
 """
