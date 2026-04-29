@@ -193,6 +193,39 @@ def test_recorder_validator_accepts_phase2_fields() -> None:
     assert payload["next_affordances"] == ["give a concrete third point"]
 
 
+def test_recorder_validator_normalizes_scalar_string_list_field() -> None:
+    """Recorder validator accepts one string where the LLM should emit a list."""
+
+    payload = recorder.validate_recorder_output({
+        "status": "active",
+        "episode_label": "slides_help",
+        "continuity": "same_episode",
+        "conversation_mode": "task_support",
+        "episode_phase": "developing",
+        "topic_momentum": "stable",
+        "current_thread": "thesis contribution page",
+        "user_goal": "write a third contribution point",
+        "current_blocker": "third point overlaps the second",
+        "user_state_updates": "user already has two contribution points",
+        "assistant_moves": "specific_answer",
+        "overused_moves": "reassurance",
+        "open_loops": "third point still missing",
+        "resolved_threads": "outline order is already settled",
+        "avoid_reopening": "do not ask to redo the outline",
+        "emotional_trajectory": "frustrated but still engaged",
+        "next_affordances": "give a concrete third point",
+        "progression_guidance": "answer with a distinct third contribution angle",
+    })
+
+    assert payload["user_state_updates"] == ["user already has two contribution points"]
+    assert payload["assistant_moves"] == ["specific_answer"]
+    assert payload["overused_moves"] == ["reassurance"]
+    assert payload["open_loops"] == ["third point still missing"]
+    assert payload["resolved_threads"] == ["outline order is already settled"]
+    assert payload["avoid_reopening"] == ["do not ask to redo the outline"]
+    assert payload["next_affordances"] == ["give a concrete third point"]
+
+
 def test_recorder_validator_rejects_invalid_phase2_label() -> None:
     """Recorder validator rejects labels outside the agreed closed sets."""
 
