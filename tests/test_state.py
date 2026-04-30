@@ -15,8 +15,8 @@ class TestIMProcessState:
         hints = typing.get_type_hints(IMProcessState)
         required_fields = [
             "timestamp", "platform", "platform_message_id", "platform_user_id", "global_user_id",
-            "user_name", "user_input", "user_multimedia_input", "user_profile",
-            "platform_bot_id", "mentioned_bot", "bot_name", "character_profile",
+            "user_name", "user_input", "message_envelope", "user_multimedia_input", "user_profile",
+            "platform_bot_id", "character_name", "character_profile",
             "platform_channel_id", "channel_name", "chat_history_wide", "chat_history_recent", "reply_context",
         ]
         for field in required_fields:
@@ -37,9 +37,18 @@ class TestIMProcessState:
 
     def test_has_persona_supervisor_output_fields(self):
         hints = typing.get_type_hints(IMProcessState)
-        output_fields = ["final_dialog", "future_promises"]
+        output_fields = [
+            "final_dialog",
+            "future_promises",
+            "target_addressed_user_ids",
+            "target_broadcast",
+        ]
         for field in output_fields:
             assert field in hints, f"Missing output field: {field}"
+
+    def test_has_message_envelope_field(self):
+        hints = typing.get_type_hints(IMProcessState)
+        assert "message_envelope" in hints, "Missing field: message_envelope"
 
     def test_can_instantiate(self):
         state: IMProcessState = {
@@ -50,11 +59,18 @@ class TestIMProcessState:
             "global_user_id": "uuid-123",
             "user_name": "TestUser",
             "user_input": "Hello",
+            "message_envelope": {
+                "body_text": "Hello",
+                "raw_wire_text": "Hello",
+                "mentions": [],
+                "attachments": [],
+                "addressed_to_global_user_ids": [],
+                "broadcast": True,
+            },
             "user_multimedia_input": [],
             "user_profile": {},
             "platform_bot_id": "456",
-            "mentioned_bot": False,
-            "bot_name": "Bot",
+            "character_name": "Character",
             "character_profile": {},
             "platform_channel_id": "789",
             "channel_name": "test",

@@ -14,11 +14,11 @@ TaskHandler = Callable[[dict, "DispatchContext", "AdapterRegistry"], Awaitable[N
 _ROLE_ORDER = {"user": 0, "moderator": 1, "admin": 2}
 
 
-def _has_permission(bot_role: str, required: Optional[str]) -> bool:
+def _has_permission(bot_permission_role: str, required: Optional[str]) -> bool:
     """Return whether the current role satisfies a required permission.
 
     Args:
-        bot_role: Current source-context bot role.
+        bot_permission_role: Current source-context permission role.
         required: Optional minimum required role.
 
     Returns:
@@ -27,7 +27,10 @@ def _has_permission(bot_role: str, required: Optional[str]) -> bool:
 
     if required is None:
         return True
-    return_value = _ROLE_ORDER.get(bot_role, 0) >= _ROLE_ORDER.get(required, 0)
+    return_value = _ROLE_ORDER.get(
+        bot_permission_role,
+        0,
+    ) >= _ROLE_ORDER.get(required, 0)
     return return_value
 
 
@@ -93,7 +96,10 @@ class ToolRegistry:
         for spec in self._tools.values():
             if spec.platforms is not None and ctx.source_platform not in spec.platforms:
                 continue
-            if not _has_permission(ctx.bot_role, spec.requires_permission):
+            if not _has_permission(
+                ctx.bot_permission_role,
+                spec.requires_permission,
+            ):
                 continue
             visible.append(spec)
         return visible

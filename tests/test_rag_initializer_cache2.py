@@ -69,13 +69,35 @@ def _capture_create_task(created: list) -> object:
     return fake_create_task
 
 
+def _envelope(body_text: str = "what did current user say?") -> dict:
+    """Build the strict initializer message envelope required by cache keys.
+
+    Args:
+        body_text: Clean user-authored message text.
+
+    Returns:
+        Typed message-envelope dict.
+    """
+
+    return_value = {
+        "body_text": body_text,
+        "raw_wire_text": body_text,
+        "mentions": [],
+        "attachments": [],
+        "addressed_to_global_user_ids": [],
+        "broadcast": True,
+    }
+    return return_value
+
+
 def test_initializer_cache_key_ignores_volatile_timestamp() -> None:
     """Initializer cache keys should not miss just because wall time changed."""
     base_context = {
         "platform": "discord",
         "platform_channel_id": "chan-1",
-        "user_name": "Alice",
+        "user_name": "<current user>",
         "current_timestamp": "2026-04-26T00:00:00+00:00",
+        "message_envelope": _envelope(),
     }
     later_context = {
         **base_context,
@@ -83,36 +105,110 @@ def test_initializer_cache_key_ignores_volatile_timestamp() -> None:
     }
 
     key_a = build_initializer_cache_key(
-        original_query="what did Alice say?",
-        character_name="Kazusa",
+        original_query="what did current user say?",
+        character_name="<active character>",
         context=base_context,
     )
     key_b = build_initializer_cache_key(
-        original_query=" what   did alice say? ",
-        character_name="kazusa",
+        original_query=" what   did current user say? ",
+        character_name="<active character>",
         context=later_context,
     )
 
     assert key_a == key_b
 
 
+def test_initializer_cache_key_uses_body_text_and_addressing() -> None:
+    """Initializer keys should reflect semantic body text and typed addressing."""
+
+    base_context = {
+        "platform": "discord",
+        "platform_channel_id": "chan-1",
+        "global_user_id": "user-a",
+        "user_name": "<current user>",
+        "message_envelope": {
+            "body_text": "clean body",
+            "raw_wire_text": "clean body",
+            "mentions": [],
+            "attachments": [],
+            "addressed_to_global_user_ids": ["character-global"],
+            "broadcast": False,
+        },
+    }
+    different_body_context = {
+        **base_context,
+        "message_envelope": {
+            "body_text": "other body",
+            "raw_wire_text": "other body",
+            "mentions": [],
+            "attachments": [],
+            "addressed_to_global_user_ids": ["character-global"],
+            "broadcast": False,
+        },
+    }
+    different_addressing_context = {
+        **base_context,
+        "message_envelope": {
+            "body_text": "clean body",
+            "raw_wire_text": "clean body",
+            "mentions": [],
+            "attachments": [],
+            "addressed_to_global_user_ids": [],
+            "broadcast": True,
+        },
+    }
+
+    key_a = build_initializer_cache_key(
+        original_query="clean body",
+        character_name="<active character>",
+        context=base_context,
+    )
+    key_b = build_initializer_cache_key(
+        original_query="clean body",
+        character_name="<active character>",
+        context=different_body_context,
+    )
+    key_c = build_initializer_cache_key(
+        original_query="clean body",
+        character_name="<active character>",
+        context=different_addressing_context,
+    )
+
+    assert key_a != key_b
+    assert key_a != key_c
+
+
+def test_initializer_cache_key_requires_message_envelope() -> None:
+    """Initializer cache keys should fail clearly without the envelope contract."""
+
+    with pytest.raises(KeyError, match="message_envelope is required"):
+        build_initializer_cache_key(
+            original_query="clean body",
+            character_name="<active character>",
+            context={
+                "platform": "discord",
+                "platform_channel_id": "chan-1",
+            },
+        )
+
+
 def test_initializer_prompt_documents_profile_evidence_dependency() -> None:
     """Initializer prompt should distinguish profile-needed and no-retrieval acts."""
     rendered_prompt = supervisor2_module._INITIALIZER_PROMPT.format(
-        character_name="千纱",
+        character_name="<active character>",
     )
 
     assert "Evidence-dependency gate" in rendered_prompt
-    assert "千纱能做一个自我介绍么" in rendered_prompt
+    assert "<character mention>能做一个自我介绍么" in rendered_prompt
     assert "Profile: retrieve full user profile" in rendered_prompt
-    assert "千纱千纱欢迎回来" in rendered_prompt
+    assert "<character mention><character mention>欢迎回来" in rendered_prompt
     assert "No profile, memory, identity, or conversation evidence is needed" in rendered_prompt
 
 
 def test_memory_search_prompt_uses_evidence_contract() -> None:
     """Memory-search prompt wording should not pre-classify memory evidence."""
     rendered_initializer = supervisor2_module._INITIALIZER_PROMPT.format(
-        character_name="千纱",
+        character_name="<active character>",
     )
     rendered_dispatcher = supervisor2_module._DISPATCHER_PROMPT.format(
         agent_name_union=supervisor2_module._build_agent_name_union(),
@@ -166,7 +262,7 @@ def test_normalize_dispatch_accepts_valid_payload() -> None:
     dispatch = supervisor2_module._normalize_dispatch(
         {
             "agent_name": "user_lookup_agent",
-            "task": " look up Alice ",
+            "task": " look up <named user> ",
             "context": {"known_facts": []},
             "max_attempts": 2,
         },
@@ -175,7 +271,7 @@ def test_normalize_dispatch_accepts_valid_payload() -> None:
 
     assert dispatch == {
         "agent_name": "user_lookup_agent",
-        "task": "look up Alice",
+        "task": "look up <named user>",
         "context": {"known_facts": []},
         "max_attempts": 2,
     }
@@ -187,7 +283,7 @@ async def test_rag_initializer_serves_second_identical_call_from_cache(monkeypat
     runtime = RAGCache2Runtime(max_entries=10)
     created_tasks: list = []
     llm = _CountingAsyncLLM({
-        "unknown_slots": ["Identity: look up display name 'Alice' to get global_user_id"]
+        "unknown_slots": ["Identity: look up display name '<named user>' to get global_user_id"]
     })
     monkeypatch.setattr(supervisor2_module, "get_rag_cache2_runtime", lambda: runtime)
     monkeypatch.setattr(supervisor2_module, "_initializer_llm", llm)
@@ -198,12 +294,13 @@ async def test_rag_initializer_serves_second_identical_call_from_cache(monkeypat
     )
 
     state = {
-        "original_query": "what did Alice say?",
-        "character_name": "Kazusa",
+        "original_query": "what did current user say?",
+        "character_name": "<active character>",
         "context": {
             "platform": "discord",
             "platform_channel_id": "chan-1",
-            "user_name": "Alice",
+            "user_name": "<current user>",
+            "message_envelope": _envelope(),
         },
     }
 
@@ -225,12 +322,13 @@ async def test_rag_initializer_hit_schedules_persistent_hit(monkeypatch) -> None
     created_tasks: list = []
     llm = _CountingAsyncLLM({"unknown_slots": ["should not run"]})
     state = {
-        "original_query": "what did Alice say?",
-        "character_name": "Kazusa",
+        "original_query": "what did current user say?",
+        "character_name": "<active character>",
         "context": {
             "platform": "discord",
             "platform_channel_id": "chan-1",
-            "user_name": "Alice",
+            "user_name": "<current user>",
+            "message_envelope": _envelope(),
         },
     }
     cache_key = build_initializer_cache_key(
@@ -275,12 +373,13 @@ async def test_rag_initializer_miss_schedules_persistent_upsert(monkeypatch) -> 
         _capture_create_task(created_tasks),
     )
     state = {
-        "original_query": "what did Alice say?",
-        "character_name": "Kazusa",
+        "original_query": "what did current user say?",
+        "character_name": "<active character>",
         "context": {
             "platform": "discord",
             "platform_channel_id": "chan-1",
-            "user_name": "Alice",
+            "user_name": "<current user>",
+            "message_envelope": _envelope(),
         },
     }
 
@@ -293,7 +392,7 @@ async def test_rag_initializer_miss_schedules_persistent_upsert(monkeypatch) -> 
     assert runtime.get_stats()["size"] == 1
 
 
-def test_initializer_prompt_version_bumped_to_v4() -> None:
+def test_initializer_prompt_version_bumped_to_v6() -> None:
     """The rollout should invalidate older persisted initializer rows."""
 
-    assert supervisor2_module.INITIALIZER_PROMPT_VERSION == "initializer_prompt:v4"
+    assert supervisor2_module.INITIALIZER_PROMPT_VERSION == "initializer_prompt:v6"

@@ -76,6 +76,19 @@ async def db_bootstrap() -> None:
         [("platform", 1), ("platform_channel_id", 1), ("timestamp", -1)],
         name="conv_platform_channel_ts",
     )
+    await db.conversation_history.create_index(
+        [
+            ("platform", 1),
+            ("platform_channel_id", 1),
+            ("addressed_to_global_user_ids", 1),
+            ("timestamp", -1),
+        ],
+        name="conv_platform_channel_addressee_ts",
+    )
+    await db.conversation_history.create_index(
+        "body_text",
+        name="conv_body_text",
+    )
     await db.user_profiles.create_index(
         "global_user_id", unique=True, name="user_global_id_unique",
     )
@@ -142,6 +155,9 @@ async def db_bootstrap() -> None:
             await enable_vector_index(collection, index_name, path=path, filter_paths=filter_paths)
         except Exception as exc:
             logger.debug(f"Handled exception in db_bootstrap: {exc}")
-            logger.exception(f'Could not create vector index \'{index_name}\' on {collection}.{path} (requires Atlas)')
+            logger.exception(
+                f"Could not create vector index {index_name!r} "
+                f"on {collection}.{path} (requires Atlas): {exc}"
+            )
 
     logger.info("Database bootstrap complete")

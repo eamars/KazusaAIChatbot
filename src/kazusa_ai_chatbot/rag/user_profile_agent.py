@@ -208,7 +208,7 @@ async def _test_main() -> None:
                     "slot": "人物指代",
                     "resolved": True,
                     "result": json.dumps(
-                        {"display_name": "小钳子", "global_user_id": "263c883d-aeff-4e0b-a758-6f69186ae8ec"},
+                        {"display_name": "<named user>", "global_user_id": "263c883d-aeff-4e0b-a758-6f69186ae8ec"},
                         ensure_ascii=False,
                     ),
                 }
@@ -218,7 +218,7 @@ async def _test_main() -> None:
     print(json.dumps(result, ensure_ascii=False, indent=2))
 
     result = await agent.run(
-        task="小钳子",
+        task="<named user>",
         context={
 
         },

@@ -7,6 +7,11 @@ from kazusa_ai_chatbot.config import (
     COGNITION_LLM_MODEL,
 )
 from kazusa_ai_chatbot.nodes.persona_supervisor2_schema import CognitionState
+from kazusa_ai_chatbot.nodes.referent_resolution import (
+    needs_referent_clarification,
+    normalize_referents,
+    unresolved_referent_reason,
+)
 from kazusa_ai_chatbot.utils import build_affinity_block, get_llm, log_preview, parse_llm_json_output
 from kazusa_ai_chatbot.nodes.boundary_profile import (
     get_self_integrity_description,
@@ -302,6 +307,8 @@ _conscious_llm = get_llm(
     base_url=COGNITION_LLM_BASE_URL,
     api_key=COGNITION_LLM_API_KEY,
 )  # Conscious deliberation
+
+
 async def call_cognition_consciousness(state: CognitionState) -> CognitionState:
     affinity_block = build_affinity_block(state["user_profile"]["affinity"])
     current_user_bundle = _current_user_rag_bundle(state)
@@ -325,7 +332,7 @@ async def call_cognition_consciousness(state: CognitionState) -> CognitionState:
         "decontextualized_input": state["decontexualized_input"],
         "active_commitments": user_memory_context["active_commitments"],
         "rag_result": _cognition_rag_result(state["rag_result"]),
-        "indirect_speech_context": state.get("indirect_speech_context", ""),
+        "indirect_speech_context": state["indirect_speech_context"],
         "emotional_appraisal": state["emotional_appraisal"],
         "interaction_subtext": state["interaction_subtext"],
     }
@@ -598,7 +605,7 @@ async def call_boundary_core_agent(state: CognitionState) -> CognitionState:
         "decontextualized_input": state["decontexualized_input"],
         "reason_to_respond": state.get("reason_to_respond", ""),
         "channel_topic": state["channel_topic"],
-        "indirect_speech_context": state.get("indirect_speech_context", ""),
+        "indirect_speech_context": state["indirect_speech_context"],
         "interaction_subtext": state["interaction_subtext"],
         "emotional_appraisal": state["emotional_appraisal"],
         "affinity_context": {
@@ -656,7 +663,7 @@ _JUDGEMENT_CORE_PROMPT = """\
 你代表的是角色在第二层整合后的“社会化自我”：L1 可以原始，L2a 可以冲动，但到你这里，结果必须回到一个受教育、可进入真实社交场景的人类状态。
 
 # 思考路径
-1. 先读取 `needs_clarification` 与 `clarification_reason`。如果需要澄清，最终意图必须是 `CLARIFY`，并且 `judgment_note` 必须说明不能用宽泛旧上下文当作证据。
+1. 先读取 `referents`。如果其中存在 `status = "unresolved"` 的项目，最终意图必须是 `CLARIFY`，并且 `judgment_note` 必须说明不能用宽泛旧上下文当作证据。
 2. 再读取 Consciousness 候选，确认角色原本的立场、意图和内在理由。
 3. 再读取 Boundary Core 的边界约束，确认角色最多可以做到哪里。
 4. 按优先级合并：Boundary Core 高于 Consciousness candidate，internal_monologue 只能微调不能推翻边界。
@@ -664,8 +671,9 @@ _JUDGEMENT_CORE_PROMPT = """\
 
 # 输入格式
 {{
-    "needs_clarification": true,
-    "clarification_reason": "缺少这些指代的具体对象",
+    "referents": [
+        {{"phrase": "这些", "referent_role": "object", "status": "unresolved"}}
+    ],
 
     // Inputs from Consciousness
     "internal_monologue_candidate": "...",
@@ -687,8 +695,9 @@ _JUDGEMENT_CORE_PROMPT = """\
 
 # 核心流程（3步）
 
-## 0. 读取 clarification 信号
-- 如果 `needs_clarification = true`，当前输入缺少回答所必需的对象。
+## 0. 读取 referents clarification 信号
+- `referents` 是唯一的指代澄清来源。
+- 如果任一 `referents[].status = "unresolved"`，当前输入缺少回答所必需的对象。
 - 这种情况下必须输出 `character_intent = "CLARIFY"`。
 - `logical_stance` 应选择 `TENTATIVE` 或其他非回答性立场；不要给出具体事实答案。
 - `judgment_note` 必须明确告诉下游：不要使用宽泛旧记忆、无关历史或检索猜测来替代缺失对象，只能追问缺少的指代对象。
@@ -795,9 +804,11 @@ async def call_judgment_core_agent(state: CognitionState) -> CognitionState:
 
     boundary_core_assessment = state["boundary_core_assessment"]
     affinity_block = build_affinity_block(state["user_profile"]["affinity"])
+    referents = normalize_referents(state["referents"])
+    has_unresolved_referents = needs_referent_clarification(referents)
+    referent_reason = unresolved_referent_reason(referents)
     msg = {
-        "needs_clarification": state.get("needs_clarification", False),
-        "clarification_reason": state.get("clarification_reason", ""),
+        "referents": referents,
         "internal_monologue_candidate": state["internal_monologue"],
         "logical_stance_candidate": state["logical_stance"],
         "character_intent_candidate": state["character_intent"],
@@ -828,15 +839,14 @@ async def call_judgment_core_agent(state: CognitionState) -> CognitionState:
     character_intent = result.get("character_intent")
     judgment_note = result.get("judgment_note", "")
 
-    if state.get("needs_clarification", False):
+    if has_unresolved_referents:
         logical_stance = "TENTATIVE"
         character_intent = "CLARIFY"
-        clarification_reason = state.get("clarification_reason", "")
         judgment_note = (
             "需要先追问缺失的指代对象；不要用宽泛旧上下文、无关历史或检索猜测来替代。"
         )
-        if clarification_reason:
-            judgment_note = f"{judgment_note} 原因: {clarification_reason}"
+        if referent_reason:
+            judgment_note = f"{judgment_note} 原因: {referent_reason}"
 
     # overwrite the logical_stance and character_intent from L2a
     if not logical_stance:

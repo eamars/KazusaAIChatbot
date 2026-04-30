@@ -43,8 +43,8 @@ pytestmark = pytest.mark.live_llm
 _ROOT = Path(__file__).resolve().parents[1]
 _PERSONALITY_PATH = _ROOT / "personalities" / "kazusa.json"
 _USER_TRACE_PATH = _ROOT / "test_artifacts" / "qq_673225019_recent_4h_chat_history.json"
-_TRACE_PHASE = os.getenv("CONVERSATION_PROGRESSION_TRACE_PHASE", "before_change")
-_TRACE_SUITE_NAME = f"conversation_progression_live_{_TRACE_PHASE}"
+_TRACE_VARIANT = os.getenv("CONVERSATION_PROGRESSION_TRACE_VARIANT", "before_change")
+_TRACE_SUITE_NAME = f"conversation_progression_live_{_TRACE_VARIANT}"
 
 _PROGRESSION_JUDGE_PROMPT = """\
 You judge whether a chatbot turn advanced an ongoing episode or repeated a stale move.
@@ -145,7 +145,6 @@ def _msg(
         "platform_user_id": platform_user_id,
         "global_user_id": global_user_id,
         "timestamp": timestamp,
-        "mentioned_bot": False,
         "reply_context": {},
     }
 
@@ -204,7 +203,7 @@ def _progress_doc_for_after_change(
         for before-change trace capture.
     """
 
-    if _TRACE_PHASE == "before_change":
+    if _TRACE_VARIANT == "before_change":
         return None
 
     user_state_updates = [
@@ -237,7 +236,6 @@ def _trim_message_for_prompt(message: dict) -> dict:
         "platform_user_id": message.get("platform_user_id", ""),
         "global_user_id": message.get("global_user_id", ""),
         "timestamp": message.get("timestamp", ""),
-        "mentioned_bot": bool(message.get("mentioned_bot", False)),
         "reply_context": message.get("reply_context", {}),
     }
 
@@ -759,17 +757,15 @@ async def _record_progression_sequence(case: dict) -> None:
             "judge": judgment,
         }
         logger.info(
-            "conversation progression turn trace %s/%s/%s => %r",
-            _TRACE_PHASE,
-            case["case_id"],
-            user_turn_number,
-            turn_trace,
+            f"conversation progression turn trace "
+            f"{_TRACE_VARIANT}/{case['case_id']}/{user_turn_number} => "
+            f"{turn_trace!r}",
         )
         turn_traces.append(turn_trace)
 
     assert turn_traces, f"No user turns found for case: {case['case_id']}"
     trace_payload = {
-        "phase": _TRACE_PHASE,
+        "variant": _TRACE_VARIANT,
         "case_id": case["case_id"],
         "prior_user_disclosures": case["prior_user_disclosures"],
         "overused_assistant_move": case["overused_assistant_move"],
@@ -788,7 +784,10 @@ async def _record_progression_sequence(case: dict) -> None:
         },
         "manual_review_note": "Compare before_change and after_change sequence traces turn-by-turn.",
     }
-    logger.info("conversation progression sequence trace %s/%s => %r", _TRACE_PHASE, case["case_id"], trace_payload)
+    logger.info(
+        f"conversation progression sequence trace "
+        f"{_TRACE_VARIANT}/{case['case_id']} => {trace_payload!r}"
+    )
     write_llm_trace(_TRACE_SUITE_NAME, case["case_id"], trace_payload)
 
 

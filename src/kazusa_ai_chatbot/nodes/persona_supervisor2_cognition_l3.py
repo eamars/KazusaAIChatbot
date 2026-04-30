@@ -4,6 +4,7 @@ Contains the MBTI expression-willingness helper and L3/L4 LLM calls.
 """
 from kazusa_ai_chatbot.config import COGNITION_LLM_API_KEY, COGNITION_LLM_BASE_URL, COGNITION_LLM_MODEL
 from kazusa_ai_chatbot.nodes.persona_supervisor2_schema import CognitionState
+from kazusa_ai_chatbot.nodes.referent_resolution import normalize_referents
 from kazusa_ai_chatbot.utils import build_affinity_block, get_llm, log_list_preview, log_preview, parse_llm_json_output
 from kazusa_ai_chatbot.nodes.linguistic_texture import (
     get_fragmentation_description,
@@ -459,10 +460,10 @@ logical_stance + character_intent
 
 # 每个锚点的最小规则
 ## Clarification override
-- 如果 `needs_clarification = true`，当前输入缺少回答所必需的指代对象。
+- `referents` 是唯一的指代澄清来源。
+- 如果任一 `referents[].status = "unresolved"`，当前输入缺少回答所必需的指代对象。
 - 不要生成 `[FACT]`，不要根据旧记忆、历史闲聊或无关检索猜测答案。
-- `[ANSWER]` 必须是一个简短澄清追问，询问用户“这些/这个/那个”具体指什么。
-- `clarification_reason` 只作为内部依据，不要照搬成机械解释。
+- `[ANSWER]` 必须是一个简短澄清追问，优先点名未解析的 `referents[].phrase`，询问用户该短语具体指什么。
 
 ## `[DECISION]`
 - `CONFIRM` -> 接受/认可；`REFUSE` -> 拒绝/驳斥；`TENTATIVE` -> 有条件、有保留或不确定；`DIVERGE` -> 转移话题；`CHALLENGE` -> 对峙/质问。
@@ -498,8 +499,9 @@ logical_stance + character_intent
 # 输入格式
 {{
     "decontexualized_input": "用户输入语义摘要",
-    "needs_clarification": true,
-    "clarification_reason": "缺少这些指代的具体对象",
+    "referents": [
+        {{"phrase": "这些", "referent_role": "object", "status": "unresolved"}}
+    ],
     "rag_result": {{
         "answer": "检索主管的一行综合结论",
         "user_image": {{
@@ -584,10 +586,10 @@ async def call_content_anchor_agent(state: CognitionState) -> CognitionState:
         character_name=character_profile["name"],
     ))
 
+    referents = normalize_referents(state["referents"])
     msg = {
         "decontexualized_input": state["decontexualized_input"],
-        "needs_clarification": state.get("needs_clarification", False),
-        "clarification_reason": state.get("clarification_reason", ""),
+        "referents": referents,
         "rag_result": _cognition_rag_result(state["rag_result"]),
         "internal_monologue": state["internal_monologue"],
         "logical_stance": state["logical_stance"],

@@ -15,10 +15,11 @@ import sys
 import uvicorn
 from fastapi import FastAPI
 from fastapi.responses import HTMLResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 import httpx
 
+from kazusa_ai_chatbot.config import CHARACTER_GLOBAL_USER_ID
 from kazusa_ai_chatbot.logging_config import configure_adapter_logging
 
 configure_adapter_logging()
@@ -119,14 +120,20 @@ async function sendMessage() {
   const payload = {
     platform: document.getElementById('cfg-platform').value,
     platform_channel_id: document.getElementById('cfg-channel').value,
+    channel_type: 'private',
     platform_user_id: document.getElementById('cfg-uid').value,
     platform_bot_id: 'debug-bot-001',
     display_name: document.getElementById('cfg-name').value,
     channel_name: document.getElementById('cfg-channel').value,
-    content: text,
     content_type: 'text',
-    mentioned_bot: false,
-    attachments: [],
+    message_envelope: {
+      body_text: text,
+      raw_wire_text: text,
+      mentions: [],
+      attachments: [],
+      addressed_to_global_user_ids: ['__CHARACTER_GLOBAL_USER_ID__'],
+      broadcast: false,
+    },
     debug_modes: {
       listen_only: document.getElementById('dbg-listen').checked,
       think_only: document.getElementById('dbg-think').checked,
@@ -161,22 +168,27 @@ class DebugModesIn(BaseModel):
 
 
 class DebugChatRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     platform: str = "debug"
     platform_channel_id: str = ""
+    channel_type: str = "private"
     platform_user_id: str = ""
     platform_bot_id: str = ""
     display_name: str = ""
     channel_name: str = ""
-    content: str = ""
     content_type: str = "text"
-    mentioned_bot: bool = False
-    attachments: list = Field(default_factory=list)
+    message_envelope: dict
     debug_modes: DebugModesIn = Field(default_factory=DebugModesIn)
 
 
 @debug_app.get("/", response_class=HTMLResponse)
 async def index():
-    return _HTML_PAGE
+    rendered_page = _HTML_PAGE.replace(
+        "__CHARACTER_GLOBAL_USER_ID__",
+        CHARACTER_GLOBAL_USER_ID,
+    )
+    return rendered_page
 
 
 @debug_app.post("/api/chat")

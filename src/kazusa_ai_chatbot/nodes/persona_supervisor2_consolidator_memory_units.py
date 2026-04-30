@@ -419,7 +419,7 @@ You are the memory-unit extractor. You only identify new candidate memories from
     "interaction_subtext": "active character's reading of the interaction subtext",
     "logical_stance": "CONFIRM | REFUSE | TENTATIVE | DIVERGE | CHALLENGE",
     "character_intent": "PROVIDE | BANTAR | REJECT | EVADE | CONFRONT | DISMISS | CLARIFY",
-    "chat_history_recent": [{"role": "user|assistant", "display_name": "optional", "content": "message text"}],
+    "chat_history_recent": [{"role": "user|assistant", "display_name": "optional", "body_text": "message text"}],
     "rag_user_memory_context": {
         "stable_patterns": [{"fact": "...", "subjective_appraisal": "...", "relationship_signal": "...", "updated_at": "optional ISO timestamp"}],
         "recent_shifts": [{"fact": "...", "subjective_appraisal": "...", "relationship_signal": "...", "updated_at": "optional ISO timestamp"}],

@@ -7,6 +7,7 @@ from typing import TypedDict
 
 from kazusa_ai_chatbot.conversation_progress import ConversationProgressPromptDoc
 from kazusa_ai_chatbot.db.schemas import ConversationEpisodeStateDoc
+from kazusa_ai_chatbot.message_envelope import MessageEnvelope
 
 
 class MultiMediaDoc(TypedDict):
@@ -19,14 +20,13 @@ class ReplyContext(TypedDict, total=False):
     reply_to_message_id: str
     reply_to_platform_user_id: str
     reply_to_display_name: str
-    reply_to_current_bot: bool
     reply_excerpt: str
 
 
 class DebugModes(TypedDict, total=False):
     listen_only: bool      # Record data but skip thinking (no LLM calls beyond relevance)
     think_only: bool       # Full pipeline but suppress dialog in response
-    no_remember: bool      # Full pipeline but skip consolidation (stage 4)
+    no_remember: bool      # Full pipeline but skip consolidation
 
 
 def keep_false(current: bool | None, update: bool | None) -> bool:
@@ -60,13 +60,13 @@ class IMProcessState(TypedDict):
 
     # Input to Relevance Agent 
     user_name: str  # display name from the platform
-    user_input: str  # Raw message provided by the user. Can input multimedia content
+    user_input: str  # Body text plus current attachment descriptions.
+    message_envelope: MessageEnvelope
     user_multimedia_input: list[MultiMediaDoc]
     user_profile: dict  # used to extract affinity score.
 
     platform_bot_id: str  # Bot's ID on the current platform (provided by the adapter)
-    mentioned_bot: bool  # Whether the platform structurally mentioned the bot in this message
-    bot_name: str
+    character_name: str
     character_profile: dict
 
     platform_channel_id: str  # Original channel/group/DM ID from the platform
@@ -95,5 +95,7 @@ class IMProcessState(TypedDict):
 
     # Output from Persona Supervisor
     final_dialog: list[str]
+    target_addressed_user_ids: NotRequired[list[str]]
+    target_broadcast: NotRequired[bool]
     future_promises: list[dict]
     consolidation_state: dict[str, Any]

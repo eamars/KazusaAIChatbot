@@ -1,4 +1,4 @@
-"""Tests for Phase 2 raw-history exposure policy."""
+"""Tests for raw-history exposure policy."""
 
 from __future__ import annotations
 
@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pytest
 
+from kazusa_ai_chatbot.config import CHARACTER_GLOBAL_USER_ID
 from kazusa_ai_chatbot.nodes import dialog_agent as dialog_module
 from kazusa_ai_chatbot.nodes import persona_supervisor2_cognition_l3 as l3_module
 
@@ -47,8 +48,13 @@ def _history(count: int = 8) -> list[dict]:
         role = "user" if index % 2 == 0 else "assistant"
         result.append({
             "role": role,
-            "content": f"{role} message {index}",
+            "body_text": f"{role} message {index}",
             "platform_user_id": "user-1" if role == "user" else "bot-1",
+            "global_user_id": "global-user-1" if role == "user" else "",
+            "addressed_to_global_user_ids": (
+                [CHARACTER_GLOBAL_USER_ID] if role == "user" else ["global-user-1"]
+            ),
+            "broadcast": False,
         })
     return result
 
@@ -67,6 +73,13 @@ def _character_profile() -> dict:
         "name": "Kazusa",
         "mood": "Neutral",
         "global_vibe": "Calm",
+        "boundary_profile": {
+            "control_sensitivity": 0.2,
+            "control_intimacy_misread": 0.2,
+            "relational_override": 0.2,
+            "compliance_strategy": "comply",
+            "boundary_recovery": "rebound",
+        },
         "personality_brief": {
             "mbti": "INTJ",
             "logic": "precise",
@@ -104,9 +117,21 @@ def _base_l3_state() -> dict:
         "character_profile": _character_profile(),
         "user_profile": {"affinity": 700, "last_relationship_insight": "friendly task support"},
         "chat_history_recent": _history(),
+        "decontexualized_input": "please answer",
         "internal_monologue": "answer directly",
         "logical_stance": "CONFIRM",
         "character_intent": "PROVIDE",
+        "boundary_core_assessment": {
+            "boundary_issue": "none",
+            "boundary_summary": "none",
+            "behavior_primary": "comply",
+            "behavior_secondary": "none",
+            "acceptance": "allow",
+            "stance_bias": "confirm",
+            "identity_policy": "accept",
+            "pressure_policy": "absorb",
+            "trajectory": "stable",
+        },
     }
 
 
@@ -190,6 +215,7 @@ async def test_dialog_generator_tone_history_is_capped_to_two(monkeypatch) -> No
         "chat_history_recent": _history(),
         "platform_user_id": "user-1",
         "platform_bot_id": "bot-1",
+        "global_user_id": "global-user-1",
         "user_name": "User",
         "user_profile": {"affinity": 700},
         "character_profile": _character_profile(),
@@ -231,6 +257,7 @@ async def test_dialog_evaluator_receives_last_user_message_only(monkeypatch) -> 
         "chat_history_recent": _history(),
         "platform_user_id": "user-1",
         "platform_bot_id": "bot-1",
+        "global_user_id": "global-user-1",
         "character_profile": _character_profile(),
         "messages": [],
         "retry": 0,
@@ -242,16 +269,16 @@ async def test_dialog_evaluator_receives_last_user_message_only(monkeypatch) -> 
     assert human_payload["last_user_message"] == "user message 6"
 
 
-def test_phase2_workload_summary_records_context_budget() -> None:
-    """Record affected LLM payload counts for the Phase 2 context budget."""
+def test_context_budget_workload_summary_records_payload_counts() -> None:
+    """Record affected LLM payload counts for the context budget."""
 
     history = _history()
-    phase1 = {
+    previous_payload = {
         "contextual_history_messages": len(history),
         "style_history_messages": len(history),
         "dialog_generator_tone_messages": len(history),
     }
-    phase2 = {
+    bounded_payload = {
         "contextual_history_messages": len(l3_module._surface_history_for_contextual(history)),
         "style_history_messages": len(l3_module._surface_history_for_style(history)),
         "dialog_generator_tone_messages": len(dialog_module._tone_history_for_generator(history)),
@@ -265,12 +292,12 @@ def test_phase2_workload_summary_records_context_budget() -> None:
     }
     summary = {
         "context_window_cap_tokens": 50000,
-        "phase1_dynamic_payload_chars": {
+        "previous_dynamic_payload_chars": {
             "contextual_history": _payload_chars(history),
             "style_history": _payload_chars(history),
             "dialog_generator_tone_history": _payload_chars(history),
         },
-        "phase2_dynamic_payload_chars": {
+        "bounded_dynamic_payload_chars": {
             "contextual_history": _payload_chars(l3_module._surface_history_for_contextual(history)),
             "style_history": _payload_chars(l3_module._surface_history_for_style(history)),
             "dialog_generator_tone_history": _payload_chars(dialog_module._tone_history_for_generator(history)),
@@ -278,18 +305,18 @@ def test_phase2_workload_summary_records_context_budget() -> None:
             "dialog_evaluator_raw_history": 0,
             "recorder_response_path_payload": 0,
         },
-        "phase1": phase1,
-        "phase2": phase2,
+        "previous_payload": previous_payload,
+        "bounded_payload": bounded_payload,
     }
 
-    output_path = _ROOT / "test_artifacts" / "conversation_progress_phase2_workload_summary.json"
+    output_path = _ROOT / "test_artifacts" / "conversation_progress_context_budget_summary.json"
     output_path.write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
 
-    assert phase2["new_response_path_llm_calls"] == 0
-    assert phase2["contextual_history_messages"] <= 4
-    assert phase2["style_history_messages"] <= 2
-    assert phase2["dialog_generator_tone_messages"] <= 2
-    assert phase2["content_anchor_raw_history_messages"] == 0
-    assert phase2["dialog_evaluator_raw_history_messages"] == 0
-    assert phase2["dialog_evaluator_last_user_message_only"]
-    assert phase2["recorder_response_path_calls"] == 0
+    assert bounded_payload["new_response_path_llm_calls"] == 0
+    assert bounded_payload["contextual_history_messages"] <= 4
+    assert bounded_payload["style_history_messages"] <= 2
+    assert bounded_payload["dialog_generator_tone_messages"] <= 2
+    assert bounded_payload["content_anchor_raw_history_messages"] == 0
+    assert bounded_payload["dialog_evaluator_raw_history_messages"] == 0
+    assert bounded_payload["dialog_evaluator_last_user_message_only"]
+    assert bounded_payload["recorder_response_path_calls"] == 0

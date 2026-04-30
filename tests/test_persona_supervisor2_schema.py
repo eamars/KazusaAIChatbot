@@ -25,6 +25,7 @@ class TestGlobalPersonaState:
             "timestamp", "user_input", "platform", "platform_user_id",
             "global_user_id", "user_name", "user_profile", "platform_bot_id",
             "chat_history_wide", "chat_history_recent", "reply_context", "indirect_speech_context", "channel_topic",
+            "message_envelope",
         ]
         for field in input_fields:
             assert field in hints, f"Missing input field: {field}"
@@ -35,16 +36,19 @@ class TestGlobalPersonaState:
 
     def test_has_stage_output_fields(self):
         hints = typing.get_type_hints(GlobalPersonaState)
-        # Stage 0
+        # Decontextualizer
         assert "decontexualized_input" in hints
-        # Stage 1
+        assert "referents" in hints
+        # RAG
         assert "rag_result" in hints
-        # Stage 2
+        # Cognition
         assert "internal_monologue" in hints
         assert "action_directives" in hints
-        # Stage 3
+        # Dialog
         assert "final_dialog" in hints
-        # Stage 4
+        assert "target_addressed_user_ids" in hints
+        assert "target_broadcast" in hints
+        # Consolidation
         assert "mood" in hints
         assert "global_vibe" in hints
         assert "reflection_summary" in hints
@@ -64,13 +68,17 @@ class TestCognitionState:
         required = [
             "character_profile",
             "user_input",
+            "message_envelope",
             "chat_history_recent",
             "reply_context",
             "indirect_speech_context",
             "decontexualized_input",
+            "referents",
             "rag_result",
             "internal_monologue",
             "action_directives",
+            "target_addressed_user_ids",
+            "target_broadcast",
         ]
         for field in required:
             assert field in hints, f"Missing cognition field: {field}"

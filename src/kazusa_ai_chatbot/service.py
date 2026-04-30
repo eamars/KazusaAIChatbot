@@ -14,7 +14,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from fastapi import FastAPI, BackgroundTasks
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 from pymongo.errors import PyMongoError
 
 from kazusa_ai_chatbot.config import (
@@ -47,6 +47,7 @@ from kazusa_ai_chatbot.db import (
 from kazusa_ai_chatbot.mcp_client import mcp_manager
 from kazusa_ai_chatbot.state import IMProcessState, MultiMediaDoc, DebugModes, ReplyContext
 from kazusa_ai_chatbot.chat_input_queue import ChatInputQueue, QueuedChatItem
+from kazusa_ai_chatbot.message_envelope import MentionEntityKind, MessageEnvelope
 from kazusa_ai_chatbot.utils import log_list_preview, log_preview, trim_history_dict
 from kazusa_ai_chatbot import scheduler
 from kazusa_ai_chatbot.dispatcher import (
@@ -87,15 +88,42 @@ class DebugModesIn(BaseModel):
     no_remember: bool = False
 
 
-class ReplyContextIn(BaseModel):
-    reply_to_message_id: str = ""
-    reply_to_platform_user_id: str = ""
-    reply_to_display_name: str = ""
-    reply_to_current_bot: bool | None = None
-    reply_excerpt: str = ""
+class MentionIn(BaseModel):
+    platform_user_id: str = ""
+    global_user_id: str = ""
+    display_name: str = ""
+    entity_kind: MentionEntityKind = "unknown"
+    raw_text: str = ""
+
+
+class ReplyTargetIn(BaseModel):
+    platform_message_id: str = ""
+    platform_user_id: str = ""
+    global_user_id: str = ""
+    display_name: str = ""
+    excerpt: str = ""
+    derivation: str = ""
+
+
+class AttachmentRefIn(AttachmentIn):
+    storage_shape: str = ""
+
+
+class MessageEnvelopeIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    body_text: str
+    raw_wire_text: str
+    mentions: list[MentionIn]
+    reply: ReplyTargetIn | None = None
+    attachments: list[AttachmentRefIn]
+    addressed_to_global_user_ids: list[str]
+    broadcast: bool
 
 
 class ChatRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     platform: str
     platform_channel_id: str = ""
     channel_type: str = "group"
@@ -104,13 +132,9 @@ class ChatRequest(BaseModel):
     platform_bot_id: str = ""  # Bot's ID on this platform (e.g. Discord snowflake)
     display_name: str = ""
     channel_name: str = ""
-    content: str = ""
     content_type: str = "text"
-    mentioned_bot: bool = False
-    attachments: list[AttachmentIn] = Field(default_factory=list)
+    message_envelope: MessageEnvelopeIn
     timestamp: str = ""
-    reply_to_message_id: str | None = None
-    reply_context: ReplyContextIn = Field(default_factory=ReplyContextIn)
     debug_modes: DebugModesIn = Field(default_factory=DebugModesIn)
 
 
@@ -276,40 +300,126 @@ def _compact_reply_context(reply_context: ReplyContext) -> ReplyContext:
 
 
 async def _hydrate_reply_context(req: ChatRequest) -> ReplyContext:
-    """Build service-facing reply context from adapter-supplied metadata only.
+    """Build service-facing reply context from the typed envelope only.
 
     Args:
         req: Incoming chat request from an adapter.
 
     Returns:
-        Compact reply context. The brain service intentionally does not query
-        conversation history to infer reply ownership; adapters own that
-        platform-specific normalization.
+        Compact reply context projected from ``message_envelope.reply``.
     """
 
-    reply_context: ReplyContext = req.reply_context.model_dump(exclude_none=True)
+    envelope: MessageEnvelope = req.message_envelope.model_dump(
+        exclude_none=True,
+        exclude_defaults=True,
+    )
+    reply = envelope.get("reply") or {}
+    reply_context: ReplyContext = {}
 
-    if req.reply_to_message_id and not reply_context.get("reply_to_message_id"):
-        reply_context["reply_to_message_id"] = req.reply_to_message_id
+    if reply.get("platform_message_id"):
+        reply_context["reply_to_message_id"] = str(reply["platform_message_id"])
+    if reply.get("platform_user_id"):
+        reply_context["reply_to_platform_user_id"] = str(reply["platform_user_id"])
+    if reply.get("display_name"):
+        reply_context["reply_to_display_name"] = str(reply["display_name"])
+    if reply.get("excerpt"):
+        reply_context["reply_excerpt"] = str(reply["excerpt"])
 
     return_value = _compact_reply_context(reply_context)
     return return_value
 
 
-# ── Bot message saver (background task) ──────────────────────────────
+async def _resolve_message_envelope_identities(req: ChatRequest) -> MessageEnvelope:
+    """Resolve typed envelope mentions and reply targets to global user ids.
+
+    Args:
+        req: Incoming chat request carrying an adapter-normalized envelope.
+
+    Returns:
+        Message envelope with user/profile identities resolved and addressees
+        recomputed from typed mentions, typed reply target, and DM defaults.
+    """
+
+    envelope: MessageEnvelope = req.message_envelope.model_dump(
+        exclude_none=True,
+        exclude_defaults=True,
+    )
+    addressed_to: list[str] = []
+    if req.channel_type == "private":
+        addressed_to.append(CHARACTER_GLOBAL_USER_ID)
+
+    resolved_mentions = []
+    for mention in envelope["mentions"]:
+        resolved_mention = dict(mention)
+        mention_entity_kind = str(
+            resolved_mention.get("entity_kind", "unknown")
+        ).strip()
+        platform_user_id = str(
+            resolved_mention.get("platform_user_id", "")
+        ).strip()
+        global_user_id = str(resolved_mention.get("global_user_id", "")).strip()
+
+        if mention_entity_kind == "bot":
+            global_user_id = CHARACTER_GLOBAL_USER_ID
+        elif (
+            mention_entity_kind == "user"
+            and platform_user_id
+            and not global_user_id
+        ):
+            display_name = str(resolved_mention.get("display_name", "")).strip()
+            global_user_id = await resolve_global_user_id(
+                platform=req.platform,
+                platform_user_id=platform_user_id,
+                display_name=display_name,
+            )
+
+        if global_user_id:
+            resolved_mention["global_user_id"] = global_user_id
+        if mention_entity_kind in ("bot", "user") and global_user_id:
+            addressed_to.append(global_user_id)
+        resolved_mentions.append(resolved_mention)
+    envelope["mentions"] = resolved_mentions
+
+    reply = envelope.get("reply")
+    if reply is not None:
+        resolved_reply = dict(reply)
+        platform_user_id = str(resolved_reply.get("platform_user_id", "")).strip()
+        global_user_id = str(resolved_reply.get("global_user_id", "")).strip()
+
+        if platform_user_id and platform_user_id == req.platform_bot_id.strip():
+            global_user_id = CHARACTER_GLOBAL_USER_ID
+        elif platform_user_id and not global_user_id:
+            display_name = str(resolved_reply.get("display_name", "")).strip()
+            global_user_id = await resolve_global_user_id(
+                platform=req.platform,
+                platform_user_id=platform_user_id,
+                display_name=display_name,
+            )
+
+        if global_user_id:
+            resolved_reply["global_user_id"] = global_user_id
+            addressed_to.append(global_user_id)
+        envelope["reply"] = resolved_reply
+
+    envelope["addressed_to_global_user_ids"] = list(dict.fromkeys(addressed_to))
+    envelope["broadcast"] = False
+    return envelope
+
+
+# ── Assistant message saver (background task) ────────────────────────
 
 async def _ensure_character_global_identity(
     *,
     platform: str,
     platform_bot_id: str,
-    bot_name: str,
+    character_name: str,
 ) -> str:
     """Ensure the character identity exists and old assistant rows are addressable.
 
     Args:
         platform: Runtime platform for the current request.
         platform_bot_id: Bot account ID on that platform.
-        bot_name: Character display name used by the platform adapter.
+        character_name: Active character display name.
 
     Returns:
         The configured stable character ``global_user_id``.
@@ -317,7 +427,7 @@ async def _ensure_character_global_identity(
     character_global_user_id = await ensure_character_identity(
         platform=platform,
         platform_user_id=platform_bot_id,
-        display_name=bot_name,
+        display_name=character_name,
         global_user_id=CHARACTER_GLOBAL_USER_ID,
     )
 
@@ -335,35 +445,47 @@ async def _ensure_character_global_identity(
     return character_global_user_id
 
 
-async def _save_bot_message(result: dict) -> None:
-    """Persist the bot's response to conversation history (background task)."""
-    platform = result.get("platform", "")
-    platform_channel_id = result.get("platform_channel_id", "")
-    platform_bot_id = result.get("platform_bot_id", "")
-    bot_name = result.get("bot_name", "")
-    bot_output = result.get("final_dialog", [])
+async def _save_assistant_message(result: dict) -> None:
+    """Persist the assistant-authored response to conversation history."""
+    platform = result["platform"]
+    platform_channel_id = result["platform_channel_id"]
+    platform_bot_id = result["platform_bot_id"]
+    character_name = result["character_name"]
+    assistant_output = result["final_dialog"]
 
-    if bot_output:
+    if assistant_output:
+        body_text = "\n".join(assistant_output)
+        target_broadcast = bool(result["target_broadcast"])
+        target_addressed_user_ids = result["target_addressed_user_ids"]
+        if not target_addressed_user_ids and not target_broadcast:
+            current_user_id = str(result["global_user_id"]).strip()
+            target_addressed_user_ids = [current_user_id]
         try:
             character_global_user_id = await _ensure_character_global_identity(
                 platform=platform,
                 platform_bot_id=platform_bot_id,
-                bot_name=bot_name,
+                character_name=character_name,
             )
             await save_conversation({
                 "platform": platform,
                 "platform_channel_id": platform_channel_id,
-                "channel_type": result.get("channel_type", "group"),
+                "channel_type": result["channel_type"],
                 "role": "assistant",
                 "platform_user_id": platform_bot_id,
                 "global_user_id": character_global_user_id,
-                "display_name": bot_name,
-                "content": "\n".join(bot_output),
+                "display_name": character_name,
+                "body_text": body_text,
+                "raw_wire_text": body_text,
+                "content_type": "text",
+                "addressed_to_global_user_ids": target_addressed_user_ids,
+                "mentions": [],
+                "broadcast": target_broadcast,
+                "attachments": [],
                 "timestamp": datetime.now(timezone.utc).isoformat(),
             })
         except Exception as exc:
-            logger.debug(f"Handled exception in _save_bot_message: {exc}")
-            logger.exception("Failed to save bot message")
+            logger.debug(f"Handled exception in _save_assistant_message: {exc}")
+            logger.exception(f"Failed to save assistant message: {exc}")
 
 
 # ── Lifespan ────────────────────────────────────────────────────────
@@ -382,6 +504,7 @@ async def _save_user_message_from_item(
     *,
     global_user_id: str,
     reply_context: ReplyContext,
+    message_envelope: MessageEnvelope | None = None,
 ) -> None:
     """Persist one queued user message.
 
@@ -389,25 +512,17 @@ async def _save_user_message_from_item(
         item: Queued chat item containing the request and timestamp.
         global_user_id: Resolved global user identifier.
         reply_context: Adapter-supplied reply metadata after compacting.
+        message_envelope: Envelope after service-side identity resolution, when
+            the caller already resolved it for graph input.
 
     Returns:
         None.
     """
 
     req = item.request
-    attachment_docs: list[dict[str, Any]] = []
-    for attachment in req.attachments:
-        attachment_doc: dict[str, Any] = {}
-        if attachment.media_type:
-            attachment_doc["media_type"] = attachment.media_type
-        if attachment.url:
-            attachment_doc["url"] = attachment.url
-        if attachment.description:
-            attachment_doc["description"] = attachment.description
-        if attachment.size_bytes is not None:
-            attachment_doc["size_bytes"] = attachment.size_bytes
-        if attachment_doc:
-            attachment_docs.append(attachment_doc)
+    if message_envelope is None:
+        message_envelope = await _resolve_message_envelope_identities(req)
+    attachment_docs = list(message_envelope["attachments"])
 
     try:
         await save_conversation({
@@ -419,16 +534,21 @@ async def _save_user_message_from_item(
             "global_user_id": global_user_id,
             "display_name": req.display_name,
             "channel_type": req.channel_type,
-            "content": req.content,
+            "body_text": message_envelope["body_text"],
+            "raw_wire_text": message_envelope["raw_wire_text"],
             "content_type": req.content_type,
-            "mentioned_bot": req.mentioned_bot,
+            "addressed_to_global_user_ids": message_envelope[
+                "addressed_to_global_user_ids"
+            ],
+            "mentions": message_envelope["mentions"],
+            "broadcast": False,
             "attachments": attachment_docs,
             "reply_context": reply_context,
             "timestamp": item.timestamp,
         })
     except Exception as exc:
         logger.debug(f"Handled exception in _save_user_message_from_item: {exc}")
-        logger.exception("Failed to save queued user message")
+        logger.exception(f"Failed to save queued user message: {exc}")
 
 
 async def _resolve_queued_user(item: QueuedChatItem) -> tuple[str, dict]:
@@ -472,10 +592,14 @@ async def _drop_queued_chat_item(item: QueuedChatItem) -> None:
         )
     except Exception as exc:
         logger.debug(f"Handled exception in _drop_queued_chat_item: {exc}")
-        logger.exception("Failed to persist dropped queued message")
+        logger.exception(f"Failed to persist dropped queued message: {exc}")
 
     _chat_input_queue.complete(item, ChatResponse())
-    logger.info(f'Queued chat item dropped: sequence={item.sequence} platform={item.request.platform} channel={item.request.platform_channel_id or "<dm>"} message={item.request.platform_message_id or "<none>"} user={item.request.platform_user_id or "<none>"} display_name={item.request.display_name or "<none>"} tagged={_chat_input_queue.is_tagged(item)} bot_reply={_chat_input_queue.is_bot_reply(item)} content={log_preview(item.request.content)}')
+    dropped_envelope: MessageEnvelope = item.request.message_envelope.model_dump(
+        exclude_none=True,
+        exclude_defaults=True,
+    )
+    logger.info(f'Queued chat item dropped: sequence={item.sequence} platform={item.request.platform} channel={item.request.platform_channel_id or "<dm>"} message={item.request.platform_message_id or "<none>"} user={item.request.platform_user_id or "<none>"} display_name={item.request.display_name or "<none>"} tagged={_chat_input_queue.is_tagged(item)} bot_reply={_chat_input_queue.is_bot_reply(item)} content={log_preview(dropped_envelope["body_text"])}')
 
 
 async def _persist_collapsed_queued_chat_item(
@@ -504,10 +628,14 @@ async def _persist_collapsed_queued_chat_item(
         logger.debug(
             f"Handled exception in _persist_collapsed_queued_chat_item: {exc}"
         )
-        logger.exception("Failed to persist collapsed queued message")
+        logger.exception(f"Failed to persist collapsed queued message: {exc}")
 
     _chat_input_queue.complete(item, ChatResponse())
-    logger.info(f'Queued chat item collapsed: sequence={item.sequence} survivor_sequence={survivor.sequence} platform={item.request.platform} channel={item.request.platform_channel_id or "<dm>"} message={item.request.platform_message_id or "<none>"} survivor_message={survivor.request.platform_message_id or "<none>"} user={item.request.platform_user_id or "<none>"} display_name={item.request.display_name or "<none>"} tagged={_chat_input_queue.is_tagged(item)} bot_reply={_chat_input_queue.is_bot_reply(item)} content={log_preview(item.request.content)}')
+    collapsed_envelope: MessageEnvelope = item.request.message_envelope.model_dump(
+        exclude_none=True,
+        exclude_defaults=True,
+    )
+    logger.info(f'Queued chat item collapsed: sequence={item.sequence} survivor_sequence={survivor.sequence} platform={item.request.platform} channel={item.request.platform_channel_id or "<dm>"} message={item.request.platform_message_id or "<none>"} survivor_message={survivor.request.platform_message_id or "<none>"} user={item.request.platform_user_id or "<none>"} display_name={item.request.display_name or "<none>"} tagged={_chat_input_queue.is_tagged(item)} bot_reply={_chat_input_queue.is_bot_reply(item)} content={log_preview(collapsed_envelope["body_text"])}')
 
 
 async def _process_queued_chat_item(item: QueuedChatItem) -> None:
@@ -521,27 +649,36 @@ async def _process_queued_chat_item(item: QueuedChatItem) -> None:
     """
 
     req = item.request
-    bot_name = _personality.get("name", "KazusaBot")
+    character_name = _personality.get("name", "Character")
 
     try:
         await _ensure_character_global_identity(
             platform=req.platform,
             platform_bot_id=req.platform_bot_id,
-            bot_name=bot_name,
+            character_name=character_name,
         )
         global_user_id, user_profile = await _resolve_queued_user(item)
+        message_envelope = await _resolve_message_envelope_identities(req)
 
         multimedia_input: list[MultiMediaDoc] = []
         for queued_item in [item, *item.collapsed_items]:
-            for attachment in queued_item.request.attachments:
-                if not attachment.media_type.startswith("image/"):
+            queued_envelope: MessageEnvelope = (
+                queued_item.request.message_envelope.model_dump(
+                    exclude_none=True,
+                    exclude_defaults=True,
+                )
+            )
+            for attachment in queued_envelope["attachments"]:
+                media_type = attachment.get("media_type", "")
+                if not media_type.startswith("image/"):
                     continue
-                if not attachment.base64_data:
+                base64_data = attachment.get("base64_data", "")
+                if not base64_data:
                     continue
                 multimedia_input.append({
-                    "content_type": attachment.media_type,
-                    "base64_data": attachment.base64_data,
-                    "description": attachment.description,
+                    "content_type": media_type,
+                    "base64_data": base64_data,
+                    "description": attachment.get("description", ""),
                 })
 
         history = await get_conversation_history(
@@ -562,10 +699,10 @@ async def _process_queued_chat_item(item: QueuedChatItem) -> None:
         if active_flags:
             logger.info(f'Debug modes active: {active_flags}')
 
-        user_input = item.combined_content or req.content
+        user_input = item.combined_content or message_envelope["body_text"]
         is_collapsed_turn = bool(item.collapsed_items)
 
-        logger.debug(f'Chat request: platform={req.platform} channel={req.platform_channel_id or "<dm>"} message={req.platform_message_id or "<none>"} user={req.platform_user_id} global_user={global_user_id} content_type={req.content_type} attachments={len(req.attachments)} image_attachments={len(multimedia_input)} history_wide={len(chat_history_wide)} history_recent={len(chat_history_recent)} reply_context={log_preview(reply_context)} debug_modes={active_flags} collapsed={is_collapsed_turn} collapsed_count={len(item.collapsed_items)} content={log_preview(user_input)}')
+        logger.debug(f'Chat request: platform={req.platform} channel={req.platform_channel_id or "<dm>"} message={req.platform_message_id or "<none>"} user={req.platform_user_id} global_user={global_user_id} content_type={req.content_type} attachments={len(message_envelope["attachments"])} image_attachments={len(multimedia_input)} history_wide={len(chat_history_wide)} history_recent={len(chat_history_recent)} reply_context={log_preview(reply_context)} debug_modes={active_flags} collapsed={is_collapsed_turn} collapsed_count={len(item.collapsed_items)} content={log_preview(user_input)}')
 
         # Reply anchoring is a false-preserving graph latch. Normal turns start
         # enabled; collapsed turns start disabled so no later stage can re-enable
@@ -580,11 +717,11 @@ async def _process_queued_chat_item(item: QueuedChatItem) -> None:
             "global_user_id": global_user_id,
             "user_name": req.display_name,
             "user_input": user_input,
+            "message_envelope": message_envelope,
             "user_multimedia_input": multimedia_input,
             "user_profile": user_profile,
             "platform_bot_id": req.platform_bot_id,
-            "mentioned_bot": req.mentioned_bot,
-            "bot_name": bot_name,
+            "character_name": character_name,
             "character_profile": _personality,
             "platform_channel_id": req.platform_channel_id,
             "channel_type": req.channel_type,
@@ -598,57 +735,66 @@ async def _process_queued_chat_item(item: QueuedChatItem) -> None:
             "channel_topic": "",
             "indirect_speech_context": "",
             "debug_modes": debug_modes,
+            "final_dialog": [],
+            "target_addressed_user_ids": [global_user_id],
+            "target_broadcast": False,
+            "future_promises": [],
+            "consolidation_state": {},
         }
 
         await _save_user_message_from_item(
             item,
             global_user_id=global_user_id,
             reply_context=reply_context,
+            message_envelope=message_envelope,
         )
 
         try:
             result = await _graph.ainvoke(initial_state)
         except Exception as exc:
             logger.debug(f"Handled exception in _process_queued_chat_item: {exc}")
-            logger.exception("Graph invocation failed")
+            logger.exception(f"Graph invocation failed: {exc}")
             response = ChatResponse(
-                messages=[f"{bot_name} is busy right now, please try again later."]
+                messages=[
+                    f"{character_name} is busy right now, please try again later."
+                ]
             )
             _chat_input_queue.complete(item, response)
             return
 
-        final_dialog = result.get("final_dialog", [])
+        final_dialog = result["final_dialog"]
         should_reply = bool(final_dialog) and bool(
-            result.get("use_reply_feature", False)
+            result["use_reply_feature"]
         )
-        consolidation_state = result.get("consolidation_state")
+        consolidation_state = result["consolidation_state"]
 
-        logger.debug(f'Chat result: platform={req.platform} channel={req.platform_channel_id or "<dm>"} message={req.platform_message_id or "<none>"} user={req.platform_user_id} should_respond={result.get("should_respond")} should_reply={should_reply} final_dialog_count={len(final_dialog)} future_promises={len(result.get("future_promises", []))} final_dialog={log_list_preview(final_dialog)}')
+        logger.debug(f'Chat result: platform={req.platform} channel={req.platform_channel_id or "<dm>"} message={req.platform_message_id or "<none>"} user={req.platform_user_id} should_respond={result["should_respond"]} should_reply={should_reply} final_dialog_count={len(final_dialog)} future_promises={len(result["future_promises"])} final_dialog={log_list_preview(final_dialog)}')
 
         consolidation_state_dict: dict | None = None
         if isinstance(consolidation_state, Mapping):
             consolidation_state_dict = dict(consolidation_state)
 
-        should_record_progress = bool(final_dialog) and consolidation_state_dict is not None
+        has_consolidation_state = bool(consolidation_state_dict)
+        should_record_progress = bool(final_dialog) and has_consolidation_state
         if should_record_progress:
             logger.debug(f'Background conversation progress recorder queued: platform={req.platform} channel={req.platform_channel_id or "<dm>"} message={req.platform_message_id or "<none>"}')
         elif not final_dialog:
-            logger.info(f'Background conversation progress recorder skipped: platform={req.platform} channel={req.platform_channel_id or "<dm>"} message={req.platform_message_id or "<none>"} should_respond={result.get("should_respond")} final_dialog_count=0')
+            logger.info(f'Background conversation progress recorder skipped: platform={req.platform} channel={req.platform_channel_id or "<dm>"} message={req.platform_message_id or "<none>"} should_respond={result["should_respond"]} final_dialog_count=0')
         else:
             logger.warning(f'Background conversation progress recorder skipped: unexpected consolidation_state type={type(consolidation_state).__name__}')
 
         should_consolidate = False
         if debug_modes.get("no_remember"):
             logger.debug("Background consolidation skipped: no_remember is active")
-        elif consolidation_state_dict is not None:
+        elif final_dialog and has_consolidation_state:
             should_consolidate = True
             logger.debug(f'Background consolidation queued: platform={req.platform} channel={req.platform_channel_id or "<dm>"} message={req.platform_message_id or "<none>"}')
         elif not final_dialog:
-            logger.info(f'Background consolidation skipped: platform={req.platform} channel={req.platform_channel_id or "<dm>"} message={req.platform_message_id or "<none>"} should_respond={result.get("should_respond")} final_dialog_count=0')
+            logger.info(f'Background consolidation skipped: platform={req.platform} channel={req.platform_channel_id or "<dm>"} message={req.platform_message_id or "<none>"} should_respond={result["should_respond"]} final_dialog_count=0')
         else:
             logger.warning(f'Background consolidation skipped: unexpected consolidation_state type={type(consolidation_state).__name__}')
 
-        should_save_bot_message = bool(final_dialog)
+        should_save_assistant_message = bool(final_dialog)
         response_dialog = final_dialog
         if debug_modes.get("think_only"):
             logger.info(f'think_only active — suppressing {len(final_dialog)} dialog message(s) from user output')
@@ -663,8 +809,8 @@ async def _process_queued_chat_item(item: QueuedChatItem) -> None:
         )
         _chat_input_queue.complete(item, response)
 
-        if should_save_bot_message:
-            await _save_bot_message(result)
+        if should_save_assistant_message:
+            await _save_assistant_message(result)
         if should_record_progress and consolidation_state_dict is not None:
             await _run_conversation_progress_record_background(
                 consolidation_state_dict,
@@ -673,9 +819,11 @@ async def _process_queued_chat_item(item: QueuedChatItem) -> None:
             await _run_consolidation_background(consolidation_state_dict)
     except Exception as exc:
         logger.debug(f"Handled exception in _process_queued_chat_item: {exc}")
-        logger.exception("Queued chat item failed")
+        logger.exception(f"Queued chat item failed: {exc}")
         response = ChatResponse(
-            messages=[f"{bot_name} is busy right now, please try again later."]
+            messages=[
+                f"{character_name} is busy right now, please try again later."
+            ]
         )
         _chat_input_queue.complete(item, response)
 
@@ -749,24 +897,24 @@ async def _enqueue_chat_request(req: ChatRequest) -> ChatResponse:
 
 
 async def _run_consolidation_background(state: dict) -> None:
-    """Run stage-4 consolidation after the dialog has already been returned.
+    """Run consolidation after the dialog has already been returned.
 
     Args:
-        state: Stage-0..3 persona state snapshot needed by the consolidator.
+        state: Persona graph state snapshot needed by the consolidator.
     """
 
     try:
         await call_consolidation_subgraph(state)
     except Exception as exc:
         logger.debug(f"Handled exception in _run_consolidation_background: {exc}")
-        logger.exception("Background consolidation failed")
+        logger.exception(f"Background consolidation failed: {exc}")
 
 
 async def _run_conversation_progress_record_background(state: dict) -> None:
     """Record conversation progress after dialog output has been returned.
 
     Args:
-        state: Stage-0..3 persona state snapshot needed by the progress recorder.
+        state: Persona graph state snapshot needed by the progress recorder.
 
     Returns:
         None.
@@ -804,7 +952,9 @@ async def _run_conversation_progress_record_background(state: dict) -> None:
         logger.info(f'Conversation progress recorded: platform={scope.platform} channel={scope.platform_channel_id or "<dm>"} user={scope.global_user_id} written={result["written"]} turn_count={result["turn_count"]} continuity={result["continuity"]} status={result["status"]} cache_updated={result["cache_updated"]}')
     except Exception as exc:
         logger.debug(f"Handled exception in _run_conversation_progress_record_background: {exc}")
-        logger.exception("Background conversation progress recording failed")
+        logger.exception(
+            f"Background conversation progress recording failed: {exc}"
+        )
 
 
 def register_runtime_adapter(adapter) -> None:
@@ -909,7 +1059,9 @@ async def lifespan(app: FastAPI):
         await mcp_manager.start()
     except Exception as exc:
         logger.debug(f"Handled exception in lifespan: {exc}")
-        logger.exception("MCP manager failed to start — tools will be unavailable")
+        logger.exception(
+            f"MCP manager failed to start — tools will be unavailable: {exc}"
+        )
 
     # 6. Build the task-dispatch runtime
     tool_registry = ToolRegistry()
@@ -962,7 +1114,7 @@ async def health():
         db_ok = True
     except Exception as exc:
         logger.debug(f"Handled exception in health: {exc}")
-        logger.exception("Health check database ping failed")
+        logger.exception(f"Health check database ping failed: {exc}")
 
     return_value = HealthResponse(
         status="ok" if db_ok else "degraded",

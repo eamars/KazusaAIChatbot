@@ -51,6 +51,7 @@ async def test_content_anchor_agent_receives_conversation_progress(monkeypatch) 
         "internal_monologue": "answer directly",
         "logical_stance": "CONFIRM",
         "character_intent": "PROVIDE",
+        "referents": [],
         "conversation_progress": {
             "status": "active",
             "episode_label": "slides_help",

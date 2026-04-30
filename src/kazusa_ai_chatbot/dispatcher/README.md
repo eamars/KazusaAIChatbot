@@ -151,7 +151,7 @@ DispatchContext(
     source_user_id=str,
     source_message_id=str,
     guild_id=str | None,
-    bot_role=str,
+    bot_permission_role=str,
     now=datetime,
 )
 ```
@@ -160,7 +160,7 @@ Important meanings:
 
 - `source_platform` is the default target platform when a tool call omits `target_platform`.
 - `source_channel_id` is used when a tool call says `target_channel: "same"`.
-- `bot_role` filters tools by permission before the LLM sees them and before evaluation accepts them.
+- `bot_permission_role` filters tools by permission before the LLM sees them and before evaluation accepts them.
 - `now` is the frozen dispatch time used for immediate tasks and relative-promise normalization upstream.
 
 The persisted scheduler event carries this context so scheduled execution can be rehydrated later.

@@ -14,7 +14,7 @@ from kazusa_ai_chatbot.rag.cache2_runtime import stable_cache_key
 
 INITIALIZER_CACHE_NAME = "rag2_initializer"
 INITIALIZER_POLICY_VERSION = "initializer:v1"
-INITIALIZER_PROMPT_VERSION = "initializer_prompt:v4"
+INITIALIZER_PROMPT_VERSION = "initializer_prompt:v6"
 INITIALIZER_AGENT_REGISTRY_VERSION = "rag_supervisor2_registry:v1"
 INITIALIZER_STRATEGY_SCHEMA_VERSION = "initializer_strategy_schema:v1"
 
@@ -74,12 +74,12 @@ def _context_scope(context: dict[str, Any]) -> dict[str, str]:
     Returns:
         Dict containing normalized platform and channel scope fields.
     """
-    platform = context.get("platform") or context.get("target_platform") or ""
-    channel = (
-        context.get("platform_channel_id")
-        or context.get("target_platform_channel_id")
-        or ""
-    )
+    platform = context.get("platform")
+    if not platform:
+        platform = context.get("target_platform", "")
+    channel = context.get("platform_channel_id")
+    if not channel:
+        channel = context.get("target_platform_channel_id", "")
     return_value = {
         "platform": normalize_cache_text(platform),
         "platform_channel_id": normalize_cache_text(channel),
@@ -87,7 +87,7 @@ def _context_scope(context: dict[str, Any]) -> dict[str, str]:
     return return_value
 
 
-def _initializer_context_signature(context: dict[str, Any]) -> dict[str, str]:
+def _initializer_context_signature(context: dict[str, Any]) -> dict[str, Any]:
     """Build the initializer's cache-relevant context signature.
 
     Args:
@@ -96,6 +96,13 @@ def _initializer_context_signature(context: dict[str, Any]) -> dict[str, str]:
     Returns:
         Stable subset of context fields that can affect slot planning.
     """
+    if "message_envelope" not in context:
+        raise KeyError("message_envelope is required for initializer cache keys")
+
+    message_envelope = context["message_envelope"]
+    addressed_to = message_envelope["addressed_to_global_user_ids"]
+    body_text = message_envelope["body_text"]
+
     return_value = {
         "platform": normalize_cache_text(context.get("platform", "")),
         "platform_channel_id": normalize_cache_text(
@@ -103,6 +110,13 @@ def _initializer_context_signature(context: dict[str, Any]) -> dict[str, str]:
         ),
         "global_user_id": str(context.get("global_user_id", "")).strip(),
         "user_name": normalize_cache_text(context.get("user_name", "")),
+        "body_text": normalize_cache_text(body_text),
+        "addressed_to_global_user_ids": sorted(
+            str(user_id).strip()
+            for user_id in addressed_to
+            if str(user_id).strip()
+        ),
+        "broadcast": bool(message_envelope["broadcast"]),
     }
     return return_value
 
@@ -149,7 +163,9 @@ def is_closed_historical_range(args: dict[str, Any]) -> bool:
         True when both ``from_timestamp`` and ``to_timestamp`` are present,
         meaning the query is anchored to a closed window safe for caching.
     """
-    return_value = bool(args.get("from_timestamp") and args.get("to_timestamp"))
+    from_timestamp = args.get("from_timestamp")
+    to_timestamp = args.get("to_timestamp")
+    return_value = bool(from_timestamp and to_timestamp)
     return return_value
 
 

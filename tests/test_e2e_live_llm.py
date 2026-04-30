@@ -144,6 +144,14 @@ async def _make_initial_state(
     )
     chat_history_wide = trim_history_dict(history)
     chat_history_recent = chat_history_wide[-5:]
+    message_envelope = {
+        "body_text": content,
+        "raw_wire_text": content,
+        "mentions": [],
+        "attachments": [],
+        "addressed_to_global_user_ids": [brain_service.CHARACTER_GLOBAL_USER_ID],
+        "broadcast": False,
+    }
 
     state = {
         "timestamp": datetime.now(timezone.utc).isoformat(),
@@ -153,10 +161,11 @@ async def _make_initial_state(
         "global_user_id": identity["global_user_id"],
         "user_name": identity["display_name"],
         "user_input": content,
+        "message_envelope": message_envelope,
         "user_multimedia_input": user_multimedia_input or [],
         "user_profile": user_profile,
         "platform_bot_id": _BOT_ID,
-        "bot_name": character_profile.get("name", _BOT_NAME),
+        "character_name": character_profile.get("name", _BOT_NAME),
         "character_profile": character_profile,
         "platform_channel_id": identity["platform_channel_id"],
         "channel_name": channel_name,
@@ -221,6 +230,7 @@ async def _run_chat(
     platform_channel_id: str | None = None,
     platform_message_id: str | None = None,
     reply_context: dict | None = None,
+    direct_address: bool = False,
 ) -> tuple[brain_service.ChatResponse, dict]:
     if platform is None or platform_user_id is None or platform_channel_id is None:
         identity = await _make_identity(label, display_name)
@@ -240,6 +250,44 @@ async def _run_chat(
 
     await _refresh_character_profile()
     background_tasks = BackgroundTasks()
+    envelope_attachments = [
+        attachment.model_dump(exclude_none=True)
+        for attachment in attachments or []
+    ]
+    mentions = []
+    reply = None
+    addressed_to = [brain_service.CHARACTER_GLOBAL_USER_ID]
+    if reply_context:
+        reply = {
+            "platform_message_id": reply_context.get("reply_to_message_id", ""),
+            "platform_user_id": reply_context.get("reply_to_platform_user_id", ""),
+            "display_name": reply_context.get("reply_to_display_name", ""),
+            "excerpt": reply_context.get("reply_excerpt", ""),
+            "derivation": "platform_native",
+        }
+        if reply["platform_user_id"] == _BOT_ID:
+            reply["global_user_id"] = brain_service.CHARACTER_GLOBAL_USER_ID
+        else:
+            addressed_to = []
+    if direct_address:
+        addressed_to = [brain_service.CHARACTER_GLOBAL_USER_ID]
+        mentions.append({
+            "platform_user_id": _BOT_ID,
+            "global_user_id": brain_service.CHARACTER_GLOBAL_USER_ID,
+            "display_name": _BOT_NAME,
+            "entity_kind": "bot",
+            "raw_text": f"<@{_BOT_ID}>",
+        })
+    message_envelope = {
+        "body_text": content,
+        "raw_wire_text": content,
+        "mentions": mentions,
+        "attachments": envelope_attachments,
+        "addressed_to_global_user_ids": addressed_to,
+        "broadcast": not addressed_to,
+    }
+    if reply is not None:
+        message_envelope["reply"] = reply
     request = brain_service.ChatRequest(
         platform=identity["platform"],
         platform_channel_id=identity["platform_channel_id"],
@@ -248,9 +296,7 @@ async def _run_chat(
         platform_bot_id=_BOT_ID,
         display_name=display_name,
         channel_name=channel_name,
-        content=content,
-        attachments=attachments or [],
-        reply_context=brain_service.ReplyContextIn(**(reply_context or {})),
+        message_envelope=message_envelope,
     )
     response = await brain_service.chat(request, background_tasks)
     for task in background_tasks.tasks:
@@ -278,18 +324,36 @@ async def _seed_conversation(
     platform_user_id: str,
     platform_message_id: str | None = None,
     reply_context: dict | None = None,
+    addressed_to_global_user_ids: list[str] | None = None,
+    broadcast: bool | None = None,
     timestamp: str | None = None,
 ) -> None:
+    if addressed_to_global_user_ids is None:
+        if role == "user":
+            addressed_to_global_user_ids = [brain_service.CHARACTER_GLOBAL_USER_ID]
+        elif global_user_id:
+            addressed_to_global_user_ids = [global_user_id]
+        else:
+            addressed_to_global_user_ids = []
+    if broadcast is None:
+        broadcast = not addressed_to_global_user_ids
     await save_conversation(
         {
             "platform": platform,
             "platform_channel_id": platform_channel_id,
+            "channel_type": "group",
             "role": role,
             "platform_message_id": platform_message_id or f"seed-{uuid4().hex[:10]}",
             "platform_user_id": platform_user_id,
             "global_user_id": global_user_id,
             "display_name": display_name,
-            "content": content,
+            "body_text": content,
+            "raw_wire_text": content,
+            "content_type": "text",
+            "addressed_to_global_user_ids": addressed_to_global_user_ids,
+            "mentions": [],
+            "broadcast": broadcast,
+            "attachments": [],
             "reply_context": reply_context or {},
             "timestamp": timestamp or datetime.now(timezone.utc).isoformat(),
         }
@@ -449,8 +513,8 @@ async def test_live_chat_smoke_response(live_env) -> None:
     assert after_stats["hits"] >= before_stats["hits"]
     assert after_stats["misses"] >= before_stats["misses"]
     assert after_stats["size"] <= after_stats["max_entries"]
-    logger.info("Cache2 stats before chat: %s", before_stats)
-    logger.info("Cache2 stats after chat: %s", after_stats)
+    logger.info(f"Cache2 stats before chat: {before_stats}")
+    logger.info(f"Cache2 stats after chat: {after_stats}")
 
 
 async def test_live_chat_multi_user_photo_thread_keeps_user_intents_separated(live_env) -> None:
@@ -622,12 +686,14 @@ async def test_live_chat_structured_third_party_reply_stays_silent(live_env) -> 
         role="user",
         platform_user_id=other_user_id,
         platform_message_id=other_message_id,
+        addressed_to_global_user_ids=[],
+        broadcast=True,
     )
 
     response, _ = await _run_chat(
         "third-party-reply",
         identity["display_name"],
-        '[Reply to message] <@live-other-user> 我同事上下班是不用加油的',
+        '我同事上下班是不用加油的',
         channel_name="general",
         platform=identity["platform"],
         platform_user_id=identity["platform_user_id"],
@@ -636,7 +702,6 @@ async def test_live_chat_structured_third_party_reply_stays_silent(live_env) -> 
             "reply_to_message_id": other_message_id,
             "reply_to_platform_user_id": other_user_id,
             "reply_to_display_name": "OtherParticipant",
-            "reply_to_current_bot": False,
             "reply_excerpt": '我同事上下班是不用加油的。',
         },
     )
@@ -658,13 +723,15 @@ async def test_live_chat_structured_third_party_reply_with_explicit_bot_address_
         role="user",
         platform_user_id=other_user_id,
         platform_message_id=other_message_id,
+        addressed_to_global_user_ids=[],
+        broadcast=True,
     )
 
     async with _neutral_character_runtime_state():
         response, _ = await _run_chat(
             "third-party-reply-addressed",
             identity["display_name"],
-            '<@pytest-live-bot> 你怎么看他刚才那句？',
+            '你怎么看他刚才那句？',
             channel_name="general",
             platform=identity["platform"],
             platform_user_id=identity["platform_user_id"],
@@ -673,9 +740,9 @@ async def test_live_chat_structured_third_party_reply_with_explicit_bot_address_
                 "reply_to_message_id": other_message_id,
                 "reply_to_platform_user_id": other_user_id,
                 "reply_to_display_name": "OtherParticipant",
-                "reply_to_current_bot": False,
                 "reply_excerpt": '混动通勤其实看使用场景。',
             },
+            direct_address=True,
         )
 
     assert response.messages

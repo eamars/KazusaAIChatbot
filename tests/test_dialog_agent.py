@@ -14,6 +14,7 @@ from kazusa_ai_chatbot.nodes.dialog_agent import (
     dialog_agent,
     DialogAgentState,
 )
+from kazusa_ai_chatbot.config import CHARACTER_GLOBAL_USER_ID
 from kazusa_ai_chatbot.utils import build_interaction_history_recent
 
 
@@ -40,6 +41,7 @@ def _base_global_state():
         "chat_history_recent": [],
         "platform_user_id": "user_123",
         "platform_bot_id": "bot_456",
+        "global_user_id": "global-user-123",
         "user_name": "TestUser",
         "user_profile": {"affinity": 500},
         "character_profile": {
@@ -86,7 +88,7 @@ class TestDialogAgentState:
         hints = typing.get_type_hints(DialogAgentState)
         required = [
             "internal_monologue", "action_directives",
-            "chat_history_wide", "chat_history_recent", "platform_user_id", "platform_bot_id", "user_name", "user_profile",
+            "chat_history_wide", "chat_history_recent", "platform_user_id", "platform_bot_id", "global_user_id", "user_name", "user_profile",
             "character_profile",
         ]
         for field in required:
@@ -114,28 +116,79 @@ def test_dialog_generator_prompt_has_no_decision_ownership() -> None:
 def test_build_interaction_history_recent_excludes_other_user_messages():
     """Scoped history should keep only the current user's turns and bot replies."""
     history = [
-        {"role": "user", "platform_user_id": "user_a", "content": "这是千纱你的照片"},
-        {"role": "assistant", "platform_user_id": "bot_456", "content": "明明就是想看我出糗吧，学长。"},
-        {"role": "user", "platform_user_id": "user_b", "content": "你照片真涩情"},
-        {"role": "assistant", "platform_user_id": "bot_456", "content": "学长看照片的眼神，感觉有点过分了啊。"},
+        {
+            "role": "user",
+            "platform_user_id": "user_a",
+            "global_user_id": "global-a",
+            "body_text": "这是 active character 的照片",
+            "addressed_to_global_user_ids": [CHARACTER_GLOBAL_USER_ID],
+            "broadcast": False,
+        },
+        {
+            "role": "assistant",
+            "platform_user_id": "bot_456",
+            "body_text": "明明就是想看我出糗吧。",
+            "addressed_to_global_user_ids": ["global-a"],
+            "broadcast": False,
+        },
+        {
+            "role": "user",
+            "platform_user_id": "user_b",
+            "global_user_id": "global-b",
+            "body_text": "你照片真涩情",
+            "addressed_to_global_user_ids": [CHARACTER_GLOBAL_USER_ID],
+            "broadcast": False,
+        },
+        {
+            "role": "assistant",
+            "platform_user_id": "bot_456",
+            "body_text": "看照片的眼神，感觉有点过分了啊。",
+            "addressed_to_global_user_ids": ["global-b"],
+            "broadcast": False,
+        },
     ]
 
-    scoped = build_interaction_history_recent(history, "user_b", "bot_456")
+    scoped = build_interaction_history_recent(
+        history,
+        "user_b",
+        "bot_456",
+        current_global_user_id="global-b",
+    )
 
     assert scoped == [
-        {"role": "user", "platform_user_id": "user_b", "content": "你照片真涩情"},
-        {"role": "assistant", "platform_user_id": "bot_456", "content": "学长看照片的眼神，感觉有点过分了啊。"},
+        {
+            "role": "user",
+            "platform_user_id": "user_b",
+            "global_user_id": "global-b",
+            "body_text": "你照片真涩情",
+            "addressed_to_global_user_ids": [CHARACTER_GLOBAL_USER_ID],
+            "broadcast": False,
+        },
+        {
+            "role": "assistant",
+            "platform_user_id": "bot_456",
+            "body_text": "看照片的眼神，感觉有点过分了啊。",
+            "addressed_to_global_user_ids": ["global-b"],
+            "broadcast": False,
+        },
     ]
 
 
 def test_build_interaction_history_recent_returns_empty_without_current_user():
     """Ambiguous bot replies should not leak across group-chat users."""
     history = [
-        {"role": "user", "platform_user_id": "user_a", "content": "prior thread"},
+        {
+            "role": "user",
+            "platform_user_id": "user_a",
+            "global_user_id": "global-a",
+            "content": "prior thread",
+            "addressed_to_global_user_ids": ["character-global"],
+        },
         {
             "role": "assistant",
             "platform_user_id": "bot_456",
             "content": "bot reply to prior thread",
+            "addressed_to_global_user_ids": ["global-a"],
         },
     ]
 
@@ -174,6 +227,8 @@ async def test_dialog_agent_returns_final_dialog():
 
     assert "final_dialog" in result
     assert isinstance(result["final_dialog"], list)
+    assert result["target_addressed_user_ids"] == ["global-user-123"]
+    assert result["target_broadcast"] is False
 
 
 @pytest.mark.asyncio

@@ -8,6 +8,8 @@ from typing import Optional
 
 from kazusa_ai_chatbot.db import ScheduledEventDoc
 
+BotPermissionRole = str
+
 
 def _to_utc_datetime(value: datetime) -> datetime:
     """Normalize a datetime into an aware UTC value.
@@ -64,7 +66,7 @@ class DispatchContext:
         source_user_id: Global user identifier of the source speaker.
         source_message_id: Platform message identifier of the source message.
         guild_id: Optional guild or server scope for permissions.
-        bot_role: Current bot permission level for the source context.
+        bot_permission_role: Current permission level for the source context.
         now: Frozen dispatch time used for immediate tasks.
     """
 
@@ -73,7 +75,7 @@ class DispatchContext:
     source_user_id: str
     source_message_id: str
     guild_id: Optional[str]
-    bot_role: str
+    bot_permission_role: BotPermissionRole
     now: datetime
 
     @classmethod
@@ -93,7 +95,7 @@ class DispatchContext:
             source_user_id=doc["source_user_id"],
             source_message_id=doc["source_message_id"],
             guild_id=doc.get("guild_id"),
-            bot_role=doc.get("bot_role", "user"),
+            bot_permission_role=doc["bot_role"],
             now=parse_iso_datetime(doc["execute_at"]),
         )
         return return_value
@@ -137,7 +139,7 @@ class Task:
             "source_user_id": ctx.source_user_id,
             "source_message_id": ctx.source_message_id,
             "guild_id": ctx.guild_id,
-            "bot_role": ctx.bot_role,
+            "bot_role": ctx.bot_permission_role,
         }
         return return_value
 

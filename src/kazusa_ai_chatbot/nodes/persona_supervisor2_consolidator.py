@@ -1,11 +1,9 @@
-"""Stage 4: consolidator subgraph.
+"""Post-dialog consolidator subgraph.
 
 Wraps the post-dialog reflection pipeline. Runs three parallel reflection
 nodes (``global_state_updater``, ``relationship_recorder``, ``facts_harvester``),
 an evaluator loop over ``facts_harvester``, and a single ``db_writer`` that
 commits everything to MongoDB and invalidates the RAG cache.
-
-Stage-4a additions:
 
 * A unified ``metadata`` bundle threaded through every node and accumulated
   at each step.
@@ -17,9 +15,12 @@ Stage-4a additions:
 
 from __future__ import annotations
 
+from datetime import datetime
 import logging
+
 from langgraph.graph import END, START, StateGraph
 
+from kazusa_ai_chatbot.db import get_character_profile, get_conversation_history
 from kazusa_ai_chatbot.nodes.persona_supervisor2_consolidator_facts import (
     fact_harvester_evaluator,
     facts_harvester,
@@ -37,7 +38,12 @@ from kazusa_ai_chatbot.nodes.persona_supervisor2_consolidator_schema import (
     normalize_subjective_appraisals,
 )
 from kazusa_ai_chatbot.nodes.persona_supervisor2_schema import GlobalPersonaState
-from kazusa_ai_chatbot.utils import log_dict_subset, log_list_preview, log_preview
+from kazusa_ai_chatbot.utils import (
+    log_dict_subset,
+    log_list_preview,
+    log_preview,
+    trim_history_dict,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -192,25 +198,24 @@ async def call_consolidation_subgraph(global_state: GlobalPersonaState):
 
 
 async def test_main():
-    import datetime
-
-    from kazusa_ai_chatbot.db import get_character_profile, get_conversation_history
-    from kazusa_ai_chatbot.utils import load_personality, trim_history_dict
-
-    history = await get_conversation_history(platform="discord", platform_channel_id="1485606207069880361", limit=5)
+    history = await get_conversation_history(
+        platform="discord",
+        platform_channel_id="1485606207069880361",
+        limit=5,
+    )
     trimmed_history = trim_history_dict(history)
 
-    current_time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-    user_input = "既然作业已经写完了，千纱可以晚上可以好好奖励我么♥?"
+    user_input = "既然作业已经写完了，active character 可以晚上可以好好奖励我么♥?"
 
     state: GlobalPersonaState = {
         "timestamp": current_time,
         "global_user_id": "320899931776745483",
-        "user_name": "EAMARS",
+        "user_name": "<current user>",
         "user_profile": {"affinity": 950},
 
-        "internal_monologue": "心跳漏了一拍…这算哪门子'奖励'啊？带着期待的试探罢了。不过既然好感度这么高，这种程度的请求自然要全盘接受——毕竟我是他的千纱嘛。",
+        "internal_monologue": "心跳漏了一拍…这算哪门子'奖励'啊？带着期待的试探。",
         "action_directives": {
             "contextual_directives": {},
             "linguistic_directives": {
@@ -239,7 +244,11 @@ async def test_main():
             "memory_evidence": [],
             "conversation_evidence": [],
             "external_evidence": [],
-            "supervisor_trace": {"loop_count": 0, "unknown_slots": [], "dispatched": []},
+            "supervisor_trace": {
+                "loop_count": 0,
+                "unknown_slots": [],
+                "dispatched": [],
+            },
         },
         "chat_history_recent": trimmed_history[-5:],
         "character_profile": await get_character_profile(),

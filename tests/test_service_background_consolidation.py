@@ -72,7 +72,16 @@ def _chat_request(
         platform_bot_id="bot-1",
         display_name="Test User",
         channel_name="Private",
-        content="please remember this",
+        message_envelope={
+            "body_text": "please remember this",
+            "raw_wire_text": "please remember this",
+            "mentions": [],
+            "attachments": [],
+            "addressed_to_global_user_ids": [
+                service_module.CHARACTER_GLOBAL_USER_ID,
+            ],
+            "broadcast": False,
+        },
         debug_modes=debug_modes or service_module.DebugModesIn(),
     )
     return request
@@ -93,7 +102,7 @@ def _consolidation_state() -> dict:
         "global_user_id": "global-user-1",
         "user_name": "Test User",
         "user_profile": {"affinity": 500},
-        "character_profile": {"name": "Kazusa"},
+        "character_profile": {"name": "Character"},
         "action_directives": {"linguistic_directives": {"content_anchors": []}},
         "internal_monologue": "test",
         "final_dialog": ["ok"],
@@ -142,7 +151,7 @@ def _patch_chat_dependencies(monkeypatch, graph) -> None:
         None.
     """
 
-    monkeypatch.setattr(service_module, "_personality", {"name": "Kazusa"})
+    monkeypatch.setattr(service_module, "_personality", {"name": "Character"})
     monkeypatch.setattr(
         service_module,
         "_ensure_character_global_identity",
@@ -188,14 +197,18 @@ async def test_chat_queues_background_consolidation_for_mapping_state(monkeypatc
     """Mapping-like consolidation state should still queue the background task."""
 
     await _reset_queue_state()
-    save_bot_message = AsyncMock()
+    save_assistant_message = AsyncMock()
     progress_recorder = AsyncMock()
     consolidation_done = asyncio.Event()
 
     async def _consolidation_runner(_state):
         consolidation_done.set()
 
-    monkeypatch.setattr(service_module, "_save_bot_message", save_bot_message)
+    monkeypatch.setattr(
+        service_module,
+        "_save_assistant_message",
+        save_assistant_message,
+    )
     monkeypatch.setattr(
         service_module,
         "_run_conversation_progress_record_background",
@@ -219,7 +232,7 @@ async def test_chat_queues_background_consolidation_for_mapping_state(monkeypatc
     assert len(background_tasks.tasks) == 0
     await asyncio.wait_for(consolidation_done.wait(), timeout=1.0)
 
-    save_bot_message.assert_awaited_once()
+    save_assistant_message.assert_awaited_once()
     progress_recorder.assert_awaited_once()
     await _reset_queue_state()
 
@@ -249,7 +262,7 @@ async def test_next_chat_waits_until_background_consolidation_finishes(monkeypat
             consolidation_started.set()
             await consolidation_can_finish.wait()
 
-    monkeypatch.setattr(service_module, "_save_bot_message", AsyncMock())
+    monkeypatch.setattr(service_module, "_save_assistant_message", AsyncMock())
     monkeypatch.setattr(
         service_module,
         "_run_conversation_progress_record_background",
@@ -299,14 +312,18 @@ async def test_no_remember_skips_consolidation_but_releases_after_other_writes(m
     """no_remember should skip consolidation and still release after save/progress."""
 
     await _reset_queue_state()
-    save_bot_message = AsyncMock()
+    save_assistant_message = AsyncMock()
     progress_done = asyncio.Event()
     consolidation_runner = AsyncMock()
 
     async def _progress_recorder(_state):
         progress_done.set()
 
-    monkeypatch.setattr(service_module, "_save_bot_message", save_bot_message)
+    monkeypatch.setattr(
+        service_module,
+        "_save_assistant_message",
+        save_assistant_message,
+    )
     monkeypatch.setattr(
         service_module,
         "_run_conversation_progress_record_background",
@@ -331,7 +348,7 @@ async def test_no_remember_skips_consolidation_but_releases_after_other_writes(m
     assert len(background_tasks.tasks) == 0
 
     await asyncio.wait_for(progress_done.wait(), timeout=1.0)
-    save_bot_message.assert_awaited_once()
+    save_assistant_message.assert_awaited_once()
     consolidation_runner.assert_not_awaited()
     await _reset_queue_state()
 
@@ -346,7 +363,7 @@ async def test_graph_failure_does_not_stop_queue_worker(monkeypatch):
     background_tasks = BackgroundTasks()
     response = await service_module.chat(_chat_request(), background_tasks)
 
-    assert response.messages == ["Kazusa is busy right now, please try again later."]
+    assert response.messages == ["Character is busy right now, please try again later."]
     assert len(background_tasks.tasks) == 0
     await _reset_queue_state()
 
@@ -409,7 +426,7 @@ async def test_build_graph_preserves_consolidation_state_from_supervisor(monkeyp
         "user_multimedia_input": [],
         "user_profile": {"affinity": 500},
         "platform_bot_id": "bot-id",
-        "bot_name": "Kazusa",
+        "character_name": "Character",
         "character_profile": {"name": "杏山千纱"},
         "platform_channel_id": "673225019",
         "channel_type": "private",
@@ -453,8 +470,8 @@ async def test_build_graph_skips_episode_state_loader_when_relevance_declines(mo
         "user_multimedia_input": [],
         "user_profile": {"affinity": 500},
         "platform_bot_id": "bot-id",
-        "bot_name": "Kazusa",
-        "character_profile": {"name": "Kazusa"},
+        "character_name": "Character",
+        "character_profile": {"name": "Character"},
         "platform_channel_id": "673225019",
         "channel_type": "group",
         "channel_name": "Group",
@@ -473,7 +490,7 @@ async def test_chat_listen_only_keeps_boolean_should_respond(monkeypatch):
     """Listen-only requests should skip thinking while preserving state defaults."""
 
     await _reset_queue_state()
-    monkeypatch.setattr(service_module, "_personality", {"name": "Kazusa"})
+    monkeypatch.setattr(service_module, "_personality", {"name": "Character"})
     monkeypatch.setattr(
         service_module,
         "_ensure_character_global_identity",
@@ -507,7 +524,14 @@ async def test_chat_listen_only_keeps_boolean_should_respond(monkeypatch):
             platform_bot_id="3768713357",
             display_name="Test User",
             channel_name="Group 227608960",
-            content="listen only fixture",
+            message_envelope={
+                "body_text": "listen only fixture",
+                "raw_wire_text": "listen only fixture",
+                "mentions": [],
+                "attachments": [],
+                "addressed_to_global_user_ids": [],
+                "broadcast": True,
+            },
             debug_modes=service_module.DebugModesIn(listen_only=True),
         ),
         background_tasks,

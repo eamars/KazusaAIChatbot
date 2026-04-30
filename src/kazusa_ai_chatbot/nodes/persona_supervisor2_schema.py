@@ -1,7 +1,18 @@
-from typing import NotRequired, TypedDict
+from typing import Literal, NotRequired, TypedDict
 from kazusa_ai_chatbot.conversation_progress import ConversationProgressPromptDoc
 from kazusa_ai_chatbot.state import MultiMediaDoc, DebugModes, ReplyContext
 from kazusa_ai_chatbot.db import CharacterProfileDoc, ConversationEpisodeStateDoc, UserProfileDoc
+from kazusa_ai_chatbot.message_envelope import MessageEnvelope
+
+ReferentRole = Literal["subject", "object", "time"]
+
+
+class ReferentResolution(TypedDict, total=False):
+    """Structured decontextualizer reference-resolution result."""
+
+    phrase: str
+    referent_role: ReferentRole
+    status: Literal["resolved", "unresolved"]
 
 
 class GlobalPersonaState(TypedDict):
@@ -11,6 +22,7 @@ class GlobalPersonaState(TypedDict):
     # Inputs
     timestamp: str
     user_input: str
+    message_envelope: MessageEnvelope
     user_multimedia_input: list[MultiMediaDoc]
     platform: str
     platform_channel_id: str
@@ -32,31 +44,31 @@ class GlobalPersonaState(TypedDict):
     # Debug
     debug_modes: DebugModes
 
-    # Bridge Variables (Outputs of stages)
-    # Stage 0 output
+    # Bridge variables populated by persona graph nodes
+    # Decontextualizer output
     decontexualized_input: str
-    reference_resolution_status: NotRequired[str]
-    needs_clarification: NotRequired[bool]
-    clarification_reason: NotRequired[str]
+    referents: list[ReferentResolution]
 
-    # Stage 1 output
+    # RAG output
     rag_result: dict
 
-    # Stage 2 output
+    # Cognition output
     internal_monologue: str
     action_directives: dict
 
-    # Stage 2 output for stage 4 consolidation
+    # Cognition output for consolidation
     interaction_subtext: str
     emotional_appraisal: str
     character_intent: str
     logical_stance: str
 
-    # Stage 3 output
+    # Dialog output
     final_dialog: [str]  # -> Will be used for dialog end point (e.g,. Discord)
+    target_addressed_user_ids: NotRequired[list[str]]
+    target_broadcast: NotRequired[bool]
     # Other outputs from here
 
-    # Stage 4 output
+    # Consolidation output
     # global state updater
     mood: str
     global_vibe: str
@@ -77,6 +89,7 @@ class CognitionState(TypedDict):
 
     timestamp: str
     user_input: str
+    message_envelope: MessageEnvelope
     global_user_id: str
     user_name: str
     user_profile: UserProfileDoc
@@ -88,9 +101,7 @@ class CognitionState(TypedDict):
     conversation_progress: NotRequired[ConversationProgressPromptDoc]
 
     decontexualized_input: str
-    reference_resolution_status: NotRequired[str]
-    needs_clarification: NotRequired[bool]
-    clarification_reason: NotRequired[str]
+    referents: list[ReferentResolution]
     rag_result: dict
 
     emotional_appraisal: str
@@ -122,6 +133,8 @@ class CognitionState(TypedDict):
     visual_vibe: list[str]
 
     action_directives: dict
+    target_addressed_user_ids: NotRequired[list[str]]
+    target_broadcast: NotRequired[bool]
 
     should_stop: bool
     reasoning: str

@@ -4,15 +4,30 @@ from kazusa_ai_chatbot.db import get_conversation_history, search_conversation_h
 from kazusa_ai_chatbot.db import search_memory as search_memory_db
 
 
+def _message_body_text(message: dict) -> str:
+    """Return clean body text from a typed conversation row.
+
+    Args:
+        message: Conversation-history row from the typed conversation store.
+
+    Returns:
+        Clean `body_text`.
+    """
+
+    body_text = message["body_text"]
+    return body_text
+
+
 @tool
-async def search_conversation(search_query: str = "", 
-                  global_user_id: str | None = None,
-                  top_k: int = 5,
-                  platform: str | None = None,
-                  platform_channel_id: str | None = None,
-                  from_timestamp: str | None = None,
-                  to_timestamp: str | None = None,
-    ) -> list[tuple[float, dict]]:
+async def search_conversation(
+    search_query: str = "",
+    global_user_id: str | None = None,
+    top_k: int = 5,
+    platform: str | None = None,
+    platform_channel_id: str | None = None,
+    from_timestamp: str | None = None,
+    to_timestamp: str | None = None,
+) -> list[tuple[float, dict]]:
     """Search conversation history by semantic similarity.
 
     Mandatory argument rules:
@@ -33,7 +48,17 @@ async def search_conversation(search_query: str = "",
         Top-K conversations close to the query, each as (similarity_score, message_with_metadata).
     """
     if not search_query or not search_query.strip():
-        return_value = [(-1.0, {"error": "search_query is mandatory and must not be empty. Please provide a natural-language semantic query."})]
+        return_value = [
+            (
+                -1.0,
+                {
+                    "error": (
+                        "search_query is mandatory and must not be empty. "
+                        "Please provide a natural-language semantic query."
+                    )
+                },
+            )
+        ]
         return return_value
 
     results = await search_conversation_history(
@@ -50,8 +75,9 @@ async def search_conversation(search_query: str = "",
     # Rebuild return format to remove unwanted columns
     return_list = []
     for (score, message) in results:
+        body_text = _message_body_text(message)
         return_list.append((score, {
-            "content": message.get("content", ""),
+            "body_text": body_text,
             "timestamp": message.get("timestamp", ""),
             "display_name": message.get("display_name", ""),
             "role": message.get("role", ""),
@@ -64,6 +90,7 @@ async def search_conversation(search_query: str = "",
         }))
 
     return return_list
+
 
 @tool
 async def search_conversation_keyword(
@@ -108,9 +135,11 @@ async def search_conversation_keyword(
         to_timestamp=to_timestamp,
     )
 
-    return_value = [
-        {
-            "content": msg.get("content", ""),
+    return_value = []
+    for _, msg in results:
+        body_text = _message_body_text(msg)
+        result_msg = {
+            "body_text": body_text,
             "timestamp": msg.get("timestamp", ""),
             "display_name": msg.get("display_name", ""),
             "role": msg.get("role", ""),
@@ -121,8 +150,7 @@ async def search_conversation_keyword(
             "global_user_id": msg.get("global_user_id", ""),
             "reply_context": msg.get("reply_context", {}),
         }
-        for _, msg in results
-    ]
+        return_value.append(result_msg)
     return return_value
 
 
@@ -180,14 +208,15 @@ async def search_persistent_memory_keyword(
 
 
 @tool
-async def get_conversation(platform: str | None = None,
-                           platform_channel_id: str | None = None,
-                           limit: int = 5,
-                           global_user_id: str | None = None,
-                           display_name: str | None = None,
-                           from_timestamp: str | None = None,
-                           to_timestamp: str | None = None,
-    ) -> list[dict]:
+async def get_conversation(
+    platform: str | None = None,
+    platform_channel_id: str | None = None,
+    limit: int = 5,
+    global_user_id: str | None = None,
+    display_name: str | None = None,
+    from_timestamp: str | None = None,
+    to_timestamp: str | None = None,
+) -> list[dict]:
     """Get conversation history using structured filters.
 
     Usage rules:
@@ -220,8 +249,9 @@ async def get_conversation(platform: str | None = None,
 
     # Rebuild return format to remove unwanted columns
     for message in results:
+        body_text = _message_body_text(message)
         return_list.append({
-            "content": message.get("content", ""),
+            "body_text": body_text,
             "timestamp": message.get("timestamp", ""),
             "display_name": message.get("display_name", ""),
             "role": message.get("role", ""),

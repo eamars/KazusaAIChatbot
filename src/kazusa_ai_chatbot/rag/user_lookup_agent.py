@@ -342,26 +342,26 @@ async def _test_main() -> None:
     """Run a manual smoke check for UserLookupAgent."""
     agent = UserLookupAgent()
     result = await agent.run(
-        task='蚝爹油',
+        task='<named user>',
         context={"platform": "qq"},
     )
     print(json.dumps(result, ensure_ascii=False, indent=2))
 
     result = await agent.run(
-        task='蚝爹油',
+        task='<named user>',
         context={"platform": "qq"},
     )
     print(json.dumps(result, ensure_ascii=False, indent=2))
 
     result = await agent.run(
-        task='蚝油',
+        task='<partial user alias>',
         context={"platform": "qq"},
     )
     print(json.dumps(result, ensure_ascii=False, indent=2))
 
     # Test performance of caching
     result = await agent.run(
-        task='蚝油',
+        task='<partial user alias>',
         context={"platform": "qq"},
     )
     print(json.dumps(result, ensure_ascii=False, indent=2))

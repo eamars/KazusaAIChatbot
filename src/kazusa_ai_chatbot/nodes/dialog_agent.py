@@ -62,7 +62,7 @@ class DialogAgentState(TypedDict):
     action_directives: dict
 
     # Example action_directives:
-    #      {'internal_monologue': "心跳漏了一拍…这算哪门子'奖励'啊？带着期待的试探罢了。不过既然好感度这么高，这种程度的请求自然要全盘接受——毕竟我是他的千纱嘛。", 
+    #      {'internal_monologue': "心跳漏了一拍…这算哪门子'奖励'啊？带着期待的试探罢了。不过既然好感度这么高，这种程度的请求自然要全盘接受——毕竟我是他的千纱嘛。",
     #       'action_directives': {
     #           'speech_guide': {
     #               'tone': '宠溺中带着微妙的羞赧', 
@@ -91,6 +91,7 @@ class DialogAgentState(TypedDict):
     chat_history_recent: list[dict]
     platform_user_id: str
     platform_bot_id: str
+    global_user_id: str
     user_name: str
     user_profile: dict
 
@@ -104,6 +105,8 @@ class DialogAgentState(TypedDict):
 
     # Output
     final_dialog: list[str]  # splitted dialog to be sent in different batch
+    target_addressed_user_ids: list[str]
+    target_broadcast: bool
 
 _DIALOG_GENERATOR_PROMPT = """\
 你现在是角色 `{character_name}` 的 **表达执行官**。你接收来自`linguistic_directives`的修辞指令和`contextual_directives`的社交参数，将它们转化为自然的聊天文本。
@@ -281,6 +284,7 @@ async def dialog_generator(state: DialogAgentState) -> DialogAgentState:
         state["chat_history_wide"],
         state["platform_user_id"],
         state["platform_bot_id"],
+        state["global_user_id"],
     )
     tone_history = _tone_history_for_generator(history)
 
@@ -464,12 +468,17 @@ async def dialog_evaluator(state: DialogAgentState) -> DialogAgentState:
 
     # Extract last user message from chat_history_recent for topic-drift detection
     chat_history_recent = build_interaction_history_recent(
-        state.get("chat_history_wide", []),
+        state["chat_history_wide"],
         state["platform_user_id"],
         state["platform_bot_id"],
+        state["global_user_id"],
     )
     last_user_msg = next(
-        (m.get("content", "") for m in reversed(chat_history_recent) if m.get("role") == "user"),
+        (
+            m["body_text"]
+            for m in reversed(chat_history_recent)
+            if m["role"] == "user"
+        ),
         ""
     )
 
@@ -571,6 +580,7 @@ async def dialog_agent(
         "chat_history_recent": global_state["chat_history_recent"],
         "platform_user_id": global_state["platform_user_id"],
         "platform_bot_id": global_state["platform_bot_id"],
+        "global_user_id": global_state["global_user_id"],
         "user_name": global_state["user_name"],
         "user_profile": global_state["user_profile"],
         
@@ -580,12 +590,14 @@ async def dialog_agent(
 
     result = await sub_graph.ainvoke(subState)
 
-    # Assmeble output
-    final_dialog = result.get("final_dialog", [])
+    # Assemble output.
+    final_dialog = result["final_dialog"]
 
-    logger.info(f'Dialog summary: fragments={len(final_dialog)} retry={result.get("retry", 0)} dialog={log_list_preview(final_dialog)}')
+    logger.info(f'Dialog summary: fragments={len(final_dialog)} retry={result["retry"]} dialog={log_list_preview(final_dialog)}')
 
     return_value = {
-        "final_dialog": final_dialog
+        "final_dialog": final_dialog,
+        "target_addressed_user_ids": [global_state["global_user_id"]] if final_dialog else [],
+        "target_broadcast": False,
     }
     return return_value

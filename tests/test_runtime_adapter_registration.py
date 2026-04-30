@@ -182,14 +182,12 @@ async def test_napcat_hydrates_reply_target_from_platform_get_msg():
     reply_context = {"reply_to_message_id": "1733223276"}
 
     await adapter._hydrate_reply_context_from_platform(reply_context, ws)
-    adapter._finalize_reply_target(reply_context)
 
     assert reply_context == {
         "reply_to_message_id": "1733223276",
         "reply_to_platform_user_id": "3768713357",
         "reply_to_display_name": "杏山千纱",
         "reply_excerpt": "上一条千纱消息",
-        "reply_to_current_bot": True,
     }
     assert ws.sent_payloads[0]["action"] == "get_msg"
     assert ws.sent_payloads[0]["params"] == {"message_id": 1733223276}
@@ -197,8 +195,8 @@ async def test_napcat_hydrates_reply_target_from_platform_get_msg():
 
 
 @pytest.mark.asyncio
-async def test_napcat_handle_event_forwards_reply_to_current_bot_metadata():
-    """Inbound QQ replies to the bot should reach the brain with reply_to_current_bot=true."""
+async def test_napcat_handle_event_forwards_typed_bot_reply_metadata():
+    """Inbound QQ replies to the bot should reach the brain as typed addressees."""
 
     adapter = NapCatWSAdapter(
         ws_url="ws://napcat.local/ws",
@@ -241,9 +239,74 @@ async def test_napcat_handle_event_forwards_reply_to_current_bot_metadata():
     )
 
     payload = adapter.brain_client.post.await_args.kwargs["json"]
-    assert payload["reply_context"]["reply_to_current_bot"] is True
-    assert payload["reply_context"]["reply_to_platform_user_id"] == "3768713357"
-    assert payload["reply_context"]["reply_to_message_id"] == "1733223276"
+    assert payload["message_envelope"]["body_text"] == "千纱さん，你来了呀"
+    assert payload["message_envelope"]["raw_wire_text"].startswith(
+        "[CQ:reply,id=1733223276]"
+    )
+    assert "content" not in payload
+    assert "reply_context" not in payload
+    assert "attachments" not in payload
+    assert payload["message_envelope"]["reply"]["platform_user_id"] == "3768713357"
+    assert payload["message_envelope"]["reply"]["platform_message_id"] == "1733223276"
+    assert payload["message_envelope"]["reply"]["global_user_id"]
+    assert payload["message_envelope"]["addressed_to_global_user_ids"]
+    await adapter.close()
+
+
+@pytest.mark.asyncio
+async def test_napcat_handle_event_sends_clean_body_text_and_typed_envelope():
+    """QQ adapter should strip CQ wire syntax before calling the brain."""
+
+    adapter = NapCatWSAdapter(
+        ws_url="ws://napcat.local/ws",
+        ws_token="token",
+        brain_url="http://127.0.0.1:8000",
+        brain_response_timeout=30,
+        runtime_host="127.0.0.1",
+        runtime_port=8011,
+        runtime_public_url="http://127.0.0.1:8011",
+        channel_ids=["1082431481"],
+        debug_modes={},
+    )
+    adapter.bot_id = "3768713357"
+    adapter.bot_name = "Kazusa"
+    adapter.brain_client.post = AsyncMock(return_value=_DummyResponse({
+        "messages": [],
+        "should_reply": False,
+    }))
+    ws = _FakeNapCatWebSocket({
+        "message_id": 1733223276,
+        "user_id": 3768713357,
+        "sender": {"nickname": "Kazusa"},
+        "raw_message": "previous bot message",
+    })
+
+    await adapter.handle_event(
+        {
+            "post_type": "message",
+            "message_type": "group",
+            "message_id": 394466267,
+            "group_id": 1082431481,
+            "user_id": 3167827653,
+            "sender": {"nickname": "User A"},
+            "message": (
+                "[CQ:reply,id=1733223276]"
+                "[CQ:at,qq=3768713357] what does this mean?"
+                "[CQ:face,id=1]"
+            ),
+        },
+        ws,
+    )
+
+    payload = adapter.brain_client.post.await_args.kwargs["json"]
+    assert "content" not in payload
+    assert all(key != "mentioned" + "_bot" for key in payload)
+    assert payload["message_envelope"]["body_text"] == "what does this mean?"
+    assert payload["message_envelope"]["raw_wire_text"].startswith(
+        "[CQ:reply,id=1733223276]"
+    )
+    assert payload["message_envelope"]["mentions"][0]["entity_kind"] == "bot"
+    assert payload["message_envelope"]["addressed_to_global_user_ids"]
     await adapter.close()
 
 

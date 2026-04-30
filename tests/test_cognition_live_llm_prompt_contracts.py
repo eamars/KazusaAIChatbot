@@ -57,7 +57,7 @@ async def ensure_live_llm() -> None:
 
 
 def _debug_snapshot(label: str, payload: object) -> None:
-    logger.info("%s => %r", label, payload)
+    logger.info(f"{label} => {payload!r}")
     write_llm_trace(
         "cognition_prompt_contracts_live",
         label,
@@ -353,7 +353,6 @@ _DECONTEXT_CASES = [
             "channel_topic": "私聊中的自我评价追问",
             "indirect_speech_context": "",
             "reply_context": {
-                "reply_to_current_bot": True,
                 "reply_to_display_name": "千纱",
                 "reply_excerpt": "评价这种事……你是说，要我说明白对你的看法吗？唔……突然问这些，感觉胸口闷闷的。",
             },
@@ -375,8 +374,8 @@ _DECONTEXT_CASES = [
             "indirect_speech_context": "",
             "reply_context": {},
         },
-        "unresolved_reference_needs_clarification",
-        id="decontext-unresolved-reference-needs-clarification",
+        "unresolved_reference",
+        id="decontext-unresolved-reference",
     ),
     pytest.param(
         {
@@ -391,7 +390,6 @@ _DECONTEXT_CASES = [
             "channel_topic": "",
             "indirect_speech_context": "",
             "reply_context": {
-                "reply_to_current_bot": False,
                 "reply_to_display_name": "LiveDecontextUser",
                 "reply_excerpt": "△ ○ □",
             },
@@ -434,20 +432,18 @@ async def _assert_live_msg_decontexualizer_prompt_contract(ensure_live_llm, case
             f"Reply-only confirmation should recover the underlying self-evaluation task: {output!r}"
         )
         assert output != state["user_input"], f"Reply-only confirmation should not remain bare: {output!r}"
-    elif case_id == "unresolved_reference_needs_clarification":
-        assert result["needs_clarification"] is True, (
-            f"Unresolved reference should request clarification: {result!r}"
-        )
-        assert result["reference_resolution_status"] == "unresolved_reference", (
-            f"Unexpected reference status: {result!r}"
-        )
+    elif case_id == "unresolved_reference":
+        unresolved = [
+            referent
+            for referent in result["referents"]
+            if referent["status"] == "unresolved"
+        ]
+        assert unresolved, f"Unresolved reference should be marked: {result!r}"
     elif case_id == "reply_excerpt_resolves_reference":
-        assert result["needs_clarification"] is False, (
-            f"Reply excerpt should resolve the referent: {result!r}"
-        )
-        assert result["reference_resolution_status"] in {"resolved", "unchanged_clear"}, (
-            f"Unexpected reference status: {result!r}"
-        )
+        assert all(
+            referent["status"] == "resolved"
+            for referent in result["referents"]
+        ), f"Reply excerpt should resolve the referent: {result!r}"
     else:
         assert "阿澈" not in output, f"Indirect speech should preserve third-person structure: {output!r}"
         assert "他" in output, f"Indirect speech case should keep third-person pronoun: {output!r}"
@@ -479,7 +475,7 @@ async def test_live_msg_decontexualizer_recovers_reply_only_confirmation_flow(en
 async def test_live_msg_decontexualizer_marks_unresolved_reference(ensure_live_llm) -> None:
     await _assert_live_msg_decontexualizer_prompt_contract(
         ensure_live_llm,
-        "unresolved_reference_needs_clarification",
+        "unresolved_reference",
     )
 
 

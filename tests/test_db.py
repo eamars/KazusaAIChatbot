@@ -71,8 +71,8 @@ def _patched_embedding(return_value=None, mock=None):
 @pytest.mark.asyncio
 async def test_get_conversation_history():
     mock_docs = [
-        {"role": "assistant", "user_id": "bot_001", "name": "bot", "content": "Hello", "timestamp": "t2"},
-        {"role": "user", "user_id": "user_001", "name": "User", "content": "Hi", "timestamp": "t1"},
+        {"role": "assistant", "platform_user_id": "bot_001", "display_name": "bot", "body_text": "Hello", "timestamp": "t2"},
+        {"role": "user", "platform_user_id": "user_001", "display_name": "User", "body_text": "Hi", "timestamp": "t1"},
     ]
     db = _mock_db()
     cursor = AsyncMock()
@@ -90,8 +90,8 @@ async def test_get_conversation_history():
         db.conversation_history.find.return_value.sort.return_value.limit.assert_called_with(10)
 
     # Should be reversed (oldest first)
-    assert result[0]["content"] == "Hi"
-    assert result[1]["content"] == "Hello"
+    assert result[0]["body_text"] == "Hi"
+    assert result[1]["body_text"] == "Hello"
 
 
 @pytest.mark.asyncio
@@ -266,11 +266,21 @@ async def test_save_conversation_generates_embedding():
     db.conversation_history.insert_one = AsyncMock()
 
     doc = {
-        "channel_id": "c1",
+        "platform": "qq",
+        "platform_channel_id": "c1",
+        "channel_type": "group",
         "role": "user",
-        "user_id": "u1",
-        "name": "Alice",
-        "content": "Hello!",
+        "platform_message_id": "m1",
+        "platform_user_id": "u1",
+        "global_user_id": "global-u1",
+        "display_name": "Alice",
+        "body_text": "Hello!",
+        "raw_wire_text": "Hello!",
+        "content_type": "text",
+        "addressed_to_global_user_ids": ["character-global"],
+        "mentions": [],
+        "broadcast": False,
+        "attachments": [],
         "timestamp": "t1",
     }
 
@@ -288,11 +298,21 @@ async def test_save_conversation_preserves_existing_embedding():
     db.conversation_history.insert_one = AsyncMock()
 
     doc = {
-        "channel_id": "c1",
+        "platform": "qq",
+        "platform_channel_id": "c1",
+        "channel_type": "group",
         "role": "user",
-        "user_id": "u1",
-        "name": "Alice",
-        "content": "Hello!",
+        "platform_message_id": "m1",
+        "platform_user_id": "u1",
+        "global_user_id": "global-u1",
+        "display_name": "Alice",
+        "body_text": "Hello!",
+        "raw_wire_text": "Hello!",
+        "content_type": "text",
+        "addressed_to_global_user_ids": ["character-global"],
+        "mentions": [],
+        "broadcast": False,
+        "attachments": [],
         "timestamp": "t1",
         "embedding": [0.5, 0.6],
     }
@@ -805,7 +825,7 @@ async def test_search_conversation_history_keyword_mocked():
     db = _mock_db()
     cursor = AsyncMock()
     cursor.to_list = AsyncMock(return_value=[
-        {"channel_id": "c1", "timestamp": "t1", "content": "keyword matched"},
+        {"channel_id": "c1", "timestamp": "t1", "body_text": "keyword matched"},
     ])
     db.conversation_history.find.return_value.sort.return_value.limit.return_value = cursor
 
@@ -814,10 +834,11 @@ async def test_search_conversation_history_keyword_mocked():
 
     assert len(results) == 1
     assert results[0][0] == -1.0
-    assert results[0][1]["content"] == "keyword matched"
+    assert results[0][1]["body_text"] == "keyword matched"
     # Verify the regex filter was passed
     call_filter = db.conversation_history.find.call_args[0][0]
-    assert "$regex" in call_filter["content"]
+    assert "$or" not in call_filter
+    assert "$regex" in call_filter["body_text"]
 
 
 @pytest.mark.asyncio
@@ -836,6 +857,8 @@ async def test_search_conversation_history_keyword_with_filters_mocked():
     call_filter = db.conversation_history.find.call_args[0][0]
     assert call_filter["platform_channel_id"] == "ch1"
     assert call_filter["global_user_id"] == "u1"
+    assert "$or" not in call_filter
+    assert "$regex" in call_filter["body_text"]
 
 
 @pytest.mark.asyncio
@@ -844,7 +867,7 @@ async def test_search_conversation_history_vector_mocked():
     db = _mock_db()
     cursor = AsyncMock()
     cursor.to_list = AsyncMock(return_value=[
-        {"channel_id": "c1", "content": "vector matched", "score": 0.95},
+        {"channel_id": "c1", "body_text": "vector matched", "score": 0.95},
     ])
     db.conversation_history.aggregate = MagicMock(return_value=cursor)
 
@@ -853,7 +876,7 @@ async def test_search_conversation_history_vector_mocked():
 
     assert len(results) == 1
     assert results[0][0] == 0.95
-    assert results[0][1]["content"] == "vector matched"
+    assert results[0][1]["body_text"] == "vector matched"
     # Verify aggregate was called with $vectorSearch pipeline
     pipeline = db.conversation_history.aggregate.call_args[0][0]
     assert "$vectorSearch" in pipeline[0]

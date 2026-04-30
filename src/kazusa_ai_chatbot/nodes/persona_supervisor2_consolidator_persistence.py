@@ -172,7 +172,7 @@ def _build_dispatch_context(state: ConsolidatorState, *, timestamp: str) -> Disp
         source_user_id=state.get("global_user_id", ""),
         source_message_id=state.get("platform_message_id", ""),
         guild_id=None,
-        bot_role="user",
+        bot_permission_role="user",
         now=now,
     )
     return return_value

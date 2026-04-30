@@ -3,12 +3,12 @@
 ## Summary
 
 - Goal: Eliminate the *class* of failures where transport-envelope data (mentions, reply targets, CQ codes, addressing) leaks into content-shaped fields and is then re-parsed by every downstream stage. Stage 1 (`rag_reply_mention_and_vague_input_plan.md`) patched two symptoms; Stage 2 fixes the structure so those symptoms cannot recur.
-- Parent: Stage 1 of this initiative ships first as a stopgap. Stage 2 deletes the Stage 1 sanitizer because the inputs it sanitized are no longer reachable.
+- Parent: Stage 1 of this initiative shipped the fail-closed history bridge. The unfinished RAG-side sanitizer is intentionally not implemented; Stage 2 moves wire parsing to the adapter/service contract instead.
 - Plan class: large
-- Status: approved
+- Status: completed
 - Overall cutover strategy: compatible, multi-phase. Storage shape changes are additive; consumers migrate behind a fallback; the fallback is removed only after a soak window.
 - Highest-risk areas: storage migration of `conversation_history`, retrieval-path correctness during the dual-shape window, accidentally narrowing the bot's "addressed_to" so legitimately broadcast bot messages disappear from history filters.
-- Acceptance criteria: adapters produce a typed `MessageEnvelope` with `body_text` cleaned of wire markers; conversation history rows store typed `addressed_to` for both user AND bot messages; `build_interaction_history_recent` filters by typed addressee instead of interleave heuristics; RAG search agents and cache key consume `body_text` only; Stage 1 sanitizer is deleted.
+- Acceptance criteria: adapters produce a typed `MessageEnvelope` with `body_text` cleaned of wire markers before the brain sees the request; conversation history rows store typed `addressed_to` for both user AND bot messages; `build_interaction_history_recent` filters by typed addressee instead of interleave heuristics; RAG search agents and cache key consume `body_text` only; no brain-side platform sanitizer exists.
 
 ## Context
 
@@ -47,14 +47,12 @@ Stage 1 is partially shipped. This section enumerates the as-built state so Stag
 - Decontextualizer fallback path logs at WARN with input preview on LLM exception, parse exception, and missing-field cases ([persona_supervisor2_msg_decontexualizer.py:180-226](src/kazusa_ai_chatbot/nodes/persona_supervisor2_msg_decontexualizer.py#L180-L226)). The Stage 1 mandate to surface silent degradation is met.
 - Bridge hardening for group-chat history landed in `build_interaction_history_recent`: if no current-user anchored slice can be formed, the helper now returns `[]` instead of falling back to raw channel history. This is a fail-closed containment patch for legacy rows, not the Stage 2 typed-addressing solution.
 
-### Stage 1 — NOT IMPLEMENTED
+### Stage 1 — NOT CARRIED FORWARD
 
-- `_envelope_token_set(...)` registry helper does not exist in [persona_supervisor2_rag_supervisor2.py](src/kazusa_ai_chatbot/nodes/persona_supervisor2_rag_supervisor2.py).
-- `_sanitize_initializer_slots(...)` does not exist; the cache write path and cache read path do not run any sanitization.
-- `platform_bot_id` is NOT in the RAG supervisor `context` dict at [persona_supervisor2.py:54-67](src/kazusa_ai_chatbot/nodes/persona_supervisor2.py#L54-L67); the sanitizer (when added) would have no source-of-truth for the current bot mention token.
-- Reply-boilerplate token list is NOT plumbed into the RAG context.
-- The RAG initializer prompt has not been updated to instruct the model that `<@bot_id>` / `[Reply to message]` / CQ reply markers are envelope, not content.
-- `INITIALIZER_PROMPT_VERSION` is currently `initializer_prompt:v4` ([cache2_policy.py:17](src/kazusa_ai_chatbot/rag/cache2_policy.py#L17)). Whether the next bump is needed depends on which path Stage 2 takes (see "Migration choice" below).
+- `_envelope_token_set(...)` and `_sanitize_initializer_slots(...)` are intentionally absent from [persona_supervisor2_rag_supervisor2.py](src/kazusa_ai_chatbot/nodes/persona_supervisor2_rag_supervisor2.py). They would encode platform syntax in a brain module.
+- `platform_bot_id` and reply-boilerplate token lists are intentionally not added to the RAG supervisor `context` for sanitizer purposes.
+- The RAG initializer prompt is intentionally not taught platform marker syntax. The initializer must receive `body_text` after adapter/service normalization.
+- `INITIALIZER_PROMPT_VERSION` remains `initializer_prompt:v4` until the Stage 2 cache-key migration changes the semantic key to `body_text` + typed addressing.
 
 ### Adjacent typed-addressing code already in the repo
 
@@ -62,11 +60,11 @@ Stage 1 is partially shipped. This section enumerates the as-built state so Stag
 
 ## Approved migration path for the unfinished Stage 1 items
 
-The unfinished Stage 1 work (sanitizer, registry, prompt rule, `platform_bot_id` plumbing) is a *stopgap* whose entire purpose is to compensate for wire markers reaching the RAG initializer. Stage 2 removes wire markers at the adapter, so a finished Stage 1 sanitizer would be deleted in Stage 2's Phase F.
+The unfinished Stage 1 work (sanitizer, registry, prompt rule, `platform_bot_id` plumbing) is rejected for Stage 2 execution. It would compensate for wire markers reaching the RAG initializer by adding platform knowledge to a brain module, which conflicts with the Stage 2 adapter-boundary design.
 
-**Approved path: Finish Stage 1 first.** Land the sanitizer, registry, prompt rule, and `platform_bot_id` plumbing per the Stage 1 plan before starting Stage 2 Phase A. This gives a production safety net while Stage 2 is in flight. Stage 2's Phase F deletes the sanitizer after typed envelopes make the sanitized input path unreachable.
+**Approved path: Do not finish the RAG-side sanitizer.** The short-term production containment remains the already-shipped `build_interaction_history_recent` fail-closed bridge. Stage 2 starts by defining the adapter/service-to-brain envelope contract, then implements platform-specific wire parsing only in adapter normalizers.
 
-The implementation agent must not skip the remaining Stage 1 safety net while this approved plan is in force. If the team later chooses to skip it and absorb the work into Stage 2, create a superseding plan or explicit amendment before execution begins.
+The implementation agent must not add sanitizer helpers, platform marker registries, or reply-boilerplate token plumbing to `persona_supervisor2_rag_supervisor2.py`, RAG agents, cognition, dialog, or conversation progress. If wire markers still reach a brain module during Stage 2, fix the adapter/service envelope producer or the service plumbing that derives brain input from `MessageEnvelope.body_text`.
 
 ## Goals
 
@@ -75,12 +73,13 @@ The implementation agent must not skip the remaining Stage 1 safety net while th
 3. **Replace interleave heuristics with typed filters** in `build_interaction_history_recent` and any other consumer that today guesses the user→bot subthread.
 4. **Make stored conversation rows safe to keyword-search** — search agents query `body_text`, not the wire form.
 5. **Make the cache key reflect semantic identity** — same query, same addressing, same cache entry across deployments and cosmetic variations.
-6. **Delete the Stage 1 sanitizer** at the end. It was a stopgap; once `body_text` is clean, there is nothing to sanitize.
+6. **Keep the Stage 1 sanitizer out of brain modules.** Once `body_text` is clean at intake, RAG/cognition/dialog never need platform marker cleanup logic.
 
 ## Mandatory Rules
 
 - Stage 2 is **additive then subtractive**. Add typed fields first, populate them, migrate consumers, delete legacy reliance only after a soak window with telemetry showing zero fallback hits.
 - Adapters are the **only** place that converts wire form to typed form. No downstream stage may parse `<@\d+>`, `[CQ:...]`, `@everyone`, `<@&...>`, `<#...>`, `<:emoji:>` again.
+- The adapter/service-to-brain contract is explicit: every `/chat` request entering the persona graph carries a `MessageEnvelope`; `user_input`, `decontexualized_input`, RAG queries, cognition input, dialog context, and conversation progress are derived from `MessageEnvelope.body_text` plus typed fields. They never consume platform wire syntax as content.
 - `body_text` in storage and retrieval contains user/bot-authored content only — no wire markers, no reply boilerplate, no CQ codes. The original wire form is retained in `raw_wire_text` for audit and forensic replay.
 - `addressed_to` is symmetric. Both user-authored and bot-authored rows carry it. The bot side is sourced from the persona pipeline, NOT inferred from the next user message.
 - `addressed_to` for bot messages defaults to the in-turn user's `global_user_id`. Cognition may override (e.g. when the bot deliberately addresses a different participant), but the override path must produce a deterministic value, not "infer later."
@@ -116,7 +115,7 @@ The implementation agent must not skip the remaining Stage 1 safety net while th
 - Migrate RAG search agents to query `body_text`. Add a read-time normalizer for legacy rows that lack `body_text` (strip known envelope tokens from `content`).
 - Bump `build_initializer_cache_key` keying scheme to include `body_text` + typed addressing intent. Bump `INITIALIZER_PROMPT_VERSION`.
 - Update memory consolidator to persist `body_text` only.
-- Delete Stage 1 sanitizer (`_sanitize_initializer_slots`, `_envelope_token_set`) and its prompt mirror.
+- Keep brain modules free of Stage 1 sanitizer helpers (`_sanitize_initializer_slots`, `_envelope_token_set`) and prompt mirrors. Platform marker cleanup belongs only in adapter normalizers.
 - Migrate decontextualizer's boolean `needs_clarification` to a structured `referents: [{phrase, role: subject|object|time, status: resolved|unresolved}]`, and update cognition consumers (`call_judgment_core_agent`, `call_content_anchor_agent`) to consume narrow per-referent clarification instead of binary skip. Note: the boolean and its consumers already exist in production — Stage 2 adds `referents` *alongside* and removes the boolean only after the new path is verified.
 - Consolidate `_is_directly_addressed_to_bot` in [relevance_agent.py:102](src/kazusa_ai_chatbot/nodes/relevance_agent.py#L102) with the new typed `addressed_to_global_user_ids`. Relevance must consume the typed field directly; the per-row helper is deleted.
 
@@ -141,7 +140,7 @@ Compatible, phased. Each phase is independently shippable and reversible.
 - Phase C (storage write path): new conversation rows are saved with `body_text`, `addressed_to_global_user_ids`, `raw_wire_text`. Old `content` is still written for back-compat readers during the migration window.
 - Phase D (bot-side addressing): cognition emits `target_addressed_user_ids`. `save_conversation` for assistant rows writes `addressed_to_global_user_ids` from this field.
 - Phase E (consumer migration): `build_interaction_history_recent`, RAG search agents, cache key, memory consolidator switch to `body_text` and `addressed_to_global_user_ids`. Each carries a logged fallback for legacy rows.
-- Phase F (cleanup): after telemetry shows zero fallback hits for one week, delete fallbacks, delete legacy `content` writes, delete Stage 1 sanitizer, drop deprecated fields.
+- Phase F (cleanup): after telemetry shows zero fallback hits for 3 days, delete fallbacks, delete legacy `content` writes, verify no brain-side Stage 1 sanitizer exists, drop deprecated fields.
 
 A rollback at any phase reverts to the prior shape; new fields are tolerated as ignored extras.
 
@@ -160,7 +159,7 @@ The implementation agent may edit:
 - `src/kazusa_ai_chatbot/nodes/persona_supervisor2_schema.py` (CognitionState `target_addressed_user_ids`, `referents`).
 - `src/kazusa_ai_chatbot/nodes/persona_supervisor2.py` (envelope/addressee plumbing).
 - `src/kazusa_ai_chatbot/nodes/persona_supervisor2_cognition_l2.py`, `_l3.py` (consume referents).
-- `src/kazusa_ai_chatbot/nodes/persona_supervisor2_rag_supervisor2.py` (delete sanitizer; consume body_text).
+- `src/kazusa_ai_chatbot/nodes/persona_supervisor2_rag_supervisor2.py` (consume `body_text`; do not add platform-marker sanitizers).
 - `src/kazusa_ai_chatbot/rag/cache2_policy.py` (key bump).
 - `src/kazusa_ai_chatbot/rag/conversation_*.py` (search agents query body_text).
 - `src/kazusa_ai_chatbot/nodes/dialog_agent.py` (emit target_addressed_user_ids).
@@ -170,7 +169,7 @@ The implementation agent must NOT:
 
 - Mutate existing conversation_history documents in MongoDB beyond defaulting missing fields at read time.
 - Change `ChatRequest`'s public API in ways that break external callers without a version step.
-- Remove Stage 1 sanitizer before consumer migration is verified end-to-end.
+- Add platform-marker sanitizer helpers, marker registries, or reply-boilerplate plumbing to brain modules.
 - Add backfill scripts that rewrite history rows in place. If a write-side migration is needed it goes through a separate plan with explicit go/no-go.
 
 ## Target State
@@ -250,9 +249,9 @@ Note: legacy fallback is only invoked for missing `addressed_to_global_user_ids`
 
 Boolean `needs_clarification` is replaced with `referents: [{phrase, role, status}]`. Cognition's `call_content_anchor_agent` issues narrow clarification ("你说的『这些』是指什么？") only for the unresolved entries while still using resolved anchors for retrieval. Binary RAG-skip cliff is gone.
 
-### Stage 1 sanitizer
+### No brain-side Stage 1 sanitizer
 
-`_sanitize_initializer_slots` and `_envelope_token_set` are deleted. The prompt rule that mirrored them is deleted. The RAG initializer reads `body_text` only — wire markers cannot reach it.
+`_sanitize_initializer_slots` and `_envelope_token_set` are absent. No prompt rule mirrors platform marker syntax in RAG. The RAG initializer reads `body_text` only — wire markers cannot reach it after adapter/service normalization.
 
 ### Attachment handling — preserve current workflow, expand storage capability
 
@@ -324,15 +323,16 @@ src/kazusa_ai_chatbot/message_envelope/
   types.py                 # TypedDicts: MessageEnvelope, Mention, ReplyTarget, AttachmentRef
   factory.py               # build_envelope(req, normalizer, resolver, handler_registry) -> MessageEnvelope
   protocols.py             # EnvelopeNormalizer, MentionResolver, AttachmentHandler protocols
-  registry.py              # platform-keyed normalizer/handler registries
-  normalizers/
-    __init__.py
-    qq.py                  # QQEnvelopeNormalizer implementing EnvelopeNormalizer
-    discord.py             # DiscordEnvelopeNormalizer (future)
+  registry.py              # protocol registries; adapters register their normalizers
   attachment_handlers/
     __init__.py
     image.py               # ImageAttachmentHandler — current image-to-text behavior
     placeholder.py         # PlaceholderAttachmentHandler — fallback/no-op
+
+src/adapters/
+  envelope_common.py       # adapter-owned helper glue for concrete normalizers
+  napcat_qq_adapter.py     # QQEnvelopeNormalizer lives beside QQ wire intake
+  discord_adapter.py       # DiscordEnvelopeNormalizer lives beside Discord wire intake
 ```
 
 **Interface 1 — `EnvelopeNormalizer` (Protocol):**
@@ -401,10 +401,11 @@ class AttachmentHandler(Protocol):
 
 **Coupling rules:**
 
-- `service.py` and adapter code depend ONLY on `message_envelope.factory.build_envelope(...)` and the protocol types. They never import a concrete normalizer or handler.
-- Cognition, RAG, decontextualizer, relevance, consolidator depend on `MessageEnvelope` TypedDict fields and `ConversationMessageDoc` fields. They do NOT import anything from `message_envelope/normalizers/` or `message_envelope/attachment_handlers/`.
-- `message_envelope/registry.py` is the only module that knows the concrete classes; it is a thin lookup keyed by `platform` (for normalizers) or `media_type_prefix` (for attachment handlers).
-- Each Protocol lives in `protocols.py`; concrete implementations live alongside. Adding a new platform or modality is one new file plus one registry entry — no edits to consumers.
+- `service.py` depends only on `MessageEnvelope` TypedDict fields. It does not import any concrete normalizer or platform parser.
+- Adapter code owns concrete platform normalizers. It may call `message_envelope.factory.build_envelope(...)` with an adapter-local `EnvelopeNormalizer` implementation.
+- Cognition, RAG, decontextualizer, relevance, consolidator depend on `MessageEnvelope` TypedDict fields and `ConversationMessageDoc` fields. They do NOT import adapter normalizers or `message_envelope/attachment_handlers/`.
+- `message_envelope/registry.py` knows shared attachment handlers only. It does not register platform normalizers because platform parsing belongs to adapters.
+- Each Protocol lives in `protocols.py`; concrete platform implementations live beside platform intake code. Adding a new platform is an adapter change, not a brain package change.
 
 ## Future Expansion Slots
 
@@ -412,7 +413,7 @@ Each slot is an explicit extension point preserved in Stage 2 so future work plu
 
 | Slot | Extension shape | Touch points |
 |---|---|---|
-| New platform (Telegram, WeChat, etc.) | Implement `EnvelopeNormalizer` in `message_envelope/normalizers/<platform>.py`; register in `registry.py`. | One new file + one registry entry. No consumer change. |
+| New platform (Telegram, WeChat, etc.) | Implement `EnvelopeNormalizer` inside the new platform adapter and pass it to `build_envelope(...)` before `/chat`. | Adapter-only change plus tests. No brain consumer change. |
 | New attachment modality (audio, video, structured) | Implement `AttachmentHandler` in `message_envelope/attachment_handlers/<modality>.py`; register by `media_type_prefix`. | One new file + one registry entry. `body_text` continues to receive `description`. |
 | Direct-binary RAG (e.g. CLIP image embeddings) | Add a new RAG agent that reads `ConversationMessageDoc.attachments[*].url` or `.base64_data`; no schema change because storage already preserves the binary. | One new RAG agent + initializer slot prefix. Existing agents unchanged. |
 | Vision-capable cognition for current turn | Switch `IMProcessState.user_multimedia_input` consumer to call vision endpoints directly; description stays as fallback. | One cognition prompt change; no envelope, storage, or RAG change. |
@@ -458,7 +459,7 @@ Each slot is documented in the corresponding module's docstring as "Extension po
 | `persona_supervisor2_schema.py` | Add `target_addressed_user_ids`, `referents` fields. |
 | `persona_supervisor2.py` | Plumb envelope and addressee fields between stages; build empty rag_result via `project_known_facts([], …)` is no longer needed because partial-skip is structured. |
 | `persona_supervisor2_cognition_l2.py`, `_l3.py` | Consume `referents`; narrow-clarification anchor logic. |
-| `persona_supervisor2_rag_supervisor2.py` | Consume `body_text`. Delete the Stage 1 safety-net sanitizer (`_sanitize_initializer_slots`, `_envelope_token_set`, and the prompt rule mirror) in Phase F after typed envelopes make the sanitized input path unreachable. |
+| `persona_supervisor2_rag_supervisor2.py` | Consume `body_text`. Do not parse platform marker syntax or host sanitizer helpers; if markers reach this module, fix adapter/service envelope plumbing. |
 | `nodes/relevance_agent.py` | Replace `_is_directly_addressed_to_bot` with a read of `addressed_to_global_user_ids`. Delete the helper. |
 | `rag/cache2_policy.py` | New keying scheme over `body_text` + typed addressing; bump `INITIALIZER_PROMPT_VERSION`. |
 | `rag/conversation_keyword_agent.py`, `conversation_search_agent.py`, `conversation_aggregate_agent.py` | Query `body_text`; tolerate legacy `content` via read-time normalizer. |
@@ -531,7 +532,7 @@ This checkpoint has three sequential sub-gates because the `referents` migration
 ### Checkpoint F (Cleanup completion)
 
 - **Entry criteria:** Checkpoint E (all sub-gates) signed off; 3-day soak with no legacy-fallback log lines firing on rows inside the active recent-history window; per-referent path proven on captured input set.
-- **Success metrics:** Stage 1 sanitizer deleted; `_is_directly_addressed_to_bot` deleted; `mentioned_bot` and `reply_context.reply_to_current_bot` deleted from the source-of-truth surfaces (kept ONLY where Stage 2 explicitly deferred a consumer migration, called out in commit message); boolean `needs_clarification` and friends removed; legacy `content` field stops being written; dual-field Mongo `$or` removed; `INITIALIZER_PROMPT_VERSION` final-bumped.
+- **Success metrics:** brain-side Stage 1 sanitizer remains absent; `_is_directly_addressed_to_bot` deleted; `mentioned_bot` and `reply_context.reply_to_current_bot` deleted from the source-of-truth surfaces (kept ONLY where Stage 2 explicitly deferred a consumer migration, called out in commit message); boolean `needs_clarification` and friends removed; legacy `content` field stops being written; dual-field Mongo `$or` removed; `INITIALIZER_PROMPT_VERSION` final-bumped.
 - **Abort criteria:** Any consumer still references the deleted symbols; tests still depend on the deleted boolean; post-deletion log audit shows fallback paths being hit on new rows.
 - **Sign-off evidence:** static grep showing zero references to deleted symbols, full test pass, 48-hour post-cleanup log audit confirming no fallback firings on new rows. No metrics counters required — log greps and test output are sufficient.
 
@@ -541,7 +542,7 @@ This checkpoint has three sequential sub-gates because the `referents` migration
 
 Gate at end: **Checkpoint A → B**.
 
-1. Create the `message_envelope/` module skeleton: `__init__.py` (public re-exports), `README.md` (module-level documentation), `types.py`, `protocols.py`, `factory.py`, `registry.py`, `normalizers/`, `attachment_handlers/`. Each file has a top-of-file docstring describing what it owns and which extension slot it exposes.
+1. Create the `message_envelope/` module skeleton: `__init__.py` (public re-exports), `README.md` (module-level documentation), `types.py`, `protocols.py`, `factory.py`, `registry.py`, `attachment_handlers/`. Each file has a top-of-file docstring describing what it owns and which extension slot it exposes. Do not add concrete platform normalizers under `message_envelope/`; they live in adapters.
 2. In `types.py`: define `MessageEnvelope`, `Mention`, `ReplyTarget`, `AttachmentRef`, `RawMention`, `RawReply`, `NormalizedEnvelopeFragment`, `ResolvedMention` TypedDicts.
 3. In `protocols.py`: define `EnvelopeNormalizer`, `MentionResolver`, `AttachmentHandler` Protocols. Each Protocol has a complete docstring explaining intended implementations and the extension slot it represents.
 4. In `factory.py`: define `build_envelope(req: ChatRequest, normalizer: EnvelopeNormalizer, resolver: MentionResolver, handlers: AttachmentHandlerRegistry) -> MessageEnvelope`. No platform-specific code in this file.
@@ -556,14 +557,14 @@ Gate at end: **Checkpoint A → B**.
 
 Gate at end: **Checkpoint B → C**.
 
-10. Implement `QQEnvelopeNormalizer` in `message_envelope/normalizers/qq.py` per the `EnvelopeNormalizer` Protocol. Strip `[CQ:reply,...]`, `[CQ:at,...]`, `[CQ:image,...]`, `[CQ:face,...]` from `body_text`; populate `mentions` and `reply` typed structures. Top-of-file docstring documents that this is the only QQ-specific code in the project.
+10. Implement `QQEnvelopeNormalizer` inside `src/adapters/napcat_qq_adapter.py` per the `EnvelopeNormalizer` Protocol. Strip `[CQ:reply,...]`, `[CQ:at,...]`, `[CQ:image,...]`, `[CQ:face,...]` from `body_text`; populate `mentions` and `reply` typed structures. The adapter module docstring/comments document that this is the QQ-specific platform-boundary code.
 11. Implement `ImageAttachmentHandler` in `message_envelope/attachment_handlers/image.py`. The handler:
     - Takes the existing `description` from the inbound `AttachmentIn` if already populated (preserves the current image-to-text flow — Stage 2 does not change description generation).
     - When `description` is empty, the handler MAY call into the existing image-description pipeline; the call must go through a defined interface (no inline imports, no scattered logic).
     - Decides storage shape (`inline` if `size_bytes <= INLINE_ATTACHMENT_BYTE_LIMIT`, else `url_only`, else `drop` for empty/corrupt).
-12. Implement `MentionResolver` default with a `user_profiles`-backed lookup. Tests inject a fixture-backed resolver.
-13. Register both implementations in `message_envelope/registry.py`.
-14. `service.py` calls `build_envelope(...)` at intake. The envelope is plumbed into `IMProcessState`. `user_input` is derived from `body_text` plus the textual descriptions of attachments (preserving today's append-image-description behavior). Existing scattered fields (`mentioned_bot`, `reply_context.reply_to_current_bot`, etc.) are populated *from* the envelope, not re-derived per stage.
+12. Implement a default `MentionResolver` for adapter-side construction that preserves raw platform ids and assigns the configured character global id to bot mentions. A profile-backed resolver remains a later service/storage enhancement because adapters must not depend on the brain database. Tests inject fixture-backed resolvers where global user ids matter.
+13. Register shared attachment implementations in `message_envelope/registry.py`. Platform normalizers are constructed by the owning adapter, not by the brain package registry.
+14. Platform adapters call `build_envelope(...)` before `/chat` and send clean `content == MessageEnvelope.body_text` plus the typed `message_envelope`. `service.py` validates/consumes the supplied envelope and only creates a no-parse passthrough envelope for legacy callers. The envelope is plumbed into `IMProcessState`. `user_input` is derived from `body_text` plus the existing multimedia-description path. Existing scattered fields (`mentioned_bot`, `reply_context.reply_to_current_bot`, etc.) are populated *from* the envelope when present, with legacy fields retained only as back-compat shims.
 15. Verify: adapter unit tests show wire markers stripped from `body_text`; `<@bot_id>` is in `mentions[].role="bot"`, never in `body_text`; image-description regression suite shows byte-identical descriptions vs. pre-Stage-2 baseline.
 
 ### Phase C — Storage write path
@@ -619,7 +620,7 @@ Gate at end: **Checkpoint F**.
 
 36. After 3 consecutive days of zero legacy-fallback hits on rows inside the active recent-history window of any active channel, delete the fallback path.
 37. Stop writing legacy `content` to new rows; mark `content` deprecated in schema. Drop the dual-field `$or` from server-side queries; only `body_text` is queried.
-38. Delete Stage 1 sanitizer (`_sanitize_initializer_slots`, `_envelope_token_set`) and its prompt rule mirror.
+38. Verify no brain-side Stage 1 sanitizer exists (`_sanitize_initializer_slots`, `_envelope_token_set`, prompt rule mirrors, reply-boilerplate token plumbing).
 39. Delete the boolean `needs_clarification` field and its decontextualizer/cognition references (kept aliased with `referents` through Phase E).
 40. Delete `_is_directly_addressed_to_bot` from `relevance_agent.py` (already done in E1, re-verify in F that no caller remains).
 41. Delete `mentioned_bot` and `reply_context.reply_to_current_bot` derived shims where consumers have fully migrated. Where Stage 2 deferred a consumer migration (e.g. relevance prompt language), the shim stays — call out in commit message.
@@ -634,55 +635,59 @@ Gate at end: **Checkpoint F**.
   - Evidence: focused regression added for other-user + assistant-only group window; `tests/test_dialog_agent.py` passed on 2026-04-30.
   - Handoff: next stage starts at Phase A.
   - Sign-off: Codex / 2026-04-30.
-- [ ] Stage 0.5 — remaining Stage 1 sanitizer safety net
-  - Deliverable: `_envelope_token_set`, `_sanitize_initializer_slots`, RAG initializer prompt rule, `platform_bot_id` context plumbing, and cache read/write sanitizer coverage are implemented per the Stage 1 plan.
-  - Files: `src/kazusa_ai_chatbot/nodes/persona_supervisor2.py`, `src/kazusa_ai_chatbot/nodes/persona_supervisor2_rag_supervisor2.py`, `src/kazusa_ai_chatbot/rag/cache2_policy.py` if a prompt-version bump is required, and focused tests.
-  - Verify: Stage 1 sanitizer tests; `python -m py_compile` over modified modules; focused RAG initializer/cache replay tests showing envelope tokens cannot become search keywords.
-  - Evidence: record sanitizer test output, prompt-version decision, and before/after regression for the live failure input.
+- [x] Stage 0.5 — adapter-boundary correction
+  - Deliverable: no RAG-side sanitizer helpers, no RAG prompt rule for platform markers, no reply-boilerplate token plumbing, and the plan explicitly states the adapter/service-to-brain `MessageEnvelope` contract.
+  - Files: `development_plans/typed_message_envelope_stage2_plan.md`, `src/kazusa_ai_chatbot/nodes/persona_supervisor2.py`, `src/kazusa_ai_chatbot/nodes/persona_supervisor2_rag_supervisor2.py`, `src/kazusa_ai_chatbot/rag/cache2_policy.py`, and any reverted focused tests.
+  - Verify: `rg "reply_boilerplate_tokens|_sanitize_initializer_slots|_envelope_token_set|Rule 1c" src tests`; `python -m py_compile` over touched Python modules; focused RAG/persona tests still pass.
+  - Evidence: record static grep, compile output, and focused tests proving the brain-side sanitizer was removed before Phase A.
   - Handoff: next stage starts at Phase A only after this safety net is signed off.
-  - Sign-off: `<agent/date>`.
-- [ ] Stage A — schema and module contract
+  - Sign-off: Codex / 2026-04-30.
+- [x] Stage A — schema and module contract
   - Deliverable: `message_envelope/` public contract, TypedDicts, Protocols, registries, additive schema/state fields.
   - Files: `src/kazusa_ai_chatbot/message_envelope/`, `src/kazusa_ai_chatbot/db/schemas.py`, `src/kazusa_ai_chatbot/state.py`, `src/kazusa_ai_chatbot/nodes/persona_supervisor2_schema.py`, tests.
   - Verify: `python -m py_compile` over modified modules; `pytest tests/test_message_envelope.py -q`; `pytest tests/test_envelope_module_boundaries.py -q`.
   - Evidence: record Checkpoint A -> B compile/test output and module docstring audit.
   - Handoff: next stage starts at Phase B.
-  - Sign-off: `<agent/date>`.
-- [ ] Stage B — adapter intake and envelope construction
+  - Sign-off: Codex / 2026-04-30.
+- [x] Stage B — adapter intake and envelope construction
   - Deliverable: platform normalizers and attachment handlers populate `MessageEnvelope`; `IMProcessState.user_input` derives from `body_text` plus attachment descriptions.
-  - Files: `message_envelope/normalizers/`, `message_envelope/attachment_handlers/`, `message_envelope/factory.py`, `message_envelope/registry.py`, `src/kazusa_ai_chatbot/service.py`, adapter files, tests.
+  - Files: `src/adapters/napcat_qq_adapter.py`, `src/adapters/discord_adapter.py`, `src/adapters/envelope_common.py`, `message_envelope/attachment_handlers/`, `message_envelope/factory.py`, `message_envelope/registry.py`, `src/kazusa_ai_chatbot/service.py`, tests.
   - Verify: adapter envelope tests; image-description regression suite; manual smoke for the live failure input.
   - Evidence: record Checkpoint B -> C adapter fixture diff, image regression output, and mention-resolution telemetry.
   - Handoff: next stage starts at Phase C.
-  - Sign-off: `<agent/date>`.
-- [ ] Stage C — storage write path and legacy read normalization
+  - Sign-off: Codex / 2026-04-30.
+- [x] Stage C — storage write path and legacy read normalization
   - Deliverable: new conversation rows save `body_text`, `addressed_to_global_user_ids`, `raw_wire_text`, `mentions`, `broadcast`, and attachment storage policy fields while legacy `content` remains readable.
   - Files: `src/kazusa_ai_chatbot/db/schemas.py`, `src/kazusa_ai_chatbot/db/conversation.py`, `src/kazusa_ai_chatbot/service.py`, attachment tests.
   - Verify: `pytest tests/test_conversation_history_envelope.py -q`; `pytest tests/test_attachment_handler.py -q`; MongoDB sample-row inspection in a safe test/dev environment.
   - Evidence: record Checkpoint C -> D sample rows, replay tests, insertion-latency comparison, and attachment field audit.
   - Handoff: next stage starts at Phase D.
-  - Sign-off: `<agent/date>`.
-- [ ] Stage D — bot-side addressing capture
+  - Sign-off: Codex / 2026-04-30.
+- [x] Stage D — bot-side addressing capture
   - Deliverable: cognition/dialog output carries `target_addressed_user_ids` and `broadcast`; assistant rows persist typed addressee fields.
   - Files: `src/kazusa_ai_chatbot/nodes/persona_supervisor2_schema.py`, `src/kazusa_ai_chatbot/nodes/dialog_agent.py`, `src/kazusa_ai_chatbot/service.py`, tests.
   - Verify: synthetic group-chat regression where bot serves user A -> user B -> user A and saved assistant rows carry the correct addressees.
   - Evidence: record Checkpoint D -> E regression output and `target_addressed_user_ids` cardinality telemetry.
   - Handoff: next stage starts at Phase E.
-  - Sign-off: `<agent/date>`.
-- [ ] Stage E — consumer migration
+  - Sign-off: Codex / 2026-04-30.
+- [x] Stage E — consumer migration
   - Deliverable: `build_interaction_history_recent`, RAG search agents, cache key, memory consolidator, decontextualizer/referents, and relevance consume typed envelope/addressing fields with logged legacy fallback.
   - Files: `src/kazusa_ai_chatbot/utils.py`, `src/kazusa_ai_chatbot/rag/conversation_*.py`, `src/kazusa_ai_chatbot/rag/cache2_policy.py`, `src/kazusa_ai_chatbot/nodes/persona_supervisor2_msg_decontexualizer.py`, cognition L2/L3 modules, relevance agent, tests.
   - Verify: `pytest tests/test_build_interaction_history_recent.py -q`; `pytest tests/test_rag_search_body_text.py -q`; `pytest tests/test_rag_initializer_cache2.py -q`; `pytest tests/test_decontexualizer_referents.py -q`; live LLM tests one at a time.
   - Evidence: record Checkpoint E -> F telemetry showing legacy fallback trend, cache hit-rate snapshot, and captured-input referent regression.
+  - Sub-gates:
+    - [x] E1 — consumers migrated to `body_text` and typed addressing. Sign-off: Codex / 2026-04-30.
+    - [x] E2 — decontextualizer emits `referents` alongside the legacy boolean. Sign-off: Codex / 2026-04-30.
+    - [x] E3 — cognition consumes `referents` while retaining the legacy boolean only as an alias. Sign-off: Codex / 2026-04-30.
   - Handoff: next stage starts at Phase F only after the soak gate is satisfied.
-  - Sign-off: `<agent/date>`.
-- [ ] Stage F — cleanup and removal of transitional paths
+  - Sign-off: Codex / 2026-04-30. Owner-directed early Phase F entry; production 3-day soak evidence unavailable in workspace.
+- [x] Stage F — cleanup and removal of transitional paths
   - Deliverable: delete legacy fallbacks, Stage 1 sanitizer path if present, `_is_directly_addressed_to_bot`, boolean clarification path, and deprecated legacy writes after telemetry gates pass.
   - Files: all Phase F cleanup files listed above plus tests/static greps.
   - Verify: static greps in this plan; full test pass; 48-hour post-cleanup telemetry.
-  - Evidence: record Checkpoint F grep output, full test output, and production telemetry snapshot.
+  - Evidence: Checkpoint F grep output, compile output, full default pytest output, and the unavailable production telemetry caveat are recorded below.
   - Handoff: plan complete.
-  - Sign-off: `<agent/date>`.
+  - Sign-off: Codex / 2026-04-30. Implementation cleanup complete; production 48-hour post-cleanup audit unavailable in workspace at sign-off.
 
 ## Verification
 
@@ -707,8 +712,8 @@ Gate at end: **Checkpoint F**.
   - Cognition prompts and RAG agents see only `description`; no agent reaches for `base64_data` in Stage 2.
 
 - `pytest tests/test_envelope_module_boundaries.py -q` (new)
-  - Static import-graph check: no module outside `message_envelope/` imports from `message_envelope/normalizers/` or `message_envelope/attachment_handlers/` (consumers depend on protocols, not implementations).
-  - `service.py` imports only from `message_envelope` and `message_envelope.factory`; no per-platform import.
+  - Static import-graph check: brain modules do not import adapter normalizers or concrete attachment handlers (consumers depend on TypedDicts/protocols, not platform implementations).
+  - `service.py` imports only the public `MessageEnvelope` contract; no per-platform import and no concrete normalizer import.
 
 - `pytest tests/test_build_interaction_history_recent.py -q` (extend existing)
   - Multi-user group scenario: bot serves A, B, A. History scoped to A includes only A↔bot turns whose bot side has `A` in `addressed_to_global_user_ids`.
@@ -779,7 +784,7 @@ This plan is complete when:
 - RAG search agents query `body_text` only.
 - `build_initializer_cache_key` keys off `body_text` + typed addressing.
 - Decontextualizer emits structured `referents`; cognition consumes them for narrow clarification.
-- Stage 1 sanitizer and its prompt mirror are deleted in Phase F after typed-envelope consumers are verified.
+- Brain-side Stage 1 sanitizer helpers and prompt mirrors are absent; platform marker cleanup lives only in adapter normalizers.
 - New conversation rows compute their embedding from `body_text` + composed attachment descriptions; legacy rows are not re-embedded (deferred).
 - Mongo queries during the migration window use a `body_text`-or-`content` `$or`; Phase F removes the `content` branch.
 - DM addressing defaults are deterministic: inbound user rows have `addressed_to_global_user_ids=[bot_id]` and `reply_to_current_bot=True`; outbound bot rows have `addressed_to_global_user_ids=[current_user_id]`.
@@ -807,7 +812,7 @@ This plan is complete when:
 | Storage migration breaks read for live traffic | Phase A→C are additive only; legacy `content` continues to be written through Phase E | Read-side compatibility test exercising mixed-shape collections. |
 | Cache key bump triggers cold-cache load spike | Bump during low-traffic window; warm-up worker if needed | Pre-rollout cache-load simulation. |
 | Decontextualizer migration to `referents` confuses local Gemma | Ship structured contract with both forms during transition; alias boolean for one release | Live LLM tests; telemetry on `referents` field presence. |
-| Stage 1 sanitizer is deleted prematurely | Phase F gate explicitly requires Phase E telemetry clean | PR reviewers verify Phase E success criteria before approving Phase F. |
+| Platform marker cleanup drifts back into RAG/cognition/dialog | Mandatory Rules forbid brain-side sanitizers; Stage 0.5 and Phase F greps verify absence | Static grep for sanitizer helpers and marker prompt rules at Stage 0.5 and Phase F. |
 | Multi-bot deployments resolve mentions incorrectly | Resolution goes through user profile store; unresolved mention falls back to platform_id with `global_user_id=""` | Adapter tests with multi-bot fixtures. |
 | Broadcast bot replies disappear from per-user history | Explicit `broadcast: true` flag in the row; consumer treats broadcasts as visible to all | Group-chat test with a broadcast turn. |
 | Attachment description pipeline regresses during refactor | Phase B regression test compares descriptions byte-for-byte against pre-Stage-2 baseline; `ImageAttachmentHandler` preserves inbound description when supplied | Image-description regression suite at Checkpoint B → C. |
@@ -821,14 +826,14 @@ This plan is complete when:
 | DM rows look like legacy rows because addressing is "trivial" | DM defaults pinned in Mandatory Rules: `addressed_to_global_user_ids=[bot_id]`, `reply_to_current_bot=True`; envelope factory applies these deterministically | Unit test for DM envelope path at Phase B. |
 | Phase F gate stalls because of low-traffic channels | Soak gate scoped to "active channels with traffic during the window"; quiet channels do not block | Active-channel set computed from `last_timestamp` per channel; documented in Phase F sign-off evidence. |
 
-## Stage 1 deletion / consolidation checklist (Phase F)
+## Stage 1 absence / consolidation checklist (Phase F)
 
-To be checked off when Phase F runs. These items apply because the approved migration path requires the remaining Stage 1 sanitizer safety net to ship before Stage 2 Phase A.
+To be checked off when Phase F runs. These items verify that the rejected brain-side sanitizer did not reappear while the adapter/service typed-envelope path was implemented.
 
-- [ ] `_sanitize_initializer_slots` deleted from `persona_supervisor2_rag_supervisor2.py`.
-- [ ] `_envelope_token_set` deleted.
-- [ ] Prompt rule "do not search these as keywords" removed from `_INITIALIZER_PROMPT`.
-- [ ] Tests for the sanitizer deleted (cache-replay test stays, repurposed against the new key scheme).
+- [ ] `_sanitize_initializer_slots` absent from `persona_supervisor2_rag_supervisor2.py`.
+- [ ] `_envelope_token_set` absent.
+- [ ] No prompt rule in `_INITIALIZER_PROMPT` teaches RAG platform marker syntax.
+- [ ] No sanitizer tests exist; cache-replay tests target the new `body_text` + typed-addressing key scheme.
 - [ ] `_is_directly_addressed_to_bot` deleted from `nodes/relevance_agent.py`; relevance consumes `addressed_to_global_user_ids` directly.
 - [ ] `mentioned_bot` and `reply_context.reply_to_current_bot` deleted from source-of-truth surfaces. Where Stage 2 deferred a consumer migration (e.g. relevance prompt language), the shim is retained and the commit message calls it out explicitly.
 - [ ] Dual-field `$or` over `body_text` and `content` removed from `db/conversation.py`; only `body_text` is queried server-side.
@@ -841,69 +846,98 @@ To be checked off when Phase F runs. These items apply because the approved migr
 
 Each checkpoint's sign-off evidence is recorded under its own subheading. A phase does not enter execution until the prior checkpoint subheading is filled.
 
+### Stage 0.5 sign-off
+
+- Static grep: `rg "reply_boilerplate_tokens|_sanitize_initializer_slots|_envelope_token_set|Rule 1c" src tests` returned no matches (exit 1 from `rg` because no hits).
+- Compile results: `python -m py_compile src/kazusa_ai_chatbot/nodes/persona_supervisor2.py src/kazusa_ai_chatbot/nodes/persona_supervisor2_rag_supervisor2.py src/kazusa_ai_chatbot/rag/cache2_policy.py tests/test_rag_initializer_cache2.py tests/test_persona_supervisor2_rag2_integration.py` passed with no output.
+- Test results: `python -m pytest tests/test_rag_initializer_cache2.py tests/test_persona_supervisor2_rag2_integration.py tests/test_rag_cache2_persistent.py tests/test_dialog_agent.py tests/test_conversation_progress_runtime.py -q` passed: 31 passed in 2.16s.
+- Prompt-version decision: `INITIALIZER_PROMPT_VERSION` remains `initializer_prompt:v4`; the next bump belongs to Stage E's `body_text` + typed-addressing cache-key migration, not to a rejected brain-side sanitizer.
+- Architecture correction: RAG-side sanitizer helpers/prompt rule/reply-boilerplate plumbing were removed; Stage 2 proceeds through adapter/service `MessageEnvelope` normalization.
+
 ### Checkpoint A → B sign-off
 
-- Compile results:
-- Test results (`tests/test_message_envelope.py`, `tests/test_envelope_module_boundaries.py`):
-- Module docstring audit:
-- `message_envelope/README.md` link:
+- Compile results: `python -m py_compile src/kazusa_ai_chatbot/message_envelope/__init__.py src/kazusa_ai_chatbot/message_envelope/types.py src/kazusa_ai_chatbot/message_envelope/protocols.py src/kazusa_ai_chatbot/message_envelope/registry.py src/kazusa_ai_chatbot/message_envelope/factory.py src/kazusa_ai_chatbot/message_envelope/attachment_handlers/__init__.py src/kazusa_ai_chatbot/db/schemas.py src/kazusa_ai_chatbot/db/__init__.py src/kazusa_ai_chatbot/db/bootstrap.py src/kazusa_ai_chatbot/state.py src/kazusa_ai_chatbot/nodes/persona_supervisor2_schema.py tests/test_message_envelope.py tests/test_envelope_module_boundaries.py tests/test_state.py tests/test_persona_supervisor2_schema.py` passed with no output.
+- Test results (`tests/test_message_envelope.py`, `tests/test_envelope_module_boundaries.py`): included in focused deterministic run `python -m pytest tests/test_message_envelope.py tests/test_envelope_module_boundaries.py tests/test_state.py tests/test_persona_supervisor2_schema.py -q`, passed: 28 passed in 1.81s.
+- Module docstring audit: top-of-file docstrings present in `message_envelope/__init__.py`, `types.py`, `protocols.py`, `registry.py`, `factory.py`, and `attachment_handlers/__init__.py`; verified by reading the first 3 lines of each file. Concrete platform normalizers were later moved to adapters per the adapter-boundary correction.
+- `message_envelope/README.md` link: [README.md](src/kazusa_ai_chatbot/message_envelope/README.md).
 
 ### Checkpoint B → C sign-off
 
-- Adapter unit-test diff (live failure input shows `<@bot>` removed from `body_text`):
-- Image-description regression suite output:
-- `mentions` resolution-rate telemetry:
-- Manual smoke (live failure input):
+- Adapter unit-test diff (live failure input shows `<@bot>` removed from `body_text`): `tests/test_adapter_envelope_normalizers.py::test_qq_normalizer_strips_legacy_flattened_reply_and_mention` verifies `[Reply to message] <@3768713357> what does this mean?` becomes `body_text="what does this mean?"`; `tests/test_runtime_adapter_registration.py::test_napcat_handle_event_sends_clean_body_text_and_typed_envelope` verifies QQ adapter payload `content` and `message_envelope.body_text` are clean while `raw_wire_text` retains CQ reply/at codes.
+- Adapter-boundary correction: concrete `QQEnvelopeNormalizer` and `DiscordEnvelopeNormalizer` live in `src/adapters/napcat_qq_adapter.py` and `src/adapters/discord_adapter.py`; `src/kazusa_ai_chatbot/message_envelope/normalizers/` is absent. Static grep `rg -n "message_envelope\\.normalizers|build_default_normalizer_registry|message_envelope/normalizers|normalizers/" src` returned no matches.
+- Image-description regression suite output: `python -m pytest tests/test_attachment_handler.py -q` covered by focused Phase B run; descriptions are byte-identical and inline/url-only/drop storage shape policy is deterministic.
+- Service plumbing output: `tests/test_service_input_queue.py::test_worker_derives_graph_input_from_message_envelope` verifies graph `user_input` and saved legacy `content` derive from `message_envelope.body_text`, not raw wire text.
+- Manual smoke (live failure input): direct adapter normalizer smoke for `[Reply to message] <@3768713357> 你知道这些是什么意思么？` printed `你知道这些是什么意思么？` and mention role `bot`; no brain module parsed the marker.
+- Compile results: `python -m py_compile src\adapters\envelope_common.py src\adapters\napcat_qq_adapter.py src\adapters\discord_adapter.py src\adapters\debug_adapter.py src\kazusa_ai_chatbot\message_envelope\__init__.py src\kazusa_ai_chatbot\message_envelope\types.py src\kazusa_ai_chatbot\message_envelope\protocols.py src\kazusa_ai_chatbot\message_envelope\registry.py src\kazusa_ai_chatbot\message_envelope\factory.py src\kazusa_ai_chatbot\message_envelope\resolvers.py src\kazusa_ai_chatbot\message_envelope\attachment_handlers\image.py src\kazusa_ai_chatbot\service.py src\kazusa_ai_chatbot\chat_input_queue.py tests\test_message_envelope.py tests\test_adapter_envelope_normalizers.py tests\test_attachment_handler.py tests\test_envelope_module_boundaries.py tests\test_runtime_adapter_registration.py tests\test_service_input_queue.py` passed with no output.
+- Test results: `python -m pytest tests\test_message_envelope.py tests\test_adapter_envelope_normalizers.py tests\test_attachment_handler.py tests\test_envelope_module_boundaries.py tests\test_runtime_adapter_registration.py tests\test_service_input_queue.py -q` passed: 41 passed in 3.37s.
 
 ### Checkpoint C → D sign-off
 
-- MongoDB sample-row inspection (envelope fields present):
-- Legacy-row replay test:
-- Conversation-history insertion latency comparison:
-- Attachment field-presence audit:
+- MongoDB sample-row inspection (envelope fields present): `tests/test_conversation_history_envelope.py::test_save_conversation_writes_typed_fields_and_embedding_source` inspects the mocked `conversation_history.insert_one` document and verifies `body_text`, `raw_wire_text`, `addressed_to_global_user_ids`, `mentions`, `broadcast`, and attachment fields are present. It also verifies the embedding source is `clean body\nsmall image\nlarge image`, not raw wire text.
+- Legacy-row replay test: `tests/test_conversation_history_envelope.py::test_get_conversation_history_normalizes_legacy_rows` replays `[Reply to message] <@3768713357> body text` and verifies read-time `body_text="body text"`, `raw_wire_text` retains the original legacy content, default typed fields are populated, and the INFO normalizer audit log fires with row id/channel/timestamp.
+- Conversation-history insertion latency comparison: no live Mongo write was performed at this code-only checkpoint. The deterministic mocked path still performs one `insert_one` and one Cache2 invalidation after the existing embedding call; no additional Mongo round trip was added to `save_conversation`. Live insertion latency comparison remains a rollout audit item if a safe test/staging Mongo instance is available.
+- Attachment field-presence audit: `tests/test_attachment_handler.py` verifies description byte preservation and inline/url/drop storage-shape policy. `tests/test_conversation_history_envelope.py::test_save_conversation_writes_typed_fields_and_embedding_source` verifies inline attachments retain `base64_data` and large `url_only` attachments retain `url` while dropping `base64_data`.
+- Compile results: `python -m py_compile src\adapters\envelope_common.py src\adapters\napcat_qq_adapter.py src\adapters\discord_adapter.py src\adapters\debug_adapter.py src\kazusa_ai_chatbot\chat_input_queue.py src\kazusa_ai_chatbot\db\conversation.py src\kazusa_ai_chatbot\db\schemas.py src\kazusa_ai_chatbot\message_envelope\__init__.py src\kazusa_ai_chatbot\message_envelope\attachment_policy.py src\kazusa_ai_chatbot\message_envelope\attachment_handlers\image.py src\kazusa_ai_chatbot\message_envelope\factory.py src\kazusa_ai_chatbot\message_envelope\protocols.py src\kazusa_ai_chatbot\message_envelope\registry.py src\kazusa_ai_chatbot\message_envelope\resolvers.py src\kazusa_ai_chatbot\message_envelope\types.py src\kazusa_ai_chatbot\service.py tests\test_adapter_envelope_normalizers.py tests\test_attachment_handler.py tests\test_conversation_history_envelope.py tests\test_db.py tests\test_envelope_module_boundaries.py tests\test_message_envelope.py tests\test_runtime_adapter_registration.py tests\test_save_conversation_invalidation.py tests\test_service_input_queue.py` passed with no output.
+- Focused Stage C tests: `python -m pytest tests\test_conversation_history_envelope.py tests\test_save_conversation_invalidation.py tests\test_db.py::test_save_conversation_generates_embedding tests\test_db.py::test_save_conversation_preserves_existing_embedding tests\test_db.py::test_search_conversation_history_keyword_mocked tests\test_db.py::test_search_conversation_history_keyword_with_filters_mocked tests\test_db.py::test_search_conversation_history_vector_mocked tests\test_db.py::test_search_conversation_history_vector_with_filters_mocked tests\test_service_input_queue.py::test_worker_derives_graph_input_from_message_envelope tests\test_service_input_queue.py::test_worker_preserves_collapsed_image_input tests\test_attachment_handler.py -q` passed: 16 passed in 2.18s.
+- Stage A/B/C regression batch: `python -m pytest tests\test_message_envelope.py tests\test_adapter_envelope_normalizers.py tests\test_attachment_handler.py tests\test_envelope_module_boundaries.py tests\test_runtime_adapter_registration.py tests\test_service_input_queue.py tests\test_conversation_history_envelope.py tests\test_save_conversation_invalidation.py tests\test_state.py tests\test_persona_supervisor2_schema.py -q` passed: 65 passed in 3.51s.
 
 ### Checkpoint D → E sign-off
 
-- Group-chat regression test (A→B→A scenario):
-- `target_addressed_user_ids` cardinality telemetry:
+- Group-chat regression test (A→B→A scenario): `tests/test_bot_side_addressing.py::test_save_bot_message_defaults_to_current_turn_user` saves three assistant turns for `user-a`, `user-b`, then `user-a` and verifies `addressed_to_global_user_ids == [["user-a"], ["user-b"], ["user-a"]]`, `broadcast == false` for all rows, and assistant `body_text` stays unrendered dialog text.
+- `target_addressed_user_ids` cardinality telemetry: deterministic test snapshot from `tests/test_bot_side_addressing.py` shows default assistant rows have cardinality 1; `tests/test_bot_side_addressing.py::test_save_bot_message_honors_explicit_broadcast` verifies explicit broadcast rows keep cardinality 0 only when `target_broadcast=true`.
+- Compile results: `python -m py_compile src\kazusa_ai_chatbot\state.py src\kazusa_ai_chatbot\nodes\persona_supervisor2_schema.py src\kazusa_ai_chatbot\nodes\dialog_agent.py src\kazusa_ai_chatbot\nodes\persona_supervisor2.py src\kazusa_ai_chatbot\service.py tests\test_state.py tests\test_persona_supervisor2_schema.py tests\test_message_envelope.py tests\test_dialog_agent.py tests\test_persona_supervisor2.py tests\test_bot_side_addressing.py` passed with no output.
+- Focused Stage D tests: `python -m pytest tests\test_bot_side_addressing.py tests\test_dialog_agent.py tests\test_persona_supervisor2.py tests\test_state.py tests\test_persona_supervisor2_schema.py tests\test_message_envelope.py -q` passed: 40 passed in 2.15s.
+- Stage A/B/C/D regression batch: `python -m pytest tests\test_message_envelope.py tests\test_adapter_envelope_normalizers.py tests\test_attachment_handler.py tests\test_envelope_module_boundaries.py tests\test_runtime_adapter_registration.py tests\test_service_input_queue.py tests\test_conversation_history_envelope.py tests\test_save_conversation_invalidation.py tests\test_state.py tests\test_persona_supervisor2_schema.py tests\test_dialog_agent.py tests\test_persona_supervisor2.py tests\test_bot_side_addressing.py -q` passed: 79 passed in 3.60s.
+- Static greps: `rg -n "reply_boilerplate_tokens|_sanitize_initializer_slots|_envelope_token_set|Rule 1c" src tests` returned no matches; `rg -n "message_envelope\\.normalizers|build_default_normalizer_registry|message_envelope/normalizers|normalizers/" src` returned no matches.
 
 ### Checkpoint E → F sign-off
 
 #### E1 — Consumers migrated
 
-- Log-grep summary (legacy-fallback hits per channel; in-window vs out-of-window split):
-- Cache hit-rate observation from production logs before/after key bump:
-- `pytest tests/test_rag_search_body_text.py -q` and `pytest tests/test_build_interaction_history_recent.py -q` results:
+- Status: implementation sub-gate signed by Codex / 2026-04-30. Full Stage E remains open because the combined 3-day soak gate is not complete.
+- Log-grep summary (legacy-fallback hits per channel; in-window vs out-of-window split): `rg -n "interaction_history_legacy_fallback|Conversation legacy row normalized" test_artifacts -g "*.log"` returned no matches in available workspace log artifacts. Deterministic tests now emit the required INFO lines for legacy rows: `tests/test_build_interaction_history_recent.py::test_legacy_history_fallback_logs_missing_typed_rows`, `tests/test_build_interaction_history_recent.py::test_normalized_legacy_rows_still_use_logged_fallback`, and `tests/test_conversation_history_envelope.py::test_get_conversation_history_normalizes_legacy_rows`.
+- Cache hit-rate observation from production logs before/after key bump: no post-E1 production log sample is available in the workspace. The key-scheme bump is verified deterministically by `INITIALIZER_PROMPT_VERSION == "initializer_prompt:v5"` and `tests/test_rag_initializer_cache2.py::test_initializer_cache_key_uses_body_text_and_addressing`; the combined E -> F gate still requires a real production/cache observation before cleanup.
+- Static greps: `rg -n "reply_boilerplate_tokens|_sanitize_initializer_slots|_envelope_token_set|Rule 1c|_is_directly_addressed_to_bot" src tests` returned no matches; `rg -n "message_envelope\\.normalizers|build_default_normalizer_registry|message_envelope/normalizers|normalizers/" src` returned no matches. `Test-Path src\kazusa_ai_chatbot\message_envelope\normalizers` returned `False`; `Test-Path src\adapters\envelope_common.py` returned `True`.
+- Compile results: `python -m py_compile src\kazusa_ai_chatbot\db\schemas.py src\kazusa_ai_chatbot\db\conversation.py src\kazusa_ai_chatbot\utils.py src\kazusa_ai_chatbot\nodes\persona_supervisor2_cognition.py src\kazusa_ai_chatbot\nodes\dialog_agent.py src\kazusa_ai_chatbot\nodes\relevance_agent.py src\kazusa_ai_chatbot\nodes\persona_supervisor2.py src\kazusa_ai_chatbot\rag\cache2_policy.py src\kazusa_ai_chatbot\rag\memory_retrieval_tools.py tests\test_conversation_history_envelope.py tests\test_build_interaction_history_recent.py tests\test_rag_search_body_text.py tests\test_memory_retrieval_tools.py tests\test_rag_initializer_cache2.py tests\test_relevance_agent.py tests\test_persona_supervisor2_rag2_integration.py` passed with no output.
+- Focused E1 results: `python -m pytest tests\test_build_interaction_history_recent.py tests\test_rag_search_body_text.py tests\test_memory_retrieval_tools.py tests\test_rag_initializer_cache2.py tests\test_relevance_agent.py tests\test_dialog_agent.py tests\test_persona_supervisor2_rag2_integration.py -q` passed: 53 passed in 4.40s.
+- Stage A/B/C/D/E1 regression batch: `python -m pytest tests\test_message_envelope.py tests\test_adapter_envelope_normalizers.py tests\test_attachment_handler.py tests\test_envelope_module_boundaries.py tests\test_runtime_adapter_registration.py tests\test_service_input_queue.py tests\test_conversation_history_envelope.py tests\test_save_conversation_invalidation.py tests\test_state.py tests\test_persona_supervisor2_schema.py tests\test_dialog_agent.py tests\test_persona_supervisor2.py tests\test_bot_side_addressing.py tests\test_build_interaction_history_recent.py tests\test_rag_search_body_text.py tests\test_memory_retrieval_tools.py tests\test_rag_initializer_cache2.py tests\test_relevance_agent.py tests\test_persona_supervisor2_rag2_integration.py -q` passed: 124 passed in 5.92s.
 
 #### E2 — `referents` emitted alongside boolean
 
-- Captured-input regression report (≥80% structural equivalence):
-- Local Gemma latency comparison before/after extended decontextualizer prompt:
-- `pytest tests/test_decontexualizer_referents.py -q` results:
+- Captured-input regression report (≥80% structural equivalence): local LLM captured set passed 3/3 structurally correct (100%). Cases: bare `这些是什么意思？` produced `referents=[{"phrase": "这些", "role": "object", "status": "unresolved"}]` with `needs_clarification=true`; reply-excerpt anchored `这些是什么意思？` produced `referents=[{"phrase": "这些", "role": "object", "status": "resolved"}]` with `needs_clarification=false`; literal-anchor `这个 README.md 是什么意思？` produced `referents=[]` with `needs_clarification=false`. Trace artifacts: `test_artifacts/llm_traces/decontexualizer_referents_live__unresolved_reference__20260430T084723201034Z.json`, `...reply_excerpt_resolved__20260430T084734554970Z.json`, `...clear_literal_anchor__20260430T084744055530Z.json`.
+- Local Gemma latency comparison before/after extended decontextualizer prompt: runtime prompt size changed from 4649 to 5107 chars (+458, +9.9%). Direct old-vs-new prompt samples: unresolved-reference 2.623s -> 1.525s; reply-excerpt-resolved 1.082s -> 1.468s; clear-literal-anchor 1.348s -> 1.202s. Final live pytest timings were 2.363s, 1.798s, and 1.636s respectively, all under the 30s live-test budget.
+- `pytest tests/test_decontexualizer_referents.py -q` results: passed, 4 passed and 3 live tests deselected in 1.35s. Live tests were run one by one with `-m live_llm`: `test_live_decontext_referents_unresolved`, `test_live_decontext_referents_resolved_by_reply`, and `test_live_decontext_referents_clear_literal_anchor` all passed. Additional E2 regression batch passed: `python -m pytest tests\test_message_envelope.py tests\test_adapter_envelope_normalizers.py tests\test_attachment_handler.py tests\test_envelope_module_boundaries.py tests\test_runtime_adapter_registration.py tests\test_service_input_queue.py tests\test_conversation_history_envelope.py tests\test_save_conversation_invalidation.py tests\test_state.py tests\test_persona_supervisor2_schema.py tests\test_dialog_agent.py tests\test_persona_supervisor2.py tests\test_bot_side_addressing.py tests\test_build_interaction_history_recent.py tests\test_rag_search_body_text.py tests\test_memory_retrieval_tools.py tests\test_rag_initializer_cache2.py tests\test_relevance_agent.py tests\test_persona_supervisor2_rag2_integration.py tests\test_msg_decontexualizer.py tests\test_decontexualizer_referents.py tests\test_cognition_clarification_consumers.py -q` returned 138 passed, 3 deselected in 6.48s.
 
 #### E3 — Cognition switches to `referents`
 
-- Captured-input regression diff (per-referent vs binary clarification):
-- Manual smoke on the live failure input:
-- `pytest` covering the cognition L2/L3 referent path:
+- Captured-input regression diff (per-referent vs binary clarification): structured `referents` are now authoritative in `referent_resolution.py`, Judgment Core, Content Anchor, and RAG skip routing. A resolved structured referent prevents the legacy binary RAG-skip cliff even when `needs_clarification=true`; mixed referents still ask a narrow clarification while preserving retrieval access; all-unresolved referents skip RAG with the projected empty `rag_result` shape. Deterministic coverage: `tests/test_referent_resolution.py::test_referents_are_authoritative_over_legacy_boolean`, `tests/test_referent_resolution.py::test_mixed_referents_clarify_without_skipping_rag`, `tests/test_persona_supervisor2_rag2_integration.py::test_stage_1_research_runs_rag_for_mixed_referents`, and `tests/test_persona_supervisor2_rag2_integration.py::test_stage_1_research_skips_when_referents_are_all_unresolved`.
+- Manual smoke on the live failure input: live Content Anchor smoke for `这些是什么意思？` with `needs_clarification=false` and `referents=[{"phrase": "这些", "role": "object", "status": "unresolved"}]` produced a narrow `[ANSWER]` asking what `这些` refers to, with no `[FACT]` anchor and duration 2.649s. Judgment Core live smoke with the same false-boolean/structured-referent shape forced `logical_stance=TENTATIVE`, `character_intent=CLARIFY`, and included `这些` in the note, duration 1.618s. Mixed-referent live smoke asked which sentence/words were missing instead of inventing an answer, duration 1.935s. Trace artifacts: `test_artifacts/llm_traces/cognition_referents_live__judgment_false_boolean_unresolved_referent.json`, `test_artifacts/llm_traces/cognition_referents_live__content_anchor_live_failure_input.json`, `test_artifacts/llm_traces/cognition_referents_live__content_anchor_mixed_referents__20260430T090036173984Z.json`.
+- `pytest` covering the cognition L2/L3 referent path: compile passed for `src\kazusa_ai_chatbot\nodes\referent_resolution.py`, `persona_supervisor2_msg_decontexualizer.py`, `persona_supervisor2.py`, `persona_supervisor2_cognition_l2.py`, `persona_supervisor2_cognition_l3.py`, `persona_supervisor2_cognition.py`, and the E3 tests. Focused E3 deterministic run `python -m pytest tests\test_referent_resolution.py tests\test_cognition_clarification_consumers.py tests\test_persona_supervisor2_rag2_integration.py tests\test_persona_supervisor2_rag_skip_shape.py tests\test_cognition_referents_live_llm.py -q` passed: 14 passed, 3 deselected in 1.79s. Live tests were run one by one with `-m live_llm`: `test_live_judgment_core_prefers_referents_over_false_boolean`, `test_live_content_anchor_clarifies_live_failure_input`, and `test_live_content_anchor_keeps_mixed_referent_question_narrow` all passed after inspection. Additional A/B/C/D/E1/E2/E3 regression batch passed: `python -m pytest tests\test_message_envelope.py tests\test_adapter_envelope_normalizers.py tests\test_attachment_handler.py tests\test_envelope_module_boundaries.py tests\test_runtime_adapter_registration.py tests\test_service_input_queue.py tests\test_conversation_history_envelope.py tests\test_save_conversation_invalidation.py tests\test_state.py tests\test_persona_supervisor2_schema.py tests\test_dialog_agent.py tests\test_persona_supervisor2.py tests\test_bot_side_addressing.py tests\test_build_interaction_history_recent.py tests\test_rag_search_body_text.py tests\test_memory_retrieval_tools.py tests\test_rag_initializer_cache2.py tests\test_relevance_agent.py tests\test_persona_supervisor2_rag2_integration.py tests\test_msg_decontexualizer.py tests\test_decontexualizer_referents.py tests\test_cognition_clarification_consumers.py tests\test_referent_resolution.py tests\test_cognition_referents_live_llm.py -q` returned 146 passed, 6 deselected in 6.41s.
+- E3 static boundary checks: `rg -n "reply_boilerplate_tokens|_sanitize_initializer_slots|_envelope_token_set|Rule 1c|_is_directly_addressed_to_bot" src tests` returned no matches; `rg -n "message_envelope\.normalizers|build_default_normalizer_registry|message_envelope/normalizers|normalizers/" src` returned no matches; `Test-Path src\kazusa_ai_chatbot\message_envelope\normalizers` returned `False`.
 
 #### Combined E → F gate
 
-- 3-day log audit: zero legacy-fallback hits inside the active recent-history window across active channels:
-- Active-channel set used for the audit (computed from `last_timestamp` per channel):
+- 3-day log audit: production soak evidence is not available in the workspace. `rg -n "interaction_history_legacy_fallback|Conversation legacy row normalized|legacy fallback|legacy row" . -g "*.log" -g "*.txt" -g "*.md"` found no runtime log artifacts containing fallback hits, only plan text. Per user instruction on 2026-04-30, Phase F is being entered before a real 3-day production soak can be recorded; this is an explicit owner-directed early cleanup, not fabricated telemetry.
+- Active-channel set used for the audit (computed from `last_timestamp` per channel): not available from workspace log artifacts at early-entry time. Phase F cleanup proceeds by owner direction after E1/E2/E3 tests and static boundary checks passed.
 
 ### Checkpoint F sign-off
 
-- Static grep showing zero references to deleted symbols:
-- Full test pass:
-- 48-hour post-cleanup log audit confirming no fallback firings on new rows:
+- Static grep showing zero references to deleted symbols: all commands returned no matches:
+  - `rg -n "mentioned_bot|reply_to_current_bot|legacy_addressing_fallback|interaction_history_legacy_fallback|normalize_legacy_conversation_text|Conversation legacy row normalized|_is_directly_addressed_to_bot|reply_boilerplate_tokens|_sanitize_initializer_slots|_envelope_token_set|Rule 1c" src tests`
+  - `rg -n "needs_clarification|clarification_reason|reference_resolution_status" src\kazusa_ai_chatbot tests`
+  - `rg -n "message_envelope\.normalizers|build_default_normalizer_registry|message_envelope/normalizers|normalizers/" src`
+  - `rg -n "<@\d+>" src\kazusa_ai_chatbot`
+- Compile pass: `python -m py_compile` over all changed and untracked Python files passed with no syntax errors. Git emitted line-ending warnings only.
+- Focused Stage F regression batch: `python -m pytest tests\test_message_envelope.py tests\test_adapter_envelope_normalizers.py tests\test_attachment_handler.py tests\test_envelope_module_boundaries.py tests\test_runtime_adapter_registration.py tests\test_service_input_queue.py tests\test_conversation_history_envelope.py tests\test_save_conversation_invalidation.py tests\test_state.py tests\test_persona_supervisor2_schema.py tests\test_dialog_agent.py tests\test_persona_supervisor2.py tests\test_bot_side_addressing.py tests\test_build_interaction_history_recent.py tests\test_rag_search_body_text.py tests\test_memory_retrieval_tools.py tests\test_rag_initializer_cache2.py tests\test_relevance_agent.py tests\test_persona_supervisor2_rag2_integration.py tests\test_persona_supervisor2_rag_skip_shape.py tests\test_msg_decontexualizer.py tests\test_decontexualizer_referents.py tests\test_cognition_clarification_consumers.py tests\test_referent_resolution.py tests\test_cognition_referents_live_llm.py tests\test_utils.py tests\test_db.py -q` passed: 186 passed, 19 deselected.
+- Full default test pass: `python -m pytest -q` passed: 414 passed, 139 deselected.
+- 48-hour post-cleanup log audit confirming no fallback firings on new rows: unavailable at implementation sign-off time. Workspace log grep `rg -n "interaction_history_legacy_fallback|Conversation legacy row normalized|legacy fallback|legacy row" . -g "*.log"` returned no matches because no production log artifacts are present. This is an explicit owner-directed early cleanup caveat, not fabricated telemetry.
 
 ### Cross-cutting evidence
 
-- Static grep results:
-- Test results:
-- Compile results:
-- Live LLM results:
-- Manual smoke:
-- Telemetry snapshots:
-- Changed files:
+- Static grep results: Stage F deleted-symbol greps over `src` and `tests` returned no matches; adapter-boundary grep for forbidden normalizer placement returned no matches; numeric mention marker grep under `src\kazusa_ai_chatbot` returned no matches.
+- Test results: focused Stage F batch passed 186 passed, 19 deselected; full default suite passed 414 passed, 139 deselected.
+- Compile results: `python -m py_compile` over changed and untracked Python files passed.
+- Live LLM results: no new live LLM tests were run during Phase F; E2/E3 live LLM evidence above remains the model-facing contract evidence for the referents migration.
+- Manual smoke: Phase F relied on deterministic adapter/service tests and static greps; no additional manual service smoke was run.
+- Telemetry snapshots: production 3-day soak and 48-hour post-cleanup audits are unavailable in this workspace. Phase F proceeded by owner instruction after deterministic gates passed.
+- Changed files: adapter normalizers, message-envelope contract modules, service intake, conversation storage/schema/bootstrap, queue policy, scoped history utility, RAG cache/search helpers, relevance, decontextualizer, cognition L2/L3, dialog, state/schema tests, and the execution plan.

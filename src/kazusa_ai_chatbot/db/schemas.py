@@ -9,6 +9,11 @@ from __future__ import annotations
 
 from typing import TypedDict
 
+from kazusa_ai_chatbot.message_envelope.types import (
+    ConversationAuthorRole,
+    MentionEntityKind,
+)
+
 
 class UserMemoryUnitType:
     """String constants for ``user_memory_units.unit_type``."""
@@ -36,6 +41,7 @@ class AttachmentDoc(TypedDict, total=False):
     base64_data: str      # Inline base64 — for small attachments only
     description: str      # Alt-text / transcription / OCR summary
     size_bytes: int       # File size
+    storage_shape: str    # "inline" | "url_only" | "drop"
 
 
 class ReplyContextDoc(TypedDict, total=False):
@@ -43,8 +49,16 @@ class ReplyContextDoc(TypedDict, total=False):
     reply_to_message_id: str
     reply_to_platform_user_id: str
     reply_to_display_name: str
-    reply_to_current_bot: bool
     reply_excerpt: str
+
+
+class MentionDoc(TypedDict, total=False):
+    """Structured mention metadata for a conversation message."""
+    platform_user_id: str
+    global_user_id: str
+    display_name: str
+    entity_kind: MentionEntityKind
+    raw_text: str
 
 
 class ConversationMessageDoc(TypedDict, total=False):
@@ -57,14 +71,17 @@ class ConversationMessageDoc(TypedDict, total=False):
     platform: str              # "discord" | "qq" | "wechat" | "whatsapp" | "telegram" | "system"
     platform_channel_id: str   # Original channel/group ID from the platform
     channel_type: str          # "group" | "private" | "system"
-    role: str                  # "user" | "assistant"
+    role: ConversationAuthorRole  # "user" | "assistant"
     platform_message_id: str   # Original platform message ID when available
     platform_user_id: str      # Original user/bot ID from the platform
     global_user_id: str        # Our internal UUID key
     display_name: str          # Display name at time of message
-    content: str               # Text content
+    body_text: str             # Content-only text without platform wire markers
+    raw_wire_text: str         # Original on-the-wire text for audit/replay
     content_type: str          # "text" | "image" | "voice" | "mixed"
-    mentioned_bot: bool        # Whether the platform structurally mentioned the bot
+    addressed_to_global_user_ids: list[str]  # Typed addressees for user/assistant rows
+    mentions: list[MentionDoc]  # Typed mentions extracted by adapter normalizers
+    broadcast: bool            # True only for assistant-authored channel replies
     attachments: list[AttachmentDoc]  # Images, voice, files
     reply_context: ReplyContextDoc     # Structured reply-to metadata when available
     timestamp: str             # ISO-8601 UTC timestamp

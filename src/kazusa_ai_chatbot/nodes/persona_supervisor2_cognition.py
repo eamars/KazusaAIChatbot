@@ -89,6 +89,7 @@ async def call_cognition_subgraph(state: GlobalPersonaState) -> GlobalPersonaSta
         state["chat_history_wide"],
         state["platform_user_id"],
         state["platform_bot_id"],
+        state["global_user_id"],
     )
 
     initial_state: CognitionState = {
@@ -96,21 +97,20 @@ async def call_cognition_subgraph(state: GlobalPersonaState) -> GlobalPersonaSta
         # Inputs
         "timestamp": state["timestamp"],
         "user_input": state["user_input"],
+        "message_envelope": state["message_envelope"],
         "global_user_id": state["global_user_id"],
         "user_name": state["user_name"],
         "user_profile": state["user_profile"],
         "platform_bot_id": state["platform_bot_id"],
         "chat_history_recent": interaction_history_recent,
-        "reply_context": state.get("reply_context", {}),
-        "indirect_speech_context": state.get("indirect_speech_context", ""),
+        "reply_context": state["reply_context"],
+        "indirect_speech_context": state["indirect_speech_context"],
         "channel_topic": state["channel_topic"],
         "conversation_progress": state.get("conversation_progress"),
 
         # From previous stages
         "decontexualized_input": decontexualized_input,
-        "reference_resolution_status": state.get("reference_resolution_status", "unchanged_clear"),
-        "needs_clarification": state.get("needs_clarification", False),
-        "clarification_reason": state.get("clarification_reason", ""),
+        "referents": state["referents"],
         "rag_result": state["rag_result"],
     }
     
@@ -131,7 +131,7 @@ async def call_cognition_subgraph(state: GlobalPersonaState) -> GlobalPersonaSta
         "internal_monologue": internal_monologue,
         "action_directives": action_directives,
 
-        # Other data to help with stage 4 consolidation
+        # Other data used by post-dialog consolidation.
         "interaction_subtext": interaction_subtext,
         "emotional_appraisal": emotional_appraisal,
         "character_intent": character_intent,

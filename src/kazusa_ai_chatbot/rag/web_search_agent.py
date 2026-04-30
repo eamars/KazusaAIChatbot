@@ -276,7 +276,7 @@ async def _tool_call_executor(state: WebSearchState) -> dict:
                 logger.error(f'Incorrect tool was invoked: {tool_call["name"]}')
             except Exception as exc:
                 logger.debug(f"Handled exception in _tool_call_executor: {exc}")
-                logger.exception(f'Error executing tool {tool_call["name"]}')
+                logger.exception(f'Error executing tool {tool_call["name"]}: {exc}')
                 observation = {"error": "tool execution failed"}
 
             results.append(ToolMessage(
@@ -551,12 +551,12 @@ async def _test_main() -> None:
     """Run a manual smoke check for WebSearchAgent."""
     try:
         await mcp_manager.start()
-    except Exception:
-        logger.exception("MCP manager failed to start — tools will be unavailable")
+    except Exception as exc:
+        logger.exception(f"MCP manager failed to start — tools will be unavailable: {exc}")
 
     agent = WebSearchAgent()
     result = await agent.run(
-        task="杏山千纱的信息",
+        task="<active character> 的信息",
         context={},
     )
     print(json.dumps(result, ensure_ascii=False, indent=2))

@@ -2,20 +2,23 @@
 
 from __future__ import annotations
 
+import json
+import logging
+import re
+from pathlib import Path
+from typing import Any
+
 from json_repair import repair_json
-from langchain_openai import ChatOpenAI
 from langchain_core.messages import HumanMessage, SystemMessage
-from kazusa_ai_chatbot.config import AFFINITY_MIN, AFFINITY_MAX
+from langchain_openai import ChatOpenAI
+
 from kazusa_ai_chatbot.config import (
+    AFFINITY_MAX,
+    AFFINITY_MIN,
     JSON_REPAIR_LLM_API_KEY,
     JSON_REPAIR_LLM_BASE_URL,
     JSON_REPAIR_LLM_MODEL,
 )
-from pathlib import Path
-import logging
-import json
-import re
-from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -53,82 +56,122 @@ def get_llm(
     return _llm
 
 
-def trim_history_dict(history):
-    """Trim history to only include necessary keys to be fed into LLM"""
+def trim_history_dict(history: list[dict]) -> list[dict]:
+    """Project conversation-history rows to prompt-facing metadata.
+
+    Args:
+        history: Conversation-history documents in chronological order.
+
+    Returns:
+        A list of compact dictionaries that preserve clean `body_text` and
+        typed-addressing metadata needed by downstream consumers.
+    """
     results = []
     for msg in history:
-        results.append({
+        body_text = msg["body_text"]
+        raw_reply_context = msg.get("reply_context") or {}
+        reply_context = {
+            key: raw_reply_context.get(key)
+            for key in (
+                "reply_to_message_id",
+                "reply_to_platform_user_id",
+                "reply_to_display_name",
+                "reply_excerpt",
+            )
+            if isinstance(raw_reply_context, dict)
+            and raw_reply_context.get(key) not in ("", None)
+        }
+        trimmed_msg = {
             "name": msg.get("display_name"),
             "display_name": msg.get("display_name"),
             "platform_message_id": msg.get("platform_message_id", ""),
             "platform_user_id": msg.get("platform_user_id"),
             "global_user_id": msg.get("global_user_id"),
             "role": msg.get("role"),
-            "content": msg.get("content"),
-            "mentioned_bot": bool(msg.get("mentioned_bot", False)),
-            "reply_context": msg.get("reply_context", {}),
-            "timestamp": msg.get("timestamp")
-        })
+            "body_text": body_text,
+            "addressed_to_global_user_ids": msg["addressed_to_global_user_ids"],
+            "mentions": msg["mentions"],
+            "broadcast": bool(msg["broadcast"]),
+            "reply_context": reply_context,
+            "timestamp": msg.get("timestamp"),
+        }
+        results.append(trimmed_msg)
     return results
+
+
+def _is_current_user_row(
+    row: dict,
+    current_platform_user_id: str,
+    current_global_user_id: str,
+) -> bool:
+    """Return whether a typed history row was authored by the current user."""
+
+    if row["role"] != "user":
+        return False
+    if current_global_user_id and row["global_user_id"] == current_global_user_id:
+        return_value = True
+        return return_value
+    return_value = row["platform_user_id"] == current_platform_user_id
+    return return_value
+
+
+def _is_visible_assistant_row(
+    row: dict,
+    platform_bot_id: str,
+    current_global_user_id: str,
+) -> bool:
+    """Return whether a typed assistant row is visible to the current user."""
+
+    if row["role"] != "assistant":
+        return False
+    if row["platform_user_id"] != platform_bot_id:
+        return False
+    if row["broadcast"] is True:
+        return True
+    addressed = row["addressed_to_global_user_ids"]
+    return_value = current_global_user_id in addressed
+    return return_value
 
 
 def build_interaction_history_recent(
     chat_history_recent: list[dict],
     current_platform_user_id: str,
     platform_bot_id: str,
+    current_global_user_id: str = "",
 ) -> list[dict]:
-    """Return the recent history slice scoped to the current user-bot interaction.
+    """Return the recent history slice scoped to the current user's interaction.
 
     Args:
         chat_history_recent: Shared recent channel history, typically from a group
             conversation window.
         current_platform_user_id: Platform user ID for the in-flight user turn.
         platform_bot_id: Platform user ID for the bot persona in the same channel.
+        current_global_user_id: Internal UUID for the in-flight user.
 
     Returns:
-        A filtered recent-history list for the current user-bot subthread. The
-        slice begins at the first current-user message after the most recent
-        other-user turn, then keeps only the current user's messages and the
-        bot's assistant replies. If no such slice can be formed for the current
-        user, returns an empty list so unrelated group-chat turns do not leak
-        into persona context.
+        A filtered recent-history list for the current user's subthread. User
+        rows are selected by author UUID; assistant rows are selected by
+        addressee UUID or explicit assistant broadcast.
     """
-    last_other_user_idx = -1
-    for index, msg in enumerate(chat_history_recent):
-        if (
-            msg.get("role") == "user"
-            and msg.get("platform_user_id") != current_platform_user_id
-        ):
-            last_other_user_idx = index
-
-    candidate_history = chat_history_recent[last_other_user_idx + 1:]
-    first_current_user_idx = next(
-        (
-            index for index, msg in enumerate(candidate_history)
-            if msg.get("role") == "user"
-            and msg.get("platform_user_id") == current_platform_user_id
-        ),
-        -1,
-    )
-    if first_current_user_idx >= 0:
-        candidate_history = candidate_history[first_current_user_idx:]
-    else:
+    if not current_global_user_id:
         return_value: list[dict] = []
         return return_value
 
-    interaction_history = [
-        msg for msg in candidate_history
-        if (
-            msg.get("role") == "user"
-            and msg.get("platform_user_id") == current_platform_user_id
-        ) or (
-            msg.get("role") == "assistant"
-            and msg.get("platform_user_id") == platform_bot_id
-        )
-    ]
-    if interaction_history:
-        return interaction_history
-    return_value = []
+    interaction_history: list[dict] = []
+    has_current_user_row = False
+    for msg in chat_history_recent:
+        if _is_current_user_row(msg, current_platform_user_id, current_global_user_id):
+            interaction_history.append(msg)
+            has_current_user_row = True
+            continue
+        if _is_visible_assistant_row(msg, platform_bot_id, current_global_user_id):
+            interaction_history.append(msg)
+
+    if not has_current_user_row:
+        return_value: list[dict] = []
+        return return_value
+
+    return_value = interaction_history
     return return_value
 
 
@@ -159,13 +202,11 @@ def text_or_empty(value: object) -> str:
     return return_value
 
 
-def log_preview(value: Any, max_length: int | None = None) -> str:
+def log_preview(value: Any) -> str:
     """Return a complete JSON-safe rendering suitable for logs.
 
     Args:
         value: Arbitrary value to render.
-        max_length: Deprecated compatibility parameter. It is intentionally
-            ignored because debug logs must not hide information.
 
     Returns:
         The full value rendered without truncation. Strings are JSON-encoded so
@@ -185,17 +226,11 @@ def log_preview(value: Any, max_length: int | None = None) -> str:
 
 def log_list_preview(
     values: list[Any],
-    max_items: int | None = None,
-    item_length: int | None = None,
 ) -> str:
     """Return a complete list rendering for log output.
 
     Args:
         values: Sequence of values to render.
-        max_items: Deprecated compatibility parameter. It is intentionally
-            ignored because debug logs must not hide list items.
-        item_length: Deprecated compatibility parameter. It is intentionally
-            ignored because debug logs must not hide item content.
 
     Returns:
         The full list as JSON text without synthetic overflow markers.
@@ -207,16 +242,13 @@ def log_list_preview(
 def log_dict_subset(
     mapping: dict[str, Any],
     keys: list[str],
-    value_length: int | None = None,
 ) -> str:
-    """Return a requested-key mapping for legacy log call sites.
+    """Return a requested-key mapping for structured log output.
 
     Args:
         mapping: Source mapping to filter.
         keys: Keys to include. Missing and empty values are recorded explicitly
             so the log does not hide their state.
-        value_length: Deprecated compatibility parameter. It is intentionally
-            ignored because debug logs must not hide value content.
 
     Returns:
         JSON text describing each requested key without truncating values.
@@ -261,8 +293,18 @@ _parse_json_with_llm = get_llm(
     base_url=JSON_REPAIR_LLM_BASE_URL,
     api_key=JSON_REPAIR_LLM_API_KEY,
 )
+
+
 def parse_json_with_llm(broken_string: str) -> dict:
-    """Parse JSON with LLM as a fallback when repair_json fails."""
+    """Repair malformed JSON text by asking the configured JSON-repair LLM.
+
+    Args:
+        broken_string: Raw malformed JSON-like text returned by an LLM.
+
+    Returns:
+        Parsed JSON object from the repaired response.
+    """
+
     system_prompt = SystemMessage(content=_PARSE_JSON_WITH_LLM_PROMPT)
     human_message = HumanMessage(
         content=json.dumps(
@@ -306,7 +348,7 @@ def parse_llm_json_output(raw_output: str) -> dict:
         decoded_json_dict = repair_json(raw, return_objects=True)            
     except Exception as exc:
         logger.debug(f"Handled exception in parse_llm_json_output: {exc}")
-        logger.exception("repair_json failed; falling back to LLM JSON repair")
+        logger.exception(f"repair_json failed; falling back to LLM JSON repair: {exc}")
         decoded_json_dict = parse_json_with_llm(raw_output)
 
     else:

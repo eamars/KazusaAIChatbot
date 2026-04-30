@@ -8,6 +8,8 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any
 
+from kazusa_ai_chatbot.config import CHARACTER_GLOBAL_USER_ID
+
 GROUP_COALESCE_MAX_GAP_SECONDS = 120.0
 
 
@@ -222,23 +224,36 @@ class ChatInputQueue:
             item: Queued chat item.
 
         Returns:
-            True when the adapter marked the request as a bot mention.
+            True when the typed message envelope contains a bot mention.
         """
 
-        return_value = item.request.mentioned_bot is True
+        envelope = item.request.message_envelope
+        mentions = envelope.mentions
+
+        return_value = False
+        for mention in mentions:
+            if mention.entity_kind == "bot":
+                return_value = True
+                break
         return return_value
 
     def is_bot_reply(self, item: QueuedChatItem) -> bool:
-        """Return whether a queued request is an adapter-confirmed bot reply.
+        """Return whether a queued request is addressed to the character.
 
         Args:
             item: Queued chat item.
 
         Returns:
-            True only when the adapter supplied `reply_to_current_bot=True`.
+            True when the typed reply target is the character.
         """
 
-        return_value = item.request.reply_context.reply_to_current_bot is True
+        envelope = item.request.message_envelope
+        reply = envelope.reply
+        if reply is None:
+            return_value = False
+            return return_value
+
+        return_value = reply.global_user_id == CHARACTER_GLOBAL_USER_ID
         return return_value
 
     def is_private_message(self, item: QueuedChatItem) -> bool:
@@ -349,11 +364,14 @@ class ChatInputQueue:
             None.
         """
 
+        survivor_content = survivor.request.message_envelope.body_text
+        collapsed_content = collapsed_item.request.message_envelope.body_text
+
         if survivor.combined_content is None:
-            survivor.combined_content = survivor.request.content
+            survivor.combined_content = survivor_content
         survivor.combined_content = "\n".join([
             survivor.combined_content,
-            collapsed_item.request.content,
+            collapsed_content,
         ])
         survivor.collapsed_items.append(collapsed_item)
 

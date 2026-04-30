@@ -33,6 +33,7 @@ from kazusa_ai_chatbot.db.schemas import (
     ConversationEpisodeStateDoc,
     ConversationMessageDoc,
     MemoryDoc,
+    MentionDoc,
     PlatformAccountDoc,
     RAGCache2PersistentEntryDoc,
     ScheduledEventDoc,
@@ -119,7 +120,7 @@ __all__ = [
     # Schemas
     "AttachmentDoc", "CharacterProfileDoc",
     "ConversationEpisodeEntryDoc", "ConversationEpisodeStateDoc",
-    "ConversationMessageDoc", "MemoryDoc",
+    "ConversationMessageDoc", "MemoryDoc", "MentionDoc",
     "PlatformAccountDoc", "RAGCache2PersistentEntryDoc",
     "ScheduledEventDoc", "UserMemoryContextDoc", "UserMemoryContextEntry",
     "UserMemoryUnitDoc", "UserMemoryUnitMergeHistoryEntry", "UserMemoryUnitSourceRef",

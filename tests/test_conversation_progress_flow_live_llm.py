@@ -1,4 +1,4 @@
-"""Live LLM A/B diagnostic for Phase 2 conversation-flow progress."""
+"""Live LLM A/B diagnostic for conversation-flow progress."""
 
 from __future__ import annotations
 
@@ -29,8 +29,8 @@ pytestmark = pytest.mark.live_llm
 
 _ROOT = Path(__file__).resolve().parents[1]
 _PERSONALITY_PATH = _ROOT / "personalities" / "kazusa.json"
-_TRACE_PHASE = os.getenv("CONVERSATION_PROGRESS_FLOW_TRACE_PHASE", "before_change")
-_TRACE_SUITE_NAME = f"conversation_progress_flow_live_{_TRACE_PHASE}"
+_TRACE_VARIANT = os.getenv("CONVERSATION_PROGRESS_FLOW_TRACE_VARIANT", "before_change")
+_TRACE_SUITE_NAME = f"conversation_progress_flow_live_{_TRACE_VARIANT}"
 
 _FLOW_JUDGE_PROMPT = """\
 You judge whether Kazusa advanced the user's ongoing problem instead of only
@@ -170,7 +170,6 @@ def _msg(role: str, content: str, timestamp: str) -> dict:
         "platform_user_id": platform_user_id,
         "global_user_id": "flow-global-user",
         "timestamp": timestamp,
-        "mentioned_bot": False,
         "reply_context": {},
     }
 
@@ -237,16 +236,16 @@ def _rag_result() -> dict:
     }
 
 
-def _conversation_progress_for_phase() -> dict:
+def _conversation_progress_for_variant() -> dict:
     """Return the before or after progress payload for the same live case.
 
     Args:
         None.
 
     Returns:
-        Phase-specific conversation progress payload. The before-change payload
-        mirrors the Phase 1 anti-repeat focus; the after-change payload is the
-        intended Phase 2 flow-memory target used for A/B comparison.
+        Variant-specific conversation progress payload. The before-change payload
+        mirrors the anti-repeat focus; the after-change payload is the intended
+        flow-memory target used for A/B comparison.
     """
 
     progress = {
@@ -266,7 +265,7 @@ def _conversation_progress_for_phase() -> dict:
             "Do not make companionship the main response again. Move the episode forward."
         ),
     }
-    if _TRACE_PHASE != "after_change":
+    if _TRACE_VARIANT != "after_change":
         return progress
 
     progress.update(
@@ -346,7 +345,7 @@ def _base_state() -> dict:
         ),
         "logical_stance": "CONFIRM",
         "character_intent": "PROVIDE",
-        "conversation_progress": _conversation_progress_for_phase(),
+        "conversation_progress": _conversation_progress_for_variant(),
     }
 
 
@@ -393,7 +392,7 @@ async def _judge_flow(state: dict, dialog: dict) -> dict[str, Any]:
     """
 
     payload = {
-        "phase": _TRACE_PHASE,
+        "variant": _TRACE_VARIANT,
         "current_user_input": state["user_input"],
         "chat_history_recent": state["chat_history_recent"],
         "conversation_progress": state["conversation_progress"],
@@ -609,7 +608,7 @@ async def _run_release_flow_case(case: dict[str, Any], ensure_live_llm) -> dict[
 
     judgment = await _judge_release_flow(case, state, dialog)
     trace_payload = {
-        "phase": _TRACE_PHASE,
+        "variant": _TRACE_VARIANT,
         "case_id": case["case_id"],
         "purpose": case["purpose"],
         "flow_target": case["flow_target"],
@@ -620,7 +619,7 @@ async def _run_release_flow_case(case: dict[str, Any], ensure_live_llm) -> dict[
         "judge": judgment,
         "manual_review_note": case["manual_review_note"],
     }
-    logger.info("release flow trace %s => %r", case["case_id"], trace_payload)
+    logger.info(f"release flow trace {case['case_id']} => {trace_payload!r}")
     write_llm_trace(_TRACE_SUITE_NAME, case["case_id"], trace_payload)
 
     assert judgment["response_quality_sufficient"], f"Release flow case failed: {trace_payload!r}"
@@ -929,7 +928,7 @@ def _group_reply_chain_case() -> dict[str, Any]:
 
 
 async def test_live_flow_baseline_thesis_contribution_case(ensure_live_llm) -> None:
-    """Record one before/after trace for the Phase 2 flow improvement target."""
+    """Record one before/after trace for the flow improvement target."""
 
     del ensure_live_llm
 
@@ -947,9 +946,9 @@ async def test_live_flow_baseline_thesis_contribution_case(ensure_live_llm) -> N
     judgment = await _judge_flow(state, dialog)
     continuity_metrics = _continuity_metrics(content_anchors, final_dialog)
     trace_payload = {
-        "phase": _TRACE_PHASE,
+        "variant": _TRACE_VARIANT,
         "case_id": "thesis_contribution_flow",
-        "purpose": "A/B trace for whether Phase 2 flow state improves episode continuation.",
+        "purpose": "A/B trace for whether flow state improves episode continuation.",
         "current_user_input": state["user_input"],
         "conversation_progress": state["conversation_progress"],
         "chat_history_recent": state["chat_history_recent"],
@@ -962,10 +961,10 @@ async def test_live_flow_baseline_thesis_contribution_case(ensure_live_llm) -> N
             "third contribution point using established episode facts, without generic companionship as the main move."
         ),
     }
-    logger.info("conversation progress flow trace %s => %r", _TRACE_PHASE, trace_payload)
+    logger.info(f"conversation progress flow trace {_TRACE_VARIANT} => {trace_payload!r}")
     write_llm_trace(_TRACE_SUITE_NAME, "thesis_contribution_flow", trace_payload)
 
-    if _TRACE_PHASE == "after_change":
+    if _TRACE_VARIANT == "after_change":
         assert judgment["flow_sufficient"], f"After-change flow was insufficient: {trace_payload!r}"
         assert judgment["answers_missing_third_contribution"], f"After-change reply missed the blocker: {trace_payload!r}"
         assert not judgment["relies_on_generic_reassurance"], f"After-change reply stayed generic: {trace_payload!r}"

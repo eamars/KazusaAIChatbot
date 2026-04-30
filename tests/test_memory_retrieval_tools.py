@@ -22,7 +22,7 @@ async def test_search_conversation_delegates_to_vector_history_search() -> None:
         (
             0.9,
             {
-                "content": "hello",
+                "body_text": "hello",
                 "timestamp": "t1",
                 "display_name": "User",
                 "role": "user",
@@ -31,7 +31,7 @@ async def test_search_conversation_delegates_to_vector_history_search() -> None:
                 "platform_message_id": "message-1",
                 "platform_user_id": "platform-user-1",
                 "global_user_id": "global-user-1",
-                "reply_context": {"content": "previous"},
+                "reply_context": {"reply_excerpt": "previous"},
                 "embedding": [0.1],
             },
         ),
@@ -67,7 +67,7 @@ async def test_search_conversation_delegates_to_vector_history_search() -> None:
         (
             0.9,
             {
-                "content": "hello",
+                "body_text": "hello",
                 "timestamp": "t1",
                 "display_name": "User",
                 "role": "user",
@@ -76,7 +76,7 @@ async def test_search_conversation_delegates_to_vector_history_search() -> None:
                 "platform_message_id": "message-1",
                 "platform_user_id": "platform-user-1",
                 "global_user_id": "global-user-1",
-                "reply_context": {"content": "previous"},
+                "reply_context": {"reply_excerpt": "previous"},
             },
         )
     ]
@@ -104,7 +104,10 @@ async def test_search_conversation_rejects_empty_query() -> None:
 async def test_search_conversation_keyword_delegates_to_keyword_history_search() -> None:
     """search_conversation_keyword should call conversation search in keyword mode."""
     mock_results = [
-        (1.0, {"content": "DDR5 came up", "timestamp": "t1", "display_name": "User"}),
+        (
+            1.0,
+            {"body_text": "DDR5 came up", "timestamp": "t1", "display_name": "User"},
+        ),
     ]
 
     with patch(
@@ -124,7 +127,8 @@ async def test_search_conversation_keyword_delegates_to_keyword_history_search()
         from_timestamp=None,
         to_timestamp=None,
     )
-    assert result[0]["content"] == "DDR5 came up"
+    assert result[0]["body_text"] == "DDR5 came up"
+    assert "content" not in result[0]
     assert result[0]["display_name"] == "User"
 
 
@@ -133,7 +137,7 @@ async def test_get_conversation_filters_and_strips_internal_fields() -> None:
     """get_conversation should pass structured filters and hide embedding data."""
     mock_messages = [
         {
-            "content": "hi",
+            "body_text": "hi",
             "timestamp": "t1",
             "display_name": "User",
             "role": "user",
@@ -170,7 +174,8 @@ async def test_get_conversation_filters_and_strips_internal_fields() -> None:
         from_timestamp=None,
         to_timestamp=None,
     )
-    assert result[0]["content"] == "hi"
+    assert result[0]["body_text"] == "hi"
+    assert "content" not in result[0]
     assert "embedding" not in result[0]
 
 

@@ -9,15 +9,10 @@ from kazusa_ai_chatbot.config import (
     MSG_DECONTEXTUALIZER_LLM_MODEL,
 )
 from kazusa_ai_chatbot.nodes.persona_supervisor2_schema import GlobalPersonaState
+from kazusa_ai_chatbot.nodes.referent_resolution import normalize_referents
 from kazusa_ai_chatbot.utils import get_llm, log_preview, parse_llm_json_output
 
 logger = logging.getLogger(__name__)
-
-_REFERENCE_RESOLUTION_STATUSES = {
-    "resolved",
-    "unchanged_clear",
-    "unresolved_reference",
-}
 
 _msg_decontexualizer_llm = get_llm(
     temperature=0.1,
@@ -40,7 +35,7 @@ _MSG_DECONTEXUALIZER_PROMPT = """\
 - 宁可不做修改，也不要“脑补”意图。
 - 严禁将社交辞令（如“你好”）强制与 channel_topic/indirect_speech_context 合并。
 - 信息不足：如果无法确定具体实体，请保持原句，不要猜测，也不要假设。
-- 指代缺失：如果用户输入必须依赖某个“这个/这些/那个/它/上面那个”等对象才能回答，而该对象无法从 user_input、reply_context、chat_history、channel_topic 或 indirect_speech_context 中解析出来，则保持原句，并标记为需要澄清。
+- 指代缺失：如果用户输入必须依赖某个“这个/这些/那个/它/上面那个”等对象才能回答，而该对象无法从 user_input、reply_context、chat_history、channel_topic 或 indirect_speech_context 中解析出来，则保持原句，并输出一条 `status="unresolved"` 的 `referents` 记录。
 - 不要修改俚语
 - 如果输入中出现 URL、文件名、引用文本、专有名词等**字面锚点**，必须原样保留这些锚点，禁止替换成猜测出的页面标题、人物名、别名或近似实体。
 - `channel_topic` 和 `indirect_speech_context` 只能帮助你理解代词/省略指代，**不能覆盖或改写**用户输入里已经出现的字面锚点。
@@ -54,7 +49,7 @@ _MSG_DECONTEXUALIZER_PROMPT = """\
   * 上述规则是**硬约束**：即使你能够从 `chat_history` 或 `indirect_speech_context` 明确识别此人是谁，只要第三人称结构已经成立，也必须保留「他 / 她 / 他们」而不是改写成人名。
   * 上一条硬约束**只适用于 `indirect_speech_context` 非空的情况**。如果 `indirect_speech_context` 为空，就不要把这条保留规则误用到普通直接对话里。
 - 补全背景：如果用户是在追问上文，请将上文的主题合并到查询中。
-- 如果 `reply_context.reply_to_current_bot=true` 且 `reply_context.reply_excerpt` 显示上一条 assistant 在做澄清、确认范围、提供选项、追问用户真实意图，那么像“是的 / 对 / 就这个 / 前者 / 后者 / 不是那个”这类回复应被视为**对上一条 assistant 语义框架的选择或确认**，输出要补全为用户真正确认的命题，而不是保留成孤立短句。
+- 如果 `message_envelope.addressed_to_global_user_ids` 表明当前消息直接指向 active character，且 `reply_context.reply_excerpt` 显示上一条 assistant 在做澄清、确认范围、提供选项、追问用户真实意图，那么像“是的 / 对 / 就这个 / 前者 / 后者 / 不是那个”这类回复应被视为**对上一条 assistant 语义框架的选择或确认**，输出要补全为用户真正确认的命题，而不是保留成孤立短句。
 - 保持原意：不要改变用户的问题意图，仅增加必要的修饰词。
 - 保持语序：不要改变句子的语法结构。
 - 保持主语：不要改变无歧义的人称代词（比如 "你"， "我"）。
@@ -67,16 +62,16 @@ _MSG_DECONTEXUALIZER_PROMPT = """\
  * 但当 `user_input` 已经包含 URL、文件名、引用文本等字面锚点时，`chat_history` / `indirect_speech_context` / `channel_topic` 都**不能**把这些锚点改写成猜测出的标题或实体名。
 
 # 示例
-- "I saw him yesterday" -> "I saw John yesterday"
+- "I saw him yesterday" -> "I saw the person mentioned in the visible context yesterday"
 - `indirect_speech_context = ""` 且最近 `chat_history` 已明确提到「昨天在天台看书的那个同学」时，`user_input = "他今天是不是又在躲雨？"` -> 改写为「昨天在天台看书的那个同学今天是不是又在躲雨？」
-- `indirect_speech_context = "大家正在讨论学生会会长阿澈最近总提起旧事。"` 且 `user_input = "他是不是又提过那件事？"` -> 保持原句，不要改成「阿澈是不是又提过那件事？」
+- `indirect_speech_context = "大家正在讨论某位群成员最近总提起旧事。"` 且 `user_input = "他是不是又提过那件事？"` -> 保持原句，不要改成带有具体称呼的句子
 - `user_input = "https://example.com/page"` -> 保持原句，不要改成「某某角色的百科页面」
 - `user_input = "这个 https://example.com/page"` 且 `channel_topic = "用户在发某角色的百科链接"` -> 可以保留原句，或改成「这个 https://example.com/page」，但不要改成「这个某某角色的百科页面链接」
 - `user_input = "这个 README.md"` 且 `channel_topic` 提到某个功能模块 -> 不要改成「这个某功能模块的说明文档」，应保留 `README.md`
-- `reply_context.reply_to_current_bot = true`，上一条 assistant 为「你是想让我怎么定义你呀？是想要一个具体的评价，还是仅仅在随口试探……唔。」；`user_input = "是的"` -> 应补全为类似「是的，我是想让千纱说明白对我的看法 / 给我具体评价」；不要保留成孤立的「是的」。
-- `user_input = "这些是什么意思？"`，且 reply_context、chat_history、channel_topic、indirect_speech_context 都没有可见对象 -> 保持原句，`reference_resolution_status = "unresolved_reference"`，`needs_clarification = true`。
-- `reply_context.reply_excerpt = "△ ○ □"` 且 `user_input = "这些是什么意思？"` -> 可解析为用户在问回复摘录里的符号，`reference_resolution_status = "resolved"`，`needs_clarification = false`。
-- `user_input = "这个 README.md 是什么意思？"` -> 输入自带字面对象，保持字面锚点，`reference_resolution_status = "unchanged_clear"`，`needs_clarification = false`。
+- `message_envelope.addressed_to_global_user_ids` 非空，上一条 assistant 为「你是想让我怎么定义你呀？是想要一个具体的评价，还是仅仅在随口试探……唔。」；`user_input = "是的"` -> 应补全为类似「是的，我是想让 active character 说明白对我的看法 / 给我具体评价」；不要保留成孤立的「是的」。
+- `user_input = "这些是什么意思？"`，且 reply_context、chat_history、channel_topic、indirect_speech_context 都没有可见对象 -> 保持原句，`referents = [{"phrase": "这些", "referent_role": "object", "status": "unresolved"}]`。
+- `reply_context.reply_excerpt = "△ ○ □"` 且 `user_input = "这些是什么意思？"` -> 可解析为用户在问回复摘录里的符号，`referents = [{"phrase": "这些", "referent_role": "object", "status": "resolved"}]`。
+- `user_input = "这个 README.md 是什么意思？"` -> 输入自带字面对象，保持字面锚点，`referents = []`。
 
 # 思考路径
 1. 先判断 `user_input` 是否已经具备独立语义；若具备，执行零修改。
@@ -84,7 +79,8 @@ _MSG_DECONTEXUALIZER_PROMPT = """\
 3. 再使用 `chat_history`、`indirect_speech_context` 和 `channel_topic` 补全必要指代。
 4. 保留 URL、文件名、引用文本和专有名词等字面锚点。
 5. 判断是否仍存在回答所必需但无法解析的指代对象。
-6. 最后确认没有改变问题意图、语气、主语或句子复杂度。
+6. 为每个影响理解的指代短语生成一条 referents 记录；无指代短语时输出空列表。
+7. 最后确认没有改变问题意图、语气、主语或句子复杂度。
 
 # 输入格式
 {
@@ -92,15 +88,23 @@ _MSG_DECONTEXUALIZER_PROMPT = """\
     "platform_user_id": "string",
     "user_name": "string",
     "platform_bot_id": "string",
+    "message_envelope": {
+        "body_text": "string",
+        "addressed_to_global_user_ids": ["string"],
+        "reply": {
+            "global_user_id": "string",
+            "display_name": "string",
+            "excerpt": "string"
+        }
+    },
     "chat_history": [
-        {"role": "user", "content": "string"},
-        {"role": "assistant", "content": "string"},
+        {"role": "user", "body_text": "string"},
+        {"role": "assistant", "body_text": "string"},
         ...
     ],
     "channel_topic": "supplimentary information",
     "indirect_speech_context": "string (empty if direct speech)",
     "reply_context": {
-        "reply_to_current_bot": true,
         "reply_to_display_name": "string",
         "reply_excerpt": "string"
     }
@@ -112,26 +116,15 @@ _MSG_DECONTEXUALIZER_PROMPT = """\
     "output": "重写后的用户信息，或原句",
     "is_modified": true/false,
     "reasoning": "重写理由",
-    "reference_resolution_status": "resolved | unchanged_clear | unresolved_reference",
-    "needs_clarification": true/false,
-    "clarification_reason": "若需要澄清，用一句内部说明指出缺少哪个指代对象；否则为空字符串"
+    "referents": [
+        {"phrase": "原文中的指代短语", "referent_role": "subject | object | time", "status": "resolved | unresolved"}
+    ]
 }
+
+`referents` 必须每次输出。没有需要解析的指代短语时输出 `[]`。
+`referent_role` 只允许 `subject`、`object`、`time`。
+`status` 只允许 `resolved` 或 `unresolved`。
 """
-
-
-def _normalize_reference_resolution_status(value: object) -> str:
-    """Normalize the decontextualizer's reference-resolution enum.
-
-    Args:
-        value: Raw LLM field value.
-
-    Returns:
-        A supported status string, defaulting to ``unchanged_clear``.
-    """
-    status = str(value or "").strip()
-    if status not in _REFERENCE_RESOLUTION_STATUSES:
-        status = "unchanged_clear"
-    return status
 
 
 async def call_msg_decontexualizer(state: GlobalPersonaState) -> dict:
@@ -139,25 +132,26 @@ async def call_msg_decontexualizer(state: GlobalPersonaState) -> dict:
     
     For example: 
         input: "I saw him yesterday"
-        output: "I saw John yesterday"
+        output: "I saw the person mentioned in the visible context yesterday"
     
     """
     system_prompt = SystemMessage(content=_MSG_DECONTEXUALIZER_PROMPT)
 
     # get key attributes
-    user_name = state.get("user_name")
-    platform_user_id = state.get("platform_user_id")
-    user_input = state.get("user_input")
+    user_name = state["user_name"]
+    platform_user_id = state["platform_user_id"]
+    user_input = state["user_input"]
 
     input_msg = {
         "user_input": user_input,
         "platform_user_id": platform_user_id,
         "user_name": user_name,
-        "platform_bot_id": state.get("platform_bot_id"),
-        "chat_history": state.get("chat_history_recent"),
-        "channel_topic": state.get("channel_topic"),
-        "indirect_speech_context": state.get("indirect_speech_context", ""),
-        "reply_context": state.get("reply_context", {}),
+        "platform_bot_id": state["platform_bot_id"],
+        "message_envelope": state["message_envelope"],
+        "chat_history": state["chat_history_recent"],
+        "channel_topic": state["channel_topic"],
+        "indirect_speech_context": state["indirect_speech_context"],
+        "reply_context": state["reply_context"],
     }
     human_message = HumanMessage(content=json.dumps(input_msg, ensure_ascii=False))
 
@@ -185,9 +179,7 @@ async def call_msg_decontexualizer(state: GlobalPersonaState) -> dict:
         output = state["user_input"]
         reasoning = "Failed to call LLM"
         is_modified = False
-        reference_resolution_status = "unchanged_clear"
-        needs_clarification = False
-        clarification_reason = ""
+        referents = []
     else:
         try:
             result = parse_llm_json_output(llm_response.content)
@@ -200,9 +192,7 @@ async def call_msg_decontexualizer(state: GlobalPersonaState) -> dict:
             output = state["user_input"]
             reasoning = "Failed to parse LLM output"
             is_modified = False
-            reference_resolution_status = "unchanged_clear"
-            needs_clarification = False
-            clarification_reason = ""
+            referents = []
         else:
             if not isinstance(result, dict):
                 result = {}
@@ -212,39 +202,29 @@ async def call_msg_decontexualizer(state: GlobalPersonaState) -> dict:
             is_modified = result.get("is_modified", False)
             missing_fields = [
                 field_name
-                for field_name in (
-                    "reference_resolution_status",
-                    "needs_clarification",
-                    "clarification_reason",
-                )
+                for field_name in ("referents",)
                 if field_name not in result
             ]
             if missing_fields:
                 logger.warning(
-                    f"Decontextualizer missing ambiguity fields: fields={missing_fields} "
+                    f"Decontextualizer missing referent fields: fields={missing_fields} "
                     f"input={log_preview(user_input)} raw={log_preview(result)}"
                 )
-            reference_resolution_status = _normalize_reference_resolution_status(
-                result.get("reference_resolution_status")
-            )
-            needs_clarification = result.get("needs_clarification", False)
-            if not isinstance(needs_clarification, bool):
-                needs_clarification = False
-            clarification_reason = result.get("clarification_reason", "")
-            if not isinstance(clarification_reason, str):
-                clarification_reason = ""
-            if needs_clarification:
-                reference_resolution_status = "unresolved_reference"
+            raw_referents = result.get("referents", [])
+            referents = normalize_referents(raw_referents)
+            if "referents" in result and raw_referents and not referents:
+                logger.warning(
+                    f"Decontextualizer dropped malformed referents: "
+                    f"input={log_preview(user_input)} raw={log_preview(raw_referents)}"
+                )
 
-    logger.info(f'Decontextualizer result: user={user_name} platform_user={platform_user_id} modified={is_modified} reference_status={reference_resolution_status} needs_clarification={needs_clarification} clarification_reason={log_preview(clarification_reason)} reason={log_preview(reasoning)} input={log_preview(user_input)} output={log_preview(output)}')
+    logger.info(f'Decontextualizer result: user={user_name} platform_user={platform_user_id} modified={is_modified} referents={log_preview(referents)} reason={log_preview(reasoning)} input={log_preview(user_input)} output={log_preview(output)}')
 
     if not is_modified:
         output = state["user_input"]
     
     return_value = {
         "decontexualized_input": output,
-        "reference_resolution_status": reference_resolution_status,
-        "needs_clarification": needs_clarification,
-        "clarification_reason": clarification_reason,
+        "referents": referents,
     }
     return return_value

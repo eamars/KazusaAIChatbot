@@ -41,13 +41,13 @@ def _clarification_state() -> dict:
     """Build a persona state whose unresolved reference skips RAG.
 
     Returns:
-        Global persona-state subset for ``stage_1_research``.
+        Global persona-state subset for the RAG routing node.
     """
     return {
         "decontexualized_input": "这些是什么意思？",
-        "reference_resolution_status": "unresolved_reference",
-        "needs_clarification": True,
-        "clarification_reason": "缺少这些指代的具体对象",
+        "referents": [
+            {"phrase": "这些", "referent_role": "object", "status": "unresolved"},
+        ],
         "character_profile": {"name": "Kazusa", "global_user_id": "character-1"},
         "platform": "qq",
         "platform_channel_id": "chan-1",
@@ -95,8 +95,9 @@ async def test_content_anchor_accepts_skipped_rag_result_shape(monkeypatch) -> N
     result = await l3_module.call_content_anchor_agent({
         "character_profile": {"name": "Kazusa"},
         "decontexualized_input": "这些是什么意思？",
-        "needs_clarification": True,
-        "clarification_reason": "缺少这些指代的具体对象",
+        "referents": [
+            {"phrase": "这些", "referent_role": "object", "status": "unresolved"},
+        ],
         "rag_result": research_result["rag_result"],
         "internal_monologue": "I need to ask what these refers to.",
         "logical_stance": "TENTATIVE",

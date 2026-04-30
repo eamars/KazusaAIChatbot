@@ -19,17 +19,27 @@ def _base_discord_state():
         "platform_user_id": "user_123",
         "global_user_id": "uuid-123",
         "user_input": "Hello",
+        "message_envelope": {
+            "body_text": "Hello",
+            "raw_wire_text": "Hello",
+            "mentions": [],
+            "attachments": [],
+            "addressed_to_global_user_ids": [],
+            "broadcast": True,
+        },
         "user_multimedia_input": [],
         "user_profile": {"affinity": 500},
         "platform_bot_id": "bot_456",
-        "bot_name": "TestBot",
+        "character_name": "TestCharacter",
         "character_profile": {
-            "name": "Kazusa",
+            "name": "Character",
+            "global_user_id": "character-uuid",
             "mood": "neutral",
             "global_vibe": "calm",
             "reflection_summary": "nothing notable",
         },
         "platform_channel_id": "chan_1",
+        "channel_type": "group",
         "channel_name": "general",
         "chat_history_wide": [],
         "chat_history_recent": [],
@@ -46,47 +56,91 @@ def _base_discord_state():
 @pytest.mark.asyncio
 async def test_call_action_subgraph_returns_final_dialog():
     """call_action_subgraph wraps dialog_agent output correctly."""
-    mock_dialog_result = {"final_dialog": ["Hello!", "How are you?"]}
+    mock_dialog_result = {
+        "final_dialog": ["Hello!", "How are you?"],
+        "target_addressed_user_ids": ["uuid-123"],
+        "target_broadcast": False,
+    }
 
-    with patch("kazusa_ai_chatbot.nodes.persona_supervisor2.dialog_agent", new_callable=AsyncMock, return_value=mock_dialog_result):
-        result = await call_action_subgraph({"any": "state"})
+    with patch(
+        "kazusa_ai_chatbot.nodes.persona_supervisor2.dialog_agent",
+        new_callable=AsyncMock,
+        return_value=mock_dialog_result,
+    ):
+        result = await call_action_subgraph({"global_user_id": "uuid-123"})
 
     assert result["final_dialog"] == ["Hello!", "How are you?"]
+    assert result["target_addressed_user_ids"] == ["uuid-123"]
+    assert result["target_broadcast"] is False
 
 
 @pytest.mark.asyncio
 async def test_call_action_subgraph_empty_dialog():
     """call_action_subgraph handles empty dialog_agent output."""
-    mock_dialog_result = {}
+    mock_dialog_result = {
+        "final_dialog": [],
+        "target_addressed_user_ids": [],
+        "target_broadcast": False,
+    }
 
-    with patch("kazusa_ai_chatbot.nodes.persona_supervisor2.dialog_agent", new_callable=AsyncMock, return_value=mock_dialog_result):
-        result = await call_action_subgraph({"any": "state"})
+    with patch(
+        "kazusa_ai_chatbot.nodes.persona_supervisor2.dialog_agent",
+        new_callable=AsyncMock,
+        return_value=mock_dialog_result,
+    ):
+        result = await call_action_subgraph({"global_user_id": "uuid-123"})
 
     assert result["final_dialog"] == []
+    assert result["target_addressed_user_ids"] == []
+    assert result["target_broadcast"] is False
 
 
 @pytest.mark.asyncio
 async def test_persona_supervisor2_returns_final_dialog_and_consolidation_state():
-    """persona_supervisor2 should return stage-3 dialog plus the stage-4 input snapshot."""
+    """persona_supervisor2 should return dialog plus the consolidation snapshot."""
     state = _base_discord_state()
 
-    # Mock stages 0-3 to avoid real LLM calls.
-    with patch("kazusa_ai_chatbot.nodes.persona_supervisor2.call_msg_decontexualizer", new_callable=AsyncMock, return_value={"decontexualized_input": "Hello"}) as m_decon, \
-         patch("kazusa_ai_chatbot.nodes.persona_supervisor2.stage_1_research", new_callable=AsyncMock, return_value={"rag_result": {}}) as m_research, \
-         patch("kazusa_ai_chatbot.nodes.persona_supervisor2.call_cognition_subgraph", new_callable=AsyncMock, return_value={
-             "internal_monologue": "thinking...",
-             "action_directives": {},
-             "interaction_subtext": "",
-             "emotional_appraisal": "",
-             "character_intent": "",
-             "logical_stance": "",
-         }) as m_cognition, \
-         patch("kazusa_ai_chatbot.nodes.persona_supervisor2.dialog_agent", new_callable=AsyncMock, return_value={"final_dialog": ["Hi there!"]}) as m_dialog:
+    # Mock graph nodes to avoid real LLM calls.
+    with (
+        patch(
+            "kazusa_ai_chatbot.nodes.persona_supervisor2.call_msg_decontexualizer",
+            new_callable=AsyncMock,
+            return_value={"decontexualized_input": "Hello"},
+        ) as m_decon,
+        patch(
+            "kazusa_ai_chatbot.nodes.persona_supervisor2.stage_1_research",
+            new_callable=AsyncMock,
+            return_value={"rag_result": {}},
+        ) as m_research,
+        patch(
+            "kazusa_ai_chatbot.nodes.persona_supervisor2.call_cognition_subgraph",
+            new_callable=AsyncMock,
+            return_value={
+                "internal_monologue": "thinking...",
+                "action_directives": {},
+                "interaction_subtext": "",
+                "emotional_appraisal": "",
+                "character_intent": "",
+                "logical_stance": "",
+            },
+        ) as m_cognition,
+        patch(
+            "kazusa_ai_chatbot.nodes.persona_supervisor2.dialog_agent",
+            new_callable=AsyncMock,
+            return_value={
+                "final_dialog": ["Hi there!"],
+                "target_addressed_user_ids": ["uuid-123"],
+                "target_broadcast": False,
+            },
+        ) as m_dialog,
+    ):
         result = await persona_supervisor2(state)
 
     assert "final_dialog" in result
     assert "future_promises" in result
     assert result["final_dialog"] == ["Hi there!"]
+    assert result["target_addressed_user_ids"] == ["uuid-123"]
+    assert result["target_broadcast"] is False
     assert result["future_promises"] == []
     assert result["consolidation_state"]["decontexualized_input"] == "Hello"
     assert result["consolidation_state"]["final_dialog"] == ["Hi there!"]
@@ -95,23 +149,47 @@ async def test_persona_supervisor2_returns_final_dialog_and_consolidation_state(
 
 @pytest.mark.asyncio
 async def test_persona_supervisor2_no_remember_skips_consolidation():
-    """no_remember stays a service concern; supervisor still returns the stage-4 snapshot."""
+    """no_remember stays a service concern; supervisor still returns the consolidation snapshot."""
     state = _base_discord_state()
     state["debug_modes"] = {"no_remember": True}
 
-    with patch("kazusa_ai_chatbot.nodes.persona_supervisor2.call_msg_decontexualizer", new_callable=AsyncMock, return_value={"decontexualized_input": "Hello"}) as m_decon, \
-         patch("kazusa_ai_chatbot.nodes.persona_supervisor2.stage_1_research", new_callable=AsyncMock, return_value={"rag_result": {}}) as m_research, \
-         patch("kazusa_ai_chatbot.nodes.persona_supervisor2.call_cognition_subgraph", new_callable=AsyncMock, return_value={
-             "internal_monologue": "thinking...",
-             "action_directives": {},
-             "interaction_subtext": "",
-             "emotional_appraisal": "",
-             "character_intent": "",
-             "logical_stance": "",
-         }) as m_cognition, \
-         patch("kazusa_ai_chatbot.nodes.persona_supervisor2.dialog_agent", new_callable=AsyncMock, return_value={"final_dialog": ["Hi there!"]}) as m_dialog:
+    with (
+        patch(
+            "kazusa_ai_chatbot.nodes.persona_supervisor2.call_msg_decontexualizer",
+            new_callable=AsyncMock,
+            return_value={"decontexualized_input": "Hello"},
+        ) as m_decon,
+        patch(
+            "kazusa_ai_chatbot.nodes.persona_supervisor2.stage_1_research",
+            new_callable=AsyncMock,
+            return_value={"rag_result": {}},
+        ) as m_research,
+        patch(
+            "kazusa_ai_chatbot.nodes.persona_supervisor2.call_cognition_subgraph",
+            new_callable=AsyncMock,
+            return_value={
+                "internal_monologue": "thinking...",
+                "action_directives": {},
+                "interaction_subtext": "",
+                "emotional_appraisal": "",
+                "character_intent": "",
+                "logical_stance": "",
+            },
+        ) as m_cognition,
+        patch(
+            "kazusa_ai_chatbot.nodes.persona_supervisor2.dialog_agent",
+            new_callable=AsyncMock,
+            return_value={
+                "final_dialog": ["Hi there!"],
+                "target_addressed_user_ids": ["uuid-123"],
+                "target_broadcast": False,
+            },
+        ) as m_dialog,
+    ):
         result = await persona_supervisor2(state)
 
     assert result["final_dialog"] == ["Hi there!"]
+    assert result["target_addressed_user_ids"] == ["uuid-123"]
+    assert result["target_broadcast"] is False
     assert result["future_promises"] == []
     assert result["consolidation_state"]["debug_modes"] == {"no_remember": True}

@@ -302,7 +302,7 @@ async def _test_main() -> None:
     """Run a manual smoke check for ConversationFilterAgent."""
     agent = ConversationFilterAgent()
     result = await agent.run(
-        task="杏山千纱 (Kyōyama Kazusa) 的最近3条发言",
+        task="<active character> 的最近3条发言",
         context={
             "platform": "qq",
             "platform_channel_id": "54369546",

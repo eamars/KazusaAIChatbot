@@ -23,10 +23,18 @@ def _base_state():
         "user_multimedia_input": [],
         "user_profile": {"affinity": 500, "last_relationship_insight": ""},
         "platform_bot_id": "bot_456",
-        "mentioned_bot": False,
-        "bot_name": "TestBot",
+        "message_envelope": {
+            "body_text": "Hello bot!",
+            "raw_wire_text": "Hello bot!",
+            "addressed_to_global_user_ids": [],
+            "mentions": [],
+            "attachments": [],
+            "broadcast": True,
+        },
+        "character_name": "TestCharacter",
         "character_profile": {
-            "name": "Kazusa",
+            "name": "Character",
+            "global_user_id": "character-global-id",
             "mood": "neutral",
             "global_vibe": "calm",
             "reflection_summary": "nothing notable",
@@ -47,7 +55,7 @@ def _history_row(
     platform_user_id: str = "user_123",
     timestamp: str = "2026-04-27T10:00:00+00:00",
     reply_context: dict | None = None,
-    mentioned_bot: bool = False,
+    addressed_to_global_user_ids: list[str] | None = None,
     content: str = "",
 ) -> dict:
     """Build a trimmed conversation-history row for relevance tests.
@@ -57,7 +65,7 @@ def _history_row(
         platform_user_id: Platform user id that produced the row.
         timestamp: ISO timestamp for active-window selection.
         reply_context: Optional structured reply metadata.
-        mentioned_bot: Whether the source platform structurally mentioned the bot.
+        addressed_to_global_user_ids: Typed addressee UUIDs for the row.
         content: Optional content fixture.
 
     Returns:
@@ -68,7 +76,7 @@ def _history_row(
         "platform_user_id": platform_user_id,
         "timestamp": timestamp,
         "reply_context": reply_context or {},
-        "mentioned_bot": mentioned_bot,
+        "addressed_to_global_user_ids": addressed_to_global_user_ids or [],
         "content": content,
     }
 
@@ -141,7 +149,6 @@ async def test_relevance_agent_short_circuits_structured_third_party_reply_in_gr
     state["reply_context"] = {
         "reply_to_message_id": "other-msg",
         "reply_to_platform_user_id": "someone-else",
-        "reply_to_current_bot": False,
     }
 
     with patch("kazusa_ai_chatbot.nodes.relevance_agent._relevance_agent_llm") as mock_llm:
@@ -158,11 +165,10 @@ async def test_relevance_agent_allows_structured_third_party_reply_when_bot_expl
     """Explicit bot address should override the third-party reply short-circuit."""
     state = _base_state()
     state["user_input"] = "你怎么看他刚才那句？"
-    state["mentioned_bot"] = True
+    state["message_envelope"]["addressed_to_global_user_ids"] = ["character-global-id"]
     state["reply_context"] = {
         "reply_to_message_id": "other-msg",
         "reply_to_platform_user_id": "someone-else",
-        "reply_to_current_bot": False,
     }
     llm_response = _llm_response('{"should_respond": true, "reason_to_respond": "bot explicitly addressed", "use_reply_feature": true, "channel_topic": "discussion", "indirect_speech_context": ""}')
 
@@ -175,7 +181,7 @@ async def test_relevance_agent_allows_structured_third_party_reply_when_bot_expl
 
 
 @pytest.mark.asyncio
-async def test_relevance_agent_legacy_reply_marker_no_longer_blocks_without_metadata() -> None:
+async def test_relevance_agent_text_only_reply_marker_does_not_block_without_metadata() -> None:
     """Text-only reply markers should not drive deterministic relevance gating."""
     state = _base_state()
     state["user_input"] = '[Reply to message] <@someone-else> 我同事上下班是不用加油的'
@@ -228,11 +234,15 @@ def test_group_attention_low_noise_when_recent_direct_address_exists() -> None:
         _history_row(
             platform_user_id="user_1",
             timestamp="2026-04-27T10:00:10+00:00",
-            reply_context={"reply_to_current_bot": True},
+            addressed_to_global_user_ids=["character-global-id"],
         ),
     ]
 
-    result = build_group_attention_context(chat_history_wide=history, platform_bot_id="bot_456")
+    result = build_group_attention_context(
+        chat_history_wide=history,
+        platform_bot_id="bot_456",
+        character_global_user_id="character-global-id",
+    )
 
     assert result == {"group_attention": "low_noise"}
 
@@ -249,7 +259,6 @@ def test_group_attention_chaotic_for_two_speaker_reply_thread_collision() -> Non
             timestamp="2026-04-27T10:19:08+00:00",
             reply_context={
                 "reply_to_platform_user_id": "user_1",
-                "reply_to_current_bot": False,
             },
         ),
         _history_row(
@@ -292,10 +301,10 @@ def test_group_attention_excludes_bot_messages_from_noise() -> None:
 
 
 @pytest.mark.asyncio
-async def test_relevance_group_payload_includes_mentioned_bot_and_group_attention() -> None:
+async def test_relevance_group_payload_includes_direct_address_and_group_attention() -> None:
     """Group relevance payload should include only compact structural attention fields."""
     state = _base_state()
-    state["mentioned_bot"] = True
+    state["message_envelope"]["addressed_to_global_user_ids"] = ["character-global-id"]
     llm_response = _llm_response('{"should_respond": true, "reason_to_respond": "metadata", "use_reply_feature": true, "channel_topic": "", "indirect_speech_context": ""}')
 
     with patch("kazusa_ai_chatbot.nodes.relevance_agent._relevance_agent_llm") as mock_llm:
@@ -304,7 +313,7 @@ async def test_relevance_group_payload_includes_mentioned_bot_and_group_attentio
 
     human_payload = mock_llm.ainvoke.await_args.args[0][1].content
     parsed_payload = json.loads(human_payload)
-    assert parsed_payload["user_message"]["mentioned_bot"] is True
+    assert parsed_payload["user_message"]["directly_addressed"] is True
     assert parsed_payload["group_attention"] == "low_noise"
     assert "group_attention_context" not in parsed_payload
     assert "distinct_speakers" not in human_payload
@@ -324,7 +333,7 @@ async def test_relevance_private_payload_omits_group_attention_fields() -> None:
 
     human_payload = mock_llm.ainvoke.await_args.args[0][1].content
     parsed_payload = json.loads(human_payload)
-    assert "mentioned_bot" not in parsed_payload["user_message"]
+    assert "directly_addressed" not in parsed_payload["user_message"]
     assert "group_attention" not in parsed_payload
 
 
@@ -349,10 +358,10 @@ async def test_relevance_chaotic_group_without_bot_address_skips_llm() -> None:
 
 
 @pytest.mark.asyncio
-async def test_relevance_chaotic_group_with_bot_mention_invokes_llm() -> None:
-    """Structured bot mention should override the chaotic metadata-only skip."""
+async def test_relevance_chaotic_group_with_direct_address_invokes_llm() -> None:
+    """Typed direct address should override the chaotic metadata-only skip."""
     state = _base_state()
-    state["mentioned_bot"] = True
+    state["message_envelope"]["addressed_to_global_user_ids"] = ["character-global-id"]
     state["chat_history_wide"] = [
         _history_row(platform_user_id="user_1", timestamp="2026-04-27T10:00:00+00:00"),
         _history_row(platform_user_id="user_2", timestamp="2026-04-27T10:00:10+00:00"),
@@ -370,13 +379,13 @@ async def test_relevance_chaotic_group_with_bot_mention_invokes_llm() -> None:
 
 
 @pytest.mark.asyncio
-async def test_relevance_chaotic_group_with_reply_to_bot_invokes_llm() -> None:
-    """Structured reply-to-bot metadata should override the chaotic skip."""
+async def test_relevance_chaotic_group_with_typed_bot_reply_invokes_llm() -> None:
+    """Typed reply-to-character addressee should override the chaotic skip."""
     state = _base_state()
+    state["message_envelope"]["addressed_to_global_user_ids"] = ["character-global-id"]
     state["reply_context"] = {
         "reply_to_message_id": "bot-msg",
         "reply_to_platform_user_id": "bot_456",
-        "reply_to_current_bot": True,
     }
     state["chat_history_wide"] = [
         _history_row(platform_user_id="user_1", timestamp="2026-04-27T10:00:00+00:00"),
@@ -402,7 +411,6 @@ async def test_relevance_regression_qq_ambiguous_you_in_reply_thread_skips_llm()
     state["platform"] = "qq"
     state["platform_bot_id"] = "3768713357"
     state["user_input"] = "你喜欢千纱吗？"
-    state["mentioned_bot"] = False
     state["reply_context"] = {}
     state["chat_history_wide"] = [
         _history_row(
@@ -416,7 +424,6 @@ async def test_relevance_regression_qq_ambiguous_you_in_reply_thread_skips_llm()
             reply_context={
                 "reply_to_message_id": "487687474",
                 "reply_to_platform_user_id": "3300869207",
-                "reply_to_current_bot": False,
             },
             content="[Reply to message] ...",
         ),

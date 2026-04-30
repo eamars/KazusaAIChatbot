@@ -101,7 +101,7 @@ def _ctx() -> DispatchContext:
         source_user_id="user-1",
         source_message_id="msg-1",
         guild_id=None,
-        bot_role="user",
+        bot_permission_role="user",
         now=datetime(2026, 4, 25, 0, 0, tzinfo=timezone.utc),
     )
 
@@ -157,7 +157,7 @@ def _live_dispatch_ctx(
         source_user_id=source_user_id,
         source_message_id=source_message_id,
         guild_id=None,
-        bot_role="user",
+        bot_permission_role="user",
         now=datetime(2026, 4, 22, 18, 11, 28, tzinfo=timezone.utc),
     )
 

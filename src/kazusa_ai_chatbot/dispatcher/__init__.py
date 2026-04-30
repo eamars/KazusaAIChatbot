@@ -12,6 +12,7 @@ from kazusa_ai_chatbot.dispatcher.handlers import build_send_message_tool, handl
 from kazusa_ai_chatbot.dispatcher.pending_index import PendingTaskIndex
 from kazusa_ai_chatbot.dispatcher.remote_adapter import RemoteHttpAdapter
 from kazusa_ai_chatbot.dispatcher.task import (
+    BotPermissionRole,
     DispatchContext,
     DispatchResult,
     RawToolCall,
@@ -21,6 +22,7 @@ from kazusa_ai_chatbot.dispatcher.tool_spec import ToolRegistry, ToolSpec
 
 __all__ = [
     "AdapterRegistry",
+    "BotPermissionRole",
     "DispatchContext",
     "DispatchResult",
     "EvalResult",

@@ -27,10 +27,17 @@ async def test_save_conversation_invalidates_conversation_history_cache(monkeypa
         "platform": "qq",
         "platform_channel_id": "chan-1",
         "role": "user",
+        "platform_message_id": "msg-1",
         "platform_user_id": "platform-user",
         "global_user_id": "user-1",
         "display_name": "User",
-        "content": "hello",
+        "body_text": "hello",
+        "raw_wire_text": "hello",
+        "content_type": "text",
+        "addressed_to_global_user_ids": ["character-global"],
+        "mentions": [],
+        "broadcast": False,
+        "attachments": [],
         "timestamp": "2026-04-27T00:00:00+12:00",
     })
 

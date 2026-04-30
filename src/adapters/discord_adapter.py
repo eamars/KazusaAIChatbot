@@ -14,9 +14,11 @@ import asyncio
 import base64
 from datetime import datetime, timezone
 import logging
-import sys
-from pathlib import Path
 import os
+import re
+import sys
+from types import SimpleNamespace
+
 import discord
 import httpx
 import uvicorn
@@ -24,8 +26,26 @@ from dotenv import load_dotenv
 from fastapi import FastAPI, Header, HTTPException
 from pydantic import BaseModel
 
+from adapters.envelope_common import (
+    addressed_to_from_envelope_parts,
+    attachment_refs,
+    normalize_body_spacing,
+    resolve_mentions,
+)
+from kazusa_ai_chatbot.config import CHARACTER_GLOBAL_USER_ID
 from kazusa_ai_chatbot.dispatcher import SendResult
 from kazusa_ai_chatbot.logging_config import configure_adapter_logging
+from kazusa_ai_chatbot.message_envelope import (
+    AttachmentHandlerRegistryProtocol,
+    MentionResolver,
+    PassthroughMentionResolver,
+    build_default_attachment_handler_registry,
+)
+from kazusa_ai_chatbot.message_envelope.types import (
+    MessageEnvelope,
+    RawMention,
+    ReplyTarget,
+)
 
 configure_adapter_logging()
 
@@ -34,6 +54,133 @@ logger = logging.getLogger(__name__)
 BRAIN_URL: str = "http://localhost:8000"
 runtime_app = FastAPI(title="Kazusa Discord Runtime Adapter")
 _runtime_adapter: "DiscordAdapter | None" = None
+
+_USER_MENTION_PATTERN = re.compile(r"<@!?(\d+)>")
+_ROLE_MENTION_PATTERN = re.compile(r"<@&(\d+)>")
+_CHANNEL_MENTION_PATTERN = re.compile(r"<#(\d+)>")
+_CUSTOM_EMOJI_PATTERN = re.compile(r"<a?:[A-Za-z0-9_]+:\d+>")
+_EVERYONE_PATTERN = re.compile(r"@(everyone|here)\b")
+
+
+class DiscordEnvelopeNormalizer:
+    """Adapter-local Discord normalizer for brain-safe envelopes."""
+
+    def normalize(
+        self,
+        request: object,
+        mention_resolver: MentionResolver,
+        attachment_handlers: AttachmentHandlerRegistryProtocol,
+    ) -> MessageEnvelope:
+        """Normalize one Discord request.
+
+        Args:
+            request: Request-like object with Discord wire content and metadata.
+            mention_resolver: Resolver used to project raw mentions.
+            attachment_handlers: Registry used to normalize attachments.
+
+        Returns:
+            Message envelope with Discord tags removed from `body_text`.
+        """
+
+        raw_wire_text = str(request.content or "")
+        platform_bot_id = str(request.platform_bot_id)
+        channel_type = str(request.channel_type)
+        reply_context = dict(request.reply_context)
+
+        raw_mentions = self._raw_mentions(raw_wire_text, platform_bot_id)
+        reply = self._reply_target(reply_context, platform_bot_id)
+
+        body_text = _USER_MENTION_PATTERN.sub(" ", raw_wire_text)
+        body_text = _ROLE_MENTION_PATTERN.sub(" ", body_text)
+        body_text = _CHANNEL_MENTION_PATTERN.sub(" ", body_text)
+        body_text = _CUSTOM_EMOJI_PATTERN.sub(" ", body_text)
+        body_text = _EVERYONE_PATTERN.sub(" ", body_text)
+        body_text = normalize_body_spacing(body_text)
+
+        mentions = resolve_mentions(raw_mentions, mention_resolver)
+        addressed_to = addressed_to_from_envelope_parts(
+            mentions=mentions,
+            reply=reply,
+            channel_type=channel_type,
+        )
+        envelope: MessageEnvelope = {
+            "body_text": body_text,
+            "raw_wire_text": raw_wire_text,
+            "mentions": mentions,
+            "attachments": attachment_refs(request.attachments, attachment_handlers),
+            "addressed_to_global_user_ids": addressed_to,
+            "broadcast": False,
+        }
+        if reply:
+            envelope["reply"] = reply
+
+        return envelope
+
+    def _raw_mentions(
+        self,
+        raw_wire_text: str,
+        platform_bot_id: str,
+    ) -> list[RawMention]:
+        """Extract typed Discord mention fragments from wire text."""
+
+        raw_mentions: list[RawMention] = []
+        for match in _USER_MENTION_PATTERN.finditer(raw_wire_text):
+            platform_user_id = match.group(1)
+            entity_kind = "bot" if platform_user_id == platform_bot_id else "user"
+            raw_mentions.append({
+                "platform": "discord",
+                "platform_user_id": platform_user_id,
+                "entity_kind": entity_kind,
+                "raw_text": match.group(0),
+            })
+
+        for match in _ROLE_MENTION_PATTERN.finditer(raw_wire_text):
+            raw_mentions.append({
+                "platform": "discord",
+                "platform_user_id": match.group(1),
+                "entity_kind": "platform_role",
+                "raw_text": match.group(0),
+            })
+
+        for match in _CHANNEL_MENTION_PATTERN.finditer(raw_wire_text):
+            raw_mentions.append({
+                "platform": "discord",
+                "platform_user_id": match.group(1),
+                "entity_kind": "channel",
+                "raw_text": match.group(0),
+            })
+
+        for match in _EVERYONE_PATTERN.finditer(raw_wire_text):
+            raw_mentions.append({
+                "platform": "discord",
+                "platform_user_id": match.group(1),
+                "entity_kind": "everyone",
+                "raw_text": match.group(0),
+            })
+
+        return raw_mentions
+
+    def _reply_target(
+        self,
+        reply_context: dict,
+        platform_bot_id: str,
+    ) -> ReplyTarget:
+        """Project Discord reply metadata into a typed reply target."""
+
+        reply: ReplyTarget = {}
+        if reply_context.get("reply_to_message_id"):
+            reply["platform_message_id"] = str(reply_context["reply_to_message_id"])
+            reply["derivation"] = "platform_native"
+        if reply_context.get("reply_to_platform_user_id"):
+            platform_user_id = str(reply_context["reply_to_platform_user_id"])
+            reply["platform_user_id"] = platform_user_id
+            if platform_user_id == platform_bot_id:
+                reply["global_user_id"] = CHARACTER_GLOBAL_USER_ID
+        if reply_context.get("reply_to_display_name"):
+            reply["display_name"] = str(reply_context["reply_to_display_name"])
+        if reply_context.get("reply_excerpt"):
+            reply["excerpt"] = str(reply_context["reply_excerpt"])
+        return reply
 
 
 class RuntimeSendMessageRequest(BaseModel):
@@ -110,6 +257,9 @@ class DiscordAdapter(discord.Client):
         self.heartbeat_seconds = heartbeat_seconds
         self.channel_ids = set(channel_ids) if channel_ids is not None else None
         self.debug_modes = debug_modes or {}
+        self._envelope_normalizer = DiscordEnvelopeNormalizer()
+        self._attachment_handlers = build_default_attachment_handler_registry()
+        self._mention_resolver = PassthroughMentionResolver()
         self._http_client = httpx.AsyncClient(timeout=120.0)
         self._runtime_server: uvicorn.Server | None = None
         self._runtime_server_task: asyncio.Task | None = None
@@ -200,12 +350,21 @@ class DiscordAdapter(discord.Client):
                 logger.warning(f"Discord runtime heartbeat failed: {exc}")
 
     async def on_message(self, message: discord.Message):
+        """Normalize one Discord message event and forward it to the brain.
+
+        Args:
+            message: Discord message emitted by the client event stream.
+
+        Returns:
+            None.
+        """
+
         if message.author == self.user:
             return
 
         is_dm = message.guild is None
         channel_id_str = str(message.channel.id)
-        reply_context: dict[str, str | bool] = {}
+        reply_context: dict[str, str] = {}
 
         if message.reference is not None and message.reference.message_id is not None:
             reply_context["reply_to_message_id"] = str(message.reference.message_id)
@@ -214,13 +373,7 @@ class DiscordAdapter(discord.Client):
         if isinstance(referenced_message, discord.Message):
             reply_context["reply_to_platform_user_id"] = str(referenced_message.author.id)
             reply_context["reply_to_display_name"] = referenced_message.author.display_name
-            reply_context["reply_to_current_bot"] = bool(self.user and referenced_message.author.id == self.user.id)
             reply_context["reply_excerpt"] = referenced_message.content
-        mentioned_bot = bool(
-            self.user is not None
-            and any(mentioned_user.id == self.user.id for mentioned_user in message.mentions)
-        )
-
         message_debug_modes = dict(self.debug_modes)
         is_active = is_dm or (self.channel_ids is not None and channel_id_str in self.channel_ids)
         
@@ -251,13 +404,27 @@ class DiscordAdapter(discord.Client):
                         })
                 except httpx.HTTPError as exc:
                     logger.debug(f"Handled exception in on_message: {exc}")
-                    logger.exception(f"Failed to fetch attachment {att.url}")
+                    logger.exception(f"Failed to fetch attachment {att.url}: {exc}")
 
         # Determine channel name
         if message.guild is None:
             channel_name = f"Private chat with {message.author.display_name}"
         else:
             channel_name = str(message.channel.name)
+
+        envelope_request = SimpleNamespace(
+            platform="discord",
+            channel_type="private" if is_dm else "group",
+            content=message.content,
+            platform_bot_id=str(self.user.id) if self.user else "",
+            reply_context=reply_context,
+            attachments=attachments,
+        )
+        envelope = self._envelope_normalizer.normalize(
+            envelope_request,
+            self._mention_resolver,
+            self._attachment_handlers,
+        )
 
         # Build the request payload
         payload = {
@@ -269,11 +436,8 @@ class DiscordAdapter(discord.Client):
             "platform_bot_id": str(self.user.id) if self.user else "",
             "display_name": message.author.display_name,
             "channel_name": channel_name,
-            "content": message.content,
             "content_type": "text",
-            "mentioned_bot": mentioned_bot,
-            "attachments": attachments,
-            "reply_context": reply_context,
+            "message_envelope": envelope,
             "debug_modes": message_debug_modes,
         }
 
@@ -295,7 +459,7 @@ class DiscordAdapter(discord.Client):
             data = resp.json()
         except Exception as exc:
             logger.debug(f"Handled exception in on_message: {exc}")
-            logger.exception("Brain service request failed")
+            logger.exception(f"Brain service request failed: {exc}")
             if not message_debug_modes.get("listen_only"):
                 await message.reply("I'm having trouble thinking right now, please try again later.")
             return
