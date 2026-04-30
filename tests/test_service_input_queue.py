@@ -660,6 +660,9 @@ async def test_worker_derives_graph_input_from_message_envelope(monkeypatch) -> 
 
     assert response.messages == []
     assert captured_state["user_input"] == "clean body"
+    assert captured_state["character_profile"]["global_user_id"] == (
+        "character-global-id"
+    )
     assert captured_state["message_envelope"]["raw_wire_text"] == "<@bot-1> clean body"
     assert all(key != "mentioned" + "_bot" for key in captured_state)
     assert saved_docs[0]["body_text"] == "clean body"

@@ -148,6 +148,115 @@ async def test_persona_supervisor2_returns_final_dialog_and_consolidation_state(
 
 
 @pytest.mark.asyncio
+async def test_persona_supervisor2_scopes_group_history_before_persona_stages():
+    """Persona stages should not receive another user's addressed subthread."""
+    state = _base_discord_state()
+    state["platform_user_id"] = "platform-user-a"
+    state["global_user_id"] = "global-user-a"
+    state["platform_bot_id"] = "platform-bot"
+    state["chat_history_wide"] = [
+        {
+            "role": "user",
+            "platform_user_id": "platform-user-a",
+            "global_user_id": "global-user-a",
+            "body_text": "current user secret",
+            "addressed_to_global_user_ids": ["character-uuid"],
+            "broadcast": False,
+            "mentions": [],
+            "reply_context": {},
+            "timestamp": "2026-04-30T00:00:00+00:00",
+        },
+        {
+            "role": "assistant",
+            "platform_user_id": "platform-bot",
+            "global_user_id": "character-uuid",
+            "body_text": "current user reply",
+            "addressed_to_global_user_ids": ["global-user-a"],
+            "broadcast": False,
+            "mentions": [],
+            "reply_context": {},
+            "timestamp": "2026-04-30T00:00:01+00:00",
+        },
+        {
+            "role": "user",
+            "platform_user_id": "platform-user-b",
+            "global_user_id": "global-user-b",
+            "body_text": "other user secret",
+            "addressed_to_global_user_ids": ["character-uuid"],
+            "broadcast": False,
+            "mentions": [],
+            "reply_context": {},
+            "timestamp": "2026-04-30T00:00:02+00:00",
+        },
+        {
+            "role": "assistant",
+            "platform_user_id": "platform-bot",
+            "global_user_id": "character-uuid",
+            "body_text": "other user reply",
+            "addressed_to_global_user_ids": ["global-user-b"],
+            "broadcast": False,
+            "mentions": [],
+            "reply_context": {},
+            "timestamp": "2026-04-30T00:00:03+00:00",
+        },
+    ]
+    state["chat_history_recent"] = list(state["chat_history_wide"])
+
+    with (
+        patch(
+            "kazusa_ai_chatbot.nodes.persona_supervisor2.call_msg_decontexualizer",
+            new_callable=AsyncMock,
+            return_value={"decontexualized_input": "Hello"},
+        ) as m_decon,
+        patch(
+            "kazusa_ai_chatbot.nodes.persona_supervisor2.stage_1_research",
+            new_callable=AsyncMock,
+            return_value={"rag_result": {}},
+        ) as m_research,
+        patch(
+            "kazusa_ai_chatbot.nodes.persona_supervisor2.call_cognition_subgraph",
+            new_callable=AsyncMock,
+            return_value={
+                "internal_monologue": "thinking...",
+                "action_directives": {},
+                "interaction_subtext": "",
+                "emotional_appraisal": "",
+                "character_intent": "",
+                "logical_stance": "",
+            },
+        ),
+        patch(
+            "kazusa_ai_chatbot.nodes.persona_supervisor2.dialog_agent",
+            new_callable=AsyncMock,
+            return_value={
+                "final_dialog": ["Hi there!"],
+                "target_addressed_user_ids": ["global-user-a"],
+                "target_broadcast": False,
+            },
+        ),
+    ):
+        result = await persona_supervisor2(state)
+
+    decon_state = m_decon.await_args.args[0]
+    research_state = m_research.await_args.args[0]
+    assert [
+        row["body_text"] for row in decon_state["chat_history_recent"]
+    ] == [
+        "current user secret",
+        "current user reply",
+    ]
+    assert [
+        row["body_text"] for row in research_state["chat_history_wide"]
+    ] == [
+        "current user secret",
+        "current user reply",
+    ]
+    assert result["consolidation_state"]["chat_history_recent"] == (
+        decon_state["chat_history_recent"]
+    )
+
+
+@pytest.mark.asyncio
 async def test_persona_supervisor2_no_remember_skips_consolidation():
     """no_remember stays a service concern; supervisor still returns the consolidation snapshot."""
     state = _base_discord_state()

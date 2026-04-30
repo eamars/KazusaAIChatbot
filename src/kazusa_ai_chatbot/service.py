@@ -652,7 +652,7 @@ async def _process_queued_chat_item(item: QueuedChatItem) -> None:
     character_name = _personality.get("name", "Character")
 
     try:
-        await _ensure_character_global_identity(
+        character_global_user_id = await _ensure_character_global_identity(
             platform=req.platform,
             platform_bot_id=req.platform_bot_id,
             character_name=character_name,
@@ -701,6 +701,8 @@ async def _process_queued_chat_item(item: QueuedChatItem) -> None:
 
         user_input = item.combined_content or message_envelope["body_text"]
         is_collapsed_turn = bool(item.collapsed_items)
+        character_profile = dict(_personality)
+        character_profile["global_user_id"] = character_global_user_id
 
         logger.debug(f'Chat request: platform={req.platform} channel={req.platform_channel_id or "<dm>"} message={req.platform_message_id or "<none>"} user={req.platform_user_id} global_user={global_user_id} content_type={req.content_type} attachments={len(message_envelope["attachments"])} image_attachments={len(multimedia_input)} history_wide={len(chat_history_wide)} history_recent={len(chat_history_recent)} reply_context={log_preview(reply_context)} debug_modes={active_flags} collapsed={is_collapsed_turn} collapsed_count={len(item.collapsed_items)} content={log_preview(user_input)}')
 
@@ -722,7 +724,7 @@ async def _process_queued_chat_item(item: QueuedChatItem) -> None:
             "user_profile": user_profile,
             "platform_bot_id": req.platform_bot_id,
             "character_name": character_name,
-            "character_profile": _personality,
+            "character_profile": character_profile,
             "platform_channel_id": req.platform_channel_id,
             "channel_type": req.channel_type,
             "channel_name": req.channel_name,

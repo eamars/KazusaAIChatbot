@@ -4,6 +4,7 @@ import logging
 
 from langgraph.graph import END, START, StateGraph
 
+from kazusa_ai_chatbot.config import CHAT_HISTORY_RECENT_LIMIT
 from kazusa_ai_chatbot.nodes.dialog_agent import dialog_agent
 from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition import call_cognition_subgraph
 from kazusa_ai_chatbot.nodes.persona_supervisor2_consolidator import call_consolidation_subgraph
@@ -16,7 +17,7 @@ from kazusa_ai_chatbot.nodes.referent_resolution import (
     unresolved_referent_reason,
 )
 from kazusa_ai_chatbot.state import IMProcessState
-from kazusa_ai_chatbot.utils import log_preview
+from kazusa_ai_chatbot.utils import build_interaction_history_recent, log_preview
 
 logger = logging.getLogger(__name__)
 
@@ -104,6 +105,14 @@ async def stage_1_research(state: GlobalPersonaState) -> dict:
 
 
 async def persona_supervisor2(state: IMProcessState) -> dict:
+    """Run persona reasoning with history scoped to the active user thread.
+
+    Args:
+        state: Top-level chat graph state after relevance gating.
+
+    Returns:
+        Dialog output and the persona-state snapshot used by background tasks.
+    """
 
     # Build the top level graph that connect stages
     persona_builder = StateGraph(GlobalPersonaState)
@@ -119,6 +128,14 @@ async def persona_supervisor2(state: IMProcessState) -> dict:
 
     
     persona_graph = persona_builder.compile()
+
+    interaction_history_wide = build_interaction_history_recent(
+        state["chat_history_wide"],
+        state["platform_user_id"],
+        state["platform_bot_id"],
+        state["global_user_id"],
+    )
+    interaction_history_recent = interaction_history_wide[-CHAT_HISTORY_RECENT_LIMIT:]
 
     initial_persona_state: GlobalPersonaState = {
         # Character Related
@@ -137,8 +154,8 @@ async def persona_supervisor2(state: IMProcessState) -> dict:
         "user_name": state["user_name"],
         "user_profile": state["user_profile"],
         "platform_bot_id": state["platform_bot_id"],
-        "chat_history_wide": state["chat_history_wide"],
-        "chat_history_recent": state["chat_history_recent"],
+        "chat_history_wide": interaction_history_wide,
+        "chat_history_recent": interaction_history_recent,
         "reply_context": state["reply_context"],
         "indirect_speech_context": state["indirect_speech_context"],
         "channel_topic": state["channel_topic"],
