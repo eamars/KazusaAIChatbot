@@ -63,6 +63,13 @@ async def test_stage_1_research_calls_rag2_and_projects_payload(monkeypatch) -> 
             "addressed_to_global_user_ids": ["character-1"],
             "broadcast": False,
         },
+        "prompt_message_context": {
+            "body_text": "clean body",
+            "mentions": [],
+            "attachments": [],
+            "addressed_to_global_user_ids": ["character-1"],
+            "broadcast": False,
+        },
         "channel_topic": "test",
         "chat_history_recent": [],
         "chat_history_wide": [],
@@ -73,7 +80,8 @@ async def test_stage_1_research_calls_rag2_and_projects_payload(monkeypatch) -> 
     assert captured["original_query"] == "你记得我喜欢什么吗？"
     assert captured["character_name"] == "Kazusa"
     assert captured["context"]["channel_type"] == "group"
-    assert captured["context"]["message_envelope"]["body_text"] == "clean body"
+    assert "message_envelope" not in captured["context"]
+    assert captured["context"]["prompt_message_context"]["body_text"] == "clean body"
     assert captured["context"]["chat_history_recent"] == []
     assert result["rag_result"]["answer"] == "resolved"
     assert result["rag_result"]["user_image"]["user_memory_context"]["objective_facts"][0]["fact"] == "User likes tea"
@@ -108,6 +116,13 @@ async def test_stage_1_research_skips_rag_for_unresolved_referents(monkeypatch) 
         "message_envelope": {
             "body_text": "clean body",
             "raw_wire_text": "clean body",
+            "mentions": [],
+            "attachments": [],
+            "addressed_to_global_user_ids": ["character-1"],
+            "broadcast": False,
+        },
+        "prompt_message_context": {
+            "body_text": "clean body",
             "mentions": [],
             "attachments": [],
             "addressed_to_global_user_ids": ["character-1"],
@@ -172,6 +187,13 @@ async def test_stage_1_research_runs_rag_for_mixed_referents(monkeypatch) -> Non
             "addressed_to_global_user_ids": ["character-1"],
             "broadcast": False,
         },
+        "prompt_message_context": {
+            "body_text": "clean body",
+            "mentions": [],
+            "attachments": [],
+            "addressed_to_global_user_ids": ["character-1"],
+            "broadcast": False,
+        },
         "channel_topic": "test",
         "chat_history_recent": [],
         "chat_history_wide": [],
@@ -212,6 +234,13 @@ async def test_stage_1_research_skips_when_referents_are_all_unresolved(monkeypa
         "message_envelope": {
             "body_text": "clean body",
             "raw_wire_text": "clean body",
+            "mentions": [],
+            "attachments": [],
+            "addressed_to_global_user_ids": ["character-1"],
+            "broadcast": False,
+        },
+        "prompt_message_context": {
+            "body_text": "clean body",
             "mentions": [],
             "attachments": [],
             "addressed_to_global_user_ids": ["character-1"],

@@ -49,7 +49,7 @@ _MSG_DECONTEXUALIZER_PROMPT = """\
   * 上述规则是**硬约束**：即使你能够从 `chat_history` 或 `indirect_speech_context` 明确识别此人是谁，只要第三人称结构已经成立，也必须保留「他 / 她 / 他们」而不是改写成人名。
   * 上一条硬约束**只适用于 `indirect_speech_context` 非空的情况**。如果 `indirect_speech_context` 为空，就不要把这条保留规则误用到普通直接对话里。
 - 补全背景：如果用户是在追问上文，请将上文的主题合并到查询中。
-- 如果 `message_envelope.addressed_to_global_user_ids` 表明当前消息直接指向 active character，且 `reply_context.reply_excerpt` 显示上一条 assistant 在做澄清、确认范围、提供选项、追问用户真实意图，那么像“是的 / 对 / 就这个 / 前者 / 后者 / 不是那个”这类回复应被视为**对上一条 assistant 语义框架的选择或确认**，输出要补全为用户真正确认的命题，而不是保留成孤立短句。
+- 如果 `prompt_message_context.addressed_to_global_user_ids` 表明当前消息直接指向 active character，且 `reply_context.reply_excerpt` 显示上一条 assistant 在做澄清、确认范围、提供选项、追问用户真实意图，那么像“是的 / 对 / 就这个 / 前者 / 后者 / 不是那个”这类回复应被视为**对上一条 assistant 语义框架的选择或确认**，输出要补全为用户真正确认的命题，而不是保留成孤立短句。
 - 保持原意：不要改变用户的问题意图，仅增加必要的修饰词。
 - 保持语序：不要改变句子的语法结构。
 - 保持主语：不要改变无歧义的人称代词（比如 "你"， "我"）。
@@ -68,7 +68,7 @@ _MSG_DECONTEXUALIZER_PROMPT = """\
 - `user_input = "https://example.com/page"` -> 保持原句，不要改成「某某角色的百科页面」
 - `user_input = "这个 https://example.com/page"` 且 `channel_topic = "用户在发某角色的百科链接"` -> 可以保留原句，或改成「这个 https://example.com/page」，但不要改成「这个某某角色的百科页面链接」
 - `user_input = "这个 README.md"` 且 `channel_topic` 提到某个功能模块 -> 不要改成「这个某功能模块的说明文档」，应保留 `README.md`
-- `message_envelope.addressed_to_global_user_ids` 非空，上一条 assistant 为「你是想让我怎么定义你呀？是想要一个具体的评价，还是仅仅在随口试探……唔。」；`user_input = "是的"` -> 应补全为类似「是的，我是想让 active character 说明白对我的看法 / 给我具体评价」；不要保留成孤立的「是的」。
+- `prompt_message_context.addressed_to_global_user_ids` 非空，上一条 assistant 为「你是想让我怎么定义你呀？是想要一个具体的评价，还是仅仅在随口试探……唔。」；`user_input = "是的"` -> 应补全为类似「是的，我是想让 active character 说明白对我的看法 / 给我具体评价」；不要保留成孤立的「是的」。
 - `user_input = "这些是什么意思？"`，且 reply_context、chat_history、channel_topic、indirect_speech_context 都没有可见对象 -> 保持原句，`referents = [{"phrase": "这些", "referent_role": "object", "status": "unresolved"}]`。
 - `reply_context.reply_excerpt = "△ ○ □"` 且 `user_input = "这些是什么意思？"` -> 可解析为用户在问回复摘录里的符号，`referents = [{"phrase": "这些", "referent_role": "object", "status": "resolved"}]`。
 - `user_input = "这个 README.md 是什么意思？"` -> 输入自带字面对象，保持字面锚点，`referents = []`。
@@ -88,13 +88,32 @@ _MSG_DECONTEXUALIZER_PROMPT = """\
     "platform_user_id": "string",
     "user_name": "string",
     "platform_bot_id": "string",
-    "message_envelope": {
+    "prompt_message_context": {
         "body_text": "string",
         "addressed_to_global_user_ids": ["string"],
+        "broadcast": true,
+        "mentions": [
+            {
+                "platform_user_id": "string",
+                "global_user_id": "string",
+                "display_name": "string",
+                "entity_kind": "bot | user | platform_role | channel | everyone | unknown"
+            }
+        ],
+        "attachments": [
+            {
+                "media_kind": "image | audio | video | file",
+                "description": "string",
+                "summary_status": "available | unavailable"
+            }
+        ],
         "reply": {
+            "platform_message_id": "string",
+            "platform_user_id": "string",
             "global_user_id": "string",
             "display_name": "string",
-            "excerpt": "string"
+            "excerpt": "string",
+            "derivation": "platform_native | leading_mention"
         }
     },
     "chat_history": [
@@ -147,7 +166,7 @@ async def call_msg_decontexualizer(state: GlobalPersonaState) -> dict:
         "platform_user_id": platform_user_id,
         "user_name": user_name,
         "platform_bot_id": state["platform_bot_id"],
-        "message_envelope": state["message_envelope"],
+        "prompt_message_context": state["prompt_message_context"],
         "chat_history": state["chat_history_recent"],
         "channel_topic": state["channel_topic"],
         "indirect_speech_context": state["indirect_speech_context"],

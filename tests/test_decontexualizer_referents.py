@@ -39,6 +39,13 @@ def _base_state() -> dict:
             "addressed_to_global_user_ids": [],
             "broadcast": True,
         },
+        "prompt_message_context": {
+            "body_text": "这些是什么意思？",
+            "mentions": [],
+            "attachments": [],
+            "addressed_to_global_user_ids": [],
+            "broadcast": True,
+        },
         "chat_history_recent": [
             {"role": "user", "body_text": "晚上好"},
             {"role": "assistant", "body_text": "晚上好。"},
@@ -204,6 +211,7 @@ async def test_mixed_referents_are_preserved() -> None:
     state["user_input"] = "他上次说的那些关于X的话是什么意思？"
     state["message_envelope"]["body_text"] = state["user_input"]
     state["message_envelope"]["raw_wire_text"] = state["user_input"]
+    state["prompt_message_context"]["body_text"] = state["user_input"]
 
     with patch(
         "kazusa_ai_chatbot.nodes.persona_supervisor2_msg_decontexualizer._msg_decontexualizer_llm"
@@ -283,6 +291,7 @@ async def test_live_decontext_referents_clear_literal_anchor(ensure_live_llm) ->
     state["user_input"] = "这个 README.md 是什么意思？"
     state["message_envelope"]["body_text"] = state["user_input"]
     state["message_envelope"]["raw_wire_text"] = state["user_input"]
+    state["prompt_message_context"]["body_text"] = state["user_input"]
     result, duration_seconds = await _run_live_case(
         ensure_live_llm,
         "clear_literal_anchor",

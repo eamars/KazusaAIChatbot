@@ -79,7 +79,7 @@ async def stage_1_research(state: GlobalPersonaState) -> dict:
             "user_name": state["user_name"],
             "user_profile": state["user_profile"],
             "current_timestamp": state["timestamp"],
-            "message_envelope": state["message_envelope"],
+            "prompt_message_context": state["prompt_message_context"],
             "channel_topic": state["channel_topic"],
             "chat_history_recent": state["chat_history_recent"],
             "chat_history_wide": state["chat_history_wide"],
@@ -144,7 +144,7 @@ async def persona_supervisor2(state: IMProcessState) -> dict:
         # Inputs
         "timestamp": state["timestamp"],
         "user_input": state["user_input"],
-        "message_envelope": state["message_envelope"],
+        "prompt_message_context": state["prompt_message_context"],
         "platform": state["platform"],
         "platform_channel_id": state["platform_channel_id"],
         "channel_type": state["channel_type"],

@@ -97,7 +97,7 @@ async def call_cognition_subgraph(state: GlobalPersonaState) -> GlobalPersonaSta
         # Inputs
         "timestamp": state["timestamp"],
         "user_input": state["user_input"],
-        "message_envelope": state["message_envelope"],
+        "prompt_message_context": state["prompt_message_context"],
         "global_user_id": state["global_user_id"],
         "user_name": state["user_name"],
         "user_profile": state["user_profile"],

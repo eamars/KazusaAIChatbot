@@ -47,7 +47,11 @@ from kazusa_ai_chatbot.db import (
 from kazusa_ai_chatbot.mcp_client import mcp_manager
 from kazusa_ai_chatbot.state import IMProcessState, MultiMediaDoc, DebugModes, ReplyContext
 from kazusa_ai_chatbot.chat_input_queue import ChatInputQueue, QueuedChatItem
-from kazusa_ai_chatbot.message_envelope import MentionEntityKind, MessageEnvelope
+from kazusa_ai_chatbot.message_envelope import (
+    MentionEntityKind,
+    MessageEnvelope,
+    project_prompt_message_context,
+)
 from kazusa_ai_chatbot.utils import log_list_preview, log_preview, trim_history_dict
 from kazusa_ai_chatbot import scheduler
 from kazusa_ai_chatbot.dispatcher import (
@@ -700,6 +704,10 @@ async def _process_queued_chat_item(item: QueuedChatItem) -> None:
             logger.info(f'Debug modes active: {active_flags}')
 
         user_input = item.combined_content or message_envelope["body_text"]
+        prompt_message_context = project_prompt_message_context(
+            message_envelope=message_envelope,
+            multimedia_input=multimedia_input,
+        )
         is_collapsed_turn = bool(item.collapsed_items)
         character_profile = dict(_personality)
         character_profile["global_user_id"] = character_global_user_id
@@ -720,6 +728,7 @@ async def _process_queued_chat_item(item: QueuedChatItem) -> None:
             "user_name": req.display_name,
             "user_input": user_input,
             "message_envelope": message_envelope,
+            "prompt_message_context": prompt_message_context,
             "user_multimedia_input": multimedia_input,
             "user_profile": user_profile,
             "platform_bot_id": req.platform_bot_id,

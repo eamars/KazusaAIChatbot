@@ -27,6 +27,13 @@ def _base_discord_state():
             "addressed_to_global_user_ids": [],
             "broadcast": True,
         },
+        "prompt_message_context": {
+            "body_text": "Hello",
+            "mentions": [],
+            "attachments": [],
+            "addressed_to_global_user_ids": [],
+            "broadcast": True,
+        },
         "user_multimedia_input": [],
         "user_profile": {"affinity": 500},
         "platform_bot_id": "bot_456",

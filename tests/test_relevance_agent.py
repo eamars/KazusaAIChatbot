@@ -3,11 +3,16 @@
 from __future__ import annotations
 
 import json
+import logging
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from kazusa_ai_chatbot.nodes.relevance_agent import build_group_attention_context, relevance_agent
+from kazusa_ai_chatbot.nodes.relevance_agent import (
+    build_group_attention_context,
+    multimedia_descriptor_agent,
+    relevance_agent,
+)
 
 
 def _base_state():
@@ -30,6 +35,13 @@ def _base_state():
             "mentions": [],
             "attachments": [],
             "broadcast": True,
+        },
+        "prompt_message_context": {
+            "body_text": "Hello bot!",
+            "addressed_to_global_user_ids": [],
+            "broadcast": True,
+            "mentions": [],
+            "attachments": [],
         },
         "character_name": "TestCharacter",
         "character_profile": {
@@ -86,6 +98,90 @@ def _llm_response(content: str) -> MagicMock:
     response = MagicMock()
     response.content = content
     return response
+
+
+@pytest.mark.asyncio
+async def test_multimedia_descriptor_updates_prompt_context_and_current_row(
+    monkeypatch,
+) -> None:
+    """Image summaries should feed prompt context and current-row persistence."""
+
+    state = _base_state()
+    state["message_envelope"]["body_text"] = ""
+    state["message_envelope"]["attachments"] = [{
+        "media_type": "image/jpeg",
+        "base64_data": "image-bytes",
+        "storage_shape": "inline",
+    }]
+    state["user_multimedia_input"] = [{
+        "content_type": "image/jpeg",
+        "base64_data": "image-bytes",
+        "description": "",
+    }]
+    update_descriptions = AsyncMock(return_value=True)
+    monkeypatch.setattr(
+        "kazusa_ai_chatbot.nodes.relevance_agent.update_conversation_attachment_descriptions",
+        update_descriptions,
+    )
+
+    response = _llm_response('{"description": "a desk with handwritten notes"}')
+    with patch("kazusa_ai_chatbot.nodes.relevance_agent._vision_descriptor_llm") as mock_llm:
+        mock_llm.ainvoke = AsyncMock(return_value=response)
+        result = await multimedia_descriptor_agent(state)
+
+    assert result["user_multimedia_input"][0]["description"] == (
+        "a desk with handwritten notes"
+    )
+    assert result["prompt_message_context"]["attachments"][0]["description"] == (
+        "a desk with handwritten notes"
+    )
+    update_descriptions.assert_awaited_once_with(
+        platform="discord",
+        platform_channel_id="chan_1",
+        platform_message_id="msg_123",
+        descriptions=["a desk with handwritten notes"],
+    )
+
+
+@pytest.mark.asyncio
+async def test_multimedia_descriptor_continues_when_vision_llm_fails(
+    monkeypatch,
+    caplog,
+) -> None:
+    """Vision descriptor failures should leave unavailable prompt summaries."""
+
+    state = _base_state()
+    state["message_envelope"]["body_text"] = ""
+    state["message_envelope"]["attachments"] = [{
+        "media_type": "image/jpeg",
+        "base64_data": "image-bytes",
+        "storage_shape": "inline",
+    }]
+    state["user_multimedia_input"] = [{
+        "content_type": "image/jpeg",
+        "base64_data": "image-bytes",
+        "description": "",
+    }]
+    update_descriptions = AsyncMock(return_value=True)
+    monkeypatch.setattr(
+        "kazusa_ai_chatbot.nodes.relevance_agent.update_conversation_attachment_descriptions",
+        update_descriptions,
+    )
+
+    with patch("kazusa_ai_chatbot.nodes.relevance_agent._vision_descriptor_llm") as mock_llm:
+        mock_llm.ainvoke = AsyncMock(side_effect=RuntimeError("vision down"))
+        caplog.set_level(logging.WARNING)
+        result = await multimedia_descriptor_agent(state)
+
+    assert result["user_multimedia_input"][0]["description"] == ""
+    assert result["prompt_message_context"]["attachments"][0] == {
+        "media_kind": "image",
+        "description": "",
+        "summary_status": "unavailable",
+    }
+    update_descriptions.assert_not_awaited()
+    assert "Image descriptor fallback after LLM exception" in caplog.text
+    assert "vision down" in caplog.text
 
 
 @pytest.mark.asyncio

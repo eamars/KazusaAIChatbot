@@ -2,7 +2,7 @@ from typing import Literal, NotRequired, TypedDict
 from kazusa_ai_chatbot.conversation_progress import ConversationProgressPromptDoc
 from kazusa_ai_chatbot.state import MultiMediaDoc, DebugModes, ReplyContext
 from kazusa_ai_chatbot.db import CharacterProfileDoc, ConversationEpisodeStateDoc, UserProfileDoc
-from kazusa_ai_chatbot.message_envelope import MessageEnvelope
+from kazusa_ai_chatbot.message_envelope import PromptMessageContext
 
 ReferentRole = Literal["subject", "object", "time"]
 
@@ -22,7 +22,7 @@ class GlobalPersonaState(TypedDict):
     # Inputs
     timestamp: str
     user_input: str
-    message_envelope: MessageEnvelope
+    prompt_message_context: PromptMessageContext
     user_multimedia_input: list[MultiMediaDoc]
     platform: str
     platform_channel_id: str
@@ -89,7 +89,7 @@ class CognitionState(TypedDict):
 
     timestamp: str
     user_input: str
-    message_envelope: MessageEnvelope
+    prompt_message_context: PromptMessageContext
     global_user_id: str
     user_name: str
     user_profile: UserProfileDoc

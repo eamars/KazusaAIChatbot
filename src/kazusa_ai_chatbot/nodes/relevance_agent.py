@@ -7,8 +7,6 @@ Outputs a structured JSON decision.
 
 from __future__ import annotations
 
-import asyncio
-import base64
 from datetime import datetime, timezone
 import json
 import logging
@@ -25,9 +23,11 @@ from kazusa_ai_chatbot.config import (
     VISION_DESCRIPTOR_LLM_MODEL,
 )
 from kazusa_ai_chatbot.db import (
-    get_character_profile,
-    get_conversation_history,
-    get_user_profile,
+    update_conversation_attachment_descriptions,
+)
+from kazusa_ai_chatbot.message_envelope import (
+    MAX_PROMPT_ATTACHMENT_DESCRIPTION_CHARS,
+    project_prompt_message_context,
 )
 from kazusa_ai_chatbot.state import IMProcessState
 from kazusa_ai_chatbot.utils import (
@@ -592,6 +592,7 @@ _VISION_DESCRIPTOR_PROMPT = """\
 - **客观记录**：只描述你看到的。严禁代替角色抒情，严禁评价好坏。
 - **细节至上**：宁可描述得琐碎，也不要遗漏可能影响剧情判断的小细节（如纸张边缘的折痕）。
 - **严禁幻觉**：看不清的部分请直接标注“模糊”，不要推测。
+- **长度控制**：`description` 控制在 {max_description_chars} 字以内，优先保留人物、物体、文字和空间关系。
 
 # 思考路径
 1. 先整体观察场景和主体，再观察局部细节。
@@ -625,7 +626,9 @@ async def multimedia_descriptor_agent(state: IMProcessState) -> IMProcessState:
     for piece in user_multimedia_input:
         if piece["content_type"].startswith("image/"):
             # Call vision descriptor
-            system_prompt = SystemMessage(content=_VISION_DESCRIPTOR_PROMPT)
+            system_prompt = SystemMessage(content=_VISION_DESCRIPTOR_PROMPT.format(
+                max_description_chars=MAX_PROMPT_ATTACHMENT_DESCRIPTION_CHARS,
+            ))
             human_message = HumanMessage(content=[
                 {
                     "type": "image_url",
@@ -636,10 +639,38 @@ async def multimedia_descriptor_agent(state: IMProcessState) -> IMProcessState:
                 }
             ])
 
-            response = await _vision_descriptor_llm.ainvoke([system_prompt, human_message])
-            result = parse_llm_json_output(response.content)
+            description = ""
+            try:
+                response = await _vision_descriptor_llm.ainvoke([
+                    system_prompt,
+                    human_message,
+                ])
+            except Exception as exc:
+                logger.warning(
+                    f"Image descriptor fallback after LLM exception: {exc} "
+                    f"user={user_name} platform_user={platform_user_id} "
+                    f"media_type={piece['content_type']}",
+                    exc_info=True,
+                )
+                result = {}
+            else:
+                try:
+                    result = parse_llm_json_output(response.content)
+                except Exception as exc:
+                    logger.warning(
+                        f"Image descriptor fallback after parse exception: {exc} "
+                        f"user={user_name} platform_user={platform_user_id} "
+                        f"media_type={piece['content_type']} "
+                        f"raw={log_preview(response.content)}",
+                        exc_info=True,
+                    )
+                    result = {}
 
-            description = result.get("description", "")
+            if not isinstance(result, dict):
+                result = {}
+            raw_description = result.get("description", "")
+            if isinstance(raw_description, str):
+                description = raw_description
 
             logger.debug(f'Image description: user={user_name} platform_user={platform_user_id} media_type={piece["content_type"]} description={log_preview(description)}')
 
@@ -651,66 +682,26 @@ async def multimedia_descriptor_agent(state: IMProcessState) -> IMProcessState:
         else:
             output_multimedia_input.append(piece)
     
+    descriptions = [
+        str(piece.get("description", "")).strip()
+        for piece in output_multimedia_input
+    ]
+    has_description = any(descriptions)
+    if has_description:
+        await update_conversation_attachment_descriptions(
+            platform=state["platform"],
+            platform_channel_id=state["platform_channel_id"],
+            platform_message_id=state["platform_message_id"],
+            descriptions=descriptions,
+        )
+
+    prompt_message_context = project_prompt_message_context(
+        message_envelope=state["message_envelope"],
+        multimedia_input=output_multimedia_input,
+    )
+
     return_value = {
         "user_multimedia_input": output_multimedia_input,
+        "prompt_message_context": prompt_message_context,
     }
     return return_value
-
-
-async def test_main():
-    history = await get_conversation_history(
-        platform="discord",
-        platform_channel_id="1485606207069880361",
-        limit=5,
-    )
-    trimmed_history = trim_history_dict(history)
-
-    user_input = "<character mention>晚安"
-    platform_user_id = "320899931776745483"
-    platform_bot_id = "1485169644888395817"
-
-    state: IMProcessState = {
-        "platform": "discord",
-        "platform_user_id": platform_user_id,
-        "global_user_id": "test-uuid-placeholder",
-        "user_name": "<current user>",
-        "user_input": user_input,
-        "message_envelope": {
-            "body_text": user_input,
-            "raw_wire_text": user_input,
-            "mentions": [],
-            "attachments": [],
-            "addressed_to_global_user_ids": [],
-            "broadcast": True,
-        },
-        "user_profile": await get_user_profile("test-uuid-placeholder"),
-        "platform_bot_id": platform_bot_id,
-        "character_name": "<active character>",
-        "character_profile": await get_character_profile(),
-        "platform_channel_id": "",
-        "channel_name": "test",
-        "chat_history_wide": trimmed_history,
-        "chat_history_recent": trimmed_history[-5:],
-    }
-
-    result = await relevance_agent(state)
-
-
-async def test_main2():
-    # Open the image as b64 format
-    image_content: MultiMediaDoc = {
-        "content_type": "image/png",
-        "base64_data": base64.b64encode(open("personalities/kazusa.png", "rb").read()).decode("utf-8"),
-        "description": "",
-    }
-
-    state: IMProcessState = {
-        "user_multimedia_input": [image_content]
-    }
-
-    result = await multimedia_descriptor_agent(state)
-    print(result["user_multimedia_input"][0]["description"])
-    
-
-if __name__ == "__main__":
-    asyncio.run(test_main2())

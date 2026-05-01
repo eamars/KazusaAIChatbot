@@ -183,11 +183,11 @@ def test_state_shapes_accept_message_envelope_and_addressee_fields() -> None:
     assert "message_envelope" in im_hints
     assert "target_addressed_user_ids" in im_hints
     assert "target_broadcast" in im_hints
-    assert "message_envelope" in global_hints
+    assert "prompt_message_context" in global_hints
     assert "referents" in global_hints
     assert "target_addressed_user_ids" in global_hints
     assert "target_broadcast" in global_hints
-    assert "message_envelope" in cognition_hints
+    assert "prompt_message_context" in cognition_hints
     assert "referents" in cognition_hints
     assert "target_addressed_user_ids" in cognition_hints
     assert "target_broadcast" in cognition_hints

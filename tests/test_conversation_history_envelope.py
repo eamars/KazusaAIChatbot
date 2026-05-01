@@ -134,3 +134,49 @@ async def test_keyword_search_uses_body_text_filter(
     assert call_filter["body_text"]["$regex"] == "keyword"
     assert "$or" not in call_filter
     assert results[0][1]["body_text"] == "keyword"
+
+
+@pytest.mark.asyncio
+async def test_update_attachment_descriptions_targets_current_row(monkeypatch) -> None:
+    """Generated media descriptions should update only the current message row."""
+
+    db = MagicMock()
+    db.conversation_history.find_one = AsyncMock(return_value={
+        "platform": "qq",
+        "platform_channel_id": "chan-1",
+        "platform_message_id": "message-1",
+        "body_text": "look",
+        "attachments": [{
+            "media_type": "image/png",
+            "base64_data": "bytes",
+            "storage_shape": "inline",
+        }],
+    })
+    update_result = MagicMock()
+    update_result.modified_count = 1
+    db.conversation_history.update_one = AsyncMock(return_value=update_result)
+    get_text_embedding = AsyncMock(return_value=[0.5, 0.6])
+
+    monkeypatch.setattr(conversation_module, "get_db", AsyncMock(return_value=db))
+    monkeypatch.setattr(conversation_module, "get_text_embedding", get_text_embedding)
+
+    updated = await conversation_module.update_conversation_attachment_descriptions(
+        platform="qq",
+        platform_channel_id="chan-1",
+        platform_message_id="message-1",
+        descriptions=["image description"],
+    )
+
+    assert updated is True
+    get_text_embedding.assert_awaited_once_with("look\nimage description")
+    query = db.conversation_history.update_one.await_args.args[0]
+    update_doc = db.conversation_history.update_one.await_args.args[1]
+    assert query == {
+        "platform": "qq",
+        "platform_channel_id": "chan-1",
+        "platform_message_id": "message-1",
+    }
+    assert update_doc["$set"]["attachments"][0]["description"] == (
+        "image description"
+    )
+    assert update_doc["$set"]["embedding"] == [0.5, 0.6]

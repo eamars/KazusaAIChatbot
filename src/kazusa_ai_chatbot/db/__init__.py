@@ -57,6 +57,7 @@ from kazusa_ai_chatbot.db.conversation import (
     get_conversation_history,
     save_conversation,
     search_conversation_history,
+    update_conversation_attachment_descriptions,
 )
 
 # ── Users (identity + profile + affinity) ─────────────────────────
@@ -130,7 +131,7 @@ __all__ = [
     "db_bootstrap",
     # Conversation
     "aggregate_conversation_by_user", "get_conversation_history", "save_conversation",
-    "search_conversation_history",
+    "search_conversation_history", "update_conversation_attachment_descriptions",
     # Users
     "add_suspected_alias", "backfill_character_conversation_identity",
     "create_user_profile",

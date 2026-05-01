@@ -96,12 +96,14 @@ def _initializer_context_signature(context: dict[str, Any]) -> dict[str, Any]:
     Returns:
         Stable subset of context fields that can affect slot planning.
     """
-    if "message_envelope" not in context:
-        raise KeyError("message_envelope is required for initializer cache keys")
+    if "prompt_message_context" not in context:
+        raise KeyError(
+            "prompt_message_context is required for initializer cache keys"
+        )
 
-    message_envelope = context["message_envelope"]
-    addressed_to = message_envelope["addressed_to_global_user_ids"]
-    body_text = message_envelope["body_text"]
+    prompt_message_context = context["prompt_message_context"]
+    addressed_to = prompt_message_context["addressed_to_global_user_ids"]
+    body_text = prompt_message_context["body_text"]
 
     return_value = {
         "platform": normalize_cache_text(context.get("platform", "")),
@@ -116,7 +118,7 @@ def _initializer_context_signature(context: dict[str, Any]) -> dict[str, Any]:
             for user_id in addressed_to
             if str(user_id).strip()
         ),
-        "broadcast": bool(message_envelope["broadcast"]),
+        "broadcast": bool(prompt_message_context["broadcast"]),
     }
     return return_value
 

@@ -92,6 +92,39 @@ def _embedding_source_text(doc: ConversationMessageDoc) -> str:
     return source_text
 
 
+def _merge_attachment_descriptions(
+    *,
+    attachments: object,
+    descriptions: list[str],
+) -> list[dict[str, Any]]:
+    """Apply generated descriptions to stored attachment documents by order.
+
+    Args:
+        attachments: Stored attachment list from one conversation row.
+        descriptions: Current-turn generated descriptions aligned by order.
+
+    Returns:
+        Attachment dictionaries with non-empty descriptions applied.
+    """
+
+    if not isinstance(attachments, list):
+        return_value: list[dict[str, Any]] = []
+        return return_value
+
+    updated_attachments: list[dict[str, Any]] = []
+    for index, attachment in enumerate(attachments):
+        if not isinstance(attachment, dict):
+            continue
+        updated_attachment = dict(attachment)
+        if index < len(descriptions):
+            description = descriptions[index]
+            if description.strip():
+                updated_attachment["description"] = description.strip()
+        updated_attachments.append(updated_attachment)
+
+    return updated_attachments
+
+
 def _keyword_text_filter(pattern: str) -> dict[str, Any]:
     """Build a case-insensitive filter for typed conversation body text."""
 
@@ -369,3 +402,55 @@ async def save_conversation(doc: ConversationMessageDoc) -> None:
         platform_channel_id = doc.get("platform_channel_id", "")
         global_user_id = doc.get("global_user_id", "")
         logger.debug(f'Cache2 invalidation source=conversation_history platform={platform} channel={platform_channel_id} global_user={global_user_id} evicted={evicted_count}')
+
+
+async def update_conversation_attachment_descriptions(
+    *,
+    platform: str,
+    platform_channel_id: str,
+    platform_message_id: str,
+    descriptions: list[str],
+) -> bool:
+    """Persist generated attachment descriptions for one current message row.
+
+    Args:
+        platform: Runtime platform of the current message.
+        platform_channel_id: Channel/group/DM id of the current message.
+        platform_message_id: Platform message id of the current message.
+        descriptions: Generated media descriptions aligned to attachment order.
+
+    Returns:
+        True when the current row was found and updated, otherwise false.
+    """
+
+    clean_descriptions = [
+        description.strip() if isinstance(description, str) else ""
+        for description in descriptions
+    ]
+    has_description = any(clean_descriptions)
+    if not has_description or not platform_message_id:
+        return False
+
+    db = await get_db()
+    query = {
+        "platform": platform,
+        "platform_channel_id": platform_channel_id,
+        "platform_message_id": platform_message_id,
+    }
+    row = await db.conversation_history.find_one(query)
+    if row is None:
+        return False
+
+    attachments = _merge_attachment_descriptions(
+        attachments=row.get("attachments", []),
+        descriptions=clean_descriptions,
+    )
+    updated_row: ConversationMessageDoc = dict(row)
+    updated_row["attachments"] = attachments
+    embedding = await get_text_embedding(_embedding_source_text(updated_row))
+    result = await db.conversation_history.update_one(
+        query,
+        {"$set": {"attachments": attachments, "embedding": embedding}},
+    )
+    return_value = bool(result.modified_count)
+    return return_value

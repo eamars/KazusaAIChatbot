@@ -153,6 +153,7 @@ Include rules such as:
 
 - coding style rules
 - test execution rules
+- plan reread rules after automatic context compaction and major checklist sign-off
 - prompt safety rules
 - trusted vs untrusted prompt boundaries
 - LLM call and context budget rules for prompt, agent, RAG, cognition, dialog, evaluator, or background LLM changes
@@ -161,6 +162,11 @@ Include rules such as:
 - required skill-derived practices, copied into the plan
 
 Write the rules directly in the plan. It is acceptable and often desirable to duplicate important skill content here.
+
+Every final plan must include these plan-continuity rules in `Mandatory Rules`:
+
+- After any automatic context compaction, the active agent must reread this entire plan before continuing implementation, verification, handoff, or final reporting.
+- After signing off any major progress checklist stage, the active agent must reread this entire plan before starting the next stage.
 
 ## No Unresolved Questions
 
@@ -399,6 +405,8 @@ Each tickable checkpoint must describe:
 Do not treat checked boxes as proof by themselves. An agent may tick a checkpoint only after running its verification and recording the result in `Execution Evidence` or a linked execution record. If verification is skipped or blocked, leave the box unchecked and record why.
 
 Agents must sign off stages one at a time, immediately after each stage is genuinely complete. Do not pre-fill sign-offs, do not sign off future stages, and do not batch multiple stage sign-offs at the end of a session. If handing off mid-plan, leave all unfinished stages unchecked and unsigned, and add a brief handoff note that points to the next unchecked stage.
+
+After signing off any major checklist stage, the active agent must reread the entire plan before starting the next stage. This reread requirement must be written into the plan's `Mandatory Rules` and treated as part of each major stage sign-off gate.
 
 ## Verification
 

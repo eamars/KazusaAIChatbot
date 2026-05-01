@@ -7,7 +7,7 @@ from typing import TypedDict
 
 from kazusa_ai_chatbot.conversation_progress import ConversationProgressPromptDoc
 from kazusa_ai_chatbot.db.schemas import ConversationEpisodeStateDoc
-from kazusa_ai_chatbot.message_envelope import MessageEnvelope
+from kazusa_ai_chatbot.message_envelope import MessageEnvelope, PromptMessageContext
 
 
 class MultiMediaDoc(TypedDict):
@@ -62,6 +62,7 @@ class IMProcessState(TypedDict):
     user_name: str  # display name from the platform
     user_input: str  # Body text plus current attachment descriptions.
     message_envelope: MessageEnvelope
+    prompt_message_context: PromptMessageContext
     user_multimedia_input: list[MultiMediaDoc]
     user_profile: dict  # used to extract affinity score.
 

@@ -5,6 +5,7 @@ import json
 import pytest
 
 from kazusa_ai_chatbot.nodes import persona_supervisor2_rag_supervisor2 as supervisor2_module
+from kazusa_ai_chatbot.message_envelope import project_prompt_message_context
 from kazusa_ai_chatbot.rag.cache2_policy import build_initializer_cache_key
 from kazusa_ai_chatbot.rag.cache2_runtime import RAGCache2Runtime
 
@@ -36,6 +37,7 @@ class _CountingAsyncLLM:
         """
         self.calls = 0
         self.payload = payload
+        self.messages: list[list] = []
 
     async def ainvoke(self, _messages: list) -> _DummyResponse:
         """Return the configured payload and increment the call count.
@@ -47,6 +49,7 @@ class _CountingAsyncLLM:
             Dummy response with JSON content.
         """
         self.calls += 1
+        self.messages.append(_messages)
         return _DummyResponse(json.dumps(self.payload))
 
 
@@ -69,19 +72,18 @@ def _capture_create_task(created: list) -> object:
     return fake_create_task
 
 
-def _envelope(body_text: str = "what did current user say?") -> dict:
-    """Build the strict initializer message envelope required by cache keys.
+def _prompt_context(body_text: str = "what did current user say?") -> dict:
+    """Build the strict initializer prompt context required by cache keys.
 
     Args:
         body_text: Clean user-authored message text.
 
     Returns:
-        Typed message-envelope dict.
+        Prompt-safe current-message context dict.
     """
 
     return_value = {
         "body_text": body_text,
-        "raw_wire_text": body_text,
         "mentions": [],
         "attachments": [],
         "addressed_to_global_user_ids": [],
@@ -97,7 +99,7 @@ def test_initializer_cache_key_ignores_volatile_timestamp() -> None:
         "platform_channel_id": "chan-1",
         "user_name": "<current user>",
         "current_timestamp": "2026-04-26T00:00:00+00:00",
-        "message_envelope": _envelope(),
+        "prompt_message_context": _prompt_context(),
     }
     later_context = {
         **base_context,
@@ -126,9 +128,8 @@ def test_initializer_cache_key_uses_body_text_and_addressing() -> None:
         "platform_channel_id": "chan-1",
         "global_user_id": "user-a",
         "user_name": "<current user>",
-        "message_envelope": {
+        "prompt_message_context": {
             "body_text": "clean body",
-            "raw_wire_text": "clean body",
             "mentions": [],
             "attachments": [],
             "addressed_to_global_user_ids": ["character-global"],
@@ -137,9 +138,8 @@ def test_initializer_cache_key_uses_body_text_and_addressing() -> None:
     }
     different_body_context = {
         **base_context,
-        "message_envelope": {
+        "prompt_message_context": {
             "body_text": "other body",
-            "raw_wire_text": "other body",
             "mentions": [],
             "attachments": [],
             "addressed_to_global_user_ids": ["character-global"],
@@ -148,9 +148,8 @@ def test_initializer_cache_key_uses_body_text_and_addressing() -> None:
     }
     different_addressing_context = {
         **base_context,
-        "message_envelope": {
+        "prompt_message_context": {
             "body_text": "clean body",
-            "raw_wire_text": "clean body",
             "mentions": [],
             "attachments": [],
             "addressed_to_global_user_ids": [],
@@ -178,10 +177,10 @@ def test_initializer_cache_key_uses_body_text_and_addressing() -> None:
     assert key_a != key_c
 
 
-def test_initializer_cache_key_requires_message_envelope() -> None:
-    """Initializer cache keys should fail clearly without the envelope contract."""
+def test_initializer_cache_key_requires_prompt_message_context() -> None:
+    """Initializer cache keys should fail clearly without prompt context."""
 
-    with pytest.raises(KeyError, match="message_envelope is required"):
+    with pytest.raises(KeyError, match="prompt_message_context is required"):
         build_initializer_cache_key(
             original_query="clean body",
             character_name="<active character>",
@@ -300,7 +299,7 @@ async def test_rag_initializer_serves_second_identical_call_from_cache(monkeypat
             "platform": "discord",
             "platform_channel_id": "chan-1",
             "user_name": "<current user>",
-            "message_envelope": _envelope(),
+            "prompt_message_context": _prompt_context(),
         },
     }
 
@@ -328,7 +327,7 @@ async def test_rag_initializer_hit_schedules_persistent_hit(monkeypatch) -> None
             "platform": "discord",
             "platform_channel_id": "chan-1",
             "user_name": "<current user>",
-            "message_envelope": _envelope(),
+            "prompt_message_context": _prompt_context(),
         },
     }
     cache_key = build_initializer_cache_key(
@@ -379,7 +378,7 @@ async def test_rag_initializer_miss_schedules_persistent_upsert(monkeypatch) -> 
             "platform": "discord",
             "platform_channel_id": "chan-1",
             "user_name": "<current user>",
-            "message_envelope": _envelope(),
+            "prompt_message_context": _prompt_context(),
         },
     }
 
@@ -392,7 +391,65 @@ async def test_rag_initializer_miss_schedules_persistent_upsert(monkeypatch) -> 
     assert runtime.get_stats()["size"] == 1
 
 
-def test_initializer_prompt_version_bumped_to_v6() -> None:
-    """The rollout should invalidate older persisted initializer rows."""
+@pytest.mark.asyncio
+async def test_rag_initializer_payload_uses_prompt_context_for_large_image(
+    monkeypatch,
+) -> None:
+    """Initializer human payload should carry image description, not bytes."""
+
+    runtime = RAGCache2Runtime(max_entries=10)
+    created_tasks: list = []
+    llm = _CountingAsyncLLM({"unknown_slots": []})
+    base64_payload = "a" * (1024 * 1024 + 1)
+    description = "image shows a desk and handwritten notes"
+    prompt_message_context = project_prompt_message_context(
+        message_envelope={
+            "body_text": "",
+            "raw_wire_text": "[CQ:image,url=https://example.test/image.jpg]",
+            "mentions": [],
+            "attachments": [{
+                "media_type": "image/jpeg",
+                "base64_data": base64_payload,
+                "description": "",
+                "storage_shape": "inline",
+            }],
+            "addressed_to_global_user_ids": [],
+            "broadcast": True,
+        },
+        multimedia_input=[{
+            "content_type": "image/jpeg",
+            "base64_data": base64_payload,
+            "description": description,
+        }],
+    )
+    state = {
+        "original_query": "",
+        "character_name": "<active character>",
+        "context": {
+            "platform": "discord",
+            "platform_channel_id": "chan-1",
+            "user_name": "<current user>",
+            "prompt_message_context": prompt_message_context,
+        },
+    }
+    monkeypatch.setattr(supervisor2_module, "get_rag_cache2_runtime", lambda: runtime)
+    monkeypatch.setattr(supervisor2_module, "_initializer_llm", llm)
+    monkeypatch.setattr(
+        supervisor2_module.asyncio,
+        "create_task",
+        _capture_create_task(created_tasks),
+    )
+
+    await supervisor2_module.rag_initializer(state)
+
+    human_payload = llm.messages[0][1].content
+    assert description in human_payload
+    assert "base64_data" not in human_payload
+    assert "raw_wire_text" not in human_payload
+    assert base64_payload not in human_payload
+
+
+def test_initializer_prompt_version_remains_v6_for_prompt_context() -> None:
+    """Prompt-safe context cutover should not bump initializer prompt version."""
 
     assert supervisor2_module.INITIALIZER_PROMPT_VERSION == "initializer_prompt:v6"

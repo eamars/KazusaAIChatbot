@@ -25,6 +25,13 @@ def _base_state():
             "addressed_to_global_user_ids": [],
             "broadcast": True,
         },
+        "prompt_message_context": {
+            "body_text": "他在干啥？",
+            "mentions": [],
+            "attachments": [],
+            "addressed_to_global_user_ids": [],
+            "broadcast": True,
+        },
         "chat_history_recent": [
             {"name": "<speaker>", "user_id": "u1", "body_text": "The person mentioned earlier is cooking", "role": "user", "timestamp": "t1"},
         ],
@@ -129,6 +136,13 @@ async def test_decontexualizer_forwards_reply_context_to_llm():
                 "addressed_to_global_user_ids": ["character-global"],
                 "broadcast": False,
             },
+            "prompt_message_context": {
+                "body_text": "是的",
+                "mentions": [],
+                "attachments": [],
+                "addressed_to_global_user_ids": ["character-global"],
+                "broadcast": False,
+            },
             "reply_context": {
                 "reply_to_display_name": "<active character>",
                 "reply_excerpt": "评价这种事……你是说，要我说明白对你的看法吗？唔……突然问这些，感觉胸口闷闷的。",
@@ -142,8 +156,16 @@ async def test_decontexualizer_forwards_reply_context_to_llm():
         result = await call_msg_decontexualizer(state)
 
     payload = mock_llm.ainvoke.await_args.args[0][1].content
+    system_prompt = mock_llm.ainvoke.await_args.args[0][0].content
+    assert '"prompt_message_context": {' in payload
+    assert '"message_envelope": {' not in payload
+    assert "raw_wire_text" not in payload
     assert '"addressed_to_global_user_ids": ["character-global"]' in payload
     assert '"reply_excerpt": "评价这种事' in payload
+    assert '"broadcast": true' in system_prompt
+    assert '"mentions": [' in system_prompt
+    assert '"attachments": [' in system_prompt
+    assert '"summary_status": "available | unavailable"' in system_prompt
     assert result["decontexualized_input"] == "是的，我是想让 active character 具体评价我。"
 
 
@@ -160,6 +182,7 @@ async def test_decontexualizer_parses_unresolved_reference_signal():
     state["user_input"] = "这些是什么意思？"
     state["message_envelope"]["body_text"] = state["user_input"]
     state["message_envelope"]["raw_wire_text"] = state["user_input"]
+    state["prompt_message_context"]["body_text"] = state["user_input"]
 
     with patch("kazusa_ai_chatbot.nodes.persona_supervisor2_msg_decontexualizer._msg_decontexualizer_llm") as mock_llm:
         mock_llm.ainvoke = AsyncMock(return_value=llm_response)
