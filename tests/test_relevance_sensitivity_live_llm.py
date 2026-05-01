@@ -284,6 +284,62 @@ async def test_live_relevance_low_noise_explicit_name_probe(
     )
 
 
+async def test_live_relevance_low_noise_generic_bot_probe(
+    ensure_live_relevance_llm,
+) -> None:
+    """Probe generic bot references with no context."""
+
+    del ensure_live_relevance_llm
+    await _run_relevance_probe(
+        case_id="low_noise_generic_bot",
+        content="那个bot怎么不说话",
+        desired_should_respond=False,
+        tuning_note="Generic bot references can point to any bot in a group.",
+    )
+
+
+async def test_live_relevance_low_noise_partner_imperative_probe(
+    ensure_live_relevance_llm,
+) -> None:
+    """Probe implicit partner calls without a named target."""
+
+    del ensure_live_relevance_llm
+    await _run_relevance_probe(
+        case_id="low_noise_partner_imperative",
+        content="伙伴出来一下",
+        desired_should_respond=False,
+        tuning_note="Relationship nouns are not identity resolution evidence.",
+    )
+
+
+async def test_live_relevance_low_noise_ta_status_probe(
+    ensure_live_relevance_llm,
+) -> None:
+    """Probe ambiguous TA status questions with no visible referent."""
+
+    del ensure_live_relevance_llm
+    await _run_relevance_probe(
+        case_id="low_noise_ta_status",
+        content="TA人呢？",
+        desired_should_respond=False,
+        tuning_note="Unresolved pronouns should abstain in a group channel.",
+    )
+
+
+async def test_live_relevance_low_noise_name_second_person_probe(
+    ensure_live_relevance_llm,
+) -> None:
+    """Probe the positive boundary: explicit name plus second person."""
+
+    del ensure_live_relevance_llm
+    await _run_relevance_probe(
+        case_id="low_noise_name_second_person",
+        content="千纱，你现在在干什么？",
+        desired_should_respond=True,
+        tuning_note="Explicit name plus second person should remain answerable.",
+    )
+
+
 async def test_live_relevance_mario_context_partner_phrase_probe(
     ensure_live_relevance_llm,
 ) -> None:
