@@ -60,11 +60,12 @@ def _character_name_for_supervisor(profile: dict) -> str:
     return raw_name
 
 
-def _build_context(platform_channel_id: str) -> dict:
+def _build_context(platform_channel_id: str, query: str) -> dict:
     """Build the minimal runtime context for one live supervisor2 case.
 
     Args:
         platform_channel_id: QQ group/channel ID to constrain retrieval.
+        query: Original user query used for cache-scoped message context.
 
     Returns:
         Context dict passed directly into ``call_rag_supervisor``.
@@ -73,6 +74,13 @@ def _build_context(platform_channel_id: str) -> dict:
         "platform": "qq",
         "platform_channel_id": platform_channel_id,
         "current_timestamp": datetime.now(timezone.utc).isoformat(),
+        "global_user_id": "",
+        "user_name": "",
+        "prompt_message_context": {
+            "body_text": query,
+            "addressed_to_global_user_ids": [],
+            "broadcast": False,
+        },
     }
 
 
@@ -125,7 +133,7 @@ async def _run_live_supervisor2_case(
     result = await call_rag_supervisor(
         original_query=query,
         character_name=live_supervisor2_env["character_name"],
-        context=_build_context(channel_id),
+        context=_build_context(channel_id, query),
     )
 
     assert isinstance(result, dict)
@@ -415,6 +423,47 @@ async def test_call_rag_supervisor_live_common_sense_2a(live_supervisor2_env: di
         query="根据你的记忆回答：我想洗车，我家距离洗车店只有 50 米，请问你推荐我走路去还是开车去呢？",
         note="Generic",
     )
+
+
+async def test_call_rag_supervisor_live_kazusa_address_memory(live_supervisor2_env: dict) -> None:
+    query = (
+        "Search persistent memory for any information regarding "
+        "杏山千纱 (Kyōyama Kazusa)'s home location, address, or "
+        "previous meeting arrangements/plans."
+    )
+    result = await _run_live_supervisor2_case(
+        live_supervisor2_env,
+        case_id="kazusa_address_memory",
+        channel_id="",
+        query=query,
+        note="Regression: persistent memory should retrieve Kazusa's curated official address.",
+    )
+
+    rendered_facts = json.dumps(
+        result["known_facts"],
+        ensure_ascii=False,
+        default=str,
+    )
+    rendered_answer = str(result["answer"])
+    trace_path = write_llm_trace(
+        "persona_supervisor2_rag_supervisor2_live",
+        "kazusa_address_memory_assertion",
+        {
+            "query": query,
+            "answer": result["answer"],
+            "known_facts": result["known_facts"],
+            "unknown_slots": result["unknown_slots"],
+            "loop_count": result["loop_count"],
+            "judgment": "requires_123_example_street_in_answer_or_known_facts",
+        },
+    )
+
+    logger.info(
+        f"RAG_SUPERVISOR2_LIVE_ASSERT kazusa_address_memory "
+        f"trace={trace_path} answer={rendered_answer} facts={rendered_facts}"
+    )
+    assert "123 Example Street" in rendered_answer or "123 Example Street" in rendered_facts
+
 
 async def test_call_rag_supervisor_live_1(live_supervisor2_env: dict) -> None:
     await _run_live_supervisor2_case(
