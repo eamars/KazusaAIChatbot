@@ -905,11 +905,24 @@ async def _run_consolidation_background(state: dict) -> None:
         state: Persona graph state snapshot needed by the consolidator.
     """
 
+    global _personality
+
     try:
-        await call_consolidation_subgraph(state)
+        result = await call_consolidation_subgraph(state)
     except Exception as exc:
         logger.debug(f"Handled exception in _run_consolidation_background: {exc}")
         logger.exception(f"Background consolidation failed: {exc}")
+        return
+
+    metadata = result.get("consolidation_metadata") or {}
+    write_success = metadata.get("write_success") or {}
+    if not write_success.get("character_state"):
+        return
+
+    for field_name in ("mood", "global_vibe", "reflection_summary"):
+        field_value = result.get(field_name)
+        if isinstance(field_value, str) and field_value:
+            _personality[field_name] = field_value
 
 
 async def _run_conversation_progress_record_background(state: dict) -> None:

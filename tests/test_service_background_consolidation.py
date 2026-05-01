@@ -369,6 +369,45 @@ async def test_graph_failure_does_not_stop_queue_worker(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_background_consolidation_refreshes_cached_character_state(monkeypatch):
+    """Successful character-state writes should update the service cache."""
+
+    monkeypatch.setattr(
+        service_module,
+        "_personality",
+        {
+            "name": "Character",
+            "mood": "old mood",
+            "global_vibe": "old vibe",
+            "reflection_summary": "old reflection",
+        },
+    )
+    monkeypatch.setattr(
+        service_module,
+        "call_consolidation_subgraph",
+        AsyncMock(return_value={
+            "mood": "Curious",
+            "global_vibe": "Focused",
+            "reflection_summary": "The previous turn left her attentive.",
+            "consolidation_metadata": {
+                "write_success": {
+                    "character_state": True,
+                },
+            },
+        }),
+    )
+
+    await service_module._run_consolidation_background({"timestamp": "t1"})
+
+    assert service_module._personality["mood"] == "Curious"
+    assert service_module._personality["global_vibe"] == "Focused"
+    assert (
+        service_module._personality["reflection_summary"]
+        == "The previous turn left her attentive."
+    )
+
+
+@pytest.mark.asyncio
 async def test_build_graph_preserves_consolidation_state_from_supervisor(monkeypatch):
     """The top-level service graph should retain supervisor consolidation_state."""
 
