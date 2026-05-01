@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Literal, TypedDict
 
-from kazusa_ai_chatbot.db.schemas import ConversationEpisodeStateDoc
+from kazusa_ai_chatbot.db.schemas import BoundaryProfileDoc, ConversationEpisodeStateDoc
 
 
 @dataclass(frozen=True)
@@ -74,6 +74,7 @@ class ConversationProgressRecordInput(TypedDict):
     logical_stance: str
     character_intent: str
     final_dialog: list[str]
+    boundary_profile: BoundaryProfileDoc
 
 
 class ConversationProgressRecordResult(TypedDict):

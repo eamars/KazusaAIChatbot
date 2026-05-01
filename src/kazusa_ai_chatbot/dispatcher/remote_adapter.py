@@ -76,7 +76,7 @@ class RemoteHttpAdapter:
         try:
             sent_at = parse_iso_datetime(sent_at_raw)
         except ValueError as exc:
-            logger.debug(f"Handled exception in send_message: {exc}")
+            logger.debug(f"Using current time for invalid adapter sent_at: {exc}")
             sent_at = datetime.now(timezone.utc)
 
         return_value = SendResult(

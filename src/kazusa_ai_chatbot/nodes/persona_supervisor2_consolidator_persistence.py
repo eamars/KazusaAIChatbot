@@ -163,7 +163,7 @@ def _build_dispatch_context(state: ConsolidatorState, *, timestamp: str) -> Disp
     try:
         now = parse_iso_datetime(timestamp)
     except ValueError as exc:
-        logger.debug(f"Handled exception in _build_dispatch_context: {exc}")
+        logger.debug(f"Using current time for invalid dispatch timestamp: {exc}")
         now = datetime.now(timezone.utc)
 
     return_value = DispatchContext(
@@ -326,7 +326,7 @@ def _default_future_promise_due_time(timestamp: str) -> str:
     try:
         reference_time = parse_iso_datetime(timestamp)
     except ValueError as exc:
-        logger.debug(f"Handled exception in _default_future_promise_due_time: {exc}")
+        logger.debug(f"Using current time for invalid promise timestamp: {exc}")
         reference_time = datetime.now(timezone.utc)
 
     if reference_time.second == 0 and reference_time.microsecond == 0:
@@ -392,8 +392,7 @@ async def db_writer(state: ConsolidatorState) -> dict:
         )
         write_log["character_state"] = True
     except PyMongoError as exc:
-        logger.debug(f"Handled exception in db_writer: {exc}")
-        logger.exception("db_writer: failed to upsert character_state")
+        logger.exception(f"db_writer: failed to upsert character_state: {exc}")
         write_log["character_state"] = False
 
     # ── Step 2: last relationship insight ───────────────────────────
@@ -403,8 +402,9 @@ async def db_writer(state: ConsolidatorState) -> dict:
             await update_last_relationship_insight(global_user_id, last_relationship_insight)
             write_log["relationship_insight"] = True
         except PyMongoError as exc:
-            logger.debug(f"Handled exception in db_writer: {exc}")
-            logger.exception("db_writer: failed to update_last_relationship_insight")
+            logger.exception(
+                f"db_writer: failed to update_last_relationship_insight: {exc}"
+            )
             write_log["relationship_insight"] = False
 
     # ── Step 3: unified user-memory units ────────────────────────────
@@ -415,8 +415,7 @@ async def db_writer(state: ConsolidatorState) -> dict:
     try:
         memory_unit_results = await update_user_memory_units_from_state(state)
     except Exception as exc:
-        logger.debug(f"Handled exception in db_writer: {exc}")
-        logger.exception("db_writer: failed to update user_memory_units")
+        logger.exception(f"db_writer: failed to update user_memory_units: {exc}")
         memory_unit_results = []
         write_log["user_memory_units"] = False
     else:
@@ -459,8 +458,7 @@ async def db_writer(state: ConsolidatorState) -> dict:
             await update_affinity(global_user_id, processed_affinity_delta)
             write_log["affinity"] = True
         except PyMongoError as exc:
-            logger.debug(f"Handled exception in db_writer: {exc}")
-            logger.exception("db_writer: failed to update_affinity")
+            logger.exception(f"db_writer: failed to update_affinity: {exc}")
             write_log["affinity"] = False
 
     logger.debug(f'User {user_name}(@{global_user_id}) affinity {user_affinity_score} -> {user_affinity_score + processed_affinity_delta}')
@@ -474,7 +472,8 @@ async def db_writer(state: ConsolidatorState) -> dict:
 
     if isinstance(character_image_result, Exception):
         logger.error(
-            "db_writer: failed to update character_image",
+            f"db_writer: failed to update character_image: "
+            f"{character_image_result}",
             exc_info=(
                 type(character_image_result),
                 character_image_result,
@@ -487,8 +486,9 @@ async def db_writer(state: ConsolidatorState) -> dict:
             await upsert_character_self_image(character_image_result)
             write_log["character_image"] = True
         except PyMongoError as exc:
-            logger.debug(f"Handled exception in db_writer: {exc}")
-            logger.exception("db_writer: failed to upsert_character_self_image")
+            logger.exception(
+                f"db_writer: failed to upsert_character_self_image: {exc}"
+            )
             write_log["character_image"] = False
 
     # ── Step 6: Cache2 invalidation events (after persistence) ──────

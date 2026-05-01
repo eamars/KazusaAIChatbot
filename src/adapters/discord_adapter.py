@@ -46,6 +46,7 @@ from kazusa_ai_chatbot.message_envelope.types import (
     RawMention,
     ReplyTarget,
 )
+from kazusa_ai_chatbot.utils import log_preview
 
 configure_adapter_logging()
 
@@ -382,7 +383,15 @@ class DiscordAdapter(discord.Client):
             
         mode_label = "LISTEN-ONLY" if message_debug_modes.get("listen_only") else "ACTIVE"
 
-        logger.info(f"[{mode_label}] Incoming Discord message: channel_id={channel_id_str} is_dm={is_dm} author={message.author.display_name} content={message.content}")
+        logger.info(
+            f"[{mode_label}] Incoming Discord message: "
+            f"channel_id={channel_id_str} is_dm={is_dm} "
+            f"author={message.author.display_name}"
+        )
+        logger.debug(
+            f"Incoming Discord message detail: channel_id={channel_id_str} "
+            f"content={log_preview(message.content)}"
+        )
 
         # Build attachments
         attachments = []
@@ -403,7 +412,6 @@ class DiscordAdapter(discord.Client):
                             "description": "",
                         })
                 except httpx.HTTPError as exc:
-                    logger.debug(f"Handled exception in on_message: {exc}")
                     logger.exception(f"Failed to fetch attachment {att.url}: {exc}")
 
         # Determine channel name
@@ -458,7 +466,6 @@ class DiscordAdapter(discord.Client):
             resp.raise_for_status()
             data = resp.json()
         except Exception as exc:
-            logger.debug(f"Handled exception in on_message: {exc}")
             logger.exception(f"Brain service request failed: {exc}")
             if not message_debug_modes.get("listen_only"):
                 await message.reply("I'm having trouble thinking right now, please try again later.")
@@ -492,7 +499,7 @@ class DiscordAdapter(discord.Client):
             try:
                 await self._heartbeat_task
             except asyncio.CancelledError as exc:
-                logger.debug(f"Handled exception in close: {exc}")
+                logger.debug(f"Heartbeat task cancelled during close: {exc}")
                 pass
         await self._http_client.aclose()
         if self._runtime_server is not None:

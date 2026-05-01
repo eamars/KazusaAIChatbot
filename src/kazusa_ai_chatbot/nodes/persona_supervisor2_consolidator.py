@@ -171,9 +171,15 @@ async def call_consolidation_subgraph(global_state: GlobalPersonaState):
     )
     metadata = result.get("metadata", {}) or {}
 
-    logger.info(f'Consolidation summary: facts={len(new_facts)} promises={len(future_promises)} affinity_delta={affinity_delta} mood={log_preview(mood)} vibe={log_preview(global_vibe)} writes={log_dict_subset(metadata, ["write_success"])} cache_invalidated={metadata.get("cache_invalidated", [])}')
+    logger.info(
+        f"Consolidation output: facts={log_list_preview(new_facts)} "
+        f"promises={log_list_preview(future_promises)} "
+        f"mood={log_preview(mood)} vibe={log_preview(global_vibe)} "
+        f"reflection={log_preview(reflection_summary)} "
+        f"affinity_delta={affinity_delta}"
+    )
 
-    logger.debug(f'Consolidation detail: facts={log_list_preview(new_facts)} promises={log_list_preview(future_promises)} metadata={log_dict_subset(
+    logger.debug(f'Consolidation metadata: writes={log_dict_subset(metadata, ["write_success"])} cache_invalidated={metadata.get("cache_invalidated", [])} metadata={log_dict_subset(
             metadata,
             [
                 "scheduled_event_ids",

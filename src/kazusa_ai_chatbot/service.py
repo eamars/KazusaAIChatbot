@@ -286,7 +286,19 @@ async def load_conversation_episode_state(state: IMProcessState) -> dict:
         scope=scope,
         current_timestamp=state["timestamp"],
     )
-    logger.info(f'Conversation progress loaded: platform={scope.platform} channel={scope.platform_channel_id or "<dm>"} user={scope.global_user_id} source={load_result["source"]} turn_count={load_result["conversation_progress"]["turn_count"]} progress={log_preview(load_result["conversation_progress"])}')
+    progress = load_result["conversation_progress"]
+    logger.info(
+        f"Conversation progress loaded: platform={scope.platform} "
+        f'channel={scope.platform_channel_id or "<dm>"} '
+        f'user={scope.global_user_id} source={load_result["source"]} '
+        f'turn_count={progress["turn_count"]} '
+        f'continuity={progress["continuity"]} status={progress["status"]}'
+    )
+    logger.debug(
+        f"Conversation progress loaded detail: platform={scope.platform} "
+        f'channel={scope.platform_channel_id or "<dm>"} '
+        f"user={scope.global_user_id} progress={log_preview(progress)}"
+    )
     return_value = {
         "conversation_episode_state": load_result["episode_state"],
         "conversation_progress": load_result["conversation_progress"],
@@ -488,7 +500,6 @@ async def _save_assistant_message(result: dict) -> None:
                 "timestamp": datetime.now(timezone.utc).isoformat(),
             })
         except Exception as exc:
-            logger.debug(f"Handled exception in _save_assistant_message: {exc}")
             logger.exception(f"Failed to save assistant message: {exc}")
 
 
@@ -551,7 +562,6 @@ async def _save_user_message_from_item(
             "timestamp": item.timestamp,
         })
     except Exception as exc:
-        logger.debug(f"Handled exception in _save_user_message_from_item: {exc}")
         logger.exception(f"Failed to save queued user message: {exc}")
 
 
@@ -595,7 +605,6 @@ async def _drop_queued_chat_item(item: QueuedChatItem) -> None:
             reply_context=reply_context,
         )
     except Exception as exc:
-        logger.debug(f"Handled exception in _drop_queued_chat_item: {exc}")
         logger.exception(f"Failed to persist dropped queued message: {exc}")
 
     _chat_input_queue.complete(item, ChatResponse())
@@ -603,7 +612,20 @@ async def _drop_queued_chat_item(item: QueuedChatItem) -> None:
         exclude_none=True,
         exclude_defaults=True,
     )
-    logger.info(f'Queued chat item dropped: sequence={item.sequence} platform={item.request.platform} channel={item.request.platform_channel_id or "<dm>"} message={item.request.platform_message_id or "<none>"} user={item.request.platform_user_id or "<none>"} display_name={item.request.display_name or "<none>"} tagged={_chat_input_queue.is_tagged(item)} bot_reply={_chat_input_queue.is_bot_reply(item)} content={log_preview(dropped_envelope["body_text"])}')
+    logger.info(
+        f"Queued chat item dropped: sequence={item.sequence} "
+        f"platform={item.request.platform} "
+        f'channel={item.request.platform_channel_id or "<dm>"} '
+        f'message={item.request.platform_message_id or "<none>"} '
+        f'user={item.request.platform_user_id or "<none>"} '
+        f"tagged={_chat_input_queue.is_tagged(item)} "
+        f"bot_reply={_chat_input_queue.is_bot_reply(item)}"
+    )
+    logger.debug(
+        f"Queued chat item dropped detail: sequence={item.sequence} "
+        f'display_name={item.request.display_name or "<none>"} '
+        f'content={log_preview(dropped_envelope["body_text"])}'
+    )
 
 
 async def _persist_collapsed_queued_chat_item(
@@ -629,9 +651,6 @@ async def _persist_collapsed_queued_chat_item(
             reply_context=reply_context,
         )
     except Exception as exc:
-        logger.debug(
-            f"Handled exception in _persist_collapsed_queued_chat_item: {exc}"
-        )
         logger.exception(f"Failed to persist collapsed queued message: {exc}")
 
     _chat_input_queue.complete(item, ChatResponse())
@@ -639,7 +658,22 @@ async def _persist_collapsed_queued_chat_item(
         exclude_none=True,
         exclude_defaults=True,
     )
-    logger.info(f'Queued chat item collapsed: sequence={item.sequence} survivor_sequence={survivor.sequence} platform={item.request.platform} channel={item.request.platform_channel_id or "<dm>"} message={item.request.platform_message_id or "<none>"} survivor_message={survivor.request.platform_message_id or "<none>"} user={item.request.platform_user_id or "<none>"} display_name={item.request.display_name or "<none>"} tagged={_chat_input_queue.is_tagged(item)} bot_reply={_chat_input_queue.is_bot_reply(item)} content={log_preview(collapsed_envelope["body_text"])}')
+    logger.info(
+        f"Queued chat item collapsed: sequence={item.sequence} "
+        f"survivor_sequence={survivor.sequence} "
+        f"platform={item.request.platform} "
+        f'channel={item.request.platform_channel_id or "<dm>"} '
+        f'message={item.request.platform_message_id or "<none>"} '
+        f'survivor_message={survivor.request.platform_message_id or "<none>"} '
+        f'user={item.request.platform_user_id or "<none>"} '
+        f"tagged={_chat_input_queue.is_tagged(item)} "
+        f"bot_reply={_chat_input_queue.is_bot_reply(item)}"
+    )
+    logger.debug(
+        f"Queued chat item collapsed detail: sequence={item.sequence} "
+        f'display_name={item.request.display_name or "<none>"} '
+        f'content={log_preview(collapsed_envelope["body_text"])}'
+    )
 
 
 async def _process_queued_chat_item(item: QueuedChatItem) -> None:
@@ -763,7 +797,6 @@ async def _process_queued_chat_item(item: QueuedChatItem) -> None:
         try:
             result = await _graph.ainvoke(initial_state)
         except Exception as exc:
-            logger.debug(f"Handled exception in _process_queued_chat_item: {exc}")
             logger.exception(f"Graph invocation failed: {exc}")
             response = ChatResponse(
                 messages=[
@@ -829,7 +862,6 @@ async def _process_queued_chat_item(item: QueuedChatItem) -> None:
         if should_consolidate and consolidation_state_dict is not None:
             await _run_consolidation_background(consolidation_state_dict)
     except Exception as exc:
-        logger.debug(f"Handled exception in _process_queued_chat_item: {exc}")
         logger.exception(f"Queued chat item failed: {exc}")
         response = ChatResponse(
             messages=[
@@ -919,7 +951,6 @@ async def _run_consolidation_background(state: dict) -> None:
     try:
         result = await call_consolidation_subgraph(state)
     except Exception as exc:
-        logger.debug(f"Handled exception in _run_consolidation_background: {exc}")
         logger.exception(f"Background consolidation failed: {exc}")
         return
 
@@ -944,41 +975,60 @@ async def _run_conversation_progress_record_background(state: dict) -> None:
         None.
     """
 
+    linguistic_directives = state["action_directives"]["linguistic_directives"]
+    character_profile = state["character_profile"]
+    boundary_profile = character_profile["boundary_profile"]
+    scope = ConversationProgressScope(
+        platform=state["platform"],
+        platform_channel_id=state["platform_channel_id"],
+        global_user_id=state["global_user_id"],
+    )
+    record_input: ConversationProgressRecordInput = {
+        "scope": scope,
+        "timestamp": state["timestamp"],
+        "prior_episode_state": state.get("conversation_episode_state"),
+        "decontexualized_input": state["decontexualized_input"],
+        "chat_history_recent": state["chat_history_recent"],
+        "content_anchors": linguistic_directives["content_anchors"],
+        "logical_stance": state["logical_stance"],
+        "character_intent": state["character_intent"],
+        "final_dialog": state["final_dialog"],
+        "boundary_profile": boundary_profile,
+    }
+    record_preview = {
+        "timestamp": record_input["timestamp"],
+        "prior_episode_state": record_input["prior_episode_state"],
+        "decontexualized_input": record_input["decontexualized_input"],
+        "chat_history_recent": record_input["chat_history_recent"],
+        "content_anchors": record_input["content_anchors"],
+        "logical_stance": record_input["logical_stance"],
+        "character_intent": record_input["character_intent"],
+        "final_dialog": record_input["final_dialog"],
+        "boundary_profile_supplied": True,
+    }
+    logger.debug(
+        f"Conversation progress record request detail: "
+        f"platform={scope.platform} "
+        f'channel={scope.platform_channel_id or "<dm>"} '
+        f"user={scope.global_user_id} input={log_preview(record_preview)}"
+    )
+
     try:
-        linguistic_directives = state["action_directives"]["linguistic_directives"]
-        scope = ConversationProgressScope(
-            platform=state["platform"],
-            platform_channel_id=state["platform_channel_id"],
-            global_user_id=state["global_user_id"],
-        )
-        record_input: ConversationProgressRecordInput = {
-            "scope": scope,
-            "timestamp": state["timestamp"],
-            "prior_episode_state": state.get("conversation_episode_state"),
-            "decontexualized_input": state["decontexualized_input"],
-            "chat_history_recent": state["chat_history_recent"],
-            "content_anchors": linguistic_directives["content_anchors"],
-            "logical_stance": state["logical_stance"],
-            "character_intent": state["character_intent"],
-            "final_dialog": state["final_dialog"],
-        }
-        logger.info(f'Conversation progress record request: platform={scope.platform} channel={scope.platform_channel_id or "<dm>"} user={scope.global_user_id} input={log_preview({
-                "timestamp": record_input["timestamp"],
-                "prior_episode_state": record_input["prior_episode_state"],
-                "decontexualized_input": record_input["decontexualized_input"],
-                "chat_history_recent": record_input["chat_history_recent"],
-                "content_anchors": record_input["content_anchors"],
-                "logical_stance": record_input["logical_stance"],
-                "character_intent": record_input["character_intent"],
-                "final_dialog": record_input["final_dialog"],
-            })}')
         result = await record_turn_progress(record_input=record_input)
-        logger.info(f'Conversation progress recorded: platform={scope.platform} channel={scope.platform_channel_id or "<dm>"} user={scope.global_user_id} written={result["written"]} turn_count={result["turn_count"]} continuity={result["continuity"]} status={result["status"]} cache_updated={result["cache_updated"]}')
     except Exception as exc:
-        logger.debug(f"Handled exception in _run_conversation_progress_record_background: {exc}")
         logger.exception(
             f"Background conversation progress recording failed: {exc}"
         )
+        return
+
+    logger.debug(
+        f"Conversation progress recorded: platform={scope.platform} "
+        f'channel={scope.platform_channel_id or "<dm>"} '
+        f'user={scope.global_user_id} written={result["written"]} '
+        f'turn_count={result["turn_count"]} '
+        f'continuity={result["continuity"]} status={result["status"]} '
+        f'cache_updated={result["cache_updated"]}'
+    )
 
 
 def register_runtime_adapter(adapter) -> None:
@@ -1082,7 +1132,6 @@ async def lifespan(app: FastAPI):
     try:
         await mcp_manager.start()
     except Exception as exc:
-        logger.debug(f"Handled exception in lifespan: {exc}")
         logger.exception(
             f"MCP manager failed to start — tools will be unavailable: {exc}"
         )
@@ -1137,7 +1186,6 @@ async def health():
         await db.client.admin.command("ping")
         db_ok = True
     except Exception as exc:
-        logger.debug(f"Handled exception in health: {exc}")
         logger.exception(f"Health check database ping failed: {exc}")
 
     return_value = HealthResponse(

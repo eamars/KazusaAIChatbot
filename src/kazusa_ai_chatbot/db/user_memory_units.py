@@ -247,8 +247,10 @@ async def search_user_memory_units_by_vector(
         return_value = [doc async for doc in cursor]
         return return_value
     except PyMongoError as exc:
-        logger.debug(f"Handled exception in search_user_memory_units_by_vector: {exc}")
-        logger.warning("user_memory_units vector search unavailable; falling back to recency")
+        logger.warning(
+            f"user_memory_units vector search unavailable; "
+            f"falling back to recency: {exc}"
+        )
         return_value = []
         return return_value
 

@@ -85,7 +85,7 @@ def _project_entry(
             current_timestamp=current_timestamp,
         )
     except ValueError as exc:
-        logger.debug(f"Handled exception in _project_entry: {exc}")
+        logger.debug(f"Dropping progress entry with invalid first_seen_at: {exc}")
         return None
     return_value = {
         "text": cap_text(text, MAX_ENTRY_CHARS),

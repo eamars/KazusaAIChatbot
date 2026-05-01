@@ -218,7 +218,6 @@ class UserLookupAgent(BaseRAGHelperAgent):
         try:
             exact_results = await search_users_by_display_name(display_name)
         except Exception as exc:
-            logger.debug(f"Handled exception in run: {exc}")
             logger.exception(
                 f"user_lookup_agent exact search failed for {display_name!r}: {exc}"
             )
@@ -317,7 +316,6 @@ class UserLookupAgent(BaseRAGHelperAgent):
                 method="vector",
             )
         except Exception as exc:
-            logger.debug(f"Handled exception in _vector_search_candidates: {exc}")
             logger.exception(
                 f"user_lookup_agent vector search failed for {display_name!r}: {exc}"
             )

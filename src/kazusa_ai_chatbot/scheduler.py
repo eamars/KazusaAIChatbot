@@ -74,8 +74,7 @@ async def _fire_event(event: ScheduledEventDoc) -> None:
     try:
         await _handle_task(event)
     except Exception as exc:
-        logger.debug(f"Handled exception in _fire_event: {exc}")
-        logger.exception(f'Event {event_id} failed')
+        logger.exception(f"Event {event_id} failed: {exc}")
         await db.scheduled_events.update_one(
             {"event_id": event_id},
             {"$set": {"status": "failed"}},

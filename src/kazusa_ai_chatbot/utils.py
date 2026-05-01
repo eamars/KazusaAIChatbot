@@ -219,7 +219,7 @@ def log_preview(value: Any) -> str:
         return_value = json.dumps(value, ensure_ascii=False, sort_keys=True, default=str)
         return return_value
     except TypeError as exc:
-        logger.debug(f"Handled exception in log_preview: {exc}")
+        logger.debug(f"Falling back to repr for unserializable log preview: {exc}")
         return_value = repr(value)
         return return_value
 
@@ -347,7 +347,6 @@ def parse_llm_json_output(raw_output: str) -> dict:
         # Use repair_json which handles both valid and broken JSON
         decoded_json_dict = repair_json(raw, return_objects=True)            
     except Exception as exc:
-        logger.debug(f"Handled exception in parse_llm_json_output: {exc}")
         logger.exception(f"repair_json failed; falling back to LLM JSON repair: {exc}")
         decoded_json_dict = parse_json_with_llm(raw_output)
 

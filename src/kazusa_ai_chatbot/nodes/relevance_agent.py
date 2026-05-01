@@ -66,7 +66,7 @@ def _parse_history_timestamp(value: object) -> datetime | None:
     try:
         parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
     except ValueError as exc:
-        logger.debug(f"Handled exception in _parse_history_timestamp: {exc}")
+        logger.debug(f"Ignoring history row with invalid timestamp: {exc}")
         return None
 
     if parsed.tzinfo is None:
@@ -518,7 +518,16 @@ async def relevance_agent(state: IMProcessState) -> IMProcessState:
         directly_addressed=directly_addressed,
     ):
         reason_to_respond = "structured reply target points to another participant without an explicit bot address"
-        logger.info(f'Relevance decision: user={user_name} platform_user={platform_user_id} should_respond={False} use_reply_feature={False} noisy={is_noisy_environment} reason={reason_to_respond} reply_target={reply_context.get("reply_to_platform_user_id", "")} content={log_preview(user_input)}')
+        logger.info(
+            f"Relevance decision: user={user_name} "
+            f"platform_user={platform_user_id} should_respond={False} "
+            f"use_reply_feature={False} noisy={is_noisy_environment} "
+            f"reason={reason_to_respond} "
+            f'reply_target={reply_context.get("reply_to_platform_user_id", "")}'
+        )
+        logger.debug(
+            f"Relevance decision detail: content={log_preview(user_input)}"
+        )
         return_value = {
             "should_respond": False,
             "reason_to_respond": reason_to_respond,
@@ -535,7 +544,16 @@ async def relevance_agent(state: IMProcessState) -> IMProcessState:
         and directly_addressed is not True
     ):
         reason_to_respond = "chaotic group noise without platform-level bot address metadata"
-        logger.info(f'Relevance decision: user={user_name} platform_user={platform_user_id} should_respond={False} use_reply_feature={False} noisy={is_noisy_environment} reason={reason_to_respond} group_attention={group_attention} directly_addressed={directly_addressed} content={log_preview(user_input)}')
+        logger.info(
+            f"Relevance decision: user={user_name} "
+            f"platform_user={platform_user_id} should_respond={False} "
+            f"use_reply_feature={False} noisy={is_noisy_environment} "
+            f"reason={reason_to_respond} group_attention={group_attention} "
+            f"directly_addressed={directly_addressed}"
+        )
+        logger.debug(
+            f"Relevance decision detail: content={log_preview(user_input)}"
+        )
         return_value = {
             "should_respond": False,
             "reason_to_respond": reason_to_respond,
@@ -585,7 +603,17 @@ async def relevance_agent(state: IMProcessState) -> IMProcessState:
     channel_topic = result.get("channel_topic", "")
     indirect_speech_context = result.get("indirect_speech_context", "")
 
-    logger.info(f'Relevance decision: user={user_name} platform_user={platform_user_id} should_respond={should_respond} use_reply_feature={use_reply_feature} noisy={is_noisy_environment} reason={log_preview(reason_to_respond)} topic={log_preview(channel_topic)} indirect={log_preview(indirect_speech_context)} content={log_preview(user_input)}')
+    logger.info(
+        f"Relevance decision: user={user_name} "
+        f"platform_user={platform_user_id} should_respond={should_respond} "
+        f"use_reply_feature={use_reply_feature} noisy={is_noisy_environment} "
+        f"reason={log_preview(reason_to_respond)} "
+        f"topic={log_preview(channel_topic)} "
+        f"indirect={log_preview(indirect_speech_context)}"
+    )
+    logger.debug(
+        f"Relevance decision input: content={log_preview(user_input)}"
+    )
 
     return_value = {
         "should_respond": should_respond,

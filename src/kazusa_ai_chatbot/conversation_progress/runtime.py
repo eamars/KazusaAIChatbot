@@ -60,7 +60,13 @@ class ConversationProgressRuntime:
             document=selected_document,
             current_timestamp=current_timestamp,
         )
-        logger.info(f'Conversation progress load: platform={scope.platform} channel={scope.platform_channel_id or "<dm>"} user={scope.global_user_id} source={source} episode_present={selected_document is not None} progress={log_preview(prompt_doc)}')
+        logger.debug(
+            f'Conversation progress load detail: platform={scope.platform} '
+            f'channel={scope.platform_channel_id or "<dm>"} '
+            f"user={scope.global_user_id} source={source} "
+            f"episode_present={selected_document is not None} "
+            f"progress={log_preview(prompt_doc)}"
+        )
         return_value = {
             "episode_state": selected_document,
             "conversation_progress": prompt_doc,
@@ -82,10 +88,17 @@ class ConversationProgressRuntime:
             Background telemetry for the write.
         """
 
+        scope = record_input["scope"]
         recorder_output = await self._recorder_callable(record_input)
-        logger.info(f'Conversation progress recorder output: platform={record_input["scope"].platform} channel={record_input["scope"].platform_channel_id or "<dm>"} user={record_input["scope"].global_user_id} output={log_preview(recorder_output)}')
+        logger.debug(
+            f"Conversation progress recorder output detail: "
+            f"platform={scope.platform} "
+            f'channel={scope.platform_channel_id or "<dm>"} '
+            f"user={scope.global_user_id} "
+            f"output={log_preview(recorder_output)}"
+        )
         document = repository.build_episode_state_doc(
-            scope=record_input["scope"],
+            scope=scope,
             timestamp=record_input["timestamp"],
             prior_episode_state=record_input["prior_episode_state"],
             recorder_output=recorder_output,
@@ -95,11 +108,22 @@ class ConversationProgressRuntime:
         cache_updated = False
         if written:
             cache.store_completed_document(
-                scope=record_input["scope"],
+                scope=scope,
                 document=document,
             )
             cache_updated = True
-        logger.info(f'Conversation progress write: platform={record_input["scope"].platform} channel={record_input["scope"].platform_channel_id or "<dm>"} user={record_input["scope"].global_user_id} written={written} cache_updated={cache_updated} document={log_preview(document)}')
+        logger.info(
+            f"Conversation progress write: platform={scope.platform} "
+            f'channel={scope.platform_channel_id or "<dm>"} '
+            f"user={scope.global_user_id} written={written} "
+            f'cache_updated={cache_updated} turn_count={document["turn_count"]} '
+            f'continuity={document["continuity"]} status={document["status"]}'
+        )
+        logger.debug(
+            f"Conversation progress write detail: platform={scope.platform} "
+            f'channel={scope.platform_channel_id or "<dm>"} '
+            f"user={scope.global_user_id} document={log_preview(document)}"
+        )
         return_value = {
             "written": written,
             "turn_count": int(document["turn_count"]),

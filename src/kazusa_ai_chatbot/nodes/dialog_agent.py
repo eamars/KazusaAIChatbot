@@ -593,7 +593,10 @@ async def dialog_agent(
     # Assemble output.
     final_dialog = result["final_dialog"]
 
-    logger.info(f'Dialog summary: fragments={len(final_dialog)} retry={result["retry"]} dialog={log_list_preview(final_dialog)}')
+    logger.info(f"Dialog output: dialog={log_list_preview(final_dialog)}")
+    logger.debug(
+        f'Dialog metadata: fragments={len(final_dialog)} retry={result["retry"]}'
+    )
 
     return_value = {
         "final_dialog": final_dialog,

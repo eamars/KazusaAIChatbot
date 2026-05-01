@@ -10,6 +10,17 @@ from kazusa_ai_chatbot.conversation_progress import runtime
 from kazusa_ai_chatbot.conversation_progress.models import ConversationProgressScope
 
 
+_BOUNDARY_PROFILE = {
+    "self_integrity": 0.82,
+    "control_sensitivity": 0.3,
+    "compliance_strategy": "comply",
+    "relational_override": 0.24,
+    "control_intimacy_misread": 0.2,
+    "boundary_recovery": "rebound",
+    "authority_skepticism": 0.35,
+}
+
+
 @pytest.mark.asyncio
 async def test_runtime_load_projects_empty_state(monkeypatch) -> None:
     """Missing DB/cache state returns the empty prompt projection."""
@@ -66,6 +77,7 @@ async def test_runtime_record_writes_and_updates_cache(monkeypatch) -> None:
             "logical_stance": "CONFIRM",
             "character_intent": "PROVIDE",
             "final_dialog": ["The third point is about scope."],
+            "boundary_profile": _BOUNDARY_PROFILE,
         },
     )
 
@@ -111,6 +123,7 @@ async def test_runtime_record_does_not_cache_stale_write(monkeypatch) -> None:
             "logical_stance": "CONFIRM",
             "character_intent": "PROVIDE",
             "final_dialog": ["hello"],
+            "boundary_profile": _BOUNDARY_PROFILE,
         },
     )
 

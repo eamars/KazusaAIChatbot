@@ -237,7 +237,15 @@ async def call_msg_decontexualizer(state: GlobalPersonaState) -> dict:
                     f"input={log_preview(user_input)} raw={log_preview(raw_referents)}"
                 )
 
-    logger.info(f'Decontextualizer result: user={user_name} platform_user={platform_user_id} modified={is_modified} referents={log_preview(referents)} reason={log_preview(reasoning)} input={log_preview(user_input)} output={log_preview(output)}')
+    logger.info(
+        f"Decontextualizer output: output={log_preview(output)} "
+        f"referents={log_preview(referents)}"
+    )
+    logger.debug(
+        f"Decontextualizer metadata: user={user_name} "
+        f"platform_user={platform_user_id} modified={is_modified} "
+        f"reason={log_preview(reasoning)} input={log_preview(user_input)}"
+    )
 
     if not is_modified:
         output = state["user_input"]

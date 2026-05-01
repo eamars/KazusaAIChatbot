@@ -254,7 +254,7 @@ async def upsert_episode_state_guarded(
     try:
         result = await db[COLLECTION_NAME].update_one(guarded_filter, update, upsert=True)
     except DuplicateKeyError as exc:
-        logger.debug(f"Handled exception in upsert_episode_state_guarded: {exc}")
+        logger.debug(f"Conversation progress guarded upsert lost race: {exc}")
         return False
     return_value = bool(result.upserted_id is not None or result.modified_count)
     return return_value

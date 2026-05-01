@@ -271,11 +271,9 @@ async def _tool_call_executor(state: WebSearchState) -> dict:
                 t = _TOOLS_BY_NAME[tool_call["name"]]
                 observation = await t.ainvoke(tool_call["args"])
             except KeyError as exc:
-                logger.debug(f"Handled exception in _tool_call_executor: {exc}")
                 observation = {"error": f"Incorrect tool was invoked: {tool_call['name']}"}
-                logger.error(f'Incorrect tool was invoked: {tool_call["name"]}')
+                logger.error(f'Incorrect tool was invoked: {tool_call["name"]}: {exc}')
             except Exception as exc:
-                logger.debug(f"Handled exception in _tool_call_executor: {exc}")
                 logger.exception(f'Error executing tool {tool_call["name"]}: {exc}')
                 observation = {"error": "tool execution failed"}
 

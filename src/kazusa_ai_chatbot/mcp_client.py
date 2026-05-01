@@ -96,7 +96,15 @@ class McpManager:
         for connection in self._server_connections.values():
             await connection.ready_event.wait()
             if connection.error is not None:
-                logger.exception(f'Failed to connect to MCP server {connection.name} at {connection.url}', exc_info=connection.error)
+                logger.error(
+                    f"Failed to connect to MCP server {connection.name} "
+                    f"at {connection.url}: {connection.error}",
+                    exc_info=(
+                        type(connection.error),
+                        connection.error,
+                        connection.error.__traceback__,
+                    ),
+                )
 
         logger.info(f'MCP ready — {len(self._tools)} tool(s) from {len(self._sessions)} server(s)')
     async def stop(self) -> None:
@@ -120,11 +128,12 @@ class McpManager:
             try:
                 await connection.task
             except asyncio.CancelledError as exc:
-                logger.debug(f"Handled exception in stop: {exc}")
-                logger.warning(f'MCP server task {connection.name} was cancelled during shutdown')
+                logger.debug(
+                    f"MCP server task {connection.name} was cancelled "
+                    f"during shutdown: {exc}"
+                )
             except Exception as exc:
-                logger.debug(f"Handled exception in stop: {exc}")
-                logger.exception("Error during MCP cleanup")
+                logger.exception(f"Error during MCP cleanup: {exc}")
 
         self._sessions.clear()
         self._tools.clear()
@@ -165,12 +174,14 @@ class McpManager:
             return_value = "\n".join(parts) if parts else "(no output)"
             return return_value
         except asyncio.TimeoutError as exc:
-            logger.debug(f"Handled exception in call_tool: {exc}")
-            logger.error(f'Tool call {name} timed out after {MCP_CALL_TIMEOUT:.0f}s')
+            logger.error(
+                f"Tool call {name} timed out after "
+                f"{MCP_CALL_TIMEOUT:.0f}s: {exc}"
+            )
             return_value = f"Error calling {name}: timed out after {MCP_CALL_TIMEOUT:.0f}s"
             return return_value
         except Exception as exc:
-            logger.exception(f'Tool call {name} failed')
+            logger.exception(f"Tool call {name} failed: {exc}")
             return_value = f"Error calling {name}: {exc}"
             return return_value
 
@@ -210,18 +221,23 @@ class McpManager:
                     connection.ready_event.set()
                     await connection.stop_event.wait()
         except asyncio.TimeoutError as exc:
-            logger.debug(f"Handled exception in _serve_server: {exc}")
             connection.error = asyncio.TimeoutError(
                 f"MCP server {connection.name!r} did not respond within {MCP_CONNECT_TIMEOUT:.0f}s"
             )
-            logger.error(f'MCP server {connection.name} timed out during connect/discovery (limit {MCP_CONNECT_TIMEOUT:.0f}s)')
+            logger.error(
+                f"MCP server {connection.name} timed out during "
+                f"connect/discovery (limit {MCP_CONNECT_TIMEOUT:.0f}s): {exc}"
+            )
         except Exception as exc:
-            logger.debug(f"Handled exception in _serve_server: {exc}")
             connection.error = exc
             if connection.stop_event.is_set():
-                logger.debug(f'MCP server {connection.name} exited during shutdown', exc_info=exc)
+                logger.debug(
+                    f"MCP server {connection.name} exited during shutdown: {exc}"
+                )
             else:
-                logger.exception(f'MCP server {connection.name} connection loop failed')
+                logger.exception(
+                    f"MCP server {connection.name} connection loop failed: {exc}"
+                )
         finally:
             for tool_name in connection.tool_names:
                 self._tools.pop(tool_name, None)

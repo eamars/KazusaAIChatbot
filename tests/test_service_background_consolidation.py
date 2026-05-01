@@ -117,6 +117,25 @@ def _consolidation_state() -> dict:
     return return_value
 
 
+def _boundary_profile() -> dict:
+    """Return a complete character boundary-profile fixture.
+
+    Returns:
+        Boundary profile with all configured fields present.
+    """
+
+    return_value = {
+        "self_integrity": 0.8,
+        "control_sensitivity": 0.3,
+        "compliance_strategy": "comply",
+        "relational_override": 0.25,
+        "control_intimacy_misread": 0.2,
+        "boundary_recovery": "rebound",
+        "authority_skepticism": 0.35,
+    }
+    return return_value
+
+
 def _graph_result(consolidation_state: Mapping | dict | None = None) -> dict:
     """Build a fixed successful service graph result.
 
@@ -405,6 +424,51 @@ async def test_background_consolidation_refreshes_cached_character_state(monkeyp
         service_module._personality["reflection_summary"]
         == "The previous turn left her attentive."
     )
+
+
+@pytest.mark.asyncio
+async def test_progress_background_passes_character_boundary_profile(monkeypatch):
+    """Progress recorder receives the character boundary profile from the snapshot."""
+
+    state = _consolidation_state()
+    boundary_profile = _boundary_profile()
+    state["character_profile"]["boundary_profile"] = boundary_profile
+    record_turn_progress = AsyncMock(return_value={
+        "written": True,
+        "turn_count": 1,
+        "continuity": "same_episode",
+        "status": "active",
+        "cache_updated": True,
+    })
+    monkeypatch.setattr(
+        service_module,
+        "record_turn_progress",
+        record_turn_progress,
+    )
+
+    await service_module._run_conversation_progress_record_background(state)
+
+    record_turn_progress.assert_awaited_once()
+    record_input = record_turn_progress.await_args.kwargs["record_input"]
+    assert record_input["boundary_profile"] == boundary_profile
+
+
+@pytest.mark.asyncio
+async def test_progress_background_requires_character_boundary_profile(monkeypatch):
+    """Missing character boundary configuration is a state-shape bug."""
+
+    state = _consolidation_state()
+    record_turn_progress = AsyncMock()
+    monkeypatch.setattr(
+        service_module,
+        "record_turn_progress",
+        record_turn_progress,
+    )
+
+    with pytest.raises(KeyError, match="boundary_profile"):
+        await service_module._run_conversation_progress_record_background(state)
+
+    record_turn_progress.assert_not_awaited()
 
 
 @pytest.mark.asyncio

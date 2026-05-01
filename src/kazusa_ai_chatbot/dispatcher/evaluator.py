@@ -167,8 +167,10 @@ class ToolCallEvaluator:
             try:
                 execute_at = parse_iso_datetime(str(execute_at_raw))
             except ValueError as exc:
-                logger.debug(f"Handled exception in evaluate: {exc}")
-                logger.warning(f'Rejecting tool call with unparseable execute_at: {execute_at_raw!r}')
+                logger.warning(
+                    f"Rejecting tool call with unparseable execute_at="
+                    f"{execute_at_raw!r}: {exc}"
+                )
                 return_value = EvalResult(
                     ok=False,
                     task=None,

@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 import logging
+import os
 
 
-APP_LOG_LEVEL = logging.DEBUG
+_DEFAULT_APP_LOG_LEVEL = "INFO"
+_APP_LOG_LEVEL_NAME = os.getenv("KAZUSA_LOG_LEVEL", _DEFAULT_APP_LOG_LEVEL).upper()
+APP_LOG_LEVEL = getattr(logging, _APP_LOG_LEVEL_NAME, logging.INFO)
 THIRD_PARTY_LOG_LEVEL = logging.WARNING
 SERVICE_LOG_FORMAT = "%(asctime)s [%(levelname)s] %(name)s: %(message)s"
 ADAPTER_LOG_FORMAT = "%(asctime)s [%(levelname)s] adapter:%(name)s: %(message)s"
@@ -35,8 +38,8 @@ def configure_service_logging() -> None:
 
     Returns:
         None. The root logger is configured with one stream handler, application
-        loggers inherit DEBUG visibility, and noisy dependencies are raised to
-        WARNING so caller code does not decide logging behavior.
+        loggers inherit the configured application level, and noisy dependencies
+        are raised to WARNING so caller code does not decide logging behavior.
     """
     _configure_logging(profile="service", log_format=SERVICE_LOG_FORMAT)
 
@@ -46,7 +49,7 @@ def configure_adapter_logging() -> None:
 
     Returns:
         None. Adapter processes use a separate root format from the brain
-        service while keeping the same no-hidden-debug-information level.
+        service while keeping the same application log-level policy.
     """
     _configure_logging(profile="adapter", log_format=ADAPTER_LOG_FORMAT)
 

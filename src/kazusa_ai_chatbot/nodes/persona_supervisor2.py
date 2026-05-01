@@ -62,7 +62,16 @@ async def stage_1_research(state: GlobalPersonaState) -> dict:
             unknown_slots=[],
             loop_count=0,
         )
-        logger.info(f'RAG2 skipped for unresolved reference: platform={state["platform"]} channel={state["platform_channel_id"] or "<dm>"} user={state["global_user_id"]} query={log_preview(state["decontexualized_input"])} reason={log_preview(referent_reason)} rag_result={log_preview(rag_result)}')
+        logger.info(
+            f"RAG2 skipped output: reason={log_preview(referent_reason)}"
+        )
+        logger.debug(
+            f'RAG2 skipped metadata: platform={state["platform"]} '
+            f'channel={state["platform_channel_id"] or "<dm>"} '
+            f'user={state["global_user_id"]} '
+            f'query={log_preview(state["decontexualized_input"])} '
+            f"rag_result={log_preview(rag_result)}"
+        )
         return_value = {
             "rag_result": rag_result,
         }
@@ -96,7 +105,23 @@ async def stage_1_research(state: GlobalPersonaState) -> dict:
         loop_count=int(rag_supervisor_result["loop_count"] or 0),
     )
     trace = rag_result["supervisor_trace"]
-    logger.info(f'RAG2 projection: platform={state["platform"]} channel={state["platform_channel_id"] or "<dm>"} user={state["global_user_id"]} query={log_preview(state["decontexualized_input"])} answer={log_preview(rag_result["answer"])} dispatched={len(trace["dispatched"])} user_image={bool(rag_result["user_image"])} character_image={bool(rag_result["character_image"])} third_party_profiles={len(rag_result["third_party_profiles"])} memory_evidence={len(rag_result["memory_evidence"])} conversation_evidence={len(rag_result["conversation_evidence"])} external_evidence={len(rag_result["external_evidence"])} rag_result={log_preview(rag_result)}')
+    logger.info(
+        f'RAG2 projection output: answer={log_preview(rag_result["answer"])}'
+    )
+    logger.debug(
+        f'RAG2 projection metadata: platform={state["platform"]} '
+        f'channel={state["platform_channel_id"] or "<dm>"} '
+        f'user={state["global_user_id"]} '
+        f'query={log_preview(state["decontexualized_input"])} '
+        f'dispatched={len(trace["dispatched"])} '
+        f'user_image={bool(rag_result["user_image"])} '
+        f'character_image={bool(rag_result["character_image"])} '
+        f'third_party_profiles={len(rag_result["third_party_profiles"])} '
+        f'memory_evidence={len(rag_result["memory_evidence"])} '
+        f'conversation_evidence={len(rag_result["conversation_evidence"])} '
+        f'external_evidence={len(rag_result["external_evidence"])} '
+        f"rag_result={log_preview(rag_result)}"
+    )
     return_value = {
         "rag_result": rag_result,
     }

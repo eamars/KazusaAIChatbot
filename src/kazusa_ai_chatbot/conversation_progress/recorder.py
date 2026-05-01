@@ -22,6 +22,11 @@ from kazusa_ai_chatbot.conversation_progress.policy import (
     VALID_TOPIC_MOMENTUM,
 )
 from kazusa_ai_chatbot.db.schemas import ConversationEpisodeStateDoc
+from kazusa_ai_chatbot.nodes.boundary_profile import (
+    get_boundary_recovery_description,
+    get_relationship_priority_description,
+    get_self_integrity_description,
+)
 from kazusa_ai_chatbot.utils import get_llm, log_preview, parse_llm_json_output
 
 logger = logging.getLogger(__name__)
@@ -33,6 +38,13 @@ Your job is to update compact operational state for the next responsive turn.
 Do not write diary prose, relationship insight, medical advice, or long-term memory.
 Do not copy full assistant turns. Use short semantic labels.
 Do not generate the active character's next reply text.
+
+# 语言政策
+- 除结构化枚举值、schema key、ID、URL、代码、命令、模型标签等必须保持原样的内容外，所有由你新生成的内部自由文本字段都必须使用简体中文。
+- `continuity`、`status`、`conversation_mode`、`episode_phase`、`topic_momentum` 等枚举字段必须保持输出格式指定的英文枚举值。
+- 用户原文、引用文本、专有名词、标题、别名、外部证据原句在需要精确保留时保持原语言；不要为了统一语言而改写。
+- 如果字段要求从 `prior_episode_state` 精确复制旧文本，优先逐字复制，不要翻译、改写或补充说明。
+- 不要添加翻译、双语复写或括号内解释，除非源文本本身已经包含。
 
 You decide semantic continuity:
 - same_episode: the user is continuing the same unresolved thread.
@@ -63,7 +75,8 @@ Use resolved_threads and avoid_reopening for items that should not be dragged ba
 2. Read decontexualized_input, content_anchors, logical_stance, character_intent, and final_dialog to understand what actually happened this turn.
 3. Decide continuity before choosing any other state labels.
 4. Preserve still-valid prior list items by copying the exact old text; omit stale items instead of rewriting them.
-5. Emit short operational labels only. Do not create diary prose, long-term memory, or next-reply text.
+5. Use character_boundary_profile descriptors as policy grounding for progression_guidance, next_affordances, and how quickly current_blocker should soften, rebound, decay, or detach.
+6. Emit short operational labels only. Do not create diary prose, long-term memory, or next-reply text.
 
 # Input Format
 {
@@ -73,7 +86,12 @@ Use resolved_threads and avoid_reopening for items that should not be dragged ba
   "content_anchors": ["content plan used by the just-finished response"],
   "logical_stance": "CONFIRM | REFUSE | TENTATIVE | DIVERGE | CHALLENGE",
   "character_intent": "PROVIDE | BANTAR | REJECT | EVADE | CONFRONT | DISMISS | CLARIFY",
-  "final_dialog": ["active character's final response text"]
+  "final_dialog": ["active character's final response text"],
+  "character_boundary_profile": {
+    "boundary_recovery_description": "mapped recovery cadence descriptor",
+    "self_integrity_description": "mapped self-definition descriptor",
+    "relationship_priority_description": "mapped relationship-priority descriptor"
+  }
 }
 
 # Output Format
@@ -107,6 +125,72 @@ _recorder_llm = get_llm(
     base_url=CONSOLIDATION_LLM_BASE_URL,
     api_key=CONSOLIDATION_LLM_API_KEY,
 )
+
+
+async def record_with_llm(record_input: ConversationProgressRecordInput) -> dict:
+    """Call the recorder LLM for one completed turn.
+
+    Args:
+        record_input: Current turn and prior episode-state payload.
+
+    Returns:
+        Validated recorder output.
+    """
+
+    boundary_profile = record_input["boundary_profile"]
+    self_integrity = float(boundary_profile["self_integrity"])
+    relationship_priority = float(boundary_profile["relational_override"])
+    character_boundary_profile = {
+        "boundary_recovery_description": get_boundary_recovery_description(
+            boundary_profile["boundary_recovery"],
+        ),
+        "self_integrity_description": get_self_integrity_description(
+            self_integrity,
+        ),
+        "relationship_priority_description": get_relationship_priority_description(
+            relationship_priority,
+        ),
+    }
+    human_payload = {
+        "prior_episode_state": build_recorder_prior_state(
+            record_input["prior_episode_state"],
+        ),
+        "decontexualized_input": record_input["decontexualized_input"],
+        "chat_history_recent": record_input["chat_history_recent"],
+        "content_anchors": record_input["content_anchors"],
+        "logical_stance": record_input["logical_stance"],
+        "character_intent": record_input["character_intent"],
+        "final_dialog": record_input["final_dialog"],
+        "character_boundary_profile": character_boundary_profile,
+    }
+    scope = record_input["scope"]
+    channel_label = scope.platform_channel_id or "<dm>"
+    log_context = (
+        f"platform={scope.platform} "
+        f"channel={channel_label} "
+        f"user={scope.global_user_id}"
+    )
+
+    logger.debug(
+        f"Conversation progress recorder input: "
+        f"{log_context} payload={log_preview(human_payload)}"
+    )
+    system_prompt = SystemMessage(content=_RECORDER_PROMPT)
+    human_message = HumanMessage(
+        content=json.dumps(human_payload, ensure_ascii=False),
+    )
+    response = await _recorder_llm.ainvoke([system_prompt, human_message])
+    parsed = parse_llm_json_output(response.content)
+    validated = validate_recorder_output(parsed)
+    logger.info(
+        f"Conversation progress recorder parsed: "
+        f"{log_context} validated={log_preview(validated)}"
+    )
+    logger.debug(
+        f"Conversation progress recorder parsed detail: "
+        f"{log_context} parsed={log_preview(parsed)}"
+    )
+    return validated
 
 
 def render_recorder_prompt() -> str:
@@ -294,33 +378,3 @@ def validate_recorder_output(payload: dict) -> dict:
         ),
     }
     return return_value
-
-
-async def record_with_llm(record_input: ConversationProgressRecordInput) -> dict:
-    """Call the recorder LLM for one completed turn.
-
-    Args:
-        record_input: Current turn and prior episode-state payload.
-
-    Returns:
-        Validated recorder output.
-    """
-
-    human_payload = {
-        "prior_episode_state": build_recorder_prior_state(record_input["prior_episode_state"]),
-        "decontexualized_input": record_input["decontexualized_input"],
-        "chat_history_recent": record_input["chat_history_recent"],
-        "content_anchors": record_input["content_anchors"],
-        "logical_stance": record_input["logical_stance"],
-        "character_intent": record_input["character_intent"],
-        "final_dialog": record_input["final_dialog"],
-    }
-    logger.info(f'Conversation progress recorder input: platform={record_input["scope"].platform} channel={record_input["scope"].platform_channel_id or "<dm>"} user={record_input["scope"].global_user_id} payload={log_preview(human_payload)}')
-    response = await _recorder_llm.ainvoke([
-        SystemMessage(content=_RECORDER_PROMPT),
-        HumanMessage(content=json.dumps(human_payload, ensure_ascii=False)),
-    ])
-    parsed = parse_llm_json_output(response.content)
-    validated = validate_recorder_output(parsed)
-    logger.info(f'Conversation progress recorder parsed: platform={record_input["scope"].platform} channel={record_input["scope"].platform_channel_id or "<dm>"} user={record_input["scope"].global_user_id} parsed={log_preview(parsed)} validated={log_preview(validated)}')
-    return validated

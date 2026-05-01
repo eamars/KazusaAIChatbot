@@ -23,6 +23,12 @@ _FACTS_HARVESTER_PROMPT = """\
 你负责提取具备长期价值的**事实证据**和**未来约定**。这些结果不是最终画像；它们会作为下游 memory-unit consolidator 的证据输入。
 你必须严格区分哪些只是“对话复述”（禁止记录），哪些是“以后仍然有用的事实/事件/约定”。
 
+# 语言政策
+- 除结构化枚举值、schema key、ID、URL、代码、命令、模型标签等必须保持原样的内容外，所有由你新生成的内部自由文本字段都必须使用简体中文。
+- `category`、`commitment_type`、`dedup_key` 等机器标签字段按输出格式要求保持英文或稳定键格式；`description`、`action` 等语义文本字段使用简体中文。
+- 用户原文、引用文本、专有名词、标题、别名、外部证据原句在需要精确保留时保持原语言；不要为了统一语言而改写。
+- 不要添加翻译、双语复写或括号内解释，除非源文本本身已经包含。
+
 # 背景信息
 - **对话主体 (Character)**: {character_name}
 - **对话对象 (User)**: human payload 中的 `user_name`
@@ -209,6 +215,12 @@ async def facts_harvester(state: ConsolidatorState) -> dict:
 
 _FACT_HARVESTER_EVALUATOR_PROMPT = """\
 你负责审计 Fact Recorder 生成的 JSON 数据。你的核心目标是：**对比“基准源”，核查“候选结果”的准确性和格式合规性。**
+
+# 语言政策
+- 除结构化枚举值、schema key、ID、URL、代码、命令、模型标签等必须保持原样的内容外，所有由你新生成的内部自由文本字段都必须使用简体中文。
+- 候选结果中的机器标签字段按原样审计，不要翻译 schema key、枚举值、ID 或 dedup key。
+- 用户原文、引用文本、专有名词、标题、别名、外部证据原句在需要精确保留时保持原语言；不要为了统一语言而改写。
+- 不要添加翻译、双语复写或括号内解释，除非源文本本身已经包含。
 
 # 审计背景
 - **角色 (Character)**: {character_name}

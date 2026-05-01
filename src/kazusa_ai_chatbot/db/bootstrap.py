@@ -154,7 +154,6 @@ async def db_bootstrap() -> None:
                 filter_paths = ["global_user_id", "unit_type", "status"]
             await enable_vector_index(collection, index_name, path=path, filter_paths=filter_paths)
         except Exception as exc:
-            logger.debug(f"Handled exception in db_bootstrap: {exc}")
             logger.exception(
                 f"Could not create vector index {index_name!r} "
                 f"on {collection}.{path} (requires Atlas): {exc}"

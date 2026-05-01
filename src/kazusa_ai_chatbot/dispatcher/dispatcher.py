@@ -66,8 +66,9 @@ class TaskDispatcher:
             try:
                 event_id = await scheduler.schedule_event(event_doc)
             except PyMongoError as exc:
-                logger.debug(f"Handled exception in dispatch: {exc}")
-                logger.exception(f'Failed to persist scheduled task for tool {task.tool}')
+                logger.exception(
+                    f"Failed to persist scheduled task for tool {task.tool}: {exc}"
+                )
                 rejected.append((raw, "scheduler write failed"))
                 continue
 

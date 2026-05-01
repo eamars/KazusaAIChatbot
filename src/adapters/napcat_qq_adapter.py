@@ -39,6 +39,7 @@ from kazusa_ai_chatbot.message_envelope.types import (
     RawMention,
     ReplyTarget,
 )
+from kazusa_ai_chatbot.utils import log_list_preview, log_preview
 
 configure_adapter_logging()
 
@@ -282,7 +283,6 @@ class NapCatWSAdapter:
                         # Handle Events (messages, etc.)
                         asyncio.create_task(self.handle_event(data, ws))
             except Exception as exc:
-                logger.debug(f"Handled exception in connect: {exc}")
                 logger.exception(f"Connection lost. Retrying in 5s: {exc}")
                 self._api_dispatch_enabled = False
                 self._reject_pending_api_responses(exc)
@@ -593,7 +593,14 @@ class NapCatWSAdapter:
 
         mode_label = "LISTEN-ONLY" if message_debug_modes.get("listen_only") else "ACTIVE"
 
-        logger.info(f'[{mode_label}] Incoming QQ message: channel_id={channel_id} is_group={is_group} sender={sender_name} raw_wire={wire_content}')
+        logger.info(
+            f"[{mode_label}] Incoming QQ message: channel_id={channel_id} "
+            f"is_group={is_group} sender={sender_name}"
+        )
+        logger.debug(
+            f"Incoming QQ message detail: channel_id={channel_id} "
+            f"raw_wire={log_preview(wire_content)}"
+        )
 
         # Attachments processing (same as before)
         attachments = []
@@ -610,7 +617,6 @@ class NapCatWSAdapter:
                             "description": "",
                         })
                     except httpx.HTTPError as exc:
-                        logger.debug(f"Handled exception in handle_event: {exc}")
                         logger.exception(f"Image fetch error: {exc}")
 
         envelope_request = SimpleNamespace(
@@ -643,20 +649,28 @@ class NapCatWSAdapter:
             "debug_modes": message_debug_modes,
         }
 
-        logger.info(f'Forwarding to brain: channel_id={channel_id} user_id={user_id} content={raw_content} attachments={len(attachments)}')
+        logger.debug(
+            f"Forwarding to brain: channel_id={channel_id} user_id={user_id} "
+            f"attachments={len(attachments)} content={log_preview(raw_content)}"
+        )
 
         try:
             resp = await self.brain_client.post(f"{self.brain_url}/chat", json=payload)
             resp.raise_for_status()
             brain_data = resp.json()
         except Exception as exc:
-            logger.debug(f"Handled exception in handle_event: {exc}")
             logger.exception(f"Brain service failed: {exc}")
             return
 
         # Response handling
         replies = brain_data.get("messages", [])
-        logger.info(f'Brain output: should_reply={brain_data.get("should_reply")} message_count={len(replies)} messages={replies}')
+        logger.info(
+            f"Brain output: messages={log_list_preview(replies)}"
+        )
+        logger.debug(
+            f'Brain output metadata: should_reply={brain_data.get("should_reply")} '
+            f"message_count={len(replies)}"
+        )
         if replies:
             combined = "\n".join(replies)
             msg_params = {
@@ -667,7 +681,10 @@ class NapCatWSAdapter:
             if brain_data.get("should_reply"):
                 msg_params["message"] = f"[CQ:reply,id={data['message_id']}]" + combined
 
-            logger.info(f'Sending QQ message: channel_id={channel_id} message={msg_params["message"]}')
+            logger.debug(
+                f"Sending QQ message: channel_id={channel_id} "
+                f'message={log_preview(msg_params["message"])}'
+            )
 
             # We don't need to wait for 'send_msg' response usually
             await ws.send(json.dumps({"action": "send_msg", "params": msg_params}))
@@ -680,7 +697,7 @@ class NapCatWSAdapter:
             try:
                 await self._heartbeat_task
             except asyncio.CancelledError as exc:
-                logger.debug(f"Handled exception in close: {exc}")
+                logger.debug(f"Heartbeat task cancelled during close: {exc}")
                 pass
         await self.brain_client.aclose()
         if self._runtime_server is not None:

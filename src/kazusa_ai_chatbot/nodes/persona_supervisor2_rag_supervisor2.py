@@ -588,7 +588,13 @@ async def rag_initializer(state: ProgressiveRAGState) -> dict:
     )
     cached_slots = _read_cached_initializer_slots(cached)
     if cached_slots is not None:
-        logger.info(f'RAG2 initializer cache hit: query={log_preview(state["original_query"])} slots={len(cached_slots)} unknown_slots={log_list_preview(cached_slots)} cache_key={cache_key}')
+        logger.info(
+            f"RAG2 initializer output: unknown_slots={log_list_preview(cached_slots)}"
+        )
+        logger.debug(
+            f'RAG2 initializer metadata: cache_hit=True query={log_preview(state["original_query"])} '
+            f"cache_key={cache_key}"
+        )
         asyncio.create_task(record_initializer_hit(cache_key))
         return_value = {
             "unknown_slots": cached_slots,
@@ -627,7 +633,13 @@ async def rag_initializer(state: ProgressiveRAGState) -> dict:
             )
         )
 
-    logger.info(f'RAG2 initializer result: query={log_preview(state["original_query"])} cacheable={cacheable_result} slots={len(unknown_slots)} unknown_slots={log_list_preview(unknown_slots)} raw={log_preview(result)}')
+    logger.info(
+        f"RAG2 initializer output: unknown_slots={log_list_preview(unknown_slots)}"
+    )
+    logger.debug(
+        f'RAG2 initializer metadata: cache_hit=False query={log_preview(state["original_query"])} '
+        f"cacheable={cacheable_result} raw={log_preview(result)}"
+    )
     return_value = {
         "unknown_slots": unknown_slots,
         "initializer_cache": _initializer_cache_status(
@@ -921,7 +933,17 @@ async def rag_dispatcher(state: ProgressiveRAGState) -> dict:
     if not isinstance(dispatch, dict):
         dispatch = {}
     normalized_dispatch = _normalize_dispatch(dispatch, current_slot)
-    logger.info(f'RAG2 dispatch: loop={state.get("loop_count", 0) + 1} slot={log_preview(current_slot)} agent={normalized_dispatch["agent_name"] or "<invalid>"} max_attempts={normalized_dispatch["max_attempts"]} task={log_preview(normalized_dispatch["task"])} dispatch_context={log_preview(normalized_dispatch["context"])} raw={log_preview(dispatch)}')
+    logger.info(
+        f'RAG2 dispatch output: agent={normalized_dispatch["agent_name"] or "<invalid>"} '
+        f"task={log_preview(normalized_dispatch['task'])}"
+    )
+    logger.debug(
+        f'RAG2 dispatch metadata: loop={state.get("loop_count", 0) + 1} '
+        f"slot={log_preview(current_slot)} "
+        f'max_attempts={normalized_dispatch["max_attempts"]} '
+        f"dispatch_context={log_preview(normalized_dispatch['context'])} "
+        f"raw={log_preview(dispatch)}"
+    )
 
     return_value = {
         "messages": [AIMessage(content=response.content)],
@@ -1012,7 +1034,13 @@ async def rag_executor(state: ProgressiveRAGState) -> dict:
             "result": "Dispatcher failed to choose a valid agent.",
             "attempts": 0,
         }
-        logger.info(f'RAG2 agent result: slot={log_preview(state.get("current_slot", ""))} agent=<invalid> resolved=False attempts=0 result={log_preview(result)}')
+        logger.info(
+            f"RAG2 agent output: result={log_preview(result)}"
+        )
+        logger.debug(
+            f'RAG2 agent metadata: slot={log_preview(state.get("current_slot", ""))} '
+            f"agent=<invalid> resolved=False attempts=0"
+        )
         return_value = {
             "last_agent_result": result,
             "messages": [HumanMessage(content=_serialize_agent_result(result), name="agent_result")],
@@ -1042,7 +1070,12 @@ async def rag_executor(state: ProgressiveRAGState) -> dict:
             "attempts": 0,
         }
 
-    logger.info(f'RAG2 agent result: slot={log_preview(state.get("current_slot", ""))} agent={agent_name} resolved={bool(result.get("resolved", False))} attempts={result.get("attempts", 0)} result={log_preview(result)}')
+    logger.info(f"RAG2 agent output: result={log_preview(result)}")
+    logger.debug(
+        f'RAG2 agent metadata: slot={log_preview(state.get("current_slot", ""))} '
+        f'agent={agent_name} resolved={bool(result.get("resolved", False))} '
+        f'attempts={result.get("attempts", 0)}'
+    )
     return_value = {
         "last_agent_result": result,
         "messages": [HumanMessage(content=_serialize_agent_result(result), name="agent_result")],
@@ -1225,7 +1258,15 @@ async def rag_evaluator(state: ProgressiveRAGState) -> dict:
     }
 
     remaining_slots = list(state.get("unknown_slots", []))[1:]
-    logger.info(f'RAG2 fact: slot={log_preview(slot)} agent={agent_name or "<none>"} resolved={resolved} attempts={new_fact["attempts"]} remaining_slots={len(remaining_slots)} summary={log_preview(summary)} raw_result={log_preview(raw_result)}')
+    logger.info(
+        f'RAG2 fact: slot={log_preview(slot)} agent={agent_name or "<none>"} '
+        f"resolved={resolved} summary={log_preview(summary)}"
+    )
+    logger.debug(
+        f'RAG2 fact metadata: attempts={new_fact["attempts"]} '
+        f"remaining_slots={len(remaining_slots)}"
+    )
+    logger.debug(f"RAG2 fact detail: raw_result={log_preview(raw_result)}")
 
     return_value = {
         "unknown_slots": remaining_slots,
@@ -1296,7 +1337,11 @@ async def rag_finalizer(state: ProgressiveRAGState) -> dict:
     human_message = HumanMessage(content=json.dumps(finalizer_input, ensure_ascii=False, default=str))
 
     response = await _finalizer_llm.ainvoke([system_prompt, human_message])
-    logger.info(f'RAG2 finalizer: query={log_preview(state["original_query"])} facts={len(state.get("known_facts", []))} answer={log_preview(response.content)}')
+    logger.info(f"RAG2 finalizer output: answer={log_preview(response.content)}")
+    logger.debug(
+        f'RAG2 finalizer metadata: query={log_preview(state["original_query"])} '
+        f'facts={len(state.get("known_facts", []))}'
+    )
     return_value = {"final_answer": response.content}
     return return_value
 
@@ -1395,14 +1440,31 @@ async def call_rag_supervisor(
         "final_answer": "",
     }
 
-    logger.info(f'RAG2 request: platform={runtime_context.get("platform", "")} channel={runtime_context.get("platform_channel_id", "") or "<dm>"} user={runtime_context.get("global_user_id", "")} character={log_preview(character_name)} history_recent={len(runtime_context.get("chat_history_recent", []))} history_wide={len(runtime_context.get("chat_history_wide", []))} query={log_preview(original_query)} context={log_preview(runtime_context)}')
+    logger.debug(
+        f'RAG2 request metadata: platform={runtime_context.get("platform", "")} '
+        f'channel={runtime_context.get("platform_channel_id", "") or "<dm>"} '
+        f'user={runtime_context.get("global_user_id", "")} '
+        f"character={log_preview(character_name)} "
+        f'history_recent={len(runtime_context.get("chat_history_recent", []))} '
+        f'history_wide={len(runtime_context.get("chat_history_wide", []))} '
+        f"query={log_preview(original_query)} "
+        f"context={log_preview(runtime_context)}"
+    )
     result = await graph.ainvoke(initial_state)
     known_facts = result.get("known_facts", [])
     unknown_slots = result.get("unknown_slots", [])
     loop_count = result.get("loop_count", 0)
     final_answer = result.get("final_answer", "")
 
-    logger.info(f'RAG2 summary: platform={runtime_context.get("platform", "")} channel={runtime_context.get("platform_channel_id", "") or "<dm>"} user={runtime_context.get("global_user_id", "")} loop_count={loop_count} known_facts={len(known_facts)} unknown_slots={len(unknown_slots)} answer={log_preview(final_answer)} facts={log_preview(known_facts)} remaining_slots={log_list_preview(unknown_slots)}')
+    logger.debug(
+        f'RAG2 summary metadata: platform={runtime_context.get("platform", "")} '
+        f'channel={runtime_context.get("platform_channel_id", "") or "<dm>"} '
+        f'user={runtime_context.get("global_user_id", "")} '
+        f"loop_count={loop_count} known_facts={len(known_facts)} "
+        f"unknown_slots={len(unknown_slots)} answer={log_preview(final_answer)} "
+        f"facts={log_preview(known_facts)} "
+        f"remaining_slots={log_list_preview(unknown_slots)}"
+    )
 
     return_value = {
         "answer": final_answer,

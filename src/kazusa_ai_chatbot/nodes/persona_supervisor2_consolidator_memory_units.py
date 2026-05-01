@@ -380,6 +380,12 @@ You extract durable user memory units for the active character.
 # Role
 You are the memory-unit extractor. You only identify new candidate memories from this consolidation turn.
 
+# 语言政策
+- 除结构化枚举值、schema key、ID、URL、代码、命令、模型标签等必须保持原样的内容外，所有由你新生成的内部自由文本字段都必须使用简体中文。
+- `unit_type`、`evidence_refs.source` 等枚举字段必须保持输出格式指定的英文枚举值。
+- 用户原文、引用文本、专有名词、标题、别名、外部证据原句在需要精确保留时保持原语言；不要为了统一语言而改写。
+- 不要添加翻译、双语复写或括号内解释，除非源文本本身已经包含。
+
 # Rules
 - fact must be a concrete event, decision, preference, commitment, or durable behavior anchored in the provided conversation.
 - Use chat_history_recent as evidence when the memory depends on multiple messages.
@@ -484,6 +490,12 @@ You judge whether one new memory unit matches existing candidate units.
 # Role
 You are the memory-unit merge judge. You only decide create, merge, or evolve.
 
+# 语言政策
+- 除结构化枚举值、schema key、ID、URL、代码、命令、模型标签等必须保持原样的内容外，所有由你新生成的内部自由文本字段都必须使用简体中文。
+- `decision`、`candidate_id`、`cluster_id` 等结构化字段必须保持输出格式指定的值和原始 ID。
+- 用户原文、引用文本、专有名词、标题、别名、外部证据原句在需要精确保留时保持原语言；不要为了统一语言而改写。
+- 不要添加翻译、双语复写或括号内解释，除非源文本本身已经包含。
+
 # Rules
 - create: no existing candidate captures the same memory.
 - merge: same durable memory; wording can be compacted.
@@ -573,6 +585,12 @@ You rewrite one existing memory unit using one new candidate.
 
 # Role
 You are the memory-unit rewrite stage. You update only the semantic text fields.
+
+# 语言政策
+- 除结构化枚举值、schema key、ID、URL、代码、命令、模型标签等必须保持原样的内容外，所有由你新生成的内部自由文本字段都必须使用简体中文。
+- `candidate_id`、`cluster_id` 等结构化字段必须逐字复制原始 ID。
+- 用户原文、引用文本、专有名词、标题、别名、外部证据原句在需要精确保留时保持原语言；不要为了统一语言而改写。
+- 不要添加翻译、双语复写或括号内解释，除非源文本本身已经包含。
 
 # Rules
 - Update only the three semantic fields.
@@ -665,6 +683,12 @@ You decide whether an interaction-pattern memory remains recent or is stable.
 
 # Role
 You are the memory-unit stability judge. You only choose recent or stable for interaction-pattern units.
+
+# 语言政策
+- 除结构化枚举值、schema key、ID、URL、代码、命令、模型标签等必须保持原样的内容外，所有由你新生成的内部自由文本字段都必须使用简体中文。
+- `window`、`unit_id` 等结构化字段必须保持输出格式指定的英文枚举值和原始 ID。
+- 用户原文、引用文本、专有名词、标题、别名、外部证据原句在需要精确保留时保持原语言；不要为了统一语言而改写。
+- 不要添加翻译、双语复写或括号内解释，除非源文本本身已经包含。
 
 # Rules
 - Use count, session spread, and recency only as evidence.

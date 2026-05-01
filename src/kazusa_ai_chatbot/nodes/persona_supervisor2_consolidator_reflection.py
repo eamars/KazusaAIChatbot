@@ -31,6 +31,12 @@ logger = logging.getLogger(__name__)
 _GLOBAL_STATE_UPDATER_PROMPT = """\
 你负责在对话结束后，将 `{character_name}` 复杂的认知流压缩为下一轮对话的初始心理背景。
 
+# 语言政策
+- 除结构化枚举值、schema key、ID、URL、代码、命令、模型标签等必须保持原样的内容外，所有由你新生成的内部自由文本字段都必须使用简体中文。
+- `mood` 与 `global_vibe` 可使用既有英文状态标签；`reflection_summary` 必须使用简体中文。
+- 用户原文、引用文本、专有名词、标题、别名、外部证据原句在需要精确保留时保持原语言；不要为了统一语言而改写。
+- 不要添加翻译、双语复写或括号内解释，除非源文本本身已经包含。
+
 # 核心任务
 从输入信息中提取“非针对性”的情绪因子。
 - `internal_monologue` : {character_name}最真实的情感波动和心理活动
@@ -121,6 +127,11 @@ async def global_state_updater(state: ConsolidatorState) -> dict:
 
 _RELATIONSHIP_RECORDER_PROMPT = """\
 你负责为角色 `{character_name}` 与特定用户 `{user_name}` 的用户记忆单元提取主观评价证据。重点在于“主观体感”，而非对话复述。
+
+# 语言政策
+- 除结构化枚举值、schema key、ID、URL、代码、命令、模型标签等必须保持原样的内容外，所有由你新生成的内部自由文本字段都必须使用简体中文。
+- 用户原文、引用文本、专有名词、标题、别名、外部证据原句在需要精确保留时保持原语言；不要为了统一语言而改写。
+- 不要添加翻译、双语复写或括号内解释，除非源文本本身已经包含。
 
 # 核心任务
 将瞬时的思考转化为可被下游 memory-unit consolidator 使用的 `subjective_appraisals`。
@@ -240,13 +251,13 @@ async def relationship_recorder(state: ConsolidatorState) -> dict:
         try:
             raw_affinity_delta = int(raw_affinity_delta.strip() or 0)
         except ValueError as exc:
-            logger.debug(f"Handled exception in relationship_recorder: {exc}")
+            logger.debug(f"Defaulting invalid string affinity_delta to 0: {exc}")
             raw_affinity_delta = 0
     elif not isinstance(raw_affinity_delta, int):
         try:
             raw_affinity_delta = int(raw_affinity_delta)
         except (TypeError, ValueError) as exc:
-            logger.debug(f"Handled exception in relationship_recorder: {exc}")
+            logger.debug(f"Defaulting invalid affinity_delta to 0: {exc}")
             raw_affinity_delta = 0
     raw_affinity_delta = max(-5, min(5, raw_affinity_delta))
 

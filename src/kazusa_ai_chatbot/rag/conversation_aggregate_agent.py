@@ -142,7 +142,7 @@ def _parse_current_timestamp(context: dict[str, Any]) -> datetime.datetime:
         try:
             parsed = datetime.datetime.fromisoformat(raw_timestamp.replace("Z", "+00:00"))
         except ValueError as exc:
-            logger.debug(f"Handled exception in _parse_current_timestamp: {exc}")
+            logger.debug(f"Using current time for invalid aggregate timestamp: {exc}")
             parsed = datetime.datetime.now(datetime.timezone.utc)
     else:
         parsed = datetime.datetime.now(datetime.timezone.utc)

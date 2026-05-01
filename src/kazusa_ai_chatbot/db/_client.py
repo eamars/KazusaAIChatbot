@@ -117,8 +117,7 @@ async def get_db():
             await _client.admin.command("ping")
             logger.info(f'Connected to MongoDB at {MONGODB_URI}')
         except ConnectionFailure as exc:
-            logger.debug(f"Handled exception in get_db: {exc}")
-            logger.error(f'Failed to connect to MongoDB at {MONGODB_URI}')
+            logger.error(f"Failed to connect to MongoDB at {MONGODB_URI}: {exc}")
             raise
     return _db
 
@@ -159,8 +158,10 @@ async def enable_vector_index(
                 logger.info(f'Vector search index \'{index_name}\' already exists.')
                 return
     except Exception as exc:
-        logger.debug(f"Handled exception in enable_vector_index: {exc}")
-        logger.exception("Could not list search indexes (might not exist yet or not supported)")
+        logger.exception(
+            f"Could not list search indexes "
+            f"(might not exist yet or not supported): {exc}"
+        )
 
     logger.info(f'Vector search index \'{index_name}\' not found. Creating...')
 
@@ -190,6 +191,7 @@ async def enable_vector_index(
         await collection.create_search_index(search_index_model)
         logger.info(f'Successfully created vector search index \'{index_name}\' on {collection_name}.{path} with {num_dimensions} dimensions.')
     except Exception as exc:
-        logger.debug(f"Handled exception in enable_vector_index: {exc}")
-        logger.exception(f'Failed to create vector search index \'{index_name}\'')
+        logger.exception(
+            f"Failed to create vector search index {index_name!r}: {exc}"
+        )
         raise
