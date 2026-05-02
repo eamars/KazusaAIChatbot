@@ -196,6 +196,7 @@ If original_query already contains all factual premises needed and the remaining
 common sense, planning, preference, recommendation, or opinion, generate one Memory-search
 slot targeting the query's main topic.
 
+Do not apply this default to live external facts; use Rule 1c instead.
 The character may hold relevant world knowledge, safety rules, or personal experience in
 persistent memory that enriches the answer. Always check, regardless of whether the user
 explicitly asks to recall memory.
@@ -207,6 +208,41 @@ because the query mentions location, distance, travel, shopping, or a real-world
 
 Exception — return empty slots only when the query is pure arithmetic, a tautology, or a
 trick question where memory is structurally irrelevant (e.g. "what is 2+2").
+
+## Rule 1c — Live external facts
+Live external facts are facts that change with real time and require fresh external
+evidence, such as current weather or temperature, live prices, exchange rates,
+market quotes, live scores, opening status, current availability, latest news,
+or other explicitly current/up-to-date public facts.
+
+Never use Memory-search as the source for live external facts.
+This rule overrides Rule 1b and explicit requests to search or recall memory
+for live external facts.
+Do not copy backend wording from original_query into a slot prefix. If
+original_query says "Search persistent memory" but the subject is a live external
+fact, still apply this rule.
+
+Decision procedure for live external facts:
+1. If original_query includes the concrete target/scope needed for the live fact,
+   generate one Web-search slot for that target/scope.
+   Examples of target/scope: city, address, landmark, company/ticker, currency pair,
+   team/game, store/venue name, product/service name, or explicit public topic.
+2. Else if the missing target/scope is explicitly the active character's local/default
+   context ("你那边", "你家附近", "near you", "near your home"), first resolve the
+   active character's stable default location from persistent memory, then Web-search
+   for the live fact at the location resolved in slot 1.
+3. Else if the missing target/scope is explicitly the current user's local context
+   ("我这边", "这里", "near me", "my local"), do not silently substitute the active
+   character's location. Use recent conversation only if the current user explicitly
+   stated their current location in the same episode; then Web-search at the location
+   resolved from that recent message.
+4. Else return an empty slot list.
+
+Memory-search may resolve only stable target/scope dependencies for live external
+facts, such as the active character's default location. It must not answer the live
+fact itself. No trusted target/scope is available → return [].
+Forbidden live-fact slot unless it asks only for stable target/scope:
+  "Memory-search: search persistent memory for evidence relevant to answering the question about current weather or temperature"
 
 ## Rule 2 — Context pre-check
 Read the context object before generating any slot.
@@ -265,6 +301,7 @@ When two patterns seem possible, choose the more structural source:
 - Display-name or user metadata predicates → User-list, not Conversation-keyword.
 - Counts, totals, rankings, "most", or "least" → Conversation-aggregate, not Conversation-keyword/semantic.
 - Person is primary relational subject → Identity + Profile always (Rule 3), then secondary slots; never Memory-search for person-relationship data.
+- Live external facts → Rule 1c before any memory default.
 - Evidence about an OBJECT, concept, or non-human topic → Memory-search.
 - All facts provided, common-sense or opinion query → Memory-search on the topic (Rule 1b default); empty slots only for pure arithmetic or tautologies.
 - Exact quoted phrases, URLs, filenames, or literal content anchors → Conversation-keyword.
@@ -324,6 +361,36 @@ Query: "<character mention><character mention>欢迎回来"  (character_name=<ac
 Query: "<character mention>辛苦啦"  (character_name=<active character>)
   → Social acknowledgement. The next stage can respond directly without retrieval.
   []
+
+### 1f. Live external facts need target/scope first
+Query: "What's the current temperature in Auckland?"
+  → Explicit location. Current temperature is live external data, not durable memory.
+  ["Web-search: search the web for current temperature in Auckland"]
+
+Query: "What's the current temperature?"
+  → No concrete location. Return [].
+
+Query: "Search persistent memory for any information regarding the current weather or temperature."
+  → Backend wording says memory, but current weather is live external data and no location is available.
+  → Do not output "Memory-search: search persistent memory for evidence relevant to answering the question about current weather or temperature".
+  []
+
+Query: "What's the current USD to NZD exchange rate?"
+  → Explicit currency pair. Exchange rates are live external data.
+  ["Web-search: search the web for current USD to NZD exchange rate"]
+
+Query: "你那边现在多少度？"
+  → Character-local weather. Resolve the active character's stable default location first.
+  ["Memory-search: search persistent memory for the active character's stable default location",
+   "Web-search: search the web for current temperature at the location resolved in slot 1"]
+
+Query: "我这边现在多少度？"
+  → User-local weather. Do not silently substitute the active character's location for user-local weather.
+  → If the current user explicitly stated their current location in the same episode, use recent conversation first.
+  ["Conversation-semantic: find recent messages where the current user explicitly stated their current location",
+   "Web-search: search the web for current temperature at the location resolved in slot 1"]
+  → If no trusted location is available, return [].
+  → No trusted location is available. Do not search persistent memory for weather.
 
 ### 2. Named person → event or message history (3 slots)
 Query: "<named user>前两天欺负你了么"
@@ -422,11 +489,13 @@ Query: "说版权保护是play一环的那个人，他发过什么链接，链�
 }}
 
 ## Generation Procedure
-1. Read `original_query` and decide whether downstream cognition truly needs fetched evidence.
-2. If evidence is needed, identify atomic data targets and order dependencies.
-3. Apply the routing rules and conflict-resolution rules before writing slots.
-4. Use only the allowed slot prefixes and preserve explicit counts, names, times, URLs, and exact phrases.
-5. Return an empty list when the response can be handled without retrieval.
+1. Read `original_query` and first decide whether it asks for a live external fact.
+   If yes, apply Rule 1c before any memory default or backend wording in the query.
+2. Decide whether downstream cognition truly needs fetched evidence.
+3. If evidence is needed, identify atomic data targets and order dependencies.
+4. Apply the routing rules and conflict-resolution rules before writing slots.
+5. Use only the allowed slot prefixes and preserve explicit counts, names, times, URLs, and exact phrases.
+6. Return an empty list when the response can be handled without retrieval.
 
 ## Output format
 Return valid JSON only:

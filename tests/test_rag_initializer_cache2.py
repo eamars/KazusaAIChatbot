@@ -222,6 +222,50 @@ def test_memory_search_prompt_uses_evidence_contract() -> None:
     assert "Handles durable memory evidence relevant to answering the slot" in rendered_dispatcher
 
 
+def test_initializer_prompt_documents_live_external_fact_contract() -> None:
+    """Initializer prompt should route live facts through explicit target/scope."""
+    rendered_prompt = supervisor2_module._INITIALIZER_PROMPT.format(
+        character_name="<active character>",
+    )
+    required_fragments = [
+        "## Rule 1c — Live external facts",
+        "Live external facts are facts that change with real time",
+        "Never use Memory-search as the source for live external facts",
+        "This rule overrides Rule 1b and explicit requests to search or recall memory",
+        "Do not copy backend wording from original_query into a slot prefix.",
+        "Do not apply this default to live external facts; use Rule 1c instead.",
+        "Decision procedure for live external facts:",
+        "If original_query includes the concrete target/scope needed for the live fact",
+        "Else return an empty slot list.",
+        "Memory-search may resolve only stable target/scope dependencies for live external",
+        "Forbidden live-fact slot unless it asks only for stable target/scope:",
+        "Do not silently substitute the active character's location for user-local weather",
+        "Query: \"What's the current temperature in Auckland?\"",
+        "Web-search: search the web for current temperature in Auckland",
+        "Query: \"What's the current temperature?\"",
+        "No concrete location. Return [].",
+        "Query: \"Search persistent memory for any information regarding the current weather or temperature.\"",
+        "Backend wording says memory, but current weather is live external data and no location is available.",
+        "Do not output \"Memory-search: search persistent memory for evidence relevant to answering the question about current weather or temperature\".",
+        "Query: \"What's the current USD to NZD exchange rate?\"",
+        "Web-search: search the web for current USD to NZD exchange rate",
+        "Query: \"你那边现在多少度？\"",
+        "Memory-search: search persistent memory for the active character's stable default location",
+        "Web-search: search the web for current temperature at the location resolved in slot 1",
+        "Query: \"我这边现在多少度？\"",
+        "Conversation-semantic: find recent messages where the current user explicitly stated their current location",
+        "No trusted location is available. Do not search persistent memory for weather.",
+    ]
+
+    missing_fragments = [
+        fragment
+        for fragment in required_fragments
+        if fragment not in rendered_prompt
+    ]
+
+    assert missing_fragments == []
+
+
 def test_normalize_initializer_slots_does_not_stringify_container_items() -> None:
     """Initializer slots should keep only native strings."""
 
@@ -449,7 +493,7 @@ async def test_rag_initializer_payload_uses_prompt_context_for_large_image(
     assert base64_payload not in human_payload
 
 
-def test_initializer_prompt_version_remains_v6_for_prompt_context() -> None:
-    """Prompt-safe context cutover should not bump initializer prompt version."""
+def test_initializer_prompt_version_bumps_to_v11_for_live_fact_contract() -> None:
+    """Live-fact routing changes must invalidate initializer strategies."""
 
-    assert supervisor2_module.INITIALIZER_PROMPT_VERSION == "initializer_prompt:v6"
+    assert supervisor2_module.INITIALIZER_PROMPT_VERSION == "initializer_prompt:v11"
