@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import logging
 import re
-from typing import Any
+from typing import Any, TypedDict
 
 from langchain_core.messages import HumanMessage, SystemMessage
 
@@ -48,6 +48,13 @@ _EXACT_ANCHOR_CHARS = (
     "\u300e",
     "\u300f",
 )
+
+
+class _ConversationProjection(TypedDict):
+    """Canonical evidence shape exposed by the conversation capability."""
+
+    summaries: list[str]
+    resolved_refs: list[dict[str, Any]]
 
 
 def _clip_text(value: object, *, limit: int = 1000) -> str:
@@ -332,63 +339,118 @@ def _worker_context(context: dict[str, Any], person_ref: dict[str, Any] | None) 
     return worker_context
 
 
-def _rows_from_result(value: object) -> list[object]:
-    """Normalize a worker ``result`` value to a row list."""
-    if isinstance(value, list):
-        return value
-    rows = [value]
+def _projection_from_worker(
+    worker_name: str,
+    worker_result: dict[str, Any],
+) -> _ConversationProjection:
+    """Project one worker's explicit raw contract into capability evidence."""
+    raw_result = worker_result.get("result")
+
+    if worker_name == "conversation_search_agent":
+        rows = _semantic_message_rows(raw_result)
+        projection = _message_projection(rows)
+        return projection
+
+    if worker_name in {
+        "conversation_keyword_agent",
+        "conversation_filter_agent",
+    }:
+        rows = _plain_message_rows(raw_result)
+        projection = _message_projection(rows)
+        return projection
+
+    if worker_name == "conversation_aggregate_agent":
+        projection = _aggregate_projection(raw_result)
+        return projection
+
+    projection = _empty_projection()
+    return projection
+
+
+def _empty_projection() -> _ConversationProjection:
+    """Build an empty canonical conversation evidence projection."""
+    projection: _ConversationProjection = {
+        "summaries": [],
+        "resolved_refs": [],
+    }
+    return projection
+
+
+def _semantic_message_rows(value: object) -> list[dict[str, Any]]:
+    """Extract message rows from semantic search ``(score, message)`` results."""
+    rows: list[dict[str, Any]] = []
+    if not isinstance(value, list):
+        return rows
+
+    for item in value:
+        if not isinstance(item, (list, tuple)) or len(item) != 2:
+            continue
+
+        score, message = item
+        if (
+            isinstance(score, (int, float))
+            and not isinstance(score, bool)
+            and isinstance(message, dict)
+        ):
+            rows.append(message)
+
     return rows
 
 
-def _row_text(row: object) -> str:
-    """Extract prompt-facing text from one conversation worker row."""
-    if isinstance(row, str):
-        return row.strip()
+def _plain_message_rows(value: object) -> list[dict[str, Any]]:
+    """Extract message rows from keyword and structured-filter results."""
+    if not isinstance(value, list):
+        return_value: list[dict[str, Any]] = []
+        return return_value
 
-    if isinstance(row, dict):
-        body = text_or_empty(row.get("body_text"))
-        if not body:
-            body = text_or_empty(row.get("content"))
-        if not body:
-            body = text_or_empty(row.get("summary"))
-        if not body:
-            body = text_or_empty(row.get("text"))
-
-        display_name = text_or_empty(row.get("display_name"))
-        timestamp = text_or_empty(row.get("timestamp"))
-        if display_name and timestamp and body:
-            text = f"{display_name} at {timestamp}: {body}"
-            return text
-        if display_name and body:
-            text = f"{display_name}: {body}"
-            return text
-        return body
-
-    text = text_or_empty(row)
-    return text
+    rows = [
+        row
+        for row in value
+        if isinstance(row, dict)
+    ]
+    return rows
 
 
-def _summaries_from_worker(worker_result: dict[str, Any]) -> list[str]:
-    """Build prompt-facing summaries from one worker result."""
-    rows = _rows_from_result(worker_result.get("result"))
+def _message_projection(rows: list[dict[str, Any]]) -> _ConversationProjection:
+    """Project typed conversation message rows into summaries and refs."""
     summaries = [
         summary
         for row in rows
-        if (summary := _clip_text(_row_text(row), limit=500))
+        if (summary := _clip_text(_message_row_text(row), limit=500))
     ]
-    return summaries
+    resolved_refs = _refs_from_message_rows(rows)
+    projection: _ConversationProjection = {
+        "summaries": summaries,
+        "resolved_refs": resolved_refs,
+    }
+    return projection
 
 
-def _refs_from_worker(worker_result: dict[str, Any]) -> list[dict[str, Any]]:
-    """Extract structured speaker, message, and URL refs from worker rows."""
+def _message_row_text(row: dict[str, Any]) -> str:
+    """Extract prompt-facing text from one canonical message row."""
+    body = text_or_empty(row.get("body_text"))
+    if not body:
+        body = text_or_empty(row.get("content"))
+    if not body:
+        body = text_or_empty(row.get("summary"))
+    if not body:
+        body = text_or_empty(row.get("text"))
+
+    display_name = text_or_empty(row.get("display_name"))
+    timestamp = text_or_empty(row.get("timestamp"))
+    if display_name and timestamp and body:
+        text = f"{display_name} at {timestamp}: {body}"
+        return text
+    if display_name and body:
+        text = f"{display_name}: {body}"
+        return text
+    return body
+
+
+def _refs_from_message_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Extract structured speaker, message, and URL refs from message rows."""
     refs: list[dict[str, Any]] = []
-    rows = _rows_from_result(worker_result.get("result"))
     for row in rows:
-        if not isinstance(row, dict):
-            text = text_or_empty(row)
-            refs.extend(_url_refs_from_text(text))
-            continue
-
         global_user_id = text_or_empty(row.get("global_user_id"))
         display_name = text_or_empty(row.get("display_name"))
         if global_user_id or display_name:
@@ -414,8 +476,123 @@ def _refs_from_worker(worker_result: dict[str, Any]) -> list[dict[str, Any]]:
                 }
             )
 
-        text = _row_text(row)
+        text = _message_row_text(row)
         refs.extend(_url_refs_from_text(text))
+    return refs
+
+
+def _aggregate_projection(value: object) -> _ConversationProjection:
+    """Project aggregate worker payloads into canonical conversation evidence."""
+    if not isinstance(value, dict):
+        projection = _empty_projection()
+        return projection
+
+    rows_value = value.get("rows")
+    rows = rows_value if isinstance(rows_value, list) else []
+    row_summaries = [
+        row_summary
+        for row in rows
+        if isinstance(row, dict)
+        if (row_summary := _aggregate_row_summary(row))
+    ]
+    total_count = value.get("total_count")
+    total_text = _aggregate_total_text(total_count)
+    aggregate = text_or_empty(value.get("aggregate")) or "conversation aggregate"
+    time_window = text_or_empty(value.get("time_window"))
+
+    summary_parts = [aggregate]
+    if time_window:
+        summary_parts.append(f"window={time_window}")
+    if total_text:
+        summary_parts.append(f"total={total_text}")
+    if row_summaries:
+        summary_parts.append("top rows: " + "; ".join(row_summaries[:5]))
+
+    if len(summary_parts) == 1:
+        summaries: list[str] = []
+    else:
+        summary = ", ".join(summary_parts)
+        summaries = [summary]
+
+    projection: _ConversationProjection = {
+        "summaries": summaries,
+        "resolved_refs": _refs_from_aggregate_rows(rows),
+    }
+    return projection
+
+
+def _aggregate_total_text(value: object) -> str:
+    """Render aggregate total count without assuming a raw payload type."""
+    if isinstance(value, int) and not isinstance(value, bool):
+        return_value = str(value)
+        return return_value
+    return_value = text_or_empty(value)
+    return return_value
+
+
+def _aggregate_row_summary(row: dict[str, Any]) -> str:
+    """Render one aggregate row for the RAG finalizer."""
+    display_name = _first_display_name(row.get("display_names"))
+    if not display_name:
+        display_name = text_or_empty(row.get("platform_user_id"))
+    if not display_name:
+        display_name = text_or_empty(row.get("global_user_id"))
+
+    message_count = row.get("message_count")
+    if isinstance(message_count, int) and not isinstance(message_count, bool):
+        count_text = str(message_count)
+    else:
+        count_text = text_or_empty(message_count)
+
+    last_timestamp = text_or_empty(row.get("last_timestamp"))
+    parts = []
+    if display_name:
+        parts.append(display_name)
+    if count_text:
+        parts.append(f"{count_text} messages")
+    if last_timestamp:
+        parts.append(f"last={last_timestamp}")
+
+    summary = ", ".join(parts)
+    return summary
+
+
+def _first_display_name(value: object) -> str:
+    """Return the first non-empty display name from an aggregate row."""
+    if not isinstance(value, list):
+        return_value = text_or_empty(value)
+        return return_value
+
+    for item in value:
+        display_name = text_or_empty(item)
+        if display_name:
+            return display_name
+
+    return_value = ""
+    return return_value
+
+
+def _refs_from_aggregate_rows(rows: list[object]) -> list[dict[str, Any]]:
+    """Extract person refs from aggregate result rows when available."""
+    refs: list[dict[str, Any]] = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+
+        global_user_id = text_or_empty(row.get("global_user_id"))
+        display_name = _first_display_name(row.get("display_names"))
+        if not global_user_id and not display_name:
+            continue
+
+        refs.append(
+            {
+                "ref_type": "person",
+                "role": "aggregate_subject",
+                "global_user_id": global_user_id,
+                "display_name": display_name,
+            }
+        )
+
     return refs
 
 
@@ -490,9 +667,10 @@ class ConversationEvidenceAgent(BaseRAGHelperAgent):
             max_attempts=1,
         )
         worker_payloads = {primary_worker: worker_result}
-        summaries = _summaries_from_worker(worker_result)
+        projection = _projection_from_worker(primary_worker, worker_result)
+        summaries = projection["summaries"]
         selected_summary = "\n".join(summaries[:5])
-        resolved_refs = _refs_from_worker(worker_result)
+        resolved_refs = projection["resolved_refs"]
         resolved = bool(worker_result.get("resolved")) and bool(summaries)
         missing_context = [] if resolved else ["conversation_evidence"]
         payload = _result_payload(

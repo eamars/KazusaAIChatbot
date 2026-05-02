@@ -357,11 +357,16 @@ async def test_conversation_evidence_semantic_topic_uses_search() -> None:
         {
             "resolved": True,
             "result": [
-                {
-                    "body_text": "We talked about roller coaster plans.",
-                    "display_name": "Tester",
-                    "timestamp": "2026-05-01T22:00:00+00:00",
-                }
+                (
+                    0.73,
+                    {
+                        "body_text": "We talked about roller coaster plans.",
+                        "display_name": "Tester",
+                        "global_user_id": "user-1",
+                        "platform_message_id": "msg-1",
+                        "timestamp": "2026-05-01T22:00:00+00:00",
+                    },
+                )
             ],
             "attempts": 1,
             "cache": {"enabled": False, "hit": False, "reason": "open_range"},
@@ -380,6 +385,16 @@ async def test_conversation_evidence_semantic_topic_uses_search() -> None:
     assert len(search_worker.calls) == 1
     assert keyword_worker.calls == []
     assert result["result"]["primary_worker"] == "conversation_search_agent"
+    assert result["result"]["projection_payload"]["summaries"] == [
+        "Tester at 2026-05-01T22:00:00+00:00: We talked about roller coaster plans."
+    ]
+    assert {
+        "ref_type": "message",
+        "platform_message_id": "msg-1",
+        "timestamp": "2026-05-01T22:00:00+00:00",
+        "global_user_id": "user-1",
+        "display_name": "Tester",
+    } in result["result"]["resolved_refs"]
 
 
 @pytest.mark.asyncio
@@ -438,7 +453,20 @@ async def test_conversation_evidence_count_uses_aggregate() -> None:
     aggregate_worker = _FakeWorker(
         {
             "resolved": True,
-            "result": {"summary": "5 recent messages matched cookie manager."},
+            "result": {
+                "aggregate": "count_by_user",
+                "time_window": "recent",
+                "total_count": 5,
+                "rows": [
+                    {
+                        "global_user_id": "user-1",
+                        "platform_user_id": "673225019",
+                        "display_names": ["Tester"],
+                        "message_count": 5,
+                        "last_timestamp": "2026-05-01T22:00:00+00:00",
+                    }
+                ],
+            },
             "attempts": 1,
             "cache": {"enabled": False, "hit": False, "reason": "open_range"},
         }
@@ -454,8 +482,15 @@ async def test_conversation_evidence_count_uses_aggregate() -> None:
     assert len(aggregate_worker.calls) == 1
     assert result["result"]["primary_worker"] == "conversation_aggregate_agent"
     assert result["result"]["projection_payload"]["summaries"] == [
-        "5 recent messages matched cookie manager."
+        "count_by_user, window=recent, total=5, top rows: "
+        "Tester, 5 messages, last=2026-05-01T22:00:00+00:00"
     ]
+    assert {
+        "ref_type": "person",
+        "role": "aggregate_subject",
+        "global_user_id": "user-1",
+        "display_name": "Tester",
+    } in result["result"]["resolved_refs"]
 
 
 @pytest.mark.asyncio
