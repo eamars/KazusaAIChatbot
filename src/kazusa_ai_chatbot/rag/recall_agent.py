@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 from datetime import datetime
 from typing import Any
 
@@ -326,8 +325,17 @@ def _event_claim(event: dict[str, Any]) -> str:
     tool = text_or_empty(event.get("tool"))
     execute_at = text_or_empty(event.get("execute_at"))
     args = event.get("args")
-    args_text = json.dumps(args or {}, ensure_ascii=False, sort_keys=True)
-    claim = f"Pending scheduled event {tool} at {execute_at}: {args_text}"
+    text = ""
+    if tool == "send_message" and isinstance(args, dict):
+        text = text_or_empty(args.get("text"))
+        if not text:
+            text = text_or_empty(args.get("message"))
+
+    if text:
+        claim = f"Pending scheduled event {tool} at {execute_at}: {text}"
+        return claim
+
+    claim = f"Pending scheduled event {tool} at {execute_at}"
     return claim
 
 

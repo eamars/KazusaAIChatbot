@@ -238,8 +238,17 @@ async def test_recall_includes_pending_scheduled_events(monkeypatch) -> None:
     )
 
     sources = {candidate["source"] for candidate in result["result"]["candidates"]}
+    scheduled_claims = [
+        candidate["claim"]
+        for candidate in result["result"]["candidates"]
+        if candidate["source"] == "scheduled_events"
+    ]
 
     assert "scheduled_events" in sources
+    assert scheduled_claims == [
+        "Pending scheduled event send_message at 2026-05-02T01:00:00+00:00: "
+        "Leave for the amusement park."
+    ]
 
 
 @pytest.mark.asyncio
