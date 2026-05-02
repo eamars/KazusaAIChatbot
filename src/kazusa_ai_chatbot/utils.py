@@ -355,6 +355,10 @@ def parse_llm_json_output(raw_output: str) -> dict:
         if not isinstance(decoded_json_dict, dict):
             decoded_json_dict = parse_json_with_llm(raw_output)
 
+    # At this stage there is still a small chance to return a non dict object, we will capture the failure pattern here
+    if not isinstance(decoded_json_dict, dict):
+        logger.exception(f"Unable to parse LLM output {raw_output}. Last attempt: {decoded_json_dict}")
+
     return decoded_json_dict
 
 
