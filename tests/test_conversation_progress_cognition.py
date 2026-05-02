@@ -133,6 +133,14 @@ def _profile_conformance_state() -> dict:
             },
         },
         "decontexualized_input": "换个轻松点的话题，你现在会想吃点甜的吗？",
+        "user_input": "换个轻松点的话题，你现在会想吃点甜的吗？",
+        "prompt_message_context": {
+            "body_text": "换个轻松点的话题，你现在会想吃点甜的吗？",
+            "addressed_to_global_user_ids": ["character-user"],
+            "broadcast": False,
+            "mentions": [],
+            "attachments": [],
+        },
         "user_profile": {
             "affinity": 500,
             "last_relationship_insight": "普通协作关系，没有当前边界冲突。",
@@ -147,8 +155,32 @@ def _profile_conformance_state() -> dict:
             "acceptance": "allow",
             "stance_bias": "confirm",
         },
+        "referents": [],
+        "rag_result": {
+            "answer": "用户在切换到轻松偏好闲聊。",
+            "user_image": {"user_memory_context": {}},
+            "character_image": {},
+            "memory_evidence": [],
+            "conversation_evidence": [],
+            "external_evidence": [],
+        },
         "internal_monologue": "这是轻松换话题，可以自然接住。",
+        "logical_stance": "CONFIRM",
+        "character_intent": "BANTAR",
+        "judgment_note": "普通闲聊可以自然接住。",
+        "content_anchors": [
+            "[DECISION] 接住轻松话题",
+            "[ANSWER] 可以说一个自然的甜食偏好",
+            "[SCOPE] ~30字",
+        ],
+        "social_distance": "日常轻松",
+        "emotional_intensity": "轻微活力",
+        "vibe_check": "普通闲聊",
+        "relational_dynamic": "自然接住轻松话题",
+        "expression_willingness": "open",
         "emotional_appraisal": "轻松、好奇。",
+        "reply_context": {},
+        "channel_topic": "",
     }
 
 
@@ -204,8 +236,15 @@ async def test_visual_agent_receives_boundary_profile_contract(monkeypatch) -> N
     assert "被审查" in system_prompt
     assert "场景时间压力" in system_prompt
     assert "已提供的检索记忆/事实上下文" in system_prompt
+    assert "静态画面" in system_prompt
+    assert "单帧" in system_prompt
+    assert "content_anchors" in system_prompt
     assert "RAG" not in system_prompt
     assert human_payload["boundary_core_assessment"]["stance_bias"] == "confirm"
+    assert human_payload["logical_stance"] == "CONFIRM"
+    assert human_payload["content_anchors"][0].startswith("[DECISION]")
+    assert human_payload["contextual_directives"]["vibe_check"] == "普通闲聊"
+    assert human_payload["prompt_message_context"]["body_text"] == "换个轻松点的话题，你现在会想吃点甜的吗？"
     assert "boundary_profile" not in human_payload
     assert result["visual_vibe"] == ["轻松的日常氛围"]
 

@@ -67,6 +67,11 @@ CHARACTER_FORMAT = {
     "relational_override_description": "allow closeness when respectful",
     "secondary_override": "preserve factual clarity",
     "self_integrity_description": "answers from her own judgment",
+    "boundary_control_sensitivity": "sensitive to manipulative pressure",
+    "boundary_control_intimacy_misread": "does not confuse control with care",
+    "boundary_compliance_strategy": "helps without surrendering agency",
+    "boundary_recovery": "returns to calm boundaries after pressure",
+    "boundary_relational_override": "allow closeness when respectful",
     "agent_name_union": (
         "user_lookup_agent | user_list_agent | user_profile_agent | "
         "relationship_agent | conversation_filter_agent | "
@@ -452,10 +457,54 @@ def _cases() -> dict[str, LLMCase]:
             "_visual_agent_llm",
             {
                 "user_input": "Describe what is in the attached image.",
-                "user_multimedia_input": [
-                    {"content_type": "image/png", "description": "a tiny white square"}
+                "prompt_message_context": {
+                    "body_text": "Describe what is in the attached image.",
+                    "addressed_to_global_user_ids": ["bot-001"],
+                    "broadcast": False,
+                    "mentions": [],
+                    "attachments": [
+                        {
+                            "media_kind": "image",
+                            "description": "a tiny white square on a plain background",
+                            "summary_status": "available",
+                        }
+                    ],
+                },
+                "decontexualized_input": "Describe the attached image objectively.",
+                "referents": [],
+                "rag_result": {
+                    "answer": "The current task is an objective image description.",
+                    "memory_evidence": [],
+                    "conversation_evidence": [],
+                    "external_evidence": [],
+                },
+                "internal_monologue": "I should answer calmly and describe only what is visible.",
+                "logical_stance": "CONFIRM",
+                "character_intent": "PROVIDE",
+                "judgment_note": "Routine image-description request.",
+                "content_anchors": [
+                    "[DECISION] describe the image objectively",
+                    "[ANSWER] mention the visible white square",
+                    "[SCOPE] concise",
                 ],
-                "content_anchors": ["describe the image objectively"],
+                "contextual_directives": {
+                    "social_distance": "neutral task-focused exchange",
+                    "emotional_intensity": "calm and low intensity",
+                    "vibe_check": "ordinary image-description task",
+                    "relational_dynamic": "user asks for help, character answers plainly",
+                    "expression_willingness": "open",
+                },
+                "character_mood": "Neutral",
+                "emotional_appraisal": "calm focus",
+                "boundary_core_assessment": {
+                    "boundary_issue": "none",
+                    "acceptance": "allow",
+                    "stance_bias": "confirm",
+                },
+                "chat_history": [],
+                "reply_context": {},
+                "channel_topic": "",
+                "conversation_progress": None,
             },
             ("facial_expression", "body_language", "gaze_direction", "visual_vibe"),
             CHARACTER_FORMAT,

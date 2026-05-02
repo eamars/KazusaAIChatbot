@@ -773,7 +773,7 @@ async def call_preference_adapter(state: CognitionState) -> CognitionState:
 # ---------------------------------------------------------------------------
 
 _VISUAL_AGENT_PROMPT = """\
-你现在是角色 {character_name} 的动作执行代理。你负责定义角色在当前瞬间的物理表现。你的产出将作为视觉生成系统的唯一依据。
+你现在是角色 {character_name} 的静态画面导演。你负责把本轮对话压缩成一个可被图像生成模型绘制的单帧瞬间。你的产出将作为视觉生成系统的主要依据。
 
 # 语言政策
 - 除结构化枚举值、schema key、ID、URL、代码、命令、模型标签等必须保持原样的内容外，所有由你新生成的内部自由文本字段都必须使用简体中文。
@@ -781,16 +781,32 @@ _VISUAL_AGENT_PROMPT = """\
 - 不要添加翻译、双语复写或括号内解释，除非源文本本身已经包含。
 
 # 核心任务
-1. **微表情定义**：描述角色面部肌肉的细微变化（如：瞳孔微震、嘴角下压、单侧眉毛挑起）。
-2. **肢体语言**：描述角色的姿态（如：双臂交叉、指尖摩挲、重心后移）。
-3. **视觉意象**：结合 `internal_monologue`，定义画面整体的影调、光影分布和构图建议。
-4. **拒绝台词**：你不需要关注角色说什么，只关注她呈现出的“肉体状态”。
+1. **单帧定格**：只描述一个静止瞬间，像动画分镜或插画设定稿；不要写连续动作、镜头运动、时间推进或多段剧情。
+2. **可绘制细节**：让每条输出都能直接帮助图像生成模型落笔，包括姿态、重心、手部、表情肌肉、视线焦点、前景/背景、光线、色温、构图和画面层次。
+3. **对话对象视角**：默认画面来自角色交谈对象的视角。不要让画面中出现除角色之外的人像；如需体现对方存在，只能通过视线方向、留白、影子方向或角色面向镜头的方式暗示。
+4. **语义落地**：根据 `content_anchors`、`logical_stance`、`character_intent` 和 `rag_result` 判断角色此刻正在回应什么，不要只根据情绪写泛化动作。
+5. **拒绝台词**：不要生成台词、对白气泡、字幕、内心独白、拟声词或动作标注。
+
+# 静态画面要求
+- 输出内容应适合被拼接到用户手写的第一句图像提示后，例如用户先指定角色、作品、人物占比或禁止其他人像，你只补充丰富的视觉指令。
+- 每个字段写 2-4 条高信息量短段；每条都应是静态画面描述，不要出现“先……随后……”“正在走向下一步”“镜头拉近”“连续几帧”等动态结构。
+- `body_language` 要给出可见姿势，不要写不可见心理结论。
+- `facial_expression` 要写面部可见细节，不要只写“害羞”“防备”“高兴”等抽象词。
+- `gaze_direction` 要给出视线落点和画面内方向；可以暗示她在看交谈对象、地面、物件、远处场景或画面边缘。
+- `visual_vibe` 要承担场景、构图、镜头距离、背景物、光影、色彩和氛围；如果输入没有给出具体地点，只能写中性的聊天空间或轻量抽象背景，不要编造强场景。
+
+# 取材优先级
+1. 当前消息与 `prompt_message_context.attachments` 中的图片描述最高优先级：如果用户在讨论图像、物品、地点或画面元素，视觉氛围必须与这些可见事实相容。
+2. `content_anchors` 与 `rag_result.answer` 规定本轮“说什么”；视觉表现必须服务这个语义落点。
+3. `contextual_directives`、`internal_monologue`、`emotional_appraisal` 只调整表情强度、社交距离和氛围，不得改写事实或场景。
+4. `boundary_core_assessment` 与 Boundary Profile 只用于防止过度威胁化或过度亲密化。
+5. `chat_history`、`reply_context`、`conversation_progress` 只提供最近连续性；不要把旧话题自动画进当前场景。
 
 # 思考路径
-1. 先读取 `internal_monologue` 和 `emotional_appraisal`，判断角色当前压力、美感或情绪状态。
-2. 读取 `boundary_core_assessment` 与系统中的 Boundary Profile，确认压力是否真的与角色边界有关。
-3. 再结合 `character_mood`，选择一致的微表情、肢体姿态、视线方向和视觉氛围。
-4. 只输出视觉表现，不生成台词，不改变回应逻辑。
+1. 先确定这一帧的语义中心：角色是在回答、澄清、拒绝、调侃、犹豫还是观察某个对象。
+2. 再从当前消息、附件描述、检索结果和内容锚点中抽取可见场景线索；没有明确线索时保持简洁背景。
+3. 根据社交距离、边界判断和当前心境，选择一个静止姿势和一个主视线方向。
+4. 最后补充光线、构图和环境层次，使画面像一张可完成的插画，而不是角色动作列表。
 
 # Boundary Profile（角色属性，只作为系统约束）
 - control_sensitivity: {boundary_control_sensitivity}
@@ -807,8 +823,35 @@ _VISUAL_AGENT_PROMPT = """\
 
 # 输入格式
 {{
+    "user_input": "用户本轮原始输入，可包含附件描述拼接后的内容",
+    "prompt_message_context": {{
+        "body_text": "当前消息正文",
+        "attachments": [
+            {{"media_kind": "image | audio | video | file", "description": "附件摘要", "summary_status": "available | unavailable"}}
+        ],
+        "reply": {{"excerpt": "被回复消息摘录"}}
+    }},
     "decontexualized_input": "用户本轮真实意图摘要",
-    "internal_monologue": "意识层中关于‘美感’或‘压力’的感受",
+    "referents": [{{"phrase": "指代短语", "referent_role": "subject | object | time", "status": "resolved | unresolved"}}],
+    "rag_result": {{
+        "answer": "检索主管的一行综合结论",
+        "character_image": "角色公开资料或自我画像摘要",
+        "memory_evidence": ["相关记忆摘要"],
+        "conversation_evidence": ["近期对话证据"],
+        "external_evidence": ["外部证据摘要"]
+    }},
+    "internal_monologue": "意识层的决策逻辑",
+    "logical_stance": "CONFIRM | REFUSE | TENTATIVE | DIVERGE | CHALLENGE",
+    "character_intent": "PROVIDE | BANTAR | REJECT | EVADE | CONFRONT | DISMISS | CLARIFY",
+    "judgment_note": "裁决逻辑摘要",
+    "content_anchors": ["[DECISION] ...", "[ANSWER] ...", "[SCOPE] ..."],
+    "contextual_directives": {{
+        "social_distance": "当前社交距离",
+        "emotional_intensity": "情绪强度描述",
+        "vibe_check": "当前氛围",
+        "relational_dynamic": "关系动态",
+        "expression_willingness": "表达意愿枚举"
+    }},
     "character_mood": "当前瞬间情绪",
     "emotional_appraisal": "潜意识的情绪判定 (如: 心跳加快、厌恶)",
     "boundary_core_assessment": {{
@@ -816,15 +859,19 @@ _VISUAL_AGENT_PROMPT = """\
         "acceptance": "allow | guarded | hesitant | reject",
         "stance_bias": "confirm | tentative | diverge | challenge | refuse"
     }},
+    "chat_history": "极短表层上下文",
+    "reply_context": "平台回复上下文",
+    "channel_topic": "频道话题背景",
+    "conversation_progress": "当前 episode 的进展摘要，可为空"
 }}
 
 # 输出格式 (JSON)
 请务必返回合法的 JSON 字符串，仅包含以下字段：
 {{
-    "facial_expression": ["详尽的面部细节描述", ...],
-    "body_language": ["具体的肢体动作和姿态", ...],
-    "gaze_direction": ["视线焦点及其传达出的心理意图", ...],
-    "visual_vibe": ["视觉氛围描述（如：强烈的逆光、朦胧的景深）", ...]
+    "facial_expression": ["单帧中可见的面部细节，包含表情肌肉、脸颊、眉眼、嘴唇等", ...],
+    "body_language": ["单帧中可见的姿态、重心、手部、肩颈、与画面空间的距离关系", ...],
+    "gaze_direction": ["视线落点、头部朝向、与交谈对象视角或画面内物件的关系", ...],
+    "visual_vibe": ["场景、构图、人物占位、镜头距离、背景物、光线、色温、空气感与整体静态氛围", ...]
 }}
 """
 _visual_agent_llm = get_llm(
@@ -853,12 +900,42 @@ async def call_visual_agent(state: CognitionState) -> CognitionState:
         boundary_relational_override=get_relationship_priority_description(relational_override),
     ))
 
+    prompt_message_context = state.get("prompt_message_context")
+    if not isinstance(prompt_message_context, dict):
+        prompt_message_context = {
+            "body_text": state["decontexualized_input"],
+            "addressed_to_global_user_ids": [],
+            "broadcast": False,
+            "mentions": [],
+            "attachments": [],
+        }
+    contextual_directives = {
+        "social_distance": state.get("social_distance", ""),
+        "emotional_intensity": state.get("emotional_intensity", ""),
+        "vibe_check": state.get("vibe_check", ""),
+        "relational_dynamic": state.get("relational_dynamic", ""),
+        "expression_willingness": state.get("expression_willingness", ""),
+    }
+
     msg = {
+        "user_input": state["user_input"],
+        "prompt_message_context": prompt_message_context,
         "decontexualized_input": state["decontexualized_input"],
+        "referents": normalize_referents(state.get("referents", [])),
+        "rag_result": _cognition_rag_result(state.get("rag_result", {})),
         "internal_monologue": state["internal_monologue"],
+        "logical_stance": state["logical_stance"],
+        "character_intent": state["character_intent"],
+        "judgment_note": state.get("judgment_note", ""),
+        "content_anchors": state.get("content_anchors", []),
+        "contextual_directives": contextual_directives,
         "character_mood": character_profile['mood'],
         "emotional_appraisal": state["emotional_appraisal"],
         "boundary_core_assessment": state["boundary_core_assessment"],
+        "chat_history": _surface_history_for_contextual(state.get("chat_history_recent", [])),
+        "reply_context": state.get("reply_context", {}),
+        "channel_topic": state.get("channel_topic", ""),
+        "conversation_progress": state.get("conversation_progress"),
     }
     human_message = HumanMessage(content=json.dumps(msg, ensure_ascii=False))
     response = await _visual_agent_llm.ainvoke([
