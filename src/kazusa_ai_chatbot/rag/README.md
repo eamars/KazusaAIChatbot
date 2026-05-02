@@ -93,14 +93,15 @@ This avoids asking one prompt to understand every backend schema, generate perfe
 
 The initializer receives the decontextualized user query, the active character name, and runtime context such as platform, channel, current user, timestamp, and recent chat hints. It does not call storage backends. It produces an ordered list of `unknown_slots`, where each slot describes one missing fact.
 
-Slots are intentionally semantic and dependency-aware:
+Slots are intentionally semantic and dependency-aware. New initializer output
+uses top-level capability prefixes:
 
 ```python
 [
-    "Identity: look up display name '小钳子' to get global_user_id",
-    "Profile: retrieve full user profile for the user resolved in slot 1",
-    "Conversation-keyword: find messages from the user resolved in slot 1 containing a URL",
-    "Web-search: retrieve the content at the URL found in slot 3",
+    "Conversation-evidence: retrieve exact phrase '版权保护一直都是play的一环' to identify the speaker",
+    "Person-context: retrieve profile/impression for speaker found in slot 1",
+    "Conversation-evidence: retrieve messages from the user resolved in slot 2 containing a URL",
+    "Web-evidence: retrieve public web content for the URL found in slot 3",
 ]
 ```
 
@@ -116,9 +117,22 @@ The dispatcher handles one slot at a time. For each loop, it receives:
 }
 ```
 
-The dispatcher first checks the slot prefix. Recognized prefixes map directly to specialist agents:
+The dispatcher first checks the slot prefix. Recognized prefixes map directly
+to one top-level capability or compatibility worker without calling the
+dispatcher LLM:
 
 | Slot prefix | Primary agent |
+|---|---|
+| `Live-context:` | `live_context_agent` |
+| `Conversation-evidence:` | `conversation_evidence_agent` |
+| `Memory-evidence:` | `memory_evidence_agent` |
+| `Person-context:` | `person_context_agent` |
+| `Web-evidence:` | `web_search_agent2` |
+| `Recall:` | `recall_agent` |
+
+Legacy worker prefixes remain accepted as compatibility aliases:
+
+| Compatibility prefix | Primary agent |
 |---|---|
 | `Identity:` | `user_lookup_agent` |
 | `User-list:` | `user_list_agent` |
@@ -129,10 +143,11 @@ The dispatcher first checks the slot prefix. Recognized prefixes map directly to
 | `Conversation-keyword:` | `conversation_keyword_agent` |
 | `Conversation-semantic:` | `conversation_search_agent` |
 | `Memory-search:` | `persistent_memory_search_agent` |
-| `Recall:` | `recall_agent` |
 | `Web-search:` | `web_search_agent2` |
 
-If a slot has no recognized prefix, the dispatcher falls back to semantic routing rules: identity resolution first, then user enumeration, profile reads when a `global_user_id` is already known, exact conversation search, aggregate conversation questions, structured conversation filters, fuzzy conversation search, persistent-memory search, and finally web search.
+If a slot has no recognized prefix, the dispatcher falls back to semantic
+routing rules for compatibility. Normal generated slots should use the
+top-level prefixes so the dispatcher path is deterministic.
 
 The executor then delegates to the chosen helper agent with a concise task description and the accumulated `known_facts`. The evaluator summarizes the result, attaches source policy metadata, appends a fact row, and removes the slot from `unknown_slots`.
 
@@ -140,9 +155,10 @@ The executor then delegates to the chosen helper agent with a concise task descr
 
 RAG 2 groups helper agents by semantic ownership:
 
-- **Identity and profile retrieval** resolves users, enumerates users, reads user or character profile bundles, and ranks relationship-like profile state.
-- **Conversation retrieval** searches or filters historical messages by semantic query, keyword, structured filters, or aggregate questions.
-- **Persistent memory retrieval** searches durable memory records by semantic query or exact keyword.
+- **Live context** resolves target/scope for changing external facts such as weather, temperature, opening status, schedules, prices, and exchange rates, then delegates to web search. Memory may be used only for stable target/scope lookup, not as the live value source.
+- **Conversation evidence** searches or filters historical messages by semantic query, keyword, structured filters, or aggregate questions.
+- **Memory evidence** searches durable shared/world/common-sense/character facts by semantic query or exact identifiers.
+- **Person context** resolves users, enumerates users, reads user or character profile bundles, and ranks relationship-like profile state.
 - **Recall retrieval** reconciles active agreements, ongoing promises, plans, open loops, and current-episode state.
 - **External retrieval** performs web search and URL reads when the required fact is outside local storage.
 
@@ -171,7 +187,39 @@ Many retrieval helpers use a generator -> tool -> judge inner loop. The generato
 
 ## Helper Agent Roles
 
-The dispatcher-visible helper agents are:
+The dispatcher-visible top-level capability agents are:
+
+| Agent | Responsibility |
+|---|---|
+| `live_context_agent` | Resolves target/scope for live external facts, then delegates to `web_search_agent2`. It refuses missing location/target instead of guessing. |
+| `conversation_evidence_agent` | Chooses the appropriate conversation worker for exact phrases, fuzzy topics, structured filters, counts, URLs, and speaker provenance. |
+| `memory_evidence_agent` | Chooses semantic or exact durable-memory retrieval for world/common-sense/character facts. Natural-language home/address questions use semantic memory search; literal memory identifiers use keyword search. |
+| `person_context_agent` | Chooses identity, profile, user-list, relationship, or the approved display-name to profile chain. |
+| `recall_agent` | Reconciles active agreements, promises, plans, and current-episode state from scoped volatile sources. |
+
+Top-level capability results keep structured handoff inside RAG 2:
+
+```python
+{
+    "selected_summary": str,
+    "capability": str,
+    "primary_worker": str,
+    "source_policy": str,
+    "resolved_refs": list[dict],
+    "projection_payload": dict,
+    "worker_payloads": dict,
+    "evidence": list[str],
+    "missing_context": list[str],
+    "conflicts": list[str],
+}
+```
+
+`resolved_refs` is the approved cross-slot channel for person IDs, message
+provenance, URLs, locations, and memory refs. `projection_payload` is the
+approved projection channel into public `rag_result` fields. `worker_payloads`
+is trace/debug material only.
+
+The reusable worker agents are:
 
 | Agent | Responsibility |
 |---|---|
@@ -185,7 +233,6 @@ The dispatcher-visible helper agents are:
 | `conversation_search_agent` | Performs semantic conversation recall when the topic is fuzzy or the exact wording is unknown. It is the fallback for conversation content after filters and keywords are unsuitable. |
 | `persistent_memory_keyword_agent` | Searches durable memories by exact keyword or phrase, useful for tags, event names, and proper nouns. |
 | `persistent_memory_search_agent` | Searches durable memories semantically for impressions, commitments, facts, and other remembered knowledge when exact wording is unknown. |
-| `recall_agent` | Reconciles active agreements, ongoing promises, current plans, open loops, and current-episode state from scoped progress, active commitments, pending scheduled events, and gated transcript proof. It is volatile and has no Cache 2 namespace. |
 | `web_search_agent2` | Searches or reads public web content when the requested fact cannot come from local profiles, memories, or conversation history. |
 
 Most agents are evidence retrievers. They should answer "what was found?" rather than "what should Kazusa think about it?" The only ranking-style agents still return factual rankings from stored data or message counts; interpretation remains downstream.
@@ -227,6 +274,10 @@ Helper-agent result cache entries are intentionally session-local:
 - helper-agent results are not written through to MongoDB,
 - correctness depends on dependency-based invalidation rather than long TTLs,
 - web search and final answers are not cached.
+
+Top-level capability agents are not cached. Their cache metadata reports
+`enabled=false` and `reason="capability_orchestrator_uncached"`. They may call
+existing cacheable workers, whose Cache 2 policies remain source-aware.
 
 The `rag_initializer` strategy cache is the one durable exception. Current-version
 initializer rows are persisted in `rag_cache2_persistent_entries`, loaded into
@@ -323,3 +374,18 @@ The most important behavior checks are:
 - live RAG supervisor smoke tests.
 
 Live LLM tests are evidence-producing checks. Inspect their logs and returned evidence, not only their pass/fail status.
+
+Production observability follows a split log policy:
+
+- INFO keeps key operational breadcrumbs: initializer slots, dispatch
+  `agent/task/route_source`, top-level capability
+  `resolved/primary_worker/missing_context/selected_summary/cache reason`,
+  evaluator fact summaries, and finalizer answers.
+- DEBUG keeps supporting detail: `resolved_refs`, `projection_payload`,
+  `worker_payloads`, raw context, raw payloads, cache keys, and compacted
+  LLM-facing views.
+
+Large raw capability payloads remain available in supervisor state and trace
+artifacts, but evaluator/finalizer and downstream delegate prompts receive
+compacted views so local LLM context windows are not consumed by full profile or
+worker payloads.

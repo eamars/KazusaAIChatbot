@@ -4,7 +4,7 @@
 
 - Goal: Reorganize RAG2 retrieval around semantic top-level capability agents so the initializer keeps multi-hop dependency planning but no longer chooses low-level search mechanics such as keyword vs semantic, profile vs relationship, or memory vs recent conversation target resolution.
 - Plan class: large
-- Status: approved
+- Status: completed
 - Mandatory skills: `development-plan-writing`, `local-llm-architecture`, `py-style`, `test-style-and-execution`, `cjk-safety`
 - Overall cutover strategy: one approved Phase 3 execution in this fixed order: baseline tests, `LiveContextAgent`, `ConversationEvidenceAgent`, `MemoryEvidenceAgent`, `PersonContextAgent`, dispatcher/projection integration, initializer prompt/cache cutover, then full regression.
 - Highest-risk areas: invalidating initializer strategy cache, increasing response latency through nested helper calls, breaking existing cascaded RAG2 paths, over-broad "memory manager" behavior, and accidentally moving RAG responsibilities into cognition or consolidation.
@@ -658,15 +658,15 @@ Only `LiveContextAgent` target/scope -> web and `PersonContextAgent` lookup -> p
 
 ## Progress Checklist
 
-- [ ] Stage 1: Baseline route mapping and expected-failure live tests recorded.
-- [ ] Stage 1b: Real-conversation-derived QQ `673225019` live LLM route cases recorded as baseline expected-failure or route-pressure evidence.
-- [ ] Stage 2: `LiveContextAgent` implemented standalone and deterministic tests pass.
-- [ ] Stage 3: `ConversationEvidenceAgent` implemented standalone and deterministic tests pass.
-- [ ] Stage 4: `MemoryEvidenceAgent` implemented standalone and deterministic tests pass.
-- [ ] Stage 5: `PersonContextAgent` implemented standalone and deterministic tests pass.
-- [ ] Stage 6: Deterministic prefix dispatch and projection integration complete, old aliases preserved, registry version bumped.
-- [ ] Stage 7: Initializer prompt cutover complete, prompt version bumped, live initializer tests inspected.
-- [ ] Stage 8: Full RAG2 regression, docs, and execution evidence complete.
+- [x] Stage 1: Baseline route mapping and expected-failure live tests recorded.
+- [x] Stage 1b: Real-conversation-derived QQ `673225019` live LLM route cases recorded as baseline expected-failure or route-pressure evidence.
+- [x] Stage 2: `LiveContextAgent` implemented standalone and deterministic tests pass.
+- [x] Stage 3: `ConversationEvidenceAgent` implemented standalone and deterministic tests pass.
+- [x] Stage 4: `MemoryEvidenceAgent` implemented standalone and deterministic tests pass.
+- [x] Stage 5: `PersonContextAgent` implemented standalone and deterministic tests pass.
+- [x] Stage 6: Deterministic prefix dispatch and projection integration complete, old aliases preserved, registry version bumped.
+- [x] Stage 7: Initializer prompt cutover complete, prompt version bumped, live initializer tests inspected.
+- [x] Stage 8: Full RAG2 regression, docs, and execution evidence complete.
 
 ## Verification
 
@@ -781,16 +781,96 @@ This plan is complete when:
 
 ## Execution Evidence
 
-Not started. Fill this section during implementation with:
-
-- plan reread log,
-- changed files,
-- prompt version and agent registry version changes,
-- prompt-render command output,
-- static grep results,
-- deterministic test results,
-- live LLM, real-conversation, and full RAG2 regression trace paths and judgments,
-- known residual risks.
+- Stage 1 evidence:
+  - Skills loaded and plan reread before implementation start.
+  - Added compact route fixture and Stage 1 live initializer tests.
+  - `venv\Scripts\python.exe -m pytest tests\test_rag_phase3_route_mapping.py -q` -> 2 passed.
+  - Baseline live route pressure run: `tests\test_rag_phase3_initializer_live_llm.py::test_live_initializer_routes_exact_phrase_to_conversation_evidence` failed as expected before prompt cutover, emitting legacy `Conversation-keyword:` instead of planned `Conversation-evidence:`; trace written under `test_artifacts\llm_traces`.
+- Stage 2 evidence:
+  - Added `src\kazusa_ai_chatbot\rag\live_context_agent.py`.
+  - Added patched-worker `LiveContextAgent` tests in `tests\test_rag_phase3_capability_agents.py`.
+  - `venv\Scripts\python.exe -m py_compile src\kazusa_ai_chatbot\rag\live_context_agent.py tests\test_rag_phase3_capability_agents.py` -> passed.
+  - `venv\Scripts\python.exe -m pytest tests\test_rag_phase3_capability_agents.py -q` -> 5 passed.
+  - Verified explicit live targets go directly to web, character-local targets use persistent memory only as `target_scope_lookup`, user-local targets use recent same-user conversation scope, and missing user location refuses without character fallback.
+- Stage 3 evidence:
+  - Added `src\kazusa_ai_chatbot\rag\conversation_evidence_agent.py`.
+  - Extended patched-worker capability tests for exact phrase, semantic topic, structured filter with `resolved_refs`, aggregate/count, anti-self-hit context, and active-agreement refusal.
+  - `venv\Scripts\python.exe -m py_compile src\kazusa_ai_chatbot\rag\live_context_agent.py src\kazusa_ai_chatbot\rag\conversation_evidence_agent.py tests\test_rag_phase3_capability_agents.py` -> passed.
+  - `venv\Scripts\python.exe -m pytest tests\test_rag_phase3_capability_agents.py -q` -> 10 passed.
+  - Verified speaker, message, and URL handoff refs are emitted and `projection_payload.summaries` carries prompt-facing conversation evidence.
+- Stage 4 evidence:
+  - Added `src\kazusa_ai_chatbot\rag\memory_evidence_agent.py`.
+  - Extended patched-worker capability tests for official address, exact memory identifier, common-sense memory, user memory-unit evidence, live-fact refusal, and active-agreement refusal.
+  - `venv\Scripts\python.exe -m py_compile src\kazusa_ai_chatbot\rag\memory_evidence_agent.py tests\test_rag_phase3_capability_agents.py` -> passed.
+  - `venv\Scripts\python.exe -m pytest tests\test_rag_phase3_capability_agents.py -q` -> initially 15 passed; Stage 8 rerun after live-discovered address selector fix -> 23 passed; post-review rerun after CJK quote shortcut coverage -> 24 passed.
+  - Verified `projection_payload.memory_rows` preserves raw memory `content` rows, natural-language address/home-location questions use semantic memory search, exact memory identifiers use keyword search, and live target/scope lookup remains outside `MemoryEvidenceAgent`.
+- Stage 5 evidence:
+  - Added `src\kazusa_ai_chatbot\rag\person_context_agent.py`.
+  - Extended patched-worker capability tests for identity lookup, display-name -> profile chain, current-user profile, user-list predicate, relationship ranking, and unknown-speaker refusal.
+  - `venv\Scripts\python.exe -m py_compile src\kazusa_ai_chatbot\rag\person_context_agent.py tests\test_rag_phase3_capability_agents.py` -> passed.
+  - `venv\Scripts\python.exe -m pytest tests\test_rag_phase3_capability_agents.py -q` -> 21 passed.
+  - Verified `resolved_refs` emits person IDs and `projection_payload` preserves current-user, third-party, list, and relationship payloads for projection.
+- Stage 6 evidence:
+  - Registered `live_context_agent`, `conversation_evidence_agent`, `memory_evidence_agent`, and `person_context_agent` in RAG2 dispatcher registry.
+  - Added deterministic prefix dispatch for new top-level prefixes and legacy aliases; dispatcher INFO now includes `route_source`.
+  - Updated projection to map top-level `projection_payload` into existing public `rag_result` fields while keeping old worker branches intact.
+  - Bumped `INITIALIZER_AGENT_REGISTRY_VERSION` to `rag_supervisor2_registry:v2` and added explicit top-level no-cache policy labels.
+  - `venv\Scripts\python.exe -m py_compile src\kazusa_ai_chatbot\nodes\persona_supervisor2_rag_supervisor2.py src\kazusa_ai_chatbot\nodes\persona_supervisor2_rag_projection.py src\kazusa_ai_chatbot\rag\cache2_policy.py` -> passed.
+  - `venv\Scripts\python.exe -m pytest tests\test_rag_phase3_capability_agents.py tests\test_rag_projection.py tests\test_rag_initializer_cache2.py tests\test_rag_recall_agent.py -q` -> 60 passed.
+  - Verified recognized prefixes skip dispatcher LLM, old worker aliases still dispatch, unresolved top-level payloads stay out of public evidence, and debug-only payloads remain at DEBUG.
+- Stage 7 evidence:
+  - Rewrote the initializer prompt around the approved top-level prefixes: `Live-context:`, `Conversation-evidence:`, `Memory-evidence:`, `Person-context:`, `Web-evidence:`, and `Recall:`.
+  - Removed generated examples for low-level worker prefixes while preserving ordered cascaded examples such as phrase -> person -> URL -> web.
+  - Bumped `INITIALIZER_PROMPT_VERSION` to `initializer_prompt:v14`; `INITIALIZER_AGENT_REGISTRY_VERSION` remains `rag_supervisor2_registry:v2`.
+  - Runtime prompt render check: initializer rendered successfully with 20,273 characters and nonzero counts for all top-level prefixes (`Live-context:` 16, `Conversation-evidence:` 19, `Memory-evidence:` 5, `Person-context:` 21, `Web-evidence:` 5, `Recall:` 5); dispatcher prompt rendered successfully with the top-level roster.
+  - `venv\Scripts\python.exe -m py_compile src\kazusa_ai_chatbot\nodes\persona_supervisor2_rag_supervisor2.py src\kazusa_ai_chatbot\rag\cache2_policy.py tests\test_rag_initializer_cache2.py tests\test_rag_phase3_initializer_live_llm.py tests\test_rag_phase3_real_conversation_live_llm.py` -> passed.
+  - `venv\Scripts\python.exe -m pytest tests\test_rag_initializer_cache2.py tests\test_rag_phase3_route_mapping.py -q` -> 21 passed.
+  - Live initializer test `test_live_initializer_routes_active_agreement_to_recall` -> passed; inspected trace `test_artifacts\llm_traces\rag_phase3_initializer_live_llm__active_agreement_to_recall__20260502T065444935777Z.json`; judged acceptable because it routes today's agreement to `Recall:` only.
+  - Live initializer test `test_live_initializer_routes_exact_phrase_to_conversation_evidence` -> passed; inspected trace `test_artifacts\llm_traces\rag_phase3_initializer_live_llm__exact_phrase_to_conversation_evidence__20260502T065457294921Z.json`; judged acceptable because exact phrase provenance routes to `Conversation-evidence:` and forbids `Recall:`.
+  - Live initializer test `test_live_initializer_routes_character_local_temperature_to_live_context` -> passed; inspected trace `test_artifacts\llm_traces\rag_phase3_initializer_live_llm__character_local_temperature_to_live_context__20260502T065509578325Z.json`; judged acceptable because character-local current temperature routes to one `Live-context:` slot.
+  - Live initializer test `test_live_initializer_routes_user_local_temperature_to_live_context_without_character_fallback` -> passed; inspected trace `test_artifacts\llm_traces\rag_phase3_initializer_live_llm__user_local_temperature_to_live_context__20260502T065526244357Z.json`; judged acceptable because user-local current temperature routes to `Live-context:` with current-user location scope and no character fallback.
+  - Live initializer test `test_live_initializer_preserves_cascaded_phrase_person_link_web_chain` -> passed; inspected trace `test_artifacts\llm_traces\rag_phase3_initializer_live_llm__cascaded_phrase_person_link_web_chain__20260502T065541806319Z.json`; judged acceptable because dependency order is `Conversation-evidence:` -> `Person-context:` -> `Conversation-evidence:` -> `Web-evidence:`.
+- Stage 8 evidence:
+  - Updated `src\kazusa_ai_chatbot\rag\README.md` with the two-tier capability/worker model, legacy alias policy, structured handoff fields, cache policy, and INFO/DEBUG logging split.
+  - Focused compile gate: `venv\Scripts\python.exe -m py_compile src\kazusa_ai_chatbot\rag\live_context_agent.py src\kazusa_ai_chatbot\rag\conversation_evidence_agent.py src\kazusa_ai_chatbot\rag\memory_evidence_agent.py src\kazusa_ai_chatbot\rag\person_context_agent.py src\kazusa_ai_chatbot\nodes\persona_supervisor2_rag_supervisor2.py src\kazusa_ai_chatbot\nodes\persona_supervisor2_rag_projection.py src\kazusa_ai_chatbot\rag\cache2_policy.py tests\test_rag_phase3_supervisor_integration.py tests\test_rag_phase3_real_conversation_live_llm.py tests\test_rag_initializer_cache2.py` -> passed.
+  - Deterministic capability tests: `venv\Scripts\python.exe -m pytest tests\test_rag_phase3_capability_agents.py -q` -> 24 passed.
+  - Deterministic projection/cache/integration tests: `venv\Scripts\python.exe -m pytest tests\test_rag_projection.py tests\test_rag_initializer_cache2.py tests\test_rag_phase3_supervisor_integration.py -q` -> 32 passed.
+  - Deterministic Recall tests: `venv\Scripts\python.exe -m pytest tests\test_rag_recall_agent.py -q` -> 10 passed.
+  - Deterministic route mapping tests: `venv\Scripts\python.exe -m pytest tests\test_rag_phase3_route_mapping.py -q` -> 2 passed.
+  - Real-conversation live initializer tests were run one at a time and inspected:
+    - `christchurch_weekend_weather` -> trace `test_artifacts\llm_traces\rag_phase3_real_conversation_live_llm__christchurch_weekend_weather__20260502T065554799266Z.json`; judged acceptable because it routes to one `Live-context:` slot.
+    - `amusement_park_opening` -> trace `test_artifacts\llm_traces\rag_phase3_real_conversation_live_llm__amusement_park_opening__20260502T065608349213Z.json`; judged acceptable because it routes opening status to `Live-context:`.
+    - `recent_address_confirmation` -> trace `test_artifacts\llm_traces\rag_phase3_real_conversation_live_llm__recent_address_confirmation.json`; judged acceptable because recent "you just sent the address" confirmation routes to `Conversation-evidence:`.
+    - `official_address_memory` -> trace `test_artifacts\llm_traces\rag_phase3_real_conversation_live_llm__official_address_memory.json`; judged acceptable because official address recall routes to `Memory-evidence:`.
+    - `today_agreement` -> trace `test_artifacts\llm_traces\rag_phase3_real_conversation_live_llm__today_agreement.json`; judged acceptable because the active agreement routes to `Recall:`.
+    - `episode_position_next_step` -> trace `test_artifacts\llm_traces\rag_phase3_real_conversation_live_llm__episode_position_next_step.json`; judged acceptable because current episode next step routes to `Recall:`.
+    - `exact_phrase_boundary` -> trace `test_artifacts\llm_traces\rag_phase3_real_conversation_live_llm__exact_phrase_boundary.json`; judged acceptable because phrase provenance routes to `Conversation-evidence:` and not `Recall:`.
+  - Full RAG2 live tests were run one at a time and inspected:
+    - Person impression -> `tests\test_persona_supervisor2_rag_supervisor2_live.py::test_call_rag_supervisor_live_opinion_small_pliers`; trace `test_artifacts\llm_traces\persona_supervisor2_rag_supervisor2_live__opinion_small_pliers.json`; route `Person-context:` -> `person_context_agent` -> `user_profile_agent`; judged acceptable.
+    - Named person recent topic -> `test_call_rag_supervisor_live_recent_small_pliers_topic`; trace `test_artifacts\llm_traces\persona_supervisor2_rag_supervisor2_live__recent_small_pliers_topic.json`; route `Person-context:` -> `Conversation-evidence:` using structured person refs; judged acceptable.
+    - Exact phrase speaker -> `test_call_rag_supervisor_live_who_said_play_one_part`; trace `test_artifacts\llm_traces\persona_supervisor2_rag_supervisor2_live__who_said_play_one_part.json`; route `Conversation-evidence:` -> `conversation_keyword_agent`; judged acceptable.
+    - Cascaded speaker/profile/recent interaction -> `test_call_rag_supervisor_live_who_said_5090_qwen27b2`; final trace `test_artifacts\llm_traces\persona_supervisor2_rag_supervisor2_live__who_said_5090_qwen27b__20260502T070557431695Z.json`; route `Conversation-evidence:` -> `Person-context:` -> `Conversation-evidence:`; all three facts resolved and judged acceptable.
+    - URL/link content -> `test_call_rag_supervisor_live_who_posted_xhs_link_comb`; trace `test_artifacts\llm_traces\persona_supervisor2_rag_supervisor2_live__who_posted_xhs_link.json`; route `Conversation-evidence:` -> `Person-context:` -> `Web-evidence:`; judged acceptable for RAG routing, with residual web-tool timeout fetching XHS content.
+    - Kazusa official address -> `test_call_rag_supervisor_live_kazusa_address_memory`; final trace `test_artifacts\llm_traces\persona_supervisor2_rag_supervisor2_live__kazusa_address_memory__20260502T071201727639Z.json`; route `Memory-evidence:` -> `persistent_memory_search_agent`, retrieved `杏山千纱-官方住址`, and final answer included `123 Example Street`; judged acceptable.
+    - Active agreement -> `tests\test_rag_recall_live_llm.py::test_live_rag2_recall_answers_today_agreement`; trace `test_artifacts\llm_traces\rag_recall_live_llm__rag2_today_agreement__20260502T071215385450Z.json`; route `Recall:` selected `conversation_progress` and final answer included `9:30`; judged acceptable.
+    - Exact phrase Recall boundary -> `tests\test_rag_recall_live_llm.py::test_live_initializer_keeps_exact_phrase_on_conversation_evidence`; trace `test_artifacts\llm_traces\rag_recall_live_llm__exact_phrase__20260502T071226972313Z.json`; judged acceptable because it emits `Conversation-evidence:` and no `Recall:`.
+  - Live regression found and fixed two RAG2-local context budget issues before final sign-off:
+    - Evaluator/finalizer summary prompts were receiving full top-level profile payloads and could exceed the local LLM context window; compact LLM-facing raw-result helpers now preserve key fields while keeping full raw state in supervisor trace/debug.
+    - Downstream delegate contexts were receiving full previous raw payloads; `_build_delegate_context`, dispatcher fallback context, and executor message history now pass compact known-fact views to worker prompts.
+  - Live regression found and fixed one RAG2-local memory worker selection issue:
+    - Natural-language official address/home-location memory slots now use semantic memory search, which retrieves the curated `杏山千纱-官方住址` entry; exact `memory_name`/`dedup_key`/tag/quoted lookups still use keyword search.
+  - Static greps:
+    - Top-level prefixes are present in new agents, tests, docs, and initializer prompt.
+    - `resolved_refs`, `projection_payload`, and `capability_orchestrator_uncached` are contained within RAG2 modules/tests and are not cognition-facing public fields.
+    - Deterministic prefix routing references exist in `persona_supervisor2_rag_supervisor2.py` and tests.
+    - Legacy `Conversation-*` worker prefixes remain only in compatibility routing/docs in `persona_supervisor2_rag_supervisor2.py`.
+    - Changed-file review shows no cognition L2/L3, consolidator schema, conversation-progress recorder, relevance, or dialog files changed.
+  - Post-review factual updates:
+    - Added a deterministic CJK quote shortcut test for `ConversationEvidenceAgent`; ASCII, typographic, and Japanese-style quoted phrase slots now route to `conversation_keyword_agent` without spending selector LLM budget.
+    - Added a registry policy test proving `live_context_agent` uses `do_not_write_knowledge` while direct `web_search_agent2` remains `eligible_external_knowledge`.
+  - Known residual risk:
+    - Public XHS URL content can still be unavailable when MCP/web tools time out; the route correctly ends in `Web-evidence:` and reports the timeout as external evidence uncertainty.
+    - Live external facts now carry `consolidation_policy="do_not_write_knowledge"` through `live_context_agent`; direct `Web-evidence:` URL/topic fetches still go through `web_search_agent2` with `eligible_external_knowledge`.
 
 ## Glossary
 

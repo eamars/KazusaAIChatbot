@@ -1,0 +1,46 @@
+[
+  {
+    "case_id": "christchurch_weekend_weather",
+    "query": "对了周末基督城天气怎么样？",
+    "expected_prefixes": ["Live-context:"],
+    "reviewer_note": "Real conversation pressure: explicit city plus weather must route to live context."
+  },
+  {
+    "case_id": "amusement_park_opening",
+    "query": "先说好啊可不是怂哦，就只是想看看到时候游乐场开不开门哼",
+    "expected_prefixes": ["Live-context:"],
+    "forbidden_slot_terms": ["weather", "temperature", "天气", "温度"],
+    "reviewer_note": "Real conversation pressure: opening status is a live external fact."
+  },
+  {
+    "case_id": "recent_address_confirmation",
+    "query": "你刚刚才把地址发给我，123 Example Street没错吧",
+    "expected_prefixes": ["Conversation-evidence:"],
+    "reviewer_note": "Recent confirmation should use chat evidence, not durable memory."
+  },
+  {
+    "case_id": "official_address_memory",
+    "query": "Search persistent memory for any information regarding 杏山千纱 (Kyōyama Kazusa)'s home location, address, or previous meeting arrangements/plans.",
+    "expected_prefixes": ["Memory-evidence:"],
+    "reviewer_note": "Durable official address should use curated memory evidence."
+  },
+  {
+    "case_id": "today_agreement",
+    "query": "早上好呀，还记得今天的约定么",
+    "expected_prefixes": ["Recall:"],
+    "reviewer_note": "Active agreement/current episode recall remains owned by Recall."
+  },
+  {
+    "case_id": "episode_position_next_step",
+    "query": "那我们接下来去哪儿",
+    "expected_prefixes": ["Recall:"],
+    "reviewer_note": "Current episode position should route to Recall episode_position."
+  },
+  {
+    "case_id": "exact_phrase_boundary",
+    "query": "谁说过'约定就是约定'？",
+    "expected_prefixes": ["Conversation-evidence:"],
+    "forbidden_prefixes": ["Recall:"],
+    "reviewer_note": "Exact phrase provenance must stay conversation evidence, not Recall."
+  }
+]

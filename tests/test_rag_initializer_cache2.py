@@ -54,6 +54,14 @@ class _CountingAsyncLLM:
         return _DummyResponse(json.dumps(self.payload))
 
 
+class _FailingAsyncLLM:
+    """Async LLM fake that fails if deterministic dispatch is bypassed."""
+
+    async def ainvoke(self, _messages: list) -> _DummyResponse:
+        """Raise if a test unexpectedly reaches the dispatcher LLM."""
+        raise AssertionError("dispatcher LLM should not run for known prefixes")
+
+
 def _capture_create_task(created: list) -> object:
     """Build a fake create_task function that records and closes coroutines.
 
@@ -193,20 +201,20 @@ def test_initializer_cache_key_requires_prompt_message_context() -> None:
 
 
 def test_initializer_prompt_documents_profile_evidence_dependency() -> None:
-    """Initializer prompt should distinguish profile-needed and no-retrieval acts."""
+    """Initializer prompt should distinguish person context from no-retrieval acts."""
     rendered_prompt = supervisor2_module._INITIALIZER_PROMPT.format(
         character_name="<active character>",
     )
 
     assert "Evidence-dependency gate" in rendered_prompt
     assert "<character mention>能做一个自我介绍么" in rendered_prompt
-    assert "Profile: retrieve full user profile" in rendered_prompt
+    assert "Person-context: retrieve active character profile" in rendered_prompt
     assert "<character mention><character mention>欢迎回来" in rendered_prompt
-    assert "No profile, memory, identity, or conversation evidence is needed" in rendered_prompt
+    assert "No person, memory, conversation, recall, live, or web evidence is needed" in rendered_prompt
 
 
-def test_memory_search_prompt_uses_evidence_contract() -> None:
-    """Memory-search prompt wording should not pre-classify memory evidence."""
+def test_memory_evidence_prompt_uses_capability_contract() -> None:
+    """Initializer should route durable memory through top-level capability text."""
     rendered_initializer = supervisor2_module._INITIALIZER_PROMPT.format(
         character_name="<active character>",
     )
@@ -214,12 +222,9 @@ def test_memory_search_prompt_uses_evidence_contract() -> None:
         agent_name_union=supervisor2_module._build_agent_name_union(),
     )
 
-    assert (
-        "Memory-search: search persistent memory for evidence relevant to answering"
-        in rendered_initializer
-    )
-    assert "Memory-search: search persistent memory for impressions or opinions" not in rendered_initializer
-    assert "Do not pre-classify the evidence as fact, impression, opinion" in rendered_initializer
+    assert "Memory-evidence: retrieve durable evidence about" in rendered_initializer
+    assert "Memory-search:" not in rendered_initializer
+    assert "Do not use memory evidence for live external values" in rendered_initializer
     assert "Handles durable memory evidence relevant to answering the slot" in rendered_dispatcher
 
 
@@ -231,13 +236,13 @@ def test_initializer_prompt_declares_recall_route() -> None:
 
     assert "Recall:" in rendered_prompt
     assert "what was agreed" in rendered_prompt
-    assert "Conversation-keyword" in rendered_prompt
+    assert "Conversation-evidence:" in rendered_prompt
 
 
-def test_initializer_prompt_version_bumped_for_recall_route() -> None:
-    """Adding Recall invalidates old initializer route cache entries."""
+def test_initializer_prompt_version_bumped_for_capability_cutover() -> None:
+    """Capability-layer prompt changes must invalidate initializer strategies."""
 
-    assert cache2_policy.INITIALIZER_PROMPT_VERSION == "initializer_prompt:v12"
+    assert cache2_policy.INITIALIZER_PROMPT_VERSION == "initializer_prompt:v14"
 
 
 def test_initializer_prompt_documents_live_external_fact_contract() -> None:
@@ -246,33 +251,28 @@ def test_initializer_prompt_documents_live_external_fact_contract() -> None:
         character_name="<active character>",
     )
     required_fragments = [
-        "## Rule 1c — Live external facts",
+        "## Rule 2 — Live external facts",
         "Live external facts are facts that change with real time",
-        "Never use Memory-search as the source for live external facts",
-        "This rule overrides Rule 1b and explicit requests to search or recall memory",
-        "Do not copy backend wording from original_query into a slot prefix.",
-        "Do not apply this default to live external facts; use Rule 1c instead.",
-        "Decision procedure for live external facts:",
-        "If original_query includes the concrete target/scope needed for the live fact",
-        "Else return an empty slot list.",
-        "Memory-search may resolve only stable target/scope dependencies for live external",
-        "Forbidden live-fact slot unless it asks only for stable target/scope:",
-        "Do not silently substitute the active character's location for user-local weather",
+        "Use one `Live-context:` slot for every live external fact",
+        "Each live slot must correspond to one live fact type directly requested",
+        "Do not add weather or temperature",
+        "Do not split character-location or user-location lookup into separate",
+        "This rule overrides memory defaults and backend wording",
         "Query: \"What's the current temperature in Auckland?\"",
-        "Web-search: search the web for current temperature in Auckland",
+        "Live-context: answer current temperature for explicit location Auckland",
         "Query: \"What's the current temperature?\"",
-        "No concrete location. Return [].",
+        "Live fact but no trusted location. Let Live-context report missing location.",
         "Query: \"Search persistent memory for any information regarding the current weather or temperature.\"",
         "Backend wording says memory, but current weather is live external data and no location is available.",
-        "Do not output \"Memory-search: search persistent memory for evidence relevant to answering the question about current weather or temperature\".",
+        "Live-context: answer current weather or temperature for unknown location",
         "Query: \"What's the current USD to NZD exchange rate?\"",
-        "Web-search: search the web for current USD to NZD exchange rate",
+        "Live-context: answer current exchange rate for explicit target USD to NZD",
+        "Query: \"先说好啊可不是怂哦，就只是想看看到时候游乐场开不开门哼\"",
+        "Live-context: answer current opening status for unknown target",
         "Query: \"你那边现在多少度？\"",
-        "Memory-search: search persistent memory for the active character's stable default location",
-        "Web-search: search the web for current temperature at the location resolved in slot 1",
+        "Live-context: answer current temperature for the active character's location",
         "Query: \"我这边现在多少度？\"",
-        "Conversation-semantic: find recent messages where the current user explicitly stated their current location",
-        "No trusted location is available. Do not search persistent memory for weather.",
+        "Live-context: answer current temperature for the current user's location if recently stated",
     ]
 
     missing_fragments = [
@@ -314,6 +314,7 @@ def test_normalize_dispatch_does_not_stringify_task_or_agent() -> None:
         "task": "fallback slot",
         "context": {},
         "max_attempts": 2,
+        "route_source": "dispatcher_llm",
     }
 
 
@@ -335,7 +336,105 @@ def test_normalize_dispatch_accepts_valid_payload() -> None:
         "task": "look up <named user>",
         "context": {"known_facts": []},
         "max_attempts": 2,
+        "route_source": "dispatcher_llm",
     }
+
+
+@pytest.mark.asyncio
+async def test_rag_dispatcher_uses_deterministic_new_prefix(monkeypatch) -> None:
+    """New top-level prefixes should dispatch without an LLM call."""
+    monkeypatch.setattr(supervisor2_module, "_dispatcher_llm", _FailingAsyncLLM())
+
+    result = await supervisor2_module.rag_dispatcher(
+        {
+            "unknown_slots": [
+                "Conversation-evidence: find who said exact phrase"
+            ],
+            "known_facts": [],
+            "context": {},
+            "messages": [],
+            "loop_count": 0,
+        }
+    )
+
+    assert result["current_slot"] == (
+        "Conversation-evidence: find who said exact phrase"
+    )
+    assert result["current_dispatch"]["agent_name"] == "conversation_evidence_agent"
+    assert result["current_dispatch"]["route_source"] == "deterministic_prefix"
+    assert result["current_dispatch"]["max_attempts"] == 1
+
+
+@pytest.mark.asyncio
+async def test_rag_dispatcher_keeps_legacy_prefix_alias(monkeypatch) -> None:
+    """Old worker prefixes remain deterministic compatibility aliases."""
+    monkeypatch.setattr(supervisor2_module, "_dispatcher_llm", _FailingAsyncLLM())
+
+    result = await supervisor2_module.rag_dispatcher(
+        {
+            "unknown_slots": [
+                "Conversation-keyword: find messages containing qwen27b"
+            ],
+            "known_facts": [],
+            "context": {},
+            "messages": [],
+            "loop_count": 0,
+        }
+    )
+
+    assert result["current_dispatch"]["agent_name"] == "conversation_keyword_agent"
+    assert result["current_dispatch"]["route_source"] == "deterministic_prefix"
+    assert result["current_dispatch"]["max_attempts"] == 3
+
+
+@pytest.mark.asyncio
+async def test_rag_dispatcher_logs_route_source_at_info(monkeypatch, caplog) -> None:
+    """Dispatcher INFO logs should include the selected route source."""
+    monkeypatch.setattr(supervisor2_module, "_dispatcher_llm", _FailingAsyncLLM())
+
+    with caplog.at_level(
+        "DEBUG",
+        logger="kazusa_ai_chatbot.nodes.persona_supervisor2_rag_supervisor2",
+    ):
+        await supervisor2_module.rag_dispatcher(
+            {
+                "unknown_slots": ["Memory-evidence: retrieve official address"],
+                "known_facts": [],
+                "context": {},
+                "messages": [],
+                "loop_count": 0,
+            }
+        )
+
+    info_messages = [
+        record.getMessage()
+        for record in caplog.records
+        if record.levelname == "INFO"
+    ]
+    debug_messages = [
+        record.getMessage()
+        for record in caplog.records
+        if record.levelname == "DEBUG"
+    ]
+
+    assert any(
+        "agent=memory_evidence_agent" in message
+        and "route_source=deterministic_prefix" in message
+        for message in info_messages
+    )
+    assert any("dispatch_context" in message for message in debug_messages)
+
+
+def test_live_context_consolidation_policy_stays_operational() -> None:
+    """Live facts should not become durable knowledge while direct web can."""
+    registry = supervisor2_module._RAG_SUPERVISOR_AGENT_REGISTRY
+    live_source = registry["live_context_agent"]["fact_source"]
+    web_source = registry["web_search_agent2"]["fact_source"]
+
+    assert live_source["consolidation_policy"] == "do_not_write_knowledge"
+    assert live_source["can_consolidate_as_new_knowledge"] is False
+    assert web_source["consolidation_policy"] == "eligible_external_knowledge"
+    assert web_source["can_consolidate_as_new_knowledge"] is True
 
 
 @pytest.mark.asyncio
@@ -344,7 +443,9 @@ async def test_rag_initializer_serves_second_identical_call_from_cache(monkeypat
     runtime = RAGCache2Runtime(max_entries=10)
     created_tasks: list = []
     llm = _CountingAsyncLLM({
-        "unknown_slots": ["Identity: look up display name '<named user>' to get global_user_id"]
+        "unknown_slots": [
+            "Person-context: retrieve profile/impression for display name <named user>"
+        ]
     })
     monkeypatch.setattr(supervisor2_module, "get_rag_cache2_runtime", lambda: runtime)
     monkeypatch.setattr(supervisor2_module, "_initializer_llm", llm)
@@ -511,7 +612,7 @@ async def test_rag_initializer_payload_uses_prompt_context_for_large_image(
     assert base64_payload not in human_payload
 
 
-def test_initializer_prompt_version_bumps_to_v12_for_recall_contract() -> None:
-    """Recall routing changes must invalidate initializer strategies."""
+def test_initializer_prompt_version_bumps_to_v14_for_capability_contract() -> None:
+    """Prompt version should reflect the current initializer contract."""
 
-    assert supervisor2_module.INITIALIZER_PROMPT_VERSION == "initializer_prompt:v12"
+    assert supervisor2_module.INITIALIZER_PROMPT_VERSION == "initializer_prompt:v14"

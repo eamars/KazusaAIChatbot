@@ -268,6 +268,153 @@ def test_project_known_facts_caps_recall_evidence_to_three_entries() -> None:
     assert result["supervisor_trace"]["dispatched"][3]["agent"] == "recall_agent"
 
 
+def test_project_known_facts_maps_top_level_capability_payloads() -> None:
+    """Projection should consume normalized top-level capability payloads."""
+    current_profile = {
+        "global_user_id": "user-1",
+        "display_name": "Tester",
+        "self_image": {"summary": "current user image"},
+        "_user_memory_units": [{"unit_id": "unit-1", "fact": "likes tea"}],
+    }
+    character_profile = {
+        "global_user_id": "character-1",
+        "self_image": {"summary": "character image"},
+    }
+
+    result = project_known_facts(
+        [
+            {
+                "slot": "live",
+                "agent": "live_context_agent",
+                "resolved": True,
+                "summary": "live summary",
+                "raw_result": {
+                    "projection_payload": {
+                        "external_text": "Auckland is 17 C.",
+                        "url": "https://weather.example/auckland",
+                    }
+                },
+            },
+            {
+                "slot": "conversation",
+                "agent": "conversation_evidence_agent",
+                "resolved": True,
+                "summary": "conversation summary",
+                "raw_result": {
+                    "projection_payload": {
+                        "summaries": ["speaker: phrase", "speaker: link"],
+                    }
+                },
+            },
+            {
+                "slot": "memory",
+                "agent": "memory_evidence_agent",
+                "resolved": True,
+                "summary": "memory summary",
+                "raw_result": {
+                    "projection_payload": {
+                        "memory_rows": [
+                            {"content": "official address is 123 Example Street"}
+                        ],
+                    }
+                },
+            },
+            {
+                "slot": "current user",
+                "agent": "person_context_agent",
+                "resolved": True,
+                "summary": "current user",
+                "raw_result": {
+                    "projection_payload": {
+                        "profile_kind": "current_user",
+                        "owner_global_user_id": "user-1",
+                        "profile": current_profile,
+                        "summary": "Tester",
+                    }
+                },
+            },
+            {
+                "slot": "character",
+                "agent": "person_context_agent",
+                "resolved": True,
+                "summary": "character",
+                "raw_result": {
+                    "projection_payload": {
+                        "profile_kind": "active_character",
+                        "owner_global_user_id": "character-1",
+                        "profile": character_profile,
+                        "summary": "Character",
+                    }
+                },
+            },
+            {
+                "slot": "third party",
+                "agent": "person_context_agent",
+                "resolved": True,
+                "summary": "third party",
+                "raw_result": {
+                    "projection_payload": {
+                        "profile_kind": "third_party",
+                        "owner_global_user_id": "user-2",
+                        "summary": "Third party summary",
+                    }
+                },
+            },
+        ],
+        current_user_id="user-1",
+        character_user_id="character-1",
+    )
+
+    assert result["external_evidence"] == [
+        {
+            "summary": "live summary",
+            "content": "Auckland is 17 C.",
+            "url": "https://weather.example/auckland",
+        }
+    ]
+    assert result["conversation_evidence"] == ["speaker: phrase", "speaker: link"]
+    assert result["memory_evidence"] == [
+        {
+            "summary": "memory summary",
+            "content": "official address is 123 Example Street",
+        }
+    ]
+    assert result["user_image"]["display_name"] == "Tester"
+    assert "_user_memory_units" not in result["user_image"]
+    assert result["user_memory_unit_candidates"] == [
+        {"unit_id": "unit-1", "fact": "likes tea"}
+    ]
+    assert result["character_image"] == character_profile
+    assert result["third_party_profiles"] == ["Third party summary"]
+
+
+def test_project_known_facts_skips_unresolved_top_level_payload() -> None:
+    """Unresolved capability results should remain only in supervisor trace."""
+    result = project_known_facts(
+        [
+            {
+                "slot": "weather",
+                "agent": "live_context_agent",
+                "resolved": False,
+                "summary": "missing location",
+                "raw_result": {
+                    "missing_context": ["location"],
+                    "projection_payload": {
+                        "external_text": "should not project",
+                    },
+                },
+            }
+        ],
+        current_user_id="user-1",
+        character_user_id="character-1",
+    )
+
+    assert result["external_evidence"] == []
+    assert result["supervisor_trace"]["dispatched"] == [
+        {"slot": "weather", "agent": "live_context_agent", "resolved": False}
+    ]
+
+
 def test_cognition_rag_result_preserves_public_recall_payload() -> None:
     """Existing cognition payload shaping should not strip Recall evidence."""
 

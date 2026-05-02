@@ -146,15 +146,15 @@ async def test_live_initializer_routes_active_agreement_to_recall(monkeypatch) -
     assert any(slot.startswith("Recall:") for slot in unknown_slots)
 
 
-async def test_live_initializer_keeps_exact_phrase_on_conversation_keyword(monkeypatch) -> None:
-    """Exact phrase provenance should remain a conversation keyword route."""
+async def test_live_initializer_keeps_exact_phrase_on_conversation_evidence(monkeypatch) -> None:
+    """Exact phrase provenance should remain a conversation evidence route."""
     unknown_slots = await _run_initializer_case(
         monkeypatch,
         "exact_phrase",
         '谁说过"约定就是约定"？',
     )
 
-    assert any(slot.startswith("Conversation-keyword:") for slot in unknown_slots)
+    assert any(slot.startswith("Conversation-evidence:") for slot in unknown_slots)
     assert not any(slot.startswith("Recall:") for slot in unknown_slots)
 
 

@@ -14,9 +14,17 @@ from kazusa_ai_chatbot.rag.cache2_runtime import stable_cache_key
 
 INITIALIZER_CACHE_NAME = "rag2_initializer"
 INITIALIZER_POLICY_VERSION = "initializer:v1"
-INITIALIZER_PROMPT_VERSION = "initializer_prompt:v12"
-INITIALIZER_AGENT_REGISTRY_VERSION = "rag_supervisor2_registry:v1"
+INITIALIZER_PROMPT_VERSION = "initializer_prompt:v14"
+INITIALIZER_AGENT_REGISTRY_VERSION = "rag_supervisor2_registry:v2"
 INITIALIZER_STRATEGY_SCHEMA_VERSION = "initializer_strategy_schema:v1"
+
+CAPABILITY_ORCHESTRATOR_UNCACHED_REASON = "capability_orchestrator_uncached"
+TOP_LEVEL_CAPABILITY_CACHE_POLICIES = {
+    "live_context_agent": CAPABILITY_ORCHESTRATOR_UNCACHED_REASON,
+    "conversation_evidence_agent": CAPABILITY_ORCHESTRATOR_UNCACHED_REASON,
+    "memory_evidence_agent": CAPABILITY_ORCHESTRATOR_UNCACHED_REASON,
+    "person_context_agent": CAPABILITY_ORCHESTRATOR_UNCACHED_REASON,
+}
 
 USER_LOOKUP_CACHE_NAME = "rag2_user_lookup_agent"
 USER_LOOKUP_POLICY_VERSION = "user_lookup:v2"

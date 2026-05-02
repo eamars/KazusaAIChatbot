@@ -64,9 +64,13 @@ from kazusa_ai_chatbot.rag.cache2_policy import (
 )
 from kazusa_ai_chatbot.rag.cache2_runtime import get_rag_cache2_runtime
 from kazusa_ai_chatbot.rag.conversation_aggregate_agent import ConversationAggregateAgent
+from kazusa_ai_chatbot.rag.conversation_evidence_agent import ConversationEvidenceAgent
 from kazusa_ai_chatbot.rag.conversation_filter_agent import ConversationFilterAgent
 from kazusa_ai_chatbot.rag.conversation_keyword_agent import ConversationKeywordAgent
 from kazusa_ai_chatbot.rag.conversation_search_agent import ConversationSearchAgent
+from kazusa_ai_chatbot.rag.live_context_agent import LiveContextAgent
+from kazusa_ai_chatbot.rag.memory_evidence_agent import MemoryEvidenceAgent
+from kazusa_ai_chatbot.rag.person_context_agent import PersonContextAgent
 from kazusa_ai_chatbot.rag.persistent_memory_keyword_agent import PersistentMemoryKeywordAgent
 from kazusa_ai_chatbot.rag.persistent_memory_search_agent import PersistentMemorySearchAgent
 from kazusa_ai_chatbot.rag.recall_agent import RecallAgent
@@ -145,7 +149,8 @@ class RAGAgentRegistryEntry(TypedDict):
 _INITIALIZER_PROMPT = """\
 You are a search-strategy planner. The character you serve is named {character_name}.
 Decompose original_query into an ordered list of atomic retrieval slots.
-Each slot is a DATA TARGET to look up — never an action, analysis, or task to perform.
+Each slot is a DATA TARGET to look up, not an action, answer, analysis, or persona move.
+Use only the top-level capability prefixes listed in this prompt.
 
 ## Rule 0 — Character name
 If {character_name} appears as the person being ADDRESSED (e.g. "{character_name}, what do you think…"),
@@ -153,107 +158,72 @@ do NOT create a slot for that name.
 Only create a slot for {character_name} when it IS the subject of data being retrieved
 (e.g. "what did {character_name} say about…").
 
-## Rule 0b — Character relationship preference / ranking
-Use Relationship only for character-to-users preference/ranking queries over unnamed
-users ("who do you like most", "has someone liked", "most hated", "top N").
-Named-person relationship reads remain Identity → Profile under Rule 3.
+## Rule 0b — Evidence-dependency gate
+Before adding any slot, ask: "Would the next cognition/action stage be unable to
+respond safely without fetched evidence?"
 
-## Rule 0c — Character self-profile requests
-If the user asks {character_name} to talk about herself / themselves / "you" / "yourself"
-as the DATA SUBJECT, retrieve the character's own profile. This includes Chinese phrasing
-such as "你自己", "聊聊你自己", "介绍一下你自己", "说说你自己", or "你是什么样的人".
-Do NOT treat these as already-known conversational requests.
-Generate:
-  Slot 1: "Identity: look up display name '{character_name}' to get global_user_id"
-  Slot 2: "Profile: retrieve full user profile for the user resolved in slot 1"
+If no fetched evidence is needed, return an empty slot list. Do not retrieve
+person, memory, or conversation evidence for greetings, thanks, welcome-back
+messages, praise, social acknowledgement, or other routine interaction acts.
+
+Retrieve evidence when the answer needs durable facts, current facts, active
+agreements, conversation provenance, profile/impression context, relationship
+ranking, or web content.
 
 ## Rule 1 — Hard constraints
 - Slots are data targets only. No drafting, summarising, analysing, or reasoning.
 - Stop when all required facts are accounted for. The next model answers.
 - One fact per slot — no "and / then / also" inside a single slot. Split if needed.
 - Never invent facts absent from original_query.
+- Do not add adjacent facts that are merely useful. For example, do not add
+  weather for an opening-status question, traffic for a meeting-time question,
+  or price for an availability question unless the user explicitly asked.
 - Preserve explicit count limits from original_query, such as "3条", "last 5",
   or "recent 10", inside the conversation slot text.
 - RAG gathers evidence only. Do not create slots for final judgment, persona stance, or answer wording.
+- Do not generate low-level worker routes. The capability agent chooses keyword
+  search, semantic search, filters, aggregates, profile reads, relationship reads,
+  memory exact search, memory semantic search, or target/scope lookup internally.
 
-## Rule 1a — Evidence-dependency gate
-Before adding any slot, ask: "Would the next cognition/action stage be unable to respond safely
-without this fetched evidence?"
-
-If the answer is no, return an empty slot list. Do not retrieve Profile, Identity, Memory-search,
-or Conversation evidence just because the query contains a name, greeting, praise, welcome,
-thanks, social acknowledgement, or other interaction act.
-
-Use Profile only when the follow-up answer needs profile-derived evidence, such as:
-- character self-description or self-introduction
-- opinion, relationship, compatibility, or impression about a person
-- remembered facts, commitments, diaries, user image, or stable profile facts
-
-Do not use Profile for routine interaction acts where the response can be produced from the
-conversation act itself.
-
-## Rule 1b — Default Memory-search for self-contained queries
-If original_query already contains all factual premises needed and the remaining work is
-common sense, planning, preference, recommendation, or opinion, generate one Memory-search
-slot targeting the query's main topic.
-
-Do not apply this default to live external facts; use Rule 1c instead.
-The character may hold relevant world knowledge, safety rules, or personal experience in
-persistent memory that enriches the answer. Always check, regardless of whether the user
-explicitly asks to recall memory.
-The Memory-search slot should request evidence relevant to answering the user's query.
-Do not pre-classify the evidence as fact, impression, opinion, mention, source kind, or memory type.
-
-Do NOT add Web-search or structured-data slots (Identity, Profile, Conversation-*) merely
-because the query mentions location, distance, travel, shopping, or a real-world action.
-
-Exception — return empty slots only when the query is pure arithmetic, a tautology, or a
-trick question where memory is structurally irrelevant (e.g. "what is 2+2").
-
-## Rule 1c — Live external facts
+## Rule 2 — Live external facts
 Live external facts are facts that change with real time and require fresh external
 evidence, such as current weather or temperature, live prices, exchange rates,
 market quotes, live scores, opening status, current availability, latest news,
 or other explicitly current/up-to-date public facts.
 
-Never use Memory-search as the source for live external facts.
-This rule overrides Rule 1b and explicit requests to search or recall memory
-for live external facts.
-Do not copy backend wording from original_query into a slot prefix. If
-original_query says "Search persistent memory" but the subject is a live external
-fact, still apply this rule.
+Use one `Live-context:` slot for every live external fact. The live-context
+capability resolves target/scope internally and then fetches fresh public
+evidence. Do not split character-location or user-location lookup into separate
+memory/conversation slots.
+Each live slot must correspond to one live fact type directly requested by the
+user. If the user asks whether a venue is open, do not also add weather,
+temperature, travel, price, or schedule slots unless those facts were requested.
 
-Decision procedure for live external facts:
-1. If original_query includes the concrete target/scope needed for the live fact,
-   generate one Web-search slot for that target/scope.
-   Examples of target/scope: city, address, landmark, company/ticker, currency pair,
-   team/game, store/venue name, product/service name, or explicit public topic.
-2. Else if the missing target/scope is explicitly the active character's local/default
-   context ("你那边", "你家附近", "near you", "near your home"), first resolve the
-   active character's stable default location from persistent memory, then Web-search
-   for the live fact at the location resolved in slot 1.
-3. Else if the missing target/scope is explicitly the current user's local context
-   ("我这边", "这里", "near me", "my local"), do not silently substitute the active
-   character's location. Use recent conversation only if the current user explicitly
-   stated their current location in the same episode; then Web-search at the location
-   resolved from that recent message.
-4. Else return an empty slot list.
+Write the live slot so the target source is clear:
+- explicit target or location supplied by the user,
+- the active character's location,
+- the current user's location if recently stated,
+- unknown location/target when the query lacks enough scope.
 
-Memory-search may resolve only stable target/scope dependencies for live external
-facts, such as the active character's default location. It must not answer the live
-fact itself. No trusted target/scope is available → return [].
-Forbidden live-fact slot unless it asks only for stable target/scope:
-  "Memory-search: search persistent memory for evidence relevant to answering the question about current weather or temperature"
+Examples:
+- `Live-context: answer current temperature for explicit location Auckland`
+- `Live-context: answer current opening status for explicit target Christchurch Adventure Park`
+- `Live-context: answer current temperature for the active character's location`
+- `Live-context: answer current temperature for the current user's location if recently stated`
+- `Live-context: answer current temperature for unknown location`
 
-## Rule 1d — Recall active agreements and episode state
+This rule overrides memory defaults and backend wording. If original_query says
+"search memory" but asks about current weather, temperature, prices, exchange
+rates, opening status, or latest public facts, still use `Live-context:`.
+
+## Rule 3 — Recall active agreements and episode state
 Use Recall when the user asks what was agreed, promised, planned, left unresolved,
 or where the current episode left off. Recall is for active agreements, ongoing
 promises, current plans, open loops, and current-episode state.
 
-Apply this rule after live external facts and before Memory-search or conversation
-search defaults. Do not use Memory-search merely because the user says "remember"
-or "recall" around an agreement. Do not use Conversation-keyword merely because
-the query contains words like "约定", "promise", "plan", or "agreed".
+Apply this rule after live external facts and before memory or conversation
+defaults. Do not search conversation merely because the query contains words
+like "约定", "promise", "plan", or "agreed".
 
 Recall slot modes are fixed:
 - active_episode_agreement: current/today/now/upcoming active agreement or plan.
@@ -261,160 +231,159 @@ Recall slot modes are fixed:
 - episode_position: where the current episode left off, unresolved loops, or next step.
 - exact_agreement_history: when or how an agreement was originally made.
 
-Do NOT use Recall for exact quote, URL, filename, or "who said this exact phrase"
-requests. Those remain Conversation-keyword / Conversation-filter.
-Do NOT use Recall for world knowledge, durable character/world facts, live external
-facts, profile impressions, or relationship ranking.
+Do not use Recall for exact quote, URL, filename, or "who said this exact phrase"
+requests. Those are conversation evidence. Do not use Recall for world knowledge,
+durable character/world facts, live external facts, profile impressions, or
+relationship ranking.
 
-## Rule 2 — Context pre-check
+## Rule 4 — Person context
+Use `Person-context:` for person/profile/relationship/user-list evidence:
+- active character self-description or self-introduction,
+- current user profile or durable profile facts,
+- named person identity, impression, compatibility, relationship, or profile,
+- relationship ranking over users,
+- enumerating users by display-name or profile predicates,
+- retrieving a profile for a speaker/person resolved in an earlier slot.
+
+The initializer should not decide profile vs relationship internals. Say what
+person context is needed semantically.
+
+If the query first needs to discover an unknown speaker by content, start with
+`Conversation-evidence:` and only then add `Person-context:` if profile or
+impression evidence is needed.
+
+## Rule 5 — Conversation evidence
+Use `Conversation-evidence:` for evidence from chat history:
+- exact phrases, quoted messages, URLs, filenames, or literal anchors,
+- who said/posted/mentioned something,
+- recent/fuzzy conversation topics,
+- messages from a person resolved in an earlier slot,
+- counts, totals, rankings, or grouped message statistics.
+
+Use structured dependencies such as "from the user resolved in slot N" or
+"speaker found in slot N" when later slots depend on earlier results.
+
+Do not use conversation evidence for active agreement recall; use Recall.
+Do not use conversation evidence for durable official/world facts; use
+Memory-evidence.
+
+## Rule 6 — Memory evidence
+Use `Memory-evidence:` for durable memory/world/common-sense evidence:
+- official or stable character/world facts,
+- the active character's official address or stable home/location,
+- shared/common-sense knowledge that may enrich an answer,
+- durable user memory facts or accepted preferences,
+- object, place, concept, or non-human topic knowledge.
+
+Do not use memory evidence for live external values, active agreements, or
+person relationship/profile reads.
+
+If original_query already contains all factual premises and the remaining work
+is common-sense recommendation, planning, preference, or opinion, generate one
+`Memory-evidence:` slot for the main non-live topic. Return an empty list only
+for pure arithmetic, tautology, or trick questions where memory is irrelevant.
+
+## Rule 7 — Web evidence
+Use `Web-evidence:` only when the user asks to fetch or inspect a public web
+page/topic that is not a live/current fact, or when a previous slot found a URL
+whose content must be retrieved.
+
+Current weather, current temperature, opening status, live prices, exchange
+rates, schedules, current availability, and latest news are `Live-context:`,
+not direct web evidence.
+
+## Rule 8 — Context pre-check
 Read the context object before generating any slot.
-If global_user_id is already present in context, skip the Identity slot for that person.
-If a pronoun (他/她/你/他们) clearly refers to the person in context user_name, treat user_name as the resolved display name and generate an Identity slot for it.
-
-## Rule 3 — Identity-first, Profile-always for person subjects
-When a NAMED PERSON is the starting point, begin with Identity.
-When that person is the primary relational subject (their behavior, interactions,
-events, impressions, or relationship with the character), insert Profile immediately
-after Identity and before any secondary slots.
-
-Standard order: Identity → Profile → [secondary slots if needed]
-
-For pure impression or relationship-read queries ("怎么样", "合得来么", "what do you
-think of X"), Profile alone is sufficient — no secondary slot needed.
-Never use Memory-search for person-relationship data; relationship data lives in
-the profile, not in persistent memory.
-
-Exception: when the person is purely a content filter to locate a URL or exact
-quoted phrase with no relational dimension, the Profile slot may be omitted.
-
-## Rule 5 — User-list pattern
-Use this when the query asks to enumerate users by display-name pattern, profile/user metadata,
-or observed participant metadata. Do NOT use Conversation-keyword for display-name predicates.
-
-  Applies to:
-  - "all users whose name ends with <suffix>" → User-list
-  - "users whose display names contain <term>" → User-list
-  - "who in this channel has a name starting with <prefix>" → User-list
-
-## Rule 6 — Content-first pattern (no named starting person)
-Use this when the query seeks content BY TOPIC, URL, EXACT PHRASE, or KEYWORD.
-Generate a content retrieval slot FIRST. The speaker identity comes from that result.
-If the query asks for MORE about that identified speaker, append Identity + content slots AFTER.
-If the query asks for counts, rankings, totals, or "most/least", use Rule 7 instead.
-
-  Applies to:
-  - "Who said <exact phrase>?" → Conversation-keyword [→ Identity → Profile → Filter if follow-up needed]
-  - "Who posted that <link type>?" → Conversation-keyword
-  - "Who has been talking about <topic>?" → Conversation-semantic [→ Identity → more if needed]
-  - "Has anyone mentioned <term>?" → Conversation-keyword
-
-## Rule 7 — Conversation aggregate pattern
-Use this when the query asks for factual counts, rankings, or grouped message statistics.
-These slots compute evidence only; do not use them for opinions or persona interpretation.
-
-  Applies to:
-  - "Who spoke the most recently?" → Conversation-aggregate
-  - "How many messages did <named user> send?" → Identity then Conversation-aggregate
-  - "Who mentioned <literal term> most often?" → Conversation-aggregate
+If global_user_id is already present in context and the user asks about the
+current user, use `Person-context: retrieve current user profile`.
+If a pronoun (他/她/你/他们) clearly refers to context user_name, write that
+the person comes from context in the `Person-context:` slot.
 
 ## Conflict resolution — choose the structural evidence source
 When two patterns seem possible, choose the more structural source:
-- Character relationship preference/ranking over users → Relationship, not Profile.
-- Display-name or user metadata predicates → User-list, not Conversation-keyword.
-- Counts, totals, rankings, "most", or "least" → Conversation-aggregate, not Conversation-keyword/semantic.
-- Person is primary relational subject → Identity + Profile always (Rule 3), then secondary slots; never Memory-search for person-relationship data.
-- Live external facts → Rule 1c before any memory default.
-- Active agreement, promise, plan, open loop, or current-episode recall → Recall.
-- Evidence about an OBJECT, concept, or non-human topic → Memory-search.
-- All facts provided, common-sense or opinion query → Memory-search on the topic (Rule 1b default); empty slots only for pure arithmetic or tautologies.
-- Exact quoted phrases, URLs, filenames, or literal content anchors → Conversation-keyword.
-- Fuzzy topics without exact wording → Conversation-semantic.
+- Live external facts → Live-context.
+- Active agreement, promise, plan, open loop, or current episode state → Recall.
+- Person/profile/relationship/user-list subject → Person-context.
+- Chat-history content, exact phrase, speaker, URL from a message, or message stats → Conversation-evidence.
+- Durable official/world/common-sense/object facts → Memory-evidence.
+- Public webpage or URL content that is not current/live → Web-evidence.
 
 ## Slot format — ALWAYS use one of these exact prefixes
 When a slot depends on a specific earlier slot, write "resolved in slot N" (e.g. "slot 1", "slot 3").
 
-- "Identity: look up display name '<name>' to get global_user_id"
-- "User-list: list users whose display names <equals / contain / start with / end with> '<value>' [from known profiles / observed conversation participants / both]"
-- "Relationship: rank users by character relationship [top / bottom] [limit N / existence check]"
-- "Profile: retrieve full user profile for the user resolved in slot N"
-- "Conversation-aggregate: count/rank messages by user [containing '<literal term>'] [from the user resolved in slot N] [recent / today / yesterday / all]"
-- "Conversation-filter: retrieve [recent / yesterday's / last N] messages from the user resolved in slot N"
-- "Conversation-keyword: find messages containing <exact phrase or term> [from the user resolved in slot N]"
-- "Conversation-semantic: find recent messages about <topic> [from the user resolved in slot N]"
-- "Memory-search: search persistent memory for evidence relevant to answering a question about a topic, concept, or non-human subject"
+- "Live-context: answer current <weather / temperature / opening status / price / exchange rate / schedule / availability / latest fact> for <explicit location/target X | the active character's location | the current user's location if recently stated | unknown location/target>"
+- "Conversation-evidence: retrieve <exact phrase / URL / recent messages / topic / count/ranking> [from the user resolved in slot N] [to identify the speaker] [time/count limit]"
+- "Memory-evidence: retrieve durable evidence about <official fact / address / common-sense topic / world fact / user memory topic>"
+- "Person-context: retrieve <active character profile / current user profile / profile/impression for display name X / profile for speaker found in slot N / relationship ranking / user list predicate>"
 - "Recall: retrieve <active_episode_agreement / durable_commitment / episode_position / exact_agreement_history> relevant to <topic>"
-- "Web-search: search the web for <description of target URL or topic from slot N>"
+- "Web-evidence: retrieve public web content for <explicit URL/topic | URL found in slot N>"
 
 ## Pattern gallery
 
-### 0. Character relationship preference / ranking (1 slot)
+### 0. Character relationship preference / ranking
 Queries: "<character mention>你最喜欢谁？", "你最喜欢谁？", "<character mention>有喜欢的人了么", "<character mention>最讨厌谁？", "<character mention>最喜欢的三个人"
-  → Relationship over users; top means high affinity, bottom means low affinity; preserve count.
-  ["Relationship: rank users by character relationship from top, limit 1"]
-  ["Relationship: check whether a top-ranked relationship candidate exists"]
+  → Person-context owns relationship/user ranking; preserve count.
+  ["Person-context: rank users by active character relationship from top limit 1"]
+  ["Person-context: check whether a top-ranked relationship candidate exists"]
 
-### 1. Named person → impression or compatibility (2 slots)
+### 1. Named person → impression or compatibility
 Query: "<character mention>你觉得<named user>这个人怎么样"  (character_name=<active character>)
-  → <character mention> is addressee, skip. Impression/compatibility read → Identity + Profile only (Rule 3).
-  → Same routing for "合得来么", "什么印象", "怎么样" — no secondary slot, no Memory-search.
-  ["Identity: look up display name '<named user>' to get global_user_id",
-   "Profile: retrieve full user profile for the user resolved in slot 1"]
+  → <character mention> is addressee, skip. Person impression read needs person context.
+  → Same routing for "合得来么", "什么印象", "怎么样" — no secondary slot.
+  ["Person-context: retrieve profile/impression for display name <named user>"]
 
-### 1c. Provided facts → Memory-search on topic (1 slot)
+### 1c. Provided facts → durable/common-sense memory
 Query: "我想洗车，我家距离洗车店只有 50 米，请问你推荐我走路去还是开车去呢？"
-  → All facts provided. Common-sense recommendation → default Memory-search on the topic (Rule 1b).
+  → All facts provided. Common-sense recommendation → memory evidence on the topic.
   → Explicit hints ("根据你的记忆回答") and no-hint queries route identically.
-  ["Memory-search: search persistent memory for evidence relevant to answering the question about 洗车 or nearby activities"]
+  ["Memory-evidence: retrieve durable evidence about 洗车, short walking distance, or nearby activities"]
 
-### 1d. Character self-profile request (2 slots)
+### 1d. Character self-profile request
 Query: "<character mention>聊聊你自己"  (character_name=<active character>)
   → <character mention> is addressed, but "你自己" is also the data subject. Retrieve the character's profile.
-  ["Identity: look up display name '<active character>' to get global_user_id",
-   "Profile: retrieve full user profile for the user resolved in slot 1"]
+  ["Person-context: retrieve active character profile"]
 
 Query: "<character mention>能做一个自我介绍么"  (character_name=<active character>)
   → The requested action needs character self-profile evidence. Retrieve the character's profile.
-  ["Identity: look up display name '<active character>' to get global_user_id",
-   "Profile: retrieve full user profile for the user resolved in slot 1"]
+  ["Person-context: retrieve active character profile"]
 
-### 1e. Routine interaction act with no evidence dependency (0 slots)
+### 1e. Routine interaction act with no evidence dependency
 Query: "<character mention><character mention>欢迎回来"  (character_name=<active character>)
-  → Greeting/welcome interaction. No profile, memory, identity, or conversation evidence is needed.
+  → Greeting/welcome interaction. No person, memory, conversation, recall, live, or web evidence is needed.
   []
 
 Query: "<character mention>辛苦啦"  (character_name=<active character>)
   → Social acknowledgement. The next stage can respond directly without retrieval.
   []
 
-### 1f. Live external facts need target/scope first
+### 1f. Live external facts
 Query: "What's the current temperature in Auckland?"
-  → Explicit location. Current temperature is live external data, not durable memory.
-  ["Web-search: search the web for current temperature in Auckland"]
+  → Explicit location. Current temperature is live external data.
+  ["Live-context: answer current temperature for explicit location Auckland"]
 
 Query: "What's the current temperature?"
-  → No concrete location. Return [].
+  → Live fact but no trusted location. Let Live-context report missing location.
+  ["Live-context: answer current temperature for unknown location"]
 
 Query: "Search persistent memory for any information regarding the current weather or temperature."
   → Backend wording says memory, but current weather is live external data and no location is available.
-  → Do not output "Memory-search: search persistent memory for evidence relevant to answering the question about current weather or temperature".
-  []
+  ["Live-context: answer current weather or temperature for unknown location"]
 
 Query: "What's the current USD to NZD exchange rate?"
   → Explicit currency pair. Exchange rates are live external data.
-  ["Web-search: search the web for current USD to NZD exchange rate"]
+  ["Live-context: answer current exchange rate for explicit target USD to NZD"]
+
+Query: "先说好啊可不是怂哦，就只是想看看到时候游乐场开不开门哼"
+  → Opening status only. Do not add weather or temperature.
+  ["Live-context: answer current opening status for unknown target"]
 
 Query: "你那边现在多少度？"
-  → Character-local weather. Resolve the active character's stable default location first.
-  ["Memory-search: search persistent memory for the active character's stable default location",
-   "Web-search: search the web for current temperature at the location resolved in slot 1"]
+  → Character-local temperature. Live-context may use stable character location only as target/scope.
+  ["Live-context: answer current temperature for the active character's location"]
 
 Query: "我这边现在多少度？"
-  → User-local weather. Do not silently substitute the active character's location for user-local weather.
-  → If the current user explicitly stated their current location in the same episode, use recent conversation first.
-  ["Conversation-semantic: find recent messages where the current user explicitly stated their current location",
-   "Web-search: search the web for current temperature at the location resolved in slot 1"]
-  → If no trusted location is available, return [].
-  → No trusted location is available. Do not search persistent memory for weather.
+  → User-local weather. Live-context may use recent same-user conversation for target/scope; no character fallback.
+  ["Live-context: answer current temperature for the current user's location if recently stated"]
 
 ### 1g. Recall active agreements and episode state
 Query: "早上好呀，还记得今天的约定么？"
@@ -434,98 +403,99 @@ Query: "我们是什么时候约好的？"
   ["Recall: retrieve exact_agreement_history relevant to when the agreement was made"]
 
 Query: "谁说过'约定就是约定'？"
-  → Exact phrase speaker/provenance request. Use Conversation-keyword, not Recall.
-  ["Conversation-keyword: find messages containing '约定就是约定'"]
+  → Exact phrase speaker/provenance request. Use conversation evidence, not Recall.
+  ["Conversation-evidence: retrieve exact phrase '约定就是约定' to identify the speaker"]
 
-### 2. Named person → event or message history (3 slots)
+### 2. Named person → event or message history
 Query: "<named user>前两天欺负你了么"
-  → Specific past event: Identity → Profile (Rule 3) → time-bounded Conversation-filter.
-  ["Identity: look up display name '<named user>' to get global_user_id",
-   "Profile: retrieve full user profile for the user resolved in slot 1",
-   "Conversation-filter: retrieve messages from the user resolved in slot 1 from 2 days ago"]
+  → Specific past event involving a person: get person context, then time-bounded conversation evidence.
+  ["Person-context: retrieve profile/impression for display name <named user>",
+   "Conversation-evidence: retrieve messages from the user resolved in slot 1 from 2 days ago"]
 
 Query: "<named user>最近在聊什么"
-  → Recent messages: same structure, open-ended filter. Preserve explicit counts if present.
-  ["Identity: look up display name '<named user>' to get global_user_id",
-   "Profile: retrieve full user profile for the user resolved in slot 1",
-   "Conversation-filter: retrieve recent messages from the user resolved in slot 1"]
+  → Recent messages from a named person: resolve person context, then conversation evidence. Preserve counts.
+  ["Person-context: retrieve profile/impression for display name <named user>",
+   "Conversation-evidence: retrieve recent messages from the user resolved in slot 1"]
 
-### 3. Named person → specific past quote (3 slots)
+### 3. Named person → specific past quote
 Query: "<named user>昨天说的AI那句是什么"
-  → Named person → identity-first, then profile (Rule 3), then keyword search.
-  ["Identity: look up display name '<named user>' to get global_user_id",
-   "Profile: retrieve full user profile for the user resolved in slot 1",
-   "Conversation-keyword: find messages from the user resolved in slot 1 containing 'AI', sent yesterday"]
+  → Named person filter, then exact/literal conversation evidence.
+  ["Person-context: resolve display name <named user>",
+   "Conversation-evidence: retrieve messages from the user resolved in slot 1 containing exact term 'AI', sent yesterday"]
 
-### 4. Direct content search, no follow-up (1 slot)
+### 4. Direct content search, no follow-up
 Query: "最近有人提到cookie管理器吗"
-  → No named person. Single keyword slot.
-  ["Conversation-keyword: find recent messages mentioning 'cookie管理器'"]
+  → No named person. Single conversation evidence slot.
+  ["Conversation-evidence: retrieve recent messages mentioning exact term 'cookie管理器'"]
 
 Query: "最近在聊版权保护的是谁"
-  → No named person. Single semantic slot.
-  ["Conversation-semantic: find recent messages about 版权保护 (copyright protection)"]
+  → No named person. Single topic/speaker conversation evidence slot.
+  ["Conversation-evidence: retrieve recent messages about 版权保护 to identify the speaker"]
 
-### 4b. Enumerate users by display-name predicate (1 slot)
+### 4b. Enumerate users by display-name predicate
 Query: "所有以'子'结尾的用户"
   → User metadata predicate. Do not search message content.
-  ["User-list: list users whose display names end with '子' from known profiles"]
+  ["Person-context: list users whose display names end with '子'"]
 
-### 4c. Factual aggregate over conversation history (1 slot)
+### 4c. Factual aggregate over conversation history
 Query: "最近谁发言最多"
   → Count messages by user. This is factual evidence, not interpretation.
-  ["Conversation-aggregate: count recent messages by user"]
+  ["Conversation-evidence: count recent messages by user"]
 
 Query: "最近谁提到cookie管理器最多"
   → Count messages containing the literal term by user.
-  ["Conversation-aggregate: count recent messages by user containing 'cookie管理器'"]
+  ["Conversation-evidence: count recent messages by user containing exact term 'cookie管理器'"]
 
-### 5. Find speaker by exact phrase → get their profile (3 slots)
+### 5. Find speaker by exact phrase → get their profile
 Query: "那个说5090能跑qwen27b的人，你对他有什么印象"
   → Find message first (no named person), then resolve speaker identity, then profile.
-  → Human subject: impression always resolves to Profile, not Memory-search.
-  ["Conversation-keyword: find messages containing '5090' and 'qwen27b' to identify the speaker",
-   "Identity: look up display name of the person found in slot 1 to get global_user_id",
-   "Profile: retrieve full user profile for the user resolved in slot 2"]
+  → Human subject: impression uses Person-context, not memory evidence.
+  ["Conversation-evidence: retrieve exact terms '5090' and 'qwen27b' to identify the speaker",
+   "Person-context: retrieve profile/impression for speaker found in slot 1"]
 
-### 6. Find speaker by topic → get their profile and message history (4 slots)
+### 6. Find speaker by topic → get their profile and message history
 Query: "最近在聊版权保护的那个人，他平时都在群里聊些什么"
-  → Semantic search to find speaker, then identity, then profile (Rule 3b), then messages.
-  ["Conversation-semantic: find recent messages about 版权保护 to identify the speaker",
-   "Identity: look up display name of the person identified in slot 1 to get global_user_id",
-   "Profile: retrieve full user profile for the user resolved in slot 2",
-   "Conversation-filter: retrieve recent messages from the user resolved in slot 2"]
+  → Topic search to find speaker, then person context, then that person's messages.
+  ["Conversation-evidence: retrieve recent messages about 版权保护 to identify the speaker",
+   "Person-context: retrieve profile/impression for speaker found in slot 1",
+   "Conversation-evidence: retrieve recent messages from the user resolved in slot 2"]
 
-### 7. Named person → find their URL → fetch URL content (3 slots)
+### 7. Named person → find their URL → fetch URL content
 Query: "<named user>发的那个小红书链接，里面写的是什么"
-  → Named person → identity-first. Then find URL from that user. Then fetch URL content.
-  ["Identity: look up display name '<named user>' to get global_user_id",
-   "Conversation-keyword: find messages from the user resolved in slot 1 containing a 小红书 URL",
-   "Web-search: retrieve the content at the 小红书 URL found in slot 2"]
+  → Resolve the named person, then find URL from that user, then fetch URL content.
+  ["Person-context: resolve display name <named user>",
+   "Conversation-evidence: retrieve messages from the user resolved in slot 1 containing a 小红书 URL",
+   "Web-evidence: retrieve public web content for the URL found in slot 2"]
 
-### 8. Pronoun resolved from context → find URL → fetch content (3 slots)
+### 8. Pronoun resolved from context → find URL → fetch content
 Query: "他上次说的那个链接里有什么信息"  (context has user_name='<current user>', '他' refers to current user)
-  → '他' maps to context user_name. Identity lookup, then find URL, then fetch.
-  ["Identity: look up display name '<current user>' (from context user_name, resolving '他') to get global_user_id",
-   "Conversation-keyword: find messages from the user resolved in slot 1 containing a URL",
-   "Web-search: retrieve the content at the URL found in slot 2"]
+  → '他' maps to context user_name. Resolve that person, find URL, then fetch.
+  ["Person-context: resolve display name from context user_name for pronoun '他'",
+   "Conversation-evidence: retrieve messages from the user resolved in slot 1 containing a URL",
+   "Web-evidence: retrieve public web content for the URL found in slot 2"]
 
-### 9. Two named people → compare profiles (4 slots)
+### 9. Two named people → compare profiles
 Query: "<named user A>和<named user B>这两个人，你对他们各有什么印象"
-  → Two independent identity+profile chains (human subjects → Profile, not Memory-search).
-  → Slot 4 depends on slot 3, NOT slot 1.
-  ["Identity: look up display name '<named user A>' to get global_user_id",
-   "Profile: retrieve full user profile for the user resolved in slot 1",
-   "Identity: look up display name '<named user B>' to get global_user_id",
-   "Profile: retrieve full user profile for the user resolved in slot 3"]
+  → Two independent person-context reads.
+  ["Person-context: retrieve profile/impression for display name <named user A>",
+   "Person-context: retrieve profile/impression for display name <named user B>"]
 
-### 10. Find speaker by exact phrase → find their URL → fetch content (4 slots)
+### 10. Find speaker by exact phrase → find their URL → fetch content
 Query: "说版权保护是play一环的那个人，他发过什么链接，链接里是什么内容"
   → Exact phrase to find speaker, then identity, then find their URL, then fetch it.
-  ["Conversation-keyword: find messages containing '版权保护一直都是play的一环' to identify the speaker",
-   "Identity: look up display name of the person found in slot 1 to get global_user_id",
-   "Conversation-keyword: find messages from the user resolved in slot 2 containing a URL",
-   "Web-search: retrieve the content at the URL found in slot 3"]
+  ["Conversation-evidence: retrieve exact phrase '版权保护一直都是play的一环' to identify the speaker",
+   "Person-context: retrieve profile/impression for speaker found in slot 1",
+   "Conversation-evidence: retrieve messages from the user resolved in slot 2 containing a URL",
+   "Web-evidence: retrieve public web content for the URL found in slot 3"]
+
+### 11. Durable official character fact
+Query: "你家的官方地址是什么？"
+  → Stable official character/world fact. Use durable memory, not recent conversation.
+  ["Memory-evidence: retrieve durable evidence about the active character's official address"]
+
+Query: "你刚才把地址发给我了吗？"
+  → Recent conversation confirmation/provenance. Use conversation evidence.
+  ["Conversation-evidence: retrieve recent messages mentioning the active character's address"]
 
 ## Input format
 {{
@@ -535,9 +505,9 @@ Query: "说版权保护是play一环的那个人，他发过什么链接，链�
 
 ## Generation Procedure
 1. Read `original_query` and first decide whether it asks for a live external fact.
-   If yes, apply Rule 1c before any memory default or backend wording in the query.
+   If yes, apply Rule 2 before any memory default or backend wording in the query.
 2. Decide whether the query asks to recall an active agreement, promise, plan,
-   open loop, or current episode state. If yes, apply Rule 1d before memory or
+   open loop, or current episode state. If yes, apply Rule 3 before memory or
    conversation search defaults.
 3. Decide whether downstream cognition truly needs fetched evidence.
 4. If evidence is needed, identify atomic data targets and order dependencies.
@@ -770,6 +740,42 @@ async def rag_initializer(state: ProgressiveRAGState) -> dict:
 
 # ── Dispatcher ─────────────────────────────────────────────────────
 _RAG_SUPERVISOR_AGENT_REGISTRY: dict[str, RAGAgentRegistryEntry] = {
+    "live_context_agent": {
+        "agent": LiveContextAgent().run,
+        "fact_source": {
+            "source_kind": "external",
+            "source_system": "live_context",
+            "consolidation_policy": "do_not_write_knowledge",
+            "can_consolidate_as_new_knowledge": False,
+        },
+    },
+    "conversation_evidence_agent": {
+        "agent": ConversationEvidenceAgent().run,
+        "fact_source": {
+            "source_kind": "internal",
+            "source_system": "conversation_history",
+            "consolidation_policy": "do_not_write_knowledge",
+            "can_consolidate_as_new_knowledge": False,
+        },
+    },
+    "memory_evidence_agent": {
+        "agent": MemoryEvidenceAgent().run,
+        "fact_source": {
+            "source_kind": "internal",
+            "source_system": "memory",
+            "consolidation_policy": "do_not_write_knowledge",
+            "can_consolidate_as_new_knowledge": False,
+        },
+    },
+    "person_context_agent": {
+        "agent": PersonContextAgent().run,
+        "fact_source": {
+            "source_kind": "internal",
+            "source_system": "user_profiles",
+            "consolidation_policy": "do_not_write_knowledge",
+            "can_consolidate_as_new_knowledge": False,
+        },
+    },
     "user_lookup_agent": {
         "agent": UserLookupAgent().run,
         "fact_source": {
@@ -880,10 +886,46 @@ _RAG_SUPERVISOR_AGENT_REGISTRY: dict[str, RAGAgentRegistryEntry] = {
     },
 }
 
+_PREFIX_DISPATCH_TABLE: tuple[tuple[str, str, int], ...] = (
+    ("Live-context:", "live_context_agent", 1),
+    ("Conversation-evidence:", "conversation_evidence_agent", 1),
+    ("Memory-evidence:", "memory_evidence_agent", 1),
+    ("Person-context:", "person_context_agent", 1),
+    ("Web-evidence:", "web_search_agent2", 3),
+    ("Identity:", "user_lookup_agent", 3),
+    ("User-list:", "user_list_agent", 3),
+    ("Relationship:", "relationship_agent", 3),
+    ("Profile:", "user_profile_agent", 3),
+    ("Conversation-aggregate:", "conversation_aggregate_agent", 3),
+    ("Conversation-filter:", "conversation_filter_agent", 3),
+    ("Conversation-keyword:", "conversation_keyword_agent", 3),
+    ("Conversation-semantic:", "conversation_search_agent", 3),
+    ("Memory-search:", "persistent_memory_search_agent", 3),
+    ("Recall:", "recall_agent", 1),
+    ("Web-search:", "web_search_agent2", 3),
+)
+
 _DISPATCHER_PROMPT = '''\
 You are a RAG Dispatcher. For each slot, select exactly one inner-loop retrieval agent and produce a concise task description for it.
 
 ## Agent Roster
+
+- `live_context_agent`: Top-level live external context capability.
+  Resolves target/scope for weather, temperature, opening status, schedules,
+  prices, exchange rates, or current public status, then delegates to web.
+  Use for `Live-context:` slots.
+
+- `conversation_evidence_agent`: Top-level conversation-history evidence capability.
+  Chooses keyword, semantic, filter, or aggregate conversation worker internally.
+  Use for `Conversation-evidence:` slots.
+
+- `memory_evidence_agent`: Top-level durable memory evidence capability.
+  Chooses exact or semantic persistent-memory worker internally.
+  Use for `Memory-evidence:` slots.
+
+- `person_context_agent`: Top-level person/profile/relationship capability.
+  Chooses identity, profile, user-list, or relationship worker internally.
+  Use for `Person-context:` slots.
 
 - `user_lookup_agent`: Direct user-profile lookup by display name.
   Queries the user_profiles collection (NOT conversation history). Returns global_user_id.
@@ -935,6 +977,11 @@ Match the prefix literally and use the mapped agent without further deliberation
 
 | Slot prefix                  | Agent                            |
 |------------------------------|----------------------------------|
+| "Live-context: ..."          | `live_context_agent`             |
+| "Conversation-evidence: ..." | `conversation_evidence_agent`    |
+| "Memory-evidence: ..."       | `memory_evidence_agent`          |
+| "Person-context: ..."        | `person_context_agent`           |
+| "Web-evidence: ..."          | `web_search_agent2`              |
 | "Identity: ..."              | `user_lookup_agent`              |
 | "User-list: ..."             | `user_list_agent`                |
 | "Relationship: ..."          | `relationship_agent`             |
@@ -1035,6 +1082,34 @@ def build_rag_fact_source_map() -> dict[str, dict[str, Any]]:
     return return_value
 
 
+def _dispatch_from_known_prefix(current_slot: str) -> dict[str, Any] | None:
+    """Build a dispatch directly from a recognized slot prefix.
+
+    Args:
+        current_slot: The ordered slot selected for this loop iteration.
+
+    Returns:
+        Normalized dispatch payload, or ``None`` when no prefix matches.
+    """
+
+    if not isinstance(current_slot, str):
+        return None
+
+    for prefix, agent_name, max_attempts in _PREFIX_DISPATCH_TABLE:
+        if current_slot.startswith(prefix):
+            dispatch = {
+                "agent_name": agent_name,
+                "task": current_slot.strip(),
+                "context": {},
+                "max_attempts": max_attempts,
+                "route_source": "deterministic_prefix",
+            }
+            return dispatch
+
+    return_value = None
+    return return_value
+
+
 async def rag_dispatcher(state: ProgressiveRAGState) -> dict:
     """Generate one plain JSON dispatch targeting the first unknown slot.
 
@@ -1046,6 +1121,30 @@ async def rag_dispatcher(state: ProgressiveRAGState) -> dict:
         current_slot set, and loop_count incremented.
     """
     current_slot = state["unknown_slots"][0]
+    prefix_dispatch = _dispatch_from_known_prefix(current_slot)
+    if prefix_dispatch is not None:
+        logger.info(
+            f'RAG2 dispatch output: agent={prefix_dispatch["agent_name"]} '
+            f"task={log_preview(prefix_dispatch['task'])} "
+            f'route_source={prefix_dispatch["route_source"]}'
+        )
+        logger.debug(
+            f'RAG2 dispatch metadata: loop={state.get("loop_count", 0) + 1} '
+            f"slot={log_preview(current_slot)} "
+            f'max_attempts={prefix_dispatch["max_attempts"]} '
+            f"dispatch_context={log_preview(prefix_dispatch['context'])}"
+        )
+        return_value = {
+            "messages": [
+                AIMessage(
+                    content=json.dumps(prefix_dispatch, ensure_ascii=False)
+                )
+            ],
+            "current_slot": current_slot,
+            "current_dispatch": prefix_dispatch,
+            "loop_count": state.get("loop_count", 0) + 1,
+        }
+        return return_value
 
     system_prompt = SystemMessage(
         content=_DISPATCHER_PROMPT.format(
@@ -1054,7 +1153,7 @@ async def rag_dispatcher(state: ProgressiveRAGState) -> dict:
     )
     user_input = {
         "current_slot": current_slot,
-        "known_facts": state.get("known_facts", []),
+        "known_facts": _known_facts_llm_view(state.get("known_facts", [])),
         "context": state.get("context", {}),
     }
     human_message = HumanMessage(content=json.dumps(user_input, ensure_ascii=False, default=str))
@@ -1070,12 +1169,14 @@ async def rag_dispatcher(state: ProgressiveRAGState) -> dict:
     normalized_dispatch = _normalize_dispatch(dispatch, current_slot)
     logger.info(
         f'RAG2 dispatch output: agent={normalized_dispatch["agent_name"] or "<invalid>"} '
-        f"task={log_preview(normalized_dispatch['task'])}"
+        f"task={log_preview(normalized_dispatch['task'])} "
+        f'route_source={normalized_dispatch["route_source"]}'
     )
     logger.debug(
         f'RAG2 dispatch metadata: loop={state.get("loop_count", 0) + 1} '
         f"slot={log_preview(current_slot)} "
         f'max_attempts={normalized_dispatch["max_attempts"]} '
+        f'route_source={normalized_dispatch["route_source"]} '
         f"dispatch_context={log_preview(normalized_dispatch['context'])} "
         f"raw={log_preview(dispatch)}"
     )
@@ -1083,7 +1184,7 @@ async def rag_dispatcher(state: ProgressiveRAGState) -> dict:
     return_value = {
         "messages": [AIMessage(content=response.content)],
         "current_slot": current_slot,
-        "current_dispatch": dispatch,
+        "current_dispatch": normalized_dispatch,
         "loop_count": state.get("loop_count", 0) + 1,
     }
     return return_value
@@ -1098,7 +1199,9 @@ def _build_delegate_context(state: ProgressiveRAGState, dispatch: dict) -> dict:
     raw_dispatch_context = dispatch.get("context", {})
     if isinstance(raw_dispatch_context, dict):
         delegate_context.update(raw_dispatch_context)
-    delegate_context["known_facts"] = list(state.get("known_facts", []))
+    delegate_context["known_facts"] = _known_facts_llm_view(
+        state.get("known_facts", []),
+    )
     delegate_context["original_query"] = state.get("original_query", "")
     delegate_context["current_slot"] = state.get("current_slot", "")
     return delegate_context
@@ -1132,11 +1235,18 @@ def _normalize_dispatch(raw_dispatch: dict, current_slot: str) -> dict:
     else:
         max_attempts = 3
 
+    raw_route_source = raw_dispatch.get("route_source", "dispatcher_llm")
+    if isinstance(raw_route_source, str) and raw_route_source.strip():
+        route_source = raw_route_source.strip()
+    else:
+        route_source = "dispatcher_llm"
+
     return_value = {
         "agent_name": agent_name,
         "task": task,
         "context": context,
         "max_attempts": max_attempts,
+        "route_source": route_source,
     }
     return return_value
 
@@ -1144,6 +1254,326 @@ def _normalize_dispatch(raw_dispatch: dict, current_slot: str) -> dict:
 def _serialize_agent_result(result: dict) -> str:
     """Serialize one agent result for dispatcher history."""
     return_value = json.dumps(result, ensure_ascii=False, default=str)
+    return return_value
+
+
+def _agent_result_info_view(result: dict) -> dict:
+    """Build an INFO-safe view of an agent result.
+
+    Args:
+        result: Raw helper-agent result from the executor.
+
+    Returns:
+        Compact operational fields suitable for INFO logging. Heavy payloads
+        such as resolved refs, projection payloads, and worker payloads remain
+        available in DEBUG logs and in graph state.
+    """
+
+    raw_result = result.get("result")
+    if isinstance(raw_result, dict) and "capability" in raw_result:
+        compact_result = {
+            "capability": raw_result.get("capability", ""),
+            "primary_worker": raw_result.get("primary_worker", ""),
+            "supporting_workers": raw_result.get("supporting_workers", []),
+            "missing_context": raw_result.get("missing_context", []),
+            "selected_summary": raw_result.get("selected_summary", ""),
+        }
+    else:
+        compact_result = raw_result
+
+    raw_cache = result.get("cache", {})
+    cache = raw_cache if isinstance(raw_cache, dict) else {}
+    info_view = {
+        "agent": result.get("agent", ""),
+        "resolved": bool(result.get("resolved", False)),
+        "attempts": result.get("attempts", 0),
+        "cache": {
+            "enabled": cache.get("enabled", False),
+            "hit": cache.get("hit", False),
+            "reason": cache.get("reason", ""),
+        },
+        "result": compact_result,
+    }
+    return info_view
+
+
+_LLM_SUMMARY_TEXT_LIMIT = 400
+_LLM_SUMMARY_LIST_LIMIT = 5
+_LLM_SUMMARY_REF_LIMIT = 8
+_LLM_SUMMARY_PROFILE_UNIT_LIMIT = 4
+
+
+def _clip_llm_summary_text(
+    value: object,
+    *,
+    limit: int = _LLM_SUMMARY_TEXT_LIMIT,
+) -> str:
+    """Clip a field before sending it to a local summarizer/finalizer LLM.
+
+    Args:
+        value: Arbitrary evidence field to render.
+        limit: Maximum number of characters kept from the rendered value.
+
+    Returns:
+        A string capped to the requested length.
+    """
+
+    text = str(value)
+    if len(text) > limit:
+        text = f"{text[:limit]}..."
+    return_value = text
+    return return_value
+
+
+def _compact_memory_unit_rows(rows: object) -> list[object]:
+    """Project memory/profile rows to the fields useful for summary prompts.
+
+    Args:
+        rows: Optional list of user-memory rows or memory-like dictionaries.
+
+    Returns:
+        A capped list with heavy metadata removed and text fields clipped.
+    """
+
+    if not isinstance(rows, list):
+        return_value: list[object] = []
+        return return_value
+
+    compact_rows: list[object] = []
+    for row in rows[:_LLM_SUMMARY_PROFILE_UNIT_LIMIT]:
+        if not isinstance(row, dict):
+            compact_rows.append(_clip_llm_summary_text(row))
+            continue
+
+        compact_row: dict[str, object] = {}
+        for key in (
+            "unit_type",
+            "fact",
+            "subjective_appraisal",
+            "relationship_signal",
+            "status",
+            "updated_at",
+            "timestamp",
+            "memory_name",
+            "content",
+        ):
+            if key in row:
+                compact_row[key] = _clip_llm_summary_text(row[key])
+        compact_rows.append(compact_row)
+
+    return_value = compact_rows
+    return return_value
+
+
+def _compact_user_memory_context(memory_context: object) -> dict[str, object]:
+    """Cap user-memory context sections for evaluator/finalizer prompts.
+
+    Args:
+        memory_context: Profile memory context from a profile payload.
+
+    Returns:
+        A dictionary with the standard memory sections and clipped rows.
+    """
+
+    if not isinstance(memory_context, dict):
+        return_value: dict[str, object] = {}
+        return return_value
+
+    compact_context: dict[str, object] = {}
+    for section in (
+        "stable_patterns",
+        "recent_shifts",
+        "objective_facts",
+        "milestones",
+        "active_commitments",
+    ):
+        if section in memory_context:
+            compact_context[section] = _compact_memory_unit_rows(
+                memory_context[section],
+            )
+
+    return_value = compact_context
+    return return_value
+
+
+def _compact_profile_for_llm(profile: object) -> dict[str, object]:
+    """Build a bounded profile view for local LLM summary stages.
+
+    Args:
+        profile: Raw profile or character image payload.
+
+    Returns:
+        Profile identity fields plus capped memory sections.
+    """
+
+    if not isinstance(profile, dict):
+        return_value: dict[str, object] = {}
+        return return_value
+
+    compact_profile: dict[str, object] = {}
+    for key in (
+        "global_user_id",
+        "display_name",
+        "name",
+        "description",
+        "gender",
+        "age",
+        "birthday",
+        "backstory",
+    ):
+        if key in profile:
+            compact_profile[key] = _clip_llm_summary_text(profile[key])
+
+    if "self_image" in profile:
+        compact_profile["self_image"] = _clip_llm_summary_text(
+            profile["self_image"],
+        )
+
+    memory_context = profile.get("user_memory_context")
+    compact_context = _compact_user_memory_context(memory_context)
+    if compact_context:
+        compact_profile["user_memory_context"] = compact_context
+    else:
+        memory_units = profile.get("_user_memory_units")
+        compact_units = _compact_memory_unit_rows(memory_units)
+        if compact_units:
+            compact_profile["_user_memory_units"] = compact_units
+
+    return_value = compact_profile
+    return return_value
+
+
+def _compact_projection_payload_for_llm(payload: object) -> dict[str, object]:
+    """Build a summary-safe view of a top-level capability projection payload.
+
+    Args:
+        payload: The capability result projection payload.
+
+    Returns:
+        A compact payload that preserves prompt-facing facts without heavy raw
+        worker/profile internals.
+    """
+
+    if not isinstance(payload, dict):
+        return_value: dict[str, object] = {}
+        return return_value
+
+    compact_payload: dict[str, object] = {}
+    for key in (
+        "profile_kind",
+        "owner_global_user_id",
+        "summary",
+        "external_text",
+        "url",
+    ):
+        if key in payload:
+            compact_payload[key] = _clip_llm_summary_text(payload[key])
+
+    if "profile" in payload:
+        compact_payload["profile"] = _compact_profile_for_llm(
+            payload["profile"],
+        )
+
+    summaries = payload.get("summaries")
+    if isinstance(summaries, list):
+        compact_payload["summaries"] = [
+            _clip_llm_summary_text(item)
+            for item in summaries[:_LLM_SUMMARY_LIST_LIMIT]
+        ]
+
+    memory_rows = payload.get("memory_rows")
+    compact_memory_rows = _compact_memory_unit_rows(memory_rows)
+    if compact_memory_rows:
+        compact_payload["memory_rows"] = compact_memory_rows
+
+    return_value = compact_payload
+    return return_value
+
+
+def _compact_raw_result_for_llm(raw_result: object) -> object:
+    """Remove heavy internals before a raw result enters a local LLM prompt.
+
+    Args:
+        raw_result: Agent raw result stored in known_facts.
+
+    Returns:
+        The original raw result for ordinary worker payloads, or a compact
+        view for top-level capability/profile payloads.
+    """
+
+    if not isinstance(raw_result, dict):
+        return raw_result
+
+    if "capability" in raw_result:
+        compact_result: dict[str, object] = {
+            "capability": raw_result.get("capability", ""),
+            "primary_worker": raw_result.get("primary_worker", ""),
+            "supporting_workers": raw_result.get("supporting_workers", []),
+            "source_policy": raw_result.get("source_policy", ""),
+            "missing_context": raw_result.get("missing_context", []),
+            "conflicts": raw_result.get("conflicts", []),
+            "selected_summary": raw_result.get("selected_summary", ""),
+        }
+
+        evidence = raw_result.get("evidence")
+        if isinstance(evidence, list):
+            compact_result["evidence"] = [
+                _clip_llm_summary_text(item)
+                for item in evidence[:_LLM_SUMMARY_LIST_LIMIT]
+            ]
+
+        refs = raw_result.get("resolved_refs")
+        if isinstance(refs, list):
+            compact_result["resolved_refs"] = refs[:_LLM_SUMMARY_REF_LIMIT]
+
+        projection_payload = raw_result.get("projection_payload")
+        compact_result["projection_payload"] = _compact_projection_payload_for_llm(
+            projection_payload,
+        )
+        return_value: object = compact_result
+        return return_value
+
+    if (
+        "user_memory_context" in raw_result
+        or "_user_memory_units" in raw_result
+        or "self_image" in raw_result
+    ):
+        return_value = _compact_profile_for_llm(raw_result)
+        return return_value
+
+    return raw_result
+
+
+def _known_facts_llm_view(known_facts: object) -> list[dict[str, object]]:
+    """Compact previous facts before sending them back through an LLM.
+
+    Args:
+        known_facts: Facts accumulated by the evaluator.
+
+    Returns:
+        A list preserving slot summaries and compact raw results.
+    """
+
+    if not isinstance(known_facts, list):
+        return_value: list[dict[str, object]] = []
+        return return_value
+
+    compact_facts: list[dict[str, object]] = []
+    for fact in known_facts:
+        if not isinstance(fact, dict):
+            continue
+
+        compact_fact = {
+            "slot": fact.get("slot", ""),
+            "agent": fact.get("agent", ""),
+            "resolved": bool(fact.get("resolved", False)),
+            "summary": _clip_llm_summary_text(fact.get("summary", "")),
+            "raw_result": _compact_raw_result_for_llm(fact.get("raw_result")),
+            "attempts": fact.get("attempts", 0),
+        }
+        compact_facts.append(compact_fact)
+
+    return_value = compact_facts
     return return_value
 
 
@@ -1178,7 +1608,12 @@ async def rag_executor(state: ProgressiveRAGState) -> dict:
         )
         return_value = {
             "last_agent_result": result,
-            "messages": [HumanMessage(content=_serialize_agent_result(result), name="agent_result")],
+            "messages": [
+                HumanMessage(
+                    content=_serialize_agent_result(_agent_result_info_view(result)),
+                    name="agent_result",
+                )
+            ],
         }
         return return_value
 
@@ -1205,15 +1640,21 @@ async def rag_executor(state: ProgressiveRAGState) -> dict:
             "attempts": 0,
         }
 
-    logger.info(f"RAG2 agent output: result={log_preview(result)}")
+    info_view = _agent_result_info_view(result)
+    logger.info(f"RAG2 agent output: result={log_preview(info_view)}")
     logger.debug(
         f'RAG2 agent metadata: slot={log_preview(state.get("current_slot", ""))} '
         f'agent={agent_name} resolved={bool(result.get("resolved", False))} '
-        f'attempts={result.get("attempts", 0)}'
+        f'attempts={result.get("attempts", 0)} raw={log_preview(result)}'
     )
     return_value = {
         "last_agent_result": result,
-        "messages": [HumanMessage(content=_serialize_agent_result(result), name="agent_result")],
+        "messages": [
+            HumanMessage(
+                content=_serialize_agent_result(info_view),
+                name="agent_result",
+            )
+        ],
     }
     return return_value
 
@@ -1333,6 +1774,8 @@ async def _summarize_agent_result(
     else:
         prompt = _EVALUATOR_SUMMARIZER_PROMPT
 
+    compact_raw_result = _compact_raw_result_for_llm(raw_result)
+    compact_known_facts = _known_facts_llm_view(known_facts)
     system_prompt = SystemMessage(content=prompt)
     human_message = HumanMessage(
         content=json.dumps(
@@ -1340,8 +1783,8 @@ async def _summarize_agent_result(
                 "slot": slot,
                 "agent": agent_name,
                 "resolved": resolved,
-                "raw_result": raw_result,
-                "known_facts": known_facts,
+                "raw_result": compact_raw_result,
+                "known_facts": compact_known_facts,
             },
             ensure_ascii=False,
             default=str,
@@ -1474,7 +1917,7 @@ async def rag_finalizer(state: ProgressiveRAGState) -> dict:
     system_prompt = SystemMessage(content=_FINALIZER_PROMPT)
     finalizer_input = {
         "original_query": state["original_query"],
-        "known_facts": state.get("known_facts", []),
+        "known_facts": _known_facts_llm_view(state.get("known_facts", [])),
     }
     human_message = HumanMessage(content=json.dumps(finalizer_input, ensure_ascii=False, default=str))
 

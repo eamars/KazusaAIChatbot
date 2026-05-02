@@ -137,6 +137,29 @@ def _extract_external_content(raw_result: object, *, evidence_char_limit: int) -
     return external_content
 
 
+def _projection_payload(raw_result: object) -> dict[str, Any]:
+    """Read a normalized top-level capability projection payload."""
+    raw_dict = _as_dict(raw_result)
+    payload = _as_dict(raw_dict.get("projection_payload"))
+    return payload
+
+
+def _project_top_level_summaries(
+    payload: dict[str, Any],
+    *,
+    key: str,
+    evidence_char_limit: int,
+) -> list[str]:
+    """Project string summaries from a normalized capability payload."""
+    raw_summaries = _as_list(payload.get(key))
+    summaries = [
+        _clip_text(text, limit=evidence_char_limit)
+        for item in raw_summaries
+        if (text := text_or_empty(item))
+    ]
+    return summaries
+
+
 def project_known_facts(
     known_facts: list[dict],
     *,
@@ -202,6 +225,65 @@ def project_known_facts(
         })
 
         if not resolved:
+            continue
+
+        if agent == "live_context_agent":
+            payload = _projection_payload(raw_result)
+            content = _clip_text(
+                text_or_empty(payload.get("external_text")),
+                limit=evidence_char_limit,
+            )
+            url = text_or_empty(payload.get("url"))
+            if not url:
+                url_match = _URL_RE.search(content)
+                url = url_match.group(0) if url_match else ""
+            external_evidence.append({
+                "summary": summary,
+                "content": content,
+                "url": url,
+            })
+            continue
+
+        if agent == "conversation_evidence_agent":
+            payload = _projection_payload(raw_result)
+            conversation_evidence.extend(
+                _project_top_level_summaries(
+                    payload,
+                    key="summaries",
+                    evidence_char_limit=evidence_char_limit,
+                )
+            )
+            if not _as_list(payload.get("summaries")) and summary:
+                conversation_evidence.append(summary)
+            continue
+
+        if agent == "memory_evidence_agent":
+            payload = _projection_payload(raw_result)
+            memory_evidence.append({
+                "summary": summary,
+                "content": _extract_memory_content(
+                    payload.get("memory_rows"),
+                    evidence_char_limit=evidence_char_limit,
+                ),
+            })
+            continue
+
+        if agent == "person_context_agent":
+            payload = _projection_payload(raw_result)
+            profile_kind = text_or_empty(payload.get("profile_kind"))
+            raw_profile = _as_dict(payload.get("profile"))
+            payload_summary = text_or_empty(payload.get("summary")) or summary
+            if profile_kind == "current_user":
+                rag_result["user_image"] = _strip_internal_profile_fields(raw_profile)
+                rag_result["user_memory_unit_candidates"] = _as_list(
+                    raw_profile.get("_user_memory_units")
+                )
+                continue
+            if profile_kind == "active_character":
+                rag_result["character_image"] = raw_profile
+                continue
+            if payload_summary:
+                third_party_profiles.append(payload_summary)
             continue
 
         if agent == "user_profile_agent":
