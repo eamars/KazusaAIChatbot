@@ -2,6 +2,12 @@
 
 from __future__ import annotations
 
+from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition_l2 import (
+    _cognition_rag_result as _l2_cognition_rag_result,
+)
+from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition_l3 import (
+    _cognition_rag_result as _l3_cognition_rag_result,
+)
 from kazusa_ai_chatbot.nodes.persona_supervisor2_rag_projection import project_known_facts
 
 
@@ -23,6 +29,7 @@ def test_project_known_facts_empty_payload() -> None:
         }
     }
     assert result["character_image"] == {}
+    assert result["recall_evidence"] == []
     assert result["supervisor_trace"]["dispatched"] == []
 
 
@@ -167,3 +174,120 @@ def test_project_known_facts_does_not_stringify_malformed_fact_values() -> None:
     assert result["third_party_profiles"] == []
     assert result["memory_evidence"] == [{"summary": "memory summary", "content": ""}]
     assert result["external_evidence"] == [{"summary": "web summary", "content": "", "url": ""}]
+
+
+def test_project_known_facts_projects_recall_agent_result() -> None:
+    """Recall helper output should be exposed separately from conversation evidence."""
+
+    result = project_known_facts(
+        [
+            {
+                "slot": "Recall: retrieve active_episode_agreement relevant to today's appointment",
+                "agent": "recall_agent",
+                "resolved": True,
+                "summary": "The active agreement is pickup at 9:30.",
+                "raw_result": {
+                    "selected_summary": "The active agreement is pickup at 9:30.",
+                    "recall_type": "active_episode_agreement",
+                    "primary_source": "conversation_progress",
+                    "supporting_sources": ["user_memory_units"],
+                    "freshness_basis": "Active progress is current.",
+                    "conflicts": [],
+                    "candidates": [
+                        {
+                            "source": "conversation_progress",
+                            "claim": "Pickup at 9:30.",
+                            "temporal_scope": "current_episode",
+                            "lifecycle_status": "active",
+                            "evidence_time": "2026-05-01T23:00:00+00:00",
+                            "authority": "primary_for_current_episode",
+                        }
+                    ],
+                },
+            }
+        ],
+        current_user_id="user-1",
+        character_user_id="character-1",
+    )
+
+    assert result["recall_evidence"] == [
+        {
+            "selected_summary": "The active agreement is pickup at 9:30.",
+            "recall_type": "active_episode_agreement",
+            "primary_source": "conversation_progress",
+            "supporting_sources": ["user_memory_units"],
+            "freshness_basis": "Active progress is current.",
+            "conflicts": [],
+            "candidates": [
+                {
+                    "source": "conversation_progress",
+                    "claim": "Pickup at 9:30.",
+                    "temporal_scope": "current_episode",
+                    "lifecycle_status": "active",
+                    "evidence_time": "2026-05-01T23:00:00+00:00",
+                    "authority": "primary_for_current_episode",
+                }
+            ],
+        }
+    ]
+    assert result["conversation_evidence"] == []
+
+
+def test_project_known_facts_caps_recall_evidence_to_three_entries() -> None:
+    """Projection should expose only the first three Recall results."""
+
+    known_facts = [
+        {
+            "slot": f"Recall: retrieve active_episode_agreement relevant to plan {index}",
+            "agent": "recall_agent",
+            "resolved": True,
+            "summary": f"Recall summary {index}",
+            "raw_result": {
+                "selected_summary": f"Recall summary {index}",
+                "primary_source": "conversation_progress",
+            },
+        }
+        for index in range(4)
+    ]
+
+    result = project_known_facts(
+        known_facts,
+        current_user_id="user-1",
+        character_user_id="character-1",
+    )
+
+    assert [
+        entry["selected_summary"]
+        for entry in result["recall_evidence"]
+    ] == [
+        "Recall summary 0",
+        "Recall summary 1",
+        "Recall summary 2",
+    ]
+    assert len(result["supervisor_trace"]["dispatched"]) == 4
+    assert result["supervisor_trace"]["dispatched"][3]["agent"] == "recall_agent"
+
+
+def test_cognition_rag_result_preserves_public_recall_payload() -> None:
+    """Existing cognition payload shaping should not strip Recall evidence."""
+
+    rag_result = {
+        "answer": "The active agreement is pickup at 9:30.",
+        "recall_evidence": [
+            {
+                "selected_summary": "The active agreement is pickup at 9:30.",
+                "primary_source": "conversation_progress",
+            }
+        ],
+        "user_memory_unit_candidates": [{"unit_id": "internal-1"}],
+    }
+
+    l2_payload = _l2_cognition_rag_result(rag_result)
+    l3_payload = _l3_cognition_rag_result(rag_result)
+
+    assert l2_payload["answer"] == "The active agreement is pickup at 9:30."
+    assert l3_payload["answer"] == "The active agreement is pickup at 9:30."
+    assert l2_payload["recall_evidence"][0]["primary_source"] == "conversation_progress"
+    assert l3_payload["recall_evidence"][0]["primary_source"] == "conversation_progress"
+    assert "user_memory_unit_candidates" not in l2_payload
+    assert "user_memory_unit_candidates" not in l3_payload

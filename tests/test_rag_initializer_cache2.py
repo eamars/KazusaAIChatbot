@@ -6,6 +6,7 @@ import pytest
 
 from kazusa_ai_chatbot.nodes import persona_supervisor2_rag_supervisor2 as supervisor2_module
 from kazusa_ai_chatbot.message_envelope import project_prompt_message_context
+from kazusa_ai_chatbot.rag import cache2_policy
 from kazusa_ai_chatbot.rag.cache2_policy import build_initializer_cache_key
 from kazusa_ai_chatbot.rag.cache2_runtime import RAGCache2Runtime
 
@@ -220,6 +221,23 @@ def test_memory_search_prompt_uses_evidence_contract() -> None:
     assert "Memory-search: search persistent memory for impressions or opinions" not in rendered_initializer
     assert "Do not pre-classify the evidence as fact, impression, opinion" in rendered_initializer
     assert "Handles durable memory evidence relevant to answering the slot" in rendered_dispatcher
+
+
+def test_initializer_prompt_declares_recall_route() -> None:
+    """Initializer prompt should expose the Recall semantic route."""
+    rendered_prompt = supervisor2_module._INITIALIZER_PROMPT.format(
+        character_name="<active character>",
+    )
+
+    assert "Recall:" in rendered_prompt
+    assert "what was agreed" in rendered_prompt
+    assert "Conversation-keyword" in rendered_prompt
+
+
+def test_initializer_prompt_version_bumped_for_recall_route() -> None:
+    """Adding Recall invalidates old initializer route cache entries."""
+
+    assert cache2_policy.INITIALIZER_PROMPT_VERSION == "initializer_prompt:v12"
 
 
 def test_initializer_prompt_documents_live_external_fact_contract() -> None:
@@ -493,7 +511,7 @@ async def test_rag_initializer_payload_uses_prompt_context_for_large_image(
     assert base64_payload not in human_payload
 
 
-def test_initializer_prompt_version_bumps_to_v11_for_live_fact_contract() -> None:
-    """Live-fact routing changes must invalidate initializer strategies."""
+def test_initializer_prompt_version_bumps_to_v12_for_recall_contract() -> None:
+    """Recall routing changes must invalidate initializer strategies."""
 
-    assert supervisor2_module.INITIALIZER_PROMPT_VERSION == "initializer_prompt:v11"
+    assert supervisor2_module.INITIALIZER_PROMPT_VERSION == "initializer_prompt:v12"

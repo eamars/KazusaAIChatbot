@@ -52,6 +52,13 @@ def _state() -> dict:
             },
             "character_image": {"self_image": {"historical_summary": "谨慎"}},
             "memory_evidence": [{"summary": "旧记忆", "content": "提拉米苏喜欢绿茶"}],
+            "recall_evidence": [
+                {
+                    "selected_summary": "当前进度是已经约好九点半出发。",
+                    "primary_source": "conversation_progress",
+                    "supporting_sources": [],
+                }
+            ],
             "conversation_evidence": ["刚才聊到饮料"],
             "external_evidence": [],
             "third_party_profiles": [],
@@ -80,6 +87,9 @@ async def test_facts_harvester_receives_rag2_payload_and_dedup_keys(monkeypatch)
     assert "RAG 元信息" not in system_prompt
     assert "提供给认知层的用户记忆摘要" in system_prompt
     assert "`rag_result.memory_evidence`、`conversation_evidence`、`external_evidence`" in system_prompt
+    assert "`rag_result.recall_evidence`" in system_prompt
+    assert "progress-only recall" in system_prompt
+    assert "不能单独授权写入" in system_prompt
     assert "义务主体是不是" in system_prompt
     assert "来源权威性" in system_prompt
     assert "生成回复自污染禁止" in system_prompt
@@ -90,6 +100,7 @@ async def test_facts_harvester_receives_rag2_payload_and_dedup_keys(monkeypatch)
     assert "建议/方案不是承诺" in system_prompt
     assert "主语替换自检" in system_prompt
     assert payload["rag_result"]["memory_evidence"][0]["summary"] == "旧记忆"
+    assert payload["rag_result"]["recall_evidence"][0]["primary_source"] == "conversation_progress"
     assert payload["supervisor_trace"]["loop_count"] == 1
     assert payload["existing_dedup_keys"] == ["drink_preference_green_tea"]
 
@@ -116,6 +127,8 @@ async def test_fact_harvester_evaluator_reads_rag2_field_names(monkeypatch) -> N
     payload = json.loads(llm.messages[1].content)
     assert "rag_result.user_image" in system_prompt
     assert "rag_result.memory_evidence" in system_prompt
+    assert "rag_result.recall_evidence" in system_prompt
+    assert "progress-only recall" in system_prompt
     assert "RAG" not in system_prompt
     assert "检索调度的 loop_count" in system_prompt
     assert "来源权威性审计" in system_prompt

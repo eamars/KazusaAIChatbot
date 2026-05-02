@@ -10,6 +10,7 @@ from kazusa_ai_chatbot.utils import text_or_empty
 
 _URL_RE = re.compile(r"https?://\S+")
 _SLOT_REF_RE = re.compile(r"slot\s+(\d+)", flags=re.IGNORECASE)
+_MAX_RECALL_EVIDENCE = 3
 
 
 def _clip_text(text: str, *, limit: int) -> str:
@@ -167,6 +168,7 @@ def project_known_facts(
         "character_image": {},
         "third_party_profiles": [],
         "memory_evidence": [],
+        "recall_evidence": [],
         "conversation_evidence": [],
         "external_evidence": [],
         "supervisor_trace": {
@@ -178,6 +180,7 @@ def project_known_facts(
 
     third_party_profiles: list[str] = []
     memory_evidence: list[dict[str, str]] = []
+    recall_evidence: list[dict[str, Any]] = []
     conversation_evidence: list[str] = []
     external_evidence: list[dict[str, str]] = []
     dispatched: list[dict[str, Any]] = []
@@ -229,6 +232,16 @@ def project_known_facts(
             })
             continue
 
+        if agent == "recall_agent":
+            if len(recall_evidence) >= _MAX_RECALL_EVIDENCE:
+                continue
+            recall_payload = _as_dict(raw_result)
+            if recall_payload:
+                recall_evidence.append(recall_payload)
+            elif summary:
+                recall_evidence.append({"selected_summary": summary})
+            continue
+
         if agent in {
             "conversation_search_agent",
             "conversation_filter_agent",
@@ -253,6 +266,7 @@ def project_known_facts(
 
     rag_result["third_party_profiles"] = third_party_profiles
     rag_result["memory_evidence"] = memory_evidence
+    rag_result["recall_evidence"] = recall_evidence
     rag_result["conversation_evidence"] = conversation_evidence
     rag_result["external_evidence"] = external_evidence
     rag_result["supervisor_trace"]["dispatched"] = dispatched

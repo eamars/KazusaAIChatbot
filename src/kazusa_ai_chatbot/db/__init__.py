@@ -9,6 +9,7 @@ Submodule map:
 * ``users``        — ``user_profiles`` operations (identity, profile, affinity)
 * ``character``    — ``character_state`` operations
 * ``memory``       — ``memory`` operations
+* ``scheduled_events`` — read-only scheduled-event queries
 """
 
 from __future__ import annotations
@@ -103,6 +104,7 @@ from kazusa_ai_chatbot.db.memory import (
     save_memory,
     search_memory,
 )
+from kazusa_ai_chatbot.db.scheduled_events import query_pending_scheduled_events
 
 from kazusa_ai_chatbot.db.rag_cache2_persistent import (
     build_initializer_version_key,
@@ -150,6 +152,8 @@ __all__ = [
     "upsert_character_self_image", "upsert_character_state",
     # Memory
     "enable_memory_vector_index", "get_active_promises", "save_memory", "search_memory",
+    # Scheduled events
+    "query_pending_scheduled_events",
     # Persistent Cache2
     "build_initializer_version_key", "load_initializer_entries",
     "prune_persistent_entries", "purge_stale_initializer_entries",

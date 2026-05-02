@@ -75,6 +75,15 @@ async def test_stage_1_research_calls_rag2_and_projects_payload(monkeypatch) -> 
         "chat_history_wide": [],
         "reply_context": {},
         "indirect_speech_context": "",
+        "conversation_progress": {
+            "status": "active",
+            "continuity": "same_episode",
+            "current_thread": "Pickup plan is active.",
+        },
+        "conversation_episode_state": {
+            "updated_at": "2026-04-26T23:00:00+00:00",
+            "turn_count": 7,
+        },
     })
 
     assert captured["original_query"] == "你记得我喜欢什么吗？"
@@ -83,6 +92,8 @@ async def test_stage_1_research_calls_rag2_and_projects_payload(monkeypatch) -> 
     assert "message_envelope" not in captured["context"]
     assert captured["context"]["prompt_message_context"]["body_text"] == "clean body"
     assert captured["context"]["chat_history_recent"] == []
+    assert captured["context"]["conversation_progress"]["current_thread"] == "Pickup plan is active."
+    assert captured["context"]["conversation_episode_state"]["turn_count"] == 7
     assert result["rag_result"]["answer"] == "resolved"
     assert result["rag_result"]["user_image"]["user_memory_context"]["objective_facts"][0]["fact"] == "User likes tea"
 

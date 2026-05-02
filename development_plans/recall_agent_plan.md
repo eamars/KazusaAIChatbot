@@ -4,7 +4,7 @@
 
 - Goal: Add a RAG2 recall capability for active agreements, promises, plans, open loops, and current-episode state so the initializer no longer has to choose between conversation history, user memory units, and conversation progress for promise/episode recall.
 - Plan class: large
-- Status: approved
+- Status: completed
 - Mandatory skills: `development-plan-writing`, `local-llm-architecture`, `py-style`, `test-style-and-execution`, `cjk-safety`
 - Overall cutover strategy: additive; introduce one new RAG2 helper agent and narrow prompt/projection changes without data migration or replacing existing conversation/history/memory agents.
 - Highest-risk areas: broadening the initializer prompt too much, touching cognition layers unnecessarily, treating progress-derived recall as durable fact evidence, cache invalidation from prompt changes, and response-path latency from unnecessary history searches.
@@ -783,41 +783,41 @@ or where the current episode left off.
 
 ## Progress Checklist
 
-- [ ] Stage 1 — module contract tests and pre-change failure captured.
+- [x] Stage 1 — module contract tests and pre-change failure captured.
   - Covers: implementation order step 1.
   - Files/modules: `tests/test_rag_recall_agent.py`.
   - Verify: `venv\Scripts\python.exe -m pytest tests\test_rag_recall_agent.py -q` before production edits.
   - Evidence: record expected missing-module/helper failures in `Execution Evidence`.
   - Handoff: next agent starts at Stage 2.
-  - Sign-off: `<agent/date>` after verification and evidence are recorded.
-- [ ] Stage 2 — integration tests and current behavior captured.
+  - Sign-off: `Codex/2026-05-02` after verification and evidence are recorded.
+- [x] Stage 2 — integration tests and current behavior captured.
   - Covers: implementation order step 2.
   - Files/modules: `tests/test_persona_supervisor2_rag2_integration.py`, `tests/test_rag_projection.py`, `tests/test_rag_initializer_cache2.py`, `tests/test_rag_recall_live_llm.py`.
   - Verify: run practical deterministic integration tests and the first live initializer test before integration edits.
   - Evidence: record expected missing-field/prefix failures and current non-Recall live route in `Execution Evidence`.
   - Handoff: next agent starts at Stage 3.
-  - Sign-off: `<agent/date>` after verification and evidence are recorded.
-- [ ] Stage 3 — Recall module and read-only support complete.
+  - Sign-off: `Codex/2026-05-02` after verification and evidence are recorded.
+- [x] Stage 3 — Recall module and read-only support complete.
   - Covers: implementation order step 3.
   - Files/modules: `src/kazusa_ai_chatbot/rag/recall_agent.py`, `src/kazusa_ai_chatbot/db/scheduled_events.py`, `src/kazusa_ai_chatbot/db/__init__.py`, `tests/test_rag_recall_agent.py`.
   - Verify: `venv\Scripts\python.exe -m pytest tests\test_rag_recall_agent.py -q` and `venv\Scripts\python.exe -m py_compile src\kazusa_ai_chatbot\rag\recall_agent.py src\kazusa_ai_chatbot\db\scheduled_events.py`.
   - Evidence: record module test output for all Recall source arbitration and output-cap cases in `Execution Evidence`.
   - Handoff: next agent starts at Stage 4.
-  - Sign-off: `<agent/date>` after verification and evidence are recorded.
-- [ ] Stage 4 — RAG2 integration and projection complete.
+  - Sign-off: `Codex/2026-05-02` after verification and evidence are recorded.
+- [x] Stage 4 — RAG2 integration and projection complete.
   - Covers: implementation order step 4.
   - Files/modules: `src/kazusa_ai_chatbot/nodes/persona_supervisor2.py`, `src/kazusa_ai_chatbot/nodes/persona_supervisor2_rag_supervisor2.py`, `src/kazusa_ai_chatbot/rag/cache2_policy.py`, `src/kazusa_ai_chatbot/nodes/persona_supervisor2_rag_projection.py`, `src/kazusa_ai_chatbot/nodes/persona_supervisor2_consolidator_facts.py`, `src/kazusa_ai_chatbot/rag/README.md`.
   - Verify: deterministic integration/projection/cache tests, prompt-render checks, and cognition no-touch git check listed in `Verification`.
   - Evidence: record context payload, prompt version, route prefix, projection, consolidator prompt-render, README, and no-touch outputs in `Execution Evidence`.
   - Handoff: next agent starts at Stage 5.
-  - Sign-off: `<agent/date>` after verification and evidence are recorded.
-- [ ] Stage 5 — live checks and final verification complete.
+  - Sign-off: `Codex/2026-05-02` after verification and evidence are recorded.
+- [x] Stage 5 — live checks and final verification complete.
   - Covers: implementation order step 5.
   - Files/modules: `tests/test_rag_recall_live_llm.py`, `test_artifacts/llm_traces/`, all changed production/test files.
   - Verify: run live tests one at a time, then all deterministic pytest, `py_compile`, static grep, and prompt-render commands listed in `Verification`.
   - Evidence: record each live trace path plus final command outputs and any skipped/blocked checks in `Execution Evidence`.
   - Handoff: implementation complete.
-  - Sign-off: `<agent/date>` after verification and evidence are recorded.
+  - Sign-off: `Codex/2026-05-02` after verification and evidence are recorded.
 
 ## Verification
 
@@ -912,13 +912,18 @@ cache key, or cache policy entry for Recall.
 Record execution evidence here during implementation. Do not tick checklist
 items until the matching evidence is present.
 
-- Stage 1 evidence: pending.
-- Stage 2 evidence: pending.
-- Stage 3 evidence: pending.
-- Stage 4 evidence: pending.
-- Stage 5 evidence: pending.
-- Stage 6 evidence: pending.
-- Stage 7 evidence: pending.
+- Stage 1 evidence: `venv\Scripts\python.exe -m pytest tests\test_rag_recall_agent.py -q` failed before production edits with `ImportError: cannot import name 'recall_agent' from 'kazusa_ai_chatbot.rag'`, proving the missing module entrypoint.
+- Stage 2 evidence: `venv\Scripts\python.exe -m pytest tests\test_rag_projection.py tests\test_persona_supervisor2_rag2_integration.py tests\test_rag_initializer_cache2.py -q` produced 6 expected/baseline failures and 20 passes before integration edits. New expected failures covered missing `recall_evidence`, missing RAG2 progress context, missing `Recall:` prompt route, and prompt-version mismatch. The same run also surfaced an existing adjacent prompt-version expectation: `test_initializer_prompt_version_bumps_to_v11_for_live_fact_contract` expects `initializer_prompt:v11` while code is `v7`.
+- Stage 2 live evidence: `venv\Scripts\python.exe -m pytest tests\test_rag_recall_live_llm.py::test_live_initializer_routes_active_agreement_to_recall -q -s -m live_llm` failed as expected before prompt edits. The live initializer routed to `Memory-search: search persistent memory for evidence relevant to answering the question about 今天的约定`; trace written to `test_artifacts/llm_traces/rag_recall_live_llm__active_agreement.json`.
+- Stage 3 evidence: `venv\Scripts\python.exe -m pytest tests\test_rag_recall_agent.py -q` passed 9 tests covering missing scope, progress-first recall, durable commitments, scheduled events, exact-history gate, stale progress, inactive memory exclusion, output caps, and scheduled-event query scoping.
+- Stage 3 compile evidence: `venv\Scripts\python.exe -m py_compile src\kazusa_ai_chatbot\rag\recall_agent.py src\kazusa_ai_chatbot\db\scheduled_events.py` passed.
+- Stage 4 evidence: `venv\Scripts\python.exe -m py_compile src\kazusa_ai_chatbot\rag\recall_agent.py src\kazusa_ai_chatbot\db\scheduled_events.py src\kazusa_ai_chatbot\nodes\persona_supervisor2.py src\kazusa_ai_chatbot\nodes\persona_supervisor2_rag_supervisor2.py src\kazusa_ai_chatbot\nodes\persona_supervisor2_rag_projection.py src\kazusa_ai_chatbot\nodes\persona_supervisor2_consolidator_facts.py tests\test_rag_recall_live_llm.py tests\test_consolidator_facts_rag2.py tests\test_rag_initializer_cache2.py` passed. Runtime prompt render passed for the RAG2 initializer, dispatcher, facts harvester, and fact harvester evaluator prompts.
+- Stage 4 deterministic evidence: `venv\Scripts\python.exe -m pytest tests\test_rag_projection.py tests\test_persona_supervisor2_rag2_integration.py tests\test_rag_initializer_cache2.py tests\test_consolidator_facts_rag2.py -q` passed 28 tests. This covered RAG2 progress context plumbing, `recall_evidence` projection, cognition public payload pass-through without L2/L3 edits, `Recall:` prompt route, `initializer_prompt:v12`, consolidator recall authority wording, and progress-only recall restrictions.
+- Stage 4 module/regression evidence: `venv\Scripts\python.exe -m pytest tests\test_rag_recall_agent.py -q` passed 9 tests after integration.
+- Stage 4 static evidence: `rg "Recall:" ...`, `rg "recall_evidence" ...`, `rg "RecallAgent|recall_agent" ...`, `rg "query_pending_scheduled_events" ...`, and `rg "recall.*cache|cache.*recall|volatile_recall" ...` returned the expected Recall route, projection, helper, scheduled-event helper, and no persistent Recall cache namespace beyond the allowed `volatile_recall` literal.
+- Stage 5 live evidence: each real LLM test was run individually and inspected before the next run. `test_live_initializer_routes_active_agreement_to_recall` passed and wrote `test_artifacts/llm_traces/rag_recall_live_llm__active_agreement__20260502T045951245970Z.json`; the initializer emitted `Recall: retrieve active_episode_agreement relevant to today's agreement`. `test_live_initializer_keeps_exact_phrase_on_conversation_keyword` passed and wrote `test_artifacts/llm_traces/rag_recall_live_llm__exact_phrase.json`; the initializer emitted `Conversation-keyword: find messages containing '约定就是约定'` and no Recall slot. `test_live_rag2_recall_answers_today_agreement` passed and wrote `test_artifacts/llm_traces/rag_recall_live_llm__rag2_today_agreement.json`; the full RAG2 path used `recall_agent`, selected `conversation_progress`, and answered `记得，用户将在 9:30 接走该角色。`.
+- Stage 5 final deterministic evidence: `venv\Scripts\python.exe -m pytest tests\test_rag_recall_agent.py -q` passed 9 tests. `venv\Scripts\python.exe -m pytest tests\test_rag_projection.py tests\test_persona_supervisor2_rag2_integration.py tests\test_rag_initializer_cache2.py tests\test_consolidator_facts_rag2.py -q` passed 28 tests.
+- Stage 5 final static evidence: `venv\Scripts\python.exe -m py_compile src\kazusa_ai_chatbot\rag\recall_agent.py src\kazusa_ai_chatbot\db\scheduled_events.py src\kazusa_ai_chatbot\nodes\persona_supervisor2.py src\kazusa_ai_chatbot\nodes\persona_supervisor2_rag_supervisor2.py src\kazusa_ai_chatbot\nodes\persona_supervisor2_rag_projection.py src\kazusa_ai_chatbot\nodes\persona_supervisor2_consolidator_facts.py` passed. Runtime prompt render passed for the edited RAG2 and consolidator prompts. Cognition no-touch check produced no output. `git diff --check` reported only CRLF warnings, no whitespace errors.
 
 ## Acceptance Criteria
 

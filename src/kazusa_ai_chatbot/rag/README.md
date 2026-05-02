@@ -34,6 +34,7 @@ The persona graph does not pass this raw shape directly to cognition. `stage_1_r
     "character_image": dict,
     "third_party_profiles": list[str],
     "memory_evidence": list[dict],
+    "recall_evidence": list[dict],
     "conversation_evidence": list[str],
     "external_evidence": list[dict],
     "supervisor_trace": {
@@ -128,6 +129,7 @@ The dispatcher first checks the slot prefix. Recognized prefixes map directly to
 | `Conversation-keyword:` | `conversation_keyword_agent` |
 | `Conversation-semantic:` | `conversation_search_agent` |
 | `Memory-search:` | `persistent_memory_search_agent` |
+| `Recall:` | `recall_agent` |
 | `Web-search:` | `web_search_agent2` |
 
 If a slot has no recognized prefix, the dispatcher falls back to semantic routing rules: identity resolution first, then user enumeration, profile reads when a `global_user_id` is already known, exact conversation search, aggregate conversation questions, structured conversation filters, fuzzy conversation search, persistent-memory search, and finally web search.
@@ -141,6 +143,7 @@ RAG 2 groups helper agents by semantic ownership:
 - **Identity and profile retrieval** resolves users, enumerates users, reads user or character profile bundles, and ranks relationship-like profile state.
 - **Conversation retrieval** searches or filters historical messages by semantic query, keyword, structured filters, or aggregate questions.
 - **Persistent memory retrieval** searches durable memory records by semantic query or exact keyword.
+- **Recall retrieval** reconciles active agreements, ongoing promises, plans, open loops, and current-episode state.
 - **External retrieval** performs web search and URL reads when the required fact is outside local storage.
 
 Each helper agent exposes the same high-level contract:
@@ -182,6 +185,7 @@ The dispatcher-visible helper agents are:
 | `conversation_search_agent` | Performs semantic conversation recall when the topic is fuzzy or the exact wording is unknown. It is the fallback for conversation content after filters and keywords are unsuitable. |
 | `persistent_memory_keyword_agent` | Searches durable memories by exact keyword or phrase, useful for tags, event names, and proper nouns. |
 | `persistent_memory_search_agent` | Searches durable memories semantically for impressions, commitments, facts, and other remembered knowledge when exact wording is unknown. |
+| `recall_agent` | Reconciles active agreements, ongoing promises, current plans, open loops, and current-episode state from scoped progress, active commitments, pending scheduled events, and gated transcript proof. It is volatile and has no Cache 2 namespace. |
 | `web_search_agent2` | Searches or reads public web content when the requested fact cannot come from local profiles, memories, or conversation history. |
 
 Most agents are evidence retrievers. They should answer "what was found?" rather than "what should Kazusa think about it?" The only ranking-style agents still return factual rankings from stored data or message counts; interpretation remains downstream.
@@ -208,6 +212,7 @@ Each fact recorded by the supervisor keeps both operational and provenance infor
 - structured profile/image bundles remain structured,
 - conversation evidence is summarized,
 - persistent-memory and external evidence keep short clipped evidence text,
+- recall evidence keeps the selected claim plus provenance, source freshness, conflicts, and bounded candidates,
 - dispatch trace remains available as retrieval telemetry, not as factual proof.
 
 This keeps cognition grounded without flooding prompts with raw search hits.
@@ -265,6 +270,12 @@ RAG evidence should not encode persona stance, emotional interpretation, or user
 The consolidator also reads the projected `rag_result`.
 
 RAG 2 retrieval does not itself write new durable knowledge. Durable writes happen later in the background consolidation path after cognition and dialog have completed. Cache invalidation is tied to those successful durable writes, not to whether a RAG result was used by cognition.
+
+`recall_evidence` is operational provenance for agreements, promises, plans, and
+current episode progress. A progress-only recall can guide the current reply but
+does not by itself authorize a durable character fact. The consolidator should
+require user input, durable memory, conversation evidence, or external evidence
+before turning recalled progress into stable knowledge.
 
 This keeps ownership clear:
 

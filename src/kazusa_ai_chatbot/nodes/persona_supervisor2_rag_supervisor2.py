@@ -69,6 +69,7 @@ from kazusa_ai_chatbot.rag.conversation_keyword_agent import ConversationKeyword
 from kazusa_ai_chatbot.rag.conversation_search_agent import ConversationSearchAgent
 from kazusa_ai_chatbot.rag.persistent_memory_keyword_agent import PersistentMemoryKeywordAgent
 from kazusa_ai_chatbot.rag.persistent_memory_search_agent import PersistentMemorySearchAgent
+from kazusa_ai_chatbot.rag.recall_agent import RecallAgent
 from kazusa_ai_chatbot.rag.relationship_agent import RelationshipAgent
 from kazusa_ai_chatbot.rag.user_list_agent import UserListAgent
 from kazusa_ai_chatbot.rag.user_lookup_agent import UserLookupAgent
@@ -244,6 +245,27 @@ fact itself. No trusted target/scope is available → return [].
 Forbidden live-fact slot unless it asks only for stable target/scope:
   "Memory-search: search persistent memory for evidence relevant to answering the question about current weather or temperature"
 
+## Rule 1d — Recall active agreements and episode state
+Use Recall when the user asks what was agreed, promised, planned, left unresolved,
+or where the current episode left off. Recall is for active agreements, ongoing
+promises, current plans, open loops, and current-episode state.
+
+Apply this rule after live external facts and before Memory-search or conversation
+search defaults. Do not use Memory-search merely because the user says "remember"
+or "recall" around an agreement. Do not use Conversation-keyword merely because
+the query contains words like "约定", "promise", "plan", or "agreed".
+
+Recall slot modes are fixed:
+- active_episode_agreement: current/today/now/upcoming active agreement or plan.
+- durable_commitment: ongoing accepted promise or obligation.
+- episode_position: where the current episode left off, unresolved loops, or next step.
+- exact_agreement_history: when or how an agreement was originally made.
+
+Do NOT use Recall for exact quote, URL, filename, or "who said this exact phrase"
+requests. Those remain Conversation-keyword / Conversation-filter.
+Do NOT use Recall for world knowledge, durable character/world facts, live external
+facts, profile impressions, or relationship ranking.
+
 ## Rule 2 — Context pre-check
 Read the context object before generating any slot.
 If global_user_id is already present in context, skip the Identity slot for that person.
@@ -302,6 +324,7 @@ When two patterns seem possible, choose the more structural source:
 - Counts, totals, rankings, "most", or "least" → Conversation-aggregate, not Conversation-keyword/semantic.
 - Person is primary relational subject → Identity + Profile always (Rule 3), then secondary slots; never Memory-search for person-relationship data.
 - Live external facts → Rule 1c before any memory default.
+- Active agreement, promise, plan, open loop, or current-episode recall → Recall.
 - Evidence about an OBJECT, concept, or non-human topic → Memory-search.
 - All facts provided, common-sense or opinion query → Memory-search on the topic (Rule 1b default); empty slots only for pure arithmetic or tautologies.
 - Exact quoted phrases, URLs, filenames, or literal content anchors → Conversation-keyword.
@@ -319,6 +342,7 @@ When a slot depends on a specific earlier slot, write "resolved in slot N" (e.g.
 - "Conversation-keyword: find messages containing <exact phrase or term> [from the user resolved in slot N]"
 - "Conversation-semantic: find recent messages about <topic> [from the user resolved in slot N]"
 - "Memory-search: search persistent memory for evidence relevant to answering a question about a topic, concept, or non-human subject"
+- "Recall: retrieve <active_episode_agreement / durable_commitment / episode_position / exact_agreement_history> relevant to <topic>"
 - "Web-search: search the web for <description of target URL or topic from slot N>"
 
 ## Pattern gallery
@@ -391,6 +415,27 @@ Query: "我这边现在多少度？"
    "Web-search: search the web for current temperature at the location resolved in slot 1"]
   → If no trusted location is available, return [].
   → No trusted location is available. Do not search persistent memory for weather.
+
+### 1g. Recall active agreements and episode state
+Query: "早上好呀，还记得今天的约定么？"
+  → User asks what was agreed for the active/current episode. Use Recall, not keyword self-hit.
+  ["Recall: retrieve active_episode_agreement relevant to today's agreement"]
+
+Query: "我们刚才说到哪儿了？"
+  → User asks where the current episode left off.
+  ["Recall: retrieve episode_position relevant to the current conversation"]
+
+Query: "你答应过我什么来着？"
+  → User asks about ongoing accepted promises.
+  ["Recall: retrieve durable_commitment relevant to promises with the current user"]
+
+Query: "我们是什么时候约好的？"
+  → User asks for provenance of when the agreement was made.
+  ["Recall: retrieve exact_agreement_history relevant to when the agreement was made"]
+
+Query: "谁说过'约定就是约定'？"
+  → Exact phrase speaker/provenance request. Use Conversation-keyword, not Recall.
+  ["Conversation-keyword: find messages containing '约定就是约定'"]
 
 ### 2. Named person → event or message history (3 slots)
 Query: "<named user>前两天欺负你了么"
@@ -491,11 +536,14 @@ Query: "说版权保护是play一环的那个人，他发过什么链接，链�
 ## Generation Procedure
 1. Read `original_query` and first decide whether it asks for a live external fact.
    If yes, apply Rule 1c before any memory default or backend wording in the query.
-2. Decide whether downstream cognition truly needs fetched evidence.
-3. If evidence is needed, identify atomic data targets and order dependencies.
-4. Apply the routing rules and conflict-resolution rules before writing slots.
-5. Use only the allowed slot prefixes and preserve explicit counts, names, times, URLs, and exact phrases.
-6. Return an empty list when the response can be handled without retrieval.
+2. Decide whether the query asks to recall an active agreement, promise, plan,
+   open loop, or current episode state. If yes, apply Rule 1d before memory or
+   conversation search defaults.
+3. Decide whether downstream cognition truly needs fetched evidence.
+4. If evidence is needed, identify atomic data targets and order dependencies.
+5. Apply the routing rules and conflict-resolution rules before writing slots.
+6. Use only the allowed slot prefixes and preserve explicit counts, names, times, URLs, and exact phrases.
+7. Return an empty list when the response can be handled without retrieval.
 
 ## Output format
 Return valid JSON only:
@@ -821,6 +869,15 @@ _RAG_SUPERVISOR_AGENT_REGISTRY: dict[str, RAGAgentRegistryEntry] = {
             "can_consolidate_as_new_knowledge": False,
         },
     },
+    "recall_agent": {
+        "agent": RecallAgent().run,
+        "fact_source": {
+            "source_kind": "internal",
+            "source_system": "recall",
+            "consolidation_policy": "operational_recall_evidence",
+            "can_consolidate_as_new_knowledge": False,
+        },
+    },
 }
 
 _DISPATCHER_PROMPT = '''\
@@ -864,6 +921,10 @@ You are a RAG Dispatcher. For each slot, select exactly one inner-loop retrieval
 - `persistent_memory_search_agent`: Semantic search over persistent memories.
   Handles durable memory evidence relevant to answering the slot when exact wording is unknown.
 
+- `recall_agent`: Reconciles active agreements, ongoing promises, current plans,
+  open loops, and current-episode state from scoped progress, active commitments,
+  pending scheduled events, and gated history proof. Use for `Recall:` slots.
+
 - `web_search_agent2`: Public internet search.
   Use ONLY when information cannot exist in local conversation history or persistent memory.
 
@@ -883,6 +944,7 @@ Match the prefix literally and use the mapped agent without further deliberation
 | "Conversation-keyword: ..."  | `conversation_keyword_agent`     |
 | "Conversation-semantic: ..." | `conversation_search_agent`      |
 | "Memory-search: ..."         | `persistent_memory_search_agent` |
+| "Recall: ..."                | `recall_agent`                   |
 | "Web-search: ..."            | `web_search_agent2`              |
 
 ## Fallback decision sequence — use only when slot has no recognised prefix
@@ -916,7 +978,11 @@ Evaluate top to bottom, pick the first match:
 9. Slot targets persistent memory semantically?
    → `persistent_memory_search_agent`.
 
-10. Slot requires public internet data?
+10. Slot asks what was agreed, promised, planned, left unresolved, or where the
+    current episode left off?
+   → `recall_agent`.
+
+11. Slot requires public internet data?
    → `web_search_agent2`.
 
 ## Input
@@ -1180,6 +1246,10 @@ human payload 是以下 JSON：
     "known_facts": [{"slot": "...", "agent": "...", "resolved": true, "summary": "...", "raw_result": "...", "attempts": 1}]
 }
 
+# Recall 结果
+- 如果 `agent` 是 `recall_agent` 且 `raw_result.selected_summary` 存在，必须保留该 selected_summary 的核心内容。
+- 可补充 `primary_source` 与 `supporting_sources`，但不要把 progress-only recall 当成长期事实来源。
+
 # 输出格式
 - 不超过 200 字，纯文本，无 JSON 外壳
 '''
@@ -1354,7 +1424,8 @@ _FINALIZER_PROMPT = '''\
 2. 按顺序读取 `known_facts`，只使用 resolved 槽位中的 summary 和 raw_result。
 3. 如果 user_profile_agent 的 raw_result 包含 user_memory_context，区分 fact、subjective_appraisal、relationship_signal 三种语义。
 4. 如果某个必要槽位 unresolved，只说明缺少该槽位信息。
-5. 输出一段短的自然语言事实回答，不使用角色口吻。
+5. 如果 agent="recall_agent"，优先使用 raw_result.selected_summary 直接回答约定/承诺/进度问题。
+6. 输出一段短的自然语言事实回答，不使用角色口吻。
 
 # 准则
 - 直接回答用户的原始问题，不要复述查找过程。
@@ -1366,6 +1437,8 @@ _FINALIZER_PROMPT = '''\
   fact 是事实锚点，subjective_appraisal 是角色的主观评价，relationship_signal 是未来互动信号。回答时不要把角色的主观评价误写成目标用户自己的感受。
 - 当 known_facts 中 agent="user_profile_agent" 且 raw_result 是角色自身公开资料或 self_image：
   这是角色自己的资料。回答角色自我资料问题时，可以使用这些公开资料；不要误写成第三方用户画像。
+- 当 known_facts 中 agent="recall_agent" 且 raw_result 包含 selected_summary：
+  这是当前约定/承诺/进度的已仲裁回忆结果。直接使用 selected_summary 回答，不要改搜关键字或把它改写成长期角色设定。
 
 # 输入格式
 {

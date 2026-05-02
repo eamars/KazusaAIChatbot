@@ -94,6 +94,8 @@ async def stage_1_research(state: GlobalPersonaState) -> dict:
             "chat_history_wide": state["chat_history_wide"],
             "reply_context": state["reply_context"],
             "indirect_speech_context": state["indirect_speech_context"],
+            "conversation_progress": state.get("conversation_progress"),
+            "conversation_episode_state": state.get("conversation_episode_state"),
         },
     )
     rag_result = project_known_facts(
@@ -118,6 +120,7 @@ async def stage_1_research(state: GlobalPersonaState) -> dict:
         f'character_image={bool(rag_result["character_image"])} '
         f'third_party_profiles={len(rag_result["third_party_profiles"])} '
         f'memory_evidence={len(rag_result["memory_evidence"])} '
+        f'recall_evidence={len(rag_result["recall_evidence"])} '
         f'conversation_evidence={len(rag_result["conversation_evidence"])} '
         f'external_evidence={len(rag_result["external_evidence"])} '
         f"rag_result={log_preview(rag_result)}"
