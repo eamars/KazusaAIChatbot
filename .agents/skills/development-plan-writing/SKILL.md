@@ -82,6 +82,7 @@ Start each plan with a compact human-readable summary:
 - Goal:
 - Plan class:
 - Status:
+- Mandatory skills:
 - Overall cutover strategy:
 - Highest-risk areas:
 - Acceptance criteria:
@@ -119,6 +120,7 @@ Every final plan must include these sections:
 ```md
 ## Summary
 ## Context
+## Mandatory Skills
 ## Mandatory Rules
 ## Must Do
 ## Deferred
@@ -137,13 +139,36 @@ Add these sections whenever relevant:
 
 ```md
 ## Data Migration
-## Rollback / Recovery
 ## Risks
 ## LLM Call And Context Budget
 ## Operational Steps
 ## Execution Evidence
 ## Glossary
 ```
+
+## Mandatory Skills
+
+Each plan must explicitly name every skill the implementation agent is required to load before making changes. Do not rely on the agent inferring mandatory skills from the repo, the task, memories, or surrounding conversation.
+
+Use a short, concrete list:
+
+```md
+## Mandatory Skills
+
+- `py-style`: load before editing Python files.
+- `test-style-and-execution`: load before adding, changing, or running tests.
+- `local-llm-architecture`: load before changing prompt, graph, RAG, memory, cognition, dialog, evaluator, or background LLM behavior.
+```
+
+If no specialized skill is required, state that explicitly:
+
+```md
+## Mandatory Skills
+
+- No specialized skill is required for this plan.
+```
+
+For plans that touch multiple domains, list the skills in the order the agent should load them and state which stage each skill governs. The plan must also copy the critical skill-derived rules into `Mandatory Rules`; naming a skill is not enough because implementation agents may lose context after compaction.
 
 ## Mandatory Rules
 
@@ -159,6 +184,7 @@ Include rules such as:
 - LLM call and context budget rules for prompt, agent, RAG, cognition, dialog, evaluator, or background LLM changes
 - database safety rules
 - forbidden filtering or validation patterns
+- target-module boundary rules for changes outside the primary module
 - required skill-derived practices, copied into the plan
 
 Write the rules directly in the plan. It is acceptable and often desirable to duplicate important skill content here.
@@ -243,6 +269,8 @@ Recommended language:
 
 - The agent may choose local implementation mechanics only when they preserve the contracts in this plan.
 - The agent must not introduce new architecture, alternate migration strategies, compatibility layers, fallback paths, or extra features.
+- The agent must treat changes outside the target module as high-scrutiny changes. Updating an existing module outside the target module, or introducing a new code path, prompt, or variable, requires strong justification in the plan before implementation.
+- The agent may remove code from the existing codebase with lighter justification when the removal is explicitly in scope and verified by references, greps, and tests.
 - The agent must not perform unrelated cleanup, formatting churn, dependency upgrades, prompt rewrites, or broad refactors unless explicitly listed in Must Do.
 - If the plan and code disagree, the agent must preserve the plan's stated intent and report the discrepancy.
 - If a required instruction is impossible, the agent must stop and report the blocker instead of inventing a substitute.
@@ -268,14 +296,31 @@ Describe the current state, target state, and why the change exists.
 
 Good context includes:
 
+- the user request or product/problem pressure driving the change
+- concrete failure mode, missing capability, maintenance burden, risk, or workflow pain that makes the change necessary now
 - old architecture and new architecture
 - exact state/data shape changes
 - production vs test-only status
 - known consumers
 - external systems affected
 - why legacy behavior is being removed or preserved
+- relevant previous attempts, completed plans, incidents, or code comments if they explain constraints
+- adjacent improvement areas discovered during planning that are intentionally deferred
 
 Target state should describe observable end behavior, not just files changed.
+
+When listing adjacent improvement areas, keep them concise and non-authorizing. They are context for future planning, not permission for the implementation agent to expand scope:
+
+```md
+## Context
+
+This change is driven by ...
+
+Adjacent improvement areas intentionally left for later plans:
+
+- ...
+- ...
+```
 
 ## Design Decisions
 
@@ -351,16 +396,50 @@ For each path, explain why it is in that group. Use stable file paths and symbol
 
 When creating a new module, list the module's public entrypoint separately from its internals. Existing code should depend on the public entrypoint, not on private storage, prompt, cache, or helper files.
 
+Every plan must name the target module or target ownership boundary. Any change outside that boundary must include strong justification in `Change Surface` or `Design Decisions`, especially when it updates an existing module or introduces a new code path, prompt, or variable. Strong justification means the plan explains why the target module cannot own the behavior, why the outside change is necessary for the approved contract, and how tests or greps will prove the change stayed bounded.
+
+Code removal is less constrained by this rule when the removal is already in scope. For delete-only work, require enough evidence to show the deleted code is obsolete or unreferenced, but do not force the same level of justification required for adding or expanding behavior outside the target module.
+
 ## Implementation Order
 
 Implementation order must prevent avoidable breakage and agent improvisation.
 
-Good ordering:
+Default to a module-first, test-first order. The plan should prove the module contract before implementation, then prove integration after the module is stable. For LLM, database, migration, or production-path changes, include the focused module test and the relevant integration, real LLM, real database, migration dry-run, or smoke test needed to cover the actual risk.
+
+Every final plan must include this general sequence unless a step is truly inapplicable:
+
+1. Add or update module tests.
+   - Name the exact test file, test function, fixture, or diagnostic that proves the target module contract.
+   - Run the module test before implementation when applicable and record the expected failure, missing symbol, missing entrypoint, or baseline result.
+2. Add or update integration tests.
+   - Name the exact integration, real LLM, real database, migration, smoke, or cross-module test that proves callers can use the module correctly.
+   - Run the integration test before implementation when practical and record the failure mode or current behavior.
+3. Implement the module.
+   - Keep the behavior inside the target module and approved public interface whenever possible.
+   - Do not update existing outside modules or introduce new code paths, prompts, or variables without the strong justification required in `Change Surface`.
+4. Run module tests.
+   - Re-run the same module test from step 1.
+   - Record the result in `Execution Evidence`.
+5. Loop back to step 1 if needed.
+   - If the module test fails or reveals an incomplete contract, update the module test or module implementation only to match the approved plan, then repeat steps 1, 3, and 4 before touching integration.
+6. Implement integration.
+   - Wire existing callers, adapters, prompts, database paths, or service entrypoints to the module only after module tests pass.
+   - Keep integration edits inside the approved change surface.
+7. Run integration tests.
+   - Re-run the same integration test from step 2.
+   - Then run any broader verification gates listed in `Verification`.
+   - Record the result in `Execution Evidence`.
+8. Loop back to step 1 if needed.
+   - If integration exposes a module contract problem, return to module tests before changing integration again.
+   - If integration exposes only wiring behavior, update integration and re-run the integration test.
+
+For low-risk documentation-only plans, explicitly state that the module/integration test-first sequence is not applicable and replace it with a before/after review gate.
+
+Additional ordering guidance:
 
 - create the new contract first
 - rewrite consumers next
 - wire the new entrypoint
-- add or update tests
 - delete legacy modules after references are gone
 - run greps and smoke tests last
 
@@ -455,24 +534,6 @@ This plan is complete when:
 - New tests for projection and Cache2 invalidation pass.
 - Legacy MongoDB collections are absent through the approved migration path.
 ```
-
-## Rollback / Recovery
-
-Required for destructive or production-affecting plans.
-
-Include:
-
-```md
-## Rollback / Recovery
-
-- Code rollback path:
-- Data rollback path:
-- Irreversible operations:
-- Required backup:
-- Recovery verification:
-```
-
-If rollback is impossible after a step, say so plainly and include the required precondition, such as a database backup.
 
 ## Risks
 
