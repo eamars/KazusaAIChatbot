@@ -271,6 +271,7 @@ Recommended language:
 - The agent must not introduce new architecture, alternate migration strategies, compatibility layers, fallback paths, or extra features.
 - The agent must treat changes outside the target module as high-scrutiny changes. Updating an existing module outside the target module, or introducing a new code path, prompt, or variable, requires strong justification in the plan before implementation.
 - The agent may remove code from the existing codebase with lighter justification when the removal is explicitly in scope and verified by references, greps, and tests.
+- If the agent is allowed to implement a helper or function, the agent must search the codebase first for existing equivalent behavior. If equivalent behavior already exists, abstract or move it into an appropriate common location instead of duplicating it. For Python code, this extraction must follow `py-style` guidance.
 - The agent must not perform unrelated cleanup, formatting churn, dependency upgrades, prompt rewrites, or broad refactors unless explicitly listed in Must Do.
 - If the plan and code disagree, the agent must preserve the plan's stated intent and report the discrepancy.
 - If a required instruction is impossible, the agent must stop and report the blocker instead of inventing a substitute.
