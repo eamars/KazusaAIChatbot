@@ -80,7 +80,9 @@ async def _run_initializer_case(
     case_id: str,
     query: str,
     expected_prefixes: list[str],
+    required_slot_fragments: list[str] | None = None,
     forbidden_prefixes: list[str] | None = None,
+    forbidden_slot_fragments: list[str] | None = None,
 ) -> list[str]:
     """Run one live initializer case and write an inspectable trace."""
 
@@ -99,7 +101,9 @@ async def _run_initializer_case(
             "raw_initializer_output": result,
             "parsed_slots": unknown_slots,
             "expected_prefixes": expected_prefixes,
+            "required_slot_fragments": required_slot_fragments or [],
             "forbidden_prefixes": forbidden_prefixes or [],
+            "forbidden_slot_fragments": forbidden_slot_fragments or [],
             "judgment": "manual_review_required_for_capability_route_quality",
         },
     )
@@ -110,10 +114,67 @@ async def _run_initializer_case(
 
     for prefix in expected_prefixes:
         assert any(slot.startswith(prefix) for slot in unknown_slots)
+    for fragment in required_slot_fragments or []:
+        assert any(fragment in slot for slot in unknown_slots)
     for prefix in forbidden_prefixes or []:
         assert not any(slot.startswith(prefix) for slot in unknown_slots)
+    for fragment in forbidden_slot_fragments or []:
+        assert not any(fragment in slot for slot in unknown_slots)
 
     return unknown_slots
+
+
+async def test_live_initializer_routes_current_time_to_runtime_live_context(
+    monkeypatch,
+) -> None:
+    """Bare current time should route to the runtime-backed Live-context form."""
+
+    await _run_initializer_case(
+        monkeypatch,
+        "current_time_to_runtime_live_context",
+        '现在几点？',
+        ["Live-context:"],
+        required_slot_fragments=["active character current local time"],
+        forbidden_slot_fragments=["unknown location", "Runtime-context:"],
+    )
+
+
+async def test_live_initializer_routes_current_date_to_runtime_live_context(
+    monkeypatch,
+) -> None:
+    """Bare current date should route to the runtime-backed Live-context form."""
+
+    await _run_initializer_case(
+        monkeypatch,
+        "current_date_to_runtime_live_context",
+        '今天几号？',
+        ["Live-context:"],
+        required_slot_fragments=["active character current local date"],
+        forbidden_slot_fragments=[
+            "unknown target",
+            "unknown location",
+            "Runtime-context:",
+        ],
+    )
+
+
+async def test_live_initializer_routes_current_weekday_to_runtime_live_context(
+    monkeypatch,
+) -> None:
+    """Bare current weekday should route to the runtime-backed Live-context form."""
+
+    await _run_initializer_case(
+        monkeypatch,
+        "current_weekday_to_runtime_live_context",
+        '今天星期几？',
+        ["Live-context:"],
+        required_slot_fragments=["active character current local weekday"],
+        forbidden_slot_fragments=[
+            "unknown target",
+            "unknown location",
+            "Runtime-context:",
+        ],
+    )
 
 
 async def test_live_initializer_routes_active_agreement_to_recall(monkeypatch) -> None:

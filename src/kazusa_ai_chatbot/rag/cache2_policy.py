@@ -14,7 +14,7 @@ from kazusa_ai_chatbot.rag.cache2_runtime import stable_cache_key
 
 INITIALIZER_CACHE_NAME = "rag2_initializer"
 INITIALIZER_POLICY_VERSION = "initializer:v1"
-INITIALIZER_PROMPT_VERSION = "initializer_prompt:v14"
+INITIALIZER_PROMPT_VERSION = "initializer_prompt:v15"
 INITIALIZER_AGENT_REGISTRY_VERSION = "rag_supervisor2_registry:v2"
 INITIALIZER_STRATEGY_SCHEMA_VERSION = "initializer_strategy_schema:v1"
 

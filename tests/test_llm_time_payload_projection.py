@@ -285,6 +285,28 @@ def test_tool_result_projects_character_recent_window_times() -> None:
 
 
 # ---------------------------------------------------------------------------
+# Runtime-backed live-context output
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_live_context_runtime_result_has_no_utc_leak() -> None:
+    """Runtime-backed live-context output should expose only sanitized local strings."""
+    from kazusa_ai_chatbot.rag.live_context_agent import LiveContextAgent
+
+    agent = LiveContextAgent()
+    result = await agent.run(
+        "Live-context: answer active character current local time",
+        {"time_context": _TIME_CONTEXT},
+    )
+
+    assert result["resolved"] is True
+    assert result["result"]["primary_worker"] == "runtime_context_provider"
+    assert result["result"]["projection_payload"]["url"] == ""
+    _assert_no_utc_leak(result, "$.live_context_runtime_result")
+
+
+# ---------------------------------------------------------------------------
 # Normalize future promises converts local due_time to UTC
 # ---------------------------------------------------------------------------
 
@@ -473,6 +495,9 @@ def test_cognition_helpers_project_rag_and_history_times() -> None:
                 "target_source": "unknown",
                 "target": "",
                 "missing_context": [],
+                "selected_summary": "No summary.",
+                "projection_payload": {},
+                "worker_payloads": {},
             },
         ),
         (
@@ -510,7 +535,14 @@ async def test_top_level_rag_selector_payload_projects_known_facts(
 
     module = importlib.import_module(module_name)
     llm = _CapturingAsyncLLM(response_payload)
-    monkeypatch.setattr(module, "_selector_llm", llm)
+    selector_function_name = "_select_plan"
+    payload_path = f"$.{module_name}._select_plan"
+    if module_name == "kazusa_ai_chatbot.rag.live_context_agent":
+        monkeypatch.setattr(module, "_external_live_selector_llm", llm)
+        selector_function_name = "_select_external_live_plan"
+        payload_path = f"$.{module_name}._select_external_live_plan"
+    else:
+        monkeypatch.setattr(module, "_selector_llm", llm)
     monkeypatch.setattr(module, "_deterministic_plan", lambda task: None)
     context = {
         "original_query": "selector test",
@@ -532,9 +564,10 @@ async def test_top_level_rag_selector_payload_projects_known_facts(
         ],
     }
 
-    await module._select_plan("selector-only neutral slot", context)
+    selector_function = getattr(module, selector_function_name)
+    await selector_function("selector-only neutral slot", context)
 
     payload = json.loads(llm.messages[1].content)
-    _assert_no_utc_leak(payload, f"$.{module_name}._select_plan")
+    _assert_no_utc_leak(payload, payload_path)
     payload_json = json.dumps(payload, ensure_ascii=False)
     assert "2026-05-03 08:00" in payload_json

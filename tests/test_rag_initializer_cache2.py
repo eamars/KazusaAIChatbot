@@ -243,7 +243,7 @@ def test_initializer_prompt_declares_recall_route() -> None:
 def test_initializer_prompt_version_bumped_for_capability_cutover() -> None:
     """Capability-layer prompt changes must invalidate initializer strategies."""
 
-    assert cache2_policy.INITIALIZER_PROMPT_VERSION == "initializer_prompt:v14"
+    assert cache2_policy.INITIALIZER_PROMPT_VERSION == "initializer_prompt:v15"
 
 
 def test_initializer_prompt_documents_live_external_fact_contract() -> None:
@@ -252,28 +252,20 @@ def test_initializer_prompt_documents_live_external_fact_contract() -> None:
         character_name="<active character>",
     )
     required_fragments = [
-        "## Rule 2 — Live external facts",
-        "Live external facts are facts that change with real time",
-        "Use one `Live-context:` slot for every live external fact",
+        "## Rule 2 — Live context present-tense facts",
+        "Live-context owns present-tense facts needed for the current turn.",
+        "Use one `Live-context:` slot for every present-tense fact",
         "Each live slot must correspond to one live fact type directly requested",
-        "Do not add weather or temperature",
-        "Do not split character-location or user-location lookup into separate",
+        "do not split character-location or user-location",
+        "Bare current-time questions are active-character runtime",
+        "Live-context: answer active character current local <time / date / weekday>",
+        "Live-context: answer current user local time if configured",
+        "Examples below are boundary anchors, not an exhaustive routing table.",
+        "Query: \"现在几点？\"",
         "This rule overrides memory defaults and backend wording",
         "Query: \"What's the current temperature in Auckland?\"",
         "Live-context: answer current temperature for explicit location Auckland",
-        "Query: \"What's the current temperature?\"",
-        "Live fact but no trusted location. Let Live-context report missing location.",
-        "Query: \"Search persistent memory for any information regarding the current weather or temperature.\"",
-        "Backend wording says memory, but current weather is live external data and no location is available.",
-        "Live-context: answer current weather or temperature for unknown location",
-        "Query: \"What's the current USD to NZD exchange rate?\"",
-        "Live-context: answer current exchange rate for explicit target USD to NZD",
-        "Query: \"先说好啊可不是怂哦，就只是想看看到时候游乐场开不开门哼\"",
-        "Live-context: answer current opening status for unknown target",
-        "Query: \"你那边现在多少度？\"",
-        "Live-context: answer current temperature for the active character's location",
-        "Query: \"我这边现在多少度？\"",
-        "Live-context: answer current temperature for the current user's location if recently stated",
+        "unknown location/target",
     ]
 
     missing_fragments = [
@@ -283,6 +275,8 @@ def test_initializer_prompt_documents_live_external_fact_contract() -> None:
     ]
 
     assert missing_fragments == []
+    assert "Live-context: answer current time for unknown location" not in rendered_prompt
+    assert "Runtime-context:" not in rendered_prompt
 
 
 def test_normalize_initializer_slots_does_not_stringify_container_items() -> None:
@@ -660,7 +654,7 @@ async def test_rag_initializer_payload_projects_runtime_context(monkeypatch) -> 
     )
 
 
-def test_initializer_prompt_version_bumps_to_v14_for_capability_contract() -> None:
+def test_initializer_prompt_version_bumps_to_v15_for_capability_contract() -> None:
     """Prompt version should reflect the current initializer contract."""
 
-    assert supervisor2_module.INITIALIZER_PROMPT_VERSION == "initializer_prompt:v14"
+    assert supervisor2_module.INITIALIZER_PROMPT_VERSION == "initializer_prompt:v15"

@@ -190,55 +190,58 @@ ranking, or web content.
   search, semantic search, filters, aggregates, profile reads, relationship reads,
   memory exact search, memory semantic search, or target/scope lookup internally.
 
-## Rule 2 — Live external facts
-Live external facts are facts that change with real time and require fresh external
-evidence, such as current weather or temperature, live prices, exchange rates,
-market quotes, live scores, opening status, current availability, latest news,
-or other explicitly current/up-to-date public facts.
+## Rule 2 — Live context present-tense facts
+Live-context owns present-tense facts needed for the current turn.
+This includes:
+- active-character current local time, current local date, and current local weekday,
+- current user local time only if runtime context already provides it,
+- live external facts that require fresh public evidence, such as current weather
+  or temperature, live prices, exchange rates, market quotes, live scores,
+  opening status, current availability, latest news, or other explicitly current
+  public facts.
 
-Use one `Live-context:` slot for every live external fact. The live-context
-capability resolves target/scope internally and then fetches fresh public
-evidence. Do not split character-location or user-location lookup into separate
-memory/conversation slots.
+Use one `Live-context:` slot for every present-tense fact. The live-context
+capability either answers from current runtime context or resolves target/scope
+internally and then fetches fresh public evidence.
+For external live slots, do not split character-location or user-location
+lookup into separate memory/conversation slots. The live-context capability
+owns target/scope resolution for those external live slots.
+
 Each live slot must correspond to one live fact type directly requested by the
 user. If the user asks whether a venue is open, do not also add weather,
 temperature, travel, price, or schedule slots unless those facts were requested.
 
-Write the live slot so the target source is clear:
+Runtime-backed live slots are limited to active-character current local
+time/date/weekday, plus current-user local time only when runtime context is
+already configured. Bare current-time questions are active-character runtime
+facts; do not attach `unknown location` to them.
+
+For external live facts, write the live slot so the target source is clear:
 - explicit target or location supplied by the user,
 - the active character's location,
 - the current user's location if recently stated,
 - unknown location/target when the query lacks enough scope.
 
-Examples:
-- `Live-context: answer current temperature for explicit location Auckland`
-- `Live-context: answer current opening status for explicit target Christchurch Adventure Park`
-- `Live-context: answer current temperature for the active character's location`
-- `Live-context: answer current temperature for the current user's location if recently stated`
-- `Live-context: answer current temperature for unknown location`
-
 This rule overrides memory defaults and backend wording. If original_query says
 "search memory" but asks about current weather, temperature, prices, exchange
-rates, opening status, or latest public facts, still use `Live-context:`.
+rates, opening status, latest public facts, or current local time/date/weekday,
+still use `Live-context:`.
 
 ## Rule 3 — Recall active agreements and episode state
 Use Recall when the user asks what was agreed, promised, planned, left unresolved,
 or where the current episode left off. Recall is for active agreements, ongoing
 promises, current plans, open loops, and current-episode state.
-
-Apply this rule after live external facts and before memory or conversation
+Apply this rule after present-tense live facts and before memory or conversation
 defaults. Do not search conversation merely because the query contains words
 like "约定", "promise", "plan", or "agreed".
-
 Recall slot modes are fixed:
 - active_episode_agreement: current/today/now/upcoming active agreement or plan.
 - durable_commitment: ongoing accepted promise or obligation.
 - episode_position: where the current episode left off, unresolved loops, or next step.
 - exact_agreement_history: when or how an agreement was originally made.
-
 Do not use Recall for exact quote, URL, filename, or "who said this exact phrase"
 requests. Those are conversation evidence. Do not use Recall for world knowledge,
-durable character/world facts, live external facts, profile impressions, or
+durable character/world facts, present-tense live facts, profile impressions, or
 relationship ranking.
 
 ## Rule 4 — Person context
@@ -249,9 +252,6 @@ Use `Person-context:` for person/profile/relationship/user-list evidence:
 - relationship ranking over users,
 - enumerating users by display-name or profile predicates,
 - retrieving a profile for a speaker/person resolved in an earlier slot.
-
-The initializer should not decide profile vs relationship internals. Say what
-person context is needed semantically.
 
 If the query first needs to discover an unknown speaker by content, start with
 `Conversation-evidence:` and only then add `Person-context:` if profile or
@@ -306,7 +306,7 @@ the person comes from context in the `Person-context:` slot.
 
 ## Conflict resolution — choose the structural evidence source
 When two patterns seem possible, choose the more structural source:
-- Live external facts → Live-context.
+- Present-tense live facts → Live-context.
 - Active agreement, promise, plan, open loop, or current episode state → Recall.
 - Person/profile/relationship/user-list subject → Person-context.
 - Chat-history content, exact phrase, speaker, URL from a message, or message stats → Conversation-evidence.
@@ -316,6 +316,8 @@ When two patterns seem possible, choose the more structural source:
 ## Slot format — ALWAYS use one of these exact prefixes
 When a slot depends on a specific earlier slot, write "resolved in slot N" (e.g. "slot 1", "slot 3").
 
+- "Live-context: answer active character current local <time / date / weekday>"
+- "Live-context: answer current user local time if configured"
 - "Live-context: answer current <weather / temperature / opening status / price / exchange rate / schedule / availability / latest fact> for <explicit location/target X | the active character's location | the current user's location if recently stated | unknown location/target>"
 - "Conversation-evidence: retrieve <exact phrase / URL / recent messages / topic / count/ranking> [from the user resolved in slot N] [to identify the speaker] [time/count limit]"
 - "Memory-evidence: retrieve durable evidence about <official fact / address / common-sense topic / world fact / user memory topic>"
@@ -324,96 +326,56 @@ When a slot depends on a specific earlier slot, write "resolved in slot N" (e.g.
 - "Web-evidence: retrieve public web content for <explicit URL/topic | URL found in slot N>"
 
 ## Pattern gallery
+Examples below are boundary anchors, not an exhaustive routing table.
+Generalize from the rules above when the wording differs.
 
 ### 0. Character relationship preference / ranking
-Queries: "<character mention>你最喜欢谁？", "你最喜欢谁？", "<character mention>有喜欢的人了么", "<character mention>最讨厌谁？", "<character mention>最喜欢的三个人"
-  → Person-context owns relationship/user ranking; preserve count.
-  ["Person-context: rank users by active character relationship from top limit 1"]
-  ["Person-context: check whether a top-ranked relationship candidate exists"]
+Queries: "<character mention>你最喜欢谁？", "<character mention>最喜欢的三个人"
+   → Person-context owns relationship/user ranking; preserve count.
+   ["Person-context: rank users by active character relationship from top limit 1"]
+   ["Person-context: check whether a top-ranked relationship candidate exists"]
 
 ### 1. Named person → impression or compatibility
 Query: "<character mention>你觉得<named user>这个人怎么样"  (character_name=<active character>)
-  → <character mention> is addressee, skip. Person impression read needs person context.
-  → Same routing for "合得来么", "什么印象", "怎么样" — no secondary slot.
-  ["Person-context: retrieve profile/impression for display name <named user>"]
+   → <character mention> is addressee, skip. Person impression read needs person context.
+   ["Person-context: retrieve profile/impression for display name <named user>"]
 
 ### 1c. Provided facts → durable/common-sense memory
 Query: "我想洗车，我家距离洗车店只有 50 米，请问你推荐我走路去还是开车去呢？"
-  → All facts provided. Common-sense recommendation → memory evidence on the topic.
-  → Explicit hints ("根据你的记忆回答") and no-hint queries route identically.
-  ["Memory-evidence: retrieve durable evidence about 洗车, short walking distance, or nearby activities"]
+   → All facts provided. Common-sense recommendation → memory evidence on the topic.
+   ["Memory-evidence: retrieve durable evidence about 洗车, short walking distance, or nearby activities"]
 
 ### 1d. Character self-profile request
-Query: "<character mention>聊聊你自己"  (character_name=<active character>)
-  → <character mention> is addressed, but "你自己" is also the data subject. Retrieve the character's profile.
-  ["Person-context: retrieve active character profile"]
-
 Query: "<character mention>能做一个自我介绍么"  (character_name=<active character>)
-  → The requested action needs character self-profile evidence. Retrieve the character's profile.
-  ["Person-context: retrieve active character profile"]
+   → The requested action needs character self-profile evidence. Retrieve the character's profile.
+   ["Person-context: retrieve active character profile"]
 
 ### 1e. Routine interaction act with no evidence dependency
 Query: "<character mention><character mention>欢迎回来"  (character_name=<active character>)
-  → Greeting/welcome interaction. No person, memory, conversation, recall, live, or web evidence is needed.
-  []
+   → Greeting/welcome interaction. No person, memory, conversation, recall, live, or web evidence is needed.
+   []
 
-Query: "<character mention>辛苦啦"  (character_name=<active character>)
-  → Social acknowledgement. The next stage can respond directly without retrieval.
-  []
+### 1f. Live context present-tense facts
+Query: "现在几点？"
+   → Bare current-time question. Use active-character runtime local time.
+   ["Live-context: answer active character current local time"]
 
-### 1f. Live external facts
 Query: "What's the current temperature in Auckland?"
-  → Explicit location. Current temperature is live external data.
-  ["Live-context: answer current temperature for explicit location Auckland"]
-
-Query: "What's the current temperature?"
-  → Live fact but no trusted location. Let Live-context report missing location.
-  ["Live-context: answer current temperature for unknown location"]
-
-Query: "Search persistent memory for any information regarding the current weather or temperature."
-  → Backend wording says memory, but current weather is live external data and no location is available.
-  ["Live-context: answer current weather or temperature for unknown location"]
-
-Query: "What's the current USD to NZD exchange rate?"
-  → Explicit currency pair. Exchange rates are live external data.
-  ["Live-context: answer current exchange rate for explicit target USD to NZD"]
-
-Query: "先说好啊可不是怂哦，就只是想看看到时候游乐场开不开门哼"
-  → Opening status only. Do not add weather or temperature.
-  ["Live-context: answer current opening status for unknown target"]
-
-Query: "你那边现在多少度？"
-  → Character-local temperature. Live-context may use stable character location only as target/scope.
-  ["Live-context: answer current temperature for the active character's location"]
-
-Query: "我这边现在多少度？"
-  → User-local weather. Live-context may use recent same-user conversation for target/scope; no character fallback.
-  ["Live-context: answer current temperature for the current user's location if recently stated"]
+   → Explicit location. Current temperature is live external data.
+   ["Live-context: answer current temperature for explicit location Auckland"]
 
 ### 1g. Recall active agreements and episode state
 Query: "早上好呀，还记得今天的约定么？"
-  → User asks what was agreed for the active/current episode. Use Recall, not keyword self-hit.
-  ["Recall: retrieve active_episode_agreement relevant to today's agreement"]
-
-Query: "我们刚才说到哪儿了？"
-  → User asks where the current episode left off.
-  ["Recall: retrieve episode_position relevant to the current conversation"]
-
-Query: "你答应过我什么来着？"
-  → User asks about ongoing accepted promises.
-  ["Recall: retrieve durable_commitment relevant to promises with the current user"]
-
-Query: "我们是什么时候约好的？"
-  → User asks for provenance of when the agreement was made.
-  ["Recall: retrieve exact_agreement_history relevant to when the agreement was made"]
+   → User asks what was agreed for the active/current episode. Use Recall, not keyword self-hit.
+   ["Recall: retrieve active_episode_agreement relevant to today's agreement"]
 
 Query: "谁说过'约定就是约定'？"
-  → Exact phrase speaker/provenance request. Use conversation evidence, not Recall.
-  ["Conversation-evidence: retrieve exact phrase '约定就是约定' to identify the speaker"]
+   → Exact phrase speaker/provenance request. Use conversation evidence, not Recall.
+   ["Conversation-evidence: retrieve exact phrase '约定就是约定' to identify the speaker"]
 
 ### 2. Named person → event or message history
 Query: "<named user>前两天欺负你了么"
-  → Specific past event involving a person: get person context, then time-bounded conversation evidence.
+   → Specific past event involving a person: get person context, then time-bounded conversation evidence.
   ["Person-context: retrieve profile/impression for display name <named user>",
    "Conversation-evidence: retrieve messages from the user resolved in slot 1 from 2 days ago"]
 
@@ -509,7 +471,7 @@ Query: "你刚才把地址发给我了吗？"
 }}
 
 ## Generation Procedure
-1. Read `original_query` and first decide whether it asks for a live external fact.
+1. Read `original_query` and first decide whether it asks for a present-tense live fact.
    If yes, apply Rule 2 before any memory default or backend wording in the query.
 2. Decide whether the query asks to recall an active agreement, promise, plan,
    open loop, or current episode state. If yes, apply Rule 3 before memory or
@@ -916,9 +878,10 @@ You are a RAG Dispatcher. For each slot, select exactly one inner-loop retrieval
 
 ## Agent Roster
 
-- `live_context_agent`: Top-level live external context capability.
-  Resolves target/scope for weather, temperature, opening status, schedules,
-  prices, exchange rates, or current public status, then delegates to web.
+- `live_context_agent`: Top-level present-tense live context capability.
+  Answers runtime-backed current local time/date/weekday directly. For weather,
+  temperature, opening status, schedules, prices, exchange rates, or current
+  public status, resolves target/scope and then delegates to web.
   Use for `Live-context:` slots.
 
 - `conversation_evidence_agent`: Top-level conversation-history evidence capability.

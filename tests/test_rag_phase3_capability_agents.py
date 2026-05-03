@@ -246,6 +246,209 @@ async def test_live_context_opening_status_explicit_target() -> None:
 
 
 @pytest.mark.asyncio
+async def test_live_context_current_local_time_uses_runtime_state_only() -> None:
+    """Current character-local time should resolve from sanitized runtime state."""
+    agent = LiveContextAgent()
+    web_worker = _FakeWorker(_web_result("should not be called"))
+    memory_worker = _FakeWorker({"resolved": True, "result": []})
+    conversation_worker = _FakeWorker({"resolved": True, "result": []})
+    agent.web_agent = web_worker
+    agent.memory_search_agent = memory_worker
+    agent.conversation_search_agent = conversation_worker
+
+    result = await agent.run(
+        "Live-context: answer active character current local time",
+        _base_context(
+            time_context={
+                "current_local_datetime": "2026-05-03 14:53",
+                "current_local_weekday": "Sunday",
+            }
+        ),
+    )
+
+    assert result["resolved"] is True
+    assert result["result"]["primary_worker"] == "runtime_context_provider"
+    assert result["result"]["supporting_workers"] == []
+    assert result["result"]["worker_payloads"]["runtime_context_provider"] == {
+        "current_local_datetime": "2026-05-03 14:53",
+        "current_local_weekday": "Sunday",
+    }
+    assert "2026-05-03 14:53" in result["result"]["selected_summary"]
+    assert web_worker.calls == []
+    assert memory_worker.calls == []
+    assert conversation_worker.calls == []
+
+
+@pytest.mark.asyncio
+async def test_live_context_current_local_date_uses_runtime_state_only() -> None:
+    """Current character-local date should resolve from sanitized runtime state."""
+    agent = LiveContextAgent()
+    web_worker = _FakeWorker(_web_result("should not be called"))
+    memory_worker = _FakeWorker({"resolved": True, "result": []})
+    conversation_worker = _FakeWorker({"resolved": True, "result": []})
+    agent.web_agent = web_worker
+    agent.memory_search_agent = memory_worker
+    agent.conversation_search_agent = conversation_worker
+
+    result = await agent.run(
+        "Live-context: answer active character current local date",
+        _base_context(
+            time_context={
+                "current_local_datetime": "2026-05-03 14:53",
+                "current_local_weekday": "Sunday",
+            }
+        ),
+    )
+
+    assert result["resolved"] is True
+    assert result["result"]["primary_worker"] == "runtime_context_provider"
+    assert result["result"]["supporting_workers"] == []
+    assert "2026-05-03" in result["result"]["selected_summary"]
+    assert web_worker.calls == []
+    assert memory_worker.calls == []
+    assert conversation_worker.calls == []
+
+
+@pytest.mark.asyncio
+async def test_live_context_current_local_weekday_uses_runtime_state_only() -> None:
+    """Current character-local weekday should resolve from sanitized runtime state."""
+    agent = LiveContextAgent()
+    web_worker = _FakeWorker(_web_result("should not be called"))
+    memory_worker = _FakeWorker({"resolved": True, "result": []})
+    conversation_worker = _FakeWorker({"resolved": True, "result": []})
+    agent.web_agent = web_worker
+    agent.memory_search_agent = memory_worker
+    agent.conversation_search_agent = conversation_worker
+
+    result = await agent.run(
+        "Live-context: answer active character current local weekday",
+        _base_context(
+            time_context={
+                "current_local_datetime": "2026-05-03 14:53",
+                "current_local_weekday": "Sunday",
+            }
+        ),
+    )
+
+    assert result["resolved"] is True
+    assert result["result"]["primary_worker"] == "runtime_context_provider"
+    assert result["result"]["supporting_workers"] == []
+    assert "Sunday" in result["result"]["selected_summary"]
+    assert web_worker.calls == []
+    assert memory_worker.calls == []
+    assert conversation_worker.calls == []
+
+
+@pytest.mark.asyncio
+async def test_live_context_current_local_time_requires_time_context() -> None:
+    """Missing runtime time_context should stay unresolved without fallback."""
+    agent = LiveContextAgent()
+    web_worker = _FakeWorker(_web_result("should not be called"))
+    memory_worker = _FakeWorker({"resolved": True, "result": []})
+    conversation_worker = _FakeWorker({"resolved": True, "result": []})
+    agent.web_agent = web_worker
+    agent.memory_search_agent = memory_worker
+    agent.conversation_search_agent = conversation_worker
+
+    result = await agent.run(
+        "Live-context: answer active character current local time",
+        _base_context(),
+    )
+
+    assert result["resolved"] is False
+    assert result["result"]["missing_context"] == ["time_context"]
+    assert web_worker.calls == []
+    assert memory_worker.calls == []
+    assert conversation_worker.calls == []
+
+
+@pytest.mark.asyncio
+async def test_live_context_legacy_unknown_location_current_time_uses_runtime_state() -> None:
+    """Legacy unknown-location current-time slots should normalize to runtime state."""
+    agent = LiveContextAgent()
+    web_worker = _FakeWorker(_web_result("should not be called"))
+    memory_worker = _FakeWorker({"resolved": True, "result": []})
+    conversation_worker = _FakeWorker({"resolved": True, "result": []})
+    agent.web_agent = web_worker
+    agent.memory_search_agent = memory_worker
+    agent.conversation_search_agent = conversation_worker
+
+    result = await agent.run(
+        "Live-context: answer current time for unknown location",
+        _base_context(
+            time_context={
+                "current_local_datetime": "2026-05-03 14:53",
+                "current_local_weekday": "Sunday",
+            }
+        ),
+    )
+
+    assert result["resolved"] is True
+    assert result["result"]["primary_worker"] == "runtime_context_provider"
+    assert result["result"]["missing_context"] == []
+    assert web_worker.calls == []
+    assert memory_worker.calls == []
+    assert conversation_worker.calls == []
+
+
+@pytest.mark.asyncio
+async def test_live_context_current_user_local_time_without_user_time_context_is_unresolved() -> None:
+    """User-local current time should require user_time_context, not location."""
+    agent = LiveContextAgent()
+    web_worker = _FakeWorker(_web_result("should not be called"))
+    memory_worker = _FakeWorker({"resolved": True, "result": []})
+    conversation_worker = _FakeWorker({"resolved": True, "result": []})
+    agent.web_agent = web_worker
+    agent.memory_search_agent = memory_worker
+    agent.conversation_search_agent = conversation_worker
+
+    result = await agent.run(
+        "Live-context: answer current user local time if configured",
+        _base_context(
+            time_context={
+                "current_local_datetime": "2026-05-03 14:53",
+                "current_local_weekday": "Sunday",
+            }
+        ),
+    )
+
+    assert result["resolved"] is False
+    assert result["result"]["missing_context"] == ["user_time_context"]
+    assert web_worker.calls == []
+    assert memory_worker.calls == []
+    assert conversation_worker.calls == []
+
+
+@pytest.mark.asyncio
+async def test_live_context_explicit_location_current_time_stays_external() -> None:
+    """Explicit-place current time should remain on the external live path."""
+    agent = LiveContextAgent()
+    web_worker = _FakeWorker(_web_result("Auckland local time is 14:53 now."))
+    memory_worker = _FakeWorker({"resolved": True, "result": []})
+    conversation_worker = _FakeWorker({"resolved": True, "result": []})
+    agent.web_agent = web_worker
+    agent.memory_search_agent = memory_worker
+    agent.conversation_search_agent = conversation_worker
+
+    result = await agent.run(
+        "Live-context: answer current time for explicit location Auckland",
+        _base_context(
+            time_context={
+                "current_local_datetime": "2026-05-03 14:53",
+                "current_local_weekday": "Sunday",
+            }
+        ),
+    )
+
+    assert result["resolved"] is True
+    assert result["result"]["primary_worker"] == "web_search_agent2"
+    assert len(web_worker.calls) == 1
+    assert "fact_type=current_time" in web_worker.calls[0]["task"]
+    assert memory_worker.calls == []
+    assert conversation_worker.calls == []
+
+
+@pytest.mark.asyncio
 async def test_conversation_evidence_exact_phrase_uses_keyword_and_refs() -> None:
     """Exact phrase evidence should expose speaker, message, and URL refs."""
     agent = ConversationEvidenceAgent()

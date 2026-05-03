@@ -1,4 +1,4 @@
-"""Top-level RAG capability agent for live external context."""
+"""Top-level RAG capability agent for present-tense live context."""
 
 from __future__ import annotations
 
@@ -27,7 +27,12 @@ _CAPABILITY_NAME = "live_context"
 _AGENT_NAME = "live_context_agent"
 _UNCACHED_REASON = "capability_orchestrator_uncached"
 _URL_PATTERN = re.compile(r"https?://[^\s)>\]}\"']+")
+_RUNTIME_DATETIME_PATTERN = re.compile(r"^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$")
+_RUNTIME_WEEKDAY_PATTERN = re.compile(r"^[A-Za-z]+$")
 _KNOWN_FACT_TYPES = {
+    "current_time",
+    "current_date",
+    "current_weekday",
     "weather",
     "temperature",
     "opening_status",
@@ -36,6 +41,11 @@ _KNOWN_FACT_TYPES = {
     "exchange_rate",
     "current_event_status",
     "other",
+}
+_RUNTIME_FACT_TYPES = {
+    "current_time",
+    "current_date",
+    "current_weekday",
 }
 _KNOWN_TARGET_SOURCES = {
     "explicit",
@@ -144,6 +154,18 @@ def _extract_fact_type(task: str) -> str:
     """
 
     normalized = task.lower()
+    if "local weekday" in normalized:
+        return "current_weekday"
+    if "local date" in normalized:
+        return "current_date"
+    if "local time" in normalized:
+        return "current_time"
+    if "current local time" in normalized or "current time" in normalized:
+        return "current_time"
+    if "current local date" in normalized or "current date" in normalized:
+        return "current_date"
+    if "current local weekday" in normalized or "current weekday" in normalized:
+        return "current_weekday"
     if "temperature" in normalized:
         return "temperature"
     if "weather" in normalized:
@@ -204,8 +226,50 @@ def _deterministic_plan(task: str) -> dict[str, Any] | None:
     normalized = task_body.lower()
     fact_type = _extract_fact_type(task_body)
 
+    if fact_type in _RUNTIME_FACT_TYPES:
+        target = _target_after_marker(task_body, "explicit location")
+        if not target:
+            target = _target_after_marker(task_body, "explicit target")
+        if not target and " for " in normalized:
+            _, _, extracted_target = task_body.rpartition(" for ")
+            extracted_target = _clean_target(extracted_target)
+            extracted_target_lower = extracted_target.lower()
+            if extracted_target and extracted_target_lower not in {
+                "unknown location",
+                "unknown target",
+            }:
+                if "location" not in extracted_target_lower:
+                    target = extracted_target
+
+        if target:
+            plan = {
+                "source_class": "external_live_lookup",
+                "runtime_scope": "",
+                "fact_type": fact_type,
+                "target_source": "explicit",
+                "target": target,
+                "missing_context": [],
+            }
+            return plan
+
+        runtime_scope = "active_character"
+        if "current user" in normalized:
+            runtime_scope = "current_user"
+
+        plan = {
+            "source_class": "runtime_snapshot",
+            "runtime_scope": runtime_scope,
+            "fact_type": fact_type,
+            "target_source": "unknown",
+            "target": "",
+            "missing_context": [],
+        }
+        return plan
+
     if "current user's location" in normalized:
         plan = {
+            "source_class": "external_live_lookup",
+            "runtime_scope": "",
             "fact_type": fact_type,
             "target_source": "current_user_recent",
             "target": "",
@@ -215,6 +279,8 @@ def _deterministic_plan(task: str) -> dict[str, Any] | None:
 
     if "active character's location" in normalized:
         plan = {
+            "source_class": "external_live_lookup",
+            "runtime_scope": "",
             "fact_type": fact_type,
             "target_source": "active_character_default",
             "target": "",
@@ -225,6 +291,8 @@ def _deterministic_plan(task: str) -> dict[str, Any] | None:
     target = _target_after_marker(task_body, "explicit location")
     if target:
         plan = {
+            "source_class": "external_live_lookup",
+            "runtime_scope": "",
             "fact_type": fact_type,
             "target_source": "explicit",
             "target": target,
@@ -235,6 +303,8 @@ def _deterministic_plan(task: str) -> dict[str, Any] | None:
     target = _target_after_marker(task_body, "explicit target")
     if target:
         plan = {
+            "source_class": "external_live_lookup",
+            "runtime_scope": "",
             "fact_type": fact_type,
             "target_source": "explicit",
             "target": target,
@@ -247,6 +317,8 @@ def _deterministic_plan(task: str) -> dict[str, Any] | None:
         target = _clean_target(target)
         if target and "location" not in target.lower():
             plan = {
+                "source_class": "external_live_lookup",
+                "runtime_scope": "",
                 "fact_type": fact_type,
                 "target_source": "explicit",
                 "target": target,
@@ -272,6 +344,8 @@ def _normalize_selector_plan(raw_plan: dict[str, Any]) -> dict[str, Any]:
         missing_context = []
 
     plan = {
+        "source_class": "external_live_lookup",
+        "runtime_scope": "",
         "fact_type": fact_type,
         "target_source": target_source,
         "target": text_or_empty(raw_plan.get("target")),
@@ -284,7 +358,7 @@ def _normalize_selector_plan(raw_plan: dict[str, Any]) -> dict[str, Any]:
     return plan
 
 
-_SELECTOR_PROMPT = """\
+_EXTERNAL_LIVE_SELECTOR_PROMPT = """\
 You choose the bounded source path for one live external fact request.
 The live value itself must come from public live/web evidence, never from memory.
 Memory or recent conversation may only resolve the target/scope, such as a
@@ -318,7 +392,7 @@ Return valid JSON only:
   "missing_context": ["location or target when unresolved"]
 }
 """
-_selector_llm = get_llm(
+_external_live_selector_llm = get_llm(
     temperature=0.0,
     top_p=1.0,
     model=RAG_SUBAGENT_LLM_MODEL,
@@ -327,8 +401,11 @@ _selector_llm = get_llm(
 )
 
 
-async def _select_plan(task: str, context: dict[str, Any]) -> dict[str, Any]:
-    """Select a bounded live target path for the requested slot.
+async def _select_external_live_plan(
+    task: str,
+    context: dict[str, Any],
+) -> dict[str, Any]:
+    """Select a bounded external live target path for the requested slot.
 
     Args:
         task: Slot text supplied by the dispatcher.
@@ -338,16 +415,14 @@ async def _select_plan(task: str, context: dict[str, Any]) -> dict[str, Any]:
         Normalized source-selection plan.
     """
 
-    deterministic_plan = _deterministic_plan(task)
-    if deterministic_plan is not None:
-        return deterministic_plan
-
     llm_input = project_selector_input_for_llm(task, context)
-    system_prompt = SystemMessage(content=_SELECTOR_PROMPT)
+    system_prompt = SystemMessage(content=_EXTERNAL_LIVE_SELECTOR_PROMPT)
     human_message = HumanMessage(
         content=json.dumps(llm_input, ensure_ascii=False, default=str)
     )
-    response = await _selector_llm.ainvoke([system_prompt, human_message])
+    response = await _external_live_selector_llm.ainvoke(
+        [system_prompt, human_message]
+    )
     raw_plan = parse_llm_json_output(response.content)
     if not isinstance(raw_plan, dict):
         raw_plan = {}
@@ -433,8 +508,74 @@ def _web_task(*, fact_type: str, target: str, original_task: str) -> str:
     return task
 
 
+def _validated_runtime_time_context(
+    raw_time_context: object,
+) -> dict[str, str] | None:
+    """Validate the sanitized runtime time context consumed by live facts.
+
+    Args:
+        raw_time_context: Runtime state payload from the current turn.
+
+    Returns:
+        Sanitized datetime and weekday fields, or ``None`` when malformed.
+    """
+
+    if not isinstance(raw_time_context, dict):
+        return None
+
+    raw_local_datetime = raw_time_context.get("current_local_datetime")
+    raw_local_weekday = raw_time_context.get("current_local_weekday")
+    if not isinstance(raw_local_datetime, str):
+        return None
+    if not isinstance(raw_local_weekday, str):
+        return None
+
+    local_datetime = raw_local_datetime.strip()
+    local_weekday = raw_local_weekday.strip()
+    if not local_datetime or not local_weekday:
+        return None
+    if _RUNTIME_DATETIME_PATTERN.fullmatch(local_datetime) is None:
+        return None
+    if _RUNTIME_WEEKDAY_PATTERN.fullmatch(local_weekday) is None:
+        return None
+
+    time_context = {
+        "current_local_datetime": local_datetime,
+        "current_local_weekday": local_weekday,
+    }
+    return time_context
+
+
+def _runtime_selected_summary(
+    fact_type: str,
+    time_context: dict[str, str],
+) -> str:
+    """Build the direct evidence sentence for a runtime-backed live fact.
+
+    Args:
+        fact_type: Runtime-backed live fact type.
+        time_context: Validated sanitized time context.
+
+    Returns:
+        A compact direct-evidence sentence for the evaluator and projection.
+    """
+
+    local_datetime = time_context["current_local_datetime"]
+    local_weekday = time_context["current_local_weekday"]
+    local_date, _, _ = local_datetime.partition(" ")
+
+    if fact_type == "current_time":
+        return_value = f"当前本地时间是 {local_datetime}，{local_weekday}。"
+        return return_value
+    if fact_type == "current_date":
+        return_value = f"当前本地日期是 {local_date}，{local_weekday}。"
+        return return_value
+    return_value = f"当前本地星期是 {local_weekday}，日期是 {local_date}。"
+    return return_value
+
+
 class LiveContextAgent(BaseRAGHelperAgent):
-    """Top-level RAG helper for live facts with bounded target resolution."""
+    """Top-level RAG helper for runtime and external live facts."""
 
     def __init__(self, *, cache_runtime=None) -> None:
         """Create the uncached live-context capability agent.
@@ -456,13 +597,64 @@ class LiveContextAgent(BaseRAGHelperAgent):
             cache_runtime=cache_runtime
         )
 
+    def _resolved_runtime_result(
+        self,
+        *,
+        fact_type: str,
+        time_context: dict[str, str],
+    ) -> dict[str, Any]:
+        """Build the final result for a runtime-backed live fact.
+
+        Args:
+            fact_type: Runtime-backed live fact type.
+            time_context: Validated sanitized time context.
+
+        Returns:
+            Standard live-context capability result.
+        """
+
+        selected_summary = _runtime_selected_summary(fact_type, time_context)
+        projection_payload = {
+            "external_text": selected_summary,
+            "url": "",
+        }
+        worker_payloads = {
+            "runtime_context_provider": time_context,
+        }
+        payload = _result_payload(
+            selected_summary=selected_summary,
+            primary_worker="runtime_context_provider",
+            supporting_workers=[],
+            source_policy="current-turn runtime state",
+            resolved_refs=[],
+            projection_payload=projection_payload,
+            worker_payloads=worker_payloads,
+            evidence=[selected_summary],
+            missing_context=[],
+            conflicts=[],
+        )
+        logger.info(
+            f"{_AGENT_NAME} output: resolved=True "
+            f"primary_worker=runtime_context_provider "
+            f"missing_context={payload['missing_context']} "
+            f"selected_summary={payload['selected_summary']} "
+            f"cache_reason={_UNCACHED_REASON}"
+        )
+        logger.debug(
+            f"{_AGENT_NAME} debug: resolved_refs=[] "
+            f"projection_payload={projection_payload} "
+            f"worker_payloads={worker_payloads}"
+        )
+        result = _agent_result(resolved=True, payload=payload)
+        return result
+
     async def run(
         self,
         task: str,
         context: dict[str, Any],
         max_attempts: int = 1,
     ) -> dict[str, Any]:
-        """Resolve one live external fact through target/scope then web.
+        """Resolve one present-tense fact from runtime state or live evidence.
 
         Args:
             task: ``Live-context:`` slot text from the RAG2 dispatcher.
@@ -476,8 +668,12 @@ class LiveContextAgent(BaseRAGHelperAgent):
 
         del max_attempts
 
-        plan = await _select_plan(task, context)
+        plan = _deterministic_plan(task)
+        if plan is None:
+            plan = await _select_external_live_plan(task, context)
         fact_type = plan["fact_type"]
+        source_class = plan["source_class"]
+        runtime_scope = plan["runtime_scope"]
         target_source = plan["target_source"]
         target = text_or_empty(plan["target"])
         missing_context = list(plan["missing_context"])
@@ -485,6 +681,51 @@ class LiveContextAgent(BaseRAGHelperAgent):
         worker_payloads: dict[str, Any] = {}
         resolved_refs: list[dict[str, Any]] = []
         source_policy = ""
+
+        if source_class == "runtime_snapshot":
+            if runtime_scope == "current_user":
+                user_time_context = _validated_runtime_time_context(
+                    context.get("user_time_context")
+                )
+                if user_time_context is None:
+                    result = self._missing_target_result(
+                        source_policy=(
+                            "current-turn runtime state missing or malformed "
+                            "user-local time context"
+                        ),
+                        missing_context=["user_time_context"],
+                        supporting_workers=supporting_workers,
+                        worker_payloads=worker_payloads,
+                    )
+                    return result
+                result = self._resolved_runtime_result(
+                    fact_type=fact_type,
+                    time_context=user_time_context,
+                )
+                return result
+
+            time_context = _validated_runtime_time_context(context.get("time_context"))
+            if time_context is None:
+                result = self._missing_target_result(
+                    source_policy=(
+                        "current-turn runtime state missing or malformed "
+                        "character-local time context"
+                    ),
+                    missing_context=["time_context"],
+                    supporting_workers=supporting_workers,
+                    worker_payloads=worker_payloads,
+                )
+                return result
+            result = self._resolved_runtime_result(
+                fact_type=fact_type,
+                time_context=time_context,
+            )
+            return result
+
+        if source_class != "external_live_lookup":
+            raise ValueError(
+                f"Unsupported live context source_class: {source_class}"
+            )
 
         if target_source == "explicit" and target:
             resolved_refs.append(
