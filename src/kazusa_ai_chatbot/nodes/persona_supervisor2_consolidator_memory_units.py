@@ -208,11 +208,19 @@ def _validate_merge_result(result: dict, candidate: dict, candidate_clusters: li
     return return_value
 
 
-def _validate_rewrite_result(result: dict, candidate: dict, cluster_id: str) -> dict:
-    if text_or_empty(result.get("candidate_id")) != candidate["candidate_id"]:
-        raise ValueError("rewrite returned an unknown candidate_id")
-    if text_or_empty(result.get("cluster_id")) != cluster_id:
-        raise ValueError("rewrite returned an unknown cluster_id")
+def _validate_rewrite_result(result: dict) -> dict:
+    """Validate semantic fields returned by the rewrite stage.
+
+    Args:
+        result: Parsed JSON object returned by the rewrite LLM.
+
+    Returns:
+        The replacement semantic fields for the selected memory unit.
+    """
+
+    if not isinstance(result, dict):
+        raise ValueError("rewrite result must be an object")
+
     for field in ("fact", "subjective_appraisal", "relationship_signal"):
         if not text_or_empty(result.get(field)):
             raise ValueError(f"rewrite missing field: {field}")
@@ -624,7 +632,6 @@ You are the memory-unit rewrite stage. You update only the semantic text fields.
 
 # 语言政策
 - 除结构化枚举值、schema key、ID、URL、代码、命令、模型标签等必须保持原样的内容外，所有由你新生成的内部自由文本字段都必须使用简体中文。
-- `candidate_id`、`cluster_id` 等结构化字段必须逐字复制原始 ID。
 - 用户原文、引用文本、专有名词、标题、别名、外部证据原句在需要精确保留时保持原语言；不要为了统一语言而改写。
 - 不要添加翻译、双语复写或括号内解释，除非源文本本身已经包含。
 
@@ -642,8 +649,8 @@ You are the memory-unit rewrite stage. You update only the semantic text fields.
 4. Keep the fact field concrete and event-based. Do not turn it into a mood summary.
 5. Keep subjective_appraisal about the active character's interpretation.
 6. Keep relationship_signal about future interaction.
-7. Copy candidate_id from new_memory_unit and cluster_id from decision.cluster_id.
-8. Output only the three updated semantic fields plus the two copied ids.
+7. Do not output structural IDs; the caller already owns persistence IDs.
+8. Output only the three updated semantic fields.
 
 # Input Format
 {
@@ -667,8 +674,6 @@ You are the memory-unit rewrite stage. You update only the semantic text fields.
 # Output Format
 Return only valid JSON:
 {
-    "candidate_id": "candidate id copied from input",
-    "cluster_id": "existing_unit_id copied from input",
     "fact": "updated compact fact",
     "subjective_appraisal": "updated active-character subjective appraisal",
     "relationship_signal": "updated future interaction signal"
@@ -706,11 +711,7 @@ async def _rewrite_memory_unit(candidate: dict, merge_result: dict) -> dict:
         human_message,
     ])
     result = parse_llm_json_output(response.content)
-    rewrite_result = _validate_rewrite_result(
-        result,
-        candidate,
-        merge_result["cluster_id"],
-    )
+    rewrite_result = _validate_rewrite_result(result)
     return rewrite_result
 
 

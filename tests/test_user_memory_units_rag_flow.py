@@ -231,6 +231,81 @@ async def test_process_memory_unit_candidate_normalizes_merge_candidate_id(monke
 
 
 @pytest.mark.asyncio
+async def test_process_memory_unit_candidate_uses_validated_merge_cluster_when_rewrite_ids_drift(
+    monkeypatch,
+) -> None:
+    captured: dict[str, object] = {}
+    existing_unit = _unit("existing-1", "Existing fact")
+    candidate = {
+        "candidate_id": "expected-candidate",
+        "unit_type": UserMemoryUnitType.OBJECTIVE_FACT,
+        "fact": "New fact",
+        "subjective_appraisal": "Kazusa appraisal",
+        "relationship_signal": "Kazusa signal",
+        "evidence_refs": [],
+    }
+
+    async def _retrieve_memory_unit_merge_candidates(global_user_id, **kwargs):
+        return [existing_unit]
+
+    async def _update_user_memory_unit_semantics(unit_id, semantics, **kwargs):
+        captured["updated_unit_id"] = unit_id
+        captured["merge_history"] = kwargs["merge_history_entry"]
+        captured["semantics"] = semantics
+
+    merge_judge_llm = _StaticAsyncLLM({
+        "candidate_id": "expected-candidate",
+        "decision": "merge",
+        "cluster_id": "existing-1",
+        "reason": "same memory with extra detail",
+    })
+    rewrite_llm = _StaticAsyncLLM({
+        "candidate_id": "expected-candidate",
+        "cluster_id": "wrong-cluster-from-rewrite",
+        "fact": "Updated fact",
+        "subjective_appraisal": "Updated appraisal",
+        "relationship_signal": "Updated signal",
+    })
+
+    monkeypatch.setattr(
+        memory_units_module,
+        "retrieve_memory_unit_merge_candidates",
+        _retrieve_memory_unit_merge_candidates,
+    )
+    monkeypatch.setattr(memory_units_module, "_merge_judge_llm", merge_judge_llm)
+    monkeypatch.setattr(memory_units_module, "_rewrite_llm", rewrite_llm)
+    monkeypatch.setattr(
+        memory_units_module,
+        "update_user_memory_unit_semantics",
+        _update_user_memory_unit_semantics,
+    )
+
+    result = await memory_units_module.process_memory_unit_candidate(
+        {
+            "timestamp": "2026-04-29T00:00:00+12:00",
+            "global_user_id": "user-1",
+            "rag_result": {"user_memory_unit_candidates": [existing_unit]},
+        },
+        candidate,
+    )
+
+    rewrite_payload = json.loads(rewrite_llm.messages[1].content)
+
+    assert rewrite_payload["existing_unit_id"] == "existing-1"
+    assert rewrite_payload["decision"]["cluster_id"] == "existing-1"
+    assert result["candidate_id"] == "expected-candidate"
+    assert result["unit_id"] == "existing-1"
+    assert result["decision"] == "merge"
+    assert captured["updated_unit_id"] == "existing-1"
+    assert captured["merge_history"]["candidate_id"] == "expected-candidate"
+    assert captured["semantics"] == {
+        "fact": "Updated fact",
+        "subjective_appraisal": "Updated appraisal",
+        "relationship_signal": "Updated signal",
+    }
+
+
+@pytest.mark.asyncio
 async def test_stability_judge_receives_count_session_and_recent_examples(monkeypatch) -> None:
     captured: dict[str, object] = {"llm_payloads": []}
     existing_unit = {

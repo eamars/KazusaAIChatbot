@@ -343,14 +343,21 @@ async def test_live_merge_rewrite_compacts_similar_memory_unit(
 
     updated_semantics = captured["updated_semantics"]
     merged_fact = updated_semantics["fact"]
+    merged_fact_lower = merged_fact.lower()
     combined_source_length = len(existing_unit["fact"]) + len(candidate["fact"])
 
     assert result["decision"] in {"merge", "evolve"}
     assert result["unit_id"] == existing_unit["unit_id"]
     assert captured["updated_unit_id"] == existing_unit["unit_id"]
     assert len(captured["llm_calls"]) == 2
-    assert "fact" in merged_fact.lower() or "factual" in merged_fact.lower()
-    assert "subjective" in merged_fact.lower() or "feelings" in merged_fact.lower()
+    assert any(
+        term in merged_fact_lower
+        for term in ("fact", "factual", "\u4e8b\u5b9e")
+    )
+    assert any(
+        term in merged_fact_lower
+        for term in ("subjective", "feelings", "\u4e3b\u89c2", "\u60c5\u611f")
+    )
     assert len(merged_fact) < combined_source_length
     assert captured["update_kwargs"]["merge_history_entry"]["decision"] == result["decision"]
     assert trace_path.exists()
