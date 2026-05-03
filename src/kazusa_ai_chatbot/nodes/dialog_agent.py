@@ -173,9 +173,11 @@ _DIALOG_GENERATOR_PROMPT = """\
    - 无论输出语言是什么，都不要让同一种连接词、口头禅或下调尾词在同一轮、或与最近一轮角色回复中重复出现两次以上；若拿不准，宁可省略。
 
 # 输出要求
-- 只返回台词，
-- **严禁包含任何括号说明或内心独白**
-- **严禁包含任何形式的动作暗示或描写**
+- 必须返回一个 JSON 对象，顶层只能是 `{{"final_dialog": [...]}}`。
+- `final_dialog` 中的每个元素才是要发送的台词片段。
+- 不要返回顶层数组、裸字符串、Markdown 代码块或任何额外说明。
+- 台词片段中**严禁包含任何括号说明或内心独白**。
+- 台词片段中**严禁包含任何形式的动作暗示或描写**。
 
 # 闭环反馈指南
 在生成回复前，请检查输入信息列表中的最后一条来自 Evaluator 的消息 (Evaluator Feedback)：
@@ -211,10 +213,11 @@ _DIALOG_GENERATOR_PROMPT = """\
 }}
 
 # 输出格式
-请务必返回合法的 JSON 字符串，仅包含以下字段：
+请务必返回合法 JSON，且顶层必须是对象，不是数组：
 {{
     "final_dialog": [
-        "段落1",
+        "台词片段1",
+        "台词片段2",
         ...
     ]
 }}
@@ -309,7 +312,34 @@ async def dialog_generator(state: DialogAgentState) -> DialogAgentState:
     response = await _dialog_generator_llm.ainvoke([system_prompt, human_message] + recent_messages)
 
     result = parse_llm_json_output(response.content)
-    generated_dialog = result.get("final_dialog", [])
+    if isinstance(result, list):
+        logger.warning(
+            "Dialog generator returned a top-level list; "
+            "normalizing it into final_dialog"
+        )
+        generated_dialog = result
+        parsed_keys = ["<top-level-list>"]
+    else:
+        generated_dialog = result.get("final_dialog", [])
+        parsed_keys = list(result.keys())
+
+    if not isinstance(generated_dialog, list):
+        logger.warning(
+            f"Dialog generator final_dialog is not a list: "
+            f"type={type(generated_dialog).__name__}"
+        )
+        generated_dialog = []
+    valid_dialog = [
+        segment
+        for segment in generated_dialog
+        if isinstance(segment, str) and segment.strip()
+    ]
+    if len(valid_dialog) != len(generated_dialog):
+        logger.warning(
+            f"Dialog generator dropped invalid fragments: "
+            f"raw_count={len(generated_dialog)} valid_count={len(valid_dialog)}"
+        )
+    generated_dialog = valid_dialog
     generated_dialog_preview = (
         generated_dialog
         if isinstance(generated_dialog, list)
@@ -317,7 +347,7 @@ async def dialog_generator(state: DialogAgentState) -> DialogAgentState:
     )
     logger.debug(
         f"Dialog generator: "
-        f"parsed_keys={list(result.keys())} "
+        f"parsed_keys={parsed_keys} "
         f"fragments={len(generated_dialog_preview)} "
         f"dialog={log_list_preview(generated_dialog_preview)}"
     )
