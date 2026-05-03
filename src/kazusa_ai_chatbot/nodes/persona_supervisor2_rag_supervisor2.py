@@ -262,11 +262,14 @@ Use `Conversation-evidence:` for evidence from chat history:
 - exact phrases, quoted messages, URLs, filenames, or literal anchors,
 - who said/posted/mentioned something,
 - recent/fuzzy conversation topics,
-- messages from a person resolved in an earlier slot,
+- messages from current_user, active_character, any_speaker, or a person
+  resolved in an earlier slot,
 - counts, totals, rankings, or grouped message statistics.
 
-Use structured dependencies such as "from the user resolved in slot N" or
-"speaker found in slot N" when later slots depend on earlier results.
+For author scope, append exactly one speaker field:
+speaker=current_user, speaker=active_character, speaker=any_speaker, or
+speaker=person resolved in slot N. Use the slot-N form only for a person
+produced by an earlier slot.
 
 Do not use conversation evidence for active agreement recall; use Recall.
 Do not use conversation evidence for durable official/world facts; use
@@ -300,7 +303,10 @@ not direct web evidence.
 ## Rule 8 — Context pre-check
 Read the context object before generating any slot.
 If global_user_id is already present in context and the user asks about the
-current user, use `Person-context: retrieve current user profile`.
+current user's profile or durable person context, use
+`Person-context: retrieve current user profile`.
+Do not create Person-context merely to bind current_user for conversation
+history; use speaker=current_user in the Conversation-evidence slot.
 If a pronoun (他/她/你/他们) clearly refers to context user_name, write that
 the person comes from context in the `Person-context:` slot.
 
@@ -319,7 +325,7 @@ When a slot depends on a specific earlier slot, write "resolved in slot N" (e.g.
 - "Live-context: answer active character current local <time / date / weekday>"
 - "Live-context: answer current user local time if configured"
 - "Live-context: answer current <weather / temperature / opening status / price / exchange rate / schedule / availability / latest fact> for <explicit location/target X | the active character's location | the current user's location if recently stated | unknown location/target>"
-- "Conversation-evidence: retrieve <exact phrase / URL / recent messages / topic / count/ranking> [from the user resolved in slot N] [to identify the speaker] [time/count limit]"
+- "Conversation-evidence: retrieve <exact phrase / URL / recent messages / topic / count/ranking> [speaker=current_user | speaker=active_character | speaker=any_speaker | speaker=person resolved in slot N] [to identify the speaker] [time/count limit]"
 - "Memory-evidence: retrieve durable evidence about <official fact / address / common-sense topic / world fact / user memory topic>"
 - "Person-context: retrieve <active character profile / current user profile / profile/impression for display name X / profile for speaker found in slot N / relationship ranking / user list predicate>"
 - "Recall: retrieve <active_episode_agreement / durable_commitment / episode_position / exact_agreement_history> relevant to <topic>"
@@ -330,10 +336,9 @@ Examples below are boundary anchors, not an exhaustive routing table.
 Generalize from the rules above when the wording differs.
 
 ### 0. Character relationship preference / ranking
-Queries: "<character mention>你最喜欢谁？", "<character mention>最喜欢的三个人"
+Query: "<character mention>你最喜欢谁？"
    → Person-context owns relationship/user ranking; preserve count.
    ["Person-context: rank users by active character relationship from top limit 1"]
-   ["Person-context: check whether a top-ranked relationship candidate exists"]
 
 ### 1. Named person → impression or compatibility
 Query: "<character mention>你觉得<named user>这个人怎么样"  (character_name=<active character>)
@@ -360,44 +365,27 @@ Query: "现在几点？"
    → Bare current-time question. Use active-character runtime local time.
    ["Live-context: answer active character current local time"]
 
-Query: "What's the current temperature in Auckland?"
-   → Explicit location. Current temperature is live external data.
-   ["Live-context: answer current temperature for explicit location Auckland"]
-
 ### 1g. Recall active agreements and episode state
 Query: "早上好呀，还记得今天的约定么？"
    → User asks what was agreed for the active/current episode. Use Recall, not keyword self-hit.
    ["Recall: retrieve active_episode_agreement relevant to today's agreement"]
 
-Query: "谁说过'约定就是约定'？"
-   → Exact phrase speaker/provenance request. Use conversation evidence, not Recall.
-   ["Conversation-evidence: retrieve exact phrase '约定就是约定' to identify the speaker"]
-
 ### 2. Named person → event or message history
 Query: "<named user>前两天欺负你了么"
    → Specific past event involving a person: get person context, then time-bounded conversation evidence.
   ["Person-context: retrieve profile/impression for display name <named user>",
-   "Conversation-evidence: retrieve messages from the user resolved in slot 1 from 2 days ago"]
-
-Query: "<named user>最近在聊什么"
-  → Recent messages from a named person: resolve person context, then conversation evidence. Preserve counts.
-  ["Person-context: retrieve profile/impression for display name <named user>",
-   "Conversation-evidence: retrieve recent messages from the user resolved in slot 1"]
+   "Conversation-evidence: retrieve messages from 2 days ago speaker=person resolved in slot 1"]
 
 ### 3. Named person → specific past quote
 Query: "<named user>昨天说的AI那句是什么"
   → Named person filter, then exact/literal conversation evidence.
   ["Person-context: resolve display name <named user>",
-   "Conversation-evidence: retrieve messages from the user resolved in slot 1 containing exact term 'AI', sent yesterday"]
+   "Conversation-evidence: retrieve messages containing exact term 'AI', sent yesterday speaker=person resolved in slot 1"]
 
 ### 4. Direct content search, no follow-up
 Query: "最近有人提到cookie管理器吗"
   → No named person. Single conversation evidence slot.
-  ["Conversation-evidence: retrieve recent messages mentioning exact term 'cookie管理器'"]
-
-Query: "最近在聊版权保护的是谁"
-  → No named person. Single topic/speaker conversation evidence slot.
-  ["Conversation-evidence: retrieve recent messages about 版权保护 to identify the speaker"]
+  ["Conversation-evidence: retrieve recent messages mentioning exact term 'cookie管理器' speaker=any_speaker"]
 
 ### 4b. Enumerate users by display-name predicate
 Query: "所有以'子'结尾的用户"
@@ -408,10 +396,6 @@ Query: "所有以'子'结尾的用户"
 Query: "最近谁发言最多"
   → Count messages by user. This is factual evidence, not interpretation.
   ["Conversation-evidence: count recent messages by user"]
-
-Query: "最近谁提到cookie管理器最多"
-  → Count messages containing the literal term by user.
-  ["Conversation-evidence: count recent messages by user containing exact term 'cookie管理器'"]
 
 ### 5. Find speaker by exact phrase → get their profile
 Query: "那个说5090能跑qwen27b的人，你对他有什么印象"
@@ -425,21 +409,20 @@ Query: "最近在聊版权保护的那个人，他平时都在群里聊些什么
   → Topic search to find speaker, then person context, then that person's messages.
   ["Conversation-evidence: retrieve recent messages about 版权保护 to identify the speaker",
    "Person-context: retrieve profile/impression for speaker found in slot 1",
-   "Conversation-evidence: retrieve recent messages from the user resolved in slot 2"]
+   "Conversation-evidence: retrieve recent messages speaker=person resolved in slot 2"]
 
 ### 7. Named person → find their URL → fetch URL content
 Query: "<named user>发的那个小红书链接，里面写的是什么"
   → Resolve the named person, then find URL from that user, then fetch URL content.
   ["Person-context: resolve display name <named user>",
-   "Conversation-evidence: retrieve messages from the user resolved in slot 1 containing a 小红书 URL",
+   "Conversation-evidence: retrieve messages containing a 小红书 URL speaker=person resolved in slot 1",
    "Web-evidence: retrieve public web content for the URL found in slot 2"]
 
-### 8. Pronoun resolved from context → find URL → fetch content
-Query: "他上次说的那个链接里有什么信息"  (context has user_name='<current user>', '他' refers to current user)
-  → '他' maps to context user_name. Resolve that person, find URL, then fetch.
-  ["Person-context: resolve display name from context user_name for pronoun '他'",
-   "Conversation-evidence: retrieve messages from the user resolved in slot 1 containing a URL",
-   "Web-evidence: retrieve public web content for the URL found in slot 2"]
+### 8. Current user → find URL → fetch content
+Query: "我上次发的那个链接里有什么信息"
+  → The current user comes from context. Do not create Person-context just to bind it.
+  ["Conversation-evidence: retrieve messages containing a URL speaker=current_user",
+   "Web-evidence: retrieve public web content for the URL found in slot 1"]
 
 ### 9. Two named people → compare profiles
 Query: "<named user A>和<named user B>这两个人，你对他们各有什么印象"
@@ -452,17 +435,13 @@ Query: "说版权保护是play一环的那个人，他发过什么链接，链�
   → Exact phrase to find speaker, then identity, then find their URL, then fetch it.
   ["Conversation-evidence: retrieve exact phrase '版权保护一直都是play的一环' to identify the speaker",
    "Person-context: retrieve profile/impression for speaker found in slot 1",
-   "Conversation-evidence: retrieve messages from the user resolved in slot 2 containing a URL",
+   "Conversation-evidence: retrieve messages containing a URL speaker=person resolved in slot 2",
    "Web-evidence: retrieve public web content for the URL found in slot 3"]
 
 ### 11. Durable official character fact
 Query: "你家的官方地址是什么？"
   → Stable official character/world fact. Use durable memory, not recent conversation.
   ["Memory-evidence: retrieve durable evidence about the active character's official address"]
-
-Query: "你刚才把地址发给我了吗？"
-  → Recent conversation confirmation/provenance. Use conversation evidence.
-  ["Conversation-evidence: retrieve recent messages mentioning the active character's address"]
 
 ## Input format
 {{

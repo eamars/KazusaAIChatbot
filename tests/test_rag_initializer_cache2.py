@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 
 import pytest
 
@@ -243,7 +244,52 @@ def test_initializer_prompt_declares_recall_route() -> None:
 def test_initializer_prompt_version_bumped_for_capability_cutover() -> None:
     """Capability-layer prompt changes must invalidate initializer strategies."""
 
-    assert cache2_policy.INITIALIZER_PROMPT_VERSION == "initializer_prompt:v15"
+    assert cache2_policy.INITIALIZER_PROMPT_VERSION == "initializer_prompt:v16"
+
+
+def test_initializer_prompt_uses_conversation_speaker_scope_contract() -> None:
+    """Conversation slots should bind current-user scope without fake dependencies."""
+    rendered_prompt = supervisor2_module._INITIALIZER_PROMPT.format(
+        character_name="<active character>",
+    )
+
+    required_fragments = [
+        "speaker=current_user",
+        "speaker=active_character",
+        "speaker=any_speaker",
+        "speaker=person resolved in slot N",
+        "Do not create Person-context merely to bind current_user",
+        "Use the slot-N form only for a person",
+    ]
+    missing_fragments = [
+        fragment
+        for fragment in required_fragments
+        if fragment not in rendered_prompt
+    ]
+
+    assert missing_fragments == []
+    assert "from the user resolved in slot N" not in rendered_prompt
+
+
+def test_initializer_pattern_gallery_limits_examples_per_section() -> None:
+    """Prompt examples should stay sparse rather than becoming a lookup table."""
+    rendered_prompt = supervisor2_module._INITIALIZER_PROMPT.format(
+        character_name="<active character>",
+    )
+    _, _, gallery_tail = rendered_prompt.partition("## Pattern gallery")
+    gallery, _, _ = gallery_tail.partition("## Input format")
+    sections = [
+        section
+        for section in gallery.split("\n### ")
+        if section.strip()
+    ]
+    overloaded_sections = [
+        section.splitlines()[0]
+        for section in sections
+        if len(re.findall(r"(?m)^\s*Queries?:", section)) > 1
+    ]
+
+    assert overloaded_sections == []
 
 
 def test_initializer_prompt_documents_live_external_fact_contract() -> None:
@@ -263,8 +309,7 @@ def test_initializer_prompt_documents_live_external_fact_contract() -> None:
         "Examples below are boundary anchors, not an exhaustive routing table.",
         "Query: \"现在几点？\"",
         "This rule overrides memory defaults and backend wording",
-        "Query: \"What's the current temperature in Auckland?\"",
-        "Live-context: answer current temperature for explicit location Auckland",
+        "answer current <weather / temperature / opening status",
         "unknown location/target",
     ]
 
@@ -654,7 +699,7 @@ async def test_rag_initializer_payload_projects_runtime_context(monkeypatch) -> 
     )
 
 
-def test_initializer_prompt_version_bumps_to_v15_for_capability_contract() -> None:
+def test_initializer_prompt_version_bumps_to_v16_for_capability_contract() -> None:
     """Prompt version should reflect the current initializer contract."""
 
-    assert supervisor2_module.INITIALIZER_PROMPT_VERSION == "initializer_prompt:v15"
+    assert supervisor2_module.INITIALIZER_PROMPT_VERSION == "initializer_prompt:v16"

@@ -237,3 +237,17 @@ async def test_live_initializer_preserves_cascaded_phrase_person_link_web_chain(
             "Web-evidence:",
         ],
     )
+
+
+async def test_live_initializer_uses_current_user_speaker_scope(monkeypatch) -> None:
+    """Current-user conversation retrieval should not invent a prior person slot."""
+
+    await _run_initializer_case(
+        monkeypatch,
+        "current_user_speaker_scope",
+        '我刚才发过什么链接？',
+        ["Conversation-evidence:"],
+        required_slot_fragments=["speaker=current_user"],
+        forbidden_prefixes=["Person-context:"],
+        forbidden_slot_fragments=["resolved in slot 1"],
+    )

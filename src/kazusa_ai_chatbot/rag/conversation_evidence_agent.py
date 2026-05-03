@@ -33,6 +33,18 @@ _CAPABILITY_NAME = "conversation_evidence"
 _AGENT_NAME = "conversation_evidence_agent"
 _UNCACHED_REASON = "capability_orchestrator_uncached"
 _URL_PATTERN = re.compile(r"https?://[^\s)>\]}\"']+")
+_EXPLICIT_SPEAKER_SCOPE_PATTERN = re.compile(
+    r"\bspeaker\s*=\s*(current_user|active_character|any_speaker)\b",
+    re.IGNORECASE,
+)
+_PERSON_SPEAKER_SCOPE_PATTERN = re.compile(
+    r"\bspeaker\s*=\s*person\s+resolved\s+in\s+slot\s+\d+\b",
+    re.IGNORECASE,
+)
+_SCOPE_CURRENT_USER = "current_user"
+_SCOPE_ACTIVE_CHARACTER = "active_character"
+_SCOPE_ANY_SPEAKER = "any_speaker"
+_SCOPE_PERSON_RESOLVED = "person_resolved"
 _KNOWN_WORKERS = {
     "conversation_keyword_agent",
     "conversation_search_agent",
@@ -142,11 +154,56 @@ def _strip_prefix(task: str) -> str:
     return return_value
 
 
+def _speaker_scope(task: str) -> str:
+    """Extract the optional conversation author scope from a slot.
+
+    Args:
+        task: Conversation-evidence slot text.
+
+    Returns:
+        One approved scope constant, or an empty string for legacy unscoped
+        slots.
+    """
+
+    task_body = _strip_prefix(task)
+    if _PERSON_SPEAKER_SCOPE_PATTERN.search(task_body):
+        return_value = _SCOPE_PERSON_RESOLVED
+        return return_value
+
+    explicit_match = _EXPLICIT_SPEAKER_SCOPE_PATTERN.search(task_body)
+    if explicit_match is None:
+        return_value = ""
+        return return_value
+
+    return_value = explicit_match.group(1).lower()
+    return return_value
+
+
+def _requires_person_ref(task: str) -> bool:
+    """Return whether a slot needs a prior structured person reference.
+
+    Args:
+        task: Conversation-evidence slot text.
+
+    Returns:
+        True when the slot explicitly depends on a person from an earlier slot.
+    """
+
+    if _speaker_scope(task) == _SCOPE_PERSON_RESOLVED:
+        return True
+
+    normalized = _strip_prefix(task).lower()
+    return_value = "resolved in slot" in normalized
+    return return_value
+
+
 def _deterministic_plan(task: str) -> dict[str, Any] | None:
     """Parse structured conversation-evidence slots without selector LLM."""
 
     task_body = _strip_prefix(task)
     normalized = task_body.lower()
+    speaker_scope = _speaker_scope(task)
+    requires_person_ref = _requires_person_ref(task)
 
     if "active agreement" in normalized or "current episode" in normalized:
         plan = {
@@ -174,27 +231,14 @@ def _deterministic_plan(task: str) -> dict[str, Any] | None:
         plan = {
             "worker": "conversation_aggregate_agent",
             "reason": "aggregate/count conversation evidence",
-            "requires_person_ref": "resolved in slot" in normalized,
-        }
-        return plan
-
-    if (
-        "resolved in slot" in normalized
-        or "recent messages from" in normalized
-        or "date-window" in normalized
-        or "from timestamp" in normalized
-        or "to timestamp" in normalized
-    ):
-        plan = {
-            "worker": "conversation_filter_agent",
-            "reason": "structured conversation filter",
-            "requires_person_ref": "resolved in slot" in normalized,
+            "requires_person_ref": requires_person_ref,
         }
         return plan
 
     if (
         any(anchor in task_body for anchor in _EXACT_ANCHOR_CHARS)
         or "exact phrase" in normalized
+        or "exact term" in normalized
         or "url" in normalized
         or "filename" in normalized
         or "literal" in normalized
@@ -202,15 +246,37 @@ def _deterministic_plan(task: str) -> dict[str, Any] | None:
         plan = {
             "worker": "conversation_keyword_agent",
             "reason": "literal phrase, URL, filename, or exact anchor",
-            "requires_person_ref": "resolved in slot" in normalized,
+            "requires_person_ref": requires_person_ref,
         }
         return plan
 
-    if "topic" in normalized or "about " in normalized or "semantic" in normalized:
+    if (
+        "topic" in normalized
+        or "about " in normalized
+        or "semantic" in normalized
+    ):
         plan = {
             "worker": "conversation_search_agent",
             "reason": "semantic or fuzzy topic conversation evidence",
-            "requires_person_ref": "resolved in slot" in normalized,
+            "requires_person_ref": requires_person_ref,
+        }
+        return plan
+
+    if (
+        "resolved in slot" in normalized
+        or "recent messages from" in normalized
+        or (
+            speaker_scope
+            and "recent messages" in normalized
+        )
+        or "date-window" in normalized
+        or "from timestamp" in normalized
+        or "to timestamp" in normalized
+    ):
+        plan = {
+            "worker": "conversation_filter_agent",
+            "reason": "structured conversation filter",
+            "requires_person_ref": requires_person_ref,
         }
         return plan
 
@@ -246,8 +312,9 @@ Do not answer from durable memory, active episode progress, user profiles, or we
 4. Use conversation_search_agent for fuzzy topics and semantic message evidence.
 5. Use conversation_filter_agent for known user/time/date-window retrieval.
 6. Use conversation_aggregate_agent for counts, rankings, or grouped stats.
-7. Set requires_person_ref=true when the task references a person from a
-   previous slot, such as "user resolved in slot 1".
+7. Set requires_person_ref=true when the task uses
+   speaker=person resolved in slot N or otherwise references a person from a
+   previous slot.
 
 # Input Format
 {
@@ -324,10 +391,41 @@ def _first_person_ref(context: dict[str, Any]) -> dict[str, Any] | None:
     return return_value
 
 
-def _worker_context(context: dict[str, Any], person_ref: dict[str, Any] | None) -> dict[str, Any]:
-    """Build worker context with approved structured handoff values."""
+def _worker_context(
+    context: dict[str, Any],
+    person_ref: dict[str, Any] | None,
+    speaker_scope: str,
+) -> dict[str, Any]:
+    """Build worker context with approved structured handoff values.
+
+    Args:
+        context: Runtime context from the RAG supervisor.
+        person_ref: Prior resolved person reference, when the slot depends on
+            one.
+        speaker_scope: Optional author scope declared by the conversation slot.
+
+    Returns:
+        Worker context with only the user filter implied by the author scope.
+    """
     worker_context = dict(context)
     worker_context["exclude_current_question"] = True
+
+    if speaker_scope == _SCOPE_ANY_SPEAKER:
+        worker_context.pop("global_user_id", None)
+        worker_context.pop("display_name", None)
+
+    if speaker_scope == _SCOPE_ACTIVE_CHARACTER:
+        worker_context.pop("global_user_id", None)
+        worker_context.pop("display_name", None)
+        character_profile = context.get("character_profile")
+        if isinstance(character_profile, dict):
+            global_user_id = text_or_empty(character_profile.get("global_user_id"))
+            display_name = text_or_empty(character_profile.get("name"))
+            if global_user_id:
+                worker_context["global_user_id"] = global_user_id
+            if display_name:
+                worker_context["display_name"] = display_name
+
     if person_ref is not None:
         global_user_id = text_or_empty(person_ref.get("global_user_id"))
         display_name = text_or_empty(person_ref.get("display_name"))
@@ -638,6 +736,7 @@ class ConversationEvidenceAgent(BaseRAGHelperAgent):
 
         plan = await _select_plan(task, context)
         primary_worker = plan["worker"]
+        speaker_scope = _speaker_scope(task)
         if primary_worker == "incompatible":
             reason = text_or_empty(plan["reason"]) or "unsupported"
             result = self._unresolved(
@@ -658,8 +757,13 @@ class ConversationEvidenceAgent(BaseRAGHelperAgent):
             )
             return result
 
+        effective_person_ref = person_ref if bool(plan["requires_person_ref"]) else None
         worker = self._worker_for_name(primary_worker)
-        context_for_worker = _worker_context(context, person_ref)
+        context_for_worker = _worker_context(
+            context,
+            effective_person_ref,
+            speaker_scope,
+        )
         worker_result = await worker.run(
             task,
             context_for_worker,

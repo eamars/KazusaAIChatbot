@@ -650,6 +650,189 @@ async def test_conversation_evidence_filter_uses_resolved_person_ref() -> None:
 
 
 @pytest.mark.asyncio
+async def test_conversation_evidence_current_user_scope_replaces_self_dependency_keyword() -> None:
+    """Current-user content search should not require a fake prior person slot."""
+    agent = ConversationEvidenceAgent()
+    keyword_worker = _FakeWorker(
+        {
+            "resolved": True,
+            "result": [
+                {
+                    "body_text": "The user mentioned dessert.",
+                    "display_name": "Tester",
+                    "global_user_id": "user-1",
+                }
+            ],
+            "attempts": 1,
+            "cache": {"enabled": False, "hit": False, "reason": "open_range"},
+        }
+    )
+    agent.keyword_agent = keyword_worker
+
+    old_result = await agent.run(
+        (
+            "Conversation-evidence: retrieve recent messages from the user "
+            "resolved in slot 1 containing exact term 'dessert'"
+        ),
+        _base_context(),
+    )
+    context_with_prior_person = _base_context(
+        known_facts=[
+            {
+                "slot": "Person-context: resolve display name",
+                "raw_result": {
+                    "resolved_refs": [
+                        {
+                            "ref_type": "person",
+                            "global_user_id": "other-user",
+                            "display_name": "Other",
+                        }
+                    ]
+                },
+            }
+        ]
+    )
+    new_result = await agent.run(
+        (
+            "Conversation-evidence: retrieve recent messages containing "
+            "exact term 'dessert' speaker=current_user"
+        ),
+        context_with_prior_person,
+    )
+
+    assert old_result["resolved"] is False
+    assert old_result["result"]["missing_context"] == ["person_ref"]
+    assert new_result["resolved"] is True
+    assert len(keyword_worker.calls) == 1
+    assert keyword_worker.calls[0]["context"]["global_user_id"] == "user-1"
+    assert new_result["result"]["primary_worker"] == "conversation_keyword_agent"
+
+
+@pytest.mark.asyncio
+async def test_conversation_evidence_current_user_scope_replaces_self_dependency_url() -> None:
+    """Current-user URL search should bind runtime user context directly."""
+    agent = ConversationEvidenceAgent()
+    keyword_worker = _FakeWorker(
+        {
+            "resolved": True,
+            "result": [
+                {
+                    "body_text": "I shared https://example.test earlier.",
+                    "display_name": "Tester",
+                    "global_user_id": "user-1",
+                }
+            ],
+            "attempts": 1,
+            "cache": {"enabled": False, "hit": False, "reason": "open_range"},
+        }
+    )
+    agent.keyword_agent = keyword_worker
+
+    old_result = await agent.run(
+        (
+            "Conversation-evidence: retrieve messages from the user resolved "
+            "in slot 1 containing a URL"
+        ),
+        _base_context(),
+    )
+    new_result = await agent.run(
+        "Conversation-evidence: retrieve messages containing a URL speaker=current_user",
+        _base_context(),
+    )
+
+    assert old_result["resolved"] is False
+    assert old_result["result"]["missing_context"] == ["person_ref"]
+    assert new_result["resolved"] is True
+    assert len(keyword_worker.calls) == 1
+    assert keyword_worker.calls[0]["context"]["global_user_id"] == "user-1"
+    assert new_result["result"]["primary_worker"] == "conversation_keyword_agent"
+
+
+@pytest.mark.asyncio
+async def test_conversation_evidence_current_user_scope_replaces_self_dependency_topic() -> None:
+    """Current-user topic search should not be encoded as a prior-slot dependency."""
+    agent = ConversationEvidenceAgent()
+    search_worker = _FakeWorker(
+        {
+            "resolved": True,
+            "result": [
+                (
+                    0.71,
+                    {
+                        "body_text": "I talked about train plans.",
+                        "display_name": "Tester",
+                        "global_user_id": "user-1",
+                    },
+                )
+            ],
+            "attempts": 1,
+            "cache": {"enabled": False, "hit": False, "reason": "open_range"},
+        }
+    )
+    agent.search_agent = search_worker
+
+    old_result = await agent.run(
+        (
+            "Conversation-evidence: retrieve recent messages from the user "
+            "resolved in slot 1 about train plans"
+        ),
+        _base_context(),
+    )
+    new_result = await agent.run(
+        (
+            "Conversation-evidence: retrieve recent messages about train "
+            "plans speaker=current_user"
+        ),
+        _base_context(),
+    )
+
+    assert old_result["resolved"] is False
+    assert old_result["result"]["missing_context"] == ["person_ref"]
+    assert new_result["resolved"] is True
+    assert len(search_worker.calls) == 1
+    assert search_worker.calls[0]["context"]["global_user_id"] == "user-1"
+    assert new_result["result"]["primary_worker"] == "conversation_search_agent"
+
+
+@pytest.mark.asyncio
+async def test_conversation_evidence_any_speaker_scope_removes_current_user_filter() -> None:
+    """Any-speaker searches should not inherit the current user as a filter."""
+    agent = ConversationEvidenceAgent()
+    search_worker = _FakeWorker(
+        {
+            "resolved": True,
+            "result": [
+                (
+                    0.69,
+                    {
+                        "body_text": "Someone talked about train plans.",
+                        "display_name": "Other",
+                        "global_user_id": "other-user",
+                    },
+                )
+            ],
+            "attempts": 1,
+            "cache": {"enabled": False, "hit": False, "reason": "open_range"},
+        }
+    )
+    agent.search_agent = search_worker
+
+    result = await agent.run(
+        (
+            "Conversation-evidence: retrieve recent messages about train "
+            "plans speaker=any_speaker"
+        ),
+        _base_context(display_name="Tester"),
+    )
+
+    assert result["resolved"] is True
+    assert len(search_worker.calls) == 1
+    assert "global_user_id" not in search_worker.calls[0]["context"]
+    assert "display_name" not in search_worker.calls[0]["context"]
+    assert result["result"]["primary_worker"] == "conversation_search_agent"
+
+
+@pytest.mark.asyncio
 async def test_conversation_evidence_count_uses_aggregate() -> None:
     """Count and ranking requests should go to the aggregate worker."""
     agent = ConversationEvidenceAgent()
