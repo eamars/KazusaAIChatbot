@@ -9,7 +9,9 @@ import pytest
 
 from kazusa_ai_chatbot.config import RAG_PLANNER_LLM_BASE_URL
 from kazusa_ai_chatbot.nodes import persona_supervisor2_rag_supervisor2 as supervisor2_module
+from kazusa_ai_chatbot.rag import user_memory_evidence_agent as user_memory_evidence_module
 from kazusa_ai_chatbot.rag.cache2_runtime import get_rag_cache2_runtime
+from kazusa_ai_chatbot.rag.memory_evidence_agent import MemoryEvidenceAgent
 from tests.llm_trace import write_llm_trace
 
 pytestmark = [pytest.mark.asyncio, pytest.mark.live_llm]
@@ -20,6 +22,23 @@ logger = logging.getLogger(__name__)
 async def _noop_async(*args, **kwargs) -> None:
     """Avoid persistent Cache2 writes in focused live prompt checks."""
     del args, kwargs
+
+
+class _ForbiddenWorker:
+    """Fail if the live scoped-continuity route leaves user memory."""
+
+    def __init__(self, name: str) -> None:
+        self.name = name
+
+    async def run(
+        self,
+        task: str,
+        context: dict,
+        max_attempts: int = 1,
+    ) -> dict:
+        """Reject unexpected persistent-memory worker calls."""
+        del context, max_attempts
+        raise AssertionError(f"{self.name} should not handle scoped slot: {task}")
 
 
 async def _skip_if_llm_unavailable() -> None:
@@ -250,4 +269,105 @@ async def test_live_initializer_uses_current_user_speaker_scope(monkeypatch) -> 
         required_slot_fragments=["speaker=current_user"],
         forbidden_prefixes=["Person-context:"],
         forbidden_slot_fragments=["resolved in slot 1"],
+    )
+
+
+async def test_live_initializer_includes_memory_evidence_for_scoped_continuity(
+    monkeypatch,
+) -> None:
+    """Scoped current-user lore should reach exact user-memory keyword lookup."""
+
+    query = '请根据你和当前用户之间已经形成的私有连续性，回忆一下“学姐抹茶冰淇淋店”那个设定。'
+    slots = await _run_initializer_case(
+        monkeypatch,
+        "scoped_user_continuity_memory_evidence",
+        query,
+        ["Memory-evidence:"],
+        forbidden_prefixes=["Person-context:"],
+    )
+    memory_slot = next(slot for slot in slots if slot.startswith("Memory-evidence:"))
+    keyword_calls: list[str] = []
+
+    async def _embedding(text: str) -> list[float]:
+        raise AssertionError(f"literal live slot should not use embeddings: {text}")
+
+    async def _vector(*args, **kwargs):
+        del args, kwargs
+        raise AssertionError("literal live slot should not use vector search")
+
+    async def _keyword(global_user_id: str, keyword: str, **kwargs):
+        keyword_calls.append(keyword)
+        if keyword != '学姐':
+            return []
+        row = {
+            "unit_id": "unit-live-xuejie",
+            "unit_type": "objective_fact",
+            "fact": "冰淇淋摊老板是千纱的初中学姐。",
+            "subjective_appraisal": "The character treats this as scoped continuity.",
+            "relationship_signal": "Keep this lore scoped to this user.",
+            "content": "冰淇淋摊老板是千纱的初中学姐。",
+            "source_system": "user_memory_units",
+            "scope_type": "user_continuity",
+            "scope_global_user_id": global_user_id,
+        }
+        return [row]
+
+    async def _recent(*args, **kwargs):
+        del args, kwargs
+        raise AssertionError("literal live slot should not use recency fallback")
+
+    monkeypatch.setattr(user_memory_evidence_module, "get_text_embedding", _embedding)
+    monkeypatch.setattr(
+        user_memory_evidence_module,
+        "search_user_memory_units_by_vector",
+        _vector,
+    )
+    monkeypatch.setattr(
+        user_memory_evidence_module,
+        "search_user_memory_units_by_keyword",
+        _keyword,
+    )
+    monkeypatch.setattr(
+        user_memory_evidence_module,
+        "query_user_memory_units",
+        _recent,
+    )
+
+    state = _initializer_state(query)
+    context = dict(state["context"])
+    context["original_query"] = query
+    context["current_slot"] = memory_slot
+
+    agent = MemoryEvidenceAgent()
+    agent.keyword_agent = _ForbiddenWorker("persistent_memory_keyword_agent")
+    agent.search_agent = _ForbiddenWorker("persistent_memory_search_agent")
+
+    result = await agent.run(memory_slot, context)
+    trace_path = write_llm_trace(
+        "rag_phase3_initializer_live_llm",
+        "scoped_user_continuity_memory_evidence_keyword_probe",
+        {
+            "query": query,
+            "memory_slot": memory_slot,
+            "keyword_calls": keyword_calls,
+            "memory_evidence_result": result,
+            "judgment": "live initializer slot reached scoped exact-keyword lookup",
+        },
+    )
+    safe_memory_slot = memory_slot.encode("unicode_escape").decode("ascii")
+    safe_keyword_calls = [
+        keyword.encode("unicode_escape").decode("ascii")
+        for keyword in keyword_calls
+    ]
+    logger.info(
+        f"RAG_PHASE3_INITIALIZER_LIVE keyword_probe trace={trace_path} "
+        f"memory_slot={safe_memory_slot} keyword_calls={safe_keyword_calls} "
+        f"primary_worker={result['result'].get('primary_worker')}"
+    )
+
+    assert result["resolved"] is True
+    assert result["result"]["primary_worker"] == "user_memory_evidence_agent"
+    assert '学姐' in keyword_calls
+    assert result["result"]["projection_payload"]["memory_rows"][0]["unit_id"] == (
+        "unit-live-xuejie"
     )

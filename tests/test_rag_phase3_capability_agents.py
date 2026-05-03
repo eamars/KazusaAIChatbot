@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import pytest
 
+from kazusa_ai_chatbot.rag import memory_evidence_agent as memory_evidence_module
 from kazusa_ai_chatbot.rag.conversation_evidence_agent import (
     ConversationEvidenceAgent,
 )
@@ -1011,26 +1012,58 @@ async def test_memory_evidence_common_sense_uses_search() -> None:
     assert result["result"]["primary_worker"] == "persistent_memory_search_agent"
 
 
+def test_memory_evidence_selector_prompt_renders_scoped_worker_option() -> None:
+    """The selector prompt should expose the scoped user-memory worker."""
+    prompt = memory_evidence_module._SELECTOR_PROMPT
+
+    assert "# Input Format" in prompt
+    assert "# Output Format" in prompt
+    assert "user_memory_evidence_agent" in prompt
+    assert "current-user durable memory" in prompt
+
+
 @pytest.mark.asyncio
-async def test_memory_evidence_user_memory_unit_uses_search_contract() -> None:
-    """Durable user-specific memory evidence still uses memory workers."""
+async def test_memory_evidence_user_memory_unit_uses_scoped_worker() -> None:
+    """Current-user continuity should route to the scoped user-memory worker."""
     agent = MemoryEvidenceAgent()
-    search_worker = _FakeWorker(
+    search_worker = _FakeWorker({"resolved": True, "result": []})
+    user_worker = _FakeWorker(
         {
             "resolved": True,
-            "result": [
-                {
-                    "memory_name": "user-preference-tea",
-                    "content": "The current user prefers jasmine tea.",
-                    "source_kind": "user_memory_unit",
-                    "memory_type": "preference",
-                }
-            ],
+            "result": {
+                "selected_summary": "The current user prefers jasmine tea.",
+                "memory_rows": [
+                    {
+                        "unit_id": "unit-1",
+                        "unit_type": "objective_fact",
+                        "fact": "The current user prefers jasmine tea.",
+                        "subjective_appraisal": "Kazusa sees this as stable continuity.",
+                        "relationship_signal": "Keep tea continuity available.",
+                        "content": "The current user prefers jasmine tea.",
+                        "updated_at": "2026-05-03T00:00:00+00:00",
+                        "source_system": "user_memory_units",
+                        "scope_type": "user_continuity",
+                        "scope_global_user_id": "user-1",
+                        "authority": "scoped_continuity",
+                        "truth_status": "character_lore_or_interaction_continuity",
+                        "origin": "consolidated_interaction",
+                    }
+                ],
+                "source_system": "user_memory_units",
+                "scope_type": "user_continuity",
+                "scope_global_user_id": "user-1",
+                "missing_context": [],
+            },
             "attempts": 1,
-            "cache": {"enabled": True, "hit": False, "reason": "miss_stored"},
+            "cache": {
+                "enabled": False,
+                "hit": False,
+                "reason": "scoped_user_memory_uncached",
+            },
         }
     )
     agent.search_agent = search_worker
+    agent.user_memory_agent = user_worker
 
     result = await agent.run(
         "Memory-evidence: retrieve durable user memory evidence about the current user's accepted preference",
@@ -1038,10 +1071,71 @@ async def test_memory_evidence_user_memory_unit_uses_search_contract() -> None:
     )
 
     assert result["resolved"] is True
-    assert len(search_worker.calls) == 1
+    assert search_worker.calls == []
+    assert len(user_worker.calls) == 1
+    assert result["result"]["primary_worker"] == "user_memory_evidence_agent"
     assert result["result"]["projection_payload"]["memory_rows"][0]["content"] == (
         "The current user prefers jasmine tea."
     )
+    assert result["result"]["projection_payload"]["memory_rows"][0]["scope_type"] == (
+        "user_continuity"
+    )
+
+
+@pytest.mark.asyncio
+async def test_memory_evidence_old_setting_slot_uses_scoped_context() -> None:
+    """Old durable-setting slots should use original-query scoped continuity."""
+    agent = MemoryEvidenceAgent()
+    search_worker = _FakeWorker({"resolved": True, "result": []})
+    user_worker = _FakeWorker(
+        {
+            "resolved": True,
+            "result": {
+                "selected_summary": "冰淇淋摊老板是千纱的初中学姐。",
+                "memory_rows": [
+                    {
+                        "unit_id": "unit-xuejie",
+                        "unit_type": "objective_fact",
+                        "fact": "冰淇淋摊老板是千纱的初中学姐。",
+                        "subjective_appraisal": "Kazusa treats this as scoped continuity.",
+                        "relationship_signal": "Keep this lore scoped to this user.",
+                        "content": "冰淇淋摊老板是千纱的初中学姐。",
+                        "updated_at": "2026-05-03T00:00:00+00:00",
+                        "source_system": "user_memory_units",
+                        "scope_type": "user_continuity",
+                        "scope_global_user_id": "user-1",
+                        "authority": "scoped_continuity",
+                        "truth_status": "character_lore_or_interaction_continuity",
+                        "origin": "consolidated_interaction",
+                    }
+                ],
+                "source_system": "user_memory_units",
+                "scope_type": "user_continuity",
+                "scope_global_user_id": "user-1",
+                "missing_context": [],
+            },
+            "attempts": 1,
+            "cache": {
+                "enabled": False,
+                "hit": False,
+                "reason": "scoped_user_memory_uncached",
+            },
+        }
+    )
+    agent.search_agent = search_worker
+    agent.user_memory_agent = user_worker
+
+    result = await agent.run(
+        'Memory-evidence: retrieve durable evidence about “学姐抹茶冰淇淋店” setting',
+        _base_context(
+            original_query='请根据你和当前用户之间已经形成的私有连续性，回忆一下“学姐抹茶冰淇淋店”那个设定。',
+        ),
+    )
+
+    assert result["resolved"] is True
+    assert search_worker.calls == []
+    assert len(user_worker.calls) == 1
+    assert result["result"]["primary_worker"] == "user_memory_evidence_agent"
 
 
 @pytest.mark.asyncio

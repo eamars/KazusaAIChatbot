@@ -21,6 +21,7 @@ from kazusa_ai_chatbot.rag.persistent_memory_search_agent import (
     PersistentMemorySearchAgent,
 )
 from kazusa_ai_chatbot.rag.prompt_projection import project_selector_input_for_llm
+from kazusa_ai_chatbot.rag.user_memory_evidence_agent import UserMemoryEvidenceAgent
 from kazusa_ai_chatbot.utils import get_llm, parse_llm_json_output, text_or_empty
 
 logger = logging.getLogger(__name__)
@@ -31,6 +32,7 @@ _UNCACHED_REASON = "capability_orchestrator_uncached"
 _KNOWN_WORKERS = {
     "persistent_memory_keyword_agent",
     "persistent_memory_search_agent",
+    "user_memory_evidence_agent",
     "incompatible",
 }
 
@@ -105,7 +107,10 @@ def _strip_prefix(task: str) -> str:
     return return_value
 
 
-def _deterministic_plan(task: str) -> dict[str, Any] | None:
+def _deterministic_plan(
+    task: str,
+    context: dict[str, Any] | None = None,
+) -> dict[str, Any] | None:
     """Parse structured memory-evidence slots without selector LLM."""
     task_body = _strip_prefix(task)
     normalized = task_body.lower()
@@ -142,6 +147,46 @@ def _deterministic_plan(task: str) -> dict[str, Any] | None:
         plan = {
             "worker": "incompatible",
             "reason": "Person-context",
+        }
+        return plan
+
+    route_parts = [task_body]
+    if isinstance(context, dict):
+        for field in ("original_query", "current_slot"):
+            value = text_or_empty(context.get(field))
+            if value:
+                route_parts.append(value)
+    route_text = "\n".join(route_parts).lower()
+
+    scoped_user_scope_markers = (
+        "current user's",
+        "current user",
+        "with the current user",
+        "当前用户",
+        "私有",
+    )
+    scoped_user_topic_markers = (
+        "continuity",
+        "accepted preference",
+        "shared experience",
+        "user memory evidence",
+        "story lore",
+        "story continuity",
+        "private lore",
+        "private continuity",
+        "连续性",
+        "设定",
+    )
+    has_scoped_user_scope = any(
+        marker in route_text for marker in scoped_user_scope_markers
+    )
+    has_scoped_user_topic = any(
+        marker in route_text for marker in scoped_user_topic_markers
+    )
+    if has_scoped_user_scope and has_scoped_user_topic:
+        plan = {
+            "worker": "user_memory_evidence_agent",
+            "reason": "scoped current-user continuity evidence",
         }
         return plan
 
@@ -193,11 +238,14 @@ Do not answer active agreements, person profiles, relationships, or live externa
 3. If the task asks for current weather, temperature, opening status, prices,
    exchange rates, or any changing live value, output worker="incompatible"
    and reason="Live-context".
-4. Use persistent_memory_keyword_agent for exact named facts, tags,
+4. Use user_memory_evidence_agent for current-user durable memory, private
+   continuity, accepted preference, user-specific lore, or prior shared
+   experience with the current user.
+5. Use persistent_memory_keyword_agent for exact named facts, tags,
    memory_name/dedup_key lookups, proper nouns, or quoted terms.
-5. Use persistent_memory_search_agent for natural-language durable facts,
+6. Use persistent_memory_search_agent for natural-language durable facts,
    home/address/location questions, fuzzy concepts, common sense, world
-   knowledge, character-world facts, and durable user memory evidence.
+   knowledge, and character-world facts.
 
 # Input Format
 {
@@ -210,7 +258,7 @@ Do not answer active agreements, person profiles, relationships, or live externa
 # Output Format
 Return valid JSON only:
 {
-  "worker": "persistent_memory_keyword_agent | persistent_memory_search_agent | incompatible",
+  "worker": "user_memory_evidence_agent | persistent_memory_keyword_agent | persistent_memory_search_agent | incompatible",
   "reason": "short source selection explanation"
 }
 """
@@ -225,7 +273,7 @@ _selector_llm = get_llm(
 
 async def _select_plan(task: str, context: dict[str, Any]) -> dict[str, Any]:
     """Select the bounded durable-memory worker path for one slot."""
-    deterministic_plan = _deterministic_plan(task)
+    deterministic_plan = _deterministic_plan(task, context)
     if deterministic_plan is not None:
         return deterministic_plan
 
@@ -245,6 +293,10 @@ async def _select_plan(task: str, context: dict[str, Any]) -> dict[str, Any]:
 def _rows_from_worker(worker_result: dict[str, Any]) -> list[object]:
     """Normalize a memory worker result into rows."""
     value = worker_result.get("result")
+    if isinstance(value, dict):
+        memory_rows = value.get("memory_rows")
+        if isinstance(memory_rows, list):
+            return memory_rows
     if isinstance(value, list):
         return value
     rows = [value]
@@ -317,6 +369,9 @@ class MemoryEvidenceAgent(BaseRAGHelperAgent):
         self.search_agent = PersistentMemorySearchAgent(
             cache_runtime=cache_runtime
         )
+        self.user_memory_agent = UserMemoryEvidenceAgent(
+            cache_runtime=cache_runtime
+        )
 
     async def run(
         self,
@@ -379,6 +434,8 @@ class MemoryEvidenceAgent(BaseRAGHelperAgent):
         """Return the configured memory worker for an approved name."""
         if worker_name == "persistent_memory_keyword_agent":
             return self.keyword_agent
+        if worker_name == "user_memory_evidence_agent":
+            return self.user_memory_agent
         return_value = self.search_agent
         return return_value
 

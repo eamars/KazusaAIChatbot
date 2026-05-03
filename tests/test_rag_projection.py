@@ -388,6 +388,82 @@ def test_project_known_facts_maps_top_level_capability_payloads() -> None:
     assert result["third_party_profiles"] == ["Third party summary"]
 
 
+def test_project_known_facts_preserves_scoped_user_memory_metadata_and_candidates() -> None:
+    """Scoped user-memory evidence should remain visible to cognition and consolidation."""
+
+    result = project_known_facts(
+        [
+            {
+                "slot": "memory",
+                "agent": "memory_evidence_agent",
+                "resolved": True,
+                "summary": "scoped continuity summary",
+                "raw_result": {
+                    "projection_payload": {
+                        "memory_rows": [
+                            {
+                                "unit_id": "unit-7",
+                                "unit_type": "objective_fact",
+                                "fact": "冰淇淋摊老板是千纱的初中学姐。",
+                                "subjective_appraisal": "Kazusa treats this as shared private continuity.",
+                                "relationship_signal": "Preserve the lore with this user.",
+                                "content": "冰淇淋摊老板是千纱的初中学姐。",
+                                "updated_at": "2026-05-03T00:00:00+00:00",
+                                "source_system": "user_memory_units",
+                                "scope_type": "user_continuity",
+                                "scope_global_user_id": "user-1",
+                                "authority": "scoped_continuity",
+                                "truth_status": "character_lore_or_interaction_continuity",
+                                "origin": "consolidated_interaction",
+                            },
+                            {
+                                "memory_name": "active-character-official-address",
+                                "content": "The active character's official address is 123 Example Street.",
+                                "source_kind": "seeded_manual",
+                            },
+                        ],
+                    }
+                },
+            }
+        ],
+        current_user_id="user-1",
+        character_user_id="character-1",
+    )
+
+    assert result["memory_evidence"] == [
+        {
+            "summary": "scoped continuity summary",
+            "content": (
+                "冰淇淋摊老板是千纱的初中学姐。\n"
+                "The active character's official address is 123 Example Street."
+            ),
+            "source_system": "user_memory_units",
+            "scope_type": "user_continuity",
+            "scope_global_user_id": "user-1",
+            "authority": "scoped_continuity",
+            "truth_status": "character_lore_or_interaction_continuity",
+            "origin": "consolidated_interaction",
+        }
+    ]
+    assert result["user_memory_unit_candidates"] == [
+        {
+            "unit_id": "unit-7",
+            "unit_type": "objective_fact",
+            "fact": "冰淇淋摊老板是千纱的初中学姐。",
+            "subjective_appraisal": "Kazusa treats this as shared private continuity.",
+            "relationship_signal": "Preserve the lore with this user.",
+            "content": "冰淇淋摊老板是千纱的初中学姐。",
+            "updated_at": "2026-05-03T00:00:00+00:00",
+            "source_system": "user_memory_units",
+            "scope_type": "user_continuity",
+            "scope_global_user_id": "user-1",
+            "authority": "scoped_continuity",
+            "truth_status": "character_lore_or_interaction_continuity",
+            "origin": "consolidated_interaction",
+        }
+    ]
+
+
 def test_project_known_facts_skips_unresolved_top_level_payload() -> None:
     """Unresolved capability results should remain only in supervisor trace."""
     result = project_known_facts(

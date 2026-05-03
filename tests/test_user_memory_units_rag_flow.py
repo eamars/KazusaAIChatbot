@@ -167,6 +167,92 @@ async def test_process_memory_unit_candidate_reuses_rag_surfaced_units(monkeypat
 
 
 @pytest.mark.asyncio
+async def test_process_memory_unit_candidate_merges_memory_evidence_surfaced_scoped_unit(
+    monkeypatch,
+) -> None:
+    captured: dict[str, object] = {}
+    surfaced_unit = {
+        **_unit("existing-scoped-1", "冰淇淋摊老板是千纱的初中学姐。"),
+        "source_system": "user_memory_units",
+        "scope_type": "user_continuity",
+        "scope_global_user_id": "user-1",
+        "authority": "scoped_continuity",
+        "truth_status": "character_lore_or_interaction_continuity",
+        "origin": "consolidated_interaction",
+    }
+    candidate = {
+        "candidate_id": "candidate-scoped-1",
+        "unit_type": UserMemoryUnitType.OBJECTIVE_FACT,
+        "fact": "冰淇淋摊老板是千纱的初中学姐，还会给双倍抹茶酱。",
+        "subjective_appraisal": "Kazusa now treats this as reinforced continuity.",
+        "relationship_signal": "Keep this scoped lore available for the same user.",
+        "evidence_refs": [],
+    }
+
+    async def _retrieve_memory_unit_merge_candidates(global_user_id, **kwargs):
+        captured["global_user_id"] = global_user_id
+        captured["surfaced_units"] = kwargs["surfaced_units"]
+        return [surfaced_unit]
+
+    async def _update_user_memory_unit_semantics(unit_id, semantics, **kwargs):
+        captured["updated_unit_id"] = unit_id
+        captured["updated_semantics"] = semantics
+        captured["merge_history"] = kwargs["merge_history_entry"]
+
+    async def _insert_user_memory_units(*args, **kwargs):
+        raise AssertionError("duplicate insert should not run when a surfaced scoped unit is merged")
+
+    merge_judge_llm = _StaticAsyncLLM({
+        "candidate_id": "candidate-scoped-1",
+        "decision": "merge",
+        "cluster_id": "existing-scoped-1",
+        "reason": "same scoped continuity with one new detail",
+    })
+    rewrite_llm = _StaticAsyncLLM({
+        "candidate_id": "candidate-scoped-1",
+        "cluster_id": "existing-scoped-1",
+        "fact": "冰淇淋摊老板是千纱的初中学姐，还会给双倍抹茶酱。",
+        "subjective_appraisal": "Kazusa now treats this as reinforced continuity.",
+        "relationship_signal": "Keep this scoped lore available for the same user.",
+    })
+
+    monkeypatch.setattr(
+        memory_units_module,
+        "retrieve_memory_unit_merge_candidates",
+        _retrieve_memory_unit_merge_candidates,
+    )
+    monkeypatch.setattr(memory_units_module, "_merge_judge_llm", merge_judge_llm)
+    monkeypatch.setattr(memory_units_module, "_rewrite_llm", rewrite_llm)
+    monkeypatch.setattr(
+        memory_units_module,
+        "update_user_memory_unit_semantics",
+        _update_user_memory_unit_semantics,
+    )
+    monkeypatch.setattr(memory_units_module, "insert_user_memory_units", _insert_user_memory_units)
+
+    result = await memory_units_module.process_memory_unit_candidate(
+        {
+            "timestamp": "2026-04-29T00:00:00+12:00",
+            "global_user_id": "user-1",
+            "rag_result": {"user_memory_unit_candidates": [surfaced_unit]},
+        },
+        candidate,
+    )
+
+    assert captured["global_user_id"] == "user-1"
+    assert captured["surfaced_units"] == [surfaced_unit]
+    assert captured["updated_unit_id"] == "existing-scoped-1"
+    assert captured["updated_semantics"] == {
+        "fact": "冰淇淋摊老板是千纱的初中学姐，还会给双倍抹茶酱。",
+        "subjective_appraisal": "Kazusa now treats this as reinforced continuity.",
+        "relationship_signal": "Keep this scoped lore available for the same user.",
+    }
+    assert captured["merge_history"]["candidate_id"] == "candidate-scoped-1"
+    assert result["decision"] == "merge"
+    assert result["unit_id"] == "existing-scoped-1"
+
+
+@pytest.mark.asyncio
 async def test_process_memory_unit_candidate_normalizes_merge_candidate_id(monkeypatch) -> None:
     captured: dict[str, object] = {}
     existing_unit = _unit("existing-1", "Existing fact")

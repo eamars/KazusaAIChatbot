@@ -120,6 +120,77 @@ def _extract_memory_content(raw_result: object, *, evidence_char_limit: int) -> 
     return memory_content
 
 
+def _scoped_user_memory_rows(
+    rows: list[dict[str, Any]],
+    *,
+    current_user_id: str,
+) -> list[dict[str, Any]]:
+    """Return scoped current-user continuity rows from memory-evidence payloads."""
+    scoped_rows: list[dict[str, Any]] = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        if text_or_empty(row.get("source_system")) != "user_memory_units":
+            continue
+        if text_or_empty(row.get("scope_type")) != "user_continuity":
+            continue
+        scope_global_user_id = text_or_empty(row.get("scope_global_user_id"))
+        if scope_global_user_id != current_user_id:
+            continue
+        scoped_rows.append(dict(row))
+    return scoped_rows
+
+
+def _append_user_memory_unit_candidates(
+    existing_candidates: list[dict[str, Any]],
+    new_candidates: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Merge user-memory candidates while preserving first-seen order."""
+    merged_candidates: list[dict[str, Any]] = []
+    seen_unit_ids: set[str] = set()
+    for candidate in existing_candidates + new_candidates:
+        if not isinstance(candidate, dict):
+            continue
+        unit_id = text_or_empty(candidate.get("unit_id"))
+        if unit_id:
+            if unit_id in seen_unit_ids:
+                continue
+            seen_unit_ids.add(unit_id)
+        merged_candidates.append(candidate)
+    return merged_candidates
+
+
+def _memory_evidence_entry(
+    *,
+    summary: str,
+    rows: list[dict[str, Any]],
+    current_user_id: str,
+    evidence_char_limit: int,
+) -> dict[str, str]:
+    """Project one memory-evidence item and preserve scoped continuity metadata."""
+    entry: dict[str, str] = {
+        "summary": summary,
+        "content": _extract_memory_content(rows, evidence_char_limit=evidence_char_limit),
+    }
+    scoped_rows = _scoped_user_memory_rows(rows, current_user_id=current_user_id)
+    if not scoped_rows:
+        return entry
+
+    scoped_row = scoped_rows[0]
+    for field in (
+        "source_system",
+        "scope_type",
+        "scope_global_user_id",
+        "authority",
+        "truth_status",
+        "origin",
+    ):
+        value = text_or_empty(scoped_row.get(field))
+        if value:
+            entry[field] = value
+    return entry
+
+
 def _extract_external_content(raw_result: object, *, evidence_char_limit: int) -> tuple[str, str]:
     """Extract clipped external evidence text and its first visible URL.
 
@@ -259,13 +330,23 @@ def project_known_facts(
 
         if agent == "memory_evidence_agent":
             payload = _projection_payload(raw_result)
-            memory_evidence.append({
-                "summary": summary,
-                "content": _extract_memory_content(
-                    payload.get("memory_rows"),
+            memory_rows = [
+                row
+                for row in _as_list(payload.get("memory_rows"))
+                if isinstance(row, dict)
+            ]
+            memory_evidence.append(
+                _memory_evidence_entry(
+                    summary=summary,
+                    rows=memory_rows,
+                    current_user_id=current_user_id,
                     evidence_char_limit=evidence_char_limit,
-                ),
-            })
+                )
+            )
+            rag_result["user_memory_unit_candidates"] = _append_user_memory_unit_candidates(
+                rag_result["user_memory_unit_candidates"],
+                _scoped_user_memory_rows(memory_rows, current_user_id=current_user_id),
+            )
             continue
 
         if agent == "person_context_agent":
@@ -275,8 +356,13 @@ def project_known_facts(
             payload_summary = text_or_empty(payload.get("summary")) or summary
             if profile_kind == "current_user":
                 rag_result["user_image"] = _strip_internal_profile_fields(raw_profile)
-                rag_result["user_memory_unit_candidates"] = _as_list(
-                    raw_profile.get("_user_memory_units")
+                rag_result["user_memory_unit_candidates"] = _append_user_memory_unit_candidates(
+                    rag_result["user_memory_unit_candidates"],
+                    [
+                        row
+                        for row in _as_list(raw_profile.get("_user_memory_units"))
+                        if isinstance(row, dict)
+                    ],
                 )
                 continue
             if profile_kind == "active_character":
@@ -291,8 +377,13 @@ def project_known_facts(
             owner_id = _resolve_profile_owner_id(fact, known_facts)
             if owner_id == current_user_id:
                 rag_result["user_image"] = _strip_internal_profile_fields(raw_profile)
-                rag_result["user_memory_unit_candidates"] = _as_list(
-                    raw_profile.get("_user_memory_units")
+                rag_result["user_memory_unit_candidates"] = _append_user_memory_unit_candidates(
+                    rag_result["user_memory_unit_candidates"],
+                    [
+                        row
+                        for row in _as_list(raw_profile.get("_user_memory_units"))
+                        if isinstance(row, dict)
+                    ],
                 )
                 continue
             if owner_id == character_user_id or (not owner_id and raw_profile.get("self_image") is not None):

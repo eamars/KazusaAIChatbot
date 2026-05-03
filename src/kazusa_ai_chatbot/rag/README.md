@@ -31,6 +31,7 @@ The persona graph does not pass this raw shape directly to cognition. `stage_1_r
 {
     "answer": str,
     "user_image": dict,
+    "user_memory_unit_candidates": list[dict],
     "character_image": dict,
     "third_party_profiles": list[str],
     "memory_evidence": list[dict],
@@ -157,7 +158,7 @@ RAG 2 groups helper agents by semantic ownership:
 
 - **Live context** resolves target/scope for changing external facts such as weather, temperature, opening status, schedules, prices, and exchange rates, then delegates to web search. Memory may be used only for stable target/scope lookup, not as the live value source.
 - **Conversation evidence** searches or filters historical messages by semantic query, keyword, structured filters, or aggregate questions.
-- **Memory evidence** searches durable shared/world/common-sense/character facts by semantic query or exact identifiers.
+- **Memory evidence** is scope-aware. It searches durable shared/world/common-sense/character facts by semantic query or exact identifiers, and it can also retrieve current-user scoped continuity from `user_memory_units` when the slot is about private continuity rather than profile or relationship state.
 - **Person context** resolves users, enumerates users, reads user or character profile bundles, and ranks relationship-like profile state.
 - **Recall retrieval** reconciles active agreements, ongoing promises, plans, open loops, and current-episode state.
 - **External retrieval** performs web search and URL reads when the required fact is outside local storage.
@@ -193,7 +194,7 @@ The dispatcher-visible top-level capability agents are:
 |---|---|
 | `live_context_agent` | Resolves target/scope for live external facts, then delegates to `web_search_agent2`. It refuses missing location/target instead of guessing. |
 | `conversation_evidence_agent` | Chooses the appropriate conversation worker for exact phrases, fuzzy topics, structured filters, counts, URLs, and speaker provenance. |
-| `memory_evidence_agent` | Chooses semantic or exact durable-memory retrieval for world/common-sense/character facts. Natural-language home/address questions use semantic memory search; literal memory identifiers use keyword search. |
+| `memory_evidence_agent` | Chooses among shared semantic memory, shared exact-memory lookup, and scoped current-user continuity retrieval. Natural-language home/address questions use shared semantic memory search; literal memory identifiers use shared keyword search; current-user private continuity uses `user_memory_evidence_agent`. |
 | `person_context_agent` | Chooses identity, profile, user-list, relationship, or the approved display-name to profile chain. |
 | `recall_agent` | Reconciles active agreements, promises, plans, and current-episode state from scoped volatile sources. |
 
@@ -233,6 +234,7 @@ The reusable worker agents are:
 | `conversation_search_agent` | Performs semantic conversation recall when the topic is fuzzy or the exact wording is unknown. It is the fallback for conversation content after filters and keywords are unsuitable. |
 | `persistent_memory_keyword_agent` | Searches durable memories by exact keyword or phrase, useful for tags, event names, and proper nouns. |
 | `persistent_memory_search_agent` | Searches durable memories semantically for impressions, commitments, facts, and other remembered knowledge when exact wording is unknown. |
+| `user_memory_evidence_agent` | Searches `user_memory_units` for the current `global_user_id` only. It uses vector retrieval when available, explicit literal lexical retrieval for exact continuity anchors, and bounded recency fallback. Returned rows keep `source_system`, `scope_type`, `scope_global_user_id`, `authority`, `truth_status`, and `origin`. |
 | `web_search_agent2` | Searches or reads public web content when the requested fact cannot come from local profiles, memories, or conversation history. |
 
 Most agents are evidence retrievers. They should answer "what was found?" rather than "what should Kazusa think about it?" The only ranking-style agents still return factual rankings from stored data or message counts; interpretation remains downstream.
@@ -257,12 +259,33 @@ Each fact recorded by the supervisor keeps both operational and provenance infor
 `summary` is the normal prompt-facing evidence for search-like agents. `raw_result` is retained where structure matters, especially user and character profile bundles. The projection layer applies a hybrid policy:
 
 - structured profile/image bundles remain structured,
+- scoped `user_memory_units` rows surfaced through `Memory-evidence:` remain in `memory_evidence` with scope metadata preserved and are also appended to `rag_result.user_memory_unit_candidates` for consolidation merge/evolve reuse,
 - conversation evidence is summarized,
-- persistent-memory and external evidence keep short clipped evidence text,
-- recall evidence keeps the selected claim plus provenance, source freshness, conflicts, and bounded candidates,
-- dispatch trace remains available as retrieval telemetry, not as factual proof.
+- shared memory evidence is summarized,
+- live/external evidence keeps URL-bearing text,
+- recall evidence stays structured because downstream stages inspect fields such as status and temporal scope.
 
-This keeps cognition grounded without flooding prompts with raw search hits.
+## Scope And Provenance
+
+`Memory-evidence:` now spans two durable-memory sources with different authority boundaries:
+
+- shared `memory` rows for official facts, common sense, seeded lore, and other non-user-scoped durable memory,
+- scoped `user_memory_units` rows for current-user continuity.
+
+When the source is `user_memory_units`, projected evidence preserves:
+
+- `source_system="user_memory_units"`,
+- `scope_type="user_continuity"`,
+- `scope_global_user_id=<current global_user_id>`,
+- `authority="scoped_continuity"` unless the stored row already provides a stronger value,
+- `truth_status="character_lore_or_interaction_continuity"` unless the stored row already provides a stronger value,
+- `origin="consolidated_interaction"` unless the stored row already provides a stronger value.
+
+This keeps current-user private continuity distinct from shared/global durable memory and lets the consolidator reuse the exact surfaced units instead of creating duplicates.
+
+## Future Direction
+
+Long-term global lore promotion remains future work. The current implementation does not promote scoped `user_memory_units` continuity into shared/global lore automatically. Any future promotion pipeline must preserve provenance and conflict handling instead of flattening user continuity into unscoped durable memory.
 
 ## Cache 2
 

@@ -300,31 +300,31 @@ When `memory_evidence_agent` returns `projection_payload.memory_rows`:
 
 ## Progress Checklist
 
-- [ ] Stage 1 - Scoped user-memory worker contract
+- [x] Stage 1 - Scoped user-memory worker contract
   - Covers: `tests/test_user_memory_evidence_agent.py` and implementation for `src/kazusa_ai_chatbot/rag/user_memory_evidence_agent.py`.
   - Verify: `venv\Scripts\python.exe -m pytest tests/test_user_memory_evidence_agent.py -q`.
   - Evidence: record test output and any fallback retrieval behavior in `Execution Evidence`.
-  - Sign-off: `<agent/date>` after verification and evidence are recorded.
-- [ ] Stage 2 - MemoryEvidenceAgent routing
+  - Sign-off: `Cascade/2026-05-04`.
+- [x] Stage 2 - MemoryEvidenceAgent routing
   - Covers: internal worker registration and selector/deterministic routing.
   - Verify: `venv\Scripts\python.exe -m pytest tests/test_rag_phase3_capability_agents.py -q`.
   - Evidence: record which test proves scoped user memory no longer uses persistent-memory search.
-  - Sign-off: `<agent/date>` after verification and evidence are recorded.
-- [ ] Stage 3 - Projection closes the loop
+  - Sign-off: `Cascade/2026-05-04`.
+- [x] Stage 3 - Projection closes the loop
   - Covers: `persona_supervisor2_rag_projection.py`.
   - Verify: `venv\Scripts\python.exe -m pytest tests/test_rag_projection.py -q`.
   - Evidence: record test proving scoped rows populate both `memory_evidence` and `user_memory_unit_candidates`.
-  - Sign-off: `<agent/date>` after verification and evidence are recorded.
-- [ ] Stage 4 - Consolidator merge/evolve compatibility
+  - Sign-off: `Cascade/2026-05-04`.
+- [x] Stage 4 - Consolidator merge/evolve compatibility
   - Covers: `tests/test_user_memory_units_rag_flow.py` and existing consolidator candidate path.
   - Verify: `venv\Scripts\python.exe -m pytest tests/test_user_memory_units_rag_flow.py -q`.
   - Evidence: record test proving an existing scoped memory candidate is merged/evolved instead of duplicated.
-  - Sign-off: `<agent/date>` after verification and evidence are recorded.
-- [ ] Stage 5 - Documentation and final verification
+  - Sign-off: `Cascade/2026-05-04`.
+- [x] Stage 5 - Documentation and final verification
   - Covers: RAG README and full targeted gates.
   - Verify: all commands in `Verification`.
   - Evidence: record command outputs and final changed-file list.
-  - Sign-off: `<agent/date>` after verification and evidence are recorded.
+  - Sign-off: `Cascade/2026-05-04`.
 
 ## Verification
 
@@ -431,8 +431,39 @@ The long-term rule is: character-made lore may become global, but only through c
 ## Execution Evidence
 
 - Static grep results:
+  - `rg -n "User-memory-evidence|Continuity-memory" src tests development_plans` returned only `development_plans\memory_evidence_scoped_user_continuity_plan.md`, confirming no new top-level prefix was introduced.
 - Compile results:
+  - `venv\Scripts\python.exe -m py_compile src\kazusa_ai_chatbot\rag\memory_evidence_agent.py src\kazusa_ai_chatbot\rag\user_memory_evidence_agent.py src\kazusa_ai_chatbot\nodes\persona_supervisor2_rag_projection.py` passed on 2026-05-04.
 - Focused test results:
+  - Baseline before implementation: `venv\Scripts\python.exe -m pytest tests\test_user_memory_evidence_agent.py tests\test_rag_phase3_capability_agents.py tests\test_rag_projection.py tests\test_user_memory_units_rag_flow.py -q` failed during collection because `kazusa_ai_chatbot.rag.user_memory_evidence_agent` did not exist yet.
+  - `venv\Scripts\python.exe -m pytest tests\test_user_memory_evidence_agent.py -q` passed after the scoped-miss guardrails were added: `7 passed in 1.63s`.
+  - `venv\Scripts\python.exe -m pytest tests\test_rag_phase3_capability_agents.py -q` passed after the old-slot routing guardrail was added: `37 passed in 1.97s`.
+  - `venv\Scripts\python.exe -m pytest tests\test_rag_projection.py -q` passed: `10 passed in 1.72s`.
+  - `venv\Scripts\python.exe -m pytest tests\test_user_memory_units_rag_flow.py -q` passed: `10 passed in 1.55s`.
+  - Prompt render gate added and exercised through `tests/test_rag_phase3_capability_agents.py::test_memory_evidence_selector_prompt_renders_scoped_worker_option`.
+  - Stage 2 proof that scoped user memory no longer uses persistent-memory search: `tests/test_rag_phase3_capability_agents.py::test_memory_evidence_user_memory_unit_uses_scoped_worker`.
+  - Backward-compatibility proof that the old live initializer slot shape still routes to scoped user memory when the original query asks for current-user private continuity: `tests/test_rag_phase3_capability_agents.py::test_memory_evidence_old_setting_slot_uses_scoped_context`.
+  - Literal miss proof that exact made-up terms do not fall through to unrelated vector or recency results: `tests/test_user_memory_evidence_agent.py::test_user_memory_evidence_literal_miss_is_unresolved`.
+  - Semantic miss proof that specific non-literal scoped requests do not fall through to unrelated recent memory: `tests/test_user_memory_evidence_agent.py::test_user_memory_evidence_specific_semantic_miss_is_unresolved`.
+  - Stage 3 proof that scoped rows populate both projection targets: `tests/test_rag_projection.py::test_project_known_facts_preserves_scoped_user_memory_metadata_and_candidates`.
+  - Stage 4 proof that surfaced scoped candidates merge/evolve instead of duplicating: `tests/test_user_memory_units_rag_flow.py::test_process_memory_unit_candidate_merges_memory_evidence_surfaced_scoped_unit`.
 - Integration test results:
+  - Combined focused gate `venv\Scripts\python.exe -m pytest tests\test_user_memory_evidence_agent.py tests\test_rag_phase3_capability_agents.py tests\test_rag_projection.py tests\test_user_memory_units_rag_flow.py -q` passed after implementation and guardrail fixes: `64 passed in 1.98s`.
+  - Expanded live initializer compatibility gate `venv\Scripts\python.exe -m pytest tests\test_rag_phase3_initializer_live_llm.py::test_live_initializer_includes_memory_evidence_for_scoped_continuity -q -s -m live_llm` passed: `1 passed in 4.67s`; the live initializer still emitted both `Recall:` and the old-shape `Memory-evidence:` slot for the 学姐 setting, then the downstream memory-evidence path routed to `user_memory_evidence_agent` and called the patched scoped keyword executor with the exact keyword `学姐` without probing the real database.
+  - During final per-file verification, `tests/test_rag_phase3_capability_agents.py` exposed an unrelated existing fixture inconsistency in `test_conversation_evidence_semantic_topic_uses_search` (the fixture omitted `timestamp` and `platform_message_id` while the test asserted both). The fixture was corrected so the standalone verification gate matches its own asserted contract.
 - Manual diagnostic:
+  - Ran a patched-worker diagnostic on 2026-05-04 using the equivalent query `Memory-evidence: retrieve durable evidence about the 学姐 matcha ice-cream shop in the current user's continuity` through `MemoryEvidenceAgent` plus `project_known_facts`.
+  - Observed result: `resolved=true`, `primary_worker=user_memory_evidence_agent`, returned row carried `source_system="user_memory_units"`, `scope_type="user_continuity"`, `scope_global_user_id="user-1"`, `authority="scoped_continuity"`, `truth_status="character_lore_or_interaction_continuity"`, `origin="consolidated_interaction"`.
+  - `project_known_facts(...)` surfaced the same row inside `rag_result.user_memory_unit_candidates`.
+  - Shared persistent-memory workers were not called: `shared_search_calls=0`, `shared_keyword_calls=0`.
 - Changed files:
+  - `src/kazusa_ai_chatbot/db/user_memory_units.py`
+  - `src/kazusa_ai_chatbot/db/__init__.py`
+  - `src/kazusa_ai_chatbot/rag/user_memory_evidence_agent.py`
+  - `src/kazusa_ai_chatbot/rag/memory_evidence_agent.py`
+  - `src/kazusa_ai_chatbot/nodes/persona_supervisor2_rag_projection.py`
+  - `src/kazusa_ai_chatbot/rag/README.md`
+  - `tests/test_user_memory_evidence_agent.py`
+  - `tests/test_rag_phase3_capability_agents.py`
+  - `tests/test_rag_projection.py`
+  - `tests/test_user_memory_units_rag_flow.py`

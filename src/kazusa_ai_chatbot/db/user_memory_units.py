@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from datetime import datetime, timezone
 from uuid import uuid4
 
@@ -182,6 +183,58 @@ async def query_user_memory_units(
     if unit_types:
         query["unit_type"] = {"$in": unit_types}
     query["status"] = {"$in": statuses or [UserMemoryUnitStatus.ACTIVE]}
+
+    db = await get_db()
+    cursor = (
+        db.user_memory_units
+        .find(query, {"_id": 0, "embedding": 0})
+        .sort([("last_seen_at", -1), ("updated_at", -1)])
+        .limit(limit)
+    )
+    return_value = [doc async for doc in cursor]
+    return return_value
+
+
+async def search_user_memory_units_by_keyword(
+    global_user_id: str,
+    keyword: str,
+    *,
+    unit_types: list[str] | None = None,
+    statuses: list[str] | None = None,
+    limit: int = 25,
+) -> list[UserMemoryUnitDoc]:
+    """Run scoped lexical retrieval over durable user memory units.
+
+    Args:
+        global_user_id: Internal UUID for the memory owner.
+        keyword: Literal term or phrase to match against memory semantics.
+        unit_types: Optional unit-type filter.
+        statuses: Optional status filter. Defaults to active units.
+        limit: Maximum keyword hits to return.
+
+    Returns:
+        Matching memory-unit documents sorted by recency, with Mongo internals
+        and embeddings removed.
+    """
+
+    stripped_keyword = text_or_empty(keyword).strip()
+    if not global_user_id or not stripped_keyword:
+        return_value = []
+        return return_value
+
+    escaped_keyword = re.escape(stripped_keyword)
+    regex_filter = {"$regex": escaped_keyword, "$options": "i"}
+    query: dict = {
+        "global_user_id": global_user_id,
+        "status": {"$in": statuses or [UserMemoryUnitStatus.ACTIVE]},
+        "$or": [
+            {"fact": regex_filter},
+            {"subjective_appraisal": regex_filter},
+            {"relationship_signal": regex_filter},
+        ],
+    }
+    if unit_types:
+        query["unit_type"] = {"$in": unit_types}
 
     db = await get_db()
     cursor = (
