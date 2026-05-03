@@ -13,6 +13,26 @@ async def enable_memory_vector_index() -> None:
     await enable_vector_index("memory", "memory_vector_index")
 
 
+def memory_embedding_source_text(doc: MemoryDoc | dict) -> str:
+    """Build the semantic source text used for memory embeddings.
+
+    Args:
+        doc: Stored memory document or memory payload.
+
+    Returns:
+        Combined text matching the vectorization contract for ``memory`` rows.
+    """
+    memory_name = str(doc.get("memory_name", ""))
+    content = str(doc.get("content", ""))
+    source_text = (
+        f"type:{doc.get('memory_type', '')}\n"
+        f"source:{doc.get('source_kind', '')}\n"
+        f"title:{memory_name}\n"
+        f"content:{content}"
+    )
+    return source_text
+
+
 async def save_memory(doc: MemoryDoc, timestamp: str) -> None:
     """Insert a memory entry (append-only).
 
@@ -25,16 +45,8 @@ async def save_memory(doc: MemoryDoc, timestamp: str) -> None:
     """
     db = await get_db()
 
-    memory_name = doc["memory_name"]
-    content = doc["content"]
-
-    combined_text = (
-        f"type:{doc.get('memory_type', '')}\n"
-        f"source:{doc.get('source_kind', '')}\n"
-        f"title:{memory_name}\n"
-        f"content:{content}"
-    )
-    embedding = await get_text_embedding(combined_text)
+    embedding_source_text = memory_embedding_source_text(doc)
+    embedding = await get_text_embedding(embedding_source_text)
 
     payload = {
         **doc,
