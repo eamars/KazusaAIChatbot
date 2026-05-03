@@ -35,8 +35,8 @@ def test_conversation_search_args_accept_string_fields() -> None:
         "global_user_id": " user-1 ",
         "platform": " qq ",
         "platform_channel_id": " channel-1 ",
-        "from_timestamp": " 2026-04-28T00:00:00+00:00 ",
-        "to_timestamp": " 2026-04-29T00:00:00+00:00 ",
+        "from_timestamp": " 2026-04-28 12:00 ",
+        "to_timestamp": " 2026-04-29 12:00 ",
         "top_k": 3,
     })
 
@@ -67,6 +67,20 @@ def test_conversation_keyword_args_do_not_stringify_container_fields() -> None:
     assert args == {"platform_channel_id": "channel-1", "top_k": 3}
 
 
+def test_conversation_keyword_args_normalize_local_time_filters() -> None:
+    """Keyword-search time filters should be converted to UTC for DB queries."""
+
+    args = conversation_keyword_agent._normalize_args({
+        "keyword": "tea",
+        "from_timestamp": "2026-04-28 12:00",
+        "to_timestamp": "2026-04-29 12:00",
+        "top_k": 3,
+    })
+
+    assert args["from_timestamp"] == "2026-04-28T00:00:00+00:00"
+    assert args["to_timestamp"] == "2026-04-29T00:00:00+00:00"
+
+
 def test_conversation_filter_args_do_not_stringify_container_fields() -> None:
     """Conversation-filter args should ignore non-string scalar fields."""
 
@@ -81,6 +95,20 @@ def test_conversation_filter_args_do_not_stringify_container_fields() -> None:
     })
 
     assert args == {"platform_channel_id": "channel-1", "limit": 4}
+
+
+def test_conversation_filter_args_normalize_local_time_filters() -> None:
+    """Conversation-filter time filters should be converted to UTC for DB queries."""
+
+    args = conversation_filter_agent._normalize_args({
+        "platform_channel_id": " channel-1 ",
+        "from_timestamp": "2026-04-28 12:00",
+        "to_timestamp": "2026-04-29 12:00",
+        "limit": 4,
+    })
+
+    assert args["from_timestamp"] == "2026-04-28T00:00:00+00:00"
+    assert args["to_timestamp"] == "2026-04-29T00:00:00+00:00"
 
 
 def test_conversation_aggregate_args_do_not_stringify_container_fields() -> None:
@@ -124,8 +152,8 @@ def test_persistent_memory_search_args_accept_string_fields() -> None:
         "source_global_user_id": " user-1 ",
         "source_kind": " conversation_extracted ",
         "status": " active ",
-        "expiry_before": " 2026-04-29T00:00:00+00:00 ",
-        "expiry_after": " 2026-04-28T00:00:00+00:00 ",
+        "expiry_before": " 2026-04-29 12:00 ",
+        "expiry_after": " 2026-04-28 12:00 ",
         "top_k": 3,
     })
 

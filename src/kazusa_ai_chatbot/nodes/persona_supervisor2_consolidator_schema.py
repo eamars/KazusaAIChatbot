@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Annotated, TypedDict
 
 from langgraph.graph.message import add_messages
+from kazusa_ai_chatbot.time_context import TimeContextDoc
 
 
 def _merge_dicts(a: dict, b: dict) -> dict:
@@ -51,6 +52,7 @@ def normalize_subjective_appraisals(value: object) -> list[str]:
 class ConsolidatorState(TypedDict):
     # Inputs for db_writer
     timestamp: str
+    time_context: TimeContextDoc
     global_user_id: str
     user_name: str
     user_profile: dict

@@ -283,7 +283,7 @@ async def test_conversation_evidence_exact_phrase_uses_keyword_and_refs() -> Non
     payload = result["result"]
     assert payload["primary_worker"] == "conversation_keyword_agent"
     assert payload["projection_payload"]["summaries"] == [
-        "Tester at 2026-05-01T23:00:00+00:00: 约定就是约定, and here is https://example.test/post"
+        "Tester at 2026-05-02 11:00: 约定就是约定, and here is https://example.test/post"
     ]
     assert {
         "ref_type": "person",
@@ -386,7 +386,7 @@ async def test_conversation_evidence_semantic_topic_uses_search() -> None:
     assert keyword_worker.calls == []
     assert result["result"]["primary_worker"] == "conversation_search_agent"
     assert result["result"]["projection_payload"]["summaries"] == [
-        "Tester at 2026-05-01T22:00:00+00:00: We talked about roller coaster plans."
+        "Tester at 2026-05-02 10:00: We talked about roller coaster plans."
     ]
     assert {
         "ref_type": "message",
@@ -483,7 +483,7 @@ async def test_conversation_evidence_count_uses_aggregate() -> None:
     assert result["result"]["primary_worker"] == "conversation_aggregate_agent"
     assert result["result"]["projection_payload"]["summaries"] == [
         "count_by_user, window=recent, total=5, top rows: "
-        "Tester, 5 messages, last=2026-05-01T22:00:00+00:00"
+        "Tester, 5 messages, last=2026-05-02 10:00"
     ]
     assert {
         "ref_type": "person",

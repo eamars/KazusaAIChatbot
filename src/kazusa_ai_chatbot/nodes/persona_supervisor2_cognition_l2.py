@@ -22,6 +22,7 @@ from kazusa_ai_chatbot.nodes.boundary_profile import (
     get_boundary_recovery_description,
     get_authority_skepticism_description,
 )
+from kazusa_ai_chatbot.rag.prompt_projection import project_tool_result_for_llm
 from kazusa_ai_chatbot.rag.user_memory_unit_retrieval import empty_user_memory_context
 
 from langchain_core.messages import HumanMessage, SystemMessage
@@ -80,7 +81,10 @@ def _current_user_rag_bundle(state: CognitionState) -> dict[str, Any]:
             **user_bundle,
             "user_memory_context": empty_user_memory_context(),
         }
-    return user_bundle
+    projected_bundle = project_tool_result_for_llm(user_bundle)
+    if not isinstance(projected_bundle, dict):
+        return {}
+    return projected_bundle
 
 
 def _cognition_rag_result(rag_result: object) -> dict[str, Any]:
@@ -98,7 +102,10 @@ def _cognition_rag_result(rag_result: object) -> dict[str, Any]:
         return return_value
     public_result = dict(rag_result)
     public_result.pop("user_memory_unit_candidates", None)
-    return public_result
+    projected_result = project_tool_result_for_llm(public_result)
+    if not isinstance(projected_result, dict):
+        return {}
+    return projected_result
 
 
 def _build_boundary_affinity_override(boundary_profile: dict, affinity: int, affinity_level: str) -> dict[str, str]:
@@ -260,11 +267,11 @@ _COGNITION_CONSCIOUSNESS_PROMPT = """\
     "character_mood": "当前心境",
     "global_vibe": "环境氛围背景",
     "user_memory_context": {{
-        "stable_patterns": [{{"fact": "重复出现的事实模式", "subjective_appraisal": "角色的主观评价", "relationship_signal": "未来互动信号", "updated_at": "ISO时间"}}],
-        "recent_shifts": [{{"fact": "最近变化或局部事件", "subjective_appraisal": "角色的主观评价", "relationship_signal": "未来互动信号", "updated_at": "ISO时间"}}],
-        "objective_facts": [{{"fact": "客观事实", "subjective_appraisal": "角色如何看待这个事实", "relationship_signal": "未来互动信号", "updated_at": "ISO时间"}}],
-        "milestones": [{{"fact": "里程碑事件", "subjective_appraisal": "角色如何看待这个事件", "relationship_signal": "未来互动信号", "updated_at": "ISO时间"}}],
-        "active_commitments": [{{"fact": "当前仍有效的承诺/约定", "subjective_appraisal": "角色如何看待这个承诺", "relationship_signal": "执行或表达上的注意点", "updated_at": "ISO时间"}}]
+        "stable_patterns": [{{"fact": "重复出现的事实模式", "subjective_appraisal": "角色的主观评价", "relationship_signal": "未来互动信号", "updated_at": "本地时间YYYY-MM-DD HH:MM"}}],
+        "recent_shifts": [{{"fact": "最近变化或局部事件", "subjective_appraisal": "角色的主观评价", "relationship_signal": "未来互动信号", "updated_at": "本地时间YYYY-MM-DD HH:MM"}}],
+        "objective_facts": [{{"fact": "客观事实", "subjective_appraisal": "角色如何看待这个事实", "relationship_signal": "未来互动信号", "updated_at": "本地时间YYYY-MM-DD HH:MM"}}],
+        "milestones": [{{"fact": "里程碑事件", "subjective_appraisal": "角色如何看待这个事件", "relationship_signal": "未来互动信号", "updated_at": "本地时间YYYY-MM-DD HH:MM"}}],
+        "active_commitments": [{{"fact": "当前仍有效的承诺/约定", "subjective_appraisal": "角色如何看待这个承诺", "relationship_signal": "执行或表达上的注意点", "updated_at": "本地时间YYYY-MM-DD HH:MM"}}]
     }},
     "last_relationship_insight": "对该用户的核心关系洞察",
     "affinity_context": {{ "level": "string", "instruction": "string" }},

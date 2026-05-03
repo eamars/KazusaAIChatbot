@@ -41,8 +41,8 @@ async def search_conversation(
         top_k (Optional): Maximum number of results to return. Default is 5.
         platform (Optional): Platform filter, e.g. "discord", "qq".
         platform_channel_id (Optional): Channel ID filter; if omitted, search all channels.
-        from_timestamp (Optional): Start timestamp (ISO 8601).
-        to_timestamp (Optional): End timestamp (ISO 8601).
+        from_timestamp (Optional): Internal normalized start timestamp.
+        to_timestamp (Optional): Internal normalized end timestamp.
         
     Returns:
         Top-K conversations close to the query, each as (similarity_score, message_with_metadata).
@@ -114,8 +114,8 @@ async def search_conversation_keyword(
         top_k (Optional): Maximum number of results. Default is 5.
         platform (Optional): Platform filter, e.g. "discord", "qq".
         platform_channel_id (Optional): Channel ID filter.
-        from_timestamp (Optional): Start timestamp (ISO 8601).
-        to_timestamp (Optional): End timestamp (ISO 8601).
+        from_timestamp (Optional): Internal normalized start timestamp.
+        to_timestamp (Optional): Internal normalized end timestamp.
 
     Returns:
         Matching conversations ordered by recency, each as a message dict.
@@ -222,7 +222,7 @@ async def get_conversation(
     Usage rules:
     - At least one filter should be provided (for example platform_channel_id, global_user_id, or time range).
     - If both global_user_id and display_name are provided, global_user_id takes priority.
-    - from_timestamp / to_timestamp should be ISO 8601 strings.
+    - from_timestamp / to_timestamp are internal normalized timestamp strings.
     
     Args:
         platform (Optional): Platform filter, e.g. "discord", "qq".
@@ -230,8 +230,8 @@ async def get_conversation(
         limit (Optional): Maximum number of rows to return. Default is 5.
         global_user_id (Optional): User UUID filter.
         display_name (Optional): User display name filter (fallback if global_user_id is absent).
-        from_timestamp (Optional): Start timestamp (ISO 8601), e.g. 2026-04-07T11:03:53.197223+00:00.
-        to_timestamp (Optional): End timestamp (ISO 8601).
+        from_timestamp (Optional): Internal normalized start timestamp.
+        to_timestamp (Optional): Internal normalized end timestamp.
         
     Returns:
         A list of conversation messages.

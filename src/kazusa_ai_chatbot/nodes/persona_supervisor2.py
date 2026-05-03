@@ -17,6 +17,7 @@ from kazusa_ai_chatbot.nodes.referent_resolution import (
     unresolved_referent_reason,
 )
 from kazusa_ai_chatbot.state import IMProcessState
+from kazusa_ai_chatbot.time_context import format_history_for_llm
 from kazusa_ai_chatbot.utils import build_interaction_history_recent, log_preview
 
 logger = logging.getLogger(__name__)
@@ -88,6 +89,7 @@ async def stage_1_research(state: GlobalPersonaState) -> dict:
             "user_name": state["user_name"],
             "user_profile": state["user_profile"],
             "current_timestamp": state["timestamp"],
+            "time_context": state["time_context"],
             "prompt_message_context": state["prompt_message_context"],
             "channel_topic": state["channel_topic"],
             "chat_history_recent": state["chat_history_recent"],
@@ -157,12 +159,13 @@ async def persona_supervisor2(state: IMProcessState) -> dict:
     
     persona_graph = persona_builder.compile()
 
-    interaction_history_wide = build_interaction_history_recent(
+    raw_interaction_wide = build_interaction_history_recent(
         state["chat_history_wide"],
         state["platform_user_id"],
         state["platform_bot_id"],
         state["global_user_id"],
     )
+    interaction_history_wide = format_history_for_llm(raw_interaction_wide)
     interaction_history_recent = interaction_history_wide[-CHAT_HISTORY_RECENT_LIMIT:]
 
     initial_persona_state: GlobalPersonaState = {
@@ -171,6 +174,7 @@ async def persona_supervisor2(state: IMProcessState) -> dict:
 
         # Inputs
         "timestamp": state["timestamp"],
+        "time_context": state["time_context"],
         "user_input": state["user_input"],
         "prompt_message_context": state["prompt_message_context"],
         "platform": state["platform"],

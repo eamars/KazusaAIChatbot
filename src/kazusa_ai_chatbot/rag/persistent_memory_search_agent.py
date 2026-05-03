@@ -23,6 +23,13 @@ from kazusa_ai_chatbot.rag.cache2_policy import (
     build_persistent_memory_search_dependencies,
 )
 from kazusa_ai_chatbot.rag.helper_agent import BaseRAGHelperAgent
+from kazusa_ai_chatbot.rag.prompt_projection import (
+    project_runtime_context_for_llm,
+    project_tool_result_for_llm,
+)
+from kazusa_ai_chatbot.time_context import (
+    structured_llm_time_to_utc_iso,
+)
 from kazusa_ai_chatbot.utils import get_llm, parse_llm_json_output, text_or_empty
 
 logger = logging.getLogger(__name__)
@@ -63,8 +70,8 @@ _GENERATOR_PROMPT = """\
   "top_k": 5,
   "source_global_user_id": "UUID string or omitted",
   "status": "string or omitted",
-  "expiry_before": "ISO-8601 or omitted",
-  "expiry_after": "ISO-8601 or omitted"
+  "expiry_before": "local YYYY-MM-DD HH:MM or omitted",
+  "expiry_after": "local YYYY-MM-DD HH:MM or omitted"
 }
 """
 _generator_llm = get_llm(
@@ -140,8 +147,6 @@ def _normalize_args(raw_args: dict[str, Any]) -> dict[str, Any]:
     for key in (
         "source_global_user_id",
         "status",
-        "expiry_before",
-        "expiry_after",
     ):
         raw_val = raw_args.get(key)
         if raw_val is None:
@@ -149,6 +154,15 @@ def _normalize_args(raw_args: dict[str, Any]) -> dict[str, Any]:
         value = text_or_empty(raw_val)
         if value:
             args[key] = value
+
+    for key in ("expiry_before", "expiry_after"):
+        value = text_or_empty(raw_args.get(key))
+        if not value:
+            continue
+        try:
+            args[key] = structured_llm_time_to_utc_iso(value)
+        except ValueError as exc:
+            logger.debug(f"Dropping invalid {key} from LLM output: {exc}")
 
     _erase_character_source_global_user_id(args)
     return args
@@ -282,9 +296,10 @@ async def _generator(task: str, context: dict[str, Any], feedback: str) -> dict[
         Normalized arguments for ``search_persistent_memory``.
     """
     system_prompt = SystemMessage(content=_GENERATOR_PROMPT)
+    llm_context = project_runtime_context_for_llm(context)
     human_message = HumanMessage(
         content=json.dumps(
-            {"task": task, "context": context, "feedback": feedback},
+            {"task": task, "context": llm_context, "feedback": feedback},
             ensure_ascii=False,
             default=str,
         )
@@ -327,8 +342,9 @@ async def _judge(task: str, result: object) -> tuple[bool, str]:
         Tuple of (resolved, feedback).
     """
     system_prompt = SystemMessage(content=_JUDGE_PROMPT)
+    llm_result = project_tool_result_for_llm(result)
     human_message = HumanMessage(
-        content=json.dumps({"task": task, "result": result}, ensure_ascii=False)
+        content=json.dumps({"task": task, "result": llm_result}, ensure_ascii=False)
     )
     response = await _judge_llm.ainvoke([system_prompt, human_message])
     verdict = parse_llm_json_output(response.content)

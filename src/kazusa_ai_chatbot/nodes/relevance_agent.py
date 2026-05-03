@@ -30,6 +30,7 @@ from kazusa_ai_chatbot.message_envelope import (
     project_prompt_message_context,
 )
 from kazusa_ai_chatbot.state import IMProcessState
+from kazusa_ai_chatbot.time_context import format_history_for_llm
 from kazusa_ai_chatbot.utils import (
     build_affinity_block,
     get_llm,
@@ -585,7 +586,9 @@ async def relevance_agent(state: IMProcessState) -> IMProcessState:
             "channel_name": channel_name,
             "reply_context": reply_context,
         },
-        "conversation_history": state.get("chat_history_wide"),
+        "conversation_history": format_history_for_llm(
+            state.get("chat_history_wide") or []
+        ),
     }
     if is_noisy_environment:
         human_data["user_message"]["directly_addressed"] = directly_addressed

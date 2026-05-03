@@ -23,6 +23,7 @@ from kazusa_ai_chatbot.dispatcher import (
 )
 from kazusa_ai_chatbot.dispatcher.task import parse_iso_datetime
 from kazusa_ai_chatbot.nodes import persona_supervisor2_consolidator_persistence as persistence_module
+from kazusa_ai_chatbot.time_context import build_character_time_context
 from tests.llm_trace import write_llm_trace
 
 
@@ -118,12 +119,14 @@ def _dispatch_generation_state(
 ) -> dict:
     """Build a minimal consolidator state for live tool-call generation tests."""
 
+    timestamp = "2026-04-23T06:11:28+12:00"
     return {
         "character_profile": {
             "name": "杏山千纱",
             "personality_brief": {"mbti": "INFJ"},
         },
-        "timestamp": "2026-04-23T06:11:28+12:00",
+        "timestamp": timestamp,
+        "time_context": build_character_time_context(timestamp),
         "platform": platform,
         "platform_channel_id": platform_channel_id,
         "channel_type": channel_type,
@@ -324,7 +327,50 @@ async def test_generate_raw_tool_calls_defaults_missing_future_promise_due_time(
     )
 
     human_payload = json.loads(llm.messages[1].content)
-    assert human_payload["future_promises"][0]["due_time"] == "2026-04-22T18:12:00+00:00"
+    assert "current_utc" not in human_payload
+    local_datetime = human_payload["time_context"]["current_local_datetime"]
+    assert local_datetime == "2026-04-23 06:11"
+    assert human_payload["future_promises"][0]["due_time"] == "2026-04-23 06:12"
+
+
+@pytest.mark.asyncio
+async def test_generate_raw_tool_calls_converts_local_execute_at(monkeypatch):
+    tool_registry = ToolRegistry()
+    tool_registry.register(build_send_message_tool())
+    monkeypatch.setattr(persistence_module, "_task_registry", tool_registry)
+    llm = _CapturingAsyncLLM({
+        "tool_calls": [
+            {
+                "tool": "send_message",
+                "args": {
+                    "target_channel": "same",
+                    "text": "hello later",
+                    "execute_at": "2026-04-23 06:12",
+                },
+            }
+        ]
+    })
+    monkeypatch.setattr(persistence_module, "_task_dispatcher_llm", llm)
+
+    raw_calls = await persistence_module._generate_raw_tool_calls(
+        _dispatch_generation_state(
+            future_promises=[
+                {
+                    "target": "提拉米苏",
+                    "action": "杏山千纱将对提拉米苏询问glitch是否在线",
+                    "due_time": "2026-04-23 06:12",
+                    "commitment_type": "future_promise",
+                    "dedup_key": "ask_glitch_online",
+                }
+            ],
+            decontexualized_input="你去问一下glitch在不在。",
+            content_anchors=["[DECISION] 接受并立刻去问。"],
+            final_dialog=["好，我现在去问一下。"],
+        ),
+        _live_dispatch_ctx(),
+    )
+
+    assert raw_calls[0].args["execute_at"] == "2026-04-22T18:12:00+00:00"
 
 
 @pytest.mark.live_llm
@@ -456,7 +502,7 @@ async def test_live_dispatcher_generates_group_target_from_private_chat(ensure_l
 @pytest.mark.live_llm
 @pytest.mark.asyncio
 async def test_live_dispatcher_assumes_five_minutes_for_implicit_near_future_time(ensure_live_llm, monkeypatch):
-    """A vague near-future promise like '一会儿' should normalize to current_utc + 5 minutes."""
+    """A vague near-future promise like '一会儿' should normalize to a near local time."""
 
     del ensure_live_llm
     tool_registry = ToolRegistry()

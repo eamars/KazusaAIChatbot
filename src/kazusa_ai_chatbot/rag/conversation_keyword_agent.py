@@ -18,6 +18,13 @@ from kazusa_ai_chatbot.rag.cache2_policy import (
     is_closed_historical_range,
 )
 from kazusa_ai_chatbot.rag.helper_agent import BaseRAGHelperAgent
+from kazusa_ai_chatbot.rag.prompt_projection import (
+    project_runtime_context_for_llm,
+    project_tool_result_for_llm,
+)
+from kazusa_ai_chatbot.time_context import (
+    structured_llm_time_to_utc_iso,
+)
 from kazusa_ai_chatbot.utils import get_llm, parse_llm_json_output, text_or_empty
 
 logger = logging.getLogger(__name__)
@@ -69,8 +76,8 @@ Return valid JSON only:
   "top_k": 5,
   "platform": "string or omitted",
   "platform_channel_id": "string or omitted",
-  "from_timestamp": "ISO-8601 or omitted",
-  "to_timestamp": "ISO-8601 or omitted"
+  "from_timestamp": "local YYYY-MM-DD HH:MM or omitted",
+  "to_timestamp": "local YYYY-MM-DD HH:MM or omitted"
 }
 """
 _generator_llm = get_llm(
@@ -147,8 +154,6 @@ def _normalize_args(raw_args: dict[str, Any]) -> dict[str, Any]:
         "global_user_id",
         "platform",
         "platform_channel_id",
-        "from_timestamp",
-        "to_timestamp",
     ):
         raw_val = raw_args.get(key)
         if raw_val is None:
@@ -156,6 +161,15 @@ def _normalize_args(raw_args: dict[str, Any]) -> dict[str, Any]:
         value = text_or_empty(raw_val)
         if value:
             args[key] = value
+
+    for key in ("from_timestamp", "to_timestamp"):
+        value = text_or_empty(raw_args.get(key))
+        if not value:
+            continue
+        try:
+            args[key] = structured_llm_time_to_utc_iso(value)
+        except ValueError as exc:
+            logger.debug(f"Dropping invalid {key} from LLM output: {exc}")
 
     return args
 
@@ -172,9 +186,10 @@ async def _generator(task: str, context: dict[str, Any], feedback: str) -> dict[
         Normalized arguments for ``search_conversation_keyword``.
     """
     system_prompt = SystemMessage(content=_GENERATOR_PROMPT)
+    llm_context = project_runtime_context_for_llm(context)
     human_message = HumanMessage(
         content=json.dumps(
-            {"task": task, "context": context, "feedback": feedback},
+            {"task": task, "context": llm_context, "feedback": feedback},
             ensure_ascii=False,
             default=str,
         )
@@ -217,8 +232,9 @@ async def _judge(task: str, result: object) -> tuple[bool, str]:
         Tuple of (resolved, feedback).
     """
     system_prompt = SystemMessage(content=_JUDGE_PROMPT)
+    llm_result = project_tool_result_for_llm(result)
     human_message = HumanMessage(
-        content=json.dumps({"task": task, "result": result}, ensure_ascii=False)
+        content=json.dumps({"task": task, "result": llm_result}, ensure_ascii=False)
     )
     response = await _judge_llm.ainvoke([system_prompt, human_message])
     verdict = parse_llm_json_output(response.content)

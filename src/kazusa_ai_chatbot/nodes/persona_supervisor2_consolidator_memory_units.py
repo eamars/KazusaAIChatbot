@@ -20,7 +20,12 @@ from kazusa_ai_chatbot.db import (
     update_user_memory_unit_window,
 )
 from kazusa_ai_chatbot.nodes.persona_supervisor2_consolidator_schema import ConsolidatorState
+from kazusa_ai_chatbot.rag.prompt_projection import project_tool_result_for_llm
 from kazusa_ai_chatbot.rag.user_memory_unit_retrieval import retrieve_memory_unit_merge_candidates
+from kazusa_ai_chatbot.time_context import (
+    format_history_for_llm,
+    format_timestamp_for_llm,
+)
 from kazusa_ai_chatbot.utils import get_llm, parse_llm_json_output, text_or_empty
 
 
@@ -42,9 +47,13 @@ def _json_payload(state: ConsolidatorState) -> dict:
     rag_result = state["rag_result"]
     user_image = rag_result["user_image"]
     rag_user_memory_context = user_image["user_memory_context"]
+    projected_memory_context = project_tool_result_for_llm(rag_user_memory_context)
+    if not isinstance(projected_memory_context, dict):
+        projected_memory_context = {}
 
+    local_datetime = state["time_context"]["current_local_datetime"]
     return_value = {
-        "timestamp": state["timestamp"],
+        "timestamp": local_datetime,
         "global_user_id": state["global_user_id"],
         "user_name": state["user_name"],
         "decontextualized_input": state["decontexualized_input"],
@@ -54,11 +63,17 @@ def _json_payload(state: ConsolidatorState) -> dict:
         "interaction_subtext": state["interaction_subtext"],
         "logical_stance": state["logical_stance"],
         "character_intent": state["character_intent"],
-        "chat_history_recent": state["chat_history_recent"],
-        "rag_user_memory_context": rag_user_memory_context,
-        "new_facts_evidence": state["new_facts"],
-        "future_promises_evidence": state["future_promises"],
-        "subjective_appraisal_evidence": state["subjective_appraisals"],
+        "chat_history_recent": format_history_for_llm(state["chat_history_recent"]),
+        "rag_user_memory_context": projected_memory_context,
+        "new_facts_evidence": project_tool_result_for_llm(
+            state["new_facts"]
+        ),
+        "future_promises_evidence": project_tool_result_for_llm(
+            state["future_promises"]
+        ),
+        "subjective_appraisal_evidence": project_tool_result_for_llm(
+            state["subjective_appraisals"]
+        ),
     }
     return return_value
 
@@ -271,11 +286,15 @@ def _session_spread(source_refs: list[dict]) -> dict:
         A dict with both raw evidence and a semantic spread label.
     """
 
-    timestamp_days = {
-        text_or_empty(ref.get("timestamp"))[:10]
-        for ref in source_refs
-        if text_or_empty(ref.get("timestamp"))
-    }
+    timestamp_days = set()
+    for ref in source_refs:
+        raw_ts = text_or_empty(ref.get("timestamp"))
+        if not raw_ts:
+            continue
+        formatted_timestamp = format_timestamp_for_llm(raw_ts)
+        day = (formatted_timestamp or raw_ts)[:10]
+        if day:
+            timestamp_days.add(day)
     message_ids = {
         text_or_empty(ref.get("message_id"))
         for ref in source_refs
@@ -313,7 +332,7 @@ def _recent_examples(candidate: dict, cluster: dict) -> list[dict]:
         examples.append({
             "source": "existing_unit",
             "fact": text_or_empty(cluster.get("fact")),
-            "updated_at": text_or_empty(cluster.get("updated_at")),
+            "updated_at": format_timestamp_for_llm(text_or_empty(cluster.get("updated_at"))),
         })
     examples.append({
         "source": "new_candidate",
@@ -344,7 +363,18 @@ def _stability_payload(
         JSON payload with semantic evidence labels and raw support details.
     """
 
-    cluster = _matching_cluster(candidate_clusters, unit_id)
+    local_datetime = state["time_context"]["current_local_datetime"]
+    cluster = project_tool_result_for_llm(
+        _matching_cluster(candidate_clusters, unit_id)
+    )
+    if not isinstance(cluster, dict):
+        cluster = {}
+    candidate = project_tool_result_for_llm(candidate)
+    if not isinstance(candidate, dict):
+        candidate = {}
+    merge_result = project_tool_result_for_llm(merge_result)
+    if not isinstance(merge_result, dict):
+        merge_result = {}
     existing_count = int(cluster.get("count", 0) or 0)
     candidate_refs = candidate.get("evidence_refs")
     if not isinstance(candidate_refs, list):
@@ -364,9 +394,13 @@ def _stability_payload(
             "new_evidence_ref_count": len(candidate_refs),
             "session_spread": _session_spread(source_refs + candidate_refs),
             "recency": {
-                "current_turn_timestamp": state["timestamp"],
-                "existing_updated_at": text_or_empty(cluster.get("updated_at")),
-                "existing_last_seen_at": text_or_empty(cluster.get("last_seen_at")),
+                "current_turn_timestamp": local_datetime,
+                "existing_updated_at": format_timestamp_for_llm(
+                    text_or_empty(cluster.get("updated_at"))
+                ),
+                "existing_last_seen_at": format_timestamp_for_llm(
+                    text_or_empty(cluster.get("last_seen_at"))
+                ),
             },
             "recent_examples": _recent_examples(candidate, cluster),
         },
@@ -415,7 +449,7 @@ You are the memory-unit extractor. You only identify new candidate memories from
 
 # Input Format
 {
-    "timestamp": "ISO timestamp for the current consolidation turn",
+    "timestamp": "local YYYY-MM-DD HH:MM timestamp for the current consolidation turn",
     "global_user_id": "stable user UUID",
     "user_name": "current user's display name",
     "decontextualized_input": "current user message after decontextualization",
@@ -427,11 +461,11 @@ You are the memory-unit extractor. You only identify new candidate memories from
     "character_intent": "PROVIDE | BANTAR | REJECT | EVADE | CONFRONT | DISMISS | CLARIFY",
     "chat_history_recent": [{"role": "user|assistant", "display_name": "optional", "body_text": "message text"}],
     "rag_user_memory_context": {
-        "stable_patterns": [{"fact": "...", "subjective_appraisal": "...", "relationship_signal": "...", "updated_at": "optional ISO timestamp"}],
-        "recent_shifts": [{"fact": "...", "subjective_appraisal": "...", "relationship_signal": "...", "updated_at": "optional ISO timestamp"}],
-        "objective_facts": [{"fact": "...", "subjective_appraisal": "...", "relationship_signal": "...", "updated_at": "optional ISO timestamp"}],
-        "milestones": [{"fact": "...", "subjective_appraisal": "...", "relationship_signal": "...", "updated_at": "optional ISO timestamp"}],
-        "active_commitments": [{"fact": "...", "subjective_appraisal": "...", "relationship_signal": "...", "updated_at": "optional ISO timestamp"}]
+        "stable_patterns": [{"fact": "...", "subjective_appraisal": "...", "relationship_signal": "...", "updated_at": "optional local YYYY-MM-DD HH:MM timestamp"}],
+        "recent_shifts": [{"fact": "...", "subjective_appraisal": "...", "relationship_signal": "...", "updated_at": "optional local YYYY-MM-DD HH:MM timestamp"}],
+        "objective_facts": [{"fact": "...", "subjective_appraisal": "...", "relationship_signal": "...", "updated_at": "optional local YYYY-MM-DD HH:MM timestamp"}],
+        "milestones": [{"fact": "...", "subjective_appraisal": "...", "relationship_signal": "...", "updated_at": "optional local YYYY-MM-DD HH:MM timestamp"}],
+        "active_commitments": [{"fact": "...", "subjective_appraisal": "...", "relationship_signal": "...", "updated_at": "optional local YYYY-MM-DD HH:MM timestamp"}]
     },
     "new_facts_evidence": [{"fact": "fact harvester output"}],
     "future_promises_evidence": [{"action": "future promise or scheduled action"}],
@@ -447,7 +481,7 @@ Return only valid JSON:
             "fact": "concrete event, decision, preference, commitment, or behavior",
             "subjective_appraisal": "active character's subjective interpretation of the fact",
             "relationship_signal": "how this should affect future interaction",
-            "evidence_refs": [{"source": "chat", "timestamp": "optional ISO timestamp", "message_id": "optional platform message id"}]
+            "evidence_refs": [{"source": "chat", "timestamp": "optional local YYYY-MM-DD HH:MM timestamp", "message_id": "optional platform message id"}]
         }
     ]
 }
@@ -522,7 +556,7 @@ You are the memory-unit merge judge. You only decide create, merge, or evolve.
         "fact": "new candidate fact",
         "subjective_appraisal": "new candidate appraisal",
         "relationship_signal": "new candidate relationship signal",
-        "evidence_refs": [{"source": "chat", "timestamp": "optional ISO timestamp", "message_id": "optional platform message id"}]
+        "evidence_refs": [{"source": "chat", "timestamp": "optional local YYYY-MM-DD HH:MM timestamp", "message_id": "optional platform message id"}]
     },
     "candidate_clusters": [
         {
@@ -531,7 +565,7 @@ You are the memory-unit merge judge. You only decide create, merge, or evolve.
             "fact": "existing fact",
             "subjective_appraisal": "existing appraisal",
             "relationship_signal": "existing relationship signal",
-            "updated_at": "optional ISO timestamp"
+            "updated_at": "optional local YYYY-MM-DD HH:MM timestamp"
         }
     ]
 }
@@ -566,8 +600,10 @@ async def _judge_memory_unit_merge(candidate: dict, candidate_clusters: list[dic
     """
 
     msg = {
-        "new_memory_unit": candidate,
-        "candidate_clusters": candidate_clusters,
+        "new_memory_unit": project_tool_result_for_llm(candidate),
+        "candidate_clusters": project_tool_result_for_llm(
+            candidate_clusters
+        ),
     }
     system_prompt = SystemMessage(content=_MERGE_JUDGE_PROMPT)
     human_message = HumanMessage(content=json.dumps(msg, ensure_ascii=False))
@@ -618,7 +654,7 @@ You are the memory-unit rewrite stage. You update only the semantic text fields.
         "fact": "new candidate fact",
         "subjective_appraisal": "new candidate appraisal",
         "relationship_signal": "new candidate relationship signal",
-        "evidence_refs": [{"source": "chat", "timestamp": "optional ISO timestamp", "message_id": "optional platform message id"}]
+        "evidence_refs": [{"source": "chat", "timestamp": "optional local YYYY-MM-DD HH:MM timestamp", "message_id": "optional platform message id"}]
     },
     "decision": {
         "candidate_id": "candidate id",
@@ -660,8 +696,8 @@ async def _rewrite_memory_unit(candidate: dict, merge_result: dict) -> dict:
 
     msg = {
         "existing_unit_id": merge_result["cluster_id"],
-        "new_memory_unit": candidate,
-        "decision": merge_result,
+        "new_memory_unit": project_tool_result_for_llm(candidate),
+        "decision": project_tool_result_for_llm(merge_result),
     }
     system_prompt = SystemMessage(content=_REWRITE_PROMPT)
     human_message = HumanMessage(content=json.dumps(msg, ensure_ascii=False))
@@ -713,7 +749,7 @@ You are the memory-unit stability judge. You only choose recent or stable for in
         "fact": "candidate fact",
         "subjective_appraisal": "candidate appraisal",
         "relationship_signal": "candidate relationship signal",
-        "evidence_refs": [{"source": "chat", "timestamp": "optional ISO timestamp", "message_id": "optional platform message id"}]
+        "evidence_refs": [{"source": "chat", "timestamp": "optional local YYYY-MM-DD HH:MM timestamp", "message_id": "optional platform message id"}]
     },
     "merge_result": {
         "candidate_id": "candidate id",
@@ -733,11 +769,11 @@ You are the memory-unit stability judge. You only choose recent or stable for in
             "timestamps": ["YYYY-MM-DD"]
         },
         "recency": {
-            "current_turn_timestamp": "ISO timestamp",
-            "existing_updated_at": "optional ISO timestamp",
-            "existing_last_seen_at": "optional ISO timestamp"
+            "current_turn_timestamp": "local YYYY-MM-DD HH:MM timestamp",
+            "existing_updated_at": "optional local YYYY-MM-DD HH:MM timestamp",
+            "existing_last_seen_at": "optional local YYYY-MM-DD HH:MM timestamp"
         },
-        "recent_examples": [{"source": "existing_unit|new_candidate", "fact": "example fact", "updated_at": "optional ISO timestamp"}]
+        "recent_examples": [{"source": "existing_unit|new_candidate", "fact": "example fact", "updated_at": "optional local YYYY-MM-DD HH:MM timestamp"}]
     }
 }
 

@@ -62,6 +62,8 @@ async def test_run_subgraph_returns_expected_keys() -> None:
             timestamp="2026-04-27T00:00:00+00:00",
         )
 
+    sub_state = graph_builder.compile.return_value.ainvoke.await_args.args[0]
+    assert sub_state["timestamp"] == "2026-04-27 12:00"
     assert result == {
         "status": "success",
         "reason": "found info",

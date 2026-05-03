@@ -73,12 +73,17 @@ from kazusa_ai_chatbot.rag.memory_evidence_agent import MemoryEvidenceAgent
 from kazusa_ai_chatbot.rag.person_context_agent import PersonContextAgent
 from kazusa_ai_chatbot.rag.persistent_memory_keyword_agent import PersistentMemoryKeywordAgent
 from kazusa_ai_chatbot.rag.persistent_memory_search_agent import PersistentMemorySearchAgent
+from kazusa_ai_chatbot.rag.prompt_projection import (
+    project_runtime_context_for_llm,
+    project_tool_result_for_llm,
+)
 from kazusa_ai_chatbot.rag.recall_agent import RecallAgent
 from kazusa_ai_chatbot.rag.relationship_agent import RelationshipAgent
 from kazusa_ai_chatbot.rag.user_list_agent import UserListAgent
 from kazusa_ai_chatbot.rag.user_lookup_agent import UserLookupAgent
 from kazusa_ai_chatbot.rag.user_profile_agent import UserProfileAgent
 from kazusa_ai_chatbot.rag.web_search_agent import WebSearchAgent
+from kazusa_ai_chatbot.time_context import format_timestamp_for_llm
 from kazusa_ai_chatbot.utils import get_llm, log_list_preview, log_preview, parse_llm_json_output
 
 logger = logging.getLogger(__name__)
@@ -694,9 +699,10 @@ async def rag_initializer(state: ProgressiveRAGState) -> dict:
         return return_value
 
     system_prompt = SystemMessage(content=_INITIALIZER_PROMPT.format(character_name=character_name))
+    llm_context = project_runtime_context_for_llm(context)
     user_input = {
         "original_query": state["original_query"],
-        "context": context,
+        "context": llm_context,
     }
     human_message = HumanMessage(content=json.dumps(user_input, ensure_ascii=False))
 
@@ -1151,10 +1157,11 @@ async def rag_dispatcher(state: ProgressiveRAGState) -> dict:
             agent_name_union=_build_agent_name_union(),
         )
     )
+    llm_context = project_runtime_context_for_llm(state.get("context", {}))
     user_input = {
         "current_slot": current_slot,
         "known_facts": _known_facts_llm_view(state.get("known_facts", [])),
-        "context": state.get("context", {}),
+        "context": llm_context,
     }
     human_message = HumanMessage(content=json.dumps(user_input, ensure_ascii=False, default=str))
 
@@ -1339,6 +1346,7 @@ def _compact_memory_unit_rows(rows: object) -> list[object]:
         return_value: list[object] = []
         return return_value
 
+    _TIME_KEYS = {"updated_at", "timestamp"}
     compact_rows: list[object] = []
     for row in rows[:_LLM_SUMMARY_PROFILE_UNIT_LIMIT]:
         if not isinstance(row, dict):
@@ -1358,7 +1366,10 @@ def _compact_memory_unit_rows(rows: object) -> list[object]:
             "content",
         ):
             if key in row:
-                compact_row[key] = _clip_llm_summary_text(row[key])
+                value = _clip_llm_summary_text(row[key])
+                if key in _TIME_KEYS:
+                    value = format_timestamp_for_llm(str(value))
+                compact_row[key] = value
         compact_rows.append(compact_row)
 
     return_value = compact_rows
@@ -1501,32 +1512,33 @@ def _compact_raw_result_for_llm(raw_result: object) -> object:
         view for top-level capability/profile payloads.
     """
 
-    if not isinstance(raw_result, dict):
-        return raw_result
+    projected_result = project_tool_result_for_llm(raw_result)
+    if not isinstance(projected_result, dict):
+        return projected_result
 
-    if "capability" in raw_result:
+    if "capability" in projected_result:
         compact_result: dict[str, object] = {
-            "capability": raw_result.get("capability", ""),
-            "primary_worker": raw_result.get("primary_worker", ""),
-            "supporting_workers": raw_result.get("supporting_workers", []),
-            "source_policy": raw_result.get("source_policy", ""),
-            "missing_context": raw_result.get("missing_context", []),
-            "conflicts": raw_result.get("conflicts", []),
-            "selected_summary": raw_result.get("selected_summary", ""),
+            "capability": projected_result.get("capability", ""),
+            "primary_worker": projected_result.get("primary_worker", ""),
+            "supporting_workers": projected_result.get("supporting_workers", []),
+            "source_policy": projected_result.get("source_policy", ""),
+            "missing_context": projected_result.get("missing_context", []),
+            "conflicts": projected_result.get("conflicts", []),
+            "selected_summary": projected_result.get("selected_summary", ""),
         }
 
-        evidence = raw_result.get("evidence")
+        evidence = projected_result.get("evidence")
         if isinstance(evidence, list):
             compact_result["evidence"] = [
                 _clip_llm_summary_text(item)
                 for item in evidence[:_LLM_SUMMARY_LIST_LIMIT]
             ]
 
-        refs = raw_result.get("resolved_refs")
+        refs = projected_result.get("resolved_refs")
         if isinstance(refs, list):
             compact_result["resolved_refs"] = refs[:_LLM_SUMMARY_REF_LIMIT]
 
-        projection_payload = raw_result.get("projection_payload")
+        projection_payload = projected_result.get("projection_payload")
         compact_result["projection_payload"] = _compact_projection_payload_for_llm(
             projection_payload,
         )
@@ -1534,14 +1546,14 @@ def _compact_raw_result_for_llm(raw_result: object) -> object:
         return return_value
 
     if (
-        "user_memory_context" in raw_result
-        or "_user_memory_units" in raw_result
-        or "self_image" in raw_result
+        "user_memory_context" in projected_result
+        or "_user_memory_units" in projected_result
+        or "self_image" in projected_result
     ):
-        return_value = _compact_profile_for_llm(raw_result)
+        return_value = _compact_profile_for_llm(projected_result)
         return return_value
 
-    return raw_result
+    return projected_result
 
 
 def _known_facts_llm_view(known_facts: object) -> list[dict[str, object]]:
@@ -1725,11 +1737,11 @@ human payload 是以下 JSON：
         "global_user_id": "用户 UUID",
         "display_name": "用户显示名",
         "user_memory_context": {
-            "stable_patterns": [{"fact": "...", "subjective_appraisal": "...", "relationship_signal": "...", "updated_at": "ISO时间"}],
-            "recent_shifts": [{"fact": "...", "subjective_appraisal": "...", "relationship_signal": "...", "updated_at": "ISO时间"}],
-            "objective_facts": [{"fact": "...", "subjective_appraisal": "...", "relationship_signal": "...", "updated_at": "ISO时间"}],
-            "milestones": [{"fact": "...", "subjective_appraisal": "...", "relationship_signal": "...", "updated_at": "ISO时间"}],
-            "active_commitments": [{"fact": "...", "subjective_appraisal": "...", "relationship_signal": "...", "updated_at": "ISO时间"}]
+            "stable_patterns": [{"fact": "...", "subjective_appraisal": "...", "relationship_signal": "...", "updated_at": "本地时间YYYY-MM-DD HH:MM"}],
+            "recent_shifts": [{"fact": "...", "subjective_appraisal": "...", "relationship_signal": "...", "updated_at": "本地时间YYYY-MM-DD HH:MM"}],
+            "objective_facts": [{"fact": "...", "subjective_appraisal": "...", "relationship_signal": "...", "updated_at": "本地时间YYYY-MM-DD HH:MM"}],
+            "milestones": [{"fact": "...", "subjective_appraisal": "...", "relationship_signal": "...", "updated_at": "本地时间YYYY-MM-DD HH:MM"}],
+            "active_commitments": [{"fact": "...", "subjective_appraisal": "...", "relationship_signal": "...", "updated_at": "本地时间YYYY-MM-DD HH:MM"}]
         }
     },
     "known_facts": [{"slot": "...", "agent": "...", "resolved": true, "summary": "...", "raw_result": "...", "attempts": 1}]

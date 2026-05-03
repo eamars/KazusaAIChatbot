@@ -46,6 +46,7 @@ from kazusa_ai_chatbot.db import (
 )
 from kazusa_ai_chatbot.mcp_client import mcp_manager
 from kazusa_ai_chatbot.state import IMProcessState, MultiMediaDoc, DebugModes, ReplyContext
+from kazusa_ai_chatbot.time_context import build_character_time_context
 from kazusa_ai_chatbot.chat_input_queue import ChatInputQueue, QueuedChatItem
 from kazusa_ai_chatbot.message_envelope import (
     MentionEntityKind,
@@ -753,8 +754,11 @@ async def _process_queued_chat_item(item: QueuedChatItem) -> None:
         # the platform reply feature for multi-message input.
         initial_use_reply_feature = not is_collapsed_turn
 
+        time_context = build_character_time_context(item.timestamp)
+
         initial_state: IMProcessState = {
             "timestamp": item.timestamp,
+            "time_context": time_context,
             "platform": req.platform,
             "platform_message_id": req.platform_message_id,
             "platform_user_id": req.platform_user_id,

@@ -58,8 +58,8 @@ def build_send_message_tool() -> ToolSpec:
         name="send_message",
         description=(
             "Send a message to a platform channel or the same channel as the"
-            " triggering user message. Use an absolute UTC execute_at when the"
-            " message should be delayed."
+            " triggering user message. Use execute_at when the message should"
+            " be delayed."
         ),
         args_schema=SEND_MESSAGE_SCHEMA,
         handler=handle_send_message,

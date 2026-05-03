@@ -3,6 +3,7 @@ from kazusa_ai_chatbot.conversation_progress import ConversationProgressPromptDo
 from kazusa_ai_chatbot.state import MultiMediaDoc, DebugModes, ReplyContext
 from kazusa_ai_chatbot.db import CharacterProfileDoc, ConversationEpisodeStateDoc, UserProfileDoc
 from kazusa_ai_chatbot.message_envelope import PromptMessageContext
+from kazusa_ai_chatbot.time_context import TimeContextDoc
 
 ReferentRole = Literal["subject", "object", "time"]
 
@@ -21,6 +22,7 @@ class GlobalPersonaState(TypedDict):
 
     # Inputs
     timestamp: str
+    time_context: TimeContextDoc
     user_input: str
     prompt_message_context: PromptMessageContext
     user_multimedia_input: list[MultiMediaDoc]
@@ -82,12 +84,13 @@ class GlobalPersonaState(TypedDict):
     # Facts harvester
     new_facts: [str]
     future_promises: [str]
-    
+
 
 class CognitionState(TypedDict):
     character_profile: CharacterProfileDoc
 
     timestamp: str
+    time_context: TimeContextDoc
     user_input: str
     prompt_message_context: PromptMessageContext
     global_user_id: str

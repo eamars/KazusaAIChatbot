@@ -8,6 +8,7 @@ from typing import TypedDict
 from kazusa_ai_chatbot.conversation_progress import ConversationProgressPromptDoc
 from kazusa_ai_chatbot.db.schemas import ConversationEpisodeStateDoc
 from kazusa_ai_chatbot.message_envelope import MessageEnvelope, PromptMessageContext
+from kazusa_ai_chatbot.time_context import TimeContextDoc
 
 
 class MultiMediaDoc(TypedDict):
@@ -51,6 +52,7 @@ def keep_false(current: bool | None, update: bool | None) -> bool:
 
 class IMProcessState(TypedDict):
     timestamp: str
+    time_context: TimeContextDoc
 
     # Platform identity
     platform: str                # "discord" | "qq" | "wechat" | etc.

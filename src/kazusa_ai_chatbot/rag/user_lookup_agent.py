@@ -19,6 +19,7 @@ from kazusa_ai_chatbot.rag.cache2_policy import (
 )
 from kazusa_ai_chatbot.rag.cache2_runtime import RAGCache2Runtime
 from kazusa_ai_chatbot.rag.helper_agent import BaseRAGHelperAgent
+from kazusa_ai_chatbot.rag.prompt_projection import project_runtime_context_for_llm
 from kazusa_ai_chatbot.utils import get_llm, parse_llm_json_output
 
 logger = logging.getLogger(__name__)
@@ -68,9 +69,12 @@ async def _extract_display_name_with_llm(
         The display name string to search for, or empty string on failure.
     """
     system_prompt = SystemMessage(content=_EXTRACTOR_PROMPT)
+    llm_context = project_runtime_context_for_llm(context)
     human_message = HumanMessage(
         content=json.dumps(
-            {"task": task, "context": context}, ensure_ascii=False, default=str
+            {"task": task, "context": llm_context},
+            ensure_ascii=False,
+            default=str,
         )
     )
     response = await _extractor_llm.ainvoke([system_prompt, human_message])

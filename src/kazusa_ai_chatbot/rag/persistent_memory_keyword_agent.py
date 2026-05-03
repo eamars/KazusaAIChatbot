@@ -22,6 +22,10 @@ from kazusa_ai_chatbot.rag.cache2_policy import (
     build_persistent_memory_keyword_dependencies,
 )
 from kazusa_ai_chatbot.rag.helper_agent import BaseRAGHelperAgent
+from kazusa_ai_chatbot.rag.prompt_projection import (
+    project_runtime_context_for_llm,
+    project_tool_result_for_llm,
+)
 from kazusa_ai_chatbot.utils import get_llm, parse_llm_json_output, text_or_empty
 
 logger = logging.getLogger(__name__)
@@ -162,9 +166,10 @@ async def _generator(task: str, context: dict[str, Any], feedback: str) -> dict[
         Normalized arguments for ``search_persistent_memory_keyword``.
     """
     system_prompt = SystemMessage(content=_GENERATOR_PROMPT)
+    llm_context = project_runtime_context_for_llm(context)
     human_message = HumanMessage(
         content=json.dumps(
-            {"task": task, "context": context, "feedback": feedback},
+            {"task": task, "context": llm_context, "feedback": feedback},
             ensure_ascii=False,
             default=str,
         )
@@ -207,8 +212,9 @@ async def _judge(task: str, result: object) -> tuple[bool, str]:
         Tuple of (resolved, feedback).
     """
     system_prompt = SystemMessage(content=_JUDGE_PROMPT)
+    llm_result = project_tool_result_for_llm(result)
     human_message = HumanMessage(
-        content=json.dumps({"task": task, "result": result}, ensure_ascii=False)
+        content=json.dumps({"task": task, "result": llm_result}, ensure_ascii=False)
     )
     response = await _judge_llm.ainvoke([system_prompt, human_message])
     verdict = parse_llm_json_output(response.content)

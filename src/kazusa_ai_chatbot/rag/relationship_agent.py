@@ -15,6 +15,7 @@ from kazusa_ai_chatbot.rag.cache2_policy import (
     build_relationship_dependencies,
 )
 from kazusa_ai_chatbot.rag.helper_agent import BaseRAGHelperAgent
+from kazusa_ai_chatbot.rag.prompt_projection import project_runtime_context_for_llm
 from kazusa_ai_chatbot.utils import build_affinity_block, get_llm, parse_llm_json_output, text_or_empty
 
 _MAX_RELATIONSHIP_LIMIT = 5
@@ -142,8 +143,13 @@ async def _extract_relationship_args(
         Sanitized relationship args, or ``None`` when extraction failed.
     """
     system_prompt = SystemMessage(content=_EXTRACTOR_PROMPT)
+    llm_context = project_runtime_context_for_llm(context)
     human_message = HumanMessage(
-        content=json.dumps({"task": task, "context": context}, ensure_ascii=False, default=str)
+        content=json.dumps(
+            {"task": task, "context": llm_context},
+            ensure_ascii=False,
+            default=str,
+        )
     )
     response = await _extractor_llm.ainvoke([system_prompt, human_message])
     result = parse_llm_json_output(response.content)
@@ -221,7 +227,7 @@ class RelationshipAgent(BaseRAGHelperAgent):
             max_attempts: Unused; kept for interface compatibility.
 
         Returns:
-            Dict with resolved flag, sanitized relationship candidates, and
+            Dict with resolved flag, prompt-safe relationship candidates, and
             cache metadata. Raw affinity values are never included.
         """
         del max_attempts

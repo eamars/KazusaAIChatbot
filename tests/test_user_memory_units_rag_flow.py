@@ -9,6 +9,7 @@ import pytest
 from kazusa_ai_chatbot.db.schemas import UserMemoryUnitType
 from kazusa_ai_chatbot.nodes import persona_supervisor2_consolidator_memory_units as memory_units_module
 from kazusa_ai_chatbot.rag import user_memory_unit_retrieval as retrieval_module
+from kazusa_ai_chatbot.time_context import build_character_time_context
 
 
 class _DummyResponse:
@@ -324,6 +325,7 @@ async def test_stability_judge_receives_count_session_and_recent_examples(monkey
     result = await memory_units_module.process_memory_unit_candidate(
         {
             "timestamp": "2026-04-30T12:00:00+12:00",
+            "time_context": build_character_time_context("2026-04-30T12:00:00+12:00"),
             "global_user_id": "user-1",
             "rag_result": {"user_memory_unit_candidates": [existing_unit]},
         },
@@ -333,6 +335,7 @@ async def test_stability_judge_receives_count_session_and_recent_examples(monkey
     stability_payload = json.loads(stability_llm.messages[1].content)
     stability_evidence = stability_payload["stability_evidence"]
     session_spread = stability_evidence["session_spread"]
+    stability_payload_json = json.dumps(stability_payload, ensure_ascii=False)
 
     assert result["decision"] == "evolve"
     assert result["stability"]["window"] == "stable"
@@ -343,6 +346,8 @@ async def test_stability_judge_receives_count_session_and_recent_examples(monkey
     assert session_spread["spread_label"] == "multiple_days_or_sessions"
     assert session_spread["distinct_day_count"] == 3
     assert len(stability_evidence["recent_examples"]) == 2
+    assert "+12:00" not in stability_payload_json
+    assert "2026-04-30 12:00" in stability_payload_json
     assert captured["window"] == "stable"
 
 
@@ -433,6 +438,7 @@ async def test_update_user_memory_units_drops_bad_extractor_output(
 def test_extractor_payload_includes_recent_history() -> None:
     state = {
         "timestamp": "2026-04-29T00:00:00+12:00",
+        "time_context": build_character_time_context("2026-04-29T00:00:00+12:00"),
         "global_user_id": "user-1",
         "user_name": "User",
         "decontexualized_input": "The memory lacks factual basis.",
@@ -446,10 +452,21 @@ def test_extractor_payload_includes_recent_history() -> None:
             {
                 "role": "user",
                 "content": "historical summary and recent window overlap",
+                "timestamp": "2026-04-28T12:01:00+00:00",
             }
         ],
         "rag_result": {
-            "user_image": {"user_memory_context": _unit_context()},
+            "user_image": {
+                "user_memory_context": {
+                    **_unit_context(),
+                    "active_commitments": [
+                        {
+                            "fact": "User asked for a reminder.",
+                            "updated_at": "2026-04-28T12:02:00+00:00",
+                        },
+                    ],
+                },
+            },
         },
         "new_facts": [],
         "future_promises": [],
@@ -458,7 +475,9 @@ def test_extractor_payload_includes_recent_history() -> None:
 
     payload = memory_units_module._json_payload(state)
 
-    assert payload["chat_history_recent"] == state["chat_history_recent"]
+    assert payload["chat_history_recent"][0]["timestamp"] == "2026-04-29 00:01"
+    commitments = payload["rag_user_memory_context"]["active_commitments"]
+    assert commitments[0]["updated_at"] == "2026-04-29 00:02"
 
 
 def _unit_context() -> dict:

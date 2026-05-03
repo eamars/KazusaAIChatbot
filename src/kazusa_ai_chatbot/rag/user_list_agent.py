@@ -16,6 +16,7 @@ from kazusa_ai_chatbot.rag.cache2_policy import (
     build_user_list_dependencies,
 )
 from kazusa_ai_chatbot.rag.helper_agent import BaseRAGHelperAgent
+from kazusa_ai_chatbot.rag.prompt_projection import project_runtime_context_for_llm
 from kazusa_ai_chatbot.utils import get_llm, parse_llm_json_output, text_or_empty
 
 logger = logging.getLogger(__name__)
@@ -128,8 +129,13 @@ async def _extract_user_list_args(task: str, context: dict[str, Any]) -> dict[st
         Normalized arguments for the user-list DB helper.
     """
     system_prompt = SystemMessage(content=_EXTRACTOR_PROMPT)
+    llm_context = project_runtime_context_for_llm(context)
     human_message = HumanMessage(
-        content=json.dumps({"task": task, "context": context}, ensure_ascii=False, default=str)
+        content=json.dumps(
+            {"task": task, "context": llm_context},
+            ensure_ascii=False,
+            default=str,
+        )
     )
     response = await _extractor_llm.ainvoke([system_prompt, human_message])
     result = parse_llm_json_output(response.content)

@@ -14,6 +14,7 @@ from kazusa_ai_chatbot.config import (
 )
 from kazusa_ai_chatbot.config import MAX_FACT_HARVESTER_RETRY
 from kazusa_ai_chatbot.nodes.persona_supervisor2_consolidator_schema import ConsolidatorState
+from kazusa_ai_chatbot.rag.prompt_projection import project_tool_result_for_llm
 from kazusa_ai_chatbot.utils import get_llm, log_list_preview, log_preview, parse_llm_json_output
 
 logger = logging.getLogger(__name__)
@@ -113,16 +114,16 @@ _FACTS_HARVESTER_PROMPT = """\
 human payload 是以下 JSON：
 {{
     "user_name": "当前用户显示名",
-    "timestamp": "当前回合 ISO 时间",
+    "timestamp": "当前回合本地时间，YYYY-MM-DD HH:MM",
     "decontexualized_input": "用户本轮真实意图摘要",
     "rag_result": {{
         "user_image": {{
             "user_memory_context": {{
-                "stable_patterns": [{{"fact": "...", "subjective_appraisal": "...", "relationship_signal": "...", "updated_at": "ISO时间"}}],
-                "recent_shifts": [{{"fact": "...", "subjective_appraisal": "...", "relationship_signal": "...", "updated_at": "ISO时间"}}],
-                "objective_facts": [{{"fact": "...", "subjective_appraisal": "...", "relationship_signal": "...", "updated_at": "ISO时间"}}],
-                "milestones": [{{"fact": "...", "subjective_appraisal": "...", "relationship_signal": "...", "updated_at": "ISO时间"}}],
-                "active_commitments": [{{"fact": "...", "subjective_appraisal": "...", "relationship_signal": "...", "updated_at": "ISO时间"}}]
+                "stable_patterns": [{{"fact": "...", "subjective_appraisal": "...", "relationship_signal": "...", "updated_at": "本地时间"}}],
+                "recent_shifts": [{{"fact": "...", "subjective_appraisal": "...", "relationship_signal": "...", "updated_at": "本地时间"}}],
+                "objective_facts": [{{"fact": "...", "subjective_appraisal": "...", "relationship_signal": "...", "updated_at": "本地时间"}}],
+                "milestones": [{{"fact": "...", "subjective_appraisal": "...", "relationship_signal": "...", "updated_at": "本地时间"}}],
+                "active_commitments": [{{"fact": "...", "subjective_appraisal": "...", "relationship_signal": "...", "updated_at": "本地时间"}}]
             }}
         }},
         "user_memory_unit_candidates": ["检索出的原始候选记忆单元"],
@@ -158,7 +159,7 @@ human payload 是以下 JSON：
         {{
             "target": "user_name / {character_name}",
             "action": "[姓名]将对[对象]执行[具体动作]（仅承诺本体，不含计划/时间词）",
-            "due_time": "ISO 8601 时间戳（如 2026-04-19T06:00:00+12:00），无法确定则为 null",
+            "due_time": "YYYY-MM-DD HH:MM 格式的本地时间（如 2026-04-19 18:00），无法确定则为 null",
             "commitment_type": "可选字符串，例如 address_preference / language_preference / future_promise",
             "dedup_key": "稳定承诺更新键"
         }}
@@ -177,10 +178,13 @@ async def facts_harvester(state: ConsolidatorState) -> dict:
         character_name=state["character_profile"]["name"],
     ))
 
-    rag_result = state["rag_result"]
+    local_datetime = state["time_context"]["current_local_datetime"]
+    rag_result = project_tool_result_for_llm(state["rag_result"])
+    if not isinstance(rag_result, dict):
+        rag_result = {}
     msg = {
         "user_name": state["user_name"],
-        "timestamp": state["timestamp"],
+        "timestamp": local_datetime,
         "decontexualized_input": state["decontexualized_input"],
         "rag_result": rag_result,
         "supervisor_trace": rag_result.get("supervisor_trace", {}),
@@ -314,7 +318,7 @@ human payload 是以下 JSON：
         {{
             "target": "承诺目标",
             "action": "可执行承诺本体",
-            "due_time": "ISO 时间或 null",
+            "due_time": "YYYY-MM-DD HH:MM 本地时间或 null",
             "commitment_type": "承诺类型",
             "dedup_key": "稳定承诺更新键"
         }}
@@ -357,7 +361,9 @@ async def fact_harvester_evaluator(state: ConsolidatorState) -> dict:
     ))
 
     retry = state.get("fact_harvester_retry", 0) + 1
-    rag_result = state["rag_result"]
+    rag_result = project_tool_result_for_llm(state["rag_result"])
+    if not isinstance(rag_result, dict):
+        rag_result = {}
     msg = {
         "retry": f"{retry}/{MAX_FACT_HARVESTER_RETRY}",
         "user_name": state["user_name"],

@@ -13,6 +13,10 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from kazusa_ai_chatbot.config import RAG_SUBAGENT_LLM_API_KEY, RAG_SUBAGENT_LLM_BASE_URL, RAG_SUBAGENT_LLM_MODEL
 from kazusa_ai_chatbot.db import aggregate_conversation_by_user
 from kazusa_ai_chatbot.rag.helper_agent import BaseRAGHelperAgent
+from kazusa_ai_chatbot.rag.prompt_projection import project_runtime_context_for_llm
+from kazusa_ai_chatbot.time_context import (
+    local_date_bounds_to_utc_iso,
+)
 from kazusa_ai_chatbot.utils import get_llm, parse_llm_json_output, text_or_empty
 
 logger = logging.getLogger(__name__)
@@ -116,8 +120,13 @@ async def _extract_aggregate_args(task: str, context: dict[str, Any]) -> dict[st
         Normalized aggregate arguments.
     """
     system_prompt = SystemMessage(content=_EXTRACTOR_PROMPT)
+    llm_context = project_runtime_context_for_llm(context)
     human_message = HumanMessage(
-        content=json.dumps({"task": task, "context": context}, ensure_ascii=False, default=str)
+        content=json.dumps(
+            {"task": task, "context": llm_context},
+            ensure_ascii=False,
+            default=str,
+        )
     )
     response = await _extractor_llm.ainvoke([system_prompt, human_message])
     result = parse_llm_json_output(response.content)
@@ -172,6 +181,23 @@ def _time_bounds(
     if time_window == "recent":
         return_value = (now - datetime.timedelta(days=7)).isoformat(), now.isoformat()
         return return_value
+
+    time_context = context.get("time_context") or {}
+    local_date_str = str(time_context.get("current_local_datetime", "")).split(" ")[0]
+    if time_window == "today" and local_date_str:
+        today_start, _ = local_date_bounds_to_utc_iso(local_date_str)
+        return_value = today_start, now.isoformat()
+        return return_value
+    if time_window == "yesterday" and local_date_str:
+        try:
+            local_date = datetime.date.fromisoformat(local_date_str)
+        except ValueError:
+            pass
+        else:
+            yesterday_str = (local_date - datetime.timedelta(days=1)).isoformat()
+            yesterday_start, yesterday_end = local_date_bounds_to_utc_iso(yesterday_str)
+            return_value = yesterday_start, yesterday_end
+            return return_value
 
     start_of_today = now.replace(hour=0, minute=0, second=0, microsecond=0)
     if time_window == "today":

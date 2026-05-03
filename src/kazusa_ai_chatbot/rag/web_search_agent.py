@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import datetime
 import json
 import logging
 from typing import Annotated, Any, TypedDict
@@ -20,11 +19,42 @@ from kazusa_ai_chatbot.config import (
 )
 from kazusa_ai_chatbot.mcp_client import mcp_manager
 from kazusa_ai_chatbot.rag.helper_agent import BaseRAGHelperAgent
+from kazusa_ai_chatbot.rag.prompt_projection import project_runtime_context_for_llm
+from kazusa_ai_chatbot.time_context import (
+    build_character_time_context,
+    format_timestamp_for_llm,
+)
 from kazusa_ai_chatbot.utils import get_llm, parse_llm_json_output
 
 logger = logging.getLogger(__name__)
 
 _DEFAULT_EXPECTED_RESPONSE = "返回能直接解决当前槽位的来源扎根网页证据。"
+
+
+def _prompt_timestamp_for_llm(timestamp: str, context: dict[str, Any]) -> str:
+    """Return the safe local timestamp string used in web-search prompts."""
+    time_context = context.get("time_context") or {}
+    local_datetime = str(time_context.get("current_local_datetime", "")).strip()
+    local_weekday = str(time_context.get("current_local_weekday", "")).strip()
+    if local_datetime:
+        if local_weekday:
+            return f"{local_datetime} ({local_weekday})"
+        return local_datetime
+
+    raw_timestamp = str(timestamp or "").strip()
+    formatted_timestamp = format_timestamp_for_llm(raw_timestamp)
+    if formatted_timestamp:
+        return formatted_timestamp
+
+    has_machine_time_marker = (
+        "UTC" in raw_timestamp
+        or "T" in raw_timestamp
+        or "+" in raw_timestamp
+        or raw_timestamp.endswith(("Z", "z"))
+    )
+    if has_machine_time_marker:
+        return ""
+    return raw_timestamp
 
 
 @tool
@@ -463,9 +493,11 @@ async def _run_subgraph(
     builder.add_edge("finalizer", END)
 
     sub_graph = builder.compile()
+    llm_context = project_runtime_context_for_llm(context)
+    prompt_timestamp = _prompt_timestamp_for_llm(timestamp, context)
     sub_state: WebSearchState = {
         "task": task,
-        "context": context,
+        "context": llm_context,
         "next_tool": "",
         "expected_response": expected_response,
         "messages": [],
@@ -475,7 +507,7 @@ async def _run_subgraph(
         "final_reason": "",
         "final_response": "",
         "final_is_empty_result": False,
-        "timestamp": timestamp,
+        "timestamp": prompt_timestamp,
         "knowledge_metadata": {},
     }
     result = await sub_graph.ainvoke(sub_state)
@@ -515,7 +547,7 @@ class WebSearchAgent(BaseRAGHelperAgent):
 
         Args:
             task: Slot description produced by the outer-loop supervisor.
-            context: Runtime hints; ``current_timestamp`` is used as the reference clock.
+            context: Runtime hints including local time context when available.
             max_attempts: Unused; retry count is controlled by MAX_WEB_SEARCH_AGENT_RETRY.
 
         Returns:
@@ -523,9 +555,18 @@ class WebSearchAgent(BaseRAGHelperAgent):
         """
         del max_attempts
 
-        timestamp = str(context.get("current_timestamp") or "").strip()
-        if not timestamp:
-            timestamp = datetime.datetime.now(datetime.timezone.utc).isoformat()
+        time_context = context.get("time_context") or {}
+        local_datetime = str(time_context.get("current_local_datetime", "")).strip()
+        local_weekday = str(time_context.get("current_local_weekday", "")).strip()
+        if local_datetime:
+            timestamp = f"{local_datetime} ({local_weekday})" if local_weekday else local_datetime
+        else:
+            fallback_context = build_character_time_context(
+                str(context.get("current_timestamp") or "").strip()
+            )
+            local_datetime = fallback_context["current_local_datetime"]
+            local_weekday = fallback_context["current_local_weekday"]
+            timestamp = f"{local_datetime} ({local_weekday})"
 
         raw = await _run_subgraph(
             task=task,

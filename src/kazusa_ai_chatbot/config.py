@@ -121,6 +121,8 @@ RAG_CACHE2_MAX_ENTRIES = int(os.getenv("RAG_CACHE2_MAX_ENTRIES", "5000"))
 # Scheduler (future_promise + followup_message events).
 SCHEDULED_TASKS_ENABLED = os.getenv("SCHEDULED_TASKS_ENABLED", "true").lower() in ("1", "true", "yes")
 
+# Character timezone (IANA name) for converting UTC to character-local time.
+CHARACTER_TIME_ZONE = os.getenv("CHARACTER_TIME_ZONE", "Pacific/Auckland")
 
 # Brain service
 BRAIN_EXECUTOR_COUNT = int(os.getenv("BRAIN_EXECUTOR_COUNT", "1"))

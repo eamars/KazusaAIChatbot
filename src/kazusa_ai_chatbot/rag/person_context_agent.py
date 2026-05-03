@@ -19,6 +19,7 @@ from kazusa_ai_chatbot.rag.relationship_agent import RelationshipAgent
 from kazusa_ai_chatbot.rag.user_list_agent import UserListAgent
 from kazusa_ai_chatbot.rag.user_lookup_agent import UserLookupAgent
 from kazusa_ai_chatbot.rag.user_profile_agent import UserProfileAgent
+from kazusa_ai_chatbot.rag.prompt_projection import project_selector_input_for_llm
 from kazusa_ai_chatbot.utils import get_llm, parse_llm_json_output, text_or_empty
 
 logger = logging.getLogger(__name__)
@@ -243,15 +244,10 @@ async def _select_plan(task: str, context: dict[str, Any]) -> dict[str, Any]:
     if deterministic_plan is not None:
         return deterministic_plan
 
-    user_input = {
-        "task": task,
-        "original_query": context.get("original_query"),
-        "current_slot": context.get("current_slot"),
-        "known_facts": context.get("known_facts"),
-    }
+    llm_input = project_selector_input_for_llm(task, context)
     system_prompt = SystemMessage(content=_SELECTOR_PROMPT)
     human_message = HumanMessage(
-        content=json.dumps(user_input, ensure_ascii=False, default=str)
+        content=json.dumps(llm_input, ensure_ascii=False, default=str)
     )
     response = await _selector_llm.ainvoke([system_prompt, human_message])
     raw_plan = parse_llm_json_output(response.content)

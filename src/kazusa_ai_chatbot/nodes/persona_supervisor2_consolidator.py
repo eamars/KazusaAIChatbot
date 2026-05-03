@@ -134,6 +134,7 @@ async def call_consolidation_subgraph(global_state: GlobalPersonaState):
 
     sub_state: ConsolidatorState = {
         "timestamp": global_state["timestamp"],
+        "time_context": global_state["time_context"],
         "global_user_id": global_state["global_user_id"],
         "user_name": global_state["user_name"],
         "user_profile": global_state["user_profile"],
