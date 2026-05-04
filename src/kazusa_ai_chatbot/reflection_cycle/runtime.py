@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import subprocess
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -11,6 +12,7 @@ from typing import Any
 from kazusa_ai_chatbot.reflection_cycle.models import (
     ChannelReflectionResult,
     DailySynthesisResult,
+    READONLY_REFLECTION_PROMPT_VERSION,
     ReflectionEvaluationResult,
     ReflectionInputSet,
     ReflectionLLMResult,
@@ -272,9 +274,12 @@ def _write_artifact(
 
     output_dir.mkdir(parents=True, exist_ok=True)
     artifact_path = _artifact_path(output_dir)
+    git_sha = _git_sha()
     payload = {
         "artifact_type": "reflection_cycle_readonly_evaluation",
         "artifact_version": 1,
+        "prompt_version": READONLY_REFLECTION_PROMPT_VERSION,
+        "git_sha": git_sha,
         "created_at": _utc_now_iso(),
         "readonly": True,
         "use_real_llm": use_real_llm,
@@ -369,6 +374,7 @@ def _hourly_result_artifact(
     artifact = {
         "channel_scope_ref": channel_result.channel_scope.scope_ref,
         "hourly_scope_ref": hourly_scope.scope_ref,
+        "prompt_version": READONLY_REFLECTION_PROMPT_VERSION,
         "platform": hourly_scope.platform,
         "platform_channel_id": hourly_scope.platform_channel_id,
         "channel_type": hourly_scope.channel_type,
@@ -396,6 +402,7 @@ def _daily_result_artifact(result: ChannelReflectionResult) -> dict[str, Any]:
     daily_result = result.daily_result
     artifact = {
         "channel_scope_ref": result.channel_scope.scope_ref,
+        "prompt_version": READONLY_REFLECTION_PROMPT_VERSION,
         "platform": result.channel_scope.platform,
         "platform_channel_id": result.channel_scope.platform_channel_id,
         "channel_type": result.channel_scope.channel_type,
@@ -453,3 +460,31 @@ def _utc_now_iso() -> str:
 
     return_value = normalize_utc_datetime(None).isoformat()
     return return_value
+
+
+def _git_sha() -> str:
+    """Return the current repository commit hash for local artifacts."""
+
+    repo_root = Path(__file__).resolve().parents[3]
+    try:
+        completed_process = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=repo_root,
+            capture_output=True,
+            text=True,
+            timeout=2,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        git_sha = f"unavailable: {exc}"
+        return git_sha
+
+    if completed_process.returncode != 0:
+        error_text = completed_process.stderr.strip()
+        if not error_text:
+            error_text = f"git exited with {completed_process.returncode}"
+        git_sha = f"unavailable: {error_text}"
+        return git_sha
+
+    git_sha = completed_process.stdout.strip()
+    return git_sha

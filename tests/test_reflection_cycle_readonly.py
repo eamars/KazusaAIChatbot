@@ -14,6 +14,7 @@ from kazusa_ai_chatbot.db import conversation_reflection as db_reflection_module
 from kazusa_ai_chatbot.reflection_cycle import selector as selector_module
 from kazusa_ai_chatbot.reflection_cycle import runtime as runtime_module
 from kazusa_ai_chatbot.reflection_cycle.models import (
+    READONLY_REFLECTION_PROMPT_VERSION,
     ReflectionInputSet,
     ReflectionScopeInput,
 )
@@ -126,6 +127,56 @@ async def test_collect_reflection_inputs_records_fallback(monkeypatch) -> None:
     assert "No monitored channel" in input_set.fallback_reason
     assert input_set.selected_scopes[0].channel_type == "group"
     assert "fallback_channel_query_elapsed_ms" in input_set.query_diagnostics
+
+
+@pytest.mark.asyncio
+async def test_collect_reflection_inputs_keeps_empty_fetch_timestamps_empty(
+    monkeypatch,
+) -> None:
+    """Selected scopes with no fetched rows should not invent message timestamps."""
+
+    now = datetime(2026, 5, 4, 0, 0, tzinfo=timezone.utc)
+    channel_row = _channel_row(
+        platform="qq",
+        platform_channel_id="chan-empty",
+        channel_type="private",
+        character_message_count=1,
+    )
+    list_channels = AsyncMock(return_value={
+        "rows": [channel_row],
+        "diagnostics": {
+            "channel_query_elapsed_ms": 3,
+            "channel_row_count": 1,
+            "pipeline_summary": {"collection": "conversation_history"},
+        },
+    })
+    monkeypatch.setattr(
+        selector_module,
+        "list_recent_character_message_channels",
+        list_channels,
+    )
+    monkeypatch.setattr(
+        selector_module,
+        "list_reflection_scope_messages",
+        AsyncMock(return_value=[]),
+    )
+    monkeypatch.setattr(
+        selector_module,
+        "explain_monitored_channel_query",
+        AsyncMock(return_value={"available": False, "reason": "mocked"}),
+    )
+
+    input_set = await selector_module.collect_reflection_inputs(
+        lookback_hours=24,
+        now=now,
+    )
+
+    selected_scope = input_set.selected_scopes[0]
+    assert selected_scope.total_message_count == 0
+    assert selected_scope.assistant_message_count == 0
+    assert selected_scope.user_message_count == 0
+    assert selected_scope.first_timestamp == ""
+    assert selected_scope.last_timestamp == ""
 
 
 def test_selector_source_has_no_direct_mongo_execution() -> None:
@@ -266,6 +317,7 @@ async def test_runtime_writes_local_artifact_only(monkeypatch, tmp_path: Path) -
         "collect_reflection_inputs",
         AsyncMock(return_value=input_set),
     )
+    monkeypatch.setattr(runtime_module, "_git_sha", lambda: "test-git-sha")
 
     result = await runtime_module.run_readonly_reflection_evaluation(
         lookback_hours=24,
@@ -277,6 +329,16 @@ async def test_runtime_writes_local_artifact_only(monkeypatch, tmp_path: Path) -
     payload = json.loads(result.artifact_path.read_text(encoding="utf-8"))
     assert result.artifact_path.parent == tmp_path
     assert payload["readonly"] is True
+    assert payload["prompt_version"] == READONLY_REFLECTION_PROMPT_VERSION
+    assert payload["git_sha"] == "test-git-sha"
+    assert (
+        payload["hourly_reflections"][0]["prompt_version"]
+        == READONLY_REFLECTION_PROMPT_VERSION
+    )
+    assert (
+        payload["daily_syntheses"][0]["prompt_version"]
+        == READONLY_REFLECTION_PROMPT_VERSION
+    )
     assert payload["hourly_reflections"][0]["llm_skipped"] is True
     assert payload["daily_syntheses"][0]["llm_skipped"] is True
     assert len(result.channel_results) == 1

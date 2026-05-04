@@ -268,7 +268,11 @@ Daily payload shape:
             "hour": "UTC hour-start ISO timestamp",
             "topic_summary": "bounded hourly topic summary",
             "conversation_quality_feedback": ["bounded feedback"],
+            "conversation_quality_feedback_omitted_count": 0,
             "privacy_notes": ["bounded privacy notes"],
+            "privacy_notes_omitted_count": 0,
+            "validation_warnings": ["bounded validation warning"],
+            "validation_warnings_omitted_count": 0,
             "confidence": "low|medium|high",
         }
     ],
@@ -283,6 +287,10 @@ message exists in that hour. User-only and assistant-only hours are still
 included. Missing hours mean no message-bearing hourly reflection data is
 available for that hour. The daily LLM must not infer content from missing
 hours.
+
+Daily slots keep only the lead compact item for list-like hourly fields. When
+more same-category items exist, the corresponding `*_omitted_count` field makes
+that budget loss visible to reviewers and to the daily synthesis prompt.
 
 ## Attachment Policy
 
@@ -381,6 +389,7 @@ The language policy block owns that instruction.
 
 `runtime.py` writes one local JSON artifact for review. The artifact may include:
 
+- prompt version and current git SHA,
 - selection windows,
 - fallback status,
 - selected-channel summaries,
@@ -436,6 +445,10 @@ A scheduler may call `run_readonly_reflection_evaluation(...)` or a future
 write-capable facade. Scheduler code must not call internal selector,
 projection, or prompt helpers directly.
 
+The read-only selector's bounded fallback is for local evaluation only. A
+future write-capable production worker must idle when no channel has a latest
+assistant message inside the monitor window.
+
 ### Future Memory Evolution
 
 Memory evolution may consume approved reflection outputs after human or
@@ -448,6 +461,13 @@ write memory.
 User image and user memory remain consolidator-owned. Reflection may emit
 participant observations for character-training evaluation only; those
 observations are not a contract to create, update, or override user image.
+
+Source evidence references for future memory evolution must be threaded from
+input/repository metadata beside the prompt projection. They must not be
+reconstructed from LLM output because prompt-facing projection intentionally
+removes or abstracts identifying fields. If a future write-capable path needs
+conversation-history join keys such as message `_id`, the field must be added
+to a persistence-only allowlist and kept out of the LLM prompt payload.
 
 ### Future Autonomous Message Injection
 

@@ -10,6 +10,8 @@ from kazusa_ai_chatbot.reflection_cycle.models import (
     ReflectionScopeInput,
 )
 from kazusa_ai_chatbot.reflection_cycle.projection import (
+    build_hourly_reflection_payload,
+    build_prompt_result,
     validate_daily_synthesis_output,
     validate_hourly_reflection_output,
 )
@@ -107,6 +109,57 @@ def test_daily_prompt_consumes_hourly_outputs_not_raw_transcripts() -> None:
     assert "conversation_quality_feedback" in hourly_projection
     assert "participant_observations" not in hourly_projection
     assert "active_hour_summaries" in prompt.system_prompt
+
+
+def test_daily_prompt_marks_omitted_compact_items() -> None:
+    """Daily prompt should expose when compact hourly lists were shortened."""
+
+    input_set = _input_set()
+    hourly_result = _hourly_result(input_set.selected_scopes[0])
+    hourly_result.parsed_output["conversation_quality_feedback"] = [
+        "The character stayed concrete.",
+        "The character asked useful follow-up questions.",
+        "The character avoided broad speculation.",
+    ]
+    hourly_result.parsed_output["privacy_notes"] = [
+        "No obvious privacy risk.",
+        "Avoid storing names if later details appear.",
+    ]
+
+    prompt = build_daily_synthesis_prompt(
+        input_set=input_set,
+        channel_scope=input_set.selected_scopes[0],
+        hourly_results=[hourly_result],
+    )
+
+    hourly_projection = prompt.human_payload["active_hour_slots"][0]
+    assert hourly_projection["conversation_quality_feedback"] == [
+        "The character stayed concrete."
+    ]
+    assert hourly_projection["conversation_quality_feedback_omitted_count"] == 2
+    assert hourly_projection["privacy_notes"] == ["No obvious privacy risk."]
+    assert hourly_projection["privacy_notes_omitted_count"] == 1
+
+
+def test_prompt_builder_drops_old_messages_when_over_budget() -> None:
+    """Prompt budget enforcement should remove oldest rows before invocation."""
+
+    scope = _scope_with_many_long_messages()
+    payload = build_hourly_reflection_payload(scope)
+
+    prompt = build_prompt_result(
+        system_prompt="instruction",
+        human_payload=payload,
+        max_prompt_chars=4500,
+    )
+
+    messages = prompt.human_payload["conversation"]["messages"]
+    assert prompt.prompt_chars <= 4500
+    assert len(messages) < len(payload["conversation"]["messages"])
+    assert "message-0" not in prompt.human_prompt
+    assert "message-19" in prompt.human_prompt
+    assert prompt.validation_warnings
+    assert prompt.validation_warnings[0].startswith("Prompt 超出预算")
 
 
 def test_hourly_output_validation_warns_on_forward_fields() -> None:
@@ -266,6 +319,38 @@ def _scope_with_long_messages(channel_type: str) -> ReflectionScopeInput:
         total_message_count=2,
         first_timestamp="2026-05-03T22:00:00+00:00",
         last_timestamp="2026-05-03T22:01:00+00:00",
+        messages=messages,
+    )
+    return scope
+
+
+def _scope_with_many_long_messages() -> ReflectionScopeInput:
+    """Build a scope with enough rows to exercise prompt row dropping."""
+
+    long_text = " ".join(["detail"] * 400)
+    messages = []
+    for index in range(20):
+        role = "assistant" if index % 2 else "user"
+        message = {
+            "role": role,
+            "platform_user_id": f"platform-{role}-{index}",
+            "global_user_id": f"global-{role}-{index}",
+            "display_name": f"Speaker {index}",
+            "body_text": f"message-{index} {long_text}",
+            "attachments": [],
+            "timestamp": f"2026-05-03T22:{index:02d}:00+00:00",
+        }
+        messages.append(message)
+    scope = ReflectionScopeInput(
+        scope_ref="scope_many_messages",
+        platform="qq",
+        platform_channel_id="private-channel-id",
+        channel_type="private",
+        assistant_message_count=10,
+        user_message_count=10,
+        total_message_count=20,
+        first_timestamp="2026-05-03T22:00:00+00:00",
+        last_timestamp="2026-05-03T22:19:00+00:00",
         messages=messages,
     )
     return scope

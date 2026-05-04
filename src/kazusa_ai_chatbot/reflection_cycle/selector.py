@@ -186,7 +186,7 @@ async def _fetch_scope_messages(
             if message.get("role") == "user"
         )
         first_timestamp = ""
-        last_timestamp = str(row["last_character_message_timestamp"])
+        last_timestamp = ""
         if messages:
             first_timestamp = str(messages[0]["timestamp"])
             last_timestamp = str(messages[-1]["timestamp"])

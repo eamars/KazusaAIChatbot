@@ -200,44 +200,59 @@ def _daily_slot_from_hourly_result(
             str(topic_summary),
             max_chars=READONLY_REFLECTION_DAILY_SLOT_TEXT_CHARS,
         )
-    quality_feedback = _compact_text_list(
+    quality_feedback, quality_feedback_omitted_count = _compact_text_list(
         parsed_output.get("conversation_quality_feedback"),
     )
     if quality_feedback:
         slot["conversation_quality_feedback"] = quality_feedback
-    privacy_notes = _compact_text_list(parsed_output.get("privacy_notes"))
+    if quality_feedback_omitted_count:
+        slot["conversation_quality_feedback_omitted_count"] = (
+            quality_feedback_omitted_count
+        )
+    privacy_notes, privacy_notes_omitted_count = _compact_text_list(
+        parsed_output.get("privacy_notes")
+    )
     if privacy_notes:
         slot["privacy_notes"] = privacy_notes
+    if privacy_notes_omitted_count:
+        slot["privacy_notes_omitted_count"] = privacy_notes_omitted_count
     confidence = parsed_output.get("confidence")
     if confidence:
         slot["confidence"] = str(confidence)
     if result.validation_warnings:
-        slot["validation_warnings"] = _compact_text_list(
+        validation_warnings, validation_warnings_omitted_count = _compact_text_list(
             result.validation_warnings,
         )
+        slot["validation_warnings"] = validation_warnings
+        if validation_warnings_omitted_count:
+            slot["validation_warnings_omitted_count"] = (
+                validation_warnings_omitted_count
+            )
     if result.llm_skipped:
         slot["llm_status"] = "skipped"
     return_value = slot
     return return_value
 
 
-def _compact_text_list(value: Any) -> list[str]:
-    """Return a short text list for daily synthesis slots."""
+def _compact_text_list(value: Any) -> tuple[list[str], int]:
+    """Return the lead compact text item and omitted source item count."""
 
     if isinstance(value, list):
-        raw_items = value[:1]
+        raw_items = value
     elif value:
         raw_items = [value]
     else:
         raw_items = []
+    selected_items = raw_items[:1]
     compact_items = [
         _trim_text(
             str(item),
             max_chars=READONLY_REFLECTION_DAILY_SLOT_TEXT_CHARS,
         )
-        for item in raw_items
+        for item in selected_items
     ]
-    return_value = compact_items
+    omitted_count = max(0, len(raw_items) - len(selected_items))
+    return_value = compact_items, omitted_count
     return return_value
 
 

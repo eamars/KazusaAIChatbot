@@ -183,6 +183,7 @@ DAILY_SYNTHESIS_SYSTEM_PROMPT = '''\
 - 只基于 `active_hour_slots` 与 `channel`，不要推断未提供的原始对话。
 - 缺失的小时表示没有可用小时反思数据，不代表没有聊天，也不代表聊天质量好或坏。
 - `active_hour_summaries.hour` 必须从 `active_hour_slots.hour` 中逐字复制，不要换算时区，不要改写格式。
+- `*_omitted_count` 表示同类小时反思内容因预算被省略，只能作为局限性信号，不要把它当成具体内容。
 - 输出用于人工评估日汇总是否有价值，不作为持久化写入合同。
 
 # 生成步骤
@@ -211,7 +212,11 @@ DAILY_SYNTHESIS_SYSTEM_PROMPT = '''\
       "hour": "UTC hour-start ISO timestamp",
       "topic_summary": "该小时的紧凑话题概括",
       "conversation_quality_feedback": ["紧凑回应质量反馈"],
+      "conversation_quality_feedback_omitted_count": 0,
       "privacy_notes": ["紧凑隐私说明"],
+      "privacy_notes_omitted_count": 0,
+      "validation_warnings": ["紧凑验证警告"],
+      "validation_warnings_omitted_count": 0,
       "confidence": "low|medium|high"
     }
   ],
