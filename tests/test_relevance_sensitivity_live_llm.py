@@ -192,6 +192,21 @@ def _mario_context_history() -> list[dict]:
     return history
 
 
+def _nickname_collision_history() -> list[dict]:
+    """Return history where a group nickname points to another participant."""
+
+    history = [
+        _history_row(
+            platform_user_id="2795731500",
+            global_user_id="43f9c213-8e99-4561-8dcd-c3d4d73ece85",
+            display_name='总是跌倒的企鹅',
+            content='还要背回国',
+            timestamp="2026-05-04T14:39:37.072843+00:00",
+        ),
+    ]
+    return history
+
+
 async def _run_relevance_probe(
     *,
     case_id: str,
@@ -337,6 +352,24 @@ async def test_live_relevance_low_noise_name_second_person_probe(
         content="千纱，你现在在干什么？",
         desired_should_respond=True,
         tuning_note="Explicit name plus second person should remain answerable.",
+    )
+
+
+async def test_live_relevance_group_nickname_collision_probe(
+    ensure_live_relevance_llm,
+) -> None:
+    """Probe group nicknames that can refer to another visible participant."""
+
+    del ensure_live_relevance_llm
+    await _run_relevance_probe(
+        case_id="group_nickname_collision",
+        content='鹅总你咋不说话了啊？',
+        desired_should_respond=False,
+        history=_nickname_collision_history(),
+        tuning_note=(
+            "Group nickname evidence is not allowed; visible history points "
+            "the nickname toward another participant."
+        ),
     )
 
 

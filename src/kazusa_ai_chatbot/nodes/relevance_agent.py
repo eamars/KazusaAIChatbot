@@ -252,6 +252,42 @@ def _should_ignore_third_party_reply(
     return return_value
 
 
+def _has_latest_bot_turn_continuity(
+    *,
+    chat_history_wide: list[dict],
+    platform_bot_id: str,
+    current_global_user_id: str,
+) -> bool:
+    """Return whether the newest history row is a bot turn visible to this user.
+
+    Args:
+        chat_history_wide: Prompt-facing channel history in chronological order.
+        platform_bot_id: Bot's platform user id for the current channel.
+        current_global_user_id: Internal UUID for the current message author.
+
+    Returns:
+        True when the latest row is a bot-authored broadcast or a bot turn
+        addressed to the current user.
+    """
+
+    if not chat_history_wide:
+        return False
+
+    latest_row = chat_history_wide[-1]
+    if latest_row["role"] != "assistant":
+        return False
+    if latest_row["platform_user_id"] != platform_bot_id:
+        return False
+
+    is_broadcast = latest_row.get("broadcast") is True
+    if is_broadcast:
+        return True
+
+    addressed_to = latest_row.get("addressed_to_global_user_ids") or []
+    return_value = current_global_user_id in addressed_to
+    return return_value
+
+
 
 _RELEVANCE_SYSTEM_PROMPT = """\
 你负责担任角色 `{character_name}` 的社交前置处理器。通过分析实时对话、角色当前状态及用户历史档案，决定 `{character_name}` 是否有必要介入当前的对话。
@@ -380,16 +416,17 @@ _RELEVANCE_SYSTEM_NOISY_PROMPT = """\
 
 # 关键原则
 1. 平台结构化元数据优先。`directly_addressed=true` 比正文措辞更可靠。
-2. 正文里的名字、昵称、第二人称、话题相关性、可见的 mention 样式文本，都只是语义线索，不能单独证明当前消息是在对你说。尤其要区分: `{character_name}` 是被谈论对象，还是当前发言的听众。
-3. 群聊即使很安静也仍然是群聊。`low_noise` 只表示竞争线程少，不表示默认轮到你说话；它不能把模糊消息升级成直接召唤。
-4. 如果 `reply_context.reply_to_platform_user_id` 指向其他平台账号且 `directly_addressed=false`，应默认这是发给其他人的线程，不要介入。
-5. 对没有结构化指向的消息，先判断当前消息的听众能否从语法结构、可见历史连续性或 typed envelope 中唯一解析为 `{character_name}`；不能唯一解析时保持旁观。不要把“名字 + 谓语”的第三人称句式误读成呼格称呼。
-6. 历史连续性可以作为辅助证据，但必须非常清楚: 当前发言者正在延续你上一轮相关发言，且窗口里没有明显竞争线程。
-7. 关系亲密度、心情和话题兴趣只能在确认消息可能是对你说之后影响是否回复；它们不能替代指向证据。
+2. 正文里的角色名、第二人称、话题相关性、可见的 mention 样式文本，都只是语义线索，不能单独证明当前消息是在对你说。尤其要区分: `{character_name}` 是被谈论对象，还是当前发言的听众。
+3. 群聊中不要猜昵称或别称。没有结构化指向时，`<昵称>你...` 必须返回 `false`。
+4. 群聊即使很安静也仍然是群聊。`low_noise` 只表示竞争线程少，不表示默认轮到你说话；它不能把模糊消息升级成直接召唤。
+5. 如果 `reply_context.reply_to_platform_user_id` 指向其他平台账号且 `directly_addressed=false`，应默认这是发给其他人的线程，不要介入。
+6. 对没有结构化指向的消息，先判断当前消息的听众能否从语法结构、可见历史连续性或 typed envelope 中唯一解析为 `{character_name}`；不能唯一解析时保持旁观。不要把“名字 + 谓语”的第三人称句式误读成呼格称呼。
+7. 历史连续性可以作为辅助证据，但必须非常清楚: 当前发言者正在延续你上一轮相关发言，且窗口里没有明显竞争线程。
+8. 关系亲密度、心情和话题兴趣只能在确认消息可能是对你说之后影响是否回复；它们不能替代指向证据。
 
 # 噪音梯度决策
-- `low_noise`: 仍按群聊判断。低噪音只降低竞争线程风险，不提供听众解析证据。没有 typed address 时，必须有可分离的呼格称呼、第二人称续接、直接请求/命令等对 `{character_name}` 说话的语法结构，或非常清楚的历史连续性。
-- `medium_noise`: 需要清楚的结构化指向或非常清楚的历史连续性；否则倾向不回复。
+- `low_noise`: 仍按群聊判断。低噪音只降低竞争线程风险，不提供听众解析证据。没有 typed address 时，必须有可分离的角色名称呼、第二人称续接、直接请求/命令等对 `{character_name}` 说话的语法结构，或非常清楚的历史连续性。
+- `medium_noise`: 需要结构化指向；没有结构化指向时，只有正在续接你上一轮发言才回复。
 - `high_noise`: 只有结构化指向或极强历史连续性才回复；普通提问、第二人称、名字出现、话题相关都不够。
 - `chaotic_noise`: 几乎只在结构化 reply/mention 指向你时回复；不要用正文措辞补足缺失的指向证据。
 
@@ -397,7 +434,7 @@ _RELEVANCE_SYSTEM_NOISY_PROMPT = """\
 返回 `true` 的常见条件:
 - `directly_addressed=true`，且消息内容需要或邀请你回应。
 - 没有结构化指向，但 `group_attention=low_noise`，历史连续性非常清楚，并且当前消息明显期待你本人回应。
-- 没有结构化指向，但正文使用你的明确名字或稳定昵称作为可分离的呼格称呼，并且后续句式是在直接向你本人提问或请求；若名字只是句子的主语或被谈论对象，仍应不回复。
+- 没有结构化指向，但 `group_attention=low_noise`，正文使用角色名作为可分离的呼格称呼，并且后续句式是在直接向你本人提问或请求；若名字只是句子的主语或被谈论对象，仍应不回复。
 
 返回 `false` 的常见条件:
 - 当前消息结构化 reply 到其他人，且没有结构化 mention 你。
@@ -441,7 +478,7 @@ _RELEVANCE_SYSTEM_NOISY_PROMPT = """\
 # 思考路径
 1. 先读取平台结构化指向证据：`directly_addressed` 与 `reply_context.reply_to_platform_user_id`。
 2. 再读取 `group_attention`，根据噪音等级提高或降低介入门槛。
-3. 判断正文语法角色: 名字或代词如果是主语、宾语或被讨论话题，先按群内谈论处理；只有可分离的呼格称呼加第二人称续接、直接请求/命令，才算正文中的直接对话证据。“<角色名>在/是/会/要...”这类名字直接接谓语的结构不是呼格。
+3. 判断正文语法角色: 角色名或代词如果是主语、宾语或被讨论话题，先按群内谈论处理；只有可分离的角色名称呼加第二人称续接、直接请求/命令，才算正文中的直接对话证据。“<角色名>在/是/会/要...”这类名字直接接谓语的结构不是呼格。
 4. 只有在结构化指向、直接对话语法或极清楚历史连续性成立后，才让正文内容、关系亲密度和心情影响判断。
 5. 若决定回复，再判断是否需要 reply 锚定，以及是否需要填写 `indirect_speech_context`。
 
@@ -545,6 +582,39 @@ async def relevance_agent(state: IMProcessState) -> IMProcessState:
         and directly_addressed is not True
     ):
         reason_to_respond = "chaotic group noise without platform-level bot address metadata"
+        logger.info(
+            f"Relevance decision: user={user_name} "
+            f"platform_user={platform_user_id} should_respond={False} "
+            f"use_reply_feature={False} noisy={is_noisy_environment} "
+            f"reason={reason_to_respond} group_attention={group_attention} "
+            f"directly_addressed={directly_addressed}"
+        )
+        logger.debug(
+            f"Relevance decision detail: content={log_preview(user_input)}"
+        )
+        return_value = {
+            "should_respond": False,
+            "reason_to_respond": reason_to_respond,
+            "use_reply_feature": False,
+            "channel_topic": "",
+            "indirect_speech_context": "",
+            "user_input": user_input,
+        }
+        return return_value
+
+    if (
+        is_noisy_environment
+        and group_attention in (_GROUP_ATTENTION_MEDIUM, _GROUP_ATTENTION_HIGH)
+        and directly_addressed is not True
+        and not _has_latest_bot_turn_continuity(
+            chat_history_wide=state.get("chat_history_wide") or [],
+            platform_bot_id=state.get("platform_bot_id", ""),
+            current_global_user_id=state["global_user_id"],
+        )
+    ):
+        reason_to_respond = (
+            "group attention requires platform address or latest bot-turn continuity"
+        )
         logger.info(
             f"Relevance decision: user={user_name} "
             f"platform_user={platform_user_id} should_respond={False} "

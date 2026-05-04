@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import ANY, AsyncMock, MagicMock
 
 import pytest
 
@@ -62,10 +62,10 @@ async def test_search_memory_keyword_defaults_to_active_non_expired(
 
 
 @pytest.mark.asyncio
-async def test_search_memory_vector_prefilters_active_rows(
+async def test_search_memory_vector_post_filters_active_rows(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Vector search prefilters active lifecycle rows before post-filtering."""
+    """Vector search keeps lifecycle filtering outside vector prefilters."""
     cursor = MagicMock()
     cursor.to_list = AsyncMock(return_value=[])
     collection = MagicMock()
@@ -82,16 +82,26 @@ async def test_search_memory_vector_prefilters_active_rows(
 
     pipeline = collection.aggregate.call_args.args[0]
     vector_search = pipeline[0]["$vectorSearch"]
-    assert vector_search["filter"]["status"] == MemoryStatus.ACTIVE
+    assert "filter" not in vector_search
     assert vector_search["limit"] > 5
+    assert {"$match": {"$and": [
+        {
+            "$or": [
+                {"expiry_timestamp": None},
+                {"expiry_timestamp": {"$exists": False}},
+                {"expiry_timestamp": {"$gt": ANY}},
+            ]
+        },
+        {"status": MemoryStatus.ACTIVE},
+    ]}} in pipeline
     assert pipeline[-1] == {"$limit": 5}
 
 
 @pytest.mark.asyncio
-async def test_find_active_memory_documents_vector_prefilters_active_rows(
+async def test_find_active_memory_documents_vector_post_filters_active_rows(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The DB interface uses vector prefiltering for active memory units."""
+    """The DB interface keeps filters index-compatible after vector search."""
     cursor = MagicMock()
     cursor.to_list = AsyncMock(return_value=[])
     collection = MagicMock()
@@ -115,14 +125,14 @@ async def test_find_active_memory_documents_vector_prefilters_active_rows(
 
     pipeline = collection.aggregate.call_args.args[0]
     vector_search = pipeline[0]["$vectorSearch"]
-    assert vector_search["filter"] == {
-        "status": MemoryStatus.ACTIVE,
-        "source_global_user_id": "user-1",
-    }
+    assert "filter" not in vector_search
     assert vector_search["limit"] > 4
     assert pipeline[1] == {
         "$addFields": {"score": {"$meta": "vectorSearchScore"}}
     }
+    match_stage = pipeline[2]
+    assert match_stage["$match"]["source_global_user_id"] == "user-1"
+    assert {"status": MemoryStatus.ACTIVE} in match_stage["$match"]["$and"]
     assert pipeline[-1] == {"$limit": 4}
 
 

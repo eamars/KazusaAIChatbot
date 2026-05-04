@@ -237,17 +237,6 @@ async def search_memory(
     # method == "vector"
     query_embedding = await get_text_embedding(query)
     index_name = "memory_vector_index"
-    vector_filter: dict[str, str] = {}
-    if source_global_user_id:
-        vector_filter["source_global_user_id"] = source_global_user_id
-    if memory_type:
-        vector_filter["memory_type"] = memory_type
-    if source_kind:
-        vector_filter["source_kind"] = source_kind
-    if status == MemoryStatus.ACTIVE:
-        vector_filter["status"] = MemoryStatus.ACTIVE
-    elif status:
-        vector_filter["status"] = status
 
     vector_search = {
         "index": index_name,
@@ -256,8 +245,6 @@ async def search_memory(
         "numCandidates": max(100, limit * 10),
         "limit": max(100, limit * 10),
     }
-    if vector_filter:
-        vector_search["filter"] = vector_filter
 
     pipeline: list[dict[str, Any]] = [
         {

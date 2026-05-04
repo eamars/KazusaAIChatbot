@@ -69,6 +69,7 @@ def _history_row(
     reply_context: dict | None = None,
     addressed_to_global_user_ids: list[str] | None = None,
     content: str = "",
+    broadcast: bool = False,
 ) -> dict:
     """Build a trimmed conversation-history row for relevance tests.
 
@@ -79,6 +80,7 @@ def _history_row(
         reply_context: Optional structured reply metadata.
         addressed_to_global_user_ids: Typed addressee UUIDs for the row.
         content: Optional content fixture.
+        broadcast: Whether the row is addressed to the whole channel.
 
     Returns:
         Trimmed history row matching ``trim_history_dict`` shape.
@@ -90,6 +92,7 @@ def _history_row(
         "reply_context": reply_context or {},
         "addressed_to_global_user_ids": addressed_to_global_user_ids or [],
         "content": content,
+        "broadcast": broadcast,
     }
 
 
@@ -319,6 +322,9 @@ async def test_noisy_relevance_prompt_preserves_metadata_first_contract() -> Non
     assert '消息明确且**仅**包含你的 ID' not in rendered_prompt
     assert '必须始终设置为 `true`' not in rendered_prompt
     assert '不能当作平台结构化指向证据' in rendered_prompt
+    assert '稳定昵称' not in rendered_prompt
+    assert '群聊中不要猜昵称或别称' in rendered_prompt
+    assert '昵称召唤只允许在私聊路径中考虑' not in rendered_prompt
     assert '不要仅凭第二人称代词判断实际听众' in rendered_prompt
     assert '"use_reply_feature": boolean' in rendered_prompt
 
@@ -414,6 +420,56 @@ async def test_relevance_group_payload_includes_direct_address_and_group_attenti
     assert "group_attention_context" not in parsed_payload
     assert "distinct_speakers" not in human_payload
     assert "message_count" not in human_payload
+
+
+@pytest.mark.asyncio
+async def test_relevance_medium_group_without_bot_continuity_skips_llm() -> None:
+    """Medium group noise without structure or bot continuity should stop early."""
+
+    state = _base_state()
+    state["user_input"] = '鹅总你咋不说话了啊？'
+    state["chat_history_wide"] = [
+        _history_row(
+            platform_user_id="2795731500",
+            timestamp="2026-05-04T14:39:37+00:00",
+            content='还要背回国',
+        ),
+    ]
+
+    with patch("kazusa_ai_chatbot.nodes.relevance_agent._relevance_agent_llm") as mock_llm:
+        mock_llm.ainvoke = AsyncMock()
+        result = await relevance_agent(state)
+
+    assert result["should_respond"] is False
+    assert "latest bot-turn continuity" in result["reason_to_respond"]
+    mock_llm.ainvoke.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_relevance_medium_group_latest_bot_continuity_invokes_llm() -> None:
+    """A latest bot turn keeps medium-noise continuation judgment with the LLM."""
+
+    state = _base_state()
+    state["chat_history_wide"] = [
+        _history_row(
+            platform_user_id="user_2",
+            timestamp="2026-05-04T14:39:30+00:00",
+        ),
+        _history_row(
+            role="assistant",
+            platform_user_id="bot_456",
+            timestamp="2026-05-04T14:39:37+00:00",
+            addressed_to_global_user_ids=["uuid-123"],
+        ),
+    ]
+    llm_response = _llm_response('{"should_respond": true, "reason_to_respond": "continuation", "use_reply_feature": true, "channel_topic": "", "indirect_speech_context": ""}')
+
+    with patch("kazusa_ai_chatbot.nodes.relevance_agent._relevance_agent_llm") as mock_llm:
+        mock_llm.ainvoke = AsyncMock(return_value=llm_response)
+        result = await relevance_agent(state)
+
+    assert result["should_respond"] is True
+    mock_llm.ainvoke.assert_called_once()
 
 
 @pytest.mark.asyncio

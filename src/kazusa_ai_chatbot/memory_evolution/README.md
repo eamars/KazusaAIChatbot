@@ -474,9 +474,11 @@ LLM-facing tools must not expose `status`, `expiry_before`, or `expiry_after`
 arguments. Audit/debug code that needs inactive rows must use an explicit
 lower-level interface and document that it is outside normal RAG retrieval.
 
-Semantic retrieval uses vector prefilters only for indexed scalar fields and
-post-filters with the full active query. Keyword retrieval uses regex filters
-and does not construct vector-only state.
+Semantic retrieval does not use `$vectorSearch.filter`; lifecycle and metadata
+filters run as a normal `$match` after vector scoring. This keeps the live
+search path compatible with existing Atlas vector indexes that were created
+without scalar filter fields. Keyword retrieval uses regex filters and does
+not construct vector-only state.
 
 ## Compatibility Interfaces
 
@@ -595,7 +597,7 @@ Before merging memory-evolution changes, verify:
 - Repository tests cover idempotent insert, caller-supplied embedding
   rejection, supersede, merge, inactive source rejection, evidence refs, and
   cache invalidation.
-- DB-interface tests cover active filters, vector prefiltering,
+- DB-interface tests cover active filters, vector post-filtering,
   `exclude_memory_unit_ids`, and lifecycle update allowlisting.
 - Reset tests cover dry-run, apply, runtime-row preservation, and write guard
   failure.

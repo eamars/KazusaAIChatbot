@@ -529,8 +529,9 @@ async def test_search_memory_vector():
     pipeline = db.memory.aggregate.call_args[0][0]
     assert "$vectorSearch" in pipeline[0]
     vector_search = pipeline[0]["$vectorSearch"]
-    assert vector_search["filter"]["status"] == "active"
+    assert "filter" not in vector_search
     assert vector_search["limit"] > 3
+    assert {"status": "active"} in pipeline[2]["$match"]["$and"]
     assert pipeline[-1] == {"$limit": 3}
 
 

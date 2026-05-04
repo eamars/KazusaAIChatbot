@@ -523,7 +523,7 @@ Stage 1b implementation and database-apply evidence is recorded below. Stage
 - Self-audit remediation evidence:
   - Public write APIs and reset now share `src\kazusa_ai_chatbot\db\memory_evolution.py`'s write guard, so reset and runtime memory writes cannot run concurrently.
   - `src\kazusa_ai_chatbot\db\memory.py::save_memory` imports `insert_memory_unit` at module scope from `memory_evolution.repository`, removing the runtime inline import while preserving the DB-interface boundary.
-  - Vector persistent-memory searches prefilter indexed lifecycle fields in `$vectorSearch.filter` and still post-filter expiry before returning results.
+  - Vector persistent-memory searches avoid `$vectorSearch.filter` for deployed-index compatibility and post-filter lifecycle fields before returning results.
   - The memory-maintenance skill source path was corrected to `personalities\knowledge\memory_seed.jsonl`.
   - `git diff --check` passed after remediation.
   - `venv\Scripts\python.exe -m scripts.manage_memory_knowledge validate` returned `valid: 104 entries`.

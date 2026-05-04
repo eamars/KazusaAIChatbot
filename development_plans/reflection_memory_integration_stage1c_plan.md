@@ -491,17 +491,21 @@ Allowed result: no matches in Stage 1c production writer code.
 
 ## Operational Steps
 
-Existing Atlas vector search indexes cannot be edited in place. Stage 1b's
-`enable_memory_vector_index` declares scalar filter paths for active memory
-search, but deployments that already have `memory_vector_index` must plan a
-manual Atlas drop-and-recreate operation for that index during rollout. Do not
-treat the bootstrap helper as proof that an existing Atlas index definition was
-modified.
+Existing Atlas vector search indexes cannot be edited in place. The current
+Stage 1b runtime search path does not require scalar vector filter fields
+because it post-filters after vector scoring. If Stage 1c or a future
+optimization reintroduces `$vectorSearch.filter`, deployments that already
+have `memory_vector_index` must plan a manual Atlas drop-and-recreate operation
+for that index. Do not treat the bootstrap helper as proof that an existing
+Atlas index definition was modified.
 
 Before enabling promotion writes:
 
 - inspect the existing `memory_vector_index` definition,
-- recreate it with the Stage 1b filter paths if needed,
+- do not require scalar filter paths unless the implementation uses
+  `$vectorSearch.filter`,
+- recreate the index with the needed filter paths if vector prefilters are
+  reintroduced,
 - run a semantic `find_active_memory_units` dry-run and confirm scores are
   present,
 - keep promotion writes disabled if vector scores are unavailable.

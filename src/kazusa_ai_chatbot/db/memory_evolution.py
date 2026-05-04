@@ -17,14 +17,6 @@ from kazusa_ai_chatbot.memory_evolution.models import (
 )
 
 MEMORY_WRITE_LOCK_ID = "__memory_evolution_write_lock__"
-_VECTOR_FILTER_FIELDS = {
-    "status",
-    "memory_type",
-    "source_kind",
-    "source_global_user_id",
-    "authority",
-    "lineage_id",
-}
 _LIFECYCLE_UPDATE_FIELDS = {
     "status",
     "updated_at",
@@ -97,23 +89,6 @@ def _active_query_filter(
     exclude_ids = query.get("exclude_memory_unit_ids")
     if exclude_ids:
         filter_doc["memory_unit_id"] = {"$nin": exclude_ids}
-    return filter_doc
-
-
-def _vector_prefilter(query: MemoryUnitQuery) -> dict[str, Any]:
-    """Build the vector-index prefilter for indexed scalar fields.
-
-    Args:
-        query: Constrained query shape.
-
-    Returns:
-        Filter document safe for ``$vectorSearch.filter``.
-    """
-    filter_doc: dict[str, Any] = {"status": MemoryStatus.ACTIVE}
-    for field in _VECTOR_FILTER_FIELDS - {"status"}:
-        value = query.get(field)
-        if value:
-            filter_doc[field] = value
     return filter_doc
 
 
@@ -223,7 +198,6 @@ async def find_active_memory_documents(
     db = await get_db()
     filter_doc = _active_query_filter(query, now_timestamp=now_timestamp)
     if query_embedding is not None:
-        vector_filter = _vector_prefilter(query)
         pipeline = [
             {
                 "$vectorSearch": {
@@ -232,7 +206,6 @@ async def find_active_memory_documents(
                     "queryVector": query_embedding,
                     "numCandidates": max(100, limit * 10),
                     "limit": max(100, limit * 10),
-                    "filter": vector_filter,
                 }
             },
             {"$addFields": {"score": {"$meta": "vectorSearchScore"}}},
