@@ -25,6 +25,11 @@ async def test_save_conversation_writes_typed_fields_and_embedding_source(
     monkeypatch.setattr(conversation_module, "get_db", AsyncMock(return_value=db))
     monkeypatch.setattr(conversation_module, "get_text_embedding", get_text_embedding)
     monkeypatch.setattr(
+        conversation_module,
+        "SAVE_ATTACHMENT_BASE64_TO_DB",
+        False,
+    )
+    monkeypatch.setattr(
         "kazusa_ai_chatbot.rag.cache2_runtime.get_rag_cache2_runtime",
         MagicMock(return_value=runtime),
     )
@@ -71,9 +76,61 @@ async def test_save_conversation_writes_typed_fields_and_embedding_source(
     assert saved_doc["raw_wire_text"].startswith("[CQ:at")
     assert saved_doc["addressed_to_global_user_ids"] == ["character-global"]
     assert saved_doc["mentions"][0]["entity_kind"] == "bot"
-    assert saved_doc["attachments"][0]["base64_data"] == "small-bytes"
+    assert saved_doc["attachments"][0]["description"] == "small image"
+    assert saved_doc["attachments"][0]["url"] == "https://example.test/small.png"
+    assert "base64_data" not in saved_doc["attachments"][0]
     assert "base64_data" not in saved_doc["attachments"][1]
     assert saved_doc["attachments"][1]["url"] == "https://example.test/large.png"
+
+
+@pytest.mark.asyncio
+async def test_save_conversation_can_store_inline_base64_when_configured(
+    monkeypatch,
+) -> None:
+    """Attachment bytes should remain opt-in for deployments that need replay."""
+
+    db = MagicMock()
+    db.conversation_history.insert_one = AsyncMock()
+    runtime = MagicMock()
+    runtime.invalidate = AsyncMock(return_value=0)
+    get_text_embedding = AsyncMock(return_value=[0.1, 0.2])
+
+    monkeypatch.setattr(conversation_module, "get_db", AsyncMock(return_value=db))
+    monkeypatch.setattr(conversation_module, "get_text_embedding", get_text_embedding)
+    monkeypatch.setattr(
+        conversation_module,
+        "SAVE_ATTACHMENT_BASE64_TO_DB",
+        True,
+    )
+    monkeypatch.setattr(
+        "kazusa_ai_chatbot.rag.cache2_runtime.get_rag_cache2_runtime",
+        MagicMock(return_value=runtime),
+    )
+
+    await conversation_module.save_conversation({
+        "platform": "qq",
+        "platform_channel_id": "chan-1",
+        "role": "user",
+        "platform_user_id": "platform-user",
+        "global_user_id": "user-1",
+        "display_name": "User",
+        "body_text": "look",
+        "raw_wire_text": "look",
+        "addressed_to_global_user_ids": ["character-global"],
+        "mentions": [],
+        "broadcast": False,
+        "attachments": [{
+            "media_type": "image/png",
+            "base64_data": "small-bytes",
+            "description": "small image",
+            "size_bytes": INLINE_ATTACHMENT_BYTE_LIMIT,
+            "storage_shape": "inline",
+        }],
+        "timestamp": "2026-04-30T00:00:00+00:00",
+    })
+
+    saved_doc = db.conversation_history.insert_one.await_args.args[0]
+    assert saved_doc["attachments"][0]["base64_data"] == "small-bytes"
 
 
 @pytest.mark.asyncio

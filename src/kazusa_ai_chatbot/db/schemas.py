@@ -38,7 +38,7 @@ class AttachmentDoc(TypedDict, total=False):
     """Multimedia attachment embedded in a conversation message."""
     media_type: str       # MIME type: "image/png", "audio/ogg", etc.
     url: str              # External URL (CDN, S3, etc.) — preferred for large files
-    base64_data: str      # Inline base64 — for small attachments only
+    base64_data: str      # Inline base64 — optional, config-gated
     description: str      # Alt-text / transcription / OCR summary
     size_bytes: int       # File size
     storage_shape: str    # "inline" | "url_only" | "drop"

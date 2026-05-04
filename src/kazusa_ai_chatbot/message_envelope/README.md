@@ -246,11 +246,13 @@ Each attachment reference SHOULD use this shape:
 | `storage_shape` | `AttachmentStorageShape` | `inline`, `url_only`, or `drop`. |
 
 Current RAG and cognition consumers read attachment `description` text. Binary
-payloads are preserved for storage and future direct-modality consumers but are
-not part of normal local LLM text prompts.
+payloads may be present in current-turn envelopes for direct modality work, but
+durable storage may omit `base64_data` according to the deployment storage
+policy.
 
 Attachment handlers MUST preserve description bytes exactly. Large binary
-payloads MAY be stored as URL-only according to `attachment_policy.py`.
+payloads MAY be stored as URL-only according to `attachment_policy.py`; inline
+binary persistence is config-gated.
 
 ### `addressed_to_global_user_ids`
 

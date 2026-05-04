@@ -70,6 +70,10 @@ CHARACTER_GLOBAL_USER_ID = os.getenv(
     "00000000-0000-4000-8000-000000000001",
 )
 CONVERSATION_HISTORY_LIMIT = int(os.getenv("CONVERSATION_HISTORY_LIMIT", "10"))
+SAVE_ATTACHMENT_BASE64_TO_DB = os.getenv(
+    "SAVE_ATTACHMENT_BASE64_TO_DB",
+    "false",
+).lower() in ("1", "true", "yes")
 # Recent history window for downstream stages.
 CHAT_HISTORY_RECENT_LIMIT = 5
 

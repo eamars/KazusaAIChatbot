@@ -6,7 +6,10 @@ import logging
 import re
 from typing import Any
 
-from kazusa_ai_chatbot.config import CONVERSATION_HISTORY_LIMIT
+from kazusa_ai_chatbot.config import (
+    CONVERSATION_HISTORY_LIMIT,
+    SAVE_ATTACHMENT_BASE64_TO_DB,
+)
 from kazusa_ai_chatbot.db._client import get_db, get_text_embedding
 from kazusa_ai_chatbot.db.schemas import ConversationMessageDoc
 from kazusa_ai_chatbot.message_envelope import INLINE_ATTACHMENT_BYTE_LIMIT
@@ -24,7 +27,8 @@ def _safe_attachment_docs(attachments: object) -> list[dict[str, Any]]:
 
     Returns:
         Attachment docs with descriptions preserved and binary payloads stored
-        only when the normalized storage shape permits inline data.
+        only when configured and the normalized storage shape permits inline
+        data.
     """
 
     if not isinstance(attachments, list):
@@ -55,7 +59,8 @@ def _safe_attachment_docs(attachments: object) -> list[dict[str, Any]]:
 
         base64_data = attachment.get("base64_data")
         should_store_inline = (
-            isinstance(base64_data, str)
+            SAVE_ATTACHMENT_BASE64_TO_DB
+            and isinstance(base64_data, str)
             and bool(base64_data)
             and storage_shape != "url_only"
             and not has_large_payload
