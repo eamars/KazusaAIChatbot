@@ -308,7 +308,7 @@ normalized_text = _normalize_text_for_memory(raw_text)
 
 ---
 
-## N-012 -- Do not add thin wrappers around a single simple expression
+## N-012 -- Do not add thin or speculative abstractions around simple behavior
 
 Call count alone does not justify a thin wrapper. Do not add helper functions
 whose body only forwards to a single simple expression, even when that
@@ -318,6 +318,11 @@ This includes wrappers around field access, dictionary access, model
 serialization, constructors, type casts, or pass-through function calls. These
 wrappers add another name for readers to chase without adding behavior,
 validation, or a useful abstraction.
+
+Also do not introduce classes, strategy objects, protocols, validators, caches,
+feature flags, optional merge modes, notification hooks, or configuration
+layers for behavior that has only one current implementation. Add those pieces
+when an actual requirement or existing local pattern needs them.
 
 **Forbidden:**
 ```python
@@ -341,7 +346,8 @@ message_envelope: MessageEnvelope = req.message_envelope.model_dump(
 ```
 
 When reviewing, reject thin wrappers around a single simple expression
-regardless of how many call sites they have.
+regardless of how many call sites they have. Reject speculative structure when
+the simpler direct implementation satisfies the current request.
 
 ---
 
@@ -395,3 +401,100 @@ queued_items = load_pending_items()
 When reviewing, scan docstrings and comments for plan-specific vocabulary and
 ask whether the sentence would still be accurate without access to the plan
 that created it. If not, replace it with stable code-facing language.
+
+---
+
+## N-014 -- Do not silently choose risky interpretations
+
+Do not implement a Python change that silently picks among materially different
+interpretations when the choice affects data exposure, exported fields, storage
+location, user-visible API semantics, migration scope, or the performance metric
+being optimized.
+
+**Forbidden:**
+```python
+def export_users() -> str:
+    """Export all users to a local JSON file."""
+
+    users = User.query.all()
+    with open("users.json", "w") as file_handle:
+        json.dump([user.to_dict() for user in users], file_handle)
+    message = f"Exported {len(users)} users"
+    return message
+```
+
+for a request that only said "add a feature to export user data".
+
+**Correct:**
+```text
+Clarify the export scope, allowed fields, delivery mechanism, and expected
+volume before editing, or state a narrow assumption and implement only that
+assumption.
+```
+
+When reviewing, look for hidden decisions about "all", "default", "fast",
+"export", "sync", "async", "admin", or "user data". These words often hide
+scope and risk.
+
+---
+
+## N-015 -- Do not bundle drive-by refactors with requested changes
+
+Do not combine a bug fix or small feature with unrelated validation changes,
+quote-style churn, type annotation sweeps, docstring additions, whitespace-only
+rewrites, renamed variables, control-flow rewrites, or opportunistic cleanup.
+
+**Forbidden:**
+```python
+def upload_file(file_path: str, destination: str) -> bool:
+    """Upload file to destination with logging."""
+
+    logger.info(f"Uploading {file_path} to {destination}")
+    with open(file_path, "rb") as file_handle:
+        data = file_handle.read()
+    response = requests.post(destination, files={"file": data})
+    success = response.status_code == 200
+    return success
+```
+
+when the existing function used untyped parameters, single quotes, direct
+boolean branches, and the task was only to add logging.
+
+**Correct:**
+```python
+logger.info(f'Starting upload: {file_path}')
+with open(file_path, 'rb') as f:
+    data = f.read()
+response = requests.post(destination, files={'file': data})
+```
+
+When reviewing diffs, ignore whether the new style is generally preferable.
+Ask whether it was necessary for this request and consistent with the nearby
+code.
+
+---
+
+## N-016 -- Do not change behavior without a verifiable target
+
+Do not start broad "fix", "improve", "optimize", or "clean up" changes without
+a concrete failure, success condition, or measurable target. Do not fix a bug
+before attempting a reasonable reproduction when tests or local commands can
+show the failure.
+
+**Forbidden:**
+```text
+Improve search performance by adding caching, indexes, async processing, and
+result streaming.
+```
+
+for a request that only said "make search faster" and did not specify latency,
+throughput, or perceived responsiveness.
+
+**Correct:**
+```text
+Define the target first, such as reducing typical latency from 500 ms to under
+100 ms, then make the smallest change that can be tested against that target.
+```
+
+When reviewing, require verification that proves the intended outcome. A test
+run that does not exercise the changed behavior is not enough.

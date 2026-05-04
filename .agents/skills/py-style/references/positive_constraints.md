@@ -316,11 +316,13 @@ or private helper already covers the behavior.
 
 ---
 
-## P-011 -- Add helpers only when the abstraction earns its place
+## P-011 -- Add helpers and abstractions only when they earn their place
 
-Helper functions are not automatically cleaner. Add a helper only when it
-removes real repetition in meaningful logic or clarifies a genuinely complex
-operation.
+Simple code that solves today's requirement is preferred over architecture for
+tomorrow's possible requirement. Add a helper, class, strategy object, protocol,
+config layer, cache, validator, or optional behavior only when it removes real
+repetition, clarifies a current domain concept, matches an established local
+pattern, or is required by the task in front of you.
 
 As a default threshold, require the same non-trivial logic block to appear at
 least three times before extracting a helper. A helper used fewer than three
@@ -342,6 +344,31 @@ result = _build_result("ok", "Saved")
 result = {"status": "ok", "message": "Saved"}
 ```
 
+**Also wrong:**
+```python
+class DiscountStrategy(Protocol):
+    def calculate(self, amount: float) -> float:
+        ...
+
+
+class PercentageDiscount:
+    def __init__(self, percent: float) -> None:
+        self.percent = percent
+
+    def calculate(self, amount: float) -> float:
+        return amount * (self.percent / 100)
+```
+
+when the current requirement is only:
+
+```python
+def calculate_discount(amount: float, percent: float) -> float:
+    """Calculate the discount amount for a percentage discount."""
+
+    discount = amount * (percent / 100)
+    return discount
+```
+
 **Also right when repetition justifies it:**
 ```python
 def _build_result(status: str, message: str) -> dict[str, str]:
@@ -349,8 +376,10 @@ def _build_result(status: str, message: str) -> dict[str, str]:
     return {"status": status, "message": message}
 ```
 
-When reviewing, challenge every new helper and require the abstraction to earn
-the extra name readers must follow.
+When reviewing, challenge every new helper or abstraction and require it to
+earn the extra names, files, branches, and tests readers must follow. If a
+future requirement would justify more structure, refactor when that requirement
+arrives instead of pre-building the structure now.
 
 ---
 
@@ -383,3 +412,117 @@ def _keyword_text_filter(pattern: str) -> dict[str, Any]:
 
 When reviewing comments and docstrings, ask whether the wording will still be
 clear six months later to someone who has never read the implementation plan.
+
+---
+
+## P-013 -- Surface risky assumptions before changing behavior
+
+Before changing Python behavior, identify any assumption that affects scope,
+privacy, data shape, persistence location, API contract, or which performance
+metric matters. Use existing code, tests, schemas, and call sites to resolve
+ordinary questions yourself. If a decision is still ambiguous and the wrong
+choice would create user-visible behavior, data exposure, or avoidable rework,
+ask the user or state the assumption explicitly before editing.
+
+**Wrong:**
+```python
+def export_users() -> str:
+    """Export all users to a local JSON file."""
+
+    users = User.query.all()
+    with open("users.json", "w") as file_handle:
+        json.dump([user.to_dict() for user in users], file_handle)
+    message = f"Exported {len(users)} users"
+    return message
+```
+
+This silently chooses all users, all fields, a local file path, and synchronous
+execution even though each choice changes product behavior and risk.
+
+**Right before editing:**
+```text
+Assumptions to resolve: whether export means API response or file download,
+which user subset and fields are allowed, whether sensitive fields must be
+excluded, and whether expected volume needs pagination or a background job.
+```
+
+When reviewing, flag changes that silently pick a scope, destination, data
+field set, or optimization target that the request did not specify and the code
+did not already establish.
+
+---
+
+## P-014 -- Keep requested changes surgical and style-compatible
+
+A code change should fit the request's blast radius. Change the specific lines
+needed to satisfy the request, preserve the surrounding style, and avoid
+opportunistic improvements that are not required for the current bug or feature.
+
+Match local conventions for quote style, typing density, comments, control
+flow, naming, and return shape unless the requested change directly requires a
+different pattern.
+
+**Wrong:**
+```python
+def validate_user(user_data: dict[str, str]) -> bool:
+    """Validate user data."""
+
+    email = user_data.get("email", "").strip()
+    if not email:
+        raise ValueError("Email required")
+    if "@" not in email or "." not in email.split("@")[1]:
+        raise ValueError("Invalid email")
+
+    username = user_data.get("username", "").strip()
+    if len(username) < 3:
+        raise ValueError("Username too short")
+    return True
+```
+
+when the task was only to stop empty email strings from crashing an existing
+validator.
+
+**Right:**
+```python
+email = user_data.get("email", "")
+if not email or not email.strip():
+    raise ValueError("Email required")
+
+if "@" not in email:
+    raise ValueError("Invalid email")
+```
+
+When reviewing, separate necessary changes from drive-by refactors. A style
+cleanup, new type annotation, docstring, stronger validation rule, or rewritten
+control flow must be justified by the task, not by general preference.
+
+---
+
+## P-015 -- Tie implementation to verifiable outcomes
+
+For bug fixes, reproduce the failure before changing the implementation when a
+reasonable test or local command exists. For new behavior, define the observable
+success criteria before implementation and verify the smallest useful slice
+before broadening the change.
+
+Prefer incremental checks: targeted test first, then adjacent tests for shared
+behavior, then broader suites when the touched code has wider reach. If the
+environment prevents running a check, report the blocker and the verification
+that remains undone.
+
+**Wrong:**
+```text
+Fix authentication by reviewing the code, making improvements, and testing.
+```
+
+**Right:**
+```text
+Reproduce: password change leaves the old session valid.
+Implement: invalidate sessions when the password version changes.
+Verify: targeted session test fails before the fix and passes after it; existing
+auth tests still pass.
+```
+
+When reviewing, ask whether the change has a concrete before/after condition
+and whether the submitted verification proves that condition rather than merely
+showing that code was edited.
