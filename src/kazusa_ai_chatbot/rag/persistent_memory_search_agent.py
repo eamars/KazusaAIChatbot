@@ -27,9 +27,6 @@ from kazusa_ai_chatbot.rag.prompt_projection import (
     project_runtime_context_for_llm,
     project_tool_result_for_llm,
 )
-from kazusa_ai_chatbot.time_context import (
-    structured_llm_time_to_utc_iso,
-)
 from kazusa_ai_chatbot.utils import get_llm, parse_llm_json_output, text_or_empty
 
 logger = logging.getLogger(__name__)
@@ -41,13 +38,11 @@ _GENERATOR_PROMPT = """\
 - 只为 `search_persistent_memory` 生成参数。
 - `search_query` 必须写成自然语言的记忆查询，不要退化成关键词列表。
 - `search_query` 应围绕原问题所需的相关证据，不要预设记忆属于事实、印象、看法或特定来源。
-- 如果 `context` 或 `known_facts` 明确给出 `status`，可以使用该过滤条件。
 - `source_global_user_id` 是隐私边界，不是相关性提示。默认省略；只有任务明确要求查找"由某个用户触发/提供/承诺"的记忆时才填写。
 - 如果 `feedback` 指出过滤条件太窄、查询太抽象或没有相关记忆，下一轮必须改写。
 
 # 字段约束（严格遵守）
 - `source_global_user_id`：只有任务明确要求按"记忆来源用户"过滤，且 context 或 known_facts 中存在**明确的 UUID 格式**来源用户 ID 时才填写；平台频道 ID、用户名、昵称、当前说话人、被查询对象均不是来源用户过滤理由，一律省略。
-- `status`：只能取 active | fulfilled | expired | superseded，否则省略。
 
 # 生成步骤
 1. 先读取 `task`，判断需要哪类持久记忆证据。
@@ -68,10 +63,7 @@ _GENERATOR_PROMPT = """\
 {
   "search_query": "string",
   "top_k": 5,
-  "source_global_user_id": "UUID string or omitted",
-  "status": "string or omitted",
-  "expiry_before": "local YYYY-MM-DD HH:MM or omitted",
-  "expiry_after": "local YYYY-MM-DD HH:MM or omitted"
+  "source_global_user_id": "UUID string or omitted"
 }
 """
 _generator_llm = get_llm(
@@ -103,7 +95,7 @@ _JUDGE_PROMPT = """\
 
 # 常见反馈方向
 - 查询太抽象，需要改成围绕原问题的具体证据查询
-- 过滤条件太窄，需要移除来源或状态过滤
+- 过滤条件太窄，需要移除来源过滤
 - 返回记忆不相关，需要换主题角度
 - 没有相关记忆，需要放宽过滤或改写查询
 
@@ -144,25 +136,13 @@ def _normalize_args(raw_args: dict[str, Any]) -> dict[str, Any]:
     else:
         args["top_k"] = 5
 
-    for key in (
-        "source_global_user_id",
-        "status",
-    ):
+    for key in ("source_global_user_id",):
         raw_val = raw_args.get(key)
         if raw_val is None:
             continue
         value = text_or_empty(raw_val)
         if value:
             args[key] = value
-
-    for key in ("expiry_before", "expiry_after"):
-        value = text_or_empty(raw_args.get(key))
-        if not value:
-            continue
-        try:
-            args[key] = structured_llm_time_to_utc_iso(value)
-        except ValueError as exc:
-            logger.debug(f"Dropping invalid {key} from LLM output: {exc}")
 
     _erase_character_source_global_user_id(args)
     return args

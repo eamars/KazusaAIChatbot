@@ -278,19 +278,28 @@ class CharacterProfileDoc(TypedDict, total=False):
 
 
 class MemoryDoc(TypedDict, total=False):
-    """Memory base in the ``memory`` collection."""
+    """Evolving shared-memory unit in the ``memory`` collection."""
+    memory_unit_id: str             # Stable id for this memory unit
+    lineage_id: str                 # Stable lineage id across superseding versions
+    version: int                    # Monotonic version within a lineage
     memory_name: str                # Name of the memory
     content: str                    # memory content
     source_global_user_id: str      # UUID4 of the user who triggered this memory (empty for non-user-specific)
     timestamp: str                  # ISO-8601 UTC timestamp of when memory was created/updated
+    updated_at: str                 # ISO-8601 UTC timestamp of last lifecycle update
     embedding: list[float]          # dense vector for similarity search
 
     # --- Structured metadata ---
     memory_type: str                # "fact" | "promise" | "impression" | "narrative" | "defense_rule"
     source_kind: str                # "conversation_extracted" | "relationship_inferred" | "reflection_inferred" | "seeded_manual" | "external_imported"
+    authority: str                  # "seed" | "reflection_promoted" | "manual"
     confidence_note: str            # free-form note on how downstream should treat this memory
-    status: str                     # "active" | "fulfilled" | "expired" | "superseded"
+    status: str                     # "active" | "fulfilled" | "expired" | "superseded" | "rejected"
     expiry_timestamp: str | None    # ISO-8601 or None (never expires)
+    supersedes_memory_unit_ids: list[str]
+    merged_from_memory_unit_ids: list[str]
+    evidence_refs: list[dict]
+    privacy_review: dict
 
 
 class RAGCache2PersistentEntryDoc(TypedDict, total=False):

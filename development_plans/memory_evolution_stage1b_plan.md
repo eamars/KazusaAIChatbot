@@ -4,8 +4,8 @@
 
 - Goal: Upgrade the existing global persistent `memory` collection, search path, Cache2 dependencies, and seed tooling into an evolving active/superseded memory-unit model with explicit reset, lineage, evidence, privacy, embedding, and cache-invalidation contracts for Stage 1c.
 - Plan class: large
-- Status: approved
-- Mandatory skills: `memory-knowledge-maintenance`, `development-plan-writing`, `py-style`, `test-style-and-execution`, `database-data-pull`
+- Status: completed
+- Mandatory skills: `memory-knowledge-maintenance`, `development-plan-writing`, `py-style`, `test-style-and-execution`, `database-data-pull`, `local-llm-architecture`
 - Overall cutover strategy: bigbang within the `memory` subsystem only. The existing global `memory` rows may be erased and re-seeded from current codebase seed files into the new evolving-unit schema.
 - Highest-risk areas: destructive memory reset, accidental deletion of future reflection-inferred lore, duplicate writes on retry, lineage corruption, embedding cost during reseed, persistent-memory retrieval regressions, vector index filter behavior, stale Cache2 persistent-memory results, and unmanaged legacy memory writers.
 - Acceptance criteria: memory reset/reseed works from current repository seed data only and preserves runtime `reflection_inferred` rows after cutover; persistent-memory search reads active non-expired rows by default; memory rows support validated insert/supersede/merge lineage; IDs are idempotent; embeddings are computed inside the memory API; Cache2 memory invalidation is synchronous from the caller perspective; no reflection, conversation-history, generation LLM, or external signal is accepted.
@@ -18,11 +18,11 @@ The current codebase has:
 
 - `memory` collection used by persistent-memory RAG helpers.
 - `db/memory.py` with append-only `save_memory` and `search_memory`.
-- `knowledge/memory_seed.jsonl` as curated seed lane when present.
+- `personalities/knowledge/memory_seed.jsonl` as curated seed lane when present.
 - `scripts.manage_memory_knowledge` as local seed maintenance tooling.
 - Persistent-memory helper caches whose dependencies currently need memory-specific invalidation.
 
-Current direct writers into the `memory` collection are:
+Current direct writers into the `memory` collection before implementation are:
 
 - `src/kazusa_ai_chatbot/db/memory.py::save_memory`
 - `src/scripts/manage_memory_knowledge.py::sync_entries`
@@ -44,6 +44,7 @@ Stage 1b must be independent from Stage 1a and Stage 1c.
 - `py-style`: load before editing Python files.
 - `test-style-and-execution`: load before adding, changing, or running tests.
 - `database-data-pull`: load before exporting current memory rows for diagnostics.
+- `local-llm-architecture`: load before changing RAG helper prompts, tool schemas, retrieval planning, or LLM-facing memory-search behavior.
 
 ## Mandatory Rules
 
@@ -86,10 +87,11 @@ async def reset_memory_from_seed(*, dry_run: bool) -> MemoryResetResult: ...
 async def insert_memory_unit(*, document: EvolvingMemoryDoc) -> EvolvingMemoryDoc: ...
 async def supersede_memory_unit(*, active_unit_id: str, replacement: EvolvingMemoryDoc) -> EvolvingMemoryDoc: ...
 async def merge_memory_units(*, source_unit_ids: list[str], replacement: EvolvingMemoryDoc) -> EvolvingMemoryDoc: ...
-async def find_active_memory_units(*, query: MemoryUnitQuery, limit: int) -> list[EvolvingMemoryDoc]: ...
+async def find_active_memory_units(*, query: MemoryUnitQuery, limit: int) -> list[tuple[float, EvolvingMemoryDoc]]: ...
 ```
 
 - Make `find_active_memory_units` accept only the constrained `MemoryUnitQuery` shape defined in this plan; it must not accept raw MongoDB filters.
+- Return `(score, EvolvingMemoryDoc)` pairs from `find_active_memory_units`; semantic queries must return Atlas vector similarity scores, while metadata-only queries use score `-1.0`.
 - Add reset/reseed CLI:
 
 ```powershell
@@ -253,6 +255,11 @@ class MemoryUnitQuery(TypedDict, total=False):
     exclude_memory_unit_ids: list[str]
 ```
 
+`find_active_memory_units` returns `list[tuple[float, EvolvingMemoryDoc]]`.
+The score is required for future promotion logic to decide whether a candidate
+is similar enough to supersede or merge instead of inserting a new lineage.
+For metadata-only reads, the score is `-1.0`.
+
 ```python
 class MemoryResetResult(TypedDict):
     dry_run: bool
@@ -368,7 +375,10 @@ memory_seed_sync_lookup:
 - `src/kazusa_ai_chatbot/memory_evolution/repository.py`
 - `src/kazusa_ai_chatbot/memory_evolution/reset.py`
 - `src/kazusa_ai_chatbot/memory_evolution/README.md`
+- `src/kazusa_ai_chatbot/memory_evolution/identity.py`
+- `src/kazusa_ai_chatbot/db/memory_evolution.py`
 - `src/scripts/reset_memory_lore.py`
+- `tests/test_memory_evolution_module_boundary.py`
 - `tests/test_memory_evolution_repository.py`
 - `tests/test_memory_evolution_reset.py`
 - `tests/test_memory_evolution_retrieval.py`
@@ -411,17 +421,17 @@ memory_seed_sync_lookup:
 
 ## Progress Checklist
 
-- [ ] Tests for memory evolution contract added.
-- [ ] Tests for idempotency, lineage edge cases, writer migration, and expiry added.
-- [ ] Evolving memory schemas and repository helpers implemented.
-- [ ] Reset/reseed CLI implemented.
-- [ ] Bootstrap indexes updated.
-- [ ] Active-only persistent-memory retrieval implemented.
-- [ ] Memory Cache2 dependency implemented.
-- [ ] Seed tooling updated.
-- [ ] Legacy memory writers migrated or wrapped.
-- [ ] Focused tests pass.
-- [ ] Reset dry-run evidence recorded.
+- [x] Tests for memory evolution contract added.
+- [x] Tests for idempotency, lineage edge cases, writer migration, and expiry added.
+- [x] Evolving memory schemas and repository helpers implemented.
+- [x] Reset/reseed CLI implemented.
+- [x] Bootstrap indexes updated.
+- [x] Active-only persistent-memory retrieval implemented.
+- [x] Memory Cache2 dependency implemented.
+- [x] Seed tooling updated.
+- [x] Legacy memory writers migrated or wrapped.
+- [x] Focused tests pass.
+- [x] Reset dry-run evidence recorded.
 
 ## Verification
 
@@ -461,40 +471,89 @@ venv\Scripts\python.exe -m scripts.manage_memory_knowledge sync
 
 ## Validation Against Current Implementation
 
-This stage has not been implemented in the current workspace.
+This stage has been implemented in the current workspace. Evidence is recorded
+below; the memory evolution package depends on `src/kazusa_ai_chatbot/db`
+interfaces for MongoDB access and does not operate Motor collections directly.
 
 | Area | Expected by plan | Current implementation | Status |
 |---|---|---|---|
-| `memory_evolution` package | Required | `src/kazusa_ai_chatbot/memory_evolution` does not exist | Not started |
-| Reset/reseed CLI | Required | `src/scripts/reset_memory_lore.py` does not exist | Not started |
-| Evolving memory schema | Required | No Stage 1b schema files exist | Not started |
-| Active-only persistent-memory retrieval | Required | Not validated by this Stage 1a work | Not started |
-| Cache2 memory invalidation | Required | Current persistent-memory Cache2 dependencies use `source="user_profile"` and must move to `source="memory"` | Not started |
-| Memory writer migration | Required | `save_memory`, `manage_memory_knowledge`, `insert_memory.py`, and `inject_knowledge.py` still write the old shape | Not started |
-| Reset semantics | Required | Existing seed sync can prune unmanaged global rows and does not preserve future `reflection_inferred` rows by contract | Not started |
-| ID and lineage validation | Required | No evolving IDs or lineage validation exists | Not started |
-| Embedding ownership | Required | Current `save_memory` computes embeddings, but the new repository contract does not exist | Not started |
+| `memory_evolution` package | Required | `src/kazusa_ai_chatbot/memory_evolution` exists with models, identity helpers, repository APIs, reset API, and README | Implemented |
+| Reset/reseed CLI | Required | `src/scripts/reset_memory_lore.py` exists and dry-run evidence is recorded | Implemented |
+| Evolving memory schema | Required | `memory_evolution.models` defines evolving documents, reset result, query, evidence, privacy, authority, status, and source-kind contracts | Implemented |
+| Active-only persistent-memory retrieval | Required | `db.memory.search_memory` defaults to active non-expired rows and LLM-facing tools expose no status/expiry filters | Implemented |
+| Cache2 memory invalidation | Required | Persistent-memory Cache2 dependencies use `source="memory"` and write APIs emit `CacheInvalidationEvent(source="memory")` | Implemented |
+| Memory writer migration | Required | `save_memory` wraps `memory_evolution`; seed sync delegates to reset; manual scripts use `save_memory` | Implemented |
+| Reset semantics | Required | Reset deletes seed-managed rows only, preserves `reflection_inferred` rows by source-kind, and shares a DB-interface write guard with runtime memory writes | Implemented |
+| ID and lineage validation | Required | Repository tests cover idempotency, active-only supersede, inactive rejection, and merge lineage behavior | Implemented |
+| Embedding ownership | Required | Public writes reject caller-supplied embeddings and compute embeddings through the DB interface | Implemented |
 | Reflection independence | Required | Current Stage 1a code does not import `memory_evolution`; Stage 1b still must not import `reflection_cycle` | Boundary currently preserved |
 
-Stage 1b implementation remains not started. This plan is signed off as the
-approved implementation contract. Stage 1c must not treat memory evolution APIs,
-reset/reseed behavior, active-only retrieval, or Cache2 memory invalidation as
-available until this plan has its own implementation evidence.
+Stage 1b implementation and database-apply evidence is recorded below. Stage
+1c may consume the memory evolution APIs after reviewing this evidence.
 
 ## Plan Sign-Off
 
 - Approved for implementation: 2026-05-05
 - Sign-off scope: Stage 1b plan only; no code or database changes are signed off here.
 - Sign-off basis: the plan now defines reset semantics, ID/idempotency, lineage, evidence refs, privacy review, authority values, embedding ownership, active-only retrieval, Cache2 invalidation, writer migration, and 1c handoff contracts.
-- Remaining gate: implementation evidence and verification results must be recorded before Stage 1c may consume the memory evolution APIs.
+- Implementation completed: 2026-05-05
+- Completion basis: focused tests, static boundary check, compile check, memory export, reset apply, post-apply dry-run, seed validation, and seed sync dry-run recorded below.
 
 ## Execution Evidence
 
 - Focused test results:
+  - `venv\Scripts\python.exe -m pytest tests\test_memory_evolution_module_boundary.py tests\test_memory_evolution_repository.py tests\test_memory_evolution_reset.py tests\test_memory_evolution_retrieval.py tests\test_memory_evolution_idempotency.py tests\test_memory_evolution_writer_migration.py tests\test_memory_knowledge_sync_runtime_lore.py tests\test_persistent_memory_cache_invalidation.py tests\test_memory_retrieval_tools.py tests\test_rag_helper_arg_boundaries.py tests\test_db.py::test_save_memory_wraps_evolving_insert_api tests\test_db.py::test_search_memory_keyword tests\test_db.py::test_search_memory_vector -q` passed: 56 passed after Stage 1c handoff scoring fixes.
+  - `venv\Scripts\python.exe -m py_compile src\kazusa_ai_chatbot\memory_evolution\__init__.py src\kazusa_ai_chatbot\memory_evolution\identity.py src\kazusa_ai_chatbot\memory_evolution\models.py src\kazusa_ai_chatbot\memory_evolution\repository.py src\kazusa_ai_chatbot\memory_evolution\reset.py src\kazusa_ai_chatbot\db\memory_evolution.py src\kazusa_ai_chatbot\db\memory.py src\scripts\reset_memory_lore.py src\scripts\manage_memory_knowledge.py src\scripts\export_memory.py` passed.
 - Reset/reseed dry-run summary:
+  - `venv\Scripts\python.exe src\scripts\reset_memory_lore.py --dry-run` returned `seed_rows_loaded=104`, `seed_rows_inserted=104`, `seed_rows_updated=0`, `seed_rows_unchanged=0`, `seed_rows_deleted=0`, `legacy_rows_deleted=104`, `runtime_rows_preserved=0`, `embeddings_computed=0`, `cache_invalidated=false`, `warnings=[]`.
+- Database apply summary:
+  - Pre-apply export: `venv\Scripts\python.exe -m scripts.export_memory --limit 1000 --output test_artifacts\memory_before_memory_evolution_stage1b_apply.json` wrote 104 memory rows.
+  - Apply reset: `venv\Scripts\python.exe src\scripts\reset_memory_lore.py --apply` returned `seed_rows_loaded=104`, `seed_rows_inserted=104`, `seed_rows_updated=0`, `seed_rows_unchanged=0`, `seed_rows_deleted=0`, `legacy_rows_deleted=104`, `runtime_rows_preserved=0`, `embeddings_computed=104`, `cache_invalidated=true`, `warnings=[]`.
+  - Post-apply dry-run: `venv\Scripts\python.exe src\scripts\reset_memory_lore.py --dry-run` returned `seed_rows_loaded=104`, `seed_rows_inserted=0`, `seed_rows_updated=0`, `seed_rows_unchanged=104`, `seed_rows_deleted=0`, `legacy_rows_deleted=0`, `runtime_rows_preserved=0`, `embeddings_computed=0`, `cache_invalidated=false`, `warnings=[]`.
 - Seed validation/sync summary:
+  - `venv\Scripts\python.exe -m scripts.manage_memory_knowledge validate` returned `valid: 104 entries`.
+  - Pre-apply `venv\Scripts\python.exe -m scripts.manage_memory_knowledge sync` returned `{"duplicates_deleted": 0, "inserted": 104, "pruned": 0, "unchanged": 0, "updated": 0}`.
+  - Post-apply `venv\Scripts\python.exe -m scripts.manage_memory_knowledge sync` returned `{"duplicates_deleted": 0, "inserted": 0, "pruned": 0, "unchanged": 104, "updated": 0}`.
 - Cache2 invalidation evidence:
+  - `tests\test_persistent_memory_cache_invalidation.py` passed, proving persistent-memory dependencies use `source="memory"` and a memory invalidation event evicts matching entries.
+  - `src\kazusa_ai_chatbot\memory_evolution\repository.py` emits `CacheInvalidationEvent(source="memory", ...)` from write APIs.
 - Writer migration grep evidence:
+  - `rg --glob "*.py" "get_db|db\.memory|\.find\(|aggregate\(|insert_one\(|update_one\(|update_many\(|delete_many\(|delete_one\(|replace_one\(|count_documents\(|get_text_embedding|pymongo|motor" src\kazusa_ai_chatbot\memory_evolution -n` returned no matches.
+  - Direct `db.memory.*` writes in `src` are confined to `src\kazusa_ai_chatbot\db\memory_evolution.py`, the DB interface layer.
+- Self-audit remediation evidence:
+  - Public write APIs and reset now share `src\kazusa_ai_chatbot\db\memory_evolution.py`'s write guard, so reset and runtime memory writes cannot run concurrently.
+  - `src\kazusa_ai_chatbot\db\memory.py::save_memory` imports `insert_memory_unit` at module scope from `memory_evolution.repository`, removing the runtime inline import while preserving the DB-interface boundary.
+  - Vector persistent-memory searches prefilter indexed lifecycle fields in `$vectorSearch.filter` and still post-filter expiry before returning results.
+  - The memory-maintenance skill source path was corrected to `personalities\knowledge\memory_seed.jsonl`.
+  - `git diff --check` passed after remediation.
+  - `venv\Scripts\python.exe -m scripts.manage_memory_knowledge validate` returned `valid: 104 entries`.
+  - Post-remediation `venv\Scripts\python.exe -m scripts.manage_memory_knowledge sync` returned `{"duplicates_deleted": 0, "inserted": 0, "pruned": 0, "unchanged": 104, "updated": 0}`.
+  - Post-remediation `venv\Scripts\python.exe src\scripts\reset_memory_lore.py --dry-run` returned `seed_rows_loaded=104`, `seed_rows_inserted=0`, `seed_rows_updated=0`, `seed_rows_unchanged=104`, `seed_rows_deleted=0`, `legacy_rows_deleted=0`, `runtime_rows_preserved=0`, `embeddings_computed=0`, `cache_invalidated=false`, `warnings=[]`.
+- Quality feedback remediation evidence:
+  - `save_memory` now infers `authority="reflection_promoted"` for extracted/inferred legacy source kinds unless the caller explicitly provides authority.
+  - Supersede and merge active-source checks now reuse the operation `write_time`, removing the extra clock read between validation and write.
+  - DB lifecycle update helpers allow only `status`, `updated_at`, and `expiry_timestamp`.
+  - Reset embedding generation for changed rows now runs concurrently before sequential DB replacement.
+  - Reset uses public repository helpers for normalization, equivalence, and cache invalidation.
+  - Keyword memory search no longer builds vector-only filter state.
+  - Added tests for `exclude_memory_unit_ids`, evidence-ref round-trip through `insert_memory_unit`, legacy extracted-source authority, and DB lifecycle update allowlisting.
+  - `venv\Scripts\python.exe -m py_compile src\kazusa_ai_chatbot\db\memory.py src\kazusa_ai_chatbot\db\memory_evolution.py src\kazusa_ai_chatbot\memory_evolution\repository.py src\kazusa_ai_chatbot\memory_evolution\reset.py tests\test_memory_evolution_repository.py tests\test_memory_evolution_retrieval.py tests\test_memory_evolution_writer_migration.py` passed.
+  - `git diff --check` passed.
+  - Boundary grep for MongoDB, Motor, direct collection methods, and raw embedding calls under Python files in `src\kazusa_ai_chatbot\memory_evolution` returned no matches.
+  - `venv\Scripts\python.exe -m scripts.manage_memory_knowledge validate` returned `valid: 104 entries`.
+  - `venv\Scripts\python.exe -m scripts.manage_memory_knowledge sync` returned `{"duplicates_deleted": 0, "inserted": 0, "pruned": 0, "unchanged": 104, "updated": 0}`.
+  - `venv\Scripts\python.exe -m scripts.reset_memory_lore --dry-run` returned `seed_rows_loaded=104`, `seed_rows_inserted=0`, `seed_rows_updated=0`, `seed_rows_unchanged=104`, `seed_rows_deleted=0`, `legacy_rows_deleted=0`, `runtime_rows_preserved=0`, `embeddings_computed=0`, `cache_invalidated=false`, `warnings=[]`.
+- Stage 1c handoff remediation evidence:
+  - `find_active_memory_units` now returns `(score, EvolvingMemoryDoc)` pairs so promotion logic can make merge/supersede decisions from vector similarity scores.
+  - `db.memory_evolution.find_active_memory_documents` now projects `vectorSearchScore` into the result tuple and still removes embeddings from returned documents.
+  - `tests\test_memory_evolution_retrieval.py` covers vector score propagation, metadata placeholder scores, and public repository score tuple preservation.
+  - `venv\Scripts\python.exe -m py_compile src\kazusa_ai_chatbot\db\memory_evolution.py src\kazusa_ai_chatbot\memory_evolution\__init__.py src\kazusa_ai_chatbot\memory_evolution\models.py src\kazusa_ai_chatbot\memory_evolution\repository.py tests\test_memory_evolution_retrieval.py` passed.
+  - `git diff --check` passed.
 - ID/lineage edge-case evidence:
+  - `tests\test_memory_evolution_repository.py` and `tests\test_memory_evolution_idempotency.py` passed, covering insert idempotency, supersede active-only behavior, inactive-target rejection, and merge lineage behavior.
 - Embedding call evidence:
+  - Dry-run reset computed `embeddings_computed=0`.
+  - Repository tests verify caller-supplied embeddings are rejected and embeddings are computed through the DB interface for changed writes.
 - Any deviations:
+  - Seed source path is `personalities/knowledge/memory_seed.jsonl` per user correction, replacing the older `knowledge/memory_seed.jsonl` references.
+  - Added `src\kazusa_ai_chatbot\db\memory_evolution.py` as the DB interface boundary and `tests\test_memory_evolution_module_boundary.py` to prevent `memory_evolution` from directly using MongoDB handles.

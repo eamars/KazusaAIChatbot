@@ -456,10 +456,8 @@ def test_build_memory_doc_with_expiry():
 
 
 @pytest.mark.asyncio
-async def test_save_memory_creates_embedding_and_inserts():
-    db = _mock_db()
-    db.memory.insert_one = AsyncMock()
-
+async def test_save_memory_wraps_evolving_insert_api():
+    """Legacy save_memory should delegate to the evolving memory API."""
     doc = build_memory_doc(
         memory_name="test_mem",
         content="some content",
@@ -469,19 +467,20 @@ async def test_save_memory_creates_embedding_and_inserts():
         confidence_note="stable fact",
     )
 
-    mock_embed = AsyncMock(return_value=[0.1, 0.2])
-    with _patched_get_db(db), _patched_embedding(mock=mock_embed):
+    insert_memory_unit = AsyncMock(return_value={})
+    with patch(
+        "kazusa_ai_chatbot.db.memory.insert_memory_unit",
+        insert_memory_unit,
+    ):
         await save_memory(doc, "2024-01-01T00:00:00Z")
 
-    # Verify structured embedding text
-    expected_text = "type:fact\nsource:conversation_extracted\ntitle:test_mem\ncontent:some content"
-    mock_embed.assert_called_once_with(expected_text)
-
-    db.memory.insert_one.assert_called_once()
-    payload = db.memory.insert_one.call_args[0][0]
+    insert_memory_unit.assert_awaited_once()
+    payload = insert_memory_unit.await_args.kwargs["document"]
+    assert payload["memory_unit_id"].startswith("manual_")
+    assert payload["lineage_id"] == payload["memory_unit_id"]
+    assert payload["version"] == 1
     assert payload["memory_name"] == "test_mem"
     assert payload["content"] == "some content"
-    assert payload["embedding"] == [0.1, 0.2]
     assert payload["memory_type"] == "fact"
     assert payload["source_kind"] == "conversation_extracted"
     assert payload["status"] == "active"
@@ -529,6 +528,10 @@ async def test_search_memory_vector():
     # Verify aggregate was called with $vectorSearch
     pipeline = db.memory.aggregate.call_args[0][0]
     assert "$vectorSearch" in pipeline[0]
+    vector_search = pipeline[0]["$vectorSearch"]
+    assert vector_search["filter"]["status"] == "active"
+    assert vector_search["limit"] > 3
+    assert pipeline[-1] == {"$limit": 3}
 
 
 # ── close_db ───────────────────────────────────────────────────────

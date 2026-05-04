@@ -209,7 +209,6 @@ async def test_search_persistent_memory_delegates_to_vector_memory_search() -> N
                 "source_global_user_id": "global-user-1",
                 "memory_type": "preference",
                 "source_kind": "conversation_extracted",
-                "status": "active",
             }
         )
 
@@ -220,9 +219,6 @@ async def test_search_persistent_memory_delegates_to_vector_memory_search() -> N
         source_global_user_id="global-user-1",
         memory_type=None,
         source_kind=None,
-        status="active",
-        expiry_before=None,
-        expiry_after=None,
     )
     assert result[0]["cosine_similarity"] == 0.85
     assert result[0]["content"] == "likes quiet conversation"

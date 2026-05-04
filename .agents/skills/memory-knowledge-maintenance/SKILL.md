@@ -11,7 +11,7 @@ through `Memory-search` and the persistent-memory helper agents.
 The design is intentionally simple:
 
 ```text
-knowledge/memory_seed.jsonl  -> source of truth
+personalities/knowledge/memory_seed.jsonl  -> source of truth
 MongoDB memory collection    -> indexed runtime copy
 RAG2 Memory-search           -> retrieval interface
 ```
@@ -25,7 +25,7 @@ existing persistent-memory search path can use it.
 Source file:
 
 ```powershell
-knowledge\memory_seed.jsonl
+personalities\knowledge\memory_seed.jsonl
 ```
 
 Maintenance CLI:

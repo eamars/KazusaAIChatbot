@@ -117,6 +117,24 @@ async def db_bootstrap() -> None:
     await db.memory.create_index(
         "source_global_user_id", name="memory_source_user_idx",
     )
+    await db.memory.create_index(
+        "memory_unit_id",
+        unique=True,
+        name="memory_unit_id_unique",
+        partialFilterExpression={"memory_unit_id": {"$exists": True}},
+    )
+    await db.memory.create_index(
+        [("lineage_id", 1), ("version", -1)],
+        name="memory_lineage_version",
+    )
+    await db.memory.create_index(
+        [("status", 1), ("memory_type", 1), ("source_kind", 1), ("updated_at", -1)],
+        name="memory_active_lookup",
+    )
+    await db.memory.create_index(
+        [("memory_name", 1), ("source_global_user_id", 1), ("source_kind", 1)],
+        name="memory_seed_sync_lookup",
+    )
 
     await db.user_memory_units.create_index(
         "unit_id",
@@ -150,6 +168,15 @@ async def db_bootstrap() -> None:
     ):
         try:
             filter_paths = None
+            if collection == "memory":
+                filter_paths = [
+                    "status",
+                    "memory_type",
+                    "source_kind",
+                    "source_global_user_id",
+                    "authority",
+                    "lineage_id",
+                ]
             if collection == "user_memory_units":
                 filter_paths = ["global_user_id", "unit_type", "status"]
             await enable_vector_index(collection, index_name, path=path, filter_paths=filter_paths)

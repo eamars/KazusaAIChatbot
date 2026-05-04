@@ -31,9 +31,12 @@ def _build_parser() -> argparse.ArgumentParser:
         Configured argument parser for shared-memory export.
     """
     parser = argparse.ArgumentParser(description="Export rows from the shared memory collection.")
+    parser.add_argument("--memory-unit-id", help="Filter by memory_unit_id.")
+    parser.add_argument("--lineage-id", help="Filter by lineage_id.")
     parser.add_argument("--source-global-user-id", help="Filter by source_global_user_id.")
     parser.add_argument("--memory-type", help="Filter by memory_type.")
     parser.add_argument("--source-kind", help="Filter by source_kind.")
+    parser.add_argument("--authority", help="Filter by authority.")
     parser.add_argument("--status", help="Filter by status.")
     parser.add_argument("--limit", type=int, default=100, help="Maximum rows to export.")
     parser.add_argument("--include-embeddings", action="store_true", help="Include vector embeddings in output.")
@@ -52,7 +55,15 @@ def _build_query(args: argparse.Namespace) -> dict[str, Any]:
         MongoDB query for the memory collection.
     """
     query: dict[str, Any] = {}
-    for argument_name in ("source_global_user_id", "memory_type", "source_kind", "status"):
+    for argument_name in (
+        "memory_unit_id",
+        "lineage_id",
+        "source_global_user_id",
+        "memory_type",
+        "source_kind",
+        "authority",
+        "status",
+    ):
         value = getattr(args, argument_name)
         if value:
             query[argument_name] = value
@@ -73,7 +84,13 @@ async def main() -> None:
 
     exclude_fields = [] if args.include_embeddings else list(DEFAULT_EXCLUDED_FIELDS)
     query_filter = _build_query(args)
-    identifier = args.source_global_user_id or args.memory_type or "all"
+    identifier = (
+        args.memory_unit_id
+        or args.lineage_id
+        or args.source_global_user_id
+        or args.memory_type
+        or "all"
+    )
     output_path = args.output or default_output_path("memory", identifier)
 
     try:
@@ -81,7 +98,7 @@ async def main() -> None:
         cursor = (
             db.memory
             .find(query_filter, projection_from_exclusions(exclude_fields))
-            .sort("timestamp", -1)
+            .sort([("updated_at", -1), ("timestamp", -1)])
             .limit(args.limit)
         )
         records = [dict(doc) for doc in await cursor.to_list(length=args.limit)]
@@ -89,7 +106,7 @@ async def main() -> None:
             "collection": "memory",
             "filter": query_filter,
             "limit": args.limit,
-            "sort": "timestamp descending",
+            "sort": "updated_at descending, timestamp descending",
         }
         write_json_export(
             output_path=output_path,

@@ -2,15 +2,43 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from typing import Any
 
 from kazusa_ai_chatbot.db._client import enable_vector_index, get_db, get_text_embedding
+from kazusa_ai_chatbot.db.memory_evolution import build_active_memory_filter
 from kazusa_ai_chatbot.db.schemas import MemoryDoc
+from kazusa_ai_chatbot.memory_evolution.repository import insert_memory_unit
+from kazusa_ai_chatbot.memory_evolution.models import (
+    MemoryAuthority,
+    MemorySourceKind,
+    MemoryStatus,
+)
+from kazusa_ai_chatbot.memory_evolution.identity import (
+    deterministic_memory_unit_id,
+    memory_embedding_source_text as evolving_memory_embedding_source_text,
+)
+
+
+def _now_iso() -> str:
+    current_time = datetime.now(timezone.utc).isoformat()
+    return current_time
 
 
 async def enable_memory_vector_index() -> None:
     """Create the vector search index on the ``memory`` collection."""
-    await enable_vector_index("memory", "memory_vector_index")
+    await enable_vector_index(
+        "memory",
+        "memory_vector_index",
+        filter_paths=[
+            "status",
+            "memory_type",
+            "source_kind",
+            "source_global_user_id",
+            "authority",
+            "lineage_id",
+        ],
+    )
 
 
 def memory_embedding_source_text(doc: MemoryDoc | dict) -> str:
@@ -22,39 +50,87 @@ def memory_embedding_source_text(doc: MemoryDoc | dict) -> str:
     Returns:
         Combined text matching the vectorization contract for ``memory`` rows.
     """
-    memory_name = str(doc.get("memory_name", ""))
-    content = str(doc.get("content", ""))
-    source_text = (
-        f"type:{doc.get('memory_type', '')}\n"
-        f"source:{doc.get('source_kind', '')}\n"
-        f"title:{memory_name}\n"
-        f"content:{content}"
-    )
+    source_text = evolving_memory_embedding_source_text(doc)
     return source_text
 
 
-async def save_memory(doc: MemoryDoc, timestamp: str) -> None:
-    """Insert a memory entry (append-only).
+def _legacy_memory_unit_id(doc: MemoryDoc) -> str:
+    """Build a stable id for callers still using ``save_memory``.
 
-    Each call creates a new document. Memories are append-only; deduplication
-    and superseding are handled at query time via the ``status`` field.
+    Args:
+        doc: Legacy memory document without evolving ids.
+
+    Returns:
+        Stable id derived from the legacy semantic payload.
+    """
+    memory_unit_id = str(doc.get("memory_unit_id", "")).strip()
+    if memory_unit_id:
+        return memory_unit_id
+
+    return_value = deterministic_memory_unit_id(
+        "manual",
+        [
+            str(doc.get("memory_name", "")).strip(),
+            str(doc.get("source_global_user_id", "")).strip(),
+            str(doc.get("source_kind", "")).strip(),
+            str(doc.get("memory_type", "")).strip(),
+            str(doc.get("content", "")).strip(),
+        ],
+    )
+    return return_value
+
+
+def _legacy_memory_authority(doc: MemoryDoc) -> str:
+    """Infer authority for callers still using ``save_memory``.
+
+    Args:
+        doc: Legacy memory document without an explicit evolving authority.
+
+    Returns:
+        Existing authority when provided, otherwise the schema authority lane
+        that best matches the legacy source kind.
+    """
+    authority = str(doc.get("authority", "")).strip()
+    if authority:
+        return authority
+
+    source_kind = str(doc.get("source_kind", "")).strip()
+    if source_kind in {
+        MemorySourceKind.CONVERSATION_EXTRACTED,
+        MemorySourceKind.REFLECTION_INFERRED,
+        MemorySourceKind.RELATIONSHIP_INFERRED,
+    }:
+        return MemoryAuthority.REFLECTION_PROMOTED
+
+    return_value = MemoryAuthority.MANUAL
+    return return_value
+
+
+async def save_memory(doc: MemoryDoc, timestamp: str) -> None:
+    """Insert a memory entry through the evolving memory-unit API.
+
+    Legacy callers that do not yet provide evolving ids receive a deterministic
+    id derived from the semantic payload so retries do not duplicate rows.
 
     Args:
         doc: A dict produced by :func:`build_memory_doc`.
         timestamp: ISO-8601 UTC timestamp for when the memory was created.
     """
-    db = await get_db()
+    if "embedding" in doc:
+        raise ValueError("save_memory callers must not provide embedding")
 
-    embedding_source_text = memory_embedding_source_text(doc)
-    embedding = await get_text_embedding(embedding_source_text)
-
+    memory_unit_id = _legacy_memory_unit_id(doc)
+    lineage_id = str(doc.get("lineage_id", "")).strip() or memory_unit_id
     payload = {
         **doc,
+        "memory_unit_id": memory_unit_id,
+        "lineage_id": lineage_id,
+        "version": doc.get("version", 1),
+        "authority": _legacy_memory_authority(doc),
         "timestamp": timestamp,
-        "embedding": embedding,
     }
 
-    await db.memory.insert_one(payload)
+    await insert_memory_unit(document=payload)
 
 
 async def get_active_promises(
@@ -99,7 +175,7 @@ async def search_memory(
     source_global_user_id: str | None = None,
     memory_type: str | None = None,
     source_kind: str | None = None,
-    status: str | None = None,
+    status: str | None = MemoryStatus.ACTIVE,
     expiry_before: str | None = None,
     expiry_after: str | None = None,
 ) -> list[tuple[float, MemoryDoc]]:
@@ -112,7 +188,8 @@ async def search_memory(
         source_global_user_id: Optional filter on origin user.
         memory_type: Optional filter (e.g. ``"fact"``, ``"promise"``).
         source_kind: Optional filter (e.g. ``"conversation_extracted"``).
-        status: Optional filter (e.g. ``"active"``).
+        status: Optional filter. Defaults to ``"active"``. Pass ``None`` only
+            for audit/debug reads that need every lifecycle state.
         expiry_before: Optional ISO-8601 upper bound on ``expiry_timestamp``.
         expiry_after: Optional ISO-8601 lower bound on ``expiry_timestamp``.
 
@@ -129,7 +206,9 @@ async def search_memory(
         extra_filter["memory_type"] = memory_type
     if source_kind:
         extra_filter["source_kind"] = source_kind
-    if status:
+    if status == MemoryStatus.ACTIVE:
+        extra_filter.update(build_active_memory_filter(_now_iso()))
+    elif status:
         extra_filter["status"] = status
     if expiry_before or expiry_after:
         expiry_cond: dict[str, str] = {}
@@ -158,16 +237,31 @@ async def search_memory(
     # method == "vector"
     query_embedding = await get_text_embedding(query)
     index_name = "memory_vector_index"
+    vector_filter: dict[str, str] = {}
+    if source_global_user_id:
+        vector_filter["source_global_user_id"] = source_global_user_id
+    if memory_type:
+        vector_filter["memory_type"] = memory_type
+    if source_kind:
+        vector_filter["source_kind"] = source_kind
+    if status == MemoryStatus.ACTIVE:
+        vector_filter["status"] = MemoryStatus.ACTIVE
+    elif status:
+        vector_filter["status"] = status
+
+    vector_search = {
+        "index": index_name,
+        "path": "embedding",
+        "queryVector": query_embedding,
+        "numCandidates": max(100, limit * 10),
+        "limit": max(100, limit * 10),
+    }
+    if vector_filter:
+        vector_search["filter"] = vector_filter
 
     pipeline: list[dict[str, Any]] = [
         {
-            "$vectorSearch": {
-                "index": index_name,
-                "path": "embedding",
-                "queryVector": query_embedding,
-                "numCandidates": limit * 10,
-                "limit": limit,
-            }
+            "$vectorSearch": vector_search
         },
         {"$addFields": {"score": {"$meta": "vectorSearchScore"}}},
     ]
@@ -176,6 +270,7 @@ async def search_memory(
         pipeline.append({"$match": extra_filter})
 
     pipeline.append({"$unset": "embedding"})
+    pipeline.append({"$limit": limit})
 
     cursor = collection.aggregate(pipeline)
     docs = await cursor.to_list(length=limit)

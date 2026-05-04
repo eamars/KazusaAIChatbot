@@ -145,7 +145,7 @@ def test_persistent_memory_search_args_do_not_stringify_container_fields() -> No
 
 
 def test_persistent_memory_search_args_accept_string_fields() -> None:
-    """Persistent-memory search args preserve valid supported string fields."""
+    """Persistent-memory search args preserve only LLM-facing supported fields."""
 
     args = persistent_memory_search_agent._normalize_args({
         "search_query": " tea preference ",
@@ -160,9 +160,6 @@ def test_persistent_memory_search_args_accept_string_fields() -> None:
     assert args == {
         "search_query": "tea preference",
         "source_global_user_id": "user-1",
-        "status": "active",
-        "expiry_before": "2026-04-29T00:00:00+00:00",
-        "expiry_after": "2026-04-28T00:00:00+00:00",
         "top_k": 3,
     }
 

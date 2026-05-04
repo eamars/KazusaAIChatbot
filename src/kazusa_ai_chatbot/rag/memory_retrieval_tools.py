@@ -273,9 +273,6 @@ async def search_persistent_memory(
     source_global_user_id: str | None = None,
     memory_type: str | None = None,
     source_kind: str | None = None,
-    status: str | None = None,
-    expiry_before: str | None = None,
-    expiry_after: str | None = None,
 ) -> list[dict]:
     """Search persistent memory by semantic similarity and optional metadata filters.
 
@@ -292,9 +289,6 @@ async def search_persistent_memory(
             compatibility and returned metadata, but not used as a search filter.
         source_kind (Optional): Deprecated for RAG retrieval; retained for
             compatibility and returned metadata, but not used as a search filter.
-        status (Optional): Filter by status, e.g. "active", "fulfilled", "expired", "superseded".
-        expiry_before (Optional): ISO-8601 upper bound for expiry_timestamp (exclusive <).
-        expiry_after (Optional): ISO-8601 lower bound for expiry_timestamp (exclusive >).
 
     Returns:
         Top-K memories close to the query, each with metadata and cosine similarity.
@@ -306,9 +300,6 @@ async def search_persistent_memory(
         source_global_user_id=source_global_user_id,
         memory_type=None,
         source_kind=None,
-        status=status,
-        expiry_before=expiry_before,
-        expiry_after=expiry_after,
     )
 
     # Rebuild return format to remove unwanted columns

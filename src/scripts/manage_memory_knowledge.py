@@ -10,18 +10,17 @@ import argparse
 import asyncio
 import json
 from dataclasses import dataclass
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 from scripts._db_export import configure_logging, configure_stdout, load_project_env
-from kazusa_ai_chatbot.db import close_db, get_db
-from kazusa_ai_chatbot.db._client import get_text_embedding
+from kazusa_ai_chatbot.db import close_db
+from kazusa_ai_chatbot.memory_evolution.reset import reset_memory_from_entries
 
-DEFAULT_KNOWLEDGE_PATH = Path("knowledge/memory_seed.jsonl")
+DEFAULT_KNOWLEDGE_PATH = Path("personalities/knowledge/memory_seed.jsonl")
 VALID_MEMORY_TYPES = {"fact", "narrative", "impression", "defense_rule"}
 VALID_SOURCE_KINDS = {"seeded_manual", "external_imported"}
-VALID_STATUSES = {"active", "fulfilled", "expired", "superseded"}
+VALID_STATUSES = {"active", "fulfilled", "expired", "superseded", "rejected"}
 MANAGED_FIELDS = (
     "memory_name",
     "content",
@@ -58,34 +57,6 @@ class KnowledgeEntry:
             str(self.data["source_global_user_id"]).strip(),
         )
         return return_value
-
-
-def _now_iso() -> str:
-    """Return a timezone-aware UTC timestamp string.
-
-    Returns:
-        ISO-8601 UTC timestamp.
-    """
-    return_value = datetime.now(timezone.utc).isoformat()
-    return return_value
-
-
-def _combined_embedding_text(entry: dict[str, Any]) -> str:
-    """Build the text payload embedded by ``db.memory.save_memory``.
-
-    Args:
-        entry: Normalized memory entry.
-
-    Returns:
-        Combined text used to produce the vector embedding.
-    """
-    return_value = (
-        f"type:{entry.get('memory_type', '')}\n"
-        f"source:{entry.get('source_kind', '')}\n"
-        f"title:{entry['memory_name']}\n"
-        f"content:{entry['content']}"
-    )
-    return return_value
 
 
 def _managed_payload(entry: dict[str, Any]) -> dict[str, Any]:
@@ -268,41 +239,6 @@ def _validate_or_raise(entries: list[KnowledgeEntry]) -> None:
         raise ValueError("\n".join(errors))
 
 
-def _entry_differs(db_doc: dict[str, Any], entry: dict[str, Any]) -> bool:
-    """Return whether the DB row differs from the managed source fields.
-
-    Args:
-        db_doc: MongoDB memory document.
-        entry: Normalized source entry.
-
-    Returns:
-        True when at least one managed field differs.
-    """
-    for field in MANAGED_FIELDS:
-        if db_doc.get(field) != entry[field]:
-            return True
-    return False
-
-
-async def _payload_with_embedding(entry: dict[str, Any], timestamp: str) -> dict[str, Any]:
-    """Build a MongoDB payload with a fresh embedding.
-
-    Args:
-        entry: Normalized source entry.
-        timestamp: Timestamp to store on the DB row.
-
-    Returns:
-        Full memory document payload.
-    """
-    embedding = await get_text_embedding(_combined_embedding_text(entry))
-    return_value = {
-        **_managed_payload(entry),
-        "timestamp": timestamp,
-        "embedding": embedding,
-    }
-    return return_value
-
-
 async def sync_entries(
     entries: list[KnowledgeEntry],
     *,
@@ -320,54 +256,21 @@ async def sync_entries(
     Returns:
         Counters describing planned or applied changes.
     """
-    db = await get_db()
-    counters = {
-        "inserted": 0,
-        "updated": 0,
-        "unchanged": 0,
-        "duplicates_deleted": 0,
-        "pruned": 0,
-    }
-    source_names = {entry.data["memory_name"] for entry in entries}
-
-    for entry in entries:
-        key_filter = {
-            "memory_name": entry.data["memory_name"],
-            "source_global_user_id": entry.data["source_global_user_id"],
-        }
-        existing = await db.memory.find(key_filter).sort("timestamp", 1).to_list(length=None)
-        timestamp = _now_iso()
-        if not existing:
-            counters["inserted"] += 1
-            if apply:
-                await db.memory.insert_one(await _payload_with_embedding(entry.data, timestamp))
-            continue
-
-        primary = existing[0]
-        duplicate_ids = [doc["_id"] for doc in existing[1:]]
-        if duplicate_ids:
-            counters["duplicates_deleted"] += len(duplicate_ids)
-            if apply:
-                await db.memory.delete_many({"_id": {"$in": duplicate_ids}})
-
-        if _entry_differs(primary, entry.data):
-            counters["updated"] += 1
-            if apply:
-                payload = await _payload_with_embedding(entry.data, timestamp)
-                await db.memory.update_one({"_id": primary["_id"]}, {"$set": payload})
-        else:
-            counters["unchanged"] += 1
-
+    result = await reset_memory_from_entries(
+        [entry.data for entry in entries],
+        dry_run=not apply,
+        prune_unmanaged_global=prune_unmanaged_global,
+    )
+    pruned = 0
     if prune_unmanaged_global:
-        prune_filter = {
-            "source_global_user_id": "",
-            "memory_name": {"$nin": sorted(source_names)},
-        }
-        prune_count = await db.memory.count_documents(prune_filter)
-        counters["pruned"] = prune_count
-        if apply and prune_count:
-            await db.memory.delete_many(prune_filter)
-
+        pruned = result["seed_rows_deleted"] + result["legacy_rows_deleted"]
+    counters = {
+        "inserted": result["seed_rows_inserted"],
+        "updated": result["seed_rows_updated"],
+        "unchanged": result["seed_rows_unchanged"],
+        "duplicates_deleted": 0,
+        "pruned": pruned,
+    }
     return counters
 
 

@@ -59,6 +59,10 @@ before any production memory write can be enabled.
 - Per-channel daily reflection may write `daily_channel` reflection-run documents but must not write global memory.
 - Global daily promotion may promote at most 1 global lore mutation and at most 1 character self-guidance mutation per character-local day after reviewing all eligible per-channel daily syntheses for that day.
 - Daily promotion must use Stage 1b memory APIs only.
+- Daily promotion must use Stage 1b `find_active_memory_units` score tuples for duplicate detection before insert, supersede, or merge decisions.
+- Daily promotion must construct `EvolvingMemoryDoc` documents directly. It must not call `build_memory_doc`, `save_memory`, or the legacy memory writer path.
+- Daily promotion must treat `RuntimeError("memory write or reset is already running")` from Stage 1b APIs as a deferred/skipped promotion for the next worker cycle, not as a fatal worker failure.
+- `decision="reject"` means rejecting the current promotion candidate only. Stage 1c must not retire, reject, or deactivate an existing active memory unit without a replacement because Stage 1b intentionally exposes no "mark existing rejected" API.
 - Production reflection must disable the Stage 1a evaluation fallback window. If no channel has a latest character message inside the monitor window, the production worker idles.
 - Production run documents must persist the raw scope triple `platform`, `platform_channel_id`, and `channel_type` in addition to any hashed `scope_ref`.
 - `source_message_refs` and `evidence_refs` must be threaded from the collected input rows and repository metadata, not reconstructed from LLM output.
@@ -83,6 +87,7 @@ before any production memory write can be enabled.
 - Add prompt/build provenance to all production reflection run documents.
 - Persist typed scope metadata with raw `platform`, `platform_channel_id`, and `channel_type` fields on every run document.
 - Persist `source_message_refs` from repository/input metadata alongside prompt-safe projections; do not ask the LLM to produce database join keys.
+- Use composite source message refs from the Stage 1a input rows: `platform`, `platform_channel_id`, `channel_type`, `timestamp`, and `role`. Leave `conversation_history_id` absent unless a future persistence-only DB projection explicitly adds it.
 - Add monitored-channel production index support on `conversation_history` for latest character-message lookup:
 
 ```text
@@ -99,6 +104,7 @@ conv_role_ts_platform_channel:
   - `self_guidance`: durable character response-behavior lessons that can guide future cognition without storing user-specific facts.
 - Add a one-by-one real LLM approval mini-gate for the new global promotion prompt before enabling memory writes.
 - Use Stage 1b `memory_evolution` APIs for insert/supersede/merge.
+- Use Stage 1b `find_active_memory_units` semantic scores to decide whether validated candidates are similar enough to supersede or merge instead of inserting a new lineage.
 - Add `REFLECTION_CYCLE_ENABLED`, `REFLECTION_CONTEXT_ENABLED`, `REFLECTION_LORE_PROMOTION_ENABLED`, and `REFLECTION_SELF_GUIDANCE_PROMOTION_ENABLED` flags.
 - Add service worker lifecycle and idle checks.
 - Add prompt-facing promoted reflection context only behind `REFLECTION_CONTEXT_ENABLED`.
@@ -189,6 +195,10 @@ normal chat
 | Daily self-guidance promotion | Max 1 per character-local day | Lets behavior improve without storing user image or raw hourly summaries. |
 | Raw hourly context | Forbidden for live cognition | Hourly records are evidence for daily synthesis, not prompt-facing memory. |
 | Memory writer | Stage 1b API only | Keeps storage rules centralized. |
+| Similarity decision input | Use Stage 1b score tuples | Promotion must not re-fetch embeddings or silently insert every candidate as a new lineage when similar active memory exists. |
+| Lock contention | Defer promotion to next cycle | Stage 1b fail-fast locking protects reset/runtime writes; worker should record skipped/deferred run state and continue unrelated work. |
+| Legacy memory path | Forbidden for 1c writers | 1c must construct `EvolvingMemoryDoc` directly so authority, evidence, privacy, lineage, and source-kind stay explicit. |
+| Candidate rejection | Reject only the candidate | Stage 1b has no API to retire existing active lore without replacement, and reflection must not deactivate durable lore solely from a reject decision. |
 | Worker | Feature-flagged | Protects live chat while enabling controlled rollout. |
 | Monitoring eligibility | Latest character message in last 24 hours | No counter, state variable, or dedicated monitoring collection is needed. |
 | Hourly production slot | Every message-bearing hour in monitored channels | User-only and assistant-only hours still provide reflection evidence; skip only empty hours. |
@@ -269,6 +279,11 @@ Run-kind ownership:
 `ReflectionMessageRef` values are produced by repository/input plumbing. They
 are not model-facing prompt fields and must not be reconstructed from
 `topic_summary`, `day_summary`, or any other LLM output.
+Because Stage 1a prompt-facing message projection does not include MongoDB
+`_id`, Stage 1c must use the composite fields already present in
+`ReflectionMessageRef`. `conversation_history_id` is optional and must remain
+absent unless a future DB interface adds a persistence-only projection that is
+kept out of the LLM prompt payload.
 
 Global promotion prompt input shape:
 
@@ -309,6 +324,24 @@ Promotion requires for both lanes:
 - user details removed
 - private-detail risk not high
 - empty `source_global_user_id` in memory write
+
+Before any memory write, deterministic promotion code must call
+`find_active_memory_units` with a semantic query built from the sanitized
+candidate and `exclude_memory_unit_ids` when replacing or re-checking a known
+unit. The returned `(score, memory_doc)` pairs are the only similarity signal
+approved for deciding:
+
+- `promote_new`: no active match meets the merge/supersede threshold,
+- `supersede`: one active same-lineage match meets the threshold and the new
+  content should replace it,
+- `merge`: multiple active matches meet the threshold and the new content
+  should merge them,
+- `reject`: the candidate is rejected and no existing memory unit is mutated.
+
+Do not call lower-level DB helpers for similarity search. Do not fetch stored
+embeddings to compute cosine similarity in Python. Do not default to
+`promote_new` when the scored search fails; record a skipped/deferred promotion
+run instead.
 
 Additional `lore` requirements:
 
@@ -400,6 +433,7 @@ The worker must defer while chat is queued or processing.
 6. Add global promotion prompt, promotion validators, and dry-run artifact output. Do not enable memory writes yet.
 7. Run the global promotion prompt real LLM mini-gate one case at a time and record inspection evidence.
 8. Add two-lane promotion integration using Stage 1b memory APIs.
+   - Include tests for scored similarity decisions and lock-contention deferral.
 9. Add service worker and feature flags.
 10. Add prompt-facing promoted reflection context behind flag; raw hourly summaries must not be retrievable by live cognition.
 11. Run focused tests.
@@ -447,6 +481,31 @@ python src\scripts\run_reflection_cycle.py promote --dry-run
 
 Run MongoDB explain for the monitored-channel selector and confirm the production index is used.
 
+Run a source grep proving Stage 1c writers do not use the legacy memory path:
+
+```powershell
+rg "build_memory_doc|save_memory" src\kazusa_ai_chatbot\reflection_cycle src\scripts\run_reflection_cycle.py
+```
+
+Allowed result: no matches in Stage 1c production writer code.
+
+## Operational Steps
+
+Existing Atlas vector search indexes cannot be edited in place. Stage 1b's
+`enable_memory_vector_index` declares scalar filter paths for active memory
+search, but deployments that already have `memory_vector_index` must plan a
+manual Atlas drop-and-recreate operation for that index during rollout. Do not
+treat the bootstrap helper as proof that an existing Atlas index definition was
+modified.
+
+Before enabling promotion writes:
+
+- inspect the existing `memory_vector_index` definition,
+- recreate it with the Stage 1b filter paths if needed,
+- run a semantic `find_active_memory_units` dry-run and confirm scores are
+  present,
+- keep promotion writes disabled if vector scores are unavailable.
+
 ## Acceptance Criteria
 
 - Stage 1c refuses to proceed without recorded Stage 1a approval and Stage 1b completion evidence.
@@ -460,6 +519,11 @@ Run MongoDB explain for the monitored-channel selector and confirm the productio
 - Hourly, daily-channel, and global-promotion production run documents include prompt/build provenance.
 - Run documents persist raw scope triples in addition to hashed scope refs.
 - Evidence refs and source message refs are repository/input-derived, not LLM-derived.
+- Source message refs use composite message identity fields unless a future DB interface explicitly provides `conversation_history_id`.
+- Promotion duplicate detection uses Stage 1b similarity scores before choosing `promote_new`, `supersede`, or `merge`.
+- Memory write lock contention records a skipped/deferred promotion and does not fail the whole worker pass.
+- Stage 1c writers construct `EvolvingMemoryDoc` directly and do not call `build_memory_doc` or `save_memory`.
+- `decision="reject"` never mutates an existing active memory unit.
 - One failed hourly slot, daily channel, or global promotion run records a failed/skipped run document and does not stop unrelated work in the same worker pass.
 - Global promotion writes at most one lore mutation and at most one self-guidance mutation through Stage 1b APIs per character-local day.
 - Private/user-specific details are rejected before all global memory writes.
@@ -478,7 +542,7 @@ blocked.
 | Entry Gate Or Component | Expected by plan | Current implementation | Status |
 |---|---|---|---|
 | Stage 1a approval | Required before coding | Stage 1a plan now requires monitored-channel selection and message-bearing hour slots; implementation and live approval must be refreshed | Blocked |
-| Stage 1b completion | Required before coding | `memory_evolution` package and reset CLI do not exist | Blocked |
+| Stage 1b completion | Required before coding | `memory_evolution` package, reset CLI, active-only retrieval, scored semantic search, and completion evidence exist in the current workspace | Ready after 1b review |
 | `character_reflection_runs` repository | Required | `reflection_cycle/repository.py` does not exist | Not started |
 | Production worker | Required | `reflection_cycle/worker.py` does not exist | Not started |
 | Two-lane promotion | Required | `reflection_cycle/promotion.py` does not exist | Not started |

@@ -629,19 +629,19 @@ def _build_persistent_memory_cache_key(
 
 
 def _build_persistent_memory_dependencies(args: dict[str, Any]) -> list[CacheDependency]:
-    """Build user-profile invalidation dependencies from winning memory-search args.
+    """Build memory invalidation dependencies from winning memory-search args.
 
     Uses ``source_global_user_id`` when present (narrows to one user's memories).
-    An empty string acts as wildcard — any user-profile write invalidates the entry.
+    An empty string acts as wildcard so any shared-memory write invalidates the entry.
 
     Args:
         args: Winning generator args (after any subject-user adjustments).
 
     Returns:
-        Single dependency on user-profile writes for the effective user scope.
+        Single dependency on shared-memory writes for the effective user scope.
     """
     global_user_id = str(args.get("source_global_user_id", "")).strip()
-    return_value = [CacheDependency(source="user_profile", global_user_id=global_user_id)]
+    return_value = [CacheDependency(source="memory", global_user_id=global_user_id)]
     return return_value
 
 
