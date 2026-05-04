@@ -58,6 +58,14 @@ stage 1b memory evolution/search/seeding
 stage 1c integration of approved 1a and completed 1b
 ```
 
+## Current Validation Snapshot
+
+| Stage | Current implementation state | Approval state |
+|---|---|---|
+| Stage 1a | Read-only module, DB interface, prompt contracts, CLI, ICD, deterministic tests, and real 48-hour monitored-channel artifact are implemented in the workspace | Completed and signed off in `character_reflection_cycle_stage1a_plan.md` |
+| Stage 1b | No `memory_evolution` package or reset/reseed CLI exists in the workspace | Not started and unsigned |
+| Stage 1c | No production repository, worker, lore-promotion module, production CLI, or feature flags exist in the workspace | Blocked on Stage 1a approval and Stage 1b completion |
+
 ## Design Decisions
 
 | Topic | Decision | Rationale |
@@ -93,4 +101,3 @@ None. This file authorizes no code changes.
   - `development_plans/character_reflection_cycle_stage1a_plan.md`
   - `development_plans/memory_evolution_stage1b_plan.md`
   - `development_plans/reflection_memory_integration_stage1c_plan.md`
-

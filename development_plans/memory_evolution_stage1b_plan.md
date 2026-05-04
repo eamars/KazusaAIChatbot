@@ -270,6 +270,23 @@ venv\Scripts\python.exe -m scripts.manage_memory_knowledge sync
 - Cache2 persistent-memory helper entries can be invalidated by `source="memory"`.
 - No reflection, LLM, conversation-history, or external data is used.
 
+## Validation Against Current Implementation
+
+This stage has not been implemented in the current workspace.
+
+| Area | Expected by plan | Current implementation | Status |
+|---|---|---|---|
+| `memory_evolution` package | Required | `src/kazusa_ai_chatbot/memory_evolution` does not exist | Not started |
+| Reset/reseed CLI | Required | `src/scripts/reset_memory_lore.py` does not exist | Not started |
+| Evolving memory schema | Required | No Stage 1b schema files exist | Not started |
+| Active-only persistent-memory retrieval | Required | Not validated by this Stage 1a work | Not started |
+| Cache2 memory invalidation | Required | Not validated by this Stage 1a work | Not started |
+| Reflection independence | Required | Current Stage 1a code does not import `memory_evolution`; Stage 1b still must not import `reflection_cycle` | Boundary currently preserved |
+
+Stage 1b remains unsigned. Stage 1c must not treat memory evolution APIs,
+reset/reseed behavior, active-only retrieval, or Cache2 memory invalidation as
+available until this plan has its own implementation evidence.
+
 ## Execution Evidence
 
 - Focused test results:
@@ -277,4 +294,3 @@ venv\Scripts\python.exe -m scripts.manage_memory_knowledge sync
 - Seed validation/sync summary:
 - Cache2 invalidation evidence:
 - Any deviations:
-

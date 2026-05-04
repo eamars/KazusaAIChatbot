@@ -6,7 +6,7 @@
 - Plan class: large
 - Status: draft
 - Mandatory skills: `local-llm-architecture`, `development-plan-writing`, `memory-knowledge-maintenance`, `no-prepost-user-input`, `py-style`, `test-style-and-execution`, `database-data-pull`
-- Overall cutover strategy: bigbang integration after entry criteria. Stage 1c adds production reflection persistence, active-scope indexing, worker wiring, and daily lore promotion in one approved integration path rather than preserving a parallel candidate-only production mode.
+- Overall cutover strategy: bigbang integration after entry criteria. Stage 1c adds production reflection persistence, monitored-channel indexing, worker wiring, and daily lore promotion in one approved integration path rather than preserving a parallel candidate-only production mode.
 - Highest-risk areas: promoting poor reflection output, private leakage, live cognition latency, memory poisoning, stale Cache2, and bypassing the Stage 1a approval gate.
 - Acceptance criteria: Stage 1c starts only after Stage 1a real LLM approval and Stage 1b completion; production reflection writes to `character_reflection_runs`; daily promotion writes through Stage 1b memory APIs only; private/user-specific details are rejected; live chat remains priority; autonomous messaging remains out of scope.
 
@@ -35,7 +35,7 @@ Stage 1c ties them together for production use.
 
 - After any automatic context compaction, the active agent must reread this entire plan before continuing implementation, verification, handoff, or final reporting.
 - After signing off any major checklist stage, the active agent must reread this entire plan before starting the next stage.
-- Do not start Stage 1c until Stage 1a has explicit approval evidence from real LLM last-24h evaluation.
+- Do not start Stage 1c until Stage 1a has explicit approval evidence from real LLM monitored-channel evaluation.
 - Do not start Stage 1c until Stage 1b focused tests pass and memory reset/reseed behavior is complete.
 - Stage 1c must not change Stage 1b memory schema except through a separate approved plan.
 - Stage 1c must not change Stage 1a approved core observational fields or prompt budgets except through a separate approved plan.
@@ -54,14 +54,14 @@ Stage 1c ties them together for production use.
 ## Must Do
 
 - Add production `character_reflection_runs` persistence.
-- Add active-scope production index on `conversation_history`:
+- Add monitored-channel production index support on `conversation_history` for latest character-message lookup:
 
 ```text
 conv_role_ts_platform_channel:
   [("role", 1), ("timestamp", -1), ("platform", 1), ("platform_channel_id", 1)]
 ```
 
-- Promote Stage 1a read-only selector/projection and approved core reflection contracts into a production runtime that can write reflection-run documents.
+- Promote Stage 1a read-only monitored-channel selector, message-bearing hour-slot projection, and approved core reflection contracts into a production runtime that can write reflection-run documents.
 - Add Stage 1c-specific lore-candidate fields to the production hourly output contract.
 - Add daily lore-promotion decision and validation.
 - Use Stage 1b `memory_evolution` APIs for insert/supersede/merge.
@@ -95,7 +95,7 @@ python src\scripts\run_reflection_cycle.py lore-promotion --dry-run
 |---|---|---|
 | Reflection persistence | bigbang | Production reflection uses DB run documents, not local artifacts. |
 | Memory writes | bigbang | Daily promotion uses Stage 1b memory APIs; no candidate-only production write path. |
-| Active-scope index | bigbang | Add production index for reflection selector. |
+| Monitored-channel index | bigbang | Add production index support for latest character-message lookup. |
 | Service worker | compatible | Off by default via feature flag. |
 | Prompt-facing context | compatible | Off by default via feature flag. |
 | Autonomous messaging | compatible | Not implemented. |
@@ -113,12 +113,13 @@ python src\scripts\run_reflection_cycle.py lore-promotion --dry-run
 
 ```text
 hourly worker
-  -> selected assistant-active scopes
+  -> select monitored channels by latest character message time
+  -> build message-bearing hourly slots
   -> reflection LLM
-  -> character_reflection_runs
+  -> character_reflection_runs hourly_slot docs
 
 daily worker
-  -> daily reflection over hourly docs
+  -> daily reflection over per-channel hourly_slot docs
   -> 0 or 1 lore promotion decision
   -> Stage 1b memory_evolution API
   -> memory Cache2 invalidation
@@ -133,24 +134,28 @@ normal chat
 | Topic | Decision | Rationale |
 |---|---|---|
 | Entry gate | Requires 1a approval and 1b completion | Prevents integrating unproven reflection or incomplete memory APIs. |
-| Production reflection storage | `character_reflection_runs` | Gives audit trail for daily decisions. |
+| Production reflection storage | `character_reflection_runs` | Gives audit trail for hourly slots and daily decisions. |
 | 1a core fields | Preserve approved observational fields | Keeps 1c from changing evaluation criteria after approval. |
 | Lore fields | Additive in 1c | Lore-candidate fields are integration-specific and need 1c tests. |
 | Hourly memory writes | Forbidden | Keeps short-window noise out of lore. |
 | Daily promotion | Max 1 | Keeps lore high-signal. |
 | Memory writer | Stage 1b API only | Keeps storage rules centralized. |
 | Worker | Feature-flagged | Protects live chat while enabling controlled rollout. |
+| Monitoring eligibility | Latest character message in last 24 hours | No counter, state variable, or dedicated monitoring collection is needed. |
+| Hourly production slot | Every message-bearing hour in monitored channels | User-only and assistant-only hours still provide reflection evidence; skip only empty hours. |
 
 ## Data Contracts
 
 ```python
 class CharacterReflectionRunDoc(TypedDict, total=False):
     run_id: str
-    run_kind: Literal["hourly_scope", "daily_global"]
+    run_kind: Literal["hourly_slot", "daily_global"]
     status: Literal["succeeded", "failed", "skipped", "dry_run"]
     scope: dict
     window_start: str
     window_end: str
+    hour_start: str
+    hour_end: str
     character_local_date: str
     source_message_refs: list[dict]
     source_reflection_run_ids: list[str]
@@ -219,12 +224,12 @@ Promotion requires:
 1. Verify Stage 1a approval artifact and Stage 1b completion evidence.
 2. Add tests for reflection repository, promotion validation, and worker idle behavior.
 3. Add `character_reflection_runs` schema/indexes and repository.
-4. Add production runtime using Stage 1a approved selector/projection/core prompts.
+4. Add production runtime using Stage 1a approved monitored-channel selector, hour-slot projection, and core prompts.
 5. Add Stage 1c lore-candidate fields and lore-promotion integration using Stage 1b memory APIs.
 6. Add service worker and feature flags.
 7. Add prompt-facing reflection context behind flag.
 8. Run focused tests.
-9. Run dry-run against last-24h data.
+9. Run dry-run against monitored-channel data.
 10. Enable writes only after dry-run evidence is reviewed.
 
 ## Progress Checklist
@@ -254,12 +259,14 @@ python src\scripts\run_reflection_cycle.py daily --dry-run
 python src\scripts\run_reflection_cycle.py lore-promotion --dry-run
 ```
 
-Run MongoDB explain for the active-scope selector and confirm the production index is used.
+Run MongoDB explain for the monitored-channel selector and confirm the production index is used.
 
 ## Acceptance Criteria
 
 - Stage 1c refuses to proceed without recorded Stage 1a approval and Stage 1b completion evidence.
+- Monitored-channel selection uses latest character message time and does not rely on counters or a dedicated monitoring collection.
 - Hourly production reflection writes only `character_reflection_runs`.
+- Hourly production reflection evaluates every message-bearing hour in monitored channels and skips only empty hours.
 - Daily production reflection writes at most one lore mutation through Stage 1b APIs.
 - Private/user-specific details are rejected before global memory writes.
 - Character agreement and boundary assessment are required.
@@ -267,12 +274,44 @@ Run MongoDB explain for the active-scope selector and confirm the production ind
 - Prompt-facing reflection context is disabled by default and bounded when enabled.
 - No autonomous messages are sent.
 
+## Validation Against Current Implementation
+
+This stage has not been implemented in the current workspace and remains
+blocked.
+
+| Entry Gate Or Component | Expected by plan | Current implementation | Status |
+|---|---|---|---|
+| Stage 1a approval | Required before coding | Stage 1a plan now requires monitored-channel selection and message-bearing hour slots; implementation and live approval must be refreshed | Blocked |
+| Stage 1b completion | Required before coding | `memory_evolution` package and reset CLI do not exist | Blocked |
+| `character_reflection_runs` repository | Required | `reflection_cycle/repository.py` does not exist | Not started |
+| Production worker | Required | `reflection_cycle/worker.py` does not exist | Not started |
+| Lore promotion | Required | `reflection_cycle/lore_promotion.py` does not exist | Not started |
+| Production CLI | Required | `src/scripts/run_reflection_cycle.py` does not exist | Not started |
+| Feature flags | Required | `REFLECTION_CYCLE_ENABLED`, `REFLECTION_CONTEXT_ENABLED`, and `REFLECTION_LORE_PROMOTION_ENABLED` are not implemented | Not started |
+| Autonomous messages | Deferred | No autonomous message path was added | Boundary preserved |
+| `/chat` coupling | Forbidden | Stage 1a did not modify `/chat`; Stage 1c must preserve this unless a future Stage 2 plan changes it | Boundary preserved |
+
+Current Stage 1a decisions that Stage 1c must respect:
+
+- Stage 1a public entry points are exported from `kazusa_ai_chatbot.reflection_cycle`.
+- Stage 1a selector must read MongoDB only through `db.conversation_reflection`.
+- Stage 1a monitored-channel selection must be based on latest character message time, not assistant/user activity counters.
+- Stage 1a hourly slots must include every message-bearing hour in monitored channels and skip only empty hours.
+- Stage 1a prompt payload keys are stable English machine-facing keys.
+- Stage 1a generated free-text language is controlled by a centralized Chinese language-policy block.
+- Stage 1a DB message reads use an allowlist projection and may include only bounded attachment descriptions.
+- Stage 1a daily synthesis receives compact active-hour slots, not raw transcripts or full hourly reflection objects.
+- Stage 1a output remains a local-artifact evaluation contract, not a production storage contract.
+
+Stage 1c remains unsigned. The first Stage 1c checklist item cannot be ticked
+until Stage 1a live approval and Stage 1b completion evidence are both recorded.
+
 ## Execution Evidence
 
 - Stage 1a approval artifact:
 - Stage 1b completion evidence:
 - Focused test results:
-- Last-24h dry-run summary:
+- Monitored-channel dry-run summary:
 - MongoDB explain summary:
 - Lore-promotion dry-run summary:
 - Any deviations:

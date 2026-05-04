@@ -60,6 +60,11 @@ from kazusa_ai_chatbot.db.conversation import (
     search_conversation_history,
     update_conversation_attachment_descriptions,
 )
+from kazusa_ai_chatbot.db.conversation_reflection import (
+    explain_monitored_channel_query,
+    list_recent_character_message_channels,
+    list_reflection_scope_messages,
+)
 
 # ── Users (identity + profile + affinity) ─────────────────────────
 from kazusa_ai_chatbot.db.users import (
@@ -135,6 +140,9 @@ __all__ = [
     # Conversation
     "aggregate_conversation_by_user", "get_conversation_history", "save_conversation",
     "search_conversation_history", "update_conversation_attachment_descriptions",
+    "explain_monitored_channel_query",
+    "list_recent_character_message_channels",
+    "list_reflection_scope_messages",
     # Users
     "add_suspected_alias", "backfill_character_conversation_identity",
     "create_user_profile",
