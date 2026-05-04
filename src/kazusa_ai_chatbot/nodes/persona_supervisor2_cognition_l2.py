@@ -313,8 +313,8 @@ _COGNITION_CONSCIOUSNESS_PROMPT = """\
 }}
 """
 _conscious_llm = get_llm(
-    temperature=0.2,
-    top_p=0.8,
+    temperature=0.3,
+    top_p=0.85,
     model=COGNITION_LLM_MODEL,
     base_url=COGNITION_LLM_BASE_URL,
     api_key=COGNITION_LLM_API_KEY,

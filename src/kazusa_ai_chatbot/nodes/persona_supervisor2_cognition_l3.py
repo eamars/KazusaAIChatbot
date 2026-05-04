@@ -223,8 +223,8 @@ _CONTEXTUAL_AGENT_PROMPT = """\
 }}
 """
 _contextual_agent_llm = get_llm(
-    temperature=0.4,
-    top_p=0.8,
+    temperature=0.45,
+    top_p=0.85,
     model=COGNITION_LLM_MODEL,
     base_url=COGNITION_LLM_BASE_URL,
     api_key=COGNITION_LLM_API_KEY,
@@ -598,7 +598,7 @@ logical_stance + character_intent
 - 所有内容选择规则只按上方“依赖树”和“解析步骤”执行，不要在输出格式示例里推断额外规则。
 """
 _content_anchor_agent_llm = get_llm(
-    temperature=0.4,
+    temperature=0.45,
     top_p=0.85,
     model=COGNITION_LLM_MODEL,
     base_url=COGNITION_LLM_BASE_URL,

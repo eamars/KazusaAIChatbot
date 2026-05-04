@@ -223,12 +223,12 @@ _DIALOG_GENERATOR_PROMPT = """\
 }}
 """
 _dialog_generator_llm = get_llm(
-    temperature=0.75,
-    top_p=0.85,
+    temperature=0.65,
+    top_p=0.8,
     model=DIALOG_GENERATOR_LLM_MODEL,
     base_url=DIALOG_GENERATOR_LLM_BASE_URL,
     api_key=DIALOG_GENERATOR_LLM_API_KEY,
-    presence_penalty=0.35,
+    presence_penalty=0.25,
 )
 
 
