@@ -2,13 +2,13 @@
 
 ## Summary
 
-- Goal: Upgrade the existing global persistent `memory` collection, search path, Cache2 dependencies, and seed tooling into an evolving active/superseded memory-unit model without using reflection output, conversation data, LLM calls, or external signals.
+- Goal: Upgrade the existing global persistent `memory` collection, search path, Cache2 dependencies, and seed tooling into an evolving active/superseded memory-unit model with explicit reset, lineage, evidence, privacy, embedding, and cache-invalidation contracts for Stage 1c.
 - Plan class: large
-- Status: draft
+- Status: approved
 - Mandatory skills: `memory-knowledge-maintenance`, `development-plan-writing`, `py-style`, `test-style-and-execution`, `database-data-pull`
 - Overall cutover strategy: bigbang within the `memory` subsystem only. The existing global `memory` rows may be erased and re-seeded from current codebase seed files into the new evolving-unit schema.
-- Highest-risk areas: destructive memory reset, persistent-memory retrieval regressions, seed sync deleting runtime lore later, vector index filter behavior, and stale Cache2 persistent-memory results.
-- Acceptance criteria: memory reset/reseed works from current repository seed data only; persistent-memory search reads active rows by default; memory rows support insert/supersede/merge lineage; Cache2 has memory invalidation; no reflection, LLM, conversation-history, or external signal is accepted.
+- Highest-risk areas: destructive memory reset, accidental deletion of future reflection-inferred lore, duplicate writes on retry, lineage corruption, embedding cost during reseed, persistent-memory retrieval regressions, vector index filter behavior, stale Cache2 persistent-memory results, and unmanaged legacy memory writers.
+- Acceptance criteria: memory reset/reseed works from current repository seed data only and preserves runtime `reflection_inferred` rows after cutover; persistent-memory search reads active non-expired rows by default; memory rows support validated insert/supersede/merge lineage; IDs are idempotent; embeddings are computed inside the memory API; Cache2 memory invalidation is synchronous from the caller perspective; no reflection, conversation-history, generation LLM, or external signal is accepted.
 
 ## Context
 
@@ -21,6 +21,19 @@ The current codebase has:
 - `knowledge/memory_seed.jsonl` as curated seed lane when present.
 - `scripts.manage_memory_knowledge` as local seed maintenance tooling.
 - Persistent-memory helper caches whose dependencies currently need memory-specific invalidation.
+
+Current direct writers into the `memory` collection are:
+
+- `src/kazusa_ai_chatbot/db/memory.py::save_memory`
+- `src/scripts/manage_memory_knowledge.py::sync_entries`
+- `src/scripts/insert_memory.py`
+- `src/scripts/inject_knowledge.py`
+- test-only/live-test helpers that call `save_memory`
+
+Stage 1b must migrate these writers to the new `memory_evolution` API or make
+them thin wrappers around it. No direct `db.memory.insert_one`,
+`db.memory.update_one`, or `db.memory.delete_many` writer may remain outside the
+seed/reset implementation after cutover.
 
 Stage 1b must be independent from Stage 1a and Stage 1c.
 
@@ -38,12 +51,17 @@ Stage 1b must be independent from Stage 1a and Stage 1c.
 - After signing off any major checklist stage, the active agent must reread this entire plan before starting the next stage.
 - Stage 1b must not import or call `reflection_cycle`.
 - Stage 1b must not read `conversation_history`, `conversation_episode_state`, `user_memory_units`, or `character_state` for memory content.
-- Stage 1b must not call any LLM.
+- Stage 1b must not call any generation LLM. Embedding calls through the existing embedding endpoint are allowed only inside memory write/search APIs and only when `dry_run=False`.
 - Stage 1b must not use web search or external data.
 - Stage 1b may use only current codebase seed files and existing `memory` DB rows for dry-run reporting.
-- Stage 1b cutover is bigbang for global `memory`: pre-cutover DB rows do not need preservation.
+- Stage 1b cutover is bigbang for legacy global `memory`: pre-cutover DB rows do not need preservation unless re-created from current codebase seed data.
 - Stage 1b must not add lore promotion, reflection candidates, or daily reflection.
-- Persistent-memory retrieval must default to `status="active"`.
+- `reset_memory_from_seed` must reset only seed-managed global rows with `source_kind in {"seeded_manual", "external_imported"}` after cutover. It must preserve `source_kind="reflection_inferred"` runtime rows.
+- `reset_memory_from_seed` is offline/admin-only. It must not run concurrently with runtime memory writes; implementation must use a lock, guard document, or fail-fast mutual exclusion.
+- Public insert/supersede/merge APIs must compute embeddings internally and must not require callers such as Stage 1c to supply embeddings.
+- Public insert/supersede/merge APIs must validate caller-supplied `memory_unit_id` and `lineage_id`; they must not silently auto-generate retry-unsafe IDs for runtime writes.
+- Public write APIs must emit Cache2 `source="memory"` invalidation synchronously before returning success.
+- Persistent-memory retrieval must default to `status="active"` and must exclude rows whose `expiry_timestamp` is in the past.
 - Superseded rows must not appear in normal RAG persistent-memory results.
 - Seed sync must not prune future `source_kind="reflection_inferred"` runtime lore rows.
 
@@ -60,6 +78,7 @@ Stage 1b must be independent from Stage 1a and Stage 1c.
   - `authority`
   - `privacy_review`
   - `updated_at`
+- Define `MemoryResetResult`, `MemoryEvidenceRef`, `MemoryPrivacyReview`, `MemoryUnitQuery`, and authority/status/source-kind constants in `memory_evolution.models`.
 - Add `memory_evolution` package with public database-only APIs:
 
 ```python
@@ -67,9 +86,10 @@ async def reset_memory_from_seed(*, dry_run: bool) -> MemoryResetResult: ...
 async def insert_memory_unit(*, document: EvolvingMemoryDoc) -> EvolvingMemoryDoc: ...
 async def supersede_memory_unit(*, active_unit_id: str, replacement: EvolvingMemoryDoc) -> EvolvingMemoryDoc: ...
 async def merge_memory_units(*, source_unit_ids: list[str], replacement: EvolvingMemoryDoc) -> EvolvingMemoryDoc: ...
-async def find_active_memory_units(*, query: dict, limit: int) -> list[EvolvingMemoryDoc]: ...
+async def find_active_memory_units(*, query: MemoryUnitQuery, limit: int) -> list[EvolvingMemoryDoc]: ...
 ```
 
+- Make `find_active_memory_units` accept only the constrained `MemoryUnitQuery` shape defined in this plan; it must not accept raw MongoDB filters.
 - Add reset/reseed CLI:
 
 ```powershell
@@ -80,16 +100,19 @@ python src\scripts\reset_memory_lore.py --apply
 - Update `db/bootstrap.py` memory indexes.
 - Update `db/memory.py` search/save helpers for evolving active rows.
 - Update `rag/memory_retrieval_tools.py` so persistent-memory search defaults to active rows.
-- Update Cache2 policy so persistent-memory helpers depend on `source="memory"`.
+- Remove LLM-controllable status/expiry filters from persistent-memory RAG tools; audit/debug status access must use lower-level DB or `memory_evolution` APIs.
+- Update Cache2 policy so persistent-memory helpers depend on `source="memory"` instead of `source="user_profile"`.
+- Emit synchronous Cache2 `source="memory"` invalidation from `insert_memory_unit`, `supersede_memory_unit`, `merge_memory_units`, and `reset_memory_from_seed`.
 - Update memory seed tooling so current seed data can populate evolving rows and future reflection-inferred rows are not managed by seed pruning.
-- Add deterministic tests for reset/reseed, active-only retrieval, supersede/merge, seed tooling, and Cache2 invalidation.
+- Migrate current memory writers (`save_memory`, `manage_memory_knowledge`, `insert_memory.py`, `inject_knowledge.py`) to use or wrap `memory_evolution`.
+- Add deterministic tests for reset/reseed, ID idempotency, active-only retrieval, supersede/merge edge cases, seed tooling, writer migration, and Cache2 invalidation.
 
 ## Deferred
 
 - Reflection-cycle code.
 - Daily lore promotion.
 - Reading conversation data.
-- LLM calls.
+- Generation LLM calls. Embedding calls remain allowed only under the rules in this plan.
 - Prompt changes unless required only to preserve existing search-path wording.
 - Service worker integration.
 - Autonomous messages.
@@ -101,8 +124,10 @@ python src\scripts\reset_memory_lore.py --apply
 |---|---|---|
 | `memory` collection | bigbang | Current rows may be deleted and re-seeded from current repo seed files. |
 | Persistent-memory search path | bigbang | Search contract becomes active evolving rows only. |
-| Seed tooling | bigbang | Seed lane writes evolving rows; future runtime lore is not seed-managed. |
-| Cache2 dependencies | compatible | Adds memory invalidation source for helper caches. |
+| Reset/reseed | bigbang | Initial cutover may delete legacy rows; post-cutover reset preserves runtime `reflection_inferred` rows. |
+| Seed tooling | bigbang | Seed lane writes evolving rows; future runtime lore is not seed-managed or pruned. |
+| Cache2 dependencies | compatible | Persistent-memory caches move to memory invalidation source. |
+| Legacy memory writers | bigbang | Existing direct writers must migrate or wrap the new API. |
 | Reflection | compatible | No reflection dependency or integration in Stage 1b. |
 
 ## Agent Autonomy Boundaries
@@ -111,6 +136,9 @@ python src\scripts\reset_memory_lore.py --apply
 - The agent must not add any reflection-specific fields beyond generic `source_kind` and evidence fields.
 - The agent must not preserve old memory rows unless they are re-created from current seed data.
 - The agent must not add a compatibility retrieval path that returns superseded rows in normal RAG.
+- The agent must not expose raw MongoDB query filters through `find_active_memory_units`.
+- The agent must not make Stage 1c or any caller supply embeddings.
+- The agent must not allow reset/reseed to delete `reflection_inferred` rows after cutover.
 - If the seed file is missing, start from an empty memory collection and record it in execution evidence.
 
 ## Target State
@@ -132,12 +160,64 @@ No reflection output, conversation transcript, or external information enters St
 | Plan class | large | DB/search/seeding changes are broad but isolated. |
 | Cutover | Bigbang memory-only | User accepts erasing current lore and re-seeding. |
 | External signal | Forbidden | Stage 1b only prepares storage/search mechanics. |
-| Retrieval | Active rows only | Prevents old and new lore conflict. |
-| Runtime lore protection | Exclude from seed pruning | Needed for Stage 1c future reflection-inferred rows. |
+| Reset semantics | Reset seed-managed global rows only after cutover | Admin reseed must not delete future reflection-promoted lore. |
+| Initial cutover | Legacy global rows may be wiped | User accepted bigbang reseed; this applies before 1c runtime rows exist. |
+| Retrieval | Active non-expired rows only by default | Prevents old, superseded, or expired lore conflict. |
+| Runtime lore protection | Exclude from reset and seed pruning | Needed for Stage 1c future reflection-inferred rows. |
+| ID ownership | Caller supplies stable IDs for runtime writes | Retries must not duplicate promoted lore. |
+| Embedding ownership | Memory API computes embeddings | 1c should not know embedding contracts or vector index mechanics. |
+| Cache invalidation | Synchronous `source="memory"` event before write API returns | The next chat turn must see memory changes after promotion. |
+| Tool status filters | Removed from RAG tool surface | Normal LLM-facing retrieval should not ask for superseded or expired rows. |
 
 ## Data Contracts
 
 ```python
+class MemoryStatus:
+    ACTIVE = "active"
+    SUPERSEDED = "superseded"
+    REJECTED = "rejected"
+    EXPIRED = "expired"
+    FULFILLED = "fulfilled"
+
+
+class MemoryAuthority:
+    SEED = "seed"
+    REFLECTION_PROMOTED = "reflection_promoted"
+    MANUAL = "manual"
+
+
+class MemorySourceKind:
+    SEEDED_MANUAL = "seeded_manual"
+    EXTERNAL_IMPORTED = "external_imported"
+    REFLECTION_INFERRED = "reflection_inferred"
+    CONVERSATION_EXTRACTED = "conversation_extracted"
+    RELATIONSHIP_INFERRED = "relationship_inferred"
+
+
+class MemoryEvidenceMessageRef(TypedDict, total=False):
+    conversation_history_id: str
+    platform: str
+    platform_channel_id: str
+    channel_type: str
+    timestamp: str
+    role: str
+
+
+class MemoryEvidenceRef(TypedDict, total=False):
+    reflection_run_id: str
+    scope_ref: str
+    message_refs: list[MemoryEvidenceMessageRef]
+    captured_at: str
+    source: str
+
+
+class MemoryPrivacyReview(TypedDict, total=False):
+    private_detail_risk: Literal["low", "medium", "high"]
+    user_details_removed: bool
+    boundary_assessment: str
+    reviewer: Literal["automated_llm", "human", "seed_tool"]
+
+
 class EvolvingMemoryDoc(TypedDict, total=False):
     memory_unit_id: str
     lineage_id: str
@@ -151,13 +231,41 @@ class EvolvingMemoryDoc(TypedDict, total=False):
     status: str
     supersedes_memory_unit_ids: list[str]
     merged_from_memory_unit_ids: list[str]
-    evidence_refs: list[dict]
-    privacy_review: dict
+    evidence_refs: list[MemoryEvidenceRef]
+    privacy_review: MemoryPrivacyReview
     confidence_note: str
     timestamp: str
     updated_at: str
     expiry_timestamp: str | None
     embedding: list[float]
+```
+
+```python
+class MemoryUnitQuery(TypedDict, total=False):
+    semantic_query: str
+    memory_name: str
+    memory_name_contains: str
+    source_global_user_id: str
+    memory_type: str
+    source_kind: str
+    authority: str
+    lineage_id: str
+    exclude_memory_unit_ids: list[str]
+```
+
+```python
+class MemoryResetResult(TypedDict):
+    dry_run: bool
+    seed_rows_loaded: int
+    seed_rows_inserted: int
+    seed_rows_updated: int
+    seed_rows_unchanged: int
+    seed_rows_deleted: int
+    legacy_rows_deleted: int
+    runtime_rows_preserved: int
+    embeddings_computed: int
+    cache_invalidated: bool
+    warnings: list[str]
 ```
 
 Required statuses:
@@ -169,6 +277,71 @@ rejected
 expired
 fulfilled
 ```
+
+Status and expiry rules:
+
+- `status` is the lifecycle source of truth.
+- Normal retrieval returns only `status="active"` rows whose
+  `expiry_timestamp` is missing, null, or greater than the current timestamp.
+- Write APIs must reject or normalize active rows with past `expiry_timestamp`
+  to `status="expired"` before persistence.
+- `status="expired"` rows must not appear in normal RAG retrieval even when
+  their `expiry_timestamp` is missing.
+- Audit/debug callers may pass an explicit status to lower-level DB APIs, but
+  LLM-facing persistent-memory tools must not expose status or expiry controls.
+
+Authority values:
+
+```text
+seed
+reflection_promoted
+manual
+```
+
+Lineage and idempotency rules:
+
+- Public runtime writes require stable caller-supplied `memory_unit_id` and
+  `lineage_id`; missing IDs are validation errors.
+- Seed/reset writes generate deterministic `memory_unit_id` values from the
+  seed key `(memory_name, source_global_user_id, source_kind)` and set
+  `lineage_id=memory_unit_id` for version 1 seed rows.
+- `insert_memory_unit` is idempotent by `memory_unit_id`: if the existing row is
+  byte-equivalent excluding `updated_at` and embedding, return it; if the same
+  id points to different content, fail.
+- `supersede_memory_unit` requires the target row to be active. Already
+  superseded, expired, rejected, or fulfilled targets fail; the API does not
+  trace forward or silently overwrite.
+- A supersede replacement must use the target's `lineage_id`, set
+  `version=target.version + 1`, and include the target id in
+  `supersedes_memory_unit_ids`.
+- `merge_memory_units` requires all source rows to be active. When all sources
+  share one lineage, the replacement inherits that lineage and uses
+  `version=max(source.version)+1`. When sources have different lineages, the
+  replacement must use a new `lineage_id`, `version=1`, and include every
+  source id in `merged_from_memory_unit_ids`. Source rows become superseded.
+
+Embedding rules:
+
+- `embedding` is stored in `EvolvingMemoryDoc` but is repository-owned.
+- Public callers must not supply embeddings; write APIs compute embeddings from
+  the same semantic text contract used by `db.memory.memory_embedding_source_text`.
+- Dry-run reset performs no embedding calls. Apply reset computes embeddings
+  only for inserted or changed seed rows.
+- Stage 1b does not drop or rebuild the vector index during reset. It keeps the
+  existing vector index and writes fresh embeddings with changed documents.
+- `find_active_memory_units` supports semantic duplicate detection by accepting
+  `semantic_query`; the repository computes the query embedding internally.
+
+Search API rules:
+
+- `db.memory.search_memory` defaults to `status="active"` and applies the
+  active non-expired filter by default.
+- Audit/debug callers may pass `status="superseded"`, `status="expired"`, or
+  `status=None` to the lower-level DB helper. `status=None` means no status
+  filter and is not allowed through LLM-facing tools.
+- `rag.memory_retrieval_tools.search_persistent_memory` and
+  `search_persistent_memory_keyword` must always use active non-expired search.
+  They must not expose status or expiry arguments in the tool schema.
 
 Minimum indexes:
 
@@ -199,6 +372,8 @@ memory_seed_sync_lookup:
 - `tests/test_memory_evolution_repository.py`
 - `tests/test_memory_evolution_reset.py`
 - `tests/test_memory_evolution_retrieval.py`
+- `tests/test_memory_evolution_idempotency.py`
+- `tests/test_memory_evolution_writer_migration.py`
 - `tests/test_memory_knowledge_sync_runtime_lore.py`
 - `tests/test_persistent_memory_cache_invalidation.py`
 
@@ -223,24 +398,28 @@ memory_seed_sync_lookup:
 ## Implementation Order
 
 1. Add deterministic tests for reset/reseed, evolving repository, active-only retrieval, seed pruning boundary, and Cache2 invalidation.
-2. Add evolving memory schemas and repository helpers.
-3. Add reset/reseed implementation and CLI.
-4. Update bootstrap indexes.
-5. Update memory search helpers and RAG retrieval tools.
-6. Update seed tooling.
-7. Run focused tests.
-8. Run reset dry-run and record current-row deletion/seed-row insertion summary.
-9. Run broader tests.
+2. Add idempotency, lineage edge-case, writer-migration, and expiry/status tests.
+3. Add evolving memory schemas and repository helpers.
+4. Add reset/reseed implementation and CLI with offline guard semantics.
+5. Update bootstrap indexes.
+6. Update memory search helpers and RAG retrieval tools.
+7. Update Cache2 dependency policy and synchronous invalidation events.
+8. Migrate seed/manual memory writers to the new API.
+9. Run focused tests.
+10. Run reset dry-run and record current-row deletion/seed-row insertion summary.
+11. Run broader tests.
 
 ## Progress Checklist
 
 - [ ] Tests for memory evolution contract added.
+- [ ] Tests for idempotency, lineage edge cases, writer migration, and expiry added.
 - [ ] Evolving memory schemas and repository helpers implemented.
 - [ ] Reset/reseed CLI implemented.
 - [ ] Bootstrap indexes updated.
 - [ ] Active-only persistent-memory retrieval implemented.
 - [ ] Memory Cache2 dependency implemented.
 - [ ] Seed tooling updated.
+- [ ] Legacy memory writers migrated or wrapped.
 - [ ] Focused tests pass.
 - [ ] Reset dry-run evidence recorded.
 
@@ -250,6 +429,8 @@ memory_seed_sync_lookup:
 pytest tests\test_memory_evolution_repository.py -q
 pytest tests\test_memory_evolution_reset.py -q
 pytest tests\test_memory_evolution_retrieval.py -q
+pytest tests\test_memory_evolution_idempotency.py -q
+pytest tests\test_memory_evolution_writer_migration.py -q
 pytest tests\test_memory_knowledge_sync_runtime_lore.py -q
 pytest tests\test_persistent_memory_cache_invalidation.py -q
 ```
@@ -264,11 +445,19 @@ venv\Scripts\python.exe -m scripts.manage_memory_knowledge sync
 
 - Reset/reseed dry-run reports destructive memory changes before apply.
 - Apply path can reset/reseed memory from current codebase seed data.
-- Normal persistent-memory search returns active rows only.
-- Supersede and merge preserve post-cutover lineage.
+- Post-cutover reset/reseed preserves `source_kind="reflection_inferred"` rows.
+- `MemoryResetResult` reports reset counters, preserved runtime rows, embedding calls, warnings, and cache invalidation.
+- Embeddings are computed internally for changed writes and are not caller-supplied by Stage 1c.
+- Normal persistent-memory search returns active non-expired rows only.
+- LLM-facing persistent-memory tools do not expose status or expiry filters.
+- Supersede and merge preserve validated post-cutover lineage and fail on inactive targets.
+- Insert is idempotent by `memory_unit_id` and retries do not create duplicate rows.
+- `find_active_memory_units` supports constrained metadata filters plus semantic vector duplicate detection.
 - Seed sync does not manage or prune future `reflection_inferred` rows.
 - Cache2 persistent-memory helper entries can be invalidated by `source="memory"`.
-- No reflection, LLM, conversation-history, or external data is used.
+- Memory write APIs emit memory invalidation before returning success.
+- Current direct memory writers are migrated to or wrapped around `memory_evolution`.
+- No reflection, generation LLM, conversation-history, or external data is used.
 
 ## Validation Against Current Implementation
 
@@ -280,12 +469,24 @@ This stage has not been implemented in the current workspace.
 | Reset/reseed CLI | Required | `src/scripts/reset_memory_lore.py` does not exist | Not started |
 | Evolving memory schema | Required | No Stage 1b schema files exist | Not started |
 | Active-only persistent-memory retrieval | Required | Not validated by this Stage 1a work | Not started |
-| Cache2 memory invalidation | Required | Not validated by this Stage 1a work | Not started |
+| Cache2 memory invalidation | Required | Current persistent-memory Cache2 dependencies use `source="user_profile"` and must move to `source="memory"` | Not started |
+| Memory writer migration | Required | `save_memory`, `manage_memory_knowledge`, `insert_memory.py`, and `inject_knowledge.py` still write the old shape | Not started |
+| Reset semantics | Required | Existing seed sync can prune unmanaged global rows and does not preserve future `reflection_inferred` rows by contract | Not started |
+| ID and lineage validation | Required | No evolving IDs or lineage validation exists | Not started |
+| Embedding ownership | Required | Current `save_memory` computes embeddings, but the new repository contract does not exist | Not started |
 | Reflection independence | Required | Current Stage 1a code does not import `memory_evolution`; Stage 1b still must not import `reflection_cycle` | Boundary currently preserved |
 
-Stage 1b remains unsigned. Stage 1c must not treat memory evolution APIs,
+Stage 1b implementation remains not started. This plan is signed off as the
+approved implementation contract. Stage 1c must not treat memory evolution APIs,
 reset/reseed behavior, active-only retrieval, or Cache2 memory invalidation as
 available until this plan has its own implementation evidence.
+
+## Plan Sign-Off
+
+- Approved for implementation: 2026-05-05
+- Sign-off scope: Stage 1b plan only; no code or database changes are signed off here.
+- Sign-off basis: the plan now defines reset semantics, ID/idempotency, lineage, evidence refs, privacy review, authority values, embedding ownership, active-only retrieval, Cache2 invalidation, writer migration, and 1c handoff contracts.
+- Remaining gate: implementation evidence and verification results must be recorded before Stage 1c may consume the memory evolution APIs.
 
 ## Execution Evidence
 
@@ -293,4 +494,7 @@ available until this plan has its own implementation evidence.
 - Reset/reseed dry-run summary:
 - Seed validation/sync summary:
 - Cache2 invalidation evidence:
+- Writer migration grep evidence:
+- ID/lineage edge-case evidence:
+- Embedding call evidence:
 - Any deviations:

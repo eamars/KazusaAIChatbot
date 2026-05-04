@@ -2,13 +2,13 @@
 
 ## Summary
 
-- Goal: Integrate the approved Stage 1a read-only reflection cycle with the completed Stage 1b evolving memory subsystem so daily reflection can persist high-signal sanitized character learning through two durable lanes: global lore and character self-guidance.
+- Goal: Integrate the approved Stage 1a read-only reflection cycle with the completed Stage 1b evolving memory subsystem so per-channel daily reflection can feed a separately approved global promotion step for two durable lanes: global lore and character self-guidance.
 - Plan class: large
 - Status: draft
 - Mandatory skills: `local-llm-architecture`, `development-plan-writing`, `memory-knowledge-maintenance`, `no-prepost-user-input`, `py-style`, `test-style-and-execution`, `database-data-pull`
-- Overall cutover strategy: bigbang integration after entry criteria. Stage 1c adds production reflection persistence, monitored-channel indexing, worker wiring, and two-lane daily promotion in one approved integration path rather than preserving a parallel candidate-only production mode.
+- Overall cutover strategy: bigbang integration after entry criteria. Stage 1c adds production reflection persistence, monitored-channel indexing, worker wiring, per-channel daily synthesis storage, and two-lane global daily promotion in one approved integration path rather than preserving a parallel candidate-only production mode.
 - Highest-risk areas: promoting poor reflection output, private leakage, live cognition latency, memory poisoning, retrieval pollution from behavioral advice, stale Cache2, and bypassing the Stage 1a approval gate.
-- Acceptance criteria: Stage 1c starts only after Stage 1a real LLM approval and Stage 1b completion; production reflection writes to `character_reflection_runs`; daily promotion writes through Stage 1b memory APIs only; private/user-specific details are rejected; live chat remains priority; raw hourly summaries are never consumed directly by cognition; autonomous messaging remains out of scope.
+- Acceptance criteria: Stage 1c starts only after Stage 1a real LLM approval and Stage 1b completion; production reflection writes to `character_reflection_runs`; the new global promotion prompt has its own one-by-one real LLM approval evidence before memory writes are enabled; promotion writes through Stage 1b memory APIs only; private/user-specific details are rejected; live chat remains priority; raw hourly summaries are never consumed directly by cognition; autonomous messaging remains out of scope.
 
 ## Context
 
@@ -20,10 +20,20 @@ Inputs:
 - Stage 1b provides evolving memory APIs, active-only search, seed tooling, and Cache2 memory invalidation.
 
 Stage 1c ties them together for production use. Hourly reflection outputs remain
-intermediate evidence. They are stored for audit and daily synthesis, but they
-must not be injected into normal chat context directly. Durable character
-learning happens only after daily promotion chooses sanitized output for one of
-the approved lanes.
+intermediate evidence. They are stored for audit and per-channel daily
+synthesis, but they must not be injected into normal chat context directly.
+Durable character learning happens only after a separate global promotion
+prompt reviews the character-local day's per-channel daily syntheses and
+chooses sanitized output for one of the approved lanes.
+
+Stage 1a approves only these model-facing contracts:
+
+- hourly observational reflection,
+- per-channel daily synthesis over compact active-hour slots.
+
+Stage 1a does not approve lore or self-guidance promotion. Promotion requires a
+new Stage 1c prompt, separate validators, and one-by-one real LLM inspection
+before any production memory write can be enabled.
 
 ## Mandatory Skills
 
@@ -43,10 +53,15 @@ the approved lanes.
 - Do not start Stage 1c until Stage 1b focused tests pass and memory reset/reseed behavior is complete.
 - Stage 1c must not change Stage 1b memory schema except through a separate approved plan.
 - Stage 1c must not change Stage 1a approved core observational fields or prompt budgets except through a separate approved plan.
-- Stage 1c may add promotion-candidate and promotion-decision fields as additive integration work with its own tests; those fields are not treated as already approved by Stage 1a.
+- Stage 1c must preserve the approved Stage 1a hourly and per-channel daily output schemas. Do not add promotion fields to those prompts without a separate approval pass.
+- Stage 1c promotion decisions belong to a new global promotion prompt. That prompt is not approved by Stage 1a and must pass its own one-by-one real LLM inspection gate before memory writes are enabled.
 - Hourly reflection may write reflection-run documents but must not write global memory.
-- Daily reflection may promote at most 1 global lore mutation and at most 1 character self-guidance mutation per character-local day.
+- Per-channel daily reflection may write `daily_channel` reflection-run documents but must not write global memory.
+- Global daily promotion may promote at most 1 global lore mutation and at most 1 character self-guidance mutation per character-local day after reviewing all eligible per-channel daily syntheses for that day.
 - Daily promotion must use Stage 1b memory APIs only.
+- Production reflection must disable the Stage 1a evaluation fallback window. If no channel has a latest character message inside the monitor window, the production worker idles.
+- Production run documents must persist the raw scope triple `platform`, `platform_channel_id`, and `channel_type` in addition to any hashed `scope_ref`.
+- `source_message_refs` and `evidence_refs` must be threaded from the collected input rows and repository metadata, not reconstructed from LLM output.
 - Private evidence must be sanitized before any durable promotion.
 - User-specific facts, preferences, relationships, health, and commitments must not be stored in global memory.
 - Character-spoken or character-agreed evidence is required for lore promotion.
@@ -56,7 +71,7 @@ the approved lanes.
 - Raw hourly summaries and raw hourly reflection documents must not be consumed directly by live cognition or prompt-facing context.
 - Prompt-facing reflection context may include only promoted lore and promoted self-guidance; it must be behind `REFLECTION_CONTEXT_ENABLED`.
 - Live chat has priority; reflection LLM calls must defer while chat is queued or processing.
-- Production reflection workers must isolate failures per hourly slot and per daily channel. A failed LLM call, parse, validation, or repository write for one slot must create a failed or skipped run document and must not stop unrelated slots in the same worker pass.
+- Production reflection workers must isolate failures per hourly slot, per daily channel, and per global promotion run. A failed LLM call, parse, validation, or repository write for one slot must create a failed or skipped run document and must not stop unrelated slots in the same worker pass.
 - Production reflection workers may retry an external LLM invocation failure at most once. Parsed JSON validation warnings are not retry triggers; they must be recorded on the run document.
 - Every reflection run document must include `prompt_version`, `git_sha`, and `attempt_count` so later memory writes can be audited against the producing code and prompt contract.
 - Stage 1c must not send autonomous messages.
@@ -66,6 +81,8 @@ the approved lanes.
 
 - Add production `character_reflection_runs` persistence.
 - Add prompt/build provenance to all production reflection run documents.
+- Persist typed scope metadata with raw `platform`, `platform_channel_id`, and `channel_type` fields on every run document.
+- Persist `source_message_refs` from repository/input metadata alongside prompt-safe projections; do not ask the LLM to produce database join keys.
 - Add monitored-channel production index support on `conversation_history` for latest character-message lookup:
 
 ```text
@@ -74,10 +91,13 @@ conv_role_ts_platform_channel:
 ```
 
 - Promote Stage 1a read-only monitored-channel selector, message-bearing hour-slot projection, and approved core reflection contracts into a production runtime that can write reflection-run documents.
-- Add Stage 1c-specific promotion-candidate fields to the production hourly output contract.
-- Add daily two-lane promotion decisions and validation:
+- Preserve Stage 1a hourly and per-channel daily prompt schemas for production reflection storage.
+- Add per-channel daily synthesis persistence as `daily_channel` run documents.
+- Add a separate global daily promotion prompt that consumes compact `daily_channel` outputs across all monitored channels for one character-local day.
+- Add global two-lane promotion decisions and validation:
   - `lore`: character/world/self facts that can become global persistent lore.
   - `self_guidance`: durable character response-behavior lessons that can guide future cognition without storing user-specific facts.
+- Add a one-by-one real LLM approval mini-gate for the new global promotion prompt before enabling memory writes.
 - Use Stage 1b `memory_evolution` APIs for insert/supersede/merge.
 - Add `REFLECTION_CYCLE_ENABLED`, `REFLECTION_CONTEXT_ENABLED`, `REFLECTION_LORE_PROMOTION_ENABLED`, and `REFLECTION_SELF_GUIDANCE_PROMOTION_ENABLED` flags.
 - Add service worker lifecycle and idle checks.
@@ -130,12 +150,19 @@ python src\scripts\run_reflection_cycle.py promote --dry-run
 ```text
 hourly worker
   -> select monitored channels by latest character message time
+  -> idle when no monitor-active channel exists
   -> build message-bearing hourly slots
   -> reflection LLM
   -> character_reflection_runs hourly_slot docs
 
-daily worker
+per-channel daily worker
   -> daily reflection over per-channel hourly_slot docs
+  -> character_reflection_runs daily_channel docs
+
+global promotion worker
+  -> compact all daily_channel docs for one character-local day
+  -> global promotion LLM
+  -> character_reflection_runs daily_global_promotion doc
   -> lore lane: 0 or 1 promotion decision
   -> self_guidance lane: 0 or 1 promotion decision
   -> Stage 1b memory_evolution API
@@ -153,7 +180,10 @@ normal chat
 | Entry gate | Requires 1a approval and 1b completion | Prevents integrating unproven reflection or incomplete memory APIs. |
 | Production reflection storage | `character_reflection_runs` | Gives audit trail for hourly slots and daily decisions. |
 | 1a core fields | Preserve approved observational fields | Keeps 1c from changing evaluation criteria after approval. |
-| Promotion fields | Additive in 1c | Durable learning fields are integration-specific and need 1c tests. |
+| Promotion prompt | New global Stage 1c prompt | 1a did not approve promotion fields, character agreement, boundary assessment, privacy review, or evidence refs. |
+| Promotion prompt approval | One-by-one real LLM mini-gate before writes | Prevents treating 1a daily synthesis approval as memory-write approval. |
+| Daily synthesis granularity | Per-channel `daily_channel` | Matches Stage 1a and preserves reviewed behavior. |
+| Promotion granularity | One global promotion prompt per character-local day | Enforces max 1 lore and max 1 self-guidance mutation across all channels. |
 | Hourly memory writes | Forbidden | Keeps short-window noise out of lore. |
 | Daily lore promotion | Max 1 per character-local day | Keeps lore high-signal. |
 | Daily self-guidance promotion | Max 1 per character-local day | Lets behavior improve without storing user image or raw hourly summaries. |
@@ -162,18 +192,24 @@ normal chat
 | Worker | Feature-flagged | Protects live chat while enabling controlled rollout. |
 | Monitoring eligibility | Latest character message in last 24 hours | No counter, state variable, or dedicated monitoring collection is needed. |
 | Hourly production slot | Every message-bearing hour in monitored channels | User-only and assistant-only hours still provide reflection evidence; skip only empty hours. |
+| Production fallback | Disabled | The 168-hour fallback is useful for read-only evaluation only; production should idle when no monitor-active channel exists. |
+| Evidence refs | Repository/input-derived, not LLM-derived | Prompt projection deidentifies data; database join keys must be threaded beside the LLM payload. |
 
 ## Data Contracts
 
 ```python
 class CharacterReflectionRunDoc(TypedDict, total=False):
     run_id: str
-    run_kind: Literal["hourly_slot", "daily_global"]
+    run_kind: Literal[
+        "hourly_slot",
+        "daily_channel",
+        "daily_global_promotion",
+    ]
     status: Literal["succeeded", "failed", "skipped", "dry_run"]
     prompt_version: str
     git_sha: str
     attempt_count: int
-    scope: dict
+    scope: ReflectionScopeDoc
     window_start: str
     window_end: str
     hour_start: str
@@ -185,6 +221,24 @@ class CharacterReflectionRunDoc(TypedDict, total=False):
     promotion_decisions: list[dict]
     validation_warnings: list[str]
     error: str
+```
+
+```python
+class ReflectionScopeDoc(TypedDict):
+    scope_ref: str
+    platform: str
+    platform_channel_id: str
+    channel_type: str
+```
+
+```python
+class ReflectionMessageRef(TypedDict, total=False):
+    conversation_history_id: str
+    platform: str
+    platform_channel_id: str
+    channel_type: str
+    role: Literal["user", "assistant"]
+    timestamp: str
 ```
 
 ```python
@@ -202,6 +256,43 @@ class ReflectionPromotionDecision(TypedDict, total=False):
     privacy_review: dict
     evidence_refs: list[dict]
 ```
+
+Run-kind ownership:
+
+- `hourly_slot` stores approved hourly observational output and
+  `source_message_refs` for the source messages in that hour.
+- `daily_channel` stores approved per-channel daily synthesis output and
+  `source_reflection_run_ids` for the channel's hourly slots.
+- `daily_global_promotion` stores the new Stage 1c global promotion prompt
+  output and `source_reflection_run_ids` for all included `daily_channel` docs.
+
+`ReflectionMessageRef` values are produced by repository/input plumbing. They
+are not model-facing prompt fields and must not be reconstructed from
+`topic_summary`, `day_summary`, or any other LLM output.
+
+Global promotion prompt input shape:
+
+```python
+class GlobalPromotionPromptPayload(TypedDict):
+    evaluation_mode: Literal["daily_global_promotion"]
+    character_local_date: str
+    channel_daily_syntheses: list[dict]
+    evidence_cards: list[dict]
+    promotion_limits: dict
+    review_questions: list[str]
+```
+
+Rules:
+
+- `channel_daily_syntheses` contains compact `daily_channel` parsed outputs,
+  run ids, channel type, confidence, validation warning labels, and source
+  dates. It must not contain raw transcripts.
+- `evidence_cards` contains bounded, sanitized evidence prepared by
+  deterministic code from source run metadata. It may include short
+  active-character utterance snippets when needed to prove `spoken` or
+  `agreed`, but must not include user identity or private user details.
+- The prompt may output `ReflectionPromotionDecision` rows only. Deterministic
+  validators decide whether any row can call Stage 1b memory APIs.
 
 Lane rules:
 
@@ -258,8 +349,9 @@ Rules:
 
 | Path | Calls | Blocking | Context budget | Notes |
 |---|---:|---|---:|---|
-| Hourly reflection worker | 1 LLM call per message-bearing hour | Background only | 8000 chars per hour prompt | Uses Stage 1a approved hourly cap plus additive candidate fields. |
-| Daily reflection worker | 1 LLM call per monitored channel/day | Background only | 25000 chars per daily prompt | Consumes compact hourly-slot outputs and produces two lane decisions. |
+| Hourly reflection worker | 1 LLM call per message-bearing hour | Background only | 8000 chars per hour prompt | Uses Stage 1a approved hourly cap and schema. |
+| Per-channel daily synthesis worker | 1 LLM call per monitored channel/day | Background only | 25000 chars per daily prompt | Uses Stage 1a approved per-channel daily cap and schema. |
+| Global promotion worker | 1 LLM call per character-local day | Background only | 25000 chars per promotion prompt | New Stage 1c prompt consuming compact `daily_channel` docs and bounded evidence cards; requires one-by-one real LLM approval before writes. |
 | Promotion persistence | 0 LLM calls | Background only | N/A | Deterministic validation and Stage 1b API writes only; no semantic reinterpretation of lane decisions. |
 | Normal chat reflection context | 0 new LLM calls | Response path only when flag enabled | Max 3 promoted lore rows and 3 promoted self-guidance rows | Adds bounded promoted memory context to existing cognition; raw hourly data is forbidden. |
 
@@ -278,6 +370,7 @@ The worker must defer while chat is queued or processing.
 - `tests/test_reflection_cycle_stage1c_repository.py`
 - `tests/test_reflection_cycle_stage1c_worker.py`
 - `tests/test_reflection_cycle_stage1c_promotion.py`
+- `tests/test_reflection_cycle_stage1c_promotion_live_llm.py`
 - `tests/test_reflection_cycle_stage1c_reflection_context.py`
 - `tests/test_reflection_cycle_stage1c_integration.py`
 
@@ -302,14 +395,16 @@ The worker must defer while chat is queued or processing.
 1. Verify Stage 1a approval artifact and Stage 1b completion evidence.
 2. Add tests for reflection repository, promotion validation, and worker idle behavior.
 3. Add `character_reflection_runs` schema/indexes and repository.
-4. Add production runtime using Stage 1a approved monitored-channel selector, hour-slot projection, and core prompts.
+4. Add production runtime using Stage 1a approved monitored-channel selector, hour-slot projection, per-channel daily projection, and core prompts. Keep the 168-hour fallback disabled in production mode.
 5. Add per-slot worker error isolation with bounded external-LLM retry and failed-run persistence.
-6. Add Stage 1c promotion-candidate fields and two-lane promotion integration using Stage 1b memory APIs.
-7. Add service worker and feature flags.
-8. Add prompt-facing promoted reflection context behind flag; raw hourly summaries must not be retrievable by live cognition.
-9. Run focused tests.
-10. Run dry-run against monitored-channel data.
-11. Enable writes only after dry-run evidence is reviewed.
+6. Add global promotion prompt, promotion validators, and dry-run artifact output. Do not enable memory writes yet.
+7. Run the global promotion prompt real LLM mini-gate one case at a time and record inspection evidence.
+8. Add two-lane promotion integration using Stage 1b memory APIs.
+9. Add service worker and feature flags.
+10. Add prompt-facing promoted reflection context behind flag; raw hourly summaries must not be retrievable by live cognition.
+11. Run focused tests.
+12. Run dry-run against monitored-channel data.
+13. Enable writes only after dry-run evidence and promotion prompt approval are reviewed.
 
 ## Progress Checklist
 
@@ -318,6 +413,7 @@ The worker must defer while chat is queued or processing.
 - [ ] Reflection DB repository implemented.
 - [ ] Production runtime implemented.
 - [ ] Per-slot worker failure isolation implemented and verified.
+- [ ] Global promotion prompt implemented in dry-run mode and real LLM mini-gate approved.
 - [ ] Two-lane promotion integrated through Stage 1b APIs.
 - [ ] Worker and flags implemented.
 - [ ] Prompt-facing promoted context implemented behind flag.
@@ -334,6 +430,15 @@ pytest tests\test_reflection_cycle_stage1c_reflection_context.py -q
 pytest tests\test_reflection_cycle_stage1c_integration.py -q
 ```
 
+Run real LLM promotion-prompt tests one by one and inspect each artifact before
+continuing:
+
+```powershell
+pytest tests\test_reflection_cycle_stage1c_promotion_live_llm.py::test_global_promotion_live_normal_case -q -s
+pytest tests\test_reflection_cycle_stage1c_promotion_live_llm.py::test_global_promotion_live_privacy_rejection_case -q -s
+pytest tests\test_reflection_cycle_stage1c_promotion_live_llm.py::test_global_promotion_live_no_signal_case -q -s
+```
+
 ```powershell
 python src\scripts\run_reflection_cycle.py hourly --dry-run
 python src\scripts\run_reflection_cycle.py daily --dry-run
@@ -346,11 +451,17 @@ Run MongoDB explain for the monitored-channel selector and confirm the productio
 
 - Stage 1c refuses to proceed without recorded Stage 1a approval and Stage 1b completion evidence.
 - Monitored-channel selection uses latest character message time and does not rely on counters or a dedicated monitoring collection.
+- Production monitoring disables the read-only fallback window and idles when no monitor-active channel exists.
 - Hourly production reflection writes only `character_reflection_runs`.
 - Hourly production reflection evaluates every message-bearing hour in monitored channels and skips only empty hours.
-- Hourly and daily production run documents include prompt/build provenance.
-- One failed hourly or daily slot records a failed/skipped run document and does not stop unrelated slots in the same worker pass.
-- Daily production reflection writes at most one lore mutation and at most one self-guidance mutation through Stage 1b APIs.
+- Per-channel daily production reflection writes `daily_channel` run documents and does not write memory.
+- Global promotion writes `daily_global_promotion` run documents and is the only reflection step allowed to produce promotion decisions.
+- The global promotion prompt has recorded one-by-one real LLM approval evidence before memory writes are enabled.
+- Hourly, daily-channel, and global-promotion production run documents include prompt/build provenance.
+- Run documents persist raw scope triples in addition to hashed scope refs.
+- Evidence refs and source message refs are repository/input-derived, not LLM-derived.
+- One failed hourly slot, daily channel, or global promotion run records a failed/skipped run document and does not stop unrelated work in the same worker pass.
+- Global promotion writes at most one lore mutation and at most one self-guidance mutation through Stage 1b APIs per character-local day.
 - Private/user-specific details are rejected before all global memory writes.
 - Lore promotion requires character agreement and boundary assessment.
 - Self-guidance promotion requires behavior-only content and boundary assessment when it can affect character identity, intimacy, attachment, safety, or setting behavior.
@@ -371,6 +482,7 @@ blocked.
 | `character_reflection_runs` repository | Required | `reflection_cycle/repository.py` does not exist | Not started |
 | Production worker | Required | `reflection_cycle/worker.py` does not exist | Not started |
 | Two-lane promotion | Required | `reflection_cycle/promotion.py` does not exist | Not started |
+| Global promotion prompt approval | Required | No promotion prompt or real LLM mini-gate exists | Not started |
 | Per-slot error isolation | Required | No production worker exists; read-only evaluation does not provide retry semantics | Not started |
 | Prompt-facing promoted context | Required | raw-hourly-excluding reflection context module does not exist | Not started |
 | Production CLI | Required | `src/scripts/run_reflection_cycle.py` does not exist | Not started |
@@ -388,6 +500,9 @@ Current Stage 1a decisions that Stage 1c must respect:
 - Stage 1a generated free-text language is controlled by a centralized Chinese language-policy block.
 - Stage 1a DB message reads use an allowlist projection and may include only bounded attachment descriptions.
 - Stage 1a daily synthesis receives compact active-hour slots, not raw transcripts or full hourly reflection objects.
+- Stage 1a daily synthesis is per-channel and must remain separate from global promotion.
+- Stage 1a does not approve promotion fields, boundary assessment, privacy review, character-agreement assessment, or evidence refs.
+- Stage 1a's 168-hour fallback is evaluation-only and must be disabled for production write-capable runs.
 - Stage 1a output remains a local-artifact evaluation contract, not a production storage contract.
 - Stage 1a hourly summaries are evidence for Stage 1c daily reflection only; they must not become direct cognition context.
 
@@ -401,6 +516,7 @@ until Stage 1a live approval and Stage 1b completion evidence are both recorded.
 - Focused test results:
 - Monitored-channel dry-run summary:
 - MongoDB explain summary:
+- Global promotion prompt real LLM approval:
 - Promotion dry-run summary:
 - Prompt-facing context filtering evidence:
 - Any deviations:
