@@ -800,6 +800,7 @@ async def test_worker_saves_collapsed_messages_before_graph(monkeypatch) -> None
     assert survivor_response.messages == []
     assert call_order[:3] == ["save:2", "save:1", "graph"]
     assert captured_state["user_input"] == "first\nsecond"
+    assert captured_state["active_turn_platform_message_ids"] == ["1", "2"]
     assert captured_state["use_reply_feature"] is False
 
     await _reset_queue_state()

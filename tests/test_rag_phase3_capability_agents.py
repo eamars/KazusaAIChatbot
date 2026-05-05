@@ -602,6 +602,209 @@ async def test_conversation_evidence_semantic_topic_uses_search() -> None:
 
 
 @pytest.mark.asyncio
+async def test_conversation_evidence_excludes_active_turn_keyword_row() -> None:
+    """Current-turn keyword hits should not become conversation evidence."""
+    agent = ConversationEvidenceAgent()
+    keyword_worker = _FakeWorker(
+        {
+            "resolved": True,
+            "result": [
+                {
+                    "body_text": "active question",
+                    "display_name": "Tester",
+                    "global_user_id": "user-1",
+                    "platform": "qq",
+                    "platform_channel_id": "chan-1",
+                    "platform_message_id": "msg-current",
+                    "timestamp": "2026-05-02T00:00:00+00:00",
+                }
+            ],
+            "attempts": 1,
+            "cache": {"enabled": False, "hit": False, "reason": "open_range"},
+        }
+    )
+    agent.keyword_agent = keyword_worker
+
+    result = await agent.run(
+        'Conversation-evidence: find who said "active question"',
+        _base_context(active_turn_platform_message_ids=["msg-current"]),
+    )
+
+    assert result["resolved"] is False
+    assert result["result"]["missing_context"] == ["conversation_evidence"]
+    assert result["result"]["selected_summary"] == ""
+    assert result["result"]["projection_payload"]["summaries"] == []
+    assert result["result"]["evidence"] == []
+    assert result["result"]["resolved_refs"] == []
+
+
+@pytest.mark.asyncio
+async def test_conversation_evidence_excludes_active_turn_filter_row() -> None:
+    """Current-turn recent-message hits should not become evidence."""
+    agent = ConversationEvidenceAgent()
+    filter_worker = _FakeWorker(
+        {
+            "resolved": True,
+            "result": [
+                {
+                    "body_text": "latest active message",
+                    "display_name": "Tester",
+                    "global_user_id": "user-1",
+                    "platform": "qq",
+                    "platform_channel_id": "chan-1",
+                    "platform_message_id": "msg-current",
+                    "timestamp": "2026-05-02T00:00:00+00:00",
+                }
+            ],
+            "attempts": 1,
+            "cache": {"enabled": False, "hit": False, "reason": "open_range"},
+        }
+    )
+    agent.filter_agent = filter_worker
+
+    result = await agent.run(
+        "Conversation-evidence: retrieve recent messages speaker=current_user",
+        _base_context(active_turn_platform_message_ids=["msg-current"]),
+    )
+
+    assert result["resolved"] is False
+    assert result["result"]["primary_worker"] == "conversation_filter_agent"
+    assert result["result"]["projection_payload"]["summaries"] == []
+    assert result["result"]["resolved_refs"] == []
+
+
+@pytest.mark.asyncio
+async def test_conversation_evidence_excludes_active_turn_semantic_row() -> None:
+    """Current-turn semantic hits should not become conversation evidence."""
+    agent = ConversationEvidenceAgent()
+    search_worker = _FakeWorker(
+        {
+            "resolved": True,
+            "result": [
+                (
+                    0.91,
+                    {
+                        "body_text": "active topic question",
+                        "display_name": "Tester",
+                        "global_user_id": "user-1",
+                        "platform": "qq",
+                        "platform_channel_id": "chan-1",
+                        "platform_message_id": "msg-current",
+                        "timestamp": "2026-05-02T00:00:00+00:00",
+                    },
+                )
+            ],
+            "attempts": 1,
+            "cache": {"enabled": False, "hit": False, "reason": "open_range"},
+        }
+    )
+    agent.search_agent = search_worker
+
+    result = await agent.run(
+        "Conversation-evidence: retrieve recent messages about active topic",
+        _base_context(active_turn_platform_message_ids=["msg-current"]),
+    )
+
+    assert result["resolved"] is False
+    assert result["result"]["primary_worker"] == "conversation_search_agent"
+    assert result["result"]["projection_payload"]["summaries"] == []
+    assert result["result"]["resolved_refs"] == []
+
+
+@pytest.mark.asyncio
+async def test_conversation_evidence_excludes_collapsed_active_turn_rows() -> None:
+    """Collapsed active-turn source messages should all be removed."""
+    agent = ConversationEvidenceAgent()
+    keyword_worker = _FakeWorker(
+        {
+            "resolved": True,
+            "result": [
+                {
+                    "body_text": "same body",
+                    "display_name": "Tester",
+                    "global_user_id": "user-1",
+                    "platform_message_id": "msg-1",
+                    "timestamp": "2026-05-02T00:00:00+00:00",
+                },
+                {
+                    "body_text": "same body",
+                    "display_name": "Tester",
+                    "global_user_id": "user-1",
+                    "platform_message_id": "msg-2",
+                    "timestamp": "2026-05-02T00:00:01+00:00",
+                },
+                {
+                    "body_text": "same body",
+                    "display_name": "Tester",
+                    "global_user_id": "user-1",
+                    "platform_message_id": "msg-old",
+                    "timestamp": "2026-05-01T23:59:00+00:00",
+                },
+            ],
+            "attempts": 1,
+            "cache": {"enabled": False, "hit": False, "reason": "open_range"},
+        }
+    )
+    agent.keyword_agent = keyword_worker
+
+    result = await agent.run(
+        'Conversation-evidence: find who said "same body"',
+        _base_context(active_turn_platform_message_ids=["msg-1", "msg-2"]),
+    )
+
+    assert result["resolved"] is True
+    assert result["result"]["projection_payload"]["summaries"] == [
+        "Tester at 2026-05-02 11:59: same body"
+    ]
+    assert {
+        "ref_type": "message",
+        "platform_message_id": "msg-old",
+        "timestamp": "2026-05-01T23:59:00+00:00",
+        "global_user_id": "user-1",
+        "display_name": "Tester",
+    } in result["result"]["resolved_refs"]
+
+
+@pytest.mark.asyncio
+async def test_conversation_evidence_keeps_row_without_message_id() -> None:
+    """Rows without platform message IDs should not be fallback-filtered."""
+    agent = ConversationEvidenceAgent()
+    keyword_worker = _FakeWorker(
+        {
+            "resolved": True,
+            "result": [
+                {
+                    "body_text": "active question",
+                    "display_name": "Tester",
+                    "global_user_id": "user-1",
+                    "timestamp": "2026-05-02T00:00:00+00:00",
+                }
+            ],
+            "attempts": 1,
+            "cache": {"enabled": False, "hit": False, "reason": "open_range"},
+        }
+    )
+    agent.keyword_agent = keyword_worker
+
+    result = await agent.run(
+        'Conversation-evidence: find who said "active question"',
+        _base_context(active_turn_platform_message_ids=["msg-current"]),
+    )
+
+    assert result["resolved"] is True
+    assert result["result"]["projection_payload"]["summaries"] == [
+        "Tester at 2026-05-02 12:00: active question"
+    ]
+    assert {
+        "ref_type": "message",
+        "platform_message_id": "",
+        "timestamp": "2026-05-02T00:00:00+00:00",
+        "global_user_id": "user-1",
+        "display_name": "Tester",
+    } in result["result"]["resolved_refs"]
+
+
+@pytest.mark.asyncio
 async def test_conversation_evidence_filter_uses_resolved_person_ref() -> None:
     """Known person refs should be passed as structured worker context."""
     agent = ConversationEvidenceAgent()

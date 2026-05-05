@@ -30,6 +30,7 @@ class GlobalPersonaState(TypedDict):
     platform_channel_id: str
     channel_type: str
     platform_message_id: str
+    active_turn_platform_message_ids: NotRequired[list[str]]
     platform_user_id: str
     global_user_id: str
     user_name: str

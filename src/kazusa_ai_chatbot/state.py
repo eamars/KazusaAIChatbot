@@ -57,6 +57,7 @@ class IMProcessState(TypedDict):
     # Platform identity
     platform: str                # "discord" | "qq" | "wechat" | etc.
     platform_message_id: str     # Original platform message ID when available
+    active_turn_platform_message_ids: NotRequired[list[str]]
     platform_user_id: str        # Original platform user ID (e.g. Discord snowflake)
     global_user_id: str          # Internal UUID4 from user_profiles collection
 

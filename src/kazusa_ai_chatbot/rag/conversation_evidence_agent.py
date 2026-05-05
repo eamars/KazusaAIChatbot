@@ -439,29 +439,54 @@ def _worker_context(
 def _projection_from_worker(
     worker_name: str,
     worker_result: dict[str, Any],
-) -> _ConversationProjection:
-    """Project one worker's explicit raw contract into capability evidence."""
+    context: dict[str, Any],
+) -> tuple[_ConversationProjection, int]:
+    """Project one worker's raw contract into capability evidence.
+
+    Args:
+        worker_name: Approved conversation worker name.
+        worker_result: Worker result containing the raw tool payload.
+        context: Runtime context used to remove active-turn source messages
+            before evidence is exposed downstream.
+
+    Returns:
+        Pair of canonical conversation projection and removed active-turn row
+        count.
+    """
+
     raw_result = worker_result.get("result")
 
     if worker_name == "conversation_search_agent":
         rows = _semantic_message_rows(raw_result)
-        projection = _message_projection(rows)
-        return projection
+        filtered_rows, excluded_count = _filter_active_turn_rows(
+            rows,
+            context,
+        )
+        projection = _message_projection(filtered_rows)
+        return_value = (projection, excluded_count)
+        return return_value
 
     if worker_name in {
         "conversation_keyword_agent",
         "conversation_filter_agent",
     }:
         rows = _plain_message_rows(raw_result)
-        projection = _message_projection(rows)
-        return projection
+        filtered_rows, excluded_count = _filter_active_turn_rows(
+            rows,
+            context,
+        )
+        projection = _message_projection(filtered_rows)
+        return_value = (projection, excluded_count)
+        return return_value
 
     if worker_name == "conversation_aggregate_agent":
         projection = _aggregate_projection(raw_result)
-        return projection
+        return_value = (projection, 0)
+        return return_value
 
     projection = _empty_projection()
-    return projection
+    return_value = (projection, 0)
+    return return_value
 
 
 def _empty_projection() -> _ConversationProjection:
@@ -506,6 +531,117 @@ def _plain_message_rows(value: object) -> list[dict[str, Any]]:
         if isinstance(row, dict)
     ]
     return rows
+
+
+def _active_turn_message_ids(context: dict[str, Any]) -> set[str]:
+    """Return platform message IDs that belong to the active graph turn.
+
+    Args:
+        context: Runtime context passed to the conversation capability.
+
+    Returns:
+        Non-empty platform message IDs for the message or collapsed messages
+        currently being answered.
+    """
+
+    raw_ids = context.get("active_turn_platform_message_ids")
+    if not isinstance(raw_ids, list):
+        return_value: set[str] = set()
+        return return_value
+
+    message_ids = {
+        message_id
+        for raw_id in raw_ids
+        if (message_id := text_or_empty(raw_id))
+    }
+    return_value = message_ids
+    return return_value
+
+
+def _row_scope_matches_context(
+    row: dict[str, Any],
+    context: dict[str, Any],
+) -> bool:
+    """Return whether an active-row match stays within the current scope.
+
+    Args:
+        row: Conversation message row returned by a worker.
+        context: Runtime context passed to the conversation capability.
+
+    Returns:
+        True when row platform/channel metadata does not contradict the
+        current RAG context.
+    """
+
+    row_platform = text_or_empty(row.get("platform"))
+    context_platform = text_or_empty(context.get("platform"))
+    if row_platform and row_platform != context_platform:
+        return_value = False
+        return return_value
+
+    row_channel = text_or_empty(row.get("platform_channel_id"))
+    context_channel = text_or_empty(context.get("platform_channel_id"))
+    if row_channel and row_channel != context_channel:
+        return_value = False
+        return return_value
+
+    return_value = True
+    return return_value
+
+
+def _is_active_turn_row(
+    row: dict[str, Any],
+    context: dict[str, Any],
+) -> bool:
+    """Return whether a message row belongs to the active graph turn.
+
+    Args:
+        row: Conversation message row returned by a worker.
+        context: Runtime context passed to the conversation capability.
+
+    Returns:
+        True when the row's platform message ID is one of the active-turn
+        source message IDs and its scope does not contradict the context.
+    """
+
+    active_ids = _active_turn_message_ids(context)
+    if not active_ids:
+        return_value = False
+        return return_value
+
+    row_message_id = text_or_empty(row.get("platform_message_id"))
+    if not row_message_id or row_message_id not in active_ids:
+        return_value = False
+        return return_value
+
+    return_value = _row_scope_matches_context(row, context)
+    return return_value
+
+
+def _filter_active_turn_rows(
+    rows: list[dict[str, Any]],
+    context: dict[str, Any],
+) -> tuple[list[dict[str, Any]], int]:
+    """Remove active-turn source rows before evidence projection.
+
+    Args:
+        rows: Conversation message rows extracted from a worker result.
+        context: Runtime context passed to the conversation capability.
+
+    Returns:
+        Pair of filtered rows and number of removed active-turn rows.
+    """
+
+    filtered_rows: list[dict[str, Any]] = []
+    excluded_count = 0
+    for row in rows:
+        if _is_active_turn_row(row, context):
+            excluded_count += 1
+            continue
+        filtered_rows.append(row)
+
+    return_value = (filtered_rows, excluded_count)
+    return return_value
 
 
 def _message_projection(rows: list[dict[str, Any]]) -> _ConversationProjection:
@@ -770,7 +906,11 @@ class ConversationEvidenceAgent(BaseRAGHelperAgent):
             max_attempts=1,
         )
         worker_payloads = {primary_worker: worker_result}
-        projection = _projection_from_worker(primary_worker, worker_result)
+        projection, excluded_count = _projection_from_worker(
+            primary_worker,
+            worker_result,
+            context_for_worker,
+        )
         summaries = projection["summaries"]
         selected_summary = "\n".join(summaries[:5])
         resolved_refs = projection["resolved_refs"]
@@ -795,6 +935,12 @@ class ConversationEvidenceAgent(BaseRAGHelperAgent):
             f"selected_summary={payload['selected_summary']} "
             f"cache_reason={_UNCACHED_REASON}"
         )
+        if excluded_count:
+            logger.info(
+                f"{_AGENT_NAME} active-turn rows excluded: "
+                f"primary_worker={primary_worker} "
+                f"excluded_active_turn_rows={excluded_count}"
+            )
         logger.debug(
             f"{_AGENT_NAME} debug: resolved_refs={resolved_refs} "
             f"projection_payload={payload['projection_payload']} "

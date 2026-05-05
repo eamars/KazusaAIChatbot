@@ -534,6 +534,30 @@ def _primary_interaction_busy() -> bool:
     return return_value
 
 
+def _active_turn_platform_message_ids(item: QueuedChatItem) -> list[str]:
+    """Build the platform message ID list answered by one graph turn.
+
+    Args:
+        item: Surviving queued item that will run through the chat graph.
+
+    Returns:
+        Non-empty platform message IDs from the survivor and collapsed
+        follow-ups, deduplicated in arrival order.
+    """
+
+    seen: set[str] = set()
+    active_ids: list[str] = []
+    for queued_item in [item, *item.collapsed_items]:
+        message_id = str(queued_item.request.platform_message_id or "").strip()
+        if not message_id or message_id in seen:
+            continue
+        seen.add(message_id)
+        active_ids.append(message_id)
+
+    return_value = active_ids
+    return return_value
+
+
 async def _save_user_message_from_item(
     item: QueuedChatItem,
     *,
@@ -763,6 +787,7 @@ async def _process_queued_chat_item(item: QueuedChatItem) -> None:
             multimedia_input=multimedia_input,
         )
         is_collapsed_turn = bool(item.collapsed_items)
+        active_turn_platform_message_ids = _active_turn_platform_message_ids(item)
         character_profile = dict(_personality)
         character_profile["global_user_id"] = character_global_user_id
 
@@ -785,6 +810,7 @@ async def _process_queued_chat_item(item: QueuedChatItem) -> None:
             "time_context": time_context,
             "platform": req.platform,
             "platform_message_id": req.platform_message_id,
+            "active_turn_platform_message_ids": active_turn_platform_message_ids,
             "platform_user_id": req.platform_user_id,
             "global_user_id": global_user_id,
             "user_name": req.display_name,
