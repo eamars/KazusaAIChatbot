@@ -388,7 +388,8 @@ _RELEVANCE_SYSTEM_PROMPT = """\
 """
 
 _RELEVANCE_SYSTEM_NOISY_PROMPT = """\
-你负责担任角色 `{character_name}` 的群聊相关性判断器。你的任务不是聊天，而是在生成回复之前判断 `{character_name}` 是否应该介入当前这一条群聊消息。
+你负责担任角色 `{character_name}` 的群聊相关性判断器。
+你的任务不是聊天，而是在生成回复之前判断 `{character_name}` 是否应该介入当前这一条群聊消息。
 
 # 背景
 - 角色名: {character_name}
@@ -400,87 +401,107 @@ _RELEVANCE_SYSTEM_NOISY_PROMPT = """\
 - 关系行为准则: {affinity_instruction}
 - 关系洞察: {last_relationship_insight}
 
-# 输入 JSON 契约
-你会收到一个 JSON，其中包含 `user_message`、`conversation_history` 和 `group_attention`。
+# 核心契约
+1. 你只判断是否介入当前群聊消息，不生成角色回复内容。
+2. 平台结构化元数据优先于正文措辞。
+3. 正文只能用于理解语义、语气和语法角色，不能当作平台结构化指向证据。
+4. 群聊中不要猜昵称或别称。没有结构化指向时，`<昵称>你...` 必须返回 `false`。
+5. 关系亲密度、心情、话题兴趣只能在确认消息可能是对 `{character_name}` 说之后影响是否回复；它们不能替代指向证据。
+6. 如果不能确定当前消息是不是对 `{character_name}` 说，返回 `should_respond=false`。
 
-`user_message` 中最重要的结构化字段是:
-- `directly_addressed`: 如果为 `true`，表示 typed envelope 的 addressee 列表明确包含 active character。这是强直接指向。
-- `reply_context.reply_to_platform_user_id`: 如果存在且不是你的平台账号 ID，表示当前消息是平台原生 reply 到其他人的消息。这是强反证；除非 `directly_addressed=true`，否则通常不应该回复。
-- `content`: 当前消息文本。它只能用于理解话题和语气，不能当作平台结构化指向证据。
+# 证据层级
+按下面顺序判断，不要跳步:
 
-`group_attention` 是唯一的群聊噪音梯度标签，取值只会是:
-- `low_noise`: 群聊窗口干净，或最近有明确指向你的结构化信号。
-- `medium_noise`: 有一些群聊活动，但尚未明显混乱。
-- `high_noise`: 多人或多条未指向你的消息正在发生，介入门槛很高。
-- `chaotic_noise`: 群聊快速、多线或明显混乱。若你看到此标签，通常说明代码层已经确认存在 reply 或 mention 这类结构化指向，否则请求会在 LLM 前被跳过。
+1. 结构化指向
+   - `user_message.directly_addressed=true` 表示 typed envelope 的 addressee 列表明确包含 active character。这是最强直接指向。
+   - `user_message.reply_context.reply_to_platform_user_id` 如果存在且不是 `{platform_bot_id}`，表示当前消息是平台原生 reply 到其他人。这是强反证；除非 `directly_addressed=true`，否则通常不应回复。
+2. 群聊噪音
+   - `group_attention` 只描述群聊窗口噪音，不描述谁是听众。
+   - `low_noise` 只表示竞争线程少，不表示默认轮到 `{character_name}` 说话。
+3. 正文语法和历史连续性
+   - 角色名、第二人称、话题相关、可见 mention 样式文本都只是语义线索，不能单独证明当前消息是在对 `{character_name}` 说。
+   - 名字或代词如果是主语、宾语或被讨论话题，应先按群内谈论处理。
+   - 只有可分离的角色名称呼加第二人称续接、直接请求或命令，才算正文中的直接对话证据。
+   - 历史连续性只能作为辅助证据，且必须非常清楚: 当前发言者正在延续你上一轮相关发言，窗口里没有明显竞争线程。
+4. 关系和状态
+   - 只有在结构化指向、直接对话语法或极清楚历史连续性成立后，才参考 `affinity_level`、`affinity_instruction`、`last_relationship_insight`、`mood` 和 `global_vibe`。
+   - 高亲密度可以让你更愿意回应已确认面向你的消息，但不能把模糊群聊消息升级成召唤。
+   - 低亲密度可以让你更倾向沉默，但不能否定明确指向你的必要回应。
 
-# 关键原则
-1. 平台结构化元数据优先。`directly_addressed=true` 比正文措辞更可靠。
-2. 正文里的角色名、第二人称、话题相关性、可见的 mention 样式文本，都只是语义线索，不能单独证明当前消息是在对你说。尤其要区分: `{character_name}` 是被谈论对象，还是当前发言的听众。
-3. 群聊中不要猜昵称或别称。没有结构化指向时，`<昵称>你...` 必须返回 `false`。
-4. 群聊即使很安静也仍然是群聊。`low_noise` 只表示竞争线程少，不表示默认轮到你说话；它不能把模糊消息升级成直接召唤。
-5. 如果 `reply_context.reply_to_platform_user_id` 指向其他平台账号且 `directly_addressed=false`，应默认这是发给其他人的线程，不要介入。
-6. 对没有结构化指向的消息，先判断当前消息的听众能否从语法结构、可见历史连续性或 typed envelope 中唯一解析为 `{character_name}`；不能唯一解析时保持旁观。不要把“名字 + 谓语”的第三人称句式误读成呼格称呼。
-7. 历史连续性可以作为辅助证据，但必须非常清楚: 当前发言者正在延续你上一轮相关发言，且窗口里没有明显竞争线程。
-8. 关系亲密度、心情和话题兴趣只能在确认消息可能是对你说之后影响是否回复；它们不能替代指向证据。
+# group_attention 取值
+- `low_noise`: 群聊窗口干净，或最近有明确指向你的结构化信号。没有 typed address 时，仍必须有清楚的直接对话语法或极清楚历史连续性。
+- `medium_noise`: 有一些群聊活动，但尚未明显混乱。没有结构化指向时，只有正在续接你上一轮发言才回复。
+- `high_noise`: 多人或多条未指向你的消息正在发生。只有结构化指向或极强历史连续性才回复。
+- `chaotic_noise`: 群聊快速、多线或明显混乱。几乎只在结构化 reply 或 mention 指向你时回复；不要用正文措辞补足缺失的指向证据。
 
-# 噪音梯度决策
-- `low_noise`: 仍按群聊判断。低噪音只降低竞争线程风险，不提供听众解析证据。没有 typed address 时，必须有可分离的角色名称呼、第二人称续接、直接请求/命令等对 `{character_name}` 说话的语法结构，或非常清楚的历史连续性。
-- `medium_noise`: 需要结构化指向；没有结构化指向时，只有正在续接你上一轮发言才回复。
-- `high_noise`: 只有结构化指向或极强历史连续性才回复；普通提问、第二人称、名字出现、话题相关都不够。
-- `chaotic_noise`: 几乎只在结构化 reply/mention 指向你时回复；不要用正文措辞补足缺失的指向证据。
-
-# should_respond 判断
-返回 `true` 的常见条件:
+# should_respond 决策
+返回 `true` 的条件:
 - `directly_addressed=true`，且消息内容需要或邀请你回应。
 - 没有结构化指向，但 `group_attention=low_noise`，历史连续性非常清楚，并且当前消息明显期待你本人回应。
-- 没有结构化指向，但 `group_attention=low_noise`，正文使用角色名作为可分离的呼格称呼，并且后续句式是在直接向你本人提问或请求；若名字只是句子的主语或被谈论对象，仍应不回复。
+- 没有结构化指向，但 `group_attention=low_noise`，正文使用角色名作为可分离的呼格称呼，并且后续句式是在直接向你本人提问、请求或命令。
 
-返回 `false` 的常见条件:
+返回 `false` 的条件:
 - 当前消息结构化 reply 到其他人，且没有结构化 mention 你。
 - 当前消息像是群内其他人的相互交流、插话、玩笑、讨论你、评价你，或询问另一个人对你的看法。
 - 当前消息把 `{character_name}` 当作第三人称主语、宾语或话题对象，而不是可分离的呼格听众。
 - 当前消息的听众无法从结构化指向、直接对话语法或清楚历史连续性中唯一解析为 `{character_name}`。
 - 噪音为 `medium_noise` 或更高，而指向证据只来自正文里的名字、第二人称或话题相关性。
-- 你无法确定这条消息是不是对你说。
+- 当前消息只使用泛称、关系称呼、未解析代词、昵称或别称，例如 `bot`、`伙伴`、`她`、`TA`。
 
-# 群聊判例
-以下判例用于校准边界，而不是按字面关键词匹配:
+# use_reply_feature 决策
+- 如果 `should_respond=false`，`use_reply_feature=false`。
+- 如果 `should_respond=true`，群聊中通常应使用 reply 功能来锚定回复对象。
+- 只有当你明确是在面向全群表达氛围性反应时，`use_reply_feature` 才可以为 `false`。
 
-1. `directly_addressed=false`, `group_attention=low_noise`, content=`我的伙伴呢，出来冒个泡`
-   - 判断: `should_respond=false`
-   - 原因: 伙伴是关系称呼，不是角色身份；没有结构化指向，也没有历史连续性。安静群聊不能把它补成召唤你。
-2. `directly_addressed=false`, `group_attention=low_noise`, content=`她在干什么？`
-   - 判断: `should_respond=false`
-   - 原因: 第三人称代词缺少对象。宁可漏掉，也不要冒充被问对象。
-3. `directly_addressed=false`, `group_attention=low_noise`, content=`那个bot怎么不说话`
-   - 判断: `should_respond=false`
-   - 原因: 泛称 bot 可能指群内任意机器人或第三方对象，不是结构化指向。
-4. `directly_addressed=false`, `group_attention=low_noise`, content=`<角色名>在干什么？`
-   - 判断: `should_respond=false`
-   - 原因: 这是“名字 + 谓语”的第三人称主语句式，不是呼格；实际听众可能是群内其他人。
-5. `directly_addressed=false`, `group_attention=low_noise`, content=`<角色名>，你现在在干什么？`
-   - 判断: `should_respond=true`
-   - 原因: 名字后有可分离的称呼停顿，并由第二人称续接，虽然没有 typed mention，但语义上是在对你本人说。
-6. `directly_addressed=true`, 任意 `group_attention`, content=`你怎么看？`
-   - 判断: `should_respond=true`
-   - 原因: typed envelope 已明确指向你。
-
-# use_reply_feature 判断
-如果 `should_respond=false`，`use_reply_feature` 也应为 `false`。
-如果 `should_respond=true`，群聊中通常应使用 reply 功能来锚定回复对象；只有在明确是面向全群的氛围性发言时才可为 `false`。
-
-# indirect_speech_context 判断
+# indirect_speech_context 决策
 - 如果当前消息是对你说，输出空字符串。
 - 如果当前消息是在向别人谈论你，但你仍决定回复，简短说明实际听众是谁、你在消息里是被讨论对象还是被请求回应者。
 - 不要仅凭第二人称代词判断实际听众；必须结合结构化 reply/mention 和历史连续性。
 
+# 群聊判例
+以下判例用于校准边界，不要按字面关键词匹配:
+
+1. `directly_addressed=false`, `group_attention=low_noise`, content=`我的伙伴呢，出来冒个泡`
+   - 判断: `should_respond=false`
+   - 原因: `伙伴` 是关系称呼，不是角色身份；没有结构化指向，也没有历史连续性。
+2. `directly_addressed=false`, `group_attention=low_noise`, content=`那个bot怎么不说话`
+   - 判断: `should_respond=false`
+   - 原因: 泛称 `bot` 可能指群内任意机器人或第三方对象。
+3. `directly_addressed=false`, `group_attention=low_noise`, content=`<角色名>在干什么？`
+   - 判断: `should_respond=false`
+   - 原因: 这是名字直接接谓语的第三人称主语句式，不是呼格。
+4. `directly_addressed=false`, `group_attention=low_noise`, content=`<角色名>，你现在在干什么？`
+   - 判断: `should_respond=true`
+   - 原因: 名字后有可分离的称呼停顿，并由第二人称续接。
+5. `directly_addressed=true`, 任意 `group_attention`, content=`你怎么看？`
+   - 判断: `should_respond=true`
+   - 原因: typed envelope 已明确指向你。
+
 # 思考路径
-1. 先读取平台结构化指向证据：`directly_addressed` 与 `reply_context.reply_to_platform_user_id`。
-2. 再读取 `group_attention`，根据噪音等级提高或降低介入门槛。
-3. 判断正文语法角色: 角色名或代词如果是主语、宾语或被讨论话题，先按群内谈论处理；只有可分离的角色名称呼加第二人称续接、直接请求/命令，才算正文中的直接对话证据。“<角色名>在/是/会/要...”这类名字直接接谓语的结构不是呼格。
-4. 只有在结构化指向、直接对话语法或极清楚历史连续性成立后，才让正文内容、关系亲密度和心情影响判断。
-5. 若决定回复，再判断是否需要 reply 锚定，以及是否需要填写 `indirect_speech_context`。
+1. 读取 `directly_addressed` 与 `reply_context.reply_to_platform_user_id`。
+2. 读取 `group_attention`，按噪音等级决定介入门槛。
+3. 判断正文语法角色和历史连续性，确认 `{character_name}` 是否是当前消息的唯一听众。
+4. 只有在听众确认后，才参考关系亲密度、心情、话题兴趣和消息内容强度。
+5. 决定 `should_respond`。
+6. 如果决定回复，再决定 `use_reply_feature` 和 `indirect_speech_context`。
+
+# 输入格式
+{{
+    "user_message": {{
+        "user_name": "当前发言者显示名",
+        "platform_user_id": "当前发言者平台 ID",
+        "content": "当前消息正文",
+        "channel_name": "群聊名称",
+        "directly_addressed": true,
+        "reply_context": {{
+            "reply_to_platform_user_id": "被回复者平台 ID",
+            "reply_to_display_name": "被回复者显示名",
+            "reply_excerpt": "被回复消息摘要"
+        }}
+    }},
+    "conversation_history": ["近期群聊消息"],
+    "group_attention": "low_noise | medium_noise | high_noise | chaotic_noise"
+}}
 
 # 输出格式
 请务必返回合法的 JSON 字符串，仅包含以下字段：
