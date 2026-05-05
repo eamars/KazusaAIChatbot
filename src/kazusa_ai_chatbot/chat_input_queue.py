@@ -286,7 +286,14 @@ class ChatInputQueue:
         self,
         waiting_items: list[QueuedChatItem],
     ) -> tuple[list[QueuedChatItem], list[tuple[QueuedChatItem, QueuedChatItem]]]:
-        """Collapse queued private follow-ups by private user scope.
+        """Collapse only adjacent private follow-ups from the same user.
+
+        A private message may collapse into the immediately active survivor
+        only when both queued items share platform, private channel, and
+        platform user id. Any listen-only item, non-private item, or private
+        item from a different scope breaks adjacency. A repeated non-empty
+        platform message id is treated as a duplicate delivery, not a
+        follow-up, so it remains a separate survivor.
 
         Args:
             waiting_items: Ordered list of queued items that are not processing.
@@ -303,7 +310,14 @@ class ChatInputQueue:
         self,
         waiting_items: list[QueuedChatItem],
     ) -> tuple[list[QueuedChatItem], list[tuple[QueuedChatItem, QueuedChatItem]]]:
-        """Collapse same-author group runs that start by addressing the bot.
+        """Collapse only adjacent addressed group follow-ups from one user.
+
+        A group run may collapse only while queued items remain consecutive,
+        share platform, group channel, and platform user id, and each adjacent
+        timestamp gap is within the configured collapse window. The first item
+        in the run must structurally mention the bot or reply to the character.
+        A repeated non-empty platform message id breaks the run so duplicate
+        deliveries are not treated as user follow-ups.
 
         Args:
             waiting_items: Ordered list of queued items after private coalescing.
@@ -379,30 +393,56 @@ class ChatInputQueue:
         self,
         waiting_items: list[QueuedChatItem],
     ) -> tuple[list[QueuedChatItem], list[tuple[QueuedChatItem, QueuedChatItem]]]:
-        """Collapse queued private follow-ups by private user scope."""
+        """Apply the adjacency-only private follow-up collapse rule."""
 
         survivors: list[QueuedChatItem] = []
         collapsed: list[tuple[QueuedChatItem, QueuedChatItem]] = []
-        private_survivors: dict[tuple[str, str, str], QueuedChatItem] = {}
+        active_survivor: QueuedChatItem | None = None
+        active_message_ids: set[str] = set()
 
         for item in waiting_items:
             if item.request.debug_modes.listen_only:
                 survivors.append(item)
+                active_survivor = None
+                active_message_ids = set()
                 continue
 
             if not self.is_private_message(item):
                 survivors.append(item)
+                active_survivor = None
+                active_message_ids = set()
                 continue
 
-            scope = self._private_message_scope(item)
-            survivor = private_survivors.get(scope)
-            if survivor is None:
-                private_survivors[scope] = item
+            item_message_id = item.request.platform_message_id
+            if active_survivor is None:
+                active_survivor = item
+                active_message_ids = set()
+                if item_message_id:
+                    active_message_ids.add(item_message_id)
                 survivors.append(item)
                 continue
 
-            self._append_collapsed_item(survivor, item)
-            collapsed.append((item, survivor))
+            if (
+                self._private_message_scope(active_survivor)
+                != self._private_message_scope(item)
+            ):
+                active_survivor = item
+                active_message_ids = set()
+                if item_message_id:
+                    active_message_ids.add(item_message_id)
+                survivors.append(item)
+                continue
+
+            if item_message_id and item_message_id in active_message_ids:
+                active_survivor = item
+                active_message_ids = {item_message_id}
+                survivors.append(item)
+                continue
+
+            self._append_collapsed_item(active_survivor, item)
+            collapsed.append((item, active_survivor))
+            if item_message_id:
+                active_message_ids.add(item_message_id)
 
         return_value = (survivors, collapsed)
         return return_value
@@ -469,7 +509,7 @@ class ChatInputQueue:
         self,
         waiting_items: list[QueuedChatItem],
     ) -> tuple[list[QueuedChatItem], list[tuple[QueuedChatItem, QueuedChatItem]]]:
-        """Collapse same-author group runs that start by addressing the bot."""
+        """Apply the addressed same-author adjacent group collapse rule."""
 
         survivors: list[QueuedChatItem] = []
         collapsed: list[tuple[QueuedChatItem, QueuedChatItem]] = []
@@ -477,15 +517,27 @@ class ChatInputQueue:
 
         while index < len(waiting_items):
             run = [waiting_items[index]]
+            run_message_ids: set[str] = set()
+            run_message_id = run[0].request.platform_message_id
+            if run_message_id:
+                run_message_ids.add(run_message_id)
             next_index = index + 1
             while next_index < len(waiting_items):
                 previous = run[-1]
                 candidate = waiting_items[next_index]
+                candidate_message_id = candidate.request.platform_message_id
                 if not self._same_group_author(previous, candidate):
                     break
                 if not self._group_gap_is_coalescible(previous, candidate):
                     break
+                if (
+                    candidate_message_id
+                    and candidate_message_id in run_message_ids
+                ):
+                    break
                 run.append(candidate)
+                if candidate_message_id:
+                    run_message_ids.add(candidate_message_id)
                 next_index += 1
 
             survivor = run[0]

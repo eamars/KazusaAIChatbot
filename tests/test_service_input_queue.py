@@ -96,6 +96,7 @@ def _request(
 def _item(
     sequence: int,
     *,
+    platform_message_id: str | None = None,
     channel_type: str = "group",
     platform_channel_id: str = "chan-1",
     platform_user_id: str | None = None,
@@ -112,6 +113,8 @@ def _item(
 
     Args:
         sequence: Queue sequence number.
+        platform_message_id: Optional platform message id, for duplicate
+            delivery fixtures where the queue sequence must remain distinct.
         content: Message body; empty string is preserved for media-only input.
         content_type: Adapter-provided content type.
         attachments: Adapter-provided attachment payloads.
@@ -130,7 +133,7 @@ def _item(
     item = queue_module.QueuedChatItem(
         sequence=sequence,
         request=_request(
-            str(sequence),
+            platform_message_id or str(sequence),
             channel_type=channel_type,
             platform_channel_id=platform_channel_id,
             platform_user_id=platform_user_id,
@@ -374,6 +377,75 @@ async def test_private_messages_same_scope_coalesce() -> None:
 
 
 @pytest.mark.asyncio
+async def test_private_messages_require_adjacency_to_coalesce() -> None:
+    """Private follow-ups separated by another scope should not collapse."""
+
+    first = _item(
+        1,
+        channel_type="private",
+        platform_channel_id="dm-1",
+        platform_user_id="user-1",
+        content="first",
+    )
+    other_scope = _item(
+        2,
+        channel_type="private",
+        platform_channel_id="dm-2",
+        platform_user_id="user-2",
+        content="other scope",
+    )
+    later_same_scope = _item(
+        3,
+        channel_type="private",
+        platform_channel_id="dm-1",
+        platform_user_id="user-1",
+        content="later same scope",
+    )
+
+    queue = queue_module.ChatInputQueue()
+    survivors, collapsed = queue.coalesce_private([
+        first,
+        other_scope,
+        later_same_scope,
+    ])
+
+    assert [item.sequence for item in survivors] == [1, 2, 3]
+    assert collapsed == []
+    assert first.collapsed_items == []
+    assert first.combined_content is None
+
+
+@pytest.mark.asyncio
+async def test_duplicate_private_platform_message_ids_do_not_coalesce() -> None:
+    """Duplicate private deliveries should not be treated as follow-ups."""
+
+    first = _item(
+        1,
+        platform_message_id="same-message",
+        channel_type="private",
+        platform_channel_id="dm-1",
+        platform_user_id="user-1",
+        content="first delivery",
+    )
+    duplicate = _item(
+        2,
+        platform_message_id="same-message",
+        channel_type="private",
+        platform_channel_id="dm-1",
+        platform_user_id="user-1",
+        content="duplicate delivery",
+    )
+
+    queue = queue_module.ChatInputQueue()
+    survivors, collapsed = queue.coalesce_private([first, duplicate])
+
+    assert [item.sequence for item in survivors] == [1, 2]
+    assert collapsed == []
+    assert first.collapsed_items == []
+    assert first.combined_content is None
+
+
+@pytest.mark.asyncio
 async def test_addressed_group_followups_coalesce() -> None:
     """Addressed-start same-author group follow-ups should collapse."""
 
@@ -408,6 +480,34 @@ async def test_addressed_group_followups_coalesce() -> None:
         (3, 1),
     ]
     assert first.combined_content == "Kazusa,\none more detail\nand another"
+
+
+@pytest.mark.asyncio
+async def test_duplicate_group_platform_message_ids_do_not_coalesce() -> None:
+    """Duplicate group deliveries should not be treated as follow-ups."""
+
+    first = _item(
+        1,
+        platform_message_id="same-message",
+        platform_user_id="user-1",
+        content="Kazusa,",
+        direct_address=True,
+    )
+    duplicate = _item(
+        2,
+        platform_message_id="same-message",
+        platform_user_id="user-1",
+        content="Kazusa,",
+        direct_address=True,
+    )
+
+    queue = queue_module.ChatInputQueue()
+    survivors, collapsed = queue.coalesce_addressed_group([first, duplicate])
+
+    assert [item.sequence for item in survivors] == [1, 2]
+    assert collapsed == []
+    assert first.collapsed_items == []
+    assert first.combined_content is None
 
 
 @pytest.mark.asyncio
