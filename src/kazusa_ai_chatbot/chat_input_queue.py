@@ -386,6 +386,10 @@ class ChatInputQueue:
         private_survivors: dict[tuple[str, str, str], QueuedChatItem] = {}
 
         for item in waiting_items:
+            if item.request.debug_modes.listen_only:
+                survivors.append(item)
+                continue
+
             if not self.is_private_message(item):
                 survivors.append(item)
                 continue
@@ -439,6 +443,8 @@ class ChatInputQueue:
         return_value = (
             self.is_group_message(first)
             and self.is_group_message(second)
+            and not first.request.debug_modes.listen_only
+            and not second.request.debug_modes.listen_only
             and first.request.platform == second.request.platform
             and first.request.platform_channel_id == second.request.platform_channel_id
             and first.request.platform_user_id == second.request.platform_user_id
@@ -504,8 +510,13 @@ class ChatInputQueue:
     ) -> tuple[list[QueuedChatItem], list[QueuedChatItem]]:
         """Apply the global input-queue pruning policy to waiting items."""
 
-        survivors = list(waiting_items)
+        survivors: list[QueuedChatItem] = []
         dropped: list[QueuedChatItem] = []
+        for item in waiting_items:
+            if item.request.debug_modes.listen_only:
+                dropped.append(item)
+            else:
+                survivors.append(item)
 
         if len(survivors) > 2:
             kept = []
@@ -551,5 +562,9 @@ class ChatInputQueue:
                 dropped.extend(survivors[:-1])
                 survivors = survivors[-1:]
 
-        return_value = (survivors, dropped)
+        dropped_ids = {id(item) for item in dropped}
+        ordered_dropped = [
+            item for item in waiting_items if id(item) in dropped_ids
+        ]
+        return_value = (survivors, ordered_dropped)
         return return_value

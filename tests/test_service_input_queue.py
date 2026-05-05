@@ -25,6 +25,7 @@ def _request(
     message_envelope: dict[str, object] | None = None,
     direct_address: bool = False,
     bot_reply: bool = False,
+    listen_only: bool = False,
 ) -> service_module.ChatRequest:
     """Build a chat request for queue tests.
 
@@ -36,6 +37,7 @@ def _request(
         message_envelope: Optional typed envelope supplied by the adapter.
         direct_address: Whether the typed envelope directly mentions the bot.
         bot_reply: Whether the typed envelope addresses the character via reply.
+        listen_only: Whether the adapter marked the message as observation-only.
 
     Returns:
         ChatRequest with deterministic payload fields.
@@ -86,6 +88,7 @@ def _request(
         channel_name="Group",
         content_type=content_type,
         message_envelope=message_envelope,
+        debug_modes=service_module.DebugModesIn(listen_only=listen_only),
     )
     return request
 
@@ -103,6 +106,7 @@ def _item(
     timestamp: str | None = None,
     direct_address: bool = False,
     bot_reply: bool = False,
+    listen_only: bool = False,
 ) -> queue_module.QueuedChatItem:
     """Build a queued item for deterministic pruning tests.
 
@@ -114,6 +118,7 @@ def _item(
         message_envelope: Optional typed envelope supplied by the adapter.
         direct_address: Whether the envelope directly mentions the bot.
         bot_reply: Whether the envelope addresses the character via reply.
+        listen_only: Whether the adapter marked the message as observation-only.
 
     Returns:
         Queued chat item.
@@ -135,6 +140,7 @@ def _item(
             message_envelope=message_envelope,
             direct_address=direct_address,
             bot_reply=bot_reply,
+            listen_only=listen_only,
         ),
         timestamp=timestamp or f"2026-04-29T00:00:{sequence:02d}+00:00",
         future=future,
@@ -288,6 +294,42 @@ async def test_private_messages_are_not_pruned_as_group_noise() -> None:
 
     assert [item.sequence for item in survivors] == [2, 3]
     assert [item.sequence for item in dropped] == [1]
+
+
+@pytest.mark.asyncio
+async def test_listen_only_messages_are_dropped_under_threshold() -> None:
+    """Listen-only messages should drop without running graph pressure policy."""
+
+    plain_group = _item(1)
+    listen_only = _item(2, listen_only=True)
+
+    queue = queue_module.ChatInputQueue()
+    survivors, dropped = queue.prune([
+        plain_group,
+        listen_only,
+    ])
+
+    assert [item.sequence for item in survivors] == [1]
+    assert [item.sequence for item in dropped] == [2]
+
+
+@pytest.mark.asyncio
+async def test_listen_only_messages_do_not_trigger_active_pruning() -> None:
+    """Listen-only messages should not count toward active queue thresholds."""
+
+    plain_group = _item(1)
+    listen_only = _item(2, listen_only=True)
+    tagged_group = _item(3, direct_address=True)
+
+    queue = queue_module.ChatInputQueue()
+    survivors, dropped = queue.prune([
+        plain_group,
+        listen_only,
+        tagged_group,
+    ])
+
+    assert [item.sequence for item in survivors] == [1, 3]
+    assert [item.sequence for item in dropped] == [2]
 
 
 @pytest.mark.asyncio
@@ -545,6 +587,62 @@ async def test_dropped_message_never_invokes_graph(monkeypatch) -> None:
     assert graph_message_ids == ["2"]
 
     graph_can_finish.set()
+    await _reset_queue_state()
+
+
+@pytest.mark.asyncio
+async def test_worker_drops_listen_only_without_pruning_active_plain(monkeypatch) -> None:
+    """Listen-only rows should persist while active plain messages keep their turn."""
+
+    await _reset_queue_state()
+    call_order = []
+    graph_started = asyncio.Event()
+    graph_can_finish = asyncio.Event()
+
+    class _Graph:
+        """Record graph entry for active survivors."""
+
+        async def ainvoke(self, state):
+            call_order.append(f"graph:{state['platform_message_id']}")
+            graph_started.set()
+            await graph_can_finish.wait()
+            return {
+                "should_respond": False,
+                "use_reply_feature": False,
+                "final_dialog": [],
+                "future_promises": [],
+                "consolidation_state": None,
+            }
+
+    async def _save_conversation(doc):
+        call_order.append(f"save:{doc['platform_message_id']}")
+
+    monkeypatch.setattr(service_module, "save_conversation", _save_conversation)
+    _patch_common_dependencies(monkeypatch, _Graph())
+
+    plain_group = _item(1)
+    listen_only = _item(2, listen_only=True)
+    tagged_group = _item(3, direct_address=True)
+    service_module._chat_input_queue.extend_for_test([
+        plain_group,
+        listen_only,
+        tagged_group,
+    ])
+
+    service_module._ensure_chat_input_worker_started()
+    await service_module._chat_input_queue.notify_for_test()
+
+    listen_response = await asyncio.wait_for(listen_only.future, timeout=1.0)
+    await asyncio.wait_for(graph_started.wait(), timeout=1.0)
+
+    assert listen_response.messages == []
+    assert call_order[:3] == ["save:2", "save:1", "graph:1"]
+    assert not tagged_group.future.done()
+
+    graph_can_finish.set()
+    plain_response = await asyncio.wait_for(plain_group.future, timeout=1.0)
+    assert plain_response.messages == []
+
     await _reset_queue_state()
 
 

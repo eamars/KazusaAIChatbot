@@ -589,8 +589,8 @@ async def test_build_graph_skips_episode_state_loader_when_relevance_declines(mo
 
 
 @pytest.mark.asyncio
-async def test_chat_listen_only_keeps_boolean_should_respond(monkeypatch):
-    """Listen-only requests should skip thinking while preserving state defaults."""
+async def test_chat_listen_only_drops_before_graph(monkeypatch):
+    """Listen-only requests should persist and complete without graph work."""
 
     await _reset_queue_state()
     monkeypatch.setattr(service_module, "_personality", {"name": "Character"})
@@ -603,18 +603,17 @@ async def test_chat_listen_only_keeps_boolean_should_respond(monkeypatch):
     monkeypatch.setattr(service_module, "get_user_profile", AsyncMock(return_value={"affinity": 500}))
     monkeypatch.setattr(service_module, "get_conversation_history", AsyncMock(return_value=[]))
     monkeypatch.setattr(service_module, "_hydrate_reply_context", AsyncMock(return_value={}))
-    monkeypatch.setattr(service_module, "save_conversation", AsyncMock())
+    save_conversation = AsyncMock()
+    monkeypatch.setattr(service_module, "save_conversation", save_conversation)
 
-    captured_state = {}
+    class _Graph:
+        """Expose a mock graph entrypoint for listen-only assertions."""
 
-    class _CapturingGraph:
-        """Capture the initial state and emulate the listen-only graph result."""
+        def __init__(self):
+            self.ainvoke = AsyncMock(return_value={})
 
-        async def ainvoke(self, state):
-            captured_state.update(state)
-            return state
-
-    monkeypatch.setattr(service_module, "_graph", _CapturingGraph())
+    graph = _Graph()
+    monkeypatch.setattr(service_module, "_graph", graph)
 
     background_tasks = BackgroundTasks()
     response = await service_module.chat(
@@ -640,8 +639,8 @@ async def test_chat_listen_only_keeps_boolean_should_respond(monkeypatch):
         background_tasks,
     )
 
-    assert captured_state["should_respond"] is False
-    assert captured_state["use_reply_feature"] is True
     assert response.messages == []
     assert response.should_reply is False
+    graph.ainvoke.assert_not_awaited()
+    save_conversation.assert_awaited_once()
     await _reset_queue_state()

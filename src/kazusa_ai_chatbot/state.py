@@ -25,7 +25,7 @@ class ReplyContext(TypedDict, total=False):
 
 
 class DebugModes(TypedDict, total=False):
-    listen_only: bool      # Record data but skip thinking (no LLM calls beyond relevance)
+    listen_only: bool      # Record data but skip response graph processing
     think_only: bool       # Full pipeline but suppress dialog in response
     no_remember: bool      # Full pipeline but skip consolidation
 
