@@ -92,6 +92,7 @@ class IMProcessState(TypedDict):
     indirect_speech_context: str  # Only populated for Situation B (user talks about the character to others)
     conversation_episode_state: NotRequired[ConversationEpisodeStateDoc | None]
     conversation_progress: NotRequired[ConversationProgressPromptDoc]
+    promoted_reflection_context: NotRequired[dict]
 
     # Debug modes (optional, passed from ChatRequest)
     debug_modes: DebugModes

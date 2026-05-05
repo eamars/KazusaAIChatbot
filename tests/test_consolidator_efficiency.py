@@ -8,11 +8,13 @@ import pytest
 
 from kazusa_ai_chatbot.nodes import persona_supervisor2_consolidator as consolidator_module
 from kazusa_ai_chatbot.nodes import persona_supervisor2_consolidator_persistence as persistence_module
+from kazusa_ai_chatbot.time_context import build_character_time_context
 
 
 def _global_state() -> dict:
     return {
         "timestamp": "2026-04-27T00:00:00+12:00",
+        "time_context": build_character_time_context("2026-04-27T00:00:00+12:00"),
         "global_user_id": "user-1",
         "user_name": "User",
         "user_profile": {

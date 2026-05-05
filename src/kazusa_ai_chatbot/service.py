@@ -22,6 +22,7 @@ from kazusa_ai_chatbot.config import (
     CHAT_HISTORY_RECENT_LIMIT,
     CONVERSATION_HISTORY_LIMIT,
     RAG_CACHE2_MAX_ENTRIES,
+    REFLECTION_CYCLE_DISABLED,
     SCHEDULED_TASKS_ENABLED,
 )
 from kazusa_ai_chatbot.conversation_progress import (
@@ -72,6 +73,12 @@ from kazusa_ai_chatbot.nodes.persona_supervisor2_consolidator import call_consol
 from kazusa_ai_chatbot.nodes.persona_supervisor2_consolidator_persistence import configure_task_dispatcher
 from kazusa_ai_chatbot.rag.cache2_policy import INITIALIZER_CACHE_NAME
 from kazusa_ai_chatbot.rag.cache2_runtime import get_rag_cache2_runtime
+from kazusa_ai_chatbot.reflection_cycle import (
+    ReflectionWorkerHandle,
+    build_promoted_reflection_context,
+    start_reflection_cycle_worker,
+    stop_reflection_cycle_worker,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -513,6 +520,18 @@ _adapter_registry: AdapterRegistry | None = None
 _character_identity_backfilled: set[tuple[str, str, str]] = set()
 _chat_input_queue = ChatInputQueue()
 _chat_queue_worker_task: asyncio.Task | None = None
+_reflection_worker_handle: ReflectionWorkerHandle | None = None
+_primary_interaction_active_count = 0
+
+
+def _primary_interaction_busy() -> bool:
+    """Return whether chat or post-dialog work currently has priority."""
+
+    return_value = (
+        _primary_interaction_active_count > 0
+        or _chat_input_queue.pending_count() > 0
+    )
+    return return_value
 
 
 async def _save_user_message_from_item(
@@ -755,6 +774,11 @@ async def _process_queued_chat_item(item: QueuedChatItem) -> None:
         initial_use_reply_feature = not is_collapsed_turn
 
         time_context = build_character_time_context(item.timestamp)
+        try:
+            promoted_reflection_context = await build_promoted_reflection_context()
+        except Exception as exc:
+            logger.exception(f"Promoted reflection context load failed: {exc}")
+            promoted_reflection_context = {}
 
         initial_state: IMProcessState = {
             "timestamp": item.timestamp,
@@ -789,6 +813,7 @@ async def _process_queued_chat_item(item: QueuedChatItem) -> None:
             "target_broadcast": False,
             "future_promises": [],
             "consolidation_state": {},
+            "promoted_reflection_context": promoted_reflection_context,
         }
 
         await _save_user_message_from_item(
@@ -882,17 +907,23 @@ async def _chat_input_worker() -> None:
         None.
     """
 
+    global _primary_interaction_active_count
+
     while True:
         dequeued_turn = await _chat_input_queue.wait_for_next()
 
-        for dropped_item in dequeued_turn.dropped_items:
-            await _drop_queued_chat_item(dropped_item)
+        _primary_interaction_active_count += 1
+        try:
+            for dropped_item in dequeued_turn.dropped_items:
+                await _drop_queued_chat_item(dropped_item)
 
-        for collapsed_item, survivor in dequeued_turn.collapsed_items:
-            await _persist_collapsed_queued_chat_item(collapsed_item, survivor)
+            for collapsed_item, survivor in dequeued_turn.collapsed_items:
+                await _persist_collapsed_queued_chat_item(collapsed_item, survivor)
 
-        if dequeued_turn.next_item is not None:
-            await _process_queued_chat_item(dequeued_turn.next_item)
+            if dequeued_turn.next_item is not None:
+                await _process_queued_chat_item(dequeued_turn.next_item)
+        finally:
+            _primary_interaction_active_count -= 1
 
 
 def _ensure_chat_input_worker_started() -> None:
@@ -1113,6 +1144,7 @@ async def _hydrate_rag_initializer_cache() -> int:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     global _personality, _graph, _task_dispatcher, _adapter_registry
+    global _reflection_worker_handle
 
     # 1. Database bootstrap
     await db_bootstrap()
@@ -1164,11 +1196,22 @@ async def lifespan(app: FastAPI):
 
     logger.info(render_llm_route_table())
     _ensure_chat_input_worker_started()
+    if REFLECTION_CYCLE_DISABLED:
+        logger.info(
+            "Reflection cycle worker disabled via REFLECTION_CYCLE_DISABLED=true"
+        )
+    else:
+        _reflection_worker_handle = start_reflection_cycle_worker(
+            is_primary_interaction_busy=_primary_interaction_busy,
+        )
     logger.info("Kazusa brain service is ready")
 
     yield
 
     # Shutdown
+    if _reflection_worker_handle is not None:
+        await stop_reflection_cycle_worker(_reflection_worker_handle)
+        _reflection_worker_handle = None
     await _stop_chat_input_worker()
     if SCHEDULED_TASKS_ENABLED:
         await scheduler.shutdown()

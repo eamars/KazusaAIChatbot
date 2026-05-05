@@ -543,7 +543,11 @@ async def test_top_level_rag_selector_payload_projects_known_facts(
         payload_path = f"$.{module_name}._select_external_live_plan"
     else:
         monkeypatch.setattr(module, "_selector_llm", llm)
-    monkeypatch.setattr(module, "_deterministic_plan", lambda task: None)
+        monkeypatch.setattr(
+            module,
+            "_deterministic_plan",
+            lambda task, context=None: None,
+        )
     context = {
         "original_query": "selector test",
         "current_slot": "selector test",

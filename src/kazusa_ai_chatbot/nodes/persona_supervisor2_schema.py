@@ -42,6 +42,7 @@ class GlobalPersonaState(TypedDict):
     channel_topic: str
     conversation_episode_state: NotRequired[ConversationEpisodeStateDoc | None]
     conversation_progress: NotRequired[ConversationProgressPromptDoc]
+    promoted_reflection_context: NotRequired[dict]
 
     # Debug
     debug_modes: DebugModes
@@ -102,6 +103,7 @@ class CognitionState(TypedDict):
     indirect_speech_context: str
     channel_topic: str
     conversation_progress: NotRequired[ConversationProgressPromptDoc]
+    promoted_reflection_context: NotRequired[dict]
 
     decontexualized_input: str
     referents: list[ReferentResolution]

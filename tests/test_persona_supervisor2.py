@@ -7,12 +7,14 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from kazusa_ai_chatbot.nodes.persona_supervisor2 import persona_supervisor2, call_action_subgraph
+from kazusa_ai_chatbot.time_context import build_character_time_context
 
 
 def _base_discord_state():
     """Minimal IMProcessState with all required keys."""
     return {
         "timestamp": "2024-01-01T00:00:00Z",
+        "time_context": build_character_time_context("2024-01-01T00:00:00Z"),
         "user_name": "TestUser",
         "platform": "discord",
         "platform_message_id": "msg_123",

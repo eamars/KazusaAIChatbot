@@ -210,6 +210,7 @@ _COGNITION_CONSCIOUSNESS_PROMPT = """\
    - 先建立 referent：如果输入里存在称呼、别名、代词或多个可能对象，必须先根据研究资料确定每段证据分别对应谁，再开始推理。
    - 先分清证据的**主体**与**时间范围**：哪些信息描述当前用户，哪些描述其他人物/实体，哪些描述最近发生的事，哪些描述较稳定的长期印象；这些证据不可混用。
    - 当输入要求评价、判断或回忆某个对象时，应先使用**关于该对象本身**的证据形成判断，再让与当前用户的关系背景影响表达方式与社交包装。
+   - `promoted_reflection_context` 只包含已晋升的全局 lore 与 self_guidance。它可以作为角色世界观与长期回应习惯的软背景；不得把它当成当前用户事实，也不得用它覆盖本轮 Boundary Core 或当前检索证据。
 5. **显性回应：** 如果用户输入中包含明确的询问（Question）、请求（Request）或提议（Proposal），internal_monologue 必须明确包含你的决定或答案（例如：如果你同意吃蛋糕，你必须在内心独白里决定具体的口味）。
    - 只有在 `rag_result` 对当前问题确实缺少可用对象或答案时，才允许把行动意图落到 `CLARIFY`；如果已经存在可直接引用的对象级证据，就应优先形成回答或判断，而不是退回澄清。
 6. **中性守恒：** 对普通问候、事实告知、图片描述请求、日常约定等 Routine 输入，若缺乏明确越界证据，禁止将其解释为“试探”“操控”“调情”“施压”“契约”或“危险信号”。
@@ -299,6 +300,12 @@ _COGNITION_CONSCIOUSNESS_PROMPT = """\
         "external_evidence": [{{"summary": "外部检索摘要", "content": "网页正文摘录", "url": "https://example.com"}}],
         "supervisor_trace": {{"unknown_slots": ["未解决槽位"], "loop_count": 1}}
     }},
+    "promoted_reflection_context": {{
+        "promoted_lore": [{{"memory_name": "全局 lore 标题", "content": "全局 lore 内容"}}],
+        "promoted_self_guidance": [{{"memory_name": "回应习惯标题", "content": "角色未来回应方式"}}],
+        "source_dates": ["YYYY-MM-DD"],
+        "retrieval_notes": ["只包含已晋升反思记忆"]
+    }},
     "indirect_speech_context": "空字符串表示直接对话，非空表示用户是在向他人谈论角色",
     "emotional_appraisal": "潜意识直觉",
     "interaction_subtext": "潜意识产生的互动潜台词",
@@ -344,6 +351,7 @@ async def call_cognition_consciousness(state: CognitionState) -> CognitionState:
         "decontextualized_input": state["decontexualized_input"],
         "active_commitments": user_memory_context["active_commitments"],
         "rag_result": _cognition_rag_result(state["rag_result"]),
+        "promoted_reflection_context": state.get("promoted_reflection_context") or {},
         "indirect_speech_context": state["indirect_speech_context"],
         "emotional_appraisal": state["emotional_appraisal"],
         "interaction_subtext": state["interaction_subtext"],

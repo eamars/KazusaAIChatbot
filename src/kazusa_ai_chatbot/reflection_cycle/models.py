@@ -17,6 +17,19 @@ READONLY_REFLECTION_MONITOR_ELIGIBILITY_HOURS = 24
 READONLY_REFLECTION_FALLBACK_LOOKBACK_HOURS = 168
 READONLY_REFLECTION_DAILY_SLOT_TEXT_CHARS = 180
 READONLY_REFLECTION_PROMPT_VERSION = "readonly_reflection_v1"
+REFLECTION_RUN_KIND_HOURLY = "hourly_slot"
+REFLECTION_RUN_KIND_DAILY_CHANNEL = "daily_channel"
+REFLECTION_RUN_KIND_DAILY_GLOBAL_PROMOTION = "daily_global_promotion"
+REFLECTION_STATUS_SUCCEEDED = "succeeded"
+REFLECTION_STATUS_FAILED = "failed"
+REFLECTION_STATUS_SKIPPED = "skipped"
+REFLECTION_STATUS_DRY_RUN = "dry_run"
+REFLECTION_TERMINAL_STATUSES = {
+    REFLECTION_STATUS_SUCCEEDED,
+    REFLECTION_STATUS_FAILED,
+    REFLECTION_STATUS_SKIPPED,
+    REFLECTION_STATUS_DRY_RUN,
+}
 
 
 HOURLY_REQUIRED_FIELDS = (
@@ -122,3 +135,35 @@ class ReflectionEvaluationResult:
     hourly_results: list[ReflectionLLMResult]
     daily_results: list[DailySynthesisResult]
     artifact_path: Path
+
+
+@dataclass
+class ReflectionWorkerResult:
+    """Summary from one production reflection worker pass."""
+
+    run_kind: str
+    dry_run: bool
+    processed_count: int = 0
+    succeeded_count: int = 0
+    failed_count: int = 0
+    skipped_count: int = 0
+    deferred: bool = False
+    defer_reason: str = ""
+    run_ids: list[str] = field(default_factory=list)
+    validation_warnings: list[str] = field(default_factory=list)
+
+
+@dataclass
+class ReflectionPromotionResult(ReflectionWorkerResult):
+    """Summary from one global promotion pass."""
+
+    promotion_decisions: list[dict[str, Any]] = field(default_factory=list)
+    memory_mutations: list[dict[str, Any]] = field(default_factory=list)
+
+
+@dataclass
+class ReflectionWorkerHandle:
+    """Process-local worker task and stop signal owned by FastAPI lifespan."""
+
+    task: Any
+    stop_event: Any

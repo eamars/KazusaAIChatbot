@@ -107,6 +107,7 @@ async def call_cognition_subgraph(state: GlobalPersonaState) -> GlobalPersonaSta
         "indirect_speech_context": state["indirect_speech_context"],
         "channel_topic": state["channel_topic"],
         "conversation_progress": state.get("conversation_progress"),
+        "promoted_reflection_context": state.get("promoted_reflection_context"),
 
         # From previous stages
         "decontexualized_input": decontexualized_input,

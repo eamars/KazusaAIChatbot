@@ -243,10 +243,10 @@ All MongoDB and embedding access for this package is isolated in:
 kazusa_ai_chatbot.db.memory_evolution
 ```
 
-The repository may import it only as the DB interface:
+The repository imports it only as the DB-interface submodule:
 
 ```python
-from kazusa_ai_chatbot.db import memory_evolution as memory_store
+import kazusa_ai_chatbot.db.memory_evolution as memory_store
 ```
 
 Approved DB-interface functions:

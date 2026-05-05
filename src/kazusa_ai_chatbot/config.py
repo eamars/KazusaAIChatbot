@@ -128,5 +128,37 @@ SCHEDULED_TASKS_ENABLED = os.getenv("SCHEDULED_TASKS_ENABLED", "true").lower() i
 # Character timezone (IANA name) for converting UTC to character-local time.
 CHARACTER_TIME_ZONE = os.getenv("CHARACTER_TIME_ZONE", "Pacific/Auckland")
 
+# Reflection cycle
+REFLECTION_CYCLE_DISABLED = os.getenv(
+    "REFLECTION_CYCLE_DISABLED",
+    "false",
+).lower() in ("1", "true", "yes")
+REFLECTION_CONTEXT_ENABLED = os.getenv(
+    "REFLECTION_CONTEXT_ENABLED",
+    "false",
+).lower() in ("1", "true", "yes")
+REFLECTION_LORE_PROMOTION_ENABLED = os.getenv(
+    "REFLECTION_LORE_PROMOTION_ENABLED",
+    "true",
+).lower() in ("1", "true", "yes")
+REFLECTION_SELF_GUIDANCE_PROMOTION_ENABLED = os.getenv(
+    "REFLECTION_SELF_GUIDANCE_PROMOTION_ENABLED",
+    "true",
+).lower() in ("1", "true", "yes")
+REFLECTION_WORKER_INTERVAL_SECONDS = int(
+    os.getenv("REFLECTION_WORKER_INTERVAL_SECONDS", "900")
+)
+REFLECTION_HOURLY_SLOTS_PER_TICK = int(
+    os.getenv("REFLECTION_HOURLY_SLOTS_PER_TICK", "3")
+)
+REFLECTION_DAILY_RUN_AFTER_LOCAL_TIME = os.getenv(
+    "REFLECTION_DAILY_RUN_AFTER_LOCAL_TIME",
+    "04:30",
+)
+REFLECTION_PROMOTION_RUN_AFTER_LOCAL_TIME = os.getenv(
+    "REFLECTION_PROMOTION_RUN_AFTER_LOCAL_TIME",
+    "05:00",
+)
+
 # Brain service
 BRAIN_EXECUTOR_COUNT = int(os.getenv("BRAIN_EXECUTOR_COUNT", "1"))

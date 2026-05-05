@@ -8,12 +8,12 @@ from typing import Any
 from kazusa_ai_chatbot.db._client import enable_vector_index, get_db, get_text_embedding
 from kazusa_ai_chatbot.db.memory_evolution import build_active_memory_filter
 from kazusa_ai_chatbot.db.schemas import MemoryDoc
-from kazusa_ai_chatbot.memory_evolution.repository import insert_memory_unit
 from kazusa_ai_chatbot.memory_evolution.models import (
     MemoryAuthority,
     MemorySourceKind,
     MemoryStatus,
 )
+from kazusa_ai_chatbot.memory_evolution.repository import insert_memory_unit
 from kazusa_ai_chatbot.memory_evolution.identity import (
     deterministic_memory_unit_id,
     memory_embedding_source_text as evolving_memory_embedding_source_text,

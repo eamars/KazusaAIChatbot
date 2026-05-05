@@ -5,6 +5,7 @@ from __future__ import annotations
 import pytest
 
 from kazusa_ai_chatbot.nodes import persona_supervisor2 as supervisor_module
+from kazusa_ai_chatbot.time_context import build_character_time_context
 
 
 @pytest.mark.asyncio
@@ -55,6 +56,7 @@ async def test_stage_1_research_calls_rag2_and_projects_payload(monkeypatch) -> 
         "user_name": "User",
         "user_profile": {"affinity": 500},
         "timestamp": "2026-04-27T00:00:00+12:00",
+        "time_context": build_character_time_context("2026-04-27T00:00:00+12:00"),
         "message_envelope": {
             "body_text": "clean body",
             "raw_wire_text": "clean body",
@@ -124,6 +126,7 @@ async def test_stage_1_research_skips_rag_for_unresolved_referents(monkeypatch) 
         "user_name": "User",
         "user_profile": {"affinity": 500},
         "timestamp": "2026-04-27T00:00:00+12:00",
+        "time_context": build_character_time_context("2026-04-27T00:00:00+12:00"),
         "message_envelope": {
             "body_text": "clean body",
             "raw_wire_text": "clean body",
@@ -190,6 +193,7 @@ async def test_stage_1_research_runs_rag_for_mixed_referents(monkeypatch) -> Non
         "user_name": "User",
         "user_profile": {"affinity": 500},
         "timestamp": "2026-04-27T00:00:00+12:00",
+        "time_context": build_character_time_context("2026-04-27T00:00:00+12:00"),
         "message_envelope": {
             "body_text": "clean body",
             "raw_wire_text": "clean body",
@@ -242,6 +246,7 @@ async def test_stage_1_research_skips_when_referents_are_all_unresolved(monkeypa
         "user_name": "User",
         "user_profile": {"affinity": 500},
         "timestamp": "2026-04-27T00:00:00+12:00",
+        "time_context": build_character_time_context("2026-04-27T00:00:00+12:00"),
         "message_envelope": {
             "body_text": "clean body",
             "raw_wire_text": "clean body",

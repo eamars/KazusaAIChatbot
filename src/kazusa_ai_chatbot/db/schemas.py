@@ -7,7 +7,7 @@ function signatures across the ``db.*`` submodules. Schemas use
 
 from __future__ import annotations
 
-from typing import TypedDict
+from typing import Literal, TypedDict
 
 from kazusa_ai_chatbot.message_envelope.types import (
     ConversationAuthorRole,
@@ -300,6 +300,59 @@ class MemoryDoc(TypedDict, total=False):
     merged_from_memory_unit_ids: list[str]
     evidence_refs: list[dict]
     privacy_review: dict
+
+
+class ReflectionMessageRefDoc(TypedDict, total=False):
+    """Persistence-only source-message reference for reflection runs."""
+
+    conversation_history_id: str
+    platform: str
+    platform_channel_id: str
+    channel_type: str
+    role: Literal["user", "assistant"]
+    timestamp: str
+
+
+class ReflectionScopeDoc(TypedDict):
+    """Raw monitored-scope metadata stored on reflection run documents."""
+
+    scope_ref: str
+    platform: str
+    platform_channel_id: str
+    channel_type: str
+
+
+class CharacterReflectionRunDoc(TypedDict, total=False):
+    """A production reflection-run audit document.
+
+    Documents live in ``character_reflection_runs`` and use ``run_id`` as both
+    the MongoDB ``_id`` and readable logical id.
+    """
+
+    _id: str
+    run_id: str
+    run_kind: Literal[
+        "hourly_slot",
+        "daily_channel",
+        "daily_global_promotion",
+    ]
+    status: Literal["succeeded", "failed", "skipped", "dry_run"]
+    prompt_version: str
+    attempt_count: int
+    scope: ReflectionScopeDoc
+    window_start: str
+    window_end: str
+    hour_start: str
+    hour_end: str
+    character_local_date: str
+    source_message_refs: list[ReflectionMessageRefDoc]
+    source_reflection_run_ids: list[str]
+    output: dict
+    promotion_decisions: list[dict]
+    validation_warnings: list[str]
+    error: str
+    created_at: str
+    updated_at: str
 
 
 class RAGCache2PersistentEntryDoc(TypedDict, total=False):

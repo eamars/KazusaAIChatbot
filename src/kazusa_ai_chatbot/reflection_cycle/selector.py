@@ -72,12 +72,15 @@ async def collect_reflection_inputs(
     *,
     lookback_hours: int = 24,
     now: datetime | None = None,
+    allow_fallback: bool = True,
 ) -> ReflectionInputSet:
     """Collect read-only reflection inputs from recent conversation history.
 
     Args:
         lookback_hours: Requested message evaluation window.
         now: Optional deterministic clock value.
+        allow_fallback: Whether to use the bounded evaluation fallback window
+            when no monitor-active channel exists.
 
     Returns:
         A read-only input set. If no monitored channel exists inside the
@@ -109,7 +112,7 @@ async def collect_reflection_inputs(
         for key, value in query_result["diagnostics"].items()
     }
 
-    if not channel_rows:
+    if not channel_rows and allow_fallback:
         fallback_used = True
         fallback_start_dt = effective_now - timedelta(
             hours=READONLY_REFLECTION_FALLBACK_LOOKBACK_HOURS

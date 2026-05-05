@@ -7,6 +7,7 @@ import json
 import pytest
 
 from kazusa_ai_chatbot.nodes import persona_supervisor2_consolidator_facts as facts_module
+from kazusa_ai_chatbot.time_context import build_character_time_context
 
 
 class _DummyResponse:
@@ -33,6 +34,7 @@ def _state() -> dict:
         "character_profile": {"name": "杏山千纱"},
         "user_name": "提拉米苏",
         "timestamp": "2026-04-27T00:00:00+12:00",
+        "time_context": build_character_time_context("2026-04-27T00:00:00+12:00"),
         "decontexualized_input": "记住我喜欢红茶。",
         "rag_result": {
             "user_image": {

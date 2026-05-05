@@ -14,6 +14,9 @@ Submodule map:
 
 from __future__ import annotations
 
+from importlib import import_module
+from typing import Any
+
 # ── Re-export config constants that old callers imported from here ──
 from kazusa_ai_chatbot.config import AFFINITY_DEFAULT, AFFINITY_MAX, AFFINITY_MIN
 
@@ -30,6 +33,7 @@ from kazusa_ai_chatbot.db._client import (
 from kazusa_ai_chatbot.db.schemas import (
     AttachmentDoc,
     CharacterProfileDoc,
+    CharacterReflectionRunDoc,
     ConversationEpisodeEntryDoc,
     ConversationEpisodeStateDoc,
     ConversationMessageDoc,
@@ -37,6 +41,8 @@ from kazusa_ai_chatbot.db.schemas import (
     MentionDoc,
     PlatformAccountDoc,
     RAGCache2PersistentEntryDoc,
+    ReflectionMessageRefDoc,
+    ReflectionScopeDoc,
     ScheduledEventDoc,
     UserMemoryContextDoc,
     UserMemoryContextEntry,
@@ -64,6 +70,14 @@ from kazusa_ai_chatbot.db.conversation_reflection import (
     explain_monitored_channel_query,
     list_recent_character_message_channels,
     list_reflection_scope_messages,
+)
+from kazusa_ai_chatbot.db.reflection_cycle import (
+    ensure_reflection_run_indexes,
+    find_reflection_run_by_id,
+    list_daily_channel_runs,
+    list_existing_run_ids,
+    list_hourly_runs_for_channel_day,
+    upsert_reflection_run,
 )
 
 # ── Users (identity + profile + affinity) ─────────────────────────
@@ -103,13 +117,6 @@ from kazusa_ai_chatbot.db.character import (
     upsert_character_state,
 )
 
-# ── Memory ────────────────────────────────────────────────────────
-from kazusa_ai_chatbot.db.memory import (
-    enable_memory_vector_index,
-    get_active_promises,
-    save_memory,
-    search_memory,
-)
 from kazusa_ai_chatbot.db.scheduled_events import query_pending_scheduled_events
 
 from kazusa_ai_chatbot.db.rag_cache2_persistent import (
@@ -121,16 +128,40 @@ from kazusa_ai_chatbot.db.rag_cache2_persistent import (
     upsert_initializer_entry,
 )
 
+_LAZY_MEMORY_EXPORTS = {
+    "enable_memory_vector_index",
+    "get_active_promises",
+    "save_memory",
+    "search_memory",
+}
+
+
+def __getattr__(name: str) -> Any:
+    """Resolve legacy memory helpers without creating import-time cycles.
+
+    The evolving-memory repository imports its DB submodule during package
+    import. Loading the legacy memory facade eagerly from here would pull that
+    repository back in before it finishes initialising.
+    """
+    if name in _LAZY_MEMORY_EXPORTS:
+        memory_module = import_module("kazusa_ai_chatbot.db.memory")
+        resolved_value = getattr(memory_module, name)
+        return resolved_value
+
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+
 __all__ = [
     # Config
     "AFFINITY_DEFAULT", "AFFINITY_MAX", "AFFINITY_MIN",
     # Client
     "close_db", "enable_vector_index", "get_db", "get_text_embedding", "get_text_embeddings_batch",
     # Schemas
-    "AttachmentDoc", "CharacterProfileDoc",
+    "AttachmentDoc", "CharacterProfileDoc", "CharacterReflectionRunDoc",
     "ConversationEpisodeEntryDoc", "ConversationEpisodeStateDoc",
     "ConversationMessageDoc", "MemoryDoc", "MentionDoc",
     "PlatformAccountDoc", "RAGCache2PersistentEntryDoc",
+    "ReflectionMessageRefDoc", "ReflectionScopeDoc",
     "ScheduledEventDoc", "UserMemoryContextDoc", "UserMemoryContextEntry",
     "UserMemoryUnitDoc", "UserMemoryUnitMergeHistoryEntry", "UserMemoryUnitSourceRef",
     "UserMemoryUnitStatus", "UserMemoryUnitType",
@@ -143,6 +174,9 @@ __all__ = [
     "explain_monitored_channel_query",
     "list_recent_character_message_channels",
     "list_reflection_scope_messages",
+    "ensure_reflection_run_indexes", "find_reflection_run_by_id",
+    "list_daily_channel_runs", "list_existing_run_ids",
+    "list_hourly_runs_for_channel_day", "upsert_reflection_run",
     # Users
     "add_suspected_alias", "backfill_character_conversation_identity",
     "create_user_profile",
