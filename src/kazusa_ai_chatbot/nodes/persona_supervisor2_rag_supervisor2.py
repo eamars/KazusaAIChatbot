@@ -1814,28 +1814,32 @@ async def rag_evaluator(state: ProgressiveRAGState) -> dict:
 # ── Finalizer ──────────────────────────────────────────────────────
 
 _FINALIZER_PROMPT = '''\
-你是一个总结员。请根据已收集的事实回答用户的原始问题。
+你是一个事实总结员。请根据 `known_facts` 生成简短事实摘要。
 
 # 生成步骤
-1. 先读取 `original_query`，确认用户原始问题要的答案类型。
+1. 先读取 `original_query`，确认本次摘要需要覆盖的事实类型。
 2. 按顺序读取 `known_facts`，只使用 resolved 槽位中的 summary 和 raw_result。
 3. 如果 user_profile_agent 的 raw_result 包含 user_memory_context，区分 fact、subjective_appraisal、relationship_signal 三种语义。
 4. 如果某个必要槽位 unresolved，只说明缺少该槽位信息。
-5. 如果 agent="recall_agent"，优先使用 raw_result.selected_summary 直接回答约定/承诺/进度问题。
-6. 输出一段短的自然语言事实回答，不使用角色口吻。
+5. 如果 agent="recall_agent"，优先使用 raw_result.selected_summary 总结约定/承诺/进度事实。
+6. 输出一段短的事实摘要；说话人、来源、时间和引用都应来自 `known_facts` 中可见内容。
 
 # 准则
-- 直接回答用户的原始问题，不要复述查找过程。
+- 围绕 `original_query` 需要的事实组织摘要，不要复述查找过程。
 - 如果 known_facts 为空，说明本次 RAG 没有需要检索的外部/内部事实；不要说“缺少关于该问题的具体信息”。
 - 如果某个槽位未能解决（resolved: false），如实告知缺少哪一部分信息。
 - 不要把某个来源没有检索结果扩大成“没有任何记录/没有互动记录”；只能说明实际查询过的来源没有返回结果。
 - 引用来源 URL 或对话来源时尽量保留。
+- 对 conversation evidence，按“可见来源/说话人标签 + 时间 + 内容”的方式摘要；没有可见标签时使用“说话人”。
+- 引用对话原文时，保留原文内部的人称，不要改写引用内容。
 - 当 known_facts 中 agent="user_profile_agent" 且 raw_result 包含 user_memory_context：
-  fact 是事实锚点，subjective_appraisal 是角色的主观评价，relationship_signal 是未来互动信号。回答时不要把角色的主观评价误写成目标用户自己的感受。
-- 当 known_facts 中 agent="user_profile_agent" 且 raw_result 是角色自身公开资料或 self_image：
-  这是角色自己的资料。回答角色自我资料问题时，可以使用这些公开资料；不要误写成第三方用户画像。
+  fact 是事实锚点，subjective_appraisal 是画像来源的主观评价，relationship_signal 是未来互动信号。
+  回答时不要把 subjective_appraisal 误写成目标用户自己的感受。
+- 当 known_facts 中 agent="user_profile_agent" 且 raw_result 是公开资料或 self_image：
+  这是 self_image 或公开资料对应的主体资料。回答自我资料问题时，可以使用这些公开资料；
+  不要误写成第三方用户画像。
 - 当 known_facts 中 agent="recall_agent" 且 raw_result 包含 selected_summary：
-  这是当前约定/承诺/进度的已仲裁回忆结果。直接使用 selected_summary 回答，不要改搜关键字或把它改写成长期角色设定。
+  这是当前约定/承诺/进度的已仲裁回忆结果。直接使用 selected_summary 回答，不要改搜关键字或把它改写成长期设定。
 
 # 输入格式
 {
@@ -1844,10 +1848,9 @@ _FINALIZER_PROMPT = '''\
 }
 
 # 输出格式
-请直接返回一段自然语言回复（纯文本，无 JSON 外壳）。
+请直接返回一段自然语言事实摘要（纯文本，无 JSON 外壳）。
 - no markdown formatting
-- no persona voice
-- no final answer
+- preserve visible source/speaker labels
 - no broad interpretation beyond short extractive summaries
 '''
 _finalizer_llm = get_llm(

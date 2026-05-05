@@ -11,7 +11,10 @@ import pytest_asyncio
 from kazusa_ai_chatbot.config import RAG_PLANNER_LLM_BASE_URL
 from kazusa_ai_chatbot.db import close_db, db_bootstrap, get_character_profile, get_db
 from kazusa_ai_chatbot.mcp_client import mcp_manager
-from kazusa_ai_chatbot.nodes.persona_supervisor2_rag_supervisor2 import call_rag_supervisor
+from kazusa_ai_chatbot.nodes.persona_supervisor2_rag_supervisor2 import (
+    call_rag_supervisor,
+    rag_finalizer,
+)
 from tests.llm_trace import write_llm_trace
 
 pytestmark = [pytest.mark.asyncio, pytest.mark.live_llm, pytest.mark.live_db]
@@ -166,6 +169,73 @@ async def _run_live_supervisor2_case(
         json.dumps(result.get("known_facts", []), ensure_ascii=False, default=str, indent=2),
     )
     return result
+
+
+async def test_rag_finalizer_live_preserves_visible_conversation_speaker() -> None:
+    """Conversation evidence handoff keeps the visible speaker/source label."""
+    await _skip_if_llm_unavailable()
+
+    state = {
+        "original_query": "我在上班的时候很想你哦",
+        "known_facts": [
+            {
+                "slot": (
+                    "Conversation-evidence: retrieve recent messages "
+                    "[speaker=current_user] [to identify the speaker]"
+                ),
+                "agent": "conversation_evidence_agent",
+                "resolved": True,
+                "summary": (
+                    "对话记录摘要：\n"
+                    "蚝爹油 (2026-05-05 19:07) 说："
+                    "“我在上班的时候很想你哦”。"
+                    "相关用户 ID 为 256e8a10-c406-47e9-ac8f-efd270d18160。"
+                ),
+                "raw_result": {
+                    "capability": "conversation_evidence",
+                    "projection_payload": {
+                        "summaries": [
+                            (
+                                "蚝爹油 at 2026-05-05 19:07: "
+                                "我在上班的时候很想你哦"
+                            ),
+                        ],
+                    },
+                    "selected_summary": (
+                        "蚝爹油 at 2026-05-05 19:07: "
+                        "我在上班的时候很想你哦"
+                    ),
+                },
+                "attempts": 1,
+            },
+        ],
+    }
+
+    result = await rag_finalizer(state)
+    answer = str(result["final_answer"]).strip()
+    trace_path = write_llm_trace(
+        "persona_supervisor2_rag_supervisor2_live",
+        "finalizer_current_user_source_perspective",
+        {
+            "original_query": state["original_query"],
+            "known_facts": state["known_facts"],
+            "final_answer": answer,
+            "judgment": (
+                "finalizer should preserve visible speaker/source labels and "
+                "quoted text in a source-perspective factual summary"
+            ),
+        },
+    )
+
+    logger.info(
+        f"RAG_FINALIZER_LIVE_SOURCE_PERSPECTIVE trace={trace_path} "
+        f"answer={answer}"
+    )
+    assert answer
+    assert "我在上班的时候很想你哦" in answer
+    assert "蚝爹油" in answer
+    speech_markers = ["说", "表示", "提到", "发言"]
+    assert any(marker in answer for marker in speech_markers)
 
 
 async def test_call_rag_supervisor_live_opinion_small_pliers(live_supervisor2_env: dict) -> None:
