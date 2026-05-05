@@ -11,11 +11,8 @@ import logging
 from collections.abc import Mapping
 from contextlib import asynccontextmanager, suppress
 from datetime import datetime, timezone
-from typing import Any
 
 from fastapi import FastAPI, BackgroundTasks
-from pydantic import BaseModel, ConfigDict, Field
-from pymongo.errors import PyMongoError
 
 from kazusa_ai_chatbot.config import (
     CHARACTER_GLOBAL_USER_ID,
@@ -26,7 +23,6 @@ from kazusa_ai_chatbot.config import (
     SCHEDULED_TASKS_ENABLED,
 )
 from kazusa_ai_chatbot.conversation_progress import (
-    ConversationProgressRecordInput,
     ConversationProgressScope,
     load_progress_context,
     record_turn_progress,
@@ -50,7 +46,6 @@ from kazusa_ai_chatbot.state import IMProcessState, MultiMediaDoc, DebugModes, R
 from kazusa_ai_chatbot.time_context import build_character_time_context
 from kazusa_ai_chatbot.chat_input_queue import ChatInputQueue, QueuedChatItem
 from kazusa_ai_chatbot.message_envelope import (
-    MentionEntityKind,
     MessageEnvelope,
     project_prompt_message_context,
 )
@@ -66,7 +61,31 @@ from kazusa_ai_chatbot.dispatcher import (
     build_send_message_tool,
 )
 
-from langgraph.graph import END, START, StateGraph
+from kazusa_ai_chatbot.brain_service import (
+    cache_startup as brain_cache_startup,
+    graph as brain_graph,
+    health as brain_health,
+    intake as brain_intake,
+    post_turn as brain_post_turn,
+    runtime_adapters as brain_runtime_registry,
+)
+from kazusa_ai_chatbot.brain_service.contracts import (
+    AttachmentIn,
+    AttachmentOut,
+    AttachmentRefIn,
+    Cache2AgentStatsResponse,
+    Cache2HealthResponse,
+    ChatRequest,
+    ChatResponse,
+    DebugModesIn,
+    EventRequest,
+    HealthResponse,
+    MentionIn,
+    MessageEnvelopeIn,
+    ReplyTargetIn,
+    RuntimeAdapterRegistrationRequest,
+    RuntimeAdapterRegistrationResponse,
+)
 from kazusa_ai_chatbot.nodes.relevance_agent import relevance_agent, multimedia_descriptor_agent
 from kazusa_ai_chatbot.nodes.persona_supervisor2 import persona_supervisor2
 from kazusa_ai_chatbot.nodes.persona_supervisor2_consolidator import call_consolidation_subgraph
@@ -81,126 +100,6 @@ from kazusa_ai_chatbot.reflection_cycle import (
 )
 
 logger = logging.getLogger(__name__)
-
-
-# ── Pydantic models for the API contract ────────────────────────────
-
-
-class AttachmentIn(BaseModel):
-    media_type: str = ""
-    url: str = ""
-    base64_data: str = ""
-    description: str = ""
-    size_bytes: int | None = None
-
-
-class DebugModesIn(BaseModel):
-    listen_only: bool = False
-    think_only: bool = False
-    no_remember: bool = False
-
-
-class MentionIn(BaseModel):
-    platform_user_id: str = ""
-    global_user_id: str = ""
-    display_name: str = ""
-    entity_kind: MentionEntityKind = "unknown"
-    raw_text: str = ""
-
-
-class ReplyTargetIn(BaseModel):
-    platform_message_id: str = ""
-    platform_user_id: str = ""
-    global_user_id: str = ""
-    display_name: str = ""
-    excerpt: str = ""
-    derivation: str = ""
-
-
-class AttachmentRefIn(AttachmentIn):
-    storage_shape: str = ""
-
-
-class MessageEnvelopeIn(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    body_text: str
-    raw_wire_text: str
-    mentions: list[MentionIn]
-    reply: ReplyTargetIn | None = None
-    attachments: list[AttachmentRefIn]
-    addressed_to_global_user_ids: list[str]
-    broadcast: bool
-
-
-class ChatRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    platform: str
-    platform_channel_id: str = ""
-    channel_type: str = "group"
-    platform_message_id: str = ""
-    platform_user_id: str
-    platform_bot_id: str = ""  # Bot's ID on this platform (e.g. Discord snowflake)
-    display_name: str = ""
-    channel_name: str = ""
-    content_type: str = "text"
-    message_envelope: MessageEnvelopeIn
-    timestamp: str = ""
-    debug_modes: DebugModesIn = Field(default_factory=DebugModesIn)
-
-
-class AttachmentOut(BaseModel):
-    media_type: str = ""
-    url: str = ""
-    base64_data: str = ""
-    description: str = ""
-    size_bytes: int | None = None
-
-
-class ChatResponse(BaseModel):
-    messages: list[str] = Field(default_factory=list)
-    content_type: str = "text"
-    attachments: list[AttachmentOut] = Field(default_factory=list)
-    should_reply: bool = False
-    scheduled_followups: int = 0
-
-
-class EventRequest(BaseModel):
-    platform: str
-    event_type: str
-    payload: dict[str, Any] = Field(default_factory=dict)
-
-
-class Cache2AgentStatsResponse(BaseModel):
-    agent_name: str
-    hit_count: int
-    miss_count: int
-    hit_rate: float
-
-
-class Cache2HealthResponse(BaseModel):
-    agents: list[Cache2AgentStatsResponse] = Field(default_factory=list)
-
-
-class HealthResponse(BaseModel):
-    status: str
-    db: bool
-    scheduler: bool
-    cache2: Cache2HealthResponse = Field(default_factory=Cache2HealthResponse)
-
-
-class RuntimeAdapterRegistrationRequest(BaseModel):
-    platform: str
-    callback_url: str
-    shared_secret: str = ""
-    timeout_seconds: float = 10.0
-
-
-class RuntimeAdapterRegistrationResponse(BaseModel):
-    status: str
-    platform: str
-    callback_url: str
 
 
 def _register_runtime_adapter_payload(
@@ -218,16 +117,10 @@ def _register_runtime_adapter_payload(
         Structured confirmation for the adapter process.
     """
 
-    register_remote_runtime_adapter(
-        platform=req.platform,
-        callback_url=req.callback_url,
-        shared_secret=req.shared_secret,
-        timeout_seconds=req.timeout_seconds,
-    )
-    return_value = RuntimeAdapterRegistrationResponse(
+    return_value = brain_runtime_registry.register_runtime_adapter_payload(
+        req,
         status=status,
-        platform=req.platform,
-        callback_url=req.callback_url,
+        register_remote_runtime_adapter_func=register_remote_runtime_adapter,
     )
     return return_value
 
@@ -236,42 +129,12 @@ def _register_runtime_adapter_payload(
 
 def _build_graph():
     """Build the LangGraph pipeline for the brain service."""
-    graph = StateGraph(IMProcessState)
-
-    graph.add_node("relevance_agent", relevance_agent)
-    graph.add_node("multimedia_descriptor_agent", multimedia_descriptor_agent)
-    graph.add_node("load_conversation_episode_state", load_conversation_episode_state)
-    graph.add_node("persona_supervisor2", persona_supervisor2)
-
-    def _start_router(state):
-        debug = state.get("debug_modes") or {}
-        if debug.get("listen_only"):
-            return "end"
-        if state.get("user_multimedia_input"):
-            return "multimedia"
-        return "skip"
-
-    graph.add_conditional_edges(
-        START,
-        _start_router,
-        {"multimedia": "multimedia_descriptor_agent", "skip": "relevance_agent", "end": END},
+    return_value = brain_graph.build_graph(
+        relevance_agent_node=relevance_agent,
+        multimedia_descriptor_agent_node=multimedia_descriptor_agent,
+        load_conversation_episode_state_node=load_conversation_episode_state,
+        persona_supervisor_node=persona_supervisor2,
     )
-    graph.add_edge("multimedia_descriptor_agent", "relevance_agent")
-
-    def _route_after_relevance(state):
-        if not state.get("should_respond"):
-            return "end"
-        return "continue"
-
-    graph.add_conditional_edges(
-        "relevance_agent",
-        _route_after_relevance,
-        {"continue": "load_conversation_episode_state", "end": END},
-    )
-    graph.add_edge("load_conversation_episode_state", "persona_supervisor2")
-    graph.add_edge("persona_supervisor2", END)
-
-    return_value = graph.compile()
     return return_value
 
 
@@ -315,12 +178,8 @@ async def load_conversation_episode_state(state: IMProcessState) -> dict:
 
 
 def _compact_reply_context(reply_context: ReplyContext) -> ReplyContext:
-    compacted: ReplyContext = {}
-    for key, value in reply_context.items():
-        if value in ("", None):
-            continue
-        compacted[key] = value
-    return compacted
+    compacted_context = brain_intake.compact_reply_context(reply_context)
+    return compacted_context
 
 
 async def _hydrate_reply_context(req: ChatRequest) -> ReplyContext:
@@ -333,23 +192,7 @@ async def _hydrate_reply_context(req: ChatRequest) -> ReplyContext:
         Compact reply context projected from ``message_envelope.reply``.
     """
 
-    envelope: MessageEnvelope = req.message_envelope.model_dump(
-        exclude_none=True,
-        exclude_defaults=True,
-    )
-    reply = envelope.get("reply") or {}
-    reply_context: ReplyContext = {}
-
-    if reply.get("platform_message_id"):
-        reply_context["reply_to_message_id"] = str(reply["platform_message_id"])
-    if reply.get("platform_user_id"):
-        reply_context["reply_to_platform_user_id"] = str(reply["platform_user_id"])
-    if reply.get("display_name"):
-        reply_context["reply_to_display_name"] = str(reply["display_name"])
-    if reply.get("excerpt"):
-        reply_context["reply_excerpt"] = str(reply["excerpt"])
-
-    return_value = _compact_reply_context(reply_context)
+    return_value = await brain_intake.hydrate_reply_context(req)
     return return_value
 
 
@@ -364,69 +207,11 @@ async def _resolve_message_envelope_identities(req: ChatRequest) -> MessageEnvel
         recomputed from typed mentions, typed reply target, and DM defaults.
     """
 
-    envelope: MessageEnvelope = req.message_envelope.model_dump(
-        exclude_none=True,
-        exclude_defaults=True,
+    envelope = await brain_intake.resolve_message_envelope_identities(
+        req,
+        character_global_user_id=CHARACTER_GLOBAL_USER_ID,
+        resolve_global_user_id_func=resolve_global_user_id,
     )
-    addressed_to: list[str] = []
-    if req.channel_type == "private":
-        addressed_to.append(CHARACTER_GLOBAL_USER_ID)
-
-    resolved_mentions = []
-    for mention in envelope["mentions"]:
-        resolved_mention = dict(mention)
-        mention_entity_kind = str(
-            resolved_mention.get("entity_kind", "unknown")
-        ).strip()
-        platform_user_id = str(
-            resolved_mention.get("platform_user_id", "")
-        ).strip()
-        global_user_id = str(resolved_mention.get("global_user_id", "")).strip()
-
-        if mention_entity_kind == "bot":
-            global_user_id = CHARACTER_GLOBAL_USER_ID
-        elif (
-            mention_entity_kind == "user"
-            and platform_user_id
-            and not global_user_id
-        ):
-            display_name = str(resolved_mention.get("display_name", "")).strip()
-            global_user_id = await resolve_global_user_id(
-                platform=req.platform,
-                platform_user_id=platform_user_id,
-                display_name=display_name,
-            )
-
-        if global_user_id:
-            resolved_mention["global_user_id"] = global_user_id
-        if mention_entity_kind in ("bot", "user") and global_user_id:
-            addressed_to.append(global_user_id)
-        resolved_mentions.append(resolved_mention)
-    envelope["mentions"] = resolved_mentions
-
-    reply = envelope.get("reply")
-    if reply is not None:
-        resolved_reply = dict(reply)
-        platform_user_id = str(resolved_reply.get("platform_user_id", "")).strip()
-        global_user_id = str(resolved_reply.get("global_user_id", "")).strip()
-
-        if platform_user_id and platform_user_id == req.platform_bot_id.strip():
-            global_user_id = CHARACTER_GLOBAL_USER_ID
-        elif platform_user_id and not global_user_id:
-            display_name = str(resolved_reply.get("display_name", "")).strip()
-            global_user_id = await resolve_global_user_id(
-                platform=req.platform,
-                platform_user_id=platform_user_id,
-                display_name=display_name,
-            )
-
-        if global_user_id:
-            resolved_reply["global_user_id"] = global_user_id
-            addressed_to.append(global_user_id)
-        envelope["reply"] = resolved_reply
-
-    envelope["addressed_to_global_user_ids"] = list(dict.fromkeys(addressed_to))
-    envelope["broadcast"] = False
     return envelope
 
 
@@ -471,44 +256,13 @@ async def _ensure_character_global_identity(
 
 async def _save_assistant_message(result: dict) -> None:
     """Persist the assistant-authored response to conversation history."""
-    platform = result["platform"]
-    platform_channel_id = result["platform_channel_id"]
-    platform_bot_id = result["platform_bot_id"]
-    character_name = result["character_name"]
-    assistant_output = result["final_dialog"]
-
-    if assistant_output:
-        body_text = "\n".join(assistant_output)
-        target_broadcast = bool(result["target_broadcast"])
-        target_addressed_user_ids = result["target_addressed_user_ids"]
-        if not target_addressed_user_ids and not target_broadcast:
-            current_user_id = str(result["global_user_id"]).strip()
-            target_addressed_user_ids = [current_user_id]
-        try:
-            character_global_user_id = await _ensure_character_global_identity(
-                platform=platform,
-                platform_bot_id=platform_bot_id,
-                character_name=character_name,
-            )
-            await save_conversation({
-                "platform": platform,
-                "platform_channel_id": platform_channel_id,
-                "channel_type": result["channel_type"],
-                "role": "assistant",
-                "platform_user_id": platform_bot_id,
-                "global_user_id": character_global_user_id,
-                "display_name": character_name,
-                "body_text": body_text,
-                "raw_wire_text": body_text,
-                "content_type": "text",
-                "addressed_to_global_user_ids": target_addressed_user_ids,
-                "mentions": [],
-                "broadcast": target_broadcast,
-                "attachments": [],
-                "timestamp": datetime.now(timezone.utc).isoformat(),
-            })
-        except Exception as exc:
-            logger.exception(f"Failed to save assistant message: {exc}")
+    await brain_post_turn.save_assistant_message(
+        result,
+        ensure_character_global_identity_func=_ensure_character_global_identity,
+        save_conversation_func=save_conversation,
+        now_func=lambda: datetime.now(timezone.utc),
+        logger=logger,
+    )
 
 
 # ── Lifespan ────────────────────────────────────────────────────────
@@ -545,16 +299,7 @@ def _active_turn_platform_message_ids(item: QueuedChatItem) -> list[str]:
         follow-ups, deduplicated in arrival order.
     """
 
-    seen: set[str] = set()
-    active_ids: list[str] = []
-    for queued_item in [item, *item.collapsed_items]:
-        message_id = str(queued_item.request.platform_message_id or "").strip()
-        if not message_id or message_id in seen:
-            continue
-        seen.add(message_id)
-        active_ids.append(message_id)
-
-    return_value = active_ids
+    return_value = brain_intake.active_turn_platform_message_ids(item)
     return return_value
 
 
@@ -578,35 +323,15 @@ async def _save_user_message_from_item(
         None.
     """
 
-    req = item.request
-    if message_envelope is None:
-        message_envelope = await _resolve_message_envelope_identities(req)
-    attachment_docs = list(message_envelope["attachments"])
-
-    try:
-        await save_conversation({
-            "platform": req.platform,
-            "platform_channel_id": req.platform_channel_id,
-            "role": "user",
-            "platform_message_id": req.platform_message_id,
-            "platform_user_id": req.platform_user_id,
-            "global_user_id": global_user_id,
-            "display_name": req.display_name,
-            "channel_type": req.channel_type,
-            "body_text": message_envelope["body_text"],
-            "raw_wire_text": message_envelope["raw_wire_text"],
-            "content_type": req.content_type,
-            "addressed_to_global_user_ids": message_envelope[
-                "addressed_to_global_user_ids"
-            ],
-            "mentions": message_envelope["mentions"],
-            "broadcast": False,
-            "attachments": attachment_docs,
-            "reply_context": reply_context,
-            "timestamp": item.timestamp,
-        })
-    except Exception as exc:
-        logger.exception(f"Failed to save queued user message: {exc}")
+    await brain_intake.save_user_message_from_item(
+        item,
+        global_user_id=global_user_id,
+        reply_context=reply_context,
+        save_conversation_func=save_conversation,
+        resolve_message_envelope_identities_func=_resolve_message_envelope_identities,
+        message_envelope=message_envelope,
+        logger=logger,
+    )
 
 
 async def _resolve_queued_user(item: QueuedChatItem) -> tuple[str, dict]:
@@ -619,14 +344,11 @@ async def _resolve_queued_user(item: QueuedChatItem) -> tuple[str, dict]:
         Pair of global user ID and user profile.
     """
 
-    req = item.request
-    global_user_id = await resolve_global_user_id(
-        platform=req.platform,
-        platform_user_id=req.platform_user_id,
-        display_name=req.display_name,
+    return_value = await brain_intake.resolve_queued_user(
+        item,
+        resolve_global_user_id_func=resolve_global_user_id,
+        get_user_profile_func=get_user_profile,
     )
-    user_profile = await get_user_profile(global_user_id)
-    return_value = (global_user_id, user_profile)
     return return_value
 
 
@@ -1007,23 +729,12 @@ async def _run_consolidation_background(state: dict) -> None:
         state: Persona graph state snapshot needed by the consolidator.
     """
 
-    global _personality
-
-    try:
-        result = await call_consolidation_subgraph(state)
-    except Exception as exc:
-        logger.exception(f"Background consolidation failed: {exc}")
-        return
-
-    metadata = result.get("consolidation_metadata") or {}
-    write_success = metadata.get("write_success") or {}
-    if not write_success.get("character_state"):
-        return
-
-    for field_name in ("mood", "global_vibe", "reflection_summary"):
-        field_value = result.get(field_name)
-        if isinstance(field_value, str) and field_value:
-            _personality[field_name] = field_value
+    await brain_post_turn.run_consolidation_background(
+        state,
+        call_consolidation_subgraph_func=call_consolidation_subgraph,
+        personality=_personality,
+        logger=logger,
+    )
 
 
 async def _run_conversation_progress_record_background(state: dict) -> None:
@@ -1036,59 +747,10 @@ async def _run_conversation_progress_record_background(state: dict) -> None:
         None.
     """
 
-    linguistic_directives = state["action_directives"]["linguistic_directives"]
-    character_profile = state["character_profile"]
-    boundary_profile = character_profile["boundary_profile"]
-    scope = ConversationProgressScope(
-        platform=state["platform"],
-        platform_channel_id=state["platform_channel_id"],
-        global_user_id=state["global_user_id"],
-    )
-    record_input: ConversationProgressRecordInput = {
-        "scope": scope,
-        "timestamp": state["timestamp"],
-        "prior_episode_state": state.get("conversation_episode_state"),
-        "decontexualized_input": state["decontexualized_input"],
-        "chat_history_recent": state["chat_history_recent"],
-        "content_anchors": linguistic_directives["content_anchors"],
-        "logical_stance": state["logical_stance"],
-        "character_intent": state["character_intent"],
-        "final_dialog": state["final_dialog"],
-        "boundary_profile": boundary_profile,
-    }
-    record_preview = {
-        "timestamp": record_input["timestamp"],
-        "prior_episode_state": record_input["prior_episode_state"],
-        "decontexualized_input": record_input["decontexualized_input"],
-        "chat_history_recent": record_input["chat_history_recent"],
-        "content_anchors": record_input["content_anchors"],
-        "logical_stance": record_input["logical_stance"],
-        "character_intent": record_input["character_intent"],
-        "final_dialog": record_input["final_dialog"],
-        "boundary_profile_supplied": True,
-    }
-    logger.debug(
-        f"Conversation progress record request detail: "
-        f"platform={scope.platform} "
-        f'channel={scope.platform_channel_id or "<dm>"} '
-        f"user={scope.global_user_id} input={log_preview(record_preview)}"
-    )
-
-    try:
-        result = await record_turn_progress(record_input=record_input)
-    except Exception as exc:
-        logger.exception(
-            f"Background conversation progress recording failed: {exc}"
-        )
-        return
-
-    logger.debug(
-        f"Conversation progress recorded: platform={scope.platform} "
-        f'channel={scope.platform_channel_id or "<dm>"} '
-        f'user={scope.global_user_id} written={result["written"]} '
-        f'turn_count={result["turn_count"]} '
-        f'continuity={result["continuity"]} status={result["status"]} '
-        f'cache_updated={result["cache_updated"]}'
+    await brain_post_turn.run_conversation_progress_record_background(
+        state,
+        record_turn_progress_func=record_turn_progress,
+        logger=logger,
     )
 
 
@@ -1137,33 +799,13 @@ async def _hydrate_rag_initializer_cache() -> int:
         Number of valid rows loaded into the process-local Cache2 runtime.
     """
 
-    try:
-        rows = await load_initializer_entries(limit=RAG_CACHE2_MAX_ENTRIES)
-    except PyMongoError as exc:
-        logger.exception(f"Persistent initializer cache hydration failed: {exc}")
-        return 0
-
-    runtime = get_rag_cache2_runtime()
-    loaded_count = 0
-    for row in reversed(rows):
-        cache_key = row.get("_id")
-        result = row.get("result")
-        if not isinstance(cache_key, str) or not isinstance(result, dict):
-            logger.warning(f"Skipping malformed persistent initializer cache row: {log_preview(row)}")
-            continue
-
-        raw_metadata = row.get("metadata", {})
-        metadata = raw_metadata if isinstance(raw_metadata, dict) else {}
-        await runtime.store(
-            cache_key=cache_key,
-            cache_name=INITIALIZER_CACHE_NAME,
-            result=result,
-            dependencies=[],
-            metadata=metadata,
-        )
-        loaded_count += 1
-
-    logger.info(f"Hydrated {loaded_count} persistent RAG initializer cache entries")
+    loaded_count = await brain_cache_startup.hydrate_rag_initializer_cache(
+        load_initializer_entries_func=load_initializer_entries,
+        get_rag_cache2_runtime_func=get_rag_cache2_runtime,
+        cache_name=INITIALIZER_CACHE_NAME,
+        max_entries=RAG_CACHE2_MAX_ENTRIES,
+        logger=logger,
+    )
     return loaded_count
 
 
@@ -1253,24 +895,10 @@ app = FastAPI(title="Kazusa Brain Service", lifespan=lifespan)
 
 @app.get("/health", response_model=HealthResponse)
 async def health():
-    db_ok = False
-    try:
-        db = await get_db()
-        await db.client.admin.command("ping")
-        db_ok = True
-    except Exception as exc:
-        logger.exception(f"Health check database ping failed: {exc}")
-
-    return_value = HealthResponse(
-        status="ok" if db_ok else "degraded",
-        db=db_ok,
-        scheduler=True,
-        cache2=Cache2HealthResponse(
-            agents=[
-                Cache2AgentStatsResponse(**row)
-                for row in get_rag_cache2_runtime().get_agent_stats()
-            ],
-        ),
+    return_value = await brain_health.build_health_response(
+        get_db_func=get_db,
+        get_rag_cache2_runtime_func=get_rag_cache2_runtime,
+        logger=logger,
     )
     return return_value
 
