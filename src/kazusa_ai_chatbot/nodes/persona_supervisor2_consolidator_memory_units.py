@@ -19,6 +19,10 @@ from kazusa_ai_chatbot.db import (
     update_user_memory_unit_semantics,
     update_user_memory_unit_window,
 )
+from kazusa_ai_chatbot.memory_writer_prompt_projection import (
+    project_memory_unit_extractor_prompt_payload,
+    project_memory_unit_rewrite_prompt_payload,
+)
 from kazusa_ai_chatbot.nodes.persona_supervisor2_consolidator_schema import ConsolidatorState
 from kazusa_ai_chatbot.rag.prompt_projection import project_tool_result_for_llm
 from kazusa_ai_chatbot.rag.user_memory_unit_retrieval import retrieve_memory_unit_merge_candidates
@@ -417,82 +421,105 @@ def _stability_payload(
 
 
 _EXTRACTOR_PROMPT = """\
-You extract durable user memory units for the active character.
-
-# Role
-You are the memory-unit extractor. You only identify new candidate memories from this consolidation turn.
+# 任务
+你从本轮 consolidation 输入中提取新的、可长期保存的 user memory unit，供 `{character_name}` 以后与该用户互动时使用。
+你只提取候选记忆，不判断 create、merge 或 evolve。
+如果没有值得长期保存的内容，只返回 {{"memory_units":[]}}。
 
 # 语言政策
-- 除结构化枚举值、schema key、ID、URL、代码、命令、模型标签等必须保持原样的内容外，所有由你新生成的内部自由文本字段都必须使用简体中文。
-- `unit_type`、`evidence_refs.source` 等枚举字段必须保持输出格式指定的英文枚举值。
-- 用户原文、引用文本、专有名词、标题、别名、外部证据原句在需要精确保留时保持原语言；不要为了统一语言而改写。
-- 不要添加翻译、双语复写或括号内解释，除非源文本本身已经包含。
+- JSON key、结构化枚举值、ID、URL、代码、命令和模型标签保持原样。
+- `unit_type`、`evidence_refs.source` 等枚举字段必须保持输出格式指定的英文值。
+- 由你新生成的自由文本字段 fact、subjective_appraisal、relationship_signal 必须使用简体中文。
+- 用户原文、引用文本、专有名词、标题、外部证据原句在需要精确保留时保持原语言。
+- 指向 `{character_name}` 的短名、别名、旧称呼、显示名或 assistant 等机器标签只可用于理解，不可复制到输出字段。
+- 不要添加翻译、双语复写或括号解释，除非源文本本身已经包含。
 
-# Rules
-- fact must be a concrete event, decision, preference, commitment, or durable behavior anchored in the provided conversation.
-- Use chat_history_recent as evidence when the memory depends on multiple messages.
-- Every returned memory unit must include non-empty fact, subjective_appraisal, and relationship_signal.
-- subjective_appraisal explains the active character's subjective interpretation of that fact; it is required even for objective facts.
-- relationship_signal explains how this should affect future interaction; it is required for every unit.
-- Do not output vague labels or only describe the latest message tone.
-- Preserve enough event detail to be useful later.
-- Do not decide merge/create/evolve.
-- If nothing durable should be remembered, return {"memory_units":[]}.
+# 输入证据读取顺序
+1. 先读 `chat_history_recent`。用 `speaker_name` 判断每条消息是谁说的；`body_text` 中的“我”必须按原说话人理解。
+2. 再读 `decontextualized_input`、`final_dialog`、`logical_stance`、`character_intent`，确认本轮发生了什么，以及 `{character_name}` 是否接受了某个未来行为。
+3. `internal_monologue`、`emotional_appraisal`、`interaction_subtext`、`subjective_appraisal_evidence` 只用于理解 `{character_name}` 如何看待事实，不可单独当作用户事实。
+4. `new_facts_evidence` 和 `future_promises_evidence` 是提示，不是必须照抄的输出。
+5. 对照 `rag_user_memory_context`。只有本轮带来新事实、更清楚的细节或新的未来互动含义时，才生成 memory_unit。
 
-# Generation Procedure
-1. Read chat_history_recent first and identify concrete events, decisions, preferences, commitments, or repeated behaviors.
-2. Use decontextualized_input, final_dialog, internal_monologue, and appraisal evidence only to clarify what happened and why it matters.
-3. Compare against rag_user_memory_context. Do not restate an existing memory unless this turn adds a new fact, sharper detail, or changed relationship meaning.
-4. For each candidate, choose exactly one unit_type:
-   - objective_fact: a factual user preference, identity fact, decision, or system instruction.
-   - milestone: a one-time important event or clear architecture/relationship turning point.
-   - active_commitment: an accepted ongoing promise, future action, or still-active preference to honor.
-   - recent_shift: a new local change or unresolved short-term pattern.
-   - stable_pattern: a durable repeated behavior only when the evidence already shows repetition across time.
-5. Write fact as the concrete event itself, not the active character's feeling about it.
-6. Write subjective_appraisal as the active character's interpretation of that fact.
-7. Write relationship_signal as the future interaction implication.
-8. Prefer one or two high-value memory units over many vague ones.
-9. If the only possible output is a mood label, tone label, or duplicate of existing memory, return an empty list.
+# 是否生成记忆
+- 只保存具体事件、决定、偏好、承诺、可复用行为模式或重要转折。
+- 不保存单纯语气、一次性心情、普通寒暄、重复旧记忆或只描述最新消息态度的内容。
+- 一个具体事件只生成一个 memory_unit。
+- 用户提出请求并且 `{character_name}` 接受后续遵守时，这是一个 `active_commitment`，不要拆成“用户偏好”和“接受回应”两条。
+- 当 `future_promises_evidence` 与用户本轮请求/偏好指向同一个后续行为时，只生成一条 `active_commitment`；不要再为同一请求另建 `objective_fact`。
+- 如果证据中有多个可长期保存的主题，只有在它们有不同的未来互动含义时才分成多条。
+- 用户明确说明某个项目名、代号、标题或外部名称属于用户自己时，优先直接记录用户事实；只在该对比本身会影响未来互动时，才保留它不是指向 `{character_name}` 的说明。
 
-# Input Format
-{
-    "timestamp": "local YYYY-MM-DD HH:MM timestamp for the current consolidation turn",
+# unit_type 判定
+- `objective_fact`: 用户事实、用户偏好、项目名称、明确决定或系统性说明；如果同一事实已经被 `{character_name}` 接受为后续行为，改用 `active_commitment`。
+- `milestone`: 一次性的重要事件、清晰转折或长期关系/协作方式的改变。
+- `active_commitment`: `{character_name}` 已接受的持续承诺、后续行为或仍需遵守的偏好。
+- `recent_shift`: 新出现的短期变化、暂时未解决的倾向或仍在观察的局部模式。
+- `stable_pattern`: 已有证据显示跨时间重复出现的稳定行为。
+
+# 三个字段的写法
+- 写每个 memory_unit 前，先决定是否需要写 `{character_name}`。如果上下文清楚，优先省略名称或用“该名称”“这一要求”“这一承诺”等方式回指。
+- `fact`: 写具体可复用事实或已接受的未来行为，不写情绪总结。
+- `subjective_appraisal`: 写 `{character_name}` 对该 fact 的第三人称理解；客观事实也必须填写。
+- `relationship_signal`: 写这条记忆以后应怎样影响互动。
+- 对用户自己的项目名、代号或标题，fact 写用户拥有的名称；relationship_signal 写以后如何识别该名称，不需要反复对比 `{character_name}`。
+- 三个字段共同表达同一条记忆，不是三条独立记忆。
+- 对 `active_commitment`，fact 应写清 `{character_name}` 接受了什么未来行为；subjective_appraisal 写理解，relationship_signal 写后续执行方式。
+- 如果 fact 已经写出 `{character_name}`，subjective_appraisal 与 relationship_signal 优先省略主语或写“该名称”“这一要求”“这一承诺”等。
+
+# 记忆视角契约
+- 本契约适用于你生成的可长期保存的 JSON 记忆字段：fact、subjective_appraisal、relationship_signal。
+- 记忆文本采用第三人称视角。
+- 可写入记忆文本的唯一名称是 `{character_name}`。
+- 需要命名 `{character_name}` 时，只使用 `{character_name}`。
+- 不要缩写、截断、翻译或改写该名称；不要使用任何别名或短名替代。
+- 规范名称是一个不可拆分的完整字符串；不要只输出括号前的中文部分，也不要只输出括号内或括号外的任一片段。
+- 名称复制规则：需要写 `{character_name}` 时，逐字复制完整字符串，包括括号内容、空格和长音符号；不要凭记忆重新拼写。
+- 如果不需要消歧，优先省略名称；如果无法逐字复制完整名称，宁可省略主语，不要写短名或近似拼写。
+- 上游证据里指向 `{character_name}` 的短名、别名或旧写法只作为证据理解，不可复制到输出；要么省略主语，要么使用完整名称。
+- 不要用“我”指代 `{character_name}`；输入中的“我”必须按原说话人理解。
+- 如果用户说“我……”，生成记忆时应写作“用户……”“对方……”或“用户自己……”，不要把这个“我”归到 `{character_name}`。
+- 不要把说话人标签、显示名称、泛称或 assistant 等机器标签写成记忆主体；需要命名时只能用 `{character_name}`。
+- 只有必须保留对比关系时，才写作“不是指向 `{character_name}` 的名称/称呼”，不要使用泛称。
+
+# 输入格式
+{{
+    "timestamp": "local YYYY-MM-DD HH:MM timestamp for this consolidation turn",
     "global_user_id": "stable user UUID",
-    "user_name": "current user's display name",
+    "user_name": "current user display name",
     "decontextualized_input": "current user message after decontextualization",
-    "final_dialog": ["active character's final response segment"],
-    "internal_monologue": "active character's cognition-stage internal monologue",
-    "emotional_appraisal": "active character's subjective emotional appraisal",
-    "interaction_subtext": "active character's reading of the interaction subtext",
+    "final_dialog": ["final response segment from {character_name}"],
+    "internal_monologue": "cognition-stage internal monologue for {character_name}",
+    "emotional_appraisal": "subjective emotional appraisal for {character_name}",
+    "interaction_subtext": "interaction subtext read by {character_name}",
     "logical_stance": "CONFIRM | REFUSE | TENTATIVE | DIVERGE | CHALLENGE",
     "character_intent": "PROVIDE | BANTAR | REJECT | EVADE | CONFRONT | DISMISS | CLARIFY",
-    "chat_history_recent": [{"role": "user|assistant", "display_name": "optional", "body_text": "message text"}],
-    "rag_user_memory_context": {
-        "stable_patterns": [{"fact": "...", "subjective_appraisal": "...", "relationship_signal": "...", "updated_at": "optional local YYYY-MM-DD HH:MM timestamp"}],
-        "recent_shifts": [{"fact": "...", "subjective_appraisal": "...", "relationship_signal": "...", "updated_at": "optional local YYYY-MM-DD HH:MM timestamp"}],
-        "objective_facts": [{"fact": "...", "subjective_appraisal": "...", "relationship_signal": "...", "updated_at": "optional local YYYY-MM-DD HH:MM timestamp"}],
-        "milestones": [{"fact": "...", "subjective_appraisal": "...", "relationship_signal": "...", "updated_at": "optional local YYYY-MM-DD HH:MM timestamp"}],
-        "active_commitments": [{"fact": "...", "subjective_appraisal": "...", "relationship_signal": "...", "updated_at": "optional local YYYY-MM-DD HH:MM timestamp"}]
-    },
-    "new_facts_evidence": [{"fact": "fact harvester output"}],
-    "future_promises_evidence": [{"action": "future promise or scheduled action"}],
+    "chat_history_recent": [{{"speaker_name": "user display name or {character_name}", "body_text": "message text"}}],
+    "rag_user_memory_context": {{
+        "stable_patterns": [{{"fact": "...", "subjective_appraisal": "...", "relationship_signal": "...", "updated_at": "optional local YYYY-MM-DD HH:MM timestamp"}}],
+        "recent_shifts": [{{"fact": "...", "subjective_appraisal": "...", "relationship_signal": "...", "updated_at": "optional local YYYY-MM-DD HH:MM timestamp"}}],
+        "objective_facts": [{{"fact": "...", "subjective_appraisal": "...", "relationship_signal": "...", "updated_at": "optional local YYYY-MM-DD HH:MM timestamp"}}],
+        "milestones": [{{"fact": "...", "subjective_appraisal": "...", "relationship_signal": "...", "updated_at": "optional local YYYY-MM-DD HH:MM timestamp"}}],
+        "active_commitments": [{{"fact": "...", "subjective_appraisal": "...", "relationship_signal": "...", "updated_at": "optional local YYYY-MM-DD HH:MM timestamp"}}]
+    }},
+    "new_facts_evidence": [{{"fact": "fact harvester output"}}],
+    "future_promises_evidence": [{{"action": "future promise or scheduled action"}}],
     "subjective_appraisal_evidence": ["relationship/appraisal evidence text"]
-}
+}}
 
-# Output Format
-Return only valid JSON:
-{
+# 输出格式
+只返回有效 JSON：
+{{
     "memory_units": [
-        {
+        {{
             "unit_type": "stable_pattern | recent_shift | objective_fact | milestone | active_commitment",
-            "fact": "concrete event, decision, preference, commitment, or behavior",
-            "subjective_appraisal": "active character's subjective interpretation of the fact",
-            "relationship_signal": "how this should affect future interaction",
-            "evidence_refs": [{"source": "chat", "timestamp": "optional local YYYY-MM-DD HH:MM timestamp", "message_id": "optional platform message id"}]
-        }
+            "fact": "具体事件、决定、偏好、承诺或行为",
+            "subjective_appraisal": "第三人称主观理解",
+            "relationship_signal": "未来互动含义",
+            "evidence_refs": [{{"source": "chat", "timestamp": "optional local YYYY-MM-DD HH:MM timestamp", "message_id": "optional platform message id"}}]
+        }}
     ]
-}
+}}
 """
 _extractor_llm = get_llm(
     temperature=0.2,
@@ -513,9 +540,16 @@ async def extract_memory_unit_candidates(state: ConsolidatorState) -> list[dict]
         Structurally valid candidate memory units.
     """
 
-    system_prompt = SystemMessage(content=_EXTRACTOR_PROMPT)
+    character_name = state["character_profile"]["name"]
+    system_prompt = SystemMessage(
+        content=_EXTRACTOR_PROMPT.format(character_name=character_name),
+    )
+    payload = project_memory_unit_extractor_prompt_payload(
+        _json_payload(state),
+        character_name=character_name,
+    )
     human_message = HumanMessage(
-        content=json.dumps(_json_payload(state), ensure_ascii=False),
+        content=json.dumps(payload, ensure_ascii=False),
     )
     response = await _extractor_llm.ainvoke([
         system_prompt,
@@ -642,42 +676,58 @@ You are the memory-unit rewrite stage. You update only the semantic text fields.
 - For evolve, explicitly update the relationship meaning.
 - Do not change the merge/evolve decision.
 
+# 记忆视角契约
+- 本契约适用于你生成的可长期保存的 JSON 记忆字段：fact、subjective_appraisal、relationship_signal。
+- 记忆文本采用第三人称视角。
+- 可写入记忆文本的唯一名称是 `{character_name}`。
+- 需要命名 `{character_name}` 时，只使用 `{character_name}`。
+- 不要缩写、截断、翻译或改写该名称；不要使用任何别名或短名替代。
+- 名称复制规则：需要写 `{character_name}` 时，逐字复制完整字符串，包括括号内容、空格和长音符号；不要凭记忆重新拼写。
+- 如果不需要消歧，优先省略名称；如果无法逐字复制完整名称，宁可省略主语，不要写短名或近似拼写。
+- 上游证据里指向 `{character_name}` 的短名、别名或旧写法只作为证据理解，不可复制到输出；要么省略主语，要么使用完整名称。
+- 不要用“我”指代 `{character_name}`；输入中的“我”必须按原说话人理解。
+- 如果用户说“我……”，生成记忆时应写作“用户……”“对方……”或“用户自己……”，不要把这个“我”归到 `{character_name}`。
+- 不要把说话人标签、显示名称、泛称或 assistant 等机器标签写成记忆主体；需要命名时只能用 `{character_name}`。
+- 当需要说明某个名称、项目代号或称呼不属于 `{character_name}` 时，写作“不是指向 `{character_name}` 的名称/称呼”，不要使用泛称。
+- 所有“无关/不是/并非”的对象都必须写成 `{character_name}` 或省略，不允许用泛称代替。
+- 只返回有效 JSON。
+
 # Generation Procedure
 1. Read decision.decision first. Treat it as fixed.
 2. If decision is merge, compact repeated information from the existing unit and new candidate into one clearer memory.
 3. If decision is evolve, preserve the older memory and update the fact/appraisal/signal to reflect the new development.
 4. Keep the fact field concrete and event-based. Do not turn it into a mood summary.
-5. Keep subjective_appraisal about the active character's interpretation.
+5. Keep subjective_appraisal as {character_name}'s third-person interpretation. Do not force the name into every field. If the field needs to name `{character_name}` or replace a polluted actor label, copy the full exact name `{character_name}`.
 6. Keep relationship_signal about future interaction.
 7. Do not output structural IDs; the caller already owns persistence IDs.
 8. Output only the three updated semantic fields.
 
 # Input Format
-{
+{{
     "existing_unit_id": "stored unit id selected by the merge judge",
-    "new_memory_unit": {
+    "new_memory_unit": {{
         "candidate_id": "candidate id",
         "unit_type": "candidate unit type",
         "fact": "new candidate fact",
         "subjective_appraisal": "new candidate appraisal",
         "relationship_signal": "new candidate relationship signal",
-        "evidence_refs": [{"source": "chat", "timestamp": "optional local YYYY-MM-DD HH:MM timestamp", "message_id": "optional platform message id"}]
-    },
-    "decision": {
+        "evidence_refs": [{{"source": "chat", "timestamp": "optional local YYYY-MM-DD HH:MM timestamp", "message_id": "optional platform message id"}}]
+    }},
+    "decision": {{
         "candidate_id": "candidate id",
         "decision": "merge | evolve",
         "cluster_id": "stored unit id",
         "reason": "merge judge reason"
-    }
-}
+    }}
+}}
 
 # Output Format
 Return only valid JSON:
-{
+{{
     "fact": "updated compact fact",
-    "subjective_appraisal": "updated active-character subjective appraisal",
+    "subjective_appraisal": "updated third-person subjective appraisal using the exact {character_name} string when naming {character_name}",
     "relationship_signal": "updated future interaction signal"
-}
+}}
 """
 _rewrite_llm = get_llm(
     temperature=0.2,
@@ -688,10 +738,15 @@ _rewrite_llm = get_llm(
 )
 
 
-async def _rewrite_memory_unit(candidate: dict, merge_result: dict) -> dict:
+async def _rewrite_memory_unit(
+    state: ConsolidatorState,
+    candidate: dict,
+    merge_result: dict,
+) -> dict:
     """Rewrite an existing memory unit with a new candidate's evidence.
 
     Args:
+        state: Current consolidator state, including the character profile.
         candidate: New memory-unit candidate.
         merge_result: Validated merge/evolve decision.
 
@@ -699,13 +754,20 @@ async def _rewrite_memory_unit(candidate: dict, merge_result: dict) -> dict:
         Validated replacement semantic fields for the stored unit.
     """
 
+    character_name = state["character_profile"]["name"]
     msg = {
         "existing_unit_id": merge_result["cluster_id"],
         "new_memory_unit": project_tool_result_for_llm(candidate),
         "decision": project_tool_result_for_llm(merge_result),
     }
-    system_prompt = SystemMessage(content=_REWRITE_PROMPT)
-    human_message = HumanMessage(content=json.dumps(msg, ensure_ascii=False))
+    payload = project_memory_unit_rewrite_prompt_payload(
+        msg,
+        character_name=character_name,
+    )
+    system_prompt = SystemMessage(
+        content=_REWRITE_PROMPT.format(character_name=character_name),
+    )
+    human_message = HumanMessage(content=json.dumps(payload, ensure_ascii=False))
     response = await _rewrite_llm.ainvoke([
         system_prompt,
         human_message,
@@ -863,7 +925,7 @@ async def process_memory_unit_candidate(state: ConsolidatorState, candidate: dic
         )
         unit_id = docs[0]["unit_id"]
     else:
-        rewrite_result = await _rewrite_memory_unit(candidate, merge_result)
+        rewrite_result = await _rewrite_memory_unit(state, candidate, merge_result)
         await update_user_memory_unit_semantics(
             merge_result["cluster_id"],
             rewrite_result,

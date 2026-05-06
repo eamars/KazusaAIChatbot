@@ -86,6 +86,7 @@ def _build_extractor_state() -> dict:
     state = {
         "timestamp": timestamp,
         "global_user_id": "live-memory-unit-user",
+        "character_profile": {"name": "杏山千纱 (Kyōyama Kazusa)"},
         "user_name": "LiveMemoryUnitUser",
         "decontexualized_input": (
             "Please remember the actual architecture decision: historical "

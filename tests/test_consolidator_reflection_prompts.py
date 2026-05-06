@@ -71,6 +71,10 @@ async def test_global_state_updater_receives_grounding_fields(monkeypatch) -> No
     assert "final_dialog" in system_prompt
     assert "弱证据" in system_prompt
     assert "强负面状态准入" in system_prompt
+    assert "# 记忆视角契约" in system_prompt
+    assert "杏山千纱" in system_prompt
+    assert "不要用“我”指代当前角色" in system_prompt
+    assert "以杏山千纱的第一人称" not in system_prompt
     assert payload["logical_stance"] == "CONFIRM"
     assert payload["decontexualized_input"] == "不是在拉开距离，只是顺手整理线材。"
 
@@ -93,6 +97,9 @@ async def test_relationship_recorder_receives_reassurance_context(monkeypatch) -
     assert "不会收到完整角色资料" in system_prompt
     assert "证据分层规则" in system_prompt
     assert "普通任务默认跳过" in system_prompt
+    assert "# 记忆视角契约" in system_prompt
+    assert "杏山千纱" in system_prompt
+    assert "描述“我”如何理解" not in system_prompt
     assert payload["decontexualized_input"] == "不是在拉开距离，只是顺手整理线材。"
     assert payload["final_dialog"] == ["那就按你说的来吧。"]
     assert payload["content_anchors"] == ["[FACTUAL] 按普通事务回应。"]

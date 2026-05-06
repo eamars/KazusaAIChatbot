@@ -15,16 +15,31 @@ from kazusa_ai_chatbot.memory_evolution.models import (
 from kazusa_ai_chatbot.reflection_cycle import promotion as promotion_module
 
 
+@pytest.fixture(autouse=True)
+def _mock_character_profile(monkeypatch) -> None:
+    """Give promotion prompts a deterministic active character profile name."""
+
+    monkeypatch.setattr(
+        promotion_module,
+        "get_character_profile",
+        AsyncMock(return_value={"name": "杏山千纱 (Kyōyama Kazusa)"}),
+    )
+
+
 def test_global_promotion_prompt_has_required_contract_sections() -> None:
     """Prompt render should expose the pinned promotion contract sections."""
 
     payload = _promotion_payload()
-    prompt = promotion_module.build_global_promotion_prompt(payload)
+    prompt = promotion_module.build_global_promotion_prompt(
+        payload,
+        character_name="杏山千纱 (Kyōyama Kazusa)",
+    )
 
     for header in (
-        "# 角色",
+        "# 任务",
         "# 核心任务",
         "# 语言政策",
+        "# 记忆视角契约",
         "# 生成步骤",
         "# 输入格式",
         "# 输出格式",
@@ -36,6 +51,11 @@ def test_global_promotion_prompt_has_required_contract_sections() -> None:
     assert "evidence_cards" in prompt.human_prompt
     assert "promotion_limits" in prompt.human_prompt
     assert "promotion_decisions" in prompt.system_prompt
+    assert "杏山千纱 (Kyōyama Kazusa)" in prompt.system_prompt
+    assert "character_profile" not in prompt.system_prompt
+    assert "active_character" not in prompt.system_prompt
+    assert "active_character" not in prompt.human_prompt
+    assert "source_utterance" in prompt.human_prompt
 
 
 def test_promotion_validation_rejects_private_or_boundary_unsafe_rows() -> None:

@@ -153,6 +153,7 @@ async def test_process_memory_unit_candidate_reuses_rag_surfaced_units(monkeypat
         {
             "timestamp": "2026-04-29T00:00:00+12:00",
             "global_user_id": "user-1",
+            "character_profile": {"name": "杏山千纱 (Kyōyama Kazusa)"},
             "rag_result": {"user_memory_unit_candidates": [surfaced_unit]},
         },
         candidate,
@@ -234,6 +235,7 @@ async def test_process_memory_unit_candidate_merges_memory_evidence_surfaced_sco
         {
             "timestamp": "2026-04-29T00:00:00+12:00",
             "global_user_id": "user-1",
+            "character_profile": {"name": "杏山千纱 (Kyōyama Kazusa)"},
             "rag_result": {"user_memory_unit_candidates": [surfaced_unit]},
         },
         candidate,
@@ -304,6 +306,7 @@ async def test_process_memory_unit_candidate_normalizes_merge_candidate_id(monke
         {
             "timestamp": "2026-04-29T00:00:00+12:00",
             "global_user_id": "user-1",
+            "character_profile": {"name": "杏山千纱 (Kyōyama Kazusa)"},
             "rag_result": {"user_memory_unit_candidates": [existing_unit]},
         },
         candidate,
@@ -370,6 +373,7 @@ async def test_process_memory_unit_candidate_uses_validated_merge_cluster_when_r
         {
             "timestamp": "2026-04-29T00:00:00+12:00",
             "global_user_id": "user-1",
+            "character_profile": {"name": "杏山千纱 (Kyōyama Kazusa)"},
             "rag_result": {"user_memory_unit_candidates": [existing_unit]},
         },
         candidate,
@@ -488,6 +492,7 @@ async def test_stability_judge_receives_count_session_and_recent_examples(monkey
             "timestamp": "2026-04-30T12:00:00+12:00",
             "time_context": build_character_time_context("2026-04-30T12:00:00+12:00"),
             "global_user_id": "user-1",
+            "character_profile": {"name": "杏山千纱 (Kyōyama Kazusa)"},
             "rag_result": {"user_memory_unit_candidates": [existing_unit]},
         },
         candidate,

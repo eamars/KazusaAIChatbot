@@ -149,7 +149,10 @@ async def test_global_promotion_live_no_signal_case(ensure_live_llm) -> None:
 async def _run_case(case_id: str, payload: dict[str, Any]) -> dict[str, Any]:
     """Run one live promotion prompt and write an inspectable trace."""
 
-    prompt = build_global_promotion_prompt(payload)
+    prompt = build_global_promotion_prompt(
+        payload,
+        character_name="杏山千纱 (Kyōyama Kazusa)",
+    )
     response = await _global_promotion_llm.ainvoke([
         SystemMessage(content=prompt.system_prompt),
         HumanMessage(content=prompt.human_prompt),
