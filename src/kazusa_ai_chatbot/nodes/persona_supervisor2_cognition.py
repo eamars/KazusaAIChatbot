@@ -27,6 +27,7 @@ from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition_l2 import (  # noqa: 
     call_judgment_core_agent,
 )
 from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition_l3 import (  # noqa: E402
+    call_interaction_style_context_loader,
     call_contextual_agent,
     call_style_agent,
     call_content_anchor_agent,
@@ -53,6 +54,10 @@ async def call_cognition_subgraph(state: GlobalPersonaState) -> GlobalPersonaSta
     sub_agent_builder.add_node("l2c_judgment_core", call_judgment_core_agent)
 
     sub_agent_builder.add_node("l3_contextual_agent", call_contextual_agent)
+    sub_agent_builder.add_node(
+        "l3_interaction_style_context_loader",
+        call_interaction_style_context_loader,
+    )
     sub_agent_builder.add_node("l3_style_agent", call_style_agent)
     sub_agent_builder.add_node("l3_content_anchor_agent", call_content_anchor_agent)
     sub_agent_builder.add_node("l3_preference_adapter", call_preference_adapter)
@@ -68,11 +73,12 @@ async def call_cognition_subgraph(state: GlobalPersonaState) -> GlobalPersonaSta
     sub_agent_builder.add_edge("l2b_boundary_core", "l2c_judgment_core")
 
     sub_agent_builder.add_edge("l2c_judgment_core", "l3_contextual_agent")
-    sub_agent_builder.add_edge("l2c_judgment_core", "l3_style_agent")
+    sub_agent_builder.add_edge("l2c_judgment_core", "l3_interaction_style_context_loader")
     sub_agent_builder.add_edge("l2c_judgment_core", "l3_content_anchor_agent")
 
     sub_agent_builder.add_edge("l3_contextual_agent", "l3_visual_agent")
     sub_agent_builder.add_edge("l3_content_anchor_agent", "l3_visual_agent")
+    sub_agent_builder.add_edge("l3_interaction_style_context_loader", "l3_style_agent")
     sub_agent_builder.add_edge("l3_style_agent", "l3_preference_adapter")
     sub_agent_builder.add_edge("l3_preference_adapter", "l4_collector")
     sub_agent_builder.add_edge("l3_visual_agent", "l4_collector")
@@ -98,6 +104,9 @@ async def call_cognition_subgraph(state: GlobalPersonaState) -> GlobalPersonaSta
         "time_context": state["time_context"],
         "user_input": state["user_input"],
         "prompt_message_context": state["prompt_message_context"],
+        "platform": state["platform"],
+        "platform_channel_id": state["platform_channel_id"],
+        "channel_type": state["channel_type"],
         "global_user_id": state["global_user_id"],
         "user_name": state["user_name"],
         "user_profile": state["user_profile"],

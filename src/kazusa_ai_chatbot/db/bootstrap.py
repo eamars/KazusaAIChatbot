@@ -11,6 +11,9 @@ from datetime import datetime, timezone
 
 from kazusa_ai_chatbot.config import RAG_CACHE2_MAX_ENTRIES
 from kazusa_ai_chatbot.db._client import enable_vector_index, get_db
+from kazusa_ai_chatbot.db.interaction_style_images import (
+    ensure_interaction_style_image_indexes,
+)
 from kazusa_ai_chatbot.db.reflection_cycle import ensure_reflection_run_indexes
 from kazusa_ai_chatbot.db.rag_cache2_persistent import (
     INITIALIZER_CACHE_NAME,
@@ -52,6 +55,7 @@ async def db_bootstrap() -> None:
         "scheduled_events",
         "conversation_episode_state",
         "character_reflection_runs",
+        "interaction_style_images",
         PERSISTENT_CACHE_COLLECTION,
     ]
     for name in required_collections:
@@ -165,6 +169,7 @@ async def db_bootstrap() -> None:
         name=PERSISTENT_CACHE_LOOKUP_INDEX,
     )
     await ensure_reflection_run_indexes()
+    await ensure_interaction_style_image_indexes()
 
     await purge_stale_initializer_entries()
     await prune_persistent_entries(

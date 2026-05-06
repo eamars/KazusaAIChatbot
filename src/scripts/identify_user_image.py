@@ -17,7 +17,9 @@ from typing import Any
 
 from kazusa_ai_chatbot.db import (
     close_db,
-    get_db,
+    empty_interaction_style_overlay,
+    find_user_profile_by_identifier,
+    get_user_style_image,
 )
 from kazusa_ai_chatbot.rag.user_memory_unit_retrieval import build_user_memory_context
 
@@ -165,6 +167,21 @@ async def _hydrate_prompt_profile(profile: dict[str, Any]) -> dict[str, Any]:
         query_text="",
         include_semantic=False,
     )
+    style_doc = await get_user_style_image(global_user_id)
+    if style_doc is not None:
+        hydrated["user_style_image"] = {
+            "status": style_doc["status"],
+            "overlay": style_doc["overlay"],
+            "revision": style_doc["revision"],
+            "updated_at": style_doc["updated_at"],
+        }
+    else:
+        hydrated["user_style_image"] = {
+            "status": "none",
+            "overlay": empty_interaction_style_overlay(),
+            "revision": "",
+            "updated_at": "",
+        }
     return hydrated
 
 
@@ -188,6 +205,12 @@ def _format_profile(profile: dict[str, Any]) -> str:
     user_memory_context = profile.get("user_memory_context") or {}
     if not isinstance(user_memory_context, dict):
         user_memory_context = {}
+    user_style_image = profile.get("user_style_image") or {}
+    if not isinstance(user_style_image, dict):
+        user_style_image = {}
+    style_overlay = user_style_image.get("overlay") or {}
+    if not isinstance(style_overlay, dict):
+        style_overlay = {}
 
     return_value = "\n".join(
         [
@@ -210,7 +233,38 @@ def _format_profile(profile: dict[str, Any]) -> str:
             _format_sequence(user_memory_context.get("milestones") or [], label="milestone"),
             "",
             "user_memory_context.active_commitments:",
-            _format_sequence(user_memory_context.get("active_commitments") or [], label="commitment"),
+            _format_sequence(
+                user_memory_context.get("active_commitments") or [],
+                label="commitment",
+            ),
+            "",
+            "user_style_image:",
+            f"  status: {user_style_image.get('status', 'none')}",
+            f"  revision: {user_style_image.get('revision', '')}",
+            f"  updated_at: {user_style_image.get('updated_at', '')}",
+            "user_style_image.speech_guidelines:",
+            _format_sequence(
+                style_overlay.get("speech_guidelines") or [],
+                label="speech",
+            ),
+            "",
+            "user_style_image.social_guidelines:",
+            _format_sequence(
+                style_overlay.get("social_guidelines") or [],
+                label="social",
+            ),
+            "",
+            "user_style_image.pacing_guidelines:",
+            _format_sequence(
+                style_overlay.get("pacing_guidelines") or [],
+                label="pacing",
+            ),
+            "",
+            "user_style_image.engagement_guidelines:",
+            _format_sequence(
+                style_overlay.get("engagement_guidelines") or [],
+                label="engagement",
+            ),
         ]
     )
     return return_value
@@ -226,30 +280,14 @@ async def _find_profile(identifier: str, platform: str | None) -> dict[str, Any]
     Returns:
         The first matching profile document with ``_id`` omitted, or ``None``.
     """
-    db = await get_db()
-    projection = {"_id": 0}
-    if platform:
-        return_value = await db.user_profiles.find_one(
-            {
-                "platform_accounts": {
-                    "$elemMatch": {
-                        "platform": platform,
-                        "platform_user_id": identifier,
-                    }
-                }
-            },
-            projection,
-        )
-        return return_value
-
-    profile = await db.user_profiles.find_one({"global_user_id": identifier}, projection)
-    if profile is not None:
-        return profile
-
-    return_value = await db.user_profiles.find_one(
-        {"platform_accounts": {"$elemMatch": {"platform_user_id": identifier}}},
-        projection,
+    profile = await find_user_profile_by_identifier(
+        identifier=identifier,
+        platform=platform,
     )
+    if profile is None:
+        return_value = None
+        return return_value
+    return_value = dict(profile)
     return return_value
 
 

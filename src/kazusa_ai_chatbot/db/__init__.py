@@ -9,6 +9,7 @@ Submodule map:
 * ``users``        — ``user_profiles`` operations (identity, profile, affinity)
 * ``character``    — ``character_state`` operations
 * ``memory``       — ``memory`` operations
+* ``interaction_style_images`` — L3-only interaction style overlays
 * ``scheduled_events`` — read-only scheduled-event queries
 """
 
@@ -37,6 +38,10 @@ from kazusa_ai_chatbot.db.schemas import (
     ConversationEpisodeEntryDoc,
     ConversationEpisodeStateDoc,
     ConversationMessageDoc,
+    InteractionStyleImageDoc,
+    InteractionStyleOverlayDoc,
+    InteractionStyleScopeType,
+    InteractionStyleStatus,
     MemoryDoc,
     MentionDoc,
     PlatformAccountDoc,
@@ -70,6 +75,7 @@ from kazusa_ai_chatbot.db.conversation_reflection import (
     explain_monitored_channel_query,
     list_recent_character_message_channels,
     list_reflection_scope_messages,
+    resolve_single_private_scope_user_id,
 )
 from kazusa_ai_chatbot.db.reflection_cycle import (
     ensure_reflection_run_indexes,
@@ -79,6 +85,16 @@ from kazusa_ai_chatbot.db.reflection_cycle import (
     list_hourly_runs_for_channel_day,
     upsert_reflection_run,
 )
+from kazusa_ai_chatbot.db.interaction_style_images import (
+    build_interaction_style_context,
+    empty_interaction_style_overlay,
+    ensure_interaction_style_image_indexes,
+    get_group_channel_style_image,
+    get_user_style_image,
+    upsert_group_channel_style_image,
+    upsert_user_style_image,
+    validate_interaction_style_overlay,
+)
 
 # ── Users (identity + profile + affinity) ─────────────────────────
 from kazusa_ai_chatbot.db.users import (
@@ -86,6 +102,7 @@ from kazusa_ai_chatbot.db.users import (
     backfill_character_conversation_identity,
     create_user_profile,
     ensure_character_identity,
+    find_user_profile_by_identifier,
     get_affinity,
     get_user_profile,
     link_platform_account,
@@ -159,7 +176,9 @@ __all__ = [
     # Schemas
     "AttachmentDoc", "CharacterProfileDoc", "CharacterReflectionRunDoc",
     "ConversationEpisodeEntryDoc", "ConversationEpisodeStateDoc",
-    "ConversationMessageDoc", "MemoryDoc", "MentionDoc",
+    "ConversationMessageDoc", "InteractionStyleImageDoc",
+    "InteractionStyleOverlayDoc", "InteractionStyleScopeType",
+    "InteractionStyleStatus", "MemoryDoc", "MentionDoc",
     "PlatformAccountDoc", "RAGCache2PersistentEntryDoc",
     "ReflectionMessageRefDoc", "ReflectionScopeDoc",
     "ScheduledEventDoc", "UserMemoryContextDoc", "UserMemoryContextEntry",
@@ -174,13 +193,19 @@ __all__ = [
     "explain_monitored_channel_query",
     "list_recent_character_message_channels",
     "list_reflection_scope_messages",
+    "resolve_single_private_scope_user_id",
     "ensure_reflection_run_indexes", "find_reflection_run_by_id",
     "list_daily_channel_runs", "list_existing_run_ids",
     "list_hourly_runs_for_channel_day", "upsert_reflection_run",
+    "build_interaction_style_context", "empty_interaction_style_overlay",
+    "ensure_interaction_style_image_indexes", "get_group_channel_style_image",
+    "get_user_style_image", "upsert_group_channel_style_image",
+    "upsert_user_style_image", "validate_interaction_style_overlay",
     # Users
     "add_suspected_alias", "backfill_character_conversation_identity",
     "create_user_profile",
     "ensure_character_identity",
+    "find_user_profile_by_identifier",
     "get_affinity",
     "get_user_profile", "link_platform_account",
     "list_users_by_affinity", "list_users_by_display_name",

@@ -4,7 +4,7 @@
 
 - Goal: Add private user and group-channel interaction style images derived from daily reflection, keep them out of RAG and cognition memory, and expose only sanitized abstract handling guidance to selected L3 agents.
 - Plan class: large
-- Status: draft
+- Status: completed
 - Mandatory skills: `local-llm-architecture`, `py-style`, `test-style-and-execution`.
 - Overall cutover strategy: additive and compatible; absent or empty user-style overlays preserve current behavior until background reflection writes usable style images.
 - Highest-risk areas: privacy boundary between reflection and L3, accidental RAG exposure, prompt authority confusion, and group/private context mixing.
@@ -584,21 +584,21 @@ Do not modify unrelated dialog, L1, L2, RAG helper-agent, memory evolution, or u
 
 ## Progress Checklist
 
-- [ ] DB schema and collection indexes added.
-- [ ] Runtime style overlay sanitizer implemented.
-- [ ] DB read/write/projection tests passing.
-- [ ] Private user resolver implemented and tested.
-- [ ] `identify_user_image` uses DB interfaces only and shows user style as a separate diagnostic section.
-- [ ] Daily reflection style extraction implemented and tested (including fully-empty-output skip behavior).
-- [ ] Reflection worker integration implemented and tested.
-- [ ] `platform`, `platform_channel_id`, `channel_type` plumbed from `GlobalPersonaState` into `CognitionState` with a focused test asserting they reach the cognition subgraph.
-- [ ] Cognition state `interaction_style_context` field and L3 loader implemented.
-- [ ] L3 graph wiring implemented.
-- [ ] Style agent prompt updated and prompt-render tested.
-- [ ] Preference adapter prompt updated and prompt-render tested, including style-vs-commitment authority conflict test.
-- [ ] RAG non-exposure tests added and passing.
-- [ ] Pre-existing raw-DB-boundary violations snapshotted at start; no new violations added.
-- [ ] Focused and affected test suites passing.
+- [x] DB schema and collection indexes added.
+- [x] Runtime style overlay sanitizer implemented.
+- [x] DB read/write/projection tests passing.
+- [x] Private user resolver implemented and tested.
+- [x] `identify_user_image` uses DB interfaces only and shows user style as a separate diagnostic section.
+- [x] Daily reflection style extraction implemented and tested (including fully-empty-output skip behavior).
+- [x] Reflection worker integration implemented and tested.
+- [x] `platform`, `platform_channel_id`, `channel_type` plumbed from `GlobalPersonaState` into `CognitionState` with a focused test asserting they reach the cognition subgraph.
+- [x] Cognition state `interaction_style_context` field and L3 loader implemented.
+- [x] L3 graph wiring implemented.
+- [x] Style agent prompt updated and prompt-render tested.
+- [x] Preference adapter prompt updated and prompt-render tested, including style-vs-commitment authority conflict test.
+- [x] RAG non-exposure tests added and passing.
+- [x] Pre-existing raw-DB-boundary violations snapshotted at start; no new violations added.
+- [x] Focused and affected test suites passing.
 
 ## Verification
 
@@ -637,6 +637,26 @@ venv\Scripts\python.exe -m pytest tests\test_reflection_cycle_prompt_contracts.p
 ```
 
 Run live-LLM tests only if the implementation changes prompt contracts in a way that cannot be covered with patched prompt-render tests and the project test instructions allow live LLM execution for the current environment.
+
+## Execution Evidence
+
+- Implementation completed on 2026-05-06.
+- Self-review corrections on 2026-05-06 tightened private-channel resolution,
+  skipped already-applied successful daily style updates, made the diagnostic
+  `user_style_image` JSON section explicit when empty, and refined quote-marker
+  validation.
+- Focused deterministic and patched-LLM tests:
+  `venv\Scripts\python.exe -m pytest tests\test_interaction_style_images.py tests\test_reflection_interaction_style.py tests\test_cognition_interaction_style_context.py tests\test_cognition_preference_adapter.py -q`
+  passed with `22 passed`.
+- Affected existing tests:
+  `venv\Scripts\python.exe -m pytest tests\test_reflection_cycle_prompt_contracts.py tests\test_reflection_cycle_readonly.py tests\test_persona_supervisor2_schema.py tests\test_rag_projection.py tests\test_persona_supervisor2_rag_skip_shape.py -q`
+  passed with `40 passed`.
+- Python compilation:
+  `venv\Scripts\python.exe -m compileall src\kazusa_ai_chatbot tests`
+  completed successfully.
+- RAG static exposure check found no production RAG module or RAG node references to `interaction_style` or `style_image`; tests contain only non-exposure assertions.
+- Raw DB boundary check showed no new violations in files introduced or modified by this plan outside `src/kazusa_ai_chatbot/db/`. Existing out-of-scope violations remain pre-existing; `src/scripts/identify_user_image.py` no longer imports or calls `get_db`.
+- Live-LLM tests were not run because this implementation used deterministic and patched-LLM prompt payload/render checks for the changed L3 contracts, as allowed by this plan.
 
 ## Acceptance Criteria
 

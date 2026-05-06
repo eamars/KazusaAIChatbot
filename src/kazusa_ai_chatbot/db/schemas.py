@@ -245,6 +245,47 @@ class UserMemoryContextDoc(TypedDict, total=False):
     active_commitments: list[UserMemoryContextEntry]
 
 
+class InteractionStyleScopeType:
+    """String constants for ``interaction_style_images.scope_type``."""
+
+    USER = "user"
+    GROUP_CHANNEL = "group_channel"
+
+
+class InteractionStyleStatus:
+    """String constants for ``interaction_style_images.status``."""
+
+    ACTIVE = "active"
+    EMPTY = "empty"
+    DISABLED = "disabled"
+
+
+class InteractionStyleOverlayDoc(TypedDict, total=False):
+    """Prompt-facing abstract interaction guidance for L3 style stages."""
+
+    speech_guidelines: list[str]
+    social_guidelines: list[str]
+    pacing_guidelines: list[str]
+    engagement_guidelines: list[str]
+    confidence: str
+
+
+class InteractionStyleImageDoc(TypedDict, total=False):
+    """Durable current interaction-style image for a user or group channel."""
+
+    style_image_id: str
+    scope_type: str
+    global_user_id: str
+    platform: str
+    platform_channel_id: str
+    status: str
+    overlay: InteractionStyleOverlayDoc
+    source_reflection_run_ids: list[str]
+    revision: int
+    created_at: str
+    updated_at: str
+
+
 class CharacterProfileDoc(TypedDict, total=False):
     """All fields of the singleton ``_id: "global"`` document in
     the ``character_state`` collection.

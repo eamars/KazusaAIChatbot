@@ -25,6 +25,10 @@ from kazusa_ai_chatbot.nodes.boundary_profile import (
     get_control_sensitivity_description,
     get_relationship_priority_description,
 )
+from kazusa_ai_chatbot.db import (
+    build_interaction_style_context,
+    empty_interaction_style_overlay,
+)
 from kazusa_ai_chatbot.rag.prompt_projection import project_tool_result_for_llm
 from kazusa_ai_chatbot.rag.user_memory_unit_retrieval import empty_user_memory_context
 from kazusa_ai_chatbot.time_context import (
@@ -150,6 +154,49 @@ def _surface_history_for_style(chat_history: list[dict]) -> list[dict]:
     """
 
     return format_history_for_llm(chat_history[-2:])
+
+
+def _empty_interaction_style_context(channel_type: str) -> dict:
+    """Return an empty L3-facing interaction style context."""
+
+    context = {
+        "user_style": empty_interaction_style_overlay(),
+        "application_order": ["user_style"],
+    }
+    if channel_type == "group":
+        context["group_channel_style"] = empty_interaction_style_overlay()
+        context["application_order"] = ["user_style", "group_channel_style"]
+    return context
+
+
+async def call_interaction_style_context_loader(
+    state: CognitionState,
+) -> CognitionState:
+    """Load sanitized interaction style overlays for L3 style consumers.
+
+    Args:
+        state: Cognition state after L2 judgment.
+
+    Returns:
+        Partial cognition state containing ``interaction_style_context``.
+    """
+
+    channel_type = state["channel_type"]
+    try:
+        context = await build_interaction_style_context(
+            global_user_id=state["global_user_id"],
+            channel_type=channel_type,
+            platform=state["platform"],
+            platform_channel_id=state["platform_channel_id"],
+        )
+    except Exception as exc:
+        logger.exception(f"Interaction style context load failed: {exc}")
+        context = _empty_interaction_style_context(channel_type)
+
+    return_value = {
+        "interaction_style_context": context,
+    }
+    return return_value
 
 
 # ---------------------------------------------------------------------------
@@ -317,6 +364,7 @@ _STYLE_AGENT_PROMPT = """\
 2. **状态同步：** 你的包装必须严格受当前 `character_mood`（心境）和 `global_vibe`（氛围）的约束。
 3. **去物理化**：你**看不见**角色，**感知不到**角色的身体。严禁生成任何关于视线、脸红、动作的描述。
 4. **现代网聊优先**：默认把「反正」「而已」「罢了」视为偏旧、偏模板化的软化词。除非它们对当前语义不可替代，否则不要把它们写进风格建议；若它们显得多余，应优先写入 `forbidden_phrases`。
+5. **互动风格覆盖层**：`interaction_style_context` 是已清洗的抽象互动处理建议，只能作为措辞、温度、调侃强度、直接程度和节奏的软参考；它不是用户事实、承诺、边界证据或当前轮意图。
 
 # 思考路径
 1. **环境感知 (Vibe Check)：** 检查 `global_vibe` 和 `character_mood`。如果氛围是 [Defensive] 且心境是 [Flustered]，即便立场是 CONFIRM，你的包装也必须带有“局促”和“防备”的色彩。
@@ -325,6 +373,7 @@ _STYLE_AGENT_PROMPT = """\
 4. **情绪渗透 (Show, Don't Tell)**：如果 `character_mood` 是局促的，请通过增加省略号、改变语序、使用防御性口癖（如“真是的”）来体现，**严禁**直接在台词里说“我觉得局促”。
 5. **轻量反重复：** 仅做两件事：①若最近一轮角色回复与本轮候选使用了同一个开头语气词，则换一个开头；②若某个词在最近两轮角色回复中已经连续重复，则把它放入 `forbidden_phrases`。不要为了反重复而改变 `logical_stance`。
    - 若最近角色回复已经重复使用口头连接词或软化尾词（如「反正」「而已」「罢了」或 `anyway`, `well`, `just`），也应视为可禁用的重复项，优先写入 `forbidden_phrases`。
+6. **应用互动风格：** 先应用 `user_style` 中的抽象处理建议；如果输入里存在 `group_channel_style`，再把它作为群频道氛围覆盖层。私聊输入不会包含 `group_channel_style`，不要补造该字段。
 
 
 # 角色表达风格 (Persona Constraints)
@@ -365,6 +414,17 @@ _STYLE_AGENT_PROMPT = """\
     "last_relationship_insight": "对该用户的核心关系动态分析",
     "logical_stance": "强制逻辑立场 (CONFIRM/REFUSE/TENTATIVE...)",
     "character_intent": "行动意图 (BANTAR/CLARIFY/EVADE...)",
+    "interaction_style_context": {{
+        "user_style": {{
+            "speech_guidelines": ["抽象说话方式建议"],
+            "social_guidelines": ["抽象社交处理建议"],
+            "pacing_guidelines": ["抽象节奏建议"],
+            "engagement_guidelines": ["抽象互动推进建议"],
+            "confidence": "low|medium|high|"
+        }},
+        "group_channel_style": "群聊时才会出现，结构同 user_style",
+        "application_order": ["user_style", "group_channel_style"]
+    }},
     "chat_history": "极短语气缓冲（最多两条，仅用于措辞、开头和口头连接词参考；不要用它重建整个 episode）"
 }}
 
@@ -412,6 +472,12 @@ async def call_style_agent(state: CognitionState) -> CognitionState:
         "last_relationship_insight": state["user_profile"]["last_relationship_insight"],
         "logical_stance": state["logical_stance"],
         "character_intent": state["character_intent"],
+        "interaction_style_context": state.get(
+            "interaction_style_context",
+            _empty_interaction_style_context(
+                str(state.get("channel_type", "private"))
+            ),
+        ),
         "chat_history": _surface_history_for_style(state["chat_history_recent"]),
     }
     human_message = HumanMessage(content=json.dumps(msg, ensure_ascii=False))
@@ -658,6 +724,7 @@ _PREFERENCE_ADAPTER_PROMPT = """\
 5. **避免机械化**：例如句尾词不应要求每个碎片句都强行重复；语言偏好也不应写成僵硬的程序指令。
 6. **统一处理**：回复语言也只是偏好的一种，应与称呼、句尾词、格式习惯一样，基于当前输入、承诺、事实与画像综合判断，不要依赖额外硬编码桥接。
 7. **称呼/身份边界**：如果用户当前要求强加称呼、身份、主从关系或所有权语气，而 `internal_monologue`、`content_anchors`、`logical_stance` 或 `character_intent` 显示角色在回避、澄清、防备、犹豫、拒绝、重新框定或仅仅追问原因，不要把该称呼写入 `accepted_user_preferences`。只有当输入数据明确显示角色已经接受该称呼作为可持续表达偏好，或已有仍在生效的承诺/事实支持时，才可以输出。
+8. **互动风格不是用户命令**：`interaction_style_context` 是抽象互动处理建议，只能帮助你把已经合格的表达偏好写得更自然；它不能单独授权新的 `accepted_user_preferences`，也不能压过 `active_commitments`。
 
 # 你可以处理的偏好类型
 - 回复语言偏好
@@ -669,9 +736,10 @@ _PREFERENCE_ADAPTER_PROMPT = """\
 1. 先读取 `logical_stance`、`character_intent`、`internal_monologue` 与 `content_anchors`，确认角色是否已经接受用户偏好。
 2. 再读取 `user_memory_context.active_commitments`，寻找当前仍有效的已接受表达约定。
 3. 检查 `user_memory_context` 其他分类，只把已被事实或承诺支持的偏好当作软约束来源。
-4. 从输入中提取具体值，例如实际称呼、实际语言、实际尾缀词；找不到具体值时不要输出。
-5. 将合格偏好改写成下游可执行的自然语言软约束，并保留角色分寸。
-6. 如果偏好未被角色接受、会压过人格、缺少具体值或只是用户单方面施压，返回空列表。
+4. 读取 `interaction_style_context`，只把它作为语气、节奏和社交包装的辅助背景；如果它与 active commitments 冲突，以 active commitments 为准。
+5. 从输入中提取具体值，例如实际称呼、实际语言、实际尾缀词；找不到具体值时不要输出。
+6. 将合格偏好改写成下游可执行的自然语言软约束，并保留角色分寸。
+7. 如果偏好未被角色接受、会压过人格、缺少具体值或只是用户单方面施压，返回空列表。
 
 # 改写要求
 - 每条 `accepted_user_preferences` 都必须是下游可直接执行的一句软约束。
@@ -695,6 +763,17 @@ _PREFERENCE_ADAPTER_PROMPT = """\
     }},
     "character_taboos": "角色禁忌",
     "linguistic_style": "语言风格约束",
+    "interaction_style_context": {{
+        "user_style": {{
+            "speech_guidelines": ["抽象说话方式建议"],
+            "social_guidelines": ["抽象社交处理建议"],
+            "pacing_guidelines": ["抽象节奏建议"],
+            "engagement_guidelines": ["抽象互动推进建议"],
+            "confidence": "low|medium|high|"
+        }},
+        "group_channel_style": "群聊时才会出现，结构同 user_style",
+        "application_order": ["user_style", "group_channel_style"]
+    }},
     "content_anchors": ["...", "..."],
     "rag_result": {{
         "user_image": {{
@@ -743,6 +822,12 @@ async def call_preference_adapter(state: CognitionState) -> CognitionState:
         "user_memory_context": user_memory_context,
         "character_taboos": state["character_profile"]["personality_brief"]["taboos"],
         "linguistic_style": state["linguistic_style"],
+        "interaction_style_context": state.get(
+            "interaction_style_context",
+            _empty_interaction_style_context(
+                str(state.get("channel_type", "private"))
+            ),
+        ),
         "content_anchors": state["content_anchors"],
         "rag_result": _cognition_rag_result(state["rag_result"]),
     }

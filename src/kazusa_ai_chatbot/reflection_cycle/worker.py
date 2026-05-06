@@ -50,6 +50,9 @@ from kazusa_ai_chatbot.reflection_cycle.selector import collect_reflection_input
 from kazusa_ai_chatbot.reflection_cycle.promotion import (
     _run_global_reflection_promotion,
 )
+from kazusa_ai_chatbot.reflection_cycle.interaction_style import (
+    run_daily_interaction_style_update as _run_daily_interaction_style_update,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -78,6 +81,21 @@ async def run_daily_channel_reflection_cycle(
     """Run the public per-channel daily reflection production pass."""
 
     result = await _run_daily_channel_reflection_cycle(
+        character_local_date=character_local_date,
+        dry_run=dry_run,
+        is_primary_interaction_busy=lambda: False,
+    )
+    return result
+
+
+async def run_daily_interaction_style_update(
+    *,
+    character_local_date: str,
+    dry_run: bool,
+) -> ReflectionWorkerResult:
+    """Run the public daily interaction-style update pass."""
+
+    result = await _run_daily_interaction_style_update(
         character_local_date=character_local_date,
         dry_run=dry_run,
         is_primary_interaction_busy=lambda: False,
@@ -176,6 +194,14 @@ async def _run_worker_tick(
             is_primary_interaction_busy=is_primary_interaction_busy,
         )
         results.append(daily_result)
+        if is_primary_interaction_busy():
+            return results
+        style_result = await _run_daily_interaction_style_update(
+            character_local_date=previous_local_date,
+            dry_run=False,
+            is_primary_interaction_busy=is_primary_interaction_busy,
+        )
+        results.append(style_result)
 
     if _local_time_is_after(local_now, REFLECTION_PROMOTION_RUN_AFTER_LOCAL_TIME):
         if is_primary_interaction_busy():

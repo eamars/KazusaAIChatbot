@@ -115,6 +115,55 @@ async def list_reflection_scope_messages(
     return return_value
 
 
+async def resolve_single_private_scope_user_id(
+    *,
+    platform: str,
+    platform_channel_id: str,
+    start_timestamp: str,
+    end_timestamp: str,
+    character_global_user_id: str,
+) -> str:
+    """Resolve the only non-character user in a private reflection window.
+
+    Args:
+        platform: Platform namespace for the private channel.
+        platform_channel_id: Private channel id.
+        start_timestamp: Inclusive ISO lower bound.
+        end_timestamp: Inclusive ISO upper bound.
+        character_global_user_id: Internal UUID for the character identity.
+
+    Returns:
+        The sole non-character ``global_user_id``, or an empty string when the
+        scope cannot be resolved to exactly one user.
+    """
+
+    db = await get_db()
+    cursor = db.conversation_history.find(
+        {
+            "platform": platform,
+            "platform_channel_id": platform_channel_id,
+            "channel_type": "private",
+            "timestamp": {"$gte": start_timestamp, "$lte": end_timestamp},
+            "role": "user",
+        },
+        {"_id": 0, "global_user_id": 1},
+    )
+    rows = await cursor.to_list(length=None)
+    user_ids: set[str] = set()
+    for row in rows:
+        global_user_id = str(row.get("global_user_id", "") or "").strip()
+        if not global_user_id:
+            continue
+        if global_user_id == character_global_user_id:
+            continue
+        user_ids.add(global_user_id)
+    if len(user_ids) != 1:
+        return_value = ""
+        return return_value
+    return_value = next(iter(user_ids))
+    return return_value
+
+
 async def explain_monitored_channel_query(
     *,
     start_timestamp: str,

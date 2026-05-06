@@ -23,6 +23,7 @@ from kazusa_ai_chatbot.reflection_cycle.promotion import (
 )
 from kazusa_ai_chatbot.reflection_cycle.worker import (
     run_daily_channel_reflection_cycle,
+    run_daily_interaction_style_update,
     run_hourly_reflection_cycle,
     start_reflection_cycle_worker,
     stop_reflection_cycle_worker,
@@ -39,6 +40,7 @@ __all__ = [
     "build_promoted_reflection_context",
     "collect_reflection_inputs",
     "run_daily_channel_reflection_cycle",
+    "run_daily_interaction_style_update",
     "run_global_reflection_promotion",
     "run_hourly_reflection_cycle",
     "run_readonly_reflection_evaluation",

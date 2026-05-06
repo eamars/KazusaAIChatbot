@@ -523,6 +523,71 @@ async def get_user_profile(global_user_id: str) -> UserProfileDoc:
     return doc
 
 
+async def find_user_profile_by_identifier(
+    *,
+    identifier: str,
+    platform: str | None = None,
+) -> UserProfileDoc | None:
+    """Find a user profile by global id or platform account without creating it.
+
+    Args:
+        identifier: Global user id, or platform user id when ``platform`` is
+            provided or no global-id match exists.
+        platform: Optional platform namespace for exact account lookup.
+
+    Returns:
+        The matching user profile without Mongo internals, or ``None``.
+    """
+
+    clean_identifier = identifier.strip()
+    clean_platform = platform.strip() if platform is not None else None
+    if not clean_identifier:
+        return_value = None
+        return return_value
+
+    db = await get_db()
+    projection = {"_id": 0}
+    if clean_platform:
+        document = await db.user_profiles.find_one(
+            {
+                "platform_accounts": {
+                    "$elemMatch": {
+                        "platform": clean_platform,
+                        "platform_user_id": clean_identifier,
+                    }
+                }
+            },
+            projection,
+        )
+        if document is None:
+            return_value = None
+            return return_value
+        return_value = dict(document)
+        return return_value
+
+    document = await db.user_profiles.find_one(
+        {"global_user_id": clean_identifier},
+        projection,
+    )
+    if document is not None:
+        return_value = dict(document)
+        return return_value
+
+    document = await db.user_profiles.find_one(
+        {
+            "platform_accounts": {
+                "$elemMatch": {"platform_user_id": clean_identifier}
+            }
+        },
+        projection,
+    )
+    if document is None:
+        return_value = None
+        return return_value
+    return_value = dict(document)
+    return return_value
+
+
 async def create_user_profile(user_profile: UserProfileDoc) -> None:
     """Create a user profile document.
 

@@ -95,6 +95,9 @@ class CognitionState(TypedDict):
     time_context: TimeContextDoc
     user_input: str
     prompt_message_context: PromptMessageContext
+    platform: str
+    platform_channel_id: str
+    channel_type: str
     global_user_id: str
     user_name: str
     user_profile: UserProfileDoc
@@ -105,6 +108,7 @@ class CognitionState(TypedDict):
     channel_topic: str
     conversation_progress: NotRequired[ConversationProgressPromptDoc]
     promoted_reflection_context: NotRequired[dict]
+    interaction_style_context: NotRequired[dict]
 
     decontexualized_input: str
     referents: list[ReferentResolution]

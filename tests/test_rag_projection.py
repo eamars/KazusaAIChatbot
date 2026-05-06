@@ -87,6 +87,22 @@ def test_project_known_facts_routes_current_and_character_profiles() -> None:
     assert result["supervisor_trace"]["unknown_slots"] == ["missing"]
 
 
+def test_project_known_facts_has_no_interaction_style_result_shape() -> None:
+    """RAG projection shape does not expose interaction style fields."""
+
+    result = project_known_facts(
+        [],
+        current_user_id="user-1",
+        character_user_id="character-1",
+    )
+
+    rendered = repr(result)
+
+    assert "user_style_image" not in rendered
+    assert "group_channel_style_image" not in rendered
+    assert "interaction_style_context" not in rendered
+
+
 def test_project_known_facts_groups_summarized_evidence() -> None:
     result = project_known_facts(
         [
