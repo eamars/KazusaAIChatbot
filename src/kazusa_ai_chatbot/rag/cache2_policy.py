@@ -33,7 +33,7 @@ USER_LIST_CACHE_NAME = "rag2_user_list_agent"
 USER_LIST_POLICY_VERSION = "user_list:v1"
 
 USER_PROFILE_CACHE_NAME = "rag2_user_profile_agent"
-USER_PROFILE_POLICY_VERSION = "user_profile:v1"
+USER_PROFILE_POLICY_VERSION = "user_profile:v2"
 
 RELATIONSHIP_CACHE_NAME = "rag2_relationship_agent"
 RELATIONSHIP_POLICY_VERSION = "relationship:v1"
@@ -316,21 +316,29 @@ def build_user_list_dependencies(
 # ---------------------------------------------------------------------------
 
 
-def build_user_profile_cache_key(global_user_id: str) -> str:
+def build_user_profile_cache_key(
+    global_user_id: str,
+    *,
+    current_local_date: str = "",
+) -> str:
     """Build the exact cache key for a hydrated user-profile bundle.
 
     Args:
         global_user_id: Resolved user UUID used to fetch the profile.
+        current_local_date: Character-local date used for due-state projection.
 
     Returns:
         Stable exact-match cache key.
     """
+    cache_payload = {
+        "policy_version": USER_PROFILE_POLICY_VERSION,
+        "global_user_id": global_user_id.strip(),
+    }
+    if current_local_date.strip():
+        cache_payload["current_local_date"] = current_local_date.strip()
     return_value = stable_cache_key(
         USER_PROFILE_CACHE_NAME,
-        {
-            "policy_version": USER_PROFILE_POLICY_VERSION,
-            "global_user_id": global_user_id.strip(),
-        },
+        cache_payload,
     )
     return return_value
 

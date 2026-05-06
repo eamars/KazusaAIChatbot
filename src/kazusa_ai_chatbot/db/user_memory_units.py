@@ -313,6 +313,7 @@ async def update_user_memory_unit_semantics(
     updated_unit: dict,
     *,
     timestamp: str | None = None,
+    lifecycle_fields: dict | None = None,
     merge_history_entry: dict | None = None,
     increment_count: bool = True,
 ) -> None:
@@ -322,6 +323,8 @@ async def update_user_memory_unit_semantics(
         unit_id: Stable memory-unit id.
         updated_unit: LLM-authored replacement semantic triple.
         timestamp: Optional write timestamp.
+        lifecycle_fields: Optional structural lifecycle fields to preserve
+            from the extractor, such as due_at.
         merge_history_entry: Optional merge/evolve audit row.
         increment_count: Whether to increment reinforcement count.
     """
@@ -339,6 +342,11 @@ async def update_user_memory_unit_semantics(
         "updated_at": write_time,
         "embedding": await get_text_embedding(_semantic_text(updated_unit)),
     }
+    if lifecycle_fields:
+        for field in ("due_at", "completed_at", "cancelled_at"):
+            if field in lifecycle_fields:
+                set_doc[field] = lifecycle_fields[field]
+
     update_doc: dict = {"$set": set_doc}
     if increment_count:
         update_doc["$inc"] = {"count": 1}

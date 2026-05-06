@@ -29,6 +29,7 @@ from kazusa_ai_chatbot.rag.user_memory_unit_retrieval import retrieve_memory_uni
 from kazusa_ai_chatbot.time_context import (
     format_history_for_llm,
     format_timestamp_for_llm,
+    structured_llm_time_to_utc_iso,
 )
 from kazusa_ai_chatbot.utils import get_llm, parse_llm_json_output, text_or_empty
 
@@ -109,6 +110,51 @@ def _candidate_with_id(candidate: dict) -> dict:
     return item
 
 
+def _normalize_candidate_lifecycle_fields(candidate: dict) -> tuple[dict, list[str]]:
+    """Normalize optional lifecycle timestamps emitted by the extractor.
+
+    Args:
+        candidate: Extractor-authored candidate with optional lifecycle fields.
+
+    Returns:
+        A pair of normalized candidate and structural validation errors.
+    """
+
+    normalized_candidate = dict(candidate)
+    errors: list[str] = []
+    for field in ("due_at", "completed_at", "cancelled_at"):
+        raw_value = text_or_empty(candidate.get(field))
+        if not raw_value:
+            normalized_candidate.pop(field, None)
+            continue
+        try:
+            normalized_candidate[field] = structured_llm_time_to_utc_iso(
+                raw_value
+            )
+        except ValueError as exc:
+            errors.append(f"invalid {field}: {exc}")
+
+    return_value = (normalized_candidate, errors)
+    return return_value
+
+
+def _candidate_lifecycle_updates(candidate: dict) -> dict:
+    """Return lifecycle fields that should be preserved during a merge update.
+
+    Args:
+        candidate: Structurally valid memory-unit candidate.
+
+    Returns:
+        Lifecycle field updates supplied by the extractor.
+    """
+
+    updates: dict = {}
+    for field in ("due_at", "completed_at", "cancelled_at"):
+        if field in candidate and text_or_empty(candidate.get(field)):
+            updates[field] = candidate[field]
+    return updates
+
+
 def _candidate_validation_errors(candidate: dict) -> list[str]:
     """Return structural errors for an extractor-authored memory unit.
 
@@ -165,7 +211,11 @@ def _validated_candidates(result: dict) -> tuple[list[dict], list[dict]]:
             continue
 
         candidate = _candidate_with_id(raw_candidate)
+        candidate, lifecycle_errors = _normalize_candidate_lifecycle_fields(
+            candidate
+        )
         candidate_errors = _candidate_validation_errors(candidate)
+        candidate_errors.extend(lifecycle_errors)
         if candidate_errors:
             validation_errors.append({
                 "candidate_id": candidate["candidate_id"],
@@ -457,6 +507,12 @@ _EXTRACTOR_PROMPT = """\
 - `recent_shift`: 新出现的短期变化、暂时未解决的倾向或仍在观察的局部模式。
 - `stable_pattern`: 已有证据显示跨时间重复出现的稳定行为。
 
+# 时间锚定
+- 输入 `timestamp` 是本轮的本地时间。遇到 `今天`、`明天`、`昨天`、`今晚`、`白天`、`下次` 等相对时间时，必须先用 `timestamp` 换算成绝对日期再写记忆。
+- 记忆文本中不要用相对日期词表达可到期承诺；写成 `YYYY-MM-DD` 的具体日期。引用用户原话时也要在同一句中补出绝对日期。
+- 对带日期、截止时间、当天展示、明日挑战、后续验收等可到期事项，输出 `due_at`。如果只有日期没有具体时刻，用该本地日期的 `00:00`，格式必须是 `YYYY-MM-DD HH:MM`。
+- 如果没有可判断的到期日期，省略 `due_at`。不要输出自然语言时间、时区、UTC、Z 或带秒格式。
+
 # 三个字段的写法
 - 写每个 memory_unit 前，先决定是否需要写 `{character_name}`。如果上下文清楚，优先省略名称或用“该名称”“这一要求”“这一承诺”等方式回指。
 - `fact`: 写具体可复用事实或已接受的未来行为，不写情绪总结。
@@ -516,6 +572,7 @@ _EXTRACTOR_PROMPT = """\
             "fact": "具体事件、决定、偏好、承诺或行为",
             "subjective_appraisal": "第三人称主观理解",
             "relationship_signal": "未来互动含义",
+            "due_at": "optional local YYYY-MM-DD HH:MM for active commitments with a known due date",
             "evidence_refs": [{{"source": "chat", "timestamp": "optional local YYYY-MM-DD HH:MM timestamp", "message_id": "optional platform message id"}}]
         }}
     ]
@@ -598,6 +655,7 @@ You are the memory-unit merge judge. You only decide create, merge, or evolve.
         "fact": "new candidate fact",
         "subjective_appraisal": "new candidate appraisal",
         "relationship_signal": "new candidate relationship signal",
+        "due_at": "optional local YYYY-MM-DD HH:MM for active commitments with a known due date",
         "evidence_refs": [{"source": "chat", "timestamp": "optional local YYYY-MM-DD HH:MM timestamp", "message_id": "optional platform message id"}]
     },
     "candidate_clusters": [
@@ -675,6 +733,7 @@ You are the memory-unit rewrite stage. You update only the semantic text fields.
 - For merge, compact repeated evidence without losing the event anchor.
 - For evolve, explicitly update the relationship meaning.
 - Do not change the merge/evolve decision.
+- If the new candidate includes `due_at`, preserve the absolute due date in the rewritten semantic text and do not reintroduce relative date words such as `明天`.
 
 # 记忆视角契约
 - 本契约适用于你生成的可长期保存的 JSON 记忆字段：fact、subjective_appraisal、relationship_signal。
@@ -711,6 +770,7 @@ You are the memory-unit rewrite stage. You update only the semantic text fields.
         "fact": "new candidate fact",
         "subjective_appraisal": "new candidate appraisal",
         "relationship_signal": "new candidate relationship signal",
+        "due_at": "optional local YYYY-MM-DD HH:MM for active commitments with a known due date",
         "evidence_refs": [{{"source": "chat", "timestamp": "optional local YYYY-MM-DD HH:MM timestamp", "message_id": "optional platform message id"}}]
     }},
     "decision": {{
@@ -930,6 +990,7 @@ async def process_memory_unit_candidate(state: ConsolidatorState, candidate: dic
             merge_result["cluster_id"],
             rewrite_result,
             timestamp=timestamp,
+            lifecycle_fields=_candidate_lifecycle_updates(candidate),
             merge_history_entry={
                 "timestamp": timestamp,
                 "decision": merge_result["decision"],

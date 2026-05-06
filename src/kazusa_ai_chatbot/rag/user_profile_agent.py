@@ -5,7 +5,6 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from kazusa_ai_chatbot.rag.user_image_retriever_agent import user_image_retriever_agent
 from kazusa_ai_chatbot.config import CHARACTER_GLOBAL_USER_ID
 from kazusa_ai_chatbot.db import get_character_profile, get_text_embedding
 from kazusa_ai_chatbot.rag.cache2_events import CacheDependency
@@ -16,6 +15,7 @@ from kazusa_ai_chatbot.rag.cache2_policy import (
     build_user_profile_dependencies,
 )
 from kazusa_ai_chatbot.rag.helper_agent import BaseRAGHelperAgent
+from kazusa_ai_chatbot.rag.user_image_retriever_agent import user_image_retriever_agent
 
 
 def _walk_for_global_user_id(value: Any) -> str:
@@ -61,6 +61,32 @@ def _extract_global_user_id_from_known_facts(context: dict[str, Any]) -> str:
     known_facts = context.get("known_facts", [])
     global_user_id = _walk_for_global_user_id(known_facts)
     return global_user_id
+
+
+def _current_local_date(context: dict[str, Any]) -> str:
+    """Return the current local date from runtime context when available.
+
+    Args:
+        context: RAG helper runtime context.
+
+    Returns:
+        ``YYYY-MM-DD`` local date, or an empty string when unavailable.
+    """
+
+    time_context = context.get("time_context")
+    if not isinstance(time_context, dict):
+        return_value = ""
+        return return_value
+    current_local_datetime = time_context.get("current_local_datetime")
+    if not isinstance(current_local_datetime, str):
+        return_value = ""
+        return return_value
+    local_datetime = current_local_datetime.strip()
+    if len(local_datetime) < 10:
+        return_value = ""
+        return return_value
+    return_value = local_datetime[:10]
+    return return_value
 
 
 def _public_character_profile(character_profile: dict[str, Any]) -> dict[str, Any]:
@@ -143,12 +169,16 @@ class UserProfileAgent(BaseRAGHelperAgent):
             )
             return result
 
-        # Dynamically switch the profile to fetch, as character's profile may include sensitive runtime data which is
-        #   not supposed to be disclosed to LLM. 
+        # Character profiles may include sensitive runtime-only fields, so
+        # ordinary user-image hydration must not be reused for that id.
         if global_user_id == CHARACTER_GLOBAL_USER_ID:
             cache_key = build_character_profile_cache_key(global_user_id)
         else:
-            cache_key = build_user_profile_cache_key(global_user_id)
+            local_date = _current_local_date(context)
+            cache_key = build_user_profile_cache_key(
+                global_user_id,
+                current_local_date=local_date,
+            )
 
         cached = await self.read_cache(cache_key)
         if cached is not None:
@@ -172,6 +202,7 @@ class UserProfileAgent(BaseRAGHelperAgent):
                 user_profile=context.get("user_profile"),
                 input_embedding=input_embedding,
                 include_semantic=True,
+                time_context=context.get("time_context"),
             )
             dependencies = build_user_profile_dependencies(global_user_id)
             metadata = {"profile_source": "user_profile"}

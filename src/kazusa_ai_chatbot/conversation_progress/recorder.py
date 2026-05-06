@@ -27,6 +27,7 @@ from kazusa_ai_chatbot.nodes.boundary_profile import (
     get_relationship_priority_description,
     get_self_integrity_description,
 )
+from kazusa_ai_chatbot.time_context import format_timestamp_for_llm
 from kazusa_ai_chatbot.utils import get_llm, log_preview, parse_llm_json_output
 
 logger = logging.getLogger(__name__)
@@ -69,17 +70,20 @@ Use current_thread for what is being discussed even when there is no task.
 Use user_goal and current_blocker only when the episode is goal-driven.
 Use next_affordances for natural next conversational moves, not exact dialog text.
 Use resolved_threads and avoid_reopening for items that should not be dragged back unless the user reopens them.
+Use current_turn_timestamp to anchor relative dates. If a prior or current item says "tomorrow" but current_turn_timestamp has reached that local date, rewrite the operational state as today/current, not tomorrow/future.
 
 # Generation Procedure
 1. Read prior_episode_state first and identify which prior user-state items or open loops still apply.
 2. Read decontexualized_input, content_anchors, logical_stance, character_intent, and final_dialog to understand what actually happened this turn.
 3. Decide continuity before choosing any other state labels.
 4. Preserve still-valid prior list items by copying the exact old text; omit stale items instead of rewriting them.
-5. Use character_boundary_profile descriptors as policy grounding for progression_guidance, next_affordances, and how quickly current_blocker should soften, rebound, decay, or detach.
-6. Emit short operational labels only. Do not create diary prose, long-term memory, or next-reply text.
+5. For scalar fields such as current_thread, current_blocker, next_affordances, and progression_guidance, resolve relative date words against current_turn_timestamp before writing them.
+6. Use character_boundary_profile descriptors as policy grounding for progression_guidance, next_affordances, and how quickly current_blocker should soften, rebound, decay, or detach.
+7. Emit short operational labels only. Do not create diary prose, long-term memory, or next-reply text.
 
 # Input Format
 {
+  "current_turn_timestamp": "local YYYY-MM-DD HH:MM timestamp",
   "prior_episode_state": "previous compact episode state, or null",
   "decontexualized_input": "current user message after decontextualization",
   "chat_history_recent": ["recent messages for local continuity"],
@@ -152,6 +156,9 @@ async def record_with_llm(record_input: ConversationProgressRecordInput) -> dict
         ),
     }
     human_payload = {
+        "current_turn_timestamp": format_timestamp_for_llm(
+            record_input["timestamp"]
+        ),
         "prior_episode_state": build_recorder_prior_state(
             record_input["prior_episode_state"],
         ),

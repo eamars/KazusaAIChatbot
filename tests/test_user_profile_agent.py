@@ -42,6 +42,21 @@ def test_extract_global_user_id_does_not_parse_stringified_known_facts() -> None
     assert _extract_global_user_id_from_known_facts(context) == ""
 
 
+def test_user_profile_cache_key_varies_by_local_date() -> None:
+    """User-profile cache must not reuse stale due-state projections."""
+
+    first_key = build_user_profile_cache_key(
+        "user-1",
+        current_local_date="2026-05-06",
+    )
+    second_key = build_user_profile_cache_key(
+        "user-1",
+        current_local_date="2026-05-07",
+    )
+
+    assert first_key != second_key
+
+
 @pytest.mark.asyncio
 async def test_user_profile_agent_reads_character_profile_for_character_gid(monkeypatch) -> None:
     """The character global user ID should read character_state, not user memories."""

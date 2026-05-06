@@ -233,6 +233,8 @@ class UserMemoryContextEntry(TypedDict, total=False):
     subjective_appraisal: str
     relationship_signal: str
     updated_at: str
+    due_at: str
+    due_state: str
 
 
 class UserMemoryContextDoc(TypedDict, total=False):

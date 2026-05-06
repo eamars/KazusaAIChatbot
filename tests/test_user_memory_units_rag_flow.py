@@ -74,6 +74,26 @@ def test_valid_candidates_drops_incomplete_memory_unit_rows(caplog) -> None:
     assert "subjective_appraisal" in caplog.text
 
 
+def test_valid_candidates_normalizes_extractor_due_at() -> None:
+    result = {
+        "memory_units": [
+            {
+                "candidate_id": "dated-commitment",
+                "unit_type": UserMemoryUnitType.ACTIVE_COMMITMENT,
+                "fact": "The character accepted a dated challenge.",
+                "subjective_appraisal": "The character treats the date as operational.",
+                "relationship_signal": "Use the date when continuing this thread.",
+                "due_at": "2026-05-07 00:00",
+                "evidence_refs": [],
+            }
+        ],
+    }
+
+    candidates = memory_units_module._valid_candidates(result)
+
+    assert candidates[0]["due_at"] == "2026-05-06T12:00:00+00:00"
+
+
 @pytest.mark.asyncio
 async def test_build_user_memory_context_bundle_merges_semantic_and_recent(monkeypatch) -> None:
     calls: dict[str, object] = {}
@@ -110,6 +130,30 @@ async def test_build_user_memory_context_bundle_merges_semantic_and_recent(monke
     assert context["objective_facts"][0]["fact"] == "Semantic fact"
     assert calls["semantic"]["global_user_id"] == "user-1"
     assert calls["recent"]["global_user_id"] == "user-1"
+
+
+def test_project_user_memory_units_labels_due_today() -> None:
+    units = [
+        {
+            "unit_id": "commitment-1",
+            "unit_type": UserMemoryUnitType.ACTIVE_COMMITMENT,
+            "fact": "The user should do the dated challenge.",
+            "subjective_appraisal": "The character expects follow-through.",
+            "relationship_signal": "Treat this as the current day's challenge.",
+            "updated_at": "2026-05-06T12:30:00+00:00",
+            "due_at": "2026-05-06T12:00:00+00:00",
+        }
+    ]
+    time_context = build_character_time_context("2026-05-06T13:30:00+00:00")
+
+    context = retrieval_module.project_user_memory_units(
+        units,
+        time_context=time_context,
+    )
+
+    commitment = context["active_commitments"][0]
+    assert commitment["due_at"] == "2026-05-07 00:00"
+    assert commitment["due_state"] == "due_today"
 
 
 @pytest.mark.asyncio
@@ -257,13 +301,18 @@ async def test_process_memory_unit_candidate_merges_memory_evidence_surfaced_sco
 @pytest.mark.asyncio
 async def test_process_memory_unit_candidate_normalizes_merge_candidate_id(monkeypatch) -> None:
     captured: dict[str, object] = {}
-    existing_unit = _unit("existing-1", "Existing fact")
+    existing_unit = _unit(
+        "existing-1",
+        "The user needs to complete a dated challenge.",
+        unit_type=UserMemoryUnitType.ACTIVE_COMMITMENT,
+    )
     candidate = {
         "candidate_id": "expected-candidate",
-        "unit_type": UserMemoryUnitType.OBJECTIVE_FACT,
-        "fact": "New fact",
+        "unit_type": UserMemoryUnitType.ACTIVE_COMMITMENT,
+        "fact": "The user needs to complete the 2026-05-07 challenge.",
         "subjective_appraisal": "Kazusa appraisal",
         "relationship_signal": "Kazusa signal",
+        "due_at": "2026-05-06T12:00:00+00:00",
         "evidence_refs": [],
     }
 
@@ -273,6 +322,7 @@ async def test_process_memory_unit_candidate_normalizes_merge_candidate_id(monke
     async def _update_user_memory_unit_semantics(unit_id, semantics, **kwargs):
         captured["updated_unit_id"] = unit_id
         captured["merge_history"] = kwargs["merge_history_entry"]
+        captured["lifecycle_fields"] = kwargs["lifecycle_fields"]
         captured["semantics"] = semantics
 
     merge_judge_llm = _StaticAsyncLLM({
@@ -317,6 +367,9 @@ async def test_process_memory_unit_candidate_normalizes_merge_candidate_id(monke
     assert result["decision"] == "merge"
     assert captured["updated_unit_id"] == "existing-1"
     assert captured["merge_history"]["candidate_id"] == "expected-candidate"
+    assert captured["lifecycle_fields"] == {
+        "due_at": "2026-05-06T12:00:00+00:00",
+    }
 
 
 @pytest.mark.asyncio

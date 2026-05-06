@@ -9,6 +9,7 @@ from kazusa_ai_chatbot.db.schemas import (
     UserMemoryUnitStatus,
     UserMemoryUnitType,
 )
+from kazusa_ai_chatbot.time_context import format_timestamp_for_llm
 from kazusa_ai_chatbot.utils import text_or_empty
 
 
@@ -45,12 +46,99 @@ DEFAULT_USER_MEMORY_CONTEXT_BUDGET = {
 def _entry_char_count(entry: dict) -> int:
     char_count = sum(
         len(text_or_empty(entry.get(field)))
-        for field in ("fact", "subjective_appraisal", "relationship_signal", "updated_at")
+        for field in (
+            "fact",
+            "subjective_appraisal",
+            "relationship_signal",
+            "updated_at",
+            "due_at",
+            "due_state",
+        )
     )
     return char_count
 
 
-def _project_unit(unit: dict) -> UserMemoryContextEntry:
+def _local_date(value: str) -> str:
+    """Extract the date portion from a local date or local datetime string.
+
+    Args:
+        value: Local date or datetime string in prompt-facing form.
+
+    Returns:
+        The ``YYYY-MM-DD`` date portion, or an empty string when unavailable.
+    """
+
+    text = value.strip()
+    if not text:
+        return_value = ""
+        return return_value
+    date_part = text.split(" ", 1)[0]
+    if len(date_part) != 10:
+        return_value = ""
+        return return_value
+    return date_part
+
+
+def _current_local_datetime(time_context: dict | None) -> str:
+    """Read the prompt-facing local datetime from runtime context.
+
+    Args:
+        time_context: Runtime time context, if available.
+
+    Returns:
+        Local datetime string, or an empty string when unavailable.
+    """
+
+    if not isinstance(time_context, dict):
+        return_value = ""
+        return return_value
+    value = time_context.get("current_local_datetime")
+    if not isinstance(value, str):
+        return_value = ""
+        return return_value
+    return_value = value.strip()
+    return return_value
+
+
+def _due_state(unit: dict, *, current_local_datetime: str) -> str:
+    """Describe whether a due date is future, current, or past.
+
+    Args:
+        unit: Stored user-memory unit.
+        current_local_datetime: Current turn's prompt-facing local datetime.
+
+    Returns:
+        One of ``no_due_date``, ``unknown_due_date``, ``future_due``,
+        ``due_today``, or ``past_due``.
+    """
+
+    due_at = text_or_empty(unit.get("due_at"))
+    if not due_at:
+        return_value = "no_due_date"
+        return return_value
+
+    due_local = format_timestamp_for_llm(due_at)
+    due_date = _local_date(due_local)
+    current_date = _local_date(current_local_datetime)
+    if not due_date or not current_date:
+        return_value = "unknown_due_date"
+        return return_value
+    if due_date < current_date:
+        return_value = "past_due"
+        return return_value
+    if due_date == current_date:
+        return_value = "due_today"
+        return return_value
+
+    return_value = "future_due"
+    return return_value
+
+
+def _project_unit(
+    unit: dict,
+    *,
+    current_local_datetime: str,
+) -> UserMemoryContextEntry:
     entry: UserMemoryContextEntry = {
         "fact": text_or_empty(unit.get("fact")),
         "subjective_appraisal": text_or_empty(unit.get("subjective_appraisal")),
@@ -59,6 +147,13 @@ def _project_unit(unit: dict) -> UserMemoryContextEntry:
     updated_at = text_or_empty(unit.get("updated_at"))
     if updated_at:
         entry["updated_at"] = updated_at
+    due_at = text_or_empty(unit.get("due_at"))
+    if due_at:
+        entry["due_at"] = format_timestamp_for_llm(due_at)
+        entry["due_state"] = _due_state(
+            unit,
+            current_local_datetime=current_local_datetime,
+        )
     return entry
 
 
@@ -93,18 +188,21 @@ def project_user_memory_units(
     units: list[dict],
     *,
     budget: dict[str, dict[str, int]] | None = None,
+    time_context: dict | None = None,
 ) -> UserMemoryContextDoc:
     """Project stored memory units into the cognition-facing category payload.
 
     Args:
         units: Stored memory-unit documents.
         budget: Optional per-category item and character budget override.
+        time_context: Current runtime time context for due-date status labels.
 
     Returns:
         Category-balanced prompt-facing memory context.
     """
 
     context = empty_user_memory_context()
+    local_datetime = _current_local_datetime(time_context)
     spent_chars = {category: 0 for category in MEMORY_CONTEXT_CATEGORY_ORDER}
     spent_items = {category: 0 for category in MEMORY_CONTEXT_CATEGORY_ORDER}
 
@@ -116,8 +214,15 @@ def project_user_memory_units(
         if spent_items[category] >= category_budget["max_items"]:
             continue
 
-        entry = _project_unit(unit)
-        if not entry["fact"] or not entry["subjective_appraisal"] or not entry["relationship_signal"]:
+        entry = _project_unit(
+            unit,
+            current_local_datetime=local_datetime,
+        )
+        if (
+            not entry["fact"]
+            or not entry["subjective_appraisal"]
+            or not entry["relationship_signal"]
+        ):
             continue
 
         entry_chars = _entry_char_count(entry)
@@ -198,6 +303,7 @@ async def build_user_memory_context_bundle(
     query_embedding: list[float] | None,
     include_semantic: bool,
     budget: dict[str, dict[str, int]] | None = None,
+    time_context: dict | None = None,
 ) -> tuple[UserMemoryContextDoc, list[dict]]:
     """Build both the cognition projection and RAG-surfaced source units.
 
@@ -206,6 +312,7 @@ async def build_user_memory_context_bundle(
         query_embedding: Current-turn embedding generated by RAG.
         include_semantic: Whether semantic recall should be attempted.
         budget: Optional per-category projection budget.
+        time_context: Current runtime time context for due-date status labels.
 
     Returns:
         Tuple of prompt-facing context and the bounded source-unit list that
@@ -217,7 +324,11 @@ async def build_user_memory_context_bundle(
         query_embedding=query_embedding,
         include_semantic=include_semantic,
     )
-    user_memory_context = project_user_memory_units(units, budget=budget)
+    user_memory_context = project_user_memory_units(
+        units,
+        budget=budget,
+        time_context=time_context,
+    )
     return_value = user_memory_context, units
     return return_value
 
@@ -228,6 +339,7 @@ async def build_user_memory_context(
     query_text: str,
     include_semantic: bool,
     budget: dict[str, dict[str, int]] | None = None,
+    time_context: dict | None = None,
 ) -> UserMemoryContextDoc:
     """Read and project user memory units for cognition.
 
@@ -236,6 +348,7 @@ async def build_user_memory_context(
         query_text: Current query text. Reserved for future semantic retrieval.
         include_semantic: Kept for parity with existing RAG profile APIs.
         budget: Optional per-category projection budget.
+        time_context: Current runtime time context for due-date status labels.
 
     Returns:
         Prompt-facing user memory context.
@@ -247,7 +360,11 @@ async def build_user_memory_context(
         statuses=[UserMemoryUnitStatus.ACTIVE],
         limit=100,
     )
-    user_memory_context = project_user_memory_units(units, budget=budget)
+    user_memory_context = project_user_memory_units(
+        units,
+        budget=budget,
+        time_context=time_context,
+    )
     return user_memory_context
 
 

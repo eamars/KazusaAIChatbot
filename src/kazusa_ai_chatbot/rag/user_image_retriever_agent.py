@@ -9,6 +9,7 @@ async def user_image_retriever_agent(
     user_profile: dict | None = None,
     input_embedding: list[float],
     include_semantic: bool,
+    time_context: dict | None = None,
 ) -> tuple[dict, dict]:
     """Hydrate one user profile with the unified memory-unit context.
 
@@ -17,6 +18,7 @@ async def user_image_retriever_agent(
         user_profile: Optional base profile document already loaded by caller.
         input_embedding: Current-topic embedding for semantic memory recall.
         include_semantic: Whether to include vector memory recall.
+        time_context: Current runtime time context for due-date status labels.
 
     Returns:
         Tuple of hydrated profile and raw RAG memory context.
@@ -25,6 +27,7 @@ async def user_image_retriever_agent(
         global_user_id,
         query_embedding=input_embedding,
         include_semantic=include_semantic,
+        time_context=time_context,
     )
     hydrated = dict(user_profile or {})
     hydrated["user_memory_context"] = user_memory_context

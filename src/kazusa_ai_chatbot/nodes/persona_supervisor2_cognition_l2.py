@@ -207,6 +207,7 @@ _COGNITION_CONSCIOUSNESS_PROMPT = """\
    - 如果 `rag_result` 已经给出了与当前问题直接对应的对象信息、事实摘要、人物画像或可用答案线索，这些证据必须优先决定“你在回应什么”。情绪、潜台词、关系氛围只能改变表达分寸，不能把话题从该对象/事实本身移开。
    - 当 `rag_result` 与模糊的直觉推断发生冲突时，优先相信与当前话题直接对应的检索证据；不要因为名字奇怪、语气暧昧或自己情绪波动，就把一个已有证据支撑的对象重新当成未知物。
    - `user_memory_context.active_commitments` 代表**当前仍有效的已接受承诺/待履约事项**，来自每轮新鲜载入的用户记忆单元。当前输入若是在延续、提醒、切换或兑现这些承诺，你必须把它视为高优先级现实背景，而不是可有可无的旧记忆。
+   - 如果 active_commitment 带有 `due_at` 和 `due_state`，先按 `due_state` 理解时间：`due_today` 表示约定日期已经到今天，`past_due` 表示已过约定日期，`future_due` 才表示仍在未来。不要把 fact 中残留的相对时间词当成更高优先级。
    - 先建立 referent：如果输入里存在称呼、别名、代词或多个可能对象，必须先根据研究资料确定每段证据分别对应谁，再开始推理。
    - 先分清证据的**主体**与**时间范围**：哪些信息描述当前用户，哪些描述其他人物/实体，哪些描述最近发生的事，哪些描述较稳定的长期印象；这些证据不可混用。
    - 当输入要求评价、判断或回忆某个对象时，应先使用**关于该对象本身**的证据形成判断，再让与当前用户的关系背景影响表达方式与社交包装。
@@ -272,7 +273,7 @@ _COGNITION_CONSCIOUSNESS_PROMPT = """\
         "recent_shifts": [{{"fact": "最近变化或局部事件", "subjective_appraisal": "角色的主观评价", "relationship_signal": "未来互动信号", "updated_at": "本地时间YYYY-MM-DD HH:MM"}}],
         "objective_facts": [{{"fact": "客观事实", "subjective_appraisal": "角色如何看待这个事实", "relationship_signal": "未来互动信号", "updated_at": "本地时间YYYY-MM-DD HH:MM"}}],
         "milestones": [{{"fact": "里程碑事件", "subjective_appraisal": "角色如何看待这个事件", "relationship_signal": "未来互动信号", "updated_at": "本地时间YYYY-MM-DD HH:MM"}}],
-        "active_commitments": [{{"fact": "当前仍有效的承诺/约定", "subjective_appraisal": "角色如何看待这个承诺", "relationship_signal": "执行或表达上的注意点", "updated_at": "本地时间YYYY-MM-DD HH:MM"}}]
+        "active_commitments": [{{"fact": "当前仍有效的承诺/约定", "subjective_appraisal": "角色如何看待这个承诺", "relationship_signal": "执行或表达上的注意点", "updated_at": "本地时间YYYY-MM-DD HH:MM", "due_at": "可选本地到期时间YYYY-MM-DD HH:MM", "due_state": "no_due_date | future_due | due_today | past_due | unknown_due_date"}}]
     }},
     "last_relationship_insight": "对该用户的核心关系洞察",
     "affinity_context": {{ "level": "string", "instruction": "string" }},

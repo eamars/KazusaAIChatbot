@@ -110,6 +110,7 @@ async def test_record_with_llm_sends_boundary_descriptors_not_config_values(monk
 
     human_payload = json.loads(fake_llm.messages[1].content)
     profile_payload = human_payload["character_boundary_profile"]
+    assert human_payload["current_turn_timestamp"] == "2026-05-01 16:00"
     assert profile_payload == {
         "boundary_recovery_description": get_boundary_recovery_description(
             _BOUNDARY_PROFILE["boundary_recovery"],
