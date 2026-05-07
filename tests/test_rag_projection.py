@@ -507,6 +507,102 @@ def test_project_known_facts_skips_unresolved_top_level_payload() -> None:
     ]
 
 
+def test_project_known_facts_keeps_continuation_trace_out_of_public_evidence() -> None:
+    """Continuation observations should stay in trace, not public evidence."""
+    result = project_known_facts(
+        [
+            {
+                "slot": "Memory-evidence: retrieve durable policy",
+                "agent": "memory_evidence_agent",
+                "resolved": False,
+                "summary": "missing concrete memory evidence",
+                "raw_result": {
+                    "projection_payload": {
+                        "memory_rows": [
+                            {
+                                "content": "candidate should not project",
+                            }
+                        ],
+                    },
+                    "observation_candidates": [
+                        {
+                            "content": "candidate should not project",
+                        }
+                    ],
+                },
+                "continuation": {
+                    "should_continue": True,
+                    "refined_query": (
+                        "Need a current fact. Prior memory only provided a "
+                        "source strategy, so retrieve fresh evidence."
+                    ),
+                    "reason": "fresh source direction",
+                },
+            }
+        ],
+        current_user_id="user-1",
+        character_user_id="character-1",
+    )
+
+    public_payload = {
+        key: value
+        for key, value in result.items()
+        if key != "supervisor_trace"
+    }
+    rendered_public = repr(public_payload)
+    trace_entry = result["supervisor_trace"]["dispatched"][0]
+
+    assert result["memory_evidence"] == []
+    assert result["conversation_evidence"] == []
+    assert result["external_evidence"] == []
+    assert result["recall_evidence"] == []
+    assert "candidate should not project" not in rendered_public
+    assert "fresh_external_evidence" not in rendered_public
+    assert trace_entry["continuation"]["should_continue"] is True
+    assert "fresh evidence" in trace_entry["continuation"]["refined_query"]
+    assert trace_entry["continuation"]["reason"] == "fresh source direction"
+
+
+def test_project_known_facts_public_keys_unchanged() -> None:
+    """The projected RAG result keeps the stable public key set."""
+    result = project_known_facts(
+        [
+            {
+                "slot": "Memory-evidence: retrieve durable policy",
+                "agent": "memory_evidence_agent",
+                "resolved": False,
+                "summary": "missing concrete memory evidence",
+                "raw_result": {},
+                "continuation": {
+                    "should_continue": False,
+                    "refined_query": "",
+                    "reason": "no source direction",
+                },
+            }
+        ],
+        current_user_id="user-1",
+        character_user_id="character-1",
+    )
+
+    assert set(result.keys()) == {
+        "answer",
+        "user_image",
+        "user_memory_unit_candidates",
+        "character_image",
+        "third_party_profiles",
+        "memory_evidence",
+        "recall_evidence",
+        "conversation_evidence",
+        "external_evidence",
+        "supervisor_trace",
+    }
+    assert set(result["supervisor_trace"].keys()) >= {
+        "loop_count",
+        "unknown_slots",
+        "dispatched",
+    }
+
+
 def test_cognition_rag_result_preserves_public_recall_payload() -> None:
     """Existing cognition payload shaping should not strip Recall evidence."""
 

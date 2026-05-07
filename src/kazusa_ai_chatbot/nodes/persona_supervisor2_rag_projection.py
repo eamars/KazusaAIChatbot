@@ -289,11 +289,23 @@ def project_known_facts(
         summary = text_or_empty(fact.get("summary"))
         raw_result = fact.get("raw_result")
 
-        dispatched.append({
+        dispatched_entry: dict[str, Any] = {
             "slot": slot,
             "agent": agent,
             "resolved": resolved,
-        })
+        }
+        continuation = fact.get("continuation")
+        if isinstance(continuation, dict):
+            dispatched_entry["continuation"] = {
+                "should_continue": bool(
+                    continuation.get("should_continue", False)
+                ),
+                "refined_query": text_or_empty(
+                    continuation.get("refined_query")
+                ),
+                "reason": text_or_empty(continuation.get("reason")),
+            }
+        dispatched.append(dispatched_entry)
 
         if not resolved:
             continue

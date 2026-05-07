@@ -69,6 +69,7 @@ def _result_payload(
     evidence: list[str] | None = None,
     missing_context: list[str] | None = None,
     conflicts: list[str] | None = None,
+    observation_candidates: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Build the standard top-level memory capability payload."""
     payload = {
@@ -83,6 +84,7 @@ def _result_payload(
         "evidence": list(evidence or []),
         "missing_context": list(missing_context or []),
         "conflicts": list(conflicts or []),
+        "observation_candidates": list(observation_candidates or []),
     }
     return payload
 
@@ -404,16 +406,26 @@ class MemoryEvidenceAgent(BaseRAGHelperAgent):
         resolved_refs = _refs_from_rows(memory_rows)
         resolved = bool(worker_result.get("resolved")) and bool(summaries)
         missing_context = [] if resolved else ["memory_evidence"]
+        projection_rows = memory_rows
+        evidence = summaries
+        observation_candidates: list[dict[str, Any]] = []
+        if not resolved:
+            selected_summary = ""
+            resolved_refs = []
+            projection_rows = []
+            evidence = []
+            observation_candidates = memory_rows
         payload = _result_payload(
             selected_summary=selected_summary,
             primary_worker=primary_worker,
             source_policy=text_or_empty(plan["reason"]),
             resolved_refs=resolved_refs,
-            projection_payload={"memory_rows": memory_rows},
+            projection_payload={"memory_rows": projection_rows},
             worker_payloads=worker_payloads,
-            evidence=summaries,
+            evidence=evidence,
             missing_context=missing_context,
             conflicts=[],
+            observation_candidates=observation_candidates,
         )
         logger.info(
             f"{_AGENT_NAME} output: resolved={resolved} "

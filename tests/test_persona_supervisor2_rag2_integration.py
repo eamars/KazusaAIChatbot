@@ -2,10 +2,245 @@
 
 from __future__ import annotations
 
+import json
+
 import pytest
 
 from kazusa_ai_chatbot.nodes import persona_supervisor2 as supervisor_module
+from kazusa_ai_chatbot.nodes import persona_supervisor2_rag_supervisor2 as rag2_module
+from kazusa_ai_chatbot.rag.cache2_runtime import RAGCache2Runtime
 from kazusa_ai_chatbot.time_context import build_character_time_context
+
+
+class _DummyResponse:
+    """Small response object for patched RAG2 LLM calls."""
+
+    def __init__(self, content: str) -> None:
+        """Store model-compatible content."""
+        self.content = content
+
+
+class _InitializerLLM:
+    """Static RAG initializer fake."""
+
+    async def ainvoke(self, _messages: list) -> _DummyResponse:
+        """Return one memory-evidence slot."""
+        payload = {
+            "unknown_slots": [
+                "Memory-evidence: retrieve durable evidence about source policy",
+            ]
+        }
+        response = _DummyResponse(json.dumps(payload))
+        return response
+
+
+class _ContinuationLLM:
+    """Static continuation refiner fake."""
+
+    def __init__(self, decision: dict) -> None:
+        """Store the decision emitted by this fake."""
+        self.decision = decision
+
+    async def ainvoke(self, _messages: list) -> _DummyResponse:
+        """Return the configured continuation decision."""
+        response = _DummyResponse(json.dumps(self.decision))
+        return response
+
+
+class _SummaryLLM:
+    """Evaluator summary fake."""
+
+    async def ainvoke(self, messages: list) -> _DummyResponse:
+        """Echo selected summary from capability payloads."""
+        payload = json.loads(messages[1].content)
+        raw_result = payload["raw_result"]
+        summary = ""
+        if isinstance(raw_result, dict):
+            summary = str(raw_result.get("selected_summary", ""))
+        response = _DummyResponse(summary)
+        return response
+
+
+class _FinalizerLLM:
+    """Finalizer fake for public-shape tests."""
+
+    async def ainvoke(self, _messages: list) -> _DummyResponse:
+        """Return a stable final answer."""
+        response = _DummyResponse("final")
+        return response
+
+
+class _FakeWorker:
+    """Async RAG worker fake."""
+
+    def __init__(self, result: dict) -> None:
+        """Store the worker result."""
+        self.result = result
+
+    async def run(
+        self,
+        task: str,
+        context: dict,
+        max_attempts: int = 3,
+    ) -> dict:
+        """Return the configured worker result."""
+        del task, context, max_attempts
+        return_value = self.result
+        return return_value
+
+
+async def _noop_async(*args, **kwargs) -> None:
+    """Accept cache write hooks without external persistence."""
+    del args, kwargs
+
+
+def _memory_observation_result() -> dict:
+    """Build one unresolved observation payload for public-shape tests."""
+    result = {
+        "resolved": False,
+        "result": {
+            "capability": "memory_evidence",
+            "primary_worker": "persistent_memory_search_agent",
+            "supporting_workers": [],
+            "source_policy": "semantic durable memory evidence",
+            "selected_summary": "",
+            "resolved_refs": [],
+            "projection_payload": {"memory_rows": []},
+            "worker_payloads": {},
+            "evidence": [],
+            "missing_context": ["memory_evidence"],
+            "conflicts": [],
+            "observation_candidates": [
+                {
+                    "content": "Fresh retrieval is needed for current facts.",
+                }
+            ],
+        },
+        "attempts": 1,
+        "cache": {"enabled": False, "hit": False, "reason": "patched"},
+    }
+    return result
+
+
+def _live_result() -> dict:
+    """Build one resolved live-context payload for public-shape tests."""
+    result = {
+        "resolved": True,
+        "result": {
+            "capability": "live_context",
+            "primary_worker": "web_search_agent2",
+            "supporting_workers": [],
+            "source_policy": "fresh external retrieval",
+            "selected_summary": "Fresh evidence found.",
+            "resolved_refs": [],
+            "projection_payload": {
+                "external_text": "Fresh evidence found.",
+                "url": "https://example.test/fresh",
+            },
+            "worker_payloads": {},
+            "evidence": ["Fresh evidence found."],
+            "missing_context": [],
+            "conflicts": [],
+        },
+        "attempts": 1,
+        "cache": {"enabled": False, "hit": False, "reason": "patched"},
+    }
+    return result
+
+
+async def _run_patched_rag2_public_shape_case(
+    monkeypatch,
+    *,
+    decision: dict,
+) -> dict:
+    """Run the real RAG2 entrypoint with patched external dependencies."""
+    runtime = RAGCache2Runtime(max_entries=10)
+    memory_worker = _FakeWorker(_memory_observation_result())
+    live_worker = _FakeWorker(_live_result())
+
+    memory_entry = dict(
+        rag2_module._RAG_SUPERVISOR_AGENT_REGISTRY["memory_evidence_agent"]
+    )
+    memory_entry["agent"] = memory_worker.run
+    live_entry = dict(
+        rag2_module._RAG_SUPERVISOR_AGENT_REGISTRY["live_context_agent"]
+    )
+    live_entry["agent"] = live_worker.run
+
+    monkeypatch.setitem(
+        rag2_module._RAG_SUPERVISOR_AGENT_REGISTRY,
+        "memory_evidence_agent",
+        memory_entry,
+    )
+    monkeypatch.setitem(
+        rag2_module._RAG_SUPERVISOR_AGENT_REGISTRY,
+        "live_context_agent",
+        live_entry,
+    )
+    monkeypatch.setattr(rag2_module, "get_rag_cache2_runtime", lambda: runtime)
+    monkeypatch.setattr(rag2_module, "_initializer_llm", _InitializerLLM())
+    monkeypatch.setattr(rag2_module, "_continuation_assessor_llm", _ContinuationLLM(decision))
+    monkeypatch.setattr(rag2_module, "_evaluator_summarizer_llm", _SummaryLLM())
+    monkeypatch.setattr(rag2_module, "_finalizer_llm", _FinalizerLLM())
+    monkeypatch.setattr(rag2_module, "upsert_initializer_entry", _noop_async)
+    monkeypatch.setattr(rag2_module, "record_initializer_hit", _noop_async)
+
+    result = await rag2_module.call_rag_supervisor(
+        original_query="Need current evidence.",
+        character_name="<active character>",
+        context={
+            "platform": "qq",
+            "platform_channel_id": "public-shape-test",
+            "global_user_id": "user-1",
+            "prompt_message_context": {
+                "body_text": "Need current evidence.",
+                "mentions": [],
+                "attachments": [],
+                "addressed_to_global_user_ids": [],
+                "broadcast": False,
+            },
+        },
+    )
+    return result
+
+
+@pytest.mark.asyncio
+async def test_call_rag_supervisor_public_keys_unchanged(monkeypatch) -> None:
+    """Continuation metadata must not change the public RAG2 return keys."""
+    continue_decision = {
+        "should_continue": True,
+        "refined_query": (
+            "Need current evidence. Prior memory only provided a source "
+            "strategy, so retrieve fresh public evidence."
+        ),
+        "reason": "fresh evidence is available",
+    }
+    stop_decision = {
+        "should_continue": False,
+        "refined_query": "",
+        "reason": "no next source",
+    }
+
+    continued_result = await _run_patched_rag2_public_shape_case(
+        monkeypatch,
+        decision=continue_decision,
+    )
+    stop_result = await _run_patched_rag2_public_shape_case(
+        monkeypatch,
+        decision=stop_decision,
+    )
+
+    expected_keys = {"answer", "known_facts", "unknown_slots", "loop_count"}
+    assert set(continued_result.keys()) == expected_keys
+    assert set(stop_result.keys()) == expected_keys
+    assert (
+        continued_result["known_facts"][0]["continuation"]["should_continue"]
+        is True
+    )
+    assert (
+        stop_result["known_facts"][0]["continuation"]["should_continue"]
+        is False
+    )
 
 
 @pytest.mark.asyncio

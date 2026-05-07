@@ -35,6 +35,27 @@ class _InitializerLLM:
         return response
 
 
+class _SequencedInitializerLLM:
+    """Initializer fake that emits one slot list per model call."""
+
+    def __init__(self, slot_batches: list[list[str]]) -> None:
+        """Store the ordered slot batches returned by the fake initializer."""
+        self.slot_batches = slot_batches
+        self.payloads: list[dict] = []
+
+    async def ainvoke(self, messages: list) -> _DummyResponse:
+        """Capture the initializer payload and return the next slot batch."""
+        payload = json.loads(messages[1].content)
+        self.payloads.append(payload)
+        batch_index = len(self.payloads) - 1
+        if batch_index < len(self.slot_batches):
+            slots = self.slot_batches[batch_index]
+        else:
+            slots = []
+        response = _DummyResponse(json.dumps({"unknown_slots": slots}))
+        return response
+
+
 class _SummaryLLM:
     """Evaluator summarizer fake that preserves selected capability evidence."""
 
@@ -61,6 +82,37 @@ class _FinalizerLLM:
         if known_facts:
             summary = str(known_facts[0]["summary"])
         response = _DummyResponse(f"final: {summary}")
+        return response
+
+
+class _LastResolvedFinalizerLLM:
+    """Finalizer fake that echoes the latest resolved known-fact summary."""
+
+    async def ainvoke(self, messages: list) -> _DummyResponse:
+        """Return a compact final answer from the latest resolved fact."""
+        payload = json.loads(messages[1].content)
+        known_facts = payload["known_facts"]
+        summary = ""
+        for fact in known_facts:
+            if fact.get("resolved"):
+                summary = str(fact.get("summary", ""))
+        response = _DummyResponse(f"final: {summary}")
+        return response
+
+
+class _ContinuationLLM:
+    """Continuation assessor fake that records payloads and returns JSON."""
+
+    def __init__(self, decision: dict) -> None:
+        """Store the deterministic continuation decision."""
+        self.decision = decision
+        self.payloads: list[dict] = []
+
+    async def ainvoke(self, messages: list) -> _DummyResponse:
+        """Capture the assessor payload and return the configured decision."""
+        payload = json.loads(messages[1].content)
+        self.payloads.append(payload)
+        response = _DummyResponse(json.dumps(self.decision))
         return response
 
 
@@ -164,6 +216,149 @@ async def _run_patched_live_context_case(
     return return_value
 
 
+def _memory_observation_result() -> dict:
+    """Build an unresolved memory payload with source-direction observations."""
+    result = {
+        "resolved": False,
+        "result": {
+            "capability": "memory_evidence",
+            "primary_worker": "persistent_memory_search_agent",
+            "supporting_workers": [],
+            "source_policy": "semantic durable memory evidence",
+            "selected_summary": "",
+            "resolved_refs": [],
+            "projection_payload": {"memory_rows": []},
+            "worker_payloads": {},
+            "evidence": [],
+            "missing_context": ["memory_evidence"],
+            "conflicts": [],
+            "observation_candidates": [
+                {
+                    "content": (
+                        "Latest device and benchmark comparisons should use "
+                        "fresh retrieval because memory can be stale."
+                    ),
+                    "source_kind": "seeded_manual",
+                }
+            ],
+        },
+        "attempts": 1,
+        "cache": {
+            "enabled": False,
+            "hit": False,
+            "cache_name": "",
+            "reason": "patched_memory_worker",
+        },
+    }
+    return result
+
+
+def _fresh_live_result(summary: str) -> dict:
+    """Build a resolved live-context payload for continuation tests."""
+    result = {
+        "resolved": True,
+        "result": {
+            "capability": "live_context",
+            "primary_worker": "web_search_agent2",
+            "supporting_workers": [],
+            "source_policy": "fresh external retrieval",
+            "selected_summary": summary,
+            "resolved_refs": [],
+            "projection_payload": {
+                "external_text": summary,
+                "url": "https://example.test/current-benchmark",
+            },
+            "worker_payloads": {},
+            "evidence": [summary],
+            "missing_context": [],
+            "conflicts": [],
+        },
+        "attempts": 1,
+        "cache": {
+            "enabled": False,
+            "hit": False,
+            "cache_name": "",
+            "reason": "patched_live_worker",
+        },
+    }
+    return result
+
+
+async def _run_patched_continuation_case(
+    monkeypatch,
+    *,
+    decision: dict,
+    refined_slot: str = "Live-context: answer current benchmark for explicit models A and B",
+) -> tuple[
+    dict,
+    _FakeWorker,
+    _FakeWorker,
+    _ContinuationLLM,
+    _SequencedInitializerLLM,
+]:
+    """Run RAG2 with patched observation, refiner, and initializer re-entry."""
+    runtime = RAGCache2Runtime(max_entries=10)
+    memory_slot = (
+        "Memory-evidence: retrieve durable evidence about source policy for "
+        "device performance comparison"
+    )
+    memory_worker = _FakeWorker(_memory_observation_result())
+    live_worker = _FakeWorker(
+        _fresh_live_result("Fresh benchmark evidence says model A is faster.")
+    )
+    continuation_llm = _ContinuationLLM(decision)
+    initializer_llm = _SequencedInitializerLLM(
+        [
+            [memory_slot],
+            [refined_slot],
+        ]
+    )
+
+    memory_entry = dict(
+        supervisor2_module._RAG_SUPERVISOR_AGENT_REGISTRY[
+            "memory_evidence_agent"
+        ]
+    )
+    memory_entry["agent"] = memory_worker.run
+    live_entry = dict(
+        supervisor2_module._RAG_SUPERVISOR_AGENT_REGISTRY["live_context_agent"]
+    )
+    live_entry["agent"] = live_worker.run
+
+    monkeypatch.setitem(
+        supervisor2_module._RAG_SUPERVISOR_AGENT_REGISTRY,
+        "memory_evidence_agent",
+        memory_entry,
+    )
+    monkeypatch.setitem(
+        supervisor2_module._RAG_SUPERVISOR_AGENT_REGISTRY,
+        "live_context_agent",
+        live_entry,
+    )
+    monkeypatch.setattr(supervisor2_module, "get_rag_cache2_runtime", lambda: runtime)
+    monkeypatch.setattr(supervisor2_module, "_initializer_llm", initializer_llm)
+    monkeypatch.setattr(supervisor2_module, "_evaluator_summarizer_llm", _SummaryLLM())
+    monkeypatch.setattr(supervisor2_module, "_finalizer_llm", _LastResolvedFinalizerLLM())
+    monkeypatch.setattr(supervisor2_module, "_continuation_assessor_llm", continuation_llm)
+    monkeypatch.setattr(supervisor2_module, "upsert_initializer_entry", _noop_async)
+    monkeypatch.setattr(supervisor2_module, "record_initializer_hit", _noop_async)
+
+    query = "Compare model A and model B performance."
+    result = await supervisor2_module.call_rag_supervisor(
+        original_query=query,
+        character_name="<active character>",
+        context=_prompt_context(query),
+    )
+    return_value = (
+        result,
+        memory_worker,
+        live_worker,
+        continuation_llm,
+        initializer_llm,
+    )
+    return return_value
+
+
 async def test_supervisor_routes_explicit_weather_through_live_context(
     monkeypatch,
     caplog,
@@ -227,6 +422,100 @@ async def test_supervisor_routes_opening_status_through_live_context(monkeypatch
     assert raw_result["projection_payload"]["url"] == (
         "https://status.example/adventure-park"
     )
+
+
+async def test_supervisor_reenters_initializer_with_refined_query(
+    monkeypatch,
+) -> None:
+    """Actionable observations re-enter the existing initializer path."""
+    refined_query = (
+        "The user wants a current comparison between model A and model B. "
+        "Memory only provided a source strategy: benchmark comparisons can "
+        "expire, so retrieve fresh public evidence."
+    )
+    refined_slot = "Live-context: answer current benchmark for explicit models A and B"
+    decision = {
+        "should_continue": True,
+        "refined_query": refined_query,
+        "reason": "fresh evidence is needed",
+    }
+
+    result, memory_worker, live_worker, continuation_llm, initializer_llm = (
+        await _run_patched_continuation_case(
+            monkeypatch,
+            decision=decision,
+            refined_slot=refined_slot,
+        )
+    )
+
+    assert result["unknown_slots"] == []
+    assert result["loop_count"] == 2
+    assert len(memory_worker.calls) == 1
+    assert len(live_worker.calls) == 1
+    assert live_worker.calls[0]["task"] == refined_slot
+    assert len(continuation_llm.payloads) == 1
+    assert len(initializer_llm.payloads) == 2
+    assert initializer_llm.payloads[1]["original_query"] == refined_query
+    assert (
+        initializer_llm.payloads[1]["context"]["prompt_message_context"]["body_text"]
+        == refined_query
+    )
+    assert "Fresh benchmark evidence" in result["answer"]
+    first_fact = result["known_facts"][0]
+    assert first_fact["continuation"]["should_continue"] is True
+    assert first_fact["continuation"]["refined_query"] == refined_query
+    assert "next_slots" not in first_fact["continuation"]
+
+
+async def test_supervisor_does_not_continue_after_stop_decision(
+    monkeypatch,
+) -> None:
+    """A stop decision does not re-enter the initializer."""
+    decision = {
+        "should_continue": False,
+        "refined_query": "This value must be ignored.",
+        "reason": "source has no answerable direction",
+    }
+
+    result, memory_worker, live_worker, continuation_llm, initializer_llm = (
+        await _run_patched_continuation_case(monkeypatch, decision=decision)
+    )
+
+    assert result["unknown_slots"] == []
+    assert result["loop_count"] == 1
+    assert len(memory_worker.calls) == 1
+    assert live_worker.calls == []
+    assert len(continuation_llm.payloads) == 1
+    assert len(initializer_llm.payloads) == 1
+    assert (
+        result["known_facts"][0]["continuation"]["should_continue"] is False
+    )
+    assert result["known_facts"][0]["continuation"]["refined_query"] == ""
+
+
+async def test_supervisor_does_not_continue_when_refined_query_is_invalid(
+    monkeypatch,
+) -> None:
+    """Invalid refined queries cannot trigger initializer re-entry."""
+    decision = {
+        "should_continue": True,
+        "refined_query": "Live-context: answer current benchmark",
+        "reason": "slot-shaped output is invalid",
+    }
+
+    result, memory_worker, live_worker, continuation_llm, initializer_llm = (
+        await _run_patched_continuation_case(monkeypatch, decision=decision)
+    )
+
+    assert result["unknown_slots"] == []
+    assert result["loop_count"] == 1
+    assert len(memory_worker.calls) == 1
+    assert live_worker.calls == []
+    assert len(continuation_llm.payloads) == 1
+    assert len(initializer_llm.payloads) == 1
+    continuation = result["known_facts"][0]["continuation"]
+    assert continuation["should_continue"] is False
+    assert continuation["refined_query"] == ""
 
 
 async def test_evaluator_summary_prompt_uses_compact_capability_payload(

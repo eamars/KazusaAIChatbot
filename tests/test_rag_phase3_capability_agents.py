@@ -1298,6 +1298,79 @@ async def test_memory_evidence_common_sense_uses_search() -> None:
     assert result["result"]["primary_worker"] == "persistent_memory_search_agent"
 
 
+@pytest.mark.asyncio
+async def test_memory_evidence_unresolved_candidates_are_observation_only() -> None:
+    """Unresolved durable-memory candidates are not accepted evidence."""
+    agent = MemoryEvidenceAgent()
+    stale_policy_row = {
+        "memory_name": "volatile-technical-data-policy",
+        "content": (
+            "Latest device, model, driver, price, and benchmark comparisons "
+            "should use fresh retrieval because memory can be stale."
+        ),
+        "source_kind": "seeded_manual",
+    }
+    search_worker = _FakeWorker(
+        {
+            "resolved": False,
+            "result": [stale_policy_row],
+            "attempts": 1,
+            "cache": {"enabled": True, "hit": False, "reason": "miss_stored"},
+        }
+    )
+    keyword_worker = _FakeWorker({"resolved": True, "result": []})
+    agent.search_agent = search_worker
+    agent.keyword_agent = keyword_worker
+
+    result = await agent.run(
+        "Memory-evidence: retrieve durable evidence about device performance comparison",
+        _base_context(),
+    )
+
+    payload = result["result"]
+    assert result["resolved"] is False
+    assert payload["selected_summary"] == ""
+    assert payload["evidence"] == []
+    assert payload["projection_payload"]["memory_rows"] == []
+    assert payload["observation_candidates"] == [stale_policy_row]
+    assert payload["missing_context"] == ["memory_evidence"]
+
+
+@pytest.mark.asyncio
+async def test_memory_evidence_resolved_rows_remain_accepted_evidence() -> None:
+    """Resolved durable-memory rows keep their evidence payload contract."""
+    agent = MemoryEvidenceAgent()
+    accepted_row = {
+        "memory_name": "official-address",
+        "content": "The active character's official address is 123 Example Street.",
+        "source_kind": "seeded_manual",
+    }
+    search_worker = _FakeWorker(
+        {
+            "resolved": True,
+            "result": [accepted_row],
+            "attempts": 1,
+            "cache": {"enabled": True, "hit": False, "reason": "miss_stored"},
+        }
+    )
+    keyword_worker = _FakeWorker({"resolved": True, "result": []})
+    agent.search_agent = search_worker
+    agent.keyword_agent = keyword_worker
+
+    result = await agent.run(
+        "Memory-evidence: retrieve durable evidence about the official address",
+        _base_context(),
+    )
+
+    payload = result["result"]
+    assert result["resolved"] is True
+    assert payload["selected_summary"] == accepted_row["content"]
+    assert payload["evidence"] == [accepted_row["content"]]
+    assert payload["projection_payload"]["memory_rows"] == [accepted_row]
+    assert payload["observation_candidates"] == []
+    assert payload["missing_context"] == []
+
+
 def test_memory_evidence_selector_prompt_renders_scoped_worker_option() -> None:
     """The selector prompt should expose the scoped user-memory worker."""
     prompt = memory_evidence_module._SELECTOR_PROMPT

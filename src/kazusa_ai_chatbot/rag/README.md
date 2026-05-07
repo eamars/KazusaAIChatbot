@@ -47,6 +47,9 @@ The persona graph does not pass this raw shape directly to cognition. `stage_1_r
 ```
 
 This split is intentional. RAG 2 keeps raw evidence and agent telemetry available inside the supervisor, then exposes only the evidence shape downstream prompts need.
+Continuation metadata, when present, is kept under
+`supervisor_trace.dispatched[*].continuation`; it is not public evidence for
+cognition.
 
 ## Runtime Lifecycle
 
@@ -62,7 +65,9 @@ persona_supervisor2
        -> rag_executor
             delegates to that helper agent
        -> rag_evaluator
-            summarizes the result, records provenance, drains the slot
+            summarizes the result, records provenance, drains the slot,
+            and may run a bounded refined-query initializer re-entry from
+            unresolved observation material
        -> repeat dispatcher/executor/evaluator until:
             unknown_slots is empty, no valid dispatch remains, or loop cap is reached
        -> rag_finalizer
@@ -76,6 +81,53 @@ persona_supervisor2
 The loop is slot-driven. `unknown_slots` is the work queue and the stop condition: slots are drained one at a time, and each completed attempt appends a fact row to `known_facts`.
 
 The default loop cap is eight dispatch iterations. This prevents open-ended agentic search while still allowing multi-hop queries such as resolving a pronoun, finding a referenced conversation object, then reading external content.
+
+## Observation-Driven Continuation
+
+RAG 2 can perform a bounded refined-query re-entry after an unresolved
+retrieval when that retrieval returned observation material with useful
+direction. This is not a generic autonomous agent loop, and it is not a second
+slot planner:
+
+```text
+unresolved retrieval result
+  -> observation candidates or source hints
+  -> continuation refiner
+  -> should_continue=false: stop RAG normally
+  -> should_continue=true: produce a self-contained refined query
+  -> existing rag_initializer(refined_query) with Cache 2 active
+  -> existing dispatcher and specialist agents execute initializer slots
+```
+
+Observation candidates are rows or snippets that did not answer the current
+slot but may improve the next initializer pass. For example, a durable memory
+row may say that latest prices, benchmark scores, schedules, or driver state
+should come from fresh retrieval. That row is not accepted answer evidence for
+the concrete question, but it can be folded into a refined natural-language
+query.
+
+The continuation refiner returns only:
+
+```python
+{
+    "should_continue": bool,
+    "refined_query": str,
+    "reason": str,
+}
+```
+
+`reason` is trace-only and never drives control flow. The refiner must not emit
+slots, prefixes, agent names, tool names, backend parameters, or user-facing
+clarification states. When `should_continue` is true, `refined_query` must be
+self-contained because Cache 2 keys the initializer from its normal query and
+context inputs, not from hidden continuation state.
+
+Continuation is capped by `MAX_CONTINUATION_DECISIONS_PER_RAG_RUN` and the
+existing eight-loop supervisor cap. Rejected candidates and continuation
+metadata stay out of public evidence. They may be visible in supervisor/debug
+trace, but they must not appear in `rag_result.memory_evidence`,
+`conversation_evidence`, `external_evidence`, `recall_evidence`,
+profile/image payloads, or finalizer-facing accepted evidence.
 
 ## Design Intention
 
@@ -212,6 +264,7 @@ Top-level capability results keep structured handoff inside RAG 2:
     "evidence": list[str],
     "missing_context": list[str],
     "conflicts": list[str],
+    "observation_candidates": list[dict],
 }
 ```
 
@@ -219,6 +272,9 @@ Top-level capability results keep structured handoff inside RAG 2:
 provenance, URLs, locations, and memory refs. `projection_payload` is the
 approved projection channel into public `rag_result` fields. `worker_payloads`
 is trace/debug material only.
+`observation_candidates` is also trace/internal material only. It carries
+unresolved candidate rows that may guide continuation, not accepted answer
+evidence.
 
 The reusable worker agents are:
 
@@ -253,6 +309,7 @@ Each fact recorded by the supervisor keeps both operational and provenance infor
     "attempts": int,
     "cache": dict,
     "fact_source": dict,
+    "continuation": dict,  # optional on unresolved facts
 }
 ```
 
