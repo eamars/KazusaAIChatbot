@@ -20,7 +20,8 @@ from scripts._db_export import (
     load_project_env,
     write_json_export,
 )
-from kazusa_ai_chatbot.db import close_db, get_db, get_user_profile
+from kazusa_ai_chatbot.db import close_db, get_user_profile
+from kazusa_ai_chatbot.db.script_operations import find_user_profile_for_export
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -54,16 +55,12 @@ async def _find_profile(identifier: str, platform: str | None) -> dict[str, Any]
             return_value = dict(profile)
             return return_value
 
-    db = await get_db()
-    account_filter: dict[str, Any] = {"platform_user_id": identifier}
-    if platform:
-        account_filter["platform"] = platform
-    doc = await db.user_profiles.find_one(
-        {"platform_accounts": {"$elemMatch": account_filter}},
-        {"_id": 0},
+    profile = await find_user_profile_for_export(
+        identifier=identifier,
+        platform=platform,
+        projection={"_id": 0},
     )
-    return_value = dict(doc or {})
-    return return_value
+    return profile
 
 
 async def main() -> None:

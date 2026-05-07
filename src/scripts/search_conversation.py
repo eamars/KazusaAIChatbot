@@ -26,7 +26,6 @@ import argparse
 from typing import List, Tuple
 
 from kazusa_ai_chatbot.db import (
-    get_db,
     close_db,
     search_conversation_history,
     ConversationMessageDoc
@@ -67,9 +66,6 @@ async def main():
         logger.info(f"User filter: {args.user}")
     
     try:
-        # Connect to database
-        await get_db()
-        
         # Perform search
         results: List[Tuple[float, ConversationMessageDoc]] = await search_conversation_history(
             query=args.query,

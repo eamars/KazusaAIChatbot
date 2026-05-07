@@ -26,7 +26,6 @@ import argparse
 from typing import List, Tuple
 
 from kazusa_ai_chatbot.db import (
-    get_db,
     close_db,
     search_memory,
     MemoryDoc,
@@ -58,9 +57,6 @@ async def main():
     logger.info(f"Method: {args.method}, Limit: {args.limit}")
     
     try:
-        # Connect to database
-        await get_db()
-        
         # Perform search
         results: List[Tuple[float, MemoryDoc]] = await search_memory(
             query=args.query,

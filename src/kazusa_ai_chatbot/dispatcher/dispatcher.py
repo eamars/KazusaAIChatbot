@@ -4,9 +4,8 @@ from __future__ import annotations
 
 import logging
 
-from pymongo.errors import PyMongoError
-
 from kazusa_ai_chatbot import scheduler
+from kazusa_ai_chatbot.db import DatabaseOperationError
 from kazusa_ai_chatbot.dispatcher.evaluator import ToolCallEvaluator
 from kazusa_ai_chatbot.dispatcher.pending_index import PendingTaskIndex
 from kazusa_ai_chatbot.dispatcher.task import DispatchContext, DispatchResult, RawToolCall
@@ -65,7 +64,7 @@ class TaskDispatcher:
             event_doc = task.to_scheduler_doc(ctx)
             try:
                 event_id = await scheduler.schedule_event(event_doc)
-            except PyMongoError as exc:
+            except DatabaseOperationError as exc:
                 logger.exception(
                     f"Failed to persist scheduled task for tool {task.tool}: {exc}"
                 )

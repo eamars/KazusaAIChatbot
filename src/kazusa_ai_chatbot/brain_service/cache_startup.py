@@ -5,8 +5,7 @@ from __future__ import annotations
 import logging
 from collections.abc import Awaitable, Callable
 
-from pymongo.errors import PyMongoError
-
+from kazusa_ai_chatbot.db import DatabaseOperationError
 from kazusa_ai_chatbot.utils import log_preview
 
 
@@ -37,7 +36,7 @@ async def hydrate_rag_initializer_cache(
 
     try:
         rows = await load_initializer_entries_func(limit=max_entries)
-    except PyMongoError as exc:
+    except DatabaseOperationError as exc:
         logger.exception(f"Persistent initializer cache hydration failed: {exc}")
         return 0
 
@@ -66,4 +65,3 @@ async def hydrate_rag_initializer_cache(
 
     logger.info(f"Hydrated {loaded_count} persistent RAG initializer cache entries")
     return loaded_count
-

@@ -2,6 +2,10 @@
 
 Shared by every other ``db.*`` submodule. The client is lazily initialised
 on first use and reused for the lifetime of the process.
+
+``get_db`` is intentionally private to the DB package. Runtime code,
+application services, and maintenance scripts should use semantic helpers
+exported by ``kazusa_ai_chatbot.db`` instead of holding raw database handles.
 """
 
 from __future__ import annotations
@@ -94,7 +98,11 @@ _db_loop: asyncio.AbstractEventLoop | None = None
 
 
 async def get_db():
-    """Return the async MongoDB database handle, creating the client on first call.
+    """Return the internal async MongoDB database handle.
+
+    This is for ``kazusa_ai_chatbot.db`` submodules only. Callers outside the
+    DB package must go through public semantic helpers exposed by the package
+    facade.
 
     Raises:
         ConnectionFailure: If the initial ping to MongoDB fails.

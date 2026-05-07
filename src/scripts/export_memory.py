@@ -21,7 +21,8 @@ from scripts._db_export import (
     projection_from_exclusions,
     write_json_export,
 )
-from kazusa_ai_chatbot.db import close_db, get_db
+from kazusa_ai_chatbot.db import close_db
+from kazusa_ai_chatbot.db.script_operations import export_memory_rows
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -94,14 +95,11 @@ async def main() -> None:
     output_path = args.output or default_output_path("memory", identifier)
 
     try:
-        db = await get_db()
-        cursor = (
-            db.memory
-            .find(query_filter, projection_from_exclusions(exclude_fields))
-            .sort([("updated_at", -1), ("timestamp", -1)])
-            .limit(args.limit)
+        records = await export_memory_rows(
+            query_filter=query_filter,
+            projection=projection_from_exclusions(exclude_fields),
+            limit=args.limit,
         )
-        records = [dict(doc) for doc in await cursor.to_list(length=args.limit)]
         query = {
             "collection": "memory",
             "filter": query_filter,

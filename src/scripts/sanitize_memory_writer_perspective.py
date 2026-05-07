@@ -22,11 +22,16 @@ from kazusa_ai_chatbot.db import (
     close_db,
     get_character_profile,
     get_character_state,
-    get_db,
     update_last_relationship_insight,
     update_user_memory_unit_semantics,
     upsert_character_self_image,
     upsert_character_state,
+)
+from kazusa_ai_chatbot.db.script_operations import (
+    find_persistent_memory_without_embedding,
+    scan_active_user_memory_units_for_perspective,
+    scan_persistent_memory_for_perspective,
+    scan_user_profiles_for_perspective,
 )
 from kazusa_ai_chatbot.memory_evolution import supersede_memory_unit
 from kazusa_ai_chatbot.memory_evolution.identity import deterministic_memory_unit_id
@@ -193,13 +198,9 @@ async def scan_memory_writer_records(
 async def scan_active_user_memory_units(*, limit: int) -> list[dict[str, Any]]:
     """Scan active user-memory-unit semantic fields."""
 
-    db = await get_db()
-    cursor = (
-        db.user_memory_units
-        .find({'status': 'active'}, {'embedding': 0})
-        .limit(limit)
+    documents = await scan_active_user_memory_units_for_perspective(
+        limit=limit,
     )
-    documents = await cursor.to_list(length=limit)
     records = []
     for document in documents:
         before = _field_view(
@@ -220,13 +221,9 @@ async def scan_active_user_memory_units(*, limit: int) -> list[dict[str, Any]]:
 async def scan_user_profiles(*, limit: int) -> list[dict[str, Any]]:
     """Scan prompt-facing relationship insight fields."""
 
-    db = await get_db()
-    cursor = (
-        db.user_profiles
-        .find({'last_relationship_insight': {'$ne': ''}}, {'_id': 0})
-        .limit(limit)
+    documents = await scan_user_profiles_for_perspective(
+        limit=limit,
     )
-    documents = await cursor.to_list(length=limit)
     records = []
     for document in documents:
         before = _field_view(document, ('last_relationship_insight',))
@@ -265,16 +262,9 @@ async def scan_character_state(*, limit: int) -> list[dict[str, Any]]:
 async def scan_persistent_memory(*, limit: int) -> list[dict[str, Any]]:
     """Scan active runtime-generated shared memory rows."""
 
-    db = await get_db()
-    cursor = (
-        db.memory
-        .find({
-            'status': 'active',
-            'authority': 'reflection_promoted',
-        }, {'embedding': 0})
-        .limit(limit)
+    documents = await scan_persistent_memory_for_perspective(
+        limit=limit,
     )
-    documents = await cursor.to_list(length=limit)
     records = []
     for document in documents:
         before = _field_view(document, ('memory_name', 'content'))
@@ -455,11 +445,7 @@ async def _apply_persistent_memory(
 ) -> None:
     """Supersede one runtime shared-memory row with rewritten prose."""
 
-    db = await get_db()
-    existing = await db.memory.find_one(
-        {'memory_unit_id': memory_unit_id},
-        {'embedding': 0},
-    )
+    existing = await find_persistent_memory_without_embedding(memory_unit_id)
     if not existing:
         raise ValueError(f'memory row not found: {memory_unit_id!r}')
     replacement = dict(existing)

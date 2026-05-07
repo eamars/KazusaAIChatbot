@@ -38,3 +38,10 @@ code validates structure and known IDs, but does not reinterpret user meaning.
 
 `db_bootstrap()` creates `user_memory_units` and its indexes. The old
 `user_profile_memories` collection is no longer created.
+
+## Public Boundary
+
+`db._client.get_db()` is private to the database package. Runtime modules and
+operator scripts must not import it or hold raw MongoDB database handles. Add a
+semantic helper under `kazusa_ai_chatbot.db` when a caller needs a new database
+operation.

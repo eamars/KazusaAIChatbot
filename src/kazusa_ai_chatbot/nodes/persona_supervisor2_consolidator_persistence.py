@@ -8,7 +8,6 @@ import logging
 from datetime import datetime, timedelta, timezone
 
 from langchain_core.messages import HumanMessage, SystemMessage
-from pymongo.errors import PyMongoError
 
 from kazusa_ai_chatbot.config import (
     AFFINITY_DECREMENT_BREAKPOINTS,
@@ -20,6 +19,7 @@ from kazusa_ai_chatbot.config import (
     CONSOLIDATION_LLM_MODEL,
 )
 from kazusa_ai_chatbot.db import (
+    DatabaseOperationError,
     update_affinity,
     update_last_relationship_insight,
     upsert_character_self_image,
@@ -512,7 +512,7 @@ async def db_writer(state: ConsolidatorState) -> dict:
             timestamp=timestamp,
         )
         write_log["character_state"] = True
-    except PyMongoError as exc:
+    except DatabaseOperationError as exc:
         logger.exception(f"db_writer: failed to upsert character_state: {exc}")
         write_log["character_state"] = False
 
@@ -522,7 +522,7 @@ async def db_writer(state: ConsolidatorState) -> dict:
         try:
             await update_last_relationship_insight(global_user_id, last_relationship_insight)
             write_log["relationship_insight"] = True
-        except PyMongoError as exc:
+        except DatabaseOperationError as exc:
             logger.exception(
                 f"db_writer: failed to update_last_relationship_insight: {exc}"
             )
@@ -580,7 +580,7 @@ async def db_writer(state: ConsolidatorState) -> dict:
         try:
             await update_affinity(global_user_id, processed_affinity_delta)
             write_log["affinity"] = True
-        except PyMongoError as exc:
+        except DatabaseOperationError as exc:
             logger.exception(f"db_writer: failed to update_affinity: {exc}")
             write_log["affinity"] = False
 
@@ -608,7 +608,7 @@ async def db_writer(state: ConsolidatorState) -> dict:
         try:
             await upsert_character_self_image(character_image_result)
             write_log["character_image"] = True
-        except PyMongoError as exc:
+        except DatabaseOperationError as exc:
             logger.exception(
                 f"db_writer: failed to upsert_character_self_image: {exc}"
             )

@@ -91,7 +91,10 @@ async def test_schedule_event_persists_tool_doc_defaults():
     db = _make_mock_db()
     _configure_runtime()
 
-    with patch("kazusa_ai_chatbot.scheduler.get_db", AsyncMock(return_value=db)):
+    with patch(
+        "kazusa_ai_chatbot.db.scheduled_events.get_db",
+        AsyncMock(return_value=db),
+    ):
         event = {
             "tool": "send_message",
             "args": {
@@ -122,7 +125,10 @@ async def test_cancel_event_sets_cancelled_status_and_timestamp():
     _configure_runtime()
     scheduler._pending_tasks["evt-1"] = asyncio.create_task(asyncio.sleep(999))
 
-    with patch("kazusa_ai_chatbot.scheduler.get_db", AsyncMock(return_value=db)):
+    with patch(
+        "kazusa_ai_chatbot.db.scheduled_events.get_db",
+        AsyncMock(return_value=db),
+    ):
         ok = await scheduler.cancel_event("evt-1")
 
     assert ok is True
@@ -156,7 +162,10 @@ async def test_fire_event_executes_registered_tool_handler_and_marks_completed()
     }
     pending_index.add("evt-send", Task.from_scheduler_doc(event))
 
-    with patch("kazusa_ai_chatbot.scheduler.get_db", AsyncMock(return_value=db)):
+    with patch(
+        "kazusa_ai_chatbot.db.scheduled_events.get_db",
+        AsyncMock(return_value=db),
+    ):
         await scheduler._fire_event(event)
 
     assert adapter.calls == [
@@ -209,7 +218,10 @@ async def test_fire_event_marks_failed_when_handler_raises():
         "bot_role": "user",
     }
 
-    with patch("kazusa_ai_chatbot.scheduler.get_db", AsyncMock(return_value=db)):
+    with patch(
+        "kazusa_ai_chatbot.db.scheduled_events.get_db",
+        AsyncMock(return_value=db),
+    ):
         await scheduler._fire_event(event)
 
     updates = [call.args[1]["$set"]["status"] for call in db.scheduled_events.update_one.await_args_list]

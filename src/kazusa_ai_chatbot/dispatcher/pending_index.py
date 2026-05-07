@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 
-from kazusa_ai_chatbot.db import get_db
+from kazusa_ai_chatbot.db import list_pending_scheduler_events
 from kazusa_ai_chatbot.dispatcher.task import Task
 
 
@@ -90,13 +90,11 @@ class PendingTaskIndex:
             Number of pending tasks loaded into the index.
         """
 
-        db = await get_db()
-        cursor = db.scheduled_events.find({"status": "pending"})
         self._by_event_id.clear()
         self._by_signature.clear()
 
         count = 0
-        async for doc in cursor:
+        for doc in await list_pending_scheduler_events():
             if "tool" not in doc or "execute_at" not in doc:
                 continue
             task = Task.from_scheduler_doc(doc)

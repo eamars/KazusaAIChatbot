@@ -7,38 +7,6 @@ import pytest
 from kazusa_ai_chatbot import service as service_module
 
 
-class _FakeAdmin:
-    """Fake Mongo admin object that accepts a ping command."""
-
-    async def command(self, name: str) -> dict:
-        """Return a successful response for one admin command.
-
-        Args:
-            name: Mongo admin command name.
-
-        Returns:
-            Minimal command response.
-        """
-        assert name == "ping"
-        return {"ok": 1}
-
-
-class _FakeClient:
-    """Fake Mongo client wrapper used by the service health check."""
-
-    def __init__(self) -> None:
-        """Create a fake client with an admin command surface."""
-        self.admin = _FakeAdmin()
-
-
-class _FakeDb:
-    """Fake Mongo database wrapper used by the service health check."""
-
-    def __init__(self) -> None:
-        """Create a fake database with a client attribute."""
-        self.client = _FakeClient()
-
-
 class _FakeCacheRuntime:
     """Fake Cache2 runtime with deterministic agent stats."""
 
@@ -62,15 +30,15 @@ class _FakeCacheRuntime:
 async def test_health_includes_cache2_agent_stats(monkeypatch) -> None:
     """Health response should preserve core fields and include Cache2 stats."""
 
-    async def _get_db() -> _FakeDb:
-        """Return a fake database for the health check.
+    async def _check_database_connection() -> bool:
+        """Return a successful database health result."""
+        return True
 
-        Returns:
-            Fake database object.
-        """
-        return _FakeDb()
-
-    monkeypatch.setattr(service_module, "get_db", _get_db)
+    monkeypatch.setattr(
+        service_module,
+        "check_database_connection",
+        _check_database_connection,
+    )
     monkeypatch.setattr(
         service_module,
         "get_rag_cache2_runtime",

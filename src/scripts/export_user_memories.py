@@ -24,8 +24,11 @@ from scripts._db_export import (
 )
 from kazusa_ai_chatbot.db import (
     close_db,
-    get_db,
     get_user_profile,
+)
+from kazusa_ai_chatbot.db.script_operations import (
+    export_raw_user_memory_units,
+    resolve_global_user_id_for_export,
 )
 from kazusa_ai_chatbot.rag.user_memory_unit_retrieval import build_user_memory_context
 from kazusa_ai_chatbot.time_context import build_character_time_context
@@ -65,16 +68,11 @@ async def _resolve_identifier(identifier: str, platform: str | None) -> str:
             return_value = str(profile["global_user_id"])
             return return_value
 
-    db = await get_db()
-    account_filter: dict[str, Any] = {"platform_user_id": identifier}
-    if platform:
-        account_filter["platform"] = platform
-    profile = await db.user_profiles.find_one(
-        {"platform_accounts": {"$elemMatch": account_filter}},
-        {"_id": 0, "global_user_id": 1},
+    global_user_id = await resolve_global_user_id_for_export(
+        identifier=identifier,
+        platform=platform,
     )
-    return_value = str((profile or {}).get("global_user_id", ""))
-    return return_value
+    return global_user_id
 
 
 async def _load_raw_units(
@@ -95,18 +93,13 @@ async def _load_raw_units(
     Returns:
         Raw memory-unit documents sorted by newest first.
     """
-    db = await get_db()
-    query: dict[str, Any] = {"global_user_id": global_user_id}
-    if not include_inactive:
-        query["status"] = "active"
-    cursor = (
-        db.user_memory_units
-        .find(query, projection_from_exclusions(exclude_fields))
-        .sort([("last_seen_at", -1), ("updated_at", -1)])
-        .limit(limit)
+    rows = await export_raw_user_memory_units(
+        global_user_id=global_user_id,
+        include_inactive=include_inactive,
+        projection=projection_from_exclusions(exclude_fields),
+        limit=limit,
     )
-    return_value = [dict(doc) for doc in await cursor.to_list(length=limit)]
-    return return_value
+    return rows
 
 
 async def main() -> None:

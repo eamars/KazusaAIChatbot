@@ -22,10 +22,15 @@ from scripts._db_export import (
     load_project_env,
     scrub_document,
 )
-from kazusa_ai_chatbot.db import close_db, get_db, get_text_embedding, get_user_profile
-from kazusa_ai_chatbot.db.conversation import _embedding_source_text
-from kazusa_ai_chatbot.db.memory import memory_embedding_source_text
-from kazusa_ai_chatbot.db.user_memory_units import _semantic_text
+from kazusa_ai_chatbot.db import close_db, get_user_profile
+from kazusa_ai_chatbot.db.script_operations import (
+    find_user_profile_for_export,
+    load_user_state_alias_profile_refs,
+    load_user_state_snapshot_documents,
+    recalculate_user_state_embeddings,
+    replace_user_state_snapshot_collection_rows,
+    restore_user_state_alias_profile_refs,
+)
 
 SNAPSHOT_TYPE = "user_state"
 SNAPSHOT_VERSION = 1
@@ -137,14 +142,12 @@ async def resolve_user_scope(identifier: str, platform: str | None) -> dict[str,
             }
             return scope
 
-    db = await get_db()
-    account_filter: dict[str, Any] = {"platform_user_id": clean_identifier}
-    if clean_platform:
-        account_filter["platform"] = clean_platform
-    profile_doc = await db.user_profiles.find_one(
-        {"platform_accounts": {"$elemMatch": account_filter}},
+    profile_doc = await find_user_profile_for_export(
+        identifier=clean_identifier,
+        platform=clean_platform,
+        projection={},
     )
-    if profile_doc is None:
+    if not profile_doc:
         if clean_platform:
             raise ValueError(f"No user profile found for {clean_platform}:{clean_identifier}")
         profile_doc = {"global_user_id": clean_identifier}
@@ -159,150 +162,18 @@ async def resolve_user_scope(identifier: str, platform: str | None) -> dict[str,
     return scope
 
 
-def conversation_history_filter(
-    global_user_id: str,
-    platform_accounts: list[dict[str, str]],
-) -> dict[str, Any]:
-    """Build the user-related conversation-history filter.
-
-    Args:
-        global_user_id: Internal UUID for the user.
-        platform_accounts: Linked platform accounts for legacy platform-id rows.
-
-    Returns:
-        MongoDB filter matching authored, addressed, mentioned, replied-to, or
-        legacy platform-account rows related to the user.
-    """
-    conditions: list[dict[str, Any]] = [
-        {"global_user_id": global_user_id},
-        {"addressed_to_global_user_ids": global_user_id},
-        {"target_addressed_user_ids": global_user_id},
-        {"mentions.global_user_id": global_user_id},
-    ]
-    for account in platform_accounts:
-        platform = account["platform"]
-        platform_user_id = account["platform_user_id"]
-        conditions.extend([
-            {
-                "platform": platform,
-                "platform_user_id": platform_user_id,
-            },
-            {
-                "platform": platform,
-                "reply_context.reply_to_platform_user_id": platform_user_id,
-            },
-            {
-                "platform": platform,
-                "mentions.platform_user_id": platform_user_id,
-            },
-        ])
-
-    filter_doc = {"$or": conditions}
-    return filter_doc
-
-
-def collection_filters(
-    global_user_id: str,
-    platform_accounts: list[dict[str, str]],
-) -> dict[str, dict[str, Any]]:
-    """Build restore and snapshot filters for authoritative user-state rows.
-
-    Args:
-        global_user_id: Internal UUID for the user.
-        platform_accounts: Linked platform accounts for legacy platform-id rows.
-
-    Returns:
-        Mapping from MongoDB collection name to query filter.
-    """
-    filters = {
-        "user_profiles": {"global_user_id": global_user_id},
-        "user_memory_units": {"global_user_id": global_user_id},
-        "memory": {"source_global_user_id": global_user_id},
-        "conversation_episode_state": {"global_user_id": global_user_id},
-        "scheduled_events": {"source_user_id": global_user_id},
-        "conversation_history": conversation_history_filter(
-            global_user_id,
-            platform_accounts,
-        ),
-    }
-    return filters
-
-
-def sort_spec_for_collection(collection_name: str) -> list[tuple[str, int]]:
-    """Return a stable sort order for snapshot readability.
-
-    Args:
-        collection_name: MongoDB collection being exported.
-
-    Returns:
-        PyMongo sort specification.
-    """
-    sort_specs = {
-        "user_profiles": [("global_user_id", 1)],
-        "user_memory_units": [("unit_id", 1), ("updated_at", 1)],
-        "memory": [("timestamp", 1), ("memory_name", 1)],
-        "conversation_episode_state": [
-            ("platform", 1),
-            ("platform_channel_id", 1),
-            ("updated_at", 1),
-        ],
-        "scheduled_events": [("execute_at", 1), ("event_id", 1)],
-        "conversation_history": [("timestamp", 1), ("platform_message_id", 1)],
-    }
-    return_value = sort_specs[collection_name]
-    return return_value
-
-
-async def load_collection_documents(
-    db: Any,
-    collection_name: str,
-    filter_doc: dict[str, Any],
-) -> list[dict[str, Any]]:
-    """Load all snapshot documents from one collection.
-
-    Args:
-        db: Async MongoDB database handle.
-        collection_name: Collection to read.
-        filter_doc: Query filter defining the user-state scope.
-
-    Returns:
-        Matching documents sorted for readable snapshots.
-    """
-    cursor = db[collection_name].find(filter_doc)
-    cursor = cursor.sort(sort_spec_for_collection(collection_name))
-    documents = [dict(doc) for doc in await cursor.to_list(length=None)]
-    return documents
-
-
 async def load_alias_profile_refs(
-    db: Any,
     global_user_id: str,
 ) -> list[dict[str, Any]]:
     """Load profile alias backlinks that point at the user.
 
     Args:
-        db: Async MongoDB database handle.
         global_user_id: Internal UUID for the user.
 
     Returns:
         Minimal profile rows needed to restore ``suspected_aliases`` backlinks.
     """
-    cursor = (
-        db.user_profiles
-        .find(
-            {
-                "global_user_id": {"$ne": global_user_id},
-                "suspected_aliases": global_user_id,
-            },
-            {
-                "_id": 0,
-                "global_user_id": 1,
-                "suspected_aliases": 1,
-            },
-        )
-        .sort("global_user_id", 1)
-    )
-    alias_refs = [dict(doc) for doc in await cursor.to_list(length=None)]
+    alias_refs = await load_user_state_alias_profile_refs(global_user_id)
     return alias_refs
 
 
@@ -461,24 +332,10 @@ async def recalculate_embeddings(
     Returns:
         Rows ready for insertion, with regenerated embeddings when applicable.
     """
-    restored_rows = [dict(row) for row in rows]
-    if collection_name not in {
-        "conversation_history",
-        "memory",
-        "user_memory_units",
-    }:
-        return restored_rows
-
-    for row in restored_rows:
-        row.pop(DERIVED_EMBEDDING_FIELD, None)
-        if collection_name == "conversation_history":
-            embedding_text = _embedding_source_text(row)
-        elif collection_name == "memory":
-            embedding_text = memory_embedding_source_text(row)
-        else:
-            embedding_text = _semantic_text(row)
-        row[DERIVED_EMBEDDING_FIELD] = await get_text_embedding(embedding_text)
-
+    restored_rows = await recalculate_user_state_embeddings(
+        collection_name=collection_name,
+        rows=rows,
+    )
     return restored_rows
 
 
@@ -501,18 +358,13 @@ async def snapshot_user_state(
     scope = await resolve_user_scope(identifier, platform)
     global_user_id = str(scope["global_user_id"])
     platform_accounts = list(scope["platform_accounts"])
-    db = await get_db()
-    filters = collection_filters(global_user_id, platform_accounts)
+    documents = await load_user_state_snapshot_documents(
+        global_user_id=global_user_id,
+        platform_accounts=platform_accounts,
+        collection_names=USER_STATE_COLLECTIONS,
+    )
 
-    documents: dict[str, list[dict[str, Any]]] = {}
-    for collection_name in USER_STATE_COLLECTIONS:
-        documents[collection_name] = await load_collection_documents(
-            db,
-            collection_name,
-            filters[collection_name],
-        )
-
-    alias_refs = await load_alias_profile_refs(db, global_user_id)
+    alias_refs = await load_alias_profile_refs(global_user_id)
     identity = {
         "requested_identifier": identifier,
         "requested_platform": platform,
@@ -530,39 +382,22 @@ async def snapshot_user_state(
 
 
 async def restore_alias_profile_refs(
-    db: Any,
     global_user_id: str,
     alias_refs: list[dict[str, Any]],
 ) -> None:
     """Restore only alias backlinks from other profile documents.
 
     Args:
-        db: Async MongoDB database handle.
         global_user_id: Internal UUID for the restored user.
         alias_refs: Minimal alias-ref rows from the snapshot.
 
     Returns:
         None.
     """
-    await db.user_profiles.update_many(
-        {
-            "global_user_id": {"$ne": global_user_id},
-            "suspected_aliases": global_user_id,
-        },
-        {"$pull": {"suspected_aliases": global_user_id}},
+    await restore_user_state_alias_profile_refs(
+        global_user_id=global_user_id,
+        alias_refs=alias_refs,
     )
-    for alias_ref in alias_refs:
-        alias_global_user_id = str(alias_ref.get("global_user_id", "")).strip()
-        if not alias_global_user_id:
-            continue
-        aliases = alias_ref.get("suspected_aliases")
-        if not isinstance(aliases, list):
-            aliases = []
-        await db.user_profiles.update_one(
-            {"global_user_id": alias_global_user_id},
-            {"$set": {"suspected_aliases": aliases}},
-            upsert=False,
-        )
 
 
 async def restore_user_state(
@@ -597,21 +432,21 @@ async def restore_user_state(
         raise ValueError("alias_profile_refs must be a list")
     alias_refs = [dict(row) for row in raw_alias_refs if isinstance(row, dict)]
 
-    db = await get_db()
-    filters = collection_filters(global_user_id, platform_accounts)
-
     restored_counts: dict[str, int] = {}
     for collection_name in USER_STATE_COLLECTIONS:
-        await db[collection_name].delete_many(filters[collection_name])
         rows = await recalculate_embeddings(
             collection_name,
             documents[collection_name],
         )
-        if rows:
-            await db[collection_name].insert_many(rows)
-        restored_counts[collection_name] = len(rows)
+        row_count = await replace_user_state_snapshot_collection_rows(
+            global_user_id=global_user_id,
+            platform_accounts=platform_accounts,
+            collection_name=collection_name,
+            rows=rows,
+        )
+        restored_counts[collection_name] = row_count
 
-    await restore_alias_profile_refs(db, global_user_id, alias_refs)
+    await restore_alias_profile_refs(global_user_id, alias_refs)
     summary = {
         "global_user_id": global_user_id,
         "counts": {

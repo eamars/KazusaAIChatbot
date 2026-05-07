@@ -7,7 +7,15 @@ import logging
 import uuid
 from datetime import datetime, timezone
 
-from kazusa_ai_chatbot.db import ScheduledEventDoc, get_db
+from kazusa_ai_chatbot.db import (
+    ScheduledEventDoc,
+    cancel_pending_scheduled_event,
+    insert_scheduled_event,
+    list_pending_scheduler_events,
+    mark_scheduled_event_completed,
+    mark_scheduled_event_failed,
+    mark_scheduled_event_running,
+)
 from kazusa_ai_chatbot.dispatcher.adapter_iface import AdapterRegistry
 from kazusa_ai_chatbot.dispatcher.pending_index import PendingTaskIndex
 from kazusa_ai_chatbot.dispatcher.task import DispatchContext, Task, parse_iso_datetime
@@ -65,25 +73,15 @@ async def _fire_event(event: ScheduledEventDoc) -> None:
     """
 
     event_id = event["event_id"]
-    db = await get_db()
-    await db.scheduled_events.update_one(
-        {"event_id": event_id},
-        {"$set": {"status": "running"}},
-    )
+    await mark_scheduled_event_running(event_id)
 
     try:
         await _handle_task(event)
     except Exception as exc:
         logger.exception(f"Event {event_id} failed: {exc}")
-        await db.scheduled_events.update_one(
-            {"event_id": event_id},
-            {"$set": {"status": "failed"}},
-        )
+        await mark_scheduled_event_failed(event_id)
     else:
-        await db.scheduled_events.update_one(
-            {"event_id": event_id},
-            {"$set": {"status": "completed"}},
-        )
+        await mark_scheduled_event_completed(event_id)
     finally:
         _pending_tasks.pop(event_id, None)
         if _pending_index is not None:
@@ -119,8 +117,7 @@ async def schedule_event(event: ScheduledEventDoc) -> str:
     event.setdefault("created_at", datetime.now(timezone.utc).isoformat())
     event.setdefault("status", "pending")
 
-    db = await get_db()
-    await db.scheduled_events.insert_one(event)
+    await insert_scheduled_event(event)
 
     task = asyncio.create_task(_schedule_task(dict(event)))
     _pending_tasks[event["event_id"]] = task
@@ -136,10 +133,8 @@ async def load_pending_events() -> int:
         Number of pending events loaded.
     """
 
-    db = await get_db()
-    cursor = db.scheduled_events.find({"status": "pending"}).sort("execute_at", 1)
     count = 0
-    async for doc in cursor:
+    for doc in await list_pending_scheduler_events():
         if "tool" not in doc or "execute_at" not in doc:
             logger.warning(f'Skipping legacy scheduled event without tool/execute_at: {doc.get("event_id")}')
             continue
@@ -169,17 +164,10 @@ async def cancel_event(event_id: str) -> bool:
     if _pending_index is not None:
         _pending_index.remove(event_id)
 
-    db = await get_db()
-    result = await db.scheduled_events.update_one(
-        {"event_id": event_id, "status": "pending"},
-        {
-            "$set": {
-                "status": "cancelled",
-                "cancelled_at": datetime.now(timezone.utc).isoformat(),
-            }
-        },
+    return_value = await cancel_pending_scheduled_event(
+        event_id,
+        cancelled_at=datetime.now(timezone.utc).isoformat(),
     )
-    return_value = result.modified_count > 0
     return return_value
 
 

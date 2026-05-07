@@ -9,7 +9,8 @@ from __future__ import annotations
 import asyncio
 import logging
 
-from kazusa_ai_chatbot.db._client import close_db, get_db
+from kazusa_ai_chatbot.db import close_db
+from kazusa_ai_chatbot.db.script_operations import drop_legacy_rag_collections
 
 logger = logging.getLogger(__name__)
 
@@ -20,11 +21,11 @@ async def main() -> None:
     Returns:
         None. Missing collections are logged and ignored.
     """
-    db = await get_db()
-    existing = set(await db.list_collection_names())
+    dropped = await drop_legacy_rag_collections(
+        ("rag_cache_index", "rag_metadata_index"),
+    )
     for name in ("rag_cache_index", "rag_metadata_index"):
-        if name in existing:
-            await db.drop_collection(name)
+        if name in dropped:
             logger.info(f'Dropped collection \'{name}\'')
         else:
             logger.info(f'Collection \'{name}\' not present; skipping')

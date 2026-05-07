@@ -15,6 +15,8 @@ import re
 import uuid
 from datetime import datetime, timezone
 
+from pymongo.errors import PyMongoError
+
 from kazusa_ai_chatbot.config import (
     AFFINITY_DEFAULT,
     AFFINITY_MAX,
@@ -22,6 +24,7 @@ from kazusa_ai_chatbot.config import (
     CHARACTER_GLOBAL_USER_ID,
 )
 from kazusa_ai_chatbot.db._client import get_db
+from kazusa_ai_chatbot.db.errors import DatabaseOperationError
 from kazusa_ai_chatbot.db.schemas import (
     UserProfileDoc,
 )
@@ -628,22 +631,37 @@ async def update_affinity(global_user_id: str, delta: int) -> int:
     Returns:
         The new (clamped) affinity value.
     """
-    current = await get_affinity(global_user_id)
+    try:
+        current = await get_affinity(global_user_id)
+    except PyMongoError as exc:
+        raise DatabaseOperationError(
+            f"failed to read affinity before update: {exc}"
+        ) from exc
     new_value = max(AFFINITY_MIN, min(AFFINITY_MAX, current + delta))
-    db = await get_db()
-    await db.user_profiles.update_one(
-        {"global_user_id": global_user_id},
-        {"$set": {"affinity": new_value}},
-        upsert=True,
-    )
+    try:
+        db = await get_db()
+        await db.user_profiles.update_one(
+            {"global_user_id": global_user_id},
+            {"$set": {"affinity": new_value}},
+            upsert=True,
+        )
+    except PyMongoError as exc:
+        raise DatabaseOperationError(
+            f"failed to update affinity: {exc}"
+        ) from exc
     return new_value
 
 
 async def update_last_relationship_insight(global_user_id: str, insight: str) -> None:
     """Update the last relationship insight for a user."""
-    db = await get_db()
-    await db.user_profiles.update_one(
-        {"global_user_id": global_user_id},
-        {"$set": {"last_relationship_insight": insight}},
-        upsert=True,
-    )
+    try:
+        db = await get_db()
+        await db.user_profiles.update_one(
+            {"global_user_id": global_user_id},
+            {"$set": {"last_relationship_insight": insight}},
+            upsert=True,
+        )
+    except PyMongoError as exc:
+        raise DatabaseOperationError(
+            f"failed to update relationship insight: {exc}"
+        ) from exc

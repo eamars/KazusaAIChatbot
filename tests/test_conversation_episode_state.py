@@ -75,7 +75,10 @@ async def test_load_episode_state_queries_by_scope_without_mongo_id(monkeypatch)
     collection = MagicMock()
     collection.find_one = AsyncMock(return_value=None)
     db = {repository.COLLECTION_NAME: collection}
-    monkeypatch.setattr(repository, "get_db", AsyncMock(return_value=db))
+    monkeypatch.setattr(
+        "kazusa_ai_chatbot.db.conversation_progress.get_db",
+        AsyncMock(return_value=db),
+    )
 
     await repository.load_episode_state(
         scope=ConversationProgressScope("qq", "channel-1", "user-1"),
@@ -99,7 +102,10 @@ async def test_upsert_episode_state_uses_turn_count_guard(monkeypatch) -> None:
     collection = MagicMock()
     collection.update_one = AsyncMock(return_value=update_result)
     db = {repository.COLLECTION_NAME: collection}
-    monkeypatch.setattr(repository, "get_db", AsyncMock(return_value=db))
+    monkeypatch.setattr(
+        "kazusa_ai_chatbot.db.conversation_progress.get_db",
+        AsyncMock(return_value=db),
+    )
 
     written = await repository.upsert_episode_state_guarded(
         document={

@@ -10,7 +10,7 @@ Submodule map:
 * ``character``    — ``character_state`` operations
 * ``memory``       — ``memory`` operations
 * ``interaction_style_images`` — L3-only interaction style overlays
-* ``scheduled_events`` — read-only scheduled-event queries
+* ``scheduled_events`` — scheduled-event persistence helpers
 """
 
 from __future__ import annotations
@@ -25,10 +25,11 @@ from kazusa_ai_chatbot.config import AFFINITY_DEFAULT, AFFINITY_MAX, AFFINITY_MI
 from kazusa_ai_chatbot.db._client import (
     close_db,
     enable_vector_index,
-    get_db,
     get_text_embedding,
     get_text_embeddings_batch,
 )
+from kazusa_ai_chatbot.db.errors import DatabaseOperationError
+from kazusa_ai_chatbot.db.health import check_database_connection
 
 # ── Schemas ────────────────────────────────────────────────────────
 from kazusa_ai_chatbot.db.schemas import (
@@ -134,7 +135,15 @@ from kazusa_ai_chatbot.db.character import (
     upsert_character_state,
 )
 
-from kazusa_ai_chatbot.db.scheduled_events import query_pending_scheduled_events
+from kazusa_ai_chatbot.db.scheduled_events import (
+    cancel_pending_scheduled_event,
+    insert_scheduled_event,
+    list_pending_scheduler_events,
+    mark_scheduled_event_completed,
+    mark_scheduled_event_failed,
+    mark_scheduled_event_running,
+    query_pending_scheduled_events,
+)
 
 from kazusa_ai_chatbot.db.rag_cache2_persistent import (
     build_initializer_version_key,
@@ -172,7 +181,9 @@ __all__ = [
     # Config
     "AFFINITY_DEFAULT", "AFFINITY_MAX", "AFFINITY_MIN",
     # Client
-    "close_db", "enable_vector_index", "get_db", "get_text_embedding", "get_text_embeddings_batch",
+    "check_database_connection", "close_db", "DatabaseOperationError",
+    "enable_vector_index",
+    "get_text_embedding", "get_text_embeddings_batch",
     # Schemas
     "AttachmentDoc", "CharacterProfileDoc", "CharacterReflectionRunDoc",
     "ConversationEpisodeEntryDoc", "ConversationEpisodeStateDoc",
@@ -222,6 +233,9 @@ __all__ = [
     # Memory
     "enable_memory_vector_index", "get_active_promises", "save_memory", "search_memory",
     # Scheduled events
+    "cancel_pending_scheduled_event", "insert_scheduled_event",
+    "list_pending_scheduler_events", "mark_scheduled_event_completed",
+    "mark_scheduled_event_failed", "mark_scheduled_event_running",
     "query_pending_scheduled_events",
     # Persistent Cache2
     "build_initializer_version_key", "load_initializer_entries",

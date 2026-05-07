@@ -17,9 +17,7 @@ import logging
 import sys
 from datetime import datetime, timezone
 
-from kazusa_ai_chatbot.db._client import close_db
-from kazusa_ai_chatbot.db.memory import save_memory
-from kazusa_ai_chatbot.db.schemas import MemoryDoc
+from kazusa_ai_chatbot.db import close_db, MemoryDoc, save_memory
 
 _VALID_MEMORY_TYPES = ("fact", "narrative", "impression", "defense_rule")
 _DEFAULT_MEMORY_TYPE = "fact"

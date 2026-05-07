@@ -22,7 +22,6 @@ from kazusa_ai_chatbot.db import (
     get_character_profile,
     get_character_state,
     get_conversation_history,
-    get_db,
     get_user_profile,
     save_character_profile,
     save_conversation,
@@ -32,6 +31,7 @@ from kazusa_ai_chatbot.db import (
     update_last_relationship_insight,
     upsert_character_state,
 )
+from kazusa_ai_chatbot.db._client import get_db
 
 # Mark for tests that require a running MongoDB instance.
 # Run with:  pytest -m live_db -v
@@ -48,8 +48,7 @@ def _mock_db():
 def _patched_get_db(db):
     """Patch every DB submodule binding used by re-exported helper functions."""
     mock_get_db = AsyncMock(return_value=db)
-    with patch.object(db_module, "get_db", mock_get_db), \
-         patch.object(db_client_module, "get_db", mock_get_db), \
+    with patch.object(db_client_module, "get_db", mock_get_db), \
          patch.object(db_character_module, "get_db", mock_get_db), \
          patch.object(db_conversation_module, "get_db", mock_get_db), \
          patch.object(db_memory_module, "get_db", mock_get_db), \

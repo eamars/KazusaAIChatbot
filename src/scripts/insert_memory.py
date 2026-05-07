@@ -20,7 +20,6 @@ import argparse
 from datetime import datetime, timezone
 
 from kazusa_ai_chatbot.db import (
-    get_db,
     close_db,
     save_memory,
     build_memory_doc,
@@ -52,9 +51,6 @@ async def main():
     logger.info(f"Content length: {len(args.content)} characters")
     
     try:
-        # Connect to database
-        await get_db()
-        
         # Save memory
         doc = build_memory_doc(
             memory_name=args.memory_name,

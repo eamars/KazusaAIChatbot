@@ -23,7 +23,12 @@ from scripts._db_export import (
     load_project_env,
 )
 from kazusa_ai_chatbot.config import CHARACTER_GLOBAL_USER_ID
-from kazusa_ai_chatbot.db import close_db, get_db
+from kazusa_ai_chatbot.db import close_db
+from kazusa_ai_chatbot.db.script_operations import (
+    count_legacy_conversation_history_rows,
+    list_legacy_conversation_history_rows,
+    update_conversation_history_row,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -37,28 +42,6 @@ _DISCORD_ROLE_MENTION_PATTERN = re.compile(r"<@&\d+>")
 _DISCORD_CHANNEL_MENTION_PATTERN = re.compile(r"<#\d+>")
 _DISCORD_CUSTOM_EMOJI_PATTERN = re.compile(r"<a?:[A-Za-z0-9_]+:\d+>")
 _DISCORD_EVERYONE_PATTERN = re.compile(r"@(everyone|here)\b")
-
-
-def legacy_conversation_query() -> dict[str, Any]:
-    """Build the selector for rows outside the typed storage contract.
-
-    Returns:
-        MongoDB filter selecting conversation rows missing typed envelope
-        fields or still retaining the deprecated `content` field.
-    """
-
-    query: dict[str, Any] = {
-        "$or": [
-            {"content": {"$exists": True}},
-            {"body_text": {"$exists": False}},
-            {"raw_wire_text": {"$exists": False}},
-            {"addressed_to_global_user_ids": {"$exists": False}},
-            {"mentions": {"$exists": False}},
-            {"broadcast": {"$exists": False}},
-            {"attachments": {"$exists": False}},
-        ]
-    }
-    return query
 
 
 def normalize_legacy_body_text(raw_wire_text: str) -> str:
@@ -167,14 +150,14 @@ def legacy_list_field(row: dict[str, Any], field: str) -> list[Any]:
     return return_value
 
 
-def legacy_conversation_update(row: dict[str, Any]) -> dict[str, Any]:
-    """Build the typed-envelope update for one stored conversation row.
+def legacy_conversation_fields(row: dict[str, Any]) -> dict[str, Any]:
+    """Build typed-envelope fields for one stored conversation row.
 
     Args:
         row: Raw MongoDB conversation document.
 
     Returns:
-        MongoDB update document that fills typed fields and removes `content`.
+        Field values that fill the typed conversation storage contract.
     """
 
     raw_wire_text = legacy_raw_wire_text(row)
@@ -186,20 +169,15 @@ def legacy_conversation_update(row: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(broadcast, bool):
         broadcast = False
 
-    update = {
-        "$set": {
-            "body_text": body_text,
-            "raw_wire_text": raw_wire_text,
-            "addressed_to_global_user_ids": legacy_addressed_to(row),
-            "mentions": legacy_list_field(row, "mentions"),
-            "broadcast": broadcast,
-            "attachments": legacy_list_field(row, "attachments"),
-        },
-        "$unset": {
-            "content": "",
-        },
+    fields = {
+        "body_text": body_text,
+        "raw_wire_text": raw_wire_text,
+        "addressed_to_global_user_ids": legacy_addressed_to(row),
+        "mentions": legacy_list_field(row, "mentions"),
+        "broadcast": broadcast,
+        "attachments": legacy_list_field(row, "attachments"),
     }
-    return update
+    return fields
 
 
 async def migrate_legacy_conversation_history_rows(
@@ -220,33 +198,30 @@ async def migrate_legacy_conversation_history_rows(
         RuntimeError: If rows still violate the typed contract after writes.
     """
 
-    db = await get_db()
-    query = legacy_conversation_query()
-
     if dry_run:
-        legacy_count = await db.conversation_history.count_documents(query)
+        legacy_count = await count_legacy_conversation_history_rows()
         print(f"{legacy_count} conversation_history row(s) need migration")
         return_value = legacy_count
         return return_value
 
     migrated_count = 0
     while True:
-        cursor = (
-            db.conversation_history
-            .find(query)
-            .sort("timestamp", 1)
-            .limit(batch_size)
+        rows = await list_legacy_conversation_history_rows(
+            batch_size=batch_size,
         )
-        rows = await cursor.to_list(length=batch_size)
         if not rows:
             break
 
         for row in rows:
-            update = legacy_conversation_update(row)
-            await db.conversation_history.update_one({"_id": row["_id"]}, update)
+            fields = legacy_conversation_fields(row)
+            await update_conversation_history_row(
+                row_id=row["_id"],
+                set_fields=fields,
+                unset_fields=("content",),
+            )
             migrated_count += 1
 
-    remaining_count = await db.conversation_history.count_documents(query)
+    remaining_count = await count_legacy_conversation_history_rows()
     if remaining_count:
         raise RuntimeError(
             "conversation_history typed-envelope rewrite incomplete: "

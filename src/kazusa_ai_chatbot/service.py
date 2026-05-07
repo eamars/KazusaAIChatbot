@@ -30,12 +30,12 @@ from kazusa_ai_chatbot.conversation_progress import (
 from kazusa_ai_chatbot.llm_route_report import render_llm_route_table
 from kazusa_ai_chatbot.db import (
     backfill_character_conversation_identity,
+    check_database_connection,
     close_db,
     db_bootstrap,
     ensure_character_identity,
     get_character_profile,
     get_conversation_history,
-    get_db,
     get_user_profile,
     load_initializer_entries,
     resolve_global_user_id,
@@ -892,7 +892,7 @@ app = FastAPI(title="Kazusa Brain Service", lifespan=lifespan)
 @app.get("/health", response_model=HealthResponse)
 async def health():
     return_value = await brain_health.build_health_response(
-        get_db_func=get_db,
+        check_database_connection_func=check_database_connection,
         get_rag_cache2_runtime_func=get_rag_cache2_runtime,
         logger=logger,
     )

@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+from pymongo.errors import PyMongoError
+
 from kazusa_ai_chatbot.db._client import get_db
+from kazusa_ai_chatbot.db.errors import DatabaseOperationError
 from kazusa_ai_chatbot.db.schemas import CharacterProfileDoc
 
 
@@ -49,12 +52,17 @@ async def upsert_character_self_image(image_doc: dict) -> None:
     """
     if not image_doc:
         return
-    db = await get_db()
-    await db.character_state.update_one(
-        {"_id": "global"},
-        {"$set": {"self_image": image_doc}},
-        upsert=True,
-    )
+    try:
+        db = await get_db()
+        await db.character_state.update_one(
+            {"_id": "global"},
+            {"$set": {"self_image": image_doc}},
+            upsert=True,
+        )
+    except PyMongoError as exc:
+        raise DatabaseOperationError(
+            f"failed to upsert character self image: {exc}"
+        ) from exc
 
 
 async def upsert_character_state(
@@ -69,8 +77,13 @@ async def upsert_character_state(
     value for that field is preserved. ``timestamp`` always overwrites
     ``updated_at``.
     """
-    db = await get_db()
-    existing = await get_character_state()
+    try:
+        db = await get_db()
+        existing = await get_character_state()
+    except PyMongoError as exc:
+        raise DatabaseOperationError(
+            f"failed to load character state before update: {exc}"
+        ) from exc
 
     if mood == "":
         mood = existing.get("mood", "")
@@ -79,15 +92,20 @@ async def upsert_character_state(
     if reflection_summary == "":
         reflection_summary = existing.get("reflection_summary", "")
 
-    await db.character_state.update_one(
-        {"_id": "global"},
-        {
-            "$set": {
-                "mood": mood,
-                "global_vibe": global_vibe,
-                "reflection_summary": reflection_summary,
-                "updated_at": timestamp,
-            }
-        },
-        upsert=True,
-    )
+    try:
+        await db.character_state.update_one(
+            {"_id": "global"},
+            {
+                "$set": {
+                    "mood": mood,
+                    "global_vibe": global_vibe,
+                    "reflection_summary": reflection_summary,
+                    "updated_at": timestamp,
+                }
+            },
+            upsert=True,
+        )
+    except PyMongoError as exc:
+        raise DatabaseOperationError(
+            f"failed to upsert character state: {exc}"
+        ) from exc

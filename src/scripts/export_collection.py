@@ -22,7 +22,8 @@ from scripts._db_export import (
     projection_from_exclusions,
     write_json_export,
 )
-from kazusa_ai_chatbot.db import close_db, get_db
+from kazusa_ai_chatbot.db import close_db
+from kazusa_ai_chatbot.db.script_operations import export_collection_rows
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -68,15 +69,13 @@ async def main() -> None:
     output_path = args.output or default_output_path("collection", args.collection)
 
     try:
-        db = await get_db()
-        cursor = db[args.collection].find(
-            filter_doc,
-            projection_from_exclusions(exclude_fields),
+        records = await export_collection_rows(
+            collection_name=args.collection,
+            filter_doc=filter_doc,
+            projection=projection_from_exclusions(exclude_fields),
+            sort_doc=sort_doc,
+            limit=args.limit,
         )
-        if sort_doc:
-            cursor = cursor.sort(list(sort_doc.items()))
-        cursor = cursor.limit(args.limit)
-        records = [dict(doc) for doc in await cursor.to_list(length=args.limit)]
         query = {
             "collection": args.collection,
             "filter": filter_doc,

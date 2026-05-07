@@ -24,14 +24,11 @@ from datetime import datetime
 
 from kazusa_ai_chatbot.config import EMBEDDING_MODEL
 
-from kazusa_ai_chatbot.config import MONGODB_URI, MONGODB_DB_NAME
 from kazusa_ai_chatbot.db import (
-    get_db,
     close_db,
-    get_text_embedding,
     enable_vector_index,
-    ConversationMessageDoc
 )
+from kazusa_ai_chatbot.db.script_operations import refresh_conversation_history_embeddings
 
 logger = logging.getLogger(__name__)
 
@@ -41,59 +38,21 @@ async def main():
     logger.info("Starting conversation history embedding overwrite...")
     
     try:
-        # Connect to database
-        db = await get_db()
-        collection = db.conversation_history
-        
-        # Find all conversation history documents to overwrite embeddings
-        query = {}  # Match all documents
-        
-        # Count documents to process
-        total_count = await collection.count_documents(query)
+        batch_size = 100
+        result = await refresh_conversation_history_embeddings(
+            batch_size=batch_size,
+        )
+        total_count = result["total_count"]
         logger.info(f"Found {total_count} conversation messages to process")
-        
+
         if total_count == 0:
             logger.info("No conversation messages found. Nothing to do.")
             return
-        
-        # Process documents in batches to avoid memory issues
-        batch_size = 100
-        processed = 0
-        failed = 0
-        
-        cursor = collection.find(query).batch_size(batch_size)
-        
-        async for doc in cursor:
-            try:
-                # Generate embedding for the message content
-                content = doc.get("content", "")
-                if not content:
-                    logger.warning(f"Document {doc['_id']} has empty content, skipping")
-                    failed += 1
-                    continue
-                
-                logger.debug(f"Generating embedding for document {doc['_id']}")
-                embedding = await get_text_embedding(content)
-                
-                # Update the document with the embedding
-                await collection.update_one(
-                    {"_id": doc["_id"]},
-                    {"$set": {"embedding": embedding}}
-                )
-                
-                processed += 1
-                
-                # Log progress every 10 documents
-                if processed % 10 == 0:
-                    logger.info(f"Processed {processed}/{total_count} documents")
-                
-            except Exception as exc:
-                logger.debug(f"Handled exception in main: {exc}")
-                logger.exception(f'Failed to process document {doc["_id"]}')
-                failed += 1
-                continue
-        
-        logger.info(f"Embedding overwrite completed. Processed: {processed}, Failed: {failed}")
+
+        logger.info(
+            "Embedding overwrite completed. "
+            f"Processed: {result['processed']}, Failed: {result['failed']}"
+        )
         
         # Enable vector search index if it doesn't exist
         logger.info("Ensuring vector search index exists...")

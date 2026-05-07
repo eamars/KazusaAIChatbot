@@ -17,7 +17,11 @@ from typing import Any
 from bson import json_util
 
 from scripts._db_export import configure_logging, configure_stdout, load_project_env
-from kazusa_ai_chatbot.db import close_db, get_db
+from kazusa_ai_chatbot.db import close_db
+from kazusa_ai_chatbot.db.script_operations import (
+    load_character_state_snapshot_document,
+    replace_character_state_snapshot_document,
+)
 
 DEFAULT_SNAPSHOT_PATH = Path("test_artifacts") / "character_state_snapshot.json"
 SNAPSHOT_TYPE = "character_state"
@@ -140,12 +144,8 @@ async def snapshot_character_state(file_path: Path) -> dict[str, Any]:
     Raises:
         ValueError: If the singleton document does not exist.
     """
-    db = await get_db()
-    document = await db.character_state.find_one({"_id": "global"})
-    if document is None:
-        raise ValueError('character_state document "_id: global" does not exist')
-
-    payload = build_snapshot_payload(dict(document))
+    document = await load_character_state_snapshot_document()
+    payload = build_snapshot_payload(document)
     write_snapshot_file(file_path, payload)
     return payload
 
@@ -162,12 +162,7 @@ async def restore_character_state(file_path: Path) -> dict[str, Any]:
     payload = read_snapshot_file(file_path)
     restored_state = extract_character_state(payload)
 
-    db = await get_db()
-    await db.character_state.replace_one(
-        {"_id": "global"},
-        restored_state,
-        upsert=True,
-    )
+    await replace_character_state_snapshot_document(restored_state)
     return restored_state
 
 

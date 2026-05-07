@@ -2,66 +2,13 @@
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock
 
 import pytest
 
 from kazusa_ai_chatbot.config import CHARACTER_GLOBAL_USER_ID
 from kazusa_ai_chatbot.db import bootstrap as bootstrap_module
 from scripts import migrate_conversation_history_envelope as migration_module
-
-
-class _Cursor:
-    """Small async cursor double for migration script tests."""
-
-    def __init__(self, rows: list[dict]) -> None:
-        """Store rows returned by `to_list`.
-
-        Args:
-            rows: MongoDB-like rows to expose from the cursor.
-
-        Returns:
-            None.
-        """
-
-        self._rows = rows
-
-    def sort(self, _field: str, _direction: int) -> "_Cursor":
-        """Accept sort chaining used by the migration query.
-
-        Args:
-            _field: Ignored field name.
-            _direction: Ignored sort direction.
-
-        Returns:
-            This cursor double for fluent chaining.
-        """
-
-        return self
-
-    def limit(self, _limit: int) -> "_Cursor":
-        """Accept limit chaining used by the migration query.
-
-        Args:
-            _limit: Ignored maximum row count.
-
-        Returns:
-            This cursor double for fluent chaining.
-        """
-
-        return self
-
-    async def to_list(self, length: int) -> list[dict]:
-        """Return the configured cursor rows.
-
-        Args:
-            length: Requested maximum row count.
-
-        Returns:
-            Configured MongoDB-like rows.
-        """
-
-        return self._rows
 
 
 def test_runtime_bootstrap_does_not_expose_migration_path() -> None:
@@ -75,21 +22,27 @@ def test_runtime_bootstrap_does_not_expose_migration_path() -> None:
 async def test_migration_dry_run_counts_rows_without_writes(monkeypatch) -> None:
     """Dry-run mode should report matching rows and leave storage untouched."""
 
-    db = MagicMock()
-    db.conversation_history.count_documents = AsyncMock(return_value=3)
-    db.conversation_history.update_one = AsyncMock()
+    count_rows = AsyncMock(return_value=3)
+    update_row = AsyncMock()
 
-    monkeypatch.setattr(migration_module, "get_db", AsyncMock(return_value=db))
+    monkeypatch.setattr(
+        migration_module,
+        "count_legacy_conversation_history_rows",
+        count_rows,
+    )
+    monkeypatch.setattr(
+        migration_module,
+        "update_conversation_history_row",
+        update_row,
+    )
 
     row_count = await migration_module.migrate_legacy_conversation_history_rows(
         dry_run=True,
     )
 
     assert row_count == 3
-    db.conversation_history.count_documents.assert_awaited_once_with(
-        migration_module.legacy_conversation_query()
-    )
-    db.conversation_history.update_one.assert_not_awaited()
+    count_rows.assert_awaited_once_with()
+    update_row.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -119,35 +72,44 @@ async def test_migration_apply_rewrites_legacy_conversation_rows(monkeypatch) ->
             "timestamp": "2026-04-30T00:00:01+00:00",
         },
     ]
-    db = MagicMock()
-    db.conversation_history.find.side_effect = [
-        _Cursor(legacy_rows),
-        _Cursor([]),
-    ]
-    db.conversation_history.update_one = AsyncMock()
-    db.conversation_history.count_documents = AsyncMock(return_value=0)
-
-    monkeypatch.setattr(migration_module, "get_db", AsyncMock(return_value=db))
+    list_rows = AsyncMock(side_effect=[legacy_rows, []])
+    update_row = AsyncMock()
+    count_rows = AsyncMock(return_value=0)
+    monkeypatch.setattr(
+        migration_module,
+        "list_legacy_conversation_history_rows",
+        list_rows,
+    )
+    monkeypatch.setattr(
+        migration_module,
+        "update_conversation_history_row",
+        update_row,
+    )
+    monkeypatch.setattr(
+        migration_module,
+        "count_legacy_conversation_history_rows",
+        count_rows,
+    )
 
     migrated_count = await migration_module.migrate_legacy_conversation_history_rows(
         dry_run=False,
     )
 
     assert migrated_count == 2
-    assert db.conversation_history.update_one.await_count == 2
+    assert update_row.await_count == 2
 
-    first_update = db.conversation_history.update_one.await_args_list[0].args[1]
-    assert first_update["$set"]["body_text"] == "hello"
-    assert first_update["$set"]["raw_wire_text"].startswith("[Reply to message]")
-    assert first_update["$set"]["addressed_to_global_user_ids"] == [
+    first_update = update_row.await_args_list[0].kwargs
+    assert first_update["set_fields"]["body_text"] == "hello"
+    assert first_update["set_fields"]["raw_wire_text"].startswith("[Reply to message]")
+    assert first_update["set_fields"]["addressed_to_global_user_ids"] == [
         CHARACTER_GLOBAL_USER_ID
     ]
-    assert first_update["$set"]["mentions"] == []
-    assert first_update["$set"]["broadcast"] is False
-    assert first_update["$set"]["attachments"] == []
-    assert first_update["$unset"] == {"content": ""}
+    assert first_update["set_fields"]["mentions"] == []
+    assert first_update["set_fields"]["broadcast"] is False
+    assert first_update["set_fields"]["attachments"] == []
+    assert first_update["unset_fields"] == ("content",)
 
-    second_update = db.conversation_history.update_one.await_args_list[1].args[1]
-    assert second_update["$set"]["body_text"] == "old assistant reply"
-    assert second_update["$set"]["addressed_to_global_user_ids"] == []
-    assert second_update["$set"]["broadcast"] is False
+    second_update = update_row.await_args_list[1].kwargs
+    assert second_update["set_fields"]["body_text"] == "old assistant reply"
+    assert second_update["set_fields"]["addressed_to_global_user_ids"] == []
+    assert second_update["set_fields"]["broadcast"] is False

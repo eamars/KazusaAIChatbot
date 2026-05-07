@@ -12,20 +12,20 @@ from .contracts import (
 )
 
 
-GetDb = Callable[[], Awaitable[object]]
+CheckDatabaseConnection = Callable[[], Awaitable[bool]]
 GetRuntime = Callable[[], object]
 
 
 async def build_health_response(
     *,
-    get_db_func: GetDb,
+    check_database_connection_func: CheckDatabaseConnection,
     get_rag_cache2_runtime_func: GetRuntime,
     logger: logging.Logger,
 ) -> HealthResponse:
     """Build the service health response from current runtime dependencies.
 
     Args:
-        get_db_func: Database accessor used for the MongoDB ping.
+        check_database_connection_func: Database health check helper.
         get_rag_cache2_runtime_func: Cache2 runtime accessor.
         logger: Logger used for compatibility with service logging.
 
@@ -33,13 +33,8 @@ async def build_health_response(
         Health payload matching the public FastAPI response contract.
     """
 
-    db_ok = False
-    try:
-        db = await get_db_func()
-        await db.client.admin.command("ping")
-        db_ok = True
-    except Exception as exc:
-        logger.exception(f"Health check database ping failed: {exc}")
+    del logger
+    db_ok = await check_database_connection_func()
 
     response = HealthResponse(
         status="ok" if db_ok else "degraded",
@@ -53,4 +48,3 @@ async def build_health_response(
         ),
     )
     return response
-
