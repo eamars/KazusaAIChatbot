@@ -85,6 +85,10 @@ async def stage_1_research(state: GlobalPersonaState) -> dict:
             "platform": state["platform"],
             "platform_channel_id": state["platform_channel_id"],
             "channel_type": state["channel_type"],
+            "character_profile": {
+                "global_user_id": state["character_profile"]["global_user_id"],
+                "name": state["character_profile"]["name"],
+            },
             "active_turn_platform_message_ids": state.get(
                 "active_turn_platform_message_ids",
                 [],

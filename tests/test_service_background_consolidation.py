@@ -295,6 +295,158 @@ async def test_chat_response_uses_true_reply_feature_from_graph(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_chat_response_tracks_deliverable_assistant_row(monkeypatch):
+    """Non-empty chat responses should carry the assistant row tracking ID."""
+
+    await _reset_queue_state()
+    save_assistant_message = AsyncMock()
+    monkeypatch.setattr(
+        service_module,
+        "_save_assistant_message",
+        save_assistant_message,
+    )
+    monkeypatch.setattr(
+        service_module,
+        "_run_conversation_progress_record_background",
+        AsyncMock(),
+    )
+    monkeypatch.setattr(
+        service_module,
+        "_run_consolidation_background",
+        AsyncMock(),
+    )
+    _patch_chat_dependencies(monkeypatch, _FakeGraph(_graph_result()))
+
+    response = await service_module.chat(
+        _chat_request(),
+        BackgroundTasks(),
+    )
+
+    assert response.messages == ["ok"]
+    assert response.delivery_tracking_id
+    save_assistant_message.assert_awaited_once()
+    saved_result = save_assistant_message.await_args.args[0]
+    assert saved_result["delivery_tracking_id"] == response.delivery_tracking_id
+    await _reset_queue_state()
+
+
+@pytest.mark.asyncio
+async def test_chat_response_omits_tracking_id_when_no_message(monkeypatch):
+    """Empty chat responses should not expose delivery tracking IDs."""
+
+    await _reset_queue_state()
+    graph_result = _graph_result()
+    graph_result["final_dialog"] = []
+    graph_result["consolidation_state"] = None
+    _patch_chat_dependencies(monkeypatch, _FakeGraph(graph_result))
+
+    response = await service_module.chat(
+        _chat_request(),
+        BackgroundTasks(),
+    )
+
+    assert response.messages == []
+    assert response.delivery_tracking_id == ""
+    await _reset_queue_state()
+
+
+@pytest.mark.asyncio
+async def test_delivery_receipt_endpoint_returns_updated_and_not_found(monkeypatch):
+    """Delivery receipt endpoint should expose idempotent update status."""
+    apply_receipt = AsyncMock(side_effect=[True, False])
+    monkeypatch.setattr(
+        service_module,
+        "apply_assistant_delivery_receipt",
+        apply_receipt,
+    )
+
+    updated = await service_module.delivery_receipt(
+        service_module.DeliveryReceiptRequest(
+            platform="qq",
+            platform_channel_id="chan-1",
+            delivery_tracking_id="delivery-1",
+            platform_message_id="platform-123",
+            delivered_at="2026-05-07T11:00:00+00:00",
+            adapter="napcat",
+        )
+    )
+    missed = await service_module.delivery_receipt(
+        service_module.DeliveryReceiptRequest(
+            platform="qq",
+            platform_channel_id="chan-1",
+            delivery_tracking_id="delivery-2",
+            platform_message_id="platform-456",
+        )
+    )
+
+    assert updated.status == "updated"
+    assert updated.updated is True
+    assert missed.status == "not_found"
+    assert missed.updated is False
+    assert apply_receipt.await_count == 2
+
+
+@pytest.mark.asyncio
+async def test_hydrate_reply_context_fills_missing_metadata_from_delivered_row(
+    monkeypatch,
+) -> None:
+    """Brain-side fallback should hydrate sparse native reply metadata."""
+    lookup = AsyncMock(return_value={
+        "platform_user_id": "bot-1",
+        "display_name": "Kazusa",
+        "body_text": "previous assistant answer",
+    })
+    monkeypatch.setattr(
+        service_module,
+        "get_conversation_by_platform_message_id",
+        lookup,
+    )
+    request = _chat_request()
+    request.message_envelope.reply = service_module.ReplyTargetIn(
+        platform_message_id="platform-123",
+    )
+
+    reply_context = await service_module._hydrate_reply_context(request)
+
+    assert reply_context["reply_to_message_id"] == "platform-123"
+    assert reply_context["reply_to_platform_user_id"] == "bot-1"
+    assert reply_context["reply_to_display_name"] == "Kazusa"
+    assert reply_context["reply_excerpt"] == "previous assistant answer"
+    lookup.assert_awaited_once_with(
+        platform="qq",
+        platform_channel_id="chan-1",
+        platform_message_id="platform-123",
+    )
+
+
+@pytest.mark.asyncio
+async def test_hydrate_reply_context_keeps_adapter_supplied_metadata(
+    monkeypatch,
+) -> None:
+    """Adapter-provided reply fields should stay authoritative."""
+    lookup = AsyncMock()
+    monkeypatch.setattr(
+        service_module,
+        "get_conversation_by_platform_message_id",
+        lookup,
+    )
+    request = _chat_request()
+    request.message_envelope.reply = service_module.ReplyTargetIn(
+        platform_message_id="platform-123",
+        platform_user_id="adapter-user",
+        display_name="Adapter Name",
+        excerpt="adapter excerpt",
+    )
+
+    reply_context = await service_module._hydrate_reply_context(request)
+
+    assert reply_context["reply_to_platform_user_id"] == "adapter-user"
+    assert reply_context["reply_to_display_name"] == "Adapter Name"
+    assert reply_context["reply_excerpt"] == "adapter excerpt"
+    lookup.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_next_chat_waits_until_background_consolidation_finishes(monkeypatch):
     """The next chat request must not enter the graph while consolidation runs."""
 

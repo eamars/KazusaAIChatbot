@@ -92,6 +92,10 @@ async def test_stage_1_research_calls_rag2_and_projects_payload(monkeypatch) -> 
     assert captured["character_name"] == "Kazusa"
     assert captured["context"]["channel_type"] == "group"
     assert "message_envelope" not in captured["context"]
+    assert captured["context"]["character_profile"] == {
+        "global_user_id": "character-1",
+        "name": "Kazusa",
+    }
     assert captured["context"]["prompt_message_context"]["body_text"] == "clean body"
     assert captured["context"]["chat_history_recent"] == []
     assert captured["context"]["conversation_progress"]["current_thread"] == "Pickup plan is active."

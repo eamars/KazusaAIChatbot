@@ -409,6 +409,82 @@ async def save_conversation(doc: ConversationMessageDoc) -> None:
         logger.debug(f'Cache2 invalidation source=conversation_history platform={platform} channel={platform_channel_id} global_user={global_user_id} evicted={evicted_count}')
 
 
+async def apply_assistant_delivery_receipt(
+    *,
+    platform: str,
+    platform_channel_id: str,
+    delivery_tracking_id: str,
+    platform_message_id: str,
+    delivered_at: str,
+    adapter: str,
+) -> bool:
+    """Record delivered platform metadata for one assistant conversation row.
+
+    Args:
+        platform: Runtime platform that delivered the assistant row.
+        platform_channel_id: Channel/group/DM id for the assistant row.
+        delivery_tracking_id: Brain-generated local row tracking id.
+        platform_message_id: Message id returned by the platform adapter.
+        delivered_at: ISO timestamp for delivery receipt creation.
+        adapter: Adapter name reporting the receipt.
+
+    Returns:
+        True when a matching assistant row was found, otherwise false.
+    """
+
+    db = await get_db()
+    query = {
+        "platform": platform,
+        "role": "assistant",
+        "delivery_tracking_id": delivery_tracking_id,
+    }
+    if platform_channel_id:
+        query["platform_channel_id"] = platform_channel_id
+
+    update = {
+        "$set": {
+            "platform_message_id": platform_message_id,
+            "delivery_status": "delivered",
+            "delivered_at": delivered_at,
+            "delivery_adapter": adapter,
+        }
+    }
+    result = await db.conversation_history.update_one(query, update)
+    return_value = bool(result.matched_count)
+    return return_value
+
+
+async def get_conversation_by_platform_message_id(
+    *,
+    platform: str,
+    platform_channel_id: str,
+    platform_message_id: str,
+) -> ConversationMessageDoc | None:
+    """Fetch one conversation row by exact platform message identity.
+
+    Args:
+        platform: Runtime platform of the reply target.
+        platform_channel_id: Channel/group/DM id of the reply target.
+        platform_message_id: Platform-native message id of the reply target.
+
+    Returns:
+        Conversation row when found, otherwise ``None``.
+    """
+
+    if not platform_message_id:
+        return None
+
+    db = await get_db()
+    query = {
+        "platform": platform,
+        "platform_channel_id": platform_channel_id,
+        "platform_message_id": platform_message_id,
+    }
+    row = await db.conversation_history.find_one(query)
+    return_value = row
+    return return_value
+
+
 async def update_conversation_attachment_descriptions(
     *,
     platform: str,

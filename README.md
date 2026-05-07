@@ -177,6 +177,7 @@ MongoDB + model APIs + platform adapters
 
 For deeper technical introductions:
 
+- [Brain Service](src/kazusa_ai_chatbot/brain_service/README.md)
 - [Conversation Progress](src/kazusa_ai_chatbot/conversation_progress/README.md)
 - [RAG 2](src/kazusa_ai_chatbot/rag/README.md)
 - [Reflection Cycle](src/kazusa_ai_chatbot/reflection_cycle/README.md)

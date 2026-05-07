@@ -6,8 +6,12 @@ import json
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock
 
+import httpx
 import pytest
 
+import adapters.delivery_receipts as delivery_receipts_module
+import adapters.discord_adapter as discord_module
+import adapters.napcat_qq_adapter as napcat_module
 from adapters.discord_adapter import DiscordAdapter
 from adapters.napcat_qq_adapter import NapCatWSAdapter
 from kazusa_ai_chatbot.dispatcher import AdapterRegistry, RemoteHttpAdapter
@@ -27,6 +31,21 @@ class _DummyResponse:
         """Return the stored JSON payload."""
 
         return self._payload
+
+
+class _RaisingResponse:
+    """HTTP response double that raises when status is checked."""
+
+    def raise_for_status(self) -> None:
+        """Raise an HTTP status error."""
+
+        request = httpx.Request("POST", "http://127.0.0.1:8000/delivery_receipt")
+        response = httpx.Response(500, request=request)
+        raise httpx.HTTPStatusError(
+            "server error",
+            request=request,
+            response=response,
+        )
 
 
 class _FakeAsyncClient:
@@ -56,6 +75,76 @@ class _FakeAsyncClient:
             "message_id": "outbound-1",
             "sent_at": datetime(2026, 4, 25, 6, 0, tzinfo=timezone.utc).isoformat(),
         })
+
+
+class _FakeDiscordAuthor:
+    """Minimal Discord author double for adapter event tests."""
+
+    def __init__(self) -> None:
+        self.id = 123456789
+        self.display_name = "User A"
+
+
+class _FakeDiscordSentMessage:
+    """Minimal sent-message double carrying a platform message id."""
+
+    def __init__(self, message_id: str) -> None:
+        self.id = message_id
+
+
+class _FakeDiscordTyping:
+    """Async context manager double for Discord typing indicators."""
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, exc_type, exc, tb):
+        del exc_type, exc, tb
+
+
+class _FakeDiscordChannel:
+    """Minimal Discord channel double for adapter event tests."""
+
+    def __init__(self) -> None:
+        self.id = 12345
+        self.name = "general"
+        self.sent_chunks: list[str] = []
+
+    def typing(self) -> _FakeDiscordTyping:
+        """Return an async context manager for the typing indicator."""
+
+        return_value = _FakeDiscordTyping()
+        return return_value
+
+    async def send(self, content: str) -> _FakeDiscordSentMessage:
+        """Record a channel send and return a sent-message id."""
+
+        self.sent_chunks.append(content)
+        message_id = f"discord-send-{len(self.sent_chunks)}"
+        return_value = _FakeDiscordSentMessage(message_id)
+        return return_value
+
+
+class _FakeDiscordMessage:
+    """Minimal inbound Discord message double for adapter event tests."""
+
+    def __init__(self) -> None:
+        self.id = 999
+        self.author = _FakeDiscordAuthor()
+        self.channel = _FakeDiscordChannel()
+        self.guild = object()
+        self.reference = None
+        self.attachments = []
+        self.content = "hello"
+        self.reply_chunks: list[str] = []
+
+    async def reply(self, content: str) -> _FakeDiscordSentMessage:
+        """Record a reply send and return a sent-message id."""
+
+        self.reply_chunks.append(content)
+        message_id = f"discord-reply-{len(self.reply_chunks)}"
+        return_value = _FakeDiscordSentMessage(message_id)
+        return return_value
 
 
 def test_register_remote_runtime_adapter_registers_proxy_in_service(monkeypatch):
@@ -154,6 +243,31 @@ class _FakeNapCatWebSocket:
             "echo": echo_id,
             "status": "ok",
             "data": self._message_data,
+        })
+
+
+class _FailingSendNapCatWebSocket:
+    """Websocket double whose send_msg API call fails."""
+
+    def __init__(self) -> None:
+        """Create a failing send websocket fake."""
+
+        self.sent_payloads: list[dict] = []
+
+    async def send(self, payload: str) -> None:
+        """Capture the sent websocket frame."""
+
+        self.sent_payloads.append(json.loads(payload))
+
+    async def recv(self) -> str:
+        """Return a failed send_msg response."""
+
+        echo_id = self.sent_payloads[-1]["echo"]
+        return json.dumps({
+            "echo": echo_id,
+            "status": "failed",
+            "retcode": 1200,
+            "message": "send failed",
         })
 
 
@@ -363,6 +477,301 @@ async def test_napcat_handle_event_sends_reply_as_message_segments():
 
 
 @pytest.mark.asyncio
+async def test_napcat_handle_event_posts_delivery_receipt_after_send():
+    """Successful normal chat sends should report platform message ids."""
+
+    adapter = NapCatWSAdapter(
+        ws_url="ws://napcat.local/ws",
+        ws_token="token",
+        brain_url="http://127.0.0.1:8000",
+        brain_response_timeout=30,
+        runtime_host="127.0.0.1",
+        runtime_port=8011,
+        runtime_public_url="http://127.0.0.1:8011",
+        channel_ids=["905393941"],
+        debug_modes={},
+    )
+    adapter.bot_id = "3768713357"
+    adapter.bot_name = "Kazusa"
+    adapter.brain_client.post = AsyncMock(side_effect=[
+        _DummyResponse({
+            "messages": ["hello there"],
+            "use_reply_feature": False,
+            "delivery_tracking_id": "delivery-1",
+        }),
+        _DummyResponse({"status": "updated", "updated": True}),
+    ])
+    ws = _FakeNapCatWebSocket({"message_id": "outbound-1"})
+
+    await adapter.handle_event(
+        {
+            "post_type": "message",
+            "message_type": "group",
+            "message_id": 1602974844,
+            "group_id": 905393941,
+            "user_id": 2787858400,
+            "sender": {"nickname": "User A"},
+            "message": [{"type": "text", "data": {"text": " hi"}}],
+        },
+        ws,
+    )
+
+    receipt_call = adapter.brain_client.post.await_args_list[1]
+    assert receipt_call.args == ("http://127.0.0.1:8000/delivery_receipt",)
+    assert receipt_call.kwargs["json"] == {
+        "platform": "qq",
+        "platform_channel_id": "905393941",
+        "delivery_tracking_id": "delivery-1",
+        "platform_message_id": "outbound-1",
+        "adapter": "napcat",
+    }
+    await adapter.close()
+
+
+@pytest.mark.asyncio
+async def test_napcat_delivery_receipt_retries_once_on_not_found(monkeypatch):
+    """A not-found receipt should retry and stop after an updated response."""
+
+    sleep = AsyncMock()
+    monkeypatch.setattr(delivery_receipts_module.asyncio, "sleep", sleep)
+    adapter = NapCatWSAdapter(
+        ws_url="ws://napcat.local/ws",
+        ws_token="token",
+        brain_url="http://127.0.0.1:8000",
+        brain_response_timeout=30,
+        runtime_host="127.0.0.1",
+        runtime_port=8011,
+        runtime_public_url="http://127.0.0.1:8011",
+        channel_ids=["905393941"],
+        debug_modes={},
+    )
+    adapter.bot_id = "3768713357"
+    adapter.bot_name = "Kazusa"
+    adapter.brain_client.post = AsyncMock(side_effect=[
+        _DummyResponse({
+            "messages": ["hello there"],
+            "use_reply_feature": False,
+            "delivery_tracking_id": "delivery-1",
+        }),
+        _DummyResponse({"status": "not_found", "updated": False}),
+        _DummyResponse({"status": "updated", "updated": True}),
+    ])
+    ws = _FakeNapCatWebSocket({"message_id": "outbound-1"})
+
+    await adapter.handle_event(
+        {
+            "post_type": "message",
+            "message_type": "group",
+            "message_id": 1602974844,
+            "group_id": 905393941,
+            "user_id": 2787858400,
+            "sender": {"nickname": "User A"},
+            "message": [{"type": "text", "data": {"text": " hi"}}],
+        },
+        ws,
+    )
+
+    receipt_calls = [
+        call for call in adapter.brain_client.post.await_args_list
+        if call.args[0].endswith("/delivery_receipt")
+    ]
+    assert len(receipt_calls) == 2
+    sleep.assert_awaited_once_with(0.25)
+    await adapter.close()
+
+
+@pytest.mark.asyncio
+async def test_napcat_delivery_receipt_stops_after_three_not_found(
+    monkeypatch,
+    caplog,
+):
+    """Repeated not-found receipts should stop after bounded retries."""
+
+    sleep = AsyncMock()
+    monkeypatch.setattr(delivery_receipts_module.asyncio, "sleep", sleep)
+    adapter = NapCatWSAdapter(
+        ws_url="ws://napcat.local/ws",
+        ws_token="token",
+        brain_url="http://127.0.0.1:8000",
+        brain_response_timeout=30,
+        runtime_host="127.0.0.1",
+        runtime_port=8011,
+        runtime_public_url="http://127.0.0.1:8011",
+        channel_ids=["905393941"],
+        debug_modes={},
+    )
+    adapter.bot_id = "3768713357"
+    adapter.bot_name = "Kazusa"
+    adapter.brain_client.post = AsyncMock(side_effect=[
+        _DummyResponse({
+            "messages": ["hello there"],
+            "use_reply_feature": False,
+            "delivery_tracking_id": "delivery-1",
+        }),
+        _DummyResponse({"status": "not_found", "updated": False}),
+        _DummyResponse({"status": "not_found", "updated": False}),
+        _DummyResponse({"status": "not_found", "updated": False}),
+    ])
+    ws = _FakeNapCatWebSocket({"message_id": "outbound-1"})
+
+    await adapter.handle_event(
+        {
+            "post_type": "message",
+            "message_type": "group",
+            "message_id": 1602974844,
+            "group_id": 905393941,
+            "user_id": 2787858400,
+            "sender": {"nickname": "User A"},
+            "message": [{"type": "text", "data": {"text": " hi"}}],
+        },
+        ws,
+    )
+
+    receipt_calls = [
+        call for call in adapter.brain_client.post.await_args_list
+        if call.args[0].endswith("/delivery_receipt")
+    ]
+    assert len(receipt_calls) == 3
+    assert [call.args[0] for call in sleep.await_args_list] == [0.25, 0.75]
+    assert "delivery-1" in caplog.text
+    assert "outbound-1" in caplog.text
+    await adapter.close()
+
+
+@pytest.mark.asyncio
+async def test_napcat_delivery_receipt_transport_failure_does_not_retry(
+    caplog,
+):
+    """Transport failures should be warned and not retried."""
+
+    adapter = NapCatWSAdapter(
+        ws_url="ws://napcat.local/ws",
+        ws_token="token",
+        brain_url="http://127.0.0.1:8000",
+        brain_response_timeout=30,
+        runtime_host="127.0.0.1",
+        runtime_port=8011,
+        runtime_public_url="http://127.0.0.1:8011",
+        channel_ids=["905393941"],
+        debug_modes={},
+    )
+    adapter.bot_id = "3768713357"
+    adapter.bot_name = "Kazusa"
+    adapter.brain_client.post = AsyncMock(side_effect=[
+        _DummyResponse({
+            "messages": ["hello there"],
+            "use_reply_feature": False,
+            "delivery_tracking_id": "delivery-1",
+        }),
+        _RaisingResponse(),
+    ])
+    ws = _FakeNapCatWebSocket({"message_id": "outbound-1"})
+
+    await adapter.handle_event(
+        {
+            "post_type": "message",
+            "message_type": "group",
+            "message_id": 1602974844,
+            "group_id": 905393941,
+            "user_id": 2787858400,
+            "sender": {"nickname": "User A"},
+            "message": [{"type": "text", "data": {"text": " hi"}}],
+        },
+        ws,
+    )
+
+    receipt_calls = [
+        call for call in adapter.brain_client.post.await_args_list
+        if call.args[0].endswith("/delivery_receipt")
+    ]
+    assert len(receipt_calls) == 1
+    assert "delivery-1" in caplog.text
+    await adapter.close()
+
+
+@pytest.mark.asyncio
+async def test_napcat_delivery_receipt_skips_empty_tracking_id():
+    """Responses without tracking ids should not post delivery receipts."""
+
+    adapter = NapCatWSAdapter(
+        ws_url="ws://napcat.local/ws",
+        ws_token="token",
+        brain_url="http://127.0.0.1:8000",
+        brain_response_timeout=30,
+        runtime_host="127.0.0.1",
+        runtime_port=8011,
+        runtime_public_url="http://127.0.0.1:8011",
+        channel_ids=["905393941"],
+        debug_modes={},
+    )
+    adapter.bot_id = "3768713357"
+    adapter.bot_name = "Kazusa"
+    adapter.brain_client.post = AsyncMock(return_value=_DummyResponse({
+        "messages": ["hello there"],
+        "use_reply_feature": False,
+        "delivery_tracking_id": "",
+    }))
+    ws = _FakeNapCatWebSocket({"message_id": "outbound-1"})
+
+    await adapter.handle_event(
+        {
+            "post_type": "message",
+            "message_type": "group",
+            "message_id": 1602974844,
+            "group_id": 905393941,
+            "user_id": 2787858400,
+            "sender": {"nickname": "User A"},
+            "message": [{"type": "text", "data": {"text": " hi"}}],
+        },
+        ws,
+    )
+
+    assert adapter.brain_client.post.await_count == 1
+    await adapter.close()
+
+
+@pytest.mark.asyncio
+async def test_napcat_delivery_receipt_skips_when_send_fails():
+    """Failed sends should not post delivery receipts."""
+
+    adapter = NapCatWSAdapter(
+        ws_url="ws://napcat.local/ws",
+        ws_token="token",
+        brain_url="http://127.0.0.1:8000",
+        brain_response_timeout=30,
+        runtime_host="127.0.0.1",
+        runtime_port=8011,
+        runtime_public_url="http://127.0.0.1:8011",
+        channel_ids=["905393941"],
+        debug_modes={},
+    )
+    adapter.bot_id = "3768713357"
+    adapter.bot_name = "Kazusa"
+    adapter.brain_client.post = AsyncMock(return_value=_DummyResponse({
+        "messages": ["hello there"],
+        "use_reply_feature": False,
+        "delivery_tracking_id": "delivery-1",
+    }))
+    ws = _FailingSendNapCatWebSocket()
+
+    await adapter.handle_event(
+        {
+            "post_type": "message",
+            "message_type": "group",
+            "message_id": 1602974844,
+            "group_id": 905393941,
+            "user_id": 2787858400,
+            "sender": {"nickname": "User A"},
+            "message": [{"type": "text", "data": {"text": " hi"}}],
+        },
+        ws,
+    )
+
+    assert adapter.brain_client.post.await_count == 1
+    await adapter.close()
+
+
+@pytest.mark.asyncio
 async def test_napcat_runtime_send_message_uses_reply_segments():
     """Runtime reply sends should use structured OneBot reply segments."""
 
@@ -520,4 +929,116 @@ async def test_discord_heartbeat_posts_runtime_callback():
             "timeout_seconds": 10.0,
         },
     )
+    await adapter.close()
+
+
+@pytest.mark.asyncio
+async def test_discord_handle_message_posts_first_delivery_receipt(
+    monkeypatch,
+):
+    """Discord normal chat sends should report the first platform message id."""
+
+    monkeypatch.setattr(
+        discord_module,
+        "_split_message",
+        lambda text: ["first chunk", "second chunk"],
+    )
+    adapter = DiscordAdapter(
+        brain_url="http://127.0.0.1:8000",
+        runtime_host="127.0.0.1",
+        runtime_port=8012,
+        runtime_public_url="http://127.0.0.1:8012",
+        runtime_shared_secret="secret-token",
+        channel_ids=["12345"],
+        debug_modes={},
+    )
+    adapter._http_client.post = AsyncMock(side_effect=[
+        _DummyResponse({
+            "messages": ["first chunk\nsecond chunk"],
+            "use_reply_feature": True,
+            "delivery_tracking_id": "delivery-1",
+        }),
+        _DummyResponse({"status": "updated", "updated": True}),
+    ])
+    message = _FakeDiscordMessage()
+
+    await adapter.on_message(message)
+
+    receipt_call = adapter._http_client.post.await_args_list[1]
+    assert receipt_call.args == ("http://127.0.0.1:8000/delivery_receipt",)
+    assert receipt_call.kwargs["json"] == {
+        "platform": "discord",
+        "platform_channel_id": "12345",
+        "delivery_tracking_id": "delivery-1",
+        "platform_message_id": "discord-reply-1",
+        "adapter": "discord",
+    }
+    assert message.reply_chunks == ["first chunk"]
+    assert message.channel.sent_chunks == ["second chunk"]
+    await adapter.close()
+
+
+@pytest.mark.asyncio
+async def test_discord_delivery_receipt_transport_failure_does_not_retry(
+    caplog,
+):
+    """Discord receipt transport failures should be warned and not retried."""
+
+    adapter = DiscordAdapter(
+        brain_url="http://127.0.0.1:8000",
+        runtime_host="127.0.0.1",
+        runtime_port=8012,
+        runtime_public_url="http://127.0.0.1:8012",
+        runtime_shared_secret="secret-token",
+        channel_ids=["12345"],
+        debug_modes={},
+    )
+    adapter._http_client.post = AsyncMock(side_effect=[
+        _DummyResponse({
+            "messages": ["hello there"],
+            "use_reply_feature": False,
+            "delivery_tracking_id": "delivery-1",
+        }),
+        _RaisingResponse(),
+    ])
+    message = _FakeDiscordMessage()
+
+    await adapter.on_message(message)
+
+    receipt_calls = [
+        call for call in adapter._http_client.post.await_args_list
+        if call.args[0].endswith("/delivery_receipt")
+    ]
+    assert len(receipt_calls) == 1
+    assert message.channel.sent_chunks == ["hello there"]
+    assert "delivery-1" in caplog.text
+    await adapter.close()
+
+
+@pytest.mark.asyncio
+async def test_discord_delivery_receipt_skips_empty_tracking_id():
+    """Discord responses without tracking ids should not post receipts."""
+
+    adapter = DiscordAdapter(
+        brain_url="http://127.0.0.1:8000",
+        runtime_host="127.0.0.1",
+        runtime_port=8012,
+        runtime_public_url="http://127.0.0.1:8012",
+        runtime_shared_secret="secret-token",
+        channel_ids=["12345"],
+        debug_modes={},
+    )
+    adapter._http_client.post = AsyncMock(return_value=_DummyResponse({
+        "messages": ["hello there"],
+        "use_reply_feature": False,
+    }))
+    message = _FakeDiscordMessage()
+
+    await adapter.on_message(message)
+
+    adapter._http_client.post.assert_awaited_once()
+    chat_call = adapter._http_client.post.await_args
+    assert chat_call.args == ("http://127.0.0.1:8000/chat",)
+    assert chat_call.kwargs["json"]["platform"] == "discord"
+    assert message.channel.sent_chunks == ["hello there"]
     await adapter.close()

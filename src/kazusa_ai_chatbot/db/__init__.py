@@ -67,6 +67,8 @@ from kazusa_ai_chatbot.db.bootstrap import db_bootstrap
 # ── Conversation history ──────────────────────────────────────────
 from kazusa_ai_chatbot.db.conversation import (
     aggregate_conversation_by_user,
+    apply_assistant_delivery_receipt,
+    get_conversation_by_platform_message_id,
     get_conversation_history,
     save_conversation,
     search_conversation_history,
@@ -199,7 +201,8 @@ __all__ = [
     # Bootstrap
     "db_bootstrap",
     # Conversation
-    "aggregate_conversation_by_user", "get_conversation_history", "save_conversation",
+    "aggregate_conversation_by_user", "apply_assistant_delivery_receipt",
+    "get_conversation_by_platform_message_id", "get_conversation_history", "save_conversation",
     "search_conversation_history", "update_conversation_attachment_descriptions",
     "explain_monitored_channel_query",
     "list_recent_character_message_channels",

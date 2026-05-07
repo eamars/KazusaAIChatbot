@@ -84,6 +84,10 @@ class ConversationMessageDoc(TypedDict, total=False):
     broadcast: bool            # True only for assistant-authored channel replies
     attachments: list[AttachmentDoc]  # Images, voice, files
     reply_context: ReplyContextDoc     # Structured reply-to metadata when available
+    delivery_tracking_id: str  # Brain-generated id for adapter delivery receipts
+    delivery_status: str       # "pending" | "delivered"
+    delivered_at: str          # ISO timestamp reported by the adapter
+    delivery_adapter: str      # Adapter that reported the delivery receipt
     timestamp: str             # ISO-8601 UTC timestamp
     embedding: list[float]     # Dense vector (on text content only)
 

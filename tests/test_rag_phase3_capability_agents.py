@@ -1037,6 +1037,89 @@ async def test_conversation_evidence_any_speaker_scope_removes_current_user_filt
 
 
 @pytest.mark.asyncio
+async def test_conversation_evidence_active_character_scope_uses_character_identity() -> None:
+    """Active-character searches should filter worker calls to character rows."""
+    agent = ConversationEvidenceAgent()
+    keyword_worker = _FakeWorker(
+        {
+            "resolved": True,
+            "result": [
+                {
+                    "body_text": "I said the project might slip.",
+                    "display_name": "Kazusa",
+                    "global_user_id": "character-1",
+                }
+            ],
+            "attempts": 1,
+            "cache": {"enabled": False, "hit": False, "reason": "open_range"},
+        }
+    )
+    agent.keyword_agent = keyword_worker
+
+    result = await agent.run(
+        (
+            "Conversation-evidence: retrieve messages containing exact term "
+            "'project' speaker=active_character"
+        ),
+        _base_context(
+            character_profile={
+                "global_user_id": "character-1",
+                "name": "Kazusa",
+            },
+        ),
+    )
+
+    assert result["resolved"] is True
+    assert len(keyword_worker.calls) == 1
+    worker_context = keyword_worker.calls[0]["context"]
+    assert worker_context["global_user_id"] == "character-1"
+    assert worker_context["display_name"] == "Kazusa"
+    assert result["result"]["primary_worker"] == "conversation_keyword_agent"
+
+
+@pytest.mark.asyncio
+async def test_conversation_evidence_active_character_scope_warns_without_identity(
+    caplog,
+) -> None:
+    """Missing active-character identity should be visible but non-fatal."""
+    agent = ConversationEvidenceAgent()
+    keyword_worker = _FakeWorker(
+        {
+            "resolved": True,
+            "result": [
+                {
+                    "body_text": "I said the project might slip.",
+                    "display_name": "Kazusa",
+                    "global_user_id": "character-1",
+                }
+            ],
+            "attempts": 1,
+            "cache": {"enabled": False, "hit": False, "reason": "open_range"},
+        }
+    )
+    agent.keyword_agent = keyword_worker
+
+    result = await agent.run(
+        (
+            "Conversation-evidence: retrieve messages containing exact term "
+            "'project' speaker=active_character"
+        ),
+        _base_context(),
+    )
+
+    assert result["resolved"] is True
+    assert len(keyword_worker.calls) == 1
+    worker_context = keyword_worker.calls[0]["context"]
+    assert "global_user_id" not in worker_context
+    assert "display_name" not in worker_context
+    assert (
+        "conversation_evidence: speaker=active_character requested "
+        "without character_profile"
+    ) in caplog.text
+    assert "platform_channel_id=chan-1" in caplog.text
+
+
+@pytest.mark.asyncio
 async def test_conversation_evidence_count_uses_aggregate() -> None:
     """Count and ranking requests should go to the aggregate worker."""
     agent = ConversationEvidenceAgent()

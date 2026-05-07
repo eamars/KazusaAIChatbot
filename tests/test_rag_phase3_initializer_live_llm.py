@@ -219,6 +219,86 @@ async def test_live_initializer_routes_exact_phrase_to_conversation_evidence(mon
     )
 
 
+async def test_initializer_live_self_words_chinese_claim_recall(monkeypatch) -> None:
+    """Chinese self-word claim checks should route to active-character evidence."""
+
+    await _run_initializer_case(
+        monkeypatch,
+        "self_words_chinese_claim_recall",
+        '你之前是不是说过那个项目要延期？',
+        ["Conversation-evidence:"],
+        required_slot_fragments=["speaker=active_character"],
+        forbidden_prefixes=[
+            "Memory-evidence:",
+            "Recall:",
+            "Person-context:",
+            "Web-evidence:",
+        ],
+        forbidden_slot_fragments=[
+            "speaker=any_speaker",
+            "speaker=current_user",
+        ],
+    )
+
+
+async def test_initializer_live_self_words_chinese_verbatim_quote(monkeypatch) -> None:
+    """Chinese verbatim self-quote requests should target character utterances."""
+
+    await _run_initializer_case(
+        monkeypatch,
+        "self_words_chinese_verbatim_quote",
+        '把你刚才那句原话找出来。',
+        ["Conversation-evidence:"],
+        required_slot_fragments=["speaker=active_character"],
+        forbidden_prefixes=[
+            "Memory-evidence:",
+            "Recall:",
+            "Person-context:",
+            "Web-evidence:",
+        ],
+        forbidden_slot_fragments=[
+            "speaker=any_speaker",
+            "speaker=current_user",
+        ],
+    )
+
+
+async def test_initializer_live_self_words_english_topic_recall(monkeypatch) -> None:
+    """English self-word topic recall should use active-character evidence."""
+
+    await _run_initializer_case(
+        monkeypatch,
+        "self_words_english_topic_recall",
+        "What did you say earlier about the deadline?",
+        ["Conversation-evidence:"],
+        required_slot_fragments=["speaker=active_character"],
+        forbidden_prefixes=[
+            "Memory-evidence:",
+            "Recall:",
+            "Person-context:",
+            "Web-evidence:",
+        ],
+        forbidden_slot_fragments=[
+            "speaker=any_speaker",
+            "speaker=current_user",
+        ],
+    )
+
+
+async def test_initializer_live_user_self_question_does_not_route_active_character(
+    monkeypatch,
+) -> None:
+    """User-self word questions must not be scoped to the active character."""
+
+    await _run_initializer_case(
+        monkeypatch,
+        "user_self_question_not_active_character",
+        '我刚才说什么了？',
+        [],
+        forbidden_slot_fragments=["speaker=active_character"],
+    )
+
+
 async def test_live_initializer_routes_character_local_temperature_to_live_context(monkeypatch) -> None:
     """Character-local current temperature should route to Live-context."""
 

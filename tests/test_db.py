@@ -10,6 +10,7 @@ import pytest
 
 import kazusa_ai_chatbot.db as db_module
 import kazusa_ai_chatbot.db._client as db_client_module
+import kazusa_ai_chatbot.db.bootstrap as db_bootstrap_module
 import kazusa_ai_chatbot.db.character as db_character_module
 import kazusa_ai_chatbot.db.conversation as db_conversation_module
 import kazusa_ai_chatbot.db.memory as db_memory_module
@@ -42,6 +43,67 @@ def _mock_db():
     """Create a mock database object with collection access."""
     db = MagicMock()
     return db
+
+
+class _BootstrapCollection:
+    """Small async collection fake for bootstrap index tests."""
+
+    def __init__(self) -> None:
+        """Create a collection fake that records indexes."""
+
+        self.indexes: list[dict] = []
+        self.find_one = AsyncMock(return_value={"_id": "global"})
+        self.insert_one = AsyncMock()
+
+    async def create_index(self, keys, **kwargs) -> None:
+        """Record one requested index."""
+
+        self.indexes.append({"keys": keys, "kwargs": kwargs})
+
+
+class _BootstrapDb:
+    """Small DB fake containing the collections touched by bootstrap."""
+
+    def __init__(self) -> None:
+        """Create all collections expected by db_bootstrap."""
+
+        collection_names = [
+            "conversation_history",
+            "user_profiles",
+            "character_state",
+            "memory",
+            "user_memory_units",
+            "scheduled_events",
+            "conversation_episode_state",
+            "character_reflection_runs",
+            "interaction_style_images",
+            "rag_cache2_persistent",
+        ]
+        self.collections = {
+            name: _BootstrapCollection()
+            for name in collection_names
+        }
+        for name, collection in self.collections.items():
+            setattr(self, name, collection)
+
+    async def list_collection_names(self) -> list[str]:
+        """Return all expected collections so bootstrap skips creation."""
+
+        return_value = list(self.collections)
+        return return_value
+
+    async def create_collection(self, name: str) -> None:
+        """Create a collection in the fake DB."""
+
+        collection = _BootstrapCollection()
+        self.collections[name] = collection
+        setattr(self, name, collection)
+
+    def __getitem__(self, name: str) -> _BootstrapCollection:
+        """Return a collection by Mongo-style item access."""
+
+        return_value = self.collections[name]
+        return return_value
 
 
 @contextmanager
@@ -321,6 +383,202 @@ async def test_save_conversation_preserves_existing_embedding():
 
     mock_embed.assert_not_called()
     assert doc["embedding"] == [0.5, 0.6]
+
+
+@pytest.mark.asyncio
+async def test_apply_assistant_delivery_receipt_updates_tracking_row() -> None:
+    """Delivery receipts should update one assistant row by local tracking ID."""
+    db = _mock_db()
+    update_result = MagicMock()
+    update_result.matched_count = 1
+    update_result.modified_count = 1
+    db.conversation_history.update_one = AsyncMock(
+        return_value=update_result,
+    )
+
+    with _patched_get_db(db):
+        updated = await db_conversation_module.apply_assistant_delivery_receipt(
+            platform="qq",
+            platform_channel_id="chan-1",
+            delivery_tracking_id="delivery-1",
+            platform_message_id="platform-123",
+            delivered_at="2026-05-07T11:00:00+00:00",
+            adapter="napcat",
+        )
+
+    assert updated is True
+    db.conversation_history.update_one.assert_awaited_once_with(
+        {
+            "platform": "qq",
+            "platform_channel_id": "chan-1",
+            "role": "assistant",
+            "delivery_tracking_id": "delivery-1",
+        },
+        {
+            "$set": {
+                "platform_message_id": "platform-123",
+                "delivery_status": "delivered",
+                "delivered_at": "2026-05-07T11:00:00+00:00",
+                "delivery_adapter": "napcat",
+            }
+        },
+    )
+
+
+@pytest.mark.asyncio
+async def test_apply_assistant_delivery_receipt_allows_empty_channel_scope() -> None:
+    """Empty channel ids should match by platform and tracking id only."""
+    db = _mock_db()
+    update_result = MagicMock()
+    update_result.matched_count = 1
+    update_result.modified_count = 1
+    db.conversation_history.update_one = AsyncMock(
+        return_value=update_result,
+    )
+
+    with _patched_get_db(db):
+        updated = await db_conversation_module.apply_assistant_delivery_receipt(
+            platform="debug",
+            platform_channel_id="",
+            delivery_tracking_id="delivery-1",
+            platform_message_id="platform-123",
+            delivered_at="2026-05-07T11:00:00+00:00",
+            adapter="debug",
+        )
+
+    assert updated is True
+    update_query = db.conversation_history.update_one.await_args.args[0]
+    assert update_query == {
+        "platform": "debug",
+        "role": "assistant",
+        "delivery_tracking_id": "delivery-1",
+    }
+
+
+@pytest.mark.asyncio
+async def test_apply_assistant_delivery_receipt_uses_matched_count() -> None:
+    """Idempotent re-receipts should still count as updated rows."""
+    db = _mock_db()
+    update_result = MagicMock()
+    update_result.matched_count = 1
+    update_result.modified_count = 0
+    db.conversation_history.update_one = AsyncMock(
+        return_value=update_result,
+    )
+
+    with _patched_get_db(db):
+        updated = await db_conversation_module.apply_assistant_delivery_receipt(
+            platform="qq",
+            platform_channel_id="chan-1",
+            delivery_tracking_id="delivery-1",
+            platform_message_id="platform-123",
+            delivered_at="2026-05-07T11:00:00+00:00",
+            adapter="napcat",
+        )
+
+    assert updated is True
+
+
+@pytest.mark.asyncio
+async def test_apply_assistant_delivery_receipt_has_no_embedding_or_cache_side_effects(
+    monkeypatch,
+) -> None:
+    """Receipt metadata updates must not touch embeddings or Cache2."""
+    db = _mock_db()
+    update_result = MagicMock()
+    update_result.matched_count = 0
+    update_result.modified_count = 0
+    db.conversation_history.update_one = AsyncMock(
+        return_value=update_result,
+    )
+    runtime = MagicMock()
+    runtime.invalidate = AsyncMock()
+
+    monkeypatch.setattr(
+        "kazusa_ai_chatbot.rag.cache2_runtime.get_rag_cache2_runtime",
+        MagicMock(return_value=runtime),
+    )
+    with _patched_get_db(db), _patched_embedding(mock=AsyncMock()) as mock_embed:
+        updated = await db_conversation_module.apply_assistant_delivery_receipt(
+            platform="qq",
+            platform_channel_id="chan-1",
+            delivery_tracking_id="delivery-1",
+            platform_message_id="platform-123",
+            delivered_at="2026-05-07T11:00:00+00:00",
+            adapter="napcat",
+        )
+
+    assert updated is False
+    mock_embed.assert_not_awaited()
+    runtime.invalidate.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_get_conversation_by_platform_message_id_uses_exact_scope() -> None:
+    """Reply fallback lookup should use exact platform/channel/message id."""
+    expected = {
+        "platform": "qq",
+        "platform_channel_id": "chan-1",
+        "platform_message_id": "platform-123",
+        "role": "assistant",
+        "body_text": "prior bot text",
+    }
+    db = _mock_db()
+    db.conversation_history.find_one = AsyncMock(return_value=expected)
+
+    with _patched_get_db(db):
+        result = await db_conversation_module.get_conversation_by_platform_message_id(
+            platform="qq",
+            platform_channel_id="chan-1",
+            platform_message_id="platform-123",
+        )
+
+    assert result == expected
+    db.conversation_history.find_one.assert_awaited_once_with({
+        "platform": "qq",
+        "platform_channel_id": "chan-1",
+        "platform_message_id": "platform-123",
+    })
+
+
+@pytest.mark.asyncio
+async def test_db_bootstrap_creates_platform_message_lookup_index(monkeypatch) -> None:
+    """Bootstrap should index exact reply-target platform message lookups."""
+    db = _BootstrapDb()
+    monkeypatch.setattr(db_bootstrap_module, "get_db", AsyncMock(return_value=db))
+    monkeypatch.setattr(db_bootstrap_module, "enable_vector_index", AsyncMock())
+    monkeypatch.setattr(
+        db_bootstrap_module,
+        "ensure_reflection_run_indexes",
+        AsyncMock(),
+    )
+    monkeypatch.setattr(
+        db_bootstrap_module,
+        "ensure_interaction_style_image_indexes",
+        AsyncMock(),
+    )
+    monkeypatch.setattr(
+        db_bootstrap_module,
+        "purge_stale_initializer_entries",
+        AsyncMock(),
+    )
+    monkeypatch.setattr(
+        db_bootstrap_module,
+        "prune_persistent_entries",
+        AsyncMock(),
+    )
+
+    await db_bootstrap_module.db_bootstrap()
+
+    index_specs = db.conversation_history.indexes
+    assert {
+        "keys": [
+            ("platform", 1),
+            ("platform_channel_id", 1),
+            ("platform_message_id", 1),
+        ],
+        "kwargs": {"name": "conv_platform_channel_message_id"},
+    } in index_specs
 
 
 # ── Character state edge cases ─────────────────────────────────────

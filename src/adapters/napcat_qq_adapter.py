@@ -19,6 +19,7 @@ from dotenv import load_dotenv
 from fastapi import FastAPI, Header, HTTPException
 from pydantic import BaseModel
 
+from adapters.delivery_receipts import post_delivery_receipt
 from adapters.envelope_common import (
     addressed_to_from_envelope_parts,
     attachment_refs,
@@ -482,6 +483,27 @@ class NapCatWSAdapter:
             if response.get("echo") == echo_id:
                 return response
 
+    async def _post_delivery_receipt(
+        self,
+        *,
+        channel_id: str,
+        delivery_tracking_id: str,
+        platform_message_id: str,
+    ) -> None:
+        """Best-effort report of a delivered normal chat response."""
+
+        await post_delivery_receipt(
+            http_client=self.brain_client,
+            brain_url=self.brain_url,
+            platform="qq",
+            platform_channel_id=channel_id,
+            delivery_tracking_id=delivery_tracking_id,
+            platform_message_id=platform_message_id,
+            adapter="napcat",
+            logger=logger,
+            log_label="QQ",
+        )
+
     def _apply_replied_message_metadata(self, reply_context: dict[str, str | bool], message_data: dict) -> None:
         """Populate reply target fields from a NapCat/OneBot message document.
 
@@ -746,6 +768,20 @@ class NapCatWSAdapter:
                     f"QQ send_msg returned status={send_status} "
                     f"retcode={retcode} message={log_preview(message)}"
                 )
+                return
+
+            response_data = send_response.get("data") or {}
+            platform_message_id = ""
+            if isinstance(response_data, dict):
+                platform_message_id = str(response_data.get("message_id") or "")
+            delivery_tracking_id = str(
+                brain_data.get("delivery_tracking_id") or ""
+            )
+            await self._post_delivery_receipt(
+                channel_id=channel_id,
+                delivery_tracking_id=delivery_tracking_id,
+                platform_message_id=platform_message_id,
+            )
 
     async def close(self):
         """Close adapter-owned network clients and callback server."""

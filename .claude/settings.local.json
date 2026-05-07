@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "PowerShell(venv\\\\Scripts\\\\python.exe -m py_compile src\\\\kazusa_ai_chatbot\\\\nodes\\\\persona_supervisor2.py src\\\\kazusa_ai_chatbot\\\\nodes\\\\persona_supervisor2_rag_supervisor2.py src\\\\kazusa_ai_chatbot\\\\rag\\\\cache2_policy.py src\\\\kazusa_ai_chatbot\\\\rag\\\\conversation_evidence_agent.py src\\\\kazusa_ai_chatbot\\\\brain_service\\\\contracts.py src\\\\kazusa_ai_chatbot\\\\brain_service\\\\post_turn.py src\\\\kazusa_ai_chatbot\\\\service.py src\\\\kazusa_ai_chatbot\\\\db\\\\conversation.py src\\\\kazusa_ai_chatbot\\\\db\\\\schemas.py src\\\\kazusa_ai_chatbot\\\\db\\\\bootstrap.py src\\\\adapters\\\\napcat_qq_adapter.py src\\\\adapters\\\\discord_adapter.py src\\\\adapters\\\\delivery_receipts.py)",
+      "PowerShell(venv\\\\Scripts\\\\python.exe -m pytest tests\\\\test_db.py tests\\\\test_rag_phase3_capability_agents.py tests\\\\test_rag_initializer_cache2.py tests\\\\test_persona_supervisor2_rag2_integration.py tests\\\\test_runtime_adapter_registration.py tests\\\\test_service_background_consolidation.py tests\\\\test_bot_side_addressing.py -q 2>&1)",
+      "PowerShell(tail -80)"
+    ]
+  }
+}

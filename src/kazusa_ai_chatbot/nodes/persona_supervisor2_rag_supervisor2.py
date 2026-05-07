@@ -271,6 +271,13 @@ speaker=current_user, speaker=active_character, speaker=any_speaker, or
 speaker=person resolved in slot N. Use the slot-N form only for a person
 produced by an earlier slot.
 
+If the user asks about the active character's own prior wording, claims,
+quotes, opinions, or self-authored statements, use Conversation-evidence with
+speaker=active_character. In these self-word requests, "you" or "你" means the
+active character even when the character name is not present. Do not use this
+route for user-self questions such as "我刚才说什么了？" or "What did I say
+earlier?"; those ask about the current user's words.
+
 Do not use conversation evidence for active agreement recall; use Recall.
 Do not use conversation evidence for durable official/world facts; use
 Memory-evidence.
@@ -423,6 +430,11 @@ Query: "我上次发的那个链接里有什么信息"
   → The current user comes from context. Do not create Person-context just to bind it.
   ["Conversation-evidence: retrieve messages containing a URL speaker=current_user",
    "Web-evidence: retrieve public web content for the URL found in slot 1"]
+
+### 8b. Active character self-word retrieval
+Query: "你之前是不是说过那个项目要延期？"
+  → The user asks for the active character's own prior claim. Use active-character conversation evidence.
+  ["Conversation-evidence: retrieve prior active-character claim about the project being delayed speaker=active_character"]
 
 ### 9. Two named people → compare profiles
 Query: "<named user A>和<named user B>这两个人，你对他们各有什么印象"

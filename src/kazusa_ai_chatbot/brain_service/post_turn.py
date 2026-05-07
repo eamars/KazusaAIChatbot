@@ -59,7 +59,7 @@ async def save_assistant_message(
                 platform_bot_id=platform_bot_id,
                 character_name=character_name,
             )
-            await save_conversation_func({
+            assistant_doc = {
                 "platform": platform,
                 "platform_channel_id": platform_channel_id,
                 "channel_type": result["channel_type"],
@@ -75,7 +75,14 @@ async def save_assistant_message(
                 "broadcast": target_broadcast,
                 "attachments": [],
                 "timestamp": now_func().isoformat(),
-            })
+            }
+            delivery_tracking_id = str(
+                result.get("delivery_tracking_id") or ""
+            ).strip()
+            if delivery_tracking_id:
+                assistant_doc["delivery_tracking_id"] = delivery_tracking_id
+                assistant_doc["delivery_status"] = "pending"
+            await save_conversation_func(assistant_doc)
         except Exception as exc:
             logger.exception(f"Failed to save assistant message: {exc}")
 
@@ -187,4 +194,3 @@ async def run_conversation_progress_record_background(
         f'continuity={result["continuity"]} status={result["status"]} '
         f'cache_updated={result["cache_updated"]}'
     )
-

@@ -26,6 +26,7 @@ from dotenv import load_dotenv
 from fastapi import FastAPI, Header, HTTPException
 from pydantic import BaseModel
 
+from adapters.delivery_receipts import post_delivery_receipt
 from adapters.envelope_common import (
     addressed_to_from_envelope_parts,
     attachment_refs,
@@ -350,6 +351,27 @@ class DiscordAdapter(discord.Client):
             except httpx.HTTPError as exc:
                 logger.warning(f"Discord runtime heartbeat failed: {exc}")
 
+    async def _post_delivery_receipt(
+        self,
+        *,
+        channel_id: str,
+        delivery_tracking_id: str,
+        platform_message_id: str,
+    ) -> None:
+        """Best-effort report of a delivered normal chat response."""
+
+        await post_delivery_receipt(
+            http_client=self._http_client,
+            brain_url=self.brain_url,
+            platform="discord",
+            platform_channel_id=channel_id,
+            delivery_tracking_id=delivery_tracking_id,
+            platform_message_id=platform_message_id,
+            adapter="discord",
+            logger=logger,
+            log_label="Discord",
+        )
+
     async def on_message(self, message: discord.Message):
         """Normalize one Discord message event and forward it to the brain.
 
@@ -478,13 +500,23 @@ class DiscordAdapter(discord.Client):
 
         use_reply = data.get("use_reply_feature", False)
         combined = "\n".join(messages)
+        first_sent_message_id = ""
 
         for chunk in _split_message(combined):
             if use_reply:
-                await message.reply(chunk)
+                sent_message = await message.reply(chunk)
                 use_reply = False
             else:
-                await message.channel.send(chunk)
+                sent_message = await message.channel.send(chunk)
+            if not first_sent_message_id:
+                first_sent_message_id = str(sent_message.id)
+
+        delivery_tracking_id = str(data.get("delivery_tracking_id") or "")
+        await self._post_delivery_receipt(
+            channel_id=channel_id_str,
+            delivery_tracking_id=delivery_tracking_id,
+            platform_message_id=first_sent_message_id,
+        )
 
         # Handle multimedia attachments from the response
         for att in data.get("attachments", []):

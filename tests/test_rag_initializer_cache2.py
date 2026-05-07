@@ -244,7 +244,7 @@ def test_initializer_prompt_declares_recall_route() -> None:
 def test_initializer_prompt_version_bumped_for_capability_cutover() -> None:
     """Capability-layer prompt changes must invalidate initializer strategies."""
 
-    assert cache2_policy.INITIALIZER_PROMPT_VERSION == "initializer_prompt:v16"
+    assert cache2_policy.INITIALIZER_PROMPT_VERSION == "initializer_prompt:v17"
 
 
 def test_initializer_prompt_uses_conversation_speaker_scope_contract() -> None:
@@ -269,6 +269,96 @@ def test_initializer_prompt_uses_conversation_speaker_scope_contract() -> None:
 
     assert missing_fragments == []
     assert "from the user resolved in slot N" not in rendered_prompt
+
+
+def test_initializer_prompt_documents_self_word_active_character_route() -> None:
+    """Self-word requests should be a documented active-character route."""
+    rendered_prompt = supervisor2_module._INITIALIZER_PROMPT.format(
+        character_name="<active character>",
+    )
+    required_fragments = [
+        "active character's own prior wording",
+        "speaker=active_character",
+        "我刚才说什么了？",
+        "Conversation-evidence: retrieve prior active-character claim "
+        "about the project being delayed speaker=active_character",
+    ]
+    missing_fragments = [
+        fragment
+        for fragment in required_fragments
+        if fragment not in rendered_prompt
+    ]
+
+    assert missing_fragments == []
+
+
+def test_self_word_corpus_assertion_logic_is_well_formed() -> None:
+    """Hardcoded corpus fixtures should exercise the self-word assertions."""
+    captured_outputs = {
+        "你之前是不是说过那个项目要延期？": [
+            (
+                "Conversation-evidence: retrieve prior active-character claim "
+                "about the project being delayed speaker=active_character"
+            )
+        ],
+        "你刚才怎么说的？": [
+            (
+                "Conversation-evidence: retrieve active-character most "
+                "recent prior utterance speaker=active_character"
+            )
+        ],
+        "把你刚才那句原话找出来。": [
+            (
+                "Conversation-evidence: retrieve active-character verbatim "
+                "prior utterance speaker=active_character"
+            )
+        ],
+        "What did you say earlier about the deadline?": [
+            (
+                "Conversation-evidence: retrieve prior active-character "
+                "statement about the deadline speaker=active_character"
+            )
+        ],
+        "You said X before, didn't you?": [
+            (
+                "Conversation-evidence: retrieve prior active-character "
+                "claim about X speaker=active_character"
+            )
+        ],
+        "我刚才说什么了？": [
+            (
+                "Conversation-evidence: retrieve current user's most recent "
+                "prior utterance speaker=current_user"
+            )
+        ],
+        "我们之前讨论过这个吗？": [
+            (
+                "Conversation-evidence: retrieve prior discussion about "
+                "this topic speaker=any_speaker"
+            )
+        ],
+    }
+    positive_queries = {
+        "你之前是不是说过那个项目要延期？",
+        "你刚才怎么说的？",
+        "把你刚才那句原话找出来。",
+        "What did you say earlier about the deadline?",
+        "You said X before, didn't you?",
+    }
+
+    for query, slots in captured_outputs.items():
+        conversation_slots = [
+            slot for slot in slots if slot.startswith("Conversation-evidence:")
+        ]
+        active_character_slots = [
+            slot for slot in conversation_slots if "speaker=active_character" in slot
+        ]
+        if query in positive_queries:
+            assert active_character_slots
+            assert not any("speaker=any_speaker" in slot for slot in conversation_slots)
+            assert not any("speaker=current_user" in slot for slot in conversation_slots)
+        else:
+            assert active_character_slots == []
 
 
 def test_initializer_pattern_gallery_limits_examples_per_section() -> None:
@@ -699,7 +789,7 @@ async def test_rag_initializer_payload_projects_runtime_context(monkeypatch) -> 
     )
 
 
-def test_initializer_prompt_version_bumps_to_v16_for_capability_contract() -> None:
+def test_initializer_prompt_version_bumps_to_v17_for_capability_contract() -> None:
     """Prompt version should reflect the current initializer contract."""
 
-    assert supervisor2_module.INITIALIZER_PROMPT_VERSION == "initializer_prompt:v16"
+    assert supervisor2_module.INITIALIZER_PROMPT_VERSION == "initializer_prompt:v17"

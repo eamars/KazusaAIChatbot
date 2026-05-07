@@ -87,3 +87,36 @@ async def test_save_assistant_message_honors_explicit_broadcast(monkeypatch) -> 
 
     assert saved_docs[0]["addressed_to_global_user_ids"] == []
     assert saved_docs[0]["broadcast"] is True
+
+
+@pytest.mark.asyncio
+async def test_save_assistant_message_persists_delivery_tracking(monkeypatch) -> None:
+    """Assistant rows should carry pending delivery metadata when supplied."""
+
+    saved_docs: list[dict] = []
+
+    async def _save_conversation(doc: dict) -> None:
+        saved_docs.append(doc)
+
+    monkeypatch.setattr(
+        service_module,
+        "_ensure_character_global_identity",
+        AsyncMock(return_value="character-global-id"),
+    )
+    monkeypatch.setattr(service_module, "save_conversation", _save_conversation)
+
+    await service_module._save_assistant_message({
+        "platform": "qq",
+        "platform_channel_id": "group-1",
+        "channel_type": "group",
+        "platform_bot_id": "bot-1",
+        "character_name": "Character",
+        "global_user_id": "user-a",
+        "final_dialog": ["tracked reply"],
+        "target_addressed_user_ids": ["user-a"],
+        "target_broadcast": False,
+        "delivery_tracking_id": "delivery-1",
+    })
+
+    assert saved_docs[0]["delivery_tracking_id"] == "delivery-1"
+    assert saved_docs[0]["delivery_status"] == "pending"

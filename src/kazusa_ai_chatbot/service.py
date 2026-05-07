@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from uuid import uuid4
 from collections.abc import Mapping
 from contextlib import asynccontextmanager, suppress
 from datetime import datetime, timezone
@@ -34,7 +35,9 @@ from kazusa_ai_chatbot.db import (
     close_db,
     db_bootstrap,
     ensure_character_identity,
+    apply_assistant_delivery_receipt,
     get_character_profile,
+    get_conversation_by_platform_message_id,
     get_conversation_history,
     get_user_profile,
     load_initializer_entries,
@@ -78,6 +81,8 @@ from kazusa_ai_chatbot.brain_service.contracts import (
     ChatRequest,
     ChatResponse,
     DebugModesIn,
+    DeliveryReceiptRequest,
+    DeliveryReceiptResponse,
     EventRequest,
     HealthResponse,
     MentionIn,
@@ -183,16 +188,48 @@ def _compact_reply_context(reply_context: ReplyContext) -> ReplyContext:
 
 
 async def _hydrate_reply_context(req: ChatRequest) -> ReplyContext:
-    """Build service-facing reply context from the typed envelope only.
+    """Build service-facing reply context from typed adapter metadata.
 
     Args:
         req: Incoming chat request from an adapter.
 
     Returns:
-        Compact reply context projected from ``message_envelope.reply``.
+        Compact reply context projected from ``message_envelope.reply``, with
+        missing reply target metadata filled from delivered conversation rows
+        when an exact platform message ID match exists.
     """
 
-    return_value = await brain_intake.hydrate_reply_context(req)
+    reply_context = await brain_intake.hydrate_reply_context(req)
+    reply_to_message_id = str(reply_context.get("reply_to_message_id") or "")
+    has_complete_metadata = all(
+        reply_context.get(key)
+        for key in (
+            "reply_to_platform_user_id",
+            "reply_to_display_name",
+            "reply_excerpt",
+        )
+    )
+    if reply_to_message_id and not has_complete_metadata:
+        row = await get_conversation_by_platform_message_id(
+            platform=req.platform,
+            platform_channel_id=req.platform_channel_id,
+            platform_message_id=reply_to_message_id,
+        )
+        if row is not None:
+            if not reply_context.get("reply_to_platform_user_id"):
+                platform_user_id = str(row.get("platform_user_id") or "")
+                if platform_user_id:
+                    reply_context["reply_to_platform_user_id"] = platform_user_id
+            if not reply_context.get("reply_to_display_name"):
+                display_name = str(row.get("display_name") or "")
+                if display_name:
+                    reply_context["reply_to_display_name"] = display_name
+            if not reply_context.get("reply_excerpt"):
+                body_text = str(row.get("body_text") or "")
+                if body_text:
+                    reply_context["reply_excerpt"] = body_text
+
+    return_value = _compact_reply_context(reply_context)
     return return_value
 
 
@@ -617,12 +654,18 @@ async def _process_queued_chat_item(item: QueuedChatItem) -> None:
             logger.info(f'think_only active — suppressing {len(final_dialog)} dialog message(s) from user output')
             response_dialog = []
 
+        delivery_tracking_id = ""
+        if response_dialog and should_save_assistant_message:
+            delivery_tracking_id = uuid4().hex
+            result["delivery_tracking_id"] = delivery_tracking_id
+
         response = ChatResponse(
             messages=response_dialog,
             content_type="text",
             attachments=[],
             use_reply_feature=use_reply_feature,
             scheduled_followups=0,
+            delivery_tracking_id=delivery_tracking_id,
         )
         _chat_input_queue.complete(item, response)
 
@@ -950,6 +993,33 @@ async def chat(req: ChatRequest, background_tasks: BackgroundTasks):
 
     _ = background_tasks
     response = await _enqueue_chat_request(req)
+    return response
+
+
+@app.post("/delivery_receipt", response_model=DeliveryReceiptResponse)
+async def delivery_receipt(
+    req: DeliveryReceiptRequest,
+) -> DeliveryReceiptResponse:
+    """Record the platform message id for a delivered assistant response.
+
+    Args:
+        req: Adapter-provided delivery metadata for one chat response.
+
+    Returns:
+        Update status for the matching assistant conversation row.
+    """
+
+    delivered_at = req.delivered_at or datetime.now(timezone.utc).isoformat()
+    updated = await apply_assistant_delivery_receipt(
+        platform=req.platform,
+        platform_channel_id=req.platform_channel_id,
+        delivery_tracking_id=req.delivery_tracking_id,
+        platform_message_id=req.platform_message_id,
+        delivered_at=delivered_at,
+        adapter=req.adapter,
+    )
+    status = "updated" if updated else "not_found"
+    response = DeliveryReceiptResponse(status=status, updated=updated)
     return response
 
 

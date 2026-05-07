@@ -87,6 +87,21 @@ class ChatResponse(BaseModel):
     attachments: list[AttachmentOut] = Field(default_factory=list)
     use_reply_feature: bool = False
     scheduled_followups: int = 0
+    delivery_tracking_id: str = ""
+
+
+class DeliveryReceiptRequest(BaseModel):
+    platform: str = Field(min_length=1)
+    platform_channel_id: str = ""
+    delivery_tracking_id: str = Field(min_length=1)
+    platform_message_id: str = Field(min_length=1)
+    delivered_at: str = ""
+    adapter: str = ""
+
+
+class DeliveryReceiptResponse(BaseModel):
+    status: str
+    updated: bool = False
 
 
 class EventRequest(BaseModel):

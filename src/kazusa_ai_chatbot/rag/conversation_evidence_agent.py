@@ -418,13 +418,29 @@ def _worker_context(
         worker_context.pop("global_user_id", None)
         worker_context.pop("display_name", None)
         character_profile = context.get("character_profile")
+        resolved_global_user_id = ""
+        resolved_display_name = ""
         if isinstance(character_profile, dict):
-            global_user_id = text_or_empty(character_profile.get("global_user_id"))
-            display_name = text_or_empty(character_profile.get("name"))
-            if global_user_id:
-                worker_context["global_user_id"] = global_user_id
-            if display_name:
-                worker_context["display_name"] = display_name
+            resolved_global_user_id = text_or_empty(
+                character_profile.get("global_user_id")
+            )
+            resolved_display_name = text_or_empty(character_profile.get("name"))
+            if resolved_global_user_id:
+                worker_context["global_user_id"] = resolved_global_user_id
+            if resolved_display_name:
+                worker_context["display_name"] = resolved_display_name
+        if not resolved_global_user_id or not resolved_display_name:
+            platform_channel_id = text_or_empty(context.get("platform_channel_id"))
+            logger.warning(
+                "conversation_evidence: speaker=active_character requested "
+                "without character_profile "
+                f"platform_channel_id={platform_channel_id}"
+            )
+        else:
+            logger.debug(
+                "conversation_evidence active-character scope resolved: "
+                f"global_user_id={resolved_global_user_id}"
+            )
 
     if person_ref is not None:
         global_user_id = text_or_empty(person_ref.get("global_user_id"))
