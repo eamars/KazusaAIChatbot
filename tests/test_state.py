@@ -4,7 +4,14 @@ from __future__ import annotations
 
 import typing
 
-from kazusa_ai_chatbot.state import IMProcessState, DebugModes, keep_false
+from langgraph.graph import END, START, StateGraph
+
+from kazusa_ai_chatbot.state import (
+    IMProcessState,
+    DebugModes,
+    keep_false,
+    keep_true,
+)
 
 
 class TestIMProcessState:
@@ -108,6 +115,72 @@ class TestDebugModes:
 
 class TestMonotonicLatches:
     def test_keep_false_preserves_false(self):
-        assert keep_false(True, False) is False
         assert keep_false(False, True) is False
+        assert keep_false(True, False) is False
+        assert keep_false(None, False) is False
         assert keep_false(None, True) is True
+        assert keep_false(True, None) is True
+
+    def test_keep_true_preserves_true(self):
+        assert keep_true(True, False) is True
+        assert keep_true(False, True) is True
+        assert keep_true(None, True) is True
+        assert keep_true(None, False) is False
+        assert keep_true(False, None) is False
+
+    def test_keep_false_allows_true_relevance_update(self):
+        class _ResponseLatchState(typing.TypedDict):
+            should_respond: typing.Annotated[bool | None, keep_false]
+
+        def _request_cognition(_state):
+            return_value = {"should_respond": True}
+            return return_value
+
+        graph = StateGraph(_ResponseLatchState)
+        graph.add_node("request_cognition", _request_cognition)
+        graph.add_edge(START, "request_cognition")
+        graph.add_edge("request_cognition", END)
+
+        result = graph.compile().invoke({"should_respond": True})
+
+        assert result["should_respond"] is True
+
+    def test_keep_false_works_with_langgraph_optional_bool_default(self):
+        class _ResponseLatchState(typing.TypedDict):
+            should_respond: typing.Annotated[bool | None, keep_false]
+
+        def _stop_cognition(_state):
+            return_value = {"should_respond": False}
+            return return_value
+
+        def _request_cognition(_state):
+            return_value = {"should_respond": True}
+            return return_value
+
+        graph = StateGraph(_ResponseLatchState)
+        graph.add_node("stop_cognition", _stop_cognition)
+        graph.add_node("request_cognition", _request_cognition)
+        graph.add_edge(START, "stop_cognition")
+        graph.add_edge("stop_cognition", "request_cognition")
+        graph.add_edge("request_cognition", END)
+
+        result = graph.compile().invoke({"should_respond": True})
+
+        assert result["should_respond"] is False
+
+    def test_keep_true_works_with_langgraph_bool_default(self):
+        class _ReplyLatchState(typing.TypedDict):
+            use_reply_feature: typing.Annotated[bool, keep_true]
+
+        def _request_reply(_state):
+            return_value = {"use_reply_feature": True}
+            return return_value
+
+        graph = StateGraph(_ReplyLatchState)
+        graph.add_node("request_reply", _request_reply)
+        graph.add_edge(START, "request_reply")
+        graph.add_edge("request_reply", END)
+
+        result = graph.compile().invoke({"use_reply_feature": False})
+
+        assert result["use_reply_feature"] is True

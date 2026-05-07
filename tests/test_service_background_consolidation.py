@@ -257,6 +257,44 @@ async def test_chat_queues_background_consolidation_for_mapping_state(monkeypatc
 
 
 @pytest.mark.asyncio
+async def test_chat_response_uses_true_reply_feature_from_graph(monkeypatch):
+    """The chat response should quote when any graph stage requests it."""
+
+    await _reset_queue_state()
+    save_assistant_message = AsyncMock()
+    progress_recorder = AsyncMock()
+    consolidation_runner = AsyncMock()
+
+    monkeypatch.setattr(
+        service_module,
+        "_save_assistant_message",
+        save_assistant_message,
+    )
+    monkeypatch.setattr(
+        service_module,
+        "_run_conversation_progress_record_background",
+        progress_recorder,
+    )
+    monkeypatch.setattr(
+        service_module,
+        "_run_consolidation_background",
+        consolidation_runner,
+    )
+    graph_result = _graph_result()
+    graph_result["use_reply_feature"] = True
+    _patch_chat_dependencies(monkeypatch, _FakeGraph(graph_result))
+
+    response = await service_module.chat(
+        _chat_request(),
+        BackgroundTasks(),
+    )
+
+    assert response.messages == ["ok"]
+    assert response.use_reply_feature is True
+    await _reset_queue_state()
+
+
+@pytest.mark.asyncio
 async def test_next_chat_waits_until_background_consolidation_finishes(monkeypatch):
     """The next chat request must not enter the graph while consolidation runs."""
 
@@ -640,7 +678,7 @@ async def test_chat_listen_only_drops_before_graph(monkeypatch):
     )
 
     assert response.messages == []
-    assert response.should_reply is False
+    assert response.use_reply_feature is False
     graph.ainvoke.assert_not_awaited()
     save_conversation.assert_awaited_once()
     await _reset_queue_state()

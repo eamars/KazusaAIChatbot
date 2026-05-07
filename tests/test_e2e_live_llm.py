@@ -746,6 +746,7 @@ async def test_live_chat_structured_third_party_reply_with_explicit_bot_address_
         )
 
     assert response.messages
+    assert response.use_reply_feature is True
 
 
 async def test_live_chat_multimodal_image_response(live_env) -> None:

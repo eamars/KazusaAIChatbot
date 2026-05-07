@@ -30,8 +30,26 @@ class DebugModes(TypedDict, total=False):
     no_remember: bool      # Full pipeline but skip consolidation
 
 
+def keep_true(current: bool | None, update: bool | None) -> bool:
+    """Preserve a true value in monotonic reply-anchor state.
+
+    Args:
+        current: Current graph-state value.
+        update: Incoming graph-node update.
+
+    Returns:
+        True once either side is true; otherwise false.
+    """
+
+    if current is True or update is True:
+        return_value = True
+    else:
+        return_value = False
+    return return_value
+
+
 def keep_false(current: bool | None, update: bool | None) -> bool:
-    """Preserve a false value in monotonic permission-latch state.
+    """Preserve a false value in monotonic cognition-continuation state.
 
     Args:
         current: Current graph-state value.
@@ -43,10 +61,8 @@ def keep_false(current: bool | None, update: bool | None) -> bool:
 
     if current is False or update is False:
         return_value = False
-    elif update is True:
-        return_value = True
     else:
-        return_value = current is not False
+        return_value = True
     return return_value
 
 
@@ -81,14 +97,15 @@ class IMProcessState(TypedDict):
     reply_context: ReplyContext
 
     # Output from Relevance Agent
-    should_respond: bool
+    # Origin contract: service.py seeds this true. LangGraph combines updates
+    # through keep_false so any pipeline stage can stop cognition processing,
+    # and no later true update can restart it.
+    should_respond: Annotated[bool | None, keep_false]
     reason_to_respond: str
-    # Origin contract: service.py seeds this true for normal turns and false
-    # for collapsed multi-message turns. LangGraph combines updates through
-    # keep_false so once any pipeline stage disables platform reply anchoring,
-    # no later stage can re-enable it. ChatResponse.should_reply is derived
-    # from this final latched value and must not add a fallback override.
-    use_reply_feature: Annotated[bool, keep_false]
+    # Origin contract: service.py seeds this false. LangGraph combines updates
+    # through keep_true so any pipeline stage can request platform reply
+    # anchoring, and no later false update can erase that request.
+    use_reply_feature: Annotated[bool, keep_true]
     channel_topic: str
     indirect_speech_context: str  # Only populated for Situation B (user talks about the character to others)
     conversation_episode_state: NotRequired[ConversationEpisodeStateDoc | None]

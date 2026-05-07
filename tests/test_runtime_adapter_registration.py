@@ -213,7 +213,7 @@ async def test_napcat_handle_event_forwards_typed_bot_reply_metadata():
     adapter.bot_name = "杏山千纱"
     adapter.brain_client.post = AsyncMock(return_value=_DummyResponse({
         "messages": [],
-        "should_reply": False,
+        "use_reply_feature": False,
     }))
     ws = _FakeNapCatWebSocket({
         "message_id": 1733223276,
@@ -272,7 +272,7 @@ async def test_napcat_handle_event_sends_clean_body_text_and_typed_envelope():
     adapter.bot_name = "Kazusa"
     adapter.brain_client.post = AsyncMock(return_value=_DummyResponse({
         "messages": [],
-        "should_reply": False,
+        "use_reply_feature": False,
     }))
     ws = _FakeNapCatWebSocket({
         "message_id": 1733223276,
@@ -329,7 +329,7 @@ async def test_napcat_handle_event_sends_reply_as_message_segments():
     adapter.bot_name = "Kazusa"
     adapter.brain_client.post = AsyncMock(return_value=_DummyResponse({
         "messages": ["hello there"],
-        "should_reply": True,
+        "use_reply_feature": True,
     }))
     ws = _FakeNapCatWebSocket({"message_id": "outbound-1"})
 

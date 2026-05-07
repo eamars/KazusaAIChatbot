@@ -499,6 +499,7 @@ async def _process_queued_chat_item(item: QueuedChatItem) -> None:
             "think_only": req.debug_modes.think_only,
             "no_remember": req.debug_modes.no_remember,
         }
+        initial_should_respond = not debug_modes["listen_only"]
         active_flags = [key for key, value in debug_modes.items() if value]
         if active_flags:
             logger.info(f'Debug modes active: {active_flags}')
@@ -514,11 +515,6 @@ async def _process_queued_chat_item(item: QueuedChatItem) -> None:
         character_profile["global_user_id"] = character_global_user_id
 
         logger.debug(f'Chat request: platform={req.platform} channel={req.platform_channel_id or "<dm>"} message={req.platform_message_id or "<none>"} user={req.platform_user_id} global_user={global_user_id} content_type={req.content_type} attachments={len(message_envelope["attachments"])} image_attachments={len(multimedia_input)} history_wide={len(chat_history_wide)} history_recent={len(chat_history_recent)} reply_context={log_preview(reply_context)} debug_modes={active_flags} collapsed={is_collapsed_turn} collapsed_count={len(item.collapsed_items)} content={log_preview(user_input)}')
-
-        # Reply anchoring is a false-preserving graph latch. Normal turns start
-        # enabled; collapsed turns start disabled so no later stage can re-enable
-        # the platform reply feature for multi-message input.
-        initial_use_reply_feature = not is_collapsed_turn
 
         time_context = build_character_time_context(item.timestamp)
         try:
@@ -550,9 +546,9 @@ async def _process_queued_chat_item(item: QueuedChatItem) -> None:
             "chat_history_wide": chat_history_wide,
             "chat_history_recent": chat_history_recent,
             "reply_context": reply_context,
-            "should_respond": False,
+            "should_respond": initial_should_respond,
             "reason_to_respond": "",
-            "use_reply_feature": initial_use_reply_feature,
+            "use_reply_feature": False,
             "channel_topic": "",
             "indirect_speech_context": "",
             "debug_modes": debug_modes,
@@ -584,12 +580,12 @@ async def _process_queued_chat_item(item: QueuedChatItem) -> None:
             return
 
         final_dialog = result["final_dialog"]
-        should_reply = bool(final_dialog) and bool(
+        use_reply_feature = bool(final_dialog) and bool(
             result["use_reply_feature"]
         )
         consolidation_state = result["consolidation_state"]
 
-        logger.debug(f'Chat result: platform={req.platform} channel={req.platform_channel_id or "<dm>"} message={req.platform_message_id or "<none>"} user={req.platform_user_id} should_respond={result["should_respond"]} should_reply={should_reply} final_dialog_count={len(final_dialog)} future_promises={len(result["future_promises"])} final_dialog={log_list_preview(final_dialog)}')
+        logger.debug(f'Chat result: platform={req.platform} channel={req.platform_channel_id or "<dm>"} message={req.platform_message_id or "<none>"} user={req.platform_user_id} should_respond={result["should_respond"]} use_reply_feature={use_reply_feature} final_dialog_count={len(final_dialog)} future_promises={len(result["future_promises"])} final_dialog={log_list_preview(final_dialog)}')
 
         consolidation_state_dict: dict | None = None
         if isinstance(consolidation_state, Mapping):
@@ -625,7 +621,7 @@ async def _process_queued_chat_item(item: QueuedChatItem) -> None:
             messages=response_dialog,
             content_type="text",
             attachments=[],
-            should_reply=should_reply,
+            use_reply_feature=use_reply_feature,
             scheduled_followups=0,
         )
         _chat_input_queue.complete(item, response)

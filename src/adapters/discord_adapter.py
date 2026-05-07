@@ -476,7 +476,7 @@ class DiscordAdapter(discord.Client):
         if not messages:
             return
 
-        use_reply = data.get("should_reply", False)
+        use_reply = data.get("use_reply_feature", False)
         combined = "\n".join(messages)
 
         for chunk in _split_message(combined):

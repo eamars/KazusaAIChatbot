@@ -85,7 +85,7 @@ class ChatResponse(BaseModel):
     messages: list[str] = Field(default_factory=list)
     content_type: str = "text"
     attachments: list[AttachmentOut] = Field(default_factory=list)
-    should_reply: bool = False
+    use_reply_feature: bool = False
     scheduled_followups: int = 0
 
 
@@ -116,6 +116,7 @@ class HealthResponse(BaseModel):
 class RuntimeAdapterRegistrationRequest(BaseModel):
     platform: str
     callback_url: str
+
     shared_secret: str = ""
     timeout_seconds: float = 10.0
 
@@ -124,4 +125,3 @@ class RuntimeAdapterRegistrationResponse(BaseModel):
     status: str
     platform: str
     callback_url: str
-

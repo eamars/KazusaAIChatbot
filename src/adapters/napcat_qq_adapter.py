@@ -700,13 +700,13 @@ class NapCatWSAdapter:
             f"Brain output: messages={log_list_preview(replies)}"
         )
         logger.debug(
-            f'Brain output metadata: should_reply={brain_data.get("should_reply")} '
+            f'Brain output metadata: use_reply_feature={brain_data.get("use_reply_feature")} '
             f"message_count={len(replies)}"
         )
         if replies:
             combined = "\n".join(replies)
             reply_to_msg_id = None
-            if brain_data.get("should_reply"):
+            if brain_data.get("use_reply_feature"):
                 reply_to_msg_id = str(data["message_id"])
             msg_params = {
                 "message_type": "group" if is_group else "private",
