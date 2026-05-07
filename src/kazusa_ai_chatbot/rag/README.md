@@ -4,7 +4,8 @@
 
 RAG 2 turns a user query into bounded factual evidence for persona cognition. It resolves identities, searches conversation history and persistent memory, reads profile-like state, performs narrow factual reductions, and can delegate to web search when external information is needed.
 
-It is not a reply generator, not a persona reasoning layer, not a relationship judge, and not long-term memory consolidation. Its job is to transform data into evidence. Cognition decides what that evidence means for Kazusa's stance, tone, and final response.
+It transforms data into evidence for cognition. Cognition decides what that
+evidence means for Kazusa's stance, tone, and final response.
 
 ## System Boundary
 
@@ -86,8 +87,8 @@ The default loop cap is eight dispatch iterations. This prevents open-ended agen
 
 RAG 2 can perform a bounded refined-query re-entry after an unresolved
 retrieval when that retrieval returned observation material with useful
-direction. This is not a generic autonomous agent loop, and it is not a second
-slot planner:
+direction. The continuation path refines the query and reuses the existing
+initializer/dispatcher/helper flow:
 
 ```text
 unresolved retrieval result
@@ -116,18 +117,15 @@ The continuation refiner returns only:
 }
 ```
 
-`reason` is trace-only and never drives control flow. The refiner must not emit
-slots, prefixes, agent names, tool names, backend parameters, or user-facing
-clarification states. When `should_continue` is true, `refined_query` must be
-self-contained because Cache 2 keys the initializer from its normal query and
-context inputs, not from hidden continuation state.
+`reason` is trace-only. The refiner emits a self-contained natural-language
+query; initializer and dispatcher stages own slots, agent choice, and backend
+parameters. When `should_continue` is true, `refined_query` is self-contained
+because Cache 2 keys the initializer from its normal query and context inputs.
 
 Continuation is capped by `MAX_CONTINUATION_DECISIONS_PER_RAG_RUN` and the
 existing eight-loop supervisor cap. Rejected candidates and continuation
-metadata stay out of public evidence. They may be visible in supervisor/debug
-trace, but they must not appear in `rag_result.memory_evidence`,
-`conversation_evidence`, `external_evidence`, `recall_evidence`,
-profile/image payloads, or finalizer-facing accepted evidence.
+metadata stay in supervisor/debug trace. Public evidence remains limited to
+accepted `rag_result` fields.
 
 ## Design Intention
 
@@ -282,7 +280,7 @@ The reusable worker agents are:
 |---|---|
 | `user_lookup_agent` | Resolves one display name to a user profile identity and `global_user_id`. It is for "who is this named person?" questions, not message-content search. |
 | `user_list_agent` | Enumerates users by display-name predicates or participant metadata, such as names that equal, contain, start with, or end with a literal value. |
-| `user_profile_agent` | Reads a full user or character profile bundle after an identity is already known. It should not be used to discover unknown identities. |
+| `user_profile_agent` | Reads a full user or character profile bundle after an identity is already known. Identity discovery belongs to person-context helpers. |
 | `relationship_agent` | Produces factual rankings from stored relationship/profile state, such as top or bottom relationship-like scores. It returns evidence, not persona judgment. |
 | `conversation_aggregate_agent` | Computes factual aggregates over conversation history, such as message counts, speaker rankings, or who mentioned a literal term most often. |
 | `conversation_filter_agent` | Retrieves conversation rows by structured filters: known user, channel, timestamp range, display name, or requested message count. It is preferred when concrete filters exist. |
@@ -291,7 +289,7 @@ The reusable worker agents are:
 | `persistent_memory_keyword_agent` | Searches durable memories by exact keyword or phrase, useful for tags, event names, and proper nouns. |
 | `persistent_memory_search_agent` | Searches durable memories semantically for impressions, commitments, facts, and other remembered knowledge when exact wording is unknown. |
 | `user_memory_evidence_agent` | Searches `user_memory_units` for the current `global_user_id` only. It uses vector retrieval when available, explicit literal lexical retrieval for exact continuity anchors, and bounded recency fallback. Returned rows keep `source_system`, `scope_type`, `scope_global_user_id`, `authority`, `truth_status`, and `origin`. |
-| `web_search_agent2` | Searches or reads public web content when the requested fact cannot come from local profiles, memories, or conversation history. |
+| `web_search_agent2` | Searches or reads public web content when the requested fact belongs outside local profiles, memories, or conversation history. |
 
 Most agents are evidence retrievers. They should answer "what was found?" rather than "what should Kazusa think about it?" The only ranking-style agents still return factual rankings from stored data or message counts; interpretation remains downstream.
 
@@ -394,19 +392,21 @@ Cognition reads `rag_result`, not raw RAG supervisor state. The intended divisio
 - Cognition answers "what does this mean for Kazusa right now?"
 - Dialog generation answers "how should Kazusa say it?"
 
-RAG evidence should not encode persona stance, emotional interpretation, or user-facing wording. If a retrieved fact is ambiguous, RAG should preserve uncertainty in evidence or summary form rather than resolving it as character intent.
+RAG evidence preserves facts, uncertainty, and source context. Cognition owns
+persona stance, emotional interpretation, and user-facing intent.
 
 ## Integration With Consolidation
 
 The consolidator also reads the projected `rag_result`.
 
-RAG 2 retrieval does not itself write new durable knowledge. Durable writes happen later in the background consolidation path after cognition and dialog have completed. Cache invalidation is tied to those successful durable writes, not to whether a RAG result was used by cognition.
+RAG 2 retrieval produces evidence. Durable writes happen later in the
+background consolidation path after cognition and dialog have completed. Cache
+invalidation is tied to successful durable writes.
 
 `recall_evidence` is operational provenance for agreements, promises, plans, and
-current episode progress. A progress-only recall can guide the current reply but
-does not by itself authorize a durable character fact. The consolidator should
-require user input, durable memory, conversation evidence, or external evidence
-before turning recalled progress into stable knowledge.
+current episode progress. A progress-only recall can guide the current reply.
+Stable knowledge comes from the consolidator using approved durable evidence
+sources.
 
 This keeps ownership clear:
 
@@ -435,25 +435,17 @@ Deterministic code owns mechanics:
 - text clipping and structural budgets,
 - database/tool execution.
 
-Do not move natural-language interpretation into regexes, keyword classifiers, or post-hoc code filters. If a semantic boundary is wrong, fix the relevant prompt, helper-agent contract, or projection policy.
+Natural-language interpretation belongs in prompts, helper-agent contracts, and
+projection policy. Deterministic code owns routing mechanics, budgets, cache
+policy, and structural validation.
 
 ## Operational Notes
 
-RAG 2 replaced the legacy RAG 1 / Cache 1 path. There is no compatibility adapter between the old `research_facts` shape and the current `rag_result` shape.
+RAG 2 replaced the legacy RAG 1 / Cache 1 path. The current downstream payload
+is `rag_result`.
 
-Cache 2 exposes per-agent hit/miss statistics through service health data. These counters are operational telemetry only; they should not affect retrieval or cognition decisions.
-
-The most important behavior checks are:
-
-- progressive supervisor integration,
-- initializer Cache 2 reuse, startup hydration, and persistent hit counting,
-- `rag_result` projection,
-- Cache 2 invalidation from conversation saves,
-- Cache 2 invalidation from consolidator writes,
-- helper-agent focused tests,
-- live RAG supervisor smoke tests.
-
-Live LLM tests are evidence-producing checks. Inspect their logs and returned evidence, not only their pass/fail status.
+Cache 2 exposes per-agent hit/miss statistics through service health data.
+These counters are operational telemetry for operators and dashboards.
 
 Production observability follows a split log policy:
 

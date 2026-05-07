@@ -2,7 +2,7 @@
 
 ## Document Control
 
-- ICD id: `ME-ICD-001`
+- ICD id: `MEMEV-ICD-001`
 - Owning package: `kazusa_ai_chatbot.memory_evolution`
 - Interface boundary: evolving shared-memory unit APIs -> DB interface ->
   `memory` collection
@@ -48,19 +48,10 @@ This ICD covers:
 - dependency and import rules,
 - future reflection integration requirements.
 
-This ICD does not cover:
-
-- reflection prompt design,
-- lore candidate extraction,
-- user-memory consolidation,
-- conversation-history selection,
-- active chat cognition,
-- platform adapter parsing,
-- scheduler orchestration,
-- manual approval UX.
-
-Those features must integrate through explicit package entry points rather than
-by importing repository internals or operating on MongoDB directly.
+Related systems integrate through the explicit package entry points in this
+document. Reflection, user-memory consolidation, active chat cognition,
+platform adapters, scheduler orchestration, and approval UX own their local
+behavior and call memory-evolution APIs at the shared-memory boundary.
 
 ## Boundary Summary
 
@@ -75,9 +66,7 @@ callers
   -> memory collection
 ```
 
-The package boundary is deliberate: `memory_evolution` may not use Motor,
-`get_db`, raw collection methods, Mongo aggregation syntax, or raw embedding
-adapters directly. Database and embedding operations belong in
+The package boundary is deliberate: database and embedding operations belong in
 `kazusa_ai_chatbot.db.memory_evolution`.
 
 ## Public Entry Points
@@ -118,10 +107,9 @@ The caller must provide:
 - `timestamp` when preserving source capture time matters
 - `evidence_refs` and `privacy_review` for non-seed promoted rows
 
-The caller must not provide `embedding`. Embeddings are repository-owned. If a
-row with the same `memory_unit_id` already exists, the repository returns it
-only when the non-volatile fields are equivalent. Different content under the
-same id is rejected.
+Embeddings are repository-owned. If a row with the same `memory_unit_id`
+already exists, the repository returns it only when the non-volatile fields are
+equivalent. Different content under the same id is rejected.
 
 ### `supersede_memory_unit`
 
@@ -232,8 +220,7 @@ from kazusa_ai_chatbot.memory_evolution.repository import (
 )
 ```
 
-External packages should not call these helpers unless this ICD is updated to
-promote them as supported public entry points.
+External packages use the public entry points named above.
 
 ## DB Interface
 
@@ -356,10 +343,9 @@ preserved by seed reset.
 
 ### Evidence and Privacy
 
-Future promotion callers must provide evidence and privacy review metadata
-beside the memory document. These fields are not reconstructed by the
-repository and must not be inferred from prompt text after identifying fields
-have been stripped.
+Future promotion callers provide evidence and privacy review metadata beside
+the memory document. The repository stores these fields as caller-supplied
+metadata.
 
 ```python
 {
@@ -413,7 +399,7 @@ construct ids explicitly so retries and merge decisions are transparent.
 
 Embeddings are owned by the repository and DB interface:
 
-- callers must not provide `embedding`,
+- callers provide memory content and metadata,
 - `insert_memory_unit`, `supersede_memory_unit`, and `merge_memory_units`
   compute embeddings for inserted replacements,
 - reset apply computes embeddings only for changed seed rows,
@@ -463,16 +449,14 @@ Reset behavior:
 - computes embeddings only for changed rows in apply mode,
 - invalidates memory cache after apply.
 
-Seed reset must not read reflection outputs, conversation history, user memory
-units, user profiles, character state, or external data.
+Seed reset reads the canonical seed file and existing seed-managed global rows.
 
 ## Retrieval Contract
 
 Normal persistent-memory retrieval is active-only and non-expired.
 
-LLM-facing tools must not expose `status`, `expiry_before`, or `expiry_after`
-arguments. Audit/debug code that needs inactive rows must use an explicit
-lower-level interface and document that it is outside normal RAG retrieval.
+LLM-facing tools expose active, non-expired retrieval. Audit/debug code that
+needs inactive rows uses an explicit lower-level interface.
 
 Semantic retrieval does not use `$vectorSearch.filter`; lifecycle and metadata
 filters run as a normal `$match` after vector scoring. This keeps the live
@@ -511,9 +495,9 @@ python -m scripts.reset_memory_lore --apply
 `--dry-run` is the required inspection path before applying destructive seed
 changes.
 
-## Dependency Rules
+## Dependency Boundary
 
-Allowed imports from `memory_evolution`:
+`memory_evolution` uses:
 
 - typed contracts from `memory_evolution.models`,
 - id helpers from `memory_evolution.identity`,
@@ -522,24 +506,6 @@ Allowed imports from `memory_evolution`:
 - `kazusa_ai_chatbot.db.memory_evolution` as the DB interface,
 - Cache2 invalidation event/runtime helpers for memory cache invalidation.
 
-Forbidden imports and calls:
-
-- `memory_evolution` importing `get_db`, `get_text_embedding`, Motor, PyMongo,
-  or raw MongoDB clients directly.
-- `memory_evolution` calling `.find(...)`, `.aggregate(...)`,
-  `.insert_one(...)`, `.update_one(...)`, `.update_many(...)`,
-  `.delete_one(...)`, `.delete_many(...)`, `.replace_one(...)`, or
-  `.count_documents(...)`.
-- `memory_evolution` importing `reflection_cycle`, cognition nodes, dialog
-  nodes, platform adapters, service handlers, scheduler dispatch, or
-  conversation-history DB modules.
-- DB-interface lifecycle update helpers accepting arbitrary fields.
-- Prompt or LLM code writing memory rows without calling public
-  `memory_evolution` APIs.
-- Reset reading conversation history, reflection artifacts, user state, or
-  external data.
-- Retrieval tools exposing inactive-row controls to LLM callers.
-
 The only DB module that may use raw MongoDB operations for evolving memory is
 `kazusa_ai_chatbot.db.memory_evolution`.
 
@@ -547,8 +513,8 @@ The only DB module that may use raw MongoDB operations for evolving memory is
 
 ### Current Runtime Memory Writers
 
-Legacy global/shared memory writers must route through `save_memory` or direct
-`memory_evolution` public APIs. They must not write `db.memory` directly.
+Legacy global/shared memory writers route through `save_memory` or direct
+`memory_evolution` public APIs.
 
 ### Current Persistent-Memory Retrieval
 
@@ -571,11 +537,8 @@ Reflection must provide:
 - confidence note,
 - candidate content that has already passed promotion gates.
 
-Reflection duplicate detection must call `find_active_memory_units` with a
-semantic query and use the returned score tuples. It must not re-fetch
-embeddings for Python-side cosine similarity, call lower-level DB helpers, or
-silently default to inserting every approved candidate as a new lineage when
-similar active memory exists.
+Reflection duplicate detection calls `find_active_memory_units` with a semantic
+query and uses returned score tuples.
 
 Reflection output alone is evidence, not authorization to write memory.
 Promotion policy and privacy stripping belong outside this package. This
@@ -584,57 +547,5 @@ decision.
 
 ### Future Scheduler Integration
 
-A scheduler may invoke reset or future promotion workers, but it must call the
-public facade for that worker. Scheduler code must not call DB-interface
-functions or repository internals directly.
-
-## Verification Checklist
-
-Before merging memory-evolution changes, verify:
-
-- Static boundary tests prove `memory_evolution` does not touch MongoDB
-  directly.
-- Repository tests cover idempotent insert, caller-supplied embedding
-  rejection, supersede, merge, inactive source rejection, evidence refs, and
-  cache invalidation.
-- DB-interface tests cover active filters, vector post-filtering,
-  `exclude_memory_unit_ids`, and lifecycle update allowlisting.
-- Reset tests cover dry-run, apply, runtime-row preservation, and write guard
-  failure.
-- Writer migration tests prove legacy `save_memory` delegates to the evolving
-  API and preserves truthful authority.
-- Seed maintenance validation passes for
-  `personalities/knowledge/memory_seed.jsonl`.
-- Reset dry-run is inspected before reset apply.
-
-Recommended commands:
-
-```powershell
-pytest tests\test_memory_evolution_module_boundary.py -q
-pytest tests\test_memory_evolution_repository.py -q
-pytest tests\test_memory_evolution_reset.py -q
-pytest tests\test_memory_evolution_retrieval.py -q
-pytest tests\test_memory_evolution_idempotency.py -q
-pytest tests\test_memory_evolution_writer_migration.py -q
-python -m scripts.manage_memory_knowledge validate
-python -m scripts.reset_memory_lore --dry-run
-```
-
-## Change Control
-
-Changes to this ICD are required when:
-
-- a public entry point is added, removed, or changes semantics,
-- `EvolvingMemoryDoc`, `MemoryUnitQuery`, `MemoryEvidenceRef`, or
-  `MemoryPrivacyReview` changes,
-- a new source kind, authority, status, or memory type is introduced,
-- a DB-interface function gains a new operation shape,
-- reset manages a new source lane,
-- retrieval exposes inactive or expired rows,
-- another package consumes memory-evolution outputs,
-- reflection integration begins writing memory,
-- scheduler integration is added,
-- cache invalidation behavior changes.
-
-Changing the DB boundary is a breaking architectural decision. It must be
-reviewed as an interface change, not as an implementation cleanup.
+A scheduler can invoke reset or future promotion workers through the public
+facade for that worker.

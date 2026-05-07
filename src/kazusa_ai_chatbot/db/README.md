@@ -17,6 +17,11 @@ This document defines the database package contract. It is the source of truth
 for which code may touch MongoDB primitives, which public helpers callers may
 use, what durable collections mean, and how storage changes must be introduced.
 
+For MongoDB environment variables, local setup, startup commands, and
+operator-oriented cleanup commands, use the operational
+[HOWTO](../../../docs/HOWTO.md). This ICD owns collection ownership and
+document-shape contracts.
+
 ## Purpose
 
 The database layer is the durable persistence boundary for Kazusa. It stores
@@ -48,14 +53,10 @@ This ICD covers:
 - Error behavior and bootstrap/index expectations.
 - Change-control rules for adding or modifying database operations.
 
-This ICD does not cover:
-
-- MongoDB deployment, credentials, Atlas configuration, or environment values.
-- Platform adapter transport storage outside persisted conversation rows.
-- LLM prompt semantics except where a DB helper stores or retrieves prompt
-  input/output documents.
-- One-off production data repair procedures. Those belong in explicit scripts
-  and plans, and still must use the public maintenance interface.
+Related operational details, such as MongoDB deployment and credentials, live in
+the HOWTO or deployment configuration. Platform adapters, LLM prompts, and
+one-off production repairs integrate with the database through the public
+runtime or maintenance interfaces described here.
 
 ## Parties
 
@@ -65,8 +66,8 @@ Runtime callers are production packages on the live or background service path:
 brain service, RAG, cognition, dialog persistence, consolidation, scheduler,
 dispatcher, reflection cycle, conversation progress, and memory evolution.
 
-Runtime callers MUST import from the `kazusa_ai_chatbot.db` facade unless this
-ICD names a narrower public package boundary for that subsystem.
+Runtime callers import from the `kazusa_ai_chatbot.db` facade unless this ICD
+names a narrower public package boundary for that subsystem.
 
 ### Maintenance Scripts
 
@@ -74,9 +75,8 @@ Maintenance scripts are operator tools under `src/scripts`. They may need
 export, migration, backfill, scan, or repair operations that are not part of
 the normal runtime API.
 
-Maintenance scripts MUST use `kazusa_ai_chatbot.db.script_operations` for those
-operator-only operations. They MUST NOT open raw database handles, import
-Motor/PyMongo, or embed direct collection method calls.
+Maintenance scripts use `kazusa_ai_chatbot.db.script_operations` for those
+operator-only operations.
 
 ### Database Package Internals
 
@@ -90,17 +90,7 @@ The database package owns:
 - Vector-search and embedding persistence mechanics.
 - Translation from backend failures into application-level errors.
 
-Only modules under `src/kazusa_ai_chatbot/db/` may import Motor, PyMongo, or
-their submodules.
-
-## Normative Language
-
-The words `MUST`, `MUST NOT`, `SHOULD`, and `MAY` are normative:
-
-- `MUST`: required for a compatible database interface.
-- `MUST NOT`: forbidden by the interface.
-- `SHOULD`: expected unless a documented local reason exists.
-- `MAY`: allowed extension behavior.
+Backend driver access is owned by modules under `src/kazusa_ai_chatbot/db/`.
 
 ## Boundary Summary
 
@@ -117,9 +107,8 @@ maintenance script
   -> MongoDB collection operation
 ```
 
-Raw database access terminates inside the database package. No runtime package
-or script should receive a database object, collection object, cursor, Motor
-type, PyMongo type, or backend exception as part of its normal contract.
+Raw database access terminates inside the database package. Runtime packages and
+scripts receive semantic return values and application-level errors.
 
 ## Public Runtime Facade
 
@@ -159,9 +148,8 @@ The runtime facade exports helpers for:
 - legacy shared-memory facade functions that are lazily resolved to avoid
   import cycles.
 
-Callers MUST treat facade helpers as semantic operations. A caller should ask
-for a new helper when it needs a new storage behavior instead of importing a
-db submodule to perform backend-shaped work.
+Callers treat facade helpers as semantic operations. New storage behavior gets a
+named helper.
 
 ## Public Maintenance Interface
 
@@ -177,53 +165,32 @@ or by importing named helpers from:
 from kazusa_ai_chatbot.db.script_operations import export_collection_rows
 ```
 
-This submodule is public for operator tools, but not for runtime packages.
-It may expose broader export, migration, scan, and repair helpers than the
-runtime facade. Even there, scripts should pass semantic parameters when a
-helper exists instead of constructing MongoDB query or update documents.
+This submodule is public for operator tools. It can expose broader export,
+migration, scan, and repair helpers than the runtime facade. Scripts pass
+semantic parameters when a helper exists.
 
-If a script needs a raw collection name, raw query operator, projection,
-aggregation pipeline, or update operator, that detail SHOULD move into
-`script_operations` behind a named helper. The script's job is orchestration,
-argument parsing, dry-run policy, file IO, and operator reporting; the database
-package owns backend expression.
+Script orchestration handles argument parsing, dry-run policy, file IO, and
+operator reporting; the database package owns backend expressions behind named
+helpers.
 
-## Private Client Boundary
+## Internal Client Boundary
 
 `kazusa_ai_chatbot.db._client.get_db()` is private to
 `src/kazusa_ai_chatbot/db/`.
-
-Forbidden outside `src/kazusa_ai_chatbot/db/`:
-
-- importing `kazusa_ai_chatbot.db._client`;
-- importing `motor`, `pymongo`, or any submodule such as `pymongo.errors`;
-- holding database, collection, cursor, or backend client objects;
-- calling collection methods such as `find`, `aggregate`, `insert_one`,
-  `update_one`, `replace_one`, `delete_many`, `create_index`, or `drop`;
-- catching `pymongo.errors.*` or `motor.*` exceptions directly;
-- constructing raw MongoDB query/update/projection/aggregation details in
-  runtime modules.
-
-Allowed inside `src/kazusa_ai_chatbot/db/`:
-
-- importing `db._client.get_db()`;
-- using Motor/PyMongo APIs;
-- constructing backend query/update documents;
-- catching backend exceptions and re-raising `DatabaseOperationError` when the
-  error crosses the public interface.
+Database package internals own backend handles, query/update documents,
+indexes, driver exceptions, and translation to public errors.
 
 ## Error Contract
 
-Public database helpers SHOULD raise application-level exceptions when a
-backend operation cannot complete. The package-level exception is:
+Public database helpers raise application-level exceptions when a backend
+operation fails. The package-level exception is:
 
 ```python
 from kazusa_ai_chatbot.db import DatabaseOperationError
 ```
 
-Callers may catch `DatabaseOperationError` when they can degrade gracefully,
-record telemetry, or return a rejected operation. Callers MUST NOT catch
-PyMongo or Motor exceptions outside the database package.
+Callers can catch `DatabaseOperationError` when they can degrade gracefully,
+record telemetry, or return a rejected operation.
 
 Functions that return `bool` for state transitions, such as scheduled-event
 status changes, use `False` for expected non-matches or invalid state
@@ -244,9 +211,8 @@ Primary owners:
   and maintenance exports;
 - update: attachment-description repair and approved maintenance helpers.
 
-Semantic search MUST use `body_text` plus attachment descriptions as the
-embedding source. `raw_wire_text` is audit/replay data and must not become the
-semantic search source.
+Semantic search uses `body_text` plus attachment descriptions as the embedding
+source. `raw_wire_text` remains audit/replay data.
 
 ### `user_profiles`
 
@@ -281,9 +247,8 @@ persistence mechanics, but it does not reinterpret user meaning.
 ### `character_state`
 
 Stores singleton character profile/state documents and runtime self-image
-material. Character state updates are explicit persistence events; reflection
-must not mutate this collection unless a future ICD or plan creates a named
-promotion path.
+material. Character state updates are explicit persistence events owned by
+named service or promotion paths.
 
 ### `memory`
 
@@ -295,8 +260,8 @@ the facade, but new reflection memory promotion should go through the
 ### `character_reflection_runs`
 
 Stores hourly, daily-channel, and global-promotion reflection run documents.
-These rows are evidence and audit records for the reflection cycle. Raw
-reflection outputs MUST NOT enter normal cognition directly.
+These rows are evidence and audit records for the reflection cycle. Normal
+cognition uses promoted, gated reflection context.
 
 Reflection reads and writes are split intentionally:
 
@@ -317,15 +282,13 @@ reflection evidence or memory systems.
 
 Stores pending, running, completed, failed, and cancelled scheduled tool
 events. The dispatcher and scheduler own semantic use of this collection
-through named helper functions. Callers must not update scheduler status fields
-directly.
+through named helper functions.
 
 ### `conversation_episode_state`
 
 Stores short-lived conversation-progress state keyed by platform, channel, and
 user. The collection is operational working memory, not durable identity memory.
-Writes should be guarded so stale background records cannot replace newer
-episode progress.
+Writes are guarded so stale background records preserve newer episode progress.
 
 ### `rag_cache2_persistent`
 
@@ -348,9 +311,8 @@ documents. It creates current collections and indexes, including
 `user_memory_units`, reflection-run indexes, interaction-style indexes,
 scheduled-event indexes, and other runtime indexes required by the facade.
 
-Bootstrap MUST be idempotent. It may create or update indexes and seed
-singleton documents, but it must not perform destructive data repair unless an
-explicit migration plan says so.
+Bootstrap is idempotent. It creates or updates indexes and seed singleton
+documents. Destructive data repair belongs in explicit migration plans.
 
 ## Reflection Interface
 
@@ -367,9 +329,8 @@ The database package provides reflection support through named helpers:
 - hourly/daily run listing by channel and date;
 - interaction-style overlay persistence for promoted runtime guidance.
 
-Reflection packages MUST NOT open database clients, construct MongoDB queries,
-or import database internals. They call the database facade or the named
-reflection DB helpers that are re-exported by the facade.
+Reflection packages call the database facade or the named reflection DB helpers
+that are re-exported by the facade.
 
 Raw reflection output is stored for audit and later promotion decisions. Normal
 cognition may consume only promoted, gated context through the reflection and
@@ -397,11 +358,10 @@ Deterministic database code owns structure and mechanics:
 - exception translation;
 - bootstrap and cache invalidation mechanics.
 
-Do not add code-side keyword classifiers over user text inside database helpers
-to override LLM meaning. If a semantic decision is wrong, fix the upstream
-prompt, schema, or caller contract.
+Database helpers keep user-text handling structural. Semantic decisions belong
+in upstream prompts, schemas, or caller contracts.
 
-## Versioning And Change Control
+## Evolution Paths
 
 Adding a new database operation requires one of these paths:
 
@@ -417,64 +377,18 @@ semantics, reflection promotion behavior, or production data interpretation
 require an explicit development plan. Completed plans are historical records;
 new scope should use a new or superseding plan.
 
-Data migrations are only needed when stored production documents must change
-shape or meaning. Interface-collapse work that only removes raw `get_db()`
-access should not mutate production content.
+Data migrations apply when stored production documents change shape or meaning.
 
-## Verification Checklist
+## Public Imports
 
-Before merging database-boundary changes, verify:
-
-- runtime code imports database functionality from `kazusa_ai_chatbot.db`;
-- maintenance scripts import operator-only helpers from
-  `kazusa_ai_chatbot.db.script_operations`;
-- no non-db module imports `motor`, `pymongo`, or any of their submodules;
-- no non-db module imports `kazusa_ai_chatbot.db._client`;
-- no non-db module catches backend database exceptions;
-- no runtime module contains raw MongoDB collection calls or query/update
-  details;
-- scripts contain only orchestration logic unless a documented maintenance
-  exception exists;
-- public DB helpers translate backend failures to `DatabaseOperationError`
-  where callers can observe them;
-- bootstrap remains idempotent;
-- focused tests cover any changed helper, collection shape, index behavior, or
-  boundary rule.
-
-Relevant boundary tests include:
-
-- `tests/test_db_public_boundary.py`
-- `tests/test_script_db_boundary.py`
-
-Relevant subsystem tests should be selected based on the helper being changed:
-conversation, RAG, scheduler, dispatcher, reflection, memory evolution,
-conversation progress, or maintenance-script tests.
-
-## Import Rules
-
-Allowed outside `src/kazusa_ai_chatbot/db/`:
+Outside `src/kazusa_ai_chatbot/db/` callers use:
 
 - `from kazusa_ai_chatbot.db import ...`
 - `from kazusa_ai_chatbot.db import script_operations` for maintenance scripts
 - `from kazusa_ai_chatbot.db.script_operations import ...` for maintenance
   scripts
-- importing DB TypedDicts and `DatabaseOperationError` through the public
-  facade
+- DB TypedDicts and `DatabaseOperationError` through the public facade.
 
-Forbidden outside `src/kazusa_ai_chatbot/db/`:
-
-- `from kazusa_ai_chatbot.db._client import get_db`
-- `import kazusa_ai_chatbot.db._client`
-- `import motor` or `from motor...`
-- `import pymongo` or `from pymongo...`
-- direct collection or cursor operations
-- backend-shaped query, projection, aggregation, and update construction in
-  runtime packages
-
-Allowed inside `src/kazusa_ai_chatbot/db/`:
-
-- raw database access through `_client.get_db()`;
-- backend query/update details;
-- backend exception handling;
-- collection-specific implementation helpers that remain private to the
-  package.
+Inside `src/kazusa_ai_chatbot/db/`, package internals use backend access,
+query/update details, backend exception handling, and private
+collection-specific helpers.

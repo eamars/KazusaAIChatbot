@@ -4,7 +4,9 @@
 
 It turns LLM-emitted raw tool calls into validated scheduled tasks, stores those tasks through the scheduler, and later delivers them through platform adapters. In the current runtime, this is mainly used for accepted future promises such as "remind me later" or "send a message to that group in one minute."
 
-It is not a user-input classifier, not a commitment harvester, not a dialogue planner, and not a general agent loop. The dispatcher does not decide whether Kazusa accepted a request. That decision happens upstream in the consolidator's LLM output. The dispatcher only handles tool-call generation, validation, deduplication, scheduling, and delivery.
+The dispatcher handles tool-call generation, validation, deduplication,
+scheduling, and delivery for accepted future promises. Upstream consolidation
+owns the semantic decision that Kazusa accepted a future action.
 
 ## Public Boundary
 
@@ -91,7 +93,8 @@ scheduled time arrives
   -> scheduler marks event completed or failed
 ```
 
-The dispatcher runs in the background consolidation path. It should not block response generation to the user.
+The dispatcher runs in the background consolidation path after response
+generation.
 
 ## Design Intention
 
@@ -219,7 +222,8 @@ The current built-in tool is `send_message`.
 }
 ```
 
-Additional tools should be added as explicit capabilities with narrow schemas. Do not make one generic "do anything" tool; dispatch remains safer when each tool has clear ownership and validation.
+Additional tools are explicit capabilities with narrow schemas. Dispatch stays
+inspectable when each tool has clear ownership and validation.
 
 ## Adapter Boundary
 
@@ -239,6 +243,11 @@ async def send_message(
 `AdapterRegistry` maps platform keys to adapters. `RemoteHttpAdapter` bridges scheduled delivery to an adapter-owned HTTP endpoint, which lets the brain service schedule work even when the live platform adapter runs in another process.
 
 If no adapter is registered for the target platform, evaluation rejects the call before scheduling.
+
+The dispatcher owns the in-process registry abstraction, tool validation, and
+scheduled-send execution semantics. The HTTP contract for runtime adapter
+registration and heartbeat endpoints is owned by the
+[Brain Service ICD](../brain_service/README.md).
 
 ## Deduplication
 
@@ -292,7 +301,9 @@ Deterministic code owns mechanics:
 - scheduler persistence,
 - delivery status updates.
 
-Do not add keyword matching over user text, final dialog, or promise text to override the LLM's chosen channel. If the model emits the wrong kind of tool call, fix the prompt, schema, or live examples.
+Channel and promise interpretation stays in the LLM prompt and schema
+contract. Deterministic code validates the emitted tool call and applies source
+defaults.
 
 ## Failure Behavior
 
@@ -305,15 +316,5 @@ The dispatcher is fail-closed:
 - duplicate pending tasks are rejected,
 - scheduler write failures are reported as rejections.
 
-Rejected dispatches are telemetry for logs and consolidation metadata. They do not affect the already-generated response.
-
-## Test Coverage
-
-Relevant tests:
-
-- `tests/test_dispatcher.py`
-- `tests/test_scheduler_future_promise.py`
-- `tests/test_runtime_adapter_registration.py`
-- dispatcher-related cases in persistence and scheduler tests
-
-The live dispatcher tests are behavior evidence. They check that real LLM output can produce a valid `send_message` call for accepted future actions, avoid tool calls for ongoing style rules, target explicit group IDs from private chats, and normalize vague near-future promises into absolute execution times.
+Rejected dispatches are telemetry for logs and consolidation metadata. They
+preserve the already-generated response.

@@ -4,7 +4,9 @@
 
 It gives the response pipeline a compact view of the current conversation episode: what is still active, what has already been handled, what kind of interaction is happening, and what next conversational moves would feel natural. Its purpose is to help Kazusa continue a conversation like a person without relying on a large raw transcript in every cognition prompt.
 
-The module is deliberately narrow. It is not long-term user memory, not a profile store, not a dialogue manager, and not a reply generator.
+The module owns short-term episode state for response planning. Long-term user
+memory, profile storage, dialogue management, and final reply generation remain
+separate subsystem responsibilities.
 
 ## Design Intent
 
@@ -17,7 +19,7 @@ It exists because raw recent history is a poor primary continuity mechanism. Raw
 - whether the exchange is task support, emotional support, casual chat, playful teasing, meta discussion, group ambient chatter, or a mix,
 - which user states or open loops are still unresolved,
 - which assistant response moves have already been used too much,
-- which threads are resolved or should not be reopened,
+- which threads are resolved or ready to stay closed,
 - what next conversational moves are available without writing the next line for Kazusa.
 
 The target behavior is better flow, not stronger control. The module should make responses less repetitive and more locally aware while preserving the existing cognition/dialog responsibility split.
@@ -78,7 +80,9 @@ User message
        updates short-term episode state for the next turn
 ```
 
-The relevance gate is intentionally outside the module. Conversation progress must not affect whether Kazusa is allowed to respond. It only helps shape a response after the system has already decided a response should happen.
+The relevance gate is intentionally outside the module. Conversation progress
+helps shape a response after the system has already decided a response should
+happen.
 
 ## Prompt-Facing State
 
@@ -168,11 +172,11 @@ The important contract is behavioral rather than database-specific:
 
 - scope fields identify exactly one user's episode within one conversation surface,
 - entry lists preserve `first_seen_at` so prompt projection can produce relative age hints,
-- `turn_count` is monotonic so stale background writes cannot overwrite newer progress,
+- `turn_count` is monotonic so guarded writes preserve newer progress,
 - expiry metadata ensures this remains short-term working memory,
 - new optional fields should be tolerated so older state can still project safely.
 
-The state is expected to expire naturally. It should not become durable identity memory or be copied into long-term profile systems.
+The state is expected to expire naturally as short-term working memory.
 
 Implementations may use any persistence backend that preserves the same behavior: scoped load, guarded newer-turn write, expiry, and a way to tolerate old or partially populated documents.
 
@@ -189,15 +193,20 @@ The cognition layer should use it to decide what the response should accomplish:
 - avoid reopening handled material,
 - respect quick pivots and fragmented group-chat flow.
 
-It should not copy `next_affordances` or `progression_guidance` as reply text. Those fields describe possible moves, not finished dialog.
+`next_affordances` and `progression_guidance` describe possible moves for
+cognition. Dialog generation owns finished reply text.
 
-Raw recent history still has a role, but only as a small surface/tone buffer: exact recent phrasing, local cadence, and immediate adjacency. It should not be the main source of semantic episode reconstruction.
+Raw recent history still has a small surface/tone role: exact recent phrasing,
+local cadence, and immediate adjacency. Conversation progress owns semantic
+episode reconstruction.
 
 ## Dialog Responsibilities
 
 The dialog layer owns final wording, character voice, rhythm, and surface expression.
 
-Conversation progress must not generate Kazusa's lines. It can influence the intended move, but it should never become a script. This keeps the module reusable: any host chatbot can consume the same kind of progress payload while using its own voice layer.
+Conversation progress influences the intended response move. Dialog generation
+owns Kazusa's final lines, which keeps the module reusable across host
+chatbots with different voice layers.
 
 ## Semantic Ownership
 
@@ -221,22 +230,17 @@ Deterministic code owns structure:
 - preventing stale writes from replacing newer state,
 - selecting a fresher local cache entry when persistence lags.
 
-Do not add keyword matching, regex classifiers, or code-side semantic filters over user or assistant natural language. If the system needs a semantic judgment, that belongs in the recorder prompt and schema contract.
+Semantic judgment belongs in the recorder prompt and schema contract.
+Deterministic code keeps the payload structural and bounded.
 
-## Reuse Guidance
+## Reusable Contract
 
-To reuse this module in another chatbot or runtime, preserve the lifecycle rather than the current host application's file layout:
+Reusable integrations preserve the same capability split: response eligibility
+is decided outside the module, prompt-facing progress informs response
+planning, host cognition/dialog generates the response, and the completed turn
+updates short-term progress for the next interaction.
 
-1. Decide response eligibility outside the module.
-2. Load progress only after the system has decided to respond.
-3. Pass the prompt-facing progress payload to response planning.
-4. Generate the assistant response in the host system's own cognition/dialog stack.
-5. Record progress only after the final response is available.
-6. Keep recording off the response path when latency matters.
-
-The essential interface is the same even if the persistence backend, graph framework, prompt names, or host application changes.
-
-## Design Constraints
+## Stable Capabilities
 
 - Keep the prompt-facing state compact and capped.
 - Treat missing or expired progress as a normal empty state.

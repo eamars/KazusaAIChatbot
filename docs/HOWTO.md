@@ -1,7 +1,14 @@
 # Kazusa AI Chatbot HOWTO
 
-This document keeps setup, operations, API shape, and test commands out of the
-project README while preserving the practical details needed to run the brain.
+This document keeps setup, operations, and test commands out of the project
+README while preserving the practical details needed to run the brain.
+
+This operational guide covers local setup, service startup, adapter startup,
+and test commands. Brain service request/response models, adapter obligations,
+delivery receipts, runtime adapter registration, and reply hydration are owned
+by the [Brain Service ICD](../src/kazusa_ai_chatbot/brain_service/README.md).
+The typed message envelope contract lives in the
+[Message Envelope ICD](../src/kazusa_ai_chatbot/message_envelope/README.md).
 
 ## Local Setup
 
@@ -118,11 +125,11 @@ DISCORD_RUNTIME_PORT=8012
 NAPCAT_RUNTIME_PORT=8011
 ```
 
-All route-specific chat model variables are required. The generic
-`LLM_BASE_URL`, `LLM_API_KEY`, and `LLM_MODEL` variables are not used after the
-route migration. Missing route variables crash config loading instead of
-silently falling back to another endpoint. The web-search helper expects an MCP
-server named `mcp-searxng` exposing `searxng_web_search` and `web_url_read`.
+All route-specific chat model variables are required. Route-specific variables
+replace the retired generic `LLM_BASE_URL`, `LLM_API_KEY`, and `LLM_MODEL`
+settings. Missing route variables stop config loading. The web-search helper
+expects an MCP server named `mcp-searxng` exposing `searxng_web_search` and
+`web_url_read`.
 
 ## Dependencies
 
@@ -225,6 +232,9 @@ chats are always active.
 
 ## HTTP API
 
+This section is a runbook-level endpoint map. Request and response schemas live
+in the [Brain Service ICD](../src/kazusa_ai_chatbot/brain_service/README.md).
+
 ### `GET /health`
 
 Returns service health and Mongo reachability.
@@ -273,19 +283,11 @@ message persistence, conversation-progress recording, consolidation, and the
 resulting Cache2 invalidation before consuming the next queued chat item. This
 keeps the next RAG pass from reading stale durable facts.
 
-Important request fields:
-
-- `platform`
-- `platform_channel_id`
-- `platform_message_id`
-- `platform_user_id`
-- `platform_bot_id`
-- `display_name`
-- `channel_name`
-- `content`
-- `attachments`
-- `reply_context`
-- `debug_modes`
+For the exact `ChatRequest` and `ChatResponse` fields, adapter rules,
+`delivery_tracking_id` semantics, and delivery receipt flow, read the
+[Brain Service ICD](../src/kazusa_ai_chatbot/brain_service/README.md). For the
+typed inbound envelope fields, read the
+[Message Envelope ICD](../src/kazusa_ai_chatbot/message_envelope/README.md).
 
 Useful drop-audit log line:
 
@@ -297,26 +299,24 @@ Current attachment behavior:
 
 - inbound image attachments with inline base64 are supported
 - image descriptions are generated before relevance
-- output attachments are not wired yet
+- outbound attachments are reserved for future service support
 
-### `POST /event`
+### Other Service Endpoints
 
-Currently a placeholder endpoint that accepts platform events and logs them.
+The brain service also exposes delivery receipt, runtime adapter registration,
+runtime adapter heartbeat, and generic event endpoints. Their contracts and
+compatibility rules are maintained in the
+[Brain Service ICD](../src/kazusa_ai_chatbot/brain_service/README.md).
 
 ## Runtime Data Model
 
-Collections created or maintained by `db_bootstrap()`:
+`db_bootstrap()` creates current collections and indexes, and it drops legacy
+RAG1 collections `rag_cache_index` and `rag_metadata_index` when present.
 
-| Collection | Purpose |
-| --- | --- |
-| `conversation_history` | Stored user and assistant messages plus embeddings |
-| `user_profiles` | Identity mapping, profile memory, affinity, commitments, user image |
-| `character_state` | Singleton character profile, runtime mood/vibe, self image |
-| `memory` | Append-only long-term fact and promise records |
-| `scheduled_events` | Pending future events |
-
-`db_bootstrap()` also drops the legacy RAG1 collections `rag_cache_index` and
-`rag_metadata_index` if they are present.
+Collection purpose, document ownership, storage invariants, and bootstrap/index
+rules are maintained in the
+[Database ICD](../src/kazusa_ai_chatbot/db/README.md). Keep this HOWTO focused
+on operator commands and setup.
 
 ## Legacy Collection Cleanup
 

@@ -27,9 +27,8 @@ daily syntheses, and runs one global daily promotion pass that may write at
 most one lore row and one self-guidance row through the evolving memory public
 API.
 
-Hourly and daily-channel reflection are evidence. They never write memory and
-must not enter normal cognition directly. Normal chat may see only promoted
-reflection memory, and only when `REFLECTION_CONTEXT_ENABLED` is true.
+Hourly and daily-channel reflection are evidence records. Normal chat uses
+promoted reflection memory when `REFLECTION_CONTEXT_ENABLED` is true.
 
 ## Public Facades
 
@@ -65,8 +64,8 @@ async def stop_reflection_cycle_worker(
 ) -> None: ...
 ```
 
-`enable_memory_writes` is required and has no default. CLI and service code
-must not import worker, repository, prompt, or DB internals.
+`enable_memory_writes` is required and has no default. CLI and service code use
+the package facade above.
 
 The worker-owned promotion path passes its busy probe into the internal
 promotion runner so a chat turn that appears after the LLM call can defer
@@ -86,10 +85,8 @@ Reflection-run persistence belongs to:
 kazusa_ai_chatbot.db.reflection_cycle
 ```
 
-The reflection package must not open database clients, operate on Motor or
-PyMongo collection handles, or express raw MongoDB commands. The repository
-imports `db.reflection_cycle` as its storage interface and calls only named
-functions.
+The reflection package uses named database interfaces for storage. The
+repository imports `db.reflection_cycle` as its storage interface.
 
 `character_reflection_runs` documents use `_id=run_id` and also store
 `run_id`. Required indexes:
@@ -255,9 +252,9 @@ memory names/content previews.
 validation warnings, boundary/privacy summaries, score values, source run ids,
 and evidence-card ids.
 
-No log level may include raw transcripts, raw hourly output, full run
-documents, source message refs, user identifiers, display names, or unsanitized
-private details.
+Logs use sanitized previews and operational identifiers. Raw transcripts, raw
+hourly output, full run documents, source message refs, user identifiers,
+display names, and private details stay out of normal log output.
 
 ## CLI
 
@@ -270,27 +267,11 @@ python src\scripts\run_reflection_cycle.py promote --dry-run
 `daily` and `promote` default to the previous character-local date. Use
 `--character-local-date YYYY-MM-DD` for deterministic runs.
 
-## Forbidden Couplings
+## Integration Boundaries
 
-Reflection must not:
+Reflection integrates through:
 
-- call the chat endpoint or send autonomous messages;
-- use scheduled-event persistence;
-- import service internals;
-- update user profiles, user memory units, character state, or conversation
-  progress;
-- write memory except through the memory-evolution public APIs;
-- expose raw hourly reflection as live cognition context.
-
-## Verification
-
-Required checks before sign-off:
-
-- focused repository, worker, promotion, context, service, and integration
-  tests pass;
-- source greps prove Stage 1c writers avoid the legacy memory compatibility
-  path;
-- source greps prove reflection package and CLI avoid raw database operations;
-- global promotion live LLM cases are run one by one when the configured local
-  LLM endpoint is available, and artifacts are inspected against the mini-gate;
-- dry-run CLI commands complete or record an environment-specific blocker.
+- the reflection-cycle package facade,
+- named database interfaces for conversation evidence and run persistence,
+- memory-evolution public APIs for promoted memory writes,
+- gated reflection context for normal chat.

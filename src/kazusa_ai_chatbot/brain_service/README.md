@@ -15,6 +15,10 @@ the Kazusa brain service. It is the source of truth for request/response
 lifecycle, delivery tracking, runtime adapter registration, and the ownership
 boundary between adapter transport code and the platform-agnostic brain.
 
+For local setup, environment variables, service startup commands, adapter run
+commands, and test commands, use the operational
+[HOWTO](../../../docs/HOWTO.md). This ICD owns normative API schemas.
+
 ## Purpose
 
 The brain service is the platform-agnostic character runtime. It accepts typed
@@ -48,16 +52,9 @@ This ICD covers:
   reply message id.
 - Compatibility rules for adding service fields and endpoints.
 
-This ICD does not cover:
-
-- Platform-specific parsing, mention syntax, CQ codes, Discord tags, websocket
-  lifecycle, or SDK details.
-- The internal persona graph prompt contracts.
-- Database query syntax or collection ownership. Those belong to the database
-  ICD.
-- The full typed `message_envelope` schema. That belongs to the message
-  envelope ICD.
-- Historical data backfills.
+Related contracts are owned by their subsystem ICDs: platform parsing lives in
+adapter docs/code, database collection ownership lives in the database ICD, and
+the typed `message_envelope` schema lives in the message envelope ICD.
 
 ## Parties
 
@@ -76,23 +73,14 @@ The brain service is the FastAPI service that validates adapter requests,
 hydrates reply context, queues live chat work, runs the persona graph, persists
 conversation rows, exposes health, and receives delivery receipts.
 
-The brain service consumes typed adapter metadata. It MUST NOT parse concrete
-platform wire syntax from raw message text.
+The brain service consumes typed adapter metadata and normalized envelope
+fields.
 
 ### Scheduler Dispatcher
 
 The scheduler dispatcher is an internal caller that uses registered adapter
-callbacks to send accepted future messages. It does not call `/chat` and does
-not participate in normal-chat delivery receipt persistence in this contract.
-
-## Normative Language
-
-The words `MUST`, `MUST NOT`, `SHOULD`, and `MAY` are normative:
-
-- `MUST`: required for the interface to be valid.
-- `MUST NOT`: forbidden by the interface.
-- `SHOULD`: expected unless a documented local reason exists.
-- `MAY`: allowed extension behavior.
+callbacks to send accepted future messages. Scheduler delivery and normal
+`/chat` delivery receipts stay on separate service paths.
 
 ## Boundary Summary
 
@@ -135,8 +123,8 @@ Purpose:
 - Report service readiness for the database, scheduler, and Cache2.
 - Provide operational visibility without running the persona graph.
 
-Adapters MAY use this endpoint for startup diagnostics. They MUST NOT infer
-chat availability solely from Cache2 agent statistics.
+Adapters can use this endpoint for startup diagnostics. Chat availability is
+reported by the health status, database status, and scheduler status fields.
 
 ### `POST /chat`
 
@@ -177,24 +165,21 @@ Purpose:
 | `scheduled_followups` | brain | Count of scheduled follow-ups accepted during the turn. |
 | `delivery_tracking_id` | brain | Brain-generated identifier for the assistant row that should receive a delivery receipt. Empty means no receipt should be posted. |
 
-Adapter rules:
+Adapter responsibilities:
 
-- An adapter MUST send a valid typed `message_envelope`. It MUST NOT send
-  platform wire syntax as the only source of mentions, replies, or attachments.
-- An adapter SHOULD preserve the inbound platform message id when available.
-- An adapter MUST treat an empty `messages` list as no outbound send.
-- An adapter SHOULD honor `use_reply_feature` for the first outbound message
-  when the platform has a native reply mechanism.
-- An adapter MUST NOT post `/delivery_receipt` when
-  `delivery_tracking_id` is empty or when platform send failed.
-- An adapter SHOULD post `/delivery_receipt` after a successful platform send
-  when both `delivery_tracking_id` and an outbound platform message id exist.
+- Send a valid typed `message_envelope`.
+- Preserve the inbound platform message id when available.
+- Treat an empty `messages` list as no outbound send.
+- Honor `use_reply_feature` for the first outbound message when the platform
+  has a native reply mechanism.
+- Post `/delivery_receipt` after a successful platform send when both
+  `delivery_tracking_id` and an outbound platform message id exist.
 
-Brain service rules:
+Brain service responsibilities:
 
 - The brain service validates `ChatRequest` through Pydantic with
   `extra="forbid"`.
-- The brain service MAY collapse queued chat messages before graph execution.
+- The brain service can collapse queued chat messages before graph execution.
 - The brain service returns `ChatResponse` before all post-turn background work
   has necessarily completed.
 - The brain service generates a non-empty `delivery_tracking_id` only when it
@@ -233,17 +218,15 @@ Purpose:
 | `status` | `updated` when a matching assistant row was updated; `not_found` when no row matched. |
 | `updated` | Boolean mirror of whether the row was matched and updated. |
 
-Adapter delivery receipt rules:
+Adapter delivery receipt responsibilities:
 
-- The adapter MUST send the receipt only after the platform send succeeds.
-- The adapter MUST use the platform's durable outbound message id, not a local
-  temporary id or request echo.
-- The adapter MUST NOT block or undo a user-visible platform send because a
-  receipt post failed.
-- The adapter SHOULD retry `not_found` briefly because `/chat` can return
-  before assistant-row persistence finishes.
-- The adapter SHOULD stop retrying on HTTP transport errors or unexpected
-  statuses after logging enough scope for diagnosis.
+- Send the receipt after the platform send succeeds.
+- Use the platform's durable outbound message id.
+- Keep the user-visible platform send delivered when a receipt post fails.
+- Retry `not_found` briefly because `/chat` can return before assistant-row
+  persistence finishes.
+- Stop retrying on HTTP transport errors or unexpected statuses after logging
+  enough scope for diagnosis.
 
 Current adapter policy:
 
@@ -251,24 +234,21 @@ Current adapter policy:
 | --- | --- |
 | NapCat QQ | Reports `send_msg.data.message_id` after successful `send_msg`; retries `not_found` with short bounded delays. |
 | Discord | Reports the first sent Discord `Message.id` after successful normal chat send; retries `not_found` with short bounded delays. |
-| Debug | Does not report receipts because it has no durable external platform message id. |
+| Debug | Omits receipts because it has no durable external platform message id. |
 
 The first-message policy for Discord is a known reply-hydration limitation of
 the current one-id receipt contract. Until multi-chunk receipts are wired,
-native replies to non-first Discord chunks degrade to adapter-provided metadata
-only. This ICD and the DB contract MUST be updated before adding multi-id
-delivery receipts.
+native replies to non-first Discord chunks use adapter-provided metadata only.
+Multi-id delivery receipts require an updated service and DB contract.
 
-Brain service delivery receipt rules:
+Brain service delivery receipt responsibilities:
 
 - The brain service updates assistant rows by generated
   `delivery_tracking_id` and platform. Non-empty channel scope is added as an
   optional disambiguator.
-- The brain service MUST NOT match delivery receipts by message body,
-  timestamp proximity, or author display name.
-- The receipt update MUST NOT recompute embeddings or invalidate RAG caches.
-- A `not_found` response is a retryable race signal for adapters, not a user
-  visible send failure.
+- Delivery receipts match generated tracking ids and platform scope.
+- The receipt update leaves embeddings and RAG cache state unchanged.
+- A `not_found` response is a retryable race signal for adapters.
 
 ### `POST /runtime/adapters/register`
 
@@ -290,8 +270,7 @@ Fields:
 | `shared_secret` | no | adapter/operator | Bearer token expected by the adapter callback, if configured. |
 | `timeout_seconds` | no | adapter/operator | Brain-side timeout for callback sends. |
 
-The brain service stores this registration in the live adapter registry. It is
-not a durable database registration.
+The brain service stores this registration in the live adapter registry.
 
 ### `POST /runtime/adapters/heartbeat`
 
@@ -306,7 +285,7 @@ Purpose:
 
 The payload contract is identical to `/runtime/adapters/register`.
 
-Adapters SHOULD heartbeat periodically while running. The brain service treats
+Adapters heartbeat periodically while running. The brain service treats
 heartbeat as an idempotent re-registration.
 
 ### `POST /event`
@@ -317,9 +296,8 @@ Purpose:
 
 - Accept generic platform or operator events that are not normal chat turns.
 
-Current behavior is intentionally minimal. New event types MUST define their
-own validation, ownership, side effects, and tests before becoming operational
-control paths.
+Current behavior is intentionally minimal. Operational event types need defined
+validation, ownership, and side effects.
 
 ## Reply Context Hydration
 
@@ -334,15 +312,13 @@ Adapters may provide reply target metadata in `message_envelope.reply`:
 
 The brain service first uses adapter-provided reply metadata. If the adapter
 provides a reply platform message id but omits author or excerpt metadata, the
-brain service MAY look up a delivered conversation row by exact
+brain service can look up a delivered conversation row by exact
 `platform`, `platform_channel_id`, and `platform_message_id`.
 
 Hydration rules:
 
 - Adapter-provided metadata wins over database fallback metadata.
-- Database fallback MUST use exact platform/channel/message-id scope.
-- Database fallback MUST NOT use fuzzy text, timestamp, body, or display-name
-  matching.
+- Database fallback uses exact platform/channel/message-id scope.
 - Missing fallback rows are allowed and should degrade to the original adapter
   metadata.
 
@@ -358,8 +334,8 @@ necessarily completed. Delivery receipt adapters therefore need bounded
 `not_found` retry behavior. The service side remains simple: it updates the row
 if the row exists and returns `not_found` otherwise.
 
-No caller may assume that a non-empty `delivery_tracking_id` is already visible
-in the database at the exact moment `/chat` returns.
+Callers treat `delivery_tracking_id` visibility as eventually consistent with
+assistant-row persistence.
 
 ## Debug Modes
 
@@ -371,13 +347,12 @@ in the database at the exact moment `/chat` returns.
 | `think_only` | Run thinking but suppress returned messages. |
 | `no_remember` | Skip consolidation/remembering side effects for the turn. |
 
-Debug modes are service controls, not user-authored natural language
-preferences. Adapters and debug clients may set them explicitly; downstream LLM
-stages must not infer them from message text.
+Debug modes are explicit service controls. Adapters and debug clients set them
+directly, and downstream stages receive them as structured state.
 
 ## Ownership Rules
 
-Runtime adapters MUST own:
+Runtime adapters own:
 
 - Platform event subscription and SDK/websocket lifecycle.
 - Platform-specific parsing and outgoing rendering.
@@ -388,7 +363,7 @@ Runtime adapters MUST own:
 - Registering and heartbeating runtime callback URLs when scheduler delivery
   is enabled.
 
-The brain service MUST own:
+The brain service owns:
 
 - Pydantic API validation.
 - Queueing and collapse policy.
@@ -399,7 +374,7 @@ The brain service MUST own:
 - Runtime adapter registry integration for scheduler dispatch.
 - Health response composition.
 
-The database package MUST own:
+The database package owns:
 
 - MongoDB collection access.
 - Delivery receipt row update mechanics.
@@ -442,22 +417,3 @@ Runtime callback registration failures should be logged by adapters and retried
 through heartbeat/startup behavior. Missing runtime adapters cause scheduler
 delivery validation to reject or fail scheduled sends according to dispatcher
 policy.
-
-## Change Control
-
-Changes to this ICD are required when:
-
-- A service endpoint is added, removed, or changes request/response meaning.
-- `ChatRequest`, `ChatResponse`, `DeliveryReceiptRequest`, or runtime adapter
-  registration models change.
-- Adapter delivery receipt semantics change.
-- Reply-context hydration uses a new source or matching rule.
-- Normal `/chat` and scheduler/proactive delivery lifecycles are merged or
-  otherwise made to share persistence semantics.
-
-Any change must include tests at the boundary it affects:
-
-- service contract or endpoint tests for brain behavior,
-- adapter tests for platform send and receipt behavior,
-- database helper tests for persistence side effects,
-- message envelope tests when inbound typed metadata changes.

@@ -15,6 +15,11 @@ brain service. It is the source of truth for what data may cross the `/chat`
 boundary and who is responsible for producing, validating, storing, and
 consuming each field.
 
+The top-level brain service HTTP request and response models are owned by the
+[Brain Service ICD](../brain_service/README.md). This ICD owns the
+`message_envelope` payload embedded in `/chat` and the typed-message invariants
+that follow from it.
+
 ## Purpose
 
 The message envelope prevents platform transport syntax from becoming chatbot
@@ -40,9 +45,8 @@ reason over semantic fields, not rediscover platform syntax from prose.
 ## Role Vocabulary
 
 The word `role` is reserved for conversation author role after the envelope
-enters the brain service. Other role-like concepts MUST use their own field
-names so prompts and typed dicts do not force local LLMs or maintainers to infer
-the namespace from shape alone.
+enters the brain service. Other role-like concepts use their own field names so
+prompts and typed dicts keep the namespace explicit.
 
 | Namespace | Field / Type | Allowed Values | Owner | Meaning |
 | --- | --- | --- | --- | --- |
@@ -58,22 +62,18 @@ the namespace from shape alone.
 
 This ICD covers:
 
-- The `/chat` request shape accepted by the brain service.
-- The `MessageEnvelope` shape embedded in every `/chat` request.
+- The `message_envelope` payload embedded in every brain service `/chat`
+  request.
 - Responsibilities of runtime adapters before calling `/chat`.
 - Responsibilities of the brain service after receiving `/chat`.
 - Extension points exported by `kazusa_ai_chatbot.message_envelope`.
 - Storage and retrieval invariants for typed conversation rows.
 - Failure behavior when the contract is violated.
 
-This ICD does not cover:
-
-- Outbound platform rendering details such as how an adapter sends messages
-  back to a platform.
-- Platform login, websocket lifecycle, heartbeat, or callback registration.
-- Durable database migration procedures outside the typed fields described
-  here.
-- Character voice, dialog style, or model prompt content.
+Related contracts are owned by their subsystem docs: the brain service ICD owns
+top-level HTTP models and runtime adapter registration, adapters own platform
+rendering and SDK lifecycles, the database ICD owns durable storage mechanics,
+and dialog code owns character voice.
 
 ## Parties
 
@@ -92,25 +92,14 @@ The brain service is the platform-agnostic FastAPI service that accepts `/chat`,
 queues work, builds graph state, runs the persona pipeline, persists
 conversation rows, and returns text responses plus reply intent.
 
-The brain service consumes only the typed envelope. It does not parse platform
-wire syntax.
+The brain service consumes the typed envelope.
 
 ### Message Envelope Package
 
 `kazusa_ai_chatbot.message_envelope` owns shared TypedDicts, Protocols,
 registries, attachment policy, and platform-neutral resolver slots.
 
-The package does not own concrete platform normalizers. Platform normalizers
-belong in adapter modules.
-
-## Normative Language
-
-The words `MUST`, `MUST NOT`, `SHOULD`, and `MAY` are normative:
-
-- `MUST`: required for the interface to be valid.
-- `MUST NOT`: forbidden by the interface.
-- `SHOULD`: expected unless a documented local reason exists.
-- `MAY`: allowed extension behavior.
+Platform normalizers belong in adapter modules.
 
 ## Boundary Summary
 
@@ -129,28 +118,15 @@ The adapter is the only party that understands the platform wire grammar. The
 brain service is allowed to assume the `/chat` payload already satisfies this
 ICD.
 
-## `/chat` Request Contract
+## `/chat` Envelope Boundary
 
-Every `/chat` request MUST provide the following top-level fields accepted by
-`ChatRequest`:
+The top-level `/chat` request model is `ChatRequest` and is defined by the
+[Brain Service ICD](../brain_service/README.md).
 
-| Field | Type | Owner | Meaning |
-| --- | --- | --- | --- |
-| `platform` | `str` | adapter | Stable platform key for the runtime adapter. |
-| `platform_channel_id` | `str` | adapter | Platform channel id. Empty string for direct/private contexts when the platform has no channel id. |
-| `channel_type` | `str` | adapter | Channel class. Current supported values are operationally `group` and `private`. |
-| `platform_message_id` | `str` | adapter | Platform message id, if available. |
-| `platform_user_id` | `str` | adapter | Platform id of the inbound message author. |
-| `platform_bot_id` | `str` | adapter | Platform id of the active bot account, if available. |
-| `display_name` | `str` | adapter | Display name of the inbound message author. |
-| `channel_name` | `str` | adapter | Human-readable channel label, if available. |
-| `content_type` | `str` | adapter | High-level input type such as `text`, `image`, or `mixed`. |
-| `message_envelope` | `MessageEnvelopeIn` | adapter | The required typed envelope defined below. |
-| `timestamp` | `str` | adapter | Event timestamp. Empty string means the service will use receive time. |
-| `debug_modes` | `DebugModesIn` | caller | Optional debug controls. |
-
-The brain service validates this model with extra fields forbidden. A request
-that does not match this model is not a compatible `/chat` request.
+For this ICD, the relevant service-level rule is narrower: every compatible
+`/chat` request includes a `message_envelope` value that satisfies the contract
+below. The brain service validates top-level request fields and extra field
+rejection according to the brain service ICD.
 
 ## `MessageEnvelope` Contract
 
@@ -169,7 +145,8 @@ defined in `types.py` and mirrored by the service-side Pydantic input model.
 
 ### `body_text`
 
-`body_text` MUST contain only authored semantic content. It MUST NOT contain:
+`body_text` contains authored semantic content. Adapter normalization removes
+platform transport syntax, including:
 
 - Platform mention tags.
 - CQ codes.
@@ -178,26 +155,23 @@ defined in `types.py` and mirrored by the service-side Pydantic input model.
 - Channel tags.
 - Role tags.
 - Custom emoji tags.
-- Any synthetic marker inserted only to help platform transport.
+- Platform-only synthetic markers are represented through typed metadata.
 
-`body_text` MAY be an empty string when the message is attachment-only or when
+`body_text` can be an empty string when the message is attachment-only or when
 the authored content is only transport syntax.
 
 The brain service derives `user_input`, RAG queries, cognition input, dialog
 context, conversation progress input, and search text from `body_text` plus
-attachment `description` text. The brain service MUST NOT derive semantic input
-from `raw_wire_text`.
+attachment `description` text.
 
 ### `raw_wire_text`
 
 `raw_wire_text` preserves the platform text for audit, debugging, and replay.
-It MAY contain platform syntax. It MUST NOT be sent to local LLM prompts, RAG
-search text, cache semantic keys, scoped interaction history, or cognition as
-content.
+It can contain platform syntax and remains audit/replay data.
 
 ### `mentions`
 
-Each mention record SHOULD use this shape:
+Each mention record uses this shape:
 
 | Field | Type | Meaning |
 | --- | --- | --- |
@@ -209,12 +183,12 @@ Each mention record SHOULD use this shape:
 
 Only `bot` and `user` mentions can contribute to
 `addressed_to_global_user_ids`. Platform-role, channel, everyone, and unknown
-mentions are metadata and MUST NOT be treated as resolved user addressees.
-Consumers MUST treat `unknown` as ignore-on-input.
+mentions stay as metadata. Consumers ignore `unknown` mentions for addressed
+user resolution.
 
 ### `reply`
 
-`reply` identifies the typed target of a reply. It SHOULD use this shape:
+`reply` identifies the typed target of a reply. It uses this shape:
 
 | Field | Type | Meaning |
 | --- | --- | --- |
@@ -234,7 +208,7 @@ but `reply_context` is derived data. It is not the source of truth.
 
 ### `attachments`
 
-Each attachment reference SHOULD use this shape:
+Each attachment reference uses this shape:
 
 | Field | Type | Meaning |
 | --- | --- | --- |
@@ -250,8 +224,8 @@ payloads may be present in current-turn envelopes for direct modality work, but
 durable storage may omit `base64_data` according to the deployment storage
 policy.
 
-Attachment handlers MUST preserve description bytes exactly. Large binary
-payloads MAY be stored as URL-only according to `attachment_policy.py`; inline
+Attachment handlers preserve description bytes exactly. Large binary
+payloads can be stored as URL-only according to `attachment_policy.py`; inline
 binary persistence is config-gated.
 
 ### `addressed_to_global_user_ids`
@@ -260,21 +234,21 @@ This field records the typed inbound addressee set.
 
 For `channel_type="private"`:
 
-- The adapter or envelope factory MUST address inbound user rows to the active
+- The adapter or envelope factory addresses inbound user rows to the active
   character's global user id.
-- `broadcast` MUST be `False`.
+- `broadcast` is `False`.
 
 For group-like channels:
 
-- Direct bot mentions SHOULD include the active character's global user id.
-- Native replies to the bot SHOULD include the active character's global user id
+- Direct bot mentions include the active character's global user id.
+- Native replies to the bot include the active character's global user id
   when the reply target is resolved.
-- Direct mentions or replies to another resolved user SHOULD include that
+- Direct mentions or replies to another resolved user include that
   user's global id.
-- Messages without a typed direct target SHOULD use an empty list and
+- Messages without a typed direct target use an empty list and
   `broadcast=False` on inbound user envelopes.
 
-The list MUST be deduplicated and deterministic.
+The list is deduplicated and deterministic.
 
 ### `broadcast`
 
@@ -283,83 +257,53 @@ intentionally address the channel rather than one participant.
 `broadcast=False` is required for inbound user envelopes and normal
 assistant-authored replies.
 
-`broadcast` MUST NOT be used as a replacement for
-`addressed_to_global_user_ids`. Consumers that need exact addressee identity
-must read the list.
+Consumers that need exact addressee identity read
+`addressed_to_global_user_ids`.
 
 ## Adapter Responsibilities
 
-A runtime adapter MUST:
+A runtime adapter:
 
-1. Parse platform wire events before calling `/chat`.
-2. Build a complete `MessageEnvelope`.
-3. Remove platform transport syntax from `body_text`.
-4. Preserve original text in `raw_wire_text`.
-5. Populate typed mentions and reply targets when available.
-6. Resolve the active bot mention to the active character global user id.
-7. Derive inbound `addressed_to_global_user_ids` deterministically.
-8. Set inbound envelope `broadcast` to `False`.
-9. Normalize attachments through registered `AttachmentHandler` implementations.
-10. Send only the typed envelope and top-level `ChatRequest` fields to `/chat`.
-
-An adapter MUST NOT:
-
-- Send raw platform wire syntax as `body_text`.
-- Depend on the brain service to strip platform syntax.
-- Send legacy addressing booleans as source-of-truth fields.
-- Put platform-specific normalizer code under `message_envelope`.
-- Invent brain-side compatibility fields to preserve old behavior.
-- Omit `message_envelope` from `/chat`.
-- Send extra fields outside the `/chat` model and expect them to be ignored.
+1. Parses platform wire events before calling `/chat`.
+2. Builds a complete `MessageEnvelope`.
+3. Removes platform transport syntax from `body_text`.
+4. Preserves original text in `raw_wire_text`.
+5. Populates typed mentions and reply targets when available.
+6. Resolves the active bot mention to the active character global user id.
+7. Derives inbound `addressed_to_global_user_ids` deterministically.
+8. Sets inbound envelope `broadcast` to `False`.
+9. Normalizes attachments through registered `AttachmentHandler`
+   implementations.
+10. Sends only the typed envelope and top-level `ChatRequest` fields to `/chat`.
 
 ## Brain Service Responsibilities
 
-The brain service MUST:
+The brain service:
 
-1. Require `message_envelope` on every `/chat` request.
-2. Reject incompatible request shapes through model validation.
-3. Derive graph `user_input` from `message_envelope.body_text`, plus collapsed
+1. Requires `message_envelope` on every `/chat` request.
+2. Rejects incompatible request shapes through model validation.
+3. Derives graph `user_input` from `message_envelope.body_text`, plus collapsed
    body text when the queue explicitly coalesces compatible messages.
-4. Derive internal reply context from `message_envelope.reply`.
-5. Persist typed conversation rows with `body_text`, `raw_wire_text`,
+4. Derives internal reply context from `message_envelope.reply`.
+5. Persists typed conversation rows with `body_text`, `raw_wire_text`,
    `mentions`, `reply`, `attachments`, `addressed_to_global_user_ids`, and
    `broadcast`.
-6. Use `body_text` and attachment descriptions for embeddings and retrieval.
-7. Use typed addressee fields when filtering recent interaction history.
-8. Persist assistant rows with unrendered assistant `body_text` and typed
+6. Uses `body_text` and attachment descriptions for embeddings and retrieval.
+7. Uses typed addressee fields when filtering recent interaction history.
+8. Persists assistant rows with unrendered assistant `body_text` and typed
    outbound addressee fields.
 
-The brain service MUST NOT:
-
-- Parse CQ codes, native mention tags, role tags, channel tags, emoji tags, or
-  reply boilerplate.
-- Treat `raw_wire_text` as semantic user input.
-- Reconstruct addressees from interleaving heuristics when typed fields are
-  present.
-- Provide a legacy fallback path for non-envelope `/chat` requests.
-- Silently synthesize missing required envelope fields.
-- Import concrete platform adapter normalizers.
-
-The brain service MAY crash or return a validation error when an adapter sends a
-non-compatible request. That failure is preferred over silently contaminating
-memory, RAG, or cognition with transport syntax.
+The brain service returns validation errors for incompatible envelope shapes.
 
 ## Message Envelope Package Responsibilities
 
-`kazusa_ai_chatbot.message_envelope` MUST provide:
+`kazusa_ai_chatbot.message_envelope` provides:
 
 - Public TypedDict contracts in `types.py`.
 - Public Protocol extension points in `protocols.py`.
 - Public registries in `registry.py`.
 - Platform-neutral mention resolver slots in `resolvers.py`.
 - Shared attachment policy and handlers for modality-level behavior.
-
-`kazusa_ai_chatbot.message_envelope` MUST NOT provide:
-
-- Concrete platform normalizer modules.
-- Platform regexes for platform event parsing.
-- Brain-side sanitizer helpers.
-- Compatibility shims for legacy `/chat` requests.
 
 Concrete normalizers live in adapter modules. Shared adapter-only construction
 helpers may live under `src/adapters`, not under the brain package.
@@ -390,14 +334,13 @@ may resolve user mentions without changing adapter parser logic.
 ### `AttachmentHandler`
 
 Converts raw adapter attachment payloads into `AttachmentRef` records and
-chooses storage shape. Handlers are modality-level extensions, not platform
-normalizers.
+chooses storage shape. Handlers are modality-level extensions owned separately
+from platform normalizers.
 
 ### `NormalizerRegistry`
 
 Maps platform keys to `EnvelopeNormalizer` implementations. Adapters register
-their own normalizer with the service/runtime layer. Brain modules do not
-retrieve concrete normalizers for content repair.
+their own normalizer with the service/runtime layer.
 
 ### `AttachmentHandlerRegistry`
 
@@ -426,9 +369,8 @@ group message with no typed direct target
   -> broadcast = true
 ```
 
-Adapters SHOULD keep address derivation explainable and deterministic. If a
-platform event cannot identify a target, the adapter should mark the message as
-broadcast rather than ask the brain service to infer the addressee from prose.
+Adapters keep address derivation explainable and deterministic. If a platform
+event lacks a typed target, the adapter marks the message as broadcast.
 
 ## Outbound Addressing Rules
 
@@ -442,7 +384,7 @@ For normal non-broadcast replies, the dialog path defaults to the current
 in-turn user when dialog is produced. Empty dialog produces an empty target
 list. Explicit broadcast output must set `target_broadcast=True`.
 
-Assistant rows persisted to conversation history MUST store:
+Assistant rows persisted to conversation history store:
 
 - `body_text`: assistant-authored text before outbound platform rendering.
 - `raw_wire_text`: rendered outbound wire text when available, otherwise the
@@ -455,8 +397,8 @@ assistant turns were addressed to which participant in group channels.
 
 ## Storage and Retrieval Invariants
 
-New conversation rows MUST store typed envelope fields. Retrieval consumers MUST
-read typed fields:
+New conversation rows store typed envelope fields. Retrieval consumers read
+typed fields:
 
 - Scoped interaction history filters assistant rows by
   `addressed_to_global_user_ids` and `broadcast`.
@@ -464,9 +406,9 @@ read typed fields:
 - Embedding source is `body_text` plus attachment `description` text.
 - `raw_wire_text` is for audit and replay, not semantic search.
 
-The current interface is strict. There is no alternate `/chat` path for legacy
-content-only requests. If historical data exists, it must be migrated or handled
-by explicit database migration tools before it enters strict consumers.
+The current interface is strict and envelope-based. Historical content-only
+data can be handled by explicit database migration tools before it enters
+strict consumers.
 
 ## Failure Policy
 
@@ -478,79 +420,31 @@ Invalid adapter payloads fail at the service boundary. Examples:
 - Non-list `mentions`, `attachments`, or `addressed_to_global_user_ids`.
 - Non-boolean `broadcast`.
 
-The brain service SHOULD log enough request scope to identify the adapter and
-message id. It SHOULD NOT repair the envelope by parsing wire syntax.
+The brain service logs enough request scope to identify the adapter and message
+id.
 
-Adapter-side parsing failures SHOULD be handled by the adapter. If the adapter
-cannot safely normalize a platform event, it should drop, log, or dead-letter
-that event according to adapter policy rather than send a partially compatible
-request.
+Adapter-side parsing failures are handled by the adapter according to adapter
+policy.
 
 ## Security and Privacy Notes
 
 - `raw_wire_text` may contain platform identifiers or syntax. Treat it as audit
   data.
-- `base64_data` may contain binary user content. Keep it out of normal prompt
-  payloads unless a future direct-modality contract explicitly allows it.
-- `display_name` is informational. Do not use display names as durable identity.
+- `base64_data` may contain binary user content. Normal prompt payloads use
+  attachment descriptions.
+- `display_name` is informational.
 - Durable identity uses `global_user_id` when known.
 
-## Versioning and Change Control
+## Public Imports
 
-Changes to this ICD require corresponding updates to:
-
-- `types.py`
-- service input models
-- adapter normalizers
-- storage schema/tests
-- boundary tests
-- any consuming graph state TypedDicts
-
-Adding a required envelope field is a breaking interface change and must update
-all adapters in the same change set. The brain service does not maintain a
-secondary compatibility path for missing required fields.
-
-Adding an optional typed field is allowed when:
-
-- The field has a clear owner.
-- The field is not parsed from `body_text` by brain modules.
-- Tests prove adapters can omit it safely or populate it consistently.
-
-## Verification Checklist
-
-Before merging changes that touch this interface, verify:
-
-- `/chat` rejects extra top-level request fields.
-- `/chat` requires `message_envelope`.
-- Adapter tests prove platform wire markers are removed from `body_text`.
-- Adapter tests prove typed mentions and replies are populated.
-- Adapter tests prove inbound addressees and `broadcast` are deterministic.
-- Brain static checks show no platform marker parsing under
-  `src/kazusa_ai_chatbot`.
-- Brain static checks show no brain-side sanitizer helpers.
-- Conversation storage tests prove typed fields are persisted.
-- Retrieval tests prove `body_text` is used for search and embeddings.
-- Group-history tests prove assistant rows are filtered by typed addressee.
-- Attachment tests prove descriptions are preserved and binary storage policy is
-  respected.
-
-## Import Rules
-
-Allowed for brain modules:
+Brain modules use:
 
 - `from kazusa_ai_chatbot.message_envelope import MessageEnvelope`
 - Other public TypedDicts or Protocols from `kazusa_ai_chatbot.message_envelope`
   when needed for type annotations.
 
-Allowed for adapters:
+Adapters use:
 
 - Public TypedDicts, Protocols, registries, and resolver slots from
   `kazusa_ai_chatbot.message_envelope`.
 - Adapter-owned helper modules under `src/adapters`.
-
-Forbidden:
-
-- Brain modules importing concrete adapter normalizers.
-- `message_envelope` importing concrete platform adapters.
-- Platform normalizer modules under `kazusa_ai_chatbot.message_envelope`.
-- Prompt or RAG modules parsing platform wire syntax.
