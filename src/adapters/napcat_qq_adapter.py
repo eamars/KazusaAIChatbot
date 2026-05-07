@@ -53,6 +53,38 @@ _CQ_AT_PATTERN = re.compile(r"\[CQ:at,qq=([^\],]+)[^\]]*\]")
 _CQ_ANY_PATTERN = re.compile(r"\[CQ:[^\]]+\]")
 
 
+def _outbound_message_payload(
+    text: str,
+    reply_to_msg_id: str | None,
+) -> str | list[dict[str, dict[str, str] | str]]:
+    """Build a OneBot message payload for normal or reply-anchored sends.
+
+    Args:
+        text: Plain message text to send.
+        reply_to_msg_id: Platform message id to quote with a native reply
+            segment, if the caller requested reply anchoring.
+
+    Returns:
+        A plain text payload for ordinary sends, or a structured message segment
+        array for reply sends.
+    """
+
+    if not reply_to_msg_id:
+        return_value = text
+    else:
+        return_value = [
+            {
+                "type": "reply",
+                "data": {"id": str(reply_to_msg_id)},
+            },
+            {
+                "type": "text",
+                "data": {"text": text},
+            },
+        ]
+    return return_value
+
+
 class QQEnvelopeNormalizer:
     """Adapter-local QQ/NapCat normalizer for brain-safe envelopes."""
 
@@ -673,21 +705,47 @@ class NapCatWSAdapter:
         )
         if replies:
             combined = "\n".join(replies)
+            reply_to_msg_id = None
+            if brain_data.get("should_reply"):
+                reply_to_msg_id = str(data["message_id"])
             msg_params = {
                 "message_type": "group" if is_group else "private",
                 "group_id" if is_group else "user_id": int(channel_id),
-                "message": combined
+                "message": _outbound_message_payload(
+                    combined,
+                    reply_to_msg_id,
+                ),
             }
-            if brain_data.get("should_reply"):
-                msg_params["message"] = f"[CQ:reply,id={data['message_id']}]" + combined
 
             logger.debug(
                 f"Sending QQ message: channel_id={channel_id} "
                 f'message={log_preview(msg_params["message"])}'
             )
 
-            # We don't need to wait for 'send_msg' response usually
-            await ws.send(json.dumps({"action": "send_msg", "params": msg_params}))
+            try:
+                send_response = await self._call_api(
+                    ws,
+                    "send_msg",
+                    msg_params,
+                )
+            except (
+                asyncio.TimeoutError,
+                websockets.exceptions.WebSocketException,
+            ) as exc:
+                logger.warning(
+                    f"QQ send_msg failed: channel_id={channel_id} "
+                    f"error={exc}"
+                )
+                return
+
+            send_status = send_response.get("status")
+            if send_status != "ok":
+                retcode = send_response.get("retcode")
+                message = send_response.get("message")
+                logger.warning(
+                    f"QQ send_msg returned status={send_status} "
+                    f"retcode={retcode} message={log_preview(message)}"
+                )
 
     async def close(self):
         """Close adapter-owned network clients and callback server."""
@@ -726,20 +784,36 @@ class NapCatWSAdapter:
         if self._ws is None:
             raise RuntimeError("NapCat websocket is not connected")
 
-        message = text
-        if reply_to_msg_id:
-            message = f"[CQ:reply,id={reply_to_msg_id}]{message}"
-
         params = {
             "message_type": "group",
             "group_id": int(channel_id),
-            "message": message,
+            "message": _outbound_message_payload(text, reply_to_msg_id),
         }
-        await self._ws.send(json.dumps({"action": "send_msg", "params": params}))
+        try:
+            response = await self._call_api(self._ws, "send_msg", params)
+        except (
+            asyncio.TimeoutError,
+            websockets.exceptions.WebSocketException,
+        ) as exc:
+            raise RuntimeError(f"NapCat send_msg failed: {exc}") from exc
+
+        status = response.get("status")
+        if status != "ok":
+            retcode = response.get("retcode")
+            message = response.get("message")
+            raise RuntimeError(
+                f"NapCat send_msg failed: status={status} "
+                f"retcode={retcode} message={message}"
+            )
+
+        response_data = response.get("data") or {}
+        message_id = ""
+        if isinstance(response_data, dict):
+            message_id = str(response_data.get("message_id") or "")
         return_value = SendResult(
             platform=self.platform,
             channel_id=channel_id,
-            message_id="",
+            message_id=message_id,
             sent_at=datetime.now(timezone.utc),
         )
         return return_value

@@ -507,10 +507,10 @@ _RELEVANCE_SYSTEM_NOISY_PROMPT = """\
 请务必返回合法的 JSON 字符串，仅包含以下字段：
 {{
     "should_respond": boolean,
-    "reason_to_respond": string,
+    "reason_to_respond": "说明为什么本轮应该回应或保持沉默，重点引用结构化指向、群聊噪音、语法角色或历史连续性",
     "use_reply_feature": boolean,
-    "channel_topic": string,
-    "indirect_speech_context": string
+    "channel_topic": "概括当前群聊正在讨论的话题；没有明确话题时输出空字符串",
+    "indirect_speech_context": "空字符串表示直接对话；非空时说明实际听众是谁，以及角色在消息中是被讨论对象还是被请求回应者"
 }}
 """
 

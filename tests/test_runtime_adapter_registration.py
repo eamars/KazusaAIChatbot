@@ -311,6 +311,91 @@ async def test_napcat_handle_event_sends_clean_body_text_and_typed_envelope():
 
 
 @pytest.mark.asyncio
+async def test_napcat_handle_event_sends_reply_as_message_segments():
+    """Inbound reply intent should render as structured OneBot reply segments."""
+
+    adapter = NapCatWSAdapter(
+        ws_url="ws://napcat.local/ws",
+        ws_token="token",
+        brain_url="http://127.0.0.1:8000",
+        brain_response_timeout=30,
+        runtime_host="127.0.0.1",
+        runtime_port=8011,
+        runtime_public_url="http://127.0.0.1:8011",
+        channel_ids=["905393941"],
+        debug_modes={},
+    )
+    adapter.bot_id = "3768713357"
+    adapter.bot_name = "Kazusa"
+    adapter.brain_client.post = AsyncMock(return_value=_DummyResponse({
+        "messages": ["hello there"],
+        "should_reply": True,
+    }))
+    ws = _FakeNapCatWebSocket({"message_id": "outbound-1"})
+
+    await adapter.handle_event(
+        {
+            "post_type": "message",
+            "message_type": "group",
+            "message_id": 1602974844,
+            "group_id": 905393941,
+            "user_id": 2787858400,
+            "sender": {"nickname": "User A"},
+            "message": [
+                {"type": "at", "data": {"qq": "3768713357"}},
+                {"type": "text", "data": {"text": " hi"}},
+            ],
+        },
+        ws,
+    )
+
+    send_payloads = [
+        payload
+        for payload in ws.sent_payloads
+        if payload["action"] == "send_msg"
+    ]
+    assert len(send_payloads) == 1
+    assert send_payloads[0]["params"]["message"] == [
+        {"type": "reply", "data": {"id": "1602974844"}},
+        {"type": "text", "data": {"text": "hello there"}},
+    ]
+    await adapter.close()
+
+
+@pytest.mark.asyncio
+async def test_napcat_runtime_send_message_uses_reply_segments():
+    """Runtime reply sends should use structured OneBot reply segments."""
+
+    adapter = NapCatWSAdapter(
+        ws_url="ws://napcat.local/ws",
+        ws_token="token",
+        brain_url="http://127.0.0.1:8000",
+        brain_response_timeout=30,
+        runtime_host="127.0.0.1",
+        runtime_port=8011,
+        runtime_public_url="http://127.0.0.1:8011",
+        channel_ids=["54369546"],
+        debug_modes={},
+    )
+    ws = _FakeNapCatWebSocket({"message_id": "outbound-1"})
+    adapter._ws = ws
+
+    result = await adapter.send_message(
+        channel_id="54369546",
+        text="scheduled hello",
+        reply_to_msg_id="1615877136",
+    )
+
+    assert ws.sent_payloads[0]["action"] == "send_msg"
+    assert ws.sent_payloads[0]["params"]["message"] == [
+        {"type": "reply", "data": {"id": "1615877136"}},
+        {"type": "text", "data": {"text": "scheduled hello"}},
+    ]
+    assert result.message_id == "outbound-1"
+    await adapter.close()
+
+
+@pytest.mark.asyncio
 async def test_napcat_register_with_brain_posts_runtime_callback(monkeypatch):
     """NapCat startup should register its callback URL with the brain service."""
 
