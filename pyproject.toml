@@ -52,6 +52,7 @@ dev = [
 create-embeddings = "scripts.create_conversation_history_embedding:async_main"
 search-conversations = "scripts.search_conversation:async_main"
 identify-user-image = "scripts.identify_user_image:async_main"
+identify-group-image = "scripts.identify_group_image:async_main"
 export-chat-history = "scripts.export_chat_history:async_main"
 export-user-profile = "scripts.export_user_profile:async_main"
 export-user-image = "scripts.export_user_image:async_main"
