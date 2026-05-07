@@ -57,26 +57,35 @@ def _state() -> dict:
 @pytest.mark.asyncio
 async def test_global_state_updater_receives_grounding_fields(monkeypatch) -> None:
     llm = _CapturingAsyncLLM({
-        "mood": "Neutral",
-        "global_vibe": "Softened",
+        "mood": "平稳",
+        "global_vibe": "松弛",
         "reflection_summary": "只是普通整理，没有留下强烈情绪。",
     })
     monkeypatch.setattr(reflection_module, "_global_state_updater_llm", llm)
 
-    await reflection_module.global_state_updater(_state())
+    result = await reflection_module.global_state_updater(_state())
 
     system_prompt = llm.messages[0].content
     payload = json.loads(llm.messages[1].content)
-    assert "不会收到完整角色资料" in system_prompt
+    assert "不会收到完整设定资料" in system_prompt
     assert "final_dialog" in system_prompt
     assert "弱证据" in system_prompt
     assert "强负面状态准入" in system_prompt
+    assert "不要从固定例词中挑选" in system_prompt
+    assert '"mood": "心情描述"' in system_prompt
+    assert '"global_vibe": "氛围描述"' in system_prompt
+    assert "例如：包括但不限于" not in system_prompt
+    assert '"Neutral"' not in system_prompt
+    assert '"Defensive"' not in system_prompt
+    assert "既有英文状态标签" not in system_prompt
     assert "# 记忆视角契约" in system_prompt
     assert "杏山千纱" in system_prompt
-    assert "不要用“我”指代当前角色" in system_prompt
+    assert "不要用“我”指代 `杏山千纱`" in system_prompt
     assert "以杏山千纱的第一人称" not in system_prompt
     assert payload["logical_stance"] == "CONFIRM"
     assert payload["decontexualized_input"] == "不是在拉开距离，只是顺手整理线材。"
+    assert result["mood"] == "平稳"
+    assert result["global_vibe"] == "松弛"
 
 
 @pytest.mark.asyncio
@@ -94,7 +103,7 @@ async def test_relationship_recorder_receives_reassurance_context(monkeypatch) -
     system_prompt = llm.messages[0].content
     payload = json.loads(llm.messages[1].content)
     assert "输入纠偏规则" in system_prompt
-    assert "不会收到完整角色资料" in system_prompt
+    assert "不会收到完整设定资料" in system_prompt
     assert "证据分层规则" in system_prompt
     assert "普通任务默认跳过" in system_prompt
     assert "# 记忆视角契约" in system_prompt

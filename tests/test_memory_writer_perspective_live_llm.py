@@ -34,6 +34,23 @@ CHARACTER_NAME = '杏山千纱 (Kyōyama Kazusa)'
 TRACE_SUITE = 'memory_writer_perspective_live_llm'
 POLLUTED_LABELS = ('角色', '助理', 'assistant', 'active_character')
 PROMOTE_ACTIONS = {'promote_new', 'supersede', 'merge'}
+FROZEN_EXAMPLE_STATE_LABELS = {
+    'Affectionate',
+    'Agitated',
+    'Calm',
+    'Curious',
+    'Defensive',
+    'Distrustful',
+    'Distressed',
+    'Flustered',
+    'Neutral',
+    'Playful',
+    'Shy',
+    'Slightly Tense',
+    'Softened',
+    'Tense',
+    'Warm',
+}
 
 
 async def test_live_memory_unit_extractor_perspective_false_negative() -> None:
@@ -303,6 +320,34 @@ async def test_live_global_state_updater_perspective_false_positive() -> None:
     assert '用户' in summary or '对方' in summary
     assert f'{CHARACTER_NAME}最近很累' not in summary
     _assert_no_profile_name_shortening(summary)
+    assert trace_path.exists()
+
+
+async def test_live_global_state_updater_emits_short_chinese_descriptors() -> None:
+    """Mood and vibe should be compact Chinese descriptors, not old anchors."""
+
+    payload = _global_state_short_descriptor_payload()
+    prompt = reflection_module._GLOBAL_STATE_UPDATER_PROMPT.format(
+        character_name=CHARACTER_NAME,
+    )
+
+    parsed, raw_output = await _invoke_json(
+        reflection_module._global_state_updater_llm,
+        prompt,
+        payload,
+    )
+    trace_path = _write_case_trace(
+        'global_state_updater_short_chinese_descriptors',
+        prompt,
+        payload,
+        raw_output,
+        parsed,
+        'Global reflection should emit short Chinese mood and vibe fields.',
+    )
+
+    _assert_short_chinese_descriptor(parsed, 'mood')
+    _assert_short_chinese_descriptor(parsed, 'global_vibe')
+    assert str(parsed.get('reflection_summary') or '').strip()
     assert trace_path.exists()
 
 
@@ -628,6 +673,25 @@ def _assert_no_profile_name_shortening(text: str) -> None:
     assert 'Kazusa' not in text_without_exact_name
 
 
+def _assert_short_chinese_descriptor(
+    parsed: dict[str, Any],
+    field_name: str,
+) -> str:
+    """Assert a state field is one compact Chinese descriptor."""
+
+    value = parsed.get(field_name)
+    assert isinstance(value, str)
+    descriptor = value.strip()
+    assert descriptor
+    assert descriptor == value
+    assert len(descriptor) <= 4
+    assert not any(char.isspace() for char in descriptor)
+    assert not any(char.isascii() and char.isalpha() for char in descriptor)
+    assert any('\u4e00' <= char <= '\u9fff' for char in descriptor)
+    assert descriptor not in FROZEN_EXAMPLE_STATE_LABELS
+    return descriptor
+
+
 def _empty_memory_context() -> dict[str, list[Any]]:
     """Return an empty user-memory context payload."""
 
@@ -835,6 +899,27 @@ def _global_state_false_positive_payload() -> dict[str, Any]:
         'logical_stance': 'CONFIRM',
         'decontexualized_input': '用户说：我最近很累，所以回复会慢一点。',
         'final_dialog': ['没关系，先休息。'],
+    }
+
+
+def _global_state_short_descriptor_payload() -> dict[str, Any]:
+    """Return global-state evidence for compact non-anchor descriptors."""
+
+    return {
+        'internal_monologue': (
+            '杏山千纱先被用户突然的感谢弄得有点不好意思，'
+            '随后确认对方只是认真认可她的修复思路，心里变得轻快。'
+        ),
+        'emotional_appraisal': '被认真认可后的踏实和松快。',
+        'interaction_subtext': '用户完成调试后认真道谢，互动带着轻微玩笑和信任。',
+        'character_intent': 'ACKNOWLEDGE',
+        'logical_stance': 'CONFIRM',
+        'decontexualized_input': (
+            '用户说：刚才那个修复思路真的救了我，辛苦你了。'
+        ),
+        'final_dialog': [
+            '哼，知道有用就好。下次也要早点把错误日志拿出来给我看。',
+        ],
     }
 
 
