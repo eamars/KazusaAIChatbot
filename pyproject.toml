@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "kazusa_ai_chatbot"
 version = "0.1.0"
-description = "A Discord AI chatbot with personality and memory"
+description = "A platform-agnostic character brain with memory and adapters"
 readme = "README.md"
 license = {file = "LICENSE"}
 authors = [
@@ -16,13 +16,12 @@ classifiers = [
     "Intended Audience :: Developers",
     "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.8",
-    "Programming Language :: Python :: 3.9",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
 ]
-requires-python = ">=3.8"
+requires-python = ">=3.10"
 dependencies = [
     "langgraph>=0.4",
     "langchain-core>=0.3",
@@ -63,10 +62,8 @@ export-character-state = "scripts.export_character_state:async_main"
 character-state-snapshot = "scripts.character_state_snapshot:async_main"
 user-state-snapshot = "scripts.user_state_snapshot:async_main"
 export-collection = "scripts.export_collection:async_main"
-debug-supervisor-speech = "scripts.debug_supervisor_speech:async_main"
-migrate-user-profile-memories = "scripts.migrate_user_profile_memories:main"
 kazusa-ai-chatbot = "kazusa_ai_chatbot.main:main"
-kazusa-brain = "kazusa_ai_chatbot.service:app"
+kazusa-brain = "kazusa_ai_chatbot.main:main"
 kazusa-discord-adapter = "adapters.discord_adapter:main"
 kazusa-debug-adapter = "adapters.debug_adapter:main"
 

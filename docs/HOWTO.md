@@ -80,6 +80,14 @@ MAX_FACT_HARVESTER_RETRY=3
 # Cache2
 RAG_CACHE2_MAX_ENTRIES=5000
 
+# Reflection cycle
+REFLECTION_CYCLE_DISABLED=false
+REFLECTION_CONTEXT_ENABLED=false
+REFLECTION_WORKER_INTERVAL_SECONDS=900
+REFLECTION_HOURLY_SLOTS_PER_TICK=3
+REFLECTION_DAILY_RUN_AFTER_LOCAL_TIME=04:30
+REFLECTION_PROMOTION_RUN_AFTER_LOCAL_TIME=05:00
+
 # Persistent profile-memory policy
 PROFILE_MEMORY_DIARY_TTL_SECONDS=7776000
 PROFILE_MEMORY_FACT_TTL_SECONDS=31536000
@@ -171,8 +179,10 @@ On startup the service:
    are still present.
 3. Loads the active character profile.
 4. Compiles the top-level LangGraph pipeline.
-5. Starts configured MCP servers.
-6. Loads pending scheduled events if scheduling is enabled.
+5. Hydrates persistent Cache2 initializer entries.
+6. Starts configured MCP servers.
+7. Loads pending scheduled events if scheduling is enabled.
+8. Starts the reflection worker unless `REFLECTION_CYCLE_DISABLED=true`.
 
 ## Adapters
 
@@ -346,7 +356,8 @@ is ignored by git.
 
 ## Current Notes
 
-- The supported documented run path is local editable install plus `uvicorn`.
-- `Dockerfile` and `docker-compose.yml` are present, but they still reference
-  `requirements.txt`, so they are not the canonical setup path today.
+- The supported development run path is local editable install plus `uvicorn`.
+- `Dockerfile` installs from `pyproject.toml`; `docker-compose.yml` remains a
+  service-oriented deployment template that expects all required environment
+  variables to be supplied.
 - The required provisioning script is `src/scripts/load_character_profile.py`.

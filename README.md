@@ -18,6 +18,7 @@ Kazusa is an experimental digital-character runtime with:
 - Evidence retrieval over profiles, memories, conversation history, and optional web sources.
 - A process-local input queue that drops burst noise before RAG while preserving addressed messages.
 - Background consolidation that turns completed interactions into durable state.
+- A reflection cycle that reviews past interaction outside the live response path.
 - Scheduled follow-through for accepted future promises.
 - Adapter-neutral deployment across chat platforms.
 
@@ -61,6 +62,7 @@ Background consolidation
   - record conversation progress
   - update durable user/character memory
   - update relationship state and image summaries
+  - run slower reflection and promotion work outside live chat
   - schedule accepted future follow-through
 ```
 
@@ -115,6 +117,10 @@ The database layer stores conversation history, user identities, durable memorie
 
 The dispatcher converts accepted future promises into validated scheduled tasks. The scheduler persists and fires them later through registered platform adapters. This is how Kazusa can follow through on a promised later message without blocking the current turn.
 
+**Reflection Cycle**
+
+Reflection is the slow background sense-making loop. It reads completed conversation windows, stores inspectable hourly and daily reflection runs, and may promote a small amount of durable lore or self-guidance through the memory-evolution boundary. Raw reflection output does not enter normal cognition directly; only promoted reflection context is eligible, and that context is gated by configuration.
+
 **Adapters**
 
 Adapters connect chat platforms to the brain service. They translate platform events into the service API and deliver responses back to the platform.
@@ -161,6 +167,8 @@ Brain service
         |
         +-- background consolidation
         |
+        +-- reflection cycle
+        |
         +-- dispatcher and scheduler
         |
         v
@@ -171,6 +179,7 @@ For deeper technical introductions:
 
 - [Conversation Progress](src/kazusa_ai_chatbot/conversation_progress/README.md)
 - [RAG 2](src/kazusa_ai_chatbot/rag/README.md)
+- [Reflection Cycle](src/kazusa_ai_chatbot/reflection_cycle/README.md)
 - [Dispatcher](src/kazusa_ai_chatbot/dispatcher/README.md)
 - [Database](src/kazusa_ai_chatbot/db/README.md)
 

@@ -1,16 +1,17 @@
 FROM python:3.12-slim
 
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1
+
 WORKDIR /app
 
-# Install dependencies first for layer caching
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+COPY pyproject.toml README.md LICENSE ./
+COPY src ./src
 
-# Copy project files
-COPY . .
+RUN pip install --no-cache-dir .
 
-# Install the package in editable mode so imports work
-RUN pip install --no-cache-dir -e .
+COPY docs ./docs
+COPY personalities ./personalities
 
 EXPOSE 8000
 
