@@ -23,6 +23,31 @@ from kazusa_ai_chatbot.utils import build_interaction_history_recent, log_previe
 logger = logging.getLogger(__name__)
 
 
+def _cognition_requests_silence(state: GlobalPersonaState) -> bool:
+    """Return true when cognition explicitly selected no visible response."""
+
+    action_directives = state.get("action_directives", {})
+    if not isinstance(action_directives, dict):
+        return_value = False
+        return return_value
+
+    contextual_directives = action_directives.get("contextual_directives", {})
+    if not isinstance(contextual_directives, dict):
+        return_value = False
+        return return_value
+
+    expression_willingness = contextual_directives.get(
+        "expression_willingness",
+        "",
+    )
+    if not isinstance(expression_willingness, str):
+        return_value = False
+        return return_value
+
+    return_value = expression_willingness.strip().lower() == "silent"
+    return return_value
+
+
 async def call_action_subgraph(state: GlobalPersonaState) -> dict:
     """Run dialog generation and attach deterministic response addressing.
 
@@ -39,6 +64,23 @@ async def call_action_subgraph(state: GlobalPersonaState) -> dict:
         "final_dialog": final_dialog,
         "target_addressed_user_ids": result["target_addressed_user_ids"],
         "target_broadcast": result["target_broadcast"],
+    }
+    return return_value
+
+
+async def stage_3_no_response(state: GlobalPersonaState) -> dict:
+    """Suppress visible dialog after cognition explicitly chooses silence."""
+
+    logger.info(
+        f'Persona output short-circuited: platform={state["platform"]} '
+        f'channel={state["platform_channel_id"] or "<dm>"} '
+        f'user={state["global_user_id"]}'
+    )
+    return_value = {
+        "should_respond": False,
+        "final_dialog": [],
+        "target_addressed_user_ids": [],
+        "target_broadcast": False,
     }
     return return_value
 
@@ -144,6 +186,15 @@ async def stage_1_research(state: GlobalPersonaState) -> dict:
     return return_value
 
 
+def _route_after_cognition(state: GlobalPersonaState) -> str:
+    """Route persona flow based on cognition's structured response decision."""
+
+    if _cognition_requests_silence(state):
+        return_value = "silent"
+    else:
+        return_value = "respond"
+    return return_value
+
 
 async def persona_supervisor2(state: IMProcessState) -> dict:
     """Run persona reasoning with history scoped to the active user thread.
@@ -161,11 +212,20 @@ async def persona_supervisor2(state: IMProcessState) -> dict:
     persona_builder.add_node("stage_1_research", stage_1_research)
     persona_builder.add_node("stage_2_cognition", call_cognition_subgraph)
     persona_builder.add_node("stage_3_action", call_action_subgraph)  # perform action
+    persona_builder.add_node("stage_3_no_response", stage_3_no_response)
     persona_builder.add_edge(START, "stage_0_msg_decontexualizer")
     persona_builder.add_edge("stage_0_msg_decontexualizer", "stage_1_research")
     persona_builder.add_edge("stage_1_research", "stage_2_cognition")
-    persona_builder.add_edge("stage_2_cognition", "stage_3_action")
+    persona_builder.add_conditional_edges(
+        "stage_2_cognition",
+        _route_after_cognition,
+        {
+            "silent": "stage_3_no_response",
+            "respond": "stage_3_action",
+        },
+    )
     persona_builder.add_edge("stage_3_action", END)
+    persona_builder.add_edge("stage_3_no_response", END)
 
     
     persona_graph = persona_builder.compile()
@@ -207,11 +267,13 @@ async def persona_supervisor2(state: IMProcessState) -> dict:
         "promoted_reflection_context": state.get("promoted_reflection_context"),
         "referents": [],
         "debug_modes": state["debug_modes"],
+        "should_respond": state["should_respond"],
     }
     
     results = await persona_graph.ainvoke(initial_persona_state)
     
     return_value = {
+        "should_respond": results["should_respond"],
         "final_dialog": results["final_dialog"],
         "target_addressed_user_ids": results["target_addressed_user_ids"],
         "target_broadcast": bool(results["target_broadcast"]),

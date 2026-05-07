@@ -351,6 +351,49 @@ async def test_chat_response_omits_tracking_id_when_no_message(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_chat_cognition_silence_skips_user_visible_work(monkeypatch):
+    """A graph-level no-response result should not queue output side effects."""
+
+    await _reset_queue_state()
+    save_assistant_message = AsyncMock()
+    progress_recorder = AsyncMock()
+    consolidation_runner = AsyncMock()
+
+    monkeypatch.setattr(
+        service_module,
+        "_save_assistant_message",
+        save_assistant_message,
+    )
+    monkeypatch.setattr(
+        service_module,
+        "_run_conversation_progress_record_background",
+        progress_recorder,
+    )
+    monkeypatch.setattr(
+        service_module,
+        "_run_consolidation_background",
+        consolidation_runner,
+    )
+    graph_result = _graph_result()
+    graph_result["should_respond"] = False
+    graph_result["final_dialog"] = []
+    graph_result["consolidation_state"] = {}
+    _patch_chat_dependencies(monkeypatch, _FakeGraph(graph_result))
+
+    response = await service_module.chat(
+        _chat_request(),
+        BackgroundTasks(),
+    )
+
+    assert response.messages == []
+    assert response.delivery_tracking_id == ""
+    save_assistant_message.assert_not_awaited()
+    progress_recorder.assert_not_awaited()
+    consolidation_runner.assert_not_awaited()
+    await _reset_queue_state()
+
+
+@pytest.mark.asyncio
 async def test_delivery_receipt_endpoint_returns_updated_and_not_found(monkeypatch):
     """Delivery receipt endpoint should expose idempotent update status."""
     apply_receipt = AsyncMock(side_effect=[True, False])
@@ -732,6 +775,83 @@ async def test_build_graph_preserves_consolidation_state_from_supervisor(monkeyp
 
     assert result["final_dialog"] == ["好呀。"]
     assert result["consolidation_state"]["decontexualized_input"] == "一分钟后发消息"
+
+
+@pytest.mark.asyncio
+async def test_build_graph_preserves_persona_no_response(monkeypatch):
+    """Persona can de-assert should_respond after cognition chooses silence."""
+
+    async def _relevance_agent(_state):
+        return {
+            "should_respond": True,
+            "reason_to_respond": "test",
+            "use_reply_feature": False,
+            "channel_topic": "test",
+            "indirect_speech_context": "",
+        }
+
+    async def _persona_supervisor(_state):
+        return {
+            "should_respond": False,
+            "final_dialog": [],
+            "target_addressed_user_ids": [],
+            "target_broadcast": False,
+            "future_promises": [],
+            "consolidation_state": {
+                "should_respond": False,
+                "final_dialog": [],
+                "decontexualized_input": "silent turn",
+            },
+        }
+
+    monkeypatch.setattr(service_module, "relevance_agent", _relevance_agent)
+    monkeypatch.setattr(service_module, "persona_supervisor2", _persona_supervisor)
+    monkeypatch.setattr(
+        service_module,
+        "load_progress_context",
+        AsyncMock(return_value={
+            "episode_state": None,
+            "conversation_progress": {
+                "status": "new_episode",
+                "episode_label": "",
+                "continuity": "sharp_transition",
+                "turn_count": 0,
+                "user_state_updates": [],
+                "assistant_moves": [],
+                "overused_moves": [],
+                "open_loops": [],
+                "progression_guidance": "",
+            },
+            "source": "empty",
+        }),
+    )
+
+    graph = service_module._build_graph()
+    result = await graph.ainvoke({
+        "timestamp": "2026-04-25T18:07:24+12:00",
+        "platform": "qq",
+        "platform_message_id": "268099968",
+        "platform_user_id": "673225019",
+        "global_user_id": "global-user-1",
+        "user_name": "Test User",
+        "user_input": "ignored message",
+        "user_multimedia_input": [],
+        "user_profile": {"affinity": 500},
+        "platform_bot_id": "bot-id",
+        "character_name": "Character",
+        "character_profile": {"name": "Character"},
+        "platform_channel_id": "673225019",
+        "channel_type": "private",
+        "channel_name": "Private",
+        "chat_history_wide": [],
+        "chat_history_recent": [],
+        "reply_context": {},
+        "debug_modes": {},
+    })
+
+    assert result["should_respond"] is False
+    assert result["final_dialog"] == []
+    assert result["consolidation_state"]["should_respond"] is False
 
 
 @pytest.mark.asyncio

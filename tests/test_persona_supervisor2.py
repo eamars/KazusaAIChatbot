@@ -157,6 +157,74 @@ async def test_persona_supervisor2_returns_final_dialog_and_consolidation_state(
 
 
 @pytest.mark.asyncio
+async def test_persona_supervisor2_silent_cognition_short_circuits_dialog():
+    """Cognition-owned silence should de-assert response before dialog runs."""
+    state = _base_discord_state()
+
+    with (
+        patch(
+            "kazusa_ai_chatbot.nodes.persona_supervisor2.call_msg_decontexualizer",
+            new_callable=AsyncMock,
+            return_value={"decontexualized_input": "Hello"},
+        ),
+        patch(
+            "kazusa_ai_chatbot.nodes.persona_supervisor2.stage_1_research",
+            new_callable=AsyncMock,
+            return_value={"rag_result": {}},
+        ),
+        patch(
+            "kazusa_ai_chatbot.nodes.persona_supervisor2.call_cognition_subgraph",
+            new_callable=AsyncMock,
+            return_value={
+                "internal_monologue": "choosing silence",
+                "action_directives": {
+                    "contextual_directives": {
+                        "social_distance": "cold",
+                        "emotional_intensity": "flat",
+                        "vibe_check": "closed",
+                        "relational_dynamic": "not engaging",
+                        "expression_willingness": "silent",
+                    },
+                    "linguistic_directives": {
+                        "rhetorical_strategy": "remain silent",
+                        "linguistic_style": "none",
+                        "accepted_user_preferences": [],
+                        "content_anchors": [
+                            "[DECISION] remain silent",
+                            "[SCOPE] 0 words",
+                        ],
+                        "forbidden_phrases": [],
+                    },
+                },
+                "interaction_subtext": "",
+                "emotional_appraisal": "",
+                "character_intent": "DISMISS",
+                "logical_stance": "REFUSE",
+            },
+        ),
+        patch(
+            "kazusa_ai_chatbot.nodes.persona_supervisor2.dialog_agent",
+            new_callable=AsyncMock,
+            return_value={
+                "final_dialog": ["should not be used"],
+                "target_addressed_user_ids": ["uuid-123"],
+                "target_broadcast": False,
+            },
+        ) as m_dialog,
+    ):
+        result = await persona_supervisor2(state)
+
+    assert result["should_respond"] is False
+    assert result["final_dialog"] == []
+    assert result["target_addressed_user_ids"] == []
+    assert result["target_broadcast"] is False
+    assert result["future_promises"] == []
+    assert result["consolidation_state"]["should_respond"] is False
+    assert result["consolidation_state"]["final_dialog"] == []
+    m_dialog.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_persona_supervisor2_scopes_group_history_before_persona_stages():
     """Persona stages should not receive another user's addressed subthread."""
     state = _base_discord_state()

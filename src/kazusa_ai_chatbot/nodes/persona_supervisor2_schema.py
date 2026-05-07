@@ -1,6 +1,11 @@
-from typing import Literal, NotRequired, TypedDict
+from typing import Annotated, Literal, NotRequired, TypedDict
 from kazusa_ai_chatbot.conversation_progress import ConversationProgressPromptDoc
-from kazusa_ai_chatbot.state import MultiMediaDoc, DebugModes, ReplyContext
+from kazusa_ai_chatbot.state import (
+    DebugModes,
+    MultiMediaDoc,
+    ReplyContext,
+    keep_false,
+)
 from kazusa_ai_chatbot.db import CharacterProfileDoc, ConversationEpisodeStateDoc, UserProfileDoc
 from kazusa_ai_chatbot.message_envelope import PromptMessageContext
 from kazusa_ai_chatbot.time_context import TimeContextDoc
@@ -47,6 +52,9 @@ class GlobalPersonaState(TypedDict):
 
     # Debug
     debug_modes: DebugModes
+
+    # Response continuation
+    should_respond: Annotated[bool | None, keep_false]
 
     # Bridge variables populated by persona graph nodes
     # Decontextualizer output

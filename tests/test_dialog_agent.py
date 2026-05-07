@@ -103,6 +103,48 @@ def test_dialog_evaluator_prompt_preserves_concise_safe_dialog() -> None:
     assert "若只有软性问题（如修辞展开不足、句子偏短、比喻不够浓），但核心逻辑正确、话题贴合、且未触犯物理污染红线，则仍应 `should_stop: true`" in _DIALOG_EVALUATOR_PROMPT
 
 
+def test_dialog_evaluator_prompt_checks_anchor_fidelity() -> None:
+    """Evaluator prompt should judge dialog against every anchor class."""
+
+    prompt = _DIALOG_EVALUATOR_PROMPT
+    assert '逐项检查所有 `content_anchors`' in prompt
+    assert '[DECISION]' in prompt
+    assert '[FACT]' in prompt
+    assert '[ANSWER]' in prompt
+    assert '[SOCIAL]' in prompt
+    assert '[AVOID_REPEAT]' in prompt
+    assert '[PROGRESSION]' in prompt
+    assert '[SCOPE]' in prompt
+
+
+def test_dialog_evaluator_prompt_orders_hard_gates_before_style() -> None:
+    """Evaluator prompt should read as an ordered weak-model audit."""
+
+    prompt = _DIALOG_EVALUATOR_PROMPT
+    assert '不是决定是否要回复用户' in prompt
+    assert prompt.index('# 1. 判定顺序') < prompt.index('# 2. 核心红线')
+    assert prompt.index('* **锚点忠实与话题对齐') < prompt.index('* **表达安全')
+    assert prompt.index('* **表达安全') < prompt.index('# 3. 软性指标')
+    assert prompt.index('# 3. 软性指标') < prompt.index('# 4. 动态通过逻辑')
+    assert '"should_stop": boolean' in prompt
+    assert 'should_stop=false` 表示必须把 `feedback` 交回生成器重试' in prompt
+
+
+def test_dialog_evaluator_prompt_rejects_unsupported_concrete_content() -> None:
+    """Evaluator prompt should reject concrete claims not backed by anchors."""
+
+    prompt = _DIALOG_EVALUATOR_PROMPT
+    rule_start = prompt.index('未经 `content_anchors` 支持的具体内容')
+    unsupported_rule = prompt[rule_start:rule_start + 500]
+
+    assert '必须驳回' in unsupported_rule
+    assert '型号' in unsupported_rule
+    assert '距离' in unsupported_rule
+    assert '日期' in unsupported_rule
+    assert '时间' in unsupported_rule
+    assert '承诺' in unsupported_rule
+
+
 def test_dialog_generator_prompt_has_no_decision_ownership() -> None:
     """Dialog generation stays an execution renderer, not a decision stage."""
 
