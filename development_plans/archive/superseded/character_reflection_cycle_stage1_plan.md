@@ -16,9 +16,9 @@ This file previously combined reflection-cycle evaluation, memory evolution, and
 
 The approved split is:
 
-- [character_reflection_cycle_stage1a_plan.md](C:/workspace/kazusa_ai_chatbot/development_plans/character_reflection_cycle_stage1a_plan.md): read-only reflection-cycle evaluation against recent data and real LLM behavior.
-- [memory_evolution_stage1b_plan.md](C:/workspace/kazusa_ai_chatbot/development_plans/memory_evolution_stage1b_plan.md): database/search/seeding changes for evolving global persistent memory.
-- [reflection_memory_integration_stage1c_plan.md](C:/workspace/kazusa_ai_chatbot/development_plans/reflection_memory_integration_stage1c_plan.md): bigbang integration that connects approved reflection output to evolved memory.
+- [character_reflection_cycle_stage1a_plan.md](../completed/short_term/character_reflection_cycle_stage1a_plan.md): read-only reflection-cycle evaluation against recent data and real LLM behavior.
+- [memory_evolution_stage1b_plan.md](../completed/short_term/memory_evolution_stage1b_plan.md): database/search/seeding changes for evolving global persistent memory.
+- [reflection_memory_integration_stage1c_plan.md](../completed/short_term/reflection_memory_integration_stage1c_plan.md): bigbang integration that connects approved reflection output to evolved memory.
 
 ## Mandatory Skills
 
@@ -98,6 +98,6 @@ None. This file authorizes no code changes.
 ## Execution Evidence
 
 - Superseded by:
-  - `development_plans/character_reflection_cycle_stage1a_plan.md`
-  - `development_plans/memory_evolution_stage1b_plan.md`
-  - `development_plans/reflection_memory_integration_stage1c_plan.md`
+  - `development_plans/archive/completed/short_term/character_reflection_cycle_stage1a_plan.md`
+  - `development_plans/archive/completed/short_term/memory_evolution_stage1b_plan.md`
+  - `development_plans/archive/completed/short_term/reflection_memory_integration_stage1c_plan.md`

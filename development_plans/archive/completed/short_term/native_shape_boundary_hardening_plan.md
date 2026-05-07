@@ -4,7 +4,7 @@
 
 - Goal: Remove the identified bandage-style shape repairs in risks 1-7 with targeted bug fixes and unit tests, without adding new architecture.
 - Plan class: medium
-- Status: draft
+- Status: completed
 - Overall cutover strategy: compatible
 - Highest-risk areas: durable memory writes, RAG projection into cognition, and RAG helper argument validators.
 - Acceptance criteria: the listed sites stop stringifying or reparsing corrupted native-shape payloads; malformed corner cases are covered by unit tests; JSON repair for raw LLM output remains unchanged.
@@ -278,4 +278,16 @@ To be filled during implementation:
   - Risks 1-7 are addressed by targeted boundary bug fixes and corrupted-shape unit tests.
   - Raw LLM JSON repair remains unchanged.
   - Malformed parsed workflow data is no longer locally repaired by reparsing stringified JSON or by converting containers into repr text at the risk sites.
+- Lifecycle correction: on 2026-05-08, this document was moved from active
+  `draft` to completed because the implementation and current equivalent test
+  coverage were present. The older execution evidence references
+  `tests/test_user_profile_memories.py`, which no longer exists in the current
+  tree; the corrected maintenance gate used the current native-shape coverage
+  files instead.
+- Current maintenance verification: `venv\Scripts\python.exe -m pytest
+  tests\test_user_profile_agent.py tests\test_persona_supervisor2_schema.py
+  tests\test_cognition_preference_adapter.py
+  tests\test_rag_helper_arg_boundaries.py tests\test_rag_projection.py
+  tests\test_rag_initializer_cache2.py tests\test_conversation_progress_flow.py
+  -q` passed, `84 passed in 1.96s`.
   - The only new shared code is the user-requested `text_or_empty(...)` helper in the existing utils module; no new validation module or architecture was added.

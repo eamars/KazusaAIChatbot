@@ -284,8 +284,17 @@ This plan is complete when:
 
 ## Execution Evidence
 
-- Static grep results:
-- Compile results:
-- Test results:
-- Manual smoke:
-- Notes:
+- Lifecycle evaluation on 2026-05-08: implementation is not present; this plan
+  remains an active `draft` and must not be executed until approved.
+- Static grep results: `src/kazusa_ai_chatbot/service.py` still owns a module
+  global `_personality`, startup still assigns `_personality = await
+  get_character_profile()`, runtime request composition still copies
+  `_personality`, and tests still monkeypatch `_personality`. The DB API still
+  has `get_character_state()` as an alias for `get_character_profile()`, not a
+  split runtime-state reader.
+- Compile results: not run for this draft because no implementation changes
+  were made.
+- Test results: not run for this draft because source inspection shows the
+  plan is not implemented.
+- Manual smoke: not run.
+- Notes: keep this file in `active/short_term/` with `Status: draft`.

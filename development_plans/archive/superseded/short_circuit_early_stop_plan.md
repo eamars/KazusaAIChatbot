@@ -1,5 +1,18 @@
 # Short-Circuit Early Stop Plan
 
+## Summary
+
+- Goal: Historical draft for richer front-of-pipeline early-stop behavior.
+- Plan class: large
+- Status: superseded
+- Superseded by:
+  `archive/completed/short_term/group_chat_noise_relevance_plan.md` and
+  `archive/completed/bugfix/cognition_silence_short_circuit_and_dialog_evaluator_quality_plan.md`.
+- Lifecycle evaluation: on 2026-05-08, source/test inspection found the useful
+  parts covered by later relevance and cognition-silence plans. The original
+  recommendation to add broader deterministic early-stop policy is not an
+  approved current execution contract. Do not execute this legacy file.
+
 ## Problem Statement
 
 Some incoming user messages should not consume the full reasoning pipeline.

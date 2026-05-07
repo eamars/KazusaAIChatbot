@@ -250,7 +250,7 @@ Both `create_task` call sites must occur after the in-memory cache mutation and 
 | `src/kazusa_ai_chatbot/service.py` | After `db_bootstrap()` and before `_build_graph()`, call `load_initializer_entries(...)` and store each row into `RAGCache2Runtime` in reverse-iterated order so highest-hit lands MRU. Wrap the hydration in `try/except PyMongoError` and log row count on success or failure cause on error; do not abort startup. |
 | `src/kazusa_ai_chatbot/nodes/persona_supervisor2_rag_supervisor2.py` | At the cache-hit branch of `rag_initializer`, schedule `asyncio.create_task(record_initializer_hit(cache_key))` after `_read_cached_initializer_slots` returns slots and before returning. At the cache-miss branch, after `_write_initializer_cache(...)`, schedule `asyncio.create_task(upsert_initializer_entry(...))` with the cached `result` and the same metadata dict already used for the in-memory store. |
 | `tests/test_rag_initializer_cache2.py` | Extend deterministic initializer cache coverage to assert that hits schedule a hit-recording task and misses schedule an upsert task, that neither is awaited on the response path, and that `PyMongoError` from either helper does not affect the returned slots. |
-| `src/kazusa_ai_chatbot/rag/README.md` and `development_plans/rag_cache2_design.md` | Document that initializer strategy cache is durable, that hydration is ranked by `hit_count desc, updated_at desc`, that helper-agent result caches remain process-local, and that LRU eviction never deletes a persistent row. |
+| `src/kazusa_ai_chatbot/rag/README.md` and `development_plans/reference/designs/rag_cache2_design.md` | Document that initializer strategy cache is durable, that hydration is ranked by `hit_count desc, updated_at desc`, that helper-agent result caches remain process-local, and that LRU eviction never deletes a persistent row. |
 
 ### Keep
 
@@ -266,7 +266,7 @@ Both `create_task` call sites must occur after the in-memory cache mutation and 
 3. Wire startup hydration in `service.lifespan()` immediately after `db_bootstrap()` and before `_build_graph()`. Iterate `load_initializer_entries(limit=RAG_CACHE2_MAX_ENTRIES)` in reverse so highest-hit is the last `RAGCache2Runtime.store(...)` call. Log the loaded row count.
 4. Wire write-through and hit-recording in `nodes/persona_supervisor2_rag_supervisor2.py`. Schedule `asyncio.create_task(...)` for both call sites; do not await. Confirm by reading the response path that no MongoDB call is awaited.
 5. Add tests in `tests/test_rag_cache2_persistent.py` for the DB helper module (purge, prune, load ordering, upsert idempotence, hit-counter increment, missing-key no-op, `PyMongoError` swallow). Add tests in `tests/test_rag_initializer_cache2.py` for fire-and-forget scheduling, response-path-not-awaiting behavior, and unchanged in-memory hit behavior.
-6. Update `src/kazusa_ai_chatbot/rag/README.md` and `development_plans/rag_cache2_design.md` to reflect the final architecture, including the hit-count-ordered hydration policy and the LRU/persistent-row decoupling.
+6. Update `src/kazusa_ai_chatbot/rag/README.md` and `development_plans/reference/designs/rag_cache2_design.md` to reflect the final architecture, including the hit-count-ordered hydration policy and the LRU/persistent-row decoupling.
 7. Run all verification commands listed below and record results in `Execution Evidence`.
 
 ## LLM Call And Context Budget
@@ -396,7 +396,7 @@ This plan is complete when:
   - Handoff: next agent starts at Stage 4.
   - Sign-off: `Codex/2026-04-29` after verification and evidence are recorded.
 - [x] Stage 4 - docs and final verification complete
-  - Covers: `src/kazusa_ai_chatbot/rag/README.md` and `development_plans/rag_cache2_design.md` updates describing durable initializer cache, hit-count-ordered hydration, and LRU/persistent-row decoupling.
+  - Covers: `src/kazusa_ai_chatbot/rag/README.md` and `development_plans/reference/designs/rag_cache2_design.md` updates describing durable initializer cache, hit-count-ordered hydration, and LRU/persistent-row decoupling.
   - Verify: every command in `Verification` (greps, tests, compile, manual smoke) passes or blockers are recorded with exact failure output.
   - Evidence: record command output summaries in `Execution Evidence`.
   - Handoff: plan can move to implementation completion review.

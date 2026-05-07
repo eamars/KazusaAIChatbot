@@ -3,8 +3,8 @@
 ## Summary
 
 - Goal: Ensure every LLM-visible time string is converted to character-local, timezone-unaware text, while every LLM-produced time intended for storage is converted back to UTC.
-- Plan class: large.
-- Status: draft.
+- Plan class: large
+- Status: completed
 - Mandatory skills: `py-style`, `cjk-safety`, `test-style-and-execution`, `local-llm-architecture`, `no-prepost-user-input`.
 - Overall cutover strategy: bigbang for prompt-facing time presentation; compatible for UTC database storage; no historical data migration.
 - Highest-risk areas: prompt payload consistency, conversation history timestamps, RAG helper result timestamps, and future-promise `due_time` normalization.

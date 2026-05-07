@@ -41,9 +41,9 @@ Stage 1c may start only from these completed interfaces:
 
 | Source stage | Required handoff artifact | Stage 1c instruction |
 |---|---|---|
-| Stage 1a | `development_plans/character_reflection_cycle_stage1a_plan.md` with completed real LLM approval and monitored-channel artifact evidence | Reuse only the public `kazusa_ai_chatbot.reflection_cycle` entry points and Stage 1a prompt schemas. Do not change the approved hourly or per-channel daily model-facing contracts. |
+| Stage 1a | `development_plans/archive/completed/short_term/character_reflection_cycle_stage1a_plan.md` with completed real LLM approval and monitored-channel artifact evidence | Reuse only the public `kazusa_ai_chatbot.reflection_cycle` entry points and Stage 1a prompt schemas. Do not change the approved hourly or per-channel daily model-facing contracts. |
 | Stage 1a ICD | `src/kazusa_ai_chatbot/reflection_cycle/README.md` | Extend the ICD for production write-capable Stage 1c interfaces before wiring service or memory integration. Do not bypass its DB-read boundary. |
-| Stage 1b | `development_plans/memory_evolution_stage1b_plan.md` with completion evidence | Write memory only through `kazusa_ai_chatbot.memory_evolution` public APIs and use returned score tuples for similarity decisions. |
+| Stage 1b | `development_plans/archive/completed/short_term/memory_evolution_stage1b_plan.md` with completion evidence | Write memory only through `kazusa_ai_chatbot.memory_evolution` public APIs and use returned score tuples for similarity decisions. |
 | Stage 1b ICD | `src/kazusa_ai_chatbot/memory_evolution/README.md` | Treat this as the memory interface contract. Stage 1c must not import `kazusa_ai_chatbot.db.memory_evolution` or operate on `db.memory` directly. |
 
 The implementation agent must copy the exact Stage 1a approval artifact path
@@ -1150,8 +1150,8 @@ memory schema, or autonomous behavior require a new or superseding plan.
 
 ## Execution Evidence
 
-- Stage 1a approval artifact: `development_plans/character_reflection_cycle_stage1a_plan.md`, status `completed`; private, group, and daily live LLM traces are recorded in that plan's `Execution Evidence`, with Stage 1a signed off on 2026-05-04.
-- Stage 1b completion evidence: `development_plans/memory_evolution_stage1b_plan.md`, status `completed`; focused Stage 1b command in that plan passed with `56 passed` after scoring fixes. During Stage 1c final verification, `venv\Scripts\pytest.exe tests\test_memory_evolution_module_boundary.py tests\test_memory_evolution_repository.py -q` passed with `8 passed`.
+- Stage 1a approval artifact: `development_plans/archive/completed/short_term/character_reflection_cycle_stage1a_plan.md`, status `completed`; private, group, and daily live LLM traces are recorded in that plan's `Execution Evidence`, with Stage 1a signed off on 2026-05-04.
+- Stage 1b completion evidence: `development_plans/archive/completed/short_term/memory_evolution_stage1b_plan.md`, status `completed`; focused Stage 1b command in that plan passed with `56 passed` after scoring fixes. During Stage 1c final verification, `venv\Scripts\pytest.exe tests\test_memory_evolution_module_boundary.py tests\test_memory_evolution_repository.py -q` passed with `8 passed`.
 - Focused test results:
   - `venv\Scripts\pytest.exe tests\test_reflection_cycle_stage1c_repository.py tests\test_reflection_cycle_stage1c_worker.py tests\test_reflection_cycle_stage1c_promotion.py tests\test_reflection_cycle_stage1c_reflection_context.py tests\test_reflection_cycle_stage1c_service.py tests\test_reflection_cycle_stage1c_integration.py -q` passed with `25 passed`.
   - `venv\Scripts\pytest.exe tests\test_reflection_cycle_stage1c_promotion.py::test_global_promotion_skips_memory_write_when_scores_are_unavailable -q` passed.

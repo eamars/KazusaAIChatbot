@@ -4,7 +4,8 @@
 
 - Goal: Add a short-lived, DB-backed conversation progress state so Kazusa can avoid repetitive response moves while preserving her focused, personality-first cognition architecture.
 - Plan class: large
-- Status: implementation in progress — checkpoints 1-10 implemented; final verification/live A/B sign-off pending.
+- Status: completed
+- Status detail: lifecycle corrected on 2026-05-08 after implementation evidence, trace review, and focused regression tests confirmed completion.
 - Overall cutover strategy: compatible
 - Highest-risk areas: adding a new state path without bloating cognition context; keeping episode state out of relevance/response-eligibility decisions; preventing deterministic keyword interpretation of user/bot text; avoiding leakage across sharp topic transitions; keeping background persistence reliable; surviving the concurrency window between consecutive user turns.
 - Acceptance criteria: repeated assistant speech acts are tracked as compact operational state, sharp topic transitions suspend stale episode obligations, cognition/content anchors receive only concise progress guidance, prior user disclosures carry relative-age signals so the bot does not re-ask them as new, existing long-term profile memory and existing Style-Agent anti-repetition behavior remain unchanged.

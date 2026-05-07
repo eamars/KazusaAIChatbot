@@ -4,7 +4,7 @@
 
 - Goal: Introduce named LLM routes so different chatbot responsibilities can move to different OpenAI-compatible providers or models without migrating every call site at once.
 - Plan class: large
-- Status: draft
+- Status: completed
 - Overall cutover strategy: migration
 - Highest-risk areas: shared LLM factory behavior, prompt JSON contracts, tool-calling web search, cognition/dialog latency, live LLM test assumptions.
 - Acceptance criteria: every production chat LLM call uses route-specific config constants with the existing `get_llm(...)` factory; `.env` explicitly defines every route; generic `LLM_BASE_URL` / `LLM_API_KEY` / `LLM_MODEL` are removed; the app crashes during config load if any required route variable is missing.
@@ -444,7 +444,16 @@ After implementation, operators can migrate routes gradually:
 
 ## Execution Evidence
 
-- Static grep results:
-- Test results:
-- Service import smoke:
-- Documentation updated:
+- Lifecycle correction: on 2026-05-08, source/test inspection found the route
+  migration implemented even though this document still said `draft`.
+- Static grep results: route-specific constants and call-site wiring are present
+  in `src/kazusa_ai_chatbot/config.py`, route-aware call sites, route report
+  tests, and `docs/HOWTO.md`; no generic source fallback to unclassified chat
+  `LLM_*` defaults was found in the inspected implementation.
+- Test results: `venv\Scripts\python.exe -m pytest tests\test_config.py
+  tests\test_utils.py tests\test_llm_route_report.py -q` passed,
+  `24 passed in 1.33s`.
+- Documentation updated: `docs/HOWTO.md` contains the LLM route configuration
+  table and operational guidance.
+- Not inspected: `.env`, per repository instruction not to read it unless the
+  user explicitly asks for environment inspection.

@@ -4,7 +4,7 @@
 
 - Goal: De-assert `should_respond` when cognition explicitly chooses silence, short-circuit dialog output, and tighten dialog evaluator quality criteria against cognition anchors.
 - Plan class: medium.
-- Status: implemented with mandatory live LLM sign-off pending review.
+- Status: completed
 - Mandatory skills: `py-style`, `test-style-and-execution`, `local-llm-architecture`.
 - Overall cutover strategy: compatible behavior change with no database migration, no environment flag, and no adapter change.
 - Highest-risk areas: preserving the `should_respond` ownership boundary, avoiding a second relevance gate inside dialog, and changing evaluator criteria without changing the generator/evaluator conversation protocol.

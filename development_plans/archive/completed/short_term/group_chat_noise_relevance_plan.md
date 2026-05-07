@@ -4,7 +4,7 @@
 
 - Goal: Cut Kazusa's false-positive responses in noisy group chats by (1) fixing the broken noisy-environment detector, (2) feeding the relevance LLM a single structural boolean indicating whether the platform itself reports the current message as `@`-mentioning the bot, and (3) supplying one compact attention-noise label so the LLM has a calibrated bar in busy rooms.
 - Plan class: medium
-- Status: draft
+- Status: completed
 - Overall cutover strategy: bigbang for in-process changes; compatible at the stored-document layer.
 - Highest-risk areas: silently shipping zero behavior change because prompt selection still hits a stale field; over-tightening private chats; introducing deterministic parsing of user text in violation of the `no-prepost-user-input` skill.
 - Acceptance criteria: noisy-group prompt fires whenever `channel_type` indicates a group; the relevance LLM payload for groups carries `mentioned_bot` and one `group_attention` label; the regression case modeled on `test_artifacts/qq_1082431481_recent_30_chat_history.json` (ambiguous second-person message in a noisy room with no mention or reply to bot) does not produce a Kazusa response.
@@ -302,9 +302,18 @@ This plan is complete when:
 
 ## Execution Evidence
 
-To be filled during implementation:
-
-- Static grep results:
-- Test results:
-- Manual payload review:
-- Offline LLM smoke results (if run):
+- Lifecycle correction: on 2026-05-08, source/test inspection found the group
+  relevance implementation complete even though this document still said
+  `draft`.
+- Static grep results: `mentioned_bot` is plumbed through adapter contracts,
+  request/state schemas, persistence, and relevance payload construction;
+  `is_noisy_environment` now derives from `channel_type == "group"`;
+  `build_group_attention_context(...)` and the chaotic-noise metadata
+  short-circuit are present in `relevance_agent.py`.
+- Test results: `venv\Scripts\python.exe -m pytest
+  tests\test_relevance_agent.py -q` passed, `23 passed in 5.09s`.
+- Manual payload review: code and tests show private payloads do not receive
+  group-only attention fields, while group payloads carry `mentioned_bot` and
+  `group_attention`.
+- Offline LLM smoke results: not run in this maintenance pass; classification
+  uses deterministic payload, short-circuit, and regression tests.

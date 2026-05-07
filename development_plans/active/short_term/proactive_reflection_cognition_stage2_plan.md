@@ -5,7 +5,8 @@
 - Goal: Convert selected Stage 1c reflection outcomes into safe autonomous character messages through an internal proactive cognition path, without routing through `/chat` and without using raw dispatcher `send_message` as the reasoning layer.
 - Parent: `reflection_memory_integration_stage1c_plan.md`
 - Plan class: large
-- Status: directional draft. Do not implement until Stage 1c execution evidence is reviewed and this plan is revised.
+- Status: draft
+- Status detail: directional draft. Do not implement until Stage 1c execution evidence is reviewed and this plan is revised.
 - Mandatory skills: `local-llm-architecture`, `development-plan-writing`, `no-prepost-user-input`, `py-style`, `test-style-and-execution`, `database-data-pull`
 - Overall cutover strategy: additive, gated, and opt-in. Start with dry-run decisions and outbox records; enable actual transport only after evidence shows low false-positive rate.
 - Highest-risk areas: unsolicited or repetitive messages, private-to-group leakage, bypassing character cognition, stale reflection candidates, adapter limitations for private sends, duplicate delivery, and persistence mismatch after send failure.
@@ -486,7 +487,20 @@ This directional draft becomes implementation-ready only when it is revised to i
 
 ## Execution Evidence
 
-Do not fill this section until this draft is promoted to an executable plan:
+Do not fill this section until this draft is promoted to an executable plan.
+Maintenance evaluation may record classification evidence here.
+
+- Lifecycle evaluation on 2026-05-08: implementation is not present; this plan
+  remains an active `draft` and must not be executed until approved.
+- Static grep results: no `src/kazusa_ai_chatbot/proactive_cognition` module or
+  equivalent proactive-cognition execution path was found. Existing scheduler,
+  dispatcher, reflection, and adapter send paths do not constitute the Stage 2
+  proactive cognition plan.
+- Compile results: not run for this draft because no implementation changes
+  were made.
+- Test results: not run for this draft because source inspection shows the
+  plan is not implemented.
+- Notes: keep this file in `active/short_term/` with `Status: draft`.
 
 - Stage 1c evidence reviewed:
 - Candidate policy approved:

@@ -4,7 +4,7 @@
 
 - Goal: Let the active character reliably retrieve her own prior conversation words, and record delivered platform message IDs for assistant rows after adapter sends.
 - Plan class: large
-- Status: approved
+- Status: completed
 - Mandatory skills: `local-llm-architecture`, `py-style`, `test-style-and-execution`
 - Overall cutover strategy: compatible behavior changes at RAG and API boundaries; no historical backfill or database migration.
 - Bundling rationale: self-word retrieval and delivery receipts are kept in one plan because they share the same data flow on the inbound side. Native QQ replies to a prior assistant message arrive with only a `platform_message_id`; without a delivery-tracking record the brain cannot resolve that reply target, so the decontextualizer cannot expand "你不是说 X 吗？" with the correct prior assistant text, and RAG cannot reliably build active-character evidence. The two halves are sequenced as independent stages but ship together because reply-context quality is a precondition for self-word retrieval working end-to-end on QQ.

@@ -14,7 +14,7 @@ The user has mandated:
 2. **No shims, no adapters, no compatibility layer.** Every legacy reference is rewritten or deleted.
 3. RAG1 and Cache1 are deleted in full — code, tests, schemas, MongoDB collections.
 4. The consolidator is reworked subject to project scope; recommendations welcome.
-5. Cache invalidation follows `development_plans/rag_cache2_design.md` §"Consolidator → Cache 2 Integration Path".
+5. Cache invalidation follows `development_plans/reference/designs/rag_cache2_design.md` §"Consolidator → Cache 2 Integration Path".
 6. Database deprecated collections are removed.
 7. All checklist items mandatory; no deferred work.
 
@@ -273,7 +273,7 @@ Notes:
 
 ### `save_conversation` event emission (NEW — wrap at db layer)
 
-`service.py:330` (user message) and `service.py:639` (bot reply) call `await save_conversation(...)`. Today no event fires — every cached entry from `conversation_filter/keyword/search/aggregate_agent` becomes stale instantly but stays served. Per `development_plans/rag_cache2_design.md`: *"`save_conversation`: invalidates overlapping conversation-history cache entries."*
+`service.py:330` (user message) and `service.py:639` (bot reply) call `await save_conversation(...)`. Today no event fires — every cached entry from `conversation_filter/keyword/search/aggregate_agent` becomes stale instantly but stays served. Per `development_plans/reference/designs/rag_cache2_design.md`: *"`save_conversation`: invalidates overlapping conversation-history cache entries."*
 
 Wrap inside `db/conversation.py::save_conversation` so the contract is enforced at the data layer rather than at every call site:
 
@@ -672,7 +672,7 @@ Each step leaves the code in a runnable state for incremental commits. Step 2 is
 ### Phase K — Documentation
 
 - [x] Update README.md if it references RAG1, Cache1, `rag_cache_index`, depth classifier, or knowledge_base
-- [x] Update `development_plans/rag_cache2_design.md` if any decision in this refactor diverges from the design (e.g., `user_image` source not emitted today; affinity-event always invalidates `user_profile`; `save_conversation` invalidation wrapped at db layer)
+- [x] Update `development_plans/reference/designs/rag_cache2_design.md` if any decision in this refactor diverges from the design (e.g., `user_image` source not emitted today; affinity-event always invalidates `user_profile`; `save_conversation` invalidation wrapped at db layer)
 
 ---
 
@@ -691,4 +691,4 @@ Each step leaves the code in a runnable state for incremental commits. Step 2 is
 - [src/kazusa_ai_chatbot/db/schemas.py](src/kazusa_ai_chatbot/db/schemas.py)
 - [src/kazusa_ai_chatbot/db/bootstrap.py](src/kazusa_ai_chatbot/db/bootstrap.py)
 - [src/kazusa_ai_chatbot/service.py](src/kazusa_ai_chatbot/service.py)
-- [development_plans/rag_cache2_design.md](development_plans/rag_cache2_design.md)
+- [rag_cache2_design.md](../../../reference/designs/rag_cache2_design.md)

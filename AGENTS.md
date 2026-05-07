@@ -61,6 +61,20 @@ For multi-file plans, migrations, decommissions, prompt or graph changes,
 database changes, and risky refactors, apply
 `.agents/skills/development-plan-writing`.
 
+Before reading or executing development plans, read
+`development_plans/README.md`. It is the lifecycle registry for long-term,
+active, archived, reference, and triage documents.
+
+`development_plans/long_term/todo.md` is a living long-term development plan,
+not an executable work contract. Promote roadmap items into
+`development_plans/active/short_term/` or `development_plans/active/bugfix/`
+before implementation.
+
+Only execute plans in `development_plans/active/` whose `Status` is `approved`
+or `in_progress`. Treat `draft` plans as discussion artifacts, archived plans
+as historical records, reference documents as context only, and triage files as
+blocked until classified.
+
 Completed plans are historical records. Do not append new scope to a completed
 plan; create a new or superseding plan.
 

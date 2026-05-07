@@ -1,5 +1,11 @@
 # Architectural Roadmap
 
+- Plan horizon: long_term
+- Document type: living development plan
+- Status: active
+- Execution rule: roadmap items are not implementation-authorized until
+  promoted into an active short-term or bugfix plan.
+
 Kazusa is now mostly past the original "extract the bot brain" milestone. The
 current direction is a bounded, inspectable digital-character runtime: adapters
 stay thin, live chat stays latency-bounded, LLM stages own semantic judgment,

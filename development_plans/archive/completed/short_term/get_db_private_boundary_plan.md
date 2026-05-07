@@ -4,7 +4,7 @@
 
 - Goal: Keep `get_db` as the internal DB-client helper, remove it from the public `kazusa_ai_chatbot.db` facade, and route runtime/application and script database access through semantic DB interfaces.
 - Plan class: medium
-- Status: draft
+- Status: completed
 - Mandatory skills: `py-style`, `test-style-and-execution`, `local-llm-architecture`.
 - Overall cutover strategy: compatible for runtime and script behavior; incompatible only for unsupported public imports of `kazusa_ai_chatbot.db.get_db`.
 - Highest-risk areas: service health, scheduler event status transitions, pending-task index rebuild, conversation-progress guarded upsert semantics, script export/snapshot behavior, and tests that currently patch raw DB handles.
@@ -492,14 +492,18 @@ This plan is complete when:
 
 ## Execution Evidence
 
-- Baseline focused tests:
-- Baseline boundary grep:
-- Stage 1 boundary test result:
-- Stage 2 health result:
-- Stage 3 scheduler/pending-index result:
-- Stage 4 conversation-progress result:
-- Stage 5 public facade result:
-- Stage 6 script boundary result:
-- Stage 7 final static grep result:
-- Broader smoke result:
-- Skipped verification, if any:
+- Lifecycle correction: on 2026-05-08, source/test inspection found the DB
+  public-boundary implementation complete even though this document still said
+  `draft`.
+- Final static grep result: broad grep over `src/kazusa_ai_chatbot` outside the
+  DB package and `src/scripts` found no production/script callers importing or
+  calling `get_db`, importing `kazusa_ai_chatbot.db._client`, importing raw
+  Motor/PyMongo, importing private DB symbols, or using the enumerated raw Mongo
+  operation tokens outside the DB package.
+- Boundary test result: `venv\Scripts\python.exe -m pytest
+  tests\test_db_public_boundary.py tests\test_script_db_boundary.py -q`
+  passed, `6 passed in 1.70s`.
+- Broader smoke result: not rerun in this maintenance pass; classification is
+  based on focused boundary tests plus source greps.
+- Skipped verification, if any: no live DB mutation or production database
+  inspection was performed.

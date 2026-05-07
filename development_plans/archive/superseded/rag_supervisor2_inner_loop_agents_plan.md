@@ -1,5 +1,16 @@
 # RAG Supervisor 2 — Inner Loop Agents Development Plan
 
+## Summary
+
+- Goal: Historical draft for RAG supervisor2 inner-loop helper agents.
+- Plan class: large
+- Status: superseded
+- Superseded by: `archive/completed/short_term/rag_phase3_development_plan.md`
+  and `archive/completed/short_term/rag1_decommission_plan.md`.
+- Lifecycle evaluation: on 2026-05-08, source/test inspection found the helper
+  agents and RAG2 dispatcher/supervisor behavior implemented through later RAG
+  plans. Do not execute this legacy file.
+
 ## Context
 
 `persona_supervisor2_rag_supervisor2.py` is an experimental progressive RAG supervisor that resolves

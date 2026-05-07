@@ -4,7 +4,7 @@
 
 - Goal: Make `Memory-evidence:` retrieve scoped user-continuity memories from `user_memory_units` while preserving scope, provenance, and consolidator merge/evolve continuity.
 - Plan class: large
-- Status: approved
+- Status: completed
 - Mandatory skills: `local-llm-architecture`, `no-prepost-user-input`, `py-style`, `test-style-and-execution`, `cjk-safety`
 - Overall cutover strategy: compatible internal expansion of the existing `Memory-evidence:` capability. No new top-level RAG prefix, no database migration, no response-path LLM call increase.
 - Highest-risk areas: scope collision between global/shared memory and user continuity, flattening `user_memory_units` into unscoped `memory_evidence`, duplicate consolidation writes, and prompt/route drift around `Person-context`.

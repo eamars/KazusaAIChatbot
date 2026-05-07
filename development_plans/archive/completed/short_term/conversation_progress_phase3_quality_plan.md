@@ -4,7 +4,7 @@
 
 - Goal: Trace and fix conversation-progress entry corruption at the source so stage payloads remain native Python objects or JSON, and new stored/projection entries keep the agreed native string-or-entry-object shapes.
 - Plan class: medium
-- Status: approved
+- Status: completed
 - Overall cutover strategy: compatible
 - Highest-risk areas: applying a bandage normalizer instead of fixing the source boundary, accidentally adding semantic filtering while fixing structural data shape, breaking old episode documents, and expanding Phase 3 into behavior redesign.
 - Acceptance criteria: recorder prior-state payloads, recorder validation, repository writes, and prompt projection preserve native data-shape boundaries and cannot create or persist Python repr strings by coercing nested containers; existing public APIs and response behavior remain otherwise unchanged.
