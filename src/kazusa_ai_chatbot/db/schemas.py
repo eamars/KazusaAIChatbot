@@ -461,6 +461,7 @@ class ScheduledEventDoc(TypedDict, total=False):
     cancelled_at: str
     source_platform: str
     source_channel_id: str
+    source_channel_type: str
     source_user_id: str
     source_message_id: str
     guild_id: str | None

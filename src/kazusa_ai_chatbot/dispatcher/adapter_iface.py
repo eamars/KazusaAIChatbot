@@ -35,6 +35,7 @@ class MessagingAdapter(Protocol):
         channel_id: str,
         text: str,
         *,
+        channel_type: str,
         reply_to_msg_id: Optional[str] = None,
     ) -> SendResult:
         """Send a message through the adapter."""

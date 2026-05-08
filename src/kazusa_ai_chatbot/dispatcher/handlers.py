@@ -19,6 +19,10 @@ SEND_MESSAGE_SCHEMA = {
         "target_platform": {
             "type": "string",
         },
+        "target_channel_type": {
+            "type": "string",
+            "enum": ["group", "private"],
+        },
         "execute_at": {
             "type": "string",
         },
@@ -47,6 +51,7 @@ async def handle_send_message(
     await adapter.send_message(
         channel_id=args["target_channel"],
         text=args["text"],
+        channel_type=args["target_channel_type"],
         reply_to_msg_id=args.get("reply_to_msg_id"),
     )
 

@@ -187,6 +187,7 @@ class DiscordEnvelopeNormalizer:
 
 class RuntimeSendMessageRequest(BaseModel):
     channel_id: str
+    channel_type: str
     text: str
     reply_to_msg_id: str | None = None
 
@@ -217,6 +218,7 @@ async def send_message_endpoint(
             channel_id=req.channel_id,
             text=req.text,
             reply_to_msg_id=req.reply_to_msg_id,
+            channel_type=req.channel_type,
         )
     except RuntimeError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
@@ -545,6 +547,7 @@ class DiscordAdapter(discord.Client):
         channel_id: str,
         text: str,
         *,
+        channel_type: str,
         reply_to_msg_id: str | None = None,
     ) -> SendResult:
         """Send one outbound message through the Discord client.
@@ -552,11 +555,16 @@ class DiscordAdapter(discord.Client):
         Args:
             channel_id: Discord channel identifier.
             text: Message body to send.
+            channel_type: Scheduler target scope. Discord sends by channel id
+                for both guild channels and DM channels.
             reply_to_msg_id: Optional message id to reply to.
 
         Returns:
             Structured send result for the dispatcher.
         """
+
+        if channel_type not in {"group", "private"}:
+            raise RuntimeError(f"Unsupported Discord channel_type: {channel_type}")
 
         channel = self.get_channel(int(channel_id))
         if channel is None:

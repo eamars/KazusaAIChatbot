@@ -54,9 +54,10 @@ class _NoopAdapter:
         channel_id: str,
         text: str,
         *,
+        channel_type: str,
         reply_to_msg_id: str | None = None,
     ) -> SendResult:
-        del channel_id, text, reply_to_msg_id
+        del channel_id, text, reply_to_msg_id, channel_type
         return SendResult(
             platform=self.platform,
             channel_id="chan-1",
@@ -99,6 +100,7 @@ def _ctx() -> DispatchContext:
     return DispatchContext(
         source_platform="discord",
         source_channel_id="chan-1",
+        source_channel_type="group",
         source_user_id="user-1",
         source_message_id="msg-1",
         guild_id=None,
@@ -149,6 +151,7 @@ def _live_dispatch_ctx(
     *,
     source_platform: str = "discord",
     source_channel_id: str = "chan-live-1",
+    source_channel_type: str = "group",
     source_user_id: str = "user-live-1",
     source_message_id: str = "msg-live-1",
 ) -> DispatchContext:
@@ -157,6 +160,7 @@ def _live_dispatch_ctx(
     return DispatchContext(
         source_platform=source_platform,
         source_channel_id=source_channel_id,
+        source_channel_type=source_channel_type,
         source_user_id=source_user_id,
         source_message_id=source_message_id,
         guild_id=None,
@@ -200,7 +204,32 @@ def test_evaluator_defaults_platform_channel_and_now():
     assert result.task is not None
     assert result.task.args["target_platform"] == "discord"
     assert result.task.args["target_channel"] == "chan-1"
+    assert result.task.args["target_channel_type"] == "group"
     assert result.task.execute_at == _ctx().now
+
+
+def test_evaluator_rejects_explicit_target_without_channel_type():
+    tool_registry = ToolRegistry()
+    tool_registry.register(build_send_message_tool())
+    adapter_registry = AdapterRegistry()
+    adapter_registry.register(_NoopAdapter())
+    evaluator = ToolCallEvaluator(tool_registry, adapter_registry)
+
+    result = evaluator.evaluate(
+        RawToolCall(
+            tool="send_message",
+            args={
+                "target_channel": "chan-2",
+                "text": "hello later",
+            },
+        ),
+        _ctx(),
+    )
+
+    assert result.ok is False
+    assert result.errors == [
+        "target_channel_type required for explicit target_channel"
+    ]
 
 
 def test_evaluator_rejects_unparseable_execute_at():
@@ -485,6 +514,7 @@ async def test_live_dispatcher_generates_group_target_from_private_chat(ensure_l
         _live_dispatch_ctx(
             source_platform="qq",
             source_channel_id="10001",
+            source_channel_type="private",
         ),
     )
     _write_live_dispatch_trace("generates_group_target_from_private_chat", state, raw_calls)

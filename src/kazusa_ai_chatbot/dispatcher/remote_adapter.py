@@ -41,6 +41,7 @@ class RemoteHttpAdapter:
         channel_id: str,
         text: str,
         *,
+        channel_type: str,
         reply_to_msg_id: str | None = None,
     ) -> SendResult:
         """Send a message by calling the registered remote adapter.
@@ -48,6 +49,8 @@ class RemoteHttpAdapter:
         Args:
             channel_id: Target channel, group, or DM id.
             text: Message body to deliver.
+            channel_type: Platform-neutral target scope such as ``group`` or
+                ``private``.
             reply_to_msg_id: Optional message id to quote/reply to.
 
         Returns:
@@ -60,6 +63,7 @@ class RemoteHttpAdapter:
 
         payload = {
             "channel_id": channel_id,
+            "channel_type": channel_type,
             "text": text,
             "reply_to_msg_id": reply_to_msg_id,
         }

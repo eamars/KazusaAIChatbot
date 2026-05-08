@@ -129,7 +129,8 @@ class ToolCallEvaluator:
 
         Args:
             raw: LLM-emitted tool name and raw argument mapping.
-            ctx: Source-side dispatch context used for defaulting and permissions.
+            ctx: Source-side dispatch context used for source-context
+                substitution and permissions.
 
         Returns:
             ``EvalResult`` containing either a validated task or rejection errors.
@@ -149,8 +150,21 @@ class ToolCallEvaluator:
         args = dict(raw.args)
         target_platform = str(args.get("target_platform") or ctx.source_platform).strip()
         args["target_platform"] = target_platform
-        if args.get("target_channel") == "same":
+        if args["target_channel"] == "same":
             args["target_channel"] = ctx.source_channel_id
+            args["target_channel_type"] = ctx.source_channel_type
+        elif (
+            "target_channel_type" not in args
+            or not str(args["target_channel_type"]).strip()
+        ):
+            return_value = EvalResult(
+                ok=False,
+                task=None,
+                errors=["target_channel_type required for explicit target_channel"],
+            )
+            return return_value
+        else:
+            args["target_channel_type"] = str(args["target_channel_type"]).strip()
 
         registered_platforms = self._adapters.platforms()
         if not registered_platforms:

@@ -58,7 +58,7 @@ class RawToolCall:
 
 @dataclass(frozen=True)
 class DispatchContext:
-    """Source-side defaults and permissions used while validating tool calls.
+    """Source-side substitution data and permissions for tool-call validation.
 
     Args:
         source_platform: Platform of the user message that caused this dispatch.
@@ -68,6 +68,8 @@ class DispatchContext:
         guild_id: Optional guild or server scope for permissions.
         bot_permission_role: Current permission level for the source context.
         now: Frozen dispatch time used for immediate tasks.
+        source_channel_type: Source channel class such as ``group`` or
+            ``private``.
     """
 
     source_platform: str
@@ -77,6 +79,7 @@ class DispatchContext:
     guild_id: Optional[str]
     bot_permission_role: BotPermissionRole
     now: datetime
+    source_channel_type: str
 
     @classmethod
     def from_scheduler_doc(cls, doc: ScheduledEventDoc) -> "DispatchContext":
@@ -97,6 +100,7 @@ class DispatchContext:
             guild_id=doc.get("guild_id"),
             bot_permission_role=doc["bot_role"],
             now=parse_iso_datetime(doc["execute_at"]),
+            source_channel_type=str(doc["source_channel_type"]),
         )
         return return_value
 
@@ -107,7 +111,7 @@ class Task:
 
     Args:
         tool: Registered tool name.
-        args: Fully-populated tool arguments after evaluator defaulting.
+        args: Fully-populated tool arguments after evaluator validation.
         execute_at: Absolute UTC instant when the task should fire.
         source_event_id: Optional source event identifier for tracing.
         tags: Free-form tracing tags such as the originating instruction.
@@ -136,6 +140,7 @@ class Task:
             "status": "pending",
             "source_platform": ctx.source_platform,
             "source_channel_id": ctx.source_channel_id,
+            "source_channel_type": ctx.source_channel_type,
             "source_user_id": ctx.source_user_id,
             "source_message_id": ctx.source_message_id,
             "guild_id": ctx.guild_id,
@@ -156,7 +161,7 @@ class Task:
 
         return_value = cls(
             tool=doc["tool"],
-            args=dict(doc.get("args") or {}),
+            args=dict(doc["args"]),
             execute_at=parse_iso_datetime(doc["execute_at"]),
         )
         return return_value

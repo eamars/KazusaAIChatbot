@@ -102,7 +102,7 @@ The dispatcher exists to separate semantic acceptance from operational execution
 
 - The consolidator LLM decides what promises or commitments Kazusa accepted.
 - The task-dispatch LLM converts accepted future promises into candidate tool calls.
-- The evaluator checks tool availability, schema shape, permissions, adapters, target defaults, and absolute time parsing.
+- The evaluator checks tool availability, schema shape, permissions, adapters, source substitutions, and absolute time parsing.
 - The dispatcher deduplicates and persists valid tasks.
 - The scheduler owns delayed execution and status transitions.
 - Platform adapters own actual delivery.
@@ -145,7 +145,7 @@ If the accepted commitment is an ongoing style, address, language, or formatting
 
 ## Dispatch Context
 
-`DispatchContext` carries source-side defaults and validation scope:
+`DispatchContext` carries source-side substitution data and validation scope:
 
 ```python
 DispatchContext(
@@ -156,6 +156,7 @@ DispatchContext(
     guild_id=str | None,
     bot_permission_role=str,
     now=datetime,
+    source_channel_type=str,
 )
 ```
 
@@ -163,6 +164,7 @@ Important meanings:
 
 - `source_platform` is the default target platform when a tool call omits `target_platform`.
 - `source_channel_id` is used when a tool call says `target_channel: "same"`.
+- `source_channel_type` is used when a tool call says `target_channel: "same"`.
 - `bot_permission_role` filters tools by permission before the LLM sees them and before evaluation accepts them.
 - `now` is the frozen dispatch time used for immediate tasks and relative-promise normalization upstream.
 
@@ -193,7 +195,7 @@ The evaluator transforms a raw call into a task only when:
 - the arguments satisfy the tool schema,
 - the target platform has a registered adapter,
 - `execute_at`, when supplied, parses as an absolute ISO timestamp,
-- default platform/channel substitution is structurally valid.
+- source platform/channel substitution is structurally valid.
 
 Rejected calls are returned with human-readable reasons and are not persisted.
 
@@ -215,6 +217,7 @@ The current built-in tool is `send_message`.
 ```python
 {
     "target_channel": str,
+    "target_channel_type": "group | private, required when target_channel is not same",
     "text": str,
     "target_platform": str | omitted,
     "execute_at": str | omitted,
@@ -236,6 +239,7 @@ async def send_message(
     channel_id: str,
     text: str,
     *,
+    channel_type: str,
     reply_to_msg_id: str | None = None,
 ) -> SendResult
 ```
@@ -296,14 +300,14 @@ Deterministic code owns mechanics:
 - permission checks,
 - adapter availability checks,
 - timestamp parsing,
-- source defaults such as `target_channel: "same"`,
+- source substitution for `target_channel: "same"` and its channel type,
 - duplicate detection,
 - scheduler persistence,
 - delivery status updates.
 
 Channel and promise interpretation stays in the LLM prompt and schema
-contract. Deterministic code validates the emitted tool call and applies source
-defaults.
+contract. Deterministic code validates the emitted tool call and applies only
+explicit source-context substitutions.
 
 ## Failure Behavior
 

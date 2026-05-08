@@ -35,7 +35,8 @@ class TaskDispatcher:
 
         Args:
             raw_calls: Raw tool calls emitted by the consolidator LLM.
-            ctx: Source-side dispatch context used for defaulting.
+            ctx: Source-side dispatch context used for substitution and
+                permissions.
             instruction: Optional natural-language trace tag carried onto tasks.
 
         Returns:

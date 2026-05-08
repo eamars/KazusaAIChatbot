@@ -206,12 +206,14 @@ async def test_remote_http_adapter_posts_send_message_payload(monkeypatch):
         channel_id="54369546",
         text="今天天气真好呀",
         reply_to_msg_id="1615877136",
+        channel_type="private",
     )
 
     assert _FakeAsyncClient.last_call == {
         "url": "http://127.0.0.1:8011/send_message",
         "json": {
             "channel_id": "54369546",
+            "channel_type": "private",
             "text": "今天天气真好呀",
             "reply_to_msg_id": "1615877136",
         },
@@ -792,6 +794,7 @@ async def test_napcat_runtime_send_message_uses_reply_segments():
     result = await adapter.send_message(
         channel_id="54369546",
         text="scheduled hello",
+        channel_type="group",
         reply_to_msg_id="1615877136",
     )
 
@@ -802,6 +805,75 @@ async def test_napcat_runtime_send_message_uses_reply_segments():
     ]
     assert result.message_id == "outbound-1"
     await adapter.close()
+
+
+@pytest.mark.asyncio
+async def test_napcat_runtime_send_message_uses_private_message_type():
+    """Runtime private sends should use OneBot private message parameters."""
+
+    adapter = NapCatWSAdapter(
+        ws_url="ws://napcat.local/ws",
+        ws_token="token",
+        brain_url="http://127.0.0.1:8000",
+        brain_response_timeout=30,
+        runtime_host="127.0.0.1",
+        runtime_port=8011,
+        runtime_public_url="http://127.0.0.1:8011",
+        channel_ids=["54369546"],
+        debug_modes={},
+    )
+    ws = _FakeNapCatWebSocket({"message_id": "outbound-private"})
+    adapter._ws = ws
+    previous_runtime_adapter = napcat_module._runtime_adapter
+    napcat_module._runtime_adapter = adapter
+
+    try:
+        transport = httpx.ASGITransport(app=napcat_module.runtime_app)
+        async with httpx.AsyncClient(
+            transport=transport,
+            base_url="http://runtime.local",
+        ) as client:
+            response = await client.post(
+                "/send_message",
+                json={
+                    "channel_id": "673225019",
+                    "channel_type": "private",
+                    "text": "scheduled private hello",
+                    "reply_to_msg_id": None,
+                },
+            )
+
+        assert response.status_code == 200
+        assert ws.sent_payloads[0]["action"] == "send_msg"
+        assert ws.sent_payloads[0]["params"] == {
+            "message_type": "private",
+            "user_id": 673225019,
+            "message": "scheduled private hello",
+        }
+    finally:
+        napcat_module._runtime_adapter = previous_runtime_adapter
+        await adapter.close()
+
+
+@pytest.mark.asyncio
+async def test_napcat_runtime_send_message_requires_channel_type():
+    """NapCat runtime send requests must carry explicit channel-type metadata."""
+
+    transport = httpx.ASGITransport(app=napcat_module.runtime_app)
+    async with httpx.AsyncClient(
+        transport=transport,
+        base_url="http://runtime.local",
+    ) as client:
+        response = await client.post(
+            "/send_message",
+            json={
+                "channel_id": "673225019",
+                "text": "scheduled private hello",
+                "reply_to_msg_id": None,
+            },
+        )
+
+    assert response.status_code == 422
 
 
 @pytest.mark.asyncio
@@ -976,6 +1048,54 @@ async def test_discord_handle_message_posts_first_delivery_receipt(
     assert message.reply_chunks == ["first chunk"]
     assert message.channel.sent_chunks == ["second chunk"]
     await adapter.close()
+
+
+@pytest.mark.asyncio
+async def test_discord_runtime_send_message_accepts_channel_type():
+    """Discord runtime sends should accept scheduler channel-type metadata."""
+
+    adapter = DiscordAdapter(
+        brain_url="http://127.0.0.1:8000",
+        runtime_host="127.0.0.1",
+        runtime_port=8012,
+        runtime_public_url="http://127.0.0.1:8012",
+        runtime_shared_secret="secret-token",
+        channel_ids=["12345"],
+        debug_modes={},
+    )
+    channel = _FakeDiscordChannel()
+    adapter.get_channel = MagicMock(return_value=channel)
+
+    result = await adapter.send_message(
+        channel_id="12345",
+        text="scheduled hello",
+        channel_type="private",
+    )
+
+    assert channel.sent_chunks == ["scheduled hello"]
+    assert result.message_id == "discord-send-1"
+    await adapter.close()
+
+
+@pytest.mark.asyncio
+async def test_discord_runtime_send_message_requires_channel_type():
+    """Discord runtime send requests must carry explicit channel-type metadata."""
+
+    transport = httpx.ASGITransport(app=discord_module.runtime_app)
+    async with httpx.AsyncClient(
+        transport=transport,
+        base_url="http://runtime.local",
+    ) as client:
+        response = await client.post(
+            "/send_message",
+            json={
+                "channel_id": "12345",
+                "text": "scheduled hello",
+                "reply_to_msg_id": None,
+            },
+        )
+
+    assert response.status_code == 422
 
 
 @pytest.mark.asyncio

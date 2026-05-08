@@ -71,6 +71,7 @@ _TASK_DISPATCHER_PROMPT = """\
 4a. 如果用户明确指定了另一个群/频道/房间 ID（例如 `54369546群`），`target_channel` 必须写那个明确的 ID，而不是 `"same"`。
 4b. 若来源是私聊/DM，但用户要求发到另一个群或频道，仍然按用户指定的目标 ID 填写 `target_channel`；不要因为来源是私聊就回退到 `"same"`。
 4c. `target_channel` 必须是平台实际使用的纯 ID 字符串；不要保留“群”“频道”“房间”“#”之类的人类描述后缀。
+4d. 当 `target_channel` 不是 `"same"` 时，必须输出 `target_channel_type`；群/频道/房间使用 `group`，私聊/DM 使用 `private`。不要让调度器猜。
 5. 对“持续生效的回复规则/称呼规则/语言偏好/格式约定”这类承诺，如果 `due_time` 为 null，说明它属于长期状态，不是未来某个时刻要发送的新消息。此时必须返回空列表。
 5a. 若 `commitment_type` 是 `future_promise` 且需要定时执行，输入侧通常会提供 `due_time`。如果 `due_time` 仍为 null，且你无法确定精确执行时间，返回空列表。
 6. 只有“未来某个时刻真的要额外发送一条消息”时，才生成 `send_message`。
@@ -122,7 +123,8 @@ _TASK_DISPATCHER_PROMPT = """\
     {{
       "tool": "工具名",
       "args": {{
-        "参数名": "参数值"
+        "参数名": "参数值",
+        "target_channel_type": "group | private，target_channel 不是 same 时必填"
       }}
     }}
   ]
@@ -181,6 +183,7 @@ def _build_dispatch_context(state: ConsolidatorState, *, timestamp: str) -> Disp
         guild_id=None,
         bot_permission_role="user",
         now=now,
+        source_channel_type=state["channel_type"],
     )
     return return_value
 
@@ -307,7 +310,7 @@ async def _generate_raw_tool_calls(
         "time_context": state["time_context"],
         "source_platform": ctx.source_platform,
         "source_channel_id": ctx.source_channel_id,
-        "source_channel_type": state.get("channel_type", "group"),
+        "source_channel_type": state["channel_type"],
         "source_message_id": ctx.source_message_id,
         "decontexualized_input": state.get("decontexualized_input", ""),
         "final_dialog": state.get("final_dialog", []),

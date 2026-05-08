@@ -192,6 +192,7 @@ class QQEnvelopeNormalizer:
 
 class RuntimeSendMessageRequest(BaseModel):
     channel_id: str
+    channel_type: str
     text: str
     reply_to_msg_id: str | None = None
 
@@ -222,6 +223,7 @@ async def send_message_endpoint(
             channel_id=req.channel_id,
             text=req.text,
             reply_to_msg_id=req.reply_to_msg_id,
+            channel_type=req.channel_type,
         )
     except RuntimeError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
@@ -804,6 +806,7 @@ class NapCatWSAdapter:
         channel_id: str,
         text: str,
         *,
+        channel_type: str,
         reply_to_msg_id: str | None = None,
     ) -> SendResult:
         """Send one outbound message through NapCat's ``send_msg`` action.
@@ -811,6 +814,7 @@ class NapCatWSAdapter:
         Args:
             channel_id: QQ group or private-chat identifier.
             text: Message body to send.
+            channel_type: Whether the target is a QQ group or private chat.
             reply_to_msg_id: Optional quoted message id.
 
         Returns:
@@ -820,11 +824,18 @@ class NapCatWSAdapter:
         if self._ws is None:
             raise RuntimeError("NapCat websocket is not connected")
 
-        params = {
-            "message_type": "group",
-            "group_id": int(channel_id),
+        params: dict[str, object] = {
             "message": _outbound_message_payload(text, reply_to_msg_id),
         }
+        if channel_type == "private":
+            params["message_type"] = "private"
+            params["user_id"] = int(channel_id)
+        elif channel_type == "group":
+            params["message_type"] = "group"
+            params["group_id"] = int(channel_id)
+        else:
+            raise RuntimeError(f"Unsupported QQ channel_type: {channel_type}")
+
         try:
             response = await self._call_api(self._ws, "send_msg", params)
         except (

@@ -31,6 +31,7 @@ class _StubAdapter:
         channel_id: str,
         text: str,
         *,
+        channel_type: str,
         reply_to_msg_id: str | None = None,
     ) -> SendResult:
         self.calls.append(
@@ -38,6 +39,7 @@ class _StubAdapter:
                 "channel_id": channel_id,
                 "text": text,
                 "reply_to_msg_id": reply_to_msg_id,
+                "channel_type": channel_type,
             }
         )
         return SendResult(
@@ -87,7 +89,7 @@ def _configure_runtime() -> tuple[_StubAdapter, PendingTaskIndex]:
 
 
 @pytest.mark.asyncio
-async def test_schedule_event_persists_tool_doc_defaults():
+async def test_schedule_event_persists_tool_doc_metadata():
     db = _make_mock_db()
     _configure_runtime()
 
@@ -100,11 +102,13 @@ async def test_schedule_event_persists_tool_doc_defaults():
             "args": {
                 "target_platform": "discord",
                 "target_channel": "chan-1",
+                "target_channel_type": "group",
                 "text": "hello",
             },
             "execute_at": "2099-01-01T00:00:00+00:00",
             "source_platform": "discord",
             "source_channel_id": "chan-1",
+            "source_channel_type": "group",
             "source_user_id": "u1",
             "source_message_id": "msg-1",
             "guild_id": None,
@@ -116,6 +120,7 @@ async def test_schedule_event_persists_tool_doc_defaults():
     assert persisted["event_id"] == event_id
     assert persisted["status"] == "pending"
     assert persisted["tool"] == "send_message"
+    assert persisted["source_channel_type"] == "group"
     assert "created_at" in persisted
 
 
@@ -148,6 +153,7 @@ async def test_fire_event_executes_registered_tool_handler_and_marks_completed()
         "args": {
             "target_platform": "discord",
             "target_channel": "chan-1",
+            "target_channel_type": "group",
             "text": "hey there",
             "reply_to_msg_id": "msg-1",
         },
@@ -155,6 +161,7 @@ async def test_fire_event_executes_registered_tool_handler_and_marks_completed()
         "status": "pending",
         "source_platform": "discord",
         "source_channel_id": "chan-1",
+        "source_channel_type": "group",
         "source_user_id": "u1",
         "source_message_id": "msg-0",
         "guild_id": None,
@@ -173,6 +180,7 @@ async def test_fire_event_executes_registered_tool_handler_and_marks_completed()
             "channel_id": "chan-1",
             "text": "hey there",
             "reply_to_msg_id": "msg-1",
+            "channel_type": "group",
         }
     ]
     updates = [call.args[1]["$set"]["status"] for call in db.scheduled_events.update_one.await_args_list]
@@ -212,6 +220,7 @@ async def test_fire_event_marks_failed_when_handler_raises():
         "status": "pending",
         "source_platform": "discord",
         "source_channel_id": "chan-1",
+        "source_channel_type": "group",
         "source_user_id": "u1",
         "source_message_id": "msg-0",
         "guild_id": None,

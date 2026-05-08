@@ -49,6 +49,9 @@ Never read `.env` unless the user explicitly asks for environment inspection.
 
 - Use the project virtual environment: `venv\Scripts\python`.
 - Before editing Python, apply `.agents/skills/py-style`.
+- Treat `.agents/skills/py-style` as the canonical coding policy, including
+  its fail-fast rules for required internal data, defaults, and exception
+  handling. Do not duplicate or weaken those rules in this file.
 - Before adding, changing, or running tests, apply
   `.agents/skills/test-style-and-execution`.
 - Regular deterministic tests may run in batches.
