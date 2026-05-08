@@ -43,7 +43,9 @@ long_term/todo.md
 
 ## Active Bugfix Plans
 
-No active bugfix plans are currently classified.
+| Plan | Status | Execution |
+|---|---|---|
+| [rag_active_turn_conversation_row_exclusion_plan.md](active/bugfix/rag_active_turn_conversation_row_exclusion_plan.md) | draft | blocked |
 
 ## Reference Documents
 

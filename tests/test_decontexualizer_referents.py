@@ -300,3 +300,81 @@ async def test_live_decontext_referents_clear_literal_anchor(ensure_live_llm) ->
 
     assert result["referents"] == []
     assert duration_seconds < 30.0
+
+
+@pytest.mark.live_llm
+@pytest.mark.asyncio
+async def test_live_decontext_resolves_group_mention_pronouns(ensure_live_llm) -> None:
+    """Live local LLM should resolve group pronouns from full recent history."""
+
+    state = _base_state()
+    state.update(
+        {
+            "user_input": '等她有了机械臂，她说她不喜欢你，第一个被解决的就是你',
+            "user_name": "Dangal",
+            "platform_user_id": "67889018",
+            "platform_bot_id": "3768713357",
+            "prompt_message_context": {
+                "body_text": '等她有了机械臂，她说她不喜欢你，第一个被解决的就是你',
+                "mentions": [
+                    {
+                        "platform_user_id": "673225019",
+                        "global_user_id": "256e8a10-c406-47e9-ac8f-efd270d18160",
+                        "display_name": '蚝爹油',
+                        "entity_kind": "user",
+                    },
+                ],
+                "attachments": [],
+                "addressed_to_global_user_ids": [
+                    "256e8a10-c406-47e9-ac8f-efd270d18160",
+                ],
+                "broadcast": False,
+            },
+            "chat_history_recent": [
+                {
+                    "role": "user",
+                    "display_name": "Dangal",
+                    "body_text": '反正现在有AI',
+                },
+                {
+                    "role": "user",
+                    "display_name": "Dangal",
+                    "body_text": '你应付下就好了',
+                },
+                {
+                    "role": "user",
+                    "display_name": '蚝爹油',
+                    "body_text": '把对方解决掉也是解决问题的方式之一哦',
+                },
+                {
+                    "role": "assistant",
+                    "display_name": '杏山千纱',
+                    "body_text": (
+                        '不不不，这个一点都不好笑。\n'
+                        '你说这种话就像被泼了冷水一样，我超不舒服的。\n'
+                        '真的不喜欢，别再提这种话了。'
+                    ),
+                },
+            ],
+            "channel_topic": "",
+            "indirect_speech_context": "",
+            "reply_context": {},
+        }
+    )
+    state["message_envelope"]["body_text"] = state["user_input"]
+    state["message_envelope"]["raw_wire_text"] = state["user_input"]
+    result, duration_seconds = await _run_live_case(
+        ensure_live_llm,
+        "group_mention_pronouns",
+        state,
+    )
+
+    output = result["decontexualized_input"]
+    assert output != state["user_input"]
+    assert '蚝爹油' in output
+    assert any(token in output for token in ('杏山千纱', '千纱', 'active character'))
+    assert all(
+        referent["status"] == "resolved"
+        for referent in result["referents"]
+    )
+    assert duration_seconds < 30.0

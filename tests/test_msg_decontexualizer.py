@@ -2,12 +2,25 @@
 
 from __future__ import annotations
 
+import json
 import logging
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
 from kazusa_ai_chatbot.nodes.persona_supervisor2_msg_decontexualizer import call_msg_decontexualizer
+
+_FAILURE_INPUT = '等她有了机械臂，她说她不喜欢你，第一个被解决的就是你'
+_RESOLVED_FAILURE_INPUT = (
+    '等杏山千纱有了机械臂，杏山千纱说杏山千纱不喜欢蚝爹油，'
+    '第一个被解决的就是蚝爹油'
+)
+_DANGAL_GLOBAL_USER_ID = '745d7818-a9d3-4889-b7f3-8555078a2061'
+_TARGET_GLOBAL_USER_ID = '256e8a10-c406-47e9-ac8f-efd270d18160'
+_CHARACTER_GLOBAL_USER_ID = '00000000-0000-4000-8000-000000000001'
+_DANGAL_PLATFORM_USER_ID = '67889018'
+_TARGET_PLATFORM_USER_ID = '673225019'
+_BOT_PLATFORM_USER_ID = '3768713357'
 
 
 def _base_state():
@@ -38,6 +51,253 @@ def _base_state():
         "channel_topic": "general chat",
         "indirect_speech_context": "",
         "reply_context": {},
+    }
+
+
+def _qq_failure_history() -> list[dict]:
+    """Return the pre-active QQ group rows needed to resolve the failure input."""
+
+    history = [
+        {
+            'name': 'Dangal',
+            'display_name': 'Dangal',
+            'platform_message_id': 'qq-2026-05-08T01:48:45',
+            'platform_user_id': _DANGAL_PLATFORM_USER_ID,
+            'global_user_id': _DANGAL_GLOBAL_USER_ID,
+            'role': 'user',
+            'body_text': '反正现在有AI',
+            'addressed_to_global_user_ids': [_CHARACTER_GLOBAL_USER_ID],
+            'mentions': [],
+            'broadcast': False,
+            'reply_context': {},
+            'timestamp': '2026-05-08T01:48:45.000000+00:00',
+        },
+        {
+            'name': 'Dangal',
+            'display_name': 'Dangal',
+            'platform_message_id': 'qq-2026-05-08T01:48:52',
+            'platform_user_id': _DANGAL_PLATFORM_USER_ID,
+            'global_user_id': _DANGAL_GLOBAL_USER_ID,
+            'role': 'user',
+            'body_text': '你应付下就好了',
+            'addressed_to_global_user_ids': [_CHARACTER_GLOBAL_USER_ID],
+            'mentions': [],
+            'broadcast': False,
+            'reply_context': {},
+            'timestamp': '2026-05-08T01:48:52.000000+00:00',
+        },
+        {
+            'name': '蚝爹油',
+            'display_name': '蚝爹油',
+            'platform_message_id': 'qq-2026-05-08T01:48:58',
+            'platform_user_id': _TARGET_PLATFORM_USER_ID,
+            'global_user_id': _TARGET_GLOBAL_USER_ID,
+            'role': 'user',
+            'body_text': '把对方解决掉也是解决问题的方式之一哦',
+            'addressed_to_global_user_ids': [_CHARACTER_GLOBAL_USER_ID],
+            'mentions': [],
+            'broadcast': False,
+            'reply_context': {},
+            'timestamp': '2026-05-08T01:48:58.000000+00:00',
+        },
+        {
+            'name': '杏山千纱',
+            'display_name': '杏山千纱',
+            'platform_message_id': 'qq-2026-05-08T01:49:02',
+            'platform_user_id': _BOT_PLATFORM_USER_ID,
+            'global_user_id': _CHARACTER_GLOBAL_USER_ID,
+            'role': 'assistant',
+            'body_text': (
+                '不不不，这个一点都不好笑。\n'
+                '你说这种话就像被泼了冷水一样，我超不舒服的。\n'
+                '真的不喜欢，别再提这种话了。'
+            ),
+            'addressed_to_global_user_ids': [_TARGET_GLOBAL_USER_ID],
+            'mentions': [],
+            'broadcast': False,
+            'reply_context': {},
+            'timestamp': '2026-05-08T01:49:02.000000+00:00',
+        },
+    ]
+    return history
+
+
+def _qq_failure_state(chat_history_recent: list[dict]) -> dict:
+    """Build decontextualizer state for the QQ group referent failure."""
+
+    state = _base_state()
+    state.update(
+        {
+            'user_input': _FAILURE_INPUT,
+            'user_name': 'Dangal',
+            'platform_user_id': _DANGAL_PLATFORM_USER_ID,
+            'platform_bot_id': _BOT_PLATFORM_USER_ID,
+            'message_envelope': {
+                'body_text': _FAILURE_INPUT,
+                'raw_wire_text': (
+                    f'[CQ:at,qq={_TARGET_PLATFORM_USER_ID}] '
+                    f'{_FAILURE_INPUT}[CQ:image,file=referent.png]'
+                ),
+                'mentions': [
+                    {
+                        'platform_user_id': _TARGET_PLATFORM_USER_ID,
+                        'global_user_id': _TARGET_GLOBAL_USER_ID,
+                        'display_name': '蚝爹油',
+                        'entity_kind': 'user',
+                    },
+                ],
+                'attachments': [
+                    {
+                        'media_kind': 'image',
+                        'description': '',
+                        'summary_status': 'unavailable',
+                    },
+                ],
+                'addressed_to_global_user_ids': [_TARGET_GLOBAL_USER_ID],
+                'broadcast': False,
+            },
+            'prompt_message_context': {
+                'body_text': _FAILURE_INPUT,
+                'mentions': [
+                    {
+                        'platform_user_id': _TARGET_PLATFORM_USER_ID,
+                        'global_user_id': _TARGET_GLOBAL_USER_ID,
+                        'display_name': '蚝爹油',
+                        'entity_kind': 'user',
+                    },
+                ],
+                'attachments': [
+                    {
+                        'media_kind': 'image',
+                        'description': '',
+                        'summary_status': 'unavailable',
+                    },
+                ],
+                'addressed_to_global_user_ids': [_TARGET_GLOBAL_USER_ID],
+                'broadcast': False,
+            },
+            'chat_history_recent': chat_history_recent,
+            'channel_topic': '',
+            'indirect_speech_context': '',
+            'reply_context': {},
+        }
+    )
+    return state
+
+
+class _HistoryAwareDecontextualizerLLM:
+    """Fake LLM that resolves only when the needed QQ exchange is visible."""
+
+    def __init__(self) -> None:
+        self.payloads: list[dict] = []
+
+    async def ainvoke(self, messages: list) -> MagicMock:
+        input_payload = json.loads(messages[1].content)
+        self.payloads.append(input_payload)
+        body_texts = [
+            row['body_text']
+            for row in input_payload['chat_history']
+        ]
+
+        if any('真的不喜欢' in body_text for body_text in body_texts):
+            content = {
+                'output': _RESOLVED_FAILURE_INPUT,
+                'reasoning': 'visible group exchange identifies speaker and target',
+                'is_modified': True,
+                'referents': [
+                    {
+                        'phrase': '她',
+                        'referent_role': 'subject',
+                        'status': 'resolved',
+                    },
+                    {
+                        'phrase': '你',
+                        'referent_role': 'object',
+                        'status': 'resolved',
+                    },
+                ],
+            }
+        else:
+            content = {
+                'output': _FAILURE_INPUT,
+                'reasoning': 'filtered history lacks the group exchange',
+                'is_modified': False,
+                'referents': [],
+            }
+
+        response = MagicMock()
+        response.content = json.dumps(content, ensure_ascii=False)
+        return response
+
+
+@pytest.mark.asyncio
+async def test_decontexualizer_filtered_history_recreates_group_referent_loss():
+    """Filtered history reproduces the logged empty-referents failure mode."""
+
+    state = _qq_failure_state(_qq_failure_history()[:2])
+    fake_llm = _HistoryAwareDecontextualizerLLM()
+
+    with patch(
+        "kazusa_ai_chatbot.nodes.persona_supervisor2_msg_decontexualizer._msg_decontexualizer_llm",
+        new=fake_llm,
+    ):
+        result = await call_msg_decontexualizer(state)
+
+    assert [row['body_text'] for row in fake_llm.payloads[0]['chat_history']] == [
+        '反正现在有AI',
+        '你应付下就好了',
+    ]
+    assert fake_llm.payloads[0]['prompt_message_context']['mentions'] == [
+        {
+            'platform_user_id': _TARGET_PLATFORM_USER_ID,
+            'global_user_id': _TARGET_GLOBAL_USER_ID,
+            'display_name': '蚝爹油',
+            'entity_kind': 'user',
+        },
+    ]
+    assert all(
+        '真的不喜欢' not in row['body_text']
+        for row in fake_llm.payloads[0]['chat_history']
+    )
+    assert result == {
+        'decontexualized_input': _FAILURE_INPUT,
+        'referents': [],
+    }
+
+
+@pytest.mark.asyncio
+async def test_decontexualizer_full_history_surfaces_group_referent_evidence():
+    """Full recent history makes the third-party exchange visible to the stage."""
+
+    state = _qq_failure_state(_qq_failure_history())
+    fake_llm = _HistoryAwareDecontextualizerLLM()
+
+    with patch(
+        "kazusa_ai_chatbot.nodes.persona_supervisor2_msg_decontexualizer._msg_decontexualizer_llm",
+        new=fake_llm,
+    ):
+        result = await call_msg_decontexualizer(state)
+
+    body_texts = [
+        row['body_text']
+        for row in fake_llm.payloads[0]['chat_history']
+    ]
+    assert '把对方解决掉也是解决问题的方式之一哦' in body_texts
+    assert any('真的不喜欢' in body_text for body_text in body_texts)
+    assert result == {
+        'decontexualized_input': _RESOLVED_FAILURE_INPUT,
+        'referents': [
+            {
+                'phrase': '她',
+                'referent_role': 'subject',
+                'status': 'resolved',
+            },
+            {
+                'phrase': '你',
+                'referent_role': 'object',
+                'status': 'resolved',
+            },
+        ],
     }
 
 

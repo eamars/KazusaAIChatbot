@@ -171,3 +171,125 @@ def test_missing_current_global_user_id_returns_empty() -> None:
     )
 
     assert result == []
+
+
+def test_current_user_slice_hides_third_party_exchange_needed_for_group_referents() -> None:
+    """Current-user slicing can hide a recent exchange referenced by group banter."""
+
+    dangal_global_user_id = "745d7818-a9d3-4889-b7f3-8555078a2061"
+    target_global_user_id = "256e8a10-c406-47e9-ac8f-efd270d18160"
+    bot_platform_id = "3768713357"
+    history = [
+        _row(
+            "user",
+            "67889018",
+            dangal_global_user_id,
+            '反正现在有AI',
+            platform_message_id="2026-05-08T01:48:45.000000+00:00",
+        ),
+        _row(
+            "user",
+            "67889018",
+            dangal_global_user_id,
+            '你应付下就好了',
+            platform_message_id="2026-05-08T01:48:52.000000+00:00",
+        ),
+        _row(
+            "user",
+            "673225019",
+            target_global_user_id,
+            '把对方解决掉也是解决问题的方式之一哦',
+            platform_message_id="2026-05-08T01:48:58.000000+00:00",
+        ),
+        _row(
+            "assistant",
+            bot_platform_id,
+            CHARACTER_GLOBAL_USER_ID,
+            '不不不，这个一点都不好笑。\n'
+            '你说这种话就像被泼了冷水一样，我超不舒服的。\n'
+            '真的不喜欢，别再提这种话了。',
+            addressed_to_global_user_ids=[target_global_user_id],
+            platform_message_id="2026-05-08T01:49:02.000000+00:00",
+        ),
+    ]
+
+    result = build_interaction_history_recent(
+        history,
+        current_platform_user_id="67889018",
+        platform_bot_id=bot_platform_id,
+        current_global_user_id=dangal_global_user_id,
+    )
+
+    assert [row["body_text"] for row in result] == [
+        '反正现在有AI',
+        '你应付下就好了',
+    ]
+    assert '把对方解决掉也是解决问题的方式之一哦' in [
+        row["body_text"] for row in history
+    ]
+    assert any('真的不喜欢' in row["body_text"] for row in history)
+    assert all('真的不喜欢' not in row["body_text"] for row in result)
+
+
+def test_full_history_exposes_unrelated_addressed_subthread_removed_by_slice() -> None:
+    """Full group history includes other addressed subthreads that the slice removes."""
+
+    history = [
+        _row(
+            "user",
+            "platform-current",
+            "global-current",
+            "current user asks about their config",
+            platform_message_id="current-1",
+        ),
+        _row(
+            "assistant",
+            "platform-bot",
+            "character-global",
+            "answer to current user",
+            addressed_to_global_user_ids=["global-current"],
+            platform_message_id="bot-current-1",
+        ),
+        _row(
+            "user",
+            "platform-other",
+            "global-other",
+            "other user private setup detail",
+            platform_message_id="other-1",
+        ),
+        _row(
+            "assistant",
+            "platform-bot",
+            "character-global",
+            "answer to other user",
+            addressed_to_global_user_ids=["global-other"],
+            platform_message_id="bot-other-1",
+        ),
+        _row(
+            "user",
+            "platform-current",
+            "global-current",
+            "current user followup",
+            platform_message_id="current-2",
+        ),
+    ]
+
+    result = build_interaction_history_recent(
+        history,
+        current_platform_user_id="platform-current",
+        platform_bot_id="platform-bot",
+        current_global_user_id="global-current",
+    )
+
+    assert [row["body_text"] for row in history] == [
+        "current user asks about their config",
+        "answer to current user",
+        "other user private setup detail",
+        "answer to other user",
+        "current user followup",
+    ]
+    assert [row["body_text"] for row in result] == [
+        "current user asks about their config",
+        "answer to current user",
+        "current user followup",
+    ]

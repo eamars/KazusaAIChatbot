@@ -206,9 +206,37 @@ async def persona_supervisor2(state: IMProcessState) -> dict:
         Dialog output and the persona-state snapshot used by background tasks.
     """
 
+    recent_channel_history_for_decontextualizer = format_history_for_llm(
+        state["chat_history_wide"]
+    )[-CHAT_HISTORY_RECENT_LIMIT:]
+    raw_interaction_wide = build_interaction_history_recent(
+        state["chat_history_wide"],
+        state["platform_user_id"],
+        state["platform_bot_id"],
+        state["global_user_id"],
+    )
+    interaction_history_wide = format_history_for_llm(raw_interaction_wide)
+    interaction_history_recent = interaction_history_wide[-CHAT_HISTORY_RECENT_LIMIT:]
+
+    async def stage_0_msg_decontexualizer(
+        persona_state: GlobalPersonaState,
+    ) -> dict:
+        """Run decontextualization with recent full channel history only."""
+
+        decontextualizer_state = dict(persona_state)
+        decontextualizer_state["chat_history_recent"] = (
+            recent_channel_history_for_decontextualizer
+        )
+        result = await call_msg_decontexualizer(decontextualizer_state)
+        return_value = result
+        return return_value
+
     # Build the top level graph that connect stages
     persona_builder = StateGraph(GlobalPersonaState)
-    persona_builder.add_node("stage_0_msg_decontexualizer", call_msg_decontexualizer)
+    persona_builder.add_node(
+        "stage_0_msg_decontexualizer",
+        stage_0_msg_decontexualizer,
+    )
     persona_builder.add_node("stage_1_research", stage_1_research)
     persona_builder.add_node("stage_2_cognition", call_cognition_subgraph)
     persona_builder.add_node("stage_3_action", call_action_subgraph)  # perform action
@@ -229,15 +257,6 @@ async def persona_supervisor2(state: IMProcessState) -> dict:
 
     
     persona_graph = persona_builder.compile()
-
-    raw_interaction_wide = build_interaction_history_recent(
-        state["chat_history_wide"],
-        state["platform_user_id"],
-        state["platform_bot_id"],
-        state["global_user_id"],
-    )
-    interaction_history_wide = format_history_for_llm(raw_interaction_wide)
-    interaction_history_recent = interaction_history_wide[-CHAT_HISTORY_RECENT_LIMIT:]
 
     initial_persona_state: GlobalPersonaState = {
         # Character Related

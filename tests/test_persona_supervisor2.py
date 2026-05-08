@@ -226,7 +226,7 @@ async def test_persona_supervisor2_silent_cognition_short_circuits_dialog():
 
 @pytest.mark.asyncio
 async def test_persona_supervisor2_scopes_group_history_before_persona_stages():
-    """Persona stages should not receive another user's addressed subthread."""
+    """Only the decontextualizer should receive full recent channel history."""
     state = _base_discord_state()
     state["platform_user_id"] = "platform-user-a"
     state["global_user_id"] = "global-user-a"
@@ -321,6 +321,15 @@ async def test_persona_supervisor2_scopes_group_history_before_persona_stages():
     ] == [
         "current user secret",
         "current user reply",
+        "other user secret",
+        "other user reply",
+    ]
+    assert [
+        row["body_text"]
+        for row in research_state["chat_history_recent"]
+    ] == [
+        "current user secret",
+        "current user reply",
     ]
     assert [
         row["body_text"] for row in research_state["chat_history_wide"]
@@ -329,7 +338,7 @@ async def test_persona_supervisor2_scopes_group_history_before_persona_stages():
         "current user reply",
     ]
     assert result["consolidation_state"]["chat_history_recent"] == (
-        decon_state["chat_history_recent"]
+        research_state["chat_history_recent"]
     )
 
 
