@@ -942,7 +942,7 @@ async def lifespan(app: FastAPI):
         )
     else:
         _reflection_worker_handle = start_reflection_cycle_worker(
-            is_primary_interaction_busy=_primary_interaction_busy,
+            is_primary_interaction_busy=lambda: False,
         )
     logger.info("Kazusa brain service is ready")
 

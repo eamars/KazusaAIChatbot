@@ -22,6 +22,7 @@ async def test_lifespan_starts_reflection_worker_by_default(monkeypatch) -> None
     assert calls["started"] == 1
     assert calls["stopped"] == 1
     assert callable(calls["busy_probe"])
+    assert calls["busy_probe"]() is False
 
 
 @pytest.mark.asyncio
@@ -59,8 +60,9 @@ async def test_reflection_worker_defers_while_primary_interaction_is_busy() -> N
     assert results[0].defer_reason == "primary interaction busy"
 
 
-def test_primary_interaction_busy_uses_queue_and_active_count(monkeypatch) -> None:
-    """Service busy probe should cover queued and active primary work."""
+@pytest.mark.asyncio
+async def test_reflection_probe_ignores_chat_queue_state(monkeypatch) -> None:
+    """Reflection should not serialize itself behind active chat work."""
 
     class _Queue:
         def __init__(self, count: int) -> None:
@@ -70,15 +72,13 @@ def test_primary_interaction_busy_uses_queue_and_active_count(monkeypatch) -> No
             return self.count
 
     monkeypatch.setattr(service_module, "_chat_input_queue", _Queue(1))
-    monkeypatch.setattr(service_module, "_primary_interaction_active_count", 0)
-    assert service_module._primary_interaction_busy() is True
-
-    monkeypatch.setattr(service_module, "_chat_input_queue", _Queue(0))
     monkeypatch.setattr(service_module, "_primary_interaction_active_count", 1)
-    assert service_module._primary_interaction_busy() is True
 
-    monkeypatch.setattr(service_module, "_primary_interaction_active_count", 0)
-    assert service_module._primary_interaction_busy() is False
+    calls = await _run_lifespan(monkeypatch, disabled=False)
+    busy_probe = calls["busy_probe"]
+
+    assert callable(busy_probe)
+    assert busy_probe() is False
 
 
 async def _run_lifespan(monkeypatch, *, disabled: bool) -> dict[str, object]:

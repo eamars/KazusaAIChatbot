@@ -176,8 +176,9 @@ promotion records a skipped/deferred result and performs no memory mutation.
 ## Worker Schedule
 
 FastAPI lifespan owns exactly one worker task when
-`REFLECTION_CYCLE_DISABLED` is false. The service passes a busy-probe callback;
-the worker never imports service state.
+`REFLECTION_CYCLE_DISABLED` is false. The service passes an always-idle
+busy-probe callback so reflection and normal chat run independently; the worker
+never imports service state.
 
 Default schedule:
 
@@ -191,11 +192,12 @@ grouping uses the character-local date of each hourly slot.
 
 Tick priority:
 
-1. Skip if primary chat or post-dialog work is busy.
-2. Run due hourly slots.
-3. Run due daily-channel syntheses after terminal hourly documents exist.
-4. Run daily global promotion after daily-channel documents are terminal.
-5. Re-check the busy probe before starting each next unit of work.
+1. Run due hourly slots.
+2. Run due daily-channel syntheses after terminal hourly documents exist.
+3. Run daily global promotion after daily-channel documents are terminal.
+
+The service does not serialize reflection behind `/chat`. Both paths may run at
+the same time and may contend for shared LLM or database resources.
 
 Terminal hourly statuses are `succeeded`, `failed`, `skipped`, and `dry_run`;
 a failed hourly slot does not block daily synthesis forever.

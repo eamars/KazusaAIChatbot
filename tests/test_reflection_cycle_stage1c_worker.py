@@ -109,6 +109,10 @@ async def test_worker_tick_passes_busy_probe_to_promotion(monkeypatch) -> None:
         run_kind="daily_channel",
         dry_run=False,
     )
+    style_result = worker_module.ReflectionWorkerResult(
+        run_kind="daily_interaction_style_update",
+        dry_run=False,
+    )
     promotion_result = worker_module.ReflectionPromotionResult(
         run_kind="daily_global_promotion",
         dry_run=False,
@@ -130,6 +134,11 @@ async def test_worker_tick_passes_busy_probe_to_promotion(monkeypatch) -> None:
     )
     monkeypatch.setattr(
         worker_module,
+        "_run_daily_interaction_style_update",
+        AsyncMock(return_value=style_result),
+    )
+    monkeypatch.setattr(
+        worker_module,
         "_run_global_reflection_promotion",
         _run_global_reflection_promotion,
     )
@@ -143,7 +152,7 @@ async def test_worker_tick_passes_busy_probe_to_promotion(monkeypatch) -> None:
         is_primary_interaction_busy=_busy_probe,
     )
 
-    assert results == [hourly_result, daily_result, promotion_result]
+    assert results == [hourly_result, daily_result, style_result, promotion_result]
     assert captured["is_primary_interaction_busy"] is _busy_probe
 
 
