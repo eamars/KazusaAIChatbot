@@ -94,6 +94,14 @@ def test_valid_candidates_normalizes_extractor_due_at() -> None:
     assert candidates[0]["due_at"] == "2026-05-06T12:00:00+00:00"
 
 
+def test_extractor_prompt_requires_unresolved_relative_commitment_omission() -> None:
+    prompt = memory_units_module._EXTRACTOR_PROMPT
+
+    assert "不把未解析的相对时间当作当前或未来事实保存" in prompt
+    assert "不输出该 memory_unit" in prompt
+    assert "无法确定且会影响活跃承诺有效性的候选直接删除" in prompt
+
+
 @pytest.mark.asyncio
 async def test_build_user_memory_context_bundle_merges_semantic_and_recent(monkeypatch) -> None:
     calls: dict[str, object] = {}

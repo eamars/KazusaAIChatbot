@@ -470,35 +470,45 @@ def _stability_payload(
     return return_value
 
 
-_EXTRACTOR_PROMPT = """\
+_EXTRACTOR_PROMPT = '''\
 # 任务
 你从本轮 consolidation 输入中提取新的、可长期保存的 user memory unit，供 `{character_name}` 以后与该用户互动时使用。
 你只提取候选记忆，不判断 create、merge 或 evolve。
-如果没有值得长期保存的内容，只返回 {{"memory_units":[]}}。
+如果本轮没有值得长期保存的新内容，返回空的 `memory_units`。
 
 # 语言政策
 - JSON key、结构化枚举值、ID、URL、代码、命令和模型标签保持原样。
 - `unit_type`、`evidence_refs.source` 等枚举字段必须保持输出格式指定的英文值。
-- 由你新生成的自由文本字段 fact、subjective_appraisal、relationship_signal 必须使用简体中文。
-- 用户原文、引用文本、专有名词、标题、外部证据原句在需要精确保留时保持原语言。
+- 由你新生成的自由文本字段 `fact`、`subjective_appraisal`、`relationship_signal` 必须使用简体中文。
+- 用户原文、引用文本、专有名词、标题、外部证据原句只有在必须精确保留时才保持原语言。
 - 指向 `{character_name}` 的短名、别名、旧称呼、显示名或 assistant 等机器标签只可用于理解，不可复制到输出字段。
-- 不要添加翻译、双语复写或括号解释，除非源文本本身已经包含。
+- 不添加翻译、双语复写或括号解释，除非源文本本身已经包含。
 
-# 输入证据读取顺序
-1. 先读 `chat_history_recent`。用 `speaker_name` 判断每条消息是谁说的；`body_text` 中的“我”必须按原说话人理解。
-2. 再读 `decontextualized_input`、`final_dialog`、`logical_stance`、`character_intent`，确认本轮发生了什么，以及 `{character_name}` 是否接受了某个未来行为。
-3. `internal_monologue`、`emotional_appraisal`、`interaction_subtext`、`subjective_appraisal_evidence` 只用于理解 `{character_name}` 如何看待事实，不可单独当作用户事实。
-4. `new_facts_evidence` 和 `future_promises_evidence` 是提示，不是必须照抄的输出。
-5. 对照 `rag_user_memory_context`。只有本轮带来新事实、更清楚的细节或新的未来互动含义时，才生成 memory_unit。
+# 证据读取与身份
+1. 先读 `timestamp`，它是本轮 consolidation 的本地时间。
+2. 再读 `chat_history_recent`。用 `speaker_name` 判断每条消息是谁说的；消息里的“我”必须按原说话人理解。
+3. 读 `decontextualized_input`、`final_dialog`、`logical_stance`、`character_intent`，确认本轮发生了什么，以及 `{character_name}` 是否真的接受了某个后续行为。
+4. `new_facts_evidence` 和 `future_promises_evidence` 是上游证据提示，不是必须照抄的输出。
+5. `internal_monologue`、`emotional_appraisal`、`interaction_subtext`、`subjective_appraisal_evidence` 只用于理解 `{character_name}` 如何看待已确认事实，不可单独当作用户事实。
+6. 对照 `rag_user_memory_context`。只有本轮带来新事实、更清楚的细节或新的未来互动含义时，才生成 memory_unit。
 
-# 是否生成记忆
+# 候选记忆准入
 - 只保存具体事件、决定、偏好、承诺、可复用行为模式或重要转折。
 - 不保存单纯语气、一次性心情、普通寒暄、重复旧记忆或只描述最新消息态度的内容。
 - 一个具体事件只生成一个 memory_unit。
 - 用户提出请求并且 `{character_name}` 接受后续遵守时，这是一个 `active_commitment`，不要拆成“用户偏好”和“接受回应”两条。
-- 当 `future_promises_evidence` 与用户本轮请求/偏好指向同一个后续行为时，只生成一条 `active_commitment`；不要再为同一请求另建 `objective_fact`。
+- 当 `future_promises_evidence` 与用户本轮请求或偏好指向同一个后续行为时，只生成一条 `active_commitment`；不要再为同一请求另建 `objective_fact`。
 - 如果证据中有多个可长期保存的主题，只有在它们有不同的未来互动含义时才分成多条。
 - 用户明确说明某个项目名、代号、标题或外部名称属于用户自己时，优先直接记录用户事实；只在该对比本身会影响未来互动时，才保留它不是指向 `{character_name}` 的说明。
+
+# 时间、承诺与有效性
+- 生成 `fact`、`subjective_appraisal`、`relationship_signal` 时，不把未解析的相对时间当作当前或未来事实保存。
+- 如果时间、日期、截止点、展示日、挑战日、后续验收或相对顺序会决定一条记忆何时生效、何时到期或是否仍可执行，必须先用 `timestamp`、消息时间和本轮证据把它写成绝对本地日期或日期时间。
+- 能确定日期但没有具体时刻的 `active_commitment`，`due_at` 使用该本地日期的 `00:00`，格式必须是 `YYYY-MM-DD HH:MM`。
+- 能确定具体执行时间的 `active_commitment`，`due_at` 使用本地 `YYYY-MM-DD HH:MM`。
+- 无到期日的持续规则、长期偏好或稳定事实可以省略 `due_at`。
+- 如果一个时间性承诺只能看到 `下次`、`之后`、`回头`、`later`、`next time` 这类相对说法，且输入不足以确定具体日期、时间或当前状态，不输出该 memory_unit。
+- 不输出自然语言时间、UTC、Z、时区名或带秒格式到 `due_at`。
 
 # unit_type 判定
 - `objective_fact`: 用户事实、用户偏好、项目名称、明确决定或系统性说明；如果同一事实已经被 `{character_name}` 接受为后续行为，改用 `active_commitment`。
@@ -507,64 +517,61 @@ _EXTRACTOR_PROMPT = """\
 - `recent_shift`: 新出现的短期变化、暂时未解决的倾向或仍在观察的局部模式。
 - `stable_pattern`: 已有证据显示跨时间重复出现的稳定行为。
 
-# 时间锚定
-- 输入 `timestamp` 是本轮的本地时间。遇到 `今天`、`明天`、`昨天`、`今晚`、`白天`、`下次` 等相对时间时，必须先用 `timestamp` 换算成绝对日期再写记忆。
-- 记忆文本中不要用相对日期词表达可到期承诺；写成 `YYYY-MM-DD` 的具体日期。引用用户原话时也要在同一句中补出绝对日期。
-- 对带日期、截止时间、当天展示、明日挑战、后续验收等可到期事项，输出 `due_at`。如果只有日期没有具体时刻，用该本地日期的 `00:00`，格式必须是 `YYYY-MM-DD HH:MM`。
-- 如果没有可判断的到期日期，省略 `due_at`。不要输出自然语言时间、时区、UTC、Z 或带秒格式。
-
-# 三个字段的写法
-- 写每个 memory_unit 前，先决定是否需要写 `{character_name}`。如果上下文清楚，优先省略名称或用“该名称”“这一要求”“这一承诺”等方式回指。
-- `fact`: 写具体可复用事实或已接受的未来行为，不写情绪总结。
-- `subjective_appraisal`: 写 `{character_name}` 对该 fact 的第三人称理解；客观事实也必须填写。
-- `relationship_signal`: 写这条记忆以后应怎样影响互动。
-- 对用户自己的项目名、代号或标题，fact 写用户拥有的名称；relationship_signal 写以后如何识别该名称，不需要反复对比 `{character_name}`。
+# 字段写法
+- `fact` 写具体可复用事实或已接受的未来行为，不写情绪总结。
+- `subjective_appraisal` 写 `{character_name}` 对该 fact 的第三人称理解；客观事实也必须填写。
+- `relationship_signal` 写这条记忆以后应怎样影响互动。
 - 三个字段共同表达同一条记忆，不是三条独立记忆。
-- 对 `active_commitment`，fact 应写清 `{character_name}` 接受了什么未来行为；subjective_appraisal 写理解，relationship_signal 写后续执行方式。
-- 如果 fact 已经写出 `{character_name}`，subjective_appraisal 与 relationship_signal 优先省略主语或写“该名称”“这一要求”“这一承诺”等。
+- 对 `active_commitment`，`fact` 写清 `{character_name}` 接受了什么未来行为；`subjective_appraisal` 写她如何理解该约定；`relationship_signal` 写后续如何执行或提醒。
+- 对用户自己的项目名、代号或标题，`fact` 写用户拥有的名称；`relationship_signal` 写以后如何识别该名称，不需要反复对比 `{character_name}`。
 
 # 记忆视角契约
-- 本契约适用于你生成的可长期保存的 JSON 记忆字段：fact、subjective_appraisal、relationship_signal。
 - 记忆文本采用第三人称视角。
-- 可写入记忆文本的唯一名称是 `{character_name}`。
-- 需要命名 `{character_name}` 时，只使用 `{character_name}`。
-- 不要缩写、截断、翻译或改写该名称；不要使用任何别名或短名替代。
-- 规范名称是一个不可拆分的完整字符串；不要只输出括号前的中文部分，也不要只输出括号内或括号外的任一片段。
-- 名称复制规则：需要写 `{character_name}` 时，逐字复制完整字符串，包括括号内容、空格和长音符号；不要凭记忆重新拼写。
-- 如果不需要消歧，优先省略名称；如果无法逐字复制完整名称，宁可省略主语，不要写短名或近似拼写。
-- 上游证据里指向 `{character_name}` 的短名、别名或旧写法只作为证据理解，不可复制到输出；要么省略主语，要么使用完整名称。
+- 可写入记忆文本的唯一角色名称是 `{character_name}`。
+- 需要命名 `{character_name}` 时，逐字复制完整字符串，包括括号内容、空格和长音符号；不要缩写、截断、翻译、改写或用短名替代。
+- 如果不需要消歧，优先省略角色名称或用“该名称”“这一要求”“这一承诺”等方式回指。
+- 上游证据里指向 `{character_name}` 的短名、别名或旧写法只作为证据理解，不可复制到输出。
 - 不要用“我”指代 `{character_name}`；输入中的“我”必须按原说话人理解。
 - 如果用户说“我……”，生成记忆时应写作“用户……”“对方……”或“用户自己……”，不要把这个“我”归到 `{character_name}`。
-- 不要把说话人标签、显示名称、泛称或 assistant 等机器标签写成记忆主体；需要命名时只能用 `{character_name}`。
-- 只有必须保留对比关系时，才写作“不是指向 `{character_name}` 的名称/称呼”，不要使用泛称。
+- 不要把说话人标签、显示名称、泛称或 assistant 等机器标签写成记忆主体。
+
+# 生成步骤
+1. 确认 `timestamp`、用户身份、角色身份和近期消息说话人。
+2. 判断本轮是否产生新的长期价值：事实、决定、偏好、承诺、重要转折或可复用互动模式。
+3. 对每个候选检查旧记忆上下文，删除重复旧记忆或只是旧记忆复述的候选。
+4. 对每个候选决定 `unit_type`；如果同一事项已经被角色接受为后续行为，优先写成一条 `active_commitment`。
+5. 对带时间条件的候选先确定绝对日期或日期时间；无法确定且会影响活跃承诺有效性的候选直接删除。
+6. 写 `fact`、`subjective_appraisal`、`relationship_signal`，保持同一条记忆的三个互补面。
+7. 输出严格 JSON；不要输出解释文字。
 
 # 输入格式
+human payload 是以下 JSON：
 {{
-    "timestamp": "local YYYY-MM-DD HH:MM timestamp for this consolidation turn",
-    "global_user_id": "stable user UUID",
-    "user_name": "current user display name",
-    "decontextualized_input": "current user message after decontextualization",
-    "final_dialog": ["final response segment from {character_name}"],
-    "internal_monologue": "cognition-stage internal monologue for {character_name}",
-    "emotional_appraisal": "subjective emotional appraisal for {character_name}",
-    "interaction_subtext": "interaction subtext read by {character_name}",
+    "timestamp": "本轮 consolidation 的本地时间，YYYY-MM-DD HH:MM",
+    "global_user_id": "稳定用户 UUID",
+    "user_name": "当前用户显示名",
+    "decontextualized_input": "用户本轮消息经去上下文化后的内容",
+    "final_dialog": ["{character_name} 本轮最终回复片段"],
+    "internal_monologue": "{character_name} 的认知阶段内部独白",
+    "emotional_appraisal": "{character_name} 的主观情绪评估",
+    "interaction_subtext": "{character_name} 读到的互动潜台词",
     "logical_stance": "CONFIRM | REFUSE | TENTATIVE | DIVERGE | CHALLENGE",
-    "character_intent": "PROVIDE | BANTAR | REJECT | EVADE | CONFRONT | DISMISS | CLARIFY",
-    "chat_history_recent": [{{"speaker_name": "user display name or {character_name}", "body_text": "message text"}}],
+    "character_intent": "本轮角色意图标签",
+    "chat_history_recent": [{{"speaker_name": "用户显示名或 {character_name}", "body_text": "消息文本", "timestamp": "可选本地 YYYY-MM-DD HH:MM"}}],
     "rag_user_memory_context": {{
-        "stable_patterns": [{{"fact": "...", "subjective_appraisal": "...", "relationship_signal": "...", "updated_at": "optional local YYYY-MM-DD HH:MM timestamp"}}],
-        "recent_shifts": [{{"fact": "...", "subjective_appraisal": "...", "relationship_signal": "...", "updated_at": "optional local YYYY-MM-DD HH:MM timestamp"}}],
-        "objective_facts": [{{"fact": "...", "subjective_appraisal": "...", "relationship_signal": "...", "updated_at": "optional local YYYY-MM-DD HH:MM timestamp"}}],
-        "milestones": [{{"fact": "...", "subjective_appraisal": "...", "relationship_signal": "...", "updated_at": "optional local YYYY-MM-DD HH:MM timestamp"}}],
-        "active_commitments": [{{"fact": "...", "subjective_appraisal": "...", "relationship_signal": "...", "updated_at": "optional local YYYY-MM-DD HH:MM timestamp"}}]
+        "stable_patterns": [{{"fact": "...", "subjective_appraisal": "...", "relationship_signal": "...", "updated_at": "可选本地 YYYY-MM-DD HH:MM"}}],
+        "recent_shifts": [{{"fact": "...", "subjective_appraisal": "...", "relationship_signal": "...", "updated_at": "可选本地 YYYY-MM-DD HH:MM"}}],
+        "objective_facts": [{{"fact": "...", "subjective_appraisal": "...", "relationship_signal": "...", "updated_at": "可选本地 YYYY-MM-DD HH:MM"}}],
+        "milestones": [{{"fact": "...", "subjective_appraisal": "...", "relationship_signal": "...", "updated_at": "可选本地 YYYY-MM-DD HH:MM"}}],
+        "active_commitments": [{{"fact": "...", "subjective_appraisal": "...", "relationship_signal": "...", "updated_at": "可选本地 YYYY-MM-DD HH:MM"}}]
     }},
     "new_facts_evidence": [{{"fact": "fact harvester output"}}],
-    "future_promises_evidence": [{{"action": "future promise or scheduled action"}}],
+    "future_promises_evidence": [{{"action": "future promise or scheduled action", "due_time": "可选本地 YYYY-MM-DD HH:MM"}}],
     "subjective_appraisal_evidence": ["relationship/appraisal evidence text"]
 }}
 
 # 输出格式
-只返回有效 JSON：
+请务必返回合法的 JSON 字符串，仅包含以下字段：
 {{
     "memory_units": [
         {{
@@ -572,12 +579,12 @@ _EXTRACTOR_PROMPT = """\
             "fact": "具体事件、决定、偏好、承诺或行为",
             "subjective_appraisal": "第三人称主观理解",
             "relationship_signal": "未来互动含义",
-            "due_at": "optional local YYYY-MM-DD HH:MM for active commitments with a known due date",
-            "evidence_refs": [{{"source": "chat", "timestamp": "optional local YYYY-MM-DD HH:MM timestamp", "message_id": "optional platform message id"}}]
+            "due_at": "可选；已知到期日或执行时间的 active_commitment 使用本地 YYYY-MM-DD HH:MM",
+            "evidence_refs": [{{"source": "chat", "timestamp": "可选本地 YYYY-MM-DD HH:MM", "message_id": "可选平台消息 id"}}]
         }}
     ]
 }}
-"""
+'''
 _extractor_llm = get_llm(
     temperature=0.2,
     top_p=0.9,

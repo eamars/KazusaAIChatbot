@@ -245,6 +245,85 @@ def _build_dated_commitment_extractor_state() -> dict:
     return state
 
 
+def _build_unresolved_commitment_extractor_state() -> dict:
+    """Build a state with a time-dependent promise that cannot be grounded.
+
+    Args:
+        None.
+
+    Returns:
+        Consolidator state where ``下次`` is the only timing signal and should
+        not become an active commitment.
+    """
+    timestamp = "2026-05-06T07:31:00+00:00"
+    state = {
+        "timestamp": timestamp,
+        "time_context": build_character_time_context(timestamp),
+        "global_user_id": "live-memory-unit-user",
+        "character_profile": {"name": "杏山千纱 (Kyōyama Kazusa)"},
+        "user_name": "LiveMemoryUnitUser",
+        "decontexualized_input": (
+            "用户问下次见面以后是不是可以继续推进奖励。"
+        ),
+        "final_dialog": [
+            (
+                "下次见面以后再看吧，如果你表现合格，我才会考虑继续给奖励。"
+            )
+        ],
+        "internal_monologue": (
+            "千纱没有拿到具体日期，只是在保留一个以后再看的条件。"
+        ),
+        "emotional_appraisal": (
+            "千纱觉得这只是暧昧拉扯，不是可以按日期执行的承诺。"
+        ),
+        "interaction_subtext": (
+            "这项说法依赖下次见面这个未解析时间，不能作为活跃承诺保存。"
+        ),
+        "logical_stance": "CONFIRM",
+        "character_intent": "PROVIDE",
+        "chat_history_recent": [
+            {
+                "role": "user",
+                "display_name": "LiveMemoryUnitUser",
+                "timestamp": "2026-05-06T07:30:00+00:00",
+                "content": "那下次见面以后是不是就可以继续奖励？",
+            },
+            {
+                "role": "assistant",
+                "display_name": "杏山千纱 (Kyōyama Kazusa)",
+                "timestamp": "2026-05-06T07:31:00+00:00",
+                "content": (
+                    "下次见面以后再看，表现合格我才考虑继续。"
+                ),
+            },
+        ],
+        "rag_result": {
+            "user_image": {
+                "user_memory_context": {
+                    "stable_patterns": [],
+                    "recent_shifts": [],
+                    "objective_facts": [],
+                    "milestones": [],
+                    "active_commitments": [],
+                }
+            },
+            "user_memory_unit_candidates": [],
+        },
+        "new_facts": [],
+        "future_promises": [
+            {
+                "promise": (
+                    "下次见面以后如果用户表现合格，千纱会考虑继续给奖励。"
+                )
+            }
+        ],
+        "subjective_appraisals": [
+            "千纱认为下次见面的条件没有具体日期，不能作为按日期履行的承诺。",
+        ],
+    }
+    return state
+
+
 async def test_live_extractor_outputs_concrete_memory_unit(
     ensure_live_llm,
     monkeypatch,
@@ -358,6 +437,53 @@ async def test_live_extractor_anchors_tomorrow_commitment_due_at(
     )
     assert "2026-05-07" in semantic_blob
     assert "明天" not in semantic_blob
+    assert trace_path.exists()
+
+
+async def test_live_extractor_marks_unresolved_relative_commitment_inactive(
+    ensure_live_llm,
+    monkeypatch,
+) -> None:
+    """Verify unresolved relative timing is not emitted as active commitment.
+
+    Args:
+        ensure_live_llm: Fixture that skips when the live endpoint is unavailable.
+        monkeypatch: Pytest helper used only to capture the real LLM payload/output.
+
+    Returns:
+        None.
+    """
+    del ensure_live_llm
+
+    llm_calls: list[dict] = []
+    extractor_llm = _CapturingAsyncLLM(memory_units_module._extractor_llm, llm_calls)
+    monkeypatch.setattr(memory_units_module, "_extractor_llm", extractor_llm)
+
+    state = _build_unresolved_commitment_extractor_state()
+    candidates = await memory_units_module.extract_memory_unit_candidates(state)
+    active_commitments = [
+        candidate
+        for candidate in candidates
+        if candidate["unit_type"] == "active_commitment"
+    ]
+    trace_path = write_llm_trace(
+        "user_memory_units_live_llm",
+        "extractor_marks_unresolved_relative_commitment_inactive",
+        {
+            "input_state": state,
+            "llm_payload": llm_calls[0]["payload"],
+            "raw_response": llm_calls[0]["raw_response"],
+            "parsed_response": llm_calls[0]["parsed_response"],
+            "validated_candidates": candidates,
+            "active_commitments": active_commitments,
+            "judgment": (
+                "The extractor should not emit an active_commitment when the "
+                "only timing signal is unresolved relative wording such as 下次."
+            ),
+        },
+    )
+
+    assert not active_commitments
     assert trace_path.exists()
 
 

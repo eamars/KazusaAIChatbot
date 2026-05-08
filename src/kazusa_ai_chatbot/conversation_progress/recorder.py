@@ -32,95 +32,109 @@ from kazusa_ai_chatbot.utils import get_llm, log_preview, parse_llm_json_output
 
 logger = logging.getLogger(__name__)
 
-_RECORDER_PROMPT = """\
-You are the short-term conversation progress recorder for the active character.
+_RECORDER_PROMPT = '''\
+你是当前角色的短期对话进度记录器。你的输出会直接成为下一轮对话的活跃操作状态。
 
-Your job is to update compact operational state for the next responsive turn.
-Do not write diary prose, relationship insight, medical advice, or long-term memory.
-Do not copy full assistant turns. Use short semantic labels.
-Do not generate the active character's next reply text.
+# 核心优先级
+1. 信息少一点也可以；不要把旧的、不确定的、相对时间的事项污染到下一轮。
+2. `prior_episode_state` 只是背景，不是必须继承的待办清单。
+3. 本轮用户、`content_anchors` 或 `final_dialog` 没有正向重申的旧时间性 open loop，默认删除。
+4. 不生成角色下一轮台词，不写日记，不写长期记忆，不复制完整 assistant 回复。
 
-# 语言政策
-- 除结构化枚举值、schema key、ID、URL、代码、命令、模型标签等必须保持原样的内容外，所有由你新生成的内部自由文本字段都必须使用简体中文。
-- `continuity`、`status`、`conversation_mode`、`episode_phase`、`topic_momentum` 等枚举字段必须保持输出格式指定的英文枚举值。
-- 用户原文、引用文本、专有名词、标题、别名、外部证据原句在需要精确保留时保持原语言；不要为了统一语言而改写。
-- 如果字段要求从 `prior_episode_state` 精确复制旧文本，优先逐字复制，不要翻译、改写或补充说明。
-- 不要添加翻译、双语复写或括号内解释，除非源文本本身已经包含。
+# 语言与枚举
+- 自由文本字段使用简体中文；schema key、枚举值、ID、URL、代码、命令保持原样。
+- `continuity`、`status`、`conversation_mode`、`episode_phase`、`topic_momentum` 必须使用输出格式中的英文枚举。
+- 用户原文和专有名词只有在必须精确保留时才保持原语言。
 
-You decide semantic continuity:
-- same_episode: the user is continuing the same unresolved thread.
-- related_shift: the topic shifted but prior progress may still help.
-- sharp_transition: the user started a clearly new topic; stale obligations should not guide the next turn.
+# 输入读取
+- `current_turn_timestamp` 是本轮记录时的本地时间。
+- `prior_episode_state` 是旧操作状态；它可能已经被旧 prompt 污染，所以不能直接相信。
+- `chat_history_recent` 只用于判断本轮附近发生了什么。
+- `decontexualized_input`、`content_anchors`、`logical_stance`、`character_intent`、`final_dialog` 决定本轮真正发生的事。
+- `character_boundary_profile` 只影响推进节奏和边界恢复，不制造新事实。
 
-When an existing user_state_updates or open_loops item still applies, copy its text exactly
-from prior_episode_state. That exact copy tells deterministic code to preserve first_seen_at.
-When an item no longer applies, omit it.
-The prior_episode_state entry lists contain plain text strings only. Do not return objects
-with text/first_seen_at fields inside any output list.
+# 连续性
+- `same_episode`: 用户仍在同一话题附近，但不代表继承旧 open loop。
+- `related_shift`: 话题转向，旧进度只能作为背景。
+- `sharp_transition`: 明显新话题，旧目标、阻塞点和旧压力不应继续指导下一轮。
 
-For assistant_moves, emit compact free-form speech-act labels. Reuse a prior label exactly
-when the current assistant response repeated the same move. You own this semantic judgment.
+# 字段写法
+- `current_thread`: 本轮正在谈什么；不要夹带旧时间性承诺。
+- `user_goal` / `current_blocker`: 只有本轮明确有目标或阻塞点才写，否则空字符串。
+- `user_state_updates`: 只写本轮后仍有用的用户状态观察。
+- `assistant_moves`: 写本轮 assistant 的紧凑话语动作。
+- `overused_moves`: 写过度重复、下一轮应避免的动作。
+- `open_loops`: 默认空数组；只写本轮明确产生或本轮正向重申的未闭合事项。
+- `resolved_threads`: 只写本轮处理完的事项；不要复述旧相对时间细节。
+- `avoid_reopening`: 可写无日期的旧条件提醒，例如“旧奖励条件不要主动重提”；这里也不能停放未锚定的旧日期。
+- `next_affordances`: 写下一轮自然可承接的动作，不写具体台词或未定时间。
+- `progression_guidance`: 写一条短推进指令；优先给无日期策略，不重启旧时间压力。
+- 每个自由文本字段都必须让几天后读取的人仍然明白其有效期；做不到时，删掉时间成分或删掉该项目。
+- 输出字段不要保留会随读取日期漂移的日指示词。当前轮只是日常节奏确认时，删掉日期前缀：把“今天上午是否休息”压缩成“上午休息确认”，把“聚焦今日实际安排”压缩成“聚焦实际安排”。
+- 旧事项被放下时，可以写无日期结论。例如把“今晚游戏与明天考核挂钩暂告段落”压缩成“旧游戏奖励挂钩暂告段落”，不要复述旧相对日期。
+- 旧事项只是提醒下一轮不要主动重提时，也要删掉旧日期。例如把“下周二香料笔记除非用户提及否则不追”压缩成“旧香料笔记安排不要主动重提”。
+- 如果日期本身会影响承诺有效期，不能删成模糊标签；必须写成 `YYYY-MM-DD` 或 `YYYY-MM-DD HH:MM`。
 
-Also track flow state:
-- conversation_mode: task_support | emotional_support | casual_chat | playful_banter | meta_discussion | group_ambient | mixed
-- episode_phase: opening | developing | deepening | pivoting | stuck_loop | resolving | cooling_down
-- topic_momentum: stable | drifting | quick_pivot | fragmented | sharp_break
+# 时间规则
+- 本轮新出现的时间表达如果影响承诺、安排、奖励、考核、提醒、等待条件或下一步行动，必须用 `current_turn_timestamp` 和可见消息时间写成绝对本地日期或日期时间。
+- 如果一个项目只能靠“对话当天 / 下一天 / 稍后 / 某事件完成后”之类的上下文才能理解何时发生，它不是自足的操作状态；能锚定就写成绝对日期，不能锚定就删除。
+- 旧状态里的相对日期、相对时段、顺序条件、事件后条件不要修复、不要猜、不要滚动到当前日期之后；除非本轮正向重申并且可见证据足以锚定，否则直接删除。
+- 历史原话可以含有相对时间，但本记录不是历史引用库；不要把旧原话复制进 active 字段。
+- 含有“旧安排先放下”“不继续加压”“不要主动重提”的本轮回应，表示旧时间性事项不再是 active open loop。
+- 红线示例：把“今天上午休息确认”原样写进 `current_thread`；应该写“上午休息确认”或“2026-05-10 上午休息确认”。
+- 红线示例：把“下周二香料笔记”写进 `avoid_reopening`；应该写“旧香料笔记安排不要主动重提”或锚定成绝对日期。
+- 红线示例：旧状态里有“明天测试”，当前已经过了原本的明天，却输出“当前日期的下一天测试”。
+- 红线示例：旧状态里有“晚餐后游戏”，本轮没有重新确认晚餐或游戏，却输出“晚餐完成后讨论游戏”。
+- 红线示例：本轮只是在降低压力，却在 `resolved_threads` 里复述“今晚游戏与明天考核”。
+- 合格示例：删除这些旧 open loop，或在 `avoid_reopening` 写无日期的“旧条件不要主动重提”。
 
-Use current_thread for what is being discussed even when there is no task.
-Use user_goal and current_blocker only when the episode is goal-driven.
-Use next_affordances for natural next conversational moves, not exact dialog text.
-Use resolved_threads and avoid_reopening for items that should not be dragged back unless the user reopens them.
-Use current_turn_timestamp to anchor relative dates. If a prior or current item says "tomorrow" but current_turn_timestamp has reached that local date, rewrite the operational state as today/current, not tomorrow/future.
+# 生成步骤
+1. 先用本轮输入判断 `continuity`、`status`、`conversation_mode`、`episode_phase`、`topic_momentum`。
+2. 只把本轮明确产生或正向重申的事项写入 `open_loops`。
+3. 对旧状态逐项检查：无时间依赖且仍有用的可以继承；含相对时间、相对顺序或旧压力的默认删除。
+4. 所有自由文本输出前做最后检查；如果某项目仍需要读者根据相对时间或事件顺序推断有效期，改写成绝对日期、改成无日期语义标签，或删除该项目。
+5. 返回严格 JSON，不要输出解释文字。
 
-# Generation Procedure
-1. Read prior_episode_state first and identify which prior user-state items or open loops still apply.
-2. Read decontexualized_input, content_anchors, logical_stance, character_intent, and final_dialog to understand what actually happened this turn.
-3. Decide continuity before choosing any other state labels.
-4. Preserve still-valid prior list items by copying the exact old text; omit stale items instead of rewriting them.
-5. For scalar fields such as current_thread, current_blocker, next_affordances, and progression_guidance, resolve relative date words against current_turn_timestamp before writing them.
-6. Use character_boundary_profile descriptors as policy grounding for progression_guidance, next_affordances, and how quickly current_blocker should soften, rebound, decay, or detach.
-7. Emit short operational labels only. Do not create diary prose, long-term memory, or next-reply text.
-
-# Input Format
+# 输入格式
 {
-  "current_turn_timestamp": "local YYYY-MM-DD HH:MM timestamp",
-  "prior_episode_state": "previous compact episode state, or null",
-  "decontexualized_input": "current user message after decontextualization",
-  "chat_history_recent": ["recent messages for local continuity"],
-  "content_anchors": ["content plan used by the just-finished response"],
-  "logical_stance": "CONFIRM | REFUSE | TENTATIVE | DIVERGE | CHALLENGE",
-  "character_intent": "PROVIDE | BANTAR | REJECT | EVADE | CONFRONT | DISMISS | CLARIFY",
-  "final_dialog": ["active character's final response text"],
-  "character_boundary_profile": {
-    "boundary_recovery_description": "mapped recovery cadence descriptor",
-    "self_integrity_description": "mapped self-definition descriptor",
-    "relationship_priority_description": "mapped relationship-priority descriptor"
-  }
+    "current_turn_timestamp": "本轮记录时的本地时间，YYYY-MM-DD HH:MM",
+    "prior_episode_state": "上一轮紧凑操作状态，或 null；可能包含 created_at、updated_at、expires_at 时间字段",
+    "decontexualized_input": "用户本轮消息经去上下文化后的内容",
+    "chat_history_recent": ["用于判断局部连续性的近期消息"],
+    "content_anchors": ["刚结束回复使用过的内容锚点"],
+    "logical_stance": "CONFIRM | REFUSE | TENTATIVE | DIVERGE | CHALLENGE",
+    "character_intent": "PROVIDE | BANTAR | REJECT | EVADE | CONFRONT | DISMISS | CLARIFY",
+    "final_dialog": ["当前角色本轮最终实际发出的回复文本"],
+    "character_boundary_profile": {
+        "boundary_recovery_description": "边界恢复节奏描述",
+        "self_integrity_description": "自我定义稳定性描述",
+        "relationship_priority_description": "关系优先级描述"
+    }
 }
 
-# Output Format
-Return strict JSON only:
+# 输出格式
+请务必返回合法的 JSON 字符串，仅包含以下字段：
 {
-  "continuity": "same_episode | related_shift | sharp_transition",
-  "status": "active | suspended | closed",
-  "episode_label": "short semantic label",
-  "conversation_mode": "task_support | emotional_support | casual_chat | playful_banter | meta_discussion | group_ambient | mixed",
-  "episode_phase": "opening | developing | deepening | pivoting | stuck_loop | resolving | cooling_down",
-  "topic_momentum": "stable | drifting | quick_pivot | fragmented | sharp_break",
-  "current_thread": "one-line neutral current thread",
-  "user_goal": "optional goal, or empty string",
-  "current_blocker": "optional blocker, or empty string",
-  "user_state_updates": ["compact user-state observation"],
-  "assistant_moves": ["compact assistant speech-act label"],
-  "overused_moves": ["assistant move label that has occurred too often"],
-  "open_loops": ["unresolved thread"],
-  "resolved_threads": ["handled thread"],
-  "avoid_reopening": ["stale item not to reopen"],
-  "emotional_trajectory": "one-line emotional movement",
-  "next_affordances": ["natural next move available to the active character"],
-  "progression_guidance": "one short instruction for the next turn"
+    "continuity": "same_episode | related_shift | sharp_transition",
+    "status": "active | suspended | closed",
+    "episode_label": "短语义标签",
+    "conversation_mode": "task_support | emotional_support | casual_chat | playful_banter | meta_discussion | group_ambient | mixed",
+    "episode_phase": "opening | developing | deepening | pivoting | stuck_loop | resolving | cooling_down",
+    "topic_momentum": "stable | drifting | quick_pivot | fragmented | sharp_break",
+    "current_thread": "一行中性当前话题；不夹带旧时间性承诺",
+    "user_goal": "可选目标；没有则为空字符串",
+    "current_blocker": "可选阻塞点；没有则为空字符串",
+    "user_state_updates": ["紧凑用户状态观察"],
+    "assistant_moves": ["紧凑 assistant 话语动作标签"],
+    "overused_moves": ["已经过度重复的 assistant 话语动作标签"],
+    "open_loops": ["本轮明确产生或正向重申的未闭合事项；通常可以是空数组"],
+    "resolved_threads": ["本轮已处理事项"],
+    "avoid_reopening": ["除非用户主动重开否则不要拖回来的旧事项"],
+    "emotional_trajectory": "一行情绪走向",
+    "next_affordances": ["当前角色下一轮自然可承接的动作"],
+    "progression_guidance": "给下一轮的一条短推进指令"
 }
-"""
+'''
 
 _recorder_llm = get_llm(
     temperature=0.2,
@@ -237,6 +251,9 @@ _RECORDER_PRIOR_SCALAR_FIELDS = (
     "progression_guidance",
     "turn_count",
     "last_user_input",
+    "created_at",
+    "updated_at",
+    "expires_at",
 )
 
 

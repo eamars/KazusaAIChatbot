@@ -45,7 +45,7 @@ long_term/todo.md
 
 | Plan | Status | Execution |
 |---|---|---|
-| _No active bugfix plans_ | - | - |
+| [temporal_grounding_rag_episode_state_plan.md](active/bugfix/temporal_grounding_rag_episode_state_plan.md) | in_progress | active |
 
 ## Reference Documents
 

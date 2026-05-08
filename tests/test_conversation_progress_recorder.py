@@ -99,6 +99,17 @@ def _record_input(
     return record_input
 
 
+def test_render_recorder_prompt_requires_absolute_or_omit_temporal_state() -> None:
+    """Recorder prompt declares producer-owned temporal grounding."""
+
+    prompt = recorder.render_recorder_prompt()
+
+    assert "直接成为下一轮对话的活跃操作状态" in prompt
+    assert "默认删除" in prompt
+    assert "不要把旧的、不确定的、相对时间的事项污染到下一轮" in prompt
+    assert "请务必返回合法的 JSON 字符串" in prompt
+
+
 @pytest.mark.asyncio
 async def test_record_with_llm_sends_boundary_descriptors_not_config_values(monkeypatch) -> None:
     """Recorder prompt payload contains descriptors, not boundary config values."""
