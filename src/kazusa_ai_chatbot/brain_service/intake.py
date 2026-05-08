@@ -14,7 +14,7 @@ from .contracts import ChatRequest
 
 ResolveGlobalUserId = Callable[..., Awaitable[str]]
 GetUserProfile = Callable[[str], Awaitable[dict]]
-SaveConversation = Callable[[dict], Awaitable[None]]
+SaveConversation = Callable[[dict], Awaitable[str | None]]
 ResolveEnvelope = Callable[[ChatRequest], Awaitable[MessageEnvelope]]
 
 
@@ -173,6 +173,29 @@ def active_turn_platform_message_ids(item: QueuedChatItem) -> list[str]:
     return active_ids
 
 
+def active_turn_conversation_row_ids(item: QueuedChatItem) -> list[str]:
+    """Build the persisted row ID list answered by one graph turn.
+
+    Args:
+        item: Surviving queued item that will run through the chat graph.
+
+    Returns:
+        Non-empty conversation-history row IDs from the survivor and collapsed
+        follow-ups, deduplicated in arrival order.
+    """
+
+    seen: set[str] = set()
+    active_ids: list[str] = []
+    for queued_item in [item, *item.collapsed_items]:
+        row_id = str(queued_item.conversation_row_id or "").strip()
+        if not row_id or row_id in seen:
+            continue
+        seen.add(row_id)
+        active_ids.append(row_id)
+
+    return active_ids
+
+
 async def save_user_message_from_item(
     item: QueuedChatItem,
     *,
@@ -182,7 +205,7 @@ async def save_user_message_from_item(
     resolve_message_envelope_identities_func: ResolveEnvelope,
     message_envelope: MessageEnvelope | None = None,
     logger: logging.Logger,
-) -> None:
+) -> str | None:
     """Persist one queued user message.
 
     Args:
@@ -195,38 +218,44 @@ async def save_user_message_from_item(
         logger: Logger used for compatibility with service logging.
 
     Returns:
-        None.
+        Inserted conversation row ID string when committed; otherwise None.
     """
 
     req = item.request
     if message_envelope is None:
         message_envelope = await resolve_message_envelope_identities_func(req)
     attachment_docs = list(message_envelope["attachments"])
+    conversation_doc = {
+        "platform": req.platform,
+        "platform_channel_id": req.platform_channel_id,
+        "role": "user",
+        "platform_message_id": req.platform_message_id,
+        "platform_user_id": req.platform_user_id,
+        "global_user_id": global_user_id,
+        "display_name": req.display_name,
+        "channel_type": req.channel_type,
+        "body_text": message_envelope["body_text"],
+        "raw_wire_text": message_envelope["raw_wire_text"],
+        "content_type": req.content_type,
+        "addressed_to_global_user_ids": message_envelope[
+            "addressed_to_global_user_ids"
+        ],
+        "mentions": message_envelope["mentions"],
+        "broadcast": False,
+        "attachments": attachment_docs,
+        "reply_context": reply_context,
+        "timestamp": item.timestamp,
+    }
 
     try:
-        await save_conversation_func({
-            "platform": req.platform,
-            "platform_channel_id": req.platform_channel_id,
-            "role": "user",
-            "platform_message_id": req.platform_message_id,
-            "platform_user_id": req.platform_user_id,
-            "global_user_id": global_user_id,
-            "display_name": req.display_name,
-            "channel_type": req.channel_type,
-            "body_text": message_envelope["body_text"],
-            "raw_wire_text": message_envelope["raw_wire_text"],
-            "content_type": req.content_type,
-            "addressed_to_global_user_ids": message_envelope[
-                "addressed_to_global_user_ids"
-            ],
-            "mentions": message_envelope["mentions"],
-            "broadcast": False,
-            "attachments": attachment_docs,
-            "reply_context": reply_context,
-            "timestamp": item.timestamp,
-        })
+        inserted_row_id = await save_conversation_func(conversation_doc)
     except Exception as exc:
         logger.exception(f"Failed to save queued user message: {exc}")
+        return_value = None
+        return return_value
+
+    return_value = inserted_row_id
+    return return_value
 
 
 async def resolve_queued_user(
@@ -255,4 +284,3 @@ async def resolve_queued_user(
     user_profile = await get_user_profile_func(global_user_id)
     return_value = (global_user_id, user_profile)
     return return_value
-

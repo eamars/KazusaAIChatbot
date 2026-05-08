@@ -340,13 +340,28 @@ def _active_turn_platform_message_ids(item: QueuedChatItem) -> list[str]:
     return return_value
 
 
+def _active_turn_conversation_row_ids(item: QueuedChatItem) -> list[str]:
+    """Build the persisted row ID list answered by one graph turn.
+
+    Args:
+        item: Surviving queued item that will run through the chat graph.
+
+    Returns:
+        Non-empty conversation-history row IDs from the survivor and collapsed
+        follow-ups, deduplicated in arrival order.
+    """
+
+    return_value = brain_intake.active_turn_conversation_row_ids(item)
+    return return_value
+
+
 async def _save_user_message_from_item(
     item: QueuedChatItem,
     *,
     global_user_id: str,
     reply_context: ReplyContext,
     message_envelope: MessageEnvelope | None = None,
-) -> None:
+) -> str | None:
     """Persist one queued user message.
 
     Args:
@@ -357,10 +372,10 @@ async def _save_user_message_from_item(
             the caller already resolved it for graph input.
 
     Returns:
-        None.
+        Inserted conversation row ID string when committed; otherwise None.
     """
 
-    await brain_intake.save_user_message_from_item(
+    return_value = await brain_intake.save_user_message_from_item(
         item,
         global_user_id=global_user_id,
         reply_context=reply_context,
@@ -369,6 +384,7 @@ async def _save_user_message_from_item(
         message_envelope=message_envelope,
         logger=logger,
     )
+    return return_value
 
 
 async def _resolve_queued_user(item: QueuedChatItem) -> tuple[str, dict]:
@@ -448,11 +464,18 @@ async def _persist_collapsed_queued_chat_item(
     try:
         global_user_id, _ = await _resolve_queued_user(item)
         reply_context = await _hydrate_reply_context(item.request)
-        await _save_user_message_from_item(
+        conversation_row_id = await _save_user_message_from_item(
             item,
             global_user_id=global_user_id,
             reply_context=reply_context,
         )
+        if conversation_row_id:
+            item.conversation_row_id = conversation_row_id
+        else:
+            logger.warning(
+                "Collapsed queued message persisted without conversation row "
+                f"id: sequence={item.sequence}"
+            )
     except Exception as exc:
         logger.exception(f"Failed to persist collapsed queued message: {exc}")
 
@@ -530,6 +553,19 @@ async def _process_queued_chat_item(item: QueuedChatItem) -> None:
         chat_history_wide = trim_history_dict(history)
         chat_history_recent = chat_history_wide[-CHAT_HISTORY_RECENT_LIMIT:]
         reply_context = await _hydrate_reply_context(req)
+        conversation_row_id = await _save_user_message_from_item(
+            item,
+            global_user_id=global_user_id,
+            reply_context=reply_context,
+            message_envelope=message_envelope,
+        )
+        if conversation_row_id:
+            item.conversation_row_id = conversation_row_id
+        else:
+            logger.warning(
+                "Surviving queued message persisted without conversation row "
+                f"id: sequence={item.sequence}"
+            )
 
         debug_modes: DebugModes = {
             "listen_only": req.debug_modes.listen_only,
@@ -548,6 +584,7 @@ async def _process_queued_chat_item(item: QueuedChatItem) -> None:
         )
         is_collapsed_turn = bool(item.collapsed_items)
         active_turn_platform_message_ids = _active_turn_platform_message_ids(item)
+        active_turn_conversation_row_ids = _active_turn_conversation_row_ids(item)
         character_profile = dict(_personality)
         character_profile["global_user_id"] = character_global_user_id
 
@@ -566,6 +603,7 @@ async def _process_queued_chat_item(item: QueuedChatItem) -> None:
             "platform": req.platform,
             "platform_message_id": req.platform_message_id,
             "active_turn_platform_message_ids": active_turn_platform_message_ids,
+            "active_turn_conversation_row_ids": active_turn_conversation_row_ids,
             "platform_user_id": req.platform_user_id,
             "global_user_id": global_user_id,
             "user_name": req.display_name,
@@ -596,13 +634,6 @@ async def _process_queued_chat_item(item: QueuedChatItem) -> None:
             "consolidation_state": {},
             "promoted_reflection_context": promoted_reflection_context,
         }
-
-        await _save_user_message_from_item(
-            item,
-            global_user_id=global_user_id,
-            reply_context=reply_context,
-            message_envelope=message_envelope,
-        )
 
         try:
             result = await _graph.ainvoke(initial_state)
@@ -704,6 +735,8 @@ async def _chat_input_worker() -> None:
             for dropped_item in dequeued_turn.dropped_items:
                 await _drop_queued_chat_item(dropped_item)
 
+            # Persist collapsed rows before the survivor builds active-turn
+            # identity filters for RAG evidence.
             for collapsed_item, survivor in dequeued_turn.collapsed_items:
                 await _persist_collapsed_queued_chat_item(collapsed_item, survivor)
 

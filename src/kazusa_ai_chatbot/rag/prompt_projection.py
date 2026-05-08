@@ -71,6 +71,8 @@ _NESTED_OBJECT_FIELDS = (
     "profile",
 )
 
+_STRIPPED_RAW_KEYS = ("conversation_row_id",)
+
 _RUNTIME_DIRECT_KEYS = (
     "platform",
     "platform_channel_id",
@@ -247,6 +249,8 @@ def project_selector_input_for_llm(
 def _project_dict_for_llm(row: dict[str, Any]) -> dict[str, Any]:
     """Project one known result row and its source-owned nested fields."""
     projected = format_time_fields_for_llm(row, _TIME_FIELDS)
+    for key in _STRIPPED_RAW_KEYS:
+        projected.pop(key, None)
 
     for field in _NESTED_LIST_FIELDS:
         value = projected.get(field)

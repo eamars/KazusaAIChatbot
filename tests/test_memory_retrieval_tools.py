@@ -15,6 +15,16 @@ from kazusa_ai_chatbot.rag.memory_retrieval_tools import (
 )
 
 
+class _FakeObjectId:
+    """Small ObjectId-like value for string-cast projection tests."""
+
+    def __str__(self) -> str:
+        """Return the stable string form used by Mongo row identity."""
+
+        return_value = "row-object-id"
+        return return_value
+
+
 @pytest.mark.asyncio
 async def test_search_conversation_delegates_to_vector_history_search() -> None:
     """search_conversation should call conversation search in vector mode."""
@@ -22,6 +32,7 @@ async def test_search_conversation_delegates_to_vector_history_search() -> None:
         (
             0.9,
             {
+                "_id": _FakeObjectId(),
                 "body_text": "hello",
                 "timestamp": "t1",
                 "display_name": "User",
@@ -76,10 +87,12 @@ async def test_search_conversation_delegates_to_vector_history_search() -> None:
                 "platform_message_id": "message-1",
                 "platform_user_id": "platform-user-1",
                 "global_user_id": "global-user-1",
+                "conversation_row_id": "row-object-id",
                 "reply_context": {"reply_excerpt": "previous"},
             },
         )
     ]
+    assert isinstance(result[0][1]["conversation_row_id"], str)
 
 
 @pytest.mark.asyncio
@@ -106,7 +119,12 @@ async def test_search_conversation_keyword_delegates_to_keyword_history_search()
     mock_results = [
         (
             1.0,
-            {"body_text": "DDR5 came up", "timestamp": "t1", "display_name": "User"},
+            {
+                "_id": _FakeObjectId(),
+                "body_text": "DDR5 came up",
+                "timestamp": "t1",
+                "display_name": "User",
+            },
         ),
     ]
 
@@ -128,6 +146,8 @@ async def test_search_conversation_keyword_delegates_to_keyword_history_search()
         to_timestamp=None,
     )
     assert result[0]["body_text"] == "DDR5 came up"
+    assert result[0]["conversation_row_id"] == "row-object-id"
+    assert isinstance(result[0]["conversation_row_id"], str)
     assert "content" not in result[0]
     assert result[0]["display_name"] == "User"
 
@@ -137,6 +157,7 @@ async def test_get_conversation_filters_and_strips_internal_fields() -> None:
     """get_conversation should pass structured filters and hide embedding data."""
     mock_messages = [
         {
+            "_id": _FakeObjectId(),
             "body_text": "hi",
             "timestamp": "t1",
             "display_name": "User",
@@ -175,6 +196,8 @@ async def test_get_conversation_filters_and_strips_internal_fields() -> None:
         to_timestamp=None,
     )
     assert result[0]["body_text"] == "hi"
+    assert result[0]["conversation_row_id"] == "row-object-id"
+    assert isinstance(result[0]["conversation_row_id"], str)
     assert "content" not in result[0]
     assert "embedding" not in result[0]
 

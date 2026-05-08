@@ -45,7 +45,7 @@ long_term/todo.md
 
 | Plan | Status | Execution |
 |---|---|---|
-| [rag_active_turn_conversation_row_exclusion_plan.md](active/bugfix/rag_active_turn_conversation_row_exclusion_plan.md) | draft | blocked |
+| _No active bugfix plans_ | - | - |
 
 ## Reference Documents
 
@@ -83,6 +83,7 @@ plans.
 | Plan |
 |---|
 | [cognition_silence_short_circuit_and_dialog_evaluator_quality_plan.md](archive/completed/bugfix/cognition_silence_short_circuit_and_dialog_evaluator_quality_plan.md) |
+| [rag_active_turn_conversation_row_exclusion_plan.md](archive/completed/bugfix/rag_active_turn_conversation_row_exclusion_plan.md) |
 
 ### Completed Short-Term Records
 

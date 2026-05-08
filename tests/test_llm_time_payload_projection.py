@@ -46,6 +46,17 @@ def _assert_no_utc_leak(payload: Any, path: str = "$") -> None:
             _assert_no_utc_leak(item, f"{path}[{idx}]")
 
 
+def _assert_absent_key(payload: Any, key: str, path: str = "$") -> None:
+    """Recursively check that a key is absent from nested prompt payloads."""
+    if isinstance(payload, dict):
+        assert key not in payload, f"Unexpected key at {path}: {key}"
+        for nested_key, value in payload.items():
+            _assert_absent_key(value, key, f"{path}.{nested_key}")
+    elif isinstance(payload, (list, tuple)):
+        for idx, item in enumerate(payload):
+            _assert_absent_key(item, key, f"{path}[{idx}]")
+
+
 # ---------------------------------------------------------------------------
 # Representative payload builders
 # ---------------------------------------------------------------------------
@@ -282,6 +293,48 @@ def test_tool_result_projects_character_recent_window_times() -> None:
     recent_window = projected["character_image"]["self_image"]["recent_window"]
     assert recent_window[0]["timestamp"] == "2026-05-03 08:00"
     _assert_no_utc_leak(projected, "$.character_image")
+
+
+def test_tool_result_strips_conversation_row_id_from_nested_payloads() -> None:
+    """Internal conversation row IDs must not reach prompt-facing payloads."""
+    result = {
+        "messages": [
+            {
+                "conversation_row_id": "row-message",
+                "body_text": "message text",
+            },
+        ],
+        "results": [
+            {
+                "conversation_row_id": "row-result",
+                "body_text": "result text",
+            },
+        ],
+        "rows": [
+            {
+                "conversation_row_id": "row-row",
+                "body_text": "row text",
+            },
+        ],
+        "conversation_evidence": [
+            {
+                "conversation_row_id": "row-evidence",
+                "summary": "evidence text",
+            },
+        ],
+        "projection_payload": {
+            "messages": [
+                {
+                    "conversation_row_id": "row-nested",
+                    "body_text": "nested text",
+                },
+            ],
+        },
+    }
+
+    projected = project_tool_result_for_llm(result)
+
+    _assert_absent_key(projected, "conversation_row_id")
 
 
 # ---------------------------------------------------------------------------

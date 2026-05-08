@@ -4,7 +4,7 @@
 
 - Goal: Prevent RAG conversation evidence from projecting the active user turn when `platform_message_id` is missing, without adding a new persisted service-generated identifier.
 - Plan class: medium
-- Status: draft
+- Status: completed
 - Mandatory skills: `local-llm-architecture`, `py-style`, `test-style-and-execution`
 - Overall cutover strategy: forward-only internal use of MongoDB's existing inserted row `_id`; no data migration, no new conversation-history field, and no prompt changes.
 - Highest-risk areas: changing pre-graph persistence ordering, leaking internal row IDs into LLM prompts, losing collapsed-turn coverage, widening retrieval behavior, and replacing exact identity matching with fuzzy matching.
@@ -213,16 +213,16 @@ row ID exclusion runs first
 
 ## Progress Checklist
 
-- [ ] `save_conversation(...)` returns inserted row ID.
-- [ ] Intake/service save wrappers propagate inserted row ID without changing failure behavior.
-- [ ] Queue items hold the existing conversation row ID after save.
-- [ ] Survivor and collapsed active-turn conversation row IDs enter graph state.
-- [ ] Persona supervisor passes active row IDs into RAG context.
-- [ ] Conversation retrieval raw results include `conversation_row_id`.
-- [ ] Prompt projection strips `conversation_row_id` before LLM prompts.
-- [ ] Conversation evidence filters by row ID first and platform message ID second.
-- [ ] Active-turn exclusion logs show reason counts without ID values.
-- [ ] Deterministic tests pass.
+- [x] `save_conversation(...)` returns inserted row ID.
+- [x] Intake/service save wrappers propagate inserted row ID without changing failure behavior.
+- [x] Queue items hold the existing conversation row ID after save.
+- [x] Survivor and collapsed active-turn conversation row IDs enter graph state.
+- [x] Persona supervisor passes active row IDs into RAG context.
+- [x] Conversation retrieval raw results include `conversation_row_id`.
+- [x] Prompt projection strips `conversation_row_id` before LLM prompts.
+- [x] Conversation evidence filters by row ID first and platform message ID second.
+- [x] Active-turn exclusion logs show reason counts without ID values.
+- [x] Deterministic tests pass.
 
 ## Verification
 
@@ -272,3 +272,26 @@ Required test coverage:
 - Some retrieval fixtures may not include `_id`. Mitigation: platform-message-ID fallback remains, and rows without either exact active identifier are not excluded; both filters explicitly skip empty-string identities to avoid false matches against default holders.
 - ObjectId vs str equality drift: a retrieval site that forgets `str(...)` would compare `ObjectId("…")` against a string list and silently fail to filter. Mitigation: centralize the cast in the three tool projections plus a focused test that asserts `conversation_row_id` is `str` and equals the active-turn list element by `==`.
 - A future refactor of `_chat_input_worker(...)` could reorder collapse handling after survivor processing, breaking the assumption that collapsed-row IDs are populated before the survivor reads them. Mitigation: comment the ordering invariant inline at the worker, and assert it in the queue-handoff test.
+
+## Execution Evidence
+
+- Implemented on 2026-05-08 by Codex.
+- Plan lifecycle: moved from `active/bugfix/` to `archive/completed/bugfix/`.
+- Scope note: `src/kazusa_ai_chatbot/db/schemas.py` did not need a code change because this fix adds no persisted `conversation_history` field.
+- Pre-implementation focused tests failed as expected for the new row-ID contract:
+  `venv\Scripts\python.exe -m pytest tests\test_db.py::test_save_conversation_returns_row_id_after_cache_invalidation tests\test_service_input_queue.py::test_active_turn_conversation_row_ids_skip_empty_and_dedupe tests\test_memory_retrieval_tools.py::test_search_conversation_delegates_to_vector_history_search tests\test_llm_time_payload_projection.py::test_tool_result_strips_conversation_row_id_from_nested_payloads tests\test_rag_phase3_capability_agents.py::test_conversation_evidence_excludes_active_turn_row_id_hit -q`
+- Post-implementation focused slice passed:
+  `venv\Scripts\python.exe -m pytest tests\test_db.py::test_save_conversation_returns_row_id_after_cache_invalidation tests\test_service_input_queue.py::test_active_turn_conversation_row_ids_skip_empty_and_dedupe tests\test_memory_retrieval_tools.py::test_search_conversation_delegates_to_vector_history_search tests\test_llm_time_payload_projection.py::test_tool_result_strips_conversation_row_id_from_nested_payloads tests\test_rag_phase3_capability_agents.py::test_conversation_evidence_excludes_active_turn_row_id_hit -q`
+  -> `5 passed`.
+- Final deterministic verification command:
+  `venv\Scripts\python.exe -m pytest tests\test_db.py tests\test_service_input_queue.py tests\test_rag_phase3_capability_agents.py tests\test_memory_retrieval_tools.py tests\test_llm_time_payload_projection.py -q`
+  -> `137 passed, 13 deselected`.
+- Queue-only rerun after test helper cleanup:
+  `venv\Scripts\python.exe -m pytest tests\test_service_input_queue.py -q`
+  -> `25 passed`.
+- Syntax check:
+  `venv\Scripts\python.exe -m py_compile src\kazusa_ai_chatbot\db\conversation.py src\kazusa_ai_chatbot\brain_service\intake.py src\kazusa_ai_chatbot\brain_service\post_turn.py src\kazusa_ai_chatbot\chat_input_queue.py src\kazusa_ai_chatbot\service.py src\kazusa_ai_chatbot\state.py src\kazusa_ai_chatbot\nodes\persona_supervisor2.py src\kazusa_ai_chatbot\nodes\persona_supervisor2_schema.py src\kazusa_ai_chatbot\rag\memory_retrieval_tools.py src\kazusa_ai_chatbot\rag\prompt_projection.py src\kazusa_ai_chatbot\rag\conversation_evidence_agent.py`
+  -> passed.
+- Whitespace check:
+  `git diff --check`
+  -> passed; Git reported only existing line-ending normalization warnings.

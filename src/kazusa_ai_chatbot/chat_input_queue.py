@@ -24,6 +24,8 @@ class QueuedChatItem:
         future: Response future awaited by the `/chat` endpoint.
         combined_content: Optional combined content for a collapsed turn.
         collapsed_items: Later queued items collapsed into this survivor.
+        conversation_row_id: Committed conversation-history row ID when the
+            queued user message has already been persisted.
     """
 
     sequence: int
@@ -32,6 +34,7 @@ class QueuedChatItem:
     future: asyncio.Future[Any]
     combined_content: str | None = None
     collapsed_items: list[QueuedChatItem] = field(default_factory=list)
+    conversation_row_id: str = ""
 
 
 @dataclass

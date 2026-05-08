@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import logging
+
 import pytest
 
 from kazusa_ai_chatbot.rag import memory_evidence_agent as memory_evidence_module
@@ -712,6 +714,113 @@ async def test_conversation_evidence_excludes_active_turn_semantic_row() -> None
 
 
 @pytest.mark.asyncio
+async def test_conversation_evidence_excludes_active_turn_row_id_hit() -> None:
+    """Mongo row identity should filter active rows without platform IDs."""
+    agent = ConversationEvidenceAgent()
+    keyword_worker = _FakeWorker(
+        {
+            "resolved": True,
+            "result": [
+                {
+                    "conversation_row_id": "row-current",
+                    "body_text": "active question",
+                    "display_name": "Tester",
+                    "global_user_id": "user-1",
+                    "platform": "qq",
+                    "platform_channel_id": "chan-1",
+                    "platform_message_id": "",
+                    "timestamp": "2026-05-02T00:00:00+00:00",
+                }
+            ],
+            "attempts": 1,
+            "cache": {"enabled": False, "hit": False, "reason": "open_range"},
+        }
+    )
+    agent.keyword_agent = keyword_worker
+
+    result = await agent.run(
+        'Conversation-evidence: find who said "active question"',
+        _base_context(active_turn_conversation_row_ids=["row-current"]),
+    )
+
+    assert result["resolved"] is False
+    assert result["result"]["missing_context"] == ["conversation_evidence"]
+    assert result["result"]["selected_summary"] == ""
+    assert result["result"]["projection_payload"]["summaries"] == []
+    assert result["result"]["evidence"] == []
+    assert result["result"]["resolved_refs"] == []
+
+
+@pytest.mark.asyncio
+async def test_conversation_evidence_logs_active_turn_exclusion_reason_counts(
+    caplog,
+) -> None:
+    """Active-turn exclusion telemetry should count reasons without ID values."""
+    agent = ConversationEvidenceAgent()
+    keyword_worker = _FakeWorker(
+        {
+            "resolved": True,
+            "result": [
+                {
+                    "conversation_row_id": "row-current",
+                    "body_text": "active by row id",
+                    "display_name": "Tester",
+                    "global_user_id": "user-1",
+                    "platform": "qq",
+                    "platform_channel_id": "chan-1",
+                    "platform_message_id": "",
+                    "timestamp": "2026-05-02T00:00:00+00:00",
+                },
+                {
+                    "body_text": "active by message id",
+                    "display_name": "Tester",
+                    "global_user_id": "user-1",
+                    "platform": "qq",
+                    "platform_channel_id": "chan-1",
+                    "platform_message_id": "msg-current",
+                    "timestamp": "2026-05-02T00:00:01+00:00",
+                },
+                {
+                    "conversation_row_id": "row-old",
+                    "body_text": "historical evidence",
+                    "display_name": "Tester",
+                    "global_user_id": "user-1",
+                    "platform": "qq",
+                    "platform_channel_id": "chan-1",
+                    "platform_message_id": "msg-old",
+                    "timestamp": "2026-05-01T23:59:00+00:00",
+                },
+            ],
+            "attempts": 1,
+            "cache": {"enabled": False, "hit": False, "reason": "open_range"},
+        }
+    )
+    agent.keyword_agent = keyword_worker
+
+    with caplog.at_level(
+        logging.INFO,
+        logger="kazusa_ai_chatbot.rag.conversation_evidence_agent",
+    ):
+        result = await agent.run(
+            'Conversation-evidence: find who said "historical evidence"',
+            _base_context(
+                active_turn_conversation_row_ids=["row-current"],
+                active_turn_platform_message_ids=["msg-current"],
+            ),
+        )
+
+    assert result["resolved"] is True
+    assert result["result"]["projection_payload"]["summaries"] == [
+        "Tester at 2026-05-02 11:59: historical evidence"
+    ]
+    assert "excluded_active_turn_rows=2" in caplog.text
+    assert "excluded_by_conversation_row_id=1" in caplog.text
+    assert "excluded_by_platform_message_id=1" in caplog.text
+    assert "row-current" not in caplog.text
+    assert "msg-current" not in caplog.text
+
+
+@pytest.mark.asyncio
 async def test_conversation_evidence_excludes_collapsed_active_turn_rows() -> None:
     """Collapsed active-turn source messages should all be removed."""
     agent = ConversationEvidenceAgent()
@@ -802,6 +911,45 @@ async def test_conversation_evidence_keeps_row_without_message_id() -> None:
         "global_user_id": "user-1",
         "display_name": "Tester",
     } in result["result"]["resolved_refs"]
+
+
+@pytest.mark.asyncio
+async def test_conversation_evidence_does_not_match_empty_active_row_id() -> None:
+    """Empty row IDs are absence markers, not comparable active-turn IDs."""
+    agent = ConversationEvidenceAgent()
+    keyword_worker = _FakeWorker(
+        {
+            "resolved": True,
+            "result": [
+                {
+                    "conversation_row_id": "",
+                    "body_text": "blank row id should stay",
+                    "display_name": "Tester",
+                    "global_user_id": "user-1",
+                    "platform": "qq",
+                    "platform_channel_id": "chan-1",
+                    "platform_message_id": "",
+                    "timestamp": "2026-05-02T00:00:00+00:00",
+                }
+            ],
+            "attempts": 1,
+            "cache": {"enabled": False, "hit": False, "reason": "open_range"},
+        }
+    )
+    agent.keyword_agent = keyword_worker
+
+    result = await agent.run(
+        'Conversation-evidence: find who said "blank row id should stay"',
+        _base_context(
+            active_turn_conversation_row_ids=[""],
+            active_turn_platform_message_ids=[""],
+        ),
+    )
+
+    assert result["resolved"] is True
+    assert result["result"]["projection_payload"]["summaries"] == [
+        "Tester at 2026-05-02 12:00: blank row id should stay"
+    ]
 
 
 @pytest.mark.asyncio

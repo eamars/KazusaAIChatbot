@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from unittest.mock import AsyncMock
 
 import pytest
@@ -10,6 +11,7 @@ from fastapi import BackgroundTasks
 
 from kazusa_ai_chatbot import chat_input_queue as queue_module
 from kazusa_ai_chatbot import service as service_module
+from kazusa_ai_chatbot.brain_service import intake as brain_intake
 from kazusa_ai_chatbot.config import CHARACTER_GLOBAL_USER_ID
 
 
@@ -162,6 +164,16 @@ async def _reset_queue_state() -> None:
     service_module._chat_input_queue.reset_for_test()
 
 
+async def _resolved_envelope(req: service_module.ChatRequest) -> dict:
+    """Return the request envelope using the service's normalized test shape."""
+
+    envelope = req.message_envelope.model_dump(
+        exclude_none=True,
+        exclude_defaults=True,
+    )
+    return envelope
+
+
 def _patch_common_dependencies(monkeypatch, graph) -> None:
     """Patch external service dependencies for queue-worker tests.
 
@@ -195,6 +207,68 @@ def _patch_common_dependencies(monkeypatch, graph) -> None:
         AsyncMock(return_value=[]),
     )
     monkeypatch.setattr(service_module, "_graph", graph)
+
+
+@pytest.mark.asyncio
+async def test_intake_save_user_message_from_item_returns_row_id() -> None:
+    """Intake should return the inserted conversation row ID from persistence."""
+    item = _item(1)
+
+    async def _save_conversation(doc):
+        return_value = "row-1"
+        return return_value
+
+    row_id = await brain_intake.save_user_message_from_item(
+        item,
+        global_user_id="global-user-1",
+        reply_context={},
+        save_conversation_func=_save_conversation,
+        resolve_message_envelope_identities_func=_resolved_envelope,
+        logger=logging.getLogger("tests.service_input_queue"),
+    )
+
+    assert row_id == "row-1"
+
+
+@pytest.mark.asyncio
+async def test_intake_save_user_message_from_item_returns_none_on_save_failure(
+    caplog,
+) -> None:
+    """Intake should keep existing save-failure degradation and return None."""
+    item = _item(1)
+    test_logger = logging.getLogger("tests.service_input_queue")
+
+    async def _save_conversation(doc):
+        raise RuntimeError("save failed")
+
+    with caplog.at_level(logging.ERROR, logger="tests.service_input_queue"):
+        row_id = await brain_intake.save_user_message_from_item(
+            item,
+            global_user_id="global-user-1",
+            reply_context={},
+            save_conversation_func=_save_conversation,
+            resolve_message_envelope_identities_func=_resolved_envelope,
+            logger=test_logger,
+        )
+
+    assert row_id is None
+    assert "Failed to save queued user message: save failed" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_active_turn_conversation_row_ids_skip_empty_and_dedupe() -> None:
+    """Active row IDs should preserve arrival order without empty defaults."""
+    survivor = _item(1)
+    collapsed_empty = _item(2)
+    collapsed_duplicate = _item(3)
+    survivor.conversation_row_id = "row-1"
+    collapsed_empty.conversation_row_id = ""
+    collapsed_duplicate.conversation_row_id = "row-1"
+    survivor.collapsed_items = [collapsed_empty, collapsed_duplicate]
+
+    row_ids = brain_intake.active_turn_conversation_row_ids(survivor)
+
+    assert row_ids == ["row-1"]
 
 
 @pytest.mark.asyncio
@@ -716,6 +790,8 @@ async def test_worker_drops_listen_only_without_pruning_active_plain(monkeypatch
 
     async def _save_conversation(doc):
         call_order.append(f"save:{doc['platform_message_id']}")
+        return_value = f"row-{doc['platform_message_id']}"
+        return return_value
 
     monkeypatch.setattr(service_module, "save_conversation", _save_conversation)
     _patch_common_dependencies(monkeypatch, _Graph())
@@ -770,6 +846,8 @@ async def test_worker_saves_collapsed_messages_before_graph(monkeypatch) -> None
 
     async def _save_conversation(doc):
         call_order.append(f"save:{doc['platform_message_id']}")
+        return_value = f"row-{doc['platform_message_id']}"
+        return return_value
 
     monkeypatch.setattr(service_module, "save_conversation", _save_conversation)
     _patch_common_dependencies(monkeypatch, _Graph())
@@ -801,6 +879,12 @@ async def test_worker_saves_collapsed_messages_before_graph(monkeypatch) -> None
     assert call_order[:3] == ["save:2", "save:1", "graph"]
     assert captured_state["user_input"] == "first\nsecond"
     assert captured_state["active_turn_platform_message_ids"] == ["1", "2"]
+    assert captured_state["active_turn_conversation_row_ids"] == [
+        "row-1",
+        "row-2",
+    ]
+    assert first.conversation_row_id == "row-1"
+    assert second.conversation_row_id == "row-2"
     assert captured_state["should_respond"] is True
     assert captured_state["use_reply_feature"] is False
 

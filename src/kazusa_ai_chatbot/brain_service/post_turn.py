@@ -14,7 +14,7 @@ from kazusa_ai_chatbot.utils import log_preview
 
 
 EnsureCharacterIdentity = Callable[..., Awaitable[str]]
-SaveConversation = Callable[[dict], Awaitable[None]]
+SaveConversation = Callable[[dict], Awaitable[str | None]]
 CallConsolidation = Callable[[dict], Awaitable[dict]]
 RecordTurnProgress = Callable[..., Awaitable[dict]]
 

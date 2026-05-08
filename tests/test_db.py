@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from contextlib import contextmanager
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -320,11 +321,38 @@ async def test_update_last_relationship_insight():
 # ── Save conversation ──────────────────────────────────────────────
 
 
+def _conversation_save_doc() -> dict:
+    """Build a valid conversation row for save-conversation tests."""
+
+    doc = {
+        "platform": "qq",
+        "platform_channel_id": "c1",
+        "channel_type": "group",
+        "role": "user",
+        "platform_message_id": "m1",
+        "platform_user_id": "u1",
+        "global_user_id": "global-u1",
+        "display_name": "Alice",
+        "body_text": "Hello!",
+        "raw_wire_text": "Hello!",
+        "content_type": "text",
+        "addressed_to_global_user_ids": ["character-global"],
+        "mentions": [],
+        "broadcast": False,
+        "attachments": [],
+        "timestamp": "t1",
+        "embedding": [0.1, 0.2],
+    }
+    return doc
+
+
 @pytest.mark.asyncio
 async def test_save_conversation_generates_embedding():
     """save_conversation should generate an embedding when not provided."""
     db = _mock_db()
-    db.conversation_history.insert_one = AsyncMock()
+    insert_result = MagicMock()
+    insert_result.inserted_id = "row-1"
+    db.conversation_history.insert_one = AsyncMock(return_value=insert_result)
 
     doc = {
         "platform": "qq",
@@ -356,7 +384,9 @@ async def test_save_conversation_generates_embedding():
 async def test_save_conversation_preserves_existing_embedding():
     """save_conversation should not regenerate embedding if already present."""
     db = _mock_db()
-    db.conversation_history.insert_one = AsyncMock()
+    insert_result = MagicMock()
+    insert_result.inserted_id = "row-1"
+    db.conversation_history.insert_one = AsyncMock(return_value=insert_result)
 
     doc = {
         "platform": "qq",
@@ -383,6 +413,92 @@ async def test_save_conversation_preserves_existing_embedding():
 
     mock_embed.assert_not_called()
     assert doc["embedding"] == [0.5, 0.6]
+
+
+@pytest.mark.asyncio
+async def test_save_conversation_returns_row_id_after_cache_invalidation(
+    monkeypatch,
+) -> None:
+    """save_conversation should return Mongo row identity after invalidation."""
+    db = _mock_db()
+    call_order = []
+    insert_result = MagicMock()
+    insert_result.inserted_id = "row-after-invalidation"
+
+    async def _insert_one(doc):
+        call_order.append("insert")
+        return_value = insert_result
+        return return_value
+
+    async def _invalidate(event):
+        call_order.append("invalidate")
+        return_value = 0
+        return return_value
+
+    runtime = MagicMock()
+    runtime.invalidate = AsyncMock(side_effect=_invalidate)
+    db.conversation_history.insert_one = AsyncMock(side_effect=_insert_one)
+    monkeypatch.setattr(
+        "kazusa_ai_chatbot.rag.cache2_runtime.get_rag_cache2_runtime",
+        MagicMock(return_value=runtime),
+    )
+
+    with _patched_get_db(db):
+        row_id = await save_conversation(_conversation_save_doc())
+
+    assert row_id == "row-after-invalidation"
+    assert call_order == ["insert", "invalidate"]
+
+
+@pytest.mark.asyncio
+async def test_save_conversation_returns_row_id_when_cache_invalidation_fails(
+    monkeypatch,
+    caplog,
+) -> None:
+    """Cache invalidation failure should not discard a committed row ID."""
+    db = _mock_db()
+    insert_result = MagicMock()
+    insert_result.inserted_id = "row-with-cache-warning"
+    db.conversation_history.insert_one = AsyncMock(return_value=insert_result)
+    runtime = MagicMock()
+    runtime.invalidate = AsyncMock(side_effect=RuntimeError("cache offline"))
+    monkeypatch.setattr(
+        "kazusa_ai_chatbot.rag.cache2_runtime.get_rag_cache2_runtime",
+        MagicMock(return_value=runtime),
+    )
+
+    with _patched_get_db(db), caplog.at_level(
+        logging.WARNING,
+        logger="kazusa_ai_chatbot.db.conversation",
+    ):
+        row_id = await save_conversation(_conversation_save_doc())
+
+    assert row_id == "row-with-cache-warning"
+    assert "Cache2 invalidation after save_conversation failed: cache offline" in (
+        caplog.text
+    )
+
+
+@pytest.mark.asyncio
+async def test_save_conversation_insert_failure_still_propagates(
+    monkeypatch,
+) -> None:
+    """Insert failures should stay exceptional instead of returning row IDs."""
+    db = _mock_db()
+    db.conversation_history.insert_one = AsyncMock(
+        side_effect=RuntimeError("insert failed")
+    )
+    runtime = MagicMock()
+    runtime.invalidate = AsyncMock()
+    monkeypatch.setattr(
+        "kazusa_ai_chatbot.rag.cache2_runtime.get_rag_cache2_runtime",
+        MagicMock(return_value=runtime),
+    )
+
+    with _patched_get_db(db), pytest.raises(RuntimeError, match="insert failed"):
+        await save_conversation(_conversation_save_doc())
+
+    runtime.invalidate.assert_not_awaited()
 
 
 @pytest.mark.asyncio

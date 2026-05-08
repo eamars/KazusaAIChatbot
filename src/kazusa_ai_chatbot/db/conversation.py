@@ -364,14 +364,14 @@ async def aggregate_conversation_by_user(
     return return_value
 
 
-async def save_conversation(doc: ConversationMessageDoc) -> None:
+async def save_conversation(doc: ConversationMessageDoc) -> str:
     """Persist one conversation message and invalidate matching cache entries.
 
     Args:
         doc: Conversation-history row to store.
 
     Returns:
-        None. The row is written and matching Cache2 entries are invalidated.
+        MongoDB row ID string for the committed conversation-history row.
     """
     db = await get_db()
 
@@ -393,20 +393,32 @@ async def save_conversation(doc: ConversationMessageDoc) -> None:
     if "embedding" not in doc or not doc.get("embedding"):
         doc["embedding"] = await get_text_embedding(_embedding_source_text(doc))
 
-    await db.conversation_history.insert_one(doc)
-    evicted_count = await cache2_runtime.get_rag_cache2_runtime().invalidate(CacheInvalidationEvent(
+    insert_result = await db.conversation_history.insert_one(doc)
+    inserted_id_str = str(insert_result.inserted_id)
+    invalidation_event = CacheInvalidationEvent(
         source="conversation_history",
         platform=doc.get("platform", ""),
         platform_channel_id=doc.get("platform_channel_id", ""),
         global_user_id=doc.get("global_user_id", ""),
         timestamp=doc.get("timestamp", ""),
         reason="save_conversation",
-    ))
+    )
+    cache_runtime = cache2_runtime.get_rag_cache2_runtime()
+    try:
+        evicted_count = await cache_runtime.invalidate(invalidation_event)
+    except Exception as exc:
+        logger.warning(
+            f"Cache2 invalidation after save_conversation failed: {exc}"
+        )
+        return inserted_id_str
+
     if evicted_count:
         platform = doc.get("platform", "")
         platform_channel_id = doc.get("platform_channel_id", "")
         global_user_id = doc.get("global_user_id", "")
         logger.debug(f'Cache2 invalidation source=conversation_history platform={platform} channel={platform_channel_id} global_user={global_user_id} evicted={evicted_count}')
+
+    return inserted_id_str
 
 
 async def apply_assistant_delivery_receipt(
