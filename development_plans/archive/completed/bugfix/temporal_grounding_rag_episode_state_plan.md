@@ -4,7 +4,7 @@
 
 - Goal: Prevent producer and writer stages from emitting unresolved relative temporal language into active operational state or producer-owned active evidence, without adding a central temporal-grounding module, deterministic semantic parser, or downstream consumer safeguard.
 - Plan class: large
-- Status: in_progress
+- Status: completed
 - Mandatory skills: `local-llm-architecture`, `py-style`, `cjk-safety`, `test-style-and-execution`.
 - Overall cutover strategy: bigbang for stage prompt/output contracts; compatible for historical stored rows; no data migration.
 - Highest-risk areas: moving semantic judgment into deterministic code, over-suppressing valid historical quotes at producer time, appending prompt fragments that break prompt flow, accidentally adding consumer safeguards, and touching RAG/cognition modules outside the producer boundary.
