@@ -10,6 +10,7 @@ from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition_output_contracts impo
     validate_cognition_output_contract,
 )
 from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition_prompt_selection import (
+    build_cognition_prompt_source_payload,
     select_cognition_prompt_variant,
 )
 from kazusa_ai_chatbot.nodes.persona_supervisor2_schema import CognitionState
@@ -339,18 +340,24 @@ async def call_cognition_consciousness(state: CognitionState) -> CognitionState:
     affinity_block = build_affinity_block(state["user_profile"]["affinity"])
     current_user_bundle = _current_user_rag_bundle(state)
     user_memory_context = current_user_bundle["user_memory_context"]
+    episode = state["cognitive_episode"]
     selection = select_cognition_prompt_variant(
-        episode=state["cognitive_episode"],
+        episode=episode,
         stage="l2a_consciousness",
     )
     prompt_template = {
         "text_chat_user_message": _COGNITION_CONSCIOUSNESS_PROMPT,
+        "reflection_signal_reflection_artifact": _COGNITION_CONSCIOUSNESS_PROMPT,
     }[selection["variant"]]
 
     system_prompt = SystemMessage(content=prompt_template.format(
         character_name=state["character_profile"]["name"],
         character_mbti=state["character_profile"]["personality_brief"]["mbti"],
     ))
+
+    promoted_reflection_context = {}
+    if selection["variant"] == "text_chat_user_message":
+        promoted_reflection_context = state.get("promoted_reflection_context") or {}
 
     msg = {
         "character_mood": state['character_profile']['mood'],
@@ -365,11 +372,15 @@ async def call_cognition_consciousness(state: CognitionState) -> CognitionState:
         "decontextualized_input": state["decontexualized_input"],
         "active_commitments": user_memory_context["active_commitments"],
         "rag_result": _cognition_rag_result(state["rag_result"]),
-        "promoted_reflection_context": state.get("promoted_reflection_context") or {},
+        "promoted_reflection_context": promoted_reflection_context,
         "indirect_speech_context": state["indirect_speech_context"],
         "emotional_appraisal": state["emotional_appraisal"],
         "interaction_subtext": state["interaction_subtext"],
     }
+    msg.update(build_cognition_prompt_source_payload(
+        episode=episode,
+        selection=selection,
+    ))
     human_message = HumanMessage(content=json.dumps(msg, ensure_ascii=False))
     response = await _conscious_llm.ainvoke([
         system_prompt,
@@ -615,12 +626,14 @@ async def call_boundary_core_agent(state: CognitionState) -> CognitionState:
     # Get attributes
     character_profile = state["character_profile"]
     boundary_profile = character_profile["boundary_profile"]
+    episode = state["cognitive_episode"]
     selection = select_cognition_prompt_variant(
-        episode=state["cognitive_episode"],
+        episode=episode,
         stage="l2b_boundary_core",
     )
     prompt_template = {
         "text_chat_user_message": _BOUNDARY_CORE_PROMPT,
+        "reflection_signal_reflection_artifact": _BOUNDARY_CORE_PROMPT,
     }[selection["variant"]]
 
     self_integrity = float(boundary_profile["self_integrity"])
@@ -663,6 +676,10 @@ async def call_boundary_core_agent(state: CognitionState) -> CognitionState:
             "instruction": affinity_block["instruction"]
         }
     }
+    msg.update(build_cognition_prompt_source_payload(
+        episode=episode,
+        selection=selection,
+    ))
     human_message = HumanMessage(content=json.dumps(msg, ensure_ascii=False))
     response = await _boundary_core_llm.ainvoke([
         system_prompt,
@@ -857,12 +874,14 @@ _judgement_core_llm = get_llm(
     api_key=COGNITION_LLM_API_KEY,
 )
 async def call_judgment_core_agent(state: CognitionState) -> CognitionState:
+    episode = state["cognitive_episode"]
     selection = select_cognition_prompt_variant(
-        episode=state["cognitive_episode"],
+        episode=episode,
         stage="l2c_judgment_core",
     )
     prompt_template = {
         "text_chat_user_message": _JUDGEMENT_CORE_PROMPT,
+        "reflection_signal_reflection_artifact": _JUDGEMENT_CORE_PROMPT,
     }[selection["variant"]]
 
     system_prompt = SystemMessage(content=prompt_template.format(
@@ -893,6 +912,10 @@ async def call_judgment_core_agent(state: CognitionState) -> CognitionState:
         "pressure_policy": boundary_core_assessment["pressure_policy"],
         "trajectory": boundary_core_assessment["trajectory"],
     }
+    msg.update(build_cognition_prompt_source_payload(
+        episode=episode,
+        selection=selection,
+    ))
     human_message = HumanMessage(content=json.dumps(msg, ensure_ascii=False))
     response = await _judgement_core_llm.ainvoke([
         system_prompt,

@@ -7,6 +7,7 @@ from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition_output_contracts impo
     validate_cognition_output_contract,
 )
 from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition_prompt_selection import (
+    build_cognition_prompt_source_payload,
     select_cognition_prompt_variant,
 )
 from kazusa_ai_chatbot.nodes.persona_supervisor2_schema import CognitionState
@@ -285,12 +286,14 @@ _contextual_agent_llm = get_llm(
 async def call_contextual_agent(state: CognitionState) -> CognitionState:
     character_profile = state["character_profile"]
     boundary_profile = character_profile["boundary_profile"]
+    episode = state["cognitive_episode"]
     selection = select_cognition_prompt_variant(
-        episode=state["cognitive_episode"],
+        episode=episode,
         stage="l3_contextual_agent",
     )
     prompt_template = {
         "text_chat_user_message": _CONTEXTUAL_AGENT_PROMPT,
+        "reflection_signal_reflection_artifact": _CONTEXTUAL_AGENT_PROMPT,
     }[selection["variant"]]
 
     mbti = character_profile["personality_brief"]["mbti"]
@@ -325,6 +328,10 @@ async def call_contextual_agent(state: CognitionState) -> CognitionState:
         },
         "chat_history": _surface_history_for_contextual(state["chat_history_recent"]),
     }
+    msg.update(build_cognition_prompt_source_payload(
+        episode=episode,
+        selection=selection,
+    ))
     human_message = HumanMessage(content=json.dumps(msg, ensure_ascii=False))
     response = await _contextual_agent_llm.ainvoke([
         system_prompt,
@@ -462,12 +469,14 @@ _style_agent_llm = get_llm(
 )
 async def call_style_agent(state: CognitionState) -> CognitionState:
     character_profile = state["character_profile"]
+    episode = state["cognitive_episode"]
     selection = select_cognition_prompt_variant(
-        episode=state["cognitive_episode"],
+        episode=episode,
         stage="l3_style_agent",
     )
     prompt_template = {
         "text_chat_user_message": _STYLE_AGENT_PROMPT,
+        "reflection_signal_reflection_artifact": _STYLE_AGENT_PROMPT,
     }[selection["variant"]]
 
     system_prompt = SystemMessage(content=prompt_template.format(
@@ -504,6 +513,10 @@ async def call_style_agent(state: CognitionState) -> CognitionState:
         ),
         "chat_history": _surface_history_for_style(state["chat_history_recent"]),
     }
+    msg.update(build_cognition_prompt_source_payload(
+        episode=episode,
+        selection=selection,
+    ))
     human_message = HumanMessage(content=json.dumps(msg, ensure_ascii=False))
     response = await _style_agent_llm.ainvoke([
         system_prompt,
@@ -701,12 +714,14 @@ _content_anchor_agent_llm = get_llm(
 )
 async def call_content_anchor_agent(state: CognitionState) -> CognitionState:
     character_profile = state["character_profile"]
+    episode = state["cognitive_episode"]
     selection = select_cognition_prompt_variant(
-        episode=state["cognitive_episode"],
+        episode=episode,
         stage="l3_content_anchor_agent",
     )
     prompt_template = {
         "text_chat_user_message": _CONTENT_ANCHOR_AGENT_PROMPT,
+        "reflection_signal_reflection_artifact": _CONTENT_ANCHOR_AGENT_PROMPT,
     }[selection["variant"]]
 
     system_prompt = SystemMessage(content=prompt_template.format(
@@ -723,6 +738,10 @@ async def call_content_anchor_agent(state: CognitionState) -> CognitionState:
         "character_intent": state["character_intent"],
         "conversation_progress": state.get("conversation_progress"),
     }
+    msg.update(build_cognition_prompt_source_payload(
+        episode=episode,
+        selection=selection,
+    ))
     human_message = HumanMessage(content=json.dumps(msg, ensure_ascii=False))
     response = await _content_anchor_agent_llm.ainvoke([
         system_prompt,
@@ -848,12 +867,14 @@ async def call_preference_adapter(state: CognitionState) -> CognitionState:
     decontexualized_input = state["decontexualized_input"]
     current_user_bundle = _current_user_rag_bundle(state)
     user_memory_context = current_user_bundle["user_memory_context"]
+    episode = state["cognitive_episode"]
     selection = select_cognition_prompt_variant(
-        episode=state["cognitive_episode"],
+        episode=episode,
         stage="l3_preference_adapter",
     )
     prompt_template = {
         "text_chat_user_message": _PREFERENCE_ADAPTER_PROMPT,
+        "reflection_signal_reflection_artifact": _PREFERENCE_ADAPTER_PROMPT,
     }[selection["variant"]]
 
     system_prompt = SystemMessage(content=prompt_template.format(
@@ -878,6 +899,10 @@ async def call_preference_adapter(state: CognitionState) -> CognitionState:
         "content_anchors": state["content_anchors"],
         "rag_result": _cognition_rag_result(state["rag_result"]),
     }
+    msg.update(build_cognition_prompt_source_payload(
+        episode=episode,
+        selection=selection,
+    ))
     human_message = HumanMessage(content=json.dumps(msg, ensure_ascii=False))
     response = await _preference_adapter_llm.ainvoke([
         system_prompt,
@@ -1030,12 +1055,14 @@ _visual_agent_llm = get_llm(
 async def call_visual_agent(state: CognitionState) -> CognitionState:
     character_profile = state["character_profile"]
     boundary_profile = character_profile["boundary_profile"]
+    episode = state["cognitive_episode"]
     selection = select_cognition_prompt_variant(
-        episode=state["cognitive_episode"],
+        episode=episode,
         stage="l3_visual_agent",
     )
     prompt_template = {
         "text_chat_user_message": _VISUAL_AGENT_PROMPT,
+        "reflection_signal_reflection_artifact": _VISUAL_AGENT_PROMPT,
     }[selection["variant"]]
 
     control_sensitivity = float(boundary_profile["control_sensitivity"])
@@ -1090,6 +1117,10 @@ async def call_visual_agent(state: CognitionState) -> CognitionState:
         "channel_topic": state.get("channel_topic", ""),
         "conversation_progress": state.get("conversation_progress"),
     }
+    msg.update(build_cognition_prompt_source_payload(
+        episode=episode,
+        selection=selection,
+    ))
     human_message = HumanMessage(content=json.dumps(msg, ensure_ascii=False))
     response = await _visual_agent_llm.ainvoke([
         system_prompt,
