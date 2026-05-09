@@ -5,12 +5,10 @@ description: Use when writing, reviewing, improving, or auditing development pla
 
 # Development Plan Writing
 
-Create plans a human owner can read and an implementation agent can execute
-without inventing architecture, scope, contracts, or verification.
-
-A final development plan is an approved work contract. Discovery drafts may
-contain questions and options; final plans must not. Completed plans are closed
-records, so new scope belongs in a new or superseding plan.
+Create plans a human owner can approve and an implementation agent can execute
+without inventing architecture, scope, contracts, or verification. Final plans
+are work contracts; drafts may contain questions, but final plans must not.
+Completed plans are closed records.
 
 ## Workflow
 
@@ -22,6 +20,8 @@ records, so new scope belongs in a new or superseding plan.
 5. Load `plan_contract.md` and `execution_gates.md` for final executable
    plans; load `cutover_policy.md` when behavior changes.
 6. Before approval, reread the plan against this skill and loaded references.
+7. For executable plans, include an independent code review gate as the final
+   pre-sign-off stage before lifecycle completion.
 
 ## References
 
@@ -33,15 +33,10 @@ records, so new scope belongs in a new or superseding plan.
 
 ## Local Registry Rule
 
-`development_plans/README.md` owns lifecycle policy:
-
-- `long_term/`: roadmap only; promote before implementation.
-- `active/short_term/`, `active/bugfix/`: execute only `approved` or
-  `in_progress` plans.
-- `archive/completed/`: historical records; do not append scope.
-- `archive/superseded/`: do not execute.
-- `reference/`: context only.
-- `triage/`: blocked until classified and moved.
+`development_plans/README.md` owns lifecycle policy. Execute only `approved`
+or `in_progress` plans under `active/`. Treat `long_term/` as roadmap,
+`archive/` as non-executable history, `reference/` as context, and `triage/`
+as blocked until classified.
 
 ## Core Rules
 
@@ -49,29 +44,32 @@ records, so new scope belongs in a new or superseding plan.
 - Name mandatory skills explicitly; copy critical skill-derived rules into the
   plan because context may compact.
 - Include `Must Do`, `Deferred`, `Agent Autonomy Boundaries`, `Change Surface`,
-  `Implementation Order`, `Progress Checklist`, `Verification`, and
-  `Acceptance Criteria`.
+  `Implementation Order`, `Progress Checklist`, `Verification`,
+  `Independent Code Review`, and `Acceptance Criteria`.
 - Break execution into granular, verifiable steps instead of broad work items.
 - Define cutover policy as `bigbang`, `migration`, or `compatible` for every
   changed behavior area, and confirm it before finalizing.
 - Name the target module or ownership boundary. Strongly justify any change
   outside it.
 - For new modules, define public interface, data shapes, ownership, callers,
-  hidden internals, test seams, integration points, and tests before finalizing.
+  internals, test seams, integration points, and tests before finalizing.
 - For prompt, graph, RAG, cognition, dialog, evaluator, background LLM,
-  database, migration, or production-path changes, include the relevant budget
-  and safety gates from the references.
+  database, migration, or production-path changes, include relevant budget and
+  safety gates.
 - Do not authorize new architecture, compatibility layers, fallback paths,
   helper wrappers, extra features, or unrelated cleanup unless explicitly in
   scope and justified.
+- Require an independent code review stage after implementation verification
+  and before final sign-off. The review must check style compliance, code
+  quality, plan alignment, design weaknesses, regression risk, handoff
+  artifacts, and stale or inaccurate verification gates. Keep the detailed
+  review contract in the references.
 
 ## Final-Plan Prohibitions
 
 Final plans must not contain unresolved questions or decision points. Avoid
-`TBD`, `maybe`, `consider`, `choose one`, `option A / option B`,
-`ask the user whether...`, and open-ended recommendations.
-
-Assumptions are allowed only when they are fixed operating inputs, not disguised
+`TBD`, `maybe`, `consider`, `choose one`, `option A / option B`, and open-ended
+recommendations. Assumptions must be fixed operating inputs, not disguised
 questions.
 
 ## Style

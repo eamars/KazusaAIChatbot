@@ -4,6 +4,18 @@ Read this reference for every final executable plan. It owns granular execution
 steps, implementation order, progress checklist, verification, execution
 evidence, handoff, and review-derived accuracy gates.
 
+## Table Of Contents
+
+- [Implementation Order](#implementation-order)
+- [Granular Execution Steps](#granular-execution-steps)
+- [Progress Checklist](#progress-checklist)
+- [Plan Self-Review](#plan-self-review)
+- [Verification](#verification)
+- [Independent Code Review Gate](#independent-code-review-gate)
+- [Review-Derived Accuracy Gates](#review-derived-accuracy-gates)
+- [Execution Evidence](#execution-evidence)
+- [Execution Handoff](#execution-handoff)
+
 ## Implementation Order
 
 Implementation order must prevent avoidable breakage and agent improvisation.
@@ -53,6 +65,22 @@ inapplicable:
      before changing integration again.
    - If integration exposes only wiring behavior, update integration and re-run
      the integration test.
+9. Run the independent code review gate.
+   - Review the full implementation diff against project style, code quality,
+     plan alignment, design risk, regression coverage, handoff artifacts, and
+     verification accuracy.
+   - Prefer a reviewer that did not implement the change. If no separate
+     reviewer is available, the active agent must reread the full plan and
+     perform a fresh review pass before sign-off.
+   - Record findings, fixes needed, commands rerun, residual risks, and review
+     approval status in `Execution Evidence`.
+10. Remediate review findings and repeat required verification.
+    - Fix findings directly only when the fix is inside the approved change
+      surface or the plan explicitly allows review-only corrections.
+    - If a finding requires a contract, boundary, or change-surface change,
+      update the plan or request approval before changing code.
+    - Rerun affected focused tests, static checks, and regression gates before
+      final sign-off.
 
 For low-risk documentation-only plans, explicitly state that the
 module/integration test-first sequence is not applicable and replace it with a
@@ -147,6 +175,8 @@ Each tickable checkpoint must describe:
 - the sign-off line the agent must complete after that checkpoint is done
 - the granular execution steps inside the checkpoint, or a pointer to the
   numbered implementation steps it covers
+- the final independent code review checkpoint, including review scope,
+  remediation authority, commands to rerun after fixes, and sign-off evidence
 
 ```md
 ## Progress Checklist
@@ -180,6 +210,12 @@ After signing off any major checklist stage, the active agent must reread the
 entire plan before starting the next stage. This reread requirement must be
 written into the plan's `Mandatory Rules` and treated as part of each major
 stage sign-off gate.
+
+Every executable plan must include a final progress-checklist checkpoint for
+independent code review. The plan cannot be marked completed, merged, or signed
+off until this checkpoint is verified and evidence is recorded. The checkpoint
+must remain unchecked if the review is skipped, blocked, or finds unresolved
+issues.
 
 ## Plan Self-Review
 
@@ -236,6 +272,47 @@ For every static check, state the exact expected result:
 - which matches are allowed, if any, and the file or literal context that makes
   them acceptable
 - which matches are forbidden and what the agent must do if they appear
+
+## Independent Code Review Gate
+
+The independent code review gate is mandatory for executable plans and runs
+after verification, before completion or merge. It exists to catch the problems
+that normal implementation verification often misses: style drift, weak design
+choices, plan deviations, stale static-grep expectations, missing handoff
+artifacts, and unplanned file changes.
+
+The gate must inspect these inputs:
+
+- the approved plan and any completed parent or prior-stage artifacts
+- `git diff` or equivalent changed-file output from the implementation branch
+- focused tests, regression tests, static checks, and execution evidence
+- lifecycle records, registry rows, and handoff notes when the plan updates
+  them
+
+The review checklist must cover:
+
+- **Project rules and style:** mandatory skill compliance, docstrings,
+  imports, defaults, exception handling, helper shape, CJK safety, test style,
+  and command path safety.
+- **Plan alignment:** `Must Do`, `Deferred`, autonomy boundaries, change
+  surface, exact contracts, implementation order, verification gates,
+  acceptance criteria, and lifecycle evidence.
+- **Code quality and architecture:** module ownership, call paths, fallback or
+  compatibility behavior, prompt/RAG/context leaks, persistence and scheduler
+  boundaries, fixture brittleness, and avoidable blast radius.
+- **Regression and handoff:** prior-stage artifacts carried forward, baseline
+  tests preserved, new tests mapped to risks, stale static gates corrected, and
+  next-stage handoff left clean.
+
+Concrete findings should be fixed before sign-off when they are inside the
+approved change surface or inside an explicit review-fix allowance. If a
+finding requires new scope, a different public contract, or edits outside the
+approved boundary, the agent must stop and update the active plan or request
+approval before implementing the fix.
+
+The review outcome must be recorded as evidence. A useful evidence line states
+the reviewer mode, files reviewed, findings, fixes made, verification rerun,
+residual risks, and whether the plan is approved for completion.
 
 ## Review-Derived Accuracy Gates
 

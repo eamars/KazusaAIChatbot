@@ -4,6 +4,28 @@ Read this reference when writing or reviewing a final executable development
 plan. Keep discovery notes, unresolved questions, and options out of final-plan
 sections.
 
+## Table Of Contents
+
+- [Plan Lifecycle](#plan-lifecycle)
+- [Filename Rule](#filename-rule)
+- [Required Top Matter](#required-top-matter)
+- [Length Budget](#length-budget)
+- [Mandatory Sections](#mandatory-sections)
+- [Mandatory Skills](#mandatory-skills)
+- [Mandatory Rules](#mandatory-rules)
+- [No Unresolved Questions](#no-unresolved-questions)
+- [Must Do](#must-do)
+- [Deferred](#deferred)
+- [Agent Autonomy Boundaries](#agent-autonomy-boundaries)
+- [Context And Target State](#context-and-target-state)
+- [Design Decisions](#design-decisions)
+- [Contracts And Data Shapes](#contracts-and-data-shapes)
+- [LLM Call And Context Budget](#llm-call-and-context-budget)
+- [Change Surface](#change-surface)
+- [Independent Code Review](#independent-code-review)
+- [Acceptance Criteria](#acceptance-criteria)
+- [Risks](#risks)
+
 ## Plan Lifecycle
 
 Keep these stages separate:
@@ -103,6 +125,7 @@ Every final plan must include these sections:
 ## Implementation Order
 ## Progress Checklist
 ## Verification
+## Independent Code Review
 ## Acceptance Criteria
 ```
 
@@ -178,6 +201,9 @@ Every final plan must include these plan-continuity rules in `Mandatory Rules`:
   reporting.
 - After signing off any major progress checklist stage, the active agent must
   reread this entire plan before starting the next stage.
+- Before final completion, lifecycle status changes, merge, or sign-off, the
+  active agent must run the plan's `Independent Code Review` gate and record
+  the result in `Execution Evidence`.
 
 ## No Unresolved Questions
 
@@ -419,6 +445,51 @@ Code removal is less constrained by this rule when the removal is already in
 scope. For delete-only work, require enough evidence to show the deleted code
 is obsolete or unreferenced, but do not force the same level of justification
 required for adding or expanding behavior outside the target module.
+
+## Independent Code Review
+
+Every final executable plan must include an independent code review section.
+Place it after `Verification` and before `Acceptance Criteria`, and include a
+matching final progress-checklist checkpoint. The review happens after all
+planned implementation verification has passed and before marking the plan
+completed, updating lifecycle records to completed, merging, or signing off.
+
+Use this shape:
+
+```md
+## Independent Code Review
+
+Run this gate after all `Verification` commands pass and before final sign-off.
+Prefer a reviewer that did not implement the change. If no separate reviewer is
+available, the active agent must reread this plan, inspect the full diff from a
+fresh-review posture, and record that no separate reviewer was available.
+
+Review scope:
+
+- Project rules and style compliance for every changed Python, test, prompt,
+  documentation, and command artifact.
+- Code quality and design weaknesses, including ownership boundaries, hidden
+  fallback paths, compatibility shims, prompt/RAG payload leaks, persistence
+  risk, brittle fixtures, and avoidable blast radius.
+- Alignment with `Must Do`, `Deferred`, `Agent Autonomy Boundaries`, `Change
+  Surface`, exact contracts, implementation order, verification gates, and
+  acceptance criteria.
+- Regression and handoff quality, including prior-stage artifacts, focused and
+  regression tests, execution evidence, next-stage handoff notes, and
+  path-safe commands for directories containing spaces.
+
+Fix concrete findings directly only when the fix is inside the approved change
+surface or this review gate explicitly allows review-only fixture/documentation
+corrections. If a fix would cross the approved boundary or alter the contract,
+stop and update the plan or request approval before changing code.
+
+Record findings, fixes, commands rerun, residual risks, and approval status in
+`Execution Evidence`.
+```
+
+If a plan intentionally uses an external reviewer or a named review artifact,
+state that exact handoff. Do not leave the reviewer identity, diff baseline,
+review scope, or remediation authority open-ended.
 
 ## Acceptance Criteria
 
