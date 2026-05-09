@@ -6,6 +6,10 @@ from unittest.mock import AsyncMock
 
 import pytest
 
+from kazusa_ai_chatbot.cognition_episode import (
+    CognitiveEpisode,
+    build_text_chat_cognitive_episode,
+)
 from kazusa_ai_chatbot.nodes import persona_supervisor2_cognition as cognition_module
 from kazusa_ai_chatbot.nodes import persona_supervisor2_cognition_l3 as l3_module
 
@@ -19,7 +23,14 @@ class _FakeStyleLlm:
         self.payload: dict | None = None
 
     async def ainvoke(self, messages: list) -> SimpleNamespace:
-        """Capture the human message payload."""
+        """Capture the human message payload.
+
+        Args:
+            messages: Prompt messages supplied by the caller.
+
+        Returns:
+            Fake response namespace with JSON content.
+        """
 
         self.payload = json.loads(messages[1].content)
         content = json.dumps(
@@ -64,6 +75,37 @@ def _character_profile() -> dict:
     return return_value
 
 
+def _cognitive_episode(*, channel_type: str = "private") -> CognitiveEpisode:
+    """Build a valid text-chat episode for cognition state fixtures.
+
+    Args:
+        channel_type: Channel type represented by the fixture.
+
+    Returns:
+        Valid Stage 02 text-chat cognitive episode.
+    """
+    return build_text_chat_cognitive_episode(
+        episode_id=f"interaction-style-{channel_type}-episode",
+        percept_id=f"interaction-style-{channel_type}-percept",
+        timestamp="2026-05-06T00:00:00+00:00",
+        time_context={
+            "current_local_datetime": "2026-05-09 19:30",
+            "current_local_weekday": "Saturday",
+        },
+        user_input="hello",
+        platform="qq",
+        platform_channel_id=f"{channel_type}-channel",
+        channel_type=channel_type,
+        platform_message_id="message-1",
+        platform_user_id="platform-user-1",
+        global_user_id="global-user-1",
+        user_name="User",
+        active_turn_platform_message_ids=["message-1"],
+        active_turn_conversation_row_ids=[],
+        debug_modes={},
+    )
+
+
 def _style_state(*, channel_type: str = "private") -> dict:
     """Build the minimal state consumed by ``call_style_agent``."""
 
@@ -75,6 +117,7 @@ def _style_state(*, channel_type: str = "private") -> dict:
         "character_intent": "PROVIDE",
         "chat_history_recent": [],
         "channel_type": channel_type,
+        "cognitive_episode": _cognitive_episode(channel_type=channel_type),
         "interaction_style_context": {
             "user_style": {
                 "speech_guidelines": ["Use compact warmth."],
@@ -118,6 +161,7 @@ def _global_state(*, channel_type: str) -> dict:
         "promoted_reflection_context": {},
         "referents": [],
         "debug_modes": {},
+        "cognitive_episode": _cognitive_episode(channel_type=channel_type),
         "decontexualized_input": "hello",
         "rag_result": {
             "user_image": {

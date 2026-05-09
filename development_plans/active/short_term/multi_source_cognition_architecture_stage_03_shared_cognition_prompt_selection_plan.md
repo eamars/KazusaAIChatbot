@@ -6,7 +6,7 @@
   cognition while keeping the current `/chat` prompt text and prompt payloads
   behaviorally unchanged.
 - Plan class: large
-- Status: approved
+- Status: completed
 - Mandatory skills: `development-plan-writing`, `local-llm-architecture`,
   `no-prepost-user-input`, `py-style`, `test-style-and-execution`, and
   `cjk-safety` because the cognition prompt modules contain CJK strings.
@@ -25,8 +25,8 @@ Parent plan:
 
 Stage: `stage_03`
 
-Execution status: approved for implementation after review on 2026-05-09; not
-started.
+Execution status: completed on branch
+`multi-source-stage-03-prompt-selection` as of 2026-05-09.
 
 ## Context
 
@@ -541,53 +541,56 @@ work.
 
 ## Progress Checklist
 
-- [ ] Preflight - Stage 02 handoff and prompt fingerprints confirmed.
+- [x] Preflight - Stage 02 handoff and prompt fingerprints confirmed.
   - Covers: parent ledger, Stage 00/01/02 execution evidence, Context paths,
     and `Prompt Text Fingerprint Guard`.
   - Verify: all artifact paths exist and fingerprints match this plan.
-  - Evidence: record path confirmation and hash output.
+  - Evidence: recorded path confirmation and hash output in
+    `Execution Evidence`.
   - Handoff: next agent starts at Stage 1.
-  - Sign-off: `<agent/date>` after evidence is recorded.
-- [ ] Stage 1 - focused selector and output-contract tests added.
+  - Sign-off: `Codex/2026-05-09` after evidence is recorded.
+- [x] Stage 1 - focused selector and output-contract tests added.
   - Covers: `tests/test_multi_source_cognition_stage_03_prompt_selection.py`.
   - Verify: focused command fails only because approved modules or symbols do
     not exist yet.
-  - Evidence: record command and expected failure.
+  - Evidence: recorded command and expected failure in `Execution Evidence`.
   - Handoff: next agent starts at Stage 2.
-  - Sign-off: `<agent/date>` after evidence is recorded.
-- [ ] Stage 2 - selector and output-contract modules implemented.
+  - Sign-off: `Codex/2026-05-09` after evidence is recorded.
+- [x] Stage 2 - selector and output-contract modules implemented.
   - Covers: the two new `persona_supervisor2_cognition_*` modules.
   - Verify: focused Stage 03 tests pass and `py_compile` passes.
-  - Evidence: record public API names and test output.
+  - Evidence: recorded public API names and test output in
+    `Execution Evidence`.
   - Handoff: reread this plan, then start Stage 3.
-  - Sign-off: `<agent/date>` after verification and evidence are recorded.
-- [ ] Stage 3 - L1/L2/L3 handlers use selector and validators.
+  - Sign-off: `Codex/2026-05-09` after verification and evidence are recorded.
+- [x] Stage 3 - L1/L2/L3 handlers use selector and validators.
   - Covers: cognition L1/L2/L3 modules.
   - Verify: focused Stage 03 tests and prompt-render tests pass.
-  - Evidence: record prompt-render equivalence output.
+  - Evidence: recorded prompt-render equivalence output in
+    `Execution Evidence`.
   - Handoff: reread this plan, then start Stage 4.
-  - Sign-off: `<agent/date>` after verification and evidence are recorded.
-- [ ] Stage 4 - inactive variant notes added.
+  - Sign-off: `Codex/2026-05-09` after verification and evidence are recorded.
+- [x] Stage 4 - inactive variant notes added.
   - Covers: reference note path.
   - Verify: static grep shows no runtime import of the reference note and no
     non-chat variants in source.
   - Evidence: record grep result.
   - Handoff: reread this plan, then start Stage 5.
-  - Sign-off: `<agent/date>` after verification and evidence are recorded.
-- [ ] Stage 5 - regression gates pass.
+  - Sign-off: `Codex/2026-05-09` after verification and evidence are recorded.
+- [x] Stage 5 - regression gates pass.
   - Covers: Stage 00, Stage 01, Stage 02, prompt render, and adjacent cognition
     tests.
   - Verify: every command in `Verification` passes.
   - Evidence: record exact command results.
   - Handoff: next agent updates lifecycle records.
-  - Sign-off: `<agent/date>` after verification and evidence are recorded.
-- [ ] Stage 6 - lifecycle records updated.
+  - Sign-off: `Codex/2026-05-09` after verification and evidence are recorded.
+- [x] Stage 6 - lifecycle records updated.
   - Covers: this plan, parent ledger, and registry.
   - Verify: rows show Stage 03 completed and artifact paths are named.
   - Evidence: record parent ledger and registry confirmation.
   - Handoff: Stage 04 may be reviewed for approval; it must read this plan's
     execution evidence before implementation.
-  - Sign-off: `<agent/date>` after lifecycle updates are recorded.
+  - Sign-off: `Codex/2026-05-09` after lifecycle updates are recorded.
 
 ## Verification
 
@@ -630,12 +633,13 @@ The first `rg` is over the L1/L2/L3 modules and must produce zero matches.
 Any match is a Stage 03 stop condition because it means a non-chat source
 label leaked into runtime prompt text or runtime selection logic.
 
-The second `rg` is over the selector module and must produce matches only
-inside the literal rejection list or the unsupported-source error message
-constants. It must not appear inside prompt template text, prompt key
-assembly, or runtime branch conditions. Reviewers must classify each match
-as either "rejection literal" or "violation"; any "violation" match is a
-Stage 03 stop condition.
+The second `rg` is over the selector module. Zero matches are valid and are
+preferred because the selector uses a closed allow-list for current chat
+sources. If matches appear, they must be only rejection literals or
+unsupported-source error text. They must not appear inside prompt template
+text, prompt key assembly, or runtime branch conditions. Reviewers must
+classify each match as either "rejection literal" or "violation"; any
+"violation" match is a Stage 03 stop condition.
 
 The third `rg` must show only Stage 03 assertions that these fields are
 absent from prompt human-message payloads.
@@ -784,4 +788,343 @@ database, cache, scheduler, or adapter.
 
 ## Execution Evidence
 
-Draft only. No implementation has been executed from this plan.
+Implementation started on 2026-05-09 on branch
+`multi-source-stage-03-prompt-selection`.
+
+Preflight completed:
+
+- Artifact path check confirmed every Stage 00, Stage 01, Stage 02, and Stage
+  03 context path exists:
+  - `development_plans/active/short_term/multi_source_cognition_architecture_stage_00_current_chat_workflow_regression_baseline_plan.md`
+  - `development_plans/active/short_term/multi_source_cognition_architecture_stage_01_cognitive_episode_contract_plan.md`
+  - `development_plans/active/short_term/multi_source_cognition_architecture_stage_02_chat_cognitive_episode_migration_plan.md`
+  - `tests/test_multi_source_cognition_stage_00_regression_baseline.py`
+  - `tests/fixtures/multi_source_cognition_stage_00_cases.json`
+  - `src/kazusa_ai_chatbot/cognition_episode.py`
+  - `tests/test_cognitive_episode_contract.py`
+  - `src/kazusa_ai_chatbot/service.py`
+  - `src/kazusa_ai_chatbot/state.py`
+  - `src/kazusa_ai_chatbot/nodes/persona_supervisor2_schema.py`
+  - `src/kazusa_ai_chatbot/nodes/persona_supervisor2.py`
+  - `src/kazusa_ai_chatbot/nodes/persona_supervisor2_cognition.py`
+  - `tests/test_multi_source_cognition_stage_02_chat_episode_migration.py`
+- Parent ledger confirmed `stage_00`, `stage_01`, and `stage_02` are
+  `completed`; `stage_03` is the active implementation stage.
+- Stage 00, Stage 01, and Stage 02 execution evidence was read. Stage 02
+  records final combined verification `43 passed in 2.12s`, plus static
+  checks with no prompt/RAG/dialog/consolidator consumption of
+  `cognitive_episode`.
+- Prompt fingerprint preflight command:
+
+```powershell
+@'
+import ast
+import hashlib
+from pathlib import Path
+
+EXPECTED = {
+    ("src/kazusa_ai_chatbot/nodes/persona_supervisor2_cognition_l1.py", "_COGNITION_SUBCONSCIOUS_PROMPT"): ("93b4a80fa69aa7479d77699622aa632dd47a8515c475c91a0921bcdb302dc938", 1768),
+    ("src/kazusa_ai_chatbot/nodes/persona_supervisor2_cognition_l2.py", "_COGNITION_CONSCIOUSNESS_PROMPT"): ("241fb639de242e2d7fc964da922a8b0ea2ac0d9c4f5b2b762df210c34805a5e5", 6795),
+    ("src/kazusa_ai_chatbot/nodes/persona_supervisor2_cognition_l2.py", "_BOUNDARY_CORE_PROMPT"): ("dee7b322eb0d8637a3ee95b386560786042911cd0acca93b7c30896638ef26d1", 5425),
+    ("src/kazusa_ai_chatbot/nodes/persona_supervisor2_cognition_l2.py", "_JUDGEMENT_CORE_PROMPT"): ("ca4e88cc3854cbdb63372ad3b20644575ef9eb74abdc8637212fedc0ca5b3b89", 4012),
+    ("src/kazusa_ai_chatbot/nodes/persona_supervisor2_cognition_l3.py", "_CONTEXTUAL_AGENT_PROMPT"): ("4a2f7735c9f6b45637f329ad10581124360a24049444be43efb43cd2d802baae", 2982),
+    ("src/kazusa_ai_chatbot/nodes/persona_supervisor2_cognition_l3.py", "_STYLE_AGENT_PROMPT"): ("c0f66e0d744688afa4b105f20573708d295057856fa924c0102c0d5605cb6340", 3748),
+    ("src/kazusa_ai_chatbot/nodes/persona_supervisor2_cognition_l3.py", "_CONTENT_ANCHOR_AGENT_PROMPT"): ("9bf38821e24a561cec5c887f54432a4bff7b84131efb6c997d26edab8e0bbea0", 7194),
+    ("src/kazusa_ai_chatbot/nodes/persona_supervisor2_cognition_l3.py", "_PREFERENCE_ADAPTER_PROMPT"): ("f5b0363c0d1ea1f28770237d27908cbfd56a86410c7c64d9522c44e1c284f88d", 4151),
+    ("src/kazusa_ai_chatbot/nodes/persona_supervisor2_cognition_l3.py", "_VISUAL_AGENT_PROMPT"): ("68b1a35d43bfa28c46c91274d946faa9c7edf206f25fa414dabc822592626294", 4337),
+}
+
+for (path_name, constant), (expected_digest, expected_length) in EXPECTED.items():
+    tree = ast.parse(Path(path_name).read_text(encoding="utf-8"))
+    value = None
+    for node in tree.body:
+        if not isinstance(node, ast.Assign):
+            continue
+        names = [target.id for target in node.targets if isinstance(target, ast.Name)]
+        if constant not in names:
+            continue
+        value = ast.literal_eval(node.value)
+        break
+    if not isinstance(value, str):
+        raise AssertionError(f"{constant} missing from {path_name}")
+    digest = hashlib.sha256(value.encode("utf-8")).hexdigest()
+    print(f"{path_name}:{constant}:{digest}:{len(value)}")
+    if digest != expected_digest or len(value) != expected_length:
+        raise AssertionError(f"{constant} fingerprint changed")
+'@ | venv\Scripts\python -
+```
+
+Result: exit code 0. All nine prompt constant digests and lengths matched the
+`Prompt Text Fingerprint Guard`.
+
+Stage 1 focused red tests added:
+
+- Added `tests/test_multi_source_cognition_stage_03_prompt_selection.py`.
+- The test file covers:
+  - current text `/chat` prompt selection for every approved stage name
+  - accepted Stage 02 output modes `visible_reply`, `think_only`, and `silent`
+  - unsupported trigger-source, input-source, output-mode, and unknown-stage
+    rejection
+  - valid normalized output shape for every approved stage
+  - missing-key and wrong-type rejection for every approved output contract
+  - unknown output-contract stage rejection
+
+Expected red command:
+
+```powershell
+venv\Scripts\python -m pytest tests\test_multi_source_cognition_stage_03_prompt_selection.py -q
+```
+
+Result: 1 collection error in 0.13s. The failure is the expected
+`ModuleNotFoundError` for
+`kazusa_ai_chatbot.nodes.persona_supervisor2_cognition_output_contracts`, which
+has not been implemented yet.
+
+Stage 2 selector and output-contract modules implemented:
+
+- Added
+  `src/kazusa_ai_chatbot/nodes/persona_supervisor2_cognition_prompt_selection.py`.
+  Public API names:
+  - `CognitionPromptStage`
+  - `CognitionPromptVariant`
+  - `CognitionPromptSelection`
+  - `CognitionPromptSelectionError`
+  - `select_cognition_prompt_variant`
+- Added
+  `src/kazusa_ai_chatbot/nodes/persona_supervisor2_cognition_output_contracts.py`.
+  Public API names:
+  - `CognitionOutputContractError`
+  - `validate_cognition_output_contract`
+- Active variant name: `text_chat_user_message`.
+
+Focused verification command:
+
+```powershell
+venv\Scripts\python -m pytest tests\test_multi_source_cognition_stage_03_prompt_selection.py -q
+```
+
+Result: 36 passed in 0.07s.
+
+Static verification command:
+
+```powershell
+venv\Scripts\python -m py_compile src\kazusa_ai_chatbot\nodes\persona_supervisor2_cognition_prompt_selection.py src\kazusa_ai_chatbot\nodes\persona_supervisor2_cognition_output_contracts.py tests\test_multi_source_cognition_stage_03_prompt_selection.py
+```
+
+Result: exit code 0.
+
+Stage 3 handler wiring completed:
+
+- Changed L1/L2/L3 handler files:
+  - `src/kazusa_ai_chatbot/nodes/persona_supervisor2_cognition_l1.py`
+  - `src/kazusa_ai_chatbot/nodes/persona_supervisor2_cognition_l2.py`
+  - `src/kazusa_ai_chatbot/nodes/persona_supervisor2_cognition_l3.py`
+- Each LLM-backed handler now calls `select_cognition_prompt_variant(...)`,
+  maps `text_chat_user_message` to the existing prompt constant, and calls
+  `validate_cognition_output_contract(...)` immediately before returning the
+  normalized payload.
+- `tests/test_multi_source_cognition_stage_00_regression_baseline.py` extends
+  the prompt-render baseline with selector-call assertions and absence
+  assertions for `prompt_key`, `trigger_source`, and `input_sources`.
+
+Expected prompt-render red command before wiring:
+
+```powershell
+venv\Scripts\python -m pytest tests\test_multi_source_cognition_stage_00_regression_baseline.py::test_existing_cognition_and_dialog_prompts_render_with_mocked_llms -q
+```
+
+Result: 1 failed in 2.18s. The failure was the expected `AttributeError`
+because `persona_supervisor2_cognition_l1` did not yet expose
+`select_cognition_prompt_variant`.
+
+Focused Stage 03 verification command after wiring:
+
+```powershell
+venv\Scripts\python -m pytest tests\test_multi_source_cognition_stage_03_prompt_selection.py -q
+```
+
+Result: 36 passed in 0.07s.
+
+Prompt-render verification command after wiring:
+
+```powershell
+venv\Scripts\python -m pytest tests\test_multi_source_cognition_stage_00_regression_baseline.py::test_existing_cognition_and_dialog_prompts_render_with_mocked_llms -q
+```
+
+Result: 1 passed in 1.96s.
+
+Syntax verification command:
+
+```powershell
+venv\Scripts\python -m py_compile src\kazusa_ai_chatbot\nodes\persona_supervisor2_cognition_prompt_selection.py src\kazusa_ai_chatbot\nodes\persona_supervisor2_cognition_output_contracts.py src\kazusa_ai_chatbot\nodes\persona_supervisor2_cognition_l1.py src\kazusa_ai_chatbot\nodes\persona_supervisor2_cognition_l2.py src\kazusa_ai_chatbot\nodes\persona_supervisor2_cognition_l3.py tests\test_multi_source_cognition_stage_03_prompt_selection.py tests\test_multi_source_cognition_stage_00_regression_baseline.py
+```
+
+Result: exit code 0.
+
+Prompt fingerprint guard after handler wiring: exit code 0. All nine prompt
+constant digests and lengths still match the `Prompt Text Fingerprint Guard`.
+
+Stage 4 inactive reference notes added:
+
+- Added
+  `development_plans/reference/multi_source_cognition_stage_03_inactive_prompt_variant_notes.md`.
+- The reference note covers only inactive future direction for
+  `reflection_signal` with `reflection_artifact` and `internal_thought` with
+  `internal_monologue`. It contains no production prompt text and states that
+  it does not runtime-enable those labels or authorize future stage work.
+
+Static verification commands:
+
+```powershell
+rg -n "multi_source_cognition_stage_03_inactive_prompt_variant_notes" src
+rg -n "reflection_signal|internal_thought|image_observation|audio_observation|scheduled_recall|system_probe" src\kazusa_ai_chatbot\nodes\persona_supervisor2_cognition_l1.py src\kazusa_ai_chatbot\nodes\persona_supervisor2_cognition_l2.py src\kazusa_ai_chatbot\nodes\persona_supervisor2_cognition_l3.py
+rg -n "reflection_signal|internal_thought|image_observation|audio_observation|scheduled_recall|system_probe" src\kazusa_ai_chatbot\nodes\persona_supervisor2_cognition_prompt_selection.py
+```
+
+Result: all three commands returned exit code 1 with zero matches, which is the
+expected Stage 4 result.
+
+Stage 5 regression gates completed:
+
+```powershell
+venv\Scripts\python -m pytest tests\test_multi_source_cognition_stage_03_prompt_selection.py
+```
+
+Result: 36 passed in 0.07s.
+
+```powershell
+venv\Scripts\python -m pytest tests\test_cognitive_episode_contract.py
+```
+
+Result: 15 passed in 0.05s.
+
+```powershell
+venv\Scripts\python -m pytest tests\test_multi_source_cognition_stage_02_chat_episode_migration.py
+```
+
+Result: 5 passed in 2.28s.
+
+```powershell
+venv\Scripts\python -m pytest tests\test_multi_source_cognition_stage_00_regression_baseline.py
+```
+
+Result: 11 passed in 2.05s.
+
+```powershell
+venv\Scripts\python -m pytest tests\test_cognition_clarification_consumers.py tests\test_cognition_interaction_style_context.py
+```
+
+First result: 3 failed, 4 passed in 1.82s. The failures were stale adjacent
+unit fixtures calling L2/L3 handlers directly without the Stage 02 required
+`cognitive_episode` state. No production fallback was added. The test fixtures
+in `tests/test_cognition_clarification_consumers.py` and
+`tests/test_cognition_interaction_style_context.py` were updated to carry valid
+text-chat `CognitiveEpisode` objects.
+
+```powershell
+venv\Scripts\python -m py_compile tests\test_cognition_clarification_consumers.py tests\test_cognition_interaction_style_context.py
+```
+
+Result: exit code 0.
+
+```powershell
+venv\Scripts\python -m pytest tests\test_cognition_clarification_consumers.py tests\test_cognition_interaction_style_context.py
+```
+
+Rerun result: 7 passed in 1.67s.
+
+```powershell
+venv\Scripts\python -m pytest tests\test_cognition_live_llm_prompt_contracts.py -m "not live_llm"
+```
+
+Result: exit code 1 with 17 deselected and 0 selected in 1.62s. This is the
+documented live-only module case from `Verification`; no live LLM tests were
+run.
+
+Static checks:
+
+```powershell
+venv\Scripts\python -m py_compile src\kazusa_ai_chatbot\nodes\persona_supervisor2_cognition_prompt_selection.py src\kazusa_ai_chatbot\nodes\persona_supervisor2_cognition_output_contracts.py src\kazusa_ai_chatbot\nodes\persona_supervisor2_cognition_l1.py src\kazusa_ai_chatbot\nodes\persona_supervisor2_cognition_l2.py src\kazusa_ai_chatbot\nodes\persona_supervisor2_cognition_l3.py tests\test_multi_source_cognition_stage_03_prompt_selection.py tests\test_multi_source_cognition_stage_00_regression_baseline.py tests\test_cognition_clarification_consumers.py tests\test_cognition_interaction_style_context.py
+```
+
+Result: exit code 0.
+
+```powershell
+git diff --check
+```
+
+Result: exit code 0. Git reported LF-to-CRLF working-copy warnings only; no
+whitespace errors.
+
+```powershell
+rg -n "reflection_signal|internal_thought|image_observation|audio_observation|scheduled_recall|system_probe" src\kazusa_ai_chatbot\nodes\persona_supervisor2_cognition_l1.py src\kazusa_ai_chatbot\nodes\persona_supervisor2_cognition_l2.py src\kazusa_ai_chatbot\nodes\persona_supervisor2_cognition_l3.py
+rg -n "reflection_signal|internal_thought|image_observation|audio_observation|scheduled_recall|system_probe" src\kazusa_ai_chatbot\nodes\persona_supervisor2_cognition_prompt_selection.py
+```
+
+Result: both commands returned exit code 1 with zero matches.
+
+```powershell
+rg -n "cognitive_episode|prompt_key|trigger_source|input_sources" tests\test_multi_source_cognition_stage_00_regression_baseline.py
+```
+
+Result: exit code 0. Matches were classified as valid Stage 02 episode fixture
+construction, text-chat episode contract assertions, prompt human-message
+payload absence assertions, and Stage 03 selector tracking assertions. No match
+adds `cognitive_episode`, `prompt_key`, `trigger_source`, or `input_sources` to
+an LLM human-message payload.
+
+Prompt fingerprint guard after final verification: exit code 0. All nine prompt
+constant digests and lengths still match the `Prompt Text Fingerprint Guard`.
+
+Diff surface confirmation:
+
+- Runtime source changes are limited to the approved cognition L1/L2/L3 files
+  and the two new cognition contract modules.
+- No RAG, dialog, consolidation, persistence, adapter, scheduler, database, or
+  service file was modified.
+- The only additional code test files touched outside the original Stage 03
+  focused/baseline tests are adjacent cognition test fixtures needed to carry
+  the now-required Stage 02 `cognitive_episode` state into direct handler
+  calls.
+
+Stage 6 lifecycle records updated:
+
+- This plan status is `completed`.
+- Parent ledger row in
+  `development_plans/active/short_term/multi_source_cognition_architecture_plan.md`
+  marks `stage_03` as `completed`.
+- Registry row in `development_plans/README.md` marks the Stage 03 plan as
+  `completed | completed`.
+- Stage 04 handoff remains the `Stage 04 Handoff` section above plus this
+  execution evidence.
+
+Post-review cleanup:
+
+- Inlined `_raise_selection_error(...)` and `_raise_output_contract_error(...)`
+  into direct `raise CognitionPromptSelectionError(...)` and
+  `raise CognitionOutputContractError(...)` statements to remove thin-wrapper
+  private helpers.
+- Updated the selector static-check wording to document the actual closed
+  allow-list behavior: zero future-source-label matches are valid and
+  preferred.
+
+Post-review verification:
+
+```powershell
+venv\Scripts\python -m py_compile src\kazusa_ai_chatbot\nodes\persona_supervisor2_cognition_prompt_selection.py src\kazusa_ai_chatbot\nodes\persona_supervisor2_cognition_output_contracts.py
+```
+
+Result: exit code 0.
+
+```powershell
+rg -n "_raise_selection_error|_raise_output_contract_error|NoReturn" src\kazusa_ai_chatbot\nodes\persona_supervisor2_cognition_prompt_selection.py src\kazusa_ai_chatbot\nodes\persona_supervisor2_cognition_output_contracts.py
+rg -n "reflection_signal|internal_thought|image_observation|audio_observation|scheduled_recall|system_probe" src\kazusa_ai_chatbot\nodes\persona_supervisor2_cognition_prompt_selection.py
+```
+
+Result: both commands returned exit code 1 with zero matches.
+
+```powershell
+venv\Scripts\python -m pytest tests\test_multi_source_cognition_stage_03_prompt_selection.py tests\test_multi_source_cognition_stage_00_regression_baseline.py tests\test_multi_source_cognition_stage_02_chat_episode_migration.py tests\test_cognitive_episode_contract.py tests\test_cognition_clarification_consumers.py tests\test_cognition_interaction_style_context.py
+```
+
+Result: 74 passed in 3.05s.

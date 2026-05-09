@@ -6,6 +6,12 @@ from kazusa_ai_chatbot.config import (
     COGNITION_LLM_BASE_URL,
     COGNITION_LLM_MODEL,
 )
+from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition_output_contracts import (
+    validate_cognition_output_contract,
+)
+from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition_prompt_selection import (
+    select_cognition_prompt_variant,
+)
 from kazusa_ai_chatbot.nodes.persona_supervisor2_schema import CognitionState
 from kazusa_ai_chatbot.nodes.referent_resolution import (
     needs_referent_clarification,
@@ -333,8 +339,15 @@ async def call_cognition_consciousness(state: CognitionState) -> CognitionState:
     affinity_block = build_affinity_block(state["user_profile"]["affinity"])
     current_user_bundle = _current_user_rag_bundle(state)
     user_memory_context = current_user_bundle["user_memory_context"]
+    selection = select_cognition_prompt_variant(
+        episode=state["cognitive_episode"],
+        stage="l2a_consciousness",
+    )
+    prompt_template = {
+        "text_chat_user_message": _COGNITION_CONSCIOUSNESS_PROMPT,
+    }[selection["variant"]]
 
-    system_prompt = SystemMessage(content=_COGNITION_CONSCIOUSNESS_PROMPT.format(
+    system_prompt = SystemMessage(content=prompt_template.format(
         character_name=state["character_profile"]["name"],
         character_mbti=state["character_profile"]["personality_brief"]["mbti"],
     ))
@@ -390,6 +403,10 @@ async def call_cognition_consciousness(state: CognitionState) -> CognitionState:
         "character_intent": character_intent,
         "logical_stance": logical_stance,
     }
+    validate_cognition_output_contract(
+        stage="l2a_consciousness",
+        payload=return_value,
+    )
     return return_value
 
 
@@ -598,6 +615,13 @@ async def call_boundary_core_agent(state: CognitionState) -> CognitionState:
     # Get attributes
     character_profile = state["character_profile"]
     boundary_profile = character_profile["boundary_profile"]
+    selection = select_cognition_prompt_variant(
+        episode=state["cognitive_episode"],
+        stage="l2b_boundary_core",
+    )
+    prompt_template = {
+        "text_chat_user_message": _BOUNDARY_CORE_PROMPT,
+    }[selection["variant"]]
 
     self_integrity = float(boundary_profile["self_integrity"])
     control_sensitivity = float(boundary_profile["control_sensitivity"])
@@ -613,7 +637,7 @@ async def call_boundary_core_agent(state: CognitionState) -> CognitionState:
         affinity_block["level"],
     )
 
-    system_prompt = SystemMessage(content=_BOUNDARY_CORE_PROMPT.format(
+    system_prompt = SystemMessage(content=prompt_template.format(
         character_name=state["character_profile"]["name"],
         self_integrity_description=get_self_integrity_description(self_integrity),
         control_sensitivity_description=get_control_sensitivity_description(control_sensitivity),
@@ -673,6 +697,10 @@ async def call_boundary_core_agent(state: CognitionState) -> CognitionState:
             "trajectory": trajectory,
         }
     }
+    validate_cognition_output_contract(
+        stage="l2b_boundary_core",
+        payload=return_value,
+    )
     return return_value
 
 
@@ -829,7 +857,15 @@ _judgement_core_llm = get_llm(
     api_key=COGNITION_LLM_API_KEY,
 )
 async def call_judgment_core_agent(state: CognitionState) -> CognitionState:
-    system_prompt = SystemMessage(content=_JUDGEMENT_CORE_PROMPT.format(
+    selection = select_cognition_prompt_variant(
+        episode=state["cognitive_episode"],
+        stage="l2c_judgment_core",
+    )
+    prompt_template = {
+        "text_chat_user_message": _JUDGEMENT_CORE_PROMPT,
+    }[selection["variant"]]
+
+    system_prompt = SystemMessage(content=prompt_template.format(
         character_name=state["character_profile"]["name"],
     ))
 
@@ -890,4 +926,8 @@ async def call_judgment_core_agent(state: CognitionState) -> CognitionState:
         "character_intent": character_intent,
         "judgment_note": judgment_note,
     }
+    validate_cognition_output_contract(
+        stage="l2c_judgment_core",
+        payload=return_value,
+    )
     return return_value

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 import json
 from pathlib import Path
 from typing import Any
@@ -11,11 +12,15 @@ import pytest
 from fastapi import BackgroundTasks
 
 from kazusa_ai_chatbot import service as service_module
+from kazusa_ai_chatbot.cognition_episode import build_text_chat_cognitive_episode
 from kazusa_ai_chatbot.nodes import dialog_agent as dialog_module
 from kazusa_ai_chatbot.nodes import persona_supervisor2 as supervisor_module
 from kazusa_ai_chatbot.nodes import persona_supervisor2_cognition_l1 as l1_module
 from kazusa_ai_chatbot.nodes import persona_supervisor2_cognition_l2 as l2_module
 from kazusa_ai_chatbot.nodes import persona_supervisor2_cognition_l3 as l3_module
+from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition_prompt_selection import (
+    select_cognition_prompt_variant,
+)
 from kazusa_ai_chatbot.nodes.persona_supervisor2_rag_projection import (
     project_known_facts,
 )
@@ -331,6 +336,32 @@ def _cognition_state() -> dict[str, Any]:
             },
         }
     )
+    state["cognitive_episode"] = build_text_chat_cognitive_episode(
+        episode_id="user_message:debug:direct:message-1",
+        percept_id="user_message:debug:direct:message-1:dialog_text:0",
+        timestamp=state["timestamp"],
+        time_context=state["time_context"],
+        user_input=state["user_input"],
+        platform=state["platform"],
+        platform_channel_id=state["platform_channel_id"],
+        channel_type=state["channel_type"],
+        platform_message_id=state["platform_message_id"],
+        platform_user_id=state["platform_user_id"],
+        global_user_id=state["global_user_id"],
+        user_name=state["user_name"],
+        active_turn_platform_message_ids=state[
+            "active_turn_platform_message_ids"
+        ],
+        active_turn_conversation_row_ids=state[
+            "active_turn_conversation_row_ids"
+        ],
+        debug_modes=state["debug_modes"],
+        output_mode="visible_reply",
+        target_addressed_user_ids=state["prompt_message_context"][
+            "addressed_to_global_user_ids"
+        ],
+        target_broadcast=state["prompt_message_context"]["broadcast"],
+    )
     return state
 
 
@@ -394,7 +425,40 @@ def _assert_prompt_messages(
     payload = json.loads(human_content)
     assert required_payload_keys <= set(payload)
     assert "cognitive_episode" not in payload
+    assert "prompt_key" not in payload
+    assert "trigger_source" not in payload
+    assert "input_sources" not in payload
     return payload
+
+
+def _selector_tracker() -> tuple[list[dict[str, Any]], Callable[..., Any]]:
+    """Build a selector wrapper that records cognition prompt decisions.
+
+    Returns:
+        A mutable list of selector calls and a selector-compatible callable.
+    """
+    selector_calls: list[dict[str, Any]] = []
+
+    def _tracked_selector(*, episode: Any, stage: Any) -> dict[str, Any]:
+        """Record the selected prompt variant and return the real selection.
+
+        Args:
+            episode: Cognitive episode passed by the handler.
+            stage: Cognition stage requesting a prompt variant.
+
+        Returns:
+            Prompt selection returned by the production selector.
+        """
+        selection = select_cognition_prompt_variant(
+            episode=episode,
+            stage=stage,
+        )
+        selector_calls.append(dict(selection))
+        return_value = selection
+        return return_value
+
+    return_value = selector_calls, _tracked_selector
+    return return_value
 
 
 async def _reset_queue_state() -> None:
@@ -1044,6 +1108,22 @@ async def test_existing_cognition_and_dialog_prompts_render_with_mocked_llms(
 ) -> None:
     """Existing L1/L2/L3 and dialog prompt paths should render deterministically."""
     state = _cognition_state()
+    selector_calls, tracked_selector = _selector_tracker()
+    monkeypatch.setattr(
+        l1_module,
+        "select_cognition_prompt_variant",
+        tracked_selector,
+    )
+    monkeypatch.setattr(
+        l2_module,
+        "select_cognition_prompt_variant",
+        tracked_selector,
+    )
+    monkeypatch.setattr(
+        l3_module,
+        "select_cognition_prompt_variant",
+        tracked_selector,
+    )
 
     subconscious_llm = _CaptureLLM({
         "emotional_appraisal": "steady",
@@ -1180,6 +1260,44 @@ async def test_existing_cognition_and_dialog_prompts_render_with_mocked_llms(
         visual_llm,
         {"prompt_message_context", "content_anchors", "conversation_progress"},
     )
+    assert [selection["stage"] for selection in selector_calls] == [
+        "l1_subconscious",
+        "l2a_consciousness",
+        "l2b_boundary_core",
+        "l2c_judgment_core",
+        "l3_contextual_agent",
+        "l3_style_agent",
+        "l3_content_anchor_agent",
+        "l3_preference_adapter",
+        "l3_visual_agent",
+    ]
+    assert {selection["variant"] for selection in selector_calls} == {
+        "text_chat_user_message"
+    }
+    assert [
+        selection["prompt_key"]
+        for selection in selector_calls
+    ] == [
+        f"{selection['stage']}.text_chat_user_message"
+        for selection in selector_calls
+    ]
+    assert {selection["trigger_source"] for selection in selector_calls} == {
+        "user_message"
+    }
+    assert [selection["input_sources"] for selection in selector_calls] == [
+        ["dialog_text"],
+        ["dialog_text"],
+        ["dialog_text"],
+        ["dialog_text"],
+        ["dialog_text"],
+        ["dialog_text"],
+        ["dialog_text"],
+        ["dialog_text"],
+        ["dialog_text"],
+    ]
+    assert {selection["output_mode"] for selection in selector_calls} == {
+        "visible_reply"
+    }
 
     dialog_state = _dialog_state()
     generator_llm = _CaptureLLM({"final_dialog": ["ok"]})

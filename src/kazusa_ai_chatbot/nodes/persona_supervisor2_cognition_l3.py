@@ -3,6 +3,12 @@
 Contains the MBTI expression-willingness helper and L3/L4 LLM calls.
 """
 from kazusa_ai_chatbot.config import COGNITION_LLM_API_KEY, COGNITION_LLM_BASE_URL, COGNITION_LLM_MODEL
+from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition_output_contracts import (
+    validate_cognition_output_contract,
+)
+from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition_prompt_selection import (
+    select_cognition_prompt_variant,
+)
 from kazusa_ai_chatbot.nodes.persona_supervisor2_schema import CognitionState
 from kazusa_ai_chatbot.nodes.referent_resolution import normalize_referents
 from kazusa_ai_chatbot.utils import build_affinity_block, get_llm, log_list_preview, log_preview, parse_llm_json_output
@@ -279,6 +285,13 @@ _contextual_agent_llm = get_llm(
 async def call_contextual_agent(state: CognitionState) -> CognitionState:
     character_profile = state["character_profile"]
     boundary_profile = character_profile["boundary_profile"]
+    selection = select_cognition_prompt_variant(
+        episode=state["cognitive_episode"],
+        stage="l3_contextual_agent",
+    )
+    prompt_template = {
+        "text_chat_user_message": _CONTEXTUAL_AGENT_PROMPT,
+    }[selection["variant"]]
 
     mbti = character_profile["personality_brief"]["mbti"]
     control_sensitivity = float(boundary_profile["control_sensitivity"])
@@ -287,7 +300,7 @@ async def call_contextual_agent(state: CognitionState) -> CognitionState:
     compliance_strategy = boundary_profile["compliance_strategy"]
     boundary_recovery = boundary_profile["boundary_recovery"]
 
-    system_prompt = SystemMessage(content=_CONTEXTUAL_AGENT_PROMPT.format(
+    system_prompt = SystemMessage(content=prompt_template.format(
         character_name=character_profile["name"],
         mbti_expression_willingness=get_mbti_expression_willingness(mbti),
         boundary_control_sensitivity=get_control_sensitivity_description(control_sensitivity),
@@ -342,6 +355,10 @@ async def call_contextual_agent(state: CognitionState) -> CognitionState:
         "relational_dynamic": relational_dynamic,
         "expression_willingness": expression_willingness,
     }
+    validate_cognition_output_contract(
+        stage="l3_contextual_agent",
+        payload=return_value,
+    )
     return return_value
 
 
@@ -445,8 +462,15 @@ _style_agent_llm = get_llm(
 )
 async def call_style_agent(state: CognitionState) -> CognitionState:
     character_profile = state["character_profile"]
+    selection = select_cognition_prompt_variant(
+        episode=state["cognitive_episode"],
+        stage="l3_style_agent",
+    )
+    prompt_template = {
+        "text_chat_user_message": _STYLE_AGENT_PROMPT,
+    }[selection["variant"]]
 
-    system_prompt = SystemMessage(content=_STYLE_AGENT_PROMPT.format(
+    system_prompt = SystemMessage(content=prompt_template.format(
         character_name=character_profile["name"],
         character_logic=character_profile["personality_brief"]["logic"],
         character_tempo=character_profile["personality_brief"]["tempo"],
@@ -503,6 +527,10 @@ async def call_style_agent(state: CognitionState) -> CognitionState:
         "linguistic_style": linguistic_style,
         "forbidden_phrases": forbidden_phrases,
     }
+    validate_cognition_output_contract(
+        stage="l3_style_agent",
+        payload=return_value,
+    )
     return return_value
 
 
@@ -673,8 +701,15 @@ _content_anchor_agent_llm = get_llm(
 )
 async def call_content_anchor_agent(state: CognitionState) -> CognitionState:
     character_profile = state["character_profile"]
+    selection = select_cognition_prompt_variant(
+        episode=state["cognitive_episode"],
+        stage="l3_content_anchor_agent",
+    )
+    prompt_template = {
+        "text_chat_user_message": _CONTENT_ANCHOR_AGENT_PROMPT,
+    }[selection["variant"]]
 
-    system_prompt = SystemMessage(content=_CONTENT_ANCHOR_AGENT_PROMPT.format(
+    system_prompt = SystemMessage(content=prompt_template.format(
         character_name=character_profile["name"],
     ))
 
@@ -705,6 +740,10 @@ async def call_content_anchor_agent(state: CognitionState) -> CognitionState:
     return_value = {
         "content_anchors": content_anchors,
     }
+    validate_cognition_output_contract(
+        stage="l3_content_anchor_agent",
+        payload=return_value,
+    )
     return return_value
 
 
@@ -809,8 +848,15 @@ async def call_preference_adapter(state: CognitionState) -> CognitionState:
     decontexualized_input = state["decontexualized_input"]
     current_user_bundle = _current_user_rag_bundle(state)
     user_memory_context = current_user_bundle["user_memory_context"]
+    selection = select_cognition_prompt_variant(
+        episode=state["cognitive_episode"],
+        stage="l3_preference_adapter",
+    )
+    prompt_template = {
+        "text_chat_user_message": _PREFERENCE_ADAPTER_PROMPT,
+    }[selection["variant"]]
 
-    system_prompt = SystemMessage(content=_PREFERENCE_ADAPTER_PROMPT.format(
+    system_prompt = SystemMessage(content=prompt_template.format(
         character_name=state["character_profile"]["name"],
     ))
 
@@ -860,6 +906,10 @@ async def call_preference_adapter(state: CognitionState) -> CognitionState:
             if isinstance(item, str) and item.strip()
         ],
     }
+    validate_cognition_output_contract(
+        stage="l3_preference_adapter",
+        payload=return_value,
+    )
     return return_value
 
 
@@ -980,6 +1030,13 @@ _visual_agent_llm = get_llm(
 async def call_visual_agent(state: CognitionState) -> CognitionState:
     character_profile = state["character_profile"]
     boundary_profile = character_profile["boundary_profile"]
+    selection = select_cognition_prompt_variant(
+        episode=state["cognitive_episode"],
+        stage="l3_visual_agent",
+    )
+    prompt_template = {
+        "text_chat_user_message": _VISUAL_AGENT_PROMPT,
+    }[selection["variant"]]
 
     control_sensitivity = float(boundary_profile["control_sensitivity"])
     control_intimacy_misread = float(boundary_profile["control_intimacy_misread"])
@@ -987,7 +1044,7 @@ async def call_visual_agent(state: CognitionState) -> CognitionState:
     compliance_strategy = boundary_profile["compliance_strategy"]
     boundary_recovery = boundary_profile["boundary_recovery"]
 
-    system_prompt = SystemMessage(content=_VISUAL_AGENT_PROMPT.format(
+    system_prompt = SystemMessage(content=prompt_template.format(
         character_name=character_profile["name"],
         boundary_control_sensitivity=get_control_sensitivity_description(control_sensitivity),
         boundary_control_intimacy_misread=get_control_intimacy_misread_description(control_intimacy_misread),
@@ -1060,6 +1117,10 @@ async def call_visual_agent(state: CognitionState) -> CognitionState:
         "gaze_direction": gaze_direction,
         "visual_vibe": visual_vibe,
     }
+    validate_cognition_output_contract(
+        stage="l3_visual_agent",
+        payload=return_value,
+    )
     return return_value
 
 
