@@ -1,0 +1,180 @@
+{
+  "cases": [
+    {
+      "case_id": "private_text",
+      "platform": "qq",
+      "channel_type": "private",
+      "platform_channel_id": "private-chan-1",
+      "platform_message_id": "msg-private-1",
+      "platform_user_id": "platform-user-1",
+      "display_name": "Test User",
+      "body_text": "hello there",
+      "addressed_to_global_user_ids": ["character-1"],
+      "broadcast": false
+    },
+    {
+      "case_id": "group_text",
+      "platform": "qq",
+      "channel_type": "group",
+      "platform_channel_id": "group-chan-1",
+      "platform_message_id": "msg-group-1",
+      "platform_user_id": "platform-user-1",
+      "display_name": "Group User",
+      "body_text": "group message",
+      "addressed_to_global_user_ids": [],
+      "broadcast": true
+    },
+    {
+      "case_id": "reply",
+      "platform": "qq",
+      "channel_type": "group",
+      "platform_channel_id": "group-chan-1",
+      "platform_message_id": "msg-reply-1",
+      "platform_user_id": "platform-user-1",
+      "display_name": "Reply User",
+      "body_text": "replying to this",
+      "addressed_to_global_user_ids": ["character-1"],
+      "broadcast": false,
+      "reply": {
+        "platform_message_id": "assistant-msg-1",
+        "platform_user_id": "bot-1",
+        "global_user_id": "character-1",
+        "display_name": "Character",
+        "excerpt": "previous answer",
+        "derivation": "platform_native"
+      }
+    },
+    {
+      "case_id": "silence",
+      "platform": "qq",
+      "channel_type": "private",
+      "platform_channel_id": "private-chan-1",
+      "platform_message_id": "msg-silence-1",
+      "platform_user_id": "platform-user-1",
+      "display_name": "Silent User",
+      "body_text": "no response needed",
+      "addressed_to_global_user_ids": ["character-1"],
+      "broadcast": false
+    },
+    {
+      "case_id": "rag_skip",
+      "platform": "qq",
+      "channel_type": "group",
+      "platform_channel_id": "group-chan-1",
+      "platform_message_id": "msg-rag-skip-1",
+      "platform_user_id": "platform-user-1",
+      "display_name": "Rag Skip User",
+      "body_text": "what does that mean",
+      "addressed_to_global_user_ids": ["character-1"],
+      "broadcast": false
+    },
+    {
+      "case_id": "rag_hit",
+      "platform": "qq",
+      "channel_type": "private",
+      "platform_channel_id": "private-chan-1",
+      "platform_message_id": "msg-rag-hit-1",
+      "platform_user_id": "platform-user-1",
+      "display_name": "Rag Hit User",
+      "body_text": "what did we decide",
+      "addressed_to_global_user_ids": ["character-1"],
+      "broadcast": false
+    },
+    {
+      "case_id": "think_only",
+      "platform": "debug",
+      "channel_type": "private",
+      "platform_channel_id": "debug-private-1",
+      "platform_message_id": "msg-think-only-1",
+      "platform_user_id": "platform-user-1",
+      "display_name": "Think User",
+      "body_text": "think through this",
+      "addressed_to_global_user_ids": ["character-1"],
+      "broadcast": false,
+      "debug_modes": {"think_only": true}
+    },
+    {
+      "case_id": "no_remember",
+      "platform": "debug",
+      "channel_type": "private",
+      "platform_channel_id": "debug-private-1",
+      "platform_message_id": "msg-no-remember-1",
+      "platform_user_id": "platform-user-1",
+      "display_name": "No Remember User",
+      "body_text": "do not remember this",
+      "addressed_to_global_user_ids": ["character-1"],
+      "broadcast": false,
+      "debug_modes": {"no_remember": true}
+    },
+    {
+      "case_id": "listen_only",
+      "platform": "debug",
+      "channel_type": "group",
+      "platform_channel_id": "debug-group-1",
+      "platform_message_id": "msg-listen-only-1",
+      "platform_user_id": "platform-user-1",
+      "display_name": "Listen User",
+      "body_text": "ambient group line",
+      "addressed_to_global_user_ids": [],
+      "broadcast": true,
+      "debug_modes": {"listen_only": true}
+    }
+  ],
+  "frozen_evidence_corpus": {
+    "corpus_id": "stage_00_synthetic_rag_equivalence_v1",
+    "description": "Small synthetic RAG2 fact rows for future adapter-equivalence checks.",
+    "known_facts": [
+      {
+        "slot": "Memory-evidence: retrieve current user continuity",
+        "agent": "memory_evidence_agent",
+        "resolved": true,
+        "summary": "User keeps a lightweight weekly planning habit.",
+        "raw_result": {
+          "projection_payload": {
+            "memory_rows": [
+              {
+                "unit_id": "unit-plan-1",
+                "source_system": "user_memory_units",
+                "scope_type": "user_continuity",
+                "scope_global_user_id": "global-user-1",
+                "authority": "scoped_continuity",
+                "truth_status": "character_lore_or_interaction_continuity",
+                "origin": "consolidated_interaction",
+                "content": "The user likes short weekly planning checkpoints."
+              }
+            ]
+          }
+        },
+        "attempts": 1,
+        "cache": {"enabled": false}
+      },
+      {
+        "slot": "Conversation-evidence: retrieve last decision",
+        "agent": "conversation_evidence_agent",
+        "resolved": true,
+        "summary": "The prior turn agreed to keep the plan short.",
+        "raw_result": {
+          "projection_payload": {
+            "summaries": ["Prior discussion settled on a short plan."]
+          }
+        },
+        "attempts": 1,
+        "cache": {"enabled": false}
+      },
+      {
+        "slot": "Web-evidence: retrieve public reference",
+        "agent": "web_search_agent2",
+        "resolved": true,
+        "summary": "External source confirms the reference URL exists.",
+        "raw_result": "Reference page at https://example.com/stage-00 confirms the topic.",
+        "attempts": 1,
+        "cache": {"enabled": false}
+      }
+    ],
+    "expected_projection": {
+      "answer": "Use current continuity and prior decision evidence.",
+      "current_user_id": "global-user-1",
+      "character_user_id": "character-1"
+    }
+  }
+}

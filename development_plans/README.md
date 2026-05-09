@@ -38,7 +38,10 @@ long_term/todo.md
 
 | Plan | Status | Execution |
 |---|---|---|
-| [proactive_reflection_cognition_stage2_plan.md](active/short_term/proactive_reflection_cognition_stage2_plan.md) | draft | blocked |
+| [multi_source_cognition_architecture_plan.md](active/short_term/multi_source_cognition_architecture_plan.md) | draft | blocked |
+| [multi_source_cognition_architecture_stage_00_current_chat_workflow_regression_baseline_plan.md](active/short_term/multi_source_cognition_architecture_stage_00_current_chat_workflow_regression_baseline_plan.md) | completed | completed |
+| [multi_source_cognition_architecture_stage_01_cognitive_episode_contract_plan.md](active/short_term/multi_source_cognition_architecture_stage_01_cognitive_episode_contract_plan.md) | draft | blocked |
+| [multi_source_cognition_architecture_stage_02_chat_cognitive_episode_migration_plan.md](active/short_term/multi_source_cognition_architecture_stage_02_chat_cognitive_episode_migration_plan.md) | draft | blocked |
 
 ## Active Bugfix Plans
 
@@ -67,7 +70,7 @@ superseded history.
 | Outcome | Plans |
 |---|---|
 | Completed by actual implementation | `character_local_time_context_plan.md`, `character_self_words_retrieval_delivery_receipt_plan.md`, `conversation_progress_phase3_quality_plan.md`, `conversation_progress_state_plan.md`, `get_db_private_boundary_plan.md`, `group_chat_noise_relevance_plan.md`, `llm_routing_migration_plan.md`, `memory_evidence_scoped_user_continuity_plan.md`, `native_shape_boundary_hardening_plan.md` |
-| Still unfinished as of 2026-05-08 | `character_profile_runtime_state_split_plan.md`, `proactive_reflection_cognition_stage2_plan.md` |
+| Still unfinished as of 2026-05-08 | `character_profile_runtime_state_split_plan.md` |
 | Superseded legacy drafts | `rag_supervisor2_inner_loop_agents_plan.md`, `short_circuit_early_stop_plan.md` |
 
 ## Archive
