@@ -589,7 +589,7 @@ Record after implementation:
   `venv\Scripts\python -m pytest` passed with
   `889 passed, 217 deselected` on branch creation.
 - Branch: `stage-05-consolidation-origin-metadata-threading`
-- Commit: pending final commit after evidence recording.
+- Commit: `de311a7` (`Implement multi-source cognition stage 05`).
 - Static compile:
   Full compile command
   `venv\Scripts\python -m py_compile src\kazusa_ai_chatbot\nodes\persona_supervisor2_consolidator_origin.py src\kazusa_ai_chatbot\nodes\persona_supervisor2_consolidator_schema.py src\kazusa_ai_chatbot\nodes\persona_supervisor2_consolidator.py tests\test_consolidation_origin_metadata.py tests\test_consolidator_efficiency.py`
