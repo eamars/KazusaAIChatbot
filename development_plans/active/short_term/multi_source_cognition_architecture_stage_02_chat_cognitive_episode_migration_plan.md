@@ -6,7 +6,7 @@
   `CognitiveEpisode` while preserving existing behavior through legacy field
   compatibility.
 - Plan class: medium
-- Status: approved
+- Status: completed
 - Mandatory skills: `development-plan-writing`, `local-llm-architecture`,
   `no-prepost-user-input`, `py-style`, `test-style-and-execution`, and
   `cjk-safety` if Python prompt or test strings with CJK content are edited.
@@ -24,8 +24,8 @@ Parent plan:
 
 Stage: `stage_02`
 
-Execution status: approved; the implementation agent may begin at Stage 1 of
-the `Progress Checklist`.
+Execution status: completed on 2026-05-09; implementation started on
+2026-05-09.
 
 ## Context
 
@@ -389,34 +389,34 @@ No call site may store the result under any other key.
 
 ## Progress Checklist
 
-- [ ] Stage 1 - focused Stage 02 tests added.
+- [x] Stage 1 - focused Stage 02 tests added.
   - Covers: `tests/test_multi_source_cognition_stage_02_chat_episode_migration.py`.
   - Verify: focused command fails only because approved Stage 02 symbols or
     state fields do not exist yet.
   - Evidence: record command and failure summary in `Execution Evidence`.
   - Handoff: next agent starts at Stage 2.
-  - Sign-off: `<agent/date>` after evidence is recorded.
-- [ ] Stage 2 - state schemas accept optional `cognitive_episode`.
+  - Sign-off: `Codex/2026-05-09` after evidence is recorded.
+- [x] Stage 2 - state schemas accept optional `cognitive_episode`.
   - Covers: `src/kazusa_ai_chatbot/state.py` and
     `src/kazusa_ai_chatbot/nodes/persona_supervisor2_schema.py`.
   - Verify: `tests/test_state.py` and `tests/test_persona_supervisor2_schema.py`.
   - Evidence: record changed fields and test output.
   - Handoff: reread this plan, then start Stage 3.
-  - Sign-off: `<agent/date>` after verification and evidence are recorded.
-- [ ] Stage 3 - service builds text-only user-message episode.
+  - Sign-off: `Codex/2026-05-09` after verification and evidence are recorded.
+- [x] Stage 3 - service builds text-only user-message episode.
   - Covers: `src/kazusa_ai_chatbot/service.py`.
   - Verify: focused Stage 02 service tests pass.
   - Evidence: record id/output-mode mapping test output.
   - Handoff: reread this plan, then start Stage 4.
-  - Sign-off: `<agent/date>` after verification and evidence are recorded.
-- [ ] Stage 4 - persona and cognition pass-through complete.
+  - Sign-off: `Codex/2026-05-09` after verification and evidence are recorded.
+- [x] Stage 4 - persona and cognition pass-through complete.
   - Covers: `src/kazusa_ai_chatbot/nodes/persona_supervisor2.py` and
     `src/kazusa_ai_chatbot/nodes/persona_supervisor2_cognition.py`.
   - Verify: focused pass-through tests pass.
   - Evidence: record pass-through assertion output.
   - Handoff: reread this plan, then start Stage 5.
-  - Sign-off: `<agent/date>` after verification and evidence are recorded.
-- [ ] Stage 5 - regression and non-consumption gates pass.
+  - Sign-off: `Codex/2026-05-09` after verification and evidence are recorded.
+- [x] Stage 5 - regression and non-consumption gates pass.
   - Covers: Stage 00 baseline, Stage 01 contract tests, static greps, and
     adjacent persona/service tests.
   - Verify: every command in `Verification` passes. The only acceptable
@@ -425,14 +425,14 @@ No call site may store the result under any other key.
     non-zero exit must be treated as a Stage 02 failure.
   - Evidence: record exact command results.
   - Handoff: next agent updates lifecycle records.
-  - Sign-off: `<agent/date>` after verification and evidence are recorded.
-- [ ] Stage 6 - lifecycle records updated.
+  - Sign-off: `Codex/2026-05-09` after verification and evidence are recorded.
+- [x] Stage 6 - lifecycle records updated.
   - Covers: this plan, parent ledger, and registry.
   - Verify: rows show Stage 02 completed and artifact paths are named.
   - Evidence: record parent ledger and registry confirmation.
   - Handoff: Stage 02 is complete; Stage 03 remains blocked until separately
     approved.
-  - Sign-off: `<agent/date>` after lifecycle updates are recorded.
+  - Sign-off: `Codex/2026-05-09` after lifecycle updates are recorded.
 
 ## Verification
 
@@ -548,4 +548,177 @@ deterministic graph state only. If any prompt-render or capture test shows
 
 ## Execution Evidence
 
-Draft only. No implementation has been executed from this plan.
+Approved before implementation. Implementation started on 2026-05-09 on branch
+`multi-source-stage-02-chat-episode-migration`.
+
+Stage 1 focused red tests added:
+
+- `tests/test_multi_source_cognition_stage_02_chat_episode_migration.py`
+  covers the private id helper contract, service episode construction,
+  debug-mode output mapping, persona pass-through, and cognition pass-through.
+- `tests/test_state.py` asserts `IMProcessState` exposes optional
+  `cognitive_episode`.
+- `tests/test_persona_supervisor2_schema.py` asserts `GlobalPersonaState` and
+  `CognitionState` expose optional `cognitive_episode`.
+
+Expected red command:
+
+```powershell
+venv\Scripts\python -m pytest tests\test_multi_source_cognition_stage_02_chat_episode_migration.py -q
+```
+
+Result: 5 failed in 2.39s. Failures were the expected Stage 02 missing-wiring
+failures: `_build_text_chat_episode_ids` absent, service graph state lacking
+`cognitive_episode`, persona state lacking `cognitive_episode`, and cognition
+node state lacking `cognitive_episode`.
+
+Stage 2 state schemas updated:
+
+- `src/kazusa_ai_chatbot/state.py` imports `CognitiveEpisode` and adds
+  `cognitive_episode: NotRequired[CognitiveEpisode]` to `IMProcessState`.
+- `src/kazusa_ai_chatbot/nodes/persona_supervisor2_schema.py` imports
+  `CognitiveEpisode` and adds `cognitive_episode:
+  NotRequired[CognitiveEpisode]` to `GlobalPersonaState` and `CognitionState`.
+
+Verification command:
+
+```powershell
+venv\Scripts\python -m pytest tests\test_state.py tests\test_persona_supervisor2_schema.py -q
+```
+
+Result: 27 passed in 1.73s.
+
+Stage 3 service construction updated:
+
+- `src/kazusa_ai_chatbot/service.py` imports `CognitiveEpisode` and
+  `build_text_chat_cognitive_episode`.
+- `src/kazusa_ai_chatbot/service.py` adds
+  `_build_text_chat_episode_ids(...)` with the approved episode/percept ID
+  fallback contract.
+- `_process_queued_chat_item(...)` computes `episode_output_mode` from
+  explicit debug flags only, builds the episode with
+  `build_text_chat_cognitive_episode(...)`, and stores it in
+  `initial_state["cognitive_episode"]`.
+
+Verification command:
+
+```powershell
+venv\Scripts\python -m pytest tests\test_multi_source_cognition_stage_02_chat_episode_migration.py::test_text_chat_episode_ids_follow_contract tests\test_multi_source_cognition_stage_02_chat_episode_migration.py::test_service_builds_text_chat_cognitive_episode tests\test_multi_source_cognition_stage_02_chat_episode_migration.py::test_service_maps_debug_modes_to_episode_output_mode -q
+```
+
+Result: 3 passed in 2.05s.
+
+Stage 4 persona and cognition pass-through updated:
+
+- `src/kazusa_ai_chatbot/nodes/persona_supervisor2.py` copies
+  `state.get("cognitive_episode")` into `initial_persona_state` as
+  `cognitive_episode` when present.
+- `src/kazusa_ai_chatbot/nodes/persona_supervisor2_cognition.py` copies
+  `state.get("cognitive_episode")` into cognition `initial_state` as
+  `cognitive_episode` when present.
+
+Verification command:
+
+```powershell
+venv\Scripts\python -m pytest tests\test_multi_source_cognition_stage_02_chat_episode_migration.py -q
+```
+
+Result: 5 passed in 2.08s.
+
+Stage 5 regression and non-consumption gates passed:
+
+- Stage 00 artifacts used as gates:
+  `tests/test_multi_source_cognition_stage_00_regression_baseline.py` and
+  `tests/fixtures/multi_source_cognition_stage_00_cases.json`.
+- Stage 01 artifacts used as gates:
+  `src/kazusa_ai_chatbot/cognition_episode.py` and
+  `tests/test_cognitive_episode_contract.py`.
+- `tests/test_multi_source_cognition_stage_00_regression_baseline.py` now
+  asserts service graph state includes a text chat episode while legacy
+  service fields and debug-mode behavior remain unchanged.
+
+Verification commands:
+
+```powershell
+venv\Scripts\python -m pytest tests\test_multi_source_cognition_stage_02_chat_episode_migration.py
+```
+
+Result: 5 passed in 2.06s.
+
+```powershell
+venv\Scripts\python -m pytest tests\test_cognitive_episode_contract.py
+```
+
+Result: 15 passed in 0.05s.
+
+```powershell
+venv\Scripts\python -m pytest tests\test_multi_source_cognition_stage_00_regression_baseline.py
+```
+
+Result: 11 passed in 2.08s.
+
+```powershell
+venv\Scripts\python -m pytest tests\test_state.py tests\test_persona_supervisor2_schema.py
+```
+
+Result: 27 passed in 1.71s.
+
+```powershell
+venv\Scripts\python -m pytest tests\test_persona_supervisor2.py tests\test_service_background_consolidation.py
+```
+
+Result: 24 passed in 2.20s.
+
+```powershell
+venv\Scripts\python -m pytest tests\test_persona_supervisor2_rag_skip_shape.py
+```
+
+Result: 2 passed in 2.07s.
+
+```powershell
+venv\Scripts\python -m py_compile src\kazusa_ai_chatbot\service.py src\kazusa_ai_chatbot\state.py src\kazusa_ai_chatbot\nodes\persona_supervisor2.py src\kazusa_ai_chatbot\nodes\persona_supervisor2_cognition.py src\kazusa_ai_chatbot\nodes\persona_supervisor2_schema.py tests\test_multi_source_cognition_stage_02_chat_episode_migration.py
+```
+
+Result: exit code 0.
+
+```powershell
+git diff --check
+```
+
+Result: exit code 0. Git emitted line-ending warnings only.
+
+```powershell
+rg -n "cognitive_episode|CognitiveEpisode" src\kazusa_ai_chatbot\nodes\persona_supervisor2_cognition_l1.py src\kazusa_ai_chatbot\nodes\persona_supervisor2_cognition_l2.py src\kazusa_ai_chatbot\nodes\persona_supervisor2_cognition_l3.py src\kazusa_ai_chatbot\nodes\dialog_agent.py src\kazusa_ai_chatbot\nodes\persona_supervisor2_rag_supervisor2.py src\kazusa_ai_chatbot\nodes\persona_supervisor2_rag_initializer.py src\kazusa_ai_chatbot\nodes\persona_supervisor2_rag_dispatch.py src\kazusa_ai_chatbot\nodes\persona_supervisor2_rag_projection.py src\kazusa_ai_chatbot\nodes\persona_supervisor2_consolidator.py
+```
+
+Result: exit code 1 with no matches, as expected for the no-consumption grep.
+
+Stage 6 lifecycle records updated:
+
+- This plan's status is `completed`.
+- Parent ledger
+  `development_plans/active/short_term/multi_source_cognition_architecture_plan.md`
+  marks `stage_02` as `completed`.
+- Registry `development_plans/README.md` marks the Stage 02 row as
+  `completed | completed`.
+- Stage 03 remains blocked until separately approved.
+
+Final style-only recheck after docstring/import polish:
+
+```powershell
+venv\Scripts\python -m pytest tests\test_multi_source_cognition_stage_02_chat_episode_migration.py tests\test_multi_source_cognition_stage_00_regression_baseline.py tests\test_state.py tests\test_persona_supervisor2_schema.py
+```
+
+Result: 43 passed in 2.12s.
+
+```powershell
+venv\Scripts\python -m py_compile src\kazusa_ai_chatbot\service.py src\kazusa_ai_chatbot\state.py src\kazusa_ai_chatbot\nodes\persona_supervisor2.py src\kazusa_ai_chatbot\nodes\persona_supervisor2_cognition.py src\kazusa_ai_chatbot\nodes\persona_supervisor2_schema.py tests\test_multi_source_cognition_stage_02_chat_episode_migration.py tests\test_multi_source_cognition_stage_00_regression_baseline.py
+```
+
+Result: exit code 0.
+
+```powershell
+git diff --check
+```
+
+Result: exit code 0. Git emitted line-ending warnings only.

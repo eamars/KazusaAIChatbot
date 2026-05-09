@@ -57,6 +57,10 @@ class TestIMProcessState:
         hints = typing.get_type_hints(IMProcessState)
         assert "message_envelope" in hints, "Missing field: message_envelope"
 
+    def test_has_cognitive_episode_field(self):
+        hints = typing.get_type_hints(IMProcessState)
+        assert "cognitive_episode" in hints, "Missing field: cognitive_episode"
+
     def test_can_instantiate(self):
         state: IMProcessState = {
             "timestamp": "2024-01-01T00:00:00Z",

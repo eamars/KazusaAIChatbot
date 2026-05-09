@@ -61,6 +61,10 @@ class TestGlobalPersonaState:
         assert "new_facts" in hints
         assert "future_promises" in hints
 
+    def test_has_cognitive_episode_field(self):
+        hints = typing.get_type_hints(GlobalPersonaState)
+        assert "cognitive_episode" in hints, "Missing field: cognitive_episode"
+
 
 class TestCognitionState:
     def test_has_core_cognition_fields(self):
@@ -82,6 +86,10 @@ class TestCognitionState:
         ]
         for field in required:
             assert field in hints, f"Missing cognition field: {field}"
+
+    def test_has_cognitive_episode_field(self):
+        hints = typing.get_type_hints(CognitionState)
+        assert "cognitive_episode" in hints, "Missing field: cognitive_episode"
 
 
 def test_normalize_subjective_appraisals_accepts_string_and_string_list() -> None:

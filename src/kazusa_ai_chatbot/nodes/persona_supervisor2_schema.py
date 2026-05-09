@@ -1,4 +1,6 @@
 from typing import Annotated, Literal, NotRequired, TypedDict
+
+from kazusa_ai_chatbot.cognition_episode import CognitiveEpisode
 from kazusa_ai_chatbot.conversation_progress import ConversationProgressPromptDoc
 from kazusa_ai_chatbot.state import (
     DebugModes,
@@ -30,6 +32,7 @@ class GlobalPersonaState(TypedDict):
     time_context: TimeContextDoc
     user_input: str
     prompt_message_context: PromptMessageContext
+    cognitive_episode: NotRequired[CognitiveEpisode]
     user_multimedia_input: list[MultiMediaDoc]
     platform: str
     platform_channel_id: str
@@ -104,6 +107,7 @@ class CognitionState(TypedDict):
     time_context: TimeContextDoc
     user_input: str
     prompt_message_context: PromptMessageContext
+    cognitive_episode: NotRequired[CognitiveEpisode]
     platform: str
     platform_channel_id: str
     channel_type: str

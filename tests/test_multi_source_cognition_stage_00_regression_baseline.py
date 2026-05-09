@@ -393,6 +393,7 @@ def _assert_prompt_messages(
     assert system_content.strip()
     payload = json.loads(human_content)
     assert required_payload_keys <= set(payload)
+    assert "cognitive_episode" not in payload
     return payload
 
 
@@ -431,6 +432,46 @@ def _graph_result() -> dict[str, Any]:
         "consolidation_state": consolidation_state,
     }
     return return_value
+
+
+def _assert_text_chat_cognitive_episode(
+    state: dict[str, Any],
+    *,
+    output_mode: str,
+) -> None:
+    """Assert the inert episode mirrors existing service graph fields.
+
+    Args:
+        state: Service graph state captured by the fake graph.
+        output_mode: Expected episode output mode for the debug-mode path.
+    """
+
+    episode = state["cognitive_episode"]
+    channel_reference = state["platform_channel_id"] or "direct"
+    episode_id = (
+        f"user_message:{state['platform']}:"
+        f"{channel_reference}:{state['platform_message_id']}"
+    )
+
+    assert episode["episode_id"] == episode_id
+    assert episode["trigger_source"] == "user_message"
+    assert episode["input_sources"] == ["dialog_text"]
+    assert episode["output_mode"] == output_mode
+    assert episode["percepts"][0]["percept_id"] == f"{episode_id}:dialog_text:0"
+    assert episode["percepts"][0]["content"] == state["user_input"]
+    assert episode["target_scope"]["target_addressed_user_ids"] == (
+        state["prompt_message_context"]["addressed_to_global_user_ids"]
+    )
+    assert episode["target_scope"]["target_broadcast"] == (
+        state["prompt_message_context"]["broadcast"]
+    )
+    assert episode["origin_metadata"]["debug_modes"] == state["debug_modes"]
+    assert episode["origin_metadata"]["active_turn_platform_message_ids"] == (
+        state["active_turn_platform_message_ids"]
+    )
+    assert episode["origin_metadata"]["active_turn_conversation_row_ids"] == (
+        state["active_turn_conversation_row_ids"]
+    )
 
 
 def _chat_request(
@@ -820,6 +861,10 @@ async def test_service_normal_response_tracks_delivery_and_handoff(
         "think_only": False,
         "no_remember": False,
     }
+    _assert_text_chat_cognitive_episode(
+        graph.states[0],
+        output_mode="visible_reply",
+    )
     mocks["save_assistant_message"].assert_awaited_once()
     saved_result = mocks["save_assistant_message"].await_args.args[0]
     assert saved_result["delivery_tracking_id"] == response.delivery_tracking_id
@@ -848,6 +893,10 @@ async def test_service_think_only_suppresses_visible_delivery(
     assert response.messages == []
     assert response.delivery_tracking_id == ""
     assert graph.states[0]["debug_modes"]["think_only"] is True
+    _assert_text_chat_cognitive_episode(
+        graph.states[0],
+        output_mode="think_only",
+    )
     mocks["save_assistant_message"].assert_awaited_once()
     mocks["progress_recorder"].assert_awaited_once()
     mocks["consolidation_runner"].assert_awaited_once()
@@ -874,6 +923,10 @@ async def test_service_no_remember_skips_consolidation(
     assert response.messages == ["ok"]
     assert response.delivery_tracking_id
     assert graph.states[0]["debug_modes"]["no_remember"] is True
+    _assert_text_chat_cognitive_episode(
+        graph.states[0],
+        output_mode="visible_reply",
+    )
     mocks["save_assistant_message"].assert_awaited_once()
     mocks["progress_recorder"].assert_awaited_once()
     mocks["consolidation_runner"].assert_not_awaited()

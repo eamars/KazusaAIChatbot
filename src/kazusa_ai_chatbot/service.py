@@ -12,6 +12,7 @@ from uuid import uuid4
 from collections.abc import Mapping
 from contextlib import asynccontextmanager, suppress
 from datetime import datetime, timezone
+from typing import Literal
 
 from fastapi import FastAPI, BackgroundTasks
 
@@ -22,6 +23,10 @@ from kazusa_ai_chatbot.config import (
     RAG_CACHE2_MAX_ENTRIES,
     REFLECTION_CYCLE_DISABLED,
     SCHEDULED_TASKS_ENABLED,
+)
+from kazusa_ai_chatbot.cognition_episode import (
+    CognitiveEpisode,
+    build_text_chat_cognitive_episode,
 )
 from kazusa_ai_chatbot.conversation_progress import (
     ConversationProgressScope,
@@ -386,6 +391,37 @@ def _active_turn_conversation_row_ids(item: QueuedChatItem) -> list[str]:
     return return_value
 
 
+def _build_text_chat_episode_ids(
+    *,
+    platform: str,
+    platform_channel_id: str,
+    platform_message_id: str,
+    conversation_row_id: str | None,
+    queue_sequence: int,
+) -> tuple[str, str]:
+    """Build deterministic episode and percept IDs for a text chat item.
+
+    Args:
+        platform: Source adapter platform name.
+        platform_channel_id: Source platform channel ID, when available.
+        platform_message_id: Source platform message ID, when available.
+        conversation_row_id: Persisted conversation row ID, when available.
+        queue_sequence: Process-local queue sequence for the surviving item.
+
+    Returns:
+        Episode ID and its single dialog-text percept ID.
+    """
+
+    message_reference = (
+        platform_message_id or conversation_row_id or f"queue-{queue_sequence}"
+    )
+    channel_reference = platform_channel_id or "direct"
+    episode_id = f"user_message:{platform}:{channel_reference}:{message_reference}"
+    percept_id = f"{episode_id}:dialog_text:0"
+    return_value = (episode_id, percept_id)
+    return return_value
+
+
 async def _save_user_message_from_item(
     item: QueuedChatItem,
     *,
@@ -632,6 +668,43 @@ async def _process_queued_chat_item(item: QueuedChatItem) -> None:
             logger.exception(f"Promoted reflection context load failed: {exc}")
             promoted_reflection_context = {}
 
+        episode_id, percept_id = _build_text_chat_episode_ids(
+            platform=req.platform,
+            platform_channel_id=req.platform_channel_id,
+            platform_message_id=req.platform_message_id,
+            conversation_row_id=item.conversation_row_id or None,
+            queue_sequence=item.sequence,
+        )
+        episode_output_mode: Literal["silent", "think_only", "visible_reply"]
+        if debug_modes["listen_only"]:
+            episode_output_mode = "silent"
+        elif debug_modes["think_only"]:
+            episode_output_mode = "think_only"
+        else:
+            episode_output_mode = "visible_reply"
+        episode: CognitiveEpisode = build_text_chat_cognitive_episode(
+            episode_id=episode_id,
+            percept_id=percept_id,
+            timestamp=item.timestamp,
+            time_context=time_context,
+            user_input=user_input,
+            platform=req.platform,
+            platform_channel_id=req.platform_channel_id,
+            channel_type=req.channel_type,
+            platform_message_id=req.platform_message_id,
+            platform_user_id=req.platform_user_id,
+            global_user_id=global_user_id,
+            user_name=req.display_name,
+            active_turn_platform_message_ids=active_turn_platform_message_ids,
+            active_turn_conversation_row_ids=active_turn_conversation_row_ids,
+            debug_modes=debug_modes,
+            output_mode=episode_output_mode,
+            target_addressed_user_ids=list(
+                prompt_message_context["addressed_to_global_user_ids"]
+            ),
+            target_broadcast=bool(prompt_message_context["broadcast"]),
+        )
+
         initial_state: IMProcessState = {
             "timestamp": item.timestamp,
             "time_context": time_context,
@@ -645,6 +718,7 @@ async def _process_queued_chat_item(item: QueuedChatItem) -> None:
             "user_input": user_input,
             "message_envelope": message_envelope,
             "prompt_message_context": prompt_message_context,
+            "cognitive_episode": episode,
             "user_multimedia_input": multimedia_input,
             "user_profile": user_profile,
             "platform_bot_id": req.platform_bot_id,

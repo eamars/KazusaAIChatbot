@@ -123,6 +123,9 @@ async def call_cognition_subgraph(state: GlobalPersonaState) -> GlobalPersonaSta
         "referents": state["referents"],
         "rag_result": state["rag_result"],
     }
+    cognitive_episode = state.get("cognitive_episode")
+    if cognitive_episode is not None:
+        initial_state["cognitive_episode"] = cognitive_episode
     
     result = await cognition_subgraph.ainvoke(initial_state)
 

@@ -292,6 +292,9 @@ async def persona_supervisor2(state: IMProcessState) -> dict:
         "debug_modes": state["debug_modes"],
         "should_respond": state["should_respond"],
     }
+    cognitive_episode = state.get("cognitive_episode")
+    if cognitive_episode is not None:
+        initial_persona_state["cognitive_episode"] = cognitive_episode
     
     results = await persona_graph.ainvoke(initial_persona_state)
     
