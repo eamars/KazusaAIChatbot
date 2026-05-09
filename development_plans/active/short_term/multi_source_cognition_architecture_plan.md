@@ -82,8 +82,8 @@ evidence names the required artifact paths.
 | `stage_00` | `multi_source_cognition_architecture_stage_00_current_chat_workflow_regression_baseline_plan.md` | completed     | `tests/test_multi_source_cognition_stage_00_regression_baseline.py`; `tests/fixtures/multi_source_cognition_stage_00_cases.json`; required verification passed | all later stages |
 | `stage_01` | `multi_source_cognition_architecture_stage_01_cognitive_episode_contract_plan.md`                | completed     | `src/kazusa_ai_chatbot/cognition_episode.py`; `tests/test_cognitive_episode_contract.py`; required verification passed | `stage_02+`      |
 | `stage_02` | `multi_source_cognition_architecture_stage_02_chat_cognitive_episode_migration_plan.md`          | draft         | `/chat` episode wiring, pass-through tests, baseline rerun | `stage_03+`      |
-| `stage_03` | `multi_source_cognition_architecture_stage_03_shared_cognition_prompt_selection_plan.md`         | not_created   | prompt selector artifact, render tests, baseline rerun     | `stage_04+`      |
-| `stage_04` | `multi_source_cognition_architecture_stage_04_rag_cognitive_episode_adapter_plan.md`             | not_created   | RAG input and retrieval equivalence artifacts              | `stage_05+`      |
+| `stage_03` | `multi_source_cognition_architecture_stage_03_shared_cognition_prompt_selection_plan.md`         | draft         | prompt selector artifact, render tests, baseline rerun     | `stage_04+`      |
+| `stage_04` | `multi_source_cognition_architecture_stage_04_rag_cognitive_episode_adapter_plan.md`             | draft         | RAG input and retrieval equivalence artifacts              | `stage_05+`      |
 | `stage_05` | `multi_source_cognition_architecture_stage_05_consolidation_origin_metadata_threading_plan.md`   | not_created   | origin metadata threading evidence                         | `stage_06+`      |
 | `stage_06` | `multi_source_cognition_architecture_stage_06_consolidator_per_write_origin_policy_plan.md`      | not_created   | per-write origin policy tests                              | `stage_07+`      |
 | `stage_07` | `multi_source_cognition_architecture_stage_07_reflection_trigger_cognition_dry_run_plan.md`      | not_created   | reflection dry-run audit artifact                          | `stage_08+`      |
@@ -790,9 +790,9 @@ No database schema changes are authorized by this plan.
 
 No proactive sends are authorized by this plan.
 
-The next useful action is to review and approve this architecture and its
-`stage_00` through `stage_02` child plans, then execute only approved stages in
-ledger order.
+The next useful action is to review the `stage_02` through `stage_04` child
+plans in ledger order, approve only the next unblocked stage, and execute only
+approved stages in ledger order.
 
 ## Execution Evidence
 

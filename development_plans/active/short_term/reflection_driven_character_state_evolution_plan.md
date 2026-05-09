@@ -163,6 +163,70 @@ The plan deliberately maps fields beyond `self_image` because several
 non-self-image fields affect decisions. The first writable scope should still
 be narrower than the analytic scope.
 
+## Raw Field Intake And Output Scan
+
+This scan covers the raw fields currently present in
+`character_state/_id: global` and checks whether each field has an active
+intake path and an active output path.
+
+Definitions used in this scan:
+
+- Intake path: code that seeds, loads, writes, or preserves the field into
+  `character_state`.
+- Output path: code that reads the field into cognition, dialog, relevance,
+  RAG/self-profile projection, visual generation, or operational export.
+- Gap: the field lacks an active current intake path, a meaningful output path,
+  or both.
+
+| Raw field | Intake path | Output path | Gap assessment | Recommendation |
+|---|---|---|---|---|
+| `name` | Profile load through `scripts.load_character_profile`; full snapshot restore. | Used broadly by cognition, dialog, RAG, relevance, reflection promotion, and consolidator prompts. | No gap. | Keep static; never reflection-evolve automatically. |
+| `description` | Profile load; full snapshot restore. | Public character-profile RAG/self-query path only. | No live decision path. | Keep as canonical public profile; do not include in reflection evolution. |
+| `gender` | Profile load; full snapshot restore. | Public character-profile RAG/self-query path only. | No live decision path. | Keep as canonical identity; do not include in reflection evolution. |
+| `age` | Profile load; full snapshot restore. | Public character-profile RAG/self-query path only. | No live decision path. | Keep as canonical identity; do not include in reflection evolution. |
+| `birthday` | Profile load; full snapshot restore. | Public character-profile RAG/self-query path only. | No live decision path. | Keep as canonical identity; do not include in reflection evolution. |
+| `backstory` | Profile load; full snapshot restore. | Public character-profile RAG/self-query path only. | No live decision path. | Keep as canonical profile; do not include in reflection evolution. |
+| `tone` | Generic profile loader could write it if present, but the current `personalities/kazusa.json` does not seed it. | No runtime output path found beyond schema/comment residue. | Gap: effectively legacy/dead field. | Remove or deprecate in a separate cleanup plan; do not add to character evolution. If broad tone is needed later, map it into existing voice fields instead. |
+| `speech_patterns` | Generic profile loader could write it if present, but the current `personalities/kazusa.json` does not seed it. | No runtime output path found beyond schema. | Gap: effectively legacy/dead field. | Remove or deprecate in a separate cleanup plan; do not add to character evolution. Existing `personality_brief` and `linguistic_texture_profile` already own voice. |
+| `personality_brief.mbti` | Profile load; full snapshot restore. | Used by L1 subconscious, L2 consciousness, L3 contextual behavior, dialog evaluator, and consolidator reflection prompts. | No gap. | Keep static; manual-review evolution only. |
+| `personality_brief.logic` | Profile load; full snapshot restore. | Used by L3 style and dialog generation. | No gap. | Keep static; manual-review evolution only. |
+| `personality_brief.tempo` | Profile load; full snapshot restore. | Used by L3 style and dialog generation. | No gap. | Keep static; manual-review evolution only. |
+| `personality_brief.defense` | Profile load; full snapshot restore. | Used by L3 style and dialog generation. | No gap. | Keep static; manual-review evolution only. |
+| `personality_brief.quirks` | Profile load; full snapshot restore. | Used by L3 style and dialog generation. | No gap. | Keep static; manual-review evolution only. |
+| `personality_brief.taboos` | Profile load; full snapshot restore. | Used by L3 style, preference adapter, and dialog generation. | No gap. | Keep static; only separate high-risk manual plan may change it. |
+| `boundary_profile.self_integrity` | Profile load; full snapshot restore. | Used by L2 boundary math, L2 boundary prompt, and conversation-progress recorder. | No gap. | Decision-critical; keep out of first automatic evolution writer. |
+| `boundary_profile.control_sensitivity` | Profile load; full snapshot restore. | Used by L2 boundary math, L2/L3 prompts, visual prompt, and conversation-progress/visual behavior. | No gap. | Decision-critical; keep out of first automatic evolution writer. |
+| `boundary_profile.compliance_strategy` | Profile load; full snapshot restore. | Used by L2 boundary math, L2/L3 prompts, visual prompt, and style behavior. | No gap. | Decision-critical; keep out of first automatic evolution writer. |
+| `boundary_profile.relational_override` | Profile load; full snapshot restore. | Used by L2 boundary math, L2/L3 prompts, visual prompt, and affinity override hints. | No gap. | Decision-critical; keep out of first automatic evolution writer. |
+| `boundary_profile.control_intimacy_misread` | Profile load; full snapshot restore. | Used by L2 boundary math, L2/L3 prompts, and visual prompt. | No gap. | Decision-critical; keep out of first automatic evolution writer. |
+| `boundary_profile.boundary_recovery` | Profile load; full snapshot restore. | Used by L2 boundary prompt, L3 contextual/visual prompts, and conversation-progress recorder. | No gap. | Decision-critical; keep out of first automatic evolution writer. |
+| `boundary_profile.authority_skepticism` | Profile load; full snapshot restore. | Used by L2 boundary math and L2 boundary prompt. | No gap. | Decision-critical; keep out of first automatic evolution writer. |
+| `linguistic_texture_profile.fragmentation` | Profile load; full snapshot restore. | Used by L3 style and dialog generation. | No gap. | Possible future voice-calibration candidate, not first self-state evolution scope. |
+| `linguistic_texture_profile.hesitation_density` | Profile load; full snapshot restore. | Used by L3 style, dialog generation, and dialog evaluator. | No gap. | Possible future voice-calibration candidate, not first self-state evolution scope. |
+| `linguistic_texture_profile.counter_questioning` | Profile load; full snapshot restore. | Used by L3 style and dialog generation. | No gap. | Possible future voice-calibration candidate, not first self-state evolution scope. |
+| `linguistic_texture_profile.softener_density` | Profile load; full snapshot restore. | Used by L3 style and dialog generation. | No gap. | Possible future voice-calibration candidate, not first self-state evolution scope. |
+| `linguistic_texture_profile.formalism_avoidance` | Profile load; full snapshot restore. | Used by L3 style and dialog generation. | No gap. | Possible future voice-calibration candidate, not first self-state evolution scope. |
+| `linguistic_texture_profile.abstraction_reframing` | Profile load; full snapshot restore. | Used by L3 style and dialog generation. | No gap. | Possible future voice-calibration candidate, not first self-state evolution scope. |
+| `linguistic_texture_profile.direct_assertion` | Profile load; full snapshot restore. | Used by L3 style and dialog generation. | No gap. | Possible future voice-calibration candidate, not first self-state evolution scope. |
+| `linguistic_texture_profile.emotional_leakage` | Profile load; full snapshot restore. | Used by L3 style and dialog generation. | No gap. | Possible future voice-calibration candidate, not first self-state evolution scope. |
+| `linguistic_texture_profile.rhythmic_bounce` | Profile load; full snapshot restore. | Used by L3 style and dialog generation. | No gap. | Possible future voice-calibration candidate, not first self-state evolution scope. |
+| `linguistic_texture_profile.self_deprecation` | Profile load; full snapshot restore. | Used by L3 style and dialog generation. | No gap. | Possible future voice-calibration candidate, not first self-state evolution scope. |
+| `mood` | Bootstrap seed and per-turn consolidation. | Used by relevance and L1/L2 cognition. | No gap. | Keep per-turn only; do not daily reflection-evolve. |
+| `global_vibe` | Bootstrap seed and per-turn consolidation. | Used by relevance and L1 cognition. | No gap. | Keep per-turn only; do not daily reflection-evolve. |
+| `reflection_summary` | Bootstrap seed, per-turn consolidation, and perspective-repair script. | Used by L1 cognition and self-image updater. | No gap, but field name can be confused with reflection-cycle output. | Keep per-turn only; do not write reflection-cycle summaries here. |
+| `updated_at` | Bootstrap seed and per-turn character-state upsert. | Operational export/snapshot only; no decision output path found. | Gap: intake exists, semantic output absent. | Keep as operational metadata; do not add to character evolution scope. |
+| `self_image.recent_window[].summary` | Per-turn self-image updater appends it. | Public/self RAG character-image path and cognition prompt payloads when character self-image is retrieved. | No gap. | Keep per-turn owned; reflection should not append here. |
+| `self_image.recent_window[].timestamp` | Per-turn self-image updater writes it. | Public/self RAG path may expose it as part of self-image projection; no direct decision math. | Weak output path. | Keep for ordering/audit; do not use as evolution content. |
+| `self_image.historical_summary` | Per-turn self-image updater rolls older recent entries into it and compresses it. | Public/self RAG character-image path and cognition prompt payloads when character self-image is retrieved. | No gap. | Primary first target for slow reflection-derived self-state evolution. |
+| `self_image.milestones` | Existing self-image updater preserves it, but no active generator currently creates milestones. | Public/self RAG character-image path and cognition prompt payloads when character self-image is retrieved. | Gap: output exists, active intake is missing. | Add to future evolution scope as a rare, high-confidence target. |
+| `self_image.meta.synthesis_count` | Per-turn self-image updater increments it. | Operational only; no semantic output path found. | Gap: intake exists, semantic output absent. | Keep as bookkeeping; do not treat as evolvable character content. |
+| `self_image.meta.last_updated` | Per-turn self-image updater writes it. | Operational only; no semantic output path found. | Gap: intake exists, semantic output absent. | Keep as bookkeeping; future lineage metadata may live under `meta`. |
+
+The dead-field cleanup candidates are `tone` and `speech_patterns`. They should
+not be pulled into reflection-driven character evolution just because they
+exist in the live raw document. Their current role appears superseded by
+`personality_brief` and `linguistic_texture_profile`.
+
 ## Target State
 
 The later target state is a slow, auditable, background character-state
