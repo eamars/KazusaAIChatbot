@@ -553,3 +553,17 @@ Approved on 2026-05-09 after review. Implementation started on 2026-05-09.
     `completed | completed`.
   - No production graph, prompt, RAG, dialog, consolidation, persistence,
     adapter, scheduler, or runtime startup file was modified.
+- Post-review cosmetic fixes:
+  - Added `Raises: CognitiveEpisodeValidationError` to
+    `build_text_chat_cognitive_episode`.
+  - Added focused parametrized validation coverage for missing `episode_id`,
+    missing `trigger_source`, non-bool `debug_modes`, unsupported percept
+    `visibility`, and `user_message` episodes without `dialog_text`.
+  - `venv\Scripts\python -m py_compile src\kazusa_ai_chatbot\cognition_episode.py tests\test_cognitive_episode_contract.py`
+    passed.
+  - `venv\Scripts\python -m pytest tests\test_cognitive_episode_contract.py`
+    passed: 15 passed.
+  - `git diff --check` passed with CRLF warnings only.
+  - The no-wiring grep against `service.py`, `state.py`,
+    `persona_supervisor2.py`, and `persona_supervisor2_schema.py` returned no
+    matches, with exit code 1 as expected.
