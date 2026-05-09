@@ -1,0 +1,234 @@
+"""Tests for the source-neutral cognitive episode contract."""
+
+from __future__ import annotations
+
+from copy import deepcopy
+
+import pytest
+
+from kazusa_ai_chatbot.cognition_episode import (
+    CognitiveEpisode,
+    CognitiveEpisodeValidationError,
+    CognitivePercept,
+    OriginMetadata,
+    TargetScope,
+    TextChatCompatibilityProjection,
+    build_text_chat_cognitive_episode,
+    project_text_chat_compatibility_fields,
+    validate_cognitive_episode,
+)
+
+
+def _time_context() -> dict[str, str]:
+    time_context = {
+        "current_local_datetime": "2026-05-09 19:30",
+        "current_local_weekday": "Saturday",
+    }
+    return time_context
+
+
+def _builder_kwargs() -> dict:
+    kwargs = {
+        "episode_id": "episode-1",
+        "percept_id": "percept-1",
+        "timestamp": "2026-05-09T07:30:00+00:00",
+        "time_context": _time_context(),
+        "user_input": "hello from current text chat",
+        "platform": "debug",
+        "platform_channel_id": "debug-private-1",
+        "channel_type": "private",
+        "platform_message_id": "platform-message-1",
+        "platform_user_id": "platform-user-1",
+        "global_user_id": "global-user-1",
+        "user_name": "Test User",
+        "active_turn_platform_message_ids": ["platform-message-1"],
+        "active_turn_conversation_row_ids": ["conversation-row-1"],
+        "debug_modes": {"think_only": False},
+        "target_addressed_user_ids": ["global-user-1"],
+        "target_broadcast": False,
+    }
+    return kwargs
+
+
+def _valid_episode() -> CognitiveEpisode:
+    episode = build_text_chat_cognitive_episode(**_builder_kwargs())
+    return episode
+
+
+def test_public_contract_shapes_expose_expected_fields() -> None:
+    assert set(CognitivePercept.__annotations__) == {
+        "percept_id",
+        "input_source",
+        "content",
+        "visibility",
+        "metadata",
+    }
+    assert set(TargetScope.__annotations__) == {
+        "platform",
+        "platform_channel_id",
+        "channel_type",
+        "current_platform_user_id",
+        "current_global_user_id",
+        "current_display_name",
+        "target_addressed_user_ids",
+        "target_broadcast",
+    }
+    assert set(OriginMetadata.__annotations__) == {
+        "platform",
+        "platform_message_id",
+        "active_turn_platform_message_ids",
+        "active_turn_conversation_row_ids",
+        "debug_modes",
+    }
+    assert set(CognitiveEpisode.__annotations__) == {
+        "episode_id",
+        "trigger_source",
+        "input_sources",
+        "output_mode",
+        "percepts",
+        "target_scope",
+        "origin_metadata",
+        "timestamp",
+        "time_context",
+    }
+    assert set(TextChatCompatibilityProjection.__annotations__) == {
+        "timestamp",
+        "time_context",
+        "user_input",
+        "platform",
+        "platform_channel_id",
+        "channel_type",
+        "platform_message_id",
+        "active_turn_platform_message_ids",
+        "active_turn_conversation_row_ids",
+        "platform_user_id",
+        "global_user_id",
+        "user_name",
+    }
+
+
+def test_text_chat_builder_creates_valid_user_message_episode() -> None:
+    episode = _valid_episode()
+
+    validate_cognitive_episode(episode)
+
+    assert episode["episode_id"] == "episode-1"
+    assert episode["trigger_source"] == "user_message"
+    assert episode["input_sources"] == ["dialog_text"]
+    assert episode["output_mode"] == "visible_reply"
+    assert episode["timestamp"] == "2026-05-09T07:30:00+00:00"
+    assert episode["time_context"] == _time_context()
+    assert episode["target_scope"] == {
+        "platform": "debug",
+        "platform_channel_id": "debug-private-1",
+        "channel_type": "private",
+        "current_platform_user_id": "platform-user-1",
+        "current_global_user_id": "global-user-1",
+        "current_display_name": "Test User",
+        "target_addressed_user_ids": ["global-user-1"],
+        "target_broadcast": False,
+    }
+    assert episode["origin_metadata"] == {
+        "platform": "debug",
+        "platform_message_id": "platform-message-1",
+        "active_turn_platform_message_ids": ["platform-message-1"],
+        "active_turn_conversation_row_ids": ["conversation-row-1"],
+        "debug_modes": {"think_only": False},
+    }
+    assert episode["percepts"] == [
+        {
+            "percept_id": "percept-1",
+            "input_source": "dialog_text",
+            "content": "hello from current text chat",
+            "visibility": "model_visible",
+            "metadata": {},
+        }
+    ]
+
+
+def test_text_chat_builder_defaults_optional_collections() -> None:
+    kwargs = _builder_kwargs()
+    del kwargs["active_turn_platform_message_ids"]
+    del kwargs["active_turn_conversation_row_ids"]
+    del kwargs["debug_modes"]
+    del kwargs["target_addressed_user_ids"]
+
+    episode = build_text_chat_cognitive_episode(**kwargs)
+
+    validate_cognitive_episode(episode)
+    assert episode["target_scope"]["target_addressed_user_ids"] == []
+    assert episode["origin_metadata"]["active_turn_platform_message_ids"] == []
+    assert episode["origin_metadata"]["active_turn_conversation_row_ids"] == []
+    assert episode["origin_metadata"]["debug_modes"] == {}
+
+
+def test_compatibility_projection_returns_current_text_chat_fields_only() -> None:
+    episode = _valid_episode()
+
+    projection = project_text_chat_compatibility_fields(episode)
+
+    assert set(projection) == set(TextChatCompatibilityProjection.__annotations__)
+    assert projection == {
+        "timestamp": "2026-05-09T07:30:00+00:00",
+        "time_context": _time_context(),
+        "user_input": "hello from current text chat",
+        "platform": "debug",
+        "platform_channel_id": "debug-private-1",
+        "channel_type": "private",
+        "platform_message_id": "platform-message-1",
+        "active_turn_platform_message_ids": ["platform-message-1"],
+        "active_turn_conversation_row_ids": ["conversation-row-1"],
+        "platform_user_id": "platform-user-1",
+        "global_user_id": "global-user-1",
+        "user_name": "Test User",
+    }
+
+
+def test_validate_rejects_empty_percepts() -> None:
+    episode = deepcopy(_valid_episode())
+    episode["percepts"] = []
+
+    with pytest.raises(CognitiveEpisodeValidationError):
+        validate_cognitive_episode(episode)
+
+
+def test_validate_rejects_unsupported_output_mode() -> None:
+    episode = deepcopy(_valid_episode())
+    episode["output_mode"] = "send_later"
+
+    with pytest.raises(CognitiveEpisodeValidationError):
+        validate_cognitive_episode(episode)
+
+
+def test_validate_rejects_missing_target_scope() -> None:
+    episode = deepcopy(_valid_episode())
+    del episode["target_scope"]
+
+    with pytest.raises(CognitiveEpisodeValidationError):
+        validate_cognitive_episode(episode)
+
+
+def test_validate_rejects_mismatched_input_sources() -> None:
+    episode = deepcopy(_valid_episode())
+    episode["input_sources"] = ["retrieved_memory"]
+
+    with pytest.raises(CognitiveEpisodeValidationError):
+        validate_cognitive_episode(episode)
+
+
+def test_validate_rejects_duplicate_percept_ids() -> None:
+    episode = deepcopy(_valid_episode())
+    second_percept = deepcopy(episode["percepts"][0])
+    second_percept["content"] = "second percept"
+    episode["percepts"].append(second_percept)
+
+    with pytest.raises(CognitiveEpisodeValidationError):
+        validate_cognitive_episode(episode)
+
+
+def test_validate_rejects_missing_time_context_fields() -> None:
+    episode = deepcopy(_valid_episode())
+    del episode["time_context"]["current_local_weekday"]
+
+    with pytest.raises(CognitiveEpisodeValidationError):
+        validate_cognitive_episode(episode)

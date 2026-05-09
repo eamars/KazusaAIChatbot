@@ -38,9 +38,9 @@ long_term/todo.md
 
 | Plan | Status | Execution |
 |---|---|---|
-| [multi_source_cognition_architecture_plan.md](active/short_term/multi_source_cognition_architecture_plan.md) | draft | blocked |
+| [multi_source_cognition_architecture_plan.md](active/short_term/multi_source_cognition_architecture_plan.md) | approved | staged |
 | [multi_source_cognition_architecture_stage_00_current_chat_workflow_regression_baseline_plan.md](active/short_term/multi_source_cognition_architecture_stage_00_current_chat_workflow_regression_baseline_plan.md) | completed | completed |
-| [multi_source_cognition_architecture_stage_01_cognitive_episode_contract_plan.md](active/short_term/multi_source_cognition_architecture_stage_01_cognitive_episode_contract_plan.md) | draft | blocked |
+| [multi_source_cognition_architecture_stage_01_cognitive_episode_contract_plan.md](active/short_term/multi_source_cognition_architecture_stage_01_cognitive_episode_contract_plan.md) | completed | completed |
 | [multi_source_cognition_architecture_stage_02_chat_cognitive_episode_migration_plan.md](active/short_term/multi_source_cognition_architecture_stage_02_chat_cognitive_episode_migration_plan.md) | draft | blocked |
 
 ## Active Bugfix Plans
