@@ -8,6 +8,7 @@ import pytest
 
 from kazusa_ai_chatbot.cognition_episode import (
     CognitiveEpisode,
+    OutputMode,
     build_text_chat_cognitive_episode,
 )
 from kazusa_ai_chatbot.nodes import (
@@ -21,7 +22,7 @@ from kazusa_ai_chatbot.time_context import build_character_time_context
 
 
 def _text_chat_episode(
-    output_mode: str = "visible_reply",
+    output_mode: OutputMode = "visible_reply",
 ) -> CognitiveEpisode:
     """Build a valid text-chat cognitive episode for origin tests.
 
@@ -213,7 +214,14 @@ async def test_call_consolidation_subgraph_threads_origin_to_all_nodes(
     seen_origins = {}
 
     async def _global_state_updater(node_state: dict) -> dict:
-        """Capture origin metadata seen by the global-state updater."""
+        """Capture origin metadata seen by the global-state updater.
+
+        Args:
+            node_state: Consolidator state passed into the patched node.
+
+        Returns:
+            Deterministic global-state updater output.
+        """
         seen_origins["global_state_updater"] = node_state["consolidation_origin"]
         return {
             "mood": "calm",
@@ -222,7 +230,14 @@ async def test_call_consolidation_subgraph_threads_origin_to_all_nodes(
         }
 
     async def _relationship_recorder(node_state: dict) -> dict:
-        """Capture origin metadata seen by the relationship recorder."""
+        """Capture origin metadata seen by the relationship recorder.
+
+        Args:
+            node_state: Consolidator state passed into the patched node.
+
+        Returns:
+            Deterministic relationship-recorder output.
+        """
         seen_origins["relationship_recorder"] = node_state["consolidation_origin"]
         return {
             "subjective_appraisals": [],
@@ -231,7 +246,14 @@ async def test_call_consolidation_subgraph_threads_origin_to_all_nodes(
         }
 
     async def _facts_harvester(node_state: dict) -> dict:
-        """Capture origin metadata seen by the facts harvester."""
+        """Capture origin metadata seen by the facts harvester.
+
+        Args:
+            node_state: Consolidator state passed into the patched node.
+
+        Returns:
+            Deterministic facts-harvester output that exercises the evaluator.
+        """
         seen_origins["facts_harvester"] = node_state["consolidation_origin"]
         return {
             "new_facts": [{"fact": "User likes tea"}],
@@ -239,14 +261,28 @@ async def test_call_consolidation_subgraph_threads_origin_to_all_nodes(
         }
 
     async def _fact_harvester_evaluator(node_state: dict) -> dict:
-        """Capture origin metadata seen by the fact evaluator."""
+        """Capture origin metadata seen by the fact evaluator.
+
+        Args:
+            node_state: Consolidator state passed into the patched node.
+
+        Returns:
+            Deterministic evaluator output that ends the loop.
+        """
         seen_origins["fact_harvester_evaluator"] = node_state[
             "consolidation_origin"
         ]
         return {"should_stop": True}
 
     async def _db_writer(node_state: dict) -> dict:
-        """Capture origin metadata seen by the persistence boundary."""
+        """Capture origin metadata seen by the persistence boundary.
+
+        Args:
+            node_state: Consolidator state passed into the patched node.
+
+        Returns:
+            Deterministic persistence metadata.
+        """
         seen_origins["db_writer"] = node_state["consolidation_origin"]
         return {"metadata": {"write_success": {}}}
 
@@ -290,7 +326,17 @@ async def test_unsupported_origin_fails_before_state_graph_construction(
     graph_construction_calls = []
 
     def _state_graph(_state_type: object) -> object:
-        """Record unexpected graph construction attempts."""
+        """Record unexpected graph construction attempts.
+
+        Args:
+            _state_type: State type passed to the graph constructor.
+
+        Returns:
+            This helper never returns because graph construction is forbidden.
+
+        Raises:
+            AssertionError: Always, if graph construction is attempted.
+        """
         graph_construction_calls.append(_state_type)
         raise AssertionError("StateGraph must not be constructed")
 
@@ -307,7 +353,14 @@ async def test_call_consolidation_subgraph_does_not_return_origin_metadata(
     monkeypatch,
 ) -> None:
     async def _global_state_updater(node_state: dict) -> dict:
-        """Return stable global-state output after seeing origin metadata."""
+        """Return stable global-state output after seeing origin metadata.
+
+        Args:
+            node_state: Consolidator state passed into the patched node.
+
+        Returns:
+            Deterministic global-state updater output.
+        """
         assert node_state["consolidation_origin"]["episode_id"] == "episode-1"
         return {
             "mood": "calm",
@@ -316,7 +369,14 @@ async def test_call_consolidation_subgraph_does_not_return_origin_metadata(
         }
 
     async def _relationship_recorder(node_state: dict) -> dict:
-        """Return stable relationship output after seeing origin metadata."""
+        """Return stable relationship output after seeing origin metadata.
+
+        Args:
+            node_state: Consolidator state passed into the patched node.
+
+        Returns:
+            Deterministic relationship-recorder output.
+        """
         assert node_state["consolidation_origin"]["episode_id"] == "episode-1"
         return {
             "subjective_appraisals": [],
@@ -325,16 +385,40 @@ async def test_call_consolidation_subgraph_does_not_return_origin_metadata(
         }
 
     async def _facts_harvester(node_state: dict) -> dict:
-        """Return no facts after seeing origin metadata."""
+        """Return no facts after seeing origin metadata.
+
+        Args:
+            node_state: Consolidator state passed into the patched node.
+
+        Returns:
+            Empty facts and promises so the evaluator is skipped.
+        """
         assert node_state["consolidation_origin"]["episode_id"] == "episode-1"
         return {"new_facts": [], "future_promises": []}
 
     async def _fact_harvester_evaluator(_node_state: dict) -> dict:
-        """Fail if the evaluator runs for empty harvester output."""
+        """Fail if the evaluator runs for empty harvester output.
+
+        Args:
+            _node_state: Unused consolidator state for an unexpected call.
+
+        Returns:
+            This helper never returns during a valid test path.
+
+        Raises:
+            AssertionError: Always, because the evaluator should be skipped.
+        """
         raise AssertionError("fact evaluator should be skipped")
 
     async def _db_writer(node_state: dict) -> dict:
-        """Return durable metadata without exposing origin metadata."""
+        """Return durable metadata without exposing origin metadata.
+
+        Args:
+            node_state: Consolidator state passed into the patched node.
+
+        Returns:
+            Deterministic durable metadata without origin fields.
+        """
         assert node_state["consolidation_origin"]["episode_id"] == "episode-1"
         return {"metadata": {"write_success": {"character_state": True}}}
 

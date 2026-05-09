@@ -1,4 +1,4 @@
-"""Stage 4 consolidator shared state schema."""
+"""Consolidator shared state schema."""
 
 from __future__ import annotations
 
@@ -83,7 +83,7 @@ class ConsolidatorState(TypedDict):
     decontexualized_input: str
     chat_history_recent: list[dict]
 
-    # Stage-4a metadata bundle (seeded from RAG metadata, accumulated per node).
+    # Shared metadata bundle seeded from RAG metadata and accumulated per node.
     metadata: Annotated[dict, _merge_dicts]
     consolidation_origin: ConsolidationOriginMetadata
 
