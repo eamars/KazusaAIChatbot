@@ -9,6 +9,7 @@ evidence, handoff, and review-derived accuracy gates.
 - [Implementation Order](#implementation-order)
 - [Granular Execution Steps](#granular-execution-steps)
 - [Progress Checklist](#progress-checklist)
+- [Independent Plan Review Gate](#independent-plan-review-gate)
 - [Plan Self-Review](#plan-self-review)
 - [Verification](#verification)
 - [Independent Code Review Gate](#independent-code-review-gate)
@@ -216,6 +217,43 @@ independent code review. The plan cannot be marked completed, merged, or signed
 off until this checkpoint is verified and evidence is recorded. The checkpoint
 must remain unchecked if the review is skipped, blocked, or finds unresolved
 issues.
+
+## Independent Plan Review Gate
+
+Use this optional pre-approval gate when the user asks for plan approval review,
+creativity-tightening, stage-boundary review, architecture alignment review, or
+handoff review. It runs before plan approval, execution, or handoff, not after
+implementation.
+
+The gate must inspect these inputs:
+
+- the current plan draft
+- the parent or high-level architecture plan
+- completed previous-stage plans, evidence, registry rows, and artifacts
+- planned next-stage handoff requirements when the current stage feeds later
+  work
+- relevant source and tests when plan readiness depends on existing contracts
+
+The review checklist must cover:
+
+- **Architecture alignment:** project modular design, ownership boundaries,
+  adapter/brain/RAG/cognition/dialog/persistence responsibilities, LLM-owned
+  semantic judgment, and deterministic-code responsibilities.
+- **Stage readiness:** status, blockers, previous artifacts, dependencies,
+  user decisions, and registry or ledger handoff are present and current.
+- **Instruction completeness:** exact contracts, file paths, change surface,
+  implementation order, verification commands, progress checklist, evidence,
+  and acceptance criteria are specific enough for an implementation agent.
+- **Creativity suppression:** no unresolved choices, broad verbs, helper
+  freedom, alternate call paths, fallbacks, compatibility shims, or unbounded
+  "similar to" wording remains.
+- **Stage boundaries:** previous-stage carryover, current-stage ownership,
+  deferred work, next-stage handoff, and non-overlap between plans are explicit.
+
+Findings should be classified as blockers, non-blocking findings, or questions.
+Blockers must be resolved before approval or execution. Non-blocking findings
+may be recorded with rationale. If the review raises a question that changes
+scope, ask the user before approving the plan.
 
 ## Plan Self-Review
 

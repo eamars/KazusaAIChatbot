@@ -1,4 +1,4 @@
 interface:
   display_name: "Development Plan Writing"
-  short_description: "Write executable development plans"
-  default_prompt: "Use $development-plan-writing to create an execution-ready development plan for a risky refactor."
+  short_description: "Write and review development plans"
+  default_prompt: "Use $development-plan-writing to review and tighten this development plan before execution."

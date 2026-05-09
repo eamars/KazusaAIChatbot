@@ -22,6 +22,7 @@ sections.
 - [Contracts And Data Shapes](#contracts-and-data-shapes)
 - [LLM Call And Context Budget](#llm-call-and-context-budget)
 - [Change Surface](#change-surface)
+- [Independent Plan Review](#independent-plan-review)
 - [Independent Code Review](#independent-code-review)
 - [Acceptance Criteria](#acceptance-criteria)
 - [Risks](#risks)
@@ -136,6 +137,7 @@ Add these sections whenever relevant:
 ## Risks
 ## LLM Call And Context Budget
 ## Operational Steps
+## Independent Plan Review
 ## Execution Evidence
 ## Glossary
 ```
@@ -445,6 +447,48 @@ Code removal is less constrained by this rule when the removal is already in
 scope. For delete-only work, require enough evidence to show the deleted code
 is obsolete or unreferenced, but do not force the same level of justification
 required for adding or expanding behavior outside the target module.
+
+## Independent Plan Review
+
+Use this optional section when the user asks for approval review,
+creativity-tightening, stage-boundary review, architecture alignment review, or
+handoff review before execution. Place it after `Verification` or before
+`Approval`/`Acceptance Criteria`, whichever fits the plan shape.
+
+Use this shape:
+
+```md
+## Independent Plan Review
+
+Run this gate before approval, execution, or handoff. Prefer a reviewer that
+did not draft the plan. If no separate reviewer is available, the active agent
+must reread the parent architecture plan, completed prior-stage artifacts, this
+plan, and relevant source/test context from a fresh-review posture.
+
+Review scope:
+
+- Previous-stage artifacts are named, completed, and carried forward.
+- The proposed scope aligns with the project modular design and the top-level
+  architecture plan.
+- The stage is unblocked: dependencies, decisions, status, registry rows, and
+  required artifacts are present.
+- The plan gives full, concrete instructions for an implementation agent:
+  contracts, change surface, exact file paths, verification gates, progress
+  checklist, and evidence requirements.
+- Agent creativity is tightly bounded: no unresolved choices, broad verbs,
+  optional fallbacks, compatibility shims, private helper freedom, or unowned
+  side paths remain.
+- Boundaries between this stage, previous stages, and next stages are explicit,
+  with clean handoff and no overlapping or missing ownership.
+
+Record blockers, non-blocking findings, required edits, open questions, and
+approval status. Approve only when blockers are resolved. If blockers remain,
+ask specific questions or update the plan before execution.
+```
+
+Do not use independent plan review to authorize new scope. If review discovers
+new work, add it to the current plan only when it is required for the approved
+goal; otherwise create or reference a follow-up plan.
 
 ## Independent Code Review
 

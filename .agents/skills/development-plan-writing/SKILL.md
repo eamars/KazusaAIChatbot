@@ -5,10 +5,10 @@ description: Use when writing, reviewing, improving, or auditing development pla
 
 # Development Plan Writing
 
-Create plans a human owner can approve and an implementation agent can execute
-without inventing architecture, scope, contracts, or verification. Final plans
-are work contracts; drafts may contain questions, but final plans must not.
-Completed plans are closed records.
+Create work-contract plans a human owner can approve and an implementation
+agent can execute without inventing architecture, scope, contracts, or
+verification. Drafts may contain questions; final and completed plans must not
+collect new scope.
 
 ## Workflow
 
@@ -20,8 +20,9 @@ Completed plans are closed records.
 5. Load `plan_contract.md` and `execution_gates.md` for final executable
    plans; load `cutover_policy.md` when behavior changes.
 6. Before approval, reread the plan against this skill and loaded references.
-7. For executable plans, include an independent code review gate as the final
-   pre-sign-off stage before lifecycle completion.
+7. When requested, run the optional independent plan review gate before
+   approval, execution, or multi-stage handoff.
+8. For executable plans, include a final independent code review gate.
 
 ## References
 
@@ -29,18 +30,16 @@ Completed plans are closed records.
 |---|---|
 | `references/plan_contract.md` | Always for final executable plans. |
 | `references/cutover_policy.md` | Behavior changes, legacy removal, data migration, or rollout strategy. |
-| `references/execution_gates.md` | Always for final executable plans; covers granular steps, verification, evidence, handoff, and review gates. |
+| `references/execution_gates.md` | Always for final executable plans; covers steps, verification, evidence, handoff, and review gates. |
 
 ## Local Registry Rule
 
 `development_plans/README.md` owns lifecycle policy. Execute only `approved`
-or `in_progress` plans under `active/`. Treat `long_term/` as roadmap,
-`archive/` as non-executable history, `reference/` as context, and `triage/`
-as blocked until classified.
+or `in_progress` plans under `active/`; use the registry for all other folders.
 
 ## Core Rules
 
-- Satisfy two audiences: human owner first, implementation agent second.
+- Serve two audiences: human owner first, implementation agent second.
 - Name mandatory skills explicitly; copy critical skill-derived rules into the
   plan because context may compact.
 - Include `Must Do`, `Deferred`, `Agent Autonomy Boundaries`, `Change Surface`,
@@ -53,12 +52,14 @@ as blocked until classified.
   outside it.
 - For new modules, define public interface, data shapes, ownership, callers,
   internals, test seams, integration points, and tests before finalizing.
-- For prompt, graph, RAG, cognition, dialog, evaluator, background LLM,
-  database, migration, or production-path changes, include relevant budget and
-  safety gates.
+- For prompt, graph, RAG, cognition, dialog, evaluator, database, migration,
+  or production-path changes, include relevant budget and safety gates.
 - Do not authorize new architecture, compatibility layers, fallback paths,
   helper wrappers, extra features, or unrelated cleanup unless explicitly in
   scope and justified.
+- Use the optional independent plan review gate when the user asks for plan
+  approval, creativity-tightening, stage-boundary review, architecture
+  alignment review, or handoff review.
 - Require an independent code review stage after implementation verification
   and before final sign-off. The review must check style compliance, code
   quality, plan alignment, design weaknesses, regression risk, handoff
