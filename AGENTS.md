@@ -87,4 +87,8 @@ plan; create a new or superseding plan.
 - Do not revert user changes unless explicitly asked.
 - Keep edits scoped to the request.
 - Prefer `rg` for searches.
+- PowerShell path safety: use `-LiteralPath '...'` for filesystem paths,
+  especially Windows absolute paths and any path that may contain spaces.
+  Never pass unquoted paths to commands. Prefer repo-relative paths when
+  possible.
 - Use `apply_patch` for manual edits.
