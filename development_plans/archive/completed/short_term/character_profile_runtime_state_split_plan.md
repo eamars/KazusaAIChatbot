@@ -4,7 +4,8 @@
 
 - Goal: Split static character profile data from dynamic runtime character state in code, while preserving the existing MongoDB `character_state` document shape.
 - Plan class: medium
-- Status: draft
+- Status: completed
+- Mandatory skills: `py-style`, `test-style-and-execution`, `local-llm-architecture`
 - Overall cutover strategy: compatible code refactor with no database migration and no prompt/schema output changes.
 - Highest-risk areas: stale runtime mood/vibe in the service cache; accidentally dropping profile fields consumed by cognition/RAG/dialog; adding response-path latency; allowing separate runtime fields to drift.
 - Acceptance criteria: normal chat turns receive a composed `character_profile` containing static profile fields plus fresh runtime fields, `mood`, `global_vibe`, and `reflection_summary` are synchronized as one bundle, the current ad hoc service cache mutation is replaced or constrained by the new runtime-state contract, and existing tests plus focused state-sync tests pass.
@@ -27,8 +28,16 @@ MongoDB character_state document stays unchanged
 
 This preserves the existing graph and prompt contracts while making the runtime-state synchronization boundary explicit.
 
+## Mandatory Skills
+
+- `py-style`: load before editing Python files.
+- `test-style-and-execution`: load before adding, changing, or running tests.
+- `local-llm-architecture`: load before changing any graph state construction, prompt-facing payload, cognition, dialog, RAG, relevance, or consolidation behavior.
+
 ## Mandatory Rules
 
+- After any automatic context compaction, the active agent must reread this entire plan before continuing implementation, verification, handoff, or final reporting.
+- After signing off any major progress checklist stage, the active agent must reread this entire plan before starting the next stage.
 - Do not change the MongoDB collection name, document `_id`, field names, indexes, or persistence layout.
 - Do not add a data migration.
 - Do not change cognition, dialog, relevance, RAG, or consolidator LLM output schemas.
@@ -42,16 +51,18 @@ This preserves the existing graph and prompt contracts while making the runtime-
 
 - Add an explicit code contract for static profile vs runtime state.
 - Keep `get_character_profile()` available for existing DB callers that need the full singleton document.
-- Add a DB helper or projection path that retrieves only runtime character-state fields for service synchronization.
+- Add `get_character_runtime_state()` to retrieve only runtime character-state fields for service synchronization.
 - Replace service-level use of `_personality` as a mixed static/dynamic cache with separate process-local state:
   - `_static_character_profile`
   - `_runtime_character_state`
 - Compose a fresh per-turn `character_profile` from static and runtime state before building `IMProcessState`.
 - Ensure composed `character_profile` still includes `global_user_id` for runtime identity.
-- Ensure `mood`, `global_vibe`, and `reflection_summary` refresh before each queued chat item or after every successful consolidation write through the same runtime-state contract.
-- Decide in code that an empty runtime field from consolidation means "leave cached value unchanged", matching `upsert_character_state(...)`.
+- Ensure `mood`, `global_vibe`, and `reflection_summary` refresh before each queued chat item through `get_character_runtime_state()`.
+- Ensure every successful consolidation write refreshes or updates `_runtime_character_state` through the same runtime-state contract.
+- Source `character_name` from the static profile (`_static_character_profile["name"]`) instead of the removed mixed cache when building per-turn identity.
+- Preserve the existing "empty string = leave cached value unchanged" filter when migrating the post-consolidation refresh callback (matches `upsert_character_state(...)` semantics already encoded in `run_consolidation_background`).
 - Add deterministic tests covering per-turn composition, refresh after consolidation, and no DB schema changes.
-- Remove or refactor the current ad hoc field loop in `_run_consolidation_background` once the explicit runtime-state contract exists.
+- Remove or refactor the current ad hoc field loop in `brain_service.post_turn.run_consolidation_background` once the explicit runtime-state contract exists.
 
 ## Deferred
 
@@ -125,26 +136,34 @@ The graph-facing state shape does not change. Existing nodes continue reading `s
 | Runtime bundle | Refresh `mood`, `global_vibe`, and `reflection_summary` together | These fields are generated and consumed together as character psychological background. |
 | `self_image` | Treat as runtime state in code but do not redesign its writer | It is mutable state in the same document; keeping it in the runtime bundle avoids pretending it is static. |
 | LLM budget | No new LLM calls and no prompt changes | This is deterministic orchestration, not a cognition redesign. |
-| Response-path DB cost | Allow one small runtime-state DB read before a queued turn if needed | Correctness is more important than preserving a stale startup cache; projection keeps the read bounded. |
+| Response-path DB cost | Use one small runtime-state DB read before each queued turn | Correctness is more important than preserving a stale startup cache; projection keeps the read bounded. |
 
 ## Change Surface
 
 ### Modify
 
 - `src/kazusa_ai_chatbot/db/character.py`
-  - Add a runtime-state projection helper, for example `get_character_runtime_state()`.
-  - Add or expose constants for runtime-state field names if no better local module owns them.
+  - Add `RUNTIME_CHARACTER_STATE_FIELDS`.
+  - Add `split_character_profile_runtime_state(profile: dict) -> tuple[dict, dict]`.
+  - Add `compose_character_profile(static_profile: dict, runtime_state: dict, global_user_id: str) -> dict`.
+  - Add `get_character_runtime_state()` using a MongoDB projection limited to runtime-state fields. Match the no-wrap exception pattern of `get_character_profile()` (do not introduce a `try/except PyMongoError`); read failures propagate to the caller as today.
+  - Leave the existing `get_character_state()` alias in `db/character.py` exactly as-is. It is a full-document reader and is out of scope for this plan; do not rename it, do not retarget it at runtime fields, and do not delete it.
 - `src/kazusa_ai_chatbot/service.py`
-  - Replace `_personality` with explicit static and runtime service caches.
+  - Remove the `_personality` module global outright and replace it with `_static_character_profile` and `_runtime_character_state`. No compatibility alias is kept — the bigbang cutover applies to this symbol.
   - Compose `character_profile` per queued chat item.
-  - Refresh runtime state through the new helper at startup and at the chosen synchronization boundary.
-  - Replace the ad hoc post-consolidation `_personality[field] = value` loop with the runtime-state update helper.
+  - Source `character_name` from `_static_character_profile.get("name", "Character")` at the start of `_process_queued_chat_item`.
+  - Refresh runtime state through `get_character_runtime_state()` at startup and immediately before building `IMProcessState` for each queued chat item.
+  - Pass an explicit runtime-state refresh/update callback into post-turn consolidation handling instead of passing a mutable mixed profile cache.
+- `src/kazusa_ai_chatbot/brain_service/post_turn.py`
+  - Replace the ad hoc post-consolidation `personality[field_name] = field_value` loop with a callback that updates the service-owned runtime-state cache.
 - `tests/test_service_background_consolidation.py`
   - Update the current cache-refresh test to assert the new runtime cache behavior.
-- `tests/test_service_input_queue.py` or a new focused service-state test file
+- `tests/test_service_input_queue.py`
   - Add coverage that the graph receives a composed profile with static and runtime fields.
 - `tests/test_db.py`
   - Add deterministic coverage for the runtime-state projection helper.
+- `tests/test_e2e_live_llm.py`
+  - Update the `live_env` fixture and `_refresh_character_profile` helper (currently set `brain_service._personality = character_profile`) to instead split the loaded document and assign `brain_service._static_character_profile` and `brain_service._runtime_character_state` via the new helpers. Behavioral assertions stay unchanged.
 
 ### Keep
 
@@ -183,45 +202,47 @@ These consumers should keep reading `character_profile` in the same shape they a
 
 ## Progress Checklist
 
-- [ ] Stage 1 - Runtime/static contract established
+- [x] Stage 1 - Runtime/static contract established
   - Covers: constants/helpers for runtime field set, split, and compose behavior.
   - Verify: `python -m py_compile src/kazusa_ai_chatbot/service.py src/kazusa_ai_chatbot/db/character.py`.
   - Evidence: record helper names and compile result in `Execution Evidence`.
   - Handoff: next agent starts at Stage 2.
-  - Sign-off: `<agent/date>` after verification and evidence are recorded.
-- [ ] Stage 2 - DB runtime projection added
-  - Covers: `get_character_runtime_state()` or equivalent focused helper.
+  - Sign-off: `Codex/2026-05-09` after verification and evidence are recorded.
+- [x] Stage 2 - DB runtime projection added
+  - Covers: `get_character_runtime_state()` projection helper.
   - Verify: `pytest tests/test_db.py -q`.
   - Evidence: record test result and any allowed unrelated failures.
   - Handoff: next agent starts at Stage 3.
-  - Sign-off: `<agent/date>` after verification and evidence are recorded.
-- [ ] Stage 3 - Service composition integrated
+  - Sign-off: `Codex/2026-05-09` after verification and evidence are recorded.
+- [x] Stage 3 - Service composition integrated
   - Covers: startup split, per-turn runtime refresh, graph-facing profile composition.
   - Verify: `pytest tests/test_service_input_queue.py tests/test_service_background_consolidation.py -q`.
   - Evidence: record changed service symbols and test output.
   - Handoff: next agent starts at Stage 4.
-  - Sign-off: `<agent/date>` after verification and evidence are recorded.
-- [ ] Stage 4 - Consolidation refresh uses runtime-state contract
+  - Sign-off: `Codex/2026-05-09` after verification and evidence are recorded.
+- [x] Stage 4 - Consolidation refresh uses runtime-state contract
   - Covers: replacement of ad hoc mixed-cache mutation after background consolidation.
   - Verify: `pytest tests/test_service_background_consolidation.py -q`.
   - Evidence: record whether consolidation refresh reloads DB or updates `_runtime_character_state` directly.
   - Handoff: next agent starts at Stage 5.
-  - Sign-off: `<agent/date>` after verification and evidence are recorded.
-- [ ] Stage 5 - Final regression and static greps complete
+  - Sign-off: `Codex/2026-05-09` after verification and evidence are recorded.
+- [x] Stage 5 - Final regression and static greps complete
   - Covers: source greps, targeted tests, and compile checks.
   - Verify: all commands in `Verification`.
-  - Evidence: record command outputs in `Execution Evidence`.
-  - Handoff: plan can move to completed after acceptance criteria are satisfied.
-  - Sign-off: `<agent/date>` after verification and evidence are recorded.
+  - Evidence: command outputs and manual smoke result recorded in `Execution Evidence`.
+  - Handoff: completed plan moved to archive after acceptance criteria were satisfied.
+  - Sign-off: `Codex/2026-05-09` after verification and evidence are recorded.
 
 ## Verification
 
 ### Static Greps
 
-- `rg "_personality" src/kazusa_ai_chatbot/service.py tests`
-  - Expected: no service runtime use remains, or only an intentional compatibility alias documented in code and tests.
-- `rg "mood|global_vibe|reflection_summary" src/kazusa_ai_chatbot/service.py`
-  - Expected: these fields appear through the runtime-state contract, not scattered independent cache mutation.
+- `rg "\b_personality\b" src/kazusa_ai_chatbot/service.py tests`
+  - Word-boundary anchored to avoid false positives from the `load_personality` utility.
+  - Expected in `src/kazusa_ai_chatbot/service.py`: zero matches. The module global is removed; no compatibility alias is kept.
+  - Expected in `tests/`: zero matches in `test_service_input_queue.py`, `test_service_background_consolidation.py`, and `test_e2e_live_llm.py` after migration to the new symbols.
+- `rg "\b(mood|global_vibe|reflection_summary)\b" src/kazusa_ai_chatbot/service.py`
+  - Expected: these fields are read or written only through the runtime-state contract (`get_character_runtime_state()`, `_runtime_character_state`, or the new consolidation refresh callback). No scattered independent cache mutation.
 
 ### Compile
 
@@ -266,10 +287,10 @@ This plan is complete when:
 
 | Risk | Mitigation | Verification |
 |---|---|---|
-| Per-turn DB read adds latency | Use a projection helper limited to runtime fields; do not load full profile each turn | Service smoke and log timing inspection |
+| Per-turn DB read adds latency | Use a projection helper limited to runtime fields; do not load full profile each turn | Bounded projection itself is the mitigation; no instrumentation is added by this plan. If latency regresses observably during manual smoke, raise as a follow-up rather than expanding scope here. |
 | Static field accidentally omitted from graph profile | Compose from full static profile plus runtime state; keep existing consumer tests | `test_persona_supervisor2.py`, relevance tests |
 | Runtime fields drift because one is refreshed alone | Treat runtime fields as a named bundle and test all three together | service background consolidation test |
-| External DB edits still do not appear | Refresh runtime state before each queued turn or document why post-write-only refresh is chosen | manual smoke with DB-edited runtime state |
+| External DB edits still do not appear | Refresh runtime state before each queued turn | manual smoke with DB-edited runtime state |
 | `self_image` stale in long-running service | Include `self_image` in runtime state projection | DB projection and composition tests |
 
 ## LLM Call And Context Budget
@@ -280,21 +301,94 @@ This plan is complete when:
 - Background LLM calls after: unchanged.
 - Prompt payload shape: unchanged graph-facing `character_profile` keys remain available.
 - Context budget impact: no added prompt sections, no larger prompt contracts. Runtime values may be fresher, but not larger by design.
-- Latency impact: at most one bounded MongoDB projection read before a queued response-path turn, unless implementation proves post-write refresh alone is sufficient and records that choice.
+- Latency impact: one bounded MongoDB projection read before each queued response-path turn.
 
 ## Execution Evidence
 
 - Lifecycle evaluation on 2026-05-08: implementation is not present; this plan
-  remains an active `draft` and must not be executed until approved.
+  remains unfinished.
 - Static grep results: `src/kazusa_ai_chatbot/service.py` still owns a module
   global `_personality`, startup still assigns `_personality = await
   get_character_profile()`, runtime request composition still copies
   `_personality`, and tests still monkeypatch `_personality`. The DB API still
   has `get_character_state()` as an alias for `get_character_profile()`, not a
   split runtime-state reader.
-- Compile results: not run for this draft because no implementation changes
-  were made.
-- Test results: not run for this draft because source inspection shows the
-  plan is not implemented.
+- Compile results: not run during approval edit because no implementation
+  changes were made.
+- Test results: not run during approval edit because source inspection shows
+  the plan is not implemented.
 - Manual smoke: not run.
-- Notes: keep this file in `active/short_term/` with `Status: draft`.
+- Approval update on 2026-05-09: plan contract tightened and status changed to
+  `approved`; implementation is now allowed but has not been started.
+- Review tightening on 2026-05-09: added `tests/test_e2e_live_llm.py` to the
+  change surface (it directly assigns `brain_service._personality`); anchored
+  static-grep gates with `\b...\b` to avoid `load_personality` substring
+  matches; declared the `_personality` module global is removed outright with
+  no compatibility alias; clarified `get_character_state()` alias stays
+  untouched; specified `get_character_runtime_state()` follows the no-wrap
+  exception pattern of `get_character_profile()`; promoted `character_name`
+  sourcing to **Must Do**; reworded the empty-string runtime field bullet to
+  preservation language; tightened the latency-risk mitigation row.
+- Execution on 2026-05-09:
+  - Changed files: `src/kazusa_ai_chatbot/db/character.py`,
+    `src/kazusa_ai_chatbot/db/__init__.py`,
+    `src/kazusa_ai_chatbot/service.py`,
+    `src/kazusa_ai_chatbot/brain_service/post_turn.py`,
+    `tests/test_db.py`, `tests/test_service_input_queue.py`,
+    `tests/test_service_background_consolidation.py`,
+    `tests/test_e2e_live_llm.py`.
+  - Runtime/static helpers added: `RUNTIME_CHARACTER_STATE_FIELDS`,
+    `split_character_profile_runtime_state(...)`,
+    `compose_character_profile(...)`, and `get_character_runtime_state()`.
+  - Service symbols changed: removed `_personality`; added
+    `_static_character_profile`, `_runtime_character_state`,
+    `_refresh_runtime_character_state()`, and
+    `_update_runtime_character_state_from_consolidation(...)`.
+  - Consolidation refresh behavior: `brain_service.post_turn` now calls the
+    service callback after successful `character_state` persistence; the
+    callback updates `_runtime_character_state` directly and preserves cached
+    values for empty runtime fields.
+  - Compile: `venv\Scripts\python -m py_compile src/kazusa_ai_chatbot/service.py src/kazusa_ai_chatbot/db/character.py` passed.
+  - Static grep: `rg "\b_personality\b" src/kazusa_ai_chatbot/service.py tests`
+    returned no matches.
+  - Static grep: `rg "\b(mood|global_vibe|reflection_summary)\b" src/kazusa_ai_chatbot/service.py`
+    returned only the runtime-state consolidation callback field loop.
+  - Tests: `venv\Scripts\python -m pytest tests/test_db.py -q` passed
+    (`43 passed, 13 deselected`).
+  - Tests: `venv\Scripts\python -m pytest tests/test_service_input_queue.py tests/test_service_background_consolidation.py -q`
+    passed (`43 passed`).
+  - Tests: `venv\Scripts\python -m pytest tests/test_relevance_agent.py tests/test_persona_supervisor2.py -q`
+    passed (`29 passed`).
+  - Static diff check: `git diff --check` passed with line-ending warnings
+    only.
+  - Manual smoke: not run during this execution pass; requires a live service,
+    existing character profile, and model/runtime environment.
+- Final sign-off on 2026-05-09:
+  - Compile: `venv\Scripts\python -m py_compile src/kazusa_ai_chatbot/service.py src/kazusa_ai_chatbot/db/character.py` passed.
+  - Static grep: `rg "\b_personality\b" src/kazusa_ai_chatbot/service.py tests`
+    returned no matches.
+  - Static grep: `rg "\b(mood|global_vibe|reflection_summary)\b" src/kazusa_ai_chatbot/service.py`
+    returned only the runtime-state consolidation callback field loop.
+  - Tests: `venv\Scripts\python -m pytest tests/test_service_background_consolidation.py -q`
+    passed (`18 passed`).
+  - Tests: `venv\Scripts\python -m pytest tests/test_service_input_queue.py -q`
+    passed (`25 passed`).
+  - Tests: `venv\Scripts\python -m pytest tests/test_db.py -q` passed
+    (`43 passed, 13 deselected`).
+  - Tests: `venv\Scripts\python -m pytest tests/test_relevance_agent.py tests/test_persona_supervisor2.py -q`
+    passed (`29 passed`).
+  - Manual smoke: started `uvicorn kazusa_ai_chatbot.service:app` on
+    `127.0.0.1:18080` with scheduler/reflection disabled for the smoke,
+    `/health` returned `status=ok` and `db=true`, two normal `/chat` requests
+    each returned one reply, and the server was stopped afterward.
+  - Smoke artifacts:
+    `test_artifacts/runtime_state_split_smoke_stdout.log` and
+    `test_artifacts/runtime_state_split_smoke_stderr.log`.
+  - Smoke log evidence: first turn produced consolidation output with
+    `mood`, `global_vibe`, and `reflection_summary`; the second turn loaded
+    conversation progress after that consolidation pass.
+  - Runtime-state projection check: direct `get_character_runtime_state()`
+    read returned non-empty `mood`, `global_vibe`, `reflection_summary`, and
+    `updated_at` through the new projection helper.
+  - Static diff check: `git diff --check` passed with line-ending warnings
+    only.

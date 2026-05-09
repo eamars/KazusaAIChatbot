@@ -185,7 +185,32 @@ def _patch_common_dependencies(monkeypatch, graph) -> None:
         None.
     """
 
-    monkeypatch.setattr(service_module, "_personality", {"name": "Kazusa"})
+    monkeypatch.setattr(
+        service_module,
+        "_static_character_profile",
+        {
+            "name": "Kazusa",
+            "personality_brief": "static brief",
+        },
+    )
+    monkeypatch.setattr(
+        service_module,
+        "_runtime_character_state",
+        {
+            "mood": "old mood",
+            "global_vibe": "old vibe",
+            "reflection_summary": "old reflection",
+        },
+    )
+    monkeypatch.setattr(
+        service_module,
+        "get_character_runtime_state",
+        AsyncMock(return_value={
+            "mood": "fresh mood",
+            "global_vibe": "fresh vibe",
+            "reflection_summary": "fresh reflection",
+        }),
+    )
     monkeypatch.setattr(
         service_module,
         "_ensure_character_global_identity",
@@ -944,6 +969,17 @@ async def test_worker_derives_graph_input_from_message_envelope(monkeypatch) -> 
 
     assert response.messages == []
     assert captured_state["user_input"] == "clean body"
+    assert captured_state["character_profile"]["name"] == "Kazusa"
+    assert (
+        captured_state["character_profile"]["personality_brief"]
+        == "static brief"
+    )
+    assert captured_state["character_profile"]["mood"] == "fresh mood"
+    assert captured_state["character_profile"]["global_vibe"] == "fresh vibe"
+    assert (
+        captured_state["character_profile"]["reflection_summary"]
+        == "fresh reflection"
+    )
     assert captured_state["character_profile"]["global_user_id"] == (
         "character-global-id"
     )

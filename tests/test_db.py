@@ -18,10 +18,13 @@ import kazusa_ai_chatbot.db.memory as db_memory_module
 import kazusa_ai_chatbot.db.users as db_users_module
 from kazusa_ai_chatbot.db import (
     AFFINITY_DEFAULT,
+    RUNTIME_CHARACTER_STATE_FIELDS,
     build_memory_doc,
     close_db,
+    compose_character_profile,
     get_affinity,
     get_character_profile,
+    get_character_runtime_state,
     get_character_state,
     get_conversation_history,
     get_user_profile,
@@ -29,6 +32,7 @@ from kazusa_ai_chatbot.db import (
     save_conversation,
     save_memory,
     search_memory,
+    split_character_profile_runtime_state,
     update_affinity,
     update_last_relationship_insight,
     upsert_character_state,
@@ -789,6 +793,94 @@ async def test_get_character_state_returns_same_as_profile():
 
     assert result == {"mood": "happy", "name": "Kazusa", "global_vibe": "warm"}
     assert "_id" not in result
+
+
+def test_split_character_profile_runtime_state_separates_runtime_fields():
+    """Static profile and runtime state should be split without DB shape changes."""
+    profile = {
+        "_id": "global",
+        "name": "Kazusa",
+        "personality_brief": "sharp but kind",
+        "mood": "focused",
+        "global_vibe": "warm",
+        "reflection_summary": "recent chat was calm",
+        "self_image": {"core": "steady"},
+        "updated_at": "t1",
+    }
+
+    static_profile, runtime_state = split_character_profile_runtime_state(profile)
+
+    assert static_profile == {
+        "name": "Kazusa",
+        "personality_brief": "sharp but kind",
+    }
+    assert runtime_state == {
+        "mood": "focused",
+        "global_vibe": "warm",
+        "reflection_summary": "recent chat was calm",
+        "self_image": {"core": "steady"},
+        "updated_at": "t1",
+    }
+
+
+def test_compose_character_profile_merges_static_runtime_and_identity():
+    """Graph-facing profile should preserve static fields and fresh runtime state."""
+    static_profile = {
+        "name": "Kazusa",
+        "personality_brief": "sharp but kind",
+    }
+    runtime_state = {
+        "mood": "focused",
+        "global_vibe": "warm",
+        "reflection_summary": "recent chat was calm",
+    }
+
+    result = compose_character_profile(
+        static_profile,
+        runtime_state,
+        "character-global-id",
+    )
+
+    assert result == {
+        "name": "Kazusa",
+        "personality_brief": "sharp but kind",
+        "mood": "focused",
+        "global_vibe": "warm",
+        "reflection_summary": "recent chat was calm",
+        "global_user_id": "character-global-id",
+    }
+
+
+@pytest.mark.asyncio
+async def test_get_character_runtime_state_uses_runtime_projection():
+    """Runtime reader should only request mutable runtime character fields."""
+    db = _mock_db()
+    db.character_state.find_one = AsyncMock(return_value={
+        "_id": "global",
+        "mood": "calm",
+        "global_vibe": "warm",
+        "reflection_summary": "recent chat was calm",
+        "self_image": {"core": "steady"},
+        "updated_at": "t1",
+    })
+
+    with _patched_get_db(db):
+        result = await get_character_runtime_state()
+
+    expected_projection = {
+        field_name: 1 for field_name in RUNTIME_CHARACTER_STATE_FIELDS
+    }
+    db.character_state.find_one.assert_awaited_once_with(
+        {"_id": "global"},
+        expected_projection,
+    )
+    assert result == {
+        "mood": "calm",
+        "global_vibe": "warm",
+        "reflection_summary": "recent chat was calm",
+        "self_image": {"core": "steady"},
+        "updated_at": "t1",
+    }
 
 
 # ── Save memory ────────────────────────────────────────────────────

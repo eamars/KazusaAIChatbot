@@ -130,9 +130,13 @@ from kazusa_ai_chatbot.db.user_memory_units import (
 
 # ── Character state ───────────────────────────────────────────────
 from kazusa_ai_chatbot.db.character import (
+    RUNTIME_CHARACTER_STATE_FIELDS,
+    compose_character_profile,
     get_character_profile,
+    get_character_runtime_state,
     get_character_state,
     save_character_profile,
+    split_character_profile_runtime_state,
     upsert_character_self_image,
     upsert_character_state,
 )
@@ -231,7 +235,10 @@ __all__ = [
     "update_user_memory_unit_semantics", "update_user_memory_unit_window",
     "validate_user_memory_unit_semantics",
     # Character
-    "get_character_profile", "get_character_state", "save_character_profile",
+    "RUNTIME_CHARACTER_STATE_FIELDS", "compose_character_profile",
+    "get_character_profile", "get_character_runtime_state",
+    "get_character_state", "save_character_profile",
+    "split_character_profile_runtime_state",
     "upsert_character_self_image", "upsert_character_state",
     # Memory
     "enable_memory_vector_index", "get_active_promises", "save_memory", "search_memory",

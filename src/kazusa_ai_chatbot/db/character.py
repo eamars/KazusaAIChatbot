@@ -9,6 +9,66 @@ from kazusa_ai_chatbot.db.errors import DatabaseOperationError
 from kazusa_ai_chatbot.db.schemas import CharacterProfileDoc
 
 
+RUNTIME_CHARACTER_STATE_FIELDS = (
+    "mood",
+    "global_vibe",
+    "reflection_summary",
+    "self_image",
+    "updated_at",
+)
+
+
+def split_character_profile_runtime_state(profile: dict) -> tuple[dict, dict]:
+    """Separate static profile fields from mutable runtime character state.
+
+    Args:
+        profile: Full singleton ``character_state`` document with ``_id``
+            already stripped or still present.
+
+    Returns:
+        A ``(static_profile, runtime_state)`` pair. Runtime fields contain only
+        keys present in ``profile``; static fields exclude runtime keys and
+        MongoDB's internal ``_id``.
+    """
+    runtime_field_names = set(RUNTIME_CHARACTER_STATE_FIELDS)
+    static_profile = {
+        key: value
+        for key, value in profile.items()
+        if key not in runtime_field_names and key != "_id"
+    }
+    runtime_state = {
+        key: value
+        for key, value in profile.items()
+        if key in runtime_field_names
+    }
+    return_value = (static_profile, runtime_state)
+    return return_value
+
+
+def compose_character_profile(
+    static_profile: dict,
+    runtime_state: dict,
+    global_user_id: str,
+) -> dict:
+    """Build the graph-facing character profile for one turn.
+
+    Args:
+        static_profile: Process-local immutable profile fields.
+        runtime_state: Current mutable runtime state fields.
+        global_user_id: Internal character identity for the active adapter
+            account.
+
+    Returns:
+        Character profile payload consumed by the persona graph.
+    """
+    character_profile = {
+        **static_profile,
+        **runtime_state,
+        "global_user_id": global_user_id,
+    }
+    return character_profile
+
+
 async def get_character_profile() -> CharacterProfileDoc | dict:
     """Retrieve the full ``_id: "global"`` document (profile + runtime state).
 
@@ -17,6 +77,23 @@ async def get_character_profile() -> CharacterProfileDoc | dict:
     """
     db = await get_db()
     doc = await db.character_state.find_one({"_id": "global"})
+    if doc is None:
+        return_value = {}
+        return return_value
+    doc.pop("_id", None)
+    return doc
+
+
+async def get_character_runtime_state() -> dict:
+    """Retrieve only runtime fields from the singleton character document.
+
+    Returns:
+        Runtime state fields with ``_id`` stripped, or an empty dict if the
+        singleton document is missing.
+    """
+    db = await get_db()
+    projection = {field_name: 1 for field_name in RUNTIME_CHARACTER_STATE_FIELDS}
+    doc = await db.character_state.find_one({"_id": "global"}, projection)
     if doc is None:
         return_value = {}
         return return_value

@@ -170,7 +170,29 @@ def _patch_chat_dependencies(monkeypatch, graph) -> None:
         None.
     """
 
-    monkeypatch.setattr(service_module, "_personality", {"name": "Character"})
+    monkeypatch.setattr(
+        service_module,
+        "_static_character_profile",
+        {"name": "Character"},
+    )
+    monkeypatch.setattr(
+        service_module,
+        "_runtime_character_state",
+        {
+            "mood": "old mood",
+            "global_vibe": "old vibe",
+            "reflection_summary": "old reflection",
+        },
+    )
+    monkeypatch.setattr(
+        service_module,
+        "get_character_runtime_state",
+        AsyncMock(return_value={
+            "mood": "fresh mood",
+            "global_vibe": "fresh vibe",
+            "reflection_summary": "fresh reflection",
+        }),
+    )
     monkeypatch.setattr(
         service_module,
         "_ensure_character_global_identity",
@@ -626,9 +648,8 @@ async def test_background_consolidation_refreshes_cached_character_state(monkeyp
 
     monkeypatch.setattr(
         service_module,
-        "_personality",
+        "_runtime_character_state",
         {
-            "name": "Character",
             "mood": "old mood",
             "global_vibe": "old vibe",
             "reflection_summary": "old reflection",
@@ -651,10 +672,10 @@ async def test_background_consolidation_refreshes_cached_character_state(monkeyp
 
     await service_module._run_consolidation_background({"timestamp": "t1"})
 
-    assert service_module._personality["mood"] == "Curious"
-    assert service_module._personality["global_vibe"] == "Focused"
+    assert service_module._runtime_character_state["mood"] == "Curious"
+    assert service_module._runtime_character_state["global_vibe"] == "Focused"
     assert (
-        service_module._personality["reflection_summary"]
+        service_module._runtime_character_state["reflection_summary"]
         == "The previous turn left her attentive."
     )
 
@@ -903,7 +924,29 @@ async def test_chat_listen_only_drops_before_graph(monkeypatch):
     """Listen-only requests should persist and complete without graph work."""
 
     await _reset_queue_state()
-    monkeypatch.setattr(service_module, "_personality", {"name": "Character"})
+    monkeypatch.setattr(
+        service_module,
+        "_static_character_profile",
+        {"name": "Character"},
+    )
+    monkeypatch.setattr(
+        service_module,
+        "_runtime_character_state",
+        {
+            "mood": "old mood",
+            "global_vibe": "old vibe",
+            "reflection_summary": "old reflection",
+        },
+    )
+    monkeypatch.setattr(
+        service_module,
+        "get_character_runtime_state",
+        AsyncMock(return_value={
+            "mood": "fresh mood",
+            "global_vibe": "fresh vibe",
+            "reflection_summary": "fresh reflection",
+        }),
+    )
     monkeypatch.setattr(
         service_module,
         "_ensure_character_global_identity",

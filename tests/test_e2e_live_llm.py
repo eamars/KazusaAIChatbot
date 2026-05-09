@@ -29,6 +29,7 @@ from kazusa_ai_chatbot.db import (
     resolve_global_user_id,
     save_conversation,
     save_memory,
+    split_character_profile_runtime_state,
     UserMemoryUnitType,
 )
 from kazusa_ai_chatbot.mcp_client import mcp_manager
@@ -64,7 +65,10 @@ async def live_env():
     if not character_profile.get("name"):
         pytest.fail("Character profile is missing from MongoDB.")
 
-    brain_service._personality = character_profile
+    (
+        brain_service._static_character_profile,
+        brain_service._runtime_character_state,
+    ) = split_character_profile_runtime_state(character_profile)
     brain_service._graph = brain_service._build_graph()
 
     await mcp_manager.start()
@@ -85,7 +89,10 @@ async def live_env():
 
 async def _refresh_character_profile() -> dict:
     character_profile = await get_character_profile()
-    brain_service._personality = character_profile
+    (
+        brain_service._static_character_profile,
+        brain_service._runtime_character_state,
+    ) = split_character_profile_runtime_state(character_profile)
     return character_profile
 
 

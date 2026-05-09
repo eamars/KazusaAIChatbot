@@ -33,16 +33,19 @@ from kazusa_ai_chatbot.db import (
     backfill_character_conversation_identity,
     check_database_connection,
     close_db,
+    compose_character_profile,
     db_bootstrap,
     ensure_character_identity,
     apply_assistant_delivery_receipt,
     get_character_profile,
+    get_character_runtime_state,
     get_conversation_by_platform_message_id,
     get_conversation_history,
     get_user_profile,
     load_initializer_entries,
     resolve_global_user_id,
     save_conversation,
+    split_character_profile_runtime_state,
 )
 from kazusa_ai_chatbot.mcp_client import mcp_manager
 from kazusa_ai_chatbot.state import IMProcessState, MultiMediaDoc, DebugModes, ReplyContext
@@ -304,7 +307,8 @@ async def _save_assistant_message(result: dict) -> None:
 
 # ── Lifespan ────────────────────────────────────────────────────────
 
-_personality: dict = {}
+_static_character_profile: dict = {}
+_runtime_character_state: dict = {}
 _graph = None
 _task_dispatcher: TaskDispatcher | None = None
 _adapter_registry: AdapterRegistry | None = None
@@ -313,6 +317,33 @@ _chat_input_queue = ChatInputQueue()
 _chat_queue_worker_task: asyncio.Task | None = None
 _reflection_worker_handle: ReflectionWorkerHandle | None = None
 _primary_interaction_active_count = 0
+
+
+async def _refresh_runtime_character_state() -> None:
+    """Replace the process-local runtime state with the current DB projection."""
+    global _runtime_character_state
+
+    runtime_state = await get_character_runtime_state()
+    _runtime_character_state = runtime_state
+
+
+async def _update_runtime_character_state_from_consolidation(
+    consolidation_result: dict,
+) -> None:
+    """Merge persisted runtime-state fields from a consolidation result."""
+    global _runtime_character_state
+
+    runtime_update = {}
+    for field_name in ("mood", "global_vibe", "reflection_summary"):
+        field_value = consolidation_result.get(field_name)
+        if isinstance(field_value, str) and field_value:
+            runtime_update[field_name] = field_value
+
+    if runtime_update:
+        _runtime_character_state = {
+            **_runtime_character_state,
+            **runtime_update,
+        }
 
 
 def _primary_interaction_busy() -> bool:
@@ -513,7 +544,7 @@ async def _process_queued_chat_item(item: QueuedChatItem) -> None:
     """
 
     req = item.request
-    character_name = _personality.get("name", "Character")
+    character_name = _static_character_profile.get("name", "Character")
 
     try:
         character_global_user_id = await _ensure_character_global_identity(
@@ -585,8 +616,12 @@ async def _process_queued_chat_item(item: QueuedChatItem) -> None:
         is_collapsed_turn = bool(item.collapsed_items)
         active_turn_platform_message_ids = _active_turn_platform_message_ids(item)
         active_turn_conversation_row_ids = _active_turn_conversation_row_ids(item)
-        character_profile = dict(_personality)
-        character_profile["global_user_id"] = character_global_user_id
+        await _refresh_runtime_character_state()
+        character_profile = compose_character_profile(
+            _static_character_profile,
+            _runtime_character_state,
+            character_global_user_id,
+        )
 
         logger.debug(f'Chat request: platform={req.platform} channel={req.platform_channel_id or "<dm>"} message={req.platform_message_id or "<none>"} user={req.platform_user_id} global_user={global_user_id} content_type={req.content_type} attachments={len(message_envelope["attachments"])} image_attachments={len(multimedia_input)} history_wide={len(chat_history_wide)} history_recent={len(chat_history_recent)} reply_context={log_preview(reply_context)} debug_modes={active_flags} collapsed={is_collapsed_turn} collapsed_count={len(item.collapsed_items)} content={log_preview(user_input)}')
 
@@ -804,7 +839,9 @@ async def _run_consolidation_background(state: dict) -> None:
     await brain_post_turn.run_consolidation_background(
         state,
         call_consolidation_subgraph_func=call_consolidation_subgraph,
-        personality=_personality,
+        update_character_runtime_state_func=(
+            _update_runtime_character_state_from_consolidation
+        ),
         logger=logger,
     )
 
@@ -883,7 +920,8 @@ async def _hydrate_rag_initializer_cache() -> int:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global _personality, _graph, _task_dispatcher, _adapter_registry
+    global _static_character_profile, _runtime_character_state
+    global _graph, _task_dispatcher, _adapter_registry
     global _reflection_worker_handle
 
     # 1. Database bootstrap
@@ -893,13 +931,18 @@ async def lifespan(app: FastAPI):
     await _hydrate_rag_initializer_cache()
 
     # 3. Load character profile from database
-    _personality = await get_character_profile()
-    if not _personality.get("name"):
+    character_profile = await get_character_profile()
+    if not character_profile.get("name"):
         raise RuntimeError(
             "No character profile found in the database. "
             "Please load one first with:  "
             "python -m scripts.load_character_profile personalities/kazusa.json"
         )
+    (
+        _static_character_profile,
+        _runtime_character_state,
+    ) = split_character_profile_runtime_state(character_profile)
+    await _refresh_runtime_character_state()
 
     # 4. Build the LangGraph pipeline
     _graph = _build_graph()

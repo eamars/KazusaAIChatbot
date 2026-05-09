@@ -16,6 +16,7 @@ from kazusa_ai_chatbot.utils import log_preview
 EnsureCharacterIdentity = Callable[..., Awaitable[str]]
 SaveConversation = Callable[[dict], Awaitable[str | None]]
 CallConsolidation = Callable[[dict], Awaitable[dict]]
+UpdateCharacterRuntimeState = Callable[[dict], Awaitable[None]]
 RecordTurnProgress = Callable[..., Awaitable[dict]]
 
 
@@ -91,7 +92,7 @@ async def run_consolidation_background(
     state: dict,
     *,
     call_consolidation_subgraph_func: CallConsolidation,
-    personality: dict,
+    update_character_runtime_state_func: UpdateCharacterRuntimeState,
     logger: logging.Logger,
 ) -> None:
     """Run consolidation after the dialog has already been returned.
@@ -99,7 +100,8 @@ async def run_consolidation_background(
     Args:
         state: Persona graph state snapshot needed by the consolidator.
         call_consolidation_subgraph_func: Service-level consolidator callable.
-        personality: Mutable character profile cache owned by the service.
+        update_character_runtime_state_func: Service callback that refreshes
+            the process-local runtime character state after a successful write.
         logger: Logger used for compatibility with service logging.
 
     Returns:
@@ -117,10 +119,7 @@ async def run_consolidation_background(
     if not write_success.get("character_state"):
         return
 
-    for field_name in ("mood", "global_vibe", "reflection_summary"):
-        field_value = result.get(field_name)
-        if isinstance(field_value, str) and field_value:
-            personality[field_name] = field_value
+    await update_character_runtime_state_func(result)
 
 
 async def run_conversation_progress_record_background(
