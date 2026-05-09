@@ -5,7 +5,7 @@
 - Goal: Thread `CognitiveEpisode` origin metadata into the consolidation
   subgraph state without changing current `/chat` consolidation writes.
 - Plan class: large
-- Status: approved
+- Status: completed
 - Mandatory skills: `development-plan-writing`, `local-llm-architecture`,
   `no-prepost-user-input`, `py-style`, `test-style-and-execution`; apply
   `cjk-safety` before editing any Python file that contains CJK prompt text.
@@ -24,8 +24,8 @@ Parent plan:
 `development_plans/active/short_term/multi_source_cognition_architecture_plan.md`
 
 Lifecycle: Stage 04 completed and was merged into `main` with commit `2131985`
-on 2026-05-10. Stage 05 is approved for execution. Stage 06 remains draft and
-blocked until this plan records execution evidence.
+on 2026-05-10. Stage 05 completed on 2026-05-10. Stage 06 remains draft and
+must be reviewed against this plan's execution evidence before approval.
 
 ## Context
 
@@ -396,48 +396,51 @@ Projection rules:
 
 ## Progress Checklist
 
-- [ ] Stage 1 — Stage 04 evidence reread.
+- [x] Stage 1 — Stage 04 evidence reread.
   - Covers: Step 1.
   - Verify: Stage 04 evidence names commit `2131985` and full-suite result
     `889 passed, 217 deselected`.
   - Evidence: record in `Execution Evidence`.
   - Handoff: next agent starts at Stage 2.
-  - Sign-off: `<agent/date>` after evidence is recorded.
-- [ ] Stage 2 — origin module contract proven.
+  - Sign-off: `Codex / 2026-05-10` after evidence was recorded.
+- [x] Stage 2 — origin module contract proven.
   - Covers: Steps 2-3.
   - Files: origin module and `tests/test_consolidation_origin_metadata.py`.
   - Verify: focused origin tests pass after the expected red import failure.
   - Evidence: red/green results recorded.
   - Handoff: reread this plan, then start Stage 3.
-  - Sign-off: `<agent/date>` after verification.
-- [ ] Stage 3 — consolidator state and graph seeding complete.
+  - Sign-off: `Codex / 2026-05-10` after red import failure, compile, and
+    focused origin tests passed.
+- [x] Stage 3 — consolidator state and graph seeding complete.
   - Covers: Steps 4-5.
   - Files: consolidator schema and graph wrapper.
   - Verify: both files compile.
   - Evidence: compile output recorded.
   - Handoff: reread this plan, then start Stage 4.
-  - Sign-off: `<agent/date>` after verification.
-- [ ] Stage 4 — direct fixtures and integration assertions complete.
+  - Sign-off: `Codex / 2026-05-10` after schema and graph wrapper compile
+    checks passed.
+- [x] Stage 4 — direct fixtures and integration assertions complete.
   - Covers: Steps 6-7.
   - Files: origin metadata tests and consolidator efficiency tests.
   - Verify: focused integration tests pass.
   - Evidence: command output recorded.
   - Handoff: reread this plan, then start Stage 5.
-  - Sign-off: `<agent/date>` after verification.
-- [ ] Stage 5 — full verification complete.
+  - Sign-off: `Codex / 2026-05-10` after focused integration tests passed.
+- [x] Stage 5 — full verification complete.
   - Covers: Step 8.
   - Verify: every command in `Verification` passes or returns an explicitly
     allowed no-match `rg` exit code.
   - Evidence: all command results recorded.
   - Handoff: next agent starts at Stage 6.
-  - Sign-off: `<agent/date>` after verification.
-- [ ] Stage 6 — lifecycle records flipped.
+  - Sign-off: `Codex / 2026-05-10` after all verification gates passed.
+- [x] Stage 6 — lifecycle records flipped.
   - Covers: Steps 9-10.
   - Files: parent ledger, registry, and this plan.
   - Verify: Stage 05 rows are `completed`.
   - Evidence: row text and commit recorded.
   - Handoff: Stage 06 may be reviewed against this execution evidence.
-  - Sign-off: `<agent/date>` after verification.
+  - Sign-off: `Codex / 2026-05-10` after registry and parent ledger rows were
+    updated.
 
 ## Verification
 
@@ -538,12 +541,12 @@ was verified on `main`.
 
 ## Execution Handoff
 
-Intended execution mode: sequential implementation on a feature branch forked
+Completed execution mode: sequential implementation on a feature branch forked
 from current `main`.
 
-Next unchecked stage: Stage 1 in this plan. Required first action: reread Stage
-04 `Execution Evidence`, then create the Stage 05 feature branch. The
-implementation agent must not start Stage 06 work from this plan.
+Next stage: Stage 06 may be reviewed against this plan's `Execution Evidence`.
+The next agent must not start Stage 06 implementation until its plan is
+approved.
 
 ## Risks
 
@@ -577,14 +580,70 @@ changes, database changes, scheduler changes, or per-write origin policy.
 
 Record after implementation:
 
-- Stage 04 evidence reread:
-- Branch:
-- Commit:
+- Stage 04 evidence reread: Stage 04 `Execution Evidence` was reread on
+  2026-05-10. It records branch
+  `stage-04-rag-cognitive-episode-adapter`, lifecycle rows completed, and
+  full-suite result `889 passed, 217 deselected`. The Stage 05 lifecycle header
+  records the Stage 04 merge/prep commit as `2131985`.
+- Baseline before Stage 05 edits:
+  `venv\Scripts\python -m pytest` passed with
+  `889 passed, 217 deselected` on branch creation.
+- Branch: `stage-05-consolidation-origin-metadata-threading`
+- Commit: `de311a7` (`Implement multi-source cognition stage 05`).
 - Static compile:
+  Full compile command
+  `venv\Scripts\python -m py_compile src\kazusa_ai_chatbot\nodes\persona_supervisor2_consolidator_origin.py src\kazusa_ai_chatbot\nodes\persona_supervisor2_consolidator_schema.py src\kazusa_ai_chatbot\nodes\persona_supervisor2_consolidator.py tests\test_consolidation_origin_metadata.py tests\test_consolidator_efficiency.py`
+  passed.
+  `venv\Scripts\python -m py_compile src\kazusa_ai_chatbot\nodes\persona_supervisor2_consolidator_origin.py`
+  passed.
+  `venv\Scripts\python -m py_compile src\kazusa_ai_chatbot\nodes\persona_supervisor2_consolidator_schema.py`
+  passed.
+  `venv\Scripts\python -m py_compile src\kazusa_ai_chatbot\nodes\persona_supervisor2_consolidator.py`
+  passed.
 - Static greps:
+  `rg -n "consolidation_origin|origin_metadata|trigger_source|input_sources|cognitive_episode" src\kazusa_ai_chatbot\nodes\persona_supervisor2_consolidator_facts.py src\kazusa_ai_chatbot\nodes\persona_supervisor2_consolidator_reflection.py src\kazusa_ai_chatbot\nodes\persona_supervisor2_consolidator_persistence.py src\kazusa_ai_chatbot\nodes\persona_supervisor2_consolidator_memory_units.py src\kazusa_ai_chatbot\nodes\persona_supervisor2_consolidator_images.py`
+  returned no matches with exit code `1`, as expected.
+  `rg -n "consolidation_origin" src\kazusa_ai_chatbot\nodes\persona_supervisor2_consolidator_origin.py src\kazusa_ai_chatbot\nodes\persona_supervisor2_consolidator_schema.py src\kazusa_ai_chatbot\nodes\persona_supervisor2_consolidator.py`
+  returned matches only in the origin module, schema field, import, builder
+  call, and initial subgraph state.
+  `rg -n "\"consolidation_origin\"|\"trigger_source\"|\"input_sources\"" src\kazusa_ai_chatbot\nodes\persona_supervisor2_consolidator_facts.py src\kazusa_ai_chatbot\nodes\persona_supervisor2_consolidator_reflection.py`
+  returned no matches with exit code `1`, as expected.
+  `git diff --check` passed. It printed only line-ending normalization
+  warnings for touched files.
 - Focused tests:
+  `venv\Scripts\python -m pytest tests\test_consolidation_origin_metadata.py -q`
+  first failed as expected with `ModuleNotFoundError:
+  kazusa_ai_chatbot.nodes.persona_supervisor2_consolidator_origin`.
+  After implementing the origin module, the same command passed with
+  `6 passed`.
+  `venv\Scripts\python -m pytest tests\test_consolidator_efficiency.py -q`
+  passed with `3 passed` after adding the direct `cognitive_episode` fixture.
+  `venv\Scripts\python -m pytest tests\test_consolidation_origin_metadata.py tests\test_consolidator_efficiency.py -q`
+  passed with `12 passed`.
 - Adjacent consolidation tests:
+  `venv\Scripts\python -m pytest tests\test_consolidator_facts_rag2.py tests\test_consolidator_reflection_prompts.py`
+  passed with `4 passed`.
+  `venv\Scripts\python -m pytest tests\test_service_background_consolidation.py`
+  passed with `18 passed`.
 - Prior stage regression gates:
+  `venv\Scripts\python -m pytest tests\test_cognitive_episode_contract.py`
+  passed with `15 passed`.
+  `venv\Scripts\python -m pytest tests\test_multi_source_cognition_stage_02_chat_episode_migration.py`
+  passed with `5 passed`.
+  `venv\Scripts\python -m pytest tests\test_multi_source_cognition_stage_03_prompt_selection.py tests\test_cognition_clarification_consumers.py tests\test_cognition_interaction_style_context.py`
+  passed with `43 passed`.
+  `venv\Scripts\python -m pytest tests\test_rag_cognitive_episode_adapter.py tests\test_persona_supervisor2_rag2_integration.py tests\test_persona_supervisor2_rag_skip_shape.py tests\test_rag_projection.py`
+  passed with `31 passed`.
+  `venv\Scripts\python -m pytest tests\test_multi_source_cognition_stage_00_regression_baseline.py`
+  passed with `11 passed`.
+  Extra full-suite sweep: `venv\Scripts\python -m pytest` passed with
+  `898 passed, 217 deselected`.
 - Completion diff review:
+  `git diff --stat` and targeted diffs for consolidator, schema, origin
+  module, and direct fixture were inspected. The diff is limited to origin
+  metadata projection, graph-state seeding, direct fixture updates, focused
+  tests, and lifecycle plan evidence.
 - Lifecycle records:
-- Sign-off:
+  `development_plans/README.md` Stage 05 row is
+  `completed | completed`. Parent ledger `stage_05` row is `completed`.
+- Sign-off: `Codex / 2026-05-10`.

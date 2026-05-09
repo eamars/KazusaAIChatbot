@@ -33,6 +33,9 @@ from kazusa_ai_chatbot.nodes.persona_supervisor2_consolidator_reflection import 
     global_state_updater,
     relationship_recorder,
 )
+from kazusa_ai_chatbot.nodes.persona_supervisor2_consolidator_origin import (
+    build_user_message_consolidation_origin,
+)
 from kazusa_ai_chatbot.nodes.persona_supervisor2_consolidator_schema import (
     ConsolidatorState,
     normalize_subjective_appraisals,
@@ -91,6 +94,9 @@ def _build_existing_dedup_keys(global_state: GlobalPersonaState) -> set[str]:
 
 
 async def call_consolidation_subgraph(global_state: GlobalPersonaState):
+    consolidation_origin = build_user_message_consolidation_origin(
+        episode=global_state["cognitive_episode"],
+    )
     sub_agent_builder = StateGraph(ConsolidatorState)
     reflection_barrier = "reflection_done"
     facts_barrier = "facts_done"
@@ -155,6 +161,7 @@ async def call_consolidation_subgraph(global_state: GlobalPersonaState):
         "decontexualized_input": global_state["decontexualized_input"],
         "chat_history_recent": chat_history_recent,
         "metadata": {},
+        "consolidation_origin": consolidation_origin,
     } # pyright: ignore[reportAssignmentType]
 
     result = await sub_graph.ainvoke(sub_state)
