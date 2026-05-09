@@ -16,6 +16,9 @@ from kazusa_ai_chatbot.nodes.referent_resolution import (
     should_skip_rag_for_unresolved_referents,
     unresolved_referent_reason,
 )
+from kazusa_ai_chatbot.rag.cognitive_episode_adapter import (
+    build_text_chat_rag_request,
+)
 from kazusa_ai_chatbot.state import IMProcessState
 from kazusa_ai_chatbot.time_context import format_history_for_llm
 from kazusa_ai_chatbot.utils import build_interaction_history_recent, log_preview
@@ -120,47 +123,30 @@ async def stage_1_research(state: GlobalPersonaState) -> dict:
         }
         return return_value
 
+    rag_request = build_text_chat_rag_request(
+        episode=state["cognitive_episode"],
+        decontexualized_input=state["decontexualized_input"],
+        character_profile=state["character_profile"],
+        user_profile=state["user_profile"],
+        prompt_message_context=state["prompt_message_context"],
+        channel_topic=state["channel_topic"],
+        chat_history_recent=state["chat_history_recent"],
+        chat_history_wide=state["chat_history_wide"],
+        reply_context=state["reply_context"],
+        indirect_speech_context=state["indirect_speech_context"],
+        conversation_progress=state.get("conversation_progress"),
+        conversation_episode_state=state.get("conversation_episode_state"),
+        promoted_reflection_context=state.get("promoted_reflection_context"),
+    )
     rag_supervisor_result = await call_rag_supervisor(
-        original_query=state["decontexualized_input"],
-        character_name=state["character_profile"]["name"],
-        context={
-            "platform": state["platform"],
-            "platform_channel_id": state["platform_channel_id"],
-            "channel_type": state["channel_type"],
-            "character_profile": {
-                "global_user_id": state["character_profile"]["global_user_id"],
-                "name": state["character_profile"]["name"],
-            },
-            "active_turn_platform_message_ids": state.get(
-                "active_turn_platform_message_ids",
-                [],
-            ),
-            "active_turn_conversation_row_ids": state.get(
-                "active_turn_conversation_row_ids",
-                [],
-            ),
-            "global_user_id": state["global_user_id"],
-            "user_name": state["user_name"],
-            "user_profile": state["user_profile"],
-            "current_timestamp": state["timestamp"],
-            "time_context": state["time_context"],
-            "prompt_message_context": state["prompt_message_context"],
-            "channel_topic": state["channel_topic"],
-            "chat_history_recent": state["chat_history_recent"],
-            "chat_history_wide": state["chat_history_wide"],
-            "reply_context": state["reply_context"],
-            "indirect_speech_context": state["indirect_speech_context"],
-            "conversation_progress": state.get("conversation_progress"),
-            "conversation_episode_state": state.get("conversation_episode_state"),
-            "promoted_reflection_context": state.get(
-                "promoted_reflection_context"
-            ),
-        },
+        original_query=rag_request["original_query"],
+        character_name=rag_request["character_name"],
+        context=rag_request["context"],
     )
     rag_result = project_known_facts(
         rag_supervisor_result["known_facts"],
-        current_user_id=state["global_user_id"],
-        character_user_id=state["character_profile"]["global_user_id"],
+        current_user_id=rag_request["current_user_id"],
+        character_user_id=rag_request["character_user_id"],
         answer=str(rag_supervisor_result["answer"]),
         unknown_slots=rag_supervisor_result["unknown_slots"],
         loop_count=int(rag_supervisor_result["loop_count"] or 0),

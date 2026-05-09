@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import pytest
 
+from kazusa_ai_chatbot.cognition_episode import build_text_chat_cognitive_episode
 from kazusa_ai_chatbot.nodes import persona_supervisor2 as supervisor_module
 from kazusa_ai_chatbot.nodes import persona_supervisor2_cognition_l3 as l3_module
+from kazusa_ai_chatbot.time_context import build_character_time_context
 
 
 class _DummyResponse:
@@ -65,6 +67,36 @@ def _clarification_state() -> dict:
     }
 
 
+def _minimal_text_chat_episode() -> dict:
+    """Build a valid text-chat cognitive episode for cognition node fixtures.
+
+    Returns:
+        Valid user-message cognitive episode.
+    """
+    timestamp = "2026-04-27T00:00:00+12:00"
+    time_context = build_character_time_context(timestamp)
+    episode = build_text_chat_cognitive_episode(
+        episode_id="episode-rag-skip",
+        percept_id="percept-rag-skip",
+        timestamp=timestamp,
+        time_context=time_context,
+        user_input="clean body",
+        platform="qq",
+        platform_channel_id="chan-1",
+        channel_type="group",
+        platform_message_id="msg-1",
+        platform_user_id="platform-user-1",
+        global_user_id="user-1",
+        user_name="User",
+        active_turn_platform_message_ids=[],
+        active_turn_conversation_row_ids=[],
+        debug_modes={},
+        target_addressed_user_ids=["character-1"],
+        target_broadcast=False,
+    )
+    return episode
+
+
 @pytest.mark.asyncio
 async def test_stage_1_research_skip_rag_preserves_projected_shape(monkeypatch) -> None:
     """Skipped RAG should still return the full cognition-consumed payload."""
@@ -87,6 +119,26 @@ async def test_stage_1_research_skip_rag_preserves_projected_shape(monkeypatch) 
 
 
 @pytest.mark.asyncio
+async def test_skip_branch_does_not_call_adapter(monkeypatch) -> None:
+    """Skipped RAG should not invoke the cognitive episode adapter."""
+
+    def _build_text_chat_rag_request(**_kwargs: object) -> dict:
+        """Fail if the skip branch reaches request construction."""
+        raise AssertionError("RAG adapter should not run when clarification is needed")
+
+    monkeypatch.setattr(
+        supervisor_module,
+        "build_text_chat_rag_request",
+        _build_text_chat_rag_request,
+    )
+
+    result = await supervisor_module.stage_1_research(_clarification_state())
+
+    assert result["rag_result"]["answer"] == ""
+    assert result["rag_result"]["supervisor_trace"]["loop_count"] == 0
+
+
+@pytest.mark.asyncio
 async def test_content_anchor_accepts_skipped_rag_result_shape(monkeypatch) -> None:
     """Content Anchor should not raise on the skipped-RAG projection shape."""
     monkeypatch.setattr(l3_module, "_content_anchor_agent_llm", _StaticAsyncLLM())
@@ -103,6 +155,7 @@ async def test_content_anchor_accepts_skipped_rag_result_shape(monkeypatch) -> N
         "logical_stance": "TENTATIVE",
         "character_intent": "CLARIFY",
         "conversation_progress": None,
+        "cognitive_episode": _minimal_text_chat_episode(),
     })
 
     assert result["content_anchors"][1].startswith("[ANSWER]")

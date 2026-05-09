@@ -6,6 +6,7 @@ import json
 
 import pytest
 
+from kazusa_ai_chatbot.cognition_episode import build_text_chat_cognitive_episode
 from kazusa_ai_chatbot.nodes import persona_supervisor2 as supervisor_module
 from kazusa_ai_chatbot.nodes import persona_supervisor2_rag_supervisor2 as rag2_module
 from kazusa_ai_chatbot.rag.cache2_runtime import RAGCache2Runtime
@@ -92,6 +93,113 @@ class _FakeWorker:
 async def _noop_async(*args, **kwargs) -> None:
     """Accept cache write hooks without external persistence."""
     del args, kwargs
+
+
+def _stage_1_research_snapshot_state() -> dict:
+    """Build a full text-chat state for RAG request-shape snapshots.
+
+    Returns:
+        Persona graph state subset with a valid text-chat cognitive episode.
+    """
+    timestamp = "2026-04-27T00:00:00+12:00"
+    time_context = build_character_time_context(timestamp)
+    episode = build_text_chat_cognitive_episode(
+        episode_id="episode-rag-snapshot",
+        percept_id="percept-rag-snapshot",
+        timestamp=timestamp,
+        time_context=time_context,
+        user_input="Need current evidence.",
+        platform="qq",
+        platform_channel_id="chan-1",
+        channel_type="group",
+        platform_message_id="msg-1",
+        platform_user_id="platform-user-1",
+        global_user_id="user-1",
+        user_name="User",
+        active_turn_platform_message_ids=["msg-1", "msg-2"],
+        active_turn_conversation_row_ids=["row-1", "row-2"],
+        debug_modes={},
+        target_addressed_user_ids=["character-1"],
+        target_broadcast=False,
+    )
+    state = {
+        "decontexualized_input": "Need current evidence.",
+        "referents": [],
+        "character_profile": {"name": "Kazusa", "global_user_id": "character-1"},
+        "platform": "qq",
+        "platform_channel_id": "chan-1",
+        "channel_type": "group",
+        "platform_bot_id": "bot-1",
+        "global_user_id": "user-1",
+        "user_name": "User",
+        "user_profile": {"affinity": 500},
+        "timestamp": timestamp,
+        "time_context": time_context,
+        "message_envelope": {
+            "body_text": "Need current evidence.",
+            "raw_wire_text": "Need current evidence.",
+            "mentions": [],
+            "attachments": [],
+            "addressed_to_global_user_ids": ["character-1"],
+            "broadcast": False,
+        },
+        "prompt_message_context": {
+            "body_text": "Need current evidence.",
+            "mentions": [],
+            "attachments": [],
+            "addressed_to_global_user_ids": ["character-1"],
+            "broadcast": False,
+        },
+        "channel_topic": "test",
+        "chat_history_recent": [{"role": "user", "content": "previous turn"}],
+        "chat_history_wide": [{"role": "assistant", "content": "older turn"}],
+        "reply_context": {"platform_message_id": "reply-1"},
+        "indirect_speech_context": "No indirect speech.",
+        "conversation_progress": {
+            "status": "active",
+            "continuity": "same_episode",
+            "current_thread": "Pickup plan is active.",
+        },
+        "conversation_episode_state": {
+            "updated_at": "2026-04-26T23:00:00+00:00",
+            "turn_count": 7,
+        },
+        "promoted_reflection_context": {"summary": "recent reflection"},
+        "active_turn_platform_message_ids": ["msg-1", "msg-2"],
+        "active_turn_conversation_row_ids": ["row-1", "row-2"],
+        "cognitive_episode": episode,
+    }
+    return state
+
+
+def _minimal_text_chat_episode() -> dict:
+    """Build a minimal text-chat cognitive episode for direct graph tests.
+
+    Returns:
+        Valid user-message cognitive episode with no active-turn collapse ids.
+    """
+    timestamp = "2026-04-27T00:00:00+12:00"
+    time_context = build_character_time_context(timestamp)
+    episode = build_text_chat_cognitive_episode(
+        episode_id="episode-rag-direct",
+        percept_id="percept-rag-direct",
+        timestamp=timestamp,
+        time_context=time_context,
+        user_input="clean body",
+        platform="qq",
+        platform_channel_id="chan-1",
+        channel_type="group",
+        platform_message_id="msg-1",
+        platform_user_id="platform-user-1",
+        global_user_id="user-1",
+        user_name="User",
+        active_turn_platform_message_ids=[],
+        active_turn_conversation_row_ids=[],
+        debug_modes={},
+        target_addressed_user_ids=["character-1"],
+        target_broadcast=False,
+    )
+    return episode
 
 
 def _memory_observation_result() -> dict:
@@ -312,6 +420,7 @@ async def test_stage_1_research_calls_rag2_and_projects_payload(monkeypatch) -> 
         "chat_history_wide": [],
         "reply_context": {},
         "indirect_speech_context": "",
+        "cognitive_episode": _minimal_text_chat_episode(),
         "conversation_progress": {
             "status": "active",
             "continuity": "same_episode",
@@ -337,6 +446,84 @@ async def test_stage_1_research_calls_rag2_and_projects_payload(monkeypatch) -> 
     assert captured["context"]["conversation_episode_state"]["turn_count"] == 7
     assert result["rag_result"]["answer"] == "resolved"
     assert result["rag_result"]["user_image"]["user_memory_context"]["objective_facts"][0]["fact"] == "User likes tea"
+
+
+@pytest.mark.asyncio
+async def test_stage_1_research_pre_stage_04_request_shape_snapshot(monkeypatch) -> None:
+    """Current RAG request shape should stay stable across adapter extraction."""
+    captured: dict = {}
+
+    async def _call_rag_supervisor(
+        *,
+        original_query: str,
+        character_name: str,
+        context: dict,
+    ) -> dict:
+        captured["request"] = {
+            "original_query": original_query,
+            "character_name": character_name,
+            "context": context,
+        }
+        return_value = {
+            "answer": "snapshot answer",
+            "known_facts": [],
+            "unknown_slots": [],
+            "loop_count": 1,
+        }
+        return return_value
+
+    monkeypatch.setattr(supervisor_module, "call_rag_supervisor", _call_rag_supervisor)
+
+    result = await supervisor_module.stage_1_research(
+        _stage_1_research_snapshot_state()
+    )
+
+    expected_request = {
+        "original_query": "Need current evidence.",
+        "character_name": "Kazusa",
+        "context": {
+            "platform": "qq",
+            "platform_channel_id": "chan-1",
+            "channel_type": "group",
+            "character_profile": {
+                "global_user_id": "character-1",
+                "name": "Kazusa",
+            },
+            "active_turn_platform_message_ids": ["msg-1", "msg-2"],
+            "active_turn_conversation_row_ids": ["row-1", "row-2"],
+            "global_user_id": "user-1",
+            "user_name": "User",
+            "user_profile": {"affinity": 500},
+            "current_timestamp": "2026-04-27T00:00:00+12:00",
+            "time_context": build_character_time_context(
+                "2026-04-27T00:00:00+12:00"
+            ),
+            "prompt_message_context": {
+                "body_text": "Need current evidence.",
+                "mentions": [],
+                "attachments": [],
+                "addressed_to_global_user_ids": ["character-1"],
+                "broadcast": False,
+            },
+            "channel_topic": "test",
+            "chat_history_recent": [{"role": "user", "content": "previous turn"}],
+            "chat_history_wide": [{"role": "assistant", "content": "older turn"}],
+            "reply_context": {"platform_message_id": "reply-1"},
+            "indirect_speech_context": "No indirect speech.",
+            "conversation_progress": {
+                "status": "active",
+                "continuity": "same_episode",
+                "current_thread": "Pickup plan is active.",
+            },
+            "conversation_episode_state": {
+                "updated_at": "2026-04-26T23:00:00+00:00",
+                "turn_count": 7,
+            },
+            "promoted_reflection_context": {"summary": "recent reflection"},
+        },
+    }
+    assert captured["request"] == expected_request
+    assert result["rag_result"]["answer"] == "snapshot answer"
 
 
 @pytest.mark.asyncio
@@ -386,6 +573,7 @@ async def test_stage_1_research_skips_rag_for_unresolved_referents(monkeypatch) 
         "chat_history_wide": [],
         "reply_context": {},
         "indirect_speech_context": "",
+        "cognitive_episode": _minimal_text_chat_episode(),
     })
 
     rag_result = result["rag_result"]
@@ -453,6 +641,7 @@ async def test_stage_1_research_runs_rag_for_mixed_referents(monkeypatch) -> Non
         "chat_history_wide": [],
         "reply_context": {},
         "indirect_speech_context": "",
+        "cognitive_episode": _minimal_text_chat_episode(),
     })
 
     assert called is True

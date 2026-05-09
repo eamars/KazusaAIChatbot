@@ -8,8 +8,10 @@ from pathlib import Path
 import pytest
 
 from kazusa_ai_chatbot.config import CHARACTER_GLOBAL_USER_ID
+from kazusa_ai_chatbot.cognition_episode import build_text_chat_cognitive_episode
 from kazusa_ai_chatbot.nodes import dialog_agent as dialog_module
 from kazusa_ai_chatbot.nodes import persona_supervisor2_cognition_l3 as l3_module
+from kazusa_ai_chatbot.time_context import build_character_time_context
 
 _ROOT = Path(__file__).resolve().parents[1]
 
@@ -103,6 +105,32 @@ def _character_profile() -> dict:
     }
 
 
+def _minimal_text_chat_episode() -> dict:
+    """Build a valid text-chat cognitive episode for direct L3 tests."""
+    timestamp = "2026-04-27T00:00:00+12:00"
+    time_context = build_character_time_context(timestamp)
+    episode = build_text_chat_cognitive_episode(
+        episode_id="episode-history-policy",
+        percept_id="percept-history-policy",
+        timestamp=timestamp,
+        time_context=time_context,
+        user_input="please answer",
+        platform="qq",
+        platform_channel_id="chan-1",
+        channel_type="group",
+        platform_message_id="msg-1",
+        platform_user_id="platform-user-1",
+        global_user_id="global-user-1",
+        user_name="User",
+        active_turn_platform_message_ids=[],
+        active_turn_conversation_row_ids=[],
+        debug_modes={},
+        target_addressed_user_ids=[CHARACTER_GLOBAL_USER_ID],
+        target_broadcast=False,
+    )
+    return episode
+
+
 def _base_l3_state() -> dict:
     """Build a reusable L3 state fixture.
 
@@ -114,6 +142,7 @@ def _base_l3_state() -> dict:
     """
 
     return {
+        "cognitive_episode": _minimal_text_chat_episode(),
         "character_profile": _character_profile(),
         "user_profile": {"affinity": 700, "last_relationship_insight": "friendly task support"},
         "chat_history_recent": _history(),

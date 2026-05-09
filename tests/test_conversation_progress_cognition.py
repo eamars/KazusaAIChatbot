@@ -7,8 +7,10 @@ import json
 import pytest
 
 from kazusa_ai_chatbot.conversation_progress import projection
+from kazusa_ai_chatbot.cognition_episode import build_text_chat_cognitive_episode
 from kazusa_ai_chatbot.nodes import dialog_agent as dialog_module
 from kazusa_ai_chatbot.nodes import persona_supervisor2_cognition_l3 as l3_module
+from kazusa_ai_chatbot.time_context import build_character_time_context
 
 
 class _FakeResponse:
@@ -30,6 +32,32 @@ class _CapturingLLM:
         return _FakeResponse(self.payload)
 
 
+def _minimal_text_chat_episode() -> dict:
+    """Build a valid text-chat cognitive episode for direct L3 tests."""
+    timestamp = "2026-04-27T00:00:00+12:00"
+    time_context = build_character_time_context(timestamp)
+    episode = build_text_chat_cognitive_episode(
+        episode_id="episode-progress-cognition",
+        percept_id="percept-progress-cognition",
+        timestamp=timestamp,
+        time_context=time_context,
+        user_input="what is the missing third point?",
+        platform="qq",
+        platform_channel_id="chan-1",
+        channel_type="group",
+        platform_message_id="msg-1",
+        platform_user_id="platform-user-1",
+        global_user_id="user-1",
+        user_name="User",
+        active_turn_platform_message_ids=[],
+        active_turn_conversation_row_ids=[],
+        debug_modes={},
+        target_addressed_user_ids=["character-1"],
+        target_broadcast=False,
+    )
+    return episode
+
+
 @pytest.mark.asyncio
 async def test_content_anchor_agent_receives_conversation_progress(monkeypatch) -> None:
     """Content Anchor input includes compact progress guidance."""
@@ -45,6 +73,7 @@ async def test_content_anchor_agent_receives_conversation_progress(monkeypatch) 
     monkeypatch.setattr(l3_module, "_content_anchor_agent_llm", fake_llm)
 
     result = await l3_module.call_content_anchor_agent({
+        "cognitive_episode": _minimal_text_chat_episode(),
         "character_profile": {"name": "Kazusa"},
         "decontexualized_input": "what is the missing third point?",
         "rag_result": {},
@@ -115,6 +144,7 @@ def test_content_anchor_prompt_requires_fact_based_answers_without_case_example(
 
 def _profile_conformance_state() -> dict:
     return {
+        "cognitive_episode": _minimal_text_chat_episode(),
         "character_profile": {
             "name": "一之濑明日奈",
             "mood": "Neutral",

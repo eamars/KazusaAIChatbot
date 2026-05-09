@@ -52,6 +52,15 @@ Continuation metadata, when present, is kept under
 `supervisor_trace.dispatched[*].continuation`; it is not public evidence for
 cognition.
 
+## Cognitive Episode Adapter
+
+`cognitive_episode_adapter.py` owns the text-chat projection from
+`CognitiveEpisode` into the current RAG request boundary.
+`build_text_chat_rag_request(...)` is the public entrypoint. RAG request
+construction is centralized there; the rest of RAG continues to receive
+`original_query`, `character_name`, and `context` rather than raw
+`CognitiveEpisode` payloads.
+
 ## Runtime Lifecycle
 
 ```text

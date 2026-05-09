@@ -4,11 +4,11 @@
 
 - Goal: Centralize `/chat` RAG request construction in a narrow `CognitiveEpisode`-aware adapter while keeping current text `/chat` retrieval byte-equivalent.
 - Plan class: large
-- Status: approved
+- Status: completed
 - Mandatory skills: `development-plan-writing`, `local-llm-architecture`, `py-style`, `test-style-and-execution`. Apply `cjk-safety` only if a Python edit accidentally surfaces CJK content; this plan should not require it.
 - Overall cutover strategy: bigbang inside `stage_1_research`. The inline RAG request builder is replaced by `build_text_chat_rag_request(...)` in one cutover; no dual path, no feature flag.
 - Highest-risk areas: silent drift in the RAG request shape; unresolved-referent skip branch leaking into the new adapter; future episode sources entering text RAG by accident; Stage 05 unblocking before evidence is recorded.
-- Acceptance criteria: adapter exists with the public contract below; non-skip `/chat` runs through it exactly once; request shape is equivalent to the pre-Stage-04 shape; unsupported sources fail closed; cognition/dialog/consolidation/RAG-internals do not consume `cognitive_episode`; all Verification gates pass; parent ledger and registry rows are flipped to `completed`.
+- Acceptance criteria: adapter exists with the public contract below; non-skip `/chat` runs through it exactly once; request shape is equivalent to the pre-Stage-04 shape; unsupported sources fail closed; dialog/consolidation/RAG-internals do not consume `cognitive_episode`; cognition prompt payloads remain unchanged; all Verification gates pass; parent ledger and registry rows are flipped to `completed`.
 
 Parent plan:
 `development_plans/active/short_term/multi_source_cognition_architecture_plan.md`
@@ -105,7 +105,7 @@ After Stage 04, Stage 05 can rely on these facts:
 - The non-skip branch must build the RAG request by calling `build_text_chat_rag_request(...)` exactly once.
 - The non-skip branch must pass `state["cognitive_episode"]` by direct indexing.
 - Unsupported future episode sources must fail closed in the adapter. Do not silently downgrade them to the current text-chat shape.
-- Prompt/RAG/consolidation internals must not receive or inspect raw `CognitiveEpisode` objects in this stage.
+- Dialog, RAG internals, consolidation, and prompt payloads must not receive or inspect raw `CognitiveEpisode` objects in this stage.
 - After any automatic context compaction, the active agent must reread this entire plan before continuing implementation, verification, handoff, or final reporting.
 - After signing off any major progress checklist stage, the active agent must reread this entire plan before starting the next stage and confirm no stale assumption has appeared.
 
@@ -118,7 +118,7 @@ After Stage 04, Stage 05 can rely on these facts:
 - Add focused adapter tests for exact projection, invalid sources, and missing required fields.
 - Add an integration snapshot test that captures the pre-Stage-04 RAG request shape and asserts the post-cutover call equals it.
 - Update direct test fixtures that invoke Stage 03+ graph nodes so they include a valid Stage 01/02 `CognitiveEpisode`.
-- Add static checks that prove no prompt, dialog, consolidation, or RAG-internal code consumes `cognitive_episode` in this stage.
+- Add static checks that prove no dialog, consolidation, or RAG-internal code consumes `cognitive_episode` in this stage, and no cognition module consumes the RAG adapter.
 - Update the parent ledger row and `development_plans/README.md` registry to mark Stage 04 `completed` after verification passes.
 
 ## Deferred
@@ -353,6 +353,9 @@ Forbidden context keys:
 - `tests/test_persona_supervisor2_rag2_integration.py` — update fixtures to carry a valid Stage 02 `CognitiveEpisode`, add the pre-Stage-04 request-shape snapshot test, and add the post-cutover equivalence assertion.
 - `tests/test_persona_supervisor2_rag_skip_shape.py` — update fixtures to carry a valid Stage 02 `CognitiveEpisode` and assert the skip branch still does not call the adapter and does not read `cognitive_episode`.
 - `tests/test_rag_projection.py` — update fixtures only where direct calls into the post-Stage-02 path now require `cognitive_episode`.
+- `tests/test_cognition_preference_adapter.py` — full-suite verification exposed direct Stage 03 L3 fixture gaps; add only a valid `CognitiveEpisode` fixture.
+- `tests/test_conversation_progress_cognition.py` — full-suite verification exposed direct Stage 03 L3 fixture gaps; add only a valid `CognitiveEpisode` fixture.
+- `tests/test_conversation_progress_history_policy.py` — full-suite verification exposed direct Stage 03 L3 fixture gaps; add only a valid `CognitiveEpisode` fixture.
 - `development_plans/active/short_term/multi_source_cognition_architecture_stage_04_rag_cognitive_episode_adapter_plan.md` — update the checklist and `Execution Evidence` only during execution.
 - `development_plans/active/short_term/multi_source_cognition_architecture_plan.md` — flip the `stage_04` ledger row to `completed` after verification passes.
 - `development_plans/README.md` — flip the Stage 04 registry row from `approved | not_started` to `completed | completed` after verification passes.
@@ -486,48 +489,52 @@ Each step has one action, named files/symbols, expected evidence, and a TDD trip
 
 ## Progress Checklist
 
-- [ ] Stage 1 — pre-cutover request snapshot captured.
+- [x] Stage 1 — pre-cutover request snapshot captured.
   - Covers: Step 1.
   - Files: `tests/test_persona_supervisor2_rag2_integration.py`.
   - Verify: focused snapshot test passes against current `main`.
   - Evidence: snapshot fingerprint recorded in `Execution Evidence`.
   - Handoff: next agent starts at Stage 2.
-  - Sign-off: `<agent/date>` after verification and evidence are recorded.
-- [ ] Stage 2 — adapter contract test added (red) and adapter module implemented (green).
+  - Sign-off: `Codex / 2026-05-09` after focused verification passed.
+- [x] Stage 2 — adapter contract test added (red) and adapter module implemented (green).
   - Covers: Steps 2-3.
   - Files: `tests/test_rag_cognitive_episode_adapter.py`, `src/kazusa_ai_chatbot/rag/cognitive_episode_adapter.py`.
   - Verify: focused adapter tests pass; `py_compile` passes.
   - Evidence: red expected failure and green pass count recorded.
   - Handoff: reread this plan, then start Stage 3.
-  - Sign-off: `<agent/date>` after verification and evidence are recorded.
-- [ ] Stage 3 — `stage_1_research` cut over.
+  - Sign-off: `Codex / 2026-05-09` after red import failure and green focused
+    tests passed.
+- [x] Stage 3 — `stage_1_research` cut over.
   - Covers: Step 4.
   - Files: `src/kazusa_ai_chatbot/nodes/persona_supervisor2.py`.
   - Verify: integration snapshot equality passes; rag2 integration suite passes.
   - Evidence: command output recorded.
   - Handoff: reread this plan, then start Stage 4.
-  - Sign-off: `<agent/date>` after verification and evidence are recorded.
-- [ ] Stage 4 — skip-branch independence and direct fixtures updated.
+  - Sign-off: `Codex / 2026-05-09` after integration snapshot equality and
+    rag2 integration suite passed.
+- [x] Stage 4 — skip-branch independence and direct fixtures updated.
   - Covers: Steps 5-6.
   - Files: `tests/test_persona_supervisor2_rag_skip_shape.py`, `tests/test_rag_projection.py`.
   - Verify: focused tests pass.
   - Evidence: command output recorded.
   - Handoff: reread this plan, then start Stage 5.
-  - Sign-off: `<agent/date>` after verification and evidence are recorded.
-- [ ] Stage 5 — README updated and full Verification executed.
+  - Sign-off: `Codex / 2026-05-09` after skip-shape and RAG projection tests
+    passed.
+- [x] Stage 5 — README updated and full Verification executed.
   - Covers: Steps 7-8.
   - Files: `src/kazusa_ai_chatbot/rag/README.md`.
   - Verify: every command in `Verification` passes per its expected result.
   - Evidence: each command output recorded.
   - Handoff: next agent starts at Stage 6.
-  - Sign-off: `<agent/date>` after verification and evidence are recorded.
-- [ ] Stage 6 — lifecycle records flipped.
+  - Sign-off: `Codex / 2026-05-09` after all verification gates passed.
+- [x] Stage 6 — lifecycle records flipped.
   - Covers: Step 9.
   - Files: parent ledger and `development_plans/README.md`.
   - Verify: parent-ledger row and registry row both show `completed`.
   - Evidence: row-text confirmation recorded.
   - Handoff: Stage 05 may now begin; it must read this plan's Execution Evidence first.
-  - Sign-off: `<agent/date>` after lifecycle updates are recorded.
+  - Sign-off: `Codex / 2026-05-09` after registry and parent ledger rows
+    were updated.
 
 ## Verification
 
@@ -539,9 +546,15 @@ Run from repository root with the project virtual environment.
 
 ### Static Greps
 
-- `rg -n "cognitive_episode|RAGEpisode|build_text_chat_rag_request|trigger_source|input_sources" src\kazusa_ai_chatbot\nodes\persona_supervisor2_cognition_l1.py src\kazusa_ai_chatbot\nodes\persona_supervisor2_cognition_l2.py src\kazusa_ai_chatbot\nodes\persona_supervisor2_cognition_l3.py src\kazusa_ai_chatbot\nodes\persona_supervisor2_consolidator.py src\kazusa_ai_chatbot\nodes\persona_supervisor2_dialog.py`
+- `rg -n "RAGEpisode|build_text_chat_rag_request" src\kazusa_ai_chatbot\nodes\persona_supervisor2_cognition_l1.py src\kazusa_ai_chatbot\nodes\persona_supervisor2_cognition_l2.py src\kazusa_ai_chatbot\nodes\persona_supervisor2_cognition_l3.py`
 
   Expected result: no matches. `rg` exit code `1` is acceptable and means this check passed. Any match is a blocker unless this plan is updated and reapproved.
+
+- `rg -n "cognitive_episode|RAGEpisode|build_text_chat_rag_request|trigger_source|input_sources" src\kazusa_ai_chatbot\nodes\persona_supervisor2_consolidator.py src\kazusa_ai_chatbot\nodes\dialog_agent.py`
+
+  Expected result: no matches. `rg` exit code `1` is acceptable and means this
+  check passed. Cognition modules are not included in this check because Stage
+  03 intentionally consumes `state["cognitive_episode"]` for prompt selection.
 
 - `rg -n "reflection_signal|internal_thought|scheduled_recall|system_probe|image_observation|audio_observation|reflection_artifact|retrieved_memory" src\kazusa_ai_chatbot\rag src\kazusa_ai_chatbot\nodes\persona_supervisor2.py`
 
@@ -583,7 +596,9 @@ Stage 04 is complete when:
 - unresolved-referent skip behavior is unchanged and does not require `cognitive_episode`;
 - normal `/chat` RAG request shape is equivalent to the pre-Stage-04 snapshot;
 - unsupported non-text-chat episode sources fail closed;
-- RAG internals, prompts, cognition, dialog, and consolidation do not consume `cognitive_episode`;
+- dialog, consolidation, and RAG internals do not consume `cognitive_episode`;
+- cognition prompt payloads remain unchanged and cognition modules do not
+  consume the new RAG adapter;
 - all Verification commands pass or have the explicitly allowed no-match exit code;
 - the parent ledger row and registry row are `completed`.
 
@@ -601,13 +616,10 @@ Performed before approval on 2026-05-09:
 
 Intended execution mode: sequential handoff to a single implementation agent on a feature branch forked from current `main`.
 
-Next unchecked stage: `Stage 1 — pre-cutover request snapshot captured`.
+Completed execution: all Stage 04 checklist items are signed off.
 
-Required skills before editing: `development-plan-writing`, `local-llm-architecture`, `py-style`, `test-style-and-execution`.
-
-Files expected to change next: `tests/test_persona_supervisor2_rag2_integration.py` (Step 1).
-
-Verification before sign-off of the next stage: `venv\Scripts\python -m pytest tests\test_persona_supervisor2_rag2_integration.py::test_stage_1_research_pre_stage_04_request_shape_snapshot -q`.
+Next stage: Stage 05 may be reviewed for approval. The next agent must reread
+this Execution Evidence before approving or executing Stage 05.
 
 ## Risks
 
@@ -638,13 +650,64 @@ The completion artifact must not include prompt changes, consolidation changes, 
 
 Record after implementation:
 
-- Branch:
-- Commit:
+- Branch: `stage-04-rag-cognitive-episode-adapter`
+- Commit: created after evidence recording; use the feature branch head.
 - Pre-Stage-04 request snapshot fingerprint:
+  `2f38086b2e49e8c3fa8deefee7610f20fa9b2864d6b7372851bcbb95dde0a879`
+  from sorted JSON of captured RAG context.
 - Static compile:
+  `venv\Scripts\python -m py_compile src\kazusa_ai_chatbot\rag\cognitive_episode_adapter.py src\kazusa_ai_chatbot\nodes\persona_supervisor2.py tests\test_rag_cognitive_episode_adapter.py tests\test_persona_supervisor2_rag2_integration.py tests\test_persona_supervisor2_rag_skip_shape.py tests\test_rag_projection.py`
+  passed.
+- Adapter red check:
+  `venv\Scripts\python -m pytest tests\test_rag_cognitive_episode_adapter.py -q`
+  failed as expected with `ModuleNotFoundError:
+  kazusa_ai_chatbot.rag.cognitive_episode_adapter`.
 - Static greps:
+  Original cognition non-consumption grep was corrected during execution
+  because Stage 03 intentionally consumes `state["cognitive_episode"]` inside
+  cognition modules. Corrected checks passed:
+  `rg -n "RAGEpisode|build_text_chat_rag_request" src\kazusa_ai_chatbot\nodes\persona_supervisor2_cognition_l1.py src\kazusa_ai_chatbot\nodes\persona_supervisor2_cognition_l2.py src\kazusa_ai_chatbot\nodes\persona_supervisor2_cognition_l3.py`
+  returned no matches with exit code `1`.
+  `rg -n "cognitive_episode|RAGEpisode|build_text_chat_rag_request|trigger_source|input_sources" src\kazusa_ai_chatbot\nodes\persona_supervisor2_consolidator.py src\kazusa_ai_chatbot\nodes\dialog_agent.py`
+  returned no matches with exit code `1`.
+  `rg -n "reflection_signal|internal_thought|scheduled_recall|system_probe|image_observation|audio_observation|reflection_artifact|retrieved_memory" src\kazusa_ai_chatbot\rag src\kazusa_ai_chatbot\nodes\persona_supervisor2.py`
+  returned no matches with exit code `1`.
+  `git diff --check` passed.
 - Focused tests:
+  `venv\Scripts\python -m py_compile src\kazusa_ai_chatbot\rag\cognitive_episode_adapter.py tests\test_rag_cognitive_episode_adapter.py`
+  passed. `venv\Scripts\python -m pytest tests\test_rag_cognitive_episode_adapter.py -q`
+  passed with `9 passed`.
+  `venv\Scripts\python -m py_compile src\kazusa_ai_chatbot\nodes\persona_supervisor2.py`
+  passed. `venv\Scripts\python -m pytest tests\test_persona_supervisor2_rag2_integration.py -q`
+  passed with `6 passed`.
+  `venv\Scripts\python -m py_compile tests\test_persona_supervisor2_rag_skip_shape.py`
+  passed. `venv\Scripts\python -m pytest tests\test_persona_supervisor2_rag_skip_shape.py -q`
+  passed with `3 passed`. `venv\Scripts\python -m pytest tests\test_rag_projection.py -q`
+  passed with `13 passed`.
+  Full-suite verification initially exposed direct Stage 03 fixture gaps in
+  `tests/test_cognition_preference_adapter.py`,
+  `tests/test_conversation_progress_cognition.py`, and
+  `tests/test_conversation_progress_history_policy.py`. After adding valid
+  text-chat cognitive episode fixtures, `venv\Scripts\python -m py_compile`
+  for those three files passed and
+  `venv\Scripts\python -m pytest tests\test_cognition_preference_adapter.py tests\test_conversation_progress_cognition.py tests\test_conversation_progress_history_policy.py -q`
+  passed with `16 passed`.
+  `venv\Scripts\python -m pytest` passed with `889 passed, 217 deselected`.
 - Prior stage regression gates:
+  `venv\Scripts\python -m pytest tests\test_cognitive_episode_contract.py`
+  passed with `15 passed`.
+  `venv\Scripts\python -m pytest tests\test_multi_source_cognition_stage_02_chat_episode_migration.py`
+  passed with `5 passed`.
+  `venv\Scripts\python -m pytest tests\test_multi_source_cognition_stage_03_prompt_selection.py tests\test_cognition_clarification_consumers.py tests\test_cognition_interaction_style_context.py`
+  passed with `43 passed`.
+  `venv\Scripts\python -m pytest tests\test_multi_source_cognition_stage_00_regression_baseline.py`
+  passed with `11 passed`.
 - Completion diff review:
+  `git diff --stat` showed only the approved adapter, `stage_1_research`,
+  RAG README, focused tests, and plan/registry files. The inspected
+  `persona_supervisor2.py` diff contains only the non-skip adapter cutover.
+  The inspected adapter diff contains the new deterministic projection module.
 - Lifecycle records flipped:
-- Sign-off:
+  `development_plans/README.md` Stage 04 row is `completed | completed`.
+  Parent ledger `stage_04` row is `completed`.
+- Sign-off: `Codex / 2026-05-09`.

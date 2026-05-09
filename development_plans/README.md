@@ -43,7 +43,7 @@ long_term/todo.md
 | [multi_source_cognition_architecture_stage_01_cognitive_episode_contract_plan.md](active/short_term/multi_source_cognition_architecture_stage_01_cognitive_episode_contract_plan.md) | completed | completed |
 | [multi_source_cognition_architecture_stage_02_chat_cognitive_episode_migration_plan.md](active/short_term/multi_source_cognition_architecture_stage_02_chat_cognitive_episode_migration_plan.md) | completed | completed |
 | [multi_source_cognition_architecture_stage_03_shared_cognition_prompt_selection_plan.md](active/short_term/multi_source_cognition_architecture_stage_03_shared_cognition_prompt_selection_plan.md) | completed | completed |
-| [multi_source_cognition_architecture_stage_04_rag_cognitive_episode_adapter_plan.md](active/short_term/multi_source_cognition_architecture_stage_04_rag_cognitive_episode_adapter_plan.md) | approved | not_started |
+| [multi_source_cognition_architecture_stage_04_rag_cognitive_episode_adapter_plan.md](active/short_term/multi_source_cognition_architecture_stage_04_rag_cognitive_episode_adapter_plan.md) | completed | completed |
 | [multi_source_cognition_architecture_stage_05_consolidation_origin_metadata_threading_plan.md](active/short_term/multi_source_cognition_architecture_stage_05_consolidation_origin_metadata_threading_plan.md) | draft | blocked |
 | [reflection_driven_character_state_evolution_plan.md](active/short_term/reflection_driven_character_state_evolution_plan.md) | draft | deferred |
 

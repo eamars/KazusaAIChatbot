@@ -5,7 +5,9 @@ from types import SimpleNamespace
 
 import pytest
 
+from kazusa_ai_chatbot.cognition_episode import build_text_chat_cognitive_episode
 from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition_l3 import call_preference_adapter
+from kazusa_ai_chatbot.time_context import build_character_time_context
 
 
 class _FakePreferenceAdapterLlm:
@@ -35,10 +37,37 @@ class _CapturingPreferenceAdapterLlm:
         return return_value
 
 
+def _minimal_text_chat_episode() -> dict:
+    """Build a valid text-chat cognitive episode for direct L3 tests."""
+    timestamp = "2026-04-27T00:00:00+12:00"
+    time_context = build_character_time_context(timestamp)
+    episode = build_text_chat_cognitive_episode(
+        episode_id="episode-preference",
+        percept_id="percept-preference",
+        timestamp=timestamp,
+        time_context=time_context,
+        user_input="please keep replies short",
+        platform="qq",
+        platform_channel_id="chan-1",
+        channel_type="group",
+        platform_message_id="msg-1",
+        platform_user_id="platform-user-1",
+        global_user_id="user-1",
+        user_name="User",
+        active_turn_platform_message_ids=[],
+        active_turn_conversation_row_ids=[],
+        debug_modes={},
+        target_addressed_user_ids=["character-1"],
+        target_broadcast=False,
+    )
+    return episode
+
+
 def _preference_state() -> dict:
     """Build the minimal state consumed by ``call_preference_adapter``."""
 
     return {
+        "cognitive_episode": _minimal_text_chat_episode(),
         "decontexualized_input": "please keep replies short",
         "rag_result": {
             "user_image": {

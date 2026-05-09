@@ -83,7 +83,7 @@ evidence names the required artifact paths.
 | `stage_01` | `multi_source_cognition_architecture_stage_01_cognitive_episode_contract_plan.md`                | completed     | `src/kazusa_ai_chatbot/cognition_episode.py`; `tests/test_cognitive_episode_contract.py`; required verification passed | `stage_02+`      |
 | `stage_02` | `multi_source_cognition_architecture_stage_02_chat_cognitive_episode_migration_plan.md`          | completed     | `/chat` episode wiring, pass-through tests, baseline rerun | `stage_03+`      |
 | `stage_03` | `multi_source_cognition_architecture_stage_03_shared_cognition_prompt_selection_plan.md`         | completed     | prompt selector artifact, render tests, baseline rerun     | `stage_04+`      |
-| `stage_04` | `multi_source_cognition_architecture_stage_04_rag_cognitive_episode_adapter_plan.md`             | approved      | RAG input and retrieval equivalence artifacts              | `stage_05+`      |
+| `stage_04` | `multi_source_cognition_architecture_stage_04_rag_cognitive_episode_adapter_plan.md`             | completed     | RAG input and retrieval equivalence artifacts              | `stage_05+`      |
 | `stage_05` | `multi_source_cognition_architecture_stage_05_consolidation_origin_metadata_threading_plan.md`   | draft         | origin metadata threading evidence                         | `stage_06+`      |
 | `stage_06` | `multi_source_cognition_architecture_stage_06_consolidator_per_write_origin_policy_plan.md`      | not_created   | per-write origin policy tests                              | `stage_07+`      |
 | `stage_07` | `multi_source_cognition_architecture_stage_07_reflection_trigger_cognition_dry_run_plan.md`      | not_created   | reflection dry-run audit artifact                          | `stage_08+`      |
@@ -788,9 +788,9 @@ No database schema changes are authorized by the parent plan.
 
 No proactive sends are authorized by the parent plan.
 
-The next useful action is to execute the approved Stage 04 child plan on a
-feature branch. Stage 05 is drafted but remains blocked until Stage 04 is
-completed, merged, and its execution evidence has been reread.
+The next useful action is to review the Stage 05 child plan against the Stage
+04 execution evidence, approve it only if the handoff is still accurate, and
+execute it on a feature branch after approval.
 
 ## Execution Evidence
 
