@@ -9,7 +9,8 @@ import pytest
 import pytest_asyncio
 
 from kazusa_ai_chatbot.config import RAG_PLANNER_LLM_BASE_URL
-from kazusa_ai_chatbot.db import close_db, db_bootstrap, get_character_profile, get_db
+from kazusa_ai_chatbot.db import close_db, db_bootstrap, get_character_profile
+from kazusa_ai_chatbot.db._client import get_db
 from kazusa_ai_chatbot.mcp_client import mcp_manager
 from kazusa_ai_chatbot.nodes.persona_supervisor2_rag_supervisor2 import (
     call_rag_supervisor,

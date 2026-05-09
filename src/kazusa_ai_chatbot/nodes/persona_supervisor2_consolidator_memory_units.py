@@ -527,19 +527,22 @@ _EXTRACTOR_PROMPT = '''\
 
 # 记忆视角契约
 - 记忆文本采用第三人称视角。
-- 可写入记忆文本的唯一角色名称是 `{character_name}`。
+- 可写入记忆文本的唯一名称是 `{character_name}`。
+- 规范名称是一个不可拆分的完整字符串：`{character_name}`。
 - 需要命名 `{character_name}` 时，逐字复制完整字符串，包括括号内容、空格和长音符号；不要缩写、截断、翻译、改写或用短名替代。
-- 如果不需要消歧，优先省略角色名称或用“该名称”“这一要求”“这一承诺”等方式回指。
+- 如果不需要消歧，优先省略名称或用“该名称”“这一要求”“这一承诺”等方式回指。
+- 如果无法逐字复制完整名称，宁可省略主语，不要写短名或近似拼写。
 - 上游证据里指向 `{character_name}` 的短名、别名或旧写法只作为证据理解，不可复制到输出。
 - 不要用“我”指代 `{character_name}`；输入中的“我”必须按原说话人理解。
 - 如果用户说“我……”，生成记忆时应写作“用户……”“对方……”或“用户自己……”，不要把这个“我”归到 `{character_name}`。
 - 不要把说话人标签、显示名称、泛称或 assistant 等机器标签写成记忆主体。
+- 当需要说明某个名称、项目代号或称呼不属于 `{character_name}` 时，写作“不是指向 `{character_name}` 的名称/称呼”，不要使用泛称。
 
 # 生成步骤
-1. 确认 `timestamp`、用户身份、角色身份和近期消息说话人。
+1. 确认 `timestamp`、用户身份、`{character_name}` 身份和近期消息说话人。
 2. 判断本轮是否产生新的长期价值：事实、决定、偏好、承诺、重要转折或可复用互动模式。
 3. 对每个候选检查旧记忆上下文，删除重复旧记忆或只是旧记忆复述的候选。
-4. 对每个候选决定 `unit_type`；如果同一事项已经被角色接受为后续行为，优先写成一条 `active_commitment`。
+4. 对每个候选决定 `unit_type`；如果同一事项已经被 `{character_name}` 接受为后续行为，优先写成一条 `active_commitment`。
 5. 对带时间条件的候选先确定绝对日期或日期时间；无法确定且会影响活跃承诺有效性的候选直接删除。
 6. 写 `fact`、`subjective_appraisal`、`relationship_signal`，保持同一条记忆的三个互补面。
 7. 输出严格 JSON；不要输出解释文字。
@@ -556,7 +559,7 @@ human payload 是以下 JSON：
     "emotional_appraisal": "{character_name} 的主观情绪评估",
     "interaction_subtext": "{character_name} 读到的互动潜台词",
     "logical_stance": "CONFIRM | REFUSE | TENTATIVE | DIVERGE | CHALLENGE",
-    "character_intent": "本轮角色意图标签",
+    "character_intent": "本轮意图标签",
     "chat_history_recent": [{{"speaker_name": "用户显示名或 {character_name}", "body_text": "消息文本", "timestamp": "可选本地 YYYY-MM-DD HH:MM"}}],
     "rag_user_memory_context": {{
         "stable_patterns": [{{"fact": "...", "subjective_appraisal": "...", "relationship_signal": "...", "updated_at": "可选本地 YYYY-MM-DD HH:MM"}}],

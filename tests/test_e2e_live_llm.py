@@ -22,7 +22,6 @@ from kazusa_ai_chatbot.db import (
     db_bootstrap,
     get_character_profile,
     get_conversation_history,
-    get_db,
     get_user_profile,
     insert_user_memory_units,
     query_user_memory_units,
@@ -32,6 +31,7 @@ from kazusa_ai_chatbot.db import (
     split_character_profile_runtime_state,
     UserMemoryUnitType,
 )
+from kazusa_ai_chatbot.db._client import get_db
 from kazusa_ai_chatbot.mcp_client import mcp_manager
 from kazusa_ai_chatbot.rag.cache2_runtime import get_rag_cache2_runtime
 from kazusa_ai_chatbot.rag.web_search_agent import _run_subgraph as web_search_agent

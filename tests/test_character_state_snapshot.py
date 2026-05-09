@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
+from kazusa_ai_chatbot.db import script_operations
 from scripts import character_state_snapshot as snapshot_module
 
 
@@ -95,7 +96,7 @@ async def test_snapshot_character_state_writes_default_shape(
             "updated_at": "2026-05-03T00:00:00+00:00",
         }
     )
-    monkeypatch.setattr(snapshot_module, "get_db", AsyncMock(return_value=db))
+    monkeypatch.setattr(script_operations, "get_db", AsyncMock(return_value=db))
     output_path = tmp_path / "state.json"
 
     payload = await snapshot_module.snapshot_character_state(output_path)
@@ -118,7 +119,7 @@ async def test_restore_character_state_replaces_singleton_document(
     """Restore mode should replace only character_state/_id: global."""
 
     db = _Db(None)
-    monkeypatch.setattr(snapshot_module, "get_db", AsyncMock(return_value=db))
+    monkeypatch.setattr(script_operations, "get_db", AsyncMock(return_value=db))
     snapshot_path = tmp_path / "state.json"
     snapshot_module.write_snapshot_file(
         snapshot_path,

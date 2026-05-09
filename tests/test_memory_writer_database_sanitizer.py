@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
+from kazusa_ai_chatbot.db import script_operations
 from scripts import sanitize_memory_writer_perspective as sanitizer
 
 
@@ -287,7 +288,7 @@ async def test_apply_persistent_memory_uses_supersede(monkeypatch) -> None:
         calls.append(('supersede', active_unit_id, replacement))
         return replacement
 
-    monkeypatch.setattr(sanitizer, 'get_db', AsyncMock(return_value=_Db()))
+    monkeypatch.setattr(script_operations, 'get_db', AsyncMock(return_value=_Db()))
     monkeypatch.setattr(
         sanitizer,
         'supersede_memory_unit',

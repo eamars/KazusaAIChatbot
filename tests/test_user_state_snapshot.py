@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
+from kazusa_ai_chatbot.db import script_operations
 from scripts import user_state_snapshot as snapshot_module
 
 
@@ -69,11 +70,16 @@ class _Collection:
         self.update_one_calls: list[tuple[dict, dict, bool]] = []
         self.find_one_result: dict | None = None
 
-    async def find_one(self, filter_doc: dict) -> dict | None:
+    async def find_one(
+        self,
+        filter_doc: dict,
+        projection: dict | None = None,
+    ) -> dict | None:
         """Capture a single-row lookup and return the configured result.
 
         Args:
             filter_doc: MongoDB find filter.
+            projection: Optional MongoDB projection.
 
         Returns:
             Configured profile document, if any.
@@ -178,7 +184,7 @@ class _Db:
 def test_conversation_history_filter_covers_user_owned_and_related_rows() -> None:
     """Conversation backup should include authored, addressed, and platform rows."""
 
-    filter_doc = snapshot_module.conversation_history_filter(
+    filter_doc = script_operations._user_state_conversation_history_filter(
         "global-user-1",
         [{"platform": "qq", "platform_user_id": "316"}],
     )
@@ -202,7 +208,7 @@ async def test_resolve_user_scope_accepts_global_id_without_profile(monkeypatch)
 
     db = _Db()
     monkeypatch.setattr(snapshot_module, "get_user_profile", AsyncMock(return_value={}))
-    monkeypatch.setattr(snapshot_module, "get_db", AsyncMock(return_value=db))
+    monkeypatch.setattr(script_operations, "get_db", AsyncMock(return_value=db))
 
     scope = await snapshot_module.resolve_user_scope("global-user-1", None)
 
@@ -221,7 +227,7 @@ async def test_restore_user_state_replaces_scoped_documents_and_alias_refs(
     """Restore should delete current scoped rows and insert snapshot rows."""
 
     db = _Db()
-    monkeypatch.setattr(snapshot_module, "get_db", AsyncMock(return_value=db))
+    monkeypatch.setattr(script_operations, "get_db", AsyncMock(return_value=db))
     snapshot_path = tmp_path / "user_state.json"
     documents = {
         name: []
@@ -266,7 +272,7 @@ async def test_restore_user_state_replaces_scoped_documents_and_alias_refs(
         }
     ]
     monkeypatch.setattr(
-        snapshot_module,
+        script_operations,
         "get_text_embedding",
         AsyncMock(return_value=[0.5, 0.25]),
     )
@@ -321,7 +327,7 @@ async def test_restore_user_state_rejects_unexpected_user(monkeypatch, tmp_path)
     """Restore guard should prevent applying a snapshot to the wrong user."""
 
     db = _Db()
-    monkeypatch.setattr(snapshot_module, "get_db", AsyncMock(return_value=db))
+    monkeypatch.setattr(script_operations, "get_db", AsyncMock(return_value=db))
     documents = {
         name: []
         for name in snapshot_module.USER_STATE_COLLECTIONS

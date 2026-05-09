@@ -5,6 +5,7 @@ import re
 
 import pytest
 
+from kazusa_ai_chatbot.nodes import persona_supervisor2_rag_dispatch as dispatch_module
 from kazusa_ai_chatbot.nodes import persona_supervisor2_rag_supervisor2 as supervisor2_module
 from kazusa_ai_chatbot.message_envelope import project_prompt_message_context
 from kazusa_ai_chatbot.rag import cache2_policy
@@ -522,19 +523,17 @@ async def test_rag_dispatcher_logs_route_source_at_info(monkeypatch, caplog) -> 
     """Dispatcher INFO logs should include the selected route source."""
     monkeypatch.setattr(supervisor2_module, "_dispatcher_llm", _FailingAsyncLLM())
 
-    with caplog.at_level(
-        "DEBUG",
-        logger="kazusa_ai_chatbot.nodes.persona_supervisor2_rag_supervisor2",
-    ):
-        await supervisor2_module.rag_dispatcher(
-            {
-                "unknown_slots": ["Memory-evidence: retrieve official address"],
-                "known_facts": [],
-                "context": {},
-                "messages": [],
-                "loop_count": 0,
-            }
-        )
+    with caplog.at_level("DEBUG", logger=dispatch_module.__name__):
+        with caplog.at_level("DEBUG", logger=supervisor2_module.__name__):
+            await supervisor2_module.rag_dispatcher(
+                {
+                    "unknown_slots": ["Memory-evidence: retrieve official address"],
+                    "known_facts": [],
+                    "context": {},
+                    "messages": [],
+                    "loop_count": 0,
+                }
+            )
 
     info_messages = [
         record.getMessage()
