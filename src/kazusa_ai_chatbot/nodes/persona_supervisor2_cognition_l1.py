@@ -1,5 +1,11 @@
 """L1 — Subconscious cognition agent and MBTI natural-response helper."""
 from kazusa_ai_chatbot.config import COGNITION_LLM_API_KEY, COGNITION_LLM_BASE_URL, COGNITION_LLM_MODEL
+from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition_output_contracts import (
+    validate_cognition_output_contract,
+)
+from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition_prompt_selection import (
+    select_cognition_prompt_variant,
+)
 from kazusa_ai_chatbot.nodes.persona_supervisor2_schema import CognitionState
 from kazusa_ai_chatbot.utils import get_llm, log_preview, parse_llm_json_output
 
@@ -104,8 +110,15 @@ _subconscious_llm = get_llm(
 )
 async def call_cognition_subconscious(state: CognitionState) -> CognitionState:
     mbti = state["character_profile"]["personality_brief"]["mbti"]
+    selection = select_cognition_prompt_variant(
+        episode=state["cognitive_episode"],
+        stage="l1_subconscious",
+    )
+    prompt_template = {
+        "text_chat_user_message": _COGNITION_SUBCONSCIOUS_PROMPT,
+    }[selection["variant"]]
     
-    system_prompt = SystemMessage(content=_COGNITION_SUBCONSCIOUS_PROMPT.format(
+    system_prompt = SystemMessage(content=prompt_template.format(
         character_name=state["character_profile"]["name"],
         character_mbti=mbti,
         character_mood=state['character_profile']['mood'],
@@ -147,4 +160,8 @@ async def call_cognition_subconscious(state: CognitionState) -> CognitionState:
         "emotional_appraisal": emotional_appraisal,
         "interaction_subtext": interaction_subtext,
     }
+    validate_cognition_output_contract(
+        stage="l1_subconscious",
+        payload=return_value,
+    )
     return return_value

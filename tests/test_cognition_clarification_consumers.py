@@ -4,6 +4,10 @@ import json
 
 import pytest
 
+from kazusa_ai_chatbot.cognition_episode import (
+    CognitiveEpisode,
+    build_text_chat_cognitive_episode,
+)
 from kazusa_ai_chatbot.nodes import persona_supervisor2_cognition_l2 as l2_module
 from kazusa_ai_chatbot.nodes import persona_supervisor2_cognition_l3 as l3_module
 
@@ -45,6 +49,34 @@ class _CapturingAsyncLLM:
         return _DummyResponse(json.dumps(self.payload))
 
 
+def _cognitive_episode() -> CognitiveEpisode:
+    """Build a valid text-chat episode for direct handler tests.
+
+    Returns:
+        Valid Stage 02 text-chat cognitive episode.
+    """
+    return build_text_chat_cognitive_episode(
+        episode_id="clarification-consumer-episode",
+        percept_id="clarification-consumer-percept",
+        timestamp="2026-05-06T00:00:00+00:00",
+        time_context={
+            "current_local_datetime": "2026-05-09 19:30",
+            "current_local_weekday": "Saturday",
+        },
+        user_input="hello",
+        platform="qq",
+        platform_channel_id="private-channel",
+        channel_type="private",
+        platform_message_id="message-1",
+        platform_user_id="platform-user-1",
+        global_user_id="global-user-1",
+        user_name="User",
+        active_turn_platform_message_ids=["message-1"],
+        active_turn_conversation_row_ids=[],
+        debug_modes={},
+    )
+
+
 def _judgment_state() -> dict:
     """Build the minimal state required by Judgment Core.
 
@@ -57,6 +89,7 @@ def _judgment_state() -> dict:
         "internal_monologue": "I might answer if I knew the object.",
         "logical_stance": "CONFIRM",
         "character_intent": "PROVIDE",
+        "cognitive_episode": _cognitive_episode(),
         "referents": [
             {"phrase": "这些", "referent_role": "object", "status": "unresolved"}
         ],
@@ -99,6 +132,7 @@ def _content_anchor_state() -> dict:
         "internal_monologue": "I need to ask what these refers to.",
         "logical_stance": "TENTATIVE",
         "character_intent": "CLARIFY",
+        "cognitive_episode": _cognitive_episode(),
         "conversation_progress": None,
     }
 
