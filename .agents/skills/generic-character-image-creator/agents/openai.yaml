@@ -1,0 +1,4 @@
+interface:
+  display_name: "Generic Character Image Creator"
+  short_description: "Image seeds from visual directives"
+  default_prompt: "Generate a character image from these visual directives using the local metadata manifest."
