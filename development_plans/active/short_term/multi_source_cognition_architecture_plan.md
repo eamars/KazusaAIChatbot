@@ -85,7 +85,7 @@ evidence names the required artifact paths.
 | `stage_03` | `multi_source_cognition_architecture_stage_03_shared_cognition_prompt_selection_plan.md`         | completed     | prompt selector artifact, render tests, baseline rerun     | `stage_04+`      |
 | `stage_04` | `multi_source_cognition_architecture_stage_04_rag_cognitive_episode_adapter_plan.md`             | completed     | RAG input and retrieval equivalence artifacts              | `stage_05+`      |
 | `stage_05` | `multi_source_cognition_architecture_stage_05_consolidation_origin_metadata_threading_plan.md`   | completed     | origin metadata threading evidence                         | `stage_06+`      |
-| `stage_06` | `multi_source_cognition_architecture_stage_06_consolidator_per_write_origin_policy_plan.md`      | approved      | per-write origin policy tests                              | `stage_07+`      |
+| `stage_06` | `multi_source_cognition_architecture_stage_06_consolidator_per_write_origin_policy_plan.md`      | completed     | per-write origin policy tests                              | `stage_07+`      |
 | `stage_07` | `multi_source_cognition_architecture_stage_07_reflection_trigger_cognition_dry_run_plan.md`      | draft         | reflection dry-run audit artifact                          | `stage_08+`      |
 | `stage_08` | `multi_source_cognition_architecture_stage_08_internal_thought_cognition_dry_run_plan.md`        | draft         | internal thought dry-run artifact                          | `stage_09+`      |
 | `stage_09` | `multi_source_cognition_architecture_stage_09_multimodal_cognitive_input_sources_plan.md`        | draft         | multimodal percept fixtures and tests                      | `stage_10`       |

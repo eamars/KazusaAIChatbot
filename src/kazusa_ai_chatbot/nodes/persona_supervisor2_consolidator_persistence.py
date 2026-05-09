@@ -31,6 +31,9 @@ from kazusa_ai_chatbot.nodes.persona_supervisor2_consolidator_images import (
 from kazusa_ai_chatbot.nodes.persona_supervisor2_consolidator_memory_units import (
     update_user_memory_units_from_state,
 )
+from kazusa_ai_chatbot.nodes.persona_supervisor2_consolidator_origin_policy import (
+    build_consolidation_write_policy,
+)
 from kazusa_ai_chatbot.nodes.persona_supervisor2_consolidator_schema import (
     ConsolidatorState,
 )
@@ -502,77 +505,98 @@ async def db_writer(state: ConsolidatorState) -> dict:
     metadata = dict(state.get("metadata", {}) or {})
     write_log: dict[str, bool] = {}
     cache_invalidated: list[str] = []
+    origin_policy = build_consolidation_write_policy(
+        origin=state["consolidation_origin"],
+    )
 
     # ── Step 1: character_state (mood / vibe / reflection) ──────────
     mood = state.get("mood", "")
     global_vibe = state.get("global_vibe", "")
     reflection_summary = state.get("reflection_summary", "")
-    try:
-        await upsert_character_state(
-            mood=mood,
-            global_vibe=global_vibe,
-            reflection_summary=reflection_summary,
-            timestamp=timestamp,
-        )
-        write_log["character_state"] = True
-    except DatabaseOperationError as exc:
-        logger.exception(f"db_writer: failed to upsert character_state: {exc}")
+    if origin_policy["character_state"]["allowed"]:
+        try:
+            await upsert_character_state(
+                mood=mood,
+                global_vibe=global_vibe,
+                reflection_summary=reflection_summary,
+                timestamp=timestamp,
+            )
+            write_log["character_state"] = True
+        except DatabaseOperationError as exc:
+            logger.exception(f"db_writer: failed to upsert character_state: {exc}")
+            write_log["character_state"] = False
+    else:
         write_log["character_state"] = False
 
     # ── Step 2: last relationship insight ───────────────────────────
     last_relationship_insight = state.get("last_relationship_insight", "")
     if global_user_id and last_relationship_insight:
-        try:
-            await update_last_relationship_insight(global_user_id, last_relationship_insight)
-            write_log["relationship_insight"] = True
-        except DatabaseOperationError as exc:
-            logger.exception(
-                f"db_writer: failed to update_last_relationship_insight: {exc}"
-            )
+        if origin_policy["relationship_insight"]["allowed"]:
+            try:
+                await update_last_relationship_insight(global_user_id, last_relationship_insight)
+                write_log["relationship_insight"] = True
+            except DatabaseOperationError as exc:
+                logger.exception(
+                    f"db_writer: failed to update_last_relationship_insight: {exc}"
+                )
+                write_log["relationship_insight"] = False
+        else:
             write_log["relationship_insight"] = False
 
     # ── Step 3: unified user-memory units ────────────────────────────
-    future_promises = _normalize_future_promises(
-        state.get("future_promises") or [],
-        timestamp=timestamp,
-    )
-    normalized_state = {
-        **state,
-        "future_promises": future_promises,
-    }
-    try:
-        memory_unit_results = await update_user_memory_units_from_state(
-            normalized_state
+    if (
+        origin_policy["user_memory_units"]["allowed"]
+        or origin_policy["task_dispatch"]["allowed"]
+    ):
+        future_promises = _normalize_future_promises(
+            state.get("future_promises") or [],
+            timestamp=timestamp,
         )
-    except Exception as exc:
-        logger.exception(f"db_writer: failed to update user_memory_units: {exc}")
-        memory_unit_results = []
-        write_log["user_memory_units"] = False
+        normalized_state = {
+            **state,
+            "future_promises": future_promises,
+        }
     else:
-        write_log["user_memory_units"] = bool(memory_unit_results)
-        metadata["user_memory_unit_results"] = memory_unit_results
+        future_promises = []
+        normalized_state = state
+
+    if origin_policy["user_memory_units"]["allowed"]:
+        try:
+            memory_unit_results = await update_user_memory_units_from_state(
+                normalized_state
+            )
+        except Exception as exc:
+            logger.exception(f"db_writer: failed to update user_memory_units: {exc}")
+            memory_unit_results = []
+            write_log["user_memory_units"] = False
+        else:
+            write_log["user_memory_units"] = bool(memory_unit_results)
+            metadata["user_memory_unit_results"] = memory_unit_results
+    else:
+        write_log["user_memory_units"] = False
 
     scheduled_event_ids: list[str] = []
     dispatch_rejections: list[str] = []
-    dispatcher = _get_task_dispatcher()
-    if dispatcher is not None:
-        dispatch_ctx = _build_dispatch_context(state, timestamp=timestamp)
-        raw_calls = await _generate_raw_tool_calls(normalized_state, dispatch_ctx)
-        dispatch_result = await dispatcher.dispatch(
-            raw_calls,
-            dispatch_ctx,
-            instruction=_build_dispatch_instruction(state),
-        )
-        scheduled_event_ids = [event_id for _task, event_id in dispatch_result.scheduled]
-        dispatch_rejections = [
-            f"{raw.tool}: {reason}"
-            for raw, reason in dispatch_result.rejected
-        ]
-        if dispatch_rejections:
-            if any("no adapters registered" in rejection for rejection in dispatch_rejections):
-                logger.warning(f'Task dispatch unavailable: raw_calls={len(raw_calls)} platform={dispatch_ctx.source_platform} channel={dispatch_ctx.source_channel_id} future_promises={len(future_promises)} rejections={dispatch_rejections}')
-            else:
-                logger.debug(f'Task dispatch rejected {len(dispatch_rejections)} call(s): {dispatch_rejections}')
+    if origin_policy["task_dispatch"]["allowed"]:
+        dispatcher = _get_task_dispatcher()
+        if dispatcher is not None:
+            dispatch_ctx = _build_dispatch_context(state, timestamp=timestamp)
+            raw_calls = await _generate_raw_tool_calls(normalized_state, dispatch_ctx)
+            dispatch_result = await dispatcher.dispatch(
+                raw_calls,
+                dispatch_ctx,
+                instruction=_build_dispatch_instruction(state),
+            )
+            scheduled_event_ids = [event_id for _task, event_id in dispatch_result.scheduled]
+            dispatch_rejections = [
+                f"{raw.tool}: {reason}"
+                for raw, reason in dispatch_result.rejected
+            ]
+            if dispatch_rejections:
+                if any("no adapters registered" in rejection for rejection in dispatch_rejections):
+                    logger.warning(f'Task dispatch unavailable: raw_calls={len(raw_calls)} platform={dispatch_ctx.source_platform} channel={dispatch_ctx.source_channel_id} future_promises={len(future_promises)} rejections={dispatch_rejections}')
+                else:
+                    logger.debug(f'Task dispatch rejected {len(dispatch_rejections)} call(s): {dispatch_rejections}')
 
     # ── Step 4: affinity (direction-scaled) ─────────────────────────
     user_profile = state.get("user_profile", {})
@@ -580,71 +604,78 @@ async def db_writer(state: ConsolidatorState) -> dict:
     raw_affinity_delta = state.get("affinity_delta", 0) or 0
     processed_affinity_delta = process_affinity_delta(user_affinity_score, raw_affinity_delta)
     if global_user_id:
-        try:
-            await update_affinity(global_user_id, processed_affinity_delta)
-            write_log["affinity"] = True
-        except DatabaseOperationError as exc:
-            logger.exception(f"db_writer: failed to update_affinity: {exc}")
+        if origin_policy["affinity"]["allowed"]:
+            try:
+                await update_affinity(global_user_id, processed_affinity_delta)
+                write_log["affinity"] = True
+            except DatabaseOperationError as exc:
+                logger.exception(f"db_writer: failed to update_affinity: {exc}")
+                write_log["affinity"] = False
+        else:
             write_log["affinity"] = False
 
     logger.debug(f'User {user_name}(@{global_user_id}) affinity {user_affinity_score} -> {user_affinity_score + processed_affinity_delta}')
 
     # ── Step 5: character image ──────────────────────────────────────
-    image_results = await asyncio.gather(
-        _update_character_image(state, timestamp=timestamp),
-        return_exceptions=True,
-    )
-    character_image_result = image_results[0]
-
-    if isinstance(character_image_result, Exception):
-        logger.error(
-            f"db_writer: failed to update character_image: "
-            f"{character_image_result}",
-            exc_info=(
-                type(character_image_result),
-                character_image_result,
-                character_image_result.__traceback__,
-            ),
+    if origin_policy["character_image"]["allowed"]:
+        image_results = await asyncio.gather(
+            _update_character_image(state, timestamp=timestamp),
+            return_exceptions=True,
         )
-        write_log["character_image"] = False
-    elif character_image_result is not None:
-        try:
-            await upsert_character_self_image(character_image_result)
-            write_log["character_image"] = True
-        except DatabaseOperationError as exc:
-            logger.exception(
-                f"db_writer: failed to upsert_character_self_image: {exc}"
+        character_image_result = image_results[0]
+
+        if isinstance(character_image_result, Exception):
+            logger.error(
+                f"db_writer: failed to update character_image: "
+                f"{character_image_result}",
+                exc_info=(
+                    type(character_image_result),
+                    character_image_result,
+                    character_image_result.__traceback__,
+                ),
             )
             write_log["character_image"] = False
+        elif character_image_result is not None:
+            try:
+                await upsert_character_self_image(character_image_result)
+                write_log["character_image"] = True
+            except DatabaseOperationError as exc:
+                logger.exception(
+                    f"db_writer: failed to upsert_character_self_image: {exc}"
+                )
+                write_log["character_image"] = False
+    else:
+        write_log["character_image"] = False
 
     # ── Step 6: Cache2 invalidation events (after persistence) ──────
-    runtime = get_rag_cache2_runtime()
-    events: list[CacheInvalidationEvent] = []
-
-    if global_user_id and (
-        write_log.get("affinity")
-        or write_log.get("relationship_insight")
-        or write_log.get("user_memory_units")
-    ):
-        events.append(CacheInvalidationEvent(
-            source="user_profile",
-            platform=state["platform"],
-            platform_channel_id=state["platform_channel_id"],
-            global_user_id=global_user_id,
-            timestamp=timestamp,
-            reason="consolidator: user_profile",
-        ))
-
-    if write_log.get("character_state") or write_log.get("character_image"):
-        events.append(CacheInvalidationEvent(
-            source="character_state",
-            reason="consolidator: character_state",
-        ))
-
     evicted_total = 0
-    for event in events:
-        evicted_total += await runtime.invalidate(event)
-    cache_invalidated = [event.source for event in events]
+    if origin_policy["cache_invalidation"]["allowed"]:
+        runtime = get_rag_cache2_runtime()
+        events: list[CacheInvalidationEvent] = []
+
+        if global_user_id and (
+            write_log.get("affinity")
+            or write_log.get("relationship_insight")
+            or write_log.get("user_memory_units")
+        ):
+            events.append(CacheInvalidationEvent(
+                source="user_profile",
+                platform=state["platform"],
+                platform_channel_id=state["platform_channel_id"],
+                global_user_id=global_user_id,
+                timestamp=timestamp,
+                reason="consolidator: user_profile",
+            ))
+
+        if write_log.get("character_state") or write_log.get("character_image"):
+            events.append(CacheInvalidationEvent(
+                source="character_state",
+                reason="consolidator: character_state",
+            ))
+
+        for event in events:
+            evicted_total += await runtime.invalidate(event)
+        cache_invalidated = [event.source for event in events]
     metadata["cache_evicted_count"] = evicted_total
 
     metadata.update({

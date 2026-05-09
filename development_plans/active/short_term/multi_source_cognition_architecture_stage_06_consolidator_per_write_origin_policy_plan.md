@@ -6,7 +6,7 @@
   durable write path has an explicit allow/deny decision before non-chat
   cognition sources are enabled.
 - Plan class: large
-- Status: approved
+- Status: completed
 - Mandatory skills: `development-plan-writing`, `local-llm-architecture`,
   `no-prepost-user-input`, `py-style`, `test-style-and-execution`, and
   `cjk-safety` before editing consolidator Python files that contain CJK prompt
@@ -421,44 +421,50 @@ incomplete. If that happens, stop and update this plan before continuing.
 
 ## Progress Checklist
 
-- [ ] Stage 1 — Stage 05 evidence reread.
+- [x] Stage 1 — Stage 05 evidence reread.
   - Covers: Step 1.
   - Verify: Stage 05 row is `completed`.
   - Evidence: Stage 05 commit and verification result recorded.
   - Handoff: next agent starts at Stage 2.
-  - Sign-off: `<agent/date>` after evidence is recorded.
-- [ ] Stage 2 — policy contract implemented.
+  - Sign-off: `Codex / 2026-05-10` after evidence was recorded.
+- [x] Stage 2 — policy contract implemented.
   - Covers: Steps 2-3.
   - Verify: policy tests pass after expected red import failure.
   - Evidence: red/green results recorded.
   - Handoff: reread this plan, then start Stage 3.
-  - Sign-off: `<agent/date>` after verification.
-- [ ] Stage 3 — denied-origin writer behavior implemented.
+  - Sign-off: `Codex / 2026-05-10` after the red import failure, compile,
+    and focused policy tests passed.
+- [x] Stage 3 — denied-origin writer behavior implemented.
   - Covers: Steps 4-5.
   - Verify: denied-origin `db_writer` test passes.
   - Evidence: command output recorded.
   - Handoff: reread this plan, then start Stage 4.
-  - Sign-off: `<agent/date>` after verification.
-- [ ] Stage 4 — user-message regression behavior proven.
+  - Sign-off: `Codex / 2026-05-10` after expected red writer failure,
+    persistence compile, and denied-origin writer test passed.
+- [x] Stage 4 — user-message regression behavior proven.
   - Covers: Steps 6-7.
   - Verify: direct fixture updates and user-message `db_writer` regression
     tests pass.
   - Evidence: command output recorded.
   - Handoff: reread this plan, then start Stage 5.
-  - Sign-off: `<agent/date>` after verification.
-- [ ] Stage 5 — full verification complete.
+  - Sign-off: `Codex / 2026-05-10` after direct fixture and user-message
+    writer regression tests passed.
+- [x] Stage 5 — full verification complete.
   - Covers: Steps 8-9.
   - Verify: every command in `Verification` passes or returns an explicitly
     allowed no-match `rg` exit code.
   - Evidence: command output recorded.
   - Handoff: next agent starts at Stage 6.
-  - Sign-off: `<agent/date>` after verification.
-- [ ] Stage 6 — lifecycle records flipped.
+  - Sign-off: `Codex / 2026-05-10` after static checks, focused tests,
+    adjacent tests, prior-stage gates, completion diff review, and full
+    deterministic suite passed.
+- [x] Stage 6 — lifecycle records flipped.
   - Covers: Steps 10-11.
   - Verify: parent ledger and registry rows show Stage 06 completed.
   - Evidence: row text and commit recorded.
   - Handoff: Stage 07 may be reviewed against this execution evidence.
-  - Sign-off: `<agent/date>` after verification.
+  - Sign-off: `Codex / 2026-05-10` after parent ledger and registry rows
+    were flipped to completed.
 
 ## Verification
 
@@ -602,14 +608,76 @@ output behavior.
 
 Record after implementation:
 
-- Stage 05 evidence reread:
-- Branch:
+- Stage 05 evidence reread: Stage 05 `Execution Evidence` was reread on
+  2026-05-10. It records branch
+  `stage-05-consolidation-origin-metadata-threading`, implementation commit
+  `de311a7`, merge commit `75816d1`, and full deterministic suite result
+  `898 passed, 217 deselected`.
+- Branch: `stage-06-consolidator-per-write-origin-policy`
 - Commit:
 - Static compile:
+  `venv\Scripts\python -m py_compile src\kazusa_ai_chatbot\nodes\persona_supervisor2_consolidator_origin_policy.py src\kazusa_ai_chatbot\nodes\persona_supervisor2_consolidator_persistence.py tests\test_consolidation_origin_policy.py tests\test_consolidator_origin_policy_db_writer.py tests\test_consolidator_efficiency.py tests\test_db_writer_cache2_invalidation.py`
+  passed.
 - Static greps:
+  prompt/helper non-consumption grep returned no matches with exit code `1`.
+  Persistence grep returned only the policy import, policy build from
+  `state["consolidation_origin"]`, and named policy decision checks.
+  Future-source label grep returned no matches with exit code `1`.
+  `git diff --check` passed with line-ending warnings only.
 - Focused tests:
+  `venv\Scripts\python -m pytest tests\test_consolidation_origin_policy.py -q`
+  first failed as expected with `ModuleNotFoundError:
+  kazusa_ai_chatbot.nodes.persona_supervisor2_consolidator_origin_policy`.
+  After implementing the policy module,
+  `venv\Scripts\python -m py_compile src\kazusa_ai_chatbot\nodes\persona_supervisor2_consolidator_origin_policy.py`
+  passed and
+  `venv\Scripts\python -m pytest tests\test_consolidation_origin_policy.py -q`
+  passed with `5 passed`.
+  `venv\Scripts\python -m pytest tests\test_consolidator_origin_policy_db_writer.py -q`
+  first failed as expected at `upsert_character_state(...)` because
+  `db_writer` had no denied-origin gate. After integrating the policy,
+  `venv\Scripts\python -m py_compile src\kazusa_ai_chatbot\nodes\persona_supervisor2_consolidator_persistence.py`
+  passed and
+  `venv\Scripts\python -m pytest tests\test_consolidator_origin_policy_db_writer.py -q`
+  passed with `1 passed`.
 - Adjacent consolidation tests:
+  `venv\Scripts\python -m pytest tests\test_consolidator_efficiency.py::test_db_writer_runs_image_updaters_through_gather tests\test_db_writer_cache2_invalidation.py -q`
+  passed with `3 passed`.
+  `venv\Scripts\python -m pytest tests\test_consolidator_origin_policy_db_writer.py -q`
+  passed with `4 passed`.
+  `venv\Scripts\python -m pytest tests\test_consolidation_origin_metadata.py tests\test_consolidator_efficiency.py tests\test_db_writer_cache2_invalidation.py`
+  passed with `14 passed`.
+  `venv\Scripts\python -m pytest tests\test_consolidator_facts_rag2.py tests\test_consolidator_reflection_prompts.py`
+  passed with `4 passed`.
+  `venv\Scripts\python -m pytest tests\test_user_memory_units_rag_flow.py`
+  passed with `13 passed`.
+  `venv\Scripts\python -m pytest tests\test_service_background_consolidation.py`
+  passed with `18 passed`.
+  `venv\Scripts\python -m pytest tests\test_scheduler_future_promise.py`
+  passed with `4 passed`.
+  `venv\Scripts\python -m pytest tests\test_save_conversation_invalidation.py`
+  passed with `1 passed`.
 - Prior stage regression gates:
+  `venv\Scripts\python -m pytest tests\test_cognitive_episode_contract.py`
+  passed with `15 passed`.
+  `venv\Scripts\python -m pytest tests\test_multi_source_cognition_stage_02_chat_episode_migration.py`
+  passed with `5 passed`.
+  `venv\Scripts\python -m pytest tests\test_multi_source_cognition_stage_03_prompt_selection.py tests\test_cognition_clarification_consumers.py tests\test_cognition_interaction_style_context.py`
+  passed with `43 passed`.
+  `venv\Scripts\python -m pytest tests\test_rag_cognitive_episode_adapter.py tests\test_persona_supervisor2_rag2_integration.py tests\test_persona_supervisor2_rag_skip_shape.py tests\test_rag_projection.py`
+  passed with `31 passed`.
+  `venv\Scripts\python -m pytest tests\test_multi_source_cognition_stage_00_regression_baseline.py`
+  passed with `11 passed`.
+  Full deterministic suite `venv\Scripts\python -m pytest` passed with
+  `907 passed, 217 deselected`.
 - Completion diff review:
+  `git diff --stat`, persistence diff, and origin-policy diff were reviewed.
+  The diff is limited to deterministic policy gating, the policy module,
+  focused tests, direct writer fixture updates, and lifecycle evidence.
 - Lifecycle records:
+  Parent ledger row:
+  `| stage_06 | multi_source_cognition_architecture_stage_06_consolidator_per_write_origin_policy_plan.md | completed | per-write origin policy tests | stage_07+ |`.
+  Registry row:
+  `multi_source_cognition_architecture_stage_06_consolidator_per_write_origin_policy_plan.md | completed | completed`.
 - Sign-off:
+  `Codex / 2026-05-10`

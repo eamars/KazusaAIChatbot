@@ -6,7 +6,40 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from kazusa_ai_chatbot.cognition_episode import build_text_chat_cognitive_episode
 from kazusa_ai_chatbot.nodes import persona_supervisor2_consolidator_persistence as persistence_module
+from kazusa_ai_chatbot.nodes.persona_supervisor2_consolidator_origin import (
+    build_user_message_consolidation_origin,
+)
+from kazusa_ai_chatbot.time_context import build_character_time_context
+
+
+def _consolidation_origin() -> dict:
+    """Build valid user-message origin metadata for direct db_writer calls.
+
+    Returns:
+        Valid Stage 05 consolidation origin metadata.
+    """
+    timestamp = "2026-04-27T00:00:00+12:00"
+    episode = build_text_chat_cognitive_episode(
+        episode_id="episode-1",
+        percept_id="percept-1",
+        timestamp=timestamp,
+        time_context=build_character_time_context(timestamp),
+        user_input="remember tea",
+        platform="qq",
+        platform_channel_id="chan-1",
+        channel_type="group",
+        platform_message_id="msg-1",
+        platform_user_id="platform-user-1",
+        global_user_id="user-1",
+        user_name="User",
+        active_turn_platform_message_ids=["msg-1"],
+        active_turn_conversation_row_ids=["conversation-row-1"],
+        debug_modes={},
+    )
+    origin = build_user_message_consolidation_origin(episode=episode)
+    return origin
 
 
 def _state() -> dict:
@@ -34,6 +67,7 @@ def _state() -> dict:
         "user_profile": {"affinity": 500},
         "affinity_delta": 1,
         "decontexualized_input": "remember tea",
+        "consolidation_origin": _consolidation_origin(),
     }
 
 

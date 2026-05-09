@@ -9,6 +9,9 @@ import pytest
 from kazusa_ai_chatbot.cognition_episode import build_text_chat_cognitive_episode
 from kazusa_ai_chatbot.nodes import persona_supervisor2_consolidator as consolidator_module
 from kazusa_ai_chatbot.nodes import persona_supervisor2_consolidator_persistence as persistence_module
+from kazusa_ai_chatbot.nodes.persona_supervisor2_consolidator_origin import (
+    build_user_message_consolidation_origin,
+)
 from kazusa_ai_chatbot.time_context import build_character_time_context
 
 
@@ -37,6 +40,18 @@ def _cognitive_episode() -> dict:
         debug_modes={},
     )
     return episode
+
+
+def _consolidation_origin() -> dict:
+    """Build valid user-message origin metadata for direct db_writer calls.
+
+    Returns:
+        Valid Stage 05 consolidation origin metadata.
+    """
+    origin = build_user_message_consolidation_origin(
+        episode=_cognitive_episode(),
+    )
+    return origin
 
 
 def _global_state() -> dict:
@@ -176,6 +191,7 @@ async def test_db_writer_runs_image_updaters_through_gather(monkeypatch) -> None
         "user_profile": {"affinity": 500},
         "affinity_delta": 0,
         "decontexualized_input": "hello",
+        "consolidation_origin": _consolidation_origin(),
     })
 
     assert len(gather_calls) == 1
