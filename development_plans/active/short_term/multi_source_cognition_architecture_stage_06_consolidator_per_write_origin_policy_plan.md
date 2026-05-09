@@ -6,7 +6,7 @@
   durable write path has an explicit allow/deny decision before non-chat
   cognition sources are enabled.
 - Plan class: large
-- Status: draft
+- Status: approved
 - Mandatory skills: `development-plan-writing`, `local-llm-architecture`,
   `no-prepost-user-input`, `py-style`, `test-style-and-execution`, and
   `cjk-safety` before editing consolidator Python files that contain CJK prompt
@@ -24,9 +24,12 @@
 Parent plan:
 `development_plans/active/short_term/multi_source_cognition_architecture_plan.md`
 
-Lifecycle: this plan is blocked until Stage 05 completes and records execution
-evidence. Do not approve or execute Stage 06 until the parent ledger row for
-`stage_05` is `completed`.
+Lifecycle: Stage 05 completed on 2026-05-10 on branch
+`stage-05-consolidation-origin-metadata-threading` with implementation commit
+`de311a7`, then was merged to `main` with merge commit `75816d1`. Stage 05
+evidence records `898 passed, 217 deselected` for the full deterministic suite.
+This plan was reviewed against that evidence and is approved for execution from
+current `main`.
 
 ## Context
 
@@ -64,9 +67,16 @@ Stage 06 expects these completed artifacts:
 - `tests/test_consolidation_origin_metadata.py`
 - Stage 05 evidence showing unsupported origins fail before graph nodes run.
 
-Approval gate: before changing `Status` from `draft` to `approved`, the Stage
-06 reviewer must update this section with the exact Stage 05 commit and test
-evidence from Stage 05 `Execution Evidence`, then rerun the plan self-review.
+Stage 05 evidence reviewed for this approval:
+
+- Branch: `stage-05-consolidation-origin-metadata-threading`
+- Implementation commit: `de311a7`
+- Merge commit on `main`: `75816d1`
+- Focused origin metadata tests: `12 passed`
+- Adjacent consolidation tests: `4 passed` and `18 passed`
+- Prior-stage regression gates: `15 passed`, `5 passed`, `43 passed`,
+  `31 passed`, and `11 passed`
+- Full deterministic suite: `898 passed, 217 deselected`
 
 ### To Stage 07
 
@@ -107,6 +117,9 @@ blocked unless a later approved plan changes the policy.
 - Do not add origin metadata to LLM messages.
 - Do not add deterministic semantic interpretation of user input, facts,
   promises, memory-unit candidates, or tool-call text.
+- Gate whole write/effect categories only. Do not drop, reclassify, rewrite,
+  or selectively filter individual LLM-emitted facts, promises, memory-unit
+  candidates, accepted preferences, or tool-call text for an allowed origin.
 - Do not change the Stage 05 origin builder or broaden accepted runtime
   origins.
 - Do not enable reflection, internal thought, scheduled recall, system probe,
@@ -117,6 +130,12 @@ blocked unless a later approved plan changes the policy.
 - Current `origin=user_message` behavior must stay observationally unchanged.
 - Disabled origins must produce no durable writes, no task dispatch, and no
   Cache2 invalidation.
+- Disabled origins must not call `get_rag_cache2_runtime()`,
+  `runtime.invalidate(...)`, `_get_task_dispatcher()`,
+  `_generate_raw_tool_calls(...)`, or `dispatcher.dispatch(...)`.
+- `db_writer(...)` must plain-index `state["consolidation_origin"]` when
+  building policy. Do not synthesize a missing origin and do not use `.get()`
+  for this field.
 - After any automatic context compaction, reread this entire plan before
   continuing implementation, verification, handoff, or final reporting.
 - After signing off any major progress checklist stage, reread this entire
@@ -135,6 +154,8 @@ blocked unless a later approved plan changes the policy.
 - Add `db_writer` tests proving denied origins call no persistence, scheduler,
   image, memory-unit, or cache functions.
 - Add current user-message regression tests proving existing calls still happen.
+- Update every existing direct `db_writer(...)` test fixture so it includes a
+  valid Stage 05 user-message `consolidation_origin`.
 - Run every Verification command and record evidence.
 - Flip lifecycle rows to `completed` only after verification passes.
 
@@ -179,6 +200,9 @@ Not allowed:
 - editing prompt constants;
 - introducing a policy registry, feature flag, config file, dependency
   injection layer, or alternate writer;
+- adding raising-only helpers, pass-through wrappers, aliases, or adapter
+  layers around `build_consolidation_write_policy(...)`;
+- creating modules, tests, or fixtures not listed in Change Surface;
 - adding origin fields to LLM payloads or durable metadata;
 - changing behavior outside `db_writer` and its direct tests;
 - broad style rewrites in CJK prompt files.
@@ -262,6 +286,8 @@ Policy rules:
   `rag_result`, facts, promises, dialog text, or user memory text.
 - The function must not raise for future origin labels already accepted by the
   `ConsolidationOriginMetadata` type; it must return denied decisions.
+- Use direct dictionary indexing for the listed origin fields. Do not use
+  `.get()` defaults or catch exceptions inside the policy module.
 
 ## `db_writer` Integration Contract
 
@@ -272,16 +298,18 @@ Integration rules:
 
 - Import only `build_consolidation_write_policy`.
 - Compute `origin_policy` once at the top of `db_writer(...)` after `metadata`
-  and `write_log` are initialized.
+  and `write_log` are initialized, using
+  `state["consolidation_origin"]`.
 - For user-message origins, preserve existing control flow and metadata.
 - For denied origins:
   - skip `upsert_character_state(...)`;
   - skip `update_last_relationship_insight(...)`;
   - skip `update_user_memory_units_from_state(...)`;
   - skip `_generate_raw_tool_calls(...)` and `dispatcher.dispatch(...)`;
+  - skip `_get_task_dispatcher()` and `_build_dispatch_context(...)`;
   - skip `update_affinity(...)`;
   - skip `_update_character_image(...)` and `upsert_character_self_image(...)`;
-  - skip all `runtime.invalidate(...)` calls.
+  - skip `get_rag_cache2_runtime()` and all `runtime.invalidate(...)` calls.
 - For denied origins, set a `write_log` key to `False` only for a category that
   would otherwise have attempted a write under current logic. Do not add new
   `write_success` keys for user-message origins.
@@ -310,6 +338,9 @@ Integration rules:
 - `src/kazusa_ai_chatbot/nodes/persona_supervisor2_consolidator_persistence.py`
 - `tests/test_consolidator_efficiency.py` — add a valid user-message
   `consolidation_origin` fixture to the existing direct `db_writer(...)` test.
+- `tests/test_db_writer_cache2_invalidation.py` — add a valid user-message
+  `consolidation_origin` fixture to existing direct `db_writer(...)` Cache2
+  invalidation tests.
 - `development_plans/active/short_term/multi_source_cognition_architecture_stage_06_consolidator_per_write_origin_policy_plan.md`
 - `development_plans/active/short_term/multi_source_cognition_architecture_plan.md`
 - `development_plans/README.md`
@@ -368,12 +399,13 @@ incomplete. If that happens, stop and update this plan before continuing.
    - Verify:
      `venv\Scripts\python -m py_compile src\kazusa_ai_chatbot\nodes\persona_supervisor2_consolidator_persistence.py`
      and rerun Step 4 tests.
-6. Update the existing direct `db_writer(...)` fixture.
-   - File: `tests/test_consolidator_efficiency.py`
-   - Action: add a valid user-message `consolidation_origin` to the state in
-     `test_db_writer_runs_image_updaters_through_gather`.
+6. Update existing direct `db_writer(...)` fixtures.
+   - Files: `tests/test_consolidator_efficiency.py` and
+     `tests/test_db_writer_cache2_invalidation.py`.
+   - Action: add a valid user-message `consolidation_origin` to every state
+     passed directly into `db_writer(...)`.
    - Verify:
-     `venv\Scripts\python -m pytest tests\test_consolidator_efficiency.py::test_db_writer_runs_image_updaters_through_gather -q`
+     `venv\Scripts\python -m pytest tests\test_consolidator_efficiency.py::test_db_writer_runs_image_updaters_through_gather tests\test_db_writer_cache2_invalidation.py -q`
 7. Add user-message regression tests for `db_writer`.
    - File: `tests/test_consolidator_origin_policy_db_writer.py`
    - Tests:
@@ -409,7 +441,8 @@ incomplete. If that happens, stop and update this plan before continuing.
   - Sign-off: `<agent/date>` after verification.
 - [ ] Stage 4 — user-message regression behavior proven.
   - Covers: Steps 6-7.
-  - Verify: user-message `db_writer` regression tests pass.
+  - Verify: direct fixture updates and user-message `db_writer` regression
+    tests pass.
   - Evidence: command output recorded.
   - Handoff: reread this plan, then start Stage 5.
   - Sign-off: `<agent/date>` after verification.
@@ -433,7 +466,7 @@ Run from repository root with the project virtual environment.
 
 ### Static Compile
 
-- `venv\Scripts\python -m py_compile src\kazusa_ai_chatbot\nodes\persona_supervisor2_consolidator_origin_policy.py src\kazusa_ai_chatbot\nodes\persona_supervisor2_consolidator_persistence.py tests\test_consolidation_origin_policy.py tests\test_consolidator_origin_policy_db_writer.py`
+- `venv\Scripts\python -m py_compile src\kazusa_ai_chatbot\nodes\persona_supervisor2_consolidator_origin_policy.py src\kazusa_ai_chatbot\nodes\persona_supervisor2_consolidator_persistence.py tests\test_consolidation_origin_policy.py tests\test_consolidator_origin_policy_db_writer.py tests\test_consolidator_efficiency.py tests\test_db_writer_cache2_invalidation.py`
 
 ### Static Greps
 
@@ -451,9 +484,9 @@ Run from repository root with the project virtual environment.
 
 - `rg -n "reflection_signal|internal_thought|scheduled_recall|system_probe|image_observation|audio_observation|reflection_artifact|retrieved_memory" src\kazusa_ai_chatbot\nodes\persona_supervisor2_consolidator_persistence.py src\kazusa_ai_chatbot\nodes\persona_supervisor2_consolidator_origin_policy.py`
 
-  Expected result: matches only in policy unit-test-style literal handling
-  inside the policy module. Runtime writer code must not branch separately on
-  future labels.
+  Expected result: no matches. `rg` exit code `1` is acceptable. Runtime code
+  must implement default-deny by checking the allowed user-message contract,
+  not by enumerating future source labels.
 
 - `git diff --check`
 
@@ -464,7 +497,7 @@ Run from repository root with the project virtual environment.
 
 ### Adjacent Consolidation Tests
 
-- `venv\Scripts\python -m pytest tests\test_consolidation_origin_metadata.py tests\test_consolidator_efficiency.py`
+- `venv\Scripts\python -m pytest tests\test_consolidation_origin_metadata.py tests\test_consolidator_efficiency.py tests\test_db_writer_cache2_invalidation.py`
 - `venv\Scripts\python -m pytest tests\test_consolidator_facts_rag2.py tests\test_consolidator_reflection_prompts.py`
 - `venv\Scripts\python -m pytest tests\test_user_memory_units_rag_flow.py`
 - `venv\Scripts\python -m pytest tests\test_service_background_consolidation.py`
@@ -508,28 +541,32 @@ Stage 06 is complete when:
 
 ## Plan Self-Review
 
-Performed during draft creation on 2026-05-10:
+Performed during approval review on 2026-05-10:
 
 - **Coverage:** every Stage 06 parent-plan scope item maps to a named
   implementation step and verification gate.
 - **Placeholder scan:** no unresolved implementation choices are left in the
-  executable sections; Stage 05 evidence is intentionally blocked until Stage
-  05 completes.
+  executable sections; Stage 05 evidence has been carried forward from the
+  completed Stage 05 plan.
 - **Contract consistency:** policy keys match the seven write/effect
   categories named in Context, Must Do, Verification, and Acceptance Criteria.
 - **Granularity:** steps split policy tests, policy module, denied-origin
-  writer integration, user-message regression, and lifecycle updates.
+  writer integration, direct writer fixtures, user-message regression, and
+  lifecycle updates.
 - **Verification:** prompt non-consumption, policy decisions, writer gating,
   current user-message behavior, adjacent consolidation, scheduler, cache, and
   prior-stage gates are covered.
 
+Approval decision: approved for implementation after Stage 05 merge evidence
+was verified on `main`.
+
 ## Execution Handoff
 
-Intended execution mode after approval: sequential implementation on a feature
-branch forked from post-Stage-05 `main`.
+Intended execution mode: sequential implementation on a feature branch forked
+from current `main`.
 
-Blocked next action: wait for Stage 05 completion evidence, then review this
-draft against the actual Stage 05 artifacts before approval.
+Next action: fork the Stage 06 branch, reread this plan, and start at the first
+unchecked Progress Checklist stage.
 
 ## Risks
 
@@ -548,6 +585,8 @@ When Stage 06 is complete, these artifacts must exist or be updated:
 - `src/kazusa_ai_chatbot/nodes/persona_supervisor2_consolidator_origin_policy.py`
 - `tests/test_consolidation_origin_policy.py`
 - `tests/test_consolidator_origin_policy_db_writer.py`
+- fixture updates in `tests/test_consolidator_efficiency.py` and
+  `tests/test_db_writer_cache2_invalidation.py`
 - `db_writer(...)` gates the seven write/effect categories through the policy.
 - parent ledger row for `stage_06` flipped to `completed`
 - `development_plans/README.md` Stage 06 row flipped to
