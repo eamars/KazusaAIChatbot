@@ -197,6 +197,10 @@ def build_text_chat_cognitive_episode(
 
     Returns:
         A validated `CognitiveEpisode` for a text chat turn.
+
+    Raises:
+        CognitiveEpisodeValidationError: If the primitive fields produce a
+            structurally invalid text chat episode.
     """
     platform_message_ids = list(active_turn_platform_message_ids or [])
     conversation_row_ids = list(active_turn_conversation_row_ids or [])

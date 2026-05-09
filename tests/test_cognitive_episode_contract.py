@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from copy import deepcopy
 
 import pytest
@@ -229,6 +230,47 @@ def test_validate_rejects_duplicate_percept_ids() -> None:
 def test_validate_rejects_missing_time_context_fields() -> None:
     episode = deepcopy(_valid_episode())
     del episode["time_context"]["current_local_weekday"]
+
+    with pytest.raises(CognitiveEpisodeValidationError):
+        validate_cognitive_episode(episode)
+
+
+def _remove_episode_id(episode: dict) -> None:
+    del episode["episode_id"]
+
+
+def _remove_trigger_source(episode: dict) -> None:
+    del episode["trigger_source"]
+
+
+def _use_non_bool_debug_mode(episode: dict) -> None:
+    episode["origin_metadata"]["debug_modes"]["think_only"] = "false"
+
+
+def _use_unsupported_visibility(episode: dict) -> None:
+    episode["percepts"][0]["visibility"] = "public"
+
+
+def _remove_dialog_text_from_user_message(episode: dict) -> None:
+    episode["input_sources"] = ["retrieved_memory"]
+    episode["percepts"][0]["input_source"] = "retrieved_memory"
+
+
+@pytest.mark.parametrize(
+    "mutate_episode",
+    [
+        _remove_episode_id,
+        _remove_trigger_source,
+        _use_non_bool_debug_mode,
+        _use_unsupported_visibility,
+        _remove_dialog_text_from_user_message,
+    ],
+)
+def test_validate_rejects_named_structural_rule_gaps(
+    mutate_episode: Callable[[dict], None],
+) -> None:
+    episode = deepcopy(_valid_episode())
+    mutate_episode(episode)
 
     with pytest.raises(CognitiveEpisodeValidationError):
         validate_cognitive_episode(episode)
