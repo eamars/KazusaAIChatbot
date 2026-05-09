@@ -39,7 +39,9 @@ def _origin(
     Returns:
         Consolidation origin metadata with no percept or prompt content.
     """
-    active_input_sources = list(input_sources or ["dialog_text"])
+    if input_sources is None:
+        input_sources = ["dialog_text"]
+    active_input_sources = list(input_sources)
     origin: ConsolidationOriginMetadata = {
         "episode_id": "episode-1",
         "trigger_source": trigger_source,
@@ -89,7 +91,7 @@ def test_user_message_dialog_text_allows_all_write_categories() -> None:
 
 
 def test_reflection_signal_origin_denies_all_write_categories() -> None:
-    """Reflection origins should be denied until a later plan enables writes."""
+    """Reflection origins should be denied until writes are explicitly enabled."""
     policy = build_consolidation_write_policy(
         origin=_origin(
             trigger_source="reflection_signal",

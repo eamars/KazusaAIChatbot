@@ -262,6 +262,8 @@ async def test_db_writer_denied_origin_skips_all_durable_write_effects(
     assert result["metadata"]["cache_evicted_count"] == 0
     assert result["metadata"]["scheduled_event_ids"] == []
     assert result["metadata"]["task_dispatch_rejected"] == []
+    denied_async_effect.assert_not_called()
+    denied_sync_effect.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -344,7 +346,10 @@ async def test_db_writer_user_message_origin_preserves_cache_invalidation(
 
     result = await persistence_module.db_writer(_state())
 
-    sources = [call.args[0].source for call in mocks["runtime"].invalidate.await_args_list]
+    sources = [
+        call.args[0].source
+        for call in mocks["runtime"].invalidate.await_args_list
+    ]
     assert sources == ["user_profile", "character_state"]
     assert result["metadata"]["cache_invalidated"] == [
         "user_profile",

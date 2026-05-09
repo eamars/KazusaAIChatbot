@@ -1,4 +1,4 @@
-"""Stage 4 consolidator persistence and scheduling helpers."""
+"""Consolidator persistence and scheduling helpers."""
 
 from __future__ import annotations
 
@@ -533,7 +533,10 @@ async def db_writer(state: ConsolidatorState) -> dict:
     if global_user_id and last_relationship_insight:
         if origin_policy["relationship_insight"]["allowed"]:
             try:
-                await update_last_relationship_insight(global_user_id, last_relationship_insight)
+                await update_last_relationship_insight(
+                    global_user_id,
+                    last_relationship_insight,
+                )
                 write_log["relationship_insight"] = True
             except DatabaseOperationError as exc:
                 logger.exception(
@@ -587,22 +590,40 @@ async def db_writer(state: ConsolidatorState) -> dict:
                 dispatch_ctx,
                 instruction=_build_dispatch_instruction(state),
             )
-            scheduled_event_ids = [event_id for _task, event_id in dispatch_result.scheduled]
+            scheduled_event_ids = [
+                event_id
+                for _task, event_id in dispatch_result.scheduled
+            ]
             dispatch_rejections = [
                 f"{raw.tool}: {reason}"
                 for raw, reason in dispatch_result.rejected
             ]
             if dispatch_rejections:
-                if any("no adapters registered" in rejection for rejection in dispatch_rejections):
-                    logger.warning(f'Task dispatch unavailable: raw_calls={len(raw_calls)} platform={dispatch_ctx.source_platform} channel={dispatch_ctx.source_channel_id} future_promises={len(future_promises)} rejections={dispatch_rejections}')
+                if any(
+                    "no adapters registered" in rejection
+                    for rejection in dispatch_rejections
+                ):
+                    logger.warning(
+                        f"Task dispatch unavailable: raw_calls={len(raw_calls)} "
+                        f"platform={dispatch_ctx.source_platform} "
+                        f"channel={dispatch_ctx.source_channel_id} "
+                        f"future_promises={len(future_promises)} "
+                        f"rejections={dispatch_rejections}"
+                    )
                 else:
-                    logger.debug(f'Task dispatch rejected {len(dispatch_rejections)} call(s): {dispatch_rejections}')
+                    logger.debug(
+                        f"Task dispatch rejected {len(dispatch_rejections)} "
+                        f"call(s): {dispatch_rejections}"
+                    )
 
     # ── Step 4: affinity (direction-scaled) ─────────────────────────
     user_profile = state.get("user_profile", {})
     user_affinity_score = user_profile.get("affinity", AFFINITY_DEFAULT)
     raw_affinity_delta = state.get("affinity_delta", 0) or 0
-    processed_affinity_delta = process_affinity_delta(user_affinity_score, raw_affinity_delta)
+    processed_affinity_delta = process_affinity_delta(
+        user_affinity_score,
+        raw_affinity_delta,
+    )
     if global_user_id:
         if origin_policy["affinity"]["allowed"]:
             try:
@@ -614,7 +635,10 @@ async def db_writer(state: ConsolidatorState) -> dict:
         else:
             write_log["affinity"] = False
 
-    logger.debug(f'User {user_name}(@{global_user_id}) affinity {user_affinity_score} -> {user_affinity_score + processed_affinity_delta}')
+    logger.debug(
+        f"User {user_name}(@{global_user_id}) affinity {user_affinity_score} "
+        f"-> {user_affinity_score + processed_affinity_delta}"
+    )
 
     # ── Step 5: character image ──────────────────────────────────────
     if origin_policy["character_image"]["allowed"]:
@@ -687,7 +711,13 @@ async def db_writer(state: ConsolidatorState) -> dict:
         "affinity_delta_processed": processed_affinity_delta,
     })
 
-    logger.debug(f'db_writer summary: user={user_name} global_user={global_user_id} writes={write_log} cache_invalidated={cache_invalidated} scheduled={len(scheduled_event_ids)} affinity_before={user_affinity_score} affinity_delta={processed_affinity_delta}')
+    logger.debug(
+        f"db_writer summary: user={user_name} global_user={global_user_id} "
+        f"writes={write_log} cache_invalidated={cache_invalidated} "
+        f"scheduled={len(scheduled_event_ids)} "
+        f"affinity_before={user_affinity_score} "
+        f"affinity_delta={processed_affinity_delta}"
+    )
 
     return_value = {"metadata": metadata}
     return return_value

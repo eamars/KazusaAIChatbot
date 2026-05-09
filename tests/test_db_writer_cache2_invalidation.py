@@ -18,7 +18,7 @@ def _consolidation_origin() -> dict:
     """Build valid user-message origin metadata for direct db_writer calls.
 
     Returns:
-        Valid Stage 05 consolidation origin metadata.
+        Valid user-message consolidation origin metadata.
     """
     timestamp = "2026-04-27T00:00:00+12:00"
     episode = build_text_chat_cognitive_episode(

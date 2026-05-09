@@ -46,7 +46,7 @@ def _consolidation_origin() -> dict:
     """Build valid user-message origin metadata for direct db_writer calls.
 
     Returns:
-        Valid Stage 05 consolidation origin metadata.
+        Valid user-message consolidation origin metadata.
     """
     origin = build_user_message_consolidation_origin(
         episode=_cognitive_episode(),
