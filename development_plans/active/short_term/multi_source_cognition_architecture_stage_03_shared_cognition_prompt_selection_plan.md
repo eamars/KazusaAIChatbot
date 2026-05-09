@@ -6,7 +6,7 @@
   cognition while keeping the current `/chat` prompt text and prompt payloads
   behaviorally unchanged.
 - Plan class: large
-- Status: draft
+- Status: approved
 - Mandatory skills: `development-plan-writing`, `local-llm-architecture`,
   `no-prepost-user-input`, `py-style`, `test-style-and-execution`, and
   `cjk-safety` because the cognition prompt modules contain CJK strings.
@@ -18,15 +18,15 @@
   consolidation behavior before their own stages.
 - Acceptance criteria: L1/L2/L3 prompt handlers call the selector, current
   `/chat` prompt rendering remains equivalent, output-shape validators cover
-  existing cognition outputs, and Stage 00 plus Stage 02 gates pass.
+  existing cognition outputs, and Stage 00, Stage 01, plus Stage 02 gates pass.
 
 Parent plan:
 `development_plans/active/short_term/multi_source_cognition_architecture_plan.md`
 
 Stage: `stage_03`
 
-Execution status: blocked until `stage_02` is completed and this plan is
-explicitly approved.
+Execution status: approved for implementation after review on 2026-05-09; not
+started.
 
 ## Context
 
@@ -34,6 +34,11 @@ Stage 02 moves a valid `CognitiveEpisode` through the current `/chat` graph and
 cognition state without prompt or RAG consumption. Stage 03 is the next bridge:
 the cognition prompt handlers become source-aware through a narrow selector,
 but the only active variant remains the existing text `/chat` path.
+
+Stage 02 is completed and merged into `main` as of 2026-05-09. Its execution
+evidence lives in
+`development_plans/active/short_term/multi_source_cognition_architecture_stage_02_chat_cognitive_episode_migration_plan.md`
+and records the final combined verification result `43 passed`.
 
 This stage does not tune prompt wording. It gives the graph an explicit place
 to select prompt variants later, and it proves that current text `/chat`
@@ -57,6 +62,28 @@ Prior-stage artifacts that must exist before editing:
   `src/kazusa_ai_chatbot/nodes/persona_supervisor2_cognition.py`, and
   `tests/test_multi_source_cognition_stage_02_chat_episode_migration.py`.
 
+Stage 02 handoff artifacts that must be preserved exactly:
+
+- `src/kazusa_ai_chatbot/service.py` builds the episode with
+  `_build_text_chat_episode_ids(...)` and
+  `build_text_chat_cognitive_episode(...)`, then stores it in
+  `initial_state["cognitive_episode"]`.
+- `src/kazusa_ai_chatbot/state.py` exposes
+  `IMProcessState.cognitive_episode`.
+- `src/kazusa_ai_chatbot/nodes/persona_supervisor2_schema.py` exposes
+  `GlobalPersonaState.cognitive_episode` and
+  `CognitionState.cognitive_episode`.
+- `src/kazusa_ai_chatbot/nodes/persona_supervisor2.py` and
+  `src/kazusa_ai_chatbot/nodes/persona_supervisor2_cognition.py` pass
+  `cognitive_episode` through without renaming, wrapping, or nesting it.
+- `tests/test_multi_source_cognition_stage_02_chat_episode_migration.py`
+  proves service construction, debug-mode output-mode mapping, persona
+  pass-through, and cognition pass-through.
+- `tests/test_multi_source_cognition_stage_00_regression_baseline.py`
+  already asserts prompt human-message payloads do not contain
+  `cognitive_episode`; Stage 03 must extend that assertion to selector
+  metadata without weakening the existing check.
+
 ## Mandatory Skills
 
 - `development-plan-writing`: preserve parent-stage scope and lifecycle.
@@ -75,6 +102,10 @@ Prior-stage artifacts that must exist before editing:
   and `stage_02` are `completed`.
 - Before editing, read Stage 00, Stage 01, and Stage 02 execution evidence and
   confirm every artifact path listed in `Context` exists.
+- Treat `state["cognitive_episode"]` as a required Stage 02 artifact inside
+  every LLM-backed L1/L2/L3 handler. Do not use `state.get(...)`, fallback
+  episodes, synthetic episodes, or legacy-only prompt selection inside those
+  handlers.
 - After any automatic context compaction, the active agent must reread this
   entire plan before continuing implementation, verification, handoff, or
   final reporting.
@@ -97,6 +128,29 @@ Prior-stage artifacts that must exist before editing:
 - Output validation may validate structure only after each handler has built
   its existing normalized return dict. It must not reinterpret, filter, or
   rewrite LLM semantic decisions.
+- Do not catch `CognitionPromptSelectionError` or
+  `CognitionOutputContractError` in Stage 03. Unsupported or malformed
+  contracts must fail closed during verification instead of silently falling
+  back to the old prompt path.
+
+## Prompt Text Fingerprint Guard
+
+The current prompt constants are the active text `/chat` prompt contract for
+Stage 03. The implementation agent must recompute these fingerprints before
+editing L1/L2/L3 and again before completion. Any changed digest is a Stage 03
+stop condition unless the diff proves only non-prompt code moved around it.
+
+| File | Constant | SHA-256 of prompt string | Length |
+|---|---|---:|---:|
+| `src/kazusa_ai_chatbot/nodes/persona_supervisor2_cognition_l1.py` | `_COGNITION_SUBCONSCIOUS_PROMPT` | `93b4a80fa69aa7479d77699622aa632dd47a8515c475c91a0921bcdb302dc938` | 1768 |
+| `src/kazusa_ai_chatbot/nodes/persona_supervisor2_cognition_l2.py` | `_COGNITION_CONSCIOUSNESS_PROMPT` | `241fb639de242e2d7fc964da922a8b0ea2ac0d9c4f5b2b762df210c34805a5e5` | 6795 |
+| `src/kazusa_ai_chatbot/nodes/persona_supervisor2_cognition_l2.py` | `_BOUNDARY_CORE_PROMPT` | `dee7b322eb0d8637a3ee95b386560786042911cd0acca93b7c30896638ef26d1` | 5425 |
+| `src/kazusa_ai_chatbot/nodes/persona_supervisor2_cognition_l2.py` | `_JUDGEMENT_CORE_PROMPT` | `ca4e88cc3854cbdb63372ad3b20644575ef9eb74abdc8637212fedc0ca5b3b89` | 4012 |
+| `src/kazusa_ai_chatbot/nodes/persona_supervisor2_cognition_l3.py` | `_CONTEXTUAL_AGENT_PROMPT` | `4a2f7735c9f6b45637f329ad10581124360a24049444be43efb43cd2d802baae` | 2982 |
+| `src/kazusa_ai_chatbot/nodes/persona_supervisor2_cognition_l3.py` | `_STYLE_AGENT_PROMPT` | `c0f66e0d744688afa4b105f20573708d295057856fa924c0102c0d5605cb6340` | 3748 |
+| `src/kazusa_ai_chatbot/nodes/persona_supervisor2_cognition_l3.py` | `_CONTENT_ANCHOR_AGENT_PROMPT` | `9bf38821e24a561cec5c887f54432a4bff7b84131efb6c997d26edab8e0bbea0` | 7194 |
+| `src/kazusa_ai_chatbot/nodes/persona_supervisor2_cognition_l3.py` | `_PREFERENCE_ADAPTER_PROMPT` | `f5b0363c0d1ea1f28770237d27908cbfd56a86410c7c64d9522c44e1c284f88d` | 4151 |
+| `src/kazusa_ai_chatbot/nodes/persona_supervisor2_cognition_l3.py` | `_VISUAL_AGENT_PROMPT` | `68b1a35d43bfa28c46c91274d946faa9c7edf206f25fa414dabc822592626294` | 4337 |
 
 ## Must Do
 
@@ -148,9 +202,13 @@ count, or Stage 00 baseline changes, stop Stage 03 and create a bugfix plan.
 
 - The implementation agent must use the exact module path, public names,
   variant name, and signatures in this plan.
-- The implementation agent may choose private helper names inside the selector
-  and output-contract modules only when the public API and behavior remain
-  unchanged.
+- Private helpers inside the selector and output-contract modules are allowed
+  only for local table lookup or repeated structural validation. They must be
+  deterministic, side-effect free, and must not add behavior not named in this
+  plan.
+- The implementation agent must use the exact handler insertion pattern in
+  `Handler Insertion Contract`; do not invent wrapper layers, feature flags,
+  fallback functions, or alternate call sites.
 - The implementation agent must not invent additional runtime variants,
   fallback variants, feature flags, prompt templates, prompt examples, source
   labels, schema keys, or semantic routing rules.
@@ -184,7 +242,11 @@ The selector is source-aware, but runtime support remains limited to
 | Unsupported source handling | Raise `CognitionPromptSelectionError`. | Non-chat triggers must not silently reuse text-chat prompts. |
 | Prompt text | Existing prompt constants remain byte-for-byte unchanged. | Stage 03 is a selector insertion, not prompt tuning. |
 | Output validation | Validate normalized return dicts, not raw LLM JSON. | Preserves current spelling-tolerance behavior while documenting schema contracts. |
+| Validator invariance | Validator is keyed by `stage`, not by variant. Adding new variants in later stages must not change the normalized schema for an existing stage. | Locks the parent plan rule "same output schema for every variant" as a structural invariant rather than a social rule. |
 | Future prompt drafts | Store as inactive reference notes only. | Keeps later source support visible without enabling it. |
+| Selector signature scope | Selector accepts `trigger_source`, `input_sources`, and `output_mode` only. `visibility` and `target_scope` are deliberately not consumed in Stage 03 even though the parent plan's Prompt Strategy lists them for L2/L3. | With one active variant per stage, those fields cannot influence selection. Extending the signature is out of scope for Stage 03 and forbidden for Stage 04 (see Stage 04 Handoff). It belongs to the first stage that introduces a second active variant. |
+| Allowed `output_mode` values | Accept `visible_reply`, `think_only`, `silent`. Reject `preview` and `scheduled_action_request`. | Mirrors the Stage 02 debug-mode mapping exactly: normal `/chat` produces `visible_reply`; debug `think_only` produces `think_only`; debug `listen_only` produces `silent`. `no_remember` keeps `visible_reply` and is handled outside selection. `preview` and `scheduled_action_request` belong to non-chat sources and must fail closed. |
+| Rejection ordering | The selector must validate in this fixed order and raise on the first mismatch: (1) `validate_cognitive_episode`; (2) unknown `stage`; (3) unsupported `trigger_source`; (4) unsupported `input_sources`; (5) unsupported `output_mode`. | Deterministic order keeps `CognitionPromptSelectionError` messages stable across fixtures and avoids brittle test assertions. |
 
 ## Prompt Selector Contract
 
@@ -237,10 +299,16 @@ def select_cognition_prompt_variant(
 - Accept `output_mode` values `visible_reply`, `think_only`, and `silent`.
 - Raise `CognitionPromptSelectionError` for every other trigger source,
   input-source combination, output mode, or unknown stage.
+- Apply the rejection checks in this fixed order and raise on the first
+  mismatch: (1) `validate_cognitive_episode`; (2) unknown `stage`;
+  (3) unsupported `trigger_source`; (4) unsupported `input_sources`;
+  (5) unsupported `output_mode`.
 - Return `variant="text_chat_user_message"`.
 - Return `prompt_key=f"{stage}.text_chat_user_message"`.
 - Not inspect percept content, user text, RAG evidence, profile facts,
-  relationship state, debug-mode names, or prompt payloads.
+  relationship state, debug-mode names, prompt payloads, `visibility`, or
+  `target_scope`. `visibility` and `target_scope` are intentionally outside
+  the Stage 03 selector contract; see `Design Decisions`.
 
 The following handlers must call the selector before choosing their system
 prompt template:
@@ -260,6 +328,49 @@ LLM-backed prompt handlers and must not call the prompt selector.
 
 Each handler must map `text_chat_user_message` to its existing prompt constant
 and must not add selector metadata to the prompt payload.
+
+## Handler Insertion Contract
+
+Each LLM-backed handler must use the Stage 02 episode state directly:
+
+```python
+selection = select_cognition_prompt_variant(
+    episode=state["cognitive_episode"],
+    stage="<approved_stage_name>",
+)
+prompt_template = {
+    "text_chat_user_message": <EXISTING_PROMPT_CONSTANT>,
+}[selection["variant"]]
+```
+
+Then the handler must use `prompt_template.format(...)` in the same place where
+it currently formats the existing prompt constant. The human-message payload
+must remain semantically equivalent, verified by parsed payload assertions that
+ignore JSON serialization ordering.
+
+Approved stage names by handler:
+
+| Handler | Stage name | Existing prompt constant |
+|---|---|---|
+| `call_cognition_subconscious` | `l1_subconscious` | `_COGNITION_SUBCONSCIOUS_PROMPT` |
+| `call_cognition_consciousness` | `l2a_consciousness` | `_COGNITION_CONSCIOUSNESS_PROMPT` |
+| `call_boundary_core_agent` | `l2b_boundary_core` | `_BOUNDARY_CORE_PROMPT` |
+| `call_judgment_core_agent` | `l2c_judgment_core` | `_JUDGEMENT_CORE_PROMPT` |
+| `call_contextual_agent` | `l3_contextual_agent` | `_CONTEXTUAL_AGENT_PROMPT` |
+| `call_style_agent` | `l3_style_agent` | `_STYLE_AGENT_PROMPT` |
+| `call_content_anchor_agent` | `l3_content_anchor_agent` | `_CONTENT_ANCHOR_AGENT_PROMPT` |
+| `call_preference_adapter` | `l3_preference_adapter` | `_PREFERENCE_ADAPTER_PROMPT` |
+| `call_visual_agent` | `l3_visual_agent` | `_VISUAL_AGENT_PROMPT` |
+
+Forbidden handler insertion patterns:
+
+- `state.get("cognitive_episode")`
+- constructing a new `CognitiveEpisode` inside L1/L2/L3
+- defaulting to `text_chat_user_message` outside
+  `select_cognition_prompt_variant`
+- adding `selection`, `prompt_key`, `trigger_source`, `input_sources`,
+  `output_mode`, or `cognitive_episode` to the LLM human-message payload
+- wrapping selector or validator calls in `try`/`except`
 
 ## Output Contract Validator
 
@@ -283,6 +394,13 @@ def validate_cognition_output_contract(
 The validator must validate only normalized return dicts built by existing
 handlers. It must not inspect raw LLM text or change payload contents.
 
+The validator is keyed by `stage`, not by variant. The required-keys table
+below is the structural contract for every current and future variant of a
+stage. Future stages that introduce a second active variant must not change
+the normalized schema for an existing stage; they must add new stages or
+extend the per-stage required-keys table only with explicitly approved
+additive keys.
+
 Required normalized keys:
 
 | Stage | Required normalized keys |
@@ -298,7 +416,19 @@ Required normalized keys:
 | `l3_visual_agent` | `facial_expression: list`, `body_language: list`, `gaze_direction: list`, `visual_vibe: list` |
 
 Each handler must call `validate_cognition_output_contract` immediately before
-returning its normalized dict.
+returning its normalized dict. Use this exact shape:
+
+```python
+result = {
+    ...
+}
+validate_cognition_output_contract(stage="<approved_stage_name>", payload=result)
+return result
+```
+
+Do not validate raw LLM JSON before the existing handler normalization logic.
+Do not create a second dict for validation if the handler already has the
+normalized return payload.
 
 ## Inactive Variant Notes
 
@@ -335,14 +465,23 @@ work.
 - `tests/test_multi_source_cognition_stage_00_regression_baseline.py`
   - Extend prompt-render checks to assert selected current variant and absence
     of selector metadata in human-message payloads.
+  - All assertions that exist in this file before Stage 03 must remain
+    byte-equivalent. New assertions are append-only. Reordering, rewording,
+    or strengthening an existing assertion is a Stage 03 stop condition.
+    Renaming a fixture key, changing a regex, or moving an assertion across
+    test functions counts as a change and is not allowed.
 - `development_plans/active/short_term/multi_source_cognition_architecture_stage_03_shared_cognition_prompt_selection_plan.md`
-  - Update checklist and `Execution Evidence` only during execution.
+  - During execution, update checklist and `Execution Evidence` only.
 - `development_plans/active/short_term/multi_source_cognition_architecture_plan.md`
-  - Update the `stage_03` ledger row to `completed` only after verification
-    passes.
+  - This review may move the `stage_03` ledger row from `draft` to `approved`.
+  - During execution, update the `stage_03` ledger row to `completed` only
+    after verification passes.
 - `development_plans/README.md`
-  - Update the Stage 03 registry row only after completion. Both `Status` and
-    `Execution` columns must move to `completed` in the same edit.
+  - This review may move the Stage 03 registry row from `draft | blocked` to
+    `approved | not_started`.
+  - During execution, update the Stage 03 registry row only after completion.
+    Both `Status` and `Execution` columns must move to `completed` in the same
+    edit.
 
 ### Keep
 
@@ -355,34 +494,60 @@ work.
 
 ## Implementation Order
 
-1. Add selector and output-contract tests.
+1. Preflight the Stage 02 handoff.
+   - Confirm every path in `Context` exists.
+   - Confirm the parent ledger marks `stage_00`, `stage_01`, and `stage_02`
+     as `completed`.
+   - Recompute the `Prompt Text Fingerprint Guard` table before editing
+     L1/L2/L3.
+   - Record the preflight in `Execution Evidence`.
+2. Add selector and output-contract tests.
    - Cover current text `/chat` selection, unsupported trigger rejection,
      unsupported input-source rejection, unsupported output-mode rejection,
      every approved stage name, and every normalized output shape.
+   - Use Stage 01 `build_text_chat_cognitive_episode(...)` for valid selector
+     fixtures.
+   - Use explicit invalid `CognitiveEpisode` dictionaries for unsupported
+     source tests; do not add helper behavior just to make invalid inputs pass.
    - Run the tests and record the expected missing-module or missing-symbol
      failure in `Execution Evidence`.
-2. Implement selector and output-contract modules.
+3. Implement selector and output-contract modules.
    - Keep them deterministic and structural.
    - Run focused module tests until they pass.
-3. Insert selector and output-contract calls into L1, L2, and L3 handlers.
-   - Use per-handler prompt maps that map only
-     `text_chat_user_message` to the existing prompt constant.
+4. Insert selector and output-contract calls into L1, L2, and L3 handlers.
+   - Use the exact shape from `Handler Insertion Contract`.
    - Do not edit prompt literal text.
    - Do not add selector fields to human-message payloads.
-4. Extend prompt-render equivalence tests.
+   - Do not change existing LLM variables, model configuration, message order,
+     JSON payload fields, parser calls, spelling-tolerance normalization,
+     logging, or return key names.
+5. Extend prompt-render equivalence tests.
    - Use mocked LLMs.
-   - Capture system prompts and human payloads before and after selector
-     insertion through stable assertions.
+   - Compare post-insertion render against the Stage 00 frozen reference in
+     `tests/fixtures/multi_source_cognition_stage_00_cases.json` plus the
+     existing assertions in
+     `tests/test_multi_source_cognition_stage_00_regression_baseline.py`.
+     The Stage 00 baseline is the only authoritative "before" snapshot;
+     do not capture a fresh "before" inside the Stage 03 test run.
+   - Assertions on parsed human-message payloads must ignore JSON
+     serialization ordering.
    - Assert no human payload contains `cognitive_episode`, `prompt_key`,
      `trigger_source`, or `input_sources`.
-5. Add inactive variant reference notes.
-6. Run all verification gates.
-7. Update this plan's checklist and `Execution Evidence`.
-8. Update the parent ledger and registry only after every verification command
+6. Add inactive variant reference notes.
+7. Run all verification gates.
+8. Update this plan's checklist and `Execution Evidence`.
+9. Update the parent ledger and registry only after every verification command
    passes.
 
 ## Progress Checklist
 
+- [ ] Preflight - Stage 02 handoff and prompt fingerprints confirmed.
+  - Covers: parent ledger, Stage 00/01/02 execution evidence, Context paths,
+    and `Prompt Text Fingerprint Guard`.
+  - Verify: all artifact paths exist and fingerprints match this plan.
+  - Evidence: record path confirmation and hash output.
+  - Handoff: next agent starts at Stage 1.
+  - Sign-off: `<agent/date>` after evidence is recorded.
 - [ ] Stage 1 - focused selector and output-contract tests added.
   - Covers: `tests/test_multi_source_cognition_stage_03_prompt_selection.py`.
   - Verify: focused command fails only because approved modules or symbols do
@@ -456,14 +621,67 @@ one-case inspected smoke run.
 ```powershell
 venv\Scripts\python -m py_compile src\kazusa_ai_chatbot\nodes\persona_supervisor2_cognition_prompt_selection.py src\kazusa_ai_chatbot\nodes\persona_supervisor2_cognition_output_contracts.py src\kazusa_ai_chatbot\nodes\persona_supervisor2_cognition_l1.py src\kazusa_ai_chatbot\nodes\persona_supervisor2_cognition_l2.py src\kazusa_ai_chatbot\nodes\persona_supervisor2_cognition_l3.py tests\test_multi_source_cognition_stage_03_prompt_selection.py
 git diff --check
-rg -n "reflection_signal|internal_thought|image_observation|audio_observation|scheduled_recall|system_probe" src\kazusa_ai_chatbot\nodes\persona_supervisor2_cognition_l1.py src\kazusa_ai_chatbot\nodes\persona_supervisor2_cognition_l2.py src\kazusa_ai_chatbot\nodes\persona_supervisor2_cognition_l3.py src\kazusa_ai_chatbot\nodes\persona_supervisor2_cognition_prompt_selection.py
+rg -n "reflection_signal|internal_thought|image_observation|audio_observation|scheduled_recall|system_probe" src\kazusa_ai_chatbot\nodes\persona_supervisor2_cognition_l1.py src\kazusa_ai_chatbot\nodes\persona_supervisor2_cognition_l2.py src\kazusa_ai_chatbot\nodes\persona_supervisor2_cognition_l3.py
+rg -n "reflection_signal|internal_thought|image_observation|audio_observation|scheduled_recall|system_probe" src\kazusa_ai_chatbot\nodes\persona_supervisor2_cognition_prompt_selection.py
 rg -n "cognitive_episode|prompt_key|trigger_source|input_sources" tests\test_multi_source_cognition_stage_00_regression_baseline.py
 ```
 
-The first `rg` may match unsupported-source error tests or literal lists only
-inside the selector module; it must not match runtime prompt text additions in
-the L1/L2/L3 modules. The second `rg` must show only Stage 03 assertions that
-these fields are absent from prompt human-message payloads.
+The first `rg` is over the L1/L2/L3 modules and must produce zero matches.
+Any match is a Stage 03 stop condition because it means a non-chat source
+label leaked into runtime prompt text or runtime selection logic.
+
+The second `rg` is over the selector module and must produce matches only
+inside the literal rejection list or the unsupported-source error message
+constants. It must not appear inside prompt template text, prompt key
+assembly, or runtime branch conditions. Reviewers must classify each match
+as either "rejection literal" or "violation"; any "violation" match is a
+Stage 03 stop condition.
+
+The third `rg` must show only Stage 03 assertions that these fields are
+absent from prompt human-message payloads.
+
+Prompt fingerprints must also be recomputed with the repository virtual
+environment and compared against `Prompt Text Fingerprint Guard`:
+
+```powershell
+@'
+import ast
+import hashlib
+from pathlib import Path
+
+EXPECTED = {
+    ("src/kazusa_ai_chatbot/nodes/persona_supervisor2_cognition_l1.py", "_COGNITION_SUBCONSCIOUS_PROMPT"): ("93b4a80fa69aa7479d77699622aa632dd47a8515c475c91a0921bcdb302dc938", 1768),
+    ("src/kazusa_ai_chatbot/nodes/persona_supervisor2_cognition_l2.py", "_COGNITION_CONSCIOUSNESS_PROMPT"): ("241fb639de242e2d7fc964da922a8b0ea2ac0d9c4f5b2b762df210c34805a5e5", 6795),
+    ("src/kazusa_ai_chatbot/nodes/persona_supervisor2_cognition_l2.py", "_BOUNDARY_CORE_PROMPT"): ("dee7b322eb0d8637a3ee95b386560786042911cd0acca93b7c30896638ef26d1", 5425),
+    ("src/kazusa_ai_chatbot/nodes/persona_supervisor2_cognition_l2.py", "_JUDGEMENT_CORE_PROMPT"): ("ca4e88cc3854cbdb63372ad3b20644575ef9eb74abdc8637212fedc0ca5b3b89", 4012),
+    ("src/kazusa_ai_chatbot/nodes/persona_supervisor2_cognition_l3.py", "_CONTEXTUAL_AGENT_PROMPT"): ("4a2f7735c9f6b45637f329ad10581124360a24049444be43efb43cd2d802baae", 2982),
+    ("src/kazusa_ai_chatbot/nodes/persona_supervisor2_cognition_l3.py", "_STYLE_AGENT_PROMPT"): ("c0f66e0d744688afa4b105f20573708d295057856fa924c0102c0d5605cb6340", 3748),
+    ("src/kazusa_ai_chatbot/nodes/persona_supervisor2_cognition_l3.py", "_CONTENT_ANCHOR_AGENT_PROMPT"): ("9bf38821e24a561cec5c887f54432a4bff7b84131efb6c997d26edab8e0bbea0", 7194),
+    ("src/kazusa_ai_chatbot/nodes/persona_supervisor2_cognition_l3.py", "_PREFERENCE_ADAPTER_PROMPT"): ("f5b0363c0d1ea1f28770237d27908cbfd56a86410c7c64d9522c44e1c284f88d", 4151),
+    ("src/kazusa_ai_chatbot/nodes/persona_supervisor2_cognition_l3.py", "_VISUAL_AGENT_PROMPT"): ("68b1a35d43bfa28c46c91274d946faa9c7edf206f25fa414dabc822592626294", 4337),
+}
+
+for (path_name, constant), (expected_digest, expected_length) in EXPECTED.items():
+    tree = ast.parse(Path(path_name).read_text(encoding="utf-8"))
+    value = None
+    for node in tree.body:
+        if not isinstance(node, ast.Assign):
+            continue
+        names = [target.id for target in node.targets if isinstance(target, ast.Name)]
+        if constant not in names:
+            continue
+        value = ast.literal_eval(node.value)
+        break
+    if not isinstance(value, str):
+        raise AssertionError(f"{constant} missing from {path_name}")
+    digest = hashlib.sha256(value.encode("utf-8")).hexdigest()
+    print(f"{path_name}:{constant}:{digest}:{len(value)}")
+    if digest != expected_digest or len(value) != expected_length:
+        raise AssertionError(f"{constant} fingerprint changed")
+'@ | venv\Scripts\python -
+```
+
+Record the output in `Execution Evidence`.
 
 No real LLM tests are required unless explicitly approved.
 
@@ -522,10 +740,19 @@ must use these facts as its handoff inputs:
 
 - `cognitive_episode` is present in `CognitionState` from Stage 02.
 - Current cognition prompt variant is `text_chat_user_message`.
+- The active selector API is
+  `select_cognition_prompt_variant(episode=..., stage=...)`.
+- The active output-contract API is
+  `validate_cognition_output_contract(stage=..., payload=...)`.
+- Prompt human-message payloads still do not contain `cognitive_episode`,
+  `prompt_key`, `trigger_source`, or `input_sources`.
 - Prompt selection is cognition-owned and must not be reused for RAG routing.
 - RAG request construction remains inline in `persona_supervisor2.stage_1_research`
   until Stage 04 changes it.
 - Stage 04 must not change prompt selector behavior or prompt output contracts.
+- Stage 04 may read selector decisions as context only if its own approved plan
+  explicitly says so; it must not change selector variants, prompt keys, output
+  validation, or cognition prompt payloads.
 
 ## Risks
 

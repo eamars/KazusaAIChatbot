@@ -241,6 +241,29 @@ copies of those same facts. Memory should carry expanded world lore,
 relationship-independent setting facts, aliases, event history, common-sense
 rules, and reflection-promoted behavioral guidance.
 
+Presentation recommendation: use a deterministic profile core plus RAG
+enrichment, not RAG as the authority for identity. The deterministic core
+should contain only the small active-character identity capsule: `name`,
+`gender`, `age`, `birthday`, compact `description`, and compact `backstory`.
+It should be available through the profile path for direct profile,
+self-introduction, or identity questions, and may be represented as a tiny
+stable anchor for cognition when identity consistency is relevant. It should
+not be treated as the main behavior driver; `personality_brief`,
+`boundary_profile`, current affect, and `self_image` remain the stronger
+decision-shaping fields.
+
+RAG should enrich rather than decide these facts. If retrieval misses or ranks
+a nearby lore/reflection row first, the model should still have a deterministic
+path to the stable profile. This follows the same memory-tier pattern used by
+agent memory systems: keep a small, reliable core in deterministic state, and
+use retrieval for larger archival context that is useful but not guaranteed to
+appear every turn.
+
+If future work introduces a deterministic "character image capsule", it should
+be a projection derived from `character_state`, not a copy stored in the current
+user's profile or user image. Active-character identity facts and current-user
+profile facts must remain separate ownership domains.
+
 | Stable profile field | Runtime profile owner | Exact memory counterpart found | Direction |
 | -------------------- | --------------------- | ------------------------------ | --------- |
 | `description`        | `character_state.description` | `杏山千纱-角色描述` | Remove or deprecate the exact memory duplicate in a later memory cleanup. Keep only richer lore rows that add details not owned by the compact profile. |
@@ -296,6 +319,7 @@ evolution process:
 | Recent self-image        | Keep `self_image.recent_window` owned by per-turn consolidation.                        | It is the high-frequency per-turn channel and should not become a daily reflection dump.                                                            |
 | Runtime affect           | Keep `mood`, `global_vibe`, and `reflection_summary` per-turn by default.               | These fields affect immediate response behavior and should not be overwritten by daily batch reflection.                                            |
 | Boundary and personality | Include them in analytic scope, but not first automatic write scope.                    | They affect decisions strongly and can destabilize character behavior if changed too freely.                                                        |
+| Stable profile delivery  | Use deterministic profile core as authority and RAG as enrichment.                      | Identity facts are too small and important to depend on retrieval recall, but should not crowd cognition as heavy behavior instructions.             |
 | Stiffness                | Require accumulated longitudinal evidence before durable writes.                        | The character should evolve over time, not drift daily.                                                                                             |
 | Live latency             | Keep all reflection-driven self-state evolution outside the live response path.         | Normal chat must remain bounded and inspectable.                                                                                                    |
 
