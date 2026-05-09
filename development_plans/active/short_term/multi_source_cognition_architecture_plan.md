@@ -83,8 +83,8 @@ evidence names the required artifact paths.
 | `stage_01` | `multi_source_cognition_architecture_stage_01_cognitive_episode_contract_plan.md`                | completed     | `src/kazusa_ai_chatbot/cognition_episode.py`; `tests/test_cognitive_episode_contract.py`; required verification passed | `stage_02+`      |
 | `stage_02` | `multi_source_cognition_architecture_stage_02_chat_cognitive_episode_migration_plan.md`          | completed     | `/chat` episode wiring, pass-through tests, baseline rerun | `stage_03+`      |
 | `stage_03` | `multi_source_cognition_architecture_stage_03_shared_cognition_prompt_selection_plan.md`         | completed     | prompt selector artifact, render tests, baseline rerun     | `stage_04+`      |
-| `stage_04` | `multi_source_cognition_architecture_stage_04_rag_cognitive_episode_adapter_plan.md`             | draft         | RAG input and retrieval equivalence artifacts              | `stage_05+`      |
-| `stage_05` | `multi_source_cognition_architecture_stage_05_consolidation_origin_metadata_threading_plan.md`   | not_created   | origin metadata threading evidence                         | `stage_06+`      |
+| `stage_04` | `multi_source_cognition_architecture_stage_04_rag_cognitive_episode_adapter_plan.md`             | approved      | RAG input and retrieval equivalence artifacts              | `stage_05+`      |
+| `stage_05` | `multi_source_cognition_architecture_stage_05_consolidation_origin_metadata_threading_plan.md`   | draft         | origin metadata threading evidence                         | `stage_06+`      |
 | `stage_06` | `multi_source_cognition_architecture_stage_06_consolidator_per_write_origin_policy_plan.md`      | not_created   | per-write origin policy tests                              | `stage_07+`      |
 | `stage_07` | `multi_source_cognition_architecture_stage_07_reflection_trigger_cognition_dry_run_plan.md`      | not_created   | reflection dry-run audit artifact                          | `stage_08+`      |
 | `stage_08` | `multi_source_cognition_architecture_stage_08_internal_thought_cognition_dry_run_plan.md`        | not_created   | internal thought dry-run artifact                          | `stage_09+`      |
@@ -494,11 +494,9 @@ Scope:
 - Add an episode-to-RAG query/context adapter.
 - Keep the current decontextualized text query for `/chat`.
 - Add input-equivalence tests for current RAG calls.
-- Add retrieval-equivalence tests on a frozen evidence corpus from `stage_00`.
-- Compare dispatched agents, source keys, consolidation policies, fact ids or
-  stable dedup keys, answer availability, and unknown-slot categories.
-- Define how future reflection, image, audio, and internal thought episodes
-  will produce `episode_focus`.
+- Add request-equivalence tests for the current RAG call shape and keep the
+  Stage 00 regression corpus as the behavior baseline.
+- Prove unsupported future episode sources fail closed at the adapter boundary.
 - Do not enable non-chat trigger sources yet.
 
 Exit if paused:
@@ -757,7 +755,7 @@ Top-level plan verification:
 
 ```powershell
 rg -n "CognitiveEpisode|/chat Episode Migration|Regression Gate Policy|Shared L1/L2/L3" development_plans\active\short_term\multi_source_cognition_architecture_plan.md
-rg -n "Status: draft|not an implementation contract|Staged Execution Overview" development_plans\active\short_term\multi_source_cognition_architecture_plan.md
+rg -n "Status: approved|Progress Tracking Agreement|stage_04|stage_05" development_plans\active\short_term\multi_source_cognition_architecture_plan.md
 git diff --check
 ```
 
@@ -770,7 +768,7 @@ for real LLM or live database evidence.
 
 This top-level plan is complete when:
 
-- The development plan registry lists it as an active draft.
+- The development plan registry lists it as an active approved staged plan.
 - It states that `/chat` migration is the first implementation target.
 - It defines trigger-source, input-source, and output-mode contracts.
 - It explains that top-level graphs may differ while L1/L2/L3 cognition,
@@ -784,15 +782,15 @@ This top-level plan is complete when:
 
 ## Execution Notes
 
-No source code changes are authorized by this plan.
+No source code changes are authorized directly by the parent plan.
 
-No database schema changes are authorized by this plan.
+No database schema changes are authorized by the parent plan.
 
-No proactive sends are authorized by this plan.
+No proactive sends are authorized by the parent plan.
 
-The next useful action is to review the `stage_02` through `stage_04` child
-plans in ledger order, approve only the next unblocked stage, and execute only
-approved stages in ledger order.
+The next useful action is to execute the approved Stage 04 child plan on a
+feature branch. Stage 05 is drafted but remains blocked until Stage 04 is
+completed, merged, and its execution evidence has been reread.
 
 ## Execution Evidence
 
