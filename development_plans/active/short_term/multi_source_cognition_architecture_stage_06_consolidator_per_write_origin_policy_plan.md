@@ -614,7 +614,7 @@ Record after implementation:
   `de311a7`, merge commit `75816d1`, and full deterministic suite result
   `898 passed, 217 deselected`.
 - Branch: `stage-06-consolidator-per-write-origin-policy`
-- Commit:
+- Commit: `2ea7526` (`Implement stage 06 consolidation write policy`)
 - Static compile:
   `venv\Scripts\python -m py_compile src\kazusa_ai_chatbot\nodes\persona_supervisor2_consolidator_origin_policy.py src\kazusa_ai_chatbot\nodes\persona_supervisor2_consolidator_persistence.py tests\test_consolidation_origin_policy.py tests\test_consolidator_origin_policy_db_writer.py tests\test_consolidator_efficiency.py tests\test_db_writer_cache2_invalidation.py`
   passed.
