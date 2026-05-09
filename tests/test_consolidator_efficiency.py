@@ -6,9 +6,37 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from kazusa_ai_chatbot.cognition_episode import build_text_chat_cognitive_episode
 from kazusa_ai_chatbot.nodes import persona_supervisor2_consolidator as consolidator_module
 from kazusa_ai_chatbot.nodes import persona_supervisor2_consolidator_persistence as persistence_module
 from kazusa_ai_chatbot.time_context import build_character_time_context
+
+
+def _cognitive_episode() -> dict:
+    """Build a valid text-chat episode for direct consolidator calls.
+
+    Returns:
+        Valid user-message cognitive episode.
+    """
+    timestamp = "2026-04-27T00:00:00+12:00"
+    episode = build_text_chat_cognitive_episode(
+        episode_id="episode-1",
+        percept_id="percept-1",
+        timestamp=timestamp,
+        time_context=build_character_time_context(timestamp),
+        user_input="hello",
+        platform="qq",
+        platform_channel_id="chan-1",
+        channel_type="group",
+        platform_message_id="msg-1",
+        platform_user_id="platform-user-1",
+        global_user_id="user-1",
+        user_name="User",
+        active_turn_platform_message_ids=["msg-1"],
+        active_turn_conversation_row_ids=["conversation-row-1"],
+        debug_modes={},
+    )
+    return episode
 
 
 def _global_state() -> dict:
@@ -62,6 +90,7 @@ def _global_state() -> dict:
             }
         },
         "decontexualized_input": "hello",
+        "cognitive_episode": _cognitive_episode(),
     }
 
 
