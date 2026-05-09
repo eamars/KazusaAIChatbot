@@ -4,6 +4,7 @@ from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition_output_contracts impo
     validate_cognition_output_contract,
 )
 from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition_prompt_selection import (
+    build_cognition_prompt_source_payload,
     select_cognition_prompt_variant,
 )
 from kazusa_ai_chatbot.nodes.persona_supervisor2_schema import CognitionState
@@ -110,12 +111,14 @@ _subconscious_llm = get_llm(
 )
 async def call_cognition_subconscious(state: CognitionState) -> CognitionState:
     mbti = state["character_profile"]["personality_brief"]["mbti"]
+    episode = state["cognitive_episode"]
     selection = select_cognition_prompt_variant(
-        episode=state["cognitive_episode"],
+        episode=episode,
         stage="l1_subconscious",
     )
     prompt_template = {
         "text_chat_user_message": _COGNITION_SUBCONSCIOUS_PROMPT,
+        "reflection_signal_reflection_artifact": _COGNITION_SUBCONSCIOUS_PROMPT,
     }[selection["variant"]]
     
     system_prompt = SystemMessage(content=prompt_template.format(
@@ -132,6 +135,10 @@ async def call_cognition_subconscious(state: CognitionState) -> CognitionState:
         "user_input": state["user_input"],
         "indirect_speech_context": state.get("indirect_speech_context", ""),
     }
+    msg.update(build_cognition_prompt_source_payload(
+        episode=episode,
+        selection=selection,
+    ))
     human_message = HumanMessage(content=json.dumps(msg, ensure_ascii=False))
     response = await _subconscious_llm.ainvoke([
         system_prompt,

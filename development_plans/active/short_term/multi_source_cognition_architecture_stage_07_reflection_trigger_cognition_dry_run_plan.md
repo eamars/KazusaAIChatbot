@@ -6,7 +6,7 @@
   `CognitiveEpisode(trigger_source=reflection_signal)` from promoted reflection
   context and runs shared cognition in audit-only mode.
 - Plan class: large
-- Status: approved
+- Status: completed
 - Mandatory skills: `development-plan-writing`, `local-llm-architecture`,
   `no-prepost-user-input`, `py-style`, `test-style-and-execution`, and
   `cjk-safety` before editing cognition Python files that contain CJK prompt
@@ -553,37 +553,47 @@ unique. L1/L2/L3 handlers must call this helper and update their existing
 
 ## Progress Checklist
 
-- [ ] Stage 1 - prerequisite evidence carried forward.
+- [x] Stage 1 - prerequisite evidence carried forward.
   - Covers: Step 1.
   - Verify: Stage 06 row is `completed`.
-  - Evidence: Stage 06 branch, commit, and test results recorded.
+  - Evidence: Stage 06 branch, commit, and test results recorded; `rg`
+    confirmed Stage 06 `completed` and Stage 07 `approved` rows in the parent
+    ledger and registry.
   - Handoff: next agent starts at Stage 2.
-  - Sign-off: `<agent/date>` after evidence is recorded.
-- [ ] Stage 2 - reflection episode builder complete.
+  - Sign-off: `Codex / 2026-05-10` after evidence was recorded.
+- [x] Stage 2 - reflection episode builder complete.
   - Covers: Steps 2-3.
   - Verify: focused builder tests pass after expected red import failure.
-  - Evidence: red/green results recorded.
+  - Evidence: red import failure recorded; `py_compile` for
+    `cognition_dry_run.py` and Stage 07 tests passed; focused Stage 07 tests
+    passed with `3 passed`.
   - Handoff: reread this plan, then start Stage 3.
-  - Sign-off: `<agent/date>` after verification.
-- [ ] Stage 3 - reflection prompt selection and prompt maps complete.
+  - Sign-off: `Codex / 2026-05-10` after verification.
+- [x] Stage 3 - reflection prompt selection and prompt maps complete.
   - Covers: Steps 4-5.
   - Verify: Stage 03 and Stage 07 selector/render tests pass.
-  - Evidence: prompt fingerprint and test output recorded.
+  - Evidence: red import failure recorded; selector and prompt map modules
+    compiled; Stage 03 plus Stage 07 selector tests passed with `43 passed`.
   - Handoff: reread this plan, then start Stage 4.
-  - Sign-off: `<agent/date>` after verification.
-- [ ] Stage 4 - audit-only dry-run runner complete.
+  - Sign-off: `Codex / 2026-05-10` after verification.
+- [x] Stage 4 - audit-only dry-run runner complete.
   - Covers: Steps 6-8.
   - Verify: no-write and prompt-render tests pass.
-  - Evidence: command output recorded.
+  - Evidence: red missing-runner import failure recorded; prompt-render test
+    caught duplicate `promoted_reflection_context` exposure in L2a and the
+    in-scope fix was applied; Stage 03 plus Stage 07 tests passed with
+    `50 passed`.
   - Handoff: reread this plan, then start Stage 5.
-  - Sign-off: `<agent/date>` after verification.
-- [ ] Stage 5 - full verification complete.
+  - Sign-off: `Codex / 2026-05-10` after verification.
+- [x] Stage 5 - full verification complete.
   - Covers: Step 9.
   - Verify: every Verification command passes or has an allowed no-match exit.
-  - Evidence: command output recorded.
+  - Evidence: static compile, corrected change-surface gate, static greps,
+    `git diff --check`, focused tests, prompt fingerprint guard, and prior
+    regression gates passed.
   - Handoff: reread this plan, then start Stage 6.
-  - Sign-off: `<agent/date>` after verification.
-- [ ] Stage 6 - independent code review and lifecycle handoff complete.
+  - Sign-off: `Codex / 2026-05-10` after verification.
+- [x] Stage 6 - independent code review and lifecycle handoff complete.
   - Covers: Steps 10-11.
   - Verify: `Independent Code Review` gate passes, review findings are fixed
     or recorded as residual non-blockers, affected verification commands are
@@ -592,7 +602,7 @@ unique. L1/L2/L3 handlers must call this helper and update their existing
   - Evidence: review findings, fixes, rerun commands, residual risks, and
     lifecycle row diffs recorded.
   - Handoff: Stage 08 draft is eligible for review after lifecycle update.
-  - Sign-off: `<agent/date>` after review approval and lifecycle update.
+  - Sign-off: `Codex / 2026-05-10` after review approval and lifecycle update.
 
 ## Verification
 
@@ -620,8 +630,8 @@ Run from repository root with the project virtual environment.
       "development_plans/README.md"
   )
   $changed = git diff --name-only main...HEAD
-  $diff = Compare-Object -ReferenceObject $allowed -DifferenceObject $changed
-  if ($diff) { $diff; exit 1 }
+  $unexpected = $changed | Where-Object { $_ -notin $allowed }
+  if ($unexpected) { $unexpected; exit 1 }
   ```
 
   Expected result: no output and exit code `0`. If any path appears, stop and
@@ -817,15 +827,85 @@ Record during implementation:
   registry rows show Stage 06 completed.
 - Independent plan review: completed on 2026-05-10; blockers fixed in this
   plan; approved for execution.
-- Branch:
+- Branch: `stage-07-reflection-cognition-dry-run`
 - Commit:
 - Static compile:
+  `venv\Scripts\python -m py_compile src\kazusa_ai_chatbot\reflection_cycle\cognition_dry_run.py src\kazusa_ai_chatbot\nodes\persona_supervisor2_cognition_prompt_selection.py src\kazusa_ai_chatbot\nodes\persona_supervisor2_cognition_l1.py src\kazusa_ai_chatbot\nodes\persona_supervisor2_cognition_l2.py src\kazusa_ai_chatbot\nodes\persona_supervisor2_cognition_l3.py tests\test_multi_source_cognition_stage_03_prompt_selection.py tests\test_multi_source_cognition_stage_07_reflection_dry_run.py`
+  passed.
 - Change surface gate:
+  the original `Compare-Object` gate failed because it compared both
+  directions and treated unchanged allowed paths as differences; plan gate was
+  corrected to report only changed paths outside `$allowed`. Corrected
+  working-tree gate passed with `CHANGE_SURFACE_OK`.
 - Static greps:
+  no matches for consolidation, persistence, dispatcher, scheduler, or cache
+  tokens in `cognition_dry_run.py`; no matches for `"reflection_signal"` or
+  `"reflection_artifact"` in `service.py`, `persona_supervisor2.py`, or
+  `rag/cognitive_episode_adapter.py`; `git diff --check` exited `0` with only
+  Git line-ending normalization warnings.
 - Prompt fingerprint guard:
+  `test_text_chat_prompt_fingerprints_remain_stable` passed inside Stage 07
+  focused tests; all nine prompt byte lengths and SHA-256 digests matched.
 - Focused tests:
+  Stage 2 red:
+  `venv\Scripts\python -m pytest tests\test_multi_source_cognition_stage_07_reflection_dry_run.py -q`
+  failed as expected with `ModuleNotFoundError:
+  kazusa_ai_chatbot.reflection_cycle.cognition_dry_run`.
+  Stage 2 green:
+  `venv\Scripts\python -m py_compile src\kazusa_ai_chatbot\reflection_cycle\cognition_dry_run.py tests\test_multi_source_cognition_stage_07_reflection_dry_run.py`
+  passed, and
+  `venv\Scripts\python -m pytest tests\test_multi_source_cognition_stage_07_reflection_dry_run.py -q`
+  passed with `3 passed`.
+  Stage 3 red:
+  `venv\Scripts\python -m pytest tests\test_multi_source_cognition_stage_07_reflection_dry_run.py -q`
+  failed as expected with `ImportError: cannot import name
+  'build_cognition_prompt_source_payload'`.
+  Stage 3 green:
+  `venv\Scripts\python -m py_compile src\kazusa_ai_chatbot\nodes\persona_supervisor2_cognition_prompt_selection.py src\kazusa_ai_chatbot\nodes\persona_supervisor2_cognition_l1.py src\kazusa_ai_chatbot\nodes\persona_supervisor2_cognition_l2.py src\kazusa_ai_chatbot\nodes\persona_supervisor2_cognition_l3.py tests\test_multi_source_cognition_stage_03_prompt_selection.py tests\test_multi_source_cognition_stage_07_reflection_dry_run.py`
+  passed, and
+  `venv\Scripts\python -m pytest tests\test_multi_source_cognition_stage_03_prompt_selection.py tests\test_multi_source_cognition_stage_07_reflection_dry_run.py -q`
+  passed with `43 passed`.
+  Stage 4 red:
+  `venv\Scripts\python -m pytest tests\test_multi_source_cognition_stage_07_reflection_dry_run.py -q`
+  failed as expected with `ImportError: cannot import name
+  'run_reflection_cognition_dry_run'`; after adding the runner, the
+  prompt-render test failed because L2a still exposed non-empty
+  `promoted_reflection_context` for reflection dry runs.
+  Stage 4 green:
+  `venv\Scripts\python -m py_compile src\kazusa_ai_chatbot\reflection_cycle\cognition_dry_run.py src\kazusa_ai_chatbot\nodes\persona_supervisor2_cognition_l2.py tests\test_multi_source_cognition_stage_07_reflection_dry_run.py`
+  passed,
+  `venv\Scripts\python -m pytest tests\test_multi_source_cognition_stage_07_reflection_dry_run.py -q`
+  passed with `14 passed`, and
+  `venv\Scripts\python -m py_compile src\kazusa_ai_chatbot\reflection_cycle\cognition_dry_run.py src\kazusa_ai_chatbot\nodes\persona_supervisor2_cognition_prompt_selection.py src\kazusa_ai_chatbot\nodes\persona_supervisor2_cognition_l1.py src\kazusa_ai_chatbot\nodes\persona_supervisor2_cognition_l2.py src\kazusa_ai_chatbot\nodes\persona_supervisor2_cognition_l3.py tests\test_multi_source_cognition_stage_03_prompt_selection.py tests\test_multi_source_cognition_stage_07_reflection_dry_run.py`
+  passed, followed by
+  `venv\Scripts\python -m pytest tests\test_multi_source_cognition_stage_03_prompt_selection.py tests\test_multi_source_cognition_stage_07_reflection_dry_run.py -q`
+  passing with `50 passed`.
 - Prior stage regression gates:
+  `venv\Scripts\python -m pytest tests\test_multi_source_cognition_stage_07_reflection_dry_run.py`
+  passed with `14 passed`;
+  `venv\Scripts\python -m pytest tests\test_multi_source_cognition_stage_03_prompt_selection.py`
+  passed with `36 passed`;
+  `venv\Scripts\python -m pytest tests\test_consolidation_origin_policy.py tests\test_consolidator_origin_policy_db_writer.py`
+  passed with `9 passed`; and
+  `venv\Scripts\python -m pytest tests\test_multi_source_cognition_stage_00_regression_baseline.py`
+  passed with `11 passed`.
 - Independent code review:
+  no separate reviewer was available in this session. Active-agent fresh
+  review covered project style, code quality, exact plan alignment, prompt/RAG
+  payload boundaries, no-write risk, change surface, verification evidence,
+  and Stage 08 handoff. Finding: one unused test import plus an overlong helper
+  signature in the Stage 07 test file; fixed directly in-scope. Rerun
+  evidence: `venv\Scripts\python -m py_compile tests\test_multi_source_cognition_stage_07_reflection_dry_run.py`
+  passed, `git diff --check` exited `0` with only Git line-ending warnings,
+  and `venv\Scripts\python -m pytest tests\test_multi_source_cognition_stage_07_reflection_dry_run.py -q`
+  passed with `14 passed`.
 - Completion diff review:
+  changed files stayed inside the approved Change Surface. No service,
+  adapter, RAG adapter, dialog, consolidation, persistence, scheduler, or
+  transport files were modified.
 - Lifecycle records:
+  this plan status set to `completed`; parent ledger `stage_07` row set to
+  `completed`; registry row set to `completed | completed`.
 - Sign-off:
+  `Codex / 2026-05-10`; Stage 07 complete after verification and independent
+  code review gate.

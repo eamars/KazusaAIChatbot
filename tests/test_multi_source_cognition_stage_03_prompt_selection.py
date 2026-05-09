@@ -130,14 +130,18 @@ def _text_chat_episode(
     return episode
 
 
-def _reflection_episode() -> CognitiveEpisode:
+def _reflection_episode(
+    output_mode: OutputMode = "think_only",
+) -> CognitiveEpisode:
     """Build a structurally valid non-chat episode fixture.
 
+    Args:
+        output_mode: Output mode to put on the reflection episode.
+
     Returns:
-        Valid `CognitiveEpisode` whose trigger source is not runtime-enabled
-        for Stage 03 prompt selection.
+        Valid `CognitiveEpisode` whose trigger source is reflection.
     """
-    episode = _text_chat_episode(output_mode="think_only")
+    episode = _text_chat_episode(output_mode=output_mode)
     episode["trigger_source"] = "reflection_signal"
     episode["input_sources"] = ["reflection_artifact"]
     episode["percepts"] = [
@@ -227,10 +231,10 @@ def test_selector_accepts_stage_02_chat_output_modes(
     ("episode", "stage", "message"),
     (
         pytest.param(
-            _reflection_episode(),
+            _reflection_episode(output_mode="scheduled_action_request"),
             "l1_subconscious",
-            "trigger_source",
-            id="unsupported-trigger",
+            "output_mode",
+            id="unsupported-reflection-output-mode",
         ),
         pytest.param(
             _image_text_episode(),
