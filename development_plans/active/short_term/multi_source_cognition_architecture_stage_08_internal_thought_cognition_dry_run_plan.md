@@ -8,7 +8,7 @@
   conversation-history pollution, durable writes, scheduler dispatch, adapter
   sends, or RAG broadening.
 - Plan class: large
-- Status: approved
+- Status: completed
 - Mandatory skills: `development-plan-writing`, `local-llm-architecture`,
   `no-prepost-user-input`, `py-style`, `test-style-and-execution`, and
   `cjk-safety` before editing cognition Python files that contain CJK prompt
@@ -573,43 +573,43 @@ prompt-map admission, focused tests, and lifecycle records.
 
 ## Progress Checklist
 
-- [ ] Stage 1 - prerequisite evidence carried forward.
+- [x] Stage 1 - prerequisite evidence carried forward.
   - Covers Step 1. Verify parent ledger and registry show Stage 07 completed
     and Stage 08 approved; record the Stage 07 branch, commits, merge commit,
     and test results.
   - Handoff: reread this plan, then start Stage 2.
-  - Sign-off: `<agent/date>` after evidence is recorded.
-- [ ] Stage 2 - internal thought episode contract complete.
+  - Sign-off: `Codex / 2026-05-10` after evidence is recorded.
+- [x] Stage 2 - internal thought episode contract complete.
   - Covers Steps 2-3. Verify focused contract/builder tests pass after the
     expected red import failure; record red/green output.
   - Handoff: reread this plan, then start Stage 3.
-  - Sign-off: `<agent/date>` after verification.
-- [ ] Stage 3 - prompt selection and source payload complete.
+  - Sign-off: `Codex / 2026-05-10` after verification.
+- [x] Stage 3 - prompt selection and source payload complete.
   - Covers Steps 4-5. Verify Stage 08 selector/source-payload tests and Stage
     03 selector tests pass; record command output.
   - Handoff: reread this plan, then start Stage 4.
-  - Sign-off: `<agent/date>` after verification.
-- [ ] Stage 4 - prompt maps and fingerprints complete.
+  - Sign-off: `Codex / 2026-05-10` after verification.
+- [x] Stage 4 - prompt maps and fingerprints complete.
   - Covers Steps 6 and 9. Verify Stage 08 prompt-render/fingerprint tests plus
     Stage 07 and Stage 03 gates pass; record fingerprint and test output.
   - Handoff: reread this plan, then start Stage 5.
-  - Sign-off: `<agent/date>` after verification.
-- [ ] Stage 5 - bounded dry-run runner complete.
+  - Sign-off: `Codex / 2026-05-10` after verification.
+- [x] Stage 5 - bounded dry-run runner complete.
   - Covers Steps 7-8. Verify bounded-run, no-public-leak, no-write,
     no-scene-residue, and context-cap tests pass; record command output.
   - Handoff: reread this plan, then start Stage 6.
-  - Sign-off: `<agent/date>` after verification.
-- [ ] Stage 6 - full verification complete.
+  - Sign-off: `Codex / 2026-05-10` after verification.
+- [x] Stage 6 - full verification complete.
   - Covers Step 10. Verify every Verification command passes or has an allowed
     no-match exit; record command output.
   - Handoff: run independent code review before lifecycle completion.
-  - Sign-off: `<agent/date>` after verification.
-- [ ] Stage 7 - independent code review and lifecycle complete.
+  - Sign-off: `Codex / 2026-05-10` after verification.
+- [x] Stage 7 - independent code review and lifecycle complete.
   - Covers Steps 11-12. Verify `Independent Code Review` passes, findings are
     fixed or recorded, affected checks are rerun, and lifecycle rows are
     updated; record review, fixes, reruns, lifecycle rows, and residual risks.
   - Handoff: Stage 09 plan can be reviewed after this checkpoint is signed.
-  - Sign-off: `<agent/date>` after review approval and lifecycle update.
+  - Sign-off: `Codex / 2026-05-10` after review approval and lifecycle update.
 
 ## Verification
 
@@ -633,7 +633,7 @@ Expected result: `CHANGE_SURFACE_OK`.
 
 ### Static Greps
 
-- `rg -n "save_conversation|save_assistant_message|call_consolidation_subgraph|dispatcher\\.dispatch|runtime\\.invalidate|get_rag_cache2_runtime|schedule|adapter" src\kazusa_ai_chatbot\internal_thought_cognition.py`
+- `rg -n "save_conversation|save_assistant_message|call_consolidation_subgraph|dispatcher\\.dispatch|runtime\\.invalidate|get_rag_cache2_runtime|schedule|\\badapter\\b|from .*adapter|import .*adapter" src\kazusa_ai_chatbot\internal_thought_cognition.py`
 
   Expected result: no matches. `rg` exit code `1` is acceptable.
 - `rg -n "\"internal_thought\"|\"internal_monologue\"" src\kazusa_ai_chatbot\service.py src\kazusa_ai_chatbot\nodes\persona_supervisor2.py src\kazusa_ai_chatbot\rag\cognitive_episode_adapter.py`
@@ -790,11 +790,79 @@ execution, or proactive behavior.
 Record during implementation:
 
 - Stage 07 evidence reread:
+  parent ledger and registry show Stage 07 completed and Stage 08 approved.
+  Stage 07 artifacts and evidence are carried above: branch
+  `stage-07-reflection-cognition-dry-run`, implementation commit `9288f42`,
+  evidence commit `3b65b8e`, merge commit `b6370d9`, Stage 07 focused
+  `14 passed`, Stage 03 regression `36 passed`, Stage 06 origin-policy gates
+  `9 passed`, and Stage 00 baseline `11 passed`.
 - Independent plan review:
   completed on 2026-05-10; approved for execution after review-derived fixes.
 - Branch and commit:
 - Static checks: compile, change surface, greps, diff check, and prompt
   fingerprint guard:
+  Static compile command passed with exit code 0. Change surface gate returned
+  `CHANGE_SURFACE_OK`. Updated no-write grep over
+  `src\kazusa_ai_chatbot\internal_thought_cognition.py` returned no matches
+  with acceptable `rg` exit code 1. Service/persona/RAG internal-thought wiring
+  grep returned no matches with acceptable `rg` exit code 1. Public scene grep
+  matched only `src\kazusa_ai_chatbot\internal_thought_cognition.py`.
+  `git diff --check` exited 0 with line-ending normalization warnings only.
+  Prompt fingerprint guard passed inside the Stage 08 focused tests.
 - Tests: focused and prior-stage regression gates:
+  Stage 2 red:
+  `venv\Scripts\python -m pytest tests\test_multi_source_cognition_stage_08_internal_thought_dry_run.py -q`
+  failed as expected with `ModuleNotFoundError:
+  kazusa_ai_chatbot.internal_thought_cognition`. Stage 2 green:
+  the same focused command passed with `9 passed`.
+  Stage 3 red:
+  `venv\Scripts\python -m pytest tests\test_multi_source_cognition_stage_08_internal_thought_dry_run.py -q`
+  failed with `6 failed, 11 passed` because `internal_thought` and
+  `internal_thought_internal_monologue` were unsupported by prompt selection.
+  Stage 3 green:
+  `venv\Scripts\python -m pytest tests\test_multi_source_cognition_stage_08_internal_thought_dry_run.py tests\test_multi_source_cognition_stage_03_prompt_selection.py -q`
+  passed with `53 passed`.
+  Stage 4 red:
+  `venv\Scripts\python -m pytest tests\test_multi_source_cognition_stage_08_internal_thought_dry_run.py -q`
+  failed with `1 failed, 18 passed`; the failure was the expected missing
+  `internal_thought_internal_monologue` prompt-map key in L1. Stage 4 green:
+  the same focused command passed with `19 passed`; Stage 03 selector gate
+  passed with `36 passed`; Stage 07 reflection dry-run gate passed with
+  `14 passed`. Prompt fingerprint guard covered all 9 existing L1/L2/L3 prompt
+  constants with post-Stage-07 byte lengths and SHA-256 digests unchanged.
+  Stage 5 red:
+  `venv\Scripts\python -m pytest tests\test_multi_source_cognition_stage_08_internal_thought_dry_run.py -q`
+  failed with `5 failed, 20 passed` because the runner still raised the
+  placeholder not-implemented error. Stage 5 green:
+  the same focused command passed with `25 passed`, covering busy skip,
+  output-mode validation before busy probe, empty-residue skip, over-cap
+  residue rejection before cognition, one injected cognition call, empty public
+  state surfaces, audit-only fields, no public-scene residue, no action
+  execution state, no write/delivery/scheduler tokens, prompt render, and
+  prompt fingerprints.
+  Stage 6 full verification:
+  `venv\Scripts\python -m pytest tests\test_multi_source_cognition_stage_08_internal_thought_dry_run.py`
+  passed with `26 passed`; Stage 07 reflection dry-run passed with `14 passed`;
+  Stage 03 prompt selection passed with `36 passed`; Stage 06 origin-policy
+  gates passed with `9 passed`; Stage 00 regression baseline passed with
+  `11 passed`.
+  Stage 6 static-grep correction:
+  the original no-write grep included a bare `adapter` token, which matched
+  the plan-mandated prompt key
+  `l3_preference_adapter.internal_thought_internal_monologue` in the runner
+  prompt-key list. The gate was narrowed to match standalone adapter imports
+  or references while preserving the exact runtime prompt-key list.
 - Independent code review:
+  No separate reviewer was available in-session. Active agent reread this plan
+  and inspected the full working-tree diff from a fresh-review posture. Finding
+  fixed in-scope: internal-thought source-payload projection validated
+  `action_latch` only as a dict, not as the required `dict[str, str]`; selector
+  validation was tightened and a focused negative test was added. Minor
+  docstring/import cleanup was also applied inside the approved Change Surface.
+  Affected checks rerun: Stage 08 focused `26 passed`, Stage 03 selector
+  `36 passed`, and static compile exited 0.
 - Completion diff review, lifecycle records, residual risks, and sign-off:
+  Stage 08 lifecycle rows updated to completed in this plan, the parent ledger,
+  and `development_plans/README.md`. Residual risks: none identified inside
+  Stage 08 scope; Stage 09 must keep public scene residue contract-only and
+  must not use internal-thought residue as image/audio percept input.
