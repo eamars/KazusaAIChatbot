@@ -799,6 +799,8 @@ Record during implementation:
 - Independent plan review:
   completed on 2026-05-10; approved for execution after review-derived fixes.
 - Branch and commit:
+  branch `stage-08-internal-thought-cognition-dry-run`, implementation commit
+  `ef1449b`.
 - Static checks: compile, change surface, greps, diff check, and prompt
   fingerprint guard:
   Static compile command passed with exit code 0. Change surface gate returned
