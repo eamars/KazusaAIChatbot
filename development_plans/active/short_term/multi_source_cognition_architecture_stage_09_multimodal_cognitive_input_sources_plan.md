@@ -825,7 +825,7 @@ Record after implementation:
 - Independent plan review:
   completed on 2026-05-10; approved for execution after review-derived fixes.
 - Branch: `stage-09-multimodal-cognitive-input-sources`
-- Commit:
+- Commit: implementation commit `566e6eb`
 - Static compile:
   `venv\Scripts\python -m py_compile src\kazusa_ai_chatbot\cognition_episode.py src\kazusa_ai_chatbot\service.py src\kazusa_ai_chatbot\nodes\relevance_agent.py src\kazusa_ai_chatbot\rag\cognitive_episode_adapter.py src\kazusa_ai_chatbot\nodes\persona_supervisor2_cognition_prompt_selection.py src\kazusa_ai_chatbot\nodes\persona_supervisor2_cognition_l1.py src\kazusa_ai_chatbot\nodes\persona_supervisor2_cognition_l2.py src\kazusa_ai_chatbot\nodes\persona_supervisor2_cognition_l3.py tests\test_multi_source_cognition_stage_09_multimodal_input_sources.py`
   exited 0.
