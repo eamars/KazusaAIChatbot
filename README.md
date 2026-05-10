@@ -107,6 +107,15 @@ The service is the stable HTTP-facing core. It receives platform-neutral chat re
 
 The persona pipeline is the main response path. It separates relevance, message clarification, retrieval, cognition, and dialog generation so each stage has a narrower responsibility.
 
+**Multi-Source Cognition**
+
+The cognition core consumes source-aware `CognitiveEpisode` records instead of
+pretending every trigger is a user chat turn. Normal `/chat` still uses the
+visible reply path. Reflection and internal thought currently run only through
+dry-run audit paths, multimodal inputs are reduced to bounded observation
+strings, and proactive output remains permissioned preview/outbox contract code
+without live scheduler or adapter registration.
+
 **Conversation Progress**
 
 Conversation Progress is short-term operational memory. It tracks the current local episode so cognition can continue, deepen, pivot, or close a conversation naturally without rereading full raw history every turn.

@@ -189,6 +189,20 @@ def test_preview_record_keeps_public_text_separate_from_outbox() -> None:
     assert "trigger_source" not in outbox
 
 
+def test_outbox_builder_rejects_permission_target_mismatch() -> None:
+    preview = _preview()
+    permission = _permission(platform_channel_id="chan-2")
+
+    with pytest.raises(ProactiveOutboxStateError):
+        build_proactive_outbox_record(
+            outbox_id="outbox-1",
+            preview=preview,
+            permission=permission,
+            status="dry_run",
+            created_at=CREATED_AT,
+        )
+
+
 @pytest.mark.asyncio
 async def test_dry_run_outbox_does_not_call_adapter() -> None:
     adapter = _FakeAdapter()
@@ -196,6 +210,20 @@ async def test_dry_run_outbox_does_not_call_adapter() -> None:
     with pytest.raises(ProactiveOutboxStateError):
         await send_ready_proactive_outbox(
             outbox=_outbox("dry_run"),
+            adapter=adapter,
+        )
+
+    assert adapter.calls == []
+
+
+@pytest.mark.asyncio
+async def test_transport_refuses_adapter_platform_mismatch() -> None:
+    adapter = _FakeAdapter()
+    adapter.platform = "discord"
+
+    with pytest.raises(ProactiveOutboxStateError):
+        await send_ready_proactive_outbox(
+            outbox=_outbox("ready"),
             adapter=adapter,
         )
 

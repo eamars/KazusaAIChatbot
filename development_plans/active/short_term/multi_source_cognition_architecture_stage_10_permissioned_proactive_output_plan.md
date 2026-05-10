@@ -741,6 +741,10 @@ calls, direct runtime adapter registration, or hidden transport sends.
   design risk. One issue found and fixed: explicit module public surfaces were
   added with `__all__`, and an unnecessary `Any` cast in the outbox test helper
   was removed. Reran compile, focused tests, and static greps after the fix.
+- Final architecture audit correction: outbox creation now rejects mismatched
+  preview/permission targets, and fake transport now rejects adapter/platform
+  mismatch before calling `send_message`. Added focused tests for both failure
+  modes and reran focused, cross-stage, and full-suite gates.
 - Completion diff review: Change Surface contains only the approved
   `proactive_output` package, two Stage 10 test files, this plan, the parent
   ledger, and the registry. No service, scheduler, DB, dispatcher, RAG,

@@ -6,7 +6,7 @@
   internal thought, future recall, and multimodal inputs can enter the same
   cognition and consolidation flow through source-aware episode contracts.
 - Plan class: large, architectural decisions
-- Status: approved
+- Status: completed
 - Mandatory skills: `development-plan-writing`, `local-llm-architecture`,
   `no-prepost-user-input`, `py-style`, `test-style-and-execution`,
   `database-data-pull`, and `cjk-safety` when editing Python files that contain
@@ -96,6 +96,55 @@ plan completes, update this ledger row, move or record the child plan according
 to `development_plans/README.md`, and keep artifact paths in that child's
 `Execution Evidence`. The next stage must read the parent ledger and previous
 child execution evidence before editing files.
+
+## Final Scope Sign-Off
+
+Review date: 2026-05-10.
+
+The multi-source cognition architecture scope is complete across Stage 00
+through Stage 10. The implemented runtime now has:
+
+- a source-neutral `CognitiveEpisode` contract for `/chat`, reflection dry-run,
+  internal-thought dry-run, multimodal percepts, and proactive preview records;
+- `/chat` behavior-preserving episode migration with Stage 00 regression gates
+  still passing;
+- source-aware prompt selection for shared L1/L2/L3 cognition nodes;
+- a RAG adapter that accepts only approved episode profiles and does not expose
+  episode control fields as retrieval context;
+- origin metadata and per-write consolidation policy that allow normal
+  user-message writes while denying reflection, internal-thought, non-dialog,
+  and preview writes;
+- reflection and internal-thought entry points limited to dry-run audit paths;
+- multimodal handoff limited to bounded image/audio observation strings;
+- proactive output contracts limited to permission evaluation, preview, outbox,
+  and fake transport tests, with no scheduler, dispatcher, DB, or live adapter
+  registration path.
+
+Final architecture review found one Stage 10 boundary weakness: outbox creation
+trusted the preview/permission pairing, and fake transport trusted the supplied
+adapter platform. The fix now rejects preview/permission target mismatch before
+building an outbox record and rejects adapter/platform mismatch before transport
+send. Focused tests cover both failure modes.
+
+Verification evidence:
+
+- `venv\Scripts\python.exe -m py_compile src\kazusa_ai_chatbot\proactive_output\__init__.py src\kazusa_ai_chatbot\proactive_output\contracts.py src\kazusa_ai_chatbot\proactive_output\policy.py src\kazusa_ai_chatbot\proactive_output\outbox.py tests\test_multi_source_cognition_stage_10_proactive_policy.py tests\test_multi_source_cognition_stage_10_proactive_outbox.py`
+  passed.
+- Proactive forbidden-call greps found zero scheduler, dispatcher,
+  persistence, runtime adapter registration, service, scheduler, DB, or
+  dispatcher integration paths.
+- `send_message` grep matched only
+  `src\kazusa_ai_chatbot\proactive_output\outbox.py` and
+  `tests\test_multi_source_cognition_stage_10_proactive_outbox.py`.
+- Cross-stage regression gate passed with `89 passed`.
+- Full deterministic suite passed with `976 passed, 217 deselected`.
+
+Residual scope deliberately remains out of runtime: real proactive DB outbox,
+real transport registration, scheduler integration for proactive contact, and
+non-dry-run reflection or internal-thought actions. Those require separate
+approved plans.
+
+Sign-off: `Codex / 2026-05-10`.
 
 ## Core Terms
 
@@ -755,7 +804,7 @@ Top-level plan verification:
 
 ```powershell
 rg -n "CognitiveEpisode|/chat Episode Migration|Regression Gate Policy|Shared L1/L2/L3" development_plans\active\short_term\multi_source_cognition_architecture_plan.md
-rg -n "Status: approved|Progress Tracking Agreement|stage_04|stage_05" development_plans\active\short_term\multi_source_cognition_architecture_plan.md
+rg -n "Status: completed|Progress Tracking Agreement|stage_10|Final Scope Sign-Off" development_plans\active\short_term\multi_source_cognition_architecture_plan.md
 git diff --check
 ```
 
@@ -768,7 +817,7 @@ for real LLM or live database evidence.
 
 This top-level plan is complete when:
 
-- The development plan registry lists it as an active approved staged plan.
+- The development plan registry lists it as completed.
 - It states that `/chat` migration is the first implementation target.
 - It defines trigger-source, input-source, and output-mode contracts.
 - It explains that top-level graphs may differ while L1/L2/L3 cognition,
@@ -779,6 +828,7 @@ This top-level plan is complete when:
 - It defines child plan filenames with the parent namespace and staging index.
 - It defines the progress ledger and artifact handoff contract.
 - It states child-plan promotion rules, rollback, and stop conditions.
+- It records completed child-stage artifacts and final architecture sign-off.
 
 ## Execution Notes
 

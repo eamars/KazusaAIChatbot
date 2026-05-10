@@ -110,6 +110,17 @@ def build_proactive_outbox_record(
         raise ProactiveOutboxStateError(
             f"initial proactive outbox status is not allowed: {status}"
         )
+    target_matches = (
+        preview["platform"] == permission["platform"]
+        and preview["platform_channel_id"] == permission["platform_channel_id"]
+        and preview["channel_type"] == permission["channel_type"]
+        and preview["target_global_user_id"] == permission["target_global_user_id"]
+        and preview["target_platform_user_id"] == permission["target_platform_user_id"]
+    )
+    if not target_matches:
+        raise ProactiveOutboxStateError(
+            "proactive outbox permission target does not match preview"
+        )
 
     outbox: ProactiveOutboxRecord = {
         "outbox_id": outbox_id,
@@ -180,6 +191,10 @@ async def send_ready_proactive_outbox(
     if outbox["status"] != "ready":
         raise ProactiveOutboxStateError(
             f'proactive outbox is not ready: {outbox["status"]}'
+        )
+    if adapter.platform != outbox["platform"]:
+        raise ProactiveOutboxStateError(
+            "proactive outbox adapter platform does not match target platform"
         )
 
     send_result = await adapter.send_message(
