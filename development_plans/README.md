@@ -45,6 +45,7 @@ long_term/todo.md
 
 | Plan | Status | Execution |
 |---|---|---|
+| [conversation_progress_identity_leakage_bugfix_plan.md](active/bugfix/conversation_progress_identity_leakage_bugfix_plan.md) | approved | ready |
 
 ## Reference Documents
 
