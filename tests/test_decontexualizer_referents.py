@@ -77,7 +77,7 @@ def _base_state() -> dict:
 async def test_decontexualizer_prompt_requires_character_name_and_identity_safe_examples(
     monkeypatch,
 ) -> None:
-    """Decontextualizer prompt input should expose the exact active character."""
+    """Decontextualizer prompt renders character identity without payload duplication."""
 
     llm_payload = (
         '{"output": "是的", "reasoning": "identity contract check", '
@@ -96,9 +96,11 @@ async def test_decontexualizer_prompt_requires_character_name_and_identity_safe_
 
     system_prompt = fake_llm.messages[0].content
     human_payload = json.loads(fake_llm.messages[1].content)
-    assert human_payload.get("character_name") == '测试角色'
+    assert "character_name" not in human_payload
     assert '测试角色' in system_prompt
     assert '{character_name}' not in system_prompt
+    assert '"character_name": "string"' not in system_prompt
+    assert '`character_name`' not in system_prompt
     assert '当前助手/角色' not in system_prompt
     assert '当前角色说明白' not in system_prompt
 
