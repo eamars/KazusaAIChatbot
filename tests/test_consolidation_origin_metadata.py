@@ -181,12 +181,12 @@ def test_origin_rejects_non_user_message_trigger() -> None:
 
 def test_origin_rejects_non_dialog_text_sources() -> None:
     episode = deepcopy(_text_chat_episode())
-    episode["input_sources"] = ["dialog_text", "image_observation"]
+    episode["input_sources"] = ["dialog_text", "retrieved_memory"]
     episode["percepts"].append(
         {
             "percept_id": "percept-2",
-            "input_source": "image_observation",
-            "content": "image observed",
+            "input_source": "retrieved_memory",
+            "content": "retrieved memory",
             "visibility": "model_visible",
             "metadata": {},
         }

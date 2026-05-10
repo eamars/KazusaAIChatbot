@@ -35,6 +35,7 @@ from kazusa_ai_chatbot.message_envelope.prompt_projection import (
     PromptMessageContext,
     PromptReplyContext,
     assert_prompt_message_context_safe,
+    project_reply_attachment_summaries,
     project_prompt_message_context,
 )
 from kazusa_ai_chatbot.message_envelope.resolvers import (
@@ -85,4 +86,5 @@ __all__ = [
     "assert_prompt_message_context_safe",
     "build_default_attachment_handler_registry",
     "project_prompt_message_context",
+    "project_reply_attachment_summaries",
 ]

@@ -226,6 +226,7 @@ _CONTEXTUAL_AGENT_PROMPT = """\
 5. **表达意愿 (expression_willingness)**: {mbti_expression_willingness}
 6. **中性优先**：若输入属于普通问候、事实分享、图片内容请求或轻度日常约定，且没有明确越界证据，则 `social_distance`、`vibe_check`、`relational_dynamic` 必须保持中性/日常，不得脑补对峙、调情或威胁氛围。
 7. **边界画像约束**：`boundary_profile` 是默认反应强度约束。若 Boundary Core 为 `acceptance=allow` 且 `stance_bias=confirm`，必须用该画像约束 affect，不得按通用敏感角色模板放大威胁感。
+8. **视觉证据定位**：`media_observations` 只说明当前图片/音频中可见或可听的事实。它可以影响当前话题和场景感，但不能单独把普通图片内容解释成关系压力、暧昧或威胁。
 
 # Boundary Profile（角色属性，只作为系统约束）
 - control_sensitivity: {boundary_control_sensitivity}
@@ -236,7 +237,7 @@ _CONTEXTUAL_AGENT_PROMPT = """\
 
 # 思考路径
 1. 先读取 `character_mood`、`global_vibe` 与 `last_relationship_insight`，判断当前社交底色。
-2. 读取 `decontexualized_input` 与 `boundary_core_assessment`，确认本轮是否真的触及角色边界。
+2. 读取 `decontexualized_input`、`media_observations` 与 `boundary_core_assessment`，确认本轮是否真的触及角色边界。
 3. 结合系统中的 Boundary Profile、`affinity_context` 与极短 `chat_history`，估计本轮社交距离和关系动态。
 4. 判断情绪强度时只输出语义描述，不输出数值。
 5. 若没有明确越界证据，保持中性/日常，不要脑补对峙、调情或威胁氛围。
@@ -251,6 +252,10 @@ _CONTEXTUAL_AGENT_PROMPT = """\
 # 输入格式
 {{
     "decontexualized_input": "用户本轮真实意图摘要",
+    "media_observations": {{
+        "image_observations": ["当前图片的结构化视觉观察；没有则为空数组"],
+        "audio_observations": ["当前音频转写或摘要；没有则为空数组"]
+    }},
     "character_mood": "当前瞬间情绪 (如: Flustered/Irritated)",
     "global_vibe": "环境氛围背景 (如: Defensive/Cozy)",
     "last_relationship_insight": "对该用户的核心关系动态分析",
@@ -393,6 +398,7 @@ _STYLE_AGENT_PROMPT = """\
 3. **去物理化**：你**看不见**角色，**感知不到**角色的身体。严禁生成任何关于视线、脸红、动作的描述。
 4. **现代网聊优先**：默认把「反正」「而已」「罢了」视为偏旧、偏模板化的软化词。除非它们对当前语义不可替代，否则不要把它们写进风格建议；若它们显得多余，应优先写入 `forbidden_phrases`。
 5. **互动风格覆盖层**：`interaction_style_context` 是已清洗的抽象互动处理建议，只能作为措辞、温度、调侃强度、直接程度和节奏的软参考；它不是用户事实、承诺、边界证据或当前轮意图。
+6. **媒体证据只影响措辞精度**：`media_observations` 可以让语言风格更具体地指向图片/音频中的对象，但不能改变 `logical_stance`、新增内容锚点，或生成任何身体、视线、表情、动作描述。
 
 # 思考路径
 1. **环境感知 (Vibe Check)：** 检查 `global_vibe` 和 `character_mood`。如果氛围是 [Defensive] 且心境是 [Flustered]，即便立场是 CONFIRM，你的包装也必须带有“局促”和“防备”的色彩。
@@ -442,6 +448,10 @@ _STYLE_AGENT_PROMPT = """\
     "last_relationship_insight": "对该用户的核心关系动态分析",
     "logical_stance": "强制逻辑立场 (CONFIRM/REFUSE/TENTATIVE...)",
     "character_intent": "行动意图 (BANTAR/CLARIFY/EVADE...)",
+    "media_observations": {{
+        "image_observations": ["当前图片的结构化视觉观察；没有则为空数组"],
+        "audio_observations": ["当前音频转写或摘要；没有则为空数组"]
+    }},
     "interaction_style_context": {{
         "user_style": {{
             "speech_guidelines": ["抽象说话方式建议"],
@@ -598,13 +608,14 @@ logical_stance + character_intent
 
 # 解析步骤
 1. **解析当前输入功能**：先读 `decontexualized_input`、`referents`、`internal_monologue`、`logical_stance`、`character_intent`。判断当前输入是在回答、提问、请求、提议、补充、玩笑、赞美、拒绝、纠正还是要求澄清。
-2. **解析当前输入与 open loop 的关系**：当 `conversation_progress.open_loops`、`current_thread` 或 `current_blocker` 存在时，必须先比较当前输入是否解决、部分解决、答错、回避或只是社交回应。当前 `decontexualized_input` 与 `internal_monologue` 优先级高于旧的 `current_blocker`。
-3. **解析 `[DECISION]`**：把 `logical_stance` 转成自然语言立场；不要只输出枚举值，也不要在这里修正上游立场。
-4. **解析 `[FACT]`**：只选择与当前输入和本轮任务直接相关的事实。若 `rag_result.answer` 直接回答当前问题，它是最高优先级事实摘要。
-5. **解析 `[ANSWER]`**：若当前输入提出问题、请求、提议或正在回答 open loop，且 `character_intent != CLARIFY`，在不改变 `[DECISION]` 的前提下给出回答、判定或决定；若 `[FACT]` 存在，答案应使用其中的具体对象与参数。
-6. **解析 `[SOCIAL]`**：只放社交姿态、局促、防备、委婉、得意、挑衅等表达分寸；不得改变 `[DECISION]`、`[FACT]` 或 `[ANSWER]`。
-7. **解析 `[PROGRESSION]` / `[AVOID_REPEAT]`**：根据当前输入对 open loop 的关系和 `conversation_progress` 处理推进、重复和旧线程。
-8. **解析 `[SCOPE]`**：只描述篇幅和需要覆盖的锚点。
+2. **读取当前媒体证据**：如果存在 `media_observations`，把它视为本轮图片/音频的直接事实证据；它不来自 RAG，也不是用户文字。
+3. **解析当前输入与 open loop 的关系**：当 `conversation_progress.open_loops`、`current_thread` 或 `current_blocker` 存在时，必须先比较当前输入是否解决、部分解决、答错、回避或只是社交回应。当前 `decontexualized_input` 与 `internal_monologue` 优先级高于旧的 `current_blocker`。
+4. **解析 `[DECISION]`**：把 `logical_stance` 转成自然语言立场；不要只输出枚举值，也不要在这里修正上游立场。
+5. **解析 `[FACT]`**：只选择与当前输入和本轮任务直接相关的事实。若当前输入在问图片/音频内容，`media_observations` 是最高优先级事实来源；若 `rag_result.answer` 直接回答当前问题，它是最高优先级检索事实摘要。
+6. **解析 `[ANSWER]`**：若当前输入提出问题、请求、提议或正在回答 open loop，且 `character_intent != CLARIFY`，在不改变 `[DECISION]` 的前提下给出回答、判定或决定；若 `[FACT]` 存在，答案应使用其中的具体对象与参数。
+7. **解析 `[SOCIAL]`**：只放社交姿态、局促、防备、委婉、得意、挑衅等表达分寸；不得改变 `[DECISION]`、`[FACT]` 或 `[ANSWER]`。
+8. **解析 `[PROGRESSION]` / `[AVOID_REPEAT]`**：根据当前输入对 open loop 的关系和 `conversation_progress` 处理推进、重复和旧线程。
+9. **解析 `[SCOPE]`**：只描述篇幅和需要覆盖的锚点。
 
 # 每个锚点的最小规则
 ## Clarification override
@@ -630,6 +641,7 @@ logical_stance + character_intent
 ## `[FACT]`
 - 事实必须能被当前问题或话题自然引用；无直接相关事实时省略 `[FACT]`。
 - 不要把无关历史记忆植入当前回应。
+- 当前输入询问或引用图片/音频时，优先从 `media_observations` 生成当前事实；不要把图片观察送回 RAG，也不要把它持久化成新的用户偏好。
 - 若 `rag_result.answer` 直接回答当前输入，优先使用它，不要从零散证据里另行挑选冲突版本。
 - 如果引用 active_commitment，必须先看 `due_state`：`due_today` 表示约定日期已经到今天，`past_due` 表示已过约定日期，`future_due` 才表示仍在未来。不要把残留的 `明天` 等相对词写进锚点。
 
@@ -662,6 +674,10 @@ logical_stance + character_intent
     "referents": [
         {{"phrase": "这些", "referent_role": "object", "status": "unresolved"}}
     ],
+    "media_observations": {{
+        "image_observations": ["当前图片的结构化视觉观察；没有则为空数组"],
+        "audio_observations": ["当前音频转写或摘要；没有则为空数组"]
+    }},
     "rag_result": {{
         "answer": "检索主管的一行综合结论",
         "user_image": {{
@@ -816,6 +832,7 @@ _PREFERENCE_ADAPTER_PROMPT = """\
 6. **统一处理**：回复语言也只是偏好的一种，应与称呼、句尾词、格式习惯一样，基于当前输入、承诺、事实与画像综合判断，不要依赖额外硬编码桥接。
 7. **称呼/身份边界**：如果用户当前要求强加称呼、身份、主从关系或所有权语气，而 `internal_monologue`、`content_anchors`、`logical_stance` 或 `character_intent` 显示角色在回避、澄清、防备、犹豫、拒绝、重新框定或仅仅追问原因，不要把该称呼写入 `accepted_user_preferences`。只有当输入数据明确显示角色已经接受该称呼作为可持续表达偏好，或已有仍在生效的承诺/事实支持时，才可以输出。
 8. **互动风格不是用户命令**：`interaction_style_context` 是抽象互动处理建议，只能帮助你把已经合格的表达偏好写得更自然；它不能单独授权新的 `accepted_user_preferences`，也不能压过 `active_commitments`。
+9. **媒体证据不是偏好来源**：`media_observations` 可以证明当前图片/音频里有什么，但不能单独形成“用户希望以后怎么回复”的偏好；除非用户文本或已接受承诺明确提出表达要求，否则不要从图片内容中提取偏好。
 
 # 你可以处理的偏好类型
 - 回复语言偏好
@@ -844,6 +861,10 @@ _PREFERENCE_ADAPTER_PROMPT = """\
     "internal_monologue": "意识层决策逻辑",
     "logical_stance": "CONFIRM/REFUSE/TENTATIVE/...",
     "character_intent": "行动意图",
+    "media_observations": {{
+        "image_observations": ["当前图片的结构化视觉观察；没有则为空数组"],
+        "audio_observations": ["当前音频转写或摘要；没有则为空数组"]
+    }},
     "active_commitments": [{{"action": "仍在生效的承诺/约定"}}],
     "user_memory_context": {{
         "stable_patterns": [{{"fact": "重复出现的事实模式", "subjective_appraisal": "角色的主观评价", "relationship_signal": "未来互动信号", "updated_at": "本地时间YYYY-MM-DD HH:MM"}}],
@@ -1003,7 +1024,7 @@ _VISUAL_AGENT_PROMPT = """\
 - `visual_vibe` 要承担场景、构图、镜头距离、背景物、光影、色彩和氛围；如果输入没有给出具体地点，只能写中性的聊天空间或轻量抽象背景，不要编造强场景。
 
 # 取材优先级
-1. 当前消息与 `prompt_message_context.attachments` 中的图片描述最高优先级：如果用户在讨论图像、物品、地点或画面元素，视觉氛围必须与这些可见事实相容。
+1. 当前消息、`media_observations.image_observations` 与 `prompt_message_context.attachments` 中的图片描述最高优先级：如果用户在讨论图像、物品、地点或画面元素，视觉氛围必须与这些可见事实相容。
 2. `content_anchors` 与 `rag_result.answer` 规定本轮“说什么”；视觉表现必须服务这个语义落点。
 3. `contextual_directives`、`internal_monologue`、`emotional_appraisal` 只调整表情强度、社交距离和氛围，不得改写事实或场景。
 4. `boundary_core_assessment` 与 Boundary Profile 只用于防止过度威胁化或过度亲密化。
@@ -1011,7 +1032,7 @@ _VISUAL_AGENT_PROMPT = """\
 
 # 思考路径
 1. 先确定这一帧的语义中心：角色是在回答、澄清、拒绝、调侃、犹豫还是观察某个对象。
-2. 再从当前消息、附件描述、检索结果和内容锚点中抽取可见场景线索；没有明确线索时保持简洁背景。
+2. 再从当前消息、`media_observations`、附件摘要、检索结果和内容锚点中抽取可见场景线索；没有明确线索时保持简洁背景。
 3. 根据社交距离、边界判断和当前心境，选择一个静止姿势和一个主视线方向。
 4. 最后补充光线、构图和环境层次，使画面像一张可完成的插画，而不是角色动作列表。
 
@@ -1030,13 +1051,17 @@ _VISUAL_AGENT_PROMPT = """\
 
 # 输入格式
 {{
-    "user_input": "用户本轮原始输入，可包含附件描述拼接后的内容",
+    "user_input": "用户本轮原始文字输入；不包含附件描述拼接内容",
     "prompt_message_context": {{
         "body_text": "当前消息正文",
         "attachments": [
             {{"media_kind": "image | audio | video | file", "description": "附件摘要", "summary_status": "available | unavailable"}}
         ],
         "reply": {{"excerpt": "被回复消息摘录"}}
+    }},
+    "media_observations": {{
+        "image_observations": ["当前图片的结构化视觉观察；没有则为空数组"],
+        "audio_observations": ["当前音频转写或摘要；没有则为空数组"]
     }},
     "decontexualized_input": "用户本轮真实意图摘要",
     "referents": [{{"phrase": "指代短语", "referent_role": "subject | object | time", "status": "resolved | unresolved"}}],

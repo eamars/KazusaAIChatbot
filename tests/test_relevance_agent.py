@@ -9,6 +9,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from kazusa_ai_chatbot.cognition_episode import build_text_chat_cognitive_episode
+from kazusa_ai_chatbot.nodes import relevance_agent as relevance_module
 from kazusa_ai_chatbot.nodes.relevance_agent import (
     build_group_attention_context,
     multimedia_descriptor_agent,
@@ -130,6 +131,16 @@ def _llm_response(content: str) -> MagicMock:
     response = MagicMock()
     response.content = content
     return response
+
+
+def test_vision_descriptor_prompt_declares_structured_prompt_sections() -> None:
+    """Vision prompt should expose input, generation, and output contracts."""
+
+    prompt = relevance_module._VISION_DESCRIPTOR_PROMPT
+
+    assert '# 输入格式' in prompt
+    assert '# 生成步骤' in prompt
+    assert '# 输出格式' in prompt
 
 
 @pytest.mark.asyncio

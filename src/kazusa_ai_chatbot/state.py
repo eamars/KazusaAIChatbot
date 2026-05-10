@@ -1,9 +1,6 @@
 from __future__ import annotations
 
-from typing import Any
-from typing import Annotated
-from typing import NotRequired
-from typing import TypedDict
+from typing import Annotated, Any, Literal, NotRequired, TypedDict
 
 from kazusa_ai_chatbot.cognition_episode import CognitiveEpisode
 from kazusa_ai_chatbot.conversation_progress import ConversationProgressPromptDoc
@@ -16,6 +13,13 @@ class MultiMediaDoc(TypedDict):
     content_type: str  # e.g,. "image/png", "video/mp4"
     base64_data: str
     description: str
+    image_observation: NotRequired[dict[str, Any]]
+
+
+class ReplyAttachmentSummary(TypedDict):
+    media_kind: str
+    description: str
+    summary_status: Literal["available", "unavailable"]
 
 
 class ReplyContext(TypedDict, total=False):
@@ -23,6 +27,7 @@ class ReplyContext(TypedDict, total=False):
     reply_to_platform_user_id: str
     reply_to_display_name: str
     reply_excerpt: str
+    reply_attachments: list[ReplyAttachmentSummary]
 
 
 class DebugModes(TypedDict, total=False):

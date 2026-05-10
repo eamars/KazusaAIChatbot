@@ -44,12 +44,20 @@ class AttachmentDoc(TypedDict, total=False):
     storage_shape: str    # "inline" | "url_only" | "drop"
 
 
+class ReplyAttachmentSummaryDoc(TypedDict, total=False):
+    """Prompt-safe attachment summary copied from a replied-to message."""
+    media_kind: str
+    description: str
+    summary_status: Literal["available", "unavailable"]
+
+
 class ReplyContextDoc(TypedDict, total=False):
     """Structured reply metadata for a conversation message."""
     reply_to_message_id: str
     reply_to_platform_user_id: str
     reply_to_display_name: str
     reply_excerpt: str
+    reply_attachments: list[ReplyAttachmentSummaryDoc]
 
 
 class MentionDoc(TypedDict, total=False):

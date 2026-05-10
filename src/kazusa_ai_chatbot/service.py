@@ -26,6 +26,7 @@ from kazusa_ai_chatbot.config import (
 )
 from kazusa_ai_chatbot.cognition_episode import (
     CognitiveEpisode,
+    build_reply_media_description_rows,
     build_text_chat_cognitive_episode,
     build_text_chat_media_description_rows,
 )
@@ -60,6 +61,7 @@ from kazusa_ai_chatbot.chat_input_queue import ChatInputQueue, QueuedChatItem
 from kazusa_ai_chatbot.message_envelope import (
     MessageEnvelope,
     project_prompt_message_context,
+    project_reply_attachment_summaries,
 )
 from kazusa_ai_chatbot.utils import log_list_preview, log_preview, trim_history_dict
 from kazusa_ai_chatbot import scheduler
@@ -218,13 +220,19 @@ async def _hydrate_reply_context(req: ChatRequest) -> ReplyContext:
             "reply_excerpt",
         )
     )
-    if reply_to_message_id and not has_complete_metadata:
+    needs_reply_attachments = not reply_context.get("reply_attachments")
+    if reply_to_message_id and (not has_complete_metadata or needs_reply_attachments):
         row = await get_conversation_by_platform_message_id(
             platform=req.platform,
             platform_channel_id=req.platform_channel_id,
             platform_message_id=reply_to_message_id,
         )
         if row is not None:
+            attachment_summaries = project_reply_attachment_summaries(
+                row.get("attachments", []),
+            )
+            if attachment_summaries:
+                reply_context["reply_attachments"] = attachment_summaries
             if not reply_context.get("reply_to_platform_user_id"):
                 platform_user_id = str(row.get("platform_user_id") or "")
                 if platform_user_id:
@@ -662,7 +670,12 @@ async def _process_queued_chat_item(item: QueuedChatItem) -> None:
         prompt_message_context = project_prompt_message_context(
             message_envelope=message_envelope,
             multimedia_input=multimedia_input,
+            reply_context=reply_context,
         )
+        media_description_rows = [
+            *build_text_chat_media_description_rows(multimedia_input),
+            *build_reply_media_description_rows(reply_context),
+        ]
         is_collapsed_turn = bool(item.collapsed_items)
         active_turn_platform_message_ids = _active_turn_platform_message_ids(item)
         active_turn_conversation_row_ids = _active_turn_conversation_row_ids(item)
@@ -717,9 +730,7 @@ async def _process_queued_chat_item(item: QueuedChatItem) -> None:
                 prompt_message_context["addressed_to_global_user_ids"]
             ),
             target_broadcast=bool(prompt_message_context["broadcast"]),
-            media_description_rows=build_text_chat_media_description_rows(
-                multimedia_input
-            ),
+            media_description_rows=media_description_rows,
         )
 
         initial_state: IMProcessState = {

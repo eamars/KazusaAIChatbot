@@ -46,6 +46,7 @@ _PROMPT_REPLY_KEYS = {
     "display_name",
     "excerpt",
     "derivation",
+    "attachments",
 }
 
 
@@ -66,6 +67,7 @@ class PromptReplyContext(TypedDict, total=False):
     display_name: str
     excerpt: str
     derivation: str
+    attachments: list[PromptAttachmentSummary]
 
 
 class PromptMentionContext(TypedDict, total=False):
@@ -192,6 +194,56 @@ def _project_attachments(
     return summaries
 
 
+def project_reply_attachment_summaries(
+    attachments: object,
+    *,
+    description_cap: int = MAX_PROMPT_ATTACHMENT_DESCRIPTION_CHARS,
+    attachment_limit: int = MAX_PROMPT_ATTACHMENTS,
+) -> list[PromptAttachmentSummary]:
+    """Project stored reply-target attachments into prompt-safe summaries.
+
+    Args:
+        attachments: Stored attachment documents from the replied-to message.
+        description_cap: Maximum description characters per attachment.
+        attachment_limit: Maximum reply attachments to expose.
+
+    Returns:
+        Prompt-safe attachment summaries with no raw media fields.
+    """
+    if not isinstance(attachments, list):
+        return_value: list[PromptAttachmentSummary] = []
+        return return_value
+
+    summaries: list[PromptAttachmentSummary] = []
+    for attachment in attachments[:attachment_limit]:
+        if not isinstance(attachment, Mapping):
+            continue
+        media_kind_value = attachment.get("media_kind")
+        if isinstance(media_kind_value, str) and media_kind_value:
+            media_kind = media_kind_value
+        else:
+            media_kind = _media_kind(attachment.get("media_type"))
+        description = ""
+        stored_description = attachment.get("description")
+        if isinstance(stored_description, str):
+            description = stored_description.strip()
+
+        summary_status: Literal["available", "unavailable"] = "unavailable"
+        stored_status = attachment.get("summary_status")
+        if stored_status in ("available", "unavailable"):
+            summary_status = stored_status
+        elif description:
+            summary_status = "available"
+
+        summary: PromptAttachmentSummary = {
+            "media_kind": media_kind,
+            "description": _trim_description(description, description_cap),
+            "summary_status": summary_status,
+        }
+        summaries.append(summary)
+    return summaries
+
+
 def _project_mentions(message_envelope: MessageEnvelope) -> list[PromptMentionContext]:
     mentions: list[PromptMentionContext] = []
     for mention in message_envelope["mentions"]:
@@ -210,10 +262,16 @@ def _project_mentions(message_envelope: MessageEnvelope) -> list[PromptMentionCo
     return mentions
 
 
-def _project_reply(message_envelope: MessageEnvelope, excerpt_cap: int) -> PromptReplyContext | None:
+def _project_reply(
+    message_envelope: MessageEnvelope,
+    excerpt_cap: int,
+    description_cap: int,
+    attachment_limit: int,
+    reply_context: Mapping[str, object] | None,
+) -> PromptReplyContext | None:
     reply = message_envelope.get("reply")
     if not isinstance(reply, Mapping) or not reply:
-        return None
+        reply = {}
 
     projected: PromptReplyContext = {}
     for key in (
@@ -231,6 +289,15 @@ def _project_reply(message_envelope: MessageEnvelope, excerpt_cap: int) -> Promp
     if isinstance(excerpt, str) and excerpt:
         projected["excerpt"] = _truncate_with_suffix(excerpt.strip(), excerpt_cap)
 
+    if isinstance(reply_context, Mapping):
+        attachments = reply_context.get("reply_attachments")
+        if isinstance(attachments, list) and attachments:
+            projected["attachments"] = project_reply_attachment_summaries(
+                attachments,
+                description_cap=description_cap,
+                attachment_limit=attachment_limit,
+            )
+
     if not projected:
         return None
     return projected
@@ -244,6 +311,7 @@ def _build_projection(
     reply_cap: int,
     description_cap: int,
     attachment_limit: int,
+    reply_context: Mapping[str, object] | None,
 ) -> PromptMessageContext:
     projection: PromptMessageContext = {
         "body_text": _truncate_with_suffix(
@@ -264,7 +332,13 @@ def _build_projection(
             attachment_limit=attachment_limit,
         ),
     }
-    reply = _project_reply(message_envelope, reply_cap)
+    reply = _project_reply(
+        message_envelope,
+        reply_cap,
+        description_cap,
+        attachment_limit,
+        reply_context,
+    )
     if reply is not None:
         projection["reply"] = reply
     return projection
@@ -278,6 +352,7 @@ def _reduced_projection(
     reply_cap: int,
     description_cap: int,
     attachment_limit: int,
+    reply_context: Mapping[str, object] | None,
 ) -> PromptMessageContext:
     projection = _build_projection(
         message_envelope=message_envelope,
@@ -286,6 +361,7 @@ def _reduced_projection(
         reply_cap=reply_cap,
         description_cap=description_cap,
         attachment_limit=attachment_limit,
+        reply_context=reply_context,
     )
     if _json_size(projection) <= MAX_PROMPT_MESSAGE_CONTEXT_CHARS:
         return projection
@@ -297,6 +373,7 @@ def _reduced_projection(
         reply_cap=reply_cap,
         description_cap=description_cap,
         attachment_limit=min(2, attachment_limit),
+        reply_context=reply_context,
     )
     if _json_size(projection) <= MAX_PROMPT_MESSAGE_CONTEXT_CHARS:
         return projection
@@ -308,6 +385,7 @@ def _reduced_projection(
         reply_cap=reply_cap,
         description_cap=max(1, description_cap // 2),
         attachment_limit=min(2, attachment_limit),
+        reply_context=reply_context,
     )
     if _json_size(projection) <= MAX_PROMPT_MESSAGE_CONTEXT_CHARS:
         return projection
@@ -319,6 +397,7 @@ def _reduced_projection(
         reply_cap=reply_cap,
         description_cap=max(1, description_cap // 2),
         attachment_limit=min(2, attachment_limit),
+        reply_context=reply_context,
     )
     if _json_size(projection) <= MAX_PROMPT_MESSAGE_CONTEXT_CHARS:
         return projection
@@ -330,6 +409,7 @@ def _reduced_projection(
         reply_cap=max(1, reply_cap // 2),
         description_cap=max(1, description_cap // 2),
         attachment_limit=min(2, attachment_limit),
+        reply_context=reply_context,
     )
     if _json_size(projection) <= MAX_PROMPT_MESSAGE_CONTEXT_CHARS:
         return projection
@@ -344,6 +424,7 @@ def project_prompt_message_context(
     *,
     message_envelope: MessageEnvelope,
     multimedia_input: list[Mapping[str, object]] | None = None,
+    reply_context: Mapping[str, object] | None = None,
 ) -> PromptMessageContext:
     """Build a bounded LLM-safe current-message context.
 
@@ -364,6 +445,7 @@ def project_prompt_message_context(
         reply_cap=MAX_PROMPT_REPLY_EXCERPT_CHARS,
         description_cap=MAX_PROMPT_ATTACHMENT_DESCRIPTION_CHARS,
         attachment_limit=MAX_PROMPT_ATTACHMENTS,
+        reply_context=reply_context,
     )
     assert_prompt_message_context_safe(projection)
     return projection
@@ -414,6 +496,12 @@ def _assert_reply_safe(value: object, path: str) -> None:
         raise ValueError(f"Expected reply mapping at {path}")
     _check_mapping_keys(value=value, allowed_keys=_PROMPT_REPLY_KEYS, path=path)
     for key, item in value.items():
+        if key == "attachments":
+            if not isinstance(item, list):
+                raise ValueError(f"Expected reply attachments list at {path}.{key}")
+            for index, attachment in enumerate(item):
+                _assert_attachment_safe(attachment, f"{path}.{key}[{index}]")
+            continue
         _reject_nested_mapping_keys(item, f"{path}.{key}")
 
 

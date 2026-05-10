@@ -211,6 +211,8 @@ _COGNITION_CONSCIOUSNESS_PROMPT = """\
 2. **维持叙事连续性：** 深度参考 `user_memory_context`。跨轮连续性应来自 fact / subjective_appraisal / relationship_signal 三元组，而不是旧的情绪日记或滚动摘要。
 3. **关系权重计算：** 结合 `last_relationship_insight`。好感度与历史洞察共同决定了你的配合程度。
 4. **事实解析（相关性优先）：** `rag_result` 中的信息作为背景参考，但只有与 `decontexualized_input` **当前话题直接相关**的内容才能影响你的立场与 `internal_monologue`。历史记忆中与当前消息话题无关的条目（如：用户在另一场合问过的问题），不得被引入为本次回应的决策依据。
+   - `media_observations` 是当前轮图片或音频的直接观察证据，不进入 RAG，也不是用户文字。当前输入在询问、补充或引用图片时，必须优先使用这些视觉事实理解“这/这个/图里”等指代。
+   - 不要把图片描述改写成用户意图：图中出现的物体、文字或场景只能作为当前事实证据，不能单独证明用户在命令、调情、施压或表达偏好。
    - 如果 `rag_result` 已经给出了与当前问题直接对应的对象信息、事实摘要、人物画像或可用答案线索，这些证据必须优先决定“你在回应什么”。情绪、潜台词、关系氛围只能改变表达分寸，不能把话题从该对象/事实本身移开。
    - 当 `rag_result` 与模糊的直觉推断发生冲突时，优先相信与当前话题直接对应的检索证据；不要因为名字奇怪、语气暧昧或自己情绪波动，就把一个已有证据支撑的对象重新当成未知物。
    - `user_memory_context.active_commitments` 代表**当前仍有效的已接受承诺/待履约事项**，来自每轮新鲜载入的用户记忆单元。当前输入若是在延续、提醒、切换或兑现这些承诺，你必须把它视为高优先级现实背景，而不是可有可无的旧记忆。
@@ -236,7 +238,7 @@ _COGNITION_CONSCIOUSNESS_PROMPT = """\
 
 # 思考路径
 1. **记忆回溯：** 检查 `user_memory_context`。先读事实锚点，再读角色的主观评价和关系信号。
-2. **动机解构：** 解析 `decontextualized_input` 和 `interaction_subtext`。先判断对方是否只是在进行普通互动；只有存在明确证据时，才升级为试探、施压或越界。
+2. **动机解构：** 解析 `decontextualized_input`、`interaction_subtext` 与可选的 `media_observations`。先判断对方是否只是在进行普通互动；只有文字或可见事实本身存在明确证据时，才升级为试探、施压或越界。
 3. **理智博弈：** 检查 `character_mood` 和 `global_vibe`。在这种心境和氛围下，结合我对他的直觉标签（last_relationship_insight），我该维持人设还是有所突破？
 4. **立场定夺：** 结合 L1 的直觉反馈（emotional_appraisal），拍板选定 `logical_stance`。**这是行政命令，下游 L3 严禁篡改。**
 
@@ -285,6 +287,10 @@ _COGNITION_CONSCIOUSNESS_PROMPT = """\
     "last_relationship_insight": "对该用户的核心关系洞察",
     "affinity_context": {{ "level": "string", "instruction": "string" }},
     "decontextualized_input": "清理后的用户意图",
+    "media_observations": {{
+        "image_observations": ["当前图片的结构化视觉观察；没有则为空数组"],
+        "audio_observations": ["当前音频转写或摘要；没有则为空数组"]
+    }},
     "active_commitments": "来自 user_memory_context.active_commitments 的当前有效承诺/已接受约定",
     "rag_result": {{
         "answer": "检索主管的一行综合结论",
@@ -360,7 +366,7 @@ async def call_cognition_consciousness(state: CognitionState) -> CognitionState:
     ))
 
     promoted_reflection_context = {}
-    if selection["variant"] == "text_chat_user_message":
+    if selection["trigger_source"] == "user_message":
         promoted_reflection_context = state.get("promoted_reflection_context") or {}
 
     msg = {
@@ -463,6 +469,10 @@ _BOUNDARY_CORE_PROMPT = """\
   "indirect_speech_context": "空字符串表示直接对话，非空表示用户是在向他人谈论角色",
   "interaction_subtext": "潜意识识别到的互动潜台词（如控制、施压、支配）",
   "emotional_appraisal": "潜意识情绪反应（如压迫、不适、紧张）",
+  "media_observations": {{
+    "image_observations": ["当前图片的结构化视觉观察；没有则为空数组"],
+    "audio_observations": ["当前音频转写或摘要；没有则为空数组"]
+  }},
   "affinity_context": {{
     "level": "当前关系强度",
     "instruction": "该关系如何影响行为"
@@ -491,7 +501,7 @@ _BOUNDARY_CORE_PROMPT = """\
 
 # 思考路径
 1. 先读取 `reason_to_respond`、`channel_topic`、`indirect_speech_context`，确认当前消息是否真的属于角色边界问题。
-2. 再读取 `decontextualized_input` 与 `interaction_subtext`，判断是否存在身份、控制、权威或关系压力问题。
+2. 再读取 `decontextualized_input`、`interaction_subtext` 与可选的 `media_observations`，判断是否存在身份、控制、权威或关系压力问题。图片观察只提供对象和场景事实，不能单独构成边界压力。
 3. 再读取人格约束与 `affinity_context`，推导该人格在这种关系强度下的可承受边界。
 4. 使用边界-关系二次校正检查是否过度乐观或过度防御。
 5. 依次输出边界问题、行为倾向、接受程度、立场偏向、身份策略、压力策略与轨迹预测。
@@ -508,6 +518,7 @@ Boundary Core 只处理角色的自我定义、控制权、亲密边界、外部
 - `indirect_speech_context` 说明这是否是直接对话。
 
 如果当前消息属于直接对话、普通事实回忆、日常物品确认、话题延续、例行帮助或普通闲聊，并且 `decontextualized_input` 本身没有直接要求角色接受亲密、改变身份、服从权威、提交控制、证明关系或让渡自主权，那么这轮不属于边界管辖。
+如果当前消息是在请求理解图片、核对图片内容或补充图片证据，只要文字没有加入服从测试、身份绑定、亲密索取或权威压制，也属于普通事实处理。
 
 在这种情况下，即使 `interaction_subtext` 或 `emotional_appraisal` 带有“被检查、被考察、局促、尴尬”的信号，也必须输出：
 - `boundary_issue`: `none`
@@ -525,6 +536,7 @@ Boundary Core 只处理角色的自我定义、控制权、亲密边界、外部
 - reason_to_respond / channel_topic / indirect_speech_context（基础语义框架）
 - decontextualized_input（显性语义）
 - interaction_subtext（隐性控制结构）
+- media_observations（仅作为当前对象/场景事实，不作为用户意图来源）
 
 判断主要问题：
 
@@ -747,7 +759,7 @@ _JUDGEMENT_CORE_PROMPT = """\
 - 不要添加翻译、双语复写或括号内解释，除非源文本本身已经包含。
 
 # 思考路径
-1. 先读取 `referents`。如果其中存在 `status = "unresolved"` 的项目，最终意图必须是 `CLARIFY`，并且 `judgment_note` 必须说明不能用宽泛旧上下文当作证据。
+1. 先读取 `referents`。如果其中存在 `status = "unresolved"` 的项目，最终意图必须是 `CLARIFY`，并且 `judgment_note` 必须说明不能用宽泛旧上下文当作证据；如果 `media_observations` 已经提供了当前图片中的具体对象，可以把它视为本轮对象证据。
 2. 再读取 Consciousness 候选，确认角色原本的立场、意图和内在理由。
 3. 再读取 Boundary Core 的边界约束，确认角色最多可以做到哪里。
 4. 按优先级合并：Boundary Core 高于 Consciousness candidate，internal_monologue 只能微调不能推翻边界。
@@ -801,6 +813,10 @@ _JUDGEMENT_CORE_PROMPT = """\
 - logical_stance
 - character_intent
 - judgment_note（一句话）
+
+## 3-2. 多源证据边界
+- `media_observations` 是当前图片/音频观察，只能校准本轮对象和事实。
+- 不要把图片事实单独升级成用户偏好、承诺、边界压力或关系意图；这些必须来自上游 Consciousness / Boundary Core 的候选判断。
 
 ## 4. 社会化回归（必须遵守）
 - 你的输出必须是“社会里说得通的人类反应”，而不是惊跳、嚎叫、警报词或纯本能反射。

@@ -325,6 +325,39 @@ def test_projection_raises_when_required_metadata_cannot_fit() -> None:
         project_prompt_message_context(message_envelope=envelope)
 
 
+def test_projection_reduces_reply_attachments_within_budget() -> None:
+    """Quoted image summaries should follow the prompt context budget."""
+
+    envelope = _image_envelope(base64_data="image-bytes")
+    envelope["body_text"] = "b" * 1200
+    envelope["attachments"][0]["description"] = "c" * (
+        MAX_PROMPT_ATTACHMENT_DESCRIPTION_CHARS
+    )
+    reply_context = {
+        "reply_attachments": [
+            {
+                "media_kind": "image",
+                "description": "r" * MAX_PROMPT_ATTACHMENT_DESCRIPTION_CHARS,
+                "summary_status": "available",
+            }
+            for _ in range(4)
+        ],
+    }
+
+    projection = project_prompt_message_context(
+        message_envelope=envelope,
+        reply_context=reply_context,
+    )
+    rendered = json.dumps(projection, ensure_ascii=False)
+
+    assert len(rendered) <= MAX_PROMPT_MESSAGE_CONTEXT_CHARS
+    assert "reply" in projection
+    assert "attachments" in projection["reply"]
+    assert len(projection["reply"]["attachments"]) < len(
+        reply_context["reply_attachments"]
+    )
+
+
 def test_safety_assertion_rejects_foreign_nested_keys() -> None:
     """Whitelist validation should reject smuggled storage fields."""
 

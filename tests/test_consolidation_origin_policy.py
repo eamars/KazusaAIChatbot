@@ -86,8 +86,28 @@ def test_user_message_dialog_text_allows_all_write_categories() -> None:
     _assert_all_decisions(
         policy,
         allowed=True,
-        reason="user_message_dialog_text",
+        reason="user_message_chat_input",
     )
+
+
+def test_user_message_multimodal_inputs_allow_all_write_categories() -> None:
+    """Image/audio observations remain user-message chat inputs."""
+    supported_inputs = [
+        ["dialog_text", "image_observation"],
+        ["dialog_text", "audio_observation"],
+        ["dialog_text", "image_observation", "audio_observation"],
+    ]
+
+    for input_sources in supported_inputs:
+        policy = build_consolidation_write_policy(
+            origin=_origin(input_sources=input_sources),
+        )
+
+        _assert_all_decisions(
+            policy,
+            allowed=True,
+            reason="user_message_chat_input",
+        )
 
 
 def test_reflection_signal_origin_denies_all_write_categories() -> None:
@@ -116,10 +136,10 @@ def test_internal_thought_origin_denies_all_write_categories() -> None:
     _assert_all_decisions(policy, allowed=False, reason="origin_not_enabled")
 
 
-def test_non_dialog_text_input_denies_all_write_categories() -> None:
+def test_unsupported_input_denies_all_write_categories() -> None:
     """User-message origins with unsupported inputs should be denied."""
     policy = build_consolidation_write_policy(
-        origin=_origin(input_sources=["dialog_text", "image_observation"]),
+        origin=_origin(input_sources=["dialog_text", "retrieved_memory"]),
     )
 
     _assert_all_decisions(policy, allowed=False, reason="origin_not_enabled")

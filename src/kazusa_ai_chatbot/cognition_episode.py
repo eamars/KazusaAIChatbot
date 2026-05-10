@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from typing import Any, Literal, NoReturn, TypedDict, get_args
+from typing import Any, Literal, NoReturn, NotRequired, TypedDict, get_args
 
 from kazusa_ai_chatbot.time_context import TimeContextDoc
 
@@ -69,6 +69,19 @@ class OriginMetadata(TypedDict):
 class MediaDescriptionRow(TypedDict):
     content_type: str
     description: str
+    image_observation: NotRequired["ImageObservation"]
+
+
+class ImageObservation(TypedDict):
+    observation_origin: str
+    source_message_id: str
+    media_kind: str
+    summary_status: Literal["available", "unavailable"]
+    summary: str
+    visible_text: list[str]
+    salient_visual_facts: list[str]
+    spatial_or_scene_facts: list[str]
+    uncertainty: list[str]
 
 
 class CognitiveEpisode(TypedDict):
@@ -109,6 +122,12 @@ _OUTPUT_MODES = frozenset(get_args(OutputMode))
 _TIME_CONTEXT_FIELDS = tuple(TimeContextDoc.__annotations__)
 MAX_COGNITIVE_EPISODE_MEDIA_PERCEPTS = 4
 MAX_COGNITIVE_EPISODE_MEDIA_DESCRIPTION_CHARS = 800
+_IMAGE_OBSERVATION_LIST_FIELDS = (
+    "visible_text",
+    "salient_visual_facts",
+    "spatial_or_scene_facts",
+    "uncertainty",
+)
 
 
 def build_text_chat_media_description_rows(
@@ -133,23 +152,184 @@ def build_text_chat_media_description_rows(
         if not isinstance(description, str):
             continue
 
-        clean_description = description.strip()
-        if clean_description == "":
-            continue
-
         if not (
             content_type.startswith("image/")
             or content_type.startswith("audio/")
         ):
             continue
 
+        clean_description = description.strip()
+        image_observation = _sanitize_image_observation(
+            item.get("image_observation"),
+            description=clean_description,
+            content_type=content_type,
+        )
+        if clean_description == "" and image_observation is None:
+            continue
+
         row: MediaDescriptionRow = {
             "content_type": content_type,
             "description": clean_description,
         }
+        if image_observation is not None:
+            row["image_observation"] = image_observation
         media_description_rows.append(row)
 
     return media_description_rows
+
+
+def build_reply_media_description_rows(
+    reply_context: Mapping[str, object] | None,
+) -> list[MediaDescriptionRow]:
+    """Project quoted-reply image summaries into episode media rows.
+
+    Args:
+        reply_context: Service-facing reply context that may include stored
+            prompt-safe attachment summaries for the replied-to message.
+
+    Returns:
+        Image media rows that preserve quoted-image availability without
+        requiring raw media bytes.
+    """
+    if not isinstance(reply_context, Mapping):
+        return_value: list[MediaDescriptionRow] = []
+        return return_value
+
+    attachments = reply_context.get("reply_attachments")
+    if not isinstance(attachments, list):
+        return_value = []
+        return return_value
+
+    source_message_id = _string_field(reply_context, "reply_to_message_id")
+    rows: list[MediaDescriptionRow] = []
+    for attachment in attachments:
+        if not isinstance(attachment, Mapping):
+            continue
+        media_kind = _string_field(attachment, "media_kind").casefold()
+        if media_kind != "image":
+            continue
+
+        description = _string_field(attachment, "description")
+        summary_status = _summary_status(attachment, description)
+        observation: ImageObservation = {
+            "observation_origin": "quoted_reply_attachment",
+            "source_message_id": source_message_id,
+            "media_kind": "image",
+            "summary_status": summary_status,
+            "summary": description,
+            "visible_text": [],
+            "salient_visual_facts": [],
+            "spatial_or_scene_facts": [],
+            "uncertainty": [],
+        }
+        row: MediaDescriptionRow = {
+            "content_type": "image/quoted-reply",
+            "description": description,
+            "image_observation": observation,
+        }
+        rows.append(row)
+
+    return_value = build_text_chat_media_description_rows(rows)
+    return return_value
+
+
+def _sanitize_image_observation(
+    value: object,
+    *,
+    description: str,
+    content_type: str,
+) -> ImageObservation | None:
+    """Build a bounded image observation from structured or legacy input.
+
+    Args:
+        value: Optional structured image observation supplied by upstream.
+        description: Prompt-safe image summary retained for compatibility.
+        content_type: Current media content type.
+
+    Returns:
+        Bounded image observation, or ``None`` for non-image media without a
+        structured visual observation.
+    """
+    if not content_type.startswith("image/"):
+        return_value = None
+        return return_value
+
+    observation_data: Mapping[str, object] = {}
+    if isinstance(value, Mapping):
+        observation_data = value
+
+    summary = _trim_media_description(
+        _string_field(observation_data, "summary") or description
+    )
+    summary_status = _summary_status(observation_data, summary)
+    if description == "" and not observation_data:
+        return_value = None
+        return return_value
+
+    list_fields = {
+        field_name: _string_list_field(observation_data, field_name)
+        for field_name in _IMAGE_OBSERVATION_LIST_FIELDS
+    }
+    observation: ImageObservation = {
+        "observation_origin": (
+            _string_field(observation_data, "observation_origin")
+            or "current_attachment"
+        ),
+        "source_message_id": _string_field(
+            observation_data,
+            "source_message_id",
+        ),
+        "media_kind": "image",
+        "summary_status": summary_status,
+        "summary": summary,
+        "visible_text": list_fields["visible_text"],
+        "salient_visual_facts": list_fields["salient_visual_facts"],
+        "spatial_or_scene_facts": list_fields["spatial_or_scene_facts"],
+        "uncertainty": list_fields["uncertainty"],
+    }
+    return observation
+
+
+def _string_field(data: Mapping[str, object], field_name: str) -> str:
+    value = data.get(field_name)
+    if not isinstance(value, str):
+        return_value = ""
+        return return_value
+    return_value = _trim_media_description(value.strip())
+    return return_value
+
+
+def _string_list_field(
+    data: Mapping[str, object],
+    field_name: str,
+) -> list[str]:
+    value = data.get(field_name)
+    if not isinstance(value, list):
+        return_value: list[str] = []
+        return return_value
+
+    strings: list[str] = []
+    for item in value:
+        if not isinstance(item, str):
+            continue
+        clean_item = _trim_media_description(item.strip())
+        if clean_item:
+            strings.append(clean_item)
+    return strings
+
+
+def _summary_status(
+    data: Mapping[str, object],
+    summary: str,
+) -> Literal["available", "unavailable"]:
+    value = data.get("summary_status")
+    if value == "available" or value == "unavailable":
+        return_value = value
+    elif summary:
+        return_value = "available"
+    else:
+        return_value = "unavailable"
+    return return_value
 
 
 def validate_cognitive_episode(episode: CognitiveEpisode) -> None:
@@ -439,19 +619,31 @@ def _build_media_percepts(
         if content_type.startswith("image/"):
             input_source: InputSource = "image_observation"
             has_image_observation = True
+            image_observation = row["image_observation"]
+            media_content = image_observation["summary"]
+            media_metadata: dict[str, Any] = {
+                "observation_origin": image_observation["observation_origin"],
+                "source_message_id": image_observation["source_message_id"],
+                "media_kind": image_observation["media_kind"],
+                "summary_status": image_observation["summary_status"],
+                "media_index": media_index,
+                "image_observation": image_observation,
+            }
         else:
             input_source = "audio_observation"
             has_audio_observation = True
+            media_content = _trim_media_description(row["description"])
+            media_metadata = {
+                "content_type": content_type,
+                "media_index": media_index,
+            }
 
         media_percept: CognitivePercept = {
             "percept_id": f"{base_percept_id}:media:{media_index}",
             "input_source": input_source,
-            "content": _trim_media_description(row["description"]),
+            "content": media_content,
             "visibility": "model_visible",
-            "metadata": {
-                "content_type": content_type,
-                "media_index": media_index,
-            },
+            "metadata": media_metadata,
         }
         media_percepts.append(media_percept)
 

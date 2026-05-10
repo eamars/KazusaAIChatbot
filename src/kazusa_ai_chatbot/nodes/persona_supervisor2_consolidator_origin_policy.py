@@ -38,9 +38,14 @@ class ConsolidationWritePolicy(TypedDict):
     cache_invalidation: WritePolicyDecision
 
 
-_TEXT_CHAT_INPUT_SOURCES = ["dialog_text"]
+_SUPPORTED_USER_MESSAGE_INPUT_SOURCE_PROFILES = {
+    ("dialog_text",),
+    ("dialog_text", "image_observation"),
+    ("dialog_text", "audio_observation"),
+    ("dialog_text", "image_observation", "audio_observation"),
+}
 _TEXT_CHAT_OUTPUT_MODES = frozenset(("visible_reply", "think_only", "silent"))
-_ALLOWED_REASON = "user_message_dialog_text"
+_ALLOWED_REASON = "user_message_chat_input"
 _DENIED_REASON = "origin_not_enabled"
 
 
@@ -60,7 +65,10 @@ def build_consolidation_write_policy(
     """
     origin_is_allowed = (
         origin["trigger_source"] == "user_message"
-        and origin["input_sources"] == _TEXT_CHAT_INPUT_SOURCES
+        and (
+            tuple(origin["input_sources"])
+            in _SUPPORTED_USER_MESSAGE_INPUT_SOURCE_PROFILES
+        )
         and origin["output_mode"] in _TEXT_CHAT_OUTPUT_MODES
     )
     if origin_is_allowed:

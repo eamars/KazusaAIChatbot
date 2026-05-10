@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Mapping
 from typing import Literal, TypedDict, get_args
 
 from kazusa_ai_chatbot.cognition_episode import (
@@ -68,6 +69,17 @@ _REFLECTION_INPUT_SOURCES: list[InputSource] = ["reflection_artifact"]
 _REFLECTION_OUTPUT_MODES = frozenset(("think_only", "preview", "silent"))
 _INTERNAL_THOUGHT_INPUT_SOURCES: list[InputSource] = ["internal_monologue"]
 _INTERNAL_THOUGHT_OUTPUT_MODES = frozenset(("think_only", "preview", "silent"))
+_IMAGE_OBSERVATION_PAYLOAD_FIELDS = (
+    "observation_origin",
+    "source_message_id",
+    "media_kind",
+    "summary_status",
+    "summary",
+    "visible_text",
+    "salient_visual_facts",
+    "spatial_or_scene_facts",
+    "uncertainty",
+)
 
 
 def select_cognition_prompt_variant(
@@ -139,8 +151,8 @@ def build_cognition_prompt_source_payload(
         selection: Prompt-selection metadata returned for this episode.
 
     Returns:
-        Empty mapping for current text chat; source-specific model-visible
-        payload fields for dry-run prompt variants.
+        Empty mapping for text-only chat; source-specific model-visible payload
+        fields for current-turn media prompt variants.
 
     Raises:
         CognitiveEpisodeValidationError: If the episode is structurally
@@ -227,13 +239,14 @@ def _media_observations_source_payload(
         episode: Valid user-message cognitive episode.
 
     Returns:
-        Mapping containing only image and audio observation text.
+        Mapping containing current-turn structured image observations and audio
+        observation text.
     """
-    image_observations: list[str] = []
+    image_observations: list[dict[str, object]] = []
     audio_observations: list[str] = []
     for percept in episode["percepts"]:
         if percept["input_source"] == "image_observation":
-            image_observations.append(percept["content"])
+            image_observations.append(_project_image_observation(percept))
         elif percept["input_source"] == "audio_observation":
             audio_observations.append(percept["content"])
 
@@ -244,6 +257,31 @@ def _media_observations_source_payload(
         },
     }
     return media_payload
+
+
+def _project_image_observation(percept: dict[str, object]) -> dict[str, object]:
+    """Project one image percept into the cognition prompt payload.
+
+    Args:
+        percept: Valid image-observation percept from a cognitive episode.
+
+    Returns:
+        Prompt-safe structured image observation.
+    """
+    metadata = percept["metadata"]
+    if not isinstance(metadata, Mapping):
+        raise CognitionPromptSelectionError("image percept metadata must be a dict")
+
+    observation = metadata.get("image_observation")
+    if not isinstance(observation, Mapping):
+        raise CognitionPromptSelectionError(
+            "image percept metadata.image_observation must be a dict"
+        )
+
+    projected: dict[str, object] = {}
+    for field_name in _IMAGE_OBSERVATION_PAYLOAD_FIELDS:
+        projected[field_name] = observation[field_name]
+    return projected
 
 
 def _select_reflection_prompt(

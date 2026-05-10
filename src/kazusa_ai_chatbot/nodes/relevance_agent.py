@@ -23,6 +23,7 @@ from kazusa_ai_chatbot.config import (
     VISION_DESCRIPTOR_LLM_MODEL,
 )
 from kazusa_ai_chatbot.cognition_episode import (
+    build_reply_media_description_rows,
     build_text_chat_media_description_rows,
     replace_text_chat_media_percepts,
 )
@@ -543,12 +544,6 @@ async def relevance_agent(state: IMProcessState) -> IMProcessState:
     envelope_addressed_to = message_envelope["addressed_to_global_user_ids"]
     directly_addressed = character_global_user_id in envelope_addressed_to
 
-    # TODO: Make the workflow taking the raw b64 image instead. For now we will only pass in the description. 
-    user_multimedia_input = state.get("user_multimedia_input", [])
-    for piece in user_multimedia_input:
-        if piece["description"]:
-            user_input += f"\nImage attachment: {piece['description']}"
-
     # Determine if this is a noisy group environment
     is_noisy_environment = channel_type == "group"
     prompt_template = _RELEVANCE_SYSTEM_NOISY_PROMPT if is_noisy_environment else _RELEVANCE_SYSTEM_PROMPT
@@ -727,40 +722,45 @@ async def relevance_agent(state: IMProcessState) -> IMProcessState:
 
 
 
-_VISION_DESCRIPTOR_PROMPT = """\
-你负责将图片信息转化为详尽、客观的文字描述，作为后续逻辑节点理解视觉场景的唯一依据。
-
-# 任务目标
-请仔细观察图片，并提供一段包含以下细节的描述：
-
-1. **场景与氛围**：说明整体环境（例如：深夜的卧室、凌乱的桌面、光线明亮的教室）以及直观的氛围感。
-2. **核心主体与细节**：
-   - 图中有什么人或物？他们在做什么？
-   - 观察物体的颜色、材质、品牌或特殊标识（例如：一杯冒热气的星巴克咖啡、一张写满微积分公式的草稿纸）。
-3. **文字提取 (OCR)**：精准记录图中出现的任何文本（包括手写字、屏幕文字、衣服上的 Logo 等）。
-4. **空间关系**：描述各物体间的相对位置（例如：左上角有一只黑猫，正中心是打开的笔记本电脑）。
-5. **状态感知**：人物的表情、肢体语言，或物品所暗示的状态（例如：用户看起来很疲惫，或者作业已经全部勾选完成）。
-
-# 行为准则
-- **客观记录**：只描述你看到的。严禁代替角色抒情，严禁评价好坏。
-- **细节至上**：宁可描述得琐碎，也不要遗漏可能影响剧情判断的小细节（如纸张边缘的折痕）。
-- **严禁幻觉**：看不清的部分请直接标注“模糊”，不要推测。
-- **长度控制**：`description` 控制在 {max_description_chars} 字以内，优先保留人物、物体、文字和空间关系。
-
-# 思考路径
-1. 先整体观察场景和主体，再观察局部细节。
-2. 按场景、主体、文字、空间关系、状态感知的顺序组织描述。
-3. 对看不清的区域标注“模糊”，不要推测。
+_VISION_DESCRIPTOR_PROMPT = '''\
+你负责把图片转换为后续认知层可直接使用的客观视觉观察。输出必须同时服务两件事:
+1. `description` 作为唯一持久化的图片文字摘要。
+2. 结构化字段作为本轮认知的视觉证据，帮助弱本地模型精确理解场景。
 
 # 输入格式
-human message contains one image payload in data URI form.
+输入是一个多模态 HumanMessage，content 数组中只有一个 `image_url` 项。
+`image_url.url` 是 `data:<mime>;base64,<payload>` 形式的图片数据。你只能依据图片像素本身输出观察，不读取外部上下文，也不推测用户为什么发送它。
+
+# 生成步骤
+1. 先整体观察画面，确认主要人物、物体、动作、环境和可见文字。
+2. 再把证据分到对应字段：文字进 `visible_text`，关键可见事实进 `salient_visual_facts`，布局和位置关系进 `spatial_or_scene_facts`。
+3. 对看不清、被遮挡、可能误读的部分使用 `uncertainty` 标出，不把不确定内容写成确定事实。
+4. 最后把最重要的可见事实压缩成 `description`，保证它可以单独作为图片存储描述。
+
+# 观察要求
+- 只描述图片中可见的内容，不代替角色评价、抒情或推测用户意图。
+- 优先保留人物、物体、动作、状态、可见文字、数量、颜色、位置关系和不确定区域。
+- 看不清的部分写入 `uncertainty`，用 "模糊"、"被遮挡"、"无法确认" 等明确措辞。
+- `description` 控制在 {max_description_chars} 字以内，写成一段自然语言摘要。
+- 其他字段使用短句数组，便于后续提示词按证据类型读取。
+
+# 字段定义
+- `description`: 图片的综合摘要，必须可单独作为存储描述使用。
+- `visible_text`: 图片中可辨认的文字、数字、符号或屏幕内容；没有则空数组。
+- `salient_visual_facts`: 关键人物、物体、动作、颜色、状态等事实。
+- `spatial_or_scene_facts`: 场景、布局、前后左右上下、远近、遮挡等空间事实。
+- `uncertainty`: 模糊、无法确认、可能误读的视觉区域。
 
 # 输出格式
-请务必返回合法的 JSON 字符串，仅包含以下字段：
+请务必返回合法 JSON 字符串，仅包含以下字段:
 {{
-    "description": "逻辑清晰、细节饱满的文字描述，无需任何开场白。"
+    "description": "一段客观图片摘要",
+    "visible_text": ["图中可见文字"],
+    "salient_visual_facts": ["关键视觉事实"],
+    "spatial_or_scene_facts": ["空间或场景事实"],
+    "uncertainty": ["不确定或模糊之处"]
 }}
-"""
+'''
 _vision_descriptor_llm = get_llm(
     temperature=0,
     top_p=1.0,
@@ -768,6 +768,78 @@ _vision_descriptor_llm = get_llm(
     base_url=VISION_DESCRIPTOR_LLM_BASE_URL,
     api_key=VISION_DESCRIPTOR_LLM_API_KEY,
 )
+
+
+def _descriptor_string_field(data: dict, field_name: str) -> str:
+    value = data.get(field_name)
+    if not isinstance(value, str):
+        return_value = ""
+        return return_value
+    return_value = value.strip()
+    return return_value
+
+
+def _descriptor_string_list_field(data: dict, field_name: str) -> list[str]:
+    value = data.get(field_name)
+    if isinstance(value, str):
+        clean_value = value.strip()
+        if clean_value:
+            return_value = [clean_value]
+            return return_value
+        return_value: list[str] = []
+        return return_value
+    if not isinstance(value, list):
+        return_value = []
+        return return_value
+
+    strings: list[str] = []
+    for item in value:
+        if not isinstance(item, str):
+            continue
+        clean_item = item.strip()
+        if clean_item:
+            strings.append(clean_item)
+    return strings
+
+
+def _build_current_image_observation(
+    *,
+    result: dict,
+    description: str,
+    source_message_id: str,
+) -> dict[str, object]:
+    visible_text = _descriptor_string_list_field(result, "visible_text")
+    salient_visual_facts = _descriptor_string_list_field(
+        result,
+        "salient_visual_facts",
+    )
+    spatial_or_scene_facts = _descriptor_string_list_field(
+        result,
+        "spatial_or_scene_facts",
+    )
+    uncertainty = _descriptor_string_list_field(result, "uncertainty")
+    summary = _descriptor_string_field(result, "summary") or description
+    has_visual_evidence = any(
+        (
+            summary,
+            visible_text,
+            salient_visual_facts,
+            spatial_or_scene_facts,
+        )
+    )
+    summary_status = "available" if has_visual_evidence else "unavailable"
+    return_value: dict[str, object] = {
+        "observation_origin": "current_attachment",
+        "source_message_id": source_message_id,
+        "media_kind": "image",
+        "summary_status": summary_status,
+        "summary": summary,
+        "visible_text": visible_text,
+        "salient_visual_facts": salient_visual_facts,
+        "spatial_or_scene_facts": spatial_or_scene_facts,
+        "uncertainty": uncertainty,
+    }
+    return return_value
 
 
 async def multimedia_descriptor_agent(state: IMProcessState) -> IMProcessState:
@@ -791,11 +863,15 @@ async def multimedia_descriptor_agent(state: IMProcessState) -> IMProcessState:
     for piece in user_multimedia_input:
         if piece["content_type"].startswith("image/"):
             if not piece["base64_data"]:
-                output_multimedia_input.append({
+                output_piece = {
                     "content_type": piece["content_type"],
                     "base64_data": piece["base64_data"],
                     "description": piece["description"],
-                })
+                }
+                image_observation = piece.get("image_observation")
+                if isinstance(image_observation, dict):
+                    output_piece["image_observation"] = image_observation
+                output_multimedia_input.append(output_piece)
                 continue
 
             # Call vision descriptor
@@ -844,6 +920,15 @@ async def multimedia_descriptor_agent(state: IMProcessState) -> IMProcessState:
             raw_description = result.get("description", "")
             if isinstance(raw_description, str):
                 description = raw_description
+            description = description.strip()
+            image_observation = _build_current_image_observation(
+                result=result,
+                description=description,
+                source_message_id=state["platform_message_id"],
+            )
+            summary = image_observation["summary"]
+            if not description and isinstance(summary, str):
+                description = summary
 
             logger.debug(f'Image description: user={user_name} platform_user={platform_user_id} media_type={piece["content_type"]} description={log_preview(description)}')
 
@@ -851,6 +936,7 @@ async def multimedia_descriptor_agent(state: IMProcessState) -> IMProcessState:
                 "content_type": piece["content_type"],
                 "base64_data": piece["base64_data"],
                 "description": description,
+                "image_observation": image_observation,
             })
         else:
             output_multimedia_input.append(piece)
@@ -871,10 +957,12 @@ async def multimedia_descriptor_agent(state: IMProcessState) -> IMProcessState:
     prompt_message_context = project_prompt_message_context(
         message_envelope=state["message_envelope"],
         multimedia_input=output_multimedia_input,
+        reply_context=state.get("reply_context"),
     )
-    media_description_rows = build_text_chat_media_description_rows(
-        output_multimedia_input
-    )
+    media_description_rows = [
+        *build_text_chat_media_description_rows(output_multimedia_input),
+        *build_reply_media_description_rows(state.get("reply_context")),
+    ]
     cognitive_episode = replace_text_chat_media_percepts(
         episode=state["cognitive_episode"],
         media_description_rows=media_description_rows,

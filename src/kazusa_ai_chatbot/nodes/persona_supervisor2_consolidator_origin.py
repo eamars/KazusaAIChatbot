@@ -34,6 +34,14 @@ class ConsolidationOriginMetadata(TypedDict):
     current_display_name: str
 
 
+_SUPPORTED_USER_MESSAGE_INPUT_SOURCE_PROFILES = {
+    ("dialog_text",),
+    ("dialog_text", "image_observation"),
+    ("dialog_text", "audio_observation"),
+    ("dialog_text", "image_observation", "audio_observation"),
+}
+
+
 def build_user_message_consolidation_origin(
     *,
     episode: CognitiveEpisode,
@@ -58,9 +66,10 @@ def build_user_message_consolidation_origin(
         raise ConsolidationOriginError(
             "consolidation origin requires trigger_source=user_message"
         )
-    if episode["input_sources"] != ["dialog_text"]:
+    input_source_profile = tuple(episode["input_sources"])
+    if input_source_profile not in _SUPPORTED_USER_MESSAGE_INPUT_SOURCE_PROFILES:
         raise ConsolidationOriginError(
-            "consolidation origin requires input_sources=['dialog_text']"
+            "consolidation origin requires supported user-message input_sources"
         )
     if episode["output_mode"] not in {"visible_reply", "think_only", "silent"}:
         raise ConsolidationOriginError(

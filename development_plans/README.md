@@ -38,7 +38,6 @@ long_term/todo.md
 
 | Plan | Status | Execution |
 |---|---|---|
-| [first_class_image_input_cognition_plan.md](active/short_term/first_class_image_input_cognition_plan.md) | draft | deferred |
 | [reflection_driven_character_state_evolution_plan.md](active/short_term/reflection_driven_character_state_evolution_plan.md) | draft | deferred |
 
 ## Active Bugfix Plans
@@ -100,6 +99,7 @@ plans.
 | [conversation_progress_flow_phase2_plan.md](archive/completed/short_term/conversation_progress_flow_phase2_plan.md) |
 | [conversation_progress_phase3_quality_plan.md](archive/completed/short_term/conversation_progress_phase3_quality_plan.md) |
 | [conversation_progress_state_plan.md](archive/completed/short_term/conversation_progress_state_plan.md) |
+| [first_class_image_input_cognition_plan.md](archive/completed/short_term/first_class_image_input_cognition_plan.md) |
 | [get_db_private_boundary_plan.md](archive/completed/short_term/get_db_private_boundary_plan.md) |
 | [global_input_queue_plan.md](archive/completed/short_term/global_input_queue_plan.md) |
 | [group_chat_noise_relevance_plan.md](archive/completed/short_term/group_chat_noise_relevance_plan.md) |
