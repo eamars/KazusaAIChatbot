@@ -89,7 +89,7 @@ evidence names the required artifact paths.
 | `stage_07` | `multi_source_cognition_architecture_stage_07_reflection_trigger_cognition_dry_run_plan.md`      | completed     | reflection dry-run audit artifact                          | `stage_08+`      |
 | `stage_08` | `multi_source_cognition_architecture_stage_08_internal_thought_cognition_dry_run_plan.md`        | completed     | internal thought dry-run artifact                          | `stage_09+`      |
 | `stage_09` | `multi_source_cognition_architecture_stage_09_multimodal_cognitive_input_sources_plan.md`        | completed     | multimodal percept fixtures, service/descriptor handoff tests, and regression gates | `stage_10`       |
-| `stage_10` | `multi_source_cognition_architecture_stage_10_permissioned_proactive_output_plan.md`             | completed     | `src/kazusa_ai_chatbot/proactive_output/*`; Stage 10 policy/outbox tests; approved transport audit and baseline rerun | none             |
+| `stage_10` | `multi_source_cognition_architecture_stage_10_permissioned_proactive_output_plan.md`             | completed     | `src/kazusa_ai_chatbot/proactive_output/*`; `src/kazusa_ai_chatbot/proactive_output/README.md`; Stage 10 policy/outbox tests; approved transport audit and baseline rerun | none             |
 
 Every child plan must include a `Completion Artifact Contract`. When a child
 plan completes, update this ledger row, move or record the child plan according
@@ -118,7 +118,9 @@ through Stage 10. The implemented runtime now has:
 - multimodal handoff limited to bounded image/audio observation strings;
 - proactive output contracts limited to permission evaluation, preview, outbox,
   and fake transport tests, with no scheduler, dispatcher, DB, or live adapter
-  registration path.
+  registration path;
+- a proactive output ICD that owns the preview, policy, outbox, fake-transport,
+  forbidden runtime path, and future integration boundaries.
 
 Final architecture review found one Stage 10 boundary weakness: outbox creation
 trusted the preview/permission pairing, and fake transport trusted the supplied

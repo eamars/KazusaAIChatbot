@@ -745,6 +745,9 @@ calls, direct runtime adapter registration, or hidden transport sends.
   preview/permission targets, and fake transport now rejects adapter/platform
   mismatch before calling `send_message`. Added focused tests for both failure
   modes and reran focused, cross-stage, and full-suite gates.
+- Documentation correction: added
+  `src/kazusa_ai_chatbot/proactive_output/README.md` as `PO-ICD-001` and linked
+  it from the root README documentation ownership table.
 - Completion diff review: Change Surface contains only the approved
   `proactive_output` package, two Stage 10 test files, this plan, the parent
   ledger, and the registry. No service, scheduler, DB, dispatcher, RAG,

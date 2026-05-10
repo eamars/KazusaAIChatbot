@@ -197,6 +197,7 @@ For deeper technical introductions:
 - [RAG 2](src/kazusa_ai_chatbot/rag/README.md)
 - [Reflection Cycle](src/kazusa_ai_chatbot/reflection_cycle/README.md)
 - [Dispatcher](src/kazusa_ai_chatbot/dispatcher/README.md)
+- [Proactive Output](src/kazusa_ai_chatbot/proactive_output/README.md)
 - [Database](src/kazusa_ai_chatbot/db/README.md)
 
 ## Documentation Ownership
@@ -213,6 +214,7 @@ Keep the docs split by ownership so contracts do not drift:
 | [Conversation Progress](src/kazusa_ai_chatbot/conversation_progress/README.md) | Short-term episode state, prompt-facing progress payload, and module integration contract |
 | [RAG 2](src/kazusa_ai_chatbot/rag/README.md) | Retrieval supervisor, helper-agent evidence flow, and RAG projection contract |
 | [Dispatcher](src/kazusa_ai_chatbot/dispatcher/README.md) | Delayed tool validation, task scheduling handoff, and scheduled-send execution semantics |
+| [Proactive Output ICD](src/kazusa_ai_chatbot/proactive_output/README.md) | Permissioned proactive preview, policy, outbox, and fake-transport contract |
 | [Reflection Cycle ICD](src/kazusa_ai_chatbot/reflection_cycle/README.md) | Reflection-run lifecycle, reflection persistence boundary, and promotion rules |
 | [Memory Evolution ICD](src/kazusa_ai_chatbot/memory_evolution/README.md) | Evolving shared-memory API, lifecycle, lineage, and seed reset contract |
 | [Cognition Core Experiment](experiments/cognition_core_next/README.md) | Separate proof-of-concept notes for a possible future cognition shape |
