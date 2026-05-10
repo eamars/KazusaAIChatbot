@@ -2,398 +2,656 @@
 
 ## Summary
 
-- Goal: Define a permissioned proactive-output path that turns approved
-  cognition previews into auditable outbox records and transport sends only
-  after explicit permission, target validation, adapter availability, and quiet
-  hour checks pass.
+- Goal: Add a permissioned proactive-output contract that turns an already
+  approved cognition preview into deterministic permission decisions, dry-run
+  outbox records, and fake-adapter transport audit records.
 - Plan class: high_risk_migration
-- Status: draft
+- Status: approved
+- Runtime behavior change: none. Stage 10 does not register a background
+  worker, create a MongoDB collection, call the scheduler, call the dispatcher,
+  or send through a real adapter.
+- Database schema change: none.
+- Prompt change: none.
+- New LLM call: none.
+- `/chat` latency impact: none. Stage 10 code is not imported by the live
+  `/chat` response path.
 - Mandatory skills: `development-plan-writing`, `local-llm-architecture`,
-  `no-prepost-user-input`, `database-data-pull`, `py-style`,
-  `test-style-and-execution`, and `cjk-safety` before editing Python files that
-  contain CJK prompt text.
-- Overall cutover strategy: migration. Start with preview/outbox dry-run
-  records, then enable transport only behind an explicit deterministic
-  permission record and a manual smoke gate. No autonomous contact is enabled
-  by default.
-- Highest-risk areas: sending without permission, wrong target, private thought
-  leakage, scheduler bypass, duplicate sends, live `/chat` regression, and
-  treating generated previews as user instructions.
-- Acceptance criteria: proactive output has explicit permission, outbox,
-  transport audit, duplicate-suppression, and rollback contracts; `/chat`
-  regression gates pass; no send path runs without an approved permission
-  fixture and test evidence.
+  `no-prepost-user-input`, `database-data-pull`, `py-style`, and
+  `test-style-and-execution`; also use `cjk-safety` before editing any Python
+  file containing CJK prompt strings.
+- Acceptance criteria: permission, preview, outbox, and audit contracts exist;
+  deterministic denials cover every listed risk; dry-run records perform no
+  adapter sends; fake-adapter transport writes sent audit metadata only for
+  `ready` outbox records; Stage 00 and prior-stage gates pass.
 
 Parent plan:
 `development_plans/active/short_term/multi_source_cognition_architecture_plan.md`
 
-Lifecycle: this draft is blocked until Stage 09 completes and records execution
-evidence. Do not approve or execute Stage 10 while the parent ledger row for
-`stage_09` is not `completed`. Because this stage can contact users, final
-approval must be explicit and separate from draft creation.
+Lifecycle: Stage 09 is completed and merged. This plan is approved for a
+feature branch forked from post-Stage-09 `main`.
 
 ## Context
 
-Earlier stages make multiple trigger and input sources enter cognition without
-changing current `/chat` behavior. Stage 10 is the first stage that may create
-outward output not directly caused by the current user message. The top-level
-architecture requires explicit permission, dispatcher or scheduler validation,
-adapter availability, and auditability before any autonomous contact.
+Earlier stages made multiple trigger and input sources enter cognition without
+changing current `/chat` behavior. Stage 10 is the first proactive-output
+boundary, so it deliberately stops before live contact. A cognition result can
+only become a candidate preview. Deterministic policy decides whether that
+preview can become an outbox item and whether a test-only fake adapter may mark
+that outbox item as sent.
 
-This plan must not turn reflection, internal thought, or media perception into
-automatic messaging. A cognition result can only become a candidate preview.
-Deterministic policy decides whether that preview can become an outbox item and
-whether the outbox item can be sent.
+The top-level architecture requires explicit permission, dispatcher or
+scheduler validation, adapter availability, and auditability before autonomous
+contact. Stage 10 satisfies the permission, adapter-availability, idempotency,
+and audit contracts. Real scheduler or dispatcher cutover remains forbidden in
+this plan.
 
 ## Stage Handoff
 
 ### From Stage 09
 
-Stage 10 expects these completed artifacts:
+Stage 10 carries forward these completed artifacts:
 
-- multimodal episode support with raw media excluded from prompts;
-- reflection and internal-thought dry-run audit patterns from Stages 07 and 08;
-- Stage 06 origin policy evidence that non-chat writes are denied by default;
-- current `/chat` regression evidence after source expansion;
-- parent ledger row for `stage_09` set to `completed`.
+- branch: `stage-09-multimodal-cognitive-input-sources`;
+- implementation commit: `566e6eb`;
+- evidence and lifecycle commit on `main`: `9de93fe`;
+- focused Stage 09 tests: `15 passed`;
+- Stage 00 regression gate: `11 passed`;
+- Stage 03 prompt-selection gate: `36 passed`;
+- Stage 06 policy gate: `9 passed`;
+- Stage 07 reflection dry-run gate: `14 passed`;
+- Stage 08 internal-thought dry-run gate: `26 passed`;
+- parent ledger row for `stage_09`: `completed`;
+- registry row for Stage 09: `completed | completed`.
 
-Before approval, replace this paragraph with exact Stage 09 branch, commit, and
-verification results from Stage 09 `Execution Evidence`, then rerun the plan
-self-review.
+Stage 10 relies on Stage 09 only for source-expanded cognition contracts. It
+does not read raw media, alter media descriptors, or modify cognition prompts.
+
+### Runtime Inspection
+
+The approved Change Surface below is based on code inspection and read-only
+database export on 2026-05-10:
+
+- Scheduler runtime: `src/kazusa_ai_chatbot/scheduler.py` persists tool events
+  through `src/kazusa_ai_chatbot/db/scheduled_events.py`.
+- Dispatcher runtime: `src/kazusa_ai_chatbot/dispatcher/dispatcher.py` writes
+  scheduler events through `TaskDispatcher`.
+- Existing send tool: `src/kazusa_ai_chatbot/dispatcher/handlers.py` uses
+  `MessagingAdapter.send_message(...)`.
+- Adapter protocol: `src/kazusa_ai_chatbot/dispatcher/adapter_iface.py`
+  exposes `MessagingAdapter` and `SendResult`.
+- Normal delivery receipts:
+  `src/kazusa_ai_chatbot/db/conversation.py` updates assistant conversation
+  rows through `apply_assistant_delivery_receipt(...)`.
+- Normal `/chat` service path:
+  `src/kazusa_ai_chatbot/service.py` registers adapters, saves assistant
+  messages, and exposes `/delivery_receipt`.
+- Read-only export artifacts, not committed:
+  `test_artifacts\stage10_scheduled_events_sample.json` and
+  `test_artifacts\stage10_delivery_rows_sample.json`.
+
+Inspection result: the current database has `scheduled_events` and
+`conversation_history` delivery fields, but no dedicated proactive outbox
+collection. Stage 10 must not create one.
 
 ### To Later Work
 
-After Stage 10, later plans can rely on:
+Later plans may rely on:
 
-- proactive output permission records and outbox records being separate from
-  normal conversation history;
-- transport sends being auditable and duplicate-suppressed;
-- previews remaining unsent until deterministic policy approves them;
-- `/chat` regression gates still protecting normal user-message behavior.
+- explicit proactive permission, preview, outbox, and send-audit record shapes;
+- deterministic denial reason strings;
+- fake-adapter transport tests proving the send boundary shape;
+- no runtime registration, real DB write, or real adapter send in Stage 10.
 
-Later plans must not broaden permission semantics without a new approval.
-
-## Mandatory Skills
-
-- `development-plan-writing`: preserve high-risk staged lifecycle and explicit
-  approval gates.
-- `local-llm-architecture`: keep LLMs responsible for preview wording only;
-  deterministic code owns permission, target, limits, and execution.
-- `no-prepost-user-input`: do not infer permissions or commitments from user
-  text with local keyword rules.
-- `database-data-pull`: inspect existing scheduler/outbox-like records before
-  approving database writes.
-- `py-style`: load before editing Python files.
-- `test-style-and-execution`: load before adding, changing, or running tests.
-- `cjk-safety`: load before editing any Python file with CJK prompt strings.
+Later plans must create a new approved plan before adding MongoDB outbox
+persistence, scheduler integration, dispatcher integration, real adapter sends,
+retry workers, permission-management UI, or normal conversation-history
+insertion for proactive sent rows.
 
 ## Mandatory Rules
 
 - Execute only from a feature branch forked from post-Stage-09 `main`.
 - Keep edits inside the approved Change Surface.
 - Use PowerShell `-LiteralPath '...'` for filesystem paths that may contain
-  spaces; prefer repo-relative paths in commands.
-- Do not send any proactive message unless an explicit permission record exists
-  for the exact platform, channel, target scope, trigger source, and output
-  mode.
-- Do not infer permission from user wording with keyword matching or from LLM
-  stance fields.
-- Do not put previews into normal conversation history until after transport
-  confirms a send and the outbox record is marked sent.
-- Do not send private internal thought. Only approved preview text may enter an
-  outbox item.
-- Do not bypass dispatcher/scheduler validation, adapter availability checks,
-  quiet hours, duplicate-suppression, target validation, or audit writes.
-- Do not add new live `/chat` LLM calls.
+  spaces. Use single-quoted JSON arguments in PowerShell commands, for example
+  `--sort '{"created_at":-1}'`.
+- Do not send any proactive message through a real adapter.
+- Do not call `scheduler.schedule_event`, `TaskDispatcher.dispatch`,
+  `save_conversation`, or `apply_assistant_delivery_receipt` from Stage 10 code.
+- Do not create or modify a MongoDB collection.
+- Do not infer permission from user wording, keywords, `logical_stance`,
+  `character_intent`, or any LLM field.
+- Do not allow `user_message` trigger source through the proactive policy.
+- Do not allow any output mode except `preview`.
+- Do not send `internal_only` or `audit_only` preview content.
 - Do not change normal `/chat` delivery, reply targeting, assistant
-  persistence, or consolidation behavior.
-- After any automatic context compaction, reread this entire plan before
+  persistence, consolidation behavior, RAG behavior, cognition prompts, media
+  descriptor behavior, scheduler behavior, or dispatcher behavior.
+- Do not add fallback sends, direct runtime adapter registration, retry loops,
+  background workers, feature flags, or broad abstractions.
+- Do not add raising-only helpers or pass-through wrappers.
+- If implementation reveals an unlisted dependency, stop and update this plan
+  before continuing.
+- After automatic context compaction, reread this entire plan before
   continuing implementation, verification, handoff, or final reporting.
-- After signing off any major progress checklist stage, reread this entire
-  plan before starting the next stage.
+- After signing off any progress checklist stage, reread this entire plan
+  before starting the next stage.
 
 ## Must Do
 
-- Inspect existing scheduler, dispatcher, delivery tracking, and conversation
-  persistence contracts before final approval.
-- Define explicit proactive permission records with platform, channel,
-  target-scope, allowed trigger sources, allowed output modes, quiet-hour
-  policy, expiry, and audit metadata.
-- Define proactive preview records separately from outbox/send records.
-- Define outbox records with idempotency key, status, target, preview source,
-  transport attempt metadata, and failure reason.
-- Add deterministic policy that refuses missing permission, expired permission,
-  wrong target, quiet hours, unsupported adapter, duplicate idempotency key,
-  unsafe output mode, and private/audit-only content.
-- Add dry-run outbox tests that create no adapter sends.
-- Add transport tests with a fake adapter only after permission and outbox
-  policy tests pass.
-- Add persistence tests proving sent proactive messages are marked with
-  explicit proactive origin metadata and are not treated as user instructions.
-- Run the full Stage 00 regression harness before any transport cutover.
-- Require manual review before changing lifecycle to `completed`.
+- Define exact TypedDict contracts for permission, quiet hours, preview,
+  outbox, and send audit records.
+- Define deterministic policy that returns the exact denial reasons listed in
+  this plan.
+- Add deterministic policy tests before implementation and observe the expected
+  failure.
+- Add dry-run outbox tests proving no adapter send occurs.
+- Add fake-adapter transport tests proving only a `ready` outbox record can be
+  marked sent.
+- Reuse existing `MessagingAdapter` and `SendResult` only as a test transport
+  protocol. Do not register the fake adapter with service runtime.
+- Run static greps proving Stage 10 code does not call scheduler, dispatcher,
+  normal conversation persistence, or delivery receipts.
+- Run prior-stage regression gates and the full deterministic suite.
+- Run the independent code review gate before lifecycle completion.
 
 ## Deferred
 
 - Broad autonomous contact.
 - Permission inference from chat content.
+- MongoDB proactive outbox collection.
+- Scheduler or dispatcher integration for proactive sends.
+- Real adapter sends.
 - Multi-recipient fanout.
 - Media sends.
 - LLM-based safety repair loops.
-- Proactive reflection-origin durable writes outside the outbox audit path.
+- Proactive conversation-history insertion.
 - User-facing permission-management UI.
 - Cross-platform transport abstraction redesign.
 
 ## Cutover Policy
 
-Overall strategy: migration.
+Overall strategy: migration without runtime cutover.
 
 | Area | Policy | Instruction |
 |---|---|---|
-| Permission records | migration | Add explicit records and tests before any outbox send path. |
-| Preview records | compatible | Store previews separately from normal conversation history. |
-| Outbox dry run | migration | Create audit-only outbox records first. No adapter send. |
-| Transport send | migration | Enable only after permission, adapter, target, quiet-hour, duplicate, and smoke gates pass. |
-| `/chat` | compatible | No new calls, no delivery changes, no persistence changes for normal user-message turns. |
+| Permission records | migration | Add typed records and deterministic policy only. |
+| Preview records | compatible | Keep previews separate from normal conversation history. |
+| Outbox dry run | migration | Create in-memory/test outbox records only. |
+| Fake transport | migration | Use only a local fake adapter in tests. |
+| Real transport | deferred | No runtime send path in Stage 10. |
+| `/chat` | compatible | No import or behavior change in normal response path. |
 
-Rollback path: disable proactive transport execution, leave audit/outbox records
-inspectable, and keep normal `/chat` path unchanged. If transport sends were
-enabled, mark pending outbox rows cancelled through the approved operational
-script named by the final approved plan. Do not delete audit history ad hoc.
+Rollback path: remove the `proactive_output` package and Stage 10 tests. There
+are no database rows, scheduler events, runtime adapter registrations, or
+conversation-history writes to roll back.
 
 ## Agent Autonomy Boundaries
 
-Allowed implementation choices before approval:
+Allowed implementation choices:
 
-- none for code. This draft is not executable until Stage 09 evidence and
-  database inspection are recorded.
-
-Allowed implementation choices after approval:
-
-- local test helper names;
 - local variable names;
-- assertion ordering.
+- local test helper names;
+- assertion ordering;
+- docstring wording that preserves the runtime meaning.
 
 Not allowed:
 
-- inventing permission semantics, database collection names, adapter APIs,
-  background worker scheduling, retry policy, or outbox status values outside
-  this plan;
-- adding send paths before dry-run outbox tests pass;
-- adding fallback sends, direct adapter calls, or bypasses around dispatcher
-  validation;
-- adding keyword permission extraction;
-- changing normal `/chat` service behavior;
-- adding raising-only helpers or pass-through wrappers.
-
-If implementation reveals an unlisted transport or database dependency, stop
-and update this plan before continuing.
+- changing field names, status values, denial reason strings, function names,
+  module names, test names, or Change Surface files;
+- adding optional fields not listed below;
+- changing denial order;
+- adding database persistence;
+- adding scheduler or dispatcher calls;
+- adding runtime adapter registration;
+- adding semantic keyword logic over user text;
+- changing normal `/chat` behavior;
+- adding speculative repository, protocol, strategy, config, retry, or worker
+  abstractions.
 
 ## Target State
 
-The proactive path is:
+The Stage 10 test-only proactive path is:
 
 ```text
-approved cognition preview
--> proactive permission policy
+approved cognition preview fixture
+-> deterministic proactive permission policy
 -> proactive preview record
--> outbox dry-run record
--> transport send only after all deterministic gates pass
--> sent audit record
--> optional assistant conversation row marked proactive_sent
+-> dry-run outbox record
+-> fake-adapter send only for status "ready"
+-> sent audit metadata on copied outbox record
 ```
 
-The normal `/chat` path is unchanged. A proactive sent row must not be consumed
-as a user instruction or stored as if a user initiated the turn.
+The normal runtime path remains:
 
-## Design Decisions
+```text
+adapter/debug client -> brain service -> queue/intake -> RAG -> cognition
+-> dialog -> persistence/consolidation -> scheduler/reflection
+```
 
-| Topic | Decision | Rationale |
-|---|---|---|
-| Permission | Explicit deterministic record only. | Prevents LLM or keyword inference from authorizing contact. |
-| Preview vs send | Separate preview, outbox, and transport records. | Keeps unsent cognition output out of public history. |
-| Transport | Fake adapter first, real adapter only after smoke gate. | High-risk user contact needs staged evidence. |
-| Idempotency | Required key per source preview and target. | Prevents duplicate proactive messages. |
-| `/chat` | No behavior change. | User-message response remains the baseline. |
+No Stage 10 code is imported by the live runtime path.
+
+## Contracts And Data Shapes
+
+Create `src/kazusa_ai_chatbot/proactive_output/contracts.py` with these public
+names only:
+
+- `QuietHoursPolicy`
+- `ProactivePermissionRecord`
+- `ProactivePreviewRecord`
+- `ProactivePolicyDecision`
+- `ProactiveOutboxStatus`
+- `ProactiveOutboxRecord`
+- `ProactiveSendAuditRecord`
+- `ProactiveOutboxStateError`
+
+`QuietHoursPolicy` fields:
+
+- `enabled: bool`
+- `start_local_time: str`
+- `end_local_time: str`
+
+`ProactivePermissionRecord` fields:
+
+- `permission_id: str`
+- `platform: str`
+- `platform_channel_id: str`
+- `channel_type: str`
+- `target_global_user_id: str`
+- `target_platform_user_id: str`
+- `allowed_trigger_sources: list[TriggerSource]`
+- `allowed_output_modes: list[OutputMode]`
+- `quiet_hours: QuietHoursPolicy`
+- `expires_at: str`
+- `enabled: bool`
+- `created_at: str`
+- `audit_reason: str`
+
+`ProactivePreviewRecord` fields:
+
+- `preview_id: str`
+- `episode_id: str`
+- `trigger_source: TriggerSource`
+- `output_mode: OutputMode`
+- `visibility: Visibility`
+- `platform: str`
+- `platform_channel_id: str`
+- `channel_type: str`
+- `target_global_user_id: str`
+- `target_platform_user_id: str`
+- `preview_text: str`
+- `idempotency_key: str`
+- `created_at: str`
+- `audit_reason: str`
+
+`ProactivePolicyDecision` fields:
+
+- `allowed: bool`
+- `reason: str`
+
+`ProactiveOutboxStatus` values:
+
+- `"dry_run"`
+- `"ready"`
+- `"sent"`
+- `"denied"`
+- `"failed"`
+- `"cancelled"`
+
+`ProactiveOutboxRecord` fields:
+
+- `outbox_id: str`
+- `preview_id: str`
+- `permission_id: str`
+- `idempotency_key: str`
+- `platform: str`
+- `platform_channel_id: str`
+- `channel_type: str`
+- `target_global_user_id: str`
+- `target_platform_user_id: str`
+- `preview_text: str`
+- `status: ProactiveOutboxStatus`
+- `created_at: str`
+- `updated_at: str`
+- `transport_attempt_count: int`
+- `last_failure_reason: str`
+- `sent_at: str`
+- `platform_message_id: str`
+- `delivery_adapter: str`
+- `origin_kind: str`
+
+`origin_kind` must be exactly `"proactive_preview"` before send and
+`"proactive_sent"` after send.
+
+`ProactiveSendAuditRecord` fields:
+
+- `audit_id: str`
+- `outbox_id: str`
+- `event_type: str`
+- `created_at: str`
+- `reason: str`
+- `platform_message_id: str`
+- `delivery_adapter: str`
+
+Create `src/kazusa_ai_chatbot/proactive_output/policy.py` with these public
+names only:
+
+- `PROACTIVE_ALLOWED_OUTPUT_MODE`
+- `evaluate_proactive_permission`
+- `is_local_time_in_quiet_hours`
+
+`PROACTIVE_ALLOWED_OUTPUT_MODE` must be exactly `"preview"`.
+
+`evaluate_proactive_permission(...)` signature:
+
+```python
+def evaluate_proactive_permission(
+    *,
+    preview: ProactivePreviewRecord,
+    permission: ProactivePermissionRecord | None,
+    existing_idempotency_keys: set[str],
+    adapter_platforms: set[str],
+    current_timestamp: str,
+    current_local_time: str,
+) -> ProactivePolicyDecision:
+```
+
+Denial checks must run in this exact order and return the exact reason string:
+
+1. `permission is None` -> `"missing_permission"`
+2. `permission["enabled"] is False` -> `"permission_disabled"`
+3. `permission["expires_at"] <= current_timestamp` -> `"permission_expired"`
+4. `preview["trigger_source"] == "user_message"` -> `"user_message_not_proactive"`
+5. trigger source not allowed -> `"trigger_source_not_allowed"`
+6. output mode not allowed or not `"preview"` -> `"unsafe_output_mode"`
+7. visibility not `"model_visible"` -> `"content_not_public"`
+8. platform/channel/channel type/target mismatch -> `"target_mismatch"`
+9. current local time is inside quiet hours -> `"quiet_hours"`
+10. preview platform absent from `adapter_platforms` -> `"adapter_unavailable"`
+11. idempotency key already exists -> `"duplicate_idempotency_key"`
+12. stripped preview text is empty -> `"empty_preview_text"`
+
+The success decision is `{"allowed": True, "reason": "allowed"}`.
+
+`is_local_time_in_quiet_hours(...)` signature:
+
+```python
+def is_local_time_in_quiet_hours(
+    *,
+    current_local_time: str,
+    quiet_hours: QuietHoursPolicy,
+) -> bool:
+```
+
+Rules: input times use `HH:MM`. If `quiet_hours["enabled"]` is false, return
+false. If start equals end, the whole day is quiet. If start is before end, the
+quiet window is `[start, end)`. If start is after end, the quiet window wraps
+midnight and is `current >= start or current < end`. Invalid time strings must
+raise `ValueError`.
+
+Create `src/kazusa_ai_chatbot/proactive_output/outbox.py` with these public
+names only:
+
+- `build_proactive_preview_record`
+- `build_proactive_outbox_record`
+- `mark_proactive_outbox_denied`
+- `send_ready_proactive_outbox`
+
+`build_proactive_preview_record(...)` must accept keyword-only arguments named
+exactly like `ProactivePreviewRecord` fields and return a
+`ProactivePreviewRecord`.
+
+`build_proactive_outbox_record(...)` signature:
+
+```python
+def build_proactive_outbox_record(
+    *,
+    outbox_id: str,
+    preview: ProactivePreviewRecord,
+    permission: ProactivePermissionRecord,
+    status: ProactiveOutboxStatus,
+    created_at: str,
+) -> ProactiveOutboxRecord:
+```
+
+Allowed input status values are only `"dry_run"` and `"ready"`. Any other
+status must raise `ProactiveOutboxStateError`.
+
+`mark_proactive_outbox_denied(...)` signature:
+
+```python
+def mark_proactive_outbox_denied(
+    *,
+    outbox: ProactiveOutboxRecord,
+    reason: str,
+    updated_at: str,
+) -> ProactiveOutboxRecord:
+```
+
+`send_ready_proactive_outbox(...)` signature:
+
+```python
+async def send_ready_proactive_outbox(
+    *,
+    outbox: ProactiveOutboxRecord,
+    adapter: MessagingAdapter,
+) -> ProactiveOutboxRecord:
+```
+
+It must raise `ProactiveOutboxStateError` unless
+`outbox["status"] == "ready"`. For `"ready"`, it must call
+`adapter.send_message(channel_id=..., text=..., channel_type=...,
+reply_to_msg_id=None)`, then return a copied outbox with:
+
+- `status` set to `"sent"`;
+- `transport_attempt_count` incremented by 1;
+- `sent_at` set to `SendResult.sent_at.isoformat()`;
+- `platform_message_id` set to `SendResult.message_id`;
+- `delivery_adapter` set to `SendResult.platform`;
+- `origin_kind` set to `"proactive_sent"`;
+- `updated_at` set to the same value as `sent_at`.
+
+Do not catch adapter exceptions in Stage 10.
 
 ## Change Surface
 
-Final approval must confirm exact collection names and adapter APIs after
-Stage 09. This draft proposes the following target surface:
-
 ### Create
 
-- `src/kazusa_ai_chatbot/proactive_output/contracts.py` — permission,
-  preview, outbox, and audit TypedDicts.
-- `src/kazusa_ai_chatbot/proactive_output/policy.py` — deterministic
-  permission and send gating.
-- `src/kazusa_ai_chatbot/proactive_output/outbox.py` — outbox persistence
-  boundary or in-memory dry-run boundary, as approved after DB inspection.
+- `src/kazusa_ai_chatbot/proactive_output/__init__.py`
+- `src/kazusa_ai_chatbot/proactive_output/contracts.py`
+- `src/kazusa_ai_chatbot/proactive_output/policy.py`
+- `src/kazusa_ai_chatbot/proactive_output/outbox.py`
 - `tests/test_multi_source_cognition_stage_10_proactive_policy.py`
 - `tests/test_multi_source_cognition_stage_10_proactive_outbox.py`
 
 ### Modify
 
-- exact dispatcher/adapter or scheduler integration files to be named after
-  Stage 09 and database inspection;
-- lifecycle rows in the parent plan and registry after completion only.
+- `development_plans/active/short_term/multi_source_cognition_architecture_stage_10_permissioned_proactive_output_plan.md`
+- `development_plans/active/short_term/multi_source_cognition_architecture_plan.md`
+- `development_plans/README.md`
 
 ### Keep
 
-- `src/kazusa_ai_chatbot/service.py` normal `/chat` response path unless final
-  approval names a surgical persistence marker for sent proactive rows;
+- `src/kazusa_ai_chatbot/service.py`
+- `src/kazusa_ai_chatbot/scheduler.py`
+- `src/kazusa_ai_chatbot/db/scheduled_events.py`
+- `src/kazusa_ai_chatbot/db/conversation.py`
+- `src/kazusa_ai_chatbot/db/schemas.py`
+- `src/kazusa_ai_chatbot/dispatcher/*.py`
 - `src/kazusa_ai_chatbot/nodes/persona_supervisor2*.py`
-- cognition prompt files;
-- RAG files;
-- consolidation policy files except explicit origin metadata for
-  `proactive_sent` if a later approved step names it.
+- `src/kazusa_ai_chatbot/rag/*.py`
+- `src/kazusa_ai_chatbot/reflection_cycle/*.py`
+- `src/kazusa_ai_chatbot/internal_thought_cognition.py`
 
 ## Implementation Order
 
-This draft is not approval to implement. Before approval:
-
-1. Reread Stage 09 `Execution Evidence`.
-2. Inspect existing scheduler, dispatcher, delivery tracking, and conversation
-   persistence contracts.
-3. Update Change Surface with exact files and exact database collection names.
-4. Add final policy, outbox, transport, rollback, and verification commands.
-5. Rerun plan self-review and obtain explicit user approval.
-
-After approval, the intended execution order is:
-
-1. Add permission policy unit tests.
-2. Implement permission policy contracts.
-3. Add outbox dry-run tests.
-4. Implement outbox dry-run persistence boundary.
-5. Add fake-adapter transport tests.
-6. Implement transport send boundary.
-7. Add sent-audit and conversation-row tests.
-8. Run full verification including Stage 00.
-9. Record evidence and request review before merge.
+1. Reread this plan, Stage 09 `Execution Evidence`, the parent ledger row, and
+   registry row.
+2. Add `tests/test_multi_source_cognition_stage_10_proactive_policy.py` with:
+   `test_missing_permission_is_denied`,
+   `test_disabled_and_expired_permissions_are_denied`,
+   `test_wrong_target_and_unapproved_trigger_are_denied`,
+   `test_quiet_hours_denies_even_with_valid_permission`,
+   `test_adapter_unavailable_and_duplicate_idempotency_are_denied`,
+   `test_private_or_unsafe_preview_content_is_denied`, and
+   `test_valid_permission_allows_preview`.
+   Expected before implementation: import failure for missing package.
+3. Implement `contracts.py` and `policy.py`.
+4. Verify Stage 10 policy tests.
+5. Reread this plan.
+6. Add `tests/test_multi_source_cognition_stage_10_proactive_outbox.py` with:
+   `test_preview_record_keeps_public_text_separate_from_outbox`,
+   `test_dry_run_outbox_does_not_call_adapter`,
+   `test_ready_outbox_fake_transport_marks_sent_with_audit_metadata`,
+   `test_transport_refuses_dry_run_denied_or_sent_status`, and
+   `test_denied_outbox_records_failure_reason_without_transport`.
+   Expected before implementation: import failure for missing outbox module.
+7. Implement `outbox.py` and `__init__.py`.
+8. Verify Stage 10 outbox tests.
+9. Run the full Verification section.
+10. Run the Independent Code Review gate, remediate in-scope findings, rerun
+    affected verification, then update lifecycle rows to completed.
 
 ## Progress Checklist
 
-- [ ] Stage 1 - prerequisite and database evidence carried forward.
-  - Covers: pre-approval Steps 1-2.
-  - Verify: Stage 09 row is `completed`; DB/dispatcher inspection notes are
-    recorded.
-  - Evidence: Stage 09 branch, commit, tests, and inspection summary recorded.
-  - Handoff: next agent updates final Change Surface.
-  - Sign-off: `<agent/date>` after evidence is recorded.
-- [ ] Stage 2 - final executable contract approved.
-  - Covers: pre-approval Steps 3-5.
-  - Verify: exact files, collections, adapter APIs, rollback script, and test
-    commands are named.
-  - Evidence: user approval recorded.
-  - Handoff: implementation may start at Stage 3.
-  - Sign-off: `<agent/date>` after approval.
+- [x] Stage 1 - prerequisite and runtime inspection complete.
+  - Covers: approval prerequisites.
+  - Verify: Stage 09 row is `completed`; scheduler, dispatcher, delivery, and
+    conversation persistence contracts inspected.
+  - Evidence/sign-off: `Codex / 2026-05-10`; Stage 09 branch
+    `stage-09-multimodal-cognitive-input-sources`, commits `566e6eb` and
+    `9de93fe`; read-only DB exports written under `test_artifacts`.
+- [x] Stage 2 - executable contract approved.
+  - Covers: exact files, data shapes, denial reasons, tests, and commands.
+  - Verify: final executable wording is complete; registry and parent ledger mark Stage 10
+    approved.
+  - Evidence/sign-off: `Codex / 2026-05-10` after independent plan review.
 - [ ] Stage 3 - permission policy implemented.
-  - Covers: approved Steps 1-2.
-  - Verify: policy unit tests pass after expected red failure.
-  - Evidence: red/green output recorded.
+  - Covers: Steps 2-4.
+  - Verify: policy unit tests pass after expected import failure.
+  - Evidence: record red/green output.
   - Handoff: reread this plan, then start Stage 4.
-  - Sign-off: `<agent/date>` after verification.
-- [ ] Stage 4 - outbox dry-run implemented.
-  - Covers: approved Steps 3-4.
-  - Verify: outbox dry-run tests pass and no adapter send occurs.
+  - Sign-off: record agent and date after verification.
+- [ ] Stage 4 - outbox dry-run and fake transport implemented.
+  - Covers: Steps 5-8.
+  - Verify: outbox tests pass after expected import failure; dry-run records do
+    not call adapters.
   - Evidence: command output recorded.
   - Handoff: reread this plan, then start Stage 5.
-  - Sign-off: `<agent/date>` after verification.
-- [ ] Stage 5 - transport and sent-audit implemented.
-  - Covers: approved Steps 5-7.
-  - Verify: fake-adapter and sent-audit tests pass.
-  - Evidence: command output recorded.
-  - Handoff: reread this plan, then start Stage 6.
-  - Sign-off: `<agent/date>` after verification.
-- [ ] Stage 6 - full verification and manual review complete.
-  - Covers: approved Steps 8-9.
-  - Verify: every Verification command passes and manual review is recorded.
+  - Sign-off: record agent and date after verification.
+- [ ] Stage 5 - full verification and independent review complete.
+  - Covers: Steps 9-10.
+  - Verify: every Verification command passes and independent code review is
+    recorded.
   - Evidence: command output and review result recorded.
   - Handoff: no later stage in this parent plan.
-  - Sign-off: `<agent/date>` after verification.
+  - Sign-off: record agent and date after verification.
 
 ## Verification
 
-This draft names minimum gates. Final approval must replace the placeholder
-transport/database commands with exact commands after inspection.
-
 ### Static Compile
 
-- `venv\Scripts\python -m py_compile src\kazusa_ai_chatbot\proactive_output\contracts.py src\kazusa_ai_chatbot\proactive_output\policy.py src\kazusa_ai_chatbot\proactive_output\outbox.py tests\test_multi_source_cognition_stage_10_proactive_policy.py tests\test_multi_source_cognition_stage_10_proactive_outbox.py`
+- `venv\Scripts\python.exe -m py_compile src\kazusa_ai_chatbot\proactive_output\__init__.py src\kazusa_ai_chatbot\proactive_output\contracts.py src\kazusa_ai_chatbot\proactive_output\policy.py src\kazusa_ai_chatbot\proactive_output\outbox.py tests\test_multi_source_cognition_stage_10_proactive_policy.py tests\test_multi_source_cognition_stage_10_proactive_outbox.py`
 
 ### Static Greps
 
-- `rg -n "send_message|adapter\\.send|save_conversation|dispatcher\\.dispatch" src\kazusa_ai_chatbot\proactive_output`
+- `rg -n "scheduler\\.schedule_event|TaskDispatcher|dispatcher\\.dispatch|save_conversation|apply_assistant_delivery_receipt|insert_scheduled_event|register_runtime_adapter|register_remote_runtime_adapter" src\kazusa_ai_chatbot\proactive_output tests\test_multi_source_cognition_stage_10_proactive_policy.py tests\test_multi_source_cognition_stage_10_proactive_outbox.py`
 
-  Expected result before transport stage: matches only in tests or explicitly
-  approved fake-adapter boundary. After transport approval, matches must be
-  limited to the named transport module.
+  Expected result: zero matches.
 
-- `rg -n "proactive|scheduled_action_request|proactive_sent" src\kazusa_ai_chatbot\service.py src\kazusa_ai_chatbot\nodes\persona_supervisor2.py`
+- `rg -n "proactive_output|proactive_preview|proactive_sent|Proactive" src\kazusa_ai_chatbot\service.py src\kazusa_ai_chatbot\scheduler.py src\kazusa_ai_chatbot\db src\kazusa_ai_chatbot\dispatcher`
 
-  Expected result: no matches unless final approval names a surgical sent-row
-  persistence marker. Normal `/chat` response path must not branch on proactive
-  state.
+  Expected result: zero matches.
+
+- `rg -n "send_message" src\kazusa_ai_chatbot\proactive_output tests\test_multi_source_cognition_stage_10_proactive_policy.py tests\test_multi_source_cognition_stage_10_proactive_outbox.py`
+
+  Expected result: matches only in `outbox.py` `send_ready_proactive_outbox`
+  and the fake-adapter outbox tests.
 
 - `git diff --check`
 
 ### Focused Tests
 
-- `venv\Scripts\python -m pytest tests\test_multi_source_cognition_stage_10_proactive_policy.py`
-- `venv\Scripts\python -m pytest tests\test_multi_source_cognition_stage_10_proactive_outbox.py`
+- `venv\Scripts\python.exe -m pytest tests\test_multi_source_cognition_stage_10_proactive_policy.py`
+- `venv\Scripts\python.exe -m pytest tests\test_multi_source_cognition_stage_10_proactive_outbox.py`
 
 ### Prior Stage Regression Gates
 
-- `venv\Scripts\python -m pytest tests\test_multi_source_cognition_stage_09_multimodal_input_sources.py`
-- `venv\Scripts\python -m pytest tests\test_multi_source_cognition_stage_08_internal_thought_dry_run.py`
-- `venv\Scripts\python -m pytest tests\test_multi_source_cognition_stage_07_reflection_dry_run.py`
-- `venv\Scripts\python -m pytest tests\test_multi_source_cognition_stage_00_regression_baseline.py`
-- `venv\Scripts\python -m pytest`
+- `venv\Scripts\python.exe -m pytest tests\test_multi_source_cognition_stage_09_multimodal_input_sources.py`
+- `venv\Scripts\python.exe -m pytest tests\test_multi_source_cognition_stage_08_internal_thought_dry_run.py`
+- `venv\Scripts\python.exe -m pytest tests\test_multi_source_cognition_stage_07_reflection_dry_run.py`
+- `venv\Scripts\python.exe -m pytest tests\test_multi_source_cognition_stage_06_consolidator_per_write_origin_policy.py`
+- `venv\Scripts\python.exe -m pytest tests\test_multi_source_cognition_stage_00_regression_baseline.py`
+- `venv\Scripts\python.exe -m pytest`
 
-### Manual Review
+### Independent Code Review
 
-- Inspect the outbox dry-run fixture and fake-adapter transport audit.
-- Confirm no real adapter send occurs before the approved transport gate.
-- Confirm permission records are explicit and not inferred from user text.
+Review all Stage 10 code changes before sign-off:
+
+- style compliance against `.agents/skills/py-style`;
+- test compliance against `.agents/skills/test-style-and-execution`;
+- plan alignment by exact Change Surface, public names, status values, denial
+  reasons, denial order, and verification commands;
+- design weaknesses, especially accidental live-send path, DB write,
+  scheduler/dispatcher bypass, semantic permission inference, duplicate-send
+  holes, and `/chat` regression risk.
+
+Make in-scope fixes directly, rerun affected verification, then record the
+review result in `Execution Evidence`.
 
 ## Acceptance Criteria
 
 Stage 10 is complete when:
 
-- permission, preview, outbox, and audit contracts exist;
-- missing, expired, wrong-target, quiet-hour, duplicate, unsupported-adapter,
-  unsafe-mode, and private-content cases are denied deterministically;
+- permission, quiet-hour, preview, outbox, and audit contracts exist exactly as
+  named;
+- missing, disabled, expired, user-message, unapproved-trigger, unsafe-mode,
+  private-content, wrong-target, quiet-hour, unsupported-adapter, duplicate,
+  and empty-preview cases are denied deterministically;
 - dry-run outbox creates no adapter send;
 - approved fake-adapter transport writes auditable sent metadata;
-- proactive sent rows, if enabled, are marked with explicit origin and are not
-  treated as user instructions;
-- Stage 00 full regression and full deterministic suite pass;
-- manual review approves the send boundary before merge.
+- no Stage 10 code calls scheduler, dispatcher, normal conversation
+  persistence, delivery receipts, DB writes, or runtime adapter registration;
+- Stage 00 and prior-stage regression gates pass;
+- full deterministic suite passes;
+- independent code review approves the send boundary before merge.
+
+## Independent Plan Review
+
+Review on 2026-05-10:
+
+- **Handoff:** Stage 09 evidence is now exact and carried forward.
+- **Architecture alignment:** LLMs own preview wording outside this plan;
+  deterministic Stage 10 code owns permission, target, quiet hours,
+  idempotency, adapter availability, and audit metadata.
+- **Boundary tightness:** no runtime import, DB collection, scheduler event,
+  dispatcher call, or real adapter send is allowed.
+- **Agent creativity suppression:** exact files, public names, fields, status
+  values, denial reasons, denial order, tests, and verification commands are
+  specified.
+- **Approval:** approved for implementation from a post-Stage-09 feature
+  branch.
 
 ## Plan Self-Review
 
-Draft self-review on 2026-05-10:
-
-- **Coverage:** parent Stage 10 scope maps to permission, preview, outbox,
-  transport, audit, rollback, and regression gates.
-- **Placeholder scan:** exact Stage 09 evidence, DB collection names, adapter
-  APIs, and final transport commands remain blocked until prerequisite
-  inspection; this draft is intentionally not executable.
-- **Contract consistency:** permission-first proactive output matches the
-  top-level architecture and does not authorize autonomous contact by default.
-- **Granularity:** checkpoints separate pre-approval evidence, final contract,
-  policy, dry-run outbox, transport, and review.
-- **Verification:** permission denial, no-send dry run, fake transport,
-  full-suite regression, and manual review are explicit.
+- **Coverage:** parent Stage 10 scope maps to permission, preview, outbox, fake
+  transport, audit metadata, rollback, and regression gates.
+- **Completeness scan:** no planning-only instruction text remains.
+- **Contract consistency:** the plan creates no autonomous contact by default
+  and requires a later approval for real transport or persistence.
+- **Granularity:** checkpoints separate policy, outbox/fake transport,
+  verification, and independent review.
+- **Verification:** denial coverage, no-send dry run, fake transport,
+  static greps, prior-stage gates, full suite, and independent review are
+  explicit.
 
 ## Execution Handoff
 
-Intended execution mode after final approval: sequential implementation on a
-feature branch forked from post-Stage-09 `main`.
+Execution mode: sequential implementation on a feature branch forked from
+post-Stage-09 `main`.
 
-Blocked next action: wait for Stage 09 completion evidence, inspect
-scheduler/dispatcher/delivery/database contracts, then update this draft into a
-final executable plan for explicit user approval.
+Next action: create a Stage 10 feature branch, add the policy tests, observe
+the expected import failure, implement the exact contracts, and continue
+through the checklist.
 
 ## Risks
 
@@ -401,35 +659,36 @@ final executable plan for explicit user approval.
 |---|---|---|
 | Message sends without permission | Explicit permission record required | Policy denial tests |
 | Wrong target receives message | Target validation before outbox/send | Policy tests and fake adapter audit |
-| Duplicate proactive send | Idempotency key and outbox status | Outbox tests |
-| Private thought leaks | Only approved preview text can send | Policy tests |
+| Duplicate proactive send | Idempotency key gate | Policy tests |
+| Private thought leaks | Only `model_visible` `preview` content can send | Policy tests |
+| Runtime contact accidentally enabled | No imports from service/scheduler/dispatcher; static greps | Static greps |
 | `/chat` regresses | No normal response-path changes | Stage 00 and full suite |
-| Audit loss after rollback | Keep records inspectable; cancel pending rows | Manual review and rollback notes |
+| Audit loss after rollback | No DB writes in Stage 10 | Rollback policy |
 
 ## Completion Artifact Contract
 
 When Stage 10 is complete, these artifacts must exist or be updated:
 
-- proactive permission, preview, outbox, and audit contracts;
-- deterministic proactive policy tests;
-- outbox dry-run and fake-adapter transport tests;
-- explicit rollback/cancel procedure for pending outbox rows;
+- `src/kazusa_ai_chatbot/proactive_output/contracts.py`
+- `src/kazusa_ai_chatbot/proactive_output/policy.py`
+- `src/kazusa_ai_chatbot/proactive_output/outbox.py`
+- `tests/test_multi_source_cognition_stage_10_proactive_policy.py`
+- `tests/test_multi_source_cognition_stage_10_proactive_outbox.py`
 - parent ledger row for `stage_10` flipped to `completed`;
 - registry row flipped to `completed | completed`;
-- execution evidence in this plan naming branch, commit, checks, manual review,
-  and sign-off.
+- execution evidence in this plan naming branch, commit, checks, independent
+  review, and sign-off.
 
 The artifact must not include inferred permissions, broad autonomous contact,
-normal `/chat` response-path changes, direct adapter bypasses, or hidden
-transport sends.
+normal `/chat` response-path changes, database writes, scheduler or dispatcher
+calls, direct runtime adapter registration, or hidden transport sends.
 
 ## Execution Evidence
 
 Record after implementation:
 
 - Stage 09 evidence reread:
-- Database and dispatcher inspection:
-- User approval for final executable plan:
+- Runtime inspection:
 - Branch:
 - Commit:
 - Static compile:
@@ -437,7 +696,7 @@ Record after implementation:
 - Focused tests:
 - Prior stage regression gates:
 - Full suite:
-- Manual review:
+- Independent code review:
 - Completion diff review:
 - Lifecycle records:
 - Sign-off:
