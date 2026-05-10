@@ -38,6 +38,7 @@ long_term/todo.md
 
 | Plan | Status | Execution |
 |---|---|---|
+| [first_class_image_input_cognition_plan.md](active/short_term/first_class_image_input_cognition_plan.md) | draft | deferred |
 | [reflection_driven_character_state_evolution_plan.md](active/short_term/reflection_driven_character_state_evolution_plan.md) | draft | deferred |
 
 ## Active Bugfix Plans
