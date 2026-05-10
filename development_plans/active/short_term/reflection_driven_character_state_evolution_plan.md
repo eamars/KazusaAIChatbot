@@ -49,9 +49,9 @@ mode first, and preserve the live response path.
 ## Relationship To Multi-Source Cognition
 
 This plan must come after
-`development_plans/active/short_term/multi_source_cognition_architecture_plan.md`.
+`development_plans/archive/completed/short_term/multi_source_cognition_architecture_plan.md`.
 
-The active multi-source cognition plan establishes the prerequisite direction:
+The completed multi-source cognition plan establishes the prerequisite direction:
 
 - Reflection must not be routed through `/chat` as fake user input.
 - Reflection should eventually enter as `trigger_source=reflection_signal`.
