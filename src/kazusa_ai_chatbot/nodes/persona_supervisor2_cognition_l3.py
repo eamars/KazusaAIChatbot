@@ -560,12 +560,18 @@ async def call_style_agent(state: CognitionState) -> CognitionState:
 # ---------------------------------------------------------------------------
 
 _CONTENT_ANCHOR_AGENT_PROMPT = """\
-你现在是角色 {character_name} 的内容锚点生成器。你负责决定"说什么"——台词的骨架与信息点。你**不**负责决定"怎么说"（修辞策略和语言风格由独立的 Style Agent 负责）。严禁涉及任何物理动作。
+你现在是角色 {character_name} 的内容锚点生成器。你只决定下游台词要覆盖的内容骨架：立场、事实、回答、社交姿态、推进和篇幅。你不决定修辞风格，不写完整台词，不写物理动作。
 
 # 语言政策
 - 除结构化枚举值、schema key、ID、URL、代码、命令、模型标签等必须保持原样的内容外，所有由你新生成的内部自由文本字段都必须使用简体中文。
 - 用户原文、引用文本、专有名词、标题、别名、外部证据原句在需要精确保留时保持原语言；不要为了统一语言而改写。
 - 不要添加翻译、双语复写或括号内解释，除非源文本本身已经包含。
+
+# 职责边界
+- 内容锚点是内部指令，不是用户可见台词。每条锚点应短、具体、可执行。
+- 不要写完整最终回复、完整下一题题面、长段用户可见文案、markdown 区块或舞台动作。
+- 不要在这里改写 `logical_stance`、`character_intent`、检索事实或上游意识判断；只能把它们组织成锚点。
+- 当前输入和上游意识判断是本轮最新语义证据；`conversation_progress` 是上一轮之前的短期进展摘要，可能包含已被当前输入解决的旧阻碍。
 
 # 依赖树（先解析上游，再生成下游）
 ```text
@@ -591,12 +597,14 @@ logical_stance + character_intent
 上游锚点约束下游锚点；下游锚点不能反向改变 `logical_stance`、`character_intent` 或已选 `[FACT]`。
 
 # 解析步骤
-1. **解析 `[DECISION]`**：把 `logical_stance` 转成自然语言立场；不要只输出枚举值，也不要在这里修正上游立场。
-2. **解析 `[FACT]`**：只选择与 `decontexualized_input` 直接相关的事实。若 `rag_result.answer` 直接回答当前问题，它是最高优先级事实摘要。
-3. **解析 `[ANSWER]`**：若当前输入提出问题、请求或提议，且 `character_intent != CLARIFY`，在不改变 `[DECISION]` 的前提下给出回答或决定；若 `[FACT]` 存在，答案应使用其中的具体对象与参数。
-4. **解析 `[SOCIAL]`**：只放社交姿态、局促、防备、委婉等表达分寸；不得改变 `[DECISION]`、`[FACT]` 或 `[ANSWER]`。
-5. **解析 `[PROGRESSION]` / `[AVOID_REPEAT]`**：只根据 `conversation_progress` 处理推进、重复和旧线程。
-6. **解析 `[SCOPE]`**：只描述篇幅和需要覆盖的锚点。
+1. **解析当前输入功能**：先读 `decontexualized_input`、`referents`、`internal_monologue`、`logical_stance`、`character_intent`。判断当前输入是在回答、提问、请求、提议、补充、玩笑、赞美、拒绝、纠正还是要求澄清。
+2. **解析当前输入与 open loop 的关系**：当 `conversation_progress.open_loops`、`current_thread` 或 `current_blocker` 存在时，必须先比较当前输入是否解决、部分解决、答错、回避或只是社交回应。当前 `decontexualized_input` 与 `internal_monologue` 优先级高于旧的 `current_blocker`。
+3. **解析 `[DECISION]`**：把 `logical_stance` 转成自然语言立场；不要只输出枚举值，也不要在这里修正上游立场。
+4. **解析 `[FACT]`**：只选择与当前输入和本轮任务直接相关的事实。若 `rag_result.answer` 直接回答当前问题，它是最高优先级事实摘要。
+5. **解析 `[ANSWER]`**：若当前输入提出问题、请求、提议或正在回答 open loop，且 `character_intent != CLARIFY`，在不改变 `[DECISION]` 的前提下给出回答、判定或决定；若 `[FACT]` 存在，答案应使用其中的具体对象与参数。
+6. **解析 `[SOCIAL]`**：只放社交姿态、局促、防备、委婉、得意、挑衅等表达分寸；不得改变 `[DECISION]`、`[FACT]` 或 `[ANSWER]`。
+7. **解析 `[PROGRESSION]` / `[AVOID_REPEAT]`**：根据当前输入对 open loop 的关系和 `conversation_progress` 处理推进、重复和旧线程。
+8. **解析 `[SCOPE]`**：只描述篇幅和需要覆盖的锚点。
 
 # 每个锚点的最小规则
 ## Clarification override
@@ -604,6 +612,13 @@ logical_stance + character_intent
 - 如果任一 `referents[].status = "unresolved"`，当前输入缺少回答所必需的指代对象。
 - 不要生成 `[FACT]`，不要根据旧记忆、历史闲聊或无关检索猜测答案。
 - `[ANSWER]` 必须是一个简短澄清追问，优先点名未解析的 `referents[].phrase`，询问用户该短语具体指什么。
+
+## 当前输入与 open loop
+- 如果当前输入正确或等价地解决了 `open_loops` 中的活跃问题、挑战、承诺、待办或澄清请求，`[ANSWER]` 必须承认或使用这个解决结果，`[PROGRESSION]` 必须关闭旧 loop、结算旧问题或进入自然下一步。
+- 解决 open loop 后，不得同时要求用户再次完成同一个问题、同一个答案或同一个动作。
+- 如果当前输入只是赞美、玩笑、拖延、换话题、错误猜测、弱相关内容或明确说还没答出，`[ANSWER]` 不得把它判定为已解决；`[PROGRESSION]` 应保持、纠正、缩小或重新提示该 loop。
+- 如果当前输入包含答案又包含玩笑或夸奖，先处理答案与 open loop 的关系，再用 `[SOCIAL]` 处理玩笑或夸奖。
+- 如果 `conversation_progress.current_blocker` 声称还在等待用户，但当前输入已经回答了该 blocker，必须以当前输入为准。
 
 ## `[DECISION]`
 - `CONFIRM` -> 接受/认可；`REFUSE` -> 拒绝/驳斥；`TENTATIVE` -> 有条件、有保留或不确定；`DIVERGE` -> 转移话题；`CHALLENGE` -> 对峙/质问。
@@ -622,6 +637,8 @@ logical_stance + character_intent
 - `[ANSWER]` 不得与 `[DECISION]` 或 `[FACT]` 矛盾。
 - 若 `[FACT]` 含有回答所需的具体对象、属性或执行参数，`[ANSWER]` 应保留这些具体内容，避免替换成泛称。
 - `character_intent = CLARIFY` 时，`[ANSWER]` 必须是缩小歧义范围的追问；不能猜测补全后的答案。
+- 当前输入回答了活跃 open loop 时，`[ANSWER]` 要判定或使用该答案，而不是把它改写成普通知识展示。
+- 当前输入没有回答活跃 open loop 时，`[ANSWER]` 可以接住社交内容，但不能宣告答对、完成或进入下一步。
 - 用户请求包含群/频道/房间 ID、消息正文、引用内容、提醒对象等执行参数时，必须保留具体细节。
 
 ## `[SOCIAL]`
@@ -631,6 +648,8 @@ logical_stance + character_intent
 ## `[PROGRESSION]` / `[AVOID_REPEAT]`
 - `conversation_progress` 是语义短期记忆；不要依赖原始聊天记录重建 episode。
 - `same_episode` 或 `related_shift` 时，参考 `next_affordances`、`overused_moves`、`avoid_reopening`、`open_loops`、`resolved_threads` 和 `progression_guidance`。
+- `[PROGRESSION]` 必须反映当前输入造成的最新状态变化；不能只复述旧的 `current_blocker`。
+- 答案已解决 open loop 时，推进到结算、下一题、下一步、冷却或收束；答案未解决时，保持 loop 并说明如何继续。
 - 若继续使用过度重复动作，必须输出 `[AVOID_REPEAT]` 并给出推进方式；若本轮必须承认同一动作，用 `[PROGRESSION]` 说明新增信息。
 - `sharp_transition` 时忽略旧 episode obligations，只处理当前输入。
 
@@ -711,6 +730,7 @@ logical_stance + character_intent
 - `content_anchors` 必须是字符串列表。
 - `[DECISION]` 必须放在第一项，`[SCOPE]` 必须放在最后一项。
 - 只允许输出 `[DECISION]`、`[FACT]`、`[ANSWER]`、`[SOCIAL]`、`[AVOID_REPEAT]`、`[PROGRESSION]`、`[SCOPE]` 这七种标签；禁止自创 `[EMOTION]`、`[STYLE]` 等新标签。
+- 每条锚点必须是内容指令，不是最终台词；不得包含完整下一题题面、长段示范回复或 markdown 标题。
 - 所有内容选择规则只按上方“依赖树”和“解析步骤”执行，不要在输出格式示例里推断额外规则。
 """
 _content_anchor_agent_llm = get_llm(

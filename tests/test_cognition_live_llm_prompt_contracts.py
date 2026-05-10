@@ -7,6 +7,8 @@ import logging
 import httpx
 import pytest
 
+from kazusa_ai_chatbot.cognition_episode import build_text_chat_cognitive_episode
+from kazusa_ai_chatbot.time_context import build_character_time_context
 from kazusa_ai_chatbot.nodes.dialog_agent import dialog_agent
 from kazusa_ai_chatbot.config import COGNITION_LLM_BASE_URL
 from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition_l1 import call_cognition_subconscious
@@ -104,6 +106,38 @@ def _build_character_profile() -> dict:
     return profile
 
 
+def _text_chat_episode(
+    *,
+    timestamp: str,
+    user_input: str,
+    user_name: str,
+    global_user_id: str,
+) -> dict:
+    """Build a valid text-chat episode for direct live node calls."""
+
+    time_context = build_character_time_context(timestamp)
+    episode = build_text_chat_cognitive_episode(
+        episode_id="live-prompt-contracts-episode",
+        percept_id="live-prompt-contracts-percept",
+        timestamp=timestamp,
+        time_context=time_context,
+        user_input=user_input,
+        platform="qq",
+        platform_channel_id="live-prompt-channel",
+        channel_type="private",
+        platform_message_id="live-prompt-message",
+        platform_user_id="live-user",
+        global_user_id=global_user_id,
+        user_name=user_name,
+        active_turn_platform_message_ids=["live-prompt-message"],
+        active_turn_conversation_row_ids=[],
+        debug_modes={},
+        target_addressed_user_ids=["live-bot"],
+        target_broadcast=False,
+    )
+    return episode
+
+
 def _rag_result(
     *,
     objective_facts: str,
@@ -159,9 +193,17 @@ def _make_state(
             "recent_window": [{"summary": character_image}],
         }
 
-    return {
+    timestamp = datetime.now(timezone.utc).isoformat()
+    cognitive_episode = _text_chat_episode(
+        timestamp=timestamp,
+        user_input=user_input,
+        user_name=user_name,
+        global_user_id=global_user_id,
+    )
+    state = {
         "character_profile": _build_character_profile(),
-        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "timestamp": timestamp,
+        "cognitive_episode": cognitive_episode,
         "user_input": user_input,
         "global_user_id": global_user_id,
         "user_name": user_name,
@@ -178,6 +220,7 @@ def _make_state(
         "indirect_speech_context": indirect_speech_context,
         "channel_topic": channel_topic,
         "decontexualized_input": user_input,
+        "referents": [],
         "rag_result": _rag_result(
             objective_facts=objective_facts,
             user_image=user_image,
@@ -186,6 +229,7 @@ def _make_state(
             external_evidence=external_evidence_text,
         ),
     }
+    return state
 
 
 async def _run_live_cognition_stack(state: dict) -> dict:
@@ -486,6 +530,206 @@ async def test_live_msg_decontexualizer_resolves_reply_excerpt_reference(ensure_
     )
 
 
+def _diving_quiz_progress() -> dict:
+    """Build active progress for the diving quiz first-question loop."""
+
+    progress = {
+        "status": "active",
+        "continuity": "same_episode",
+        "conversation_mode": "playful_banter",
+        "episode_phase": "answering_first_question",
+        "topic_momentum": "active",
+        "current_thread": "潜水知识竞赛第一题：耳压平衡基础方法",
+        "user_goal": "参与潜水知识问答挑战",
+        "current_blocker": "等待用户回答第一题。",
+        "user_state_updates": [
+            {"text": "用户正在参与潜水知识问答挑战", "age_hint": "current episode"},
+        ],
+        "assistant_moves": ["提出第一题", "维持好胜挑衅的问答氛围"],
+        "overused_moves": [],
+        "open_loops": [
+            {
+                "text": "第一题：潜水时做耳压平衡最常用、最基础的方法是什么？",
+                "age_hint": "current episode",
+            }
+        ],
+        "resolved_threads": [],
+        "avoid_reopening": [
+            {"text": "旧甜点区约定不要主动重提", "age_hint": "older episode"},
+            {"text": "旧材料库存与蛋糕确认不要主动重提", "age_hint": "older episode"},
+        ],
+        "emotional_trajectory": "轻松竞技，双方在互相试探知识储备。",
+        "next_affordances": ["判断用户是否答出第一题", "答对后进入下一题"],
+        "progression_guidance": "围绕第一题的回答状态推进挑战，不要重开旧话题。",
+    }
+    return progress
+
+
+def _make_diving_quiz_anchor_state(
+    *,
+    user_input: str,
+    internal_monologue: str,
+    logical_stance: str = "CONFIRM",
+    character_intent: str = "BANTAR",
+) -> dict:
+    """Build a direct content-anchor state for the diving quiz loop."""
+
+    state = _make_state(
+        user_input=user_input,
+        chat_history_recent=[
+            {
+                "role": "assistant",
+                "content": "第一题，潜水时做耳压平衡最常用、最基础的方法是什么？",
+            },
+            {"role": "user", "content": user_input},
+        ],
+        channel_topic="潜水知识竞赛",
+        memory_evidence_text="",
+        user_name="蚝爹油",
+        global_user_id="256e8a10-c406-47e9-ac8f-efd270d18160",
+    )
+    state.update(
+        {
+            "internal_monologue": internal_monologue,
+            "logical_stance": logical_stance,
+            "character_intent": character_intent,
+            "conversation_progress": _diving_quiz_progress(),
+        }
+    )
+    state["rag_result"]["answer"] = "本次 RAG 没有需要检索的外部/内部事实。"
+    return state
+
+
+def _assert_anchor_directives_not_full_dialog(anchors: list[str]) -> None:
+    """Assert anchors stay compact and instruction-like."""
+
+    assert anchors, "Content anchors should not be empty."
+    assert anchors[0].startswith("[DECISION]"), f"Missing leading DECISION anchor: {anchors!r}"
+    assert anchors[-1].startswith("[SCOPE]"), f"Missing trailing SCOPE anchor: {anchors!r}"
+    forbidden_fragments = ("```", "**", "【潜水问答挑战")
+    joined = "\n".join(anchors)
+    assert not any(fragment in joined for fragment in forbidden_fragments), (
+        f"Anchors should not contain markdown or full quiz blocks: {anchors!r}"
+    )
+    assert all("\n" not in anchor for anchor in anchors), f"Anchor should be one compact directive: {anchors!r}"
+    assert all(len(anchor) <= 260 for anchor in anchors), f"Anchor should stay compact: {anchors!r}"
+    assert not any(anchor.lstrip().startswith(("千纱：", "助手：", '"')) for anchor in anchors), (
+        f"Anchors should not be final spoken lines: {anchors!r}"
+    )
+
+
+def _contains_unnegated_fragment(text: str, fragments: tuple[str, ...]) -> bool:
+    """Return whether text contains a target fragment outside nearby negation."""
+
+    blocking_tokens = (
+        "不",
+        "别",
+        "未",
+        "没",
+        "不能",
+        "不要",
+        "避免",
+        "不再",
+        "停止",
+        "是否",
+        "能否",
+        "等待",
+        "观察",
+        "如果",
+        "若",
+        "需要",
+        "给出",
+    )
+    for fragment in fragments:
+        start = text.find(fragment)
+        while start != -1:
+            prefix = text[max(0, start - 16):start]
+            if not any(token in prefix for token in blocking_tokens):
+                return True
+            start = text.find(fragment, start + len(fragment))
+    return False
+
+
+def _assert_quiz_answer_resolves_open_loop(anchors: list[str]) -> None:
+    """Assert a valid quiz answer is accepted and the first loop advances."""
+
+    _assert_anchor_directives_not_full_dialog(anchors)
+    joined = "\n".join(anchors)
+    answer_terms = ("瓦尔萨尔瓦", "Valsalva", "捏鼻鼓气", "耳压平衡")
+    resolution_terms = (
+        "答对",
+        "正确",
+        "说得对",
+        "认可",
+        "承认",
+        "第二题",
+        "下一题",
+        "推进",
+        "进入",
+    )
+    same_question_demands = (
+        "赶紧回答我的问题",
+        "回答第一题",
+        "第一题还没答",
+        "还没回答",
+        "继续回答",
+        "尚未回答",
+        "未回答",
+        "别光说大话",
+    )
+    assert any(token in joined for token in answer_terms), (
+        f"Valid answer should be preserved in anchors: {anchors!r}"
+    )
+    assert any(token in joined for token in resolution_terms), (
+        f"Valid answer should close or advance the open loop: {anchors!r}"
+    )
+    assert not _contains_unnegated_fragment(joined, same_question_demands), (
+        f"Valid answer should not be treated as unanswered: {anchors!r}"
+    )
+
+
+def _assert_quiz_answer_does_not_resolve_open_loop(anchors: list[str]) -> None:
+    """Assert a non-answer or wrong answer keeps the first loop unresolved."""
+
+    _assert_anchor_directives_not_full_dialog(anchors)
+    joined = "\n".join(anchors)
+    acceptance_terms = (
+        "答对",
+        "回答正确",
+        "正确回答",
+        "说得对",
+        "猜对",
+        "完成第一题",
+        "关闭第一题",
+        "解决第一题",
+        "结算第一题",
+        "通过第一题",
+        "第二题",
+        "下一题",
+        "推进到",
+        "进入第二题",
+    )
+    keep_open_terms = (
+        "还没",
+        "没答",
+        "未答",
+        "不算",
+        "不正确",
+        "错误",
+        "猜错",
+        "继续",
+        "保持",
+        "保留",
+        "第一题",
+    )
+    assert not _contains_unnegated_fragment(joined, acceptance_terms), (
+        f"Non-answer or wrong answer should not close the open loop: {anchors!r}"
+    )
+    assert any(token in joined for token in keep_open_terms), (
+        f"Anchors should keep or correct the first-question loop: {anchors!r}"
+    )
+
+
 async def test_live_content_anchor_uses_character_public_facts_for_birthday_question(ensure_live_llm) -> None:
     state = _make_state(
         user_input="千纱你的生日是什么时候？",
@@ -642,6 +886,68 @@ async def test_live_content_anchor_answers_from_direct_conversation_evidence(ens
     assert not any(token in answer_text for token in forbidden_deflection), (
         f"ANSWER deflected instead of restating direct evidence: {anchors!r}"
     )
+
+
+async def test_live_content_anchor_quiz_full_answer_closes_open_loop(ensure_live_llm) -> None:
+    state = _make_diving_quiz_anchor_state(
+        user_input="潜水时做耳压平衡最常用、最基础的方法是瓦尔萨尔瓦动作，也就是捏鼻鼓气法。千纱居然知道这些，不简单哦",
+        internal_monologue=(
+            "他答出了瓦尔萨尔瓦动作和捏鼻鼓气法，这就是第一题的正确答案。"
+            "我可以嘴硬一点承认他答对，再把挑战推进下去。"
+        ),
+    )
+
+    result = await call_content_anchor_agent(state)
+    _debug_snapshot("prompt_contracts.content_anchor.quiz_full_answer_positive", result)
+
+    _assert_quiz_answer_resolves_open_loop(result["content_anchors"])
+
+
+async def test_live_content_anchor_quiz_concise_answer_closes_open_loop(ensure_live_llm) -> None:
+    state = _make_diving_quiz_anchor_state(
+        user_input="瓦尔萨尔瓦，捏鼻鼓气法。轮到下一题了吧？",
+        internal_monologue=(
+            "他用很短的说法直接答出了瓦尔萨尔瓦和捏鼻鼓气法。"
+            "这已经解决第一题，应该承认答对并进入下一题的节奏。"
+        ),
+    )
+
+    result = await call_content_anchor_agent(state)
+    _debug_snapshot("prompt_contracts.content_anchor.quiz_concise_answer_positive", result)
+
+    _assert_quiz_answer_resolves_open_loop(result["content_anchors"])
+
+
+async def test_live_content_anchor_quiz_banter_without_answer_keeps_open_loop(ensure_live_llm) -> None:
+    state = _make_diving_quiz_anchor_state(
+        user_input="千纱还挺懂潜水的嘛，不过我还没想出答案，先让我想想。",
+        internal_monologue=(
+            "他只是在夸我懂潜水，并且明确说还没有想出答案。"
+            "可以接住玩笑，但不能把第一题当作已经答对。"
+        ),
+        logical_stance="TENTATIVE",
+    )
+
+    result = await call_content_anchor_agent(state)
+    _debug_snapshot("prompt_contracts.content_anchor.quiz_banter_without_answer_negative", result)
+
+    _assert_quiz_answer_does_not_resolve_open_loop(result["content_anchors"])
+
+
+async def test_live_content_anchor_quiz_wrong_answer_keeps_open_loop(ensure_live_llm) -> None:
+    state = _make_diving_quiz_anchor_state(
+        user_input="是不是张嘴吞咽就好了？我猜的。",
+        internal_monologue=(
+            "他猜的是张嘴吞咽，和耳压平衡有关但不是题目要求的最常用基础捏鼻鼓气法。"
+            "不要判定答对，可以用好胜语气指出不够准。"
+        ),
+        logical_stance="CHALLENGE",
+    )
+
+    result = await call_content_anchor_agent(state)
+    _debug_snapshot("prompt_contracts.content_anchor.quiz_wrong_answer_negative", result)
+
+    _assert_quiz_answer_does_not_resolve_open_loop(result["content_anchors"])
 
 
 async def test_live_boundary_core_ignores_low_pressure_fact_recall_context(ensure_live_llm) -> None:
