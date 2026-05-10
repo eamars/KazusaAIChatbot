@@ -120,7 +120,7 @@ def test_render_recorder_prompt_requires_absolute_or_omit_temporal_state() -> No
 async def test_recorder_prompt_requires_character_name_and_prompt_safe_history_projection(
     monkeypatch,
 ) -> None:
-    """Recorder prompt payload should expose character identity without raw roles."""
+    """Recorder prompt renders character identity without payload duplication."""
 
     fake_llm = _CapturingLLM(_VALID_RECORDER_OUTPUT)
     monkeypatch.setattr(recorder, "_recorder_llm", fake_llm)
@@ -139,9 +139,10 @@ async def test_recorder_prompt_requires_character_name_and_prompt_safe_history_p
     system_prompt = fake_llm.messages[0].content
     human_payload = json.loads(fake_llm.messages[1].content)
     projected_history = human_payload["chat_history_recent"]
-    assert human_payload.get("character_name") == '测试角色'
+    assert "character_name" not in human_payload
     assert '测试角色' in system_prompt
     assert '{character_name}' not in system_prompt
+    assert '"character_name": "本轮人设名"' not in system_prompt
     assert projected_history == [
         {
             "speaker_name": '测试角色',

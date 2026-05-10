@@ -48,7 +48,7 @@ _RECORDER_PROMPT = '''\
 
 # 输入读取
 - `current_turn_timestamp` 是本轮记录时的本地时间。
-- `character_name` 是本轮人设名；自由文本确实需要点名时使用 `{character_name}`。
+- 本轮人设名是「{character_name}」；自由文本确实需要点名时使用「{character_name}」。
 - `prior_episode_state` 是旧操作状态；它可能已经被旧 prompt 污染，所以不能直接相信。
 - `chat_history_recent` 只用于判断本轮附近发生了什么；用 `speaker_name` 和 `speaker_kind` 判断谁说话。
 - `decontexualized_input`、`content_anchors`、`logical_stance`、`character_intent`、`final_dialog` 决定本轮真正发生的事。
@@ -102,7 +102,6 @@ _RECORDER_PROMPT = '''\
 # 输入格式
 {
     "current_turn_timestamp": "本轮记录时的本地时间，YYYY-MM-DD HH:MM",
-    "character_name": "本轮人设名",
     "prior_episode_state": "上一轮紧凑操作状态，或 null；可能包含 created_at、updated_at、expires_at 时间字段",
     "decontexualized_input": "用户本轮消息经去上下文化后的内容",
     "chat_history_recent": [
@@ -251,7 +250,6 @@ async def record_with_llm(record_input: ConversationProgressRecordInput) -> dict
         "current_turn_timestamp": format_timestamp_for_llm(
             record_input["timestamp"]
         ),
-        "character_name": character_name,
         "prior_episode_state": build_recorder_prior_state(
             record_input["prior_episode_state"],
         ),
