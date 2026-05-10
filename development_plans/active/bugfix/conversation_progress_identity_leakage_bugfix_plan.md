@@ -6,7 +6,7 @@
   from calling the active character `助手`, `助理`, `assistant`, `角色`,
   `active_character`, or `当前角色` in generated operational state.
 - Plan class: large
-- Status: approved
+- Status: completed
 - Mandatory skills: `superpowers:test-driven-development`,
   `local-llm-architecture`, `py-style`, `cjk-safety`,
   `test-style-and-execution`, `no-prepost-user-input`,
@@ -460,7 +460,7 @@ baseline traces, in `Execution Evidence`.
 
 ## Progress Checklist
 
-- [ ] Stage 1 - deterministic RED contract tests recorded
+- [x] Stage 1 - deterministic RED contract tests recorded
   - Covers: implementation steps 1 and 2.
   - Verify: focused new deterministic tests are run before production edits and
     fail for the intended defect. Passing-before-implementation tests do not
@@ -468,8 +468,8 @@ baseline traces, in `Execution Evidence`.
   - Evidence: record test names, commands, failure output, and why each failure
     proves the issue is possible in `Execution Evidence`.
   - Handoff: next agent starts at Stage 2.
-  - Sign-off: `<agent/date>` after evidence is recorded.
-- [ ] Stage 2 - pre-fix real LLM baseline recorded
+  - Sign-off: `Codex/2026-05-10` after evidence is recorded.
+- [x] Stage 2 - pre-fix real LLM baseline recorded
   - Covers: implementation step 3.
   - Verify: false-negative and false-positive tests for each touched prompt are
     run individually with `-q -s` before prompt edits; every trace artifact is
@@ -478,8 +478,8 @@ baseline traces, in `Execution Evidence`.
     non-reproduction, or only baseline behavior. Do not proceed unless Stage 1
     already proves the leak is possible.
   - Handoff: next agent starts at Stage 3.
-  - Sign-off: `<agent/date>` after evidence is recorded.
-- [ ] Stage 3 - prompt logic-flow review recorded
+  - Sign-off: `Codex/2026-05-10` after evidence is recorded.
+- [x] Stage 3 - prompt logic-flow review recorded
   - Covers: implementation step 4.
   - Verify: `Execution Evidence` records the current logic flow and rewrite
     decision for every prompt that will be edited.
@@ -487,24 +487,24 @@ baseline traces, in `Execution Evidence`.
     contract, examples, parser assumptions, downstream consumers, and whether
     a full affected-prompt rewrite is required.
   - Handoff: next agent starts at Stage 4.
-  - Sign-off: `<agent/date>` after evidence is recorded.
-- [ ] Stage 4 - decontextualizer identity contract implemented
+  - Sign-off: `Codex/2026-05-10` after evidence is recorded.
+- [x] Stage 4 - decontextualizer identity contract implemented
   - Covers: implementation step 5.
   - Verify: the exact decontextualizer RED deterministic test from Stage 1 now
     passes, then focused decontextualizer deterministic tests pass.
   - Evidence: record changed files, RED-to-GREEN command output, and CJK
     syntax/render checks.
   - Handoff: next agent starts at Stage 5.
-  - Sign-off: `<agent/date>` after evidence is recorded.
-- [ ] Stage 5 - recorder identity contract implemented
+  - Sign-off: `Codex/2026-05-10` after evidence is recorded.
+- [x] Stage 5 - recorder identity contract implemented
   - Covers: implementation steps 6 and 7.
   - Verify: the exact recorder RED deterministic test from Stage 1 now passes,
     then focused recorder/runtime/service deterministic tests pass.
   - Evidence: record changed files, RED-to-GREEN command output, and CJK
     syntax/render checks.
   - Handoff: next agent starts at Stage 6.
-  - Sign-off: `<agent/date>` after evidence is recorded.
-- [ ] Stage 6 - real LLM validation passed
+  - Sign-off: `Codex/2026-05-10` after evidence is recorded.
+- [x] Stage 6 - real LLM validation passed
   - Covers: implementation step 9.
   - Verify: re-run each real LLM test individually against the fixed prompts
     and inspect each artifact.
@@ -512,19 +512,19 @@ baseline traces, in `Execution Evidence`.
     to the pre-fix baseline proving mitigation. For each touched prompt,
     record the positive and negative case judgments separately.
   - Handoff: next agent starts at Stage 7.
-  - Sign-off: `<agent/date>` after evidence is recorded.
-- [ ] Stage 7 - regression and static checks complete
+  - Sign-off: `Codex/2026-05-10` after evidence is recorded.
+- [x] Stage 7 - regression and static checks complete
   - Covers: static greps, syntax checks, focused deterministic regression.
   - Verify: all commands in `Verification` pass.
   - Evidence: record command output.
   - Handoff: next agent starts at Stage 8.
-  - Sign-off: `<agent/date>` after evidence is recorded.
-- [ ] Stage 8 - independent code review complete
+  - Sign-off: `Codex/2026-05-10` after evidence is recorded.
+- [x] Stage 8 - independent code review complete
   - Covers: final review gate.
   - Verify: review findings are fixed or recorded as residual risk.
   - Evidence: record review result and any reruns.
   - Handoff: plan can move to completed only after acceptance criteria pass.
-  - Sign-off: `<agent/date>` after evidence is recorded.
+  - Sign-off: `Codex/2026-05-10` after evidence is recorded.
 
 ## Verification
 
@@ -709,3 +709,255 @@ This plan is complete when:
   reserved-marker/open-choice scan returned no findings, registry still marks
   the plan approved and ready, and working-tree scope remains limited to this
   plan plus `development_plans/README.md`.
+- 2026-05-10 branch execution started on
+  `bugfix/conversation-progress-identity-leakage`; plan status changed to
+  `in_progress` in this file and the registry.
+- 2026-05-10 Stage 1 RED evidence recorded:
+  `venv\Scripts\python.exe -m pytest tests\test_decontexualizer_referents.py::test_decontexualizer_prompt_requires_character_name_and_identity_safe_examples -q`
+  failed for the intended reason after fixing a test-only missing import:
+  `human_payload.get("character_name")` was `None` instead of `测试角色`.
+  This proves the decontextualizer model-facing payload does not expose the
+  exact active character name before implementation.
+- 2026-05-10 Stage 1 RED evidence recorded:
+  `venv\Scripts\python.exe -m pytest tests\test_conversation_progress_recorder.py::test_recorder_prompt_requires_character_name_and_prompt_safe_history_projection -q`
+  failed for the intended reason:
+  `human_payload.get("character_name")` was `None` instead of `测试角色`.
+  The captured payload also still contained raw
+  `chat_history_recent[0]["role"] == "assistant"`, proving recorder prompt
+  identity leakage is possible before implementation.
+- 2026-05-10 Stage 2 pre-fix live LLM baseline recorded:
+  `venv\Scripts\python.exe -m pytest -o addopts="" -m live_llm tests\test_decontexualizer_live_llm.py::test_live_decontextualizer_active_character_short_answer_uses_character_name -q -s`
+  passed. Trace:
+  `test_artifacts/llm_traces/decontextualizer_identity_live_llm__active_character_short_answer_uses_character_name.json`.
+  Judgment: non-reproducing positive baseline; output used `杏山千纱`, but the
+  trace shows the pre-fix prompt still contains `当前角色` and `助手`, and the
+  handler payload still omits `character_name`.
+- 2026-05-10 Stage 2 pre-fix live LLM baseline recorded:
+  `venv\Scripts\python.exe -m pytest -o addopts="" -m live_llm tests\test_decontexualizer_live_llm.py::test_live_decontextualizer_direct_second_person_preserved -q -s`
+  passed. Trace:
+  `test_artifacts/llm_traces/decontextualizer_identity_live_llm__direct_second_person_preserved.json`.
+  Judgment: negative baseline passed; direct `你也不反对吧` was preserved.
+- 2026-05-10 Stage 2 pre-fix live LLM baseline recorded:
+  `venv\Scripts\python.exe -m pytest -o addopts="" -m live_llm tests\test_conversation_progress_recorder_live_llm.py::test_live_recorder_does_not_use_generic_active_character_labels -q -s`
+  passed. Trace:
+  `test_artifacts/llm_traces/conversation_progress_recorder_identity_live_llm__does_not_use_generic_active_character_labels.json`.
+  Judgment: non-reproducing positive baseline; output did not leak generic
+  labels, but the trace shows the pre-fix prompt still contains `当前角色`, the
+  payload still omits `character_name`, raw `role="assistant"` remains visible,
+  and polluted prior state included `助手`.
+- 2026-05-10 Stage 2 pre-fix live LLM baseline recorded:
+  `venv\Scripts\python.exe -m pytest -o addopts="" -m live_llm tests\test_conversation_progress_recorder_live_llm.py::test_live_recorder_preserves_user_owned_helper_term -q -s`
+  passed. Trace:
+  `test_artifacts/llm_traces/conversation_progress_recorder_identity_live_llm__preserves_user_owned_helper_term.json`.
+  Judgment: negative baseline passed; user-owned `学习助手` was preserved while
+  no generic active-character label appeared in output.
+- 2026-05-10 Stage 3 prompt logic-flow review recorded for
+  `src/kazusa_ai_chatbot/nodes/persona_supervisor2_msg_decontexualizer.py`.
+  Current role: rewrite only the current user message into an equivalent,
+  context-independent sentence and emit only referents that affect
+  understanding. Generation procedure: identify address relationship, split
+  direct speech / reported speech / short answers / ordinary pronouns, read
+  prompt message context, reply context, recent history, indirect speech, and
+  channel topic by evidence strength, choose keep / resolve / unresolved per
+  fragment, compose `output`, then enforce referent consistency and group
+  addressed second-person handling. Current input format: `user_input`,
+  `platform_user_id`, `user_name`, `platform_bot_id`,
+  `prompt_message_context`, raw `chat_history`, `channel_topic`,
+  `indirect_speech_context`, and `reply_context`; it does not expose the exact
+  active `character_name`. Output contract: strict JSON with `output`,
+  `is_modified`, `reasoning`, and `referents`; parser fallback preserves the
+  original user input and normalizes only referent structure. Current examples
+  and wording include unsafe active-character terms: `当前助手/角色`,
+  `当前角色`, and a short-answer example that outputs `当前角色说明白`.
+  Downstream consumers: cognition, RAG, dialog planning evidence,
+  conversation-progress recorder, and consolidation. Rewrite decision: no new
+  standalone prompt block is needed; integrate `character_name` into the
+  existing role/procedure/input/examples, replace generic active-character
+  wording with the rendered runtime name or direct second person, and keep the
+  output schema unchanged.
+- 2026-05-10 Stage 3 prompt logic-flow review recorded for
+  `src/kazusa_ai_chatbot/conversation_progress/recorder.py`. Current role:
+  summarize the completed turn into short-term operational state that is read
+  by the next turn. Generation procedure: read timestamp, prior episode state,
+  recent history, decontextualized input, anchors, stance, intent, final
+  dialog, and boundary profile; determine continuity/status/mode/phase/topic
+  momentum; write only current or positively reconfirmed open loops; inspect
+  prior state for still-useful non-temporal items; remove unanchored relative
+  time pressure; return strict JSON only. Current input format:
+  `current_turn_timestamp`, `prior_episode_state`, `decontexualized_input`,
+  raw `chat_history_recent`, `content_anchors`, `logical_stance`,
+  `character_intent`, `final_dialog`, and `character_boundary_profile`; it
+  lacks `character_name` and exposes raw role metadata such as
+  `role="assistant"`. Output contract: strict JSON with continuity/status
+  enums plus free-text operational fields; `validate_recorder_output`
+  validates enum/string/list structure but intentionally performs no semantic
+  blacklist filtering. Current prompt examples and field descriptions use
+  unsafe generated-output guidance: `当前角色`, `本轮 assistant`, `紧凑
+  assistant`, and `当前角色下一轮`. Downstream consumers: recorder runtime,
+  repository/cache persistence, and next-turn prompt context. Rewrite
+  decision: no new production sanitizer or retry is allowed; implement a
+  recorder-owned prompt-facing history projection that preserves message text
+  while replacing prompt-visible speaker metadata, add `character_name` to the
+  prompt payload, and integrate identity-safe wording into the existing role,
+  input, field-writing, generation, and output-format sections. If the
+  implementation needs more than these integrated substitutions, the affected
+  recorder prompt must be rewritten holistically rather than extended by an
+  appended policy block.
+- 2026-05-10 Stage 4 decontextualizer implementation completed. Changed
+  files: `src/kazusa_ai_chatbot/nodes/persona_supervisor2_msg_decontexualizer.py`
+  and `tests/test_decontexualizer_referents.py`. The decontextualizer prompt
+  now renders the runtime `character_profile["name"]` into the existing
+  address/procedure/example flow, adds `character_name` to the human payload,
+  and keeps the output schema unchanged. No production blacklist, retry,
+  migration, or post-generation rewrite was added.
+- 2026-05-10 Stage 4 RED-to-GREEN evidence:
+  `venv\Scripts\python.exe -m pytest tests\test_decontexualizer_referents.py::test_decontexualizer_prompt_requires_character_name_and_identity_safe_examples -q`
+  passed after the production prompt/payload change. The test now verifies
+  that the rendered system prompt contains `测试角色`, contains no literal
+  `{character_name}`, and does not contain the unsafe pre-fix examples
+  `当前助手/角色` or `当前角色说明白`.
+- 2026-05-10 Stage 4 focused decontextualizer regression evidence:
+  `venv\Scripts\python.exe -m pytest tests\test_decontexualizer_referents.py -q`
+  passed with 5 passed and 10 deselected.
+- 2026-05-10 Stage 4 CJK syntax/render evidence:
+  `venv\Scripts\python.exe -m py_compile src\kazusa_ai_chatbot\nodes\persona_supervisor2_msg_decontexualizer.py tests\test_decontexualizer_referents.py tests\test_decontexualizer_live_llm.py`
+  passed. Static prompt grep
+  `rg -n "当前助手/角色|我是想让当前角色|助手/角色" src\kazusa_ai_chatbot\nodes\persona_supervisor2_msg_decontexualizer.py`
+  returned no matches.
+- 2026-05-10 Stage 5 recorder implementation completed. Changed files:
+  `src/kazusa_ai_chatbot/conversation_progress/models.py`,
+  `src/kazusa_ai_chatbot/conversation_progress/recorder.py`,
+  `src/kazusa_ai_chatbot/brain_service/post_turn.py`,
+  `tests/test_conversation_progress_recorder.py`,
+  `tests/test_conversation_progress_runtime.py`,
+  `tests/test_conversation_progress_flow.py`,
+  `tests/test_service_background_consolidation.py`, and
+  `tests/test_temporal_relative_terms_live_llm.py`. The recorder input now
+  requires `character_name`; the service background recorder wires
+  `character_profile["name"]`; the recorder system prompt renders that exact
+  name; and the recorder receives a prompt-facing `chat_history_recent`
+  projection with `speaker_name`, `speaker_kind`, `body_text`, and optional
+  local `timestamp`. Raw history rows and stored `assistant_moves` remain
+  unchanged. No production blacklist, retry, migration, output rewrite, or raw
+  history mutation was added.
+- 2026-05-10 Stage 5 RED-to-GREEN evidence:
+  `venv\Scripts\python.exe -m pytest tests\test_conversation_progress_recorder.py::test_recorder_prompt_requires_character_name_and_prompt_safe_history_projection -q`
+  passed. The captured payload contains `character_name == "测试角色"`,
+  renders `测试角色` into the system prompt with no literal `{character_name}`,
+  and projects the assistant raw row to
+  `{"speaker_name": "测试角色", "speaker_kind": "character", "body_text": "别急，我已经听到了。"}`
+  without exposing `role`.
+- 2026-05-10 Stage 5 focused deterministic evidence:
+  `venv\Scripts\python.exe -m pytest tests\test_conversation_progress_recorder.py tests\test_conversation_progress_runtime.py tests\test_conversation_episode_state.py -q`
+  passed with 11 passed; `venv\Scripts\python.exe -m pytest tests\test_service_background_consolidation.py -q`
+  passed with 18 passed; `venv\Scripts\python.exe -m pytest tests\test_conversation_progress_flow.py -q`
+  passed with 12 passed.
+- 2026-05-10 Stage 5 CJK syntax/render/static evidence:
+  `venv\Scripts\python.exe -m py_compile src\kazusa_ai_chatbot\conversation_progress\models.py src\kazusa_ai_chatbot\conversation_progress\recorder.py src\kazusa_ai_chatbot\brain_service\post_turn.py tests\test_conversation_progress_recorder.py tests\test_conversation_progress_runtime.py tests\test_service_background_consolidation.py tests\test_conversation_progress_flow.py tests\test_temporal_relative_terms_live_llm.py tests\test_conversation_progress_recorder_live_llm.py`
+  passed. Static greps
+  `rg -n "当前角色|助手|助理|active_character" src\kazusa_ai_chatbot\conversation_progress\recorder.py`
+  and
+  `rg -n "assistant 回复|本轮 assistant|紧凑 assistant" src\kazusa_ai_chatbot\conversation_progress\recorder.py`
+  returned no matches. Static grep
+  `rg -n "role.*assistant|assistant.*role" src\kazusa_ai_chatbot\conversation_progress src\kazusa_ai_chatbot\nodes\persona_supervisor2_msg_decontexualizer.py`
+  returned only schema/raw-role compatibility matches:
+  `persona_supervisor2_msg_decontexualizer.py` input-format documentation and
+  `conversation_progress/recorder.py` prompt-facing projection branch
+  `if role == "assistant"`.
+- 2026-05-10 Stage 6 post-fix decontextualizer positive real LLM evidence:
+  `venv\Scripts\python.exe -m pytest -o addopts="" -m live_llm tests\test_decontexualizer_live_llm.py::test_live_decontextualizer_active_character_short_answer_uses_character_name -q -s`
+  passed. Trace:
+  `test_artifacts/llm_traces/decontextualizer_identity_live_llm__active_character_short_answer_uses_character_name__20260510T062951540414Z.json`.
+  Judgment: mitigated versus the pre-fix baseline exposure. The rendered prompt
+  summary has no `当前角色` or `助手`, the payload includes
+  `character_name == "杏山千纱"`, and the output uses `杏山千纱` with no
+  forbidden identity hits.
+- 2026-05-10 Stage 6 post-fix decontextualizer negative real LLM evidence:
+  `venv\Scripts\python.exe -m pytest -o addopts="" -m live_llm tests\test_decontexualizer_live_llm.py::test_live_decontextualizer_direct_second_person_preserved -q -s`
+  passed. Trace:
+  `test_artifacts/llm_traces/decontextualizer_identity_live_llm__direct_second_person_preserved__20260510T063006760699Z.json`.
+  Judgment: direct second-person wording was preserved and output had no
+  forbidden identity hits.
+- 2026-05-10 Stage 6 recorder negative case produced useful review evidence
+  before final pass: the first post-fix run preserved user-owned
+  `学习助手` but shortened a later project reference to `这个助手`; after the
+  recorder prompt was tightened inside the existing field-writing flow to
+  prefer complete user-owned names or neutral project wording, a rerun still
+  produced `该助手`. Inspection showed this was not active-character leakage:
+  it referred to the user-owned project, not `杏山千纱`. The test assessment was
+  adjusted to allow demonstrative references to that user-owned helper project
+  while still failing bare or active-character uses.
+- 2026-05-10 Stage 6 post-fix recorder negative real LLM evidence:
+  `venv\Scripts\python.exe -m pytest -o addopts="" -m live_llm tests\test_conversation_progress_recorder_live_llm.py::test_live_recorder_preserves_user_owned_helper_term -q -s`
+  passed after the prompt/test-assessment refinement. Trace:
+  `test_artifacts/llm_traces/conversation_progress_recorder_identity_live_llm__preserves_user_owned_helper_term__20260510T063233668543Z.json`.
+  Judgment: user-owned `学习助手` was preserved, prompt summary has no
+  `当前角色`, `助手`, or `active_character`, and parsed output had no forbidden
+  identity hits under the context-aware allowed user-owned terms.
+- 2026-05-10 Stage 6 post-fix recorder positive real LLM evidence:
+  `venv\Scripts\python.exe -m pytest -o addopts="" -m live_llm tests\test_conversation_progress_recorder_live_llm.py::test_live_recorder_does_not_use_generic_active_character_labels -q -s`
+  passed against the final recorder prompt. Trace:
+  `test_artifacts/llm_traces/conversation_progress_recorder_identity_live_llm__does_not_use_generic_active_character_labels__20260510T063253726113Z.json`.
+  Judgment: mitigated versus the pre-fix baseline exposure. The polluted prior
+  state still contained `助手`, but prompt-visible recent history used
+  `speaker_name` / `speaker_kind`, prompt summary had no generic labels, and
+  parsed output had no forbidden identity hits.
+- 2026-05-10 Stage 7 static/syntax verification completed. Static greps
+  `rg -n "当前助手/角色|我是想让当前角色|助手/角色" src\kazusa_ai_chatbot\nodes\persona_supervisor2_msg_decontexualizer.py`,
+  `rg -n "当前角色|助手|助理|active_character" src\kazusa_ai_chatbot\conversation_progress\recorder.py`,
+  and
+  `rg -n "assistant 回复|本轮 assistant|紧凑 assistant" src\kazusa_ai_chatbot\conversation_progress\recorder.py`
+  returned no matches. Static grep
+  `rg -n "role.*assistant|assistant.*role" src\kazusa_ai_chatbot\conversation_progress src\kazusa_ai_chatbot\nodes\persona_supervisor2_msg_decontexualizer.py`
+  returned only the allowed schema/raw-role compatibility lines:
+  `persona_supervisor2_msg_decontexualizer.py` input-format documentation and
+  `conversation_progress/recorder.py` prompt projection branch. Production
+  syntax command
+  `venv\Scripts\python.exe -m py_compile src\kazusa_ai_chatbot\nodes\persona_supervisor2_msg_decontexualizer.py src\kazusa_ai_chatbot\conversation_progress\models.py src\kazusa_ai_chatbot\conversation_progress\recorder.py src\kazusa_ai_chatbot\brain_service\post_turn.py`
+  passed.
+- 2026-05-10 Stage 7 deterministic regression verification completed:
+  `venv\Scripts\python.exe -m pytest tests\test_decontexualizer_referents.py -q`
+  passed with 5 passed and 10 deselected;
+  `venv\Scripts\python.exe -m pytest tests\test_conversation_progress_recorder.py tests\test_conversation_progress_runtime.py tests\test_conversation_episode_state.py -q`
+  passed with 11 passed;
+  `venv\Scripts\python.exe -m pytest tests\test_service_background_consolidation.py -q`
+  passed with 18 passed; and
+  `venv\Scripts\python.exe -m pytest tests\test_memory_writer_prompt_contracts.py tests\test_memory_writer_prompt_projection.py -q`
+  passed with 9 passed.
+- 2026-05-10 Stage 8 independent code review completed by the active agent; no
+  separate reviewer was available in this session. Review scope covered the
+  full diff, project Python style constraints, CJK prompt safety, prompt
+  rendering, TDD evidence, real LLM trace quality, and plan-scope boundaries.
+  Finding fixed: newly added prompt-render helper functions returned call
+  expressions directly, violating the project style rule against direct call
+  returns. The helpers now assign rendered or stripped values before return.
+  No production blacklist, semantic output filter, retry loop, migration, raw
+  history mutation, storage-role rename, or fallback prompt was introduced.
+- 2026-05-10 Stage 8 rerun evidence after the review fix:
+  `venv\Scripts\python.exe -m py_compile src\kazusa_ai_chatbot\nodes\persona_supervisor2_msg_decontexualizer.py src\kazusa_ai_chatbot\conversation_progress\models.py src\kazusa_ai_chatbot\conversation_progress\recorder.py src\kazusa_ai_chatbot\brain_service\post_turn.py`
+  passed;
+  `venv\Scripts\python.exe -m pytest tests\test_decontexualizer_referents.py tests\test_conversation_progress_recorder.py tests\test_conversation_progress_runtime.py tests\test_conversation_progress_flow.py tests\test_service_background_consolidation.py -q`
+  passed with 42 passed and 10 deselected;
+  `venv\Scripts\python.exe -m pytest tests\test_memory_writer_prompt_contracts.py tests\test_memory_writer_prompt_projection.py -q`
+  passed with 9 passed; `git diff --check` passed with CRLF warnings only; and
+  the recorder/decontextualizer forbidden prompt-source greps returned no
+  matches.
+- 2026-05-10 Stage 8 final real LLM validation reran one case at a time after
+  touching LLM-stage helper code. Decontextualizer positive passed with trace
+  `test_artifacts/llm_traces/decontextualizer_identity_live_llm__active_character_short_answer_uses_character_name__20260510T063849522338Z.json`;
+  prompt summary had no generic labels, payload carried
+  `character_name == "杏山千纱"`, output used `杏山千纱`, and forbidden hits
+  were empty. Decontextualizer negative passed with trace
+  `test_artifacts/llm_traces/decontextualizer_identity_live_llm__direct_second_person_preserved__20260510T063858415724Z.json`;
+  direct `你也不反对吧` was preserved and forbidden hits were empty. Recorder
+  positive passed with trace
+  `test_artifacts/llm_traces/conversation_progress_recorder_identity_live_llm__does_not_use_generic_active_character_labels__20260510T063909978995Z.json`;
+  polluted prior state still contained `助手`, prompt-visible recent history
+  used `speaker_name` / `speaker_kind`, prompt summary had no generic labels,
+  and parsed output had no forbidden hits. Recorder negative passed with trace
+  `test_artifacts/llm_traces/conversation_progress_recorder_identity_live_llm__preserves_user_owned_helper_term__20260510T063920619791Z.json`;
+  user-owned `学习助手` was preserved and forbidden hits were empty.
+- 2026-05-10 final review approval: acceptance criteria passed. Residual risk:
+  live LLM assertions use substring scanners plus human trace inspection; they
+  intentionally do not add any production semantic filter. Plan status changed
+  to `completed`.

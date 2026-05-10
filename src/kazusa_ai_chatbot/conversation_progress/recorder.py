@@ -33,13 +33,13 @@ from kazusa_ai_chatbot.utils import get_llm, log_preview, parse_llm_json_output
 logger = logging.getLogger(__name__)
 
 _RECORDER_PROMPT = '''\
-你是当前角色的短期对话进度记录器。你的输出会直接成为下一轮对话的活跃操作状态。
+你是 {character_name} 的短期对话进度记录器。你的输出会直接成为下一轮对话的活跃操作状态。
 
 # 核心优先级
 1. 信息少一点也可以；不要把旧的、不确定的、相对时间的事项污染到下一轮。
 2. `prior_episode_state` 只是背景，不是必须继承的待办清单。
 3. 本轮用户、`content_anchors` 或 `final_dialog` 没有正向重申的旧时间性 open loop，默认删除。
-4. 不生成角色下一轮台词，不写日记，不写长期记忆，不复制完整 assistant 回复。
+4. 不生成下一轮台词，不写日记，不写长期记忆，不复制完整回复。
 
 # 语言与枚举
 - 自由文本字段使用简体中文；schema key、枚举值、ID、URL、代码、命令保持原样。
@@ -48,8 +48,9 @@ _RECORDER_PROMPT = '''\
 
 # 输入读取
 - `current_turn_timestamp` 是本轮记录时的本地时间。
+- `character_name` 是本轮人设名；自由文本确实需要点名时使用 `{character_name}`。
 - `prior_episode_state` 是旧操作状态；它可能已经被旧 prompt 污染，所以不能直接相信。
-- `chat_history_recent` 只用于判断本轮附近发生了什么。
+- `chat_history_recent` 只用于判断本轮附近发生了什么；用 `speaker_name` 和 `speaker_kind` 判断谁说话。
 - `decontexualized_input`、`content_anchors`、`logical_stance`、`character_intent`、`final_dialog` 决定本轮真正发生的事。
 - `character_boundary_profile` 只影响推进节奏和边界恢复，不制造新事实。
 
@@ -62,7 +63,10 @@ _RECORDER_PROMPT = '''\
 - `current_thread`: 本轮正在谈什么；不要夹带旧时间性承诺。
 - `user_goal` / `current_blocker`: 只有本轮明确有目标或阻塞点才写，否则空字符串。
 - `user_state_updates`: 只写本轮后仍有用的用户状态观察。
-- `assistant_moves`: 写本轮 assistant 的紧凑话语动作。
+- 自由文本需要点名本轮发言对象时，使用 `{character_name}`；不需要点名时优先使用无主语动作标签。
+- 不把机器端标签、内部枚举名或 schema key 当作说话人名字写进自由文本。
+- 用户项目名、产品名、文件名、频道名等专名可以保留；后续提及时优先保留完整专名，或改成“该项目/这个项目”等中性指称，不要截成“这个/该 + 末尾类名”。
+- `assistant_moves`: 写本轮的紧凑话语动作标签；保留字段名，值里不要写机器端标签。
 - `overused_moves`: 写过度重复、下一轮应避免的动作。
 - `open_loops`: 默认空数组；只写本轮明确产生或本轮正向重申的未闭合事项。
 - `resolved_threads`: 只写本轮处理完的事项；不要复述旧相对时间细节。
@@ -98,13 +102,16 @@ _RECORDER_PROMPT = '''\
 # 输入格式
 {
     "current_turn_timestamp": "本轮记录时的本地时间，YYYY-MM-DD HH:MM",
+    "character_name": "本轮人设名",
     "prior_episode_state": "上一轮紧凑操作状态，或 null；可能包含 created_at、updated_at、expires_at 时间字段",
     "decontexualized_input": "用户本轮消息经去上下文化后的内容",
-    "chat_history_recent": ["用于判断局部连续性的近期消息"],
+    "chat_history_recent": [
+        {"speaker_name": "用户显示名或 {character_name}", "speaker_kind": "user | character | other", "body_text": "消息文本", "timestamp": "可选本地 YYYY-MM-DD HH:MM"}
+    ],
     "content_anchors": ["刚结束回复使用过的内容锚点"],
     "logical_stance": "CONFIRM | REFUSE | TENTATIVE | DIVERGE | CHALLENGE",
     "character_intent": "PROVIDE | BANTAR | REJECT | EVADE | CONFRONT | DISMISS | CLARIFY",
-    "final_dialog": ["当前角色本轮最终实际发出的回复文本"],
+    "final_dialog": ["本轮最终实际发出的回复文本"],
     "character_boundary_profile": {
         "boundary_recovery_description": "边界恢复节奏描述",
         "self_integrity_description": "自我定义稳定性描述",
@@ -125,13 +132,13 @@ _RECORDER_PROMPT = '''\
     "user_goal": "可选目标；没有则为空字符串",
     "current_blocker": "可选阻塞点；没有则为空字符串",
     "user_state_updates": ["紧凑用户状态观察"],
-    "assistant_moves": ["紧凑 assistant 话语动作标签"],
-    "overused_moves": ["已经过度重复的 assistant 话语动作标签"],
+    "assistant_moves": ["紧凑话语动作标签"],
+    "overused_moves": ["已经过度重复的话语动作标签"],
     "open_loops": ["本轮明确产生或正向重申的未闭合事项；通常可以是空数组"],
     "resolved_threads": ["本轮已处理事项"],
     "avoid_reopening": ["除非用户主动重开否则不要拖回来的旧事项"],
     "emotional_trajectory": "一行情绪走向",
-    "next_affordances": ["当前角色下一轮自然可承接的动作"],
+    "next_affordances": ["下一轮自然可承接的动作"],
     "progression_guidance": "给下一轮的一条短推进指令"
 }
 '''
@@ -143,6 +150,76 @@ _recorder_llm = get_llm(
     base_url=CONSOLIDATION_LLM_BASE_URL,
     api_key=CONSOLIDATION_LLM_API_KEY,
 )
+
+
+def _render_recorder_prompt(character_name: str) -> str:
+    """Render recorder prompt with exact active character identity."""
+
+    rendered_prompt = _RECORDER_PROMPT.replace("{character_name}", character_name)
+    return rendered_prompt
+
+
+def _project_recorder_chat_history(
+    chat_history_recent: list[dict],
+    *,
+    character_name: str,
+) -> list[dict]:
+    """Build recorder-facing chat history without raw machine role labels."""
+
+    projected_rows: list[dict] = []
+    for row in chat_history_recent:
+        projected_rows.append(
+            _project_recorder_chat_history_row(
+                row,
+                character_name=character_name,
+            )
+        )
+    return projected_rows
+
+
+def _project_recorder_chat_history_row(
+    row: dict,
+    *,
+    character_name: str,
+) -> dict:
+    """Project one recorder history row while preserving message text."""
+
+    role = row.get("role")
+    display_name = row.get("display_name")
+    if role == "assistant":
+        speaker_name = character_name
+        speaker_kind = "character"
+    elif role == "user":
+        speaker_name = _prompt_speaker_name(display_name, default="user")
+        speaker_kind = "user"
+    else:
+        speaker_name = _prompt_speaker_name(display_name, default="other")
+        speaker_kind = "other"
+
+    body_text = row.get("body_text")
+    if body_text is None:
+        body_text = row.get("content")
+    if not isinstance(body_text, str):
+        raise ValueError("chat_history_recent body_text must be a string")
+
+    projected_row = {
+        "speaker_name": speaker_name,
+        "speaker_kind": speaker_kind,
+        "body_text": body_text,
+    }
+    timestamp = format_timestamp_for_llm(row.get("timestamp"))
+    if timestamp:
+        projected_row["timestamp"] = timestamp
+    return projected_row
+
+
+def _prompt_speaker_name(value: Any, *, default: str) -> str:
+    """Return a compact speaker name for prompt-facing history."""
+
+    if isinstance(value, str) and value.strip():
+        speaker_name = value.strip()
+        return speaker_name
+    return default
 
 
 async def record_with_llm(record_input: ConversationProgressRecordInput) -> dict:
@@ -169,15 +246,20 @@ async def record_with_llm(record_input: ConversationProgressRecordInput) -> dict
             relationship_priority,
         ),
     }
+    character_name = record_input["character_name"]
     human_payload = {
         "current_turn_timestamp": format_timestamp_for_llm(
             record_input["timestamp"]
         ),
+        "character_name": character_name,
         "prior_episode_state": build_recorder_prior_state(
             record_input["prior_episode_state"],
         ),
         "decontexualized_input": record_input["decontexualized_input"],
-        "chat_history_recent": record_input["chat_history_recent"],
+        "chat_history_recent": _project_recorder_chat_history(
+            record_input["chat_history_recent"],
+            character_name=character_name,
+        ),
         "content_anchors": record_input["content_anchors"],
         "logical_stance": record_input["logical_stance"],
         "character_intent": record_input["character_intent"],
@@ -196,7 +278,9 @@ async def record_with_llm(record_input: ConversationProgressRecordInput) -> dict
         f"Conversation progress recorder input: "
         f"{log_context} payload={log_preview(human_payload)}"
     )
-    system_prompt = SystemMessage(content=_RECORDER_PROMPT)
+    system_prompt = SystemMessage(
+        content=_render_recorder_prompt(character_name),
+    )
     human_message = HumanMessage(
         content=json.dumps(human_payload, ensure_ascii=False),
     )
@@ -214,14 +298,18 @@ async def record_with_llm(record_input: ConversationProgressRecordInput) -> dict
     return validated
 
 
-def render_recorder_prompt() -> str:
+def render_recorder_prompt(character_name: str) -> str:
     """Return the recorder system prompt for render checks.
+
+    Args:
+        character_name: Exact active character name to render.
 
     Returns:
         Recorder prompt text.
     """
 
-    return _RECORDER_PROMPT
+    rendered_prompt = _render_recorder_prompt(character_name)
+    return rendered_prompt
 
 
 _ENTRY_LIST_FIELDS = (

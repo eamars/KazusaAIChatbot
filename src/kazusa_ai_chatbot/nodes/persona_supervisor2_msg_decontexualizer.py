@@ -41,8 +41,8 @@ _MSG_DECONTEXUALIZER_PROMPT = '''\
 # 处理流程
 1. 先确定本轮地址关系：
    - `user_name` 是当前发言人。
-   - 当前角色是当前助手/角色。
-   - `prompt_message_context.mentions` 或 `addressed_to_global_user_ids` 明确指向当前角色以外的群成员时，该群成员是群聊指向对象。
+   - `character_name` 是本轮用户直接对话的人设名；当必须显式写出该对象时，使用 `{character_name}`。
+   - `prompt_message_context.mentions` 或 `addressed_to_global_user_ids` 明确指向 `{character_name}` 以外的群成员时，该群成员是群聊指向对象。
 2. 再拆分 `user_input`：
    - 当前用户直接表达：当前发言人自己说的话。
    - 转述内容：当前发言人说某个可见说话人说过、问过、发过的内容。
@@ -64,7 +64,7 @@ _MSG_DECONTEXUALIZER_PROMPT = '''\
 
 # 代词规则
 - 存在群聊指向对象时，当前用户直接表达里的「你 / 你的 / 你自己」动作是解析，统一改成该群成员名；范围覆盖整条 `user_input` 的后续分句。
-- 不存在群聊指向对象时，当前用户直接对当前角色说的「你 / 你的 / 你自己」动作是保持，不写入 `referents`。
+- 不存在群聊指向对象时，当前用户直接对 `{character_name}` 说的「你 / 你的 / 你自己」动作是保持，不写入 `referents`。
 - 当前用户直接表达里的自称「我 / 我的 / 我们 / 我们的」动作是保持，不写入 `referents`。
 - 转述内容里的「我 / 我的」属于被转述说话人。该说话人必须能从转述引导语、引号内容、reply_context 或 chat_history 明确确定；动作是解析。结构为「A 说 X，Y」时，X 是转述内容，Y 回到当前用户的直接表达，除非 Y 明确继续引用 A。当前用户自己的「我 / 我的」仍保持。
 - 转述片段里的「我的 + 名词」按被转述说话人的所有格处理，输出为「A 的 + 名词」；`user_name` 只用于当前用户直接表达片段，不用于转述片段 X。
@@ -81,13 +81,14 @@ _MSG_DECONTEXUALIZER_PROMPT = '''\
 
 # 正向模式
 - 直接对话：`user_input = "我的目标很简单，你也不反对吧"` -> 保持原句，`referents = []`。
-- 群聊提及指向群成员：`user_input = "她说她不喜欢你，你自己心里有数"` -> 把「她」改成说话的当前角色，把所有指向被提及群友的「你 / 你自己」改成该群友。
+- 群聊提及指向群成员：`user_input = "她说她不喜欢你，你自己心里有数"` -> 把「她」改成可见说话人名，把所有指向被提及群友的「你 / 你自己」改成该群友。
 - 转述可见说话人：最近 A 说「我的琴谱在柜子最上层」，`user_input = "A 刚才说我的琴谱在柜子最上层，我明天帮她拿"` -> `output = "A 刚才说 A 的琴谱在柜子最上层，我明天帮 A 拿"`。
-- 回复短答：`reply_context.reply_excerpt = "你是想让我说明白对你的看法吗？"` 且 `user_input = "是的"` -> `output = "是的，我是想让当前角色说明白对我的看法"`。
+- 回复短答：`reply_context.reply_excerpt = "你是想让我说明白对你的看法吗？"` 且 `user_input = "是的"` -> `output = "是的，我是想让{character_name}说明白对我的看法"`。
 - 缺失对象：`user_input = "这些是什么意思？"` 且没有可见对象 -> 保持原句，并输出 `{"phrase": "这些", "referent_role": "object", "status": "unresolved"}`。
 
 # 输入格式
 {
+    "character_name": "string",
     "user_input": "string",
     "platform_user_id": "string",
     "user_name": "string",
@@ -126,6 +127,16 @@ _MSG_DECONTEXUALIZER_PROMPT = '''\
 '''
 
 
+def _render_msg_decontexualizer_prompt(character_name: str) -> str:
+    """Render the decontextualizer prompt with active character identity."""
+
+    rendered_prompt = _MSG_DECONTEXUALIZER_PROMPT.replace(
+        "{character_name}",
+        character_name,
+    )
+    return rendered_prompt
+
+
 async def call_msg_decontexualizer(state: GlobalPersonaState) -> dict:
     """This agent substitude relative message with concrete information
     
@@ -134,14 +145,17 @@ async def call_msg_decontexualizer(state: GlobalPersonaState) -> dict:
         output: "I saw the person mentioned in the visible context yesterday"
     
     """
-    system_prompt = SystemMessage(content=_MSG_DECONTEXUALIZER_PROMPT)
-
     # get key attributes
     user_name = state["user_name"]
     platform_user_id = state["platform_user_id"]
     user_input = state["user_input"]
+    character_name = state["character_profile"]["name"]
+    system_prompt = SystemMessage(
+        content=_render_msg_decontexualizer_prompt(character_name),
+    )
 
     input_msg = {
+        "character_name": character_name,
         "user_input": user_input,
         "platform_user_id": platform_user_id,
         "user_name": user_name,

@@ -704,6 +704,7 @@ async def test_progress_background_passes_character_boundary_profile(monkeypatch
 
     record_turn_progress.assert_awaited_once()
     record_input = record_turn_progress.await_args.kwargs["record_input"]
+    assert record_input["character_name"] == "Character"
     assert record_input["boundary_profile"] == boundary_profile
 
 

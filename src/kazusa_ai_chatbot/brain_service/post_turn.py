@@ -150,6 +150,7 @@ async def run_conversation_progress_record_background(
     record_input: ConversationProgressRecordInput = {
         "scope": scope,
         "timestamp": state["timestamp"],
+        "character_name": character_profile["name"],
         "prior_episode_state": state.get("conversation_episode_state"),
         "decontexualized_input": state["decontexualized_input"],
         "chat_history_recent": state["chat_history_recent"],
@@ -161,6 +162,7 @@ async def run_conversation_progress_record_background(
     }
     record_preview = {
         "timestamp": record_input["timestamp"],
+        "character_name": record_input["character_name"],
         "prior_episode_state": record_input["prior_episode_state"],
         "decontexualized_input": record_input["decontexualized_input"],
         "chat_history_recent": record_input["chat_history_recent"],

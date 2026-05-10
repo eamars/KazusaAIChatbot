@@ -70,6 +70,7 @@ async def test_runtime_record_writes_and_updates_cache(monkeypatch) -> None:
         record_input={
             "scope": scope,
             "timestamp": "2026-04-28T04:00:00+00:00",
+            "character_name": "Character",
             "prior_episode_state": None,
             "decontexualized_input": "what is the third point?",
             "chat_history_recent": [],
@@ -116,6 +117,7 @@ async def test_runtime_record_does_not_cache_stale_write(monkeypatch) -> None:
         record_input={
             "scope": ConversationProgressScope("qq", "channel-1", "user-1"),
             "timestamp": "2026-04-28T04:00:00+00:00",
+            "character_name": "Character",
             "prior_episode_state": None,
             "decontexualized_input": "hello",
             "chat_history_recent": [],

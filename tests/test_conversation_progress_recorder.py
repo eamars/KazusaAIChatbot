@@ -87,6 +87,7 @@ def _record_input(
     record_input: ConversationProgressRecordInput = {
         "scope": ConversationProgressScope("qq", "channel-1", "user-1"),
         "timestamp": "2026-05-01T04:00:00+00:00",
+        "character_name": "TestCharacter",
         "prior_episode_state": None,
         "decontexualized_input": "I meant the other thing.",
         "chat_history_recent": [],
@@ -102,12 +103,53 @@ def _record_input(
 def test_render_recorder_prompt_requires_absolute_or_omit_temporal_state() -> None:
     """Recorder prompt declares producer-owned temporal grounding."""
 
-    prompt = recorder.render_recorder_prompt()
+    prompt = recorder.render_recorder_prompt("测试角色")
 
+    assert "测试角色" in prompt
+    assert "{character_name}" not in prompt
     assert "直接成为下一轮对话的活跃操作状态" in prompt
     assert "默认删除" in prompt
     assert "不要把旧的、不确定的、相对时间的事项污染到下一轮" in prompt
+    assert "用户项目名、产品名、文件名、频道名等专名可以保留" in prompt
     assert "请务必返回合法的 JSON 字符串" in prompt
+    assert "当前角色" not in prompt
+    assert "紧凑 assistant" not in prompt
+
+
+@pytest.mark.asyncio
+async def test_recorder_prompt_requires_character_name_and_prompt_safe_history_projection(
+    monkeypatch,
+) -> None:
+    """Recorder prompt payload should expose character identity without raw roles."""
+
+    fake_llm = _CapturingLLM(_VALID_RECORDER_OUTPUT)
+    monkeypatch.setattr(recorder, "_recorder_llm", fake_llm)
+    record_input = _record_input(_BOUNDARY_PROFILE)
+    record_input["character_name"] = '测试角色'
+    record_input["chat_history_recent"] = [
+        {
+            "role": "assistant",
+            "display_name": "助手",
+            "body_text": '别急，我已经听到了。',
+        }
+    ]
+
+    await recorder.record_with_llm(record_input)
+
+    system_prompt = fake_llm.messages[0].content
+    human_payload = json.loads(fake_llm.messages[1].content)
+    projected_history = human_payload["chat_history_recent"]
+    assert human_payload.get("character_name") == '测试角色'
+    assert '测试角色' in system_prompt
+    assert '{character_name}' not in system_prompt
+    assert projected_history == [
+        {
+            "speaker_name": '测试角色',
+            "speaker_kind": "character",
+            "body_text": '别急，我已经听到了。',
+        }
+    ]
+    assert "role" not in projected_history[0]
 
 
 @pytest.mark.asyncio

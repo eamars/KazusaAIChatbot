@@ -352,10 +352,10 @@ def test_projection_suppresses_malformed_legacy_shapes() -> None:
 def test_recorder_prompt_mentions_phase2_flow_contract() -> None:
     """Rendered recorder prompt contains the Phase 2 flow fields."""
 
-    prompt = recorder.render_recorder_prompt()
+    prompt = recorder.render_recorder_prompt("Character")
 
     assert "conversation_mode" in prompt
     assert "episode_phase" in prompt
     assert "topic_momentum" in prompt
     assert "next_affordances" in prompt
-    assert "不生成角色下一轮台词" in prompt
+    assert "不生成下一轮台词" in prompt

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 from time import perf_counter
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -19,6 +20,20 @@ from tests.llm_trace import write_llm_trace
 logger = logging.getLogger(__name__)
 
 
+class _CapturingLLM:
+    """Capture decontextualizer messages while returning a fixed JSON payload."""
+
+    def __init__(self, payload: str):
+        self.payload = payload
+        self.messages = []
+
+    async def ainvoke(self, messages):
+        self.messages = messages
+        response = MagicMock()
+        response.content = self.payload
+        return response
+
+
 def _base_state() -> dict:
     """Build a minimal decontextualizer state fixture.
 
@@ -31,6 +46,7 @@ def _base_state() -> dict:
         "user_name": "ReferentUser",
         "platform_user_id": "referent-user",
         "platform_bot_id": "referent-bot",
+        "character_profile": {"name": "ReferentCharacter"},
         "message_envelope": {
             "body_text": "这些是什么意思？",
             "raw_wire_text": "这些是什么意思？",
@@ -55,6 +71,36 @@ def _base_state() -> dict:
         "reply_context": {},
     }
     return state
+
+
+@pytest.mark.asyncio
+async def test_decontexualizer_prompt_requires_character_name_and_identity_safe_examples(
+    monkeypatch,
+) -> None:
+    """Decontextualizer prompt input should expose the exact active character."""
+
+    llm_payload = (
+        '{"output": "是的", "reasoning": "identity contract check", '
+        '"is_modified": false, "referents": []}'
+    )
+    fake_llm = _CapturingLLM(llm_payload)
+    monkeypatch.setattr(
+        "kazusa_ai_chatbot.nodes.persona_supervisor2_msg_decontexualizer."
+        "_msg_decontexualizer_llm",
+        fake_llm,
+    )
+    state = _base_state()
+    state["character_profile"] = {"name": '测试角色'}
+
+    await call_msg_decontexualizer(state)
+
+    system_prompt = fake_llm.messages[0].content
+    human_payload = json.loads(fake_llm.messages[1].content)
+    assert human_payload.get("character_name") == '测试角色'
+    assert '测试角色' in system_prompt
+    assert '{character_name}' not in system_prompt
+    assert '当前助手/角色' not in system_prompt
+    assert '当前角色说明白' not in system_prompt
 
 
 async def _skip_if_llm_unavailable() -> None:
