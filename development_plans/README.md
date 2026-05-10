@@ -49,7 +49,7 @@ long_term/todo.md
 | [multi_source_cognition_architecture_stage_07_reflection_trigger_cognition_dry_run_plan.md](active/short_term/multi_source_cognition_architecture_stage_07_reflection_trigger_cognition_dry_run_plan.md) | completed | completed |
 | [multi_source_cognition_architecture_stage_08_internal_thought_cognition_dry_run_plan.md](active/short_term/multi_source_cognition_architecture_stage_08_internal_thought_cognition_dry_run_plan.md) | completed | completed |
 | [multi_source_cognition_architecture_stage_09_multimodal_cognitive_input_sources_plan.md](active/short_term/multi_source_cognition_architecture_stage_09_multimodal_cognitive_input_sources_plan.md) | completed | completed |
-| [multi_source_cognition_architecture_stage_10_permissioned_proactive_output_plan.md](active/short_term/multi_source_cognition_architecture_stage_10_permissioned_proactive_output_plan.md) | approved | ready |
+| [multi_source_cognition_architecture_stage_10_permissioned_proactive_output_plan.md](active/short_term/multi_source_cognition_architecture_stage_10_permissioned_proactive_output_plan.md) | completed | completed |
 | [reflection_driven_character_state_evolution_plan.md](active/short_term/reflection_driven_character_state_evolution_plan.md) | draft | deferred |
 
 ## Active Bugfix Plans

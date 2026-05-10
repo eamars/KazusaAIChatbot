@@ -6,7 +6,7 @@
   approved cognition preview into deterministic permission decisions, dry-run
   outbox records, and fake-adapter transport audit records.
 - Plan class: high_risk_migration
-- Status: approved
+- Status: completed
 - Runtime behavior change: none. Stage 10 does not register a background
   worker, create a MongoDB collection, call the scheduler, call the dispatcher,
   or send through a real adapter.
@@ -27,8 +27,9 @@
 Parent plan:
 `development_plans/active/short_term/multi_source_cognition_architecture_plan.md`
 
-Lifecycle: Stage 09 is completed and merged. This plan is approved for a
-feature branch forked from post-Stage-09 `main`.
+Lifecycle: Stage 10 implementation is completed on branch
+`stage-10-permissioned-proactive-output` with deterministic verification and
+independent code review recorded below.
 
 ## Context
 
@@ -525,26 +526,29 @@ Do not catch adapter exceptions in Stage 10.
   - Verify: final executable wording is complete; registry and parent ledger mark Stage 10
     approved.
   - Evidence/sign-off: `Codex / 2026-05-10` after independent plan review.
-- [ ] Stage 3 - permission policy implemented.
+- [x] Stage 3 - permission policy implemented.
   - Covers: Steps 2-4.
   - Verify: policy unit tests pass after expected import failure.
-  - Evidence: record red/green output.
+  - Evidence/sign-off: `Codex / 2026-05-10` after expected import failure for
+    missing `kazusa_ai_chatbot.proactive_output` and green policy tests with
+    `7 passed`.
   - Handoff: reread this plan, then start Stage 4.
-  - Sign-off: record agent and date after verification.
-- [ ] Stage 4 - outbox dry-run and fake transport implemented.
+- [x] Stage 4 - outbox dry-run and fake transport implemented.
   - Covers: Steps 5-8.
   - Verify: outbox tests pass after expected import failure; dry-run records do
     not call adapters.
-  - Evidence: command output recorded.
+  - Evidence/sign-off: `Codex / 2026-05-10` after expected import failure for
+    missing `kazusa_ai_chatbot.proactive_output.outbox` and green outbox tests
+    with `5 passed`.
   - Handoff: reread this plan, then start Stage 5.
-  - Sign-off: record agent and date after verification.
-- [ ] Stage 5 - full verification and independent review complete.
+- [x] Stage 5 - full verification and independent review complete.
   - Covers: Steps 9-10.
   - Verify: every Verification command passes and independent code review is
     recorded.
-  - Evidence: command output and review result recorded.
+  - Evidence/sign-off: `Codex / 2026-05-10` after static compile, static
+    greps, focused tests, prior-stage gates, full suite, and independent code
+    review passed.
   - Handoff: no later stage in this parent plan.
-  - Sign-off: record agent and date after verification.
 
 ## Verification
 
@@ -579,7 +583,8 @@ Do not catch adapter exceptions in Stage 10.
 - `venv\Scripts\python.exe -m pytest tests\test_multi_source_cognition_stage_09_multimodal_input_sources.py`
 - `venv\Scripts\python.exe -m pytest tests\test_multi_source_cognition_stage_08_internal_thought_dry_run.py`
 - `venv\Scripts\python.exe -m pytest tests\test_multi_source_cognition_stage_07_reflection_dry_run.py`
-- `venv\Scripts\python.exe -m pytest tests\test_multi_source_cognition_stage_06_consolidator_per_write_origin_policy.py`
+- `venv\Scripts\python.exe -m pytest tests\test_consolidation_origin_policy.py`
+- `venv\Scripts\python.exe -m pytest tests\test_consolidator_origin_policy_db_writer.py`
 - `venv\Scripts\python.exe -m pytest tests\test_multi_source_cognition_stage_00_regression_baseline.py`
 - `venv\Scripts\python.exe -m pytest`
 
@@ -685,18 +690,61 @@ calls, direct runtime adapter registration, or hidden transport sends.
 
 ## Execution Evidence
 
-Record after implementation:
-
-- Stage 09 evidence reread:
-- Runtime inspection:
-- Branch:
-- Commit:
+- Stage 09 evidence reread: branch
+  `stage-09-multimodal-cognitive-input-sources`; implementation commit
+  `566e6eb`; evidence/lifecycle commit `9de93fe`; focused Stage 09 tests
+  `15 passed`; Stage 00 `11 passed`; Stage 03 `36 passed`; Stage 06 `9 passed`;
+  Stage 07 `14 passed`; Stage 08 `26 passed`.
+- Runtime inspection: inspected scheduler, dispatcher, adapter protocol,
+  delivery receipt, conversation persistence, and service adapter registration
+  files named in `Runtime Inspection`; read-only DB exports written to
+  `test_artifacts\stage10_scheduled_events_sample.json` and
+  `test_artifacts\stage10_delivery_rows_sample.json` and left uncommitted.
+- Branch: `stage-10-permissioned-proactive-output`.
+- Commit: implementation commit `680a6ca`.
 - Static compile:
+  `venv\Scripts\python.exe -m py_compile src\kazusa_ai_chatbot\proactive_output\__init__.py src\kazusa_ai_chatbot\proactive_output\contracts.py src\kazusa_ai_chatbot\proactive_output\policy.py src\kazusa_ai_chatbot\proactive_output\outbox.py tests\test_multi_source_cognition_stage_10_proactive_policy.py tests\test_multi_source_cognition_stage_10_proactive_outbox.py`
+  passed.
 - Static greps:
+  - scheduler/dispatcher/persistence forbidden-call grep: zero matches.
+  - service/scheduler/db/dispatcher proactive runtime-import grep: zero
+    matches.
+  - `send_message` grep: only
+    `src\kazusa_ai_chatbot\proactive_output\outbox.py` and
+    `tests\test_multi_source_cognition_stage_10_proactive_outbox.py` matched.
+  - `git diff --check`: passed.
 - Focused tests:
+  - policy test red: expected collection failure for missing
+    `kazusa_ai_chatbot.proactive_output`.
+  - outbox test red: expected collection failure for missing
+    `kazusa_ai_chatbot.proactive_output.outbox`.
+  - `venv\Scripts\python.exe -m pytest tests\test_multi_source_cognition_stage_10_proactive_policy.py`:
+    `7 passed`.
+  - `venv\Scripts\python.exe -m pytest tests\test_multi_source_cognition_stage_10_proactive_outbox.py`:
+    `5 passed`.
 - Prior stage regression gates:
-- Full suite:
-- Independent code review:
-- Completion diff review:
-- Lifecycle records:
-- Sign-off:
+  - `tests\test_multi_source_cognition_stage_09_multimodal_input_sources.py`:
+    `15 passed`.
+  - `tests\test_multi_source_cognition_stage_08_internal_thought_dry_run.py`:
+    `26 passed`.
+  - `tests\test_multi_source_cognition_stage_07_reflection_dry_run.py`:
+    `14 passed`.
+  - stale Stage 06 filename in this plan failed with file-not-found, then the
+    plan was corrected to the real Stage 06 gates.
+  - `tests\test_consolidation_origin_policy.py`: `5 passed`.
+  - `tests\test_consolidator_origin_policy_db_writer.py`: `4 passed`.
+  - `tests\test_multi_source_cognition_stage_00_regression_baseline.py`:
+    `11 passed`.
+- Full suite: `venv\Scripts\python.exe -m pytest` passed with `974 passed,
+  217 deselected`.
+- Independent code review: checked py-style, test style, plan alignment, and
+  design risk. One issue found and fixed: explicit module public surfaces were
+  added with `__all__`, and an unnecessary `Any` cast in the outbox test helper
+  was removed. Reran compile, focused tests, and static greps after the fix.
+- Completion diff review: Change Surface contains only the approved
+  `proactive_output` package, two Stage 10 test files, this plan, the parent
+  ledger, and the registry. No service, scheduler, DB, dispatcher, RAG,
+  cognition prompt, or consolidation runtime files were modified.
+- Lifecycle records: this plan status set to `completed`; parent ledger row set
+  to `completed`; registry row set to `completed | completed`.
+- Sign-off: `Codex / 2026-05-10`.
