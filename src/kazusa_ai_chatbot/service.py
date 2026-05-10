@@ -27,6 +27,7 @@ from kazusa_ai_chatbot.config import (
 from kazusa_ai_chatbot.cognition_episode import (
     CognitiveEpisode,
     build_text_chat_cognitive_episode,
+    build_text_chat_media_description_rows,
 )
 from kazusa_ai_chatbot.conversation_progress import (
     ConversationProgressScope,
@@ -601,15 +602,28 @@ async def _process_queued_chat_item(item: QueuedChatItem) -> None:
             )
             for attachment in queued_envelope["attachments"]:
                 media_type = attachment.get("media_type", "")
-                if not media_type.startswith("image/"):
-                    continue
                 base64_data = attachment.get("base64_data", "")
-                if not base64_data:
+                description = attachment.get("description", "")
+                if not isinstance(media_type, str):
+                    continue
+                if not isinstance(base64_data, str):
+                    base64_data = ""
+                if not isinstance(description, str):
+                    description = ""
+                has_image_payload = (
+                    media_type.startswith("image/")
+                    and bool(base64_data or description)
+                )
+                has_audio_description = (
+                    media_type.startswith("audio/")
+                    and bool(description)
+                )
+                if not has_image_payload and not has_audio_description:
                     continue
                 multimedia_input.append({
                     "content_type": media_type,
                     "base64_data": base64_data,
-                    "description": attachment.get("description", ""),
+                    "description": description,
                 })
 
         history = await get_conversation_history(
@@ -659,7 +673,7 @@ async def _process_queued_chat_item(item: QueuedChatItem) -> None:
             character_global_user_id,
         )
 
-        logger.debug(f'Chat request: platform={req.platform} channel={req.platform_channel_id or "<dm>"} message={req.platform_message_id or "<none>"} user={req.platform_user_id} global_user={global_user_id} content_type={req.content_type} attachments={len(message_envelope["attachments"])} image_attachments={len(multimedia_input)} history_wide={len(chat_history_wide)} history_recent={len(chat_history_recent)} reply_context={log_preview(reply_context)} debug_modes={active_flags} collapsed={is_collapsed_turn} collapsed_count={len(item.collapsed_items)} content={log_preview(user_input)}')
+        logger.debug(f'Chat request: platform={req.platform} channel={req.platform_channel_id or "<dm>"} message={req.platform_message_id or "<none>"} user={req.platform_user_id} global_user={global_user_id} content_type={req.content_type} attachments={len(message_envelope["attachments"])} media_attachments={len(multimedia_input)} history_wide={len(chat_history_wide)} history_recent={len(chat_history_recent)} reply_context={log_preview(reply_context)} debug_modes={active_flags} collapsed={is_collapsed_turn} collapsed_count={len(item.collapsed_items)} content={log_preview(user_input)}')
 
         time_context = build_character_time_context(item.timestamp)
         try:
@@ -703,6 +717,9 @@ async def _process_queued_chat_item(item: QueuedChatItem) -> None:
                 prompt_message_context["addressed_to_global_user_ids"]
             ),
             target_broadcast=bool(prompt_message_context["broadcast"]),
+            media_description_rows=build_text_chat_media_description_rows(
+                multimedia_input
+            ),
         )
 
         initial_state: IMProcessState = {

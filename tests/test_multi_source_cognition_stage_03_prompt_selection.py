@@ -156,20 +156,20 @@ def _reflection_episode(
     return episode
 
 
-def _image_text_episode() -> CognitiveEpisode:
+def _retrieved_memory_text_episode() -> CognitiveEpisode:
     """Build a chat episode with an unsupported extra input source.
 
     Returns:
-        Valid `CognitiveEpisode` with both `dialog_text` and an unsupported
-        Stage 03 image observation.
+        Valid `CognitiveEpisode` with both `dialog_text` and a retrieved memory
+        source that prompt selection still rejects for user messages.
     """
     episode = _text_chat_episode()
-    episode["input_sources"] = ["dialog_text", "image_observation"]
+    episode["input_sources"] = ["dialog_text", "retrieved_memory"]
     episode["percepts"].append(
         {
-            "percept_id": "user_message:debug:direct:message-1:image:0",
-            "input_source": "image_observation",
-            "content": "A small image summary.",
+            "percept_id": "user_message:debug:direct:message-1:memory:0",
+            "input_source": "retrieved_memory",
+            "content": "A memory summary.",
             "visibility": "model_visible",
             "metadata": {},
         }
@@ -237,7 +237,7 @@ def test_selector_accepts_stage_02_chat_output_modes(
             id="unsupported-reflection-output-mode",
         ),
         pytest.param(
-            _image_text_episode(),
+            _retrieved_memory_text_episode(),
             "l1_subconscious",
             "input_sources",
             id="unsupported-input-sources",

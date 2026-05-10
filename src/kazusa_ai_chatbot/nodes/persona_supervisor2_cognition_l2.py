@@ -347,6 +347,9 @@ async def call_cognition_consciousness(state: CognitionState) -> CognitionState:
     )
     prompt_template = {
         "text_chat_user_message": _COGNITION_CONSCIOUSNESS_PROMPT,
+        "text_chat_user_message_image_observation": _COGNITION_CONSCIOUSNESS_PROMPT,
+        "text_chat_user_message_audio_observation": _COGNITION_CONSCIOUSNESS_PROMPT,
+        "text_chat_user_message_image_audio_observation": _COGNITION_CONSCIOUSNESS_PROMPT,
         "reflection_signal_reflection_artifact": _COGNITION_CONSCIOUSNESS_PROMPT,
         "internal_thought_internal_monologue": _COGNITION_CONSCIOUSNESS_PROMPT,
     }[selection["variant"]]
@@ -634,6 +637,9 @@ async def call_boundary_core_agent(state: CognitionState) -> CognitionState:
     )
     prompt_template = {
         "text_chat_user_message": _BOUNDARY_CORE_PROMPT,
+        "text_chat_user_message_image_observation": _BOUNDARY_CORE_PROMPT,
+        "text_chat_user_message_audio_observation": _BOUNDARY_CORE_PROMPT,
+        "text_chat_user_message_image_audio_observation": _BOUNDARY_CORE_PROMPT,
         "reflection_signal_reflection_artifact": _BOUNDARY_CORE_PROMPT,
         "internal_thought_internal_monologue": _BOUNDARY_CORE_PROMPT,
     }[selection["variant"]]
@@ -883,6 +889,9 @@ async def call_judgment_core_agent(state: CognitionState) -> CognitionState:
     )
     prompt_template = {
         "text_chat_user_message": _JUDGEMENT_CORE_PROMPT,
+        "text_chat_user_message_image_observation": _JUDGEMENT_CORE_PROMPT,
+        "text_chat_user_message_audio_observation": _JUDGEMENT_CORE_PROMPT,
+        "text_chat_user_message_image_audio_observation": _JUDGEMENT_CORE_PROMPT,
         "reflection_signal_reflection_artifact": _JUDGEMENT_CORE_PROMPT,
         "internal_thought_internal_monologue": _JUDGEMENT_CORE_PROMPT,
     }[selection["variant"]]

@@ -27,6 +27,9 @@ CognitionPromptStage = Literal[
 
 CognitionPromptVariant = Literal[
     "text_chat_user_message",
+    "text_chat_user_message_image_observation",
+    "text_chat_user_message_audio_observation",
+    "text_chat_user_message_image_audio_observation",
     "reflection_signal_reflection_artifact",
     "internal_thought_internal_monologue",
 ]
@@ -47,6 +50,19 @@ class CognitionPromptSelectionError(ValueError):
 
 _SUPPORTED_STAGES = frozenset(get_args(CognitionPromptStage))
 _TEXT_CHAT_INPUT_SOURCES: list[InputSource] = ["dialog_text"]
+_TEXT_CHAT_IMAGE_INPUT_SOURCES: list[InputSource] = [
+    "dialog_text",
+    "image_observation",
+]
+_TEXT_CHAT_AUDIO_INPUT_SOURCES: list[InputSource] = [
+    "dialog_text",
+    "audio_observation",
+]
+_TEXT_CHAT_IMAGE_AUDIO_INPUT_SOURCES: list[InputSource] = [
+    "dialog_text",
+    "image_observation",
+    "audio_observation",
+]
 _TEXT_CHAT_OUTPUT_MODES = frozenset(("visible_reply", "think_only", "silent"))
 _REFLECTION_INPUT_SOURCES: list[InputSource] = ["reflection_artifact"]
 _REFLECTION_OUTPUT_MODES = frozenset(("think_only", "preview", "silent"))
@@ -137,6 +153,12 @@ def build_cognition_prompt_source_payload(
     variant = selection["variant"]
     if variant == "text_chat_user_message":
         source_payload: dict[str, object] = {}
+    elif variant in (
+        "text_chat_user_message_image_observation",
+        "text_chat_user_message_audio_observation",
+        "text_chat_user_message_image_audio_observation",
+    ):
+        source_payload = _media_observations_source_payload(episode)
     elif variant == "reflection_signal_reflection_artifact":
         source_payload = _reflection_source_payload(episode)
     elif variant == "internal_thought_internal_monologue":
@@ -169,7 +191,15 @@ def _select_text_chat_prompt(
     Raises:
         CognitionPromptSelectionError: If the text-chat tuple is not enabled.
     """
-    if input_sources != _TEXT_CHAT_INPUT_SOURCES:
+    if input_sources == _TEXT_CHAT_INPUT_SOURCES:
+        variant: CognitionPromptVariant = "text_chat_user_message"
+    elif input_sources == _TEXT_CHAT_IMAGE_INPUT_SOURCES:
+        variant = "text_chat_user_message_image_observation"
+    elif input_sources == _TEXT_CHAT_AUDIO_INPUT_SOURCES:
+        variant = "text_chat_user_message_audio_observation"
+    elif input_sources == _TEXT_CHAT_IMAGE_AUDIO_INPUT_SOURCES:
+        variant = "text_chat_user_message_image_audio_observation"
+    else:
         raise CognitionPromptSelectionError(
             f"input_sources are not supported: {input_sources}"
         )
@@ -179,13 +209,41 @@ def _select_text_chat_prompt(
         )
     selection: CognitionPromptSelection = {
         "stage": stage,
-        "variant": "text_chat_user_message",
-        "prompt_key": f"{stage}.text_chat_user_message",
+        "variant": variant,
+        "prompt_key": f"{stage}.{variant}",
         "trigger_source": trigger_source,
         "input_sources": list(input_sources),
         "output_mode": output_mode,
     }
     return selection
+
+
+def _media_observations_source_payload(
+    episode: CognitiveEpisode,
+) -> dict[str, object]:
+    """Project user-message media observations into model-facing payload.
+
+    Args:
+        episode: Valid user-message cognitive episode.
+
+    Returns:
+        Mapping containing only image and audio observation text.
+    """
+    image_observations: list[str] = []
+    audio_observations: list[str] = []
+    for percept in episode["percepts"]:
+        if percept["input_source"] == "image_observation":
+            image_observations.append(percept["content"])
+        elif percept["input_source"] == "audio_observation":
+            audio_observations.append(percept["content"])
+
+    media_payload: dict[str, object] = {
+        "media_observations": {
+            "image_observations": image_observations,
+            "audio_observations": audio_observations,
+        },
+    }
+    return media_payload
 
 
 def _select_reflection_prompt(

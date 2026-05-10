@@ -8,6 +8,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from kazusa_ai_chatbot.cognition_episode import build_text_chat_cognitive_episode
 from kazusa_ai_chatbot.nodes.relevance_agent import (
     build_group_attention_context,
     multimedia_descriptor_agent,
@@ -16,9 +17,19 @@ from kazusa_ai_chatbot.nodes.relevance_agent import (
 
 
 def _base_state():
-    """Minimal IMProcessState for testing relevance_agent."""
-    return {
+    """Build the minimal graph state shared by relevance-agent tests.
+
+    Returns:
+        State containing the required fields consumed by relevance and
+        multimedia descriptor handlers.
+    """
+    time_context = {
+        "current_local_datetime": "2024-01-01 00:00",
+        "current_local_weekday": "Monday",
+    }
+    state = {
         "timestamp": "2024-01-01T00:00:00Z",
+        "time_context": time_context,
         "platform": "discord",
         "platform_message_id": "msg_123",
         "platform_user_id": "user_123",
@@ -59,6 +70,24 @@ def _base_state():
         "reply_context": {},
         "debug_modes": {},
     }
+    state["cognitive_episode"] = build_text_chat_cognitive_episode(
+        episode_id="episode-msg_123",
+        percept_id="percept-msg_123-dialog",
+        timestamp=state["timestamp"],
+        time_context=time_context,
+        user_input=state["user_input"],
+        platform=state["platform"],
+        platform_channel_id=state["platform_channel_id"],
+        channel_type=state["channel_type"],
+        platform_message_id=state["platform_message_id"],
+        platform_user_id=state["platform_user_id"],
+        global_user_id=state["global_user_id"],
+        user_name=state["user_name"],
+        debug_modes=state["debug_modes"],
+        target_addressed_user_ids=[],
+        target_broadcast=True,
+    )
+    return state
 
 
 def _history_row(

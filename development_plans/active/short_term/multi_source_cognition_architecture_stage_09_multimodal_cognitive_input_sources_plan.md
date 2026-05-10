@@ -7,7 +7,7 @@
   cognition without raw binary, prompt payload leakage, or text-only `/chat`
   regression.
 - Plan class: large
-- Status: approved
+- Status: completed
 - Mandatory skills: `development-plan-writing`, `local-llm-architecture`,
   `no-prepost-user-input`, `py-style`, `test-style-and-execution`, and
   `cjk-safety` before editing cognition Python files that contain CJK prompt
@@ -27,7 +27,7 @@
 Parent plan:
 `development_plans/active/short_term/multi_source_cognition_architecture_plan.md`
 
-Lifecycle: this plan is approved for execution from post-Stage-08 `main`.
+Lifecycle: this plan completed execution from post-Stage-08 `main`.
 Stage 09 must execute on a feature branch forked from a mainline that includes
 Stage 08 evidence commit `6b62476`.
 
@@ -502,6 +502,16 @@ must not add media fields to `original_query`, `context`, `current_user_id`, or
   prompt-map entries only.
 - `src/kazusa_ai_chatbot/nodes/persona_supervisor2_cognition_l3.py` - add
   prompt-map entries only.
+- `tests/test_rag_cognitive_episode_adapter.py` - update the pre-Stage-09
+  unsupported-source regression fixture so it uses a still-unsupported source
+  profile instead of the newly approved image/audio profile.
+- `tests/test_multi_source_cognition_stage_03_prompt_selection.py` - update
+  the pre-Stage-09 unsupported-source selector fixture so it uses a
+  still-unsupported source profile instead of the newly approved image/audio
+  profile.
+- `tests/test_relevance_agent.py` - update the pre-Stage-09 descriptor test
+  fixture so direct `multimedia_descriptor_agent(...)` calls include the
+  required current `cognitive_episode` state key.
 - lifecycle rows in the parent plan and registry after completion only.
 
 ### Create
@@ -570,49 +580,69 @@ must not add media fields to `original_query`, `context`, `current_user_id`, or
 
 ## Progress Checklist
 
-- [ ] Stage 1 - prerequisite evidence carried forward.
+- [x] Stage 1 - prerequisite evidence carried forward.
   - Covers: Step 1.
   - Verify: parent ledger and registry show Stage 08 completed and Stage 09
     approved.
   - Evidence/sign-off: record Stage 08 branch, commits, and regression results;
     next agent starts at Stage 2.
-- [ ] Stage 2 - multimodal episode contract complete.
+  - Sign-off: `Codex / 2026-05-10` after verifying branch
+    `stage-09-multimodal-cognitive-input-sources` at `77847cd` contains Stage
+    08 evidence commit `6b62476`; registry marks Stage 09 `approved | ready`;
+    parent ledger marks `stage_09` approved.
+- [x] Stage 2 - multimodal episode contract complete.
   - Covers: Steps 2-3.
   - Verify: Stage 09 episode contract tests pass and text-only output is
     unchanged.
   - Evidence/sign-off: record red/green results; reread this plan, then start
     Stage 3.
-- [ ] Stage 3 - RAG projection compatibility complete.
+  - Sign-off: `Codex / 2026-05-10` after red collection failure for missing
+    media constants/helpers and green focused episode tests with `4 passed`.
+- [x] Stage 3 - RAG projection compatibility complete.
   - Covers: Steps 4-5.
   - Verify: Stage 09 RAG tests and `tests/test_rag_cognitive_episode_adapter.py`
     pass.
   - Evidence/sign-off: record command output; reread this plan, then start
     Stage 4.
-- [ ] Stage 4 - cognition prompt admission complete.
+  - Sign-off: `Codex / 2026-05-10` after red multimodal RAG rejection and
+    green Stage 09 plus RAG adapter regression tests with `15 passed`.
+- [x] Stage 4 - cognition prompt admission complete.
   - Covers: Steps 6-9.
   - Verify: Stage 09 selector/source-payload/prompt-map/fingerprint tests and
     Stage 03 prompt-selection tests pass.
   - Evidence/sign-off: record prompt fingerprint and test output; reread this
     plan, then start Stage 5.
-- [ ] Stage 5 - service and descriptor handoff complete.
+  - Sign-off: `Codex / 2026-05-10` after selector/source-payload red,
+    prompt-map red, CJK module compile, and green Stage 09 plus Stage 03 tests
+    with `47 passed`.
+- [x] Stage 5 - service and descriptor handoff complete.
   - Covers: Steps 10-11.
   - Verify: Stage 09 service/descriptor tests prove post-descriptor episode
     refresh, audio pass-through, and no raw media in episode or source payload.
   - Evidence/sign-off: record command output; reread this plan, then start
     Stage 6.
-- [ ] Stage 6 - full verification complete.
+  - Sign-off: `Codex / 2026-05-10` after red service/descriptor handoff tests,
+    green Stage 09 focused tests with `14 passed`, and green adjacent
+    descriptor/queue regression command with `62 passed`.
+- [x] Stage 6 - full verification complete.
   - Covers: Step 12.
   - Verify: every Verification command passes or has an explicitly allowed
     no-match exit.
   - Evidence/sign-off: record command output; reread this plan, then start
     Stage 7.
-- [ ] Stage 7 - independent code review complete.
+  - Sign-off: `Codex / 2026-05-10` after static compile, change-surface gate,
+    static greps, `git diff --check`, focused tests, adjacent descriptor/queue
+    tests, and all listed prior-stage regression gates passed.
+- [x] Stage 7 - independent code review complete.
   - Covers: Step 13.
   - Verify: full diff reviewed against style, code quality, plan alignment,
     design weaknesses, regression coverage, handoff artifacts, and verification
     accuracy.
   - Evidence/sign-off: record findings, fixes, rerun commands, residual risks,
     and approval; lifecycle rows may be completed only after this stage.
+  - Sign-off: `Codex / 2026-05-10` after independent review fixed one
+    no-base64 image descriptor gap, one stale plan-label test docstring, one
+    incomplete helper docstring, and one inaccurate media-count log label.
 
 ## Verification
 
@@ -622,20 +652,21 @@ must not add media fields to `original_query`, `context`, `current_user_id`, or
 
 ### Change Surface Gate
 
-- `git diff --name-only main...HEAD`
+- `git status --short`
 
-  Expected result: only files listed in `Change Surface` may appear. Lifecycle
-  row edits are allowed only after independent code review approval.
+  Expected result: only files listed in `Change Surface` may appear, including
+  untracked created files. Lifecycle row edits are allowed only after
+  independent code review approval.
 
 ### Static Greps
 
-- `rg -n "base64_data|image_url|data:" src\kazusa_ai_chatbot\cognition_episode.py src\kazusa_ai_chatbot\rag\cognitive_episode_adapter.py src\kazusa_ai_chatbot\nodes\persona_supervisor2_cognition_prompt_selection.py src\kazusa_ai_chatbot\nodes\persona_supervisor2_cognition_l1.py src\kazusa_ai_chatbot\nodes\persona_supervisor2_cognition_l2.py src\kazusa_ai_chatbot\nodes\persona_supervisor2_cognition_l3.py`
+- `rg -n "\"base64_data\"|\"image_url\"|\"data:" src\kazusa_ai_chatbot\cognition_episode.py src\kazusa_ai_chatbot\rag\cognitive_episode_adapter.py src\kazusa_ai_chatbot\nodes\persona_supervisor2_cognition_prompt_selection.py src\kazusa_ai_chatbot\nodes\persona_supervisor2_cognition_l1.py src\kazusa_ai_chatbot\nodes\persona_supervisor2_cognition_l2.py src\kazusa_ai_chatbot\nodes\persona_supervisor2_cognition_l3.py`
 
   Expected result: no matches, with `rg` exit code 1 accepted. Cognition
   episode content, source payloads, and prompt maps must not mention raw media
   fields.
 
-- `rg -n "image_observation|audio_observation|media_observations" src\kazusa_ai_chatbot\nodes\persona_supervisor2_consolidator*.py src\kazusa_ai_chatbot\reflection_cycle src\kazusa_ai_chatbot\internal_thought_cognition.py src\kazusa_ai_chatbot\dispatcher`
+- `rg -n "image_observation|audio_observation|media_observations" src\kazusa_ai_chatbot\nodes\persona_supervisor2_consolidator.py src\kazusa_ai_chatbot\nodes\persona_supervisor2_consolidator_facts.py src\kazusa_ai_chatbot\nodes\persona_supervisor2_consolidator_images.py src\kazusa_ai_chatbot\nodes\persona_supervisor2_consolidator_memory_units.py src\kazusa_ai_chatbot\nodes\persona_supervisor2_consolidator_origin.py src\kazusa_ai_chatbot\nodes\persona_supervisor2_consolidator_origin_policy.py src\kazusa_ai_chatbot\nodes\persona_supervisor2_consolidator_persistence.py src\kazusa_ai_chatbot\nodes\persona_supervisor2_consolidator_reflection.py src\kazusa_ai_chatbot\nodes\persona_supervisor2_consolidator_schema.py src\kazusa_ai_chatbot\reflection_cycle src\kazusa_ai_chatbot\internal_thought_cognition.py src\kazusa_ai_chatbot\dispatcher`
 
   Expected result: no matches, with `rg` exit code 1 accepted. Stage 09 does
   not change consolidation, reflection, internal thought, or dispatcher policy.
@@ -783,16 +814,105 @@ proactive output, scheduler, dispatcher, dialog, or consolidation changes.
 Record after implementation:
 
 - Stage 08 evidence reread:
+  branch `stage-08-internal-thought-cognition-dry-run`, implementation commit
+  `ef1449b`, evidence/mainline commit `6b62476`, Stage 08 focused
+  `26 passed`, Stage 07 reflection dry-run `14 passed`, Stage 03 selector
+  `36 passed`, Stage 06 origin-policy gates `9 passed`, Stage 00 baseline
+  `11 passed`, and Stage 08 independent review fixed the internal-thought
+  `action_latch` value-type validation gap. Current Stage 09 branch
+  `stage-09-multimodal-cognitive-input-sources` is based on approved-plan
+  commit `77847cd`; `git merge-base --is-ancestor 6b62476 HEAD` passed.
 - Independent plan review:
   completed on 2026-05-10; approved for execution after review-derived fixes.
-- Branch:
+- Branch: `stage-09-multimodal-cognitive-input-sources`
 - Commit:
 - Static compile:
+  `venv\Scripts\python -m py_compile src\kazusa_ai_chatbot\cognition_episode.py src\kazusa_ai_chatbot\service.py src\kazusa_ai_chatbot\nodes\relevance_agent.py src\kazusa_ai_chatbot\rag\cognitive_episode_adapter.py src\kazusa_ai_chatbot\nodes\persona_supervisor2_cognition_prompt_selection.py src\kazusa_ai_chatbot\nodes\persona_supervisor2_cognition_l1.py src\kazusa_ai_chatbot\nodes\persona_supervisor2_cognition_l2.py src\kazusa_ai_chatbot\nodes\persona_supervisor2_cognition_l3.py tests\test_multi_source_cognition_stage_09_multimodal_input_sources.py`
+  exited 0.
 - Change surface gate:
+  `git status --short` showed only approved Change Surface files: this plan,
+  the parent ledger, the registry, the eight approved source files, the Stage
+  09 test file, and the three review-derived fixture files added to Change
+  Surface.
 - Static greps:
+  The raw-media grep was corrected to quoted literals so `data:` does not
+  match `metadata:`; it returned no matches with accepted exit code 1. The
+  consolidation/reflection/internal-thought/dispatcher grep was corrected to
+  explicit consolidator paths for PowerShell; it returned no matches with
+  accepted exit code 1. The approved helper grep matched only imports plus the
+  service builder call and descriptor refresh calls. `git diff --check` exited
+  0.
 - Focused tests:
+  Stage 2 red:
+  `venv\Scripts\python -m pytest tests\test_multi_source_cognition_stage_09_multimodal_input_sources.py -q`
+  failed during collection with missing
+  `MAX_COGNITIVE_EPISODE_MEDIA_DESCRIPTION_CHARS`. Stage 2 green:
+  the same focused command passed with `4 passed`.
+  Stage 3 red:
+  the Stage 09 focused command failed with multimodal input-source profiles
+  rejected by `build_text_chat_rag_request(...)`. Stage 3 green:
+  `venv\Scripts\python -m pytest tests\test_multi_source_cognition_stage_09_multimodal_input_sources.py tests\test_rag_cognitive_episode_adapter.py -q`
+  passed with `15 passed`.
+  Stage 3 plan correction:
+  `tests/test_rag_cognitive_episode_adapter.py` was added to Change Surface
+  after the regression gate exposed a stale fixture that used the newly
+  approved image profile as an invalid source set.
+  Stage 4 red:
+  Stage 09 focused tests failed because multimodal prompt variants were not
+  selected and `media_observations` payload projection was missing. After
+  selector implementation, Stage 03 failed because its unsupported-source
+  fixture used the newly approved image profile. The plan Change Surface was
+  updated and the fixture now uses `retrieved_memory`. Stage 09 focused tests
+  then failed once on missing L1/L2/L3 prompt-map variant keys.
+  Stage 4 green:
+  CJK module compile for L1/L2/L3 exited 0; then
+  `venv\Scripts\python -m pytest tests\test_multi_source_cognition_stage_09_multimodal_input_sources.py tests\test_multi_source_cognition_stage_03_prompt_selection.py -q`
+  passed with `47 passed`. Prompt fingerprint tests covered all nine L1/L2/L3
+  prompt constants with unchanged byte lengths and SHA-256 digests.
+  Stage 5 plan correction:
+  `tests/test_relevance_agent.py` was added to Change Surface after the
+  adjacent descriptor regression gate exposed a stale direct-node fixture that
+  did not include the now-required `cognitive_episode` state key.
+  Stage 5 red:
+  Stage 09 focused tests first failed because service did not pass
+  `media_description_rows` into the episode builder and the descriptor node did
+  not return `cognitive_episode`.
+  Stage 5 green:
+  `venv\Scripts\python -m py_compile tests\test_relevance_agent.py src\kazusa_ai_chatbot\nodes\relevance_agent.py src\kazusa_ai_chatbot\service.py`
+  exited 0. Then
+  `venv\Scripts\python -m pytest tests\test_multi_source_cognition_stage_09_multimodal_input_sources.py tests\test_relevance_agent.py tests\test_service_input_queue.py -q`
+  passed with `62 passed`.
+  Stage 6 focused:
+  `venv\Scripts\python -m pytest tests\test_multi_source_cognition_stage_09_multimodal_input_sources.py`
+  passed with `15 passed` after the independent-review no-base64 image
+  pass-through test was added.
 - Prior stage regression gates:
+  `tests\test_cognitive_episode_contract.py` passed with `15 passed`;
+  `tests\test_rag_cognitive_episode_adapter.py` passed with `9 passed`;
+  `tests\test_multi_source_cognition_stage_03_prompt_selection.py` passed with
+  `36 passed`; `tests\test_consolidation_origin_policy.py
+  tests\test_consolidator_origin_policy_db_writer.py` passed with `9 passed`;
+  `tests\test_multi_source_cognition_stage_07_reflection_dry_run.py` passed
+  with `14 passed`;
+  `tests\test_multi_source_cognition_stage_08_internal_thought_dry_run.py`
+  passed with `26 passed`; and
+  `tests\test_multi_source_cognition_stage_00_regression_baseline.py` passed
+  with `11 passed`.
 - Independent code review:
+  Completed on 2026-05-10. Review checked changed Python against py-style
+  constraints, plan alignment, raw-media safety, prompt byte stability, RAG
+  dialog-text projection, handoff freshness, and regression coverage. Fixes
+  made during review: added a docstring to `_trim_media_description(...)`;
+  renamed the service debug log field from `image_attachments` to
+  `media_attachments`; removed a plan-stage label from a test helper
+  docstring; and prevented the existing vision descriptor from being called
+  with an empty data URI when an image row has a preexisting description but no
+  base64 payload. Added
+  `test_descriptor_image_description_without_base64_skips_vision_llm`.
+  Rerun after review: py_compile for affected files exited 0;
+  `venv\Scripts\python -m pytest tests\test_multi_source_cognition_stage_09_multimodal_input_sources.py tests\test_relevance_agent.py -q`
+  passed with `38 passed`; full Verification static checks and all listed
+  prior-stage regression gates were rerun and passed.
 - Completion diff review:
 - Lifecycle records:
 - Residual risks:

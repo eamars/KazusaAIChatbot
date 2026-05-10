@@ -23,6 +23,14 @@ class RAGEpisodeRequest(TypedDict):
     character_user_id: str
 
 
+_SUPPORTED_USER_MESSAGE_INPUT_SOURCE_PROFILES = {
+    ("dialog_text",),
+    ("dialog_text", "image_observation"),
+    ("dialog_text", "audio_observation"),
+    ("dialog_text", "image_observation", "audio_observation"),
+}
+
+
 def build_text_chat_rag_request(
     *,
     episode: CognitiveEpisode,
@@ -68,7 +76,10 @@ def build_text_chat_rag_request(
     if episode["trigger_source"] != "user_message":
         raise RAGEpisodeAdapterError("episode trigger_source is not supported")
 
-    if episode["input_sources"] != ["dialog_text"]:
+    if (
+        tuple(episode["input_sources"])
+        not in _SUPPORTED_USER_MESSAGE_INPUT_SOURCE_PROFILES
+    ):
         raise RAGEpisodeAdapterError("episode input_sources are not supported")
 
     projection = project_text_chat_compatibility_fields(episode)

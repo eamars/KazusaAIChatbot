@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import Any, Literal, NoReturn, TypedDict, get_args
 
 from kazusa_ai_chatbot.time_context import TimeContextDoc
@@ -65,6 +66,11 @@ class OriginMetadata(TypedDict):
     debug_modes: dict[str, bool]
 
 
+class MediaDescriptionRow(TypedDict):
+    content_type: str
+    description: str
+
+
 class CognitiveEpisode(TypedDict):
     episode_id: str
     trigger_source: TriggerSource
@@ -101,6 +107,49 @@ _INPUT_SOURCES = frozenset(get_args(InputSource))
 _VISIBILITIES = frozenset(get_args(Visibility))
 _OUTPUT_MODES = frozenset(get_args(OutputMode))
 _TIME_CONTEXT_FIELDS = tuple(TimeContextDoc.__annotations__)
+MAX_COGNITIVE_EPISODE_MEDIA_PERCEPTS = 4
+MAX_COGNITIVE_EPISODE_MEDIA_DESCRIPTION_CHARS = 800
+
+
+def build_text_chat_media_description_rows(
+    multimedia_input: list[Mapping[str, object]],
+) -> list[MediaDescriptionRow]:
+    """Project current media rows into prompt-safe episode description rows.
+
+    Args:
+        multimedia_input: Current-turn media rows that may include storage or
+            adapter fields outside the episode contract.
+
+    Returns:
+        Rows containing only supported content types and stripped descriptions.
+    """
+    media_description_rows: list[MediaDescriptionRow] = []
+    for item in multimedia_input:
+        content_type = item.get("content_type")
+        if not isinstance(content_type, str) or content_type == "":
+            continue
+
+        description = item.get("description")
+        if not isinstance(description, str):
+            continue
+
+        clean_description = description.strip()
+        if clean_description == "":
+            continue
+
+        if not (
+            content_type.startswith("image/")
+            or content_type.startswith("audio/")
+        ):
+            continue
+
+        row: MediaDescriptionRow = {
+            "content_type": content_type,
+            "description": clean_description,
+        }
+        media_description_rows.append(row)
+
+    return media_description_rows
 
 
 def validate_cognitive_episode(episode: CognitiveEpisode) -> None:
@@ -170,6 +219,7 @@ def build_text_chat_cognitive_episode(
     output_mode: OutputMode = "visible_reply",
     target_addressed_user_ids: list[str] | None = None,
     target_broadcast: bool = False,
+    media_description_rows: list[MediaDescriptionRow] | None = None,
 ) -> CognitiveEpisode:
     """Build a source-neutral episode for the current text `/chat` turn.
 
@@ -194,6 +244,8 @@ def build_text_chat_cognitive_episode(
         output_mode: Allowed output mode for the episode.
         target_addressed_user_ids: Current explicit addressees.
         target_broadcast: Whether the current turn targets the channel broadly.
+        media_description_rows: Optional bounded image/audio descriptions for
+            the same user-message turn.
 
     Returns:
         A validated `CognitiveEpisode` for a text chat turn.
@@ -214,6 +266,10 @@ def build_text_chat_cognitive_episode(
         "visibility": "model_visible",
         "metadata": {},
     }
+    media_input_sources, media_percepts = _build_media_percepts(
+        base_percept_id=percept_id,
+        media_description_rows=media_description_rows,
+    )
     target_scope: TargetScope = {
         "platform": platform,
         "platform_channel_id": platform_channel_id,
@@ -234,9 +290,9 @@ def build_text_chat_cognitive_episode(
     episode: CognitiveEpisode = {
         "episode_id": episode_id,
         "trigger_source": "user_message",
-        "input_sources": ["dialog_text"],
+        "input_sources": ["dialog_text", *media_input_sources],
         "output_mode": output_mode,
-        "percepts": [percept],
+        "percepts": [percept, *media_percepts],
         "target_scope": target_scope,
         "origin_metadata": origin_metadata,
         "timestamp": timestamp,
@@ -245,6 +301,63 @@ def build_text_chat_cognitive_episode(
 
     validate_cognitive_episode(episode)
     return episode
+
+
+def replace_text_chat_media_percepts(
+    *,
+    episode: CognitiveEpisode,
+    media_description_rows: list[MediaDescriptionRow] | None,
+) -> CognitiveEpisode:
+    """Return a user-message episode with refreshed media-description percepts.
+
+    Args:
+        episode: Existing text-chat episode to refresh after media descriptions
+            become available.
+        media_description_rows: Optional bounded image/audio descriptions for
+            the same user-message turn.
+
+    Returns:
+        New validated episode preserving the text-chat fields and replacing
+        only image/audio media percepts.
+
+    Raises:
+        CognitiveEpisodeValidationError: If the input episode is not a valid
+            user-message episode with exactly one dialog-text percept.
+    """
+    validate_cognitive_episode(episode)
+
+    if episode["trigger_source"] != "user_message":
+        _raise_validation_error("episode must be a user_message episode")
+
+    dialog_percept = _single_dialog_text_percept(episode)
+    target_scope = episode["target_scope"]
+    origin_metadata = episode["origin_metadata"]
+    refreshed_episode = build_text_chat_cognitive_episode(
+        episode_id=episode["episode_id"],
+        percept_id=dialog_percept["percept_id"],
+        timestamp=episode["timestamp"],
+        time_context=episode["time_context"],
+        user_input=dialog_percept["content"],
+        platform=target_scope["platform"],
+        platform_channel_id=target_scope["platform_channel_id"],
+        channel_type=target_scope["channel_type"],
+        platform_message_id=origin_metadata["platform_message_id"],
+        platform_user_id=target_scope["current_platform_user_id"],
+        global_user_id=target_scope["current_global_user_id"],
+        user_name=target_scope["current_display_name"],
+        active_turn_platform_message_ids=origin_metadata[
+            "active_turn_platform_message_ids"
+        ],
+        active_turn_conversation_row_ids=origin_metadata[
+            "active_turn_conversation_row_ids"
+        ],
+        debug_modes=origin_metadata["debug_modes"],
+        output_mode=episode["output_mode"],
+        target_addressed_user_ids=target_scope["target_addressed_user_ids"],
+        target_broadcast=target_scope["target_broadcast"],
+        media_description_rows=media_description_rows,
+    )
+    return refreshed_episode
 
 
 def project_text_chat_compatibility_fields(
@@ -297,6 +410,101 @@ def project_text_chat_compatibility_fields(
         "user_name": target_scope["current_display_name"],
     }
     return projection
+
+
+def _build_media_percepts(
+    *,
+    base_percept_id: str,
+    media_description_rows: list[MediaDescriptionRow] | None,
+) -> tuple[list[InputSource], list[CognitivePercept]]:
+    """Build bounded media percepts and deterministic input-source labels.
+
+    Args:
+        base_percept_id: Dialog percept id used as the stable media id prefix.
+        media_description_rows: Optional media descriptions for the turn.
+
+    Returns:
+        Tuple containing ordered media input-source labels and media percepts.
+    """
+    sanitized_rows = build_text_chat_media_description_rows(
+        media_description_rows or []
+    )
+    bounded_rows = sanitized_rows[:MAX_COGNITIVE_EPISODE_MEDIA_PERCEPTS]
+
+    media_percepts: list[CognitivePercept] = []
+    has_image_observation = False
+    has_audio_observation = False
+    for media_index, row in enumerate(bounded_rows, start=1):
+        content_type = row["content_type"]
+        if content_type.startswith("image/"):
+            input_source: InputSource = "image_observation"
+            has_image_observation = True
+        else:
+            input_source = "audio_observation"
+            has_audio_observation = True
+
+        media_percept: CognitivePercept = {
+            "percept_id": f"{base_percept_id}:media:{media_index}",
+            "input_source": input_source,
+            "content": _trim_media_description(row["description"]),
+            "visibility": "model_visible",
+            "metadata": {
+                "content_type": content_type,
+                "media_index": media_index,
+            },
+        }
+        media_percepts.append(media_percept)
+
+    media_input_sources: list[InputSource] = []
+    if has_image_observation:
+        media_input_sources.append("image_observation")
+    if has_audio_observation:
+        media_input_sources.append("audio_observation")
+
+    return_value = (media_input_sources, media_percepts)
+    return return_value
+
+
+def _trim_media_description(description: str) -> str:
+    """Clamp a media description to the episode percept character budget.
+
+    Args:
+        description: Sanitized image or audio description text.
+
+    Returns:
+        Description text no longer than the configured media percept limit.
+    """
+    if len(description) <= MAX_COGNITIVE_EPISODE_MEDIA_DESCRIPTION_CHARS:
+        return description
+
+    body_limit = MAX_COGNITIVE_EPISODE_MEDIA_DESCRIPTION_CHARS - len("...")
+    trimmed_description = description[:body_limit].rstrip()
+    return_value = f"{trimmed_description}..."
+    return return_value
+
+
+def _single_dialog_text_percept(episode: CognitiveEpisode) -> CognitivePercept:
+    """Return the unique dialog-text percept required for text-chat refresh.
+
+    Args:
+        episode: Valid user-message episode.
+
+    Returns:
+        The single dialog-text percept carried by the episode.
+
+    Raises:
+        CognitiveEpisodeValidationError: If the dialog-text percept is missing
+            or duplicated.
+    """
+    dialog_percepts = [
+        percept
+        for percept in episode["percepts"]
+        if percept["input_source"] == "dialog_text"
+    ]
+    if len(dialog_percepts) != 1:
+        _raise_validation_error("episode must include exactly one dialog_text")
+    return_value = dialog_percepts[0]
+    return return_value
 
 
 def _raise_validation_error(message: str) -> NoReturn:

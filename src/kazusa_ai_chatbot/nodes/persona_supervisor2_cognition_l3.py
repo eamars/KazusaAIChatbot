@@ -293,6 +293,9 @@ async def call_contextual_agent(state: CognitionState) -> CognitionState:
     )
     prompt_template = {
         "text_chat_user_message": _CONTEXTUAL_AGENT_PROMPT,
+        "text_chat_user_message_image_observation": _CONTEXTUAL_AGENT_PROMPT,
+        "text_chat_user_message_audio_observation": _CONTEXTUAL_AGENT_PROMPT,
+        "text_chat_user_message_image_audio_observation": _CONTEXTUAL_AGENT_PROMPT,
         "reflection_signal_reflection_artifact": _CONTEXTUAL_AGENT_PROMPT,
         "internal_thought_internal_monologue": _CONTEXTUAL_AGENT_PROMPT,
     }[selection["variant"]]
@@ -477,6 +480,9 @@ async def call_style_agent(state: CognitionState) -> CognitionState:
     )
     prompt_template = {
         "text_chat_user_message": _STYLE_AGENT_PROMPT,
+        "text_chat_user_message_image_observation": _STYLE_AGENT_PROMPT,
+        "text_chat_user_message_audio_observation": _STYLE_AGENT_PROMPT,
+        "text_chat_user_message_image_audio_observation": _STYLE_AGENT_PROMPT,
         "reflection_signal_reflection_artifact": _STYLE_AGENT_PROMPT,
         "internal_thought_internal_monologue": _STYLE_AGENT_PROMPT,
     }[selection["variant"]]
@@ -723,6 +729,9 @@ async def call_content_anchor_agent(state: CognitionState) -> CognitionState:
     )
     prompt_template = {
         "text_chat_user_message": _CONTENT_ANCHOR_AGENT_PROMPT,
+        "text_chat_user_message_image_observation": _CONTENT_ANCHOR_AGENT_PROMPT,
+        "text_chat_user_message_audio_observation": _CONTENT_ANCHOR_AGENT_PROMPT,
+        "text_chat_user_message_image_audio_observation": _CONTENT_ANCHOR_AGENT_PROMPT,
         "reflection_signal_reflection_artifact": _CONTENT_ANCHOR_AGENT_PROMPT,
         "internal_thought_internal_monologue": _CONTENT_ANCHOR_AGENT_PROMPT,
     }[selection["variant"]]
@@ -877,6 +886,9 @@ async def call_preference_adapter(state: CognitionState) -> CognitionState:
     )
     prompt_template = {
         "text_chat_user_message": _PREFERENCE_ADAPTER_PROMPT,
+        "text_chat_user_message_image_observation": _PREFERENCE_ADAPTER_PROMPT,
+        "text_chat_user_message_audio_observation": _PREFERENCE_ADAPTER_PROMPT,
+        "text_chat_user_message_image_audio_observation": _PREFERENCE_ADAPTER_PROMPT,
         "reflection_signal_reflection_artifact": _PREFERENCE_ADAPTER_PROMPT,
         "internal_thought_internal_monologue": _PREFERENCE_ADAPTER_PROMPT,
     }[selection["variant"]]
@@ -1066,6 +1078,9 @@ async def call_visual_agent(state: CognitionState) -> CognitionState:
     )
     prompt_template = {
         "text_chat_user_message": _VISUAL_AGENT_PROMPT,
+        "text_chat_user_message_image_observation": _VISUAL_AGENT_PROMPT,
+        "text_chat_user_message_audio_observation": _VISUAL_AGENT_PROMPT,
+        "text_chat_user_message_image_audio_observation": _VISUAL_AGENT_PROMPT,
         "reflection_signal_reflection_artifact": _VISUAL_AGENT_PROMPT,
         "internal_thought_internal_monologue": _VISUAL_AGENT_PROMPT,
     }[selection["variant"]]

@@ -22,6 +22,10 @@ from kazusa_ai_chatbot.config import (
     VISION_DESCRIPTOR_LLM_BASE_URL,
     VISION_DESCRIPTOR_LLM_MODEL,
 )
+from kazusa_ai_chatbot.cognition_episode import (
+    build_text_chat_media_description_rows,
+    replace_text_chat_media_percepts,
+)
 from kazusa_ai_chatbot.db import (
     update_conversation_attachment_descriptions,
 )
@@ -764,7 +768,19 @@ _vision_descriptor_llm = get_llm(
     base_url=VISION_DESCRIPTOR_LLM_BASE_URL,
     api_key=VISION_DESCRIPTOR_LLM_API_KEY,
 )
+
+
 async def multimedia_descriptor_agent(state: IMProcessState) -> IMProcessState:
+    """Refresh prompt-safe media descriptions for the current chat turn.
+
+    Args:
+        state: Current graph state containing multimedia rows and the current
+            cognitive episode.
+
+    Returns:
+        Partial graph state containing refreshed multimedia rows, prompt
+        message context, and cognitive episode.
+    """
     user_name = state.get("user_name")
     platform_user_id = state.get("platform_user_id", "")
 
@@ -774,6 +790,14 @@ async def multimedia_descriptor_agent(state: IMProcessState) -> IMProcessState:
 
     for piece in user_multimedia_input:
         if piece["content_type"].startswith("image/"):
+            if not piece["base64_data"]:
+                output_multimedia_input.append({
+                    "content_type": piece["content_type"],
+                    "base64_data": piece["base64_data"],
+                    "description": piece["description"],
+                })
+                continue
+
             # Call vision descriptor
             system_prompt = SystemMessage(content=_VISION_DESCRIPTOR_PROMPT.format(
                 max_description_chars=MAX_PROMPT_ATTACHMENT_DESCRIPTION_CHARS,
@@ -848,9 +872,17 @@ async def multimedia_descriptor_agent(state: IMProcessState) -> IMProcessState:
         message_envelope=state["message_envelope"],
         multimedia_input=output_multimedia_input,
     )
+    media_description_rows = build_text_chat_media_description_rows(
+        output_multimedia_input
+    )
+    cognitive_episode = replace_text_chat_media_percepts(
+        episode=state["cognitive_episode"],
+        media_description_rows=media_description_rows,
+    )
 
     return_value = {
         "user_multimedia_input": output_multimedia_input,
         "prompt_message_context": prompt_message_context,
+        "cognitive_episode": cognitive_episode,
     }
     return return_value
