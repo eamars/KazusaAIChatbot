@@ -12,6 +12,11 @@ from kazusa_ai_chatbot.db.schemas import (
     InteractionStyleScopeType,
     InteractionStyleStatus,
 )
+from kazusa_ai_chatbot.config import (
+    INTERACTION_STYLE_STORAGE_GUIDELINES_PER_FIELD_LIMIT,
+    L3_INTERACTION_STYLE_GUIDELINES_PER_FIELD_LIMIT,
+    RELEVANCE_USER_ENGAGEMENT_GUIDELINES_LIMIT,
+)
 from kazusa_ai_chatbot.utils import text_or_empty
 
 
@@ -85,7 +90,8 @@ def _normalized_guidelines(
         field_name: Name of the guideline field being normalized.
 
     Returns:
-        Up to five unique, trimmed, source-detail-free guideline strings.
+        Up to the configured number of unique, trimmed, source-detail-free
+        guideline strings.
     """
 
     raw_items = overlay.get(field_name)
@@ -110,7 +116,10 @@ def _normalized_guidelines(
             continue
         seen.add(dedup_key)
         normalized_items.append(text)
-        if len(normalized_items) >= 5:
+        if (
+            len(normalized_items)
+            >= INTERACTION_STYLE_STORAGE_GUIDELINES_PER_FIELD_LIMIT
+        ):
             break
     return_value = normalized_items
     return return_value
@@ -401,8 +410,10 @@ async def upsert_group_channel_style_image(
     return document
 
 
-def _runtime_overlay(document: InteractionStyleImageDoc | None) -> InteractionStyleOverlayDoc:
-    """Project a stored style image into its L3-facing overlay."""
+def _runtime_overlay(
+    document: InteractionStyleImageDoc | None,
+) -> InteractionStyleOverlayDoc:
+    """Project a stored style image into its sanitized runtime overlay."""
 
     if document is None:
         return_value = empty_interaction_style_overlay()
@@ -412,6 +423,37 @@ def _runtime_overlay(document: InteractionStyleImageDoc | None) -> InteractionSt
         return return_value
     overlay = document["overlay"]
     return_value = validate_interaction_style_overlay(dict(overlay))
+    return return_value
+
+
+def _project_l3_overlay(
+    overlay: InteractionStyleOverlayDoc,
+) -> InteractionStyleOverlayDoc:
+    """Cap a sanitized style overlay for L3 prompt consumption."""
+
+    return_value: InteractionStyleOverlayDoc = {
+        "speech_guidelines": list(
+            overlay["speech_guidelines"][
+                :L3_INTERACTION_STYLE_GUIDELINES_PER_FIELD_LIMIT
+            ]
+        ),
+        "social_guidelines": list(
+            overlay["social_guidelines"][
+                :L3_INTERACTION_STYLE_GUIDELINES_PER_FIELD_LIMIT
+            ]
+        ),
+        "pacing_guidelines": list(
+            overlay["pacing_guidelines"][
+                :L3_INTERACTION_STYLE_GUIDELINES_PER_FIELD_LIMIT
+            ]
+        ),
+        "engagement_guidelines": list(
+            overlay["engagement_guidelines"][
+                :L3_INTERACTION_STYLE_GUIDELINES_PER_FIELD_LIMIT
+            ]
+        ),
+        "confidence": overlay["confidence"],
+    }
     return return_value
 
 
@@ -435,7 +477,7 @@ async def build_interaction_style_context(
     """
 
     user_document = await get_user_style_image(global_user_id)
-    user_style = _runtime_overlay(user_document)
+    user_style = _project_l3_overlay(_runtime_overlay(user_document))
     context: dict = {
         "user_style": user_style,
         "application_order": ["user_style"],
@@ -445,6 +487,42 @@ async def build_interaction_style_context(
             platform=platform,
             platform_channel_id=platform_channel_id,
         )
-        context["group_channel_style"] = _runtime_overlay(group_document)
+        context["group_channel_style"] = _project_l3_overlay(
+            _runtime_overlay(group_document)
+        )
         context["application_order"] = ["user_style", "group_channel_style"]
     return context
+
+
+async def build_user_engagement_relevance_context(global_user_id: str) -> dict:
+    """Project one user's style image into relevance-facing engagement context.
+
+    Args:
+        global_user_id: Internal user UUID for the current speaker.
+
+    Returns:
+        Compact prompt-facing engagement guidance for persona relevance.
+    """
+
+    empty_context = {"engagement_guidelines": [], "confidence": ""}
+    user_document = await get_user_style_image(global_user_id)
+    try:
+        user_style = _runtime_overlay(user_document)
+    except (KeyError, TypeError, ValueError):
+        return_value = empty_context
+        return return_value
+
+    engagement_guidelines = list(
+        user_style["engagement_guidelines"][
+            :RELEVANCE_USER_ENGAGEMENT_GUIDELINES_LIMIT
+        ]
+    )
+    if not engagement_guidelines:
+        return_value = empty_context
+        return return_value
+
+    return_value = {
+        "engagement_guidelines": engagement_guidelines,
+        "confidence": user_style["confidence"],
+    }
+    return return_value

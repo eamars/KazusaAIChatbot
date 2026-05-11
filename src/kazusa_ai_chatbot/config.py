@@ -7,6 +7,16 @@ import os
 
 from dotenv import load_dotenv
 
+
+def _positive_int_from_env(name: str, default: str) -> int:
+    """Read a positive integer environment setting and fail fast if invalid."""
+
+    value = int(os.getenv(name, default))
+    if value < 1:
+        raise ValueError(f"{name} must be >= 1")
+    return value
+
+
 load_dotenv()
 
 # MongoDB
@@ -76,6 +86,25 @@ SAVE_ATTACHMENT_BASE64_TO_DB = os.getenv(
 ).lower() in ("1", "true", "yes")
 # Recent history window for downstream stages.
 CHAT_HISTORY_RECENT_LIMIT = 5
+
+# Maximum guideline strings retained for each interaction-style category in
+# persisted user or group-channel style images.
+INTERACTION_STYLE_STORAGE_GUIDELINES_PER_FIELD_LIMIT = _positive_int_from_env(
+    "INTERACTION_STYLE_STORAGE_GUIDELINES_PER_FIELD_LIMIT",
+    "5",
+)
+# Maximum stored guideline strings projected from each style source into L3
+# cognition prompts. Group chat may include one user source and one group source.
+L3_INTERACTION_STYLE_GUIDELINES_PER_FIELD_LIMIT = _positive_int_from_env(
+    "L3_INTERACTION_STYLE_GUIDELINES_PER_FIELD_LIMIT",
+    "5",
+)
+# Maximum stored user engagement guidelines projected into the group relevance
+# prompt. This keeps relevance context bounded on the live response path.
+RELEVANCE_USER_ENGAGEMENT_GUIDELINES_LIMIT = _positive_int_from_env(
+    "RELEVANCE_USER_ENGAGEMENT_GUIDELINES_LIMIT",
+    "3",
+)
 
 # MCP tool servers — JSON dict of {name: {url: ...}}
 # Read from MCP_SERVERS env var (JSON string)

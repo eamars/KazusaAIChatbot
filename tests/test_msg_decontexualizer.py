@@ -8,7 +8,14 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from kazusa_ai_chatbot.nodes.persona_supervisor2_msg_decontexualizer import call_msg_decontexualizer
+from kazusa_ai_chatbot.cognition_episode import build_text_chat_cognitive_episode
+from kazusa_ai_chatbot.nodes import (
+    persona_supervisor2_msg_decontexualizer as decontextualizer_module,
+)
+from kazusa_ai_chatbot.nodes.persona_supervisor2_msg_decontexualizer import (
+    call_msg_decontexualizer,
+    multimedia_descriptor_agent,
+)
 
 _FAILURE_INPUT = '等她有了机械臂，她说她不喜欢你，第一个被解决的就是你'
 _RESOLVED_FAILURE_INPUT = (
@@ -30,6 +37,9 @@ def _base_state():
         "user_name": "TestUser",
         "platform_user_id": "user_123",
         "platform_bot_id": "bot_456",
+        "character_profile": {
+            "name": "Character",
+        },
         "message_envelope": {
             "body_text": "他在干啥？",
             "raw_wire_text": "他在干啥？",
@@ -52,6 +62,82 @@ def _base_state():
         "indirect_speech_context": "",
         "reply_context": {},
     }
+
+
+def _multimedia_state() -> dict:
+    """Build a minimal graph state for multimedia descriptor tests."""
+
+    time_context = {
+        "current_local_datetime": "2024-01-01 00:00",
+        "current_local_weekday": "Monday",
+    }
+    state = {
+        "timestamp": "2024-01-01T00:00:00Z",
+        "time_context": time_context,
+        "platform": "discord",
+        "platform_message_id": "msg_123",
+        "platform_user_id": "user_123",
+        "global_user_id": "uuid-123",
+        "user_name": "TestUser",
+        "user_input": "Hello bot!",
+        "user_multimedia_input": [],
+        "user_profile": {"affinity": 500, "last_relationship_insight": ""},
+        "platform_bot_id": "bot_456",
+        "message_envelope": {
+            "body_text": "Hello bot!",
+            "raw_wire_text": "Hello bot!",
+            "addressed_to_global_user_ids": [],
+            "mentions": [],
+            "attachments": [],
+            "broadcast": True,
+        },
+        "prompt_message_context": {
+            "body_text": "Hello bot!",
+            "addressed_to_global_user_ids": [],
+            "broadcast": True,
+            "mentions": [],
+            "attachments": [],
+        },
+        "character_profile": {
+            "name": "Character",
+            "global_user_id": "character-global-id",
+            "mood": "neutral",
+            "global_vibe": "calm",
+        },
+        "platform_channel_id": "chan_1",
+        "channel_type": "group",
+        "channel_name": "general",
+        "chat_history_wide": [],
+        "chat_history_recent": [],
+        "reply_context": {},
+        "debug_modes": {},
+    }
+    state["cognitive_episode"] = build_text_chat_cognitive_episode(
+        episode_id="episode-msg_123",
+        percept_id="percept-msg_123-dialog",
+        timestamp=state["timestamp"],
+        time_context=time_context,
+        user_input=state["user_input"],
+        platform=state["platform"],
+        platform_channel_id=state["platform_channel_id"],
+        channel_type=state["channel_type"],
+        platform_message_id=state["platform_message_id"],
+        platform_user_id=state["platform_user_id"],
+        global_user_id=state["global_user_id"],
+        user_name=state["user_name"],
+        debug_modes=state["debug_modes"],
+        target_addressed_user_ids=[],
+        target_broadcast=True,
+    )
+    return state
+
+
+def _llm_response(content: str) -> MagicMock:
+    """Return a small mock object shaped like a LangChain response."""
+
+    response = MagicMock()
+    response.content = content
+    return response
 
 
 def _qq_failure_history() -> list[dict]:
@@ -229,6 +315,99 @@ class _HistoryAwareDecontextualizerLLM:
         response.content = json.dumps(content, ensure_ascii=False)
         return response
 
+
+def test_vision_descriptor_prompt_declares_structured_prompt_sections() -> None:
+    """Vision prompt should expose input, generation, and output contracts."""
+
+    prompt = decontextualizer_module._VISION_DESCRIPTOR_PROMPT
+
+    assert '# 输入格式' in prompt
+    assert '# 生成步骤' in prompt
+    assert '# 输出格式' in prompt
+
+
+@pytest.mark.asyncio
+async def test_multimedia_descriptor_updates_prompt_context_and_current_row(
+    monkeypatch,
+) -> None:
+    """Image summaries should feed prompt context and current-row persistence."""
+
+    state = _multimedia_state()
+    state["message_envelope"]["body_text"] = ""
+    state["message_envelope"]["attachments"] = [{
+        "media_type": "image/jpeg",
+        "base64_data": "image-bytes",
+        "storage_shape": "inline",
+    }]
+    state["user_multimedia_input"] = [{
+        "content_type": "image/jpeg",
+        "base64_data": "image-bytes",
+        "description": "",
+    }]
+    update_descriptions = AsyncMock(return_value=True)
+    monkeypatch.setattr(
+        "kazusa_ai_chatbot.nodes.persona_supervisor2_msg_decontexualizer.update_conversation_attachment_descriptions",
+        update_descriptions,
+    )
+
+    response = _llm_response('{"description": "a desk with handwritten notes"}')
+    with patch("kazusa_ai_chatbot.nodes.persona_supervisor2_msg_decontexualizer._vision_descriptor_llm") as mock_llm:
+        mock_llm.ainvoke = AsyncMock(return_value=response)
+        result = await multimedia_descriptor_agent(state)
+
+    assert result["user_multimedia_input"][0]["description"] == (
+        "a desk with handwritten notes"
+    )
+    assert result["prompt_message_context"]["attachments"][0]["description"] == (
+        "a desk with handwritten notes"
+    )
+    update_descriptions.assert_awaited_once_with(
+        platform="discord",
+        platform_channel_id="chan_1",
+        platform_message_id="msg_123",
+        descriptions=["a desk with handwritten notes"],
+    )
+
+
+@pytest.mark.asyncio
+async def test_multimedia_descriptor_continues_when_vision_llm_fails(
+    monkeypatch,
+    caplog,
+) -> None:
+    """Vision descriptor failures should leave unavailable prompt summaries."""
+
+    state = _multimedia_state()
+    state["message_envelope"]["body_text"] = ""
+    state["message_envelope"]["attachments"] = [{
+        "media_type": "image/jpeg",
+        "base64_data": "image-bytes",
+        "storage_shape": "inline",
+    }]
+    state["user_multimedia_input"] = [{
+        "content_type": "image/jpeg",
+        "base64_data": "image-bytes",
+        "description": "",
+    }]
+    update_descriptions = AsyncMock(return_value=True)
+    monkeypatch.setattr(
+        "kazusa_ai_chatbot.nodes.persona_supervisor2_msg_decontexualizer.update_conversation_attachment_descriptions",
+        update_descriptions,
+    )
+
+    with patch("kazusa_ai_chatbot.nodes.persona_supervisor2_msg_decontexualizer._vision_descriptor_llm") as mock_llm:
+        mock_llm.ainvoke = AsyncMock(side_effect=RuntimeError("vision down"))
+        caplog.set_level(logging.WARNING)
+        result = await multimedia_descriptor_agent(state)
+
+    assert result["user_multimedia_input"][0]["description"] == ""
+    assert result["prompt_message_context"]["attachments"][0] == {
+        "media_kind": "image",
+        "description": "",
+        "summary_status": "unavailable",
+    }
+    update_descriptions.assert_not_awaited()
+    assert "Image descriptor fallback after LLM exception" in caplog.text
+    assert "vision down" in caplog.text
 
 @pytest.mark.asyncio
 async def test_decontexualizer_filtered_history_recreates_group_referent_loss():

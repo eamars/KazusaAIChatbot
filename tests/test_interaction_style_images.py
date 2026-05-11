@@ -122,6 +122,94 @@ def test_validate_interaction_style_overlay_normalizes_guidelines() -> None:
     }
 
 
+def test_validate_interaction_style_overlay_uses_configured_guideline_limit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Stored style images cap each guideline field by configured limit."""
+
+    monkeypatch.setattr(
+        style_store,
+        "INTERACTION_STYLE_STORAGE_GUIDELINES_PER_FIELD_LIMIT",
+        2,
+    )
+    raw_overlay = {
+        "speech_guidelines": ["First.", "Second.", "Third."],
+        "social_guidelines": [],
+        "pacing_guidelines": [],
+        "engagement_guidelines": [],
+        "confidence": "medium",
+    }
+
+    overlay = style_store.validate_interaction_style_overlay(raw_overlay)
+
+    assert overlay["speech_guidelines"] == ["First.", "Second."]
+
+
+@pytest.mark.asyncio
+async def test_build_interaction_style_context_uses_configured_l3_limit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """L3 style context caps each source independently from storage."""
+
+    monkeypatch.setattr(
+        style_store,
+        "L3_INTERACTION_STYLE_GUIDELINES_PER_FIELD_LIMIT",
+        2,
+        raising=False,
+    )
+    db = _StyleImageDb()
+    _patch_get_db(monkeypatch, db)
+    await style_store.upsert_user_style_image(
+        global_user_id="user-1",
+        overlay={
+            "speech_guidelines": [],
+            "social_guidelines": [],
+            "pacing_guidelines": [],
+            "engagement_guidelines": [
+                "User first.",
+                "User second.",
+                "User third.",
+            ],
+            "confidence": "medium",
+        },
+        source_reflection_run_ids=["run-1"],
+        timestamp="2026-05-06T00:00:00+00:00",
+    )
+    await style_store.upsert_group_channel_style_image(
+        platform="qq",
+        platform_channel_id="group-1",
+        overlay={
+            "speech_guidelines": [],
+            "social_guidelines": [],
+            "pacing_guidelines": [],
+            "engagement_guidelines": [
+                "Group first.",
+                "Group second.",
+                "Group third.",
+            ],
+            "confidence": "high",
+        },
+        source_reflection_run_ids=["run-2"],
+        timestamp="2026-05-06T00:00:00+00:00",
+    )
+
+    context = await style_store.build_interaction_style_context(
+        global_user_id="user-1",
+        channel_type="group",
+        platform="qq",
+        platform_channel_id="group-1",
+    )
+
+    assert context["user_style"]["engagement_guidelines"] == [
+        "User first.",
+        "User second.",
+    ]
+    assert context["group_channel_style"]["engagement_guidelines"] == [
+        "Group first.",
+        "Group second.",
+    ]
+
+
 def test_validate_interaction_style_overlay_rejects_source_details() -> None:
     """Event-like markers cannot be persisted as style guidance."""
 
@@ -314,3 +402,128 @@ async def test_build_interaction_style_context_group_applies_user_then_group(
     assert context["group_channel_style"]["social_guidelines"] == [
         "Keep group replies compact."
     ]
+
+
+@pytest.mark.asyncio
+async def test_build_user_engagement_relevance_context_projects_only_engagement(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Relevance context exposes only capped user engagement guidance."""
+
+    db = _StyleImageDb()
+    _patch_get_db(monkeypatch, db)
+    await style_store.upsert_user_style_image(
+        global_user_id="user-1",
+        overlay={
+            "speech_guidelines": ["Use light teasing."],
+            "social_guidelines": ["Acknowledge effort."],
+            "pacing_guidelines": ["Pause before advice."],
+            "engagement_guidelines": [
+                "Ask one concrete follow-up.",
+                "Join clear direct requests.",
+                "Reflect image-sharing intent.",
+                "Extra item should be capped.",
+            ],
+            "confidence": "high",
+        },
+        source_reflection_run_ids=["run-1"],
+        timestamp="2026-05-06T00:00:00+00:00",
+    )
+
+    context = await style_store.build_user_engagement_relevance_context("user-1")
+
+    assert context == {
+        "engagement_guidelines": [
+            "Ask one concrete follow-up.",
+            "Join clear direct requests.",
+            "Reflect image-sharing intent.",
+        ],
+        "confidence": "high",
+    }
+
+
+@pytest.mark.asyncio
+async def test_build_user_engagement_relevance_context_uses_configured_limit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Relevance projection caps engagement guidance by configured limit."""
+
+    db = _StyleImageDb()
+    _patch_get_db(monkeypatch, db)
+    monkeypatch.setattr(
+        style_store,
+        "RELEVANCE_USER_ENGAGEMENT_GUIDELINES_LIMIT",
+        2,
+    )
+    await style_store.upsert_user_style_image(
+        global_user_id="user-1",
+        overlay={
+            "speech_guidelines": [],
+            "social_guidelines": [],
+            "pacing_guidelines": [],
+            "engagement_guidelines": [
+                "Ask one concrete follow-up.",
+                "Join clear direct requests.",
+                "Reflect image-sharing intent.",
+            ],
+            "confidence": "high",
+        },
+        source_reflection_run_ids=["run-1"],
+        timestamp="2026-05-06T00:00:00+00:00",
+    )
+
+    context = await style_store.build_user_engagement_relevance_context("user-1")
+
+    assert context == {
+        "engagement_guidelines": [
+            "Ask one concrete follow-up.",
+            "Join clear direct requests.",
+        ],
+        "confidence": "high",
+    }
+
+
+@pytest.mark.asyncio
+async def test_build_user_engagement_relevance_context_empty_for_missing_or_inactive(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Missing, inactive, or empty user style returns the empty relevance shape."""
+
+    db = _StyleImageDb()
+    _patch_get_db(monkeypatch, db)
+    await style_store.upsert_user_style_image(
+        global_user_id="user-empty",
+        overlay=style_store.empty_interaction_style_overlay(),
+        source_reflection_run_ids=[],
+        timestamp="2026-05-06T00:00:00+00:00",
+    )
+
+    missing = await style_store.build_user_engagement_relevance_context("missing")
+    empty = await style_store.build_user_engagement_relevance_context("user-empty")
+
+    expected = {"engagement_guidelines": [], "confidence": ""}
+    assert missing == expected
+    assert empty == expected
+
+
+@pytest.mark.asyncio
+async def test_build_user_engagement_relevance_context_empty_for_invalid_document(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Malformed stored style documents should not break optional relevance."""
+
+    db = _StyleImageDb()
+    _patch_get_db(monkeypatch, db)
+    style_image_id = style_store._style_image_id_for_user("user-invalid")
+    db.collection.docs[style_image_id] = {
+        "style_image_id": style_image_id,
+        "scope_type": "user",
+        "global_user_id": "user-invalid",
+        "status": InteractionStyleStatus.ACTIVE,
+    }
+
+    context = await style_store.build_user_engagement_relevance_context(
+        "user-invalid"
+    )
+
+    assert context == {"engagement_guidelines": [], "confidence": ""}

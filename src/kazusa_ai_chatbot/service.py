@@ -103,7 +103,10 @@ from kazusa_ai_chatbot.brain_service.contracts import (
     RuntimeAdapterRegistrationRequest,
     RuntimeAdapterRegistrationResponse,
 )
-from kazusa_ai_chatbot.nodes.relevance_agent import relevance_agent, multimedia_descriptor_agent
+from kazusa_ai_chatbot.nodes.persona_relevance_agent import relevance_agent
+from kazusa_ai_chatbot.nodes.persona_supervisor2_msg_decontexualizer import (
+    multimedia_descriptor_agent,
+)
 from kazusa_ai_chatbot.nodes.persona_supervisor2 import persona_supervisor2
 from kazusa_ai_chatbot.nodes.persona_supervisor2_consolidator import call_consolidation_subgraph
 from kazusa_ai_chatbot.nodes.persona_supervisor2_consolidator_persistence import configure_task_dispatcher

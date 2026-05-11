@@ -141,6 +141,74 @@ class TestCache2Config:
         assert RAG_CACHE2_MAX_ENTRIES > 0
 
 
+class TestInteractionStyleConfig:
+    def test_interaction_style_limits_default_to_positive_values(self):
+        from kazusa_ai_chatbot.config import (
+            INTERACTION_STYLE_STORAGE_GUIDELINES_PER_FIELD_LIMIT,
+            L3_INTERACTION_STYLE_GUIDELINES_PER_FIELD_LIMIT,
+            RELEVANCE_USER_ENGAGEMENT_GUIDELINES_LIMIT,
+        )
+
+        assert INTERACTION_STYLE_STORAGE_GUIDELINES_PER_FIELD_LIMIT == 5
+        assert L3_INTERACTION_STYLE_GUIDELINES_PER_FIELD_LIMIT == 5
+        assert RELEVANCE_USER_ENGAGEMENT_GUIDELINES_LIMIT == 3
+
+    def test_interaction_style_storage_guideline_limit_rejects_zero(self, tmp_path):
+        env = _configured_subprocess_env_without_dotenv()
+        env["INTERACTION_STYLE_STORAGE_GUIDELINES_PER_FIELD_LIMIT"] = "0"
+
+        result = subprocess.run(
+            [sys.executable, "-c", "import kazusa_ai_chatbot.config"],
+            cwd=tmp_path,
+            env=env,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+        assert result.returncode != 0
+        expected_error = (
+            "INTERACTION_STYLE_STORAGE_GUIDELINES_PER_FIELD_LIMIT must be >= 1"
+        )
+        assert expected_error in result.stderr
+
+    def test_l3_interaction_style_guideline_limit_rejects_zero(self, tmp_path):
+        env = _configured_subprocess_env_without_dotenv()
+        env["L3_INTERACTION_STYLE_GUIDELINES_PER_FIELD_LIMIT"] = "0"
+
+        result = subprocess.run(
+            [sys.executable, "-c", "import kazusa_ai_chatbot.config"],
+            cwd=tmp_path,
+            env=env,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+        assert result.returncode != 0
+        expected_error = (
+            "L3_INTERACTION_STYLE_GUIDELINES_PER_FIELD_LIMIT must be >= 1"
+        )
+        assert expected_error in result.stderr
+
+    def test_relevance_user_engagement_limit_rejects_negative(self, tmp_path):
+        env = _configured_subprocess_env_without_dotenv()
+        env["RELEVANCE_USER_ENGAGEMENT_GUIDELINES_LIMIT"] = "-1"
+
+        result = subprocess.run(
+            [sys.executable, "-c", "import kazusa_ai_chatbot.config"],
+            cwd=tmp_path,
+            env=env,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+        assert result.returncode != 0
+        expected_error = "RELEVANCE_USER_ENGAGEMENT_GUIDELINES_LIMIT must be >= 1"
+        assert expected_error in result.stderr
+
+
 class TestRouteLlmConfig:
     def test_generic_chat_llm_config_is_removed(self):
         import kazusa_ai_chatbot.config as config

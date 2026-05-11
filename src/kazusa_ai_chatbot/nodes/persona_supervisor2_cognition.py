@@ -74,9 +74,12 @@ async def call_cognition_subgraph(state: GlobalPersonaState) -> GlobalPersonaSta
 
     sub_agent_builder.add_edge("l2c_judgment_core", "l3_contextual_agent")
     sub_agent_builder.add_edge("l2c_judgment_core", "l3_interaction_style_context_loader")
-    sub_agent_builder.add_edge("l2c_judgment_core", "l3_content_anchor_agent")
 
     sub_agent_builder.add_edge("l3_contextual_agent", "l3_visual_agent")
+    sub_agent_builder.add_edge(
+        "l3_interaction_style_context_loader",
+        "l3_content_anchor_agent",
+    )
     sub_agent_builder.add_edge("l3_content_anchor_agent", "l3_visual_agent")
     sub_agent_builder.add_edge("l3_interaction_style_context_loader", "l3_style_agent")
     sub_agent_builder.add_edge("l3_style_agent", "l3_preference_adapter")

@@ -90,6 +90,7 @@ from kazusa_ai_chatbot.db.reflection_cycle import (
 )
 from kazusa_ai_chatbot.db.interaction_style_images import (
     build_interaction_style_context,
+    build_user_engagement_relevance_context,
     empty_interaction_style_overlay,
     ensure_interaction_style_image_indexes,
     get_group_channel_style_image,
@@ -215,8 +216,9 @@ __all__ = [
     "ensure_reflection_run_indexes", "find_reflection_run_by_id",
     "list_daily_channel_runs", "list_existing_run_ids",
     "list_hourly_runs_for_channel_day", "upsert_reflection_run",
-    "build_interaction_style_context", "empty_interaction_style_overlay",
-    "ensure_interaction_style_image_indexes", "get_group_channel_style_image",
+    "build_interaction_style_context", "build_user_engagement_relevance_context",
+    "empty_interaction_style_overlay", "ensure_interaction_style_image_indexes",
+    "get_group_channel_style_image",
     "get_user_style_image", "upsert_group_channel_style_image",
     "upsert_user_style_image", "validate_interaction_style_overlay",
     # Users

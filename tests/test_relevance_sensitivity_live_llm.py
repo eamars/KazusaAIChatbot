@@ -4,12 +4,14 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 import os
+from unittest.mock import AsyncMock, patch
 
 import httpx
 import pytest
 
 from kazusa_ai_chatbot.config import RELEVANCE_AGENT_LLM_BASE_URL
-from kazusa_ai_chatbot.nodes.relevance_agent import (
+from kazusa_ai_chatbot.nodes import persona_relevance_agent as relevance_module
+from kazusa_ai_chatbot.nodes.persona_relevance_agent import (
     build_group_attention_context,
     relevance_agent,
 )
@@ -213,6 +215,7 @@ async def _run_relevance_probe(
     content: str,
     desired_should_respond: bool,
     history: list[dict] | None = None,
+    engagement_context: dict | None = None,
     tuning_note: str,
 ) -> dict:
     """Run one live relevance probe and persist an inspectable trace.
@@ -229,18 +232,29 @@ async def _run_relevance_probe(
     """
 
     state = _quiet_group_state(content, history=history)
+    if engagement_context is None:
+        engagement_context = {
+            "engagement_guidelines": [],
+            "confidence": "",
+        }
     group_attention = build_group_attention_context(
         chat_history_wide=state["chat_history_wide"],
         platform_bot_id=_PLATFORM_BOT_ID,
         character_global_user_id=_CHARACTER_GLOBAL_USER_ID,
     )
-    result = await relevance_agent(state)
+    with patch.object(
+        relevance_module,
+        "build_user_engagement_relevance_context",
+        AsyncMock(return_value=engagement_context),
+    ):
+        result = await relevance_agent(state)
 
     trace = {
         "case_id": case_id,
         "input": content,
         "desired_should_respond": desired_should_respond,
         "strict_expectations": _STRICT_EXPECTATIONS,
+        "engagement_context": engagement_context,
         "group_attention": group_attention["group_attention"],
         "directly_addressed": False,
         "history": state["chat_history_wide"],
@@ -353,6 +367,56 @@ async def test_live_relevance_low_noise_name_second_person_probe(
         desired_should_respond=True,
         tuning_note="Explicit name plus second person should remain answerable.",
     )
+
+
+async def test_noisy_relevance_live_uses_user_engagement_without_false_negative(
+    ensure_live_relevance_llm,
+) -> None:
+    """Eligible low-noise share should not be missed when engagement invites follow-up."""
+
+    del ensure_live_relevance_llm
+    result = await _run_relevance_probe(
+        case_id="user_engagement_followup_false_negative",
+        content="千纱，翻到一张旧图，突然有点怀旧。",
+        desired_should_respond=True,
+        engagement_context={
+            "engagement_guidelines": [
+                "主动承接用户分享意图，通过追问背景或感受参与。",
+            ],
+            "confidence": "medium",
+        },
+        tuning_note=(
+            "Name-as-vocative plus a user share is eligible; engagement guidance "
+            "should support a light follow-up."
+        ),
+    )
+
+    assert result["should_respond"] is True, result
+
+
+async def test_noisy_relevance_live_does_not_turn_engagement_into_false_positive(
+    ensure_live_relevance_llm,
+) -> None:
+    """Engagement guidance must not make third-person group talk a bot summons."""
+
+    del ensure_live_relevance_llm
+    result = await _run_relevance_probe(
+        case_id="user_engagement_third_person_false_positive",
+        content="千纱看到这种旧照片会不会怀旧？",
+        desired_should_respond=False,
+        engagement_context={
+            "engagement_guidelines": [
+                "主动承接用户分享意图，通过追问背景或感受参与。",
+            ],
+            "confidence": "medium",
+        },
+        tuning_note=(
+            "Kazusa is the grammatical topic, not a vocative listener; "
+            "engagement guidance must remain subordinate to address evidence."
+        ),
+    )
+
+    assert result["should_respond"] is False, result
 
 
 async def test_live_relevance_group_nickname_collision_probe(

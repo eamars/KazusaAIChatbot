@@ -18,7 +18,7 @@ from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition_prompt_selection impo
 from kazusa_ai_chatbot.nodes.persona_supervisor2_consolidator_origin import (
     build_user_message_consolidation_origin,
 )
-from kazusa_ai_chatbot.nodes.relevance_agent import relevance_agent
+from kazusa_ai_chatbot.nodes.persona_relevance_agent import relevance_agent
 
 
 class _CapturingServiceGraph:
@@ -268,7 +268,7 @@ async def test_relevance_keeps_image_descriptor_out_of_user_input() -> None:
         '"indirect_speech_context": ""}'
     )
 
-    with patch("kazusa_ai_chatbot.nodes.relevance_agent._relevance_agent_llm") as llm:
+    with patch("kazusa_ai_chatbot.nodes.persona_relevance_agent._relevance_agent_llm") as llm:
         llm.ainvoke = AsyncMock(return_value=response)
         result = await relevance_agent(_minimal_relevance_state())
 

@@ -7,12 +7,283 @@ from kazusa_ai_chatbot.config import (
     MSG_DECONTEXTUALIZER_LLM_API_KEY,
     MSG_DECONTEXTUALIZER_LLM_BASE_URL,
     MSG_DECONTEXTUALIZER_LLM_MODEL,
+    VISION_DESCRIPTOR_LLM_API_KEY,
+    VISION_DESCRIPTOR_LLM_BASE_URL,
+    VISION_DESCRIPTOR_LLM_MODEL,
+)
+from kazusa_ai_chatbot.cognition_episode import (
+    build_reply_media_description_rows,
+    build_text_chat_media_description_rows,
+    replace_text_chat_media_percepts,
+)
+from kazusa_ai_chatbot.db import (
+    update_conversation_attachment_descriptions,
+)
+from kazusa_ai_chatbot.message_envelope import (
+    MAX_PROMPT_ATTACHMENT_DESCRIPTION_CHARS,
+    project_prompt_message_context,
 )
 from kazusa_ai_chatbot.nodes.persona_supervisor2_schema import GlobalPersonaState
 from kazusa_ai_chatbot.nodes.referent_resolution import normalize_referents
+from kazusa_ai_chatbot.state import IMProcessState
 from kazusa_ai_chatbot.utils import get_llm, log_preview, parse_llm_json_output
 
 logger = logging.getLogger(__name__)
+
+
+_VISION_DESCRIPTOR_PROMPT = '''\
+你负责把图片转换为后续认知层可直接使用的客观视觉观察。输出必须同时服务两件事:
+1. `description` 作为唯一持久化的图片文字摘要。
+2. 结构化字段作为本轮认知的视觉证据，帮助弱本地模型精确理解场景。
+
+# 输入格式
+输入是一个多模态 HumanMessage，content 数组中只有一个 `image_url` 项。
+`image_url.url` 是 `data:<mime>;base64,<payload>` 形式的图片数据。你只能依据图片像素本身输出观察，不读取外部上下文，也不推测用户为什么发送它。
+
+# 生成步骤
+1. 先整体观察画面，确认主要人物、物体、动作、环境和可见文字。
+2. 再把证据分到对应字段：文字进 `visible_text`，关键可见事实进 `salient_visual_facts`，布局和位置关系进 `spatial_or_scene_facts`。
+3. 对看不清、被遮挡、可能误读的部分使用 `uncertainty` 标出，不把不确定内容写成确定事实。
+4. 最后把最重要的可见事实压缩成 `description`，保证它可以单独作为图片存储描述。
+
+# 观察要求
+- 只描述图片中可见的内容，不代替角色评价、抒情或推测用户意图。
+- 优先保留人物、物体、动作、状态、可见文字、数量、颜色、位置关系和不确定区域。
+- 看不清的部分写入 `uncertainty`，用 "模糊"、"被遮挡"、"无法确认" 等明确措辞。
+- `description` 控制在 {max_description_chars} 字以内，写成一段自然语言摘要。
+- 其他字段使用短句数组，便于后续提示词按证据类型读取。
+
+# 字段定义
+- `description`: 图片的综合摘要，必须可单独作为存储描述使用。
+- `visible_text`: 图片中可辨认的文字、数字、符号或屏幕内容；没有则空数组。
+- `salient_visual_facts`: 关键人物、物体、动作、颜色、状态等事实。
+- `spatial_or_scene_facts`: 场景、布局、前后左右上下、远近、遮挡等空间事实。
+- `uncertainty`: 模糊、无法确认、可能误读的视觉区域。
+
+# 输出格式
+请务必返回合法 JSON 字符串，仅包含以下字段:
+{{
+    "description": "一段客观图片摘要",
+    "visible_text": ["图中可见文字"],
+    "salient_visual_facts": ["关键视觉事实"],
+    "spatial_or_scene_facts": ["空间或场景事实"],
+    "uncertainty": ["不确定或模糊之处"]
+}}
+'''
+_vision_descriptor_llm = get_llm(
+    temperature=0,
+    top_p=1.0,
+    model=VISION_DESCRIPTOR_LLM_MODEL,
+    base_url=VISION_DESCRIPTOR_LLM_BASE_URL,
+    api_key=VISION_DESCRIPTOR_LLM_API_KEY,
+)
+
+
+def _descriptor_string_field(data: dict, field_name: str) -> str:
+    value = data.get(field_name)
+    if not isinstance(value, str):
+        return_value = ""
+        return return_value
+    return_value = value.strip()
+    return return_value
+
+
+def _descriptor_string_list_field(data: dict, field_name: str) -> list[str]:
+    value = data.get(field_name)
+    if isinstance(value, str):
+        clean_value = value.strip()
+        if clean_value:
+            return_value = [clean_value]
+            return return_value
+        return_value: list[str] = []
+        return return_value
+    if not isinstance(value, list):
+        return_value = []
+        return return_value
+
+    strings: list[str] = []
+    for item in value:
+        if not isinstance(item, str):
+            continue
+        clean_item = item.strip()
+        if clean_item:
+            strings.append(clean_item)
+    return strings
+
+
+def _build_current_image_observation(
+    *,
+    result: dict,
+    description: str,
+    source_message_id: str,
+) -> dict[str, object]:
+    visible_text = _descriptor_string_list_field(result, "visible_text")
+    salient_visual_facts = _descriptor_string_list_field(
+        result,
+        "salient_visual_facts",
+    )
+    spatial_or_scene_facts = _descriptor_string_list_field(
+        result,
+        "spatial_or_scene_facts",
+    )
+    uncertainty = _descriptor_string_list_field(result, "uncertainty")
+    summary = _descriptor_string_field(result, "summary") or description
+    has_visual_evidence = any(
+        (
+            summary,
+            visible_text,
+            salient_visual_facts,
+            spatial_or_scene_facts,
+        )
+    )
+    summary_status = "available" if has_visual_evidence else "unavailable"
+    return_value: dict[str, object] = {
+        "observation_origin": "current_attachment",
+        "source_message_id": source_message_id,
+        "media_kind": "image",
+        "summary_status": summary_status,
+        "summary": summary,
+        "visible_text": visible_text,
+        "salient_visual_facts": salient_visual_facts,
+        "spatial_or_scene_facts": spatial_or_scene_facts,
+        "uncertainty": uncertainty,
+    }
+    return return_value
+
+
+async def multimedia_descriptor_agent(state: IMProcessState) -> IMProcessState:
+    """Refresh prompt-safe media descriptions for the current chat turn.
+
+    Args:
+        state: Current graph state containing multimedia rows and the current
+            cognitive episode.
+
+    Returns:
+        Partial graph state containing refreshed multimedia rows, prompt
+        message context, and cognitive episode.
+    """
+    user_name = state.get("user_name")
+    platform_user_id = state.get("platform_user_id", "")
+
+    # Read the multi-media content
+    user_multimedia_input = state.get("user_multimedia_input", [])
+    output_multimedia_input = []
+
+    for piece in user_multimedia_input:
+        if piece["content_type"].startswith("image/"):
+            if not piece["base64_data"]:
+                output_piece = {
+                    "content_type": piece["content_type"],
+                    "base64_data": piece["base64_data"],
+                    "description": piece["description"],
+                }
+                image_observation = piece.get("image_observation")
+                if isinstance(image_observation, dict):
+                    output_piece["image_observation"] = image_observation
+                output_multimedia_input.append(output_piece)
+                continue
+
+            # Call vision descriptor
+            system_prompt = SystemMessage(content=_VISION_DESCRIPTOR_PROMPT.format(
+                max_description_chars=MAX_PROMPT_ATTACHMENT_DESCRIPTION_CHARS,
+            ))
+            human_message = HumanMessage(content=[
+                {
+                    "type": "image_url",
+                    "image_url": {
+                        # You must combine the mime_type and base64 into a Data URI string
+                        "url": f"data:{piece['content_type']};base64,{piece['base64_data']}"
+                    },
+                }
+            ])
+
+            description = ""
+            try:
+                response = await _vision_descriptor_llm.ainvoke([
+                    system_prompt,
+                    human_message,
+                ])
+            except Exception as exc:
+                logger.warning(
+                    f"Image descriptor fallback after LLM exception: {exc} "
+                    f"user={user_name} platform_user={platform_user_id} "
+                    f"media_type={piece['content_type']}",
+                    exc_info=True,
+                )
+                result = {}
+            else:
+                try:
+                    result = parse_llm_json_output(response.content)
+                except Exception as exc:
+                    logger.warning(
+                        f"Image descriptor fallback after parse exception: {exc} "
+                        f"user={user_name} platform_user={platform_user_id} "
+                        f"media_type={piece['content_type']} "
+                        f"raw={log_preview(response.content)}",
+                        exc_info=True,
+                    )
+                    result = {}
+
+            if not isinstance(result, dict):
+                result = {}
+            raw_description = result.get("description", "")
+            if isinstance(raw_description, str):
+                description = raw_description
+            description = description.strip()
+            image_observation = _build_current_image_observation(
+                result=result,
+                description=description,
+                source_message_id=state["platform_message_id"],
+            )
+            summary = image_observation["summary"]
+            if not description and isinstance(summary, str):
+                description = summary
+
+            logger.debug(f'Image description: user={user_name} platform_user={platform_user_id} media_type={piece["content_type"]} description={log_preview(description)}')
+
+            output_multimedia_input.append({
+                "content_type": piece["content_type"],
+                "base64_data": piece["base64_data"],
+                "description": description,
+                "image_observation": image_observation,
+            })
+        else:
+            output_multimedia_input.append(piece)
+
+    descriptions = [
+        str(piece.get("description", "")).strip()
+        for piece in output_multimedia_input
+    ]
+    has_description = any(descriptions)
+    if has_description:
+        await update_conversation_attachment_descriptions(
+            platform=state["platform"],
+            platform_channel_id=state["platform_channel_id"],
+            platform_message_id=state["platform_message_id"],
+            descriptions=descriptions,
+        )
+
+    prompt_message_context = project_prompt_message_context(
+        message_envelope=state["message_envelope"],
+        multimedia_input=output_multimedia_input,
+        reply_context=state.get("reply_context"),
+    )
+    media_description_rows = [
+        *build_text_chat_media_description_rows(output_multimedia_input),
+        *build_reply_media_description_rows(state.get("reply_context")),
+    ]
+    cognitive_episode = replace_text_chat_media_percepts(
+        episode=state["cognitive_episode"],
+        media_description_rows=media_description_rows,
+    )
+
+    return_value = {
+        "user_multimedia_input": output_multimedia_input,
+        "prompt_message_context": prompt_message_context,
+        "cognitive_episode": cognitive_episode,
+    }
+    return return_value
+
 
 _msg_decontexualizer_llm = get_llm(
     temperature=0.1,

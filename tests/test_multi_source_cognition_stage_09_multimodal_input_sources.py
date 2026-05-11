@@ -16,7 +16,7 @@ from kazusa_ai_chatbot import service as service_module
 from kazusa_ai_chatbot.nodes import persona_supervisor2_cognition_l1 as l1_module
 from kazusa_ai_chatbot.nodes import persona_supervisor2_cognition_l2 as l2_module
 from kazusa_ai_chatbot.nodes import persona_supervisor2_cognition_l3 as l3_module
-from kazusa_ai_chatbot.nodes import relevance_agent as relevance_module
+from kazusa_ai_chatbot.nodes import persona_supervisor2_msg_decontexualizer as decontextualizer_module
 from kazusa_ai_chatbot.cognition_episode import (
     CognitiveEpisodeValidationError,
     MAX_COGNITIVE_EPISODE_MEDIA_DESCRIPTION_CHARS,
@@ -96,8 +96,8 @@ _PROMPT_FINGERPRINTS = (
     (
         "_CONTENT_ANCHOR_AGENT_PROMPT",
         l3_module._CONTENT_ANCHOR_AGENT_PROMPT,
-        14604,
-        "5bf5c049cba9e7a67548c193c3ff5079f13b25a33ca2c338348932fc13f9cad3",
+        16814,
+        "ddf82213185239bedf4755a4f23e3abfa9d1f0a8e2b813c0bbee38b85bc9405f",
     ),
     (
         "_PREFERENCE_ADAPTER_PROMPT",
@@ -923,17 +923,17 @@ async def test_descriptor_refreshes_cognitive_episode_after_image_description(
     )
     update_descriptions = AsyncMock(return_value=True)
     monkeypatch.setattr(
-        relevance_module,
+        decontextualizer_module,
         "_vision_descriptor_llm",
         descriptor_llm,
     )
     monkeypatch.setattr(
-        relevance_module,
+        decontextualizer_module,
         "update_conversation_attachment_descriptions",
         update_descriptions,
     )
 
-    result = await relevance_module.multimedia_descriptor_agent(state)
+    result = await decontextualizer_module.multimedia_descriptor_agent(state)
 
     assert state["cognitive_episode"] == original_episode
     assert result["cognitive_episode"]["input_sources"] == [
@@ -974,17 +974,17 @@ async def test_descriptor_audio_description_passes_through_without_audio_llm_cal
     descriptor_llm.ainvoke = AsyncMock()
     update_descriptions = AsyncMock(return_value=True)
     monkeypatch.setattr(
-        relevance_module,
+        decontextualizer_module,
         "_vision_descriptor_llm",
         descriptor_llm,
     )
     monkeypatch.setattr(
-        relevance_module,
+        decontextualizer_module,
         "update_conversation_attachment_descriptions",
         update_descriptions,
     )
 
-    result = await relevance_module.multimedia_descriptor_agent(state)
+    result = await decontextualizer_module.multimedia_descriptor_agent(state)
 
     descriptor_llm.ainvoke.assert_not_awaited()
     assert result["user_multimedia_input"] == state["user_multimedia_input"]
@@ -1025,17 +1025,17 @@ async def test_descriptor_image_description_without_base64_skips_vision_llm(
     descriptor_llm.ainvoke = AsyncMock()
     update_descriptions = AsyncMock(return_value=True)
     monkeypatch.setattr(
-        relevance_module,
+        decontextualizer_module,
         "_vision_descriptor_llm",
         descriptor_llm,
     )
     monkeypatch.setattr(
-        relevance_module,
+        decontextualizer_module,
         "update_conversation_attachment_descriptions",
         update_descriptions,
     )
 
-    result = await relevance_module.multimedia_descriptor_agent(state)
+    result = await decontextualizer_module.multimedia_descriptor_agent(state)
 
     descriptor_llm.ainvoke.assert_not_awaited()
     assert result["user_multimedia_input"] == state["user_multimedia_input"]

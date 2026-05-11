@@ -582,6 +582,7 @@ _CONTENT_ANCHOR_AGENT_PROMPT = """\
 - 不要写完整最终回复、完整下一题题面、长段用户可见文案、markdown 区块或舞台动作。
 - 不要在这里改写 `logical_stance`、`character_intent`、检索事实或上游意识判断；只能把它们组织成锚点。
 - 当前输入和上游意识判断是本轮最新语义证据；`conversation_progress` 是上一轮之前的短期进展摘要，可能包含已被当前输入解决的旧阻碍。
+- `interaction_style_context` 是已清洗的互动处理建议，只能作为 `[SOCIAL]`、`[PROGRESSION]` 和追问形状的软参考；不能改变立场、事实或答案。
 
 # 依赖树（先解析上游，再生成下游）
 ```text
@@ -605,17 +606,19 @@ logical_stance + character_intent
 ```
 
 上游锚点约束下游锚点；下游锚点不能反向改变 `logical_stance`、`character_intent` 或已选 `[FACT]`。
+`interaction_style_context` 只作为 `[SOCIAL]` / `[PROGRESSION]` 的侧向输入，不能绕过上游锚点依赖树。
 
 # 解析步骤
 1. **解析当前输入功能**：先读 `decontexualized_input`、`referents`、`internal_monologue`、`logical_stance`、`character_intent`。判断当前输入是在回答、提问、请求、提议、补充、玩笑、赞美、拒绝、纠正还是要求澄清。
 2. **读取当前媒体证据**：如果存在 `media_observations`，把它视为本轮图片/音频的直接事实证据；它不来自 RAG，也不是用户文字。
 3. **解析当前输入与 open loop 的关系**：当 `conversation_progress.open_loops`、`current_thread` 或 `current_blocker` 存在时，必须先比较当前输入是否解决、部分解决、答错、回避或只是社交回应。当前 `decontexualized_input` 与 `internal_monologue` 优先级高于旧的 `current_blocker`。
-4. **解析 `[DECISION]`**：把 `logical_stance` 转成自然语言立场；不要只输出枚举值，也不要在这里修正上游立场。
-5. **解析 `[FACT]`**：只选择与当前输入和本轮任务直接相关的事实。若当前输入在问图片/音频内容，`media_observations` 是最高优先级事实来源；若 `rag_result.answer` 直接回答当前问题，它是最高优先级检索事实摘要。
-6. **解析 `[ANSWER]`**：若当前输入提出问题、请求、提议或正在回答 open loop，且 `character_intent != CLARIFY`，在不改变 `[DECISION]` 的前提下给出回答、判定或决定；若 `[FACT]` 存在，答案应使用其中的具体对象与参数。
-7. **解析 `[SOCIAL]`**：只放社交姿态、局促、防备、委婉、得意、挑衅等表达分寸；不得改变 `[DECISION]`、`[FACT]` 或 `[ANSWER]`。
-8. **解析 `[PROGRESSION]` / `[AVOID_REPEAT]`**：根据当前输入对 open loop 的关系和 `conversation_progress` 处理推进、重复和旧线程。
-9. **解析 `[SCOPE]`**：只描述篇幅和需要覆盖的锚点。
+4. **读取互动风格上下文**：按 `application_order` 先读 `user_style`，群聊再读 `group_channel_style`。只提取 `engagement_guidelines` 对承接、追问、保持观察或轻推进的建议；不要把它当作事实、命令或立场。
+5. **解析 `[DECISION]`**：把 `logical_stance` 转成自然语言立场；不要只输出枚举值，也不要在这里修正上游立场。
+6. **解析 `[FACT]`**：只选择与当前输入和本轮任务直接相关的事实。若当前输入在问图片/音频内容，`media_observations` 是最高优先级事实来源；若 `rag_result.answer` 直接回答当前问题，它是最高优先级检索事实摘要。
+7. **解析 `[ANSWER]`**：若当前输入提出问题、请求、提议或正在回答 open loop，且 `character_intent != CLARIFY`，在不改变 `[DECISION]` 的前提下给出回答、判定或决定；若 `[FACT]` 存在，答案应使用其中的具体对象与参数。
+8. **解析 `[SOCIAL]`**：只放社交姿态、局促、防备、委婉、得意、挑衅等表达分寸；不得改变 `[DECISION]`、`[FACT]` 或 `[ANSWER]`。
+9. **解析 `[PROGRESSION]` / `[AVOID_REPEAT]`**：根据当前输入对 open loop 的关系、`conversation_progress` 和合格的互动风格建议处理推进、重复和旧线程。
+10. **解析 `[SCOPE]`**：只描述篇幅和需要覆盖的锚点。
 
 # 每个锚点的最小规则
 ## Clarification override
@@ -637,6 +640,7 @@ logical_stance + character_intent
 - `CONFIRM` 或 `REFUSE` 不能被私自改成 `DIVERGE`。
 - 话题准入决定必须在这里完成。若上游 `logical_stance` 已确认且 `character_intent` 是提供、澄清或调侃接话，`[DECISION]` 应接住当前话题并约束下游只执行该决定；不得把已接纳话题重新写成时机、场合或话题本身不合适。
 - 只有当上游立场或意图已经表达保留、转移、对峙、拒绝或回避时，`[DECISION]` 才能包含对话题准入的保留或改写。
+- 不得因为 `interaction_style_context` 鼓励参与、追问或保持观察而改变 `[DECISION]`。
 
 ## `[FACT]`
 - 事实必须能被当前问题或话题自然引用；无直接相关事实时省略 `[FACT]`。
@@ -652,10 +656,12 @@ logical_stance + character_intent
 - 当前输入回答了活跃 open loop 时，`[ANSWER]` 要判定或使用该答案，而不是把它改写成普通知识展示。
 - 当前输入没有回答活跃 open loop 时，`[ANSWER]` 可以接住社交内容，但不能宣告答对、完成或进入下一步。
 - 用户请求包含群/频道/房间 ID、消息正文、引用内容、提醒对象等执行参数时，必须保留具体细节。
+- 不得使用 `interaction_style_context` 补足缺失事实、替代检索答案或回答未被当前输入/RAG/媒体证据支持的问题。
 
 ## `[SOCIAL]`
 - 只描述关系姿态或表达分寸。
 - 不新增事实或决定，不改变 `[DECISION]`、`[FACT]` 或 `[ANSWER]`。
+- 可以参考 `interaction_style_context` 选择是否轻接分享、追问背景、先共情或保持观察；群聊中按 `application_order` 先应用用户风格，再应用频道风格。
 
 ## `[PROGRESSION]` / `[AVOID_REPEAT]`
 - `conversation_progress` 是语义短期记忆；不要依赖原始聊天记录重建 episode。
@@ -664,6 +670,7 @@ logical_stance + character_intent
 - 答案已解决 open loop 时，推进到结算、下一题、下一步、冷却或收束；答案未解决时，保持 loop 并说明如何继续。
 - 若继续使用过度重复动作，必须输出 `[AVOID_REPEAT]` 并给出推进方式；若本轮必须承认同一动作，用 `[PROGRESSION]` 说明新增信息。
 - `sharp_transition` 时忽略旧 episode obligations，只处理当前输入。
+- 可以用 `interaction_style_context.engagement_guidelines` 调整追问方向或收束节奏，但不能重开 `avoid_reopening`，也不能把无关松散话题伪装成 open loop。
 
 ## `[SCOPE]`
 - 只根据已生成锚点控制篇幅：仅 `[DECISION]` 约 15 字；含 `[FACT]` 或 `[ANSWER]` 约 20-40 字；多个实质锚点约 50 字以上。
@@ -708,6 +715,23 @@ logical_stance + character_intent
     "internal_monologue": "意识层的决策逻辑",
     "logical_stance": "强制逻辑立场 (CONFIRM/REFUSE/TENTATIVE...)",
     "character_intent": "行动意图 (BANTAR/CLARIFY/EVADE...)",
+    "interaction_style_context": {{
+        "user_style": {{
+            "speech_guidelines": ["用户互动风格中的表达处理建议"],
+            "social_guidelines": ["用户互动风格中的社交处理建议"],
+            "pacing_guidelines": ["用户互动风格中的节奏处理建议"],
+            "engagement_guidelines": ["用户互动风格中的参与/追问/观察建议"],
+            "confidence": "low | medium | high | "
+        }},
+        "group_channel_style": {{
+            "speech_guidelines": ["群聊频道互动风格中的表达处理建议"],
+            "social_guidelines": ["群聊频道互动风格中的社交处理建议"],
+            "pacing_guidelines": ["群聊频道互动风格中的节奏处理建议"],
+            "engagement_guidelines": ["群聊频道互动风格中的参与/追问/观察建议"],
+            "confidence": "low | medium | high | "
+        }},
+        "application_order": ["user_style", "group_channel_style"]
+    }},
     "conversation_progress": {{
         "status": "active | new_episode | suspended | closed",
         "continuity": "same_episode | related_shift | sharp_transition",
@@ -784,6 +808,12 @@ async def call_content_anchor_agent(state: CognitionState) -> CognitionState:
         "internal_monologue": state["internal_monologue"],
         "logical_stance": state["logical_stance"],
         "character_intent": state["character_intent"],
+        "interaction_style_context": state.get(
+            "interaction_style_context",
+            _empty_interaction_style_context(
+                str(state.get("channel_type", "private"))
+            ),
+        ),
         "conversation_progress": state.get("conversation_progress"),
     }
     msg.update(build_cognition_prompt_source_payload(

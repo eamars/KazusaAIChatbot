@@ -18,21 +18,11 @@ from kazusa_ai_chatbot.config import (
     RELEVANCE_AGENT_LLM_API_KEY,
     RELEVANCE_AGENT_LLM_BASE_URL,
     RELEVANCE_AGENT_LLM_MODEL,
-    VISION_DESCRIPTOR_LLM_API_KEY,
-    VISION_DESCRIPTOR_LLM_BASE_URL,
-    VISION_DESCRIPTOR_LLM_MODEL,
-)
-from kazusa_ai_chatbot.cognition_episode import (
-    build_reply_media_description_rows,
-    build_text_chat_media_description_rows,
-    replace_text_chat_media_percepts,
+    RELEVANCE_USER_ENGAGEMENT_GUIDELINES_LIMIT,
 )
 from kazusa_ai_chatbot.db import (
-    update_conversation_attachment_descriptions,
-)
-from kazusa_ai_chatbot.message_envelope import (
-    MAX_PROMPT_ATTACHMENT_DESCRIPTION_CHARS,
-    project_prompt_message_context,
+    DatabaseOperationError,
+    build_user_engagement_relevance_context,
 )
 from kazusa_ai_chatbot.state import IMProcessState
 from kazusa_ai_chatbot.time_context import format_history_for_llm
@@ -42,7 +32,6 @@ from kazusa_ai_chatbot.utils import (
     log_dict_subset,
     log_preview,
     parse_llm_json_output,
-    trim_history_dict,
 )
 
 logger = logging.getLogger(__name__)
@@ -411,8 +400,9 @@ _RELEVANCE_SYSTEM_NOISY_PROMPT = """\
 2. 平台结构化元数据优先于正文措辞。
 3. 正文只能用于理解语义、语气和语法角色，不能当作平台结构化指向证据。
 4. 群聊中不要猜昵称或别称。没有结构化指向时，`<昵称>你...` 必须返回 `false`。
-5. 关系亲密度、心情、话题兴趣只能在确认消息可能是对 `{character_name}` 说之后影响是否回复；它们不能替代指向证据。
-6. 如果不能确定当前消息是不是对 `{character_name}` 说，返回 `should_respond=false`。
+5. 用户互动风格只能在结构化资格、直接对话语法或历史连续性已经成立后，帮助判断是否承接用户分享；它不能替代指向证据，也不能把第三人称谈论升级为邀请你发言。
+6. 关系亲密度、心情、话题兴趣只能在确认消息可能是对 `{character_name}` 说之后影响是否回复；它们不能替代指向证据。
+7. 如果不能确定当前消息是不是对 `{character_name}` 说，返回 `should_respond=false`。
 
 # 证据层级
 按下面顺序判断，不要跳步:
@@ -426,9 +416,15 @@ _RELEVANCE_SYSTEM_NOISY_PROMPT = """\
 3. 正文语法和历史连续性
    - 角色名、第二人称、话题相关、可见 mention 样式文本都只是语义线索，不能单独证明当前消息是在对 `{character_name}` 说。
    - 名字或代词如果是主语、宾语或被讨论话题，应先按群内谈论处理。
+   - 询问 `{character_name}` 会不会、是否、想不想、怎么看某事，但句法上把名字作为主语时，仍是谈论 `{character_name}` 的第三人称问题，不是对你本人说话。
    - 只有可分离的角色名称呼加第二人称续接、直接请求或命令，才算正文中的直接对话证据。
    - 历史连续性只能作为辅助证据，且必须非常清楚: 当前发言者正在延续你上一轮相关发言，窗口里没有明显竞争线程。
-4. 关系和状态
+4. 用户互动风格
+   - `user_engagement_context.engagement_guidelines` 描述当前发言者通常如何期待互动，只能作为合格消息的软性偏好。
+   - 如果当前消息已经通过结构化指向、直接对话语法或极清楚历史连续性确认是在邀请你参与，可用这些指南判断是否更适合追问、轻接话题或保持观察。
+   - 如果当前消息只是谈论 `{character_name}` 对某事的可能反应，互动指南不能把它解释成用户分享给你本人。
+   - 如果前面层级没有确认听众，或消息结构化指向别人，互动指南必须忽略。
+5. 关系和状态
    - 只有在结构化指向、直接对话语法或极清楚历史连续性成立后，才参考 `affinity_level`、`affinity_instruction`、`last_relationship_insight`、`mood` 和 `global_vibe`。
    - 高亲密度可以让你更愿意回应已确认面向你的消息，但不能把模糊群聊消息升级成召唤。
    - 低亲密度可以让你更倾向沉默，但不能否定明确指向你的必要回应。
@@ -444,14 +440,17 @@ _RELEVANCE_SYSTEM_NOISY_PROMPT = """\
 - `directly_addressed=true`，且消息内容需要或邀请你回应。
 - 没有结构化指向，但 `group_attention=low_noise`，历史连续性非常清楚，并且当前消息明显期待你本人回应。
 - 没有结构化指向，但 `group_attention=low_noise`，正文使用角色名作为可分离的呼格称呼，并且后续句式是在直接向你本人提问、请求或命令。
+- 在上述资格已经成立后，`user_engagement_context` 显示该用户倾向通过追问承接分享，可支持把图片分享、行为描述或松散话题判断为值得轻度参与。
 
 返回 `false` 的条件:
 - 当前消息结构化 reply 到其他人，且没有结构化 mention 你。
 - 当前消息像是群内其他人的相互交流、插话、玩笑、讨论你、评价你，或询问另一个人对你的看法。
 - 当前消息把 `{character_name}` 当作第三人称主语、宾语或话题对象，而不是可分离的呼格听众。
+- 当前消息用第三人称主语句式询问 `{character_name}` 会不会、是否、想不想或可能有什么感受，即使内容与用户分享或图片有关。
 - 当前消息的听众无法从结构化指向、直接对话语法或清楚历史连续性中唯一解析为 `{character_name}`。
 - 噪音为 `medium_noise` 或更高，而指向证据只来自正文里的名字、第二人称或话题相关性。
 - 当前消息只使用泛称、关系称呼、未解析代词、昵称或别称，例如 `bot`、`伙伴`、`她`、`TA`。
+- `user_engagement_context` 鼓励参与，但当前消息没有通过结构化指向、直接对话语法或清楚历史连续性确认听众是你。
 
 # use_reply_feature 决策
 - 如果 `should_respond=false`，`use_reply_feature=false`。
@@ -475,20 +474,24 @@ _RELEVANCE_SYSTEM_NOISY_PROMPT = """\
 3. `directly_addressed=false`, `group_attention=low_noise`, content=`<角色名>在干什么？`
    - 判断: `should_respond=false`
    - 原因: 这是名字直接接谓语的第三人称主语句式，不是呼格。
-4. `directly_addressed=false`, `group_attention=low_noise`, content=`<角色名>，你现在在干什么？`
+4. `directly_addressed=false`, `group_attention=low_noise`, content=`<角色名>看到这种旧照片会不会怀旧？`
+   - 判断: `should_respond=false`
+   - 原因: 这是询问角色可能反应的第三人称主语问题；即使互动指南鼓励承接分享，也不能替代听众指向。
+5. `directly_addressed=false`, `group_attention=low_noise`, content=`<角色名>，你现在在干什么？`
    - 判断: `should_respond=true`
    - 原因: 名字后有可分离的称呼停顿，并由第二人称续接。
-5. `directly_addressed=true`, 任意 `group_attention`, content=`你怎么看？`
+6. `directly_addressed=true`, 任意 `group_attention`, content=`你怎么看？`
    - 判断: `should_respond=true`
    - 原因: typed envelope 已明确指向你。
 
 # 思考路径
 1. 读取 `directly_addressed` 与 `reply_context.reply_to_platform_user_id`。
 2. 读取 `group_attention`，按噪音等级决定介入门槛。
-3. 判断正文语法角色和历史连续性，确认 `{character_name}` 是否是当前消息的唯一听众。
-4. 只有在听众确认后，才参考关系亲密度、心情、话题兴趣和消息内容强度。
-5. 决定 `should_respond`。
-6. 如果决定回复，再决定 `use_reply_feature` 和 `indirect_speech_context`。
+3. 判断正文语法角色和历史连续性，先区分名字是呼格听众还是第三人称主语，再确认 `{character_name}` 是否是当前消息的唯一听众。
+4. 只有在听众确认后，才读取 `user_engagement_context`，判断是否应承接已合格的分享或追问。
+5. 再参考关系亲密度、心情、话题兴趣和消息内容强度。
+6. 决定 `should_respond`。
+7. 如果决定回复，再决定 `use_reply_feature` 和 `indirect_speech_context`。
 
 # 输入格式
 {{
@@ -505,7 +508,11 @@ _RELEVANCE_SYSTEM_NOISY_PROMPT = """\
         }}
     }},
     "conversation_history": ["近期群聊消息"],
-    "group_attention": "low_noise | medium_noise | high_noise | chaotic_noise"
+    "group_attention": "low_noise | medium_noise | high_noise | chaotic_noise",
+    "user_engagement_context": {{
+        "engagement_guidelines": ["当前发言者相关的互动参与偏好，最多 {relevance_user_engagement_guidelines_limit} 条"],
+        "confidence": "low | medium | high | "
+    }}
 }}
 
 # 输出格式
@@ -665,6 +672,9 @@ async def relevance_agent(state: IMProcessState) -> IMProcessState:
         affinity_instruction=affinity_block["instruction"],
         last_relationship_insight=state["user_profile"].get("last_relationship_insight", ""),
         platform_bot_id=state["platform_bot_id"],
+        relevance_user_engagement_guidelines_limit=(
+            RELEVANCE_USER_ENGAGEMENT_GUIDELINES_LIMIT
+        ),
     ))
 
 
@@ -683,6 +693,20 @@ async def relevance_agent(state: IMProcessState) -> IMProcessState:
     if is_noisy_environment:
         human_data["user_message"]["directly_addressed"] = directly_addressed
         human_data["group_attention"] = group_attention
+        try:
+            user_engagement_context = await build_user_engagement_relevance_context(
+                state["global_user_id"],
+            )
+        except DatabaseOperationError as exc:
+            logger.warning(
+                f"User engagement relevance context unavailable: {exc} "
+                f"user={state['global_user_id']}"
+            )
+            user_engagement_context = {
+                "engagement_guidelines": [],
+                "confidence": "",
+            }
+        human_data["user_engagement_context"] = user_engagement_context
 
     human_message = HumanMessage(content=json.dumps(human_data, ensure_ascii=False))
 
@@ -717,260 +741,5 @@ async def relevance_agent(state: IMProcessState) -> IMProcessState:
 
         # Update user input with optional image descriptions
         "user_input": user_input
-    }
-    return return_value
-
-
-
-_VISION_DESCRIPTOR_PROMPT = '''\
-你负责把图片转换为后续认知层可直接使用的客观视觉观察。输出必须同时服务两件事:
-1. `description` 作为唯一持久化的图片文字摘要。
-2. 结构化字段作为本轮认知的视觉证据，帮助弱本地模型精确理解场景。
-
-# 输入格式
-输入是一个多模态 HumanMessage，content 数组中只有一个 `image_url` 项。
-`image_url.url` 是 `data:<mime>;base64,<payload>` 形式的图片数据。你只能依据图片像素本身输出观察，不读取外部上下文，也不推测用户为什么发送它。
-
-# 生成步骤
-1. 先整体观察画面，确认主要人物、物体、动作、环境和可见文字。
-2. 再把证据分到对应字段：文字进 `visible_text`，关键可见事实进 `salient_visual_facts`，布局和位置关系进 `spatial_or_scene_facts`。
-3. 对看不清、被遮挡、可能误读的部分使用 `uncertainty` 标出，不把不确定内容写成确定事实。
-4. 最后把最重要的可见事实压缩成 `description`，保证它可以单独作为图片存储描述。
-
-# 观察要求
-- 只描述图片中可见的内容，不代替角色评价、抒情或推测用户意图。
-- 优先保留人物、物体、动作、状态、可见文字、数量、颜色、位置关系和不确定区域。
-- 看不清的部分写入 `uncertainty`，用 "模糊"、"被遮挡"、"无法确认" 等明确措辞。
-- `description` 控制在 {max_description_chars} 字以内，写成一段自然语言摘要。
-- 其他字段使用短句数组，便于后续提示词按证据类型读取。
-
-# 字段定义
-- `description`: 图片的综合摘要，必须可单独作为存储描述使用。
-- `visible_text`: 图片中可辨认的文字、数字、符号或屏幕内容；没有则空数组。
-- `salient_visual_facts`: 关键人物、物体、动作、颜色、状态等事实。
-- `spatial_or_scene_facts`: 场景、布局、前后左右上下、远近、遮挡等空间事实。
-- `uncertainty`: 模糊、无法确认、可能误读的视觉区域。
-
-# 输出格式
-请务必返回合法 JSON 字符串，仅包含以下字段:
-{{
-    "description": "一段客观图片摘要",
-    "visible_text": ["图中可见文字"],
-    "salient_visual_facts": ["关键视觉事实"],
-    "spatial_or_scene_facts": ["空间或场景事实"],
-    "uncertainty": ["不确定或模糊之处"]
-}}
-'''
-_vision_descriptor_llm = get_llm(
-    temperature=0,
-    top_p=1.0,
-    model=VISION_DESCRIPTOR_LLM_MODEL,
-    base_url=VISION_DESCRIPTOR_LLM_BASE_URL,
-    api_key=VISION_DESCRIPTOR_LLM_API_KEY,
-)
-
-
-def _descriptor_string_field(data: dict, field_name: str) -> str:
-    value = data.get(field_name)
-    if not isinstance(value, str):
-        return_value = ""
-        return return_value
-    return_value = value.strip()
-    return return_value
-
-
-def _descriptor_string_list_field(data: dict, field_name: str) -> list[str]:
-    value = data.get(field_name)
-    if isinstance(value, str):
-        clean_value = value.strip()
-        if clean_value:
-            return_value = [clean_value]
-            return return_value
-        return_value: list[str] = []
-        return return_value
-    if not isinstance(value, list):
-        return_value = []
-        return return_value
-
-    strings: list[str] = []
-    for item in value:
-        if not isinstance(item, str):
-            continue
-        clean_item = item.strip()
-        if clean_item:
-            strings.append(clean_item)
-    return strings
-
-
-def _build_current_image_observation(
-    *,
-    result: dict,
-    description: str,
-    source_message_id: str,
-) -> dict[str, object]:
-    visible_text = _descriptor_string_list_field(result, "visible_text")
-    salient_visual_facts = _descriptor_string_list_field(
-        result,
-        "salient_visual_facts",
-    )
-    spatial_or_scene_facts = _descriptor_string_list_field(
-        result,
-        "spatial_or_scene_facts",
-    )
-    uncertainty = _descriptor_string_list_field(result, "uncertainty")
-    summary = _descriptor_string_field(result, "summary") or description
-    has_visual_evidence = any(
-        (
-            summary,
-            visible_text,
-            salient_visual_facts,
-            spatial_or_scene_facts,
-        )
-    )
-    summary_status = "available" if has_visual_evidence else "unavailable"
-    return_value: dict[str, object] = {
-        "observation_origin": "current_attachment",
-        "source_message_id": source_message_id,
-        "media_kind": "image",
-        "summary_status": summary_status,
-        "summary": summary,
-        "visible_text": visible_text,
-        "salient_visual_facts": salient_visual_facts,
-        "spatial_or_scene_facts": spatial_or_scene_facts,
-        "uncertainty": uncertainty,
-    }
-    return return_value
-
-
-async def multimedia_descriptor_agent(state: IMProcessState) -> IMProcessState:
-    """Refresh prompt-safe media descriptions for the current chat turn.
-
-    Args:
-        state: Current graph state containing multimedia rows and the current
-            cognitive episode.
-
-    Returns:
-        Partial graph state containing refreshed multimedia rows, prompt
-        message context, and cognitive episode.
-    """
-    user_name = state.get("user_name")
-    platform_user_id = state.get("platform_user_id", "")
-
-    # Read the multi-media content
-    user_multimedia_input = state.get("user_multimedia_input", [])
-    output_multimedia_input = []
-
-    for piece in user_multimedia_input:
-        if piece["content_type"].startswith("image/"):
-            if not piece["base64_data"]:
-                output_piece = {
-                    "content_type": piece["content_type"],
-                    "base64_data": piece["base64_data"],
-                    "description": piece["description"],
-                }
-                image_observation = piece.get("image_observation")
-                if isinstance(image_observation, dict):
-                    output_piece["image_observation"] = image_observation
-                output_multimedia_input.append(output_piece)
-                continue
-
-            # Call vision descriptor
-            system_prompt = SystemMessage(content=_VISION_DESCRIPTOR_PROMPT.format(
-                max_description_chars=MAX_PROMPT_ATTACHMENT_DESCRIPTION_CHARS,
-            ))
-            human_message = HumanMessage(content=[
-                {
-                    "type": "image_url",
-                    "image_url": {
-                        # You must combine the mime_type and base64 into a Data URI string
-                        "url": f"data:{piece['content_type']};base64,{piece['base64_data']}"
-                    },
-                }
-            ])
-
-            description = ""
-            try:
-                response = await _vision_descriptor_llm.ainvoke([
-                    system_prompt,
-                    human_message,
-                ])
-            except Exception as exc:
-                logger.warning(
-                    f"Image descriptor fallback after LLM exception: {exc} "
-                    f"user={user_name} platform_user={platform_user_id} "
-                    f"media_type={piece['content_type']}",
-                    exc_info=True,
-                )
-                result = {}
-            else:
-                try:
-                    result = parse_llm_json_output(response.content)
-                except Exception as exc:
-                    logger.warning(
-                        f"Image descriptor fallback after parse exception: {exc} "
-                        f"user={user_name} platform_user={platform_user_id} "
-                        f"media_type={piece['content_type']} "
-                        f"raw={log_preview(response.content)}",
-                        exc_info=True,
-                    )
-                    result = {}
-
-            if not isinstance(result, dict):
-                result = {}
-            raw_description = result.get("description", "")
-            if isinstance(raw_description, str):
-                description = raw_description
-            description = description.strip()
-            image_observation = _build_current_image_observation(
-                result=result,
-                description=description,
-                source_message_id=state["platform_message_id"],
-            )
-            summary = image_observation["summary"]
-            if not description and isinstance(summary, str):
-                description = summary
-
-            logger.debug(f'Image description: user={user_name} platform_user={platform_user_id} media_type={piece["content_type"]} description={log_preview(description)}')
-
-            output_multimedia_input.append({
-                "content_type": piece["content_type"],
-                "base64_data": piece["base64_data"],
-                "description": description,
-                "image_observation": image_observation,
-            })
-        else:
-            output_multimedia_input.append(piece)
-    
-    descriptions = [
-        str(piece.get("description", "")).strip()
-        for piece in output_multimedia_input
-    ]
-    has_description = any(descriptions)
-    if has_description:
-        await update_conversation_attachment_descriptions(
-            platform=state["platform"],
-            platform_channel_id=state["platform_channel_id"],
-            platform_message_id=state["platform_message_id"],
-            descriptions=descriptions,
-        )
-
-    prompt_message_context = project_prompt_message_context(
-        message_envelope=state["message_envelope"],
-        multimedia_input=output_multimedia_input,
-        reply_context=state.get("reply_context"),
-    )
-    media_description_rows = [
-        *build_text_chat_media_description_rows(output_multimedia_input),
-        *build_reply_media_description_rows(state.get("reply_context")),
-    ]
-    cognitive_episode = replace_text_chat_media_percepts(
-        episode=state["cognitive_episode"],
-        media_description_rows=media_description_rows,
-    )
-
-    return_value = {
-        "user_multimedia_input": output_multimedia_input,
-        "prompt_message_context": prompt_message_context,
-        "cognitive_episode": cognitive_episode,
     }
     return return_value

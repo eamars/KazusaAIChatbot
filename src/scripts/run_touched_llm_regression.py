@@ -660,7 +660,7 @@ def _cases() -> dict[str, LLMCase]:
         ),
         LLMCase(
             "relevance_normal",
-            "kazusa_ai_chatbot.nodes.relevance_agent",
+            "kazusa_ai_chatbot.nodes.persona_relevance_agent",
             "_RELEVANCE_SYSTEM_PROMPT",
             "_relevance_agent_llm",
             {
@@ -678,7 +678,7 @@ def _cases() -> dict[str, LLMCase]:
         ),
         LLMCase(
             "relevance_noisy",
-            "kazusa_ai_chatbot.nodes.relevance_agent",
+            "kazusa_ai_chatbot.nodes.persona_relevance_agent",
             "_RELEVANCE_SYSTEM_NOISY_PROMPT",
             "_relevance_agent_llm",
             {
@@ -697,7 +697,7 @@ def _cases() -> dict[str, LLMCase]:
         ),
         LLMCase(
             "vision_descriptor",
-            "kazusa_ai_chatbot.nodes.relevance_agent",
+            "kazusa_ai_chatbot.nodes.persona_supervisor2_msg_decontexualizer",
             "_VISION_DESCRIPTOR_PROMPT",
             "_vision_descriptor_llm",
             {},

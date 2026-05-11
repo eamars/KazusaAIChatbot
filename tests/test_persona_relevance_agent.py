@@ -3,16 +3,15 @@
 from __future__ import annotations
 
 import json
-import logging
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
 from kazusa_ai_chatbot.cognition_episode import build_text_chat_cognitive_episode
-from kazusa_ai_chatbot.nodes import relevance_agent as relevance_module
-from kazusa_ai_chatbot.nodes.relevance_agent import (
+from kazusa_ai_chatbot.db import DatabaseOperationError
+from kazusa_ai_chatbot.nodes import persona_relevance_agent as relevance_module
+from kazusa_ai_chatbot.nodes.persona_relevance_agent import (
     build_group_attention_context,
-    multimedia_descriptor_agent,
     relevance_agent,
 )
 
@@ -133,98 +132,21 @@ def _llm_response(content: str) -> MagicMock:
     return response
 
 
-def test_vision_descriptor_prompt_declares_structured_prompt_sections() -> None:
-    """Vision prompt should expose input, generation, and output contracts."""
-
-    prompt = relevance_module._VISION_DESCRIPTOR_PROMPT
-
-    assert '# 输入格式' in prompt
-    assert '# 生成步骤' in prompt
-    assert '# 输出格式' in prompt
-
-
-@pytest.mark.asyncio
-async def test_multimedia_descriptor_updates_prompt_context_and_current_row(
-    monkeypatch,
-) -> None:
-    """Image summaries should feed prompt context and current-row persistence."""
-
-    state = _base_state()
-    state["message_envelope"]["body_text"] = ""
-    state["message_envelope"]["attachments"] = [{
-        "media_type": "image/jpeg",
-        "base64_data": "image-bytes",
-        "storage_shape": "inline",
-    }]
-    state["user_multimedia_input"] = [{
-        "content_type": "image/jpeg",
-        "base64_data": "image-bytes",
-        "description": "",
-    }]
-    update_descriptions = AsyncMock(return_value=True)
+@pytest.fixture(autouse=True)
+def _stub_user_engagement_context(monkeypatch):
+    """Keep relevance tests independent from Mongo style-image reads."""
+    helper = AsyncMock(return_value={
+        "engagement_guidelines": [],
+        "confidence": "",
+    })
     monkeypatch.setattr(
-        "kazusa_ai_chatbot.nodes.relevance_agent.update_conversation_attachment_descriptions",
-        update_descriptions,
+        relevance_module,
+        "build_user_engagement_relevance_context",
+        helper,
+        raising=False,
     )
+    return helper
 
-    response = _llm_response('{"description": "a desk with handwritten notes"}')
-    with patch("kazusa_ai_chatbot.nodes.relevance_agent._vision_descriptor_llm") as mock_llm:
-        mock_llm.ainvoke = AsyncMock(return_value=response)
-        result = await multimedia_descriptor_agent(state)
-
-    assert result["user_multimedia_input"][0]["description"] == (
-        "a desk with handwritten notes"
-    )
-    assert result["prompt_message_context"]["attachments"][0]["description"] == (
-        "a desk with handwritten notes"
-    )
-    update_descriptions.assert_awaited_once_with(
-        platform="discord",
-        platform_channel_id="chan_1",
-        platform_message_id="msg_123",
-        descriptions=["a desk with handwritten notes"],
-    )
-
-
-@pytest.mark.asyncio
-async def test_multimedia_descriptor_continues_when_vision_llm_fails(
-    monkeypatch,
-    caplog,
-) -> None:
-    """Vision descriptor failures should leave unavailable prompt summaries."""
-
-    state = _base_state()
-    state["message_envelope"]["body_text"] = ""
-    state["message_envelope"]["attachments"] = [{
-        "media_type": "image/jpeg",
-        "base64_data": "image-bytes",
-        "storage_shape": "inline",
-    }]
-    state["user_multimedia_input"] = [{
-        "content_type": "image/jpeg",
-        "base64_data": "image-bytes",
-        "description": "",
-    }]
-    update_descriptions = AsyncMock(return_value=True)
-    monkeypatch.setattr(
-        "kazusa_ai_chatbot.nodes.relevance_agent.update_conversation_attachment_descriptions",
-        update_descriptions,
-    )
-
-    with patch("kazusa_ai_chatbot.nodes.relevance_agent._vision_descriptor_llm") as mock_llm:
-        mock_llm.ainvoke = AsyncMock(side_effect=RuntimeError("vision down"))
-        caplog.set_level(logging.WARNING)
-        result = await multimedia_descriptor_agent(state)
-
-    assert result["user_multimedia_input"][0]["description"] == ""
-    assert result["prompt_message_context"]["attachments"][0] == {
-        "media_kind": "image",
-        "description": "",
-        "summary_status": "unavailable",
-    }
-    update_descriptions.assert_not_awaited()
-    assert "Image descriptor fallback after LLM exception" in caplog.text
-    assert "vision down" in caplog.text
 
 
 @pytest.mark.asyncio
@@ -232,7 +154,7 @@ async def test_relevance_agent_returns_should_respond():
     """LLM says should_respond=true → agent forwards that decision."""
     llm_response = _llm_response('{"should_respond": true, "reason_to_respond": "user greeted", "use_reply_feature": false, "channel_topic": "greetings", "indirect_speech_context": ""}')
 
-    with patch("kazusa_ai_chatbot.nodes.relevance_agent._relevance_agent_llm") as mock_llm:
+    with patch("kazusa_ai_chatbot.nodes.persona_relevance_agent._relevance_agent_llm") as mock_llm:
         mock_llm.ainvoke = AsyncMock(return_value=llm_response)
         result = await relevance_agent(_base_state())
 
@@ -246,7 +168,7 @@ async def test_relevance_agent_should_not_respond():
     """LLM says should_respond=false → agent forwards that decision."""
     llm_response = _llm_response('{"should_respond": false, "reason_to_respond": "third party conversation", "use_reply_feature": false, "channel_topic": "sports", "indirect_speech_context": ""}')
 
-    with patch("kazusa_ai_chatbot.nodes.relevance_agent._relevance_agent_llm") as mock_llm:
+    with patch("kazusa_ai_chatbot.nodes.persona_relevance_agent._relevance_agent_llm") as mock_llm:
         mock_llm.ainvoke = AsyncMock(return_value=llm_response)
         result = await relevance_agent(_base_state())
 
@@ -259,7 +181,7 @@ async def test_relevance_agent_malformed_json_defaults_to_not_respond():
     """If LLM returns garbage JSON, parse_llm_json_output returns {} and should_respond defaults to False."""
     llm_response = _llm_response("this is not json at all")
 
-    with patch("kazusa_ai_chatbot.nodes.relevance_agent._relevance_agent_llm") as mock_llm:
+    with patch("kazusa_ai_chatbot.nodes.persona_relevance_agent._relevance_agent_llm") as mock_llm:
         mock_llm.ainvoke = AsyncMock(return_value=llm_response)
         result = await relevance_agent(_base_state())
 
@@ -273,7 +195,7 @@ async def test_relevance_agent_use_reply_feature():
     """LLM says use_reply_feature=true → agent forwards it."""
     llm_response = _llm_response('{"should_respond": true, "reason_to_respond": "reply needed", "use_reply_feature": true, "channel_topic": "topic", "indirect_speech_context": ""}')
 
-    with patch("kazusa_ai_chatbot.nodes.relevance_agent._relevance_agent_llm") as mock_llm:
+    with patch("kazusa_ai_chatbot.nodes.persona_relevance_agent._relevance_agent_llm") as mock_llm:
         mock_llm.ainvoke = AsyncMock(return_value=llm_response)
         result = await relevance_agent(_base_state())
 
@@ -290,7 +212,7 @@ async def test_relevance_agent_short_circuits_structured_third_party_reply_in_gr
         "reply_to_platform_user_id": "someone-else",
     }
 
-    with patch("kazusa_ai_chatbot.nodes.relevance_agent._relevance_agent_llm") as mock_llm:
+    with patch("kazusa_ai_chatbot.nodes.persona_relevance_agent._relevance_agent_llm") as mock_llm:
         mock_llm.ainvoke = AsyncMock()
         result = await relevance_agent(state)
 
@@ -311,7 +233,7 @@ async def test_relevance_agent_allows_structured_third_party_reply_when_bot_expl
     }
     llm_response = _llm_response('{"should_respond": true, "reason_to_respond": "bot explicitly addressed", "use_reply_feature": true, "channel_topic": "discussion", "indirect_speech_context": ""}')
 
-    with patch("kazusa_ai_chatbot.nodes.relevance_agent._relevance_agent_llm") as mock_llm:
+    with patch("kazusa_ai_chatbot.nodes.persona_relevance_agent._relevance_agent_llm") as mock_llm:
         mock_llm.ainvoke = AsyncMock(return_value=llm_response)
         result = await relevance_agent(state)
 
@@ -326,7 +248,7 @@ async def test_relevance_agent_text_only_reply_marker_does_not_block_without_met
     state["user_input"] = '[Reply to message] <@someone-else> 我同事上下班是不用加油的'
     llm_response = _llm_response('{"should_respond": false, "reason_to_respond": "model decision", "use_reply_feature": true, "channel_topic": "", "indirect_speech_context": ""}')
 
-    with patch("kazusa_ai_chatbot.nodes.relevance_agent._relevance_agent_llm") as mock_llm:
+    with patch("kazusa_ai_chatbot.nodes.persona_relevance_agent._relevance_agent_llm") as mock_llm:
         mock_llm.ainvoke = AsyncMock(return_value=llm_response)
         result = await relevance_agent(state)
 
@@ -339,7 +261,7 @@ async def test_relevance_agent_does_not_expose_reflection_summary_in_prompt() ->
     """Global reflection summaries should not be injected into relevance reasoning."""
     llm_response = _llm_response('{"should_respond": true, "reason_to_respond": "user greeted", "use_reply_feature": false, "channel_topic": "greetings", "indirect_speech_context": ""}')
 
-    with patch("kazusa_ai_chatbot.nodes.relevance_agent._relevance_agent_llm") as mock_llm:
+    with patch("kazusa_ai_chatbot.nodes.persona_relevance_agent._relevance_agent_llm") as mock_llm:
         mock_llm.ainvoke = AsyncMock(return_value=llm_response)
         await relevance_agent(_base_state())
 
@@ -353,7 +275,7 @@ async def test_noisy_relevance_prompt_preserves_metadata_first_contract() -> Non
     """Group prompt should not reintroduce text-only address inference."""
     llm_response = _llm_response('{"should_respond": true, "reason_to_respond": "metadata", "use_reply_feature": true, "channel_topic": "", "indirect_speech_context": ""}')
 
-    with patch("kazusa_ai_chatbot.nodes.relevance_agent._relevance_agent_llm") as mock_llm:
+    with patch("kazusa_ai_chatbot.nodes.persona_relevance_agent._relevance_agent_llm") as mock_llm:
         mock_llm.ainvoke = AsyncMock(return_value=llm_response)
         await relevance_agent(_base_state())
 
@@ -449,7 +371,7 @@ async def test_relevance_group_payload_includes_direct_address_and_group_attenti
     state["message_envelope"]["addressed_to_global_user_ids"] = ["character-global-id"]
     llm_response = _llm_response('{"should_respond": true, "reason_to_respond": "metadata", "use_reply_feature": true, "channel_topic": "", "indirect_speech_context": ""}')
 
-    with patch("kazusa_ai_chatbot.nodes.relevance_agent._relevance_agent_llm") as mock_llm:
+    with patch("kazusa_ai_chatbot.nodes.persona_relevance_agent._relevance_agent_llm") as mock_llm:
         mock_llm.ainvoke = AsyncMock(return_value=llm_response)
         await relevance_agent(state)
 
@@ -463,7 +385,58 @@ async def test_relevance_group_payload_includes_direct_address_and_group_attenti
 
 
 @pytest.mark.asyncio
-async def test_relevance_medium_group_without_bot_continuity_skips_llm() -> None:
+async def test_relevance_group_payload_includes_user_engagement_context(
+    _stub_user_engagement_context,
+) -> None:
+    """Group LLM payload should expose bounded user engagement guidance."""
+    state = _base_state()
+    engagement_context = {
+        "engagement_guidelines": [
+            "主动承接用户分享意图，通过追问参与。",
+        ],
+        "confidence": "medium",
+    }
+    _stub_user_engagement_context.return_value = engagement_context
+    llm_response = _llm_response('{"should_respond": true, "reason_to_respond": "eligible engagement", "use_reply_feature": true, "channel_topic": "", "indirect_speech_context": ""}')
+
+    with patch("kazusa_ai_chatbot.nodes.persona_relevance_agent._relevance_agent_llm") as mock_llm:
+        mock_llm.ainvoke = AsyncMock(return_value=llm_response)
+        await relevance_agent(state)
+
+    human_payload = mock_llm.ainvoke.await_args.args[0][1].content
+    parsed_payload = json.loads(human_payload)
+    assert parsed_payload["user_engagement_context"] == engagement_context
+    _stub_user_engagement_context.assert_awaited_once_with("uuid-123")
+
+
+@pytest.mark.asyncio
+async def test_relevance_group_payload_uses_empty_engagement_context_when_db_unavailable(
+    _stub_user_engagement_context,
+) -> None:
+    """Optional engagement style lookup failure should not block relevance."""
+    state = _base_state()
+    _stub_user_engagement_context.side_effect = DatabaseOperationError(
+        "style image unavailable"
+    )
+    llm_response = _llm_response('{"should_respond": true, "reason_to_respond": "fallback", "use_reply_feature": true, "channel_topic": "", "indirect_speech_context": ""}')
+
+    with patch("kazusa_ai_chatbot.nodes.persona_relevance_agent._relevance_agent_llm") as mock_llm:
+        mock_llm.ainvoke = AsyncMock(return_value=llm_response)
+        await relevance_agent(state)
+
+    human_payload = mock_llm.ainvoke.await_args.args[0][1].content
+    parsed_payload = json.loads(human_payload)
+    assert parsed_payload["user_engagement_context"] == {
+        "engagement_guidelines": [],
+        "confidence": "",
+    }
+    _stub_user_engagement_context.assert_awaited_once_with("uuid-123")
+
+
+@pytest.mark.asyncio
+async def test_relevance_medium_group_without_bot_continuity_skips_llm(
+    _stub_user_engagement_context,
+) -> None:
     """Medium group noise without structure or bot continuity should stop early."""
 
     state = _base_state()
@@ -476,13 +449,14 @@ async def test_relevance_medium_group_without_bot_continuity_skips_llm() -> None
         ),
     ]
 
-    with patch("kazusa_ai_chatbot.nodes.relevance_agent._relevance_agent_llm") as mock_llm:
+    with patch("kazusa_ai_chatbot.nodes.persona_relevance_agent._relevance_agent_llm") as mock_llm:
         mock_llm.ainvoke = AsyncMock()
         result = await relevance_agent(state)
 
     assert result["should_respond"] is False
     assert "latest bot-turn continuity" in result["reason_to_respond"]
     mock_llm.ainvoke.assert_not_called()
+    _stub_user_engagement_context.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -504,7 +478,7 @@ async def test_relevance_medium_group_latest_bot_continuity_invokes_llm() -> Non
     ]
     llm_response = _llm_response('{"should_respond": true, "reason_to_respond": "continuation", "use_reply_feature": true, "channel_topic": "", "indirect_speech_context": ""}')
 
-    with patch("kazusa_ai_chatbot.nodes.relevance_agent._relevance_agent_llm") as mock_llm:
+    with patch("kazusa_ai_chatbot.nodes.persona_relevance_agent._relevance_agent_llm") as mock_llm:
         mock_llm.ainvoke = AsyncMock(return_value=llm_response)
         result = await relevance_agent(state)
 
@@ -519,7 +493,7 @@ async def test_relevance_private_payload_omits_group_attention_fields() -> None:
     state["channel_type"] = "private"
     llm_response = _llm_response('{"should_respond": true, "reason_to_respond": "private", "use_reply_feature": false, "channel_topic": "", "indirect_speech_context": ""}')
 
-    with patch("kazusa_ai_chatbot.nodes.relevance_agent._relevance_agent_llm") as mock_llm:
+    with patch("kazusa_ai_chatbot.nodes.persona_relevance_agent._relevance_agent_llm") as mock_llm:
         mock_llm.ainvoke = AsyncMock(return_value=llm_response)
         await relevance_agent(state)
 
@@ -527,6 +501,7 @@ async def test_relevance_private_payload_omits_group_attention_fields() -> None:
     parsed_payload = json.loads(human_payload)
     assert "directly_addressed" not in parsed_payload["user_message"]
     assert "group_attention" not in parsed_payload
+    assert "user_engagement_context" not in parsed_payload
 
 
 @pytest.mark.asyncio
@@ -540,7 +515,7 @@ async def test_relevance_chaotic_group_without_bot_address_skips_llm() -> None:
         _history_row(platform_user_id="user_1", timestamp="2026-04-27T10:00:30+00:00"),
     ]
 
-    with patch("kazusa_ai_chatbot.nodes.relevance_agent._relevance_agent_llm") as mock_llm:
+    with patch("kazusa_ai_chatbot.nodes.persona_relevance_agent._relevance_agent_llm") as mock_llm:
         mock_llm.ainvoke = AsyncMock()
         result = await relevance_agent(state)
 
@@ -562,7 +537,7 @@ async def test_relevance_chaotic_group_with_direct_address_invokes_llm() -> None
     ]
     llm_response = _llm_response('{"should_respond": true, "reason_to_respond": "mentioned", "use_reply_feature": true, "channel_topic": "", "indirect_speech_context": ""}')
 
-    with patch("kazusa_ai_chatbot.nodes.relevance_agent._relevance_agent_llm") as mock_llm:
+    with patch("kazusa_ai_chatbot.nodes.persona_relevance_agent._relevance_agent_llm") as mock_llm:
         mock_llm.ainvoke = AsyncMock(return_value=llm_response)
         result = await relevance_agent(state)
 
@@ -587,7 +562,7 @@ async def test_relevance_chaotic_group_with_typed_bot_reply_invokes_llm() -> Non
     ]
     llm_response = _llm_response('{"should_respond": false, "reason_to_respond": "character declines", "use_reply_feature": false, "channel_topic": "", "indirect_speech_context": ""}')
 
-    with patch("kazusa_ai_chatbot.nodes.relevance_agent._relevance_agent_llm") as mock_llm:
+    with patch("kazusa_ai_chatbot.nodes.persona_relevance_agent._relevance_agent_llm") as mock_llm:
         mock_llm.ainvoke = AsyncMock(return_value=llm_response)
         result = await relevance_agent(state)
 
@@ -627,7 +602,7 @@ async def test_relevance_regression_qq_ambiguous_you_in_reply_thread_skips_llm()
         ),
     ]
 
-    with patch("kazusa_ai_chatbot.nodes.relevance_agent._relevance_agent_llm") as mock_llm:
+    with patch("kazusa_ai_chatbot.nodes.persona_relevance_agent._relevance_agent_llm") as mock_llm:
         mock_llm.ainvoke = AsyncMock()
         result = await relevance_agent(state)
 

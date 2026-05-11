@@ -45,6 +45,41 @@ class _FakeStyleLlm:
         return return_value
 
 
+class _FakeContentAnchorLlm:
+    """Capture content-anchor payload and return a valid anchor result."""
+
+    def __init__(self) -> None:
+        """Create the fake content-anchor LLM."""
+
+        self.payload: dict | None = None
+        self.system_prompt = ""
+
+    async def ainvoke(self, messages: list) -> SimpleNamespace:
+        """Capture prompt messages and return a valid content-anchor result.
+
+        Args:
+            messages: Prompt messages supplied by the caller.
+
+        Returns:
+            Fake response namespace with JSON content.
+        """
+
+        self.system_prompt = messages[0].content
+        self.payload = json.loads(messages[1].content)
+        content = json.dumps(
+            {
+                "content_anchors": [
+                    "[DECISION] 接住当前轻松分享",
+                    "[SOCIAL] 轻轻追问图片背景",
+                    "[SCOPE] 简短覆盖立场和追问",
+                ],
+            },
+            ensure_ascii=False,
+        )
+        return_value = SimpleNamespace(content=content)
+        return return_value
+
+
 def _character_profile() -> dict:
     """Build the minimal character profile used by L3 style tests."""
 
@@ -127,6 +162,54 @@ def _style_state(*, channel_type: str = "private") -> dict:
                 "confidence": "medium",
             },
             "application_order": ["user_style"],
+        },
+    }
+    return return_value
+
+
+def _content_anchor_state(*, channel_type: str = "group") -> dict:
+    """Build the minimal state consumed by ``call_content_anchor_agent``."""
+
+    return_value = {
+        "character_profile": {"name": "Test Character"},
+        "decontexualized_input": "用户分享了一张旧照片，像是在等回应。",
+        "referents": [],
+        "rag_result": {
+            "answer": "",
+            "user_image": {},
+            "character_image": {},
+            "third_party_profiles": [],
+            "memory_evidence": [],
+            "conversation_evidence": [],
+            "external_evidence": [],
+            "supervisor_trace": {"unknown_slots": [], "loop_count": 0},
+        },
+        "internal_monologue": "This is a harmless share worth a light follow-up.",
+        "logical_stance": "CONFIRM",
+        "character_intent": "BANTER",
+        "conversation_progress": None,
+        "channel_type": channel_type,
+        "cognitive_episode": _cognitive_episode(channel_type=channel_type),
+        "interaction_style_context": {
+            "user_style": {
+                "speech_guidelines": [],
+                "social_guidelines": [],
+                "pacing_guidelines": [],
+                "engagement_guidelines": [
+                    "主动承接用户分享意图，通过追问参与。"
+                ],
+                "confidence": "medium",
+            },
+            "group_channel_style": {
+                "speech_guidelines": [],
+                "social_guidelines": [],
+                "pacing_guidelines": [],
+                "engagement_guidelines": [
+                    "根据频道主题判断是否参与松散话题。"
+                ],
+                "confidence": "medium",
+            },
+            "application_order": ["user_style", "group_channel_style"],
         },
     }
     return return_value
@@ -229,12 +312,31 @@ async def test_style_agent_receives_private_interaction_style_without_group(
 
 
 @pytest.mark.asyncio
+async def test_content_anchor_agent_receives_interaction_style_context(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Content-anchor prompt payload should receive sanitized style context."""
+
+    fake_llm = _FakeContentAnchorLlm()
+    monkeypatch.setattr(l3_module, "_content_anchor_agent_llm", fake_llm)
+
+    result = await l3_module.call_content_anchor_agent(_content_anchor_state())
+
+    assert result["content_anchors"][0].startswith("[DECISION]")
+    assert fake_llm.payload["interaction_style_context"] == (
+        _content_anchor_state()["interaction_style_context"]
+    )
+    assert "只能作为 `[SOCIAL]`、`[PROGRESSION]`" in fake_llm.system_prompt
+
+
+@pytest.mark.asyncio
 async def test_cognition_subgraph_plumbs_channel_scope_into_l3_loader(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Platform and channel fields reach ``CognitionState`` for L3 loading."""
 
     captured_states: list[dict] = []
+    captured_content_states: list[dict] = []
 
     async def fake_l1(_state: dict) -> dict:
         return_value = {
@@ -295,7 +397,8 @@ async def test_cognition_subgraph_plumbs_channel_scope_into_l3_loader(
         }
         return return_value
 
-    async def fake_content(_state: dict) -> dict:
+    async def fake_content(state: dict) -> dict:
+        captured_content_states.append(dict(state))
         return_value = {"content_anchors": []}
         return return_value
 
@@ -345,4 +448,11 @@ async def test_cognition_subgraph_plumbs_channel_scope_into_l3_loader(
     assert [state["platform_channel_id"] for state in captured_states] == [
         "private-channel",
         "group-channel",
+    ]
+    assert [
+        state["interaction_style_context"]["application_order"]
+        for state in captured_content_states
+    ] == [
+        ["user_style"],
+        ["user_style"],
     ]
