@@ -2,11 +2,23 @@
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Mapping, Sequence
 from typing import Any
 
-from kazusa_ai_chatbot.db._client import get_db, get_text_embedding
-from kazusa_ai_chatbot.db.conversation import _embedding_source_text
+from kazusa_ai_chatbot.db._client import (
+    build_vector_search_index_model,
+    get_db,
+    get_text_embedding,
+    vector_index_definition_issues,
+    vector_index_missing_filter_paths,
+)
+from kazusa_ai_chatbot.db.conversation import (
+    CONVERSATION_VECTOR_FILTER_FIELDS,
+    CONVERSATION_VECTOR_INDEX_NAME,
+    _embedding_source_text,
+    reset_conversation_vector_prefilter_support_cache,
+)
 from kazusa_ai_chatbot.db.memory import memory_embedding_source_text
 from kazusa_ai_chatbot.db.user_memory_units import _semantic_text
 
@@ -20,6 +32,173 @@ USER_STATE_COLLECTIONS = (
     "scheduled_events",
     "conversation_history",
 )
+VECTOR_SEARCH_INDEX_CONFIGS = {
+    "conversation_history": {
+        "collection": "conversation_history",
+        "index_name": CONVERSATION_VECTOR_INDEX_NAME,
+        "path": "embedding",
+        "filter_paths": list(CONVERSATION_VECTOR_FILTER_FIELDS),
+    }
+}
+VECTOR_INDEX_READY_STATUSES = {"READY", "STEADY", "QUERYABLE"}
+
+
+def _vector_search_index_config(collection_name: str) -> dict[str, Any]:
+    """Return the approved vector-search index config for one collection."""
+
+    config = VECTOR_SEARCH_INDEX_CONFIGS.get(collection_name)
+    if config is None:
+        raise ValueError(f"unsupported vector-search collection: {collection_name}")
+    return_value = dict(config)
+    return return_value
+
+
+async def _find_search_index(
+    *,
+    collection_name: str,
+    index_name: str,
+) -> dict[str, Any] | None:
+    """Find one Atlas search-index document by name."""
+
+    db = await get_db()
+    collection = db[collection_name]
+    async for index in collection.list_search_indexes():
+        if index.get("name") == index_name:
+            return_value = dict(index)
+            return return_value
+    return_value = None
+    return return_value
+
+
+async def inspect_vector_search_index(collection_name: str) -> dict[str, Any]:
+    """Inspect whether a vector-search index needs recreation."""
+
+    config = _vector_search_index_config(collection_name)
+    index_name = str(config["index_name"])
+    filter_paths = list(config["filter_paths"])
+    index_document = await _find_search_index(
+        collection_name=collection_name,
+        index_name=index_name,
+    )
+    if index_document is None:
+        result = {
+            **config,
+            "status": "missing",
+            "requires_recreate": True,
+            "missing_filter_paths": filter_paths,
+            "definition_issues": ["missing_index"],
+        }
+        return result
+
+    path = str(config["path"])
+    sample_embedding = await get_text_embedding("test")
+    definition_issues = vector_index_definition_issues(
+        index_document,
+        path=path,
+        num_dimensions=len(sample_embedding),
+        required_filter_paths=filter_paths,
+    )
+    missing_paths = vector_index_missing_filter_paths(
+        index_document,
+        filter_paths,
+    )
+    status = "ready"
+    requires_recreate = False
+    if definition_issues:
+        status = "definition_mismatch"
+        requires_recreate = True
+
+    result = {
+        **config,
+        "status": status,
+        "requires_recreate": requires_recreate,
+        "missing_filter_paths": missing_paths,
+        "definition_issues": definition_issues,
+    }
+    return result
+
+
+async def _wait_for_search_index_ready(
+    *,
+    collection_name: str,
+    index_name: str,
+    timeout_seconds: int = 180,
+    poll_seconds: int = 5,
+) -> str:
+    """Wait for Atlas to report a recreated search index as queryable."""
+
+    elapsed_seconds = 0
+    status = "UNKNOWN"
+    while elapsed_seconds <= timeout_seconds:
+        index_document = await _find_search_index(
+            collection_name=collection_name,
+            index_name=index_name,
+        )
+        if index_document is not None:
+            raw_status = index_document.get("status")
+            if isinstance(raw_status, str) and raw_status:
+                status = raw_status
+            if status.upper() in VECTOR_INDEX_READY_STATUSES:
+                return_value = status
+                return return_value
+
+        await asyncio.sleep(poll_seconds)
+        elapsed_seconds += poll_seconds
+
+    raise TimeoutError(
+        f"search index {index_name!r} on {collection_name!r} "
+        f"was not ready after {timeout_seconds}s; last status={status!r}"
+    )
+
+
+async def apply_vector_search_index(
+    collection_name: str,
+    *,
+    wait_ready: bool,
+) -> dict[str, Any]:
+    """Recreate one approved vector-search index with required filters."""
+
+    config = _vector_search_index_config(collection_name)
+    index_name = str(config["index_name"])
+    path = str(config["path"])
+    filter_paths = list(config["filter_paths"])
+    db = await get_db()
+    collection = db[collection_name]
+    existing_index = await _find_search_index(
+        collection_name=collection_name,
+        index_name=index_name,
+    )
+    dropped_existing = existing_index is not None
+
+    sample_embedding = await get_text_embedding("test")
+    search_index_model = build_vector_search_index_model(
+        index_name=index_name,
+        path=path,
+        num_dimensions=len(sample_embedding),
+        filter_paths=filter_paths,
+    )
+    if dropped_existing:
+        await collection.drop_search_index(index_name)
+
+    await collection.create_search_index(search_index_model)
+
+    ready_status = ""
+    if wait_ready:
+        ready_status = await _wait_for_search_index_ready(
+            collection_name=collection_name,
+            index_name=index_name,
+        )
+
+    reset_conversation_vector_prefilter_support_cache()
+    result = {
+        **config,
+        "status": "applied",
+        "ready_status": ready_status,
+        "requires_recreate": False,
+        "missing_filter_paths": [],
+        "dropped_existing": dropped_existing,
+    }
+    return result
 
 
 async def export_collection_rows(

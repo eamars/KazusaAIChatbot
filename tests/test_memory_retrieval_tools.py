@@ -6,6 +6,10 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
+from kazusa_ai_chatbot.config import (
+    CONVERSATION_SEARCH_DEFAULT_TOP_K,
+    CONVERSATION_SEARCH_MAX_TOP_K,
+)
 from kazusa_ai_chatbot.rag.memory_retrieval_tools import (
     get_conversation,
     search_conversation,
@@ -69,7 +73,7 @@ async def test_search_conversation_delegates_to_vector_history_search() -> None:
         platform="qq",
         platform_channel_id="channel-1",
         global_user_id="global-user-1",
-        limit=5,
+        limit=CONVERSATION_SEARCH_DEFAULT_TOP_K,
         method="vector",
         from_timestamp="2026-04-01T00:00:00Z",
         to_timestamp="2026-04-02T00:00:00Z",
@@ -93,6 +97,47 @@ async def test_search_conversation_delegates_to_vector_history_search() -> None:
         )
     ]
     assert isinstance(result[0][1]["conversation_row_id"], str)
+
+
+@pytest.mark.asyncio
+async def test_search_conversation_clamps_too_small_direct_top_k() -> None:
+    """Direct tool calls should not bypass the configured semantic top-k floor."""
+
+    with patch(
+        "kazusa_ai_chatbot.rag.memory_retrieval_tools.search_conversation_history",
+        new_callable=AsyncMock,
+        return_value=[],
+    ) as search_history:
+        await search_conversation.ainvoke(
+            {
+                "search_query": "friendly greeting",
+                "top_k": 3,
+            }
+        )
+
+    assert (
+        search_history.await_args.kwargs["limit"]
+        == CONVERSATION_SEARCH_DEFAULT_TOP_K
+    )
+
+
+@pytest.mark.asyncio
+async def test_search_conversation_clamps_too_large_direct_top_k() -> None:
+    """Direct tool calls should not bypass the configured semantic top-k cap."""
+
+    with patch(
+        "kazusa_ai_chatbot.rag.memory_retrieval_tools.search_conversation_history",
+        new_callable=AsyncMock,
+        return_value=[],
+    ) as search_history:
+        await search_conversation.ainvoke(
+            {
+                "search_query": "friendly greeting",
+                "top_k": CONVERSATION_SEARCH_MAX_TOP_K + 1,
+            }
+        )
+
+    assert search_history.await_args.kwargs["limit"] == CONVERSATION_SEARCH_MAX_TOP_K
 
 
 @pytest.mark.asyncio

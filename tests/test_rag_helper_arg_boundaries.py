@@ -1,6 +1,10 @@
 from __future__ import annotations
 
-from kazusa_ai_chatbot.config import CHARACTER_GLOBAL_USER_ID
+from kazusa_ai_chatbot.config import (
+    CHARACTER_GLOBAL_USER_ID,
+    CONVERSATION_SEARCH_DEFAULT_TOP_K,
+    CONVERSATION_SEARCH_MAX_TOP_K,
+)
 from kazusa_ai_chatbot.rag import conversation_aggregate_agent
 from kazusa_ai_chatbot.rag import conversation_filter_agent
 from kazusa_ai_chatbot.rag import conversation_keyword_agent
@@ -24,7 +28,10 @@ def test_conversation_search_args_do_not_stringify_container_fields() -> None:
         "top_k": 3,
     })
 
-    assert args == {"platform_channel_id": "channel-1", "top_k": 3}
+    assert args == {
+        "platform_channel_id": "channel-1",
+        "top_k": CONVERSATION_SEARCH_DEFAULT_TOP_K,
+    }
 
 
 def test_conversation_search_args_accept_string_fields() -> None:
@@ -47,7 +54,21 @@ def test_conversation_search_args_accept_string_fields() -> None:
         "platform_channel_id": "channel-1",
         "from_timestamp": "2026-04-28T00:00:00+00:00",
         "to_timestamp": "2026-04-29T00:00:00+00:00",
-        "top_k": 3,
+        "top_k": CONVERSATION_SEARCH_DEFAULT_TOP_K,
+    }
+
+
+def test_conversation_search_args_clamp_to_configured_cap() -> None:
+    """Semantic conversation-search args should honor the configured top-k cap."""
+
+    args = conversation_search_agent._normalize_args({
+        "search_query": "tea preference",
+        "top_k": CONVERSATION_SEARCH_MAX_TOP_K + 1,
+    })
+
+    assert args == {
+        "search_query": "tea preference",
+        "top_k": CONVERSATION_SEARCH_MAX_TOP_K,
     }
 
 

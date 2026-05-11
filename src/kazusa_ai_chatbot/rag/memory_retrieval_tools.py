@@ -1,5 +1,9 @@
 from langchain_core.tools import tool
 
+from kazusa_ai_chatbot.config import (
+    CONVERSATION_SEARCH_DEFAULT_TOP_K,
+    CONVERSATION_SEARCH_MAX_TOP_K,
+)
 from kazusa_ai_chatbot.db import get_conversation_history, search_conversation_history
 from kazusa_ai_chatbot.db import search_memory as search_memory_db
 
@@ -18,11 +22,24 @@ def _message_body_text(message: dict) -> str:
     return body_text
 
 
+def _conversation_search_top_k(value: int) -> int:
+    """Normalize direct semantic conversation-search tool limits."""
+
+    if not isinstance(value, int) or isinstance(value, bool):
+        return_value = CONVERSATION_SEARCH_DEFAULT_TOP_K
+        return return_value
+    if value < CONVERSATION_SEARCH_DEFAULT_TOP_K:
+        return_value = CONVERSATION_SEARCH_DEFAULT_TOP_K
+        return return_value
+    return_value = min(value, CONVERSATION_SEARCH_MAX_TOP_K)
+    return return_value
+
+
 @tool
 async def search_conversation(
     search_query: str = "",
     global_user_id: str | None = None,
-    top_k: int = 5,
+    top_k: int = CONVERSATION_SEARCH_DEFAULT_TOP_K,
     platform: str | None = None,
     platform_channel_id: str | None = None,
     from_timestamp: str | None = None,
@@ -38,7 +55,7 @@ async def search_conversation(
     Args:
         search_query (Mandatory): Semantic query sentence used for vector retrieval.
         global_user_id (Optional): Filter results to one user UUID.
-        top_k (Optional): Maximum number of results to return. Default is 5.
+        top_k (Optional): Maximum number of results to return.
         platform (Optional): Platform filter, e.g. "discord", "qq".
         platform_channel_id (Optional): Channel ID filter; if omitted, search all channels.
         from_timestamp (Optional): Internal normalized start timestamp.
@@ -61,12 +78,13 @@ async def search_conversation(
         ]
         return return_value
 
+    retrieval_limit = _conversation_search_top_k(top_k)
     results = await search_conversation_history(
         query=search_query,
         platform=platform,
         platform_channel_id=platform_channel_id,
         global_user_id=global_user_id,
-        limit=top_k,
+        limit=retrieval_limit,
         method="vector",
         from_timestamp=from_timestamp,
         to_timestamp=to_timestamp,

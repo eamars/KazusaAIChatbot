@@ -10,13 +10,116 @@ from kazusa_ai_chatbot.config import (
     CONVERSATION_HISTORY_LIMIT,
     SAVE_ATTACHMENT_BASE64_TO_DB,
 )
-from kazusa_ai_chatbot.db._client import get_db, get_text_embedding
+from kazusa_ai_chatbot.db._client import (
+    get_db,
+    get_search_index_definition,
+    get_text_embedding,
+    vector_index_has_filter_paths,
+)
 from kazusa_ai_chatbot.db.schemas import ConversationMessageDoc
 from kazusa_ai_chatbot.message_envelope import INLINE_ATTACHMENT_BYTE_LIMIT
 from kazusa_ai_chatbot.rag import cache2_runtime
 from kazusa_ai_chatbot.rag.cache2_events import CacheInvalidationEvent
 
 logger = logging.getLogger(__name__)
+
+CONVERSATION_VECTOR_INDEX_NAME = "conversation_history_vector_index"
+CONVERSATION_VECTOR_FILTER_FIELDS = (
+    "platform",
+    "platform_channel_id",
+    "global_user_id",
+    "role",
+    "timestamp",
+)
+_VECTOR_SEARCH_MIN_CANDIDATES = 200
+_VECTOR_SEARCH_CANDIDATE_MULTIPLIER = 20
+_VECTOR_SEARCH_MAX_CANDIDATES = 10000
+_conversation_vector_prefilter_support_cache: bool | None = None
+
+
+def reset_conversation_vector_prefilter_support_cache() -> None:
+    """Clear cached conversation vector-index capability inspection.
+
+    Tests and maintenance scripts use this after recreating the Atlas search
+    index so the next retrieval observes the current definition.
+    """
+
+    global _conversation_vector_prefilter_support_cache
+    _conversation_vector_prefilter_support_cache = None
+
+
+def _vector_num_candidates(limit: int) -> int:
+    """Return a bounded Atlas candidate count for conversation vector search."""
+
+    candidate_count = max(
+        _VECTOR_SEARCH_MIN_CANDIDATES,
+        limit * _VECTOR_SEARCH_CANDIDATE_MULTIPLIER,
+    )
+    candidate_count = min(candidate_count, _VECTOR_SEARCH_MAX_CANDIDATES)
+    return candidate_count
+
+
+def _conversation_search_filter(
+    *,
+    platform: str | None,
+    platform_channel_id: str | None,
+    global_user_id: str | None,
+    from_timestamp: str | None,
+    to_timestamp: str | None,
+) -> dict[str, Any]:
+    """Build the shared filter document for conversation retrieval."""
+
+    match_filter: dict[str, Any] = {}
+    if platform:
+        match_filter["platform"] = platform
+    if platform_channel_id:
+        match_filter["platform_channel_id"] = platform_channel_id
+    if global_user_id:
+        match_filter["global_user_id"] = global_user_id
+    if from_timestamp or to_timestamp:
+        match_filter["timestamp"] = {}
+        if from_timestamp:
+            match_filter["timestamp"]["$gte"] = from_timestamp
+        if to_timestamp:
+            match_filter["timestamp"]["$lte"] = to_timestamp
+    return match_filter
+
+
+async def _conversation_vector_prefilter_supported() -> bool:
+    """Return whether the live vector index supports required prefilters."""
+
+    global _conversation_vector_prefilter_support_cache
+    if _conversation_vector_prefilter_support_cache is True:
+        return _conversation_vector_prefilter_support_cache
+
+    try:
+        index_document = await get_search_index_definition(
+            "conversation_history",
+            CONVERSATION_VECTOR_INDEX_NAME,
+        )
+    except Exception as exc:
+        logger.warning(
+            "Could not inspect conversation vector index filters; "
+            f"falling back to post-filtering: {exc}"
+        )
+        return_value = False
+        return return_value
+
+    if index_document is None:
+        logger.warning(
+            "Conversation vector index is missing; "
+            "falling back to post-filtering."
+        )
+        return_value = False
+        return return_value
+
+    supported = vector_index_has_filter_paths(
+        index_document,
+        CONVERSATION_VECTOR_FILTER_FIELDS,
+    )
+    if supported:
+        _conversation_vector_prefilter_support_cache = True
+    return supported
 
 
 def _safe_attachment_docs(attachments: object) -> list[dict[str, Any]]:
@@ -208,19 +311,16 @@ async def search_conversation_history(
     collection = db.conversation_history
 
     if method == "keyword":
-        base_filter: dict[str, Any] = _keyword_text_filter(query)
-        if platform:
-            base_filter["platform"] = platform
-        if platform_channel_id:
-            base_filter["platform_channel_id"] = platform_channel_id
-        if global_user_id:
-            base_filter["global_user_id"] = global_user_id
-        if from_timestamp or to_timestamp:
-            base_filter["timestamp"] = {}
-            if from_timestamp:
-                base_filter["timestamp"]["$gte"] = from_timestamp
-            if to_timestamp:
-                base_filter["timestamp"]["$lte"] = to_timestamp
+        base_filter = _keyword_text_filter(query)
+        base_filter.update(
+            _conversation_search_filter(
+                platform=platform,
+                platform_channel_id=platform_channel_id,
+                global_user_id=global_user_id,
+                from_timestamp=from_timestamp,
+                to_timestamp=to_timestamp,
+            )
+        )
 
         cursor = collection.find(base_filter).sort("timestamp", -1).limit(limit)
         docs = await cursor.to_list(length=limit)
@@ -229,35 +329,34 @@ async def search_conversation_history(
 
     # method == "vector"
     query_embedding = await get_text_embedding(query)
-    index_name = "conversation_history_vector_index"
+    index_name = CONVERSATION_VECTOR_INDEX_NAME
+    match_filter = _conversation_search_filter(
+        platform=platform,
+        platform_channel_id=platform_channel_id,
+        global_user_id=global_user_id,
+        from_timestamp=from_timestamp,
+        to_timestamp=to_timestamp,
+    )
+    vector_stage: dict[str, Any] = {
+        "index": index_name,
+        "path": "embedding",
+        "queryVector": query_embedding,
+        "numCandidates": _vector_num_candidates(limit),
+        "limit": limit,
+    }
+    use_prefilter = (
+        bool(match_filter)
+        and await _conversation_vector_prefilter_supported()
+    )
+    if use_prefilter:
+        vector_stage["filter"] = match_filter
 
     pipeline: list[dict[str, Any]] = [
-        {
-            "$vectorSearch": {
-                "index": index_name,
-                "path": "embedding",
-                "queryVector": query_embedding,
-                "numCandidates": limit * 10,
-                "limit": limit,
-            }
-        },
+        {"$vectorSearch": vector_stage},
         {"$addFields": {"score": {"$meta": "vectorSearchScore"}}},
     ]
 
-    match_filter: dict[str, Any] = {}
-    if platform:
-        match_filter["platform"] = platform
-    if platform_channel_id:
-        match_filter["platform_channel_id"] = platform_channel_id
-    if global_user_id:
-        match_filter["global_user_id"] = global_user_id
-    if from_timestamp or to_timestamp:
-        match_filter["timestamp"] = {}
-        if from_timestamp:
-            match_filter["timestamp"]["$gte"] = from_timestamp
-        if to_timestamp:
-            match_filter["timestamp"]["$lte"] = to_timestamp
-    if match_filter:
+    if match_filter and not use_prefilter:
         pipeline.append({"$match": match_filter})
 
     pipeline.append({"$limit": limit})

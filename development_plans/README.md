@@ -42,7 +42,9 @@ long_term/todo.md
 
 ## Active Bugfix Plans
 
-No active bugfix plans.
+| Plan | Status | Execution |
+|---|---|---|
+| [rag_retrieval_top_k_embedding_tuning_plan.md](active/bugfix/rag_retrieval_top_k_embedding_tuning_plan.md) | approved | ready |
 
 ## Reference Documents
 

@@ -751,6 +751,62 @@ async def test_db_bootstrap_delegates_global_character_growth_indexes(
 
 
 @pytest.mark.asyncio
+async def test_db_bootstrap_configures_conversation_vector_filter_paths(
+    monkeypatch,
+) -> None:
+    """Bootstrap should request filterable fields for conversation vector search."""
+
+    db = _BootstrapDb()
+    enable_vector_index = AsyncMock()
+    monkeypatch.setattr(db_bootstrap_module, "get_db", AsyncMock(return_value=db))
+    monkeypatch.setattr(
+        db_bootstrap_module,
+        "enable_vector_index",
+        enable_vector_index,
+    )
+    monkeypatch.setattr(
+        db_bootstrap_module,
+        "ensure_reflection_run_indexes",
+        AsyncMock(),
+    )
+    monkeypatch.setattr(
+        db_bootstrap_module,
+        "ensure_interaction_style_image_indexes",
+        AsyncMock(),
+    )
+    monkeypatch.setattr(
+        db_bootstrap_module,
+        "ensure_global_character_growth_indexes",
+        AsyncMock(),
+    )
+    monkeypatch.setattr(
+        db_bootstrap_module,
+        "purge_stale_initializer_entries",
+        AsyncMock(),
+    )
+    monkeypatch.setattr(
+        db_bootstrap_module,
+        "prune_persistent_entries",
+        AsyncMock(),
+    )
+
+    await db_bootstrap_module.db_bootstrap()
+
+    enable_vector_index.assert_any_await(
+        "conversation_history",
+        "conversation_history_vector_index",
+        path="embedding",
+        filter_paths=[
+            "platform",
+            "platform_channel_id",
+            "global_user_id",
+            "role",
+            "timestamp",
+        ],
+    )
+
+
+@pytest.mark.asyncio
 async def test_global_character_growth_index_bootstrap(monkeypatch) -> None:
     """Global growth DB interface should create all required indexes."""
 
@@ -1421,7 +1477,9 @@ async def test_search_conversation_history_keyword_with_filters_mocked():
 
 
 @pytest.mark.asyncio
-async def test_search_conversation_history_vector_mocked():
+async def test_search_conversation_history_vector_mocked(
+    monkeypatch: pytest.MonkeyPatch,
+):
     """Vector search uses $vectorSearch aggregation pipeline."""
     db = _mock_db()
     cursor = AsyncMock()
@@ -1429,6 +1487,12 @@ async def test_search_conversation_history_vector_mocked():
         {"channel_id": "c1", "body_text": "vector matched", "score": 0.95},
     ])
     db.conversation_history.aggregate = MagicMock(return_value=cursor)
+    monkeypatch.setattr(
+        db_conversation_module,
+        "_conversation_vector_prefilter_supported",
+        AsyncMock(return_value=False),
+        raising=False,
+    )
 
     with _patched_get_db(db), _patched_embedding(return_value=[0.1, 0.2, 0.3]):
         results = await db_module.search_conversation_history("test query", method="vector", limit=2)
@@ -1442,15 +1506,24 @@ async def test_search_conversation_history_vector_mocked():
     vs = pipeline[0]["$vectorSearch"]
     assert vs["queryVector"] == [0.1, 0.2, 0.3]
     assert vs["index"] == "conversation_history_vector_index"
+    assert vs["numCandidates"] == 200
 
 
 @pytest.mark.asyncio
-async def test_search_conversation_history_vector_with_filters_mocked():
+async def test_search_conversation_history_vector_with_filters_mocked(
+    monkeypatch: pytest.MonkeyPatch,
+):
     """Vector search adds $match stage for platform_channel_id/global_user_id post-filtering."""
     db = _mock_db()
     cursor = AsyncMock()
     cursor.to_list = AsyncMock(return_value=[])
     db.conversation_history.aggregate = MagicMock(return_value=cursor)
+    monkeypatch.setattr(
+        db_conversation_module,
+        "_conversation_vector_prefilter_supported",
+        AsyncMock(return_value=False),
+        raising=False,
+    )
 
     with _patched_get_db(db), _patched_embedding(return_value=[0.1, 0.2, 0.3]):
         await db_module.search_conversation_history(
@@ -1463,6 +1536,198 @@ async def test_search_conversation_history_vector_with_filters_mocked():
     assert len(match_stages) == 1
     assert match_stages[0]["$match"]["platform_channel_id"] == "ch1"
     assert match_stages[0]["$match"]["global_user_id"] == "u1"
+    assert "filter" not in pipeline[0]["$vectorSearch"]
+
+
+@pytest.mark.asyncio
+async def test_search_conversation_history_vector_uses_prefilter_when_supported(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Vector search should push supported filters into $vectorSearch."""
+
+    db = _mock_db()
+    cursor = AsyncMock()
+    cursor.to_list = AsyncMock(return_value=[])
+    db.conversation_history.aggregate = MagicMock(return_value=cursor)
+    monkeypatch.setattr(
+        db_conversation_module,
+        "_conversation_vector_prefilter_supported",
+        AsyncMock(return_value=True),
+        raising=False,
+    )
+
+    with _patched_get_db(db), _patched_embedding(return_value=[0.1, 0.2, 0.3]):
+        await db_module.search_conversation_history(
+            "test",
+            method="vector",
+            platform="qq",
+            platform_channel_id="ch1",
+            global_user_id="u1",
+            from_timestamp="2026-05-11T00:00:00Z",
+            to_timestamp="2026-05-12T00:00:00Z",
+            limit=3,
+        )
+
+    pipeline = db.conversation_history.aggregate.call_args[0][0]
+    vector_filter = pipeline[0]["$vectorSearch"]["filter"]
+    assert vector_filter == {
+        "platform": "qq",
+        "platform_channel_id": "ch1",
+        "global_user_id": "u1",
+        "timestamp": {
+            "$gte": "2026-05-11T00:00:00Z",
+            "$lte": "2026-05-12T00:00:00Z",
+        },
+    }
+    assert [stage for stage in pipeline if "$match" in stage] == []
+
+
+@pytest.mark.asyncio
+async def test_search_conversation_history_vector_post_filters_when_prefilter_not_supported(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Vector search should keep post-filtering when index filters are absent."""
+
+    db = _mock_db()
+    cursor = AsyncMock()
+    cursor.to_list = AsyncMock(return_value=[])
+    db.conversation_history.aggregate = MagicMock(return_value=cursor)
+    monkeypatch.setattr(
+        db_conversation_module,
+        "_conversation_vector_prefilter_supported",
+        AsyncMock(return_value=False),
+        raising=False,
+    )
+
+    with _patched_get_db(db), _patched_embedding(return_value=[0.1, 0.2, 0.3]):
+        await db_module.search_conversation_history(
+            "test",
+            method="vector",
+            platform="qq",
+            platform_channel_id="ch1",
+            from_timestamp="2026-05-11T00:00:00Z",
+            limit=20,
+        )
+
+    pipeline = db.conversation_history.aggregate.call_args[0][0]
+    assert "filter" not in pipeline[0]["$vectorSearch"]
+    match_stages = [stage for stage in pipeline if "$match" in stage]
+    assert match_stages == [
+        {
+            "$match": {
+                "platform": "qq",
+                "platform_channel_id": "ch1",
+                "timestamp": {"$gte": "2026-05-11T00:00:00Z"},
+            }
+        }
+    ]
+
+
+def test_conversation_vector_prefilter_support_detects_missing_fields() -> None:
+    """Index definition helpers should report missing required filter paths."""
+
+    index_document = {
+        "latestDefinition": {
+            "fields": [
+                {"type": "vector", "path": "embedding", "numDimensions": 768},
+                {"type": "filter", "path": "platform"},
+            ]
+        }
+    }
+    required_paths = ["platform", "platform_channel_id"]
+
+    missing_paths = db_client_module.vector_index_missing_filter_paths(
+        index_document,
+        required_paths,
+    )
+
+    assert missing_paths == ["platform_channel_id"]
+    assert not db_client_module.vector_index_has_filter_paths(
+        index_document,
+        required_paths,
+    )
+
+
+def test_vector_index_definition_issues_detect_vector_mismatch() -> None:
+    """Index definition helpers should report vector-field mismatches."""
+
+    index_document = {
+        "latestDefinition": {
+            "fields": [
+                {
+                    "type": "vector",
+                    "path": "wrong_embedding",
+                    "numDimensions": 512,
+                    "similarity": "dotProduct",
+                },
+                {"type": "filter", "path": "platform"},
+            ]
+        }
+    }
+
+    issues = db_client_module.vector_index_definition_issues(
+        index_document,
+        path="embedding",
+        num_dimensions=768,
+        required_filter_paths=["platform", "platform_channel_id"],
+    )
+
+    assert issues == [
+        "vector_path",
+        "num_dimensions",
+        "similarity",
+        "missing_filter_path:platform_channel_id",
+    ]
+
+
+def test_vector_num_candidates_is_capped_to_atlas_limit() -> None:
+    """Conversation vector search should not exceed the Atlas candidate cap."""
+
+    candidate_count = db_conversation_module._vector_num_candidates(1000)
+
+    assert candidate_count == 10000
+
+
+@pytest.mark.asyncio
+async def test_conversation_vector_prefilter_support_rechecks_cached_false(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A stale negative capability cache should not survive index recreation."""
+
+    index_document = {
+        "latestDefinition": {
+            "fields": [
+                {
+                    "type": "vector",
+                    "path": "embedding",
+                    "numDimensions": 768,
+                    "similarity": "cosine",
+                },
+                {"type": "filter", "path": "platform"},
+                {"type": "filter", "path": "platform_channel_id"},
+                {"type": "filter", "path": "global_user_id"},
+                {"type": "filter", "path": "role"},
+                {"type": "filter", "path": "timestamp"},
+            ]
+        }
+    }
+    get_definition = AsyncMock(return_value=index_document)
+    monkeypatch.setattr(
+        db_conversation_module,
+        "_conversation_vector_prefilter_support_cache",
+        False,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        db_conversation_module,
+        "get_search_index_definition",
+        get_definition,
+    )
+
+    supported = await db_conversation_module._conversation_vector_prefilter_supported()
+
+    assert supported is True
+    get_definition.assert_awaited_once()
 
 
 # NOTE: test_search_lore_mocked removed due to async mock complexity

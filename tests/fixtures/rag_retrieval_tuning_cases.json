@@ -1,0 +1,56 @@
+[
+  {
+    "case_id": "qq905393941_gpu_precise",
+    "kind": "positive",
+    "platform": "qq",
+    "platform_channel_id": "905393941",
+    "query": "游戏市场占有率最高的显卡",
+    "expected_any": ["Steam", "RTX 3060", "NVIDIA", "3060"],
+    "forbidden_any": ["早餐外卖"]
+  },
+  {
+    "case_id": "qq905393941_gpu_discussed_today",
+    "kind": "positive",
+    "platform": "qq",
+    "platform_channel_id": "905393941",
+    "query": "今天群里有没有讨论显卡的使用率或者市场占有率问题",
+    "expected_any": ["显卡", "使用率", "占比", "Steam", "RTX 3060", "3060"],
+    "forbidden_any": ["早餐外卖"]
+  },
+  {
+    "case_id": "qq905393941_gpu_recent_reference",
+    "kind": "positive",
+    "platform": "qq",
+    "platform_channel_id": "905393941",
+    "query": "刚刚提到的游戏市场占有率最高的显卡是什么",
+    "expected_any": ["Steam", "RTX 3060", "NVIDIA", "3060"],
+    "forbidden_any": ["早餐外卖"]
+  },
+  {
+    "case_id": "qq905393941_rag_memory_failure_today",
+    "kind": "positive",
+    "platform": "qq",
+    "platform_channel_id": "905393941",
+    "query": "今天群里讨论RAG搜不出来显卡市场占有率和使用率的问题",
+    "expected_any": ["RAG", "搜不出来", "市场占有率", "使用率"],
+    "forbidden_any": ["早餐外卖"]
+  },
+  {
+    "case_id": "qq905393941_embedding_model_today",
+    "kind": "positive",
+    "platform": "qq",
+    "platform_channel_id": "905393941",
+    "query": "今天群里提到text-embedding-nomic-embed-text-v2-moe效果不好吗",
+    "expected_any": ["text-embedding-nomic-embed-text-v2-moe", "embedding", "nomic"],
+    "forbidden_any": ["早餐外卖"]
+  },
+  {
+    "case_id": "qq905393941_absent_breakfast_memory",
+    "kind": "negative",
+    "platform": "qq",
+    "platform_channel_id": "905393941",
+    "query": "今天早餐外卖吃了什么",
+    "expected_any": [],
+    "forbidden_any": ["RTX 3060", "显卡", "RAG", "text-embedding-nomic-embed-text-v2-moe"]
+  }
+]

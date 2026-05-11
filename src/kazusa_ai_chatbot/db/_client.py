@@ -12,6 +12,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections.abc import Mapping, Sequence
+from typing import Any
 
 from motor.motor_asyncio import AsyncIOMotorClient
 from openai import AsyncOpenAI
@@ -142,6 +144,195 @@ async def close_db() -> None:
 
 # ── Vector search index helper ─────────────────────────────────────
 
+def build_vector_search_index_fields(
+    *,
+    path: str,
+    num_dimensions: int,
+    filter_paths: Sequence[str] | None = None,
+) -> list[dict[str, Any]]:
+    """Build Atlas vector-search field definitions.
+
+    Args:
+        path: Field containing embedding vectors.
+        num_dimensions: Embedding vector dimension count.
+        filter_paths: Optional scalar fields for vector pre-filtering.
+
+    Returns:
+        Search-index field definitions.
+    """
+
+    fields: list[dict[str, Any]] = [
+        {
+            "type": "vector",
+            "path": path,
+            "numDimensions": num_dimensions,
+            "similarity": "cosine",
+        }
+    ]
+    for filter_path in filter_paths or ():
+        if filter_path:
+            fields.append({"type": "filter", "path": filter_path})
+    return fields
+
+
+def build_vector_search_index_model(
+    *,
+    index_name: str,
+    path: str,
+    num_dimensions: int,
+    filter_paths: Sequence[str] | None = None,
+) -> SearchIndexModel:
+    """Build a ``SearchIndexModel`` for a vector-search index."""
+
+    fields = build_vector_search_index_fields(
+        path=path,
+        num_dimensions=num_dimensions,
+        filter_paths=filter_paths,
+    )
+    search_index_model = SearchIndexModel(
+        definition={"fields": fields},
+        name=index_name,
+        type="vectorSearch",
+    )
+    return search_index_model
+
+
+def _search_index_definition(index_document: Mapping[str, Any]) -> Mapping[str, Any]:
+    """Extract a search-index definition from Atlas or PyMongo-shaped docs."""
+
+    definition = index_document.get("latestDefinition")
+    if isinstance(definition, Mapping):
+        return definition
+
+    definition = index_document.get("definition")
+    if isinstance(definition, Mapping):
+        return definition
+
+    return_value: Mapping[str, Any] = {}
+    return return_value
+
+
+def vector_index_filter_paths(index_document: Mapping[str, Any]) -> set[str]:
+    """Return filter paths configured on one Atlas vector-search index."""
+
+    definition = _search_index_definition(index_document)
+    raw_fields = definition.get("fields")
+    if not isinstance(raw_fields, list):
+        return_value: set[str] = set()
+        return return_value
+
+    filter_paths: set[str] = set()
+    for raw_field in raw_fields:
+        if not isinstance(raw_field, Mapping):
+            continue
+        if raw_field.get("type") != "filter":
+            continue
+        path = raw_field.get("path")
+        if isinstance(path, str) and path:
+            filter_paths.add(path)
+    return filter_paths
+
+
+def vector_index_missing_filter_paths(
+    index_document: Mapping[str, Any],
+    required_paths: Sequence[str],
+) -> list[str]:
+    """Return required filter paths absent from one vector-search index."""
+
+    existing_paths = vector_index_filter_paths(index_document)
+    missing_paths = [
+        path
+        for path in required_paths
+        if path not in existing_paths
+    ]
+    return missing_paths
+
+
+def vector_index_definition_issues(
+    index_document: Mapping[str, Any],
+    *,
+    path: str,
+    num_dimensions: int,
+    required_filter_paths: Sequence[str],
+    similarity: str = "cosine",
+) -> list[str]:
+    """Return mismatches between an index document and expected vector shape."""
+
+    issues: list[str] = []
+    index_type = index_document.get("type")
+    if isinstance(index_type, str) and index_type != "vectorSearch":
+        issues.append("index_type")
+
+    definition = _search_index_definition(index_document)
+    raw_fields = definition.get("fields")
+    vector_field: Mapping[str, Any] | None = None
+    if isinstance(raw_fields, list):
+        for raw_field in raw_fields:
+            if not isinstance(raw_field, Mapping):
+                continue
+            if raw_field.get("type") == "vector":
+                vector_field = raw_field
+                break
+
+    if vector_field is None:
+        issues.append("missing_vector_field")
+    else:
+        if vector_field.get("path") != path:
+            issues.append("vector_path")
+        if vector_field.get("numDimensions") != num_dimensions:
+            issues.append("num_dimensions")
+        if vector_field.get("similarity") != similarity:
+            issues.append("similarity")
+
+    missing_filter_issues = [
+        f"missing_filter_path:{filter_path}"
+        for filter_path in vector_index_missing_filter_paths(
+            index_document,
+            required_filter_paths,
+        )
+    ]
+    issues.extend(missing_filter_issues)
+    return issues
+
+
+def vector_index_has_filter_paths(
+    index_document: Mapping[str, Any],
+    required_paths: Sequence[str],
+) -> bool:
+    """Return whether a vector-search index has all required filter paths."""
+
+    missing_paths = vector_index_missing_filter_paths(
+        index_document,
+        required_paths,
+    )
+    has_filter_paths = not missing_paths
+    return has_filter_paths
+
+
+async def get_search_index_definition(
+    collection_name: str,
+    index_name: str,
+) -> dict[str, Any] | None:
+    """Load one Atlas search-index definition document by name.
+
+    Args:
+        collection_name: Target collection name.
+        index_name: Search index name.
+
+    Returns:
+        The raw search-index document when found, otherwise ``None``.
+    """
+
+    db = await get_db()
+    collection = db[collection_name]
+    async for index in collection.list_search_indexes():
+        if index.get("name") == index_name:
+            return_value = dict(index)
+            return return_value
+    return_value = None
+    return return_value
+
+
 async def enable_vector_index(
     collection_name: str,
     index_name: str,
@@ -163,7 +354,21 @@ async def enable_vector_index(
     try:
         async for index in collection.list_search_indexes():
             if index.get("name") == index_name:
-                logger.info(f'Vector search index \'{index_name}\' already exists.')
+                missing_filter_paths = vector_index_missing_filter_paths(
+                    index,
+                    filter_paths or [],
+                )
+                if missing_filter_paths:
+                    logger.warning(
+                        f"Vector search index {index_name!r} exists but is "
+                        "missing filter paths "
+                        f"{missing_filter_paths}; run the vector-index "
+                        "migration script to recreate it."
+                    )
+                else:
+                    logger.info(
+                        f'Vector search index \'{index_name}\' already exists.'
+                    )
                 return
     except Exception as exc:
         logger.exception(
@@ -176,23 +381,11 @@ async def enable_vector_index(
     sample_embedding = await get_text_embedding("test")
     num_dimensions = len(sample_embedding)
 
-    fields = [
-        {
-            "type": "vector",
-            "path": path,
-            "numDimensions": num_dimensions,
-            "similarity": "cosine",
-        }
-    ]
-    for filter_path in filter_paths or []:
-        fields.append({"type": "filter", "path": filter_path})
-
-    search_index_model = SearchIndexModel(
-        definition={
-            "fields": fields
-        },
-        name=index_name,
-        type="vectorSearch",
+    search_index_model = build_vector_search_index_model(
+        index_name=index_name,
+        path=path,
+        num_dimensions=num_dimensions,
+        filter_paths=filter_paths,
     )
 
     try:

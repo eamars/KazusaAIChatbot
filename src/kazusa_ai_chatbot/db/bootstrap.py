@@ -11,6 +11,10 @@ from datetime import datetime, timezone
 
 from kazusa_ai_chatbot.config import RAG_CACHE2_MAX_ENTRIES
 from kazusa_ai_chatbot.db._client import enable_vector_index, get_db
+from kazusa_ai_chatbot.db.conversation import (
+    CONVERSATION_VECTOR_FILTER_FIELDS,
+    CONVERSATION_VECTOR_INDEX_NAME,
+)
 from kazusa_ai_chatbot.db.interaction_style_images import (
     ensure_interaction_style_image_indexes,
 )
@@ -195,12 +199,14 @@ async def db_bootstrap() -> None:
 
     # ── Vector search indexes (best-effort — requires Atlas) ──────
     for collection, index_name, path in (
-        ("conversation_history", "conversation_history_vector_index", "embedding"),
+        ("conversation_history", CONVERSATION_VECTOR_INDEX_NAME, "embedding"),
         ("memory",               "memory_vector_index",              "embedding"),
         ("user_memory_units",     "user_memory_units_vector",         "embedding"),
     ):
         try:
             filter_paths = None
+            if collection == "conversation_history":
+                filter_paths = list(CONVERSATION_VECTOR_FILTER_FIELDS)
             if collection == "memory":
                 filter_paths = [
                     "status",

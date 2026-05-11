@@ -141,6 +141,93 @@ class TestCache2Config:
         assert RAG_CACHE2_MAX_ENTRIES > 0
 
 
+class TestConversationSearchConfig:
+    def test_conversation_search_top_k_defaults_are_stable(self, tmp_path):
+        env = _configured_subprocess_env_without_dotenv()
+        env.pop("CONVERSATION_SEARCH_DEFAULT_TOP_K", None)
+        env.pop("CONVERSATION_SEARCH_MAX_TOP_K", None)
+
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-c",
+                (
+                    "import kazusa_ai_chatbot.config as config; "
+                    "print(config.CONVERSATION_SEARCH_DEFAULT_TOP_K); "
+                    "print(config.CONVERSATION_SEARCH_MAX_TOP_K)"
+                ),
+            ],
+            cwd=tmp_path,
+            env=env,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+        assert result.returncode == 0
+        assert result.stdout.splitlines() == ["20", "50"]
+
+    def test_conversation_search_default_top_k_reads_environment(self, tmp_path):
+        env = _configured_subprocess_env_without_dotenv()
+        env["CONVERSATION_SEARCH_DEFAULT_TOP_K"] = "12"
+
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-c",
+                (
+                    "import kazusa_ai_chatbot.config as config; "
+                    "print(config.CONVERSATION_SEARCH_DEFAULT_TOP_K)"
+                ),
+            ],
+            cwd=tmp_path,
+            env=env,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+        assert result.returncode == 0
+        assert result.stdout.strip() == "12"
+
+    def test_conversation_search_default_top_k_rejects_zero(self, tmp_path):
+        env = _configured_subprocess_env_without_dotenv()
+        env["CONVERSATION_SEARCH_DEFAULT_TOP_K"] = "0"
+
+        result = subprocess.run(
+            [sys.executable, "-c", "import kazusa_ai_chatbot.config"],
+            cwd=tmp_path,
+            env=env,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+        assert result.returncode != 0
+        assert "CONVERSATION_SEARCH_DEFAULT_TOP_K must be >= 1" in result.stderr
+
+    def test_conversation_search_max_top_k_must_cover_default(self, tmp_path):
+        env = _configured_subprocess_env_without_dotenv()
+        env["CONVERSATION_SEARCH_DEFAULT_TOP_K"] = "30"
+        env["CONVERSATION_SEARCH_MAX_TOP_K"] = "20"
+
+        result = subprocess.run(
+            [sys.executable, "-c", "import kazusa_ai_chatbot.config"],
+            cwd=tmp_path,
+            env=env,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+        assert result.returncode != 0
+        expected_error = (
+            "CONVERSATION_SEARCH_MAX_TOP_K must be >= "
+            "CONVERSATION_SEARCH_DEFAULT_TOP_K"
+        )
+        assert expected_error in result.stderr
+
+
 class TestInteractionStyleConfig:
     def test_interaction_style_limits_default_to_positive_values(self):
         from kazusa_ai_chatbot.config import (

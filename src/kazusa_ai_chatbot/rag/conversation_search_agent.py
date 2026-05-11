@@ -9,7 +9,13 @@ from typing import Any
 from langchain_core.messages import HumanMessage, SystemMessage
 from pydantic import ValidationError
 
-from kazusa_ai_chatbot.config import RAG_SUBAGENT_LLM_API_KEY, RAG_SUBAGENT_LLM_BASE_URL, RAG_SUBAGENT_LLM_MODEL
+from kazusa_ai_chatbot.config import (
+    CONVERSATION_SEARCH_DEFAULT_TOP_K,
+    CONVERSATION_SEARCH_MAX_TOP_K,
+    RAG_SUBAGENT_LLM_API_KEY,
+    RAG_SUBAGENT_LLM_BASE_URL,
+    RAG_SUBAGENT_LLM_MODEL,
+)
 from kazusa_ai_chatbot.rag.memory_retrieval_tools import search_conversation
 from kazusa_ai_chatbot.rag.cache2_policy import (
     CONVERSATION_SEARCH_CACHE_NAME,
@@ -29,7 +35,8 @@ from kazusa_ai_chatbot.utils import get_llm, parse_llm_json_output, text_or_empt
 
 logger = logging.getLogger(__name__)
 
-_GENERATOR_PROMPT = """\
+_GENERATOR_PROMPT = (
+    """\
 你是一个只负责 `search_conversation` 的检索参数生成器。
 
 # 你的唯一职责
@@ -46,24 +53,25 @@ _GENERATOR_PROMPT = """\
 4. Write one natural-language `search_query`, then add only filters supported by context.
 
 # Input Format
-{
+{{
   "task": "slot description from the outer RAG supervisor",
   "context": "known facts and runtime hints",
   "feedback": "previous judge feedback, or empty string"
-}
+}}
 
 # 输出格式
 请只返回合法 JSON：
-{
+{{
   "search_query": "string",
   "global_user_id": "string or omitted",
-  "top_k": 5,
+  "top_k": {default_top_k},
   "platform": "string or omitted",
   "platform_channel_id": "string or omitted",
   "from_timestamp": "local YYYY-MM-DD HH:MM or omitted",
   "to_timestamp": "local YYYY-MM-DD HH:MM or omitted"
-}
+}}
 """
+).format(default_top_k=CONVERSATION_SEARCH_DEFAULT_TOP_K)
 _generator_llm = get_llm(
     temperature=0.0,
     top_p=1.0,
@@ -113,6 +121,21 @@ _judge_llm = get_llm(
 )
 
 
+def _normalize_top_k(value: object) -> int:
+    """Normalize semantic conversation-search top-k to configured bounds."""
+
+    if not isinstance(value, int) or isinstance(value, bool):
+        return_value = CONVERSATION_SEARCH_DEFAULT_TOP_K
+        return return_value
+
+    if value < CONVERSATION_SEARCH_DEFAULT_TOP_K:
+        return_value = CONVERSATION_SEARCH_DEFAULT_TOP_K
+        return return_value
+
+    return_value = min(value, CONVERSATION_SEARCH_MAX_TOP_K)
+    return return_value
+
+
 def _normalize_args(raw_args: dict[str, Any]) -> dict[str, Any]:
     """Keep only valid `search_conversation` arguments with safe scalar coercion.
 
@@ -128,11 +151,7 @@ def _normalize_args(raw_args: dict[str, Any]) -> dict[str, Any]:
     if search_query:
         args["search_query"] = search_query
 
-    top_k = raw_args.get("top_k", 5)
-    if isinstance(top_k, int) and not isinstance(top_k, bool) and top_k > 0:
-        args["top_k"] = top_k
-    else:
-        args["top_k"] = 5
+    args["top_k"] = _normalize_top_k(raw_args.get("top_k"))
 
     for key in (
         "global_user_id",
@@ -203,6 +222,18 @@ async def _tool(args: dict[str, Any]) -> object:
         logger.info(f'conversation_search_agent invalid args: {exc}')
         return_value = {"error": f"{type(exc).__name__}: {exc}"}
         return return_value
+
+
+def _apply_context_top_k(args: dict[str, Any], context: dict[str, Any]) -> dict[str, Any]:
+    """Apply a bounded internal top-k override from trusted worker context."""
+
+    override = context.get("conversation_search_top_k")
+    if override is None:
+        return dict(args)
+
+    scoped_args = dict(args)
+    scoped_args["top_k"] = _normalize_top_k(override)
+    return scoped_args
 
 
 async def _judge(task: str, result: object) -> tuple[bool, str]:
@@ -282,6 +313,7 @@ class ConversationSearchAgent(BaseRAGHelperAgent):
 
         for attempt in range(max_attempts):
             args = await _generator(task, context, feedback)
+            args = _apply_context_top_k(args, context)
             result = await _tool(args)
             resolved, feedback = await _judge(task, result)
             if resolved:
