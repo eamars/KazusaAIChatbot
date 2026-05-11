@@ -217,21 +217,28 @@ except TimeoutError:
 
 ---
 
-## P-008 -- Use f-strings for interpolation
+## P-008 -- Use f-strings for immediate interpolation
 
-Use f-strings for string interpolation. They keep the rendered message close to
-the values being inserted and match the project's logging style.
+Use f-strings for immediate string interpolation. They keep the rendered
+message close to the values being inserted and match the project's logging
+style.
+
+For reusable template strings that are defined separately from the substitution
+site, use `.format(...)` with named placeholders. Do not populate templates by
+chaining `.replace(...)` calls.
 
 **Wrong:**
 ```python
 logger.info("User %s affinity changed to %d", user_id, affinity)
 message = "User %s" % user_id
+prompt = PROMPT_TEMPLATE.replace("{user_name}", user_name)
 ```
 
 **Right:**
 ```python
 logger.info(f"User {user_id} affinity changed to {affinity}")
 message = f"User {user_id}"
+prompt = PROMPT_TEMPLATE.format(user_name=user_name)
 ```
 
 ---

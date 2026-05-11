@@ -498,3 +498,38 @@ Define the target first, such as reducing typical latency from 500 ms to under
 
 When reviewing, require verification that proves the intended outcome. A test
 run that does not exercise the changed behavior is not enough.
+
+---
+
+## N-017 -- Do not use `.replace(...)` for template substitution
+
+Do not populate reusable template strings by chaining `.replace(...)` calls.
+Template substitution should use `.format(...)` with named placeholders so the
+required fields are visible at the call site and missing placeholders fail
+directly.
+
+This applies to prompt templates, message templates, query templates, and other
+strings whose placeholder values are supplied after the template is defined.
+Immediate interpolation should still use f-strings under `P-008`.
+
+**Forbidden:**
+```python
+rendered_prompt = (
+    PROMPT_TEMPLATE
+    .replace("{character_name}", character_name)
+    .replace("{user_message}", user_message)
+)
+```
+
+**Correct:**
+```python
+rendered_prompt = PROMPT_TEMPLATE.format(
+    character_name=character_name,
+    user_message=user_message,
+)
+```
+
+When reviewing, flag `.replace(...)` calls that are being used to fill
+placeholder tokens in a template. `.replace(...)` remains acceptable for
+ordinary text normalization where the code is replacing literal content rather
+than rendering a template.

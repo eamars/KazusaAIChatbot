@@ -104,6 +104,25 @@
           "description": "Response proposes a replacement docstring based on stable runtime or domain behavior"
         }
       ]
+    },
+    {
+      "id": 5,
+      "prompt": "Review this prompt-rendering code for py-style issues:\n\n```python\nPROMPT_TEMPLATE = \"Hello {character_name}, reply to {user_message}.\"\n\n\ndef build_prompt(character_name: str, user_message: str) -> str:\n    \"\"\"Render the prompt for the active character.\"\"\"\n\n    prompt = (\n        PROMPT_TEMPLATE\n        .replace(\"{character_name}\", character_name)\n        .replace(\"{user_message}\", user_message)\n    )\n    return prompt\n```",
+      "expected_output": "Flags the chained .replace(...) calls as an N-017 violation because reusable template strings must be populated with .format(...) and named placeholders. Proposes PROMPT_TEMPLATE.format(character_name=character_name, user_message=user_message).",
+      "assertions": [
+        {
+          "name": "flags_replace_template_substitution",
+          "description": "Response identifies chained .replace(...) placeholder substitution as an N-017 violation"
+        },
+        {
+          "name": "suggests_format_with_named_placeholders",
+          "description": "Response proposes .format(...) with named placeholders for the template values"
+        },
+        {
+          "name": "distinguishes_template_from_text_normalization",
+          "description": "Response does not ban all .replace(...) usage, only template placeholder substitution"
+        }
+      ]
     }
   ]
 }
