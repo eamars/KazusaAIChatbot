@@ -357,14 +357,14 @@ context caps, or retry paths are authorized.
 
 ### Create
 
-- `development_plans/active/short_term/cognition_visual_directives_control_plan.md`
+- `development_plans/archive/completed/short_term/cognition_visual_directives_control_plan.md`
   - Owns this execution contract.
 
 ### Modify
 
 - `development_plans/README.md`
-  - Track this plan in the active short-term registry. Execution moves the row
-    to `in_progress | in_progress`.
+  - Track this plan in the lifecycle registry. Completed execution moves the
+    record to `archive/completed/short_term/`.
 - `src/kazusa_ai_chatbot/config.py`
   - Add `COGNITION_VISUAL_DIRECTIVES_ENABLED`.
 - `docs/HOWTO.md`
@@ -719,6 +719,12 @@ This plan is complete when:
     resolved by aligning tests to approved later contracts, not by weakening
     production behavior.
   - Approval status: approved. No residual blockers remain for this plan.
+- Lifecycle cleanup:
+  - Moved the completed plan from `active/short_term/` to
+    `archive/completed/short_term/`.
+  - Removed the completed plan from the Active Short-Term Plans registry table.
+  - Added the completed plan to the Completed Short-Term Records registry
+    table.
 
 ## Plan Self-Review
 
