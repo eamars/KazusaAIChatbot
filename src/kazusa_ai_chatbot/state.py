@@ -34,6 +34,7 @@ class DebugModes(TypedDict, total=False):
     listen_only: bool      # Record data but skip response graph processing
     think_only: bool       # Full pipeline but suppress dialog in response
     no_remember: bool      # Full pipeline but skip consolidation
+    no_visual_directives: bool  # Full pipeline but skip visual LLM directives
 
 
 def keep_true(current: bool | None, update: bool | None) -> bool:

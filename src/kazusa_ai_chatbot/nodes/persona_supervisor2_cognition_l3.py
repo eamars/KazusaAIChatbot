@@ -1114,9 +1114,23 @@ _visual_agent_llm = get_llm(
     api_key=COGNITION_LLM_API_KEY,
 )
 async def call_visual_agent(state: CognitionState) -> CognitionState:
+    episode = state["cognitive_episode"]
+    debug_modes = episode["origin_metadata"]["debug_modes"]
+    if debug_modes.get("no_visual_directives"):
+        return_value = {
+            "facial_expression": [],
+            "body_language": [],
+            "gaze_direction": [],
+            "visual_vibe": [],
+        }
+        validate_cognition_output_contract(
+            stage="l3_visual_agent",
+            payload=return_value,
+        )
+        return return_value
+
     character_profile = state["character_profile"]
     boundary_profile = character_profile["boundary_profile"]
-    episode = state["cognitive_episode"]
     selection = select_cognition_prompt_variant(
         episode=episode,
         stage="l3_visual_agent",

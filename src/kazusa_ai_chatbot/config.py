@@ -125,6 +125,13 @@ RAG_CACHE2_MAX_ENTRIES = int(os.getenv("RAG_CACHE2_MAX_ENTRIES", "5000"))
 # Scheduler (future_promise + followup_message events).
 SCHEDULED_TASKS_ENABLED = os.getenv("SCHEDULED_TASKS_ENABLED", "true").lower() in ("1", "true", "yes")
 
+# Visual directives are service-side generation metadata, not an adapter debug
+# mode. Disable this to skip the L3 visual-agent LLM call globally.
+COGNITION_VISUAL_DIRECTIVES_ENABLED = os.getenv(
+    "COGNITION_VISUAL_DIRECTIVES_ENABLED",
+    "true",
+).lower() in ("1", "true", "yes")
+
 # Character timezone (IANA name) for converting UTC to character-local time.
 CHARACTER_TIME_ZONE = os.getenv("CHARACTER_TIME_ZONE", "Pacific/Auckland")
 

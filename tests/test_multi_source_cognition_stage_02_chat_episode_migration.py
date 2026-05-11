@@ -179,6 +179,11 @@ def _patch_service_dependencies(
 
     monkeypatch.setattr(
         service_module,
+        "COGNITION_VISUAL_DIRECTIVES_ENABLED",
+        True,
+    )
+    monkeypatch.setattr(
+        service_module,
         "_static_character_profile",
         _character_profile(),
     )
@@ -461,6 +466,38 @@ async def test_service_builds_text_chat_cognitive_episode(
         "think_only": False,
         "no_remember": False,
     }
+    await _reset_queue_state()
+
+
+@pytest.mark.asyncio
+async def test_service_adds_internal_visual_flag_when_config_disables_it(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Config-disabled visual directives should appear only in internal state."""
+
+    await _reset_queue_state()
+    graph = _FakeGraph(_graph_result())
+    _patch_service_dependencies(monkeypatch, graph)
+    monkeypatch.setattr(
+        service_module,
+        "COGNITION_VISUAL_DIRECTIVES_ENABLED",
+        False,
+    )
+
+    response = await service_module.chat(_chat_request(), BackgroundTasks())
+
+    assert response.messages == ["ok"]
+    state = graph.states[0]
+    assert state["debug_modes"] == {
+        "listen_only": False,
+        "think_only": False,
+        "no_remember": False,
+        "no_visual_directives": True,
+    }
+    assert state["cognitive_episode"]["origin_metadata"]["debug_modes"] == (
+        state["debug_modes"]
+    )
+    assert "no_visual_directives" not in service_module.DebugModesIn.model_fields
     await _reset_queue_state()
 
 

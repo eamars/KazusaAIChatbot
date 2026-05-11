@@ -72,6 +72,7 @@ EMBEDDING_MODEL=your-embedding-model
 CHARACTER_GLOBAL_USER_ID=00000000-0000-4000-8000-000000000001
 CONVERSATION_HISTORY_LIMIT=10
 SCHEDULED_TASKS_ENABLED=true
+COGNITION_VISUAL_DIRECTIVES_ENABLED=true
 
 # MCP servers and timeouts
 MCP_SERVERS={"mcp-searxng":{"url":"http://localhost:4001/mcp"}}
@@ -130,6 +131,10 @@ replace the retired generic `LLM_BASE_URL`, `LLM_API_KEY`, and `LLM_MODEL`
 settings. Missing route variables stop config loading. The web-search helper
 expects an MCP server named `mcp-searxng` exposing `searxng_web_search` and
 `web_url_read`.
+
+`COGNITION_VISUAL_DIRECTIVES_ENABLED` is a brain-service level switch. Set it
+to `false` to skip L3 visual-directive generation globally; adapters and
+debug-client request payloads do not control this behavior.
 
 ## Dependencies
 

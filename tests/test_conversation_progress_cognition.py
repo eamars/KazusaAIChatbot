@@ -32,6 +32,17 @@ class _CapturingLLM:
         return _FakeResponse(self.payload)
 
 
+class _FailingLLM:
+    """LLM stand-in that fails if a skipped stage invokes it."""
+
+    def __init__(self):
+        self.calls = 0
+
+    async def ainvoke(self, messages):
+        self.calls += 1
+        raise AssertionError("visual agent LLM should not be called")
+
+
 def _minimal_text_chat_episode() -> dict:
     """Build a valid text-chat cognitive episode for direct L3 tests."""
     timestamp = "2026-04-27T00:00:00+12:00"
@@ -56,6 +67,31 @@ def _minimal_text_chat_episode() -> dict:
         target_broadcast=False,
     )
     return episode
+
+
+@pytest.mark.asyncio
+async def test_visual_agent_skip_returns_empty_directives_without_llm(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Internal skip flag should bypass visual LLM generation completely."""
+    episode = _minimal_text_chat_episode()
+    episode["origin_metadata"]["debug_modes"] = {
+        "no_visual_directives": True,
+    }
+    fake_llm = _FailingLLM()
+    monkeypatch.setattr(l3_module, "_visual_agent_llm", fake_llm)
+
+    result = await l3_module.call_visual_agent({
+        "cognitive_episode": episode,
+    })
+
+    assert result == {
+        "facial_expression": [],
+        "body_language": [],
+        "gaze_direction": [],
+        "visual_vibe": [],
+    }
+    assert fake_llm.calls == 0
 
 
 @pytest.mark.asyncio
@@ -130,7 +166,7 @@ def test_content_anchor_prompt_requires_fact_based_answers_without_case_example(
     assert "logical_stance + character_intent" in prompt
     assert "不能反向改变 `logical_stance`、`character_intent` 或已选 `[FACT]`" in prompt
     assert "不要在这里修正上游立场" in prompt
-    assert "若 `rag_result.answer` 直接回答当前问题，它是最高优先级事实摘要" in prompt
+    assert "若 `rag_result.answer` 直接回答当前问题，它是最高优先级检索事实摘要" in prompt
     assert "`[ANSWER]` 不得与 `[DECISION]` 或 `[FACT]` 矛盾" in prompt
     assert "应保留这些具体内容，避免替换成泛称" in prompt
     assert "`character_intent = CLARIFY` 时，`[ANSWER]` 必须是缩小歧义范围的追问" in prompt

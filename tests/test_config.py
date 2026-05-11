@@ -59,6 +59,22 @@ def _subprocess_env_without_dotenv() -> dict[str, str]:
     return env
 
 
+def _configured_subprocess_env_without_dotenv() -> dict[str, str]:
+    """Return a subprocess env with required route settings populated.
+
+    Returns:
+        Environment that imports config without relying on the repo `.env`.
+    """
+
+    env = _subprocess_env_without_dotenv()
+    for name in REQUIRED_ROUTE_ENV_VARS:
+        env[name] = "configured"
+    env["EMBEDDING_BASE_URL"] = "configured"
+    env["EMBEDDING_API_KEY"] = "configured"
+    env["EMBEDDING_MODEL"] = "configured"
+    return env
+
+
 class TestAffinityConstants:
     def test_affinity_default_within_bounds(self):
         from kazusa_ai_chatbot.config import AFFINITY_DEFAULT, AFFINITY_MIN, AFFINITY_MAX
@@ -159,3 +175,51 @@ class TestRouteLlmConfig:
 
         assert result.returncode != 0
         assert "COGNITION_LLM_MODEL" in result.stderr
+
+
+class TestCognitionVisualDirectivesConfig:
+    def test_visual_directives_enabled_defaults_to_true(self, tmp_path):
+        env = _configured_subprocess_env_without_dotenv()
+        env.pop("COGNITION_VISUAL_DIRECTIVES_ENABLED", None)
+
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-c",
+                (
+                    "import kazusa_ai_chatbot.config as config; "
+                    "print(config.COGNITION_VISUAL_DIRECTIVES_ENABLED)"
+                ),
+            ],
+            cwd=tmp_path,
+            env=env,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+        assert result.returncode == 0
+        assert result.stdout.strip() == "True"
+
+    def test_visual_directives_enabled_parses_false(self, tmp_path):
+        env = _configured_subprocess_env_without_dotenv()
+        env["COGNITION_VISUAL_DIRECTIVES_ENABLED"] = "false"
+
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-c",
+                (
+                    "import kazusa_ai_chatbot.config as config; "
+                    "print(config.COGNITION_VISUAL_DIRECTIVES_ENABLED)"
+                ),
+            ],
+            cwd=tmp_path,
+            env=env,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+        assert result.returncode == 0
+        assert result.stdout.strip() == "False"

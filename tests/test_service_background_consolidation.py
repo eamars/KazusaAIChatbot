@@ -489,7 +489,17 @@ async def test_hydrate_reply_context_keeps_adapter_supplied_metadata(
     monkeypatch,
 ) -> None:
     """Adapter-provided reply fields should stay authoritative."""
-    lookup = AsyncMock()
+    lookup = AsyncMock(return_value={
+        "platform_user_id": "db-user",
+        "display_name": "DB Name",
+        "body_text": "db excerpt",
+        "attachments": [
+            {
+                "media_type": "image/png",
+                "description": "stored reply image summary",
+            },
+        ],
+    })
     monkeypatch.setattr(
         service_module,
         "get_conversation_by_platform_message_id",
@@ -508,7 +518,18 @@ async def test_hydrate_reply_context_keeps_adapter_supplied_metadata(
     assert reply_context["reply_to_platform_user_id"] == "adapter-user"
     assert reply_context["reply_to_display_name"] == "Adapter Name"
     assert reply_context["reply_excerpt"] == "adapter excerpt"
-    lookup.assert_not_awaited()
+    assert reply_context["reply_attachments"] == [
+        {
+            "media_kind": "image",
+            "description": "stored reply image summary",
+            "summary_status": "available",
+        },
+    ]
+    lookup.assert_awaited_once_with(
+        platform="qq",
+        platform_channel_id="chan-1",
+        platform_message_id="platform-123",
+    )
 
 
 @pytest.mark.asyncio

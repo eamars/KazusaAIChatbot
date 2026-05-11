@@ -11,6 +11,7 @@ from kazusa_ai_chatbot.cognition_episode import (
     CognitiveEpisode,
     validate_cognitive_episode,
 )
+from kazusa_ai_chatbot.config import COGNITION_VISUAL_DIRECTIVES_ENABLED
 from kazusa_ai_chatbot.db import CharacterProfileDoc, UserProfileDoc
 from kazusa_ai_chatbot.nodes.persona_supervisor2_schema import GlobalPersonaState
 from kazusa_ai_chatbot.rag.user_memory_unit_retrieval import (
@@ -38,6 +39,13 @@ _INTERNAL_THOUGHT_DRY_RUN_PROMPT_KEYS = [
     "l3_content_anchor_agent.internal_thought_internal_monologue",
     "l3_preference_adapter.internal_thought_internal_monologue",
     "l3_visual_agent.internal_thought_internal_monologue",
+]
+_INTERNAL_THOUGHT_VISUAL_PROMPT_KEY = (
+    "l3_visual_agent.internal_thought_internal_monologue"
+)
+_INTERNAL_THOUGHT_DRY_RUN_PROMPT_KEYS_WITHOUT_VISUAL = [
+    key for key in _INTERNAL_THOUGHT_DRY_RUN_PROMPT_KEYS
+    if key != _INTERNAL_THOUGHT_VISUAL_PROMPT_KEY
 ]
 _INTERNAL_MONOLOGUE_MAX_CHARACTERS = 4000
 _ACTION_LATCH_TEXT_MAX_CHARACTERS = 1000
@@ -101,6 +109,7 @@ def build_internal_thought_cognitive_episode(
     time_context: TimeContextDoc,
     action_latch: InternalActionLatch | None = None,
     output_mode: InternalThoughtDryRunOutputMode = "think_only",
+    visual_directives_enabled: bool = True,
 ) -> CognitiveEpisode:
     """Build a source-neutral episode for private internal-thought residue.
 
@@ -110,6 +119,8 @@ def build_internal_thought_cognitive_episode(
         time_context: Character-local time context associated with the event.
         action_latch: Optional audit-only action candidate.
         output_mode: Audit-only cognition output mode.
+        visual_directives_enabled: Whether this run may generate visual
+            directives when global config also allows it.
 
     Returns:
         Valid `CognitiveEpisode` representing the internal-thought residue.
@@ -133,6 +144,13 @@ def build_internal_thought_cognitive_episode(
     )
     digest = hashlib.sha256(percept_content.encode("utf-8")).hexdigest()
     episode_id = f"internal_thought:dry_run:{digest[:16]}"
+    debug_modes = {"think_only": True, "no_remember": True}
+    effective_visual_directives_enabled = (
+        COGNITION_VISUAL_DIRECTIVES_ENABLED and visual_directives_enabled
+    )
+    if not effective_visual_directives_enabled:
+        debug_modes["no_visual_directives"] = True
+
     episode: CognitiveEpisode = {
         "episode_id": episode_id,
         "trigger_source": "internal_thought",
@@ -162,7 +180,7 @@ def build_internal_thought_cognitive_episode(
             "platform_message_id": "internal_thought:dry_run",
             "active_turn_platform_message_ids": [],
             "active_turn_conversation_row_ids": [],
-            "debug_modes": {"think_only": True, "no_remember": True},
+            "debug_modes": debug_modes,
         },
         "timestamp": timestamp,
         "time_context": time_context,
@@ -185,6 +203,7 @@ async def run_internal_thought_cognition_dry_run(
     ],
     action_latch: InternalActionLatch | None = None,
     output_mode: InternalThoughtDryRunOutputMode = "think_only",
+    visual_directives_enabled: bool = True,
 ) -> InternalThoughtCognitionDryRunAudit:
     """Run shared cognition over private thought in audit-only mode.
 
@@ -198,6 +217,8 @@ async def run_internal_thought_cognition_dry_run(
         call_cognition_subgraph_func: Injected cognition callable.
         action_latch: Optional audit-only action candidate.
         output_mode: Audit-only cognition output mode.
+        visual_directives_enabled: Whether this run may generate visual
+            directives when global config also allows it.
 
     Returns:
         Audit-only summary of the dry-run outcome.
@@ -256,7 +277,9 @@ async def run_internal_thought_cognition_dry_run(
         time_context=time_context,
         action_latch=action_latch,
         output_mode=output_mode,
+        visual_directives_enabled=visual_directives_enabled,
     )
+    debug_modes = dict(episode["origin_metadata"]["debug_modes"])
     dry_run_state: GlobalPersonaState = {
         "character_profile": character_profile,
         "timestamp": timestamp,
@@ -286,7 +309,7 @@ async def run_internal_thought_cognition_dry_run(
         "indirect_speech_context": "",
         "channel_topic": "",
         "promoted_reflection_context": {},
-        "debug_modes": {"think_only": True, "no_remember": True},
+        "debug_modes": debug_modes,
         "should_respond": False,
         "decontexualized_input": _INTERNAL_THOUGHT_INPUT_TEXT,
         "referents": [],
@@ -326,6 +349,11 @@ async def run_internal_thought_cognition_dry_run(
     }
     cognition_result = await call_cognition_subgraph_func(dry_run_state)
     cognition_output_keys = sorted(cognition_result)
+    if debug_modes.get("no_visual_directives"):
+        prompt_keys = list(_INTERNAL_THOUGHT_DRY_RUN_PROMPT_KEYS_WITHOUT_VISUAL)
+    else:
+        prompt_keys = list(_INTERNAL_THOUGHT_DRY_RUN_PROMPT_KEYS)
+
     audit = {
         "status": "completed",
         "skip_reason": "",
@@ -337,7 +365,7 @@ async def run_internal_thought_cognition_dry_run(
         "input_sources": ["internal_monologue"],
         "output_mode": output_mode,
         "prompt_variant": "internal_thought_internal_monologue",
-        "prompt_keys": list(_INTERNAL_THOUGHT_DRY_RUN_PROMPT_KEYS),
+        "prompt_keys": prompt_keys,
         "cognition_output_keys": cognition_output_keys,
     }
     return audit

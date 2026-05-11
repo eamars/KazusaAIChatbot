@@ -38,6 +38,7 @@ long_term/todo.md
 
 | Plan | Status | Execution |
 |---|---|---|
+| [cognition_visual_directives_control_plan.md](active/short_term/cognition_visual_directives_control_plan.md) | completed | completed |
 | [reflection_driven_character_state_evolution_plan.md](active/short_term/reflection_driven_character_state_evolution_plan.md) | draft | deferred |
 
 ## Active Bugfix Plans

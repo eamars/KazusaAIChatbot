@@ -587,6 +587,11 @@ def _patch_service_dependencies(
     save_conversation = AsyncMock()
     monkeypatch.setattr(
         service_module,
+        "COGNITION_VISUAL_DIRECTIVES_ENABLED",
+        True,
+    )
+    monkeypatch.setattr(
+        service_module,
         "_static_character_profile",
         _character_profile(),
     )
@@ -934,6 +939,35 @@ async def test_service_normal_response_tracks_delivery_and_handoff(
     assert saved_result["delivery_tracking_id"] == response.delivery_tracking_id
     mocks["progress_recorder"].assert_awaited_once()
     mocks["consolidation_runner"].assert_awaited_once()
+    await _reset_queue_state()
+
+
+@pytest.mark.asyncio
+async def test_service_config_disabled_visual_directives_handoff(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Service config should seed the internal visual-directive skip flag."""
+    await _reset_queue_state()
+    graph = _FakeGraph(_graph_result())
+    _patch_service_dependencies(monkeypatch, graph)
+    monkeypatch.setattr(
+        service_module,
+        "COGNITION_VISUAL_DIRECTIVES_ENABLED",
+        False,
+    )
+
+    response = await service_module.chat(_chat_request(), BackgroundTasks())
+
+    assert response.messages == ["ok"]
+    assert graph.states[0]["debug_modes"] == {
+        "listen_only": False,
+        "think_only": False,
+        "no_remember": False,
+        "no_visual_directives": True,
+    }
+    assert graph.states[0]["cognitive_episode"]["origin_metadata"][
+        "debug_modes"
+    ] == graph.states[0]["debug_modes"]
     await _reset_queue_state()
 
 

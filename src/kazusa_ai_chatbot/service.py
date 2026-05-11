@@ -20,6 +20,7 @@ from kazusa_ai_chatbot.config import (
     CHARACTER_GLOBAL_USER_ID,
     CHAT_HISTORY_RECENT_LIMIT,
     CONVERSATION_HISTORY_LIMIT,
+    COGNITION_VISUAL_DIRECTIVES_ENABLED,
     RAG_CACHE2_MAX_ENTRIES,
     REFLECTION_CYCLE_DISABLED,
     SCHEDULED_TASKS_ENABLED,
@@ -661,6 +662,9 @@ async def _process_queued_chat_item(item: QueuedChatItem) -> None:
             "think_only": req.debug_modes.think_only,
             "no_remember": req.debug_modes.no_remember,
         }
+        if not COGNITION_VISUAL_DIRECTIVES_ENABLED:
+            debug_modes["no_visual_directives"] = True
+
         initial_should_respond = not debug_modes["listen_only"]
         active_flags = [key for key, value in debug_modes.items() if value]
         if active_flags:
