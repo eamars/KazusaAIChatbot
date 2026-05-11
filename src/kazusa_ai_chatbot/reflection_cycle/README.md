@@ -211,6 +211,10 @@ document.
 - `REFLECTION_LORE_PROMOTION_ENABLED=true`: lore lane is enabled by default.
 - `REFLECTION_SELF_GUIDANCE_PROMOTION_ENABLED=true`: self-guidance lane is
   enabled by default.
+- `GLOBAL_CHARACTER_GROWTH_PASS_ENABLED=true`: after daily global promotion,
+  the worker runs the global character-growth pass when the busy probe remains
+  idle. This pass writes only the global growth trait/run collections and can
+  be disabled as a rollback switch.
 
 Feature flags are process-loaded from config. Changing them requires a process
 restart unless a test monkeypatches the module value directly.

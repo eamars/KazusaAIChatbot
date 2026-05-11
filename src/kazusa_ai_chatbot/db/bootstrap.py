@@ -14,6 +14,11 @@ from kazusa_ai_chatbot.db._client import enable_vector_index, get_db
 from kazusa_ai_chatbot.db.interaction_style_images import (
     ensure_interaction_style_image_indexes,
 )
+from kazusa_ai_chatbot.db.global_character_growth import (
+    GLOBAL_CHARACTER_GROWTH_RUNS_COLLECTION,
+    GLOBAL_CHARACTER_GROWTH_TRAITS_COLLECTION,
+    ensure_global_character_growth_indexes,
+)
 from kazusa_ai_chatbot.db.reflection_cycle import ensure_reflection_run_indexes
 from kazusa_ai_chatbot.db.rag_cache2_persistent import (
     INITIALIZER_CACHE_NAME,
@@ -56,6 +61,8 @@ async def db_bootstrap() -> None:
         "conversation_episode_state",
         "character_reflection_runs",
         "interaction_style_images",
+        GLOBAL_CHARACTER_GROWTH_TRAITS_COLLECTION,
+        GLOBAL_CHARACTER_GROWTH_RUNS_COLLECTION,
         PERSISTENT_CACHE_COLLECTION,
     ]
     for name in required_collections:
@@ -178,6 +185,7 @@ async def db_bootstrap() -> None:
     )
     await ensure_reflection_run_indexes()
     await ensure_interaction_style_image_indexes()
+    await ensure_global_character_growth_indexes()
 
     await purge_stale_initializer_entries()
     await prune_persistent_entries(

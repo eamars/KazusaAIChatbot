@@ -410,6 +410,58 @@ class CharacterReflectionRunDoc(TypedDict, total=False):
     updated_at: str
 
 
+class GlobalCharacterGrowthTraitDoc(TypedDict, total=False):
+    """Durable global character-growth trait row."""
+
+    _id: str
+    trait_id: str
+    lineage_id: str
+    status: Literal["active", "superseded", "rejected"]
+    growth_axis: str
+    trait_name: str
+    guidance: str
+    strength: float
+    maturity_band: Literal["observed", "emerging", "stabilizing", "promoted"]
+    first_observed_date: str
+    last_observed_date: str
+    supporting_dates: list[str]
+    source_memory_unit_ids: list[str]
+    source_reflection_run_ids: list[str]
+    source_candidate_ids: list[str]
+    evidence_count: int
+    version: int
+    supersedes_trait_ids: list[str]
+    merged_from_trait_ids: list[str]
+    created_at: str
+    updated_at: str
+
+
+class GlobalCharacterGrowthRunDoc(TypedDict, total=False):
+    """Audit document for one global character-growth run."""
+
+    _id: str
+    run_id: str
+    run_kind: Literal["global_character_growth"]
+    status: Literal["dry_run", "applied", "skipped", "failed"]
+    dry_run: bool
+    prompt_version: str
+    created_at: str
+    updated_at: str
+    character_local_date: str
+    input_counts: dict
+    input_quality: dict
+    source_memory_unit_ids: list[str]
+    source_reflection_run_ids: list[str]
+    accepted_candidates: list[dict]
+    rejected_candidates: list[dict]
+    trait_updates: list[dict]
+    shadow_projection: list[dict]
+    validation_warnings: list[str]
+    raw_llm_output: str
+    summary: str
+    error: str
+
+
 class RAGCache2PersistentEntryDoc(TypedDict, total=False):
     """A durable backing row for selected Cache2 entries.
 

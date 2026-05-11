@@ -17,6 +17,11 @@ async def test_reflection_context_returns_empty_when_no_promoted_lanes(
 
     find_active = AsyncMock(return_value=[])
     monkeypatch.setattr(context_module, "find_active_memory_units", find_active)
+    monkeypatch.setattr(
+        context_module,
+        "build_global_character_growth_context",
+        AsyncMock(return_value={}),
+    )
 
     result = await context_module.build_promoted_reflection_context()
 
@@ -68,6 +73,11 @@ async def test_reflection_context_projects_only_promoted_memory_lanes(
         context_module,
         "find_active_memory_units",
         _find_active_memory_units,
+    )
+    monkeypatch.setattr(
+        context_module,
+        "build_global_character_growth_context",
+        AsyncMock(return_value={}),
     )
 
     result = await context_module.build_promoted_reflection_context()

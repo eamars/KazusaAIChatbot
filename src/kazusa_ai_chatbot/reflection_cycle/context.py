@@ -8,6 +8,9 @@ from kazusa_ai_chatbot.memory_evolution import (
     MemorySourceKind,
     find_active_memory_units,
 )
+from kazusa_ai_chatbot.global_character_growth import (
+    build_global_character_growth_context,
+)
 from kazusa_ai_chatbot.reflection_cycle.promotion import PROMOTION_LANE_MEMORY_TYPE
 
 
@@ -16,6 +19,7 @@ class PromotedReflectionContext(TypedDict, total=False):
 
     promoted_lore: list[dict]
     promoted_self_guidance: list[dict]
+    promoted_global_growth: list[dict]
     source_dates: list[str]
     retrieval_notes: list[str]
 
@@ -34,18 +38,27 @@ async def build_promoted_reflection_context(
         memory_type=PROMOTION_LANE_MEMORY_TYPE["self_guidance"],
         limit=limit_per_lane,
     )
-    if not lore and not self_guidance:
+    growth_context = await build_global_character_growth_context()
+    promoted_global_growth = growth_context.get("promoted_global_growth", [])
+    if not lore and not self_guidance and not promoted_global_growth:
         return_value = {}
         return return_value
 
     source_dates = _source_dates(lore + self_guidance)
+    retrieval_notes = [
+        "Only active reflection-promoted memory rows are included.",
+    ]
+    growth_notes = growth_context.get("retrieval_notes", [])
+    for note in growth_notes:
+        if note not in retrieval_notes:
+            retrieval_notes.append(str(note))
+
     context: PromotedReflectionContext = {
         "promoted_lore": lore,
         "promoted_self_guidance": self_guidance,
+        "promoted_global_growth": promoted_global_growth,
         "source_dates": source_dates,
-        "retrieval_notes": [
-            "Only active reflection-promoted memory rows are included.",
-        ],
+        "retrieval_notes": retrieval_notes,
     }
     return context
 

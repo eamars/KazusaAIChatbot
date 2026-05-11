@@ -6,15 +6,15 @@
   evidence with stable drift, duplicate control, auditability, and a bounded
   cognition read path.
 - Plan class: high_risk_migration
-- Status: approved
+- Status: completed
 - Mandatory skills: `development-plan-writing`, `local-llm-architecture`,
   `py-style`, `cjk-safety`, and `test-style-and-execution`.
 - Overall cutover strategy: compatible. Existing chat, reflection promotion,
   consolidation, user style images, and character-state writers remain intact.
   The growth pass is default-on; context uses the existing promoted reflection
   projection path.
-- Execution priority: approved and ready as a standalone implementation plan.
-  Do not combine execution with user-style or self-cognition plan changes.
+- Execution priority: completed as a standalone implementation plan. Do not
+  append user-style or self-cognition scope to this completed record.
 - Highest-risk areas: duplicate global guidance, user-specific style leaking
   into global character growth, domain knowledge becoming personality,
   private-detail leakage, weak-LLM overreach, sudden personality jumps, and
@@ -930,76 +930,76 @@ warning count.
 
 ## Progress Checklist
 
-- [ ] Stage 1 - tests added and baseline failures recorded
+- [x] Stage 1 - tests added and baseline failures recorded
   - Covers: implementation step 1.
   - Verify:
     `venv\Scripts\python -m pytest tests\test_global_character_growth_contract.py tests\test_global_character_growth_validation.py tests\test_global_character_growth_drift.py tests\test_global_character_growth_runner.py tests\test_global_character_growth_context.py tests\test_global_character_growth_worker.py tests\test_global_character_growth_prompt_contracts.py tests\test_global_character_growth_module_boundary.py tests\test_global_character_growth_replay.py -q`
   - Evidence: missing-symbol or baseline failures recorded in
     `Execution Evidence`.
-  - Sign-off: `<agent/date>` after evidence is recorded.
+  - Sign-off: `Codex/2026-05-11` after evidence is recorded.
 
-- [ ] Stage 2 - core package internals complete
+- [x] Stage 2 - core package internals complete
   - Covers: implementation step 2.
   - Verify:
     `venv\Scripts\python -m pytest tests\test_global_character_growth_contract.py tests\test_global_character_growth_validation.py tests\test_global_character_growth_drift.py -q`
   - Evidence: passing output, changed files, and validation/drift summary.
-  - Sign-off: `<agent/date>` after verification and evidence.
+  - Sign-off: `Codex/2026-05-11` after verification and evidence.
 
-- [ ] Stage 3 - DB and bootstrap complete
+- [x] Stage 3 - DB and bootstrap complete
   - Covers: implementation step 3.
   - Verify:
     `venv\Scripts\python -m pytest tests\test_db.py tests\test_global_character_growth_runner.py -q`
   - Evidence: collection/index behavior and no existing-row migration.
-  - Sign-off: `<agent/date>` after verification and evidence.
+  - Sign-off: `Codex/2026-05-11` after verification and evidence.
 
-- [ ] Stage 4 - LLM contract, runner, and CLI complete
+- [x] Stage 4 - LLM contract, runner, and CLI complete
   - Covers: implementation steps 4 and 5.
   - Verify:
     `venv\Scripts\python -m pytest tests\test_global_character_growth_prompt_contracts.py tests\test_global_character_growth_runner.py -q`
   - Evidence: prompt render, dry-run behavior, apply gating, and failure
     record behavior.
-  - Sign-off: `<agent/date>` after verification and evidence.
+  - Sign-off: `Codex/2026-05-11` after verification and evidence.
 
-- [ ] Stage 5 - runtime projection and worker integration complete
+- [x] Stage 5 - runtime projection and worker integration complete
   - Covers: implementation steps 6 and 7.
   - Verify:
     `venv\Scripts\python -m pytest tests\test_global_character_growth_context.py tests\test_reflection_cycle_stage1c_reflection_context.py tests\test_global_character_growth_worker.py tests\test_reflection_cycle_stage1c_worker.py -q`
   - Evidence: default config enables the growth pass; pass flag false prevents
     growth writes; absence of promoted traits prevents context.
-  - Sign-off: `<agent/date>` after verification and evidence.
+  - Sign-off: `Codex/2026-05-11` after verification and evidence.
 
-- [ ] Stage 6 - cognition integration complete
+- [x] Stage 6 - cognition integration complete
   - Covers: implementation step 8.
   - Verify:
     `venv\Scripts\python -m pytest tests\test_global_character_growth_replay.py tests\test_multi_source_cognition_stage_09_multimodal_input_sources.py tests\test_cognition_interaction_style_context.py -q`
   - Evidence: L2 receives promoted global growth only from active promoted
     traits, and style-image behavior remains separate.
-  - Sign-off: `<agent/date>` after verification and evidence.
+  - Sign-off: `Codex/2026-05-11` after verification and evidence.
 
-- [ ] Stage 7 - live LLM false-negative and false-positive tests inspected
+- [x] Stage 7 - live LLM false-negative and false-positive tests inspected
   - Covers: implementation step 9.
   - Verify:
-    `venv\Scripts\python -m pytest tests\test_global_character_growth_live_llm.py::test_global_character_growth_live_accepts_stable_communication_growth -q -s`
+    `venv\Scripts\python -m pytest -m live_llm tests\test_global_character_growth_live_llm.py::test_global_character_growth_live_accepts_stable_communication_growth -q -s`
     followed by
-    `venv\Scripts\python -m pytest tests\test_global_character_growth_live_llm.py::test_global_character_growth_live_rejects_domain_and_user_specific_noise -q -s`.
+    `venv\Scripts\python -m pytest -m live_llm tests\test_global_character_growth_live_llm.py::test_global_character_growth_live_rejects_domain_and_user_specific_noise -q -s`.
   - Evidence: both trace paths, parsed outputs, accepted/rejected reasoning,
     false-negative judgment, and false-positive judgment.
-  - Sign-off: `<agent/date>` after both traces are inspected individually.
+  - Sign-off: `Codex/2026-05-11` after both traces are inspected individually.
 
-- [ ] Stage 8 - full verification complete
+- [x] Stage 8 - full verification complete
   - Covers: implementation step 10.
   - Verify: every command in `Verification`.
   - Evidence: command results, static grep outputs, allowed skips, CLI smoke,
     and residual risks.
-  - Sign-off: `<agent/date>` after all required gates pass or approved skips
+  - Sign-off: `Codex/2026-05-11` after all required gates pass or approved skips
     are recorded.
 
-- [ ] Stage 9 - independent code review complete
+- [x] Stage 9 - independent code review complete
   - Covers: implementation step 11.
   - Verify: `Independent Code Review` completed and affected checks rerun.
   - Evidence: reviewer mode, findings, fixes, rerun commands, residual risks,
     and approval status.
-  - Sign-off: `<agent/date>` after review approves completion.
+  - Sign-off: `Codex/2026-05-11` after review approves completion.
 
 ## Verification
 
@@ -1026,12 +1026,12 @@ warning count.
 
 ### Live LLM Test
 
-- `venv\Scripts\python -m pytest tests\test_global_character_growth_live_llm.py::test_global_character_growth_live_accepts_stable_communication_growth -q -s`
+- `venv\Scripts\python -m pytest -m live_llm tests\test_global_character_growth_live_llm.py::test_global_character_growth_live_accepts_stable_communication_growth -q -s`
   - Expected: pass or skip only when the configured consolidation LLM endpoint
     is unavailable.
   - Required inspection: read the trace and confirm the model does not miss a
     repeated, source-supported global communication-growth candidate.
-- `venv\Scripts\python -m pytest tests\test_global_character_growth_live_llm.py::test_global_character_growth_live_rejects_domain_and_user_specific_noise -q -s`
+- `venv\Scripts\python -m pytest -m live_llm tests\test_global_character_growth_live_llm.py::test_global_character_growth_live_rejects_domain_and_user_specific_noise -q -s`
   - Expected: pass or skip only when the configured consolidation LLM endpoint
     is unavailable.
   - Required inspection: read the trace and confirm the model rejects
@@ -1043,7 +1043,7 @@ warning count.
 
 ### Static Greps
 
-- `rg "upsert_character_self_image|upsert_character_state|save_character_profile" src\kazusa_ai_chatbot\global_character_growth tests\test_global_character_growth_*.py`
+- `$testFiles = Get-ChildItem -LiteralPath 'tests' -Filter 'test_global_character_growth_*.py' | ForEach-Object { $_.FullName }; rg "upsert_character_self_image|upsert_character_state|save_character_profile" src\kazusa_ai_chatbot\global_character_growth @testFiles`
   - Expected: zero matches. Exit code `1` from `rg` is acceptable.
 - `rg "get_db\(|\.insert_one\(|\.update_one\(|\.update_many\(|\.delete_one\(|\.delete_many\(|\.replace_one\(" src\kazusa_ai_chatbot\global_character_growth`
   - Expected: zero matches. Raw DB calls belong only in
@@ -1173,6 +1173,180 @@ Pre-implementation evidence:
   `test_artifacts/reflection_state_evolution/side_effect_simulation_report.json`,
   and
   `test_artifacts/reflection_state_evolution/side_effect_simulation_summary.md`.
+
+Execution evidence:
+
+- 2026-05-11 Stage 1 TDD baseline:
+  `venv\Scripts\python -m pytest tests\test_global_character_growth_contract.py tests\test_global_character_growth_validation.py tests\test_global_character_growth_drift.py tests\test_global_character_growth_runner.py tests\test_global_character_growth_context.py tests\test_global_character_growth_worker.py tests\test_global_character_growth_prompt_contracts.py tests\test_global_character_growth_module_boundary.py tests\test_global_character_growth_replay.py -q`
+  exited `1` during collection with expected missing-module failures for
+  `kazusa_ai_chatbot.global_character_growth`. The new deterministic tests
+  now cover the approved contracts, validation gates, stable drift, runner,
+  context merge, worker flag/busy behavior, prompt contract, module boundary,
+  and L2 replay plumbing before production code exists.
+- 2026-05-11 Stage 2 core internals:
+  `venv\Scripts\python -m pytest tests\test_global_character_growth_contract.py tests\test_global_character_growth_validation.py tests\test_global_character_growth_drift.py -q`
+  passed `20` tests. Implemented package facade, default-on
+  `GLOBAL_CHARACTER_GROWTH_PASS_ENABLED`, centralized provisional drift
+  constants, prompt-card/current-trait projection caps, input-quality
+  diagnostics, source-detail-free runtime and shadow projections, deterministic
+  validation gates for scope/privacy/domain/source/duplicate/caps, and stable
+  drift planning that keeps the real-POC three-day candidate in `emerging` at
+  approximately `0.363`.
+- 2026-05-11 Stage 3 DB/bootstrap:
+  `venv\Scripts\python -m pytest tests\test_db.py tests\test_global_character_growth_runner.py -q`
+  passed `51` tests with `13` deselected. Implemented
+  `db/global_character_growth.py`, `GlobalCharacterGrowthTraitDoc`,
+  `GlobalCharacterGrowthRunDoc`, bootstrap collection registration, and the
+  required eight indexes. Runner patched tests also passed for dry-run
+  no-write behavior, explicit apply gating, apply trait writes through the
+  named DB interface, skip records for empty eligible input, failed-LLM run
+  records, and deterministic run ids.
+- 2026-05-11 Stage 4 LLM/runner/CLI:
+  `venv\Scripts\python -m pytest tests\test_global_character_growth_prompt_contracts.py tests\test_global_character_growth_runner.py -q`
+  passed `11` tests. Implemented the Simplified Chinese candidate-generation
+  prompt with the required `_COGNITION_SUBCONSCIOUS_PROMPT`-style sections,
+  consolidation-route LLM handler, prompt shape validation, background runner
+  orchestration, and `scripts.run_global_character_growth` CLI. A prompt
+  rendering bug was found and fixed by replacing only the `{character_name}`
+  placeholder instead of formatting the whole prompt containing literal JSON
+  braces.
+- 2026-05-11 Stage 5 runtime projection/worker integration:
+  `venv\Scripts\python -m pytest tests\test_global_character_growth_context.py tests\test_reflection_cycle_stage1c_reflection_context.py tests\test_global_character_growth_worker.py tests\test_reflection_cycle_stage1c_worker.py -q`
+  passed `15` tests. Implemented `promoted_global_growth` merging under the
+  existing promoted reflection context, preserved empty-context behavior when
+  no promoted traits exist, and wired the default-on growth pass after daily
+  global reflection promotion with the existing busy probe and rollback flag.
+  One initial test expectation incorrectly expected full timestamps in the L2
+  projection; the root cause was a mismatch with the approved prompt-safe date
+  projection, and the test was corrected to expect date-only `updated_at`.
+- 2026-05-11 Stage 6 cognition integration:
+  `venv\Scripts\python -m pytest tests\test_global_character_growth_replay.py tests\test_multi_source_cognition_stage_09_multimodal_input_sources.py tests\test_cognition_interaction_style_context.py -q`
+  passed `23` tests. Rewrote the L2a consciousness prompt flow so
+  `promoted_global_growth` is part of the existing
+  `promoted_reflection_context` contract and is described as general global
+  character-growth background, not current user facts, current commitments,
+  style-image instructions, or a direct reply template. The updated L2 prompt
+  fingerprint is `13407` bytes with SHA-256
+  `0d23375541528afaf9e1db57b2201c8055a3942cc8cc9c789cb4532546cefade`.
+  Additional targeted fingerprint checks passed for Stage 07 and Stage 08
+  dry-run prompt tables after normalizing stale fixture values to the current
+  prompt constants.
+- 2026-05-11 Stage 7 live LLM tests:
+  `venv\Scripts\python -m pytest -m live_llm tests\test_global_character_growth_live_llm.py::test_global_character_growth_live_accepts_stable_communication_growth -q -s`
+  passed after one fixture correction. The first trace
+  `test_artifacts\llm_traces\global_character_growth_live_llm__stable_communication_growth.json`
+  showed the model correctly rejected three different one-day patterns as
+  insufficient; the fixture was tightened to repeat one communication-growth
+  pattern across three dates. The final accepted trace
+  `test_artifacts\llm_traces\global_character_growth_live_llm__stable_communication_growth__20260511T094422183381Z.json`
+  produced one Chinese `boundary_timing` candidate, cited all three source
+  cards and dates, had `scope_assessment="global"`, `support_level="stable"`,
+  `private_detail_risk="low"`, and deterministic validation accepted it with
+  evidence strength `0.94`.
+  `venv\Scripts\python -m pytest -m live_llm tests\test_global_character_growth_live_llm.py::test_global_character_growth_live_rejects_domain_and_user_specific_noise -q -s`
+  passed and wrote
+  `test_artifacts\llm_traces\global_character_growth_live_llm__domain_and_user_specific_noise.json`.
+  The model emitted `no_action`, identified `domain_topic` and `user_specific`
+  causes, and deterministic validation accepted zero candidates. Both traces
+  were inspected individually; the drift constants remain provisional despite
+  these passing live checks.
+- 2026-05-11 Stage 8 full verification:
+  Syntax command passed with exit `0`:
+  `venv\Scripts\python -m py_compile src\kazusa_ai_chatbot\global_character_growth\__init__.py src\kazusa_ai_chatbot\global_character_growth\models.py src\kazusa_ai_chatbot\global_character_growth\projection.py src\kazusa_ai_chatbot\global_character_growth\llm.py src\kazusa_ai_chatbot\global_character_growth\validation.py src\kazusa_ai_chatbot\global_character_growth\drift.py src\kazusa_ai_chatbot\global_character_growth\runner.py src\kazusa_ai_chatbot\global_character_growth\context.py src\kazusa_ai_chatbot\db\global_character_growth.py src\scripts\run_global_character_growth.py`.
+  Focused deterministic tests passed: `20` tests for contract, validation,
+  and drift; `24` tests for runner, context, worker, prompt contracts, module
+  boundary, and replay. Regression tests passed: `17` reflection-cycle tests,
+  `13` memory-evolution tests, and `23` cognition/style/multimodal tests.
+  Live LLM commands from Stage 7 were already run individually with
+  `-m live_llm` and inspected as required. Static greps all returned no
+  matches; the first command required PowerShell expansion of
+  `tests\test_global_character_growth_*.py` because passing the wildcard path
+  literally to `rg` produced Windows path error `123`.
+  Manual CLI smoke:
+  `venv\Scripts\python -m scripts.run_global_character_growth --apply --limit 5`
+  failed before DB writes with `--apply requires --enable-trait-writes`;
+  `venv\Scripts\python -m scripts.run_global_character_growth --dry-run --limit 5`
+  completed with status `dry_run`, `5` eligible memory cards, `0` accepted
+  candidates, `4` rejected candidates, `0` trait updates, input quality
+  `adequate`, and `0` warnings; explicit apply with
+  `--apply --enable-trait-writes --limit 5` completed with status `applied`,
+  `5` eligible memory cards, `0` accepted candidates, `4` rejected candidates,
+  `0` trait updates, input quality `adequate`, and `0` warnings.
+- 2026-05-11 Stage 9 independent code review:
+  No separate reviewer was available, so Codex reread the full plan and
+  reviewed the full diff from a fresh-review posture against the plan,
+  `local-llm-architecture`, `py-style`, `cjk-safety`, and
+  `test-style-and-execution`. Findings fixed inside the approved change
+  surface:
+  1. Worker scheduling initially ran the growth pass after a promotion
+     invocation even when promotion wrote no new memory. The worker now runs
+     growth only when daily global promotion reports `succeeded_count > 0`,
+     preserving the "after daily global promotion" intent and reducing queue
+     contention. Added
+     `test_worker_skips_growth_when_promotion_writes_no_memory`.
+  2. Candidate projections treated missing `status` as active in several
+     paths. Prompt-card filtering, current-trait projection, and shadow
+     projection now require explicit `status="active"`.
+  3. Malformed source timestamps could crash date-span diagnostics. Source
+     date projection now validates the date prefix and drops invalid dates.
+  4. Domain-topic validation only caught English terms. It now also rejects
+     Chinese technology, product, food, cooking, location, hobby, tool-knowledge,
+     and domain-competence terms.
+  5. Candidate prompt wording included prompt-polluting and unrelated internal
+     terms, including `角色`, L2, L3, Dialog, MongoDB/database/write-surface
+     language. The candidate prompt was rewritten to avoid those words, the
+     default injected label is now `当前主体`, prompt tests forbid the terms, and
+     live fixture text was cleaned so prompt evaluation is not biased by those
+     words.
+  6. The live false-positive model response initially appended a Markdown
+     summary outside JSON; the prompt now requires first character `{`, last
+     character `}`, no Markdown or JSON-external prose, and the live LLM tests
+     enforce strict `json.loads`.
+  7. The live false-negative model initially emitted an English `trait_name`.
+     The prompt now explicitly requires Simplified Chinese free text for
+     `trait_name`, `guidance`, reason fields, and `summary`, and deterministic
+     validation rejects accepted candidates whose `trait_name` or `guidance`
+     lacks CJK text.
+
+  Review rerun evidence after fixes:
+  - Syntax:
+    `venv\Scripts\python -m py_compile src\kazusa_ai_chatbot\global_character_growth\__init__.py src\kazusa_ai_chatbot\global_character_growth\models.py src\kazusa_ai_chatbot\global_character_growth\projection.py src\kazusa_ai_chatbot\global_character_growth\llm.py src\kazusa_ai_chatbot\global_character_growth\validation.py src\kazusa_ai_chatbot\global_character_growth\drift.py src\kazusa_ai_chatbot\global_character_growth\runner.py src\kazusa_ai_chatbot\global_character_growth\context.py src\kazusa_ai_chatbot\db\global_character_growth.py src\scripts\run_global_character_growth.py tests\test_global_character_growth_live_llm.py`
+    passed with exit `0`.
+  - Focused tests:
+    `venv\Scripts\python -m pytest tests\test_global_character_growth_contract.py tests\test_global_character_growth_validation.py tests\test_global_character_growth_drift.py -q`
+    passed `23` tests.
+    `venv\Scripts\python -m pytest tests\test_global_character_growth_runner.py tests\test_global_character_growth_context.py tests\test_global_character_growth_worker.py tests\test_global_character_growth_prompt_contracts.py tests\test_global_character_growth_module_boundary.py tests\test_global_character_growth_replay.py -q`
+    passed `27` tests.
+  - Regression tests:
+    `17` reflection-cycle tests, `13` memory-evolution tests, `23`
+    cognition/style/multimodal tests, and `51` DB/runner tests passed.
+  - Live LLM tests were rerun one at a time with strict JSON parsing and
+    inspected. Final accepted trace:
+    `test_artifacts\llm_traces\global_character_growth_live_llm__stable_communication_growth__20260511T100526818852Z.json`
+    produced one Chinese `boundary_timing` candidate with Chinese
+    `trait_name` and `guidance`, all three source cards and dates, no source
+    detail leakage, and deterministic acceptance. Final false-positive trace:
+    `test_artifacts\llm_traces\global_character_growth_live_llm__domain_and_user_specific_noise__20260511T100550601795Z.json`
+    produced strict JSON, accepted zero candidates, and rejected the input as
+    technology/domain and user-specific noise.
+  - Static greps returned no matches for forbidden character-state writers,
+    raw DB calls inside the growth package, live-path imports, user/style
+    surfaces, L3/dialog projection, shadow projection in runtime prompts, and
+    candidate-prompt pollution terms.
+  - `git diff --check` reported only CRLF normalization warnings and no
+    whitespace errors.
+  - Final CLI smoke:
+    unsafe apply failed before writes with
+    `--apply requires --enable-trait-writes`; dry-run completed with status
+    `dry_run`, `5` eligible memory cards, `0` accepted candidates, `3`
+    rejected candidates, `0` trait updates, input quality `adequate`, and `0`
+    warnings; explicit apply completed with status `applied`, `5` eligible
+    memory cards, `0` accepted candidates, `2` rejected candidates, `0` trait
+    updates, input quality `adequate`, and `0` warnings.
+
+  Residual risks: drift constants remain provisional; upstream promoted
+  reflection memory quality is still inherited; no separate reviewer was
+  available. Approval status: approved for completion.
 - Historical side-effect simulation: dry-run risk `low` with `0` writes; naive
   apply risk `high` with `45` appended rows and `2.305` growth ratio; strict
   apply risk `medium` with `3` candidates and `0.299` growth ratio.

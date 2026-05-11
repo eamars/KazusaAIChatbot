@@ -39,6 +39,8 @@ from kazusa_ai_chatbot.db.schemas import (
     ConversationEpisodeEntryDoc,
     ConversationEpisodeStateDoc,
     ConversationMessageDoc,
+    GlobalCharacterGrowthRunDoc,
+    GlobalCharacterGrowthTraitDoc,
     InteractionStyleImageDoc,
     InteractionStyleOverlayDoc,
     InteractionStyleScopeType,
@@ -87,6 +89,13 @@ from kazusa_ai_chatbot.db.reflection_cycle import (
     list_existing_run_ids,
     list_hourly_runs_for_channel_day,
     upsert_reflection_run,
+)
+from kazusa_ai_chatbot.db.global_character_growth import (
+    ensure_global_character_growth_indexes,
+    insert_growth_run_document,
+    list_active_growth_traits,
+    list_prompt_visible_growth_traits,
+    upsert_growth_trait_documents,
 )
 from kazusa_ai_chatbot.db.interaction_style_images import (
     build_interaction_style_context,
@@ -194,7 +203,8 @@ __all__ = [
     # Schemas
     "AttachmentDoc", "CharacterProfileDoc", "CharacterReflectionRunDoc",
     "ConversationEpisodeEntryDoc", "ConversationEpisodeStateDoc",
-    "ConversationMessageDoc", "InteractionStyleImageDoc",
+    "ConversationMessageDoc", "GlobalCharacterGrowthRunDoc",
+    "GlobalCharacterGrowthTraitDoc", "InteractionStyleImageDoc",
     "InteractionStyleOverlayDoc", "InteractionStyleScopeType",
     "InteractionStyleStatus", "MemoryDoc", "MentionDoc",
     "PlatformAccountDoc", "RAGCache2PersistentEntryDoc",
@@ -216,6 +226,9 @@ __all__ = [
     "ensure_reflection_run_indexes", "find_reflection_run_by_id",
     "list_daily_channel_runs", "list_existing_run_ids",
     "list_hourly_runs_for_channel_day", "upsert_reflection_run",
+    "ensure_global_character_growth_indexes", "insert_growth_run_document",
+    "list_active_growth_traits", "list_prompt_visible_growth_traits",
+    "upsert_growth_trait_documents",
     "build_interaction_style_context", "build_user_engagement_relevance_context",
     "empty_interaction_style_overlay", "ensure_interaction_style_image_indexes",
     "get_group_channel_style_image",

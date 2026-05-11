@@ -80,8 +80,8 @@ _PROMPT_FINGERPRINTS = (
     (
         "_COGNITION_CONSCIOUSNESS_PROMPT",
         l2_module._COGNITION_CONSCIOUSNESS_PROMPT,
-        12709,
-        "46654e7cada986691c3f8fd8a4d3be8453c3a82a30618190018670701216f590",
+        13407,
+        "0d23375541528afaf9e1db57b2201c8055a3942cc8cc9c789cb4532546cefade",
     ),
     (
         "_BOUNDARY_CORE_PROMPT",
@@ -110,8 +110,8 @@ _PROMPT_FINGERPRINTS = (
     (
         "_CONTENT_ANCHOR_AGENT_PROMPT",
         l3_module._CONTENT_ANCHOR_AGENT_PROMPT,
-        14604,
-        "5bf5c049cba9e7a67548c193c3ff5079f13b25a33ca2c338348932fc13f9cad3",
+        16814,
+        "ddf82213185239bedf4755a4f23e3abfa9d1f0a8e2b813c0bbee38b85bc9405f",
     ),
     (
         "_PREFERENCE_ADAPTER_PROMPT",
@@ -372,7 +372,7 @@ def _user_profile() -> dict[str, Any]:
 
 
 def _expected_empty_rag_result() -> dict[str, Any]:
-    """Build the exact empty RAG shape required by the dry-run plan.
+    """Build the exact empty RAG shape required for dry-run cognition.
 
     Returns:
         Empty projected RAG payload for dry-run cognition state.

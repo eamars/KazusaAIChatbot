@@ -14,6 +14,7 @@ import kazusa_ai_chatbot.db._client as db_client_module
 import kazusa_ai_chatbot.db.bootstrap as db_bootstrap_module
 import kazusa_ai_chatbot.db.character as db_character_module
 import kazusa_ai_chatbot.db.conversation as db_conversation_module
+import kazusa_ai_chatbot.db.global_character_growth as db_global_growth_module
 import kazusa_ai_chatbot.db.memory as db_memory_module
 import kazusa_ai_chatbot.db.users as db_users_module
 from kazusa_ai_chatbot.db import (
@@ -82,6 +83,8 @@ class _BootstrapDb:
             "conversation_episode_state",
             "character_reflection_runs",
             "interaction_style_images",
+            "global_character_growth_traits",
+            "global_character_growth_runs",
             "rag_cache2_persistent",
         ]
         self.collections = {
@@ -679,6 +682,11 @@ async def test_db_bootstrap_creates_platform_message_lookup_index(monkeypatch) -
     )
     monkeypatch.setattr(
         db_bootstrap_module,
+        "ensure_global_character_growth_indexes",
+        AsyncMock(),
+    )
+    monkeypatch.setattr(
+        db_bootstrap_module,
         "purge_stale_initializer_entries",
         AsyncMock(),
     )
@@ -699,6 +707,88 @@ async def test_db_bootstrap_creates_platform_message_lookup_index(monkeypatch) -
         ],
         "kwargs": {"name": "conv_platform_channel_message_id"},
     } in index_specs
+
+
+@pytest.mark.asyncio
+async def test_db_bootstrap_delegates_global_character_growth_indexes(
+    monkeypatch,
+) -> None:
+    """Bootstrap should prepare global character-growth storage."""
+
+    db = _BootstrapDb()
+    ensure_global_growth = AsyncMock()
+    monkeypatch.setattr(db_bootstrap_module, "get_db", AsyncMock(return_value=db))
+    monkeypatch.setattr(db_bootstrap_module, "enable_vector_index", AsyncMock())
+    monkeypatch.setattr(
+        db_bootstrap_module,
+        "ensure_reflection_run_indexes",
+        AsyncMock(),
+    )
+    monkeypatch.setattr(
+        db_bootstrap_module,
+        "ensure_interaction_style_image_indexes",
+        AsyncMock(),
+    )
+    monkeypatch.setattr(
+        db_bootstrap_module,
+        "ensure_global_character_growth_indexes",
+        ensure_global_growth,
+    )
+    monkeypatch.setattr(
+        db_bootstrap_module,
+        "purge_stale_initializer_entries",
+        AsyncMock(),
+    )
+    monkeypatch.setattr(
+        db_bootstrap_module,
+        "prune_persistent_entries",
+        AsyncMock(),
+    )
+
+    await db_bootstrap_module.db_bootstrap()
+
+    ensure_global_growth.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_global_character_growth_index_bootstrap(monkeypatch) -> None:
+    """Global growth DB interface should create all required indexes."""
+
+    db = _BootstrapDb()
+    db.collections.pop("global_character_growth_traits")
+    db.collections.pop("global_character_growth_runs")
+    delattr(db, "global_character_growth_traits")
+    delattr(db, "global_character_growth_runs")
+    monkeypatch.setattr(
+        db_global_growth_module,
+        "get_db",
+        AsyncMock(return_value=db),
+    )
+
+    await db_global_growth_module.ensure_global_character_growth_indexes()
+
+    traits = db["global_character_growth_traits"]
+    runs = db["global_character_growth_runs"]
+    trait_index_names = {
+        index["kwargs"]["name"]
+        for index in traits.indexes
+    }
+    run_index_names = {
+        index["kwargs"]["name"]
+        for index in runs.indexes
+    }
+    assert trait_index_names == {
+        "global_growth_trait_id_unique",
+        "global_growth_trait_status_maturity",
+        "global_growth_trait_axis_status",
+        "global_growth_trait_source_memory",
+    }
+    assert run_index_names == {
+        "global_growth_run_id_unique",
+        "global_growth_run_status_updated",
+        "global_growth_run_source_memory",
+        "global_growth_run_source_reflection",
+    }
 
 
 # ── Character state edge cases ─────────────────────────────────────

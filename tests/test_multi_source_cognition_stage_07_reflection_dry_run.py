@@ -63,56 +63,56 @@ _PROMPT_FINGERPRINTS = (
     (
         "_COGNITION_SUBCONSCIOUS_PROMPT",
         l1_module._COGNITION_SUBCONSCIOUS_PROMPT,
-        3884,
-        "93b4a80fa69aa7479d77699622aa632dd47a8515c475c91a0921bcdb302dc938",
+        4535,
+        "436df67750af7f6ace060e07b03c019f63617df6b617bd0f6f05bbe6de60221d",
     ),
     (
         "_COGNITION_CONSCIOUSNESS_PROMPT",
         l2_module._COGNITION_CONSCIOUSNESS_PROMPT,
-        11993,
-        "241fb639de242e2d7fc964da922a8b0ea2ac0d9c4f5b2b762df210c34805a5e5",
+        13407,
+        "0d23375541528afaf9e1db57b2201c8055a3942cc8cc9c789cb4532546cefade",
     ),
     (
         "_BOUNDARY_CORE_PROMPT",
         l2_module._BOUNDARY_CORE_PROMPT,
-        9694,
-        "dee7b322eb0d8637a3ee95b386560786042911cd0acca93b7c30896638ef26d1",
+        10304,
+        "2e40706a0efa6f53330f7093021e5b7be5951b2ac39d2c6647e51b4aa6e0525c",
     ),
     (
         "_JUDGEMENT_CORE_PROMPT",
         l2_module._JUDGEMENT_CORE_PROMPT,
-        6532,
-        "ca4e88cc3854cbdb63372ad3b20644575ef9eb74abdc8637212fedc0ca5b3b89",
+        6932,
+        "d478625f8b47a9b9c2ef33f0ae52f956e7ebe227b7e74dbaea0d81b8b7ad2ae6",
     ),
     (
         "_CONTEXTUAL_AGENT_PROMPT",
         l3_module._CONTEXTUAL_AGENT_PROMPT,
-        5112,
-        "4a2f7735c9f6b45637f329ad10581124360a24049444be43efb43cd2d802baae",
+        5582,
+        "df453430e47dd1ee4fb90e442b0287470082a2a015212b535316e19db201fc3e",
     ),
     (
         "_STYLE_AGENT_PROMPT",
         l3_module._STYLE_AGENT_PROMPT,
-        6430,
-        "c0f66e0d744688afa4b105f20573708d295057856fa924c0102c0d5605cb6340",
+        6894,
+        "664f0c8fe115dc0a0683595c815c072c7423dc2c6f047b9561938c7831238c0a",
     ),
     (
         "_CONTENT_ANCHOR_AGENT_PROMPT",
         l3_module._CONTENT_ANCHOR_AGENT_PROMPT,
-        11088,
-        "9bf38821e24a561cec5c887f54432a4bff7b84131efb6c997d26edab8e0bbea0",
+        16814,
+        "ddf82213185239bedf4755a4f23e3abfa9d1f0a8e2b813c0bbee38b85bc9405f",
     ),
     (
         "_PREFERENCE_ADAPTER_PROMPT",
         l3_module._PREFERENCE_ADAPTER_PROMPT,
-        7017,
-        "f5b0363c0d1ea1f28770237d27908cbfd56a86410c7c64d9522c44e1c284f88d",
+        7521,
+        "2f09e1ee799141a78cd24b783b6f9a493663d3aa677d7ed449a719d8ae392def",
     ),
     (
         "_VISUAL_AGENT_PROMPT",
         l3_module._VISUAL_AGENT_PROMPT,
-        7597,
-        "68b1a35d43bfa28c46c91274d946faa9c7edf206f25fa414dabc822592626294",
+        7882,
+        "b5440513d41341b04e6f8300b4e95c052073199a1f4aa01c71002f8e0e141e44",
     ),
 )
 
@@ -255,7 +255,7 @@ def _promoted_reflection_context() -> dict[str, list[dict[str, str]] | list[str]
 
 
 def _canonical_context(context: dict[str, Any]) -> str:
-    """Render promoted reflection context using the plan's stable JSON shape.
+    """Render promoted reflection context with the stable payload shape.
 
     Args:
         context: Promoted reflection context to render.
@@ -342,7 +342,7 @@ def _user_profile() -> dict[str, Any]:
 
 
 def _expected_empty_rag_result() -> dict[str, Any]:
-    """Build the exact empty RAG shape required by the dry-run plan.
+    """Build the exact empty RAG shape required for dry-run cognition.
 
     Returns:
         Empty projected RAG payload for dry-run cognition state.

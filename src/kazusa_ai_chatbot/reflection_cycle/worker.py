@@ -12,12 +12,16 @@ from zoneinfo import ZoneInfo
 
 from kazusa_ai_chatbot.config import (
     CHARACTER_TIME_ZONE,
+    GLOBAL_CHARACTER_GROWTH_PASS_ENABLED,
     REFLECTION_DAILY_RUN_AFTER_LOCAL_TIME,
     REFLECTION_HOURLY_SLOTS_PER_TICK,
     REFLECTION_LORE_PROMOTION_ENABLED,
     REFLECTION_PROMOTION_RUN_AFTER_LOCAL_TIME,
     REFLECTION_SELF_GUIDANCE_PROMOTION_ENABLED,
     REFLECTION_WORKER_INTERVAL_SECONDS,
+)
+from kazusa_ai_chatbot.global_character_growth import (
+    run_global_character_growth_pass,
 )
 from kazusa_ai_chatbot.db.schemas import CharacterReflectionRunDoc
 from kazusa_ai_chatbot.reflection_cycle import repository
@@ -160,12 +164,12 @@ async def _run_worker_tick(
     *,
     now: datetime,
     is_primary_interaction_busy: Callable[[], bool],
-) -> list[ReflectionWorkerResult]:
+) -> list[Any]:
     """Run one scheduled worker tick in approved priority order."""
 
     if is_primary_interaction_busy():
         logger.info("Reflection cycle tick skipped: primary interaction busy")
-        return_value: list[ReflectionWorkerResult] = [
+        return_value: list[Any] = [
             ReflectionWorkerResult(
                 run_kind="reflection_tick",
                 dry_run=False,
@@ -175,7 +179,7 @@ async def _run_worker_tick(
         ]
         return return_value
 
-    results: list[ReflectionWorkerResult] = []
+    results: list[Any] = []
     hourly_result = await _run_hourly_reflection_cycle(
         now=now,
         dry_run=False,
@@ -216,6 +220,18 @@ async def _run_worker_tick(
             is_primary_interaction_busy=is_primary_interaction_busy,
         )
         results.append(promotion_result)
+        if is_primary_interaction_busy():
+            return results
+        if (
+            GLOBAL_CHARACTER_GROWTH_PASS_ENABLED
+            and promotion_result.succeeded_count > 0
+        ):
+            growth_result = await run_global_character_growth_pass(
+                character_local_date=previous_local_date,
+                dry_run=False,
+                enable_trait_writes=True,
+            )
+            results.append(growth_result)
     return results
 
 

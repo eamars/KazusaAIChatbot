@@ -94,6 +94,7 @@ REFLECTION_WORKER_INTERVAL_SECONDS=900
 REFLECTION_HOURLY_SLOTS_PER_TICK=3
 REFLECTION_DAILY_RUN_AFTER_LOCAL_TIME=04:30
 REFLECTION_PROMOTION_RUN_AFTER_LOCAL_TIME=05:00
+GLOBAL_CHARACTER_GROWTH_PASS_ENABLED=true
 
 # Persistent profile-memory policy
 PROFILE_MEMORY_DIARY_TTL_SECONDS=7776000
@@ -334,6 +335,33 @@ python scripts/drop_legacy_rag_collections.py
 The script drops `rag_cache_index` and `rag_metadata_index` when present and is
 safe to run repeatedly.
 
+## Global Character Growth
+
+Global character growth runs after daily global reflection promotion when the
+worker is enabled and `GLOBAL_CHARACTER_GROWTH_PASS_ENABLED=true`. It writes
+only `global_character_growth_traits` and `global_character_growth_runs`.
+
+Dry-run:
+
+```bash
+python -m scripts.run_global_character_growth --dry-run --limit 80
+```
+
+Apply:
+
+```bash
+python -m scripts.run_global_character_growth --apply --enable-trait-writes --limit 80
+```
+
+Rollback:
+
+```bash
+GLOBAL_CHARACTER_GROWTH_PASS_ENABLED=false
+```
+
+Only active promoted traits enter L2 cognition through promoted reflection
+context. Emerging and stabilizing traits remain audit-only in run records.
+
 ## Testing
 
 Default test runs exclude live DB and live LLM tests through `pytest.ini`.
@@ -346,7 +374,7 @@ pytest -m "not live_db and not live_llm" -q
 Live LLM tests must be run and inspected one at a time:
 
 ```bash
-pytest tests/test_cognition_live_llm.py::test_live_msg_decontexualizer_returns_non_empty_output -q -s
+pytest -m live_llm tests/test_cognition_live_llm.py::test_live_msg_decontexualizer_returns_non_empty_output -q -s
 ```
 
 Live DB tests can be run explicitly when MongoDB is available:

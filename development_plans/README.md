@@ -38,7 +38,6 @@ long_term/todo.md
 
 | Plan | Status | Execution |
 |---|---|---|
-| [global_character_growth_from_reflection_plan.md](active/short_term/global_character_growth_from_reflection_plan.md) | approved | ready |
 | [self_cognition_agency_loop_plan.md](active/short_term/self_cognition_agency_loop_plan.md) | draft | deferred |
 
 ## Active Bugfix Plans
@@ -103,6 +102,7 @@ plans.
 | [conversation_progress_state_plan.md](archive/completed/short_term/conversation_progress_state_plan.md) |
 | [first_class_image_input_cognition_plan.md](archive/completed/short_term/first_class_image_input_cognition_plan.md) |
 | [get_db_private_boundary_plan.md](archive/completed/short_term/get_db_private_boundary_plan.md) |
+| [global_character_growth_from_reflection_plan.md](archive/completed/short_term/global_character_growth_from_reflection_plan.md) |
 | [global_input_queue_plan.md](archive/completed/short_term/global_input_queue_plan.md) |
 | [group_chat_noise_relevance_plan.md](archive/completed/short_term/group_chat_noise_relevance_plan.md) |
 | [identity_free_memory_output_contract_plan.md](archive/completed/short_term/identity_free_memory_output_contract_plan.md) |

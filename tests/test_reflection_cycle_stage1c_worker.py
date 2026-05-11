@@ -142,6 +142,7 @@ async def test_worker_tick_passes_busy_probe_to_promotion(monkeypatch) -> None:
         "_run_global_reflection_promotion",
         _run_global_reflection_promotion,
     )
+    monkeypatch.setattr(worker_module, "GLOBAL_CHARACTER_GROWTH_PASS_ENABLED", False)
     monkeypatch.setattr(worker_module, "_local_time_is_after", lambda *_: True)
 
     def _busy_probe() -> bool:
