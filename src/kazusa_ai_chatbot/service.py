@@ -22,7 +22,7 @@ from kazusa_ai_chatbot.config import (
     CONVERSATION_HISTORY_LIMIT,
     COGNITION_VISUAL_DIRECTIVES_ENABLED,
     RAG_CACHE2_MAX_ENTRIES,
-    REFLECTION_CYCLE_DISABLED,
+    REFLECTION_CYCLE_ENABLED,
     SCHEDULED_TASKS_ENABLED,
 )
 from kazusa_ai_chatbot.cognition_episode import (
@@ -1088,13 +1088,13 @@ async def lifespan(app: FastAPI):
 
     logger.info(render_llm_route_table())
     _ensure_chat_input_worker_started()
-    if REFLECTION_CYCLE_DISABLED:
-        logger.info(
-            "Reflection cycle worker disabled via REFLECTION_CYCLE_DISABLED=true"
-        )
-    else:
+    if REFLECTION_CYCLE_ENABLED:
         _reflection_worker_handle = start_reflection_cycle_worker(
             is_primary_interaction_busy=lambda: False,
+        )
+    else:
+        logger.info(
+            "Reflection cycle worker disabled via REFLECTION_CYCLE_ENABLED=false"
         )
     logger.info("Kazusa brain service is ready")
 

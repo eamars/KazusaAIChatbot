@@ -27,8 +27,8 @@ daily syntheses, and runs one global daily promotion pass that may write at
 most one lore row and one self-guidance row through the evolving memory public
 API.
 
-Hourly and daily-channel reflection are evidence records. Normal chat uses
-promoted reflection memory when `REFLECTION_CONTEXT_ENABLED` is true.
+Hourly and daily-channel reflection are evidence records. Normal chat can use
+active promoted reflection memory through the bounded prompt projection.
 
 ## Public Facades
 
@@ -176,7 +176,7 @@ promotion records a skipped/deferred result and performs no memory mutation.
 ## Worker Schedule
 
 FastAPI lifespan owns exactly one worker task when
-`REFLECTION_CYCLE_DISABLED` is false. The service passes an always-idle
+`REFLECTION_CYCLE_ENABLED` is true. The service passes an always-idle
 busy-probe callback so reflection and normal chat run independently; the worker
 never imports service state.
 
@@ -207,8 +207,7 @@ document.
 
 ## Feature Flags
 
-- `REFLECTION_CYCLE_DISABLED=false`: worker runs by default.
-- `REFLECTION_CONTEXT_ENABLED=false`: promoted context is off by default.
+- `REFLECTION_CYCLE_ENABLED=true`: worker runs by default.
 - `REFLECTION_LORE_PROMOTION_ENABLED=true`: lore lane is enabled by default.
 - `REFLECTION_SELF_GUIDANCE_PROMOTION_ENABLED=true`: self-guidance lane is
   enabled by default.
@@ -226,7 +225,8 @@ No reflection-specific LLM route exists.
 
 ## Prompt-Facing Context
 
-`context.py` exposes compact promoted reflection context only when enabled.
+`context.py` exposes compact promoted reflection context from active promoted
+reflection memory lanes.
 Allowed shape:
 
 ```python
@@ -276,4 +276,4 @@ Reflection integrates through:
 - the reflection-cycle package facade,
 - named database interfaces for conversation evidence and run persistence,
 - memory-evolution public APIs for promoted memory writes,
-- gated reflection context for normal chat.
+- bounded promoted reflection context for normal chat.

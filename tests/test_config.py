@@ -291,3 +291,83 @@ class TestCognitionVisualDirectivesConfig:
 
         assert result.returncode == 0
         assert result.stdout.strip() == "False"
+
+
+class TestReflectionCycleConfig:
+    def test_reflection_cycle_enabled_defaults_to_true(self, tmp_path):
+        env = _configured_subprocess_env_without_dotenv()
+        env.pop("REFLECTION_CYCLE_ENABLED", None)
+        env.pop("REFLECTION_" + "CYCLE_DISABLED", None)
+
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-c",
+                (
+                    "import kazusa_ai_chatbot.config as config; "
+                    "print(config.REFLECTION_CYCLE_ENABLED)"
+                ),
+            ],
+            cwd=tmp_path,
+            env=env,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+        assert result.returncode == 0
+        assert result.stdout.strip() == "True"
+
+    def test_reflection_cycle_enabled_parses_false(self, tmp_path):
+        env = _configured_subprocess_env_without_dotenv()
+        env["REFLECTION_CYCLE_ENABLED"] = "false"
+        env.pop("REFLECTION_" + "CYCLE_DISABLED", None)
+
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-c",
+                (
+                    "import kazusa_ai_chatbot.config as config; "
+                    "print(config.REFLECTION_CYCLE_ENABLED)"
+                ),
+            ],
+            cwd=tmp_path,
+            env=env,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+        assert result.returncode == 0
+        assert result.stdout.strip() == "False"
+
+    def test_removed_reflection_disable_env_is_ignored(self, tmp_path):
+        env = _configured_subprocess_env_without_dotenv()
+        env.pop("REFLECTION_CYCLE_ENABLED", None)
+        env["REFLECTION_" + "CYCLE_DISABLED"] = "true"
+
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-c",
+                (
+                    "import kazusa_ai_chatbot.config as config; "
+                    "print(config.REFLECTION_CYCLE_ENABLED)"
+                ),
+            ],
+            cwd=tmp_path,
+            env=env,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+        assert result.returncode == 0
+        assert result.stdout.strip() == "True"
+
+    def test_removed_reflection_flags_are_absent(self):
+        import kazusa_ai_chatbot.config as config
+
+        assert not hasattr(config, "REFLECTION_" + "CYCLE_DISABLED")
+        assert not hasattr(config, "REFLECTION_" + "CONTEXT_ENABLED")

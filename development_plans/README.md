@@ -39,7 +39,6 @@ long_term/todo.md
 | Plan | Status | Execution |
 |---|---|---|
 | [global_character_growth_from_reflection_plan.md](active/short_term/global_character_growth_from_reflection_plan.md) | approved | ready |
-| [reflection_flag_simplification_plan.md](active/short_term/reflection_flag_simplification_plan.md) | draft | deferred |
 | [self_cognition_agency_loop_plan.md](active/short_term/self_cognition_agency_loop_plan.md) | draft | deferred |
 
 ## Active Bugfix Plans
@@ -134,6 +133,7 @@ plans.
 | [rag_phase3_development_plan.md](archive/completed/short_term/rag_phase3_development_plan.md) |
 | [rag_reply_mention_and_vague_input_plan.md](archive/completed/short_term/rag_reply_mention_and_vague_input_plan.md) |
 | [recall_agent_plan.md](archive/completed/short_term/recall_agent_plan.md) |
+| [reflection_flag_simplification_plan.md](archive/completed/short_term/reflection_flag_simplification_plan.md) |
 | [reflection_memory_integration_stage1c_plan.md](archive/completed/short_term/reflection_memory_integration_stage1c_plan.md) |
 | [role_vocabulary_contract_cleanup_plan.md](archive/completed/short_term/role_vocabulary_contract_cleanup_plan.md) |
 | [service_module_separation_stage1_plan.md](archive/completed/short_term/service_module_separation_stage1_plan.md) |

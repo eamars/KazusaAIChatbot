@@ -89,8 +89,7 @@ MAX_FACT_HARVESTER_RETRY=3
 RAG_CACHE2_MAX_ENTRIES=5000
 
 # Reflection cycle
-REFLECTION_CYCLE_DISABLED=false
-REFLECTION_CONTEXT_ENABLED=false
+REFLECTION_CYCLE_ENABLED=true
 REFLECTION_WORKER_INTERVAL_SECONDS=900
 REFLECTION_HOURLY_SLOTS_PER_TICK=3
 REFLECTION_DAILY_RUN_AFTER_LOCAL_TIME=04:30
@@ -194,7 +193,7 @@ On startup the service:
 5. Hydrates persistent Cache2 initializer entries.
 6. Starts configured MCP servers.
 7. Loads pending scheduled events if scheduling is enabled.
-8. Starts the reflection worker unless `REFLECTION_CYCLE_DISABLED=true`.
+8. Starts the reflection worker when `REFLECTION_CYCLE_ENABLED=true`.
 
 ## Adapters
 

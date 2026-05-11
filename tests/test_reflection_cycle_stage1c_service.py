@@ -15,9 +15,9 @@ from kazusa_ai_chatbot.reflection_cycle import worker as worker_module
 
 @pytest.mark.asyncio
 async def test_lifespan_starts_reflection_worker_by_default(monkeypatch) -> None:
-    """FastAPI lifespan should start reflection unless explicitly disabled."""
+    """FastAPI lifespan should start reflection when the worker flag is enabled."""
 
-    calls = await _run_lifespan(monkeypatch, disabled=False)
+    calls = await _run_lifespan(monkeypatch, enabled=True)
 
     assert calls["started"] == 1
     assert calls["stopped"] == 1
@@ -29,9 +29,9 @@ async def test_lifespan_starts_reflection_worker_by_default(monkeypatch) -> None
 async def test_lifespan_does_not_start_reflection_worker_when_explicitly_disabled(
     monkeypatch,
 ) -> None:
-    """The explicit disable flag should be the only startup skip path."""
+    """The positive worker flag should be the startup skip path."""
 
-    calls = await _run_lifespan(monkeypatch, disabled=True)
+    calls = await _run_lifespan(monkeypatch, enabled=False)
 
     assert calls["started"] == 0
     assert calls["stopped"] == 0
@@ -41,7 +41,7 @@ async def test_lifespan_does_not_start_reflection_worker_when_explicitly_disable
 async def test_lifespan_stops_reflection_worker_on_shutdown(monkeypatch) -> None:
     """Shutdown should stop the owned reflection worker handle before exit."""
 
-    calls = await _run_lifespan(monkeypatch, disabled=False)
+    calls = await _run_lifespan(monkeypatch, enabled=True)
 
     assert calls["started"] == 1
     assert calls["stopped"] == 1
@@ -74,14 +74,14 @@ async def test_reflection_probe_ignores_chat_queue_state(monkeypatch) -> None:
     monkeypatch.setattr(service_module, "_chat_input_queue", _Queue(1))
     monkeypatch.setattr(service_module, "_primary_interaction_active_count", 1)
 
-    calls = await _run_lifespan(monkeypatch, disabled=False)
+    calls = await _run_lifespan(monkeypatch, enabled=True)
     busy_probe = calls["busy_probe"]
 
     assert callable(busy_probe)
     assert busy_probe() is False
 
 
-async def _run_lifespan(monkeypatch, *, disabled: bool) -> dict[str, object]:
+async def _run_lifespan(monkeypatch, *, enabled: bool) -> dict[str, object]:
     """Run service lifespan with external dependencies patched."""
 
     calls: dict[str, object] = {
@@ -104,7 +104,7 @@ async def _run_lifespan(monkeypatch, *, disabled: bool) -> dict[str, object]:
         except asyncio.CancelledError:
             pass
 
-    monkeypatch.setattr(service_module, "REFLECTION_CYCLE_DISABLED", disabled)
+    monkeypatch.setattr(service_module, "REFLECTION_CYCLE_ENABLED", enabled)
     monkeypatch.setattr(service_module, "db_bootstrap", AsyncMock())
     monkeypatch.setattr(
         service_module,

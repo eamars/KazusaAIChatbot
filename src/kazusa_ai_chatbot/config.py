@@ -165,13 +165,9 @@ COGNITION_VISUAL_DIRECTIVES_ENABLED = os.getenv(
 CHARACTER_TIME_ZONE = os.getenv("CHARACTER_TIME_ZONE", "Pacific/Auckland")
 
 # Reflection cycle
-REFLECTION_CYCLE_DISABLED = os.getenv(
-    "REFLECTION_CYCLE_DISABLED",
-    "false",
-).lower() in ("1", "true", "yes")
-REFLECTION_CONTEXT_ENABLED = os.getenv(
-    "REFLECTION_CONTEXT_ENABLED",
-    "false",
+REFLECTION_CYCLE_ENABLED = os.getenv(
+    "REFLECTION_CYCLE_ENABLED",
+    "true",
 ).lower() in ("1", "true", "yes")
 REFLECTION_LORE_PROMOTION_ENABLED = os.getenv(
     "REFLECTION_LORE_PROMOTION_ENABLED",

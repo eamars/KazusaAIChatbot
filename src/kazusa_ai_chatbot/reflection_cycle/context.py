@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from typing import TypedDict
 
-from kazusa_ai_chatbot.config import REFLECTION_CONTEXT_ENABLED
 from kazusa_ai_chatbot.memory_evolution import (
     MemorySourceKind,
     find_active_memory_units,
@@ -23,14 +22,9 @@ class PromotedReflectionContext(TypedDict, total=False):
 
 async def build_promoted_reflection_context(
     *,
-    enabled: bool = REFLECTION_CONTEXT_ENABLED,
     limit_per_lane: int = 3,
 ) -> PromotedReflectionContext:
-    """Return compact promoted lore and self-guidance context when enabled."""
-
-    if not enabled:
-        return_value: PromotedReflectionContext = {}
-        return return_value
+    """Return compact promoted lore and self-guidance context."""
 
     lore = await _project_lane(
         memory_type=PROMOTION_LANE_MEMORY_TYPE["lore"],

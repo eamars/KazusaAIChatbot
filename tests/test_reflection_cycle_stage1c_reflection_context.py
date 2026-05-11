@@ -10,16 +10,22 @@ from kazusa_ai_chatbot.reflection_cycle import context as context_module
 
 
 @pytest.mark.asyncio
-async def test_reflection_context_disabled_returns_empty(monkeypatch) -> None:
-    """Disabled context must not query memory or expose reflection data."""
+async def test_reflection_context_returns_empty_when_no_promoted_lanes(
+    monkeypatch,
+) -> None:
+    """Empty promoted lanes should produce no prompt-facing context."""
 
-    find_active = AsyncMock()
+    find_active = AsyncMock(return_value=[])
     monkeypatch.setattr(context_module, "find_active_memory_units", find_active)
 
-    result = await context_module.build_promoted_reflection_context(enabled=False)
+    result = await context_module.build_promoted_reflection_context()
 
     assert result == {}
-    find_active.assert_not_awaited()
+    assert find_active.await_count == 2
+    for call in find_active.await_args_list:
+        assert call.kwargs["query"]["source_kind"] == "reflection_inferred"
+        assert call.kwargs["query"]["source_global_user_id"] == ""
+        assert call.kwargs["limit"] == 3
 
 
 @pytest.mark.asyncio
@@ -64,7 +70,7 @@ async def test_reflection_context_projects_only_promoted_memory_lanes(
         _find_active_memory_units,
     )
 
-    result = await context_module.build_promoted_reflection_context(enabled=True)
+    result = await context_module.build_promoted_reflection_context()
 
     assert result["promoted_lore"][0]["memory_type"] == "fact"
     assert result["promoted_self_guidance"][0]["memory_type"] == "defense_rule"

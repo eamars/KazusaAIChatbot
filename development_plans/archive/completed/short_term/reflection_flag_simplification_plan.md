@@ -5,7 +5,7 @@
 - Goal: Replace the reflection runtime controls with one positive worker flag and
   remove the separate prompt-facing reflection context flag.
 - Plan class: large
-- Status: draft
+- Status: completed
 - Mandatory skills: `py-style`, `test-style-and-execution`,
   `local-llm-architecture`, and `development-plan-writing`
 - Overall cutover strategy: bigbang
@@ -414,42 +414,42 @@ surface before editing that template.
 
 ## Progress Checklist
 
-- [ ] Stage 1 - tests express new contracts
+- [x] Stage 1 - tests express new contracts
   - Covers: implementation steps 1 and 2.
   - Verify:
     `venv\Scripts\python -m pytest tests\test_config.py tests\test_reflection_cycle_stage1c_reflection_context.py tests\test_reflection_cycle_stage1c_service.py -q`
   - Expected before implementation: failing tests identify old flag contracts.
   - Evidence: record failures or baseline result in `Execution Evidence`.
-  - Sign-off: `<agent/date>` after evidence is recorded.
+  - Sign-off: `Codex/2026-05-11`
 
-- [ ] Stage 2 - config, context, and service code updated
+- [x] Stage 2 - config, context, and service code updated
   - Covers: implementation steps 3 and 4.
   - Verify:
     `venv\Scripts\python -m pytest tests\test_config.py tests\test_reflection_cycle_stage1c_reflection_context.py tests\test_reflection_cycle_stage1c_service.py -q`
   - Evidence: focused tests pass and changed files are listed.
-  - Sign-off: `<agent/date>` after verification and evidence are recorded.
+  - Sign-off: `Codex/2026-05-11`
 
-- [ ] Stage 3 - docs and active plans updated
+- [x] Stage 3 - docs and active plans updated
   - Covers: implementation step 5.
   - Verify:
     `rg "REFLECTION_CONTEXT_ENABLED|REFLECTION_CYCLE_DISABLED" README.md docs src tests development_plans/README.md development_plans/active -g "!development_plans/active/short_term/reflection_flag_simplification_plan.md"`
     returns no matches.
   - Evidence: static grep result recorded. This plan's own historical/context
     references and archive matches are not part of this check.
-  - Sign-off: `<agent/date>` after verification and evidence are recorded.
+  - Sign-off: `Codex/2026-05-11`
 
-- [ ] Stage 4 - full verification complete
+- [x] Stage 4 - full verification complete
   - Covers: implementation step 6.
   - Verify all commands in `Verification`.
   - Evidence: command outputs and any allowed exceptions recorded.
-  - Sign-off: `<agent/date>` after verification and evidence are recorded.
+  - Sign-off: `Codex/2026-05-11`
 
-- [ ] Stage 5 - independent code review complete
+- [x] Stage 5 - independent code review complete
   - Covers: implementation step 7 and `Independent Code Review`.
   - Verify: review findings resolved or explicitly recorded as residual risk.
   - Evidence: review mode, findings, fixes, rerun commands, and approval status
     recorded.
-  - Sign-off: `<agent/date>` after review evidence is recorded.
+  - Sign-off: `Codex/2026-05-11`
 
 ## Verification
 
@@ -586,4 +586,52 @@ This plan is complete when:
   edit to administrative dependency wording, adding operational migration
   instructions plus a config test requirement, and replacing the invalid lane
   snippet with explicit allowed memory types.
-- Implementation pending. This plan is a draft and has not been executed.
+- 2026-05-11 execution started on branch `reflection-flag-simplification`.
+  Initial focused test-first run:
+  `venv\Scripts\python -m pytest tests\test_config.py tests\test_reflection_cycle_stage1c_reflection_context.py tests\test_reflection_cycle_stage1c_service.py -q`
+  returned 10 failed and 21 passed. The failures identified the old contracts:
+  missing `REFLECTION_CYCLE_ENABLED`, exported removed symbols, context reads
+  skipped by the removed context flag, and service tests still using the old
+  worker flag.
+- Implemented source changes in `src/kazusa_ai_chatbot/config.py`,
+  `src/kazusa_ai_chatbot/reflection_cycle/context.py`, and
+  `src/kazusa_ai_chatbot/service.py`. Focused rerun of the same config,
+  context, and service test batch returned 31 passed.
+- Updated `README.md`, `docs/HOWTO.md`,
+  `src/kazusa_ai_chatbot/reflection_cycle/README.md`, and
+  `development_plans/active/short_term/global_character_growth_from_reflection_plan.md`.
+  The active growth-plan edit was limited to stale context-flag wording and the
+  future context-builder contract.
+- Operational migration: deployments that set `REFLECTION_CYCLE_DISABLED=true`
+  must change that setting to `REFLECTION_CYCLE_ENABLED=false` before rollout.
+  Deployments that set `REFLECTION_CYCLE_DISABLED=false` should remove it
+  because `REFLECTION_CYCLE_ENABLED=true` is the new default. Remove
+  `REFLECTION_CONTEXT_ENABLED`; there is no replacement context flag.
+- Full focused reflection batch:
+  `venv\Scripts\python -m pytest tests\test_config.py tests\test_reflection_cycle_stage1c_reflection_context.py tests\test_reflection_cycle_stage1c_service.py tests\test_reflection_cycle_stage1c_integration.py -q`
+  returned 36 passed.
+- Regression batch:
+  `venv\Scripts\python -m pytest tests\test_multi_source_cognition_stage_02_chat_episode_migration.py tests\test_multi_source_cognition_stage_09_multimodal_input_sources.py tests\test_persona_supervisor2_rag2_integration.py tests\test_rag_cognitive_episode_adapter.py -q`
+  returned 37 passed.
+- Compile check:
+  `venv\Scripts\python -m py_compile src\kazusa_ai_chatbot\config.py src\kazusa_ai_chatbot\service.py src\kazusa_ai_chatbot\reflection_cycle\context.py`
+  returned exit code 0.
+- Static grep for removed flags across active surfaces returned no matches with
+  exit code 1, which is the expected no-match result:
+  `rg "REFLECTION_CONTEXT_ENABLED|REFLECTION_CYCLE_DISABLED" README.md docs src tests development_plans/README.md development_plans/active -g "!development_plans/active/short_term/reflection_flag_simplification_plan.md"`.
+  Archive grep returned only historical completed-plan references.
+- Positive flag grep returned current references in config, service, tests,
+  docs, and the execution plan. Deployment-template grep checked existing
+  `Dockerfile`, `docker-compose.yml`, and `.github` paths and returned no
+  removed-flag matches with exit code 1.
+- Independent code review was performed by the implementing agent because no
+  separate reviewer was available in this session. Review inspected the full
+  diff against this plan and found one documentation issue: stale "reflection
+  gate" wording in the growth plan and reflection README. The wording was
+  replaced with promoted-projection language. Rerun checks after the fix:
+  `venv\Scripts\python -m pytest tests\test_reflection_cycle_stage1c_integration.py -q`
+  returned 5 passed, and the active-surface removed-flag grep still returned
+  no matches.
+- Residual risk: this is a bigbang env rename with no compatibility alias.
+  Operator configuration must be migrated before deploying to environments that
+  relied on the removed disable variable.

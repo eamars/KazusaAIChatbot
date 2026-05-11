@@ -134,7 +134,7 @@ The dispatcher converts accepted future promises into validated scheduled tasks.
 
 **Reflection Cycle**
 
-Reflection is the slow background sense-making loop. It reads completed conversation windows, stores inspectable hourly and daily reflection runs, and may promote a small amount of durable lore or self-guidance through the memory-evolution boundary. Raw reflection output does not enter normal cognition directly; only promoted reflection context is eligible, and that context is gated by configuration.
+Reflection is the slow background sense-making loop. It reads completed conversation windows, stores inspectable hourly and daily reflection runs, and may promote a small amount of durable lore or self-guidance through the memory-evolution boundary. Raw reflection output does not enter normal cognition directly; only promoted reflection context is eligible through the promoted memory boundary.
 
 **Adapters**
 

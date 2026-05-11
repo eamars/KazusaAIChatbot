@@ -77,7 +77,7 @@ def test_readme_documents_production_interface_controls() -> None:
     assert "DB Boundaries" in readme
     assert "Memory Boundary" in readme
     assert "Worker Schedule" in readme
-    assert "REFLECTION_CYCLE_DISABLED=false" in readme
+    assert "REFLECTION_CYCLE_ENABLED=true" in readme
     assert "CONSOLIDATION_LLM_BASE_URL" in readme
 
 

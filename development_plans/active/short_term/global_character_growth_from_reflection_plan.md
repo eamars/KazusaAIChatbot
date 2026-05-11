@@ -11,7 +11,8 @@
   `py-style`, `cjk-safety`, and `test-style-and-execution`.
 - Overall cutover strategy: compatible. Existing chat, reflection promotion,
   consolidation, user style images, and character-state writers remain intact.
-  The growth pass is default-on; context uses the existing reflection gate.
+  The growth pass is default-on; context uses the existing promoted reflection
+  projection path.
 - Execution priority: approved and ready as a standalone implementation plan.
   Do not combine execution with user-style or self-cognition plan changes.
 - Highest-risk areas: duplicate global guidance, user-specific style leaking
@@ -40,8 +41,8 @@ Current production already has the required upstream evidence path:
   `memory` collection through `memory_evolution` with
   `source_kind="reflection_inferred"` and `authority="reflection_promoted"`.
 - `reflection_cycle.context.build_promoted_reflection_context()` can project
-  active promoted reflection memory into normal cognition when
-  `REFLECTION_CONTEXT_ENABLED` is true.
+  active promoted reflection memory into normal cognition through the bounded
+  promoted-reflection-context path.
 - L2 cognition already receives `promoted_reflection_context` as global soft
   background and is instructed not to treat it as current-user facts.
 - `interaction_style_images`, `user_memory_context`, and group-channel style
@@ -272,7 +273,7 @@ Overall strategy: compatible.
 | Background growth pass | compatible | Add a default-on worker path and manual CLI. `GLOBAL_CHARACTER_GROWTH_PASS_ENABLED=false` is the rollback switch. |
 | Trait writes | compatible | Worker apply writes only the new trait/run collections by default. Manual CLI dry-run writes one run record and no trait mutations. |
 | Shadow projection | compatible | Add log-only shadow projection to run records. It is never merged into prompt context. |
-| Cognition context | compatible | Use the existing `REFLECTION_CONTEXT_ENABLED` gate. Add no separate global-growth context flag. |
+| Cognition context | compatible | Use the existing promoted-reflection-context path. Add no separate global-growth context flag. |
 | L2 cognition prompt | compatible | Rewrite the affected Chinese prompt flow to integrate one compact field; no new LLM call and no L3/dialog rewrite. |
 | Reflection promotion | compatible | Keep existing promotion lanes and memory writes unchanged. |
 | Tests | compatible | Add focused tests and static checks without deleting existing tests. |
@@ -322,17 +323,16 @@ Observable behavior:
 
 - By default, the growth pass runs after daily global reflection promotion and
   writes only the new growth trait/run collections.
-- Promoted global-growth context is prompt visible only when
-  `REFLECTION_CONTEXT_ENABLED=true` and at least one active trait reaches
-  `promoted`.
+- Promoted global-growth context is prompt visible only when at least one active
+  trait reaches `promoted`.
 - Operators can run a dry-run CLI and inspect candidate, rejection, and drift
   evidence without mutating traits.
 - Operators can inspect shadow projection for emerging, stabilizing, and
   promoted traits immediately after a run, without affecting live cognition.
 - Operators can run explicit CLI apply mode, or let the default-on background
   pass update the trait ledger after reflection promotion.
-- L2 cognition sees promoted global growth only when
-  `REFLECTION_CONTEXT_ENABLED=true`.
+- L2 cognition sees promoted global growth only when the promoted reflection
+  context builder projects at least one promoted trait.
 - A newly observed candidate does not immediately affect runtime behavior.
   It must accumulate enough evidence to reach `promoted`.
 
@@ -342,14 +342,14 @@ Observable behavior:
 |---|---|---|
 | Production target | Use a new `global_character_growth` package. | The feature is not self-image, user style, or reflection promotion. A separate package keeps ownership explicit. |
 | Durable storage | Use `global_character_growth_traits` and `global_character_growth_runs`. | `memory_evolution` normalizes memory docs and is not shaped for numeric drift, maturity bands, and run audit state. |
-| Input evidence | Read active reflection-promoted memory only. | Promoted memory is already gated; raw reflection has privacy and noise risk. |
+| Input evidence | Read active reflection-promoted memory only. | Promoted memory has already passed promotion policy; raw reflection has privacy and noise risk. |
 | Candidate semantics | LLM proposes communication-growth candidates only. | Semantic generalization belongs to the model, while validation and persistence remain deterministic. |
 | Drift model | Use bounded evidence accumulation with maturity bands and provisional constants. | Human-like growth should be gradual. The POC supports the path, but the constants were calibrated on very little real candidate volume and must stay tunable. |
 | Shadow projection | Store source-detail-free emerging, stabilizing, and promoted guidance in run records only. | This shortens the operator feedback loop while preserving the rule that only promoted traits affect cognition. |
 | Input quality visibility | Store promotion-density and drop-reason diagnostics in each run. | The plan inherits upstream promoted-memory quality; it does not repair the upstream lane, so every run must show whether sparse or noisy input limited the output. |
-| Runtime projection | Add `promoted_global_growth` under `promoted_reflection_context`. | Service and L2 already have a gated global reflection context path; extending it avoids a new response-path fetch. |
+| Runtime projection | Add `promoted_global_growth` under `promoted_reflection_context`. | Service and L2 already have a promoted global reflection context path; extending it avoids a new response-path fetch. |
 | Cognition owner | Inject into L2 only. | L2 owns logical stance and character intent. L3 style remains scoped to style overlays and current-turn packaging. |
-| Feature flag | Default the growth pass to enabled and do not add a context-specific flag. | Character growth is a project goal. Context exposure is already governed by `REFLECTION_CONTEXT_ENABLED` and promoted-only projection. |
+| Feature flag | Default the growth pass to enabled and do not add a context-specific flag. | Character growth is a project goal. Context exposure stays inside promoted-only projection. |
 | Self-image writes | Defer all `character_state.self_image` mutation. | The POC showed useful growth but also showed duplication/bloat risk from direct summary appends. |
 | Self-cognition merge point | Keep self-cognition outputs out of this plan's input contract. | A later plan may add a separately promoted self-cognition evidence source, but this plan reads only reflection-promoted memory. |
 
@@ -371,15 +371,14 @@ async def run_global_character_growth_pass(
 
 async def build_global_character_growth_context(
     *,
-    enabled: bool,
     limit: int = 3,
 ) -> GlobalCharacterGrowthContext: ...
 ```
 
 `enable_trait_writes=True` is valid only when `dry_run=False`. The runner must
 raise `ValueError` for `dry_run=True` with `enable_trait_writes=True`.
-`build_global_character_growth_context(enabled=...)` receives the existing
-`REFLECTION_CONTEXT_ENABLED` decision; do not add a separate context flag.
+`build_global_character_growth_context()` is called from the promoted
+reflection context projection; do not add a separate context flag.
 
 ### ICD-Style Module README Contract
 
@@ -714,8 +713,8 @@ Live path impact:
 
 - No extra live LLM call.
 - At most one additional MongoDB read through
-  `global_character_growth_context` when both reflection context and global
-  growth context are enabled.
+  `global_character_growth_context` when promoted reflection context projection
+  includes global growth context.
 - Context projection cap is `3` promoted traits.
 - Shadow projection adds no prompt tokens and no live-path work. It is stored
   only in run records for operator review.
@@ -757,11 +756,10 @@ Apply:
 venv\Scripts\python -m scripts.run_global_character_growth --apply --enable-trait-writes --limit 80
 ```
 
-Default worker/context values:
+Default worker value:
 
 ```env
 GLOBAL_CHARACTER_GROWTH_PASS_ENABLED=true
-REFLECTION_CONTEXT_ENABLED=true
 ```
 
 Rollback override:
@@ -854,7 +852,7 @@ warning count.
 - `src/kazusa_ai_chatbot/config.py`
   - Add the default-on growth-pass feature flag.
 - `docs/HOWTO.md`
-  - Document the new default-on pass flag, existing reflection context gate,
+  - Document the new default-on pass flag, promoted reflection context path,
     rollback override, and CLI commands.
 - `src/kazusa_ai_chatbot/db/schemas.py`
   - Add `GlobalCharacterGrowthTraitDoc` and
@@ -868,7 +866,7 @@ warning count.
     submodule directly as a named DB interface.
 - `src/kazusa_ai_chatbot/reflection_cycle/context.py`
   - Merge `promoted_global_growth` into `PromotedReflectionContext` when
-    enabled.
+    active promoted traits exist.
 - `src/kazusa_ai_chatbot/reflection_cycle/worker.py`
   - Run the global growth pass after daily global reflection promotion when
     `GLOBAL_CHARACTER_GROWTH_PASS_ENABLED` is true and the busy probe remains
@@ -967,15 +965,15 @@ warning count.
   - Verify:
     `venv\Scripts\python -m pytest tests\test_global_character_growth_context.py tests\test_reflection_cycle_stage1c_reflection_context.py tests\test_global_character_growth_worker.py tests\test_reflection_cycle_stage1c_worker.py -q`
   - Evidence: default config enables the growth pass; pass flag false prevents
-    growth writes; `REFLECTION_CONTEXT_ENABLED=false` prevents context.
+    growth writes; absence of promoted traits prevents context.
   - Sign-off: `<agent/date>` after verification and evidence.
 
 - [ ] Stage 6 - cognition integration complete
   - Covers: implementation step 8.
   - Verify:
     `venv\Scripts\python -m pytest tests\test_global_character_growth_replay.py tests\test_multi_source_cognition_stage_09_multimodal_input_sources.py tests\test_cognition_interaction_style_context.py -q`
-  - Evidence: L2 receives promoted global growth only when reflection context
-    is enabled, and style-image behavior remains separate.
+  - Evidence: L2 receives promoted global growth only from active promoted
+    traits, and style-image behavior remains separate.
   - Sign-off: `<agent/date>` after verification and evidence.
 
 - [ ] Stage 7 - live LLM false-negative and false-positive tests inspected
@@ -1132,8 +1130,7 @@ This plan is complete when:
   with required indexes.
 - Dry-run and explicit apply CLI modes work and enforce write safety.
 - The reflection worker respects `GLOBAL_CHARACTER_GROWTH_PASS_ENABLED`; L2
-  receives `promoted_global_growth` only when `REFLECTION_CONTEXT_ENABLED` is
-  true.
+  receives `promoted_global_growth` only from active promoted trait projection.
 - Only active promoted traits enter cognition; lower bands remain audit-only.
 - Run records include input-quality diagnostics and log-only shadow projection,
   and static checks prove shadow projection is absent from runtime prompts.
