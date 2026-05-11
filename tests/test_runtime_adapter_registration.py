@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock
@@ -248,6 +249,29 @@ class _FakeNapCatWebSocket:
         })
 
 
+class _FakeNapCatActionWebSocket:
+    """Websocket double that returns responses by OneBot action name."""
+
+    def __init__(self, responses_by_action: dict[str, dict]):
+        self._responses_by_action = responses_by_action
+        self.sent_payloads: list[dict] = []
+
+    async def send(self, payload: str) -> None:
+        """Capture the sent websocket frame."""
+
+        self.sent_payloads.append(json.loads(payload))
+
+    async def recv(self) -> str:
+        """Return a response matching the last requested OneBot action."""
+
+        request_payload = self.sent_payloads[-1]
+        action = request_payload["action"]
+        response_payload = dict(self._responses_by_action[action])
+        response_payload["echo"] = request_payload["echo"]
+        return_value = json.dumps(response_payload)
+        return return_value
+
+
 class _FailingSendNapCatWebSocket:
     """Websocket double whose send_msg API call fails."""
 
@@ -370,8 +394,8 @@ async def test_napcat_handle_event_forwards_typed_bot_reply_metadata():
 
 
 @pytest.mark.asyncio
-async def test_napcat_handle_event_sends_clean_body_text_and_typed_envelope():
-    """QQ adapter should strip CQ wire syntax before calling the brain."""
+async def test_napcat_handle_event_sends_readable_bot_mention_and_typed_envelope():
+    """QQ adapter should replace bot CQ mentions before calling the brain."""
 
     adapter = NapCatWSAdapter(
         ws_url="ws://napcat.local/ws",
@@ -417,12 +441,288 @@ async def test_napcat_handle_event_sends_clean_body_text_and_typed_envelope():
     payload = adapter.brain_client.post.await_args.kwargs["json"]
     assert "content" not in payload
     assert all(key != "mentioned" + "_bot" for key in payload)
-    assert payload["message_envelope"]["body_text"] == "what does this mean?"
+    assert payload["message_envelope"]["body_text"] == "@Kazusa what does this mean?"
     assert payload["message_envelope"]["raw_wire_text"].startswith(
         "[CQ:reply,id=1733223276]"
     )
     assert payload["message_envelope"]["mentions"][0]["entity_kind"] == "bot"
+    assert payload["message_envelope"]["mentions"][0]["display_name"] == "Kazusa"
     assert payload["message_envelope"]["addressed_to_global_user_ids"]
+    await adapter.close()
+
+
+@pytest.mark.asyncio
+async def test_napcat_handle_event_uses_segment_nickname_without_lookup():
+    """QQ segment mention labels should be used before platform lookup."""
+
+    adapter = NapCatWSAdapter(
+        ws_url="ws://napcat.local/ws",
+        ws_token="token",
+        brain_url="http://127.0.0.1:8000",
+        brain_response_timeout=30,
+        runtime_host="127.0.0.1",
+        runtime_port=8011,
+        runtime_public_url="http://127.0.0.1:8011",
+        channel_ids=["905393941"],
+        debug_modes={},
+    )
+    adapter.bot_id = "3768713357"
+    adapter.bot_name = "Kazusa"
+    adapter.brain_client.post = AsyncMock(return_value=_DummyResponse({
+        "messages": [],
+        "use_reply_feature": False,
+    }))
+    ws = _FakeNapCatActionWebSocket({})
+
+    await adapter.handle_event(
+        {
+            "post_type": "message",
+            "message_type": "group",
+            "message_id": 394466271,
+            "group_id": 905393941,
+            "user_id": 3167827653,
+            "sender": {"nickname": "User A"},
+            "message": [
+                {
+                    "type": "at",
+                    "data": {
+                        "qq": "673225019",
+                        "nickname": "Segment Nick",
+                        "card": "Group Card",
+                    },
+                },
+                {"type": "text", "data": {"text": " hello"}},
+            ],
+        },
+        ws,
+    )
+
+    payload = adapter.brain_client.post.await_args.kwargs["json"]
+    envelope = payload["message_envelope"]
+    assert envelope["body_text"] == "@Segment Nick hello"
+    assert envelope["mentions"][0]["display_name"] == "Segment Nick"
+    assert ws.sent_payloads == []
+    await adapter.close()
+
+
+@pytest.mark.asyncio
+async def test_napcat_handle_event_hydrates_human_mention_nickname_and_cache():
+    """QQ human mention labels should use nickname before card and cache it."""
+
+    adapter = NapCatWSAdapter(
+        ws_url="ws://napcat.local/ws",
+        ws_token="token",
+        brain_url="http://127.0.0.1:8000",
+        brain_response_timeout=30,
+        runtime_host="127.0.0.1",
+        runtime_port=8011,
+        runtime_public_url="http://127.0.0.1:8011",
+        channel_ids=["905393941"],
+        debug_modes={},
+    )
+    adapter.bot_id = "3768713357"
+    adapter.bot_name = "Kazusa"
+    adapter.brain_client.post = AsyncMock(return_value=_DummyResponse({
+        "messages": [],
+        "use_reply_feature": False,
+    }))
+    ws = _FakeNapCatActionWebSocket({
+        "get_group_member_info": {
+            "status": "ok",
+            "data": {
+                "nickname": "Mention Nick",
+                "card": "Group Card",
+            },
+        },
+    })
+
+    await adapter.handle_event(
+        {
+            "post_type": "message",
+            "message_type": "group",
+            "message_id": 394466268,
+            "group_id": 905393941,
+            "user_id": 3167827653,
+            "sender": {"nickname": "User A"},
+            "message": "[CQ:at,qq=673225019] 你怎么评价群友",
+        },
+        ws,
+    )
+    await adapter.handle_event(
+        {
+            "post_type": "message",
+            "message_type": "group",
+            "message_id": 394466269,
+            "group_id": 905393941,
+            "user_id": 3167827653,
+            "sender": {"nickname": "User A"},
+            "message": "[CQ:at,qq=673225019] again",
+        },
+        ws,
+    )
+
+    payloads = [
+        call.kwargs["json"]
+        for call in adapter.brain_client.post.await_args_list
+    ]
+    first_envelope = payloads[0]["message_envelope"]
+    second_envelope = payloads[1]["message_envelope"]
+    assert first_envelope["body_text"] == "@Mention Nick 你怎么评价群友"
+    assert first_envelope["mentions"][0]["display_name"] == "Mention Nick"
+    assert second_envelope["body_text"] == "@Mention Nick again"
+    lookup_payloads = [
+        payload
+        for payload in ws.sent_payloads
+        if payload["action"] == "get_group_member_info"
+    ]
+    assert len(lookup_payloads) == 1
+    assert lookup_payloads[0]["params"] == {
+        "group_id": 905393941,
+        "user_id": 673225019,
+        "no_cache": False,
+    }
+    await adapter.close()
+
+
+@pytest.mark.asyncio
+async def test_napcat_mention_display_cache_evicts_oldest_label():
+    """QQ mention display cache should stay bounded in long-running adapters."""
+
+    adapter = NapCatWSAdapter(
+        ws_url="ws://napcat.local/ws",
+        ws_token="token",
+        brain_url="http://127.0.0.1:8000",
+        brain_response_timeout=30,
+        runtime_host="127.0.0.1",
+        runtime_port=8011,
+        runtime_public_url="http://127.0.0.1:8011",
+        channel_ids=["905393941"],
+        debug_modes={},
+    )
+
+    for index in range(napcat_module._MENTION_DISPLAY_CACHE_LIMIT + 1):
+        adapter._cache_qq_mention_display_name(
+            ("905393941", str(index)),
+            f"User {index}",
+        )
+
+    assert len(adapter._mention_display_cache) == (
+        napcat_module._MENTION_DISPLAY_CACHE_LIMIT
+    )
+    assert ("905393941", "0") not in adapter._mention_display_cache
+    assert ("905393941", str(napcat_module._MENTION_DISPLAY_CACHE_LIMIT)) in (
+        adapter._mention_display_cache
+    )
+    await adapter.close()
+
+
+@pytest.mark.asyncio
+async def test_napcat_handle_event_uses_occurrence_label_when_lookup_fails():
+    """QQ mention lookup misses should not expose QQ ids in body text."""
+
+    adapter = NapCatWSAdapter(
+        ws_url="ws://napcat.local/ws",
+        ws_token="token",
+        brain_url="http://127.0.0.1:8000",
+        brain_response_timeout=30,
+        runtime_host="127.0.0.1",
+        runtime_port=8011,
+        runtime_public_url="http://127.0.0.1:8011",
+        channel_ids=["905393941"],
+        debug_modes={},
+    )
+    adapter.bot_id = "3768713357"
+    adapter.bot_name = "Kazusa"
+    adapter.brain_client.post = AsyncMock(return_value=_DummyResponse({
+        "messages": [],
+        "use_reply_feature": False,
+    }))
+    ws = _FakeNapCatActionWebSocket({
+        "get_group_member_info": {
+            "status": "failed",
+            "message": "not found",
+        },
+    })
+
+    await adapter.handle_event(
+        {
+            "post_type": "message",
+            "message_type": "group",
+            "message_id": 394466270,
+            "group_id": 905393941,
+            "user_id": 3167827653,
+            "sender": {"nickname": "User A"},
+            "message": "[CQ:at,qq=673225019] hello",
+        },
+        ws,
+    )
+
+    payload = adapter.brain_client.post.await_args.kwargs["json"]
+    envelope = payload["message_envelope"]
+    assert envelope["body_text"] == "@mentioned-user-1 hello"
+    assert "673225019" not in envelope["body_text"]
+    assert envelope["mentions"][0]["display_name"] == ""
+    await adapter.close()
+
+
+@pytest.mark.asyncio
+async def test_napcat_handle_event_bounds_duplicate_timeout_lookups(
+    monkeypatch,
+):
+    """QQ lookup timeouts should fallback once per mentioned id per message."""
+
+    observed_timeouts: list[float] = []
+
+    async def fake_wait_for(awaitable, timeout: float):
+        """Simulate NapCat lookup timeout without waiting one real second."""
+
+        observed_timeouts.append(timeout)
+        if hasattr(awaitable, "close"):
+            awaitable.close()
+        raise asyncio.TimeoutError("mention lookup timeout")
+
+    monkeypatch.setattr(napcat_module.asyncio, "wait_for", fake_wait_for)
+    adapter = NapCatWSAdapter(
+        ws_url="ws://napcat.local/ws",
+        ws_token="token",
+        brain_url="http://127.0.0.1:8000",
+        brain_response_timeout=30,
+        runtime_host="127.0.0.1",
+        runtime_port=8011,
+        runtime_public_url="http://127.0.0.1:8011",
+        channel_ids=["905393941"],
+        debug_modes={},
+    )
+    adapter.bot_id = "3768713357"
+    adapter.bot_name = "Kazusa"
+    adapter.brain_client.post = AsyncMock(return_value=_DummyResponse({
+        "messages": [],
+        "use_reply_feature": False,
+    }))
+    ws = _FakeNapCatActionWebSocket({})
+
+    await adapter.handle_event(
+        {
+            "post_type": "message",
+            "message_type": "group",
+            "message_id": 394466272,
+            "group_id": 905393941,
+            "user_id": 3167827653,
+            "sender": {"nickname": "User A"},
+            "message": (
+                "[CQ:at,qq=673225019] hello "
+                "[CQ:at,qq=673225019] again"
+            ),
+        },
+        ws,
+    )
+
+    payload = adapter.brain_client.post.await_args.kwargs["json"]
+    envelope = payload["message_envelope"]
+    assert observed_timeouts == [1.0]
+    assert envelope["body_text"] == "@mentioned-user-1 hello @mentioned-user-2 again"
+    assert "673225019" not in envelope["body_text"]
+    assert [mention["display_name"] for mention in envelope["mentions"]] == ["", ""]
     await adapter.close()
 
 

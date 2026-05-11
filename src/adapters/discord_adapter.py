@@ -30,7 +30,9 @@ from adapters.delivery_receipts import post_delivery_receipt
 from adapters.envelope_common import (
     addressed_to_from_envelope_parts,
     attachment_refs,
+    normalize_mention_display_map,
     normalize_body_spacing,
+    readable_mention_token,
     resolve_mentions,
 )
 from kazusa_ai_chatbot.config import CHARACTER_GLOBAL_USER_ID
@@ -81,23 +83,39 @@ class DiscordEnvelopeNormalizer:
             attachment_handlers: Registry used to normalize attachments.
 
         Returns:
-            Message envelope with Discord tags removed from `body_text`.
+            Message envelope with Discord mention tags represented as readable
+            tokens in `body_text`.
         """
 
         raw_wire_text = str(request.content or "")
         platform_bot_id = str(request.platform_bot_id)
         channel_type = str(request.channel_type)
         reply_context = dict(request.reply_context)
+        user_display_names = normalize_mention_display_map(
+            getattr(request, "user_mention_display_names", {}),
+        )
+        role_display_names = normalize_mention_display_map(
+            getattr(request, "role_mention_display_names", {}),
+        )
+        channel_display_names = normalize_mention_display_map(
+            getattr(request, "channel_mention_display_names", {}),
+        )
 
-        raw_mentions = self._raw_mentions(raw_wire_text, platform_bot_id)
+        raw_mentions = self._raw_mentions(
+            raw_wire_text,
+            platform_bot_id,
+            user_display_names,
+            role_display_names,
+            channel_display_names,
+        )
         reply = self._reply_target(reply_context, platform_bot_id)
-
-        body_text = _USER_MENTION_PATTERN.sub(" ", raw_wire_text)
-        body_text = _ROLE_MENTION_PATTERN.sub(" ", body_text)
-        body_text = _CHANNEL_MENTION_PATTERN.sub(" ", body_text)
-        body_text = _CUSTOM_EMOJI_PATTERN.sub(" ", body_text)
-        body_text = _EVERYONE_PATTERN.sub(" ", body_text)
-        body_text = normalize_body_spacing(body_text)
+        body_text = self._body_text(
+            raw_wire_text,
+            platform_bot_id,
+            user_display_names,
+            role_display_names,
+            channel_display_names,
+        )
 
         mentions = resolve_mentions(raw_mentions, mention_resolver)
         addressed_to = addressed_to_from_envelope_parts(
@@ -118,10 +136,83 @@ class DiscordEnvelopeNormalizer:
 
         return envelope
 
+    def _body_text(
+        self,
+        raw_wire_text: str,
+        platform_bot_id: str,
+        user_display_names: dict[str, str],
+        role_display_names: dict[str, str],
+        channel_display_names: dict[str, str],
+    ) -> str:
+        """Replace Discord mention wire tags with readable body tokens."""
+
+        occurrence_counts: dict[str, int] = {}
+
+        def next_occurrence(kind: str) -> int:
+            occurrence_counts[kind] = occurrence_counts.get(kind, 0) + 1
+            return occurrence_counts[kind]
+
+        def replace_user(match: re.Match[str]) -> str:
+            platform_user_id = match.group(1)
+            entity_kind = "bot" if platform_user_id == platform_bot_id else "user"
+            occurrence_index = next_occurrence("user")
+            token = readable_mention_token(
+                entity_kind=entity_kind,
+                display_name=user_display_names.get(platform_user_id, ""),
+                occurrence_index=occurrence_index,
+            )
+            return_value = f" {token} "
+            return return_value
+
+        def replace_role(match: re.Match[str]) -> str:
+            platform_role_id = match.group(1)
+            occurrence_index = next_occurrence("platform_role")
+            token = readable_mention_token(
+                entity_kind="platform_role",
+                display_name=role_display_names.get(platform_role_id, ""),
+                occurrence_index=occurrence_index,
+            )
+            return_value = f" {token} "
+            return return_value
+
+        def replace_channel(match: re.Match[str]) -> str:
+            platform_channel_id = match.group(1)
+            occurrence_index = next_occurrence("channel")
+            token = readable_mention_token(
+                entity_kind="channel",
+                display_name=channel_display_names.get(platform_channel_id, ""),
+                occurrence_index=occurrence_index,
+            )
+            return_value = f" {token} "
+            return return_value
+
+        def replace_everyone(match: re.Match[str]) -> str:
+            raw_label = match.group(1)
+            occurrence_index = next_occurrence("everyone")
+            token = readable_mention_token(
+                entity_kind="everyone",
+                display_name="",
+                occurrence_index=occurrence_index,
+                raw_label=raw_label,
+            )
+            return_value = f" {token} "
+            return return_value
+
+        body_text = _USER_MENTION_PATTERN.sub(replace_user, raw_wire_text)
+        body_text = _ROLE_MENTION_PATTERN.sub(replace_role, body_text)
+        body_text = _CHANNEL_MENTION_PATTERN.sub(replace_channel, body_text)
+        body_text = _CUSTOM_EMOJI_PATTERN.sub(" ", body_text)
+        body_text = _EVERYONE_PATTERN.sub(replace_everyone, body_text)
+        body_text = normalize_body_spacing(body_text)
+        return body_text
+
     def _raw_mentions(
         self,
         raw_wire_text: str,
         platform_bot_id: str,
+        user_display_names: dict[str, str],
+        role_display_names: dict[str, str],
+        channel_display_names: dict[str, str],
     ) -> list[RawMention]:
         """Extract typed Discord mention fragments from wire text."""
 
@@ -134,22 +225,27 @@ class DiscordEnvelopeNormalizer:
                 "platform_user_id": platform_user_id,
                 "entity_kind": entity_kind,
                 "raw_text": match.group(0),
+                "display_name": user_display_names.get(platform_user_id, ""),
             })
 
         for match in _ROLE_MENTION_PATTERN.finditer(raw_wire_text):
+            platform_role_id = match.group(1)
             raw_mentions.append({
                 "platform": "discord",
-                "platform_user_id": match.group(1),
+                "platform_user_id": platform_role_id,
                 "entity_kind": "platform_role",
                 "raw_text": match.group(0),
+                "display_name": role_display_names.get(platform_role_id, ""),
             })
 
         for match in _CHANNEL_MENTION_PATTERN.finditer(raw_wire_text):
+            platform_channel_id = match.group(1)
             raw_mentions.append({
                 "platform": "discord",
-                "platform_user_id": match.group(1),
+                "platform_user_id": platform_channel_id,
                 "entity_kind": "channel",
                 "raw_text": match.group(0),
+                "display_name": channel_display_names.get(platform_channel_id, ""),
             })
 
         for match in _EVERYONE_PATTERN.finditer(raw_wire_text):
@@ -158,6 +254,7 @@ class DiscordEnvelopeNormalizer:
                 "platform_user_id": match.group(1),
                 "entity_kind": "everyone",
                 "raw_text": match.group(0),
+                "display_name": match.group(1),
             })
 
         return raw_mentions
@@ -444,12 +541,45 @@ class DiscordAdapter(discord.Client):
         else:
             channel_name = str(message.channel.name)
 
+        user_mention_display_names: dict[str, str] = {}
+        for mentioned_user in getattr(message, "mentions", []):
+            platform_user_id = getattr(mentioned_user, "id", None)
+            if platform_user_id is None:
+                continue
+            display_name = getattr(mentioned_user, "display_name", "")
+            if not isinstance(display_name, str):
+                display_name = ""
+            user_mention_display_names[str(platform_user_id)] = display_name
+
+        role_mention_display_names: dict[str, str] = {}
+        for mentioned_role in getattr(message, "role_mentions", []):
+            platform_role_id = getattr(mentioned_role, "id", None)
+            if platform_role_id is None:
+                continue
+            display_name = getattr(mentioned_role, "name", "")
+            if not isinstance(display_name, str):
+                display_name = ""
+            role_mention_display_names[str(platform_role_id)] = display_name
+
+        channel_mention_display_names: dict[str, str] = {}
+        for mentioned_channel in getattr(message, "channel_mentions", []):
+            platform_channel_id = getattr(mentioned_channel, "id", None)
+            if platform_channel_id is None:
+                continue
+            display_name = getattr(mentioned_channel, "name", "")
+            if not isinstance(display_name, str):
+                display_name = ""
+            channel_mention_display_names[str(platform_channel_id)] = display_name
+
         envelope_request = SimpleNamespace(
             platform="discord",
             channel_type="private" if is_dm else "group",
             content=message.content,
             platform_bot_id=str(self.user.id) if self.user else "",
             reply_context=reply_context,
+            user_mention_display_names=user_mention_display_names,
+            role_mention_display_names=role_mention_display_names,
+            channel_mention_display_names=channel_mention_display_names,
             attachments=attachments,
         )
         envelope = self._envelope_normalizer.normalize(

@@ -38,7 +38,6 @@ long_term/todo.md
 
 | Plan | Status | Execution |
 |---|---|---|
-| [qq_adapter_readable_mentions_plan.md](active/short_term/qq_adapter_readable_mentions_plan.md) | approved | ready |
 | [self_cognition_agency_loop_plan.md](active/short_term/self_cognition_agency_loop_plan.md) | draft | deferred |
 
 ## Active Bugfix Plans
@@ -129,6 +128,7 @@ plans.
 | [multi_source_cognition_architecture_stage_10_permissioned_proactive_output_plan.md](archive/completed/short_term/multi_source_cognition_architecture_stage_10_permissioned_proactive_output_plan.md) |
 | [native_shape_boundary_hardening_plan.md](archive/completed/short_term/native_shape_boundary_hardening_plan.md) |
 | [prompt_safe_message_context_plan.md](archive/completed/short_term/prompt_safe_message_context_plan.md) |
+| [qq_adapter_readable_mentions_plan.md](archive/completed/short_term/qq_adapter_readable_mentions_plan.md) |
 | [rag1_decommission_plan.md](archive/completed/short_term/rag1_decommission_plan.md) |
 | [rag2_phase4_continuation_plan.md](archive/completed/short_term/rag2_phase4_continuation_plan.md) |
 | [rag_cache2_persistent_initializer_plan.md](archive/completed/short_term/rag_cache2_persistent_initializer_plan.md) |

@@ -44,6 +44,98 @@ def normalize_body_spacing(text: str) -> str:
     return return_value
 
 
+def normalize_mention_display_label(value: object) -> str:
+    """Normalize an adapter-provided display label for LLM-visible text.
+
+    Args:
+        value: External platform label value from an event or lookup response.
+
+    Returns:
+        Trimmed label with internal whitespace collapsed, or an empty string
+        when no readable label is available.
+    """
+
+    if not isinstance(value, str):
+        return_value = ""
+        return return_value
+
+    normalized = re.sub(r"\s+", " ", value).strip()
+    normalized = normalized.lstrip("@#").strip()
+    return normalized
+
+
+def normalize_mention_display_map(value: object) -> dict[str, str]:
+    """Normalize an adapter-provided id-to-display-label mapping.
+
+    Args:
+        value: External mapping supplied by an adapter event handler.
+
+    Returns:
+        Mapping with string ids and non-empty sanitized display labels.
+    """
+
+    if not isinstance(value, Mapping):
+        return_value: dict[str, str] = {}
+        return return_value
+
+    display_names: dict[str, str] = {}
+    for platform_user_id, display_name in value.items():
+        label = normalize_mention_display_label(display_name)
+        if not label:
+            continue
+        display_names[str(platform_user_id)] = label
+    return display_names
+
+
+def readable_mention_token(
+    *,
+    entity_kind: str,
+    display_name: str,
+    occurrence_index: int,
+    raw_label: str = "",
+) -> str:
+    """Format a platform-neutral visible mention token for body text.
+
+    Args:
+        entity_kind: Typed mention kind such as user, bot, role, or channel.
+        display_name: Adapter-resolved display label, if one is available.
+        occurrence_index: One-based fallback occurrence index for the entity
+            kind in this message.
+        raw_label: Safe authored broadcast label for everyone/here/all tokens.
+
+    Returns:
+        A readable mention token that does not expose platform wire syntax or
+        raw platform ids.
+    """
+
+    label = normalize_mention_display_label(display_name)
+    normalized_kind = entity_kind or "unknown"
+    if normalized_kind == "channel":
+        if label:
+            return_value = f"#{label}"
+        else:
+            return_value = f"#mentioned-channel-{occurrence_index}"
+        return return_value
+
+    if normalized_kind == "everyone":
+        broadcast_label = normalize_mention_display_label(raw_label) or "everyone"
+        return_value = f"@{broadcast_label}"
+        return return_value
+
+    fallback_by_kind = {
+        "bot": "mentioned-user",
+        "user": "mentioned-user",
+        "platform_role": "mentioned-role",
+        "unknown": "mentioned-entity",
+    }
+    if label:
+        return_value = f"@{label}"
+    else:
+        fallback = fallback_by_kind.get(normalized_kind, "mentioned-entity")
+        return_value = f"@{fallback}-{occurrence_index}"
+    return return_value
+
+
 def attachment_refs(
     raw_attachments: list[object],
     handlers: AttachmentHandlerRegistryProtocol,

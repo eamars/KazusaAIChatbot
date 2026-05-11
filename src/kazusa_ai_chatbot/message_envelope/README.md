@@ -30,7 +30,7 @@ to the user's authored message.
 
 The brain service must receive semantic content and typed metadata:
 
-- `body_text`: user-authored content only.
+- `body_text`: user-authored content plus readable visible mention tokens.
 - `raw_wire_text`: original transport text for audit and replay only.
 - `mentions`: typed mention records.
 - `reply`: typed reply target, when present.
@@ -135,7 +135,7 @@ defined in `types.py` and mirrored by the service-side Pydantic input model.
 
 | Field | Required | Type | Meaning |
 | --- | --- | --- | --- |
-| `body_text` | yes | `str` | User-authored text after removing platform transport syntax. |
+| `body_text` | yes | `str` | User-authored text after replacing visible platform mentions with readable tokens and removing other platform transport syntax. |
 | `raw_wire_text` | yes | `str` | Original platform text or closest textual replay form. Audit only. |
 | `mentions` | yes | `list[Mention]` | Typed mentions found in the inbound message. |
 | `reply` | no | `ReplyTarget` | Typed reply target, when the platform event or adapter derivation identifies one. |
@@ -145,10 +145,23 @@ defined in `types.py` and mirrored by the service-side Pydantic input model.
 
 ### `body_text`
 
-`body_text` contains authored semantic content. Adapter normalization removes
-platform transport syntax, including:
+`body_text` contains authored semantic content. Visible platform mentions are
+authored addressing content, so adapter normalization preserves them as
+readable platform-neutral tokens:
 
-- Platform mention tags.
+| Mention kind | Readable token when label is known | Fallback token when label is unknown |
+| --- | --- | --- |
+| `bot` or `user` | `@display name` | `@mentioned-user-N` |
+| `platform_role` | `@role name` | `@mentioned-role-N` |
+| `channel` | `#channel-name` | `#mentioned-channel-N` |
+| `everyone` | `@everyone`, `@here`, or `@all` | same raw broadcast word without platform wrapper |
+| `unknown` | `@display name` | `@mentioned-entity-N` |
+
+Adapter normalization removes or replaces platform transport syntax,
+including:
+
+- Platform mention tags, which must become readable tokens rather than being
+  stripped.
 - CQ codes.
 - Native reply markers.
 - Adapter reply boilerplate.
@@ -157,8 +170,11 @@ platform transport syntax, including:
 - Custom emoji tags.
 - Platform-only synthetic markers are represented through typed metadata.
 
-`body_text` can be an empty string when the message is attachment-only or when
-the authored content is only transport syntax.
+`body_text` must not contain CQ codes, Discord mention tags, raw platform ids,
+or platform names as lookup-failure stand-ins. Raw ids and raw tokens belong in
+typed metadata and `raw_wire_text`. `body_text` can be an empty string when the
+message is attachment-only or when the authored content is only non-mention
+transport syntax.
 
 The brain service derives `user_input`, RAG queries, cognition input, dialog
 context, conversation progress input, and search text from `body_text` plus
@@ -167,7 +183,9 @@ attachment `description` text.
 ### `raw_wire_text`
 
 `raw_wire_text` preserves the platform text for audit, debugging, and replay.
-It can contain platform syntax and remains audit/replay data.
+It can contain platform syntax and remains audit/replay data. Platform-native
+mention syntax that is unsafe for the brain to interpret belongs here, not in
+`body_text`.
 
 ### `mentions`
 
@@ -185,6 +203,10 @@ Only `bot` and `user` mentions can contribute to
 `addressed_to_global_user_ids`. Platform-role, channel, everyone, and unknown
 mentions stay as metadata. Consumers ignore `unknown` mentions for addressed
 user resolution.
+
+Mention `display_name` values are labels, not semantic aliases. Adapters may
+trim and collapse whitespace in labels, but they must not translate,
+summarize, infer aliases, or rewrite ordinary authored words.
 
 ### `reply`
 
@@ -266,7 +288,8 @@ A runtime adapter:
 
 1. Parses platform wire events before calling `/chat`.
 2. Builds a complete `MessageEnvelope`.
-3. Removes platform transport syntax from `body_text`.
+3. Replaces visible platform mention syntax with readable mention tokens in
+   `body_text`.
 4. Preserves original text in `raw_wire_text`.
 5. Populates typed mentions and reply targets when available.
 6. Resolves the active bot mention to the active character global user id.
@@ -274,7 +297,8 @@ A runtime adapter:
 8. Sets inbound envelope `broadcast` to `False`.
 9. Normalizes attachments through registered `AttachmentHandler`
    implementations.
-10. Sends only the typed envelope and top-level `ChatRequest` fields to `/chat`.
+10. Removes non-mention platform transport syntax from `body_text`.
+11. Sends only the typed envelope and top-level `ChatRequest` fields to `/chat`.
 
 ## Brain Service Responsibilities
 
@@ -366,11 +390,12 @@ group message addressed to another resolved user
 
 group message with no typed direct target
   -> addressed_to_global_user_ids = []
-  -> broadcast = true
+  -> broadcast = false
 ```
 
 Adapters keep address derivation explainable and deterministic. If a platform
-event lacks a typed target, the adapter marks the message as broadcast.
+event lacks a typed target, the adapter leaves the inbound addressee list empty
+and keeps `broadcast=False`.
 
 ## Outbound Addressing Rules
 

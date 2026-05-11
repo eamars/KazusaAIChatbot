@@ -168,6 +168,14 @@ Purpose:
 Adapter responsibilities:
 
 - Send a valid typed `message_envelope`.
+- Represent visible platform mentions in `message_envelope.body_text` as
+  readable platform-neutral tokens such as `@display name`,
+  `#channel-name`, `@everyone`, or occurrence fallbacks such as
+  `@mentioned-user-1`.
+- Keep native platform mention syntax, such as CQ at codes and Discord
+  mention tags, only in `message_envelope.raw_wire_text`.
+- Keep raw platform ids out of `message_envelope.body_text`; typed mention
+  identity belongs in `message_envelope.mentions`.
 - Preserve the inbound platform message id when available.
 - Treat an empty `messages` list as no outbound send.
 - Honor `use_reply_feature` for the first outbound message when the platform
@@ -357,6 +365,9 @@ Runtime adapters own:
 - Platform event subscription and SDK/websocket lifecycle.
 - Platform-specific parsing and outgoing rendering.
 - Normalizing platform wire syntax into typed envelope fields.
+- Replacing only platform mention tokens with readable mention tokens before
+  `/chat`; adapters must not rewrite pronouns, aliases, or other authored
+  text semantically.
 - Calling `/chat` and rendering `ChatResponse.messages`.
 - Extracting durable outbound platform message ids after successful sends.
 - Posting `/delivery_receipt` when the adapter supports durable outbound ids.

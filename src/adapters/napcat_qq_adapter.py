@@ -3,6 +3,7 @@
 import argparse
 import asyncio
 import base64
+from collections import OrderedDict
 from datetime import datetime, timezone
 import json
 import logging
@@ -15,6 +16,7 @@ from typing import Optional
 import httpx
 import uvicorn
 import websockets
+from websockets.exceptions import WebSocketException
 from dotenv import load_dotenv
 from fastapi import FastAPI, Header, HTTPException
 from pydantic import BaseModel
@@ -23,7 +25,10 @@ from adapters.delivery_receipts import post_delivery_receipt
 from adapters.envelope_common import (
     addressed_to_from_envelope_parts,
     attachment_refs,
+    normalize_mention_display_map,
+    normalize_mention_display_label,
     normalize_body_spacing,
+    readable_mention_token,
     resolve_mentions,
 )
 from kazusa_ai_chatbot.config import CHARACTER_GLOBAL_USER_ID
@@ -52,6 +57,7 @@ _runtime_adapter: "NapCatWSAdapter | None" = None
 _CQ_REPLY_PATTERN = re.compile(r"\[CQ:reply,id=([^\],]+)[^\]]*\]")
 _CQ_AT_PATTERN = re.compile(r"\[CQ:at,qq=([^\],]+)[^\]]*\]")
 _CQ_ANY_PATTERN = re.compile(r"\[CQ:[^\]]+\]")
+_MENTION_DISPLAY_CACHE_LIMIT = 512
 
 
 def _outbound_message_payload(
@@ -103,22 +109,29 @@ class QQEnvelopeNormalizer:
             attachment_handlers: Registry used to normalize attachments.
 
         Returns:
-            Message envelope with QQ CQ/reply/mention markers removed from
-            `body_text`.
+            Message envelope with QQ mention markers represented as readable
+            tokens in `body_text`.
         """
 
         raw_wire_text = str(request.content or "")
         platform_bot_id = str(request.platform_bot_id)
         channel_type = str(request.channel_type)
         reply_context = dict(request.reply_context)
+        mention_display_names = normalize_mention_display_map(
+            getattr(request, "mention_display_names", {}),
+        )
 
-        raw_mentions = self._raw_mentions(raw_wire_text, platform_bot_id)
+        raw_mentions = self._raw_mentions(
+            raw_wire_text,
+            platform_bot_id,
+            mention_display_names,
+        )
         reply = self._reply_target(raw_wire_text, reply_context, platform_bot_id)
-
-        body_text = _CQ_REPLY_PATTERN.sub(" ", raw_wire_text)
-        body_text = _CQ_AT_PATTERN.sub(" ", body_text)
-        body_text = _CQ_ANY_PATTERN.sub(" ", body_text)
-        body_text = normalize_body_spacing(body_text)
+        body_text = self._body_text(
+            raw_wire_text,
+            platform_bot_id,
+            mention_display_names,
+        )
 
         mentions = resolve_mentions(raw_mentions, mention_resolver)
         addressed_to = addressed_to_from_envelope_parts(
@@ -139,27 +152,80 @@ class QQEnvelopeNormalizer:
 
         return envelope
 
+    def _body_text(
+        self,
+        raw_wire_text: str,
+        platform_bot_id: str,
+        display_names: dict[str, str],
+    ) -> str:
+        """Replace QQ mention wire markers with readable body tokens."""
+
+        occurrence_counts: dict[str, int] = {}
+
+        def replacement(match: re.Match[str]) -> str:
+            platform_user_id = match.group(1)
+            entity_kind = self._mention_entity_kind(
+                platform_user_id,
+                platform_bot_id,
+            )
+            fallback_kind = "user" if entity_kind == "bot" else entity_kind
+            occurrence_counts[fallback_kind] = (
+                occurrence_counts.get(fallback_kind, 0) + 1
+            )
+            token = readable_mention_token(
+                entity_kind=entity_kind,
+                display_name=display_names.get(platform_user_id, ""),
+                occurrence_index=occurrence_counts[fallback_kind],
+                raw_label=platform_user_id if entity_kind == "everyone" else "",
+            )
+            return_value = f" {token} "
+            return return_value
+
+        body_text = _CQ_REPLY_PATTERN.sub(" ", raw_wire_text)
+        body_text = _CQ_AT_PATTERN.sub(replacement, body_text)
+        body_text = _CQ_ANY_PATTERN.sub(" ", body_text)
+        body_text = normalize_body_spacing(body_text)
+        return body_text
+
     def _raw_mentions(
         self,
         raw_wire_text: str,
         platform_bot_id: str,
+        display_names: dict[str, str],
     ) -> list[RawMention]:
         """Extract QQ wire mention markers for bot/user addressing."""
 
         raw_mentions: list[RawMention] = []
         for match in _CQ_AT_PATTERN.finditer(raw_wire_text):
             platform_user_id = match.group(1)
-            entity_kind = "bot" if platform_user_id == platform_bot_id else "user"
-            if platform_user_id.lower() == "all":
-                entity_kind = "everyone"
+            entity_kind = self._mention_entity_kind(
+                platform_user_id,
+                platform_bot_id,
+            )
             raw_mentions.append({
                 "platform": "qq",
                 "platform_user_id": platform_user_id,
                 "entity_kind": entity_kind,
                 "raw_text": match.group(0),
+                "display_name": display_names.get(platform_user_id, ""),
             })
 
         return raw_mentions
+
+    def _mention_entity_kind(
+        self,
+        platform_user_id: str,
+        platform_bot_id: str,
+    ) -> str:
+        """Classify a QQ at target without interpreting message semantics."""
+
+        if platform_user_id.lower() == "all":
+            return_value = "everyone"
+        elif platform_user_id == platform_bot_id:
+            return_value = "bot"
+        else:
+            return_value = "user"
+        return return_value
 
     def _reply_target(
         self,
@@ -276,6 +342,9 @@ class NapCatWSAdapter:
         self._runtime_server: uvicorn.Server | None = None
         self._runtime_server_task: asyncio.Task | None = None
         self._heartbeat_task: asyncio.Task | None = None
+        self._mention_display_cache: OrderedDict[tuple[str, str], str] = (
+            OrderedDict()
+        )
 
         self.debug_modes = debug_modes or {}
         self._envelope_normalizer = QQEnvelopeNormalizer()
@@ -556,7 +625,7 @@ class NapCatWSAdapter:
 
         try:
             response = await self._call_api(ws, "get_msg", params)
-        except (asyncio.TimeoutError, websockets.exceptions.WebSocketException) as exc:
+        except (asyncio.TimeoutError, WebSocketException) as exc:
             logger.warning(f'Failed to resolve QQ reply target message_id={reply_to_message_id}: {exc}')
             return
 
@@ -570,6 +639,159 @@ class NapCatWSAdapter:
             return
 
         self._apply_replied_message_metadata(reply_context, message_data)
+
+    def _select_qq_display_name(self, source: dict) -> str:
+        """Choose the QQ label source that matches inbound sender naming."""
+
+        nickname = normalize_mention_display_label(source.get("nickname"))
+        if nickname:
+            return nickname
+
+        name = normalize_mention_display_label(source.get("name"))
+        if name:
+            return name
+
+        card = normalize_mention_display_label(source.get("card"))
+        return card
+
+    async def _lookup_qq_mention_display_name(
+        self,
+        *,
+        platform_user_id: str,
+        is_group: bool,
+        group_id: object,
+        ws: object,
+    ) -> str:
+        """Resolve one QQ mention label through a bounded NapCat lookup."""
+
+        user_param: int | str = platform_user_id
+        if platform_user_id.isdigit():
+            user_param = int(platform_user_id)
+
+        if is_group and group_id is not None:
+            group_param: int | str = str(group_id)
+            if group_param.isdigit():
+                group_param = int(group_param)
+            action = "get_group_member_info"
+            params: dict[str, int | str | bool] = {
+                "group_id": group_param,
+                "user_id": user_param,
+                "no_cache": False,
+            }
+        else:
+            action = "get_stranger_info"
+            params = {"user_id": user_param}
+
+        try:
+            response = await asyncio.wait_for(
+                self._call_api(ws, action, params),
+                timeout=1.0,
+            )
+        except (asyncio.TimeoutError, WebSocketException) as exc:
+            logger.warning(
+                f"QQ mention display lookup failed: "
+                f"user_id={platform_user_id} action={action} error={exc}"
+            )
+            return_value = ""
+            return return_value
+
+        if not isinstance(response, dict):
+            logger.warning(
+                f"QQ mention display lookup returned non-dict response: "
+                f"user_id={platform_user_id} action={action}"
+            )
+            return_value = ""
+            return return_value
+
+        if response.get("status") != "ok":
+            logger.warning(
+                f'QQ mention display lookup returned status={response.get("status")} '
+                f'user_id={platform_user_id} action={action} '
+                f'message={log_preview(response.get("message"))}'
+            )
+            return_value = ""
+            return return_value
+
+        response_data = response.get("data", {})
+        if not isinstance(response_data, dict):
+            logger.warning(
+                f"QQ mention display lookup returned non-dict data: "
+                f"user_id={platform_user_id} action={action}"
+            )
+            return_value = ""
+            return return_value
+
+        display_name = self._select_qq_display_name(response_data)
+        return display_name
+
+    def _cache_qq_mention_display_name(
+        self,
+        cache_key: tuple[str, str],
+        display_name: str,
+    ) -> None:
+        """Remember a positive QQ mention label with bounded LRU retention."""
+
+        label = normalize_mention_display_label(display_name)
+        if not label:
+            return
+
+        self._mention_display_cache[cache_key] = label
+        self._mention_display_cache.move_to_end(cache_key)
+        while len(self._mention_display_cache) > _MENTION_DISPLAY_CACHE_LIMIT:
+            self._mention_display_cache.popitem(last=False)
+
+    async def _hydrate_mention_display_names(
+        self,
+        *,
+        raw_wire_text: str,
+        initial_display_names: dict[str, str],
+        channel_id: str,
+        is_group: bool,
+        group_id: object,
+        ws: object,
+    ) -> dict[str, str]:
+        """Hydrate QQ mention labels before the envelope reaches the brain."""
+
+        display_names = dict(initial_display_names)
+        attempted_lookup_keys: set[tuple[str, str]] = set()
+        for match in _CQ_AT_PATTERN.finditer(raw_wire_text):
+            platform_user_id = match.group(1)
+            if platform_user_id.lower() == "all":
+                continue
+
+            if self.bot_id is not None and platform_user_id == self.bot_id:
+                bot_label = normalize_mention_display_label(self.bot_name)
+                if bot_label:
+                    display_names[platform_user_id] = bot_label
+                continue
+
+            cache_key = (channel_id, platform_user_id)
+            existing_label = display_names.get(platform_user_id, "")
+            if existing_label:
+                self._cache_qq_mention_display_name(cache_key, existing_label)
+                continue
+
+            cached_label = self._mention_display_cache.get(cache_key, "")
+            if cached_label:
+                self._mention_display_cache.move_to_end(cache_key)
+                display_names[platform_user_id] = cached_label
+                continue
+
+            if cache_key in attempted_lookup_keys:
+                continue
+            attempted_lookup_keys.add(cache_key)
+
+            lookup_label = await self._lookup_qq_mention_display_name(
+                platform_user_id=platform_user_id,
+                is_group=is_group,
+                group_id=group_id,
+                ws=ws,
+            )
+            if lookup_label:
+                display_names[platform_user_id] = lookup_label
+                self._cache_qq_mention_display_name(cache_key, lookup_label)
+
+        return display_names
 
     async def handle_event(self, data: dict, ws):
         """Normalize one NapCat event and forward message events to the brain.
@@ -588,12 +810,15 @@ class NapCatWSAdapter:
         user_id = str(data.get("user_id"))
         message_id = str(data.get("message_id", ""))
         group_id = data.get("group_id")
+        is_group = data.get("message_type") == "group"
+        channel_id = str(group_id) if is_group else user_id
 
         message_data = data.get("message", [])
         reply_context: dict[str, str] = {}
+        mention_display_names: dict[str, str] = {}
 
         # Preprocess QQ message into a platform-faithful wire form. The typed
-        # envelope normalizer below is the only layer that strips CQ markers.
+        # envelope normalizer below owns CQ marker handling for brain input.
         if isinstance(message_data, str):
             wire_content = message_data
             reply_match = re.search(r"\[CQ:reply,id=([^\],]+)[^\]]*\]", wire_content)
@@ -607,11 +832,17 @@ class NapCatWSAdapter:
                     continue
                 seg_type = seg.get("type")
                 seg_data = seg.get("data", {})
+                if not isinstance(seg_data, dict):
+                    seg_data = {}
                 if seg_type == "text":
                     wire_parts.append(seg_data.get("text", ""))
                 elif seg_type == "at":
                     qq = seg_data.get("qq")
-                    wire_parts.append(f"[CQ:at,qq={qq}]")
+                    platform_user_id = str(qq or "")
+                    label = self._select_qq_display_name(seg_data)
+                    if label:
+                        mention_display_names[platform_user_id] = label
+                    wire_parts.append(f"[CQ:at,qq={platform_user_id}]")
                 elif seg_type == "reply":
                     reply_context["reply_to_message_id"] = str(seg_data.get("id", ""))
                     reply_sender_id = seg_data.get("user_id")
@@ -635,11 +866,16 @@ class NapCatWSAdapter:
 
         wire_content = wire_content.strip()
         await self._hydrate_reply_context_from_platform(reply_context, ws)
+        mention_display_names = await self._hydrate_mention_display_names(
+            raw_wire_text=wire_content,
+            initial_display_names=mention_display_names,
+            channel_id=channel_id,
+            is_group=is_group,
+            group_id=group_id,
+            ws=ws,
+        )
         sender = data.get("sender", {})
         sender_name = sender.get("nickname", f"User {user_id}")
-
-        is_group = data.get("message_type") == "group"
-        channel_id = str(group_id) if is_group else user_id
 
         message_debug_modes = dict(self.debug_modes)
         is_active = (not is_group) or (self.channel_ids is not None and str(group_id) in self.channel_ids)
@@ -681,6 +917,7 @@ class NapCatWSAdapter:
             content=wire_content,
             platform_bot_id=self.bot_id,
             reply_context=reply_context,
+            mention_display_names=mention_display_names,
             attachments=attachments,
         )
         envelope = self._envelope_normalizer.normalize(
@@ -754,7 +991,7 @@ class NapCatWSAdapter:
                 )
             except (
                 asyncio.TimeoutError,
-                websockets.exceptions.WebSocketException,
+                WebSocketException,
             ) as exc:
                 logger.warning(
                     f"QQ send_msg failed: channel_id={channel_id} "
@@ -840,7 +1077,7 @@ class NapCatWSAdapter:
             response = await self._call_api(self._ws, "send_msg", params)
         except (
             asyncio.TimeoutError,
-            websockets.exceptions.WebSocketException,
+            WebSocketException,
         ) as exc:
             raise RuntimeError(f"NapCat send_msg failed: {exc}") from exc
 

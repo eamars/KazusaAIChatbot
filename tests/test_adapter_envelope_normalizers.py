@@ -13,8 +13,8 @@ from kazusa_ai_chatbot.message_envelope import (
 )
 
 
-def test_qq_normalizer_strips_cq_wire_markers_from_body_text() -> None:
-    """QQ normalizer should keep CQ metadata out of content text."""
+def test_qq_normalizer_rewrites_cq_mentions_as_readable_tokens() -> None:
+    """QQ normalizer should keep CQ syntax out while preserving mention labels."""
 
     handlers = build_default_attachment_handler_registry()
     request = SimpleNamespace(
@@ -22,9 +22,14 @@ def test_qq_normalizer_strips_cq_wire_markers_from_body_text() -> None:
         channel_type="group",
         content=(
             "[CQ:reply,id=1733223276]"
-            "[CQ:at,qq=3768713357] what are these [CQ:face,id=1]"
+            "[CQ:at,qq=3768713357] what are these "
+            "[CQ:at,qq=673225019][CQ:face,id=1]"
         ),
         platform_bot_id="3768713357",
+        mention_display_names={
+            "3768713357": "Kazusa",
+            "673225019": "Other User",
+        },
         reply_context={
             "reply_to_message_id": "1733223276",
             "reply_to_platform_user_id": "3768713357",
@@ -39,18 +44,46 @@ def test_qq_normalizer_strips_cq_wire_markers_from_body_text() -> None:
         handlers,
     )
 
-    assert envelope["body_text"] == "what are these"
+    assert envelope["body_text"] == "@Kazusa what are these @Other User"
     assert "<@3768713357>" not in envelope["body_text"]
     assert "[CQ:" not in envelope["body_text"]
     assert envelope["mentions"][0]["entity_kind"] == "bot"
     assert envelope["mentions"][0]["global_user_id"] == CHARACTER_GLOBAL_USER_ID
+    assert envelope["mentions"][0]["display_name"] == "Kazusa"
+    assert envelope["mentions"][1]["display_name"] == "Other User"
     assert envelope["reply"]["global_user_id"] == CHARACTER_GLOBAL_USER_ID
     assert envelope["reply"]["platform_message_id"] == "1733223276"
     assert envelope["addressed_to_global_user_ids"] == [CHARACTER_GLOBAL_USER_ID]
 
 
-def test_discord_normalizer_strips_tags_and_keeps_typed_mentions() -> None:
-    """Discord normalizer should strip platform tags from body text."""
+def test_qq_normalizer_uses_occurrence_label_without_display_name() -> None:
+    """QQ fallback labels should not leak platform IDs into body text."""
+
+    handlers = build_default_attachment_handler_registry()
+    request = SimpleNamespace(
+        platform="qq",
+        channel_type="group",
+        content="[CQ:at,qq=673225019] hello",
+        platform_bot_id="3768713357",
+        reply_context={},
+        attachments=[],
+    )
+
+    envelope = QQEnvelopeNormalizer().normalize(
+        request,
+        PassthroughMentionResolver(),
+        handlers,
+    )
+
+    assert envelope["body_text"] == "@mentioned-user-1 hello"
+    assert "673225019" not in envelope["body_text"]
+    assert "[CQ:" not in envelope["body_text"]
+    assert envelope["mentions"][0]["platform_user_id"] == "673225019"
+    assert envelope["mentions"][0]["display_name"] == ""
+
+
+def test_discord_normalizer_rewrites_tags_as_readable_tokens() -> None:
+    """Discord normalizer should keep tags out while preserving mention labels."""
 
     handlers = build_default_attachment_handler_registry()
     request = SimpleNamespace(
@@ -58,9 +91,12 @@ def test_discord_normalizer_strips_tags_and_keeps_typed_mentions() -> None:
         channel_type="group",
         content=(
             "<@12345> hello <@&777> <#888> "
-            "<:sparkle:999> @everyone"
+            "<:sparkle:999> @everyone @here"
         ),
         platform_bot_id="12345",
+        user_mention_display_names={"12345": "Character"},
+        role_mention_display_names={"777": "Regulars"},
+        channel_mention_display_names={"888": "general"},
         reply_context={},
         attachments=[],
     )
@@ -71,10 +107,11 @@ def test_discord_normalizer_strips_tags_and_keeps_typed_mentions() -> None:
         handlers,
     )
 
-    assert envelope["body_text"] == "hello"
+    assert envelope["body_text"] == "@Character hello @Regulars #general @everyone @here"
     assert "<@12345>" not in envelope["body_text"]
     assert "<#888>" not in envelope["body_text"]
     assert envelope["mentions"][0]["entity_kind"] == "bot"
+    assert envelope["mentions"][0]["display_name"] == "Character"
     assert {mention["entity_kind"] for mention in envelope["mentions"]} == {
         "bot",
         "platform_role",
