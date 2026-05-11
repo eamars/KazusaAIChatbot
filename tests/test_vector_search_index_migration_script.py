@@ -103,7 +103,11 @@ async def test_vector_search_index_apply_prepares_model_before_drop(
         "_find_search_index",
         AsyncMock(return_value={"name": "conversation_history_vector_index"}),
     )
-    monkeypatch.setattr(script_operations, "get_text_embedding", get_embedding)
+    monkeypatch.setattr(
+        script_operations,
+        "get_document_text_embedding",
+        get_embedding,
+    )
     monkeypatch.setattr(script_operations, "build_vector_search_index_model", build_model)
 
     await script_operations.apply_vector_search_index(
@@ -143,7 +147,7 @@ async def test_inspect_vector_search_index_reports_definition_mismatch(
     )
     monkeypatch.setattr(
         script_operations,
-        "get_text_embedding",
+        "get_document_text_embedding",
         AsyncMock(return_value=[0.1, 0.2, 0.3]),
     )
 

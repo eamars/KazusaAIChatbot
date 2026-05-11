@@ -180,6 +180,42 @@ helpers.
 Database package internals own backend handles, query/update documents,
 indexes, driver exceptions, and translation to public errors.
 
+## Embedding Role Contract
+
+The database package owns the distinction between query embeddings and document
+embeddings.
+
+A document embedding represents durable text stored for later retrieval. Current
+document rows include `conversation_history` messages, `memory` rows, and
+`user_memory_units` rows. Document text remains stored without embedding-model
+task prefixes; only the text sent to the embedding endpoint may be role-shaped.
+
+A query embedding represents the retrieval intent used to search stored
+documents. Current query text includes RAG conversation-search slots,
+shared-memory semantic search requests, scoped user-memory evidence requests,
+and semantic user-profile hydration requests.
+
+Callers must use role-specific helpers when intent matters:
+
+```python
+from kazusa_ai_chatbot.db import (
+    get_document_text_embedding,
+    get_query_text_embedding,
+)
+```
+
+Document write paths and re-embedding maintenance scripts use document-role
+helpers. Vector search paths use query-role helpers. The legacy
+`get_text_embedding(...)` and `get_text_embeddings_batch(...)` helpers remain
+available as document-role compatibility APIs; they must not be used for vector
+query generation.
+
+For `text-embedding-nomic-embed-text-v2-moe`, the embedding adapter applies the
+model's task-instruction prefixes inside `db._client`: query text is embedded as
+search intent, and document text is embedded as retrievable evidence. These
+prefixes are adapter implementation details, not durable database content and
+not prompt-facing text.
+
 ## Error Contract
 
 Public database helpers raise application-level exceptions when a backend

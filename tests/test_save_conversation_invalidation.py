@@ -17,7 +17,11 @@ async def test_save_conversation_invalidates_conversation_history_cache(monkeypa
     runtime.invalidate = AsyncMock(return_value=1)
 
     monkeypatch.setattr(conversation_module, "get_db", AsyncMock(return_value=db))
-    monkeypatch.setattr(conversation_module, "get_text_embedding", AsyncMock(return_value=[0.1, 0.2]))
+    monkeypatch.setattr(
+        conversation_module,
+        "get_document_text_embedding",
+        AsyncMock(return_value=[0.1, 0.2]),
+    )
     monkeypatch.setattr(
         "kazusa_ai_chatbot.rag.cache2_runtime.get_rag_cache2_runtime",
         MagicMock(return_value=runtime),

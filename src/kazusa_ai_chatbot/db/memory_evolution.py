@@ -6,7 +6,11 @@ from typing import Any
 
 from pymongo.errors import DuplicateKeyError
 
-from kazusa_ai_chatbot.db._client import get_db, get_text_embedding
+from kazusa_ai_chatbot.db._client import (
+    get_db,
+    get_document_text_embedding,
+    get_query_text_embedding,
+)
 from kazusa_ai_chatbot.memory_evolution.models import (
     EvolvingMemoryDoc,
     MemorySourceKind,
@@ -25,7 +29,7 @@ _LIFECYCLE_UPDATE_FIELDS = {
 
 
 async def compute_memory_embedding(text: str) -> list[float]:
-    """Compute an embedding through the configured embedding adapter.
+    """Compute a document-role embedding for stored memory text.
 
     Args:
         text: Semantic memory text.
@@ -33,7 +37,33 @@ async def compute_memory_embedding(text: str) -> list[float]:
     Returns:
         Embedding vector.
     """
-    embedding = await get_text_embedding(text)
+    embedding = await compute_memory_document_embedding(text)
+    return embedding
+
+
+async def compute_memory_query_embedding(text: str) -> list[float]:
+    """Compute a query-role embedding for semantic memory retrieval text.
+
+    Args:
+        text: Semantic search intent.
+
+    Returns:
+        Query embedding vector.
+    """
+    embedding = await get_query_text_embedding(text)
+    return embedding
+
+
+async def compute_memory_document_embedding(text: str) -> list[float]:
+    """Compute a document-role embedding for stored memory text.
+
+    Args:
+        text: Stored semantic memory text.
+
+    Returns:
+        Document embedding vector.
+    """
+    embedding = await get_document_text_embedding(text)
     return embedding
 
 

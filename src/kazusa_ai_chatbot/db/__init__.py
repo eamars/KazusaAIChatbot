@@ -25,6 +25,10 @@ from kazusa_ai_chatbot.config import AFFINITY_DEFAULT, AFFINITY_MAX, AFFINITY_MI
 from kazusa_ai_chatbot.db._client import (
     close_db,
     enable_vector_index,
+    get_document_text_embedding,
+    get_document_text_embeddings_batch,
+    get_query_text_embedding,
+    get_query_text_embeddings_batch,
     get_text_embedding,
     get_text_embeddings_batch,
 )
@@ -199,6 +203,8 @@ __all__ = [
     # Client
     "check_database_connection", "close_db", "DatabaseOperationError",
     "enable_vector_index",
+    "get_document_text_embedding", "get_document_text_embeddings_batch",
+    "get_query_text_embedding", "get_query_text_embeddings_batch",
     "get_text_embedding", "get_text_embeddings_batch",
     # Schemas
     "AttachmentDoc", "CharacterProfileDoc", "CharacterReflectionRunDoc",

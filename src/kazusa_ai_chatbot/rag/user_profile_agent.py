@@ -6,7 +6,7 @@ import json
 from typing import Any
 
 from kazusa_ai_chatbot.config import CHARACTER_GLOBAL_USER_ID
-from kazusa_ai_chatbot.db import get_character_profile, get_text_embedding
+from kazusa_ai_chatbot.db import get_character_profile, get_query_text_embedding
 from kazusa_ai_chatbot.rag.cache2_events import CacheDependency
 from kazusa_ai_chatbot.rag.cache2_policy import (
     USER_PROFILE_CACHE_NAME,
@@ -196,7 +196,7 @@ class UserProfileAgent(BaseRAGHelperAgent):
             dependencies = [CacheDependency(source="character_state")]
             metadata = {"profile_source": "character_state"}
         else:
-            input_embedding = await get_text_embedding(task)
+            input_embedding = await get_query_text_embedding(task)
             hydrated_profile, _ = await user_image_retriever_agent(
                 global_user_id,
                 user_profile=context.get("user_profile"),

@@ -60,7 +60,10 @@ def _document(content: str = "Stable content") -> dict:
     return return_value
 
 
-def _patch_repository(monkeypatch: pytest.MonkeyPatch, collection: _Collection) -> AsyncMock:
+def _patch_repository(
+    monkeypatch: pytest.MonkeyPatch,
+    collection: _Collection,
+) -> AsyncMock:
     embedding = AsyncMock(return_value=[0.1])
     runtime = MagicMock()
     runtime.invalidate = AsyncMock(return_value=0)
@@ -86,7 +89,7 @@ def _patch_repository(monkeypatch: pytest.MonkeyPatch, collection: _Collection) 
     )
     monkeypatch.setattr(
         repository_module.memory_store,
-        "compute_memory_embedding",
+        "compute_memory_document_embedding",
         embedding,
     )
     monkeypatch.setattr(

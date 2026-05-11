@@ -74,7 +74,7 @@ async def test_search_memory_vector_post_filters_active_rows(
     monkeypatch.setattr(db_memory_module, "get_db", AsyncMock(return_value=db))
     monkeypatch.setattr(
         db_memory_module,
-        "get_text_embedding",
+        "get_query_text_embedding",
         AsyncMock(return_value=[0.1, 0.2]),
     )
 
@@ -306,10 +306,11 @@ async def test_find_active_memory_units_returns_similarity_scores(
             },
         )
     ])
+    compute_memory_query_embedding = AsyncMock(return_value=[0.1, 0.2])
     monkeypatch.setattr(
         repository_module.memory_store,
-        "compute_memory_embedding",
-        AsyncMock(return_value=[0.1, 0.2]),
+        "compute_memory_query_embedding",
+        compute_memory_query_embedding,
     )
     monkeypatch.setattr(
         repository_module.memory_store,
@@ -331,7 +332,7 @@ async def test_find_active_memory_units_returns_similarity_scores(
             },
         )
     ]
-    repository_module.memory_store.compute_memory_embedding.assert_awaited_once_with(
+    compute_memory_query_embedding.assert_awaited_once_with(
         "near duplicate",
     )
     find_active_memory_documents.assert_awaited_once()

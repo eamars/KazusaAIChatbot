@@ -8,8 +8,9 @@ from typing import Any
 
 from kazusa_ai_chatbot.db._client import (
     build_vector_search_index_model,
+    get_document_text_embedding,
+    get_document_text_embeddings_batch,
     get_db,
-    get_text_embedding,
     vector_index_definition_issues,
     vector_index_missing_filter_paths,
 )
@@ -41,6 +42,11 @@ VECTOR_SEARCH_INDEX_CONFIGS = {
     }
 }
 VECTOR_INDEX_READY_STATUSES = {"READY", "STEADY", "QUERYABLE"}
+TEXT_VECTOR_REEMBEDDING_COLLECTIONS = (
+    "conversation_history",
+    "memory",
+    "user_memory_units",
+)
 
 
 def _vector_search_index_config(collection_name: str) -> dict[str, Any]:
@@ -91,7 +97,7 @@ async def inspect_vector_search_index(collection_name: str) -> dict[str, Any]:
         return result
 
     path = str(config["path"])
-    sample_embedding = await get_text_embedding("test")
+    sample_embedding = await get_document_text_embedding("test")
     definition_issues = vector_index_definition_issues(
         index_document,
         path=path,
@@ -170,7 +176,7 @@ async def apply_vector_search_index(
     )
     dropped_existing = existing_index is not None
 
-    sample_embedding = await get_text_embedding("test")
+    sample_embedding = await get_document_text_embedding("test")
     search_index_model = build_vector_search_index_model(
         index_name=index_name,
         path=path,
@@ -351,7 +357,7 @@ async def refresh_conversation_history_embeddings(
         if not isinstance(content, str) or not content.strip():
             failed += 1
             continue
-        embedding = await get_text_embedding(content)
+        embedding = await get_document_text_embedding(content)
         await collection.update_one(
             {"_id": doc["_id"]},
             {"$set": {"embedding": embedding}},
@@ -362,6 +368,149 @@ async def refresh_conversation_history_embeddings(
         "total_count": total_count,
         "processed": processed,
         "failed": failed,
+    }
+    return result
+
+
+def _reembedding_source_text(collection_name: str, row: Mapping[str, Any]) -> str:
+    """Build the stored-document source text for an approved collection."""
+
+    row_copy = dict(row)
+    if collection_name == "conversation_history":
+        source_text = _embedding_source_text(row_copy)
+    elif collection_name == "memory":
+        source_text = memory_embedding_source_text(row_copy)
+    elif collection_name == "user_memory_units":
+        source_text = _semantic_text(row_copy)
+    else:
+        raise ValueError(f"unsupported re-embedding collection: {collection_name}")
+    return source_text
+
+
+def _skipped_reembedding_row(row: Mapping[str, Any]) -> dict[str, str]:
+    """Build the operator report entry for a row with no source text."""
+
+    row_id = str(row.get("_id", ""))
+    skipped_row = {"row_id": row_id, "reason": "empty_source_text"}
+    return skipped_row
+
+
+async def _flush_reembedding_batch(
+    *,
+    collection: Any,
+    rows: list[Mapping[str, Any]],
+    source_texts: list[str],
+    apply: bool,
+) -> int:
+    """Embed and update one prepared batch of non-empty source rows."""
+
+    if not apply or not rows:
+        return_value = 0
+        return return_value
+
+    embeddings = await get_document_text_embeddings_batch(list(source_texts))
+    updated = 0
+    for row, embedding in zip(rows, embeddings, strict=True):
+        await collection.update_one(
+            {"_id": row["_id"]},
+            {"$set": {DERIVED_EMBEDDING_FIELD: embedding}},
+        )
+        updated += 1
+    return updated
+
+
+async def reembed_text_vector_collection(
+    *,
+    collection_name: str,
+    batch_size: int,
+    apply: bool,
+) -> dict[str, Any]:
+    """Dry-run or apply document-role embeddings for one approved collection."""
+
+    if collection_name not in TEXT_VECTOR_REEMBEDDING_COLLECTIONS:
+        raise ValueError(f"unsupported re-embedding collection: {collection_name}")
+
+    db = await get_db()
+    collection = db[collection_name]
+    query: dict[str, Any] = {}
+    total_count = await collection.count_documents(query)
+    processed = 0
+    skipped_rows: list[dict[str, str]] = []
+    updated = 0
+    cleared = 0
+    pending_rows: list[Mapping[str, Any]] = []
+    pending_texts: list[str] = []
+    cursor = collection.find(query).batch_size(batch_size)
+    async for row in cursor:
+        source_text = _reembedding_source_text(collection_name, row).strip()
+        if not source_text:
+            skipped_rows.append(_skipped_reembedding_row(row))
+            if apply:
+                await collection.update_one(
+                    {"_id": row["_id"]},
+                    {"$unset": {DERIVED_EMBEDDING_FIELD: ""}},
+                )
+                cleared += 1
+            continue
+
+        processed += 1
+        pending_rows.append(dict(row))
+        pending_texts.append(source_text)
+        if len(pending_rows) >= batch_size:
+            updated += await _flush_reembedding_batch(
+                collection=collection,
+                rows=pending_rows,
+                source_texts=pending_texts,
+                apply=apply,
+            )
+            pending_rows = []
+            pending_texts = []
+
+    updated += await _flush_reembedding_batch(
+        collection=collection,
+        rows=pending_rows,
+        source_texts=pending_texts,
+        apply=apply,
+    )
+
+    result = {
+        "collection": collection_name,
+        "total_count": total_count,
+        "processed": processed,
+        "skipped": len(skipped_rows),
+        "updated": updated,
+        "cleared": cleared,
+        "skipped_rows": skipped_rows,
+    }
+    return result
+
+
+async def reembed_text_vector_embeddings(
+    *,
+    collection_names: Sequence[str],
+    batch_size: int,
+    apply: bool,
+) -> dict[str, Any]:
+    """Dry-run or apply document-role re-embedding for approved collections."""
+
+    collection_results: list[dict[str, Any]] = []
+    for collection_name in collection_names:
+        collection_result = await reembed_text_vector_collection(
+            collection_name=collection_name,
+            batch_size=batch_size,
+            apply=apply,
+        )
+        collection_results.append(collection_result)
+
+    result = {
+        "apply": apply,
+        "batch_size": batch_size,
+        "collections": collection_results,
+        "total_count": sum(row["total_count"] for row in collection_results),
+        "total_processed": sum(row["processed"] for row in collection_results),
+        "total_skipped": sum(row["skipped"] for row in collection_results),
+        "total_updated": sum(row["updated"] for row in collection_results),
+        "total_cleared": sum(row["cleared"] for row in collection_results),
     }
     return result
 
@@ -514,7 +663,9 @@ async def recalculate_user_state_embeddings(
             embedding_text = memory_embedding_source_text(row)
         else:
             embedding_text = _semantic_text(row)
-        row[DERIVED_EMBEDDING_FIELD] = await get_text_embedding(embedding_text)
+        row[DERIVED_EMBEDDING_FIELD] = await get_document_text_embedding(
+            embedding_text
+        )
     return restored_rows
 
 

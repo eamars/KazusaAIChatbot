@@ -37,6 +37,9 @@ _embed_client: AsyncOpenAI | None = None
 _embed_client_loop: asyncio.AbstractEventLoop | None = None
 _EMBEDDING_REQUEST_SEMAPHORE = asyncio.Semaphore(10)
 _EMBEDDING_BATCH_SIZE = 10
+_NOMIC_EMBED_TEXT_V2_MOE_MODEL_FRAGMENT = "nomic-embed-text-v2-moe"
+_NOMIC_QUERY_PREFIX = "search_query: "
+_NOMIC_DOCUMENT_PREFIX = "search_document: "
 
 
 def _get_embed_client() -> AsyncOpenAI:
@@ -52,35 +55,42 @@ def _get_embed_client() -> AsyncOpenAI:
     return _embed_client
 
 
-async def get_text_embedding(text: str) -> list[float]:
-    """Compute an embedding vector for a single text string.
+def _embedding_model_uses_nomic_prefixes() -> bool:
+    """Return whether the configured embedding model needs Nomic role prefixes."""
 
-    Args:
-        text: Source text. Empty strings are accepted by the embedding API
-            and return a valid (zero-information) vector.
-
-    Returns:
-        The embedding as a list of floats.
-    """
-    client = _get_embed_client()
-    async with _EMBEDDING_REQUEST_SEMAPHORE:
-        resp = await client.embeddings.create(input=[text], model=EMBEDDING_MODEL)
-    return resp.data[0].embedding
+    model_name = EMBEDDING_MODEL.lower()
+    uses_prefixes = _NOMIC_EMBED_TEXT_V2_MOE_MODEL_FRAGMENT in model_name
+    return uses_prefixes
 
 
-async def get_text_embeddings_batch(texts: list[str]) -> list[list[float]]:
-    """Compute embedding vectors for multiple texts in a single API call.
+def _apply_embedding_role_prefix(text: str, prefix: str) -> str:
+    """Prepend a Nomic role prefix to raw source text."""
 
-    Args:
-        texts: List of source texts. The OpenAI embeddings endpoint accepts
-            up to ~2048 inputs per request (model-dependent).
+    prefixed_text = f"{prefix}{text}"
+    return prefixed_text
 
-    Returns:
-        List of embedding vectors, one per input text, in the same order.
-    """
-    if not texts:
-        return_value = []
+
+def _embedding_texts_for_role(texts: list[str], prefix: str) -> list[str]:
+    """Return effective embedding endpoint inputs for one semantic role."""
+
+    if not _embedding_model_uses_nomic_prefixes():
+        return_value = list(texts)
         return return_value
+
+    return_value = [
+        _apply_embedding_role_prefix(text, prefix)
+        for text in texts
+    ]
+    return return_value
+
+
+async def _request_text_embeddings(texts: list[str]) -> list[list[float]]:
+    """Call the embedding endpoint for already-prepared input text."""
+
+    if not texts:
+        return_value: list[list[float]] = []
+        return return_value
+
     client = _get_embed_client()
     all_embeddings: list[list[float]] = []
     for start in range(0, len(texts), _EMBEDDING_BATCH_SIZE):
@@ -90,6 +100,89 @@ async def get_text_embeddings_batch(texts: list[str]) -> list[list[float]]:
         sorted_data = sorted(resp.data, key=lambda d: d.index)
         all_embeddings.extend(d.embedding for d in sorted_data)
     return all_embeddings
+
+
+async def get_query_text_embedding(text: str) -> list[float]:
+    """Compute a query-role embedding for vector retrieval text.
+
+    Args:
+        text: Search intent text.
+
+    Returns:
+        Query embedding vector.
+    """
+    embeddings = await get_query_text_embeddings_batch([text])
+    return_value = embeddings[0]
+    return return_value
+
+
+async def get_query_text_embeddings_batch(texts: list[str]) -> list[list[float]]:
+    """Compute query-role embeddings for multiple retrieval texts.
+
+    Args:
+        texts: Search intent texts.
+
+    Returns:
+        Query embedding vectors in input order.
+    """
+    effective_texts = _embedding_texts_for_role(texts, _NOMIC_QUERY_PREFIX)
+    embeddings = await _request_text_embeddings(effective_texts)
+    return embeddings
+
+
+async def get_document_text_embedding(text: str) -> list[float]:
+    """Compute a document-role embedding for stored retrievable text.
+
+    Args:
+        text: Stored source text.
+
+    Returns:
+        Document embedding vector.
+    """
+    embeddings = await get_document_text_embeddings_batch([text])
+    return_value = embeddings[0]
+    return return_value
+
+
+async def get_document_text_embeddings_batch(texts: list[str]) -> list[list[float]]:
+    """Compute document-role embeddings for multiple stored source texts.
+
+    Args:
+        texts: Stored source texts.
+
+    Returns:
+        Document embedding vectors in input order.
+    """
+    effective_texts = _embedding_texts_for_role(texts, _NOMIC_DOCUMENT_PREFIX)
+    embeddings = await _request_text_embeddings(effective_texts)
+    return embeddings
+
+
+async def get_text_embedding(text: str) -> list[float]:
+    """Compute a document-role embedding vector for a single text string.
+
+    Args:
+        text: Source text. Empty strings are accepted by the embedding API
+            and return a valid vector.
+
+    Returns:
+        The document embedding as a list of floats.
+    """
+    embedding = await get_document_text_embedding(text)
+    return embedding
+
+
+async def get_text_embeddings_batch(texts: list[str]) -> list[list[float]]:
+    """Compute document-role embedding vectors for multiple texts.
+
+    Args:
+        texts: Stored source texts.
+
+    Returns:
+        List of document embedding vectors in the same order.
+    """
+    embeddings = await get_document_text_embeddings_batch(texts)
+    return embeddings
 
 
 # ── MongoDB client (lazy) ──────────────────────────────────────────
@@ -378,7 +471,7 @@ async def enable_vector_index(
 
     logger.info(f'Vector search index \'{index_name}\' not found. Creating...')
 
-    sample_embedding = await get_text_embedding("test")
+    sample_embedding = await get_document_text_embedding("test")
     num_dimensions = len(sample_embedding)
 
     search_index_model = build_vector_search_index_model(
@@ -390,7 +483,10 @@ async def enable_vector_index(
 
     try:
         await collection.create_search_index(search_index_model)
-        logger.info(f'Successfully created vector search index \'{index_name}\' on {collection_name}.{path} with {num_dimensions} dimensions.')
+        logger.info(
+            f"Successfully created vector search index {index_name!r} on "
+            f"{collection_name}.{path} with {num_dimensions} dimensions."
+        )
     except Exception as exc:
         logger.exception(
             f"Failed to create vector search index {index_name!r}: {exc}"

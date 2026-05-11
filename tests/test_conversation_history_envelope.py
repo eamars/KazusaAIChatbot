@@ -20,10 +20,14 @@ async def test_save_conversation_writes_typed_fields_and_embedding_source(
     db.conversation_history.insert_one = AsyncMock()
     runtime = MagicMock()
     runtime.invalidate = AsyncMock(return_value=0)
-    get_text_embedding = AsyncMock(return_value=[0.1, 0.2])
+    get_document_text_embedding = AsyncMock(return_value=[0.1, 0.2])
 
     monkeypatch.setattr(conversation_module, "get_db", AsyncMock(return_value=db))
-    monkeypatch.setattr(conversation_module, "get_text_embedding", get_text_embedding)
+    monkeypatch.setattr(
+        conversation_module,
+        "get_document_text_embedding",
+        get_document_text_embedding,
+    )
     monkeypatch.setattr(
         conversation_module,
         "SAVE_ATTACHMENT_BASE64_TO_DB",
@@ -68,7 +72,7 @@ async def test_save_conversation_writes_typed_fields_and_embedding_source(
     })
 
     saved_doc = db.conversation_history.insert_one.await_args.args[0]
-    get_text_embedding.assert_awaited_once_with(
+    get_document_text_embedding.assert_awaited_once_with(
         "clean body\nsmall image\nlarge image"
     )
     assert saved_doc["body_text"] == "clean body"
@@ -93,10 +97,14 @@ async def test_save_conversation_can_store_inline_base64_when_configured(
     db.conversation_history.insert_one = AsyncMock()
     runtime = MagicMock()
     runtime.invalidate = AsyncMock(return_value=0)
-    get_text_embedding = AsyncMock(return_value=[0.1, 0.2])
+    get_document_text_embedding = AsyncMock(return_value=[0.1, 0.2])
 
     monkeypatch.setattr(conversation_module, "get_db", AsyncMock(return_value=db))
-    monkeypatch.setattr(conversation_module, "get_text_embedding", get_text_embedding)
+    monkeypatch.setattr(
+        conversation_module,
+        "get_document_text_embedding",
+        get_document_text_embedding,
+    )
     monkeypatch.setattr(
         conversation_module,
         "SAVE_ATTACHMENT_BASE64_TO_DB",
@@ -194,6 +202,51 @@ async def test_keyword_search_uses_body_text_filter(
 
 
 @pytest.mark.asyncio
+async def test_vector_search_uses_query_embedding_helper(monkeypatch) -> None:
+    """Conversation semantic search should use query-role embeddings."""
+
+    db = MagicMock()
+    cursor = AsyncMock()
+    cursor.to_list = AsyncMock(return_value=[{
+        "body_text": "vector row",
+        "score": 0.9,
+    }])
+    db.conversation_history.aggregate = MagicMock(return_value=cursor)
+    get_query_text_embedding = AsyncMock(return_value=[0.7, 0.8])
+    get_document_text_embedding = AsyncMock(
+        side_effect=AssertionError("document embedding helper should not run")
+    )
+
+    monkeypatch.setattr(conversation_module, "get_db", AsyncMock(return_value=db))
+    monkeypatch.setattr(
+        conversation_module,
+        "get_query_text_embedding",
+        get_query_text_embedding,
+    )
+    monkeypatch.setattr(
+        conversation_module,
+        "get_document_text_embedding",
+        get_document_text_embedding,
+    )
+    monkeypatch.setattr(
+        conversation_module,
+        "_conversation_vector_prefilter_supported",
+        AsyncMock(return_value=False),
+    )
+
+    await conversation_module.search_conversation_history(
+        "semantic query",
+        method="vector",
+        limit=2,
+    )
+
+    pipeline = db.conversation_history.aggregate.call_args.args[0]
+    get_query_text_embedding.assert_awaited_once_with("semantic query")
+    get_document_text_embedding.assert_not_awaited()
+    assert pipeline[0]["$vectorSearch"]["queryVector"] == [0.7, 0.8]
+
+
+@pytest.mark.asyncio
 async def test_update_attachment_descriptions_targets_current_row(monkeypatch) -> None:
     """Generated media descriptions should update only the current message row."""
 
@@ -212,10 +265,14 @@ async def test_update_attachment_descriptions_targets_current_row(monkeypatch) -
     update_result = MagicMock()
     update_result.modified_count = 1
     db.conversation_history.update_one = AsyncMock(return_value=update_result)
-    get_text_embedding = AsyncMock(return_value=[0.5, 0.6])
+    get_document_text_embedding = AsyncMock(return_value=[0.5, 0.6])
 
     monkeypatch.setattr(conversation_module, "get_db", AsyncMock(return_value=db))
-    monkeypatch.setattr(conversation_module, "get_text_embedding", get_text_embedding)
+    monkeypatch.setattr(
+        conversation_module,
+        "get_document_text_embedding",
+        get_document_text_embedding,
+    )
 
     updated = await conversation_module.update_conversation_attachment_descriptions(
         platform="qq",
@@ -225,7 +282,7 @@ async def test_update_attachment_descriptions_targets_current_row(monkeypatch) -
     )
 
     assert updated is True
-    get_text_embedding.assert_awaited_once_with("look\nimage description")
+    get_document_text_embedding.assert_awaited_once_with("look\nimage description")
     query = db.conversation_history.update_one.await_args.args[0]
     update_doc = db.conversation_history.update_one.await_args.args[1]
     assert query == {

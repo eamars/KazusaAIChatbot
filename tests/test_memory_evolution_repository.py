@@ -52,7 +52,11 @@ class _MemoryCollection:
         return_value = SimpleNamespace(matched_count=1)
         return return_value
 
-    async def update_many_fields(self, memory_unit_ids: list[str], fields: dict) -> SimpleNamespace:
+    async def update_many_fields(
+        self,
+        memory_unit_ids: list[str],
+        fields: dict,
+    ) -> SimpleNamespace:
         """Apply field updates to many documents."""
         ids = set(memory_unit_ids)
         modified = 0
@@ -72,7 +76,7 @@ def _patch_repository(
     runtime.invalidate = AsyncMock(return_value=1)
     monkeypatch.setattr(
         repository_module.memory_store,
-        "compute_memory_embedding",
+        "compute_memory_document_embedding",
         AsyncMock(return_value=[0.1, 0.2]),
     )
     monkeypatch.setattr(
@@ -199,7 +203,8 @@ async def test_insert_memory_unit_fails_when_reset_or_write_lock_is_held(
             document=_document("unit-1"),
         )
 
-    repository_module.memory_store.compute_memory_embedding.assert_not_awaited()
+    embedding_mock = repository_module.memory_store.compute_memory_document_embedding
+    embedding_mock.assert_not_awaited()
     repository_module.memory_store.insert_memory_unit_document.assert_not_awaited()
     repository_module.memory_store.release_memory_write_lock.assert_not_awaited()
 

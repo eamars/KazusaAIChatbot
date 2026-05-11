@@ -11,9 +11,10 @@ from kazusa_ai_chatbot.config import (
     SAVE_ATTACHMENT_BASE64_TO_DB,
 )
 from kazusa_ai_chatbot.db._client import (
+    get_document_text_embedding,
     get_db,
+    get_query_text_embedding,
     get_search_index_definition,
-    get_text_embedding,
     vector_index_has_filter_paths,
 )
 from kazusa_ai_chatbot.db.schemas import ConversationMessageDoc
@@ -328,7 +329,7 @@ async def search_conversation_history(
         return return_value
 
     # method == "vector"
-    query_embedding = await get_text_embedding(query)
+    query_embedding = await get_query_text_embedding(query)
     index_name = CONVERSATION_VECTOR_INDEX_NAME
     match_filter = _conversation_search_filter(
         platform=platform,
@@ -490,7 +491,9 @@ async def save_conversation(doc: ConversationMessageDoc) -> str:
     doc["attachments"] = _safe_attachment_docs(doc["attachments"])
 
     if "embedding" not in doc or not doc.get("embedding"):
-        doc["embedding"] = await get_text_embedding(_embedding_source_text(doc))
+        doc["embedding"] = await get_document_text_embedding(
+            _embedding_source_text(doc)
+        )
 
     insert_result = await db.conversation_history.insert_one(doc)
     inserted_id_str = str(insert_result.inserted_id)
@@ -639,7 +642,9 @@ async def update_conversation_attachment_descriptions(
     )
     updated_row: ConversationMessageDoc = dict(row)
     updated_row["attachments"] = attachments
-    embedding = await get_text_embedding(_embedding_source_text(updated_row))
+    embedding = await get_document_text_embedding(
+        _embedding_source_text(updated_row)
+    )
     result = await db.conversation_history.update_one(
         query,
         {"$set": {"attachments": attachments, "embedding": embedding}},

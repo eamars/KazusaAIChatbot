@@ -38,13 +38,13 @@ long_term/todo.md
 
 | Plan | Status | Execution |
 |---|---|---|
+| [qq_adapter_readable_mentions_plan.md](active/short_term/qq_adapter_readable_mentions_plan.md) | approved | ready |
 | [self_cognition_agency_loop_plan.md](active/short_term/self_cognition_agency_loop_plan.md) | draft | deferred |
 
 ## Active Bugfix Plans
 
 | Plan | Status | Execution |
 |---|---|---|
-| [rag_retrieval_top_k_embedding_tuning_plan.md](active/bugfix/rag_retrieval_top_k_embedding_tuning_plan.md) | approved | ready |
 
 ## Reference Documents
 
@@ -85,6 +85,7 @@ plans.
 | [conversation_progress_identity_leakage_bugfix_plan.md](archive/completed/bugfix/conversation_progress_identity_leakage_bugfix_plan.md) |
 | [l3_content_anchor_open_loop_resolution_plan.md](archive/completed/bugfix/l3_content_anchor_open_loop_resolution_plan.md) |
 | [rag_active_turn_conversation_row_exclusion_plan.md](archive/completed/bugfix/rag_active_turn_conversation_row_exclusion_plan.md) |
+| [rag_retrieval_top_k_embedding_tuning_plan.md](archive/completed/bugfix/rag_retrieval_top_k_embedding_tuning_plan.md) |
 | [temporal_grounding_rag_episode_state_plan.md](archive/completed/bugfix/temporal_grounding_rag_episode_state_plan.md) |
 
 ### Completed Short-Term Records

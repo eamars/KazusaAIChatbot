@@ -9,7 +9,7 @@ from uuid import uuid4
 
 from pymongo.errors import PyMongoError
 
-from kazusa_ai_chatbot.db._client import get_db, get_text_embedding
+from kazusa_ai_chatbot.db._client import get_db, get_document_text_embedding
 from kazusa_ai_chatbot.db.schemas import (
     UserMemoryUnitDoc,
     UserMemoryUnitStatus,
@@ -153,7 +153,9 @@ async def insert_user_memory_units(
 
     if include_embeddings:
         for doc in docs:
-            doc["embedding"] = await get_text_embedding(_semantic_text(doc))
+            doc["embedding"] = await get_document_text_embedding(
+                _semantic_text(doc)
+            )
 
     db = await get_db()
     await db.user_memory_units.insert_many(docs)
@@ -340,7 +342,9 @@ async def update_user_memory_unit_semantics(
         "relationship_signal": text_or_empty(updated_unit["relationship_signal"]),
         "last_seen_at": write_time,
         "updated_at": write_time,
-        "embedding": await get_text_embedding(_semantic_text(updated_unit)),
+        "embedding": await get_document_text_embedding(
+            _semantic_text(updated_unit)
+        ),
     }
     if lifecycle_fields:
         for field in ("due_at", "completed_at", "cancelled_at"):

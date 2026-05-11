@@ -273,7 +273,7 @@ async def test_restore_user_state_replaces_scoped_documents_and_alias_refs(
     ]
     monkeypatch.setattr(
         script_operations,
-        "get_text_embedding",
+        "get_document_text_embedding",
         AsyncMock(return_value=[0.5, 0.25]),
     )
     payload = snapshot_module.build_snapshot_payload(

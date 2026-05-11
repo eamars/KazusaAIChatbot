@@ -128,12 +128,24 @@ def _patched_get_db(db):
 
 @contextmanager
 def _patched_embedding(return_value=None, mock=None):
-    """Patch every embedding binding used by DB helpers under test."""
+    """Patch document embedding bindings used by DB helpers under test."""
     mock_embed = mock or AsyncMock(return_value=return_value)
     with patch.object(db_module, "get_text_embedding", mock_embed), \
+         patch.object(db_module, "get_document_text_embedding", mock_embed), \
          patch.object(db_client_module, "get_text_embedding", mock_embed), \
-         patch.object(db_conversation_module, "get_text_embedding", mock_embed), \
-         patch.object(db_memory_module, "get_text_embedding", mock_embed):
+         patch.object(db_client_module, "get_document_text_embedding", mock_embed), \
+         patch.object(db_conversation_module, "get_document_text_embedding", mock_embed):
+        yield mock_embed
+
+
+@contextmanager
+def _patched_query_embedding(return_value=None, mock=None):
+    """Patch every query embedding binding used by vector search helpers."""
+    mock_embed = mock or AsyncMock(return_value=return_value)
+    with patch.object(db_module, "get_query_text_embedding", mock_embed), \
+         patch.object(db_client_module, "get_query_text_embedding", mock_embed), \
+         patch.object(db_conversation_module, "get_query_text_embedding", mock_embed), \
+         patch.object(db_memory_module, "get_query_text_embedding", mock_embed):
         yield mock_embed
 
 
@@ -1130,7 +1142,7 @@ async def test_search_memory_vector():
     ])
     db.memory.aggregate = MagicMock(return_value=cursor)
 
-    with _patched_get_db(db), _patched_embedding(return_value=[0.1, 0.2]):
+    with _patched_get_db(db), _patched_query_embedding(return_value=[0.1, 0.2]):
         results = await search_memory("test query", method="vector", limit=3)
 
     assert len(results) == 1
@@ -1494,7 +1506,9 @@ async def test_search_conversation_history_vector_mocked(
         raising=False,
     )
 
-    with _patched_get_db(db), _patched_embedding(return_value=[0.1, 0.2, 0.3]):
+    with _patched_get_db(db), _patched_query_embedding(
+        return_value=[0.1, 0.2, 0.3],
+    ):
         results = await db_module.search_conversation_history("test query", method="vector", limit=2)
 
     assert len(results) == 1
@@ -1525,7 +1539,9 @@ async def test_search_conversation_history_vector_with_filters_mocked(
         raising=False,
     )
 
-    with _patched_get_db(db), _patched_embedding(return_value=[0.1, 0.2, 0.3]):
+    with _patched_get_db(db), _patched_query_embedding(
+        return_value=[0.1, 0.2, 0.3],
+    ):
         await db_module.search_conversation_history(
             "test", method="vector", platform_channel_id="ch1", global_user_id="u1", limit=3
         )
@@ -1556,7 +1572,9 @@ async def test_search_conversation_history_vector_uses_prefilter_when_supported(
         raising=False,
     )
 
-    with _patched_get_db(db), _patched_embedding(return_value=[0.1, 0.2, 0.3]):
+    with _patched_get_db(db), _patched_query_embedding(
+        return_value=[0.1, 0.2, 0.3],
+    ):
         await db_module.search_conversation_history(
             "test",
             method="vector",
@@ -1599,7 +1617,9 @@ async def test_search_conversation_history_vector_post_filters_when_prefilter_no
         raising=False,
     )
 
-    with _patched_get_db(db), _patched_embedding(return_value=[0.1, 0.2, 0.3]):
+    with _patched_get_db(db), _patched_query_embedding(
+        return_value=[0.1, 0.2, 0.3],
+    ):
         await db_module.search_conversation_history(
             "test",
             method="vector",

@@ -76,7 +76,9 @@ async def test_user_profile_agent_reads_character_profile_for_character_gid(monk
             },
         }
     )
-    get_text_embedding = AsyncMock(side_effect=AssertionError("embedding should not run"))
+    get_query_text_embedding = AsyncMock(
+        side_effect=AssertionError("embedding should not run")
+    )
     user_image_retriever_agent = AsyncMock(
         side_effect=AssertionError("user-image retriever should not run")
     )
@@ -85,8 +87,8 @@ async def test_user_profile_agent_reads_character_profile_for_character_gid(monk
         get_character_profile,
     )
     monkeypatch.setattr(
-        "kazusa_ai_chatbot.rag.user_profile_agent.get_text_embedding",
-        get_text_embedding,
+        "kazusa_ai_chatbot.rag.user_profile_agent.get_query_text_embedding",
+        get_query_text_embedding,
     )
     monkeypatch.setattr(
         "kazusa_ai_chatbot.rag.user_profile_agent.user_image_retriever_agent",
@@ -193,3 +195,44 @@ async def test_user_profile_agent_ignores_stale_user_profile_cache_for_character
     assert result["cache"]["hit"] is False
     assert result["result"] == {"name": "Kazusa"}
     get_character_profile.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_user_profile_agent_uses_query_embedding_for_user_hydration(
+    monkeypatch,
+) -> None:
+    """Semantic user-profile hydration should use query-role embeddings."""
+
+    get_query_text_embedding = AsyncMock(return_value=[0.3, 0.4])
+    user_image_retriever_agent = AsyncMock(return_value=({"name": "User"}, []))
+    monkeypatch.setattr(
+        "kazusa_ai_chatbot.rag.user_profile_agent.get_query_text_embedding",
+        get_query_text_embedding,
+    )
+    monkeypatch.setattr(
+        "kazusa_ai_chatbot.rag.user_profile_agent.user_image_retriever_agent",
+        user_image_retriever_agent,
+    )
+
+    agent = UserProfileAgent(cache_runtime=RAGCache2Runtime(max_entries=10))
+    result = await agent.run(
+        task="retrieve profile context",
+        context={
+            "known_facts": [
+                {
+                    "raw_result": {
+                        "global_user_id": "user-1",
+                        "display_name": "User",
+                    }
+                }
+            ]
+        },
+    )
+
+    assert result["resolved"] is True
+    get_query_text_embedding.assert_awaited_once_with("retrieve profile context")
+    user_image_retriever_agent.assert_awaited_once()
+    assert user_image_retriever_agent.await_args.kwargs["input_embedding"] == [
+        0.3,
+        0.4,
+    ]

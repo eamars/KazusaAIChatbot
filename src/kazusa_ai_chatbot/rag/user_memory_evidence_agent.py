@@ -9,7 +9,7 @@ from typing import Any
 from openai import OpenAIError
 
 from kazusa_ai_chatbot.db import (
-    get_text_embedding,
+    get_query_text_embedding,
     query_user_memory_units,
     search_user_memory_units_by_keyword,
     search_user_memory_units_by_vector,
@@ -240,7 +240,7 @@ class UserMemoryEvidenceAgent(BaseRAGHelperAgent):
         if not rows and not literal_terms:
             query_embedding: list[float] | None = None
             try:
-                query_embedding = await get_text_embedding(task_body)
+                query_embedding = await get_query_text_embedding(task_body)
             except OpenAIError as exc:
                 logger.info(
                     f"{_AGENT_NAME} embedding unavailable; "

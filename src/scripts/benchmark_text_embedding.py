@@ -15,7 +15,12 @@ import statistics
 import time
 
 from kazusa_ai_chatbot.config import EMBEDDING_BASE_URL, EMBEDDING_MODEL
-from kazusa_ai_chatbot.db import get_text_embedding, get_text_embeddings_batch
+from kazusa_ai_chatbot.db import (
+    get_document_text_embedding,
+    get_document_text_embeddings_batch,
+    get_query_text_embedding,
+    get_query_text_embeddings_batch,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -53,16 +58,23 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="After all single-query timings, run one batch timing over the same queries.",
     )
+    parser.add_argument(
+        "--role",
+        choices=("query", "document"),
+        default="query",
+        help="Embedding role to benchmark.",
+    )
     return_value = parser.parse_args()
     return return_value
 
 
-async def benchmark_single_query(query: str, repeat: int) -> dict:
+async def benchmark_single_query(query: str, repeat: int, role: str) -> dict:
     """Measure embedding latency for a single query across repeated runs.
 
     Args:
         query: Text to embed.
         repeat: Number of sequential single-query requests to run.
+        role: Embedding role to benchmark.
 
     Returns:
         Summary dict containing the query text, embedding dimension, per-run
@@ -73,14 +85,21 @@ async def benchmark_single_query(query: str, repeat: int) -> dict:
 
     for attempt in range(1, repeat + 1):
         start = time.perf_counter()
-        embedding = await get_text_embedding(query)
+        if role == "document":
+            embedding = await get_document_text_embedding(query)
+        else:
+            embedding = await get_query_text_embedding(query)
         elapsed = time.perf_counter() - start
         embedding_dim = len(embedding)
         timings.append(elapsed)
-        logger.info(f'single query attempt={attempt} query={query!r} elapsed_seconds={elapsed:.3f} embedding_dim={embedding_dim}')
+        logger.info(
+            f"single query attempt={attempt} query={query!r} "
+            f"elapsed_seconds={elapsed:.3f} embedding_dim={embedding_dim}"
+        )
 
     return_value = {
         "query": query,
+        "role": role,
         "embedding_dim": embedding_dim,
         "timings": timings,
         "min_seconds": min(timings),
@@ -90,23 +109,31 @@ async def benchmark_single_query(query: str, repeat: int) -> dict:
     return return_value
 
 
-async def benchmark_batch(queries: list[str]) -> dict:
+async def benchmark_batch(queries: list[str], role: str) -> dict:
     """Measure a single batch embedding request for multiple queries.
 
     Args:
         queries: Query texts to embed together in one batch request.
+        role: Embedding role to benchmark.
 
     Returns:
         Summary dict containing batch latency, per-item latency estimate, and
         returned embedding dimensions.
     """
     start = time.perf_counter()
-    embeddings = await get_text_embeddings_batch(queries)
+    if role == "document":
+        embeddings = await get_document_text_embeddings_batch(queries)
+    else:
+        embeddings = await get_query_text_embeddings_batch(queries)
     elapsed = time.perf_counter() - start
     embedding_dims = [len(embedding) for embedding in embeddings]
-    logger.info(f'batch query_count={len(queries)} elapsed_seconds={elapsed:.3f} embedding_dims={embedding_dims!r}')
+    logger.info(
+        f"batch query_count={len(queries)} elapsed_seconds={elapsed:.3f} "
+        f"embedding_dims={embedding_dims!r}"
+    )
     return_value = {
         "query_count": len(queries),
+        "role": role,
         "elapsed_seconds": elapsed,
         "per_item_seconds": elapsed / max(1, len(queries)),
         "embedding_dims": embedding_dims,
@@ -127,6 +154,7 @@ def print_single_summary(results: list[dict]) -> None:
     for result in results:
         print(
             f"query={result['query']!r} "
+            f"role={result['role']} "
             f"dim={result['embedding_dim']} "
             f"min={result['min_seconds']:.3f}s "
             f"avg={result['avg_seconds']:.3f}s "
@@ -146,6 +174,7 @@ def print_batch_summary(result: dict) -> None:
     print("\n=== Batch summary ===")
     print(
         f"queries={result['query_count']} "
+        f"role={result['role']} "
         f"elapsed={result['elapsed_seconds']:.3f}s "
         f"per_item_estimate={result['per_item_seconds']:.3f}s "
         f"dims={result['embedding_dims']}"
@@ -168,14 +197,17 @@ async def main() -> None:
     logger.info(f'Embedding model: {EMBEDDING_MODEL}')
     logger.info(f'Single-query benchmark count: {len(queries)}')
     logger.info(f'Repeat per query: {args.repeat}')
+    logger.info(f'Embedding role: {args.role}')
 
     single_results: list[dict] = []
     for query in queries:
-        single_results.append(await benchmark_single_query(query, args.repeat))
+        single_results.append(
+            await benchmark_single_query(query, args.repeat, args.role)
+        )
     print_single_summary(single_results)
 
     if args.compare_batch:
-        batch_result = await benchmark_batch(queries)
+        batch_result = await benchmark_batch(queries, args.role)
         print_batch_summary(batch_result)
 
 

@@ -178,7 +178,7 @@ async def document_with_embedding(document: EvolvingMemoryDoc) -> EvolvingMemory
     Returns:
         Copy of the document with an embedding vector.
     """
-    embedding = await memory_store.compute_memory_embedding(
+    embedding = await memory_store.compute_memory_document_embedding(
         memory_embedding_source_text(document)
     )
     return_value: EvolvingMemoryDoc = {
@@ -448,7 +448,7 @@ async def find_active_memory_units(
     semantic_query = query.get("semantic_query")
     query_embedding = None
     if semantic_query:
-        query_embedding = await memory_store.compute_memory_embedding(
+        query_embedding = await memory_store.compute_memory_query_embedding(
             semantic_query,
         )
     matches = await memory_store.find_active_memory_documents(

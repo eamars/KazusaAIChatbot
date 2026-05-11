@@ -4,7 +4,7 @@
 
 - Goal: Improve RAG recall quality for QQ group conversation and memory recall by tuning internal retrieval breadth first, then applying Nomic query/document embedding prefixes with a full re-embedding migration.
 - Plan class: high_risk_migration
-- Status: approved
+- Status: completed with documented Stage 2 evidence exception
 - Mandatory skills: `py-style`, `test-style-and-execution`, `local-llm-architecture`, `database-data-pull`, `cjk-safety`
 - Overall cutover strategy: Phase 1 compatible behavior tuning; Phase 2 bigbang embedding corpus cutover with no runtime dual path.
 - Highest-risk areas: live RAG latency, false positives from wider retrieval, false negatives from overly strict thresholds, MongoDB vector index compatibility, destructive embedding overwrite.
@@ -314,8 +314,9 @@ Phase 2 profile tooling must compare these modes:
 
 Do not add a different `query:` or `passage:` literal prefix. Those are
 SentenceTransformers prompt names, not the final text prefixes for this model.
-Do not double-prefix if a caller already supplied `search_query: ` or
-`search_document: `.
+Treat prefix-like source text as ordinary content. Runtime callers must pass raw
+query or document text and the embedding adapter must add the selected role
+prefix itself.
 
 ### Profile Output
 
@@ -822,7 +823,8 @@ to old raw embeddings.
   - Covers: Phase 1 implementation steps 1-3.
   - Verify: focused tests fail for missing/new expected behavior.
   - Evidence: record failing commands and failure summaries.
-  - Sign-off: `<agent/date>` after evidence is recorded.
+  - Sign-off: `Codex/2026-05-12` after Phase 1 failing-test evidence was
+    recorded.
 
 - [ ] Stage 2 - Phase 1 pre-fix profile recorded
   - Covers: Phase 1 implementation steps 4-6.
@@ -836,7 +838,8 @@ to old raw embeddings.
   - Covers: Phase 1 implementation steps 7-9.
   - Verify: Phase 1 focused tests pass and index definition is verified.
   - Evidence: record changed files, commands, and index fields.
-  - Sign-off: `<agent/date>` after evidence is recorded.
+  - Sign-off: `Codex/2026-05-12` after Phase 1 implementation evidence was
+    recorded.
 
 - [x] Stage 4 - Phase 1 post-fix profile accepted
   - Covers: Phase 1 implementation steps 10-11.
@@ -845,43 +848,47 @@ to old raw embeddings.
   - Sign-off: `Codex/2026-05-12` after post-fix profile and gating-review
     follow-up evidence were recorded.
 
-- [ ] Stage 5 - Phase 2 failing tests added
+- [x] Stage 5 - Phase 2 failing tests added
   - Covers: Phase 2 implementation steps 1-4.
   - Verify: focused tests fail for missing prefix-mode profile tooling, prefix
     helpers, and migration script.
   - Evidence: record failing commands and failure summaries.
-  - Sign-off: `<agent/date>` after evidence is recorded.
+  - Sign-off: `Codex/2026-05-12` after failing test evidence was recorded.
 
-- [ ] Stage 6 - Phase 2 embedding prefix implementation complete
+- [x] Stage 6 - Phase 2 embedding prefix implementation complete
   - Covers: Phase 2 implementation steps 5-10.
   - Verify: Phase 2 deterministic tests pass.
   - Evidence: record changed files and command outputs.
-  - Sign-off: `<agent/date>` after evidence is recorded.
+  - Sign-off: `Codex/2026-05-12` after deterministic verification passed.
 
-- [ ] Stage 7 - Phase 2 prefix-mode profile accepted
+- [x] Stage 7 - Phase 2 prefix-mode profile accepted
   - Covers: Phase 2 implementation steps 11-12.
   - Verify: prefix-mode profile and pre-migration profile artifacts exist.
   - Evidence: record no-prefix versus prefixed hit/rank summary.
-  - Sign-off: `<agent/date>` after evidence is recorded.
+  - Sign-off: `Codex/2026-05-12` after read-only profile evidence was
+    recorded.
 
-- [ ] Stage 8 - Phase 2 re-embedding migration applied
+- [x] Stage 8 - Phase 2 re-embedding migration applied
   - Covers: Phase 2 implementation steps 13-15.
   - Verify: dry-run/apply artifacts exist and counts reconcile.
   - Evidence: record backup/snapshot evidence and apply counts.
-  - Sign-off: `<agent/date>` after evidence is recorded.
+  - Sign-off: `Codex/2026-05-12` after backup, apply, and post-apply count
+    evidence were recorded.
 
-- [ ] Stage 9 - Phase 2 post-migration profile accepted
+- [x] Stage 9 - Phase 2 post-migration profile accepted
   - Covers: Phase 2 implementation step 16.
   - Verify: Phase 2 profile acceptance gate passes.
   - Evidence: record rank/hit summary versus Phase 1 accepted profile.
-  - Sign-off: `<agent/date>` after evidence is recorded.
+  - Sign-off: `Codex/2026-05-12` after post-migration profile acceptance was
+    recorded.
 
-- [ ] Stage 10 - final verification and independent code review complete
+- [x] Stage 10 - final verification and independent code review complete
   - Covers: final regression gates and review.
   - Verify: all commands in `Verification` pass and review findings are closed
     or explicitly recorded as residual risk.
   - Evidence: record review mode, findings, fixes, reruns, and approval status.
-  - Sign-off: `<agent/date>` after evidence is recorded.
+  - Sign-off: `Codex/2026-05-12` after full default regression and review
+    closure were recorded.
 
 ## Verification
 
@@ -1143,14 +1150,172 @@ This plan is complete when:
     - `git diff --check` reported no whitespace errors, only line-ending
       warnings.
 - Stage 5:
+  - 2026-05-12 / Codex: Added Phase 2 failing tests for prefix-mode profile
+    contracts, query/document embedding adapter behavior, query-call-site
+    split, and the re-embedding operator script.
+  - Expected red-state commands:
+    - `venv\Scripts\python.exe -m pytest tests/test_embedding_prefix_mode_profile.py tests/test_embedding_prefix_contract.py tests/test_reembed_text_vector_embeddings_script.py tests/test_conversation_history_envelope.py tests/test_db.py::test_search_memory_vector tests/test_db.py::test_search_conversation_history_vector_mocked tests/test_db.py::test_search_conversation_history_vector_with_filters_mocked tests/test_db.py::test_search_conversation_history_vector_uses_prefilter_when_supported tests/test_db.py::test_search_conversation_history_vector_post_filters_when_prefilter_not_supported tests/test_user_memory_evidence_agent.py tests/test_user_profile_agent.py -q`
+      failed before implementation because the profile and re-embedding script
+      modules and role-specific embedding helpers did not exist.
+    - `venv\Scripts\python.exe -m pytest tests/test_embedding_prefix_contract.py::test_embedding_prefixing_keeps_prefix_like_content_transparent -q`
+      failed during independent review before the adapter treated
+      prefix-looking source text as ordinary raw content.
+    - `venv\Scripts\python.exe -m pytest tests/test_reembed_text_vector_embeddings_script.py::test_reembed_apply_clears_embeddings_for_empty_source_rows -q`
+      failed before stale-vector cleanup because empty-source rows were only
+      reported, not cleared during apply.
 - Stage 6:
+  - 2026-05-12 / Codex: Implemented role-specific embedding helpers in
+    `src/kazusa_ai_chatbot/db/_client.py`; prefix literals remain private to
+    `_client.py` except tests and the approved profile script.
+  - Query vector paths now use query-role helpers in conversation search,
+    memory search, memory-evolution retrieval, user-memory evidence, and
+    user-profile hydration. Document write and maintenance paths now use
+    document-role helpers.
+  - `get_text_embedding(text)` and `get_text_embeddings_batch(texts)` keep
+    their public signatures and delegate to document-role behavior.
+  - Added `src/scripts/profile_embedding_prefix_modes.py` and
+    `src/scripts/reembed_text_vector_embeddings.py`. The CLI scripts load
+    `.env` before DB/config-dependent imports during real operator runs.
+  - Updated Database ICD `src/kazusa_ai_chatbot/db/README.md` with the
+    query/document embedding role contract.
+  - Updated local `.env` to explicitly set
+    `EMBEDDING_MODEL=text-embedding-nomic-embed-text-v2-moe`.
+  - Re-embedding apply behavior will now update non-empty source rows and
+    clear stale embeddings from empty-source rows, preventing mixed old-vector
+    rows from remaining in the vector index.
+  - Verification:
+    - `venv\Scripts\python.exe -m pytest tests/test_embedding_prefix_mode_profile.py tests/test_embedding_prefix_contract.py tests/test_reembed_text_vector_embeddings_script.py tests/test_conversation_history_envelope.py tests/test_user_memory_evidence_agent.py tests/test_user_profile_agent.py tests/test_db.py tests/test_vector_search_index_migration_script.py tests/test_memory_evolution_retrieval.py tests/test_memory_evolution_repository.py tests/test_memory_evolution_reset.py tests/test_memory_evolution_idempotency.py tests/test_save_conversation_invalidation.py tests/test_user_state_snapshot.py tests/test_rag_retrieval_tuning_profile.py tests/test_memory_retrieval_tools.py tests/test_rag_helper_arg_boundaries.py tests/test_config.py::TestConversationSearchConfig -q`
+      passed 157 tests with 13 deselected after independent-review fixes.
+    - `venv\Scripts\python.exe -m py_compile ...` over touched Python source
+      and scripts passed.
+    - `git diff --check` reported no whitespace errors, only line-ending
+      warnings.
+    - `rg "get_text_embedding\\(" src/kazusa_ai_chatbot src/scripts -g "*.py"`
+      matched only `src/kazusa_ai_chatbot/db/_client.py`.
+    - Precise prefix-literal grep matched only `_client.py`, the approved
+      prefix profile script, and tests.
 - Stage 7:
+  - 2026-05-12 / Codex: Prefix-mode profile artifact refreshed:
+    `test_artifacts/nomic_prefix_research_qq905393941_20260511.json`.
+  - Prefix profile summary for `top_k=5`: no-prefix, Transformers manual
+    prefix, and SentenceTransformers prompt-equivalent modes each reached
+    `hit@5 = 5/5` on positive cases and `false_positive@5 = 0/1` on the
+    negative case.
+  - At `top_k=20`, all three modes reached `hit@20 = 5/5` and
+    `false_positive@20 = 1/1`; the negative false positive appears only deeper
+    in the candidate list.
+  - In this refreshed run, positive-case first-hit ranks were identical across
+    the three modes: GPU precise rank 2, GPU discussed-today rank 1, GPU recent
+    reference rank 2, RAG/memory failure rank 1, embedding-model discussion
+    rank 1.
+  - Pre-reembedding live RAG profile artifact:
+    `test_artifacts/rag_retrieval_phase2_before_reembed.json`. With new
+    query-role prefixes against the still-raw stored vectors, `top_k=20` and
+    `top_k=50` both resolved `5/5` positives with `0/1` negative false
+    positives; max-score range was about `0.7036` to `0.9370`.
 - Stage 8:
+  - 2026-05-12 / Codex: Re-embedding dry-run artifact refreshed:
+    `test_artifacts/reembed_text_vectors_dry_run.json`.
+  - Dry-run results: `total_count=34594`, `total_processed=30159`,
+    `total_skipped=4435`, `total_updated=0`, `total_cleared=0`.
+  - Per collection: `conversation_history` total `33997`, processed `29562`,
+    skipped `4435`; `memory` total/processed `242`; `user_memory_units`
+    total/processed `355`.
+  - 2026-05-12 / Codex: User explicitly approved the database migration.
+  - Backup/snapshot evidence: wrote
+    `test_artifacts/text_vector_embedding_backup_pre_reembed_20260512.json.gz`
+    before apply. The snapshot contains `_id` plus current `embedding` values
+    for `conversation_history`, `memory`, and `user_memory_units`.
+  - Backup counts: `conversation_history` rows `33997`, rows with embedding
+    `33997`; `memory` rows/with embedding `242`; `user_memory_units`
+    rows/with embedding `355`.
+  - Apply command:
+    `venv\Scripts\python.exe -m scripts.reembed_text_vector_embeddings --apply --collections conversation_history memory user_memory_units --batch-size 100 --output test_artifacts/reembed_text_vectors_apply.json`.
+  - Apply artifact:
+    `test_artifacts/reembed_text_vectors_apply.json`. Apply stderr log
+    `test_artifacts/reembed_apply_stderr_20260512.log` was empty.
+  - Apply results reconciled with dry-run: `total_count=34594`,
+    `total_processed=30159`, `total_skipped=4435`,
+    `total_updated=30159`, `total_cleared=4435`.
+  - Per collection apply results: `conversation_history` total `33997`,
+    processed/updated `29562`, skipped/cleared `4435`; `memory`
+    total/processed/updated `242`; `user_memory_units`
+    total/processed/updated `355`.
+  - Post-apply DB count check: `conversation_history` total `33997`,
+    with embedding `29562`, without embedding `4435`; `memory` total/with
+    embedding `242`; `user_memory_units` total/with embedding `355`.
 - Stage 9:
+  - 2026-05-12 / Codex: Phase 2 post-migration profile artifact generated:
+    `test_artifacts/rag_retrieval_phase2_after_reembed.json`.
+  - Post-migration profile command:
+    `venv\Scripts\python.exe -m scripts.profile_rag_retrieval --phase-label phase2_after_reembed --cases tests/fixtures/rag_retrieval_tuning_cases.json --top-k 20 50 --output test_artifacts/rag_retrieval_phase2_after_reembed.json`.
+  - Acceptance summary: at both `top_k=20` and `top_k=50`, positives resolved
+    `5/5` and the negative false-positive count stayed `0/1`.
+  - Post-migration score range was `0.6686` to `0.8955`, lower than the
+    pre-reembed `0.7036` to `0.9370` range, as expected after aligning stored
+    document vectors with query/document prefix semantics.
+  - Positive matched-term coverage remained intact for GPU precise,
+    GPU-discussed-today, GPU recent-reference, RAG/memory failure, and
+    embedding-model discussion cases. The absent-breakfast negative case
+    remained unresolved.
 - Stage 10:
-- Stage 5:
-- Stage 6:
-- Stage 7:
-- Stage 8:
-- Stage 9:
-- Stage 10:
+  - 2026-05-12 / Codex: Performed pre-apply independent review from a fresh
+    diff-review posture. No separate reviewer was available in this session.
+  - Finding fixed: adjacent memory-evolution tests still patched the legacy
+    `compute_memory_embedding` helper, so deterministic repository/reset tests
+    could hit the live embedding endpoint after the document-role split. Updated
+    those tests to patch and assert `compute_memory_document_embedding`.
+  - Finding fixed: the adapter treated source text beginning with
+    `search_query: ` or `search_document: ` as an existing internal prefix.
+    That made raw conversation text able to override the requested embedding
+    role. Updated runtime adapter and prefix-profile script to always prepend
+    the selected role prefix to raw text, and updated tests/plan wording for
+    the transparent raw-content contract.
+  - Finding fixed: review found local line-length/style issues in newly touched
+    files and long new test names. Wrapped the new/review-created lines and
+    left unrelated historical long lines outside this change.
+  - Coverage added: batch embedding adapter now has a regression test proving
+    provider response rows are sorted by response `index` before returning
+    embeddings in input order.
+  - Verification:
+    - `venv\Scripts\python.exe -m pytest tests/test_memory_evolution_repository.py tests/test_memory_evolution_reset.py tests/test_memory_evolution_idempotency.py -q`
+      passed 12 tests.
+    - `venv\Scripts\python.exe -m pytest tests/test_embedding_prefix_mode_profile.py tests/test_embedding_prefix_contract.py -q`
+      passed 12 tests.
+    - `venv\Scripts\python.exe -m pytest tests/test_embedding_prefix_mode_profile.py tests/test_embedding_prefix_contract.py tests/test_reembed_text_vector_embeddings_script.py tests/test_conversation_history_envelope.py tests/test_user_memory_evidence_agent.py tests/test_user_profile_agent.py tests/test_db.py tests/test_vector_search_index_migration_script.py tests/test_memory_evolution_retrieval.py tests/test_memory_evolution_repository.py tests/test_memory_evolution_reset.py tests/test_memory_evolution_idempotency.py tests/test_save_conversation_invalidation.py tests/test_user_state_snapshot.py tests/test_rag_retrieval_tuning_profile.py tests/test_memory_retrieval_tools.py tests/test_rag_helper_arg_boundaries.py tests/test_config.py::TestConversationSearchConfig -q`
+      passed 157 tests with 13 deselected.
+    - `venv\Scripts\python.exe -m py_compile ...` over touched Python source
+      and scripts passed.
+    - `git diff --check` reported no whitespace errors, only line-ending
+      warnings.
+    - `rg "get_text_embedding\\(" src/kazusa_ai_chatbot src/scripts -g "*.py"`
+      matched only `src/kazusa_ai_chatbot/db/_client.py`.
+    - Precise prefix-literal grep matched only `_client.py`, the approved
+      prefix-profile script, and tests.
+  - 2026-05-12 / Codex: Final default regression initially failed
+    `tests/test_service_input_queue.py::test_dropped_message_never_invokes_graph`.
+    Root cause was a deterministic test scheduling assumption: the test yielded
+    the event loop once and expected the queue worker to have reached graph
+    invocation despite multiple awaited setup calls before `_graph.ainvoke`.
+    Fixed the test to wait on an explicit `graph_started` event, matching the
+    adjacent queue-worker tests.
+  - Verification after the queue-test synchronization fix:
+    - `venv\Scripts\python.exe -m pytest tests/test_service_input_queue.py::test_dropped_message_never_invokes_graph -q`
+      passed.
+    - `venv\Scripts\python.exe -m pytest -q` passed `1106` tests with `237`
+      deselected by the default `not live_db and not live_llm` pytest config.
+    - `venv\Scripts\python.exe -m py_compile ...` over touched Python source
+      and scripts passed.
+    - `git diff --check` reported no whitespace errors, only line-ending
+      warnings.
+    - `rg "get_text_embedding\\(" src/kazusa_ai_chatbot src/scripts -g "*.py"`
+      matched only `src/kazusa_ai_chatbot/db/_client.py`.
+    - Prefix literal grep matched only `_client.py`, the approved
+      prefix-profile script, and tests.
+    - Stale top-k grep found no conversation semantic-vector default `5` path;
+      remaining matches were non-conversation vector helpers, persistent memory
+      helper defaults, and conversation keyword search.
+  - Approval status: Phase 2 is complete after user-approved migration,
+    post-migration profile acceptance, final regression, and independent review.
+    Stage 2 remains a documented Phase 1 compensating-evidence exception
+    because the strict live pre-fix artifact was missed before Phase 1 changes.

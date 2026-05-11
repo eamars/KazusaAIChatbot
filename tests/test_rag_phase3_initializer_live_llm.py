@@ -396,7 +396,11 @@ async def test_live_initializer_includes_memory_evidence_for_scoped_continuity(
         del args, kwargs
         raise AssertionError("literal live slot should not use recency fallback")
 
-    monkeypatch.setattr(user_memory_evidence_module, "get_text_embedding", _embedding)
+    monkeypatch.setattr(
+        user_memory_evidence_module,
+        "get_query_text_embedding",
+        _embedding,
+    )
     monkeypatch.setattr(
         user_memory_evidence_module,
         "search_user_memory_units_by_vector",

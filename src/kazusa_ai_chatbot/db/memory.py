@@ -5,7 +5,11 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any
 
-from kazusa_ai_chatbot.db._client import enable_vector_index, get_db, get_text_embedding
+from kazusa_ai_chatbot.db._client import (
+    enable_vector_index,
+    get_db,
+    get_query_text_embedding,
+)
 from kazusa_ai_chatbot.db.memory_evolution import build_active_memory_filter
 from kazusa_ai_chatbot.db.schemas import MemoryDoc
 from kazusa_ai_chatbot.memory_evolution.models import (
@@ -235,7 +239,7 @@ async def search_memory(
         return return_value
 
     # method == "vector"
-    query_embedding = await get_text_embedding(query)
+    query_embedding = await get_query_text_embedding(query)
     index_name = "memory_vector_index"
 
     vector_search = {

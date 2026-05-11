@@ -45,7 +45,7 @@ async def test_user_memory_evidence_requires_global_user_id(monkeypatch) -> None
     async def _fail_recent(*args, **kwargs):
         raise AssertionError("recent query should not run")
 
-    monkeypatch.setattr(module, "get_text_embedding", _fail_embedding)
+    monkeypatch.setattr(module, "get_query_text_embedding", _fail_embedding)
     monkeypatch.setattr(module, "search_user_memory_units_by_vector", _fail_vector)
     monkeypatch.setattr(module, "search_user_memory_units_by_keyword", _fail_keyword)
     monkeypatch.setattr(module, "query_user_memory_units", _fail_recent)
@@ -102,7 +102,7 @@ async def test_user_memory_evidence_exact_cjk_term_uses_scoped_keyword(monkeypat
     async def _recent(*args, **kwargs):
         raise AssertionError("recent fallback should not run when keyword retrieval resolves")
 
-    monkeypatch.setattr(module, "get_text_embedding", _embedding)
+    monkeypatch.setattr(module, "get_query_text_embedding", _embedding)
     monkeypatch.setattr(module, "search_user_memory_units_by_vector", _vector)
     monkeypatch.setattr(module, "search_user_memory_units_by_keyword", _keyword)
     monkeypatch.setattr(module, "query_user_memory_units", _recent)
@@ -161,7 +161,7 @@ async def test_user_memory_evidence_literal_miss_is_unresolved(monkeypatch) -> N
     async def _recent(*args, **kwargs):
         raise AssertionError("literal misses should not use recency fallback")
 
-    monkeypatch.setattr(module, "get_text_embedding", _embedding)
+    monkeypatch.setattr(module, "get_query_text_embedding", _embedding)
     monkeypatch.setattr(module, "search_user_memory_units_by_vector", _vector)
     monkeypatch.setattr(module, "search_user_memory_units_by_keyword", _keyword)
     monkeypatch.setattr(module, "query_user_memory_units", _recent)
@@ -198,7 +198,7 @@ async def test_user_memory_evidence_scopes_results_to_current_user(monkeypatch) 
     async def _recent(*args, **kwargs):
         raise AssertionError("recent fallback should not run when keyword retrieval resolves")
 
-    monkeypatch.setattr(module, "get_text_embedding", _embedding)
+    monkeypatch.setattr(module, "get_query_text_embedding", _embedding)
     monkeypatch.setattr(module, "search_user_memory_units_by_vector", _vector)
     monkeypatch.setattr(module, "search_user_memory_units_by_keyword", _keyword)
     monkeypatch.setattr(module, "query_user_memory_units", _recent)
@@ -223,6 +223,7 @@ async def test_user_memory_evidence_specific_semantic_miss_is_unresolved(
     calls: dict[str, object] = {}
 
     async def _embedding(text: str) -> list[float]:
+        calls["embedding_text"] = text
         return [0.5, 0.4, 0.3]
 
     async def _vector(global_user_id: str, embedding: list[float], **kwargs):
@@ -236,7 +237,7 @@ async def test_user_memory_evidence_specific_semantic_miss_is_unresolved(
     async def _recent(*args, **kwargs):
         raise AssertionError("specific semantic misses should not use recency fallback")
 
-    monkeypatch.setattr(module, "get_text_embedding", _embedding)
+    monkeypatch.setattr(module, "get_query_text_embedding", _embedding)
     monkeypatch.setattr(module, "search_user_memory_units_by_vector", _vector)
     monkeypatch.setattr(module, "search_user_memory_units_by_keyword", _keyword)
     monkeypatch.setattr(module, "query_user_memory_units", _recent)
@@ -247,6 +248,9 @@ async def test_user_memory_evidence_specific_semantic_miss_is_unresolved(
     )
 
     assert result["resolved"] is False
+    assert calls["embedding_text"] == (
+        "retrieve durable evidence about the current user's accepted preference for tea"
+    )
     assert calls["vector"] is True
     assert "keyword" not in calls
     assert result["result"]["memory_rows"] == []
@@ -276,7 +280,7 @@ async def test_user_memory_evidence_falls_back_when_embedding_call_is_unavailabl
         }
         return [_memory_row("recent-embed-down", "The user still expects the 学姐 continuity.")]
 
-    monkeypatch.setattr(module, "get_text_embedding", _embedding)
+    monkeypatch.setattr(module, "get_query_text_embedding", _embedding)
     monkeypatch.setattr(module, "search_user_memory_units_by_vector", _vector)
     monkeypatch.setattr(module, "search_user_memory_units_by_keyword", _keyword)
     monkeypatch.setattr(module, "query_user_memory_units", _recent)
@@ -294,8 +298,10 @@ async def test_user_memory_evidence_falls_back_when_embedding_call_is_unavailabl
 @pytest.mark.asyncio
 async def test_user_memory_evidence_preserves_stronger_provenance_fields(monkeypatch) -> None:
     agent = UserMemoryEvidenceAgent()
+    calls: dict[str, object] = {}
 
     async def _embedding(text: str) -> list[float]:
+        calls["embedding_text"] = text
         return [0.9, 0.1]
 
     async def _vector(global_user_id: str, embedding: list[float], **kwargs):
@@ -315,7 +321,7 @@ async def test_user_memory_evidence_preserves_stronger_provenance_fields(monkeyp
     async def _recent(*args, **kwargs):
         raise AssertionError("recent fallback should not run when semantic retrieval resolves")
 
-    monkeypatch.setattr(module, "get_text_embedding", _embedding)
+    monkeypatch.setattr(module, "get_query_text_embedding", _embedding)
     monkeypatch.setattr(module, "search_user_memory_units_by_vector", _vector)
     monkeypatch.setattr(module, "search_user_memory_units_by_keyword", _keyword)
     monkeypatch.setattr(module, "query_user_memory_units", _recent)
@@ -326,6 +332,9 @@ async def test_user_memory_evidence_preserves_stronger_provenance_fields(monkeyp
     )
 
     assert result["resolved"] is True
+    assert calls["embedding_text"] == (
+        "retrieve durable evidence about the current user's story continuity around the ice-cream shop"
+    )
     assert result["attempts"] == 1
     assert result["cache"] == {
         "enabled": False,

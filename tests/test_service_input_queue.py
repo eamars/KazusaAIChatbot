@@ -750,6 +750,7 @@ async def test_dropped_message_never_invokes_graph(monkeypatch) -> None:
 
     await _reset_queue_state()
     graph_message_ids = []
+    graph_started = asyncio.Event()
     graph_can_finish = asyncio.Event()
 
     class _Graph:
@@ -757,6 +758,7 @@ async def test_dropped_message_never_invokes_graph(monkeypatch) -> None:
 
         async def ainvoke(self, state):
             graph_message_ids.append(state["platform_message_id"])
+            graph_started.set()
             await graph_can_finish.wait()
             return {
                 "should_respond": False,
@@ -782,7 +784,7 @@ async def test_dropped_message_never_invokes_graph(monkeypatch) -> None:
 
     assert response.messages == []
     save_conversation.assert_awaited()
-    await asyncio.sleep(0)
+    await asyncio.wait_for(graph_started.wait(), timeout=1.0)
     assert graph_message_ids == ["2"]
 
     graph_can_finish.set()

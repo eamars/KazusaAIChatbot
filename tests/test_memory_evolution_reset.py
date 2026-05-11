@@ -256,7 +256,7 @@ def _patch_reset(monkeypatch: pytest.MonkeyPatch, collection: _Collection) -> Ma
     )
     monkeypatch.setattr(
         repository_module.memory_store,
-        "compute_memory_embedding",
+        "compute_memory_document_embedding",
         AsyncMock(return_value=[0.4, 0.5]),
     )
     monkeypatch.setattr(
@@ -300,7 +300,8 @@ async def test_reset_memory_from_entries_dry_run_reports_legacy_and_runtime_rows
     assert result["runtime_rows_preserved"] == 1
     assert result["embeddings_computed"] == 0
     assert "legacy" in collection.docs
-    repository_module.memory_store.compute_memory_embedding.assert_not_awaited()
+    embedding_mock = repository_module.memory_store.compute_memory_document_embedding
+    embedding_mock.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -365,4 +366,5 @@ async def test_reset_memory_from_entries_apply_fails_when_write_lock_is_held(
 
     reset_module.memory_store.delete_reset_seed_managed_memory.assert_not_awaited()
     reset_module.memory_store.replace_memory_unit_document.assert_not_awaited()
-    repository_module.memory_store.compute_memory_embedding.assert_not_awaited()
+    embedding_mock = repository_module.memory_store.compute_memory_document_embedding
+    embedding_mock.assert_not_awaited()
