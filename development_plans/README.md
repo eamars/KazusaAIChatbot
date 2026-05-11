@@ -38,7 +38,9 @@ long_term/todo.md
 
 | Plan | Status | Execution |
 |---|---|---|
-| [reflection_driven_character_state_evolution_plan.md](active/short_term/reflection_driven_character_state_evolution_plan.md) | draft | deferred |
+| [global_character_growth_from_reflection_plan.md](active/short_term/global_character_growth_from_reflection_plan.md) | approved | ready |
+| [reflection_flag_simplification_plan.md](active/short_term/reflection_flag_simplification_plan.md) | draft | deferred |
+| [self_cognition_agency_loop_plan.md](active/short_term/self_cognition_agency_loop_plan.md) | draft | deferred |
 
 ## Active Bugfix Plans
 
