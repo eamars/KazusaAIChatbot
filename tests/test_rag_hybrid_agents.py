@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+
 import pytest
 
 from kazusa_ai_chatbot.config import RAG_HYBRID_SEMANTIC_ONLY_SCORE_FLOOR
@@ -15,6 +17,31 @@ class _FakeTool:
     async def ainvoke(self, args: dict[str, object]) -> object:
         self.calls.append(dict(args))
         return self.result
+
+
+class _FakeObjectId:
+    """ObjectId-like value that plain JSON serialization cannot encode."""
+
+    def __str__(self) -> str:
+        """Return the stable string form used by Mongo row identity."""
+
+        return_value = "row-object-id"
+        return return_value
+
+
+class _FakeResponse:
+    def __init__(self, content: str) -> None:
+        self.content = content
+
+
+class _FakeJudgeLLM:
+    def __init__(self) -> None:
+        self.messages: list[object] = []
+
+    async def ainvoke(self, messages: list[object]) -> _FakeResponse:
+        self.messages = list(messages)
+        response = _FakeResponse('{"resolved": true, "feedback": ""}')
+        return response
 
 
 @pytest.mark.asyncio
@@ -122,6 +149,61 @@ async def test_persistent_memory_search_tool_fuses_semantic_and_keyword_rows(
     assert keyword_tool.calls[0]["keyword"] == "GPU"
     assert result[0]["memory_name"] == "hardware"
     assert result[0]["methods"] == ["semantic", "keyword:GPU"]
+
+
+@pytest.mark.asyncio
+async def test_conversation_search_judge_serializes_mongo_rows(
+    monkeypatch,
+) -> None:
+    """Conversation judge payloads should strip raw Mongo row identifiers."""
+
+    judge_llm = _FakeJudgeLLM()
+    monkeypatch.setattr(conversation_search_agent, "_judge_llm", judge_llm)
+
+    resolved, feedback = await conversation_search_agent._judge(
+        "Conversation-evidence: retrieve GPU discussion",
+        [
+            {
+                "_id": _FakeObjectId(),
+                "conversation_row_id": "row-message",
+                "body_text": "GPU market-share topic",
+            },
+        ],
+    )
+
+    human_message = judge_llm.messages[-1]
+    payload = json.loads(human_message.content)
+    assert resolved is True
+    assert feedback == ""
+    assert "_id" not in payload["result"][0]
+    assert "conversation_row_id" not in payload["result"][0]
+
+
+@pytest.mark.asyncio
+async def test_persistent_memory_search_judge_serializes_mongo_rows(
+    monkeypatch,
+) -> None:
+    """Persistent-memory judge payloads should strip raw Mongo row IDs."""
+
+    judge_llm = _FakeJudgeLLM()
+    monkeypatch.setattr(persistent_memory_search_agent, "_judge_llm", judge_llm)
+
+    resolved, feedback = await persistent_memory_search_agent._judge(
+        "Memory-evidence: retrieve GPU memory",
+        [
+            {
+                "_id": _FakeObjectId(),
+                "memory_name": "hardware",
+                "content": "GPU market-share memory",
+            },
+        ],
+    )
+
+    human_message = judge_llm.messages[-1]
+    payload = json.loads(human_message.content)
+    assert resolved is True
+    assert feedback == ""
+    assert "_id" not in payload["result"][0]
 
 
 def test_conversation_search_reapplies_scope_time_and_literal_anchors() -> None:

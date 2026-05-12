@@ -14,6 +14,7 @@ from typing import Any
 import pytest
 
 from kazusa_ai_chatbot.rag.prompt_projection import (
+    project_selector_input_for_llm,
     project_runtime_context_for_llm,
     project_tool_result_for_llm,
 )
@@ -370,6 +371,64 @@ def test_tool_result_strips_mongo_id_from_nested_payloads() -> None:
 
     _assert_absent_key(projected, "_id")
     json.dumps({"task": "serialize", "result": projected}, ensure_ascii=False)
+
+
+def test_rag_prompt_projections_are_plain_json_serializable() -> None:
+    """Representative RAG prompt projections should not require BSON defaults."""
+    tool_result = {
+        "result": {
+            "rows": [
+                {
+                    "_id": _FakeObjectId(),
+                    "conversation_row_id": "row-message",
+                    "body_text": "message text",
+                },
+            ],
+            "projection_payload": {
+                "memory_rows": [
+                    {
+                        "_id": _FakeObjectId(),
+                        "memory_name": "memory-name",
+                        "content": "memory text",
+                    },
+                ],
+            },
+        },
+    }
+    runtime_context = {
+        "conversation_progress": {
+            "rows": [
+                {
+                    "_id": _FakeObjectId(),
+                    "body_text": "progress text",
+                },
+            ],
+        },
+        "known_facts": [
+            {
+                "slot": "Conversation-evidence: retrieve message",
+                "agent": "conversation_evidence_agent",
+                "resolved": True,
+                "summary": "message text",
+                "raw_result": tool_result,
+                "attempts": 1,
+            },
+        ],
+    }
+
+    prompt_payloads = [
+        project_tool_result_for_llm(tool_result),
+        project_runtime_context_for_llm(runtime_context),
+        project_selector_input_for_llm(
+            "Conversation-evidence: retrieve message",
+            runtime_context,
+        ),
+    ]
+
+    for payload in prompt_payloads:
+        _assert_absent_key(payload, "_id")
+        _assert_absent_key(payload, "conversation_row_id")
+        json.dumps(payload, ensure_ascii=False)
 
 
 # ---------------------------------------------------------------------------
