@@ -5,6 +5,12 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any
 
+from kazusa_ai_chatbot.config import (
+    RAG_SEARCH_DEFAULT_TOP_K,
+    RAG_VECTOR_CANDIDATE_MULTIPLIER,
+    RAG_VECTOR_MAX_CANDIDATES,
+    RAG_VECTOR_MIN_CANDIDATES,
+)
 from kazusa_ai_chatbot.db._client import (
     enable_vector_index,
     get_db,
@@ -174,7 +180,7 @@ async def get_active_promises(
 
 async def search_memory(
     query: str,
-    limit: int = 5,
+    limit: int = RAG_SEARCH_DEFAULT_TOP_K,
     method: str = "vector",  # "keyword", "vector"
     source_global_user_id: str | None = None,
     memory_type: str | None = None,
@@ -242,12 +248,17 @@ async def search_memory(
     query_embedding = await get_query_text_embedding(query)
     index_name = "memory_vector_index"
 
+    candidate_count = max(
+        RAG_VECTOR_MIN_CANDIDATES,
+        limit * RAG_VECTOR_CANDIDATE_MULTIPLIER,
+    )
+    candidate_count = min(candidate_count, RAG_VECTOR_MAX_CANDIDATES)
     vector_search = {
         "index": index_name,
         "path": "embedding",
         "queryVector": query_embedding,
-        "numCandidates": max(100, limit * 10),
-        "limit": max(100, limit * 10),
+        "numCandidates": candidate_count,
+        "limit": candidate_count,
     }
 
     pipeline: list[dict[str, Any]] = [

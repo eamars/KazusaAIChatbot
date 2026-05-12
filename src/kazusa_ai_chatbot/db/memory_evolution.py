@@ -6,6 +6,11 @@ from typing import Any
 
 from pymongo.errors import DuplicateKeyError
 
+from kazusa_ai_chatbot.config import (
+    RAG_VECTOR_CANDIDATE_MULTIPLIER,
+    RAG_VECTOR_MAX_CANDIDATES,
+    RAG_VECTOR_MIN_CANDIDATES,
+)
 from kazusa_ai_chatbot.db._client import (
     get_db,
     get_document_text_embedding,
@@ -228,14 +233,19 @@ async def find_active_memory_documents(
     db = await get_db()
     filter_doc = _active_query_filter(query, now_timestamp=now_timestamp)
     if query_embedding is not None:
+        candidate_count = max(
+            RAG_VECTOR_MIN_CANDIDATES,
+            limit * RAG_VECTOR_CANDIDATE_MULTIPLIER,
+        )
+        candidate_count = min(candidate_count, RAG_VECTOR_MAX_CANDIDATES)
         pipeline = [
             {
                 "$vectorSearch": {
                     "index": "memory_vector_index",
                     "path": "embedding",
                     "queryVector": query_embedding,
-                    "numCandidates": max(100, limit * 10),
-                    "limit": max(100, limit * 10),
+                    "numCandidates": candidate_count,
+                    "limit": candidate_count,
                 }
             },
             {"$addFields": {"score": {"$meta": "vectorSearchScore"}}},

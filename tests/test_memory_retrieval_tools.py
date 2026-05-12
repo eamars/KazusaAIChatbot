@@ -9,6 +9,7 @@ import pytest
 from kazusa_ai_chatbot.config import (
     CONVERSATION_SEARCH_DEFAULT_TOP_K,
     CONVERSATION_SEARCH_MAX_TOP_K,
+    RAG_SEARCH_DEFAULT_TOP_K,
 )
 from kazusa_ai_chatbot.rag.memory_retrieval_tools import (
     get_conversation,
@@ -93,6 +94,7 @@ async def test_search_conversation_delegates_to_vector_history_search() -> None:
                 "global_user_id": "global-user-1",
                 "conversation_row_id": "row-object-id",
                 "reply_context": {"reply_excerpt": "previous"},
+                "attachments": [],
             },
         )
     ]
@@ -195,6 +197,20 @@ async def test_search_conversation_keyword_delegates_to_keyword_history_search()
     assert isinstance(result[0]["conversation_row_id"], str)
     assert "content" not in result[0]
     assert result[0]["display_name"] == "User"
+
+
+@pytest.mark.asyncio
+async def test_search_conversation_keyword_uses_shared_default_top_k() -> None:
+    """Keyword conversation retrieval should use the shared RAG top-k default."""
+
+    with patch(
+        "kazusa_ai_chatbot.rag.memory_retrieval_tools.search_conversation_history",
+        new_callable=AsyncMock,
+        return_value=[],
+    ) as search_history:
+        await search_conversation_keyword.ainvoke({"keyword": "DDR5"})
+
+    assert search_history.await_args.kwargs["limit"] == RAG_SEARCH_DEFAULT_TOP_K
 
 
 @pytest.mark.asyncio
@@ -304,7 +320,9 @@ async def test_search_persistent_memory_keyword_delegates_to_keyword_memory_sear
         new_callable=AsyncMock,
         return_value=mock_results,
     ) as search_memory:
-        result = await search_persistent_memory_keyword.ainvoke({"keyword": "DDR5"})
+        result = await search_persistent_memory_keyword.ainvoke(
+            {"keyword": "DDR5", "top_k": 5}
+        )
 
     search_memory.assert_awaited_once_with(
         query="DDR5",
@@ -315,3 +333,17 @@ async def test_search_persistent_memory_keyword_delegates_to_keyword_memory_sear
     )
     assert result[0]["memory_name"] == "hardware"
     assert result[0]["content"] == "DDR5 discussion"
+
+
+@pytest.mark.asyncio
+async def test_search_persistent_memory_keyword_uses_shared_default_top_k() -> None:
+    """Keyword memory retrieval should use the shared RAG top-k default."""
+
+    with patch(
+        "kazusa_ai_chatbot.rag.memory_retrieval_tools.search_memory_db",
+        new_callable=AsyncMock,
+        return_value=[],
+    ) as search_memory:
+        await search_persistent_memory_keyword.ainvoke({"keyword": "DDR5"})
+
+    assert search_memory.await_args.kwargs["limit"] == RAG_SEARCH_DEFAULT_TOP_K

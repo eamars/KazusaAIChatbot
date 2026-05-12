@@ -10,6 +10,8 @@ from typing import Any, TypedDict
 from langchain_core.messages import HumanMessage, SystemMessage
 
 from kazusa_ai_chatbot.config import (
+    RAG_CONVERSATION_EVIDENCE_TEXT_LIMIT,
+    RAG_SEARCH_SELECTED_SUMMARY_LIMIT,
     RAG_SUBAGENT_LLM_API_KEY,
     RAG_SUBAGENT_LLM_BASE_URL,
     RAG_SUBAGENT_LLM_MODEL,
@@ -18,9 +20,9 @@ from kazusa_ai_chatbot.rag.conversation_aggregate_agent import (
     ConversationAggregateAgent,
 )
 from kazusa_ai_chatbot.rag.conversation_filter_agent import ConversationFilterAgent
-from kazusa_ai_chatbot.rag.conversation_keyword_agent import ConversationKeywordAgent
 from kazusa_ai_chatbot.rag.conversation_search_agent import ConversationSearchAgent
 from kazusa_ai_chatbot.rag.helper_agent import BaseRAGHelperAgent
+from kazusa_ai_chatbot.rag.hybrid_retrieval import candidate_prompt_text
 from kazusa_ai_chatbot.rag.prompt_projection import project_selector_input_for_llm
 from kazusa_ai_chatbot.time_context import (
     format_timestamp_for_llm,
@@ -46,7 +48,6 @@ _SCOPE_ACTIVE_CHARACTER = "active_character"
 _SCOPE_ANY_SPEAKER = "any_speaker"
 _SCOPE_PERSON_RESOLVED = "person_resolved"
 _KNOWN_WORKERS = {
-    "conversation_keyword_agent",
     "conversation_search_agent",
     "conversation_filter_agent",
     "conversation_aggregate_agent",
@@ -70,6 +71,7 @@ class _ConversationProjection(TypedDict):
     """Canonical evidence shape exposed by the conversation capability."""
 
     summaries: list[str]
+    rows: list[dict[str, Any]]
     resolved_refs: list[dict[str, Any]]
 
 
@@ -122,6 +124,8 @@ def _result_payload(
     evidence: list[str] | None = None,
     missing_context: list[str] | None = None,
     conflicts: list[str] | None = None,
+    observation_candidates: list[dict[str, Any]] | None = None,
+    source_hints: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Build the standard top-level conversation capability payload."""
 
@@ -137,6 +141,8 @@ def _result_payload(
         "evidence": list(evidence or []),
         "missing_context": list(missing_context or []),
         "conflicts": list(conflicts or []),
+        "observation_candidates": list(observation_candidates or []),
+        "source_hints": list(source_hints or []),
     }
     return payload
 
@@ -251,8 +257,8 @@ def _deterministic_plan(task: str) -> dict[str, Any] | None:
         or "literal" in normalized
     ):
         plan = {
-            "worker": "conversation_keyword_agent",
-            "reason": "literal phrase, URL, filename, or exact anchor",
+            "worker": "conversation_search_agent",
+            "reason": "hybrid literal phrase, URL, filename, or exact anchor",
             "requires_person_ref": requires_person_ref,
         }
         return plan
@@ -293,6 +299,8 @@ def _deterministic_plan(task: str) -> dict[str, Any] | None:
 def _normalize_selector_plan(raw_plan: dict[str, Any]) -> dict[str, Any]:
     """Normalize an LLM selector payload to approved fields."""
     worker = text_or_empty(raw_plan.get("worker"))
+    if worker == "conversation_keyword_agent":
+        worker = "conversation_search_agent"
     if worker not in _KNOWN_WORKERS:
         worker = "conversation_search_agent"
     reason = text_or_empty(raw_plan.get("reason"))
@@ -314,12 +322,12 @@ Do not answer from durable memory, active episode progress, user profiles, or we
    worker="incompatible" and reason="Recall".
 2. If the task asks for a durable world fact, output worker="incompatible" and
    reason="Memory-evidence".
-3. Use conversation_keyword_agent for exact phrases, URLs, filenames, literal
-   terms, and provenance of a quoted message.
-4. Use conversation_search_agent for fuzzy topics and semantic message evidence.
-5. Use conversation_filter_agent for known user/time/date-window retrieval.
-6. Use conversation_aggregate_agent for counts, rankings, or grouped stats.
-7. Set requires_person_ref=true when the task uses
+3. Use conversation_search_agent for fuzzy topics, semantic message evidence,
+   exact phrases, URLs, filenames, literal terms, and quoted-message provenance.
+   The search worker performs hybrid semantic plus literal-anchor retrieval.
+4. Use conversation_filter_agent for known user/time/date-window retrieval.
+5. Use conversation_aggregate_agent for counts, rankings, or grouped stats.
+6. Set requires_person_ref=true when the task uses
    speaker=person resolved in slot N or otherwise references a person from a
    previous slot.
 
@@ -334,7 +342,7 @@ Do not answer from durable memory, active episode progress, user profiles, or we
 # Output Format
 Return valid JSON only:
 {
-  "worker": "conversation_keyword_agent | conversation_search_agent | conversation_filter_agent | conversation_aggregate_agent | incompatible",
+  "worker": "conversation_search_agent | conversation_filter_agent | conversation_aggregate_agent | incompatible",
   "reason": "short source selection explanation",
   "requires_person_ref": true
 }
@@ -416,6 +424,11 @@ def _worker_context(
     """
     worker_context = dict(context)
     worker_context["exclude_current_question"] = True
+    if speaker_scope:
+        worker_context["conversation_user_scope"] = speaker_scope
+    else:
+        worker_context.pop("global_user_id", None)
+        worker_context.pop("display_name", None)
 
     if speaker_scope == _SCOPE_ANY_SPEAKER:
         worker_context.pop("global_user_id", None)
@@ -489,10 +502,7 @@ def _projection_from_worker(
         return_value = (projection, exclusion_counts)
         return return_value
 
-    if worker_name in {
-        "conversation_keyword_agent",
-        "conversation_filter_agent",
-    }:
+    if worker_name == "conversation_filter_agent":
         rows = _plain_message_rows(raw_result)
         filtered_rows, exclusion_counts = _filter_active_turn_rows(
             rows,
@@ -522,6 +532,7 @@ def _empty_projection() -> _ConversationProjection:
     """Build an empty canonical conversation evidence projection."""
     projection: _ConversationProjection = {
         "summaries": [],
+        "rows": [],
         "resolved_refs": [],
     }
     return projection
@@ -534,6 +545,10 @@ def _semantic_message_rows(value: object) -> list[dict[str, Any]]:
         return rows
 
     for item in value:
+        if isinstance(item, dict):
+            rows.append(dict(item))
+            continue
+
         if not isinstance(item, (list, tuple)) or len(item) != 2:
             continue
 
@@ -717,38 +732,92 @@ def _filter_active_turn_rows(
 
 def _message_projection(rows: list[dict[str, Any]]) -> _ConversationProjection:
     """Project typed conversation message rows into summaries and refs."""
-    summaries = [
-        summary
-        for row in rows
-        if (summary := _clip_text(_message_row_text(row), limit=500))
-    ]
+    summaries: list[str] = []
+    projected_rows: list[dict[str, Any]] = []
+    for row in rows:
+        summary = _clip_text(
+            _message_row_text(row),
+            limit=RAG_CONVERSATION_EVIDENCE_TEXT_LIMIT,
+        )
+        if not summary:
+            continue
+        summaries.append(summary)
+        projected_rows.append(_projection_row(row, summary))
     resolved_refs = _refs_from_message_rows(rows)
     projection: _ConversationProjection = {
         "summaries": summaries,
+        "rows": projected_rows,
         "resolved_refs": resolved_refs,
     }
     return projection
 
 
+def _projection_row(row: dict[str, Any], summary: str) -> dict[str, Any]:
+    """Build inspectable row provenance for one projected message."""
+
+    conversation_row_id = text_or_empty(row.get("conversation_row_id"))
+    if not conversation_row_id:
+        conversation_row_id = text_or_empty(row.get("_id"))
+    methods_value = row.get("methods")
+    methods: list[str] = []
+    if isinstance(methods_value, list):
+        methods = [
+            text
+            for item in methods_value
+            if (text := text_or_empty(item))
+        ]
+    method = text_or_empty(row.get("method"))
+    if method and method not in methods:
+        methods.append(method)
+    score_value = row.get("score")
+    if isinstance(score_value, (int, float)) and not isinstance(score_value, bool):
+        score: float | None = float(score_value)
+    else:
+        score = None
+
+    projected_row = {
+        "summary": summary,
+        "timestamp": text_or_empty(row.get("timestamp")),
+        "display_name": text_or_empty(row.get("display_name")),
+        "platform_message_id": text_or_empty(row.get("platform_message_id")),
+        "conversation_row_id": conversation_row_id,
+        "methods": methods,
+        "score": score,
+    }
+    return projected_row
+
+
+def _conversation_projection_source(row: dict[str, Any]) -> str:
+    """Build a compact source label for a projected conversation row."""
+
+    platform_message_id = text_or_empty(row.get("platform_message_id"))
+    if platform_message_id:
+        source = f"conversation:platform_message_id:{platform_message_id}"
+        return source
+
+    conversation_row_id = text_or_empty(row.get("conversation_row_id"))
+    if conversation_row_id:
+        source = f"conversation:row_id:{conversation_row_id}"
+        return source
+
+    timestamp = text_or_empty(row.get("timestamp"))
+    display_name = text_or_empty(row.get("display_name"))
+    if timestamp or display_name:
+        source = f"conversation:{display_name}:{timestamp}"
+        return source
+
+    source = "conversation:unknown"
+    return source
+
+
 def _message_row_text(row: dict[str, Any]) -> str:
     """Extract prompt-facing text from one canonical message row."""
-    body = text_or_empty(row.get("body_text"))
-    if not body:
-        body = text_or_empty(row.get("content"))
-    if not body:
-        body = text_or_empty(row.get("summary"))
-    if not body:
-        body = text_or_empty(row.get("text"))
-
-    display_name = text_or_empty(row.get("display_name"))
-    timestamp = format_timestamp_for_llm(text_or_empty(row.get("timestamp")))
-    if display_name and timestamp and body:
-        text = f"{display_name} at {timestamp}: {body}"
-        return text
-    if display_name and body:
-        text = f"{display_name}: {body}"
-        return text
-    return body
+    text = candidate_prompt_text(
+        row,
+        source="conversation",
+        text_limit=RAG_CONVERSATION_EVIDENCE_TEXT_LIMIT,
+    )
+    return text
 
 
 def _refs_from_message_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -810,7 +879,10 @@ def _aggregate_projection(value: object) -> _ConversationProjection:
     if total_text:
         summary_parts.append(f"total={total_text}")
     if row_summaries:
-        summary_parts.append("top rows: " + "; ".join(row_summaries[:5]))
+        summary_parts.append(
+            "top rows: "
+            + "; ".join(row_summaries[:RAG_SEARCH_SELECTED_SUMMARY_LIMIT])
+        )
 
     if len(summary_parts) == 1:
         summaries: list[str] = []
@@ -820,6 +892,7 @@ def _aggregate_projection(value: object) -> _ConversationProjection:
 
     projection: _ConversationProjection = {
         "summaries": summaries,
+        "rows": [],
         "resolved_refs": _refs_from_aggregate_rows(rows),
     }
     return projection
@@ -924,7 +997,6 @@ class ConversationEvidenceAgent(BaseRAGHelperAgent):
             cache_name="",
             cache_runtime=cache_runtime,
         )
-        self.keyword_agent = ConversationKeywordAgent(cache_runtime=cache_runtime)
         self.search_agent = ConversationSearchAgent(cache_runtime=cache_runtime)
         self.filter_agent = ConversationFilterAgent(cache_runtime=cache_runtime)
         self.aggregate_agent = ConversationAggregateAgent(
@@ -987,21 +1059,45 @@ class ConversationEvidenceAgent(BaseRAGHelperAgent):
             + exclusion_counts["platform_message_id"]
         )
         summaries = projection["summaries"]
-        selected_summary = "\n".join(summaries[:5])
+        projection_rows = projection["rows"]
+        selected_summary = "\n".join(summaries[:RAG_SEARCH_SELECTED_SUMMARY_LIMIT])
         resolved_refs = projection["resolved_refs"]
         resolved = bool(worker_result.get("resolved")) and bool(summaries)
         missing_context = [] if resolved else ["conversation_evidence"]
+        observation_candidates = []
+        source_hints: list[dict[str, Any]] = []
+        if summaries and not resolved:
+            observation_candidates = [
+                {
+                    "content": row["summary"],
+                    "source": _conversation_projection_source(row),
+                }
+                for row in projection_rows[:RAG_SEARCH_SELECTED_SUMMARY_LIMIT]
+            ]
+            source_hints = [
+                {
+                    "kind": "conversation",
+                    "source": candidate["source"],
+                }
+                for candidate in observation_candidates
+                if candidate.get("source")
+            ]
         payload = _result_payload(
             selected_summary=selected_summary,
             primary_worker=primary_worker,
             supporting_workers=[],
             source_policy=text_or_empty(plan["reason"]),
             resolved_refs=resolved_refs,
-            projection_payload={"summaries": summaries},
+            projection_payload={
+                "summaries": summaries,
+                "rows": projection_rows,
+            },
             worker_payloads=worker_payloads,
             evidence=summaries,
             missing_context=missing_context,
             conflicts=[],
+            observation_candidates=observation_candidates,
+            source_hints=source_hints,
         )
         logger.info(
             f"{_AGENT_NAME} output: resolved={resolved} "
@@ -1030,8 +1126,6 @@ class ConversationEvidenceAgent(BaseRAGHelperAgent):
 
     def _worker_for_name(self, worker_name: str) -> BaseRAGHelperAgent:
         """Return the configured worker instance for an approved name."""
-        if worker_name == "conversation_keyword_agent":
-            return self.keyword_agent
         if worker_name == "conversation_filter_agent":
             return self.filter_agent
         if worker_name == "conversation_aggregate_agent":
@@ -1058,6 +1152,8 @@ class ConversationEvidenceAgent(BaseRAGHelperAgent):
             evidence=[],
             missing_context=missing_context,
             conflicts=[],
+            observation_candidates=[],
+            source_hints=[],
         )
         logger.info(
             f"{_AGENT_NAME} output: resolved=False "

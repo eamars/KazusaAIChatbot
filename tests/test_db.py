@@ -1464,8 +1464,8 @@ async def test_search_conversation_history_keyword_mocked():
     assert results[0][1]["body_text"] == "keyword matched"
     # Verify the regex filter was passed
     call_filter = db.conversation_history.find.call_args[0][0]
-    assert "$or" not in call_filter
-    assert "$regex" in call_filter["body_text"]
+    assert call_filter["$or"][0]["body_text"]["$regex"] == "keyword"
+    assert call_filter["$or"][1]["attachments.description"]["$regex"] == "keyword"
 
 
 @pytest.mark.asyncio
@@ -1484,8 +1484,8 @@ async def test_search_conversation_history_keyword_with_filters_mocked():
     call_filter = db.conversation_history.find.call_args[0][0]
     assert call_filter["platform_channel_id"] == "ch1"
     assert call_filter["global_user_id"] == "u1"
-    assert "$or" not in call_filter
-    assert "$regex" in call_filter["body_text"]
+    assert call_filter["$or"][0]["body_text"]["$regex"] == "test"
+    assert call_filter["$or"][1]["attachments.description"]["$regex"] == "test"
 
 
 @pytest.mark.asyncio
@@ -1520,7 +1520,7 @@ async def test_search_conversation_history_vector_mocked(
     vs = pipeline[0]["$vectorSearch"]
     assert vs["queryVector"] == [0.1, 0.2, 0.3]
     assert vs["index"] == "conversation_history_vector_index"
-    assert vs["numCandidates"] == 200
+    assert vs["numCandidates"] == db_conversation_module.RAG_VECTOR_MIN_CANDIDATES
 
 
 @pytest.mark.asyncio

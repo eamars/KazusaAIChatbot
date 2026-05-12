@@ -452,10 +452,10 @@ async def test_live_context_explicit_location_current_time_stays_external() -> N
 
 
 @pytest.mark.asyncio
-async def test_conversation_evidence_exact_phrase_uses_keyword_and_refs() -> None:
-    """Exact phrase evidence should expose speaker, message, and URL refs."""
+async def test_conversation_evidence_exact_phrase_uses_hybrid_search_and_refs() -> None:
+    """Exact phrase evidence should use hybrid search and expose refs."""
     agent = ConversationEvidenceAgent()
-    keyword_worker = _FakeWorker(
+    search_worker = _FakeWorker(
         {
             "resolved": True,
             "result": [
@@ -472,9 +472,9 @@ async def test_conversation_evidence_exact_phrase_uses_keyword_and_refs() -> Non
             "cache": {"enabled": False, "hit": False, "reason": "open_range"},
         }
     )
-    search_worker = _FakeWorker({"resolved": True, "result": []})
-    agent.keyword_agent = keyword_worker
+    keyword_worker = _FakeWorker({"resolved": True, "result": []})
     agent.search_agent = search_worker
+    agent.keyword_agent = keyword_worker
 
     result = await agent.run(
         'Conversation-evidence: find who said "约定就是约定"',
@@ -482,15 +482,19 @@ async def test_conversation_evidence_exact_phrase_uses_keyword_and_refs() -> Non
     )
 
     assert result["resolved"] is True
-    assert search_worker.calls == []
-    assert len(keyword_worker.calls) == 1
-    assert keyword_worker.calls[0]["context"]["exclude_current_question"] is True
+    assert len(search_worker.calls) == 1
+    assert keyword_worker.calls == []
+    assert search_worker.calls[0]["context"]["exclude_current_question"] is True
 
     payload = result["result"]
-    assert payload["primary_worker"] == "conversation_keyword_agent"
+    assert payload["primary_worker"] == "conversation_search_agent"
     assert payload["projection_payload"]["summaries"] == [
         "Tester at 2026-05-02 11:00: 约定就是约定, and here is https://example.test/post"
     ]
+    assert payload["projection_payload"]["rows"][0]["summary"] == (
+        "Tester at 2026-05-02 11:00: "
+        "约定就是约定, and here is https://example.test/post"
+    )
     assert {
         "ref_type": "person",
         "role": "speaker",
@@ -512,8 +516,8 @@ async def test_conversation_evidence_exact_phrase_uses_keyword_and_refs() -> Non
 
 
 @pytest.mark.asyncio
-async def test_conversation_evidence_cjk_quotes_use_keyword_shortcut() -> None:
-    """Quoted CJK phrases should not spend an LLM selector hop."""
+async def test_conversation_evidence_cjk_quotes_use_hybrid_shortcut() -> None:
+    """Quoted CJK phrases should route directly to hybrid search."""
     tasks = [
         "Conversation-evidence: find who said \u201c约定就是约定\u201d",
         "Conversation-evidence: find who said \u2018约定就是约定\u2019",
@@ -523,7 +527,7 @@ async def test_conversation_evidence_cjk_quotes_use_keyword_shortcut() -> None:
 
     for task in tasks:
         agent = ConversationEvidenceAgent()
-        keyword_worker = _FakeWorker(
+        search_worker = _FakeWorker(
             {
                 "resolved": True,
                 "result": [
@@ -540,9 +544,9 @@ async def test_conversation_evidence_cjk_quotes_use_keyword_shortcut() -> None:
                 "cache": {"enabled": False, "hit": False, "reason": "open_range"},
             }
         )
-        search_worker = _FakeWorker({"resolved": True, "result": []})
-        agent.keyword_agent = keyword_worker
+        keyword_worker = _FakeWorker({"resolved": True, "result": []})
         agent.search_agent = search_worker
+        agent.keyword_agent = keyword_worker
 
         result = await agent.run(
             task,
@@ -550,9 +554,9 @@ async def test_conversation_evidence_cjk_quotes_use_keyword_shortcut() -> None:
         )
 
         assert result["resolved"] is True
-        assert result["result"]["primary_worker"] == "conversation_keyword_agent"
-        assert len(keyword_worker.calls) == 1
-        assert search_worker.calls == []
+        assert result["result"]["primary_worker"] == "conversation_search_agent"
+        assert len(search_worker.calls) == 1
+        assert keyword_worker.calls == []
 
 
 @pytest.mark.asyncio
@@ -625,7 +629,7 @@ async def test_conversation_evidence_excludes_active_turn_keyword_row() -> None:
             "cache": {"enabled": False, "hit": False, "reason": "open_range"},
         }
     )
-    agent.keyword_agent = keyword_worker
+    agent.search_agent = keyword_worker
 
     result = await agent.run(
         'Conversation-evidence: find who said "active question"',
@@ -736,7 +740,7 @@ async def test_conversation_evidence_excludes_active_turn_row_id_hit() -> None:
             "cache": {"enabled": False, "hit": False, "reason": "open_range"},
         }
     )
-    agent.keyword_agent = keyword_worker
+    agent.search_agent = keyword_worker
 
     result = await agent.run(
         'Conversation-evidence: find who said "active question"',
@@ -795,7 +799,7 @@ async def test_conversation_evidence_logs_active_turn_exclusion_reason_counts(
             "cache": {"enabled": False, "hit": False, "reason": "open_range"},
         }
     )
-    agent.keyword_agent = keyword_worker
+    agent.search_agent = keyword_worker
 
     with caplog.at_level(
         logging.INFO,
@@ -854,7 +858,7 @@ async def test_conversation_evidence_excludes_collapsed_active_turn_rows() -> No
             "cache": {"enabled": False, "hit": False, "reason": "open_range"},
         }
     )
-    agent.keyword_agent = keyword_worker
+    agent.search_agent = keyword_worker
 
     result = await agent.run(
         'Conversation-evidence: find who said "same body"',
@@ -893,7 +897,7 @@ async def test_conversation_evidence_keeps_row_without_message_id() -> None:
             "cache": {"enabled": False, "hit": False, "reason": "open_range"},
         }
     )
-    agent.keyword_agent = keyword_worker
+    agent.search_agent = keyword_worker
 
     result = await agent.run(
         'Conversation-evidence: find who said "active question"',
@@ -936,7 +940,7 @@ async def test_conversation_evidence_does_not_match_empty_active_row_id() -> Non
             "cache": {"enabled": False, "hit": False, "reason": "open_range"},
         }
     )
-    agent.keyword_agent = keyword_worker
+    agent.search_agent = keyword_worker
 
     result = await agent.run(
         'Conversation-evidence: find who said "blank row id should stay"',
@@ -1019,7 +1023,7 @@ async def test_conversation_evidence_current_user_scope_replaces_self_dependency
             "cache": {"enabled": False, "hit": False, "reason": "open_range"},
         }
     )
-    agent.keyword_agent = keyword_worker
+    agent.search_agent = keyword_worker
 
     old_result = await agent.run(
         (
@@ -1057,7 +1061,7 @@ async def test_conversation_evidence_current_user_scope_replaces_self_dependency
     assert new_result["resolved"] is True
     assert len(keyword_worker.calls) == 1
     assert keyword_worker.calls[0]["context"]["global_user_id"] == "user-1"
-    assert new_result["result"]["primary_worker"] == "conversation_keyword_agent"
+    assert new_result["result"]["primary_worker"] == "conversation_search_agent"
 
 
 @pytest.mark.asyncio
@@ -1078,7 +1082,7 @@ async def test_conversation_evidence_current_user_scope_replaces_self_dependency
             "cache": {"enabled": False, "hit": False, "reason": "open_range"},
         }
     )
-    agent.keyword_agent = keyword_worker
+    agent.search_agent = keyword_worker
 
     old_result = await agent.run(
         (
@@ -1097,7 +1101,7 @@ async def test_conversation_evidence_current_user_scope_replaces_self_dependency
     assert new_result["resolved"] is True
     assert len(keyword_worker.calls) == 1
     assert keyword_worker.calls[0]["context"]["global_user_id"] == "user-1"
-    assert new_result["result"]["primary_worker"] == "conversation_keyword_agent"
+    assert new_result["result"]["primary_worker"] == "conversation_search_agent"
 
 
 @pytest.mark.asyncio
@@ -1185,6 +1189,42 @@ async def test_conversation_evidence_any_speaker_scope_removes_current_user_filt
 
 
 @pytest.mark.asyncio
+async def test_conversation_evidence_unscoped_search_removes_current_user_filter() -> None:
+    """Unscoped evidence searches should default to the group, not the caller."""
+    agent = ConversationEvidenceAgent()
+    search_worker = _FakeWorker(
+        {
+            "resolved": True,
+            "result": [
+                (
+                    0.69,
+                    {
+                        "body_text": "Someone talked about train plans.",
+                        "display_name": "Other",
+                        "global_user_id": "other-user",
+                    },
+                )
+            ],
+            "attempts": 1,
+            "cache": {"enabled": False, "hit": False, "reason": "open_range"},
+        }
+    )
+    agent.search_agent = search_worker
+
+    result = await agent.run(
+        "Conversation-evidence: retrieve recent messages about train plans",
+        _base_context(display_name="Tester"),
+    )
+
+    assert result["resolved"] is True
+    assert len(search_worker.calls) == 1
+    assert "global_user_id" not in search_worker.calls[0]["context"]
+    assert "display_name" not in search_worker.calls[0]["context"]
+    assert "conversation_user_scope" not in search_worker.calls[0]["context"]
+    assert result["result"]["primary_worker"] == "conversation_search_agent"
+
+
+@pytest.mark.asyncio
 async def test_conversation_evidence_active_character_scope_uses_character_identity() -> None:
     """Active-character searches should filter worker calls to character rows."""
     agent = ConversationEvidenceAgent()
@@ -1202,7 +1242,7 @@ async def test_conversation_evidence_active_character_scope_uses_character_ident
             "cache": {"enabled": False, "hit": False, "reason": "open_range"},
         }
     )
-    agent.keyword_agent = keyword_worker
+    agent.search_agent = keyword_worker
 
     result = await agent.run(
         (
@@ -1222,7 +1262,7 @@ async def test_conversation_evidence_active_character_scope_uses_character_ident
     worker_context = keyword_worker.calls[0]["context"]
     assert worker_context["global_user_id"] == "character-1"
     assert worker_context["display_name"] == "Kazusa"
-    assert result["result"]["primary_worker"] == "conversation_keyword_agent"
+    assert result["result"]["primary_worker"] == "conversation_search_agent"
 
 
 @pytest.mark.asyncio
@@ -1245,7 +1285,7 @@ async def test_conversation_evidence_active_character_scope_warns_without_identi
             "cache": {"enabled": False, "hit": False, "reason": "open_range"},
         }
     )
-    agent.keyword_agent = keyword_worker
+    agent.search_agent = keyword_worker
 
     result = await agent.run(
         (
@@ -1319,7 +1359,7 @@ async def test_conversation_evidence_rejects_active_agreement_intent() -> None:
     """Active episode agreement lookup belongs to Recall, not chat search."""
     agent = ConversationEvidenceAgent()
     keyword_worker = _FakeWorker({"resolved": True, "result": []})
-    agent.keyword_agent = keyword_worker
+    agent.search_agent = keyword_worker
 
     result = await agent.run(
         "Conversation-evidence: retrieve active agreement for today's appointment",
@@ -1351,7 +1391,7 @@ async def test_memory_evidence_official_address_uses_search() -> None:
         }
     )
     keyword_worker = _FakeWorker({"resolved": True, "result": []})
-    agent.keyword_agent = keyword_worker
+    agent.search_agent = keyword_worker
     agent.search_agent = search_worker
 
     result = await agent.run(
@@ -1381,10 +1421,10 @@ async def test_memory_evidence_official_address_uses_search() -> None:
 
 
 @pytest.mark.asyncio
-async def test_memory_evidence_exact_memory_name_uses_keyword() -> None:
-    """Literal memory identifiers should use memory keyword evidence."""
+async def test_memory_evidence_exact_memory_name_uses_hybrid_search() -> None:
+    """Literal memory identifiers should use shared hybrid memory evidence."""
     agent = MemoryEvidenceAgent()
-    keyword_worker = _FakeWorker(
+    search_worker = _FakeWorker(
         {
             "resolved": True,
             "result": [
@@ -1398,9 +1438,9 @@ async def test_memory_evidence_exact_memory_name_uses_keyword() -> None:
             "cache": {"enabled": True, "hit": False, "reason": "miss_stored"},
         }
     )
-    search_worker = _FakeWorker({"resolved": True, "result": []})
-    agent.keyword_agent = keyword_worker
+    keyword_worker = _FakeWorker({"resolved": True, "result": []})
     agent.search_agent = search_worker
+    agent.keyword_agent = keyword_worker
 
     result = await agent.run(
         "Memory-evidence: exact memory_name active-character-official-address",
@@ -1408,9 +1448,9 @@ async def test_memory_evidence_exact_memory_name_uses_keyword() -> None:
     )
 
     assert result["resolved"] is True
-    assert len(keyword_worker.calls) == 1
-    assert search_worker.calls == []
-    assert result["result"]["primary_worker"] == "persistent_memory_keyword_agent"
+    assert len(search_worker.calls) == 1
+    assert keyword_worker.calls == []
+    assert result["result"]["primary_worker"] == "persistent_memory_search_agent"
 
 
 @pytest.mark.asyncio
@@ -1480,7 +1520,18 @@ async def test_memory_evidence_unresolved_candidates_are_observation_only() -> N
     assert payload["selected_summary"] == ""
     assert payload["evidence"] == []
     assert payload["projection_payload"]["memory_rows"] == []
-    assert payload["observation_candidates"] == [stale_policy_row]
+    assert payload["observation_candidates"] == [
+        {
+            "content": stale_policy_row["content"],
+            "source": "memory:memory_name:volatile-technical-data-policy",
+        }
+    ]
+    assert payload["source_hints"] == [
+        {
+            "kind": "memory",
+            "source": "memory:memory_name:volatile-technical-data-policy",
+        }
+    ]
     assert payload["missing_context"] == ["memory_evidence"]
 
 

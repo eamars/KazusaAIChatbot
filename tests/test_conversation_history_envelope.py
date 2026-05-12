@@ -171,10 +171,10 @@ async def test_get_conversation_history_returns_typed_rows(monkeypatch) -> None:
 
 
 @pytest.mark.asyncio
-async def test_keyword_search_uses_body_text_filter(
+async def test_keyword_search_uses_body_text_and_attachment_filter(
     monkeypatch,
 ) -> None:
-    """Keyword search should query body_text only."""
+    """Keyword search should query body_text and attachment descriptions."""
 
     db = MagicMock()
     cursor = AsyncMock()
@@ -196,8 +196,8 @@ async def test_keyword_search_uses_body_text_filter(
     )
 
     call_filter = db.conversation_history.find.call_args.args[0]
-    assert call_filter["body_text"]["$regex"] == "keyword"
-    assert "$or" not in call_filter
+    assert call_filter["$or"][0]["body_text"]["$regex"] == "keyword"
+    assert call_filter["$or"][1]["attachments.description"]["$regex"] == "keyword"
     assert results[0][1]["body_text"] == "keyword"
 
 

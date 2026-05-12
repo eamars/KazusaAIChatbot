@@ -4,12 +4,19 @@ from __future__ import annotations
 
 import json
 import logging
+from string import Template
 from typing import Any
 
 from langchain_core.messages import HumanMessage, SystemMessage
 from pydantic import ValidationError
 
-from kazusa_ai_chatbot.config import RAG_SUBAGENT_LLM_API_KEY, RAG_SUBAGENT_LLM_BASE_URL, RAG_SUBAGENT_LLM_MODEL
+from kazusa_ai_chatbot.config import (
+    RAG_SEARCH_DEFAULT_TOP_K,
+    RAG_SEARCH_MAX_TOP_K,
+    RAG_SUBAGENT_LLM_API_KEY,
+    RAG_SUBAGENT_LLM_BASE_URL,
+    RAG_SUBAGENT_LLM_MODEL,
+)
 from kazusa_ai_chatbot.rag.memory_retrieval_tools import get_conversation
 from kazusa_ai_chatbot.rag.cache2_policy import (
     CONVERSATION_FILTER_CACHE_NAME,
@@ -22,6 +29,9 @@ from kazusa_ai_chatbot.rag.prompt_projection import (
     project_runtime_context_for_llm,
     project_tool_result_for_llm,
 )
+from kazusa_ai_chatbot.rag.search_runtime import (
+    apply_conversation_filter_runtime_constraints,
+)
 from kazusa_ai_chatbot.time_context import (
     structured_llm_time_to_utc_iso,
 )
@@ -29,7 +39,7 @@ from kazusa_ai_chatbot.utils import get_llm, parse_llm_json_output, text_or_empt
 
 logger = logging.getLogger(__name__)
 
-_GENERATOR_PROMPT = """\
+_GENERATOR_PROMPT = Template("""\
 你是一个只负责 `get_conversation` 的结构化筛选参数生成器。
 
 # 你的唯一职责
@@ -58,13 +68,13 @@ _GENERATOR_PROMPT = """\
 {
   "platform": "string or omitted",
   "platform_channel_id": "string or omitted",
-  "limit": 5,
+  "limit": $default_limit,
   "global_user_id": "string or omitted",
   "display_name": "string or omitted",
   "from_timestamp": "local YYYY-MM-DD HH:MM or omitted",
   "to_timestamp": "local YYYY-MM-DD HH:MM or omitted"
 }
-"""
+""").substitute(default_limit=RAG_SEARCH_DEFAULT_TOP_K)
 _generator_llm = get_llm(
     temperature=0.0,
     top_p=1.0,
@@ -125,11 +135,11 @@ def _normalize_args(raw_args: dict[str, Any]) -> dict[str, Any]:
     """
     args: dict[str, Any] = {}
 
-    limit = raw_args.get("limit", 5)
+    limit = raw_args.get("limit", RAG_SEARCH_DEFAULT_TOP_K)
     if isinstance(limit, int) and not isinstance(limit, bool) and limit > 0:
-        args["limit"] = limit
+        args["limit"] = min(limit, RAG_SEARCH_MAX_TOP_K)
     else:
-        args["limit"] = 5
+        args["limit"] = RAG_SEARCH_DEFAULT_TOP_K
 
     for key in (
         "platform",
@@ -201,6 +211,21 @@ async def _tool(args: dict[str, Any]) -> object:
         logger.info(f'conversation_filter_agent invalid args: {exc}')
         return_value = {"error": f"{type(exc).__name__}: {exc}"}
         return return_value
+
+
+def _apply_runtime_constraints(
+    args: dict[str, Any],
+    task: str,
+    context: dict[str, Any],
+) -> dict[str, Any]:
+    """Apply runtime-owned filters after structured argument generation."""
+
+    constrained = apply_conversation_filter_runtime_constraints(
+        args,
+        context=context,
+        task=task,
+    )
+    return constrained
 
 
 async def _judge(task: str, result: object) -> tuple[bool, str]:
@@ -280,6 +305,7 @@ class ConversationFilterAgent(BaseRAGHelperAgent):
 
         for attempt in range(max_attempts):
             args = await _generator(task, context, feedback)
+            args = _apply_runtime_constraints(args, task, context)
             result = await _tool(args)
             resolved, feedback = await _judge(task, result)
             if resolved:

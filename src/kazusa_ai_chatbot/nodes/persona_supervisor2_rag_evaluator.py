@@ -179,6 +179,37 @@ async def _summarize_agent_result(
     return return_value
 
 
+def _unresolved_summary(slot: str, raw_result: object) -> str:
+    """Build deterministic unresolved text without hiding candidate rows."""
+
+    if isinstance(raw_result, dict):
+        observation_candidates = _compact_continuation_items(
+            raw_result.get('observation_candidates')
+        )
+        if observation_candidates:
+            preview_parts = []
+            for candidate in observation_candidates[:3]:
+                content = candidate.get('content') or candidate.get('summary')
+                source = candidate.get('source')
+                if content and source:
+                    preview_parts.append(f'{source}: {content}')
+                    continue
+                if content:
+                    preview_parts.append(content)
+            preview = '；'.join(preview_parts)
+            if preview:
+                summary = (
+                    f'检索到候选结果，但未确认足以解决槽位。'
+                    f'槽位: {slot}。候选: {preview}'
+                )
+                return summary
+            summary = f'检索到候选结果，但未确认足以解决槽位。槽位: {slot}'
+            return summary
+
+    summary = f'检索未返回相关结果。槽位: {slot}'
+    return summary
+
+
 _CONTINUATION_OBSERVATION_LIMIT = 5
 _CONTINUATION_OBSERVATION_TEXT_LIMIT = 500
 _CONTINUATION_KNOWN_FACT_LIMIT = 5
@@ -540,7 +571,7 @@ async def rag_evaluator(state: ProgressiveRAGState) -> dict:
             known_facts,
         )
     else:
-        summary = f"检索未返回相关结果。槽位: {slot}"
+        summary = _unresolved_summary(slot, raw_result)
 
     continuation_decision: RAGContinuationDecision | None = None
     loop_count = int(state.get("loop_count", 0) or 0)
@@ -608,11 +639,12 @@ _FINALIZER_PROMPT = '''\
 
 # 生成步骤
 1. 先读取 `original_query`，确认本次摘要需要覆盖的事实类型。
-2. 按顺序读取 `known_facts`，只使用 resolved 槽位中的 summary 和 raw_result。
-3. 如果 user_profile_agent 的 raw_result 包含 user_memory_context，区分 fact、subjective_appraisal、relationship_signal 三种语义。
-4. 如果某个必要槽位 unresolved，只说明缺少该槽位信息。
-5. 如果 agent="recall_agent"，优先使用 raw_result.selected_summary 总结约定/承诺/进度事实。
-6. 输出一段短的事实摘要；说话人、来源、时间和引用都应来自 `known_facts` 中可见内容。
+2. 读取 `time_context`，将“今天/昨天/前天”等相对日期解释为角色本地日期。
+3. 按顺序读取 `known_facts`，只使用 resolved 槽位中的 summary 和 raw_result。
+4. 如果 user_profile_agent 的 raw_result 包含 user_memory_context，区分 fact、subjective_appraisal、relationship_signal 三种语义。
+5. 如果某个必要槽位 unresolved，只说明缺少该槽位信息。
+6. 如果 agent="recall_agent"，优先使用 raw_result.selected_summary 总结约定/承诺/进度事实。
+7. 输出一段短的事实摘要；说话人、来源、时间和引用都应来自 `known_facts` 中可见内容。
 
 # 准则
 - 围绕 `original_query` 需要的事实组织摘要，不要复述查找过程。
@@ -634,6 +666,7 @@ _FINALIZER_PROMPT = '''\
 # 输入格式
 {
     "original_query": "用户原始问题",
+    "time_context": {"current_local_datetime": "YYYY-MM-DD HH:MM", "current_local_weekday": "Weekday"},
     "known_facts": [{"slot": ..., "agent": ..., "resolved": ..., "summary": "简洁事实摘要", "raw_result": "原始工具输出（如需引用原文）", "attempts": ...}, ...]
 }
 
@@ -652,6 +685,28 @@ _finalizer_llm = get_llm(
 )
 
 
+def _finalizer_time_context(state: ProgressiveRAGState) -> dict[str, object]:
+    """Return prompt-facing local time context for the finalizer."""
+
+    context = state.get("context", {})
+    if not isinstance(context, dict):
+        return_value: dict[str, object] = {}
+        return return_value
+
+    time_context = context.get("time_context")
+    if not isinstance(time_context, dict):
+        return_value = {}
+        return return_value
+
+    allowed_keys = ("current_local_datetime", "current_local_weekday")
+    return_value = {
+        key: time_context[key]
+        for key in allowed_keys
+        if isinstance(time_context.get(key), str)
+    }
+    return return_value
+
+
 async def rag_finalizer(state: ProgressiveRAGState) -> dict:
     """Synthesise the final answer from all collected slot results.
 
@@ -664,6 +719,7 @@ async def rag_finalizer(state: ProgressiveRAGState) -> dict:
     system_prompt = SystemMessage(content=_FINALIZER_PROMPT)
     finalizer_input = {
         "original_query": state["original_query"],
+        "time_context": _finalizer_time_context(state),
         "known_facts": _known_facts_llm_view(state.get("known_facts", [])),
     }
     human_message = HumanMessage(content=json.dumps(finalizer_input, ensure_ascii=False, default=str))

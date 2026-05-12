@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+from string import Template
 from typing import Any
 
 from langchain_core.messages import HumanMessage, SystemMessage
@@ -12,31 +13,48 @@ from pydantic import ValidationError
 
 from kazusa_ai_chatbot.config import (
     CHARACTER_GLOBAL_USER_ID,
+    RAG_HYBRID_LITERAL_ANCHOR_LIMIT,
+    RAG_HYBRID_SEMANTIC_ONLY_SCORE_FLOOR,
+    RAG_SEARCH_DEFAULT_TOP_K,
+    RAG_SEARCH_MAX_TOP_K,
+    RAG_SEARCH_SELECTED_LIMIT,
     RAG_SUBAGENT_LLM_API_KEY,
     RAG_SUBAGENT_LLM_BASE_URL,
     RAG_SUBAGENT_LLM_MODEL,
 )
 from kazusa_ai_chatbot.rag.memory_retrieval_tools import search_persistent_memory
+from kazusa_ai_chatbot.rag.memory_retrieval_tools import (
+    search_persistent_memory_keyword,
+)
 from kazusa_ai_chatbot.rag.cache2_policy import (
     PERSISTENT_MEMORY_SEARCH_CACHE_NAME,
     build_persistent_memory_search_cache_key,
     build_persistent_memory_search_dependencies,
 )
 from kazusa_ai_chatbot.rag.helper_agent import BaseRAGHelperAgent
+from kazusa_ai_chatbot.rag.hybrid_retrieval import (
+    HybridCandidate,
+    merge_hybrid_candidates,
+)
 from kazusa_ai_chatbot.rag.prompt_projection import (
     project_runtime_context_for_llm,
     project_tool_result_for_llm,
+)
+from kazusa_ai_chatbot.rag.search_runtime import (
+    apply_source_memory_runtime_constraints,
+    literal_anchors_from_text,
 )
 from kazusa_ai_chatbot.utils import get_llm, parse_llm_json_output, text_or_empty
 
 logger = logging.getLogger(__name__)
 
-_GENERATOR_PROMPT = """\
+_GENERATOR_PROMPT = Template("""\
 你是一个只负责 `search_persistent_memory` 的检索参数生成器。
 
 # 你的唯一职责
 - 只为 `search_persistent_memory` 生成参数。
 - `search_query` 必须写成自然语言的记忆查询，不要退化成关键词列表。
+- `literal_anchors` 是可选字段，只放原问题中必须字面命中的专有名词、技术词、短语或中文关键词；不要把整句拆成词表。
 - `search_query` 应围绕原问题所需的相关证据，不要预设记忆属于事实、印象、看法或特定来源。
 - `source_global_user_id` 是隐私边界，不是相关性提示。默认省略；只有任务明确要求查找"由某个用户触发/提供/承诺"的记忆时才填写。
 - 如果 `feedback` 指出过滤条件太窄、查询太抽象或没有相关记忆，下一轮必须改写。
@@ -62,10 +80,11 @@ _GENERATOR_PROMPT = """\
 请只返回合法 JSON：
 {
   "search_query": "string",
-  "top_k": 5,
+  "literal_anchors": ["string, optional; at most 5 anchors"],
+  "top_k": $default_top_k,
   "source_global_user_id": "UUID string or omitted"
 }
-"""
+""").substitute(default_top_k=RAG_SEARCH_DEFAULT_TOP_K)
 _generator_llm = get_llm(
     temperature=0.0,
     top_p=1.0,
@@ -130,11 +149,15 @@ def _normalize_args(raw_args: dict[str, Any]) -> dict[str, Any]:
     if search_query:
         args["search_query"] = search_query
 
-    top_k = raw_args.get("top_k", 5)
+    literal_anchors = _normalize_literal_anchors(raw_args.get("literal_anchors"))
+    if literal_anchors:
+        args["literal_anchors"] = literal_anchors
+
+    top_k = raw_args.get("top_k", RAG_SEARCH_DEFAULT_TOP_K)
     if isinstance(top_k, int) and not isinstance(top_k, bool) and top_k > 0:
-        args["top_k"] = top_k
+        args["top_k"] = min(top_k, RAG_SEARCH_MAX_TOP_K)
     else:
-        args["top_k"] = 5
+        args["top_k"] = RAG_SEARCH_DEFAULT_TOP_K
 
     for key in ("source_global_user_id",):
         raw_val = raw_args.get(key)
@@ -146,6 +169,26 @@ def _normalize_args(raw_args: dict[str, Any]) -> dict[str, Any]:
 
     _erase_character_source_global_user_id(args)
     return args
+
+
+def _normalize_literal_anchors(value: object) -> list[str]:
+    """Normalize optional literal anchors from the generator output."""
+
+    if not isinstance(value, list):
+        return_value: list[str] = []
+        return return_value
+
+    anchors: list[str] = []
+    for item in value:
+        anchor = text_or_empty(item)
+        if not anchor:
+            continue
+        if anchor not in anchors:
+            anchors.append(anchor)
+        if len(anchors) >= RAG_HYBRID_LITERAL_ANCHOR_LIMIT:
+            break
+
+    return anchors
 
 
 def _erase_character_source_global_user_id(args: dict[str, Any]) -> None:
@@ -303,12 +346,135 @@ async def _tool(args: dict[str, Any]) -> object:
         Tool result or an error dict on invalid arguments.
     """
     try:
-        return_value = await search_persistent_memory.ainvoke(args)
+        semantic_args = _semantic_tool_args(args)
+        semantic_result = await search_persistent_memory.ainvoke(semantic_args)
+        semantic_rows = _semantic_rows_from_result(semantic_result)
+        keyword_rows = await _keyword_rows_for_anchors(args)
+        candidates = merge_hybrid_candidates(
+            semantic_rows,
+            keyword_rows,
+            semantic_only_floor=RAG_HYBRID_SEMANTIC_ONLY_SCORE_FLOOR,
+            selected_limit=RAG_SEARCH_SELECTED_LIMIT,
+            source="persistent_memory",
+        )
+        return_value = _rows_from_candidates(candidates)
         return return_value
     except (TypeError, ValueError, ValidationError) as exc:
         logger.info(f'persistent_memory_search_agent invalid args: {exc}')
         return_value = {"error": f"{type(exc).__name__}: {exc}"}
         return return_value
+
+
+def _apply_runtime_constraints(
+    args: dict[str, Any],
+    context: dict[str, Any],
+    task: str = "",
+) -> dict[str, Any]:
+    """Apply runtime-owned source filters and task anchors after generation."""
+
+    constrained = apply_source_memory_runtime_constraints(args, context=context)
+    generated_anchors = constrained.get("literal_anchors")
+    anchors = generated_anchors if isinstance(generated_anchors, list) else []
+    normalized_anchors = _normalize_literal_anchors(anchors)
+    for anchor in literal_anchors_from_text(
+        task,
+        limit=RAG_HYBRID_LITERAL_ANCHOR_LIMIT,
+    ):
+        if anchor not in normalized_anchors:
+            normalized_anchors.append(anchor)
+        if len(normalized_anchors) >= RAG_HYBRID_LITERAL_ANCHOR_LIMIT:
+            break
+    if normalized_anchors:
+        constrained["literal_anchors"] = normalized_anchors
+    else:
+        constrained.pop("literal_anchors", None)
+
+    return constrained
+
+
+def _semantic_tool_args(args: dict[str, Any]) -> dict[str, Any]:
+    """Remove hybrid-only fields before calling semantic memory retrieval."""
+
+    semantic_args = {
+        key: value
+        for key, value in args.items()
+        if key != "literal_anchors"
+    }
+    return semantic_args
+
+
+def _keyword_tool_args(
+    args: dict[str, Any],
+    anchor: str,
+) -> dict[str, Any]:
+    """Build keyword memory tool args from shared semantic filters."""
+
+    keyword_args: dict[str, Any] = {
+        "keyword": anchor,
+        "top_k": args.get("top_k", RAG_SEARCH_DEFAULT_TOP_K),
+    }
+    source_global_user_id = args.get("source_global_user_id")
+    if source_global_user_id:
+        keyword_args["source_global_user_id"] = source_global_user_id
+    return keyword_args
+
+
+def _semantic_rows_from_result(result: object) -> list[dict[str, Any]]:
+    """Convert semantic memory tool output into hybrid rows."""
+
+    if not isinstance(result, list):
+        return_value: list[dict[str, Any]] = []
+        return return_value
+
+    rows = [
+        dict(item)
+        for item in result
+        if isinstance(item, dict)
+    ]
+    return rows
+
+
+async def _keyword_rows_for_anchors(args: dict[str, Any]) -> list[dict[str, Any]]:
+    """Run keyword memory retrieval for literal anchors generated with the query."""
+
+    anchors = args.get("literal_anchors")
+    if not isinstance(anchors, list):
+        return_value: list[dict[str, Any]] = []
+        return return_value
+
+    rows: list[dict[str, Any]] = []
+    for anchor in anchors:
+        anchor_text = text_or_empty(anchor)
+        if not anchor_text:
+            continue
+        keyword_result = await search_persistent_memory_keyword.ainvoke(
+            _keyword_tool_args(args, anchor_text)
+        )
+        if not isinstance(keyword_result, list):
+            continue
+        for item in keyword_result:
+            if not isinstance(item, dict):
+                continue
+            row = dict(item)
+            row["method"] = f"keyword:{anchor_text}"
+            row["matched_anchors"] = [anchor_text]
+            rows.append(row)
+
+    return rows
+
+
+def _rows_from_candidates(candidates: list[HybridCandidate]) -> list[dict[str, Any]]:
+    """Project fused candidates back to ordinary memory rows."""
+
+    rows: list[dict[str, Any]] = []
+    for rank, candidate in enumerate(candidates, start=1):
+        row = dict(candidate.row)
+        row["methods"] = list(candidate.methods)
+        row["matched_anchors"] = list(candidate.matched_anchors)
+        row["score"] = candidate.score
+        row["hybrid_rank"] = rank
+        rows.append(row)
+    return rows
 
 
 async def _judge(task: str, result: object) -> tuple[bool, str]:
@@ -389,6 +555,7 @@ class PersistentMemorySearchAgent(BaseRAGHelperAgent):
         for attempt in range(max_attempts):
             args = await _generator(task, context, feedback)
             args = _apply_resolved_subject_user(args, task, context)
+            args = _apply_runtime_constraints(args, context, task)
             result = await _tool(args)
             resolved, feedback = await _judge(task, result)
             if resolved:

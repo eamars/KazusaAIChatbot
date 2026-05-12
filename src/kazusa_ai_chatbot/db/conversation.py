@@ -8,6 +8,10 @@ from typing import Any
 
 from kazusa_ai_chatbot.config import (
     CONVERSATION_HISTORY_LIMIT,
+    RAG_SEARCH_DEFAULT_TOP_K,
+    RAG_VECTOR_CANDIDATE_MULTIPLIER,
+    RAG_VECTOR_MAX_CANDIDATES,
+    RAG_VECTOR_MIN_CANDIDATES,
     SAVE_ATTACHMENT_BASE64_TO_DB,
 )
 from kazusa_ai_chatbot.db._client import (
@@ -32,9 +36,6 @@ CONVERSATION_VECTOR_FILTER_FIELDS = (
     "role",
     "timestamp",
 )
-_VECTOR_SEARCH_MIN_CANDIDATES = 200
-_VECTOR_SEARCH_CANDIDATE_MULTIPLIER = 20
-_VECTOR_SEARCH_MAX_CANDIDATES = 10000
 _conversation_vector_prefilter_support_cache: bool | None = None
 
 
@@ -53,10 +54,10 @@ def _vector_num_candidates(limit: int) -> int:
     """Return a bounded Atlas candidate count for conversation vector search."""
 
     candidate_count = max(
-        _VECTOR_SEARCH_MIN_CANDIDATES,
-        limit * _VECTOR_SEARCH_CANDIDATE_MULTIPLIER,
+        RAG_VECTOR_MIN_CANDIDATES,
+        limit * RAG_VECTOR_CANDIDATE_MULTIPLIER,
     )
-    candidate_count = min(candidate_count, _VECTOR_SEARCH_MAX_CANDIDATES)
+    candidate_count = min(candidate_count, RAG_VECTOR_MAX_CANDIDATES)
     return candidate_count
 
 
@@ -235,10 +236,15 @@ def _merge_attachment_descriptions(
 
 
 def _keyword_text_filter(pattern: str) -> dict[str, Any]:
-    """Build a case-insensitive filter for typed conversation body text."""
+    """Build a case-insensitive filter for searchable conversation text."""
 
     regex_filter = {"$regex": pattern, "$options": "i"}
-    filter_doc: dict[str, Any] = {"body_text": regex_filter}
+    filter_doc: dict[str, Any] = {
+        "$or": [
+            {"body_text": regex_filter},
+            {"attachments.description": regex_filter},
+        ]
+    }
     return filter_doc
 
 
@@ -250,9 +256,25 @@ async def get_conversation_history(
     display_name: str | None = None,
     from_timestamp: str | None = None,
     to_timestamp: str | None = None,
+    sort_direction: int = -1,
 ) -> list[ConversationMessageDoc]:
-    """Fetch the last ``limit`` messages for a channel (or all channels), oldest first."""
+    """Fetch bounded messages for a channel, returned oldest first.
+
+    Args:
+        platform: Optional platform filter.
+        platform_channel_id: Optional channel filter.
+        limit: Maximum number of rows to fetch before chronological projection.
+        global_user_id: Optional speaker UUID filter.
+        display_name: Optional speaker display-name filter when no UUID is set.
+        from_timestamp: Optional inclusive lower timestamp bound.
+        to_timestamp: Optional inclusive upper timestamp bound.
+        sort_direction: ``-1`` for newest rows in the window, ``1`` for oldest.
+
+    Returns:
+        Conversation rows sorted chronologically.
+    """
     db = await get_db()
+    effective_sort_direction = 1 if sort_direction == 1 else -1
 
     query: dict[str, Any] = {}
     if platform:
@@ -275,11 +297,12 @@ async def get_conversation_history(
     cursor = (
         db.conversation_history
         .find(query)
-        .sort("timestamp", -1)
+        .sort("timestamp", effective_sort_direction)
         .limit(limit)
     )
     docs = await cursor.to_list(length=limit)
-    docs.reverse()  # oldest first
+    if effective_sort_direction == -1:
+        docs.reverse()  # oldest first
     return_value = docs
     return return_value
 
@@ -289,7 +312,7 @@ async def search_conversation_history(
     platform: str | None = None,
     platform_channel_id: str | None = None,
     global_user_id: str | None = None,
-    limit: int = 5,
+    limit: int = RAG_SEARCH_DEFAULT_TOP_K,
     method: str = "vector",  # "keyword", "vector"
     from_timestamp: str | None = None,
     to_timestamp: str | None = None,

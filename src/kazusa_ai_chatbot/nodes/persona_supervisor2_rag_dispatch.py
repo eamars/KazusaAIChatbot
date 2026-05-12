@@ -204,14 +204,24 @@ _PREFIX_DISPATCH_TABLE: tuple[tuple[str, str, int], ...] = (
     ("User-list:", "user_list_agent", 3),
     ("Relationship:", "relationship_agent", 3),
     ("Profile:", "user_profile_agent", 3),
-    ("Conversation-aggregate:", "conversation_aggregate_agent", 3),
-    ("Conversation-filter:", "conversation_filter_agent", 3),
-    ("Conversation-keyword:", "conversation_keyword_agent", 3),
-    ("Conversation-semantic:", "conversation_search_agent", 3),
-    ("Memory-search:", "persistent_memory_search_agent", 3),
+    ("Conversation-aggregate:", "conversation_evidence_agent", 1),
+    ("Conversation-filter:", "conversation_evidence_agent", 1),
+    ("Conversation-keyword:", "conversation_evidence_agent", 1),
+    ("Conversation-semantic:", "conversation_evidence_agent", 1),
+    ("Memory-keyword:", "memory_evidence_agent", 1),
+    ("Memory-search:", "memory_evidence_agent", 1),
     ("Recall:", "recall_agent", 1),
     ("Web-search:", "web_search_agent2", 3),
 )
+
+_DISPATCH_AGENT_ALIASES = {
+    "conversation_aggregate_agent": "conversation_evidence_agent",
+    "conversation_filter_agent": "conversation_evidence_agent",
+    "conversation_keyword_agent": "conversation_evidence_agent",
+    "conversation_search_agent": "conversation_evidence_agent",
+    "persistent_memory_keyword_agent": "memory_evidence_agent",
+    "persistent_memory_search_agent": "memory_evidence_agent",
+}
 
 _DISPATCHER_PROMPT = '''\
 You are a RAG Dispatcher. For each slot, select exactly one inner-loop retrieval agent and produce a concise task description for it.
@@ -225,12 +235,16 @@ You are a RAG Dispatcher. For each slot, select exactly one inner-loop retrieval
   Use for `Live-context:` slots.
 
 - `conversation_evidence_agent`: Top-level conversation-history evidence capability.
-  Chooses keyword, semantic, filter, or aggregate conversation worker internally.
-  Use for `Conversation-evidence:` slots.
+  Chooses hybrid exact/fuzzy search, structured filter, or aggregate
+  conversation worker internally. Use for `Conversation-evidence:` slots and
+  legacy `Conversation-keyword:`, `Conversation-semantic:`,
+  `Conversation-filter:`, and `Conversation-aggregate:` slots.
 
 - `memory_evidence_agent`: Top-level durable memory evidence capability.
-  Chooses exact or semantic persistent-memory worker internally.
-  Use for `Memory-evidence:` slots.
+  Handles durable memory evidence relevant to answering the slot.
+  Chooses hybrid exact/fuzzy persistent-memory workers internally.
+  Use for `Memory-evidence:`, legacy `Memory-search:`, and legacy
+  `Memory-keyword:` slots.
 
 - `person_context_agent`: Top-level person/profile/relationship capability.
   Chooses identity, profile, user-list, or relationship worker internally.
@@ -250,27 +264,26 @@ You are a RAG Dispatcher. For each slot, select exactly one inner-loop retrieval
 - `relationship_agent`: Ranks profiled users by the character's relationship data.
   Use for `Relationship:` slots. The agent extracts its own ranking parameters.
 
-- `conversation_filter_agent`: Structured filter over conversation history.
+- `conversation_filter_agent`: Internal structured filter over conversation history.
   Handles: fetching messages from a known user (by global_user_id); filtering by channel, time range, or message count.
-  Prefer over search agents whenever structural filters are available.
+  Top-level dispatch should use `conversation_evidence_agent`, which invokes this worker internally when appropriate.
 
-- `conversation_aggregate_agent`: Factual aggregate over conversation history.
+- `conversation_aggregate_agent`: Internal factual aggregate over conversation history.
   Handles: counts and rankings grouped by user, optionally filtered by literal keyword, known user, channel, and time window.
-  Use for "who spoke most", "how many messages", and "who mentioned X most" questions.
+  Top-level dispatch should use `conversation_evidence_agent` for "who spoke most", "how many messages", and "who mentioned X most" questions.
   It returns evidence only, not opinions or persona interpretation.
 
-- `conversation_keyword_agent`: Exact-string search over message content.
-  Handles: URLs, filenames, exact phrases, proper nouns that must appear verbatim.
+- `conversation_keyword_agent`: Internal exact-string worker used by hybrid conversation search.
+  Top-level dispatch should use `conversation_evidence_agent` for URLs, filenames, exact phrases, and proper nouns.
 
-- `conversation_search_agent`: Semantic similarity search over message content.
-  Handles: fuzzy topic recall when exact wording is unknown.
-  Use ONLY when filter and keyword agents are not applicable.
+- `conversation_search_agent`: Internal hybrid semantic plus literal-anchor search over message content.
+  Top-level dispatch should use `conversation_evidence_agent` for fuzzy topic recall and exact/literal recall.
 
-- `persistent_memory_keyword_agent`: Exact-keyword search over persistent memories.
-  Handles: tags, event names, proper nouns that must appear verbatim.
+- `persistent_memory_keyword_agent`: Internal exact-keyword worker used by hybrid persistent-memory search.
+  Top-level dispatch should use `memory_evidence_agent` for tags, event names, and exact memory identifiers.
 
-- `persistent_memory_search_agent`: Semantic search over persistent memories.
-  Handles durable memory evidence relevant to answering the slot when exact wording is unknown.
+- `persistent_memory_search_agent`: Internal hybrid search over persistent memories.
+  Top-level dispatch should use `memory_evidence_agent` for durable memory evidence.
 
 - `recall_agent`: Reconciles active agreements, ongoing promises, current plans,
   open loops, and current-episode state from scoped progress, active commitments,
@@ -295,11 +308,12 @@ Match the prefix literally and use the mapped agent without further deliberation
 | "User-list: ..."             | `user_list_agent`                |
 | "Relationship: ..."          | `relationship_agent`             |
 | "Profile: ..."               | `user_profile_agent`             |
-| "Conversation-aggregate: ..."| `conversation_aggregate_agent`   |
-| "Conversation-filter: ..."   | `conversation_filter_agent`      |
-| "Conversation-keyword: ..."  | `conversation_keyword_agent`     |
-| "Conversation-semantic: ..." | `conversation_search_agent`      |
-| "Memory-search: ..."         | `persistent_memory_search_agent` |
+| "Conversation-aggregate: ..."| `conversation_evidence_agent`    |
+| "Conversation-filter: ..."   | `conversation_evidence_agent`    |
+| "Conversation-keyword: ..."  | `conversation_evidence_agent`    |
+| "Conversation-semantic: ..." | `conversation_evidence_agent`    |
+| "Memory-keyword: ..."        | `memory_evidence_agent`          |
+| "Memory-search: ..."         | `memory_evidence_agent`          |
 | "Recall: ..."                | `recall_agent`                   |
 | "Web-search: ..."            | `web_search_agent2`              |
 
@@ -316,29 +330,20 @@ Evaluate top to bottom, pick the first match:
 3. Slot needs a user's full profile AND global_user_id is already in known_facts?
    → `user_profile_agent`.
 
-4. Slot targets a literal string (URL, filename, exact phrase) inside messages?
-   → `conversation_keyword_agent`.
+4. Slot targets conversation history, including literal strings, URLs,
+   filenames, exact phrases, fuzzy topics, structured filters, counts, or
+   rankings?
+   → `conversation_evidence_agent`.
 
-5. Slot asks for counts, rankings, or grouped message statistics?
-   → `conversation_aggregate_agent`.
+5. Slot targets durable persistent memory by exact keyword, tag, event name,
+   proper noun, memory identifier, or semantic memory meaning?
+   → `memory_evidence_agent`.
 
-6. Slot needs messages from a known user (global_user_id available in known_facts)?
-   → `conversation_filter_agent`.
-
-7. Slot needs semantic/fuzzy recall over conversation history?
-   → `conversation_search_agent`.
-
-8. Slot targets persistent memory with a known exact keyword?
-   → `persistent_memory_keyword_agent`.
-
-9. Slot targets persistent memory semantically?
-   → `persistent_memory_search_agent`.
-
-10. Slot asks what was agreed, promised, planned, left unresolved, or where the
+6. Slot asks what was agreed, promised, planned, left unresolved, or where the
     current episode left off?
    → `recall_agent`.
 
-11. Slot requires public internet data?
+7. Slot requires public internet data?
    → `web_search_agent2`.
 
 ## Input
@@ -520,7 +525,12 @@ def _build_delegate_context(state: ProgressiveRAGState, dispatch: dict) -> dict:
 
 def _build_agent_name_union() -> str:
     """Render the dispatcher's allowed ``agent_name`` values as a union string."""
-    return_value = " | ".join(_RAG_SUPERVISOR_AGENT_REGISTRY)
+    agent_names = [
+        agent_name
+        for agent_name in _RAG_SUPERVISOR_AGENT_REGISTRY
+        if agent_name not in _DISPATCH_AGENT_ALIASES
+    ]
+    return_value = " | ".join(agent_names)
     return return_value
 
 
@@ -528,6 +538,7 @@ def _normalize_dispatch(raw_dispatch: dict, current_slot: str) -> dict:
     """Normalize dispatcher JSON into a safe executable dispatch payload."""
     raw_agent_name = raw_dispatch.get("agent_name", "")
     agent_name = raw_agent_name.strip() if isinstance(raw_agent_name, str) else ""
+    agent_name = _DISPATCH_AGENT_ALIASES.get(agent_name, agent_name)
     if agent_name not in _RAG_SUPERVISOR_AGENT_REGISTRY:
         agent_name = ""
 

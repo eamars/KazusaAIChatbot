@@ -198,11 +198,12 @@ Legacy worker prefixes remain accepted as compatibility aliases:
 | `User-list:` | `user_list_agent` |
 | `Relationship:` | `relationship_agent` |
 | `Profile:` | `user_profile_agent` |
-| `Conversation-aggregate:` | `conversation_aggregate_agent` |
-| `Conversation-filter:` | `conversation_filter_agent` |
-| `Conversation-keyword:` | `conversation_keyword_agent` |
-| `Conversation-semantic:` | `conversation_search_agent` |
-| `Memory-search:` | `persistent_memory_search_agent` |
+| `Conversation-aggregate:` | `conversation_evidence_agent` |
+| `Conversation-filter:` | `conversation_evidence_agent` |
+| `Conversation-keyword:` | `conversation_evidence_agent` |
+| `Conversation-semantic:` | `conversation_evidence_agent` |
+| `Memory-keyword:` | `memory_evidence_agent` |
+| `Memory-search:` | `memory_evidence_agent` |
 | `Web-search:` | `web_search_agent2` |
 
 If a slot has no recognized prefix, the dispatcher falls back to semantic
@@ -252,8 +253,8 @@ The dispatcher-visible top-level capability agents are:
 | Agent | Responsibility |
 |---|---|
 | `live_context_agent` | Resolves target/scope for live external facts, then delegates to `web_search_agent2`. It refuses missing location/target instead of guessing. |
-| `conversation_evidence_agent` | Chooses the appropriate conversation worker for exact phrases, fuzzy topics, structured filters, counts, URLs, and speaker provenance. |
-| `memory_evidence_agent` | Chooses among shared semantic memory, shared exact-memory lookup, and scoped current-user continuity retrieval. Natural-language home/address questions use shared semantic memory search; literal memory identifiers use shared keyword search; current-user private continuity uses `user_memory_evidence_agent`. |
+| `conversation_evidence_agent` | Chooses the appropriate conversation worker for hybrid exact/fuzzy evidence, structured filters, counts, URLs, and speaker provenance. |
+| `memory_evidence_agent` | Chooses among shared hybrid memory retrieval and scoped current-user continuity retrieval. Natural-language home/address questions and literal memory identifiers both use shared hybrid memory search; current-user private continuity uses `user_memory_evidence_agent`. |
 | `person_context_agent` | Chooses identity, profile, user-list, relationship, or the approved display-name to profile chain. |
 | `recall_agent` | Reconciles active agreements, promises, plans, and current-episode state from scoped volatile sources. |
 
@@ -272,6 +273,7 @@ Top-level capability results keep structured handoff inside RAG 2:
     "missing_context": list[str],
     "conflicts": list[str],
     "observation_candidates": list[dict],
+    "source_hints": list[dict],
 }
 ```
 
@@ -281,7 +283,8 @@ approved projection channel into public `rag_result` fields. `worker_payloads`
 is trace/debug material only.
 `observation_candidates` is also trace/internal material only. It carries
 unresolved candidate rows that may guide continuation, not accepted answer
-evidence.
+evidence. `source_hints` gives compact provenance for those unresolved
+observations.
 
 The reusable worker agents are:
 
@@ -293,14 +296,38 @@ The reusable worker agents are:
 | `relationship_agent` | Produces factual rankings from stored relationship/profile state, such as top or bottom relationship-like scores. It returns evidence, not persona judgment. |
 | `conversation_aggregate_agent` | Computes factual aggregates over conversation history, such as message counts, speaker rankings, or who mentioned a literal term most often. |
 | `conversation_filter_agent` | Retrieves conversation rows by structured filters: known user, channel, timestamp range, display name, or requested message count. It is preferred when concrete filters exist. |
-| `conversation_keyword_agent` | Searches message content for exact strings, URLs, filenames, proper nouns, and phrases that must appear verbatim. |
-| `conversation_search_agent` | Performs semantic conversation recall when the topic is fuzzy or the exact wording is unknown. It is the fallback for conversation content after filters and keywords are unsuitable. |
-| `persistent_memory_keyword_agent` | Searches durable memories by exact keyword or phrase, useful for tags, event names, and proper nouns. |
-| `persistent_memory_search_agent` | Searches durable memories semantically for impressions, commitments, facts, and other remembered knowledge when exact wording is unknown. |
+| `conversation_keyword_agent` | Lower-level exact-string search worker used by tools and hybrid fusion. Top-level conversation evidence does not route literal recall here directly. The shared search config controls default and maximum result counts. |
+| `conversation_search_agent` | Performs hybrid conversation recall for fuzzy topics and literal anchors. Its LLM generator may emit a semantic query plus literal anchors; deterministic code reapplies trusted platform/channel/time filters plus explicit author-scope filters, runs bounded semantic and keyword retrieval, fuses candidates, and expands narrow neighboring context around accepted evidence. |
+| `persistent_memory_keyword_agent` | Lower-level exact-keyword memory worker used by hybrid fusion. Top-level shared-memory evidence does not route literal recall here directly. |
+| `persistent_memory_search_agent` | Performs hybrid durable-memory recall for exact and fuzzy shared memory evidence. It fuses semantic memory rows with literal-anchor keyword rows, enforces trusted source filters, and keeps scoped `user_memory_evidence_agent` separate. |
 | `user_memory_evidence_agent` | Searches `user_memory_units` for the current `global_user_id` only. It uses vector retrieval when available, explicit literal lexical retrieval for exact continuity anchors, and bounded recency fallback. Returned rows keep `source_system`, `scope_type`, `scope_global_user_id`, `authority`, `truth_status`, and `origin`. |
 | `web_search_agent2` | Searches or reads public web content when the requested fact belongs outside local profiles, memories, or conversation history. |
 
 Most agents are evidence retrievers. They should answer "what was found?" rather than "what should Kazusa think about it?" The only ranking-style agents still return factual rankings from stored data or message counts; interpretation remains downstream.
+
+### Hybrid Retrieval
+
+Conversation and shared persistent-memory recall now use bounded hybrid
+retrieval internally for exact and fuzzy evidence paths. Public tool signatures
+and the public `rag_result.conversation_evidence` string projection stay
+stable. Hybrid row metadata is internal `raw_result` / `projection_payload`
+evidence for evaluator, continuation, logging, and tests.
+
+Hybrid fusion ranks semantic+keyword rows first, keyword-only rows second,
+neighbor/context rows third, and semantic-only rows last when they clear the
+configured semantic-only floor. Search top-k, selected evidence limits, vector
+candidate counts, neighbor windows, semantic-only floor, and evidence text caps
+come from shared `RAG_SEARCH_*` / `RAG_HYBRID_*` / `RAG_VECTOR_*` config values
+rather than per-agent literals.
+
+Conversation projection includes bounded attachment descriptions and reply
+excerpts, so rows whose body text is empty can still become usable evidence
+when attachments carried the remembered content.
+
+Relative-day conversation retrieval is grounded before tool execution when the
+runtime `time_context` is available. For example, a local "yesterday" slot uses
+the character-local previous date converted to UTC query bounds instead of
+trusting the LLM to invent timestamp filters.
 
 ## Evidence Shape
 

@@ -9,14 +9,13 @@ from typing import Any
 from langchain_core.messages import HumanMessage, SystemMessage
 
 from kazusa_ai_chatbot.config import (
+    RAG_MEMORY_EVIDENCE_TEXT_LIMIT,
+    RAG_SEARCH_SELECTED_SUMMARY_LIMIT,
     RAG_SUBAGENT_LLM_API_KEY,
     RAG_SUBAGENT_LLM_BASE_URL,
     RAG_SUBAGENT_LLM_MODEL,
 )
 from kazusa_ai_chatbot.rag.helper_agent import BaseRAGHelperAgent
-from kazusa_ai_chatbot.rag.persistent_memory_keyword_agent import (
-    PersistentMemoryKeywordAgent,
-)
 from kazusa_ai_chatbot.rag.persistent_memory_search_agent import (
     PersistentMemorySearchAgent,
 )
@@ -30,7 +29,6 @@ _CAPABILITY_NAME = "memory_evidence"
 _AGENT_NAME = "memory_evidence_agent"
 _UNCACHED_REASON = "capability_orchestrator_uncached"
 _KNOWN_WORKERS = {
-    "persistent_memory_keyword_agent",
     "persistent_memory_search_agent",
     "user_memory_evidence_agent",
     "incompatible",
@@ -70,6 +68,7 @@ def _result_payload(
     missing_context: list[str] | None = None,
     conflicts: list[str] | None = None,
     observation_candidates: list[dict[str, Any]] | None = None,
+    source_hints: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Build the standard top-level memory capability payload."""
     payload = {
@@ -85,6 +84,7 @@ def _result_payload(
         "missing_context": list(missing_context or []),
         "conflicts": list(conflicts or []),
         "observation_candidates": list(observation_candidates or []),
+        "source_hints": list(source_hints or []),
     }
     return payload
 
@@ -203,8 +203,8 @@ def _deterministic_plan(
     )
     if any(marker in normalized for marker in exact_markers):
         plan = {
-            "worker": "persistent_memory_keyword_agent",
-            "reason": "durable named fact or exact memory evidence",
+            "worker": "persistent_memory_search_agent",
+            "reason": "hybrid durable named fact or exact memory evidence",
         }
         return plan
 
@@ -218,6 +218,8 @@ def _deterministic_plan(
 def _normalize_selector_plan(raw_plan: dict[str, Any]) -> dict[str, Any]:
     """Normalize an LLM selector payload to approved fields."""
     worker = text_or_empty(raw_plan.get("worker"))
+    if worker == "persistent_memory_keyword_agent":
+        worker = "persistent_memory_search_agent"
     if worker not in _KNOWN_WORKERS:
         worker = "persistent_memory_search_agent"
     reason = text_or_empty(raw_plan.get("reason"))
@@ -243,11 +245,11 @@ Do not answer active agreements, person profiles, relationships, or live externa
 4. Use user_memory_evidence_agent for current-user durable memory, private
    continuity, accepted preference, user-specific lore, or prior shared
    experience with the current user.
-5. Use persistent_memory_keyword_agent for exact named facts, tags,
-   memory_name/dedup_key lookups, proper nouns, or quoted terms.
-6. Use persistent_memory_search_agent for natural-language durable facts,
-   home/address/location questions, fuzzy concepts, common sense, world
-   knowledge, and character-world facts.
+5. Use persistent_memory_search_agent for natural-language durable facts,
+   exact named facts, tags, memory_name/dedup_key lookups, proper nouns,
+   quoted terms, home/address/location questions, fuzzy concepts, common
+   sense, world knowledge, and character-world facts. The search worker
+   performs hybrid semantic plus literal-anchor retrieval.
 
 # Input Format
 {
@@ -260,7 +262,7 @@ Do not answer active agreements, person profiles, relationships, or live externa
 # Output Format
 Return valid JSON only:
 {
-  "worker": "user_memory_evidence_agent | persistent_memory_keyword_agent | persistent_memory_search_agent | incompatible",
+  "worker": "user_memory_evidence_agent | persistent_memory_search_agent | incompatible",
   "reason": "short source selection explanation"
 }
 """
@@ -333,7 +335,12 @@ def _summaries_from_rows(rows: list[dict[str, Any]]) -> list[str]:
     summaries = [
         summary
         for row in rows
-        if (summary := _clip_text(_content_from_row(row), limit=500))
+        if (
+            summary := _clip_text(
+                _content_from_row(row),
+                limit=RAG_MEMORY_EVIDENCE_TEXT_LIMIT,
+            )
+        )
     ]
     return summaries
 
@@ -355,6 +362,50 @@ def _refs_from_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return refs
 
 
+def _memory_observation_candidates(
+    rows: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Build source-scoped observation rows for unresolved memory retrieval."""
+
+    candidates: list[dict[str, Any]] = []
+    for row in rows[:RAG_SEARCH_SELECTED_SUMMARY_LIMIT]:
+        content = _clip_text(
+            _content_from_row(row),
+            limit=RAG_MEMORY_EVIDENCE_TEXT_LIMIT,
+        )
+        if not content:
+            continue
+        candidates.append(
+            {
+                "content": content,
+                "source": _memory_row_source(row),
+            }
+        )
+    return candidates
+
+
+def _memory_row_source(row: dict[str, Any]) -> str:
+    """Build a compact source label for one memory row."""
+
+    memory_name = text_or_empty(row.get("memory_name"))
+    if memory_name:
+        source = f"memory:memory_name:{memory_name}"
+        return source
+
+    source_kind = text_or_empty(row.get("source_kind"))
+    if source_kind:
+        source = f"memory:source_kind:{source_kind}"
+        return source
+
+    mongo_id = text_or_empty(row.get("_id"))
+    if mongo_id:
+        source = f"memory:id:{mongo_id}"
+        return source
+
+    source = "memory:unknown"
+    return source
+
+
 class MemoryEvidenceAgent(BaseRAGHelperAgent):
     """Top-level RAG helper for durable memory and world evidence."""
 
@@ -364,9 +415,6 @@ class MemoryEvidenceAgent(BaseRAGHelperAgent):
             name=_AGENT_NAME,
             cache_name="",
             cache_runtime=cache_runtime,
-        )
-        self.keyword_agent = PersistentMemoryKeywordAgent(
-            cache_runtime=cache_runtime
         )
         self.search_agent = PersistentMemorySearchAgent(
             cache_runtime=cache_runtime
@@ -402,19 +450,28 @@ class MemoryEvidenceAgent(BaseRAGHelperAgent):
         worker_payloads = {primary_worker: worker_result}
         memory_rows = _memory_rows(worker_result)
         summaries = _summaries_from_rows(memory_rows)
-        selected_summary = "\n".join(summaries[:5])
+        selected_summary = "\n".join(summaries[:RAG_SEARCH_SELECTED_SUMMARY_LIMIT])
         resolved_refs = _refs_from_rows(memory_rows)
         resolved = bool(worker_result.get("resolved")) and bool(summaries)
         missing_context = [] if resolved else ["memory_evidence"]
         projection_rows = memory_rows
         evidence = summaries
         observation_candidates: list[dict[str, Any]] = []
+        source_hints: list[dict[str, Any]] = []
         if not resolved:
             selected_summary = ""
             resolved_refs = []
             projection_rows = []
             evidence = []
-            observation_candidates = memory_rows
+            observation_candidates = _memory_observation_candidates(memory_rows)
+            source_hints = [
+                {
+                    "kind": "memory",
+                    "source": candidate["source"],
+                }
+                for candidate in observation_candidates
+                if candidate.get("source")
+            ]
         payload = _result_payload(
             selected_summary=selected_summary,
             primary_worker=primary_worker,
@@ -426,6 +483,7 @@ class MemoryEvidenceAgent(BaseRAGHelperAgent):
             missing_context=missing_context,
             conflicts=[],
             observation_candidates=observation_candidates,
+            source_hints=source_hints,
         )
         logger.info(
             f"{_AGENT_NAME} output: resolved={resolved} "
@@ -444,8 +502,6 @@ class MemoryEvidenceAgent(BaseRAGHelperAgent):
 
     def _worker_for_name(self, worker_name: str) -> BaseRAGHelperAgent:
         """Return the configured memory worker for an approved name."""
-        if worker_name == "persistent_memory_keyword_agent":
-            return self.keyword_agent
         if worker_name == "user_memory_evidence_agent":
             return self.user_memory_agent
         return_value = self.search_agent
@@ -470,6 +526,8 @@ class MemoryEvidenceAgent(BaseRAGHelperAgent):
             evidence=[],
             missing_context=missing_context,
             conflicts=[],
+            observation_candidates=[],
+            source_hints=[],
         )
         logger.info(
             f"{_AGENT_NAME} output: resolved=False "

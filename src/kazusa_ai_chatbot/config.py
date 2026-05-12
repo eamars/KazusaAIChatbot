@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 import os
 
 from dotenv import load_dotenv
@@ -11,9 +12,76 @@ from dotenv import load_dotenv
 def _positive_int_from_env(name: str, default: str) -> int:
     """Read a positive integer environment setting and fail fast if invalid."""
 
-    value = int(os.getenv(name, default))
+    raw_value = os.getenv(name, default)
+    value = _positive_int_from_value(name, raw_value)
+    return value
+
+
+def _positive_int_from_value(name: str, raw_value: str) -> int:
+    """Parse a positive integer config value and fail fast if invalid."""
+
+    value = int(raw_value)
     if value < 1:
         raise ValueError(f"{name} must be >= 1")
+    return value
+
+
+def _positive_int_from_env_alias(
+    primary_name: str,
+    legacy_name: str,
+    default: str,
+) -> int:
+    """Read a positive integer with one temporary legacy env alias.
+
+    Args:
+        primary_name: Canonical environment variable name.
+        legacy_name: Backward-compatible alias name.
+        default: Default string used when neither variable is set.
+
+    Returns:
+        The configured positive integer.
+
+    Raises:
+        ValueError: If either value is invalid or both variables are set to
+            different integer values.
+    """
+
+    primary_raw = os.getenv(primary_name)
+    legacy_raw = os.getenv(legacy_name)
+    if primary_raw is not None and legacy_raw is not None:
+        primary_value = _positive_int_from_value(primary_name, primary_raw)
+        legacy_value = _positive_int_from_value(legacy_name, legacy_raw)
+        if primary_value != legacy_value:
+            raise ValueError(
+                f"{primary_name} conflicts with {legacy_name}"
+            )
+        return primary_value
+
+    if primary_raw is not None:
+        value = _positive_int_from_value(primary_name, primary_raw)
+        return value
+
+    if legacy_raw is not None:
+        value = _positive_int_from_value(legacy_name, legacy_raw)
+        return value
+
+    value = _positive_int_from_value(primary_name, default)
+    return value
+
+
+def _bounded_float_from_env(
+    name: str,
+    default: str,
+    *,
+    minimum: float,
+    maximum: float,
+) -> float:
+    """Read a finite float within inclusive bounds from the environment."""
+
+    raw_value = os.getenv(name, default)
+    value = float(raw_value)
+    if not math.isfinite(value) or value < minimum or value > maximum:
+        raise ValueError(f"{name} must be between {minimum} and {maximum}")
     return value
 
 
@@ -80,19 +148,73 @@ CHARACTER_GLOBAL_USER_ID = os.getenv(
     "00000000-0000-4000-8000-000000000001",
 )
 CONVERSATION_HISTORY_LIMIT = int(os.getenv("CONVERSATION_HISTORY_LIMIT", "10"))
-CONVERSATION_SEARCH_DEFAULT_TOP_K = _positive_int_from_env(
+RAG_SEARCH_DEFAULT_TOP_K = _positive_int_from_env_alias(
+    "RAG_SEARCH_DEFAULT_TOP_K",
     "CONVERSATION_SEARCH_DEFAULT_TOP_K",
     "20",
 )
-CONVERSATION_SEARCH_MAX_TOP_K = _positive_int_from_env(
+RAG_SEARCH_MAX_TOP_K = _positive_int_from_env_alias(
+    "RAG_SEARCH_MAX_TOP_K",
     "CONVERSATION_SEARCH_MAX_TOP_K",
     "50",
 )
-if CONVERSATION_SEARCH_MAX_TOP_K < CONVERSATION_SEARCH_DEFAULT_TOP_K:
+if RAG_SEARCH_MAX_TOP_K < RAG_SEARCH_DEFAULT_TOP_K:
     raise ValueError(
-        "CONVERSATION_SEARCH_MAX_TOP_K must be >= "
-        "CONVERSATION_SEARCH_DEFAULT_TOP_K"
+        "RAG_SEARCH_MAX_TOP_K must be >= "
+        "RAG_SEARCH_DEFAULT_TOP_K"
     )
+RAG_SEARCH_SELECTED_LIMIT = _positive_int_from_env(
+    "RAG_SEARCH_SELECTED_LIMIT",
+    "20",
+)
+RAG_SEARCH_SELECTED_SUMMARY_LIMIT = _positive_int_from_env(
+    "RAG_SEARCH_SELECTED_SUMMARY_LIMIT",
+    "20",
+)
+RAG_VECTOR_MIN_CANDIDATES = _positive_int_from_env(
+    "RAG_VECTOR_MIN_CANDIDATES",
+    "200",
+)
+RAG_VECTOR_CANDIDATE_MULTIPLIER = _positive_int_from_env(
+    "RAG_VECTOR_CANDIDATE_MULTIPLIER",
+    "20",
+)
+RAG_VECTOR_MAX_CANDIDATES = _positive_int_from_env(
+    "RAG_VECTOR_MAX_CANDIDATES",
+    "10000",
+)
+RAG_HYBRID_NEIGHBOR_SEED_LIMIT = _positive_int_from_env(
+    "RAG_HYBRID_NEIGHBOR_SEED_LIMIT",
+    "8",
+)
+RAG_HYBRID_NEIGHBOR_MESSAGE_LIMIT = _positive_int_from_env(
+    "RAG_HYBRID_NEIGHBOR_MESSAGE_LIMIT",
+    "3",
+)
+RAG_HYBRID_NEIGHBOR_WINDOW_MINUTES = _positive_int_from_env(
+    "RAG_HYBRID_NEIGHBOR_WINDOW_MINUTES",
+    "3",
+)
+RAG_HYBRID_LITERAL_ANCHOR_LIMIT = _positive_int_from_env(
+    "RAG_HYBRID_LITERAL_ANCHOR_LIMIT",
+    "5",
+)
+RAG_HYBRID_SEMANTIC_ONLY_SCORE_FLOOR = _bounded_float_from_env(
+    "RAG_HYBRID_SEMANTIC_ONLY_SCORE_FLOOR",
+    "0.72",
+    minimum=0.0,
+    maximum=1.0,
+)
+RAG_CONVERSATION_EVIDENCE_TEXT_LIMIT = _positive_int_from_env(
+    "RAG_CONVERSATION_EVIDENCE_TEXT_LIMIT",
+    "500",
+)
+RAG_MEMORY_EVIDENCE_TEXT_LIMIT = _positive_int_from_env(
+    "RAG_MEMORY_EVIDENCE_TEXT_LIMIT",
+    "500",
+)
+CONVERSATION_SEARCH_DEFAULT_TOP_K = RAG_SEARCH_DEFAULT_TOP_K
+CONVERSATION_SEARCH_MAX_TOP_K = RAG_SEARCH_MAX_TOP_K
 SAVE_ATTACHMENT_BASE64_TO_DB = os.getenv(
     "SAVE_ATTACHMENT_BASE64_TO_DB",
     "false",

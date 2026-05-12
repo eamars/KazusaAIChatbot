@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+from string import Template
 from typing import Any
 
 from langchain_core.messages import HumanMessage, SystemMessage
@@ -11,6 +12,8 @@ from pydantic import ValidationError
 
 from kazusa_ai_chatbot.config import (
     CHARACTER_GLOBAL_USER_ID,
+    RAG_SEARCH_DEFAULT_TOP_K,
+    RAG_SEARCH_MAX_TOP_K,
     RAG_SUBAGENT_LLM_API_KEY,
     RAG_SUBAGENT_LLM_BASE_URL,
     RAG_SUBAGENT_LLM_MODEL,
@@ -26,11 +29,14 @@ from kazusa_ai_chatbot.rag.prompt_projection import (
     project_runtime_context_for_llm,
     project_tool_result_for_llm,
 )
+from kazusa_ai_chatbot.rag.search_runtime import (
+    apply_source_memory_runtime_constraints,
+)
 from kazusa_ai_chatbot.utils import get_llm, parse_llm_json_output, text_or_empty
 
 logger = logging.getLogger(__name__)
 
-_GENERATOR_PROMPT = """\
+_GENERATOR_PROMPT = Template("""\
 你是一个只负责 `search_persistent_memory_keyword` 的检索参数生成器。
 
 # 你的唯一职责
@@ -57,10 +63,10 @@ _GENERATOR_PROMPT = """\
 请只返回合法 JSON：
 {
   "keyword": "string",
-  "top_k": 5,
+  "top_k": $default_top_k,
   "source_global_user_id": "string or omitted"
 }
-"""
+""").substitute(default_top_k=RAG_SEARCH_DEFAULT_TOP_K)
 _generator_llm = get_llm(
     temperature=0.0,
     top_p=1.0,
@@ -125,11 +131,11 @@ def _normalize_args(raw_args: dict[str, Any]) -> dict[str, Any]:
     if keyword:
         args["keyword"] = keyword
 
-    top_k = raw_args.get("top_k", 5)
+    top_k = raw_args.get("top_k", RAG_SEARCH_DEFAULT_TOP_K)
     if isinstance(top_k, int) and not isinstance(top_k, bool) and top_k > 0:
-        args["top_k"] = top_k
+        args["top_k"] = min(top_k, RAG_SEARCH_MAX_TOP_K)
     else:
-        args["top_k"] = 5
+        args["top_k"] = RAG_SEARCH_DEFAULT_TOP_K
 
     for key in ("source_global_user_id",):
         raw_val = raw_args.get(key)
@@ -199,6 +205,16 @@ async def _tool(args: dict[str, Any]) -> object:
         logger.info(f'persistent_memory_keyword_agent invalid args: {exc}')
         return_value = {"error": f"{type(exc).__name__}: {exc}"}
         return return_value
+
+
+def _apply_runtime_constraints(
+    args: dict[str, Any],
+    context: dict[str, Any],
+) -> dict[str, Any]:
+    """Apply trusted source-memory filters after keyword generation."""
+
+    constrained = apply_source_memory_runtime_constraints(args, context=context)
+    return constrained
 
 
 async def _judge(task: str, result: object) -> tuple[bool, str]:
@@ -278,6 +294,7 @@ class PersistentMemoryKeywordAgent(BaseRAGHelperAgent):
 
         for attempt in range(max_attempts):
             args = await _generator(task, context, feedback)
+            args = _apply_runtime_constraints(args, context)
             result = await _tool(args)
             resolved, feedback = await _judge(task, result)
             if resolved:

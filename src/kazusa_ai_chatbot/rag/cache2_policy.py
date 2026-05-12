@@ -42,16 +42,16 @@ CONVERSATION_FILTER_CACHE_NAME = "rag2_conversation_filter_agent"
 CONVERSATION_FILTER_POLICY_VERSION = "conversation_filter:v1"
 
 CONVERSATION_KEYWORD_CACHE_NAME = "rag2_conversation_keyword_agent"
-CONVERSATION_KEYWORD_POLICY_VERSION = "conversation_keyword:v1"
+CONVERSATION_KEYWORD_POLICY_VERSION = "conversation_keyword:v2"
 
 CONVERSATION_SEARCH_CACHE_NAME = "rag2_conversation_search_agent"
-CONVERSATION_SEARCH_POLICY_VERSION = "conversation_search:v1"
+CONVERSATION_SEARCH_POLICY_VERSION = "conversation_search:v2"
 
 PERSISTENT_MEMORY_KEYWORD_CACHE_NAME = "rag2_persistent_memory_keyword_agent"
-PERSISTENT_MEMORY_KEYWORD_POLICY_VERSION = "persistent_memory_keyword:v2"
+PERSISTENT_MEMORY_KEYWORD_POLICY_VERSION = "persistent_memory_keyword:v3"
 
 PERSISTENT_MEMORY_SEARCH_CACHE_NAME = "rag2_persistent_memory_search_agent"
-PERSISTENT_MEMORY_SEARCH_POLICY_VERSION = "persistent_memory_search:v2"
+PERSISTENT_MEMORY_SEARCH_POLICY_VERSION = "persistent_memory_search:v3"
 
 # ---------------------------------------------------------------------------
 # Shared utilities

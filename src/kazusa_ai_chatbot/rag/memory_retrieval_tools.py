@@ -3,6 +3,8 @@ from langchain_core.tools import tool
 from kazusa_ai_chatbot.config import (
     CONVERSATION_SEARCH_DEFAULT_TOP_K,
     CONVERSATION_SEARCH_MAX_TOP_K,
+    RAG_SEARCH_DEFAULT_TOP_K,
+    RAG_SEARCH_MAX_TOP_K,
 )
 from kazusa_ai_chatbot.db import get_conversation_history, search_conversation_history
 from kazusa_ai_chatbot.db import search_memory as search_memory_db
@@ -33,6 +35,40 @@ def _conversation_search_top_k(value: int) -> int:
         return return_value
     return_value = min(value, CONVERSATION_SEARCH_MAX_TOP_K)
     return return_value
+
+
+def _rag_search_top_k(value: int) -> int:
+    """Normalize general RAG retrieval limits to configured bounds."""
+
+    if not isinstance(value, int) or isinstance(value, bool):
+        return_value = RAG_SEARCH_DEFAULT_TOP_K
+        return return_value
+    if value < 1:
+        return_value = RAG_SEARCH_DEFAULT_TOP_K
+        return return_value
+    return_value = min(value, RAG_SEARCH_MAX_TOP_K)
+    return return_value
+
+
+def _conversation_message_payload(message: dict) -> dict:
+    """Project one typed conversation row for RAG tool output."""
+
+    body_text = _message_body_text(message)
+    payload = {
+        "body_text": body_text,
+        "timestamp": message.get("timestamp", ""),
+        "display_name": message.get("display_name", ""),
+        "role": message.get("role", ""),
+        "platform": message.get("platform", ""),
+        "platform_channel_id": message.get("platform_channel_id", ""),
+        "platform_message_id": message.get("platform_message_id", ""),
+        "conversation_row_id": str(message.get("_id", "")),
+        "platform_user_id": message.get("platform_user_id", ""),
+        "global_user_id": message.get("global_user_id", ""),
+        "reply_context": message.get("reply_context", {}),
+        "attachments": message.get("attachments", []),
+    }
+    return payload
 
 
 @tool
@@ -93,20 +129,8 @@ async def search_conversation(
     # Rebuild return format to remove unwanted columns
     return_list = []
     for (score, message) in results:
-        body_text = _message_body_text(message)
-        return_list.append((score, {
-            "body_text": body_text,
-            "timestamp": message.get("timestamp", ""),
-            "display_name": message.get("display_name", ""),
-            "role": message.get("role", ""),
-            "platform": message.get("platform", ""),
-            "platform_channel_id": message.get("platform_channel_id", ""),
-            "platform_message_id": message.get("platform_message_id", ""),
-            "conversation_row_id": str(message.get("_id", "")),
-            "platform_user_id": message.get("platform_user_id", ""),
-            "global_user_id": message.get("global_user_id", ""),
-            "reply_context": message.get("reply_context", {}),
-        }))
+        payload = _conversation_message_payload(message)
+        return_list.append((score, payload))
 
     return return_list
 
@@ -115,7 +139,7 @@ async def search_conversation(
 async def search_conversation_keyword(
     keyword: str,
     global_user_id: str | None = None,
-    top_k: int = 5,
+    top_k: int = RAG_SEARCH_DEFAULT_TOP_K,
     platform: str | None = None,
     platform_channel_id: str | None = None,
     from_timestamp: str | None = None,
@@ -130,7 +154,7 @@ async def search_conversation_keyword(
     Args:
         keyword (Mandatory): Exact term or short phrase to match (regex, case-insensitive). Do not pass a full sentence — use the core noun/phrase only.
         global_user_id (Optional): Filter results to one user UUID.
-        top_k (Optional): Maximum number of results. Default is 5.
+        top_k (Optional): Maximum number of results.
         platform (Optional): Platform filter, e.g. "discord", "qq".
         platform_channel_id (Optional): Channel ID filter.
         from_timestamp (Optional): Internal normalized start timestamp.
@@ -143,12 +167,13 @@ async def search_conversation_keyword(
         return_value = [{"error": "keyword is mandatory and must not be empty."}]
         return return_value
 
+    retrieval_limit = _rag_search_top_k(top_k)
     results = await search_conversation_history(
         query=keyword,
         platform=platform,
         platform_channel_id=platform_channel_id,
         global_user_id=global_user_id,
-        limit=top_k,
+        limit=retrieval_limit,
         method="keyword",
         from_timestamp=from_timestamp,
         to_timestamp=to_timestamp,
@@ -156,20 +181,7 @@ async def search_conversation_keyword(
 
     return_value = []
     for _, msg in results:
-        body_text = _message_body_text(msg)
-        result_msg = {
-            "body_text": body_text,
-            "timestamp": msg.get("timestamp", ""),
-            "display_name": msg.get("display_name", ""),
-            "role": msg.get("role", ""),
-            "platform": msg.get("platform", ""),
-            "platform_channel_id": msg.get("platform_channel_id", ""),
-            "platform_message_id": msg.get("platform_message_id", ""),
-            "conversation_row_id": str(msg.get("_id", "")),
-            "platform_user_id": msg.get("platform_user_id", ""),
-            "global_user_id": msg.get("global_user_id", ""),
-            "reply_context": msg.get("reply_context", {}),
-        }
+        result_msg = _conversation_message_payload(msg)
         return_value.append(result_msg)
     return return_value
 
@@ -177,7 +189,7 @@ async def search_conversation_keyword(
 @tool
 async def search_persistent_memory_keyword(
     keyword: str,
-    top_k: int = 5,
+    top_k: int = RAG_SEARCH_DEFAULT_TOP_K,
     source_global_user_id: str | None = None,
     memory_type: str | None = None,
 ) -> list[dict]:
@@ -194,7 +206,7 @@ async def search_persistent_memory_keyword(
 
     Args:
         keyword (Mandatory): Exact term or short phrase to match (regex, case-insensitive).
-        top_k (Optional): Maximum number of results. Default is 5.
+        top_k (Optional): Maximum number of results.
         source_global_user_id (Optional): Filter by source user UUID.
         memory_type (Optional): Deprecated for RAG retrieval; retained for
             compatibility and returned metadata, but not used as a search filter.
@@ -206,9 +218,10 @@ async def search_persistent_memory_keyword(
         return_value = [{"error": "keyword is mandatory and must not be empty."}]
         return return_value
 
+    retrieval_limit = _rag_search_top_k(top_k)
     results = await search_memory_db(
         query=keyword,
-        limit=top_k,
+        limit=retrieval_limit,
         method="keyword",
         source_global_user_id=source_global_user_id,
         memory_type=None,
@@ -231,7 +244,7 @@ async def search_persistent_memory_keyword(
 async def get_conversation(
     platform: str | None = None,
     platform_channel_id: str | None = None,
-    limit: int = 5,
+    limit: int = RAG_SEARCH_DEFAULT_TOP_K,
     global_user_id: str | None = None,
     display_name: str | None = None,
     from_timestamp: str | None = None,
@@ -247,7 +260,7 @@ async def get_conversation(
     Args:
         platform (Optional): Platform filter, e.g. "discord", "qq".
         platform_channel_id (Optional): Channel ID filter.
-        limit (Optional): Maximum number of rows to return. Default is 5.
+        limit (Optional): Maximum number of rows to return.
         global_user_id (Optional): User UUID filter.
         display_name (Optional): User display name filter (fallback if global_user_id is absent).
         from_timestamp (Optional): Internal normalized start timestamp.
@@ -269,20 +282,8 @@ async def get_conversation(
 
     # Rebuild return format to remove unwanted columns
     for message in results:
-        body_text = _message_body_text(message)
-        return_list.append({
-            "body_text": body_text,
-            "timestamp": message.get("timestamp", ""),
-            "display_name": message.get("display_name", ""),
-            "role": message.get("role", ""),
-            "platform": message.get("platform", ""),
-            "platform_channel_id": message.get("platform_channel_id", ""),
-            "platform_message_id": message.get("platform_message_id", ""),
-            "conversation_row_id": str(message.get("_id", "")),
-            "platform_user_id": message.get("platform_user_id", ""),
-            "global_user_id": message.get("global_user_id", ""),
-            "reply_context": message.get("reply_context", {}),
-        })
+        payload = _conversation_message_payload(message)
+        return_list.append(payload)
 
     return return_list
 
@@ -290,7 +291,7 @@ async def get_conversation(
 @tool
 async def search_persistent_memory(
     search_query: str,
-    top_k: int = 5,
+    top_k: int = RAG_SEARCH_DEFAULT_TOP_K,
     source_global_user_id: str | None = None,
     memory_type: str | None = None,
     source_kind: str | None = None,
@@ -304,7 +305,7 @@ async def search_persistent_memory(
     
     Args:
         search_query (Mandatory): Semantic query sentence for vector retrieval.
-        top_k (Optional): Maximum number of results to return. Default is 5.
+        top_k (Optional): Maximum number of results to return.
         source_global_user_id (Optional): Filter by source user UUID.
         memory_type (Optional): Deprecated for RAG retrieval; retained for
             compatibility and returned metadata, but not used as a search filter.
@@ -314,9 +315,10 @@ async def search_persistent_memory(
     Returns:
         Top-K memories close to the query, each with metadata and cosine similarity.
     """
+    retrieval_limit = _rag_search_top_k(top_k)
     results = await search_memory_db(
         query=search_query,
-        limit=top_k,
+        limit=retrieval_limit,
         method="vector",
         source_global_user_id=source_global_user_id,
         memory_type=None,

@@ -497,8 +497,8 @@ async def test_rag_dispatcher_uses_deterministic_new_prefix(monkeypatch) -> None
 
 
 @pytest.mark.asyncio
-async def test_rag_dispatcher_keeps_legacy_prefix_alias(monkeypatch) -> None:
-    """Old worker prefixes remain deterministic compatibility aliases."""
+async def test_rag_dispatcher_remaps_legacy_prefix_alias(monkeypatch) -> None:
+    """Old worker prefixes should route through top-level capabilities."""
     monkeypatch.setattr(supervisor2_module, "_dispatcher_llm", _FailingAsyncLLM())
 
     result = await supervisor2_module.rag_dispatcher(
@@ -513,9 +513,35 @@ async def test_rag_dispatcher_keeps_legacy_prefix_alias(monkeypatch) -> None:
         }
     )
 
-    assert result["current_dispatch"]["agent_name"] == "conversation_keyword_agent"
+    assert result["current_dispatch"]["agent_name"] == "conversation_evidence_agent"
     assert result["current_dispatch"]["route_source"] == "deterministic_prefix"
-    assert result["current_dispatch"]["max_attempts"] == 3
+    assert result["current_dispatch"]["max_attempts"] == 1
+
+
+def test_normalize_dispatch_remaps_low_level_keyword_agents() -> None:
+    """LLM fallback output should not bypass top-level hybrid evidence."""
+
+    conversation_dispatch = supervisor2_module._normalize_dispatch(
+        {
+            "agent_name": "conversation_keyword_agent",
+            "task": "find exact phrase",
+            "context": {},
+            "max_attempts": 3,
+        },
+        current_slot="fallback slot",
+    )
+    memory_dispatch = supervisor2_module._normalize_dispatch(
+        {
+            "agent_name": "persistent_memory_keyword_agent",
+            "task": "find exact memory",
+            "context": {},
+            "max_attempts": 3,
+        },
+        current_slot="fallback slot",
+    )
+
+    assert conversation_dispatch["agent_name"] == "conversation_evidence_agent"
+    assert memory_dispatch["agent_name"] == "memory_evidence_agent"
 
 
 @pytest.mark.asyncio

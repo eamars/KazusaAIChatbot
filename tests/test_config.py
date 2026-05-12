@@ -144,6 +144,8 @@ class TestCache2Config:
 class TestConversationSearchConfig:
     def test_conversation_search_top_k_defaults_are_stable(self, tmp_path):
         env = _configured_subprocess_env_without_dotenv()
+        env.pop("RAG_SEARCH_DEFAULT_TOP_K", None)
+        env.pop("RAG_SEARCH_MAX_TOP_K", None)
         env.pop("CONVERSATION_SEARCH_DEFAULT_TOP_K", None)
         env.pop("CONVERSATION_SEARCH_MAX_TOP_K", None)
 
@@ -153,6 +155,8 @@ class TestConversationSearchConfig:
                 "-c",
                 (
                     "import kazusa_ai_chatbot.config as config; "
+                    "print(config.RAG_SEARCH_DEFAULT_TOP_K); "
+                    "print(config.RAG_SEARCH_MAX_TOP_K); "
                     "print(config.CONVERSATION_SEARCH_DEFAULT_TOP_K); "
                     "print(config.CONVERSATION_SEARCH_MAX_TOP_K)"
                 ),
@@ -165,7 +169,31 @@ class TestConversationSearchConfig:
         )
 
         assert result.returncode == 0
-        assert result.stdout.splitlines() == ["20", "50"]
+        assert result.stdout.splitlines() == ["20", "50", "20", "50"]
+
+    def test_rag_search_default_top_k_reads_environment(self, tmp_path):
+        env = _configured_subprocess_env_without_dotenv()
+        env["RAG_SEARCH_DEFAULT_TOP_K"] = "24"
+
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-c",
+                (
+                    "import kazusa_ai_chatbot.config as config; "
+                    "print(config.RAG_SEARCH_DEFAULT_TOP_K); "
+                    "print(config.CONVERSATION_SEARCH_DEFAULT_TOP_K)"
+                ),
+            ],
+            cwd=tmp_path,
+            env=env,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+        assert result.returncode == 0
+        assert result.stdout.splitlines() == ["24", "24"]
 
     def test_conversation_search_default_top_k_reads_environment(self, tmp_path):
         env = _configured_subprocess_env_without_dotenv()
@@ -190,26 +218,10 @@ class TestConversationSearchConfig:
         assert result.returncode == 0
         assert result.stdout.strip() == "12"
 
-    def test_conversation_search_default_top_k_rejects_zero(self, tmp_path):
+    def test_rag_search_top_k_rejects_conflicting_legacy_alias(self, tmp_path):
         env = _configured_subprocess_env_without_dotenv()
-        env["CONVERSATION_SEARCH_DEFAULT_TOP_K"] = "0"
-
-        result = subprocess.run(
-            [sys.executable, "-c", "import kazusa_ai_chatbot.config"],
-            cwd=tmp_path,
-            env=env,
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-
-        assert result.returncode != 0
-        assert "CONVERSATION_SEARCH_DEFAULT_TOP_K must be >= 1" in result.stderr
-
-    def test_conversation_search_max_top_k_must_cover_default(self, tmp_path):
-        env = _configured_subprocess_env_without_dotenv()
-        env["CONVERSATION_SEARCH_DEFAULT_TOP_K"] = "30"
-        env["CONVERSATION_SEARCH_MAX_TOP_K"] = "20"
+        env["RAG_SEARCH_DEFAULT_TOP_K"] = "24"
+        env["CONVERSATION_SEARCH_DEFAULT_TOP_K"] = "12"
 
         result = subprocess.run(
             [sys.executable, "-c", "import kazusa_ai_chatbot.config"],
@@ -222,8 +234,83 @@ class TestConversationSearchConfig:
 
         assert result.returncode != 0
         expected_error = (
-            "CONVERSATION_SEARCH_MAX_TOP_K must be >= "
+            "RAG_SEARCH_DEFAULT_TOP_K conflicts with "
             "CONVERSATION_SEARCH_DEFAULT_TOP_K"
+        )
+        assert expected_error in result.stderr
+
+    def test_conversation_search_default_top_k_rejects_zero(self, tmp_path):
+        env = _configured_subprocess_env_without_dotenv()
+        env["RAG_SEARCH_DEFAULT_TOP_K"] = "0"
+
+        result = subprocess.run(
+            [sys.executable, "-c", "import kazusa_ai_chatbot.config"],
+            cwd=tmp_path,
+            env=env,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+        assert result.returncode != 0
+        assert "RAG_SEARCH_DEFAULT_TOP_K must be >= 1" in result.stderr
+
+    def test_conversation_search_max_top_k_must_cover_default(self, tmp_path):
+        env = _configured_subprocess_env_without_dotenv()
+        env["RAG_SEARCH_DEFAULT_TOP_K"] = "30"
+        env["RAG_SEARCH_MAX_TOP_K"] = "20"
+
+        result = subprocess.run(
+            [sys.executable, "-c", "import kazusa_ai_chatbot.config"],
+            cwd=tmp_path,
+            env=env,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+        assert result.returncode != 0
+        expected_error = (
+            "RAG_SEARCH_MAX_TOP_K must be >= "
+            "RAG_SEARCH_DEFAULT_TOP_K"
+        )
+        assert expected_error in result.stderr
+
+    def test_rag_hybrid_semantic_floor_rejects_out_of_range(self, tmp_path):
+        env = _configured_subprocess_env_without_dotenv()
+        env["RAG_HYBRID_SEMANTIC_ONLY_SCORE_FLOOR"] = "1.5"
+
+        result = subprocess.run(
+            [sys.executable, "-c", "import kazusa_ai_chatbot.config"],
+            cwd=tmp_path,
+            env=env,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+        assert result.returncode != 0
+        expected_error = (
+            "RAG_HYBRID_SEMANTIC_ONLY_SCORE_FLOOR must be between 0.0 and 1.0"
+        )
+        assert expected_error in result.stderr
+
+    def test_rag_hybrid_semantic_floor_rejects_nan(self, tmp_path):
+        env = _configured_subprocess_env_without_dotenv()
+        env["RAG_HYBRID_SEMANTIC_ONLY_SCORE_FLOOR"] = "nan"
+
+        result = subprocess.run(
+            [sys.executable, "-c", "import kazusa_ai_chatbot.config"],
+            cwd=tmp_path,
+            env=env,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+        assert result.returncode != 0
+        expected_error = (
+            "RAG_HYBRID_SEMANTIC_ONLY_SCORE_FLOOR must be between 0.0 and 1.0"
         )
         assert expected_error in result.stderr
 
