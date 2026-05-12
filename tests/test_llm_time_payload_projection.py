@@ -32,6 +32,16 @@ _UTC_LEAK_RE = re.compile(
 )
 
 
+class _FakeObjectId:
+    """ObjectId-like value that plain ``json.dumps`` cannot serialize."""
+
+    def __str__(self) -> str:
+        """Return the stable string form used by Mongo row identity."""
+
+        return_value = "row-object-id"
+        return return_value
+
+
 def _assert_no_utc_leak(payload: Any, path: str = "$") -> None:
     """Recursively check that no string value in *payload* leaks UTC markers."""
     if isinstance(payload, str):
@@ -335,6 +345,31 @@ def test_tool_result_strips_conversation_row_id_from_nested_payloads() -> None:
     projected = project_tool_result_for_llm(result)
 
     _assert_absent_key(projected, "conversation_row_id")
+
+
+def test_tool_result_strips_mongo_id_from_nested_payloads() -> None:
+    """Raw Mongo IDs must not break prompt JSON serialization."""
+    result = {
+        "rows": [
+            {
+                "_id": _FakeObjectId(),
+                "conversation_row_id": "row-message",
+                "body_text": "message text",
+            },
+        ],
+        "memory_rows": [
+            {
+                "_id": _FakeObjectId(),
+                "memory_name": "memory-name",
+                "content": "memory text",
+            },
+        ],
+    }
+
+    projected = project_tool_result_for_llm(result)
+
+    _assert_absent_key(projected, "_id")
+    json.dumps({"task": "serialize", "result": projected}, ensure_ascii=False)
 
 
 # ---------------------------------------------------------------------------

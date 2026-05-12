@@ -71,7 +71,7 @@ _NESTED_OBJECT_FIELDS = (
     "profile",
 )
 
-_STRIPPED_RAW_KEYS = ("conversation_row_id",)
+_STRIPPED_RAW_KEYS = ("conversation_row_id", "_id")
 
 _RUNTIME_DIRECT_KEYS = (
     "platform",
