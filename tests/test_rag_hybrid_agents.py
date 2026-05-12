@@ -167,6 +167,7 @@ async def test_conversation_search_judge_serializes_mongo_rows(
                 "_id": _FakeObjectId(),
                 "conversation_row_id": "row-message",
                 "body_text": "GPU market-share topic",
+                "embedding": [0.1, 0.2, 0.3],
             },
         ],
     )
@@ -177,6 +178,7 @@ async def test_conversation_search_judge_serializes_mongo_rows(
     assert feedback == ""
     assert "_id" not in payload["result"][0]
     assert "conversation_row_id" not in payload["result"][0]
+    assert "embedding" not in payload["result"][0]
 
 
 @pytest.mark.asyncio
@@ -371,6 +373,78 @@ async def test_conversation_neighbor_rows_fetches_nearest_sides(
 
     assert [call["sort_direction"] for call in calls] == [-1, 1]
     assert [row["platform_message_id"] for row in rows] == ["before", "after"]
+
+
+@pytest.mark.asyncio
+async def test_conversation_neighbor_rows_strip_raw_storage_fields(
+    monkeypatch,
+) -> None:
+    """Neighbor expansion should not pass Mongo storage fields into prompts."""
+
+    async def fake_get_conversation_history(**_: object) -> list[dict[str, object]]:
+        return [
+            {
+                "_id": _FakeObjectId(),
+                "platform_message_id": "neighbor",
+                "body_text": "neighbor text",
+                "raw_wire_text": "[CQ:large-storage-value]",
+                "timestamp": "2026-05-11T09:00:01+00:00",
+                "embedding": [0.1, 0.2, 0.3],
+            }
+        ]
+
+    monkeypatch.setattr(
+        conversation_search_agent,
+        "get_conversation_history",
+        fake_get_conversation_history,
+    )
+    candidates = conversation_search_agent.merge_hybrid_candidates(
+        [
+            {
+                "platform_message_id": "seed",
+                "body_text": "GPU seed",
+                "timestamp": "2026-05-11T09:00:00+00:00",
+                "score": RAG_HYBRID_SEMANTIC_ONLY_SCORE_FLOOR,
+            }
+        ],
+        [],
+        semantic_only_floor=RAG_HYBRID_SEMANTIC_ONLY_SCORE_FLOOR,
+        selected_limit=20,
+        source="conversation",
+    )
+
+    rows = await conversation_search_agent._conversation_neighbor_rows(
+        candidates,
+        {"platform": "qq", "platform_channel_id": "905393941"},
+        semantic_only_floor=RAG_HYBRID_SEMANTIC_ONLY_SCORE_FLOOR,
+        seed_limit=8,
+        message_limit=3,
+        window_minutes=3,
+    )
+
+    assert len(rows) == 1
+    assert rows[0]["conversation_row_id"] == "row-object-id"
+    assert "embedding" not in rows[0]
+    assert "raw_wire_text" not in rows[0]
+
+
+def test_conversation_result_row_strips_malformed_raw_storage_fields() -> None:
+    """The search result contract should stay compact even for odd rows."""
+
+    row = conversation_search_agent._conversation_result_row(
+        {
+            "_id": _FakeObjectId(),
+            "error": "unexpected storage-shaped row",
+            "embedding": [0.1, 0.2, 0.3],
+            "raw_wire_text": "raw text",
+            "base64_data": "inline-bytes",
+        }
+    )
+
+    assert row == {
+        "conversation_row_id": "row-object-id",
+        "error": "unexpected storage-shaped row",
+    }
 
 
 async def _async_empty_neighbors(

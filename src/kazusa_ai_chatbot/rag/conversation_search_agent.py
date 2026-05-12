@@ -24,8 +24,11 @@ from kazusa_ai_chatbot.config import (
     RAG_SUBAGENT_LLM_MODEL,
 )
 from kazusa_ai_chatbot.db import get_conversation_history
-from kazusa_ai_chatbot.rag.memory_retrieval_tools import search_conversation
-from kazusa_ai_chatbot.rag.memory_retrieval_tools import search_conversation_keyword
+from kazusa_ai_chatbot.rag.memory_retrieval_tools import (
+    conversation_message_payload,
+    search_conversation,
+    search_conversation_keyword,
+)
 from kazusa_ai_chatbot.rag.cache2_policy import (
     CONVERSATION_SEARCH_CACHE_NAME,
     build_conversation_search_cache_key,
@@ -51,6 +54,13 @@ from kazusa_ai_chatbot.time_context import (
 from kazusa_ai_chatbot.utils import get_llm, parse_llm_json_output, text_or_empty
 
 logger = logging.getLogger(__name__)
+
+_RAW_CONVERSATION_STORAGE_KEYS = (
+    "_id",
+    "embedding",
+    "raw_wire_text",
+    "base64_data",
+)
 
 _GENERATOR_PROMPT = (
     """\
@@ -369,13 +379,14 @@ def _semantic_rows_from_result(result: object) -> list[dict[str, Any]]:
             score, message = item
             if not isinstance(message, dict):
                 continue
-            row = dict(message)
+            row = _conversation_result_row(message)
             if isinstance(score, (int, float)) and not isinstance(score, bool):
                 row["score"] = float(score)
             rows.append(row)
             continue
         if isinstance(item, dict):
-            rows.append(dict(item))
+            row = _conversation_result_row(item)
+            rows.append(row)
 
     return rows
 
@@ -401,7 +412,7 @@ async def _keyword_rows_for_anchors(args: dict[str, Any]) -> list[dict[str, Any]
         for item in keyword_result:
             if not isinstance(item, dict):
                 continue
-            row = dict(item)
+            row = _conversation_result_row(item)
             row["method"] = f"keyword:{anchor_text}"
             row["matched_anchors"] = [anchor_text]
             rows.append(row)
@@ -464,7 +475,7 @@ async def _conversation_neighbor_rows(
         for doc in before_docs + after_docs:
             if not isinstance(doc, dict):
                 continue
-            candidate = dict(doc)
+            candidate = _conversation_result_row(doc)
             identity = text_or_empty(candidate.get("platform_message_id"))
             if not identity:
                 identity = text_or_empty(candidate.get("conversation_row_id"))
@@ -514,14 +525,44 @@ def _neighbor_time_bounds(
     return return_value
 
 
+def _conversation_result_row(row: dict[str, Any]) -> dict[str, Any]:
+    """Project one conversation row into the search-agent result contract."""
+
+    if "body_text" not in row:
+        return _strip_raw_conversation_storage_fields(row)
+
+    payload = conversation_message_payload(row)
+    for key in (
+        "error",
+        "method",
+        "methods",
+        "matched_anchors",
+        "score",
+        "hybrid_rank",
+    ):
+        if key in row:
+            payload[key] = row[key]
+
+    return payload
+
+
+def _strip_raw_conversation_storage_fields(row: dict[str, Any]) -> dict[str, Any]:
+    """Drop raw storage fields from non-standard conversation rows."""
+
+    projected = dict(row)
+    if "_id" in projected and "conversation_row_id" not in projected:
+        projected["conversation_row_id"] = str(projected["_id"])
+    for key in _RAW_CONVERSATION_STORAGE_KEYS:
+        projected.pop(key, None)
+    return projected
+
+
 def _rows_from_candidates(candidates: list[HybridCandidate]) -> list[dict[str, Any]]:
     """Project fused candidates back to ordinary row dictionaries."""
 
     rows: list[dict[str, Any]] = []
     for rank, candidate in enumerate(candidates, start=1):
-        row = dict(candidate.row)
-        if "_id" in row and "conversation_row_id" not in row:
-            row["conversation_row_id"] = str(row["_id"])
+        row = _conversation_result_row(candidate.row)
         row["methods"] = list(candidate.methods)
         row["matched_anchors"] = list(candidate.matched_anchors)
         row["score"] = candidate.score

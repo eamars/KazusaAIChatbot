@@ -1,3 +1,5 @@
+from typing import Any, Mapping
+
 from langchain_core.tools import tool
 
 from kazusa_ai_chatbot.config import (
@@ -8,6 +10,7 @@ from kazusa_ai_chatbot.config import (
 )
 from kazusa_ai_chatbot.db import get_conversation_history, search_conversation_history
 from kazusa_ai_chatbot.db import search_memory as search_memory_db
+from kazusa_ai_chatbot.utils import text_or_empty
 
 
 def _message_body_text(message: dict) -> str:
@@ -50,7 +53,7 @@ def _rag_search_top_k(value: int) -> int:
     return return_value
 
 
-def _conversation_message_payload(message: dict) -> dict:
+def conversation_message_payload(message: dict) -> dict:
     """Project one typed conversation row for RAG tool output."""
 
     body_text = _message_body_text(message)
@@ -65,10 +68,64 @@ def _conversation_message_payload(message: dict) -> dict:
         "conversation_row_id": str(message.get("_id", "")),
         "platform_user_id": message.get("platform_user_id", ""),
         "global_user_id": message.get("global_user_id", ""),
-        "reply_context": message.get("reply_context", {}),
-        "attachments": message.get("attachments", []),
+        "reply_context": _compact_reply_context(message.get("reply_context")),
+        "attachments": _compact_attachments(message.get("attachments")),
     }
     return payload
+
+
+def _compact_reply_context(reply_context: object) -> dict[str, Any]:
+    """Return reply metadata without raw or binary storage fields."""
+
+    if not isinstance(reply_context, Mapping):
+        return_value: dict[str, Any] = {}
+        return return_value
+
+    projected: dict[str, Any] = {}
+    for key in (
+        "reply_to_message_id",
+        "reply_to_platform_user_id",
+        "reply_to_global_user_id",
+        "reply_to_display_name",
+        "reply_excerpt",
+    ):
+        value = text_or_empty(reply_context.get(key))
+        if value:
+            projected[key] = value
+
+    reply_attachments = reply_context.get("reply_attachments")
+    attachments = _compact_attachments(reply_attachments)
+    if attachments:
+        projected["reply_attachments"] = attachments
+
+    return projected
+
+
+def _compact_attachments(attachments: object) -> list[dict[str, Any]]:
+    """Return attachment metadata that is useful for retrieval prompts."""
+
+    if not isinstance(attachments, list):
+        return_value: list[dict[str, Any]] = []
+        return return_value
+
+    projected_attachments: list[dict[str, Any]] = []
+    for attachment in attachments:
+        if not isinstance(attachment, Mapping):
+            continue
+
+        projected: dict[str, Any] = {}
+        for key in ("media_type", "url", "description", "storage_shape"):
+            value = text_or_empty(attachment.get(key))
+            if value:
+                projected[key] = value
+        size_bytes = attachment.get("size_bytes")
+        if isinstance(size_bytes, int) and not isinstance(size_bytes, bool):
+            projected["size_bytes"] = size_bytes
+        if projected:
+            projected_attachments.append(projected)
+
+    return_value = projected_attachments
+    return return_value
 
 
 @tool
@@ -129,7 +186,7 @@ async def search_conversation(
     # Rebuild return format to remove unwanted columns
     return_list = []
     for (score, message) in results:
-        payload = _conversation_message_payload(message)
+        payload = conversation_message_payload(message)
         return_list.append((score, payload))
 
     return return_list
@@ -181,7 +238,7 @@ async def search_conversation_keyword(
 
     return_value = []
     for _, msg in results:
-        result_msg = _conversation_message_payload(msg)
+        result_msg = conversation_message_payload(msg)
         return_value.append(result_msg)
     return return_value
 
@@ -282,7 +339,7 @@ async def get_conversation(
 
     # Rebuild return format to remove unwanted columns
     for message in results:
-        payload = _conversation_message_payload(message)
+        payload = conversation_message_payload(message)
         return_list.append(payload)
 
     return return_list

@@ -57,6 +57,8 @@ _NESTED_LIST_FIELDS = (
     "open_loops",
     "resolved_threads",
     "avoid_reopening",
+    "attachments",
+    "reply_attachments",
 )
 
 _NESTED_OBJECT_FIELDS = (
@@ -69,9 +71,16 @@ _NESTED_OBJECT_FIELDS = (
     "self_image",
     "supervisor_trace",
     "profile",
+    "reply_context",
 )
 
-_STRIPPED_RAW_KEYS = ("conversation_row_id", "_id")
+_STRIPPED_RAW_KEYS = (
+    "conversation_row_id",
+    "_id",
+    "embedding",
+    "raw_wire_text",
+    "base64_data",
+)
 
 _RUNTIME_DIRECT_KEYS = (
     "platform",

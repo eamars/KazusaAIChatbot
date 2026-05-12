@@ -382,6 +382,7 @@ def test_rag_prompt_projections_are_plain_json_serializable() -> None:
                     "_id": _FakeObjectId(),
                     "conversation_row_id": "row-message",
                     "body_text": "message text",
+                    "embedding": [0.1, 0.2, 0.3],
                 },
             ],
             "projection_payload": {
@@ -390,6 +391,7 @@ def test_rag_prompt_projections_are_plain_json_serializable() -> None:
                         "_id": _FakeObjectId(),
                         "memory_name": "memory-name",
                         "content": "memory text",
+                        "embedding": [0.4, 0.5, 0.6],
                     },
                 ],
             },
@@ -428,6 +430,7 @@ def test_rag_prompt_projections_are_plain_json_serializable() -> None:
     for payload in prompt_payloads:
         _assert_absent_key(payload, "_id")
         _assert_absent_key(payload, "conversation_row_id")
+        _assert_absent_key(payload, "embedding")
         json.dumps(payload, ensure_ascii=False)
 
 

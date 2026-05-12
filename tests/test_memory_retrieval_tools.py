@@ -47,7 +47,22 @@ async def test_search_conversation_delegates_to_vector_history_search() -> None:
                 "platform_message_id": "message-1",
                 "platform_user_id": "platform-user-1",
                 "global_user_id": "global-user-1",
-                "reply_context": {"reply_excerpt": "previous"},
+                "reply_context": {
+                    "reply_excerpt": "previous",
+                    "reply_attachments": [
+                        {
+                            "description": "reply image",
+                            "base64_data": "reply-bytes",
+                        }
+                    ],
+                },
+                "attachments": [
+                    {
+                        "description": "chart image",
+                        "url": "https://example.test/chart.png",
+                        "base64_data": "inline-bytes",
+                    }
+                ],
                 "embedding": [0.1],
             },
         ),
@@ -93,8 +108,16 @@ async def test_search_conversation_delegates_to_vector_history_search() -> None:
                 "platform_user_id": "platform-user-1",
                 "global_user_id": "global-user-1",
                 "conversation_row_id": "row-object-id",
-                "reply_context": {"reply_excerpt": "previous"},
-                "attachments": [],
+                "reply_context": {
+                    "reply_excerpt": "previous",
+                    "reply_attachments": [{"description": "reply image"}],
+                },
+                "attachments": [
+                    {
+                        "description": "chart image",
+                        "url": "https://example.test/chart.png",
+                    }
+                ],
             },
         )
     ]
