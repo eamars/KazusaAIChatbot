@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "kazusa_ai_chatbot"
 version = "0.1.0"
-description = "A platform-agnostic character brain with memory and adapters"
+description = "A platform-agnostic character cognition core with memory and adapters"
 readme = "README.md"
 license = {file = "LICENSE"}
 authors = [
@@ -14,7 +14,7 @@ authors = [
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
-    "License :: OSI Approved :: MIT License",
+    "License :: OSI Approved :: GNU Affero General Public License v3",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",

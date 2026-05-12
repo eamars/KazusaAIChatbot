@@ -1,234 +1,281 @@
-# Kazusa AI Chatbot
+<div align="center">
+  <img src="resources/avatar.png" alt="Kazusa avatar" width="420" height="420" />
 
-Kazusa AI Chatbot is a platform-agnostic character brain for long-running chat interaction.
+  <h1>Kazusa Cognitive Core</h1>
 
-The project is built around a simple idea: a character brain can stay
-platform-agnostic while keeping durable memory, retrieval, cognition, dialog,
-and follow-through in one inspectable service core.
+  <p><strong>A self-evolving character cognition runtime for persistent digital presence.</strong></p>
 
-The same brain can be reached from Discord, QQ, a browser debug UI, or another adapter that speaks the service API. Platform code stays thin; the character logic, memory, retrieval, and scheduling live in one place.
+  <p>
+    <a href="README_CN.md">简体中文</a>
+    ·
+    <a href="docs/HOWTO.md">HOWTO</a>
+    ·
+    <a href="src/kazusa_ai_chatbot/brain_service/README.md">Brain Service ICD</a>
+  </p>
 
-For setup, operations, environment variables, service startup, adapters, and test
-commands, see [docs/HOWTO.md](docs/HOWTO.md). For the brain service API
-contract, see
-[src/kazusa_ai_chatbot/brain_service/README.md](src/kazusa_ai_chatbot/brain_service/README.md).
+  <p>
+    <img alt="Python" src="https://img.shields.io/badge/Python-3.10%2B-3776AB?logo=python&logoColor=white" />
+    <img alt="FastAPI" src="https://img.shields.io/badge/FastAPI-brain_service-009688?logo=fastapi&logoColor=white" />
+    <img alt="LangGraph" src="https://img.shields.io/badge/LangGraph-cognition_pipeline-1C3C3C" />
+    <img alt="MongoDB" src="https://img.shields.io/badge/MongoDB-memory_store-47A248?logo=mongodb&logoColor=white" />
+    <img alt="License" src="https://img.shields.io/badge/License-AGPL--3.0-blue" />
+  </p>
+</div>
 
-## What This Project Is
+## What Kazusa Achieves
 
-Kazusa is an experimental digital-character runtime with:
+Kazusa is not a generic assistant shell. It is a psychological model of a
+self-evolving character brain: a runtime that keeps identity, relationship
+continuity, retrieval, cognition, dialog, memory, reflection, and future
+follow-through inside one inspectable service core.
 
-- A staged conversation pipeline instead of a single giant prompt.
-- Long-term user and relationship memory.
-- Short-term conversation-flow continuity.
-- Evidence retrieval over profiles, memories, conversation history, and optional web sources.
-- A process-local input queue that drops burst noise before RAG while preserving addressed messages.
-- Background consolidation that turns completed interactions into durable state.
-- A reflection cycle that reviews past interaction outside the live response path.
-- Scheduled follow-through for accepted future promises.
-- Adapter-neutral deployment across chat platforms.
+The same brain can be reached from Discord, NapCat QQ, the browser debug UI, or
+another adapter that speaks the service API. Adapters stay thin. The brain
+service consumes typed message-envelope fields instead of parsing raw Discord,
+QQ, or debug-wire syntax.
 
-The project is designed for local or OpenAI-compatible model runtimes, including weaker models with limited practical context-following ability. The architecture favors explicit boundaries, compact intermediate state, and specialist sub-systems over one prompt trying to infer everything.
+At a high level, Kazusa provides:
 
-## Character-Centered Runtime
+| Capability | What it means |
+| --- | --- |
+| Platform-neutral character brain | Discord, QQ, debug UI, and future adapters feed the same FastAPI brain service. |
+| Typed message boundary | Platform syntax is normalized into `MessageEnvelope` fields before cognition or RAG sees it. |
+| Bounded live response path | Queueing, relevance, RAG, cognition, and dialog are explicit stages with caps and inspectable payloads. |
+| Multi-horizon memory | Recent chat, short-term conversation flow, retrieved evidence, durable memory, and scheduled commitments remain separate. |
+| RAG 2 evidence retrieval | Helper agents retrieve user profiles, memories, conversation history, live facts, web evidence, and recall state. |
+| Layered cognition | Cognition decides stance, boundaries, judgment, style, and response goals before dialog writes the final wording. |
+| Background consolidation | Completed turns update durable memory, relationship state, Cache2 invalidation, images, and progress after the reply is available. |
+| Reflection outside chat | Hourly, daily, and promoted reflection runs are stored as audit records and only promoted context can enter normal cognition. |
+| Scheduled follow-through | Accepted future promises can become validated scheduled tasks delivered later through registered adapters. |
 
-The core runtime is character-centered: retrieval provides evidence, cognition
-decides what that evidence means for Kazusa in the current moment, and dialog
-generation owns the final wording. Durable memory is written after the
-user-facing response path.
+## What You Can Build
 
-## High-Level Flow
+| Use case | Why Kazusa fits |
+| --- | --- |
+| Persistent character companion | The runtime keeps relationship memory, short-term flow, character state, and reflection separate but connected. |
+| Group-chat character bot | Queue pruning, typed addressees, native reply hydration, and adapter-specific delivery let the brain survive noisy channels. |
+| Local model character lab | Route-specific OpenAI-compatible model settings let weaker local models handle narrower, staged prompts. |
+| Memory and RAG experiments | RAG 2, Cache2, scoped user memory, shared memory evolution, and conversation search are modular enough to inspect independently. |
+| Cross-platform adapter experiments | New adapters only need to normalize platform events into the service contract and render returned messages. |
+| Promise and follow-through workflows | Accepted future commitments can be validated, persisted, deduplicated, and delivered later through registered adapters. |
+
+## Supported LLMs
+
+Kazusa is designed around OpenAI-compatible endpoints rather than one hosted
+vendor. All OpenAI-compatible chat completion endpoints are technically
+supported, and route-specific configuration lets different stages use different
+models when needed.
+
+Tested chat model families:
+
+- Gemma 4 26B MoE
+- Qwen3.6 27B
+- DeepSeek v4
+
+Kazusa also requires an OpenAI-compatible embeddings endpoint for conversation
+history, memory retrieval, and vector search features. Local deployments
+commonly use LM Studio or another OpenAI-compatible runtime.
+
+## Architecture At A Glance
 
 ```text
-Chat platform / debug client
+Discord / NapCat QQ / Debug UI / future adapters
+        |
+        | typed ChatRequest + MessageEnvelope
+        v
+FastAPI brain service
         |
         v
-Brain service
-  - enqueue inbound messages
-  - prune burst noise before RAG
-  - save dropped user messages without replying
+Process-local input queue
+  - collapse nearby follow-ups
+  - drop burst noise before RAG
+  - persist dropped user rows without replying
         |
         v
-Listen gate + perception
-  - normalize incoming message
-  - describe attachments when needed
-  - decide whether Kazusa should respond
+Listen gate and perception
+  - hydrate reply context
+  - describe image inputs when needed
+  - decide whether Kazusa should answer
         |
         v
 Persona turn
-  - clarify the user's current message
-  - retrieve relevant evidence
-  - load short-term conversation flow
-  - reason through stance, intent, and response goals
-  - generate Kazusa's reply
+  - decontextualize the current message
+  - retrieve evidence through RAG 2
+  - load short-term conversation progress
+  - reason through stance, boundary, style, and intent
+  - generate final dialog
         |
-        +-------------------------> response to platform
+        +-----------------------------> adapter delivers visible reply
         |
         v
-Background consolidation
+Post-turn work
+  - persist assistant rows and delivery tracking
   - record conversation progress
-  - update durable user/character memory
-  - update relationship state and image summaries
-  - run slower reflection and promotion work outside live chat
-  - schedule accepted future follow-through
+  - consolidate durable memory and state
+  - invalidate stale Cache2 entries
+  - schedule accepted future promises
+  - run reflection and growth workers outside live chat
+        |
+        v
+MongoDB + model routes + optional MCP web tools + platform callbacks
 ```
 
-The response path is kept bounded. Heavier memory writes, image updates, cache invalidation, and scheduling happen after the user-facing reply is already available. The service still waits for those post-response writes before consuming the next queued chat item, so the next RAG pass does not read stale durable facts or stale Cache2 entries.
-
-## Memory Horizons
-
-Kazusa uses several memory horizons rather than treating all context as one pile of chat history.
+The core boundary is deliberately narrow:
 
 ```text
-Immediate surface
-  recent message text and local tone
-
-Short-term flow
-  current episode, open loops, topic momentum, repeated moves to avoid
-
-Retrieved evidence
-  profiles, memories, conversation history, user lookup, web facts when needed
-
-Durable memory
-  identity links, relationship notes, objective facts, milestones, commitments
-
-Scheduled future actions
-  accepted promises that should fire later through platform adapters
+adapter/debug client -> brain service -> queue/intake -> RAG -> cognition
+-> dialog -> persistence/consolidation -> scheduler/reflection
 ```
 
-This separation matters. Recent chat helps Kazusa sound locally present, short-term flow helps her avoid looping or reopening stale threads, RAG provides factual grounding, and durable memory preserves relationship continuity across sessions.
-
-## Core Subsystems
-
-**Brain Service**
-
-The service is the stable HTTP-facing core. It receives platform-neutral chat requests, queues them, prunes noisy bursts, runs the surviving turn pipeline, persists conversation rows, exposes health data, and coordinates startup/shutdown work. Dropped queued messages are still saved as user conversation rows, but they do not run relevance, RAG, cognition, dialog, or consolidation.
-
-**Persona Pipeline**
-
-The persona pipeline is the main response path. It separates relevance, message clarification, retrieval, cognition, and dialog generation so each stage has a narrower responsibility.
-
-**Multi-Source Cognition**
-
-The cognition core consumes source-aware `CognitiveEpisode` records instead of
-pretending every trigger is a user chat turn. Normal `/chat` still uses the
-visible reply path. Reflection and internal thought currently run only through
-dry-run audit paths, multimodal inputs are reduced to bounded observation
-strings, and proactive output remains permissioned preview/outbox contract code
-without live scheduler or adapter registration.
-
-**Conversation Progress**
-
-Conversation Progress is short-term operational memory. It tracks the current local episode so cognition can continue, deepen, pivot, or close a conversation naturally without rereading full raw history every turn.
-
-**RAG 2**
-
-RAG 2 is the evidence-retrieval system. It decomposes a query into missing facts, dispatches specialist retrieval agents, and returns compact evidence for cognition. It retrieves facts; it does not decide Kazusa's feelings or final wording.
-
-**Database Layer**
-
-The database layer stores conversation history, user identities, durable memories, character state, scheduled events, and short-lived episode state. It owns storage mechanics and embeddings, while higher-level modules own semantic interpretation.
-
-**Dispatcher And Scheduler**
-
-The dispatcher converts accepted future promises into validated scheduled tasks. The scheduler persists and fires them later through registered platform adapters. This is how Kazusa can follow through on a promised later message without blocking the current turn.
-
-**Reflection Cycle**
-
-Reflection is the slow background sense-making loop. It reads completed conversation windows, stores inspectable hourly and daily reflection runs, and may promote a small amount of durable lore or self-guidance through the memory-evolution boundary. Raw reflection output does not enter normal cognition directly; only promoted reflection context is eligible through the promoted memory boundary.
-
-**Adapters**
-
-Adapters connect chat platforms to the brain service. They translate platform events into the service API and deliver responses back to the platform.
-
-## Architectural Principles
+## Design Principles
 
 **LLM-first semantics, deterministic mechanics**
 
-LLMs decide semantic questions: whether Kazusa should answer, what evidence is needed, what a memory means, whether a user request became an accepted promise, and how Kazusa should frame her reply. Deterministic code handles structure: validation, persistence, limits, cache invalidation, scheduling, and adapter delivery.
-
-**Bounded response latency**
-
-The normal response path avoids unbounded multi-agent exploration. Retrieval and cognition are structured; consolidation and scheduling run in the background.
+LLM stages judge meaning: response relevance, missing evidence, memory meaning,
+accepted promises, character stance, and final dialog intent. Deterministic code
+owns validation, persistence, limits, cache invalidation, scheduling, adapter
+delivery, and auditability.
 
 **Evidence is not persona**
 
-RAG evidence answers "what is known?" Cognition answers "what does this mean for Kazusa right now?" Dialog answers "how does she say it?"
+RAG answers "what is known?" Cognition answers "what does this mean for Kazusa
+right now?" Dialog answers "how should she say it?"
 
 **Memory has ownership**
 
-Short-term flow, retrieved evidence, durable memories, and scheduled commitments are separate systems. They overlap in purpose, but they do not replace each other.
+Kazusa does not flatten all context into one prompt. Immediate surface text,
+conversation progress, retrieved evidence, durable memory, promoted reflection,
+and scheduled commitments each have a separate lifecycle.
 
-**Platform-neutral core**
+**Reflection does not shortcut into live chat**
 
-Kazusa's identity, cognition, memory, and retrieval do not belong to Discord, QQ, or any one adapter. Adapters are transport edges around the same brain.
+Reflection is slower sense-making work. Raw reflection output is stored for
+inspection, but normal cognition only receives bounded, promoted, gated context.
 
-## Project Shape
+**Adapters are transport edges**
 
-```text
-Adapters and clients
-        |
-        v
-Brain service
-        |
-        +-- global input queue
-        |     prune burst noise -> persist dropped messages
-        |
-        +-- turn pipeline
-        |     relevance -> retrieval -> cognition -> dialog
-        |
-        +-- short-term conversation progress
-        |
-        +-- RAG 2 evidence retrieval
-        |
-        +-- background consolidation
-        |
-        +-- reflection cycle
-        |
-        +-- dispatcher and scheduler
-        |
-        v
-MongoDB + model APIs + platform adapters
+Platform adapters parse platform events, normalize typed envelopes, call the
+brain service, and deliver returned messages. Character identity, memory, RAG,
+cognition, and scheduling remain in the platform-neutral core.
+
+## Runtime Layers
+
+| Layer | Owns | Key docs |
+| --- | --- | --- |
+| Adapters | Discord, NapCat QQ, debug UI transport and platform rendering | [HOWTO](docs/HOWTO.md) |
+| Brain service | HTTP API, queue, graph startup, health, delivery receipts, runtime adapter registration | [Brain Service ICD](src/kazusa_ai_chatbot/brain_service/README.md) |
+| Message envelope | Typed inbound content, mentions, replies, attachments, addressees, broadcast state | [Message Envelope ICD](src/kazusa_ai_chatbot/message_envelope/README.md) |
+| Conversation progress | Short-term episode state used by cognition to avoid loops and stale reopenings | [Conversation Progress](src/kazusa_ai_chatbot/conversation_progress/README.md) |
+| RAG 2 | Slot-driven helper-agent retrieval and Cache2 evidence projection | [RAG 2](src/kazusa_ai_chatbot/rag/README.md) |
+| Cognition and dialog | Character stance, boundaries, judgment, style, visual directives, and final wording | `src/kazusa_ai_chatbot/nodes/` |
+| Database | MongoDB collection ownership, embeddings, indexes, public persistence helpers | [Database ICD](src/kazusa_ai_chatbot/db/README.md) |
+| Dispatcher and scheduler | Validated delayed tool execution for accepted future promises | [Dispatcher](src/kazusa_ai_chatbot/dispatcher/README.md) |
+| Reflection cycle | Background reflection runs, promotion gates, prompt-safe reflection context | [Reflection Cycle ICD](src/kazusa_ai_chatbot/reflection_cycle/README.md) |
+| Memory evolution | Curated shared memory lifecycle, lineage, seed reset, promoted memory writes | [Memory Evolution ICD](src/kazusa_ai_chatbot/memory_evolution/README.md) |
+| Global character growth | Slow promoted-trait drift from approved reflection memory | [Global Character Growth ICD](src/kazusa_ai_chatbot/global_character_growth/README.md) |
+| Proactive output | Permissioned preview/outbox contracts for future autonomous contact paths | [Proactive Output ICD](src/kazusa_ai_chatbot/proactive_output/README.md) |
+
+## Quick Start
+
+Kazusa expects MongoDB plus OpenAI-compatible chat and embedding endpoints. LM
+Studio works for local development, but any compatible endpoint can be used.
+All route-specific model environment variables are documented in
+[docs/HOWTO.md](docs/HOWTO.md).
+
+```powershell
+python -m venv venv
+venv\Scripts\activate
+pip install -U pip
+pip install -e ".[dev]"
 ```
 
-For deeper technical introductions:
+Load a character profile before starting the brain:
 
-- [Brain Service](src/kazusa_ai_chatbot/brain_service/README.md)
-- [Conversation Progress](src/kazusa_ai_chatbot/conversation_progress/README.md)
-- [RAG 2](src/kazusa_ai_chatbot/rag/README.md)
-- [Reflection Cycle](src/kazusa_ai_chatbot/reflection_cycle/README.md)
-- [Dispatcher](src/kazusa_ai_chatbot/dispatcher/README.md)
-- [Proactive Output](src/kazusa_ai_chatbot/proactive_output/README.md)
-- [Database](src/kazusa_ai_chatbot/db/README.md)
+```powershell
+python -m scripts.load_character_profile personalities/kazusa.json
+```
 
-## Documentation Ownership
+Run the brain service:
 
-Keep the docs split by ownership so contracts do not drift:
+```powershell
+kazusa-brain --host 0.0.0.0 --port 8000
+```
 
-| Document | Owns |
+Or use Uvicorn directly:
+
+```powershell
+uvicorn kazusa_ai_chatbot.service:app --host 0.0.0.0 --port 8000
+```
+
+Run the browser debug adapter:
+
+```powershell
+python -m adapters.debug_adapter --brain-url http://localhost:8000 --port 8080
+```
+
+Then open `http://localhost:8080`.
+
+## Repository Map
+
+```text
+src/
+  adapters/                    Platform adapters and debug UI
+  kazusa_ai_chatbot/
+    brain_service/             Service API, graph, intake, health, post-turn glue
+    message_envelope/          Typed adapter-to-brain message contract
+    nodes/                     Persona, cognition, dialog, consolidation stages
+    rag/                       RAG 2 helper agents, hybrid retrieval, Cache2
+    conversation_progress/     Short-term episode memory
+    db/                        MongoDB facade, schemas, collection owners
+    dispatcher/                Delayed task validation and adapter handoff
+    reflection_cycle/          Background reflection and promotion
+    memory_evolution/          Shared memory lifecycle and seed reset
+    global_character_growth/   Slow promoted character-growth traits
+    proactive_output/          Permissioned proactive preview contracts
+  scripts/                     Operator and maintenance CLIs
+docs/
+  HOWTO.md                     Setup, runtime commands, environment, tests
+development_plans/             Approved, archived, and reference plan registry
+tests/                         Deterministic, live DB, and live LLM test suites
+resources/
+  avatar.png                   README avatar asset
+```
+
+## Testing
+
+Default test runs exclude live DB and live LLM tests through `pytest.ini`.
+
+```powershell
+venv\Scripts\python -m pytest -q
+venv\Scripts\python -m pytest -m "not live_db and not live_llm" -q
+```
+
+Live LLM tests must be run one case at a time with output inspected. Live DB
+tests require MongoDB. See [docs/HOWTO.md](docs/HOWTO.md#testing) for the
+project testing contract.
+
+## Project Status
+
+Kazusa Cognitive Core is alpha-stage experimental infrastructure for a
+persistent digital character. The main runtime is usable as a local brain
+service with adapters, memory, retrieval, reflection, and scheduling, but some
+autonomous-contact surfaces intentionally remain permissioned preview contracts
+rather than production sends.
+
+## Documentation Index
+
+| Document | Purpose |
 | --- | --- |
 | [README.md](README.md) | Project overview and architecture map |
-| [docs/HOWTO.md](docs/HOWTO.md) | Local setup, environment variables, run commands, adapter commands, and test commands |
-| [Brain Service ICD](src/kazusa_ai_chatbot/brain_service/README.md) | HTTP endpoint contracts, service request/response models, delivery receipts, and runtime adapter registration |
-| [Message Envelope ICD](src/kazusa_ai_chatbot/message_envelope/README.md) | Typed inbound message envelope and adapter-normalization contract |
-| [Database ICD](src/kazusa_ai_chatbot/db/README.md) | Database facade, collection ownership, document-shape contracts, and bootstrap/index rules |
-| [Conversation Progress](src/kazusa_ai_chatbot/conversation_progress/README.md) | Short-term episode state, prompt-facing progress payload, and module integration contract |
-| [RAG 2](src/kazusa_ai_chatbot/rag/README.md) | Retrieval supervisor, helper-agent evidence flow, and RAG projection contract |
-| [Dispatcher](src/kazusa_ai_chatbot/dispatcher/README.md) | Delayed tool validation, task scheduling handoff, and scheduled-send execution semantics |
-| [Proactive Output ICD](src/kazusa_ai_chatbot/proactive_output/README.md) | Permissioned proactive preview, policy, outbox, and fake-transport contract |
-| [Reflection Cycle ICD](src/kazusa_ai_chatbot/reflection_cycle/README.md) | Reflection-run lifecycle, reflection persistence boundary, and promotion rules |
-| [Memory Evolution ICD](src/kazusa_ai_chatbot/memory_evolution/README.md) | Evolving shared-memory API, lifecycle, lineage, and seed reset contract |
-| [Cognition Core Experiment](experiments/cognition_core_next/README.md) | Separate proof-of-concept notes for a possible future cognition shape |
-| [Development Plans Registry](development_plans/README.md) | Plan lifecycle, active work, historical records, and long-term roadmap location |
+| [README_CN.md](README_CN.md) | Simplified Chinese project overview |
+| [docs/HOWTO.md](docs/HOWTO.md) | Local setup, environment variables, run commands, adapters, tests |
+| [Brain Service ICD](src/kazusa_ai_chatbot/brain_service/README.md) | HTTP endpoint contracts and adapter obligations |
+| [Message Envelope ICD](src/kazusa_ai_chatbot/message_envelope/README.md) | Typed inbound message contract |
+| [Database ICD](src/kazusa_ai_chatbot/db/README.md) | Persistence ownership and collection contracts |
+| [RAG 2](src/kazusa_ai_chatbot/rag/README.md) | Retrieval architecture and evidence projection |
+| [Development Plans Registry](development_plans/README.md) | Active, archived, reference, and roadmap documents |
 
-## Current Direction
+## License
 
-The project is moving toward an autonomous digital-life engine: a character that can maintain continuity, remember responsibly, retrieve evidence when needed, and follow through on accepted commitments while remaining platform independent.
-
-The goal is not maximal tool use. The goal is a believable, inspectable character runtime where each subsystem has a clear reason to exist.
-
-## Getting Started
-
-Use [docs/HOWTO.md](docs/HOWTO.md) for local setup and operation.
-
-That guide covers environment variables, model endpoints, MongoDB, service
-startup, adapters, runbook-level endpoint notes, and testing.
+Kazusa Cognitive Core is released under the
+[GNU Affero General Public License v3.0](LICENSE).
