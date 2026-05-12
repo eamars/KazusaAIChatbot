@@ -50,6 +50,7 @@ long_term/todo.md
 | Document | Type |
 |---|---|
 | [rag_cache2_design.md](reference/designs/rag_cache2_design.md) | Design reference |
+| [rag_hybrid_search_architecture_decision.md](reference/designs/rag_hybrid_search_architecture_decision.md) | Design reference |
 
 ## Triage
 
