@@ -11,6 +11,8 @@
     <a href="docs/HOWTO.md">HOWTO</a>
     ·
     <a href="src/kazusa_ai_chatbot/brain_service/README.md">Brain Service ICD</a>
+    ·
+    <a href="src/kazusa_ai_chatbot/nodes/README.md">Cognition Nodes</a>
   </p>
 
 <p>
@@ -192,7 +194,7 @@ cognition, and scheduling remain in the platform-neutral core.
 | Message envelope         | Typed inbound content, mentions, replies, attachments, addressees, broadcast state      | [Message Envelope ICD](src/kazusa_ai_chatbot/message_envelope/README.md)               |
 | Conversation progress    | Short-term episode state used by cognition to avoid loops and stale reopenings          | [Conversation Progress](src/kazusa_ai_chatbot/conversation_progress/README.md)         |
 | RAG 2                    | Slot-driven helper-agent retrieval and Cache2 evidence projection                       | [RAG 2](src/kazusa_ai_chatbot/rag/README.md)                                           |
-| Cognition and dialog     | Character stance, boundaries, judgment, style, visual directives, and final wording     | `src/kazusa_ai_chatbot/nodes/`                                                         |
+| Cognition and dialog     | Character stance, boundaries, judgment, style, visual directives, and final wording     | [Cognition Nodes](src/kazusa_ai_chatbot/nodes/README.md)                              |
 | Database                 | MongoDB collection ownership, embeddings, indexes, public persistence helpers           | [Database ICD](src/kazusa_ai_chatbot/db/README.md)                                     |
 | Dispatcher and scheduler | Validated delayed tool execution for accepted future promises                           | [Dispatcher](src/kazusa_ai_chatbot/dispatcher/README.md)                               |
 | Reflection cycle         | Background reflection runs, promotion gates, prompt-safe reflection context             | [Reflection Cycle ICD](src/kazusa_ai_chatbot/reflection_cycle/README.md)               |
@@ -298,6 +300,7 @@ rather than production sends.
 | [Message Envelope ICD](src/kazusa_ai_chatbot/message_envelope/README.md) | Typed inbound message contract                                    |
 | [Database ICD](src/kazusa_ai_chatbot/db/README.md)                       | Persistence ownership and collection contracts                    |
 | [RAG 2](src/kazusa_ai_chatbot/rag/README.md)                             | Retrieval architecture and evidence projection                    |
+| [Cognition Nodes](src/kazusa_ai_chatbot/nodes/README.md)                 | Layered cognition, dialog, and node-package design contracts      |
 | [Development Plans Registry](development_plans/README.md)                | Active, archived, reference, and roadmap documents                |
 
 ## License
