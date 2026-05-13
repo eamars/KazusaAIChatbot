@@ -320,6 +320,13 @@ Stores pending, running, completed, failed, and cancelled scheduled tool
 events. The dispatcher and scheduler own semantic use of this collection
 through named helper functions.
 
+### `self_cognition_action_attempts`
+
+Stores durable action-attempt state for idle self-cognition duplicate
+suppression. The collection is keyed by `idempotency_key`, which is derived
+from source kind, source id, due time, target scope, and action kind. It does
+not replace event logging; event logs remain the sanitized operator view.
+
 ### `conversation_episode_state`
 
 Stores short-lived conversation-progress state keyed by platform, channel, and
@@ -371,7 +378,8 @@ dropped only through maintenance helpers and explicit operator scripts.
 `db_bootstrap()` owns startup collection/index preparation and required seed
 documents. It creates current collections and indexes, including
 `user_memory_units`, reflection-run indexes, interaction-style indexes,
-scheduled-event indexes, and other runtime indexes required by the facade.
+scheduled-event indexes, self-cognition action-attempt indexes, and other
+runtime indexes required by the facade.
 
 Bootstrap is idempotent. It creates or updates indexes and seed singleton
 documents. Destructive data repair belongs in explicit migration plans.

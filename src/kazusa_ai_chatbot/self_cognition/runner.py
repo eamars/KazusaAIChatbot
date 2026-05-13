@@ -66,6 +66,32 @@ def run_self_cognition_case(
     return written_paths
 
 
+def build_self_cognition_case_artifacts(
+    case: models.SelfCognitionCase,
+    rag_client: RagClient | None = None,
+    cognition_client: SelfCognitionClient | None = None,
+) -> dict[str, Any]:
+    """Build one self-cognition case's tracking records in memory.
+
+    Args:
+        case: External self-cognition case data.
+        rag_client: Optional test seam for the RAG2 supervisor.
+        cognition_client: Optional test seam for the shared cognition graph.
+
+    Returns:
+        Artifact names mapped to JSON-like payloads or Markdown text.
+    """
+
+    artifact_payloads = asyncio.run(
+        build_self_cognition_case_artifacts_async(
+            case,
+            rag_client=rag_client,
+            cognition_client=cognition_client,
+        )
+    )
+    return artifact_payloads
+
+
 async def run_self_cognition_case_async(
     case: models.SelfCognitionCase,
     output_dir: str | Path,
@@ -86,6 +112,41 @@ async def run_self_cognition_case_async(
 
     Returns:
         Artifact names mapped to written paths.
+    """
+
+    artifact_payloads = await build_self_cognition_case_artifacts_async(
+        case,
+        rag_client=rag_client,
+        cognition_client=cognition_client,
+    )
+    written_paths = artifacts.write_tracking_artifacts(
+        output_dir,
+        artifact_payloads,
+    )
+    if event_log_mirror:
+        await _record_self_cognition_event_from_artifacts(
+            case=case,
+            artifact_payloads=artifact_payloads,
+            dispatch_status="not_requested",
+            component="self_cognition.runner",
+        )
+    return written_paths
+
+
+async def build_self_cognition_case_artifacts_async(
+    case: models.SelfCognitionCase,
+    rag_client: RagClient | None = None,
+    cognition_client: SelfCognitionClient | None = None,
+) -> dict[str, Any]:
+    """Async implementation for building self-cognition records in memory.
+
+    Args:
+        case: External self-cognition case data.
+        rag_client: Optional test seam for the RAG2 supervisor.
+        cognition_client: Optional test seam for the shared cognition graph.
+
+    Returns:
+        Artifact names mapped to JSON-like payloads or Markdown text.
     """
 
     case_name = projection.validate_case_name(case)
@@ -111,18 +172,7 @@ async def run_self_cognition_case_async(
             run_record,
             route_effect,
         )
-        written_paths = artifacts.write_tracking_artifacts(
-            output_dir,
-            artifact_payloads,
-        )
-        if event_log_mirror:
-            await _record_self_cognition_event_from_artifacts(
-                case=case,
-                artifact_payloads=artifact_payloads,
-                dispatch_status="not_requested",
-                component="self_cognition.runner",
-            )
-        return written_paths
+        return artifact_payloads
 
     rag_output: dict[str, Any] | None = None
     rag_calls = 0
@@ -216,18 +266,7 @@ async def run_self_cognition_case_async(
         action_attempt=action_attempt,
         action_candidate=action_candidate,
     )
-    written_paths = artifacts.write_tracking_artifacts(
-        output_dir,
-        artifact_payloads,
-    )
-    if event_log_mirror:
-        await _record_self_cognition_event_from_artifacts(
-            case=case,
-            artifact_payloads=artifact_payloads,
-            dispatch_status="not_requested",
-            component="self_cognition.runner",
-        )
-    return written_paths
+    return artifact_payloads
 
 
 async def _record_self_cognition_event_from_artifacts(

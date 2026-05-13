@@ -56,6 +56,7 @@ from kazusa_ai_chatbot.db.schemas import (
     ReflectionMessageRefDoc,
     ReflectionScopeDoc,
     ScheduledEventDoc,
+    SelfCognitionActionAttemptDoc,
     UserMemoryContextDoc,
     UserMemoryContextEntry,
     UserMemoryUnitDoc,
@@ -165,6 +166,10 @@ from kazusa_ai_chatbot.db.scheduled_events import (
     mark_scheduled_event_running,
     query_pending_scheduled_events,
 )
+from kazusa_ai_chatbot.db.self_cognition import (
+    list_self_cognition_action_attempts,
+    upsert_self_cognition_action_attempt,
+)
 
 from kazusa_ai_chatbot.db.rag_cache2_persistent import (
     build_initializer_version_key,
@@ -216,7 +221,8 @@ __all__ = [
     "InteractionStyleStatus", "MemoryDoc", "MentionDoc",
     "PlatformAccountDoc", "RAGCache2PersistentEntryDoc",
     "ReflectionMessageRefDoc", "ReflectionScopeDoc",
-    "ScheduledEventDoc", "UserMemoryContextDoc", "UserMemoryContextEntry",
+    "ScheduledEventDoc", "SelfCognitionActionAttemptDoc",
+    "UserMemoryContextDoc", "UserMemoryContextEntry",
     "UserMemoryUnitDoc", "UserMemoryUnitMergeHistoryEntry", "UserMemoryUnitSourceRef",
     "UserMemoryUnitStatus", "UserMemoryUnitType",
     "UserProfileDoc", "build_memory_doc",
@@ -270,6 +276,9 @@ __all__ = [
     "list_pending_scheduler_events", "mark_scheduled_event_completed",
     "mark_scheduled_event_failed", "mark_scheduled_event_running",
     "query_pending_scheduled_events",
+    # Self-cognition action attempts
+    "list_self_cognition_action_attempts",
+    "upsert_self_cognition_action_attempt",
     # Persistent Cache2
     "build_initializer_version_key", "load_initializer_entries",
     "prune_persistent_entries", "purge_stale_initializer_entries",

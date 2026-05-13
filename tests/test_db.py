@@ -16,6 +16,7 @@ import kazusa_ai_chatbot.db.character as db_character_module
 import kazusa_ai_chatbot.db.conversation as db_conversation_module
 import kazusa_ai_chatbot.db.global_character_growth as db_global_growth_module
 import kazusa_ai_chatbot.db.memory as db_memory_module
+import kazusa_ai_chatbot.db.self_cognition as db_self_cognition_module
 import kazusa_ai_chatbot.db.users as db_users_module
 from kazusa_ai_chatbot.db import (
     AFFINITY_DEFAULT,
@@ -80,6 +81,7 @@ class _BootstrapDb:
             "memory",
             "user_memory_units",
             "scheduled_events",
+            "self_cognition_action_attempts",
             "conversation_episode_state",
             "character_reflection_runs",
             "interaction_style_images",
@@ -124,6 +126,7 @@ def _patched_get_db(db):
          patch.object(db_character_module, "get_db", mock_get_db), \
          patch.object(db_conversation_module, "get_db", mock_get_db), \
          patch.object(db_memory_module, "get_db", mock_get_db), \
+         patch.object(db_self_cognition_module, "get_db", mock_get_db), \
          patch.object(db_users_module, "get_db", mock_get_db):
         yield mock_get_db
 
@@ -679,6 +682,70 @@ async def test_get_conversation_by_platform_message_id_uses_exact_scope() -> Non
 
 
 @pytest.mark.asyncio
+async def test_upsert_self_cognition_action_attempt_uses_idempotency_key() -> None:
+    """Self-cognition attempts should be stored by stable action identity."""
+
+    attempt = {
+        "attempt_id": "self_cognition_attempt:abc",
+        "run_id": "self_cognition_run:abc",
+        "trigger_id": "self_cognition_trigger:abc",
+        "source_kind": "user_memory_unit",
+        "source_id": "promise-001",
+        "target_scope": {
+            "platform": "qq",
+            "platform_channel_id": "673225019",
+            "channel_type": "private",
+            "user_id": "user-001",
+        },
+        "action_kind": "send_message",
+        "due_at": "2026-05-13T00:00:00+00:00",
+        "idempotency_key": "sha256:abc",
+        "status": "scheduled",
+        "recorded_at": "2026-05-13T00:01:00+00:00",
+    }
+    db = _mock_db()
+    db.self_cognition_action_attempts.replace_one = AsyncMock()
+
+    with _patched_get_db(db):
+        await db_self_cognition_module.upsert_self_cognition_action_attempt(attempt)
+
+    db.self_cognition_action_attempts.replace_one.assert_awaited_once_with(
+        {"idempotency_key": "sha256:abc"},
+        attempt,
+        upsert=True,
+    )
+
+
+@pytest.mark.asyncio
+async def test_list_self_cognition_action_attempts_returns_recent_rows() -> None:
+    """Self-cognition attempt reads should stay behind the DB facade."""
+
+    rows = [{"idempotency_key": "sha256:abc", "status": "scheduled"}]
+    cursor = MagicMock()
+    cursor.to_list = AsyncMock(return_value=rows)
+    db = _mock_db()
+    db.self_cognition_action_attempts.find.return_value.sort.return_value.limit.return_value = (
+        cursor
+    )
+
+    with _patched_get_db(db):
+        result = await db_self_cognition_module.list_self_cognition_action_attempts(
+            limit=25,
+        )
+
+    assert result == rows
+    db.self_cognition_action_attempts.find.assert_called_once_with({}, {"_id": 0})
+    db.self_cognition_action_attempts.find.return_value.sort.assert_called_once_with(
+        "recorded_at",
+        -1,
+    )
+    db.self_cognition_action_attempts.find.return_value.sort.return_value.limit.assert_called_once_with(
+        25,
+    )
+    cursor.to_list.assert_awaited_once_with(length=25)
+
+
+@pytest.mark.asyncio
 async def test_db_bootstrap_creates_platform_message_lookup_index(monkeypatch) -> None:
     """Bootstrap should index exact reply-target platform message lookups."""
     db = _BootstrapDb()
@@ -725,6 +792,62 @@ async def test_db_bootstrap_creates_platform_message_lookup_index(monkeypatch) -
             ("platform_message_id", 1),
         ],
         "kwargs": {"name": "conv_platform_channel_message_id"},
+    } in index_specs
+
+
+@pytest.mark.asyncio
+async def test_db_bootstrap_creates_self_cognition_attempt_indexes(
+    monkeypatch,
+) -> None:
+    """Bootstrap should index self-cognition attempt state."""
+
+    db = _BootstrapDb()
+    monkeypatch.setattr(db_bootstrap_module, "get_db", AsyncMock(return_value=db))
+    monkeypatch.setattr(db_bootstrap_module, "enable_vector_index", AsyncMock())
+    monkeypatch.setattr(
+        db_bootstrap_module,
+        "ensure_reflection_run_indexes",
+        AsyncMock(),
+    )
+    monkeypatch.setattr(
+        db_bootstrap_module,
+        "ensure_interaction_style_image_indexes",
+        AsyncMock(),
+    )
+    monkeypatch.setattr(
+        db_bootstrap_module,
+        "ensure_global_character_growth_indexes",
+        AsyncMock(),
+    )
+    monkeypatch.setattr(
+        db_bootstrap_module,
+        "ensure_event_log_indexes",
+        AsyncMock(),
+    )
+    monkeypatch.setattr(
+        db_bootstrap_module,
+        "purge_stale_initializer_entries",
+        AsyncMock(),
+    )
+    monkeypatch.setattr(
+        db_bootstrap_module,
+        "prune_persistent_entries",
+        AsyncMock(),
+    )
+
+    await db_bootstrap_module.db_bootstrap()
+
+    index_specs = db.self_cognition_action_attempts.indexes
+    assert {
+        "keys": "idempotency_key",
+        "kwargs": {
+            "unique": True,
+            "name": "self_cognition_attempt_idempotency_unique",
+        },
+    } in index_specs
+    assert {
+        "keys": [("status", 1), ("recorded_at", -1)],
+        "kwargs": {"name": "self_cognition_attempt_status_recorded"},
     } in index_specs
 
 

@@ -81,7 +81,6 @@ ARTIFACT_ACTION_ATTEMPT = "self_cognition_action_attempt.json"
 ARTIFACT_ACTION_CANDIDATE = "self_cognition_action_candidate.json"
 ARTIFACT_DISPATCH_RESULT = "self_cognition_dispatch_result.json"
 ARTIFACT_LOOP_TRACE = "self_cognition_loop_trace.md"
-ACTION_ATTEMPT_LEDGER_FILENAME = "self_cognition_action_attempts.jsonl"
 TRACKING_ARTIFACT_NAMES = frozenset(
     (
         ARTIFACT_TRIGGER_RECORD,

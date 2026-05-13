@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -12,7 +11,7 @@ import pytest
 
 from kazusa_ai_chatbot.dispatcher.task import DispatchResult, Task
 from kazusa_ai_chatbot.db import user_memory_units as memory_units_module
-from kazusa_ai_chatbot.self_cognition import artifacts, models, sources
+from kazusa_ai_chatbot.self_cognition import models, sources
 from kazusa_ai_chatbot.self_cognition import tracking, worker
 from kazusa_ai_chatbot.self_cognition.handoff import dispatch_action_candidate
 
@@ -120,45 +119,30 @@ def _action_candidate(attempt: dict[str, Any]) -> dict[str, Any]:
     return candidate
 
 
-def _write_json(path: Path, payload: dict[str, Any]) -> str:
-    path.write_text(
-        json.dumps(payload, ensure_ascii=False, indent=2),
-        encoding="utf-8",
-    )
-    rendered_path = str(path)
-    return rendered_path
-
-
 def _case_runner_with_candidate(
     case: dict[str, Any],
     output_dir: Path,
-) -> dict[str, str]:
-    output_dir.mkdir(parents=True, exist_ok=True)
+) -> dict[str, Any]:
+    del output_dir
     attempt = _action_attempt(
         case,
         status=models.ACTION_ATTEMPT_STATUS_CANDIDATE,
     )
     candidate = _action_candidate(attempt)
-    paths = {
-        models.ARTIFACT_ACTION_ATTEMPT: _write_json(
-            output_dir / models.ARTIFACT_ACTION_ATTEMPT,
-            attempt,
-        ),
-        models.ARTIFACT_ACTION_CANDIDATE: _write_json(
-            output_dir / models.ARTIFACT_ACTION_CANDIDATE,
-            candidate,
-        ),
+    payloads = {
+        models.ARTIFACT_ACTION_ATTEMPT: attempt,
+        models.ARTIFACT_ACTION_CANDIDATE: candidate,
     }
-    return paths
+    return payloads
 
 
 def _case_runner_with_tracking(
     case: dict[str, Any],
     output_dir: Path,
-) -> dict[str, str]:
+) -> dict[str, Any]:
     """Build action artifacts using real tracking duplicate logic."""
 
-    output_dir.mkdir(parents=True, exist_ok=True)
+    del output_dir
     trigger_record = tracking.build_trigger_record(case)
     existing_attempts = case.get("existing_attempts")
     if not isinstance(existing_attempts, list):
@@ -177,18 +161,10 @@ def _case_runner_with_tracking(
         action_attempt,
         "Checking in now.",
     )
-    paths = {
-        models.ARTIFACT_ACTION_ATTEMPT: _write_json(
-            output_dir / models.ARTIFACT_ACTION_ATTEMPT,
-            action_attempt,
-        )
-    }
+    payloads = {models.ARTIFACT_ACTION_ATTEMPT: action_attempt}
     if action_candidate is not None:
-        paths[models.ARTIFACT_ACTION_CANDIDATE] = _write_json(
-            output_dir / models.ARTIFACT_ACTION_CANDIDATE,
-            action_candidate,
-        )
-    return paths
+        payloads[models.ARTIFACT_ACTION_CANDIDATE] = action_candidate
+    return payloads
 
 
 class _FakeDispatcher:
@@ -249,22 +225,27 @@ class _FakeUserMemoryUnitsCollection:
 
 
 @pytest.mark.asyncio
-async def test_worker_tick_loads_ledger_before_running_case(tmp_path) -> None:
-    """Prior attempts from the local ledger should enter the next case run."""
+async def test_worker_tick_loads_prior_attempts_before_running_case(
+    tmp_path,
+) -> None:
+    """Prior persisted attempts should enter the next case run."""
 
     case = _commitment_case()
     prior_attempt = _action_attempt(
         case,
         status=models.ACTION_ATTEMPT_STATUS_SCHEDULED,
     )
-    artifacts.append_action_attempt_ledger(tmp_path, prior_attempt)
     captured_case: dict[str, Any] = {}
 
     async def collect_cases(*, now: datetime, max_cases: int) -> list[dict[str, Any]]:
         assert max_cases == 3
         return [case]
 
-    async def run_case(next_case: dict[str, Any], output_dir: Path) -> dict[str, str]:
+    async def read_attempts(*, limit: int) -> list[dict[str, Any]]:
+        assert limit > 0
+        return [prior_attempt]
+
+    async def run_case(next_case: dict[str, Any], output_dir: Path) -> dict[str, Any]:
         del output_dir
         captured_case.update(next_case)
         return {}
@@ -276,6 +257,7 @@ async def test_worker_tick_loads_ledger_before_running_case(tmp_path) -> None:
         is_primary_interaction_busy=lambda: False,
         collect_cases_func=collect_cases,
         run_case_func=run_case,
+        read_attempts_func=read_attempts,
         max_cases=3,
     )
 
@@ -293,10 +275,18 @@ async def test_worker_tick_dispatches_candidate_through_task_dispatcher(
 
     case = _commitment_case()
     dispatcher = _FakeDispatcher()
+    recorded_attempts: list[dict[str, Any]] = []
 
     async def collect_cases(*, now: datetime, max_cases: int) -> list[dict[str, Any]]:
         del now, max_cases
         return [case]
+
+    async def read_attempts(*, limit: int) -> list[dict[str, Any]]:
+        assert limit > 0
+        return list(recorded_attempts)
+
+    async def record_attempt(attempt: dict[str, Any]) -> None:
+        recorded_attempts.append(dict(attempt))
 
     result = await worker.run_self_cognition_worker_tick(
         output_root=tmp_path,
@@ -305,23 +295,19 @@ async def test_worker_tick_dispatches_candidate_through_task_dispatcher(
         is_primary_interaction_busy=lambda: False,
         collect_cases_func=collect_cases,
         run_case_func=_case_runner_with_candidate,
+        read_attempts_func=read_attempts,
+        record_attempt_func=record_attempt,
         max_cases=3,
     )
 
-    ledger = artifacts.read_action_attempt_ledger(tmp_path)
-    dispatch_result_path = next(
-        Path(path)
-        for path in result.artifact_paths
-        if Path(path).name == models.ARTIFACT_DISPATCH_RESULT
-    )
-    dispatch_result = json.loads(dispatch_result_path.read_text(encoding="utf-8"))
-
     assert result.dispatched_count == 1
+    assert result.artifact_paths == []
     assert dispatcher.calls[0]["raw_calls"][0].tool == "send_message"
     assert dispatcher.calls[0]["raw_calls"][0].args["text"] == "Checking in now."
-    assert dispatch_result["status"] == "accepted"
-    assert dispatch_result["scheduled_event_ids"] == ["event-001"]
-    assert ledger[0]["status"] == models.ACTION_ATTEMPT_STATUS_SCHEDULED
+    assert recorded_attempts[0]["status"] == models.ACTION_ATTEMPT_STATUS_SCHEDULED
+    assert recorded_attempts[0]["dispatch_status"] == "accepted"
+    assert recorded_attempts[0]["scheduled_event_ids"] == ["event-001"]
+    assert list(tmp_path.iterdir()) == []
 
 
 @pytest.mark.asyncio
@@ -332,10 +318,18 @@ async def test_worker_tick_records_dispatch_rejection_without_adapter_send(
 
     case = _commitment_case()
     dispatcher = _FakeDispatcher(reject=True)
+    recorded_attempts: list[dict[str, Any]] = []
 
     async def collect_cases(*, now: datetime, max_cases: int) -> list[dict[str, Any]]:
         del now, max_cases
         return [case]
+
+    async def read_attempts(*, limit: int) -> list[dict[str, Any]]:
+        assert limit > 0
+        return list(recorded_attempts)
+
+    async def record_attempt(attempt: dict[str, Any]) -> None:
+        recorded_attempts.append(dict(attempt))
 
     result = await worker.run_self_cognition_worker_tick(
         output_root=tmp_path,
@@ -344,39 +338,47 @@ async def test_worker_tick_records_dispatch_rejection_without_adapter_send(
         is_primary_interaction_busy=lambda: False,
         collect_cases_func=collect_cases,
         run_case_func=_case_runner_with_candidate,
+        read_attempts_func=read_attempts,
+        record_attempt_func=record_attempt,
         max_cases=3,
     )
 
-    ledger = artifacts.read_action_attempt_ledger(tmp_path)
-
     assert result.rejected_count == 1
-    assert ledger[0]["status"] == models.ACTION_ATTEMPT_STATUS_HELD
-    assert ledger[0]["dispatch_status"] == "rejected"
+    assert recorded_attempts[0]["status"] == models.ACTION_ATTEMPT_STATUS_HELD
+    assert recorded_attempts[0]["dispatch_status"] == "rejected"
+    assert list(tmp_path.iterdir()) == []
 
 
 @pytest.mark.asyncio
-async def test_worker_tick_suppresses_duplicate_due_occurrence_from_ledger(
+async def test_worker_tick_suppresses_duplicate_due_occurrence_from_prior_attempts(
     tmp_path,
 ) -> None:
-    """A prior ledger attempt should prevent a repeated dispatcher handoff."""
+    """A prior persisted attempt should prevent a repeated dispatcher handoff."""
 
     case = _commitment_case()
     prior_attempt = _action_attempt(
         case,
         status=models.ACTION_ATTEMPT_STATUS_SCHEDULED,
     )
-    artifacts.append_action_attempt_ledger(tmp_path, prior_attempt)
+    recorded_attempts = [prior_attempt]
     dispatcher = _FakeDispatcher()
 
     async def collect_cases(*, now: datetime, max_cases: int) -> list[dict[str, Any]]:
         del now, max_cases
         return [case]
 
+    async def read_attempts(*, limit: int) -> list[dict[str, Any]]:
+        assert limit > 0
+        return list(recorded_attempts)
+
+    async def record_attempt(attempt: dict[str, Any]) -> None:
+        recorded_attempts.append(dict(attempt))
+
     def run_duplicate_case(
         next_case: dict[str, Any],
         output_dir: Path,
-    ) -> dict[str, str]:
-        output_dir.mkdir(parents=True, exist_ok=True)
+    ) -> dict[str, Any]:
+        del output_dir
         assert next_case["existing_attempts"][0]["idempotency_key"] == (
             prior_attempt["idempotency_key"]
         )
@@ -384,13 +386,8 @@ async def test_worker_tick_suppresses_duplicate_due_occurrence_from_ledger(
             next_case,
             status=models.ACTION_ATTEMPT_STATUS_DUPLICATE,
         )
-        paths = {
-            models.ARTIFACT_ACTION_ATTEMPT: _write_json(
-                output_dir / models.ARTIFACT_ACTION_ATTEMPT,
-                duplicate,
-            )
-        }
-        return paths
+        payloads = {models.ARTIFACT_ACTION_ATTEMPT: duplicate}
+        return payloads
 
     result = await worker.run_self_cognition_worker_tick(
         output_root=tmp_path,
@@ -399,19 +396,26 @@ async def test_worker_tick_suppresses_duplicate_due_occurrence_from_ledger(
         is_primary_interaction_busy=lambda: False,
         collect_cases_func=collect_cases,
         run_case_func=run_duplicate_case,
+        read_attempts_func=read_attempts,
+        record_attempt_func=record_attempt,
         max_cases=3,
     )
 
     assert result.dispatched_count == 0
     assert dispatcher.calls == []
+    assert recorded_attempts[-1]["status"] == (
+        models.ACTION_ATTEMPT_STATUS_DUPLICATE
+    )
+    assert list(tmp_path.iterdir()) == []
 
 
 @pytest.mark.asyncio
-async def test_worker_tick_uses_ledger_updates_between_cases(tmp_path) -> None:
-    """Same-tick duplicate cases should see attempts recorded earlier."""
+async def test_worker_tick_uses_attempt_updates_between_cases(tmp_path) -> None:
+    """Same-tick duplicate cases should see persisted attempts recorded earlier."""
 
     case = _commitment_case()
     dispatcher = _FakeDispatcher()
+    recorded_attempts: list[dict[str, Any]] = []
 
     async def collect_cases(
         *,
@@ -421,6 +425,13 @@ async def test_worker_tick_uses_ledger_updates_between_cases(tmp_path) -> None:
         del now, max_cases
         return [case, dict(case)]
 
+    async def read_attempts(*, limit: int) -> list[dict[str, Any]]:
+        assert limit > 0
+        return list(recorded_attempts)
+
+    async def record_attempt(attempt: dict[str, Any]) -> None:
+        recorded_attempts.append(dict(attempt))
+
     result = await worker.run_self_cognition_worker_tick(
         output_root=tmp_path,
         dispatcher=dispatcher,
@@ -428,15 +439,19 @@ async def test_worker_tick_uses_ledger_updates_between_cases(tmp_path) -> None:
         is_primary_interaction_busy=lambda: False,
         collect_cases_func=collect_cases,
         run_case_func=_case_runner_with_tracking,
+        read_attempts_func=read_attempts,
+        record_attempt_func=record_attempt,
         max_cases=3,
     )
-    ledger = artifacts.read_action_attempt_ledger(tmp_path)
 
     assert result.processed_count == 2
     assert result.dispatched_count == 1
     assert len(dispatcher.calls) == 1
-    assert ledger[0]["status"] == models.ACTION_ATTEMPT_STATUS_SCHEDULED
-    assert ledger[1]["status"] == models.ACTION_ATTEMPT_STATUS_DUPLICATE
+    assert recorded_attempts[0]["status"] == models.ACTION_ATTEMPT_STATUS_SCHEDULED
+    assert recorded_attempts[1]["status"] == (
+        models.ACTION_ATTEMPT_STATUS_DUPLICATE
+    )
+    assert list(tmp_path.iterdir()) == []
 
 
 @pytest.mark.asyncio

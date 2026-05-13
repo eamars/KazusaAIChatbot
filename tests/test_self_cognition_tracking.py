@@ -336,6 +336,28 @@ def test_past_due_contact_decision_writes_action_attempt_and_candidate_without_h
     assert "checking in now" in action_candidate["text"]
 
 
+def test_build_self_cognition_case_artifacts_does_not_write_files(tmp_path) -> None:
+    """Production artifact construction should stay in memory."""
+
+    case = _commitment_case()
+    output_dir = tmp_path / "should_not_exist"
+
+    artifact_payloads = runner.build_self_cognition_case_artifacts(
+        case,
+        cognition_client=lambda state: _action_cognition_output(
+            "I noticed the reminder is due; checking in now.",
+        ),
+    )
+
+    assert not output_dir.exists()
+    assert artifact_payloads[models.ARTIFACT_ACTION_ATTEMPT]["status"] == (
+        models.ACTION_ATTEMPT_STATUS_CANDIDATE
+    )
+    assert "checking in now" in (
+        artifact_payloads[models.ARTIFACT_ACTION_CANDIDATE]["text"]
+    )
+
+
 def test_contact_decision_without_candidate_marker_uses_dialog_candidate(
     monkeypatch,
     tmp_path,

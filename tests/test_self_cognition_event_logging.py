@@ -73,24 +73,13 @@ def _action_cognition_output() -> dict[str, Any]:
     return output
 
 
-def _write_json(path: Path, document: dict[str, Any]) -> str:
-    """Write one JSON artifact and return its path."""
-
-    path.write_text(
-        json.dumps(document, ensure_ascii=False, indent=2),
-        encoding="utf-8",
-    )
-    rendered_path = str(path)
-    return rendered_path
-
-
 def _case_runner_with_tracking(
     case: dict[str, Any],
     output_dir: Path,
-) -> dict[str, str]:
-    """Write local artifacts that resemble a completed runner case."""
+) -> dict[str, Any]:
+    """Build records that resemble a completed runner case."""
 
-    output_dir.mkdir(parents=True, exist_ok=True)
+    del output_dir
     trigger_record = {
         "trigger_id": "self_cognition_trigger:promise-001",
         "trigger_kind": case["trigger_kind"],
@@ -137,25 +126,13 @@ def _case_runner_with_tracking(
         "dispatch_shape": models.ACTION_KIND_SEND_MESSAGE,
         "production_handoff": False,
     }
-    paths = {
-        models.ARTIFACT_TRIGGER_RECORD: _write_json(
-            output_dir / models.ARTIFACT_TRIGGER_RECORD,
-            trigger_record,
-        ),
-        models.ARTIFACT_RUN_RECORD: _write_json(
-            output_dir / models.ARTIFACT_RUN_RECORD,
-            run_record,
-        ),
-        models.ARTIFACT_ACTION_ATTEMPT: _write_json(
-            output_dir / models.ARTIFACT_ACTION_ATTEMPT,
-            action_attempt,
-        ),
-        models.ARTIFACT_ACTION_CANDIDATE: _write_json(
-            output_dir / models.ARTIFACT_ACTION_CANDIDATE,
-            action_candidate,
-        ),
+    payloads = {
+        models.ARTIFACT_TRIGGER_RECORD: trigger_record,
+        models.ARTIFACT_RUN_RECORD: run_record,
+        models.ARTIFACT_ACTION_ATTEMPT: action_attempt,
+        models.ARTIFACT_ACTION_CANDIDATE: action_candidate,
     }
-    return paths
+    return payloads
 
 
 class _FakeDispatcher:
@@ -234,6 +211,12 @@ async def test_worker_mirrors_production_run_and_dispatch_without_text(
         del now, max_cases
         return [_commitment_case()]
 
+    async def read_attempts(*, limit: int) -> list[dict[str, Any]]:
+        assert limit > 0
+        return []
+
+    record_attempt = AsyncMock()
+
     result = await worker.run_self_cognition_worker_tick(
         output_root=tmp_path,
         dispatcher=_FakeDispatcher(),
@@ -241,6 +224,8 @@ async def test_worker_mirrors_production_run_and_dispatch_without_text(
         is_primary_interaction_busy=lambda: False,
         collect_cases_func=collect_cases,
         run_case_func=_case_runner_with_tracking,
+        read_attempts_func=read_attempts,
+        record_attempt_func=record_attempt,
         max_cases=3,
     )
 
@@ -259,3 +244,5 @@ async def test_worker_mirrors_production_run_and_dispatch_without_text(
     )
     assert "Checking in now." not in serialized
     record_worker_event.assert_awaited_once()
+    record_attempt.assert_awaited_once()
+    assert list(tmp_path.iterdir()) == []

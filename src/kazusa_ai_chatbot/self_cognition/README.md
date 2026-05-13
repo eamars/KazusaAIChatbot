@@ -1,9 +1,9 @@
 # Self-Cognition Module
 
 This module is the canonical ICD for `kazusa_ai_chatbot.self_cognition`.
-It owns the source packet, route tracking, action-attempt, local ledger,
-dispatcher-handoff, worker, and local artifact contracts for the idle
-self-cognition agency loop.
+It owns the source packet, route tracking, action-attempt,
+dispatcher-handoff, worker, production attempt persistence, and dry-run
+artifact contracts for the idle self-cognition agency loop.
 
 ## Boundary
 
@@ -15,8 +15,9 @@ The module supports two entry points:
   after cognition selects outward contact without explicit candidate text, and
   writes local artifacts under the requested output directory.
 - The opt-in service worker collects bounded visible/actionable source cases,
-  invokes the same dry-run core, records a local action-attempt ledger, and may
-  hand a cognition-selected `send_message` action candidate to the existing
+  builds the same route records in memory, records sanitized event-log
+  telemetry, persists action-attempt state through the DB facade, and may hand
+  a cognition-selected `send_message` action candidate to the existing
   `TaskDispatcher`.
 
 Production behavior is unchanged while `SELF_COGNITION_ENABLED=false`.
@@ -25,8 +26,9 @@ normal dispatcher/scheduler handling of a non-duplicate action candidate.
 
 The module does not call adapters directly, write `/chat` conversation rows,
 run live-chat consolidation, update reflection state, update stable memory, or
-update conversation progress/history. Dispatcher rejection is recorded locally
-and must not be converted into an adapter send.
+update conversation progress/history. Dispatcher rejection is recorded through
+event logging and persisted action-attempt state; it must not be converted into
+an adapter send.
 
 ## Configuration
 
@@ -35,7 +37,8 @@ Central settings live in `kazusa_ai_chatbot.config`:
 - `SELF_COGNITION_ENABLED`, default `false`.
 - `SELF_COGNITION_WORKER_INTERVAL_SECONDS`, default `3600`.
 - `SELF_COGNITION_MAX_CASES_PER_TICK`, default `3`.
-- `SELF_COGNITION_TRACKING_DIR`, default `self_cognition_runs`.
+- `SELF_COGNITION_TRACKING_DIR`, default `self_cognition_runs`; used only by
+  explicit dry-run/debug artifact writers, not by the production worker.
 - `SELF_COGNITION_SOURCE_PACKET_CHAR_LIMIT`, default `4000`.
 - `SELF_COGNITION_RAG_EVIDENCE_CHAR_LIMIT`, default `4000`.
 - Trigger-source enablement flags, all default `true`:
@@ -71,10 +74,10 @@ cognition's route or contact decision.
 - `tracking.classify_route(case, cognition_output, action_attempt=None)`
 - `tracking.build_action_attempt(case, trigger_record, existing_attempts)`
 - `tracking.build_action_candidate(case, action_attempt, text)`
+- `runner.build_self_cognition_case_artifacts(case, rag_client=None, cognition_client=None)`
+- `runner.build_self_cognition_case_artifacts_async(case, rag_client=None, cognition_client=None)`
 - `runner.run_self_cognition_case(case, output_dir, rag_client=None, cognition_client=None)`
 - `artifacts.write_tracking_artifacts(output_dir, artifacts)`
-- `artifacts.read_action_attempt_ledger(root_dir)`
-- `artifacts.append_action_attempt_ledger(root_dir, attempt)`
 - `handoff.build_raw_tool_call(action_candidate)`
 - `handoff.dispatch_action_candidate(case, action_attempt, action_candidate, dispatcher, now)`
 - `worker.run_self_cognition_worker_tick(...)`
@@ -103,9 +106,11 @@ Existing attempts with these statuses suppress a new send candidate for the
 same idempotency key: `candidate`, `held`, `pending_handoff`,
 `handoff_accepted`, `scheduled`, `sent`, and `duplicate_suppressed`.
 
-The live worker stores suppression history in
-`SELF_COGNITION_TRACKING_DIR/self_cognition_action_attempts.jsonl`. This file
-is the module's own tracking system and is not a production database schema.
+The live worker stores suppression history in the
+`self_cognition_action_attempts` MongoDB collection through
+`kazusa_ai_chatbot.db` helpers. Event logging mirrors sanitized run and
+dispatch metadata for operators, but event logs are not used as production
+control state.
 
 ## Event Logging
 
@@ -114,16 +119,15 @@ and dispatcher-result metadata through `kazusa_ai_chatbot.event_logging`.
 This event-log mirror is the durable operator view for long-term production
 counts and `/ops/self-cognition/stats`.
 
-Local artifacts remain the canonical dry-run and debug output. Existing
-artifact files and the local action-attempt ledger are not backfilled into
-production MongoDB by this module. Event-log rows store ids, route names,
-output modes, budget counters, dispatch status, and status labels; they must
-not include source packet text, action candidate text, raw target channels, or
+Dry-run artifacts remain the canonical debug output. The production worker
+does not write artifact files. Event-log rows store ids, route names, output
+modes, budget counters, dispatch status, and status labels; they must not
+include source packet text, action candidate text, raw target channels, or
 conversation bodies.
 
 ## Artifacts
 
-The dry-run writer or live worker may produce:
+The dry-run writer may produce:
 
 - `self_cognition_trigger_record.json`
 - `self_cognition_run_record.json`
@@ -136,11 +140,11 @@ The dry-run writer or live worker may produce:
 - `self_cognition_action_candidate.json`
 - `self_cognition_dispatch_result.json`
 - `self_cognition_loop_trace.md`
-- `self_cognition_action_attempts.jsonl`
 
 Action candidates always use `dispatch_shape: "send_message"` and
-`production_handoff: false`. In live mode, actual handoff state is represented
-by `self_cognition_dispatch_result.json` and the local action-attempt ledger.
+`production_handoff: false` in dry-run artifacts. In live mode, actual handoff
+state is represented by event logging, scheduler rows, and the
+`self_cognition_action_attempts` collection.
 
 ## Command
 

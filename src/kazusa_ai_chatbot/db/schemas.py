@@ -526,3 +526,21 @@ class ScheduledEventDoc(TypedDict, total=False):
     source_message_id: str
     guild_id: str | None
     bot_role: str
+
+
+class SelfCognitionActionAttemptDoc(TypedDict, total=False):
+    """Durable action-attempt state for idle self-cognition deduplication."""
+
+    attempt_id: str
+    run_id: str
+    trigger_id: str
+    source_kind: str
+    source_id: str
+    target_scope: dict
+    action_kind: str
+    due_at: str | None
+    idempotency_key: str
+    status: str
+    dispatch_status: str
+    scheduled_event_ids: list[str]
+    recorded_at: str

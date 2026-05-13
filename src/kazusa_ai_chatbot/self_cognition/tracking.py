@@ -299,12 +299,13 @@ def extract_action_candidate_text(cognition_output: dict[str, Any]) -> str:
     """
 
     for anchor in _content_anchors(cognition_output):
-        marker_index = anchor.find(models.ACTION_CANDIDATE_MARKER)
-        if marker_index < 0:
+        _, marker, candidate_text = anchor.partition(
+            models.ACTION_CANDIDATE_MARKER
+        )
+        if not marker:
             continue
-        text_start = marker_index + len(models.ACTION_CANDIDATE_MARKER)
-        candidate_text = anchor[text_start:].strip()
-        return candidate_text
+        return_value = candidate_text.strip()
+        return return_value
     return_value = ""
     return return_value
 

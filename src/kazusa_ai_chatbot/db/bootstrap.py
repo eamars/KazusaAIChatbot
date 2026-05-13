@@ -37,6 +37,9 @@ from kazusa_ai_chatbot.db.rag_cache2_persistent import (
     prune_persistent_entries,
     purge_stale_initializer_entries,
 )
+from kazusa_ai_chatbot.db.self_cognition import (
+    SELF_COGNITION_ACTION_ATTEMPTS_COLLECTION,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -75,6 +78,7 @@ async def db_bootstrap() -> None:
         PERSISTENT_CACHE_COLLECTION,
         EVENT_LOG_EVENTS_COLLECTION,
         EVENT_LOG_SNAPSHOTS_COLLECTION,
+        SELF_COGNITION_ACTION_ATTEMPTS_COLLECTION,
     ]
     for name in required_collections:
         if name not in existing:
@@ -141,6 +145,15 @@ async def db_bootstrap() -> None:
     )
     await db.scheduled_events.create_index(
         "source_user_id", name="event_source_user",
+    )
+    await db[SELF_COGNITION_ACTION_ATTEMPTS_COLLECTION].create_index(
+        "idempotency_key",
+        unique=True,
+        name="self_cognition_attempt_idempotency_unique",
+    )
+    await db[SELF_COGNITION_ACTION_ATTEMPTS_COLLECTION].create_index(
+        [("status", 1), ("recorded_at", -1)],
+        name="self_cognition_attempt_status_recorded",
     )
     await db.conversation_episode_state.create_index(
         [("platform", 1), ("platform_channel_id", 1), ("global_user_id", 1)],

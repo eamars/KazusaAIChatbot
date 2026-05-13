@@ -1,15 +1,15 @@
 """Self-cognition contracts, artifact builders, and worker entrypoints."""
 
-from kazusa_ai_chatbot.self_cognition.artifacts import (
-    append_action_attempt_ledger,
-    read_action_attempt_ledger,
-    write_tracking_artifacts,
-)
+from kazusa_ai_chatbot.self_cognition.artifacts import write_tracking_artifacts
 from kazusa_ai_chatbot.self_cognition.handoff import (
     build_raw_tool_call,
     dispatch_action_candidate,
 )
-from kazusa_ai_chatbot.self_cognition.runner import run_self_cognition_case
+from kazusa_ai_chatbot.self_cognition.runner import (
+    build_self_cognition_case_artifacts,
+    build_self_cognition_case_artifacts_async,
+    run_self_cognition_case,
+)
 from kazusa_ai_chatbot.self_cognition.tracking import (
     build_action_attempt,
     build_action_candidate,
@@ -30,7 +30,8 @@ from kazusa_ai_chatbot.self_cognition.worker import (
 __all__ = [
     "SelfCognitionWorkerHandle",
     "SelfCognitionWorkerResult",
-    "append_action_attempt_ledger",
+    "build_self_cognition_case_artifacts",
+    "build_self_cognition_case_artifacts_async",
     "build_raw_tool_call",
     "build_action_attempt",
     "build_action_candidate",
@@ -40,7 +41,6 @@ __all__ = [
     "build_trigger_record",
     "classify_route",
     "dispatch_action_candidate",
-    "read_action_attempt_ledger",
     "run_self_cognition_case",
     "run_self_cognition_worker_tick",
     "start_self_cognition_worker",
