@@ -180,6 +180,11 @@ class OpsStatsResponse(BaseModel):
     semantic_descriptors: dict[str, str] = Field(default_factory=dict)
 
 
+class OpsSelfCognitionStatsResponse(OpsStatsResponse):
+    enabled: bool = False
+    task_alive: bool = False
+
+
 class RuntimeAdapterRegistrationRequest(BaseModel):
     platform: str
     callback_url: str

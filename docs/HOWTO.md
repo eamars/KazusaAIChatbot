@@ -292,9 +292,12 @@ conversation details.
 ### `GET /ops/self-cognition/stats`
 
 Trusted-operator self-cognition stats for a bounded event-log window. The
-response contains run counts, dispatcher handoff counts, latest refs, and
-semantic liveness labels. It does not expose source packets, action candidate
-text, or generated dialog.
+response contains the service-owned `enabled` and `task_alive` state, run
+counts, dispatcher handoff counts, latest refs, and semantic liveness labels.
+This avoids treating `self_cognition_liveness=inactive` as the full worker
+state; inactive only means no self-cognition run events were recorded in the
+window. It does not expose source packets, action candidate text, or generated
+dialog.
 
 The `/ops/*` endpoints have no authentication or authorization in this plan.
 Deployments must keep them on localhost or a trusted operator network until a
@@ -319,6 +322,20 @@ Without `--output`, the command writes
 `test_artifacts/diagnostics/event_log_<UTC>.json`. The export includes the
 same aggregate status/stat payloads and the deterministic snapshot write
 result. It does not export raw event documents.
+
+Recent terminal status:
+
+```bash
+python -m scripts.fetch_ops_status --hours 24
+python -m scripts.fetch_ops_status 6 --json
+```
+
+The status command reads the same aggregate event-log builders used by the
+`/ops/*` endpoints. It prints recent runtime, reflection, and self-cognition
+status without writing a snapshot or exporting raw event documents. The local
+CLI includes the configured self-cognition `enabled` value; use
+`/ops/runtime-status` or `/ops/self-cognition/stats` on the running service when
+you need process-local `task_alive` state.
 
 ### `POST /chat`
 

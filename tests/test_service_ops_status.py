@@ -205,10 +205,18 @@ async def test_ops_self_cognition_stats_returns_aggregate_payload(
         "build_self_cognition_stats",
         build_self_cognition_stats,
     )
+    monkeypatch.setattr(service_module, "SELF_COGNITION_ENABLED", False)
+    monkeypatch.setattr(
+        service_module,
+        "_self_cognition_worker_handle",
+        None,
+    )
 
     response = await service_module.ops_self_cognition_stats(window_hours=12)
     payload = response.model_dump()
 
+    assert payload["enabled"] is False
+    assert payload["task_alive"] is False
     assert payload["counts"] == {
         "runs": 2,
         "dispatch_accepted": 1,

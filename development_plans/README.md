@@ -44,7 +44,7 @@ long_term/todo.md
 
 | Plan | Status | Execution |
 |---|---|---|
-| [rag_memory_evidence_remember_me_inner_path_bugfix_plan.md](active/bugfix/rag_memory_evidence_remember_me_inner_path_bugfix_plan.md) | completed | verified |
+| [self_cognition_background_context_budget_bugfix_plan.md](active/bugfix/self_cognition_background_context_budget_bugfix_plan.md) | draft | Do not execute until approved |
 
 ## Reference Documents
 
@@ -52,8 +52,10 @@ long_term/todo.md
 |---|---|
 | [rag_cache2_design.md](reference/designs/rag_cache2_design.md) | Design reference |
 | [rag_hybrid_search_architecture_decision.md](reference/designs/rag_hybrid_search_architecture_decision.md) | Design reference |
+| [self_cognition_loop_architecture.md](reference/designs/self_cognition_loop_architecture.md) | Architecture reference |
 | [self_cognition_reasoning_basis.md](reference/designs/self_cognition_reasoning_basis.md) | Reasoning basis |
 | [self_cognition_tracking_icd.md](reference/designs/self_cognition_tracking_icd.md) | Interface control document |
+| [multi_source_cognition_stage_03_inactive_prompt_variant_notes.md](reference/multi_source_cognition_stage_03_inactive_prompt_variant_notes.md) | Reference notes |
 
 ## Triage
 
@@ -90,6 +92,7 @@ plans.
 | [l3_content_anchor_open_loop_resolution_plan.md](archive/completed/bugfix/l3_content_anchor_open_loop_resolution_plan.md) |
 | [rag_active_turn_conversation_row_exclusion_plan.md](archive/completed/bugfix/rag_active_turn_conversation_row_exclusion_plan.md) |
 | [rag_hybrid_search_time_config_plan.md](archive/completed/bugfix/rag_hybrid_search_time_config_plan.md) |
+| [rag_memory_evidence_remember_me_inner_path_bugfix_plan.md](archive/completed/bugfix/rag_memory_evidence_remember_me_inner_path_bugfix_plan.md) |
 | [rag_retrieval_top_k_embedding_tuning_plan.md](archive/completed/bugfix/rag_retrieval_top_k_embedding_tuning_plan.md) |
 | [task_dispatcher_json_contract_bugfix_plan.md](archive/completed/bugfix/task_dispatcher_json_contract_bugfix_plan.md) |
 | [temporal_grounding_rag_episode_state_plan.md](archive/completed/bugfix/temporal_grounding_rag_episode_state_plan.md) |

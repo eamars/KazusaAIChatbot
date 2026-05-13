@@ -12,6 +12,8 @@
     ·
     <a href="src/kazusa_ai_chatbot/brain_service/README.md">Brain Service ICD</a>
     ·
+    <a href="src/kazusa_ai_chatbot/event_logging/README.md">Event Logging ICD</a>
+    ·
     <a href="src/kazusa_ai_chatbot/nodes/README.md">Cognition Nodes</a>
   </p>
 
@@ -49,6 +51,7 @@ At a high level, Kazusa provides:
 | Background consolidation         | Completed turns update durable memory, relationship state, Cache2 invalidation, images, and progress after the reply is available. |
 | Reflection outside chat          | Hourly, daily, and promoted reflection runs are stored as audit records and only promoted context can enter normal cognition.      |
 | Scheduled follow-through         | Accepted future promises can become validated scheduled tasks delivered later through registered adapters.                         |
+| Event logging observability      | Runtime, LLM, RAG, dialog, reflection, self-cognition, dispatcher, and DB operations emit sanitized operational events.            |
 
 ## What You Can Build
 
@@ -196,6 +199,7 @@ cognition, and scheduling remain in the platform-neutral core.
 | RAG 2                    | Slot-driven helper-agent retrieval and Cache2 evidence projection                       | [RAG 2](src/kazusa_ai_chatbot/rag/README.md)                                           |
 | Cognition and dialog     | Character stance, boundaries, judgment, style, visual directives, and final wording     | [Cognition Nodes](src/kazusa_ai_chatbot/nodes/README.md)                              |
 | Database                 | MongoDB collection ownership, embeddings, indexes, public persistence helpers           | [Database ICD](src/kazusa_ai_chatbot/db/README.md)                                     |
+| Event logging            | Sanitized operational telemetry, status snapshots, statistics, and export contracts     | [Event Logging ICD](src/kazusa_ai_chatbot/event_logging/README.md)                     |
 | Dispatcher and scheduler | Validated delayed tool execution for accepted future promises                           | [Dispatcher](src/kazusa_ai_chatbot/dispatcher/README.md)                               |
 | Reflection cycle         | Background reflection runs, promotion gates, prompt-safe reflection context             | [Reflection Cycle ICD](src/kazusa_ai_chatbot/reflection_cycle/README.md)               |
 | Memory evolution         | Curated shared memory lifecycle, lineage, seed reset, promoted memory writes            | [Memory Evolution ICD](src/kazusa_ai_chatbot/memory_evolution/README.md)               |
@@ -254,6 +258,7 @@ src/
     rag/                       RAG 2 helper agents, hybrid retrieval, Cache2
     conversation_progress/     Short-term episode memory
     db/                        MongoDB facade, schemas, collection owners
+    event_logging/             Sanitized operational telemetry interface and ICD
     dispatcher/                Delayed task validation and adapter handoff
     reflection_cycle/          Background reflection and promotion
     memory_evolution/          Shared memory lifecycle and seed reset
@@ -299,6 +304,7 @@ rather than production sends.
 | [Brain Service ICD](src/kazusa_ai_chatbot/brain_service/README.md)       | HTTP endpoint contracts and adapter obligations                   |
 | [Message Envelope ICD](src/kazusa_ai_chatbot/message_envelope/README.md) | Typed inbound message contract                                    |
 | [Database ICD](src/kazusa_ai_chatbot/db/README.md)                       | Persistence ownership and collection contracts                    |
+| [Event Logging ICD](src/kazusa_ai_chatbot/event_logging/README.md)        | Sanitized telemetry interface, event taxonomy, and ops statistics |
 | [RAG 2](src/kazusa_ai_chatbot/rag/README.md)                             | Retrieval architecture and evidence projection                    |
 | [Cognition Nodes](src/kazusa_ai_chatbot/nodes/README.md)                 | Layered cognition, dialog, and node-package design contracts      |
 | [Development Plans Registry](development_plans/README.md)                | Active, archived, reference, and roadmap documents                |

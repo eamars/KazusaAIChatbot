@@ -162,13 +162,18 @@ reflection run ledger and does not expose raw reflection output.
 
 ### `GET /ops/self-cognition/stats`
 
-Response model: `OpsStatsResponse`.
+Response model: `OpsSelfCognitionStatsResponse`.
 
 Purpose:
 
+- Report service-owned self-cognition `enabled` and `task_alive` state.
 - Report aggregate self-cognition event-log counts for a bounded window.
 - Distinguish internal-only activity from dispatcher handoff activity through
   deterministic labels.
+
+`self_cognition_liveness=inactive` only means no self-cognition run events were
+recorded in the window. Callers must use `enabled` and `task_alive` to
+distinguish a disabled worker from an enabled idle worker.
 
 This endpoint does not expose source packet text, route reasoning, action
 candidate text, dispatcher arguments, or generated dialog.

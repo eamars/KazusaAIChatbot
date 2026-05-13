@@ -110,6 +110,7 @@ from kazusa_ai_chatbot.brain_service.contracts import (
     MentionIn,
     MessageEnvelopeIn,
     OpsRuntimeStatusResponse,
+    OpsSelfCognitionStatsResponse,
     OpsStatsResponse,
     ReplyTargetIn,
     RuntimeAdapterRegistrationRequest,
@@ -537,6 +538,17 @@ def _ops_runtime_status_payload(
             base_status.get("semantic_descriptors", {}),
         ),
     }
+    return payload
+
+
+def _ops_self_cognition_stats_payload(
+    stats: Mapping[str, object],
+) -> dict[str, object]:
+    """Merge self-cognition aggregates with service-owned worker state."""
+
+    payload = dict(stats)
+    payload["enabled"] = SELF_COGNITION_ENABLED
+    payload["task_alive"] = _worker_task_alive(_self_cognition_worker_handle)
     return payload
 
 
@@ -1811,16 +1823,20 @@ async def ops_reflection_stats(
     return response
 
 
-@app.get("/ops/self-cognition/stats", response_model=OpsStatsResponse)
+@app.get(
+    "/ops/self-cognition/stats",
+    response_model=OpsSelfCognitionStatsResponse,
+)
 async def ops_self_cognition_stats(
     window_hours: int = 24,
-) -> OpsStatsResponse:
+) -> OpsSelfCognitionStatsResponse:
     """Return aggregate self-cognition telemetry for trusted local operators."""
 
     stats = await event_logging.build_self_cognition_stats(
         window_hours=window_hours,
     )
-    response = OpsStatsResponse.model_validate(stats)
+    payload = _ops_self_cognition_stats_payload(stats)
+    response = OpsSelfCognitionStatsResponse.model_validate(payload)
     return response
 
 
