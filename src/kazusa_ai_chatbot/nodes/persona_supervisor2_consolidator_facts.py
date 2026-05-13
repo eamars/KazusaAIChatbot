@@ -20,6 +20,131 @@ from kazusa_ai_chatbot.utils import get_llm, log_list_preview, log_preview, pars
 logger = logging.getLogger(__name__)
 
 
+_FACTS_HARVESTER_CANDIDATE_LIMIT = 12
+_FACTS_HARVESTER_CANDIDATE_FACT_LIMIT = 240
+_FACTS_HARVESTER_CANDIDATE_FIELDS = (
+    "unit_id",
+    "unit_type",
+    "dedup_key",
+    "updated_at",
+)
+
+
+def _stripped_candidate_text(value: object) -> str:
+    if not isinstance(value, str):
+        return_value = ""
+        return return_value
+
+    return_value = value.strip()
+    return return_value
+
+
+def _clipped_candidate_fact(value: object) -> str:
+    fact = _stripped_candidate_text(value)
+    if len(fact) > _FACTS_HARVESTER_CANDIDATE_FACT_LIMIT:
+        fact = fact[:_FACTS_HARVESTER_CANDIDATE_FACT_LIMIT].rstrip()
+
+    return_value = fact
+    return return_value
+
+
+def _compact_memory_unit_candidate(candidate: object) -> dict[str, object]:
+    """Keep one memory-unit candidate as bounded duplicate evidence.
+
+    Args:
+        candidate: Raw surfaced memory-unit row from the global RAG payload.
+
+    Returns:
+        A prompt-safe row containing only identity, type, dedup, timestamp, and
+        clipped fact text.
+    """
+
+    if not isinstance(candidate, dict):
+        return_value: dict[str, object] = {}
+        return return_value
+
+    selected_candidate: dict[str, object] = {}
+    for field in _FACTS_HARVESTER_CANDIDATE_FIELDS + ("fact",):
+        if field in candidate:
+            selected_candidate[field] = candidate[field]
+
+    projected_candidate = project_tool_result_for_llm(selected_candidate)
+    if not isinstance(projected_candidate, dict):
+        projected_candidate = selected_candidate
+
+    compact_candidate: dict[str, object] = {}
+    for field in _FACTS_HARVESTER_CANDIDATE_FIELDS:
+        value = _stripped_candidate_text(projected_candidate.get(field))
+        if value:
+            compact_candidate[field] = value
+
+    fact = _clipped_candidate_fact(projected_candidate.get("fact"))
+    if fact:
+        compact_candidate["fact"] = fact
+
+    return_value = compact_candidate
+    return return_value
+
+
+def _compact_memory_unit_candidates(candidates: object) -> list[dict[str, object]]:
+    """Build capped memory-unit duplicate hints for facts prompts.
+
+    Args:
+        candidates: Raw surfaced memory-unit candidate list from RAG.
+
+    Returns:
+        At most `_FACTS_HARVESTER_CANDIDATE_LIMIT` compact candidate rows.
+    """
+
+    if not isinstance(candidates, list):
+        return_value: list[dict[str, object]] = []
+        return return_value
+
+    compact_candidates: list[dict[str, object]] = []
+    for candidate in candidates:
+        if len(compact_candidates) >= _FACTS_HARVESTER_CANDIDATE_LIMIT:
+            break
+
+        compact_candidate = _compact_memory_unit_candidate(candidate)
+        if compact_candidate:
+            compact_candidates.append(compact_candidate)
+
+    return_value = compact_candidates
+    return return_value
+
+
+def _facts_harvester_rag_view(rag_result: object) -> dict:
+    """Return the bounded RAG view used by facts harvester prompts.
+
+    Args:
+        rag_result: Global consolidation RAG result, possibly carrying raw
+            surfaced memory-unit candidates for later merge reuse.
+
+    Returns:
+        Projected RAG evidence with raw memory-unit candidate rows replaced by
+        compact prompt-safe duplicate hints.
+    """
+
+    if not isinstance(rag_result, dict):
+        return_value: dict = {}
+        return return_value
+
+    raw_candidates = rag_result.get("user_memory_unit_candidates")
+    projected_source = dict(rag_result)
+    projected_source.pop("user_memory_unit_candidates", None)
+
+    projected_result = project_tool_result_for_llm(projected_source)
+    if not isinstance(projected_result, dict):
+        return_value = {}
+        return return_value
+
+    projected_result["user_memory_unit_candidates"] = _compact_memory_unit_candidates(
+        raw_candidates,
+    )
+    return_value = projected_result
+    return return_value
+
+
 _FACTS_HARVESTER_PROMPT = '''\
 你负责从本轮 consolidation 输入中提取具备长期价值的事实证据 `new_facts` 和已被角色接下的未来约定 `future_promises`。
 这些结果不是最终画像；它们会作为下游 memory-unit consolidator 的证据输入。
@@ -106,7 +231,7 @@ human payload 是以下 JSON：
                 "active_commitments": [{{"fact": "...", "subjective_appraisal": "...", "relationship_signal": "...", "updated_at": "本地时间"}}]
             }}
         }},
-        "user_memory_unit_candidates": ["检索出的原始候选记忆单元"],
+        "user_memory_unit_candidates": ["已压缩的候选记忆单元，仅含 unit_id/unit_type/fact/dedup_key/updated_at"],
         "memory_evidence": ["相关长期记忆证据"],
         "recall_evidence": ["约定/承诺/进度回忆证据"],
         "conversation_evidence": ["相关近期对话证据"],
@@ -159,9 +284,7 @@ async def facts_harvester(state: ConsolidatorState) -> dict:
     ))
 
     local_datetime = state["time_context"]["current_local_datetime"]
-    rag_result = project_tool_result_for_llm(state["rag_result"])
-    if not isinstance(rag_result, dict):
-        rag_result = {}
+    rag_result = _facts_harvester_rag_view(state["rag_result"])
     msg = {
         "user_name": state["user_name"],
         "timestamp": local_datetime,
@@ -292,7 +415,7 @@ human payload 是以下 JSON：
     "decontexualized_input": "用户本轮真实意图摘要",
     "rag_result": {{
         "user_image": {{"user_memory_context": "五类用户记忆单元投影"}},
-        "user_memory_unit_candidates": ["检索出的原始候选记忆单元"],
+        "user_memory_unit_candidates": ["已压缩的候选记忆单元，仅含 unit_id/unit_type/fact/dedup_key/updated_at"],
         "memory_evidence": ["相关长期记忆证据"],
         "recall_evidence": ["约定/承诺/进度回忆证据"],
         "conversation_evidence": ["相关近期对话证据"],
@@ -327,9 +450,7 @@ async def fact_harvester_evaluator(state: ConsolidatorState) -> dict:
     ))
 
     retry = state.get("fact_harvester_retry", 0) + 1
-    rag_result = project_tool_result_for_llm(state["rag_result"])
-    if not isinstance(rag_result, dict):
-        rag_result = {}
+    rag_result = _facts_harvester_rag_view(state["rag_result"])
     msg = {
         "retry": f"{retry}/{MAX_FACT_HARVESTER_RETRY}",
         "user_name": state["user_name"],

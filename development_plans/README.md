@@ -44,7 +44,6 @@ long_term/todo.md
 
 | Plan | Status | Execution |
 |---|---|---|
-| [consolidator_facts_prompt_budget_bugfix_plan.md](active/bugfix/consolidator_facts_prompt_budget_bugfix_plan.md) | draft | blocked until approved |
 | [rag_memory_evidence_remember_me_inner_path_bugfix_plan.md](active/bugfix/rag_memory_evidence_remember_me_inner_path_bugfix_plan.md) | draft | blocked until approved |
 
 ## Reference Documents
@@ -86,6 +85,7 @@ plans.
 | Plan |
 |---|
 | [cognition_silence_short_circuit_and_dialog_evaluator_quality_plan.md](archive/completed/bugfix/cognition_silence_short_circuit_and_dialog_evaluator_quality_plan.md) |
+| [consolidator_facts_prompt_budget_bugfix_plan.md](archive/completed/bugfix/consolidator_facts_prompt_budget_bugfix_plan.md) |
 | [conversation_progress_identity_leakage_bugfix_plan.md](archive/completed/bugfix/conversation_progress_identity_leakage_bugfix_plan.md) |
 | [l3_content_anchor_open_loop_resolution_plan.md](archive/completed/bugfix/l3_content_anchor_open_loop_resolution_plan.md) |
 | [rag_active_turn_conversation_row_exclusion_plan.md](archive/completed/bugfix/rag_active_turn_conversation_row_exclusion_plan.md) |
