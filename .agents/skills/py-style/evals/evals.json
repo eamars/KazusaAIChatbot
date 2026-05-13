@@ -123,6 +123,25 @@
           "description": "Response does not ban all .replace(...) usage, only template placeholder substitution"
         }
       ]
+    },
+    {
+      "id": 6,
+      "prompt": "Review this scoring helper for py-style issues:\n\n```python\nasync def choose_reply_mode(affinity: int, db) -> str:\n    \"\"\"Choose the reply mode from the user's affinity score.\"\"\"\n\n    recent_messages = await db.messages.find().sort(\"created_at\", -1).limit(10).to_list(None)\n    if affinity >= 750 and len(recent_messages) > 3:\n        return \"warm\"\n    return \"plain\"\n```",
+      "expected_output": "Flags the unexplained numeric literals 10, 750, and 3 as P-016 violations because limits, thresholds, and count gates should use named constants, configuration, schema fields, or environment-backed settings where appropriate. Proposes named constants or explains that any inline numeric literal needs a comment documenting justification, intended use case, and future extraction path.",
+      "assertions": [
+        {
+          "name": "flags_magic_numbers",
+          "description": "Response identifies unexplained non-obvious numeric literals as P-016 violations"
+        },
+        {
+          "name": "suggests_named_constants_or_config",
+          "description": "Response proposes named constants, configuration, schema ownership, or environment-backed settings where applicable"
+        },
+        {
+          "name": "requires_inline_justification_for_exceptions",
+          "description": "Response says any necessary inline magic number must include a justification, intended use case, and future extraction path"
+        }
+      ]
     }
   ]
 }

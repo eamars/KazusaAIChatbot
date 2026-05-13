@@ -533,3 +533,55 @@ auth tests still pass.
 When reviewing, ask whether the change has a concrete before/after condition
 and whether the submitted verification proves that condition rather than merely
 showing that code was edited.
+
+---
+
+## P-016 -- Minimize magic numbers with named constants or configuration
+
+Numeric literals should communicate their domain meaning. Prefer named
+module-level constants, configuration values, schema fields, or
+environment-backed settings when a number represents a policy, threshold,
+timeout, retry count, score bound, window size, batch size, or any other
+behavior that may need review or tuning.
+
+Use environment variables only for deploy-time operational settings. For stable
+domain rules, prefer uppercase module-level constants or existing config/schema
+owners so the value remains visible in code review.
+
+**Wrong:**
+```python
+if affinity >= 750:
+    tier = "trusted"
+
+messages = await load_history(limit=10)
+```
+
+**Right:**
+```python
+TRUSTED_AFFINITY_THRESHOLD = 750
+DEFAULT_HISTORY_LIMIT = 10
+
+if affinity >= TRUSTED_AFFINITY_THRESHOLD:
+    tier = "trusted"
+
+messages = await load_history(limit=DEFAULT_HISTORY_LIMIT)
+```
+
+If a numeric literal must remain inline because it is required by an external
+protocol, a well-known formula, or a one-off local invariant, add an inline
+comment that states the justification, intended use case, and future extraction
+path.
+
+**Acceptable with justification:**
+```python
+if response.status_code == 429:  # HTTP rate limit; replace with HTTPStatus later.
+    await schedule_retry()
+```
+
+Small structural values such as `0` or `1` may remain literal when their meaning
+is local and self-evident, such as starting an index, checking an empty count,
+or incrementing by one.
+
+When reviewing, flag unexplained non-obvious numeric literals and ask whether
+the value belongs in a named constant, config owner, schema default, or
+environment-backed setting.
