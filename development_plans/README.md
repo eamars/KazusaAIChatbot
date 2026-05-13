@@ -44,7 +44,7 @@ long_term/todo.md
 
 | Plan | Status | Execution |
 |---|---|---|
-| [rag_memory_evidence_remember_me_inner_path_bugfix_plan.md](active/bugfix/rag_memory_evidence_remember_me_inner_path_bugfix_plan.md) | draft | blocked until approved |
+| [rag_memory_evidence_remember_me_inner_path_bugfix_plan.md](active/bugfix/rag_memory_evidence_remember_me_inner_path_bugfix_plan.md) | completed | verified |
 
 ## Reference Documents
 

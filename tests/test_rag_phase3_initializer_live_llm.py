@@ -455,3 +455,136 @@ async def test_live_initializer_includes_memory_evidence_for_scoped_continuity(
     assert result["result"]["projection_payload"]["memory_rows"][0]["unit_id"] == (
         "unit-live-xuejie"
     )
+
+
+async def test_live_initializer_routes_remember_me_to_scoped_memory(
+    monkeypatch,
+) -> None:
+    """Remember-me recognition should route to scoped current-user memory."""
+
+    await _run_initializer_case(
+        monkeypatch,
+        "remember_me_to_scoped_memory",
+        '@<active character> 你还记得我吗',
+        ["Memory-evidence:"],
+        required_slot_fragments=["current-user private continuity"],
+        forbidden_prefixes=[
+            "Person-context:",
+            "Conversation-evidence:",
+        ],
+    )
+
+
+async def test_live_initializer_remember_today_agreement_stays_recall(
+    monkeypatch,
+) -> None:
+    """Remembering today's agreement remains Recall, not scoped memory."""
+
+    await _run_initializer_case(
+        monkeypatch,
+        "remember_today_agreement_stays_recall",
+        '早上好呀，还记得今天的约定么',
+        ["Recall:"],
+        forbidden_prefixes=[
+            "Memory-evidence:",
+            "Conversation-evidence:",
+            "Person-context:",
+        ],
+    )
+
+
+async def test_live_initializer_remember_recent_user_words_stays_conversation(
+    monkeypatch,
+) -> None:
+    """Remembering recent user wording remains current-user conversation evidence."""
+
+    await _run_initializer_case(
+        monkeypatch,
+        "remember_recent_user_words_stays_conversation",
+        '你还记得我刚刚说那堆充电线里大概有哪些吗？',
+        ["Conversation-evidence:"],
+        required_slot_fragments=["speaker=current_user"],
+        forbidden_prefixes=[
+            "Memory-evidence:",
+            "Person-context:",
+            "Recall:",
+        ],
+    )
+
+
+async def test_live_initializer_active_character_self_words_stays_conversation(
+    monkeypatch,
+) -> None:
+    """Active-character self-word recall remains character conversation evidence."""
+
+    await _run_initializer_case(
+        monkeypatch,
+        "active_character_self_words_stays_conversation",
+        '你之前是不是说过那个项目要延期？',
+        ["Conversation-evidence:"],
+        required_slot_fragments=["speaker=active_character"],
+        forbidden_prefixes=[
+            "Memory-evidence:",
+            "Person-context:",
+            "Recall:",
+        ],
+    )
+
+
+async def test_live_initializer_current_user_url_recall_stays_conversation(
+    monkeypatch,
+) -> None:
+    """Current-user URL recall should search chat first, then fetch the URL."""
+
+    await _run_initializer_case(
+        monkeypatch,
+        "current_user_url_recall_stays_conversation",
+        '我上次发的那个链接里有什么信息？',
+        [
+            "Conversation-evidence:",
+            "Web-evidence:",
+        ],
+        required_slot_fragments=["speaker=current_user"],
+        forbidden_prefixes=[
+            "Memory-evidence:",
+            "Person-context:",
+            "Recall:",
+        ],
+    )
+
+
+async def test_live_initializer_named_person_impression_stays_person_context(
+    monkeypatch,
+) -> None:
+    """Named-person impression questions should remain Person-context."""
+
+    await _run_initializer_case(
+        monkeypatch,
+        "named_person_impression_stays_person_context",
+        '<character mention>你觉得小明这个人怎么样',
+        ["Person-context:"],
+        forbidden_prefixes=[
+            "Memory-evidence:",
+            "Conversation-evidence:",
+            "Recall:",
+        ],
+    )
+
+
+async def test_live_initializer_official_address_stays_shared_memory_slot(
+    monkeypatch,
+) -> None:
+    """Official address remains shared memory, not current-user continuity."""
+
+    await _run_initializer_case(
+        monkeypatch,
+        "official_address_stays_shared_memory_slot",
+        '你家的官方地址是什么？',
+        ["Memory-evidence:"],
+        required_slot_fragments=["official address"],
+        forbidden_slot_fragments=[
+            "current-user",
+            "private continuity",
+            "prior shared interaction",
+        ],
+    )

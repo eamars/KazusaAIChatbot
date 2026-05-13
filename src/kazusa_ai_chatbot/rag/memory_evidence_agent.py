@@ -152,38 +152,82 @@ def _deterministic_plan(
         }
         return plan
 
-    route_parts = [task_body]
+    slot_parts = [task_body]
+    original_query_text = ""
     if isinstance(context, dict):
-        for field in ("original_query", "current_slot"):
-            value = text_or_empty(context.get(field))
-            if value:
-                route_parts.append(value)
-    route_text = "\n".join(route_parts).lower()
+        current_slot = text_or_empty(context.get("current_slot"))
+        if current_slot:
+            slot_parts.append(current_slot)
+        original_query_text = text_or_empty(context.get("original_query")).lower()
+    slot_text = "\n".join(slot_parts).lower()
 
     scoped_user_scope_markers = (
         "current user's",
         "current user",
         "with the current user",
+        "remember me",
+        "recognize me",
         "当前用户",
+        "私有",
+        "记得我",
+        "还记得我",
+        "认识我",
+    )
+    context_scoped_user_scope_markers = (
+        "private",
+        "user-specific",
+        "scoped",
+        "with the current user",
         "私有",
     )
     scoped_user_topic_markers = (
         "continuity",
         "accepted preference",
         "shared experience",
+        "past interaction",
+        "past interactions",
+        "prior interaction",
+        "prior interactions",
+        "interaction history",
+        "prior shared interaction",
+        "prior shared interactions",
+        "shared history",
+        "remember the current user",
+        "recognize the current user",
+        "remember me",
         "user memory evidence",
         "story lore",
         "story continuity",
         "private lore",
         "private continuity",
+        "setting",
         "连续性",
         "设定",
+        "过往互动",
+        "历史互动",
+        "之前的互动",
+        "以前的互动",
+        "共同经历",
+        "记得我",
+        "还记得我",
+        "认识我",
+        "记得当前用户",
+        "认识当前用户",
     )
-    has_scoped_user_scope = any(
-        marker in route_text for marker in scoped_user_scope_markers
+    # Query-level context can confirm private scope, but each slot must carry
+    # its own scoped-user topic so mixed queries keep independent memory paths.
+    has_slot_scoped_user_scope = any(
+        marker in slot_text for marker in scoped_user_scope_markers
+    )
+    has_context_scoped_user_scope = any(
+        marker in original_query_text
+        for marker in context_scoped_user_scope_markers
+    )
+    has_scoped_user_scope = (
+        has_slot_scoped_user_scope or has_context_scoped_user_scope
     )
     has_scoped_user_topic = any(
-        marker in route_text for marker in scoped_user_topic_markers
+        marker in slot_text for marker in scoped_user_topic_markers
     )
     if has_scoped_user_scope and has_scoped_user_topic:
         plan = {
@@ -243,8 +287,9 @@ Do not answer active agreements, person profiles, relationships, or live externa
    exchange rates, or any changing live value, output worker="incompatible"
    and reason="Live-context".
 4. Use user_memory_evidence_agent for current-user durable memory, private
-   continuity, accepted preference, user-specific lore, or prior shared
-   experience with the current user.
+   continuity, accepted preference, user-specific lore, current-user
+   recognition, prior interaction history, or prior shared experience with the
+   current user.
 5. Use persistent_memory_search_agent for natural-language durable facts,
    exact named facts, tags, memory_name/dedup_key lookups, proper nouns,
    quoted terms, home/address/location questions, fuzzy concepts, common

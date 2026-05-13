@@ -184,7 +184,8 @@ Use `Memory-evidence:` for durable memory/world/common-sense evidence:
 - official or stable character/world facts,
 - the active character's official address or stable home/location,
 - shared/common-sense knowledge that may enrich an answer,
-- durable user memory facts or accepted preferences,
+- durable user memory facts, accepted preferences, current-user private
+  continuity, recognition, or prior shared interactions,
 - object, place, concept, or non-human topic knowledge.
 
 Do not use memory evidence for live external values, active agreements, or
@@ -209,6 +210,9 @@ Read the context object before generating any slot.
 If global_user_id is already present in context and the user asks about the
 current user's profile or durable person context, use
 `Person-context: retrieve current user profile`.
+If global_user_id is present and the subject is current-user continuity,
+recognition, or prior shared interactions, use
+`Memory-evidence:` with current-user scoped wording.
 Do not create Person-context merely to bind current_user for conversation
 history; use speaker=current_user in the Conversation-evidence slot.
 If a pronoun (他/她/你/他们) clearly refers to context user_name, write that
@@ -220,6 +224,7 @@ When two patterns seem possible, choose the more structural source:
 - Active agreement, promise, plan, open loop, or current episode state → Recall.
 - Person/profile/relationship/user-list subject → Person-context.
 - Chat-history content, exact phrase, speaker, URL from a message, or message stats → Conversation-evidence.
+- Current-user private continuity, recognition, or prior shared interactions → Memory-evidence.
 - Durable official/world/common-sense/object facts → Memory-evidence.
 - Public webpage or URL content that is not current/live → Web-evidence.
 
@@ -230,6 +235,7 @@ When a slot depends on a specific earlier slot, write "resolved in slot N" (e.g.
 - "Live-context: answer current user local time if configured"
 - "Live-context: answer current <weather / temperature / opening status / price / exchange rate / schedule / availability / latest fact> for <explicit location/target X | the active character's location | the current user's location if recently stated | unknown location/target>"
 - "Conversation-evidence: retrieve <exact phrase / URL / recent messages / topic / count/ranking> [speaker=current_user | speaker=active_character | speaker=any_speaker | speaker=person resolved in slot N] [to identify the speaker] [time/count limit]"
+- "Memory-evidence: retrieve current-user private continuity and prior shared interactions with the active character"
 - "Memory-evidence: retrieve durable evidence about <official fact / address / common-sense topic / world fact / user memory topic>"
 - "Person-context: retrieve <active character profile / current user profile / profile/impression for display name X / profile for speaker found in slot N / relationship ranking / user list predicate>"
 - "Recall: retrieve <active_episode_agreement / durable_commitment / episode_position / exact_agreement_history> relevant to <topic>"

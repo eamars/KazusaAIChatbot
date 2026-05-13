@@ -245,7 +245,27 @@ def test_initializer_prompt_declares_recall_route() -> None:
 def test_initializer_prompt_version_bumped_for_capability_cutover() -> None:
     """Capability-layer prompt changes must invalidate initializer strategies."""
 
-    assert cache2_policy.INITIALIZER_PROMPT_VERSION == "initializer_prompt:v17"
+    assert cache2_policy.INITIALIZER_PROMPT_VERSION == "initializer_prompt:v18"
+
+
+def test_initializer_prompt_documents_current_user_recognition_memory_route() -> None:
+    """Initializer prompt should route current-user recognition to scoped memory."""
+    rendered_prompt = supervisor2_module._INITIALIZER_PROMPT.format(
+        character_name="<active character>",
+    )
+
+    required_fragments = [
+        "current-user private continuity",
+        "prior shared interactions",
+        "Memory-evidence: retrieve current-user private continuity",
+    ]
+    missing_fragments = [
+        fragment
+        for fragment in required_fragments
+        if fragment not in rendered_prompt
+    ]
+
+    assert missing_fragments == []
 
 
 def test_initializer_prompt_uses_conversation_speaker_scope_contract() -> None:
@@ -814,7 +834,7 @@ async def test_rag_initializer_payload_projects_runtime_context(monkeypatch) -> 
     )
 
 
-def test_initializer_prompt_version_bumps_to_v17_for_capability_contract() -> None:
+def test_initializer_prompt_version_bumps_to_v18_for_current_contract() -> None:
     """Prompt version should reflect the current initializer contract."""
 
-    assert supervisor2_module.INITIALIZER_PROMPT_VERSION == "initializer_prompt:v17"
+    assert supervisor2_module.INITIALIZER_PROMPT_VERSION == "initializer_prompt:v18"

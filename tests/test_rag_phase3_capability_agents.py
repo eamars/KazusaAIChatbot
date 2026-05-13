@@ -1641,6 +1641,136 @@ async def test_memory_evidence_user_memory_unit_uses_scoped_worker() -> None:
 
 
 @pytest.mark.asyncio
+async def test_memory_evidence_remember_me_slot_uses_scoped_worker() -> None:
+    """Current-user recognition requests should search scoped user memory."""
+    agent = MemoryEvidenceAgent()
+    search_worker = _FakeWorker({"resolved": True, "result": []})
+    user_worker = _FakeWorker(
+        {
+            "resolved": True,
+            "result": {
+                "selected_summary": "The current user and the active character have prior shared interactions.",
+                "memory_rows": [
+                    {
+                        "unit_id": "unit-remember-me",
+                        "unit_type": "objective_fact",
+                        "fact": "The current user and the active character have prior shared interactions.",
+                        "content": "The current user and the active character have prior shared interactions.",
+                        "source_system": "user_memory_units",
+                        "scope_type": "user_continuity",
+                        "scope_global_user_id": "user-1",
+                    }
+                ],
+                "source_system": "user_memory_units",
+                "scope_type": "user_continuity",
+                "scope_global_user_id": "user-1",
+                "missing_context": [],
+            },
+            "attempts": 1,
+            "cache": {
+                "enabled": False,
+                "hit": False,
+                "reason": "scoped_user_memory_uncached",
+            },
+        }
+    )
+    agent.search_agent = search_worker
+    agent.user_memory_agent = user_worker
+
+    result = await agent.run(
+        (
+            "Memory-evidence: retrieve durable evidence about the current "
+            "user's identity and past interactions with active character"
+        ),
+        _base_context(),
+    )
+
+    assert result["resolved"] is True
+    assert search_worker.calls == []
+    assert len(user_worker.calls) == 1
+    assert result["result"]["primary_worker"] == "user_memory_evidence_agent"
+    assert result["result"]["projection_payload"]["memory_rows"][0]["unit_id"] == (
+        "unit-remember-me"
+    )
+
+
+@pytest.mark.asyncio
+async def test_memory_evidence_official_character_fact_stays_shared_memory() -> None:
+    """Official character facts should remain shared durable memory lookups."""
+    agent = MemoryEvidenceAgent()
+    accepted_row = {
+        "memory_name": "active-character-official-address",
+        "content": "The active character's official address is 123 Example Street.",
+        "source_kind": "seeded_manual",
+    }
+    search_worker = _FakeWorker(
+        {
+            "resolved": True,
+            "result": [accepted_row],
+            "attempts": 1,
+            "cache": {"enabled": True, "hit": False, "reason": "miss_stored"},
+        }
+    )
+    user_worker = _FakeWorker({"resolved": True, "result": {"memory_rows": []}})
+    agent.search_agent = search_worker
+    agent.user_memory_agent = user_worker
+
+    result = await agent.run(
+        (
+            "Memory-evidence: retrieve durable evidence about the active "
+            "character's official address"
+        ),
+        _base_context(),
+    )
+
+    assert result["resolved"] is True
+    assert len(search_worker.calls) == 1
+    assert user_worker.calls == []
+    assert result["result"]["primary_worker"] == "persistent_memory_search_agent"
+    assert result["result"]["projection_payload"]["memory_rows"] == [accepted_row]
+
+
+@pytest.mark.asyncio
+async def test_memory_evidence_shared_fact_ignores_remember_me_query_scope() -> None:
+    """A separate shared-memory slot must not inherit remember-me scope."""
+    agent = MemoryEvidenceAgent()
+    accepted_row = {
+        "memory_name": "active-character-official-address",
+        "content": "The active character's official address is 123 Example Street.",
+        "source_kind": "seeded_manual",
+    }
+    search_worker = _FakeWorker(
+        {
+            "resolved": True,
+            "result": [accepted_row],
+            "attempts": 1,
+            "cache": {"enabled": True, "hit": False, "reason": "miss_stored"},
+        }
+    )
+    user_worker = _FakeWorker({"resolved": True, "result": {"memory_rows": []}})
+    agent.search_agent = search_worker
+    agent.user_memory_agent = user_worker
+    task = (
+        "Memory-evidence: retrieve durable evidence about the active "
+        "character's official address"
+    )
+
+    result = await agent.run(
+        task,
+        _base_context(
+            original_query='<character mention> 你还记得我吗？你家的官方地址是什么？',
+            current_slot=task,
+        ),
+    )
+
+    assert result["resolved"] is True
+    assert len(search_worker.calls) == 1
+    assert user_worker.calls == []
+    assert result["result"]["primary_worker"] == "persistent_memory_search_agent"
+    assert result["result"]["projection_payload"]["memory_rows"] == [accepted_row]
+
+
+@pytest.mark.asyncio
 async def test_memory_evidence_old_setting_slot_uses_scoped_context() -> None:
     """Old durable-setting slots should use original-query scoped continuity."""
     agent = MemoryEvidenceAgent()

@@ -6,7 +6,7 @@
   memory requests to scoped `user_memory_evidence_agent` instead of shared
   `persistent_memory_search_agent`.
 - Plan class: large
-- Status: draft
+- Status: completed
 - Mandatory skills: `local-llm-architecture`, `py-style`,
   `test-style-and-execution`, `cjk-safety`
 - Overall cutover strategy: bigbang for routing and prompt strategy cache;
@@ -69,11 +69,15 @@ prior-interaction wording path.
   flags, compatibility shims, or alternate RAG paths.
 - Do not change cognition, dialog, evaluator finalizer, persistence,
   scheduler, adapter delivery, or conversation evidence behavior.
-- Prompt changes must be written as an organic rewrite of the affected
-  initializer prompt flow. Do not append an isolated bullet or one-off example
-  that contradicts the surrounding rule order. The rewritten prompt must read
-  coherently from evidence-dependency gate, through source ownership, through
-  conflict resolution, slot format, examples, and generation procedure.
+- Prompt changes must be the minimum source-ownership clarification needed for
+  the bug boundary. Do not turn `_INITIALIZER_PROMPT` into a lookup table based
+  on the observed failure mode. Avoid adding failure-mode examples when the
+  same behavior can be captured by the existing route rules.
+- Any initializer prompt edit requires a full review of the entire rendered
+  prompt before the edit is accepted. The implementation agent must inspect the
+  prompt from Rule 0 through Output format, build a route-contract checklist
+  covering every top-level source family, and record the checklist result in
+  `Execution Evidence`.
 - Any initializer prompt behavior change must bump
   `INITIALIZER_PROMPT_VERSION` and update tests that pin the version.
 - Do not hard-code a concrete character name in reusable prompt rules or
@@ -102,9 +106,9 @@ prior-interaction wording path.
 - Preserve `persistent_memory_search_agent` routing for official character
   facts, shared world facts, common-sense topics, exact memory identifiers,
   tags, proper nouns, home/address/location facts, and global memory rows.
-- Rewrite the RAG initializer prompt flow organically so "do you remember me?",
-  "你还记得我吗", and equivalent current-user recognition questions generate a
-  scoped current-user continuity `Memory-evidence:` slot.
+- Apply the minimum RAG initializer prompt clarification so current-user
+  recognition and equivalent current-user prior-interaction questions generate
+  a scoped current-user continuity `Memory-evidence:` slot.
 - Bump `INITIALIZER_PROMPT_VERSION` from `initializer_prompt:v17` to
   `initializer_prompt:v18`.
 - Add deterministic prompt contract tests covering the rewritten prompt and
@@ -112,6 +116,10 @@ prior-interaction wording path.
 - Add one live-LLM initializer regression for `@<active character> 你还记得我吗`
   that expects a `Memory-evidence:` slot with current-user scoped continuity or
   prior shared interaction wording.
+- Add live-LLM initializer negative regressions for adjacent routes so the
+  prompt rewrite proves it did not steal active agreements, recent chat recall,
+  active-character self-word recall, current-user URL recall, profile/person
+  reads, or shared official memory.
 - Update RAG documentation to state that current-user recognition and prior
   shared interaction memory belong to scoped user memory under
   `Memory-evidence:`.
@@ -138,7 +146,7 @@ Overall strategy: bigbang for the changed behavior.
 | Area | Policy | Instruction |
 |---|---|---|
 | `memory_evidence_agent` current-user recognition routing | bigbang | Replace the fall-through shared-memory route with scoped user-memory routing for current-user recognition and prior-interaction slot text. |
-| Initializer prompt wording | bigbang | Rewrite the prompt flow coherently and bump the initializer prompt version; do not preserve stale cached strategy compatibility. |
+| Initializer prompt wording | bigbang | Apply a minimal source-ownership clarification and bump the initializer prompt version; do not add lookup-table examples or preserve stale cached strategy compatibility. |
 | Public RAG slot prefix | compatible | Keep `Memory-evidence:` as the top-level prefix. |
 | Public RAG projection shape | compatible | Preserve existing `rag_result` fields and scoped metadata behavior. |
 | Shared memory retrieval | compatible | Preserve existing shared/world/official memory routing. |
@@ -163,12 +171,17 @@ Overall strategy: bigbang for the changed behavior.
   strategies, compatibility layers, fallback paths, or extra features.
 - The agent must treat changes outside the files listed in `Change Surface` as
   out of scope unless this plan is updated first.
-- The initializer prompt rewrite may reorganize the existing prompt text only
-  to improve logical flow around existing source ownership. It must not change
-  unrelated routing semantics.
-- The agent must not satisfy the prompt requirement by adding only a single
-  pattern-gallery example. The rule flow and generation procedure must also
-  align with the new scoped-continuity intent.
+- The initializer prompt change must stay limited to existing source ownership
+  rules. It must not change unrelated routing semantics.
+- The agent must not satisfy the prompt requirement by adding a pattern-gallery
+  lookup-table entry for the observed failure mode.
+- The agent must not accept the prompt rewrite until the rendered full prompt
+  has been reviewed as one document. The review must check that each rule,
+  conflict-resolution item, slot-format row, pattern-gallery case, input
+  format, generation-procedure step, and output format remains consistent.
+- The agent must not rely only on deterministic prompt-text assertions for this
+  prompt change. Real LLM positive and negative initializer tests are required
+  and must be run one case at a time with output inspected.
 - If existing tests encode the old fall-through behavior, update them only to
   match this approved contract and record the old expectation in
   `Execution Evidence`.
@@ -291,26 +304,30 @@ The prompt must state, in the normal rule flow, that:
 - current-user profile or durable person context remains `Person-context:`;
 - recent or exact chat content remains `Conversation-evidence:`;
 - active agreements remain `Recall:`;
-- current-user private continuity, recognition, accepted preferences,
-  user-specific lore, and prior shared interactions belong to
+- current-user private continuity, recognition, durable user memory facts,
+  accepted preferences, and prior shared interactions belong to
   `Memory-evidence:`;
-- a "do you remember me?" query needs evidence unless the surrounding context
-  already makes it a routine no-retrieval greeting, and its evidence target is
-  current-user scoped continuity rather than shared character/world memory.
+- current-user recognition and prior-interaction queries target scoped
+  current-user continuity.
 
-The pattern gallery must include one boundary anchor equivalent to:
+The prompt must not add a pattern-gallery lookup entry for the observed
+failure mode. The generation procedure should remain unchanged unless the
+route contract cannot be made clear through the existing source ownership
+rules.
 
-```text
-Query: "<character mention>你还记得我吗"
-  -> The current user asks whether the active character has durable continuity
-     about this user. Use scoped memory evidence, not shared world memory and
-     not Person-context.
-  ["Memory-evidence: retrieve current-user private continuity and prior shared interactions with the active character"]
-```
+The implementation must produce and record a full-prompt review checklist with
+these source-family expectations:
 
-The generation procedure must explicitly apply the current-user scoped memory
-rule before generic durable memory defaults and after live/recall/person/history
-source checks.
+| Source family | Expected prompt contract |
+|---|---|
+| No retrieval | greetings, thanks, welcome-back, praise, and routine social acknowledgement stay empty unless durable evidence is required. |
+| Live context | current time/date/weekday and current external facts stay `Live-context:`. |
+| Recall | active agreements, promises, plans, open loops, and current episode state stay `Recall:`. |
+| Person context | profile, impression, compatibility, relationship, ranking, user-list, and active-character self-profile stay `Person-context:`. |
+| Conversation evidence | exact phrases, quoted messages, URLs, recent/fuzzy chat topics, speaker provenance, user-self recent words, and active-character self-words stay `Conversation-evidence:`. |
+| Memory evidence scoped user continuity | current-user recognition, durable user memory facts, accepted preferences, and prior shared interactions use `Memory-evidence:` with scoped current-user continuity wording. |
+| Memory evidence shared durable facts | official character/world facts, common-sense facts, stable home/address/location facts, object/place/concept knowledge, tags, and memory identifiers stay `Memory-evidence:` without implying current-user scope. |
+| Web evidence | public web page/topic reads that are not current/live stay `Web-evidence:`. |
 
 ## LLM Call And Context Budget
 
@@ -334,6 +351,9 @@ After:
   context budget. The implementation agent must record rendered prompt
   character length before and after in `Execution Evidence`; any increase above
   15 percent requires user approval before implementation continues.
+- Real LLM validation after the prompt rewrite must cover the positive and
+  negative initializer matrix in `Verification`. These tests use the existing
+  initializer LLM call only; they do not add runtime LLM calls to production.
 
 ## Change Surface
 
@@ -345,7 +365,7 @@ After:
   - Update selector prompt wording only when needed to keep it consistent with
     the deterministic contract.
 - `src/kazusa_ai_chatbot/nodes/persona_supervisor2_rag_initializer.py`
-  - Organically rewrite the initializer prompt flow around current-user scoped
+  - Add minimum source-ownership clarification around current-user scoped
     continuity.
 - `src/kazusa_ai_chatbot/rag/cache2_policy.py`
   - Bump `INITIALIZER_PROMPT_VERSION` to `initializer_prompt:v18`.
@@ -359,7 +379,9 @@ After:
   - Update initializer prompt-version expectation and add deterministic prompt
     contract assertions for the rewritten remember-me route.
 - `tests/test_rag_phase3_initializer_live_llm.py`
-  - Add one `live_llm` initializer regression for `你还记得我吗`.
+  - Add one `live_llm` positive initializer regression for `你还记得我吗`.
+  - Add or extend live-LLM negative initializer regressions for adjacent
+    source families affected by the full-prompt rewrite.
 
 ### Create
 
@@ -399,10 +421,10 @@ After:
      expect `initializer_prompt:v18`.
    - Add `test_initializer_prompt_documents_current_user_recognition_memory_route`.
    - The prompt contract test must render `_INITIALIZER_PROMPT.format(...)` and
-     assert the rendered prompt contains `你还记得我吗`,
-     `current-user private continuity`, `prior shared interactions`, and
+     assert the rendered prompt contains `current-user private continuity`,
+     `prior shared interactions`, and
      `Memory-evidence: retrieve current-user private continuity`.
-4. Add the live initializer regression in
+4. Add the live initializer positive and negative regressions in
    `tests/test_rag_phase3_initializer_live_llm.py`.
    - Add `test_live_initializer_routes_remember_me_to_scoped_memory`.
    - Query: `@<active character> 你还记得我吗`.
@@ -411,21 +433,51 @@ After:
    - Required slot fragments: `["current-user", "continuity"]` or
      `["prior shared interaction"]`; use the existing test helper style for
      required fragments.
-   - Run this live test one case at a time with `-m live_llm -q -s`.
+   - Add `test_live_initializer_remember_today_agreement_stays_recall`.
+     Query: `早上好呀，还记得今天的约定么`.
+     Expected prefixes: `["Recall:"]`; forbidden prefixes:
+     `["Memory-evidence:", "Conversation-evidence:", "Person-context:"]`.
+   - Add `test_live_initializer_remember_recent_user_words_stays_conversation`.
+     Query: `你还记得我刚刚说那堆充电线里大概有哪些吗？`.
+     Expected prefixes: `["Conversation-evidence:"]`; required slot fragments:
+     `["speaker=current_user"]`; forbidden prefixes:
+     `["Memory-evidence:", "Person-context:", "Recall:"]`.
+   - Add `test_live_initializer_active_character_self_words_stays_conversation`.
+     Query: `你之前是不是说过那个项目要延期？`.
+     Expected prefixes: `["Conversation-evidence:"]`; required slot fragments:
+     `["speaker=active_character"]`; forbidden prefixes:
+     `["Memory-evidence:", "Person-context:", "Recall:"]`.
+   - Add `test_live_initializer_current_user_url_recall_stays_conversation`.
+     Query: `我上次发的那个链接里有什么信息？`.
+     Expected prefixes: `["Conversation-evidence:", "Web-evidence:"]`;
+     required slot fragments: `["speaker=current_user"]`; forbidden prefixes:
+     `["Memory-evidence:", "Person-context:", "Recall:"]`.
+   - Add `test_live_initializer_named_person_impression_stays_person_context`.
+     Query: `<character mention>你觉得小明这个人怎么样`.
+     Expected prefixes: `["Person-context:"]`; forbidden prefixes:
+     `["Memory-evidence:", "Conversation-evidence:", "Recall:"]`.
+   - Add `test_live_initializer_official_address_stays_shared_memory_slot`.
+     Query: `你家的官方地址是什么？`.
+     Expected prefixes: `["Memory-evidence:"]`; required slot fragments:
+     `["official address"]` or `["官方地址"]`; forbidden slot fragments:
+     `["current-user", "private continuity", "prior shared interaction"]`.
+   - Run each live test one case at a time with `-m live_llm -q -s`, inspect
+     each emitted slot, and record the observed route in `Execution Evidence`.
 5. Implement deterministic worker routing in
    `src/kazusa_ai_chatbot/rag/memory_evidence_agent.py`.
    - Add the route concepts from `Contracts And Data Shapes` to the scoped
      current-user topic recognition path.
    - Keep the existing `has_scoped_user_scope and has_scoped_user_topic` shape.
    - Do not inspect adapter raw syntax or mutate user text.
-6. Rewrite the initializer prompt in
+6. Apply the minimum initializer prompt clarification in
    `src/kazusa_ai_chatbot/nodes/persona_supervisor2_rag_initializer.py`.
    - Read the full prompt before editing.
-   - Integrate current-user recognition into the evidence-dependency gate,
-     memory evidence rule, context pre-check, conflict resolution, slot format
-     guidance, pattern gallery, and generation procedure.
-   - Remove or revise wording that would make current-user recognition look
-     like generic durable shared memory or profile lookup.
+   - Build the full-prompt route-contract checklist listed in
+     `Initializer Prompt Contract`.
+   - Integrate current-user recognition only into the existing memory evidence
+     rule, context pre-check, conflict resolution, and slot format guidance.
+   - Do not add a failure-mode pattern-gallery entry or rewrite the generation
+     procedure unless tests prove it is necessary.
 7. Bump `INITIALIZER_PROMPT_VERSION` in
    `src/kazusa_ai_chatbot/rag/cache2_policy.py`.
 8. Update `src/kazusa_ai_chatbot/rag/README.md` with the narrowed scoped
@@ -436,7 +488,7 @@ After:
 
 ## Progress Checklist
 
-- [ ] Stage 1 - Failing tests added
+- [x] Stage 1 - Failing tests added
   - Covers: implementation steps 1 through 4.
   - Verify:
     `venv\Scripts\python.exe -m pytest tests/test_rag_phase3_capability_agents.py::test_memory_evidence_remember_me_slot_uses_scoped_worker -q`
@@ -444,44 +496,47 @@ After:
   - Evidence: record the failing assertion or forbidden-worker call in
     `Execution Evidence`.
   - Handoff: next agent starts at Stage 2.
-  - Sign-off: `<agent/date>` after verification and evidence are recorded.
-- [ ] Stage 2 - MemoryEvidenceAgent inner path fixed
+  - Sign-off: `Codex/2026-05-13` after verification and evidence are recorded.
+- [x] Stage 2 - MemoryEvidenceAgent inner path fixed
   - Covers: implementation step 5.
   - Verify:
     `venv\Scripts\python.exe -m pytest tests/test_rag_phase3_capability_agents.py::test_memory_evidence_remember_me_slot_uses_scoped_worker tests/test_rag_phase3_capability_agents.py::test_memory_evidence_official_character_fact_stays_shared_memory -q`.
   - Evidence: record worker names from passing tests in `Execution Evidence`.
   - Handoff: reread this plan, then start Stage 3.
-  - Sign-off: `<agent/date>` after verification and evidence are recorded.
-- [ ] Stage 3 - Initializer prompt rewritten and versioned
+  - Sign-off: `Codex/2026-05-13` after verification and evidence are recorded.
+- [x] Stage 3 - Initializer prompt rewritten and versioned
   - Covers: implementation steps 6 and 7.
   - Verify:
     `venv\Scripts\python.exe -m pytest tests/test_rag_initializer_cache2.py::test_initializer_prompt_version_bumped_for_capability_cutover tests/test_rag_initializer_cache2.py::test_initializer_prompt_documents_current_user_recognition_memory_route -q`.
-  - Evidence: record rendered prompt length before/after and prompt-version
-    assertion result in `Execution Evidence`.
+  - Evidence: record rendered prompt length before/after, full-prompt
+    route-contract checklist result, and prompt-version assertion result in
+    `Execution Evidence`.
   - Handoff: reread this plan, then start Stage 4.
-  - Sign-off: `<agent/date>` after verification and evidence are recorded.
-- [ ] Stage 4 - Documentation and focused regression complete
+  - Sign-off: `Codex/2026-05-13` after verification and evidence are recorded.
+- [x] Stage 4 - Documentation and focused regression complete
   - Covers: implementation step 8 and deterministic focused tests.
   - Verify:
     `venv\Scripts\python.exe -m pytest tests/test_rag_phase3_capability_agents.py tests/test_rag_initializer_cache2.py -q`.
   - Evidence: record test output in `Execution Evidence`.
   - Handoff: reread this plan, then start Stage 5.
-  - Sign-off: `<agent/date>` after verification and evidence are recorded.
-- [ ] Stage 5 - Live initializer smoke complete
+  - Sign-off: `Codex/2026-05-13` after verification and evidence are recorded.
+- [x] Stage 5 - Live initializer smoke complete
   - Covers: implementation step 4 after prompt rewrite.
   - Verify:
-    `venv\Scripts\python.exe -m pytest tests/test_rag_phase3_initializer_live_llm.py::test_live_initializer_routes_remember_me_to_scoped_memory -m live_llm -q -s`.
-  - Evidence: record the emitted slot and test result in `Execution Evidence`.
+    run every live LLM test listed in `Verification` one case at a time with
+    `-m live_llm -q -s`.
+  - Evidence: record each emitted slot, positive/negative classification, and
+    test result in `Execution Evidence`.
   - Handoff: reread this plan, then start Stage 6.
-  - Sign-off: `<agent/date>` after verification and evidence are recorded.
-- [ ] Stage 6 - Independent code review complete
+  - Sign-off: `Codex/2026-05-13` after verification and evidence are recorded.
+- [x] Stage 6 - Independent code review complete
   - Covers: `Independent Code Review`.
   - Verify: review full diff against this plan, then rerun affected focused
     tests after any review fixes.
   - Evidence: record review mode, findings, fixes, rerun commands, residual
     risks, and approval status in `Execution Evidence`.
   - Handoff: plan may be marked completed only after this checkpoint passes.
-  - Sign-off: `<agent/date>` after verification and evidence are recorded.
+  - Sign-off: `Codex/2026-05-13` after verification and evidence are recorded.
 
 ## Verification
 
@@ -501,9 +556,13 @@ After:
 ### Prompt Render
 
 - Run:
-  `venv\Scripts\python.exe -c "from kazusa_ai_chatbot.nodes.persona_supervisor2_rag_initializer import _INITIALIZER_PROMPT; rendered=_INITIALIZER_PROMPT.format(character_name='<active character>'); print(len(rendered)); assert '你还记得我吗' in rendered; assert 'Memory-evidence: retrieve current-user private continuity' in rendered"`
+  `venv\Scripts\python.exe -c "from kazusa_ai_chatbot.nodes.persona_supervisor2_rag_initializer import _INITIALIZER_PROMPT; rendered=_INITIALIZER_PROMPT.format(character_name='<active character>'); print(len(rendered)); assert 'Memory-evidence: retrieve current-user private continuity' in rendered; assert 'prior shared interactions' in rendered"`
   - Expected after implementation: command exits 0 and prints the rendered
     prompt length.
+- Full-prompt review:
+  - Expected after implementation: `Execution Evidence` contains a route
+    checklist result for every source family listed in `Initializer Prompt
+    Contract`, and no checklist item is marked blocked or unreviewed.
 
 ### Python Compile
 
@@ -522,13 +581,38 @@ After:
 - `venv\Scripts\python.exe -m pytest tests/test_rag_phase3_capability_agents.py tests/test_rag_initializer_cache2.py tests/test_user_memory_evidence_agent.py -q`
   - Expected after implementation: all pass.
 
-### Live LLM Gate
+### Live LLM Positive Gate
 
 - `venv\Scripts\python.exe -m pytest tests/test_rag_phase3_initializer_live_llm.py::test_live_initializer_routes_remember_me_to_scoped_memory -m live_llm -q -s`
   - Expected after implementation: one case passes, and the inspected output
     shows a `Memory-evidence:` slot for current-user scoped continuity or prior
     shared interactions.
   - This live test must be run one case at a time with output inspected.
+
+### Live LLM Negative Gates
+
+Run each command separately with output inspected:
+
+- `venv\Scripts\python.exe -m pytest tests/test_rag_phase3_initializer_live_llm.py::test_live_initializer_remember_today_agreement_stays_recall -m live_llm -q -s`
+  - Expected after implementation: `Recall:` is emitted; no
+    `Memory-evidence:`, `Conversation-evidence:`, or `Person-context:` slot is
+    emitted for the agreement.
+- `venv\Scripts\python.exe -m pytest tests/test_rag_phase3_initializer_live_llm.py::test_live_initializer_remember_recent_user_words_stays_conversation -m live_llm -q -s`
+  - Expected after implementation: `Conversation-evidence:` with
+    `speaker=current_user`; no scoped memory slot.
+- `venv\Scripts\python.exe -m pytest tests/test_rag_phase3_initializer_live_llm.py::test_live_initializer_active_character_self_words_stays_conversation -m live_llm -q -s`
+  - Expected after implementation: `Conversation-evidence:` with
+    `speaker=active_character`; no scoped memory slot.
+- `venv\Scripts\python.exe -m pytest tests/test_rag_phase3_initializer_live_llm.py::test_live_initializer_current_user_url_recall_stays_conversation -m live_llm -q -s`
+  - Expected after implementation: `Conversation-evidence:` for the current
+    user's URL plus `Web-evidence:` for content retrieval; no scoped memory
+    slot.
+- `venv\Scripts\python.exe -m pytest tests/test_rag_phase3_initializer_live_llm.py::test_live_initializer_named_person_impression_stays_person_context -m live_llm -q -s`
+  - Expected after implementation: `Person-context:`; no scoped memory slot.
+- `venv\Scripts\python.exe -m pytest tests/test_rag_phase3_initializer_live_llm.py::test_live_initializer_official_address_stays_shared_memory_slot -m live_llm -q -s`
+  - Expected after implementation: `Memory-evidence:` for the active
+    character's official address; slot text must not contain current-user
+    private-continuity wording.
 
 ## Independent Code Review
 
@@ -549,6 +633,8 @@ Review scope:
   acceptance criteria.
 - Prompt quality: the initializer prompt must read as a coherent source-routing
   policy, not as isolated special-case text.
+- Prompt validation quality: the reviewer must inspect the full-prompt
+  route-contract checklist and the real LLM positive/negative test traces.
 - Regression and handoff quality, including focused tests, live-LLM evidence,
   static checks, execution evidence, and any residual risk.
 
@@ -573,7 +659,8 @@ This plan is complete when:
 - `INITIALIZER_PROMPT_VERSION` is `initializer_prompt:v18`.
 - Deterministic focused tests, prompt render checks, compile checks, and the
   listed regression batch pass.
-- The live-LLM initializer gate passes with inspected output.
+- The live-LLM positive and negative initializer gates pass with inspected
+  output recorded for every case.
 - RAG documentation describes the scoped recognition behavior.
 - Independent code review has passed and its result is recorded.
 
@@ -581,7 +668,7 @@ This plan is complete when:
 
 | Risk | Mitigation | Verification |
 |---|---|---|
-| Prompt rewrite changes unrelated source routing | Keep the rewrite limited to current-user recognition flow and run existing initializer prompt tests. | `tests/test_rag_initializer_cache2.py` and live initializer regression. |
+| Prompt change expands into lookup-table routing | Keep the initializer edit to minimum source-ownership clarification and validate with real LLM positive/negative gates. | Prompt diff review, `tests/test_rag_initializer_cache2.py`, and live initializer regression. |
 | Current-user recognition overroutes third-party history to scoped memory | Require current-user scope plus recognition/prior-interaction topic markers. | Capability-agent shared-memory non-regression test. |
 | Stale initializer Cache2 strategies preserve old wording | Bump `INITIALIZER_PROMPT_VERSION` to `initializer_prompt:v18`. | Static grep and version test. |
 | Local LLM prompt becomes longer or less coherent | Require full prompt render check and rendered length evidence; cap increase over 15 percent without approval. | Prompt render command and execution evidence. |
@@ -590,11 +677,167 @@ This plan is complete when:
 ## Execution Evidence
 
 - Pre-implementation failing tests:
+  - `venv\Scripts\python.exe -m py_compile tests\test_rag_phase3_capability_agents.py tests\test_rag_initializer_cache2.py tests\test_rag_phase3_initializer_live_llm.py` passed after adding red tests.
+  - `venv\Scripts\python.exe -m pytest tests/test_rag_phase3_capability_agents.py::test_memory_evidence_remember_me_slot_uses_scoped_worker -q` failed as expected before implementation. Observed `primary_worker=persistent_memory_search_agent`, `missing_context=['memory_evidence']`, and assertion `result["resolved"] is True` failed.
 - Prompt rendered length before/after:
+  - Stage 3 before edit: 18167 characters.
+  - Stage 3 initial prompt rewrite: 20672 characters, a 13.79 percent
+    increase. This was below the 15 percent threshold but was superseded by
+    the user's post-review requirement to keep the prompt change minimal.
+  - Post-review minimal prompt clarification: 18630 characters, a 2.55 percent
+    increase from baseline. The final prompt diff adds no pattern-gallery
+    lookup entry and leaves the generation procedure unchanged.
 - Static grep results:
+  - Stage 6: `rg "initializer_prompt:v17" src tests` returned exit code 1
+    with no matches, as expected.
+  - Stage 6: `rg "initializer_prompt:v18" src tests` matched only
+    `src\kazusa_ai_chatbot\rag\cache2_policy.py` and
+    `tests\test_rag_initializer_cache2.py`.
+  - Stage 6: `rg "User-memory-evidence|user_memory_evidence:" src tests`
+    returned exit code 1 with no matches, so no new top-level prefix was
+    introduced.
+  - Post-minimal-prompt rerun repeated these static checks with the same
+    results.
 - Compile results:
+  - Stage 3: `venv\Scripts\python.exe -m py_compile src\kazusa_ai_chatbot\nodes\persona_supervisor2_rag_initializer.py src\kazusa_ai_chatbot\rag\cache2_policy.py tests\test_rag_initializer_cache2.py` passed.
+  - Stage 6: `venv\Scripts\python.exe -m py_compile src\kazusa_ai_chatbot\rag\memory_evidence_agent.py src\kazusa_ai_chatbot\nodes\persona_supervisor2_rag_initializer.py src\kazusa_ai_chatbot\rag\cache2_policy.py` passed.
+  - Post-minimal-prompt rerun: the same compile command passed.
 - Focused deterministic test results:
+  - Stage 2: `venv\Scripts\python.exe -m py_compile src\kazusa_ai_chatbot\rag\memory_evidence_agent.py` passed.
+  - Stage 2: `venv\Scripts\python.exe -m pytest tests/test_rag_phase3_capability_agents.py::test_memory_evidence_remember_me_slot_uses_scoped_worker tests/test_rag_phase3_capability_agents.py::test_memory_evidence_official_character_fact_stays_shared_memory -q` passed. Observed `primary_worker=user_memory_evidence_agent` for the RCA slot and `primary_worker=persistent_memory_search_agent` for the official-address slot.
+  - Stage 3 prompt render: `venv\Scripts\python.exe -c "from kazusa_ai_chatbot.nodes.persona_supervisor2_rag_initializer import _INITIALIZER_PROMPT; rendered=_INITIALIZER_PROMPT.format(character_name='<active character>'); print(len(rendered)); assert 'Memory-evidence: retrieve current-user private continuity' in rendered; assert 'prior shared interactions' in rendered"` passed after prompt minimization and printed `18630`.
+  - Stage 3 focused prompt tests: `venv\Scripts\python.exe -m pytest tests/test_rag_initializer_cache2.py::test_initializer_prompt_version_bumped_for_capability_cutover tests/test_rag_initializer_cache2.py::test_initializer_prompt_documents_current_user_recognition_memory_route -q` passed; version assertion observed `initializer_prompt:v18`.
 - Focused regression batch results:
-- Live LLM gate result and inspected slot:
+  - Stage 4: `venv\Scripts\python.exe -m pytest tests/test_rag_phase3_capability_agents.py tests/test_rag_initializer_cache2.py -q` passed after documentation update and test-name cleanup; observed `79 passed`.
+  - Stage 6: `venv\Scripts\python.exe -m pytest tests/test_rag_phase3_capability_agents.py tests/test_rag_initializer_cache2.py tests/test_user_memory_evidence_agent.py -q` passed before and after the review-only plan fix; final observed result was `86 passed`.
+  - Post-minimal-prompt rerun of the same focused regression batch passed with
+    `86 passed`.
+- Full-prompt route-contract checklist:
+  - Stage 3 full rendered prompt reviewed from Rule 0 through Output format
+    after the final minimal prompt clarification.
+  - No retrieval: greetings, thanks, welcome-back, praise, and routine social
+    acknowledgement remain empty unless durable evidence is required.
+  - Live context: current time/date/weekday and current external facts remain
+    `Live-context:`.
+  - Recall: active agreements, promises, plans, open loops, and current
+    episode state remain `Recall:`.
+  - Person context: profile, impression, compatibility, relationship,
+    ranking, user-list, and active-character self-profile remain
+    `Person-context:`.
+  - Conversation evidence: exact phrases, quoted messages, URLs,
+    recent/fuzzy chat topics, speaker provenance, user-self recent words, and
+    active-character self-words remain `Conversation-evidence:`.
+  - Memory evidence scoped user continuity: current-user private continuity,
+    recognition, accepted preferences, durable user memory facts, and prior
+    shared interactions use `Memory-evidence:` with scoped current-user
+    continuity wording.
+  - Memory evidence shared durable facts: official character/world facts,
+    common-sense facts, stable home/address/location facts, object/place/
+    concept knowledge, tags, and memory identifiers remain `Memory-evidence:`
+    without current-user continuity wording.
+  - Web evidence: public web page/topic reads that are not current/live remain
+    `Web-evidence:`.
+  - Checklist result: pass; no source family blocked or unreviewed.
+  - Prompt shape result: pass; no observed-failure pattern-gallery example was
+    added, and the generation procedure remains unchanged.
+- Live LLM positive gate result and inspected slot:
+  - Stage 5 positive: `venv\Scripts\python.exe -m pytest tests/test_rag_phase3_initializer_live_llm.py::test_live_initializer_routes_remember_me_to_scoped_memory -m live_llm -q -s` passed.
+    Inspected slot: `Memory-evidence: retrieve current-user private continuity and prior shared interactions with the active character`.
+    Trace: `test_artifacts\llm_traces\rag_phase3_initializer_live_llm__remember_me_to_scoped_memory.json`.
+  - Post-minimal-prompt rerun passed. Inspected slot:
+    `Memory-evidence: retrieve current-user private continuity and prior shared interactions with the active character`.
+    Trace: `test_artifacts\llm_traces\rag_phase3_initializer_live_llm__remember_me_to_scoped_memory__20260513T100537098848Z.json`.
+- Live LLM negative gate results and inspected slots:
+  - Stage 5 negative agreement: `venv\Scripts\python.exe -m pytest tests/test_rag_phase3_initializer_live_llm.py::test_live_initializer_remember_today_agreement_stays_recall -m live_llm -q -s` passed.
+    Inspected slot: `Recall: retrieve active_episode_agreement relevant to today's agreement`.
+    Trace: `test_artifacts\llm_traces\rag_phase3_initializer_live_llm__remember_today_agreement_stays_recall.json`.
+  - Stage 5 negative recent current-user words: `venv\Scripts\python.exe -m pytest tests/test_rag_phase3_initializer_live_llm.py::test_live_initializer_remember_recent_user_words_stays_conversation -m live_llm -q -s` passed.
+    Inspected slot: `Conversation-evidence: retrieve recent messages from current user mentioning charging cables or contents of a pile of cables speaker=current_user`.
+    Trace: `test_artifacts\llm_traces\rag_phase3_initializer_live_llm__remember_recent_user_words_stays_conversation.json`.
+  - Stage 5 negative active-character self-words: `venv\Scripts\python.exe -m pytest tests/test_rag_phase3_initializer_live_llm.py::test_live_initializer_active_character_self_words_stays_conversation -m live_llm -q -s` passed.
+    Inspected slot: `Conversation-evidence: retrieve prior active-character claim about the project being delayed speaker=active_character`.
+    Trace: `test_artifacts\llm_traces\rag_phase3_initializer_live_llm__active_character_self_words_stays_conversation.json`.
+  - Stage 5 negative current-user URL chain: `venv\Scripts\python.exe -m pytest tests/test_rag_phase3_initializer_live_llm.py::test_live_initializer_current_user_url_recall_stays_conversation -m live_llm -q -s` passed.
+    Inspected slots: `Conversation-evidence: retrieve messages containing a URL speaker=current_user`; `Web-evidence: retrieve public web content for the URL found in slot 1`.
+    Trace: `test_artifacts\llm_traces\rag_phase3_initializer_live_llm__current_user_url_recall_stays_conversation.json`.
+  - Stage 5 negative named-person impression: `venv\Scripts\python.exe -m pytest tests/test_rag_phase3_initializer_live_llm.py::test_live_initializer_named_person_impression_stays_person_context -m live_llm -q -s` passed.
+    Inspected slot: `Person-context: retrieve profile/impression for display name 小明`.
+    Trace: `test_artifacts\llm_traces\rag_phase3_initializer_live_llm__named_person_impression_stays_person_context.json`.
+  - Stage 5 negative official address: `venv\Scripts\python.exe -m pytest tests/test_rag_phase3_initializer_live_llm.py::test_live_initializer_official_address_stays_shared_memory_slot -m live_llm -q -s` passed.
+    Inspected slot: `Memory-evidence: retrieve durable evidence about the active character's official address`.
+    Trace: `test_artifacts\llm_traces\rag_phase3_initializer_live_llm__official_address_stays_shared_memory_slot.json`.
+  - Post-minimal-prompt rerun of all negative gates passed one case at a time.
+    Inspected slots remained in their expected families:
+    `Recall: retrieve active_episode_agreement relevant to today's agreement`;
+    `Conversation-evidence: retrieve recent messages from current user about charging cables speaker=current_user`;
+    `Conversation-evidence: retrieve prior active-character claim about the project being delayed speaker=active_character`;
+    `Conversation-evidence: retrieve messages containing a URL speaker=current_user`;
+    `Web-evidence: retrieve public web content for the URL found in slot 1`;
+    `Person-context: retrieve profile/impression for display name 小明`;
+    `Memory-evidence: retrieve durable evidence about the active character's official address`.
 - Documentation update:
+  - Stage 4: `src/kazusa_ai_chatbot/rag/README.md` now states that
+    current-user recognition, accepted preferences, user-specific lore, and
+    prior shared interactions are scoped `user_memory_units` evidence under
+    `Memory-evidence:` and are handled by `user_memory_evidence_agent`.
 - Independent code review result:
+  - Review mode: same-agent fresh-review posture; no separate reviewer was
+    available because no explicit subagent delegation was requested.
+  - Inputs reviewed: full plan after Stage 5, `git status --short`,
+    `git diff --stat`, `git diff --check`, source/test/doc/plan diffs,
+    full-prompt route checklist, and all live LLM inspected slots.
+  - `git diff --check` result: no whitespace errors; only Windows
+    line-ending warnings.
+  - Finding 1: the historical `Independent Plan Review` section still said
+    execution was blocked after the user had requested execution.
+  - Fix 1: updated that section to distinguish the earlier draft-time review
+    from the current `in_progress` execution status.
+  - Follow-up source finding: deterministic memory-worker selection let a
+    remember-me `original_query` satisfy scoped-user scope and topic checks for
+    every `Memory-evidence:` slot in the same request. A separate official
+    address slot could therefore route to `user_memory_evidence_agent`.
+  - Fix 2: added
+    `test_memory_evidence_shared_fact_ignores_remember_me_query_scope` and
+    changed scoped-user topic detection to use current-slot text only. The
+    original query can still provide supporting private scoped-continuity
+    context, but it no longer turns unrelated shared-memory slots into
+    remember-me lookups.
+  - Post-fix targeted rerun:
+    `venv\Scripts\python.exe -m pytest tests\test_rag_phase3_capability_agents.py::test_memory_evidence_remember_me_slot_uses_scoped_worker tests\test_rag_phase3_capability_agents.py::test_memory_evidence_official_character_fact_stays_shared_memory tests\test_rag_phase3_capability_agents.py::test_memory_evidence_shared_fact_ignores_remember_me_query_scope tests\test_rag_phase3_capability_agents.py::test_memory_evidence_old_setting_slot_uses_scoped_context -q`
+    passed with `4 passed`.
+  - Post-fix compile rerun:
+    `venv\Scripts\python.exe -m py_compile src\kazusa_ai_chatbot\rag\memory_evidence_agent.py tests\test_rag_phase3_capability_agents.py`
+    passed.
+  - Post-fix focused regression batch:
+    `venv\Scripts\python.exe -m pytest tests\test_rag_phase3_capability_agents.py tests\test_rag_initializer_cache2.py tests\test_user_memory_evidence_agent.py -q`
+    passed with `87 passed`.
+  - Residual risk: initializer behavior is still model-dependent for unseen
+    phrasings, but the required real LLM positive and adjacent negative gates
+    passed. Production logs should continue to be monitored for new phrasing
+    gaps.
+  - Approval status: passed after the follow-up routing-leak fix.
+  - Post-review user correction: the user rejected negative-constraint and
+    lookup-table prompt expansion. The initializer prompt was reduced to
+    minimum source-ownership clarification in Rule 6, Rule 8, conflict
+    resolution, and slot format only. Deterministic and live LLM gates were
+    rerun after this reduction and passed.
+
+## Independent Plan Review
+
+- Review mode: same-agent fresh review requested by user on 2026-05-13.
+- Inputs reviewed: this plan, `development_plans/README.md`,
+  `development-plan-writing` references, `local-llm-architecture`, current
+  `persona_supervisor2_rag_initializer.py`, and existing live initializer tests.
+- Blocker found: the draft required only one real LLM positive initializer test
+  for `你还记得我吗`; it did not require real LLM negative tests for adjacent
+  source families, which is insufficient for a full prompt rewrite.
+- Fix applied: added a required full-prompt route-contract checklist and a
+  positive/negative live LLM validation matrix covering Recall,
+  Conversation-evidence, Person-context, scoped Memory-evidence, and shared
+  Memory-evidence routes.
+- Non-blocking finding at plan-review time: the plan was `draft` and blocked
+  until approved, which matched the registry lifecycle rule.
+- Execution status update: after the user requested execution on 2026-05-13,
+  the plan and registry were promoted to `in_progress`.
+- Approval status: plan review passed after the fixes above; execution is now
+  governed by the staged checklist and verification gates in this document.

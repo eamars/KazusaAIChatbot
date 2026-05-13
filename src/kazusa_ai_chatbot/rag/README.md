@@ -218,7 +218,7 @@ RAG 2 groups helper agents by semantic ownership:
 
 - **Live context** resolves target/scope for changing external facts such as weather, temperature, opening status, schedules, prices, and exchange rates, then delegates to web search. Memory may be used only for stable target/scope lookup, not as the live value source.
 - **Conversation evidence** searches or filters historical messages by semantic query, keyword, structured filters, or aggregate questions.
-- **Memory evidence** is scope-aware. It searches durable shared/world/common-sense/character facts by semantic query or exact identifiers, and it can also retrieve current-user scoped continuity from `user_memory_units` when the slot is about private continuity rather than profile or relationship state.
+- **Memory evidence** is scope-aware. It searches durable shared/world/common-sense/character facts by semantic query or exact identifiers, and it can also retrieve current-user scoped continuity from `user_memory_units` when the slot is about private continuity, recognition, accepted preferences, user-specific lore, or prior shared interactions rather than profile or relationship state.
 - **Person context** resolves users, enumerates users, reads user or character profile bundles, and ranks relationship-like profile state.
 - **Recall retrieval** reconciles active agreements, ongoing promises, plans, open loops, and current-episode state.
 - **External retrieval** performs web search and URL reads when the required fact is outside local storage.
@@ -254,7 +254,7 @@ The dispatcher-visible top-level capability agents are:
 |---|---|
 | `live_context_agent` | Resolves target/scope for live external facts, then delegates to `web_search_agent2`. It refuses missing location/target instead of guessing. |
 | `conversation_evidence_agent` | Chooses the appropriate conversation worker for hybrid exact/fuzzy evidence, structured filters, counts, URLs, and speaker provenance. |
-| `memory_evidence_agent` | Chooses among shared hybrid memory retrieval and scoped current-user continuity retrieval. Natural-language home/address questions and literal memory identifiers both use shared hybrid memory search; current-user private continuity uses `user_memory_evidence_agent`. |
+| `memory_evidence_agent` | Chooses among shared hybrid memory retrieval and scoped current-user continuity retrieval. Natural-language home/address questions and literal memory identifiers both use shared hybrid memory search; current-user recognition, private continuity, accepted preferences, user-specific lore, and prior shared interactions use `user_memory_evidence_agent`. |
 | `person_context_agent` | Chooses identity, profile, user-list, relationship, or the approved display-name to profile chain. |
 | `recall_agent` | Reconciles active agreements, promises, plans, and current-episode state from scoped volatile sources. |
 
@@ -361,7 +361,8 @@ Each fact recorded by the supervisor keeps both operational and provenance infor
 `Memory-evidence:` now spans two durable-memory sources with different authority boundaries:
 
 - shared `memory` rows for official facts, common sense, seeded lore, and other non-user-scoped durable memory,
-- scoped `user_memory_units` rows for current-user continuity.
+- scoped `user_memory_units` rows for current-user continuity, recognition,
+  accepted preferences, user-specific lore, and prior shared interactions.
 
 When the source is `user_memory_units`, projected evidence preserves:
 
