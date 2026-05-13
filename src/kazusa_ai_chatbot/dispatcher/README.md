@@ -115,7 +115,7 @@ The dispatcher consumes `future_promises` that have already been emitted by the 
 
 The task-dispatch LLM receives a structured payload containing:
 
-- current UTC time,
+- character-local time context,
 - source platform and channel,
 - source channel type,
 - final dialog,
@@ -134,14 +134,23 @@ It returns JSON shaped like:
             "args": {
                 "target_channel": "same",
                 "text": "message to send later",
-                "execute_at": "2026-04-22T18:16:28+00:00",
+                "execute_at": "2026-04-23 06:16",
             },
         }
     ]
 }
 ```
 
-If the accepted commitment is an ongoing style, address, language, or formatting rule rather than a future action at a specific time, the task-dispatch LLM should return no tool calls. That distinction belongs in the LLM prompt and promise schema, not in keyword-based Python filters.
+If the accepted commitment is an ongoing style, address, language, or formatting
+rule rather than a future action at a specific time, the task-dispatch LLM should
+return:
+
+```python
+{"tool_calls": []}
+```
+
+That distinction belongs in the LLM prompt and promise schema, not in
+keyword-based Python filters.
 
 ## Dispatch Context
 

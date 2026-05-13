@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import inspect
 import json
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock, patch
@@ -9,7 +10,7 @@ from unittest.mock import AsyncMock, patch
 import httpx
 import pytest
 
-from kazusa_ai_chatbot.config import DIALOG_GENERATOR_LLM_BASE_URL
+from kazusa_ai_chatbot.config import CONSOLIDATION_LLM_BASE_URL
 from kazusa_ai_chatbot.dispatcher import (
     AdapterRegistry,
     DispatchContext,
@@ -24,6 +25,7 @@ from kazusa_ai_chatbot.dispatcher import (
 from kazusa_ai_chatbot.dispatcher.task import parse_iso_datetime
 from kazusa_ai_chatbot.nodes import persona_supervisor2_consolidator_persistence as persistence_module
 from kazusa_ai_chatbot.time_context import build_character_time_context
+from kazusa_ai_chatbot import utils as utils_module
 from tests.llm_trace import write_llm_trace
 
 
@@ -44,6 +46,32 @@ class _CapturingAsyncLLM:
     async def ainvoke(self, messages):
         self.messages = messages
         return _DummyResponse(json.dumps(self._response_payload, ensure_ascii=False))
+
+
+class _RawAsyncLLM:
+    """Return a fixed raw LLM response body."""
+
+    def __init__(self, content: str):
+        self.content = content
+
+    async def ainvoke(self, messages):
+        del messages
+        return_value = _DummyResponse(self.content)
+        return return_value
+
+
+class _CapturingLiveAsyncLLM:
+    """Wrap a live async LLM and retain the most recent raw response."""
+
+    def __init__(self, inner_llm):
+        self.inner_llm = inner_llm
+        self.raw_output = None
+
+    async def ainvoke(self, messages):
+        response = await self.inner_llm.ainvoke(messages)
+        self.raw_output = str(response.content)
+        return_value = response
+        return return_value
 
 
 class _NoopAdapter:
@@ -71,12 +99,12 @@ async def _skip_if_llm_unavailable() -> None:
 
     try:
         async with httpx.AsyncClient(timeout=3.0) as client:
-            response = await client.get(f"{DIALOG_GENERATOR_LLM_BASE_URL.rstrip('/')}/models")
+            response = await client.get(f"{CONSOLIDATION_LLM_BASE_URL.rstrip('/')}/models")
     except httpx.HTTPError:
-        pytest.skip(f"LLM endpoint is unavailable: {DIALOG_GENERATOR_LLM_BASE_URL}")
+        pytest.skip(f"LLM endpoint is unavailable: {CONSOLIDATION_LLM_BASE_URL}")
 
     if response.status_code >= 500:
-        pytest.skip(f"LLM endpoint returned server error {response.status_code}: {DIALOG_GENERATOR_LLM_BASE_URL}")
+        pytest.skip(f"LLM endpoint returned server error {response.status_code}: {CONSOLIDATION_LLM_BASE_URL}")
 
 
 @pytest.fixture()
@@ -169,17 +197,70 @@ def _live_dispatch_ctx(
     )
 
 
-def _write_live_dispatch_trace(case_id: str, state: dict, raw_calls: list[RawToolCall]) -> None:
+def _write_live_dispatch_trace(
+    case_id: str,
+    state: dict,
+    raw_calls: list[RawToolCall],
+    *,
+    raw_model_output: str | None = None,
+    parsed_output: dict | None = None,
+    repair_invoked: bool | None = None,
+) -> None:
     """Persist one live dispatcher generation trace for manual inspection."""
-    write_llm_trace(
+    trace_path = write_llm_trace(
         "dispatcher_live_tool_call_generation",
         case_id,
         {
             "input_state": state,
-            "raw_calls": raw_calls,
+            "raw_model_output": raw_model_output,
+            "parsed_output": parsed_output,
+            "repair_invoked": repair_invoked,
+            "raw_calls": [
+                {
+                    "tool": raw_call.tool,
+                    "args": raw_call.args,
+                }
+                for raw_call in raw_calls
+            ],
             "judgment": "raw_calls_match_case_assertions_when_test_passes",
         },
     )
+    print(f"dispatcher_live_trace={trace_path}")
+
+
+def test_task_dispatcher_prompt_uses_object_wrapper_contract():
+    """The model-facing no-op and output contracts must not allow bare arrays."""
+
+    prompt = persistence_module._TASK_DISPATCHER_PROMPT
+    output_format = persistence_module._TASK_DISPATCHER_OUTPUT_FORMAT
+
+    assert "返回空列表" not in prompt
+    assert "输出空列表" not in prompt
+    assert "返回空数组" not in prompt
+    assert "{{" not in prompt
+    assert "}}" not in prompt
+    assert "{{" not in output_format
+    assert "}}" not in output_format
+    assert json.loads(output_format) == {
+        "tool_calls": [
+            {
+                "tool": "工具名",
+                "args": {
+                    "参数名": "参数值",
+                    "target_channel_type": "group | private，target_channel 不是 same 时必填",
+                },
+            }
+        ]
+    }
+    assert output_format in prompt
+    assert '{"tool_calls": []}' in prompt
+
+
+def test_task_dispatcher_generation_does_not_store_global_trace_state():
+    """Runtime dispatcher generation must not expose mutable test trace state."""
+
+    assert not hasattr(persistence_module, "_last_task_dispatcher_generation_trace")
+    assert not hasattr(persistence_module, "_record_task_dispatcher_generation_trace")
 
 
 def test_evaluator_defaults_platform_channel_and_now():
@@ -363,6 +444,90 @@ async def test_generate_raw_tool_calls_defaults_missing_future_promise_due_time(
 
 
 @pytest.mark.asyncio
+async def test_generate_raw_tool_calls_returns_empty_for_raw_top_level_array(monkeypatch):
+    """A production-shaped raw [] model response should not crash dispatch."""
+
+    class _RepairLLM:
+        def invoke(self, messages):
+            del messages
+            return _DummyResponse("[]")
+
+    tool_registry = ToolRegistry()
+    tool_registry.register(build_send_message_tool())
+    monkeypatch.setattr(persistence_module, "_task_registry", tool_registry)
+    monkeypatch.setattr(persistence_module, "_task_dispatcher_llm", _RawAsyncLLM("[]"))
+    monkeypatch.setattr(utils_module, "_parse_json_with_llm", _RepairLLM())
+
+    raw_calls = await persistence_module._generate_raw_tool_calls(
+        _dispatch_generation_state(
+            future_promises=[
+                {
+                    "target": "提拉米苏",
+                    "action": "杏山千纱将对提拉米苏使用“主人”称呼并以“喵”结尾说话",
+                    "due_time": None,
+                    "commitment_type": "address_preference",
+                    "dedup_key": "address_rule_master_meow",
+                }
+            ],
+            decontexualized_input="以后叫我主人，而且每句话都喵一下。",
+            content_anchors=["[DECISION] 勉强接受并沿用这个规则。"],
+            final_dialog=["主、主人……这种奇怪的称呼真的很羞耻喵。"],
+        ),
+        _live_dispatch_ctx(),
+    )
+
+    assert raw_calls == []
+
+
+@pytest.mark.asyncio
+async def test_generate_raw_tool_calls_passes_task_dispatcher_expected_format(monkeypatch):
+    """The dispatcher must pass the same rendered output contract to JSON repair."""
+
+    captured_call = {}
+
+    def _capture_parse(raw_output: str, *, expected_output_format: str | None = None):
+        captured_call["raw_output"] = raw_output
+        captured_call["expected_output_format"] = expected_output_format
+        return {"tool_calls": []}
+
+    tool_registry = ToolRegistry()
+    tool_registry.register(build_send_message_tool())
+    monkeypatch.setattr(persistence_module, "_task_registry", tool_registry)
+    monkeypatch.setattr(persistence_module, "_task_dispatcher_llm", _RawAsyncLLM("{}"))
+    monkeypatch.setattr(persistence_module, "parse_llm_json_output", _capture_parse)
+
+    await persistence_module._generate_raw_tool_calls(
+        _dispatch_generation_state(
+            future_promises=[
+                {
+                    "target": "提拉米苏",
+                    "action": "杏山千纱将对提拉米苏询问glitch是否在线",
+                    "due_time": "2026-04-23 06:12",
+                    "commitment_type": "future_promise",
+                    "dedup_key": "ask_glitch_online",
+                }
+            ],
+            decontexualized_input="你去问一下glitch在不在。",
+            content_anchors=["[DECISION] 接受并立刻去问。"],
+            final_dialog=["好，我现在去问一下。"],
+        ),
+        _live_dispatch_ctx(),
+    )
+
+    expected_format = persistence_module._TASK_DISPATCHER_OUTPUT_FORMAT
+    assert captured_call == {
+        "raw_output": "{}",
+        "expected_output_format": expected_format,
+    }
+    assert expected_format in persistence_module._TASK_DISPATCHER_PROMPT
+    assert "{{" not in expected_format
+    assert "}}" not in expected_format
+    assert "expected_output_format" in inspect.signature(
+        persistence_module.parse_llm_json_output
+    ).parameters
+
+
+@pytest.mark.asyncio
 async def test_generate_raw_tool_calls_converts_local_execute_at(monkeypatch):
     tool_registry = ToolRegistry()
     tool_registry.register(build_send_message_tool())
@@ -411,6 +576,32 @@ async def test_live_dispatcher_generates_send_message_tool_call(ensure_live_llm,
     tool_registry = ToolRegistry()
     tool_registry.register(build_send_message_tool())
     monkeypatch.setattr(persistence_module, "_task_registry", tool_registry)
+    live_llm = _CapturingLiveAsyncLLM(persistence_module._task_dispatcher_llm)
+    monkeypatch.setattr(persistence_module, "_task_dispatcher_llm", live_llm)
+    generation_trace = {"repair_invoked": False}
+
+    original_parse = persistence_module.parse_llm_json_output
+
+    def _capture_parse(raw_output: str, *, expected_output_format: str | None = None):
+        result = original_parse(
+            raw_output,
+            expected_output_format=expected_output_format,
+        )
+        generation_trace["parsed_output"] = result
+        return result
+
+    original_repair = utils_module.parse_json_with_llm
+
+    def _capture_repair(broken_string: str, *, expected_output_format: str | None = None):
+        generation_trace["repair_invoked"] = True
+        return_value = original_repair(
+            broken_string,
+            expected_output_format=expected_output_format,
+        )
+        return return_value
+
+    monkeypatch.setattr(persistence_module, "parse_llm_json_output", _capture_parse)
+    monkeypatch.setattr(utils_module, "parse_json_with_llm", _capture_repair)
 
     due_time = "2026-04-24T08:00:00+12:00"
     state = _dispatch_generation_state(
@@ -432,7 +623,14 @@ async def test_live_dispatcher_generates_send_message_tool_call(ensure_live_llm,
     )
 
     raw_calls = await persistence_module._generate_raw_tool_calls(state, _live_dispatch_ctx())
-    _write_live_dispatch_trace("generates_send_message_tool_call", state, raw_calls)
+    _write_live_dispatch_trace(
+        "generates_send_message_tool_call",
+        state,
+        raw_calls,
+        raw_model_output=live_llm.raw_output,
+        parsed_output=generation_trace.get("parsed_output"),
+        repair_invoked=bool(generation_trace["repair_invoked"]),
+    )
 
     assert raw_calls, "Expected at least one tool call from the live dispatcher LLM."
     assert any(call.tool == "send_message" for call in raw_calls)
@@ -452,6 +650,32 @@ async def test_live_dispatcher_rejects_persistent_style_rule_as_tool_call(ensure
     tool_registry = ToolRegistry()
     tool_registry.register(build_send_message_tool())
     monkeypatch.setattr(persistence_module, "_task_registry", tool_registry)
+    live_llm = _CapturingLiveAsyncLLM(persistence_module._task_dispatcher_llm)
+    monkeypatch.setattr(persistence_module, "_task_dispatcher_llm", live_llm)
+    generation_trace = {"repair_invoked": False}
+
+    original_parse = persistence_module.parse_llm_json_output
+
+    def _capture_parse(raw_output: str, *, expected_output_format: str | None = None):
+        result = original_parse(
+            raw_output,
+            expected_output_format=expected_output_format,
+        )
+        generation_trace["parsed_output"] = result
+        return result
+
+    original_repair = utils_module.parse_json_with_llm
+
+    def _capture_repair(broken_string: str, *, expected_output_format: str | None = None):
+        generation_trace["repair_invoked"] = True
+        return_value = original_repair(
+            broken_string,
+            expected_output_format=expected_output_format,
+        )
+        return return_value
+
+    monkeypatch.setattr(persistence_module, "parse_llm_json_output", _capture_parse)
+    monkeypatch.setattr(utils_module, "parse_json_with_llm", _capture_repair)
 
     state = _dispatch_generation_state(
         future_promises=[
@@ -472,7 +696,14 @@ async def test_live_dispatcher_rejects_persistent_style_rule_as_tool_call(ensure
     )
 
     raw_calls = await persistence_module._generate_raw_tool_calls(state, _live_dispatch_ctx())
-    _write_live_dispatch_trace("rejects_persistent_style_rule_as_tool_call", state, raw_calls)
+    _write_live_dispatch_trace(
+        "rejects_persistent_style_rule_as_tool_call",
+        state,
+        raw_calls,
+        raw_model_output=live_llm.raw_output,
+        parsed_output=generation_trace.get("parsed_output"),
+        repair_invoked=bool(generation_trace["repair_invoked"]),
+    )
 
     assert raw_calls == [], f"Expected no tool calls for a persistent style rule, got: {raw_calls}"
 
@@ -486,8 +717,34 @@ async def test_live_dispatcher_generates_group_target_from_private_chat(ensure_l
     tool_registry = ToolRegistry()
     tool_registry.register(build_send_message_tool())
     monkeypatch.setattr(persistence_module, "_task_registry", tool_registry)
+    live_llm = _CapturingLiveAsyncLLM(persistence_module._task_dispatcher_llm)
+    monkeypatch.setattr(persistence_module, "_task_dispatcher_llm", live_llm)
+    generation_trace = {"repair_invoked": False}
 
-    due_time = "2026-04-22T18:12:28+00:00"
+    original_parse = persistence_module.parse_llm_json_output
+
+    def _capture_parse(raw_output: str, *, expected_output_format: str | None = None):
+        result = original_parse(
+            raw_output,
+            expected_output_format=expected_output_format,
+        )
+        generation_trace["parsed_output"] = result
+        return result
+
+    original_repair = utils_module.parse_json_with_llm
+
+    def _capture_repair(broken_string: str, *, expected_output_format: str | None = None):
+        generation_trace["repair_invoked"] = True
+        return_value = original_repair(
+            broken_string,
+            expected_output_format=expected_output_format,
+        )
+        return return_value
+
+    monkeypatch.setattr(persistence_module, "parse_llm_json_output", _capture_parse)
+    monkeypatch.setattr(utils_module, "parse_json_with_llm", _capture_repair)
+
+    due_time = "2026-04-22T18:12:00+00:00"
     state = _dispatch_generation_state(
         future_promises=[
             {
@@ -517,7 +774,14 @@ async def test_live_dispatcher_generates_group_target_from_private_chat(ensure_l
             source_channel_type="private",
         ),
     )
-    _write_live_dispatch_trace("generates_group_target_from_private_chat", state, raw_calls)
+    _write_live_dispatch_trace(
+        "generates_group_target_from_private_chat",
+        state,
+        raw_calls,
+        raw_model_output=live_llm.raw_output,
+        parsed_output=generation_trace.get("parsed_output"),
+        repair_invoked=bool(generation_trace["repair_invoked"]),
+    )
 
     assert raw_calls, "Expected at least one tool call from the live dispatcher LLM."
     assert any(call.tool == "send_message" for call in raw_calls)

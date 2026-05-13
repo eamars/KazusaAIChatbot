@@ -273,10 +273,16 @@ _PARSE_JSON_WITH_LLM_PROMPT = """\
 You are a JSON repair expert. Fix the provided malformed JSON string and return one valid JSON object.
 
 # Generation Procedure
-1. Read `broken_json` as a malformed JSON-like object string.
-2. Repair only syntax problems such as trailing commas, unclosed brackets, bad quotes, or markdown fences.
-3. Preserve the original keys and values as much as possible.
-4. Return only the corrected JSON object text.
+1. Read `broken_json` as malformed JSON-like text.
+2. Assume deterministic repair already handled ordinary syntax fixes; this call is for hard residual cases.
+3. Use the expected output format only as a shape contract, not as data.
+4. If an expected output format shows one top-level array field and `broken_json` is a top-level array, wrap the raw array under that field.
+5. For example, with `{"tool_calls": [...]}` as the target shape, `[]` repairs to `{"tool_calls": []}`.
+6. Repair syntax, wrapper shape, or damaged object structure only when the raw values support that repair.
+7. Preserve actual keys and values from the raw output as much as possible.
+8. Never copy placeholder values from an expected output format as real data.
+9. If the raw output cannot be reconciled with the target object shape, return `{}`.
+10. Return only the corrected JSON object text.
 
 # Input Format
 {
@@ -286,6 +292,10 @@ You are a JSON repair expert. Fix the provided malformed JSON string and return 
 # Output Format
 Return only valid RFC 8259 JSON object text. Do not use code blocks, markdown fences, explanations, or surrounding prose.
 """
+_PARSE_JSON_WITH_LLM_EXPECTED_FORMAT_PROMPT = (
+    _PARSE_JSON_WITH_LLM_PROMPT
+    + "\nExpected output format from the original prompt:\n"
+)
 _parse_json_with_llm = get_llm(
     temperature=0,
     top_p=1.0,
@@ -295,17 +305,52 @@ _parse_json_with_llm = get_llm(
 )
 
 
-def parse_json_with_llm(broken_string: str) -> dict:
+def _validate_expected_output_format(expected_output_format: str | None) -> None:
+    """Reject unsupported expected-format payloads at the parser boundary."""
+
+    if expected_output_format is None:
+        return
+    if not isinstance(expected_output_format, str):
+        raise TypeError("expected_output_format must be a string or None")
+
+
+def _build_json_repair_prompt(expected_output_format: str | None) -> str:
+    """Build the JSON-repair prompt variant for the current parse request."""
+
+    if expected_output_format is None:
+        return_value = _PARSE_JSON_WITH_LLM_PROMPT
+        return return_value
+
+    return_value = (
+        _PARSE_JSON_WITH_LLM_EXPECTED_FORMAT_PROMPT
+        + expected_output_format
+        + "\n\nOnly the broken JSON text is sent as the repair call's input message.\n"
+    )
+    return return_value
+
+
+def parse_json_with_llm(
+    broken_string: str,
+    *,
+    expected_output_format: str | None = None,
+) -> dict:
     """Repair malformed JSON text by asking the configured JSON-repair LLM.
 
     Args:
         broken_string: Raw malformed JSON-like text returned by an LLM.
+        expected_output_format: Optional target output contract shown to the
+            original LLM.
 
     Returns:
-        Parsed JSON object from the repaired response.
+        Parsed JSON object from the repaired response, or ``{}`` if repair does
+        not produce an object.
     """
 
-    system_prompt = SystemMessage(content=_PARSE_JSON_WITH_LLM_PROMPT)
+    _validate_expected_output_format(expected_output_format)
+
+    system_prompt = SystemMessage(
+        content=_build_json_repair_prompt(expected_output_format)
+    )
     human_message = HumanMessage(
         content=json.dumps(
             {
@@ -320,20 +365,39 @@ def parse_json_with_llm(broken_string: str) -> dict:
     json_string = response.content.strip().strip("```").strip("json")
 
     # Use repair_json which handles both valid and broken JSON
-    decoded_json_dict = repair_json(json_string, return_objects=True)
+    try:
+        decoded_json_dict = repair_json(json_string, return_objects=True)
+    except Exception as exc:
+        logger.exception(f"LLM JSON repair response could not be parsed: {exc}")
+        decoded_json_dict = {}
 
-    return decoded_json_dict
+    if not isinstance(decoded_json_dict, dict):
+        logger.error(
+            f"LLM JSON repair returned non-object output: {decoded_json_dict}"
+        )
+        decoded_json_dict = {}
+
+    return_value = decoded_json_dict
+    return return_value
 
 
-def parse_llm_json_output(raw_output: str) -> dict:
+def parse_llm_json_output(
+    raw_output: str,
+    *,
+    expected_output_format: str | None = None,
+) -> dict:
     """Parse LLM JSON output, handling markdown fences and malformed JSON.
     
     Args:
         raw_output: Raw string output from LLM
+        expected_output_format: Optional target output contract shown to the
+            original LLM, used only by the LLM repair fallback.
         
     Returns:
         Parsed JSON object as dict, or empty dict if parsing fails
     """
+    _validate_expected_output_format(expected_output_format)
+
     if not raw_output:
         return_value = {}
         return return_value
@@ -348,18 +412,36 @@ def parse_llm_json_output(raw_output: str) -> dict:
         decoded_json_dict = repair_json(raw, return_objects=True)            
     except Exception as exc:
         logger.exception(f"repair_json failed; falling back to LLM JSON repair: {exc}")
-        decoded_json_dict = parse_json_with_llm(raw_output)
+        try:
+            decoded_json_dict = parse_json_with_llm(
+                raw_output,
+                expected_output_format=expected_output_format,
+            )
+        except Exception as repair_exc:
+            logger.exception(f"LLM JSON repair failed: {repair_exc}")
+            decoded_json_dict = {}
 
     else:
         # repair_json failed to do the work. Now try the LLM approach
         if not isinstance(decoded_json_dict, dict):
-            decoded_json_dict = parse_json_with_llm(raw_output)
+            try:
+                decoded_json_dict = parse_json_with_llm(
+                    raw_output,
+                    expected_output_format=expected_output_format,
+                )
+            except Exception as exc:
+                logger.exception(f"LLM JSON repair failed: {exc}")
+                decoded_json_dict = {}
 
-    # At this stage there is still a small chance to return a non dict object, we will capture the failure pattern here
     if not isinstance(decoded_json_dict, dict):
-        logger.exception(f"Unable to parse LLM output {raw_output}. Last attempt: {decoded_json_dict}")
+        logger.error(
+            f"Unable to parse LLM output {raw_output}. "
+            f"Last attempt: {decoded_json_dict}"
+        )
+        decoded_json_dict = {}
 
-    return decoded_json_dict
+    return_value = decoded_json_dict
+    return return_value
 
 
 def build_affinity_block(affinity: int, affinity_min: int=AFFINITY_MIN, affinity_max: int=AFFINITY_MAX) -> dict:

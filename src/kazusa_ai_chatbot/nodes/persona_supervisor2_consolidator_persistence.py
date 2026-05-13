@@ -50,19 +50,36 @@ from kazusa_ai_chatbot.time_context import (
     local_llm_time_to_utc_iso,
 )
 from kazusa_ai_chatbot.rag.cache2_runtime import get_rag_cache2_runtime
-from kazusa_ai_chatbot.utils import get_llm, log_list_preview, parse_llm_json_output, text_or_empty
+from kazusa_ai_chatbot.utils import (
+    get_llm,
+    log_list_preview,
+    parse_llm_json_output,
+    text_or_empty,
+)
 
 logger = logging.getLogger(__name__)
 
 _task_dispatcher: TaskDispatcher | None = None
 _task_registry: ToolRegistry | None = None
 
+_TASK_DISPATCHER_OUTPUT_FORMAT = """\
+{
+  "tool_calls": [
+    {
+      "tool": "工具名",
+      "args": {
+        "参数名": "参数值",
+        "target_channel_type": "group | private，target_channel 不是 same 时必填"
+      }
+    }
+  ]
+}"""
 _TASK_DISPATCHER_PROMPT = """\
 你负责把角色已经接受的未来约定，转换成可执行的工具调用。
 
 # 目标
 - 输入是角色本轮最终说出口的话、已提取的 `future_promises`、来源平台上下文，以及当前可用工具。
-- 输出必须是零个或多个工具调用；若没有把握，就输出空列表。
+- 输出必须是零个或多个工具调用；若没有把握，就输出 {"tool_calls": []}。
 
 # 规则
 1. 只能使用 `available_tools` 中出现的工具名与参数字段。
@@ -75,21 +92,22 @@ _TASK_DISPATCHER_PROMPT = """\
 4b. 若来源是私聊/DM，但用户要求发到另一个群或频道，仍然按用户指定的目标 ID 填写 `target_channel`；不要因为来源是私聊就回退到 `"same"`。
 4c. `target_channel` 必须是平台实际使用的纯 ID 字符串；不要保留“群”“频道”“房间”“#”之类的人类描述后缀。
 4d. 当 `target_channel` 不是 `"same"` 时，必须输出 `target_channel_type`；群/频道/房间使用 `group`，私聊/DM 使用 `private`。不要让调度器猜。
-5. 对“持续生效的回复规则/称呼规则/语言偏好/格式约定”这类承诺，如果 `due_time` 为 null，说明它属于长期状态，不是未来某个时刻要发送的新消息。此时必须返回空列表。
-5a. 若 `commitment_type` 是 `future_promise` 且需要定时执行，输入侧通常会提供 `due_time`。如果 `due_time` 仍为 null，且你无法确定精确执行时间，返回空列表。
+5. 对“持续生效的回复规则/称呼规则/语言偏好/格式约定”这类承诺，如果 `due_time` 为 null，说明它属于长期状态，不是未来某个时刻要发送的新消息。此时必须返回 {"tool_calls": []}。
+5a. 若 `commitment_type` 是 `future_promise` 且需要定时执行，输入侧通常会提供 `due_time`。如果 `due_time` 仍为 null，且你无法确定精确执行时间，返回 {"tool_calls": []}。
 6. 只有“未来某个时刻真的要额外发送一条消息”时，才生成 `send_message`。
-7. 若无法形成可靠工具调用，返回空列表，不要解释。
+7. 若无法形成可靠工具调用，返回 {"tool_calls": []}，不要解释。
 8. `text` 是届时角色真正要发送的消息正文，不要只是复述 promise 字段。
+9. 顶层输出必须始终是 JSON 对象，不能是顶层数组。
 
 # 生成步骤
 1. 先读取 `future_promises`，只保留仍然需要在未来某一刻额外执行的承诺。
 2. 对每个候选承诺，检查 `available_tools` 是否存在可执行工具及必要参数字段。
 3. 根据 `due_time` 确定本地 `execute_at`；不要自行输出时区或带 T 分隔符的机器时间。
 4. 根据来源会话和用户明确指定的目标，确定 `target_platform` 与 `target_channel`。
-5. 生成届时角色真正要发送的 `text`。如果无法可靠生成工具调用，返回空数组。
+5. 生成届时角色真正要发送的 `text`。如果无法可靠生成工具调用，返回 {"tool_calls": []}。
 
 # 输入格式
-{{
+{
   "instruction": "当前调度意图摘要",
   "time_context": {
     "current_local_datetime": "当前本地时间，YYYY-MM-DD HH:MM",
@@ -103,36 +121,25 @@ _TASK_DISPATCHER_PROMPT = """\
   "final_dialog": ["角色本轮最终实际说出口的话"],
   "content_anchors": ["回复前的内容锚点"],
   "future_promises": [
-    {{
+    {
       "target": "承诺目标",
       "action": "可执行承诺本体",
       "due_time": "YYYY-MM-DD HH:MM 本地时间或 null",
       "commitment_type": "future_promise | language_preference | address_preference | other"
-    }}
+    }
   ],
   "available_tools": [
-    {{
+    {
       "name": "工具名",
       "description": "工具说明",
-      "args_schema": {{"参数名": "参数定义"}}
-    }}
+      "args_schema": {"参数名": "参数定义"}
+    }
   ]
-}}
+}
 
 # 输出格式
 请只返回合法 JSON：
-{{
-  "tool_calls": [
-    {{
-      "tool": "工具名",
-      "args": {{
-        "参数名": "参数值",
-        "target_channel_type": "group | private，target_channel 不是 same 时必填"
-      }}
-    }}
-  ]
-}}
-"""
+""" + _TASK_DISPATCHER_OUTPUT_FORMAT
 _task_dispatcher_llm = get_llm(
     temperature=0.0,
     top_p=1.0,
@@ -334,7 +341,11 @@ async def _generate_raw_tool_calls(
             HumanMessage(content=json.dumps(msg, ensure_ascii=False)),
         ]
     )
-    result = parse_llm_json_output(response.content)
+    raw_model_output = str(response.content)
+    result = parse_llm_json_output(
+        raw_model_output,
+        expected_output_format=_TASK_DISPATCHER_OUTPUT_FORMAT,
+    )
     tool_calls = result.get("tool_calls", [])
     if not isinstance(tool_calls, list):
         return_value = []
@@ -354,7 +365,8 @@ async def _generate_raw_tool_calls(
         raw_calls.append(RawToolCall(tool=tool_name, args=normalized_args))
 
     logger.debug(f'Task dispatcher LLM: raw_calls={log_list_preview([{"tool": raw.tool, "args": raw.args} for raw in raw_calls])}')
-    return raw_calls
+    return_value = raw_calls
+    return return_value
 
 
 def process_affinity_delta(current_affinity: int, raw_delta: int) -> int:

@@ -14,7 +14,7 @@ import importlib
 import json
 import sys
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -200,7 +200,6 @@ def _cases() -> dict[str, LLMCase]:
     """
 
     now = datetime.now(timezone.utc).isoformat()
-    due_time = (datetime.now(timezone.utc) + timedelta(minutes=5)).isoformat()
     rag_context = {
         "platform": "qq",
         "platform_channel_id": "1082431481",
@@ -542,7 +541,10 @@ def _cases() -> dict[str, LLMCase]:
             "_task_dispatcher_llm",
             {
                 "instruction": "Chisa should follow through on one accepted promise for Ren.",
-                "current_utc": now,
+                "time_context": {
+                    "current_local_datetime": "2026-04-29 12:00",
+                    "current_local_weekday": "Wednesday",
+                },
                 "source_platform": "qq",
                 "source_channel_id": "1082431481",
                 "source_channel_type": "group",
@@ -554,7 +556,7 @@ def _cases() -> dict[str, LLMCase]:
                     {
                         "target": "Ren",
                         "action": "send reminder",
-                        "due_time": due_time,
+                        "due_time": "2026-04-29 12:05",
                         "commitment_type": "future_promise",
                     }
                 ],
@@ -563,8 +565,9 @@ def _cases() -> dict[str, LLMCase]:
                         "name": "send_message",
                         "description": "send a message later",
                         "args_schema": {
-                            "execute_at": "UTC ISO timestamp",
+                            "execute_at": "local YYYY-MM-DD HH:MM timestamp",
                             "target_channel": "channel id or same",
+                            "target_channel_type": "group or private when target_channel is not same",
                             "text": "message body",
                         },
                     }

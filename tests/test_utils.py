@@ -1,5 +1,92 @@
-from kazusa_ai_chatbot.config import AFFINITY_DEFAULT
+import json
+
+import httpx
+import pytest
+
+from langchain_core.messages import HumanMessage, SystemMessage
+
+from kazusa_ai_chatbot.config import AFFINITY_DEFAULT, JSON_REPAIR_LLM_BASE_URL
+from kazusa_ai_chatbot import utils as utils_module
 from kazusa_ai_chatbot.utils import build_affinity_block, parse_llm_json_output
+from tests.llm_trace import write_llm_trace
+
+
+_TOOL_CALLS_EXPECTED_OUTPUT_FORMAT = """{
+  "tool_calls": [
+    {
+      "tool": "tool name",
+      "args": {
+        "parameter": "value",
+        "target_channel_type": "group | private when target_channel is not same"
+      }
+    }
+  ]
+}"""
+
+
+class _CapturingRepairLLM:
+    """Wrap the live JSON-repair LLM and retain the most recent exchange."""
+
+    def __init__(self, inner_llm):
+        self.inner_llm = inner_llm
+        self.messages = None
+        self.raw_output = None
+
+    def invoke(self, messages):
+        self.messages = messages
+        response = self.inner_llm.invoke(messages)
+        self.raw_output = str(response.content)
+        return_value = response
+        return return_value
+
+
+def _skip_if_json_repair_llm_unavailable() -> None:
+    """Skip live JSON repair tests when the configured endpoint is unavailable."""
+
+    try:
+        response = httpx.get(
+            f"{JSON_REPAIR_LLM_BASE_URL.rstrip('/')}/models",
+            timeout=3.0,
+        )
+    except httpx.HTTPError as exc:
+        pytest.skip(f"JSON repair LLM endpoint is unavailable: {exc}")
+
+    if response.status_code >= 500:
+        pytest.skip(
+            f"JSON repair LLM endpoint returned server error "
+            f"{response.status_code}: {JSON_REPAIR_LLM_BASE_URL}"
+        )
+
+
+@pytest.fixture()
+def ensure_json_repair_live_llm() -> None:
+    """Ensure the configured JSON repair LLM endpoint is reachable."""
+
+    _skip_if_json_repair_llm_unavailable()
+
+
+def _write_json_repair_trace(
+    case_id: str,
+    *,
+    broken_json: str,
+    expected_output_format: str,
+    raw_repair_output: str | None,
+    parsed_output: dict,
+) -> None:
+    """Persist one live JSON repair trace for manual inspection."""
+
+    trace_path = write_llm_trace(
+        "json_repair_live_llm",
+        case_id,
+        {
+            "broken_json": broken_json,
+            "expected_output_format": expected_output_format,
+            "raw_repair_output": raw_repair_output,
+            "parsed_output": parsed_output,
+            "judgment": "parsed_output_matches_expected_contract_when_test_passes",
+        },
+    )
+    print(f"json_repair_live_trace={trace_path}")
 
 
 def test_trim_history_dict():
@@ -60,6 +147,224 @@ def test_parse_llm_json_output_accepts_markdown_fenced_raw_output():
         "continuity": "related_shift",
         "open_loops": ["follow up"],
     }
+
+
+def test_parse_llm_json_output_returns_empty_dict_for_repaired_list(monkeypatch):
+    """Non-object repair results should fail closed to an empty object."""
+
+    def _list_repair(_broken_string: str, *, expected_output_format=None):
+        del expected_output_format
+        return []
+
+    monkeypatch.setattr(utils_module, "parse_json_with_llm", _list_repair)
+
+    result = parse_llm_json_output("[]")
+
+    assert result == {}
+
+
+def test_parse_llm_json_output_does_not_expose_global_trace_state():
+    """The shared parser must not expose mutable last-call trace state."""
+
+    assert not hasattr(utils_module, "_LAST_PARSE_LLM_JSON_OUTPUT_TRACE")
+    assert not hasattr(utils_module, "get_last_parse_llm_json_output_trace")
+
+
+def test_parse_llm_json_output_rejects_non_string_expected_format():
+    """The expected-format hint is a string-only parser contract."""
+
+    with pytest.raises(TypeError):
+        parse_llm_json_output("{\"answer\": true}", expected_output_format={})
+
+
+def test_parse_llm_json_output_does_not_use_expected_format_on_success(monkeypatch):
+    """Valid object JSON should not call the LLM repair path."""
+
+    def _unexpected_repair(_broken_string: str, *, expected_output_format=None):
+        del expected_output_format
+        raise AssertionError("LLM repair should not run for valid JSON objects")
+
+    monkeypatch.setattr(utils_module, "parse_json_with_llm", _unexpected_repair)
+
+    result = parse_llm_json_output(
+        "{\"answer\": true}",
+        expected_output_format='{"answer": true}',
+    )
+
+    assert result == {"answer": True}
+
+
+def test_parse_json_with_llm_renders_expected_format_in_system_prompt(monkeypatch):
+    """Expected output format belongs in the repair prompt, not user JSON."""
+
+    captured_messages = {}
+
+    class _RepairLLM:
+        def invoke(self, messages):
+            captured_messages["messages"] = messages
+            return_value = type(
+                "_Response",
+                (),
+                {"content": "{\"tool_calls\": []}"},
+            )()
+            return return_value
+
+    expected_format = """{
+  "tool_calls": []
+}"""
+    monkeypatch.setattr(utils_module, "_parse_json_with_llm", _RepairLLM())
+
+    result = utils_module.parse_json_with_llm(
+        "[]",
+        expected_output_format=expected_format,
+    )
+
+    system_prompt, human_message = captured_messages["messages"]
+    assert isinstance(system_prompt, SystemMessage)
+    assert isinstance(human_message, HumanMessage)
+    assert expected_format in system_prompt.content
+    assert "Expected output format from the original prompt:" in system_prompt.content
+    payload = json.loads(human_message.content)
+    assert payload == {"broken_json": "[]"}
+    assert "expected_output_format" not in human_message.content
+    assert result == {"tool_calls": []}
+
+
+def test_parse_json_with_llm_omits_expected_format_header_when_absent(monkeypatch):
+    """The base repair prompt should not include an empty expected-format block."""
+
+    captured_messages = {}
+
+    class _RepairLLM:
+        def invoke(self, messages):
+            captured_messages["messages"] = messages
+            return_value = type(
+                "_Response",
+                (),
+                {"content": "{\"answer\": true}"},
+            )()
+            return return_value
+
+    monkeypatch.setattr(utils_module, "_parse_json_with_llm", _RepairLLM())
+
+    result = utils_module.parse_json_with_llm("{answer: true}")
+
+    system_prompt = captured_messages["messages"][0]
+    assert "Expected output format from the original prompt:" not in system_prompt.content
+    assert result == {"answer": True}
+
+
+@pytest.mark.live_llm
+def test_parse_json_with_llm_live_wraps_empty_array_contract(
+    ensure_json_repair_live_llm,
+    monkeypatch,
+):
+    """The repair prompt should map a bare no-op array into the target object."""
+
+    del ensure_json_repair_live_llm
+    live_llm = _CapturingRepairLLM(utils_module._parse_json_with_llm)
+    monkeypatch.setattr(utils_module, "_parse_json_with_llm", live_llm)
+
+    broken_json = "[]"
+    result = utils_module.parse_json_with_llm(
+        broken_json,
+        expected_output_format=_TOOL_CALLS_EXPECTED_OUTPUT_FORMAT,
+    )
+    _write_json_repair_trace(
+        "wraps_empty_array_contract",
+        broken_json=broken_json,
+        expected_output_format=_TOOL_CALLS_EXPECTED_OUTPUT_FORMAT,
+        raw_repair_output=live_llm.raw_output,
+        parsed_output=result,
+    )
+
+    assert result == {"tool_calls": []}
+
+
+@pytest.mark.live_llm
+def test_parse_json_with_llm_live_wraps_tool_call_array_contract(
+    ensure_json_repair_live_llm,
+    monkeypatch,
+):
+    """The repair prompt should preserve tool-call entries while fixing wrapper shape."""
+
+    del ensure_json_repair_live_llm
+    live_llm = _CapturingRepairLLM(utils_module._parse_json_with_llm)
+    monkeypatch.setattr(utils_module, "_parse_json_with_llm", live_llm)
+
+    broken_json = """[
+  {
+    "tool": "send_message",
+    "args": {
+      "target_channel": "same",
+      "text": "I will remind you now.",
+      "execute_at": "2026-04-23 06:12"
+    }
+  }
+]"""
+    result = utils_module.parse_json_with_llm(
+        broken_json,
+        expected_output_format=_TOOL_CALLS_EXPECTED_OUTPUT_FORMAT,
+    )
+    _write_json_repair_trace(
+        "wraps_tool_call_array_contract",
+        broken_json=broken_json,
+        expected_output_format=_TOOL_CALLS_EXPECTED_OUTPUT_FORMAT,
+        raw_repair_output=live_llm.raw_output,
+        parsed_output=result,
+    )
+
+    assert list(result) == ["tool_calls"]
+    assert isinstance(result["tool_calls"], list)
+    assert len(result["tool_calls"]) == 1
+    tool_call = result["tool_calls"][0]
+    assert tool_call["tool"] == "send_message"
+    assert tool_call["args"]["target_channel"] == "same"
+    assert tool_call["args"]["execute_at"] == "2026-04-23 06:12"
+
+
+@pytest.mark.live_llm
+def test_parse_json_with_llm_live_repairs_malformed_object_contract(
+    ensure_json_repair_live_llm,
+    monkeypatch,
+):
+    """The repair prompt should fix syntax without copying schema placeholders."""
+
+    del ensure_json_repair_live_llm
+    live_llm = _CapturingRepairLLM(utils_module._parse_json_with_llm)
+    monkeypatch.setattr(utils_module, "_parse_json_with_llm", live_llm)
+
+    broken_json = """```json
+{
+  tool_calls: [
+    {
+      tool: "send_message",
+      args: {
+        target_channel: "same",
+        text: "I will remind you now.",
+        execute_at: "2026-04-23 06:12",
+      },
+    },
+  ],
+}
+```"""
+    result = utils_module.parse_json_with_llm(
+        broken_json,
+        expected_output_format=_TOOL_CALLS_EXPECTED_OUTPUT_FORMAT,
+    )
+    _write_json_repair_trace(
+        "repairs_malformed_object_contract",
+        broken_json=broken_json,
+        expected_output_format=_TOOL_CALLS_EXPECTED_OUTPUT_FORMAT,
+        raw_repair_output=live_llm.raw_output,
+        parsed_output=result,
+    )
+
+    assert list(result) == ["tool_calls"]
+    tool_call = result["tool_calls"][0]
+    assert tool_call["tool"] == "send_message"
+    assert tool_call["args"]["target_channel"] == "same"
+    assert tool_call["args"]["text"] == "I will remind you now."
 
 
 class TestBuildAffinityBlock:
