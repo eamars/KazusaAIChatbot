@@ -24,6 +24,10 @@
   trait ledger, project only promoted source-detail-free traits into cognition,
   and prove the behavior with deterministic, patched, live LLM, static, and
   replay-oriented verification.
+- Post-completion cleanup: on 2026-05-12, owner direction removed the
+  non-production proof-of-concept package
+  `experiments/reflection_state_evolution/` because its relevant behavior had
+  already been merged into this production design and implementation record.
 
 ## Context
 
@@ -59,6 +63,10 @@ The current proof of concept under
   production-derived simulation produced one accepted candidate, kept it in
   the `emerging` band at strength `0.363`, projected `0` prompt-visible traits,
   and required `7` additional confirming days before promotion.
+
+The local proof-of-concept package was removed after this completed plan
+absorbed the design conclusion. Historical `test_artifacts/` paths below remain
+as evidence records.
 
 This plan replaces the older self-image-first dry-run direction. Production
 implementation must target global character growth only.
@@ -1365,3 +1373,8 @@ Execution evidence:
 
 Implementation evidence must be appended here stage by stage. Checked progress
 boxes are not evidence by themselves.
+
+Post-completion cleanup on 2026-05-12 removed
+`experiments/reflection_state_evolution/` by owner direction. The production
+global-character-growth package and historical artifacts remain the source of
+truth for this completed plan.

@@ -2,972 +2,799 @@
 
 ## Summary
 
-- Goal: Define self-cognition as an idle cognition and agency loop that reuses
-  the current multi-source cognition core and routes its output into existing
-  consumers: conversation progress, proactive output, dispatcher/scheduler,
-  reflection/growth, and audit.
-- Plan class: high_risk_migration
-- Status: draft
-- Runtime behavior change: none until a future approved implementation stage.
-- Database schema change: future stages likely need proactive outbox and action
-  audit persistence; this draft does not authorize schema work.
-- Prompt change: future stages likely need a self-cognition prompt variant and
-  proactive-preview rendering contract; this draft does not authorize prompt
-  edits.
-- New LLM call: future stages may add idle background calls only; no live
-  `/chat` response-path call increase is allowed.
-- Mandatory skills for future executable stages: `development-plan-writing`,
-  `local-llm-architecture`, `no-prepost-user-input`, `py-style`,
-  `test-style-and-execution`, `database-data-pull` when using real data, and
-  `cjk-safety` before editing Python files that contain CJK prompt text.
-- Highest-risk areas: unbounded autonomous contact, bypassing the current
-  L1/L2/L3 cognition stack, treating self-generated thought as user evidence,
-  writing private thought into user memory, direct adapter sends, unbounded idle
-  loops, duplicate scheduled messages, spammy contact cadence, and audit gaps.
+- Goal: Implement the next self-cognition slice as a production-owned module
+  under `src/kazusa_ai_chatbot/self_cognition/`. The module must reuse the
+  current RAG2 and L1/L2/L3 cognition interfaces, write local dry-run artifacts,
+  and prove trigger, route, action-attempt, duplicate-suppression, and
+  no-production-handoff behavior without depending on `experiments/*`.
+- Plan class: large
+- Status: approved
+- Mandatory skills: `development-plan-writing`, `local-llm-architecture`,
+  `no-prepost-user-input`, `py-style`, `test-style-and-execution`,
+  `database-data-pull` when using real exported data, and `cjk-safety` before
+  editing Python files that contain CJK text.
+- Overall cutover strategy: compatible. This adds a production module and
+  minimal config, but must not wire self-cognition into live runtime behavior.
+- Highest-risk areas: accidental production writes or sends, bypassing the
+  shared cognition stack, weak duplicate suppression for expired commitments,
+  reflection artifacts becoming triggers, and broad LLM/RAG context growth.
+- Acceptance criteria: artifacts prove the tracking contract; focused tests and
+  static gates pass; independent review passes.
 
 ## Context
 
-The earlier self-cognition reference under
-`development_plans/reference/designs/self_cognition_loop_architecture.md`
-correctly identified the main boundary: self-cognition must enter through
-`CognitiveEpisode` and the production `call_cognition_subgraph` path. That
-reference was too narrow in one important way: it treated self-cognition mostly
-as private growth or audit. The intended target is broader.
-
-Self-cognition should let the character privately reprocess recent state and
-decide whether anything should happen next. That "anything" may be:
-
-- no visible action;
-- short-term conversation progress cleanup;
-- additional retrieval over memory, conversation history, pending commitments,
-  live context, or the public web;
-- a proactive message candidate;
-- a scheduled action request;
-- a follow-up self-cognition step triggered by a discovered topic;
-- slower relationship or personality-growth evidence;
-- an audit/evaluation artifact.
-
-Self-cognition can end with the decision to send a message, the same way a
-person's cognition can end with outward action. The runtime still needs
-mechanical execution infrastructure so that "I will send this" becomes a real,
-auditable adapter action instead of an untracked side effect:
-
-- `src/kazusa_ai_chatbot/cognition_episode.py` already defines
-  `output_mode="preview"` and `output_mode="scheduled_action_request"`.
-- `src/kazusa_ai_chatbot/internal_thought_cognition.py` already accepts
-  `think_only`, `preview`, and `silent` output modes for non-chat cognition.
-- `src/kazusa_ai_chatbot/conversation_progress/` already owns short-term
-  episode continuity used by L3 cognition.
-- `src/kazusa_ai_chatbot/nodes/persona_supervisor2_rag_supervisor2.py` and
-  `src/kazusa_ai_chatbot/rag/` already own full RAG2 retrieval, including
-  memory, conversation, recall, live-context, continuation, and web-search
-  helper paths.
-- `src/kazusa_ai_chatbot/proactive_output/` already owns contract/test-only
-  proactive preview records, deterministic record checks, idempotency fields,
-  target matching, and outbox shapes. It does not yet own persistent outbox
-  storage or live scheduler handoff.
-- `src/kazusa_ai_chatbot/nodes/persona_supervisor2_consolidator.py` already
-  owns post-cognition consolidation, but current origin construction is
-  user-message-only and must become source-aware before self-cognition can use
-  it.
-- `src/kazusa_ai_chatbot/dispatcher/` already owns validated `send_message`
-  task dispatch.
-- `src/kazusa_ai_chatbot/scheduler.py` already owns delayed execution through
-  registered adapters.
-
-The right direction is to improve these owners, not add a separate
-self-cognition module that competes with them.
-
-## Industrial Research Basis
-
-Industry practice for production agents is not "let the model act directly."
-The recurring pattern is:
-
-```text
-model reasoning
--> structured candidate action
--> structured action record
--> durable or resumable state
--> validated tool execution
--> trace / audit
-```
-
-Research sources inspected for this plan:
-
-- Anthropic, [Building Effective AI Agents](https://www.anthropic.com/engineering/building-effective-agents).
-  Key lesson: use simple, composable patterns; distinguish fixed workflows from
-  agents that dynamically direct tool use; route complex tasks to specialized
-  downstream processes when the categories are clear.
-- Anthropic, [Writing effective tools for AI agents](https://www.anthropic.com/engineering/writing-tools-for-agents).
-  Key lesson: tools for agents need clear purpose, namespacing, meaningful
-  context, token-efficient responses, evaluations, and strict input/output
-  contracts.
-- OpenAI Agents SDK, [Guardrails](https://openai.github.io/openai-agents-python/guardrails/).
-  Key lesson: input, output, and tool guardrails run at different workflow
-  boundaries; side-effect tools need tool-level checks, not only final-output
-  checks.
-- OpenAI Agents SDK, [Tracing](https://openai.github.io/openai-agents-python/tracing/).
-  Key lesson: production agent runs need traces of LLM generations, tool calls,
-  handoffs, guardrails, and custom events.
-- OpenAI, [A practical guide to building agents](https://cdn.openai.com/business-guides-and-resources/a-practical-guide-to-building-agents.pdf).
-  Key lesson: guardrails and human intervention are first-class safeguards,
-  especially early in deployment.
-- LangGraph, [Persistence](https://langchain-5e9cc07a.mintlify.app/oss/python/langgraph/persistence),
-  [Human-in-the-loop](https://docs.langchain.com/oss/python/langchain/human-in-the-loop),
-  and [Durable execution](https://docs.langchain.com/oss/python/langgraph/durable-execution).
-  Key lesson: long-running or approval-based agents need persisted state, pause
-  and resume, idempotency, and side effects wrapped so they are not repeated on
-  replay.
-- Microsoft AutoGen, [Human-in-the-loop](https://microsoft.github.io/autogen/stable/user-guide/agentchat-user-guide/tutorial/human-in-the-loop.html).
-  Key lesson: agent teams need explicit handoff/feedback points; blocking
-  human approval is useful for short, sensitive decisions but should be used
-  carefully.
-
-Applied to this project:
-
-- Kazusa's L1/L2/L3 cognition is the reasoning layer.
-- `proactive_output` is an action-preview and outbox boundary, not the source
-  of Kazusa's social agency. It may provide structural checks, duplicate
-  suppression, and audit records, but the decision to send must come from
-  cognition.
-- `dispatcher` and `scheduler` are the validated tool execution layer.
-- `conversation_progress`, proactive outbox records, scheduler rows, and
-  reflection run documents are the durable/resumable state surfaces.
-- Logs and future outbox/audit rows are the trace layer.
-
-## Explicit Goal
-
-The self-cognition agency loop should answer:
-
-> While idle, what does Kazusa privately decide needs to be preserved, updated,
-> postponed, or acted on, and which existing consumer is allowed to receive that
-> decision?
-
-The loop must preserve this invariant:
-
-```text
-self-cognition may propose
-deterministic code validates mechanics
-existing owners persist or execute
-adapters deliver only after dispatcher validation and scheduler execution
-```
-
-## Consumer Map
-
-### Consumer 1: Audit And Evaluation
-
-Purpose: prove what the cognition stack thought without changing runtime state.
-
-Current owner:
-
-- `src/kazusa_ai_chatbot/internal_thought_cognition.py`
-- `src/kazusa_ai_chatbot/reflection_cycle/cognition_dry_run.py`
-
-Valid input:
-
-- idle source packet;
-- selected target scope;
-- current conversation progress;
-- recent bounded evidence;
-- current character/runtime state;
-- current user relationship evidence when scoped to one user.
-
-Valid output:
-
-- cognition output keys and values;
-- selected prompt variants;
-- source packet digest;
-- no persistence side effect except explicit audit artifact.
-
-Example:
-
-```text
-Input:
-Kazusa privately replays the last few QQ turns with user 673225019.
-The conversation ended with a playful pickup/drop-off correction and a future
-"next week" light obligation.
-
-Self-cognition output:
-"I should keep the teasing accountability alive, but not reopen it every idle
-hour. If the user brings up next week, continue naturally."
-
-Consumer:
-Audit artifact only.
-```
-
-### Consumer 2: RAG / Research Planning
-
-Purpose: let one self-cognition topic trigger real retrieval work before the
-character decides whether to act.
-
-Current owner:
-
-- `src/kazusa_ai_chatbot/nodes/persona_supervisor2_rag_supervisor2.py`
-- `src/kazusa_ai_chatbot/nodes/persona_supervisor2_rag_initializer.py`
-- `src/kazusa_ai_chatbot/nodes/persona_supervisor2_rag_dispatch.py`
-- `src/kazusa_ai_chatbot/rag/live_context_agent.py`
-- `src/kazusa_ai_chatbot/rag/web_search_agent.py`
-
-Required improvement:
-
-- Let idle self-cognition build a normal RAG request payload with a
-  source-aware query such as "What does Kazusa need to know before deciding
-  whether to contact this user about X?"
-- Reuse RAG2's existing slot, dispatcher, helper-agent, continuation, and
-  finalizer contracts.
-- Keep RAG bounded. The existing RAG continuation cap and web-search retry caps
-  are the model for any wider self-cognition loop budget.
-- Treat retrieved facts as evidence for cognition, not as actions by
-  themselves.
-
-Example:
-
-```text
-Self-cognition topic:
-"He mentioned a local concert might be tonight. Should I ask him about it?"
-
-RAG request:
-Live-context: answer current schedule/status for the named concert or venue.
-Recall: find recent conversation evidence that the user wanted reminders or
-follow-up about this event.
-
-RAG result:
-The event is tonight at 19:30; prior conversation suggests the user was
-interested but did not make a clear plan.
-
-Next consumer:
-Run shared cognition again with the RAG result before deciding whether to send,
-hold, or only update conversation progress.
-```
-
-### Consumer 3: Conversation Progress
-
-Purpose: improve short-term flow for the next live chat without durable
-personality or user-memory writes.
-
-Current owner:
-
-- `src/kazusa_ai_chatbot/conversation_progress/`
-
-Required improvement:
-
-- Make `conversation_progress` source-aware. It currently records completed
-  responsive turns and assumes `final_dialog` exists. It should accept an
-  `idle_self_cognition` maintenance source without pretending a new user turn
-  occurred.
-
-Allowed fields for hourly idle updates:
-
-- `current_thread`
-- `topic_momentum`
-- `episode_phase`
-- `open_loops`
-- `resolved_threads`
-- `avoid_reopening`
-- `emotional_trajectory`
-- `next_affordances`
-- `progression_guidance`
-
-Forbidden fields for hourly idle updates:
-
-- `assistant_moves`, unless a real assistant message was sent;
-- `last_user_input` as if a new user message occurred;
-- durable facts, promises, user-memory units, or character profile fields.
-
-Example:
-
-```text
-Input:
-Kazusa sees the previous chat has an old "next week don't be late" tease.
-
-Self-cognition conclusion:
-Keep it as a soft open loop for the next relevant turn, but suppress repeated
-proactive nagging.
-
-Conversation progress update:
-open_loops: ["下周接送/别迟到的玩笑约定仍可自然承接"]
-avoid_reopening: ["如果用户没有提到下周，不要每次主动催迟到"]
-progression_guidance: "下次用户接续时用轻微调侃承接，不要重启压力。"
-```
-
-### Consumer 4: Proactive Preview / Outbox
-
-Purpose: let Kazusa form a candidate outward message from cognition and keep
-that action inspectable until it is handed to dispatcher/scheduler for real
-delivery.
-
-Current owner:
-
-- `src/kazusa_ai_chatbot/proactive_output/`
-
-Required improvement:
-
-- Move from contract/test-only records to production persistence and runtime
-  outbox handling.
-- Keep `ProactivePreviewRecord` as the candidate boundary.
-- Remove reliance on the Stage 10 permission-check helper as the outbound
-  decision point. Future implementation may reuse only structural checks that
-  remain useful, such as target shape, adapter availability, blank text
-  rejection, and idempotency.
-
-Valid proactive preview:
-
-```text
-trigger_source: internal_thought or future self_cognition source
-output_mode: preview
-visibility: model_visible
-target: exact platform/channel/user chosen by cognition and structurally
-validated by runtime
-preview_text: public message candidate
-```
-
-Example send candidate:
-
-```text
-Self-cognition:
-"I should remind him before leaving."
-
-Preview text:
-"喂，到点了。别磨蹭啦，钥匙和外套都带上。"
-
-Execution checks:
-target is resolved, adapter is available, idempotency is new, preview text is
-not blank, and cadence limits do not classify the send as spammy repetition.
-
-Outbox:
-ready for dispatcher/scheduler handoff.
-```
-
-Example held candidate:
-
-```text
-Self-cognition:
-"I kind of want to ask why he has been quiet."
-
-Preview text:
-"你今天怎么这么安静？"
-
-Execution checks:
-This may still be held or skipped if the target is unresolved, adapter is
-unavailable, the outbox already has an equivalent pending send, or cadence
-limits say the contact would be repetitive.
-
-Outbox:
-held or dry_run only. No scheduler event. No adapter send.
-```
-
-### Consumer 5: Dispatcher And Scheduler
-
-Purpose: execute cognition-selected real-world interaction through the existing
-`send_message` tool path.
-
-Current owners:
-
-- `src/kazusa_ai_chatbot/dispatcher/`
-- `src/kazusa_ai_chatbot/scheduler.py`
-- runtime adapter registry in `src/kazusa_ai_chatbot/service.py`
-
-Required improvement:
-
-- Add a proactive-output handoff into the existing dispatcher path.
-- Do not call adapters directly from self-cognition or `proactive_output`.
-- Convert a ready outbox item into a validated `RawToolCall` for
-  `send_message`, then let `TaskDispatcher` and `scheduler` do the normal
-  validation, deduplication, persistence, and delivery.
-
-Example:
-
-```text
-Approved outbox:
-platform: qq
-platform_channel_id: 673225019
-channel_type: private
-preview_text: "喂，到点了。别磨蹭啦，钥匙和外套都带上。"
-
-RawToolCall:
-tool: send_message
-args:
-  target_platform: qq
-  target_channel: 673225019
-  target_channel_type: private
-  text: "喂，到点了。别磨蹭啦，钥匙和外套都带上。"
-  execute_at: current UTC or future UTC
-
-Execution:
-TaskDispatcher -> scheduler -> registered QQ adapter.
-```
-
-### Consumer 6: Source-Aware Consolidation
-
-Purpose: close the loop after idle cognition, retrieval, and possible action
-planning without pretending the source was a user message.
-
-Current owner:
-
-- `src/kazusa_ai_chatbot/nodes/persona_supervisor2_consolidator.py`
-- `src/kazusa_ai_chatbot/nodes/persona_supervisor2_consolidator_origin.py`
-- `src/kazusa_ai_chatbot/nodes/persona_supervisor2_consolidator_origin_policy.py`
-- `src/kazusa_ai_chatbot/nodes/persona_supervisor2_consolidator_persistence.py`
-
-Required improvement:
-
-- Extend consolidation origin construction beyond
-  `build_user_message_consolidation_origin(...)`.
-- Add a self-cognition origin that carries source episode id, target scope,
-  source topic, RAG evidence lineage, action/outbox ids, and loop iteration id.
-- Make per-write origin policy source-aware. Self-cognition consolidation may
-  update conversation progress, action audit/outbox state, and slower growth
-  evidence. It must not write user-authored facts unless the evidence really
-  comes from user messages or existing user memory.
-- Let consolidation schedule outbound work through the existing dispatcher path
-  only after cognition produced an action request and mechanical execution
-  checks passed.
-
-Example:
-
-```text
-Self-cognition result:
-"The event is tonight; I should send one light nudge, then stop."
-
-Consolidation writes:
-outbox/action audit: ready send_message candidate
-conversation_progress: "concert topic handled by proactive nudge"
-growth evidence: none
-user_memory_units: none
-
-Dispatcher:
-send_message is scheduled through the existing TaskDispatcher.
-```
-
-### Consumer 7: Reflection And Character Growth
-
-Purpose: slower pattern learning, not hourly outreach.
-
-Current owners:
-
-- `src/kazusa_ai_chatbot/reflection_cycle/`
-- `src/kazusa_ai_chatbot/memory_evolution/`
-- active draft:
-  `development_plans/active/short_term/global_character_growth_from_reflection_plan.md`
-
-Rule:
-
-- Hourly self-cognition should not directly mutate personality.
-- Repeated, audited self-cognition outcomes may become evidence for daily or
-  slower reflection/growth if a future plan defines the promotion gate.
-
-Example:
-
-```text
-Repeated hourly evidence:
-Kazusa often chooses playful accountability after the user makes soft promises.
-
-Invalid hourly write:
-"Kazusa's personality changed to nagging."
-
-Valid slower candidate:
-"In close relationships, Kazusa increasingly uses light teasing to preserve
-follow-through without sounding formal."
-```
-
-### Consumer 8: Runtime Agency Controls
-
-Purpose: keep autonomous contact bounded and inspectable without adding a
-separate proactive permission policy.
-
-Current related owner:
-
-- `src/kazusa_ai_chatbot/proactive_output/` defines preview and outbox record
-  shapes but has no production storage or runtime handoff yet.
-
-Required improvement:
-
-- Store proactive preview and outbox records with target scope, trigger source,
-  output mode, generated text, idempotency key, cadence metadata, status, and
-  audit reason.
-- Provide runtime controls that are mechanical rather than semantic:
-  per-target cooldown, global rate limit, duplicate suppression, adapter
-  availability, operator kill switch, and audit visibility.
-- Let cognition decide whether a message should be sent. Deterministic code
-  must not reinterpret the social reason with keyword rules.
-
-Example runtime controls:
-
-```text
-Allowed by mechanics:
-Kazusa decided to send one short check-in; there is no equivalent pending
-outbox item and the target has not been contacted by autonomy in the current
-cooldown window.
-
-Held by mechanics:
-Kazusa generated three similar check-ins within the cooldown window, so only
-the first can be scheduled and the rest are recorded as duplicate/cadence-held.
-```
-
-## Target Architecture
-
-```text
-idle scheduler / reflection worker cadence
-  -> self-cognition topic selector
-  -> source packet builder
-  -> RAG2 supervisor when the topic needs evidence
-  -> CognitiveEpisode(trigger_source=internal_thought or self_cognition,
-                      output_mode=think_only|preview|scheduled_action_request)
-  -> existing call_cognition_subgraph
-  -> cognition output
-  -> source-aware consolidation
-  -> source-aware consumer routing:
-       audit/evaluation
-       conversation_progress idle maintenance
-       proactive preview/outbox
-       dispatcher/scheduler handoff
-       slower reflection/growth evidence
-       optional next self-cognition topic while budget remains
-```
-
-The route is source-aware and output-mode-aware. It is not keyword-based.
-
-The loop form is bounded:
-
-```text
-loop_state = topic queue + evidence + cognition output + consolidation result
-
-for each idle tick:
-  pick at most N topics
-  for each topic:
-    run RAG only if cognition or topic selection needs evidence
-    run shared cognition once
-    run source-aware consolidation once
-    enqueue at most M follow-up topics
-  stop on budget, no follow-up, active live chat, or duplicate/cadence hold
-```
-
-The loop is not recursive free association. It is a small agenda loop using
-the existing RAG, cognition, consolidation, dispatcher, scheduler, and audit
-owners.
-
-## Output Modes
-
-### `think_only`
-
-Use when self-cognition only changes private interpretation or audit.
-
-Allowed consumers:
-
-- audit;
-- conversation progress;
-- slower reflection/growth evidence.
-
-Forbidden consumers:
-
-- proactive outbox;
-- dispatcher;
-- scheduler;
-- adapter send.
-
-### `preview`
-
-Use when self-cognition proposes public text that may become a real outbound
-message.
-
-Allowed consumers:
-
-- proactive preview/outbox;
-- mechanical execution validation;
-- optional review UI in early rollout;
-- dispatcher only after the outbox is `ready`.
-
-Forbidden consumers:
-
-- direct adapter send;
-- normal `/chat` `final_dialog` response;
-- user memory persistence as if it were user-authored evidence.
-
-### `scheduled_action_request`
-
-Use when self-cognition proposes a future tool action rather than immediate
-text.
-
-Allowed consumers:
-
-- mechanical execution validation;
-- dispatcher;
-- scheduler.
-
-Forbidden consumers:
-
-- direct scheduler insert from cognition;
-- direct adapter send;
-- new tool execution path outside dispatcher.
-
-## Path To Get There
-
-## Proof Of Concept Design
-
-The next experiment should stay under
-`experiments/self_cognition_loop_poc/` and remain non-writing. It should prove
-the loop shape before production changes:
-
-```text
-agenda topic
--> production RAG2 when evidence is needed
--> production L1/L2/L3 cognition
--> source-aware consolidation candidate artifact
--> action/outbox candidate artifact
--> optional next agenda topic while budget remains
-```
-
-The POC should reuse production code where the production contract already
-exists:
-
-- RAG: call `persona_supervisor2_rag_supervisor2.call_rag_supervisor(...)`.
-- Cognition: call `persona_supervisor2_cognition.call_cognition_subgraph(...)`.
-- Conversation progress: read existing exported progress and emit a candidate
-  update artifact only.
-- Dispatcher handoff: emit a `send_message`-shaped candidate only. Do not call
-  `TaskDispatcher.dispatch(...)`.
-
-The POC must not call production consolidation writes yet. Current
-consolidation origin construction requires `trigger_source=user_message`, so
-the experiment should emit a source-aware consolidation candidate artifact
-instead of invoking `call_consolidation_subgraph(...)`. A later production plan
-must add a self-cognition origin and per-write policy before real
-consolidation is enabled.
-
-POC artifacts:
-
-- `self_cognition_agenda.json`
-- `self_cognition_rag_request.json`
-- `self_cognition_rag_output.json`
-- `self_cognition_cognition_input_after_rag.json`
-- `self_cognition_cognition_output.json`
-- `self_cognition_consolidation_candidate.json`
-- `self_cognition_action_candidate.json`
-- `self_cognition_loop_trace.md`
-
-POC example:
-
-```text
-Topic:
-Should the character follow up on the user's possible concert plan?
-
-RAG2:
-Recall recent conversation evidence and use live context or web search if the
-event time/status is unknown.
-
-Cognition:
-Decide whether to send a light nudge, stay silent, or enqueue a follow-up
-topic.
-
-Consolidation candidate:
-conversation_progress: mark the concert thread as nudged or cooled down.
-action_audit: record the action candidate or held reason.
-user_memory_units: no write unless evidence comes from actual user-authored
-messages or existing durable user memory.
-
-Action candidate:
-outbox-shaped preview plus dispatcher-shaped `send_message` candidate if
-cognition chooses contact.
-```
-
-### Stage 1: Broaden Internal Thought Into Idle Cognition Runner
-
-Improve the existing `internal_thought_cognition.py` owner.
-
-Required outcome:
-
-- It can run a source-aware idle cognition pass over a real target scope.
-- It returns actual cognition output values, not only output keys.
-- It supports `think_only` and `preview` as real run modes.
-- It remains one bounded cognition call per run.
-
-No new production module is needed.
-
-### Stage 2: Add Idle Agenda Loop On Existing Runtime Owners
-
-Improve the existing scheduler/reflection-worker/internal-thought ownership
-instead of adding a separate self-cognition service.
-
-Required outcome:
-
-- Represent an idle run as a bounded agenda: selected target scope, topic,
-  evidence state, cognition output, consolidation result, and optional follow-up
-  topics.
-- Stop on budget, live-chat activity, duplicate topic, repeated held action, or
-  no follow-up.
-- Persist enough audit state to resume or inspect the loop without replaying
-  side effects.
-- Keep the default loop tiny: one or two topics per idle tick until real traces
-  justify more.
-
-### Stage 3: Reuse Full RAG2 Inside Idle Self-Cognition
-
-Improve the existing RAG2 owners.
-
-Required outcome:
-
-- Let self-cognition send source-aware RAG queries through the existing RAG2
-  initializer, dispatcher, helper agents, continuation evaluator, and finalizer.
-- Allow live context and web search when the self-cognition topic needs current
-  external facts.
-- Carry RAG evidence lineage into the next cognition pass and consolidation
-  origin.
-- Preserve existing RAG caps; do not give idle self-cognition an unbounded
-  search budget.
-
-### Stage 4: Add Self-Cognition Prompt Variant
-
-Improve the existing cognition prompt-selection owner.
-
-Required outcome:
-
-- Add a source/prompt variant that frames the input as Kazusa privately
-  processing her own recent state, not as Kazusa reading a backend report.
-- Preserve the same L1/L2/L3 output schema.
-- Keep examples role-neutral; inject character name only through runtime data
-  if necessary.
-
-### Stage 5: Make Conversation Progress Idle-Maintainable
-
-Improve the existing `conversation_progress` owner.
-
-Required outcome:
-
-- Add a source-aware record/update contract for `idle_self_cognition`.
-- Preserve short-term scope by platform/channel/user.
-- Avoid incrementing visible conversation turn semantics for idle-only updates.
-- Project the updated state into future L3 cognition exactly through the
-  existing `conversation_progress` read path.
-
-### Stage 6: Make Consolidation Source-Aware For Self-Cognition
-
-Improve the existing consolidation owner.
-
-Required outcome:
-
-- Add self-cognition origin construction next to the existing user-message
-  origin construction.
-- Add per-write origin policy that allows only self-cognition-appropriate
-  writes.
-- Allow consolidation to consume cognition output, RAG result, action/outbox
-  state, and loop metadata.
-- Prevent self-cognition from writing user facts, preferences, or promises
-  unless the supporting evidence originates from actual user-authored messages
-  or existing durable user memory.
-
-### Stage 7: Productionize Proactive Output Storage
-
-Improve the existing `proactive_output` owner.
-
-Required outcome:
-
-- Persist preview records, outbox records, mechanical execution decisions, and
-  audit events.
-- Keep only deterministic structural checks from Stage 10 that match the
-  agency-first design.
-- Add idempotency that survives process restarts.
-- Keep all proactive candidates inspectable before execution.
-
-### Stage 8: Render Proactive Preview Text Through Existing Voice Stack
-
-Improve the existing dialog/preview rendering boundary.
-
-Required outcome:
-
-- Use the character's dialog voice machinery to render public proactive
-  preview text from cognition output.
-- Do not return the preview as normal `/chat` `final_dialog`.
-- Do not save it as conversation history unless delivery actually succeeds and
-  a future plan defines the storage semantics.
-
-### Stage 9: Handoff Ready Outbox To Dispatcher/Scheduler
-
-Improve the existing dispatcher/scheduler handoff.
-
-Required outcome:
-
-- Ready proactive outbox records become `send_message` tool calls.
-- `TaskDispatcher` validates target platform, channel type, adapter
-  availability, execute time, tool visibility role, and duplicates.
-- `scheduler` persists and fires the task.
-- adapters deliver through the existing `MessagingAdapter` interface.
-
-### Stage 10: Add Runtime Agency Controls
-
-Improve the existing proactive output and runtime controls.
-
-Required outcome:
-
-- Per-target cooldowns, global rate limits, idempotency, off-switches, and
-  audit visibility.
-- Reviewable outbox mode for early rollout, with auto-send as a later runtime
-  mode once traces show the loop behaves well.
-- No semantic permission policy. Cognition owns the social decision to send;
-  deterministic code owns execution mechanics.
-
-### Stage 11: Feed Slower Growth Only Through Reflection/Memory Evolution
-
-Improve the existing reflection/growth owners.
-
-Required outcome:
-
-- Self-cognition artifacts may become evidence for daily or slower growth.
-- Hourly runs do not directly mutate stable character state.
-- Growth projection remains compact, source-detail-free, and reversible.
-
-## Examples
-
-### Example A: No-Action Private Thought
-
-```text
-Recent state:
-User and Kazusa ended a playful exchange cleanly.
-
-Self-cognition:
-"The thread is settled. Keep the warm teasing tone available, but do not reopen
-the topic unless the user brings it back."
-
-Consumers:
-audit: write run record
-conversation_progress: update avoid_reopening and progression_guidance
-proactive_output: none
-dispatcher/scheduler: none
-```
-
-### Example B: Autonomous Reminder
-
-```text
-Recent state:
-Kazusa privately recognizes that a planned departure reminder is due.
-
-Self-cognition:
-"This is the promised reminder moment."
-
-Preview:
-"喂，到点了。别磨蹭啦，钥匙和外套都带上。"
-
-Consumers:
-audit: write run record
-proactive_output: structural and cadence checks pass, outbox ready
-dispatcher/scheduler: schedule send_message
-conversation_progress: record that the reminder was attempted only after send
-```
-
-### Example C: Desire Held By Cadence
-
-```text
-Recent state:
-User has been quiet. Kazusa privately wants to check in.
-
-Self-cognition:
-"I want to ask, but this would be the third similar check-in in the cooldown
-window."
-
-Consumers:
-audit: write held candidate
-proactive_output: cadence-held duplicate/check-in
-conversation_progress: optional note not to infer abandonment
-dispatcher/scheduler: none
-```
-
-### Example D: Topic-Triggered Research And Follow-Up
-
-```text
-Recent state:
-The user previously mentioned wanting to go to a concert but never confirmed
-the time. Kazusa is idle and the topic remains salient.
-
-Loop iteration 1:
-self-cognition topic: "Should I follow up about the concert?"
-RAG2:
-  Recall: retrieve recent conversation evidence about the concert.
-  Live-context: check current public schedule/status for the concert or venue.
-
-RAG result:
-The event appears to start tonight at 19:30. The user showed interest but did
-not explicitly ask for a reminder.
-
-Loop iteration 2:
-shared cognition decides: "A light nudge is useful, but only send one and do
-not keep pushing."
-
-Consolidation:
-outbox/action audit: one ready send_message candidate
-conversation_progress: mark the concert thread as proactively nudged
-user_memory_units: no new user fact
-growth evidence: no immediate personality write
-
-Dispatcher/scheduler:
-send_message through the existing `send_message` tool.
-
-Possible message:
-"喂，刚想起来你之前说的那个演出好像是今晚。要是真打算去，就别拖到临出门才手忙脚乱哦。"
-```
-
-### Example E: Slower Growth Evidence
-
-```text
-Repeated evidence:
-Across many interactions, playful accountability helps this relationship
-continue without pressure.
-
-Hourly action:
-No personality write.
-
-Daily/slower candidate:
-"Kazusa can preserve closeness by using light teasing as a low-pressure
-follow-through cue in trusted relationships."
-
-Consumer:
-reflection/memory evolution only after promotion gates.
-```
-
-## Mandatory Rules For Future Implementation
-
-- Do not create a standalone self-cognition LLM path.
-- Do not create a new proactive send module.
-- Do not send directly from self-cognition, dialog, or proactive output.
-- Do not add a separate semantic proactive permission policy. Cognition owns
-  the social decision to send.
-- Do not let deterministic code reinterpret mood, relationship score,
-  `logical_stance`, `character_intent`, or natural-language keywords into a
-  different social decision.
-- Do not build a separate self-cognition retrieval stack. Use existing RAG2
-  initializer, dispatcher, helper agents, continuation evaluator, and finalizer.
-- Do not bypass consolidation origin policy. Add a self-cognition origin and
-  per-write rules before enabling consolidation writes from idle loops.
-- Do not route self-generated thought into user memory as user evidence.
-- Do not route self-cognition preview text into normal `/chat` response output.
-- Do not add LLM calls to the live `/chat` response path.
-- Do not run unbounded idle loops. Idle self-cognition must have cadence,
-  target selection, caps, and backoff.
-- Do not let web search results become durable memory without source lineage
-  and source-aware consolidation.
-- Do not let an idle update overwrite fresher conversation progress or schedule
-  duplicate messages.
-- Do not bypass adapter availability, idempotency, cadence limits, or audit.
+Self-cognition is intended to become an idle agency loop, but this slice is not
+production autonomy. It adds a production module with no live scheduler,
+dispatcher, adapter, durable storage, or consolidation integration. Dry-run and
+smoke commands must use the module or `src/scripts/`; deleting `experiments/*`
+must not break the module, tests, smoke, or docs.
+
+Reference documents: `development_plans/reference/designs/self_cognition_reasoning_basis.md`,
+`development_plans/reference/designs/self_cognition_tracking_icd.md`, and
+`development_plans/reference/designs/self_cognition_loop_architecture.md`.
+The reasoning basis holds research and examples; this plan is the execution
+contract.
+
+## Mandatory Skills
+
+- `development-plan-writing`: plan changes and execution evidence.
+- `local-llm-architecture`: source-packet, RAG, cognition, or prompt-like work.
+- `no-prepost-user-input`: action selection, commitment interpretation, or send decision handling.
+- `py-style`: Python edits.
+- `test-style-and-execution`: test edits or runs.
+- `database-data-pull`: real chat/progress/memory/user exports for case files.
+- `cjk-safety`: Python files containing CJK prompt text or expected strings.
+
+## Mandatory Rules
+
+- After context compaction or major checklist sign-off, reread this entire plan
+  before continuing.
+- Before final completion, lifecycle status changes, merge, or sign-off, the
+  active agent must run the `Independent Code Review` gate and record the
+  result in `Execution Evidence`.
+- Use `venv\Scripts\python` for Python tests and scripts.
+- Do not read `.env`.
+- Modify production code only for the new `self_cognition` module, central
+  config constants, and tests named in `Change Surface`.
+- Do not write production database rows, scheduler rows, conversation history,
+  conversation progress, user memory, character state, reflection state, or
+  adapter output.
+- Do not call dispatcher, scheduler mutation, adapter send, production
+  consolidation persistence, or normal `/chat` service entrypoints.
+- Do not create a standalone self-cognition LLM path. The module must call the
+  existing cognition graph through the current shared cognition interface.
+- Do not build a separate retrieval stack. Use existing RAG2 interfaces when
+  a case needs retrieval.
+- Do not use hourly reflection, daily reflection, self-reflection promotion, or
+  promoted reflection artifacts as triggers. Reflection-derived state may only
+  be a modifier after a valid visible/actionable trigger exists.
+- Do not add a deterministic semantic proactive permission policy. Cognition
+  owns the social decision to send; deterministic code owns target shape,
+  idempotency, duplicate suppression, retry/backoff, budget, and audit.
+- Do not route raw self-cognition internal monologue into reflection, stable
+  memory, or production conversation progress.
+- Do not use `think_only` as the production answer for outward-capable
+  self-cognition. Dry-run/no-write behavior is represented by local artifacts
+  and explicit route records.
+- Keep CJK text in Python source safe per `cjk-safety`.
+
+## Must Do
+
+- Implement reusable self-cognition logic under
+  `src/kazusa_ai_chatbot/self_cognition/`.
+- Add only the minimal central config needed by this slice in
+  `src/kazusa_ai_chatbot/config.py`.
+- Add deterministic tests proving source framing, artifact shape, route
+  classification, no forced action on model silence, action-attempt
+  idempotency, and duplicate suppression.
+- Add or update the module README so it owns the canonical ICD and dry-run
+  command contract.
+- Preserve existing production RAG2 and cognition entrypoints as imported
+  engines only.
+- Produce all required local artifact types:
+  `self_cognition_trigger_record.json`,
+  `self_cognition_run_record.json`,
+  `self_cognition_rag_request.json` when RAG is used,
+  `self_cognition_rag_output.json` when RAG is used,
+  `self_cognition_cognition_input_after_rag.json`,
+  `self_cognition_cognition_output.json`,
+  `self_cognition_route_effect.json`,
+  `self_cognition_action_candidate.json` when an outward action is considered,
+  `self_cognition_action_attempt.json` when an outward action is considered,
+  and `self_cognition_loop_trace.md`.
+- Model these dry-run cases with exported or synthetic local inputs:
+  before-due commitment, past-due commitment, duplicate idle tick for the same
+  due occurrence, no-action/progress-maintenance case, noisy group rejection,
+  and bounded RAG follow-up case.
+- Move the canonical ICD content into
+  `src/kazusa_ai_chatbot/self_cognition/README.md`; leave the reference ICD as
+  a pointer or transition note.
 
 ## Deferred
 
-- New proactive MongoDB collections.
-- Multi-recipient proactive fanout.
-- Media proactive sends.
-- Cross-platform proactive target selection.
-- New web-search implementation outside RAG2.
-- Personality mutation from hourly self-cognition.
-- New tools beyond `send_message`.
-- New external orchestrator framework.
+- Do not create durable MongoDB collections for self-cognition tracking.
+- Do not create a separate `self_cognition_tracking` module; tracking is a
+  sub-area of `src/kazusa_ai_chatbot/self_cognition/`.
+- Do not wire the module into production dispatcher, scheduler, adapter,
+  conversation-history writes, conversation-progress writes, consolidation,
+  reflection, memory writes, or Cache2 mutation.
+- Do not add cross-platform proactive fanout, media sends, new tools beyond
+  `send_message`, or external orchestrator frameworks.
+- Do not mutate personality or stable character state from hourly
+  self-cognition.
+- Do not implement review UI, operator approval UI, or runtime auto-send mode.
 
-## Acceptance Criteria For This Draft
+## Cutover Policy
 
-This draft is useful when it:
+Overall strategy: compatible.
 
-- identifies all plausible consumers of self-cognition output;
-- maps each consumer to an existing owner in this repo;
-- explains why direct sends are forbidden;
-- applies industry patterns to the current architecture;
-- provides a staged path that improves existing modules rather than creating a
-  parallel subsystem;
-- includes examples of no-action, progress-only, autonomous outreach,
-  cadence-held outreach, topic-triggered RAG/web-search follow-up, and slower
-  growth.
+| Area | Policy | Instruction |
+|---|---|---|
+| Production runtime | compatible | Preserve existing behavior. Do not wire self-cognition into live `/chat`, scheduler, dispatcher, adapters, consolidation, progress, or reflection. |
+| Production module | bigbang | Put reusable self-cognition logic in `src/kazusa_ai_chatbot/self_cognition/`; do not depend on `experiments/*`. |
+| Central config | compatible | Add only the minimal `SELF_COGNITION_*` constants listed in `Configuration Contract`; no broad env surface or legacy aliases. |
+| Dry-run artifacts | bigbang | Replace the old artifact shape with the tracking-artifact shape listed in this plan. No compatibility shim for obsolete artifact names is required. |
+| Tests | bigbang | Update or add focused deterministic tests for config, tracking, route classification, and harness behavior. Keep existing relevant framing tests. |
+| ICD location | migration | Move the canonical ICD into `src/kazusa_ai_chatbot/self_cognition/README.md` during this plan and leave a pointer from the reference ICD. |
+
+## Cutover Policy Enforcement
+
+- The implementation agent must follow the selected policy for each area.
+- The agent must not choose a more conservative compatibility strategy by
+  default.
+- If an area is `bigbang`, rewrite obsolete experiment references instead of
+  preserving old artifact names.
+- If an area is `migration`, follow the exact migration phase listed in this
+  plan.
+- Any change to a cutover policy requires user approval before implementation.
+
+## Agent Autonomy Boundaries
+
+- The agent may choose local implementation mechanics only when they preserve
+  the contracts in this plan.
+- The agent must not introduce alternate production call paths, compatibility
+  layers, fallback paths, extra features, or unrelated cleanup.
+- The agent must search existing production code before adding helpers. Shared
+  self-cognition behavior belongs in the production module.
+- The agent must not create, import, or test against code under `experiments/`.
+- Any change outside `src/kazusa_ai_chatbot/self_cognition/`,
+  `src/kazusa_ai_chatbot/config.py`, `src/scripts/run_self_cognition_dry_run.py`,
+  `tests/test_self_cognition_*.py`, `tests/test_config.py`, this plan, and the
+  reference docs listed in `Change Surface` is forbidden unless the plan is
+  updated first.
+- If the plan and code disagree, preserve the plan intent and record the
+  discrepancy before changing behavior.
+- If a required instruction is impossible, stop and report the blocker instead
+  of inventing a substitute.
+
+## Target State
+
+After this plan is executed, `src/kazusa_ai_chatbot/self_cognition/` exposes a
+reusable dry-run self-cognition core. The module CLI/script can run selected
+idle self-cognition case files and produce local tracking artifacts that show:
+
+- why the idle run started;
+- what visible evidence and semantic due/actionability state were used;
+- whether RAG2 was called and what bounded evidence it returned;
+- what shared cognition input/output was used;
+- which route was selected;
+- which action attempt or outbox candidate was created, held, or suppressed;
+- that no production handoff, production write, scheduler insert, dispatcher
+  dispatch, or adapter send happened.
+
+The target state is a production-owned dry-run module. Production behavior
+remains unchanged because no live worker, dispatcher, scheduler, adapter, or
+persistence integration is wired.
+
+## Design Decisions
+
+| Topic | Decision | Rationale |
+|---|---|---|
+| Executable scope | Implement the reusable dry-run core in `src/kazusa_ai_chatbot/self_cognition/`; use `src/scripts/run_self_cognition_dry_run.py` for manual smoke. | Production logic and smoke commands must survive deletion of `experiments/*`. |
+| Reasoning engine | Reuse existing RAG2 and L1/L2/L3 cognition interfaces. | Self-cognition must exercise the current character cognition stack. |
+| Storage | Write local dry-run artifacts only. | Durable storage and production projections require separate approved plans. |
+| Trigger source | Use visible/actionable dialog, commitments, progress, pending action state, or bounded follow-up topics. | Reflection artifacts are modifiers only, not triggers. |
+| Duplicate suppression | Use action-attempt idempotency based on source identity, due time, target scope, and action kind. | Generated text is not a stable identity. |
+| Outbound execution | Emit handoff-shaped candidates only. | Real dispatcher/scheduler handoff is deferred until tracking quality is proven. |
+| Config surface | Add only a small set of `SELF_COGNITION_*` constants to `config.py`; use named module constants for fixed internal limits. | Avoid magic numbers without turning every internal value into an env setting. |
+| ICD placement | Move the canonical ICD into `src/kazusa_ai_chatbot/self_cognition/README.md`. | Runtime module contracts should live with the module once it exists. |
+
+## Configuration Contract
+
+Follow the current `src/kazusa_ai_chatbot/config.py` pattern: module-level
+constants, environment-variable parsing, fail-fast validation, and focused
+`tests/test_config.py` coverage. Do not introduce a new settings framework.
+
+Add only these central config items:
+
+| Constant | Env var | Default | Validation | Purpose |
+|---|---|---|---|---|
+| `SELF_COGNITION_ENABLED` | `SELF_COGNITION_ENABLED` | `false` | bool string parse | Prevent accidental live activation when a future worker is wired. This plan does not wire the worker. |
+| `SELF_COGNITION_SOURCE_PACKET_CHAR_LIMIT` | same | `16000` | positive int | Max source packet text passed into cognition. |
+| `SELF_COGNITION_RAG_EVIDENCE_CHAR_LIMIT` | same | `16000` | positive int | Max RAG evidence text included in cognition. |
+
+Add these bool trigger flags with default `true`: `SELF_COGNITION_TRIGGER_ACTIVE_COMMITMENT_ENABLED`, `SELF_COGNITION_TRIGGER_CONVERSATION_PROGRESS_ENABLED`, `SELF_COGNITION_TRIGGER_RECENT_DIRECT_DIALOG_ENABLED`, `SELF_COGNITION_TRIGGER_PENDING_OUTBOX_ENABLED`, `SELF_COGNITION_TRIGGER_BOUNDED_TOPIC_FOLLOWUP_ENABLED`, and `SELF_COGNITION_TRIGGER_GROUP_CHAT_REVIEW_ENABLED`.
+
+Do not add config for route names, artifact filenames, case names, action
+statuses, idempotency identity, RAG supervisor call count, cognition call
+count, topic limit, or production handoff. Those are fixed contracts or named
+module constants, not operator settings.
+
+Trigger flags control source collector eligibility only. They must not override
+cognition's social decision to send, hold, search, or stay silent. Do not add a
+reflection trigger flag; promoted reflection remains a modifier only after
+another valid trigger exists.
+
+## Contracts And Data Shapes
+
+Artifacts are local dry-run files produced by the production module or dry-run
+harness. They are not production database schemas.
+
+### Public Module Interface
+
+Implement these functions under `kazusa_ai_chatbot.self_cognition`. Existing
+code may use private helpers, but these public functions must exist and tests
+must target them.
+
+- `tracking.build_idempotency_key(source_kind, source_id, due_at, target_scope, action_kind) -> str`
+  - Build a stable key from source identity, due time, normalized target
+    scope, and action kind.
+  - Do not include generated message text.
+- `tracking.build_trigger_record(case) -> dict`
+  - Return the `self_cognition_trigger_record.json` shape.
+- `tracking.build_run_record(case, trigger_record, selected_route, budget) -> dict`
+  - Return the `self_cognition_run_record.json` shape.
+- `tracking.build_route_effect(run_record, route, consumer, effect_summary, next_topic=None) -> dict`
+  - Return the `self_cognition_route_effect.json` shape with
+    `production_write=False`.
+- `tracking.classify_route(case, cognition_output, action_attempt=None) -> str`
+  - Derive the selected route from case metadata, cognition output, and optional
+    action-attempt state.
+  - Do not force `action_candidate` merely because a commitment is past due.
+    If cognition output does not select outward contact, return the silent,
+    audit, or progress route indicated by cognition/case state.
+  - If cognition selects outward contact and `action_attempt.status` is
+    `duplicate_suppressed`, return `action_candidate` while leaving candidate
+    creation suppressed.
+- `tracking.build_action_attempt(case, trigger_record, existing_attempts) -> dict`
+  - Return `candidate`, `held`, `duplicate_suppressed`, or
+    `closed_no_action`.
+  - Use existing local attempts only; do not query production storage.
+- `tracking.build_action_candidate(case, action_attempt, text) -> dict | None`
+  - Return a `send_message`-shaped candidate only for a non-duplicate outward
+    action attempt.
+  - Always set `production_handoff=False`.
+- `runner.run_self_cognition_case(case, output_dir, rag_client=None, cognition_client=None) -> dict`
+  - Orchestrate one dry-run case and return artifact names to paths.
+  - Optional clients are test seams; production defaults must call existing
+    RAG2 and shared cognition interfaces.
+- `artifacts.write_tracking_artifacts(output_dir, artifacts) -> dict[str, str]`
+  - Write only files under `output_dir`.
+  - Return artifact names to paths.
+
+`self_cognition_trigger_record.json`:
+
+```python
+{
+    "trigger_id": str,
+    "trigger_kind": str,
+    "target_scope": {
+        "platform": str,
+        "platform_channel_id": str,
+        "channel_type": str,
+        "user_id": str | None,
+    },
+    "source_refs": list[dict],
+    "semantic_due_state": str | None,
+    "actionability": str,
+    "status": str,
+}
+```
+
+`self_cognition_run_record.json`:
+
+```python
+{
+    "run_id": str,
+    "trigger_id": str,
+    "idle_timestamp": str,
+    "output_mode": "silent" | "preview" | "scheduled_action_request",
+    "selected_route": str,
+    "status": str,
+    "evidence_refs": list[dict],
+    "budget": {
+        "rag_calls": int,
+        "cognition_calls": int,
+        "topic_limit": int,
+    },
+}
+```
+
+`self_cognition_route_effect.json`:
+
+```python
+{
+    "run_id": str,
+    "route": str,
+    "consumer": str,
+    "production_write": False,
+    "effect_summary": str,
+    "next_topic": dict | None,
+}
+```
+
+`self_cognition_action_attempt.json`:
+
+```python
+{
+    "attempt_id": str,
+    "run_id": str,
+    "trigger_id": str,
+    "source_kind": str,
+    "source_id": str,
+    "target_scope": dict,
+    "action_kind": str,
+    "due_at": str | None,
+    "idempotency_key": str,
+    "status": (
+        "candidate"
+        | "held"
+        | "duplicate_suppressed"
+        | "closed_no_action"
+    ),
+}
+```
+
+`self_cognition_action_candidate.json`:
+
+```python
+{
+    "attempt_id": str,
+    "target_platform": str,
+    "target_channel": str,
+    "target_channel_type": str,
+    "text": str,
+    "execute_at": str | None,
+    "dispatch_shape": "send_message",
+    "production_handoff": False,
+}
+```
+
+Forbidden compatibility shapes:
+
+- Do not preserve `self_cognition_consolidation_candidate.json` as the primary
+  route artifact. Use `self_cognition_route_effect.json`.
+- Do not represent an outward candidate only as free text. It must be tied to
+  an action attempt.
+- Do not infer duplicate identity from generated message text.
+
+### Dry-Run Case Contract
+
+Implement these case names exactly in dry-run case files and tests. The module
+must not ship built-in synthetic fixtures for these cases; callers provide a
+case file.
+
+| Case | Trigger kind | Due state | Expected primary route | Required artifacts |
+|---|---|---|---|---|
+| `commitment_before_due` | `active_commitment_due_check` | `future_due` | `progress_maintenance` | trigger, run, cognition input/output, route effect, trace |
+| `commitment_past_due` | `active_commitment_due_check` | `past_due` | `action_candidate` only if cognition selects outward contact; otherwise record the silent/audit/progress route as an observation | trigger, run, cognition input/output, route effect, action attempt and action candidate only when contact is selected, trace |
+| `commitment_duplicate_tick` | `active_commitment_due_check` | `past_due` | `action_candidate` with duplicate suppression only if cognition selects outward contact; otherwise record the silent/audit/progress route as an observation | trigger, run, route effect, synthetic prior attempt fixture, action attempt when contact is selected, trace; no new action candidate |
+| `private_no_action` | `recent_direct_dialog_review` | none | `audit_only` or `progress_maintenance` | trigger, run, cognition input/output, route effect, trace |
+| `group_noise_rejected` | `group_chat_trigger_review` | none | `silent_no_write` or `audit_only` | trigger, run, route effect, trace; no RAG, no action attempt |
+| `topic_rag_followup` | `bounded_followup_topic` | none | `action_candidate`, `progress_maintenance`, or `audit_only` after RAG | trigger, run, RAG request/output, cognition input/output, route effect, trace |
+
+Dry-run command contract:
+
+```text
+venv\Scripts\python -m scripts.run_self_cognition_dry_run --case-file <path> --output-dir <path>
+```
+
+The command must reject missing files, malformed case files, and unknown case
+names with a nonzero exit and a clear message. It must never default to a
+production write mode.
+
+The `commitment_duplicate_tick` fixture must supply a synthetic prior
+`candidate` or `sent` attempt for the same idempotency key. The command must
+not depend on a previous dry-run or production storage to create duplicate
+state.
+
+## LLM Call And Context Budget
+
+- Production live `/chat` call count: unchanged.
+- Deterministic tests: zero LLM calls.
+- Dry-run single case without RAG: at most one background cognition call.
+- Dry-run single case with RAG: at most one background RAG2 supervisor invocation
+  and one background cognition call. Internal RAG2 helper-agent calls or
+  continuation iterations are governed by existing RAG2 caps and do not count
+  as additional self-cognition supervisor invocations.
+- Dry-run multi-case commands must execute cases sequentially and write a separate
+  output directory per case.
+- Real LLM verification must run one case at a time and inspect output before
+  running the next case.
+- Default context cap: 50k tokens.
+- Source packet budget: use `SELF_COGNITION_SOURCE_PACKET_CHAR_LIMIT`.
+- RAG result budget: use `SELF_COGNITION_RAG_EVIDENCE_CHAR_LIMIT`.
+- Drop policy: if exported evidence exceeds budget, keep source refs and the
+  highest-signal bounded excerpts; do not pass raw unbounded histories to the
+  LLM.
+- No retry loops are authorized for ordinary cognition or RAG failures in this
+  dry-run slice. A failed LLM/RAG call records a failed run artifact and stops
+  that case.
+
+## Change Surface
+
+### Modify
+
+- `src/kazusa_ai_chatbot/config.py`
+  - Add only the `SELF_COGNITION_*` constants in `Configuration Contract`.
+- `src/kazusa_ai_chatbot/self_cognition/__init__.py`
+  - Export the public dry-run and tracking interfaces.
+- `src/kazusa_ai_chatbot/self_cognition/models.py`
+  - Add typed models and literal constants for trigger, run, route effect,
+    action attempt, action candidate, case metadata, routes, statuses, artifact
+    filenames, and fixed internal limits.
+- `src/kazusa_ai_chatbot/self_cognition/projection.py`
+  - Build source packets, semantic due-state labels, route-effect candidates,
+    and bounded evidence projections.
+- `src/kazusa_ai_chatbot/self_cognition/tracking.py`
+  - Own artifact construction, idempotency key construction, action-attempt
+    status transitions, route classification, and duplicate suppression.
+- `src/kazusa_ai_chatbot/self_cognition/artifacts.py`
+  - Write local dry-run artifacts under the requested output directory only.
+- `src/kazusa_ai_chatbot/self_cognition/runner.py`
+  - Orchestrate one dry-run case, write the required artifacts, call RAG2 only
+    when needed, call the shared cognition graph, and suppress duplicates using
+    local action-attempt state.
+- `src/kazusa_ai_chatbot/self_cognition/README.md`
+  - Own the canonical ICD, no-production-write contract, public interfaces,
+    commands, artifacts, and supported case schema.
+- `src/scripts/run_self_cognition_dry_run.py`
+  - Add a manual dry-run command with `--case-file` and `--output-dir`.
+- `tests/test_config.py`
+  - Add focused config coverage for the minimal self-cognition settings.
+- `tests/test_self_cognition_framing.py`
+  - Keep or update framing tests so the source packet does not bias toward
+    passive waiting.
+- `development_plans/reference/designs/self_cognition_tracking_icd.md`
+  - Convert it to a pointer or transition note after the module README owns
+    the canonical ICD.
+
+### Create
+
+- `tests/test_self_cognition_tracking.py`
+  - Cover tracking artifacts, idempotency, duplicate suppression, route
+    classification, and forbidden production handoff flags.
+- `tests/test_self_cognition_dry_run_cli.py`
+  - Cover the dry-run command's case-file loading, output directory behavior,
+    and rejection of unsupported case names.
+
+## Test Contract
+
+Add or preserve these exact deterministic tests. They must not call the LLM,
+RAG, database, scheduler, dispatcher, or adapters.
+
+Exact tests:
+
+- `tests/test_config.py`: `test_self_cognition_config_defaults_are_minimal`,
+  `test_self_cognition_char_limits_fail_fast_when_invalid`,
+  `test_self_cognition_trigger_flags_default_true_and_parse_false`.
+- `tests/test_self_cognition_framing.py`:
+  `test_self_cognition_framing_presents_agency_without_silence_bias`.
+- `tests/test_self_cognition_tracking.py`:
+  `test_build_idempotency_key_ignores_generated_text`,
+  `test_build_idempotency_key_changes_when_due_occurrence_changes`,
+  `test_classify_route_returns_action_candidate_when_cognition_selects_contact`,
+  `test_classify_route_does_not_force_action_for_past_due_silence`,
+  `test_before_due_commitment_writes_progress_route_without_action_candidate`,
+  `test_past_due_contact_decision_writes_action_attempt_and_candidate_without_handoff`,
+  `test_duplicate_contact_decision_suppresses_same_due_occurrence`,
+  `test_duplicate_tick_fixture_supplies_prior_attempt_state`,
+  `test_group_noise_rejected_without_rag_or_action`,
+  `test_artifact_writer_uses_expected_file_names`,
+  `test_dry_run_command_rejects_unknown_case_name`.
+
+### Keep
+
+- `experiments/**`
+  - Do not read, import, modify, or depend on this tree. It is planned for
+    removal after this plan.
+- `development_plans/reference/designs/self_cognition_reasoning_basis.md`
+  - Reference only unless execution discovers a factual correction.
+- `development_plans/reference/designs/self_cognition_loop_architecture.md`
+  - Historical reference only.
+
+## Implementation Order
+
+1. Load mandatory skills and reread this plan, the ICD, and the reasoning
+   basis.
+2. Inspect current files:
+   - `src/kazusa_ai_chatbot/config.py`
+   - `tests/test_config.py`
+   - `src/kazusa_ai_chatbot/reflection_cycle/cognition_dry_run.py`
+   - `src/scripts/run_reflection_cycle_readonly.py`
+   - existing `tests/test_self_cognition*.py` files, if any.
+3. Add or update the deterministic tests listed in `Test Contract`.
+4. Run:
+   `venv\Scripts\python -m pytest tests/test_config.py tests/test_self_cognition_framing.py tests/test_self_cognition_tracking.py tests/test_self_cognition_dry_run_cli.py -q`
+   - Expected before implementation: existing config tests may pass; new
+     self-cognition tests fail because the module, config constants, script, or
+     artifact writer contracts are missing.
+   - Record the result in `Execution Evidence`.
+5. Update `src/kazusa_ai_chatbot/config.py`.
+   - Add only the constants in `Configuration Contract`.
+   - Use existing parsing helpers; add helper code only if required for
+     fail-fast validation.
+6. Create `src/kazusa_ai_chatbot/self_cognition/`.
+   - Add `__init__.py`, `README.md`, `models.py`, `projection.py`,
+     `tracking.py`, `artifacts.py`, and `runner.py`.
+7. Update `src/kazusa_ai_chatbot/self_cognition/models.py`.
+   - Add literal constants for case names, route names, artifact filenames,
+     action-attempt statuses, and fixed internal limits.
+   - Add typed dictionaries only when tests or public functions use them.
+8. Update `src/kazusa_ai_chatbot/self_cognition/projection.py`.
+   - Add deterministic semantic labels for due state and group-noise
+     rejection.
+   - Pass semantic descriptors to cognition; do not pass raw noise metrics or
+     unbounded histories.
+9. Update `src/kazusa_ai_chatbot/self_cognition/tracking.py`,
+   `artifacts.py`, and `runner.py`.
+   - Build trigger, run, route effect, route classification, action attempt,
+     and action candidate artifacts through `tracking.py`.
+   - Write artifacts through `artifacts.write_tracking_artifacts(...)`.
+   - Ensure duplicate suppression runs before action candidate creation.
+   - Ensure `commitment_past_due` does not force action when cognition selects
+     silence.
+   - Ensure all action candidates have `production_handoff=False`.
+10. Create `src/scripts/run_self_cognition_dry_run.py`.
+   - Add `--case-file`.
+   - Add `--output-dir`.
+   - Reject missing files, malformed case files, and unknown case names before
+     creating output directories.
+11. Mandatory pause gate: run real-data dry-run integration trials.
+   - Use exported real data to create case files under
+     `test_artifacts/self_cognition_cases/`.
+   - Include at least one real active or expired promise case and one
+     no-action case; inspect cognition output, route effect, action attempt,
+     and message candidate.
+   - Stop and report artifacts before any future workflow-integration plan.
+12. Move the canonical ICD content into
+    `src/kazusa_ai_chatbot/self_cognition/README.md`.
+13. Update `development_plans/reference/designs/self_cognition_tracking_icd.md`
+    so it points to the module README as canonical.
+14. Remove old artifact-name references from production module code, tests,
+    script, and docs.
+15. Re-run focused deterministic tests.
+- They must pass before any dry-run smoke.
+16. Run static no-production-write, no-experiments-dependency, and
+    obsolete-artifact greps listed in
+    `Verification`.
+17. Run dry-run smoke cases one at a time only if local LLM/RAG prerequisites are
+    available. If unavailable, record the blocker and do not substitute
+    production calls or live sends.
+18. Run the independent code review gate.
+19. Record execution evidence and leave unfinished stages unchecked if handing
+    off.
+
+## Progress Checklist
+
+- [ ] Stage 1 - Contract tests added
+  - Covers steps 1-4. Files: `tests/test_config.py`,
+    `tests/test_self_cognition_framing.py`,
+    `tests/test_self_cognition_tracking.py`,
+    `tests/test_self_cognition_dry_run_cli.py`.
+  - Verify: run the focused pytest command in `Implementation Order` step 4.
+  - Evidence/sign-off: record baseline result in `Execution Evidence`.
+
+- [ ] Stage 2 - Production module implemented
+  - Covers steps 5-10. Files: `src/kazusa_ai_chatbot/config.py`,
+    `src/kazusa_ai_chatbot/self_cognition/**`,
+    `src/scripts/run_self_cognition_dry_run.py`.
+  - Verify: focused deterministic tests pass, including `classify_route`
+    contact and silence cases.
+  - Evidence/sign-off: record changed files and pytest output.
+
+- [ ] Stage 3 - Real-data dry-run integration pause
+  - Covers step 11.
+  - Verify: run at least one real promise case and one no-action case through
+    `src/scripts/run_self_cognition_dry_run.py`.
+  - Evidence/sign-off: record input files, outputs, candidate text if any, and
+    user review result before any future workflow-integration plan.
+
+- [ ] Stage 4 - Documentation and ICD relocation rule updated
+  - Covers steps 12-14. Files: `src/kazusa_ai_chatbot/self_cognition/README.md`,
+    `development_plans/reference/designs/self_cognition_tracking_icd.md`.
+  - Verify: `rg -n "canonical ICD|SC-TRACKING-ICD-001|kazusa_ai_chatbot.self_cognition" src/kazusa_ai_chatbot/self_cognition/README.md development_plans/reference/designs/self_cognition_tracking_icd.md`.
+  - Verify: `rg -n "self_cognition_consolidation_candidate" src/kazusa_ai_chatbot/self_cognition src/scripts tests` returns no matches; exit code 1 is acceptable.
+  - Verify: `rg -n "experiments" src/kazusa_ai_chatbot/self_cognition src/scripts tests/test_self_cognition*.py` returns no matches; exit code 1 is acceptable.
+  - Evidence/sign-off: record grep output and doc paths.
+
+- [ ] Stage 5 - Verification complete
+  - Covers steps 15-17.
+  - Verify: run every command in `Verification`.
+  - Evidence/sign-off: record command, exit code, and relevant output summary.
+
+- [ ] Stage 6 - Independent code review complete
+  - Covers step 18.
+  - Verify: run the `Independent Code Review` gate.
+  - Evidence/sign-off: record findings, fixes, commands rerun, residual risks,
+    and approval status.
+
+## Verification
+
+### Static Greps
+
+- Command:
+  `rg -n "TaskDispatcher|save_conversation|call_consolidation_subgraph|mark_scheduled_event|insert_user_memory_units|delete_many|update_many|adapter\\.send|dispatch\\(" src/kazusa_ai_chatbot/self_cognition src/scripts/run_self_cognition_dry_run.py -g "*.py"`
+  - Expected: no matches. Exit code 1 from `rg` is acceptable and means no
+    matches.
+- Command:
+  `rg -n "trigger_source=user_message|build_user_message_consolidation_origin|final_dialog" src/kazusa_ai_chatbot/self_cognition src/scripts/run_self_cognition_dry_run.py -g "*.py"`
+  - Expected: no matches. Exit code 1 from `rg` is acceptable.
+- Command:
+  `rg -n "canonical ICD|SC-TRACKING-ICD-001|kazusa_ai_chatbot.self_cognition" src/kazusa_ai_chatbot/self_cognition/README.md development_plans/reference/designs/self_cognition_tracking_icd.md`
+  - Expected: matches proving the module README owns the canonical ICD and the
+    reference document points to it.
+- Command:
+  `rg -n "experiments" src/kazusa_ai_chatbot/self_cognition src/scripts tests/test_self_cognition*.py`
+  - Expected: no matches. Exit code 1 from `rg` is acceptable.
+- Command:
+  `rg -n "self_cognition_consolidation_candidate" src/kazusa_ai_chatbot/self_cognition src/scripts tests`
+  - Expected: no matches. Exit code 1 from `rg` is acceptable. The active plan
+    may mention the obsolete filename only to forbid it; code, tests, and
+    module docs must not keep the old artifact name.
+
+### Deterministic Tests
+
+- Command:
+  `venv\Scripts\python -m pytest tests/test_config.py -q`
+  - Expected: pass.
+- Command:
+  `venv\Scripts\python -m pytest tests/test_self_cognition_framing.py -q`
+  - Expected: pass.
+- Command:
+  `venv\Scripts\python -m pytest tests/test_self_cognition_tracking.py tests/test_self_cognition_dry_run_cli.py -q`
+  - Expected: pass.
+
+### Dry-Run CLI Smoke
+
+Run only after deterministic tests pass.
+
+Before any future workflow integration, run exported real-data case files:
+minimum one active or expired promise case and one no-action case. Record input,
+cognition output, route effect, action attempt, and message candidate if any.
+Silence is acceptable if the artifacts explain the decision.
+
+- Command:
+  `venv\Scripts\python -m scripts.run_self_cognition_dry_run --case-file test_artifacts/self_cognition_cases/commitment_before_due.json --output-dir test_artifacts/self_cognition_dry_run/commitment_before_due`
+  - Expected: writes trigger, run, cognition input/output, route effect, loop
+    trace, and no action candidate.
+- Command:
+  `venv\Scripts\python -m scripts.run_self_cognition_dry_run --case-file test_artifacts/self_cognition_cases/commitment_past_due.json --output-dir test_artifacts/self_cognition_dry_run/commitment_past_due`
+  - Expected: if cognition selects outward contact, writes action attempt and
+    action candidate with `production_handoff=false`. If cognition selects
+    silence, writes the selected silent/audit/progress route as an observation;
+    this is not a smoke-test failure.
+- Command:
+  `venv\Scripts\python -m scripts.run_self_cognition_dry_run --case-file test_artifacts/self_cognition_cases/commitment_duplicate_tick.json --output-dir test_artifacts/self_cognition_dry_run/commitment_duplicate_tick`
+  - Expected: fixture includes a synthetic prior attempt for the same
+    idempotency key. If cognition selects outward contact, writes
+    duplicate-suppressed action attempt and no new send candidate. If cognition
+    selects silence, writes the selected silent/audit/progress route as an
+    observation; this is not a smoke-test failure.
+
+If local LLM, RAG, or exported data prerequisites are unavailable, record the
+blocker and do not substitute production calls or live sends.
+
+Deterministic tests prove the tracking, idempotency, duplicate-suppression, and
+artifact contracts. Dry-run smoke runs are behavioral observations of the current
+LLM/RAG framing; they do not prove that self-cognition will always produce
+useful agency or that a past-due commitment will always become a send
+candidate.
+
+## Independent Plan Review
+
+Audit status: completed during plan tightening. Inputs included the plan
+registry, plan-writing references, current plan, reasoning basis, ICD,
+`config.py`, and existing module README patterns.
+
+Findings fixed in this plan:
+
+- Split research basis from executable instructions.
+- Added mandatory executable-plan sections, public interfaces, exact tests,
+  case contract, verification, and evidence gates.
+- Moved the target from experiment-owned logic to
+  `src/kazusa_ai_chatbot/self_cognition/`.
+- Made `src/kazusa_ai_chatbot/self_cognition/README.md` the canonical ICD.
+- Added `tracking.classify_route(...)` as the tested route owner.
+- Made action-candidate smoke expectations conditional on cognition output.
+- Required synthetic prior attempt state for duplicate-tick case files.
+- Defined the RAG cap as one RAG2 supervisor invocation.
+- Added obsolete-artifact and no-`experiments/*` dependency greps.
+- Added per-trigger-source enablement flags, all enabled by default.
+- Added a mandatory real-data dry-run pause before any future workflow wiring.
+
+Approval status: approved for dry-run module execution. Placeholder scan,
+contract consistency, granularity, and scope-control self-review passed.
+
+## Independent Code Review
+
+Run this gate after all `Verification` commands pass and before final sign-off.
+Prefer a reviewer that did not implement the change. If no separate reviewer is
+available, the active agent must reread this plan, inspect the full diff from a
+fresh-review posture, and record that no separate reviewer was available.
+
+Review scope:
+
+- Project rules and style compliance for every changed Python, test, prompt,
+  documentation, and command artifact.
+- Code quality and design weaknesses, including ownership boundaries, hidden
+  fallback paths, compatibility shims, prompt/RAG payload leaks, persistence
+  risk, brittle fixtures, and avoidable blast radius.
+- Alignment with `Must Do`, `Deferred`, `Agent Autonomy Boundaries`, `Change
+  Surface`, exact contracts, implementation order, verification gates, and
+  acceptance criteria.
+- Regression and handoff quality, including focused tests, static checks,
+  execution evidence, next-stage handoff notes, and path-safe PowerShell
+  commands.
+
+Fix concrete findings directly only when the fix is inside the approved change
+surface or this review gate explicitly allows review-only fixture/documentation
+corrections. If a fix would cross the approved boundary or alter the contract,
+stop and update the plan or request approval before changing code.
+
+Record findings, fixes, commands rerun, residual risks, and approval status in
+`Execution Evidence`.
+
+## Acceptance Criteria
+
+This plan is complete when:
+
+- The production self-cognition module writes the required dry-run tracking
+  artifacts locally.
+- Deterministic tests prove source framing, route artifacts, action-attempt
+  idempotency, duplicate suppression, and route classification, including the
+  rule that a past-due commitment does not force action when cognition selects
+  silence.
+- Static greps show no production write, scheduler, dispatcher, adapter,
+  consolidation, or normal `/chat` path is called from self-cognition code.
+- Static greps show no dependency on `experiments/*` from the module, script,
+  or self-cognition tests.
+- Static greps show obsolete artifact names are removed from module code,
+  tests, script, and module docs.
+- The module README states the canonical ICD, no-production-write contract,
+  public interfaces, config surface, and supported case schema.
+- The reference ICD points to the module README as canonical after
+  implementation.
+- Stage 3 artifacts show one real promise case and one no-action case.
+- Execution evidence records focused tests, static greps, dry-run smoke status or
+  blocker, and independent code review result.
+- Dry-run smoke results are recorded as behavioral observations. A silence outcome
+  for `commitment_past_due` or `commitment_duplicate_tick` is not a failure if
+  deterministic tracking tests pass.
+- Production behavior is unchanged.
+
+## Risks
+
+| Risk | Mitigation | Verification |
+|---|---|---|
+| Dry-run module accidentally writes production state | Keep all writes local and grep for forbidden production write paths | Static greps and code review |
+| Dry-run module bypasses real cognition | Require existing cognition graph call and framing test | Focused tests and code review |
+| Duplicate expired commitment creates repeated sends | Add action-attempt idempotency and duplicate-suppression tests | Tracking tests and duplicate dry-run case |
+| LLM context grows unbounded | Enforce source packet and RAG result budgets | Tests or artifact inspection plus code review |
+| Accidental dependency on removable `experiments/*` | Forbid imports and add no-experiments grep | Static grep and code review |
+| Config surface grows too broad | Limit central config to approved constants and trigger flags | Config tests and code review |
+| Module quality is unproven before workflow wiring | Pause for real-data dry-run trial | Stage 3 evidence and user review |
+| ICD remains stranded in development plans after module implementation | Move canonical ICD into module README and leave reference pointer | ICD grep gate |
+
+## Execution Evidence
+
+Record evidence here during implementation.
+
+- Stage 1 contract test baseline:
+- Stage 2 tracking implementation tests:
+- Stage 3 real-data dry-run pause:
+- Stage 4 documentation and ICD grep:
+- Stage 5 verification commands:
+- Dry-run smoke status:
+- Independent code review:
+- Residual risks:

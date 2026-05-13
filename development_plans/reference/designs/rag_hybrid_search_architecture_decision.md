@@ -3,6 +3,8 @@
 ## Status
 
 Decision-only reference. Do not execute this document as a development plan.
+The one-off repository experiment files used to support this decision were
+removed on 2026-05-12 after the conclusion was recorded.
 
 ## Date
 
@@ -64,6 +66,11 @@ to justify production replacement.
 ## Recommended Future Action
 
 No production action is required now.
+
+The historical experiment code and pytest fixture are no longer kept in the
+repository. If this area is revisited, recreate a fresh experiment from current
+production code and real production-row copies instead of relying on the old
+diagnostic package.
 
 If this area is revisited, create a new active plan with these constraints:
 

@@ -9,6 +9,12 @@
 - Overall cutover strategy: compatible, with local bigbang replacement for internal conversation and shared-memory evidence retrieval.
 - Highest-risk areas: false positives from broader retrieval, broad semantic drift, hidden filter loss, attachment-only evidence loss, local-time boundary errors, local LLM judging, Cache2 stale plans, and response-path latency.
 - Acceptance criteria: hybrid evidence beats current semantic-only and keyword-only baselines on real QQ `905393941` cases; absent-topic and literal-trap negatives stay clean; attachment-only positives are usable evidence; all search top-k, selected-limit, candidate, and floor values are shared config; relative-day output respects the runtime local date.
+- Post-completion cleanup: on 2026-05-12, owner direction removed the
+  non-production experiment package `experiments/rag_hybrid_search/` and its
+  focused pytest file `tests/test_rag_hybrid_search_experiment.py` because the
+  investigation conclusion had already been recorded. Historical commands and
+  artifacts below are retained as execution evidence, not as current runnable
+  instructions.
 
 ## Context
 
@@ -511,7 +517,7 @@ No new web, background, or scheduler LLM calls are authorized.
 
 ## Change Surface
 
-Target ownership boundary: `src/kazusa_ai_chatbot/rag/`, `src/kazusa_ai_chatbot/db/` retrieval helpers, `src/kazusa_ai_chatbot/config.py`, RAG evaluator/finalizer payload code, experiments, and focused tests.
+Target ownership boundary: `src/kazusa_ai_chatbot/rag/`, `src/kazusa_ai_chatbot/db/` retrieval helpers, `src/kazusa_ai_chatbot/config.py`, RAG evaluator/finalizer payload code, and focused tests. The one-off experiment package that supported the completed investigation was removed after the conclusion was accepted.
 
 ### Create
 
@@ -534,7 +540,6 @@ Target ownership boundary: `src/kazusa_ai_chatbot/rag/`, `src/kazusa_ai_chatbot/
 - `src/kazusa_ai_chatbot/rag/cache2_policy.py`: bump `CONVERSATION_KEYWORD_POLICY_VERSION`, `CONVERSATION_SEARCH_POLICY_VERSION`, `PERSISTENT_MEMORY_KEYWORD_POLICY_VERSION`, and `PERSISTENT_MEMORY_SEARCH_POLICY_VERSION`; bump `INITIALIZER_PROMPT_VERSION` only if initializer prompt text changes.
 - `src/kazusa_ai_chatbot/nodes/persona_supervisor2_rag_evaluator.py`: distinguish empty retrieval from unresolved candidate retrieval and consume continuation observation candidates.
 - `src/kazusa_ai_chatbot/nodes/persona_supervisor2_rag_evaluator.py`: include `time_context` in finalizer input and prompt contract.
-- `experiments/rag_hybrid_search/`: keep experiment reusable and update fixtures/reports only when profiling changes.
 - `development_plans/README.md`: keep registry row accurate when status changes.
 
 ### Keep
@@ -547,6 +552,9 @@ Target ownership boundary: `src/kazusa_ai_chatbot/rag/`, `src/kazusa_ai_chatbot/
 ### Delete
 
 - No production modules are deleted by this plan.
+- Post-completion cleanup removed `experiments/rag_hybrid_search/` and
+  `tests/test_rag_hybrid_search_experiment.py`; these files were diagnostic
+  artifacts, not production modules.
 
 ## Data Migration
 
@@ -869,3 +877,13 @@ This plan is complete when:
   - Source-scoped route-bypass grep over `src\kazusa_ai_chatbot\nodes`, `src\kazusa_ai_chatbot\rag`, and active bugfix docs -> no matches.
   - Source-scoped stale schema grep over this plan and `src\kazusa_ai_chatbot\rag\README.md` -> no matches.
 - 2026-05-12 / Popper: independent approval review returned `APPROVED` with no gating findings. Confirmed legacy dispatcher prefixes and LLM fallback low-level worker names route to top-level evidence agents, trusted user/time scope and production-backed experiment fixes remain intact, and docs/plan are accurate enough to close. Residual non-gating risk: real-data experiment fixture `keywords` validate production fusion and neighbor behavior, not live LLM anchor-generation quality.
+
+### Post-Completion Cleanup
+
+- 2026-05-12 / Codex: By owner direction, removed the concluded diagnostic
+  package `experiments/rag_hybrid_search/`, removed
+  `tests/test_rag_hybrid_search_experiment.py`, and removed the
+  `rag_hybrid_search` allowlist from `experiments/.gitignore`. The production
+  hybrid retrieval implementation, deterministic production tests, and
+  historical `test_artifacts/rag_hybrid_search_*` evidence remain the source of
+  truth for this completed plan.

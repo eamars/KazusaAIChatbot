@@ -38,7 +38,7 @@ long_term/todo.md
 
 | Plan | Status | Execution |
 |---|---|---|
-| [self_cognition_agency_loop_plan.md](active/short_term/self_cognition_agency_loop_plan.md) | draft | deferred |
+| [self_cognition_agency_loop_plan.md](active/short_term/self_cognition_agency_loop_plan.md) | approved | ready |
 
 ## Active Bugfix Plans
 
@@ -51,6 +51,8 @@ long_term/todo.md
 |---|---|
 | [rag_cache2_design.md](reference/designs/rag_cache2_design.md) | Design reference |
 | [rag_hybrid_search_architecture_decision.md](reference/designs/rag_hybrid_search_architecture_decision.md) | Design reference |
+| [self_cognition_reasoning_basis.md](reference/designs/self_cognition_reasoning_basis.md) | Reasoning basis |
+| [self_cognition_tracking_icd.md](reference/designs/self_cognition_tracking_icd.md) | Interface control document |
 
 ## Triage
 

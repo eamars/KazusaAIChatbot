@@ -20,6 +20,10 @@
 - Acceptance criteria: the plan defines the shared cognition architecture,
   first-stage regression gates, trigger and input-source contracts, shared RAG
   and consolidator strategy, and independent child stages.
+- Post-completion cleanup: on 2026-05-12, owner direction removed the
+  non-production reference experiment `experiments/cognition_core_next/`
+  because its relevant ideas had already been merged into this design record
+  and child-stage contracts.
 
 This is the top-level architectural development plan for multi-source
 cognition. It is not an implementation contract by itself.
@@ -825,8 +829,9 @@ This top-level plan is complete when:
 - It explains that top-level graphs may differ while L1/L2/L3 cognition,
   RAG, and consolidation are shared through source-aware adapters.
 - It defines regression gates before alternative triggers are enabled.
-- It accounts for `experiments/cognition_core_next/` as reference material
-  without adopting it directly.
+- It accounts for `experiments/cognition_core_next/` as consumed reference
+  material without adopting it directly; the local experiment tree was removed
+  after design completion.
 - It defines child plan filenames with the parent namespace and staging index.
 - It defines the progress ledger and artifact handoff contract.
 - It states child-plan promotion rules, rollback, and stop conditions.
@@ -837,6 +842,10 @@ This top-level plan is complete when:
 No source code changes are authorized directly by the parent plan.
 
 No database schema changes are authorized by the parent plan.
+
+Post-completion cleanup on 2026-05-12 removed
+`experiments/cognition_core_next/` by owner direction. Historical references in
+this archived plan remain as rationale for the completed architecture.
 
 No proactive sends are authorized by the parent plan.
 
