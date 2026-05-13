@@ -24,6 +24,8 @@ from kazusa_ai_chatbot.config import (
     RAG_CACHE2_MAX_ENTRIES,
     REFLECTION_CYCLE_ENABLED,
     SCHEDULED_TASKS_ENABLED,
+    SELF_COGNITION_ENABLED,
+    SELF_COGNITION_TRACKING_DIR,
 )
 from kazusa_ai_chatbot.cognition_episode import (
     CognitiveEpisode,
@@ -117,6 +119,11 @@ from kazusa_ai_chatbot.reflection_cycle import (
     build_promoted_reflection_context,
     start_reflection_cycle_worker,
     stop_reflection_cycle_worker,
+)
+from kazusa_ai_chatbot.self_cognition import (
+    SelfCognitionWorkerHandle,
+    start_self_cognition_worker,
+    stop_self_cognition_worker,
 )
 
 logger = logging.getLogger(__name__)
@@ -334,6 +341,7 @@ _character_identity_backfilled: set[tuple[str, str, str]] = set()
 _chat_input_queue = ChatInputQueue()
 _chat_queue_worker_task: asyncio.Task | None = None
 _reflection_worker_handle: ReflectionWorkerHandle | None = None
+_self_cognition_worker_handle: SelfCognitionWorkerHandle | None = None
 _primary_interaction_active_count = 0
 
 
@@ -372,6 +380,17 @@ def _primary_interaction_busy() -> bool:
         or _chat_input_queue.pending_count() > 0
     )
     return return_value
+
+
+def _current_character_profile_snapshot() -> dict:
+    """Return the current composed character profile for background workers."""
+
+    character_profile = compose_character_profile(
+        _static_character_profile,
+        _runtime_character_state,
+        CHARACTER_GLOBAL_USER_ID,
+    )
+    return character_profile
 
 
 def _active_turn_platform_message_ids(item: QueuedChatItem) -> list[str]:
@@ -1031,7 +1050,7 @@ async def _hydrate_rag_initializer_cache() -> int:
 async def lifespan(app: FastAPI):
     global _static_character_profile, _runtime_character_state
     global _graph, _task_dispatcher, _adapter_registry
-    global _reflection_worker_handle
+    global _reflection_worker_handle, _self_cognition_worker_handle
 
     # 1. Database bootstrap
     await db_bootstrap()
@@ -1088,6 +1107,17 @@ async def lifespan(app: FastAPI):
 
     logger.info(render_llm_route_table())
     _ensure_chat_input_worker_started()
+    if SELF_COGNITION_ENABLED:
+        _self_cognition_worker_handle = start_self_cognition_worker(
+            is_primary_interaction_busy=_primary_interaction_busy,
+            dispatcher=_task_dispatcher,
+            character_profile_provider=_current_character_profile_snapshot,
+            output_root=SELF_COGNITION_TRACKING_DIR,
+        )
+    else:
+        logger.info(
+            "Self-cognition worker disabled via SELF_COGNITION_ENABLED=false"
+        )
     if REFLECTION_CYCLE_ENABLED:
         _reflection_worker_handle = start_reflection_cycle_worker(
             is_primary_interaction_busy=lambda: False,
@@ -1101,6 +1131,9 @@ async def lifespan(app: FastAPI):
     yield
 
     # Shutdown
+    if _self_cognition_worker_handle is not None:
+        await stop_self_cognition_worker(_self_cognition_worker_handle)
+        _self_cognition_worker_handle = None
     if _reflection_worker_handle is not None:
         await stop_reflection_cycle_worker(_reflection_worker_handle)
         _reflection_worker_handle = None

@@ -38,12 +38,13 @@ long_term/todo.md
 
 | Plan | Status | Execution |
 |---|---|---|
-| [self_cognition_agency_loop_plan.md](active/short_term/self_cognition_agency_loop_plan.md) | approved | ready |
+| _None_ | _None_ | _None_ |
 
 ## Active Bugfix Plans
 
 | Plan | Status | Execution |
 |---|---|---|
+| [task_dispatcher_json_contract_bugfix_plan.md](active/bugfix/task_dispatcher_json_contract_bugfix_plan.md) | approved | ready |
 
 ## Reference Documents
 
@@ -143,6 +144,7 @@ plans.
 | [reflection_flag_simplification_plan.md](archive/completed/short_term/reflection_flag_simplification_plan.md) |
 | [reflection_memory_integration_stage1c_plan.md](archive/completed/short_term/reflection_memory_integration_stage1c_plan.md) |
 | [role_vocabulary_contract_cleanup_plan.md](archive/completed/short_term/role_vocabulary_contract_cleanup_plan.md) |
+| [self_cognition_agency_loop_plan.md](archive/completed/short_term/self_cognition_agency_loop_plan.md) |
 | [service_module_separation_stage1_plan.md](archive/completed/short_term/service_module_separation_stage1_plan.md) |
 | [typed_message_envelope_stage2_plan.md](archive/completed/short_term/typed_message_envelope_stage2_plan.md) |
 | [user_style_engagement_consumer_plan.md](archive/completed/short_term/user_style_engagement_consumer_plan.md) |

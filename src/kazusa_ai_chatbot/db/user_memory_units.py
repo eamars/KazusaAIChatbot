@@ -40,10 +40,24 @@ VALID_USER_MEMORY_UNIT_STATUSES = {
     UserMemoryUnitStatus.CANCELLED,
 }
 
+ACTIVE_COMMITMENT_DUE_BUCKET_READY = 0
+ACTIVE_COMMITMENT_DUE_BUCKET_FUTURE = 1
+
 
 def _now_iso() -> str:
     current_time = datetime.now(timezone.utc).isoformat()
     return current_time
+
+
+def _parse_datetime_for_query(value: str) -> datetime:
+    """Parse stored ISO-like timestamps into aware UTC datetimes."""
+
+    normalized = value.replace("Z", "+00:00").replace(" ", "T")
+    parsed = datetime.fromisoformat(normalized)
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return_value = parsed.astimezone(timezone.utc)
+    return return_value
 
 
 def _semantic_text(unit: dict) -> str:
@@ -198,6 +212,84 @@ async def query_user_memory_units(
         .sort([("last_seen_at", -1), ("updated_at", -1)])
         .limit(limit)
     )
+    return_value = [doc async for doc in cursor]
+    return return_value
+
+
+async def query_active_commitment_memory_units(
+    *,
+    current_timestamp: str,
+    limit: int = 100,
+) -> list[UserMemoryUnitDoc]:
+    """Read active commitment units across users for idle due checks.
+
+    Args:
+        current_timestamp: Worker tick timestamp used to prioritize due or
+            past-due commitments before future commitments.
+        limit: Maximum documents to return.
+
+    Returns:
+        Active commitment memory units without embeddings.
+    """
+
+    current_time = _parse_datetime_for_query(current_timestamp)
+    db = await get_db()
+    pipeline = [
+        {
+            "$match": {
+                "unit_type": UserMemoryUnitType.ACTIVE_COMMITMENT,
+                "status": UserMemoryUnitStatus.ACTIVE,
+                "due_at": {"$type": "string", "$ne": ""},
+            }
+        },
+        {
+            "$addFields": {
+                "_self_cognition_due_at": {
+                    "$dateFromString": {
+                        "dateString": {
+                            "$replaceOne": {
+                                "input": "$due_at",
+                                "find": " ",
+                                "replacement": "T",
+                            }
+                        },
+                        "onError": None,
+                        "onNull": None,
+                    }
+                },
+            }
+        },
+        {"$match": {"_self_cognition_due_at": {"$ne": None}}},
+        {
+            "$addFields": {
+                "_self_cognition_due_bucket": {
+                    "$cond": [
+                        {"$lte": ["$_self_cognition_due_at", current_time]},
+                        ACTIVE_COMMITMENT_DUE_BUCKET_READY,
+                        ACTIVE_COMMITMENT_DUE_BUCKET_FUTURE,
+                    ]
+                }
+            }
+        },
+        {
+            "$sort": {
+                "_self_cognition_due_bucket": 1,
+                "_self_cognition_due_at": 1,
+                "last_seen_at": -1,
+                "updated_at": -1,
+            }
+        },
+        {"$limit": limit},
+        {
+            "$project": {
+                "_id": 0,
+                "embedding": 0,
+                "_self_cognition_due_at": 0,
+                "_self_cognition_due_bucket": 0,
+            }
+        },
+    ]
+    cursor = db.user_memory_units.aggregate(pipeline)
     return_value = [doc async for doc in cursor]
     return return_value
 

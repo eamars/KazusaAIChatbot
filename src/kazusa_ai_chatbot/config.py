@@ -85,6 +85,30 @@ def _bounded_float_from_env(
     return value
 
 
+def _bool_from_env(name: str, default: str) -> bool:
+    """Read a boolean environment setting and fail fast if invalid."""
+
+    raw_value = os.getenv(name, default)
+    normalized_value = raw_value.strip().lower()
+    if normalized_value in ("1", "true", "yes"):
+        return_value = True
+        return return_value
+    if normalized_value in ("0", "false", "no"):
+        return_value = False
+        return return_value
+    raise ValueError(f"{name} must be a bool string")
+
+
+def _non_empty_string_from_env(name: str, default: str) -> str:
+    """Read a required non-empty string environment setting."""
+
+    raw_value = os.getenv(name, default)
+    value = raw_value.strip()
+    if not value:
+        raise ValueError(f"{name} must be non-empty")
+    return value
+
+
 load_dotenv()
 
 # MongoDB
@@ -295,6 +319,56 @@ COGNITION_VISUAL_DIRECTIVES_ENABLED = os.getenv(
     "COGNITION_VISUAL_DIRECTIVES_ENABLED",
     "true",
 ).lower() in ("1", "true", "yes")
+
+# Self-cognition is off for live activation until scheduler, dispatcher,
+# adapter, and persistence boundaries are wired intentionally.
+SELF_COGNITION_ENABLED = _bool_from_env("SELF_COGNITION_ENABLED", "false")
+SELF_COGNITION_WORKER_INTERVAL_SECONDS = _positive_int_from_env(
+    "SELF_COGNITION_WORKER_INTERVAL_SECONDS",
+    "3600",
+)
+SELF_COGNITION_MAX_CASES_PER_TICK = _positive_int_from_env(
+    "SELF_COGNITION_MAX_CASES_PER_TICK",
+    "3",
+)
+SELF_COGNITION_TRACKING_DIR = _non_empty_string_from_env(
+    "SELF_COGNITION_TRACKING_DIR",
+    "self_cognition_runs",
+)
+# Source packets enter cognition as internal-monologue percepts, so the default
+# budget stays aligned with the existing internal-thought cognition boundary.
+SELF_COGNITION_SOURCE_PACKET_CHAR_LIMIT = _positive_int_from_env(
+    "SELF_COGNITION_SOURCE_PACKET_CHAR_LIMIT",
+    "4000",
+)
+SELF_COGNITION_RAG_EVIDENCE_CHAR_LIMIT = _positive_int_from_env(
+    "SELF_COGNITION_RAG_EVIDENCE_CHAR_LIMIT",
+    "4000",
+)
+SELF_COGNITION_TRIGGER_ACTIVE_COMMITMENT_ENABLED = _bool_from_env(
+    "SELF_COGNITION_TRIGGER_ACTIVE_COMMITMENT_ENABLED",
+    "true",
+)
+SELF_COGNITION_TRIGGER_CONVERSATION_PROGRESS_ENABLED = _bool_from_env(
+    "SELF_COGNITION_TRIGGER_CONVERSATION_PROGRESS_ENABLED",
+    "true",
+)
+SELF_COGNITION_TRIGGER_RECENT_DIRECT_DIALOG_ENABLED = _bool_from_env(
+    "SELF_COGNITION_TRIGGER_RECENT_DIRECT_DIALOG_ENABLED",
+    "true",
+)
+SELF_COGNITION_TRIGGER_PENDING_OUTBOX_ENABLED = _bool_from_env(
+    "SELF_COGNITION_TRIGGER_PENDING_OUTBOX_ENABLED",
+    "true",
+)
+SELF_COGNITION_TRIGGER_BOUNDED_TOPIC_FOLLOWUP_ENABLED = _bool_from_env(
+    "SELF_COGNITION_TRIGGER_BOUNDED_TOPIC_FOLLOWUP_ENABLED",
+    "true",
+)
+SELF_COGNITION_TRIGGER_GROUP_CHAT_REVIEW_ENABLED = _bool_from_env(
+    "SELF_COGNITION_TRIGGER_GROUP_CHAT_REVIEW_ENABLED",
+    "true",
+)
 
 # Character timezone (IANA name) for converting UTC to character-local time.
 CHARACTER_TIME_ZONE = os.getenv("CHARACTER_TIME_ZONE", "Pacific/Auckland")

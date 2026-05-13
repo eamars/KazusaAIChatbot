@@ -48,11 +48,43 @@ async def test_lifespan_stops_reflection_worker_on_shutdown(monkeypatch) -> None
 
 
 @pytest.mark.asyncio
+async def test_lifespan_starts_self_cognition_worker_only_when_enabled(
+    monkeypatch,
+) -> None:
+    """Self-cognition worker startup should be explicitly gated by config."""
+
+    disabled_calls = await _run_lifespan(
+        monkeypatch,
+        enabled=False,
+        self_cognition_enabled=False,
+    )
+    enabled_calls = await _run_lifespan(
+        monkeypatch,
+        enabled=False,
+        self_cognition_enabled=True,
+    )
+
+    assert disabled_calls["self_cognition_started"] == 0
+    assert disabled_calls["self_cognition_stopped"] == 0
+    assert enabled_calls["self_cognition_started"] == 1
+    assert enabled_calls["self_cognition_stopped"] == 1
+    assert callable(enabled_calls["self_cognition_busy_probe"])
+    assert enabled_calls["self_cognition_busy_probe"]() is False
+
+
+@pytest.mark.asyncio
 async def test_reflection_worker_defers_while_primary_interaction_is_busy() -> None:
     """Worker tick should defer when the service busy probe is true."""
 
     results = await worker_module._run_worker_tick(
-        now=worker_module.datetime(2026, 5, 4, 18, 0, tzinfo=worker_module.timezone.utc),
+        now=worker_module.datetime(
+            2026,
+            5,
+            4,
+            18,
+            0,
+            tzinfo=worker_module.timezone.utc,
+        ),
         is_primary_interaction_busy=lambda: True,
     )
 
@@ -81,15 +113,27 @@ async def test_reflection_probe_ignores_chat_queue_state(monkeypatch) -> None:
     assert busy_probe() is False
 
 
-async def _run_lifespan(monkeypatch, *, enabled: bool) -> dict[str, object]:
+async def _run_lifespan(
+    monkeypatch,
+    *,
+    enabled: bool,
+    self_cognition_enabled: bool = False,
+) -> dict[str, object]:
     """Run service lifespan with external dependencies patched."""
 
     calls: dict[str, object] = {
         "started": 0,
         "stopped": 0,
         "busy_probe": None,
+        "self_cognition_started": 0,
+        "self_cognition_stopped": 0,
+        "self_cognition_busy_probe": None,
     }
-    handle = SimpleNamespace(task=asyncio.create_task(_sleep_forever()), stop_event=None)
+    handle = SimpleNamespace(
+        task=asyncio.create_task(_sleep_forever()),
+        stop_event=None,
+    )
+    self_cognition_handle: SimpleNamespace | None = None
 
     def _start_reflection_cycle_worker(*, is_primary_interaction_busy):
         calls["started"] = int(calls["started"]) + 1
@@ -104,7 +148,41 @@ async def _run_lifespan(monkeypatch, *, enabled: bool) -> dict[str, object]:
         except asyncio.CancelledError:
             pass
 
+    def _start_self_cognition_worker(**kwargs):
+        nonlocal self_cognition_handle
+        calls["self_cognition_started"] = (
+            int(calls["self_cognition_started"]) + 1
+        )
+        calls["self_cognition_busy_probe"] = kwargs["is_primary_interaction_busy"]
+        self_cognition_handle = SimpleNamespace(
+            task=asyncio.create_task(_sleep_forever()),
+            stop_event=None,
+        )
+        return self_cognition_handle
+
+    async def _stop_self_cognition_worker(_handle):
+        calls["self_cognition_stopped"] = (
+            int(calls["self_cognition_stopped"]) + 1
+        )
+        assert self_cognition_handle is not None
+        self_cognition_handle.task.cancel()
+        try:
+            await self_cognition_handle.task
+        except asyncio.CancelledError:
+            pass
+
     monkeypatch.setattr(service_module, "REFLECTION_CYCLE_ENABLED", enabled)
+    monkeypatch.setattr(
+        service_module,
+        "SELF_COGNITION_ENABLED",
+        self_cognition_enabled,
+    )
+    monkeypatch.setattr(
+        service_module,
+        "SELF_COGNITION_TRACKING_DIR",
+        "test-self-cognition-runs",
+        raising=False,
+    )
     monkeypatch.setattr(service_module, "db_bootstrap", AsyncMock())
     monkeypatch.setattr(
         service_module,
@@ -116,7 +194,11 @@ async def _run_lifespan(monkeypatch, *, enabled: bool) -> dict[str, object]:
         "get_character_profile",
         AsyncMock(return_value={"name": "Character"}),
     )
-    monkeypatch.setattr(service_module, "_build_graph", MagicMock(return_value=object()))
+    monkeypatch.setattr(
+        service_module,
+        "_build_graph",
+        MagicMock(return_value=object()),
+    )
     monkeypatch.setattr(service_module.mcp_manager, "start", AsyncMock())
     monkeypatch.setattr(service_module.mcp_manager, "stop", AsyncMock())
     monkeypatch.setattr(service_module, "PendingTaskIndex", _FakePendingTaskIndex)
@@ -124,8 +206,16 @@ async def _run_lifespan(monkeypatch, *, enabled: bool) -> dict[str, object]:
     monkeypatch.setattr(service_module.scheduler, "shutdown", AsyncMock())
     monkeypatch.setattr(service_module.scheduler, "configure_runtime", MagicMock())
     monkeypatch.setattr(service_module, "configure_task_dispatcher", MagicMock())
-    monkeypatch.setattr(service_module, "render_llm_route_table", MagicMock(return_value="routes"))
-    monkeypatch.setattr(service_module, "_ensure_chat_input_worker_started", MagicMock())
+    monkeypatch.setattr(
+        service_module,
+        "render_llm_route_table",
+        MagicMock(return_value="routes"),
+    )
+    monkeypatch.setattr(
+        service_module,
+        "_ensure_chat_input_worker_started",
+        MagicMock(),
+    )
     monkeypatch.setattr(service_module, "_stop_chat_input_worker", AsyncMock())
     monkeypatch.setattr(service_module, "close_db", AsyncMock())
     monkeypatch.setattr(
@@ -137,6 +227,18 @@ async def _run_lifespan(monkeypatch, *, enabled: bool) -> dict[str, object]:
         service_module,
         "stop_reflection_cycle_worker",
         _stop_reflection_cycle_worker,
+    )
+    monkeypatch.setattr(
+        service_module,
+        "start_self_cognition_worker",
+        _start_self_cognition_worker,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        service_module,
+        "stop_self_cognition_worker",
+        _stop_self_cognition_worker,
+        raising=False,
     )
 
     async with service_module.lifespan(FastAPI()):

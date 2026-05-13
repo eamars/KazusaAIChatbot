@@ -4,13 +4,14 @@
 
 - Status: reference
 - Related execution plan:
-  `development_plans/active/short_term/self_cognition_agency_loop_plan.md`
+  `development_plans/archive/completed/short_term/self_cognition_agency_loop_plan.md`
 - Related ICD:
   `development_plans/reference/designs/self_cognition_tracking_icd.md`
 - Purpose: collect rationale, online research, code observations, and
   experiment results that justify the execution plan.
 - Execution rule: this document is not an implementation contract. Use the
-  active plan for work order and implementation instructions.
+  archived plan for historical execution evidence and the production module
+  README for current interfaces.
 
 ## Online Research Basis
 
@@ -224,17 +225,19 @@ Finding:
 
 ## Consumer Priority Basis
 
-This ranking is based on observed usefulness, risk reduction, and cost.
+This ranking is based on observed usefulness, risk reduction, and cost. The
+boundary column reflects the implemented module contract after the
+self-cognition plan completed.
 
-| Rank | Consumer | Priority reason from experiments | First useful output | Production write allowed now |
+| Rank | Consumer | Priority reason from experiments | First useful output | Implemented boundary |
 |---|---|---|---|---|
-| 1 | Self-cognition tracking | Every useful outcome needs a place to land. Current no-dialog cognition residue is ephemeral, so tracking is the foundation for both silence and action. | run, trigger, evidence ref, route effect | no production write |
-| 2 | Action-attempt lifecycle and runtime agency controls | The expired-promise case can re-trigger every idle tick unless attempts, idempotency, retry, and duplicate suppression exist first. | action_attempt with stable idempotency key | no production write |
-| 3 | Proactive preview / outbox candidate | The clearest character-growth benefit was a past-due commitment becoming one natural outward message candidate. | preview/outbox candidate tied to an action_attempt | no production write |
-| 4 | Progress-maintenance candidate | Before-due commitments and settled conversations should still preserve short-term continuity without sending. | `progress_maintenance` route effect | no production write |
-| 5 | Audit and evaluation | The system cannot be trusted without inspecting why the loop sent, held, or stayed silent. This is cheap and mandatory for POC quality. | readable loop trace and route explanation | no production write |
+| 1 | Self-cognition tracking | Every useful outcome needs a place to land. Current no-dialog cognition residue is ephemeral, so tracking is the foundation for both silence and action. | run, trigger, evidence ref, route effect | local tracking artifacts |
+| 2 | Action-attempt lifecycle and runtime agency controls | The expired-promise case can re-trigger every idle tick unless attempts, idempotency, retry, and duplicate suppression exist first. | action_attempt with stable idempotency key | local attempt ledger |
+| 3 | Proactive preview / outbox candidate | The clearest character-growth benefit was a past-due commitment becoming one natural outward message candidate. | preview/outbox candidate tied to an action_attempt | local candidate; dispatcher handoff only when enabled |
+| 4 | Progress-maintenance candidate | Before-due commitments and settled conversations should still preserve short-term continuity without sending. | `progress_maintenance` route effect | local route effect only |
+| 5 | Audit and evaluation | The system cannot be trusted without inspecting why the loop sent, held, or stayed silent. This is cheap and mandatory for quality. | readable loop trace and route explanation | local loop trace |
 | 6 | RAG / research planning | Topic-triggered RAG can make the loop more autonomous, but it should come after commitment/action routing is stable. | bounded RAG request/result linked to the run | read-only production/RAG call |
-| 7 | Dispatcher and scheduler handoff | This creates real-world interaction, but it is high-risk until tracking, idempotency, and outbox quality are proven. | ready handoff candidate | future ICD handoff only |
+| 7 | Dispatcher and scheduler handoff | This creates real-world interaction, but it is high-risk until tracking, idempotency, and outbox quality are proven. | ready handoff candidate | opt-in `TaskDispatcher` handoff; disabled by default |
 | 8 | Reflection / growth projection | Growth is important, but hourly self-cognition should not directly mutate personality; only compact projections may feed slower systems. | growth_candidate projection | future approved projection only |
 | 9 | Source-aware consolidation / production projections | This has the widest blast radius because it touches existing persistence semantics. It is useful later, not needed to prove the loop. | consolidation/progress/history projection candidate | future approved projection only |
 
