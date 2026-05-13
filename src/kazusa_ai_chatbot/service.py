@@ -7,7 +7,12 @@ Start with:
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import logging
+import os
+import socket
+import time
+import traceback
 from uuid import uuid4
 from collections.abc import Mapping
 from contextlib import asynccontextmanager, suppress
@@ -23,9 +28,12 @@ from kazusa_ai_chatbot.config import (
     COGNITION_VISUAL_DIRECTIVES_ENABLED,
     RAG_CACHE2_MAX_ENTRIES,
     REFLECTION_CYCLE_ENABLED,
+    REFLECTION_WORKER_INTERVAL_SECONDS,
     SCHEDULED_TASKS_ENABLED,
     SELF_COGNITION_ENABLED,
+    SELF_COGNITION_MAX_CASES_PER_TICK,
     SELF_COGNITION_TRACKING_DIR,
+    SELF_COGNITION_WORKER_INTERVAL_SECONDS,
 )
 from kazusa_ai_chatbot.cognition_episode import (
     CognitiveEpisode,
@@ -67,7 +75,7 @@ from kazusa_ai_chatbot.message_envelope import (
     project_reply_attachment_summaries,
 )
 from kazusa_ai_chatbot.utils import log_list_preview, log_preview, trim_history_dict
-from kazusa_ai_chatbot import scheduler
+from kazusa_ai_chatbot import event_logging, scheduler
 from kazusa_ai_chatbot.dispatcher import (
     AdapterRegistry,
     PendingTaskIndex,
@@ -101,6 +109,8 @@ from kazusa_ai_chatbot.brain_service.contracts import (
     HealthResponse,
     MentionIn,
     MessageEnvelopeIn,
+    OpsRuntimeStatusResponse,
+    OpsStatsResponse,
     ReplyTargetIn,
     RuntimeAdapterRegistrationRequest,
     RuntimeAdapterRegistrationResponse,
@@ -127,6 +137,122 @@ from kazusa_ai_chatbot.self_cognition import (
 )
 
 logger = logging.getLogger(__name__)
+
+MILLISECONDS_PER_SECOND = 1000
+SERVICE_COMPONENT = "brain_service"
+CONVERSATION_HISTORY_COLLECTION = "conversation_history"
+
+
+def _service_event_scope(req: ChatRequest) -> event_logging.EventScopeInput:
+    """Project adapter request scope into the event-log public input shape.
+
+    Args:
+        req: Incoming chat request from an adapter.
+
+    Returns:
+        Scope fields allowed by the event-logging public interface.
+    """
+
+    scope = event_logging.EventScopeInput(
+        platform=req.platform,
+        channel_type=req.channel_type,
+    )
+    if req.platform_channel_id:
+        scope["platform_channel_id"] = req.platform_channel_id
+    return scope
+
+
+def _chat_correlation_id(req: ChatRequest) -> str:
+    """Build a stable non-content correlation id for one inbound chat request.
+
+    Args:
+        req: Incoming chat request from an adapter.
+
+    Returns:
+        Correlation id derived from platform metadata, not message body text or
+        raw channel identifiers.
+    """
+
+    message_ref = req.platform_message_id or "no-message-id"
+    channel_source = req.platform_channel_id or "direct"
+    channel_bytes = f"{req.platform}:{channel_source}".encode(
+        "utf-8",
+        errors="replace",
+    )
+    channel_ref = f"ch_{hashlib.sha256(channel_bytes).hexdigest()[:16]}"
+    correlation_id = f"chat:{req.platform}:{channel_ref}:{message_ref}"
+    return correlation_id
+
+
+def _elapsed_ms(started_at: float) -> int:
+    """Return elapsed monotonic milliseconds since a start marker."""
+
+    elapsed = time.perf_counter() - started_at
+    elapsed_ms = max(0, int(elapsed * MILLISECONDS_PER_SECOND))
+    return elapsed_ms
+
+
+def _queue_wait_ms(item: QueuedChatItem) -> int:
+    """Return how long a queued item waited before service processing.
+
+    Args:
+        item: Queued chat item assigned a timestamp at enqueue time.
+
+    Returns:
+        Non-negative queue wait duration in milliseconds. Invalid external
+        timestamps are treated as unknown and reported as zero.
+    """
+
+    timestamp = item.timestamp
+    if timestamp.endswith("Z"):
+        timestamp = f"{timestamp[:-1]}+00:00"
+    try:
+        queued_at = datetime.fromisoformat(timestamp)
+    except ValueError:
+        return_value = 0
+        return return_value
+
+    if queued_at.tzinfo is None:
+        queued_at = queued_at.replace(tzinfo=timezone.utc)
+    now = datetime.now(timezone.utc)
+    wait_seconds = max(0.0, (now - queued_at.astimezone(timezone.utc)).total_seconds())
+    wait_ms = int(wait_seconds * MILLISECONDS_PER_SECOND)
+    return wait_ms
+
+
+def _runtime_error_fields(exc: BaseException) -> tuple[str, str, str, str]:
+    """Build sanitized runtime-error metadata from an exception.
+
+    Args:
+        exc: Exception caught at a service boundary.
+
+    Returns:
+        Tuple of error class, short preview, stack fingerprint, and top frame.
+    """
+
+    traceback_frames = traceback.extract_tb(exc.__traceback__)
+    if traceback_frames:
+        top_frame = traceback_frames[-1]
+        top_frame_module = top_frame.filename
+        fingerprint_source = (
+            f"{exc.__class__.__module__}:{exc.__class__.__name__}:"
+            f"{top_frame.filename}:{top_frame.name}:{top_frame.lineno}"
+        )
+    else:
+        top_frame_module = ""
+        fingerprint_source = f"{exc.__class__.__module__}:{exc.__class__.__name__}"
+
+    fingerprint_bytes = fingerprint_source.encode("utf-8", errors="replace")
+    stack_fingerprint = hashlib.sha256(fingerprint_bytes).hexdigest()[:16]
+    error_class = exc.__class__.__name__
+    error_preview = str(exc)
+    return_value = (
+        error_class,
+        error_preview,
+        stack_fingerprint,
+        top_frame_module,
+    )
+    return return_value
 
 
 def _register_runtime_adapter_payload(
@@ -345,6 +471,75 @@ _self_cognition_worker_handle: SelfCognitionWorkerHandle | None = None
 _primary_interaction_active_count = 0
 
 
+def _worker_task_alive(handle: object | None) -> bool:
+    """Return whether a process-local worker handle owns a running task."""
+
+    if handle is None:
+        alive = False
+        return alive
+
+    task = getattr(handle, "task", None)
+    if task is None:
+        alive = False
+        return alive
+
+    done = getattr(task, "done", None)
+    if not callable(done):
+        alive = False
+        return alive
+
+    alive = not bool(done())
+    return alive
+
+
+def _ops_runtime_status_payload(
+    base_status: Mapping[str, object],
+) -> dict[str, object]:
+    """Merge aggregate runtime status with service-owned config and liveness."""
+
+    raw_workers = base_status.get("workers", {})
+    workers = raw_workers if isinstance(raw_workers, Mapping) else {}
+    raw_process = base_status.get("process", {})
+    process = raw_process if isinstance(raw_process, Mapping) else {}
+    reflection_worker = dict(workers.get("reflection_cycle", {}))
+    self_cognition_worker = dict(workers.get("self_cognition", {}))
+    reflection_worker.update({
+        "enabled": REFLECTION_CYCLE_ENABLED,
+        "task_alive": _worker_task_alive(_reflection_worker_handle),
+    })
+    self_cognition_worker.update({
+        "enabled": SELF_COGNITION_ENABLED,
+        "task_alive": _worker_task_alive(_self_cognition_worker_handle),
+    })
+    payload = {
+        "status": str(base_status.get("status", "ok")),
+        "generated_at": str(base_status.get("generated_at", "")),
+        "window_hours": int(base_status.get("window_hours", 24)),
+        "config": {
+            "reflection_cycle_enabled": REFLECTION_CYCLE_ENABLED,
+            "self_cognition_enabled": SELF_COGNITION_ENABLED,
+            "reflection_worker_interval_seconds": (
+                REFLECTION_WORKER_INTERVAL_SECONDS
+            ),
+            "self_cognition_worker_interval_seconds": (
+                SELF_COGNITION_WORKER_INTERVAL_SECONDS
+            ),
+            "self_cognition_max_cases_per_tick": (
+                SELF_COGNITION_MAX_CASES_PER_TICK
+            ),
+        },
+        "process": dict(process),
+        "workers": {
+            "reflection_cycle": reflection_worker,
+            "self_cognition": self_cognition_worker,
+        },
+        "semantic_descriptors": dict(
+            base_status.get("semantic_descriptors", {}),
+        ),
+    }
+    return payload
+
+
 async def _refresh_runtime_character_state() -> None:
     """Replace the process-local runtime state with the current DB projection."""
     global _runtime_character_state
@@ -514,16 +709,60 @@ async def _drop_queued_chat_item(item: QueuedChatItem) -> None:
         None.
     """
 
+    correlation_id = _chat_correlation_id(item.request)
+    scope = _service_event_scope(item.request)
+    save_started_at = 0.0
     try:
         global_user_id, _ = await _resolve_queued_user(item)
         reply_context = await _hydrate_reply_context(item.request)
-        await _save_user_message_from_item(
+        save_started_at = time.perf_counter()
+        conversation_row_id = await _save_user_message_from_item(
             item,
             global_user_id=global_user_id,
             reply_context=reply_context,
         )
+        operation_status = "succeeded" if conversation_row_id else "failed"
+        idempotency_result = "inserted" if conversation_row_id else "not_committed"
+        await event_logging.record_database_operation_event(
+            component=SERVICE_COMPONENT,
+            collection=CONVERSATION_HISTORY_COLLECTION,
+            operation_kind="insert_user_message",
+            status=operation_status,
+            idempotency_result=idempotency_result,
+            latency_ms=_elapsed_ms(save_started_at),
+            document_ref=conversation_row_id or "",
+            correlation_id=correlation_id,
+        )
     except Exception as exc:
         logger.exception(f"Failed to persist dropped queued message: {exc}")
+        if save_started_at:
+            await event_logging.record_database_operation_event(
+                component=SERVICE_COMPONENT,
+                collection=CONVERSATION_HISTORY_COLLECTION,
+                operation_kind="insert_user_message",
+                status="failed",
+                idempotency_result="exception",
+                latency_ms=_elapsed_ms(save_started_at),
+                correlation_id=correlation_id,
+                severity="warning",
+            )
+        (
+            error_class,
+            error_preview,
+            stack_fingerprint,
+            top_frame_module,
+        ) = _runtime_error_fields(exc)
+        await event_logging.record_runtime_error_event(
+            component=SERVICE_COMPONENT,
+            error_class=error_class,
+            error_preview=error_preview,
+            stack_fingerprint=stack_fingerprint,
+            top_frame_module=top_frame_module,
+            recovered=True,
+            status="recovered",
+            correlation_id=correlation_id,
+            severity="warning",
+        )
 
     _chat_input_queue.complete(item, ChatResponse())
     dropped_envelope: MessageEnvelope = item.request.message_envelope.model_dump(
@@ -544,6 +783,18 @@ async def _drop_queued_chat_item(item: QueuedChatItem) -> None:
         f'display_name={item.request.display_name or "<none>"} '
         f'content={log_preview(dropped_envelope["body_text"])}'
     )
+    await event_logging.record_queue_intake_event(
+        component=SERVICE_COMPONENT,
+        correlation_id=correlation_id,
+        status="dropped",
+        queue_depth=_chat_input_queue.pending_count(),
+        coalesced_count=0,
+        dropped_count=1,
+        protected_by_reply=_chat_input_queue.is_bot_reply(item),
+        listen_only=item.request.debug_modes.listen_only,
+        scope=scope,
+        severity="warning",
+    )
 
 
 async def _persist_collapsed_queued_chat_item(
@@ -560,9 +811,13 @@ async def _persist_collapsed_queued_chat_item(
         None.
     """
 
+    correlation_id = _chat_correlation_id(item.request)
+    scope = _service_event_scope(item.request)
+    save_started_at = 0.0
     try:
         global_user_id, _ = await _resolve_queued_user(item)
         reply_context = await _hydrate_reply_context(item.request)
+        save_started_at = time.perf_counter()
         conversation_row_id = await _save_user_message_from_item(
             item,
             global_user_id=global_user_id,
@@ -575,8 +830,48 @@ async def _persist_collapsed_queued_chat_item(
                 "Collapsed queued message persisted without conversation row "
                 f"id: sequence={item.sequence}"
             )
+        operation_status = "succeeded" if conversation_row_id else "failed"
+        idempotency_result = "inserted" if conversation_row_id else "not_committed"
+        await event_logging.record_database_operation_event(
+            component=SERVICE_COMPONENT,
+            collection=CONVERSATION_HISTORY_COLLECTION,
+            operation_kind="insert_user_message",
+            status=operation_status,
+            idempotency_result=idempotency_result,
+            latency_ms=_elapsed_ms(save_started_at),
+            document_ref=conversation_row_id or "",
+            correlation_id=correlation_id,
+        )
     except Exception as exc:
         logger.exception(f"Failed to persist collapsed queued message: {exc}")
+        if save_started_at:
+            await event_logging.record_database_operation_event(
+                component=SERVICE_COMPONENT,
+                collection=CONVERSATION_HISTORY_COLLECTION,
+                operation_kind="insert_user_message",
+                status="failed",
+                idempotency_result="exception",
+                latency_ms=_elapsed_ms(save_started_at),
+                correlation_id=correlation_id,
+                severity="warning",
+            )
+        (
+            error_class,
+            error_preview,
+            stack_fingerprint,
+            top_frame_module,
+        ) = _runtime_error_fields(exc)
+        await event_logging.record_runtime_error_event(
+            component=SERVICE_COMPONENT,
+            error_class=error_class,
+            error_preview=error_preview,
+            stack_fingerprint=stack_fingerprint,
+            top_frame_module=top_frame_module,
+            recovered=True,
+            status="recovered",
+            correlation_id=correlation_id,
+            severity="warning",
+        )
 
     _chat_input_queue.complete(item, ChatResponse())
     collapsed_envelope: MessageEnvelope = item.request.message_envelope.model_dump(
@@ -599,6 +894,17 @@ async def _persist_collapsed_queued_chat_item(
         f'display_name={item.request.display_name or "<none>"} '
         f'content={log_preview(collapsed_envelope["body_text"])}'
     )
+    await event_logging.record_queue_intake_event(
+        component=SERVICE_COMPONENT,
+        correlation_id=correlation_id,
+        status="collapsed",
+        queue_depth=_chat_input_queue.pending_count(),
+        coalesced_count=1,
+        dropped_count=0,
+        protected_by_reply=_chat_input_queue.is_bot_reply(item),
+        listen_only=item.request.debug_modes.listen_only,
+        scope=scope,
+    )
 
 
 async def _process_queued_chat_item(item: QueuedChatItem) -> None:
@@ -613,6 +919,12 @@ async def _process_queued_chat_item(item: QueuedChatItem) -> None:
 
     req = item.request
     character_name = _static_character_profile.get("name", "Character")
+    correlation_id = _chat_correlation_id(req)
+    scope = _service_event_scope(req)
+    turn_started_at = time.perf_counter()
+    stages_reached: list[str] = []
+    scheduled_followup_count = 0
+    debug_mode_names: list[str] = []
 
     try:
         character_global_user_id = await _ensure_character_global_identity(
@@ -622,6 +934,7 @@ async def _process_queued_chat_item(item: QueuedChatItem) -> None:
         )
         global_user_id, user_profile = await _resolve_queued_user(item)
         message_envelope = await _resolve_message_envelope_identities(req)
+        stages_reached.append("identity")
 
         multimedia_input: list[MultiMediaDoc] = []
         for queued_item in [item, *item.collapsed_items]:
@@ -665,11 +978,39 @@ async def _process_queued_chat_item(item: QueuedChatItem) -> None:
         chat_history_wide = trim_history_dict(history)
         chat_history_recent = chat_history_wide[-CHAT_HISTORY_RECENT_LIMIT:]
         reply_context = await _hydrate_reply_context(req)
-        conversation_row_id = await _save_user_message_from_item(
-            item,
-            global_user_id=global_user_id,
-            reply_context=reply_context,
-            message_envelope=message_envelope,
+        stages_reached.append("history_loaded")
+        user_save_started_at = time.perf_counter()
+        try:
+            conversation_row_id = await _save_user_message_from_item(
+                item,
+                global_user_id=global_user_id,
+                reply_context=reply_context,
+                message_envelope=message_envelope,
+            )
+        except Exception as exc:
+            await event_logging.record_database_operation_event(
+                component=SERVICE_COMPONENT,
+                collection=CONVERSATION_HISTORY_COLLECTION,
+                operation_kind="insert_user_message",
+                status="failed",
+                idempotency_result=f"exception:{exc.__class__.__name__}",
+                latency_ms=_elapsed_ms(user_save_started_at),
+                correlation_id=correlation_id,
+                severity="warning",
+            )
+            raise
+
+        operation_status = "succeeded" if conversation_row_id else "failed"
+        idempotency_result = "inserted" if conversation_row_id else "not_committed"
+        await event_logging.record_database_operation_event(
+            component=SERVICE_COMPONENT,
+            collection=CONVERSATION_HISTORY_COLLECTION,
+            operation_kind="insert_user_message",
+            status=operation_status,
+            idempotency_result=idempotency_result,
+            latency_ms=_elapsed_ms(user_save_started_at),
+            document_ref=conversation_row_id or "",
+            correlation_id=correlation_id,
         )
         if conversation_row_id:
             item.conversation_row_id = conversation_row_id
@@ -678,6 +1019,7 @@ async def _process_queued_chat_item(item: QueuedChatItem) -> None:
                 "Surviving queued message persisted without conversation row "
                 f"id: sequence={item.sequence}"
             )
+        stages_reached.append("user_persisted")
 
         debug_modes: DebugModes = {
             "listen_only": req.debug_modes.listen_only,
@@ -689,6 +1031,7 @@ async def _process_queued_chat_item(item: QueuedChatItem) -> None:
 
         initial_should_respond = not debug_modes["listen_only"]
         active_flags = [key for key, value in debug_modes.items() if value]
+        debug_mode_names = active_flags
         if active_flags:
             logger.info(f'Debug modes active: {active_flags}')
 
@@ -719,6 +1062,23 @@ async def _process_queued_chat_item(item: QueuedChatItem) -> None:
             promoted_reflection_context = await build_promoted_reflection_context()
         except Exception as exc:
             logger.exception(f"Promoted reflection context load failed: {exc}")
+            (
+                error_class,
+                error_preview,
+                stack_fingerprint,
+                top_frame_module,
+            ) = _runtime_error_fields(exc)
+            await event_logging.record_runtime_error_event(
+                component=SERVICE_COMPONENT,
+                error_class=error_class,
+                error_preview=error_preview,
+                stack_fingerprint=stack_fingerprint,
+                top_frame_module=top_frame_module,
+                recovered=True,
+                status="recovered",
+                correlation_id=correlation_id,
+                severity="warning",
+            )
             promoted_reflection_context = {}
 
         episode_id, percept_id = _build_text_chat_episode_ids(
@@ -758,6 +1118,7 @@ async def _process_queued_chat_item(item: QueuedChatItem) -> None:
             target_broadcast=bool(prompt_message_context["broadcast"]),
             media_description_rows=media_description_rows,
         )
+        stages_reached.append("episode_built")
 
         initial_state: IMProcessState = {
             "timestamp": item.timestamp,
@@ -808,13 +1169,44 @@ async def _process_queued_chat_item(item: QueuedChatItem) -> None:
                 ]
             )
             _chat_input_queue.complete(item, response)
+            (
+                error_class,
+                error_preview,
+                stack_fingerprint,
+                top_frame_module,
+            ) = _runtime_error_fields(exc)
+            await event_logging.record_runtime_error_event(
+                component=SERVICE_COMPONENT,
+                error_class=error_class,
+                error_preview=error_preview,
+                stack_fingerprint=stack_fingerprint,
+                top_frame_module=top_frame_module,
+                recovered=True,
+                status="failed",
+                correlation_id=correlation_id,
+            )
+            await event_logging.record_pipeline_turn_event(
+                component=SERVICE_COMPONENT,
+                correlation_id=correlation_id,
+                status="failed",
+                queue_wait_ms=_queue_wait_ms(item),
+                stages_reached=stages_reached,
+                final_outcome="graph_error",
+                scheduled_followups=0,
+                debug_modes=debug_mode_names,
+                scope=scope,
+                duration_ms=_elapsed_ms(turn_started_at),
+                severity="error",
+            )
             return
 
+        stages_reached.append("graph")
         final_dialog = result["final_dialog"]
         use_reply_feature = bool(final_dialog) and bool(
             result["use_reply_feature"]
         )
         consolidation_state = result["consolidation_state"]
+        scheduled_followup_count = len(result["future_promises"])
 
         logger.debug(f'Chat result: platform={req.platform} channel={req.platform_channel_id or "<dm>"} message={req.platform_message_id or "<none>"} user={req.platform_user_id} should_respond={result["should_respond"]} use_reply_feature={use_reply_feature} final_dialog_count={len(final_dialog)} future_promises={len(result["future_promises"])} final_dialog={log_list_preview(final_dialog)}')
 
@@ -862,15 +1254,66 @@ async def _process_queued_chat_item(item: QueuedChatItem) -> None:
             delivery_tracking_id=delivery_tracking_id,
         )
         _chat_input_queue.complete(item, response)
+        stages_reached.append("response_completed")
 
         if should_save_assistant_message:
-            await _save_assistant_message(result)
+            assistant_save_started_at = time.perf_counter()
+            try:
+                await _save_assistant_message(result)
+            except Exception as exc:
+                await event_logging.record_database_operation_event(
+                    component=SERVICE_COMPONENT,
+                    collection=CONVERSATION_HISTORY_COLLECTION,
+                    operation_kind="insert_assistant_message",
+                    status="failed",
+                    idempotency_result=f"exception:{exc.__class__.__name__}",
+                    latency_ms=_elapsed_ms(assistant_save_started_at),
+                    document_ref=delivery_tracking_id,
+                    correlation_id=correlation_id,
+                    severity="warning",
+                )
+                raise
+
+            await event_logging.record_database_operation_event(
+                component=SERVICE_COMPONENT,
+                collection=CONVERSATION_HISTORY_COLLECTION,
+                operation_kind="insert_assistant_message",
+                status="succeeded",
+                idempotency_result="inserted",
+                latency_ms=_elapsed_ms(assistant_save_started_at),
+                document_ref=delivery_tracking_id,
+                correlation_id=correlation_id,
+            )
+            stages_reached.append("assistant_persisted")
         if should_record_progress and consolidation_state_dict is not None:
             await _run_conversation_progress_record_background(
                 consolidation_state_dict,
             )
+            stages_reached.append("progress_recorded")
         if should_consolidate and consolidation_state_dict is not None:
             await _run_consolidation_background(consolidation_state_dict)
+            stages_reached.append("consolidation_recorded")
+
+        if response_dialog:
+            final_outcome = "visible_reply"
+        elif debug_modes.get("think_only") and final_dialog:
+            final_outcome = "think_only"
+        elif debug_modes.get("listen_only"):
+            final_outcome = "listen_only"
+        else:
+            final_outcome = "no_response"
+        await event_logging.record_pipeline_turn_event(
+            component=SERVICE_COMPONENT,
+            correlation_id=correlation_id,
+            status="succeeded",
+            queue_wait_ms=_queue_wait_ms(item),
+            stages_reached=stages_reached,
+            final_outcome=final_outcome,
+            scheduled_followups=scheduled_followup_count,
+            debug_modes=debug_mode_names,
+            scope=scope,
+            duration_ms=_elapsed_ms(turn_started_at),
+        )
     except Exception as exc:
         logger.exception(f"Queued chat item failed: {exc}")
         response = ChatResponse(
@@ -879,6 +1322,35 @@ async def _process_queued_chat_item(item: QueuedChatItem) -> None:
             ]
         )
         _chat_input_queue.complete(item, response)
+        (
+            error_class,
+            error_preview,
+            stack_fingerprint,
+            top_frame_module,
+        ) = _runtime_error_fields(exc)
+        await event_logging.record_runtime_error_event(
+            component=SERVICE_COMPONENT,
+            error_class=error_class,
+            error_preview=error_preview,
+            stack_fingerprint=stack_fingerprint,
+            top_frame_module=top_frame_module,
+            recovered=True,
+            status="failed",
+            correlation_id=correlation_id,
+        )
+        await event_logging.record_pipeline_turn_event(
+            component=SERVICE_COMPONENT,
+            correlation_id=correlation_id,
+            status="failed",
+            queue_wait_ms=_queue_wait_ms(item),
+            stages_reached=stages_reached,
+            final_outcome="runtime_error",
+            scheduled_followups=scheduled_followup_count,
+            debug_modes=debug_mode_names,
+            scope=scope,
+            duration_ms=_elapsed_ms(turn_started_at),
+            severity="error",
+        )
 
 
 async def _chat_input_worker() -> None:
@@ -953,6 +1425,20 @@ async def _enqueue_chat_request(req: ChatRequest) -> ChatResponse:
     """
 
     _ensure_chat_input_worker_started()
+    await event_logging.record_queue_intake_event(
+        component=SERVICE_COMPONENT,
+        correlation_id=_chat_correlation_id(req),
+        status="accepted",
+        queue_depth=_chat_input_queue.pending_count() + 1,
+        coalesced_count=0,
+        dropped_count=0,
+        protected_by_reply=(
+            req.message_envelope.reply is not None
+            and req.message_envelope.reply.global_user_id == CHARACTER_GLOBAL_USER_ID
+        ),
+        listen_only=req.debug_modes.listen_only,
+        scope=_service_event_scope(req),
+    )
     response = await _chat_input_queue.enqueue(req)
     return response
 
@@ -1052,97 +1538,235 @@ async def lifespan(app: FastAPI):
     global _graph, _task_dispatcher, _adapter_registry
     global _reflection_worker_handle, _self_cognition_worker_handle
 
-    # 1. Database bootstrap
-    await db_bootstrap()
-
-    # 2. Hydrate persistent RAG initializer cache into the process-local LRU
-    await _hydrate_rag_initializer_cache()
-
-    # 3. Load character profile from database
-    character_profile = await get_character_profile()
-    if not character_profile.get("name"):
-        raise RuntimeError(
-            "No character profile found in the database. "
-            "Please load one first with:  "
-            "python -m scripts.load_character_profile personalities/kazusa.json"
-        )
-    (
-        _static_character_profile,
-        _runtime_character_state,
-    ) = split_character_profile_runtime_state(character_profile)
-    await _refresh_runtime_character_state()
-
-    # 4. Build the LangGraph pipeline
-    _graph = _build_graph()
-
-    # 5. Start MCP tool servers
+    process_correlation_id = uuid4().hex
+    host_label = socket.gethostname()
     try:
-        await mcp_manager.start()
+        # 1. Database bootstrap
+        database_started_at = time.perf_counter()
+        await db_bootstrap()
+        await event_logging.record_resource_health_event(
+            component=SERVICE_COMPONENT,
+            resource_name="mongo",
+            resource_kind="database",
+            availability="available",
+            latency_ms=_elapsed_ms(database_started_at),
+            status="ok",
+        )
+
+        # 2. Hydrate persistent RAG initializer cache into the process-local LRU
+        cache_started_at = time.perf_counter()
+        await _hydrate_rag_initializer_cache()
+        await event_logging.record_resource_health_event(
+            component=SERVICE_COMPONENT,
+            resource_name="rag_initializer_cache",
+            resource_kind="cache",
+            availability="available",
+            latency_ms=_elapsed_ms(cache_started_at),
+            status="ok",
+        )
+
+        # 3. Load character profile from database
+        character_profile = await get_character_profile()
+        if not character_profile.get("name"):
+            raise RuntimeError(
+                "No character profile found in the database. "
+                "Please load one first with:  "
+                "python -m scripts.load_character_profile personalities/kazusa.json"
+            )
+        (
+            _static_character_profile,
+            _runtime_character_state,
+        ) = split_character_profile_runtime_state(character_profile)
+        await _refresh_runtime_character_state()
+
+        # 4. Build the LangGraph pipeline
+        _graph = _build_graph()
+
+        # 5. Start MCP tool servers
+        mcp_started_at = time.perf_counter()
+        try:
+            await mcp_manager.start()
+        except Exception as exc:
+            logger.exception(
+                f"MCP manager failed to start — tools will be unavailable: {exc}"
+            )
+            await event_logging.record_resource_health_event(
+                component=SERVICE_COMPONENT,
+                resource_name="mcp_manager",
+                resource_kind="tool_runtime",
+                availability="degraded",
+                latency_ms=_elapsed_ms(mcp_started_at),
+                failure_class=exc.__class__.__name__,
+                status="degraded",
+                severity="warning",
+            )
+            (
+                error_class,
+                error_preview,
+                stack_fingerprint,
+                top_frame_module,
+            ) = _runtime_error_fields(exc)
+            await event_logging.record_runtime_error_event(
+                component=SERVICE_COMPONENT,
+                error_class=error_class,
+                error_preview=error_preview,
+                stack_fingerprint=stack_fingerprint,
+                top_frame_module=top_frame_module,
+                recovered=True,
+                status="recovered",
+                correlation_id=process_correlation_id,
+                severity="warning",
+            )
+        else:
+            await event_logging.record_resource_health_event(
+                component=SERVICE_COMPONENT,
+                resource_name="mcp_manager",
+                resource_kind="tool_runtime",
+                availability="available",
+                latency_ms=_elapsed_ms(mcp_started_at),
+                status="ok",
+            )
+
+        # 6. Build the task-dispatch runtime
+        tool_registry = ToolRegistry()
+        tool_registry.register(build_send_message_tool())
+        adapter_registry = AdapterRegistry()
+        _adapter_registry = adapter_registry
+        pending_index = PendingTaskIndex()
+        await pending_index.rebuild_from_db()
+        evaluator = ToolCallEvaluator(tool_registry, adapter_registry)
+        _task_dispatcher = TaskDispatcher(evaluator, pending_index)
+        configure_task_dispatcher(_task_dispatcher, tool_registry)
+        scheduler.configure_runtime(
+            tool_registry=tool_registry,
+            adapter_registry=adapter_registry,
+            pending_index=pending_index,
+        )
+
+        # 7. Load pending scheduled events
+        if SCHEDULED_TASKS_ENABLED:
+            await scheduler.load_pending_events()
+        else:
+            logger.info("Scheduler disabled via SCHEDULED_TASKS_ENABLED=false — skipping load_pending_events")
+
+        logger.info(render_llm_route_table())
+        _ensure_chat_input_worker_started()
+        if SELF_COGNITION_ENABLED:
+            _self_cognition_worker_handle = start_self_cognition_worker(
+                is_primary_interaction_busy=_primary_interaction_busy,
+                dispatcher=_task_dispatcher,
+                character_profile_provider=_current_character_profile_snapshot,
+                output_root=SELF_COGNITION_TRACKING_DIR,
+            )
+        else:
+            logger.info(
+                "Self-cognition worker disabled via SELF_COGNITION_ENABLED=false"
+            )
+        if REFLECTION_CYCLE_ENABLED:
+            _reflection_worker_handle = start_reflection_cycle_worker(
+                is_primary_interaction_busy=lambda: False,
+            )
+        else:
+            logger.info(
+                "Reflection cycle worker disabled via REFLECTION_CYCLE_ENABLED=false"
+            )
+        await event_logging.record_process_event(
+            event_type="startup",
+            phase="lifespan",
+            component=SERVICE_COMPONENT,
+            status="ready",
+            pid=os.getpid(),
+            host_label=host_label,
+            correlation_id=process_correlation_id,
+        )
+        logger.info("Kazusa brain service is ready")
     except Exception as exc:
-        logger.exception(
-            f"MCP manager failed to start — tools will be unavailable: {exc}"
+        logger.exception(f"Kazusa brain service startup failed: {exc}")
+        (
+            error_class,
+            error_preview,
+            stack_fingerprint,
+            top_frame_module,
+        ) = _runtime_error_fields(exc)
+        await event_logging.record_runtime_error_event(
+            component=SERVICE_COMPONENT,
+            error_class=error_class,
+            error_preview=error_preview,
+            stack_fingerprint=stack_fingerprint,
+            top_frame_module=top_frame_module,
+            recovered=False,
+            status="failed",
+            correlation_id=process_correlation_id,
+            severity="critical",
         )
-
-    # 6. Build the task-dispatch runtime
-    tool_registry = ToolRegistry()
-    tool_registry.register(build_send_message_tool())
-    adapter_registry = AdapterRegistry()
-    _adapter_registry = adapter_registry
-    pending_index = PendingTaskIndex()
-    await pending_index.rebuild_from_db()
-    evaluator = ToolCallEvaluator(tool_registry, adapter_registry)
-    _task_dispatcher = TaskDispatcher(evaluator, pending_index)
-    configure_task_dispatcher(_task_dispatcher, tool_registry)
-    scheduler.configure_runtime(
-        tool_registry=tool_registry,
-        adapter_registry=adapter_registry,
-        pending_index=pending_index,
-    )
-
-    # 7. Load pending scheduled events
-    if SCHEDULED_TASKS_ENABLED:
-        await scheduler.load_pending_events()
-    else:
-        logger.info("Scheduler disabled via SCHEDULED_TASKS_ENABLED=false — skipping load_pending_events")
-
-    logger.info(render_llm_route_table())
-    _ensure_chat_input_worker_started()
-    if SELF_COGNITION_ENABLED:
-        _self_cognition_worker_handle = start_self_cognition_worker(
-            is_primary_interaction_busy=_primary_interaction_busy,
-            dispatcher=_task_dispatcher,
-            character_profile_provider=_current_character_profile_snapshot,
-            output_root=SELF_COGNITION_TRACKING_DIR,
+        await event_logging.record_process_event(
+            event_type="lifespan_error",
+            phase="startup",
+            component=SERVICE_COMPONENT,
+            status="failed",
+            pid=os.getpid(),
+            host_label=host_label,
+            severity="critical",
+            correlation_id=process_correlation_id,
         )
-    else:
-        logger.info(
-            "Self-cognition worker disabled via SELF_COGNITION_ENABLED=false"
-        )
-    if REFLECTION_CYCLE_ENABLED:
-        _reflection_worker_handle = start_reflection_cycle_worker(
-            is_primary_interaction_busy=lambda: False,
-        )
-    else:
-        logger.info(
-            "Reflection cycle worker disabled via REFLECTION_CYCLE_ENABLED=false"
-        )
-    logger.info("Kazusa brain service is ready")
+        raise
 
-    yield
-
-    # Shutdown
-    if _self_cognition_worker_handle is not None:
-        await stop_self_cognition_worker(_self_cognition_worker_handle)
-        _self_cognition_worker_handle = None
-    if _reflection_worker_handle is not None:
-        await stop_reflection_cycle_worker(_reflection_worker_handle)
-        _reflection_worker_handle = None
-    await _stop_chat_input_worker()
-    if SCHEDULED_TASKS_ENABLED:
-        await scheduler.shutdown()
-    await mcp_manager.stop()
-    await close_db()
-    logger.info("Kazusa brain service shut down")
+    try:
+        yield
+    finally:
+        try:
+            # Shutdown
+            if _self_cognition_worker_handle is not None:
+                await stop_self_cognition_worker(_self_cognition_worker_handle)
+                _self_cognition_worker_handle = None
+            if _reflection_worker_handle is not None:
+                await stop_reflection_cycle_worker(_reflection_worker_handle)
+                _reflection_worker_handle = None
+            await _stop_chat_input_worker()
+            if SCHEDULED_TASKS_ENABLED:
+                await scheduler.shutdown()
+            await mcp_manager.stop()
+            await event_logging.record_process_event(
+                event_type="shutdown",
+                phase="lifespan",
+                component=SERVICE_COMPONENT,
+                status="stopped",
+                pid=os.getpid(),
+                host_label=host_label,
+                correlation_id=process_correlation_id,
+            )
+            await close_db()
+            logger.info("Kazusa brain service shut down")
+        except Exception as exc:
+            logger.exception(f"Kazusa brain service shutdown failed: {exc}")
+            (
+                error_class,
+                error_preview,
+                stack_fingerprint,
+                top_frame_module,
+            ) = _runtime_error_fields(exc)
+            await event_logging.record_runtime_error_event(
+                component=SERVICE_COMPONENT,
+                error_class=error_class,
+                error_preview=error_preview,
+                stack_fingerprint=stack_fingerprint,
+                top_frame_module=top_frame_module,
+                recovered=False,
+                status="failed",
+                correlation_id=process_correlation_id,
+                severity="critical",
+            )
+            await event_logging.record_process_event(
+                event_type="lifespan_error",
+                phase="shutdown",
+                component=SERVICE_COMPONENT,
+                status="failed",
+                pid=os.getpid(),
+                host_label=host_label,
+                severity="critical",
+                correlation_id=process_correlation_id,
+            )
+            raise
 
 
 # ── App ─────────────────────────────────────────────────────────────
@@ -1158,6 +1782,46 @@ async def health():
         logger=logger,
     )
     return return_value
+
+
+@app.get("/ops/runtime-status", response_model=OpsRuntimeStatusResponse)
+async def ops_runtime_status(
+    window_hours: int = 24,
+) -> OpsRuntimeStatusResponse:
+    """Return bounded runtime status for trusted local operators."""
+
+    base_status = await event_logging.build_runtime_status(
+        window_hours=window_hours,
+    )
+    payload = _ops_runtime_status_payload(base_status)
+    response = OpsRuntimeStatusResponse.model_validate(payload)
+    return response
+
+
+@app.get("/ops/reflection/stats", response_model=OpsStatsResponse)
+async def ops_reflection_stats(
+    window_hours: int = 24,
+) -> OpsStatsResponse:
+    """Return aggregate reflection telemetry for trusted local operators."""
+
+    stats = await event_logging.build_reflection_stats(
+        window_hours=window_hours,
+    )
+    response = OpsStatsResponse.model_validate(stats)
+    return response
+
+
+@app.get("/ops/self-cognition/stats", response_model=OpsStatsResponse)
+async def ops_self_cognition_stats(
+    window_hours: int = 24,
+) -> OpsStatsResponse:
+    """Return aggregate self-cognition telemetry for trusted local operators."""
+
+    stats = await event_logging.build_self_cognition_stats(
+        window_hours=window_hours,
+    )
+    response = OpsStatsResponse.model_validate(stats)
+    return response
 
 
 @app.post("/runtime/adapters/register", response_model=RuntimeAdapterRegistrationResponse)

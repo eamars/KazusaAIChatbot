@@ -13,6 +13,23 @@ from kazusa_ai_chatbot import service as service_module
 from kazusa_ai_chatbot.reflection_cycle import worker as worker_module
 
 
+@pytest.fixture(autouse=True)
+def _stub_service_event_logging(monkeypatch) -> None:
+    """Keep lifespan scheduling tests off the event-log database."""
+
+    recorder_names = (
+        "record_process_event",
+        "record_resource_health_event",
+        "record_runtime_error_event",
+    )
+    for recorder_name in recorder_names:
+        monkeypatch.setattr(
+            service_module.event_logging,
+            recorder_name,
+            AsyncMock(),
+        )
+
+
 @pytest.mark.asyncio
 async def test_lifespan_starts_reflection_worker_by_default(monkeypatch) -> None:
     """FastAPI lifespan should start reflection when the worker flag is enabled."""

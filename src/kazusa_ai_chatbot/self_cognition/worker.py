@@ -19,6 +19,7 @@ from kazusa_ai_chatbot.config import (
     SELF_COGNITION_TRACKING_DIR,
     SELF_COGNITION_WORKER_INTERVAL_SECONDS,
 )
+from kazusa_ai_chatbot import event_logging
 from kazusa_ai_chatbot.dispatcher import TaskDispatcher
 from kazusa_ai_chatbot.self_cognition import artifacts, handoff, models, runner
 from kazusa_ai_chatbot.self_cognition import sources as source_collectors
@@ -134,6 +135,7 @@ async def run_self_cognition_worker_tick(
             deferred=True,
             defer_reason="primary interaction busy",
         )
+        await _record_worker_tick_event(result)
         return result
 
     active_profile = character_profile or {}
@@ -145,6 +147,7 @@ async def run_self_cognition_worker_tick(
     )
     if not cases:
         result = SelfCognitionWorkerResult(skipped_count=1)
+        await _record_worker_tick_event(result)
         return result
 
     root = Path(output_root)
@@ -169,7 +172,7 @@ async def run_self_cognition_worker_tick(
         )
         result.processed_count += 1
         result.artifact_paths.extend(str(path) for path in paths.values())
-        await _handle_case_action_outputs(
+        dispatch_status = await _handle_case_action_outputs(
             case=case_for_run,
             output_dir=output_dir,
             paths=paths,
@@ -179,7 +182,13 @@ async def run_self_cognition_worker_tick(
             result=result,
             output_root=root,
         )
+        await _record_self_cognition_event_from_paths(
+            case=case_for_run,
+            paths=paths,
+            dispatch_status=dispatch_status,
+        )
 
+    await _record_worker_tick_event(result)
     return result
 
 
@@ -205,6 +214,14 @@ async def _self_cognition_worker_loop(
             )
         except Exception as exc:
             logger.exception(f"Self-cognition worker tick failed: {exc}")
+            await event_logging.record_runtime_error_event(
+                component="self_cognition.worker",
+                error_class=type(exc).__name__,
+                error_preview=str(exc),
+                stack_fingerprint="self_cognition_worker_tick",
+                top_frame_module=__name__,
+                recovered=True,
+            )
         try:
             await asyncio.wait_for(
                 stop_event.wait(),
@@ -248,12 +265,13 @@ async def _handle_case_action_outputs(
     dispatch_candidate_func: Callable[..., Any],
     result: SelfCognitionWorkerResult,
     output_root: Path,
-) -> None:
+) -> str:
     """Record action attempts and optional dispatcher handoff for one case."""
 
     attempt_path = paths.get(models.ARTIFACT_ACTION_ATTEMPT)
     if not attempt_path:
-        return
+        return_value = "not_requested"
+        return return_value
 
     action_attempt = _read_json(attempt_path)
     candidate_path = paths.get(models.ARTIFACT_ACTION_CANDIDATE)
@@ -264,7 +282,8 @@ async def _handle_case_action_outputs(
             now=now,
         )
         artifacts.append_action_attempt_ledger(output_root, ledger_attempt)
-        return
+        return_value = "not_requested"
+        return return_value
 
     action_candidate = _read_json(candidate_path)
     if dispatcher is None:
@@ -288,6 +307,22 @@ async def _handle_case_action_outputs(
         result.dispatched_count += 1
     elif dispatch_result["status"] == "rejected":
         result.rejected_count += 1
+    await event_logging.record_dispatcher_event(
+        component="self_cognition.worker",
+        action_kind=models.ACTION_KIND_SEND_MESSAGE,
+        validation_status=str(dispatch_result["status"]),
+        adapter_available=bool(dispatcher is not None),
+        status=str(dispatch_result["status"]),
+        scheduled_event_ids=[
+            str(event_id)
+            for event_id in dispatch_result["scheduled_event_ids"]
+        ],
+        rejection_codes=[
+            str(rejection)
+            for rejection in dispatch_result["rejections"]
+        ],
+        attempt_id=str(action_attempt["attempt_id"]),
+    )
 
     ledger_attempt = _ledger_attempt(
         action_attempt,
@@ -295,6 +330,71 @@ async def _handle_case_action_outputs(
         now=now,
     )
     artifacts.append_action_attempt_ledger(output_root, ledger_attempt)
+    return_value = str(dispatch_result["status"])
+    return return_value
+
+
+async def _record_worker_tick_event(result: SelfCognitionWorkerResult) -> None:
+    """Record one sanitized self-cognition worker tick summary."""
+
+    if result.deferred:
+        status = "deferred"
+    elif result.processed_count == 0 and result.skipped_count > 0:
+        status = "skipped"
+    else:
+        status = "completed"
+    await event_logging.record_worker_event(
+        event_type="tick",
+        component="self_cognition.worker",
+        worker_name="self_cognition",
+        enabled=True,
+        dry_run=False,
+        run_kind="self_cognition_tick",
+        status=status,
+        processed_count=result.processed_count,
+        succeeded_count=result.dispatched_count,
+        failed_count=result.rejected_count,
+        skipped_count=result.skipped_count,
+        deferred=result.deferred,
+        defer_reason=result.defer_reason,
+    )
+
+
+async def _record_self_cognition_event_from_paths(
+    *,
+    case: models.SelfCognitionCase,
+    paths: dict[str, str],
+    dispatch_status: str,
+) -> None:
+    """Mirror local self-cognition artifacts into event logging."""
+
+    trigger_path = paths.get(models.ARTIFACT_TRIGGER_RECORD)
+    run_path = paths.get(models.ARTIFACT_RUN_RECORD)
+    if not trigger_path or not run_path:
+        return
+    trigger_record = _read_json(trigger_path)
+    run_record = _read_json(run_path)
+    attempt_path = paths.get(models.ARTIFACT_ACTION_ATTEMPT)
+    action_attempt = _read_json(attempt_path) if attempt_path else {}
+    budget = run_record["budget"]
+    await event_logging.record_self_cognition_event(
+        component="self_cognition.worker",
+        case_id=str(case.get("case_id") or ""),
+        trigger_kind=str(trigger_record["trigger_kind"]),
+        selected_route=str(run_record["selected_route"]),
+        output_mode=str(run_record["output_mode"]),
+        budget={
+            "rag_calls": int(budget["rag_calls"]),
+            "cognition_calls": int(budget["cognition_calls"]),
+            "dialog_calls": int(budget["dialog_calls"]),
+            "topic_limit": int(budget["topic_limit"]),
+        },
+        dispatch_status=dispatch_status,
+        status=str(run_record["status"]),
+        trigger_id=str(trigger_record["trigger_id"]),
+        run_id=str(run_record["run_id"]),
+        attempt_id=str(action_attempt.get("attempt_id") or ""),
+    )
 
 
 def _case_with_prior_attempts(

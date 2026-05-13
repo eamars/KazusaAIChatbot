@@ -20,6 +20,7 @@ from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition import (
 from kazusa_ai_chatbot.nodes.persona_supervisor2_rag_supervisor2 import (
     call_rag_supervisor,
 )
+from kazusa_ai_chatbot import event_logging
 from kazusa_ai_chatbot.rag.user_memory_unit_retrieval import (
     empty_user_memory_context,
 )
@@ -36,6 +37,8 @@ def run_self_cognition_case(
     output_dir: str | Path,
     rag_client: RagClient | None = None,
     cognition_client: SelfCognitionClient | None = None,
+    *,
+    event_log_mirror: bool = False,
 ) -> dict[str, str]:
     """Run one dry-run case and write local tracking artifacts.
 
@@ -44,6 +47,8 @@ def run_self_cognition_case(
         output_dir: Local output directory for artifacts.
         rag_client: Optional test seam for the RAG2 supervisor.
         cognition_client: Optional test seam for the shared cognition graph.
+        event_log_mirror: When true, mirror sanitized artifact metadata through
+            the public event-logging interface.
 
     Returns:
         Artifact names mapped to written paths.
@@ -55,6 +60,7 @@ def run_self_cognition_case(
             output_dir,
             rag_client=rag_client,
             cognition_client=cognition_client,
+            event_log_mirror=event_log_mirror,
         )
     )
     return written_paths
@@ -65,6 +71,8 @@ async def run_self_cognition_case_async(
     output_dir: str | Path,
     rag_client: RagClient | None = None,
     cognition_client: SelfCognitionClient | None = None,
+    *,
+    event_log_mirror: bool = False,
 ) -> dict[str, str]:
     """Async implementation for one self-cognition dry-run case.
 
@@ -73,6 +81,8 @@ async def run_self_cognition_case_async(
         output_dir: Local output directory for artifacts.
         rag_client: Optional test seam for the RAG2 supervisor.
         cognition_client: Optional test seam for the shared cognition graph.
+        event_log_mirror: When true, mirror sanitized artifact metadata through
+            the public event-logging interface.
 
     Returns:
         Artifact names mapped to written paths.
@@ -105,6 +115,13 @@ async def run_self_cognition_case_async(
             output_dir,
             artifact_payloads,
         )
+        if event_log_mirror:
+            await _record_self_cognition_event_from_artifacts(
+                case=case,
+                artifact_payloads=artifact_payloads,
+                dispatch_status="not_requested",
+                component="self_cognition.runner",
+            )
         return written_paths
 
     rag_output: dict[str, Any] | None = None
@@ -203,7 +220,51 @@ async def run_self_cognition_case_async(
         output_dir,
         artifact_payloads,
     )
+    if event_log_mirror:
+        await _record_self_cognition_event_from_artifacts(
+            case=case,
+            artifact_payloads=artifact_payloads,
+            dispatch_status="not_requested",
+            component="self_cognition.runner",
+        )
     return written_paths
+
+
+async def _record_self_cognition_event_from_artifacts(
+    *,
+    case: models.SelfCognitionCase,
+    artifact_payloads: dict[str, Any],
+    dispatch_status: str,
+    component: str,
+) -> None:
+    """Mirror built tracking artifacts into the event log without raw text."""
+
+    trigger_record = artifact_payloads.get(models.ARTIFACT_TRIGGER_RECORD)
+    run_record = artifact_payloads.get(models.ARTIFACT_RUN_RECORD)
+    action_attempt = artifact_payloads.get(models.ARTIFACT_ACTION_ATTEMPT)
+    if not isinstance(trigger_record, dict) or not isinstance(run_record, dict):
+        return
+    if not isinstance(action_attempt, dict):
+        action_attempt = {}
+    budget = run_record["budget"]
+    await event_logging.record_self_cognition_event(
+        component=component,
+        case_id=_string_field(case, "case_id"),
+        trigger_kind=str(trigger_record["trigger_kind"]),
+        selected_route=str(run_record["selected_route"]),
+        output_mode=str(run_record["output_mode"]),
+        budget={
+            "rag_calls": int(budget["rag_calls"]),
+            "cognition_calls": int(budget["cognition_calls"]),
+            "dialog_calls": int(budget["dialog_calls"]),
+            "topic_limit": int(budget["topic_limit"]),
+        },
+        dispatch_status=dispatch_status,
+        status=str(run_record["status"]),
+        trigger_id=str(trigger_record["trigger_id"]),
+        run_id=str(run_record["run_id"]),
+        attempt_id=str(action_attempt.get("attempt_id") or ""),
+    )
 
 
 async def _default_rag_client(

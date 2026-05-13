@@ -5,10 +5,12 @@ from __future__ import annotations
 import copy
 import json
 import logging
+import time
 from typing import Any
 
 from langchain_core.messages import HumanMessage, SystemMessage
 
+from kazusa_ai_chatbot import event_logging
 from kazusa_ai_chatbot.config import (
     RAG_SUBAGENT_LLM_API_KEY,
     RAG_SUBAGENT_LLM_BASE_URL,
@@ -41,6 +43,31 @@ from kazusa_ai_chatbot.utils import (
 )
 
 logger = logging.getLogger(__name__)
+
+MILLISECONDS_PER_SECOND = 1000
+RAG_EVALUATOR_COMPONENT = "nodes.persona_supervisor2_rag_evaluator"
+
+
+def _elapsed_ms(started_at: float) -> int:
+    """Return elapsed monotonic milliseconds since a start marker."""
+
+    elapsed = time.perf_counter() - started_at
+    elapsed_ms = max(0, int(elapsed * MILLISECONDS_PER_SECOND))
+    return elapsed_ms
+
+
+def _state_correlation_id(state: ProgressiveRAGState) -> str:
+    """Build a non-content correlation id for RAG evaluator work."""
+
+    context = state.get("context", {})
+    if isinstance(context, dict):
+        platform = str(context.get("platform", ""))
+        message_ref = str(context.get("platform_message_id", "") or "")
+    else:
+        platform = ""
+        message_ref = ""
+    correlation_id = f"rag:{platform}:{message_ref or 'no-message-id'}"
+    return correlation_id
 
 
 # ── Evaluator ──────────────────────────────────────────────────────
@@ -174,7 +201,21 @@ async def _summarize_agent_result(
             default=str,
         )
     )
+    started_at = time.perf_counter()
     response = await _evaluator_summarizer_llm.ainvoke([system_prompt, human_message])
+    await event_logging.record_llm_stage_event(
+        component=RAG_EVALUATOR_COMPONENT,
+        stage_name="rag_result_summarizer",
+        route_name=agent_name,
+        model_name=RAG_SUBAGENT_LLM_MODEL,
+        status="succeeded",
+        prompt_chars=len(system_prompt.content) + len(human_message.content),
+        output_chars=len(str(response.content)),
+        parse_status="not_json",
+        retry_count=0,
+        json_repair_used=False,
+        duration_ms=_elapsed_ms(started_at),
+    )
     return_value = response.content.strip()
     return return_value
 
@@ -471,10 +512,12 @@ async def _assess_continuation(
             default=str,
         )
     )
+    started_at = time.perf_counter()
     response = await _continuation_assessor_llm.ainvoke(
         [system_prompt, human_message],
     )
     raw_decision = parse_llm_json_output(response.content)
+    parse_status = "succeeded" if isinstance(raw_decision, dict) else "failed"
     decision = validate_refined_query(
         raw_decision,
         original_query=original_query,
@@ -493,6 +536,20 @@ async def _assess_continuation(
         f"payload={log_preview(observation_payload)} "
         f"raw_decision={log_preview(raw_decision)} "
         f"validated={log_preview(decision)}"
+    )
+    await event_logging.record_llm_stage_event(
+        component=RAG_EVALUATOR_COMPONENT,
+        stage_name="continuation_assessor",
+        route_name="continuation",
+        model_name=RAG_SUBAGENT_LLM_MODEL,
+        status="succeeded" if parse_status == "succeeded" else "failed",
+        prompt_chars=len(system_prompt.content) + len(human_message.content),
+        output_chars=len(str(response.content)),
+        parse_status=parse_status,
+        retry_count=0,
+        json_repair_used=False,
+        duration_ms=_elapsed_ms(started_at),
+        severity="info" if parse_status == "succeeded" else "warning",
     )
     return decision
 
@@ -724,11 +781,26 @@ async def rag_finalizer(state: ProgressiveRAGState) -> dict:
     }
     human_message = HumanMessage(content=json.dumps(finalizer_input, ensure_ascii=False, default=str))
 
+    started_at = time.perf_counter()
     response = await _finalizer_llm.ainvoke([system_prompt, human_message])
     logger.info(f"RAG2 finalizer output: answer={log_preview(response.content)}")
     logger.debug(
         f'RAG2 finalizer metadata: query={log_preview(state["original_query"])} '
         f'facts={len(state.get("known_facts", []))}'
+    )
+    await event_logging.record_llm_stage_event(
+        component=RAG_EVALUATOR_COMPONENT,
+        stage_name="rag_finalizer",
+        route_name="finalize",
+        model_name=RAG_SUBAGENT_LLM_MODEL,
+        status="succeeded",
+        prompt_chars=len(system_prompt.content) + len(human_message.content),
+        output_chars=len(str(response.content)),
+        parse_status="not_json",
+        retry_count=0,
+        json_repair_used=False,
+        correlation_id=_state_correlation_id(state),
+        duration_ms=_elapsed_ms(started_at),
     )
     return_value = {"final_answer": response.content}
     return return_value

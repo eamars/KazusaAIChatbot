@@ -107,6 +107,20 @@ The live worker stores suppression history in
 `SELF_COGNITION_TRACKING_DIR/self_cognition_action_attempts.jsonl`. This file
 is the module's own tracking system and is not a production database schema.
 
+## Event Logging
+
+The production worker mirrors sanitized trigger, run, route, action-attempt,
+and dispatcher-result metadata through `kazusa_ai_chatbot.event_logging`.
+This event-log mirror is the durable operator view for long-term production
+counts and `/ops/self-cognition/stats`.
+
+Local artifacts remain the canonical dry-run and debug output. Existing
+artifact files and the local action-attempt ledger are not backfilled into
+production MongoDB by this module. Event-log rows store ids, route names,
+output modes, budget counters, dispatch status, and status labels; they must
+not include source packet text, action candidate text, raw target channels, or
+conversation bodies.
+
 ## Artifacts
 
 The dry-run writer or live worker may produce:

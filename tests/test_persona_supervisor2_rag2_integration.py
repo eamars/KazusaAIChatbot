@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -11,6 +12,22 @@ from kazusa_ai_chatbot.nodes import persona_supervisor2 as supervisor_module
 from kazusa_ai_chatbot.nodes import persona_supervisor2_rag_supervisor2 as rag2_module
 from kazusa_ai_chatbot.rag.cache2_runtime import RAGCache2Runtime
 from kazusa_ai_chatbot.time_context import build_character_time_context
+
+
+@pytest.fixture(autouse=True)
+def _stub_rag_event_logging(monkeypatch):
+    """Keep deterministic RAG tests away from event-log persistence."""
+
+    for recorder_name in (
+        "record_rag_stage_event",
+        "record_llm_stage_event",
+        "record_model_contract_event",
+    ):
+        monkeypatch.setattr(
+            rag2_module.event_logging,
+            recorder_name,
+            AsyncMock(),
+        )
 
 
 class _DummyResponse:

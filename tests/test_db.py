@@ -86,6 +86,8 @@ class _BootstrapDb:
             "global_character_growth_traits",
             "global_character_growth_runs",
             "rag_cache2_persistent",
+            "event_log_events",
+            "event_log_snapshots",
         ]
         self.collections = {
             name: _BootstrapCollection()
@@ -699,6 +701,11 @@ async def test_db_bootstrap_creates_platform_message_lookup_index(monkeypatch) -
     )
     monkeypatch.setattr(
         db_bootstrap_module,
+        "ensure_event_log_indexes",
+        AsyncMock(),
+    )
+    monkeypatch.setattr(
+        db_bootstrap_module,
         "purge_stale_initializer_entries",
         AsyncMock(),
     )
@@ -748,6 +755,11 @@ async def test_db_bootstrap_delegates_global_character_growth_indexes(
     )
     monkeypatch.setattr(
         db_bootstrap_module,
+        "ensure_event_log_indexes",
+        AsyncMock(),
+    )
+    monkeypatch.setattr(
+        db_bootstrap_module,
         "purge_stale_initializer_entries",
         AsyncMock(),
     )
@@ -760,6 +772,52 @@ async def test_db_bootstrap_delegates_global_character_growth_indexes(
     await db_bootstrap_module.db_bootstrap()
 
     ensure_global_growth.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_db_bootstrap_delegates_event_log_indexes(
+    monkeypatch,
+) -> None:
+    """Bootstrap should prepare event-log storage through its DB owner."""
+
+    db = _BootstrapDb()
+    ensure_event_log = AsyncMock()
+    monkeypatch.setattr(db_bootstrap_module, "get_db", AsyncMock(return_value=db))
+    monkeypatch.setattr(db_bootstrap_module, "enable_vector_index", AsyncMock())
+    monkeypatch.setattr(
+        db_bootstrap_module,
+        "ensure_reflection_run_indexes",
+        AsyncMock(),
+    )
+    monkeypatch.setattr(
+        db_bootstrap_module,
+        "ensure_interaction_style_image_indexes",
+        AsyncMock(),
+    )
+    monkeypatch.setattr(
+        db_bootstrap_module,
+        "ensure_global_character_growth_indexes",
+        AsyncMock(),
+    )
+    monkeypatch.setattr(
+        db_bootstrap_module,
+        "ensure_event_log_indexes",
+        ensure_event_log,
+    )
+    monkeypatch.setattr(
+        db_bootstrap_module,
+        "purge_stale_initializer_entries",
+        AsyncMock(),
+    )
+    monkeypatch.setattr(
+        db_bootstrap_module,
+        "prune_persistent_entries",
+        AsyncMock(),
+    )
+
+    await db_bootstrap_module.db_bootstrap()
+
+    ensure_event_log.assert_awaited_once()
 
 
 @pytest.mark.asyncio
@@ -789,6 +847,11 @@ async def test_db_bootstrap_configures_conversation_vector_filter_paths(
     monkeypatch.setattr(
         db_bootstrap_module,
         "ensure_global_character_growth_indexes",
+        AsyncMock(),
+    )
+    monkeypatch.setattr(
+        db_bootstrap_module,
+        "ensure_event_log_indexes",
         AsyncMock(),
     )
     monkeypatch.setattr(

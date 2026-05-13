@@ -18,6 +18,22 @@ from kazusa_ai_chatbot.config import CHARACTER_GLOBAL_USER_ID
 from kazusa_ai_chatbot.utils import build_interaction_history_recent
 
 
+@pytest.fixture(autouse=True)
+def _stub_dialog_event_logging(monkeypatch):
+    """Keep deterministic dialog tests away from event-log persistence."""
+
+    for recorder_name in (
+        "record_llm_stage_event",
+        "record_model_contract_event",
+        "record_dialog_quality_event",
+    ):
+        monkeypatch.setattr(
+            dialog_module.event_logging,
+            recorder_name,
+            AsyncMock(),
+        )
+
+
 def _base_global_state():
     """Minimal GlobalPersonaState for testing dialog_agent."""
     return {

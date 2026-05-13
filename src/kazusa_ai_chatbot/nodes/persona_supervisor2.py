@@ -1,9 +1,11 @@
 """Persona graph orchestration for decontextualization, RAG, cognition, and dialog."""
 
 import logging
+import time
 
 from langgraph.graph import END, START, StateGraph
 
+from kazusa_ai_chatbot import event_logging
 from kazusa_ai_chatbot.config import CHAT_HISTORY_RECENT_LIMIT
 from kazusa_ai_chatbot.nodes.dialog_agent import dialog_agent
 from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition import call_cognition_subgraph
@@ -24,6 +26,26 @@ from kazusa_ai_chatbot.time_context import format_history_for_llm
 from kazusa_ai_chatbot.utils import build_interaction_history_recent, log_preview
 
 logger = logging.getLogger(__name__)
+
+MILLISECONDS_PER_SECOND = 1000
+PERSONA_RAG_COMPONENT = "nodes.persona_supervisor2"
+
+
+def _elapsed_ms(started_at: float) -> int:
+    """Return elapsed monotonic milliseconds since a start marker."""
+
+    elapsed = time.perf_counter() - started_at
+    elapsed_ms = max(0, int(elapsed * MILLISECONDS_PER_SECOND))
+    return elapsed_ms
+
+
+def _rag_correlation_id(state: GlobalPersonaState) -> str:
+    """Build a non-content correlation id for persona RAG work."""
+
+    platform = str(state.get("platform", ""))
+    message_ref = str(state.get("platform_message_id", "") or "no-message-id")
+    correlation_id = f"rag:{platform}:{message_ref}"
+    return correlation_id
 
 
 def _cognition_requests_silence(state: GlobalPersonaState) -> bool:
@@ -97,6 +119,8 @@ async def stage_1_research(state: GlobalPersonaState) -> dict:
     Returns:
         A partial state update containing the projected ``rag_result``.
     """
+    started_at = time.perf_counter()
+    correlation_id = _rag_correlation_id(state)
     referents = state["referents"]
     if should_skip_rag_for_unresolved_referents(referents):
         referent_reason = unresolved_referent_reason(referents)
@@ -117,6 +141,17 @@ async def stage_1_research(state: GlobalPersonaState) -> dict:
             f'user={state["global_user_id"]} '
             f'query={log_preview(state["decontexualized_input"])} '
             f"rag_result={log_preview(rag_result)}"
+        )
+        await event_logging.record_rag_stage_event(
+            component=PERSONA_RAG_COMPONENT,
+            correlation_id=correlation_id,
+            agent_name="stage_1_research",
+            status="skipped",
+            slot_count=0,
+            retrieval_count=0,
+            cache_hit=False,
+            no_evidence=True,
+            latency_ms=_elapsed_ms(started_at),
         )
         return_value = {
             "rag_result": rag_result,
@@ -169,6 +204,24 @@ async def stage_1_research(state: GlobalPersonaState) -> dict:
         f'conversation_evidence={len(rag_result["conversation_evidence"])} '
         f'external_evidence={len(rag_result["external_evidence"])} '
         f"rag_result={log_preview(rag_result)}"
+    )
+    retrieval_count = (
+        len(rag_result["memory_evidence"])
+        + len(rag_result["recall_evidence"])
+        + len(rag_result["conversation_evidence"])
+        + len(rag_result["external_evidence"])
+        + len(rag_result["third_party_profiles"])
+    )
+    await event_logging.record_rag_stage_event(
+        component=PERSONA_RAG_COMPONENT,
+        correlation_id=correlation_id,
+        agent_name="stage_1_research",
+        status="succeeded",
+        slot_count=len(rag_supervisor_result["unknown_slots"]),
+        retrieval_count=retrieval_count,
+        cache_hit=False,
+        no_evidence=retrieval_count == 0,
+        latency_ms=_elapsed_ms(started_at),
     )
     return_value = {
         "rag_result": rag_result,

@@ -9,6 +9,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 import kazusa_ai_chatbot.scheduler as scheduler
+from kazusa_ai_chatbot.dispatcher import handlers as handlers_module
 from kazusa_ai_chatbot.dispatcher import (
     AdapterRegistry,
     PendingTaskIndex,
@@ -71,6 +72,22 @@ def _reset_scheduler_runtime():
     for task in list(scheduler._pending_tasks.values()):
         task.cancel()
     scheduler._pending_tasks.clear()
+
+
+@pytest.fixture(autouse=True)
+def _stub_dispatcher_event_logging(monkeypatch) -> None:
+    """Keep scheduler tests off the event-log database."""
+
+    monkeypatch.setattr(
+        handlers_module.event_logging,
+        "record_dispatcher_event",
+        AsyncMock(),
+    )
+    monkeypatch.setattr(
+        handlers_module.event_logging,
+        "record_runtime_error_event",
+        AsyncMock(),
+    )
 
 
 def _configure_runtime() -> tuple[_StubAdapter, PendingTaskIndex]:

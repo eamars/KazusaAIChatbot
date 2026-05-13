@@ -332,6 +332,32 @@ Stores persistent initializer cache entries for RAG Cache2. The collection is
 owned by cache helpers that build version keys, load entries, record hits, and
 prune stale data.
 
+### `event_log_events`
+
+Append-only canonical observability stream. Runtime callers do not write this
+collection directly; they call the public `kazusa_ai_chatbot.event_logging`
+interface, and event-logging internals call the DB adapter.
+
+The collection stores sanitized event families for process lifecycle, workers,
+LLM stage metadata, runtime errors, queue/pipeline decisions, RAG stages,
+dialog quality, dispatcher outcomes, approved database operation outcomes,
+self-cognition mirrors, model contract drift, and resource health. Documents
+store IDs, refs, counts, statuses, timestamps, components, labels, and
+sanitized warning/error metadata. They must not store prompt text, model
+answers, message bodies, generated dialog, base64 media, vector arrays,
+secrets, callback credentials, raw channel ids, raw documents, or raw adapter
+responses.
+
+### `event_log_snapshots`
+
+Append-only deterministic aggregate snapshots for later operator or approved
+agent review. Snapshot documents contain bounded source counts, semantic
+descriptors, findings, and source event refs. They are generated without LLM
+calls and must remain prompt-safe.
+
+Retention and archival for event-log collections are intentionally deferred.
+Any pruning, compaction, or archival policy requires a separate approved plan.
+
 ### Deprecated Or Removed Collections
 
 `user_profile_memories` is no longer created by bootstrap. Cognition-facing
@@ -423,6 +449,9 @@ Outside `src/kazusa_ai_chatbot/db/` callers use:
 - `from kazusa_ai_chatbot.db import script_operations` for maintenance scripts
 - `from kazusa_ai_chatbot.db.script_operations import ...` for maintenance
   scripts
+- `from kazusa_ai_chatbot import event_logging` for runtime event capture;
+  runtime callers must not import `kazusa_ai_chatbot.db.event_logging`
+  directly.
 - DB TypedDicts and `DatabaseOperationError` through the public facade.
 
 Inside `src/kazusa_ai_chatbot/db/`, package internals use backend access,

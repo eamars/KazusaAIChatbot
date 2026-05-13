@@ -109,6 +109,7 @@ plans.
 | [conversation_progress_flow_phase2_plan.md](archive/completed/short_term/conversation_progress_flow_phase2_plan.md) |
 | [conversation_progress_phase3_quality_plan.md](archive/completed/short_term/conversation_progress_phase3_quality_plan.md) |
 | [conversation_progress_state_plan.md](archive/completed/short_term/conversation_progress_state_plan.md) |
+| [event_logging_observability_plan.md](archive/completed/short_term/event_logging_observability_plan.md) |
 | [first_class_image_input_cognition_plan.md](archive/completed/short_term/first_class_image_input_cognition_plan.md) |
 | [get_db_private_boundary_plan.md](archive/completed/short_term/get_db_private_boundary_plan.md) |
 | [global_character_growth_from_reflection_plan.md](archive/completed/short_term/global_character_growth_from_reflection_plan.md) |

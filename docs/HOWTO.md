@@ -269,6 +269,57 @@ The Cache2 block intentionally exposes only agent names and aggregate lookup
 counts. It does not include cache keys, user identifiers, queries, dependency
 scopes, or cached retrieval results.
 
+### `GET /ops/runtime-status`
+
+Trusted-operator runtime status. This endpoint is separate from `/health` so
+adapter readiness checks stay small and stable.
+
+The response contains only aggregate service state:
+
+- process last event status and timestamp,
+- effective reflection/self-cognition worker config,
+- process-local worker liveness flags,
+- latest worker event status and timestamp,
+- semantic health labels such as `worker_error_level`.
+
+### `GET /ops/reflection/stats`
+
+Trusted-operator reflection stats for a bounded event-log window. The response
+contains counts, latest run refs, and deterministic semantic labels. It does
+not expose reflection prompt text, raw reflection output, source messages, or
+conversation details.
+
+### `GET /ops/self-cognition/stats`
+
+Trusted-operator self-cognition stats for a bounded event-log window. The
+response contains run counts, dispatcher handoff counts, latest refs, and
+semantic liveness labels. It does not expose source packets, action candidate
+text, or generated dialog.
+
+The `/ops/*` endpoints have no authentication or authorization in this plan.
+Deployments must keep them on localhost or a trusted operator network until a
+separate auth plan is implemented.
+
+In-process event logging can record startup, graceful shutdown, lifespan
+failures, handled request/worker exceptions, and worker-loop exceptions. It
+does not prove OS kills, interpreter aborts, host crashes, power loss, or
+external supervisor restarts.
+
+Event-log collections are append-only for now. Retention, archival, and
+high-volume pruning require a separate approved plan before production scale
+becomes a concern.
+
+Aggregate export:
+
+```bash
+python -m scripts.export_event_log --hours 24 --output test_artifacts/diagnostics/event_log_smoke.json
+```
+
+Without `--output`, the command writes
+`test_artifacts/diagnostics/event_log_<UTC>.json`. The export includes the
+same aggregate status/stat payloads and the deterministic snapshot write
+result. It does not export raw event documents.
+
 ### `POST /chat`
 
 Primary brain entrypoint.

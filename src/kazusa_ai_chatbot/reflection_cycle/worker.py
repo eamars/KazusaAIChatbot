@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from collections.abc import Callable
 from contextlib import suppress
 from datetime import datetime, timedelta, timezone
@@ -20,6 +21,7 @@ from kazusa_ai_chatbot.config import (
     REFLECTION_SELF_GUIDANCE_PROMOTION_ENABLED,
     REFLECTION_WORKER_INTERVAL_SECONDS,
 )
+from kazusa_ai_chatbot import event_logging
 from kazusa_ai_chatbot.global_character_growth import (
     run_global_character_growth_pass,
 )
@@ -60,6 +62,16 @@ from kazusa_ai_chatbot.reflection_cycle.interaction_style import (
 
 
 logger = logging.getLogger(__name__)
+
+MILLISECONDS_PER_SECOND = 1000
+
+
+def _elapsed_ms(started_at: float) -> int:
+    """Return elapsed monotonic milliseconds since a start marker."""
+
+    elapsed = time.perf_counter() - started_at
+    elapsed_ms = max(0, int(elapsed * MILLISECONDS_PER_SECOND))
+    return elapsed_ms
 
 
 async def run_hourly_reflection_cycle(
@@ -137,6 +149,15 @@ async def stop_reflection_cycle_worker(handle: ReflectionWorkerHandle) -> None:
         with suppress(asyncio.CancelledError):
             await task
     logger.info("Reflection cycle worker stopped")
+    await event_logging.record_worker_event(
+        event_type="stopped",
+        component="reflection_cycle.worker",
+        worker_name="reflection_cycle",
+        enabled=True,
+        dry_run=False,
+        run_kind="reflection_worker",
+        status="stopped",
+    )
 
 
 async def _reflection_worker_loop(
@@ -146,11 +167,31 @@ async def _reflection_worker_loop(
 ) -> None:
     """Run reflection scheduling ticks until stopped."""
 
+    await event_logging.record_worker_event(
+        event_type="started",
+        component="reflection_cycle.worker",
+        worker_name="reflection_cycle",
+        enabled=True,
+        dry_run=False,
+        run_kind="reflection_worker",
+        status="started",
+    )
     while not stop_event.is_set():
-        await _run_worker_tick(
-            now=datetime.now(timezone.utc),
-            is_primary_interaction_busy=is_primary_interaction_busy,
-        )
+        try:
+            await _run_worker_tick(
+                now=datetime.now(timezone.utc),
+                is_primary_interaction_busy=is_primary_interaction_busy,
+            )
+        except Exception as exc:
+            logger.exception(f"Reflection worker tick failed: {exc}")
+            await event_logging.record_runtime_error_event(
+                component="reflection_cycle.worker",
+                error_class=type(exc).__name__,
+                error_preview=str(exc),
+                stack_fingerprint="reflection_worker_tick",
+                top_frame_module=__name__,
+                recovered=True,
+            )
         try:
             await asyncio.wait_for(
                 stop_event.wait(),
@@ -177,6 +218,7 @@ async def _run_worker_tick(
                 defer_reason="primary interaction busy",
             )
         ]
+        await _record_reflection_worker_result(return_value[0])
         return return_value
 
     results: list[Any] = []
@@ -186,6 +228,7 @@ async def _run_worker_tick(
         is_primary_interaction_busy=is_primary_interaction_busy,
     )
     results.append(hourly_result)
+    await _record_reflection_worker_result(hourly_result)
 
     local_now = now.astimezone(ZoneInfo(CHARACTER_TIME_ZONE))
     previous_local_date = (local_now.date() - timedelta(days=1)).isoformat()
@@ -198,6 +241,7 @@ async def _run_worker_tick(
             is_primary_interaction_busy=is_primary_interaction_busy,
         )
         results.append(daily_result)
+        await _record_reflection_worker_result(daily_result)
         if is_primary_interaction_busy():
             return results
         style_result = await _run_daily_interaction_style_update(
@@ -206,6 +250,7 @@ async def _run_worker_tick(
             is_primary_interaction_busy=is_primary_interaction_busy,
         )
         results.append(style_result)
+        await _record_reflection_worker_result(style_result)
 
     if _local_time_is_after(local_now, REFLECTION_PROMOTION_RUN_AFTER_LOCAL_TIME):
         if is_primary_interaction_busy():
@@ -220,6 +265,7 @@ async def _run_worker_tick(
             is_primary_interaction_busy=is_primary_interaction_busy,
         )
         results.append(promotion_result)
+        await _record_reflection_worker_result(promotion_result)
         if is_primary_interaction_busy():
             return results
         if (
@@ -412,7 +458,7 @@ async def _run_one_hourly_slot(
             status=status,
             attempt_count=0,
         )
-        await repository.upsert_run(run_doc)
+        await _upsert_reflection_run_with_event(run_doc)
         return run_doc
 
     attempt_count = 0
@@ -427,7 +473,7 @@ async def _run_one_hourly_slot(
             attempt_count=max(1, attempt_count),
             error=f"{type(exc).__name__}: {exc}",
         )
-        await repository.upsert_run(run_doc)
+        await _upsert_reflection_run_with_event(run_doc)
         return run_doc
 
     run_doc = repository.build_hourly_run_document(
@@ -436,7 +482,7 @@ async def _run_one_hourly_slot(
         status=repository.status_for_result(dry_run=False),
         attempt_count=attempt_count,
     )
-    await repository.upsert_run(run_doc)
+    await _upsert_reflection_run_with_event(run_doc)
     return run_doc
 
 
@@ -481,7 +527,7 @@ async def _run_one_daily_channel(
             attempt_count=0,
         )
         _extend_validation_warnings(run_doc, extra_warnings)
-        await repository.upsert_run(run_doc)
+        await _upsert_reflection_run_with_event(run_doc)
         return run_doc
 
     attempt_count = 0
@@ -503,7 +549,7 @@ async def _run_one_daily_channel(
             error=f"{type(exc).__name__}: {exc}",
         )
         _extend_validation_warnings(run_doc, extra_warnings)
-        await repository.upsert_run(run_doc)
+        await _upsert_reflection_run_with_event(run_doc)
         return run_doc
 
     run_doc = repository.build_daily_channel_run_document(
@@ -515,7 +561,7 @@ async def _run_one_daily_channel(
         attempt_count=attempt_count,
     )
     _extend_validation_warnings(run_doc, extra_warnings)
-    await repository.upsert_run(run_doc)
+    await _upsert_reflection_run_with_event(run_doc)
     return run_doc
 
 
@@ -534,11 +580,29 @@ async def _run_hourly_with_retry(
                 scope_ref=hourly_scope.scope_ref,
                 prompt=prompt,
             )
+            await _record_reflection_llm_stage(
+                stage_name="hourly_reflection",
+                run_kind=REFLECTION_RUN_KIND_HOURLY,
+                prompt_chars=prompt.prompt_chars,
+                output_chars=len(llm_result.raw_output),
+                status="succeeded",
+                retry_count=attempt - 1,
+                validation_warnings=llm_result.validation_warnings,
+            )
             return_value = (llm_result, attempt_count)
             return return_value
         except Exception as exc:
             last_error = exc
             if attempt == 2:
+                await _record_reflection_llm_stage(
+                    stage_name="hourly_reflection",
+                    run_kind=REFLECTION_RUN_KIND_HOURLY,
+                    prompt_chars=prompt.prompt_chars,
+                    output_chars=0,
+                    status="failed",
+                    retry_count=attempt - 1,
+                    validation_warnings=[],
+                )
                 break
     if last_error is None:
         raise RuntimeError("hourly reflection failed without exception")
@@ -577,11 +641,29 @@ async def _run_daily_with_retry(
         attempt_count = attempt
         try:
             daily_result = await run_daily_synthesis_llm(prompt=prompt)
+            await _record_reflection_llm_stage(
+                stage_name="daily_synthesis",
+                run_kind=REFLECTION_RUN_KIND_DAILY_CHANNEL,
+                prompt_chars=prompt.prompt_chars,
+                output_chars=len(daily_result.raw_output),
+                status="succeeded",
+                retry_count=attempt - 1,
+                validation_warnings=daily_result.validation_warnings,
+            )
             return_value = (daily_result, attempt_count)
             return return_value
         except Exception as exc:
             last_error = exc
             if attempt == 2:
+                await _record_reflection_llm_stage(
+                    stage_name="daily_synthesis",
+                    run_kind=REFLECTION_RUN_KIND_DAILY_CHANNEL,
+                    prompt_chars=prompt.prompt_chars,
+                    output_chars=0,
+                    status="failed",
+                    retry_count=attempt - 1,
+                    validation_warnings=[],
+                )
                 break
     if last_error is None:
         raise RuntimeError("daily reflection failed without exception")
@@ -662,6 +744,108 @@ def _apply_doc_status(
         result.failed_count += 1
     else:
         result.skipped_count += 1
+
+
+async def _record_reflection_worker_result(
+    result: ReflectionWorkerResult,
+) -> None:
+    """Record one sanitized reflection worker pass summary."""
+
+    if result.deferred:
+        status = "deferred"
+    elif result.failed_count > 0:
+        status = "failed"
+    elif result.succeeded_count > 0:
+        status = "succeeded"
+    else:
+        status = "skipped"
+    await event_logging.record_worker_event(
+        event_type="tick",
+        component="reflection_cycle.worker",
+        worker_name="reflection_cycle",
+        enabled=True,
+        dry_run=result.dry_run,
+        run_kind=result.run_kind,
+        status=status,
+        processed_count=result.processed_count,
+        succeeded_count=result.succeeded_count,
+        failed_count=result.failed_count,
+        skipped_count=result.skipped_count,
+        deferred=result.deferred,
+        defer_reason=result.defer_reason,
+        run_id=result.run_ids[0] if result.run_ids else "",
+    )
+
+
+async def _upsert_reflection_run_with_event(
+    document: CharacterReflectionRunDoc,
+) -> None:
+    """Persist one reflection run and record the approved DB operation."""
+
+    started_at = time.perf_counter()
+    await repository.upsert_run(document)
+    latency_ms = _elapsed_ms(started_at)
+    await _record_reflection_db_operation(document, latency_ms=latency_ms)
+
+
+async def _record_reflection_db_operation(
+    document: CharacterReflectionRunDoc,
+    *,
+    latency_ms: int,
+) -> None:
+    """Record one approved reflection-run upsert outcome."""
+
+    await event_logging.record_database_operation_event(
+        component="reflection_cycle.worker",
+        collection="character_reflection_runs",
+        operation_kind="upsert_reflection_run",
+        status=str(document["status"]),
+        idempotency_result="upserted",
+        latency_ms=latency_ms,
+        document_ref=str(document["run_id"]),
+        run_id=str(document["run_id"]),
+    )
+
+
+async def _record_reflection_llm_stage(
+    *,
+    stage_name: str,
+    run_kind: str,
+    prompt_chars: int,
+    output_chars: int,
+    status: str,
+    retry_count: int,
+    validation_warnings: list[str],
+) -> None:
+    """Record model-stage metadata and contract warnings for reflection."""
+
+    parse_status = "valid"
+    if status == "failed":
+        parse_status = "failed"
+    elif validation_warnings:
+        parse_status = "warning"
+    await event_logging.record_llm_stage_event(
+        component="reflection_cycle.worker",
+        stage_name=stage_name,
+        route_name=run_kind,
+        model_name="consolidation_route",
+        status=status,
+        prompt_chars=prompt_chars,
+        output_chars=output_chars,
+        parse_status=parse_status,
+        retry_count=retry_count,
+        json_repair_used=False,
+    )
+    if validation_warnings:
+        await event_logging.record_model_contract_event(
+            component="reflection_cycle.worker",
+            stage_name=stage_name,
+            violation_kind="validation_warning",
+            missing_fields=[],
+            invalid_fields=validation_warnings,
+            repair_used=False,
+            status="warning",
+        )
 
 
 def _local_time_is_after(local_now: datetime, value: str) -> bool:

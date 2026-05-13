@@ -126,6 +126,57 @@ Purpose:
 Adapters can use this endpoint for startup diagnostics. Chat availability is
 reported by the health status, database status, and scheduler status fields.
 
+### `GET /ops/runtime-status`
+
+Response model: `OpsRuntimeStatusResponse`.
+
+Purpose:
+
+- Report aggregate runtime observability for trusted local operators.
+- Keep worker state and event-log health out of adapter `/health` checks.
+
+The response exposes:
+
+- `status`, `generated_at`, and `window_hours`;
+- `config` values for reflection and self-cognition worker enablement and
+  intervals;
+- process-local worker `enabled` and `task_alive` values;
+- latest event timestamp/status for process, reflection, and self-cognition;
+- deterministic `semantic_descriptors`.
+
+This endpoint must not expose message bodies, prompt text, generated dialog,
+event-log row bodies, channel ids, secrets, callback tokens, or per-user
+details.
+
+### `GET /ops/reflection/stats`
+
+Response model: `OpsStatsResponse`.
+
+Purpose:
+
+- Report aggregate reflection event-log counts for a bounded window.
+- Return latest event/run refs and semantic health labels.
+
+This endpoint supplements `character_reflection_runs`; it does not replace the
+reflection run ledger and does not expose raw reflection output.
+
+### `GET /ops/self-cognition/stats`
+
+Response model: `OpsStatsResponse`.
+
+Purpose:
+
+- Report aggregate self-cognition event-log counts for a bounded window.
+- Distinguish internal-only activity from dispatcher handoff activity through
+  deterministic labels.
+
+This endpoint does not expose source packet text, route reasoning, action
+candidate text, dispatcher arguments, or generated dialog.
+
+`/ops/*` endpoints are local-service/trusted-operator endpoints in the current
+contract. They have no auth layer here and must not be internet exposed until a
+separate authentication and authorization plan exists.
+
 ### `POST /chat`
 
 Request model: `ChatRequest`.

@@ -18,6 +18,37 @@ from kazusa_ai_chatbot.reflection_cycle.models import (
 )
 
 
+@pytest.fixture(autouse=True)
+def _disable_event_log_writes(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep deterministic reflection worker tests off MongoDB."""
+
+    monkeypatch.setattr(
+        worker_module.event_logging,
+        "record_worker_event",
+        AsyncMock(),
+    )
+    monkeypatch.setattr(
+        worker_module.event_logging,
+        "record_database_operation_event",
+        AsyncMock(),
+    )
+    monkeypatch.setattr(
+        worker_module.event_logging,
+        "record_llm_stage_event",
+        AsyncMock(),
+    )
+    monkeypatch.setattr(
+        worker_module.event_logging,
+        "record_model_contract_event",
+        AsyncMock(),
+    )
+    monkeypatch.setattr(
+        worker_module.event_logging,
+        "record_runtime_error_event",
+        AsyncMock(),
+    )
+
+
 @pytest.mark.asyncio
 async def test_hourly_worker_disables_evaluation_fallback(monkeypatch) -> None:
     """Production hourly collection should idle instead of using fallback."""

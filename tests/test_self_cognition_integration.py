@@ -6,6 +6,7 @@ import json
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -14,6 +15,32 @@ from kazusa_ai_chatbot.db import user_memory_units as memory_units_module
 from kazusa_ai_chatbot.self_cognition import artifacts, models, sources
 from kazusa_ai_chatbot.self_cognition import tracking, worker
 from kazusa_ai_chatbot.self_cognition.handoff import dispatch_action_candidate
+
+
+@pytest.fixture(autouse=True)
+def _disable_event_log_writes(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep deterministic self-cognition integration tests off MongoDB."""
+
+    monkeypatch.setattr(
+        worker.event_logging,
+        "record_self_cognition_event",
+        AsyncMock(),
+    )
+    monkeypatch.setattr(
+        worker.event_logging,
+        "record_worker_event",
+        AsyncMock(),
+    )
+    monkeypatch.setattr(
+        worker.event_logging,
+        "record_dispatcher_event",
+        AsyncMock(),
+    )
+    monkeypatch.setattr(
+        worker.event_logging,
+        "record_runtime_error_event",
+        AsyncMock(),
+    )
 
 
 def _target_scope() -> dict[str, str | None]:

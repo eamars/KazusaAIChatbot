@@ -12,10 +12,12 @@ import asyncio
 import datetime
 import json
 import logging
+import time
 from typing import Any
 
 from langgraph.graph import END, START, StateGraph
 
+from kazusa_ai_chatbot import event_logging
 from kazusa_ai_chatbot.mcp_client import mcp_manager
 from kazusa_ai_chatbot.nodes import persona_supervisor2_rag_dispatch as _dispatch_domain
 from kazusa_ai_chatbot.nodes import persona_supervisor2_rag_evaluator as _evaluator_domain
@@ -31,6 +33,9 @@ from kazusa_ai_chatbot.nodes.persona_supervisor2_rag_types import (
 from kazusa_ai_chatbot.utils import log_list_preview, log_preview
 
 logger = logging.getLogger(__name__)
+
+MILLISECONDS_PER_SECOND = 1000
+RAG_SUPERVISOR_COMPONENT = "nodes.persona_supervisor2_rag_supervisor2"
 
 _INITIALIZER_PROMPT = _initializer_domain._INITIALIZER_PROMPT
 _DISPATCHER_PROMPT = _dispatch_domain._DISPATCHER_PROMPT
@@ -74,6 +79,28 @@ _compact_projection_payload_for_llm = (
 _compact_raw_result_for_llm = _prompt_view_domain._compact_raw_result_for_llm
 _known_facts_llm_view = _prompt_view_domain._known_facts_llm_view
 _clip_llm_summary_text = _prompt_view_domain._clip_llm_summary_text
+
+
+def _elapsed_ms(started_at: float) -> int:
+    """Return elapsed monotonic milliseconds since a start marker."""
+
+    elapsed = time.perf_counter() - started_at
+    elapsed_ms = max(0, int(elapsed * MILLISECONDS_PER_SECOND))
+    return elapsed_ms
+
+
+def _state_correlation_id(state: ProgressiveRAGState) -> str:
+    """Build a non-content correlation id for one RAG supervisor state."""
+
+    context = state.get("context", {})
+    if isinstance(context, dict):
+        platform = str(context.get("platform", ""))
+        message_ref = str(context.get("platform_message_id", "") or "")
+    else:
+        platform = ""
+        message_ref = ""
+    correlation_id = f"rag:{platform}:{message_ref or 'no-message-id'}"
+    return correlation_id
 
 
 def _sync_initializer_domain() -> None:
@@ -168,13 +195,33 @@ async def _assess_continuation(
 async def rag_initializer(state: ProgressiveRAGState) -> dict:
     """Decompose the input query into ordered unknown slots."""
     _sync_initializer_domain()
+    started_at = time.perf_counter()
     update = await _initializer_domain.rag_initializer(state)
+    unknown_slots = update.get("unknown_slots", [])
+    slot_count = len(unknown_slots) if isinstance(unknown_slots, list) else 0
+    cache_metadata = update.get("initializer_cache", {})
+    cache_hit = (
+        isinstance(cache_metadata, dict)
+        and str(cache_metadata.get("status", "")).startswith("hit")
+    )
+    await event_logging.record_rag_stage_event(
+        component=RAG_SUPERVISOR_COMPONENT,
+        correlation_id=_state_correlation_id(state),
+        agent_name="rag_initializer",
+        status="succeeded",
+        slot_count=slot_count,
+        retrieval_count=0,
+        cache_hit=cache_hit,
+        no_evidence=slot_count == 0,
+        latency_ms=_elapsed_ms(started_at),
+    )
     return update
 
 
 async def rag_dispatcher(state: ProgressiveRAGState) -> dict:
     """Dispatch the next unknown slot to one helper agent."""
     _sync_dispatch_domain()
+    started_at = time.perf_counter()
     update = await _dispatch_domain.rag_dispatcher(state)
     dispatch = update.get("current_dispatch", {})
     if isinstance(dispatch, dict):
@@ -185,27 +232,94 @@ async def rag_dispatcher(state: ProgressiveRAGState) -> dict:
             f'route_source={dispatch.get("route_source", "")} '
             f"dispatch_context={log_preview(dispatch.get('context', {}))}"
         )
+    agent_name = ""
+    if isinstance(dispatch, dict):
+        agent_name = str(dispatch.get("agent_name", ""))
+    await event_logging.record_rag_stage_event(
+        component=RAG_SUPERVISOR_COMPONENT,
+        correlation_id=_state_correlation_id(state),
+        agent_name="rag_dispatcher",
+        status="succeeded" if agent_name else "failed",
+        slot_count=len(state.get("unknown_slots", [])),
+        retrieval_count=0,
+        cache_hit=False,
+        no_evidence=not bool(agent_name),
+        latency_ms=_elapsed_ms(started_at),
+    )
     return update
 
 
 async def rag_executor(state: ProgressiveRAGState) -> dict:
     """Execute the helper-agent call selected by the dispatcher."""
     _sync_dispatch_domain()
+    started_at = time.perf_counter()
     update = await _dispatch_domain.rag_executor(state)
+    result = update.get("last_agent_result", {})
+    if isinstance(result, dict):
+        agent_name = str(result.get("agent", ""))
+        resolved = bool(result.get("resolved", False))
+    else:
+        agent_name = ""
+        resolved = False
+    await event_logging.record_rag_stage_event(
+        component=RAG_SUPERVISOR_COMPONENT,
+        correlation_id=_state_correlation_id(state),
+        agent_name=agent_name or "rag_executor",
+        status="succeeded" if resolved else "unresolved",
+        slot_count=len(state.get("unknown_slots", [])),
+        retrieval_count=1 if resolved else 0,
+        cache_hit=False,
+        no_evidence=not resolved,
+        latency_ms=_elapsed_ms(started_at),
+    )
     return update
 
 
 async def rag_evaluator(state: ProgressiveRAGState) -> dict:
     """Evaluate one helper-agent result and update known facts."""
     _sync_evaluator_domain()
+    started_at = time.perf_counter()
     update = await _evaluator_domain.rag_evaluator(state)
+    known_facts = update.get("known_facts", [])
+    latest_fact = known_facts[-1] if isinstance(known_facts, list) and known_facts else {}
+    if isinstance(latest_fact, dict):
+        agent_name = str(latest_fact.get("agent", ""))
+        resolved = bool(latest_fact.get("resolved", False))
+    else:
+        agent_name = ""
+        resolved = False
+    await event_logging.record_rag_stage_event(
+        component=RAG_SUPERVISOR_COMPONENT,
+        correlation_id=_state_correlation_id(state),
+        agent_name=agent_name or "rag_evaluator",
+        status="succeeded" if resolved else "unresolved",
+        slot_count=len(state.get("unknown_slots", [])),
+        retrieval_count=len(known_facts) if isinstance(known_facts, list) else 0,
+        cache_hit=False,
+        no_evidence=not resolved,
+        latency_ms=_elapsed_ms(started_at),
+    )
     return update
 
 
 async def rag_finalizer(state: ProgressiveRAGState) -> dict:
     """Synthesize the final factual RAG answer."""
     _sync_evaluator_domain()
+    started_at = time.perf_counter()
     update = await _evaluator_domain.rag_finalizer(state)
+    final_answer = str(update.get("final_answer", ""))
+    known_facts = state.get("known_facts", [])
+    await event_logging.record_rag_stage_event(
+        component=RAG_SUPERVISOR_COMPONENT,
+        correlation_id=_state_correlation_id(state),
+        agent_name="rag_finalizer",
+        status="succeeded",
+        slot_count=len(state.get("unknown_slots", [])),
+        retrieval_count=len(known_facts) if isinstance(known_facts, list) else 0,
+        cache_hit=False,
+        no_evidence=not bool(final_answer),
+        latency_ms=_elapsed_ms(started_at),
+    )
     return update
 
 
@@ -266,6 +380,7 @@ async def call_rag_supervisor(
         Dict with keys ``answer``, ``known_facts``, ``unknown_slots``, and
         ``loop_count``.
     """
+    started_at = time.perf_counter()
     runtime_context = context or {}
     builder = StateGraph(ProgressiveRAGState)
 
@@ -335,6 +450,17 @@ async def call_rag_supervisor(
         f"unknown_slots={len(unknown_slots)} answer={log_preview(final_answer)} "
         f"facts={log_preview(known_facts)} "
         f"remaining_slots={log_list_preview(unknown_slots)}"
+    )
+    await event_logging.record_rag_stage_event(
+        component=RAG_SUPERVISOR_COMPONENT,
+        correlation_id=_state_correlation_id(initial_state),
+        agent_name="call_rag_supervisor",
+        status="succeeded",
+        slot_count=len(unknown_slots) if isinstance(unknown_slots, list) else 0,
+        retrieval_count=len(known_facts) if isinstance(known_facts, list) else 0,
+        cache_hit=False,
+        no_evidence=not bool(known_facts),
+        latency_ms=_elapsed_ms(started_at),
     )
 
     return_value = {

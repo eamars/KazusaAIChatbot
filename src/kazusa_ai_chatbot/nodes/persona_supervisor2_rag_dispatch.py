@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import json
 import logging
+import time
 from typing import Any
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
+from kazusa_ai_chatbot import event_logging
 from kazusa_ai_chatbot.config import (
     RAG_PLANNER_LLM_API_KEY,
     RAG_PLANNER_LLM_BASE_URL,
@@ -44,6 +46,31 @@ from kazusa_ai_chatbot.utils import (
 )
 
 logger = logging.getLogger(__name__)
+
+MILLISECONDS_PER_SECOND = 1000
+RAG_DISPATCH_COMPONENT = "nodes.persona_supervisor2_rag_dispatch"
+
+
+def _elapsed_ms(started_at: float) -> int:
+    """Return elapsed monotonic milliseconds since a start marker."""
+
+    elapsed = time.perf_counter() - started_at
+    elapsed_ms = max(0, int(elapsed * MILLISECONDS_PER_SECOND))
+    return elapsed_ms
+
+
+def _state_correlation_id(state: ProgressiveRAGState) -> str:
+    """Build a non-content correlation id for RAG dispatch work."""
+
+    context = state.get("context", {})
+    if isinstance(context, dict):
+        platform = str(context.get("platform", ""))
+        message_ref = str(context.get("platform_message_id", "") or "")
+    else:
+        platform = ""
+        message_ref = ""
+    correlation_id = f"rag:{platform}:{message_ref or 'no-message-id'}"
+    return correlation_id
 
 
 # ── Dispatcher ─────────────────────────────────────────────────────
@@ -477,11 +504,17 @@ async def rag_dispatcher(state: ProgressiveRAGState) -> dict:
     # without polluting the current slot with distant attempts.
     recent_messages = state["messages"][-2:] if len(state["messages"]) >= 2 else state["messages"]
 
+    started_at = time.perf_counter()
     response = await _dispatcher_llm.ainvoke([system_prompt, human_message] + recent_messages)
-    dispatch = parse_llm_json_output(response.content)
-    if not isinstance(dispatch, dict):
+    raw_dispatch = parse_llm_json_output(response.content)
+    parse_status = "succeeded" if isinstance(raw_dispatch, dict) else "failed"
+    if not isinstance(raw_dispatch, dict):
         dispatch = {}
+    else:
+        dispatch = raw_dispatch
     normalized_dispatch = _normalize_dispatch(dispatch, current_slot)
+    if not normalized_dispatch["agent_name"]:
+        parse_status = "invalid_contract"
     logger.info(
         f'RAG2 dispatch output: agent={normalized_dispatch["agent_name"] or "<invalid>"} '
         f"task={log_preview(normalized_dispatch['task'])} "
@@ -495,6 +528,32 @@ async def rag_dispatcher(state: ProgressiveRAGState) -> dict:
         f"dispatch_context={log_preview(normalized_dispatch['context'])} "
         f"raw={log_preview(dispatch)}"
     )
+    await event_logging.record_llm_stage_event(
+        component=RAG_DISPATCH_COMPONENT,
+        stage_name="rag_dispatcher",
+        route_name=normalized_dispatch["route_source"],
+        model_name=RAG_PLANNER_LLM_MODEL,
+        status="succeeded" if normalized_dispatch["agent_name"] else "failed",
+        prompt_chars=len(system_prompt.content) + len(human_message.content),
+        output_chars=len(str(response.content)),
+        parse_status=parse_status,
+        retry_count=0,
+        json_repair_used=False,
+        correlation_id=_state_correlation_id(state),
+        duration_ms=_elapsed_ms(started_at),
+        severity="info" if normalized_dispatch["agent_name"] else "warning",
+    )
+    if not normalized_dispatch["agent_name"]:
+        await event_logging.record_model_contract_event(
+            component=RAG_DISPATCH_COMPONENT,
+            stage_name="rag_dispatcher",
+            violation_kind="invalid_dispatch",
+            missing_fields=[],
+            invalid_fields=["agent_name"],
+            repair_used=False,
+            status="failed",
+            correlation_id=_state_correlation_id(state),
+        )
 
     return_value = {
         "messages": [AIMessage(content=response.content)],

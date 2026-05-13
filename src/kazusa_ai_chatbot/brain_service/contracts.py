@@ -128,6 +128,58 @@ class HealthResponse(BaseModel):
     cache2: Cache2HealthResponse = Field(default_factory=Cache2HealthResponse)
 
 
+class OpsRuntimeConfigResponse(BaseModel):
+    reflection_cycle_enabled: bool
+    self_cognition_enabled: bool
+    reflection_worker_interval_seconds: int
+    self_cognition_worker_interval_seconds: int
+    self_cognition_max_cases_per_tick: int
+
+
+class OpsProcessStatusResponse(BaseModel):
+    last_event_at: str = ""
+    last_status: str = ""
+
+
+class OpsWorkerStatusResponse(BaseModel):
+    enabled: bool = False
+    task_alive: bool = False
+    last_event_at: str = ""
+    last_status: str = ""
+
+
+class OpsRuntimeStatusResponse(BaseModel):
+    status: str
+    generated_at: str
+    window_hours: int
+    config: OpsRuntimeConfigResponse
+    process: OpsProcessStatusResponse = Field(
+        default_factory=OpsProcessStatusResponse,
+    )
+    workers: dict[str, OpsWorkerStatusResponse] = Field(default_factory=dict)
+    semantic_descriptors: dict[str, str] = Field(default_factory=dict)
+
+
+class OpsLatestEventRefResponse(BaseModel):
+    event_id: str = ""
+    run_id: str = ""
+    trigger_id: str = ""
+    attempt_id: str = ""
+    occurred_at: str = ""
+    status: str = ""
+
+
+class OpsStatsResponse(BaseModel):
+    status: str
+    generated_at: str
+    window_hours: int
+    counts: dict[str, int] = Field(default_factory=dict)
+    latest: OpsLatestEventRefResponse = Field(
+        default_factory=OpsLatestEventRefResponse,
+    )
+    semantic_descriptors: dict[str, str] = Field(default_factory=dict)
+
+
 class RuntimeAdapterRegistrationRequest(BaseModel):
     platform: str
     callback_url: str

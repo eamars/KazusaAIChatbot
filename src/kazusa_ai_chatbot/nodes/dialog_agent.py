@@ -11,8 +11,10 @@ Design intent:
   before this module runs.
 """
 
+import time
 from typing import Annotated, TypedDict
 
+from kazusa_ai_chatbot import event_logging
 from kazusa_ai_chatbot.nodes.persona_supervisor2_schema import GlobalPersonaState
 from kazusa_ai_chatbot.config import (
     AFFINITY_DEFAULT,
@@ -53,6 +55,17 @@ import json
 
 
 logger = logging.getLogger(__name__)
+
+MILLISECONDS_PER_SECOND = 1000
+DIALOG_COMPONENT = "nodes.dialog_agent"
+
+
+def _elapsed_ms(started_at: float) -> int:
+    """Return elapsed monotonic milliseconds since a start marker."""
+
+    elapsed = time.perf_counter() - started_at
+    elapsed_ms = max(0, int(elapsed * MILLISECONDS_PER_SECOND))
+    return elapsed_ms
 
 
 # Define DialogAgent state
@@ -309,9 +322,11 @@ async def dialog_generator(state: DialogAgentState) -> DialogAgentState:
         recent_messages = state["messages"]
     
 
+    started_at = time.perf_counter()
     response = await _dialog_generator_llm.ainvoke([system_prompt, human_message] + recent_messages)
 
     result = parse_llm_json_output(response.content)
+    invalid_fields: list[str] = []
     if isinstance(result, list):
         logger.warning(
             "Dialog generator returned a top-level list; "
@@ -319,6 +334,7 @@ async def dialog_generator(state: DialogAgentState) -> DialogAgentState:
         )
         generated_dialog = result
         parsed_keys = ["<top-level-list>"]
+        invalid_fields.append("top_level")
     else:
         generated_dialog = result.get("final_dialog", [])
         parsed_keys = list(result.keys())
@@ -329,6 +345,7 @@ async def dialog_generator(state: DialogAgentState) -> DialogAgentState:
             f"type={type(generated_dialog).__name__}"
         )
         generated_dialog = []
+        invalid_fields.append("final_dialog")
     valid_dialog = [
         segment
         for segment in generated_dialog
@@ -339,6 +356,7 @@ async def dialog_generator(state: DialogAgentState) -> DialogAgentState:
             f"Dialog generator dropped invalid fragments: "
             f"raw_count={len(generated_dialog)} valid_count={len(valid_dialog)}"
         )
+        invalid_fields.append("final_dialog_fragment")
     generated_dialog = valid_dialog
     generated_dialog_preview = (
         generated_dialog
@@ -351,6 +369,31 @@ async def dialog_generator(state: DialogAgentState) -> DialogAgentState:
         f"fragments={len(generated_dialog_preview)} "
         f"dialog={log_list_preview(generated_dialog_preview)}"
     )
+    parse_status = "succeeded" if not invalid_fields else "warning"
+    await event_logging.record_llm_stage_event(
+        component=DIALOG_COMPONENT,
+        stage_name="dialog_generator",
+        route_name="generate",
+        model_name=DIALOG_GENERATOR_LLM_MODEL,
+        status="succeeded",
+        prompt_chars=len(system_prompt.content) + len(human_message.content),
+        output_chars=len(str(response.content)),
+        parse_status=parse_status,
+        retry_count=state.get("retry", 0),
+        json_repair_used=False,
+        duration_ms=_elapsed_ms(started_at),
+        severity="info" if not invalid_fields else "warning",
+    )
+    if invalid_fields:
+        await event_logging.record_model_contract_event(
+            component=DIALOG_COMPONENT,
+            stage_name="dialog_generator",
+            violation_kind="invalid_dialog_output",
+            missing_fields=[],
+            invalid_fields=invalid_fields,
+            repair_used=True,
+            status="repaired",
+        )
 
     return_value = {
         "final_dialog": generated_dialog,
@@ -536,9 +579,21 @@ async def dialog_evaluator(state: DialogAgentState) -> DialogAgentState:
 
     human_message = HumanMessage(content=json.dumps(msg, ensure_ascii=False))
 
+    started_at = time.perf_counter()
     response = await _dialog_evaluator_llm.ainvoke([system_prompt, human_message])
 
     result = parse_llm_json_output(response.content)
+    missing_fields: list[str] = []
+    invalid_fields: list[str] = []
+    for required_field in ("feedback", "should_stop"):
+        if required_field not in result:
+            missing_fields.append(required_field)
+    if (
+        isinstance(result, dict)
+        and "should_stop" in result
+        and not isinstance(result["should_stop"], bool)
+    ):
+        invalid_fields.append("should_stop")
     if not result.get("should_stop", True) or result.get("feedback", "") != "Passed":
         logger.debug(f'Dialog evaluator: retry={retry} should_stop={result.get("should_stop", True)} feedback={log_preview(result.get("feedback", ""))}')
 
@@ -546,6 +601,35 @@ async def dialog_evaluator(state: DialogAgentState) -> DialogAgentState:
     should_stop = result.get("should_stop", True)
     if (retry >= MAX_DIALOG_AGENT_RETRY):
         should_stop = True
+    parse_status = (
+        "succeeded"
+        if not missing_fields and not invalid_fields
+        else "warning"
+    )
+    await event_logging.record_llm_stage_event(
+        component=DIALOG_COMPONENT,
+        stage_name="dialog_evaluator",
+        route_name="evaluate",
+        model_name=DIALOG_EVALUATOR_LLM_MODEL,
+        status="succeeded",
+        prompt_chars=len(system_prompt.content) + len(human_message.content),
+        output_chars=len(str(response.content)),
+        parse_status=parse_status,
+        retry_count=retry,
+        json_repair_used=False,
+        duration_ms=_elapsed_ms(started_at),
+        severity="info" if parse_status == "succeeded" else "warning",
+    )
+    if missing_fields or invalid_fields:
+        await event_logging.record_model_contract_event(
+            component=DIALOG_COMPONENT,
+            stage_name="dialog_evaluator",
+            violation_kind="invalid_evaluator_output",
+            missing_fields=missing_fields,
+            invalid_fields=invalid_fields,
+            repair_used=True,
+            status="repaired",
+        )
 
     # Generate feedback message
     feedback_message = HumanMessage(
@@ -639,6 +723,21 @@ async def dialog_agent(
     logger.info(f"Dialog output: dialog={log_list_preview(final_dialog)}")
     logger.debug(
         f'Dialog metadata: fragments={len(final_dialog)} retry={result["retry"]}'
+    )
+    evaluator_status = "passed" if final_dialog else "empty"
+    await event_logging.record_dialog_quality_event(
+        component=DIALOG_COMPONENT,
+        correlation_id="",
+        evaluator_status=evaluator_status,
+        retry_count=int(result["retry"]),
+        failure_codes=[] if final_dialog else ["empty_dialog"],
+        anchor_count=len(
+            global_state["action_directives"]["linguistic_directives"].get(
+                "content_anchors",
+                [],
+            )
+        ),
+        status="succeeded",
     )
 
     return_value = {

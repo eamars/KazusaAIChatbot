@@ -15,6 +15,24 @@ from kazusa_ai_chatbot.brain_service import intake as brain_intake
 from kazusa_ai_chatbot.config import CHARACTER_GLOBAL_USER_ID
 
 
+@pytest.fixture(autouse=True)
+def _stub_service_event_logging(monkeypatch) -> None:
+    """Keep deterministic queue tests off the event-log database."""
+
+    recorder_names = (
+        "record_database_operation_event",
+        "record_pipeline_turn_event",
+        "record_queue_intake_event",
+        "record_runtime_error_event",
+    )
+    for recorder_name in recorder_names:
+        monkeypatch.setattr(
+            service_module.event_logging,
+            recorder_name,
+            AsyncMock(),
+        )
+
+
 def _request(
     message_id: str,
     *,
@@ -230,6 +248,16 @@ def _patch_common_dependencies(monkeypatch, graph) -> None:
         service_module,
         "get_conversation_history",
         AsyncMock(return_value=[]),
+    )
+    monkeypatch.setattr(
+        service_module,
+        "get_conversation_by_platform_message_id",
+        AsyncMock(return_value=None),
+    )
+    monkeypatch.setattr(
+        service_module,
+        "build_promoted_reflection_context",
+        AsyncMock(return_value={}),
     )
     monkeypatch.setattr(service_module, "_graph", graph)
 
