@@ -81,6 +81,9 @@ def _outbound_message_payload(
     """
 
     mention_segments = _prefix_user_mention_segments(delivery_mentions)
+    outbound_text = text
+    if mention_segments and text and not text[0].isspace():
+        outbound_text = f" {text}"
     if not reply_to_msg_id and not mention_segments:
         return_value = text
     else:
@@ -93,7 +96,7 @@ def _outbound_message_payload(
         return_value.extend(mention_segments)
         return_value.append({
             "type": "text",
-            "data": {"text": text},
+            "data": {"text": outbound_text},
         })
     return return_value
 

@@ -847,7 +847,7 @@ async def test_napcat_handle_event_prefixes_delivery_mention_from_brain():
     assert len(send_payloads) == 1
     assert send_payloads[0]["params"]["message"] == [
         {"type": "at", "data": {"qq": "2787858400"}},
-        {"type": "text", "data": {"text": "hello there"}},
+        {"type": "text", "data": {"text": " hello there"}},
     ]
     await adapter.close()
 
@@ -1208,7 +1208,7 @@ async def test_napcat_runtime_send_message_prefixes_delivery_mention():
 
     assert ws.sent_payloads[0]["params"]["message"] == [
         {"type": "at", "data": {"qq": "2787858400"}},
-        {"type": "text", "data": {"text": "scheduled hello"}},
+        {"type": "text", "data": {"text": " scheduled hello"}},
     ]
     assert result.message_id == "outbound-mention"
     await adapter.close()
@@ -1316,7 +1316,7 @@ async def test_napcat_runtime_endpoint_accepts_delivery_mentions():
         assert response.status_code == 200
         assert ws.sent_payloads[0]["params"]["message"] == [
             {"type": "at", "data": {"qq": "2787858400"}},
-            {"type": "text", "data": {"text": "scheduled hello"}},
+            {"type": "text", "data": {"text": " scheduled hello"}},
         ]
     finally:
         napcat_module._runtime_adapter = previous_runtime_adapter
