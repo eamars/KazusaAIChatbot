@@ -110,6 +110,9 @@ SEND_MESSAGE_SCHEMA = {
         "reply_to_msg_id": {
             "type": ["string", "null"],
         },
+        "delivery_mentions": {
+            "type": "array",
+        },
     },
 }
 
@@ -157,12 +160,16 @@ async def handle_send_message(
             save_conversation_func=save_conversation,
         )
         delivery_attempted = True
-        send_result = await adapter.send_message(
-            channel_id=target_channel,
-            text=str(args["text"]),
-            channel_type=channel_type,
-            reply_to_msg_id=args.get("reply_to_msg_id"),
-        )
+        send_kwargs = {
+            "channel_id": target_channel,
+            "text": str(args["text"]),
+            "channel_type": channel_type,
+            "reply_to_msg_id": args.get("reply_to_msg_id"),
+        }
+        delivery_mentions = _delivery_mentions(args)
+        if delivery_mentions is not None:
+            send_kwargs["delivery_mentions"] = delivery_mentions
+        send_result = await adapter.send_message(**send_kwargs)
         try:
             await apply_assistant_delivery_receipt(
                 platform=target_platform,
@@ -222,6 +229,17 @@ async def handle_send_message(
         status="succeeded",
         correlation_id=correlation_id,
     )
+
+
+def _delivery_mentions(args: dict) -> list[dict] | None:
+    """Return optional adapter-owned delivery mention metadata."""
+
+    value = args.get("delivery_mentions")
+    if isinstance(value, list):
+        return_value = value
+        return return_value
+    return_value = None
+    return return_value
 
 
 def build_send_message_tool() -> ToolSpec:

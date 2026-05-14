@@ -89,6 +89,7 @@ async def call_action_subgraph(state: GlobalPersonaState) -> dict:
         "final_dialog": final_dialog,
         "target_addressed_user_ids": result["target_addressed_user_ids"],
         "target_broadcast": result["target_broadcast"],
+        "mention_target_user": bool(result.get("mention_target_user", False)),
     }
     return return_value
 
@@ -106,6 +107,7 @@ async def stage_3_no_response(state: GlobalPersonaState) -> dict:
         "final_dialog": [],
         "target_addressed_user_ids": [],
         "target_broadcast": False,
+        "mention_target_user": False,
     }
     return return_value
 
@@ -342,6 +344,7 @@ async def persona_supervisor2(state: IMProcessState) -> dict:
         "final_dialog": results["final_dialog"],
         "target_addressed_user_ids": results["target_addressed_user_ids"],
         "target_broadcast": bool(results["target_broadcast"]),
+        "mention_target_user": bool(results.get("mention_target_user", False)),
         "future_promises": [],
         "consolidation_state": results,
     }

@@ -444,6 +444,42 @@ async def test_generate_raw_tool_calls_defaults_missing_future_promise_due_time(
 
 
 @pytest.mark.asyncio
+async def test_generate_raw_tool_calls_hides_delivery_mentions_from_llm(monkeypatch):
+    """Adapter-owned delivery metadata must not become an LLM argument."""
+
+    tool_registry = ToolRegistry()
+    tool_registry.register(build_send_message_tool())
+    monkeypatch.setattr(persistence_module, "_task_registry", tool_registry)
+    llm = _CapturingAsyncLLM({"tool_calls": []})
+    monkeypatch.setattr(persistence_module, "_task_dispatcher_llm", llm)
+
+    await persistence_module._generate_raw_tool_calls(
+        _dispatch_generation_state(
+            future_promises=[
+                {
+                    "target": "提拉米苏",
+                    "action": "杏山千纱将对提拉米苏询问glitch是否在线",
+                    "due_time": "2026-04-23 06:12",
+                    "commitment_type": "future_promise",
+                    "dedup_key": "ask_glitch_online",
+                }
+            ],
+            decontexualized_input="你去问一下glitch在不在。",
+            content_anchors=["[DECISION] 接受并立刻去问。"],
+            final_dialog=["好，我现在去问一下。"],
+        ),
+        _live_dispatch_ctx(),
+    )
+
+    human_payload = json.loads(llm.messages[1].content)
+    available_tools_text = json.dumps(
+        human_payload["available_tools"],
+        ensure_ascii=False,
+    )
+    assert "delivery_mentions" not in available_tools_text
+
+
+@pytest.mark.asyncio
 async def test_generate_raw_tool_calls_returns_empty_for_raw_top_level_array(monkeypatch):
     """A production-shaped raw [] model response should not crash dispatch."""
 

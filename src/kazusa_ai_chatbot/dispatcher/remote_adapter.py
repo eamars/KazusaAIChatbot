@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 import logging
 from datetime import datetime, timezone
+from typing import Any
 
 import httpx
 
@@ -47,6 +49,7 @@ class RemoteHttpAdapter:
         *,
         channel_type: str,
         reply_to_msg_id: str | None = None,
+        delivery_mentions: Sequence[dict[str, Any]] | None = None,
     ) -> SendResult:
         """Send a message by calling the registered remote adapter.
 
@@ -56,6 +59,7 @@ class RemoteHttpAdapter:
             channel_type: Platform-neutral target scope such as ``group`` or
                 ``private``.
             reply_to_msg_id: Optional message id to quote/reply to.
+            delivery_mentions: Optional adapter-owned mention requests.
 
         Returns:
             Structured delivery result returned by the remote adapter.
@@ -71,6 +75,9 @@ class RemoteHttpAdapter:
             "text": text,
             "reply_to_msg_id": reply_to_msg_id,
         }
+        if delivery_mentions is not None:
+            payload["delivery_mentions"] = list(delivery_mentions)
+
         async with httpx.AsyncClient(timeout=self._timeout_seconds) as client:
             response = await client.post(
                 f"{self._callback_url}/send_message",

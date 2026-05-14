@@ -760,6 +760,48 @@ async def test_dispatch_action_candidate_builds_existing_dispatch_context() -> N
 
 
 @pytest.mark.asyncio
+async def test_dispatch_action_candidate_preserves_delivery_mentions() -> None:
+    """Self-cognition handoff should pass mention metadata as task args."""
+
+    case = _commitment_case()
+    case["target_scope"] = {
+        "platform": "qq",
+        "platform_channel_id": "54369546",
+        "channel_type": "group",
+        "user_id": "user-1",
+    }
+    attempt = _action_attempt(
+        case,
+        status=models.ACTION_ATTEMPT_STATUS_CANDIDATE,
+    )
+    mention = {
+        "entity_kind": "user",
+        "placement": "prefix",
+        "platform_user_id": "platform-user-1",
+        "global_user_id": "user-1",
+        "display_name": "Target User",
+        "requested_by": "dialog.mention_target_user",
+    }
+    candidate = _action_candidate(attempt)
+    candidate["target_channel"] = "54369546"
+    candidate["target_channel_type"] = "group"
+    candidate["delivery_mentions"] = [mention]
+    dispatcher = _FakeDispatcher()
+
+    await dispatch_action_candidate(
+        case,
+        attempt,
+        candidate,
+        dispatcher,
+        now=datetime(2026, 5, 13, tzinfo=timezone.utc),
+    )
+
+    raw_call = dispatcher.calls[0]["raw_calls"][0]
+    assert raw_call.args["text"] == "Checking in now."
+    assert raw_call.args["delivery_mentions"] == [mention]
+
+
+@pytest.mark.asyncio
 async def test_active_commitment_source_builds_due_case_from_memory_unit() -> None:
     """Active commitment collection should build visible/actionable case input."""
 
@@ -812,7 +854,11 @@ async def test_active_commitment_source_builds_due_case_from_memory_unit() -> No
 
     assert len(cases) == 1
     assert cases[0]["case_name"] == models.CASE_COMMITMENT_PAST_DUE
-    assert cases[0]["target_scope"] == _target_scope()
+    assert cases[0]["target_scope"] == {
+        **_target_scope(),
+        "platform_user_id": "",
+        "display_name": "User",
+    }
     assert cases[0]["source_refs"][0]["source_id"] == "promise-001"
     assert cases[0]["visible_context"][0]["body_text"].startswith("Please")
 

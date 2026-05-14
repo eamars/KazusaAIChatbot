@@ -43,8 +43,12 @@ or `in_progress` plans under `active/`; use the registry for all other folders.
 - Name mandatory skills explicitly; copy critical skill-derived rules into the
   plan because context may compact.
 - Include `Must Do`, `Deferred`, `Agent Autonomy Boundaries`, `Change Surface`,
-  `Implementation Order`, `Progress Checklist`, `Verification`,
-  `Independent Code Review`, and `Acceptance Criteria`.
+  `Overdesign Guardrail`, `Implementation Order`, `Progress Checklist`,
+  `Verification`, `Independent Code Review`, and `Acceptance Criteria`.
+- In `Overdesign Guardrail`, state the actual problem, minimal change,
+  ownership boundaries, rejected complexity, and evidence required before
+  adding flexibility. Do not approve a plan that adds speculative fields,
+  layers, helpers, flags, modes, fallback paths, or abstractions.
 - Break execution into granular, verifiable steps instead of broad work items.
 - Define cutover policy as `bigbang`, `migration`, or `compatible` for every
   changed behavior area, and confirm it before finalizing.

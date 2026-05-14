@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Optional, Protocol, runtime_checkable
+from typing import Any, Optional, Protocol, runtime_checkable
 
 
 @dataclass(frozen=True)
@@ -37,6 +38,7 @@ class MessagingAdapter(Protocol):
         *,
         channel_type: str,
         reply_to_msg_id: Optional[str] = None,
+        delivery_mentions: Sequence[dict[str, Any]] | None = None,
     ) -> SendResult:
         """Send a message through the adapter."""
 

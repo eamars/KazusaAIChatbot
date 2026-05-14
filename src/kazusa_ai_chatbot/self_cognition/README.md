@@ -87,7 +87,7 @@ cognition's route or contact decision.
 - `tracking.build_route_effect(run_record, route, consumer, effect_summary, next_topic=None)`
 - `tracking.classify_route(case, cognition_output, action_attempt=None)`
 - `tracking.build_action_attempt(case, trigger_record, existing_attempts)`
-- `tracking.build_action_candidate(case, action_attempt, text)`
+- `tracking.build_action_candidate(case, action_attempt, text, mention_target_user=False)`
 - `runner.build_self_cognition_case_artifacts(case, rag_client=None, cognition_client=None, dialog_client=None, consolidation_client=None, apply_consolidation=False)`
 - `runner.build_self_cognition_case_artifacts_async(case, rag_client=None, cognition_client=None, dialog_client=None, consolidation_client=None, apply_consolidation=False)`
 - `runner.run_self_cognition_case(case, output_dir, rag_client=None, cognition_client=None, dialog_client=None, consolidation_client=None, apply_consolidation=False)`
@@ -125,6 +125,50 @@ The live worker stores suppression history in the
 `kazusa_ai_chatbot.db` helpers. Event logging mirrors sanitized run and
 dispatch metadata for operators, but event logs are not used as production
 control state.
+
+## Delivery Mentions
+
+Self-cognition may attach one platform-neutral `delivery_mentions` request to
+a proactive `send_message` action candidate when the shared dialog graph
+returns `mention_target_user=true` and the case has a semantic target user in
+`target_scope.user_id`.
+
+The target scope may carry delivery-only platform identity:
+
+```python
+{
+    "platform": str,
+    "platform_channel_id": str,
+    "channel_type": str,
+    "user_id": str | None,
+    "platform_user_id": str | None,
+    "display_name": str,
+}
+```
+
+`platform_user_id` and `display_name` are not model context. They must not be
+rendered into source packets, RAG requests, cognition state, dialog state, or
+prompt text. They also do not participate in action-attempt idempotency.
+
+Action candidates may carry:
+
+```python
+"delivery_mentions": [
+    {
+        "entity_kind": "user",
+        "placement": "prefix",
+        "platform_user_id": str | None,
+        "global_user_id": str | None,
+        "display_name": str,
+        "requested_by": "dialog.mention_target_user",
+    }
+]
+```
+
+Self-cognition does not decide adapter capability, channel feasibility, or
+native mention syntax. It only carries the dialog-owned semantic mention
+request as metadata. The dispatcher passes the metadata through and adapters
+render or ignore it.
 
 ## Event Logging
 
@@ -242,6 +286,7 @@ self_cognition_action_candidate = {
     "execute_at": str | None,
     "dispatch_shape": "send_message",
     "production_handoff": False,
+    "delivery_mentions": list[dict],  # optional
 }
 
 self_cognition_dispatch_result = {

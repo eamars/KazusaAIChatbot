@@ -51,12 +51,14 @@ class _FailingGraph:
 def _chat_request(
     *,
     message_id: str = "msg-1",
+    channel_type: str = "private",
     debug_modes: service_module.DebugModesIn | None = None,
 ) -> service_module.ChatRequest:
     """Build a minimal chat request for service-layer tests.
 
     Args:
         message_id: Platform message identifier for the request.
+        channel_type: Channel surface for the request.
         debug_modes: Optional debug-mode flags for the request.
 
     Returns:
@@ -66,7 +68,7 @@ def _chat_request(
     request = service_module.ChatRequest(
         platform="qq",
         platform_channel_id="chan-1",
-        channel_type="private",
+        channel_type=channel_type,
         platform_message_id=message_id,
         platform_user_id="user-1",
         platform_bot_id="bot-1",
@@ -153,6 +155,7 @@ def _graph_result(consolidation_state: Mapping | dict | None = None) -> dict:
         "should_respond": True,
         "use_reply_feature": False,
         "final_dialog": ["ok"],
+        "mention_target_user": False,
         "future_promises": [],
         "consolidation_state": consolidation_state,
     }
@@ -328,6 +331,89 @@ async def test_chat_response_uses_true_reply_feature_from_graph(monkeypatch):
 
     assert response.messages == ["ok"]
     assert response.use_reply_feature is True
+    await _reset_queue_state()
+
+
+@pytest.mark.asyncio
+async def test_chat_response_adds_delivery_mentions_from_dialog_flag_without_channel_gate(
+    monkeypatch,
+):
+    """Chat responses should carry mention metadata when dialog asks."""
+
+    await _reset_queue_state()
+    monkeypatch.setattr(
+        service_module,
+        "_save_assistant_message",
+        AsyncMock(),
+    )
+    monkeypatch.setattr(
+        service_module,
+        "_run_conversation_progress_record_background",
+        AsyncMock(),
+    )
+    monkeypatch.setattr(
+        service_module,
+        "_run_consolidation_background",
+        AsyncMock(),
+    )
+    graph_result = _graph_result()
+    graph_result["mention_target_user"] = True
+    _patch_chat_dependencies(monkeypatch, _FakeGraph(graph_result))
+
+    response = await service_module.chat(
+        _chat_request(),
+        BackgroundTasks(),
+    )
+
+    assert response.messages == ["ok"]
+    assert response.delivery_mentions == [
+        {
+            "entity_kind": "user",
+            "placement": "prefix",
+            "platform_user_id": "user-1",
+            "global_user_id": "global-user-1",
+            "display_name": "Test User",
+            "requested_by": "dialog.mention_target_user",
+        }
+    ]
+    await _reset_queue_state()
+
+
+@pytest.mark.asyncio
+async def test_chat_response_reply_feature_suppresses_delivery_mentions(
+    monkeypatch,
+):
+    """Reply anchoring should win over dialog mention intent."""
+
+    await _reset_queue_state()
+    monkeypatch.setattr(
+        service_module,
+        "_save_assistant_message",
+        AsyncMock(),
+    )
+    monkeypatch.setattr(
+        service_module,
+        "_run_conversation_progress_record_background",
+        AsyncMock(),
+    )
+    monkeypatch.setattr(
+        service_module,
+        "_run_consolidation_background",
+        AsyncMock(),
+    )
+    graph_result = _graph_result()
+    graph_result["use_reply_feature"] = True
+    graph_result["mention_target_user"] = True
+    _patch_chat_dependencies(monkeypatch, _FakeGraph(graph_result))
+
+    response = await service_module.chat(
+        _chat_request(channel_type="group"),
+        BackgroundTasks(),
+    )
+
+    assert response.messages == ["ok"]
+    assert response.use_reply_feature is True
+    assert response.delivery_mentions == []
     await _reset_queue_state()
 
 

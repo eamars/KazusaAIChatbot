@@ -149,6 +149,10 @@ def _build_active_commitment_case(
             ),
             "channel_type": text_or_empty(latest_row.get("channel_type")),
             "user_id": text_or_empty(unit.get("global_user_id")),
+            "platform_user_id": text_or_empty(
+                latest_row.get("platform_user_id")
+            ),
+            "display_name": text_or_empty(latest_row.get("display_name")),
         },
         "source_refs": [
             {

@@ -231,8 +231,16 @@ The current built-in tool is `send_message`.
     "target_platform": str | omitted,
     "execute_at": str | omitted,
     "reply_to_msg_id": str | None,
+    "delivery_mentions": list[dict] | omitted,
 }
 ```
+
+`delivery_mentions` is optional adapter-owned rendering metadata. The
+dispatcher validates only that the field is an array when present, preserves it
+inside task args, and passes it to the adapter unchanged. Mention feasibility,
+native syntax, and fallback behavior belong to the platform adapter.
+This field is runtime-only metadata and is not shown to the task-dispatcher
+LLM as a generatable tool argument.
 
 Additional tools are explicit capabilities with narrow schemas. Dispatch stays
 inspectable when each tool has clear ownership and validation.
@@ -250,8 +258,13 @@ async def send_message(
     *,
     channel_type: str,
     reply_to_msg_id: str | None = None,
+    delivery_mentions: Sequence[dict] | None = None,
 ) -> SendResult
 ```
+
+`delivery_mentions` requests are best-effort. If an adapter cannot render one
+or the request lacks the needed platform identity, it sends the original text.
+Prefix is the only approved placement for the current contract.
 
 `AdapterRegistry` maps platform keys to adapters. `RemoteHttpAdapter` bridges scheduled delivery to an adapter-owned HTTP endpoint, which lets the brain service schedule work even when the live platform adapter runs in another process.
 

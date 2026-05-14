@@ -533,3 +533,47 @@ When reviewing, flag `.replace(...)` calls that are being used to fill
 placeholder tokens in a template. `.replace(...)` remains acceptable for
 ordinary text normalization where the code is replacing literal content rather
 than rendering a template.
+
+---
+
+## N-018 -- Do not add speculative flexibility to Python contracts
+
+Do not add parameters, state keys, fields, flags, modes, optional branches,
+fallback paths, adapters, hooks, or configuration surfaces for hypothetical
+future needs. Each new contract dimension must be required by the current
+request, an observed failure, an existing caller, or an approved near-term
+integration point.
+
+This constraint applies even when the implementation is small. A boolean flag,
+extra payload field, no-op option, or unused mode still expands the contract
+readers and tests must understand.
+
+**Forbidden:**
+```python
+def build_delivery_payload(
+    text: str,
+    *,
+    use_native_mentions: bool = False,
+    mention_position: str = "prefix",
+    adapter_supports_mentions: bool = True,
+) -> dict[str, Any]:
+    ...
+```
+
+when the current requirement only needs one deterministic prefix path.
+
+**Correct:**
+```python
+def build_delivery_payload(text: str, mention_user: bool) -> dict[str, Any]:
+    ...
+```
+
+or, if the caller can express the behavior directly:
+
+```python
+payload = {"text": text, "mention_user": mention_user}
+```
+
+When reviewing, ask for each new parameter, field, branch, and config option:
+"Which current requirement or observed failure needs this now?" If the answer
+is future-proofing, reject it and keep the simpler contract.

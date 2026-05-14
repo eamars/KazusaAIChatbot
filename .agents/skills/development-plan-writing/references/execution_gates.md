@@ -262,6 +262,10 @@ brief self-review:
 
 - **Coverage:** every `Must Do`, accepted design decision, and acceptance
   criterion maps to at least one implementation step or verification gate.
+- **Minimality:** the `Overdesign Guardrail` names the actual problem,
+  minimal change, ownership boundaries, rejected complexity, and evidence
+  threshold; no new field, layer, flag, helper, fallback, mode, or abstraction
+  lacks current-requirement justification.
 - **Placeholder scan:** no `TBD`, `TODO`, "similar to", "handle edge cases",
   "add tests", or open-ended implementation wording remains.
 - **Contract consistency:** filenames, function names, state keys, schemas,

@@ -120,6 +120,7 @@ class DialogAgentState(TypedDict):
     final_dialog: list[str]  # splitted dialog to be sent in different batch
     target_addressed_user_ids: list[str]
     target_broadcast: bool
+    mention_target_user: bool
 
 _DIALOG_GENERATOR_PROMPT = """\
 你现在是角色 `{character_name}` 的 **表达执行官**。你接收来自`linguistic_directives`的修辞指令和`contextual_directives`的社交参数，将它们转化为自然的聊天文本。
@@ -186,8 +187,12 @@ _DIALOG_GENERATOR_PROMPT = """\
    - 无论输出语言是什么，都不要让同一种连接词、口头禅或下调尾词在同一轮、或与最近一轮角色回复中重复出现两次以上；若拿不准，宁可省略。
 
 # 输出要求
-- 必须返回一个 JSON 对象，顶层只能是 `{{"final_dialog": [...]}}`。
+- 必须返回一个 JSON 对象，顶层只能包含 `final_dialog` 和 `mention_target_user`。
 - `final_dialog` 中的每个元素才是要发送的台词片段。
+- `mention_target_user` 必须是 boolean，不是字符串。它只表示“这句话在语义上是否明显对当前用户本人说，并且如果放进没有回复锚点的共享聊天流里会需要显式锚定对方”。
+- 只有当台词明确对 `user_name` 所代表的当前用户本人发起、催促、回答或追问时，`mention_target_user` 才能为 `true`。
+- 当台词更像泛泛评论、群体广播、场景旁白、承接气氛、对象不明，或你不确定是否需要锚定当前用户时，`mention_target_user` 必须为 `false`。
+- 你绝不能生成任何 @、平台 ID、用户 ID、插入标记、占位符或原生标签；只输出 boolean。
 - 不要返回顶层数组、裸字符串、Markdown 代码块或任何额外说明。
 - 台词片段中**严禁包含任何括号说明或内心独白**。
 - 台词片段中**严禁包含任何形式的动作暗示或描写**。
@@ -203,6 +208,7 @@ _DIALOG_GENERATOR_PROMPT = """\
 3. 用 `internal_monologue` 和 `contextual_directives` 调整语气厚度，但不要把内心独白直接写成台词。
 4. 检查 `tone_history`，避免重复刚用过的连接词、口癖或回应动作。
 5. 生成纯聊天文本，最后自查是否出现动作、括号说明、物理感官或系统提示。
+6. 只根据生成台词的语义指向判断 `mention_target_user`；不要推测平台、频道、回复功能或标签能力。
 
 # 输入格式
 {{
@@ -222,7 +228,7 @@ _DIALOG_GENERATOR_PROMPT = """\
         "expression_willingness": "string",
     }},
     "tone_history": "已完成的历史轮次（至上一条 assistant 回复为止），仅供语气节奏参考",
-    "user_name": "string",
+    "user_name": "string"
 }}
 
 # 输出格式
@@ -232,7 +238,8 @@ _DIALOG_GENERATOR_PROMPT = """\
         "台词片段1",
         "台词片段2",
         ...
-    ]
+    ],
+    "mention_target_user": boolean
 }}
 """
 _dialog_generator_llm = get_llm(
@@ -333,10 +340,17 @@ async def dialog_generator(state: DialogAgentState) -> DialogAgentState:
             "normalizing it into final_dialog"
         )
         generated_dialog = result
+        mention_target_user = False
         parsed_keys = ["<top-level-list>"]
         invalid_fields.append("top_level")
     else:
         generated_dialog = result.get("final_dialog", [])
+        raw_mention_target_user = result.get("mention_target_user")
+        if isinstance(raw_mention_target_user, bool):
+            mention_target_user = raw_mention_target_user
+        else:
+            mention_target_user = False
+            invalid_fields.append("mention_target_user")
         parsed_keys = list(result.keys())
 
     if not isinstance(generated_dialog, list):
@@ -358,6 +372,8 @@ async def dialog_generator(state: DialogAgentState) -> DialogAgentState:
         )
         invalid_fields.append("final_dialog_fragment")
     generated_dialog = valid_dialog
+    if not generated_dialog:
+        mention_target_user = False
     generated_dialog_preview = (
         generated_dialog
         if isinstance(generated_dialog, list)
@@ -397,6 +413,7 @@ async def dialog_generator(state: DialogAgentState) -> DialogAgentState:
 
     return_value = {
         "final_dialog": generated_dialog,
+        "mention_target_user": mention_target_user,
         "messages": [response]
     }
     return return_value
@@ -718,12 +735,16 @@ async def dialog_agent(
         "final_dialog": [],
         "target_addressed_user_ids": [],
         "target_broadcast": False,
+        "mention_target_user": False,
     }
 
     result = await sub_graph.ainvoke(subState)
 
     # Assemble output.
     final_dialog = result["final_dialog"]
+    mention_target_user = bool(final_dialog) and bool(
+        result["mention_target_user"]
+    )
 
     logger.info(f"Dialog output: dialog={log_list_preview(final_dialog)}")
     logger.debug(
@@ -749,5 +770,6 @@ async def dialog_agent(
         "final_dialog": final_dialog,
         "target_addressed_user_ids": [global_state["global_user_id"]] if final_dialog else [],
         "target_broadcast": False,
+        "mention_target_user": mention_target_user,
     }
     return return_value

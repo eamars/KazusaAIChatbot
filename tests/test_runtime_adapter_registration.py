@@ -110,6 +110,7 @@ class _FakeDiscordChannel:
         self.id = 12345
         self.name = "general"
         self.sent_chunks: list[str] = []
+        self.sent_kwargs: list[dict] = []
 
     def typing(self) -> _FakeDiscordTyping:
         """Return an async context manager for the typing indicator."""
@@ -117,10 +118,11 @@ class _FakeDiscordChannel:
         return_value = _FakeDiscordTyping()
         return return_value
 
-    async def send(self, content: str) -> _FakeDiscordSentMessage:
+    async def send(self, content: str, **kwargs) -> _FakeDiscordSentMessage:
         """Record a channel send and return a sent-message id."""
 
         self.sent_chunks.append(content)
+        self.sent_kwargs.append(dict(kwargs))
         message_id = f"discord-send-{len(self.sent_chunks)}"
         return_value = _FakeDiscordSentMessage(message_id)
         return return_value
@@ -146,6 +148,20 @@ class _FakeDiscordMessage:
         message_id = f"discord-reply-{len(self.reply_chunks)}"
         return_value = _FakeDiscordSentMessage(message_id)
         return return_value
+
+
+def _target_user_mention(
+    *,
+    platform_user_id: str | None = "2787858400",
+) -> dict:
+    return {
+        "entity_kind": "user",
+        "placement": "prefix",
+        "platform_user_id": platform_user_id,
+        "global_user_id": "global-user-1",
+        "display_name": "Target User",
+        "requested_by": "dialog.mention_target_user",
+    }
 
 
 def test_register_remote_runtime_adapter_registers_proxy_in_service(monkeypatch):
@@ -195,6 +211,7 @@ def test_register_runtime_adapter_payload_reuses_remote_registration(monkeypatch
 async def test_remote_http_adapter_posts_send_message_payload(monkeypatch):
     """The remote proxy should call the adapter callback endpoint with bearer auth."""
 
+    mention = _target_user_mention()
     monkeypatch.setattr("kazusa_ai_chatbot.dispatcher.remote_adapter.httpx.AsyncClient", _FakeAsyncClient)
     adapter = RemoteHttpAdapter(
         platform="qq",
@@ -208,6 +225,7 @@ async def test_remote_http_adapter_posts_send_message_payload(monkeypatch):
         text="今天天气真好呀",
         reply_to_msg_id="1615877136",
         channel_type="private",
+        delivery_mentions=[mention],
     )
 
     assert _FakeAsyncClient.last_call == {
@@ -217,6 +235,7 @@ async def test_remote_http_adapter_posts_send_message_payload(monkeypatch):
             "channel_type": "private",
             "text": "今天天气真好呀",
             "reply_to_msg_id": "1615877136",
+            "delivery_mentions": [mention],
         },
         "headers": {"Authorization": "Bearer secret-token"},
         "timeout": 7.5,
@@ -779,6 +798,61 @@ async def test_napcat_handle_event_sends_reply_as_message_segments():
 
 
 @pytest.mark.asyncio
+async def test_napcat_handle_event_prefixes_delivery_mention_from_brain():
+    """Normal QQ chat sends should render brain-provided mention metadata."""
+
+    adapter = NapCatWSAdapter(
+        ws_url="ws://napcat.local/ws",
+        ws_token="token",
+        brain_url="http://127.0.0.1:8000",
+        brain_response_timeout=30,
+        runtime_host="127.0.0.1",
+        runtime_port=8011,
+        runtime_public_url="http://127.0.0.1:8011",
+        channel_ids=["905393941"],
+        debug_modes={},
+    )
+    adapter.bot_id = "3768713357"
+    adapter.bot_name = "Kazusa"
+    adapter.brain_client.post = AsyncMock(return_value=_DummyResponse({
+        "messages": ["hello there"],
+        "use_reply_feature": False,
+        "delivery_mentions": [
+            _target_user_mention(platform_user_id="2787858400"),
+        ],
+    }))
+    ws = _FakeNapCatWebSocket({"message_id": "outbound-mention"})
+
+    await adapter.handle_event(
+        {
+            "post_type": "message",
+            "message_type": "group",
+            "message_id": 1602974845,
+            "group_id": 905393941,
+            "user_id": 2787858400,
+            "sender": {"nickname": "User A"},
+            "message": [
+                {"type": "at", "data": {"qq": "3768713357"}},
+                {"type": "text", "data": {"text": " hi"}},
+            ],
+        },
+        ws,
+    )
+
+    send_payloads = [
+        payload
+        for payload in ws.sent_payloads
+        if payload["action"] == "send_msg"
+    ]
+    assert len(send_payloads) == 1
+    assert send_payloads[0]["params"]["message"] == [
+        {"type": "at", "data": {"qq": "2787858400"}},
+        {"type": "text", "data": {"text": "hello there"}},
+    ]
+    await adapter.close()
+
+
+@pytest.mark.asyncio
 async def test_napcat_handle_event_posts_delivery_receipt_after_send():
     """Successful normal chat sends should report platform message ids."""
 
@@ -1108,6 +1182,148 @@ async def test_napcat_runtime_send_message_uses_reply_segments():
 
 
 @pytest.mark.asyncio
+async def test_napcat_runtime_send_message_prefixes_delivery_mention():
+    """QQ scheduled sends should render feasible prefix mention requests."""
+
+    adapter = NapCatWSAdapter(
+        ws_url="ws://napcat.local/ws",
+        ws_token="token",
+        brain_url="http://127.0.0.1:8000",
+        brain_response_timeout=30,
+        runtime_host="127.0.0.1",
+        runtime_port=8011,
+        runtime_public_url="http://127.0.0.1:8011",
+        channel_ids=["54369546"],
+        debug_modes={},
+    )
+    ws = _FakeNapCatWebSocket({"message_id": "outbound-mention"})
+    adapter._ws = ws
+
+    result = await adapter.send_message(
+        channel_id="54369546",
+        text="scheduled hello",
+        channel_type="group",
+        delivery_mentions=[_target_user_mention(platform_user_id="2787858400")],
+    )
+
+    assert ws.sent_payloads[0]["params"]["message"] == [
+        {"type": "at", "data": {"qq": "2787858400"}},
+        {"type": "text", "data": {"text": "scheduled hello"}},
+    ]
+    assert result.message_id == "outbound-mention"
+    await adapter.close()
+
+
+@pytest.mark.asyncio
+async def test_napcat_runtime_send_message_noops_incomplete_delivery_mention():
+    """QQ scheduled sends should ignore unrenderable mention requests."""
+
+    adapter = NapCatWSAdapter(
+        ws_url="ws://napcat.local/ws",
+        ws_token="token",
+        brain_url="http://127.0.0.1:8000",
+        brain_response_timeout=30,
+        runtime_host="127.0.0.1",
+        runtime_port=8011,
+        runtime_public_url="http://127.0.0.1:8011",
+        channel_ids=["54369546"],
+        debug_modes={},
+    )
+    ws = _FakeNapCatWebSocket({"message_id": "outbound-noop"})
+    adapter._ws = ws
+
+    result = await adapter.send_message(
+        channel_id="54369546",
+        text="scheduled hello",
+        channel_type="group",
+        delivery_mentions=[_target_user_mention(platform_user_id=None)],
+    )
+
+    assert ws.sent_payloads[0]["params"]["message"] == "scheduled hello"
+    assert result.message_id == "outbound-noop"
+    await adapter.close()
+
+
+@pytest.mark.asyncio
+async def test_napcat_runtime_send_message_noops_non_user_delivery_mention():
+    """QQ scheduled sends should not render broad or malformed mention IDs."""
+
+    adapter = NapCatWSAdapter(
+        ws_url="ws://napcat.local/ws",
+        ws_token="token",
+        brain_url="http://127.0.0.1:8000",
+        brain_response_timeout=30,
+        runtime_host="127.0.0.1",
+        runtime_port=8011,
+        runtime_public_url="http://127.0.0.1:8011",
+        channel_ids=["54369546"],
+        debug_modes={},
+    )
+    ws = _FakeNapCatWebSocket({"message_id": "outbound-noop"})
+    adapter._ws = ws
+
+    result = await adapter.send_message(
+        channel_id="54369546",
+        text="scheduled hello",
+        channel_type="group",
+        delivery_mentions=[_target_user_mention(platform_user_id="all")],
+    )
+
+    assert ws.sent_payloads[0]["params"]["message"] == "scheduled hello"
+    assert result.message_id == "outbound-noop"
+    await adapter.close()
+
+
+@pytest.mark.asyncio
+async def test_napcat_runtime_endpoint_accepts_delivery_mentions():
+    """The QQ callback endpoint should preserve mention metadata to send."""
+
+    adapter = NapCatWSAdapter(
+        ws_url="ws://napcat.local/ws",
+        ws_token="token",
+        brain_url="http://127.0.0.1:8000",
+        brain_response_timeout=30,
+        runtime_host="127.0.0.1",
+        runtime_port=8011,
+        runtime_public_url="http://127.0.0.1:8011",
+        channel_ids=["54369546"],
+        debug_modes={},
+    )
+    ws = _FakeNapCatWebSocket({"message_id": "outbound-endpoint"})
+    adapter._ws = ws
+    previous_runtime_adapter = napcat_module._runtime_adapter
+    napcat_module._runtime_adapter = adapter
+
+    try:
+        transport = httpx.ASGITransport(app=napcat_module.runtime_app)
+        async with httpx.AsyncClient(
+            transport=transport,
+            base_url="http://runtime.local",
+        ) as client:
+            response = await client.post(
+                "/send_message",
+                json={
+                    "channel_id": "54369546",
+                    "channel_type": "group",
+                    "text": "scheduled hello",
+                    "reply_to_msg_id": None,
+                    "delivery_mentions": [
+                        _target_user_mention(platform_user_id="2787858400")
+                    ],
+                },
+            )
+
+        assert response.status_code == 200
+        assert ws.sent_payloads[0]["params"]["message"] == [
+            {"type": "at", "data": {"qq": "2787858400"}},
+            {"type": "text", "data": {"text": "scheduled hello"}},
+        ]
+    finally:
+        napcat_module._runtime_adapter = previous_runtime_adapter
+        await adapter.close()
+
+
+@pytest.mark.asyncio
 async def test_napcat_runtime_send_message_uses_private_message_type():
     """Runtime private sends should use OneBot private message parameters."""
 
@@ -1351,6 +1567,36 @@ async def test_discord_handle_message_posts_first_delivery_receipt(
 
 
 @pytest.mark.asyncio
+async def test_discord_on_message_prefixes_delivery_mention_from_brain():
+    """Normal Discord chat sends should render brain-provided mentions."""
+
+    adapter = DiscordAdapter(
+        brain_url="http://127.0.0.1:8000",
+        runtime_host="127.0.0.1",
+        runtime_port=8012,
+        runtime_public_url="http://127.0.0.1:8012",
+        runtime_shared_secret="secret-token",
+        channel_ids=["12345"],
+        debug_modes={},
+    )
+    adapter._http_client.post = AsyncMock(return_value=_DummyResponse({
+        "messages": ["hello there"],
+        "use_reply_feature": False,
+        "delivery_mentions": [
+            _target_user_mention(platform_user_id="2787858400"),
+        ],
+        "delivery_tracking_id": "delivery-mention",
+    }))
+    message = _FakeDiscordMessage()
+
+    await adapter.on_message(message)
+
+    assert message.reply_chunks == []
+    assert message.channel.sent_chunks == ["<@2787858400> hello there"]
+    await adapter.close()
+
+
+@pytest.mark.asyncio
 async def test_discord_runtime_send_message_accepts_channel_type():
     """Discord runtime sends should accept scheduler channel-type metadata."""
 
@@ -1375,6 +1621,137 @@ async def test_discord_runtime_send_message_accepts_channel_type():
     assert channel.sent_chunks == ["scheduled hello"]
     assert result.message_id == "discord-send-1"
     await adapter.close()
+
+
+@pytest.mark.asyncio
+async def test_discord_runtime_send_message_prefixes_delivery_mention():
+    """Discord scheduled sends should render feasible prefix mentions."""
+
+    adapter = DiscordAdapter(
+        brain_url="http://127.0.0.1:8000",
+        runtime_host="127.0.0.1",
+        runtime_port=8012,
+        runtime_public_url="http://127.0.0.1:8012",
+        runtime_shared_secret="secret-token",
+        channel_ids=["12345"],
+        debug_modes={},
+    )
+    channel = _FakeDiscordChannel()
+    adapter.get_channel = MagicMock(return_value=channel)
+
+    result = await adapter.send_message(
+        channel_id="12345",
+        text="scheduled hello",
+        channel_type="group",
+        delivery_mentions=[_target_user_mention(platform_user_id="2787858400")],
+    )
+
+    assert channel.sent_chunks == ["<@2787858400> scheduled hello"]
+    assert result.message_id == "discord-send-1"
+    await adapter.close()
+
+
+@pytest.mark.asyncio
+async def test_discord_runtime_send_message_noops_incomplete_delivery_mention():
+    """Discord scheduled sends should ignore unrenderable mentions."""
+
+    adapter = DiscordAdapter(
+        brain_url="http://127.0.0.1:8000",
+        runtime_host="127.0.0.1",
+        runtime_port=8012,
+        runtime_public_url="http://127.0.0.1:8012",
+        runtime_shared_secret="secret-token",
+        channel_ids=["12345"],
+        debug_modes={},
+    )
+    channel = _FakeDiscordChannel()
+    adapter.get_channel = MagicMock(return_value=channel)
+
+    result = await adapter.send_message(
+        channel_id="12345",
+        text="scheduled hello",
+        channel_type="group",
+        delivery_mentions=[_target_user_mention(platform_user_id=None)],
+    )
+
+    assert channel.sent_chunks == ["scheduled hello"]
+    assert result.message_id == "discord-send-1"
+    await adapter.close()
+
+
+@pytest.mark.asyncio
+async def test_discord_runtime_send_message_noops_malformed_delivery_mention():
+    """Discord scheduled sends should not interpolate malformed mention IDs."""
+
+    adapter = DiscordAdapter(
+        brain_url="http://127.0.0.1:8000",
+        runtime_host="127.0.0.1",
+        runtime_port=8012,
+        runtime_public_url="http://127.0.0.1:8012",
+        runtime_shared_secret="secret-token",
+        channel_ids=["12345"],
+        debug_modes={},
+    )
+    channel = _FakeDiscordChannel()
+    adapter.get_channel = MagicMock(return_value=channel)
+
+    result = await adapter.send_message(
+        channel_id="12345",
+        text="scheduled hello",
+        channel_type="group",
+        delivery_mentions=[
+            _target_user_mention(platform_user_id="123> @everyone")
+        ],
+    )
+
+    assert channel.sent_chunks == ["scheduled hello"]
+    assert result.message_id == "discord-send-1"
+    await adapter.close()
+
+
+@pytest.mark.asyncio
+async def test_discord_runtime_endpoint_accepts_delivery_mentions():
+    """The Discord callback endpoint should preserve mention metadata to send."""
+
+    adapter = DiscordAdapter(
+        brain_url="http://127.0.0.1:8000",
+        runtime_host="127.0.0.1",
+        runtime_port=8012,
+        runtime_public_url="http://127.0.0.1:8012",
+        runtime_shared_secret="secret-token",
+        channel_ids=["12345"],
+        debug_modes={},
+    )
+    channel = _FakeDiscordChannel()
+    adapter.get_channel = MagicMock(return_value=channel)
+    previous_runtime_adapter = discord_module._runtime_adapter
+    discord_module._runtime_adapter = adapter
+
+    try:
+        transport = httpx.ASGITransport(app=discord_module.runtime_app)
+        async with httpx.AsyncClient(
+            transport=transport,
+            base_url="http://runtime.local",
+        ) as client:
+            response = await client.post(
+                "/send_message",
+                headers={"Authorization": "Bearer secret-token"},
+                json={
+                    "channel_id": "12345",
+                    "channel_type": "group",
+                    "text": "scheduled hello",
+                    "reply_to_msg_id": None,
+                    "delivery_mentions": [
+                        _target_user_mention(platform_user_id="2787858400")
+                    ],
+                },
+            )
+
+        assert response.status_code == 200
+        assert channel.sent_chunks == ["<@2787858400> scheduled hello"]
+    finally:
+        discord_module._runtime_adapter = previous_runtime_adapter
+        await adapter.close()
 
 
 @pytest.mark.asyncio

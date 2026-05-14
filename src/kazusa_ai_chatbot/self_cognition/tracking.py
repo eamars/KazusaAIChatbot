@@ -305,6 +305,8 @@ def build_action_candidate(
     case: models.SelfCognitionCase,
     action_attempt: dict[str, Any],
     text: str,
+    *,
+    mention_target_user: bool = False,
 ) -> dict[str, Any] | None:
     """Build a send-message candidate for a non-duplicate action attempt.
 
@@ -312,6 +314,8 @@ def build_action_candidate(
         case: External dry-run case.
         action_attempt: Action attempt returned by `build_action_attempt`.
         text: Candidate message text emitted by the cognition output.
+        mention_target_user: Dialog-owned semantic request to address the
+            current target user explicitly.
 
     Returns:
         Handoff-shaped local candidate, or `None` when no candidate is allowed.
@@ -337,6 +341,12 @@ def build_action_candidate(
         "dispatch_shape": models.ACTION_KIND_SEND_MESSAGE,
         "production_handoff": False,
     }
+    delivery_mentions = _delivery_mentions_for_action(
+        case,
+        mention_target_user=mention_target_user,
+    )
+    if delivery_mentions:
+        action_candidate["delivery_mentions"] = delivery_mentions
     return action_candidate
 
 
@@ -521,6 +531,41 @@ def _case_target_scope(case: models.SelfCognitionCase) -> dict[str, Any]:
         value = {}
     scope = _normalized_target_scope(value)
     return scope
+
+
+def _delivery_mentions_for_action(
+    case: models.SelfCognitionCase,
+    *,
+    mention_target_user: bool,
+) -> list[dict[str, Any]]:
+    """Build optional delivery mention metadata for a self-cognition action."""
+
+    if not mention_target_user:
+        return_value: list[dict[str, Any]] = []
+        return return_value
+
+    value = case.get("target_scope")
+    if not isinstance(value, dict):
+        return_value = []
+        return return_value
+
+    user_id = value.get("user_id")
+    if not isinstance(user_id, str) or not user_id:
+        return_value = []
+        return return_value
+
+    platform_user_id = _optional_string_field(value, "platform_user_id")
+    display_name = _string_field(value, "display_name")
+    delivery_mention = {
+        "entity_kind": "user",
+        "placement": "prefix",
+        "platform_user_id": platform_user_id,
+        "global_user_id": user_id,
+        "display_name": display_name,
+        "requested_by": "dialog.mention_target_user",
+    }
+    return_value = [delivery_mention]
+    return return_value
 
 
 def _normalized_target_scope(target_scope: dict[str, Any]) -> dict[str, Any]:

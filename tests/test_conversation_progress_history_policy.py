@@ -242,6 +242,8 @@ async def test_dialog_generator_tone_history_is_capped_to_two(monkeypatch) -> No
         },
         "chat_history_wide": _history(),
         "chat_history_recent": _history(),
+        "channel_type": "group",
+        "use_reply_feature": False,
         "platform_user_id": "user-1",
         "platform_bot_id": "bot-1",
         "global_user_id": "global-user-1",

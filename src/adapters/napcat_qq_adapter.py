@@ -4,6 +4,7 @@ import argparse
 import asyncio
 import base64
 from collections import OrderedDict
+from collections.abc import Sequence
 from datetime import datetime, timezone
 import json
 import logging
@@ -28,6 +29,7 @@ from adapters.envelope_common import (
     normalize_mention_display_map,
     normalize_mention_display_label,
     normalize_body_spacing,
+    normalize_numeric_platform_user_id,
     readable_mention_token,
     resolve_mentions,
 )
@@ -63,6 +65,7 @@ _MENTION_DISPLAY_CACHE_LIMIT = 512
 def _outbound_message_payload(
     text: str,
     reply_to_msg_id: str | None,
+    delivery_mentions: Sequence[dict] | None = None,
 ) -> str | list[dict[str, dict[str, str] | str]]:
     """Build a OneBot message payload for normal or reply-anchored sends.
 
@@ -70,25 +73,61 @@ def _outbound_message_payload(
         text: Plain message text to send.
         reply_to_msg_id: Platform message id to quote with a native reply
             segment, if the caller requested reply anchoring.
+        delivery_mentions: Optional adapter-owned mention requests.
 
     Returns:
         A plain text payload for ordinary sends, or a structured message segment
         array for reply sends.
     """
 
-    if not reply_to_msg_id:
+    mention_segments = _prefix_user_mention_segments(delivery_mentions)
+    if not reply_to_msg_id and not mention_segments:
         return_value = text
     else:
-        return_value = [
-            {
+        return_value = []
+        if reply_to_msg_id:
+            return_value.append({
                 "type": "reply",
                 "data": {"id": str(reply_to_msg_id)},
-            },
+            })
+        return_value.extend(mention_segments)
+        return_value.append({
+            "type": "text",
+            "data": {"text": text},
+        })
+    return return_value
+
+
+def _prefix_user_mention_segments(
+    delivery_mentions: Sequence[dict] | None,
+) -> list[dict[str, dict[str, str] | str]]:
+    """Return QQ native prefix mention segments when metadata is renderable."""
+
+    if not delivery_mentions:
+        return_value: list[dict[str, dict[str, str] | str]] = []
+        return return_value
+
+    for mention in delivery_mentions:
+        if not isinstance(mention, dict):
+            continue
+        if mention.get("entity_kind") != "user":
+            continue
+        if mention.get("placement") != "prefix":
+            continue
+        normalized_user_id = normalize_numeric_platform_user_id(
+            mention.get("platform_user_id")
+        )
+        if not normalized_user_id:
+            continue
+        return_value = [
             {
-                "type": "text",
-                "data": {"text": text},
-            },
+                "type": "at",
+                "data": {"qq": normalized_user_id},
+            }
         ]
+        return return_value
+
+    return_value = []
     return return_value
 
 
@@ -261,6 +300,7 @@ class RuntimeSendMessageRequest(BaseModel):
     channel_type: str
     text: str
     reply_to_msg_id: str | None = None
+    delivery_mentions: list[dict] | None = None
 
 
 class RuntimeSendMessageResponse(BaseModel):
@@ -290,6 +330,7 @@ async def send_message_endpoint(
             text=req.text,
             reply_to_msg_id=req.reply_to_msg_id,
             channel_type=req.channel_type,
+            delivery_mentions=req.delivery_mentions,
         )
     except RuntimeError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
@@ -973,12 +1014,19 @@ class NapCatWSAdapter:
             reply_to_msg_id = None
             if brain_data.get("use_reply_feature"):
                 reply_to_msg_id = str(data["message_id"])
+            raw_delivery_mentions = brain_data.get("delivery_mentions")
+            delivery_mentions = (
+                raw_delivery_mentions
+                if isinstance(raw_delivery_mentions, list)
+                else None
+            )
             msg_params = {
                 "message_type": "group" if is_group else "private",
                 "group_id" if is_group else "user_id": int(channel_id),
                 "message": _outbound_message_payload(
                     combined,
                     reply_to_msg_id,
+                    delivery_mentions if is_group else None,
                 ),
             }
 
@@ -1049,6 +1097,7 @@ class NapCatWSAdapter:
         *,
         channel_type: str,
         reply_to_msg_id: str | None = None,
+        delivery_mentions: Sequence[dict] | None = None,
     ) -> SendResult:
         """Send one outbound message through NapCat's ``send_msg`` action.
 
@@ -1057,6 +1106,7 @@ class NapCatWSAdapter:
             text: Message body to send.
             channel_type: Whether the target is a QQ group or private chat.
             reply_to_msg_id: Optional quoted message id.
+            delivery_mentions: Optional adapter-owned mention requests.
 
         Returns:
             Structured send result for the dispatcher.
@@ -1066,7 +1116,11 @@ class NapCatWSAdapter:
             raise RuntimeError("NapCat websocket is not connected")
 
         params: dict[str, object] = {
-            "message": _outbound_message_payload(text, reply_to_msg_id),
+            "message": _outbound_message_payload(
+                text,
+                reply_to_msg_id,
+                delivery_mentions if channel_type == "group" else None,
+            ),
         }
         if channel_type == "private":
             params["message_type"] = "private"

@@ -38,6 +38,9 @@ def build_raw_tool_call(action_candidate: dict[str, Any]) -> RawToolCall:
     execute_at = action_candidate.get("execute_at")
     if isinstance(execute_at, str) and execute_at.strip():
         args["execute_at"] = execute_at.strip()
+    delivery_mentions = action_candidate.get("delivery_mentions")
+    if isinstance(delivery_mentions, list):
+        args["delivery_mentions"] = delivery_mentions
 
     raw_call = RawToolCall(
         tool=models.ACTION_KIND_SEND_MESSAGE,

@@ -16,6 +16,7 @@ sections.
 - [No Unresolved Questions](#no-unresolved-questions)
 - [Must Do](#must-do)
 - [Deferred](#deferred)
+- [Overdesign Guardrail](#overdesign-guardrail)
 - [Agent Autonomy Boundaries](#agent-autonomy-boundaries)
 - [Context And Target State](#context-and-target-state)
 - [Design Decisions](#design-decisions)
@@ -123,6 +124,7 @@ Every final plan must include these sections:
 ## Target State
 ## Design Decisions
 ## Change Surface
+## Overdesign Guardrail
 ## Implementation Order
 ## Progress Checklist
 ## Verification
@@ -272,6 +274,44 @@ The `Deferred` section defines explicit non-scope. Use directive language:
 
 The implementation agent must not opportunistically do deferred work, even if
 it looks useful.
+
+## Overdesign Guardrail
+
+Every final executable plan must include an `Overdesign Guardrail` section
+before `Agent Autonomy Boundaries`. This section prevents the plan from
+turning a narrow requirement into speculative architecture.
+
+Use this shape:
+
+```md
+## Overdesign Guardrail
+
+- Actual problem: <one sentence describing the observable bug, missing
+  behavior, risk, or user need being fixed now.>
+- Minimal change: <the smallest viable contract/code/prompt/schema change that
+  satisfies the actual problem.>
+- Ownership boundaries: <which layer owns each decision, such as LLM semantic
+  judgment, deterministic validation, persistence, scheduling, or adapter
+  delivery.>
+- Rejected complexity: <specific fields, helpers, modes, fallback paths,
+  compatibility layers, extra agents, retries, abstractions, or integrations
+  that are intentionally not being added.>
+- Evidence threshold: <what observed failure, test, measurement, or approved
+  near-term integration would be required before adding the rejected
+  complexity later.>
+```
+
+The guardrail must reject any new dimension of flexibility unless it is needed
+by the current requirement, fixes a current failure, or supports an approved
+near-term integration point. If a plan adds a new field, helper, layer, flag,
+mode, fallback path, or abstraction, the guardrail must explain why
+deterministic existing code or a smaller local change cannot handle the need.
+
+If the plan touches architecture boundaries, explicitly state which decisions
+belong to each owner. Do not move routing, delivery, permission, feasibility,
+override, retry, persistence, or platform-specific behavior into a semantic
+LLM prompt or generic stage unless the user has explicitly approved that
+ownership change.
 
 ## Agent Autonomy Boundaries
 

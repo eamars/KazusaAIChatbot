@@ -12,6 +12,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import base64
+from collections.abc import Sequence
 from datetime import datetime, timezone
 import logging
 import os
@@ -32,6 +33,7 @@ from adapters.envelope_common import (
     attachment_refs,
     normalize_mention_display_map,
     normalize_body_spacing,
+    normalize_numeric_platform_user_id,
     readable_mention_token,
     resolve_mentions,
 )
@@ -287,6 +289,7 @@ class RuntimeSendMessageRequest(BaseModel):
     channel_type: str
     text: str
     reply_to_msg_id: str | None = None
+    delivery_mentions: list[dict] | None = None
 
 
 class RuntimeSendMessageResponse(BaseModel):
@@ -316,6 +319,7 @@ async def send_message_endpoint(
             text=req.text,
             reply_to_msg_id=req.reply_to_msg_id,
             channel_type=req.channel_type,
+            delivery_mentions=req.delivery_mentions,
         )
     except RuntimeError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
@@ -636,6 +640,17 @@ class DiscordAdapter(discord.Client):
 
         use_reply = data.get("use_reply_feature", False)
         combined = "\n".join(messages)
+        raw_delivery_mentions = data.get("delivery_mentions")
+        delivery_mentions = (
+            raw_delivery_mentions
+            if isinstance(raw_delivery_mentions, list)
+            else None
+        )
+        if not use_reply:
+            combined = _outbound_text_with_delivery_mentions(
+                combined,
+                delivery_mentions if not is_dm else None,
+            )
         first_sent_message_id = ""
 
         for chunk in _split_message(combined):
@@ -683,6 +698,7 @@ class DiscordAdapter(discord.Client):
         *,
         channel_type: str,
         reply_to_msg_id: str | None = None,
+        delivery_mentions: Sequence[dict] | None = None,
     ) -> SendResult:
         """Send one outbound message through the Discord client.
 
@@ -692,6 +708,7 @@ class DiscordAdapter(discord.Client):
             channel_type: Scheduler target scope. Discord sends by channel id
                 for both guild channels and DM channels.
             reply_to_msg_id: Optional message id to reply to.
+            delivery_mentions: Optional adapter-owned mention requests.
 
         Returns:
             Structured send result for the dispatcher.
@@ -711,7 +728,11 @@ class DiscordAdapter(discord.Client):
                 id=int(reply_to_msg_id),
             )
 
-        message = await channel.send(text, **send_kwargs)
+        outbound_text = _outbound_text_with_delivery_mentions(
+            text,
+            delivery_mentions if channel_type == "group" else None,
+        )
+        message = await channel.send(outbound_text, **send_kwargs)
         return_value = SendResult(
             platform=self.platform,
             channel_id=channel_id,
@@ -719,6 +740,49 @@ class DiscordAdapter(discord.Client):
             sent_at=datetime.now(timezone.utc),
         )
         return return_value
+
+
+def _outbound_text_with_delivery_mentions(
+    text: str,
+    delivery_mentions: Sequence[dict] | None,
+) -> str:
+    """Return Discord text with a renderable prefix mention when requested."""
+
+    mention_text = _prefix_user_mention_text(delivery_mentions)
+    if not mention_text:
+        return_value = text
+        return return_value
+    if text:
+        return_value = f"{mention_text} {text}"
+        return return_value
+    return_value = mention_text
+    return return_value
+
+
+def _prefix_user_mention_text(delivery_mentions: Sequence[dict] | None) -> str:
+    """Return one Discord native user mention for prefix placement."""
+
+    if not delivery_mentions:
+        return_value = ""
+        return return_value
+
+    for mention in delivery_mentions:
+        if not isinstance(mention, dict):
+            continue
+        if mention.get("entity_kind") != "user":
+            continue
+        if mention.get("placement") != "prefix":
+            continue
+        normalized_user_id = normalize_numeric_platform_user_id(
+            mention.get("platform_user_id")
+        )
+        if not normalized_user_id:
+            continue
+        return_value = f"<@{normalized_user_id}>"
+        return return_value
+
+    return_value = ""
+    return return_value
 
 
 def _split_message(text: str, limit: int = 2000) -> list[str]:

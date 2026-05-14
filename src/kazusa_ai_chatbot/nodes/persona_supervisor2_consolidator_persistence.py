@@ -147,6 +147,7 @@ _task_dispatcher_llm = get_llm(
     base_url=CONSOLIDATION_LLM_BASE_URL,
     api_key=CONSOLIDATION_LLM_API_KEY,
 )
+_TASK_DISPATCHER_LLM_HIDDEN_ARGS = {"delivery_mentions"}
 
 
 def configure_task_dispatcher(dispatcher: TaskDispatcher, tool_registry: ToolRegistry) -> None:
@@ -251,6 +252,39 @@ def _dispatcher_llm_promises(future_promises: list[dict]) -> list[dict]:
     return return_value
 
 
+def _dispatcher_llm_args_schema(schema: dict) -> dict:
+    """Return the tool argument schema safe for model generation.
+
+    Args:
+        schema: Runtime validator schema for one tool.
+
+    Returns:
+        A schema copy with deterministic runtime-only arguments removed.
+    """
+
+    visible_schema = dict(schema)
+    properties = schema.get("properties")
+    if isinstance(properties, dict):
+        visible_properties = {
+            name: value
+            for name, value in properties.items()
+            if name not in _TASK_DISPATCHER_LLM_HIDDEN_ARGS
+        }
+        visible_schema["properties"] = visible_properties
+
+    required = schema.get("required")
+    if isinstance(required, list):
+        visible_required = [
+            name
+            for name in required
+            if name not in _TASK_DISPATCHER_LLM_HIDDEN_ARGS
+        ]
+        visible_schema["required"] = visible_required
+
+    return_value = visible_schema
+    return return_value
+
+
 def _normalize_raw_tool_call_args(args: dict) -> dict | None:
     """Convert LLM-emitted local tool times to UTC scheduler arguments.
 
@@ -332,7 +366,7 @@ async def _generate_raw_tool_calls(
             {
                 "name": spec.name,
                 "description": spec.description,
-                "args_schema": spec.args_schema,
+                "args_schema": _dispatcher_llm_args_schema(spec.args_schema),
             }
             for spec in available_tools
         ],

@@ -86,6 +86,7 @@ class ChatResponse(BaseModel):
     content_type: str = "text"
     attachments: list[AttachmentOut] = Field(default_factory=list)
     use_reply_feature: bool = False
+    delivery_mentions: list[dict[str, Any]] = Field(default_factory=list)
     scheduled_followups: int = 0
     delivery_tracking_id: str = ""
 

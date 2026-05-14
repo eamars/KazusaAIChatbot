@@ -22,6 +22,9 @@ The goal is to avoid designs that look elegant with a frontier model but become 
 
 Prefer bounded, inspectable architecture:
 
+- Start with the smallest semantic question the LLM must answer. Do not add a
+  prompt input, output field, agent, retry, or repair path until a current
+  requirement, observed failure, or approved near-term integration needs it.
 - Preserve the existing pipeline contract before optimizing the new feature.
 - Small set of explicit capabilities over many ad hoc tools.
 - Typed or semi-typed intermediate representations over free-form prose when routing matters.
@@ -62,9 +65,35 @@ Avoid designs where:
 - A feature request causes changes to generic prompts, summarizers, finalizers, or persistence paths without an explicit architectural reason.
 - A single initializer must understand every database shape and generate all low-level parameters.
 - A weak local LLM is expected to infer schema or tool semantics from long prompts.
+- A prompt receives routing, delivery, platform, permission, override,
+  fallback, retry, cache, or feasibility inputs that deterministic code or an
+  adapter should own.
 - A retrieval agent can silently accept tasks outside its domain and produce plausible but wrong results.
 - Retry loops are the default path for ordinary queries.
 - More tools are added without clarifying semantic ownership.
+
+## Minimality Gate
+
+Before proposing or editing any LLM prompt, schema, graph edge, or model call,
+write down the smallest current contract:
+
+```text
+Semantic question:
+Inputs required for that semantic question:
+Output fields required by downstream code:
+Deterministic owners:
+Rejected complexity:
+Evidence needed before adding complexity:
+```
+
+Reject proposed inputs that exist only to let the LLM decide operational
+behavior. If a field affects routing, delivery, platform behavior, permission,
+execution, override, fallback, retry, persistence, cache invalidation, or
+adapter feasibility, keep it out of the prompt and put the decision in the
+deterministic owner.
+
+`Universal path` means one shared contract and one deterministic mapper; it
+does not mean one LLM stage receives every layer's operational context.
 
 ## Responsibility Boundaries
 
@@ -104,6 +133,9 @@ Before implementing, identify:
 - **Forbidden change surface:** generic prompts, finalizers, summarizers, persistence, cache invalidation, or repair paths that should not change unless explicitly required.
 - **Contract compatibility:** whether the new capability follows the same initializer/router/specialist pattern as existing capabilities.
 - **Blast-radius risk:** which existing tests, prompts, or live examples could be affected.
+- **Rejected complexity:** which tempting fields, fallbacks, helper agents,
+  retries, compatibility paths, or abstractions are intentionally excluded
+  because the current semantic contract does not require them.
 
 For this repo's RAG-style pipelines, keep this default invariant unless the user explicitly asks to redesign it:
 
@@ -235,10 +267,16 @@ Examples:
 
 Before recommending an architecture or prompt change, check:
 
+- Have I stated the smallest semantic question the LLM must answer?
 - Have I written down the existing contract of the stages I am touching?
 - Did I separate allowed change surface from forbidden change surface?
+- Did I reject speculative fields, helper agents, retries, compatibility
+  paths, and adapter/platform context that are not required by the current
+  semantic contract?
 - Would this still work with a weaker local LLM?
 - Is the LLM being asked to infer hidden database structure?
+- Is the LLM being asked to decide deterministic routing, delivery,
+  permission, override, fallback, retry, persistence, or adapter feasibility?
 - Is the responsibility boundary between planner, router, specialist, and executor clear?
 - Does the new capability follow the same contract shape as neighboring capabilities?
 - Can each agent reject out-of-domain work?

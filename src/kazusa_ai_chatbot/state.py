@@ -128,5 +128,6 @@ class IMProcessState(TypedDict):
     final_dialog: list[str]
     target_addressed_user_ids: NotRequired[list[str]]
     target_broadcast: NotRequired[bool]
+    mention_target_user: NotRequired[bool]
     future_promises: list[dict]
     consolidation_state: dict[str, Any]

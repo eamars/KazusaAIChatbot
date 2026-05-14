@@ -1240,6 +1240,7 @@ async def _process_queued_chat_item(item: QueuedChatItem) -> None:
             "final_dialog": [],
             "target_addressed_user_ids": [global_user_id],
             "target_broadcast": False,
+            "mention_target_user": False,
             "future_promises": [],
             "consolidation_state": {},
             "promoted_reflection_context": promoted_reflection_context,
@@ -1263,6 +1264,7 @@ async def _process_queued_chat_item(item: QueuedChatItem) -> None:
                 "final_dialog": [fallback_text],
                 "target_addressed_user_ids": [global_user_id],
                 "target_broadcast": False,
+                "mention_target_user": False,
                 "delivery_tracking_id": delivery_tracking_id,
             }
             try:
@@ -1315,6 +1317,22 @@ async def _process_queued_chat_item(item: QueuedChatItem) -> None:
         use_reply_feature = bool(final_dialog) and bool(
             result["use_reply_feature"]
         )
+        delivery_mentions: list[dict[str, str | None]] = []
+        if (
+            bool(final_dialog)
+            and bool(result.get("mention_target_user", False))
+            and not use_reply_feature
+        ):
+            delivery_mentions = [
+                {
+                    "entity_kind": "user",
+                    "placement": "prefix",
+                    "platform_user_id": req.platform_user_id,
+                    "global_user_id": global_user_id,
+                    "display_name": req.display_name,
+                    "requested_by": "dialog.mention_target_user",
+                }
+            ]
         consolidation_state = result["consolidation_state"]
         scheduled_followup_count = len(result["future_promises"])
 
@@ -1360,6 +1378,7 @@ async def _process_queued_chat_item(item: QueuedChatItem) -> None:
             content_type="text",
             attachments=[],
             use_reply_feature=use_reply_feature,
+            delivery_mentions=delivery_mentions if response_dialog else [],
             scheduled_followups=0,
             delivery_tracking_id=delivery_tracking_id,
         )

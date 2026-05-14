@@ -87,6 +87,33 @@ def normalize_mention_display_map(value: object) -> dict[str, str]:
     return display_names
 
 
+def normalize_numeric_platform_user_id(value: object) -> str:
+    """Return a native user id only when it is safe to interpolate.
+
+    Args:
+        value: Adapter-facing platform user id from delivery metadata.
+
+    Returns:
+        A stripped ASCII digit string, or an empty string when the value is not
+        a concrete platform user id.
+    """
+
+    if not isinstance(value, str):
+        return_value = ""
+        return return_value
+
+    normalized_id = value.strip()
+    if not normalized_id:
+        return_value = ""
+        return return_value
+    if not normalized_id.isascii() or not normalized_id.isdecimal():
+        return_value = ""
+        return return_value
+
+    return_value = normalized_id
+    return return_value
+
+
 def readable_mention_token(
     *,
     entity_kind: str,
