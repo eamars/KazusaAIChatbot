@@ -257,7 +257,13 @@ def _validate_merge_result(result: dict, candidate: dict, candidate_clusters: li
     if decision == "create" and cluster_id:
         raise ValueError("create decision must not include cluster_id")
     if decision in {"merge", "evolve"} and cluster_id not in valid_cluster_ids:
-        raise ValueError("merge/evolve decision returned an unknown cluster_id")
+        logger.warning(
+            "memory-unit merge/evolve decision used an unknown cluster_id; "
+            f"falling back to create: candidate_id={expected_candidate_id} "
+            f"decision={decision} cluster_id={cluster_id}"
+        )
+        decision = "create"
+        cluster_id = ""
 
     return_value = {
         "candidate_id": expected_candidate_id,

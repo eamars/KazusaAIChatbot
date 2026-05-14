@@ -165,6 +165,85 @@ def test_project_user_memory_units_labels_due_today() -> None:
 
 
 @pytest.mark.asyncio
+async def test_process_memory_unit_candidate_creates_when_merge_cluster_id_is_unknown(
+    monkeypatch,
+) -> None:
+    captured: dict[str, object] = {}
+    existing_unit = _unit(
+        "existing-dessert-plan",
+        "The character and user have a weekend dessert plan.",
+        unit_type=UserMemoryUnitType.ACTIVE_COMMITMENT,
+    )
+    candidate = {
+        "candidate_id": "candidate-unknown-cluster",
+        "unit_type": UserMemoryUnitType.ACTIVE_COMMITMENT,
+        "fact": "The character reminded the user about the weekend dessert plan.",
+        "subjective_appraisal": "The reminder keeps the shared plan active.",
+        "relationship_signal": "Preserve the plan without risking a wrong merge.",
+        "due_at": "2026-05-16T12:00:00+00:00",
+        "evidence_refs": [],
+    }
+
+    async def _retrieve_memory_unit_merge_candidates(global_user_id, **kwargs):
+        captured["retrieval_user_id"] = global_user_id
+        captured["surfaced_units"] = kwargs["surfaced_units"]
+        return [existing_unit]
+
+    async def _insert_user_memory_units(global_user_id, units, **kwargs):
+        captured["insert_user_id"] = global_user_id
+        captured["inserted_units"] = units
+        return [{"unit_id": "created-safe-fallback"}]
+
+    async def _update_user_memory_unit_semantics(unit_id, semantics, **kwargs):
+        raise AssertionError(
+            "unknown merge cluster ids must not update existing units"
+        )
+
+    merge_judge_llm = _StaticAsyncLLM({
+        "candidate_id": "candidate-unknown-cluster",
+        "decision": "merge",
+        "cluster_id": "hallucinated-cluster-id",
+        "reason": "same dessert plan, but copied the wrong id",
+    })
+
+    monkeypatch.setattr(
+        memory_units_module,
+        "retrieve_memory_unit_merge_candidates",
+        _retrieve_memory_unit_merge_candidates,
+    )
+    monkeypatch.setattr(memory_units_module, "_merge_judge_llm", merge_judge_llm)
+    monkeypatch.setattr(
+        memory_units_module,
+        "insert_user_memory_units",
+        _insert_user_memory_units,
+    )
+    monkeypatch.setattr(
+        memory_units_module,
+        "update_user_memory_unit_semantics",
+        _update_user_memory_unit_semantics,
+    )
+
+    result = await memory_units_module.process_memory_unit_candidate(
+        {
+            "timestamp": "2026-05-14T12:38:43+00:00",
+            "global_user_id": "user-1",
+            "character_profile": {"name": "杏山千纱 (Kyōyama Kazusa)"},
+            "rag_result": {"user_memory_unit_candidates": [existing_unit]},
+        },
+        candidate,
+    )
+
+    assert result == {
+        "candidate_id": "candidate-unknown-cluster",
+        "unit_id": "created-safe-fallback",
+        "decision": "create",
+        "stability": {},
+    }
+    assert captured["insert_user_id"] == "user-1"
+    assert captured["inserted_units"] == [candidate]
+
+
+@pytest.mark.asyncio
 async def test_process_memory_unit_candidate_reuses_rag_surfaced_units(monkeypatch) -> None:
     captured: dict[str, object] = {}
     surfaced_unit = _unit("existing-1", "Existing fact")
