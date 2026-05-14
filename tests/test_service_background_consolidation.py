@@ -218,6 +218,21 @@ def _patch_chat_dependencies(monkeypatch, graph) -> None:
         "_hydrate_reply_context",
         AsyncMock(return_value={}),
     )
+    monkeypatch.setattr(
+        service_module.event_logging,
+        "record_database_operation_event",
+        AsyncMock(),
+    )
+    monkeypatch.setattr(
+        service_module.event_logging,
+        "record_pipeline_turn_event",
+        AsyncMock(),
+    )
+    monkeypatch.setattr(
+        service_module.event_logging,
+        "record_runtime_error_event",
+        AsyncMock(),
+    )
     monkeypatch.setattr(service_module, "save_conversation", AsyncMock())
     monkeypatch.setattr(service_module, "_graph", graph)
 
@@ -349,6 +364,60 @@ async def test_chat_response_tracks_deliverable_assistant_row(monkeypatch):
     save_assistant_message.assert_awaited_once()
     saved_result = save_assistant_message.await_args.args[0]
     assert saved_result["delivery_tracking_id"] == response.delivery_tracking_id
+    await _reset_queue_state()
+
+
+@pytest.mark.asyncio
+async def test_chat_response_waits_for_assistant_persistence(monkeypatch):
+    """The chat endpoint must not release visible output before persistence."""
+
+    await _reset_queue_state()
+    save_started = asyncio.Event()
+    save_can_finish = asyncio.Event()
+
+    async def _save_assistant_message(_result):
+        save_started.set()
+        await save_can_finish.wait()
+
+    monkeypatch.setattr(
+        service_module,
+        "_save_assistant_message",
+        _save_assistant_message,
+    )
+    monkeypatch.setattr(
+        service_module,
+        "_run_conversation_progress_record_background",
+        AsyncMock(),
+    )
+    monkeypatch.setattr(
+        service_module,
+        "_run_consolidation_background",
+        AsyncMock(),
+    )
+    monkeypatch.setattr(
+        service_module.event_logging,
+        "record_database_operation_event",
+        AsyncMock(),
+    )
+    monkeypatch.setattr(
+        service_module.event_logging,
+        "record_pipeline_turn_event",
+        AsyncMock(),
+    )
+    _patch_chat_dependencies(monkeypatch, _FakeGraph(_graph_result()))
+
+    chat_task = asyncio.create_task(service_module.chat(
+        _chat_request(),
+        BackgroundTasks(),
+    ))
+    await asyncio.wait_for(save_started.wait(), timeout=1.0)
+    await asyncio.sleep(0)
+
+    assert not chat_task.done()
+    save_can_finish.set()
+    response = await asyncio.wait_for(chat_task, timeout=1.0)
+
+    assert response.messages == ["ok"]
     await _reset_queue_state()
 
 
@@ -978,6 +1047,21 @@ async def test_chat_listen_only_drops_before_graph(monkeypatch):
     monkeypatch.setattr(service_module, "get_user_profile", AsyncMock(return_value={"affinity": 500}))
     monkeypatch.setattr(service_module, "get_conversation_history", AsyncMock(return_value=[]))
     monkeypatch.setattr(service_module, "_hydrate_reply_context", AsyncMock(return_value={}))
+    monkeypatch.setattr(
+        service_module.event_logging,
+        "record_database_operation_event",
+        AsyncMock(),
+    )
+    monkeypatch.setattr(
+        service_module.event_logging,
+        "record_pipeline_turn_event",
+        AsyncMock(),
+    )
+    monkeypatch.setattr(
+        service_module.event_logging,
+        "record_queue_intake_event",
+        AsyncMock(),
+    )
     save_conversation = AsyncMock()
     monkeypatch.setattr(service_module, "save_conversation", save_conversation)
 

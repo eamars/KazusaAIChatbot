@@ -191,6 +191,8 @@ class RuntimeAdapterRegistrationRequest(BaseModel):
 
     shared_secret: str = ""
     timeout_seconds: float = 10.0
+    platform_bot_id: str = ""
+    display_name: str = ""
 
 
 class RuntimeAdapterRegistrationResponse(BaseModel):

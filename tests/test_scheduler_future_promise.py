@@ -88,6 +88,16 @@ def _stub_dispatcher_event_logging(monkeypatch) -> None:
         "record_runtime_error_event",
         AsyncMock(),
     )
+    monkeypatch.setattr(
+        handlers_module,
+        "record_assistant_outbound_message",
+        AsyncMock(return_value="conversation-row-1"),
+    )
+    monkeypatch.setattr(
+        handlers_module,
+        "apply_assistant_delivery_receipt",
+        AsyncMock(return_value=True),
+    )
 
 
 def _configure_runtime() -> tuple[_StubAdapter, PendingTaskIndex]:

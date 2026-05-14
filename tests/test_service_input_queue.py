@@ -746,6 +746,8 @@ async def test_worker_saves_dropped_messages_before_next_graph(monkeypatch) -> N
 
     async def _save_conversation(_doc):
         call_order.append("save")
+        return_value = f"row-{len(call_order)}"
+        return return_value
 
     monkeypatch.setattr(service_module, "save_conversation", _save_conversation)
     _patch_common_dependencies(monkeypatch, _Graph())
@@ -816,6 +818,72 @@ async def test_dropped_message_never_invokes_graph(monkeypatch) -> None:
     assert graph_message_ids == ["2"]
 
     graph_can_finish.set()
+    await _reset_queue_state()
+
+
+@pytest.mark.asyncio
+async def test_worker_suppresses_graph_when_surviving_user_save_fails(
+    monkeypatch,
+) -> None:
+    """Active turns should fail closed when incoming persistence fails."""
+
+    await _reset_queue_state()
+
+    class _Graph:
+        """Expose a mock graph call for fail-closed assertions."""
+
+        def __init__(self):
+            self.ainvoke = AsyncMock(return_value={})
+
+    graph = _Graph()
+    monkeypatch.setattr(
+        service_module,
+        "save_conversation",
+        AsyncMock(return_value=None),
+    )
+    monkeypatch.setattr(
+        service_module.event_logging,
+        "record_database_operation_event",
+        AsyncMock(),
+    )
+    monkeypatch.setattr(
+        service_module.event_logging,
+        "record_pipeline_turn_event",
+        AsyncMock(),
+    )
+    _patch_common_dependencies(monkeypatch, graph)
+
+    item = _item(1, direct_address=True)
+    service_module._chat_input_queue.extend_for_test([item])
+
+    service_module._ensure_chat_input_worker_started()
+    await service_module._chat_input_queue.notify_for_test()
+
+    with pytest.raises(RuntimeError):
+        await asyncio.wait_for(item.future, timeout=1.0)
+    graph.ainvoke.assert_not_awaited()
+    await _reset_queue_state()
+
+
+@pytest.mark.asyncio
+async def test_drop_queued_item_fails_when_user_save_not_committed(
+    monkeypatch,
+) -> None:
+    """Dropped input should not complete successfully without history."""
+
+    await _reset_queue_state()
+    monkeypatch.setattr(
+        service_module,
+        "save_conversation",
+        AsyncMock(return_value=None),
+    )
+    _patch_common_dependencies(monkeypatch, AsyncMock())
+
+    item = _item(1)
+    await service_module._drop_queued_chat_item(item)
+
+    with pytest.raises(RuntimeError):
+        await item.future
     await _reset_queue_state()
 
 
@@ -947,6 +1015,56 @@ async def test_worker_saves_collapsed_messages_before_graph(monkeypatch) -> None
 
 
 @pytest.mark.asyncio
+async def test_worker_aborts_survivor_when_collapsed_save_fails(
+    monkeypatch,
+) -> None:
+    """Survivor graph must not run on collapsed text without history rows."""
+
+    await _reset_queue_state()
+
+    class _Graph:
+        """Expose a mock graph call for collapsed fail-closed assertions."""
+
+        def __init__(self):
+            self.ainvoke = AsyncMock(return_value={})
+
+    graph = _Graph()
+    monkeypatch.setattr(
+        service_module,
+        "save_conversation",
+        AsyncMock(return_value=None),
+    )
+    _patch_common_dependencies(monkeypatch, graph)
+
+    first = _item(
+        1,
+        channel_type="private",
+        platform_channel_id="dm-1",
+        platform_user_id="user-1",
+        content="first",
+    )
+    second = _item(
+        2,
+        channel_type="private",
+        platform_channel_id="dm-1",
+        platform_user_id="user-1",
+        content="second",
+    )
+    service_module._chat_input_queue.extend_for_test([first, second])
+
+    service_module._ensure_chat_input_worker_started()
+    await service_module._chat_input_queue.notify_for_test()
+
+    with pytest.raises(RuntimeError):
+        await asyncio.wait_for(second.future, timeout=1.0)
+    with pytest.raises(RuntimeError):
+        await asyncio.wait_for(first.future, timeout=1.0)
+    graph.ainvoke.assert_not_awaited()
+
+    await _reset_queue_state()
+
+
+@pytest.mark.asyncio
 async def test_worker_derives_graph_input_from_message_envelope(monkeypatch) -> None:
     """Service intake should use envelope body text, not raw wire content."""
 
@@ -969,6 +1087,8 @@ async def test_worker_derives_graph_input_from_message_envelope(monkeypatch) -> 
 
     async def _save_conversation(doc):
         saved_docs.append(doc)
+        return_value = f"row-{doc['platform_message_id']}"
+        return return_value
 
     monkeypatch.setattr(service_module, "save_conversation", _save_conversation)
     _patch_common_dependencies(monkeypatch, _Graph())
@@ -1044,6 +1164,8 @@ async def test_worker_resolves_cross_user_envelope_targets(monkeypatch) -> None:
 
     async def _save_conversation(doc):
         saved_docs.append(doc)
+        return_value = f"row-{doc['platform_message_id']}"
+        return return_value
 
     async def _resolve_global_user_id(
         *,
@@ -1139,6 +1261,8 @@ async def test_worker_preserves_collapsed_image_input(monkeypatch) -> None:
 
     async def _save_conversation(doc):
         saved_docs.append(doc)
+        return_value = f"row-{doc['platform_message_id']}"
+        return return_value
 
     monkeypatch.setattr(service_module, "save_conversation", _save_conversation)
     _patch_common_dependencies(monkeypatch, _Graph())

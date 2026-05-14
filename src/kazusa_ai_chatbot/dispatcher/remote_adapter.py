@@ -30,8 +30,12 @@ class RemoteHttpAdapter:
         callback_url: str,
         shared_secret: str = "",
         timeout_seconds: float = 10.0,
+        platform_bot_id: str = "",
+        display_name: str = "",
     ) -> None:
         self.platform = platform
+        self.platform_bot_id = platform_bot_id
+        self.display_name = display_name
         self._callback_url = callback_url.rstrip("/")
         self._shared_secret = shared_secret
         self._timeout_seconds = timeout_seconds

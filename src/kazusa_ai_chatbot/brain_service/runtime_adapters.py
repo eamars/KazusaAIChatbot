@@ -27,16 +27,21 @@ def register_runtime_adapter_payload(
         Structured confirmation for the adapter process.
     """
 
-    register_remote_runtime_adapter_func(
-        platform=req.platform,
-        callback_url=req.callback_url,
-        shared_secret=req.shared_secret,
-        timeout_seconds=req.timeout_seconds,
-    )
+    registration_kwargs = {
+        "platform": req.platform,
+        "callback_url": req.callback_url,
+        "shared_secret": req.shared_secret,
+        "timeout_seconds": req.timeout_seconds,
+    }
+    if req.platform_bot_id:
+        registration_kwargs["platform_bot_id"] = req.platform_bot_id
+    if req.display_name:
+        registration_kwargs["display_name"] = req.display_name
+
+    register_remote_runtime_adapter_func(**registration_kwargs)
     response = RuntimeAdapterRegistrationResponse(
         status=status,
         platform=req.platform,
         callback_url=req.callback_url,
     )
     return response
-

@@ -194,6 +194,8 @@ def _build_dispatch_context(state: ConsolidatorState, *, timestamp: str) -> Disp
         bot_permission_role="user",
         now=now,
         source_channel_type=state["channel_type"],
+        source_platform_bot_id=state.get("platform_bot_id", ""),
+        source_character_name=state.get("character_name", ""),
     )
     return return_value
 

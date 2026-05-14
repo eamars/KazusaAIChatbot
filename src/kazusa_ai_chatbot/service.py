@@ -711,19 +711,20 @@ async def _resolve_queued_user(item: QueuedChatItem) -> tuple[str, dict]:
     return return_value
 
 
-async def _drop_queued_chat_item(item: QueuedChatItem) -> None:
+async def _drop_queued_chat_item(item: QueuedChatItem) -> bool:
     """Persist and complete one pruned queued item without running the graph.
 
     Args:
         item: Queued chat item selected for pruning.
 
     Returns:
-        None.
+        True when the incoming row was committed, otherwise false.
     """
 
     correlation_id = _chat_correlation_id(item.request)
     scope = _service_event_scope(item.request)
     save_started_at = 0.0
+    persistence_error: BaseException | None = None
     try:
         global_user_id, _ = await _resolve_queued_user(item)
         reply_context = await _hydrate_reply_context(item.request)
@@ -745,8 +746,14 @@ async def _drop_queued_chat_item(item: QueuedChatItem) -> None:
             document_ref=conversation_row_id or "",
             correlation_id=correlation_id,
         )
+        if not conversation_row_id:
+            persistence_error = RuntimeError(
+                "dropped queued message was not committed to "
+                "conversation_history"
+            )
     except Exception as exc:
         logger.exception(f"Failed to persist dropped queued message: {exc}")
+        persistence_error = exc
         if save_started_at:
             await event_logging.record_database_operation_event(
                 component=SERVICE_COMPONENT,
@@ -775,6 +782,23 @@ async def _drop_queued_chat_item(item: QueuedChatItem) -> None:
             correlation_id=correlation_id,
             severity="warning",
         )
+
+    if persistence_error is not None:
+        _chat_input_queue.fail(item, persistence_error)
+        await event_logging.record_queue_intake_event(
+            component=SERVICE_COMPONENT,
+            correlation_id=correlation_id,
+            status="failed",
+            queue_depth=_chat_input_queue.pending_count(),
+            coalesced_count=0,
+            dropped_count=1,
+            protected_by_reply=_chat_input_queue.is_bot_reply(item),
+            listen_only=item.request.debug_modes.listen_only,
+            scope=scope,
+            severity="error",
+        )
+        return_value = False
+        return return_value
 
     _chat_input_queue.complete(item, ChatResponse())
     dropped_envelope: MessageEnvelope = item.request.message_envelope.model_dump(
@@ -807,12 +831,14 @@ async def _drop_queued_chat_item(item: QueuedChatItem) -> None:
         scope=scope,
         severity="warning",
     )
+    return_value = True
+    return return_value
 
 
 async def _persist_collapsed_queued_chat_item(
     item: QueuedChatItem,
     survivor: QueuedChatItem,
-) -> None:
+) -> bool:
     """Persist and complete one queued item collapsed into a surviving turn.
 
     Args:
@@ -820,12 +846,13 @@ async def _persist_collapsed_queued_chat_item(
         survivor: Surviving queued item that will receive the character reply.
 
     Returns:
-        None.
+        True when the collapsed row was committed, otherwise false.
     """
 
     correlation_id = _chat_correlation_id(item.request)
     scope = _service_event_scope(item.request)
     save_started_at = 0.0
+    persistence_error: BaseException | None = None
     try:
         global_user_id, _ = await _resolve_queued_user(item)
         reply_context = await _hydrate_reply_context(item.request)
@@ -842,6 +869,10 @@ async def _persist_collapsed_queued_chat_item(
                 "Collapsed queued message persisted without conversation row "
                 f"id: sequence={item.sequence}"
             )
+            persistence_error = RuntimeError(
+                "collapsed queued message was not committed to "
+                "conversation_history"
+            )
         operation_status = "succeeded" if conversation_row_id else "failed"
         idempotency_result = "inserted" if conversation_row_id else "not_committed"
         await event_logging.record_database_operation_event(
@@ -856,6 +887,7 @@ async def _persist_collapsed_queued_chat_item(
         )
     except Exception as exc:
         logger.exception(f"Failed to persist collapsed queued message: {exc}")
+        persistence_error = exc
         if save_started_at:
             await event_logging.record_database_operation_event(
                 component=SERVICE_COMPONENT,
@@ -884,6 +916,23 @@ async def _persist_collapsed_queued_chat_item(
             correlation_id=correlation_id,
             severity="warning",
         )
+
+    if persistence_error is not None:
+        _chat_input_queue.fail(item, persistence_error)
+        await event_logging.record_queue_intake_event(
+            component=SERVICE_COMPONENT,
+            correlation_id=correlation_id,
+            status="failed",
+            queue_depth=_chat_input_queue.pending_count(),
+            coalesced_count=1,
+            dropped_count=0,
+            protected_by_reply=_chat_input_queue.is_bot_reply(item),
+            listen_only=item.request.debug_modes.listen_only,
+            scope=scope,
+            severity="error",
+        )
+        return_value = False
+        return return_value
 
     _chat_input_queue.complete(item, ChatResponse())
     collapsed_envelope: MessageEnvelope = item.request.message_envelope.model_dump(
@@ -917,6 +966,8 @@ async def _persist_collapsed_queued_chat_item(
         listen_only=item.request.debug_modes.listen_only,
         scope=scope,
     )
+    return_value = True
+    return return_value
 
 
 async def _process_queued_chat_item(item: QueuedChatItem) -> None:
@@ -1028,9 +1079,32 @@ async def _process_queued_chat_item(item: QueuedChatItem) -> None:
             item.conversation_row_id = conversation_row_id
         else:
             logger.warning(
-                "Surviving queued message persisted without conversation row "
-                f"id: sequence={item.sequence}"
+                "Surviving queued message did not commit conversation row; "
+                "suppressing graph processing: "
+                f"sequence={item.sequence}"
             )
+            _chat_input_queue.fail(
+                item,
+                RuntimeError(
+                    "surviving queued message was not committed to "
+                    "conversation_history"
+                ),
+            )
+            stages_reached.append("user_persist_failed")
+            await event_logging.record_pipeline_turn_event(
+                component=SERVICE_COMPONENT,
+                correlation_id=correlation_id,
+                status="failed",
+                queue_wait_ms=_queue_wait_ms(item),
+                stages_reached=stages_reached,
+                final_outcome="user_persist_failed",
+                scheduled_followups=0,
+                debug_modes=debug_mode_names,
+                scope=scope,
+                duration_ms=_elapsed_ms(turn_started_at),
+                severity="error",
+            )
+            return
         stages_reached.append("user_persisted")
 
         debug_modes: DebugModes = {
@@ -1175,11 +1249,35 @@ async def _process_queued_chat_item(item: QueuedChatItem) -> None:
             result = await _graph.ainvoke(initial_state)
         except Exception as exc:
             logger.exception(f"Graph invocation failed: {exc}")
-            response = ChatResponse(
-                messages=[
-                    f"{character_name} is busy right now, please try again later."
-                ]
+            fallback_text = (
+                f"{character_name} is busy right now, please try again later."
             )
+            delivery_tracking_id = uuid4().hex
+            fallback_result = {
+                "platform": req.platform,
+                "platform_channel_id": req.platform_channel_id,
+                "channel_type": req.channel_type,
+                "platform_bot_id": req.platform_bot_id,
+                "character_name": character_name,
+                "global_user_id": global_user_id,
+                "final_dialog": [fallback_text],
+                "target_addressed_user_ids": [global_user_id],
+                "target_broadcast": False,
+                "delivery_tracking_id": delivery_tracking_id,
+            }
+            try:
+                await _save_assistant_message(fallback_result)
+                response = ChatResponse(
+                    messages=[fallback_text],
+                    delivery_tracking_id=delivery_tracking_id,
+                )
+                stages_reached.append("assistant_persisted")
+            except Exception as save_exc:
+                logger.exception(
+                    "Graph failure fallback suppressed because assistant "
+                    f"history persistence failed: {save_exc}"
+                )
+                response = ChatResponse()
             _chat_input_queue.complete(item, response)
             (
                 error_class,
@@ -1265,8 +1363,6 @@ async def _process_queued_chat_item(item: QueuedChatItem) -> None:
             scheduled_followups=0,
             delivery_tracking_id=delivery_tracking_id,
         )
-        _chat_input_queue.complete(item, response)
-        stages_reached.append("response_completed")
 
         if should_save_assistant_message:
             assistant_save_started_at = time.perf_counter()
@@ -1284,8 +1380,27 @@ async def _process_queued_chat_item(item: QueuedChatItem) -> None:
                     correlation_id=correlation_id,
                     severity="warning",
                 )
-                raise
+                _chat_input_queue.complete(item, ChatResponse())
+                stages_reached.append("assistant_persist_failed")
+                await event_logging.record_pipeline_turn_event(
+                    component=SERVICE_COMPONENT,
+                    correlation_id=correlation_id,
+                    status="failed",
+                    queue_wait_ms=_queue_wait_ms(item),
+                    stages_reached=stages_reached,
+                    final_outcome="assistant_persist_failed",
+                    scheduled_followups=scheduled_followup_count,
+                    debug_modes=debug_mode_names,
+                    scope=scope,
+                    duration_ms=_elapsed_ms(turn_started_at),
+                    severity="error",
+                )
+                return
 
+            stages_reached.append("assistant_persisted")
+        _chat_input_queue.complete(item, response)
+        stages_reached.append("response_completed")
+        if should_save_assistant_message:
             await event_logging.record_database_operation_event(
                 component=SERVICE_COMPONENT,
                 collection=CONVERSATION_HISTORY_COLLECTION,
@@ -1296,7 +1411,6 @@ async def _process_queued_chat_item(item: QueuedChatItem) -> None:
                 document_ref=delivery_tracking_id,
                 correlation_id=correlation_id,
             )
-            stages_reached.append("assistant_persisted")
         if should_record_progress and consolidation_state_dict is not None:
             await _run_conversation_progress_record_background(
                 consolidation_state_dict,
@@ -1328,12 +1442,7 @@ async def _process_queued_chat_item(item: QueuedChatItem) -> None:
         )
     except Exception as exc:
         logger.exception(f"Queued chat item failed: {exc}")
-        response = ChatResponse(
-            messages=[
-                f"{character_name} is busy right now, please try again later."
-            ]
-        )
-        _chat_input_queue.complete(item, response)
+        _chat_input_queue.fail(item, exc)
         (
             error_class,
             error_preview,
@@ -1379,13 +1488,34 @@ async def _chat_input_worker() -> None:
 
         _primary_interaction_active_count += 1
         try:
+            incoming_history_committed = True
             for dropped_item in dequeued_turn.dropped_items:
-                await _drop_queued_chat_item(dropped_item)
+                dropped_committed = await _drop_queued_chat_item(dropped_item)
+                incoming_history_committed = (
+                    incoming_history_committed and dropped_committed
+                )
 
             # Persist collapsed rows before the survivor builds active-turn
             # identity filters for RAG evidence.
             for collapsed_item, survivor in dequeued_turn.collapsed_items:
-                await _persist_collapsed_queued_chat_item(collapsed_item, survivor)
+                collapsed_committed = await _persist_collapsed_queued_chat_item(
+                    collapsed_item,
+                    survivor,
+                )
+                incoming_history_committed = (
+                    incoming_history_committed and collapsed_committed
+                )
+
+            if not incoming_history_committed:
+                if dequeued_turn.next_item is not None:
+                    _chat_input_queue.fail(
+                        dequeued_turn.next_item,
+                        RuntimeError(
+                            "queued turn aborted because incoming history "
+                            "persistence failed"
+                        ),
+                    )
+                continue
 
             if dequeued_turn.next_item is not None:
                 await _process_queued_chat_item(dequeued_turn.next_item)
@@ -1507,6 +1637,8 @@ def register_remote_runtime_adapter(
     callback_url: str,
     shared_secret: str = "",
     timeout_seconds: float = 10.0,
+    platform_bot_id: str = "",
+    display_name: str = "",
 ) -> None:
     """Register a cross-process adapter callback for scheduled delivery.
 
@@ -1515,6 +1647,8 @@ def register_remote_runtime_adapter(
         callback_url: Base callback URL exposed by the adapter process.
         shared_secret: Optional bearer token used when the brain calls back.
         timeout_seconds: Timeout for one outbound callback request.
+        platform_bot_id: Platform account id for outbound history rows.
+        display_name: Adapter-side display name fallback.
     """
 
     register_runtime_adapter(
@@ -1523,6 +1657,8 @@ def register_remote_runtime_adapter(
             callback_url=callback_url,
             shared_secret=shared_secret,
             timeout_seconds=timeout_seconds,
+            platform_bot_id=platform_bot_id,
+            display_name=display_name,
         )
     )
 

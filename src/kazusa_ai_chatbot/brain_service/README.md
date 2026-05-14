@@ -388,18 +388,21 @@ Hydration rules:
 
 ## Persistence Timing
 
-The normal `/chat` path has two visible timings:
+The normal `/chat` path records the incoming user row before graph execution.
+If that row is not committed, the request fails closed and no visible reply is
+released. Pruned, listen-only, and collapsed queued inputs follow the same
+rule; a survivor turn is not allowed to run on collapsed text whose source row
+was not committed.
 
-1. The brain returns `ChatResponse` to the adapter.
-2. The brain persists assistant post-turn data and background state updates.
+For visible assistant output, the brain writes the assistant row before
+returning `ChatResponse` to the adapter. Background state updates such as
+conversation progress and consolidation may still run after the response has
+been released.
 
-The response is intentionally returned before every background action has
-necessarily completed. Delivery receipt adapters therefore need bounded
-`not_found` retry behavior. The service side remains simple: it updates the row
-if the row exists and returns `not_found` otherwise.
-
-Callers treat `delivery_tracking_id` visibility as eventually consistent with
-assistant-row persistence.
+Delivery receipt adapters may still need bounded `not_found` retry behavior
+for transport timing and cross-process delivery, but a non-empty
+`delivery_tracking_id` means the assistant row was committed before the
+response was returned.
 
 ## Debug Modes
 

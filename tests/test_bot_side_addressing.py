@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock
 import pytest
 
 from kazusa_ai_chatbot import service as service_module
+from kazusa_ai_chatbot.brain_service.outbound import ConversationHistoryWriteError
 
 
 @pytest.mark.asyncio
@@ -15,8 +16,10 @@ async def test_save_assistant_message_persists_current_turn_addressee(monkeypatc
 
     saved_docs: list[dict] = []
 
-    async def _save_conversation(doc: dict) -> None:
+    async def _save_conversation(doc: dict) -> str:
         saved_docs.append(doc)
+        return_value = f"row-{len(saved_docs)}"
+        return return_value
 
     monkeypatch.setattr(
         service_module,
@@ -63,8 +66,10 @@ async def test_save_assistant_message_honors_explicit_broadcast(monkeypatch) -> 
 
     saved_docs: list[dict] = []
 
-    async def _save_conversation(doc: dict) -> None:
+    async def _save_conversation(doc: dict) -> str:
         saved_docs.append(doc)
+        return_value = f"row-{len(saved_docs)}"
+        return return_value
 
     monkeypatch.setattr(
         service_module,
@@ -95,8 +100,10 @@ async def test_save_assistant_message_persists_delivery_tracking(monkeypatch) ->
 
     saved_docs: list[dict] = []
 
-    async def _save_conversation(doc: dict) -> None:
+    async def _save_conversation(doc: dict) -> str:
         saved_docs.append(doc)
+        return_value = f"row-{len(saved_docs)}"
+        return return_value
 
     monkeypatch.setattr(
         service_module,
@@ -120,3 +127,34 @@ async def test_save_assistant_message_persists_delivery_tracking(monkeypatch) ->
 
     assert saved_docs[0]["delivery_tracking_id"] == "delivery-1"
     assert saved_docs[0]["delivery_status"] == "pending"
+
+
+@pytest.mark.asyncio
+async def test_save_assistant_message_fails_when_history_row_not_committed(
+    monkeypatch,
+) -> None:
+    """Assistant output is not deliverable without a committed history row."""
+
+    monkeypatch.setattr(
+        service_module,
+        "_ensure_character_global_identity",
+        AsyncMock(return_value="character-global-id"),
+    )
+    monkeypatch.setattr(
+        service_module,
+        "save_conversation",
+        AsyncMock(return_value=None),
+    )
+
+    with pytest.raises(ConversationHistoryWriteError):
+        await service_module._save_assistant_message({
+            "platform": "qq",
+            "platform_channel_id": "group-1",
+            "channel_type": "group",
+            "platform_bot_id": "bot-1",
+            "character_name": "Character",
+            "global_user_id": "user-a",
+            "final_dialog": ["uncommitted reply"],
+            "target_addressed_user_ids": ["user-a"],
+            "target_broadcast": False,
+        })

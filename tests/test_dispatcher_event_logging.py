@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock
@@ -102,6 +103,78 @@ class _FailingAdapter(_Adapter):
 
         del channel_id, text, channel_type, reply_to_msg_id
         raise RuntimeError("adapter unavailable")
+
+
+@pytest.mark.asyncio
+async def test_send_message_handler_records_outbound_before_adapter_send(
+    monkeypatch,
+) -> None:
+    """Scheduled sends must use the shared write-ahead outbound boundary."""
+
+    call_order: list[str] = []
+    record_continue = asyncio.Event()
+
+    class _OrderingAdapter(_Adapter):
+        """Adapter fake that records whether delivery was attempted."""
+
+        async def send_message(
+            self,
+            channel_id: str,
+            text: str,
+            *,
+            channel_type: str,
+            reply_to_msg_id: str | None = None,
+        ) -> SendResult:
+            call_order.append("send")
+            return_value = await super().send_message(
+                channel_id,
+                text,
+                channel_type=channel_type,
+                reply_to_msg_id=reply_to_msg_id,
+            )
+            return return_value
+
+    async def _record_assistant_outbound_message(**_kwargs) -> str:
+        call_order.append("record")
+        await record_continue.wait()
+        return "conversation-row-1"
+
+    monkeypatch.setattr(
+        handlers_module,
+        "record_assistant_outbound_message",
+        _record_assistant_outbound_message,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        handlers_module,
+        "apply_assistant_delivery_receipt",
+        AsyncMock(return_value=True),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        handlers_module.event_logging,
+        "record_dispatcher_event",
+        AsyncMock(),
+    )
+    adapter_registry = AdapterRegistry()
+    adapter_registry.register(_OrderingAdapter())
+
+    task = asyncio.create_task(handlers_module.handle_send_message(
+        {
+            "target_platform": "discord",
+            "target_channel": "chan-1",
+            "target_channel_type": "group",
+            "text": "scheduled private text",
+        },
+        _context(),
+        adapter_registry,
+    ))
+    await asyncio.sleep(0)
+
+    assert call_order == ["record"]
+    record_continue.set()
+    await task
+    assert call_order == ["record", "send"]
 
 
 @pytest.mark.asyncio
@@ -241,10 +314,22 @@ async def test_send_message_handler_records_success_without_adapter_response(
     """Adapter success should record delivery metadata without raw response."""
 
     record_dispatcher_event = AsyncMock()
+    record_assistant_outbound = AsyncMock(return_value="conversation-row-1")
+    apply_delivery_receipt = AsyncMock(return_value=True)
     monkeypatch.setattr(
         handlers_module.event_logging,
         "record_dispatcher_event",
         record_dispatcher_event,
+    )
+    monkeypatch.setattr(
+        handlers_module,
+        "record_assistant_outbound_message",
+        record_assistant_outbound,
+    )
+    monkeypatch.setattr(
+        handlers_module,
+        "apply_assistant_delivery_receipt",
+        apply_delivery_receipt,
     )
     adapter_registry = AdapterRegistry()
     adapter_registry.register(_Adapter())
@@ -264,6 +349,8 @@ async def test_send_message_handler_records_success_without_adapter_response(
     kwargs = record_dispatcher_event.await_args.kwargs
     assert kwargs["component"] == handlers_module.HANDLER_COMPONENT
     assert kwargs["status"] == "succeeded"
+    record_assistant_outbound.assert_awaited_once()
+    apply_delivery_receipt.assert_awaited_once()
     serialized = json.dumps(kwargs, ensure_ascii=False)
     assert "scheduled private text" not in serialized
     assert "adapter-message-1" not in serialized
@@ -277,6 +364,7 @@ async def test_send_message_handler_records_send_failure_without_text(
 
     record_dispatcher_event = AsyncMock()
     record_runtime_error_event = AsyncMock()
+    record_assistant_outbound = AsyncMock(return_value="conversation-row-1")
     monkeypatch.setattr(
         handlers_module.event_logging,
         "record_dispatcher_event",
@@ -286,6 +374,11 @@ async def test_send_message_handler_records_send_failure_without_text(
         handlers_module.event_logging,
         "record_runtime_error_event",
         record_runtime_error_event,
+    )
+    monkeypatch.setattr(
+        handlers_module,
+        "record_assistant_outbound_message",
+        record_assistant_outbound,
     )
     adapter_registry = AdapterRegistry()
     adapter_registry.register(_FailingAdapter())
@@ -306,6 +399,8 @@ async def test_send_message_handler_records_send_failure_without_text(
     dispatch_kwargs = record_dispatcher_event.await_args.kwargs
     assert dispatch_kwargs["status"] == "failed"
     assert dispatch_kwargs["adapter_available"] is True
+    assert dispatch_kwargs["rejection_codes"] == ["adapter_send_failed"]
+    record_assistant_outbound.assert_awaited_once()
     record_runtime_error_event.assert_awaited_once()
     runtime_kwargs = record_runtime_error_event.await_args.kwargs
     assert runtime_kwargs["error_class"] == "RuntimeError"
@@ -314,3 +409,87 @@ async def test_send_message_handler_records_send_failure_without_text(
         ensure_ascii=False,
     )
     assert "scheduled private failure text" not in serialized
+
+
+@pytest.mark.asyncio
+async def test_send_message_handler_refuses_send_when_history_write_fails(
+    monkeypatch,
+) -> None:
+    """Scheduled sends must stop before adapter delivery if history fails."""
+
+    record_dispatcher_event = AsyncMock()
+    record_runtime_error_event = AsyncMock()
+    record_assistant_outbound = AsyncMock(
+        side_effect=RuntimeError("conversation history write failed")
+    )
+
+    class _CapturingAdapter(_Adapter):
+        """Adapter fake that exposes whether send was attempted."""
+
+        def __init__(self) -> None:
+            self.calls: list[dict[str, str | None]] = []
+
+        async def send_message(
+            self,
+            channel_id: str,
+            text: str,
+            *,
+            channel_type: str,
+            reply_to_msg_id: str | None = None,
+        ) -> SendResult:
+            """Capture attempted delivery for fail-closed assertions."""
+
+            self.calls.append(
+                {
+                    "channel_id": channel_id,
+                    "text": text,
+                    "channel_type": channel_type,
+                    "reply_to_msg_id": reply_to_msg_id,
+                }
+            )
+            return_value = await super().send_message(
+                channel_id,
+                text,
+                channel_type=channel_type,
+                reply_to_msg_id=reply_to_msg_id,
+            )
+            return return_value
+
+    monkeypatch.setattr(
+        handlers_module.event_logging,
+        "record_dispatcher_event",
+        record_dispatcher_event,
+    )
+    monkeypatch.setattr(
+        handlers_module.event_logging,
+        "record_runtime_error_event",
+        record_runtime_error_event,
+    )
+    monkeypatch.setattr(
+        handlers_module,
+        "record_assistant_outbound_message",
+        record_assistant_outbound,
+    )
+    adapter = _CapturingAdapter()
+    adapter_registry = AdapterRegistry()
+    adapter_registry.register(adapter)
+
+    with pytest.raises(RuntimeError):
+        await handlers_module.handle_send_message(
+            {
+                "target_platform": "discord",
+                "target_channel": "chan-1",
+                "target_channel_type": "group",
+                "text": "uncommitted scheduled text",
+            },
+            _context(),
+            adapter_registry,
+        )
+
+    assert adapter.calls == []
+    dispatch_kwargs = record_dispatcher_event.await_args.kwargs
+    assert dispatch_kwargs["status"] == "failed"
+    assert dispatch_kwargs["rejection_codes"] == [
+        "conversation_history_write_failed"
+    ]
+    record_runtime_error_event.assert_awaited_once()

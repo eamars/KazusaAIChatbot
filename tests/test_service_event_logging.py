@@ -163,6 +163,11 @@ async def test_process_queued_item_records_db_and_pipeline_without_content(
     )
     monkeypatch.setattr(
         service_module,
+        "save_conversation",
+        AsyncMock(return_value="row-assistant"),
+    )
+    monkeypatch.setattr(
+        service_module,
         "_refresh_runtime_character_state",
         AsyncMock(),
     )
@@ -278,6 +283,11 @@ async def test_graph_failure_records_runtime_error_and_failed_pipeline(
         service_module,
         "_save_user_message_from_item",
         AsyncMock(return_value="row-user"),
+    )
+    monkeypatch.setattr(
+        service_module,
+        "save_conversation",
+        AsyncMock(return_value="row-assistant"),
     )
     monkeypatch.setattr(
         service_module,

@@ -151,6 +151,20 @@ class ChatInputQueue:
         if not item.future.done():
             item.future.set_result(response)
 
+    def fail(self, item: QueuedChatItem, exc: BaseException) -> None:
+        """Fail one queued item future if the caller is still waiting.
+
+        Args:
+            item: Queued chat item.
+            exc: Exception to return through the item's future.
+
+        Returns:
+            None.
+        """
+
+        if not item.future.done():
+            item.future.set_exception(exc)
+
     async def drain(self) -> list[QueuedChatItem]:
         """Remove and return all pending queued items.
 

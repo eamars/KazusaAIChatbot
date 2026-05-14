@@ -10,6 +10,10 @@ from kazusa_ai_chatbot.conversation_progress import (
     ConversationProgressRecordInput,
     ConversationProgressScope,
 )
+from kazusa_ai_chatbot.brain_service.outbound import (
+    record_assistant_outbound_message,
+    utc_timestamp,
+)
 from kazusa_ai_chatbot.utils import log_preview
 
 
@@ -35,7 +39,7 @@ async def save_assistant_message(
         ensure_character_global_identity_func: Service identity backfill helper.
         save_conversation_func: Service-level persistence function.
         now_func: Clock function used for assistant-row timestamps.
-        logger: Logger used for compatibility with service logging.
+        logger: Retained for service call-site compatibility.
 
     Returns:
         None.
@@ -46,46 +50,29 @@ async def save_assistant_message(
     platform_bot_id = result["platform_bot_id"]
     character_name = result["character_name"]
     assistant_output = result["final_dialog"]
+    del logger
 
-    if assistant_output:
-        body_text = "\n".join(assistant_output)
-        target_broadcast = bool(result["target_broadcast"])
-        target_addressed_user_ids = result["target_addressed_user_ids"]
-        if not target_addressed_user_ids and not target_broadcast:
-            current_user_id = str(result["global_user_id"]).strip()
-            target_addressed_user_ids = [current_user_id]
-        try:
-            character_global_user_id = await ensure_character_global_identity_func(
-                platform=platform,
-                platform_bot_id=platform_bot_id,
-                character_name=character_name,
-            )
-            assistant_doc = {
-                "platform": platform,
-                "platform_channel_id": platform_channel_id,
-                "channel_type": result["channel_type"],
-                "role": "assistant",
-                "platform_user_id": platform_bot_id,
-                "global_user_id": character_global_user_id,
-                "display_name": character_name,
-                "body_text": body_text,
-                "raw_wire_text": body_text,
-                "content_type": "text",
-                "addressed_to_global_user_ids": target_addressed_user_ids,
-                "mentions": [],
-                "broadcast": target_broadcast,
-                "attachments": [],
-                "timestamp": now_func().isoformat(),
-            }
-            delivery_tracking_id = str(
-                result.get("delivery_tracking_id") or ""
-            ).strip()
-            if delivery_tracking_id:
-                assistant_doc["delivery_tracking_id"] = delivery_tracking_id
-                assistant_doc["delivery_status"] = "pending"
-            await save_conversation_func(assistant_doc)
-        except Exception as exc:
-            logger.exception(f"Failed to save assistant message: {exc}")
+    if not assistant_output:
+        return
+
+    body_text = "\n".join(assistant_output)
+    await record_assistant_outbound_message(
+        platform=platform,
+        platform_channel_id=platform_channel_id,
+        channel_type=result["channel_type"],
+        platform_bot_id=platform_bot_id,
+        character_name=character_name,
+        body_text=body_text,
+        addressed_to_global_user_ids=result["target_addressed_user_ids"],
+        broadcast=bool(result["target_broadcast"]),
+        fallback_addressed_global_user_id=str(result["global_user_id"]),
+        delivery_tracking_id=str(result.get("delivery_tracking_id") or ""),
+        timestamp=utc_timestamp(now_func),
+        ensure_character_global_identity_func=(
+            ensure_character_global_identity_func
+        ),
+        save_conversation_func=save_conversation_func,
+    )
 
 
 async def run_consolidation_background(

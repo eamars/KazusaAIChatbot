@@ -432,6 +432,10 @@ class NapCatWSAdapter:
             "shared_secret": self.runtime_shared_secret,
             "timeout_seconds": 10.0,
         }
+        if self.bot_id:
+            return_value["platform_bot_id"] = self.bot_id
+        if self.bot_name:
+            return_value["display_name"] = self.bot_name
         return return_value
 
     async def _send_heartbeat_once(self) -> None:

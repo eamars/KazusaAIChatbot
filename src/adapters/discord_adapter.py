@@ -422,6 +422,10 @@ class DiscordAdapter(discord.Client):
             "shared_secret": self.runtime_shared_secret,
             "timeout_seconds": 10.0,
         }
+        user = getattr(self, "user", None)
+        if user is not None:
+            return_value["platform_bot_id"] = str(user.id)
+            return_value["display_name"] = str(user.display_name)
         return return_value
 
     async def _send_heartbeat_once(self) -> None:

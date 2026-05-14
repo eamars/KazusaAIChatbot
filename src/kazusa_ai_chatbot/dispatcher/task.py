@@ -70,6 +70,8 @@ class DispatchContext:
         now: Frozen dispatch time used for immediate tasks.
         source_channel_type: Source channel class such as ``group`` or
             ``private``.
+        source_platform_bot_id: Platform account id for the active character.
+        source_character_name: Display name for the active character.
     """
 
     source_platform: str
@@ -80,6 +82,8 @@ class DispatchContext:
     bot_permission_role: BotPermissionRole
     now: datetime
     source_channel_type: str
+    source_platform_bot_id: str = ""
+    source_character_name: str = ""
 
     @classmethod
     def from_scheduler_doc(cls, doc: ScheduledEventDoc) -> "DispatchContext":
@@ -101,6 +105,8 @@ class DispatchContext:
             bot_permission_role=doc["bot_role"],
             now=parse_iso_datetime(doc["execute_at"]),
             source_channel_type=str(doc["source_channel_type"]),
+            source_platform_bot_id=str(doc.get("source_platform_bot_id") or ""),
+            source_character_name=str(doc.get("source_character_name") or ""),
         )
         return return_value
 
@@ -146,6 +152,10 @@ class Task:
             "guild_id": ctx.guild_id,
             "bot_role": ctx.bot_permission_role,
         }
+        if ctx.source_platform_bot_id:
+            return_value["source_platform_bot_id"] = ctx.source_platform_bot_id
+        if ctx.source_character_name:
+            return_value["source_character_name"] = ctx.source_character_name
         return return_value
 
     @classmethod

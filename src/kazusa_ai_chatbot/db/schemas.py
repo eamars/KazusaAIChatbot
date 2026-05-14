@@ -524,6 +524,8 @@ class ScheduledEventDoc(TypedDict, total=False):
     source_channel_type: str
     source_user_id: str
     source_message_id: str
+    source_platform_bot_id: str
+    source_character_name: str
     guild_id: str | None
     bot_role: str
 

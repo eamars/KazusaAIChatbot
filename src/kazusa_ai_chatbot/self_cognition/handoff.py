@@ -111,7 +111,7 @@ def _build_dispatch_context(
     """Build source context for dispatcher validation and scheduler audit."""
 
     target_scope = _target_scope(case)
-    source_user_id = target_scope["user_id"] or "self_cognition"
+    source_user_id = target_scope["user_id"] or ""
     context = DispatchContext(
         source_platform=target_scope["platform"],
         source_channel_id=target_scope["platform_channel_id"],
@@ -121,6 +121,8 @@ def _build_dispatch_context(
         bot_permission_role="user",
         now=now,
         source_channel_type=target_scope["channel_type"],
+        source_platform_bot_id=_string_field(case, "platform_bot_id"),
+        source_character_name=_character_name(case),
     )
     return context
 
@@ -160,4 +162,19 @@ def _string_field(case: dict[str, Any], field_name: str) -> str:
         return_value = ""
         return return_value
     return_value = value
+    return return_value
+
+
+def _character_name(case: models.SelfCognitionCase) -> str:
+    """Read the active character name from the case profile."""
+
+    profile = case.get("character_profile")
+    if not isinstance(profile, dict):
+        return_value = ""
+        return return_value
+    name = profile.get("name")
+    if not isinstance(name, str):
+        return_value = ""
+        return return_value
+    return_value = name
     return return_value
