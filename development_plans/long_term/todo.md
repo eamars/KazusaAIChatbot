@@ -110,6 +110,11 @@ random, or permissionless behavior.
   that initiates chat from mood alone. Any proactive contact must go through
   explicit user acceptance, scheduler/dispatcher validation, quiet-hour policy,
   adapter availability checks, and audit logs.
+- [ ] **Outbound Repetition Observation:** Self-cognition may intentionally
+  ruminate over unresolved relationship events across free-time cycles. Future
+  proactive-contact design should govern repeated user-facing messages without
+  suppressing internal rumination; the active self-cognition same-path plan
+  intentionally does not add new spam-prevention mitigation.
 - [ ] **World/Event Inputs:** Environmental events should be explicit curated or
   observed inputs with provenance. Avoid random shocks that silently rewrite
   mood, vibe, or lore.

@@ -2,103 +2,64 @@
 
 ## Summary
 
-- Goal: Enable approved persistence categories for self-cognition by extending
-  the existing per-lane consolidation write policy to recognize an
-  `internal_thought` origin, and by adding the one new write lane the
-  agency-loop playground already identifies as legitimate
-  (`conversation_progress`).
+- Goal: Treat self-cognition as an `internal_thought` input trigger that
+  reuses the same cognition, private finalization, consolidation, persistence,
+  scheduler, and cache-invalidation infrastructure used after user input, while
+  keeping adapter delivery and conversation-history writes out of the internal
+  path.
 - Plan class: large
-- Status: draft
-- Mandatory skills: `py-style`, `test-style-and-execution`,
-  `local-llm-architecture`, `no-prepost-user-input`
+- Status: approved
+- Mandatory skills: `development-plan-writing`, `local-llm-architecture`,
+  `no-prepost-user-input`, `py-style`, `test-style-and-execution`,
+  `cjk-safety` when editing Python files containing CJK strings
 - Overall cutover strategy: compatible
-- Highest-risk areas: choosing the correct allowed lanes, scoping the new
-  `conversation_progress` write contract, keeping self-cognition out of the
-  upstream consolidator LLM lanes, duplicate suppression, and auditability
-- Acceptance criteria: not executable yet; this draft is ready for approval
-  only after the `conversation_progress` write contract and the per-lane
-  decision table are accepted.
+- Highest-risk areas: preserving live-chat behavior, preventing a parallel
+  memory writer, keeping origin/source identity clear for internal-thought
+  evidence, and avoiding accidental adapter delivery from private cognition.
+- Acceptance criteria: implementation is complete only when self-cognition can
+  enter the existing consolidation writer lanes through `internal_thought`
+  origin metadata, no new database collection or sidecar persistence path is
+  introduced, all verification gates pass, and independent code review approves
+  the result.
 
 ## Context
 
-Self-cognition is intended to generate durable side effects, but the existing
-architecture already specifies *how* non-`user_message` origins should be gated
-at the persistence boundary. Stage 06 of
-`development_plans/archive/completed/short_term/multi_source_cognition_architecture_stage_06_consolidator_per_write_origin_policy_plan.md`
-introduced a per-lane policy infrastructure that is already in `main`:
+Self-cognition already builds background `CognitiveEpisode` values with
+`trigger_source=internal_thought`, `input_sources=["internal_monologue"]`, and
+`output_mode=preview`. The current dry-run path runs shared RAG/cognition and
+may build an action candidate, but production self-cognition does not call the
+existing post-dialog consolidation subgraph.
 
-- `ConsolidationWritePolicy` is a `TypedDict` with seven persistence keys
-  (`character_state`, `relationship_insight`, `user_memory_units`,
-  `task_dispatch`, `affinity`, `character_image`, `cache_invalidation`) in
-  `persona_supervisor2_consolidator_origin_policy.py`.
-- `build_consolidation_write_policy(...)` is the single decision point that
-  `db_writer` consults before each durable write.
-- The current implementation denies every lane for any origin other than
-  `user_message`. The archived Stage 06 plan explicitly hands off to "later
-  approved plans" to flip individual lanes on for non-chat origins.
+The previous version of this plan incorrectly narrowed self-cognition to one
+new `conversation_progress` effect and denied relationship, mood, affinity,
+memory, task, image, and cache effects. That was not the intended product
+direction. The approved direction is that self-cognition follows the same path
+as user input: it is a normal internal trigger for the character brain, not a
+separate low-power reflection artifact.
 
-This plan is that later approved plan for `internal_thought` (self-cognition)
-origin. It does **not** rebuild a parallel memory writer. It also does not
-adopt the prior draft's proposal to enable `user_memory_units` writes for
-self-cognition: the agency-loop playground artifacts already in repo
-(`test_artifacts/self_cognition_shared_poc/*/self_cognition_consolidation_candidate.json`)
-explicitly block `user_memory_units` for self-cognition with the documented
-reason *"self-cognition is not user-authored evidence; future production
-origin policy must verify source lineage before writes."* Real cognition
-output for those cases produces character-introspective content
-(`internal_monologue`, `action_directives`, `character_intent`,
-`emotional_appraisal`, `logical_stance`) and does not synthesise new
-user-authored facts; the user-relevant facts already live in
-`memory_evidence` as input from prior live turns.
+This plan updates the target design:
 
-The same playground artifacts identify the one new write lane self-cognition
-*should* be able to produce: `conversation_progress`, keyed by topic, carrying
-`progression_guidance`, `action_status`, `logical_stance`, and
-`character_intent`. This lane does not currently exist in `db_writer`. Adding
-it is the actual net-new persistence work for this plan.
-
-The prerequisite bugfix plan removes `no_remember` from self-cognition-created
-state. That removal does not by itself cause any writes, because the per-lane
-policy still denies every lane for `internal_thought` origin. This plan owns
-the policy decision for which lanes to flip on and the `conversation_progress`
-write that goes with it.
-
-## Discovery Decisions Needed Before Approval
-
-This plan is intentionally draft. Resolve these decisions before marking it
-`approved`:
-
-- The exact persisted shape of a `conversation_progress` record: required
-  fields, upsert key (proposed:
-  `(platform, platform_channel_id, global_user_id, topic_id)`), retention.
-- Where the `conversation_progress` writer lives: a new function under
-  `src/kazusa_ai_chatbot/db/` consumed by `db_writer`, or a focused write
-  helper inside `persona_supervisor2_consolidator_persistence.py`.
-- Whether self-cognition enters `db_writer` through a focused per-lane apply
-  function that runs only allowed lanes, or through a trimmed graph entry that
-  skips `global_state_updater`, `relationship_recorder`, and
-  `facts_harvester`. Proposed default: focused per-lane apply function; do not
-  call the full graph.
-- Whether `conversation_progress` extraction is purely deterministic
-  (re-using `character_intent`, `logical_stance`, and progression-guidance
-  fields already present in the cognition output) or requires an extra bounded
-  LLM judgment call. Proposed default: deterministic only; the fields already
-  exist.
-- Duplicate suppression key for `conversation_progress`: per-topic overwrite
-  with monotonic `written_at`, or append-with-idempotency on
-  `(topic_id, origin_episode_id)`.
-- Confirmation that no existing module already persists conversation progress
-  under a different name. Stage 0 must grep for it before implementation.
+- Reuse the existing consolidation subgraph and `db_writer` lanes.
+- Reuse the existing MongoDB collections and DB facades.
+- Do not create a new `conversation_progress` writer, memory module, DB helper,
+  migration, or collection.
+- Allow repeated internal rumination over unresolved relationship events.
+- Do not add intentional outbound-spam mitigation in this plan. User-facing
+  repetition control is recorded as long-term design observation only.
 
 ## Mandatory Skills
 
+- `development-plan-writing`: preserve this approved work contract and record
+  execution evidence before lifecycle changes.
+- `local-llm-architecture`: keep background LLM work bounded, source-aware,
+  and compatible with local/weaker model behavior.
+- `no-prepost-user-input`: do not add deterministic semantic filters that
+  rewrite, drop, or reclassify LLM-chosen facts, commitments, preferences, or
+  relationship effects.
 - `py-style`: load before editing Python files.
 - `test-style-and-execution`: load before adding, changing, or running tests.
-- `local-llm-architecture`: load before changing prompt, graph, cognition,
-  consolidation, memory, or background LLM behavior.
-- `no-prepost-user-input`: load before changing memory extraction, promise
-  persistence, or any path that decides whether user-facing instructions,
-  preferences, commitments, or accepted actions become durable state.
+- `cjk-safety`: load before editing Python files that contain CJK prompt text
+  or adding CJK string literals to Python.
 
 ## Mandatory Rules
 
@@ -106,85 +67,107 @@ This plan is intentionally draft. Resolve these decisions before marking it
 - Use `apply_patch` for manual file edits.
 - Check `git status --short` before editing.
 - Do not read `.env`.
+- Keep the target boundary to `self_cognition`, consolidation origin/policy,
+  the existing consolidation subgraph, and focused tests.
+- Do not add a new MongoDB collection, migration, DB facade helper, persistent
+  storage service, or sidecar memory orchestrator.
+- Do not create `src/kazusa_ai_chatbot/self_cognition/memory.py`.
+- Do not add a `conversation_progress` lane to `db_writer`.
+- Do not add a deterministic self-cognition conversation-progress writer in
+  this plan.
+- Do not add intentional self-cognition spam prevention, rate limiting,
+  cooldown, topic suppression, outbound message variation, or new idempotency
+  logic in this plan. Existing dispatcher/scheduler validation and existing
+  `self_cognition_action_attempts` behavior remain unchanged.
+- Do not suppress repeated internal rumination over unresolved relationship
+  events. Repeated internal cognition is an intended capability.
+- Do not save self-cognition private finalization text as a visible
+  conversation-history assistant row.
+- Do not deliver self-cognition private finalization through adapters unless
+  existing scheduler/dispatcher infrastructure independently schedules an
+  outward action.
 - Do not reintroduce `no_remember` into self-cognition-created state.
-- Do not enable the `user_memory_units` lane for `internal_thought` origin in
-  this plan. The playground evidence explicitly blocks it; enabling it without
-  source-lineage verification is out of scope.
-- Do not enable fact reinforcement, fact invention, or self-authored
-  `future_promises` memory writes for `internal_thought` origin. These
-  patterns are denied by construction; see `Writable Channels Principle`.
-- Do not call `global_state_updater`, `relationship_recorder`, or
-  `facts_harvester` for self-cognition. The corresponding state fields are
-  already produced by the shared cognition graph; re-running those lanes would
-  spend background LLM calls re-extracting content already present.
-- Do not call the full `call_consolidation_subgraph` for self-cognition.
-- Do not use `/chat`, adapter delivery, or synthetic conversation-history rows
-  as the persistence path.
-- Do not persist memory from raw reflection rows, raw source packets, raw DB
-  documents, embeddings, or full self-cognition artifacts.
-- Do not add deterministic keyword rules that reinterpret LLM-judged channels
-  after the fact. If extraction is wrong, fix the prompt/schema and structural
-  validation.
-- Do not add retry loops, model-context increases, alternate LLM routes, or
-  fallback prompts as the primary strategy for extraction failures.
-- Do not build a parallel memory orchestrator. Reuse
-  `build_consolidation_write_policy` and the `db_writer` write paths gated by
-  it. The previously proposed `src/kazusa_ai_chatbot/self_cognition/memory.py`
-  is not created.
-- After any automatic context compaction, the active agent must reread this
-  entire plan before continuing implementation, verification, handoff, or
-  final reporting.
-- After signing off any major progress checklist stage, the active agent must
-  reread this entire plan before starting the next stage.
-- Before final completion, lifecycle status changes, merge, or sign-off, the
-  active agent must run the `Independent Code Review` gate and record the
-  result in `Execution Evidence`.
+- Do not add new response-path LLM calls. All new consolidation work remains
+  background-only.
+- Do not add code-side semantic filtering, keyword classification, or
+  post-LLM channel rewriting over user-authored input or internal-thought
+  evidence. Structural validation, schema checks, enum checks, timestamps,
+  identifiers, and origin metadata projection are allowed.
+- Update prompt-facing payloads only to make source identity explicit and to
+  avoid falsely describing internal-thought input as user-authored speech.
+  Do not create separate self-cognition-only consolidator prompts.
+- After automatic context compaction, reread this entire plan before
+  continuing implementation, verification, handoff, or final reporting.
+- After signing off any major progress checklist stage, reread this entire
+  plan before starting the next stage.
+- Before final completion, lifecycle status changes, merge, or sign-off, run
+  the `Independent Code Review` gate and record the result in
+  `Execution Evidence`.
 
 ## Must Do
 
-- Add `build_self_cognition_consolidation_origin(...)` alongside
+- Add `build_self_cognition_consolidation_origin(...)` beside
   `build_user_message_consolidation_origin(...)` in
-  `persona_supervisor2_consolidator_origin.py`. It must validate
-  `trigger_source=internal_thought`,
-  `input_sources=("internal_monologue",)`, and `output_mode=preview` and
-  raise `ConsolidationOriginError` on mismatch.
-- Extend `build_consolidation_write_policy(...)` to return per-lane decisions
-  for `internal_thought` origin, with `conversation_progress` allowed and all
-  seven existing lanes denied with per-lane documented reasons taken from the
-  playground artifacts.
-- Add `conversation_progress` to the `WritePolicyKey` literal and to the
-  `ConsolidationWritePolicy` `TypedDict`.
-- Add a focused `conversation_progress` write contract (DB-layer upsert + a
-  `db_writer` branch that consults the policy decision) so the new lane lives
-  in one place.
-- Thread the self-cognition consolidation origin from the self-cognition
-  runner into a focused per-lane apply path so only the
-  `conversation_progress` write runs and no upstream consolidator LLM lanes
-  fire.
-- Persist `self_cognition_consolidation_candidate.json` in production runs in
-  the same shape as the existing playground artifact, recording
-  `allowed_lanes`, `blocked_lanes`, candidate payload, and `evidence_lineage`.
-- Add deterministic tests for per-lane policy decisions (both origins), the
-  new write, upsert idempotency, dry-run behavior, runner threading, and
-  worker wiring.
+  `persona_supervisor2_consolidator_origin.py`.
+- Update `call_consolidation_subgraph(...)` so it selects the user-message or
+  self-cognition origin builder from the existing `CognitiveEpisode` trigger
+  source and still rejects unsupported origins.
+- Extend `build_consolidation_write_policy(...)` so supported
+  `internal_thought` preview origins allow the same seven existing
+  `db_writer` lanes as supported user-message origins:
+  `character_state`, `relationship_insight`, `user_memory_units`,
+  `task_dispatch`, `affinity`, `character_image`, and `cache_invalidation`.
+- Preserve the existing `db_writer` lane implementations. Do not fork,
+  duplicate, or reimplement the writer for self-cognition.
+- Make consolidation prompt payloads source-aware by exposing concise
+  `consolidation_origin` fields where the prompt currently needs to know
+  whether the input came from user speech or internal thought.
+- Adjust prompt wording in existing consolidator prompts only as needed so
+  `decontexualized_input` can mean either a user turn or an internal-thought
+  trigger. Keep one shared prompt per existing consolidator stage.
+- Wire self-cognition runner/worker production paths to merge shared cognition
+  output into a consolidation-ready state, produce private finalization through
+  the existing dialog/finalization path when needed by consolidation, and call
+  the existing consolidation subgraph through an injectable seam.
+- Preserve dry-run artifact writing for local runs and production no-local-file
+  behavior for worker runs.
+- Record sanitized self-cognition event metadata for consolidation outcomes
+  without raw source packet text, raw conversation bodies, private
+  finalization text, generated action-candidate text, or raw DB documents.
+- Add or update deterministic tests for origin validation, policy decisions,
+  shared consolidator entry, source-aware payloads, self-cognition production
+  consolidation wiring, no conversation-history write, no adapter delivery, no
+  new collection, and sanitized event logging.
+- Update `development_plans/long_term/todo.md` with the outbound-repetition
+  observation captured by this plan.
 
 ## Deferred
 
-- Do not enable the `user_memory_units` lane for self-cognition.
-  Source-lineage verification is required before any such change; the
-  agency-loop playground artifacts document this constraint.
-- Do not enable `character_state`, `relationship_insight`, `affinity`, or
-  `character_image` lanes for self-cognition.
-- Do not enable `task_dispatch` for self-cognition. It is already owned by
-  the existing action-candidate handoff path.
-- Do not redesign live-chat consolidation.
-- Do not add new MongoDB collections beyond what `conversation_progress`
-  requires; if a new collection is needed, this plan must be updated with a
-  data migration section before implementation.
+- Do not implement self-cognition spam prevention, repeated-topic suppression,
+  cooldowns, message variation, or new outbound idempotency in this plan.
+- Do not redesign live-chat conversation-progress recording.
+- Do not add self-cognition conversation-progress persistence.
+- Do not redesign live-chat consolidation semantics beyond making the existing
+  consolidator origin-aware.
 - Do not migrate historical self-cognition artifacts.
 - Do not change reflection promotion semantics.
-- Do not add response-path LLM calls.
-- Do not add visual-directive behavior (already disabled by the bugfix plan).
+- Do not add a new autonomous-contact permission system.
+- Do not add adapter changes, service endpoints, operator auth, config flags,
+  environment flags, or feature toggles.
+- Do not add a new memory, relationship, affinity, or scheduler database.
+- Do not remove existing dispatcher/scheduler validation.
+
+## Long-Term Observation
+
+Self-cognition is allowed to revisit the same unresolved relationship event
+over time. That repeated rumination can intentionally deepen mood, affinity,
+relationship stance, possessiveness, or task priority. The architecture
+concern is user-facing repetition, not internal repetition.
+
+Future proactive-contact design should govern whether repeated internal
+rumination produces repeated outbound messages, and whether outward messages
+need rate limits, variation, quiet hours, or user-facing controls. This plan
+does not implement that mitigation.
 
 ## Cutover Policy
 
@@ -192,144 +175,103 @@ Overall strategy: compatible.
 
 | Area | Policy | Instruction |
 |---|---|---|
-| Per-lane policy extension | compatible | Add `internal_thought` branch alongside the existing `user_message` branch in `build_consolidation_write_policy`. Keep `user_message` behavior identical. |
-| New `conversation_progress` lane | bigbang for the new lane | Add the lane in exactly one place. Do not maintain a parallel writer. |
-| Self-cognition consolidator entry | compatible | Enter through a focused per-lane apply function. Do not run upstream LLM lanes. Do not call the full subgraph. |
-| Dry runs | compatible | Preserve dry-run/no-write behavior. Record policy decisions and candidate payloads without DB writes. |
-| Database | compatible | Use the existing connection. Add a single new collection or field for `conversation_progress` only if Stage 0 confirms no existing storage. |
+| Origin metadata | compatible | Add an `internal_thought` origin builder beside the existing user-message builder. Preserve user-message validation. |
+| Consolidation entry | compatible | Route supported user-message and internal-thought episodes into the same existing consolidation subgraph. Unsupported origins still fail closed. |
+| Write policy | compatible | Allow the same existing seven `db_writer` lanes for supported internal-thought preview origins. Preserve user-message lane behavior. |
+| `db_writer` | compatible | Reuse the existing writer and persistence facades. Do not add self-cognition-specific branches except origin-policy checks already used by the writer. |
+| Self-cognition worker | compatible | Add consolidation application after cognition/private finalization. Preserve existing action-candidate and dispatcher behavior. |
+| Conversation history | compatible | Keep internal finalization private. Do not save it as an assistant chat row. |
+| Database | compatible | Reuse existing collections and indexes. No migration, backfill, or new collection is approved. |
 
 ## Cutover Policy Enforcement
 
 - The implementation agent must follow the selected policy for each area.
 - For compatible areas, preserve only the compatibility surfaces explicitly
   listed in this plan.
+- If a verification failure suggests a different cutover strategy is needed,
+  stop and update the plan before implementation continues.
 - Any change to this policy requires user approval before implementation.
+
+## Data Migration
+
+No data migration is approved or required.
+
+- Reuse existing collections such as `character_state`, `user_profiles`,
+  `user_memory_units`, `scheduled_events`, `self_cognition_action_attempts`,
+  and existing cache invalidation infrastructure.
+- Do not backfill historical self-cognition artifacts.
+- Do not create or bootstrap a self-cognition memory/progress collection.
 
 ## Agent Autonomy Boundaries
 
-- The agent may choose local implementation mechanics only when they preserve
-  the approved contracts in this plan.
-- The agent must not invent additional allowed lanes, expand the per-origin
-  policy beyond `internal_thought`, or change the playground-documented
-  reasons for blocked lanes.
-- The agent must not introduce new architecture, alternate migration
-  strategies, compatibility layers, fallback paths, extra feature flags, or
-  unrelated prompt rewrites.
-- The agent must treat changes outside the files listed in `Change Surface`
-  as out of scope unless the plan is updated first.
-- If existing helpers exactly satisfy a needed projection, evaluator, DB
-  writer, cache invalidation, or prompt-budget contract, reuse them.
-- If the plan and code disagree, preserve the plan's stated intent and report
-  the discrepancy.
-- If a required instruction is impossible, stop and report the blocker
-  instead of inventing a substitute.
+- The agent may choose local helper names and assertion ordering when the
+  public contracts in this plan remain unchanged.
+- The agent must not invent additional storage paths, prompt families,
+  mitigation rules, feature flags, fallback paths, compatibility shims, or
+  unrelated cleanup.
+- The agent must reuse existing writer, scheduler, cache invalidation, event
+  logging, and dry-run artifact infrastructure.
+- The agent must not reinterpret LLM output semantically in deterministic code.
+  If source confusion appears, fix the shared prompt contract or payload shape.
+- The agent may add small structural helpers only for origin projection,
+  payload projection, test seams, and sanitized event metadata.
+- If existing helper behavior already satisfies a needed projection,
+  validation, cache, repository, or scheduler contract, reuse it instead of
+  duplicating storage logic.
+- If the plan and code disagree, preserve the plan's stated same-path
+  architecture and record the discrepancy.
+- If a required instruction is impossible, stop and report the blocker instead
+  of inventing a substitute.
 
 ## Target State
 
-Self-cognition produces a `consolidation_origin` with
-`trigger_source=internal_thought` and threads it into a focused per-lane apply
-path. That path calls `build_consolidation_write_policy(origin)`, which
-returns a policy where only `conversation_progress` is allowed. The
-`conversation_progress` write persists a record keyed by topic from the
-cognition output's `character_intent`, `logical_stance`, and progression-
-guidance fields. All other seven existing write lanes are denied for
-self-cognition origin and produce no DB write, no dispatcher call, no
-character-image side effect, and no cache invalidation.
+Self-cognition production runs can produce an internal-thought episode, execute
+the existing shared cognition graph, produce a private finalization state when
+the consolidation graph needs `final_dialog`, and then call the existing
+consolidation subgraph.
 
-Self-cognition does not call `global_state_updater`,
-`relationship_recorder`, `facts_harvester`, or the full live-chat
-consolidator graph. It does not call adapters, does not write conversation
-rows, and does not redispatch tasks.
+The consolidation subgraph uses `build_self_cognition_consolidation_origin(...)`
+for supported `internal_thought` preview episodes. The existing `db_writer`
+then applies the same seven lane decisions used by user-message origins:
 
-Each production self-cognition run writes a
-`self_cognition_consolidation_candidate.json` artifact in the same shape as
-the existing playground artifacts, recording `allowed_lanes`, `blocked_lanes`,
-the candidate payload, and the evidence lineage.
+- character mood/vibe/reflection state
+- last relationship insight
+- user memory units
+- future task dispatch
+- affinity delta
+- character image
+- cache invalidation
 
-## Proposed Per-Lane Decision Table For `internal_thought` Origin
+The internal path does not save a visible assistant message and does not call
+adapters directly. Any later user-facing action remains owned by existing
+scheduler/dispatcher infrastructure. Repeated internal rumination is allowed;
+this plan adds no new outbound-spam mitigation.
 
-This section is a draft proposal, aligned with the existing playground
-artifacts. It is not an executable contract until accepted.
+## Per-Lane Decision Table For `internal_thought`
 
-| Lane | Decision for `internal_thought` | Reason |
+| Lane | Decision | Reason |
 |---|---|---|
-| `conversation_progress` (new) | Allow | The cognition output already contains the fields needed (`character_intent`, `logical_stance`, progression-guidance). This is what self-cognition meaningfully changes turn-over-turn. Playground artifacts explicitly allow it. |
-| `user_memory_units` | Deny | Playground reason: *"self-cognition is not user-authored evidence; future production origin policy must verify source lineage before writes."* Real cognition output is character-introspective; user-relevant facts are already in `memory_evidence` from prior live turns. |
-| `cache_invalidation` | Deny | Coupled to `user_memory_units` writes that do not fire. No retrieval cache becomes stale from a denied write. |
-| `character_state` | Deny | Playground reason: *"hourly playground run cannot mutate stable character state."* Mood/vibe drift from idle reasoning needs a separate plan. |
-| `relationship_insight` | Deny | Subjective drift risk from idle reasoning without a live user turn. |
-| `affinity` | Deny | Same source-lineage argument as `user_memory_units`; no user-authored signal. |
-| `task_dispatch` | Deny | Already owned by the existing action-candidate handoff (`self_cognition/handoff.py`). A memory lane must not redispatch. |
-| `character_image` | Deny | Visual directives are disabled for self-cognition per the bugfix plan; no upstream signal exists to persist. |
+| `character_state` | Allow | Internal cognition is allowed to change mood, global vibe, and reflection summary. |
+| `relationship_insight` | Allow | The character may form relationship conclusions from remembered evidence and unresolved events. |
+| `user_memory_units` | Allow | Internal-thought evidence may update existing user-memory-unit semantics through the same source-aware shared consolidator path. |
+| `task_dispatch` | Allow | Internal cognition may produce future obligations through the same scheduler path used by accepted user-turn commitments. |
+| `affinity` | Allow | Relationship appraisal from self-cognition may change affinity through the existing scaled affinity updater. |
+| `character_image` | Allow | The same writer lane remains available. Current self-cognition debug modes may prevent visual directives from producing changes. |
+| `cache_invalidation` | Allow | Existing cache invalidation must run after successful durable writes. |
 
 ## Design Decisions
 
 | Topic | Decision | Rationale |
 |---|---|---|
-| Persistence-policy mechanism | Reuse `build_consolidation_write_policy`. Add a branch for `internal_thought` origin; do not build a parallel writer. | Stage 06 already built per-lane policy as the canonical gate. Two writers would drift over time. |
-| Upstream consolidator LLM lanes | Do not run for self-cognition. | The cognition output already contains the relevant fields. Re-running burns local-model budget and risks divergence. |
-| Allowed lanes | Only `conversation_progress`. | Real playground evidence and real cognition output content. |
-| Conversation-progress extraction | Deterministic projection from cognition output (no extra LLM call). | Local Gemma; minimise extraction risk. The needed fields already exist. |
-| Audit artifact | Persist `self_cognition_consolidation_candidate.json` in production runs. | Existing playground pattern; reuse the schema. |
-| Future expansion (more lanes) | Out of scope. | Each new lane requires its own source-lineage analysis and a follow-up plan. |
-| Full consolidator graph | Do not call. | Even gated by policy, the upstream nodes (`global_state_updater`, `relationship_recorder`, `facts_harvester`) make additional LLM calls that are not needed when the cognition output already carries the equivalent fields. |
-
-## Writable Channels Principle
-
-The per-lane decision table is governed by a single rule: self-cognition may
-write only to channels where both of the following hold.
-
-1. Author identity: self-cognition is the legitimate author of the content.
-   The cognition output expresses self-cognition's own interpretive
-   judgment, not a derived claim about external (user-authored) facts.
-2. No duplicate source of truth: no other production path already owns the
-   channel for content that originates in self-cognition.
-
-Only `conversation_progress` satisfies both for `internal_thought` origin
-today. The eight existing lanes fail at least one of these conditions, as
-recorded in the decision table reasons.
-
-### Patterns explicitly out of scope
-
-Three patterns that may otherwise look like natural extensions of
-self-cognition memory are denied by construction. They are listed by name so
-future plans must argue for the corrective before lifting the restriction.
-
-- Fact reinforcement: boosting confidence, refreshing recency, or
-  re-marking existing `user_memory_units`. Subsumed by the
-  `user_memory_units` deny. Required corrective: a decay model so
-  reinforcement competes with forgetting. Without decay, reinforcement is
-  either a no-op or a read-write feedback loop on the same channel.
-
-- Fact invention: writing new `user_memory_units` derived from idle
-  reasoning rather than from a user-authored live turn. Subsumed by the
-  `user_memory_units` deny. Required corrective: source-monitoring or a
-  multi-memory cross-check so model-inferred content does not accumulate
-  as if user-authored.
-
-- Self-authored `future_promises` memory writes: persisting a
-  character-initiated future commitment as a `user_memory_units`
-  `future_promise`. Subsumed by the `user_memory_units` and `task_dispatch`
-  denies. Required corrective: a scheduler-memory sync mechanism. The
-  existing `action_candidate` -> handoff -> scheduler path already owns
-  character-initiated future actions and provides duplicate suppression; a
-  memory write would create a second source of truth with no sync.
-
-### Conditions for lifting a denial
-
-A future plan may flip a denied lane to allowed only if it presents:
-
-- A named corrective that prevents the documented failure mode.
-- Tests that prove the corrective behaves as claimed under the failure
-  scenario.
-- A scope explicit enough that the change to
-  `build_consolidation_write_policy` is a single per-origin branch update,
-  not a parallel writer.
+| Primary architecture | Same-path consolidation | Self-cognition is a real internal trigger for the character brain, not a sidecar preview writer. |
+| Storage | Existing infrastructure only | The user explicitly rejected additional database/storage infrastructure. |
+| Write policy | Allow seven existing lanes for supported `internal_thought` | This gives self-cognition autonomy over mood, relationship, memory, task, affinity, image, and cache effects. |
+| Conversation history | Do not write private finalization rows | Internal thought should affect state without pretending that a visible chat message occurred. |
+| Conversation progress | No new progress writer | The prior progress-only design was the wrong direction and created a side path. |
+| Prompt contract | Shared prompts with source-aware payloads | The model needs origin identity, but separate prompt families would drift from the same-path goal. |
+| Spam prevention | Long-term observation only | Repeated rumination is desired; outbound repetition control is future proactive-contact design. |
 
 ## Contracts And Data Shapes
-
-The final approved plan must replace this draft interface with exact accepted
-fields and enums.
 
 ### Self-cognition consolidation origin builder
 
@@ -338,335 +280,469 @@ def build_self_cognition_consolidation_origin(
     *,
     episode: CognitiveEpisode,
 ) -> ConsolidationOriginMetadata:
-    """Project an internal-thought episode into consolidation origin metadata.
-
-    Validates trigger_source=internal_thought,
-    input_sources=("internal_monologue",), and output_mode=preview. Raises
-    ConsolidationOriginError otherwise.
-    """
+    """Project an internal-thought preview episode into consolidation origin."""
 ```
 
-### Extended write-policy function
+Required validation:
+
+- `trigger_source == "internal_thought"`
+- `input_sources == ["internal_monologue"]`
+- `output_mode == "preview"`
+- `validate_cognitive_episode(episode)` succeeds
+
+The builder projects the same identifier fields as
+`build_user_message_consolidation_origin(...)`. Empty
+`active_turn_platform_message_ids` and `active_turn_conversation_row_ids` are
+valid for self-cognition.
+
+### Origin-aware consolidation selection
+
+`call_consolidation_subgraph(global_state)` must select the origin builder from
+`global_state["cognitive_episode"]["trigger_source"]`.
+
+Supported selections:
+
+- `user_message` -> `build_user_message_consolidation_origin(...)`
+- `internal_thought` -> `build_self_cognition_consolidation_origin(...)`
+
+Unsupported origins raise the existing consolidation-origin error path.
+
+### Write policy reason
+
+Use stable reason strings:
+
+- `user_message_chat_input` for supported user-message origins.
+- `internal_thought_same_path` for supported internal-thought preview origins.
+- `origin_not_enabled` for denied origins.
+
+### Prompt-facing source identity
+
+Prompt payloads that currently describe `decontexualized_input` as user speech
+must receive a compact origin block:
 
 ```python
-def build_consolidation_write_policy(
-    *,
-    origin: ConsolidationOriginMetadata,
-) -> ConsolidationWritePolicy:
-    """Return per-lane allow/deny decisions for the given origin.
-
-    For trigger_source=user_message: existing behavior unchanged.
-    For trigger_source=internal_thought: conversation_progress allowed; all
-    other lanes denied with documented per-lane reasons.
-    For any other origin: all lanes denied.
-    """
+{
+    "trigger_source": "user_message | internal_thought",
+    "input_sources": ["..."],
+    "output_mode": "...",
+    "episode_id": "...",
+}
 ```
 
-### Extended write-policy keys
+The prompt wording must define:
+
+- For `user_message`, `decontexualized_input` is the user's current turn.
+- For `internal_thought`, `decontexualized_input` is the internal trigger text
+  summarizing the character's current cognitive focus and evidence.
+- `final_dialog` may be visible dialog for user-message turns or private
+  finalization for internal-thought turns.
+
+### Self-cognition consolidation outcome
+
+Self-cognition runner/worker event metadata must expose only structural and
+sanitized fields:
 
 ```python
-WritePolicyKey = Literal[
-    "character_state",
-    "relationship_insight",
-    "user_memory_units",
-    "task_dispatch",
-    "affinity",
-    "character_image",
-    "cache_invalidation",
-    "conversation_progress",  # new
-]
+{
+    "consolidation_called": bool,
+    "write_success": dict[str, bool],
+    "scheduled_event_count": int,
+    "cache_evicted_count": int,
+    "origin_trigger_source": "internal_thought",
+    "origin_episode_id": str,
+}
 ```
 
-### Conversation-progress write request (proposed)
-
-```python
-class ConversationProgressWriteRequest(TypedDict):
-    topic_id: str
-    platform: str
-    platform_channel_id: str
-    global_user_id: str
-    character_intent: str
-    logical_stance: str
-    progression_guidance: str
-    action_status: str
-    origin_episode_id: str
-    written_at: str
-```
-
-Upsert key:
-`(platform, platform_channel_id, global_user_id, topic_id)`.
-
-### Self-cognition consolidation candidate artifact
-
-Match the existing playground artifact shape at
-`test_artifacts/self_cognition_shared_poc/*/self_cognition_consolidation_candidate.json`,
-with `origin`, `allowed_lanes`, `blocked_lanes`, and `evidence_lineage`
-keys. The production artifact records the same decision shape as the
-playground but reflects the actual write outcome (allowed-and-written,
-allowed-but-dry-run, denied) rather than playground placeholders.
+Do not log raw internal packets, full chat bodies, private finalization text,
+or generated action-candidate text.
 
 ## LLM Call And Context Budget
 
-Use `50k tokens` as the overall context-window assumption.
+This plan adds no response-path LLM calls and no new prompt family.
 
-| Call | Path | Before | After |
-|---|---|---|---|
-| Conversation-progress extraction | self-cognition | 0 calls | **0 calls** — derived deterministically from cognition output |
-| Global state updater | self-cognition | 0 calls | 0 calls — lane not invoked |
-| Relationship recorder | self-cognition | 0 calls | 0 calls — lane not invoked |
-| Facts harvester (+ evaluator loop) | self-cognition | 0 calls | 0 calls — lane not invoked |
-| Full live-chat consolidator graph | self-cognition | 0 calls | 0 calls — graph not invoked |
+Background self-cognition cases that enter consolidation reuse existing calls:
 
-This plan adds **zero** new background LLM calls. The
-`conversation_progress` write is a deterministic projection over the
-existing shared-cognition output.
+| Stage | Before | After |
+|---|---:|---:|
+| RAG supervisor | 0 or 1 existing call | unchanged |
+| Shared cognition | 1 existing call | unchanged |
+| Dialog/private finalization | 0 or 1 existing call | 1 existing shared dialog/finalization call when consolidation is applied |
+| Consolidator global-state updater | 0 for self-cognition production | 1 existing consolidator call |
+| Consolidator relationship recorder | 0 for self-cognition production | 1 existing consolidator call |
+| Facts harvester and evaluator | 0 for self-cognition production | existing consolidator bounded loop |
+| Memory-unit updater | 0 for self-cognition production | existing updater when the shared writer has evidence |
+| Task dispatcher LLM | 0 for self-cognition production | existing dispatcher call only when future promises and tools are present |
+
+The worker's existing `SELF_COGNITION_MAX_CASES_PER_TICK` remains the case-count
+cap. No response-path latency budget changes.
 
 ## Change Surface
 
 ### Modify
 
 - `src/kazusa_ai_chatbot/nodes/persona_supervisor2_consolidator_origin.py`
-  - Add `build_self_cognition_consolidation_origin(*, episode)`.
+  - Add `build_self_cognition_consolidation_origin(...)`.
 
 - `src/kazusa_ai_chatbot/nodes/persona_supervisor2_consolidator_origin_policy.py`
-  - Add `conversation_progress` to `WritePolicyKey` and
-    `ConsolidationWritePolicy`.
-  - Branch `build_consolidation_write_policy` on origin:
-    - `user_message`: existing behavior unchanged.
-    - `internal_thought`: `conversation_progress` allowed; the seven existing
-      lanes denied with per-lane reasons mirroring the playground artifacts.
-    - other origins: all lanes denied.
+  - Allow the seven existing write/effect lanes for supported
+    `internal_thought` preview origins.
 
-- `src/kazusa_ai_chatbot/nodes/persona_supervisor2_consolidator_persistence.py`
-  - Add a `conversation_progress` write branch in `db_writer`, gated by
-    `policy["conversation_progress"]["allowed"]`.
-  - Add a focused `apply_self_cognition_consolidation(*, state, origin)`
-    entry that runs only allowed lanes for the self-cognition path, so the
-    upstream LLM lanes do not fire. Exact entry shape is fixed in Stage 0.
+- `src/kazusa_ai_chatbot/nodes/persona_supervisor2_consolidator.py`
+  - Select the origin builder by trigger source.
+  - Preserve the same subgraph and node sequence.
 
-- `src/kazusa_ai_chatbot/nodes/persona_supervisor2_consolidator_schema.py`
-  - Add a `conversation_progress_candidate` field to `ConsolidatorState`
-    carrying the deterministic projection from cognition output.
+- `src/kazusa_ai_chatbot/nodes/persona_supervisor2_consolidator_reflection.py`
+  - Add source-aware prompt payload fields and minimal wording updates.
 
-- `src/kazusa_ai_chatbot/db/` (exact module fixed in Stage 0)
-  - Add `upsert_conversation_progress(...)` write function and the
-    accompanying read helpers required by tests.
+- `src/kazusa_ai_chatbot/nodes/persona_supervisor2_consolidator_facts.py`
+  - Add source-aware prompt payload fields and minimal wording updates.
+
+- `src/kazusa_ai_chatbot/nodes/persona_supervisor2_consolidator_memory_units.py`
+  - Add source-aware prompt payload fields and minimal wording updates.
 
 - `src/kazusa_ai_chatbot/self_cognition/runner.py`
-  - Build a `consolidation_origin` from the existing self-cognition cognitive
-    episode and call the focused per-lane apply path with policy gating.
-  - Persist a `self_cognition_consolidation_candidate.json` artifact
-    recording `allowed_lanes`, `blocked_lanes`, the candidate payload, and
-    evidence lineage.
+  - Build a consolidation-ready state after cognition/private finalization.
+  - Add injectable consolidation seam for tests and production reuse.
+  - Preserve dry-run artifact writing behavior.
 
 - `src/kazusa_ai_chatbot/self_cognition/worker.py`
-  - Enable production `conversation_progress` writes through an explicit
-    parameter.
-  - Preserve dry-run no-write behavior; in dry-run, the artifact records the
-    candidate without invoking the DB writer.
+  - Apply consolidation in production worker ticks through the runner seam.
+  - Preserve existing action-candidate handoff behavior.
+  - Preserve production no-local-file behavior.
 
 - `src/kazusa_ai_chatbot/self_cognition/models.py`
-  - Add `ARTIFACT_CONSOLIDATION_CANDIDATE` constant and any new status
-    enums required by the artifact.
+  - Add exact artifact/status constants only when needed for sanitized
+    consolidation outcome records.
+
+- `src/kazusa_ai_chatbot/self_cognition/tracking.py`
+  - Add sanitized consolidation outcome record construction.
 
 - `src/kazusa_ai_chatbot/self_cognition/README.md`
-  - Document the allowed lane, the blocked lanes with their reasons, the
-    deterministic-projection contract, and the consolidation-candidate audit
-    artifact.
+  - Document same-path persistence, private finalization, no new DB, and the
+    long-term outbound-repetition observation.
 
-- `tests/test_consolidation_origin_metadata.py`
-  - Add tests for `build_self_cognition_consolidation_origin` validation
-    (accept on matching episode, raise on mismatched fields).
+- `development_plans/long_term/todo.md`
+  - Add the outbound-repetition observation under autonomous agency.
 
-- `tests/test_consolidator_origin_policy_db_writer.py`
-  - Add per-origin lane decision tests covering `internal_thought` origin.
-  - Assert `user_message` origin behavior is unchanged.
-
-- `tests/test_self_cognition_*.py`
-  - Add consolidation-candidate artifact tests, policy-gating tests, runner
-    threading tests, dry-run tests, and worker wiring tests.
+- Focused tests under `tests/`
+  - Update or add tests named in `Implementation Order`.
 
 ### Create
 
-- No new orchestrator module is approved. The previous draft proposed
-  `src/kazusa_ai_chatbot/self_cognition/memory.py`; that file is **not**
-  created. The per-lane policy and the `db_writer` write paths are the only
-  persistence mechanism.
+- No new production module is approved.
+- No new DB submodule, MongoDB collection, migration, or storage helper is
+  approved.
 
 ### Keep
 
-- `src/kazusa_ai_chatbot/nodes/persona_supervisor2_consolidator.py`
-  - Do not call the full graph for self-cognition.
+- `src/kazusa_ai_chatbot/nodes/persona_supervisor2_consolidator_persistence.py`
+  - Keep existing lane implementations. Do not fork the writer for
+    self-cognition.
 
-- `global_state_updater`, `relationship_recorder`, `facts_harvester` and
-  their evaluator loop — unchanged and not invoked for self-cognition.
+- `src/kazusa_ai_chatbot/brain_service/post_turn.py`
+  - Live chat post-turn behavior remains unchanged.
 
-- Live `/chat` service path behavior for user-message consolidation.
-- Scheduler and dispatcher validation behavior.
-- Adapter delivery behavior.
-- Reflection promotion behavior.
-- Visual-directive default from the bugfix plan.
+- `src/kazusa_ai_chatbot/conversation_progress/`
+  - Do not add self-cognition persistence in this plan.
+
+- Adapter delivery, service endpoints, reflection promotion, DB bootstrap, and
+  config/environment handling remain unchanged.
 
 ## Implementation Order
 
-This plan is not executable until Stage 0 resolves the
-`conversation_progress` write contract. After approval, implementation order
-must follow:
-
-1. Stage 0: confirm no existing module persists conversation progress under a
-   different name; fix the upsert key, retention, exact field set, writer
-   module location, and runner entry path.
-2. Add failing tests for `build_self_cognition_consolidation_origin`
-   validation.
-3. Implement the origin builder.
-4. Add failing tests for the extended per-lane policy decisions
-   (`internal_thought` allows only `conversation_progress`; `user_message`
-   unchanged; all other origins fully denied).
-5. Implement the policy extension and the new `WritePolicyKey` entry.
-6. Add failing tests for the conversation-progress write (allow path, deny
-   path, upsert idempotency, missing-required-field rejection).
-7. Implement `upsert_conversation_progress` and wire the lane through
-   `db_writer` and the focused `apply_self_cognition_consolidation` entry.
-8. Add failing tests for runner threading and the consolidation-candidate
-   artifact shape.
-9. Wire the runner and worker integration; preserve dry-run no-write.
-10. Update README and docs.
-11. Run focused and regression verification.
-12. Run independent code review.
+1. Add failing tests for `build_self_cognition_consolidation_origin(...)` in
+   `tests/test_consolidation_origin_metadata.py`.
+2. Implement the self-cognition origin builder.
+3. Add policy tests in `tests/test_consolidation_origin_policy.py` proving
+   supported `internal_thought` allows all seven existing lanes and unsupported
+   origins deny all lanes.
+4. Implement the origin policy update.
+5. Add tests for `call_consolidation_subgraph(...)` origin selection in
+   `tests/test_consolidator_origin_selection.py`.
+6. Implement origin selection in `call_consolidation_subgraph(...)`.
+7. Add prompt-payload tests in
+   `tests/test_consolidator_source_aware_payloads.py` proving consolidator
+   prompt payloads include source identity and do not label internal-thought
+   input as user speech.
+8. Implement source-aware payload and minimal prompt wording updates.
+9. Add self-cognition runner tests for consolidation-ready state construction,
+   private finalization, injectable consolidation seam, and sanitized outcome
+   artifacts.
+10. Implement runner integration.
+11. Add worker integration tests for production consolidation calls, no local
+    file writes, unchanged action-candidate handoff, no assistant conversation
+    row, and no adapter delivery.
+12. Implement worker integration.
+13. Update self-cognition README and long-term roadmap observation.
+14. Run all `Verification` commands.
+15. Run the `Independent Code Review` gate, fix in-scope findings, rerun
+    affected verification, and record evidence.
 
 ## Progress Checklist
 
-- [ ] Stage 0 - discovery decisions resolved
-  - Covers: conversation-progress write contract, upsert key, writer module
-    location, runner entry path, duplicate suppression, confirmation no
-    existing storage exists.
-  - Verify: this draft no longer contains unresolved discovery decisions.
-  - Evidence: record accepted decisions and updated plan diff.
-  - Handoff: next agent starts at Stage 1.
-  - Sign-off: `<agent/date>`.
+- [ ] Stage 1 - origin contract complete
+  - Covers: Implementation Order steps 1-6.
+  - Verify: origin metadata, origin policy, and consolidator origin-selection
+    tests pass.
+  - Evidence: record expected red failures and green command output.
+  - Handoff: next agent starts at Stage 2.
+  - Sign-off: `<agent/date>` after evidence is recorded.
 
-- [ ] Stage 1 - executable plan finalized
-  - Covers: exact contracts, implementation steps, verification commands, and
-    acceptance criteria.
-  - Verify: independent plan review passes.
-  - Evidence: record review findings and approval status.
-  - Handoff: implementation may start only after this stage.
-  - Sign-off: `<agent/date>`.
+- [ ] Stage 2 - source-aware shared prompts complete
+  - Covers: Implementation Order steps 7-8.
+  - Verify: prompt-payload tests pass and no separate self-cognition prompt
+    family is created.
+  - Evidence: record changed prompts and focused test output.
+  - Handoff: next agent starts at Stage 3.
+  - Sign-off: `<agent/date>` after evidence is recorded.
 
-- [ ] Stage 2 - implementation complete
-  - Covers: approved implementation steps after plan finalization.
-  - Verify: focused and regression tests pass.
-  - Evidence: record command output.
-  - Handoff: next agent starts independent code review.
-  - Sign-off: `<agent/date>`.
+- [ ] Stage 3 - self-cognition runner integration complete
+  - Covers: Implementation Order steps 9-10.
+  - Verify: runner/tracking tests pass.
+  - Evidence: record private-finalization handling and sanitized artifact
+    shape.
+  - Handoff: next agent starts at Stage 4.
+  - Sign-off: `<agent/date>` after evidence is recorded.
 
-- [ ] Stage 3 - independent code review complete
-  - Verify: full diff reviewed against the approved plan and affected tests
-    rerun after any review fixes.
+- [ ] Stage 4 - worker production integration complete
+  - Covers: Implementation Order steps 11-13.
+  - Verify: worker integration, event logging, README, and roadmap checks pass.
+  - Evidence: record no-file production assertion and no delivery/history
+    assertions.
+  - Handoff: next agent starts Stage 5 verification.
+  - Sign-off: `<agent/date>` after evidence is recorded.
+
+- [ ] Stage 5 - full verification complete
+  - Covers: Implementation Order step 14.
+  - Verify: every command in `Verification` passes or has an explicitly
+    allowed no-match result.
+  - Evidence: record command output and static grep results.
+  - Handoff: next agent starts Stage 6 independent code review.
+  - Sign-off: `<agent/date>` after evidence is recorded.
+
+- [ ] Stage 6 - independent code review complete
+  - Covers: Implementation Order step 15.
+  - Verify: full diff reviewed against this plan; affected tests rerun after
+    review fixes.
   - Evidence: record reviewer mode, findings, fixes, rerun commands, residual
     risks, and approval status.
   - Handoff: plan can be marked completed only after this stage is signed off.
-  - Sign-off: `<agent/date>`.
+  - Sign-off: `<agent/date>` after evidence is recorded.
 
 ## Verification
 
-Final verification commands must be filled in after Stage 0 decisions. The
-minimum expected gates are:
+Run from repository root with the project virtual environment.
+
+### Static Compile
 
 ```powershell
-venv\Scripts\python -m pytest tests\test_consolidation_origin_metadata.py -q
-venv\Scripts\python -m pytest tests\test_consolidator_origin_policy_db_writer.py -q
-venv\Scripts\python -m pytest tests\test_self_cognition_framing.py tests\test_self_cognition_integration.py -q
-venv\Scripts\python -m pytest tests\test_self_cognition_*.py -q
+venv\Scripts\python -m py_compile src\kazusa_ai_chatbot\nodes\persona_supervisor2_consolidator_origin.py src\kazusa_ai_chatbot\nodes\persona_supervisor2_consolidator_origin_policy.py src\kazusa_ai_chatbot\nodes\persona_supervisor2_consolidator.py src\kazusa_ai_chatbot\nodes\persona_supervisor2_consolidator_reflection.py src\kazusa_ai_chatbot\nodes\persona_supervisor2_consolidator_facts.py src\kazusa_ai_chatbot\nodes\persona_supervisor2_consolidator_memory_units.py src\kazusa_ai_chatbot\self_cognition\models.py src\kazusa_ai_chatbot\self_cognition\tracking.py src\kazusa_ai_chatbot\self_cognition\runner.py src\kazusa_ai_chatbot\self_cognition\worker.py
 ```
 
-Expected after implementation:
+### Static Greps
 
-- `internal_thought` origin returns a policy where only
-  `conversation_progress` is allowed.
-- `user_message` origin policy is unchanged across all seven existing lanes.
-- The conversation-progress write upserts under the documented key and is a
-  no-op when the lane is denied.
-- Self-cognition runs persist a `self_cognition_consolidation_candidate.json`
-  artifact whose `blocked_lanes` reasons match the playground artifacts.
-- No new MongoDB collection appears without an updated plan section.
+```powershell
+rg -n "self_cognition[/\\]memory|class .*Memory|memory orchestrator" src\kazusa_ai_chatbot\self_cognition
+```
+
+Expected result: no matches. `rg` exit code `1` is acceptable.
+
+```powershell
+rg -n "record_self_cognition_progress|last_self_cognition_origin_episode_id|SelfCognitionProgressRecordInput" src\kazusa_ai_chatbot
+```
+
+Expected result: no matches. `rg` exit code `1` is acceptable.
+
+```powershell
+rg -n "conversation_progress" src\kazusa_ai_chatbot\nodes\persona_supervisor2_consolidator_origin_policy.py src\kazusa_ai_chatbot\nodes\persona_supervisor2_consolidator_persistence.py
+```
+
+Expected result: no matches. `rg` exit code `1` is acceptable. A match here
+means the implementation added a `conversation_progress` policy or persistence
+lane, which is forbidden by this plan.
+
+```powershell
+rg -n "create_collection|conversation_episode_state|self_cognition_memory|self_cognition_progress" src\kazusa_ai_chatbot\db src\kazusa_ai_chatbot\self_cognition
+```
+
+Expected result: existing collection/bootstrap references only. New collection
+creation for this feature is a blocker.
+
+```powershell
+rg -n "cooldown|rate limit|rate_limit|spam|suppress repeated|topic suppression|last_self_cognition_origin_episode_id" src\kazusa_ai_chatbot\self_cognition src\kazusa_ai_chatbot\nodes
+```
+
+Expected result: no new intentional mitigation added by this plan. Existing
+unrelated occurrences must be listed in `Execution Evidence`.
+
+```powershell
+git diff --check
+```
+
+### Focused Tests
+
+```powershell
+venv\Scripts\python -m pytest tests\test_consolidation_origin_metadata.py tests\test_consolidation_origin_policy.py -q
+venv\Scripts\python -m pytest tests\test_consolidator_origin_selection.py tests\test_consolidator_source_aware_payloads.py -q
+venv\Scripts\python -m pytest tests\test_consolidator_origin_policy_db_writer.py -q
+venv\Scripts\python -m pytest tests\test_self_cognition_tracking.py tests\test_self_cognition_integration.py tests\test_self_cognition_event_logging.py -q
+```
+
+### Adjacent Regression Tests
+
+```powershell
+venv\Scripts\python -m pytest tests\test_service_background_consolidation.py -q
+venv\Scripts\python -m pytest tests\test_self_cognition_framing.py tests\test_self_cognition_dry_run_cli.py -q
+venv\Scripts\python -m pytest tests\test_conversation_progress_recorder.py tests\test_conversation_progress_cognition.py tests\test_conversation_progress_flow.py -q
+```
+
+### Full Deterministic Regression
+
+```powershell
+venv\Scripts\python -m pytest -m "not live_db and not live_llm" -q
+```
+
+Live DB and live LLM tests are not required for this plan unless implementation
+changes DB bootstrap behavior or prompt contracts in a way that deterministic
+tests cannot cover. If that happens, update this plan before running
+additional live gates.
 
 ## Independent Plan Review
 
-Run this gate before approval or execution. Prefer a reviewer that did not
-draft the plan. If no separate reviewer is available, the active agent must
-reread the parent self-cognition architecture reference, this plan, the
-archived Stage 06 plan, and relevant source/test context from a fresh-review
-posture.
+Review performed on 2026-05-14 from a fresh-review posture after the user
+requested independent review and approval.
 
-Review scope:
+Inputs inspected:
 
-- The per-lane decision table for `internal_thought` matches the playground
-  artifacts and the documented source-lineage constraint on
-  `user_memory_units`.
-- The plan does not call the full consolidator graph or the upstream LLM
-  lanes for self-cognition.
-- The plan does not introduce a parallel memory writer.
-- The conversation-progress write contract is explicit and has an upsert key.
-- Dry-run and live-worker behavior are distinct.
-- Tests prove allowed writes, denied lanes, dry-run behavior, runner
-  threading, upsert idempotency, and the consolidation-candidate artifact
-  shape.
+- `README.md`
+- `docs/HOWTO.md`
+- `development_plans/README.md`
+- `development_plans/long_term/todo.md`
+- completed Stage 06 origin-policy plan
+- current self-cognition runner and worker
+- current consolidator origin, policy, subgraph, persistence, reflection,
+  facts, and memory-unit code
+- current brain-service post-turn helpers
+
+Findings and fixes:
+
+- Blocker resolved during this review: Implementation Order steps for
+  consolidator origin selection and source-aware prompt payloads left test-file
+  placement open. The plan now names
+  `tests/test_consolidator_origin_selection.py` and
+  `tests/test_consolidator_source_aware_payloads.py`.
+- Blocker resolved during this review: the conversation-progress static grep
+  would have matched existing source-packet and cognition-context references.
+  The verification gate now checks exact forbidden symbols and exact forbidden
+  consolidator policy/persistence files.
+- Blocker resolved: the prior approved plan denied the very autonomy lanes the
+  user wanted. This plan allows the existing seven `db_writer` lanes for
+  supported `internal_thought` origins.
+- Blocker resolved: the prior plan introduced a new conversation-progress
+  persistence path. This plan removes that side path and reuses existing
+  persistence infrastructure only.
+- Blocker resolved: the prior plan treated repeated internal rumination as a
+  loop to suppress. This plan allows repeated internal rumination and records
+  outward repetition control as long-term observation only.
+- Non-blocking risk: source-aware prompt payloads are required so internal
+  thoughts are not misread as user-authored speech while still using the same
+  prompt families.
+
+Plan self-review:
+
+- Coverage: every `Must Do` item maps to implementation steps and verification
+  gates.
+- Placeholder scan: no unresolved decisions remain.
+- Contract consistency: origin builder, policy reasons, lane list, change
+  surface, and verification commands are aligned.
+- Granularity: checklist stages split origin contract, prompt payloads,
+  runner integration, worker integration, verification, and review.
+- Verification: tests and greps cover same-path policy, no new DB, no
+  conversation-progress persistence lane, no intentional spam mitigation, and
+  sanitized event logging.
+
+Approval decision: approved for implementation.
 
 ## Independent Code Review
 
-Run this gate after all final `Verification` commands pass and before final
-sign-off. Prefer a reviewer that did not implement the change. If no separate
-reviewer is available, the active agent must reread this plan, inspect the
-full diff from a fresh-review posture, and record that no separate reviewer
-was available.
+Run this gate after all `Verification` commands pass and before final sign-off.
+Prefer a reviewer that did not implement the change. If no separate reviewer is
+available, the active agent must reread this plan, inspect the full diff from a
+fresh-review posture, and record that no separate reviewer was available.
 
 Review scope:
 
 - Project rules and style compliance for every changed Python, test, prompt,
   documentation, and command artifact.
 - Code quality and design weaknesses, including ownership boundaries, hidden
-  fallback paths, compatibility shims, prompt/context leaks, persistence
-  risk, duplicate dispatcher side effects, brittle fixtures, and avoidable
-  blast radius.
-- Alignment with the approved per-lane decision table, `Must Do`, `Deferred`,
-  `Change Surface`, verification gates, and acceptance criteria.
+  fallback paths, compatibility shims, prompt/context leaks, persistence risk,
+  accidental delivery/history writes, brittle fixtures, and avoidable blast
+  radius.
+- Alignment with the same-path design, `Must Do`, `Deferred`, `Change Surface`,
+  verification gates, and acceptance criteria.
 - Regression and handoff quality, including static-grep accuracy, execution
-  evidence, and lifecycle registry updates.
+  evidence, no new DB, no self-cognition progress side path, no intentional
+  spam mitigation, and lifecycle registry accuracy.
+
+Fix concrete findings directly only when the fix is inside the approved Change
+Surface. If a finding requires a new contract, boundary, or change surface,
+stop and update this plan or request approval before changing code.
+
+Record findings, fixes, commands rerun, residual risks, and approval status in
+`Execution Evidence`.
 
 ## Acceptance Criteria
 
-This draft is ready for approval when:
+This plan is complete when:
 
-- Stage 0 decisions are resolved and encoded as directives.
-- The per-lane decision table for `internal_thought` origin is accepted
-  as-is or replaced with documented reasons.
-- The `conversation_progress` write contract is explicit (fields, upsert
-  key, writer module).
-- The implementation order contains exact tests, expected failures, exact
-  source edits, and final verification commands.
-
-The implemented feature is complete only after the finalized acceptance
-criteria replace this draft section.
+- `build_self_cognition_consolidation_origin(...)` exists and validates only
+  internal-thought preview episodes.
+- `call_consolidation_subgraph(...)` routes supported user-message and
+  internal-thought episodes into the same subgraph and rejects unsupported
+  origins.
+- `build_consolidation_write_policy(...)` allows the same seven existing
+  writer lanes for supported `internal_thought` preview origins as for
+  supported user-message origins.
+- Existing user-message consolidation behavior remains unchanged.
+- Self-cognition production runs call the existing consolidation subgraph
+  through an injectable seam after shared cognition/private finalization.
+- Self-cognition private finalization is not saved as a conversation-history
+  assistant row and is not delivered through adapters.
+- No new MongoDB collection, migration, DB facade helper, conversation-progress
+  self-cognition writer, or memory sidecar is created.
+- No new intentional spam-prevention, cooldown, topic-suppression, or outbound
+  dedupe logic is implemented.
+- The long-term roadmap records outbound repetition governance as future
+  observation.
+- All Verification commands pass or have explicitly allowed no-match results.
+- Independent code review passes and evidence is recorded.
 
 ## Risks
 
 | Risk | Mitigation | Verification |
 |---|---|---|
-| Self-cognition is mistakenly allowed to write `user_memory_units` | Encode the per-lane denial with the playground's documented reason; assert the deny in tests | Per-origin policy tests |
-| New `conversation_progress` writer duplicates an existing storage path | Stage 0 explicitly greps for existing storage before implementation | Stage 0 sign-off |
-| Self-cognition accidentally triggers upstream LLM lanes | Enter via a focused per-lane apply function; do not call the full graph; static-grep for forbidden call sites | Runner tests and static greps |
-| Per-lane policy regresses for `user_message` origin | Keep the `user_message` branch unchanged; add the `internal_thought` branch alongside | Existing user-message policy tests must continue to pass unchanged |
-| Conversation-progress writes accumulate without bound | Upsert by `(platform, platform_channel_id, global_user_id, topic_id)`; do not append | Upsert idempotency tests |
-| Dry-run path writes to production | Gate writes behind the explicit worker parameter; record the candidate-only artifact in dry-run | Dry-run test |
-| Future plans drift back to a parallel memory writer | Acceptance criteria forbid creating `self_cognition/memory.py` or any other parallel orchestrator | Static grep in the code review gate |
+| Internal thought is mistaken for user-authored speech | Add source identity to shared prompt payloads without creating separate prompt families | Prompt-payload tests |
+| Live user-message consolidation regresses | Preserve user-message origin validation and policy reasons | Origin/policy regression tests |
+| A sidecar memory or progress writer appears | Forbid new DB collections, self-cognition memory module, and progress writer | Static greps and code review |
+| Private finalization leaks to chat history or adapters | Keep self-cognition finalization private and test no delivery/history writes | Worker integration tests |
+| Repeated internal rumination produces repeated outward messages | Not mitigated in this plan by user request; recorded as long-term observation | Roadmap check and no-spam-mitigation grep |
+| Background worker cost increases | Reuse existing LLM stages only and keep current per-tick case cap | LLM budget review and worker tests |
 
 ## Execution Evidence
 
-- Not started.
+- Independent plan review: updated by Codex on 2026-05-14 after user clarified
+  same-path self-cognition, repeated rumination, no new DB, and no intentional
+  spam mitigation in this plan.
+- Independent plan review: refreshed by Codex on 2026-05-14 after final review
+  request; test-file placement and static-grep expectations were tightened;
+  no blockers remain.
+- Approval status: approved for implementation.
+- Implementation: not started.
 
 ## Execution Handoff
 
-Execution is not started. The next agent should begin at Stage 0 by
-resolving the `conversation_progress` write contract with the owner before
-this plan is approved.
+Intended execution mode: sequential implementation in the current workspace or
+on a feature branch.
+
+Next action: reread this approved plan, load mandatory skills, check
+`git status --short`, then start at Progress Checklist Stage 1.

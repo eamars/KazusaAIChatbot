@@ -39,7 +39,7 @@ long_term/todo.md
 | Plan | Status | Execution |
 |---|---|---|
 | [rag_2_1_initializer_subagent_contract_plan.md](active/short_term/rag_2_1_initializer_subagent_contract_plan.md) | draft | Do not execute until approved |
-| [self_cognition_memory_semantics_plan.md](active/short_term/self_cognition_memory_semantics_plan.md) | draft | Do not execute until discovery decisions are resolved and approved |
+| [self_cognition_memory_semantics_plan.md](active/short_term/self_cognition_memory_semantics_plan.md) | approved | Ready for implementation |
 
 ## Active Bugfix Plans
 
