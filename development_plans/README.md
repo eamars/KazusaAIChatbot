@@ -50,6 +50,7 @@ long_term/todo.md
 
 | Document | Type |
 |---|---|
+| [cognition_core_evolution_progression.md](reference/designs/cognition_core_evolution_progression.md) | Architectural progression |
 | [rag_cache2_design.md](reference/designs/rag_cache2_design.md) | Design reference |
 | [rag_hybrid_search_architecture_decision.md](reference/designs/rag_hybrid_search_architecture_decision.md) | Design reference |
 | [self_cognition_loop_architecture.md](reference/designs/self_cognition_loop_architecture.md) | Architecture reference |
