@@ -8,7 +8,7 @@
   keeping adapter delivery and conversation-history writes out of the internal
   path.
 - Plan class: large
-- Status: approved
+- Status: completed
 - Mandatory skills: `development-plan-writing`, `local-llm-architecture`,
   `no-prepost-user-input`, `py-style`, `test-style-and-execution`,
   `cjk-safety` when editing Python files containing CJK strings
@@ -916,11 +916,12 @@ This plan is complete when:
   LLM behavior were not exercised because the approved verification contract
   required deterministic gates only.
 - Implementation: complete through Stage 6 independent code review.
+- Lifecycle closeout: completed implementation record moved from
+  `development_plans/active/short_term/` to
+  `development_plans/archive/completed/short_term/` after fresh deterministic
+  verification on 2026-05-14.
 
 ## Execution Handoff
 
-Intended execution mode: sequential implementation in the current workspace or
-on a feature branch.
-
-Next action: operator owner may review the diff, then choose whether to commit
-or archive this completed implementation record.
+This completed implementation record is historical context. New scope must use
+a new active short-term or bugfix plan.
