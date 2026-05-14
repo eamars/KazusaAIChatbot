@@ -34,6 +34,13 @@ class ConsolidationOriginMetadata(TypedDict):
     current_display_name: str
 
 
+class ConsolidationOriginPromptBlock(TypedDict):
+    episode_id: str
+    trigger_source: TriggerSource
+    input_sources: list[InputSource]
+    output_mode: OutputMode
+
+
 _SUPPORTED_USER_MESSAGE_INPUT_SOURCE_PROFILES = {
     ("dialog_text",),
     ("dialog_text", "image_observation"),
@@ -76,6 +83,80 @@ def build_user_message_consolidation_origin(
             "consolidation origin requires a chat-compatible output_mode"
         )
 
+    metadata = _project_consolidation_origin_metadata(episode)
+    return metadata
+
+
+def build_self_cognition_consolidation_origin(
+    *,
+    episode: CognitiveEpisode,
+) -> ConsolidationOriginMetadata:
+    """Project internal-thought episode identifiers into consolidation state.
+
+    Args:
+        episode: Source-neutral cognitive episode for a self-cognition run.
+
+    Returns:
+        Identifier-only origin metadata for consolidation nodes.
+
+    Raises:
+        CognitiveEpisodeValidationError: If the episode is structurally
+            invalid.
+        ConsolidationOriginError: If the episode is not supported by current
+            self-cognition consolidation.
+    """
+    validate_cognitive_episode(episode)
+
+    if episode["trigger_source"] != "internal_thought":
+        raise ConsolidationOriginError(
+            "consolidation origin requires trigger_source=internal_thought"
+        )
+    input_source_profile = tuple(episode["input_sources"])
+    if input_source_profile != ("internal_monologue",):
+        raise ConsolidationOriginError(
+            "consolidation origin requires input_sources=internal_monologue"
+        )
+    if episode["output_mode"] != "preview":
+        raise ConsolidationOriginError(
+            "consolidation origin requires output_mode=preview"
+        )
+
+    metadata = _project_consolidation_origin_metadata(episode)
+    return metadata
+
+
+def project_consolidation_origin_prompt_block(
+    origin: ConsolidationOriginMetadata,
+) -> ConsolidationOriginPromptBlock:
+    """Project origin metadata into model-facing source identity.
+
+    Args:
+        origin: Identifier-only consolidation origin metadata.
+
+    Returns:
+        Compact origin fields needed by shared consolidator prompts.
+    """
+    block: ConsolidationOriginPromptBlock = {
+        "episode_id": origin["episode_id"],
+        "trigger_source": origin["trigger_source"],
+        "input_sources": list(origin["input_sources"]),
+        "output_mode": origin["output_mode"],
+    }
+    return block
+
+
+def _project_consolidation_origin_metadata(
+    episode: CognitiveEpisode,
+) -> ConsolidationOriginMetadata:
+    """Project shared identifier fields from a validated cognitive episode.
+
+    Args:
+        episode: Valid cognitive episode accepted by a consolidation origin
+            builder.
+
+    Returns:
+        Identifier-only origin metadata without percept or prompt content.
+    """
     target_scope = episode["target_scope"]
     origin_metadata = episode["origin_metadata"]
     metadata: ConsolidationOriginMetadata = {

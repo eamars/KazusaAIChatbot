@@ -16,6 +16,7 @@ from kazusa_ai_chatbot.nodes import (
 )
 from kazusa_ai_chatbot.nodes.persona_supervisor2_consolidator_origin import (
     ConsolidationOriginError,
+    build_self_cognition_consolidation_origin,
     build_user_message_consolidation_origin,
 )
 from kazusa_ai_chatbot.time_context import build_character_time_context
@@ -53,6 +54,55 @@ def _text_chat_episode(
         target_addressed_user_ids=["character-user-1"],
         target_broadcast=False,
     )
+    return episode
+
+
+def _self_cognition_episode(
+    output_mode: OutputMode = "preview",
+) -> CognitiveEpisode:
+    """Build a valid internal-thought episode for origin tests.
+
+    Args:
+        output_mode: Output mode to store on the episode.
+
+    Returns:
+        Valid self-cognition cognitive episode.
+    """
+    timestamp = "2026-05-10T21:00:00+12:00"
+    episode: CognitiveEpisode = {
+        "episode_id": "self-cognition-episode-1",
+        "trigger_source": "internal_thought",
+        "input_sources": ["internal_monologue"],
+        "output_mode": output_mode,
+        "percepts": [
+            {
+                "percept_id": "self-cognition-percept-1",
+                "input_source": "internal_monologue",
+                "content": "The missed promise still feels unresolved.",
+                "visibility": "model_visible",
+                "metadata": {"source": "self_cognition_source_packet"},
+            }
+        ],
+        "target_scope": {
+            "platform": "qq",
+            "platform_channel_id": "channel-1",
+            "channel_type": "private",
+            "current_platform_user_id": "platform-user-1",
+            "current_global_user_id": "global-user-1",
+            "current_display_name": "Test User",
+            "target_addressed_user_ids": ["global-user-1"],
+            "target_broadcast": False,
+        },
+        "origin_metadata": {
+            "platform": "qq",
+            "platform_message_id": "self_cognition:case-1",
+            "active_turn_platform_message_ids": [],
+            "active_turn_conversation_row_ids": [],
+            "debug_modes": {"no_visual_directives": True},
+        },
+        "timestamp": timestamp,
+        "time_context": build_character_time_context(timestamp),
+    }
     return episode
 
 
@@ -201,6 +251,100 @@ def test_origin_rejects_unsupported_output_mode() -> None:
 
     with pytest.raises(ConsolidationOriginError):
         build_user_message_consolidation_origin(episode=episode)
+
+
+def test_build_self_cognition_consolidation_origin_returns_exact_metadata() -> None:
+    episode = _self_cognition_episode()
+
+    metadata = build_self_cognition_consolidation_origin(episode=episode)
+
+    expected_metadata = {
+        "episode_id": "self-cognition-episode-1",
+        "trigger_source": "internal_thought",
+        "input_sources": ["internal_monologue"],
+        "output_mode": "preview",
+        "timestamp": "2026-05-10T21:00:00+12:00",
+        "platform": "qq",
+        "platform_channel_id": "channel-1",
+        "channel_type": "private",
+        "platform_message_id": "self_cognition:case-1",
+        "active_turn_platform_message_ids": [],
+        "active_turn_conversation_row_ids": [],
+        "current_platform_user_id": "platform-user-1",
+        "current_global_user_id": "global-user-1",
+        "current_display_name": "Test User",
+    }
+    assert metadata == expected_metadata
+
+
+def test_self_cognition_origin_metadata_copies_list_fields() -> None:
+    episode = _self_cognition_episode()
+
+    metadata = build_self_cognition_consolidation_origin(episode=episode)
+    episode["input_sources"].append("retrieved_memory")
+    episode["origin_metadata"]["active_turn_platform_message_ids"].append(
+        "message-1"
+    )
+    episode["origin_metadata"]["active_turn_conversation_row_ids"].append(
+        "conversation-row-1"
+    )
+
+    assert metadata["input_sources"] == ["internal_monologue"]
+    assert metadata["active_turn_platform_message_ids"] == []
+    assert metadata["active_turn_conversation_row_ids"] == []
+
+
+def test_self_cognition_origin_excludes_content_and_prompt_fields() -> None:
+    episode = _self_cognition_episode()
+
+    metadata = build_self_cognition_consolidation_origin(episode=episode)
+
+    forbidden_keys = {
+        "percepts",
+        "content",
+        "user_input",
+        "decontexualized_input",
+        "prompt_payload",
+        "attachments",
+        "rag_result",
+        "facts",
+        "promises",
+        "debug_modes",
+    }
+    assert forbidden_keys.isdisjoint(set(metadata))
+    assert "The missed promise still feels unresolved." not in str(metadata)
+
+
+def test_self_cognition_origin_rejects_non_internal_thought_trigger() -> None:
+    episode = deepcopy(_self_cognition_episode())
+    episode["trigger_source"] = "reflection_signal"
+
+    with pytest.raises(ConsolidationOriginError):
+        build_self_cognition_consolidation_origin(episode=episode)
+
+
+def test_self_cognition_origin_rejects_non_internal_monologue_sources() -> None:
+    episode = deepcopy(_self_cognition_episode())
+    episode["input_sources"] = ["internal_monologue", "retrieved_memory"]
+    episode["percepts"].append(
+        {
+            "percept_id": "self-cognition-percept-2",
+            "input_source": "retrieved_memory",
+            "content": "retrieved memory",
+            "visibility": "model_visible",
+            "metadata": {},
+        }
+    )
+
+    with pytest.raises(ConsolidationOriginError):
+        build_self_cognition_consolidation_origin(episode=episode)
+
+
+def test_self_cognition_origin_rejects_non_preview_output_mode() -> None:
+    episode = _self_cognition_episode(output_mode="think_only")
+
+    with pytest.raises(ConsolidationOriginError):
+        build_self_cognition_consolidation_origin(episode=episode)
 
 
 @pytest.mark.asyncio

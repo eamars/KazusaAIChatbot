@@ -10,6 +10,8 @@ from unittest.mock import AsyncMock
 
 import pytest
 
+from kazusa_ai_chatbot import event_logging
+import kazusa_ai_chatbot.event_logging.recording as recording_module
 from kazusa_ai_chatbot.self_cognition import models, runner, worker
 
 
@@ -131,6 +133,14 @@ def _case_runner_with_tracking(
         models.ARTIFACT_RUN_RECORD: run_record,
         models.ARTIFACT_ACTION_ATTEMPT: action_attempt,
         models.ARTIFACT_ACTION_CANDIDATE: action_candidate,
+        models.ARTIFACT_CONSOLIDATION_OUTCOME: {
+            "consolidation_called": True,
+            "write_success": {"character_state": True},
+            "scheduled_event_count": 0,
+            "cache_evicted_count": 1,
+            "origin_trigger_source": "internal_thought",
+            "origin_episode_id": "self_cognition:dry_run:promise-001",
+        },
     }
     return payloads
 
@@ -235,6 +245,14 @@ async def test_worker_mirrors_production_run_and_dispatch_without_text(
     assert self_kwargs["component"] == "self_cognition.worker"
     assert self_kwargs["dispatch_status"] == "accepted"
     assert self_kwargs["attempt_id"] == "self_cognition_attempt:promise-001"
+    assert self_kwargs["consolidation_outcome"] == {
+        "consolidation_called": True,
+        "write_success": {"character_state": True},
+        "scheduled_event_count": 0,
+        "cache_evicted_count": 1,
+        "origin_trigger_source": "internal_thought",
+        "origin_episode_id": "self_cognition:dry_run:promise-001",
+    }
     record_dispatcher_event.assert_awaited_once()
     dispatch_kwargs = record_dispatcher_event.await_args.kwargs
     assert dispatch_kwargs["scheduled_event_ids"] == ["event-001"]
@@ -246,3 +264,63 @@ async def test_worker_mirrors_production_run_and_dispatch_without_text(
     record_worker_event.assert_awaited_once()
     record_attempt.assert_awaited_once()
     assert list(tmp_path.iterdir()) == []
+
+
+@pytest.mark.asyncio
+async def test_self_cognition_event_logger_sanitizes_consolidation_outcome(
+    monkeypatch,
+) -> None:
+    """Consolidation event metadata should keep only approved outcome fields."""
+
+    captured: dict[str, object] = {}
+
+    async def write_event(document):
+        captured.update(document)
+        event_id = str(document["event_id"])
+        return event_id
+
+    monkeypatch.setattr(recording_module.repository, "write_event", write_event)
+
+    result = await event_logging.record_self_cognition_event(
+        component="self_cognition.worker",
+        case_id="case-1",
+        trigger_kind="active_commitment",
+        selected_route=models.ROUTE_AUDIT_ONLY,
+        output_mode="silent",
+        budget={
+            "rag_calls": 0,
+            "cognition_calls": 1,
+            "dialog_calls": 1,
+            "topic_limit": 1,
+        },
+        dispatch_status="not_requested",
+        status="completed",
+        consolidation_outcome={
+            "consolidation_called": True,
+            "write_success": {
+                "character_state": True,
+                "raw_output": "Private finalization for consolidation only.",
+            },
+            "scheduled_event_count": 0,
+            "cache_evicted_count": 1,
+            "origin_trigger_source": "internal_thought",
+            "origin_episode_id": "self_cognition:dry_run:promise-001",
+            "private_finalization": "Private finalization for consolidation only.",
+            "source_packet_text": "Please check back after the appointment.",
+        },
+    )
+
+    assert result["status"] == "recorded"
+    payload = captured["payload"]
+    assert isinstance(payload, dict)
+    assert payload["consolidation_outcome"] == {
+        "consolidation_called": True,
+        "write_success": {"character_state": True},
+        "scheduled_event_count": 0,
+        "cache_evicted_count": 1,
+        "origin_trigger_source": "internal_thought",
+        "origin_episode_id": "self_cognition:dry_run:promise-001",
+    }
+    serialized = json.dumps(captured, ensure_ascii=False, sort_keys=True)
+    assert "Private finalization" not in serialized
+    assert "Please check back" not in serialized

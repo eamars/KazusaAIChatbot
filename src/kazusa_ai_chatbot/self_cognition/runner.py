@@ -14,6 +14,9 @@ from kazusa_ai_chatbot.cognition_episode import (
     validate_cognitive_episode,
 )
 from kazusa_ai_chatbot.nodes.dialog_agent import dialog_agent
+from kazusa_ai_chatbot.nodes.persona_supervisor2_consolidator import (
+    call_consolidation_subgraph,
+)
 from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition import (
     call_cognition_subgraph,
 )
@@ -30,6 +33,7 @@ from kazusa_ai_chatbot.time_context import build_character_time_context
 
 SelfCognitionClient = Callable[[dict[str, Any]], Any]
 RagClient = Callable[..., Any]
+ConsolidationBuildResult = tuple[dict[str, Any], dict[str, Any], bool]
 
 
 def run_self_cognition_case(
@@ -37,7 +41,10 @@ def run_self_cognition_case(
     output_dir: str | Path,
     rag_client: RagClient | None = None,
     cognition_client: SelfCognitionClient | None = None,
+    dialog_client: SelfCognitionClient | None = None,
+    consolidation_client: SelfCognitionClient | None = None,
     *,
+    apply_consolidation: bool = False,
     event_log_mirror: bool = False,
 ) -> dict[str, str]:
     """Run one dry-run case and write local tracking artifacts.
@@ -47,6 +54,10 @@ def run_self_cognition_case(
         output_dir: Local output directory for artifacts.
         rag_client: Optional test seam for the RAG2 supervisor.
         cognition_client: Optional test seam for the shared cognition graph.
+        dialog_client: Optional test seam for private finalization.
+        consolidation_client: Optional test seam for the shared consolidator.
+        apply_consolidation: When true, build private finalization and call the
+            shared consolidation seam.
         event_log_mirror: When true, mirror sanitized artifact metadata through
             the public event-logging interface.
 
@@ -60,6 +71,9 @@ def run_self_cognition_case(
             output_dir,
             rag_client=rag_client,
             cognition_client=cognition_client,
+            dialog_client=dialog_client,
+            consolidation_client=consolidation_client,
+            apply_consolidation=apply_consolidation,
             event_log_mirror=event_log_mirror,
         )
     )
@@ -70,6 +84,10 @@ def build_self_cognition_case_artifacts(
     case: models.SelfCognitionCase,
     rag_client: RagClient | None = None,
     cognition_client: SelfCognitionClient | None = None,
+    dialog_client: SelfCognitionClient | None = None,
+    consolidation_client: SelfCognitionClient | None = None,
+    *,
+    apply_consolidation: bool = False,
 ) -> dict[str, Any]:
     """Build one self-cognition case's tracking records in memory.
 
@@ -77,6 +95,10 @@ def build_self_cognition_case_artifacts(
         case: External self-cognition case data.
         rag_client: Optional test seam for the RAG2 supervisor.
         cognition_client: Optional test seam for the shared cognition graph.
+        dialog_client: Optional test seam for private finalization.
+        consolidation_client: Optional test seam for the shared consolidator.
+        apply_consolidation: When true, build private finalization and call the
+            shared consolidation seam.
 
     Returns:
         Artifact names mapped to JSON-like payloads or Markdown text.
@@ -87,6 +109,9 @@ def build_self_cognition_case_artifacts(
             case,
             rag_client=rag_client,
             cognition_client=cognition_client,
+            dialog_client=dialog_client,
+            consolidation_client=consolidation_client,
+            apply_consolidation=apply_consolidation,
         )
     )
     return artifact_payloads
@@ -97,7 +122,10 @@ async def run_self_cognition_case_async(
     output_dir: str | Path,
     rag_client: RagClient | None = None,
     cognition_client: SelfCognitionClient | None = None,
+    dialog_client: SelfCognitionClient | None = None,
+    consolidation_client: SelfCognitionClient | None = None,
     *,
+    apply_consolidation: bool = False,
     event_log_mirror: bool = False,
 ) -> dict[str, str]:
     """Async implementation for one self-cognition dry-run case.
@@ -107,6 +135,10 @@ async def run_self_cognition_case_async(
         output_dir: Local output directory for artifacts.
         rag_client: Optional test seam for the RAG2 supervisor.
         cognition_client: Optional test seam for the shared cognition graph.
+        dialog_client: Optional test seam for private finalization.
+        consolidation_client: Optional test seam for the shared consolidator.
+        apply_consolidation: When true, build private finalization and call the
+            shared consolidation seam.
         event_log_mirror: When true, mirror sanitized artifact metadata through
             the public event-logging interface.
 
@@ -118,6 +150,9 @@ async def run_self_cognition_case_async(
         case,
         rag_client=rag_client,
         cognition_client=cognition_client,
+        dialog_client=dialog_client,
+        consolidation_client=consolidation_client,
+        apply_consolidation=apply_consolidation,
     )
     written_paths = artifacts.write_tracking_artifacts(
         output_dir,
@@ -137,6 +172,10 @@ async def build_self_cognition_case_artifacts_async(
     case: models.SelfCognitionCase,
     rag_client: RagClient | None = None,
     cognition_client: SelfCognitionClient | None = None,
+    dialog_client: SelfCognitionClient | None = None,
+    consolidation_client: SelfCognitionClient | None = None,
+    *,
+    apply_consolidation: bool = False,
 ) -> dict[str, Any]:
     """Async implementation for building self-cognition records in memory.
 
@@ -144,6 +183,10 @@ async def build_self_cognition_case_artifacts_async(
         case: External self-cognition case data.
         rag_client: Optional test seam for the RAG2 supervisor.
         cognition_client: Optional test seam for the shared cognition graph.
+        dialog_client: Optional test seam for private finalization.
+        consolidation_client: Optional test seam for the shared consolidator.
+        apply_consolidation: When true, build private finalization and call the
+            shared consolidation seam.
 
     Returns:
         Artifact names mapped to JSON-like payloads or Markdown text.
@@ -209,7 +252,9 @@ async def build_self_cognition_case_artifacts_async(
     selected_route = tracking.classify_route(case, cognition_output)
     action_attempt = None
     action_candidate = None
+    dialog_output: dict[str, Any] | None = None
     dialog_calls = 0
+    active_dialog_client = dialog_client or _default_dialog_client
     if selected_route == models.ROUTE_ACTION_CANDIDATE:
         action_attempt = tracking.build_action_attempt(
             case,
@@ -229,7 +274,7 @@ async def build_self_cognition_case_artifacts_async(
                     cognition_output,
                 )
                 dialog_output = await _call_maybe_async(
-                    _default_dialog_client,
+                    active_dialog_client,
                     dialog_state,
                 )
                 dialog_calls = models.DIALOG_RENDER_CALL_LIMIT
@@ -244,6 +289,32 @@ async def build_self_cognition_case_artifacts_async(
             artifact_payloads[models.ARTIFACT_ACTION_CANDIDATE] = (
                 action_candidate
             )
+
+    if apply_consolidation:
+        consolidation_state, dialog_output, dialog_called = (
+            await _build_consolidation_ready_state(
+                cognition_state,
+                cognition_output,
+                rendered_packet,
+                dialog_client=active_dialog_client,
+                dialog_output=dialog_output,
+            )
+        )
+        if dialog_called:
+            dialog_calls += models.DIALOG_RENDER_CALL_LIMIT
+        active_consolidation_client = (
+            consolidation_client or _default_consolidation_client
+        )
+        consolidation_result = await _call_maybe_async(
+            active_consolidation_client,
+            consolidation_state,
+        )
+        artifact_payloads[models.ARTIFACT_CONSOLIDATION_OUTCOME] = (
+            tracking.build_consolidation_outcome_record(
+                consolidation_state,
+                consolidation_result,
+            )
+        )
 
     budget = _budget(
         rag_calls=rag_calls,
@@ -285,6 +356,11 @@ async def _record_self_cognition_event_from_artifacts(
         return
     if not isinstance(action_attempt, dict):
         action_attempt = {}
+    consolidation_outcome = artifact_payloads.get(
+        models.ARTIFACT_CONSOLIDATION_OUTCOME
+    )
+    if not isinstance(consolidation_outcome, dict):
+        consolidation_outcome = None
     budget = run_record["budget"]
     await event_logging.record_self_cognition_event(
         component=component,
@@ -303,6 +379,7 @@ async def _record_self_cognition_event_from_artifacts(
         trigger_id=str(trigger_record["trigger_id"]),
         run_id=str(run_record["run_id"]),
         attempt_id=str(action_attempt.get("attempt_id") or ""),
+        consolidation_outcome=consolidation_outcome,
     )
 
 
@@ -359,6 +436,21 @@ async def _default_dialog_client(state: dict[str, Any]) -> dict[str, Any]:
     return dialog_result
 
 
+async def _default_consolidation_client(state: dict[str, Any]) -> dict[str, Any]:
+    """Call the existing post-dialog consolidator subgraph.
+
+    Args:
+        state: Self-cognition state after shared cognition and private
+            finalization.
+
+    Returns:
+        Shared consolidator result with write metadata.
+    """
+
+    consolidation_result = await call_consolidation_subgraph(state)
+    return consolidation_result
+
+
 async def _call_maybe_async(
     callable_object: Callable[..., Any],
     *args: Any,
@@ -370,6 +462,66 @@ async def _call_maybe_async(
     if inspect.isawaitable(result):
         result = await result
     return result
+
+
+async def _build_consolidation_ready_state(
+    cognition_state: dict[str, Any],
+    cognition_output: dict[str, Any],
+    rendered_packet: str,
+    *,
+    dialog_client: SelfCognitionClient,
+    dialog_output: dict[str, Any] | None,
+) -> ConsolidationBuildResult:
+    """Build private-finalization state for same-path consolidation.
+
+    Args:
+        cognition_state: State originally sent into shared cognition.
+        cognition_output: Shared cognition graph output.
+        rendered_packet: Internal-thought evidence text used as the
+            decontextualized consolidation input.
+        dialog_client: Existing dialog/finalization seam.
+        dialog_output: Previously rendered dialog output, if the action route
+            already needed it.
+
+    Returns:
+        Consolidation-ready state, dialog output, and whether a new dialog call
+        was needed.
+    """
+
+    dialog_called = False
+    active_dialog_output = dialog_output
+    if active_dialog_output is None:
+        dialog_state = _build_dialog_state(cognition_state, cognition_output)
+        active_dialog_output = await _call_maybe_async(
+            dialog_client,
+            dialog_state,
+        )
+        dialog_called = True
+
+    consolidation_state = _build_consolidation_state(
+        cognition_state,
+        cognition_output,
+        active_dialog_output,
+        rendered_packet,
+    )
+    return_value = (consolidation_state, active_dialog_output, dialog_called)
+    return return_value
+
+
+def _build_consolidation_state(
+    cognition_state: dict[str, Any],
+    cognition_output: dict[str, Any],
+    dialog_output: dict[str, Any],
+    rendered_packet: str,
+) -> dict[str, Any]:
+    """Merge cognition and private finalization for the consolidator."""
+
+    consolidation_state = dict(cognition_state)
+    consolidation_state.update(cognition_output)
+    consolidation_state.update(dialog_output)
+    consolidation_state["decontexualized_input"] = rendered_packet
+    consolidation_state["final_dialog"] = _dialog_fragments(dialog_output)
+    return consolidation_state
 
 
 def _build_cognition_state(
@@ -456,17 +608,25 @@ def _build_dialog_state(
 def _dialog_text(dialog_output: dict[str, Any]) -> str:
     """Extract dry-run candidate text from dialog graph output."""
 
+    fragments = _dialog_fragments(dialog_output)
+    text = "\n".join(fragments)
+    return text
+
+
+def _dialog_fragments(dialog_output: dict[str, Any]) -> list[str]:
+    """Extract normalized final-dialog fragments from dialog output."""
+
     value = dialog_output.get("final_dialog")
     if not isinstance(value, list):
-        return_value = ""
+        return_value: list[str] = []
         return return_value
     fragments = [
         item.strip()
         for item in value
         if isinstance(item, str) and item.strip()
     ]
-    text = "\n".join(fragments)
-    return text
+    return_value = fragments
+    return return_value
 
 
 def _build_cognitive_episode(

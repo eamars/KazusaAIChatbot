@@ -34,6 +34,8 @@ from kazusa_ai_chatbot.nodes.persona_supervisor2_consolidator_reflection import 
     relationship_recorder,
 )
 from kazusa_ai_chatbot.nodes.persona_supervisor2_consolidator_origin import (
+    ConsolidationOriginError,
+    build_self_cognition_consolidation_origin,
     build_user_message_consolidation_origin,
 )
 from kazusa_ai_chatbot.nodes.persona_supervisor2_consolidator_schema import (
@@ -54,6 +56,34 @@ logger = logging.getLogger(__name__)
 async def _consolidator_noop(_: ConsolidatorState) -> dict:
     return_value = {}
     return return_value
+
+
+def _build_consolidation_origin(
+    global_state: GlobalPersonaState,
+):
+    """Build origin metadata for supported consolidation trigger sources.
+
+    Args:
+        global_state: Top-level persona-supervisor state.
+
+    Returns:
+        Identifier-only consolidation origin metadata.
+
+    Raises:
+        ConsolidationOriginError: If the cognitive episode trigger source is
+            not supported by the consolidation graph.
+    """
+    episode = global_state["cognitive_episode"]
+    trigger_source = episode["trigger_source"]
+    if trigger_source == "user_message":
+        origin = build_user_message_consolidation_origin(episode=episode)
+    elif trigger_source == "internal_thought":
+        origin = build_self_cognition_consolidation_origin(episode=episode)
+    else:
+        raise ConsolidationOriginError(
+            f"consolidation origin does not support trigger_source={trigger_source}"
+        )
+    return origin
 
 
 def _record_existing_dedup_key(row: object, dedup_keys: set[str]) -> None:
@@ -94,9 +124,7 @@ def _build_existing_dedup_keys(global_state: GlobalPersonaState) -> set[str]:
 
 
 async def call_consolidation_subgraph(global_state: GlobalPersonaState):
-    consolidation_origin = build_user_message_consolidation_origin(
-        episode=global_state["cognitive_episode"],
-    )
+    consolidation_origin = _build_consolidation_origin(global_state)
     sub_agent_builder = StateGraph(ConsolidatorState)
     reflection_barrier = "reflection_done"
     facts_barrier = "facts_done"

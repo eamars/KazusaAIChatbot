@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Callable
 import json
 from pathlib import Path
@@ -35,6 +36,8 @@ FIXTURE_PATH = (
     / "fixtures"
     / "multi_source_cognition_stage_00_cases.json"
 )
+BACKGROUND_HANDOFF_WAIT_POLLS = 100
+BACKGROUND_HANDOFF_WAIT_SECONDS = 0.01
 
 
 class _DummyResponse:
@@ -585,6 +588,17 @@ def _patch_service_dependencies(
     progress_recorder = AsyncMock()
     consolidation_runner = AsyncMock()
     save_conversation = AsyncMock()
+    for event_function_name in (
+        "record_database_operation_event",
+        "record_pipeline_turn_event",
+        "record_queue_intake_event",
+        "record_runtime_error_event",
+    ):
+        monkeypatch.setattr(
+            service_module.event_logging,
+            event_function_name,
+            AsyncMock(),
+        )
     monkeypatch.setattr(
         service_module,
         "COGNITION_VISUAL_DIRECTIVES_ENABLED",
@@ -665,6 +679,21 @@ def _patch_service_dependencies(
         "save_conversation": save_conversation,
     }
     return mocks
+
+
+async def _wait_for_mock_await(
+    mock: AsyncMock,
+    *,
+    await_count: int = 1,
+) -> None:
+    """Wait until post-response queue work reaches a patched async seam."""
+
+    for _ in range(BACKGROUND_HANDOFF_WAIT_POLLS):
+        if mock.await_count >= await_count:
+            return
+        await asyncio.sleep(BACKGROUND_HANDOFF_WAIT_SECONDS)
+
+    assert mock.await_count >= await_count
 
 
 def test_stage_00_fixture_covers_required_cases() -> None:
@@ -934,6 +963,7 @@ async def test_service_normal_response_tracks_delivery_and_handoff(
         graph.states[0],
         output_mode="visible_reply",
     )
+    await _wait_for_mock_await(mocks["consolidation_runner"])
     mocks["save_assistant_message"].assert_awaited_once()
     saved_result = mocks["save_assistant_message"].await_args.args[0]
     assert saved_result["delivery_tracking_id"] == response.delivery_tracking_id
@@ -995,6 +1025,7 @@ async def test_service_think_only_suppresses_visible_delivery(
         graph.states[0],
         output_mode="think_only",
     )
+    await _wait_for_mock_await(mocks["consolidation_runner"])
     mocks["save_assistant_message"].assert_awaited_once()
     mocks["progress_recorder"].assert_awaited_once()
     mocks["consolidation_runner"].assert_awaited_once()
@@ -1025,6 +1056,7 @@ async def test_service_no_remember_skips_consolidation(
         graph.states[0],
         output_mode="visible_reply",
     )
+    await _wait_for_mock_await(mocks["progress_recorder"])
     mocks["save_assistant_message"].assert_awaited_once()
     mocks["progress_recorder"].assert_awaited_once()
     mocks["consolidation_runner"].assert_not_awaited()

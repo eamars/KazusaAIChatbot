@@ -53,6 +53,22 @@ def _state() -> dict:
         "user_name": "提拉米苏",
         "timestamp": "2026-04-27T00:00:00+12:00",
         "time_context": build_character_time_context("2026-04-27T00:00:00+12:00"),
+        "consolidation_origin": {
+            "episode_id": "episode-1",
+            "trigger_source": "user_message",
+            "input_sources": ["dialog_text"],
+            "output_mode": "visible_reply",
+            "timestamp": "2026-04-27T00:00:00+12:00",
+            "platform": "debug",
+            "platform_channel_id": "channel-1",
+            "channel_type": "private",
+            "platform_message_id": "message-1",
+            "active_turn_platform_message_ids": ["message-1"],
+            "active_turn_conversation_row_ids": ["row-1"],
+            "current_platform_user_id": "platform-user-1",
+            "current_global_user_id": "global-user-1",
+            "current_display_name": "提拉米苏",
+        },
         "decontexualized_input": "记住我喜欢红茶。",
         "rag_result": {
             "user_image": {

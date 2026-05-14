@@ -23,6 +23,9 @@ from kazusa_ai_chatbot.memory_writer_prompt_projection import (
     project_memory_unit_extractor_prompt_payload,
     project_memory_unit_rewrite_prompt_payload,
 )
+from kazusa_ai_chatbot.nodes.persona_supervisor2_consolidator_origin import (
+    project_consolidation_origin_prompt_block,
+)
 from kazusa_ai_chatbot.nodes.persona_supervisor2_consolidator_schema import ConsolidatorState
 from kazusa_ai_chatbot.rag.prompt_projection import project_tool_result_for_llm
 from kazusa_ai_chatbot.rag.user_memory_unit_retrieval import retrieve_memory_unit_merge_candidates
@@ -61,6 +64,9 @@ def _json_payload(state: ConsolidatorState) -> dict:
         "timestamp": local_datetime,
         "global_user_id": state["global_user_id"],
         "user_name": state["user_name"],
+        "consolidation_origin": project_consolidation_origin_prompt_block(
+            state["consolidation_origin"]
+        ),
         "decontextualized_input": state["decontexualized_input"],
         "final_dialog": state["final_dialog"],
         "internal_monologue": state["internal_monologue"],
@@ -486,11 +492,14 @@ _EXTRACTOR_PROMPT = '''\
 
 # 证据读取与身份
 1. 先读 `timestamp`，它是本轮 consolidation 的本地时间。
-2. 再读 `chat_history_recent`。用 `speaker_name` 判断每条消息是谁说的；消息里的“我”必须按原说话人理解。
-3. 读 `decontextualized_input`、`final_dialog`、`logical_stance`、`character_intent`，确认本轮发生了什么，以及 `{character_name}` 是否真的接受了某个后续行为。
-4. `new_facts_evidence` 和 `future_promises_evidence` 是上游证据提示，不是必须照抄的输出。
-5. `internal_monologue`、`emotional_appraisal`、`interaction_subtext`、`subjective_appraisal_evidence` 只用于理解 `{character_name}` 如何看待已确认事实，不可单独当作用户事实。
-6. 对照 `rag_user_memory_context`。只有本轮带来新事实、更清楚的细节或新的未来互动含义时，才生成 memory_unit。
+2. 读 `consolidation_origin.trigger_source`。`user_message` 表示本轮由用户消息触发；`internal_thought` 表示本轮由 `{character_name}` 的内部思考触发。
+3. 再读 `chat_history_recent`。用 `speaker_name` 判断每条消息是谁说的；消息里的“我”必须按原说话人理解。
+4. 读 `decontextualized_input`、`final_dialog`、`logical_stance`、`character_intent`，确认本轮发生了什么，以及 `{character_name}` 是否真的接受了某个后续行为。
+5. 当 trigger_source 是 `user_message` 时，`decontextualized_input` 是用户本轮表达；当 trigger_source 是 `internal_thought` 时，它是内部触发文本，不是用户原话。
+6. `final_dialog` 在 `user_message` 中是可见回复，在 `internal_thought` 中是私有 finalization。
+7. `new_facts_evidence` 和 `future_promises_evidence` 是上游证据提示，不是必须照抄的输出。
+8. `internal_monologue`、`emotional_appraisal`、`interaction_subtext`、`subjective_appraisal_evidence` 只用于理解 `{character_name}` 如何看待已确认事实，不可单独当作用户事实。
+9. 对照 `rag_user_memory_context`。只有本轮带来新事实、更清楚的细节或新的未来互动含义时，才生成 memory_unit。
 
 # 候选记忆准入
 - 只保存具体事件、决定、偏好、承诺、可复用行为模式或重要转折。
@@ -553,8 +562,14 @@ human payload 是以下 JSON：
     "timestamp": "本轮 consolidation 的本地时间，YYYY-MM-DD HH:MM",
     "global_user_id": "稳定用户 UUID",
     "user_name": "当前用户显示名",
-    "decontextualized_input": "用户本轮消息经去上下文化后的内容",
-    "final_dialog": ["{character_name} 本轮最终回复片段"],
+    "consolidation_origin": {{
+        "episode_id": "string",
+        "trigger_source": "user_message | internal_thought",
+        "input_sources": ["..."],
+        "output_mode": "string"
+    }},
+    "decontextualized_input": "用户本轮消息或内部思考触发文本经去上下文化后的内容",
+    "final_dialog": ["{character_name} 本轮最终回复片段或私有 finalization"],
     "internal_monologue": "{character_name} 的认知阶段内部独白",
     "emotional_appraisal": "{character_name} 的主观情绪评估",
     "interaction_subtext": "{character_name} 读到的互动潜台词",

@@ -639,6 +639,7 @@ async def record_self_cognition_event(
     trigger_id: str = "",
     run_id: str = "",
     attempt_id: str = "",
+    consolidation_outcome: Mapping[str, object] | None = None,
     severity: EventSeverity = "info",
     occurred_at: datetime | None = None,
 ) -> EventLogWriteResult:
@@ -658,6 +659,13 @@ async def record_self_cognition_event(
         "budget": budget_payload,
         "dispatch_status": sanitize_short_text(dispatch_status, limit=100),
     }
+    sanitized_consolidation_outcome = (
+        _sanitize_self_cognition_consolidation_outcome(
+            consolidation_outcome,
+        )
+    )
+    if sanitized_consolidation_outcome:
+        payload["consolidation_outcome"] = sanitized_consolidation_outcome
     result = await _record_event(
         event_family="self_cognition",
         event_type=trigger_kind,
@@ -671,6 +679,70 @@ async def record_self_cognition_event(
         occurred_at=occurred_at,
     )
     return result
+
+
+def _sanitize_self_cognition_consolidation_outcome(
+    consolidation_outcome: Mapping[str, object] | None,
+) -> dict[str, object]:
+    """Project consolidation metadata into the approved event-log shape.
+
+    Args:
+        consolidation_outcome: Sanitized runner artifact metadata, if the case
+            applied same-path consolidation.
+
+    Returns:
+        Event-log payload subset without source text, private finalization,
+        generated candidate text, or raw database documents.
+    """
+
+    if consolidation_outcome is None:
+        empty_outcome: dict[str, object] = {}
+        return empty_outcome
+
+    raw_write_success = consolidation_outcome.get("write_success")
+    write_success: dict[str, bool] = {}
+    if isinstance(raw_write_success, Mapping):
+        for raw_key, raw_value in raw_write_success.items():
+            key = sanitize_short_text(raw_key, limit=80)
+            if not key or unsafe_field_paths({key: ""}):
+                continue
+            write_success[key] = bool(raw_value)
+
+    raw_scheduled_event_count = consolidation_outcome.get(
+        "scheduled_event_count"
+    )
+    scheduled_event_count = 0
+    if (
+        isinstance(raw_scheduled_event_count, int)
+        and not isinstance(raw_scheduled_event_count, bool)
+    ):
+        scheduled_event_count = raw_scheduled_event_count
+
+    raw_cache_evicted_count = consolidation_outcome.get("cache_evicted_count")
+    cache_evicted_count = 0
+    if (
+        isinstance(raw_cache_evicted_count, int)
+        and not isinstance(raw_cache_evicted_count, bool)
+    ):
+        cache_evicted_count = raw_cache_evicted_count
+
+    sanitized_outcome = {
+        "consolidation_called": (
+            consolidation_outcome.get("consolidation_called") is True
+        ),
+        "write_success": write_success,
+        "scheduled_event_count": scheduled_event_count,
+        "cache_evicted_count": cache_evicted_count,
+        "origin_trigger_source": sanitize_short_text(
+            consolidation_outcome.get("origin_trigger_source", ""),
+            limit=80,
+        ),
+        "origin_episode_id": sanitize_short_text(
+            consolidation_outcome.get("origin_episode_id", ""),
+            limit=160,
+        ),
+    }
+    return sanitized_outcome
 
 
 async def record_model_contract_event(

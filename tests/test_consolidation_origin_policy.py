@@ -124,12 +124,42 @@ def test_reflection_signal_origin_denies_all_write_categories() -> None:
 
 
 def test_internal_thought_origin_denies_all_write_categories() -> None:
-    """Internal-thought origins should be denied by the shared write policy."""
+    """Non-preview internal-thought origins should remain denied."""
     policy = build_consolidation_write_policy(
         origin=_origin(
             trigger_source="internal_thought",
             input_sources=["internal_monologue"],
             output_mode="think_only",
+        ),
+    )
+
+    _assert_all_decisions(policy, allowed=False, reason="origin_not_enabled")
+
+
+def test_internal_thought_preview_origin_allows_all_write_categories() -> None:
+    """Self-cognition preview origins should use the same durable lanes."""
+    policy = build_consolidation_write_policy(
+        origin=_origin(
+            trigger_source="internal_thought",
+            input_sources=["internal_monologue"],
+            output_mode="preview",
+        ),
+    )
+
+    _assert_all_decisions(
+        policy,
+        allowed=True,
+        reason="internal_thought_same_path",
+    )
+
+
+def test_internal_thought_preview_rejects_extra_input_sources() -> None:
+    """Self-cognition consolidation supports only the internal monologue lane."""
+    policy = build_consolidation_write_policy(
+        origin=_origin(
+            trigger_source="internal_thought",
+            input_sources=["internal_monologue", "retrieved_memory"],
+            output_mode="preview",
         ),
     )
 

@@ -119,6 +119,65 @@ def _action_candidate(attempt: dict[str, Any]) -> dict[str, Any]:
     return candidate
 
 
+def _progress_cognition_output() -> dict[str, Any]:
+    """Build a cognition output that stays internal but affects state."""
+
+    output = {
+        "logical_stance": "OBSERVE",
+        "character_intent": "WAIT",
+        "mood": "subdued",
+        "affinity_delta": -1,
+        "action_directives": {
+            "linguistic_directives": {
+                "content_anchors": [
+                    "[AUDIT_ONLY] The missed promise should be remembered.",
+                ],
+            },
+        },
+    }
+    return output
+
+
+def _action_cognition_output() -> dict[str, Any]:
+    """Build a cognition output that requests dispatcher handoff."""
+
+    output = {
+        "logical_stance": "FOLLOW_UP",
+        "character_intent": "FOLLOW_UP",
+        "mood": "hurt",
+        "affinity_delta": -1,
+        "action_directives": {
+            "linguistic_directives": {
+                "content_anchors": [
+                    "[ACTION_CANDIDATE] Checking in now.",
+                ],
+            },
+        },
+    }
+    return output
+
+
+def _consolidation_result() -> dict[str, Any]:
+    """Build the shared consolidator metadata shape used by worker tests."""
+
+    result = {
+        "consolidation_metadata": {
+            "write_success": {
+                "character_state": True,
+                "relationship_insight": True,
+                "user_memory_units": False,
+                "task_dispatch": False,
+                "affinity": True,
+                "character_image": False,
+                "cache_invalidation": True,
+            },
+            "scheduled_event_ids": [],
+            "cache_evicted_count": 1,
+        },
+    }
+    return result
+
+
 def _case_runner_with_candidate(
     case: dict[str, Any],
     output_dir: Path,
@@ -222,6 +281,201 @@ class _FakeUserMemoryUnitsCollection:
         self.pipeline = pipeline
         cursor = _AsyncCursor([{"unit_id": "promise-001"}])
         return cursor
+
+
+@pytest.mark.asyncio
+async def test_worker_default_path_requests_production_consolidation_without_files(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    """Default worker runs should request consolidation and stay in memory."""
+
+    case = _commitment_case()
+    captured_kwargs: dict[str, Any] = {}
+
+    async def collect_cases(*, now: datetime, max_cases: int) -> list[dict[str, Any]]:
+        del now, max_cases
+        return [case]
+
+    async def read_attempts(*, limit: int) -> list[dict[str, Any]]:
+        assert limit > 0
+        return []
+
+    async def build_artifacts(
+        next_case: dict[str, Any],
+        **kwargs: Any,
+    ) -> dict[str, Any]:
+        captured_kwargs.update(kwargs)
+        trigger_record = tracking.build_trigger_record(next_case)
+        run_record = tracking.build_run_record(
+            next_case,
+            trigger_record,
+            models.ROUTE_AUDIT_ONLY,
+            {
+                "rag_calls": 0,
+                "cognition_calls": 1,
+                "dialog_calls": 1,
+                "topic_limit": models.TOPIC_LIMIT,
+            },
+        )
+        payloads = {
+            models.ARTIFACT_TRIGGER_RECORD: trigger_record,
+            models.ARTIFACT_RUN_RECORD: run_record,
+            models.ARTIFACT_CONSOLIDATION_OUTCOME: {
+                "consolidation_called": True,
+                "write_success": {"character_state": True},
+                "scheduled_event_count": 0,
+                "cache_evicted_count": 0,
+                "origin_trigger_source": "internal_thought",
+                "origin_episode_id": "self_cognition:dry_run:test",
+            },
+        }
+        return payloads
+
+    monkeypatch.setattr(
+        worker.runner,
+        "build_self_cognition_case_artifacts_async",
+        build_artifacts,
+    )
+
+    result = await worker.run_self_cognition_worker_tick(
+        output_root=tmp_path,
+        dispatcher=None,
+        now=datetime(2026, 5, 13, tzinfo=timezone.utc),
+        is_primary_interaction_busy=lambda: False,
+        collect_cases_func=collect_cases,
+        read_attempts_func=read_attempts,
+        max_cases=3,
+    )
+
+    assert result.processed_count == 1
+    assert captured_kwargs["apply_consolidation"] is True
+    assert list(tmp_path.iterdir()) == []
+
+
+@pytest.mark.asyncio
+async def test_worker_default_path_applies_consolidation_without_dispatch_or_files(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    """Internal-only cognition should consolidate without outward delivery."""
+
+    case = _commitment_case()
+    captured_consolidation_state: dict[str, Any] = {}
+    dispatcher = _FakeDispatcher()
+
+    async def collect_cases(*, now: datetime, max_cases: int) -> list[dict[str, Any]]:
+        del now, max_cases
+        return [case]
+
+    async def read_attempts(*, limit: int) -> list[dict[str, Any]]:
+        assert limit > 0
+        return []
+
+    async def cognition_client(state: dict[str, Any]) -> dict[str, Any]:
+        assert state["cognitive_episode"]["trigger_source"] == "internal_thought"
+        return _progress_cognition_output()
+
+    async def dialog_client(state: dict[str, Any]) -> dict[str, Any]:
+        assert state["should_respond"] is False
+        return {"final_dialog": ["Private finalization for consolidation only."]}
+
+    async def consolidation_client(state: dict[str, Any]) -> dict[str, Any]:
+        captured_consolidation_state.update(state)
+        return _consolidation_result()
+
+    monkeypatch.setattr(worker.runner, "_default_cognition_client", cognition_client)
+    monkeypatch.setattr(worker.runner, "_default_dialog_client", dialog_client)
+    monkeypatch.setattr(
+        worker.runner,
+        "_default_consolidation_client",
+        consolidation_client,
+    )
+
+    result = await worker.run_self_cognition_worker_tick(
+        output_root=tmp_path,
+        dispatcher=dispatcher,
+        now=datetime(2026, 5, 13, tzinfo=timezone.utc),
+        is_primary_interaction_busy=lambda: False,
+        collect_cases_func=collect_cases,
+        read_attempts_func=read_attempts,
+        max_cases=3,
+    )
+
+    assert result.processed_count == 1
+    assert result.dispatched_count == 0
+    assert dispatcher.calls == []
+    assert captured_consolidation_state["cognitive_episode"][
+        "trigger_source"
+    ] == "internal_thought"
+    assert captured_consolidation_state["final_dialog"] == [
+        "Private finalization for consolidation only.",
+    ]
+    assert list(tmp_path.iterdir()) == []
+
+
+@pytest.mark.asyncio
+async def test_worker_default_path_preserves_action_handoff_with_consolidation(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    """Consolidation should not bypass the existing dispatcher handoff."""
+
+    case = _commitment_case()
+    dispatcher = _FakeDispatcher()
+    recorded_attempts: list[dict[str, Any]] = []
+    captured_consolidation_state: dict[str, Any] = {}
+
+    async def collect_cases(*, now: datetime, max_cases: int) -> list[dict[str, Any]]:
+        del now, max_cases
+        return [case]
+
+    async def read_attempts(*, limit: int) -> list[dict[str, Any]]:
+        assert limit > 0
+        return list(recorded_attempts)
+
+    async def record_attempt(attempt: dict[str, Any]) -> None:
+        recorded_attempts.append(dict(attempt))
+
+    async def cognition_client(state: dict[str, Any]) -> dict[str, Any]:
+        assert state["cognitive_episode"]["trigger_source"] == "internal_thought"
+        return _action_cognition_output()
+
+    async def dialog_client(state: dict[str, Any]) -> dict[str, Any]:
+        assert state["should_respond"] is False
+        return {"final_dialog": ["Private finalization for consolidation only."]}
+
+    async def consolidation_client(state: dict[str, Any]) -> dict[str, Any]:
+        captured_consolidation_state.update(state)
+        return _consolidation_result()
+
+    monkeypatch.setattr(worker.runner, "_default_cognition_client", cognition_client)
+    monkeypatch.setattr(worker.runner, "_default_dialog_client", dialog_client)
+    monkeypatch.setattr(
+        worker.runner,
+        "_default_consolidation_client",
+        consolidation_client,
+    )
+
+    result = await worker.run_self_cognition_worker_tick(
+        output_root=tmp_path,
+        dispatcher=dispatcher,
+        now=datetime(2026, 5, 13, tzinfo=timezone.utc),
+        is_primary_interaction_busy=lambda: False,
+        collect_cases_func=collect_cases,
+        read_attempts_func=read_attempts,
+        record_attempt_func=record_attempt,
+        max_cases=3,
+    )
+
+    assert result.dispatched_count == 1
+    assert dispatcher.calls[0]["raw_calls"][0].tool == "send_message"
+    assert dispatcher.calls[0]["raw_calls"][0].args["text"] == "Checking in now."
+    assert recorded_attempts[0]["status"] == models.ACTION_ATTEMPT_STATUS_SCHEDULED
+    assert captured_consolidation_state["final_dialog"] == [
+        "Private finalization for consolidation only.",
+    ]
+    assert list(tmp_path.iterdir()) == []
 
 
 @pytest.mark.asyncio

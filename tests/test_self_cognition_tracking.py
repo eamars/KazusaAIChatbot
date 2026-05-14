@@ -358,6 +358,145 @@ def test_build_self_cognition_case_artifacts_does_not_write_files(tmp_path) -> N
     )
 
 
+def test_runner_apply_consolidation_builds_private_finalization_state() -> None:
+    case = _commitment_case()
+    captured_dialog_state: dict[str, Any] = {}
+    captured_consolidation_state: dict[str, Any] = {}
+
+    async def dialog_client(state: dict[str, Any]) -> dict[str, Any]:
+        captured_dialog_state.update(state)
+        return_value = {
+            "final_dialog": ["Private finalization for consolidation only."],
+            "target_addressed_user_ids": [state["global_user_id"]],
+            "target_broadcast": False,
+        }
+        return return_value
+
+    async def consolidation_client(state: dict[str, Any]) -> dict[str, Any]:
+        captured_consolidation_state.update(state)
+        return_value = {
+            "consolidation_metadata": {
+                "write_success": {
+                    "character_state": True,
+                    "relationship_insight": True,
+                    "user_memory_units": False,
+                    "task_dispatch": True,
+                    "affinity": True,
+                    "character_image": False,
+                    "cache_invalidation": True,
+                },
+                "scheduled_event_ids": ["scheduled-1"],
+                "cache_evicted_count": 2,
+            },
+        }
+        return return_value
+
+    artifact_payloads = runner.build_self_cognition_case_artifacts(
+        case,
+        cognition_client=lambda state: _progress_cognition_output(),
+        dialog_client=dialog_client,
+        consolidation_client=consolidation_client,
+        apply_consolidation=True,
+    )
+
+    assert captured_dialog_state["cognitive_episode"]["trigger_source"] == (
+        "internal_thought"
+    )
+    assert captured_consolidation_state["cognitive_episode"]["trigger_source"] == (
+        "internal_thought"
+    )
+    assert captured_consolidation_state["cognitive_episode"]["output_mode"] == (
+        "preview"
+    )
+    assert captured_consolidation_state["final_dialog"] == [
+        "Private finalization for consolidation only.",
+    ]
+    assert "The user expected a follow-up" in (
+        captured_consolidation_state["decontexualized_input"]
+    )
+    assert "no_remember" not in captured_consolidation_state["debug_modes"]
+
+    outcome = artifact_payloads[models.ARTIFACT_CONSOLIDATION_OUTCOME]
+    assert outcome == {
+        "consolidation_called": True,
+        "write_success": {
+            "character_state": True,
+            "relationship_insight": True,
+            "user_memory_units": False,
+            "task_dispatch": True,
+            "affinity": True,
+            "character_image": False,
+            "cache_invalidation": True,
+        },
+        "scheduled_event_count": 1,
+        "cache_evicted_count": 2,
+        "origin_trigger_source": "internal_thought",
+        "origin_episode_id": "self_cognition:dry_run:commitment_past_due:promise-001",
+    }
+    serialized = json.dumps(outcome, ensure_ascii=False)
+    assert "Private finalization" not in serialized
+    assert "Reminder was expected" not in serialized
+
+
+def test_runner_reuses_dialog_render_for_action_and_consolidation() -> None:
+    case = _commitment_case()
+    dialog_call_count = 0
+    captured_consolidation_state: dict[str, Any] = {}
+
+    async def dialog_client(state: dict[str, Any]) -> dict[str, Any]:
+        nonlocal dialog_call_count
+        dialog_call_count += 1
+        return_value = {
+            "final_dialog": ["Checking in after the missed promise."],
+            "target_addressed_user_ids": [state["global_user_id"]],
+            "target_broadcast": False,
+        }
+        return return_value
+
+    async def consolidation_client(state: dict[str, Any]) -> dict[str, Any]:
+        captured_consolidation_state.update(state)
+        return_value = {
+            "consolidation_metadata": {
+                "write_success": {"character_state": True},
+                "scheduled_event_ids": [],
+                "cache_evicted_count": 0,
+            },
+        }
+        return return_value
+
+    artifact_payloads = runner.build_self_cognition_case_artifacts(
+        case,
+        cognition_client=lambda state: {
+            "logical_stance": "CONFIRM",
+            "character_intent": "PROVIDE",
+            "action_directives": {
+                "contextual_directives": {
+                    "expression_willingness": "normal",
+                },
+                "linguistic_directives": {
+                    "content_anchors": [
+                        "[ANSWER] The commitment is due now.",
+                    ],
+                },
+            },
+        },
+        dialog_client=dialog_client,
+        consolidation_client=consolidation_client,
+        apply_consolidation=True,
+    )
+
+    assert dialog_call_count == 1
+    assert artifact_payloads[models.ARTIFACT_ACTION_CANDIDATE]["text"] == (
+        "Checking in after the missed promise."
+    )
+    assert captured_consolidation_state["final_dialog"] == [
+        "Checking in after the missed promise.",
+    ]
+    assert artifact_payloads[models.ARTIFACT_RUN_RECORD]["budget"][
+        "dialog_calls"
+    ] == 1
+
+
 def test_contact_decision_without_candidate_marker_uses_dialog_candidate(
     monkeypatch,
     tmp_path,

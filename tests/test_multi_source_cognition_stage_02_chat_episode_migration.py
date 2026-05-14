@@ -17,6 +17,10 @@ from kazusa_ai_chatbot.nodes import persona_supervisor2_cognition as cognition_m
 from kazusa_ai_chatbot.time_context import build_character_time_context
 
 
+BACKGROUND_HANDOFF_WAIT_POLLS = 100
+BACKGROUND_HANDOFF_WAIT_SECONDS = 0.01
+
+
 class _FakeGraph:
     """Service graph fake that captures state passed to graph invocation."""
 
@@ -177,6 +181,17 @@ def _patch_service_dependencies(
     progress_recorder = AsyncMock()
     consolidation_runner = AsyncMock()
 
+    for event_function_name in (
+        "record_database_operation_event",
+        "record_pipeline_turn_event",
+        "record_queue_intake_event",
+        "record_runtime_error_event",
+    ):
+        monkeypatch.setattr(
+            service_module.event_logging,
+            event_function_name,
+            AsyncMock(),
+        )
     monkeypatch.setattr(
         service_module,
         "COGNITION_VISUAL_DIRECTIVES_ENABLED",
@@ -269,6 +284,21 @@ async def _reset_queue_state() -> None:
 
     await service_module._stop_chat_input_worker()
     service_module._chat_input_queue.reset_for_test()
+
+
+async def _wait_for_mock_await(
+    mock: AsyncMock,
+    *,
+    await_count: int = 1,
+) -> None:
+    """Wait until post-response queue work reaches a patched async seam."""
+
+    for _ in range(BACKGROUND_HANDOFF_WAIT_POLLS):
+        if mock.await_count >= await_count:
+            return
+        await asyncio.sleep(BACKGROUND_HANDOFF_WAIT_SECONDS)
+
+    assert mock.await_count >= await_count
 
 
 def _episode() -> dict[str, Any]:
@@ -437,7 +467,7 @@ async def test_service_builds_text_chat_cognitive_episode(
 
     await _reset_queue_state()
     graph = _FakeGraph(_graph_result())
-    _patch_service_dependencies(monkeypatch, graph)
+    mocks = _patch_service_dependencies(monkeypatch, graph)
 
     response = await service_module.chat(_chat_request(), BackgroundTasks())
 
@@ -466,6 +496,7 @@ async def test_service_builds_text_chat_cognitive_episode(
         "think_only": False,
         "no_remember": False,
     }
+    await _wait_for_mock_await(mocks["consolidation_runner"])
     await _reset_queue_state()
 
 
@@ -477,7 +508,7 @@ async def test_service_adds_internal_visual_flag_when_config_disables_it(
 
     await _reset_queue_state()
     graph = _FakeGraph(_graph_result())
-    _patch_service_dependencies(monkeypatch, graph)
+    mocks = _patch_service_dependencies(monkeypatch, graph)
     monkeypatch.setattr(
         service_module,
         "COGNITION_VISUAL_DIRECTIVES_ENABLED",
@@ -498,6 +529,7 @@ async def test_service_adds_internal_visual_flag_when_config_disables_it(
         state["debug_modes"]
     )
     assert "no_visual_directives" not in service_module.DebugModesIn.model_fields
+    await _wait_for_mock_await(mocks["consolidation_runner"])
     await _reset_queue_state()
 
 
@@ -509,7 +541,7 @@ async def test_service_maps_debug_modes_to_episode_output_mode(
 
     await _reset_queue_state()
     think_graph = _FakeGraph(_graph_result())
-    _patch_service_dependencies(monkeypatch, think_graph)
+    think_mocks = _patch_service_dependencies(monkeypatch, think_graph)
 
     await service_module.chat(
         _chat_request(
@@ -521,6 +553,7 @@ async def test_service_maps_debug_modes_to_episode_output_mode(
     assert think_graph.states[0]["cognitive_episode"]["output_mode"] == (
         "think_only"
     )
+    await _wait_for_mock_await(think_mocks["consolidation_runner"])
     await _reset_queue_state()
 
     listen_graph = _FakeGraph(_graph_result(final_dialog=[]))

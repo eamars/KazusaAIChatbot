@@ -316,3 +316,26 @@ async def test_dialog_agent_handles_empty_dialog():
         result = await dialog_agent(state)
 
     assert result["final_dialog"] == [] or isinstance(result["final_dialog"], list)
+
+
+@pytest.mark.asyncio
+async def test_dialog_agent_silent_willingness_returns_empty_dialog(monkeypatch):
+    """Silent dialog routing should return an empty delivery shape."""
+    state = _base_global_state()
+    state["action_directives"]["contextual_directives"][
+        "expression_willingness"
+    ] = "silent"
+    generator_llm = MagicMock()
+    generator_llm.ainvoke = AsyncMock()
+    evaluator_llm = MagicMock()
+    evaluator_llm.ainvoke = AsyncMock()
+    monkeypatch.setattr(dialog_module, "_dialog_generator_llm", generator_llm)
+    monkeypatch.setattr(dialog_module, "_dialog_evaluator_llm", evaluator_llm)
+
+    result = await dialog_agent(state)
+
+    assert result["final_dialog"] == []
+    assert result["target_addressed_user_ids"] == []
+    assert result["target_broadcast"] is False
+    generator_llm.ainvoke.assert_not_awaited()
+    evaluator_llm.ainvoke.assert_not_awaited()

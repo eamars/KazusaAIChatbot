@@ -16,6 +16,9 @@ from kazusa_ai_chatbot.config import (
 from kazusa_ai_chatbot.memory_writer_prompt_projection import (
     project_relationship_prompt_payload,
 )
+from kazusa_ai_chatbot.nodes.persona_supervisor2_consolidator_origin import (
+    project_consolidation_origin_prompt_block,
+)
 from kazusa_ai_chatbot.nodes.persona_supervisor2_consolidator_schema import (
     ConsolidatorState,
     normalize_subjective_appraisals,
@@ -47,10 +50,16 @@ _GLOBAL_STATE_UPDATER_PROMPT = """\
 - `character_intent`: {character_name}在互动中的核心意图
 - 该阶段不会收到完整设定资料；默认使用中性基线，不要凭空放大敏感、防御或暧昧倾向。
 
+# 来源身份
+- `consolidation_origin.trigger_source` 指明本轮 consolidation 的来源。
+- 当 trigger_source 是 `user_message` 时，`decontexualized_input` 是用户本轮表达。
+- 当 trigger_source 是 `internal_thought` 时，`decontexualized_input` 是 `{character_name}` 的内部触发文本，概括当前认知焦点与证据，不是用户原话。
+- `final_dialog` 在 `user_message` 中是可见回复，在 `internal_thought` 中是私有 finalization，仅供 consolidation 判断。
+
 # 生成步骤
 1. 先读取 `internal_monologue` 和 `emotional_appraisal`，分清一瞬间情绪与最终心理沉淀。
 2. 读取 `final_dialog` 与 `character_intent`，判断本轮是否真的留下持续心理惯性。
-3. 读取 `logical_stance` 与 `decontexualized_input`，区分普通事务、事实澄清、用户解释、关系事件或边界冲突。
+3. 读取 `consolidation_origin`、`logical_stance` 与 `decontexualized_input`，区分普通事务、事实澄清、用户解释、内部回想、关系事件或边界冲突。
 4. 为 `mood` 生成一个短词，概括本轮之后留下的内在心情；它不是第一反应，也不是关系评价。
 5. 为 `global_vibe` 生成一个短词，概括下一轮会继承的背景氛围；它不指向特定用户。
 6. 不要从固定例词中挑选；根据证据自行压缩成贴切短词。
@@ -75,13 +84,19 @@ _GLOBAL_STATE_UPDATER_PROMPT = """\
 
 # 输入格式
 {{
+    "consolidation_origin": {{
+        "episode_id": "string",
+        "trigger_source": "user_message | internal_thought",
+        "input_sources": ["..."],
+        "output_mode": "string"
+    }},
     "internal_monologue": "string",
     "emotional_appraisal": "string",
     "interaction_subtext": "string",
     "character_intent": "string",
     "logical_stance": "string",
     "decontexualized_input": "string",
-    "final_dialog": ["{character_name} 本轮最终实际说出口的话"]
+    "final_dialog": ["{character_name} 本轮可见回复或私有 finalization"]
 }}
 
 # 逻辑准则
@@ -123,6 +138,9 @@ async def global_state_updater(state: ConsolidatorState) -> dict:
     ))
 
     msg = project_relationship_prompt_payload({
+        "consolidation_origin": project_consolidation_origin_prompt_block(
+            state["consolidation_origin"]
+        ),
         "internal_monologue": state["internal_monologue"],
         "emotional_appraisal": state["emotional_appraisal"],
         "interaction_subtext": state["interaction_subtext"],
@@ -161,14 +179,15 @@ _RELATIONSHIP_RECORDER_PROMPT = """\
 该阶段不会收到完整设定资料；默认使用中性基线。只有当输入、最终回复和认知证据共同支持关系意义时，才记录关系评价。
 
 # 核心输入
+- `consolidation_origin`: 指明本轮输入来自用户消息还是内部思考。
 - `internal_monologue`: 揭示了{character_name}对用户的真实喜好和内心波动。
 - `emotional_appraisal`: 捕捉了{character_name}当下最原始、最直接的情绪反应。
 - `interaction_subtext`: 捕捉了对话表面下的张力（如：暧昧、怀疑、博弈）。
 - `affinity_context`: 当前{user_name}在{character_name}的好感度描述。
 - `logical_stance`: {character_name}对{user_name}言行的逻辑认可度。
 - `character_intent`: {character_name}本轮最终选择的行动意图，说明她是在正常提供、调侃拉扯、回避、拒绝、澄清还是对抗。
-- `decontexualized_input`: 用户本轮真实表达，用于判断这是不是普通任务、事实澄清、用户解释或关系事件。
-- `final_dialog`: {character_name}本轮最终说出口的话，用于判断关系意义是否真的被接住。
+- `decontexualized_input`: 由 `consolidation_origin.trigger_source` 定义；`user_message` 时是用户本轮真实表达，`internal_thought` 时是内部触发文本，不是用户原话。
+- `final_dialog`: {character_name}本轮最终输出；`user_message` 时是可见回复，`internal_thought` 时是私有 finalization，用于判断关系意义是否真的被接住。
 - `content_anchors`: 回复前的内容锚点。只能作为中等强度证据，不能单独制造关系记忆。
 
 # 生成步骤
@@ -197,6 +216,12 @@ _RELATIONSHIP_RECORDER_PROMPT = """\
 
 # 输入格式
 {{
+    "consolidation_origin": {{
+        "episode_id": "string",
+        "trigger_source": "user_message | internal_thought",
+        "input_sources": ["..."],
+        "output_mode": "string"
+    }},
     "internal_monologue": "string",
     "emotional_appraisal": "string",
     "interaction_subtext": "string",
@@ -204,7 +229,7 @@ _RELATIONSHIP_RECORDER_PROMPT = """\
     "logical_stance": "string",
     "character_intent": "string",
     "decontexualized_input": "string",
-    "final_dialog": ["{character_name} 本轮最终实际说出口的话"],
+    "final_dialog": ["{character_name} 本轮可见回复或私有 finalization"],
     "content_anchors": ["回复前的内容锚点"]
 }}
 
@@ -260,6 +285,9 @@ async def relationship_recorder(state: ConsolidatorState) -> dict:
     affinity_block = build_affinity_block(user_affinity_score)
 
     msg = project_relationship_prompt_payload({
+        "consolidation_origin": project_consolidation_origin_prompt_block(
+            state["consolidation_origin"]
+        ),
         "internal_monologue": state["internal_monologue"],
         "emotional_appraisal": state["emotional_appraisal"],
         "interaction_subtext": state["interaction_subtext"],

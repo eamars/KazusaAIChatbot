@@ -46,6 +46,7 @@ _SUPPORTED_USER_MESSAGE_INPUT_SOURCE_PROFILES = {
 }
 _TEXT_CHAT_OUTPUT_MODES = frozenset(("visible_reply", "think_only", "silent"))
 _ALLOWED_REASON = "user_message_chat_input"
+_INTERNAL_THOUGHT_ALLOWED_REASON = "internal_thought_same_path"
 _DENIED_REASON = "origin_not_enabled"
 
 
@@ -63,7 +64,7 @@ def build_consolidation_write_policy(
         Policy decisions for every current durable write and side-effect
         category.
     """
-    origin_is_allowed = (
+    user_message_origin_is_allowed = (
         origin["trigger_source"] == "user_message"
         and (
             tuple(origin["input_sources"])
@@ -71,9 +72,17 @@ def build_consolidation_write_policy(
         )
         and origin["output_mode"] in _TEXT_CHAT_OUTPUT_MODES
     )
-    if origin_is_allowed:
+    internal_thought_origin_is_allowed = (
+        origin["trigger_source"] == "internal_thought"
+        and tuple(origin["input_sources"]) == ("internal_monologue",)
+        and origin["output_mode"] == "preview"
+    )
+    if user_message_origin_is_allowed:
         allowed = True
         reason = _ALLOWED_REASON
+    elif internal_thought_origin_is_allowed:
+        allowed = True
+        reason = _INTERNAL_THOUGHT_ALLOWED_REASON
     else:
         allowed = False
         reason = _DENIED_REASON

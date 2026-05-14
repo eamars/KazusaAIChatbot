@@ -13,6 +13,9 @@ from kazusa_ai_chatbot.config import (
     CONSOLIDATION_LLM_MODEL,
 )
 from kazusa_ai_chatbot.config import MAX_FACT_HARVESTER_RETRY
+from kazusa_ai_chatbot.nodes.persona_supervisor2_consolidator_origin import (
+    project_consolidation_origin_prompt_block,
+)
 from kazusa_ai_chatbot.nodes.persona_supervisor2_consolidator_schema import ConsolidatorState
 from kazusa_ai_chatbot.rag.prompt_projection import project_tool_result_for_llm
 from kazusa_ai_chatbot.utils import get_llm, log_list_preview, log_preview, parse_llm_json_output
@@ -161,13 +164,15 @@ _FACTS_HARVESTER_PROMPT = '''\
 - 对话主体是 `{character_name}`。
 - 对话对象是 human payload 中的 `user_name`。
 - `timestamp` 是当前回合本地时间。
-- `decontexualized_input` 始终表示 `user_name` 指向的用户本轮真正表达的内容。
+- `consolidation_origin.trigger_source` 指明本轮 consolidation 的来源。
+- 当 trigger_source 是 `user_message` 时，`decontexualized_input` 是 `user_name` 指向的用户本轮真正表达的内容。
+- 当 trigger_source 是 `internal_thought` 时，`decontexualized_input` 是角色内部触发文本，概括当前认知焦点与证据，不是用户原话。
 - `content_anchors` 表示 `{character_name}` 生成回复前的草案意图，只能作为候选计划，不能单独证明承诺已经成立。
-- `final_dialog` 是 `{character_name}` 本轮最终实际说出口的话，是判断接受、拒绝、保留选择权或形成承诺的最高优先级证据。
+- `final_dialog` 是 `{character_name}` 本轮最终输出；`user_message` 时是可见回复，`internal_thought` 时是私有 finalization，是判断接受、拒绝、保留选择权或形成承诺的最高优先级证据。
 - 当 `final_dialog`、`content_anchors`、`decontexualized_input` 冲突时，承诺判断优先级为 `final_dialog` > `content_anchors` > `decontexualized_input`。
 
 # 来源权威性
-- 强事实来源：用户在 `decontexualized_input` 中明确陈述的自身事实；`rag_result.memory_evidence`、`conversation_evidence`、`external_evidence` 中已有或检索出的事实。
+- 强事实来源：`user_message` 来源中用户在 `decontexualized_input` 明确陈述的自身事实；`rag_result.memory_evidence`、`conversation_evidence`、`external_evidence` 中已有或检索出的事实。`internal_thought` 来源中的 `decontexualized_input` 不是用户事实来源，只能说明当前内部关注点。
 - 回忆证据来源：`rag_result.recall_evidence` 可以证明当前约定、承诺、计划或进度的来源。若 `primary_source` 是 `conversation_progress` 且没有 `user_memory_units`、`conversation_history` 或本轮用户明确事实支持，它只能作为回合操作证据，不能单独授权写入 `{character_name}` 的稳定事实。
 - 回合局部支持：`final_dialog` 与 `content_anchors` 可说明本轮角色说了什么、准备怎么回应，但不能单独制造角色的长期偏好、角色设定或角色 lore。
 - 弱/非事实来源：内部独白、情绪评估、互动潜台词不是客观事实来源；即使上游出现，也只能作为主观体感。
@@ -220,6 +225,12 @@ human payload 是以下 JSON：
 {{
     "user_name": "当前用户显示名",
     "timestamp": "当前回合本地时间，YYYY-MM-DD HH:MM",
+    "consolidation_origin": {{
+        "episode_id": "string",
+        "trigger_source": "user_message | internal_thought",
+        "input_sources": ["..."],
+        "output_mode": "string"
+    }},
     "decontexualized_input": "用户本轮真实意图摘要",
     "rag_result": {{
         "user_image": {{
@@ -241,7 +252,7 @@ human payload 是以下 JSON：
     "supervisor_trace": {{"unknown_slots": ["未解决槽位"], "loop_count": 1}},
     "existing_dedup_keys": ["已存在事实或承诺的稳定去重键"],
     "content_anchors": ["回复前的内容锚点"],
-    "final_dialog": ["{character_name} 本轮最终实际说出口的话"],
+    "final_dialog": ["{character_name} 本轮可见回复或私有 finalization"],
     "logical_stance": "CONFIRM | REFUSE | TENTATIVE | DIVERGE | CHALLENGE",
     "character_intent": "PROVIDE | BANTAR | REJECT | EVADE | CONFRONT | DISMISS | CLARIFY"
 }}
@@ -288,6 +299,9 @@ async def facts_harvester(state: ConsolidatorState) -> dict:
     msg = {
         "user_name": state["user_name"],
         "timestamp": local_datetime,
+        "consolidation_origin": project_consolidation_origin_prompt_block(
+            state["consolidation_origin"]
+        ),
         "decontexualized_input": state["decontexualized_input"],
         "rag_result": rag_result,
         "supervisor_trace": rag_result.get("supervisor_trace", {}),
@@ -336,14 +350,16 @@ _FACT_HARVESTER_EVALUATOR_PROMPT = '''\
 # 审计身份与基准源
 - 角色是 `{character_name}`。
 - 用户是 human payload 中的 `user_name`。
-- 事实基准是 `decontexualized_input`，只用于核对 `user_name` 指向用户的状态、事实或偏好。
-- 承诺基准是 `final_dialog`，因为它是角色最终实际说出口的话。
+- `consolidation_origin.trigger_source` 指明本轮 consolidation 的来源。
+- 当 trigger_source 是 `user_message` 时，`decontexualized_input` 是用户本轮表达，可用于核对 `user_name` 指向用户的状态、事实或偏好。
+- 当 trigger_source 是 `internal_thought` 时，`decontexualized_input` 是角色内部触发文本，不是用户原话；用户事实必须来自 `rag_result`、近期对话证据或其他明确证据。
+- 承诺基准是 `final_dialog`；`user_message` 时它是角色可见回复，`internal_thought` 时它是私有 finalization。
 - `content_anchors` 只能补足 `final_dialog` 中省略的对象或条件，不能单独制造承诺。
 - `rag_result` 用于检查旧闻、重复和非生成证据。
 - `supervisor_trace` 只能作为检索充分性参考，不能替代事实或承诺证据。
 
 # 来源权威性审计
-- 强事实来源：`decontexualized_input` 中用户明确陈述的自身事实，以及 `rag_result.memory_evidence`、`conversation_evidence`、`external_evidence` 中的证据。
+- 强事实来源：`user_message` 来源中用户在 `decontexualized_input` 明确陈述的自身事实，以及 `rag_result.memory_evidence`、`conversation_evidence`、`external_evidence` 中的证据。`internal_thought` 来源中的 `decontexualized_input` 不是用户事实来源。
 - 回忆证据来源：`rag_result.recall_evidence` 是约定、承诺或进度的来源证据。progress-only recall 只能说明当前操作状态；若没有 durable memory、conversation proof 或本轮用户明确事实支持，不能作为 `{character_name}` 稳定事实依据。
 - 回合局部支持：`final_dialog` 与 `content_anchors` 只能证明本轮说法或候选计划，不能单独制造角色长期偏好、角色设定或角色 lore。
 - 弱/非事实来源：内部独白、情绪评估、互动潜台词不是客观事实来源。
@@ -392,6 +408,12 @@ human payload 是以下 JSON：
 {{
     "retry": "当前重试次数/最大重试次数",
     "user_name": "当前用户显示名",
+    "consolidation_origin": {{
+        "episode_id": "string",
+        "trigger_source": "user_message | internal_thought",
+        "input_sources": ["..."],
+        "output_mode": "string"
+    }},
     "new_facts": [
         {{
             "entity": "事实所属主语",
@@ -424,7 +446,7 @@ human payload 是以下 JSON：
     }},
     "supervisor_trace": {{"unknown_slots": ["未解决槽位"], "loop_count": 1}},
     "content_anchors": ["回复前的内容锚点"],
-    "final_dialog": ["{character_name} 本轮最终实际说出口的话"],
+    "final_dialog": ["{character_name} 本轮可见回复或私有 finalization"],
     "logical_stance": "CONFIRM | REFUSE | TENTATIVE | DIVERGE | CHALLENGE",
     "character_intent": "PROVIDE | BANTAR | REJECT | EVADE | CONFRONT | DISMISS | CLARIFY"
 }}
@@ -454,6 +476,9 @@ async def fact_harvester_evaluator(state: ConsolidatorState) -> dict:
     msg = {
         "retry": f"{retry}/{MAX_FACT_HARVESTER_RETRY}",
         "user_name": state["user_name"],
+        "consolidation_origin": project_consolidation_origin_prompt_block(
+            state["consolidation_origin"]
+        ),
         "new_facts": state["new_facts"],
         "future_promises": state["future_promises"],
 

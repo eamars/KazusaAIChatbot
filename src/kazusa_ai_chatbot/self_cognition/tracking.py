@@ -153,6 +153,58 @@ def build_route_effect(
     return route_effect
 
 
+def build_consolidation_outcome_record(
+    consolidation_state: dict[str, Any],
+    consolidation_result: dict[str, Any],
+) -> dict[str, Any]:
+    """Build sanitized metadata for a self-cognition consolidation call.
+
+    Args:
+        consolidation_state: Private finalization state passed to the shared
+            consolidator.
+        consolidation_result: Result returned by the shared consolidator.
+
+    Returns:
+        Structural outcome metadata without prompt, packet, dialog, or DB row
+        bodies.
+    """
+
+    episode = consolidation_state["cognitive_episode"]
+    metadata = consolidation_result["consolidation_metadata"]
+    if not isinstance(metadata, dict):
+        raise ValueError("consolidation_metadata must be a dict")
+
+    write_success = metadata["write_success"]
+    if not isinstance(write_success, dict):
+        raise ValueError("write_success must be a dict")
+    sanitized_write_success = {
+        str(key): bool(value)
+        for key, value in write_success.items()
+        if isinstance(key, str)
+    }
+
+    scheduled_event_ids = metadata["scheduled_event_ids"]
+    if not isinstance(scheduled_event_ids, list):
+        raise ValueError("scheduled_event_ids must be a list")
+
+    cache_evicted_count = metadata["cache_evicted_count"]
+    if isinstance(cache_evicted_count, bool) or not isinstance(
+        cache_evicted_count,
+        int,
+    ):
+        raise ValueError("cache_evicted_count must be an int")
+
+    outcome = {
+        "consolidation_called": True,
+        "write_success": sanitized_write_success,
+        "scheduled_event_count": len(scheduled_event_ids),
+        "cache_evicted_count": cache_evicted_count,
+        "origin_trigger_source": episode["trigger_source"],
+        "origin_episode_id": episode["episode_id"],
+    }
+    return outcome
+
+
 def classify_route(
     case: models.SelfCognitionCase,
     cognition_output: dict[str, Any],

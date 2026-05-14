@@ -710,9 +710,14 @@ async def dialog_agent(
         "global_user_id": global_state["global_user_id"],
         "user_name": global_state["user_name"],
         "user_profile": global_state["user_profile"],
-        
+
         # D
         "character_profile": global_state["character_profile"],
+        "should_stop": True,
+        "retry": 0,
+        "final_dialog": [],
+        "target_addressed_user_ids": [],
+        "target_broadcast": False,
     }
 
     result = await sub_graph.ainvoke(subState)

@@ -180,6 +180,7 @@ async def run_self_cognition_worker_tick(
         if run_case_func is None:
             artifact_payloads = await runner.build_self_cognition_case_artifacts_async(
                 case_for_run,
+                apply_consolidation=True,
             )
         else:
             artifact_payloads = await _call_maybe_async(
@@ -382,6 +383,11 @@ async def _record_self_cognition_event_from_artifacts(
     action_attempt = artifact_payloads.get(models.ARTIFACT_ACTION_ATTEMPT)
     if not isinstance(action_attempt, dict):
         action_attempt = {}
+    consolidation_outcome = artifact_payloads.get(
+        models.ARTIFACT_CONSOLIDATION_OUTCOME
+    )
+    if not isinstance(consolidation_outcome, dict):
+        consolidation_outcome = None
     budget = run_record["budget"]
     await event_logging.record_self_cognition_event(
         component="self_cognition.worker",
@@ -400,6 +406,7 @@ async def _record_self_cognition_event_from_artifacts(
         trigger_id=str(trigger_record["trigger_id"]),
         run_id=str(run_record["run_id"]),
         attempt_id=str(action_attempt.get("attempt_id") or ""),
+        consolidation_outcome=consolidation_outcome,
     )
 
 

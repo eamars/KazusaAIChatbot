@@ -15,7 +15,9 @@ The module supports two entry points:
   after cognition selects outward contact without explicit candidate text, and
   writes local artifacts under the requested output directory.
 - The service worker collects bounded visible/actionable source cases,
-  builds the same route records in memory, records sanitized event-log
+  builds the same route records in memory, invokes the existing dialog graph
+  for private finalization when consolidation is applied, calls the existing
+  consolidator through the shared same-path entry, records sanitized event-log
   telemetry, persists action-attempt state through the DB facade, and may hand
   a cognition-selected `send_message` action candidate to the existing
   `TaskDispatcher`.
@@ -28,14 +30,16 @@ handling of a non-duplicate action candidate.
 Self-cognition-created episodes set
 `origin_metadata.debug_modes.no_visual_directives=true` by default, so the
 shared L3 visual-directive LLM is skipped for self-cognition. These episodes do
-not set `no_remember`; durable self-cognition memory semantics are planned
-separately and are not implemented by this module contract.
+not set `no_remember`. Production worker consolidation can update the existing
+character-state, relationship, affinity, memory-unit, task-dispatch, and cache
+lanes through the shared consolidator policy. It does not create a separate
+self-cognition memory or progress store.
 
-The module does not call adapters directly, write `/chat` conversation rows,
-run live-chat consolidation, update reflection state, update stable memory, or
-update conversation progress/history. Dispatcher rejection is recorded through
-event logging and persisted action-attempt state; it must not be converted into
-an adapter send.
+The module does not call adapters directly or write `/chat` conversation rows.
+Private finalization exists only to feed the shared consolidator and optional
+action-candidate rendering. Dispatcher rejection is recorded through event
+logging and persisted action-attempt state; it must not be converted into an
+adapter send.
 
 ## Configuration
 
@@ -67,8 +71,11 @@ cognition's route or contact decision.
 - If cognition selects outward contact but does not emit explicit
   `[ACTION_CANDIDATE]` text, the runner may invoke the existing dialog graph
   once to render the local action candidate text.
-- Duplicate or held action attempts do not invoke dialog rendering because no
-  send candidate can be created.
+- When consolidation is applied, the runner may invoke the existing dialog
+  graph once for private finalization even when no send candidate can be
+  created.
+- The production worker applies consolidation by default and keeps the existing
+  `SELF_COGNITION_MAX_CASES_PER_TICK` case cap.
 
 ## Public Interface
 
@@ -81,9 +88,9 @@ cognition's route or contact decision.
 - `tracking.classify_route(case, cognition_output, action_attempt=None)`
 - `tracking.build_action_attempt(case, trigger_record, existing_attempts)`
 - `tracking.build_action_candidate(case, action_attempt, text)`
-- `runner.build_self_cognition_case_artifacts(case, rag_client=None, cognition_client=None)`
-- `runner.build_self_cognition_case_artifacts_async(case, rag_client=None, cognition_client=None)`
-- `runner.run_self_cognition_case(case, output_dir, rag_client=None, cognition_client=None)`
+- `runner.build_self_cognition_case_artifacts(case, rag_client=None, cognition_client=None, dialog_client=None, consolidation_client=None, apply_consolidation=False)`
+- `runner.build_self_cognition_case_artifacts_async(case, rag_client=None, cognition_client=None, dialog_client=None, consolidation_client=None, apply_consolidation=False)`
+- `runner.run_self_cognition_case(case, output_dir, rag_client=None, cognition_client=None, dialog_client=None, consolidation_client=None, apply_consolidation=False)`
 - `artifacts.write_tracking_artifacts(output_dir, artifacts)`
 - `handoff.build_raw_tool_call(action_candidate)`
 - `handoff.dispatch_action_candidate(case, action_attempt, action_candidate, dispatcher, now)`
@@ -122,15 +129,16 @@ control state.
 ## Event Logging
 
 The production worker mirrors sanitized trigger, run, route, action-attempt,
-and dispatcher-result metadata through `kazusa_ai_chatbot.event_logging`.
-This event-log mirror is the durable operator view for long-term production
-counts and `/ops/self-cognition/stats`.
+consolidation-outcome, and dispatcher-result metadata through
+`kazusa_ai_chatbot.event_logging`. This event-log mirror is the durable
+operator view for long-term production counts and `/ops/self-cognition/stats`.
 
 Dry-run artifacts remain the canonical debug output. The production worker
 does not write artifact files. Event-log rows store ids, route names, output
-modes, budget counters, dispatch status, and status labels; they must not
-include source packet text, action candidate text, raw target channels, or
-conversation bodies.
+modes, budget counters, dispatch status, consolidation write-success booleans,
+scheduled-event counts, cache-eviction counts, origin labels, and status
+labels; they must not include source packet text, private finalization text,
+action candidate text, raw target channels, or conversation bodies.
 
 ## Artifacts
 
@@ -146,6 +154,7 @@ The dry-run writer may produce:
 - `self_cognition_action_attempt.json`
 - `self_cognition_action_candidate.json`
 - `self_cognition_dispatch_result.json`
+- `self_cognition_consolidation_outcome.json`
 - `self_cognition_loop_trace.md`
 
 Action candidates always use `dispatch_shape: "send_message"` and
@@ -243,5 +252,14 @@ self_cognition_dispatch_result = {
     "dispatcher_called": bool,
     "scheduled_event_ids": list[str],
     "rejections": list[str],
+}
+
+self_cognition_consolidation_outcome = {
+    "consolidation_called": bool,
+    "write_success": dict[str, bool],
+    "scheduled_event_count": int,
+    "cache_evicted_count": int,
+    "origin_trigger_source": "internal_thought",
+    "origin_episode_id": str,
 }
 ```

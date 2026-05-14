@@ -337,6 +337,7 @@ async def record_self_cognition_event(
     trigger_id: str = "",
     run_id: str = "",
     attempt_id: str = "",
+    consolidation_outcome: Mapping[str, object] | None = None,
     severity: EventSeverity = "info",
     occurred_at: datetime | None = None,
 ) -> EventLogWriteResult: ...
@@ -410,7 +411,7 @@ by the matching public recorder.
 | `dialog_quality` | `record_dialog_quality_event` | `dialog_quality` | `evaluator_status`, `retry_count`, `failure_codes`, `anchor_count` |
 | `dispatcher` | `record_dispatcher_event` | `action_kind` | `action_kind`, `validation_status`, `adapter_available`, `scheduled_event_ids`, `rejection_codes` |
 | `database_operation` | `record_database_operation_event` | `operation_kind` | `collection`, `operation_kind`, `idempotency_result`, `latency_ms`, `document_ref` |
-| `self_cognition` | `record_self_cognition_event` | `trigger_kind` | `case_id`, `trigger_kind`, `selected_route`, `output_mode`, `budget`, `dispatch_status` |
+| `self_cognition` | `record_self_cognition_event` | `trigger_kind` | `case_id`, `trigger_kind`, `selected_route`, `output_mode`, `budget`, `dispatch_status`, `consolidation_outcome` |
 | `model_contract` | `record_model_contract_event` | `violation_kind` | `stage_name`, `violation_kind`, `missing_fields`, `invalid_fields`, `repair_used` |
 | `resource_health` | `record_resource_health_event` | `resource_kind` | `resource_name`, `resource_kind`, `availability`, `latency_ms`, `failure_class` |
 
