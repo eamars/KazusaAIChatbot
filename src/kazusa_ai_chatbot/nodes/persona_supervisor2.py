@@ -12,7 +12,6 @@ from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition import call_cognition
 from kazusa_ai_chatbot.nodes.persona_supervisor2_consolidator import call_consolidation_subgraph
 from kazusa_ai_chatbot.nodes.persona_supervisor2_msg_decontexualizer import call_msg_decontexualizer
 from kazusa_ai_chatbot.nodes.persona_supervisor2_rag_projection import project_known_facts
-from kazusa_ai_chatbot.nodes.persona_supervisor2_rag_supervisor2 import call_rag_supervisor
 from kazusa_ai_chatbot.nodes.persona_supervisor2_schema import GlobalPersonaState
 from kazusa_ai_chatbot.nodes.referent_resolution import (
     should_skip_rag_for_unresolved_referents,
@@ -20,6 +19,9 @@ from kazusa_ai_chatbot.nodes.referent_resolution import (
 )
 from kazusa_ai_chatbot.rag.cognitive_episode_adapter import (
     build_text_chat_rag_request,
+)
+from kazusa_ai_chatbot.rag.quote_aware_sequence import (
+    call_quote_aware_rag_supervisor,
 )
 from kazusa_ai_chatbot.state import IMProcessState
 from kazusa_ai_chatbot.time_context import format_history_for_llm
@@ -175,8 +177,9 @@ async def stage_1_research(state: GlobalPersonaState) -> dict:
         conversation_episode_state=state.get("conversation_episode_state"),
         promoted_reflection_context=state.get("promoted_reflection_context"),
     )
-    rag_supervisor_result = await call_rag_supervisor(
-        original_query=rag_request["original_query"],
+    rag_supervisor_result = await call_quote_aware_rag_supervisor(
+        fresh_query=rag_request["original_query"],
+        reply_context=state["reply_context"],
         character_name=rag_request["character_name"],
         context=rag_request["context"],
     )

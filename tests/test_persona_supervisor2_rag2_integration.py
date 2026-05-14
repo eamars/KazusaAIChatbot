@@ -372,8 +372,15 @@ async def test_call_rag_supervisor_public_keys_unchanged(monkeypatch) -> None:
 async def test_stage_1_research_calls_rag2_and_projects_payload(monkeypatch) -> None:
     captured: dict = {}
 
-    async def _call_rag_supervisor(*, original_query: str, character_name: str, context: dict) -> dict:
-        captured["original_query"] = original_query
+    async def _call_quote_aware_rag_supervisor(
+        *,
+        fresh_query: str,
+        reply_context: dict,
+        character_name: str,
+        context: dict,
+    ) -> dict:
+        captured["fresh_query"] = fresh_query
+        captured["reply_context"] = reply_context
         captured["character_name"] = character_name
         captured["context"] = context
         return {
@@ -402,7 +409,11 @@ async def test_stage_1_research_calls_rag2_and_projects_payload(monkeypatch) -> 
             "loop_count": 1,
         }
 
-    monkeypatch.setattr(supervisor_module, "call_rag_supervisor", _call_rag_supervisor)
+    monkeypatch.setattr(
+        supervisor_module,
+        "call_quote_aware_rag_supervisor",
+        _call_quote_aware_rag_supervisor,
+    )
 
     result = await supervisor_module.stage_1_research({
         "decontexualized_input": "你记得我喜欢什么吗？",
@@ -435,7 +446,10 @@ async def test_stage_1_research_calls_rag2_and_projects_payload(monkeypatch) -> 
         "channel_topic": "test",
         "chat_history_recent": [],
         "chat_history_wide": [],
-        "reply_context": {},
+        "reply_context": {
+            "platform_message_id": "reply-1",
+            "reply_excerpt": "BYD Shark 6 uses a 1.5T hybrid system.",
+        },
         "indirect_speech_context": "",
         "cognitive_episode": _minimal_text_chat_episode(),
         "conversation_progress": {
@@ -449,7 +463,11 @@ async def test_stage_1_research_calls_rag2_and_projects_payload(monkeypatch) -> 
         },
     })
 
-    assert captured["original_query"] == "你记得我喜欢什么吗？"
+    assert captured["fresh_query"] == "你记得我喜欢什么吗？"
+    assert captured["reply_context"] == {
+        "platform_message_id": "reply-1",
+        "reply_excerpt": "BYD Shark 6 uses a 1.5T hybrid system.",
+    }
     assert captured["character_name"] == "Kazusa"
     assert captured["context"]["channel_type"] == "group"
     assert "message_envelope" not in captured["context"]
@@ -470,14 +488,16 @@ async def test_stage_1_research_pre_stage_04_request_shape_snapshot(monkeypatch)
     """Current RAG request shape should stay stable across adapter extraction."""
     captured: dict = {}
 
-    async def _call_rag_supervisor(
+    async def _call_quote_aware_rag_supervisor(
         *,
-        original_query: str,
+        fresh_query: str,
+        reply_context: dict,
         character_name: str,
         context: dict,
     ) -> dict:
         captured["request"] = {
-            "original_query": original_query,
+            "fresh_query": fresh_query,
+            "reply_context": reply_context,
             "character_name": character_name,
             "context": context,
         }
@@ -489,14 +509,19 @@ async def test_stage_1_research_pre_stage_04_request_shape_snapshot(monkeypatch)
         }
         return return_value
 
-    monkeypatch.setattr(supervisor_module, "call_rag_supervisor", _call_rag_supervisor)
+    monkeypatch.setattr(
+        supervisor_module,
+        "call_quote_aware_rag_supervisor",
+        _call_quote_aware_rag_supervisor,
+    )
 
     result = await supervisor_module.stage_1_research(
         _stage_1_research_snapshot_state()
     )
 
     expected_request = {
-        "original_query": "Need current evidence.",
+        "fresh_query": "Need current evidence.",
+        "reply_context": {"platform_message_id": "reply-1"},
         "character_name": "Kazusa",
         "context": {
             "platform": "qq",
@@ -544,16 +569,65 @@ async def test_stage_1_research_pre_stage_04_request_shape_snapshot(monkeypatch)
 
 
 @pytest.mark.asyncio
+async def test_stage_1_research_passes_empty_reply_context_to_wrapper(
+    monkeypatch,
+) -> None:
+    """Empty reply metadata should reach the quote-aware wrapper unchanged."""
+    captured: dict = {}
+
+    async def _call_quote_aware_rag_supervisor(
+        *,
+        fresh_query: str,
+        reply_context: dict,
+        character_name: str,
+        context: dict,
+    ) -> dict:
+        del fresh_query, character_name, context
+        captured["reply_context"] = reply_context
+        return_value = {
+            "answer": "empty reply answer",
+            "known_facts": [],
+            "unknown_slots": [],
+            "loop_count": 1,
+        }
+        return return_value
+
+    monkeypatch.setattr(
+        supervisor_module,
+        "call_quote_aware_rag_supervisor",
+        _call_quote_aware_rag_supervisor,
+    )
+    state = _stage_1_research_snapshot_state()
+    state["reply_context"] = {}
+
+    result = await supervisor_module.stage_1_research(state)
+
+    assert captured["reply_context"] == {}
+    assert result["rag_result"]["answer"] == "empty reply answer"
+
+
+@pytest.mark.asyncio
 async def test_stage_1_research_skips_rag_for_unresolved_referents(monkeypatch) -> None:
     """Unresolved required references should skip RAG and preserve payload shape."""
     called = False
 
-    async def _call_rag_supervisor(*, original_query: str, character_name: str, context: dict) -> dict:
+    async def _call_quote_aware_rag_supervisor(
+        *,
+        fresh_query: str,
+        reply_context: dict,
+        character_name: str,
+        context: dict,
+    ) -> dict:
+        del fresh_query, reply_context, character_name, context
         nonlocal called
         called = True
         return {}
 
-    monkeypatch.setattr(supervisor_module, "call_rag_supervisor", _call_rag_supervisor)
+    monkeypatch.setattr(
+        supervisor_module,
+        "call_quote_aware_rag_supervisor",
+        _call_quote_aware_rag_supervisor,
+    )
 
     result = await supervisor_module.stage_1_research({
         "decontexualized_input": "这些是什么意思？",
@@ -610,7 +684,14 @@ async def test_stage_1_research_runs_rag_for_mixed_referents(monkeypatch) -> Non
     """Mixed referents should not trigger the old binary RAG skip cliff."""
     called = False
 
-    async def _call_rag_supervisor(*, original_query: str, character_name: str, context: dict) -> dict:
+    async def _call_quote_aware_rag_supervisor(
+        *,
+        fresh_query: str,
+        reply_context: dict,
+        character_name: str,
+        context: dict,
+    ) -> dict:
+        del fresh_query, reply_context, character_name, context
         nonlocal called
         called = True
         return {
@@ -620,7 +701,11 @@ async def test_stage_1_research_runs_rag_for_mixed_referents(monkeypatch) -> Non
             "loop_count": 1,
         }
 
-    monkeypatch.setattr(supervisor_module, "call_rag_supervisor", _call_rag_supervisor)
+    monkeypatch.setattr(
+        supervisor_module,
+        "call_quote_aware_rag_supervisor",
+        _call_quote_aware_rag_supervisor,
+    )
 
     result = await supervisor_module.stage_1_research({
         "decontexualized_input": "他上次说的那些关于X的话是什么意思？",
@@ -670,12 +755,23 @@ async def test_stage_1_research_skips_when_referents_are_all_unresolved(monkeypa
     """Structured unresolved referents should be authoritative."""
     called = False
 
-    async def _call_rag_supervisor(*, original_query: str, character_name: str, context: dict) -> dict:
+    async def _call_quote_aware_rag_supervisor(
+        *,
+        fresh_query: str,
+        reply_context: dict,
+        character_name: str,
+        context: dict,
+    ) -> dict:
+        del fresh_query, reply_context, character_name, context
         nonlocal called
         called = True
         return {}
 
-    monkeypatch.setattr(supervisor_module, "call_rag_supervisor", _call_rag_supervisor)
+    monkeypatch.setattr(
+        supervisor_module,
+        "call_quote_aware_rag_supervisor",
+        _call_quote_aware_rag_supervisor,
+    )
 
     result = await supervisor_module.stage_1_research({
         "decontexualized_input": "这些是什么意思？",

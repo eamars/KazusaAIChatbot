@@ -90,6 +90,7 @@ plans.
 | [consolidator_facts_prompt_budget_bugfix_plan.md](archive/completed/bugfix/consolidator_facts_prompt_budget_bugfix_plan.md) |
 | [conversation_progress_identity_leakage_bugfix_plan.md](archive/completed/bugfix/conversation_progress_identity_leakage_bugfix_plan.md) |
 | [l3_content_anchor_open_loop_resolution_plan.md](archive/completed/bugfix/l3_content_anchor_open_loop_resolution_plan.md) |
+| [quote_aware_rag_sequence_plan.md](archive/completed/bugfix/quote_aware_rag_sequence_plan.md) |
 | [rag_active_turn_conversation_row_exclusion_plan.md](archive/completed/bugfix/rag_active_turn_conversation_row_exclusion_plan.md) |
 | [rag_hybrid_search_time_config_plan.md](archive/completed/bugfix/rag_hybrid_search_time_config_plan.md) |
 | [rag_memory_evidence_remember_me_inner_path_bugfix_plan.md](archive/completed/bugfix/rag_memory_evidence_remember_me_inner_path_bugfix_plan.md) |
