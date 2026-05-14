@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from datetime import date
 from typing import Any
 
@@ -22,9 +22,12 @@ from kazusa_ai_chatbot.global_character_growth.models import (
     RUNTIME_CONTEXT_LIMIT,
     SHADOW_PROJECTION_LIMIT,
     CandidatePromptPayload,
+    CurrentTraitSummary,
     GlobalCharacterGrowthContext,
     InputQualityDiagnostics,
     MemoryCard,
+    PromptBudgetDiagnostics,
+    PromptBudgetStatus,
 )
 
 
@@ -38,6 +41,67 @@ def build_candidate_prompt_payload(
 
     memory_cards, _ = build_memory_cards(memory_rows, limit=limit)
     trait_summaries = project_current_traits(current_trait_rows)
+    payload = _candidate_prompt_payload_from_cards(
+        memory_cards=memory_cards,
+        trait_summaries=trait_summaries,
+    )
+    return payload
+
+
+def build_budgeted_candidate_prompt_payload(
+    *,
+    memory_rows: Sequence[Mapping[str, Any]],
+    current_trait_rows: Sequence[Mapping[str, Any]],
+    prompt_char_budget: int,
+    prompt_char_counter: Callable[[CandidatePromptPayload], int],
+    limit: int = MAX_MEMORY_CARDS,
+) -> tuple[CandidatePromptPayload, InputQualityDiagnostics, PromptBudgetDiagnostics]:
+    """Return a candidate payload trimmed to the rendered prompt budget."""
+
+    memory_cards, input_quality = build_memory_cards(memory_rows, limit=limit)
+    trait_summaries = project_current_traits(current_trait_rows)
+    payload = _candidate_prompt_payload_from_cards(
+        memory_cards=memory_cards,
+        trait_summaries=trait_summaries,
+    )
+    rendered_before = prompt_char_counter(payload)
+    rendered_after = rendered_before
+    dropped_cards = 0
+    while payload["memory_cards"] and rendered_after > prompt_char_budget:
+        remaining_cards = payload["memory_cards"][:-1]
+        dropped_cards += 1
+        payload = _candidate_prompt_payload_from_cards(
+            memory_cards=remaining_cards,
+            trait_summaries=trait_summaries,
+        )
+        rendered_after = prompt_char_counter(payload)
+
+    prompt_budget_status: PromptBudgetStatus = "within_budget"
+    if rendered_after > prompt_char_budget and not payload["memory_cards"]:
+        prompt_budget_status = "empty_after_budget"
+    elif dropped_cards:
+        prompt_budget_status = "trimmed_to_budget"
+
+    prompt_budget: PromptBudgetDiagnostics = {
+        "prompt_char_budget": prompt_char_budget,
+        "rendered_prompt_chars_before_budget": rendered_before,
+        "rendered_prompt_chars_after_budget": rendered_after,
+        "memory_cards_before_prompt_budget": len(memory_cards),
+        "memory_cards_after_prompt_budget": len(payload["memory_cards"]),
+        "dropped_memory_cards_for_prompt_budget": dropped_cards,
+        "prompt_budget_status": prompt_budget_status,
+    }
+    return_value = (payload, input_quality, prompt_budget)
+    return return_value
+
+
+def _candidate_prompt_payload_from_cards(
+    *,
+    memory_cards: list[MemoryCard],
+    trait_summaries: list[CurrentTraitSummary],
+) -> CandidatePromptPayload:
+    """Build the candidate payload from already-projected cards and traits."""
+
     payload: CandidatePromptPayload = {
         "evaluation_mode": EVALUATION_MODE,
         "prompt_version": PROMPT_VERSION,
@@ -93,10 +157,10 @@ def build_memory_cards(
 
 def project_current_traits(
     trait_rows: Sequence[Mapping[str, Any]],
-) -> list[dict[str, str]]:
+) -> list[CurrentTraitSummary]:
     """Project current traits into candidate-generation summaries."""
 
-    projected: list[dict[str, str]] = []
+    projected: list[CurrentTraitSummary] = []
     for row in trait_rows:
         if len(projected) >= MAX_CURRENT_TRAITS:
             break

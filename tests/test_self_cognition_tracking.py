@@ -562,6 +562,33 @@ def test_cognition_state_keeps_source_packet_inside_internal_percept(
     assert percept_payload["residue"]["internal_monologue"] == rendered_text
 
 
+def test_cognition_state_disables_visual_and_does_not_suppress_memory(
+    tmp_path,
+) -> None:
+    case = _commitment_case()
+    captured: dict[str, Any] = {}
+
+    def capture_state(state: dict[str, Any]) -> dict[str, Any]:
+        captured.update(state)
+        return _silent_cognition_output()
+
+    run_self_cognition_case(
+        case,
+        tmp_path,
+        cognition_client=capture_state,
+    )
+
+    state_debug_modes = captured["debug_modes"]
+    episode_debug_modes = captured["cognitive_episode"]["origin_metadata"][
+        "debug_modes"
+    ]
+
+    assert state_debug_modes == {"no_visual_directives": True}
+    assert episode_debug_modes == {"no_visual_directives": True}
+    assert "no_remember" not in state_debug_modes
+    assert "no_remember" not in episode_debug_modes
+
+
 def test_artifact_writer_uses_expected_file_names(tmp_path) -> None:
     payloads = {
         models.ARTIFACT_TRIGGER_RECORD: {"trigger_id": "trigger-001"},

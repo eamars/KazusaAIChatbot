@@ -119,6 +119,33 @@ def test_build_candidate_prompt_renders_payload_separately() -> None:
     assert json.loads(rendered.human_prompt) == payload
 
 
+def test_candidate_prompt_char_count_matches_rendered_prompts() -> None:
+    """Prompt size checks should measure the final rendered prompt pair."""
+
+    payload = {
+        "evaluation_mode": "global_character_growth_v1",
+        "prompt_version": "global_character_growth_candidate_v1",
+        "memory_cards": [],
+        "current_global_growth_traits": [],
+        "candidate_limits": {
+            "max_candidates": 4,
+            "max_source_cards_per_candidate": 8,
+        },
+        "allowed_growth_axes": ["clarity"],
+    }
+
+    rendered = llm.build_candidate_generation_prompt(
+        payload=payload,
+        character_name="Test Character",
+    )
+    count = llm.count_candidate_generation_prompt_chars(
+        payload=payload,
+        character_name="Test Character",
+    )
+
+    assert count == len(rendered.system_prompt) + len(rendered.human_prompt)
+
+
 def test_generate_growth_candidates_default_character_label_is_chinese() -> None:
     """Default prompt rendering should not inject an English role label."""
 

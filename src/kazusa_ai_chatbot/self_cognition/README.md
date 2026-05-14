@@ -14,15 +14,22 @@ The module supports two entry points:
   graph, optionally invokes the existing dialog graph once to render a message
   after cognition selects outward contact without explicit candidate text, and
   writes local artifacts under the requested output directory.
-- The opt-in service worker collects bounded visible/actionable source cases,
+- The service worker collects bounded visible/actionable source cases,
   builds the same route records in memory, records sanitized event-log
   telemetry, persists action-attempt state through the DB facade, and may hand
   a cognition-selected `send_message` action candidate to the existing
   `TaskDispatcher`.
 
-Production behavior is unchanged while `SELF_COGNITION_ENABLED=false`.
-When it is enabled, the only allowed outward production side effect is the
-normal dispatcher/scheduler handling of a non-duplicate action candidate.
+The production worker is enabled by default with `SELF_COGNITION_ENABLED=true`.
+Set it to `false` to suppress self-cognition worker activation. The only
+allowed outward production side effect is the normal dispatcher/scheduler
+handling of a non-duplicate action candidate.
+
+Self-cognition-created episodes set
+`origin_metadata.debug_modes.no_visual_directives=true` by default, so the
+shared L3 visual-directive LLM is skipped for self-cognition. These episodes do
+not set `no_remember`; durable self-cognition memory semantics are planned
+separately and are not implemented by this module contract.
 
 The module does not call adapters directly, write `/chat` conversation rows,
 run live-chat consolidation, update reflection state, update stable memory, or
@@ -34,7 +41,7 @@ an adapter send.
 
 Central settings live in `kazusa_ai_chatbot.config`:
 
-- `SELF_COGNITION_ENABLED`, default `false`.
+- `SELF_COGNITION_ENABLED`, default `true`.
 - `SELF_COGNITION_WORKER_INTERVAL_SECONDS`, default `3600`.
 - `SELF_COGNITION_MAX_CASES_PER_TICK`, default `3`.
 - `SELF_COGNITION_TRACKING_DIR`, default `self_cognition_runs`; used only by

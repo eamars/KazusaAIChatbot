@@ -73,6 +73,7 @@ CHARACTER_GLOBAL_USER_ID=00000000-0000-4000-8000-000000000001
 CONVERSATION_HISTORY_LIMIT=10
 SCHEDULED_TASKS_ENABLED=true
 COGNITION_VISUAL_DIRECTIVES_ENABLED=true
+SELF_COGNITION_ENABLED=true
 
 # MCP servers and timeouts
 MCP_SERVERS={"mcp-searxng":{"url":"http://localhost:4001/mcp"}}
@@ -95,6 +96,7 @@ REFLECTION_HOURLY_SLOTS_PER_TICK=3
 REFLECTION_DAILY_RUN_AFTER_LOCAL_TIME=04:30
 REFLECTION_PROMOTION_RUN_AFTER_LOCAL_TIME=05:00
 GLOBAL_CHARACTER_GROWTH_PASS_ENABLED=true
+GLOBAL_CHARACTER_GROWTH_PROMPT_CHAR_BUDGET=32000
 
 # Persistent profile-memory policy
 PROFILE_MEMORY_DIARY_TTL_SECONDS=7776000
@@ -135,6 +137,11 @@ expects an MCP server named `mcp-searxng` exposing `searxng_web_search` and
 `COGNITION_VISUAL_DIRECTIVES_ENABLED` is a brain-service level switch. Set it
 to `false` to skip L3 visual-directive generation globally; adapters and
 debug-client request payloads do not control this behavior.
+
+`SELF_COGNITION_ENABLED` defaults to `true`. Self-cognition-created episodes
+disable visual directives by default with
+`origin_metadata.debug_modes.no_visual_directives=true`, so normal
+self-cognition worker runs do not invoke the L3 visual-directive LLM.
 
 ## Dependencies
 
@@ -408,6 +415,9 @@ safe to run repeatedly.
 Global character growth runs after daily global reflection promotion when the
 worker is enabled and `GLOBAL_CHARACTER_GROWTH_PASS_ENABLED=true`. It writes
 only `global_character_growth_traits` and `global_character_growth_runs`.
+Candidate generation receives a final rendered prompt bounded by
+`GLOBAL_CHARACTER_GROWTH_PROMPT_CHAR_BUDGET`, which defaults to `32000`
+characters.
 
 Dry-run:
 

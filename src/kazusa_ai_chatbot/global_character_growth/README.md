@@ -161,6 +161,7 @@ applied, or failed invocation. Rows include:
 - rejected candidates,
 - trait updates,
 - log-only review projection,
+- prompt-budget diagnostics,
 - validation warnings,
 - raw LLM output,
 - summary,
@@ -211,6 +212,13 @@ rewritten or backfilled.
 The candidate LLM is a background consolidation-route call. It receives bounded
 memory cards and current trait summaries, then proposes candidates only.
 
+Before the candidate LLM is called, the final rendered system+human prompt is
+measured against `GLOBAL_CHARACTER_GROWTH_PROMPT_CHAR_BUDGET`, which defaults
+to `32000` characters. If the rendered prompt exceeds the budget, memory cards
+are dropped from the tail of the already-ranked card list until the prompt fits
+or no cards remain. If all cards are dropped and the rendered prompt still
+exceeds budget, the run is skipped and the LLM is not called.
+
 The LLM must not:
 
 - generate database operations,
@@ -239,11 +247,14 @@ The reflection worker invokes the growth pass after daily global reflection
 promotion when:
 
 - `GLOBAL_CHARACTER_GROWTH_PASS_ENABLED=true`,
+- `GLOBAL_CHARACTER_GROWTH_PROMPT_CHAR_BUDGET=32000`,
 - the worker reaches the promotion step,
 - the busy probe remains idle after promotion.
 
-The flag defaults to `true` and is the rollback switch. Changing it requires a
-process restart unless a test monkeypatches the loaded module value.
+The pass flag defaults to `true` and is the rollback switch. The prompt budget
+is a conservative character budget for the final rendered prompt, not an exact
+token budget. Changing either value requires a process restart unless a test
+monkeypatches the loaded module value.
 
 ## Manual Operations
 
@@ -272,6 +283,8 @@ review projection count, input-quality density, and warning count.
 ## Failure Modes
 
 - No eligible promoted reflection memory: write a skipped run record.
+- Prompt budget drops all eligible cards: write a skipped run record and do not
+  call the candidate LLM.
 - LLM endpoint or parsing failure: write a failed run record with error text.
 - Dry-run with write enablement: raise before writes.
 - Apply without write enablement: raise before writes.

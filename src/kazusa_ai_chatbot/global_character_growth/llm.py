@@ -141,6 +141,21 @@ def build_candidate_generation_prompt(
     return result
 
 
+def count_candidate_generation_prompt_chars(
+    *,
+    payload: CandidatePromptPayload,
+    character_name: str = "当前主体",
+) -> int:
+    """Return rendered system+human prompt characters for candidate generation."""
+
+    rendered = build_candidate_generation_prompt(
+        payload=payload,
+        character_name=character_name,
+    )
+    count = len(rendered.system_prompt) + len(rendered.human_prompt)
+    return count
+
+
 def validate_llm_candidate_response_shape(parsed_response: dict[str, Any]) -> list[str]:
     """Return shape warnings for parsed candidate-generation output."""
 

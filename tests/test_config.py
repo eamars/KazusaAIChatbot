@@ -547,6 +547,50 @@ class TestReflectionCycleConfig:
         assert not hasattr(config, "REFLECTION_" + "CONTEXT_ENABLED")
 
 
+class TestGlobalCharacterGrowthConfig:
+    def test_prompt_char_budget_defaults_to_32000(self, tmp_path):
+        env = _configured_subprocess_env_without_dotenv()
+        env.pop("GLOBAL_CHARACTER_GROWTH_PROMPT_CHAR_BUDGET", None)
+
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-c",
+                (
+                    "import kazusa_ai_chatbot.config as config; "
+                    "print(config.GLOBAL_CHARACTER_GROWTH_PROMPT_CHAR_BUDGET)"
+                ),
+            ],
+            cwd=tmp_path,
+            env=env,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+        assert result.returncode == 0
+        assert result.stdout.strip() == "32000"
+
+    def test_prompt_char_budget_fails_fast_when_invalid(self, tmp_path):
+        env = _configured_subprocess_env_without_dotenv()
+        env["GLOBAL_CHARACTER_GROWTH_PROMPT_CHAR_BUDGET"] = "0"
+
+        result = subprocess.run(
+            [sys.executable, "-c", "import kazusa_ai_chatbot.config"],
+            cwd=tmp_path,
+            env=env,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+        assert result.returncode != 0
+        assert (
+            "GLOBAL_CHARACTER_GROWTH_PROMPT_CHAR_BUDGET must be >= 1"
+            in result.stderr
+        )
+
+
 class TestSelfCognitionConfig:
     def test_self_cognition_config_defaults_are_minimal(self, tmp_path):
         env = _configured_subprocess_env_without_dotenv()
@@ -592,7 +636,7 @@ class TestSelfCognitionConfig:
 
         assert result.returncode == 0
         assert result.stdout.splitlines() == [
-            "False",
+            "True",
             "3600",
             "3",
             "self_cognition_runs",

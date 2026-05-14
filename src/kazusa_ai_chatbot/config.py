@@ -320,9 +320,9 @@ COGNITION_VISUAL_DIRECTIVES_ENABLED = os.getenv(
     "true",
 ).lower() in ("1", "true", "yes")
 
-# Self-cognition is off for live activation until scheduler, dispatcher,
-# adapter, and persistence boundaries are wired intentionally.
-SELF_COGNITION_ENABLED = _bool_from_env("SELF_COGNITION_ENABLED", "false")
+# Self-cognition runs by default as a background reasoning loop. Its runtime
+# output and persistence boundaries stay controlled by the self-cognition worker.
+SELF_COGNITION_ENABLED = _bool_from_env("SELF_COGNITION_ENABLED", "true")
 SELF_COGNITION_WORKER_INTERVAL_SECONDS = _positive_int_from_env(
     "SELF_COGNITION_WORKER_INTERVAL_SECONDS",
     "3600",
@@ -404,6 +404,10 @@ GLOBAL_CHARACTER_GROWTH_PASS_ENABLED = os.getenv(
     "GLOBAL_CHARACTER_GROWTH_PASS_ENABLED",
     "true",
 ).lower() in ("1", "true", "yes")
+GLOBAL_CHARACTER_GROWTH_PROMPT_CHAR_BUDGET = _positive_int_from_env(
+    "GLOBAL_CHARACTER_GROWTH_PROMPT_CHAR_BUDGET",
+    "32000",
+)
 
 # Brain service
 BRAIN_EXECUTOR_COUNT = int(os.getenv("BRAIN_EXECUTOR_COUNT", "1"))

@@ -76,6 +76,85 @@ def test_candidate_prompt_payload_caps_inputs_and_projects_shape() -> None:
     assert len(first_card["source_reflection_run_ids"]) <= 8
 
 
+def test_budgeted_candidate_prompt_payload_trims_until_rendered_prompt_fits() -> None:
+    """Candidate payload budgeting should drop tail cards until the prompt fits."""
+
+    memory_rows = [_memory_doc(index) for index in range(4)]
+    prompt_char_budget = 2100
+
+    def prompt_char_counter(payload: models.CandidatePromptPayload) -> int:
+        card_chars = sum(
+            len(card["content"]) + len(card["confidence_note"])
+            for card in payload["memory_cards"]
+        )
+        count = 1000 + card_chars
+        return count
+
+    unbudgeted_payload = projection.build_candidate_prompt_payload(
+        memory_rows=memory_rows,
+        current_trait_rows=[_trait_doc(1, maturity_band="promoted")],
+        limit=80,
+    )
+    expected_before_budget = prompt_char_counter(unbudgeted_payload)
+
+    payload, input_quality, prompt_budget = (
+        projection.build_budgeted_candidate_prompt_payload(
+            memory_rows=memory_rows,
+            current_trait_rows=[_trait_doc(1, maturity_band="promoted")],
+            prompt_char_budget=prompt_char_budget,
+            prompt_char_counter=prompt_char_counter,
+            limit=80,
+        )
+    )
+
+    assert prompt_char_counter(payload) <= prompt_char_budget
+    assert input_quality["eligible_memory_cards"] == 4
+    assert prompt_budget == {
+        "prompt_char_budget": prompt_char_budget,
+        "rendered_prompt_chars_before_budget": expected_before_budget,
+        "rendered_prompt_chars_after_budget": prompt_char_counter(payload),
+        "memory_cards_before_prompt_budget": 4,
+        "memory_cards_after_prompt_budget": 2,
+        "dropped_memory_cards_for_prompt_budget": 2,
+        "prompt_budget_status": "trimmed_to_budget",
+    }
+    assert [card["memory_unit_id"] for card in payload["memory_cards"]] == [
+        "memory-0",
+        "memory-1",
+    ]
+
+
+def test_budgeted_candidate_prompt_payload_reports_empty_after_budget() -> None:
+    """If even an empty payload is too large, diagnostics should make that clear."""
+
+    memory_rows = [_memory_doc(index) for index in range(3)]
+    prompt_char_budget = 2000
+
+    def prompt_char_counter(_payload: models.CandidatePromptPayload) -> int:
+        count = prompt_char_budget + 1
+        return count
+
+    payload, input_quality, prompt_budget = (
+        projection.build_budgeted_candidate_prompt_payload(
+            memory_rows=memory_rows,
+            current_trait_rows=[],
+            prompt_char_budget=prompt_char_budget,
+            prompt_char_counter=prompt_char_counter,
+            limit=80,
+        )
+    )
+
+    assert payload["memory_cards"] == []
+    assert input_quality["eligible_memory_cards"] == 3
+    assert prompt_budget["prompt_char_budget"] == prompt_char_budget
+    assert prompt_budget["rendered_prompt_chars_before_budget"] == 2001
+    assert prompt_budget["rendered_prompt_chars_after_budget"] == 2001
+    assert prompt_budget["memory_cards_before_prompt_budget"] == 3
+    assert prompt_budget["memory_cards_after_prompt_budget"] == 0
+    assert prompt_budget["dropped_memory_cards_for_prompt_budget"] == 3
+    assert prompt_budget["prompt_budget_status"] == "empty_after_budget"
+
+
 def test_input_quality_diagnostics_are_human_auditable() -> None:
     """Run records need enough input diagnostics to explain sparse output."""
 

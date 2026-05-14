@@ -59,6 +59,11 @@ GrowthAxis = Literal[
 TraitStatus = Literal["active", "superseded", "rejected"]
 MaturityBand = Literal["observed", "emerging", "stabilizing", "promoted"]
 RunStatus = Literal["dry_run", "applied", "skipped", "failed"]
+PromptBudgetStatus = Literal[
+    "within_budget",
+    "trimmed_to_budget",
+    "empty_after_budget",
+]
 
 
 class MemoryCard(TypedDict):
@@ -111,6 +116,18 @@ class InputQualityDiagnostics(TypedDict):
     promotion_density: str
     dropped_rows: dict[str, int]
     quality_notes: list[str]
+
+
+class PromptBudgetDiagnostics(TypedDict):
+    """Auditable final prompt-size diagnostics for run documents."""
+
+    prompt_char_budget: int
+    rendered_prompt_chars_before_budget: int
+    rendered_prompt_chars_after_budget: int
+    memory_cards_before_prompt_budget: int
+    memory_cards_after_prompt_budget: int
+    dropped_memory_cards_for_prompt_budget: int
+    prompt_budget_status: PromptBudgetStatus
 
 
 class AcceptedCandidate(TypedDict, total=False):
@@ -177,4 +194,6 @@ class GlobalCharacterGrowthRunResult(TypedDict, total=False):
     promoted_trait_count: int
     shadow_projection_count: int
     input_quality_density: str
+    dropped_memory_cards_for_prompt_budget: int
+    rendered_prompt_chars_after_budget: int
     warning_count: int
