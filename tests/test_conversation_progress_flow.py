@@ -137,7 +137,7 @@ def test_build_episode_state_doc_caps_phase2_fields() -> None:
             "status": "active",
             "episode_label": long_text,
             "continuity": "same_episode",
-            "conversation_mode": "task_support",
+            "conversation_mode": long_text,
             "episode_phase": "developing",
             "topic_momentum": "stable",
             "current_thread": long_text,
@@ -157,6 +157,7 @@ def test_build_episode_state_doc_caps_phase2_fields() -> None:
     )
 
     assert len(document["current_thread"]) == 180
+    assert len(document["conversation_mode"]) == 80
     assert len(document["resolved_threads"]) == 5
     assert len(document["avoid_reopening"]) == 5
     assert len(document["next_affordances"]) == 4
@@ -226,27 +227,57 @@ def test_recorder_validator_normalizes_scalar_string_list_field() -> None:
     assert payload["next_affordances"] == ["give a concrete third point"]
 
 
-def test_recorder_validator_rejects_invalid_phase2_label() -> None:
-    """Recorder validator rejects labels outside the agreed closed sets."""
+def test_recorder_validator_accepts_free_text_conversation_mode() -> None:
+    """Recorder validator keeps conversation_mode as bounded semantic text."""
 
-    try:
+    payload = recorder.validate_recorder_output({
+        "status": "active",
+        "episode_label": "boundary discussion",
+        "continuity": "same_episode",
+        "conversation_mode": "serious_boundary_setting",
+        "episode_phase": "developing",
+        "topic_momentum": "stable",
+        "current_thread": "boundary setting",
+        "user_goal": "",
+        "current_blocker": "",
+        "user_state_updates": [],
+        "assistant_moves": [],
+        "overused_moves": [],
+        "open_loops": [],
+        "resolved_threads": [],
+        "avoid_reopening": [],
+        "emotional_trajectory": "tense but contained",
+        "next_affordances": [],
+        "progression_guidance": "",
+    })
+
+    assert payload["conversation_mode"] == "serious_boundary_setting"
+
+
+def test_recorder_validator_rejects_non_string_conversation_mode() -> None:
+    """Recorder validator still rejects malformed conversation_mode shapes."""
+
+    with pytest.raises(ValueError, match="conversation_mode"):
         recorder.validate_recorder_output({
             "status": "active",
-            "episode_label": "slides_help",
+            "episode_label": "bad output",
             "continuity": "same_episode",
-            "conversation_mode": "unknown_mode",
+            "conversation_mode": ["serious_boundary_setting"],
             "episode_phase": "developing",
             "topic_momentum": "stable",
+            "current_thread": "boundary setting",
+            "user_goal": "",
+            "current_blocker": "",
             "user_state_updates": [],
             "assistant_moves": [],
             "overused_moves": [],
             "open_loops": [],
+            "resolved_threads": [],
+            "avoid_reopening": [],
+            "emotional_trajectory": "",
+            "next_affordances": [],
             "progression_guidance": "",
         })
-    except ValueError as exc:
-        assert "conversation_mode" in str(exc)
-    else:
-        raise AssertionError("invalid conversation_mode was accepted")
 
 
 def test_recorder_prior_state_exposes_entry_text_lists_only() -> None:
@@ -355,6 +386,7 @@ def test_recorder_prompt_mentions_phase2_flow_contract() -> None:
     prompt = recorder.render_recorder_prompt("Character")
 
     assert "conversation_mode" in prompt
+    assert "80" in prompt
     assert "episode_phase" in prompt
     assert "topic_momentum" in prompt
     assert "next_affordances" in prompt

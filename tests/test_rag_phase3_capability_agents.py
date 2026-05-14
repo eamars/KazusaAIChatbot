@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import logging
+from types import SimpleNamespace
 
 import pytest
 
+from kazusa_ai_chatbot.rag import conversation_evidence_agent as conversation_evidence_module
 from kazusa_ai_chatbot.rag import memory_evidence_agent as memory_evidence_module
 from kazusa_ai_chatbot.rag.conversation_evidence_agent import (
     ConversationEvidenceAgent,
@@ -1003,6 +1005,63 @@ async def test_conversation_evidence_filter_uses_resolved_person_ref() -> None:
     assert len(filter_worker.calls) == 1
     assert filter_worker.calls[0]["context"]["global_user_id"] == "resolved-user"
     assert result["result"]["primary_worker"] == "conversation_filter_agent"
+
+
+@pytest.mark.asyncio
+async def test_conversation_evidence_current_user_scope_ignores_selector_person_ref(
+    monkeypatch,
+) -> None:
+    """Current-user scope should not let the selector invent a person dependency."""
+
+    class _FakeSelectorLLM:
+        """Selector test double that returns the observed bad dependency flag."""
+
+        async def ainvoke(self, _messages: list) -> SimpleNamespace:
+            """Return a valid selector payload with a bad person-ref requirement."""
+            return_value = SimpleNamespace(
+                content=(
+                    '{"worker": "conversation_search_agent", '
+                    '"reason": "semantic message evidence", '
+                    '"requires_person_ref": true}'
+                )
+            )
+            return return_value
+
+    monkeypatch.setattr(
+        conversation_evidence_module,
+        "_selector_llm",
+        _FakeSelectorLLM(),
+    )
+    agent = ConversationEvidenceAgent()
+    search_worker = _FakeWorker(
+        {
+            "resolved": True,
+            "result": [
+                {
+                    "body_text": "The user described explicit accusations.",
+                    "display_name": "Tester",
+                    "global_user_id": "user-1",
+                }
+            ],
+            "attempts": 1,
+            "cache": {"enabled": False, "hit": False, "reason": "open_range"},
+        }
+    )
+    agent.search_agent = search_worker
+
+    result = await agent.run(
+        (
+            "Conversation-evidence: retrieve messages from current_user "
+            "containing sexual harassment or explicit accusations "
+            "speaker=current_user"
+        ),
+        _base_context(),
+    )
+
+    assert result["resolved"] is True
+    assert len(search_worker.calls) == 1
+    assert search_worker.calls[0]["context"]["global_user_id"] == "user-1"
+    assert result["result"]["primary_worker"] == "conversation_search_agent"
 
 
 @pytest.mark.asyncio

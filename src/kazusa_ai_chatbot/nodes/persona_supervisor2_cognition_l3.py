@@ -735,7 +735,7 @@ logical_stance + character_intent
     "conversation_progress": {{
         "status": "active | new_episode | suspended | closed",
         "continuity": "same_episode | related_shift | sharp_transition",
-        "conversation_mode": "task_support | emotional_support | casual_chat | playful_banter | meta_discussion | group_ambient | mixed",
+        "conversation_mode": "80 字符以内的短语义描述，可直接按语义读取，不是枚举",
         "episode_phase": "opening | developing | deepening | pivoting | stuck_loop | resolving | cooling_down",
         "topic_momentum": "stable | drifting | quick_pivot | fragmented | sharp_break",
         "current_thread": "当前正在讨论的中性线程",

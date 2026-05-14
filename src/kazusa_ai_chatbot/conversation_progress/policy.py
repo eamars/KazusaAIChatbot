@@ -29,15 +29,6 @@ MAX_PROGRESS_PROMPT_CHARS = 5000
 VALID_CONTINUITY = {"same_episode", "related_shift", "sharp_transition"}
 VALID_STATUS = {"active", "suspended", "closed"}
 VALID_EPISODE_PHASE = {"opening", "developing", "deepening", "pivoting", "stuck_loop", "resolving", "cooling_down"}
-VALID_CONVERSATION_MODE = {
-    "task_support",
-    "emotional_support",
-    "casual_chat",
-    "playful_banter",
-    "meta_discussion",
-    "group_ambient",
-    "mixed",
-}
 VALID_TOPIC_MOMENTUM = {"stable", "drifting", "quick_pivot", "fragmented", "sharp_break"}
 
 

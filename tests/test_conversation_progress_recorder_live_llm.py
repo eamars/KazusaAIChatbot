@@ -223,6 +223,7 @@ async def test_live_recorder_does_not_use_generic_active_character_labels(
     )
 
     output_text = _all_output_text(result)
+    assert len(result["conversation_mode"]) <= 80, trace_payload
     assert not _identity_hits(output_text), trace_payload
 
 

@@ -16,7 +16,6 @@ from kazusa_ai_chatbot.config import (
 from kazusa_ai_chatbot.conversation_progress.models import ConversationProgressRecordInput
 from kazusa_ai_chatbot.conversation_progress.policy import (
     VALID_CONTINUITY,
-    VALID_CONVERSATION_MODE,
     VALID_EPISODE_PHASE,
     VALID_STATUS,
     VALID_TOPIC_MOMENTUM,
@@ -41,9 +40,10 @@ _RECORDER_PROMPT = '''\
 3. 本轮用户、`content_anchors` 或 `final_dialog` 没有正向重申的旧时间性 open loop，默认删除。
 4. 不生成下一轮台词，不写日记，不写长期记忆，不复制完整回复。
 
-# 语言与枚举
+# 语言与字段
 - 自由文本字段使用简体中文；schema key、枚举值、ID、URL、代码、命令保持原样。
-- `continuity`、`status`、`conversation_mode`、`episode_phase`、`topic_momentum` 必须使用输出格式中的英文枚举。
+- `continuity`、`status`、`episode_phase`、`topic_momentum` 必须使用输出格式中的英文枚举。
+- `conversation_mode` 是给下游 LLM 读取的短语义描述，不是枚举；用 80 字符以内的简短英文或简体中文短语概括互动类型。
 - 用户原文和专有名词只有在必须精确保留时才保持原语言。
 
 # 输入读取
@@ -124,7 +124,7 @@ _RECORDER_PROMPT = '''\
     "continuity": "same_episode | related_shift | sharp_transition",
     "status": "active | suspended | closed",
     "episode_label": "短语义标签",
-    "conversation_mode": "task_support | emotional_support | casual_chat | playful_banter | meta_discussion | group_ambient | mixed",
+    "conversation_mode": "80 字符以内的短语义描述，例如 task_support / serious_boundary_setting / casual_chat",
     "episode_phase": "opening | developing | deepening | pivoting | stuck_loop | resolving | cooling_down",
     "topic_momentum": "stable | drifting | quick_pivot | fragmented | sharp_break",
     "current_thread": "一行中性当前话题；不夹带旧时间性承诺",
@@ -453,10 +453,9 @@ def validate_recorder_output(payload: dict) -> dict:
         "continuity": continuity,
         "status": status,
         "episode_label": _require_string(payload.get("episode_label", ""), "episode_label"),
-        "conversation_mode": _validated_label(
+        "conversation_mode": _require_string(
             payload.get("conversation_mode", ""),
             "conversation_mode",
-            VALID_CONVERSATION_MODE,
         ),
         "episode_phase": _validated_label(
             payload.get("episode_phase", ""),
