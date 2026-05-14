@@ -338,15 +338,27 @@ def _deterministic_plan(task: str) -> dict[str, Any] | None:
     return None
 
 
-def _normalize_selector_plan(raw_plan: dict[str, Any]) -> dict[str, Any]:
-    """Normalize an LLM selector payload to approved fields."""
+def _normalize_selector_plan(
+    raw_plan: dict[str, Any],
+    task: str,
+) -> dict[str, Any]:
+    """Normalize selector output while keeping dependency checks deterministic.
+
+    Args:
+        raw_plan: Parsed selector LLM output.
+        task: Conversation-evidence slot text being planned.
+
+    Returns:
+        Approved worker plan with person-reference requirements derived from
+        the slot text instead of the selector payload.
+    """
     worker = text_or_empty(raw_plan.get("worker"))
     if worker == "conversation_keyword_agent":
         worker = "conversation_search_agent"
     if worker not in _KNOWN_WORKERS:
         worker = "conversation_search_agent"
     reason = text_or_empty(raw_plan.get("reason"))
-    requires_person_ref = bool(raw_plan.get("requires_person_ref"))
+    requires_person_ref = worker != "incompatible" and _requires_person_ref(task)
     plan = {
         "worker": worker,
         "reason": reason,
@@ -369,9 +381,8 @@ Do not answer from durable memory, active episode progress, user profiles, or we
    The search worker performs hybrid semantic plus literal-anchor retrieval.
 4. Use conversation_filter_agent for known user/time/date-window retrieval.
 5. Use conversation_aggregate_agent for counts, rankings, or grouped stats.
-6. Set requires_person_ref=true when the task uses
-   speaker=person resolved in slot N or otherwise references a person from a
-   previous slot.
+6. Do not decide whether a structured person reference is required. That
+   dependency is validated deterministically from the slot text.
 
 # Input Format
 {
@@ -385,8 +396,7 @@ Do not answer from durable memory, active episode progress, user profiles, or we
 Return valid JSON only:
 {
   "worker": "conversation_search_agent | conversation_filter_agent | conversation_aggregate_agent | incompatible",
-  "reason": "short source selection explanation",
-  "requires_person_ref": true
+  "reason": "short source selection explanation"
 }
 """
 _selector_llm = get_llm(
@@ -413,7 +423,7 @@ async def _select_plan(task: str, context: dict[str, Any]) -> dict[str, Any]:
     raw_plan = parse_llm_json_output(response.content)
     if not isinstance(raw_plan, dict):
         raw_plan = {}
-    plan = _normalize_selector_plan(raw_plan)
+    plan = _normalize_selector_plan(raw_plan, task)
     return plan
 
 

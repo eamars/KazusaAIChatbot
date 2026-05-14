@@ -7,7 +7,9 @@ from types import SimpleNamespace
 
 import pytest
 
-from kazusa_ai_chatbot.rag import conversation_evidence_agent as conversation_evidence_module
+from kazusa_ai_chatbot.rag import (
+    conversation_evidence_agent as conversation_evidence_module,
+)
 from kazusa_ai_chatbot.rag import memory_evidence_agent as memory_evidence_module
 from kazusa_ai_chatbot.rag.conversation_evidence_agent import (
     ConversationEvidenceAgent,
