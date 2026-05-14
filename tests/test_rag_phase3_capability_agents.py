@@ -1266,6 +1266,48 @@ async def test_conversation_evidence_active_character_scope_uses_character_ident
 
 
 @pytest.mark.asyncio
+async def test_conversation_evidence_current_episode_active_character_definition_request_uses_conversation_worker() -> None:
+    """Current-episode transcript proof is chat evidence, not Recall state."""
+    agent = ConversationEvidenceAgent()
+    search_worker = _FakeWorker(
+        {
+            "resolved": True,
+            "result": [
+                {
+                    "body_text": '你先解释一下呗，我等你的定义呢',
+                    "display_name": "Kazusa",
+                    "global_user_id": "character-1",
+                }
+            ],
+            "attempts": 1,
+            "cache": {"enabled": False, "hit": False, "reason": "open_range"},
+        }
+    )
+    agent.search_agent = search_worker
+
+    result = await agent.run(
+        (
+            "Conversation-evidence: retrieve recent messages from the "
+            "current episode where the active character asked about yandere "
+            "definition speaker=active_character"
+        ),
+        _base_context(
+            character_profile={
+                "global_user_id": "character-1",
+                "name": "Kazusa",
+            },
+        ),
+    )
+
+    assert result["resolved"] is True
+    assert len(search_worker.calls) == 1
+    worker_context = search_worker.calls[0]["context"]
+    assert worker_context["global_user_id"] == "character-1"
+    assert worker_context["display_name"] == "Kazusa"
+    assert result["result"]["primary_worker"] == "conversation_search_agent"
+
+
+@pytest.mark.asyncio
 async def test_conversation_evidence_active_character_scope_warns_without_identity(
     caplog,
 ) -> None:
@@ -1363,6 +1405,23 @@ async def test_conversation_evidence_rejects_active_agreement_intent() -> None:
 
     result = await agent.run(
         "Conversation-evidence: retrieve active agreement for today's appointment",
+        _base_context(),
+    )
+
+    assert result["resolved"] is False
+    assert result["result"]["missing_context"] == ["incompatible_intent:Recall"]
+    assert keyword_worker.calls == []
+
+
+@pytest.mark.asyncio
+async def test_conversation_evidence_rejects_episode_state_intent() -> None:
+    """Current episode state lookup belongs to Recall, not chat search."""
+    agent = ConversationEvidenceAgent()
+    keyword_worker = _FakeWorker({"resolved": True, "result": []})
+    agent.search_agent = keyword_worker
+
+    result = await agent.run(
+        "Conversation-evidence: retrieve where the current episode left off",
         _base_context(),
     )
 

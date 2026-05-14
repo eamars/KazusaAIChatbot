@@ -38,6 +38,7 @@ long_term/todo.md
 
 | Plan | Status | Execution |
 |---|---|---|
+| [rag_2_1_initializer_subagent_contract_plan.md](active/short_term/rag_2_1_initializer_subagent_contract_plan.md) | draft | Do not execute until approved |
 | [self_cognition_memory_semantics_plan.md](active/short_term/self_cognition_memory_semantics_plan.md) | draft | Do not execute until discovery decisions are resolved and approved |
 
 ## Active Bugfix Plans
@@ -93,6 +94,7 @@ plans.
 | [rag_active_turn_conversation_row_exclusion_plan.md](archive/completed/bugfix/rag_active_turn_conversation_row_exclusion_plan.md) |
 | [rag_hybrid_search_time_config_plan.md](archive/completed/bugfix/rag_hybrid_search_time_config_plan.md) |
 | [rag_memory_evidence_remember_me_inner_path_bugfix_plan.md](archive/completed/bugfix/rag_memory_evidence_remember_me_inner_path_bugfix_plan.md) |
+| [rag_conversation_evidence_current_episode_boundary_bugfix_plan.md](archive/completed/bugfix/rag_conversation_evidence_current_episode_boundary_bugfix_plan.md) |
 | [rag_retrieval_top_k_embedding_tuning_plan.md](archive/completed/bugfix/rag_retrieval_top_k_embedding_tuning_plan.md) |
 | [self_cognition_background_context_budget_bugfix_plan.md](archive/completed/bugfix/self_cognition_background_context_budget_bugfix_plan.md) |
 | [task_dispatcher_json_contract_bugfix_plan.md](archive/completed/bugfix/task_dispatcher_json_contract_bugfix_plan.md) |

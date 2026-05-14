@@ -53,6 +53,26 @@ _KNOWN_WORKERS = {
     "conversation_aggregate_agent",
     "incompatible",
 }
+_RECALL_OWNED_TASK_MARKERS = (
+    "active agreement",
+    "active promise",
+    "active commitment",
+    "ongoing agreement",
+    "ongoing promise",
+    "ongoing commitment",
+    "current plan",
+    "current plans",
+    "open loop",
+    "open loops",
+    "unresolved loop",
+    "unresolved loops",
+    "next step",
+    "episode position",
+    "episode state",
+    "current episode state",
+    "where the current episode left off",
+    "where current episode left off",
+)
 _EXACT_ANCHOR_CHARS = (
     '"',
     "'",
@@ -210,6 +230,27 @@ def _requires_person_ref(task: str) -> bool:
     return return_value
 
 
+def _recall_owned_task_reason(task_body: str) -> str:
+    """Return Recall when a conversation task asks for episode state.
+
+    Args:
+        task_body: Conversation-evidence slot text without the capability
+            prefix.
+
+    Returns:
+        ``"Recall"`` when the task belongs to active episode recall; otherwise
+        an empty string.
+    """
+
+    normalized = task_body.lower()
+    is_recall_task = any(
+        marker in normalized
+        for marker in _RECALL_OWNED_TASK_MARKERS
+    )
+    reason = "Recall" if is_recall_task else ""
+    return reason
+
+
 def _deterministic_plan(task: str) -> dict[str, Any] | None:
     """Parse structured conversation-evidence slots without selector LLM."""
 
@@ -217,11 +258,12 @@ def _deterministic_plan(task: str) -> dict[str, Any] | None:
     normalized = task_body.lower()
     speaker_scope = _speaker_scope(task)
     requires_person_ref = _requires_person_ref(task)
+    incompatible_reason = _recall_owned_task_reason(task_body)
 
-    if "active agreement" in normalized or "current episode" in normalized:
+    if incompatible_reason:
         plan = {
             "worker": "incompatible",
-            "reason": "Recall",
+            "reason": incompatible_reason,
             "requires_person_ref": False,
         }
         return plan

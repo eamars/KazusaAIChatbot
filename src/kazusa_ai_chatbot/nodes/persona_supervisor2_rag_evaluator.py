@@ -247,6 +247,33 @@ def _unresolved_summary(slot: str, raw_result: object) -> str:
             summary = f'检索到候选结果，但未确认足以解决槽位。槽位: {slot}'
             return summary
 
+        missing_context = _compact_continuation_text_list(
+            raw_result.get('missing_context')
+        )
+        if missing_context:
+            incompatible_routes = []
+            for item in missing_context:
+                if not item.startswith('incompatible_intent:'):
+                    continue
+                _, _, route = item.partition(':')
+                if route:
+                    incompatible_routes.append(route)
+
+            if incompatible_routes:
+                route_text = '、'.join(incompatible_routes)
+                summary = (
+                    f'检索来源不匹配，当前槽位应由 {route_text} 处理；'
+                    f'未将该结果解释为记录不存在。槽位: {slot}'
+                )
+                return summary
+
+            context_text = '、'.join(missing_context)
+            summary = (
+                f'检索缺少必要上下文，未确认槽位。'
+                f'槽位: {slot}。缺少: {context_text}'
+            )
+            return summary
+
     summary = f'检索未返回相关结果。槽位: {slot}'
     return summary
 
@@ -740,6 +767,9 @@ _finalizer_llm = get_llm(
     base_url=RAG_SUBAGENT_LLM_BASE_URL,
     api_key=RAG_SUBAGENT_LLM_API_KEY,
 )
+_FINALIZER_UNRESOLVED_FACT_LIMIT = 5
+_FINALIZER_UNRESOLVED_SLOT_LIMIT = 200
+_FINALIZER_UNRESOLVED_SUMMARY_LIMIT = 400
 
 
 def _finalizer_time_context(state: ProgressiveRAGState) -> dict[str, object]:
@@ -764,6 +794,57 @@ def _finalizer_time_context(state: ProgressiveRAGState) -> dict[str, object]:
     return return_value
 
 
+def _all_known_facts_unresolved(known_facts: object) -> bool:
+    """Return whether every collected RAG fact is unresolved."""
+
+    if not isinstance(known_facts, list):
+        return_value = False
+        return return_value
+
+    if not known_facts:
+        return_value = False
+        return return_value
+
+    for fact in known_facts:
+        if not isinstance(fact, dict):
+            return_value = False
+            return return_value
+        if fact.get("resolved") is not False:
+            return_value = False
+            return return_value
+
+    return_value = True
+    return return_value
+
+
+def _unresolved_finalizer_answer(known_facts: list[dict]) -> str:
+    """Summarize all-unresolved RAG output without inferring absence."""
+
+    fact_lines: list[str] = []
+    for fact in known_facts[:_FINALIZER_UNRESOLVED_FACT_LIMIT]:
+        slot = _clip_llm_summary_text(
+            fact.get("slot", ""),
+            limit=_FINALIZER_UNRESOLVED_SLOT_LIMIT,
+        )
+        summary = _clip_llm_summary_text(
+            fact.get("summary", ""),
+            limit=_FINALIZER_UNRESOLVED_SUMMARY_LIMIT,
+        )
+        if slot and summary:
+            fact_lines.append(f"{slot}: {summary}")
+            continue
+        if summary:
+            fact_lines.append(summary)
+
+    details = "；".join(fact_lines)
+    if details:
+        final_answer = f"本次检索没有得到已确认事实。未解决槽位: {details}"
+        return final_answer
+
+    final_answer = "本次检索没有得到已确认事实。"
+    return final_answer
+
+
 async def rag_finalizer(state: ProgressiveRAGState) -> dict:
     """Synthesise the final answer from all collected slot results.
 
@@ -773,11 +854,21 @@ async def rag_finalizer(state: ProgressiveRAGState) -> dict:
     Returns:
         Partial state update with final_answer set.
     """
+    known_facts = state.get("known_facts", [])
+    if _all_known_facts_unresolved(known_facts):
+        final_answer = _unresolved_finalizer_answer(known_facts)
+        logger.info(
+            "RAG2 finalizer deterministic unresolved output: "
+            f"answer={log_preview(final_answer)}"
+        )
+        return_value = {"final_answer": final_answer}
+        return return_value
+
     system_prompt = SystemMessage(content=_FINALIZER_PROMPT)
     finalizer_input = {
         "original_query": state["original_query"],
         "time_context": _finalizer_time_context(state),
-        "known_facts": _known_facts_llm_view(state.get("known_facts", [])),
+        "known_facts": _known_facts_llm_view(known_facts),
     }
     human_message = HumanMessage(content=json.dumps(finalizer_input, ensure_ascii=False, default=str))
 
