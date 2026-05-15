@@ -117,6 +117,9 @@ Run kinds:
 `daily_global_promotion` uses a synthetic system scope:
 `scope_ref="daily_global"`, `platform="system"`,
 `platform_channel_id="global"`, and `channel_type="system"`.
+Its deterministic run id is the idempotency key for a character-local day and
+prompt version: an existing `succeeded` global promotion is not rerun, while
+`skipped`, `failed`, and `dry_run` rows remain retryable.
 
 Statuses:
 

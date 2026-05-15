@@ -93,6 +93,242 @@ def test_evidence_cards_preserve_low_privacy_risk_for_negated_notes() -> None:
 
 
 @pytest.mark.asyncio
+async def test_global_promotion_skips_existing_succeeded_run_without_llm_or_writes(
+    monkeypatch,
+) -> None:
+    """A succeeded daily global promotion run should not replay write work."""
+
+    character_local_date = "2026-05-04"
+    global_run_id = promotion_module.repository.daily_global_promotion_run_id(
+        character_local_date=character_local_date,
+        prompt_version=promotion_module.GLOBAL_PROMOTION_PROMPT_VERSION,
+    )
+    existing_run = _global_run_doc(status="succeeded", run_id=global_run_id)
+    daily_channel_runs = AsyncMock(return_value=[_daily_doc()])
+    run_promotion_llm = AsyncMock(
+        return_value={"promotion_decisions": [_decision("lore")]},
+    )
+    find_memory = AsyncMock(return_value=[])
+    insert_memory = AsyncMock(return_value=_stored_memory_unit("unit-1"))
+    supersede_memory = AsyncMock()
+    merge_memory = AsyncMock()
+    monkeypatch.setattr(
+        promotion_module.repository,
+        "reflection_run_by_id",
+        AsyncMock(return_value=existing_run),
+    )
+    monkeypatch.setattr(
+        promotion_module.repository,
+        "daily_channel_runs",
+        daily_channel_runs,
+    )
+    monkeypatch.setattr(
+        promotion_module,
+        "run_global_promotion_llm",
+        run_promotion_llm,
+    )
+    monkeypatch.setattr(promotion_module, "find_active_memory_units", find_memory)
+    monkeypatch.setattr(promotion_module, "insert_memory_unit", insert_memory)
+    monkeypatch.setattr(promotion_module, "supersede_memory_unit", supersede_memory)
+    monkeypatch.setattr(promotion_module, "merge_memory_units", merge_memory)
+    monkeypatch.setattr(promotion_module.repository, "upsert_run", AsyncMock())
+
+    result = await promotion_module.run_global_reflection_promotion(
+        character_local_date=character_local_date,
+        dry_run=False,
+        enable_memory_writes=True,
+    )
+
+    assert result.skipped_count == 1
+    assert result.succeeded_count == 0
+    assert result.run_ids == [global_run_id]
+    assert result.defer_reason == "daily global promotion already succeeded"
+    daily_channel_runs.assert_not_awaited()
+    run_promotion_llm.assert_not_awaited()
+    find_memory.assert_not_awaited()
+    insert_memory.assert_not_awaited()
+    supersede_memory.assert_not_awaited()
+    merge_memory.assert_not_awaited()
+
+
+@pytest.mark.parametrize("status", ["skipped", "failed", "dry_run"])
+@pytest.mark.asyncio
+async def test_global_promotion_retries_existing_skipped_failed_and_dry_run_rows(
+    monkeypatch,
+    status,
+) -> None:
+    """Only succeeded daily global promotion rows should block retry."""
+
+    character_local_date = "2026-05-04"
+    global_run_id = promotion_module.repository.daily_global_promotion_run_id(
+        character_local_date=character_local_date,
+        prompt_version=promotion_module.GLOBAL_PROMOTION_PROMPT_VERSION,
+    )
+    persisted = []
+
+    async def _reflection_run_by_id(run_id):
+        if run_id == global_run_id:
+            existing = _global_run_doc(status=status, run_id=global_run_id)
+            return existing
+        hourly_doc = _hourly_doc()
+        return hourly_doc
+
+    async def _upsert(document):
+        persisted.append(document)
+
+    run_promotion_llm = AsyncMock(
+        return_value={"promotion_decisions": [_decision("lore")]},
+    )
+    insert_memory = AsyncMock(return_value=_stored_memory_unit("unit-1"))
+    monkeypatch.setattr(
+        promotion_module.repository,
+        "daily_channel_runs",
+        AsyncMock(return_value=[_daily_doc()]),
+    )
+    monkeypatch.setattr(
+        promotion_module.repository,
+        "reflection_run_by_id",
+        AsyncMock(side_effect=_reflection_run_by_id),
+    )
+    monkeypatch.setattr(
+        promotion_module,
+        "run_global_promotion_llm",
+        run_promotion_llm,
+    )
+    monkeypatch.setattr(
+        promotion_module,
+        "find_active_memory_units",
+        AsyncMock(return_value=[]),
+    )
+    monkeypatch.setattr(promotion_module, "insert_memory_unit", insert_memory)
+    monkeypatch.setattr(promotion_module.repository, "upsert_run", _upsert)
+
+    result = await promotion_module.run_global_reflection_promotion(
+        character_local_date=character_local_date,
+        dry_run=False,
+        enable_memory_writes=True,
+    )
+
+    assert result.succeeded_count == 1
+    assert persisted[-1]["status"] == "succeeded"
+    run_promotion_llm.assert_awaited_once()
+    insert_memory.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_global_promotion_persists_skipped_when_memory_writes_disabled(
+    monkeypatch,
+) -> None:
+    """Prompt-only apply runs must not persist as successful memory writes."""
+
+    character_local_date = "2026-05-04"
+    global_run_id = promotion_module.repository.daily_global_promotion_run_id(
+        character_local_date=character_local_date,
+        prompt_version=promotion_module.GLOBAL_PROMOTION_PROMPT_VERSION,
+    )
+    persisted = []
+
+    async def _reflection_run_by_id(run_id):
+        if run_id == global_run_id:
+            return_value = None
+            return return_value
+        hourly_doc = _hourly_doc()
+        return hourly_doc
+
+    async def _upsert(document):
+        persisted.append(document)
+
+    monkeypatch.setattr(
+        promotion_module.repository,
+        "daily_channel_runs",
+        AsyncMock(return_value=[_daily_doc()]),
+    )
+    monkeypatch.setattr(
+        promotion_module.repository,
+        "reflection_run_by_id",
+        AsyncMock(side_effect=_reflection_run_by_id),
+    )
+    monkeypatch.setattr(
+        promotion_module,
+        "run_global_promotion_llm",
+        AsyncMock(return_value={"promotion_decisions": [_decision("lore")]}),
+    )
+    monkeypatch.setattr(promotion_module.repository, "upsert_run", _upsert)
+
+    result = await promotion_module.run_global_reflection_promotion(
+        character_local_date=character_local_date,
+        dry_run=False,
+        enable_memory_writes=False,
+    )
+
+    assert result.skipped_count == 1
+    assert result.defer_reason == "memory writes disabled"
+    assert persisted[-1]["status"] == "skipped"
+
+
+@pytest.mark.asyncio
+async def test_global_promotion_records_failed_write_phase_without_worker_crash(
+    monkeypatch,
+) -> None:
+    """Unexpected write failures should become failed promotion results."""
+
+    character_local_date = "2026-05-04"
+    global_run_id = promotion_module.repository.daily_global_promotion_run_id(
+        character_local_date=character_local_date,
+        prompt_version=promotion_module.GLOBAL_PROMOTION_PROMPT_VERSION,
+    )
+    persisted = []
+
+    async def _reflection_run_by_id(run_id):
+        if run_id == global_run_id:
+            return_value = None
+            return return_value
+        hourly_doc = _hourly_doc()
+        return hourly_doc
+
+    async def _upsert(document):
+        persisted.append(document)
+
+    monkeypatch.setattr(
+        promotion_module.repository,
+        "daily_channel_runs",
+        AsyncMock(return_value=[_daily_doc()]),
+    )
+    monkeypatch.setattr(
+        promotion_module.repository,
+        "reflection_run_by_id",
+        AsyncMock(side_effect=_reflection_run_by_id),
+    )
+    monkeypatch.setattr(
+        promotion_module,
+        "run_global_promotion_llm",
+        AsyncMock(return_value={"promotion_decisions": [_decision("lore")]}),
+    )
+    monkeypatch.setattr(
+        promotion_module,
+        "find_active_memory_units",
+        AsyncMock(return_value=[]),
+    )
+    monkeypatch.setattr(
+        promotion_module,
+        "insert_memory_unit",
+        AsyncMock(side_effect=RuntimeError("unexpected memory failure")),
+    )
+    monkeypatch.setattr(promotion_module.repository, "upsert_run", _upsert)
+
+    result = await promotion_module.run_global_reflection_promotion(
+        character_local_date=character_local_date,
+        dry_run=False,
+        enable_memory_writes=True,
+    )
+
+    assert result.failed_count == 1
+    assert "unexpected memory failure" in result.defer_reason
+    assert persisted[-1]["status"] == "failed"
+    assert "unexpected memory failure" in persisted[-1]["error"]
+
+
+@pytest.mark.asyncio
 async def test_global_promotion_skips_memory_write_when_scores_are_unavailable(
     monkeypatch,
 ) -> None:
@@ -329,6 +565,89 @@ async def test_promotion_skips_active_replacement_replay(monkeypatch) -> None:
         for warning in result.validation_warnings
     )
     promotion_module.supersede_memory_unit.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_promotion_skips_duplicate_replacement_id_from_different_source(
+    monkeypatch,
+) -> None:
+    """Duplicate replacement ids should not crash when the source differs."""
+
+    character_local_date = "2026-05-04"
+    global_run_id = promotion_module.repository.daily_global_promotion_run_id(
+        character_local_date=character_local_date,
+        prompt_version=promotion_module.GLOBAL_PROMOTION_PROMPT_VERSION,
+    )
+    decision = _decision("lore")
+    deterministic_doc = promotion_module._memory_document_for_decision(
+        decision=decision,
+        character_local_date=character_local_date,
+        global_run_id=global_run_id,
+        source_unit_ids=[],
+        source_lineage_ids=[],
+        mutation_action="insert",
+    )
+    active_source = {
+        **deterministic_doc,
+        "memory_unit_id": "different-active-source",
+        "lineage_id": "different-lineage",
+    }
+    persisted = []
+
+    async def _reflection_run_by_id(run_id):
+        if run_id == global_run_id:
+            return_value = None
+            return return_value
+        hourly_doc = _hourly_doc()
+        return hourly_doc
+
+    async def _upsert(document):
+        persisted.append(document)
+
+    monkeypatch.setattr(
+        promotion_module.repository,
+        "daily_channel_runs",
+        AsyncMock(return_value=[_daily_doc()]),
+    )
+    monkeypatch.setattr(
+        promotion_module.repository,
+        "reflection_run_by_id",
+        AsyncMock(side_effect=_reflection_run_by_id),
+    )
+    monkeypatch.setattr(
+        promotion_module,
+        "run_global_promotion_llm",
+        AsyncMock(return_value={"promotion_decisions": [decision]}),
+    )
+    monkeypatch.setattr(
+        promotion_module,
+        "find_active_memory_units",
+        AsyncMock(return_value=[(0.95, active_source)]),
+    )
+    monkeypatch.setattr(
+        promotion_module,
+        "supersede_memory_unit",
+        AsyncMock(
+            side_effect=ValueError("replacement memory_unit_id already exists"),
+        ),
+    )
+    monkeypatch.setattr(promotion_module.repository, "upsert_run", _upsert)
+
+    result = await promotion_module.run_global_reflection_promotion(
+        character_local_date=character_local_date,
+        dry_run=False,
+        enable_memory_writes=True,
+    )
+
+    assert result.succeeded_count == 0
+    assert result.skipped_count == 1
+    assert result.memory_mutations == []
+    assert persisted[-1]["status"] == "skipped"
+    assert any(
+        "replacement memory_unit_id already exists" in warning
+        for warning in result.validation_warnings
+    )
+    promotion_module.supersede_memory_unit.assert_awaited_once()
 
 
 @pytest.mark.asyncio
@@ -623,5 +942,50 @@ def _hourly_doc() -> dict:
         "validation_warnings": [],
         "created_at": "2026-05-04T10:00:00+00:00",
         "updated_at": "2026-05-04T10:00:00+00:00",
+    }
+    return doc
+
+
+def _global_run_doc(*, status: str, run_id: str) -> dict:
+    """Build a daily global promotion run document fixture."""
+
+    doc = {
+        "run_id": run_id,
+        "run_kind": "daily_global_promotion",
+        "status": status,
+        "prompt_version": promotion_module.GLOBAL_PROMOTION_PROMPT_VERSION,
+        "attempt_count": 1,
+        "scope": {
+            "scope_ref": "daily_global",
+            "platform": "system",
+            "platform_channel_id": "global",
+            "channel_type": "system",
+        },
+        "character_local_date": "2026-05-04",
+        "source_message_refs": [],
+        "source_reflection_run_ids": ["daily-run-1"],
+        "output": {"promotion_decisions": [_decision("lore")]},
+        "promotion_decisions": [_decision("lore")],
+        "validation_warnings": [],
+        "error": "",
+        "created_at": "2026-05-05T05:00:00+00:00",
+        "updated_at": "2026-05-05T05:00:00+00:00",
+    }
+    return doc
+
+
+def _stored_memory_unit(memory_unit_id: str) -> dict:
+    """Build a stored memory-unit result fixture."""
+
+    doc = {
+        "memory_unit_id": memory_unit_id,
+        "lineage_id": memory_unit_id,
+        "memory_type": "fact",
+        "memory_name": "stored memory",
+        "content": "stored content",
+        "source_global_user_id": "",
+        "source_kind": MemorySourceKind.REFLECTION_INFERRED,
+        "authority": MemoryAuthority.REFLECTION_PROMOTED,
+        "status": MemoryStatus.ACTIVE,
     }
     return doc

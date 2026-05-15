@@ -97,6 +97,7 @@ plans.
 | [rag_memory_evidence_remember_me_inner_path_bugfix_plan.md](archive/completed/bugfix/rag_memory_evidence_remember_me_inner_path_bugfix_plan.md) |
 | [rag_conversation_evidence_current_episode_boundary_bugfix_plan.md](archive/completed/bugfix/rag_conversation_evidence_current_episode_boundary_bugfix_plan.md) |
 | [rag_retrieval_top_k_embedding_tuning_plan.md](archive/completed/bugfix/rag_retrieval_top_k_embedding_tuning_plan.md) |
+| [reflection_global_promotion_replay_bugfix_plan.md](archive/completed/bugfix/reflection_global_promotion_replay_bugfix_plan.md) |
 | [self_cognition_background_context_budget_bugfix_plan.md](archive/completed/bugfix/self_cognition_background_context_budget_bugfix_plan.md) |
 | [task_dispatcher_json_contract_bugfix_plan.md](archive/completed/bugfix/task_dispatcher_json_contract_bugfix_plan.md) |
 | [temporal_grounding_rag_episode_state_plan.md](archive/completed/bugfix/temporal_grounding_rag_episode_state_plan.md) |

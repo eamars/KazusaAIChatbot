@@ -42,6 +42,7 @@ from kazusa_ai_chatbot.reflection_cycle.models import (
     REFLECTION_RUN_KIND_DAILY_GLOBAL_PROMOTION,
     REFLECTION_STATUS_FAILED,
     REFLECTION_STATUS_SKIPPED,
+    REFLECTION_STATUS_SUCCEEDED,
     ReflectionPromotionResult,
 )
 from kazusa_ai_chatbot.reflection_cycle.projection import build_prompt_result
@@ -61,6 +62,7 @@ PROMOTION_LANE_MEMORY_TYPE = {
 PROMOTION_DUPLICATE_SCORE_THRESHOLD = 0.92
 PROMOTION_MERGE_SCORE_THRESHOLD = 0.88
 PROMOTION_REVIEW_BAND_SCORE_THRESHOLD = 0.82
+PROMOTION_DUPLICATE_REPLACEMENT_ERROR = "replacement memory_unit_id already exists"
 PROMOTION_MAX_CHANNEL_CARDS = 25
 PROMOTION_MAX_EVIDENCE_CARDS = 40
 PROMOTION_MAX_CHANNEL_CARD_CHARS = 600
@@ -331,15 +333,36 @@ async def _run_global_reflection_promotion(
 ) -> ReflectionPromotionResult:
     """Run one daily global promotion pass and optionally mutate memory."""
 
-    daily_docs = await repository.daily_channel_runs(
+    global_run_id = repository.daily_global_promotion_run_id(
         character_local_date=character_local_date,
+        prompt_version=GLOBAL_PROMOTION_PROMPT_VERSION,
     )
-    source_run_ids = [str(document["run_id"]) for document in daily_docs]
+    existing_run = await repository.reflection_run_by_id(global_run_id)
     result = ReflectionPromotionResult(
         run_kind=REFLECTION_RUN_KIND_DAILY_GLOBAL_PROMOTION,
         dry_run=dry_run,
         processed_count=1,
     )
+    if (
+        existing_run is not None
+        and str(existing_run.get("run_kind", ""))
+        == REFLECTION_RUN_KIND_DAILY_GLOBAL_PROMOTION
+        and str(existing_run.get("status", "")) == REFLECTION_STATUS_SUCCEEDED
+    ):
+        result.skipped_count = 1
+        result.defer_reason = "daily global promotion already succeeded"
+        result.run_ids.append(global_run_id)
+        logger.info(
+            "Reflection promotion skipped: "
+            f"character_local_date={character_local_date} "
+            f"run_id={global_run_id} reason={result.defer_reason}"
+        )
+        return result
+
+    daily_docs = await repository.daily_channel_runs(
+        character_local_date=character_local_date,
+    )
+    source_run_ids = [str(document["run_id"]) for document in daily_docs]
     if not daily_docs:
         result.skipped_count = 1
         result.defer_reason = "no daily_channel runs available"
@@ -436,20 +459,23 @@ async def _run_global_reflection_promotion(
             f"character_local_date={character_local_date} "
             f"warnings={validation_warnings}"
         )
-    global_run_doc = await _persist_global_run(
-        character_local_date=character_local_date,
-        source_run_ids=source_run_ids,
-        output=parsed_output,
-        promotion_decisions=result.promotion_decisions,
-        status=status,
-        attempt_count=attempt_count,
-        validation_warnings=validation_warnings,
-    )
-    result.run_ids.append(str(global_run_doc["run_id"]))
 
     if dry_run or not enable_memory_writes:
         result.skipped_count = 1
         result.defer_reason = "memory writes disabled"
+        persist_status = status
+        if not dry_run:
+            persist_status = REFLECTION_STATUS_SKIPPED
+        global_run_doc = await _persist_global_run(
+            character_local_date=character_local_date,
+            source_run_ids=source_run_ids,
+            output=parsed_output,
+            promotion_decisions=result.promotion_decisions,
+            status=persist_status,
+            attempt_count=attempt_count,
+            validation_warnings=validation_warnings,
+        )
+        result.run_ids.append(str(global_run_doc["run_id"]))
         logger.info(
             "Reflection promotion memory writes skipped: "
             f"character_local_date={character_local_date} "
@@ -463,7 +489,7 @@ async def _run_global_reflection_promotion(
         result.defer_reason = "primary interaction busy"
         result.validation_warnings.extend(validation_warnings)
         result.validation_warnings.append(result.defer_reason)
-        await _persist_global_run(
+        global_run_doc = await _persist_global_run(
             character_local_date=character_local_date,
             source_run_ids=source_run_ids,
             output=parsed_output,
@@ -472,6 +498,7 @@ async def _run_global_reflection_promotion(
             attempt_count=attempt_count,
             validation_warnings=result.validation_warnings,
         )
+        result.run_ids.append(str(global_run_doc["run_id"]))
         logger.info(
             "Reflection promotion memory writes deferred: "
             f"character_local_date={character_local_date} "
@@ -479,12 +506,35 @@ async def _run_global_reflection_promotion(
         )
         return result
 
-    write_summary = await _write_validated_promotion_decisions(
-        decisions=decisions,
-        character_local_date=character_local_date,
-        global_run_id=str(global_run_doc["run_id"]),
-        is_primary_interaction_busy=is_primary_interaction_busy,
-    )
+    try:
+        write_summary = await _write_validated_promotion_decisions(
+            decisions=decisions,
+            character_local_date=character_local_date,
+            global_run_id=global_run_id,
+            is_primary_interaction_busy=is_primary_interaction_busy,
+        )
+    except Exception as exc:
+        result.failed_count = 1
+        result.defer_reason = f"{type(exc).__name__}: {exc}"
+        result.validation_warnings.extend(validation_warnings)
+        result.validation_warnings.append(result.defer_reason)
+        logger.exception(
+            "Reflection promotion failed during write phase: "
+            f"character_local_date={character_local_date} error={exc}"
+        )
+        failed_run = await _persist_global_run(
+            character_local_date=character_local_date,
+            source_run_ids=source_run_ids,
+            output=parsed_output,
+            promotion_decisions=result.promotion_decisions,
+            status=REFLECTION_STATUS_FAILED,
+            attempt_count=attempt_count,
+            validation_warnings=result.validation_warnings,
+            error=result.defer_reason,
+        )
+        result.run_ids.append(str(failed_run["run_id"]))
+        return result
+
     result.memory_mutations = write_summary["mutations"]
     result.validation_warnings.extend(validation_warnings)
     result.validation_warnings.extend(write_summary["warnings"])
@@ -502,8 +552,28 @@ async def _run_global_reflection_promotion(
             attempt_count=attempt_count,
             validation_warnings=result.validation_warnings,
         )
+        result.run_ids.append(str(global_run_id))
     if result.succeeded_count == 0 and not result.deferred:
         result.skipped_count += 1
+    if not result.deferred:
+        replay_skip = any(
+            warning == PROMOTION_DUPLICATE_REPLACEMENT_ERROR
+            or warning.startswith("replacement already active:")
+            for warning in write_summary["warnings"]
+        )
+        persist_status = REFLECTION_STATUS_SUCCEEDED
+        if replay_skip:
+            persist_status = REFLECTION_STATUS_SKIPPED
+        global_run_doc = await _persist_global_run(
+            character_local_date=character_local_date,
+            source_run_ids=source_run_ids,
+            output=parsed_output,
+            promotion_decisions=result.promotion_decisions,
+            status=persist_status,
+            attempt_count=attempt_count,
+            validation_warnings=result.validation_warnings,
+        )
+        result.run_ids.append(str(global_run_doc["run_id"]))
     return result
 
 
@@ -952,6 +1022,22 @@ async def _resolve_similarity_and_write(
         if str(exc) == "memory write or reset is already running":
             deferred_result = _deferred_result(str(exc))
             return deferred_result
+        raise
+    except ValueError as exc:
+        if str(exc) == PROMOTION_DUPLICATE_REPLACEMENT_ERROR:
+            warning = str(exc)
+            logger.info(
+                "Reflection promotion skipped for duplicate replacement id: "
+                f"lane={lane} memory_unit_id={memory_unit_id} "
+                f"run_id={global_run_id}"
+            )
+            result = {
+                "mutation": None,
+                "warnings": [warning],
+                "deferred": False,
+                "defer_reason": "",
+            }
+            return result
         raise
 
     mutation = {
