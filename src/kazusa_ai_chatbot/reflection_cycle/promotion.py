@@ -924,6 +924,21 @@ async def _resolve_similarity_and_write(
         f"source_unit_ids={source_unit_ids} "
         f"evidence_refs={_evidence_ref_ids(decision)}"
     )
+    memory_unit_id = str(memory_doc["memory_unit_id"])
+    if mutation_action == "supersede" and source_unit_ids == [memory_unit_id]:
+        warning = f"replacement already active: memory_unit_id={memory_unit_id}"
+        logger.info(
+            "Reflection promotion skipped for active replacement replay: "
+            f"lane={lane} memory_unit_id={memory_unit_id} "
+            f"run_id={global_run_id}"
+        )
+        result = {
+            "mutation": None,
+            "warnings": [warning],
+            "deferred": False,
+            "defer_reason": "",
+        }
+        return result
     if is_primary_interaction_busy is not None and is_primary_interaction_busy():
         deferred_result = _deferred_result("primary interaction busy")
         return deferred_result

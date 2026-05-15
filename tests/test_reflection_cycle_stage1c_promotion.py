@@ -263,6 +263,75 @@ async def test_memory_write_lock_defers_promotion(monkeypatch) -> None:
 
 
 @pytest.mark.asyncio
+async def test_promotion_skips_active_replacement_replay(monkeypatch) -> None:
+    """Replaying an already-active replacement must not supersede itself."""
+
+    character_local_date = "2026-05-04"
+    global_run_id = promotion_module.repository.daily_global_promotion_run_id(
+        character_local_date=character_local_date,
+        prompt_version=promotion_module.GLOBAL_PROMOTION_PROMPT_VERSION,
+    )
+    decision = _decision("lore")
+    deterministic_doc = promotion_module._memory_document_for_decision(
+        decision=decision,
+        character_local_date=character_local_date,
+        global_run_id=global_run_id,
+        source_unit_ids=[],
+        source_lineage_ids=[],
+        mutation_action="insert",
+    )
+    active_replacement = {
+        **deterministic_doc,
+        "lineage_id": "existing-lineage",
+    }
+    monkeypatch.setattr(
+        promotion_module.repository,
+        "daily_channel_runs",
+        AsyncMock(return_value=[_daily_doc()]),
+    )
+    monkeypatch.setattr(
+        promotion_module.repository,
+        "reflection_run_by_id",
+        AsyncMock(return_value=_hourly_doc()),
+    )
+    monkeypatch.setattr(
+        promotion_module,
+        "run_global_promotion_llm",
+        AsyncMock(return_value={"promotion_decisions": [decision]}),
+    )
+    monkeypatch.setattr(
+        promotion_module,
+        "find_active_memory_units",
+        AsyncMock(return_value=[(0.95, active_replacement)]),
+    )
+    monkeypatch.setattr(promotion_module.repository, "upsert_run", AsyncMock())
+    monkeypatch.setattr(
+        promotion_module,
+        "supersede_memory_unit",
+        AsyncMock(
+            side_effect=ValueError(
+                "replacement memory_unit_id already exists",
+            ),
+        ),
+    )
+
+    result = await promotion_module.run_global_reflection_promotion(
+        character_local_date=character_local_date,
+        dry_run=False,
+        enable_memory_writes=True,
+    )
+
+    assert result.succeeded_count == 0
+    assert result.skipped_count == 1
+    assert result.memory_mutations == []
+    assert any(
+        "replacement already active" in warning
+        for warning in result.validation_warnings
+    )
+    promotion_module.supersede_memory_unit.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_primary_interaction_busy_defers_before_memory_write(
     monkeypatch,
 ) -> None:
