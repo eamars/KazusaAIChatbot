@@ -546,3 +546,10 @@ class SelfCognitionActionAttemptDoc(TypedDict, total=False):
     dispatch_status: str
     scheduled_event_ids: list[str]
     recorded_at: str
+    action_spec_schema_version: str
+    cognition_mode: str | None
+    validation_status: str
+    handler_owner: str | None
+    continuation_status: str
+    execution_result: dict | None
+    errors: list[str]

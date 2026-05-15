@@ -6,7 +6,7 @@
   action contracts, shared validation, `send_message` compatibility, and
   character-selected lifecycle updates for `user_memory_units.active_commitment`.
 - Plan class: high_risk_migration
-- Status: approved
+- Status: in_progress
 - Mandatory skills: `development-plan-writing`, `local-llm-architecture`,
   `no-prepost-user-input`, `py-style`, `test-style-and-execution`, `cjk-safety`
 - Overall cutover strategy: compatible
@@ -662,18 +662,18 @@ Exit criteria:
 
 ## Progress Checklist
 
-- [ ] Stage 0 - contracts reference prerequisite complete
+- [x] Stage 0 - contracts reference prerequisite complete
   - Verify: registry links approved `cognition_contracts_design.md`.
   - Evidence: record reference path and reconciliation notes.
-  - Sign-off: `<agent/date>`
-- [ ] Stage 1 - action contract tests added
+  - Sign-off: `Codex/2026-05-16`
+- [x] Stage 1 - action contract tests added
   - Verify: focused tests fail for missing symbols before implementation.
   - Evidence: record failing commands.
-  - Sign-off: `<agent/date>`
-- [ ] Stage 2 - `action_spec` module implemented
+  - Sign-off: `Codex/2026-05-16`
+- [x] Stage 2 - `action_spec` module implemented
   - Verify: action-spec model, evaluator, registry, and ledger tests pass.
   - Evidence: record changed files and test output.
-  - Sign-off: `<agent/date>`
+  - Sign-off: `Codex/2026-05-16`
 - [ ] Stage 3 - cognition schema and offline measurement gated
   - Verify: cognition schema tests pass and measurement output is reviewed.
   - Evidence: record validity, false-positive, and latency results.
@@ -903,4 +903,48 @@ Latest review result:
 
 ## Execution Evidence
 
-No implementation has been executed. This is an approved execution plan.
+Implementation is in progress. Execute only through the approved stage order and
+record verification evidence here.
+
+- 2026-05-16 Stage 0 - contracts reference reconciliation complete.
+  - Branch: `feature/action-spec-effector-expansion`.
+  - Planning baseline commit: `f8fde7a` (`Approve action spec effector
+    expansion plan`).
+  - Registry check: `development_plans/README.md` lists
+    `modality_neutral_action_spec_effector_expansion_plan.md` as `approved`
+    and `cognition_contracts_design.md` as the authoritative contract
+    reference.
+  - Contracts check: `cognition_contracts_design.md` is `Status: approved
+    reference`; `reflection_promoted` is not a committed trigger source;
+    `system_event` is reserved rather than committed; `ActionSourceRefV1`,
+    `ActionTargetV1`, `ActionContinuationV1`, `MemoryQueryV1`,
+    `MemoryResultV1`, `MemoryLifecycleUpdateV1`, and `CapabilitySpecV1` are
+    defined.
+  - Reconciliation check: action-spec architecture and execution plan both
+    reference `ActionSpecV1`, action-category `CapabilitySpecV1`,
+    `memory_lifecycle_update`, and contracts 3, 4, and 7 consistently.
+- 2026-05-16 Stage 1 - action contract RED tests added.
+  - Added focused contract tests:
+    `tests/test_action_spec_models.py`,
+    `tests/test_action_spec_evaluator.py`,
+    `tests/test_action_spec_attempt_ledger.py`,
+    `tests/test_action_spec_memory_lifecycle.py`, and
+    `tests/test_action_spec_self_cognition_bridge.py`.
+  - RED command:
+    `venv\Scripts\python -m pytest tests/test_action_spec_models.py tests/test_action_spec_evaluator.py tests/test_action_spec_attempt_ledger.py tests/test_action_spec_memory_lifecycle.py tests/test_action_spec_self_cognition_bridge.py -q`.
+  - Expected result recorded: all five focused files fail at collection with
+    `ModuleNotFoundError: No module named 'kazusa_ai_chatbot.action_spec'`.
+- 2026-05-16 Stage 2 - `action_spec` module implemented.
+  - Added public action-spec module files:
+    `src/kazusa_ai_chatbot/action_spec/models.py`,
+    `src/kazusa_ai_chatbot/action_spec/registry.py`,
+    `src/kazusa_ai_chatbot/action_spec/evaluator.py`,
+    `src/kazusa_ai_chatbot/action_spec/attempt_ledger.py`,
+    `src/kazusa_ai_chatbot/action_spec/handlers/memory_lifecycle.py`, and
+    `src/kazusa_ai_chatbot/action_spec/__init__.py`.
+  - Updated `SelfCognitionActionAttemptDoc` with additive generic
+    action-attempt metadata fields.
+  - Verification command:
+    `venv\Scripts\python -m pytest tests/test_action_spec_models.py tests/test_action_spec_evaluator.py tests/test_action_spec_attempt_ledger.py tests/test_action_spec_memory_lifecycle.py tests/test_action_spec_self_cognition_bridge.py -q`.
+  - Result: 20 passed in 1.48s; old `self_cognition_action_attempts` rows
+    remain readable through compatibility normalization.

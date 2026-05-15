@@ -38,7 +38,7 @@ long_term/todo.md
 
 | Plan | Status | Execution |
 |---|---|---|
-| [modality_neutral_action_spec_effector_expansion_plan.md](active/short_term/modality_neutral_action_spec_effector_expansion_plan.md) | approved | Execute according to the plan. |
+| [modality_neutral_action_spec_effector_expansion_plan.md](active/short_term/modality_neutral_action_spec_effector_expansion_plan.md) | in_progress | Execute according to the plan. |
 
 ## Active Bugfix Plans
 

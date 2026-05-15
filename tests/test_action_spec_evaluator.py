@@ -1,0 +1,179 @@
+"""Tests for action-spec capability registry and evaluator behavior."""
+
+from __future__ import annotations
+
+import json
+
+from kazusa_ai_chatbot.action_spec.evaluator import ActionSpecEvaluator
+from kazusa_ai_chatbot.action_spec.registry import (
+    build_initial_action_capabilities,
+    project_prompt_affordances,
+)
+
+
+def _source_ref() -> dict:
+    return {
+        "schema_version": "action_source_ref.v1",
+        "ref_kind": "memory_unit",
+        "ref_id": "promise-001",
+        "owner": "user_memory_units",
+        "relationship": "basis",
+        "evidence_refs": [],
+    }
+
+
+def _target_for_kind(kind: str) -> dict:
+    if kind == "memory_lifecycle_update":
+        return {
+            "schema_version": "action_target.v1",
+            "target_kind": "memory_unit",
+            "target_id": "promise-001",
+            "owner": "user_memory_units",
+            "scope": {"unit_type": "active_commitment"},
+        }
+    return {
+        "schema_version": "action_target.v1",
+        "target_kind": "current_channel",
+        "target_id": None,
+        "owner": "dispatcher",
+        "scope": {"channel_relation": "same"},
+    }
+
+
+def _no_continuation() -> dict:
+    return {
+        "schema_version": "action_continuation.v1",
+        "mode": "none",
+        "episode_type": None,
+        "max_depth": 0,
+        "include_result_as": None,
+    }
+
+
+def _params_for_kind(kind: str) -> dict:
+    if kind == "memory_lifecycle_update":
+        return {
+            "memory_kind": "user_memory_unit",
+            "unit_type": "active_commitment",
+            "unit_id": "promise-001",
+            "lifecycle_decision": "abandoned",
+            "due_at": "2026-05-07T00:00:00+00:00",
+        }
+    return {
+        "target_channel": "same",
+        "text": "Checking in now.",
+        "execute_at": None,
+        "delivery_mentions": [],
+    }
+
+
+def _action_spec(kind: str) -> dict:
+    return {
+        "schema_version": "action_spec.v1",
+        "kind": kind,
+        "cognition_mode": "deliberative",
+        "source_refs": [_source_ref()],
+        "target": _target_for_kind(kind),
+        "params": _params_for_kind(kind),
+        "urgency": "now",
+        "visibility": "private" if kind == "memory_lifecycle_update" else "user_visible",
+        "deadline": None,
+        "continuation": _no_continuation(),
+        "reason": "The character selected this action from cognition.",
+    }
+
+
+def test_initial_registry_contains_only_approved_runtime_capabilities() -> None:
+    """The first registry slice must not expose deferred future tools."""
+
+    capabilities = build_initial_action_capabilities()
+
+    assert set(capabilities) == {"send_message", "memory_lifecycle_update"}
+    assert capabilities["send_message"]["owner_module"] == "dispatcher"
+    assert capabilities["memory_lifecycle_update"]["owner_module"] == "memory_lifecycle"
+    assert "web_research" not in capabilities
+    assert "schedule_self_check" not in capabilities
+    assert "note_open_loop" not in capabilities
+
+
+def test_memory_lifecycle_schema_and_vocabulary_match_plan() -> None:
+    """The lifecycle capability should expose the exact approved vocabulary."""
+
+    capabilities = build_initial_action_capabilities()
+    capability = capabilities["memory_lifecycle_update"]
+    schema = capability["input_schema"]
+    properties = schema["properties"]
+
+    assert schema["required"] == [
+        "memory_kind",
+        "unit_type",
+        "unit_id",
+        "lifecycle_decision",
+        "due_at",
+    ]
+    assert properties["memory_kind"]["enum"] == ["user_memory_unit"]
+    assert properties["unit_type"]["enum"] == ["active_commitment"]
+    assert properties["lifecycle_decision"]["enum"] == [
+        "fulfilled",
+        "abandoned",
+        "obsolete",
+        "deferred",
+    ]
+    assert capability["category"] == "action"
+
+
+def test_prompt_affordance_projection_excludes_runtime_internals() -> None:
+    """Prompt-visible affordances must not leak handlers, storage, or raw IDs."""
+
+    capabilities = build_initial_action_capabilities()
+    projection = project_prompt_affordances(capabilities)
+    serialized = json.dumps(projection, sort_keys=True).lower()
+
+    assert "send_message" in serialized
+    assert "memory_lifecycle_update" in serialized
+    for forbidden in (
+        "handler_id",
+        "dispatcher.send_message",
+        "self_cognition_action_attempts",
+        "user_memory_units",
+        "mongodb",
+        "mongo",
+        "credential",
+        "adapter_id",
+        "platform_channel_id",
+        "channel_id",
+        "raw_channel",
+    ):
+        assert forbidden not in serialized
+
+
+def test_evaluator_rejects_reflex_for_all_current_capabilities() -> None:
+    """Reflex mode is represented in schema but remains disabled at runtime."""
+
+    evaluator = ActionSpecEvaluator(build_initial_action_capabilities())
+
+    for kind in ("send_message", "memory_lifecycle_update"):
+        action_spec = _action_spec(kind)
+        action_spec["cognition_mode"] = "reflex"
+        result = evaluator.evaluate(action_spec)
+        assert result["ok"] is False
+        assert any("reflex" in error for error in result["errors"])
+
+
+def test_evaluator_validates_continuation_contract() -> None:
+    """Continuation requests must be structurally bounded before execution."""
+
+    evaluator = ActionSpecEvaluator(build_initial_action_capabilities())
+    action_spec = _action_spec("send_message")
+    action_spec["continuation"] = {
+        "schema_version": "action_continuation.v1",
+        "mode": "immediate_followup",
+        "episode_type": None,
+        "max_depth": 1,
+        "include_result_as": "tool_result",
+    }
+
+    result = evaluator.evaluate(action_spec)
+
+    assert result["ok"] is False
+    assert any("episode_type" in error for error in result["errors"])
