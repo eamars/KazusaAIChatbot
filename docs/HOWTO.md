@@ -319,6 +319,11 @@ Event-log collections are append-only for now. Retention, archival, and
 high-volume pruning require a separate approved plan before production scale
 becomes a concern.
 
+Routine successful chat input is not mirrored into `event_log_events`.
+Successful user and assistant message writes are audited through
+`conversation_history`; event logging focuses on queue drops/collapses, failed
+persistence, runtime errors, worker/resource health, and model-contract issues.
+
 Aggregate export:
 
 ```bash

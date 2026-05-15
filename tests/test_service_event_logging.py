@@ -58,10 +58,10 @@ def _item(message_id: str, *, body_text: str = "private body"):
 
 
 @pytest.mark.asyncio
-async def test_enqueue_records_accepted_queue_event_without_content(
+async def test_enqueue_suppresses_routine_accepted_queue_event(
     monkeypatch,
 ) -> None:
-    """The chat endpoint queue handoff should record only queue metadata."""
+    """Routine enqueue should rely on conversation history for audit."""
 
     await service_module._stop_chat_input_worker()
     service_module._chat_input_queue.reset_for_test()
@@ -84,13 +84,7 @@ async def test_enqueue_records_accepted_queue_event_without_content(
     )
     await asyncio.sleep(0)
 
-    record_queue_intake_event.assert_awaited_once()
-    kwargs = record_queue_intake_event.await_args.kwargs
-    assert kwargs["component"] == service_module.SERVICE_COMPONENT
-    assert kwargs["status"] == "accepted"
-    assert kwargs["queue_depth"] == 1
-    assert kwargs["protected_by_reply"] is False
-    assert "do not store this" not in json.dumps(kwargs, ensure_ascii=False)
+    record_queue_intake_event.assert_not_awaited()
 
     queued_item = service_module._chat_input_queue.pop_left_for_test()
     queued_item.future.set_result(service_module.ChatResponse())
@@ -102,10 +96,10 @@ async def test_enqueue_records_accepted_queue_event_without_content(
 
 
 @pytest.mark.asyncio
-async def test_process_queued_item_records_db_and_pipeline_without_content(
+async def test_process_queued_item_suppresses_routine_success_events(
     monkeypatch,
 ) -> None:
-    """Successful chat processing should record refs and counts only."""
+    """Successful chat processing should not duplicate history writes."""
 
     record_database_operation_event = AsyncMock()
     record_pipeline_turn_event = AsyncMock()
@@ -201,26 +195,8 @@ async def test_process_queued_item_records_db_and_pipeline_without_content(
     await service_module._process_queued_chat_item(item)
 
     assert item.future.result().messages == ["visible response"]
-    assert record_database_operation_event.await_count == 2
-    db_kwargs = [
-        call.kwargs
-        for call in record_database_operation_event.await_args_list
-    ]
-    assert db_kwargs[0]["operation_kind"] == "insert_user_message"
-    assert db_kwargs[0]["document_ref"] == "row-user"
-    assert db_kwargs[1]["operation_kind"] == "insert_assistant_message"
-    assert db_kwargs[1]["document_ref"]
-    record_pipeline_turn_event.assert_awaited_once()
-    pipeline_kwargs = record_pipeline_turn_event.await_args.kwargs
-    assert pipeline_kwargs["status"] == "succeeded"
-    assert pipeline_kwargs["final_outcome"] == "visible_reply"
-    assert "graph" in pipeline_kwargs["stages_reached"]
-    serialized = json.dumps(
-        {"db": db_kwargs, "pipeline": pipeline_kwargs},
-        ensure_ascii=False,
-    )
-    assert "highly private user text" not in serialized
-    assert "visible response" not in serialized
+    record_database_operation_event.assert_not_awaited()
+    record_pipeline_turn_event.assert_not_awaited()
     record_runtime_error_event.assert_not_awaited()
 
 
@@ -327,6 +303,99 @@ async def test_graph_failure_records_runtime_error_and_failed_pipeline(
         ensure_ascii=False,
     )
     assert "private failure text" not in serialized
+
+
+@pytest.mark.asyncio
+async def test_user_persistence_failure_keeps_failure_telemetry(
+    monkeypatch,
+) -> None:
+    """Missing conversation-history commits should still emit failure events."""
+
+    record_database_operation_event = AsyncMock()
+    record_pipeline_turn_event = AsyncMock()
+    record_runtime_error_event = AsyncMock()
+    monkeypatch.setattr(
+        service_module.event_logging,
+        "record_database_operation_event",
+        record_database_operation_event,
+    )
+    monkeypatch.setattr(
+        service_module.event_logging,
+        "record_pipeline_turn_event",
+        record_pipeline_turn_event,
+    )
+    monkeypatch.setattr(
+        service_module.event_logging,
+        "record_runtime_error_event",
+        record_runtime_error_event,
+    )
+    monkeypatch.setattr(
+        service_module,
+        "_static_character_profile",
+        {"name": "Character"},
+    )
+    monkeypatch.setattr(service_module, "_runtime_character_state", {})
+    monkeypatch.setattr(
+        service_module,
+        "_ensure_character_global_identity",
+        AsyncMock(return_value="character-global-id"),
+    )
+    monkeypatch.setattr(
+        service_module,
+        "_resolve_queued_user",
+        AsyncMock(return_value=("global-user-1", {})),
+    )
+    monkeypatch.setattr(
+        service_module,
+        "_resolve_message_envelope_identities",
+        AsyncMock(return_value=_request("msg").message_envelope.model_dump()),
+    )
+    monkeypatch.setattr(
+        service_module,
+        "get_conversation_history",
+        AsyncMock(return_value=[]),
+    )
+    monkeypatch.setattr(
+        service_module,
+        "_hydrate_reply_context",
+        AsyncMock(return_value={}),
+    )
+    monkeypatch.setattr(
+        service_module,
+        "_save_user_message_from_item",
+        AsyncMock(return_value=None),
+    )
+
+    class _Graph:
+        """Expose a mock graph call for fail-closed assertions."""
+
+        def __init__(self):
+            self.ainvoke = AsyncMock(return_value={})
+
+    graph = _Graph()
+    monkeypatch.setattr(service_module, "_graph", graph)
+    item = _item("msg", body_text="private uncommitted text")
+
+    await service_module._process_queued_chat_item(item)
+
+    with pytest.raises(RuntimeError):
+        await item.future
+    graph.ainvoke.assert_not_awaited()
+    record_database_operation_event.assert_awaited_once()
+    db_kwargs = record_database_operation_event.await_args.kwargs
+    assert db_kwargs["operation_kind"] == "insert_user_message"
+    assert db_kwargs["status"] == "failed"
+    assert db_kwargs["idempotency_result"] == "not_committed"
+    record_pipeline_turn_event.assert_awaited_once()
+    pipeline_kwargs = record_pipeline_turn_event.await_args.kwargs
+    assert pipeline_kwargs["status"] == "failed"
+    assert pipeline_kwargs["final_outcome"] == "user_persist_failed"
+    serialized = json.dumps(
+        {"db": db_kwargs, "pipeline": pipeline_kwargs},
+        ensure_ascii=False,
+    )
+    assert "private uncommitted text" not in serialized
+    record_runtime_error_event.assert_not_awaited()
 
 
 @pytest.mark.asyncio

@@ -33,6 +33,12 @@ drift, and resource health.
 The module is append-only and best-effort. A telemetry write must never change
 live chat behavior, reflection routing, self-cognition routing, dispatcher
 handoff, scheduler execution, memory promotion, or adapter delivery.
+On the live chat input path, routine successful enqueue, message persistence,
+assistant-message persistence, and turn completion are intentionally not
+mirrored into `event_log_events`; `conversation_history` is the canonical
+record for those normal message writes. Event logging remains anomaly-first for
+queue drops/collapses, failed persistence, runtime errors, and degraded
+resource or model-contract health.
 
 ## Non-Goals
 

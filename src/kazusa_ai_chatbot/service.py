@@ -734,19 +734,17 @@ async def _drop_queued_chat_item(item: QueuedChatItem) -> bool:
             global_user_id=global_user_id,
             reply_context=reply_context,
         )
-        operation_status = "succeeded" if conversation_row_id else "failed"
-        idempotency_result = "inserted" if conversation_row_id else "not_committed"
-        await event_logging.record_database_operation_event(
-            component=SERVICE_COMPONENT,
-            collection=CONVERSATION_HISTORY_COLLECTION,
-            operation_kind="insert_user_message",
-            status=operation_status,
-            idempotency_result=idempotency_result,
-            latency_ms=_elapsed_ms(save_started_at),
-            document_ref=conversation_row_id or "",
-            correlation_id=correlation_id,
-        )
         if not conversation_row_id:
+            await event_logging.record_database_operation_event(
+                component=SERVICE_COMPONENT,
+                collection=CONVERSATION_HISTORY_COLLECTION,
+                operation_kind="insert_user_message",
+                status="failed",
+                idempotency_result="not_committed",
+                latency_ms=_elapsed_ms(save_started_at),
+                correlation_id=correlation_id,
+                severity="warning",
+            )
             persistence_error = RuntimeError(
                 "dropped queued message was not committed to "
                 "conversation_history"
@@ -873,18 +871,16 @@ async def _persist_collapsed_queued_chat_item(
                 "collapsed queued message was not committed to "
                 "conversation_history"
             )
-        operation_status = "succeeded" if conversation_row_id else "failed"
-        idempotency_result = "inserted" if conversation_row_id else "not_committed"
-        await event_logging.record_database_operation_event(
-            component=SERVICE_COMPONENT,
-            collection=CONVERSATION_HISTORY_COLLECTION,
-            operation_kind="insert_user_message",
-            status=operation_status,
-            idempotency_result=idempotency_result,
-            latency_ms=_elapsed_ms(save_started_at),
-            document_ref=conversation_row_id or "",
-            correlation_id=correlation_id,
-        )
+            await event_logging.record_database_operation_event(
+                component=SERVICE_COMPONENT,
+                collection=CONVERSATION_HISTORY_COLLECTION,
+                operation_kind="insert_user_message",
+                status="failed",
+                idempotency_result="not_committed",
+                latency_ms=_elapsed_ms(save_started_at),
+                correlation_id=correlation_id,
+                severity="warning",
+            )
     except Exception as exc:
         logger.exception(f"Failed to persist collapsed queued message: {exc}")
         persistence_error = exc
@@ -1063,21 +1059,19 @@ async def _process_queued_chat_item(item: QueuedChatItem) -> None:
             )
             raise
 
-        operation_status = "succeeded" if conversation_row_id else "failed"
-        idempotency_result = "inserted" if conversation_row_id else "not_committed"
-        await event_logging.record_database_operation_event(
-            component=SERVICE_COMPONENT,
-            collection=CONVERSATION_HISTORY_COLLECTION,
-            operation_kind="insert_user_message",
-            status=operation_status,
-            idempotency_result=idempotency_result,
-            latency_ms=_elapsed_ms(user_save_started_at),
-            document_ref=conversation_row_id or "",
-            correlation_id=correlation_id,
-        )
         if conversation_row_id:
             item.conversation_row_id = conversation_row_id
         else:
+            await event_logging.record_database_operation_event(
+                component=SERVICE_COMPONENT,
+                collection=CONVERSATION_HISTORY_COLLECTION,
+                operation_kind="insert_user_message",
+                status="failed",
+                idempotency_result="not_committed",
+                latency_ms=_elapsed_ms(user_save_started_at),
+                correlation_id=correlation_id,
+                severity="warning",
+            )
             logger.warning(
                 "Surviving queued message did not commit conversation row; "
                 "suppressing graph processing: "
@@ -1419,17 +1413,6 @@ async def _process_queued_chat_item(item: QueuedChatItem) -> None:
             stages_reached.append("assistant_persisted")
         _chat_input_queue.complete(item, response)
         stages_reached.append("response_completed")
-        if should_save_assistant_message:
-            await event_logging.record_database_operation_event(
-                component=SERVICE_COMPONENT,
-                collection=CONVERSATION_HISTORY_COLLECTION,
-                operation_kind="insert_assistant_message",
-                status="succeeded",
-                idempotency_result="inserted",
-                latency_ms=_elapsed_ms(assistant_save_started_at),
-                document_ref=delivery_tracking_id,
-                correlation_id=correlation_id,
-            )
         if should_record_progress and consolidation_state_dict is not None:
             await _run_conversation_progress_record_background(
                 consolidation_state_dict,
@@ -1438,27 +1421,6 @@ async def _process_queued_chat_item(item: QueuedChatItem) -> None:
         if should_consolidate and consolidation_state_dict is not None:
             await _run_consolidation_background(consolidation_state_dict)
             stages_reached.append("consolidation_recorded")
-
-        if response_dialog:
-            final_outcome = "visible_reply"
-        elif debug_modes.get("think_only") and final_dialog:
-            final_outcome = "think_only"
-        elif debug_modes.get("listen_only"):
-            final_outcome = "listen_only"
-        else:
-            final_outcome = "no_response"
-        await event_logging.record_pipeline_turn_event(
-            component=SERVICE_COMPONENT,
-            correlation_id=correlation_id,
-            status="succeeded",
-            queue_wait_ms=_queue_wait_ms(item),
-            stages_reached=stages_reached,
-            final_outcome=final_outcome,
-            scheduled_followups=scheduled_followup_count,
-            debug_modes=debug_mode_names,
-            scope=scope,
-            duration_ms=_elapsed_ms(turn_started_at),
-        )
     except Exception as exc:
         logger.exception(f"Queued chat item failed: {exc}")
         _chat_input_queue.fail(item, exc)
@@ -1586,20 +1548,6 @@ async def _enqueue_chat_request(req: ChatRequest) -> ChatResponse:
     """
 
     _ensure_chat_input_worker_started()
-    await event_logging.record_queue_intake_event(
-        component=SERVICE_COMPONENT,
-        correlation_id=_chat_correlation_id(req),
-        status="accepted",
-        queue_depth=_chat_input_queue.pending_count() + 1,
-        coalesced_count=0,
-        dropped_count=0,
-        protected_by_reply=(
-            req.message_envelope.reply is not None
-            and req.message_envelope.reply.global_user_id == CHARACTER_GLOBAL_USER_ID
-        ),
-        listen_only=req.debug_modes.listen_only,
-        scope=_service_event_scope(req),
-    )
     response = await _chat_input_queue.enqueue(req)
     return response
 
