@@ -38,7 +38,7 @@ long_term/todo.md
 
 | Plan | Status | Execution |
 |---|---|---|
-| _None_ | _None_ | _None_ |
+| [modality_neutral_action_spec_effector_expansion_plan.md](active/short_term/modality_neutral_action_spec_effector_expansion_plan.md) | approved | Execute according to the plan. |
 
 ## Active Bugfix Plans
 
@@ -50,6 +50,8 @@ long_term/todo.md
 
 | Document | Type |
 |---|---|
+| [action_spec_effector_expansion_architecture.md](reference/designs/action_spec_effector_expansion_architecture.md) | Architecture reference |
+| [cognition_contracts_design.md](reference/designs/cognition_contracts_design.md) | Authoritative contract reference |
 | [cognition_core_evolution_progression.md](reference/designs/cognition_core_evolution_progression.md) | Architectural progression |
 | [rag_cache2_design.md](reference/designs/rag_cache2_design.md) | Design reference |
 | [rag_hybrid_search_architecture_decision.md](reference/designs/rag_hybrid_search_architecture_decision.md) | Design reference |
