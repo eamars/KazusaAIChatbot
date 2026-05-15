@@ -13,7 +13,11 @@ from kazusa_ai_chatbot.cognition_episode import (
     CognitiveEpisode,
     validate_cognitive_episode,
 )
-from kazusa_ai_chatbot.nodes.dialog_agent import dialog_agent
+from kazusa_ai_chatbot.nodes.dialog_agent import (
+    DIALOG_USAGE_MODE_SELF_COGNITION_ACTION_CANDIDATE,
+    DIALOG_USAGE_MODE_SELF_COGNITION_PRIVATE_FINALIZATION,
+    dialog_agent,
+)
 from kazusa_ai_chatbot.nodes.persona_supervisor2_consolidator import (
     call_consolidation_subgraph,
 )
@@ -272,6 +276,7 @@ async def build_self_cognition_case_artifacts_async(
                 dialog_state = _build_dialog_state(
                     cognition_state,
                     cognition_output,
+                    usage_mode=DIALOG_USAGE_MODE_SELF_COGNITION_ACTION_CANDIDATE,
                 )
                 dialog_output = await _call_maybe_async(
                     active_dialog_client,
@@ -496,7 +501,11 @@ async def _build_consolidation_ready_state(
     dialog_called = False
     active_dialog_output = dialog_output
     if active_dialog_output is None:
-        dialog_state = _build_dialog_state(cognition_state, cognition_output)
+        dialog_state = _build_dialog_state(
+            cognition_state,
+            cognition_output,
+            usage_mode=DIALOG_USAGE_MODE_SELF_COGNITION_PRIVATE_FINALIZATION,
+        )
         active_dialog_output = await _call_maybe_async(
             dialog_client,
             dialog_state,
@@ -602,6 +611,8 @@ def _build_cognition_state(
 def _build_dialog_state(
     cognition_state: dict[str, Any],
     cognition_output: dict[str, Any],
+    *,
+    usage_mode: str,
 ) -> dict[str, Any]:
     """Merge cognition output into the dialog graph's input state."""
 
@@ -609,6 +620,7 @@ def _build_dialog_state(
     dialog_state.update(cognition_output)
     dialog_state["final_dialog"] = []
     dialog_state["mention_target_user"] = False
+    dialog_state["dialog_usage_mode"] = usage_mode
     return dialog_state
 
 

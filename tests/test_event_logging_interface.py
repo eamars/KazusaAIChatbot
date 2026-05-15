@@ -166,6 +166,36 @@ async def test_self_cognition_budget_persists_only_approved_counters(
 
 
 @pytest.mark.asyncio
+async def test_dialog_quality_event_persists_usage_mode(monkeypatch) -> None:
+    """Dialog quality recorder should expose why dialog was invoked."""
+
+    captured: dict[str, object] = {}
+
+    async def write_event(document):
+        captured.update(document)
+        event_id = str(document["event_id"])
+        return event_id
+
+    monkeypatch.setattr(recording_module.repository, "write_event", write_event)
+
+    result = await event_logging.record_dialog_quality_event(
+        component="nodes.dialog_agent",
+        correlation_id="corr-dialog",
+        usage_mode="self_cognition_private_finalization",
+        evaluator_status="passed",
+        retry_count=1,
+        failure_codes=[],
+        anchor_count=3,
+        status="succeeded",
+    )
+
+    assert result["status"] == "recorded"
+    payload = captured["payload"]
+    assert isinstance(payload, dict)
+    assert payload["usage_mode"] == "self_cognition_private_finalization"
+
+
+@pytest.mark.asyncio
 async def test_recorder_timeout_is_best_effort(monkeypatch) -> None:
     """A slow repository write should return failed instead of raising."""
 

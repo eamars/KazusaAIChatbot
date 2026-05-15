@@ -378,6 +378,7 @@ async def test_worker_default_path_applies_consolidation_without_dispatch_or_fil
 
     async def dialog_client(state: dict[str, Any]) -> dict[str, Any]:
         assert state["should_respond"] is False
+        assert state["dialog_usage_mode"] == "self_cognition_private_finalization"
         return {"final_dialog": ["Private finalization for consolidation only."]}
 
     async def consolidation_client(state: dict[str, Any]) -> dict[str, Any]:
@@ -443,6 +444,7 @@ async def test_worker_default_path_preserves_action_handoff_with_consolidation(
 
     async def dialog_client(state: dict[str, Any]) -> dict[str, Any]:
         assert state["should_respond"] is False
+        assert state["dialog_usage_mode"] == "self_cognition_private_finalization"
         return {"final_dialog": ["Private finalization for consolidation only."]}
 
     async def consolidation_client(state: dict[str, Any]) -> dict[str, Any]:

@@ -168,6 +168,8 @@ def _dialog_global_state() -> dict[str, object]:
         },
         "chat_history_wide": [],
         "chat_history_recent": [],
+        "debug_modes": {},
+        "should_respond": True,
         "channel_type": "group",
         "use_reply_feature": False,
         "platform_user_id": "platform-user-1",
@@ -519,6 +521,7 @@ async def test_dialog_agent_records_quality_without_dialog_text(monkeypatch) -> 
     assert result["final_dialog"] == ["secret full graph reply"]
     record_dialog_quality_event.assert_awaited_once()
     kwargs = record_dialog_quality_event.await_args.kwargs
+    assert kwargs["usage_mode"] == "live_visible_reply"
     assert kwargs["evaluator_status"] == "passed"
     assert kwargs["retry_count"] == 1
     assert kwargs["anchor_count"] == 1

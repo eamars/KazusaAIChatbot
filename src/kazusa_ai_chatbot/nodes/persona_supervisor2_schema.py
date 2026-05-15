@@ -59,6 +59,7 @@ class GlobalPersonaState(TypedDict):
 
     # Response continuation
     should_respond: Annotated[bool | None, keep_false]
+    dialog_usage_mode: NotRequired[str]
 
     # Bridge variables populated by persona graph nodes
     # Decontextualizer output

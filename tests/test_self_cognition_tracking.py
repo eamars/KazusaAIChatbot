@@ -587,6 +587,9 @@ def test_runner_apply_consolidation_builds_private_finalization_state() -> None:
     assert captured_dialog_state["cognitive_episode"]["trigger_source"] == (
         "internal_thought"
     )
+    assert captured_dialog_state["dialog_usage_mode"] == (
+        "self_cognition_private_finalization"
+    )
     assert captured_consolidation_state["cognitive_episode"]["trigger_source"] == (
         "internal_thought"
     )
@@ -626,11 +629,13 @@ def test_runner_apply_consolidation_builds_private_finalization_state() -> None:
 def test_runner_reuses_dialog_render_for_action_and_consolidation() -> None:
     case = _commitment_case()
     dialog_call_count = 0
+    captured_dialog_state: dict[str, Any] = {}
     captured_consolidation_state: dict[str, Any] = {}
 
     async def dialog_client(state: dict[str, Any]) -> dict[str, Any]:
         nonlocal dialog_call_count
         dialog_call_count += 1
+        captured_dialog_state.update(state)
         return_value = {
             "final_dialog": ["Checking in after the missed promise."],
             "target_addressed_user_ids": [state["global_user_id"]],
@@ -671,6 +676,9 @@ def test_runner_reuses_dialog_render_for_action_and_consolidation() -> None:
     )
 
     assert dialog_call_count == 1
+    assert captured_dialog_state["dialog_usage_mode"] == (
+        "self_cognition_action_candidate_render"
+    )
     assert artifact_payloads[models.ARTIFACT_ACTION_CANDIDATE]["text"] == (
         "Checking in after the missed promise."
     )

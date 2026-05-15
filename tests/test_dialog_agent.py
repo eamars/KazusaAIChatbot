@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import typing
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -55,6 +56,8 @@ def _base_global_state():
         },
         "chat_history_wide": [],
         "chat_history_recent": [],
+        "debug_modes": {},
+        "should_respond": True,
         "platform_user_id": "user_123",
         "platform_bot_id": "bot_456",
         "global_user_id": "global-user-123",
@@ -316,6 +319,62 @@ async def test_dialog_agent_handles_empty_dialog():
         result = await dialog_agent(state)
 
     assert result["final_dialog"] == [] or isinstance(result["final_dialog"], list)
+
+
+@pytest.mark.asyncio
+async def test_dialog_agent_logs_explicit_usage_mode(caplog):
+    """Dialog output logs should identify private finalization usage."""
+
+    state = _base_global_state()
+    state["dialog_usage_mode"] = "self_cognition_private_finalization"
+
+    from langchain_core.messages import AIMessage
+    generator_response = AIMessage(content='{"final_dialog": ["Internal only."]}')
+    evaluator_response = AIMessage(
+        content=(
+            '{"fatal_errors": [], "guideline_violations": [], "score": 90, '
+            '"should_stop": true, "feedback": "Passed"}'
+        )
+    )
+
+    call_count = 0
+
+    async def mock_ainvoke(messages):
+        nonlocal call_count
+        call_count += 1
+        if call_count % 2 == 1:
+            return generator_response
+        return evaluator_response
+
+    with (
+        patch(
+            "kazusa_ai_chatbot.nodes.dialog_agent._dialog_generator_llm"
+        ) as mock_generator,
+        patch(
+            "kazusa_ai_chatbot.nodes.dialog_agent._dialog_evaluator_llm"
+        ) as mock_evaluator,
+    ):
+        mock_generator.ainvoke = mock_ainvoke
+        mock_evaluator.ainvoke = mock_ainvoke
+
+        with caplog.at_level(logging.INFO, logger=dialog_module.__name__):
+            await dialog_agent(state)
+
+    assert "usage_mode=self_cognition_private_finalization" in caplog.text
+
+
+def test_dialog_usage_mode_requires_internal_state_fields():
+    """Missing required state fields should not fall back to visible mode."""
+
+    state_without_debug_modes = _base_global_state()
+    state_without_debug_modes.pop("debug_modes")
+    with pytest.raises(KeyError):
+        dialog_module._dialog_usage_mode(state_without_debug_modes)
+
+    state_without_should_respond = _base_global_state()
+    state_without_should_respond.pop("should_respond")
+    with pytest.raises(KeyError):
+        dialog_module._dialog_usage_mode(state_without_should_respond)
 
 
 @pytest.mark.asyncio

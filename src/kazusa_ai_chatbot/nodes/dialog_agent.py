@@ -58,6 +58,13 @@ logger = logging.getLogger(__name__)
 
 MILLISECONDS_PER_SECOND = 1000
 DIALOG_COMPONENT = "nodes.dialog_agent"
+DEFAULT_DIALOG_USAGE_MODE = "live_visible_reply"
+DIALOG_USAGE_MODE_SELF_COGNITION_ACTION_CANDIDATE = (
+    "self_cognition_action_candidate_render"
+)
+DIALOG_USAGE_MODE_SELF_COGNITION_PRIVATE_FINALIZATION = (
+    "self_cognition_private_finalization"
+)
 
 
 def _elapsed_ms(started_at: float) -> int:
@@ -66,6 +73,48 @@ def _elapsed_ms(started_at: float) -> int:
     elapsed = time.perf_counter() - started_at
     elapsed_ms = max(0, int(elapsed * MILLISECONDS_PER_SECOND))
     return elapsed_ms
+
+
+def _dialog_usage_mode(global_state: GlobalPersonaState) -> str:
+    """Describe why the shared dialog graph is being invoked.
+
+    Args:
+        global_state: Persona or self-cognition state passed to dialog.
+
+    Returns:
+        Stable log label distinguishing visible replies from private renders.
+    """
+
+    explicit_mode = global_state.get("dialog_usage_mode")
+    if isinstance(explicit_mode, str) and explicit_mode.strip():
+        usage_mode = explicit_mode.strip()
+        return usage_mode
+
+    debug_modes = global_state["debug_modes"]
+    if isinstance(debug_modes, dict) and debug_modes.get("think_only"):
+        usage_mode = "debug_think_only"
+        return usage_mode
+
+    cognitive_episode = global_state.get("cognitive_episode")
+    if isinstance(cognitive_episode, dict):
+        trigger_source = cognitive_episode.get("trigger_source")
+        output_mode = cognitive_episode.get("output_mode")
+        if trigger_source == "internal_thought":
+            usage_mode = f"internal_thought_{output_mode or 'unknown'}"
+            return usage_mode
+        if trigger_source == "reflection_signal":
+            usage_mode = f"reflection_{output_mode or 'unknown'}"
+            return usage_mode
+        if output_mode == "think_only":
+            usage_mode = "debug_think_only"
+            return usage_mode
+
+    if global_state["should_respond"] is False:
+        usage_mode = "private_finalization"
+        return usage_mode
+
+    usage_mode = DEFAULT_DIALOG_USAGE_MODE
+    return usage_mode
 
 
 # Define DialogAgent state
@@ -121,6 +170,7 @@ class DialogAgentState(TypedDict):
     target_addressed_user_ids: list[str]
     target_broadcast: bool
     mention_target_user: bool
+    dialog_usage_mode: str
 
 _DIALOG_GENERATOR_PROMPT = """\
 你现在是角色 `{character_name}` 的 **表达执行官**。你接收来自`linguistic_directives`的修辞指令和`contextual_directives`的社交参数，将它们转化为自然的聊天文本。
@@ -675,6 +725,7 @@ async def dialog_agent(
     Dialog agent that generates and evaluates dialogue
     """
     
+    usage_mode = _dialog_usage_mode(global_state)
     sub_agent_builder = StateGraph(DialogAgentState)
 
     # Add nodes
@@ -736,6 +787,7 @@ async def dialog_agent(
         "target_addressed_user_ids": [],
         "target_broadcast": False,
         "mention_target_user": False,
+        "dialog_usage_mode": usage_mode,
     }
 
     result = await sub_graph.ainvoke(subState)
@@ -746,14 +798,19 @@ async def dialog_agent(
         result["mention_target_user"]
     )
 
-    logger.info(f"Dialog output: dialog={log_list_preview(final_dialog)}")
+    logger.info(
+        f"Dialog output: usage_mode={usage_mode} "
+        f"dialog={log_list_preview(final_dialog)}"
+    )
     logger.debug(
-        f'Dialog metadata: fragments={len(final_dialog)} retry={result["retry"]}'
+        f'Dialog metadata: usage_mode={usage_mode} '
+        f'fragments={len(final_dialog)} retry={result["retry"]}'
     )
     evaluator_status = "passed" if final_dialog else "empty"
     await event_logging.record_dialog_quality_event(
         component=DIALOG_COMPONENT,
         correlation_id="",
+        usage_mode=usage_mode,
         evaluator_status=evaluator_status,
         retry_count=int(result["retry"]),
         failure_codes=[] if final_dialog else ["empty_dialog"],

@@ -284,6 +284,7 @@ async def record_dialog_quality_event(
     *,
     component: str,
     correlation_id: str,
+    usage_mode: str,
     evaluator_status: str,
     retry_count: int,
     failure_codes: Sequence[str],
@@ -408,7 +409,7 @@ by the matching public recorder.
 | `pipeline_turn` | `record_pipeline_turn_event` | `turn` | `queue_wait_ms`, `stages_reached`, `final_outcome`, `scheduled_followups`, `debug_modes` |
 | `queue_intake` | `record_queue_intake_event` | `queue_intake` | `queue_depth`, `coalesced_count`, `dropped_count`, `protected_by_reply`, `listen_only` |
 | `rag_stage` | `record_rag_stage_event` | `agent_name` | `agent_name`, `slot_count`, `retrieval_count`, `cache_hit`, `no_evidence`, `latency_ms` |
-| `dialog_quality` | `record_dialog_quality_event` | `dialog_quality` | `evaluator_status`, `retry_count`, `failure_codes`, `anchor_count` |
+| `dialog_quality` | `record_dialog_quality_event` | `dialog_quality` | `usage_mode`, `evaluator_status`, `retry_count`, `failure_codes`, `anchor_count` |
 | `dispatcher` | `record_dispatcher_event` | `action_kind` | `action_kind`, `validation_status`, `adapter_available`, `scheduled_event_ids`, `rejection_codes` |
 | `database_operation` | `record_database_operation_event` | `operation_kind` | `collection`, `operation_kind`, `idempotency_result`, `latency_ms`, `document_ref` |
 | `self_cognition` | `record_self_cognition_event` | `trigger_kind` | `case_id`, `trigger_kind`, `selected_route`, `output_mode`, `budget`, `dispatch_status`, `consolidation_outcome` |
