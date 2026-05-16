@@ -211,7 +211,6 @@ _DIALOG_GENERATOR_PROMPT = """\
    - `emotional_intensity`: 对情绪波动程度的文字描述。
    - `vibe_check`: 当前对话氛围的定性分析。
    - `relational_dynamic`: 当前两人关系的动态描述。
-   - `expression_willingness`: 角色的当前的表达欲望。
 3. **内心独白 (internal_monologue)**: 真实的心理活动，用于支撑语气的“厚度”，**严禁**直接转化为台词。
 
 # 表达规范 (The "Human-like" Protocol)
@@ -274,8 +273,7 @@ _DIALOG_GENERATOR_PROMPT = """\
         "social_distance": "string",
         "emotional_intensity": "string",
         "vibe_check": "string",
-        "relational_dynamic": "string",
-        "expression_willingness": "string",
+        "relational_dynamic": "string"
     }},
     "tone_history": "已完成的历史轮次（至上一条 assistant 回复为止），仅供语气节奏参考",
     "user_name": "string"
@@ -584,8 +582,7 @@ _DIALOG_EVALUATOR_PROMPT = """\
         "social_distance": "string",
         "emotional_intensity": "string",
         "vibe_check": "string",
-        "relational_dynamic": "string",
-        "expression_willingness": "string",
+        "relational_dynamic": "string"
     }},
     "internal_monologue": "意识层面的原始意图",
     "last_user_message": "chat_history_recent 中最后一条用户消息（供话题偏离检测使用）"
@@ -733,22 +730,7 @@ async def dialog_agent(
     sub_agent_builder.add_node("evaluator", dialog_evaluator)
     
     # Add edges
-    # Skip the dialog if the expression_willingness is silent. 
-    def conditional_skip_dialog_agent(state: DialogAgentState) -> str:
-        expresison_willingness = state["action_directives"]["contextual_directives"]["expression_willingness"].strip()
-        if (expresison_willingness == "silent"):
-            return "skip"
-        else:
-            return "continue"
-
-    sub_agent_builder.add_conditional_edges(
-        START,
-        conditional_skip_dialog_agent,
-        {
-            "skip": END,
-            "continue": "generator",
-        }
-    )
+    sub_agent_builder.add_edge(START, "generator")
     sub_agent_builder.add_edge("generator", "evaluator")
     
     # Evaluate

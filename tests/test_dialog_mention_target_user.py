@@ -74,7 +74,6 @@ def _dialog_state() -> dict:
                 "emotional_intensity": "low",
                 "vibe_check": "calm",
                 "relational_dynamic": "cooperative",
-                "expression_willingness": "open",
             },
         },
         "chat_history_wide": [],
@@ -85,6 +84,8 @@ def _dialog_state() -> dict:
         "user_name": "User",
         "user_profile": {"affinity": 700},
         "character_profile": _character_profile(),
+        "debug_modes": {},
+        "should_respond": True,
         "messages": [],
     }
     return state

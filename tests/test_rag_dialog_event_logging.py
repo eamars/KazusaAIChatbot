@@ -156,7 +156,6 @@ def _dialog_global_state() -> dict[str, object]:
                 "emotional_intensity": "low",
                 "vibe_check": "friendly",
                 "relational_dynamic": "direct reply",
-                "expression_willingness": "open",
             },
             "linguistic_directives": {
                 "rhetorical_strategy": "answer directly",
@@ -235,7 +234,7 @@ async def test_stage_1_skip_records_rag_event_without_query_text(monkeypatch) ->
     )
     monkeypatch.setattr(
         supervisor_module,
-        "call_rag_supervisor",
+        "call_quote_aware_rag_supervisor",
         call_rag_supervisor,
     )
 
@@ -274,13 +273,14 @@ async def test_stage_1_success_records_counts_without_evidence(monkeypatch) -> N
 
     async def call_rag_supervisor(
         *,
-        original_query: str,
+        fresh_query: str,
+        reply_context: dict,
         character_name: str,
         context: dict,
     ) -> dict[str, object]:
         """Return one projected memory evidence fact."""
 
-        del original_query, character_name, context
+        del fresh_query, reply_context, character_name, context
         result = {
             "answer": "private synthesized answer",
             "known_facts": [
@@ -309,7 +309,7 @@ async def test_stage_1_success_records_counts_without_evidence(monkeypatch) -> N
 
     monkeypatch.setattr(
         supervisor_module,
-        "call_rag_supervisor",
+        "call_quote_aware_rag_supervisor",
         call_rag_supervisor,
     )
 

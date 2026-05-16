@@ -374,7 +374,6 @@ def _dialog_state_from_anchor(state: dict, content_anchors: list[str]) -> dict:
             "emotional_intensity": '疲惫和卡顿感明显，但仍能接收短而具体的建议。',
             "vibe_check": '深夜赶稿的焦虑和信任混在一起。',
             "relational_dynamic": '用户把千纱当成能继续接住上下文的人，而不是只安抚的人。',
-            "expression_willingness": "open",
         },
     }
     return state
@@ -534,7 +533,6 @@ def _release_dialog_state_from_anchor(state: dict, case: dict[str, Any], content
             "emotional_intensity": case["emotional_intensity"],
             "vibe_check": case["vibe_check"],
             "relational_dynamic": case["relational_dynamic"],
-            "expression_willingness": "open",
         },
     }
     return state

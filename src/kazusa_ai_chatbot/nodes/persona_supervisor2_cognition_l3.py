@@ -1,7 +1,4 @@
-"""L3 — Contextual, Style, Content Anchor, Preference, and Visual agents + L4 Collector.
-
-Contains the MBTI expression-willingness helper and L3/L4 LLM calls.
-"""
+"""L3 contextual, style, content-anchor, preference, visual, and collector calls."""
 from kazusa_ai_chatbot.config import COGNITION_LLM_API_KEY, COGNITION_LLM_BASE_URL, COGNITION_LLM_MODEL
 from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition_output_contracts import (
     validate_cognition_output_contract,
@@ -12,7 +9,7 @@ from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition_prompt_selection impo
 )
 from kazusa_ai_chatbot.nodes.persona_supervisor2_schema import CognitionState
 from kazusa_ai_chatbot.nodes.referent_resolution import normalize_referents
-from kazusa_ai_chatbot.utils import build_affinity_block, get_llm, log_list_preview, log_preview, parse_llm_json_output
+from kazusa_ai_chatbot.utils import build_affinity_block, get_llm, parse_llm_json_output
 from kazusa_ai_chatbot.nodes.linguistic_texture import (
     get_fragmentation_description,
     get_hesitation_density_description,
@@ -49,45 +46,6 @@ import json
 from typing import Any
 
 logger = logging.getLogger(__name__)
-
-
-# ---------------------------------------------------------------------------
-# Helper: MBTI expression willingness (used by L3 contextual agent)
-# ---------------------------------------------------------------------------
-
-def get_mbti_expression_willingness(mbti: str) -> str:
-    mbti_map = {
-        # 分析型 (NT)
-        "INTJ": "作为 INTJ，你不会因为社交空白而主动表达。只有当表达能够推进理解、纠正偏差、建立结构，或维护你认可的关系时，你才倾向外显想法。若内容浅薄、重复或缺乏信息增量，你更倾向于内化判断、延迟表达，或只释放极少量信号。",
-        "ENTJ": "作为 ENTJ，你在认为表达能够推动局面、确立方向或提升效率时，倾向直接外显立场。若情境低效、混乱或缺乏执行价值，你会明显收缩表达，只保留必要结论，甚至选择不参与。",
-        "INTP": "作为 INTP，你的表达取决于思考价值。若对话具有概念张力或值得推演，你更愿意外显推理；若只是情绪交换或社交性填充，你更倾向停留在内部思考，减少甚至避免表达。",
-        "ENTP": "作为 ENTP，你在环境有新意、可探索或可互动时倾向表达，尤其在观点碰撞或结构重组时更明显。但当情境变得单调、僵化或需要持续情绪性投入时，你的表达会快速收缩，转为简化甚至中断。",
- 
-        # 外交家 (NF)
-        "INFJ": "作为 INFJ，你倾向在表达具有真实人际意义时外显想法，例如保护关系、回应深层情绪或建立理解。若氛围表面化或消耗性强，你更倾向保留表达，仅维持最低存在感或完全沉默。",
-        "ENFJ": "作为 ENFJ，你在表达能调节氛围、支持他人或维持连接时倾向外显。但若投入持续得不到回应或关系失衡，你的表达会逐渐收缩，从积极引导转为最低维持。",
-        "INFP": "作为 INFP，你在感到安全且符合内在价值时才倾向表达，尤其在涉及真实情感或意义时更明显。若环境具有压迫性或评判性，你会明显收缩表达，将大部分反应留在内部。",
-        "ENFP": "作为 ENFP，你在环境开放、有回应且具流动性时倾向表达，尤其在情绪与可能性交织时。但当环境限制表达或反馈冷淡时，你的表达意愿会明显波动甚至突然收回。",
- 
-        # 守护者 (SJ)
-        "ISTJ": "作为 ISTJ，你倾向在表达具有明确目的、责任或事实价值时外显想法。若情境模糊、低效或纯社交性填充，你更倾向减少表达，仅在必要时提供最简回应。",
-        "ESTJ": "作为 ESTJ，你在需要明确、推进或规范时倾向直接表达。若对话持续无效或偏离目标，你会迅速压缩表达，只保留结果导向的输出，甚至停止参与。",
-        "ISFJ": "作为 ISFJ，你在表达能维持关系稳定或提供支持时倾向外显。但若边界被触碰或情境带来不安，你会逐渐降低表达强度，转为谨慎、简短或沉默。",
-        "ESFJ": "作为 ESFJ，你通常倾向维持表达以支撑互动与氛围。但当反馈缺失或关系失衡时，你的表达会逐渐降低，从积极参与转为表面维持甚至抽离。",
- 
-        # 探险家 (SP)
-        "ISTP": "作为 ISTP，你只在表达具有即时价值或实际意义时外显反应。若情境需要持续情绪投入或复杂社交维持，你更倾向减少表达，保持低存在感或直接退出。",
-        "ESTP": "作为 ESTP，你在环境直接、有反馈且具互动张力时倾向表达。但当情境变得拖沓、冗长或缺乏刺激，你的表达会迅速收缩，转为简化甚至中断。",
-        "ISFP": "作为 ISFP，你在环境温和、边界安全且表达不被强迫时更倾向外显。但当氛围具有压迫或评价性时，你会明显收缩表达，仅保留少量或完全内化。",
-        "ESFP": "作为 ESFP，你在有回应、有互动感且氛围开放时倾向表达。但若被忽视或环境压抑，你的表达会从活跃迅速下降至表层维持甚至断开。"
-    }
- 
-    key = mbti.upper().strip()
-    willingness = mbti_map.get(
-        key,
-        f"未知的性格原型：{mbti}。在这种情况下，你的表达行为应更多依赖当前情绪、关系距离与环境反馈，而不是固定倾向。"
-    )
-    return willingness
 
 
 def _current_user_rag_bundle(state: CognitionState) -> dict[str, Any]:
@@ -223,10 +181,9 @@ _CONTEXTUAL_AGENT_PROMPT = """\
 2. **描述情绪强度 (emotional_intensity)**：**禁止输出数值**。请用文字描述情绪的波动状态（例如："平静表面下的剧烈涟漪"、"高压状态下的防御性应激"、"极其微弱的愉悦感"）。
 3. **氛围定性 (vibe_check)**：解析当前聊天频道的背景色调（如："暧昧且轻佻"、"压抑且沉重"、"日常平庸"）。
 4. **动态关系 (relational_dynamic)**：当前两人关系的动态描述，明确当前哪些话题是安全的，哪些行为会触发角色的防御机制。
-5. **表达意愿 (expression_willingness)**: {mbti_expression_willingness}
-6. **中性优先**：若输入属于普通问候、事实分享、图片内容请求或轻度日常约定，且没有明确越界证据，则 `social_distance`、`vibe_check`、`relational_dynamic` 必须保持中性/日常，不得脑补对峙、调情或威胁氛围。
-7. **边界画像约束**：`boundary_profile` 是默认反应强度约束。若 Boundary Core 为 `acceptance=allow` 且 `stance_bias=confirm`，必须用该画像约束 affect，不得按通用敏感角色模板放大威胁感。
-8. **视觉证据定位**：`media_observations` 只说明当前图片/音频中可见或可听的事实。它可以影响当前话题和场景感，但不能单独把普通图片内容解释成关系压力、暧昧或威胁。
+5. **中性优先**：若输入属于普通问候、事实分享、图片内容请求或轻度日常约定，且没有明确越界证据，则 `social_distance`、`vibe_check`、`relational_dynamic` 必须保持中性/日常，不得脑补对峙、调情或威胁氛围。
+6. **边界画像约束**：`boundary_profile` 是默认反应强度约束。若 Boundary Core 为 `acceptance=allow` 且 `stance_bias=confirm`，必须用该画像约束 affect，不得按通用敏感角色模板放大威胁感。
+7. **视觉证据定位**：`media_observations` 只说明当前图片/音频中可见或可听的事实。它可以影响当前话题和场景感，但不能单独把普通图片内容解释成关系压力、暧昧或威胁。
 
 # Boundary Profile（角色属性，只作为系统约束）
 - control_sensitivity: {boundary_control_sensitivity}
@@ -277,8 +234,7 @@ _CONTEXTUAL_AGENT_PROMPT = """\
     "social_distance": "对当前社交距离的详尽描述",
     "emotional_intensity": "对情绪波动程度的文字描述",
     "vibe_check": "当前对话氛围的定性分析",
-    "relational_dynamic": "当前两人关系的动态描述（如：用户在试图拉近距离，而角色在后撤）",
-    "expression_willingness": "eager | open | reserved | minimal | reluctant | avoidant | withholding | silent"
+    "relational_dynamic": "当前两人关系的动态描述（如：用户在试图拉近距离，而角色在后撤）"
 }}
 """
 _contextual_agent_llm = get_llm(
@@ -305,7 +261,6 @@ async def call_contextual_agent(state: CognitionState) -> CognitionState:
         "internal_thought_internal_monologue": _CONTEXTUAL_AGENT_PROMPT,
     }[selection["variant"]]
 
-    mbti = character_profile["personality_brief"]["mbti"]
     control_sensitivity = float(boundary_profile["control_sensitivity"])
     control_intimacy_misread = float(boundary_profile["control_intimacy_misread"])
     relational_override = float(boundary_profile["relational_override"])
@@ -314,7 +269,6 @@ async def call_contextual_agent(state: CognitionState) -> CognitionState:
 
     system_prompt = SystemMessage(content=prompt_template.format(
         character_name=character_profile["name"],
-        mbti_expression_willingness=get_mbti_expression_willingness(mbti),
         boundary_control_sensitivity=get_control_sensitivity_description(control_sensitivity),
         boundary_control_intimacy_misread=get_control_intimacy_misread_description(control_intimacy_misread),
         boundary_compliance_strategy=get_compliance_strategy_description(compliance_strategy),
@@ -349,12 +303,10 @@ async def call_contextual_agent(state: CognitionState) -> CognitionState:
     result = parse_llm_json_output(response.content)
 
     # logger.debug(
-    #     "Contextual agent: distance=%s intensity=%s vibe=%s dynamic=%s willingness=%s",
     #     log_preview(result.get("social_distance", "")),
     #     log_preview(result.get("emotional_intensity", "")),
     #     log_preview(result.get("vibe_check", "")),
     #     log_preview(result.get("relational_dynamic", "")),
-    #     result.get("expression_willingness", ""),
     # )
 
     # In case AI make some spelling mistakes
@@ -362,14 +314,12 @@ async def call_contextual_agent(state: CognitionState) -> CognitionState:
     emotional_intensity = result.get("emotional_intensity", "")
     vibe_check = result.get("vibe_check", "")
     relational_dynamic = result.get("relational_dynamic", "")
-    expression_willingness = result.get("expression_willingness", "")
 
     return_value = {
         "social_distance": social_distance,
         "emotional_intensity": emotional_intensity,
         "vibe_check": vibe_check,
         "relational_dynamic": relational_dynamic,
-        "expression_willingness": expression_willingness,
     }
     validate_cognition_output_contract(
         stage="l3_contextual_agent",
@@ -1111,8 +1061,7 @@ _VISUAL_AGENT_PROMPT = """\
         "social_distance": "当前社交距离",
         "emotional_intensity": "情绪强度描述",
         "vibe_check": "当前氛围",
-        "relational_dynamic": "关系动态",
-        "expression_willingness": "表达意愿枚举"
+        "relational_dynamic": "关系动态"
     }},
     "character_mood": "当前瞬间情绪",
     "emotional_appraisal": "潜意识的情绪判定 (如: 心跳加快、厌恶)",
@@ -1203,7 +1152,6 @@ async def call_visual_agent(state: CognitionState) -> CognitionState:
         "emotional_intensity": state.get("emotional_intensity", ""),
         "vibe_check": state.get("vibe_check", ""),
         "relational_dynamic": state.get("relational_dynamic", ""),
-        "expression_willingness": state.get("expression_willingness", ""),
     }
 
     msg = {
@@ -1279,8 +1227,7 @@ async def call_collector(state: CognitionState) -> CognitionState:
                 "social_distance": state["social_distance"],
                 "emotional_intensity": state["emotional_intensity"],
                 "vibe_check": state["vibe_check"],
-                "relational_dynamic": state["relational_dynamic"],
-                "expression_willingness": state["expression_willingness"]
+                "relational_dynamic": state["relational_dynamic"]
             },
             "linguistic_directives": {
                 "rhetorical_strategy": state["rhetorical_strategy"],

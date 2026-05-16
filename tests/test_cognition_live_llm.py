@@ -35,7 +35,6 @@ _ROOT = Path(__file__).resolve().parents[1]
 _PERSONALITY_PATH = _ROOT / "personalities" / "kazusa.json"
 _ALLOWED_LOGICAL_STANCES = {"CONFIRM", "REFUSE", "TENTATIVE", "DIVERGE", "CHALLENGE"}
 _ALLOWED_CHARACTER_INTENTS = {"PROVIDE", "BANTAR", "REJECT", "EVADE", "CONFRONT", "DISMISS", "CLARIFY"}
-_ALLOWED_EXPRESSION_WILLINGNESS = {"eager", "open", "reserved", "minimal", "reluctant", "avoidant", "withholding", "silent"}
 
 
 async def _skip_if_llm_unavailable() -> None:
@@ -288,7 +287,6 @@ async def test_live_cognition_stack_exercises_each_stage_llm(ensure_live_llm) ->
     assert state["character_intent"] in _ALLOWED_CHARACTER_INTENTS, f"Unexpected character_intent: {state!r}"
     assert state["boundary_core_assessment"]["acceptance"] in {"allow", "guarded", "hesitant", "reject"}, f"Unexpected boundary assessment: {state['boundary_core_assessment']!r}"
     assert state["social_distance"].strip(), f"Missing L3 contextual output: {state!r}"
-    assert state["expression_willingness"] in _ALLOWED_EXPRESSION_WILLINGNESS, f"Unexpected expression_willingness: {state!r}"
     assert state["rhetorical_strategy"].strip(), f"Missing style output: {state!r}"
     assert state["linguistic_style"].strip(), f"Missing linguistic_style: {state!r}"
     assert isinstance(state["forbidden_phrases"], list), f"Invalid forbidden_phrases: {state!r}"

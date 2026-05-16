@@ -37,7 +37,6 @@ _REQUIRED_OUTPUT_FIELDS: dict[CognitionPromptStage, dict[str, type[object]]] = {
         "emotional_intensity": str,
         "vibe_check": str,
         "relational_dynamic": str,
-        "expression_willingness": str,
     },
     "l3_style_agent": {
         "rhetorical_strategy": str,

@@ -676,55 +676,15 @@ async def test_cognition_subgraph_passes_cognitive_episode_to_nodes(
         }
         return return_value
 
-    async def _contextual(_state: dict[str, Any]) -> dict[str, str]:
-        """Return deterministic contextual directives."""
+    async def _capture_action_initializer(
+        state: dict[str, Any],
+    ) -> dict[str, list]:
+        """Capture L2d input state and return no selected actions."""
 
+        captured["l2d"] = dict(state)
         return_value = {
-            "social_distance": "neutral",
-            "emotional_intensity": "low",
-            "vibe_check": "routine",
-            "relational_dynamic": "stable",
-            "expression_willingness": "open",
+            "action_specs": [],
         }
-        return return_value
-
-    async def _style(_state: dict[str, Any]) -> dict[str, Any]:
-        """Return deterministic linguistic style directives."""
-
-        return_value = {
-            "rhetorical_strategy": "brief",
-            "linguistic_style": "plain",
-            "forbidden_phrases": [],
-        }
-        return return_value
-
-    async def _content(_state: dict[str, Any]) -> dict[str, list[str]]:
-        """Return deterministic content anchors."""
-
-        return_value = {"content_anchors": ["answer briefly"]}
-        return return_value
-
-    async def _preferences(_state: dict[str, Any]) -> dict[str, list[str]]:
-        """Return deterministic accepted preference output."""
-
-        return_value = {"accepted_user_preferences": []}
-        return return_value
-
-    async def _visual(_state: dict[str, Any]) -> dict[str, list[str]]:
-        """Return deterministic visual directives."""
-
-        return_value = {
-            "facial_expression": [],
-            "body_language": [],
-            "gaze_direction": [],
-            "visual_vibe": [],
-        }
-        return return_value
-
-    async def _interaction_style(_state: dict[str, Any]) -> dict[str, dict]:
-        """Return deterministic interaction-style context."""
-
-        return_value = {"interaction_style_context": {}}
         return return_value
 
     monkeypatch.setattr(
@@ -747,23 +707,10 @@ async def test_cognition_subgraph_passes_cognitive_episode_to_nodes(
         "call_judgment_core_agent",
         _capture_judgment,
     )
-    monkeypatch.setattr(cognition_module, "call_contextual_agent", _contextual)
-    monkeypatch.setattr(cognition_module, "call_style_agent", _style)
     monkeypatch.setattr(
         cognition_module,
-        "call_content_anchor_agent",
-        _content,
-    )
-    monkeypatch.setattr(
-        cognition_module,
-        "call_preference_adapter",
-        _preferences,
-    )
-    monkeypatch.setattr(cognition_module, "call_visual_agent", _visual)
-    monkeypatch.setattr(
-        cognition_module,
-        "call_interaction_style_context_loader",
-        _interaction_style,
+        "call_action_initializer",
+        _capture_action_initializer,
     )
 
     state = _base_cognition_state()
@@ -774,5 +721,7 @@ async def test_cognition_subgraph_passes_cognitive_episode_to_nodes(
     assert captured["l2a"]["cognitive_episode"] == episode
     assert captured["l2b"]["cognitive_episode"] == episode
     assert captured["l2c"]["cognitive_episode"] == episode
+    assert captured["l2d"]["cognitive_episode"] == episode
     assert result["internal_monologue"] == "answer"
     assert result["logical_stance"] == "CONFIRM"
+    assert result["action_specs"] == []

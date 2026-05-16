@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -11,7 +12,7 @@ import pytest
 
 from kazusa_ai_chatbot.dispatcher.task import DispatchResult, Task
 from kazusa_ai_chatbot.db import user_memory_units as memory_units_module
-from kazusa_ai_chatbot.self_cognition import models, sources
+from kazusa_ai_chatbot.self_cognition import models, projection, sources
 from kazusa_ai_chatbot.self_cognition import tracking, worker
 from kazusa_ai_chatbot.self_cognition.handoff import dispatch_action_candidate
 
@@ -77,6 +78,76 @@ def _commitment_case() -> dict[str, Any]:
                 "timestamp": "2026-05-12T23:50:00+00:00",
             }
         ],
+    }
+    return case
+
+
+def _future_cognition_event() -> dict[str, Any]:
+    event = {
+        "event_id": "future_cognition:action_attempt:future-123",
+        "tool": "trigger_future_cognition",
+        "execute_at": "2026-05-16T10:00:00+00:00",
+        "created_at": "2026-05-16T09:00:00+00:00",
+        "status": "pending",
+        "args": {
+            "episode_type": "self_cognition",
+            "trigger_at": "2026-05-16T10:00:00+00:00",
+            "context_summary": "Re-check whether a natural pause appeared.",
+            "source_action_attempt_id": "action_attempt:future-123",
+            "source_refs": [
+                {
+                    "ref_kind": "cognitive_episode",
+                    "ref_id": "episode-123",
+                    "owner": "cognition",
+                    "relationship": "basis",
+                    "evidence_refs": [],
+                }
+            ],
+            "continuation": {
+                "mode": "scheduled_followup",
+                "episode_type": "self_cognition",
+                "max_depth": 1,
+                "include_result_as": "scheduled_event",
+            },
+        },
+        "source_platform": "orchestrator",
+        "source_channel_id": "",
+        "source_channel_type": "internal",
+        "source_user_id": "self_cognition",
+        "source_message_id": "action_attempt:future-123",
+        "source_platform_bot_id": "",
+        "source_character_name": "",
+        "guild_id": None,
+        "bot_role": "system",
+    }
+    return event
+
+
+def _future_cognition_case() -> dict[str, Any]:
+    case = {
+        "case_name": models.CASE_SCHEDULED_FUTURE_COGNITION,
+        "case_id": "future_cognition:action_attempt:future-123",
+        "idle_timestamp": "2026-05-16T10:00:00+00:00",
+        "last_evidence_timestamp": "2026-05-16T10:00:00+00:00",
+        "trigger_kind": models.TRIGGER_SCHEDULED_FUTURE_COGNITION,
+        "semantic_due_state": models.DUE_STATE_DUE_NOW,
+        "actionability": "scheduled_future_cognition_due",
+        "target_scope": {
+            "platform": "internal",
+            "platform_channel_id": "",
+            "channel_type": "internal",
+            "user_id": None,
+        },
+        "source_refs": [
+            {
+                "source_kind": "scheduled_event",
+                "source_id": "future_cognition:action_attempt:future-123",
+                "due_at": "2026-05-16T10:00:00+00:00",
+                "summary": "Re-check whether a natural pause appeared.",
+            }
+        ],
+        "visible_context": [],
+        "source_scheduled_event_id": "future_cognition:action_attempt:future-123",
     }
     return case
 
@@ -224,6 +295,134 @@ def _case_runner_with_tracking(
     if action_candidate is not None:
         payloads[models.ARTIFACT_ACTION_CANDIDATE] = action_candidate
     return payloads
+
+
+@pytest.mark.asyncio
+async def test_collect_scheduled_future_cognition_cases_projects_due_slots() -> None:
+    """Due future-cognition slots become normal prompt-safe trigger cases."""
+
+    now = datetime(2026, 5, 16, 10, 0, tzinfo=timezone.utc)
+    calls: list[dict[str, Any]] = []
+
+    async def list_due_events(**kwargs: Any) -> list[dict[str, Any]]:
+        calls.append(dict(kwargs))
+        return [_future_cognition_event()]
+
+    cases = await sources.collect_scheduled_future_cognition_cases(
+        now=now,
+        character_profile={"name": "TestCharacter"},
+        max_cases=3,
+        list_due_events_func=list_due_events,
+    )
+
+    assert calls == [{"current_timestamp": now.isoformat(), "limit": 3}]
+    assert len(cases) == 1
+    case = cases[0]
+    assert case["case_name"] == models.CASE_SCHEDULED_FUTURE_COGNITION
+    assert case["trigger_kind"] == models.TRIGGER_SCHEDULED_FUTURE_COGNITION
+    assert case["case_id"] == "future_cognition:action_attempt:future-123"
+    assert (
+        case["source_scheduled_event_id"]
+        == "future_cognition:action_attempt:future-123"
+    )
+    assert case["source_refs"][0]["source_kind"] == "scheduled_event"
+    assert case["source_refs"][0]["source_id"] == (
+        "scheduled_future_cognition_slot"
+    )
+    assert case["source_refs"][0]["summary"] == (
+        "Re-check whether a natural pause appeared."
+    )
+    source_packet = projection.build_source_packet(case)
+    rendered_packet = projection.render_source_packet_text(source_packet)
+    serialized = json.dumps(source_packet, ensure_ascii=False).lower()
+    serialized = f"{serialized}\n{rendered_packet.lower()}"
+    for forbidden in (
+        "action_attempt:future-123",
+        "episode-123",
+        "future-123",
+        "handler_id",
+        "credential",
+        "mongodb",
+        "collection",
+        "episode_type",
+        "include_result_as",
+        "max_depth",
+        "raw_channel",
+        "schema_version",
+    ):
+        assert forbidden not in serialized
+
+
+@pytest.mark.asyncio
+async def test_collect_self_cognition_cases_includes_future_slots(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The shared collector should include due scheduled cognition slots."""
+
+    async def no_commitments(**kwargs: Any) -> list[dict[str, Any]]:
+        del kwargs
+        return []
+
+    async def future_cases(**kwargs: Any) -> list[dict[str, Any]]:
+        del kwargs
+        return [_future_cognition_case()]
+
+    monkeypatch.setattr(sources, "collect_active_commitment_cases", no_commitments)
+    monkeypatch.setattr(
+        sources,
+        "collect_scheduled_future_cognition_cases",
+        future_cases,
+    )
+
+    cases = await sources.collect_self_cognition_cases(
+        now=datetime(2026, 5, 16, 10, 0, tzinfo=timezone.utc),
+        character_profile={"name": "TestCharacter"},
+        max_cases=3,
+    )
+
+    assert [case["trigger_kind"] for case in cases] == [
+        models.TRIGGER_SCHEDULED_FUTURE_COGNITION,
+    ]
+
+
+@pytest.mark.asyncio
+async def test_worker_tick_marks_future_cognition_slot_completed(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """A processed scheduled cognition slot should not stay pending forever."""
+
+    completed_event_ids: list[str] = []
+
+    async def collect_cases(**kwargs: Any) -> list[dict[str, Any]]:
+        del kwargs
+        return [_future_cognition_case()]
+
+    async def run_case(case: dict[str, Any], output_dir: Path) -> dict[str, Any]:
+        assert case["trigger_kind"] == models.TRIGGER_SCHEDULED_FUTURE_COGNITION
+        assert output_dir.name
+        return {}
+
+    async def mark_completed(event_id: str) -> bool:
+        completed_event_ids.append(event_id)
+        return True
+
+    monkeypatch.setattr(worker.db, "mark_scheduled_event_completed", mark_completed)
+
+    result = await worker.run_self_cognition_worker_tick(
+        output_root=tmp_path,
+        dispatcher=None,
+        now=datetime(2026, 5, 16, 10, 0, tzinfo=timezone.utc),
+        is_primary_interaction_busy=lambda: False,
+        collect_cases_func=collect_cases,
+        run_case_func=run_case,
+        read_attempts_func=lambda **kwargs: [],
+        record_attempt_func=lambda attempt: None,
+        max_cases=3,
+    )
+
+    assert result.processed_count == 1
+    assert completed_event_ids == ["future_cognition:action_attempt:future-123"]
 
 
 class _FakeDispatcher:

@@ -88,6 +88,7 @@ class GlobalPersonaState(TypedDict):
     emotional_appraisal: str
     character_intent: str
     logical_stance: str
+    judgment_note: str
 
     # Dialog output
     final_dialog: [str]  # -> Will be used for dialog end point (e.g,. Discord)
@@ -153,7 +154,6 @@ class CognitionState(TypedDict):
     emotional_intensity: str
     vibe_check: str
     relational_dynamic: str
-    expression_willingness: str
 
     rhetorical_strategy: str
     linguistic_style: str

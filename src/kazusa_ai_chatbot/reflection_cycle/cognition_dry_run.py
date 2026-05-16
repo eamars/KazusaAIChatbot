@@ -34,11 +34,7 @@ _REFLECTION_DRY_RUN_PROMPT_KEYS = [
     "l2a_consciousness.reflection_signal_reflection_artifact",
     "l2b_boundary_core.reflection_signal_reflection_artifact",
     "l2c_judgment_core.reflection_signal_reflection_artifact",
-    "l3_contextual_agent.reflection_signal_reflection_artifact",
-    "l3_style_agent.reflection_signal_reflection_artifact",
-    "l3_content_anchor_agent.reflection_signal_reflection_artifact",
-    "l3_preference_adapter.reflection_signal_reflection_artifact",
-    "l3_visual_agent.reflection_signal_reflection_artifact",
+    "l2d_action_initializer.reflection_signal_reflection_artifact",
 ]
 _REFLECTION_DRY_RUN_INPUT_TEXT = (
     "Reflection dry run over promoted reflection artifact."

@@ -27,6 +27,7 @@ _pending_tasks: dict[str, asyncio.Task] = {}
 _tool_registry: ToolRegistry | None = None
 _adapter_registry: AdapterRegistry | None = None
 _pending_index: PendingTaskIndex | None = None
+_NON_DISPATCHER_SLOT_TOOLS = frozenset(("trigger_future_cognition",))
 
 
 def configure_runtime(
@@ -119,6 +120,13 @@ async def schedule_event(event: ScheduledEventDoc) -> str:
 
     await insert_scheduled_event(event)
 
+    if event["tool"] in _NON_DISPATCHER_SLOT_TOOLS:
+        logger.info(
+            f'Scheduled non-dispatcher slot {event["event_id"]} '
+            f'({event["tool"]}) at {event["execute_at"]}'
+        )
+        return event["event_id"]
+
     task = asyncio.create_task(_schedule_task(dict(event)))
     _pending_tasks[event["event_id"]] = task
 
@@ -137,6 +145,11 @@ async def load_pending_events() -> int:
     for doc in await list_pending_scheduler_events():
         if "tool" not in doc or "execute_at" not in doc:
             logger.warning(f'Skipping legacy scheduled event without tool/execute_at: {doc.get("event_id")}')
+            continue
+        if doc["tool"] in _NON_DISPATCHER_SLOT_TOOLS:
+            logger.info(
+                f'Skipping non-dispatcher scheduled slot: {doc.get("event_id")}'
+            )
             continue
         task = asyncio.create_task(_schedule_task(doc))
         _pending_tasks[doc["event_id"]] = task

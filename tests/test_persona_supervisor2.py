@@ -127,6 +127,30 @@ def _speak_action_spec() -> dict:
     }
 
 
+def _action_directives() -> dict:
+    return {
+        "contextual_directives": {
+            "social_distance": "friendly",
+            "emotional_intensity": "low",
+            "vibe_check": "calm",
+            "relational_dynamic": "direct reply",
+        },
+        "linguistic_directives": {
+            "rhetorical_strategy": "answer directly",
+            "linguistic_style": "brief",
+            "accepted_user_preferences": [],
+            "content_anchors": ["[DECISION] answer", "[SCOPE] short"],
+            "forbidden_phrases": [],
+        },
+        "visual_directives": {
+            "facial_expression": [],
+            "body_language": [],
+            "gaze_direction": [],
+            "visual_vibe": [],
+        },
+    }
+
+
 @pytest.mark.asyncio
 async def test_call_action_subgraph_returns_final_dialog():
     """call_action_subgraph wraps dialog_agent output correctly."""
@@ -137,12 +161,20 @@ async def test_call_action_subgraph_returns_final_dialog():
         "mention_target_user": True,
     }
 
-    with patch(
-        "kazusa_ai_chatbot.nodes.persona_supervisor2.dialog_agent",
-        new_callable=AsyncMock,
-        return_value=mock_dialog_result,
+    with (
+        patch(
+            "kazusa_ai_chatbot.nodes.persona_supervisor2.call_l3_text_surface_handler",
+            new_callable=AsyncMock,
+            return_value={"action_directives": _action_directives()},
+        ),
+        patch(
+            "kazusa_ai_chatbot.nodes.persona_supervisor2.dialog_agent",
+            new_callable=AsyncMock,
+            return_value=mock_dialog_result,
+        ),
     ):
         state = _base_discord_state()
+        state["action_specs"] = [_speak_action_spec()]
         result = await call_action_subgraph(state)
 
     assert result["final_dialog"] == ["Hello!", "How are you?"]
@@ -166,12 +198,20 @@ async def test_call_action_subgraph_empty_dialog():
         "mention_target_user": False,
     }
 
-    with patch(
-        "kazusa_ai_chatbot.nodes.persona_supervisor2.dialog_agent",
-        new_callable=AsyncMock,
-        return_value=mock_dialog_result,
+    with (
+        patch(
+            "kazusa_ai_chatbot.nodes.persona_supervisor2.call_l3_text_surface_handler",
+            new_callable=AsyncMock,
+            return_value={"action_directives": _action_directives()},
+        ),
+        patch(
+            "kazusa_ai_chatbot.nodes.persona_supervisor2.dialog_agent",
+            new_callable=AsyncMock,
+            return_value=mock_dialog_result,
+        ),
     ):
         state = _base_discord_state()
+        state["action_specs"] = [_speak_action_spec()]
         result = await call_action_subgraph(state)
 
     assert result["final_dialog"] == []
@@ -185,11 +225,6 @@ def test_route_after_cognition_uses_l2d_speak_selection() -> None:
 
     state = {
         "action_specs": [_speak_action_spec()],
-        "action_directives": {
-            "contextual_directives": {
-                "expression_willingness": "silent",
-            },
-        },
     }
 
     assert _route_after_cognition(state) == "respond"
@@ -200,11 +235,6 @@ def test_route_after_cognition_allows_no_visible_action() -> None:
 
     state = {
         "action_specs": [],
-        "action_directives": {
-            "contextual_directives": {
-                "expression_willingness": "open",
-            },
-        },
     }
 
     assert _route_after_cognition(state) == "silent"
@@ -246,13 +276,18 @@ async def test_persona_supervisor2_returns_final_dialog_and_consolidation_state(
             new_callable=AsyncMock,
             return_value={
                 "internal_monologue": "thinking...",
-                "action_directives": {},
                 "interaction_subtext": "",
                 "emotional_appraisal": "",
                 "character_intent": "",
                 "logical_stance": "",
+                "action_specs": [_speak_action_spec()],
             },
         ) as m_cognition,
+        patch(
+            "kazusa_ai_chatbot.nodes.persona_supervisor2.call_l3_text_surface_handler",
+            new_callable=AsyncMock,
+            return_value={"action_directives": _action_directives()},
+        ),
         patch(
             "kazusa_ai_chatbot.nodes.persona_supervisor2.dialog_agent",
             new_callable=AsyncMock,
@@ -280,8 +315,9 @@ async def test_persona_supervisor2_returns_final_dialog_and_consolidation_state(
 
 
 @pytest.mark.asyncio
-async def test_persona_supervisor2_silent_cognition_short_circuits_dialog():
-    """Cognition-owned silence should de-assert response before dialog runs."""
+async def test_persona_supervisor2_no_speak_action_skips_dialog():
+    """A no-visible-action L2d decision should skip dialog."""
+
     state = _base_discord_state()
 
     with (
@@ -300,29 +336,11 @@ async def test_persona_supervisor2_silent_cognition_short_circuits_dialog():
             new_callable=AsyncMock,
             return_value={
                 "internal_monologue": "choosing silence",
-                "action_directives": {
-                    "contextual_directives": {
-                        "social_distance": "cold",
-                        "emotional_intensity": "flat",
-                        "vibe_check": "closed",
-                        "relational_dynamic": "not engaging",
-                        "expression_willingness": "silent",
-                    },
-                    "linguistic_directives": {
-                        "rhetorical_strategy": "remain silent",
-                        "linguistic_style": "none",
-                        "accepted_user_preferences": [],
-                        "content_anchors": [
-                            "[DECISION] remain silent",
-                            "[SCOPE] 0 words",
-                        ],
-                        "forbidden_phrases": [],
-                    },
-                },
                 "interaction_subtext": "",
                 "emotional_appraisal": "",
                 "character_intent": "DISMISS",
                 "logical_stance": "REFUSE",
+                "action_specs": [],
             },
         ),
         patch(
@@ -487,13 +505,18 @@ async def test_persona_supervisor2_no_remember_skips_consolidation():
             new_callable=AsyncMock,
             return_value={
                 "internal_monologue": "thinking...",
-                "action_directives": {},
                 "interaction_subtext": "",
                 "emotional_appraisal": "",
                 "character_intent": "",
                 "logical_stance": "",
+                "action_specs": [_speak_action_spec()],
             },
         ) as m_cognition,
+        patch(
+            "kazusa_ai_chatbot.nodes.persona_supervisor2.call_l3_text_surface_handler",
+            new_callable=AsyncMock,
+            return_value={"action_directives": _action_directives()},
+        ),
         patch(
             "kazusa_ai_chatbot.nodes.persona_supervisor2.dialog_agent",
             new_callable=AsyncMock,

@@ -11,6 +11,7 @@ CASE_COMMITMENT_DUPLICATE_TICK = "commitment_duplicate_tick"
 CASE_PRIVATE_NO_ACTION = "private_no_action"
 CASE_GROUP_NOISE_REJECTED = "group_noise_rejected"
 CASE_TOPIC_RAG_FOLLOWUP = "topic_rag_followup"
+CASE_SCHEDULED_FUTURE_COGNITION = "scheduled_future_cognition"
 SUPPORTED_CASE_NAMES = frozenset(
     (
         CASE_COMMITMENT_BEFORE_DUE,
@@ -19,6 +20,7 @@ SUPPORTED_CASE_NAMES = frozenset(
         CASE_PRIVATE_NO_ACTION,
         CASE_GROUP_NOISE_REJECTED,
         CASE_TOPIC_RAG_FOLLOWUP,
+        CASE_SCHEDULED_FUTURE_COGNITION,
     )
 )
 
@@ -28,6 +30,7 @@ TRIGGER_RECENT_DIRECT_DIALOG_REVIEW = "recent_direct_dialog_review"
 TRIGGER_PENDING_OUTBOX_REVIEW = "pending_outbox_review"
 TRIGGER_BOUNDED_FOLLOWUP_TOPIC = "bounded_followup_topic"
 TRIGGER_GROUP_CHAT_REVIEW = "group_chat_trigger_review"
+TRIGGER_SCHEDULED_FUTURE_COGNITION = "scheduled_future_cognition_due"
 
 DUE_STATE_FUTURE_DUE = "future_due"
 DUE_STATE_DUE_NOW = "due_now"
@@ -184,6 +187,8 @@ class SelfCognitionCase(TypedDict, total=False):
     channel_topic: str
     promoted_reflection_context: dict[str, Any]
     budget: SelfCognitionBudget
+    source_scheduled_event_id: str
+    source_action_attempt_id: str
 
 
 class SourcePacket(TypedDict):

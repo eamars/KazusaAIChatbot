@@ -6,12 +6,17 @@ import time
 from langgraph.graph import END, START, StateGraph
 
 from kazusa_ai_chatbot.action_spec.evaluator import ActionSpecEvaluator
+from kazusa_ai_chatbot.action_spec.handlers.future_cognition import (
+    execute_future_cognition_action,
+)
 from kazusa_ai_chatbot.action_spec.handlers.memory_lifecycle import (
     execute_user_memory_lifecycle_action,
 )
+from kazusa_ai_chatbot.action_spec.models import ActionValidationError
 from kazusa_ai_chatbot.action_spec.registry import (
     MEMORY_LIFECYCLE_UPDATE_CAPABILITY,
     SPEAK_CAPABILITY,
+    TRIGGER_FUTURE_COGNITION_CAPABILITY,
 )
 from kazusa_ai_chatbot.action_spec.results import (
     action_attempt_id_from_eval_result,
@@ -22,9 +27,13 @@ from kazusa_ai_chatbot.action_spec.results import (
 )
 from kazusa_ai_chatbot import event_logging
 from kazusa_ai_chatbot.config import CHAT_HISTORY_RECENT_LIMIT
+from kazusa_ai_chatbot.db import DatabaseOperationError
 from kazusa_ai_chatbot.nodes.dialog_agent import dialog_agent
 from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition import call_cognition_subgraph
 from kazusa_ai_chatbot.nodes.persona_supervisor2_consolidator import call_consolidation_subgraph
+from kazusa_ai_chatbot.nodes.persona_supervisor2_l3_surface import (
+    call_l3_text_surface_handler,
+)
 from kazusa_ai_chatbot.nodes.persona_supervisor2_msg_decontexualizer import call_msg_decontexualizer
 from kazusa_ai_chatbot.nodes.persona_supervisor2_rag_projection import project_known_facts
 from kazusa_ai_chatbot.nodes.persona_supervisor2_schema import GlobalPersonaState
@@ -76,65 +85,60 @@ def _rag_correlation_id(state: GlobalPersonaState) -> str:
     return correlation_id
 
 
-def _cognition_requests_silence(state: GlobalPersonaState) -> bool:
-    """Return true when cognition explicitly selected no visible response."""
-
-    action_directives = state.get("action_directives", {})
-    if not isinstance(action_directives, dict):
-        return_value = False
-        return return_value
-
-    contextual_directives = action_directives.get("contextual_directives", {})
-    if not isinstance(contextual_directives, dict):
-        return_value = False
-        return return_value
-
-    expression_willingness = contextual_directives.get(
-        "expression_willingness",
-        "",
-    )
-    if not isinstance(expression_willingness, str):
-        return_value = False
-        return return_value
-
-    return_value = expression_willingness.strip().lower() == "silent"
-    return return_value
-
-
 def _cognition_selects_text_surface(state: GlobalPersonaState) -> bool:
     """Return whether L2d selected the text surface handler."""
 
-    for action_spec in _selected_action_specs(state):
-        if action_spec.get("kind") == SPEAK_CAPABILITY:
-            return_value = True
-            return return_value
-    return_value = False
+    return_value = (
+        _first_valid_action_attempt_id(state, SPEAK_CAPABILITY) is not None
+    )
     return return_value
+
+
+def _empty_action_directives() -> dict:
+    """Return a consolidation-safe directive shell for private-only episodes."""
+
+    directives = {
+        "contextual_directives": {},
+        "linguistic_directives": {
+            "rhetorical_strategy": "",
+            "linguistic_style": "",
+            "accepted_user_preferences": [],
+            "content_anchors": [],
+            "forbidden_phrases": [],
+        },
+        "visual_directives": {
+            "facial_expression": [],
+            "body_language": [],
+            "gaze_direction": [],
+            "visual_vibe": [],
+        },
+    }
+    return directives
 
 
 async def _action_results_for_state(
     state: GlobalPersonaState,
     *,
-    executed_action_kinds: set[str] | None = None,
+    executed_action_attempt_ids: set[str] | None = None,
 ) -> list[dict]:
     """Evaluate selected actions into traceable action results."""
 
-    executed_kinds = executed_action_kinds or set()
+    executed_attempts = executed_action_attempt_ids or set()
     evaluator = ActionSpecEvaluator()
     action_results: list[dict] = []
     for action_spec in _selected_action_specs(state):
         eval_result = evaluator.evaluate(action_spec)
         result_summary = ""
         completed_at = None
+        action_attempt_id = action_attempt_id_from_eval_result(eval_result)
         if not eval_result["ok"]:
             status = "rejected"
+            result_summary = "; ".join(eval_result["errors"])
         elif action_spec["kind"] == MEMORY_LIFECYCLE_UPDATE_CAPABILITY:
             memory_result = await execute_user_memory_lifecycle_action(
                 eval_result["action_spec"] or action_spec,
                 timestamp=state["timestamp"],
-                action_attempt_id=action_attempt_id_from_eval_result(
-                    eval_result,
-                ),
+                action_attempt_id=action_attempt_id,
             )
             if memory_result["status"] in ("executed", "unchanged"):
                 status = "executed"
@@ -145,9 +149,33 @@ async def _action_results_for_state(
                 f"memory_lifecycle_update {memory_result['status']}: "
                 f"{memory_result['lifecycle_status']}"
             )
-        elif action_spec["kind"] in executed_kinds:
+        elif action_spec["kind"] == TRIGGER_FUTURE_COGNITION_CAPABILITY:
+            try:
+                future_result = await execute_future_cognition_action(
+                    eval_result["action_spec"] or action_spec,
+                    timestamp=state["timestamp"],
+                    action_attempt_id=action_attempt_id,
+                )
+            except ActionValidationError as exc:
+                status = "rejected"
+                result_summary = f"trigger_future_cognition rejected: {exc}"
+            except DatabaseOperationError as exc:
+                status = "failed"
+                result_summary = f"trigger_future_cognition failed: {exc}"
+            else:
+                status = "scheduled"
+                completed_at = state["timestamp"]
+                scheduled_ids = future_result["scheduled_event_ids"]
+                result_summary = (
+                    "trigger_future_cognition scheduled: "
+                    f"{', '.join(scheduled_ids)}"
+                )
+        elif action_attempt_id in executed_attempts:
             status = "executed"
             completed_at = state["timestamp"]
+        elif action_spec["kind"] == SPEAK_CAPABILITY:
+            status = "rejected"
+            result_summary = "duplicate speak action ignored"
         else:
             status = "validated"
         action_result = build_action_result(
@@ -187,7 +215,7 @@ def _episode_trace_update(
 
 
 async def call_action_subgraph(state: GlobalPersonaState) -> dict:
-    """Run dialog generation and attach deterministic response addressing.
+    """Run selected text-surface directives and dialog.
 
     Args:
         state: Current persona graph state.
@@ -196,13 +224,21 @@ async def call_action_subgraph(state: GlobalPersonaState) -> dict:
         Partial state update with dialog fragments and addressed users.
     """
 
-    result = await dialog_agent(state)
+    surface_update = await call_l3_text_surface_handler(state)
+    surface_state = dict(state)
+    surface_state.update(surface_update)
+    speak_attempt_id = _first_valid_action_attempt_id(
+        surface_state,
+        SPEAK_CAPABILITY,
+    )
+    result = await dialog_agent(surface_state)
     final_dialog = result["final_dialog"]
     action_results = await _action_results_for_state(
-        state,
-        executed_action_kinds={SPEAK_CAPABILITY},
+        surface_state,
+        executed_action_attempt_ids=(
+            {speak_attempt_id} if speak_attempt_id is not None else set()
+        ),
     )
-    speak_attempt_id = _first_action_attempt_id(action_results, SPEAK_CAPABILITY)
     surface_outputs = [
         build_text_surface_output(
             fragments=final_dialog,
@@ -216,8 +252,9 @@ async def call_action_subgraph(state: GlobalPersonaState) -> dict:
         "target_broadcast": result["target_broadcast"],
         "mention_target_user": bool(result.get("mention_target_user", False)),
     }
+    return_value.update(surface_update)
     return_value.update(_episode_trace_update(
-        state,
+        surface_state,
         action_results=action_results,
         surface_outputs=surface_outputs,
     ))
@@ -225,7 +262,7 @@ async def call_action_subgraph(state: GlobalPersonaState) -> dict:
 
 
 async def stage_3_no_response(state: GlobalPersonaState) -> dict:
-    """Suppress visible dialog after cognition explicitly chooses silence."""
+    """Finish a private-only episode when L2d selected no text surface."""
 
     logger.info(
         f'Persona output short-circuited: platform={state["platform"]} '
@@ -235,6 +272,7 @@ async def stage_3_no_response(state: GlobalPersonaState) -> dict:
     return_value = {
         "should_respond": False,
         "final_dialog": [],
+        "action_directives": _empty_action_directives(),
         "target_addressed_user_ids": [],
         "target_broadcast": False,
         "mention_target_user": False,
@@ -377,31 +415,30 @@ async def stage_1_research(state: GlobalPersonaState) -> dict:
 
 
 def _route_after_cognition(state: GlobalPersonaState) -> str:
-    """Route persona flow based on cognition's structured response decision."""
+    """Route persona flow based on selected L2d text surfaces."""
 
-    if "action_specs" in state:
-        if _cognition_selects_text_surface(state):
-            return_value = "respond"
-        else:
-            return_value = "silent"
-    elif _cognition_requests_silence(state):
-        return_value = "silent"
-    else:
+    if _cognition_selects_text_surface(state):
         return_value = "respond"
+    else:
+        return_value = "silent"
     return return_value
 
 
-def _first_action_attempt_id(
-    action_results: list[dict],
+def _first_valid_action_attempt_id(
+    state: GlobalPersonaState,
     action_kind: str,
 ) -> str | None:
-    """Return the first action-attempt id for one action kind."""
+    """Return the first valid selected action-attempt id for one kind."""
 
-    for action_result in action_results:
-        if action_result.get("action_kind") != action_kind:
+    evaluator = ActionSpecEvaluator()
+    for action_spec in _selected_action_specs(state):
+        if action_spec.get("kind") != action_kind:
             continue
-        attempt_id = action_result.get("action_attempt_id")
-        if isinstance(attempt_id, str) and attempt_id:
+        eval_result = evaluator.evaluate(action_spec)
+        if not eval_result["ok"]:
+            continue
+        attempt_id = action_attempt_id_from_eval_result(eval_result)
+        if attempt_id:
             return_value = attempt_id
             return return_value
     return_value = None

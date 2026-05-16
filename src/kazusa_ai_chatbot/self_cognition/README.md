@@ -11,10 +11,10 @@ self-cognition agency loop.
 The module supports two entry points:
 
 - The dry-run command reads caller-supplied case files, optionally invokes the
-  existing RAG2 supervisor once, invokes the existing shared L1/L2/L2d/L3
-  cognition graph, optionally invokes the existing dialog graph once to render
-  a message after cognition selects outward contact without explicit candidate
-  text, and writes local artifacts under the requested output directory.
+  existing RAG2 supervisor once, invokes the existing shared L1/L2/L2d
+  cognition graph, runs selected L3 text/dialog only when L2d selects a
+  visible `speak` surface, and writes local artifacts under the requested
+  output directory.
 - The service worker collects bounded visible/actionable source cases,
   builds the same route records in memory, invokes the existing dialog graph
   for private finalization when consolidation is applied, calls the existing
@@ -84,9 +84,8 @@ cognition's route or contact decision.
 - Non-RAG cases may invoke the shared cognition graph once.
 - RAG follow-up cases may invoke the RAG2 supervisor once before the shared
   cognition graph. Internal RAG2 helper calls remain governed by RAG2.
-- If cognition selects outward contact but does not emit explicit
-  `[ACTION_CANDIDATE]` text, the runner may invoke the existing dialog graph
-  once to render the local action candidate text.
+- If L2d selects visible `speak`, the selected L3 text handler may invoke the
+  existing dialog graph once to render text.
 - When consolidation is applied, the runner may invoke the existing dialog
   graph once for private finalization even when no send candidate can be
   created.
@@ -207,6 +206,14 @@ Self-cognition itself does not expose `send_message` to L2d as a text-surface
 choice. Ordinary visible expression uses `speak`, L3 text, and dialog. The
 dispatcher bridge is only for adapter-facing delivery after text exists or for
 legacy delivery-candidate compatibility.
+
+`trigger_future_cognition` uses `scheduled_events` as an internal delayed
+trigger source. The action handler records a private non-dispatcher slot; a
+later self-cognition worker tick collects due slots as normal source cases and
+marks the source slot completed after the normal runner path returns. The
+model-facing source packet receives only semantic follow-up context, not
+scheduler ids, action-attempt ids, continuation schema versions, or depth
+limits.
 
 ## Event Logging
 

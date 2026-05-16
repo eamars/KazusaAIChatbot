@@ -12,6 +12,7 @@ from kazusa_ai_chatbot.cognition_episode import (
 )
 from kazusa_ai_chatbot.nodes import persona_supervisor2_cognition as cognition_module
 from kazusa_ai_chatbot.nodes import persona_supervisor2_cognition_l3 as l3_module
+from kazusa_ai_chatbot.nodes import persona_supervisor2_l3_surface as surface_module
 
 
 class _FakeStyleLlm:
@@ -385,7 +386,6 @@ async def test_cognition_subgraph_plumbs_channel_scope_into_l3_loader(
             "emotional_intensity": "calm",
             "vibe_check": "daily",
             "relational_dynamic": "stable",
-            "expression_willingness": "open",
         }
         return return_value
 
@@ -419,26 +419,31 @@ async def test_cognition_subgraph_plumbs_channel_scope_into_l3_loader(
         return_value = {"action_directives": {"ok": True}}
         return return_value
 
-    monkeypatch.setattr(cognition_module, "call_cognition_subconscious", fake_l1)
-    monkeypatch.setattr(cognition_module, "call_cognition_consciousness", fake_l2a)
-    monkeypatch.setattr(cognition_module, "call_boundary_core_agent", fake_l2b)
-    monkeypatch.setattr(cognition_module, "call_judgment_core_agent", fake_l2c)
     monkeypatch.setattr(
-        cognition_module,
+        surface_module,
         "call_interaction_style_context_loader",
         fake_loader,
     )
-    monkeypatch.setattr(cognition_module, "call_contextual_agent", fake_contextual)
-    monkeypatch.setattr(cognition_module, "call_style_agent", fake_style)
-    monkeypatch.setattr(cognition_module, "call_content_anchor_agent", fake_content)
-    monkeypatch.setattr(cognition_module, "call_preference_adapter", fake_preference)
-    monkeypatch.setattr(cognition_module, "call_visual_agent", fake_visual)
-    monkeypatch.setattr(cognition_module, "call_collector", fake_collector)
+    monkeypatch.setattr(surface_module, "call_contextual_agent", fake_contextual)
+    monkeypatch.setattr(surface_module, "call_style_agent", fake_style)
+    monkeypatch.setattr(surface_module, "call_content_anchor_agent", fake_content)
+    monkeypatch.setattr(surface_module, "call_preference_adapter", fake_preference)
+    monkeypatch.setattr(surface_module, "call_visual_agent", fake_visual)
+    monkeypatch.setattr(surface_module, "call_collector", fake_collector)
 
     for channel_type in ("private", "group"):
-        await cognition_module.call_cognition_subgraph(
-            _global_state(channel_type=channel_type)
+        state = _global_state(channel_type=channel_type)
+        state.update(
+            {
+                "emotional_appraisal": "calm",
+                "interaction_subtext": "neutral",
+                "internal_monologue": "safe",
+                "character_intent": "PROVIDE",
+                "logical_stance": "CONFIRM",
+                "judgment_note": "ok",
+            }
         )
+        await surface_module.call_l3_text_surface_handler(state)
 
     assert [state["channel_type"] for state in captured_states] == [
         "private",

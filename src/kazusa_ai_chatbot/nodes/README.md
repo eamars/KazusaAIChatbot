@@ -32,7 +32,7 @@ The package currently contains five major node groups:
 | --- | --- | --- |
 | Relevance and perception | `persona_relevance_agent.py`, `persona_supervisor2_msg_decontexualizer.py` | Whether to answer, current media observation, current-message rewrite, referent status. |
 | Persona orchestration | `persona_supervisor2.py` | Live turn graph: decontextualization, RAG, cognition, dialog/no-response routing. |
-| Cognition and action initialization | `persona_supervisor2_cognition*.py`, `boundary_profile.py`, `linguistic_texture.py` | Layered internal appraisal, stance, boundary judgment, L2d action initialization, style directives, visual directives. |
+| Cognition and action initialization | `persona_supervisor2_cognition*.py`, `boundary_profile.py`, `linguistic_texture.py` | Layered internal appraisal, stance, boundary judgment, L2d action initialization, and selected L3 surface directives. |
 | Dialog | `dialog_agent.py` | Final text generation and evaluator retry loop. |
 | Consolidation | `persona_supervisor2_consolidator*.py` | Background extraction of durable facts, promises, relationship state, images, memory units, and character state. |
 
@@ -59,16 +59,15 @@ stage_0_msg_decontexualizer
        L1 subconscious
        L2 consciousness + boundary + judgment
        L2d action initializer
-       selected L3 surface/action handlers
-       L4 collector
        state["internal_monologue"]
-       state["action_directives"]
        state["action_specs"]
-       state["action_results"]
-       state["surface_outputs"]
   -> route
-       selected speak action -> stage_3_action/dialog_agent
-       no visible surface    -> stage_3_no_response/private finalization
+       selected speak action -> stage_3_action
+           selected L3 text directives
+           dialog_agent
+           text surface output + action results
+       no visible surface    -> stage_3_no_response
+           private surface output + private action results
   -> final_dialog + episode_trace + consolidation_state
 ```
 
@@ -509,7 +508,7 @@ The L3 branches are:
 
 | Node | Output | Purpose |
 | --- | --- | --- |
-| `l3_contextual_agent` | `social_distance`, `emotional_intensity`, `vibe_check`, `relational_dynamic`, `expression_willingness` | Social temperature and whether the character should speak at all. |
+| `l3_contextual_agent` | `social_distance`, `emotional_intensity`, `vibe_check`, `relational_dynamic` | Social temperature and relationship framing for a selected surface. |
 | `l3_interaction_style_context_loader` | `interaction_style_context` | Sanitized user/channel interaction-style overlays from storage. |
 | `l3_style_agent` | `rhetorical_strategy`, `linguistic_style`, `forbidden_phrases` | How to package the already-decided stance in character voice. |
 | `l3_content_anchor_agent` | `content_anchors` | What dialog must do, answer, avoid, or cover. |
@@ -521,9 +520,9 @@ plan. The most important text artifact is `content_anchors`. Dialog is
 evaluated against these anchors, so they are the bridge from internal decision
 to visible wording.
 
-The `expression_willingness` field can be `silent`. When it is silent,
-`persona_supervisor2` routes to `stage_3_no_response` and suppresses visible
-dialog.
+L3 does not decide whether to create a visible text surface. That decision
+belongs to the selected `speak` action from L2d. If no visible surface is selected,
+the persona graph does not run L3 text or dialog.
 
 Example input:
 
@@ -553,7 +552,6 @@ Shown as the combined L3 surface before L4 collection.
   "emotional_intensity": "Low and steady.",
   "vibe_check": "Practical technical explanation.",
   "relational_dynamic": "The user asks for a compact explanation; the character can answer without extra probing.",
-  "expression_willingness": "open",
   "rhetorical_strategy": "Give a direct definition, then one concrete reason it matters.",
   "linguistic_style": "Concise, plain, lightly conversational.",
   "forbidden_phrases": [],
@@ -598,7 +596,6 @@ L4 collects L3 outputs into `action_directives`:
             "emotional_intensity": str,
             "vibe_check": str,
             "relational_dynamic": str,
-            "expression_willingness": str,
         },
         "linguistic_directives": {
             "rhetorical_strategy": str,
@@ -629,7 +626,6 @@ Example input:
   "emotional_intensity": "Low and steady.",
   "vibe_check": "Practical technical explanation.",
   "relational_dynamic": "The user asks for a compact explanation; the character can answer without extra probing.",
-  "expression_willingness": "open",
   "rhetorical_strategy": "Give a direct definition, then one concrete reason it matters.",
   "linguistic_style": "Concise, plain, lightly conversational.",
   "accepted_user_preferences": ["Keep the reply to one short paragraph."],
@@ -655,8 +651,7 @@ Example output:
       "social_distance": "Friendly and task-focused.",
       "emotional_intensity": "Low and steady.",
       "vibe_check": "Practical technical explanation.",
-      "relational_dynamic": "The user asks for a compact explanation; the character can answer without extra probing.",
-      "expression_willingness": "open"
+      "relational_dynamic": "The user asks for a compact explanation; the character can answer without extra probing."
     },
     "linguistic_directives": {
       "rhetorical_strategy": "Give a direct definition, then one concrete reason it matters.",
@@ -713,7 +708,7 @@ The implemented flow is:
    Judgment Core emits final `logical_stance`, `character_intent`,
    and `judgment_note`.
 
-7. L3 expression plan
+7. L2d action selection and L3 expression plan
    L2d selects zero or more semantic actions. When a text surface is selected,
    contextual, style, content-anchor, preference, and visual agents build
    `action_directives`.
@@ -733,8 +728,8 @@ Emotion affects thought at three points:
 
 - L1 creates the first affective appraisal.
 - L2a reads that appraisal while forming the internal monologue and stance.
-- L3 contextual/style agents use the settled emotional temperature to decide
-  expression willingness, social distance, and rhetorical packaging.
+- L3 contextual/style agents use the settled emotional temperature to shape
+  social distance and rhetorical packaging for a selected surface.
 
 Emotion does not directly write dialog. It must pass through the L2 decision
 and L3 directive contracts before visible text is generated.
@@ -782,8 +777,7 @@ Example input:
       "social_distance": "Friendly and task-focused.",
       "emotional_intensity": "Low and steady.",
       "vibe_check": "Practical technical explanation.",
-      "relational_dynamic": "The user asks for a compact explanation; the character can answer without extra probing.",
-      "expression_willingness": "open"
+      "relational_dynamic": "The user asks for a compact explanation; the character can answer without extra probing."
     },
     "linguistic_directives": {
       "rhetorical_strategy": "Give a direct definition, then one concrete reason it matters.",
@@ -847,8 +841,8 @@ metadata from polluting long-term memory.
 
 Keep these invariants when changing the node package:
 
-- Relevance decides whether to enter the persona turn; cognition may still
-  choose silence later through `expression_willingness`.
+- Relevance decides whether to enter the persona turn; L2d may still select no
+  visible surface. L3 and dialog must not carry a second response gate.
 - Decontextualization rewrites references; it must not answer the user or infer
   deep motive.
 - RAG returns evidence; cognition owns interpretation.

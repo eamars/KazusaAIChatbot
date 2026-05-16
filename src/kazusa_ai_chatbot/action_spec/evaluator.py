@@ -11,6 +11,9 @@ from kazusa_ai_chatbot.action_spec.attempt_ledger import (
 from kazusa_ai_chatbot.action_spec.handlers.memory_lifecycle import (
     validate_memory_lifecycle_action,
 )
+from kazusa_ai_chatbot.action_spec.handlers.future_cognition import (
+    validate_future_cognition_action,
+)
 from kazusa_ai_chatbot.action_spec.models import (
     ActionEvalResult,
     ActionValidationError,
@@ -143,7 +146,7 @@ def _validate_kind_specific_contract(action_spec: dict[str, Any]) -> None:
     elif kind == SPEAK_CAPABILITY:
         _validate_speak_contract(action_spec)
     elif kind == TRIGGER_FUTURE_COGNITION_CAPABILITY:
-        _validate_future_cognition_contract(action_spec)
+        validate_future_cognition_action(action_spec)
 
 
 def _validate_send_message_contract(action_spec: dict[str, Any]) -> None:
@@ -168,27 +171,6 @@ def _validate_speak_contract(action_spec: dict[str, Any]) -> None:
     target_kind = target["target_kind"]
     if target_kind not in ("current_channel", "self"):
         raise ActionValidationError("target_kind: expected text surface target")
-
-
-def _validate_future_cognition_contract(action_spec: dict[str, Any]) -> None:
-    """Validate a private request for a later cognition episode."""
-
-    target = action_spec["target"]
-    if target["owner"] != "orchestrator":
-        raise ActionValidationError("owner: expected orchestrator")
-    if target["target_kind"] != "cognitive_episode":
-        raise ActionValidationError("target_kind: expected cognitive_episode")
-    if action_spec["visibility"] != "private":
-        raise ActionValidationError("visibility: expected private")
-    if action_spec["urgency"] not in ("background", "scheduled"):
-        raise ActionValidationError("urgency: expected background or scheduled")
-    params = action_spec["params"]
-    context_summary = params.get("context_summary")
-    if not isinstance(context_summary, str) or not context_summary.strip():
-        raise ActionValidationError("context_summary: expected non-empty string")
-    trigger_at = params.get("trigger_at")
-    if action_spec["urgency"] == "scheduled" and not isinstance(trigger_at, str):
-        raise ActionValidationError("trigger_at: expected scheduled timestamp")
 
 
 def _validate_params(params: dict[str, Any], schema: dict[str, object]) -> None:

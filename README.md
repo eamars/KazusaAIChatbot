@@ -136,7 +136,7 @@ Persona turn
   - load short-term conversation progress
   - reason through stance, boundary, style, and intent
   - initialize zero-or-more semantic actions through L2d
-  - run selected L3 text/image/action handlers
+  - run selected L3 text/action handlers
   - emit surface outputs and action results
         |
         +-----------------------------> adapter bridge delivers visible surfaces

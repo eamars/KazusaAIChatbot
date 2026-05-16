@@ -37,7 +37,6 @@ _ROOT = Path(__file__).resolve().parents[1]
 _PERSONALITY_PATH = _ROOT / "personalities" / "kazusa.json"
 _ALLOWED_LOGICAL_STANCES = {"CONFIRM", "REFUSE", "TENTATIVE", "DIVERGE", "CHALLENGE"}
 _ALLOWED_CHARACTER_INTENTS = {"PROVIDE", "BANTAR", "REJECT", "EVADE", "CONFRONT", "DISMISS", "CLARIFY"}
-_ALLOWED_EXPRESSION_WILLINGNESS = {"eager", "open", "reserved", "minimal", "reluctant", "avoidant", "withholding", "silent"}
 _LEGACY_FILLERS = ("反正", "而已", "罢了")
 _LEGACY_FILLERS_LOWER = ("anyway", "or whatever")
 
@@ -1170,7 +1169,6 @@ async def _assert_live_cognition_stack_prompt_contract(ensure_live_llm, case_id:
     assert state["logical_stance"] in _ALLOWED_LOGICAL_STANCES, f"Unexpected logical_stance: {state!r}"
     assert state["character_intent"] in _ALLOWED_CHARACTER_INTENTS, f"Unexpected character_intent: {state!r}"
     assert state["boundary_core_assessment"]["acceptance"] in {"allow", "guarded", "hesitant", "reject"}, f"Unexpected boundary assessment: {state['boundary_core_assessment']!r}"
-    assert state["expression_willingness"] in _ALLOWED_EXPRESSION_WILLINGNESS, f"Unexpected expression_willingness: {state!r}"
     assert state["content_anchors"][0].startswith("[DECISION]"), f"Bad DECISION anchor: {state['content_anchors']!r}"
     assert state["content_anchors"][-1].startswith("[SCOPE]"), f"Bad SCOPE anchor: {state['content_anchors']!r}"
     assert isinstance(state["accepted_user_preferences"], list), f"Invalid accepted_user_preferences: {state!r}"

@@ -6,6 +6,7 @@ import logging
 import typing
 from unittest.mock import AsyncMock, MagicMock, patch
 
+from langchain_core.messages import AIMessage
 import pytest
 
 from kazusa_ai_chatbot.nodes import dialog_agent as dialog_module
@@ -45,7 +46,6 @@ def _base_global_state():
                 "emotional_intensity": "light and positive",
                 "vibe_check": "friendly conversation",
                 "relational_dynamic": "user greets, bot responds warmly",
-                "expression_willingness": "open",
             },
             "linguistic_directives": {
                 "rhetorical_strategy": "direct greeting",
@@ -378,23 +378,29 @@ def test_dialog_usage_mode_requires_internal_state_fields():
 
 
 @pytest.mark.asyncio
-async def test_dialog_agent_silent_willingness_returns_empty_dialog(monkeypatch):
-    """Silent dialog routing should return an empty delivery shape."""
+async def test_dialog_agent_ignores_retired_response_field(monkeypatch):
+    """Dialog generation should not own response routing decisions."""
+
     state = _base_global_state()
+    retired_field = "expression" + "_willingness"
     state["action_directives"]["contextual_directives"][
-        "expression_willingness"
+        retired_field
     ] = "silent"
     generator_llm = MagicMock()
-    generator_llm.ainvoke = AsyncMock()
+    generator_llm.ainvoke = AsyncMock(return_value=AIMessage(
+        content='{"final_dialog": ["Still answering."], "mention_target_user": false}'
+    ))
     evaluator_llm = MagicMock()
-    evaluator_llm.ainvoke = AsyncMock()
+    evaluator_llm.ainvoke = AsyncMock(return_value=AIMessage(
+        content='{"feedback": "Passed", "should_stop": true}'
+    ))
     monkeypatch.setattr(dialog_module, "_dialog_generator_llm", generator_llm)
     monkeypatch.setattr(dialog_module, "_dialog_evaluator_llm", evaluator_llm)
 
     result = await dialog_agent(state)
 
-    assert result["final_dialog"] == []
-    assert result["target_addressed_user_ids"] == []
+    assert result["final_dialog"] == ["Still answering."]
+    assert result["target_addressed_user_ids"] == ["global-user-123"]
     assert result["target_broadcast"] is False
-    generator_llm.ainvoke.assert_not_awaited()
-    evaluator_llm.ainvoke.assert_not_awaited()
+    generator_llm.ainvoke.assert_awaited_once()
+    evaluator_llm.ainvoke.assert_awaited_once()

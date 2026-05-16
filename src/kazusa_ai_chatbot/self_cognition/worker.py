@@ -113,6 +113,7 @@ async def run_self_cognition_worker_tick(
     dispatch_candidate_func: Callable[..., Any] | None = None,
     read_attempts_func: Callable[..., Any] | None = None,
     record_attempt_func: Callable[..., Any] | None = None,
+    complete_scheduled_event_func: Callable[..., Any] | None = None,
     max_cases: int = SELF_COGNITION_MAX_CASES_PER_TICK,
 ) -> SelfCognitionWorkerResult:
     """Run one bounded self-cognition worker tick.
@@ -128,6 +129,8 @@ async def run_self_cognition_worker_tick(
         dispatch_candidate_func: Optional test seam for dispatcher handoff.
         read_attempts_func: Optional test seam for prior attempt reads.
         record_attempt_func: Optional test seam for attempt persistence.
+        complete_scheduled_event_func: Optional test seam for source slot
+            completion.
         max_cases: Maximum cases to process in this tick.
 
     Returns:
@@ -164,6 +167,9 @@ async def run_self_cognition_worker_tick(
     )
     active_record_attempt = record_attempt_func or (
         db.upsert_self_cognition_action_attempt
+    )
+    active_complete_scheduled_event = (
+        complete_scheduled_event_func or db.mark_scheduled_event_completed
     )
 
     for case in cases[:max_cases]:
@@ -202,6 +208,10 @@ async def run_self_cognition_worker_tick(
             case=case_for_run,
             artifact_payloads=artifact_payloads,
             dispatch_status=dispatch_status,
+        )
+        await _complete_scheduled_future_cognition_event(
+            case_for_run,
+            complete_scheduled_event_func=active_complete_scheduled_event,
         )
 
     await _record_worker_tick_event(result)
@@ -366,6 +376,23 @@ async def _record_worker_tick_event(result: SelfCognitionWorkerResult) -> None:
         deferred=result.deferred,
         defer_reason=result.defer_reason,
     )
+
+
+async def _complete_scheduled_future_cognition_event(
+    case: models.SelfCognitionCase,
+    *,
+    complete_scheduled_event_func: Callable[..., Any],
+) -> None:
+    """Mark a source scheduled cognition slot consumed after processing."""
+
+    if case.get("trigger_kind") != models.TRIGGER_SCHEDULED_FUTURE_COGNITION:
+        return
+
+    event_id = case.get("source_scheduled_event_id")
+    if not isinstance(event_id, str) or not event_id:
+        return
+
+    await _call_maybe_async(complete_scheduled_event_func, event_id)
 
 
 async def _record_self_cognition_event_from_artifacts(

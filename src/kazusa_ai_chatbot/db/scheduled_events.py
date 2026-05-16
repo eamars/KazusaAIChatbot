@@ -70,6 +70,38 @@ async def list_pending_scheduler_events() -> list[ScheduledEventDoc]:
     return return_value
 
 
+async def list_due_future_cognition_events(
+    *,
+    current_timestamp: str,
+    limit: int,
+) -> list[ScheduledEventDoc]:
+    """Return due pending future-cognition slots in execution order.
+
+    Args:
+        current_timestamp: Worker tick timestamp; rows at or before this time
+            are eligible for collection.
+        limit: Maximum number of scheduled slots to return.
+
+    Returns:
+        Prompt-source scheduler documents for later self-cognition processing.
+    """
+
+    query = {
+        "status": "pending",
+        "tool": "trigger_future_cognition",
+        "execute_at": {"$lte": current_timestamp},
+    }
+    db = await get_db()
+    cursor = (
+        db.scheduled_events
+        .find(query, {"_id": 0})
+        .sort("execute_at", 1)
+        .limit(limit)
+    )
+    return_value = [doc async for doc in cursor]
+    return return_value
+
+
 async def mark_scheduled_event_running(event_id: str) -> bool:
     """Mark one scheduled event as running."""
 

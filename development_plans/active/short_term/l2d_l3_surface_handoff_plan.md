@@ -7,7 +7,7 @@
   `trigger_future_cognition -> scheduled cognition slot` as the two runtime
   action chains implemented by this plan.
 - Plan class: high_risk_migration
-- Status: draft
+- Status: in_progress
 - Mandatory skills: `development-plan-writing`, `local-llm-architecture`,
   `no-prepost-user-input`, `py-style`, `test-style-and-execution`,
   `cjk-safety`
@@ -23,9 +23,8 @@
   without calling cognition inline; visual directives remain a side effect of
   text-surface handling only
 
-This plan is a draft blocker discovered during execution of
-`modality_neutral_action_spec_effector_expansion_plan.md`. Do not execute it
-until it is approved and the registry row is updated.
+This plan is an in-progress blocker discovered during execution of
+`modality_neutral_action_spec_effector_expansion_plan.md`.
 
 ## Context
 
@@ -137,7 +136,7 @@ The scan also found controls that must not be deleted as part of this cleanup:
   plan before starting the next stage.
 - Before final completion, lifecycle status changes, merge, or sign-off, run
   the Independent Code Review gate and record the result in Execution Evidence.
-- Do not execute this plan while `Status: draft`.
+- Execute this plan only while the registry status is `in_progress`.
 - Do not make L2a, L2b, L2c, L3, or dialog select actions.
 - Do not expose `send_message` to L2d. L2d selects `speak`; delivery is derived
   after text exists.
@@ -518,9 +517,17 @@ output.
   - Change only as needed to schedule a non-adapter cognition slot through the
     existing scheduled-event runtime. Do not make dispatcher the parent action
     system.
-- `src/kazusa_ai_chatbot/self_cognition/runner.py`
-  - Add the future-slot typed trigger adapter for scheduled self-cognition.
-    Worker code remains a caller, not a second trigger contract owner.
+- `src/kazusa_ai_chatbot/self_cognition/models.py`
+  - Add the scheduled future-cognition case and trigger constants used by the
+    normal self-cognition source packet path.
+- `src/kazusa_ai_chatbot/self_cognition/sources.py`
+  - Add the future-slot typed trigger adapter for due scheduled
+    self-cognition slots. Keep scheduler ids and action-attempt ids internal;
+    project only semantic source refs and follow-up context to the model.
+- `src/kazusa_ai_chatbot/self_cognition/worker.py`
+  - Consume scheduled future-cognition cases through the existing worker
+    runner and mark the source scheduled event completed only after the normal
+    case processing path returns.
 - Documentation:
   - `src/kazusa_ai_chatbot/nodes/README.md`
   - `src/kazusa_ai_chatbot/action_spec/README.md`
@@ -592,6 +599,10 @@ output.
   handler.
 - Schedule a future self-cognition trigger contract without calling cognition
   inline.
+- Collect due `trigger_future_cognition` scheduled rows as ordinary
+  self-cognition trigger cases on later worker ticks.
+- Keep scheduler row ids, source action-attempt ids, continuation schema
+  versions, and depth limits out of the model-facing source packet.
 - Add trace/action-result output for scheduled, rejected, and failed cases.
 
 ### Stage 4: Consolidation And Regression
@@ -612,33 +623,33 @@ output.
 
 ## Progress Checklist
 
-- [ ] Stage 0 - baseline blocker captured
+- [x] Stage 0 - baseline blocker captured
   - Verify: focused tests fail against the old unconditional L3 path.
   - Evidence: record failing commands and assertions.
-  - Sign-off: `<agent/date>`
-- [ ] Stage 1 - selected text surface handler complete
+  - Sign-off: `Codex/2026-05-16`
+- [x] Stage 1 - selected text surface handler complete
   - Verify: selected `speak` runs L3 text/dialog; no `speak` skips L3/dialog.
   - Evidence: record changed files and passing focused tests.
-  - Sign-off: `<agent/date>`
-- [ ] Stage 2 - delivery edge after dialog complete
+  - Sign-off: `Codex/2026-05-16`
+- [x] Stage 2 - delivery edge after dialog complete
   - Verify: normal `/chat` output remains stable; bridge-only `send_message` occurs
     only after text exists in scheduled/proactive contexts.
   - Evidence: record dispatcher/service tests.
-  - Sign-off: `<agent/date>`
-- [ ] Stage 3 - future cognition slot handler complete
+  - Sign-off: `Codex/2026-05-16`
+- [x] Stage 3 - future cognition slot handler complete
   - Verify: `trigger_future_cognition` schedules a future self-cognition slot
     and never calls cognition inline.
   - Evidence: record scheduler/orchestrator tests.
-  - Sign-off: `<agent/date>`
-- [ ] Stage 4 - consolidation and documentation complete
+  - Sign-off: `Codex/2026-05-16`
+- [x] Stage 4 - consolidation and documentation complete
   - Verify: private-only and mixed-action episodes consolidate; docs updated.
   - Evidence: record consolidator tests and doc grep summaries.
-  - Sign-off: `<agent/date>`
-- [ ] Stage 5 - independent code review complete
+  - Sign-off: `Codex/2026-05-16`
+- [x] Stage 5 - independent code review complete
   - Verify: review findings fixed or recorded as residual risks; affected
     checks rerun.
   - Evidence: record review mode, findings, fixes, commands, and approval.
-  - Sign-off: `<agent/date>`
+  - Sign-off: `Codex/2026-05-16`
 
 ## Verification
 
@@ -794,5 +805,112 @@ This plan is complete when:
 
 ## Execution Evidence
 
-No implementation has started. Record baseline failures, changes, commands,
-results, live traces, review findings, and handoff notes here during execution.
+- 2026-05-16 Stage 0 baseline and blocker capture.
+  - Static inspection confirmed the old cognition graph still connected
+    `l2d_action_initializer -> l3_* -> l4_collector`, so L3 ran before the
+    top-level `speak` route.
+  - Initial focused tests were added around the intended contract:
+    cognition subgraph stops after L2d; selected `speak` runs one L3
+    text/dialog surface; no `speak` skips L3/dialog but preserves
+    consolidation evidence.
+  - Legacy response-gate scan target captured:
+    `_cognition_requests_silence`, `conditional_skip_dialog_agent`, and
+    `expression_willingness` response-gate usage in runtime nodes, prompts,
+    docs, and tests.
+- 2026-05-16 Stage 1-3 implementation.
+  - Created `src/kazusa_ai_chatbot/nodes/persona_supervisor2_l3_surface.py`
+    as the selected text-surface handler around existing L3 directive agents.
+  - Updated `call_cognition_subgraph` to end after L2d. Persona routing now
+    runs L3 text/dialog only when a valid `speak` action spec is selected.
+  - Removed the L3/dialog `expression_willingness` response gate from runtime
+    code, prompt contracts, schemas, tests, and node docs. Dialog no longer
+    has an internal skip branch after the text surface has been selected.
+  - Created `src/kazusa_ai_chatbot/action_spec/handlers/future_cognition.py`
+    and wired `trigger_future_cognition` through the action evaluator and
+    action-result path. The handler schedules a non-dispatcher
+    `scheduled_events` row and never calls cognition inline.
+  - Added due-slot consumption through `self_cognition.sources` and
+    `self_cognition.worker`: pending `trigger_future_cognition` rows become
+    ordinary self-cognition trigger cases on later worker ticks and are marked
+    completed only after normal case processing returns.
+  - Prompt-facing scheduled-slot projection was narrowed so scheduler ids,
+    action-attempt ids, raw source ref ids, `schema_version`, `episode_type`,
+    `include_result_as`, and `max_depth` stay out of the source packet.
+- 2026-05-16 Stage 4 consolidation and documentation checkpoint.
+  - Updated `src/kazusa_ai_chatbot/nodes/README.md` to show L2d ending the
+    cognition subgraph and selected `speak` entering the L3 text/dialog
+    surface.
+  - Updated `src/kazusa_ai_chatbot/self_cognition/README.md` to describe
+    self-cognition as a normal trigger source for shared L1/L2/L2d, with L3
+    text/dialog only after L2d selects `speak`.
+  - Updated root `README.md` to remove stale selected-image-handler wording
+    from the current runtime summary.
+  - Registry status set to `in_progress` in `development_plans/README.md`.
+- 2026-05-16 worker delegation outcome.
+  - Worker `Nash` implemented the runtime side and returned
+    `DONE_WITH_CONCERNS`; concern was limited to not owning tests/docs.
+  - Parent agent wrote and executed the tests, found three concrete
+    future-slot handoff failures, then tightened the implementation and tests:
+    case-id correlation, keyword-seam use, completion marking, and prompt-safe
+    projection of deterministic continuation fields.
+- 2026-05-16 verification.
+  - Targeted scheduled future-cognition tests:
+    `venv\Scripts\python -m pytest tests\test_self_cognition_integration.py::test_collect_scheduled_future_cognition_cases_projects_due_slots tests\test_self_cognition_integration.py::test_collect_self_cognition_cases_includes_future_slots tests\test_self_cognition_integration.py::test_worker_tick_marks_future_cognition_slot_completed -q`
+    result: 3 passed.
+  - Focused and affected regression suite:
+    `venv\Scripts\python -m pytest tests\test_l2d_l3_surface_handoff.py tests\test_action_spec_future_cognition.py tests\test_self_cognition_integration.py tests\test_persona_supervisor2.py tests\test_persona_supervisor2_action_initializer.py tests\test_action_spec_evaluator.py tests\test_action_spec_results.py tests\test_action_spec_self_cognition_bridge.py tests\test_service_background_consolidation.py tests\test_consolidator_facts_rag2.py tests\test_dialog_agent.py -q`
+    result: 96 passed.
+  - Static response-gate grep:
+    `rg -n "expression_willingness|_cognition_requests_silence|conditional_skip_dialog_agent" src tests src/scripts -g "*.py" -g "*.md"`
+    result: no matches.
+  - Syntax verification:
+    `venv\Scripts\python -m py_compile src\kazusa_ai_chatbot\nodes\persona_supervisor2.py src\kazusa_ai_chatbot\nodes\persona_supervisor2_cognition.py src\kazusa_ai_chatbot\nodes\persona_supervisor2_l3_surface.py src\kazusa_ai_chatbot\action_spec\handlers\future_cognition.py src\kazusa_ai_chatbot\self_cognition\sources.py src\kazusa_ai_chatbot\self_cognition\worker.py src\kazusa_ai_chatbot\db\scheduled_events.py src\kazusa_ai_chatbot\scheduler.py tests\test_action_spec_future_cognition.py tests\test_l2d_l3_surface_handoff.py tests\test_self_cognition_integration.py`
+    passed.
+  - Hygiene verification: `git diff --check` exited 0 with Windows CRLF
+    normalization warnings only.
+- 2026-05-16 expanded verification after stale-test alignment.
+  - Broad touched regression batch:
+    `venv\Scripts\python -m pytest tests\test_cognition_interaction_style_context.py tests\test_cognition_live_llm.py tests\test_cognition_live_llm_prompt_contracts.py tests\test_conversation_progress_cognition.py tests\test_conversation_progress_flow_live_llm.py tests\test_conversation_progress_history_policy.py tests\test_dialog_evaluator_live_llm_contract.py tests\test_dialog_generator_live_llm_contract.py tests\test_dialog_mention_target_user.py tests\test_dialog_mention_target_user_live_llm.py tests\test_multi_source_cognition_stage_00_regression_baseline.py tests\test_multi_source_cognition_stage_02_chat_episode_migration.py tests\test_multi_source_cognition_stage_03_prompt_selection.py tests\test_multi_source_cognition_stage_07_reflection_dry_run.py tests\test_multi_source_cognition_stage_08_internal_thought_dry_run.py tests\test_rag_dialog_event_logging.py tests\test_self_cognition_tracking.py -q`
+    result: 160 passed, 39 deselected.
+  - Focused handoff/action/self-cognition/consolidation suite rerun:
+    `venv\Scripts\python -m pytest tests\test_l2d_l3_surface_handoff.py tests\test_action_spec_future_cognition.py tests\test_self_cognition_integration.py tests\test_persona_supervisor2.py tests\test_persona_supervisor2_action_initializer.py tests\test_action_spec_evaluator.py tests\test_action_spec_results.py tests\test_action_spec_self_cognition_bridge.py tests\test_service_background_consolidation.py tests\test_consolidator_facts_rag2.py tests\test_dialog_agent.py -q`
+    result: 96 passed.
+  - Static response-gate grep:
+    `rg -n "expression_willingness|_cognition_requests_silence|conditional_skip_dialog_agent" src tests src/scripts -g "*.py" -g "*.md"`
+    result: no matches.
+  - Documentation grep confirmed the new selected L3 text and
+    `trigger_future_cognition` path appears in root, node, self-cognition,
+    action-spec, parent-plan, and handoff-plan docs.
+  - Syntax verification on touched runtime/test Python files passed.
+  - Hygiene verification: `git diff --check` exited 0 with Windows CRLF
+    normalization warnings only.
+- 2026-05-16 independent code review.
+  - Review mode: self-review from a fresh-review posture; no separate reviewer
+    was available after worker `Nash` completed implementation without owning
+    tests/docs.
+  - Inspected runtime diff for `persona_supervisor2.py`,
+    `persona_supervisor2_cognition.py`,
+    `persona_supervisor2_l3_surface.py`, `action_spec/evaluator.py`,
+    `action_spec/handlers/future_cognition.py`, `db/scheduled_events.py`,
+    `scheduler.py`, `self_cognition/sources.py`,
+    `self_cognition/worker.py`, L3/dialog prompt-contract removals, dry-run
+    prompt-key updates, README changes, and focused test additions.
+  - Findings: no approval-blocking implementation issues found. The selected
+    `speak` path is the only L3 text/dialog entry; private actions execute and
+    produce consolidation-facing traces on no-visible-action paths;
+    `trigger_future_cognition` schedules a non-dispatcher slot and does not
+    invoke cognition inline; scheduler/action ids are scrubbed from the
+    model-facing due-slot source packet.
+  - Static gate review:
+    `rg -n "l2d_action_initializer.*l3_|l3_.*l2d_action_initializer|send_message.*capabilities|build_initial_action_capabilities\\(\\).*send_message" src tests -g "*.py"`
+    matched only tests asserting `send_message` is absent from initial
+    capabilities; the old L2d-to-L3 graph edge did not match.
+  - Static docs/runtime review:
+    response-gate and stale node-doc greps returned no matches; documentation
+    grep matched the expected selected L3 text and `trigger_future_cognition`
+    descriptions.
+- 2026-05-16 remaining acceptance item.
+  - The handoff-specific live LLM smoke in this plan has not been rerun in
+    this checkpoint. The prior same-day L2d live sweep remains recorded in the
+    parent plan; this checkpoint verified graph handoff deterministically
+    because no L2d prompt text changed.

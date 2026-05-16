@@ -88,7 +88,6 @@ def _base_evaluator_state() -> dict:
                 "emotional_intensity": "平静但疏离",
                 "vibe_check": "理性但有防御性",
                 "relational_dynamic": "用户挑衅，角色不接战",
-                "expression_willingness": "open",
             },
             "linguistic_directives": {
                 "rhetorical_strategy": "简短回避，不提供新事实",

@@ -81,7 +81,6 @@ def _dialog_state(*, direct_target: bool) -> dict:
             "emotional_intensity": "low excitement",
             "vibe_check": "casual follow-up",
             "relational_dynamic": "the character is nudging one known user",
-            "expression_willingness": "open",
         }
     else:
         internal_monologue = (
@@ -109,7 +108,6 @@ def _dialog_state(*, direct_target: bool) -> dict:
             "emotional_intensity": "low amusement",
             "vibe_check": "casual group banter",
             "relational_dynamic": "the character is making a broad aside",
-            "expression_willingness": "open",
         }
 
     state = {

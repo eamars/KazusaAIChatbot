@@ -14,6 +14,7 @@ from kazusa_ai_chatbot.cognition_episode import validate_cognitive_episode
 from kazusa_ai_chatbot.nodes import persona_supervisor2_cognition as cognition_module
 from kazusa_ai_chatbot.nodes import persona_supervisor2_cognition_l1 as l1_module
 from kazusa_ai_chatbot.nodes import persona_supervisor2_cognition_l2 as l2_module
+from kazusa_ai_chatbot.nodes import persona_supervisor2_cognition_l2d as l2d_module
 from kazusa_ai_chatbot.nodes import persona_supervisor2_cognition_l3 as l3_module
 from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition_prompt_selection import (
     CognitionPromptSelectionError,
@@ -34,6 +35,7 @@ _APPROVED_STAGES: tuple[CognitionPromptStage, ...] = (
     "l2a_consciousness",
     "l2b_boundary_core",
     "l2c_judgment_core",
+    "l2d_action_initializer",
     "l3_contextual_agent",
     "l3_style_agent",
     "l3_content_anchor_agent",
@@ -45,11 +47,7 @@ _EXPECTED_PROMPT_KEYS = [
     "l2a_consciousness.reflection_signal_reflection_artifact",
     "l2b_boundary_core.reflection_signal_reflection_artifact",
     "l2c_judgment_core.reflection_signal_reflection_artifact",
-    "l3_contextual_agent.reflection_signal_reflection_artifact",
-    "l3_style_agent.reflection_signal_reflection_artifact",
-    "l3_content_anchor_agent.reflection_signal_reflection_artifact",
-    "l3_preference_adapter.reflection_signal_reflection_artifact",
-    "l3_visual_agent.reflection_signal_reflection_artifact",
+    "l2d_action_initializer.reflection_signal_reflection_artifact",
 ]
 _FORBIDDEN_DRY_RUN_TOKENS = (
     "call_consolidation_subgraph",
@@ -87,8 +85,8 @@ _PROMPT_FINGERPRINTS = (
     (
         "_CONTEXTUAL_AGENT_PROMPT",
         l3_module._CONTEXTUAL_AGENT_PROMPT,
-        5582,
-        "df453430e47dd1ee4fb90e442b0287470082a2a015212b535316e19db201fc3e",
+        5393,
+        "9c6dfaf8ac8932e721ad11964634956f79c1ebbc1650bf06b4f6387e39bc382c",
     ),
     (
         "_STYLE_AGENT_PROMPT",
@@ -99,8 +97,8 @@ _PROMPT_FINGERPRINTS = (
     (
         "_CONTENT_ANCHOR_AGENT_PROMPT",
         l3_module._CONTENT_ANCHOR_AGENT_PROMPT,
-        16814,
-        "ddf82213185239bedf4755a4f23e3abfa9d1f0a8e2b813c0bbee38b85bc9405f",
+        16784,
+        "25c377a3ff3ee189e63f5cd9e1ed2178a9182605e3bda513db8b393f2ced5c48",
     ),
     (
         "_PREFERENCE_ADAPTER_PROMPT",
@@ -111,8 +109,8 @@ _PROMPT_FINGERPRINTS = (
     (
         "_VISUAL_AGENT_PROMPT",
         l3_module._VISUAL_AGENT_PROMPT,
-        7882,
-        "b5440513d41341b04e6f8300b4e95c052073199a1f4aa01c71002f8e0e141e44",
+        7826,
+        "552498b619657ce9aa11099aa7a4abec3236956691b0908994158798af75743a",
     ),
 )
 
@@ -406,12 +404,14 @@ def _llm_output_payloads() -> dict[str, dict[str, Any]]:
             "character_intent": "PROVIDE",
             "judgment_note": "reflection dry run remains internal",
         },
+        "_action_initializer_llm": {
+            "action_requests": [],
+        },
         "_contextual_agent_llm": {
             "social_distance": "neutral",
             "emotional_intensity": "low",
             "vibe_check": "quiet",
             "relational_dynamic": "stable",
-            "expression_willingness": "restrained",
         },
         "_style_agent_llm": {
             "rhetorical_strategy": "brief",
@@ -470,7 +470,7 @@ async def _fake_build_interaction_style_context(**_kwargs: Any) -> dict[str, Any
 def _patch_cognition_llms(
     monkeypatch: pytest.MonkeyPatch,
 ) -> dict[str, _CapturingAsyncLLM]:
-    """Patch every L1/L2/L3 cognition LLM with a capturing fake.
+    """Patch every L1/L2d/L3 cognition LLM with a capturing fake.
 
     Args:
         monkeypatch: Pytest monkeypatch fixture.
@@ -487,6 +487,11 @@ def _patch_cognition_llms(
     monkeypatch.setattr(l2_module, "_conscious_llm", llms["_conscious_llm"])
     monkeypatch.setattr(l2_module, "_boundary_core_llm", llms["_boundary_core_llm"])
     monkeypatch.setattr(l2_module, "_judgement_core_llm", llms["_judgement_core_llm"])
+    monkeypatch.setattr(
+        l2d_module,
+        "_action_initializer_llm",
+        llms["_action_initializer_llm"],
+    )
     monkeypatch.setattr(
         l3_module,
         "_contextual_agent_llm",
@@ -889,7 +894,14 @@ async def test_reflection_prompt_rendering_uses_only_artifact_payload(
     )
 
     assert audit["status"] == "completed"
-    for fake_llm in llms.values():
+    l1_l2_llm_names = (
+        "_subconscious_llm",
+        "_conscious_llm",
+        "_boundary_core_llm",
+        "_judgement_core_llm",
+    )
+    for llm_name in l1_l2_llm_names:
+        fake_llm = llms[llm_name]
         assert fake_llm.messages
         prompt_payload = json.loads(fake_llm.messages[1].content)
         assert prompt_payload["reflection_artifact"] == _canonical_context(context)
@@ -902,6 +914,21 @@ async def test_reflection_prompt_rendering_uses_only_artifact_payload(
         assert "raw_reflection_run" not in prompt_payload
         if "promoted_reflection_context" in prompt_payload:
             assert prompt_payload["promoted_reflection_context"] == {}
+
+    l2d_llm = llms["_action_initializer_llm"]
+    assert l2d_llm.messages
+    l2d_payload = json.loads(l2d_llm.messages[1].content)
+    assert l2d_payload["trigger_context"]["trigger_source"] == "reflection_signal"
+    assert l2d_payload["trigger_context"]["input_sources"] == [
+        "reflection_artifact",
+    ]
+    assert "cognitive_episode" not in l2d_payload
+    assert "raw_reflection_run" not in json.dumps(l2d_payload, ensure_ascii=False)
+
+    invoked_llm_names = (*l1_l2_llm_names, "_action_initializer_llm")
+    for llm_name, fake_llm in llms.items():
+        if llm_name not in invoked_llm_names:
+            assert fake_llm.messages == []
 
 
 def test_text_chat_prompt_fingerprints_remain_stable() -> None:

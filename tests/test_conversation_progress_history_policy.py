@@ -186,7 +186,6 @@ async def test_contextual_agent_receives_at_most_four_history_messages(monkeypat
         "emotional_intensity": "low",
         "vibe_check": "calm",
         "relational_dynamic": "cooperative",
-        "expression_willingness": "open",
     })
     monkeypatch.setattr(l3_module, "_contextual_agent_llm", fake_llm)
 
@@ -237,7 +236,6 @@ async def test_dialog_generator_tone_history_is_capped_to_two(monkeypatch) -> No
                 "emotional_intensity": "low",
                 "vibe_check": "calm",
                 "relational_dynamic": "cooperative",
-                "expression_willingness": "open",
             },
         },
         "chat_history_wide": _history(),
@@ -281,7 +279,6 @@ async def test_dialog_evaluator_receives_last_user_message_only(monkeypatch) -> 
                 "emotional_intensity": "low",
                 "vibe_check": "calm",
                 "relational_dynamic": "cooperative",
-                "expression_willingness": "open",
             },
         },
         "chat_history_wide": _history(),

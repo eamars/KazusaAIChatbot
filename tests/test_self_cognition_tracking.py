@@ -661,7 +661,6 @@ def test_runner_reuses_dialog_render_for_action_and_consolidation() -> None:
             "character_intent": "PROVIDE",
             "action_directives": {
                 "contextual_directives": {
-                    "expression_willingness": "normal",
                 },
                 "linguistic_directives": {
                     "content_anchors": [

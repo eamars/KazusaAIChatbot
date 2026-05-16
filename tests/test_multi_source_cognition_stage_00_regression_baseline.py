@@ -22,6 +22,7 @@ from kazusa_ai_chatbot.nodes import persona_supervisor2_cognition_l3 as l3_modul
 from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition_prompt_selection import (
     select_cognition_prompt_variant,
 )
+from kazusa_ai_chatbot.action_spec.registry import SPEAK_CAPABILITY
 from kazusa_ai_chatbot.nodes.persona_supervisor2_rag_projection import (
     project_known_facts,
 )
@@ -287,6 +288,40 @@ def _base_state(case_id: str = "private_text") -> dict[str, Any]:
         "conversation_episode_state": None,
         "promoted_reflection_context": {},
     }
+    return_value["cognitive_episode"] = build_text_chat_cognitive_episode(
+        episode_id=(
+            f"user_message:{return_value['platform']}:"
+            f"{return_value['platform_channel_id']}:"
+            f"{return_value['platform_message_id']}"
+        ),
+        percept_id=(
+            f"user_message:{return_value['platform']}:"
+            f"{return_value['platform_channel_id']}:"
+            f"{return_value['platform_message_id']}:dialog_text:0"
+        ),
+        timestamp=return_value["timestamp"],
+        time_context=return_value["time_context"],
+        user_input=return_value["user_input"],
+        platform=return_value["platform"],
+        platform_channel_id=return_value["platform_channel_id"],
+        channel_type=return_value["channel_type"],
+        platform_message_id=return_value["platform_message_id"],
+        platform_user_id=return_value["platform_user_id"],
+        global_user_id=return_value["global_user_id"],
+        user_name=return_value["user_name"],
+        active_turn_platform_message_ids=return_value[
+            "active_turn_platform_message_ids"
+        ],
+        active_turn_conversation_row_ids=return_value[
+            "active_turn_conversation_row_ids"
+        ],
+        debug_modes=return_value["debug_modes"],
+        output_mode="visible_reply",
+        target_addressed_user_ids=return_value["prompt_message_context"][
+            "addressed_to_global_user_ids"
+        ],
+        target_broadcast=return_value["prompt_message_context"]["broadcast"],
+    )
     return return_value
 
 
@@ -318,7 +353,6 @@ def _cognition_state() -> dict[str, Any]:
             "emotional_intensity": "low",
             "vibe_check": "routine",
             "relational_dynamic": "stable",
-            "expression_willingness": "open",
             "rhetorical_strategy": "answer briefly",
             "linguistic_style": "plain",
             "forbidden_phrases": [],
@@ -368,6 +402,79 @@ def _cognition_state() -> dict[str, Any]:
     return state
 
 
+def _speak_action_spec() -> dict[str, Any]:
+    """Build a valid L2d-selected text-surface action spec."""
+
+    action_spec = {
+        "schema_version": "action_spec.v1",
+        "kind": SPEAK_CAPABILITY,
+        "cognition_mode": "deliberative",
+        "source_refs": [
+            {
+                "schema_version": "action_source_ref.v1",
+                "ref_kind": "cognitive_episode",
+                "ref_id": "current_cognitive_episode",
+                "owner": "cognition",
+                "relationship": "basis",
+                "evidence_refs": [],
+            }
+        ],
+        "target": {
+            "schema_version": "action_target.v1",
+            "target_kind": "current_channel",
+            "target_id": None,
+            "owner": "l3_text",
+            "scope": {"surface": "text"},
+        },
+        "params": {
+            "delivery_mode": "visible_reply",
+            "execute_at": None,
+            "surface_requirements": {"intent": "answer normally"},
+        },
+        "urgency": "now",
+        "visibility": "user_visible",
+        "deadline": None,
+        "continuation": {
+            "schema_version": "action_continuation.v1",
+            "mode": "none",
+            "episode_type": None,
+            "max_depth": 0,
+            "include_result_as": None,
+        },
+        "reason": "The character should answer visibly.",
+    }
+    return action_spec
+
+
+def _text_surface_update() -> dict[str, Any]:
+    """Build a minimal selected L3 text-surface update."""
+
+    update = {
+        "action_directives": {
+            "contextual_directives": {
+                "social_distance": "friendly",
+                "emotional_intensity": "low",
+                "vibe_check": "routine",
+                "relational_dynamic": "stable",
+            },
+            "linguistic_directives": {
+                "rhetorical_strategy": "answer briefly",
+                "linguistic_style": "plain",
+                "accepted_user_preferences": [],
+                "content_anchors": ["[DECISION] answer", "[SCOPE] short"],
+                "forbidden_phrases": [],
+            },
+            "visual_directives": {
+                "facial_expression": [],
+                "body_language": [],
+                "gaze_direction": [],
+                "visual_vibe": [],
+            },
+        }
+    }
+    return update
+
+
 def _dialog_state() -> dict[str, Any]:
     """Build a dialog-agent state for generator and evaluator render checks."""
     cognition_state = _cognition_state()
@@ -379,7 +486,6 @@ def _dialog_state() -> dict[str, Any]:
                 "emotional_intensity": cognition_state["emotional_intensity"],
                 "vibe_check": cognition_state["vibe_check"],
                 "relational_dynamic": cognition_state["relational_dynamic"],
-                "expression_willingness": cognition_state["expression_willingness"],
             },
             "linguistic_directives": {
                 "rhetorical_strategy": cognition_state["rhetorical_strategy"],
@@ -480,7 +586,7 @@ def _graph_result() -> dict[str, Any]:
             "internal_monologue": "test",
             "action_directives": {
                 "linguistic_directives": {"content_anchors": []},
-                "contextual_directives": {"expression_willingness": "open"},
+                "contextual_directives": {},
             },
             "interaction_subtext": "",
             "emotional_appraisal": "",
@@ -742,13 +848,19 @@ async def test_persona_graph_response_route_preserves_consolidation_snapshot() -
             new_callable=AsyncMock,
             return_value={
                 "internal_monologue": "answer normally",
-                "action_directives": {},
                 "interaction_subtext": "",
                 "emotional_appraisal": "",
                 "character_intent": "PROVIDE",
                 "logical_stance": "CONFIRM",
+                "judgment_note": "ok",
+                "action_specs": [_speak_action_spec()],
             },
         ) as cognition,
+        patch(
+            "kazusa_ai_chatbot.nodes.persona_supervisor2.call_l3_text_surface_handler",
+            new_callable=AsyncMock,
+            return_value=_text_surface_update(),
+        ),
         patch(
             "kazusa_ai_chatbot.nodes.persona_supervisor2.dialog_agent",
             new_callable=AsyncMock,
@@ -800,15 +912,11 @@ async def test_persona_graph_silence_route_skips_dialog() -> None:
             new_callable=AsyncMock,
             return_value={
                 "internal_monologue": "stay quiet",
-                "action_directives": {
-                    "contextual_directives": {
-                        "expression_willingness": "silent",
-                    },
-                },
                 "interaction_subtext": "",
                 "emotional_appraisal": "",
                 "character_intent": "DISMISS",
                 "logical_stance": "REFUSE",
+                "action_specs": [],
             },
         ),
         patch(
@@ -902,12 +1010,18 @@ async def test_persona_graph_scopes_group_history_after_decontextualizer() -> No
             new_callable=AsyncMock,
             return_value={
                 "internal_monologue": "answer normally",
-                "action_directives": {},
                 "interaction_subtext": "",
                 "emotional_appraisal": "",
                 "character_intent": "PROVIDE",
                 "logical_stance": "CONFIRM",
+                "judgment_note": "ok",
+                "action_specs": [_speak_action_spec()],
             },
+        ),
+        patch(
+            "kazusa_ai_chatbot.nodes.persona_supervisor2.call_l3_text_surface_handler",
+            new_callable=AsyncMock,
+            return_value=_text_surface_update(),
         ),
         patch(
             "kazusa_ai_chatbot.nodes.persona_supervisor2.dialog_agent",
@@ -1105,17 +1219,12 @@ async def test_rag_skip_preserves_full_projected_shape(
         }
     ]
 
-    async def _fail_rag_supervisor(
-        *,
-        original_query: str,
-        character_name: str,
-        context: dict[str, Any],
-    ) -> dict[str, Any]:
+    async def _fail_rag_supervisor(*_args: Any, **_kwargs: Any) -> dict[str, Any]:
         raise AssertionError("RAG supervisor should not run")
 
     monkeypatch.setattr(
         supervisor_module,
-        "call_rag_supervisor",
+        "call_quote_aware_rag_supervisor",
         _fail_rag_supervisor,
     )
 
@@ -1262,11 +1371,10 @@ async def test_existing_cognition_and_dialog_prompts_render_with_mocked_llms(
         "emotional_intensity": "low",
         "vibe_check": "routine",
         "relational_dynamic": "stable",
-        "expression_willingness": "open",
     })
     monkeypatch.setattr(l3_module, "_contextual_agent_llm", contextual_llm)
     contextual_result = await l3_module.call_contextual_agent(state)
-    assert contextual_result["expression_willingness"] == "open"
+    assert contextual_result["social_distance"] == "neutral"
     _assert_prompt_messages(
         contextual_llm,
         {"decontexualized_input", "boundary_core_assessment"},

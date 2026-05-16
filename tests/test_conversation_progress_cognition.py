@@ -243,7 +243,6 @@ def _profile_conformance_state() -> dict:
         "emotional_intensity": "轻微活力",
         "vibe_check": "普通闲聊",
         "relational_dynamic": "自然接住轻松话题",
-        "expression_willingness": "open",
         "emotional_appraisal": "轻松、好奇。",
         "reply_context": {},
         "channel_topic": "",
@@ -259,7 +258,6 @@ async def test_contextual_agent_receives_boundary_profile_contract(monkeypatch) 
         "emotional_intensity": "轻微活力",
         "vibe_check": "普通闲聊",
         "relational_dynamic": "自然接住轻松话题",
-        "expression_willingness": "open",
     })
     monkeypatch.setattr(l3_module, "_contextual_agent_llm", fake_llm)
 

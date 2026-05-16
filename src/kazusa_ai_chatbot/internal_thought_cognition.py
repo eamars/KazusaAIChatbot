@@ -34,19 +34,11 @@ _INTERNAL_THOUGHT_DRY_RUN_PROMPT_KEYS = [
     "l2a_consciousness.internal_thought_internal_monologue",
     "l2b_boundary_core.internal_thought_internal_monologue",
     "l2c_judgment_core.internal_thought_internal_monologue",
-    "l3_contextual_agent.internal_thought_internal_monologue",
-    "l3_style_agent.internal_thought_internal_monologue",
-    "l3_content_anchor_agent.internal_thought_internal_monologue",
-    "l3_preference_adapter.internal_thought_internal_monologue",
-    "l3_visual_agent.internal_thought_internal_monologue",
+    "l2d_action_initializer.internal_thought_internal_monologue",
 ]
-_INTERNAL_THOUGHT_VISUAL_PROMPT_KEY = (
-    "l3_visual_agent.internal_thought_internal_monologue"
+_INTERNAL_THOUGHT_DRY_RUN_PROMPT_KEYS_WITHOUT_VISUAL = list(
+    _INTERNAL_THOUGHT_DRY_RUN_PROMPT_KEYS
 )
-_INTERNAL_THOUGHT_DRY_RUN_PROMPT_KEYS_WITHOUT_VISUAL = [
-    key for key in _INTERNAL_THOUGHT_DRY_RUN_PROMPT_KEYS
-    if key != _INTERNAL_THOUGHT_VISUAL_PROMPT_KEY
-]
 _INTERNAL_MONOLOGUE_MAX_CHARACTERS = 4000
 _ACTION_LATCH_TEXT_MAX_CHARACTERS = 1000
 _INTERNAL_THOUGHT_INPUT_TEXT = (

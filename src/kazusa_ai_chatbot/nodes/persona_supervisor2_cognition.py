@@ -3,7 +3,7 @@
 Agent implementations live in the layer-specific submodules:
   - persona_supervisor2_cognition_l1  (L1 subconscious)
   - persona_supervisor2_cognition_l2  (L2 consciousness / boundary / judgment)
-  - persona_supervisor2_cognition_l3  (L3 contextual / linguistic / visual + L4 collector)
+  - persona_supervisor2_cognition_l2d (L2d action initialization)
 """
 from kazusa_ai_chatbot.nodes.persona_supervisor2_schema import GlobalPersonaState, CognitionState
 from kazusa_ai_chatbot.utils import build_interaction_history_recent, log_preview
@@ -29,16 +29,6 @@ from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition_l2 import (  # noqa: 
 from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition_l2d import (  # noqa: E402
     call_action_initializer,
 )
-from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition_l3 import (  # noqa: E402
-    call_interaction_style_context_loader,
-    call_contextual_agent,
-    call_style_agent,
-    call_content_anchor_agent,
-    call_preference_adapter,
-    call_visual_agent,
-    call_collector,
-)
-
 
 async def call_cognition_subgraph(state: GlobalPersonaState) -> GlobalPersonaState:
     """
@@ -57,17 +47,6 @@ async def call_cognition_subgraph(state: GlobalPersonaState) -> GlobalPersonaSta
     sub_agent_builder.add_node("l2c_judgment_core", call_judgment_core_agent)
     sub_agent_builder.add_node("l2d_action_initializer", call_action_initializer)
 
-    sub_agent_builder.add_node("l3_contextual_agent", call_contextual_agent)
-    sub_agent_builder.add_node(
-        "l3_interaction_style_context_loader",
-        call_interaction_style_context_loader,
-    )
-    sub_agent_builder.add_node("l3_style_agent", call_style_agent)
-    sub_agent_builder.add_node("l3_content_anchor_agent", call_content_anchor_agent)
-    sub_agent_builder.add_node("l3_preference_adapter", call_preference_adapter)
-    sub_agent_builder.add_node("l3_visual_agent", call_visual_agent)
-    sub_agent_builder.add_node("l4_collector", call_collector)
-
     # Connect
     sub_agent_builder.add_edge(START, "l1_subconscious")
     sub_agent_builder.add_edge("l1_subconscious", "l2a_consciousness")
@@ -77,24 +56,7 @@ async def call_cognition_subgraph(state: GlobalPersonaState) -> GlobalPersonaSta
     sub_agent_builder.add_edge("l2b_boundary_core", "l2c_judgment_core")
 
     sub_agent_builder.add_edge("l2c_judgment_core", "l2d_action_initializer")
-    sub_agent_builder.add_edge("l2d_action_initializer", "l3_contextual_agent")
-    sub_agent_builder.add_edge(
-        "l2d_action_initializer",
-        "l3_interaction_style_context_loader",
-    )
-
-    sub_agent_builder.add_edge("l3_contextual_agent", "l3_visual_agent")
-    sub_agent_builder.add_edge(
-        "l3_interaction_style_context_loader",
-        "l3_content_anchor_agent",
-    )
-    sub_agent_builder.add_edge("l3_content_anchor_agent", "l3_visual_agent")
-    sub_agent_builder.add_edge("l3_interaction_style_context_loader", "l3_style_agent")
-    sub_agent_builder.add_edge("l3_style_agent", "l3_preference_adapter")
-    sub_agent_builder.add_edge("l3_preference_adapter", "l4_collector")
-    sub_agent_builder.add_edge("l3_visual_agent", "l4_collector")
-
-    sub_agent_builder.add_edge("l4_collector", END)
+    sub_agent_builder.add_edge("l2d_action_initializer", END)
 
 
     cognition_subgraph = sub_agent_builder.compile()
@@ -142,11 +104,11 @@ async def call_cognition_subgraph(state: GlobalPersonaState) -> GlobalPersonaSta
 
     # Generate outputs
     internal_monologue = result.get("internal_monologue", "")
-    action_directives = result.get("action_directives", {})
     interaction_subtext = result.get("interaction_subtext", "")
     emotional_appraisal = result.get("emotional_appraisal", "")
     character_intent = result.get("character_intent", "")
     logical_stance = result.get("logical_stance", "")
+    judgment_note = result.get("judgment_note", "")
     action_specs = result.get("action_specs", [])
 
     logger.info(
@@ -155,7 +117,6 @@ async def call_cognition_subgraph(state: GlobalPersonaState) -> GlobalPersonaSta
         f"appraisal={log_preview(emotional_appraisal)} "
         f"subtext={log_preview(interaction_subtext)} "
         f"action_specs={log_preview(action_specs)} "
-        f"action_directives={log_preview(action_directives)} "
         f"monologue={log_preview(internal_monologue)}"
     )
     logger.debug(
@@ -165,7 +126,6 @@ async def call_cognition_subgraph(state: GlobalPersonaState) -> GlobalPersonaSta
 
     return_value = {
         "internal_monologue": internal_monologue,
-        "action_directives": action_directives,
         "action_specs": action_specs,
 
         # Other data used by post-dialog consolidation.
@@ -173,5 +133,6 @@ async def call_cognition_subgraph(state: GlobalPersonaState) -> GlobalPersonaSta
         "emotional_appraisal": emotional_appraisal,
         "character_intent": character_intent,
         "logical_stance": logical_stance,
+        "judgment_note": judgment_note,
     }
     return return_value

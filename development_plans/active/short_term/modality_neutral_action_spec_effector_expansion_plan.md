@@ -1833,6 +1833,48 @@ record verification evidence here.
     complete until L3 text/dialog becomes a selected `speak` handler and
     `trigger_future_cognition` schedules a future cognition slot.
   - Stage 7 documentation/handoff and independent code review remain pending.
+- 2026-05-16 handoff-blocker implementation checkpoint.
+  - Follow-up plan
+    `development_plans/active/short_term/l2d_l3_surface_handoff_plan.md` moved
+    to `in_progress` and executed through deterministic Stage 4 verification.
+  - Runtime changes now stop the cognition subgraph after L2d. Selected
+    `speak` invokes the L3 text surface and dialog; no selected `speak` skips
+    L3/dialog and still produces private episode-trace evidence for
+    consolidation.
+  - `trigger_future_cognition` now schedules a non-dispatcher
+    `scheduled_events` row, and due rows are consumed by the existing
+    self-cognition worker as ordinary trigger cases on later ticks. Scheduler
+    ids and continuation mechanics stay out of the model-facing source packet.
+  - Static response-gate cleanup removed runtime/test/script references to
+    `_cognition_requests_silence`, `conditional_skip_dialog_agent`, and
+    `expression_willingness`.
+  - Focused and affected regression command:
+    `venv\Scripts\python -m pytest tests\test_l2d_l3_surface_handoff.py tests\test_action_spec_future_cognition.py tests\test_self_cognition_integration.py tests\test_persona_supervisor2.py tests\test_persona_supervisor2_action_initializer.py tests\test_action_spec_evaluator.py tests\test_action_spec_results.py tests\test_action_spec_self_cognition_bridge.py tests\test_service_background_consolidation.py tests\test_consolidator_facts_rag2.py tests\test_dialog_agent.py -q`.
+    Result: 96 passed.
+  - Hygiene verification: `py_compile` on touched runtime/test Python files
+    passed; `git diff --check` exited 0 with Windows CRLF normalization
+    warnings only.
+  - Remaining blocker before parent Stage 7 final sign-off:
+    handoff-specific live LLM smoke remains pending in the follow-up plan.
+- 2026-05-16 handoff-blocker expanded verification.
+  - Broad touched regression batch covering cognition prompt contracts,
+    multi-source cognition dry runs, dialog contracts, RAG event logging, and
+    self-cognition tracking:
+    `venv\Scripts\python -m pytest tests\test_cognition_interaction_style_context.py tests\test_cognition_live_llm.py tests\test_cognition_live_llm_prompt_contracts.py tests\test_conversation_progress_cognition.py tests\test_conversation_progress_flow_live_llm.py tests\test_conversation_progress_history_policy.py tests\test_dialog_evaluator_live_llm_contract.py tests\test_dialog_generator_live_llm_contract.py tests\test_dialog_mention_target_user.py tests\test_dialog_mention_target_user_live_llm.py tests\test_multi_source_cognition_stage_00_regression_baseline.py tests\test_multi_source_cognition_stage_02_chat_episode_migration.py tests\test_multi_source_cognition_stage_03_prompt_selection.py tests\test_multi_source_cognition_stage_07_reflection_dry_run.py tests\test_multi_source_cognition_stage_08_internal_thought_dry_run.py tests\test_rag_dialog_event_logging.py tests\test_self_cognition_tracking.py -q`
+    result: 160 passed, 39 deselected.
+  - Focused handoff/action/self-cognition/consolidation suite rerun:
+    `venv\Scripts\python -m pytest tests\test_l2d_l3_surface_handoff.py tests\test_action_spec_future_cognition.py tests\test_self_cognition_integration.py tests\test_persona_supervisor2.py tests\test_persona_supervisor2_action_initializer.py tests\test_action_spec_evaluator.py tests\test_action_spec_results.py tests\test_action_spec_self_cognition_bridge.py tests\test_service_background_consolidation.py tests\test_consolidator_facts_rag2.py tests\test_dialog_agent.py -q`
+    result: 96 passed.
+  - Static stale-gate grep for `expression_willingness`,
+    `_cognition_requests_silence`, and `conditional_skip_dialog_agent` returned
+    no matches in `src`, `tests`, or `src/scripts`.
+  - Documentation grep confirmed the selected L3 text surface and
+    `trigger_future_cognition` route are described in the affected README and
+    plan files.
+  - Follow-up plan independent code review completed by Codex from a
+    fresh-review posture. No approval-blocking implementation findings were
+    found; residual risk remains the explicit handoff-specific live LLM smoke
+    gate.
 - 2026-05-16 Stage 3-6 live LLM demonstration before Stage 7.
   - User requested real LLM evidence before continuing. No Stage 7 work was
     started.

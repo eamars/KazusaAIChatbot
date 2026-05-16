@@ -65,7 +65,6 @@ _VALID_OUTPUT_PAYLOADS: dict[CognitionPromptStage, dict[str, object]] = {
         "emotional_intensity": "low",
         "vibe_check": "routine",
         "relational_dynamic": "stable",
-        "expression_willingness": "open",
     },
     "l3_style_agent": {
         "rhetorical_strategy": "answer briefly",

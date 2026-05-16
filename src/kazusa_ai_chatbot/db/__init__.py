@@ -160,6 +160,7 @@ from kazusa_ai_chatbot.db.character import (
 from kazusa_ai_chatbot.db.scheduled_events import (
     cancel_pending_scheduled_event,
     insert_scheduled_event,
+    list_due_future_cognition_events,
     list_pending_scheduler_events,
     mark_scheduled_event_completed,
     mark_scheduled_event_failed,
@@ -273,7 +274,8 @@ __all__ = [
     "enable_memory_vector_index", "get_active_promises", "save_memory", "search_memory",
     # Scheduled events
     "cancel_pending_scheduled_event", "insert_scheduled_event",
-    "list_pending_scheduler_events", "mark_scheduled_event_completed",
+    "list_due_future_cognition_events", "list_pending_scheduler_events",
+    "mark_scheduled_event_completed",
     "mark_scheduled_event_failed", "mark_scheduled_event_running",
     "query_pending_scheduled_events",
     # Self-cognition action attempts

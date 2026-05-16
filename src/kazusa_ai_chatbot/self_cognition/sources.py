@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import inspect
 from collections.abc import Callable
 from datetime import datetime
 from typing import Any
@@ -12,6 +13,7 @@ from kazusa_ai_chatbot.config import (
 from kazusa_ai_chatbot.db import (
     get_conversation_history,
     get_user_profile,
+    list_due_future_cognition_events,
     query_active_commitment_memory_units,
 )
 from kazusa_ai_chatbot.dispatcher.task import parse_iso_datetime
@@ -37,16 +39,81 @@ async def collect_self_cognition_cases(
     """
 
     cases: list[models.SelfCognitionCase] = []
+    scheduled_cases = await collect_scheduled_future_cognition_cases(
+        now=now,
+        character_profile=character_profile,
+        max_cases=max_cases,
+    )
+    cases.extend(scheduled_cases)
+
+    remaining_cases = max_cases - len(cases)
     if SELF_COGNITION_TRIGGER_ACTIVE_COMMITMENT_ENABLED:
-        commitment_cases = await collect_active_commitment_cases(
-            now=now,
-            character_profile=character_profile,
-            max_cases=max_cases,
-        )
-        cases.extend(commitment_cases)
+        if remaining_cases > 0:
+            commitment_cases = await collect_active_commitment_cases(
+                now=now,
+                character_profile=character_profile,
+                max_cases=remaining_cases,
+            )
+            cases.extend(commitment_cases)
 
     selected_cases = cases[:max_cases]
     return selected_cases
+
+
+async def collect_scheduled_future_cognition_cases(
+    now: datetime,
+    character_profile: dict[str, Any],
+    max_cases: int,
+    list_due_events_func: Callable[..., Any] | None = None,
+) -> list[models.SelfCognitionCase]:
+    """Build worker cases from due scheduled future-cognition slots.
+
+    Args:
+        now: Current worker tick time.
+        character_profile: Current character state snapshot.
+        max_cases: Maximum due slots to project.
+        list_due_events_func: Optional test seam for scheduled-slot reads.
+
+    Returns:
+        Prompt-safe self-cognition cases for the standard worker runner.
+    """
+
+    if max_cases <= 0:
+        return_value: list[models.SelfCognitionCase] = []
+        return return_value
+
+    current_now = parse_iso_datetime(now.isoformat())
+    due_events_reader = list_due_events_func or list_due_future_cognition_events
+    raw_events = due_events_reader(
+        current_timestamp=current_now.isoformat(),
+        limit=max_cases,
+    )
+    if inspect.isawaitable(raw_events):
+        raw_events = await raw_events
+
+    if raw_events is None:
+        return_value = []
+        return return_value
+    events = raw_events if isinstance(raw_events, list) else list(raw_events)
+
+    cases: list[models.SelfCognitionCase] = []
+    for event in events:
+        if len(cases) >= max_cases:
+            break
+        if not isinstance(event, dict):
+            continue
+        if not _is_due_future_cognition_event(event, current_now):
+            continue
+        case = _build_scheduled_future_cognition_case(
+            event,
+            character_profile=character_profile,
+            now=current_now,
+        )
+        if case is None:
+            continue
+        cases.append(case)
+
+    return cases
 
 
 async def collect_active_commitment_cases(
@@ -111,6 +178,192 @@ async def collect_active_commitment_cases(
         cases.append(case)
 
     return cases
+
+
+def _is_due_future_cognition_event(
+    event: dict[str, Any],
+    now: datetime,
+) -> bool:
+    """Return whether a scheduler row is an eligible future-cognition slot."""
+
+    if event.get("status") != "pending":
+        return_value = False
+        return return_value
+    if event.get("tool") != "trigger_future_cognition":
+        return_value = False
+        return return_value
+
+    execute_at = text_or_empty(event.get("execute_at"))
+    if not execute_at:
+        return_value = False
+        return return_value
+    try:
+        execute_time = parse_iso_datetime(execute_at)
+    except ValueError:
+        return_value = False
+        return return_value
+
+    return_value = execute_time <= now
+    return return_value
+
+
+def _build_scheduled_future_cognition_case(
+    event: dict[str, Any],
+    *,
+    character_profile: dict[str, Any],
+    now: datetime,
+) -> models.SelfCognitionCase | None:
+    """Project one due future-cognition slot into a normal worker case."""
+
+    args = event.get("args")
+    if not isinstance(args, dict):
+        return_value = None
+        return return_value
+    if args.get("episode_type") != "self_cognition":
+        return_value = None
+        return return_value
+
+    context_summary = text_or_empty(args.get("context_summary"))
+    if not context_summary:
+        return_value = None
+        return return_value
+    event_id = text_or_empty(event.get("event_id"))
+    if not event_id:
+        return_value = None
+        return return_value
+
+    execute_at = text_or_empty(event.get("execute_at"))
+    source_action_attempt_id = text_or_empty(
+        args.get("source_action_attempt_id")
+    )
+    source_refs = _scheduled_future_cognition_source_refs(
+        args,
+        context_summary=context_summary,
+        execute_at=execute_at,
+    )
+    safe_continuation = _safe_continuation(args.get("continuation"))
+
+    case: models.SelfCognitionCase = {
+        "case_name": models.CASE_SCHEDULED_FUTURE_COGNITION,
+        "case_id": event_id,
+        "idle_timestamp": now.isoformat(),
+        "last_evidence_timestamp": _scheduled_event_evidence_timestamp(event),
+        "trigger_kind": models.TRIGGER_SCHEDULED_FUTURE_COGNITION,
+        "semantic_due_state": models.DUE_STATE_DUE_NOW,
+        "actionability": "scheduled_private_followup_ready_no_direct_contact",
+        "target_scope": {
+            "platform": text_or_empty(event.get("source_platform"))
+            or "orchestrator",
+            "platform_channel_id": "",
+            "channel_type": text_or_empty(event.get("source_channel_type"))
+            or "internal",
+            "user_id": "self_cognition",
+            "display_name": "self-cognition",
+        },
+        "source_refs": source_refs,
+        "visible_context": [],
+        "conversation_progress": {
+            "source": "scheduled_future_cognition",
+            "context_summary": context_summary,
+            "continuation": safe_continuation,
+        },
+        "character_profile": dict(character_profile),
+        "user_profile": {
+            "affinity": models.DEFAULT_DRY_RUN_AFFINITY,
+            "display_name": "self-cognition",
+            "last_relationship_insight": "",
+        },
+        "current_mood": text_or_empty(character_profile.get("mood")),
+        "global_vibe": text_or_empty(character_profile.get("global_vibe")),
+        "rag_query": context_summary,
+        "source_scheduled_event_id": event_id,
+        "source_action_attempt_id": source_action_attempt_id,
+    }
+    return case
+
+
+def _scheduled_future_cognition_source_refs(
+    args: dict[str, Any],
+    *,
+    context_summary: str,
+    execute_at: str,
+) -> list[models.SelfCognitionSourceRef]:
+    """Build prompt-safe source references for a scheduled cognition slot."""
+
+    source_refs: list[models.SelfCognitionSourceRef] = [
+        {
+            "source_kind": "scheduled_event",
+            "source_id": "scheduled_future_cognition_slot",
+            "due_at": execute_at or None,
+            "summary": context_summary,
+        }
+    ]
+
+    raw_source_refs = args.get("source_refs")
+    if not isinstance(raw_source_refs, list):
+        return source_refs
+
+    for index, raw_ref in enumerate(raw_source_refs):
+        if not isinstance(raw_ref, dict):
+            continue
+        source_ref = {
+            "source_kind": _safe_action_source_kind(raw_ref),
+            "source_id": f"action_source_ref:{index}",
+            "due_at": None,
+            "summary": _safe_action_source_summary(raw_ref),
+        }
+        source_refs.append(source_ref)
+    return source_refs
+
+
+def _safe_action_source_kind(raw_ref: dict[str, Any]) -> str:
+    """Project an action source kind without leaking storage identifiers."""
+
+    ref_kind = text_or_empty(raw_ref.get("ref_kind"))
+    if ref_kind:
+        return_value = f"action_{ref_kind}"
+    else:
+        return_value = "action_source_ref"
+    return return_value
+
+
+def _safe_action_source_summary(raw_ref: dict[str, Any]) -> str:
+    """Summarize action source metadata without raw ids or excerpts."""
+
+    parts: list[str] = []
+    for field_name in ("owner", "relationship", "ref_kind"):
+        value = text_or_empty(raw_ref.get(field_name))
+        if value:
+            parts.append(f"{field_name}={value}")
+    if not parts:
+        return_value = "prior action source reference"
+        return return_value
+    return_value = "; ".join(parts)
+    return return_value
+
+
+def _safe_continuation(value: object) -> dict[str, Any]:
+    """Project bounded continuation metadata for model-visible context."""
+
+    if not isinstance(value, dict):
+        return_value: dict[str, Any] = {}
+        return return_value
+
+    safe_value: dict[str, Any] = {}
+    mode = value.get("mode")
+    if isinstance(mode, str):
+        safe_value["mode"] = mode
+    return safe_value
+
+
+def _scheduled_event_evidence_timestamp(event: dict[str, Any]) -> str:
+    """Choose the visible timestamp for a scheduled slot case."""
+
+    execute_at = text_or_empty(event.get("execute_at"))
+    if execute_at:
+        return execute_at
+    created_at = text_or_empty(event.get("created_at"))
+    return created_at
 
 
 def _build_active_commitment_case(
