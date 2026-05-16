@@ -280,6 +280,32 @@ merge/evolve/create decisions, rewriting, and stability classification.
 Database code validates structure, known ids, search constraints, and
 persistence mechanics, but it does not reinterpret user meaning.
 
+`active_commitment` rows have an explicit lifecycle:
+
+| Status | Meaning |
+| --- | --- |
+| `active` | Open commitment eligible for RAG/self-cognition active-commitment context. |
+| `completed` | Character judged the commitment fulfilled. |
+| `cancelled` | Character judged the commitment abandoned or no longer appropriate. |
+| `archived` | Character judged the commitment obsolete but worth preserving historically. |
+
+Active-commitment retrieval helpers default to `status="active"` and exclude
+retired statuses unless a caller explicitly asks for other statuses through a
+named helper. No database helper may retire commitments because a due date is
+old, a threshold elapsed, or a keyword matched.
+
+Private lifecycle writes use:
+
+```python
+update_user_memory_unit_lifecycle(...)
+```
+
+That helper updates only one currently active `active_commitment`, records
+`updated_at`, stamps `completed_at`, `cancelled_at`, or `archived_at` when
+appropriate, and appends a `merge_history` audit row containing the
+action-attempt id and cognition-authored reason. It is the persistence owner
+behind validated `memory_lifecycle_update` actions.
+
 ### `character_state`
 
 Stores singleton character profile/state documents and runtime self-image
@@ -326,6 +352,13 @@ Stores durable action-attempt state for idle self-cognition duplicate
 suppression. The collection is keyed by `idempotency_key`, which is derived
 from source kind, source id, due time, target scope, and action kind. It does
 not replace event logging; event logs remain the sanitized operator view.
+
+This collection also backs the generic action-attempt ledger for the
+action-spec slice. Old rows that only describe legacy self-cognition
+`send_message` attempts remain valid. New rows may include generic action
+metadata such as action kind, validation status, continuation status, and
+action-spec attempt refs. Callers must read the collection tolerantly and must
+not require a separate ledger collection for each capability.
 
 ### `conversation_episode_state`
 
@@ -415,6 +448,8 @@ LLM stages own semantic judgment:
 - what reflection evidence implies;
 - what interaction style guidance should say;
 - which future promise exists before dispatcher scheduling.
+- whether a validated active commitment lifecycle action should mark a
+  commitment fulfilled, abandoned, obsolete, or deferred.
 
 Deterministic database code owns structure and mechanics:
 

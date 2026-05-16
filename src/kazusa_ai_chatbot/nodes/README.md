@@ -1,8 +1,8 @@
 # Cognition Nodes
 
 `kazusa_ai_chatbot.nodes` owns the persona-facing runtime nodes that turn a
-surviving message into internal cognition, visible dialog, and post-turn
-consolidation input.
+surviving trigger into internal cognition, selected action/surface work, and
+post-turn consolidation input.
 
 This package is not a generic assistant chain. It is the character-brain layer
 inside the larger service boundary:
@@ -18,10 +18,11 @@ adapter/debug client
 ```
 
 The critical design decision is that these nodes separate evidence, thought,
-decision, expression, and persistence. RAG retrieves what is known. Cognition
-decides what the evidence means for the active character. Dialog turns the
-decision into user-visible wording. Consolidation later decides what durable
-state should change.
+decision, action selection, expression, and persistence. RAG retrieves what is
+known. Cognition decides what the evidence means for the active character. L2d
+selects zero or more semantic actions. Selected L3 surface handlers and dialog
+render output when a surface is needed. Consolidation later decides what
+durable state should change from prompt-safe episode evidence.
 
 ## Module Boundary
 
@@ -31,7 +32,7 @@ The package currently contains five major node groups:
 | --- | --- | --- |
 | Relevance and perception | `persona_relevance_agent.py`, `persona_supervisor2_msg_decontexualizer.py` | Whether to answer, current media observation, current-message rewrite, referent status. |
 | Persona orchestration | `persona_supervisor2.py` | Live turn graph: decontextualization, RAG, cognition, dialog/no-response routing. |
-| Cognition | `persona_supervisor2_cognition*.py`, `boundary_profile.py`, `linguistic_texture.py` | Layered internal appraisal, stance, boundary judgment, style directives, visual directives. |
+| Cognition and action initialization | `persona_supervisor2_cognition*.py`, `boundary_profile.py`, `linguistic_texture.py` | Layered internal appraisal, stance, boundary judgment, L2d action initialization, style directives, visual directives. |
 | Dialog | `dialog_agent.py` | Final text generation and evaluator retry loop. |
 | Consolidation | `persona_supervisor2_consolidator*.py` | Background extraction of durable facts, promises, relationship state, images, memory units, and character state. |
 
@@ -57,21 +58,59 @@ stage_0_msg_decontexualizer
   -> stage_2_cognition
        L1 subconscious
        L2 consciousness + boundary + judgment
-       L3 contextual/style/content/preference/visual
+       L2d action initializer
+       selected L3 surface/action handlers
        L4 collector
        state["internal_monologue"]
        state["action_directives"]
+       state["action_specs"]
+       state["action_results"]
+       state["surface_outputs"]
   -> route
-       expression_willingness == "silent" -> stage_3_no_response
-       otherwise                          -> stage_3_action/dialog_agent
-  -> final_dialog + consolidation_state
+       selected speak action -> stage_3_action/dialog_agent
+       no visible surface    -> stage_3_no_response/private finalization
+  -> final_dialog + episode_trace + consolidation_state
 ```
 
 The returned `consolidation_state` is the completed persona snapshot. The
-service uses it after the user-visible response to record conversation progress
+service uses it after visible surface handling to record conversation progress
 and run consolidation. That timing is intentional: the user should not wait for
-memory writes, and durable writes should not happen before the final reply is
-known.
+memory writes, and durable writes should not happen before the selected
+surfaces and action results are known.
+
+## Action Spec And Surface Routing
+
+L2d is the only cognition node that may initialize action work. It runs after
+L2c, when the final stance and intent already exist, and before selected L3
+surface handlers run. L2d emits semantic `action_requests`; deterministic code
+materializes valid requests into graph-visible `ActionSpecV1` rows.
+
+L2a consciousness and L2c judgment do not emit action specs. L2a interprets
+the stimulus, and L2c adjudicates stance/intent. Action selection is a later,
+separate concern so weaker local models are not asked to interpret, judge,
+plan, and write executable envelopes in one step.
+
+Text response is now a selected surface action. When L2d selects `speak`,
+the text surface path runs L3 directives plus `dialog_agent` and records the
+final text as `SurfaceOutputV1(surface_kind="text")`. When no visible surface
+is selected, the graph may still produce private finalization or action results
+for consolidation without fabricating user-visible dialog.
+
+L3 text and L3 image are treated as registered surface handlers. The current
+runtime implements text-surface routing and keeps visual directives/promptable
+image guidance available for future image surfaces; it does not call an
+external image generation service in this implementation slice.
+
+Action and surface outcomes are collected into `EpisodeTraceV1`:
+
+- `action_specs`: validated action residues selected for the episode.
+- `action_results`: validation, private-action, scheduling, or rejection
+  outcomes.
+- `surface_outputs`: text, private, image, or future surface artifacts.
+
+The consolidator consumes a prompt-safe projection of the episode trace. It
+does not select actions, execute actions, call the dispatcher, call the
+scheduler, or trigger cognition.
 
 ## Cognitive Episode Contract
 
@@ -86,7 +125,7 @@ Current supported cognition prompt variants are selected by
 | --- | --- | --- | --- |
 | `user_message` | `dialog_text` plus optional `image_observation` and `audio_observation` | `visible_reply`, `think_only`, `silent` | Normal live chat. |
 | `reflection_signal` | `reflection_artifact` | `think_only`, `preview`, `silent` | Reflection dry-run cognition. |
-| `internal_thought` | `internal_monologue` | `think_only`, `preview`, `silent` | Audit-only self-cognition over private thought residue. |
+| `internal_thought` | `internal_monologue` | `think_only`, `preview`, `silent` | Legacy prompt-variant label used by current self-cognition dry-run/worker paths. Architecturally this is a self-cognition trigger, not a downstream action consumer. |
 
 The selector validates the episode and exposes only prompt-safe fields:
 
@@ -130,8 +169,10 @@ L1 emotional_appraisal + interaction_subtext
   -> L2a internal_monologue + logical_stance candidate + character_intent candidate
   -> L2b boundary_core_assessment
   -> L2c final logical_stance + character_intent + judgment_note
-  -> L3 action_directives
-  -> dialog final_dialog
+  -> L2d action_requests/action_specs
+  -> selected L3 surface directives
+  -> dialog final_dialog when a text surface is selected
+  -> episode_trace
 ```
 
 `internal_monologue` is the explicit character-facing thought artifact. It is
@@ -143,8 +184,9 @@ The system keeps this distinction because the runtime needs inspectability
 without depending on hidden model reasoning. If a turn needs to be audited, the
 stable artifacts are `emotional_appraisal`, `interaction_subtext`,
 `internal_monologue`, `logical_stance`, `character_intent`,
-`boundary_core_assessment`, `judgment_note`, `action_directives`, and
-`final_dialog`.
+`boundary_core_assessment`, `judgment_note`, `action_specs`,
+`action_directives`, `surface_outputs`, `action_results`, `episode_trace`, and
+`final_dialog` when a text surface exists.
 
 ## Running Example
 
@@ -459,8 +501,9 @@ topic.
 
 File: `persona_supervisor2_cognition_l3.py`
 
-L3 does not change the L2 decision. It turns that decision into presentation
-constraints for dialog.
+L3 does not change the L2 decision or choose actions. It turns selected
+surface actions into presentation constraints for dialog or future surface
+handlers.
 
 The L3 branches are:
 
@@ -471,11 +514,12 @@ The L3 branches are:
 | `l3_style_agent` | `rhetorical_strategy`, `linguistic_style`, `forbidden_phrases` | How to package the already-decided stance in character voice. |
 | `l3_content_anchor_agent` | `content_anchors` | What dialog must do, answer, avoid, or cover. |
 | `l3_preference_adapter` | `accepted_user_preferences` | User expression preferences that the character has accepted and can execute. |
-| `l3_visual_agent` | `facial_expression`, `body_language`, `gaze_direction`, `visual_vibe` | Optional still-frame visual directives for image generation surfaces. |
+| `l3_visual_agent` | `facial_expression`, `body_language`, `gaze_direction`, `visual_vibe` | Optional still-frame visual directives and promptable guidance for image generation surfaces. |
 
-L3 is where the idea becomes an executable communication plan. The most
-important artifact is `content_anchors`. Dialog is evaluated against these
-anchors, so they are the bridge from internal decision to visible wording.
+L3 is where a selected surface action becomes an executable communication
+plan. The most important text artifact is `content_anchors`. Dialog is
+evaluated against these anchors, so they are the bridge from internal decision
+to visible wording.
 
 The `expression_willingness` field can be `silent`. When it is silent,
 `persona_supervisor2` routes to `stage_3_no_response` and suppresses visible
@@ -670,17 +714,18 @@ The implemented flow is:
    and `judgment_note`.
 
 7. L3 expression plan
-   Contextual, style, content-anchor, preference, and visual agents build
+   L2d selects zero or more semantic actions. When a text surface is selected,
+   contextual, style, content-anchor, preference, and visual agents build
    `action_directives`.
 
-8. Dialog generation
+8. Dialog or selected surface generation
    Dialog generator writes `final_dialog` from `internal_monologue` and
    `action_directives`.
    Dialog evaluator checks anchor fidelity, unauthorized facts, physical/action
    pollution, forbidden phrases, and style constraints.
 
-9. Post-turn consolidation
-   Background nodes use the completed turn to update durable memory,
+9. Episode trace and post-turn consolidation
+   Background nodes use the completed episode trace to update durable memory,
    relationship state, character state, images, and scheduled promises.
 ```
 
@@ -773,8 +818,8 @@ or change the decision.
 
 ## Consolidation Boundary
 
-Consolidation runs after the user-visible reply is available. It consumes the
-completed persona state, including:
+Consolidation runs after selected visible surfaces and private action results
+are available. It consumes the completed persona state, including:
 
 - `decontexualized_input`,
 - `rag_result`,
@@ -784,15 +829,19 @@ completed persona state, including:
 - `logical_stance`,
 - `character_intent`,
 - `action_directives`,
-- `final_dialog`.
+- `final_dialog`,
+- `action_specs`,
+- `action_results`,
+- `surface_outputs`,
+- prompt-safe `episode_trace_projection`.
 
 Consolidation treats these fields with different evidence strength. The final
-dialog and explicit user facts are stronger evidence than raw affect. Internal
-monologue and emotional appraisal can explain subjective reaction, but they
-must not become durable user facts by themselves.
+dialog, selected action results, and explicit user facts are stronger evidence
+than raw affect. Internal monologue and emotional appraisal can explain
+subjective reaction, but they must not become durable user facts by themselves.
 
-That rule prevents self-generated dialog or momentary affect from polluting
-long-term memory.
+That rule prevents self-generated dialog, momentary affect, or private action
+metadata from polluting long-term memory.
 
 ## Design Invariants
 
@@ -808,9 +857,15 @@ Keep these invariants when changing the node package:
 - Judgment Core is the final owner of `logical_stance` and
   `character_intent`.
 - L3 may shape expression, but it must not change the L2 decision.
+- L2d is the only action initializer; L2a, L2b, and L2c must not emit action
+  specs.
+- L3 text/image handlers run only for selected surface actions.
 - Dialog renders directives; it must not make policy, memory, or permission
   decisions.
-- Consolidation writes durable state only after final dialog exists.
+- Consolidation writes durable state only after selected surfaces, action
+  results, or private finalization make the episode consolidatable.
+- Consolidation consumes prompt-safe episode-trace evidence; it must not
+  execute actions, dispatch, schedule, or trigger cognition.
 - Reflection and self-cognition dry runs reuse the shared cognition graph, but
   raw reflection output and private thought residue do not automatically enter
   normal chat.

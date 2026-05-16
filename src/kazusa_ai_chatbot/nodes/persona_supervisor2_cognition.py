@@ -26,6 +26,9 @@ from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition_l2 import (  # noqa: 
     call_boundary_core_agent,
     call_judgment_core_agent,
 )
+from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition_l2d import (  # noqa: E402
+    call_action_initializer,
+)
 from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition_l3 import (  # noqa: E402
     call_interaction_style_context_loader,
     call_contextual_agent,
@@ -52,6 +55,7 @@ async def call_cognition_subgraph(state: GlobalPersonaState) -> GlobalPersonaSta
     sub_agent_builder.add_node("l2a_consciousness", call_cognition_consciousness)
     sub_agent_builder.add_node("l2b_boundary_core", call_boundary_core_agent)
     sub_agent_builder.add_node("l2c_judgment_core", call_judgment_core_agent)
+    sub_agent_builder.add_node("l2d_action_initializer", call_action_initializer)
 
     sub_agent_builder.add_node("l3_contextual_agent", call_contextual_agent)
     sub_agent_builder.add_node(
@@ -72,8 +76,12 @@ async def call_cognition_subgraph(state: GlobalPersonaState) -> GlobalPersonaSta
     sub_agent_builder.add_edge("l2a_consciousness", "l2c_judgment_core")
     sub_agent_builder.add_edge("l2b_boundary_core", "l2c_judgment_core")
 
-    sub_agent_builder.add_edge("l2c_judgment_core", "l3_contextual_agent")
-    sub_agent_builder.add_edge("l2c_judgment_core", "l3_interaction_style_context_loader")
+    sub_agent_builder.add_edge("l2c_judgment_core", "l2d_action_initializer")
+    sub_agent_builder.add_edge("l2d_action_initializer", "l3_contextual_agent")
+    sub_agent_builder.add_edge(
+        "l2d_action_initializer",
+        "l3_interaction_style_context_loader",
+    )
 
     sub_agent_builder.add_edge("l3_contextual_agent", "l3_visual_agent")
     sub_agent_builder.add_edge(
@@ -139,12 +147,14 @@ async def call_cognition_subgraph(state: GlobalPersonaState) -> GlobalPersonaSta
     emotional_appraisal = result.get("emotional_appraisal", "")
     character_intent = result.get("character_intent", "")
     logical_stance = result.get("logical_stance", "")
+    action_specs = result.get("action_specs", [])
 
     logger.info(
         f"Cognition output: stance={logical_stance} "
         f"intent={character_intent} "
         f"appraisal={log_preview(emotional_appraisal)} "
         f"subtext={log_preview(interaction_subtext)} "
+        f"action_specs={log_preview(action_specs)} "
         f"action_directives={log_preview(action_directives)} "
         f"monologue={log_preview(internal_monologue)}"
     )
@@ -156,6 +166,7 @@ async def call_cognition_subgraph(state: GlobalPersonaState) -> GlobalPersonaSta
     return_value = {
         "internal_monologue": internal_monologue,
         "action_directives": action_directives,
+        "action_specs": action_specs,
 
         # Other data used by post-dialog consolidation.
         "interaction_subtext": interaction_subtext,

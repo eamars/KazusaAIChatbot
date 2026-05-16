@@ -11,8 +11,17 @@ from kazusa_ai_chatbot.action_spec.models import (
     validate_action_spec,
 )
 from kazusa_ai_chatbot.action_spec.registry import (
+    build_dispatcher_bridge_capabilities,
     build_initial_action_capabilities,
     project_prompt_affordances,
+)
+from kazusa_ai_chatbot.action_spec.results import (
+    build_action_result,
+    build_episode_trace,
+    build_private_surface_output,
+    build_text_surface_output,
+    has_consolidatable_output,
+    project_episode_trace_for_consolidation,
 )
 
 __all__ = [
@@ -20,8 +29,15 @@ __all__ = [
     "LIFECYCLE_STATUS_BY_DECISION",
     "ActionSpecEvaluator",
     "ActionValidationError",
+    "build_dispatcher_bridge_capabilities",
+    "build_action_result",
+    "build_episode_trace",
     "build_initial_action_capabilities",
+    "build_private_surface_output",
     "build_raw_tool_call_from_action_spec",
+    "build_text_surface_output",
+    "has_consolidatable_output",
     "project_prompt_affordances",
+    "project_episode_trace_for_consolidation",
     "validate_action_spec",
 ]

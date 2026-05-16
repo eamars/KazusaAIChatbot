@@ -13,10 +13,10 @@ justification for the modality-neutral action spec and effector expansion work.
 The active short-term plan contains only executable steps and verification
 gates.
 
-Approval of any derived execution plan remains blocked until
-`development_plans/reference/designs/cognition_contracts_design.md` is approved
-as the registry-level source of truth for the seven cognition contracts
-described in `cognition_core_evolution_progression.md`.
+`development_plans/reference/designs/cognition_contracts_design.md` is the
+approved registry-level source of truth for the seven cognition contracts. This
+document is subordinate design rationale; if the two conflict, the contracts
+design wins.
 
 ## Research Inputs
 
@@ -30,8 +30,9 @@ The architecture is based on these observed repo facts and prior design records:
   defines trigger-source pluralism and the seven contracts. It says expansion
   plans derived from that progression must not be approved before
   `cognition_contracts_design.md` exists.
-- The same progression records the one-effector state: dispatcher effectively
-  only executes `send_message`.
+- The same progression historically recorded the single adapter-facing
+  dispatcher state: scheduled delivery used `send_message`, while private
+  memory or cognition actions did not yet have a shared contract.
 - `development_plans/archive/completed/short_term/self_cognition_agency_loop_plan.md`
   proved self-cognition can select `send_message` and route it through the
   existing dispatcher. It also avoided forcing action only because a commitment
@@ -90,8 +91,16 @@ new semantic channel for each tool.
   user-visible tools.
 - Memory lifecycle actions belong to the target memory owner, not the
   dispatcher.
-- Tool results re-enter cognition as typed evidence episodes. Tool handlers do
-  not call cognition or write final dialogue.
+- Self-cognition is a trigger source for the same shared path, not a downstream
+  action consumer or private cleanup channel.
+- L3 text and L3 image are selected surface handlers under action specs, not
+  always-on branches outside the action contract.
+- Tool and action results re-enter cognition only through typed continuation
+  episodes. Tool handlers do not call cognition or write final dialogue.
+- Consolidation consumes prompt-safe episode traces. Final dialog is one text
+  surface output, not the only turn result.
+- Consolidator consumes action/surface evidence but does not select actions,
+  execute actions, dispatch, schedule, or trigger cognition.
 - Local-LLM constraints require a small, explicit capability set and bounded
   prompt-safe affordance projection.
 - Existing lineage and ledger primitives must be reused instead of creating
@@ -104,41 +113,48 @@ a narrow slice of them.
 
 | Contract | Relationship In This Architecture |
 |---|---|
-| 1. Trigger source | Used as metadata on typed cognitive episodes. Not redefined here. |
-| 2. Inter-layer residue bus | Action specs are part of future L2 residue. Full bus shape is deferred. |
+| 1. Trigger source | Self-cognition, scheduled ticks, tool results, and user messages enter as typed cognitive episodes. |
+| 2. Inter-layer residue bus | L2d action requests, action specs, L3 surface outputs, action results, and consolidation projections are residue/trace surfaces. |
 | 3. Modality-neutral action spec | This architecture defines the initial `ActionSpecV1` slice. |
 | 4. Affordance registry | Referenced as prompt-safe capability projection. Full registry shape is deferred to `cognition_contracts_design.md`. |
 | 5. Engine routing layer | Not defined here. |
 | 6. Memory layer interface | Used through existing `user_memory_units` and memory-evolution owners. Full provider interface is deferred. |
 | 7. Capability surface uniformity | Referenced through action-category `CapabilitySpecV1` entries; full extension pattern is deferred to `cognition_contracts_design.md`. |
 
-The active execution plan must remain blocked until the seven-contract reference
-exists and reconciles contracts 3, 4, and 7.
+The active execution plan must remain reconciled against the approved contracts
+reference before each new implementation stage.
 
 ## Core Decision
 
 Do not merge action spec into dispatcher.
 
-Action spec is the semantic contract emitted by cognition. Dispatcher is one
-execution owner for a subset of actions: scheduled and adapter-facing tools.
+Action spec is the graph-visible contract materialized from L2d's semantic
+action request. Dispatcher is one execution owner for a subset of actions:
+scheduled and adapter-facing tools.
 
 The relationship should be:
 
 ```text
-cognition
--> ActionSpecV1
+L2d semantic action request
+-> ActionSpecV1 materialization
 -> ActionSpecEvaluator / capability policy
--> execution owner
-   -> dispatcher for send_message and adapter-facing tools
+-> selected execution owner or L3 surface handler
+   -> L3 text/image for surface outputs
+   -> dispatcher bridge for delivered text after surface output exists
    -> memory lifecycle handler for promise retirement
-   -> orchestrator for continuation
+   -> orchestrator for future cognition continuation
+-> ActionResultV1 + SurfaceOutputV1
+-> EpisodeTraceV1 for consolidation
 ```
 
-For `send_message`, a validated action spec is bridged to the existing
-dispatcher shape:
+For visible text, `speak` selects the L3 text surface and `send_message` is only
+the dispatcher bridge after deliverable text exists:
 
 ```text
-ActionSpecV1(kind="send_message")
+ActionSpecV1(kind="speak")
+-> L3 text handler
+-> SurfaceOutputV1(surface_kind="text")
+-> delivery validation
 -> RawToolCall(tool="send_message", args=...)
 -> TaskDispatcher.dispatch(...)
 ```
@@ -156,7 +172,12 @@ parent system.
 |---|---|---|
 | Action spec vs dispatcher | Keep separate modules and bridge dispatcher-owned actions. | Prevents dispatcher from becoming a generic semantic action bus while preserving the proven `send_message` path. |
 | Registration model | Use semantic action-category `CapabilitySpecV1` entries for cognition-visible capabilities; dispatcher `ToolSpec` remains execution-specific. | Avoids two competing semantic registries while preserving dispatcher permissions and adapter validation. |
-| Current runtime scope | Implement action spec, evaluator, `send_message` bridge, and user-memory lifecycle update first. | Solves the expired-promise case with the smallest production-capable slice. |
+| Current runtime scope | Implement action spec, evaluator, L2d semantic action initialization, L3 text surface routing, episode-trace consolidation, dispatcher bridge compatibility, future-cognition request contract, and user-memory lifecycle update first. | Solves the expired-promise case while preserving one shared action/consolidation path for text, private actions, and scheduled follow-up. |
+| L2d boundary | L2d emits compact semantic `action_requests`; deterministic code materializes `ActionSpecV1`. | Keeps schema versions, handler IDs, source refs, transport targets, and persistence IDs out of the local LLM prompt. |
+| Target binding | Build action targets from deterministic binding context, never from L2d-emitted IDs or copied refs. | The local LLM can decide semantics, but target IDs belong to trusted episode/source/RAG/repository context and must not become model-facing selectors. |
+| L3 surface ownership | Treat L3 text/image as selected action handlers. | Enables no-response, delayed response, image surface, and future tool surfaces without always-on branches. |
+| Self-cognition integration | Treat self-cognition as an upstream trigger source. | Keeps self-checks on the same L1/L2/L2d/action/consolidation path and avoids a private cleanup channel. |
+| Consolidation basis | Consolidate from episode trace, not only final dialog. | Parallel actions, private memory updates, scheduled cognition requests, and future image/tool outputs need durable state updates even when no text is sent. |
 | Promise retirement | Express as `memory_lifecycle_update`, not deletion or stale-age cleanup. | The character decides; deterministic code only validates and persists. |
 | Promise store | Treat `user_memory_units.active_commitment` as the runtime promise/open-commitment store for this slice. | Current self-cognition due checks already read this shape. |
 | Status mapping | `fulfilled -> completed`, `abandoned -> cancelled`, `obsolete -> archived`, `deferred -> active`. | Reuses existing collection statuses; no migration needed. |
@@ -164,7 +185,7 @@ parent system.
 | Action ledger | Reuse `self_cognition_action_attempts` through a generic action-attempt repository. | Avoids a second idempotency/control-state collection. |
 | Source references | Project action refs onto existing `source_reflection_run_ids`, `evidence_refs`, and `source_refs`. | Avoids creating a fourth lineage primitive. |
 | Cognition mode | Include `cognition_mode`, accept only `deliberative` initially, reject `reflex`. | Reserves the roadmap-required reflex slot without enabling an unreviewed reflex path. |
-| Continuation | Add continuation policy to action specs; tools return `ToolResult`, orchestrator starts follow-up episodes. | Lets future tools trigger cognition without calling cognition directly. |
+| Continuation | Add continuation policy to action specs; handlers return action results, orchestrator starts follow-up episodes. | Lets future tools trigger cognition without calling cognition directly. |
 | Web research | Defer runtime implementation. | It requires evidence shaping, citations, timeout policy, and follow-up-cycle controls. |
 | Schedule self-check | Defer runtime implementation. | It needs scheduler policy and typed trigger-source integration. |
 
@@ -178,23 +199,45 @@ typed episode
 shared evidence assembly / RAG
         |
         v
-shared cognition L1/L2/L3
+shared cognition L1/L2a/L2b/L2c
         |
         v
-ActionSpecV1 list + existing dialog/action_directives output
+L2d semantic action request list
         |
         v
-ActionSpecEvaluator
+deterministic target binding + ActionSpecV1 materialization + evaluation
+        |
+        v
+selected L3 surfaces / action handlers
+        |
+        +--> L3 text/image -> SurfaceOutputV1
         |
         +--> dispatcher bridge -> TaskDispatcher -> scheduler/adapters
         |
         +--> memory lifecycle handler -> user_memory_units repository
         |
-        +--> orchestrator continuation -> typed follow-up episode
+        +--> orchestrator continuation/future cognition -> typed follow-up episode
+        |
+        v
+ActionResultV1 + SurfaceOutputV1
+        |
+        v
+EpisodeTraceV1 -> consolidator prompt-safe projection -> memory/state/progress
 ```
 
 The action spec path is additive. Existing final dialog and dispatcher behavior
-remain valid.
+remain valid, but final dialog is treated as a text surface output rather than
+the only consolidation basis.
+
+Target binding is part of materialization, not a model-facing planning task.
+For `memory_lifecycle_update`, deterministic code resolves the active
+commitment from trusted episode/source references and current RAG memory
+context, then attaches `target`, `source_refs`, and `unit_id` to the
+materialized spec. If no single eligible commitment can be resolved, the action
+is rejected before any memory write. The prompt may receive a plain-language
+summary of the bound commitment and capability availability, but it must not
+receive or emit memory unit IDs, source-ref IDs, collection names, owner names,
+handler IDs, adapter IDs, or scheduler IDs.
 
 ## Contract Sketch
 
@@ -222,7 +265,13 @@ class CapabilitySpecV1(TypedDict):
     schema_version: Literal["capability_spec.v1"]
     capability_kind: str
     category: Literal["action"]
-    owner_module: Literal["dispatcher", "memory_lifecycle", "orchestrator"]
+    owner_module: Literal[
+        "dispatcher",
+        "memory_lifecycle",
+        "orchestrator",
+        "l3_text",
+        "l3_image",
+    ]
     input_schema: dict[str, object]
     output_schema: dict[str, object]
     handler_id: str
@@ -250,11 +299,14 @@ class ActionContinuationV1(TypedDict):
 
 The initial runtime slice accepts only:
 
-- `send_message` with owner `dispatcher`;
-- `memory_lifecycle_update` with owner `memory_lifecycle`.
+- `speak` with owner `l3_text`;
+- `memory_lifecycle_update` with owner `memory_lifecycle`;
+- `trigger_future_cognition` with owner `orchestrator`;
+- bridge-only `send_message` with owner `dispatcher`, after a text surface
+  exists.
 
 Future tools may use continuation, but the first execution plan validates the
-contract without shipping runtime web research or scheduled self-checks.
+contract without shipping runtime web research or external image generation.
 
 ## Existing Primitive Integration
 
@@ -309,11 +361,11 @@ shape. Persistence maps them to existing owner fields:
 
 ### Runtime Scope For First Execution Plan
 
-1. `send_message`
-   - Existing user-visible outbound contact.
-   - Owner: dispatcher.
+1. `speak`
+   - Selected text surface action.
+   - Owner: L3 text handler.
    - Continuation: `none`.
-   - Execution: bridge to `RawToolCall` and `TaskDispatcher`.
+   - Execution: generate `SurfaceOutputV1(surface_kind="text")`.
 
 2. `memory_lifecycle_update`
    - Private lifecycle update for `user_memory_units.active_commitment`.
@@ -321,34 +373,41 @@ shape. Persistence maps them to existing owner fields:
    - Continuation: `none`.
    - Execution: validated repository write and action-attempt audit.
 
+3. `trigger_future_cognition`
+   - Private request for a future typed cognition episode.
+   - Owner: orchestrator/scheduler boundary.
+   - Continuation: `scheduled_followup`.
+   - Execution: validated future episode request; no direct cognition call.
+
+4. Bridge-only `send_message`
+   - Existing adapter-facing outbound delivery after text exists.
+   - Owner: dispatcher.
+   - Continuation: `none`.
+   - Execution: bridge to `RawToolCall` and `TaskDispatcher`.
+
 ### Next-Stage Tool Candidates
 
-1. `schedule_self_check`
-   - Schedules a future typed cognition episode without user-visible contact.
-   - Requires scheduler policy and trigger-source registration.
-   - Uses `scheduled_followup`.
-
-2. `web_research` or `fetch_url`
+1. `web_research` or `fetch_url`
    - Produces evidence artifacts with citations and bounded result size.
    - Result re-enters cognition through `immediate_followup`.
    - Must not author final dialogue directly.
 
-3. `note_open_loop` / `close_open_loop`
+2. `note_open_loop` / `close_open_loop`
    - Should be wrappers over memory lifecycle or conversation-progress owner
      APIs, not a separate freeform note store.
 
-4. Image generation or external messaging
+3. Image generation or external messaging
    - Deferred until product rules, storage, adapter delivery, permission, and
      audit boundaries are specified.
 
-## Rationale For Deferring Runtime Web And Scheduling Tools
+## Rationale For Deferring Runtime Web, Image, And External Tools
 
 The current need is expired-promise retirement. Shipping web research or
-scheduled self-checks in the same execution plan would expand three additional
-risk surfaces:
+external image/message tools in the same execution plan would expand three
+additional risk surfaces:
 
 - external evidence acquisition and citation policy;
-- scheduler-triggered cognition episodes;
+- adapter/storage/product policy for new output modalities;
 - continuation loop depth and latency control.
 
 The continuation field should exist now so future tools share the same action
@@ -366,12 +425,15 @@ capability plans.
 | Lineage primitives multiply | Map action source refs to existing owner fields. |
 | Reflex path ships accidentally | Reject `reflex` until a future allow-listed reflex capability plan exists. |
 | Local LLM emits invalid structured actions | Keep actions optional, validate deterministically, and run offline validity/latency measurement before broad live rollout. |
+| Action outcomes do not reach durable memory/state | Feed `ActionResultV1` and `SurfaceOutputV1` into `EpisodeTraceV1` and project it into consolidation. |
+| Consolidator becomes an executor | Forbid dispatcher, scheduler, cognition, and action-handler calls from consolidator code. |
 
-## Open Blockers
+## Reference Status Notes
 
-- `cognition_contracts_design.md` exists as a draft. Any execution plan derived
-  from this architecture must remain `draft` until that reference is approved
-  and the execution plan is reconciled against it.
+- `cognition_contracts_design.md` is approved and authoritative.
+- Derived execution plans must still reconcile against that reference before
+  each stage that changes contracts, prompts, graph wiring, action execution,
+  consolidation, or documentation.
 
 ## Non-Goals
 

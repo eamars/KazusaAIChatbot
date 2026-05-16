@@ -1,5 +1,11 @@
 from typing import Annotated, Literal, NotRequired, TypedDict
 
+from kazusa_ai_chatbot.action_spec.models import ActionSpecV1
+from kazusa_ai_chatbot.action_spec.results import (
+    ActionResultV1,
+    EpisodeTraceV1,
+    SurfaceOutputV1,
+)
 from kazusa_ai_chatbot.cognition_episode import CognitiveEpisode
 from kazusa_ai_chatbot.conversation_progress import ConversationProgressPromptDoc
 from kazusa_ai_chatbot.state import (
@@ -72,6 +78,10 @@ class GlobalPersonaState(TypedDict):
     # Cognition output
     internal_monologue: str
     action_directives: dict
+    action_specs: NotRequired[list[ActionSpecV1]]
+    action_results: NotRequired[list[ActionResultV1]]
+    surface_outputs: NotRequired[list[SurfaceOutputV1]]
+    episode_trace: NotRequired[EpisodeTraceV1]
 
     # Cognition output for consolidation
     interaction_subtext: str
@@ -158,6 +168,10 @@ class CognitionState(TypedDict):
     visual_vibe: list[str]
 
     action_directives: dict
+    action_specs: NotRequired[list[ActionSpecV1]]
+    action_results: NotRequired[list[ActionResultV1]]
+    surface_outputs: NotRequired[list[SurfaceOutputV1]]
+    episode_trace: NotRequired[EpisodeTraceV1]
     target_addressed_user_ids: NotRequired[list[str]]
     target_broadcast: NotRequired[bool]
 

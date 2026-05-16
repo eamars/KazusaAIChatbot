@@ -1,8 +1,12 @@
 # Dispatcher
 
-`kazusa_ai_chatbot.dispatcher` is the task-dispatch layer for deferred tool execution.
+`kazusa_ai_chatbot.dispatcher` is the task-dispatch layer for adapter-facing
+deferred tool execution.
 
-It turns LLM-emitted raw tool calls into validated scheduled tasks, stores those tasks through the scheduler, and later delivers them through platform adapters. In the current runtime, this is mainly used for accepted future promises such as "remind me later" or "send a message to that group in one minute."
+It turns raw delivery tool calls into validated scheduled tasks, stores those
+tasks through the scheduler, and later delivers them through platform adapters.
+In the current runtime, this is mainly used for accepted future promises such
+as "remind me later" or "send a message to that group in one minute."
 
 The dispatcher handles tool-call generation, validation, deduplication,
 scheduling, and delivery for accepted future promises. Upstream consolidation
@@ -65,7 +69,7 @@ It returns:
 ```text
 service startup
   -> build ToolRegistry
-       register dispatchable tools, currently send_message
+       register dispatchable tools, including send_message
   -> build AdapterRegistry
        adapters may be registered at runtime for each platform
   -> rebuild PendingTaskIndex from pending scheduler rows
@@ -96,6 +100,33 @@ scheduled time arrives
 The dispatcher runs in the background consolidation path after response
 generation.
 
+## Action-Spec Bridge
+
+The dispatcher is an execution owner, not the parent action system. Cognition
+does not call `TaskDispatcher` directly. When the shared action layer needs an
+adapter-facing delivery, the handoff is:
+
+```text
+ActionSpecV1(kind="send_message")
+  -> action-spec evaluator
+  -> RawToolCall(tool="send_message")
+  -> TaskDispatcher.dispatch(...)
+  -> scheduler event
+  -> registered platform adapter
+```
+
+`send_message` is bridge-only for this action-spec slice. L2d selects `speak`
+when a text surface is needed. The text/L3/dialog path produces the deliverable
+surface first; only then may delivery mechanics cross into this dispatcher
+boundary. Legacy self-cognition delivery candidates are also wrapped as
+validated `ActionSpecV1(kind="send_message")` rows before they become
+`RawToolCall` rows.
+
+The action-spec layer owns action residue validation and prompt-safe result
+tracing. The dispatcher owns tool visibility, schema validation, permission
+checks, adapter availability, deduplication, scheduler persistence, and
+delivery status.
+
 ## Design Intention
 
 The dispatcher exists to separate semantic acceptance from operational execution.
@@ -111,7 +142,11 @@ This keeps the local LLM's semantic work explicit while keeping execution mechan
 
 ## Upstream Handoff
 
-The dispatcher consumes `future_promises` that have already been emitted by the consolidator. It does not reinterpret arbitrary user input.
+The dispatcher consumes delivery requests that have already passed upstream
+semantic ownership. For legacy task-dispatch generation, that source is
+`future_promises` emitted by the consolidator. For action-spec handoff, that
+source is a validated `ActionSpecV1(kind="send_message")` bridge row. The
+dispatcher does not reinterpret arbitrary user input.
 
 The task-dispatch LLM receives a structured payload containing:
 
@@ -181,7 +216,8 @@ The persisted scheduler event carries this context so scheduled execution can be
 
 ## Tool Calls And Tasks
 
-`RawToolCall` is untrusted LLM output:
+`RawToolCall` is an untrusted raw tool-call payload. It may come from the
+legacy task-dispatch LLM or from the action-spec bridge:
 
 ```python
 RawToolCall(tool=str, args=dict)
@@ -219,7 +255,7 @@ Rejected calls are returned with human-readable reasons and are not persisted.
 - optional minimum permission,
 - optional source-platform allowlist.
 
-The current built-in tool is `send_message`.
+The current built-in adapter-facing tool is `send_message`.
 
 `send_message` schedules a platform message with:
 

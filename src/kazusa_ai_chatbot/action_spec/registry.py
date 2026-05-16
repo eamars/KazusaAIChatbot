@@ -11,14 +11,28 @@ from kazusa_ai_chatbot.action_spec.models import (
 
 SEND_MESSAGE_CAPABILITY = "send_message"
 MEMORY_LIFECYCLE_UPDATE_CAPABILITY = "memory_lifecycle_update"
+SPEAK_CAPABILITY = "speak"
+TRIGGER_FUTURE_COGNITION_CAPABILITY = "trigger_future_cognition"
 
 
 def build_initial_action_capabilities() -> dict[str, CapabilitySpecV1]:
     """Return the approved initial action capability registry."""
 
     capabilities = {
-        SEND_MESSAGE_CAPABILITY: _send_message_capability(),
         MEMORY_LIFECYCLE_UPDATE_CAPABILITY: _memory_lifecycle_capability(),
+        SPEAK_CAPABILITY: _speak_capability(),
+        TRIGGER_FUTURE_COGNITION_CAPABILITY: _future_cognition_capability(),
+    }
+    for capability in capabilities.values():
+        validate_capability_spec(capability)
+    return capabilities
+
+
+def build_dispatcher_bridge_capabilities() -> dict[str, CapabilitySpecV1]:
+    """Return internal delivery capabilities used after surface generation."""
+
+    capabilities = {
+        SEND_MESSAGE_CAPABILITY: _send_message_capability(),
     }
     for capability in capabilities.values():
         validate_capability_spec(capability)
@@ -37,6 +51,10 @@ def project_prompt_affordances(
             projection.append(_send_message_projection())
         elif capability_kind == MEMORY_LIFECYCLE_UPDATE_CAPABILITY:
             projection.append(_memory_lifecycle_projection())
+        elif capability_kind == SPEAK_CAPABILITY:
+            projection.append(_speak_projection())
+        elif capability_kind == TRIGGER_FUTURE_COGNITION_CAPABILITY:
+            projection.append(_future_cognition_projection())
     return projection
 
 
@@ -125,6 +143,90 @@ def _memory_lifecycle_capability() -> CapabilitySpecV1:
     return return_value
 
 
+def _speak_capability() -> CapabilitySpecV1:
+    """Build the L3-text-owned speak surface capability spec."""
+
+    return_value: CapabilitySpecV1 = {
+        "schema_version": "capability_spec.v1",
+        "capability_kind": SPEAK_CAPABILITY,
+        "category": "action",
+        "owner_module": "l3_text",
+        "input_schema": {
+            "type": "object",
+            "required": [
+                "delivery_mode",
+                "execute_at",
+                "surface_requirements",
+            ],
+            "properties": {
+                "delivery_mode": {
+                    "type": "string",
+                    "enum": [
+                        "visible_reply",
+                        "private_finalization",
+                        "delayed",
+                        "scheduled",
+                    ],
+                },
+                "execute_at": {"type": ["string", "null"]},
+                "surface_requirements": {"type": "object"},
+            },
+        },
+        "output_schema": {
+            "type": "object",
+            "properties": {
+                "surface": {"type": "string"},
+                "status": {"type": "string"},
+            },
+        },
+        "handler_id": "l3_text.speak",
+        "lifecycle_hooks": ["validate", "route_to_text_surface"],
+        "permission_policy": "policy:l3_text.speak.v1",
+        "rate_limit_policy": "policy:action.default_rate_limit.v1",
+        "audit_policy": "policy:action.audit.v1",
+        "prompt_projection_policy": "policy:prompt.action_safe.v1",
+    }
+    return return_value
+
+
+def _future_cognition_capability() -> CapabilitySpecV1:
+    """Build the orchestrator-owned future-cognition request capability."""
+
+    return_value: CapabilitySpecV1 = {
+        "schema_version": "capability_spec.v1",
+        "capability_kind": TRIGGER_FUTURE_COGNITION_CAPABILITY,
+        "category": "action",
+        "owner_module": "orchestrator",
+        "input_schema": {
+            "type": "object",
+            "required": [
+                "episode_type",
+                "trigger_at",
+                "context_summary",
+            ],
+            "properties": {
+                "episode_type": {"type": "string", "enum": ["self_cognition"]},
+                "trigger_at": {"type": ["string", "null"]},
+                "context_summary": {"type": "string"},
+            },
+        },
+        "output_schema": {
+            "type": "object",
+            "properties": {
+                "status": {"type": "string"},
+                "episode_type": {"type": "string"},
+            },
+        },
+        "handler_id": "orchestrator.future_cognition.request.v1",
+        "lifecycle_hooks": ["validate", "enqueue_cognition_request"],
+        "permission_policy": "policy:orchestrator.future_cognition.v1",
+        "rate_limit_policy": "policy:action.default_rate_limit.v1",
+        "audit_policy": "policy:action.audit.v1",
+        "prompt_projection_policy": "policy:prompt.action_safe.v1",
+    }
+    return return_value
+
+
 def _send_message_projection() -> dict[str, object]:
     """Return prompt-safe send-message affordance metadata."""
 
@@ -143,6 +245,38 @@ def _send_message_projection() -> dict[str, object]:
     return return_value
 
 
+def _future_cognition_projection() -> dict[str, object]:
+    """Return prompt-safe future-cognition affordance metadata."""
+
+    return_value = {
+        "capability": TRIGGER_FUTURE_COGNITION_CAPABILITY,
+        "available": True,
+        "visibility": "private",
+        "semantic_input_summary": [
+            "Use when the character wants a later private cognition cycle.",
+            "Provide the semantic reason and any ordinary-language timing hint.",
+        ],
+        "execution_boundary": "downstream scheduler builds the executable request",
+    }
+    return return_value
+
+
+def _speak_projection() -> dict[str, object]:
+    """Return prompt-safe text-surface affordance metadata."""
+
+    return_value = {
+        "capability": SPEAK_CAPABILITY,
+        "available": True,
+        "visibility": "user_visible",
+        "semantic_input_summary": [
+            "Use when the character wants a text surface to exist.",
+            "Provide the semantic surface intent, not final wording.",
+        ],
+        "execution_boundary": "downstream text surface builds the surface details",
+    }
+    return return_value
+
+
 def _memory_lifecycle_projection() -> dict[str, object]:
     """Return prompt-safe memory-lifecycle affordance metadata."""
 
@@ -156,12 +290,10 @@ def _memory_lifecycle_projection() -> dict[str, object]:
             "obsolete",
             "deferred",
         ],
-        "parameter_summary": [
-            "memory_kind: user_memory_unit",
-            "unit_type: active_commitment",
-            "unit_id: commitment identifier supplied in evidence",
-            "due_at: ISO-8601 UTC time or null",
+        "semantic_input_summary": [
+            "Use when the character semantically changes a commitment lifecycle.",
+            "Choose the lifecycle decision and describe the affected commitment.",
         ],
-        "continuation": "may request a bounded follow-up contract",
+        "execution_boundary": "downstream lifecycle owner resolves persistence fields",
     }
     return return_value

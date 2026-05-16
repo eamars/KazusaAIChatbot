@@ -571,6 +571,77 @@ async def test_chat_cognition_silence_skips_user_visible_work(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_chat_consolidates_private_action_result_without_dialog(monkeypatch):
+    """Private action traces should queue consolidation without visible output."""
+
+    await _reset_queue_state()
+    save_assistant_message = AsyncMock()
+    progress_recorder = AsyncMock()
+    consolidation_done = asyncio.Event()
+    captured_state = {}
+
+    async def _consolidation_runner(state):
+        captured_state.update(state)
+        consolidation_done.set()
+
+    monkeypatch.setattr(
+        service_module,
+        "_save_assistant_message",
+        save_assistant_message,
+    )
+    monkeypatch.setattr(
+        service_module,
+        "_run_conversation_progress_record_background",
+        progress_recorder,
+    )
+    monkeypatch.setattr(
+        service_module,
+        "_run_consolidation_background",
+        _consolidation_runner,
+    )
+    consolidation_state = _consolidation_state()
+    consolidation_state["final_dialog"] = []
+    consolidation_state["action_results"] = [
+        {
+            "schema_version": "action_result.v1",
+            "action_attempt_id": "action_attempt:abc",
+            "action_kind": "memory_lifecycle_update",
+            "handler_owner": "memory_lifecycle",
+            "status": "executed",
+            "visibility": "private",
+            "result_summary": "memory lifecycle updated",
+            "result_refs": [],
+            "continuation": {
+                "schema_version": "action_continuation.v1",
+                "mode": "none",
+                "episode_type": None,
+                "max_depth": 0,
+                "include_result_as": None,
+            },
+            "completed_at": "2026-04-25T18:00:58+12:00",
+        }
+    ]
+    graph_result = _graph_result(consolidation_state)
+    graph_result["should_respond"] = False
+    graph_result["final_dialog"] = []
+    _patch_chat_dependencies(monkeypatch, _FakeGraph(graph_result))
+
+    response = await service_module.chat(
+        _chat_request(),
+        BackgroundTasks(),
+    )
+
+    assert response.messages == []
+    await asyncio.wait_for(consolidation_done.wait(), timeout=1.0)
+    assert captured_state["action_results"][0]["action_kind"] == (
+        "memory_lifecycle_update"
+    )
+    save_assistant_message.assert_not_awaited()
+    progress_recorder.assert_not_awaited()
+    await _reset_queue_state()
+
+
+@pytest.mark.asyncio
 async def test_delivery_receipt_endpoint_returns_updated_and_not_found(monkeypatch):
     """Delivery receipt endpoint should expose idempotent update status."""
     apply_receipt = AsyncMock(side_effect=[True, False])

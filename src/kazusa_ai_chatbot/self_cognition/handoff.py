@@ -5,9 +5,74 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
+from kazusa_ai_chatbot.action_spec.evaluator import (
+    build_raw_tool_call_from_action_spec,
+)
+from kazusa_ai_chatbot.action_spec.registry import SEND_MESSAGE_CAPABILITY
 from kazusa_ai_chatbot.dispatcher import TaskDispatcher
 from kazusa_ai_chatbot.dispatcher.task import DispatchContext, RawToolCall
 from kazusa_ai_chatbot.self_cognition import models
+
+
+def build_send_message_action_spec(
+    case: models.SelfCognitionCase,
+    action_candidate: dict[str, Any],
+) -> dict[str, Any]:
+    """Convert a legacy self-cognition delivery candidate to ActionSpecV1.
+
+    Args:
+        case: Self-cognition trigger case that selected the candidate.
+        action_candidate: Legacy local action-candidate artifact.
+
+    Returns:
+        A send-message action spec that must pass the shared action evaluator
+        before entering the dispatcher bridge.
+
+    Raises:
+        ValueError: If the candidate is not a send-message candidate.
+    """
+
+    dispatch_shape = action_candidate.get("dispatch_shape")
+    if dispatch_shape != models.ACTION_KIND_SEND_MESSAGE:
+        raise ValueError("self-cognition candidate is not send_message")
+
+    execute_at = action_candidate.get("execute_at")
+    if not isinstance(execute_at, str) or not execute_at.strip():
+        execute_at = None
+    delivery_mentions = action_candidate.get("delivery_mentions")
+    if not isinstance(delivery_mentions, list):
+        delivery_mentions = []
+    action_spec = {
+        "schema_version": "action_spec.v1",
+        "kind": SEND_MESSAGE_CAPABILITY,
+        "cognition_mode": "deliberative",
+        "source_refs": _action_source_refs(case),
+        "target": {
+            "schema_version": "action_target.v1",
+            "target_kind": "current_channel",
+            "target_id": None,
+            "owner": "dispatcher",
+            "scope": {"channel_relation": "same"},
+        },
+        "params": {
+            "target_channel": str(action_candidate.get("target_channel") or ""),
+            "text": str(action_candidate.get("text") or ""),
+            "execute_at": execute_at,
+            "delivery_mentions": delivery_mentions,
+        },
+        "urgency": "scheduled" if execute_at is not None else "now",
+        "visibility": "user_visible",
+        "deadline": execute_at,
+        "continuation": {
+            "schema_version": "action_continuation.v1",
+            "mode": "none",
+            "episode_type": None,
+            "max_depth": 0,
+            "include_result_as": None,
+        },
+        "reason": "Self-cognition selected a user-visible follow-up.",
+    }
+    return action_spec
 
 
 def build_raw_tool_call(action_candidate: dict[str, Any]) -> RawToolCall:
@@ -71,7 +136,8 @@ async def dispatch_action_candidate(
         the dispatcher, not by this module.
     """
 
-    raw_call = build_raw_tool_call(action_candidate)
+    action_spec = build_send_message_action_spec(case, action_candidate)
+    raw_call = build_raw_tool_call_from_action_spec(action_spec)
     dispatch_context = _build_dispatch_context(case, now=now)
     instruction = f"self_cognition:{_string_field(case, 'case_id')}"
     dispatch_result = await dispatcher.dispatch(
@@ -102,6 +168,8 @@ async def dispatch_action_candidate(
         "scheduled_event_ids": scheduled_event_ids,
         "rejections": rejections,
         "status": status,
+        "action_spec_schema_version": action_spec["schema_version"],
+        "action_spec_kind": action_spec["kind"],
     }
     return result
 
@@ -155,6 +223,54 @@ def _target_scope(case: models.SelfCognitionCase) -> dict[str, str | None]:
         "user_id": raw_user_id if isinstance(raw_user_id, str) else None,
     }
     return scope
+
+
+def _action_source_refs(
+    case: models.SelfCognitionCase,
+) -> list[dict[str, Any]]:
+    """Project self-cognition source refs into action-spec references."""
+
+    raw_refs = case.get("source_refs")
+    if not isinstance(raw_refs, list):
+        raw_refs = []
+
+    source_refs = []
+    for raw_ref in raw_refs:
+        if not isinstance(raw_ref, dict):
+            continue
+        source_kind = raw_ref.get("source_kind")
+        source_id = raw_ref.get("source_id")
+        if not isinstance(source_id, str) or not source_id.strip():
+            continue
+        if source_kind == "user_memory_unit":
+            ref_kind = "memory_unit"
+            owner = "user_memory_units"
+        else:
+            ref_kind = "system_event"
+            owner = "self_cognition"
+        source_refs.append(
+            {
+                "schema_version": "action_source_ref.v1",
+                "ref_kind": ref_kind,
+                "ref_id": source_id,
+                "owner": owner,
+                "relationship": "basis",
+                "evidence_refs": [],
+            }
+        )
+
+    if not source_refs:
+        source_refs.append(
+            {
+                "schema_version": "action_source_ref.v1",
+                "ref_kind": "system_event",
+                "ref_id": _string_field(case, "case_id") or "self_cognition",
+                "owner": "self_cognition",
+                "relationship": "basis",
+                "evidence_refs": [],
+            }
+        )
+    return source_refs
 
 
 def _string_field(case: dict[str, Any], field_name: str) -> str:

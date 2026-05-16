@@ -6,6 +6,7 @@ import json
 
 from kazusa_ai_chatbot.action_spec.evaluator import ActionSpecEvaluator
 from kazusa_ai_chatbot.action_spec.registry import (
+    build_dispatcher_bridge_capabilities,
     build_initial_action_capabilities,
     project_prompt_affordances,
 )
@@ -30,6 +31,22 @@ def _target_for_kind(kind: str) -> dict:
             "target_id": "promise-001",
             "owner": "user_memory_units",
             "scope": {"unit_type": "active_commitment"},
+        }
+    if kind == "speak":
+        return {
+            "schema_version": "action_target.v1",
+            "target_kind": "current_channel",
+            "target_id": None,
+            "owner": "l3_text",
+            "scope": {"surface": "text"},
+        }
+    if kind == "trigger_future_cognition":
+        return {
+            "schema_version": "action_target.v1",
+            "target_kind": "cognitive_episode",
+            "target_id": None,
+            "owner": "orchestrator",
+            "scope": {"episode_type": "self_cognition"},
         }
     return {
         "schema_version": "action_target.v1",
@@ -59,6 +76,18 @@ def _params_for_kind(kind: str) -> dict:
             "lifecycle_decision": "abandoned",
             "due_at": "2026-05-07T00:00:00+00:00",
         }
+    if kind == "speak":
+        return {
+            "delivery_mode": "visible_reply",
+            "execute_at": None,
+            "surface_requirements": {"tone": "brief"},
+        }
+    if kind == "trigger_future_cognition":
+        return {
+            "episode_type": "self_cognition",
+            "trigger_at": "2026-05-16T00:30:00+00:00",
+            "context_summary": "Re-evaluate the promise after a natural pause.",
+        }
     return {
         "target_channel": "same",
         "text": "Checking in now.",
@@ -75,8 +104,12 @@ def _action_spec(kind: str) -> dict:
         "source_refs": [_source_ref()],
         "target": _target_for_kind(kind),
         "params": _params_for_kind(kind),
-        "urgency": "now",
-        "visibility": "private" if kind == "memory_lifecycle_update" else "user_visible",
+        "urgency": "scheduled" if kind == "trigger_future_cognition" else "now",
+        "visibility": (
+            "private"
+            if kind in ("memory_lifecycle_update", "trigger_future_cognition")
+            else "user_visible"
+        ),
         "deadline": None,
         "continuation": _no_continuation(),
         "reason": "The character selected this action from cognition.",
@@ -88,9 +121,15 @@ def test_initial_registry_contains_only_approved_runtime_capabilities() -> None:
 
     capabilities = build_initial_action_capabilities()
 
-    assert set(capabilities) == {"send_message", "memory_lifecycle_update"}
-    assert capabilities["send_message"]["owner_module"] == "dispatcher"
+    assert set(capabilities) == {
+        "memory_lifecycle_update",
+        "speak",
+        "trigger_future_cognition",
+    }
     assert capabilities["memory_lifecycle_update"]["owner_module"] == "memory_lifecycle"
+    assert capabilities["speak"]["owner_module"] == "l3_text"
+    assert capabilities["trigger_future_cognition"]["owner_module"] == "orchestrator"
+    assert "send_message" not in capabilities
     assert "web_research" not in capabilities
     assert "schedule_self_check" not in capabilities
     assert "note_open_loop" not in capabilities
@@ -129,11 +168,14 @@ def test_prompt_affordance_projection_excludes_runtime_internals() -> None:
     projection = project_prompt_affordances(capabilities)
     serialized = json.dumps(projection, sort_keys=True).lower()
 
-    assert "send_message" in serialized
     assert "memory_lifecycle_update" in serialized
+    assert "speak" in serialized
+    assert "trigger_future_cognition" in serialized
+    assert "send_message" not in serialized
     for forbidden in (
         "handler_id",
         "dispatcher.send_message",
+        "l3_text",
         "self_cognition_action_attempts",
         "user_memory_units",
         "mongodb",
@@ -152,7 +194,11 @@ def test_evaluator_rejects_reflex_for_all_current_capabilities() -> None:
 
     evaluator = ActionSpecEvaluator(build_initial_action_capabilities())
 
-    for kind in ("send_message", "memory_lifecycle_update"):
+    for kind in (
+        "memory_lifecycle_update",
+        "speak",
+        "trigger_future_cognition",
+    ):
         action_spec = _action_spec(kind)
         action_spec["cognition_mode"] = "reflex"
         result = evaluator.evaluate(action_spec)
@@ -160,10 +206,44 @@ def test_evaluator_rejects_reflex_for_all_current_capabilities() -> None:
         assert any("reflex" in error for error in result["errors"])
 
 
+def test_evaluator_accepts_speak_surface_action_without_dispatcher_bridge() -> None:
+    """Text-surface selection is an L3 action, not a send-message tool call."""
+
+    evaluator = ActionSpecEvaluator(build_initial_action_capabilities())
+
+    result = evaluator.evaluate(_action_spec("speak"))
+
+    assert result["ok"] is True
+    assert result["handler_owner"] == "l3_text"
+
+
+def test_evaluator_accepts_private_future_cognition_trigger() -> None:
+    """Future cognition is a private orchestration request, not a tool call."""
+
+    evaluator = ActionSpecEvaluator(build_initial_action_capabilities())
+
+    action_spec = _action_spec("trigger_future_cognition")
+    action_spec["visibility"] = "private"
+    result = evaluator.evaluate(action_spec)
+
+    assert result["ok"] is True
+    assert result["handler_owner"] == "orchestrator"
+
+
+def test_send_message_bridge_capability_is_not_l2d_initial_capability() -> None:
+    """Dispatcher delivery remains available only to the bridge evaluator."""
+
+    initial_capabilities = build_initial_action_capabilities()
+    bridge_capabilities = build_dispatcher_bridge_capabilities()
+
+    assert "send_message" not in initial_capabilities
+    assert set(bridge_capabilities) == {"send_message"}
+
+
 def test_evaluator_validates_continuation_contract() -> None:
     """Continuation requests must be structurally bounded before execution."""
 
-    evaluator = ActionSpecEvaluator(build_initial_action_capabilities())
+    evaluator = ActionSpecEvaluator(build_dispatcher_bridge_capabilities())
     action_spec = _action_spec("send_message")
     action_spec["continuation"] = {
         "schema_version": "action_continuation.v1",

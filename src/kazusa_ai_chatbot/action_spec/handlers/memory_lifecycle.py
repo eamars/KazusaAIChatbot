@@ -9,6 +9,9 @@ from kazusa_ai_chatbot.action_spec.models import (
     ActionValidationError,
     validate_action_spec,
 )
+from kazusa_ai_chatbot.db.user_memory_units import (
+    update_user_memory_unit_lifecycle,
+)
 
 
 def map_lifecycle_decision_to_status(decision: str) -> str:
@@ -33,6 +36,7 @@ def validate_memory_lifecycle_action(
     _validate_memory_params(params)
     target = validated["target"]
     _validate_target(target, params)
+    _validate_source_refs(validated["source_refs"], params)
     return validated
 
 
@@ -61,6 +65,44 @@ def build_user_memory_lifecycle_update(
         "due_at": params.get("due_at"),
     }
     return update
+
+
+async def execute_user_memory_lifecycle_action(
+    action_spec: dict[str, Any],
+    *,
+    timestamp: str,
+    action_attempt_id: str,
+) -> dict[str, Any]:
+    """Execute a validated memory lifecycle action through its DB owner."""
+
+    update = build_user_memory_lifecycle_update(
+        action_spec,
+        timestamp=timestamp,
+        action_attempt_id=action_attempt_id,
+    )
+    result = await update_user_memory_unit_lifecycle(
+        update["unit_id"],
+        status=update["status"],
+        timestamp=update["timestamp"],
+        reason=update["reason"],
+        action_attempt_id=update["action_attempt_id"],
+        due_at=update["due_at"],
+    )
+    if result["modified_count"]:
+        status = "executed"
+    elif result["matched_count"]:
+        status = "unchanged"
+    else:
+        status = "not_found"
+    return_value = {
+        "status": status,
+        "unit_id": result["unit_id"],
+        "lifecycle_status": result["status"],
+        "matched_count": result["matched_count"],
+        "modified_count": result["modified_count"],
+        "merge_history_entry": result["merge_history_entry"],
+    }
+    return return_value
 
 
 def _validate_memory_params(params: dict[str, Any]) -> None:
@@ -95,6 +137,23 @@ def _validate_target(target: dict[str, Any], params: dict[str, Any]) -> None:
     scope = target["scope"]
     if scope.get("unit_type") != "active_commitment":
         raise ActionValidationError("scope.unit_type: expected active_commitment")
+
+
+def _validate_source_refs(
+    source_refs: list[dict[str, Any]],
+    params: dict[str, Any],
+) -> None:
+    """Require a matching memory-unit source reference for audit lineage."""
+
+    unit_id = params["unit_id"]
+    for source_ref in source_refs:
+        if source_ref.get("ref_kind") != "memory_unit":
+            continue
+        if source_ref.get("owner") != "user_memory_units":
+            continue
+        if source_ref.get("ref_id") == unit_id:
+            return
+    raise ActionValidationError("source_refs: expected target memory_unit ref")
 
 
 def _reject_evolving_memory_targets(action_spec: dict[str, Any]) -> None:

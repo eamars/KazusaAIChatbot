@@ -6,15 +6,23 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from kazusa_ai_chatbot.nodes.persona_supervisor2 import persona_supervisor2, call_action_subgraph
+from kazusa_ai_chatbot.cognition_episode import build_text_chat_cognitive_episode
+from kazusa_ai_chatbot.nodes.persona_supervisor2 import (
+    _route_after_cognition,
+    call_action_subgraph,
+    persona_supervisor2,
+    stage_3_no_response,
+)
 from kazusa_ai_chatbot.time_context import build_character_time_context
 
 
 def _base_discord_state():
     """Minimal IMProcessState with all required keys."""
+    timestamp = "2024-01-01T00:00:00Z"
+    time_context = build_character_time_context(timestamp)
     return {
-        "timestamp": "2024-01-01T00:00:00Z",
-        "time_context": build_character_time_context("2024-01-01T00:00:00Z"),
+        "timestamp": timestamp,
+        "time_context": time_context,
         "user_name": "TestUser",
         "platform": "discord",
         "platform_message_id": "msg_123",
@@ -59,6 +67,63 @@ def _base_discord_state():
         "channel_topic": "greetings",
         "indirect_speech_context": "",
         "debug_modes": {},
+        "cognitive_episode": build_text_chat_cognitive_episode(
+            episode_id="episode-123",
+            percept_id="percept-123",
+            timestamp=timestamp,
+            time_context=time_context,
+            user_input="Hello",
+            platform="discord",
+            platform_channel_id="chan_1",
+            channel_type="group",
+            platform_message_id="msg_123",
+            platform_user_id="user_123",
+            global_user_id="uuid-123",
+            user_name="TestUser",
+            target_addressed_user_ids=["character-uuid"],
+            target_broadcast=True,
+        ),
+    }
+
+
+def _speak_action_spec() -> dict:
+    return {
+        "schema_version": "action_spec.v1",
+        "kind": "speak",
+        "cognition_mode": "deliberative",
+        "source_refs": [
+            {
+                "schema_version": "action_source_ref.v1",
+                "ref_kind": "cognitive_episode",
+                "ref_id": "episode-123",
+                "owner": "cognition",
+                "relationship": "basis",
+                "evidence_refs": [],
+            }
+        ],
+        "target": {
+            "schema_version": "action_target.v1",
+            "target_kind": "current_channel",
+            "target_id": None,
+            "owner": "l3_text",
+            "scope": {"delivery_mode": "visible_reply"},
+        },
+        "params": {
+            "delivery_mode": "visible_reply",
+            "execute_at": None,
+            "surface_requirements": {"intent": "answer naturally"},
+        },
+        "urgency": "now",
+        "visibility": "user_visible",
+        "deadline": None,
+        "continuation": {
+            "schema_version": "action_continuation.v1",
+            "mode": "none",
+            "episode_type": None,
+            "max_depth": 0,
+            "include_result_as": None,
+        },
+        "reason": "A visible response is needed.",
     }
 
 
@@ -77,12 +142,18 @@ async def test_call_action_subgraph_returns_final_dialog():
         new_callable=AsyncMock,
         return_value=mock_dialog_result,
     ):
-        result = await call_action_subgraph({"global_user_id": "uuid-123"})
+        state = _base_discord_state()
+        result = await call_action_subgraph(state)
 
     assert result["final_dialog"] == ["Hello!", "How are you?"]
     assert result["target_addressed_user_ids"] == ["uuid-123"]
     assert result["target_broadcast"] is False
     assert result["mention_target_user"] is True
+    assert result["surface_outputs"][0]["surface_kind"] == "text"
+    assert result["episode_trace"]["surface_outputs"][0]["fragments"] == [
+        "Hello!",
+        "How are you?",
+    ]
 
 
 @pytest.mark.asyncio
@@ -100,12 +171,57 @@ async def test_call_action_subgraph_empty_dialog():
         new_callable=AsyncMock,
         return_value=mock_dialog_result,
     ):
-        result = await call_action_subgraph({"global_user_id": "uuid-123"})
+        state = _base_discord_state()
+        result = await call_action_subgraph(state)
 
     assert result["final_dialog"] == []
     assert result["target_addressed_user_ids"] == []
     assert result["target_broadcast"] is False
     assert result["mention_target_user"] is False
+
+
+def test_route_after_cognition_uses_l2d_speak_selection() -> None:
+    """L2d action specs should own visible text routing when present."""
+
+    state = {
+        "action_specs": [_speak_action_spec()],
+        "action_directives": {
+            "contextual_directives": {
+                "expression_willingness": "silent",
+            },
+        },
+    }
+
+    assert _route_after_cognition(state) == "respond"
+
+
+def test_route_after_cognition_allows_no_visible_action() -> None:
+    """A present but empty L2d action set means no text surface is required."""
+
+    state = {
+        "action_specs": [],
+        "action_directives": {
+            "contextual_directives": {
+                "expression_willingness": "open",
+            },
+        },
+    }
+
+    assert _route_after_cognition(state) == "silent"
+
+
+@pytest.mark.asyncio
+async def test_stage_3_no_response_records_private_trace_for_l2d() -> None:
+    """No-speak L2d decisions should still leave consolidation evidence."""
+
+    state = _base_discord_state()
+    state["action_specs"] = []
+
+    result = await stage_3_no_response(state)
+
+    assert result["final_dialog"] == []
+    assert result["surface_outputs"][0]["surface_kind"] == "private"
+    assert result["episode_trace"]["trigger_source"] == "user_message"
 
 
 @pytest.mark.asyncio

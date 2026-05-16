@@ -139,6 +139,7 @@ def build_user_memory_unit_doc(
         "due_at": unit.get("due_at"),
         "completed_at": unit.get("completed_at"),
         "cancelled_at": unit.get("cancelled_at"),
+        "archived_at": unit.get("archived_at"),
     }
     return return_value
 
@@ -461,6 +462,86 @@ async def update_user_memory_unit_semantics(
 
     db = await get_db()
     await db.user_memory_units.update_one({"unit_id": unit_id}, update_doc)
+
+
+async def update_user_memory_unit_lifecycle(
+    unit_id: str,
+    *,
+    status: str,
+    timestamp: str,
+    reason: str,
+    action_attempt_id: str,
+    due_at: str | None = None,
+) -> dict[str, object]:
+    """Apply a private lifecycle action to one active commitment unit.
+
+    Args:
+        unit_id: Stable ``user_memory_units.unit_id`` selected by cognition.
+        status: Collection-native lifecycle status to write.
+        timestamp: ISO timestamp for the update and audit row.
+        reason: Cognition-authored semantic reason for the lifecycle change.
+        action_attempt_id: Action-attempt identifier used for audit lineage.
+        due_at: Optional due timestamp copied from the action evidence.
+
+    Returns:
+        Update counts and the merge-history audit row.
+
+    Raises:
+        ValueError: If the lifecycle request is structurally invalid.
+    """
+
+    if not text_or_empty(unit_id):
+        raise ValueError("unit_id is required")
+    if status not in VALID_USER_MEMORY_UNIT_STATUSES:
+        raise ValueError(f"invalid user memory unit status: {status!r}")
+    if not text_or_empty(timestamp):
+        raise ValueError("timestamp is required")
+    if not text_or_empty(reason):
+        raise ValueError("reason is required")
+    if not text_or_empty(action_attempt_id):
+        raise ValueError("action_attempt_id is required")
+
+    merge_history_entry = {
+        "operation": "lifecycle_update",
+        "status": status,
+        "reason": reason,
+        "action_attempt_id": action_attempt_id,
+        "timestamp": timestamp,
+    }
+    set_doc: dict[str, object] = {
+        "status": status,
+        "updated_at": timestamp,
+    }
+    if due_at is not None:
+        set_doc["due_at"] = due_at
+        merge_history_entry["due_at"] = due_at
+    if status == UserMemoryUnitStatus.COMPLETED:
+        set_doc["completed_at"] = timestamp
+    elif status == UserMemoryUnitStatus.CANCELLED:
+        set_doc["cancelled_at"] = timestamp
+    elif status == UserMemoryUnitStatus.ARCHIVED:
+        set_doc["archived_at"] = timestamp
+
+    db = await get_db()
+    result = await db.user_memory_units.update_one(
+        {
+            "unit_id": unit_id,
+            "unit_type": UserMemoryUnitType.ACTIVE_COMMITMENT,
+            "status": UserMemoryUnitStatus.ACTIVE,
+        },
+        {
+            "$set": set_doc,
+            "$push": {"merge_history": merge_history_entry},
+        },
+    )
+    return_value = {
+        "unit_id": unit_id,
+        "status": status,
+        "matched_count": result.matched_count,
+        "modified_count": result.modified_count,
+        "merge_history_entry": merge_history_entry,
+    }
+    return return_value
 
 
 async def update_user_memory_unit_window(

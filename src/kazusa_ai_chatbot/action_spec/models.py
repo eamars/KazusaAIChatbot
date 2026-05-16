@@ -52,7 +52,7 @@ ALLOWED_CONTINUATION_MODES = frozenset(
     ("none", "immediate_followup", "scheduled_followup", "background_followup")
 )
 ALLOWED_CAPABILITY_OWNERS = frozenset(
-    ("dispatcher", "memory_lifecycle", "orchestrator")
+    ("dispatcher", "memory_lifecycle", "orchestrator", "l3_text", "l3_image")
 )
 ALLOWED_COGNITION_MODES = frozenset(("deliberative", "reflex"))
 ALLOWED_URGENCY_VALUES = frozenset(("now", "background", "scheduled"))
@@ -150,7 +150,13 @@ class CapabilitySpecV1(TypedDict):
     schema_version: Literal["capability_spec.v1"]
     capability_kind: str
     category: Literal["action"]
-    owner_module: Literal["dispatcher", "memory_lifecycle", "orchestrator"]
+    owner_module: Literal[
+        "dispatcher",
+        "memory_lifecycle",
+        "orchestrator",
+        "l3_text",
+        "l3_image",
+    ]
     input_schema: dict[str, object]
     output_schema: dict[str, object]
     handler_id: str
@@ -162,7 +168,7 @@ class CapabilitySpecV1(TypedDict):
 
 
 class ActionSpecV1(TypedDict):
-    """Modality-neutral action residue emitted by cognition."""
+    """Materialized modality-neutral action residue from semantic requests."""
 
     schema_version: Literal["action_spec.v1"]
     kind: str
@@ -189,12 +195,25 @@ class ActionEvalResult(TypedDict):
 
 
 class SendMessageParamsV1(TypedDict):
-    """Params for the initial dispatcher-owned send-message action."""
+    """Params for the bridge-only dispatcher send-message action."""
 
     target_channel: str
     text: str
     execute_at: str | None
     delivery_mentions: list[dict[str, object]]
+
+
+class SpeakParamsV1(TypedDict):
+    """Params for a text-surface action realized by the L3 text handler."""
+
+    delivery_mode: Literal[
+        "visible_reply",
+        "private_finalization",
+        "delayed",
+        "scheduled",
+    ]
+    execute_at: str | None
+    surface_requirements: dict[str, object]
 
 
 class MemoryLifecycleUpdateParamsV1(TypedDict):
@@ -205,6 +224,14 @@ class MemoryLifecycleUpdateParamsV1(TypedDict):
     unit_id: str
     lifecycle_decision: Literal["fulfilled", "abandoned", "obsolete", "deferred"]
     due_at: str | None
+
+
+class TriggerFutureCognitionParamsV1(TypedDict):
+    """Params for a private request to create a later cognition episode."""
+
+    episode_type: Literal["self_cognition"]
+    trigger_at: str | None
+    context_summary: str
 
 
 def validate_evidence_ref(value: object) -> EvidenceRefV1:

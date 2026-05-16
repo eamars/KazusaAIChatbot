@@ -21,6 +21,7 @@ from typing import Literal
 
 from fastapi import FastAPI, BackgroundTasks
 
+from kazusa_ai_chatbot.action_spec.results import has_consolidatable_output
 from kazusa_ai_chatbot.config import (
     CHARACTER_GLOBAL_USER_ID,
     CHAT_HISTORY_RECENT_LIMIT,
@@ -1337,6 +1338,11 @@ async def _process_queued_chat_item(item: QueuedChatItem) -> None:
             consolidation_state_dict = dict(consolidation_state)
 
         has_consolidation_state = bool(consolidation_state_dict)
+        is_consolidatable = (
+            has_consolidatable_output(consolidation_state_dict)
+            if consolidation_state_dict is not None
+            else False
+        )
         should_record_progress = bool(final_dialog) and has_consolidation_state
         if should_record_progress:
             logger.debug(f'Background conversation progress recorder queued: platform={req.platform} channel={req.platform_channel_id or "<dm>"} message={req.platform_message_id or "<none>"}')
@@ -1348,11 +1354,11 @@ async def _process_queued_chat_item(item: QueuedChatItem) -> None:
         should_consolidate = False
         if debug_modes.get("no_remember"):
             logger.debug("Background consolidation skipped: no_remember is active")
-        elif final_dialog and has_consolidation_state:
+        elif is_consolidatable and has_consolidation_state:
             should_consolidate = True
             logger.debug(f'Background consolidation queued: platform={req.platform} channel={req.platform_channel_id or "<dm>"} message={req.platform_message_id or "<none>"}')
-        elif not final_dialog:
-            logger.info(f'Background consolidation skipped: platform={req.platform} channel={req.platform_channel_id or "<dm>"} message={req.platform_message_id or "<none>"} should_respond={result["should_respond"]} final_dialog_count=0')
+        elif not is_consolidatable:
+            logger.info(f'Background consolidation skipped: platform={req.platform} channel={req.platform_channel_id or "<dm>"} message={req.platform_message_id or "<none>"} should_respond={result["should_respond"]} consolidatable_output=false final_dialog_count={len(final_dialog)}')
         else:
             logger.warning(f'Background consolidation skipped: unexpected consolidation_state type={type(consolidation_state).__name__}')
 

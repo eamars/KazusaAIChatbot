@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 from kazusa_ai_chatbot.action_spec.evaluator import (
     build_raw_tool_call_from_action_spec,
 )
+from kazusa_ai_chatbot.action_spec.models import validate_action_spec
 from kazusa_ai_chatbot.dispatcher import (
     AdapterRegistry,
     DispatchContext,
@@ -16,6 +17,9 @@ from kazusa_ai_chatbot.dispatcher import (
     build_send_message_tool,
 )
 from kazusa_ai_chatbot.dispatcher.task import RawToolCall
+from kazusa_ai_chatbot.self_cognition.handoff import (
+    build_send_message_action_spec,
+)
 
 
 class _NoopAdapter:
@@ -92,6 +96,53 @@ def _action_spec() -> dict:
     }
 
 
+def _self_cognition_case() -> dict:
+    return {
+        "case_name": "active_commitment_past_due",
+        "case_id": "active_commitment:promise-001:2026-05-07",
+        "target_scope": {
+            "platform": "qq",
+            "platform_channel_id": "673225019",
+            "channel_type": "private",
+            "user_id": "user-001",
+            "platform_user_id": "673225019",
+            "display_name": "提拉米苏",
+        },
+        "source_refs": [
+            {
+                "source_kind": "user_memory_unit",
+                "source_id": "promise-001",
+                "due_at": "2026-05-07T00:00:00+00:00",
+                "summary": "揭晓香料谜底",
+            }
+        ],
+        "character_profile": {"name": "杏山千纱"},
+        "platform_bot_id": "bot-001",
+    }
+
+
+def _action_candidate() -> dict:
+    return {
+        "target_platform": "qq",
+        "target_channel": "673225019",
+        "target_channel_type": "private",
+        "text": "Checking in now.",
+        "execute_at": None,
+        "dispatch_shape": "send_message",
+        "production_handoff": False,
+        "delivery_mentions": [
+            {
+                "entity_kind": "user",
+                "placement": "prefix",
+                "platform_user_id": "673225019",
+                "global_user_id": "user-001",
+                "display_name": "提拉米苏",
+                "requested_by": "self_cognition",
+            }
+        ],
+    }
+
+
 def _dispatcher_evaluator() -> ToolCallEvaluator:
     tool_registry = ToolRegistry()
     tool_registry.register(build_send_message_tool())
@@ -125,6 +176,22 @@ def test_send_message_action_spec_bridges_to_raw_tool_call() -> None:
     assert raw_call.args["text"] == "Checking in now."
     assert raw_call.args["delivery_mentions"][0]["display_name"] == "提拉米苏"
     assert "handler_id" not in raw_call.args
+
+
+def test_self_cognition_candidate_builds_valid_action_spec() -> None:
+    """Legacy self-cognition delivery must cross the shared action contract."""
+
+    action_spec = build_send_message_action_spec(
+        _self_cognition_case(),
+        _action_candidate(),
+    )
+    validated = validate_action_spec(action_spec)
+
+    assert validated["kind"] == "send_message"
+    assert validated["source_refs"][0]["ref_kind"] == "memory_unit"
+    assert validated["params"]["target_channel"] == "673225019"
+    assert validated["params"]["text"] == "Checking in now."
+    assert validated["target"]["owner"] == "dispatcher"
 
 
 def test_send_message_bridge_shape_is_accepted_by_dispatcher_evaluator() -> None:

@@ -794,14 +794,20 @@ def _budget(
 def _rag_result(case: models.SelfCognitionCase) -> dict[str, Any]:
     """Return supplied RAG context or the existing empty RAG projection."""
 
+    source_ref_commitments = _active_commitments_from_source_refs(case)
     rag_output = case.get("rag_output")
     if isinstance(rag_output, dict):
-        return_value = rag_output
+        return_value = _merge_source_ref_commitments(
+            rag_output,
+            source_ref_commitments,
+        )
         return return_value
+    memory_context = empty_user_memory_context()
+    memory_context["active_commitments"] = source_ref_commitments
     return_value = {
         "answer": "",
         "user_image": {
-            "user_memory_context": empty_user_memory_context(),
+            "user_memory_context": memory_context,
         },
         "user_memory_unit_candidates": [],
         "character_image": {},
@@ -816,6 +822,86 @@ def _rag_result(case: models.SelfCognitionCase) -> dict[str, Any]:
             "dispatched": [],
         },
     }
+    return return_value
+
+
+def _active_commitments_from_source_refs(
+    case: models.SelfCognitionCase,
+) -> list[dict[str, Any]]:
+    """Build deterministic active-commitment bindings from source refs."""
+
+    trigger_kind = _string_field(case, "trigger_kind")
+    if trigger_kind != models.TRIGGER_ACTIVE_COMMITMENT_DUE_CHECK:
+        return_value: list[dict[str, Any]] = []
+        return return_value
+
+    raw_refs = case.get("source_refs")
+    if not isinstance(raw_refs, list):
+        return_value: list[dict[str, Any]] = []
+        return return_value
+
+    due_state = _string_field(case, "semantic_due_state")
+    commitments: list[dict[str, Any]] = []
+    for raw_ref in raw_refs:
+        if not isinstance(raw_ref, dict):
+            continue
+        source_kind = _string_field(raw_ref, "source_kind")
+        if source_kind != "user_memory_unit":
+            continue
+        unit_id = _string_field(raw_ref, "source_id")
+        summary = _string_field(raw_ref, "summary")
+        if not unit_id or not summary:
+            continue
+        commitment = {
+            "unit_id": unit_id,
+            "fact": summary,
+            "summary": summary,
+            "status": "active",
+        }
+        due_at = _string_field(raw_ref, "due_at")
+        if due_at:
+            commitment["due_at"] = due_at
+        if due_state:
+            commitment["due_state"] = due_state
+        commitments.append(commitment)
+    return_value = commitments
+    return return_value
+
+
+def _merge_source_ref_commitments(
+    rag_output: dict[str, Any],
+    source_ref_commitments: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """Attach source-ref commitments when supplied RAG lacks active targets."""
+
+    if not source_ref_commitments:
+        return_value = rag_output
+        return return_value
+
+    merged_result = dict(rag_output)
+    raw_user_image = merged_result.get("user_image")
+    if isinstance(raw_user_image, dict):
+        user_image = dict(raw_user_image)
+    else:
+        user_image = {}
+
+    raw_memory_context = user_image.get("user_memory_context")
+    if isinstance(raw_memory_context, dict):
+        memory_context = dict(raw_memory_context)
+    else:
+        memory_context = empty_user_memory_context()
+
+    raw_active_commitments = memory_context.get("active_commitments")
+    has_active_commitments = (
+        isinstance(raw_active_commitments, list)
+        and bool(raw_active_commitments)
+    )
+    if not has_active_commitments:
+        memory_context["active_commitments"] = source_ref_commitments
+        user_image["user_memory_context"] = memory_context
+        merged_result["user_image"] = user_image
+
+    return_value = merged_result
     return return_value
 
 

@@ -90,6 +90,7 @@ platform event
   -> adapter-owned envelope normalizer
   -> POST /chat
   -> brain queue and persona graph
+  -> selected text surface outputs
   -> ChatResponse(messages, use_reply_feature, delivery_mentions, delivery_tracking_id)
   -> adapter platform send
   -> platform returns outbound message id
@@ -117,6 +118,11 @@ optional `delivery_mentions` metadata. This is adapter-owned rendering
 metadata: the brain keeps outbound text platform-neutral, and the adapter
 renders a native prefix user mention only when feasible. Missing, empty, or
 unrenderable mention metadata must not block text delivery.
+
+Visible `/chat` delivery follows selected `SurfaceOutputV1` text surfaces.
+Private action results, private finalization, scheduled-action results, and
+no-visible-output decisions may still make an episode consolidatable, but they
+do not create adapter sends or delivery receipts by themselves.
 
 ## Public Endpoints
 
@@ -257,6 +263,9 @@ Brain service responsibilities:
   has necessarily completed.
 - The brain service generates a non-empty `delivery_tracking_id` only when it
   returns user-visible messages and will persist an assistant conversation row.
+- The brain service may run post-turn consolidation for selected surface
+  outputs, action results, or private finalization even when `messages` is
+  empty.
 - Existing adapters that ignore `delivery_tracking_id` remain compatible; they
   simply do not enable future reply hydration by delivered outbound id.
 
@@ -404,9 +413,15 @@ rule; a survivor turn is not allowed to run on collapsed text whose source row
 was not committed.
 
 For visible assistant output, the brain writes the assistant row before
-returning `ChatResponse` to the adapter. Background state updates such as
+returning `ChatResponse` to the adapter. Visible assistant rows are derived
+from selected text surface outputs. Background state updates such as
 conversation progress and consolidation may still run after the response has
 been released.
+
+When an episode has no visible text surface, the brain returns an empty
+`messages` list and no delivery tracking id. That episode can still be
+consolidated when private action results, scheduled-action results, private
+surface outputs, or private finalization exist.
 
 Delivery receipt adapters may still need bounded `not_found` retry behavior
 for transport timing and cross-process delivery, but a non-empty

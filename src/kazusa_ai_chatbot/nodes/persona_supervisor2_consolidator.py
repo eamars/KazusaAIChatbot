@@ -20,6 +20,9 @@ import logging
 
 from langgraph.graph import END, START, StateGraph
 
+from kazusa_ai_chatbot.action_spec.results import (
+    project_episode_trace_for_consolidation,
+)
 from kazusa_ai_chatbot.db import get_character_profile, get_conversation_history
 from kazusa_ai_chatbot.nodes.persona_supervisor2_consolidator_facts import (
     fact_harvester_evaluator,
@@ -179,6 +182,9 @@ async def call_consolidation_subgraph(global_state: GlobalPersonaState):
         "action_directives": global_state["action_directives"],
         "internal_monologue": global_state["internal_monologue"],
         "final_dialog": global_state["final_dialog"],
+        "episode_trace_projection": project_episode_trace_for_consolidation(
+            global_state.get("episode_trace"),
+        ),
         "interaction_subtext": global_state["interaction_subtext"],
         "emotional_appraisal": global_state["emotional_appraisal"],
         "character_intent": global_state["character_intent"],

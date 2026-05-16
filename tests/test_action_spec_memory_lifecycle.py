@@ -6,6 +6,7 @@ import pytest
 
 from kazusa_ai_chatbot.action_spec.handlers.memory_lifecycle import (
     build_user_memory_lifecycle_update,
+    execute_user_memory_lifecycle_action,
     map_lifecycle_decision_to_status,
     validate_memory_lifecycle_action,
 )
@@ -100,6 +101,25 @@ def test_memory_lifecycle_rejects_wrong_target_owner() -> None:
         validate_memory_lifecycle_action(action_spec)
 
 
+def test_memory_lifecycle_rejects_missing_memory_source_ref() -> None:
+    """Lifecycle actions need a matching memory-unit source reference."""
+
+    action_spec = _action_spec()
+    action_spec["source_refs"] = [
+        {
+            "schema_version": "action_source_ref.v1",
+            "ref_kind": "cognitive_episode",
+            "ref_id": "episode-001",
+            "owner": "cognition",
+            "relationship": "basis",
+            "evidence_refs": [],
+        }
+    ]
+
+    with pytest.raises(ActionValidationError, match="source_refs"):
+        validate_memory_lifecycle_action(action_spec)
+
+
 def test_memory_lifecycle_rejects_evolving_memory_doc_targets() -> None:
     """EvolvingMemoryDoc lifecycle mutation is outside this plan."""
 
@@ -136,3 +156,41 @@ def test_deferred_lifecycle_decision_keeps_commitment_active() -> None:
     )
 
     assert update["status"] == "active"
+
+
+@pytest.mark.asyncio
+async def test_memory_lifecycle_execute_uses_repository_owner(monkeypatch) -> None:
+    """Execution should delegate to the user-memory lifecycle repository."""
+
+    captured = {}
+
+    async def _fake_update(unit_id, **kwargs):
+        captured["unit_id"] = unit_id
+        captured.update(kwargs)
+        return {
+            "unit_id": unit_id,
+            "status": kwargs["status"],
+            "matched_count": 1,
+            "modified_count": 1,
+            "merge_history_entry": {
+                "operation": "lifecycle_update",
+                "action_attempt_id": kwargs["action_attempt_id"],
+            },
+        }
+
+    monkeypatch.setattr(
+        "kazusa_ai_chatbot.action_spec.handlers.memory_lifecycle."
+        "update_user_memory_unit_lifecycle",
+        _fake_update,
+    )
+
+    result = await execute_user_memory_lifecycle_action(
+        _action_spec(),
+        timestamp="2026-05-16T00:00:00+00:00",
+        action_attempt_id="attempt-003",
+    )
+
+    assert result["status"] == "executed"
+    assert captured["unit_id"] == "promise-001"
+    assert captured["status"] == "cancelled"
+    assert captured["reason"] == _action_spec()["reason"]

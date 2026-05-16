@@ -28,6 +28,7 @@ _APPROVED_STAGES: tuple[CognitionPromptStage, ...] = (
     "l2a_consciousness",
     "l2b_boundary_core",
     "l2c_judgment_core",
+    "l2d_action_initializer",
     "l3_contextual_agent",
     "l3_style_agent",
     "l3_content_anchor_agent",
@@ -55,6 +56,9 @@ _VALID_OUTPUT_PAYLOADS: dict[CognitionPromptStage, dict[str, object]] = {
         "logical_stance": "CONFIRM",
         "character_intent": "PROVIDE",
         "judgment_note": "stable",
+    },
+    "l2d_action_initializer": {
+        "action_specs": [],
     },
     "l3_contextual_agent": {
         "social_distance": "neutral",
@@ -87,6 +91,7 @@ _WRONG_OUTPUT_VALUES: dict[CognitionPromptStage, object] = {
     "l2a_consciousness": [],
     "l2b_boundary_core": "not a dict",
     "l2c_judgment_core": [],
+    "l2d_action_initializer": "not a list",
     "l3_contextual_agent": [],
     "l3_style_agent": [],
     "l3_content_anchor_agent": "not a list",
@@ -306,3 +311,16 @@ def test_output_contract_rejects_unknown_stage() -> None:
     """Unknown stages should not share any normalized output contract."""
     with pytest.raises(CognitionOutputContractError, match="stage"):
         validate_cognition_output_contract(stage="unknown_stage", payload={})
+
+
+@pytest.mark.parametrize("stage", ("l2a_consciousness", "l2c_judgment_core"))
+def test_output_contract_rejects_action_specs_outside_l2d(
+    stage: CognitionPromptStage,
+) -> None:
+    """L2a and L2c must not become accidental action initializers."""
+
+    payload = dict(_VALID_OUTPUT_PAYLOADS[stage])
+    payload["action_specs"] = []
+
+    with pytest.raises(CognitionOutputContractError, match="action_specs"):
+        validate_cognition_output_contract(stage=stage, payload=payload)

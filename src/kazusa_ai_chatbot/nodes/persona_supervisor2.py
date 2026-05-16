@@ -5,6 +5,21 @@ import time
 
 from langgraph.graph import END, START, StateGraph
 
+from kazusa_ai_chatbot.action_spec.evaluator import ActionSpecEvaluator
+from kazusa_ai_chatbot.action_spec.handlers.memory_lifecycle import (
+    execute_user_memory_lifecycle_action,
+)
+from kazusa_ai_chatbot.action_spec.registry import (
+    MEMORY_LIFECYCLE_UPDATE_CAPABILITY,
+    SPEAK_CAPABILITY,
+)
+from kazusa_ai_chatbot.action_spec.results import (
+    action_attempt_id_from_eval_result,
+    build_action_result,
+    build_episode_trace,
+    build_private_surface_output,
+    build_text_surface_output,
+)
 from kazusa_ai_chatbot import event_logging
 from kazusa_ai_chatbot.config import CHAT_HISTORY_RECENT_LIMIT
 from kazusa_ai_chatbot.nodes.dialog_agent import dialog_agent
@@ -31,6 +46,17 @@ logger = logging.getLogger(__name__)
 
 MILLISECONDS_PER_SECOND = 1000
 PERSONA_RAG_COMPONENT = "nodes.persona_supervisor2"
+
+
+def _selected_action_specs(state: GlobalPersonaState) -> list[dict]:
+    """Return materialized action specs selected for the current episode."""
+
+    raw_specs = state.get("action_specs")
+    if not isinstance(raw_specs, list):
+        return_value: list[dict] = []
+        return return_value
+    specs = [spec for spec in raw_specs if isinstance(spec, dict)]
+    return specs
 
 
 def _elapsed_ms(started_at: float) -> int:
@@ -75,6 +101,91 @@ def _cognition_requests_silence(state: GlobalPersonaState) -> bool:
     return return_value
 
 
+def _cognition_selects_text_surface(state: GlobalPersonaState) -> bool:
+    """Return whether L2d selected the text surface handler."""
+
+    for action_spec in _selected_action_specs(state):
+        if action_spec.get("kind") == SPEAK_CAPABILITY:
+            return_value = True
+            return return_value
+    return_value = False
+    return return_value
+
+
+async def _action_results_for_state(
+    state: GlobalPersonaState,
+    *,
+    executed_action_kinds: set[str] | None = None,
+) -> list[dict]:
+    """Evaluate selected actions into traceable action results."""
+
+    executed_kinds = executed_action_kinds or set()
+    evaluator = ActionSpecEvaluator()
+    action_results: list[dict] = []
+    for action_spec in _selected_action_specs(state):
+        eval_result = evaluator.evaluate(action_spec)
+        result_summary = ""
+        completed_at = None
+        if not eval_result["ok"]:
+            status = "rejected"
+        elif action_spec["kind"] == MEMORY_LIFECYCLE_UPDATE_CAPABILITY:
+            memory_result = await execute_user_memory_lifecycle_action(
+                eval_result["action_spec"] or action_spec,
+                timestamp=state["timestamp"],
+                action_attempt_id=action_attempt_id_from_eval_result(
+                    eval_result,
+                ),
+            )
+            if memory_result["status"] in ("executed", "unchanged"):
+                status = "executed"
+                completed_at = state["timestamp"]
+            else:
+                status = "failed"
+            result_summary = (
+                f"memory_lifecycle_update {memory_result['status']}: "
+                f"{memory_result['lifecycle_status']}"
+            )
+        elif action_spec["kind"] in executed_kinds:
+            status = "executed"
+            completed_at = state["timestamp"]
+        else:
+            status = "validated"
+        action_result = build_action_result(
+            eval_result["action_spec"] or action_spec,
+            eval_result,
+            status=status,
+            result_summary=result_summary,
+            completed_at=completed_at,
+        )
+        action_results.append(action_result)
+    return action_results
+
+
+def _episode_trace_update(
+    state: GlobalPersonaState,
+    *,
+    action_results: list[dict],
+    surface_outputs: list[dict],
+) -> dict:
+    """Build trace fields for the current persona episode."""
+
+    episode = state["cognitive_episode"]
+    trace = build_episode_trace(
+        episode_id=episode["episode_id"],
+        trigger_source=episode["trigger_source"],
+        created_at=state["timestamp"],
+        action_specs=_selected_action_specs(state),
+        action_results=action_results,
+        surface_outputs=surface_outputs,
+    )
+    trace_update = {
+        "action_results": action_results,
+        "surface_outputs": surface_outputs,
+        "episode_trace": trace,
+    }
+    return trace_update
+
+
 async def call_action_subgraph(state: GlobalPersonaState) -> dict:
     """Run dialog generation and attach deterministic response addressing.
 
@@ -87,12 +198,29 @@ async def call_action_subgraph(state: GlobalPersonaState) -> dict:
 
     result = await dialog_agent(state)
     final_dialog = result["final_dialog"]
+    action_results = await _action_results_for_state(
+        state,
+        executed_action_kinds={SPEAK_CAPABILITY},
+    )
+    speak_attempt_id = _first_action_attempt_id(action_results, SPEAK_CAPABILITY)
+    surface_outputs = [
+        build_text_surface_output(
+            fragments=final_dialog,
+            created_at=state["timestamp"],
+            action_attempt_id=speak_attempt_id,
+        )
+    ]
     return_value = {
         "final_dialog": final_dialog,
         "target_addressed_user_ids": result["target_addressed_user_ids"],
         "target_broadcast": result["target_broadcast"],
         "mention_target_user": bool(result.get("mention_target_user", False)),
     }
+    return_value.update(_episode_trace_update(
+        state,
+        action_results=action_results,
+        surface_outputs=surface_outputs,
+    ))
     return return_value
 
 
@@ -111,6 +239,20 @@ async def stage_3_no_response(state: GlobalPersonaState) -> dict:
         "target_broadcast": False,
         "mention_target_user": False,
     }
+    action_results = await _action_results_for_state(state)
+    surface_outputs = []
+    if "action_specs" in state:
+        surface_outputs = [
+            build_private_surface_output(
+                summary="No visible text surface selected for this episode.",
+                created_at=state["timestamp"],
+            )
+        ]
+    return_value.update(_episode_trace_update(
+        state,
+        action_results=action_results,
+        surface_outputs=surface_outputs,
+    ))
     return return_value
 
 
@@ -237,10 +379,32 @@ async def stage_1_research(state: GlobalPersonaState) -> dict:
 def _route_after_cognition(state: GlobalPersonaState) -> str:
     """Route persona flow based on cognition's structured response decision."""
 
-    if _cognition_requests_silence(state):
+    if "action_specs" in state:
+        if _cognition_selects_text_surface(state):
+            return_value = "respond"
+        else:
+            return_value = "silent"
+    elif _cognition_requests_silence(state):
         return_value = "silent"
     else:
         return_value = "respond"
+    return return_value
+
+
+def _first_action_attempt_id(
+    action_results: list[dict],
+    action_kind: str,
+) -> str | None:
+    """Return the first action-attempt id for one action kind."""
+
+    for action_result in action_results:
+        if action_result.get("action_kind") != action_kind:
+            continue
+        attempt_id = action_result.get("action_attempt_id")
+        if isinstance(attempt_id, str) and attempt_id:
+            return_value = attempt_id
+            return return_value
+    return_value = None
     return return_value
 
 
@@ -350,5 +514,8 @@ async def persona_supervisor2(state: IMProcessState) -> dict:
         "mention_target_user": bool(results.get("mention_target_user", False)),
         "future_promises": [],
         "consolidation_state": results,
+        "surface_outputs": results.get("surface_outputs", []),
+        "action_results": results.get("action_results", []),
+        "episode_trace": results.get("episode_trace"),
     }
     return return_value

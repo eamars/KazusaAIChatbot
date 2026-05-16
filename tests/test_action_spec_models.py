@@ -153,6 +153,17 @@ def test_capability_spec_requires_action_category_and_policy_refs() -> None:
         validate_capability_spec(capability)
 
 
+def test_capability_spec_accepts_l3_surface_owner() -> None:
+    """Surface action handlers are registered action owners, not dispatcher tools."""
+
+    capability = _capability_spec()
+    capability["owner_module"] = "l3_text"
+
+    validated = validate_capability_spec(capability)
+
+    assert validated["owner_module"] == "l3_text"
+
+
 def test_lifecycle_decision_status_mapping_matches_plan() -> None:
     """The LLM-owned semantic decisions map to existing collection statuses."""
 

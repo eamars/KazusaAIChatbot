@@ -19,6 +19,7 @@ CognitionPromptStage = Literal[
     "l2a_consciousness",
     "l2b_boundary_core",
     "l2c_judgment_core",
+    "l2d_action_initializer",
     "l3_contextual_agent",
     "l3_style_agent",
     "l3_content_anchor_agent",

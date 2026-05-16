@@ -236,6 +236,7 @@ class UserMemoryUnitDoc(TypedDict, total=False):
     due_at: str | None
     completed_at: str | None
     cancelled_at: str | None
+    archived_at: str | None
 
 
 class UserMemoryContextEntry(TypedDict, total=False):

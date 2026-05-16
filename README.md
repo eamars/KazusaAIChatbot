@@ -12,6 +12,8 @@
     ·
     <a href="src/kazusa_ai_chatbot/brain_service/README.md">Brain Service ICD</a>
     ·
+    <a href="src/kazusa_ai_chatbot/action_spec/README.md">Action Spec</a>
+    ·
     <a href="src/kazusa_ai_chatbot/event_logging/README.md">Event Logging ICD</a>
     ·
     <a href="src/kazusa_ai_chatbot/nodes/README.md">Cognition Nodes</a>
@@ -44,14 +46,14 @@ At a high level, Kazusa provides:
 | -------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
 | Platform-neutral character brain | Discord, QQ, debug UI, and future adapters feed the same FastAPI brain service.                                                    |
 | Typed message boundary           | Platform syntax is normalized into `MessageEnvelope` fields before cognition or RAG sees it.                                       |
-| Bounded live response path       | Queueing, relevance, RAG, cognition, and dialog are explicit stages with caps and inspectable payloads.                            |
+| Bounded live response path       | Queueing, relevance, RAG, cognition, action routing, and L3 surfaces are explicit stages with caps and inspectable payloads.       |
 | Multi-horizon memory             | Recent chat, short-term conversation flow, retrieved evidence, durable memory, and scheduled commitments remain separate.          |
 | RAG 2 evidence retrieval         | Helper agents retrieve user profiles, memories, conversation history, live facts, web evidence, and recall state.                  |
-| Layered cognition                | Cognition decides stance, boundaries, judgment, style, and response goals before dialog writes the final wording.                  |
-| Background consolidation         | Completed turns update durable memory, relationship state, Cache2 invalidation, images, and progress after the reply is available. |
+| Layered cognition                | Cognition decides stance, boundaries, judgment, style, action needs, and response goals before selected L3 surfaces render output. |
+| Background consolidation         | Completed episodes update durable memory, relationship state, Cache2 invalidation, images, and progress from text plus action/surface traces. |
 | Reflection outside chat          | Hourly, daily, and promoted reflection runs are stored as audit records and only promoted context can enter normal cognition.      |
 | Scheduled follow-through         | Accepted future promises can become validated scheduled tasks delivered later through registered adapters.                         |
-| Event logging observability      | Runtime, LLM, RAG, dialog, reflection, self-cognition, dispatcher, and DB operations emit sanitized operational events.            |
+| Event logging observability      | Runtime, LLM, RAG, action routing, surfaces, reflection, self-cognition, dispatcher, consolidation, and DB operations emit sanitized operational events. |
 
 ## What You Can Build
 
@@ -133,15 +135,17 @@ Persona turn
   - retrieve evidence through RAG 2
   - load short-term conversation progress
   - reason through stance, boundary, style, and intent
-  - generate final dialog
+  - initialize zero-or-more semantic actions through L2d
+  - run selected L3 text/image/action handlers
+  - emit surface outputs and action results
         |
-        +-----------------------------> adapter delivers visible reply
+        +-----------------------------> adapter bridge delivers visible surfaces
         |
         v
 Post-turn work
-  - persist assistant rows and delivery tracking
+  - persist assistant surface rows and delivery tracking
   - record conversation progress
-  - consolidate durable memory and state
+  - consolidate durable memory and state from the episode trace
   - invalidate stale Cache2 entries
   - schedule accepted future promises
   - run reflection and growth workers outside live chat
@@ -150,11 +154,17 @@ Post-turn work
 MongoDB + model routes + optional MCP web tools + platform callbacks
 ```
 
+Visible adapter delivery follows selected text surface outputs. Private action
+results, scheduled-action results, no-visible-output decisions, and private
+finalization still feed episode-trace consolidation without creating adapter
+sends.
+
 The core boundary is deliberately narrow:
 
 ```text
-adapter/debug client -> brain service -> queue/intake -> RAG -> cognition
--> dialog -> persistence/consolidation -> scheduler/reflection
+adapter/debug client -> brain service -> queue/intake -> typed episode/RAG
+-> cognition/L2d -> selected L3 surfaces/action handlers
+-> episode-trace consolidation -> scheduler/reflection
 ```
 
 ## Design Principles
@@ -162,14 +172,15 @@ adapter/debug client -> brain service -> queue/intake -> RAG -> cognition
 **LLM-first semantics, deterministic mechanics**
 
 LLM stages judge meaning: response relevance, missing evidence, memory meaning,
-accepted promises, character stance, and final dialog intent. Deterministic code
-owns validation, persistence, limits, cache invalidation, scheduling, adapter
-delivery, and auditability.
+accepted promises, character stance, action choice, and surface intent.
+Deterministic code owns validation, persistence, limits, cache invalidation,
+scheduling, adapter delivery, and auditability.
 
 **Evidence is not persona**
 
 RAG answers "what is known?" Cognition answers "what does this mean for Kazusa
-right now?" Dialog answers "how should she say it?"
+right now?" L2d answers "which actions or surfaces are needed?" L3/dialog
+answers "how should the selected surface render it?"
 
 **Memory has ownership**
 
@@ -198,6 +209,7 @@ cognition, and scheduling remain in the platform-neutral core.
 | Conversation progress    | Short-term episode state used by cognition to avoid loops and stale reopenings          | [Conversation Progress](src/kazusa_ai_chatbot/conversation_progress/README.md)         |
 | RAG 2                    | Slot-driven helper-agent retrieval and Cache2 evidence projection                       | [RAG 2](src/kazusa_ai_chatbot/rag/README.md)                                           |
 | Cognition and dialog     | Character stance, boundaries, judgment, style, visual directives, and final wording     | [Cognition Nodes](src/kazusa_ai_chatbot/nodes/README.md)                              |
+| Action spec              | L2d action residues, capability registry, evaluator, results, surfaces, and traces      | [Action Spec](src/kazusa_ai_chatbot/action_spec/README.md)                            |
 | Database                 | MongoDB collection ownership, embeddings, indexes, public persistence helpers           | [Database ICD](src/kazusa_ai_chatbot/db/README.md)                                     |
 | Event logging            | Sanitized operational telemetry, status snapshots, statistics, and export contracts     | [Event Logging ICD](src/kazusa_ai_chatbot/event_logging/README.md)                     |
 | Dispatcher and scheduler | Validated delayed tool execution for accepted future promises                           | [Dispatcher](src/kazusa_ai_chatbot/dispatcher/README.md)                               |
@@ -255,6 +267,7 @@ src/
     brain_service/             Service API, graph, intake, health, post-turn glue
     message_envelope/          Typed adapter-to-brain message contract
     nodes/                     Persona, cognition, dialog, consolidation stages
+    action_spec/               Modality-neutral action contracts, registry, results
     rag/                       RAG 2 helper agents, hybrid retrieval, Cache2
     conversation_progress/     Short-term episode memory
     db/                        MongoDB facade, schemas, collection owners
@@ -304,6 +317,7 @@ rather than production sends.
 | [Brain Service ICD](src/kazusa_ai_chatbot/brain_service/README.md)       | HTTP endpoint contracts and adapter obligations                   |
 | [Message Envelope ICD](src/kazusa_ai_chatbot/message_envelope/README.md) | Typed inbound message contract                                    |
 | [Database ICD](src/kazusa_ai_chatbot/db/README.md)                       | Persistence ownership and collection contracts                    |
+| [Action Spec](src/kazusa_ai_chatbot/action_spec/README.md)               | Modality-neutral action contracts and trace handoff               |
 | [Event Logging ICD](src/kazusa_ai_chatbot/event_logging/README.md)        | Sanitized telemetry interface, event taxonomy, and ops statistics |
 | [RAG 2](src/kazusa_ai_chatbot/rag/README.md)                             | Retrieval architecture and evidence projection                    |
 | [Cognition Nodes](src/kazusa_ai_chatbot/nodes/README.md)                 | Layered cognition, dialog, and node-package design contracts      |

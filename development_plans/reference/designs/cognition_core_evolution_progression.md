@@ -95,7 +95,7 @@ Two load-bearing properties already in production:
 | Reasoning over symbolic state | PLN | LLM in-context | LLM reflection prompts | LLM + iterative refinement | LLM graph nodes | LLM only (local Gemma) |
 | Procedural / skill learning | MOSES | None | Plans -> behaviors | Persisted skill code | Few-shot in tools | Defense rules + style overlays (static config, not callable) |
 | Self-modification loop | Goal system + ECAN feedback | Memory edits | Reflection abstracts memories | Auto-curriculum | None | Reflection promotion -> `EvolvingMemoryDoc` |
-| Embodied / world loop | CogPrime perception-action | Tool calls | Town tick | Game tick | Tool calls | Reactive only; one-shot scheduled `send_message` |
+| Embodied / world loop | CogPrime perception-action | Tool calls | Town tick | Game tick | Tool calls | Reactive chat; scheduled adapter sends via `send_message`; private action-spec slice in progress |
 | Idle / self-pacing | Cognitive cycle | None | Reflection at idle | Continual play | None | `self_cognition` module exists; gated off by default |
 | Persistent goals | First-class goal atoms | None | Plans | Auto-generated curricula | None | `character_intent` per turn, not persisted |
 
@@ -127,9 +127,11 @@ production data; the corrections override anything below.
 3. **No procedural / skill memory.** Defense rules and style overlays are
    static configuration learned by reflection, not executable units the
    cognition core can call later.
-4. **One effector.** The dispatcher knows only `send_message`. Confirmed by
-   DB review: 70/70 scheduled events use `send_message`. The character cannot
-   do anything outside chat.
+4. **One adapter-facing dispatcher effector.** Historical DB review confirmed
+   70/70 scheduled events used `send_message`. After the action-spec expansion,
+   dispatcher delivery remains bridge-only for adapter-facing sends while
+   private action capabilities such as memory lifecycle updates and future
+   cognition requests live outside the dispatcher boundary.
 5. **Outward loop exists but is one-shape.** `self_cognition` does fire and
    schedule real outbound through the action-attempt ledger (verified in DB
    review). What is missing is **route variety**: every accepted attempt is

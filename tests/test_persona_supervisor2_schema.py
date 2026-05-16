@@ -44,6 +44,7 @@ class TestGlobalPersonaState:
         # Cognition
         assert "internal_monologue" in hints
         assert "action_directives" in hints
+        assert "action_specs" in hints
         # Dialog
         assert "final_dialog" in hints
         assert "target_addressed_user_ids" in hints
@@ -81,6 +82,7 @@ class TestCognitionState:
             "rag_result",
             "internal_monologue",
             "action_directives",
+            "action_specs",
             "target_addressed_user_ids",
             "target_broadcast",
         ]

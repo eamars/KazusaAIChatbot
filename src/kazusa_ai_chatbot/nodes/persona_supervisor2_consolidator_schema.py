@@ -69,6 +69,7 @@ class ConsolidatorState(TypedDict):
     action_directives: dict
     internal_monologue: str
     final_dialog: list
+    episode_trace_projection: dict
     interaction_subtext: str
     emotional_appraisal: str
     character_intent: str

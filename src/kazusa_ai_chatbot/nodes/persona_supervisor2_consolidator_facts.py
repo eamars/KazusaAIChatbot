@@ -169,6 +169,7 @@ _FACTS_HARVESTER_PROMPT = '''\
 - 当 trigger_source 是 `internal_thought` 时，`decontexualized_input` 是角色内部触发文本，概括当前认知焦点与证据，不是用户原话。
 - `content_anchors` 表示 `{character_name}` 生成回复前的草案意图，只能作为候选计划，不能单独证明承诺已经成立。
 - `final_dialog` 是 `{character_name}` 本轮最终输出；`user_message` 时是可见回复，`internal_thought` 时是私有 finalization，是判断接受、拒绝、保留选择权或形成承诺的最高优先级证据。
+- `episode_trace_projection` 是动作和表面输出的安全摘要；它只能帮助判断本轮实际选择、执行或跳过了哪些动作，不能替代用户事实来源。
 - 当 `final_dialog`、`content_anchors`、`decontexualized_input` 冲突时，承诺判断优先级为 `final_dialog` > `content_anchors` > `decontexualized_input`。
 
 # 来源权威性
@@ -253,6 +254,10 @@ human payload 是以下 JSON：
     "existing_dedup_keys": ["已存在事实或承诺的稳定去重键"],
     "content_anchors": ["回复前的内容锚点"],
     "final_dialog": ["{character_name} 本轮可见回复或私有 finalization"],
+    "episode_trace_projection": {{
+        "action_results": ["动作结果摘要，不包含 handler、raw params 或数据库内部字段"],
+        "surface_outputs": ["表面输出摘要"]
+    }},
     "logical_stance": "CONFIRM | REFUSE | TENTATIVE | DIVERGE | CHALLENGE",
     "character_intent": "PROVIDE | BANTAR | REJECT | EVADE | CONFRONT | DISMISS | CLARIFY"
 }}
@@ -308,6 +313,7 @@ async def facts_harvester(state: ConsolidatorState) -> dict:
         "existing_dedup_keys": sorted(state.get("existing_dedup_keys", set())),
         "content_anchors": state["action_directives"]["linguistic_directives"]["content_anchors"],
         "final_dialog": state["final_dialog"],
+        "episode_trace_projection": state.get("episode_trace_projection", {}),
         "logical_stance": state["logical_stance"],
         "character_intent": state["character_intent"],
     }

@@ -29,6 +29,9 @@ _REQUIRED_OUTPUT_FIELDS: dict[CognitionPromptStage, dict[str, type[object]]] = {
         "character_intent": str,
         "judgment_note": str,
     },
+    "l2d_action_initializer": {
+        "action_specs": list,
+    },
     "l3_contextual_agent": {
         "social_distance": str,
         "emotional_intensity": str,
@@ -73,6 +76,11 @@ def validate_cognition_output_contract(
     """
     if stage not in _REQUIRED_OUTPUT_FIELDS:
         raise CognitionOutputContractError(f"stage is not supported: {stage}")
+
+    if stage != "l2d_action_initializer" and "action_specs" in payload:
+        raise CognitionOutputContractError(
+            f"{stage}.action_specs is only supported for l2d_action_initializer"
+        )
 
     required_fields = _REQUIRED_OUTPUT_FIELDS[stage]
     for field_name, expected_type in required_fields.items():
