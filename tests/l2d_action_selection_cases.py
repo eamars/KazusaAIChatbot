@@ -1,4 +1,4 @@
-"""Fixture contract for live L2d action-initializer routing tests."""
+"""Fixture contract for live L2d action-selection routing tests."""
 
 from __future__ import annotations
 

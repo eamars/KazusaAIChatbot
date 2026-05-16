@@ -86,7 +86,7 @@ def _params_for_kind(kind: str) -> dict:
         return {
             "episode_type": "self_cognition",
             "trigger_at": "2026-05-16T00:30:00+00:00",
-            "context_summary": "Re-evaluate the promise after a natural pause.",
+            "continuation_objective": "Re-evaluate the promise after a natural pause.",
         }
     return {
         "target_channel": "same",

@@ -2,8 +2,9 @@
 
 Agent implementations live in the layer-specific submodules:
   - persona_supervisor2_cognition_l1  (L1 subconscious)
-  - persona_supervisor2_cognition_l2  (L2 consciousness / boundary / judgment)
-  - persona_supervisor2_cognition_l2d (L2d action initialization)
+  - persona_supervisor2_cognition_l2   (L2a/L2b/L2c1 cognition)
+  - persona_supervisor2_cognition_l2c2 (L2c2 social context)
+  - persona_supervisor2_cognition_l2d  (L2d action selection)
 """
 from kazusa_ai_chatbot.nodes.persona_supervisor2_schema import GlobalPersonaState, CognitionState
 from kazusa_ai_chatbot.utils import build_interaction_history_recent, log_preview
@@ -26,9 +27,13 @@ from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition_l2 import (  # noqa: 
     call_boundary_core_agent,
     call_judgment_core_agent,
 )
+from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition_l2c2 import (  # noqa: E402
+    call_social_context_appraisal,
+)
 from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition_l2d import (  # noqa: E402
     call_action_initializer,
 )
+
 
 async def call_cognition_subgraph(state: GlobalPersonaState) -> GlobalPersonaState:
     """
@@ -42,22 +47,37 @@ async def call_cognition_subgraph(state: GlobalPersonaState) -> GlobalPersonaSta
     sub_agent_builder = StateGraph(CognitionState)
 
     sub_agent_builder.add_node("l1_subconscious", call_cognition_subconscious)
-    sub_agent_builder.add_node("l2a_consciousness", call_cognition_consciousness)
-    sub_agent_builder.add_node("l2b_boundary_core", call_boundary_core_agent)
-    sub_agent_builder.add_node("l2c_judgment_core", call_judgment_core_agent)
-    sub_agent_builder.add_node("l2d_action_initializer", call_action_initializer)
+    sub_agent_builder.add_node(
+        "l2a_conscious_framing",
+        call_cognition_consciousness,
+    )
+    sub_agent_builder.add_node("l2b_boundary_appraisal", call_boundary_core_agent)
+    sub_agent_builder.add_node("l2c1_judgment_synthesis", call_judgment_core_agent)
+    sub_agent_builder.add_node(
+        "l2c2_social_context_appraisal",
+        call_social_context_appraisal,
+    )
+    sub_agent_builder.add_node("l2d_action_selection", call_action_initializer)
 
     # Connect
     sub_agent_builder.add_edge(START, "l1_subconscious")
-    sub_agent_builder.add_edge("l1_subconscious", "l2a_consciousness")
-    sub_agent_builder.add_edge("l1_subconscious", "l2b_boundary_core")
+    sub_agent_builder.add_edge("l1_subconscious", "l2a_conscious_framing")
+    sub_agent_builder.add_edge("l1_subconscious", "l2b_boundary_appraisal")
 
-    sub_agent_builder.add_edge("l2a_consciousness", "l2c_judgment_core")
-    sub_agent_builder.add_edge("l2b_boundary_core", "l2c_judgment_core")
+    sub_agent_builder.add_edge(
+        ["l2a_conscious_framing", "l2b_boundary_appraisal"],
+        "l2c1_judgment_synthesis",
+    )
+    sub_agent_builder.add_edge(
+        "l2b_boundary_appraisal",
+        "l2c2_social_context_appraisal",
+    )
 
-    sub_agent_builder.add_edge("l2c_judgment_core", "l2d_action_initializer")
-    sub_agent_builder.add_edge("l2d_action_initializer", END)
-
+    sub_agent_builder.add_edge(
+        ["l2c1_judgment_synthesis", "l2c2_social_context_appraisal"],
+        "l2d_action_selection",
+    )
+    sub_agent_builder.add_edge("l2d_action_selection", END)
 
     cognition_subgraph = sub_agent_builder.compile()
 
@@ -109,6 +129,10 @@ async def call_cognition_subgraph(state: GlobalPersonaState) -> GlobalPersonaSta
     character_intent = result.get("character_intent", "")
     logical_stance = result.get("logical_stance", "")
     judgment_note = result.get("judgment_note", "")
+    social_distance = result["social_distance"]
+    emotional_intensity = result["emotional_intensity"]
+    vibe_check = result["vibe_check"]
+    relational_dynamic = result["relational_dynamic"]
     action_specs = result.get("action_specs", [])
 
     logger.info(
@@ -134,5 +158,9 @@ async def call_cognition_subgraph(state: GlobalPersonaState) -> GlobalPersonaSta
         "character_intent": character_intent,
         "logical_stance": logical_stance,
         "judgment_note": judgment_note,
+        "social_distance": social_distance,
+        "emotional_intensity": emotional_intensity,
+        "vibe_check": vibe_check,
+        "relational_dynamic": relational_dynamic,
     }
     return return_value

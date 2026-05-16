@@ -202,12 +202,12 @@ def _future_cognition_capability() -> CapabilitySpecV1:
             "required": [
                 "episode_type",
                 "trigger_at",
-                "context_summary",
+                "continuation_objective",
             ],
             "properties": {
                 "episode_type": {"type": "string", "enum": ["self_cognition"]},
                 "trigger_at": {"type": ["string", "null"]},
-                "context_summary": {"type": "string"},
+                "continuation_objective": {"type": "string"},
             },
         },
         "output_schema": {

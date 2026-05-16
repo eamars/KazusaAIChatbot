@@ -597,6 +597,7 @@ def test_message_row_text_uses_local_timestamp() -> None:
 def test_cognition_helpers_project_rag_and_history_times() -> None:
     """Cognition L2/L3 helper payloads should not expose stored UTC values."""
     from kazusa_ai_chatbot.nodes import persona_supervisor2_cognition_l2 as l2
+    from kazusa_ai_chatbot.nodes import persona_supervisor2_cognition_l2c2 as l2c2
     from kazusa_ai_chatbot.nodes import persona_supervisor2_cognition_l3 as l3
 
     rag_result = {
@@ -640,8 +641,8 @@ def test_cognition_helpers_project_rag_and_history_times() -> None:
     _assert_no_utc_leak(l3._current_user_rag_bundle(state), "$.l3.user_bundle")
     _assert_no_utc_leak(l3._cognition_rag_result(rag_result), "$.l3.rag")
     _assert_no_utc_leak(
-        l3._surface_history_for_contextual(chat_history),
-        "$.l3.contextual_history",
+        l2c2._surface_history_for_social_context(chat_history),
+        "$.l2c2.social_context_history",
     )
 
 

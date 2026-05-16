@@ -7,7 +7,7 @@
   handling still works, and the full cognition module is validated with real
   QQ private and group conversation cases for user `673225019`.
 - Plan class: high_risk_migration
-- Status: draft
+- Status: in_progress
 - Mandatory skills: `development-plan-writing`, `local-llm-architecture`,
   `no-prepost-user-input`, `py-style`, `test-style-and-execution`,
   `database-data-pull`, `cjk-safety`
@@ -149,8 +149,9 @@ L2d -> END
   `vibe_check`, and `relational_dynamic` from the post-L2d global state.
 - Ensure L3 style, content-anchor, preference, visual side-effect, and L4
   collector still run correctly when `speak` is selected.
-- Ensure no selected `speak` skips L3, L4, and dialog while still producing
-  private trace/consolidation evidence.
+- Ensure selected `speak` runs L3, L4, and dialog exactly once.
+- Ensure episodes without selected `speak` skip L3, L4, and dialog while still
+  producing private trace/consolidation evidence.
 - Update prompt-selection stage names, output-contract stage names, schema
   annotations, tests, docs, and static greps to match the new naming.
 - Add deterministic graph and handoff tests for:
@@ -327,6 +328,12 @@ relational_dynamic: str
 This field is prompt-safe semantic residue. It is not permission, routing,
 delivery, target binding, adapter feasibility, or persistence data.
 
+The L2d prompt input-format section must be updated to name
+`social_context_appraisal` as social evidence from L2c2. The prompt must state
+that this evidence may influence semantic action choice, but it does not grant
+permission, select handlers, create delivery parameters, create persistence
+targets, or override L2c1 judgment.
+
 ### Selected L3 Text Input
 
 `call_l3_text_surface_handler(...)` must seed the selected L3 graph with:
@@ -376,13 +383,16 @@ unbounded chat history.
 
 ## LLM Call And Context Budget
 
-- The L2 shuffle must not add a new LLM call. It moves the existing contextual
-  call from selected L3 text to L2c2.
-- For visible text cases, the total live call count remains equivalent to the
-  previous selected-text path: L1, L2a, L2b, L2c1, L2c2, L2d, selected L3 text
-  agents, and dialog.
-- For no-speak cases, the call count improves because selected L3 and dialog
-  do not run.
+- The L2 shuffle moves the existing contextual call from selected L3 text to
+  L2c2. It does not create a new responsibility, prompt family, retry path, or
+  second contextual pass.
+- For visible text cases, the total live call count remains approximately
+  equivalent to the previous selected-text path: the contextual call runs
+  earlier, then selected L3 text runs without a contextual node.
+- For no-speak cases, this plan intentionally adds one bounded L2c2
+  social-context LLM call before L2d. That is the accepted cost of giving L2d
+  the evidence it needs to select no visible action, private action, delayed
+  action, or multiple actions correctly.
 - Do not add prompt retries, repair calls, or second-pass validators for this
   plan.
 - Live LLM test cases run one at a time. The full QQ private/group evidence
@@ -397,9 +407,11 @@ unbounded chat history.
   - Add `L2c2` social-context node after `L2b`.
   - Join `L2c1` and `L2c2` into `L2d`.
   - Return social context fields with L2/L2d state.
+- `src/kazusa_ai_chatbot/nodes/persona_supervisor2_cognition_l2c2.py`
+  - Own the L2c2 social-context prompt, helper projection, LLM call, and
+    output fields.
 - `src/kazusa_ai_chatbot/nodes/persona_supervisor2_cognition_l3.py`
-  - Rename `call_contextual_agent(...)` to the L2c2 social-context function.
-  - Preserve prompt responsibility and output fields.
+  - Remove L2c2 social-context prompt and handler ownership.
   - Rename `call_collector(...)` to the L4 surface directive collector.
   - Update validation stage names.
 - `src/kazusa_ai_chatbot/nodes/persona_supervisor2_l3_surface.py`
@@ -450,31 +462,43 @@ unbounded chat history.
 
 ## Data Source And Artifacts
 
-Use read-only exports first. Do not query MongoDB ad hoc from shell.
+Use read-only project scripts. Do not query MongoDB ad hoc from shell.
 
-Private history export:
+The real-history evidence must include the assistant rows surrounding user
+`673225019` messages. Filtering `conversation_history` directly by
+`platform_user_id="673225019"` is insufficient for comparison cases because it
+returns only user-authored rows and drops historical assistant replies.
+
+Capture therefore uses scope discovery:
+
+1. Find recent `conversation_history` rows authored by QQ user `673225019`.
+2. Split those rows into private and group scopes by `channel_type`.
+3. For each discovered scope, load the full conversation window for its
+   `platform_channel_id` without filtering by `platform_user_id`.
+4. Select user-message rows by `673225019` that have a nearby historical
+   assistant reply in the same scope.
+5. Build separate private and group case sets from those full windows.
+
+Scope discovery and case capture:
 
 ```powershell
-venv\Scripts\python.exe -m scripts.export_collection conversation_history --filter '{"platform":"qq","platform_user_id":"673225019","channel_type":"private"}' --sort '{"timestamp":-1}' --limit 500 --output test_artifacts\cognition_stage_connection\qq_673225019_private_history.json
+venv\Scripts\python.exe src\scripts\capture_cognition_stage_connection_cases.py --platform qq --platform-user-id 673225019 --history-limit 500 --max-private 20 --max-group 20 --output-dir test_artifacts\cognition_stage_connection
 ```
 
-Group history export:
+The capture script must write these local, uncommitted artifacts:
 
-```powershell
-venv\Scripts\python.exe -m scripts.export_collection conversation_history --filter '{"platform":"qq","platform_user_id":"673225019","channel_type":"group"}' --sort '{"timestamp":-1}' --limit 500 --output test_artifacts\cognition_stage_connection\qq_673225019_group_history.json
-```
+- `qq_673225019_scope_discovery.json`: authored rows and discovered
+  `(channel_type, platform_channel_id)` scopes.
+- `qq_673225019_private_windows.json`: full private conversation windows used
+  for case selection.
+- `qq_673225019_group_windows.json`: full group conversation windows used for
+  case selection.
+- `qq_673225019_private_cases.json`: selected private cases.
+- `qq_673225019_group_cases.json`: selected group cases.
 
-Case capture:
-
-```powershell
-venv\Scripts\python.exe src\scripts\capture_cognition_stage_connection_cases.py --private-export test_artifacts\cognition_stage_connection\qq_673225019_private_history.json --group-export test_artifacts\cognition_stage_connection\qq_673225019_group_history.json --max-private 20 --max-group 20 --output-dir test_artifacts\cognition_stage_connection
-```
-
-The capture script must select user-message rows by QQ user `673225019` that
-have a nearby historical assistant reply in the same conversation. The
-historical assistant reply is the comparison baseline for visible-surface
+The historical assistant reply is the comparison baseline for visible-surface
 routing and qualitative content alignment. If either the private or group
-export contains no valid user/assistant pairs, execution stops and records a
+capture contains no valid user/assistant pairs, execution stops and records a
 data blocker.
 
 ## Overdesign Guardrail
@@ -508,14 +532,15 @@ data blocker.
 7. Update docs and active-plan reconciliation notes.
 8. Add real QQ history capture script and case-set helpers.
 9. Add one-case live LLM integration test for full cognition connection.
-10. Export private and group QQ history for user `673225019`, capture case
-    sets, and run live LLM cases one at a time.
+10. Discover QQ private/group scopes for user `673225019`, capture full
+    conversation windows, build case sets, and run live LLM cases one at a
+    time.
 11. Run static greps, deterministic tests, focused live tests, and independent
     code review.
 
 ## Progress Checklist
 
-- [ ] Stage 1 - deterministic graph contract tests added
+- [x] Stage 1 - deterministic graph contract tests added
   - Covers: tests proving L2c2 runs before L2d, L2d sees social context, L3 no
     longer calls contextual, and L4 still collects social fields.
   - Files: `tests/test_cognition_stage_connection.py`,
@@ -527,7 +552,7 @@ data blocker.
     social context.
   - Sign-off: record failure output in `Execution Evidence`.
 
-- [ ] Stage 2 - stage names and contracts updated
+- [x] Stage 2 - stage names and contracts updated
   - Covers: prompt-selection stage literals, output contract keys, schema
     comments, graph node labels, and test references.
   - Files: `persona_supervisor2_cognition_prompt_selection.py`,
@@ -537,16 +562,16 @@ data blocker.
     `venv\Scripts\python -m pytest tests\test_multi_source_cognition_stage_03_prompt_selection.py tests\test_persona_supervisor2_schema.py -q`.
   - Sign-off: record changed names and test output.
 
-- [ ] Stage 3 - L2c2 social context appraisal wired before L2d
+- [x] Stage 3 - L2c2 social context appraisal wired before L2d
   - Covers: cognition graph edge rewrite and L2d payload update.
   - Files: `persona_supervisor2_cognition.py`,
-    `persona_supervisor2_cognition_l3.py`,
+    `persona_supervisor2_cognition_l2c2.py`,
     `persona_supervisor2_cognition_l2d.py`.
   - Verify:
     `venv\Scripts\python -m pytest tests\test_cognition_stage_connection.py tests\test_persona_supervisor2_action_initializer.py -q`.
   - Sign-off: record graph edge summary and test output.
 
-- [ ] Stage 4 - selected L3/L4 reconnected after L2 shuffle
+- [x] Stage 4 - selected L3/L4 reconnected after L2 shuffle
   - Covers: selected L3 text no longer calls contextual; L3/L4 consume social
     context from state; dialog receives complete `action_directives`.
   - Files: `persona_supervisor2_l3_surface.py`,
@@ -555,7 +580,7 @@ data blocker.
     `venv\Scripts\python -m pytest tests\test_l2d_l3_surface_handoff.py tests\test_dialog_agent.py tests\test_persona_supervisor2.py -q`.
   - Sign-off: record selected-surface and no-speak test output.
 
-- [ ] Stage 5 - documentation and active-plan reconciliation complete
+- [x] Stage 5 - documentation and active-plan reconciliation complete
   - Covers: node README, contracts reference, and active plan notes.
   - Files: `src/kazusa_ai_chatbot/nodes/README.md`,
     `development_plans/reference/designs/cognition_contracts_design.md`,
@@ -567,7 +592,7 @@ data blocker.
     or execution evidence remain.
   - Sign-off: record grep output and doc summary.
 
-- [ ] Stage 6 - real QQ case capture implemented
+- [x] Stage 6 - real QQ case capture implemented
   - Covers: read-only export workflow, case capture script, case loader, and
     trace helper integration.
   - Files: `src/scripts/capture_cognition_stage_connection_cases.py`,
@@ -577,20 +602,18 @@ data blocker.
     `venv\Scripts\python -m py_compile src\scripts\capture_cognition_stage_connection_cases.py tests\cognition_stage_connection_cases.py`.
   - Sign-off: record command output.
 
-- [ ] Stage 7 - real LLM integration test added
+- [x] Stage 7 - real LLM integration test added
   - Covers: one-case live LLM full cognition module test with per-stage trace.
   - Files: `tests/test_cognition_stage_connection_live_llm.py`.
   - Verify:
     `venv\Scripts\python -m py_compile tests\test_cognition_stage_connection_live_llm.py`.
   - Sign-off: record command output.
 
-- [ ] Stage 8 - QQ private/group real LLM evidence captured and inspected
-  - Covers: export, capture, and one-by-one live LLM runs for private and group
-    cases.
+- [x] Stage 8 - QQ private/group real LLM evidence captured and inspected
+  - Covers: scope discovery, full-window capture, case selection, and
+    one-by-one live LLM runs for private and group cases.
   - Commands:
-    `venv\Scripts\python.exe -m scripts.export_collection conversation_history --filter '{"platform":"qq","platform_user_id":"673225019","channel_type":"private"}' --sort '{"timestamp":-1}' --limit 500 --output test_artifacts\cognition_stage_connection\qq_673225019_private_history.json`;
-    `venv\Scripts\python.exe -m scripts.export_collection conversation_history --filter '{"platform":"qq","platform_user_id":"673225019","channel_type":"group"}' --sort '{"timestamp":-1}' --limit 500 --output test_artifacts\cognition_stage_connection\qq_673225019_group_history.json`;
-    `venv\Scripts\python.exe src\scripts\capture_cognition_stage_connection_cases.py --private-export test_artifacts\cognition_stage_connection\qq_673225019_private_history.json --group-export test_artifacts\cognition_stage_connection\qq_673225019_group_history.json --max-private 20 --max-group 20 --output-dir test_artifacts\cognition_stage_connection`.
+    `venv\Scripts\python.exe src\scripts\capture_cognition_stage_connection_cases.py --platform qq --platform-user-id 673225019 --history-limit 500 --max-private 20 --max-group 20 --output-dir test_artifacts\cognition_stage_connection`.
   - Live verify shape for each case:
     `COGNITION_CONNECTION_CASE_FILE=<case-file> COGNITION_CONNECTION_CASE_ID=<case-id> venv\Scripts\python -m pytest tests\test_cognition_stage_connection_live_llm.py::test_live_cognition_stage_connection_case -q -s -m live_llm`.
   - Evidence: record each trace path, case id, source kind, selected action
@@ -687,8 +710,9 @@ changes, or data migration require plan revision before code changes.
 - Selected L3 text does not call contextual/social appraisal.
 - L3 style/content/preference/visual and L4 collector run only when `speak` is
   selected.
-- No selected `speak` skips L3, L4, and dialog while still producing private
-  trace evidence when applicable.
+- Selected `speak` runs L3, L4, and dialog exactly once.
+- Episodes without selected `speak` skip L3, L4, and dialog while still
+  producing private trace evidence when applicable.
 - Real LLM integration traces exist and are inspected for QQ user `673225019`
   private and group cases.
 - No prompt or code path reintroduces response-decision authority outside L2d.
@@ -718,3 +742,224 @@ stage checkbox was signed off.
   changes.
 - Registered required real LLM evidence source: QQ user `673225019` private and
   group chat history.
+
+### 2026-05-16 Stage 1-7 Implementation And Test Preparation
+
+- Agent split:
+  - Production code changes were delegated to worker agent `Bacon`.
+  - Main agent owned test data, deterministic tests, live LLM harness, fixture
+    capture, documentation reconciliation, and verification evidence.
+- Production changes completed by worker:
+  - Renamed internal stages to `l2a_conscious_framing`,
+    `l2b_boundary_appraisal`, `l2c1_judgment_synthesis`,
+    `l2c2_social_context_appraisal`, `l2d_action_selection`, and
+    `l4_surface_directive_collector`.
+  - Moved the existing social/contextual LLM before L2d as L2c2.
+  - Rewired selected L3 text to consume L2c2 social fields from state.
+  - Updated reflection/internal-thought dry-run prompt keys.
+- Added test and capture surfaces:
+  - `src/scripts/capture_cognition_stage_connection_cases.py`.
+  - `tests/cognition_stage_connection_cases.py`.
+  - `tests/test_cognition_stage_connection.py`.
+  - `tests/test_cognition_stage_connection_live_llm.py`.
+  - Renamed L2d frozen-case tests from `l2d_action_initializer` to
+    `l2d_action_selection`.
+- Deterministic verification:
+  - `venv\Scripts\python.exe -m py_compile src\scripts\capture_cognition_stage_connection_cases.py tests\cognition_stage_connection_cases.py tests\test_cognition_stage_connection.py tests\test_cognition_stage_connection_live_llm.py tests\test_l2d_l3_surface_handoff.py tests\test_multi_source_cognition_stage_03_prompt_selection.py tests\test_persona_supervisor2_action_initializer.py tests\test_l2d_action_selection_cases.py tests\test_l2d_action_selection_live_llm.py`
+    passed.
+  - `venv\Scripts\python.exe -m pytest tests\test_cognition_stage_connection.py tests\test_l2d_l3_surface_handoff.py tests\test_persona_supervisor2_action_initializer.py tests\test_multi_source_cognition_stage_03_prompt_selection.py tests\test_l2d_action_selection_cases.py -q`
+    passed: 61 tests.
+  - `venv\Scripts\python.exe -m pytest tests\test_cognition_interaction_style_context.py tests\test_conversation_progress_cognition.py tests\test_conversation_progress_history_policy.py -q`
+    passed: 18 tests.
+  - `venv\Scripts\python.exe -m pytest tests\test_multi_source_cognition_stage_07_reflection_dry_run.py tests\test_multi_source_cognition_stage_08_internal_thought_dry_run.py tests\test_multi_source_cognition_stage_09_multimodal_input_sources.py -q`
+    initially found stale expectations, then passed after updating tests for
+    L2c2 dry-run invocation and prompt-safe media projection: 60 tests.
+  - `venv\Scripts\python.exe -m pytest tests\test_multi_source_cognition_stage_00_regression_baseline.py -q`
+    passed: 12 tests.
+  - `venv\Scripts\python.exe -m pytest tests\test_l2d_l3_surface_handoff.py tests\test_persona_supervisor2.py tests\test_dialog_agent.py -q`
+    passed: 27 tests.
+  - `venv\Scripts\python.exe -m pytest tests\test_multi_source_cognition_stage_03_prompt_selection.py tests\test_persona_supervisor2_schema.py -q`
+    passed: 52 tests.
+- Static checks:
+  - `rg -n "expression_willingness|expression_posture|conditional_skip_dialog_agent|_cognition_requests_silence" src\kazusa_ai_chatbot\nodes tests -g "*.py" -g "*.md"`
+    returned no matches.
+  - `rg -n "l2d_action_initializer.*l3_|l3_.*l2d_action_initializer" src\kazusa_ai_chatbot\nodes tests -g "*.py"`
+    returned no matches.
+  - `rg -n "l3_contextual_agent|l2c_judgment_core|l2d_action_initializer|l4_collector|call_contextual_agent|call_collector" src\kazusa_ai_chatbot\nodes tests -g "*.py" -g "*.md"`
+    returned no matches after updating `src/kazusa_ai_chatbot/nodes/README.md`.
+- Documentation reconciliation:
+  - Updated `src/kazusa_ai_chatbot/nodes/README.md` to document L2c2 social
+    context before L2d and L3 consuming social fields from state.
+  - Updated `development_plans/reference/designs/cognition_contracts_design.md`
+    to include L2c2 social-context evidence in the long-term contract path.
+  - Added reconciliation notes to
+    `development_plans/active/short_term/l2d_l3_surface_handoff_plan.md` and
+    `development_plans/active/short_term/modality_neutral_action_spec_effector_expansion_plan.md`.
+- Stage sign-off:
+  - Stage 1 signed off with deterministic graph-contract tests, but the
+    original pre-implementation failing run was not captured in this session
+    because production implementation ran in parallel.
+  - Stages 2-7 signed off by deterministic tests, static greps, capture-script
+    help, and py_compile.
+
+### 2026-05-16 L2c2 File Ownership Refactor Evidence
+
+- Moved L2c2 social-context implementation out of
+  `persona_supervisor2_cognition_l3.py` into dedicated
+  `persona_supervisor2_cognition_l2c2.py`.
+- Updated the cognition graph import, LLM prompt regression script, affected
+  unit tests, and node README to treat L2c2 as an L2 module.
+- File-size check:
+  - `persona_supervisor2_cognition_l2.py`: 833 lines.
+  - `persona_supervisor2_cognition_l2c2.py`: 198 lines.
+  - `persona_supervisor2_cognition_l2d.py`: 586 lines.
+  - `persona_supervisor2_cognition_l3.py`: 974 lines.
+- Static ownership checks:
+  - `rg -n "_CONTEXTUAL_AGENT_PROMPT|_contextual_agent_llm|call_social_context_appraisal|L2c2|l2c2_social_context_appraisal|_surface_history_for_contextual" src\kazusa_ai_chatbot\nodes\persona_supervisor2_cognition_l3.py`
+    returned no matches.
+  - `rg -n "_surface_history_for_contextual|call_contextual_agent|l3_contextual_agent" src\kazusa_ai_chatbot tests src\scripts -g "*.py" -g "*.md"`
+    returned no matches.
+- Verification:
+  - `venv\Scripts\python.exe -m py_compile src\kazusa_ai_chatbot\nodes\persona_supervisor2_cognition.py src\kazusa_ai_chatbot\nodes\persona_supervisor2_cognition_l2c2.py src\kazusa_ai_chatbot\nodes\persona_supervisor2_cognition_l3.py tests\test_conversation_progress_history_policy.py tests\test_llm_time_payload_projection.py`
+    passed.
+  - `venv\Scripts\python.exe -m pytest tests\test_conversation_progress_cognition.py tests\test_conversation_progress_history_policy.py tests\test_multi_source_cognition_stage_00_regression_baseline.py tests\test_llm_time_payload_projection.py -q`
+    passed: 45 tests.
+  - `venv\Scripts\python.exe -m pytest tests\test_multi_source_cognition_stage_03_prompt_selection.py tests\test_l2d_l3_surface_handoff.py tests\test_persona_supervisor2_action_initializer.py -q`
+    passed: 52 tests.
+  - `venv\Scripts\python.exe -m pytest tests\test_multi_source_cognition_stage_07_reflection_dry_run.py tests\test_multi_source_cognition_stage_08_internal_thought_dry_run.py tests\test_multi_source_cognition_stage_09_multimodal_input_sources.py -q`
+    passed: 60 tests.
+
+### 2026-05-16 Stage 8 Partial Live LLM Evidence
+
+- Capture command:
+  - `venv\Scripts\python.exe src\scripts\capture_cognition_stage_connection_cases.py --platform qq --platform-user-id 673225019 --history-limit 500 --max-private 20 --max-group 20 --output-dir test_artifacts\cognition_stage_connection`
+    produced 20 private and 20 group cases.
+- Captured local artifacts:
+  - `test_artifacts/cognition_stage_connection/qq_673225019_scope_discovery.json`.
+  - `test_artifacts/cognition_stage_connection/qq_673225019_private_windows.json`.
+  - `test_artifacts/cognition_stage_connection/qq_673225019_group_windows.json`.
+  - `test_artifacts/cognition_stage_connection/qq_673225019_private_cases.json`.
+  - `test_artifacts/cognition_stage_connection/qq_673225019_group_cases.json`.
+- Fixture sanity checks:
+  - `venv\Scripts\python.exe src\scripts\capture_cognition_stage_connection_cases.py --help`
+    passed.
+  - `venv\Scripts\python.exe -m pytest tests\test_cognition_stage_connection.py -q`
+    passed: 2 tests.
+- Live LLM runs executed one case at a time and inspected:
+  - `qq_private_001`: first run exposed a test-harness bug that rebuilt the
+    L2d prompt from reduced final state and failed with missing
+    `boundary_core_assessment`. The harness was fixed to capture the L2d
+    prompt at the actual L2d boundary.
+  - `qq_private_001` rerun passed. Trace:
+    `test_artifacts/llm_traces/cognition_stage_connection_live_llm__qq_private_001.json`.
+    Summary: source `qq_private`, action kinds `["speak"]`, all core stages
+    present including L2c2 and L2d prompt payload, selected L3/L4/dialog ran,
+    comparison report `ok=true`, final dialog count 6.
+  - `qq_group_001` passed. Trace:
+    `test_artifacts/llm_traces/cognition_stage_connection_live_llm__qq_group_001.json`.
+    Summary: source `qq_group`, action kinds `["speak"]`, all core stages
+    present including L2c2 and L2d prompt payload, selected L3/L4/dialog ran,
+    comparison report `ok=true`, final dialog count 3.
+- Stage 8 remains partial: the plan still requires one-by-one execution and
+  inspection of the remaining 19 private and 19 group captured cases before
+  final Stage 8 sign-off.
+
+### 2026-05-16 Stage 8 Full Live LLM Evidence And Review
+
+- Capture command rerun:
+  - `venv\Scripts\python.exe src\scripts\capture_cognition_stage_connection_cases.py --platform qq --platform-user-id 673225019 --history-limit 500 --max-private 20 --max-group 20 --output-dir test_artifacts\cognition_stage_connection`
+    produced 20 private cases and 20 group cases from 9 discovered QQ scopes.
+- Live LLM execution:
+  - Ran `tests\test_cognition_stage_connection_live_llm.py::test_live_cognition_stage_connection_case`
+    one case at a time for all 40 captured cases.
+  - All 40 cases passed the structural test: selected visible `speak`, ran
+    selected L3, ran L4 surface directive collector, and produced dialog.
+  - Full per-case before/current comparison, manual judgment, action kinds,
+    route summary, and trace path are recorded in:
+    `test_artifacts/cognition_stage_connection/stage8_live_llm_review_20260516.md`.
+- Baseline interpretation caveat:
+  - Historical QQ conversation rows include mixed LLM outputs. Some stronger
+    baseline replies came from a non-local model, so the before/current review
+    is not an apple-to-apple quality comparison against the current local
+    Gemma path.
+  - Use the review primarily for structural routing, continuity failure
+    discovery, and capability-gap discovery; do not use it as a direct local
+    model quality score.
+- Per-case review counts:
+  - `improvement`: 8.
+  - `neutral/aligned` or `mostly neutral`: 2.
+  - `mixed`: 3.
+  - `mixed/regression`: 2.
+  - `slight/mild regression`: 9.
+  - `regression`: 12.
+  - `major regression`: 3.
+  - `major regression/action gap`: 1.
+- Architectural positives found:
+  - L2d-to-L3/L4/dialog structural handoff is complete in all 40 cases.
+  - Multiple-action selection appeared in private cases where a visible reply
+    and private `trigger_future_cognition` were both appropriate.
+  - Several group cases improved current-turn grounding by avoiding stale
+    repeated answers or unsupported 5090 claims.
+- Quality blockers found before Stage 9 approval:
+  - Private continuity regressed frequently: the current path often lost
+    concrete open-loop details such as the tomorrow showcase, special spice,
+    South Island clue, and challenge state.
+  - Some boundary/commitment cases weakened compared with baseline, especially
+    `qq_private_007`, `qq_private_017`, and `qq_private_019`.
+  - Group context sometimes regressed on identity/mention continuity and
+    current-turn alignment, especially `qq_group_002`, `qq_group_003`, and
+    `qq_group_007`.
+  - `qq_group_019` exposed an action gap: the dialog promised to search, but
+    L2d emitted only `speak`; no actual search action was selected.
+- Stage 8 status:
+  - Evidence capture and inspection are complete.
+  - Do not promote to final Stage 9 approval until the quality blockers above
+    are triaged or explicitly accepted as known regressions.
+
+### 2026-05-16 Stage 8 Future-Cognition Chaining Probe
+
+- Shortlisted Stage 8 cases where L2d selected `trigger_future_cognition`:
+  - `qq_private_001`: re-check if identity/past-detail pressure continues.
+  - `qq_private_006`: re-check if the user clarifies or changes the
+    progression direction.
+  - `qq_private_015`: re-check if the challenge progresses and the conditional
+    relationship/nickname expectation should be revisited.
+- Probe mode:
+  - Non-persistent live probe. Used the actual
+    `build_future_cognition_scheduled_event(...)` handler and scheduled
+    self-cognition case projection.
+  - Ran the real self-cognition cognition path. Consolidation was stubbed to
+    avoid production memory/state writes.
+- Artifact:
+  - `test_artifacts/cognition_stage_connection/future_cognition_chain/future_cognition_chaining_probe_20260516.md`.
+- Result:
+  - All three `trigger_future_cognition` specs validated and projected into
+    due scheduled self-cognition cases.
+  - The follow-up cognition cycles ran, but the original projected cases
+    carried only a short lossy context summary and no fresh visible evidence.
+    The model therefore chose audit-only or silent behavior in the tested runs.
+  - Full private finalization failed for all three no-action follow-up cycles
+    with `KeyError: 'linguistic_directives'` in `dialog_agent`, because the
+    private-finalization dialog path expects
+    `action_directives.linguistic_directives` even when cognition selected no
+    visible/private action.
+  - `qq_private_015` emitted another `trigger_future_cognition` from the
+    follow-up audit-only cycle, exposing a possible self-perpetuating chain
+    unless deterministic execution enforces continuation bounds.
+- Stage 8 chaining conclusion at the time of the original probe:
+  - Scheduling/projection works.
+  - Follow-up cognition executes.
+  - End-to-end chaining was not production-ready until the lossy summary
+    contract, no-action/private-finalization handling, and continuation-depth
+    enforcement were corrected.
+- 2026-05-16 follow-up verification after continuation-objective and
+  self-cognition surface bridge fixes:
+  - `qq_group_019` was rerun through a projected scheduled future-cognition
+    case using the real cognition, selected L3 text surface, and dialog path.
+  - Artifact:
+    `test_artifacts/cognition_stage_connection/future_cognition_chain/qq_group_019_after_runner_fix_real_dialog`.
+  - Result: selected route `action_candidate`, action kinds `speak`,
+    `rag_calls=1`, `cognition_calls=1`, `dialog_calls=1`.
+  - Candidate text was generated without the earlier
+    `KeyError: 'linguistic_directives'`, proving the self-cognition `speak`
+    path now hands off through L3 text directives before dialog.

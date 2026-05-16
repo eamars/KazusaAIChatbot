@@ -16,11 +16,11 @@ from kazusa_ai_chatbot.cognition_episode import (
 
 CognitionPromptStage = Literal[
     "l1_subconscious",
-    "l2a_consciousness",
-    "l2b_boundary_core",
-    "l2c_judgment_core",
-    "l2d_action_initializer",
-    "l3_contextual_agent",
+    "l2a_conscious_framing",
+    "l2b_boundary_appraisal",
+    "l2c1_judgment_synthesis",
+    "l2c2_social_context_appraisal",
+    "l2d_action_selection",
     "l3_style_agent",
     "l3_content_anchor_agent",
     "l3_preference_adapter",
@@ -72,7 +72,6 @@ _INTERNAL_THOUGHT_INPUT_SOURCES: list[InputSource] = ["internal_monologue"]
 _INTERNAL_THOUGHT_OUTPUT_MODES = frozenset(("think_only", "preview", "silent"))
 _IMAGE_OBSERVATION_PAYLOAD_FIELDS = (
     "observation_origin",
-    "source_message_id",
     "media_kind",
     "summary_status",
     "summary",

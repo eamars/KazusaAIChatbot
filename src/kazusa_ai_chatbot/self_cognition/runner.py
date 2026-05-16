@@ -9,6 +9,8 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
+from kazusa_ai_chatbot import event_logging
+from kazusa_ai_chatbot.action_spec.registry import SPEAK_CAPABILITY
 from kazusa_ai_chatbot.cognition_episode import (
     CognitiveEpisode,
     validate_cognitive_episode,
@@ -24,10 +26,12 @@ from kazusa_ai_chatbot.nodes.persona_supervisor2_consolidator import (
 from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition import (
     call_cognition_subgraph,
 )
+from kazusa_ai_chatbot.nodes.persona_supervisor2_l3_surface import (
+    call_l3_text_surface_handler,
+)
 from kazusa_ai_chatbot.nodes.persona_supervisor2_rag_supervisor2 import (
     call_rag_supervisor,
 )
-from kazusa_ai_chatbot import event_logging
 from kazusa_ai_chatbot.rag.user_memory_unit_retrieval import (
     empty_user_memory_context,
 )
@@ -38,6 +42,12 @@ from kazusa_ai_chatbot.time_context import build_character_time_context
 SelfCognitionClient = Callable[[dict[str, Any]], Any]
 RagClient = Callable[..., Any]
 ConsolidationBuildResult = tuple[dict[str, Any], dict[str, Any], bool]
+RAG_BACKED_CASE_NAMES = frozenset(
+    (
+        models.CASE_TOPIC_RAG_FOLLOWUP,
+        models.CASE_SCHEDULED_FUTURE_COGNITION,
+    )
+)
 
 
 def run_self_cognition_case(
@@ -223,7 +233,7 @@ async def build_self_cognition_case_artifacts_async(
 
     rag_output: dict[str, Any] | None = None
     rag_calls = 0
-    if case_name == models.CASE_TOPIC_RAG_FOLLOWUP:
+    if case_name in RAG_BACKED_CASE_NAMES:
         rag_request = projection.build_rag_request(case)
         active_rag_client = rag_client or _default_rag_client
         rag_output = await _call_maybe_async(
@@ -245,7 +255,11 @@ async def build_self_cognition_case_artifacts_async(
     artifact_payloads[models.ARTIFACT_COGNITION_INPUT] = cognition_input
 
     active_cognition_client = cognition_client or _default_cognition_client
-    cognition_state = _build_cognition_state(case, rendered_packet)
+    cognition_state = _build_cognition_state(
+        case,
+        rendered_packet,
+        rag_output=rag_output,
+    )
     cognition_output = await _call_maybe_async(
         active_cognition_client,
         cognition_state,
@@ -273,7 +287,7 @@ async def build_self_cognition_case_artifacts_async(
         if action_attempt["status"] == models.ACTION_ATTEMPT_STATUS_CANDIDATE:
             action_text = tracking.extract_action_candidate_text(cognition_output)
             if not action_text:
-                dialog_state = _build_dialog_state(
+                dialog_state = await _build_dialog_state_with_text_surface(
                     cognition_state,
                     cognition_output,
                     usage_mode=DIALOG_USAGE_MODE_SELF_COGNITION_ACTION_CANDIDATE,
@@ -306,6 +320,7 @@ async def build_self_cognition_case_artifacts_async(
                 cognition_state,
                 cognition_output,
                 rendered_packet,
+                selected_route=selected_route,
                 dialog_client=active_dialog_client,
                 dialog_output=dialog_output,
             )
@@ -479,6 +494,7 @@ async def _build_consolidation_ready_state(
     cognition_output: dict[str, Any],
     rendered_packet: str,
     *,
+    selected_route: str,
     dialog_client: SelfCognitionClient,
     dialog_output: dict[str, Any] | None,
 ) -> ConsolidationBuildResult:
@@ -489,6 +505,7 @@ async def _build_consolidation_ready_state(
         cognition_output: Shared cognition graph output.
         rendered_packet: Internal-thought evidence text used as the
             decontextualized consolidation input.
+        selected_route: Route selected for the self-cognition run.
         dialog_client: Existing dialog/finalization seam.
         dialog_output: Previously rendered dialog output, if the action route
             already needed it.
@@ -500,8 +517,11 @@ async def _build_consolidation_ready_state(
 
     dialog_called = False
     active_dialog_output = dialog_output
-    if active_dialog_output is None:
-        dialog_state = _build_dialog_state(
+    if active_dialog_output is None and _needs_private_dialog_finalization(
+        selected_route,
+        cognition_output,
+    ):
+        dialog_state = await _build_dialog_state_with_text_surface(
             cognition_state,
             cognition_output,
             usage_mode=DIALOG_USAGE_MODE_SELF_COGNITION_PRIVATE_FINALIZATION,
@@ -511,6 +531,14 @@ async def _build_consolidation_ready_state(
             dialog_state,
         )
         dialog_called = True
+    elif active_dialog_output is None:
+        active_dialog_output = {
+            "final_dialog": [],
+            "mention_target_user": False,
+            "dialog_usage_mode": (
+                DIALOG_USAGE_MODE_SELF_COGNITION_PRIVATE_FINALIZATION
+            ),
+        }
 
     consolidation_state = _build_consolidation_state(
         cognition_state,
@@ -520,6 +548,34 @@ async def _build_consolidation_ready_state(
     )
     return_value = (consolidation_state, active_dialog_output, dialog_called)
     return return_value
+
+
+def _needs_private_dialog_finalization(
+    selected_route: str,
+    cognition_output: dict[str, Any],
+) -> bool:
+    """Return whether consolidation needs a private text surface first."""
+
+    if selected_route == models.ROUTE_ACTION_CANDIDATE:
+        return True
+
+    action_directives = cognition_output.get("action_directives")
+    if not isinstance(action_directives, dict):
+        return False
+
+    linguistic_directives = action_directives.get("linguistic_directives")
+    if not isinstance(linguistic_directives, dict):
+        return False
+
+    content_anchors = linguistic_directives.get("content_anchors")
+    if not isinstance(content_anchors, list):
+        return False
+
+    needs_finalization = any(
+        isinstance(anchor, str) and bool(anchor.strip())
+        for anchor in content_anchors
+    )
+    return needs_finalization
 
 
 def _build_consolidation_state(
@@ -541,6 +597,7 @@ def _build_consolidation_state(
 def _build_cognition_state(
     case: models.SelfCognitionCase,
     rendered_packet: str,
+    rag_output: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Build the shared cognition graph state for an idle dry run."""
 
@@ -588,7 +645,7 @@ def _build_cognition_state(
         "should_respond": False,
         "decontexualized_input": models.SELF_COGNITION_INPUT_TEXT,
         "referents": [],
-        "rag_result": _rag_result(case),
+        "rag_result": _rag_result(case, rag_output=rag_output),
         "internal_monologue": "",
         "action_directives": {},
         "interaction_subtext": "",
@@ -622,6 +679,75 @@ def _build_dialog_state(
     dialog_state["mention_target_user"] = False
     dialog_state["dialog_usage_mode"] = usage_mode
     return dialog_state
+
+
+async def _build_dialog_state_with_text_surface(
+    cognition_state: dict[str, Any],
+    cognition_output: dict[str, Any],
+    *,
+    usage_mode: str,
+) -> dict[str, Any]:
+    """Build dialog input, running selected L3 text directives when needed."""
+
+    dialog_state = _build_dialog_state(
+        cognition_state,
+        cognition_output,
+        usage_mode=usage_mode,
+    )
+    if _needs_text_surface_directives(dialog_state):
+        surface_update = await _call_maybe_async(
+            call_l3_text_surface_handler,
+            dialog_state,
+        )
+        dialog_state.update(surface_update)
+    return dialog_state
+
+
+def _needs_text_surface_directives(state: dict[str, Any]) -> bool:
+    """Return whether selected speak needs L3 directives before dialog."""
+
+    if _has_collected_text_directives(state):
+        return_value = False
+        return return_value
+    return_value = _has_selected_speak_action(state)
+    return return_value
+
+
+def _has_selected_speak_action(state: dict[str, Any]) -> bool:
+    """Return whether L2d selected the text surface action."""
+
+    raw_specs = state.get("action_specs")
+    if not isinstance(raw_specs, list):
+        return_value = False
+        return return_value
+    for action_spec in raw_specs:
+        if not isinstance(action_spec, dict):
+            continue
+        kind = action_spec.get("kind")
+        if kind == SPEAK_CAPABILITY:
+            return_value = True
+            return return_value
+    return_value = False
+    return return_value
+
+
+def _has_collected_text_directives(state: dict[str, Any]) -> bool:
+    """Return whether dialog already has collected L3 text directives."""
+
+    action_directives = state.get("action_directives")
+    if not isinstance(action_directives, dict):
+        return_value = False
+        return return_value
+    linguistic_directives = action_directives.get("linguistic_directives")
+    if not isinstance(linguistic_directives, dict):
+        return_value = False
+        return return_value
+    contextual_directives = action_directives.get("contextual_directives")
+    if not isinstance(contextual_directives, dict):
+        return_value = False
+        return return_value
+    return_value = True
+    return return_value
 
 
 def _dialog_text(dialog_output: dict[str, Any]) -> str:
@@ -791,14 +917,23 @@ def _budget(
     return budget
 
 
-def _rag_result(case: models.SelfCognitionCase) -> dict[str, Any]:
+def _rag_result(
+    case: models.SelfCognitionCase,
+    rag_output: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     """Return supplied RAG context or the existing empty RAG projection."""
 
     source_ref_commitments = _active_commitments_from_source_refs(case)
-    rag_output = case.get("rag_output")
     if isinstance(rag_output, dict):
         return_value = _merge_source_ref_commitments(
             rag_output,
+            source_ref_commitments,
+        )
+        return return_value
+    case_rag_output = case.get("rag_output")
+    if isinstance(case_rag_output, dict):
+        return_value = _merge_source_ref_commitments(
+            case_rag_output,
             source_ref_commitments,
         )
         return return_value

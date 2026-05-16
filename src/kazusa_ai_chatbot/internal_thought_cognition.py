@@ -31,10 +31,11 @@ _INTERNAL_THOUGHT_DRY_RUN_OUTPUT_MODES = frozenset(
 )
 _INTERNAL_THOUGHT_DRY_RUN_PROMPT_KEYS = [
     "l1_subconscious.internal_thought_internal_monologue",
-    "l2a_consciousness.internal_thought_internal_monologue",
-    "l2b_boundary_core.internal_thought_internal_monologue",
-    "l2c_judgment_core.internal_thought_internal_monologue",
-    "l2d_action_initializer.internal_thought_internal_monologue",
+    "l2a_conscious_framing.internal_thought_internal_monologue",
+    "l2b_boundary_appraisal.internal_thought_internal_monologue",
+    "l2c1_judgment_synthesis.internal_thought_internal_monologue",
+    "l2c2_social_context_appraisal.internal_thought_internal_monologue",
+    "l2d_action_selection.internal_thought_internal_monologue",
 ]
 _INTERNAL_THOUGHT_DRY_RUN_PROMPT_KEYS_WITHOUT_VISUAL = list(
     _INTERNAL_THOUGHT_DRY_RUN_PROMPT_KEYS

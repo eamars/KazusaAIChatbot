@@ -31,10 +31,11 @@ _REFLECTION_DRY_RUN_OUTPUT_MODES = frozenset(
 )
 _REFLECTION_DRY_RUN_PROMPT_KEYS = [
     "l1_subconscious.reflection_signal_reflection_artifact",
-    "l2a_consciousness.reflection_signal_reflection_artifact",
-    "l2b_boundary_core.reflection_signal_reflection_artifact",
-    "l2c_judgment_core.reflection_signal_reflection_artifact",
-    "l2d_action_initializer.reflection_signal_reflection_artifact",
+    "l2a_conscious_framing.reflection_signal_reflection_artifact",
+    "l2b_boundary_appraisal.reflection_signal_reflection_artifact",
+    "l2c1_judgment_synthesis.reflection_signal_reflection_artifact",
+    "l2c2_social_context_appraisal.reflection_signal_reflection_artifact",
+    "l2d_action_selection.reflection_signal_reflection_artifact",
 ]
 _REFLECTION_DRY_RUN_INPUT_TEXT = (
     "Reflection dry run over promoted reflection artifact."

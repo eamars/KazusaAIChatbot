@@ -351,7 +351,7 @@ async def call_cognition_consciousness(state: CognitionState) -> CognitionState:
     episode = state["cognitive_episode"]
     selection = select_cognition_prompt_variant(
         episode=episode,
-        stage="l2a_consciousness",
+        stage="l2a_conscious_framing",
     )
     prompt_template = {
         "text_chat_user_message": _COGNITION_CONSCIOUSNESS_PROMPT,
@@ -427,7 +427,7 @@ async def call_cognition_consciousness(state: CognitionState) -> CognitionState:
         "logical_stance": logical_stance,
     }
     validate_cognition_output_contract(
-        stage="l2a_consciousness",
+        stage="l2a_conscious_framing",
         payload=return_value,
     )
     return return_value
@@ -647,7 +647,7 @@ async def call_boundary_core_agent(state: CognitionState) -> CognitionState:
     episode = state["cognitive_episode"]
     selection = select_cognition_prompt_variant(
         episode=episode,
-        stage="l2b_boundary_core",
+        stage="l2b_boundary_appraisal",
     )
     prompt_template = {
         "text_chat_user_message": _BOUNDARY_CORE_PROMPT,
@@ -737,7 +737,7 @@ async def call_boundary_core_agent(state: CognitionState) -> CognitionState:
         }
     }
     validate_cognition_output_contract(
-        stage="l2b_boundary_core",
+        stage="l2b_boundary_appraisal",
         payload=return_value,
     )
     return return_value
@@ -903,7 +903,7 @@ async def call_judgment_core_agent(state: CognitionState) -> CognitionState:
     episode = state["cognitive_episode"]
     selection = select_cognition_prompt_variant(
         episode=episode,
-        stage="l2c_judgment_core",
+        stage="l2c1_judgment_synthesis",
     )
     prompt_template = {
         "text_chat_user_message": _JUDGEMENT_CORE_PROMPT,
@@ -980,7 +980,7 @@ async def call_judgment_core_agent(state: CognitionState) -> CognitionState:
         "judgment_note": judgment_note,
     }
     validate_cognition_output_contract(
-        stage="l2c_judgment_core",
+        stage="l2c1_judgment_synthesis",
         payload=return_value,
     )
     return return_value

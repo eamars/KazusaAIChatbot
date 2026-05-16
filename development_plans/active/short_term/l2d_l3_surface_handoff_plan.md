@@ -20,11 +20,30 @@
   no selected visible surface skips L3/dialog but still consolidates;
   text delivery is derived after dialog, never selected directly by L2d;
   `trigger_future_cognition` creates a scheduled follow-up cognition contract
-  without calling cognition inline; visual directives remain a side effect of
-  text-surface handling only
+  without calling cognition inline; future cognition handoff text is one
+  precise semantic `continuation_objective`, not a lossy context summary;
+  visual directives remain a side effect of text-surface handling only
 
 This plan is an in-progress blocker discovered during execution of
 `modality_neutral_action_spec_effector_expansion_plan.md`.
+
+2026-05-16 reconciliation: this plan's original context describes the
+pre-reconnection graph where the contextual/social agent still lived under
+selected L3. `cognition_llm_stage_reconnection_plan.md` supersedes that
+placement. The current approved topology is:
+
+```text
+l2c1_judgment_synthesis
+  + l2c2_social_context_appraisal
+  -> l2d_action_selection
+  -> selected L3 style/content/preference/visual
+  -> l4_surface_directive_collector
+```
+
+The semantic responsibility is unchanged: the former contextual agent still
+emits only `social_distance`, `emotional_intensity`, `vibe_check`, and
+`relational_dynamic`; it is now L2c2 evidence for L2d and later selected L3
+surfaces.
 
 ## Context
 
@@ -62,7 +81,10 @@ action chains:
    appropriate deterministic delivery edge.
 2. `trigger_future_cognition`: L2d selects a private follow-up cognition
    request. The orchestrator/scheduler owner records a future cognition slot.
-   It must not call cognition directly from the action handler.
+   It must not call cognition directly from the action handler. The scheduled
+   slot must carry exactly one LLM-facing `continuation_objective` string as the
+   future thinking contract. Typed scheduler fields, source refs, target scope,
+   and action-attempt IDs remain deterministic-only metadata.
 
 `memory_lifecycle_update` remains a private action handler from the current
 plan. It does not require L3. L3 visual remains a text-surface side effect in
@@ -456,7 +478,11 @@ The handler must validate:
 The scheduled event must carry a prompt-safe source/action ref that the future
 self-cognition path can use as a typed trigger. It must not contain raw prompt
 text, final dialog, private source packet text, credentials, or arbitrary model
-output.
+output. Its only LLM-facing handoff payload is one semantic
+`continuation_objective` string. If the future cognition action is paired with a
+concrete sibling action, such as `speak`, the sibling action's semantic `detail`
+is the preferred source for that objective. If no faithful one-string objective
+can be built, scheduling must fail closed.
 
 ## LLM Call And Context Budget
 

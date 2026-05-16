@@ -6,6 +6,7 @@ import hashlib
 import json
 from typing import Any
 
+from kazusa_ai_chatbot.action_spec.registry import SPEAK_CAPABILITY
 from kazusa_ai_chatbot.self_cognition import models
 
 
@@ -224,6 +225,11 @@ def classify_route(
     explicit_route = _explicit_route(cognition_output)
     if explicit_route:
         route = _route_with_action_attempt(explicit_route, action_attempt)
+        return route
+
+    action_spec_route = _route_from_action_specs(cognition_output)
+    if action_spec_route:
+        route = _route_with_action_attempt(action_spec_route, action_attempt)
         return route
 
     anchor_route = _route_from_content_anchors(cognition_output)
@@ -451,6 +457,24 @@ def _explicit_route(cognition_output: dict[str, Any]) -> str:
             return return_value
 
     return_value = ""
+    return return_value
+
+
+def _route_from_action_specs(cognition_output: dict[str, Any]) -> str:
+    """Map selected action specs to the self-cognition visible route."""
+
+    action_specs = cognition_output.get("action_specs")
+    if not isinstance(action_specs, list) or not action_specs:
+        return_value = ""
+        return return_value
+    for action_spec in action_specs:
+        if not isinstance(action_spec, dict):
+            continue
+        kind = action_spec.get("kind")
+        if kind == SPEAK_CAPABILITY:
+            return_value = models.ROUTE_ACTION_CANDIDATE
+            return return_value
+    return_value = models.ROUTE_AUDIT_ONLY
     return return_value
 
 

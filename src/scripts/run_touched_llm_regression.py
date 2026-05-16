@@ -434,8 +434,8 @@ def _cases() -> dict[str, LLMCase]:
             CHARACTER_FORMAT,
         ),
         LLMCase(
-            "cognition_l3_contextual",
-            "kazusa_ai_chatbot.nodes.persona_supervisor2_cognition_l3",
+            "cognition_l2c2_social_context",
+            "kazusa_ai_chatbot.nodes.persona_supervisor2_cognition_l2c2",
             "_CONTEXTUAL_AGENT_PROMPT",
             "_contextual_agent_llm",
             BASE_COGNITION_PAYLOAD,

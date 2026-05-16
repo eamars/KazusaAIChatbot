@@ -10,6 +10,7 @@ import pytest
 from kazusa_ai_chatbot.config import CHARACTER_GLOBAL_USER_ID
 from kazusa_ai_chatbot.cognition_episode import build_text_chat_cognitive_episode
 from kazusa_ai_chatbot.nodes import dialog_agent as dialog_module
+from kazusa_ai_chatbot.nodes import persona_supervisor2_cognition_l2c2 as l2c2_module
 from kazusa_ai_chatbot.nodes import persona_supervisor2_cognition_l3 as l3_module
 from kazusa_ai_chatbot.time_context import build_character_time_context
 
@@ -187,9 +188,9 @@ async def test_contextual_agent_receives_at_most_four_history_messages(monkeypat
         "vibe_check": "calm",
         "relational_dynamic": "cooperative",
     })
-    monkeypatch.setattr(l3_module, "_contextual_agent_llm", fake_llm)
+    monkeypatch.setattr(l2c2_module, "_contextual_agent_llm", fake_llm)
 
-    await l3_module.call_contextual_agent(_base_l3_state())
+    await l2c2_module.call_social_context_appraisal(_base_l3_state())
 
     human_payload = json.loads(fake_llm.messages[1].content)
     assert len(human_payload["chat_history"]) == 4
@@ -307,7 +308,9 @@ def test_context_budget_workload_summary_records_payload_counts() -> None:
         "dialog_generator_tone_messages": len(history),
     }
     bounded_payload = {
-        "contextual_history_messages": len(l3_module._surface_history_for_contextual(history)),
+        "contextual_history_messages": len(
+            l2c2_module._surface_history_for_social_context(history)
+        ),
         "style_history_messages": len(l3_module._surface_history_for_style(history)),
         "dialog_generator_tone_messages": len(dialog_module._tone_history_for_generator(history)),
         "content_anchor_progress_cap_chars": 5000,
@@ -326,7 +329,9 @@ def test_context_budget_workload_summary_records_payload_counts() -> None:
             "dialog_generator_tone_history": _payload_chars(history),
         },
         "bounded_dynamic_payload_chars": {
-            "contextual_history": _payload_chars(l3_module._surface_history_for_contextual(history)),
+            "contextual_history": _payload_chars(
+                l2c2_module._surface_history_for_social_context(history)
+            ),
             "style_history": _payload_chars(l3_module._surface_history_for_style(history)),
             "dialog_generator_tone_history": _payload_chars(dialog_module._tone_history_for_generator(history)),
             "content_anchor_conversation_progress_cap": 5000,

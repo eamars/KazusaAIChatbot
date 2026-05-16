@@ -184,27 +184,81 @@ Do not overload one capability with incompatible cardinality unless the contract
 
 Prompts for local LLMs should be short, explicit, and contract-oriented.
 
+### System vs Human Message Boundary
+
+Keep stable contract material in the system message. This includes role,
+standing policies, character-static context, capability semantics, allowed
+action names, output format, and the positive decision procedure.
+
+Keep the human message for the current run only: user stimulus, upstream LLM
+outputs, retrieved evidence, tool results, and other dynamic facts. Do not put
+capability registry descriptions, handler affordances, stable examples, or
+repeated action semantics in the human payload. If the model needs the same
+information every run, it is system context.
+
+For LLM-to-LLM handoff, prefer one precise semantic string over nested
+TypedDict-shaped payloads. Typed dictionaries, schema fields, IDs, and
+structured envelopes are for deterministic code unless the model is explicitly
+being asked to produce or consume that exact wire format. If the model-facing
+handoff cannot fit into one clear string without losing the essential task,
+stop and redesign the handoff instead of adding more nested fields.
+
+### Prompt Vocabulary Discipline
+
+Never introduce a new idea, term, label, acronym, module name, stage name,
+plan phrase, or development-process concept into a persistent runtime prompt
+unless all of these are true:
+
+- The term is already present in the model-facing input or is defined in the
+  same prompt.
+- The term directly helps the model answer the current semantic question.
+- A plain domain phrase would be less clear.
+
+If a term needs explanation, first try deleting it or replacing it with a
+plain semantic phrase. Runtime prompts should not contain implementation
+history, migration language, plan labels, review findings, compatibility-layer
+notes, checkpoint names, or comments about how the feature was developed.
+Those belong in design docs, tests, and code comments, not in prompts that the
+character model sees every turn.
+
 Good prompts:
 
 - Give a small roster of allowed capabilities.
-- Include refusal rules for out-of-domain requests.
-- Provide 3-6 high-value examples, not a huge gallery.
+- Use a positive decision procedure before any refusal rule.
+- Provide examples only when they encode general reusable boundaries, not to
+  force one known test case through a desired route.
 - Ask for strict JSON only when downstream code validates it.
 - Keep schema names semantic and stable.
+- Use one language for ordinary instructions. Keep foreign terms only for
+  keys, enum values, code, commands, URLs, model labels, or quoted source text.
 
 Risky prompts:
 
 - Long prose policies that require remembering exceptions far from the output format.
+- Negative-constraint accretion: repeatedly adding "do not..." rules and
+  counterexamples to chase individual failures.
+- Test-shaped examples that mention the same nouns, route names, or expected
+  answer as the live regression case being tuned.
 - Mixed responsibilities, such as planning, routing, argument generation, and judging in one call.
 - Free-form slot labels where a prefix can contradict the content.
 - Instructions that require the model to infer database schema from examples.
+- Dynamic human payloads that repeat stable capability definitions or registry
+  metadata already known to the system prompt.
+- Internal topology labels such as stage numbers, implementation module names,
+  compatibility-layer names, or handler names unless those labels are part of
+  the prompt's visible input contract and useful to the model's semantic task.
+- Development artifacts in runtime prompts: plan names, migration phases,
+  regression-test notes, temporary compatibility explanations, TODO language,
+  or any wording whose only purpose is to explain how the code got here.
 
 When editing prompt strings embedded in code:
 
 - Check whether the prompt is later processed by `.format(...)`, f-strings, templates, or JSON serialization.
 - Escape literal braces in `.format(...)` templates, or avoid inserting inline JSON examples there.
 - Run a runtime prompt-render check, not only a syntax check. `py_compile` will not catch broken `.format(...)` placeholders.
-- Keep examples as semantic boundary anchors. Add an example only when it fixes a real routing boundary or recurring confusion.
+- Keep examples as semantic boundary anchors. Add an example only when it fixes
+  a reusable routing boundary or recurring confusion; do not add examples to
+  make one fixture pass.
 - Always state `# Input Format` and `# Output Format` for structured prompt stages. The examples must match the exact payload built by the handler and the exact parsed output expected by validators. If you cannot write those sections precisely, the prompt contract is not ready.
 - For local LLMs, also include explicit generation guidance such as `# Generation Procedure` or `# Thinking Steps` before the format sections. The guidance should tell the model how to inspect the input and choose the output fields; do not rely on the schema alone to imply the procedure.
 - Keep prompt vocabulary grounded in the prompt's visible inputs and role. Do not introduce foreign terms, acronyms, internal architecture names, storage jargon, or source labels that are not explicitly present in the input format or defined in the prompt itself. If the handler payload contains `rag_result.memory_evidence`, say that exact field name or explain it semantically as "retrieved memory evidence"; do not say "RAG evidence" unless the input format exposes and defines "RAG" as a concept the model should reason about. The same rule applies to terms such as "canonical", "planner", "router", or hidden node names: use them only when they are part of the model-facing contract, otherwise translate them into the evidence or decision source the model can actually see.
@@ -228,7 +282,10 @@ Do not group several prompt constants at the top of a file and several handlers 
 Each handler should follow the established node style:
 
 - Build `SystemMessage(content=<PROMPT>)` inside the handler.
-- Build the `HumanMessage` from the stage payload with `json.dumps(..., ensure_ascii=False)`.
+- Build the `HumanMessage` from current-run dynamic content only. Use one
+  semantic string for LLM-to-LLM handoff when possible; use
+  `json.dumps(..., ensure_ascii=False)` only when the model-facing input
+  contract genuinely needs structured dynamic fields.
 - Call that stage's LLM with `await <stage_llm>.ainvoke([system_prompt, human_message])`.
 - Parse structured JSON with `parse_llm_json_output(response.content)` unless the existing local file has a stronger approved parser contract.
 - Run structural validation after parsing in ordinary Python.

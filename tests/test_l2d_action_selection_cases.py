@@ -6,7 +6,7 @@ import json
 
 import pytest
 
-from tests.l2d_action_initializer_cases import (
+from tests.l2d_action_selection_cases import (
     L2D_ROUTING_CASE_SET_SCHEMA_VERSION,
     L2D_ROUTING_CASE_SCHEMA_VERSION,
     compare_action_specs_to_expectations,
@@ -304,3 +304,4 @@ def _memory_lifecycle_action(lifecycle_decision: str) -> dict[str, object]:
     action["visibility"] = "private"
     action["urgency"] = "background"
     return action
+

@@ -50,7 +50,7 @@ def _future_cognition_action_spec() -> dict:
         "params": {
             "episode_type": "self_cognition",
             "trigger_at": "2026-05-16T10:00:00+12:00",
-            "context_summary": "Re-check whether a natural pause appeared.",
+            "continuation_objective": "Re-check whether a natural pause appeared.",
         },
         "urgency": "scheduled",
         "visibility": "private",
@@ -81,9 +81,10 @@ def test_build_future_cognition_event_uses_prompt_safe_scheduler_shape() -> None
     assert event["args"]["source_action_attempt_id"] == (
         "action_attempt:future-123"
     )
-    assert event["args"]["context_summary"] == (
+    assert event["args"]["continuation_objective"] == (
         "Re-check whether a natural pause appeared."
     )
+    assert "context_summary" not in event["args"]
     for forbidden in (
         "handler_id",
         "platform_channel_id",
@@ -94,6 +95,41 @@ def test_build_future_cognition_event_uses_prompt_safe_scheduler_shape() -> None
         '"params"',
     ):
         assert forbidden not in serialized
+
+
+def test_future_cognition_event_copies_trusted_source_scope() -> None:
+    """Code-bound source scope should survive into the scheduled trigger."""
+
+    from kazusa_ai_chatbot.action_spec.handlers.future_cognition import (
+        build_future_cognition_scheduled_event,
+    )
+
+    action_spec = _future_cognition_action_spec()
+    action_spec["target"]["scope"].update(
+        {
+            "source_platform": "qq",
+            "source_channel_id": "54369546",
+            "source_channel_type": "group",
+            "source_user_id": "673225019",
+            "source_platform_bot_id": "bot-001",
+            "source_character_name": "TestCharacter",
+        }
+    )
+
+    event = build_future_cognition_scheduled_event(
+        action_spec,
+        timestamp="2026-05-16T09:00:00+12:00",
+        action_attempt_id="action_attempt:future-123",
+    )
+
+    assert event["source_platform"] == "qq"
+    assert event["source_channel_id"] == "54369546"
+    assert event["source_channel_type"] == "group"
+    assert event["source_user_id"] == "673225019"
+    assert event["source_platform_bot_id"] == "bot-001"
+    assert event["source_character_name"] == "TestCharacter"
+    assert "source_channel_id" not in event["args"]
+    assert "source_user_id" not in event["args"]
 
 
 @pytest.mark.asyncio

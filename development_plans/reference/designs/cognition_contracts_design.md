@@ -59,7 +59,8 @@ not authorize implementation by itself.
 
 ```text
 typed episode -> evidence assembly / RAG -> cognition concerns
--> L2d action initialization -> ActionSpecV1 materialization/evaluation
+-> L2c2 social context appraisal -> L2d action initialization
+-> ActionSpecV1 materialization/evaluation
 -> selected L3 surfaces / action handlers -> ActionResultV1 + SurfaceOutputV1
 -> episode-trace consolidation -> persistence / scheduler / adapter bridge
 ```
@@ -77,6 +78,12 @@ typed episode -> evidence assembly / RAG -> cognition concerns
 - Tool handlers do not call cognition directly. A tool or action result can
   request continuation only by returning a typed continuation contract;
   orchestration enqueues the next typed episode.
+- LLM-to-LLM handoff information is exactly one prompt-safe semantic string.
+  TypedDicts, JSON objects, source refs, IDs, schema versions, target scopes,
+  lifecycle markers, and routing metadata are deterministic envelopes only.
+  They may store, validate, route, or audit the handoff, but they must not be
+  projected to the next LLM as structural meaning. If the required handoff
+  cannot be represented faithfully as one string, the handoff fails closed.
 - Final user-visible dialog is one surface output, not the whole turn result.
   Image, tool, private, scheduled, and no-reply outcomes must also be traceable.
 - Consolidation consumes an episode trace: trigger, prompt-safe cognition
@@ -115,8 +122,8 @@ PolicyRefV1 = str
 L1, L2, and L3 are concerns, not fixed process stages.
 
 - L1: affective interpretation, salience, and immediate appraisal.
-- L2: deliberative stance, character intent, modality-neutral action, and
-  reasoning residue.
+- L2: deliberative stance, character intent, social-context appraisal,
+  modality-neutral action, and reasoning residue.
 - L3: output-surface specialization, including text, image, tool, motor, or
   other modality-specific rendering.
 
@@ -129,7 +136,7 @@ L1 -> L2 -> L3-text
 The action-spec architecture makes that text path one selected action surface:
 
 ```text
-L1/L2 residue -> L2d action request(kind="speak")
+L1/L2 residue + L2c2 social context -> L2d action request(kind="speak")
 -> ActionSpecV1(kind="speak") -> L3-text handler -> SurfaceOutputV1(text)
 ```
 
@@ -154,7 +161,8 @@ L1 -> L2 -> L3-image
 L1 -> L2 -> L3-motor
 ```
 
-All non-reflex L3 surfaces consume the same L2 residue. L2 must remain
+All non-reflex L3 surfaces consume the same L2 residue and L2c2 social-context
+fields. L2 must remain
 output-modality-neutral. The visual/image path does not create a separate
 cognition channel: image generation remains an L3 surface or action capability
 with deterministic validation, permission, execution, and audit. The first
@@ -465,6 +473,33 @@ class ActionContinuationV1(TypedDict):
   targets, raw persistence IDs, or other deterministic envelope fields.
 - L2d can select zero, one, or many action requests. Evaluation may reject,
   schedule, execute, or defer each materialized spec independently.
+
+### LLM Handoff Text
+
+Continuation that feeds a later cognition episode carries one LLM-facing text
+contract:
+
+```python
+ContinuationObjectiveV1 = str
+```
+
+`ContinuationObjectiveV1` is not a summary. It is the future thinking contract
+for the next cognition cycle. It must preserve the concrete subject, requested
+outcome, unresolved commitment or action objective, and any detail required for
+the next cycle to reason without guessing. Proper nouns, object names, user-
+requested targets, commitments, and selected action anchors must not be
+paraphrased away.
+
+Deterministic wrappers may store `ContinuationObjectiveV1` inside typed action
+params, scheduled-event args, action results, or episode metadata, but the next
+LLM consumes only this one string as handoff text. If a selected future
+cognition action continues another selected action, deterministic
+materialization should prefer that concrete sibling action's semantic `detail`
+as the continuation objective instead of asking L2d to regenerate the same
+objective in a second field. Supporting reasons, timing, refs, and audit fields
+remain deterministic metadata and may not replace the continuation objective.
+
+If no single faithful string can be built, the continuation request is invalid.
 
 ### Deterministic Target Binding
 
@@ -958,6 +993,13 @@ handlers own surface generation. Memory owners own memory lifecycle writes.
 Orchestration owns continuation episodes and future cognition scheduling. The
 consolidator consumes the resulting episode trace and does not execute any of
 these actions.
+
+The scheduled typed episode created by `trigger_future_cognition` must carry
+one `ContinuationObjectiveV1` as its only LLM-facing handoff text. It may also
+carry deterministic scheduling, scope, source-ref, depth, and audit metadata,
+but those fields are not LLM handoff content. The previous concept of a
+`context_summary` is rejected because it encourages lossy compression instead
+of preserving the exact future thinking objective.
 
 ## Promise Retirement Policy
 

@@ -57,7 +57,7 @@ stage_0_msg_decontexualizer
        state["rag_result"]
   -> stage_2_cognition
        L1 subconscious
-       L2 consciousness + boundary + judgment
+       L2 consciousness + boundary + judgment + social context
        L2d action initializer
        state["internal_monologue"]
        state["action_specs"]
@@ -80,12 +80,15 @@ surfaces and action results are known.
 ## Action Spec And Surface Routing
 
 L2d is the only cognition node that may initialize action work. It runs after
-L2c, when the final stance and intent already exist, and before selected L3
-surface handlers run. L2d emits semantic `action_requests`; deterministic code
-materializes valid requests into graph-visible `ActionSpecV1` rows.
+L2c1 judgment and L2c2 social-context appraisal, when the final stance, intent,
+and social temperature already exist, and before selected L3 surface handlers
+run. L2d emits semantic `action_requests`; deterministic code materializes
+valid requests into graph-visible `ActionSpecV1` rows.
 
-L2a consciousness and L2c judgment do not emit action specs. L2a interprets
-the stimulus, and L2c adjudicates stance/intent. Action selection is a later,
+L2a consciousness, L2b boundary appraisal, L2c1 judgment, and L2c2 social
+context do not emit action specs. L2a interprets the stimulus, L2b constrains
+the safe envelope, L2c1 adjudicates stance/intent, and L2c2 gives L2d the
+same social-distance evidence L3 used to own. Action selection is a later,
 separate concern so weaker local models are not asked to interpret, judge,
 plan, and write executable envelopes in one step.
 
@@ -167,7 +170,8 @@ The public "thought chain" is therefore:
 L1 emotional_appraisal + interaction_subtext
   -> L2a internal_monologue + logical_stance candidate + character_intent candidate
   -> L2b boundary_core_assessment
-  -> L2c final logical_stance + character_intent + judgment_note
+  -> L2c1 final logical_stance + character_intent + judgment_note
+  -> L2c2 social_distance + emotional_intensity + vibe_check + relational_dynamic
   -> L2d action_requests/action_specs
   -> selected L3 surface directives
   -> dialog final_dialog when a text surface is selected
@@ -461,7 +465,7 @@ Design role:
 
 This is the point where the system can say consciousness has settled into a
 decision. L1 affect remains visible through `emotional_appraisal`; L2a thought
-remains visible through `internal_monologue`; L2c is the explicit final
+remains visible through `internal_monologue`; L2c1 is the explicit final
 decision.
 
 Example input:
@@ -496,7 +500,31 @@ Interpretation: final stance and intent are now settled. Later layers may
 shape wording, but they must not convert this into refusal, evasion, or a new
 topic.
 
-## L3: Context And Expression Directives
+## L2c2: Social Context Appraisal
+
+File: `persona_supervisor2_cognition_l2c2.py`
+
+L2c2 is the social temperature layer. It keeps the existing contextual-agent
+responsibility and output fields, but it now runs before L2d so action
+selection can see social distance and relationship framing before choosing
+zero, one, or many actions.
+
+It outputs:
+
+```python
+{
+    "social_distance": str,
+    "emotional_intensity": str,
+    "vibe_check": str,
+    "relational_dynamic": str,
+}
+```
+
+L2c2 does not decide whether to answer, select an action, or generate visible
+wording. L2d consumes these fields for action selection; selected L3 surface
+handlers consume the same fields later for expression packaging.
+
+## L3: Expression Directives
 
 File: `persona_supervisor2_cognition_l3.py`
 
@@ -508,7 +536,6 @@ The L3 branches are:
 
 | Node | Output | Purpose |
 | --- | --- | --- |
-| `l3_contextual_agent` | `social_distance`, `emotional_intensity`, `vibe_check`, `relational_dynamic` | Social temperature and relationship framing for a selected surface. |
 | `l3_interaction_style_context_loader` | `interaction_style_context` | Sanitized user/channel interaction-style overlays from storage. |
 | `l3_style_agent` | `rhetorical_strategy`, `linguistic_style`, `forbidden_phrases` | How to package the already-decided stance in character voice. |
 | `l3_content_anchor_agent` | `content_anchors` | What dialog must do, answer, avoid, or cover. |
@@ -708,10 +735,12 @@ The implemented flow is:
    Judgment Core emits final `logical_stance`, `character_intent`,
    and `judgment_note`.
 
-7. L2d action selection and L3 expression plan
+7. L2c2 social context, L2d action selection, and L3 expression plan
+   L2c2 produces social temperature and relationship framing before action
+   selection.
    L2d selects zero or more semantic actions. When a text surface is selected,
-   contextual, style, content-anchor, preference, and visual agents build
-   `action_directives`.
+   style, content-anchor, preference, and visual agents build
+   `action_directives` using the L2c2 social fields.
 
 8. Dialog or selected surface generation
    Dialog generator writes `final_dialog` from `internal_monologue` and
@@ -728,8 +757,10 @@ Emotion affects thought at three points:
 
 - L1 creates the first affective appraisal.
 - L2a reads that appraisal while forming the internal monologue and stance.
-- L3 contextual/style agents use the settled emotional temperature to shape
-  social distance and rhetorical packaging for a selected surface.
+- L2c2 uses the settled emotional temperature to shape social distance and
+  relationship framing before action selection.
+- L3 style and content agents use the settled decision plus L2c2 social fields
+  to package a selected surface.
 
 Emotion does not directly write dialog. It must pass through the L2 decision
 and L3 directive contracts before visible text is generated.
@@ -850,9 +881,11 @@ Keep these invariants when changing the node package:
 - L2a may propose stance, but Boundary Core constrains the safe envelope.
 - Judgment Core is the final owner of `logical_stance` and
   `character_intent`.
+- L2c2 may shape social-context evidence, but it must not select actions or
+  create visible output.
 - L3 may shape expression, but it must not change the L2 decision.
-- L2d is the only action initializer; L2a, L2b, and L2c must not emit action
-  specs.
+- L2d is the only action initializer; L2a, L2b, L2c1, and L2c2 must not emit
+  action specs.
 - L3 text/image handlers run only for selected surface actions.
 - Dialog renders directives; it must not make policy, memory, or permission
   decisions.

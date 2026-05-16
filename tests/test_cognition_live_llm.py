@@ -16,13 +16,13 @@ from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition_l2 import (
     call_judgment_core_agent,
 )
 from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition_l3 import (
-    call_collector,
+    call_surface_directive_collector,
     call_content_anchor_agent,
-    call_contextual_agent,
     call_preference_adapter,
     call_style_agent,
     call_visual_agent,
 )
+from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition_l2c2 import call_social_context_appraisal
 from kazusa_ai_chatbot.nodes.persona_supervisor2_msg_decontexualizer import call_msg_decontexualizer
 from kazusa_ai_chatbot.utils import load_personality
 from tests.llm_trace import write_llm_trace
@@ -230,7 +230,7 @@ async def _run_live_cognition_stack(state: dict) -> dict:
     _debug_snapshot("cognition.l2c", l2c)
     state.update(l2c)
 
-    l3a = await call_contextual_agent(state)
+    l3a = await call_social_context_appraisal(state)
     _debug_snapshot("cognition.l3a", l3a)
     state.update(l3a)
 
@@ -250,7 +250,7 @@ async def _run_live_cognition_stack(state: dict) -> dict:
     _debug_snapshot("cognition.l3c", l3c)
     state.update(l3c)
 
-    l4 = await call_collector(state)
+    l4 = await call_surface_directive_collector(state)
     _debug_snapshot("cognition.l4", l4)
     state.update(l4)
     return state
@@ -357,3 +357,4 @@ async def test_live_cognition_propagates_explicit_future_group_message_details(e
     assert "今天天气真好呀" in joined_anchors, f"Message body did not propagate through cognition anchors: {anchors!r}"
     assert "54369546" in joined_action_anchors, f"Collector lost the group id: {linguistic_directives!r}"
     assert "今天天气真好呀" in joined_action_anchors, f"Collector lost the message body: {linguistic_directives!r}"
+

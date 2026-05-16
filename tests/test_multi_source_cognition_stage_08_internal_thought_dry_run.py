@@ -28,6 +28,7 @@ from kazusa_ai_chatbot.nodes import persona_supervisor2_cognition_l1 as l1_modul
 from kazusa_ai_chatbot.nodes import persona_supervisor2_cognition_l2 as l2_module
 from kazusa_ai_chatbot.nodes import persona_supervisor2_cognition_l2d as l2d_module
 from kazusa_ai_chatbot.nodes import persona_supervisor2_cognition_l3 as l3_module
+from kazusa_ai_chatbot.nodes import persona_supervisor2_cognition_l2c2 as l2c2_module
 from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition_prompt_selection import (
     CognitionPromptSelectionError,
     CognitionPromptStage,
@@ -38,11 +39,11 @@ from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition_prompt_selection impo
 
 _APPROVED_STAGES: tuple[CognitionPromptStage, ...] = (
     "l1_subconscious",
-    "l2a_consciousness",
-    "l2b_boundary_core",
-    "l2c_judgment_core",
-    "l2d_action_initializer",
-    "l3_contextual_agent",
+    "l2a_conscious_framing",
+    "l2b_boundary_appraisal",
+    "l2c1_judgment_synthesis",
+    "l2d_action_selection",
+    "l2c2_social_context_appraisal",
     "l3_style_agent",
     "l3_content_anchor_agent",
     "l3_preference_adapter",
@@ -50,10 +51,11 @@ _APPROVED_STAGES: tuple[CognitionPromptStage, ...] = (
 )
 _EXPECTED_PROMPT_KEYS = [
     "l1_subconscious.internal_thought_internal_monologue",
-    "l2a_consciousness.internal_thought_internal_monologue",
-    "l2b_boundary_core.internal_thought_internal_monologue",
-    "l2c_judgment_core.internal_thought_internal_monologue",
-    "l2d_action_initializer.internal_thought_internal_monologue",
+    "l2a_conscious_framing.internal_thought_internal_monologue",
+    "l2b_boundary_appraisal.internal_thought_internal_monologue",
+    "l2c1_judgment_synthesis.internal_thought_internal_monologue",
+    "l2c2_social_context_appraisal.internal_thought_internal_monologue",
+    "l2d_action_selection.internal_thought_internal_monologue",
 ]
 _EXPECTED_PROMPT_KEYS_WITHOUT_VISUAL = list(_EXPECTED_PROMPT_KEYS)
 _FORBIDDEN_DRY_RUN_TOKENS = (
@@ -92,9 +94,9 @@ _PROMPT_FINGERPRINTS = (
     ),
     (
         "_CONTEXTUAL_AGENT_PROMPT",
-        l3_module._CONTEXTUAL_AGENT_PROMPT,
-        5393,
-        "9c6dfaf8ac8932e721ad11964634956f79c1ebbc1650bf06b4f6387e39bc382c",
+        l2c2_module._CONTEXTUAL_AGENT_PROMPT,
+        5402,
+        "3d99f7054f25facf32f17d187aeec52d6cb415868480eda836f674e3293e7cb2",
     ),
     (
         "_STYLE_AGENT_PROMPT",
@@ -520,7 +522,7 @@ def _patch_cognition_llms(
         llms["_action_initializer_llm"],
     )
     monkeypatch.setattr(
-        l3_module,
+        l2c2_module,
         "_contextual_agent_llm",
         llms["_contextual_agent_llm"],
     )
@@ -1421,10 +1423,14 @@ async def test_internal_thought_prompt_rendering_uses_only_residue_payload(
         "action_specs",
         "character_intent",
         "emotional_appraisal",
+        "emotional_intensity",
         "interaction_subtext",
         "internal_monologue",
         "judgment_note",
         "logical_stance",
+        "relational_dynamic",
+        "social_distance",
+        "vibe_check",
     ]
     l1_l2_llm_names = (
         "_subconscious_llm",
@@ -1454,17 +1460,23 @@ async def test_internal_thought_prompt_rendering_uses_only_residue_payload(
 
     l2d_llm = llms["_action_initializer_llm"]
     assert l2d_llm.messages
-    l2d_payload = json.loads(l2d_llm.messages[1].content)
-    assert l2d_payload["trigger_context"]["trigger_source"] == (
-        "internal_thought"
-    )
-    assert l2d_payload["trigger_context"]["input_sources"] == [
-        "internal_monologue",
-    ]
-    assert "cognitive_episode" not in l2d_payload
-    assert "raw_reflection_run" not in json.dumps(l2d_payload, ensure_ascii=False)
+    l2d_context = l2d_llm.messages[1].content
+    assert l2d_context.startswith("当前行动上下文：")
+    assert "触发来源：internal_thought" in l2d_context
+    assert "输入来源：internal_monologue" in l2d_context
+    assert "距离=neutral" in l2d_context
+    assert "强度=low" in l2d_context
+    assert "氛围=quiet" in l2d_context
+    assert "关系=stable" in l2d_context
+    assert "cognitive_episode" not in l2d_context
+    assert "raw_reflection_run" not in l2d_context
+    assert "available_capabilities" not in l2d_context
 
-    invoked_llm_names = (*l1_l2_llm_names, "_action_initializer_llm")
+    invoked_llm_names = (
+        *l1_l2_llm_names,
+        "_contextual_agent_llm",
+        "_action_initializer_llm",
+    )
     for llm_name, fake_llm in llms.items():
         if llm_name not in invoked_llm_names:
             assert fake_llm.messages == []
@@ -1480,3 +1492,4 @@ def test_text_chat_and_reflection_prompt_fingerprints_remain_stable() -> None:
 
         assert len(encoded_prompt) == expected_bytes, prompt_name
         assert digest == expected_digest, prompt_name
+

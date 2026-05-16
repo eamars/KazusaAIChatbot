@@ -10,6 +10,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from kazusa_ai_chatbot.action_spec.registry import SPEAK_CAPABILITY
 from kazusa_ai_chatbot.self_cognition import artifacts, models, projection
 from kazusa_ai_chatbot.self_cognition import sources, tracking
 from kazusa_ai_chatbot.self_cognition import runner
@@ -143,6 +144,37 @@ def _topic_followup_case() -> dict[str, Any]:
     return case
 
 
+def _scheduled_future_cognition_case() -> dict[str, Any]:
+    case = {
+        "case_name": models.CASE_SCHEDULED_FUTURE_COGNITION,
+        "case_id": "future-cognition-001",
+        "idle_timestamp": "2026-05-10T00:30:00+00:00",
+        "last_evidence_timestamp": "2026-05-10T00:00:00+00:00",
+        "trigger_kind": models.TRIGGER_SCHEDULED_FUTURE_COGNITION,
+        "semantic_due_state": models.DUE_STATE_DUE_NOW,
+        "actionability": "scheduled_private_followup_ready_no_direct_contact",
+        "target_scope": _target_scope(channel_type="group"),
+        "source_refs": [
+            {
+                "source_kind": "scheduled_event",
+                "source_id": "scheduled_future_cognition_slot",
+                "due_at": "2026-05-10T00:30:00+00:00",
+                "summary": "Re-check whether the open hardware topic changed.",
+            }
+        ],
+        "visible_context": [
+            {
+                "role": "user",
+                "text": "Let's check the GPU model topic later.",
+                "timestamp": "2026-05-10T00:00:00+00:00",
+            }
+        ],
+        "rag_query": "Find evidence for the open hardware follow-up topic.",
+        "source_scheduled_event_id": "future-cognition-001",
+    }
+    return case
+
+
 def _action_cognition_output(text: str) -> dict[str, Any]:
     output = {
         "logical_stance": "outward contact is appropriate",
@@ -171,12 +203,111 @@ def _progress_cognition_output() -> dict[str, Any]:
     return output
 
 
+def _audit_only_cognition_output_without_directives() -> dict[str, Any]:
+    output = {
+        "logical_stance": "DIVERGE",
+        "character_intent": "SILENT_NO_WRITE",
+        "self_cognition_route": models.ROUTE_AUDIT_ONLY,
+        "action_specs": [],
+    }
+    return output
+
+
 def _silent_cognition_output() -> dict[str, Any]:
     output = {
         "logical_stance": "no outward contact is warranted",
         "character_intent": "stay silent",
         "self_cognition_route": models.ROUTE_AUDIT_ONLY,
         "action_directives": {"linguistic_directives": {"content_anchors": []}},
+    }
+    return output
+
+
+def _speak_action_spec() -> dict[str, Any]:
+    spec = {
+        "schema_version": "action_spec.v1",
+        "kind": SPEAK_CAPABILITY,
+        "cognition_mode": "deliberative",
+        "source_refs": [
+            {
+                "schema_version": "action_source_ref.v1",
+                "ref_kind": "cognitive_episode",
+                "ref_id": "self-cognition-episode",
+                "owner": "cognition",
+                "relationship": "basis",
+                "evidence_refs": [],
+            }
+        ],
+        "target": {
+            "schema_version": "action_target.v1",
+            "target_kind": "current_channel",
+            "target_id": None,
+            "owner": "l3_text",
+            "scope": {"surface": "text"},
+        },
+        "params": {
+            "delivery_mode": "visible_reply",
+            "execute_at": None,
+            "surface_requirements": {
+                "intent": "answer the scheduled follow-up precisely",
+            },
+        },
+        "urgency": "now",
+        "visibility": "user_visible",
+        "deadline": None,
+        "continuation": {
+            "schema_version": "action_continuation.v1",
+            "mode": "none",
+            "episode_type": None,
+            "max_depth": 0,
+            "include_result_as": None,
+        },
+        "reason": "The scheduled self-cognition selected a visible reply.",
+    }
+    return spec
+
+
+def _surface_action_directives() -> dict[str, Any]:
+    directives = {
+        "contextual_directives": {
+            "social_distance": "friendly",
+            "emotional_intensity": "low",
+            "vibe_check": "focused",
+            "relational_dynamic": "scheduled follow-up",
+        },
+        "linguistic_directives": {
+            "rhetorical_strategy": "answer the scheduled follow-up",
+            "linguistic_style": "brief",
+            "accepted_user_preferences": [],
+            "content_anchors": ["[ANSWER] Continue the GPU model topic."],
+            "forbidden_phrases": [],
+        },
+        "visual_directives": {
+            "facial_expression": [],
+            "body_language": [],
+            "gaze_direction": [],
+            "visual_vibe": [],
+        },
+    }
+    return directives
+
+
+def _speak_cognition_output_with_partial_directives() -> dict[str, Any]:
+    output = {
+        "logical_stance": "CONFIRM",
+        "character_intent": "PROVIDE",
+        "internal_monologue": "The scheduled follow-up should be answered.",
+        "judgment_note": "A concise visible reply is appropriate.",
+        "social_distance": "friendly",
+        "emotional_intensity": "low",
+        "vibe_check": "focused",
+        "relational_dynamic": "scheduled follow-up",
+        "action_directives": {
+            "linguistic_directives": {
+                "content_anchors": ["[ANSWER] Continue the GPU model topic."],
+            },
+        },
+        "action_specs": [_speak_action_spec()],
     }
     return output
 
@@ -456,6 +587,43 @@ def test_classify_route_returns_action_candidate_when_cognition_intent_provides(
     assert route == models.ROUTE_ACTION_CANDIDATE
 
 
+def test_classify_route_does_not_render_private_only_action_specs() -> None:
+    case = _commitment_case()
+    route = tracking.classify_route(
+        case,
+        {
+            "logical_stance": "CONFIRM",
+            "character_intent": "PROVIDE",
+            "action_specs": [
+                {
+                    "kind": "memory_lifecycle_update",
+                    "visibility": "private",
+                },
+                {
+                    "kind": "trigger_future_cognition",
+                    "visibility": "private",
+                },
+            ],
+        },
+    )
+
+    assert route == models.ROUTE_AUDIT_ONLY
+
+
+def test_classify_route_uses_speak_action_spec_for_visible_candidate() -> None:
+    case = _commitment_case()
+    route = tracking.classify_route(
+        case,
+        {
+            "logical_stance": "DIVERGE",
+            "character_intent": "SILENT_NO_WRITE",
+            "action_specs": [_speak_action_spec()],
+        },
+    )
+
+    assert route == models.ROUTE_ACTION_CANDIDATE
+
+
 def test_classify_route_does_not_force_action_for_past_due_silence() -> None:
     case = _commitment_case()
     route = tracking.classify_route(case, _silent_cognition_output())
@@ -626,6 +794,53 @@ def test_runner_apply_consolidation_builds_private_finalization_state() -> None:
     assert "Reminder was expected" not in serialized
 
 
+def test_runner_consolidates_no_action_cognition_without_dialog() -> None:
+    """Audit-only cognition should consolidate without fabricating dialog."""
+
+    case = _scheduled_future_cognition_case()
+    captured_consolidation_state: dict[str, Any] = {}
+
+    async def dialog_client(state: dict[str, Any]) -> dict[str, Any]:
+        del state
+        raise AssertionError("no-action self-cognition should not call dialog")
+
+    async def consolidation_client(state: dict[str, Any]) -> dict[str, Any]:
+        captured_consolidation_state.update(state)
+        return_value = {
+            "consolidation_metadata": {
+                "write_success": {"character_state": True},
+                "scheduled_event_ids": [],
+                "cache_evicted_count": 0,
+            },
+        }
+        return return_value
+
+    def rag_client(query: str, **kwargs: Any) -> dict[str, Any]:
+        del query, kwargs
+        return_value = {"answer": ""}
+        return return_value
+
+    artifact_payloads = runner.build_self_cognition_case_artifacts(
+        case,
+        rag_client=rag_client,
+        cognition_client=lambda state: (
+            _audit_only_cognition_output_without_directives()
+        ),
+        dialog_client=dialog_client,
+        consolidation_client=consolidation_client,
+        apply_consolidation=True,
+    )
+
+    assert captured_consolidation_state["final_dialog"] == []
+    assert captured_consolidation_state["logical_stance"] == "DIVERGE"
+    assert artifact_payloads[models.ARTIFACT_RUN_RECORD]["budget"][
+        "dialog_calls"
+    ] == 0
+    assert artifact_payloads[models.ARTIFACT_CONSOLIDATION_OUTCOME][
+        "consolidation_called"
+    ] is True
+
+
 def test_runner_reuses_dialog_render_for_action_and_consolidation() -> None:
     case = _commitment_case()
     dialog_call_count = 0
@@ -722,6 +937,64 @@ def test_contact_decision_without_candidate_marker_uses_dialog_candidate(
 
     assert action_candidate["production_handoff"] is False
     assert action_candidate["text"] == '我来确认一下，刚才那个时间已经到了哦。'
+    assert run_record["budget"]["dialog_calls"] == 1
+
+
+def test_selected_speak_self_cognition_runs_l3_before_dialog(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    case = _scheduled_future_cognition_case()
+    l3_states: list[dict[str, Any]] = []
+    dialog_states: list[dict[str, Any]] = []
+    action_directives = _surface_action_directives()
+
+    def rag_client(query: str, **kwargs: Any) -> dict[str, Any]:
+        del query, kwargs
+        result = {
+            "answer": "Retrieved evidence for the scheduled GPU follow-up.",
+            "known_facts": [],
+            "unknown_slots": [],
+            "loop_count": 0,
+        }
+        return result
+
+    async def l3_text_surface_handler(state: dict[str, Any]) -> dict[str, Any]:
+        l3_states.append(state)
+        result = {"action_directives": action_directives}
+        return result
+
+    async def dialog_client(state: dict[str, Any]) -> dict[str, Any]:
+        dialog_states.append(state)
+        assert state["action_directives"] == action_directives
+        result = {
+            "final_dialog": ["Continuing the GPU model topic now."],
+            "mention_target_user": False,
+        }
+        return result
+
+    monkeypatch.setattr(
+        runner,
+        "call_l3_text_surface_handler",
+        l3_text_surface_handler,
+        raising=False,
+    )
+    paths = run_self_cognition_case(
+        case,
+        tmp_path,
+        rag_client=rag_client,
+        cognition_client=lambda state: (
+            _speak_cognition_output_with_partial_directives()
+        ),
+        dialog_client=dialog_client,
+    )
+    action_candidate = _read_json(paths[models.ARTIFACT_ACTION_CANDIDATE])
+    run_record = _read_json(paths[models.ARTIFACT_RUN_RECORD])
+
+    assert len(l3_states) == 1
+    assert l3_states[0]["action_specs"][0]["kind"] == SPEAK_CAPABILITY
+    assert len(dialog_states) == 1
+    assert action_candidate["text"] == "Continuing the GPU model topic now."
     assert run_record["budget"]["dialog_calls"] == 1
 
 
@@ -960,6 +1233,57 @@ def test_topic_followup_contact_decision_writes_action_candidate(
 
     assert action_attempt["status"] == models.ACTION_ATTEMPT_STATUS_CANDIDATE
     assert action_candidate["text"] == "Want to continue the GraphRAG thread?"
+
+
+def test_scheduled_future_cognition_uses_rag_query_for_next_cycle(
+    tmp_path,
+) -> None:
+    """Scheduled follow-up cognition should not run with empty evidence."""
+
+    case = _scheduled_future_cognition_case()
+    rag_calls: list[dict[str, Any]] = []
+
+    def rag_client(
+        query: str,
+        *,
+        character_name: str,
+        context: dict[str, Any],
+    ) -> dict[str, Any]:
+        rag_calls.append(
+            {
+                "query": query,
+                "character_name": character_name,
+                "context": context,
+            }
+        )
+        result = {
+            "answer": "Retrieved follow-up evidence for the GPU model topic.",
+            "known_facts": [],
+            "unknown_slots": [],
+            "loop_count": 0,
+        }
+        return result
+
+    def cognition_client(state: dict[str, Any]) -> dict[str, Any]:
+        assert state["rag_result"]["answer"] == (
+            "Retrieved follow-up evidence for the GPU model topic."
+        )
+        return _silent_cognition_output()
+
+    paths = run_self_cognition_case(
+        case,
+        tmp_path,
+        rag_client=rag_client,
+        cognition_client=cognition_client,
+    )
+
+    assert len(rag_calls) == 1
+    assert rag_calls[0]["query"] == (
+        "Find evidence for the open hardware follow-up topic."
+    )
+    assert rag_calls[0]["context"]["platform_channel_id"] == "54369546"
+    assert models.ARTIFACT_RAG_REQUEST in paths
+    assert models.ARTIFACT_RAG_OUTPUT in paths
 
 
 def test_cognition_state_keeps_source_packet_inside_internal_percept(

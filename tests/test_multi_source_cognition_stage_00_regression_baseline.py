@@ -19,6 +19,7 @@ from kazusa_ai_chatbot.nodes import persona_supervisor2 as supervisor_module
 from kazusa_ai_chatbot.nodes import persona_supervisor2_cognition_l1 as l1_module
 from kazusa_ai_chatbot.nodes import persona_supervisor2_cognition_l2 as l2_module
 from kazusa_ai_chatbot.nodes import persona_supervisor2_cognition_l3 as l3_module
+from kazusa_ai_chatbot.nodes import persona_supervisor2_cognition_l2c2 as l2c2_module
 from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition_prompt_selection import (
     select_cognition_prompt_variant,
 )
@@ -1295,6 +1296,11 @@ async def test_existing_cognition_and_dialog_prompts_render_with_mocked_llms(
         tracked_selector,
     )
     monkeypatch.setattr(
+        l2c2_module,
+        "select_cognition_prompt_variant",
+        tracked_selector,
+    )
+    monkeypatch.setattr(
         l3_module,
         "select_cognition_prompt_variant",
         tracked_selector,
@@ -1372,8 +1378,8 @@ async def test_existing_cognition_and_dialog_prompts_render_with_mocked_llms(
         "vibe_check": "routine",
         "relational_dynamic": "stable",
     })
-    monkeypatch.setattr(l3_module, "_contextual_agent_llm", contextual_llm)
-    contextual_result = await l3_module.call_contextual_agent(state)
+    monkeypatch.setattr(l2c2_module, "_contextual_agent_llm", contextual_llm)
+    contextual_result = await l2c2_module.call_social_context_appraisal(state)
     assert contextual_result["social_distance"] == "neutral"
     _assert_prompt_messages(
         contextual_llm,
@@ -1436,10 +1442,10 @@ async def test_existing_cognition_and_dialog_prompts_render_with_mocked_llms(
     )
     assert [selection["stage"] for selection in selector_calls] == [
         "l1_subconscious",
-        "l2a_consciousness",
-        "l2b_boundary_core",
-        "l2c_judgment_core",
-        "l3_contextual_agent",
+        "l2a_conscious_framing",
+        "l2b_boundary_appraisal",
+        "l2c1_judgment_synthesis",
+        "l2c2_social_context_appraisal",
         "l3_style_agent",
         "l3_content_anchor_agent",
         "l3_preference_adapter",
@@ -1491,3 +1497,4 @@ async def test_existing_cognition_and_dialog_prompts_render_with_mocked_llms(
         evaluator_llm,
         {"retry", "final_dialog", "linguistic_directives"},
     )
+

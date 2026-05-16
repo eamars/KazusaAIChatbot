@@ -378,6 +378,11 @@ shape. Persistence maps them to existing owner fields:
    - Owner: orchestrator/scheduler boundary.
    - Continuation: `scheduled_followup`.
    - Execution: validated future episode request; no direct cognition call.
+   - Handoff: one prompt-safe semantic `continuation_objective` string. This
+     is the next cognition cycle's future thinking contract, not a summary.
+     Typed scheduler fields, source refs, IDs, and target scope are
+     deterministic-only metadata. If a faithful one-string objective cannot be
+     built, the future cognition request fails closed.
 
 4. Bridge-only `send_message`
    - Existing adapter-facing outbound delivery after text exists.

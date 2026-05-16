@@ -231,7 +231,7 @@ class TriggerFutureCognitionParamsV1(TypedDict):
 
     episode_type: Literal["self_cognition"]
     trigger_at: str | None
-    context_summary: str
+    continuation_objective: str
 
 
 def validate_evidence_ref(value: object) -> EvidenceRefV1:

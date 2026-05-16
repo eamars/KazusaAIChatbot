@@ -75,6 +75,10 @@ def _state() -> dict:
             "acceptance": "allow",
             "stance_bias": "confirm",
         },
+        "social_distance": "friendly but not intrusive",
+        "emotional_intensity": "quiet and low pressure",
+        "vibe_check": "relaxed daily conversation",
+        "relational_dynamic": "stable trust with room to wait",
         "rag_result": {
             "answer": "The active commitment is overdue.",
             "user_image": {
@@ -165,15 +169,24 @@ def _future_cognition_request() -> dict:
 
 
 def test_action_initializer_payload_is_prompt_safe() -> None:
-    """L2d should receive semantic trigger context, not raw transport internals."""
+    """L2d should receive one semantic string, not raw transport internals."""
 
-    payload = l2d_module.build_action_initializer_payload(_state())
-    serialized = json.dumps(payload, ensure_ascii=False, sort_keys=True).lower()
+    action_context = l2d_module.build_action_initializer_payload(_state())
+    serialized = action_context.lower()
 
-    assert payload["trigger_context"]["trigger_source"] == "user_message"
-    assert "speak" in serialized
-    assert "memory_lifecycle_update" in serialized
-    assert "trigger_future_cognition" in serialized
+    assert action_context.startswith("当前行动上下文：")
+    assert "触发来源：user_message" in action_context
+    assert "输出要求：visible_reply" in action_context
+    assert "场景：private 对话" in action_context
+    assert "距离=friendly but not intrusive" in action_context
+    assert "强度=quiet and low pressure" in action_context
+    assert "氛围=relaxed daily conversation" in action_context
+    assert "关系=stable trust with room to wait" in action_context
+    assert "可绑定承诺：有" in action_context
+    assert "Reveal the spice answer." in action_context
+    assert "semantic_input_summary" not in serialized
+    assert "execution_boundary" not in serialized
+    assert "available_capabilities" not in serialized
     assert "send_message" not in serialized
     for forbidden in (
         "raw-channel-123",
@@ -230,26 +243,25 @@ def test_action_initializer_prompt_follows_cognition_prompt_structure() -> None:
 
     for required_section in (
         "# 语言政策",
-        "# 核心任务",
-        "# 运行规则",
-        "# 自我认知输出规则",
-        "# 能力语义",
-        "# 思考路径",
+        "# 可选动作",
+        "# 选择流程",
+        "# 未来认知判断",
         "# 输入格式",
         "# 输出格式",
     ):
         assert required_section in prompt
-    assert "你现在是角色" in prompt
-    assert "请务必返回合法的 JSON 字符串" in prompt
+    assert "你是角色的语义行动选择层" in prompt
+    assert "用户消息只包含本轮动态行动上下文" in prompt
+    assert "行动请求只描述角色想做什么" in prompt
+    assert "只返回合法 JSON 字符串" in prompt
     assert "`speak`" in prompt
     assert "`trigger_future_cognition`" in prompt
     assert "`send_message`" not in prompt
-    assert "执行信封、目标对象、持久化字段" in prompt
-    assert "只写语义请求" in prompt
+    assert "用户消息是一段中文行动上下文字符串，不是 JSON" in prompt
+    assert "具体新信息" in prompt
+    assert "具体问题、任务或承诺" in prompt
     assert "action_requests" in prompt
-    assert "self_cognition" in prompt
-    assert "scheduled_tick" in prompt
-    assert "tool_result" in prompt
+    assert "available_capabilities" not in prompt
     assert "reflection_signal" not in prompt
     assert "scheduled_recall" not in prompt
     assert "system_probe" not in prompt
@@ -259,9 +271,13 @@ def test_action_initializer_prompt_follows_cognition_prompt_structure() -> None:
     assert "continuation" not in prompt
     assert "l3_text" not in prompt
     assert "handler_id" not in prompt
-    assert "不要因为 `logical_stance=CONFIRM`" in prompt
-    assert "只有当 `final_l2` 明确决定要对外联系" in prompt
-    assert "未来某个时刻再自检" in prompt
+    assert "final_l2" not in prompt
+    assert "trigger_context" not in prompt
+    assert "social_context_appraisal" not in prompt
+    assert "L2c1" not in prompt
+    assert "L2c2" not in prompt
+    assert "小判断例" not in prompt
+    assert "5090 能跑什么人工智能模型" not in prompt
 
 
 def test_action_initializer_hides_lifecycle_without_single_bound_target() -> None:
@@ -272,13 +288,10 @@ def test_action_initializer_hides_lifecycle_without_single_bound_target() -> Non
         "active_commitments"
     ] = []
 
-    payload = l2d_module.build_action_initializer_payload(state)
+    action_context = l2d_module.build_action_initializer_payload(state)
 
-    capabilities = [
-        capability["capability"]
-        for capability in payload["capabilities"]
-    ]
-    assert "memory_lifecycle_update" not in capabilities
+    assert "可绑定承诺：无" in action_context
+    assert "memory_lifecycle_update" not in action_context
 
 
 @pytest.mark.asyncio
@@ -322,6 +335,114 @@ async def test_action_initializer_ignores_lifecycle_target_ids_from_llm(
 
 
 @pytest.mark.asyncio
+async def test_future_cognition_materialization_binds_trusted_source_scope(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Future cognition source scope is copied by code, not emitted by L2d."""
+
+    state = _state()
+    state.update(
+        {
+            "platform": "qq",
+            "platform_channel_id": "54369546",
+            "channel_type": "group",
+            "global_user_id": "673225019",
+            "platform_bot_id": "bot-001",
+            "character_profile": {"name": "TestCharacter"},
+        }
+    )
+    fake_llm = _FakeLLM(json.dumps({
+        "action_requests": [_future_cognition_request()],
+    }))
+    monkeypatch.setattr(l2d_module, "_action_initializer_llm", fake_llm)
+
+    result = await l2d_module.call_action_initializer(state)
+
+    action_spec = result["action_specs"][0]
+    assert action_spec["kind"] == "trigger_future_cognition"
+    assert action_spec["continuation"] == {
+        "schema_version": "action_continuation.v1",
+        "mode": "scheduled_followup",
+        "episode_type": "self_cognition",
+        "max_depth": 1,
+        "include_result_as": "scheduled_event",
+    }
+    assert action_spec["target"]["scope"] == {
+        "episode_type": "self_cognition",
+        "source_platform": "qq",
+        "source_channel_id": "54369546",
+        "source_channel_type": "group",
+        "source_user_id": "673225019",
+        "source_platform_bot_id": "bot-001",
+        "source_character_name": "TestCharacter",
+    }
+    human_payload = fake_llm.messages[1].content
+    assert "54369546" not in human_payload
+    assert "bot-001" not in human_payload
+
+
+@pytest.mark.asyncio
+async def test_future_cognition_uses_own_detail_as_objective(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Future cognition should carry its own distinct next-cycle objective."""
+
+    speak_request = {
+        "capability": "speak",
+        "decision": "visible_reply",
+        "detail": '回应用户关于 5090 AI 模型运行能力的询问',
+        "reason": "The user asked for a visible acknowledgement first.",
+    }
+    future_request = {
+        "capability": "trigger_future_cognition",
+        "decision": "future_self_check",
+        "detail": '需要查阅目前已知的泄露参数、预测数据以及社区讨论的兼容性信息',
+        "reason": "The character needs a later private cognition cycle.",
+    }
+    fake_llm = _FakeLLM(json.dumps({
+        "action_requests": [speak_request, future_request],
+    }, ensure_ascii=False))
+    monkeypatch.setattr(l2d_module, "_action_initializer_llm", fake_llm)
+
+    result = await l2d_module.call_action_initializer(_state())
+
+    future_specs = [
+        spec for spec in result["action_specs"]
+        if spec["kind"] == "trigger_future_cognition"
+    ]
+    assert len(future_specs) == 1
+    params = future_specs[0]["params"]
+    assert params["continuation_objective"] == (
+        '需要查阅目前已知的泄露参数、预测数据以及社区讨论的兼容性信息'
+    )
+    assert "context_summary" not in params
+
+
+@pytest.mark.asyncio
+async def test_scheduled_future_cognition_cannot_chain_another_future_slot(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A due future-cognition cycle must not schedule itself again."""
+
+    state = _state()
+    state["cognitive_episode"]["trigger_source"] = "internal_thought"
+    state["conversation_progress"] = {
+        "source": "scheduled_future_cognition",
+        "continuation_objective": (
+            "Check whether the earlier follow-up is still useful."
+        ),
+    }
+    fake_llm = _FakeLLM(json.dumps({
+        "action_requests": [_future_cognition_request()],
+    }))
+    monkeypatch.setattr(l2d_module, "_action_initializer_llm", fake_llm)
+
+    result = await l2d_module.call_action_initializer(state)
+
+    assert result["action_specs"] == []
+
+
+@pytest.mark.asyncio
 async def test_action_initializer_accepts_multiple_valid_action_specs(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -343,8 +464,10 @@ async def test_action_initializer_accepts_multiple_valid_action_specs(
         "memory_lifecycle_update",
         "trigger_future_cognition",
     ]
-    human_payload = json.loads(fake_llm.messages[1].content)
-    assert "trigger_context" in human_payload
+    human_context = fake_llm.messages[1].content
+    assert human_context.startswith("当前行动上下文：")
+    assert "trigger_context" not in human_context
+    assert "available_capabilities" not in human_context
 
 
 @pytest.mark.asyncio

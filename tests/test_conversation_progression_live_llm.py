@@ -26,13 +26,13 @@ from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition_l2 import (
     call_judgment_core_agent,
 )
 from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition_l3 import (
-    call_collector,
+    call_surface_directive_collector,
     call_content_anchor_agent,
-    call_contextual_agent,
     call_preference_adapter,
     call_style_agent,
     call_visual_agent,
 )
+from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition_l2c2 import call_social_context_appraisal
 from kazusa_ai_chatbot.utils import get_llm, load_personality, parse_llm_json_output
 from tests.llm_trace import write_llm_trace
 
@@ -550,7 +550,7 @@ async def _run_live_cognition_and_dialog(state: dict) -> tuple[dict, dict]:
     l2c = await call_judgment_core_agent(state)
     state.update(l2c)
 
-    l3a = await call_contextual_agent(state)
+    l3a = await call_social_context_appraisal(state)
     state.update(l3a)
 
     l3b = await call_style_agent(state)
@@ -565,7 +565,7 @@ async def _run_live_cognition_and_dialog(state: dict) -> tuple[dict, dict]:
     l3c = await call_visual_agent(state)
     state.update(l3c)
 
-    l4 = await call_collector(state)
+    l4 = await call_surface_directive_collector(state)
     state.update(l4)
 
     dialog = await dialog_agent(state)
@@ -845,3 +845,4 @@ async def test_live_progression_mixed_language_art_commission(ensure_live_llm) -
 
     del ensure_live_llm
     await _record_progression_sequence(_mixed_language_art_case())
+

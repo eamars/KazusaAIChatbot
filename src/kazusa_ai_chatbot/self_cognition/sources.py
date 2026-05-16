@@ -223,8 +223,8 @@ def _build_scheduled_future_cognition_case(
         return_value = None
         return return_value
 
-    context_summary = text_or_empty(args.get("context_summary"))
-    if not context_summary:
+    continuation_objective = text_or_empty(args.get("continuation_objective"))
+    if not continuation_objective:
         return_value = None
         return return_value
     event_id = text_or_empty(event.get("event_id"))
@@ -236,9 +236,14 @@ def _build_scheduled_future_cognition_case(
     source_action_attempt_id = text_or_empty(
         args.get("source_action_attempt_id")
     )
+    source_platform = text_or_empty(event.get("source_platform"))
+    source_channel_id = text_or_empty(event.get("source_channel_id"))
+    source_channel_type = text_or_empty(event.get("source_channel_type"))
+    source_user_id = text_or_empty(event.get("source_user_id"))
+    source_platform_bot_id = text_or_empty(event.get("source_platform_bot_id"))
     source_refs = _scheduled_future_cognition_source_refs(
         args,
-        context_summary=context_summary,
+        continuation_objective=continuation_objective,
         execute_at=execute_at,
     )
     safe_continuation = _safe_continuation(args.get("continuation"))
@@ -252,19 +257,17 @@ def _build_scheduled_future_cognition_case(
         "semantic_due_state": models.DUE_STATE_DUE_NOW,
         "actionability": "scheduled_private_followup_ready_no_direct_contact",
         "target_scope": {
-            "platform": text_or_empty(event.get("source_platform"))
-            or "orchestrator",
-            "platform_channel_id": "",
-            "channel_type": text_or_empty(event.get("source_channel_type"))
-            or "internal",
-            "user_id": "self_cognition",
-            "display_name": "self-cognition",
+            "platform": source_platform or "orchestrator",
+            "platform_channel_id": source_channel_id,
+            "channel_type": source_channel_type or "internal",
+            "user_id": source_user_id or "self_cognition",
+            "display_name": source_user_id or "self-cognition",
         },
         "source_refs": source_refs,
         "visible_context": [],
         "conversation_progress": {
             "source": "scheduled_future_cognition",
-            "context_summary": context_summary,
+            "continuation_objective": continuation_objective,
             "continuation": safe_continuation,
         },
         "character_profile": dict(character_profile),
@@ -275,7 +278,8 @@ def _build_scheduled_future_cognition_case(
         },
         "current_mood": text_or_empty(character_profile.get("mood")),
         "global_vibe": text_or_empty(character_profile.get("global_vibe")),
-        "rag_query": context_summary,
+        "rag_query": continuation_objective,
+        "platform_bot_id": source_platform_bot_id,
         "source_scheduled_event_id": event_id,
         "source_action_attempt_id": source_action_attempt_id,
     }
@@ -285,7 +289,7 @@ def _build_scheduled_future_cognition_case(
 def _scheduled_future_cognition_source_refs(
     args: dict[str, Any],
     *,
-    context_summary: str,
+    continuation_objective: str,
     execute_at: str,
 ) -> list[models.SelfCognitionSourceRef]:
     """Build prompt-safe source references for a scheduled cognition slot."""
@@ -295,7 +299,7 @@ def _scheduled_future_cognition_source_refs(
             "source_kind": "scheduled_event",
             "source_id": "scheduled_future_cognition_slot",
             "due_at": execute_at or None,
-            "summary": context_summary,
+            "summary": continuation_objective,
         }
     ]
 

@@ -20,6 +20,9 @@ from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition_l2 import (
     call_cognition_consciousness,
     call_judgment_core_agent,
 )
+from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition_l2c2 import (
+    call_social_context_appraisal,
+)
 from kazusa_ai_chatbot.rag.user_memory_unit_retrieval import (
     empty_user_memory_context,
 )
@@ -283,7 +286,11 @@ async def _capture_self_upstream_state(
         rag_output=rag_output,
     )
     rendered_packet = self_projection.render_source_packet_text(source_packet)
-    state = self_runner._build_cognition_state(source_case, rendered_packet)
+    state = self_runner._build_cognition_state(
+        source_case,
+        rendered_packet,
+        rag_output=rag_output,
+    )
     frozen_state = await _run_upstream_to_l2c(state)
     return frozen_state
 
@@ -300,6 +307,8 @@ async def _run_upstream_to_l2c(state: dict[str, Any]) -> dict[str, Any]:
     working_state.update(l2b_output)
     l2c_output = await call_judgment_core_agent(working_state)
     working_state.update(l2c_output)
+    l2c2_output = await call_social_context_appraisal(working_state)
+    working_state.update(l2c2_output)
     frozen_state = _freeze_l2d_state(working_state)
     return frozen_state
 
@@ -315,6 +324,10 @@ def _freeze_l2d_state(state: dict[str, Any]) -> dict[str, Any]:
         "emotional_appraisal": state["emotional_appraisal"],
         "interaction_subtext": state["interaction_subtext"],
         "boundary_core_assessment": state["boundary_core_assessment"],
+        "social_distance": state["social_distance"],
+        "emotional_intensity": state["emotional_intensity"],
+        "vibe_check": state["vibe_check"],
+        "relational_dynamic": state["relational_dynamic"],
         "cognitive_episode": state["cognitive_episode"],
         "channel_type": state["channel_type"],
         "rag_result": state["rag_result"],

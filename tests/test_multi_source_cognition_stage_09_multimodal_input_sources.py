@@ -16,6 +16,7 @@ from kazusa_ai_chatbot import service as service_module
 from kazusa_ai_chatbot.nodes import persona_supervisor2_cognition_l1 as l1_module
 from kazusa_ai_chatbot.nodes import persona_supervisor2_cognition_l2 as l2_module
 from kazusa_ai_chatbot.nodes import persona_supervisor2_cognition_l3 as l3_module
+from kazusa_ai_chatbot.nodes import persona_supervisor2_cognition_l2c2 as l2c2_module
 from kazusa_ai_chatbot.nodes import persona_supervisor2_msg_decontexualizer as decontextualizer_module
 from kazusa_ai_chatbot.cognition_episode import (
     CognitiveEpisodeValidationError,
@@ -42,10 +43,10 @@ from kazusa_ai_chatbot.rag.user_memory_unit_retrieval import (
 
 _APPROVED_STAGES: tuple[CognitionPromptStage, ...] = (
     "l1_subconscious",
-    "l2a_consciousness",
-    "l2b_boundary_core",
-    "l2c_judgment_core",
-    "l3_contextual_agent",
+    "l2a_conscious_framing",
+    "l2b_boundary_appraisal",
+    "l2c1_judgment_synthesis",
+    "l2c2_social_context_appraisal",
     "l3_style_agent",
     "l3_content_anchor_agent",
     "l3_preference_adapter",
@@ -83,9 +84,9 @@ _PROMPT_FINGERPRINTS = (
     ),
     (
         "_CONTEXTUAL_AGENT_PROMPT",
-        l3_module._CONTEXTUAL_AGENT_PROMPT,
-        5582,
-        "df453430e47dd1ee4fb90e442b0287470082a2a015212b535316e19db201fc3e",
+        l2c2_module._CONTEXTUAL_AGENT_PROMPT,
+        5402,
+        "3d99f7054f25facf32f17d187aeec52d6cb415868480eda836f674e3293e7cb2",
     ),
     (
         "_STYLE_AGENT_PROMPT",
@@ -96,8 +97,8 @@ _PROMPT_FINGERPRINTS = (
     (
         "_CONTENT_ANCHOR_AGENT_PROMPT",
         l3_module._CONTENT_ANCHOR_AGENT_PROMPT,
-        16814,
-        "ddf82213185239bedf4755a4f23e3abfa9d1f0a8e2b813c0bbee38b85bc9405f",
+        16784,
+        "25c377a3ff3ee189e63f5cd9e1ed2178a9182605e3bda513db8b393f2ced5c48",
     ),
     (
         "_PREFERENCE_ADAPTER_PROMPT",
@@ -108,8 +109,8 @@ _PROMPT_FINGERPRINTS = (
     (
         "_VISUAL_AGENT_PROMPT",
         l3_module._VISUAL_AGENT_PROMPT,
-        7882,
-        "b5440513d41341b04e6f8300b4e95c052073199a1f4aa01c71002f8e0e141e44",
+        7826,
+        "552498b619657ce9aa11099aa7a4abec3236956691b0908994158798af75743a",
     ),
 )
 
@@ -724,7 +725,6 @@ def test_source_payload_contains_structured_image_observations() -> None:
             "image_observations": [
                 {
                     "observation_origin": "current_attachment",
-                    "source_message_id": "",
                     "media_kind": "image",
                     "summary_status": "available",
                     "summary": "image shows a whiteboard",
@@ -1047,3 +1047,4 @@ async def test_descriptor_image_description_without_base64_skips_vision_llm(
         "adapter supplied image summary"
     )
     update_descriptions.assert_awaited_once()
+

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import logging
 from collections.abc import Mapping
 from typing import TypedDict
@@ -21,7 +20,6 @@ from kazusa_ai_chatbot.action_spec.registry import (
     SPEAK_CAPABILITY,
     TRIGGER_FUTURE_COGNITION_CAPABILITY,
     build_initial_action_capabilities,
-    project_prompt_affordances,
 )
 from kazusa_ai_chatbot.config import (
     COGNITION_LLM_API_KEY,
@@ -40,15 +38,6 @@ ACTION_SPEC_CAP = 3
 _ALLOWED_LIFECYCLE_DECISIONS = frozenset(LIFECYCLE_STATUS_BY_DECISION)
 
 
-class TriggerContextV1(TypedDict):
-    """Prompt-safe trigger context consumed by the action initializer."""
-
-    trigger_source: str
-    input_sources: list[str]
-    output_mode: str
-    target_scope_summary: str
-
-
 class ActionRequestV1(TypedDict, total=False):
     """Semantic action request emitted by L2d before deterministic wrapping."""
 
@@ -61,44 +50,29 @@ class ActionRequestV1(TypedDict, total=False):
 def build_action_initializer_payload(
     state: CognitionState,
     capabilities: Mapping[str, CapabilitySpecV1] | None = None,
-) -> dict[str, object]:
-    """Build the prompt-safe payload for L2d action selection.
+) -> str:
+    """Build the current-run semantic context for L2d action selection.
 
     Args:
         state: Cognition state after L2c judgment.
         capabilities: Optional registry override for deterministic tests.
 
     Returns:
-        JSON-serializable payload containing final L2 state, semantic trigger
-        context, prompt-safe affordances, and bounded evidence.
+        One prompt-safe semantic string containing only dynamic turn context.
     """
 
     if capabilities is None:
         capabilities = build_initial_action_capabilities()
     prompt_capabilities = _prompt_capabilities_for_state(state, capabilities)
-    trigger_context = build_trigger_context(state)
-    payload = {
-        "final_l2": {
-            "internal_monologue": state["internal_monologue"],
-            "logical_stance": state["logical_stance"],
-            "character_intent": state["character_intent"],
-            "judgment_note": state["judgment_note"],
-            "emotional_appraisal": state["emotional_appraisal"],
-            "interaction_subtext": state["interaction_subtext"],
-            "boundary_core_assessment": state["boundary_core_assessment"],
-        },
-        "trigger_context": trigger_context,
-        "capabilities": project_prompt_affordances(prompt_capabilities),
-        "evidence": _project_action_evidence(state),
-    }
-    return payload
+    action_context = _build_action_context_text(state, prompt_capabilities)
+    return action_context
 
 
 def _prompt_capabilities_for_state(
     state: CognitionState,
     capabilities: Mapping[str, CapabilitySpecV1],
 ) -> dict[str, CapabilitySpecV1]:
-    """Return prompt-visible capabilities allowed by deterministic bindings."""
+    """Return action capabilities allowed by deterministic bindings."""
 
     prompt_capabilities = dict(capabilities)
     if _select_active_commitment(state) is None:
@@ -106,21 +80,152 @@ def _prompt_capabilities_for_state(
     return prompt_capabilities
 
 
-def build_trigger_context(state: CognitionState) -> TriggerContextV1:
-    """Project the cognitive episode into prompt-safe trigger context."""
+def _build_action_context_text(
+    state: CognitionState,
+    prompt_capabilities: Mapping[str, CapabilitySpecV1],
+) -> str:
+    """Render the current cognition state as one model-facing context string."""
 
     episode = state["cognitive_episode"]
-    output_mode = episode["output_mode"]
-    channel_type = state["channel_type"]
-    trigger_context: TriggerContextV1 = {
-        "trigger_source": episode["trigger_source"],
-        "input_sources": list(episode["input_sources"]),
-        "output_mode": output_mode,
-        "target_scope_summary": (
-            f"{channel_type} conversation with {output_mode} output mode"
+    input_sources = ", ".join(episode["input_sources"])
+    evidence = _project_action_evidence(state)
+    commitment_text = _commitment_context_text(
+        state,
+        memory_lifecycle_visible=(
+            MEMORY_LIFECYCLE_UPDATE_CAPABILITY in prompt_capabilities
         ),
-    }
-    return trigger_context
+    )
+    context_lines = [
+        "当前行动上下文：",
+        (
+            f"触发来源：{episode['trigger_source']}；"
+            f"输入来源：{input_sources}；"
+            f"输出要求：{episode['output_mode']}；"
+            f"场景：{state['channel_type']} 对话。"
+        ),
+        (
+            "已形成的决定："
+            f"立场={state['logical_stance']}；"
+            f"意图={state['character_intent']}；"
+            f"裁决={state['judgment_note']}；"
+            f"内心判断={state['internal_monologue']}"
+        ),
+        (
+            "即时感受："
+            f"{state['emotional_appraisal']}；"
+            f"互动潜台词：{state['interaction_subtext']}。"
+        ),
+        (
+            "边界与社交语境："
+            f"边界={_compact_context_value(state['boundary_core_assessment'])}；"
+            f"距离={state['social_distance']}；"
+            f"强度={state['emotional_intensity']}；"
+            f"氛围={state['vibe_check']}；"
+            f"关系={state['relational_dynamic']}。"
+        ),
+        f"当前输入摘要：{evidence['decontexualized_input']}",
+        f"检索结论：{evidence['rag_answer'] or '无'}",
+        commitment_text,
+        f"相关记忆：{_evidence_list_text(evidence['memory_evidence'])}",
+        f"对话进度：{_compact_context_value(evidence['conversation_progress'])}",
+    ]
+    action_context = "\n".join(context_lines)
+    return action_context
+
+
+def _commitment_context_text(
+    state: CognitionState,
+    *,
+    memory_lifecycle_visible: bool,
+) -> str:
+    """Return the prompt-safe commitment context without persistence IDs."""
+
+    selected_commitment = _select_active_commitment(state)
+    if selected_commitment is None:
+        projected_commitments = _project_active_commitments_for_prompt(
+            _raw_active_commitments(state)
+        )
+        if projected_commitments:
+            commitment_lines = _evidence_list_text(projected_commitments)
+            commitment_text = (
+                "可绑定承诺：无唯一目标；"
+                f"当前只可作为承诺线索阅读：{commitment_lines}"
+            )
+            return commitment_text
+        commitment_text = "可绑定承诺：无。"
+        return commitment_text
+
+    projected_commitments = _project_active_commitments_for_prompt(
+        [selected_commitment]
+    )
+    commitment_lines = _evidence_list_text(projected_commitments)
+    if memory_lifecycle_visible:
+        commitment_text = f"可绑定承诺：有；{commitment_lines}"
+        return commitment_text
+
+    commitment_text = (
+        "可绑定承诺：有承诺线索，但当前不允许承诺生命周期动作；"
+        f"{commitment_lines}"
+    )
+    return commitment_text
+
+
+def _evidence_list_text(entries: object) -> str:
+    """Render prompt-safe evidence entries as compact prose."""
+
+    if not isinstance(entries, list) or not entries:
+        return "无"
+
+    rendered_entries: list[str] = []
+    for entry in entries:
+        if isinstance(entry, dict):
+            rendered_entry = _compact_mapping_text(entry)
+        else:
+            rendered_entry = _compact_context_value(entry)
+        if rendered_entry != "无":
+            rendered_entries.append(rendered_entry)
+
+    if not rendered_entries:
+        return "无"
+    evidence_text = "；".join(rendered_entries)
+    return evidence_text
+
+
+def _compact_mapping_text(value: Mapping[str, object]) -> str:
+    """Render a dictionary as compact prompt-facing prose."""
+
+    rendered_pairs: list[str] = []
+    for key, raw_value in value.items():
+        rendered_value = _compact_context_value(raw_value)
+        if rendered_value == "无":
+            continue
+        rendered_pairs.append(f"{key}={rendered_value}")
+
+    if not rendered_pairs:
+        return "无"
+    mapping_text = "，".join(rendered_pairs)
+    return mapping_text
+
+
+def _compact_context_value(value: object) -> str:
+    """Render one dynamic context value for the human message string."""
+
+    if value is None:
+        return "无"
+    if isinstance(value, str):
+        stripped_value = value.strip()
+        if not stripped_value:
+            return "无"
+        return stripped_value
+    if isinstance(value, Mapping):
+        mapping_text = _compact_mapping_text(value)
+        return mapping_text
+    if isinstance(value, list):
+        list_text = _evidence_list_text(value)
+        return list_text
+
+    context_value = str(value)
+    return context_value
 
 
 def _project_action_evidence(state: CognitionState) -> dict[str, object]:
@@ -266,8 +371,18 @@ def _materialize_action_specs(
     """Wrap semantic requests in deterministic action-spec envelopes."""
 
     action_specs: list[ActionSpecV1] = []
-    for request in requests:
-        action_spec = _materialize_action_request(request, state)
+    for index, request in enumerate(requests):
+        continuation_objective: str | None = None
+        if request["capability"] == TRIGGER_FUTURE_COGNITION_CAPABILITY:
+            continuation_objective = _future_cognition_objective(
+                requests,
+                future_request_index=index,
+            )
+        action_spec = _materialize_action_request(
+            request,
+            state,
+            continuation_objective=continuation_objective,
+        )
         if action_spec is None:
             continue
         action_specs.append(action_spec)
@@ -279,6 +394,8 @@ def _materialize_action_specs(
 def _materialize_action_request(
     request: ActionRequestV1,
     state: CognitionState,
+    *,
+    continuation_objective: str | None = None,
 ) -> ActionSpecV1 | None:
     """Build one validated action spec for a selected semantic capability."""
 
@@ -288,7 +405,17 @@ def _materialize_action_request(
     elif capability == MEMORY_LIFECYCLE_UPDATE_CAPABILITY:
         action_spec = _build_memory_lifecycle_action_spec(request, state)
     elif capability == TRIGGER_FUTURE_COGNITION_CAPABILITY:
-        action_spec = _build_future_cognition_action_spec(request)
+        if _is_scheduled_future_cognition_source(state):
+            logger.warning(
+                "L2d dropped future-cognition request from scheduled "
+                "future-cognition source"
+            )
+            return None
+        action_spec = _build_future_cognition_action_spec(
+            request,
+            state,
+            continuation_objective=continuation_objective,
+        )
     else:
         logger.warning(f"L2d dropped unsupported action capability: {capability}")
         return None
@@ -438,12 +565,16 @@ def _active_commitments(state: CognitionState) -> list[dict[str, object]]:
 
 def _build_future_cognition_action_spec(
     request: ActionRequestV1,
+    state: CognitionState,
+    *,
+    continuation_objective: str | None,
 ) -> dict[str, object]:
     """Build the deterministic envelope for a future cognition request."""
 
-    context_summary = _semantic_text(request, "detail")
-    if not context_summary:
-        context_summary = request["reason"]
+    if continuation_objective is None:
+        continuation_objective = _semantic_text(request, "detail")
+    if not continuation_objective:
+        continuation_objective = request["reason"]
     action_spec = _build_action_spec(
         kind=TRIGGER_FUTURE_COGNITION_CAPABILITY,
         source_refs=[_current_episode_source_ref()],
@@ -452,19 +583,100 @@ def _build_future_cognition_action_spec(
             "target_kind": "cognitive_episode",
             "target_id": None,
             "owner": "orchestrator",
-            "scope": {"episode_type": "self_cognition"},
+            "scope": _future_cognition_target_scope(state),
         },
         params={
             "episode_type": "self_cognition",
             "trigger_at": None,
-            "context_summary": context_summary,
+            "continuation_objective": continuation_objective,
         },
         urgency="background",
         visibility="private",
         deadline=None,
+        continuation=_scheduled_followup_continuation(),
         reason=request["reason"],
     )
     return action_spec
+
+
+def _future_cognition_objective(
+    requests: list[ActionRequestV1],
+    *,
+    future_request_index: int,
+) -> str:
+    """Return the one-string objective for a future cognition handoff."""
+
+    future_request = requests[future_request_index]
+    continuation_objective = _semantic_text(future_request, "detail")
+    if continuation_objective:
+        return continuation_objective
+
+    continuation_objective = future_request["reason"]
+    return continuation_objective
+
+
+def _future_cognition_target_scope(state: CognitionState) -> dict[str, object]:
+    """Bind trusted source scope for the later scheduled cognition slot."""
+
+    scope: dict[str, object] = {
+        "episode_type": "self_cognition",
+    }
+    field_map = (
+        ("platform", "source_platform"),
+        ("platform_channel_id", "source_channel_id"),
+        ("channel_type", "source_channel_type"),
+        ("global_user_id", "source_user_id"),
+        ("platform_bot_id", "source_platform_bot_id"),
+    )
+    for state_field, scope_field in field_map:
+        field_value = _state_text(state, state_field)
+        if field_value:
+            scope[scope_field] = field_value
+
+    character_name = _character_name_for_scope(state)
+    if character_name:
+        scope["source_character_name"] = character_name
+    return scope
+
+
+def _state_text(state: CognitionState, field_name: str) -> str:
+    """Return one optional text value from the trusted cognition state."""
+
+    raw_value = state.get(field_name)
+    if not isinstance(raw_value, str):
+        return_value = ""
+        return return_value
+    return_value = raw_value.strip()
+    return return_value
+
+
+def _character_name_for_scope(state: CognitionState) -> str:
+    """Return the active character name when present in trusted state."""
+
+    profile = state.get("character_profile")
+    if not isinstance(profile, dict):
+        return_value = ""
+        return return_value
+
+    name = profile.get("name")
+    if not isinstance(name, str):
+        return_value = ""
+        return return_value
+
+    return_value = name.strip()
+    return return_value
+
+
+def _is_scheduled_future_cognition_source(state: CognitionState) -> bool:
+    """Return whether this cycle was itself started by a future-cognition slot."""
+
+    conversation_progress = state.get("conversation_progress")
+    if not isinstance(conversation_progress, dict):
+        return False
+
+    source = conversation_progress.get("source")
+    is_scheduled_source = source == "scheduled_future_cognition"
+    return is_scheduled_source
 
 
 def _build_action_spec(
@@ -477,9 +689,13 @@ def _build_action_spec(
     visibility: str,
     deadline: str | None,
     reason: str,
+    continuation: dict[str, object] | None = None,
 ) -> dict[str, object]:
     """Build the common deterministic action-spec envelope."""
 
+    action_continuation = continuation
+    if action_continuation is None:
+        action_continuation = _no_continuation()
     action_spec = {
         "schema_version": "action_spec.v1",
         "kind": kind,
@@ -490,7 +706,7 @@ def _build_action_spec(
         "urgency": urgency,
         "visibility": visibility,
         "deadline": deadline,
-        "continuation": _no_continuation(),
+        "continuation": action_continuation,
         "reason": reason,
     }
     return action_spec
@@ -523,6 +739,19 @@ def _no_continuation() -> dict[str, object]:
     return continuation
 
 
+def _scheduled_followup_continuation() -> dict[str, object]:
+    """Return the bounded continuation contract for future cognition."""
+
+    continuation = {
+        "schema_version": "action_continuation.v1",
+        "mode": "scheduled_followup",
+        "episode_type": "self_cognition",
+        "max_depth": 1,
+        "include_result_as": "scheduled_event",
+    }
+    return continuation
+
+
 def _semantic_text(value: Mapping[str, object], field_name: str) -> str:
     """Return one stripped semantic text field from LLM output."""
 
@@ -534,103 +763,52 @@ def _semantic_text(value: Mapping[str, object], field_name: str) -> str:
 
 
 _ACTION_INITIALIZER_PROMPT = """\
-你现在是角色的语义行动初始化层 (Action Initializer / L2d)。
-最终立场、意图和边界裁决已经由上游完成。你不重新裁决、不写台词、不执行工具、不选择执行处理器、不授予权限、不修复上游判断。
-你只负责把角色已经 settled 的决定翻译成 0 到 3 个语义动作请求。执行信封、目标对象、持久化字段、投递字段、后续承接对象由后续确定性代码或能力拥有者生成，不在这里输出。
+你是角色的语义行动选择层。
+前面的理解过程已经完成当前事件的立场、意图、边界和社交语境判断。
+用户消息只包含本轮动态行动上下文。
+你的任务是把已经成形的角色行动意图整理成 0 到 3 个语义动作请求。
+行动请求只描述角色想做什么，保持在语义层；输出内容只包含动作名、语义决定、目标细节和理由。
 
 # 语言政策
-- 除结构化枚举值、字段名、ID、URL、代码、命令、模型标签等必须保持原样的内容外，所有由你新生成的内部自由文本字段都必须使用简体中文。
-- 用户原文、引用文本、专有名词、标题、别名、外部证据原句在需要精确保留时保持原语言；不要为了统一语言而改写。
-- 不要添加翻译、双语复写或括号内解释，除非源文本本身已经包含。
+- 除字段名、枚举值、ID、URL、代码、命令、模型标签等必须保持原样的内容外，你新生成的内部自由文本字段使用简体中文。
+- 用户原文、引用文本、专有名词、标题、别名、外部证据原句在需要精确保留时保持原语言。
+- 保留原语言内容时只保留原文，不另加旁注解释。
 
-# 核心任务
-1. 读取 `final_l2`，确认角色已经决定了什么，而不是重新做 Consciousness 或 Judgment。
-2. 读取 `trigger_context`，只用它理解触发来源、输出模式、可见性、紧急度和是否需要表层表达。
-3. 读取 `capabilities`，只能从其中列出的 capability 名称中选择动作。
-4. 读取 `evidence.active_commitments` 与 `evidence.memory_evidence`，判断是否需要对仍有效的承诺做生命周期动作。
-5. 输出 `action_requests`，数量可以是 0、1 或多个，但最多 3 个。
+# 可选动作
+- `speak`：角色需要一个文字表层。`detail` 写清文字表层要处理的具体对象、问题、承诺或待处理目标。
+- `memory_lifecycle_update`：角色已经决定改变一个可绑定承诺的状态。当前行动上下文需要写明可绑定承诺为有。`decision` 只能是 fulfilled、abandoned、obsolete、deferred。
+- `trigger_future_cognition`：角色需要在未来拿到或消费一个具体新信息后再想一次。`detail` 写成完整目标：等待或消费什么新信息，继续处理哪个具体问题、任务或承诺。
 
-# 运行规则
-1. **不写对话**：如果需要文字表层，选择 `speak`；不要在这里生成最终回复文本。
-2. **不处理投递**：普通对话表层必须使用 `speak`；最终文本生成和适配器投递由后续表层与执行边界处理。
-3. **不做确定性清理**：不能因为承诺过期、时间太久、关键词匹配或状态难看，就自动放弃承诺。只有当角色语义上决定 fulfilled / abandoned / obsolete / deferred 时，才选择 `memory_lifecycle_update`。
-4. **不泄露执行细节**：不要输出执行处理器标识、数据库集合名、平台原始频道 ID、凭据、适配器内部字段或数据库内部细节。
-5. **多动作必须独立**：同一轮可以同时选择表层表达和私有生命周期动作；如果一个动作依赖另一个工具结果，不要隐式串联，改为选择未来认知动作。
-6. **无动作也是合法决策**：如果角色决定继续等待、保持沉默或不需要任何动作，返回空数组。
-7. **只写语义请求**：不要输出执行参数、目标 owner、存储 owner、版本号、投递通道、适配器字段或后续承接结构。
+# 选择流程
+1. 先根据当前行动上下文确认角色现在的行动意图。
+2. 当前需要文字表层时，选择 `speak`。
+3. 当前有可绑定承诺，并且行动意图已经包含承诺状态变化时，选择 `memory_lifecycle_update`。
+4. 当前回合存在具体未完成问题，且继续处理依赖未来新信息时，选择 `trigger_future_cognition`。
+5. 没有真实动作时，返回空数组。
+6. 同一轮可以选择多个彼此独立的动作，最多 3 个。
 
-# 自我认知输出规则
-- 当 `trigger_context.trigger_source` 是 `self_cognition`，或当前兼容层仍使用 `internal_thought` 表示自我认知时，不要因为 `logical_stance=CONFIRM` 或 `character_intent=PROVIDE` 就自动选择用户可见 `speak`。
-- 内部自检、审计、观察、等待自然契机、暂不主动、保持静默、无输出、SILENT_NO_WRITE、AUDIT_ONLY、PROGRESS_MAINTENANCE 等语义，都表示不要生成用户可见表层。
-- 只有当 `final_l2` 明确决定要对外联系、主动发起候选消息、或需要用户可见表达时，内部触发才可以选择 `speak`。
-- 如果角色只是决定记住、继续等待、后台维护或延期承诺，返回空数组，或只选择合法的私有 `memory_lifecycle_update`。
-- 如果角色明确决定未来某个时刻再自检、等自然间隙后再判断、或需要后续认知回合承接当前结果，选择私有 `trigger_future_cognition`；不要在这里直接启动认知。
+# 未来认知判断
+未来认知动作承接需要下一轮思考的具体信息缺口。
+合格的 `detail` 同时包含两部分：
+- 未来要等待或消费的具体新信息；
+- 该信息将继续处理的具体问题、任务或承诺。
 
-# 能力语义
-- `speak`: 角色需要一个文字表层。只说明表层意图或语气约束，不写最终台词。
-- `memory_lifecycle_update`: 角色决定改变某个承诺的生命周期。必须在 `decision` 中选择 fulfilled、abandoned、obsolete 或 deferred。
-- `trigger_future_cognition`: 角色需要未来再启动一次私有认知回合。只说明为什么需要后续认知，以及普通语言的时机线索。
-
-# 生命周期语义
-- `fulfilled`: 承诺已经被满足。
-- `abandoned`: 角色决定不再继续这个承诺。
-- `obsolete`: 新上下文使这个承诺不再相关或已被取代。
-- `deferred`: 承诺仍有效，应继续保持开放。
-
-# 思考路径
-1. 先读 `final_l2.internal_monologue`、`logical_stance`、`character_intent` 和 `judgment_note`，确定角色的 settled decision。
-2. 再读 `trigger_context.output_mode` 和 `target_scope_summary`，判断此轮是否需要用户可见表层、私有动作、预览动作或无动作。
-3. 再读 `capabilities`，只选择当前可用动作，不要发明工具。
-4. 若存在 active commitment，先判断角色是要履行、放弃、归档还是继续延期；不要用过期天数替角色做决定。
-5. 最后检查动作数量、互相依赖关系和可见性；超过 3 个时只保留最重要的 3 个独立动作。
+普通等待、情绪余波、关系观察和更自然的时机属于对话进度，不生成未来认知动作。
+如果未来认知动作与文字表层动作并列，`speak.detail` 写当前文字表层目标，`trigger_future_cognition.detail` 写下一轮思考目标。
 
 # 输入格式
-Human message 是 JSON，包含以下字段：
-{
-  "final_l2": {
-    "internal_monologue": "上游意识层产生的可审计内心独白",
-    "logical_stance": "CONFIRM | REFUSE | TENTATIVE | DIVERGE | CHALLENGE",
-    "character_intent": "PROVIDE | BANTAR | REJECT | EVADE | CONFRONT | DISMISS | CLARIFY",
-    "judgment_note": "最终裁决说明",
-    "emotional_appraisal": "L1 本能情绪",
-    "interaction_subtext": "L1 潜台词",
-    "boundary_core_assessment": {}
-  },
-  "trigger_context": {
-    "trigger_source": "user_message | internal_thought | self_cognition | scheduled_tick | tool_result",
-    "input_sources": ["..."],
-    "output_mode": "visible_reply | think_only | preview | silent",
-    "target_scope_summary": "prompt-safe scope summary"
-  },
-  "capabilities": [
-    {
-      "capability": "speak | memory_lifecycle_update | trigger_future_cognition",
-      "available": true,
-      "visibility": "private | preview | user_visible",
-      "semantic_input_summary": ["prompt-safe semantic summary"]
-    }
-  ],
-  "evidence": {
-    "decontexualized_input": "当前输入的语义摘要",
-    "rag_answer": "检索主管的一行综合结论",
-    "active_commitments": [],
-    "memory_evidence": [],
-    "conversation_progress": {}
-  }
-}
+用户消息是一段中文行动上下文字符串，不是 JSON。
+它描述当前回合的动态信息：触发来源、输出要求、已形成的决定、即时感受、社交语境、当前输入摘要、检索结论、可绑定承诺、相关记忆和对话进度。
 
 # 输出格式
-请务必返回合法的 JSON 字符串，仅包含以下字段：
+只返回合法 JSON 字符串：
 {
   "action_requests": [
     {
-      "capability": "capability 名称，必须来自 capabilities",
-      "decision": "生命周期枚举，或表层/未来认知的短语义决定",
-      "detail": "补充说明：涉及哪个承诺、表层约束、或未来认知时机",
-      "reason": "角色为什么选择这个动作的简短语义理由"
-    },
-    {
-        ...
+      "capability": "speak | memory_lifecycle_update | trigger_future_cognition",
+      "decision": "生命周期枚举，或简短语义决定",
+      "detail": "一个精确语义字符串",
+      "reason": "选择这个动作的简短语义理由"
     }
   ]
 }
@@ -650,8 +828,8 @@ async def call_action_initializer(state: CognitionState) -> CognitionState:
     """Run L2d and return validated action specs without executing them."""
 
     system_prompt = SystemMessage(content=_ACTION_INITIALIZER_PROMPT)
-    payload = build_action_initializer_payload(state)
-    human_message = HumanMessage(content=json.dumps(payload, ensure_ascii=False))
+    action_context = build_action_initializer_payload(state)
+    human_message = HumanMessage(content=action_context)
     response = await _action_initializer_llm.ainvoke([
         system_prompt,
         human_message,
@@ -667,7 +845,7 @@ async def call_action_initializer(state: CognitionState) -> CognitionState:
         "action_specs": action_specs,
     }
     validate_cognition_output_contract(
-        stage="l2d_action_initializer",
+        stage="l2d_action_selection",
         payload=return_value,
     )
     return return_value

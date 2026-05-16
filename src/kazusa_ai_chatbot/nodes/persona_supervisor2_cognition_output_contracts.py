@@ -16,27 +16,27 @@ _REQUIRED_OUTPUT_FIELDS: dict[CognitionPromptStage, dict[str, type[object]]] = {
         "emotional_appraisal": str,
         "interaction_subtext": str,
     },
-    "l2a_consciousness": {
+    "l2a_conscious_framing": {
         "internal_monologue": str,
         "character_intent": str,
         "logical_stance": str,
     },
-    "l2b_boundary_core": {
+    "l2b_boundary_appraisal": {
         "boundary_core_assessment": dict,
     },
-    "l2c_judgment_core": {
+    "l2c1_judgment_synthesis": {
         "logical_stance": str,
         "character_intent": str,
         "judgment_note": str,
     },
-    "l2d_action_initializer": {
-        "action_specs": list,
-    },
-    "l3_contextual_agent": {
+    "l2c2_social_context_appraisal": {
         "social_distance": str,
         "emotional_intensity": str,
         "vibe_check": str,
         "relational_dynamic": str,
+    },
+    "l2d_action_selection": {
+        "action_specs": list,
     },
     "l3_style_agent": {
         "rhetorical_strategy": str,
@@ -76,9 +76,9 @@ def validate_cognition_output_contract(
     if stage not in _REQUIRED_OUTPUT_FIELDS:
         raise CognitionOutputContractError(f"stage is not supported: {stage}")
 
-    if stage != "l2d_action_initializer" and "action_specs" in payload:
+    if stage != "l2d_action_selection" and "action_specs" in payload:
         raise CognitionOutputContractError(
-            f"{stage}.action_specs is only supported for l2d_action_initializer"
+            f"{stage}.action_specs is only supported for l2d_action_selection"
         )
 
     required_fields = _REQUIRED_OUTPUT_FIELDS[stage]

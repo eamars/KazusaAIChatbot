@@ -1,4 +1,4 @@
-"""Real LLM routing checks for the L2d action initializer."""
+"""Real LLM routing checks for L2d action selection."""
 
 from __future__ import annotations
 
@@ -16,7 +16,7 @@ from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition_l2d import (
     build_action_initializer_payload,
     call_action_initializer,
 )
-from tests.l2d_action_initializer_cases import (
+from tests.l2d_action_selection_cases import (
     compare_action_specs_to_expectations,
     load_l2d_routing_case_set,
     select_l2d_routing_case,
@@ -61,7 +61,7 @@ async def test_l2d_live_case_against_frozen_upstream() -> None:
     report = compare_action_specs_to_expectations(case, action_specs)
     leakage_errors = _action_spec_leakage_errors(action_specs)
     trace_path = write_llm_trace(
-        "l2d_action_initializer_live_llm",
+        "l2d_action_selection_live_llm",
         case_id,
         {
             "case_id": case_id,
@@ -76,7 +76,7 @@ async def test_l2d_live_case_against_frozen_upstream() -> None:
         },
     )
     logger.info(
-        f"L2D_ACTION_INITIALIZER_LIVE case={case_id} "
+        f"L2D_ACTION_SELECTION_LIVE case={case_id} "
         f"trace={trace_path} report={json.dumps(report, ensure_ascii=True)}"
     )
 
@@ -133,3 +133,4 @@ def _action_spec_leakage_errors(action_specs: list[dict]) -> list[str]:
         if fragment in serialized:
             errors.append(f"forbidden runtime fragment leaked: {fragment}")
     return errors
+

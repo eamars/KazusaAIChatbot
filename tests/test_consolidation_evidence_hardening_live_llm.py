@@ -17,9 +17,9 @@ from kazusa_ai_chatbot.config import (
 from kazusa_ai_chatbot.nodes.dialog_agent import dialog_generator
 from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition_l3 import (
     call_content_anchor_agent,
-    call_contextual_agent,
     call_visual_agent,
 )
+from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition_l2c2 import call_social_context_appraisal
 from kazusa_ai_chatbot.nodes.persona_supervisor2_consolidator_facts import facts_harvester
 from kazusa_ai_chatbot.nodes.persona_supervisor2_consolidator_reflection import relationship_recorder
 from kazusa_ai_chatbot.utils import load_personality
@@ -188,7 +188,7 @@ async def test_live_l3_profile_conformance_dessert_topic_shift(ensure_live_llms)
     del ensure_live_llms
     state = _cognition_state('换个轻松点的话题，你现在会想吃点甜的吗？')
 
-    contextual = await call_contextual_agent(state)
+    contextual = await call_social_context_appraisal(state)
     visual = await call_visual_agent({**state, **contextual})
     combined = f'{contextual} {visual}'
     _assert_no_forbidden(combined, _FORBIDDEN_AFFECT_FRAMES, 'l3_dessert_topic_shift')
@@ -238,7 +238,7 @@ async def test_live_l3_profile_conformance_practical_sorting(ensure_live_llms) -
     )
     state['rag_result']['answer'] = '这是普通整理建议问题，不涉及边界压力；可以按接口形状分。'
 
-    contextual = await call_contextual_agent(state)
+    contextual = await call_social_context_appraisal(state)
     visual = await call_visual_agent({**state, **contextual})
     combined = f'{contextual} {visual}'
     _assert_no_forbidden(combined, _FORBIDDEN_AFFECT_FRAMES, 'l3_practical_sorting')
@@ -382,7 +382,7 @@ async def test_live_direct_node_integration_smoke(ensure_live_llms) -> None:
 
     del ensure_live_llms
     state = _cognition_state('换个轻松点的话题，你现在会想吃点甜的吗？')
-    contextual = await call_contextual_agent(state)
+    contextual = await call_social_context_appraisal(state)
     visual = await call_visual_agent({**state, **contextual})
     dialog_state = {
         'internal_monologue': state['internal_monologue'],
@@ -445,3 +445,4 @@ async def test_live_direct_node_integration_smoke(ensure_live_llms) -> None:
         },
     )
     assert trace_path.exists()
+

@@ -66,11 +66,19 @@ Load these skills before execution:
 - Keep one shared semantic path:
 
 ```text
-typed episode -> RAG/evidence -> cognition L1/L2a/L2b/L2c
--> L2d action initialization -> action spec materialization/evaluation
+typed episode -> RAG/evidence -> cognition L1/L2a/L2b/L2c1/L2c2
+-> L2d action selection -> action spec materialization/evaluation
 -> selected L3 surfaces/action handlers -> action results + surface outputs
 -> episode-trace consolidation -> persistence/scheduler/adapter bridge
 ```
+
+- 2026-05-16 reconciliation: `cognition_llm_stage_reconnection_plan.md`
+  renames the internal initializer stage to `l2d_action_selection` and moves
+  the former contextual/social LLM to `l2c2_social_context_appraisal` before
+  L2d. Historical execution-evidence paths in this plan may still mention
+  `l2d_action_initializer` artifacts from the first implementation slice; new
+  code, tests, and docs must use `l2d_action_selection` naming and L2c2
+  placement.
 
 - LLM stages own semantic judgment. Deterministic code owns schema validation,
   permissions, limits, execution eligibility, persistence, cache invalidation,
@@ -83,10 +91,11 @@ typed episode -> RAG/evidence -> cognition L1/L2a/L2b/L2c
   user-facing dialogue.
 - Keep action specs optional in live cognition output until offline structured
   emission measurement is reviewed.
-- Do not make L2a Consciousness or L2c Judgment emit `ActionSpecV1` records.
-  L2a owns deliberative interpretation, L2b owns boundary assessment, and L2c
-  owns final stance/intent adjudication. Action selection belongs to L2d.
-- Add L2d as the action initializer after L2c. L2d is analogous to the RAG
+- Do not make L2a Consciousness, L2c1 Judgment, or L2c2 Social Context emit
+  `ActionSpecV1` records. L2a owns deliberative interpretation, L2b owns
+  boundary assessment, L2c1 owns final stance/intent adjudication, and L2c2
+  owns social-context appraisal. Action selection belongs to L2d.
+- Add L2d as the action selector after L2c1 and L2c2. L2d is analogous to the RAG
   initializer: it chooses which registered action capabilities are needed, but
   does not run specialists or generate low-level handler mechanics.
 - Treat L2d prompt output as semantic `action_requests` with cardinality zero,
@@ -114,6 +123,19 @@ typed episode -> RAG/evidence -> cognition L1/L2a/L2b/L2c
   trigger-source, RAG, and repository context. L2d must not receive, copy,
   compare, or emit raw target IDs, source-ref IDs, persistence IDs, owner names,
   collection names, adapter IDs, scheduler IDs, or handler IDs.
+- LLM-to-LLM handoff information must be exactly one prompt-safe semantic
+  string. TypedDicts, JSON objects, schema versions, source refs, target scopes,
+  continuation envelopes, IDs, lifecycle markers, and routing metadata are for
+  deterministic code only and must not be projected to the next LLM as
+  structural meaning. If the required handoff cannot be represented faithfully
+  in one string, fail the handoff instead of emitting a lossy substitute.
+- Future cognition uses a `continuation_objective`, not a `context_summary`.
+  This string is the future thinking contract for the next cognition cycle. It
+  must preserve concrete subjects, requested outcomes, unresolved commitments,
+  and selected action anchors. If `trigger_future_cognition` continues another
+  selected action such as `speak`, deterministic materialization should carry
+  the sibling action's semantic `detail` as the continuation objective rather
+  than asking L2d to summarize the same task again.
 - `memory_lifecycle_update` may be materialized only when deterministic code
   has exactly one eligible active-commitment target. If no single target is
   bound, hide the lifecycle capability from the prompt when possible or reject
@@ -570,14 +592,19 @@ passed action-spec validation.
 class TriggerFutureCognitionParamsV1(TypedDict):
     episode_type: Literal["self_cognition"]
     trigger_at: str | None
-    context_summary: str
+    continuation_objective: str
 ```
 
 The L2d initializer may select
 `ActionSpecV1(kind="trigger_future_cognition")` only for a private bounded
 request to create a future cognition episode. It must not directly call
 cognition, bypass scheduler/orchestrator validation, or expose adapter/database
-details. The initial target must be:
+details. `continuation_objective` is the only LLM-facing handoff text for the
+future episode. It is not a summary; it must preserve the exact future thinking
+objective. If the future cognition action is paired with a concrete action,
+such as `speak`, use that action's semantic `detail` as the primary source for
+`continuation_objective` instead of using a second lossy future-context
+summary. The initial target must be:
 
 ```python
 {
@@ -1655,7 +1682,8 @@ record verification evidence here.
     `send_message` remains available only through a separate dispatcher bridge
     capability set used after final text exists.
   - Added `trigger_future_cognition` as an orchestrator-owned private action
-    request with params `episode_type`, `trigger_at`, and `context_summary`.
+    request with params `episode_type`, `trigger_at`, and
+    `continuation_objective`.
     This is a contract for a later cognition cycle; it does not directly call
     cognition from the action handler.
   - Tightened the L2d prompt so every action must include a full
@@ -1699,6 +1727,23 @@ record verification evidence here.
     `self_future_001` passed with private `trigger_future_cognition`.
   - Full 20x QQ plus 20x self-cognition rerun is still required before
     approving further graph wiring.
+- 2026-05-16 Stage 3 contract correction - future cognition handoff is not a
+  summary.
+  - User review identified `context_summary` as the wrong contract: it
+    encouraged a lossy L2d paraphrase and dropped the most useful future
+    thinking anchors in live case 019.
+  - Updated implementation decision: replace `context_summary` with a single
+    prompt-safe `continuation_objective` string. This is the contract consumed
+    by the next cognition cycle, not a human-readable summary.
+  - TypedDicts and structural fields remain deterministic-only. The next LLM
+    must not consume schema-shaped handoff information. If the future-thinking
+    contract cannot be represented faithfully in one string, materialization or
+    scheduling must fail closed.
+  - When `trigger_future_cognition` is selected with a concrete sibling action,
+    deterministic materialization should use the sibling action's semantic
+    `detail` as the continuation objective before considering the future
+    action's own detail. This prevents duplicate LLM summarization from
+    stripping the concrete task anchor.
 - 2026-05-16 Stage 3 partial - code alignment cleanup after contracts update.
   - Reviewed the branch against the updated contract decisions:
     self-cognition is a trigger source, L2d emits only semantic
@@ -1982,3 +2027,30 @@ record verification evidence here.
     `trigger_future_cognition`, and leakage errors were 0.
   - Hygiene verification: `git diff --check` exited 0 with Windows CRLF
     normalization warnings only.
+- 2026-05-16 self-cognition text-surface bridge correction before Stage 7.
+  - Root cause: self-cognition candidate rendering called `dialog_agent`
+    directly after L2d selected `speak`. The main persona graph already uses
+    selected L3 text-surface directives before dialog, but the self-cognition
+    runner still bypassed that boundary when no legacy `[ACTION_CANDIDATE]`
+    anchor existed.
+  - Implementation update: self-cognition dialog-state construction now runs
+    the selected L3 text-surface handler when `action_specs` contains `speak`
+    and complete collected text directives are not present. The same bridge is
+    used for action-candidate rendering and private finalization.
+  - Focused failing-before/fixed-after test:
+    `venv\Scripts\python -m pytest tests\test_self_cognition_tracking.py::test_selected_speak_self_cognition_runs_l3_before_dialog -q`
+    failed before the runner bridge because dialog received empty
+    `action_directives`; after implementation it passed.
+  - Adjacent deterministic verification:
+    `venv\Scripts\python -m pytest tests\test_self_cognition_tracking.py -q`
+    result 32 passed.
+  - Action/future-cognition focus verification:
+    `venv\Scripts\python -m pytest tests\test_self_cognition_tracking.py tests\test_persona_supervisor2_action_initializer.py tests\test_action_spec_future_cognition.py tests\test_action_spec_evaluator.py tests\test_self_cognition_integration.py::test_collect_scheduled_future_cognition_cases_projects_due_slots tests\test_self_cognition_integration.py::test_worker_tick_marks_future_cognition_slot_completed -q`
+    result 58 passed.
+  - Real chained LLM verification: `qq_group_019` was projected into a due
+    scheduled future-cognition case and rerun through real cognition, selected
+    L3 text surface, and dialog. Artifact:
+    `test_artifacts/cognition_stage_connection/future_cognition_chain/qq_group_019_after_runner_fix_real_dialog`.
+    Result: selected route `action_candidate`, action kinds `speak`,
+    `rag_calls=1`, `cognition_calls=1`, `dialog_calls=1`, no
+    `KeyError: 'linguistic_directives'`.

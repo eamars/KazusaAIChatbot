@@ -10,6 +10,7 @@ from kazusa_ai_chatbot.conversation_progress import projection
 from kazusa_ai_chatbot.cognition_episode import build_text_chat_cognitive_episode
 from kazusa_ai_chatbot.nodes import dialog_agent as dialog_module
 from kazusa_ai_chatbot.nodes import persona_supervisor2_cognition_l3 as l3_module
+from kazusa_ai_chatbot.nodes import persona_supervisor2_cognition_l2c2 as l2c2_module
 from kazusa_ai_chatbot.time_context import build_character_time_context
 
 
@@ -259,9 +260,9 @@ async def test_contextual_agent_receives_boundary_profile_contract(monkeypatch) 
         "vibe_check": "普通闲聊",
         "relational_dynamic": "自然接住轻松话题",
     })
-    monkeypatch.setattr(l3_module, "_contextual_agent_llm", fake_llm)
+    monkeypatch.setattr(l2c2_module, "_contextual_agent_llm", fake_llm)
 
-    result = await l3_module.call_contextual_agent(_profile_conformance_state())
+    result = await l2c2_module.call_social_context_appraisal(_profile_conformance_state())
 
     system_prompt = fake_llm.messages[0].content
     human_payload = json.loads(fake_llm.messages[1].content)
@@ -353,3 +354,4 @@ def test_content_anchor_prompt_owns_topic_admission_decision() -> None:
     assert "若上游 `logical_stance` 已确认" in prompt
     assert "只有当上游立场或意图已经表达保留" in prompt
     assert "dialog" not in prompt.lower()
+

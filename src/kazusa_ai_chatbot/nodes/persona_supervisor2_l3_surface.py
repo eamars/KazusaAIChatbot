@@ -3,11 +3,10 @@
 from langgraph.graph import END, START, StateGraph
 
 from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition_l3 import (
-    call_collector,
     call_content_anchor_agent,
-    call_contextual_agent,
     call_interaction_style_context_loader,
     call_preference_adapter,
+    call_surface_directive_collector,
     call_style_agent,
     call_visual_agent,
 )
@@ -29,7 +28,6 @@ async def call_l3_text_surface_handler(state: GlobalPersonaState) -> dict:
     """
 
     surface_builder = StateGraph(CognitionState)
-    surface_builder.add_node("l3_contextual_agent", call_contextual_agent)
     surface_builder.add_node(
         "l3_interaction_style_context_loader",
         call_interaction_style_context_loader,
@@ -38,11 +36,12 @@ async def call_l3_text_surface_handler(state: GlobalPersonaState) -> dict:
     surface_builder.add_node("l3_content_anchor_agent", call_content_anchor_agent)
     surface_builder.add_node("l3_preference_adapter", call_preference_adapter)
     surface_builder.add_node("l3_visual_agent", call_visual_agent)
-    surface_builder.add_node("l4_collector", call_collector)
+    surface_builder.add_node(
+        "l4_surface_directive_collector",
+        call_surface_directive_collector,
+    )
 
-    surface_builder.add_edge(START, "l3_contextual_agent")
     surface_builder.add_edge(START, "l3_interaction_style_context_loader")
-    surface_builder.add_edge("l3_contextual_agent", "l3_visual_agent")
     surface_builder.add_edge(
         "l3_interaction_style_context_loader",
         "l3_content_anchor_agent",
@@ -50,9 +49,11 @@ async def call_l3_text_surface_handler(state: GlobalPersonaState) -> dict:
     surface_builder.add_edge("l3_content_anchor_agent", "l3_visual_agent")
     surface_builder.add_edge("l3_interaction_style_context_loader", "l3_style_agent")
     surface_builder.add_edge("l3_style_agent", "l3_preference_adapter")
-    surface_builder.add_edge("l3_preference_adapter", "l4_collector")
-    surface_builder.add_edge("l3_visual_agent", "l4_collector")
-    surface_builder.add_edge("l4_collector", END)
+    surface_builder.add_edge(
+        ["l3_preference_adapter", "l3_visual_agent"],
+        "l4_surface_directive_collector",
+    )
+    surface_builder.add_edge("l4_surface_directive_collector", END)
 
     surface_graph = surface_builder.compile()
     interaction_history_recent = build_interaction_history_recent(
@@ -89,6 +90,10 @@ async def call_l3_text_surface_handler(state: GlobalPersonaState) -> dict:
         "character_intent": state["character_intent"],
         "logical_stance": state["logical_stance"],
         "judgment_note": state["judgment_note"],
+        "social_distance": state["social_distance"],
+        "emotional_intensity": state["emotional_intensity"],
+        "vibe_check": state["vibe_check"],
+        "relational_dynamic": state["relational_dynamic"],
     }
     cognitive_episode = state.get("cognitive_episode")
     if cognitive_episode is not None:

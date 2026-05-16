@@ -38,7 +38,7 @@ long_term/todo.md
 
 | Plan | Status | Execution |
 |---|---|---|
-| [cognition_llm_stage_reconnection_plan.md](active/short_term/cognition_llm_stage_reconnection_plan.md) | draft | Do not execute until approved or moved to in_progress. |
+| [cognition_llm_stage_reconnection_plan.md](active/short_term/cognition_llm_stage_reconnection_plan.md) | in_progress | Execute according to the plan. |
 | [l2d_l3_surface_handoff_plan.md](active/short_term/l2d_l3_surface_handoff_plan.md) | in_progress | Execute according to the plan. |
 | [modality_neutral_action_spec_effector_expansion_plan.md](active/short_term/modality_neutral_action_spec_effector_expansion_plan.md) | in_progress | Execute according to the plan. |
 

@@ -62,6 +62,7 @@ def build_future_cognition_scheduled_event(
 
     validated = validate_future_cognition_action(action_spec)
     params = validated["params"]
+    source_scope = _source_scope(validated["target"]["scope"])
     trigger_at = params["trigger_at"]
     if trigger_at is None:
         execute_at = _normalized_iso_datetime(timestamp)
@@ -70,14 +71,14 @@ def build_future_cognition_scheduled_event(
         normalized_trigger_at = _normalized_absolute_iso_datetime(trigger_at)
         execute_at = normalized_trigger_at
 
-    context_summary = str(params["context_summary"]).strip()
+    continuation_objective = str(params["continuation_objective"]).strip()
     event = {
         "event_id": f"future_cognition:{action_attempt_id}",
         "tool": FUTURE_COGNITION_TOOL,
         "args": {
             "episode_type": "self_cognition",
             "trigger_at": normalized_trigger_at,
-            "context_summary": context_summary,
+            "continuation_objective": continuation_objective,
             "source_action_attempt_id": action_attempt_id,
             "source_refs": list(validated["source_refs"]),
             "continuation": dict(validated["continuation"]),
@@ -85,13 +86,13 @@ def build_future_cognition_scheduled_event(
         "execute_at": execute_at,
         "created_at": _normalized_iso_datetime(timestamp),
         "status": "pending",
-        "source_platform": "orchestrator",
-        "source_channel_id": "",
-        "source_channel_type": "internal",
-        "source_user_id": "self_cognition",
+        "source_platform": source_scope["source_platform"],
+        "source_channel_id": source_scope["source_channel_id"],
+        "source_channel_type": source_scope["source_channel_type"],
+        "source_user_id": source_scope["source_user_id"],
         "source_message_id": action_attempt_id,
-        "source_platform_bot_id": "",
-        "source_character_name": "",
+        "source_platform_bot_id": source_scope["source_platform_bot_id"],
+        "source_character_name": source_scope["source_character_name"],
         "guild_id": None,
         "bot_role": "system",
     }
@@ -160,9 +161,14 @@ def validate_future_cognition_action(
         if not isinstance(trigger_at, str):
             raise ActionValidationError("trigger_at: expected string or null")
         _normalized_absolute_iso_datetime(trigger_at)
-    context_summary = params.get("context_summary")
-    if not isinstance(context_summary, str) or not context_summary.strip():
-        raise ActionValidationError("context_summary: expected non-empty string")
+    continuation_objective = params.get("continuation_objective")
+    if (
+        not isinstance(continuation_objective, str)
+        or not continuation_objective.strip()
+    ):
+        raise ActionValidationError(
+            "continuation_objective: expected non-empty string"
+        )
     _reject_raw_id_params(params)
     _validate_bounded_continuation(validated["continuation"])
     return_value = validated
@@ -186,6 +192,33 @@ def _reject_raw_id_params(params: dict[str, Any]) -> None:
         normalized_key = key.strip().casefold()
         if normalized_key in _FORBIDDEN_RAW_ID_PARAM_KEYS:
             raise ActionValidationError(f"{key}: raw id params are not allowed")
+
+
+def _source_scope(scope: dict[str, Any]) -> dict[str, str]:
+    """Return trusted scheduler source fields from deterministic target scope."""
+
+    source_scope = {
+        "source_platform": _scope_text(scope, "source_platform") or "orchestrator",
+        "source_channel_id": _scope_text(scope, "source_channel_id"),
+        "source_channel_type": _scope_text(scope, "source_channel_type")
+        or "internal",
+        "source_user_id": _scope_text(scope, "source_user_id")
+        or "self_cognition",
+        "source_platform_bot_id": _scope_text(scope, "source_platform_bot_id"),
+        "source_character_name": _scope_text(scope, "source_character_name"),
+    }
+    return source_scope
+
+
+def _scope_text(scope: dict[str, Any], field_name: str) -> str:
+    """Read one optional text value from deterministic target scope."""
+
+    value = scope.get(field_name)
+    if not isinstance(value, str):
+        return_value = ""
+        return return_value
+    return_value = value.strip()
+    return return_value
 
 
 def _normalized_iso_datetime(value: str) -> str:

@@ -25,11 +25,11 @@ from kazusa_ai_chatbot.time_context import build_character_time_context
 
 _APPROVED_STAGES: tuple[CognitionPromptStage, ...] = (
     "l1_subconscious",
-    "l2a_consciousness",
-    "l2b_boundary_core",
-    "l2c_judgment_core",
-    "l2d_action_initializer",
-    "l3_contextual_agent",
+    "l2a_conscious_framing",
+    "l2b_boundary_appraisal",
+    "l2c1_judgment_synthesis",
+    "l2c2_social_context_appraisal",
+    "l2d_action_selection",
     "l3_style_agent",
     "l3_content_anchor_agent",
     "l3_preference_adapter",
@@ -41,30 +41,30 @@ _VALID_OUTPUT_PAYLOADS: dict[CognitionPromptStage, dict[str, object]] = {
         "emotional_appraisal": "steady",
         "interaction_subtext": "routine",
     },
-    "l2a_consciousness": {
+    "l2a_conscious_framing": {
         "internal_monologue": "Answer directly.",
         "character_intent": "PROVIDE",
         "logical_stance": "CONFIRM",
     },
-    "l2b_boundary_core": {
+    "l2b_boundary_appraisal": {
         "boundary_core_assessment": {
             "boundary_issue": "none",
             "acceptance": "allow",
         },
     },
-    "l2c_judgment_core": {
+    "l2c1_judgment_synthesis": {
         "logical_stance": "CONFIRM",
         "character_intent": "PROVIDE",
         "judgment_note": "stable",
     },
-    "l2d_action_initializer": {
-        "action_specs": [],
-    },
-    "l3_contextual_agent": {
+    "l2c2_social_context_appraisal": {
         "social_distance": "neutral",
         "emotional_intensity": "low",
         "vibe_check": "routine",
         "relational_dynamic": "stable",
+    },
+    "l2d_action_selection": {
+        "action_specs": [],
     },
     "l3_style_agent": {
         "rhetorical_strategy": "answer briefly",
@@ -87,11 +87,11 @@ _VALID_OUTPUT_PAYLOADS: dict[CognitionPromptStage, dict[str, object]] = {
 
 _WRONG_OUTPUT_VALUES: dict[CognitionPromptStage, object] = {
     "l1_subconscious": [],
-    "l2a_consciousness": [],
-    "l2b_boundary_core": "not a dict",
-    "l2c_judgment_core": [],
-    "l2d_action_initializer": "not a list",
-    "l3_contextual_agent": [],
+    "l2a_conscious_framing": [],
+    "l2b_boundary_appraisal": "not a dict",
+    "l2c1_judgment_synthesis": [],
+    "l2c2_social_context_appraisal": [],
+    "l2d_action_selection": "not a list",
     "l3_style_agent": [],
     "l3_content_anchor_agent": "not a list",
     "l3_preference_adapter": "not a list",
@@ -312,7 +312,10 @@ def test_output_contract_rejects_unknown_stage() -> None:
         validate_cognition_output_contract(stage="unknown_stage", payload={})
 
 
-@pytest.mark.parametrize("stage", ("l2a_consciousness", "l2c_judgment_core"))
+@pytest.mark.parametrize(
+    "stage",
+    ("l2a_conscious_framing", "l2c1_judgment_synthesis"),
+)
 def test_output_contract_rejects_action_specs_outside_l2d(
     stage: CognitionPromptStage,
 ) -> None:

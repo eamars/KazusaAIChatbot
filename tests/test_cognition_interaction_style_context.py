@@ -380,15 +380,6 @@ async def test_cognition_subgraph_plumbs_channel_scope_into_l3_loader(
         }
         return return_value
 
-    async def fake_contextual(_state: dict) -> dict:
-        return_value = {
-            "social_distance": "neutral",
-            "emotional_intensity": "calm",
-            "vibe_check": "daily",
-            "relational_dynamic": "stable",
-        }
-        return return_value
-
     async def fake_style(_state: dict) -> dict:
         return_value = {
             "rhetorical_strategy": "plain",
@@ -424,12 +415,11 @@ async def test_cognition_subgraph_plumbs_channel_scope_into_l3_loader(
         "call_interaction_style_context_loader",
         fake_loader,
     )
-    monkeypatch.setattr(surface_module, "call_contextual_agent", fake_contextual)
     monkeypatch.setattr(surface_module, "call_style_agent", fake_style)
     monkeypatch.setattr(surface_module, "call_content_anchor_agent", fake_content)
     monkeypatch.setattr(surface_module, "call_preference_adapter", fake_preference)
     monkeypatch.setattr(surface_module, "call_visual_agent", fake_visual)
-    monkeypatch.setattr(surface_module, "call_collector", fake_collector)
+    monkeypatch.setattr(surface_module, "call_surface_directive_collector", fake_collector)
 
     for channel_type in ("private", "group"):
         state = _global_state(channel_type=channel_type)
@@ -441,6 +431,10 @@ async def test_cognition_subgraph_plumbs_channel_scope_into_l3_loader(
                 "character_intent": "PROVIDE",
                 "logical_stance": "CONFIRM",
                 "judgment_note": "ok",
+                "social_distance": "neutral",
+                "emotional_intensity": "calm",
+                "vibe_check": "daily",
+                "relational_dynamic": "stable",
             }
         )
         await surface_module.call_l3_text_surface_handler(state)
@@ -461,3 +455,4 @@ async def test_cognition_subgraph_plumbs_channel_scope_into_l3_loader(
         ["user_style"],
         ["user_style"],
     ]
+

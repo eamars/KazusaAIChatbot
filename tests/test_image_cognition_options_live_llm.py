@@ -920,7 +920,7 @@ async def _run_direct_image_layer_copy(
 
     l2_selection = select_cognition_prompt_variant(
         episode=state["cognitive_episode"],
-        stage="l2a_consciousness",
+        stage="l2a_conscious_framing",
     )
     affinity_block = build_affinity_block(state["user_profile"]["affinity"])
     user_memory_context = _current_user_rag_bundle(state)["user_memory_context"]
@@ -1452,3 +1452,4 @@ async def test_live_compare_option_b_and_d_text_image_dessert_shop_correction(
         case_id="dessert_shop_correction",
         ensure_image_llm_routes=ensure_image_llm_routes,
     )
+

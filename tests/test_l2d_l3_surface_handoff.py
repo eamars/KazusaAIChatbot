@@ -145,6 +145,10 @@ def _cognition_state() -> dict:
         "character_intent": "PROVIDE",
         "logical_stance": "CONFIRM",
         "judgment_note": "Answering is allowed.",
+        "social_distance": "friendly",
+        "emotional_intensity": "low",
+        "vibe_check": "calm",
+        "relational_dynamic": "direct request",
         "action_specs": [_speak_action_spec()],
     })
     return state
@@ -220,120 +224,87 @@ def _action_directives() -> dict:
 
 
 @pytest.mark.asyncio
-async def test_cognition_subgraph_stops_after_l2d_without_l3() -> None:
-    """The cognition subgraph should not run L3 before action routing."""
+async def test_cognition_subgraph_runs_l2c2_before_l2d() -> None:
+    """The cognition subgraph should feed social context into L2d."""
 
-    l3_contextual = AsyncMock(return_value={
-        "social_distance": "friendly",
-        "emotional_intensity": "low",
-        "vibe_check": "calm",
-        "relational_dynamic": "direct",
-        RETIRED_L3_FIELD: "silent",
-    })
-    l3_collector = AsyncMock(return_value={"action_directives": _action_directives()})
+    call_order: list[str] = []
+
+    async def l1_agent(state: dict) -> dict:
+        call_order.append("l1")
+        return {
+            "emotional_appraisal": "calm",
+            "interaction_subtext": "none",
+        }
+
+    async def l2a_agent(state: dict) -> dict:
+        call_order.append("l2a")
+        return {
+            "internal_monologue": "I should decide the action.",
+            "logical_stance": "CONFIRM",
+            "character_intent": "PROVIDE",
+        }
+
+    async def l2b_agent(state: dict) -> dict:
+        call_order.append("l2b")
+        return {
+            "boundary_core_assessment": {
+                "boundary_issue": "none",
+                "acceptance": "allow",
+                "stance_bias": "confirm",
+            },
+        }
+
+    async def l2c1_agent(state: dict) -> dict:
+        assert state["boundary_core_assessment"]["acceptance"] == "allow"
+        call_order.append("l2c1")
+        return {
+            "logical_stance": "CONFIRM",
+            "character_intent": "PROVIDE",
+            "judgment_note": "Answering is allowed.",
+        }
+
+    async def l2c2_agent(state: dict) -> dict:
+        assert state["boundary_core_assessment"]["acceptance"] == "allow"
+        call_order.append("l2c2")
+        return {
+            "social_distance": "friendly",
+            "emotional_intensity": "low",
+            "vibe_check": "calm",
+            "relational_dynamic": "direct request",
+        }
+
+    async def l2d_agent(state: dict) -> dict:
+        assert state["judgment_note"] == "Answering is allowed."
+        assert state["social_distance"] == "friendly"
+        assert state["emotional_intensity"] == "low"
+        assert state["vibe_check"] == "calm"
+        assert state["relational_dynamic"] == "direct request"
+        call_order.append("l2d")
+        return {"action_specs": []}
 
     with (
+        patch.object(cognition_module, "call_cognition_subconscious", l1_agent),
+        patch.object(cognition_module, "call_cognition_consciousness", l2a_agent),
+        patch.object(cognition_module, "call_boundary_core_agent", l2b_agent),
+        patch.object(cognition_module, "call_judgment_core_agent", l2c1_agent),
         patch.object(
             cognition_module,
-            "call_cognition_subconscious",
-            new_callable=AsyncMock,
-            return_value={
-                "emotional_appraisal": "calm",
-                "interaction_subtext": "none",
-            },
-        ),
-        patch.object(
-            cognition_module,
-            "call_cognition_consciousness",
-            new_callable=AsyncMock,
-            return_value={
-                "internal_monologue": "I should decide the action.",
-                "logical_stance": "CONFIRM",
-                "character_intent": "PROVIDE",
-            },
-        ),
-        patch.object(
-            cognition_module,
-            "call_boundary_core_agent",
-            new_callable=AsyncMock,
-            return_value={
-                "boundary_core_assessment": {
-                    "boundary_issue": "none",
-                    "acceptance": "allow",
-                    "stance_bias": "confirm",
-                },
-            },
-        ),
-        patch.object(
-            cognition_module,
-            "call_judgment_core_agent",
-            new_callable=AsyncMock,
-            return_value={
-                "logical_stance": "CONFIRM",
-                "character_intent": "PROVIDE",
-                "judgment_note": "Answering is allowed.",
-            },
-        ),
-        patch.object(
-            cognition_module,
-            "call_action_initializer",
-            new_callable=AsyncMock,
-            return_value={"action_specs": []},
-        ),
-        patch.object(
-            cognition_module,
-            "call_contextual_agent",
-            l3_contextual,
+            "call_social_context_appraisal",
+            l2c2_agent,
             create=True,
         ),
-        patch.object(
-            cognition_module,
-            "call_interaction_style_context_loader",
-            new_callable=AsyncMock,
-            return_value={"interaction_style_context": {}},
-            create=True,
-        ),
-        patch.object(
-            cognition_module,
-            "call_style_agent",
-            new_callable=AsyncMock,
-            return_value={},
-            create=True,
-        ),
-        patch.object(
-            cognition_module,
-            "call_content_anchor_agent",
-            new_callable=AsyncMock,
-            return_value={},
-            create=True,
-        ),
-        patch.object(
-            cognition_module,
-            "call_preference_adapter",
-            new_callable=AsyncMock,
-            return_value={},
-            create=True,
-        ),
-        patch.object(
-            cognition_module,
-            "call_visual_agent",
-            new_callable=AsyncMock,
-            return_value={},
-            create=True,
-        ),
-        patch.object(
-            cognition_module,
-            "call_collector",
-            l3_collector,
-            create=True,
-        ),
+        patch.object(cognition_module, "call_action_initializer", l2d_agent),
     ):
         result = await cognition_module.call_cognition_subgraph(_cognition_state())
 
     assert result["action_specs"] == []
-    assert result.get("action_directives", {}) == {}
-    l3_contextual.assert_not_awaited()
-    l3_collector.assert_not_awaited()
+    assert result["social_distance"] == "friendly"
+    assert result["emotional_intensity"] == "low"
+    assert result["vibe_check"] == "calm"
+    assert result["relational_dynamic"] == "direct request"
+    assert call_order.index("l2b") < call_order.index("l2c2")
+    assert call_order.index("l2c1") < call_order.index("l2d")
+    assert call_order.index("l2c2") < call_order.index("l2d")
 
 
 @pytest.mark.asyncio
@@ -458,17 +429,22 @@ async def test_l3_text_surface_contract_excludes_retired_response_field() -> Non
 
     from kazusa_ai_chatbot.nodes import persona_supervisor2_l3_surface as l3_surface
 
+    forbidden_social_agent = AsyncMock(
+        side_effect=AssertionError("selected L3 must not run social appraisal"),
+    )
+
     with (
         patch.object(
             l3_surface,
-            "call_contextual_agent",
-            new_callable=AsyncMock,
-            return_value={
-                "social_distance": "friendly",
-                "emotional_intensity": "low",
-                "vibe_check": "calm",
-                "relational_dynamic": "direct request",
-            },
+            "call_social_context_appraisal",
+            forbidden_social_agent,
+            create=True,
+        ),
+        patch.object(
+            l3_surface,
+            "call_social_context_appraisal",
+            forbidden_social_agent,
+            create=True,
         ),
         patch.object(
             l3_surface,
@@ -520,3 +496,5 @@ async def test_l3_text_surface_contract_excludes_retired_response_field() -> Non
     serialized = json.dumps(result, ensure_ascii=False)
     assert RETIRED_L3_FIELD not in serialized
     assert result["action_directives"] == _action_directives()
+    forbidden_social_agent.assert_not_awaited()
+

@@ -92,7 +92,7 @@ def _future_cognition_event() -> dict[str, Any]:
         "args": {
             "episode_type": "self_cognition",
             "trigger_at": "2026-05-16T10:00:00+00:00",
-            "context_summary": "Re-check whether a natural pause appeared.",
+            "continuation_objective": "Re-check whether a natural pause appeared.",
             "source_action_attempt_id": "action_attempt:future-123",
             "source_refs": [
                 {
@@ -332,6 +332,11 @@ async def test_collect_scheduled_future_cognition_cases_projects_due_slots() -> 
     assert case["source_refs"][0]["summary"] == (
         "Re-check whether a natural pause appeared."
     )
+    assert case["rag_query"] == "Re-check whether a natural pause appeared."
+    assert case["conversation_progress"]["continuation_objective"] == (
+        "Re-check whether a natural pause appeared."
+    )
+    assert "context_summary" not in case["conversation_progress"]
     source_packet = projection.build_source_packet(case)
     rendered_packet = projection.render_source_packet_text(source_packet)
     serialized = json.dumps(source_packet, ensure_ascii=False).lower()
@@ -351,6 +356,44 @@ async def test_collect_scheduled_future_cognition_cases_projects_due_slots() -> 
         "schema_version",
     ):
         assert forbidden not in serialized
+
+
+@pytest.mark.asyncio
+async def test_collect_scheduled_future_cognition_cases_preserves_source_scope() -> None:
+    """Scheduled future cognition should keep trusted scope for RAG/context."""
+
+    now = datetime(2026, 5, 16, 10, 0, tzinfo=timezone.utc)
+    event = _future_cognition_event()
+    event.update(
+        {
+            "source_platform": "qq",
+            "source_channel_id": "54369546",
+            "source_channel_type": "group",
+            "source_user_id": "673225019",
+            "source_platform_bot_id": "bot-001",
+            "source_character_name": "TestCharacter",
+        }
+    )
+
+    async def list_due_events(**kwargs: Any) -> list[dict[str, Any]]:
+        del kwargs
+        return [event]
+
+    cases = await sources.collect_scheduled_future_cognition_cases(
+        now=now,
+        character_profile={"name": "TestCharacter"},
+        max_cases=1,
+        list_due_events_func=list_due_events,
+    )
+
+    assert cases[0]["target_scope"] == {
+        "platform": "qq",
+        "platform_channel_id": "54369546",
+        "channel_type": "group",
+        "user_id": "673225019",
+        "display_name": "673225019",
+    }
+    assert cases[0]["platform_bot_id"] == "bot-001"
 
 
 @pytest.mark.asyncio
