@@ -455,4 +455,3 @@ async def test_cognition_subgraph_plumbs_channel_scope_into_l3_loader(
         ["user_style"],
         ["user_style"],
     ]
-

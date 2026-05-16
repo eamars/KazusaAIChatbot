@@ -9,6 +9,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 import kazusa_ai_chatbot.scheduler as scheduler
+from kazusa_ai_chatbot.db import scheduled_events as scheduled_events_module
 from kazusa_ai_chatbot.dispatcher import handlers as handlers_module
 from kazusa_ai_chatbot.dispatcher import (
     AdapterRegistry,
@@ -225,6 +226,26 @@ async def test_cancel_event_sets_cancelled_status_and_timestamp():
     assert update_call.args[0] == {"event_id": "evt-1", "status": "pending"}
     assert update_call.args[1]["$set"]["status"] == "cancelled"
     assert "cancelled_at" in update_call.args[1]["$set"]
+
+
+@pytest.mark.asyncio
+async def test_claim_pending_event_running_requires_pending_status():
+    """Future workers should atomically claim only pending scheduler rows."""
+
+    db = _make_mock_db()
+
+    with patch(
+        "kazusa_ai_chatbot.db.scheduled_events.get_db",
+        AsyncMock(return_value=db),
+    ):
+        ok = await scheduled_events_module.claim_pending_scheduled_event_running(
+            "evt-1",
+        )
+
+    assert ok is True
+    update_call = db.scheduled_events.update_one.call_args
+    assert update_call.args[0] == {"event_id": "evt-1", "status": "pending"}
+    assert update_call.args[1] == {"$set": {"status": "running"}}
 
 
 @pytest.mark.asyncio

@@ -7,7 +7,7 @@
   `trigger_future_cognition -> scheduled cognition slot` as the two runtime
   action chains implemented by this plan.
 - Plan class: high_risk_migration
-- Status: in_progress
+- Status: completed
 - Mandatory skills: `development-plan-writing`, `local-llm-architecture`,
   `no-prepost-user-input`, `py-style`, `test-style-and-execution`,
   `cjk-safety`
@@ -935,8 +935,39 @@ This plan is complete when:
     response-gate and stale node-doc greps returned no matches; documentation
     grep matched the expected selected L3 text and `trigger_future_cognition`
     descriptions.
-- 2026-05-16 remaining acceptance item.
-  - The handoff-specific live LLM smoke in this plan has not been rerun in
-    this checkpoint. The prior same-day L2d live sweep remains recorded in the
-    parent plan; this checkpoint verified graph handoff deterministically
-    because no L2d prompt text changed.
+- 2026-05-16 handoff live-smoke reconciliation.
+  - The earlier "remaining acceptance item" was closed by later parent-plan
+    live evidence before code review.
+  - Ordinary visible `speak` handoff remained covered by the same-day QQ
+    Stage 8 live sweep recorded in
+    `cognition_llm_stage_reconnection_plan.md`: all 40 captured QQ private and
+    group cases selected visible `speak`, ran selected L3, ran L4, and
+    produced dialog.
+  - Scheduled/self-cognition handoff was additionally covered by the
+    `qq_group_019` future-cognition chain artifact:
+    `test_artifacts/cognition_stage_connection/future_cognition_chain/qq_group_019_after_runner_fix_real_dialog`,
+    which ran real cognition, selected L3 text surface, and dialog with
+    `rag_calls=1`, `cognition_calls=1`, and `dialog_calls=1`.
+  - No-visible/private-action handoff was covered by the final live E2E
+    lifecycle test recorded in the parent plan:
+    `tests/test_self_cognition_memory_lifecycle_live_llm.py::test_self_cognition_e2e_retires_controlled_past_due_commitment`.
+    Evidence: private `memory_lifecycle_update` executed, no outbound action
+    candidate was created, and consolidation was called from
+    `internal_thought`.
+  - The residual parent-plan code-review risk was closed on 2026-05-17 and
+    recorded in
+    `modality_neutral_action_spec_effector_expansion_plan.md`.
+- 2026-05-17 closure verification.
+  - Stage-reconnection and selected-surface verification:
+    `venv\Scripts\python.exe -m pytest tests\test_cognition_stage_connection.py tests\test_l2d_l3_surface_handoff.py tests\test_persona_supervisor2.py tests\test_dialog_agent.py tests\test_multi_source_cognition_stage_03_prompt_selection.py tests\test_persona_supervisor2_schema.py -q`
+    result: 82 passed.
+  - Action/self-cognition/consolidation verification:
+    `venv\Scripts\python.exe -m pytest tests\test_action_spec_results.py tests\test_action_spec_attempt_ledger.py tests\test_self_cognition_tracking.py tests\test_self_cognition_integration.py tests\test_scheduler_future_promise.py tests\test_consolidator_facts_rag2.py -q`
+    result: 79 passed.
+  - Static response-gate check:
+    `rg -n "expression_willingness|expression_posture|conditional_skip_dialog_agent|_cognition_requests_silence" src\kazusa_ai_chatbot\nodes tests -g "*.py" -g "*.md"`
+    result: no matches.
+  - Completion judgment: the selected `speak -> L3 text -> dialog` chain,
+    no-visible-action consolidation path, and
+    `trigger_future_cognition -> scheduled self-cognition slot` chain are
+    implemented and verified. This plan is complete.

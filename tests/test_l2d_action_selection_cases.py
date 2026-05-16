@@ -304,4 +304,3 @@ def _memory_lifecycle_action(lifecycle_decision: str) -> dict[str, object]:
     action["visibility"] = "private"
     action["urgency"] = "background"
     return action
-

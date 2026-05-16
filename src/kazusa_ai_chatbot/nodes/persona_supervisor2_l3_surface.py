@@ -2,6 +2,7 @@
 
 from langgraph.graph import END, START, StateGraph
 
+from kazusa_ai_chatbot.action_spec.registry import SPEAK_CAPABILITY
 from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition_l3 import (
     call_content_anchor_agent,
     call_interaction_style_context_loader,
@@ -15,6 +16,56 @@ from kazusa_ai_chatbot.nodes.persona_supervisor2_schema import (
     GlobalPersonaState,
 )
 from kazusa_ai_chatbot.utils import build_interaction_history_recent
+
+
+def _selected_text_surface_intent(state: GlobalPersonaState) -> str:
+    """Project the selected text action into one model-facing intent string."""
+
+    raw_specs = state.get("action_specs")
+    if not isinstance(raw_specs, list):
+        return_value = ""
+        return return_value
+
+    for action_spec in raw_specs:
+        if not isinstance(action_spec, dict):
+            continue
+        kind = action_spec.get("kind")
+        if kind != SPEAK_CAPABILITY:
+            continue
+        intent_parts = _text_surface_intent_parts(action_spec)
+        return_value = "；".join(intent_parts)
+        return return_value
+
+    return_value = ""
+    return return_value
+
+
+def _text_surface_intent_parts(action_spec: dict) -> list[str]:
+    """Extract prompt-safe text-surface requirements from one action spec."""
+
+    params = action_spec.get("params")
+    if not isinstance(params, dict):
+        params = {}
+    raw_requirements = params.get("surface_requirements")
+    if not isinstance(raw_requirements, dict):
+        raw_requirements = {}
+
+    intent_parts: list[str] = []
+    for field_name, label in (
+        ("decision", "决策"),
+        ("intent", "目标"),
+        ("detail", "内容要求"),
+        ("tone", "语气"),
+    ):
+        value = raw_requirements.get(field_name)
+        if isinstance(value, str) and value.strip():
+            intent_parts.append(f"{label}：{value.strip()}")
+
+    reason = action_spec.get("reason")
+    if isinstance(reason, str) and reason.strip():
+        intent_parts.append(f"理由：{reason.strip()}")
+
+    return intent_parts
 
 
 async def call_l3_text_surface_handler(state: GlobalPersonaState) -> dict:
@@ -98,6 +149,11 @@ async def call_l3_text_surface_handler(state: GlobalPersonaState) -> dict:
     cognitive_episode = state.get("cognitive_episode")
     if cognitive_episode is not None:
         initial_state["cognitive_episode"] = cognitive_episode
+    selected_text_surface_intent = _selected_text_surface_intent(state)
+    if selected_text_surface_intent:
+        initial_state["selected_text_surface_intent"] = (
+            selected_text_surface_intent
+        )
 
     result = await surface_graph.ainvoke(initial_state)
     return_value = {

@@ -16,7 +16,10 @@ from kazusa_ai_chatbot.config import MAX_FACT_HARVESTER_RETRY
 from kazusa_ai_chatbot.nodes.persona_supervisor2_consolidator_origin import (
     project_consolidation_origin_prompt_block,
 )
-from kazusa_ai_chatbot.nodes.persona_supervisor2_consolidator_schema import ConsolidatorState
+from kazusa_ai_chatbot.nodes.persona_supervisor2_consolidator_schema import (
+    ConsolidatorState,
+    content_anchors_from_action_directives,
+)
 from kazusa_ai_chatbot.rag.prompt_projection import project_tool_result_for_llm
 from kazusa_ai_chatbot.utils import get_llm, log_list_preview, log_preview, parse_llm_json_output
 
@@ -311,7 +314,9 @@ async def facts_harvester(state: ConsolidatorState) -> dict:
         "rag_result": rag_result,
         "supervisor_trace": rag_result.get("supervisor_trace", {}),
         "existing_dedup_keys": sorted(state.get("existing_dedup_keys", set())),
-        "content_anchors": state["action_directives"]["linguistic_directives"]["content_anchors"],
+        "content_anchors": content_anchors_from_action_directives(
+            state.get("action_directives"),
+        ),
         "final_dialog": state["final_dialog"],
         "episode_trace_projection": state.get("episode_trace_projection", {}),
         "logical_stance": state["logical_stance"],
@@ -363,6 +368,7 @@ _FACT_HARVESTER_EVALUATOR_PROMPT = '''\
 - `content_anchors` 只能补足 `final_dialog` 中省略的对象或条件，不能单独制造承诺。
 - `rag_result` 用于检查旧闻、重复和非生成证据。
 - `supervisor_trace` 只能作为检索充分性参考，不能替代事实或承诺证据。
+- `episode_trace_projection` 是动作和表面输出的安全摘要；它只能帮助判断本轮实际选择、执行或跳过了哪些动作，不能替代用户事实来源。
 
 # 来源权威性审计
 - 强事实来源：`user_message` 来源中用户在 `decontexualized_input` 明确陈述的自身事实，以及 `rag_result.memory_evidence`、`conversation_evidence`、`external_evidence` 中的证据。`internal_thought` 来源中的 `decontexualized_input` 不是用户事实来源。
@@ -451,6 +457,10 @@ human payload 是以下 JSON：
         "supervisor_trace": {{"unknown_slots": ["未解决槽位"], "loop_count": 1}}
     }},
     "supervisor_trace": {{"unknown_slots": ["未解决槽位"], "loop_count": 1}},
+    "episode_trace_projection": {{
+        "action_results": ["安全动作结果摘要"],
+        "surface_outputs": ["安全表面输出摘要"]
+    }},
     "content_anchors": ["回复前的内容锚点"],
     "final_dialog": ["{character_name} 本轮可见回复或私有 finalization"],
     "logical_stance": "CONFIRM | REFUSE | TENTATIVE | DIVERGE | CHALLENGE",
@@ -491,7 +501,10 @@ async def fact_harvester_evaluator(state: ConsolidatorState) -> dict:
         "decontexualized_input": state["decontexualized_input"],
         "rag_result": rag_result,
         "supervisor_trace": rag_result.get("supervisor_trace", {}),
-        "content_anchors": state["action_directives"]["linguistic_directives"]["content_anchors"],
+        "episode_trace_projection": state.get("episode_trace_projection", {}),
+        "content_anchors": content_anchors_from_action_directives(
+            state.get("action_directives"),
+        ),
         "final_dialog": state["final_dialog"],
         "logical_stance": state["logical_stance"],
         "character_intent": state["character_intent"],

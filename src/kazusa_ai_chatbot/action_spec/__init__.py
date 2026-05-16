@@ -4,6 +4,7 @@ from kazusa_ai_chatbot.action_spec.evaluator import (
     ActionSpecEvaluator,
     build_raw_tool_call_from_action_spec,
 )
+from kazusa_ai_chatbot.action_spec.execution import execute_action_specs_for_trace
 from kazusa_ai_chatbot.action_spec.models import (
     ACTION_SPEC_VERSION,
     LIFECYCLE_STATUS_BY_DECISION,
@@ -36,6 +37,7 @@ __all__ = [
     "build_private_surface_output",
     "build_raw_tool_call_from_action_spec",
     "build_text_surface_output",
+    "execute_action_specs_for_trace",
     "has_consolidatable_output",
     "project_prompt_affordances",
     "project_episode_trace_for_consolidation",

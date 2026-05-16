@@ -21,6 +21,7 @@ from kazusa_ai_chatbot.nodes.persona_supervisor2_consolidator_origin import (
 )
 from kazusa_ai_chatbot.nodes.persona_supervisor2_consolidator_schema import (
     ConsolidatorState,
+    content_anchors_from_action_directives,
     normalize_subjective_appraisals,
 )
 from kazusa_ai_chatbot.utils import (
@@ -299,7 +300,9 @@ async def relationship_recorder(state: ConsolidatorState) -> dict:
         "character_intent": state["character_intent"],
         "decontexualized_input": state["decontexualized_input"],
         "final_dialog": state["final_dialog"],
-        "content_anchors": state["action_directives"]["linguistic_directives"]["content_anchors"],
+        "content_anchors": content_anchors_from_action_directives(
+            state.get("action_directives"),
+        ),
     }, character_name=character_name)
 
     human_message = HumanMessage(content=json.dumps(msg, ensure_ascii=False))

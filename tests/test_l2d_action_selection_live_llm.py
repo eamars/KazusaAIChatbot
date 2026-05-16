@@ -6,15 +6,22 @@ import json
 import logging
 import os
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 import httpx
 import pytest
+from pymongo.errors import PyMongoError
 
 from kazusa_ai_chatbot.config import COGNITION_LLM_BASE_URL
+from kazusa_ai_chatbot.db import close_db, get_character_profile
 from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition_l2d import (
     build_action_initializer_payload,
     call_action_initializer,
+)
+from kazusa_ai_chatbot.self_cognition import runner as self_cognition_runner
+from kazusa_ai_chatbot.self_cognition.sources import (
+    collect_active_commitment_cases,
 )
 from tests.l2d_action_selection_cases import (
     compare_action_specs_to_expectations,
@@ -34,6 +41,8 @@ logger = logging.getLogger(__name__)
 
 _CASE_FILE_ENV = "L2D_LIVE_CASE_FILE"
 _CASE_ID_ENV = "L2D_LIVE_CASE_ID"
+REAL_COMMITMENT_CASE_LIMIT = 1
+LIFECYCLE_TEST_DECISION = "abandoned"
 _FORBIDDEN_ACTION_SPEC_FRAGMENTS = (
     "handler_id",
     "credentials",
@@ -85,6 +94,72 @@ async def test_l2d_live_case_against_frozen_upstream() -> None:
     assert report["ok"] is True, report["errors"]
 
 
+@pytest.mark.live_db
+async def test_l2d_live_routes_real_active_commitment_lifecycle_update() -> None:
+    """Run L2d against one production active commitment lifecycle case."""
+
+    await _skip_if_llm_unavailable()
+    case = await _load_real_active_commitment_case()
+    frozen_state = _lifecycle_update_state_from_case(case)
+    prompt_payload = build_action_initializer_payload(frozen_state)
+    rag_result = frozen_state["rag_result"]
+    user_image = rag_result["user_image"]
+    user_memory_context = user_image["user_memory_context"]
+    active_commitments = user_memory_context["active_commitments"]
+    active_commitment = active_commitments[0]
+
+    result = await call_action_initializer(frozen_state)
+    action_specs = result["action_specs"]
+    observed_kinds = [
+        action_spec["kind"]
+        for action_spec in action_specs
+        if isinstance(action_spec, dict)
+    ]
+    lifecycle_specs = [
+        action_spec for action_spec in action_specs
+        if action_spec["kind"] == "memory_lifecycle_update"
+    ]
+    leakage_errors = _action_spec_leakage_errors(action_specs)
+    trace_path = write_llm_trace(
+        "l2d_memory_lifecycle_live_llm",
+        case["case_id"],
+        {
+            "case_id": case["case_id"],
+            "source_kind": "production_active_commitment",
+            "prompt_payload": prompt_payload,
+            "selected_commitment": {
+                "fact": active_commitment["fact"],
+                "due_at": active_commitment.get("due_at"),
+                "due_state": active_commitment.get("due_state"),
+            },
+            "parsed_output": result,
+            "observed_kinds": observed_kinds,
+            "leakage_errors": leakage_errors,
+            "judgment": (
+                "manual_review_required_for_memory_lifecycle_route_quality"
+            ),
+        },
+    )
+    logger.info(
+        f"L2D_MEMORY_LIFECYCLE_LIVE case={case['case_id']} "
+        f"trace={trace_path} kinds={json.dumps(observed_kinds)}"
+    )
+
+    assert "可绑定承诺：有" in prompt_payload
+    assert active_commitment["unit_id"] not in prompt_payload
+    assert "speak" not in observed_kinds
+    assert len(lifecycle_specs) == 1
+    lifecycle_spec = lifecycle_specs[0]
+    assert lifecycle_spec["visibility"] == "private"
+    assert lifecycle_spec["target"]["target_id"] == active_commitment["unit_id"]
+    assert lifecycle_spec["params"]["unit_id"] == active_commitment["unit_id"]
+    assert lifecycle_spec["params"]["unit_type"] == "active_commitment"
+    assert lifecycle_spec["params"]["lifecycle_decision"] == (
+        LIFECYCLE_TEST_DECISION
+    )
+    assert leakage_errors == []
+
+
 async def _skip_if_llm_unavailable() -> None:
     """Skip when the configured cognition endpoint is unavailable."""
 
@@ -124,6 +199,73 @@ def _configured_case_id() -> str:
     return case_id
 
 
+async def _load_real_active_commitment_case() -> dict:
+    """Read one active commitment case from the configured production database."""
+
+    now = datetime.now(timezone.utc)
+    try:
+        character_profile = await get_character_profile()
+        cases = await collect_active_commitment_cases(
+            now=now,
+            character_profile=character_profile,
+            max_cases=REAL_COMMITMENT_CASE_LIMIT,
+        )
+    except PyMongoError as exc:
+        pytest.skip(f"MongoDB unavailable for live lifecycle test: {exc}")
+    finally:
+        await close_db()
+
+    if not cases:
+        pytest.skip("No production active commitment case is available")
+    case = cases[0]
+    return case
+
+
+def _lifecycle_update_state_from_case(case: dict) -> dict:
+    """Build a frozen L2d state where the character chose commitment closure."""
+
+    rendered_packet = (
+        '自我认知检查到一个生产数据库中的有效承诺已经长期过期。'
+        '当前决定不再等待自然触发，而是关闭这条承诺。'
+    )
+    state = self_cognition_runner._build_cognition_state(
+        case,
+        rendered_packet,
+    )
+    state.update({
+        "decontexualized_input": rendered_packet,
+        "logical_stance": "CONFIRM",
+        "character_intent": "DISMISS",
+        "judgment_note": (
+            '角色已经决定将这个长期过期承诺标记为 abandoned，'
+            '不再让它继续占据开放承诺列表。'
+        ),
+        "internal_monologue": (
+            '这个承诺已经长期 past_due，继续等待只会让待办失真。'
+            '我现在选择放弃这条承诺，并把它作为私有记忆生命周期更新处理。'
+        ),
+        "emotional_appraisal": '平静、明确，没有对外表达压力',
+        "interaction_subtext": '自我维护承诺状态，不需要打扰用户',
+        "boundary_core_assessment": {
+            "boundary_issue": "none",
+            "acceptance": "allow",
+            "stance_bias": "confirm",
+        },
+        "social_distance": '私有自检',
+        "emotional_intensity": '低',
+        "vibe_check": '安静维护',
+        "relational_dynamic": '关系稳定，当前只做后台承诺整理',
+        "conversation_progress": {
+            "source": "active_commitment_due_check",
+            "current_thread": '私有承诺生命周期复核',
+            "next_affordances": [
+                '如果角色决定放弃承诺，关闭该承诺而不生成文字表层',
+            ],
+        },
+    })
+    return state
+
+
 def _action_spec_leakage_errors(action_specs: list[dict]) -> list[str]:
     """Return prompt-safety errors found in action-spec output."""
 
@@ -133,4 +275,3 @@ def _action_spec_leakage_errors(action_specs: list[dict]) -> list[str]:
         if fragment in serialized:
             errors.append(f"forbidden runtime fragment leaked: {fragment}")
     return errors
-

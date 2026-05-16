@@ -101,10 +101,19 @@ def _minimal_text_chat_episode() -> dict:
 async def test_stage_1_research_skip_rag_preserves_projected_shape(monkeypatch) -> None:
     """Skipped RAG should still return the full cognition-consumed payload."""
 
-    async def _call_rag_supervisor(*, original_query: str, character_name: str, context: dict) -> dict:
+    async def _call_rag_supervisor(
+        *,
+        fresh_query: str,
+        character_name: str,
+        context: dict,
+    ) -> dict:
         raise AssertionError("RAG supervisor should not run when clarification is needed")
 
-    monkeypatch.setattr(supervisor_module, "call_rag_supervisor", _call_rag_supervisor)
+    monkeypatch.setattr(
+        supervisor_module,
+        "call_quote_aware_rag_supervisor",
+        _call_rag_supervisor,
+    )
 
     result = await supervisor_module.stage_1_research(_clarification_state())
     rag_result = result["rag_result"]

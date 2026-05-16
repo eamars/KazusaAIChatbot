@@ -1452,4 +1452,3 @@ async def test_live_compare_option_b_and_d_text_image_dessert_shop_correction(
         case_id="dessert_shop_correction",
         ensure_image_llm_routes=ensure_image_llm_routes,
     )
-

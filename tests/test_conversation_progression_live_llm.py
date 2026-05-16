@@ -845,4 +845,3 @@ async def test_live_progression_mixed_language_art_commission(ensure_live_llm) -
 
     del ensure_live_llm
     await _record_progression_sequence(_mixed_language_art_case())
-

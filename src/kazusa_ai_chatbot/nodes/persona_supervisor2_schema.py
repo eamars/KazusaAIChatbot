@@ -135,6 +135,7 @@ class CognitionState(TypedDict):
     conversation_progress: NotRequired[ConversationProgressPromptDoc]
     promoted_reflection_context: NotRequired[dict]
     interaction_style_context: NotRequired[dict]
+    selected_text_surface_intent: NotRequired[str]
 
     decontexualized_input: str
     referents: list[ReferentResolution]

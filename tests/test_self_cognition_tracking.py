@@ -10,7 +10,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from kazusa_ai_chatbot.action_spec.registry import SPEAK_CAPABILITY
+from kazusa_ai_chatbot.action_spec.registry import (
+    MEMORY_LIFECYCLE_UPDATE_CAPABILITY,
+    SPEAK_CAPABILITY,
+)
 from kazusa_ai_chatbot.self_cognition import artifacts, models, projection
 from kazusa_ai_chatbot.self_cognition import sources, tracking
 from kazusa_ai_chatbot.self_cognition import runner
@@ -263,6 +266,58 @@ def _speak_action_spec() -> dict[str, Any]:
             "include_result_as": None,
         },
         "reason": "The scheduled self-cognition selected a visible reply.",
+    }
+    return spec
+
+
+def _memory_lifecycle_action_spec() -> dict[str, Any]:
+    spec = {
+        "schema_version": "action_spec.v1",
+        "kind": MEMORY_LIFECYCLE_UPDATE_CAPABILITY,
+        "cognition_mode": "deliberative",
+        "source_refs": [
+            {
+                "schema_version": "action_source_ref.v1",
+                "ref_kind": "cognitive_episode",
+                "ref_id": "self-cognition-episode",
+                "owner": "cognition_episode",
+                "relationship": "basis",
+                "evidence_refs": [],
+            },
+            {
+                "schema_version": "action_source_ref.v1",
+                "ref_kind": "memory_unit",
+                "ref_id": "memory-unit-001",
+                "owner": "user_memory_units",
+                "relationship": "target",
+                "evidence_refs": [],
+            },
+        ],
+        "target": {
+            "schema_version": "action_target.v1",
+            "target_kind": "memory_unit",
+            "target_id": "memory-unit-001",
+            "owner": "user_memory_units",
+            "scope": {"unit_type": "active_commitment"},
+        },
+        "params": {
+            "memory_kind": "user_memory_unit",
+            "unit_type": "active_commitment",
+            "unit_id": "memory-unit-001",
+            "lifecycle_decision": "abandoned",
+            "due_at": "2026-05-10T00:00:00+00:00",
+        },
+        "urgency": "background",
+        "visibility": "private",
+        "deadline": None,
+        "continuation": {
+            "schema_version": "action_continuation.v1",
+            "mode": "none",
+            "episode_type": None,
+            "max_depth": 0,
+            "include_result_as": None,
+        },
+        "reason": "The character chose to abandon the stale commitment.",
     }
     return spec
 
@@ -839,6 +894,130 @@ def test_runner_consolidates_no_action_cognition_without_dialog() -> None:
     assert artifact_payloads[models.ARTIFACT_CONSOLIDATION_OUTCOME][
         "consolidation_called"
     ] is True
+
+
+def test_runner_executes_private_lifecycle_action_for_consolidation(
+    monkeypatch,
+) -> None:
+    case = _commitment_case()
+    captured_consolidation_state: dict[str, Any] = {}
+    captured_specs: list[dict[str, Any]] = []
+
+    async def action_executor(
+        action_specs: list[dict[str, Any]],
+        *,
+        timestamp: str,
+        executed_action_attempt_ids: set[str] | None = None,
+        record_attempt_func: Any = None,
+    ) -> list[dict[str, Any]]:
+        del timestamp, executed_action_attempt_ids, record_attempt_func
+        captured_specs.extend(action_specs)
+        action_results = [
+            {
+                "schema_version": "action_result.v1",
+                "action_attempt_id": "action_attempt:memory-unit-001",
+                "action_kind": MEMORY_LIFECYCLE_UPDATE_CAPABILITY,
+                "handler_owner": "memory_lifecycle",
+                "status": "executed",
+                "visibility": "private",
+                "result_summary": "memory_lifecycle_update executed: cancelled",
+                "result_refs": [],
+                "continuation": action_specs[0]["continuation"],
+                "completed_at": "2026-05-10T00:30:00+00:00",
+            }
+        ]
+        return action_results
+
+    async def consolidation_client(state: dict[str, Any]) -> dict[str, Any]:
+        captured_consolidation_state.update(state)
+        return_value = {
+            "consolidation_metadata": {
+                "write_success": {"character_state": True},
+                "scheduled_event_ids": [],
+                "cache_evicted_count": 0,
+            },
+        }
+        return return_value
+
+    monkeypatch.setattr(
+        runner,
+        "execute_action_specs_for_trace",
+        action_executor,
+    )
+    artifact_payloads = runner.build_self_cognition_case_artifacts(
+        case,
+        cognition_client=lambda state: {
+            "logical_stance": "CONFIRM",
+            "character_intent": "DISMISS",
+            "internal_monologue": "Close the stale commitment privately.",
+            "judgment_note": "The commitment should be abandoned.",
+            "action_directives": {"linguistic_directives": {"content_anchors": []}},
+            "action_specs": [_memory_lifecycle_action_spec()],
+        },
+        consolidation_client=consolidation_client,
+        apply_consolidation=True,
+        execute_private_actions=True,
+    )
+    cognition_output = artifact_payloads[models.ARTIFACT_COGNITION_OUTPUT]
+
+    assert captured_specs[0]["kind"] == MEMORY_LIFECYCLE_UPDATE_CAPABILITY
+    assert cognition_output["action_results"][0]["status"] == "executed"
+    assert cognition_output["episode_trace"]["action_results"][0][
+        "action_kind"
+    ] == MEMORY_LIFECYCLE_UPDATE_CAPABILITY
+    assert captured_consolidation_state["episode_trace"]["action_results"][0][
+        "status"
+    ] == "executed"
+
+
+def test_runner_does_not_execute_private_actions_by_default(
+    monkeypatch,
+) -> None:
+    """Artifact builds should stay dry-run unless execution is requested."""
+
+    case = _commitment_case()
+
+    async def action_executor(
+        action_specs: list[dict[str, Any]],
+        *,
+        timestamp: str,
+        executed_action_attempt_ids: set[str] | None = None,
+    ) -> list[dict[str, Any]]:
+        del action_specs, timestamp, executed_action_attempt_ids
+        raise AssertionError("default dry-run must not execute private actions")
+
+    async def consolidation_client(state: dict[str, Any]) -> dict[str, Any]:
+        assert "action_results" not in state
+        return_value = {
+            "consolidation_metadata": {
+                "write_success": {"character_state": True},
+                "scheduled_event_ids": [],
+                "cache_evicted_count": 0,
+            },
+        }
+        return return_value
+
+    monkeypatch.setattr(
+        runner,
+        "execute_action_specs_for_trace",
+        action_executor,
+    )
+    artifact_payloads = runner.build_self_cognition_case_artifacts(
+        case,
+        cognition_client=lambda state: {
+            "logical_stance": "CONFIRM",
+            "character_intent": "DISMISS",
+            "internal_monologue": "Close the stale commitment privately.",
+            "judgment_note": "The commitment should be abandoned.",
+            "action_directives": {"linguistic_directives": {"content_anchors": []}},
+            "action_specs": [_memory_lifecycle_action_spec()],
+        },
+        consolidation_client=consolidation_client,
+        apply_consolidation=True,
+    )
+    cognition_output = artifact_payloads[models.ARTIFACT_COGNITION_OUTPUT]
+
+    assert "action_results" not in cognition_output
 
 
 def test_runner_reuses_dialog_render_for_action_and_consolidation() -> None:

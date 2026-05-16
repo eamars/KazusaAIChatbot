@@ -1497,4 +1497,3 @@ async def test_existing_cognition_and_dialog_prompts_render_with_mocked_llms(
         evaluator_llm,
         {"retry", "final_dialog", "linguistic_directives"},
     )
-

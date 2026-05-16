@@ -7,7 +7,7 @@
   handling still works, and the full cognition module is validated with real
   QQ private and group conversation cases for user `673225019`.
 - Plan class: high_risk_migration
-- Status: in_progress
+- Status: completed
 - Mandatory skills: `development-plan-writing`, `local-llm-architecture`,
   `no-prepost-user-input`, `py-style`, `test-style-and-execution`,
   `database-data-pull`, `cjk-safety`
@@ -455,9 +455,9 @@ unbounded chat history.
 - `development_plans/reference/designs/cognition_contracts_design.md`
   - Add the L2c1/L2c2 naming and state that this is a placement/naming change,
     not an LLM responsibility change.
-- `development_plans/active/short_term/l2d_l3_surface_handoff_plan.md`
+- `development_plans/archive/completed/short_term/l2d_l3_surface_handoff_plan.md`
   - Add a reconciliation note that contextual/social appraisal is now L2c2.
-- `development_plans/active/short_term/modality_neutral_action_spec_effector_expansion_plan.md`
+- `development_plans/archive/completed/short_term/modality_neutral_action_spec_effector_expansion_plan.md`
   - Add an execution-note reference to this plan as the LLM connection cleanup.
 
 ## Data Source And Artifacts
@@ -584,8 +584,8 @@ data blocker.
   - Covers: node README, contracts reference, and active plan notes.
   - Files: `src/kazusa_ai_chatbot/nodes/README.md`,
     `development_plans/reference/designs/cognition_contracts_design.md`,
-    `development_plans/active/short_term/l2d_l3_surface_handoff_plan.md`,
-    `development_plans/active/short_term/modality_neutral_action_spec_effector_expansion_plan.md`.
+    `development_plans/archive/completed/short_term/l2d_l3_surface_handoff_plan.md`,
+    `development_plans/archive/completed/short_term/modality_neutral_action_spec_effector_expansion_plan.md`.
   - Verify:
     `rg -n "l3_contextual_agent|l2c_judgment_core|l2d_action_initializer|l4_collector" src\kazusa_ai_chatbot\nodes tests -g "*.py" -g "*.md"`.
   - Expected evidence: only intentional historical references in active plans
@@ -620,15 +620,14 @@ data blocker.
     kinds, whether L3/L4/dialog ran, and manual judgment.
   - Sign-off: record private and group case counts plus trace paths.
 
-- [ ] Stage 9 - final regression and independent code review complete
+- [x] Stage 9 - final regression and independent code review complete
   - Covers: deterministic regression, static stale-reference scans, live LLM
     evidence review, and independent code review.
   - Verify:
     `venv\Scripts\python -m pytest tests\test_cognition_stage_connection.py tests\test_l2d_l3_surface_handoff.py tests\test_persona_supervisor2.py tests\test_dialog_agent.py tests\test_multi_source_cognition_stage_03_prompt_selection.py tests\test_persona_supervisor2_schema.py -q`;
     `rg -n "expression_willingness|expression_posture|conditional_skip_dialog_agent|_cognition_requests_silence" src\kazusa_ai_chatbot\nodes tests -g "*.py" -g "*.md"`;
     `rg -n "l2d_action_initializer.*l3_|l3_.*l2d_action_initializer" src\kazusa_ai_chatbot\nodes tests -g "*.py"`.
-  - Sign-off: record review result, remediations, rerun commands, and residual
-    risks.
+  - Sign-off: `Codex/2026-05-17`
 
 ## Verification
 
@@ -793,8 +792,8 @@ stage checkbox was signed off.
   - Updated `development_plans/reference/designs/cognition_contracts_design.md`
     to include L2c2 social-context evidence in the long-term contract path.
   - Added reconciliation notes to
-    `development_plans/active/short_term/l2d_l3_surface_handoff_plan.md` and
-    `development_plans/active/short_term/modality_neutral_action_spec_effector_expansion_plan.md`.
+    `development_plans/archive/completed/short_term/l2d_l3_surface_handoff_plan.md` and
+    `development_plans/archive/completed/short_term/modality_neutral_action_spec_effector_expansion_plan.md`.
 - Stage sign-off:
   - Stage 1 signed off with deterministic graph-contract tests, but the
     original pre-implementation failing run was not captured in this session
@@ -963,3 +962,48 @@ stage checkbox was signed off.
   - Candidate text was generated without the earlier
     `KeyError: 'linguistic_directives'`, proving the self-cognition `speak`
     path now hands off through L3 text directives before dialog.
+- 2026-05-16/17 Stage 9 readiness update after action-spec completion
+  validation.
+  - The future-cognition lossy-summary blocker has been addressed in the
+    parent action-spec plan by replacing `context_summary` with one precise
+    `continuation_objective` string. The active contract now fails closed if
+    the future-thinking handoff cannot fit in one prompt-safe string.
+  - The no-action/private-finalization `KeyError: 'linguistic_directives'`
+    found in the original chaining probe was fixed for selected `speak` by the
+    self-cognition text-surface bridge and later fixed for no-surface
+    consolidation by safe content-anchor projection in consolidator reflection
+    and fact-harvester nodes.
+  - The original expired-promise goal was validated by the parent plan's live
+    E2E test:
+    `tests/test_self_cognition_memory_lifecycle_live_llm.py::test_self_cognition_e2e_retires_controlled_past_due_commitment`.
+    That test proved private lifecycle action execution, no outbound action
+    candidate, and consolidation from an `internal_thought` origin.
+  - Stage 9 closure review inspected the current full diff, including late
+    parent-plan changes in `action_spec/execution.py`,
+    `self_cognition/runner.py`, `self_cognition/sources.py`, scheduled-slot
+    claiming, selected L3 text-surface handoff, and consolidator no-surface
+    handling.
+  - Findings fixed before closure: selected `speak` intent now reaches L3
+    through one prompt-safe string; dry-run self-cognition APIs do not execute
+    private actions by default; production private action execution records the
+    existing action-attempt ledger; due future-cognition slots are atomically
+    claimed; malformed/failed actions do not crash result construction; and
+    no-surface action evidence is visible to consolidation.
+  - Stage 9 deterministic verification:
+    `venv\Scripts\python.exe -m pytest tests\test_cognition_stage_connection.py tests\test_l2d_l3_surface_handoff.py tests\test_persona_supervisor2.py tests\test_dialog_agent.py tests\test_multi_source_cognition_stage_03_prompt_selection.py tests\test_persona_supervisor2_schema.py -q`
+    result: 82 passed.
+  - Affected action/self-cognition/consolidation verification:
+    `venv\Scripts\python.exe -m pytest tests\test_action_spec_results.py tests\test_action_spec_attempt_ledger.py tests\test_self_cognition_tracking.py tests\test_self_cognition_integration.py tests\test_scheduler_future_promise.py tests\test_consolidator_facts_rag2.py -q`
+    result: 79 passed.
+  - Static response-gate closure check:
+    `rg -n "expression_willingness|expression_posture|conditional_skip_dialog_agent|_cognition_requests_silence" src\kazusa_ai_chatbot\nodes tests -g "*.py" -g "*.md"`
+    result: no matches.
+  - Live original-goal closure check:
+    `venv\Scripts\python.exe -m pytest tests\test_self_cognition_memory_lifecycle_live_llm.py::test_self_cognition_e2e_retires_controlled_past_due_commitment -q -s -o addopts=''`
+    result: 1 passed in 25.19s.
+  - The Stage 8 semantic-quality regressions against mixed historical QQ
+    outputs remain historical review findings, not completion blockers for the
+    wiring contract unless the owner promotes them into a new quality plan.
+  - Completion judgment: all LLM stage wiring, selected L3/L4 handoff, QQ real
+    LLM routing evidence, and final regression/code-review gates required by
+    this plan are complete.

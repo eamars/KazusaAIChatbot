@@ -8,7 +8,7 @@
   compatibility, and character-selected lifecycle updates for
   `user_memory_units.active_commitment`.
 - Plan class: high_risk_migration
-- Status: in_progress
+- Status: completed
 - Mandatory skills: `development-plan-writing`, `local-llm-architecture`,
   `no-prepost-user-input`, `py-style`, `test-style-and-execution`, `cjk-safety`
 - Overall cutover strategy: compatible
@@ -76,9 +76,11 @@ typed episode -> RAG/evidence -> cognition L1/L2a/L2b/L2c1/L2c2
   renames the internal initializer stage to `l2d_action_selection` and moves
   the former contextual/social LLM to `l2c2_social_context_appraisal` before
   L2d. Historical execution-evidence paths in this plan may still mention
-  `l2d_action_initializer` artifacts from the first implementation slice; new
-  code, tests, and docs must use `l2d_action_selection` naming and L2c2
-  placement.
+  `l2d_action_initializer` artifacts from the first implementation slice.
+  Current runtime/test modules use `l2d_action_selection` naming and L2c2
+  placement. The capture script and private artifact directory retain the
+  historical initializer filename/path until a separate artifact-renaming
+  cleanup is approved; they are tooling names, not current stage semantics.
 
 - LLM stages own semantic judgment. Deterministic code owns schema validation,
   permissions, limits, execution eligibility, persistence, cache invalidation,
@@ -107,11 +109,18 @@ typed episode -> RAG/evidence -> cognition L1/L2a/L2b/L2c1/L2c2
 - Treat self-cognition as a typed trigger source for the same path. Do not make
   self-cognition a downstream action consumer, private cleanup channel, or
   action executor.
+- Self-cognition runner may invoke the shared action execution helper for
+  private, already-selected action specs so private lifecycle/scheduling
+  outcomes are available before route classification and consolidation. This
+  does not give self-cognition separate semantic authority.
 - Treat final dialog as one `SurfaceOutputV1`, not as the sole consolidation
   input or the only reason post-turn work may run.
 - Feed selected action specs, action attempts, action results, and surface
   outputs into consolidation through an episode trace. The consolidator must
   consume prompt-safe action projections, not raw handler params.
+- Consolidation must tolerate episodes with no selected text surface. Missing
+  L3 text directives or empty `content_anchors` are valid for private/no-speak
+  action episodes and must not crash reflection or fact harvesting.
 - The consolidator must not select actions, execute actions, call dispatcher,
   call scheduler, or call cognition. It may persist memory/state through its
   existing owners after consuming episode-trace evidence.
@@ -717,6 +726,7 @@ status transitions, and empty reasons.
 - `src/kazusa_ai_chatbot/action_spec/models.py`
 - `src/kazusa_ai_chatbot/action_spec/registry.py`
 - `src/kazusa_ai_chatbot/action_spec/evaluator.py`
+- `src/kazusa_ai_chatbot/action_spec/execution.py`
 - `src/kazusa_ai_chatbot/action_spec/results.py`
 - `src/kazusa_ai_chatbot/action_spec/attempt_ledger.py`
 - `src/kazusa_ai_chatbot/action_spec/handlers/memory_lifecycle.py`
@@ -728,11 +738,11 @@ status transitions, and empty reasons.
 - `tests/test_action_spec_attempt_ledger.py`
 - `tests/test_action_spec_memory_lifecycle.py`
 - `tests/test_action_spec_self_cognition_bridge.py`
-- `tests/test_consolidator_action_trace.py`
+- `tests/test_self_cognition_memory_lifecycle_live_llm.py`
 - `tests/test_persona_supervisor2_action_initializer.py`
-- `tests/l2d_action_initializer_cases.py`
-- `tests/test_l2d_action_initializer_cases.py`
-- `tests/test_l2d_action_initializer_live_llm.py`
+- `tests/l2d_action_selection_cases.py`
+- `tests/test_l2d_action_selection_cases.py`
+- `tests/test_l2d_action_selection_live_llm.py`
 - `tests/fixtures/action_spec_cognition_cases.json`
 - `src/scripts/capture_l2d_action_initializer_cases.py`
 - `src/scripts/measure_action_spec_validity.py`
@@ -753,6 +763,8 @@ remain flat under `tests/`.
 - `src/kazusa_ai_chatbot/db/self_cognition.py`
 - `src/kazusa_ai_chatbot/db/user_memory_units.py`
 - `src/kazusa_ai_chatbot/self_cognition/handoff.py`
+- `src/kazusa_ai_chatbot/self_cognition/runner.py`
+- `src/kazusa_ai_chatbot/self_cognition/sources.py`
 - `src/kazusa_ai_chatbot/nodes/persona_supervisor2_schema.py`
 - `src/kazusa_ai_chatbot/nodes/persona_supervisor2_cognition_output_contracts.py`
 - `src/kazusa_ai_chatbot/nodes/persona_supervisor2_cognition.py`
@@ -765,6 +777,10 @@ remain flat under `tests/`.
 - `src/kazusa_ai_chatbot/nodes/persona_supervisor2_consolidator_persistence.py`
 - `src/kazusa_ai_chatbot/brain_service/post_turn.py`
 - `src/kazusa_ai_chatbot/service.py`
+- `tests/test_consolidator_facts_rag2.py`
+- `tests/test_consolidator_reflection_prompts.py`
+- `tests/test_l2d_action_selection_live_llm.py`
+- `tests/test_self_cognition_tracking.py`
 - `src/kazusa_ai_chatbot/db/README.md`
 - `src/kazusa_ai_chatbot/nodes/README.md`
 - `src/kazusa_ai_chatbot/dispatcher/README.md`
@@ -1142,12 +1158,12 @@ Exit criteria:
   - Evidence: record changed doc paths, no-change audited doc paths, and grep
     output summaries.
   - Sign-off: `Codex/2026-05-16`
-- [ ] Independent code review complete
+- [x] Independent code review complete
   - Verify: review findings are fixed or recorded as residual risks; affected
     tests are rerun.
   - Evidence: record reviewer mode, findings, fixes, rerun commands, and
     approval status.
-  - Sign-off: `<agent/date>`
+  - Sign-off: `Codex/2026-05-17`
 
 ## LLM And Latency Budget
 
@@ -1183,9 +1199,9 @@ venv\Scripts\python -m pytest tests/test_action_spec_results.py
 venv\Scripts\python -m pytest tests/test_action_spec_attempt_ledger.py
 venv\Scripts\python -m pytest tests/test_action_spec_memory_lifecycle.py
 venv\Scripts\python -m pytest tests/test_action_spec_self_cognition_bridge.py
-venv\Scripts\python -m pytest tests/test_consolidator_action_trace.py
+venv\Scripts\python -m pytest tests/test_consolidator_facts_rag2.py tests/test_consolidator_reflection_prompts.py
 venv\Scripts\python -m pytest tests/test_persona_supervisor2_action_initializer.py
-venv\Scripts\python -m pytest tests/test_l2d_action_initializer_cases.py tests/test_l2d_action_initializer_live_llm.py -q
+venv\Scripts\python -m pytest tests/test_l2d_action_selection_cases.py tests/test_l2d_action_selection_live_llm.py -q
 venv\Scripts\python src\scripts\capture_l2d_action_initializer_cases.py --help
 venv\Scripts\python -m pytest tests/test_dispatcher.py tests/test_self_cognition_integration.py
 venv\Scripts\python -m pytest tests/test_multi_source_cognition_stage_03_prompt_selection.py tests/test_persona_supervisor2_schema.py
@@ -1201,6 +1217,10 @@ Targeted behavioral checks after deterministic tests pass:
 - long-past-due promise, character abandons with reason;
 - long-past-due promise, character defers without lifecycle action;
 - unrelated live user message, no lifecycle action.
+- live end-to-end self-cognition lifecycle case:
+  `tests/test_self_cognition_memory_lifecycle_live_llm.py::test_self_cognition_e2e_retires_controlled_past_due_commitment`
+  with `-m "live_llm and live_db"`, proving selected private lifecycle action,
+  DB status transition, no outbound candidate, consolidation call, and cleanup.
 - one frozen QQ history case at a time:
   `L2D_LIVE_CASE_FILE=test_artifacts/l2d_action_initializer/qq_673225019_cases.json`
   and `L2D_LIVE_CASE_ID=qq_001`;
@@ -1873,14 +1893,14 @@ record verification evidence here.
     `action_specs`, and L3 visual remains an always-run directive branch unless
     skipped by existing debug/config controls.
   - Draft follow-up plan created:
-    `development_plans/active/short_term/l2d_l3_surface_handoff_plan.md`.
+    `development_plans/archive/completed/short_term/l2d_l3_surface_handoff_plan.md`.
     This plan blocks treating the action-spec expansion as architecturally
     complete until L3 text/dialog becomes a selected `speak` handler and
     `trigger_future_cognition` schedules a future cognition slot.
   - Stage 7 documentation/handoff and independent code review remain pending.
 - 2026-05-16 handoff-blocker implementation checkpoint.
   - Follow-up plan
-    `development_plans/active/short_term/l2d_l3_surface_handoff_plan.md` moved
+    `development_plans/archive/completed/short_term/l2d_l3_surface_handoff_plan.md` moved
     to `in_progress` and executed through deterministic Stage 4 verification.
   - Runtime changes now stop the cognition subgraph after L2d. Selected
     `speak` invokes the L3 text surface and dialog; no selected `speak` skips
@@ -1899,8 +1919,10 @@ record verification evidence here.
   - Hygiene verification: `py_compile` on touched runtime/test Python files
     passed; `git diff --check` exited 0 with Windows CRLF normalization
     warnings only.
-  - Remaining blocker before parent Stage 7 final sign-off:
-    handoff-specific live LLM smoke remains pending in the follow-up plan.
+  - Historical blocker note: at this checkpoint the handoff-specific live LLM
+    smoke remained pending in the follow-up plan. Later evidence in this file
+    and `l2d_l3_surface_handoff_plan.md` closes that live-smoke gap before
+    independent code review.
 - 2026-05-16 handoff-blocker expanded verification.
   - Broad touched regression batch covering cognition prompt contracts,
     multi-source cognition dry runs, dialog contracts, RAG event logging, and
@@ -2054,3 +2076,75 @@ record verification evidence here.
     Result: selected route `action_candidate`, action kinds `speak`,
     `rag_calls=1`, `cognition_calls=1`, `dialog_calls=1`, no
     `KeyError: 'linguistic_directives'`.
+- 2026-05-16 final goal-completion validation before independent code review.
+  - User requested completion validation before code review. No code-review
+    gate was run before this evidence.
+  - Late blocker fixed: self-cognition selected private action specs were not
+    executed by the runner path. Added shared
+    `src/kazusa_ai_chatbot/action_spec/execution.py` and routed both persona
+    graph and self-cognition private action execution through it, so private
+    lifecycle/scheduling outcomes are available before route classification and
+    consolidation evidence construction.
+  - Late blocker fixed: self-cognition active-commitment live cases could
+    carry the full singleton `character_profile`, including expensive
+    `self_image`, into local LLM context. Added a bounded self-cognition
+    character-profile projection in `self_cognition/sources.py` containing
+    identity, current state, personality, boundary, and linguistic profiles
+    only.
+  - Late blocker fixed: no-visible-action/private-action consolidation assumed
+    `action_directives.linguistic_directives.content_anchors` existed. Added
+    shared safe content-anchor projection in the consolidator schema and used
+    it from reflection and fact-harvester nodes. Missing L3 text directives now
+    project as an empty list instead of failing.
+  - Added live E2E test
+    `tests/test_self_cognition_memory_lifecycle_live_llm.py`, which inserts a
+    controlled synthetic `user_memory_units.active_commitment`, runs the real
+    self-cognition cognition path with real LLM and live DB, executes the
+    selected private `memory_lifecycle_update`, runs consolidation, writes a
+    durable trace, restores singleton character state, and deletes synthetic
+    user-scoped rows.
+  - Live E2E command:
+    `venv\Scripts\python.exe -m pytest tests\test_self_cognition_memory_lifecycle_live_llm.py::test_self_cognition_e2e_retires_controlled_past_due_commitment -q -s -m "live_llm and live_db"`.
+    Result: 1 passed in 33.49s.
+  - Live trace:
+    `test_artifacts/llm_traces/self_cognition_memory_lifecycle_e2e_live_llm__live_e2e_lifecycle_9960876ac60549e1a3d4e25489a3ec4e.json`.
+    Evidence: before status `active`, after status `cancelled`, selected
+    action `memory_lifecycle_update`, action result `executed` with
+    `memory_lifecycle_update executed: cancelled`, route `audit_only`, no
+    outbound action candidate, consolidation called with origin
+    `internal_thought`.
+  - Cleanup verification after live DB run: synthetic memory rows with
+    `unit_id` prefix `live_e2e_lifecycle_` count 0; synthetic user profiles
+    with `global_user_id` prefix `live-e2e-user-` count 0.
+  - Deterministic regression after the late fixes:
+    `venv\Scripts\python.exe -m pytest tests\test_action_spec_models.py tests\test_action_spec_evaluator.py tests\test_action_spec_attempt_ledger.py tests\test_action_spec_results.py tests\test_action_spec_future_cognition.py tests\test_action_spec_memory_lifecycle.py tests\test_action_spec_self_cognition_bridge.py tests\test_persona_supervisor2_action_initializer.py tests\test_l2d_action_selection_cases.py tests\test_l2d_l3_surface_handoff.py tests\test_cognition_stage_connection.py tests\test_self_cognition_integration.py tests\test_self_cognition_tracking.py tests\test_service_background_consolidation.py tests\test_consolidator_facts_rag2.py tests\test_consolidator_reflection_prompts.py tests\test_user_memory_unit_lifecycle.py tests\test_dialog_agent.py -q`.
+    Result: 159 passed.
+  - Hygiene verification: `git diff --check` exited 0 with Windows CRLF
+    normalization warnings only.
+  - Follow-up independent code review gate:
+    - Review mode: self-review from a fresh-review posture over all modified
+      code compared to `main`.
+    - Findings fixed before closure: selected `speak` intent now reaches L3
+      through one prompt-safe string; dry-run self-cognition paths no longer
+      execute private actions by default; production private action execution
+      records the existing action-attempt ledger; due future-cognition slots
+      are atomically claimed before processing; malformed action specs produce
+      rejected/failed action results instead of crashing; no-surface action
+      traces are available to consolidation; stale deterministic test seams
+      were updated to the current RAG supervisor boundary.
+    - Focused closure verification:
+      `venv\Scripts\python.exe -m pytest tests\test_action_spec_results.py tests\test_action_spec_attempt_ledger.py tests\test_self_cognition_tracking.py tests\test_self_cognition_integration.py tests\test_scheduler_future_promise.py tests\test_consolidator_facts_rag2.py -q`
+      result: 79 passed.
+    - Stage-reconnection closure verification:
+      `venv\Scripts\python.exe -m pytest tests\test_cognition_stage_connection.py tests\test_l2d_l3_surface_handoff.py tests\test_persona_supervisor2.py tests\test_dialog_agent.py tests\test_multi_source_cognition_stage_03_prompt_selection.py tests\test_persona_supervisor2_schema.py -q`
+      result: 82 passed.
+    - Static response-gate closure check:
+      `rg -n "expression_willingness|expression_posture|conditional_skip_dialog_agent|_cognition_requests_silence" src\kazusa_ai_chatbot\nodes tests -g "*.py" -g "*.md"`
+      result: no matches.
+    - Live E2E original-goal closure check:
+      `venv\Scripts\python.exe -m pytest tests\test_self_cognition_memory_lifecycle_live_llm.py::test_self_cognition_e2e_retires_controlled_past_due_commitment -q -s -o addopts=''`
+      result: 1 passed in 25.19s.
+    - Completion judgment: all acceptance criteria owned by this plan are
+      satisfied. Historical Stage 8 semantic-quality findings against mixed
+      historical QQ outputs are not action-spec architecture blockers and must
+      be handled by a separate quality plan if they are promoted to scope.

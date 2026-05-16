@@ -114,6 +114,7 @@ async def run_self_cognition_worker_tick(
     read_attempts_func: Callable[..., Any] | None = None,
     record_attempt_func: Callable[..., Any] | None = None,
     complete_scheduled_event_func: Callable[..., Any] | None = None,
+    claim_scheduled_event_func: Callable[..., Any] | None = None,
     max_cases: int = SELF_COGNITION_MAX_CASES_PER_TICK,
 ) -> SelfCognitionWorkerResult:
     """Run one bounded self-cognition worker tick.
@@ -131,6 +132,8 @@ async def run_self_cognition_worker_tick(
         record_attempt_func: Optional test seam for attempt persistence.
         complete_scheduled_event_func: Optional test seam for source slot
             completion.
+        claim_scheduled_event_func: Optional test seam for atomically claiming
+            source scheduler rows before processing.
         max_cases: Maximum cases to process in this tick.
 
     Returns:
@@ -171,12 +174,22 @@ async def run_self_cognition_worker_tick(
     active_complete_scheduled_event = (
         complete_scheduled_event_func or db.mark_scheduled_event_completed
     )
+    active_claim_scheduled_event = (
+        claim_scheduled_event_func or db.claim_pending_scheduled_event_running
+    )
 
     for case in cases[:max_cases]:
         if is_primary_interaction_busy():
             result.deferred = True
             result.defer_reason = "primary interaction busy"
             break
+        claimed = await _claim_scheduled_future_cognition_event(
+            case,
+            claim_scheduled_event_func=active_claim_scheduled_event,
+        )
+        if not claimed:
+            result.skipped_count += 1
+            continue
         prior_attempts = await _call_maybe_async(
             active_read_attempts,
             limit=_ATTEMPT_HISTORY_LIMIT,
@@ -187,6 +200,7 @@ async def run_self_cognition_worker_tick(
             artifact_payloads = await runner.build_self_cognition_case_artifacts_async(
                 case_for_run,
                 apply_consolidation=True,
+                execute_private_actions=True,
             )
         else:
             artifact_payloads = await _call_maybe_async(
@@ -376,6 +390,27 @@ async def _record_worker_tick_event(result: SelfCognitionWorkerResult) -> None:
         deferred=result.deferred,
         defer_reason=result.defer_reason,
     )
+
+
+async def _claim_scheduled_future_cognition_event(
+    case: models.SelfCognitionCase,
+    *,
+    claim_scheduled_event_func: Callable[..., Any],
+) -> bool:
+    """Atomically claim a source scheduled cognition slot before processing."""
+
+    if case.get("trigger_kind") != models.TRIGGER_SCHEDULED_FUTURE_COGNITION:
+        return_value = True
+        return return_value
+
+    event_id = case.get("source_scheduled_event_id")
+    if not isinstance(event_id, str) or not event_id:
+        return_value = False
+        return return_value
+
+    claimed = await _call_maybe_async(claim_scheduled_event_func, event_id)
+    return_value = bool(claimed)
+    return return_value
 
 
 async def _complete_scheduled_future_cognition_event(

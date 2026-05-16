@@ -239,6 +239,19 @@ async def test_facts_harvester_receives_prompt_safe_action_trace(monkeypatch) ->
 
 
 @pytest.mark.asyncio
+async def test_facts_harvester_accepts_no_surface_action(monkeypatch) -> None:
+    llm = _CapturingAsyncLLM({"new_facts": [], "future_promises": []})
+    monkeypatch.setattr(facts_module, "_facts_harvester_llm", llm)
+    state = _state()
+    state["action_directives"] = {}
+
+    await facts_module.facts_harvester(state)
+
+    payload = json.loads(llm.messages[1].content)
+    assert payload["content_anchors"] == []
+
+
+@pytest.mark.asyncio
 async def test_fact_harvester_evaluator_reads_rag2_field_names(monkeypatch) -> None:
     llm = _CapturingAsyncLLM({
         "should_stop": True,
@@ -275,6 +288,77 @@ async def test_fact_harvester_evaluator_reads_rag2_field_names(monkeypatch) -> N
     assert "research_facts" not in system_prompt
     memory_context = payload["rag_result"]["user_image"]["user_memory_context"]
     assert memory_context["objective_facts"][0]["fact"] == "提拉米苏喜欢绿茶"
+
+
+@pytest.mark.asyncio
+async def test_fact_harvester_evaluator_accepts_no_surface_action(monkeypatch) -> None:
+    llm = _CapturingAsyncLLM({
+        "should_stop": True,
+        "feedback": "通过审计，无需修改",
+        "contradiction_flags": [],
+    })
+    monkeypatch.setattr(facts_module, "_fact_harvester_evaluator_llm", llm)
+    state = {
+        **_state(),
+        "action_directives": {},
+        "new_facts": [],
+        "future_promises": [],
+        "fact_harvester_retry": 0,
+        "metadata": {},
+    }
+
+    await facts_module.fact_harvester_evaluator(state)
+
+    payload = json.loads(llm.messages[1].content)
+    assert payload["content_anchors"] == []
+
+
+@pytest.mark.asyncio
+async def test_fact_harvester_evaluator_receives_prompt_safe_action_trace(
+    monkeypatch,
+) -> None:
+    llm = _CapturingAsyncLLM({
+        "should_stop": True,
+        "feedback": "通过审计，无需修改",
+        "contradiction_flags": [],
+    })
+    monkeypatch.setattr(facts_module, "_fact_harvester_evaluator_llm", llm)
+    state = {
+        **_state(),
+        "new_facts": [],
+        "future_promises": [],
+        "fact_harvester_retry": 0,
+        "metadata": {},
+        "episode_trace_projection": {
+            "schema_version": "episode_trace_projection.v1",
+            "episode_id": "episode-1",
+            "trigger_source": "self_cognition",
+            "action_results": [
+                {
+                    "schema_version": "consolidation_action_projection.v1",
+                    "action_kind": "memory_lifecycle_update",
+                    "status": "executed",
+                    "visibility": "private",
+                    "semantic_decision": "角色决定放弃这个过期承诺。",
+                    "result_summary": "memory_lifecycle_update executed: cancelled",
+                    "evidence_refs": [],
+                }
+            ],
+            "surface_outputs": [],
+        },
+    }
+
+    await facts_module.fact_harvester_evaluator(state)
+
+    system_prompt = llm.messages[0].content
+    payload = json.loads(llm.messages[1].content)
+    rendered = json.dumps(payload["episode_trace_projection"], ensure_ascii=False)
+    assert "episode_trace_projection" in system_prompt
+    assert payload["episode_trace_projection"]["action_results"][0][
+        "action_kind"
+    ] == "memory_lifecycle_update"
+    assert "handler_id" not in rendered
+    assert "raw_params" not in rendered
 
 
 @pytest.mark.asyncio

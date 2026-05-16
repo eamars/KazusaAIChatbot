@@ -498,3 +498,76 @@ async def test_l3_text_surface_contract_excludes_retired_response_field() -> Non
     assert result["action_directives"] == _action_directives()
     forbidden_social_agent.assert_not_awaited()
 
+
+@pytest.mark.asyncio
+async def test_l3_content_anchor_receives_selected_speak_intent_only() -> None:
+    """L3 should consume a prompt-safe text intent, not raw action specs."""
+
+    from kazusa_ai_chatbot.nodes import persona_supervisor2_l3_surface as l3_surface
+
+    captured_content_state: dict = {}
+    state = _cognition_state()
+    speak_spec = _speak_action_spec(
+        reason="The visible answer should use the retrieved fact.",
+    )
+    speak_spec["params"]["surface_requirements"] = {
+        "decision": "visible_reply",
+        "detail": "answer with the retrieved fact",
+    }
+    state["action_specs"] = [speak_spec]
+
+    async def content_anchor(state: dict) -> dict:
+        captured_content_state.update(state)
+        return {
+            "content_anchors": [
+                "[DECISION] Answer directly.",
+                "[ANSWER] Known fact.",
+            ],
+        }
+
+    with (
+        patch.object(
+            l3_surface,
+            "call_interaction_style_context_loader",
+            new_callable=AsyncMock,
+            return_value={"interaction_style_context": {}},
+        ),
+        patch.object(
+            l3_surface,
+            "call_style_agent",
+            new_callable=AsyncMock,
+            return_value={
+                "rhetorical_strategy": "answer directly",
+                "linguistic_style": "brief",
+                "forbidden_phrases": [],
+            },
+        ),
+        patch.object(
+            l3_surface,
+            "call_content_anchor_agent",
+            content_anchor,
+        ),
+        patch.object(
+            l3_surface,
+            "call_preference_adapter",
+            new_callable=AsyncMock,
+            return_value={"accepted_user_preferences": []},
+        ),
+        patch.object(
+            l3_surface,
+            "call_visual_agent",
+            new_callable=AsyncMock,
+            return_value={
+                "facial_expression": [],
+                "body_language": [],
+                "gaze_direction": [],
+                "visual_vibe": [],
+            },
+        ),
+    ):
+        await l3_surface.call_l3_text_surface_handler(state)
+
+    selected_intent = captured_content_state["selected_text_surface_intent"]
+    assert "answer with the retrieved fact" in selected_intent
+    assert "The visible answer should use the retrieved fact." in selected_intent
+    assert "action_specs" not in captured_content_state

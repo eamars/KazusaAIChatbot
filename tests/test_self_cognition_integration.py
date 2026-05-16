@@ -461,11 +461,54 @@ async def test_worker_tick_marks_future_cognition_slot_completed(
         run_case_func=run_case,
         read_attempts_func=lambda **kwargs: [],
         record_attempt_func=lambda attempt: None,
+        claim_scheduled_event_func=lambda event_id: True,
         max_cases=3,
     )
 
     assert result.processed_count == 1
     assert completed_event_ids == ["future_cognition:action_attempt:future-123"]
+
+
+@pytest.mark.asyncio
+async def test_worker_tick_skips_future_cognition_slot_when_claim_fails(
+    tmp_path: Path,
+) -> None:
+    """A due future-cognition slot should run only after an atomic claim."""
+
+    processed_cases: list[dict[str, Any]] = []
+    completed_event_ids: list[str] = []
+
+    async def collect_cases(**kwargs: Any) -> list[dict[str, Any]]:
+        del kwargs
+        return [_future_cognition_case()]
+
+    async def run_case(case: dict[str, Any], output_dir: Path) -> dict[str, Any]:
+        del output_dir
+        processed_cases.append(case)
+        return {}
+
+    async def mark_completed(event_id: str) -> bool:
+        completed_event_ids.append(event_id)
+        return True
+
+    result = await worker.run_self_cognition_worker_tick(
+        output_root=tmp_path,
+        dispatcher=None,
+        now=datetime(2026, 5, 16, 10, 0, tzinfo=timezone.utc),
+        is_primary_interaction_busy=lambda: False,
+        collect_cases_func=collect_cases,
+        run_case_func=run_case,
+        read_attempts_func=lambda **kwargs: [],
+        record_attempt_func=lambda attempt: None,
+        complete_scheduled_event_func=mark_completed,
+        claim_scheduled_event_func=lambda event_id: False,
+        max_cases=3,
+    )
+
+    assert result.processed_count == 0
+    assert result.skipped_count == 1
+    assert processed_cases == []
+    assert completed_event_ids == []
 
 
 class _FakeDispatcher:

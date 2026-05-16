@@ -53,6 +53,33 @@ def normalize_subjective_appraisals(value: object) -> list[str]:
     return normalized
 
 
+def content_anchors_from_action_directives(
+    action_directives: object,
+) -> list[str]:
+    """Project text content anchors when a surface stage produced them."""
+
+    if not isinstance(action_directives, dict):
+        return_value: list[str] = []
+        return return_value
+
+    linguistic_directives = action_directives.get("linguistic_directives")
+    if not isinstance(linguistic_directives, dict):
+        return_value = []
+        return return_value
+
+    content_anchors = linguistic_directives.get("content_anchors")
+    if not isinstance(content_anchors, list):
+        return_value = []
+        return return_value
+
+    return_value = [
+        anchor.strip()
+        for anchor in content_anchors
+        if isinstance(anchor, str) and anchor.strip()
+    ]
+    return return_value
+
+
 class ConsolidatorState(TypedDict):
     # Inputs for db_writer
     timestamp: str

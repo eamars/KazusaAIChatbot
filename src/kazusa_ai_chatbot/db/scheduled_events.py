@@ -114,6 +114,18 @@ async def mark_scheduled_event_running(event_id: str) -> bool:
     return return_value
 
 
+async def claim_pending_scheduled_event_running(event_id: str) -> bool:
+    """Atomically mark one pending scheduled event as running."""
+
+    db = await get_db()
+    result = await db.scheduled_events.update_one(
+        {"event_id": event_id, "status": "pending"},
+        {"$set": {"status": "running"}},
+    )
+    return_value = result.modified_count > 0
+    return return_value
+
+
 async def mark_scheduled_event_completed(event_id: str) -> bool:
     """Mark one scheduled event as completed."""
 

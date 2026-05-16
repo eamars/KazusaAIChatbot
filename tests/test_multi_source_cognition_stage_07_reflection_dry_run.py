@@ -951,4 +951,3 @@ def test_text_chat_prompt_fingerprints_remain_stable() -> None:
 
         assert len(encoded_prompt) == expected_bytes, prompt_name
         assert digest == expected_digest, prompt_name
-

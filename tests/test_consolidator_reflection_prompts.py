@@ -131,3 +131,22 @@ async def test_relationship_recorder_receives_reassurance_context(monkeypatch) -
     assert result["affinity_delta"] == 0
     assert result["subjective_appraisals"] == []
     assert result["last_relationship_insight"] == ""
+
+
+@pytest.mark.asyncio
+async def test_relationship_recorder_accepts_no_surface_action(monkeypatch) -> None:
+    llm = _CapturingAsyncLLM({
+        "skip": True,
+        "subjective_appraisals": [],
+        "affinity_delta": 0,
+        "last_relationship_insight": "",
+    })
+    monkeypatch.setattr(reflection_module, "_relationship_recorder_llm", llm)
+    state = _state()
+    state["action_directives"] = {}
+
+    result = await reflection_module.relationship_recorder(state)
+
+    payload = json.loads(llm.messages[1].content)
+    assert payload["content_anchors"] == []
+    assert result["affinity_delta"] == 0

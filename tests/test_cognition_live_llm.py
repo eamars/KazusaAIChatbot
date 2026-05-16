@@ -357,4 +357,3 @@ async def test_live_cognition_propagates_explicit_future_group_message_details(e
     assert "今天天气真好呀" in joined_anchors, f"Message body did not propagate through cognition anchors: {anchors!r}"
     assert "54369546" in joined_action_anchors, f"Collector lost the group id: {linguistic_directives!r}"
     assert "今天天气真好呀" in joined_action_anchors, f"Collector lost the message body: {linguistic_directives!r}"
-

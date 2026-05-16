@@ -10,7 +10,14 @@ from pathlib import Path
 from typing import Any
 
 from kazusa_ai_chatbot import event_logging
-from kazusa_ai_chatbot.action_spec.registry import SPEAK_CAPABILITY
+from kazusa_ai_chatbot.action_spec.attempt_ledger import upsert_action_attempt
+from kazusa_ai_chatbot.action_spec.execution import execute_action_specs_for_trace
+from kazusa_ai_chatbot.action_spec.registry import (
+    MEMORY_LIFECYCLE_UPDATE_CAPABILITY,
+    SPEAK_CAPABILITY,
+    TRIGGER_FUTURE_COGNITION_CAPABILITY,
+)
+from kazusa_ai_chatbot.action_spec.results import build_episode_trace
 from kazusa_ai_chatbot.cognition_episode import (
     CognitiveEpisode,
     validate_cognitive_episode,
@@ -48,6 +55,12 @@ RAG_BACKED_CASE_NAMES = frozenset(
         models.CASE_SCHEDULED_FUTURE_COGNITION,
     )
 )
+SELF_COGNITION_PRIVATE_ACTION_KINDS = frozenset(
+    (
+        MEMORY_LIFECYCLE_UPDATE_CAPABILITY,
+        TRIGGER_FUTURE_COGNITION_CAPABILITY,
+    )
+)
 
 
 def run_self_cognition_case(
@@ -60,6 +73,7 @@ def run_self_cognition_case(
     *,
     apply_consolidation: bool = False,
     event_log_mirror: bool = False,
+    execute_private_actions: bool = False,
 ) -> dict[str, str]:
     """Run one dry-run case and write local tracking artifacts.
 
@@ -74,6 +88,8 @@ def run_self_cognition_case(
             shared consolidation seam.
         event_log_mirror: When true, mirror sanitized artifact metadata through
             the public event-logging interface.
+        execute_private_actions: When true, execute selected private action
+            specs through their deterministic owners.
 
     Returns:
         Artifact names mapped to written paths.
@@ -89,6 +105,7 @@ def run_self_cognition_case(
             consolidation_client=consolidation_client,
             apply_consolidation=apply_consolidation,
             event_log_mirror=event_log_mirror,
+            execute_private_actions=execute_private_actions,
         )
     )
     return written_paths
@@ -102,6 +119,7 @@ def build_self_cognition_case_artifacts(
     consolidation_client: SelfCognitionClient | None = None,
     *,
     apply_consolidation: bool = False,
+    execute_private_actions: bool = False,
 ) -> dict[str, Any]:
     """Build one self-cognition case's tracking records in memory.
 
@@ -113,6 +131,8 @@ def build_self_cognition_case_artifacts(
         consolidation_client: Optional test seam for the shared consolidator.
         apply_consolidation: When true, build private finalization and call the
             shared consolidation seam.
+        execute_private_actions: When true, execute selected private action
+            specs through their deterministic owners.
 
     Returns:
         Artifact names mapped to JSON-like payloads or Markdown text.
@@ -126,6 +146,7 @@ def build_self_cognition_case_artifacts(
             dialog_client=dialog_client,
             consolidation_client=consolidation_client,
             apply_consolidation=apply_consolidation,
+            execute_private_actions=execute_private_actions,
         )
     )
     return artifact_payloads
@@ -141,6 +162,7 @@ async def run_self_cognition_case_async(
     *,
     apply_consolidation: bool = False,
     event_log_mirror: bool = False,
+    execute_private_actions: bool = False,
 ) -> dict[str, str]:
     """Async implementation for one self-cognition dry-run case.
 
@@ -155,6 +177,8 @@ async def run_self_cognition_case_async(
             shared consolidation seam.
         event_log_mirror: When true, mirror sanitized artifact metadata through
             the public event-logging interface.
+        execute_private_actions: When true, execute selected private action
+            specs through their deterministic owners.
 
     Returns:
         Artifact names mapped to written paths.
@@ -167,6 +191,7 @@ async def run_self_cognition_case_async(
         dialog_client=dialog_client,
         consolidation_client=consolidation_client,
         apply_consolidation=apply_consolidation,
+        execute_private_actions=execute_private_actions,
     )
     written_paths = artifacts.write_tracking_artifacts(
         output_dir,
@@ -190,6 +215,7 @@ async def build_self_cognition_case_artifacts_async(
     consolidation_client: SelfCognitionClient | None = None,
     *,
     apply_consolidation: bool = False,
+    execute_private_actions: bool = False,
 ) -> dict[str, Any]:
     """Async implementation for building self-cognition records in memory.
 
@@ -201,6 +227,8 @@ async def build_self_cognition_case_artifacts_async(
         consolidation_client: Optional test seam for the shared consolidator.
         apply_consolidation: When true, build private finalization and call the
             shared consolidation seam.
+        execute_private_actions: When true, execute selected private action
+            specs through their deterministic owners.
 
     Returns:
         Artifact names mapped to JSON-like payloads or Markdown text.
@@ -264,6 +292,11 @@ async def build_self_cognition_case_artifacts_async(
         active_cognition_client,
         cognition_state,
     )
+    if execute_private_actions:
+        cognition_output = await _with_private_action_results(
+            cognition_state,
+            cognition_output,
+        )
     artifact_payloads[models.ARTIFACT_COGNITION_OUTPUT] = cognition_output
 
     existing_attempts = _existing_attempts(case)
@@ -592,6 +625,83 @@ def _build_consolidation_state(
     consolidation_state["decontexualized_input"] = rendered_packet
     consolidation_state["final_dialog"] = _dialog_fragments(dialog_output)
     return consolidation_state
+
+
+async def _with_private_action_results(
+    cognition_state: dict[str, Any],
+    cognition_output: dict[str, Any],
+) -> dict[str, Any]:
+    """Execute selected private actions before route and consolidation handling."""
+
+    private_specs = _private_action_specs(cognition_output)
+    if not private_specs:
+        return_value = cognition_output
+        return return_value
+
+    action_results = await execute_action_specs_for_trace(
+        private_specs,
+        timestamp=cognition_state["timestamp"],
+        record_attempt_func=upsert_action_attempt,
+    )
+    updated_output = dict(cognition_output)
+    updated_output["action_results"] = action_results
+    updated_output["episode_trace"] = _episode_trace_for_private_actions(
+        cognition_state,
+        updated_output,
+        action_results,
+    )
+    return updated_output
+
+
+def _private_action_specs(cognition_output: dict[str, Any]) -> list[dict[str, Any]]:
+    """Return private non-surface actions selected by shared cognition."""
+
+    raw_specs = cognition_output.get("action_specs")
+    if not isinstance(raw_specs, list):
+        return_value: list[dict[str, Any]] = []
+        return return_value
+
+    specs: list[dict[str, Any]] = []
+    for action_spec in raw_specs:
+        if not isinstance(action_spec, dict):
+            continue
+        kind = action_spec.get("kind")
+        if kind not in SELF_COGNITION_PRIVATE_ACTION_KINDS:
+            continue
+        if action_spec.get("visibility") != "private":
+            continue
+        specs.append(action_spec)
+    return specs
+
+
+def _action_specs(cognition_output: dict[str, Any]) -> list[dict[str, Any]]:
+    """Return materialized action specs selected by shared cognition."""
+
+    raw_specs = cognition_output.get("action_specs")
+    if not isinstance(raw_specs, list):
+        return_value: list[dict[str, Any]] = []
+        return return_value
+    specs = [spec for spec in raw_specs if isinstance(spec, dict)]
+    return specs
+
+
+def _episode_trace_for_private_actions(
+    cognition_state: dict[str, Any],
+    cognition_output: dict[str, Any],
+    action_results: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """Build episode trace evidence for private self-cognition actions."""
+
+    episode = cognition_state["cognitive_episode"]
+    trace = build_episode_trace(
+        episode_id=episode["episode_id"],
+        trigger_source=episode["trigger_source"],
+        created_at=cognition_state["timestamp"],
+        action_specs=_action_specs(cognition_output),
+        action_results=action_results,
+        surface_outputs=[],
+    )
+    return trace
 
 
 def _build_cognition_state(

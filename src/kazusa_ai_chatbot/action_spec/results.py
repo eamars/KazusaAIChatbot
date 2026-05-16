@@ -14,6 +14,13 @@ ACTION_RESULT_VERSION = "action_result.v1"
 SURFACE_OUTPUT_VERSION = "surface_output.v1"
 EPISODE_TRACE_VERSION = "episode_trace.v1"
 CONSOLIDATION_ACTION_PROJECTION_VERSION = "consolidation_action_projection.v1"
+DEFAULT_ACTION_CONTINUATION: ActionContinuationV1 = {
+    "schema_version": "action_continuation.v1",
+    "mode": "none",
+    "episode_type": None,
+    "max_depth": 0,
+    "include_result_as": None,
+}
 
 ActionResultStatus: TypeAlias = Literal[
     "rejected",
@@ -92,7 +99,7 @@ def action_attempt_id_from_eval_result(eval_result: dict[str, object]) -> str:
 
 
 def build_action_result(
-    action_spec: ActionSpecV1,
+    action_spec: dict[str, object],
     eval_result: dict[str, object],
     *,
     status: ActionResultStatus = "validated",
@@ -121,13 +128,13 @@ def build_action_result(
     result: ActionResultV1 = {
         "schema_version": ACTION_RESULT_VERSION,
         "action_attempt_id": action_attempt_id_from_eval_result(eval_result),
-        "action_kind": action_spec["kind"],
+        "action_kind": _action_kind(action_spec),
         "handler_owner": handler_owner,
         "status": status,
-        "visibility": action_spec["visibility"],
+        "visibility": _action_visibility(action_spec),
         "result_summary": summary,
         "result_refs": [],
-        "continuation": action_spec["continuation"],
+        "continuation": _action_continuation(action_spec),
         "completed_at": completed_at,
     }
     return result
@@ -255,14 +262,69 @@ def has_consolidatable_output(state: dict[str, object]) -> bool:
     return return_value
 
 
-def _default_result_summary(action_spec: ActionSpecV1, status: str) -> str:
+def _default_result_summary(action_spec: dict[str, object], status: str) -> str:
     """Build a compact summary when a handler has no richer result text."""
 
-    reason = action_spec["reason"].strip()
+    reason = _string_field(action_spec, "reason").strip()
     if reason:
-        return_value = f"{action_spec['kind']} {status}: {reason}"
+        return_value = f"{_action_kind(action_spec)} {status}: {reason}"
         return return_value
-    return_value = f"{action_spec['kind']} {status}"
+    return_value = f"{_action_kind(action_spec)} {status}"
+    return return_value
+
+
+def _action_kind(action_spec: dict[str, object]) -> str:
+    """Read an action kind from a valid or rejected action spec."""
+
+    kind = _string_field(action_spec, "kind")
+    if not kind:
+        kind = "unknown"
+    return kind
+
+
+def _action_visibility(
+    action_spec: dict[str, object],
+) -> Literal["private", "preview", "user_visible"]:
+    """Read action visibility with a private default for invalid specs."""
+
+    value = action_spec.get("visibility")
+    if value in ("private", "preview", "user_visible"):
+        return_value = value
+        return return_value
+    return_value = "private"
+    return return_value
+
+
+def _action_continuation(action_spec: dict[str, object]) -> ActionContinuationV1:
+    """Read continuation metadata with a no-continuation default."""
+
+    value = action_spec.get("continuation")
+    if isinstance(value, dict):
+        mode = value.get("mode")
+        max_depth = value.get("max_depth")
+        include_result_as = value.get("include_result_as")
+        if (
+            value.get("schema_version") == "action_continuation.v1"
+            and mode in (
+                "none",
+                "immediate_followup",
+                "scheduled_followup",
+                "background_followup",
+            )
+            and isinstance(max_depth, int)
+            and (
+                include_result_as in (None, "scheduled_event", "action_result")
+            )
+        ):
+            continuation: ActionContinuationV1 = {
+                "schema_version": "action_continuation.v1",
+                "mode": mode,
+                "episode_type": value.get("episode_type"),
+                "max_depth": max_depth,
+                "include_result_as": include_result_as,
+            }
+            return continuation
+    return_value = dict(DEFAULT_ACTION_CONTINUATION)
     return return_value
 
 

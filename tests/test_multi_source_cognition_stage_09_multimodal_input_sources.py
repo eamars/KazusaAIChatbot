@@ -1047,4 +1047,3 @@ async def test_descriptor_image_description_without_base64_skips_vision_llm(
         "adapter supplied image summary"
     )
     update_descriptions.assert_awaited_once()
-

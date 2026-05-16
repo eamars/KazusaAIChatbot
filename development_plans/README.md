@@ -38,9 +38,7 @@ long_term/todo.md
 
 | Plan | Status | Execution |
 |---|---|---|
-| [cognition_llm_stage_reconnection_plan.md](active/short_term/cognition_llm_stage_reconnection_plan.md) | in_progress | Execute according to the plan. |
-| [l2d_l3_surface_handoff_plan.md](active/short_term/l2d_l3_surface_handoff_plan.md) | in_progress | Execute according to the plan. |
-| [modality_neutral_action_spec_effector_expansion_plan.md](active/short_term/modality_neutral_action_spec_effector_expansion_plan.md) | in_progress | Execute according to the plan. |
+| _None_ | _None_ | _None_ |
 
 ## Active Bugfix Plans
 
@@ -115,6 +113,7 @@ plans.
 | [character_profile_runtime_state_split_plan.md](archive/completed/short_term/character_profile_runtime_state_split_plan.md) |
 | [character_reflection_cycle_stage1a_plan.md](archive/completed/short_term/character_reflection_cycle_stage1a_plan.md) |
 | [character_self_words_retrieval_delivery_receipt_plan.md](archive/completed/short_term/character_self_words_retrieval_delivery_receipt_plan.md) |
+| [cognition_llm_stage_reconnection_plan.md](archive/completed/short_term/cognition_llm_stage_reconnection_plan.md) |
 | [cognition_visual_directives_control_plan.md](archive/completed/short_term/cognition_visual_directives_control_plan.md) |
 | [cognition_state_integrity_plan.md](archive/completed/short_term/cognition_state_integrity_plan.md) |
 | [consolidation_evidence_hardening_plan.md](archive/completed/short_term/consolidation_evidence_hardening_plan.md) |
@@ -132,9 +131,11 @@ plans.
 | [interaction_style_image_plan.md](archive/completed/short_term/interaction_style_image_plan.md) |
 | [live_context_runtime_facts_plan.md](archive/completed/short_term/live_context_runtime_facts_plan.md) |
 | [llm_routing_migration_plan.md](archive/completed/short_term/llm_routing_migration_plan.md) |
+| [l2d_l3_surface_handoff_plan.md](archive/completed/short_term/l2d_l3_surface_handoff_plan.md) |
 | [memory_evidence_scoped_user_continuity_plan.md](archive/completed/short_term/memory_evidence_scoped_user_continuity_plan.md) |
 | [memory_evolution_stage1b_plan.md](archive/completed/short_term/memory_evolution_stage1b_plan.md) |
 | [message_coalescing_queue_module_plan.md](archive/completed/short_term/message_coalescing_queue_module_plan.md) |
+| [modality_neutral_action_spec_effector_expansion_plan.md](archive/completed/short_term/modality_neutral_action_spec_effector_expansion_plan.md) |
 | [multi_source_cognition_architecture_plan.md](archive/completed/short_term/multi_source_cognition_architecture_plan.md) |
 | [multi_source_cognition_architecture_stage_00_current_chat_workflow_regression_baseline_plan.md](archive/completed/short_term/multi_source_cognition_architecture_stage_00_current_chat_workflow_regression_baseline_plan.md) |
 | [multi_source_cognition_architecture_stage_01_cognitive_episode_contract_plan.md](archive/completed/short_term/multi_source_cognition_architecture_stage_01_cognitive_episode_contract_plan.md) |

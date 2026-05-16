@@ -4,7 +4,11 @@ from __future__ import annotations
 
 import json
 
+import pytest
+
+from kazusa_ai_chatbot.action_spec import execution as execution_module
 from kazusa_ai_chatbot.action_spec.evaluator import ActionSpecEvaluator
+from kazusa_ai_chatbot.db import DatabaseOperationError
 from kazusa_ai_chatbot.action_spec.results import (
     build_action_result,
     build_episode_trace,
@@ -56,6 +60,49 @@ def _speak_action_spec() -> dict:
             "include_result_as": None,
         },
         "reason": "The character selected a visible text surface.",
+    }
+
+
+def _memory_lifecycle_action_spec() -> dict:
+    return {
+        "schema_version": "action_spec.v1",
+        "kind": "memory_lifecycle_update",
+        "cognition_mode": "deliberative",
+        "source_refs": [
+            {
+                "schema_version": "action_source_ref.v1",
+                "ref_kind": "memory_unit",
+                "ref_id": "memory-unit-001",
+                "owner": "user_memory_units",
+                "relationship": "target",
+                "evidence_refs": [],
+            }
+        ],
+        "target": {
+            "schema_version": "action_target.v1",
+            "target_kind": "memory_unit",
+            "target_id": "memory-unit-001",
+            "owner": "user_memory_units",
+            "scope": {"unit_type": "active_commitment"},
+        },
+        "params": {
+            "memory_kind": "user_memory_unit",
+            "unit_type": "active_commitment",
+            "unit_id": "memory-unit-001",
+            "lifecycle_decision": "abandoned",
+            "due_at": "2026-05-16T00:00:00+00:00",
+        },
+        "urgency": "background",
+        "visibility": "private",
+        "deadline": None,
+        "continuation": {
+            "schema_version": "action_continuation.v1",
+            "mode": "none",
+            "episode_type": None,
+            "max_depth": 0,
+            "include_result_as": None,
+        },
+        "reason": "The stale commitment should be abandoned.",
     }
 
 
@@ -135,3 +182,70 @@ def test_private_surface_and_action_results_are_consolidatable() -> None:
         "final_dialog": [],
         "action_results": [{"status": "validated"}],
     }) is True
+
+
+@pytest.mark.asyncio
+async def test_action_execution_rejects_malformed_spec_without_crashing() -> None:
+    """Rejected action rows should be returned even for malformed input."""
+
+    results = await execution_module.execute_action_specs_for_trace(
+        [{"kind": "speak"}],
+        timestamp="2026-05-16T00:00:00+00:00",
+    )
+
+    assert len(results) == 1
+    assert results[0]["status"] == "rejected"
+    assert results[0]["action_kind"] == "speak"
+    assert "schema_version" in results[0]["result_summary"]
+
+
+@pytest.mark.asyncio
+async def test_action_execution_records_attempt_ledger() -> None:
+    """Execution should persist validation/execution status in the attempt ledger."""
+
+    recorded_attempts: list[dict] = []
+
+    async def record_attempt(record: dict) -> None:
+        recorded_attempts.append(record)
+
+    results = await execution_module.execute_action_specs_for_trace(
+        [_speak_action_spec()],
+        timestamp="2026-05-16T00:00:00+00:00",
+        record_attempt_func=record_attempt,
+    )
+
+    assert results[0]["status"] == "rejected"
+    assert recorded_attempts[0]["action_kind"] == "speak"
+    assert recorded_attempts[0]["validation_status"] == "accepted"
+    assert recorded_attempts[0]["execution_result"]["status"] == "rejected"
+
+
+@pytest.mark.asyncio
+async def test_memory_lifecycle_execution_failure_returns_failed_result(
+    monkeypatch,
+) -> None:
+    """DB lifecycle errors should become failed action results, not crashes."""
+
+    async def fail_lifecycle_action(
+        action_spec: dict,
+        *,
+        timestamp: str,
+        action_attempt_id: str,
+    ) -> dict:
+        del action_spec, timestamp, action_attempt_id
+        raise DatabaseOperationError("memory update unavailable")
+
+    monkeypatch.setattr(
+        execution_module,
+        "execute_user_memory_lifecycle_action",
+        fail_lifecycle_action,
+    )
+
+    results = await execution_module.execute_action_specs_for_trace(
+        [_memory_lifecycle_action_spec()],
+        timestamp="2026-05-16T00:00:00+00:00",
+    )
+
+    assert results[0]["status"] == "failed"
+    assert results[0]["action_kind"] == "memory_lifecycle_update"
+    assert "memory update unavailable" in results[0]["result_summary"]

@@ -354,4 +354,3 @@ def test_content_anchor_prompt_owns_topic_admission_decision() -> None:
     assert "若上游 `logical_stance` 已确认" in prompt
     assert "只有当上游立场或意图已经表达保留" in prompt
     assert "dialog" not in prompt.lower()
-

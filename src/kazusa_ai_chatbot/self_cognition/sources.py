@@ -20,6 +20,18 @@ from kazusa_ai_chatbot.dispatcher.task import parse_iso_datetime
 from kazusa_ai_chatbot.self_cognition import models
 from kazusa_ai_chatbot.utils import text_or_empty
 
+_CHARACTER_PROFILE_FIELDS = frozenset(
+    (
+        "name",
+        "mood",
+        "global_vibe",
+        "reflection_summary",
+        "personality_brief",
+        "boundary_profile",
+        "linguistic_texture_profile",
+    )
+)
+
 
 async def collect_self_cognition_cases(
     *,
@@ -270,7 +282,7 @@ def _build_scheduled_future_cognition_case(
             "continuation_objective": continuation_objective,
             "continuation": safe_continuation,
         },
-        "character_profile": dict(character_profile),
+        "character_profile": _project_character_profile(character_profile),
         "user_profile": {
             "affinity": models.DEFAULT_DRY_RUN_AFFINITY,
             "display_name": "self-cognition",
@@ -420,7 +432,7 @@ def _build_active_commitment_case(
             }
         ],
         "visible_context": _visible_context(rows),
-        "character_profile": dict(character_profile),
+        "character_profile": _project_character_profile(character_profile),
         "user_profile": dict(user_profile),
         "current_mood": text_or_empty(character_profile.get("mood")),
         "global_vibe": text_or_empty(character_profile.get("global_vibe")),
@@ -480,3 +492,18 @@ def _visible_context(rows: list[dict[str, Any]]) -> list[dict[str, str]]:
         }
         visible_rows.append(visible_row)
     return visible_rows
+
+
+def _project_character_profile(
+    character_profile: dict[str, Any],
+) -> dict[str, Any]:
+    """Project only cognition-relevant character fields for worker cases."""
+
+    projected = {
+        field_name: character_profile[field_name]
+        for field_name in _CHARACTER_PROFILE_FIELDS
+        if field_name in character_profile
+    }
+    if "name" not in projected:
+        projected["name"] = "active character"
+    return projected

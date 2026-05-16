@@ -6,28 +6,18 @@ import time
 from langgraph.graph import END, START, StateGraph
 
 from kazusa_ai_chatbot.action_spec.evaluator import ActionSpecEvaluator
-from kazusa_ai_chatbot.action_spec.handlers.future_cognition import (
-    execute_future_cognition_action,
-)
-from kazusa_ai_chatbot.action_spec.handlers.memory_lifecycle import (
-    execute_user_memory_lifecycle_action,
-)
-from kazusa_ai_chatbot.action_spec.models import ActionValidationError
+from kazusa_ai_chatbot.action_spec.execution import execute_action_specs_for_trace
 from kazusa_ai_chatbot.action_spec.registry import (
-    MEMORY_LIFECYCLE_UPDATE_CAPABILITY,
     SPEAK_CAPABILITY,
-    TRIGGER_FUTURE_COGNITION_CAPABILITY,
 )
 from kazusa_ai_chatbot.action_spec.results import (
     action_attempt_id_from_eval_result,
-    build_action_result,
     build_episode_trace,
     build_private_surface_output,
     build_text_surface_output,
 )
 from kazusa_ai_chatbot import event_logging
 from kazusa_ai_chatbot.config import CHAT_HISTORY_RECENT_LIMIT
-from kazusa_ai_chatbot.db import DatabaseOperationError
 from kazusa_ai_chatbot.nodes.dialog_agent import dialog_agent
 from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition import call_cognition_subgraph
 from kazusa_ai_chatbot.nodes.persona_supervisor2_consolidator import call_consolidation_subgraph
@@ -123,69 +113,11 @@ async def _action_results_for_state(
 ) -> list[dict]:
     """Evaluate selected actions into traceable action results."""
 
-    executed_attempts = executed_action_attempt_ids or set()
-    evaluator = ActionSpecEvaluator()
-    action_results: list[dict] = []
-    for action_spec in _selected_action_specs(state):
-        eval_result = evaluator.evaluate(action_spec)
-        result_summary = ""
-        completed_at = None
-        action_attempt_id = action_attempt_id_from_eval_result(eval_result)
-        if not eval_result["ok"]:
-            status = "rejected"
-            result_summary = "; ".join(eval_result["errors"])
-        elif action_spec["kind"] == MEMORY_LIFECYCLE_UPDATE_CAPABILITY:
-            memory_result = await execute_user_memory_lifecycle_action(
-                eval_result["action_spec"] or action_spec,
-                timestamp=state["timestamp"],
-                action_attempt_id=action_attempt_id,
-            )
-            if memory_result["status"] in ("executed", "unchanged"):
-                status = "executed"
-                completed_at = state["timestamp"]
-            else:
-                status = "failed"
-            result_summary = (
-                f"memory_lifecycle_update {memory_result['status']}: "
-                f"{memory_result['lifecycle_status']}"
-            )
-        elif action_spec["kind"] == TRIGGER_FUTURE_COGNITION_CAPABILITY:
-            try:
-                future_result = await execute_future_cognition_action(
-                    eval_result["action_spec"] or action_spec,
-                    timestamp=state["timestamp"],
-                    action_attempt_id=action_attempt_id,
-                )
-            except ActionValidationError as exc:
-                status = "rejected"
-                result_summary = f"trigger_future_cognition rejected: {exc}"
-            except DatabaseOperationError as exc:
-                status = "failed"
-                result_summary = f"trigger_future_cognition failed: {exc}"
-            else:
-                status = "scheduled"
-                completed_at = state["timestamp"]
-                scheduled_ids = future_result["scheduled_event_ids"]
-                result_summary = (
-                    "trigger_future_cognition scheduled: "
-                    f"{', '.join(scheduled_ids)}"
-                )
-        elif action_attempt_id in executed_attempts:
-            status = "executed"
-            completed_at = state["timestamp"]
-        elif action_spec["kind"] == SPEAK_CAPABILITY:
-            status = "rejected"
-            result_summary = "duplicate speak action ignored"
-        else:
-            status = "validated"
-        action_result = build_action_result(
-            eval_result["action_spec"] or action_spec,
-            eval_result,
-            status=status,
-            result_summary=result_summary,
-            completed_at=completed_at,
-        )
-        action_results.append(action_result)
+    action_results = await execute_action_specs_for_trace(
+        _selected_action_specs(state),
+        timestamp=state["timestamp"],
+        executed_action_attempt_ids=executed_action_attempt_ids,
+    )
     return action_results
 
 

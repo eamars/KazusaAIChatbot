@@ -445,4 +445,3 @@ async def test_live_direct_node_integration_smoke(ensure_live_llms) -> None:
         },
     )
     assert trace_path.exists()
-

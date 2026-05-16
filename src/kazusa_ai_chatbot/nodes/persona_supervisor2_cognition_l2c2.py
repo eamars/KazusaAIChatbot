@@ -222,4 +222,3 @@ async def call_social_context_appraisal(state: CognitionState) -> CognitionState
         payload=return_value,
     )
     return return_value
-
