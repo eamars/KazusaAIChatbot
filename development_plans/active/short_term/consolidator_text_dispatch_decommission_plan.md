@@ -6,7 +6,7 @@
   is decided by scheduled cognition and L2d/L3 speak, not by a background
   task-dispatch prompt.
 - Plan class: high_risk_migration
-- Status: approved
+- Status: in_progress
 - Mandatory skills: `py-style`, `test-style-and-execution`,
   `local-llm-architecture`, `no-prepost-user-input`, `cjk-safety`,
   `database-data-pull`, `character-test`
