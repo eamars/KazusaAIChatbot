@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import logging
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -10,6 +12,7 @@ import pytest
 from kazusa_ai_chatbot.action_spec.registry import SPEAK_CAPABILITY
 from kazusa_ai_chatbot.cognition_episode import build_text_chat_cognitive_episode
 from kazusa_ai_chatbot.nodes import persona_supervisor2_cognition as cognition_module
+from kazusa_ai_chatbot.nodes import persona_supervisor2_cognition_l3 as l3_module
 from kazusa_ai_chatbot.nodes import persona_supervisor2 as persona_module
 from kazusa_ai_chatbot.nodes import persona_supervisor2_l3_surface as l3_surface_module
 from kazusa_ai_chatbot.nodes.persona_supervisor2 import persona_supervisor2
@@ -673,3 +676,29 @@ async def test_l3_content_anchor_receives_selected_speak_intent_only() -> None:
     assert "answer with the retrieved fact" in selected_intent
     assert "The visible answer should use the retrieved fact." in selected_intent
     assert "action_specs" not in captured_content_state
+
+
+@pytest.mark.asyncio
+async def test_l3_content_anchor_logs_output(caplog) -> None:
+    """Content-anchor output should be visible in normal runtime logs."""
+
+    llm = AsyncMock()
+    llm.ainvoke.return_value = SimpleNamespace(
+        content=json.dumps({
+            "content_anchors": [
+                "[DECISION] Answer directly.",
+                "[SCOPE] short.",
+            ],
+        }),
+    )
+
+    with patch.object(l3_module, "_content_anchor_agent_llm", llm):
+        caplog.set_level(logging.INFO, logger=l3_module.__name__)
+        result = await l3_module.call_content_anchor_agent(_cognition_state())
+
+    assert result["content_anchors"] == [
+        "[DECISION] Answer directly.",
+        "[SCOPE] short.",
+    ]
+    assert "Content anchor output: anchors=" in caplog.text
+    assert "[DECISION] Answer directly." in caplog.text

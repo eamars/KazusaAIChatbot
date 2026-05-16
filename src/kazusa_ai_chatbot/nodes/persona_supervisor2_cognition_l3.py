@@ -13,7 +13,7 @@ from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition_prompt_selection impo
 )
 from kazusa_ai_chatbot.nodes.persona_supervisor2_schema import CognitionState
 from kazusa_ai_chatbot.nodes.referent_resolution import normalize_referents
-from kazusa_ai_chatbot.utils import get_llm, parse_llm_json_output
+from kazusa_ai_chatbot.utils import get_llm, log_list_preview, parse_llm_json_output
 from kazusa_ai_chatbot.nodes.linguistic_texture import (
     get_fragmentation_description,
     get_hesitation_density_description,
@@ -623,12 +623,10 @@ async def call_content_anchor_agent(state: CognitionState) -> CognitionState:
     ])
     result = parse_llm_json_output(response.content)
 
-    # logger.debug(
-    #     "Content anchor agent: anchors=%s",
-    #     log_list_preview(result.get("content_anchors", []) or []),
-    # )
-
     content_anchors = result.get("content_anchors", [])
+    logger.info(
+        f"Content anchor output: anchors={log_list_preview(content_anchors)}"
+    )
 
     return_value = {
         "content_anchors": content_anchors,
