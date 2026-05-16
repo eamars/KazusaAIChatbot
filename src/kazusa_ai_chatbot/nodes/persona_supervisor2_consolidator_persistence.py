@@ -3,20 +3,14 @@
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
 from datetime import datetime, timedelta, timezone
-
-from langchain_core.messages import HumanMessage, SystemMessage
 
 from kazusa_ai_chatbot.config import (
     AFFINITY_DECREMENT_BREAKPOINTS,
     AFFINITY_DEFAULT,
     AFFINITY_INCREMENT_BREAKPOINTS,
     AFFINITY_RAW_DEAD_ZONE,
-    CONSOLIDATION_LLM_API_KEY,
-    CONSOLIDATION_LLM_BASE_URL,
-    CONSOLIDATION_LLM_MODEL,
 )
 from kazusa_ai_chatbot.db import (
     DatabaseOperationError,
@@ -37,373 +31,15 @@ from kazusa_ai_chatbot.nodes.persona_supervisor2_consolidator_origin_policy impo
 from kazusa_ai_chatbot.nodes.persona_supervisor2_consolidator_schema import (
     ConsolidatorState,
 )
-from kazusa_ai_chatbot.dispatcher import (
-    DispatchContext,
-    RawToolCall,
-    TaskDispatcher,
-    ToolRegistry,
-)
 from kazusa_ai_chatbot.dispatcher.task import parse_iso_datetime
 from kazusa_ai_chatbot.rag.cache2_events import CacheInvalidationEvent
-from kazusa_ai_chatbot.time_context import (
-    format_time_fields_for_llm,
-    local_llm_time_to_utc_iso,
-)
+from kazusa_ai_chatbot.time_context import local_llm_time_to_utc_iso
 from kazusa_ai_chatbot.rag.cache2_runtime import get_rag_cache2_runtime
 from kazusa_ai_chatbot.utils import (
-    get_llm,
-    log_list_preview,
-    parse_llm_json_output,
     text_or_empty,
 )
 
 logger = logging.getLogger(__name__)
-
-_task_dispatcher: TaskDispatcher | None = None
-_task_registry: ToolRegistry | None = None
-
-_TASK_DISPATCHER_OUTPUT_FORMAT = """\
-{
-  "tool_calls": [
-    {
-      "tool": "工具名",
-      "args": {
-        "参数名": "参数值",
-        "target_channel_type": "group | private，target_channel 不是 same 时必填"
-      }
-    }
-  ]
-}"""
-_TASK_DISPATCHER_PROMPT = """\
-你负责把角色已经接受的未来约定，转换成可执行的工具调用。
-
-# 目标
-- 输入是角色本轮最终说出口的话、已提取的 `future_promises`、来源平台上下文，以及当前可用工具。
-- 输出必须是零个或多个工具调用；若没有把握，就输出 {"tool_calls": []}。
-
-# 规则
-1. 只能使用 `available_tools` 中出现的工具名与参数字段。
-2. 所有延迟执行任务都必须使用 `YYYY-MM-DD HH:MM` 格式的本地时间 `execute_at`；禁止输出带时区、带 T 分隔符或相对时间字段。
-2a. 输入里的 `source_channel_type` 表示来源会话类型，常见值有 `group` 和 `private`。
-2b. 如果某个 `future_promises` 已经给出 `due_time`，那就是权威执行时间；`execute_at` 必须照抄同一个本地时间值。
-3. 若要回到原会话发送消息，使用 `target_channel: "same"`。
-4. 若目标平台与来源平台相同，可以省略 `target_platform`。
-4a. 如果用户明确指定了另一个群/频道/房间 ID（例如 `54369546群`），`target_channel` 必须写那个明确的 ID，而不是 `"same"`。
-4b. 若来源是私聊/DM，但用户要求发到另一个群或频道，仍然按用户指定的目标 ID 填写 `target_channel`；不要因为来源是私聊就回退到 `"same"`。
-4c. `target_channel` 必须是平台实际使用的纯 ID 字符串；不要保留“群”“频道”“房间”“#”之类的人类描述后缀。
-4d. 当 `target_channel` 不是 `"same"` 时，必须输出 `target_channel_type`；群/频道/房间使用 `group`，私聊/DM 使用 `private`。不要让调度器猜。
-5. 对“持续生效的回复规则/称呼规则/语言偏好/格式约定”这类承诺，如果 `due_time` 为 null，说明它属于长期状态，不是未来某个时刻要发送的新消息。此时必须返回 {"tool_calls": []}。
-5a. 若 `commitment_type` 是 `future_promise` 且需要定时执行，输入侧通常会提供 `due_time`。如果 `due_time` 仍为 null，且你无法确定精确执行时间，返回 {"tool_calls": []}。
-6. 只有“未来某个时刻真的要额外发送一条消息”时，才生成 `send_message`。
-7. 若无法形成可靠工具调用，返回 {"tool_calls": []}，不要解释。
-8. `text` 是届时角色真正要发送的消息正文，不要只是复述 promise 字段。
-9. 顶层输出必须始终是 JSON 对象，不能是顶层数组。
-
-# 生成步骤
-1. 先读取 `future_promises`，只保留仍然需要在未来某一刻额外执行的承诺。
-2. 对每个候选承诺，检查 `available_tools` 是否存在可执行工具及必要参数字段。
-3. 根据 `due_time` 确定本地 `execute_at`；不要自行输出时区或带 T 分隔符的机器时间。
-4. 根据来源会话和用户明确指定的目标，确定 `target_platform` 与 `target_channel`。
-5. 生成届时角色真正要发送的 `text`。如果无法可靠生成工具调用，返回 {"tool_calls": []}。
-
-# 输入格式
-{
-  "instruction": "当前调度意图摘要",
-  "time_context": {
-    "current_local_datetime": "当前本地时间，YYYY-MM-DD HH:MM",
-    "current_local_weekday": "当前本地星期"
-  },
-  "source_platform": "来源平台",
-  "source_channel_id": "来源会话 ID",
-  "source_channel_type": "group | private",
-  "source_message_id": "来源消息 ID",
-  "decontexualized_input": "用户本轮真实意图摘要",
-  "final_dialog": ["角色本轮最终实际说出口的话"],
-  "content_anchors": ["回复前的内容锚点"],
-  "future_promises": [
-    {
-      "target": "承诺目标",
-      "action": "可执行承诺本体",
-      "due_time": "YYYY-MM-DD HH:MM 本地时间或 null",
-      "commitment_type": "future_promise | language_preference | address_preference | other"
-    }
-  ],
-  "available_tools": [
-    {
-      "name": "工具名",
-      "description": "工具说明",
-      "args_schema": {"参数名": "参数定义"}
-    }
-  ]
-}
-
-# 输出格式
-请只返回合法 JSON：
-""" + _TASK_DISPATCHER_OUTPUT_FORMAT
-_task_dispatcher_llm = get_llm(
-    temperature=0.0,
-    top_p=1.0,
-    model=CONSOLIDATION_LLM_MODEL,
-    base_url=CONSOLIDATION_LLM_BASE_URL,
-    api_key=CONSOLIDATION_LLM_API_KEY,
-)
-_TASK_DISPATCHER_LLM_HIDDEN_ARGS = {"delivery_mentions"}
-
-
-def configure_task_dispatcher(dispatcher: TaskDispatcher, tool_registry: ToolRegistry) -> None:
-    """Install the runtime dispatcher used by the consolidator background path.
-
-    Args:
-        dispatcher: Task dispatcher instance shared by the service runtime.
-        tool_registry: Tool registry used to expose visible tool specs to the LLM.
-    """
-
-    global _task_dispatcher, _task_registry
-    _task_dispatcher = dispatcher
-    _task_registry = tool_registry
-
-
-def _get_task_dispatcher() -> TaskDispatcher | None:
-    """Return the configured task dispatcher, if the service installed one."""
-
-    return _task_dispatcher
-
-
-def _build_dispatch_context(state: ConsolidatorState, *, timestamp: str) -> DispatchContext:
-    """Build the dispatcher context from consolidator state.
-
-    Args:
-        state: Consolidator state for the current turn.
-        timestamp: Current turn timestamp.
-
-    Returns:
-        Source-side dispatch context.
-    """
-
-    try:
-        now = parse_iso_datetime(timestamp)
-    except ValueError as exc:
-        logger.debug(f"Using current time for invalid dispatch timestamp: {exc}")
-        now = datetime.now(timezone.utc)
-
-    return_value = DispatchContext(
-        source_platform=state.get("platform", ""),
-        source_channel_id=state.get("platform_channel_id", ""),
-        source_user_id=state.get("global_user_id", ""),
-        source_message_id=state.get("platform_message_id", ""),
-        guild_id=None,
-        bot_permission_role="user",
-        now=now,
-        source_channel_type=state["channel_type"],
-        source_platform_bot_id=state.get("platform_bot_id", ""),
-        source_character_name=state.get("character_name", ""),
-    )
-    return return_value
-
-
-def _build_dispatch_instruction(state: ConsolidatorState) -> str:
-    """Summarize the current turn intent for tracing and task generation.
-
-    Args:
-        state: Consolidator state for the current turn.
-
-    Returns:
-        Natural-language instruction summary.
-    """
-
-    character_profile = state.get("character_profile", {})
-    character_name = character_profile["name"]
-    user_name = state.get("user_name", "")
-    promise_count = len(state.get("future_promises") or [])
-    return_value = (
-        f"{character_name} should follow through on {promise_count} accepted promise(s)"
-        f" for {user_name} based on the finalized dialog."
-    )
-    return return_value
-
-
-def _dispatcher_llm_promises(future_promises: list[dict]) -> list[dict]:
-    """Return local-time promise rows for the scheduler dispatcher prompt.
-
-    Args:
-        future_promises: UTC-normalized promise rows used by deterministic
-            storage and scheduler code.
-
-    Returns:
-        Prompt-facing promise rows with time fields converted back to
-        character-local, timezone-unaware strings.
-    """
-    prompt_promises = [
-        format_time_fields_for_llm(
-            promise,
-            (
-                "due_time",
-                "execute_at",
-                "created_at",
-                "updated_at",
-                "completed_at",
-                "cancelled_at",
-            ),
-        )
-        for promise in future_promises
-        if isinstance(promise, dict)
-    ]
-    return_value = prompt_promises
-    return return_value
-
-
-def _dispatcher_llm_args_schema(schema: dict) -> dict:
-    """Return the tool argument schema safe for model generation.
-
-    Args:
-        schema: Runtime validator schema for one tool.
-
-    Returns:
-        A schema copy with deterministic runtime-only arguments removed.
-    """
-
-    visible_schema = dict(schema)
-    properties = schema.get("properties")
-    if isinstance(properties, dict):
-        visible_properties = {
-            name: value
-            for name, value in properties.items()
-            if name not in _TASK_DISPATCHER_LLM_HIDDEN_ARGS
-        }
-        visible_schema["properties"] = visible_properties
-
-    required = schema.get("required")
-    if isinstance(required, list):
-        visible_required = [
-            name
-            for name in required
-            if name not in _TASK_DISPATCHER_LLM_HIDDEN_ARGS
-        ]
-        visible_schema["required"] = visible_required
-
-    return_value = visible_schema
-    return return_value
-
-
-def _normalize_raw_tool_call_args(args: dict) -> dict | None:
-    """Convert LLM-emitted local tool times to UTC scheduler arguments.
-
-    Args:
-        args: Raw tool-call arguments emitted by the scheduler dispatcher LLM.
-
-    Returns:
-        A copied argument dictionary with ``execute_at`` converted to UTC, or
-        ``None`` when the model emitted an invalid structured time.
-    """
-    normalized_args = dict(args)
-    execute_at = normalized_args.get("execute_at")
-    if execute_at in (None, ""):
-        return_value = normalized_args
-        return return_value
-
-    if not isinstance(execute_at, str):
-        logger.debug(f"Dropping tool call with non-string execute_at: {execute_at!r}")
-        return None
-
-    try:
-        normalized_args["execute_at"] = local_llm_time_to_utc_iso(
-            execute_at.strip()
-        )
-    except ValueError as exc:
-        logger.debug(
-            f"Dropping tool call with invalid local execute_at "
-            f"{execute_at!r}: {exc}"
-        )
-        return None
-
-    return_value = normalized_args
-    return return_value
-
-
-async def _generate_raw_tool_calls(
-    state: ConsolidatorState,
-    ctx: DispatchContext,
-) -> list[RawToolCall]:
-    """Ask the LLM to convert accepted promises into raw tool calls.
-
-    Args:
-        state: Consolidator state containing finalized dialog and harvested promises.
-        ctx: Dispatch context used to expose source defaults and visible tools.
-
-    Returns:
-        Zero or more raw tool calls emitted by the LLM.
-    """
-
-    if _task_registry is None:
-        return_value = []
-        return return_value
-
-    available_tools = _task_registry.filter(ctx)
-    future_promises = _normalize_future_promises(
-        state.get("future_promises") or [],
-        timestamp=ctx.now.isoformat(),
-    )
-    if not available_tools or not future_promises:
-        return_value = []
-        return return_value
-
-    action_directives = state.get("action_directives", {})
-    linguistic_directives = action_directives.get("linguistic_directives", {})
-    content_anchors = linguistic_directives.get("content_anchors", [])
-
-    msg = {
-        "instruction": _build_dispatch_instruction(state),
-        "time_context": state["time_context"],
-        "source_platform": ctx.source_platform,
-        "source_channel_id": ctx.source_channel_id,
-        "source_channel_type": state["channel_type"],
-        "source_message_id": ctx.source_message_id,
-        "decontexualized_input": state.get("decontexualized_input", ""),
-        "final_dialog": state.get("final_dialog", []),
-        "content_anchors": content_anchors,
-        "future_promises": _dispatcher_llm_promises(future_promises),
-        "available_tools": [
-            {
-                "name": spec.name,
-                "description": spec.description,
-                "args_schema": _dispatcher_llm_args_schema(spec.args_schema),
-            }
-            for spec in available_tools
-        ],
-    }
-    response = await _task_dispatcher_llm.ainvoke(
-        [
-            SystemMessage(content=_TASK_DISPATCHER_PROMPT),
-            HumanMessage(content=json.dumps(msg, ensure_ascii=False)),
-        ]
-    )
-    raw_model_output = str(response.content)
-    result = parse_llm_json_output(
-        raw_model_output,
-        expected_output_format=_TASK_DISPATCHER_OUTPUT_FORMAT,
-    )
-    tool_calls = result.get("tool_calls", [])
-    if not isinstance(tool_calls, list):
-        return_value = []
-        return return_value
-
-    raw_calls: list[RawToolCall] = []
-    for item in tool_calls:
-        if not isinstance(item, dict):
-            continue
-        tool_name = str(item.get("tool", "")).strip()
-        args = item.get("args")
-        if not tool_name or not isinstance(args, dict):
-            continue
-        normalized_args = _normalize_raw_tool_call_args(args)
-        if normalized_args is None:
-            continue
-        raw_calls.append(RawToolCall(tool=tool_name, args=normalized_args))
-
-    logger.debug(f'Task dispatcher LLM: raw_calls={log_list_preview([{"tool": raw.tool, "args": raw.args} for raw in raw_calls])}')
-    return_value = raw_calls
-    return return_value
-
 
 def process_affinity_delta(current_affinity: int, raw_delta: int) -> int:
     """Scale a raw affinity delta by direction-specific breakpoints.
@@ -595,10 +231,7 @@ async def db_writer(state: ConsolidatorState) -> dict:
             write_log["relationship_insight"] = False
 
     # ── Step 3: unified user-memory units ────────────────────────────
-    if (
-        origin_policy["user_memory_units"]["allowed"]
-        or origin_policy["task_dispatch"]["allowed"]
-    ):
+    if origin_policy["user_memory_units"]["allowed"]:
         future_promises = _normalize_future_promises(
             state.get("future_promises") or [],
             timestamp=timestamp,
@@ -625,44 +258,6 @@ async def db_writer(state: ConsolidatorState) -> dict:
             metadata["user_memory_unit_results"] = memory_unit_results
     else:
         write_log["user_memory_units"] = False
-
-    scheduled_event_ids: list[str] = []
-    dispatch_rejections: list[str] = []
-    if origin_policy["task_dispatch"]["allowed"]:
-        dispatcher = _get_task_dispatcher()
-        if dispatcher is not None:
-            dispatch_ctx = _build_dispatch_context(state, timestamp=timestamp)
-            raw_calls = await _generate_raw_tool_calls(normalized_state, dispatch_ctx)
-            dispatch_result = await dispatcher.dispatch(
-                raw_calls,
-                dispatch_ctx,
-                instruction=_build_dispatch_instruction(state),
-            )
-            scheduled_event_ids = [
-                event_id
-                for _task, event_id in dispatch_result.scheduled
-            ]
-            dispatch_rejections = [
-                f"{raw.tool}: {reason}"
-                for raw, reason in dispatch_result.rejected
-            ]
-            if dispatch_rejections:
-                if any(
-                    "no adapters registered" in rejection
-                    for rejection in dispatch_rejections
-                ):
-                    logger.warning(
-                        f"Task dispatch unavailable: raw_calls={len(raw_calls)} "
-                        f"platform={dispatch_ctx.source_platform} "
-                        f"channel={dispatch_ctx.source_channel_id} "
-                        f"future_promises={len(future_promises)} "
-                        f"rejections={dispatch_rejections}"
-                    )
-                else:
-                    logger.debug(
-                        f"Task dispatch rejected {len(dispatch_rejections)} "
-                        f"call(s): {dispatch_rejections}"
-                    )
 
     # ── Step 4: affinity (direction-scaled) ─────────────────────────
     user_profile = state.get("user_profile", {})
@@ -753,8 +348,6 @@ async def db_writer(state: ConsolidatorState) -> dict:
     metadata.update({
         "write_success": write_log,
         "cache_invalidated": cache_invalidated,
-        "scheduled_event_ids": scheduled_event_ids,
-        "task_dispatch_rejected": dispatch_rejections,
         "affinity_before": user_affinity_score,
         "affinity_delta_processed": processed_affinity_delta,
     })
@@ -762,7 +355,6 @@ async def db_writer(state: ConsolidatorState) -> dict:
     logger.debug(
         f"db_writer summary: user={user_name} global_user={global_user_id} "
         f"writes={write_log} cache_invalidated={cache_invalidated} "
-        f"scheduled={len(scheduled_event_ids)} "
         f"affinity_before={user_affinity_score} "
         f"affinity_delta={processed_affinity_delta}"
     )

@@ -6,7 +6,6 @@ import json
 
 from kazusa_ai_chatbot.action_spec.evaluator import ActionSpecEvaluator
 from kazusa_ai_chatbot.action_spec.registry import (
-    build_dispatcher_bridge_capabilities,
     build_initial_action_capabilities,
     project_prompt_affordances,
 )
@@ -48,13 +47,7 @@ def _target_for_kind(kind: str) -> dict:
             "owner": "orchestrator",
             "scope": {"episode_type": "self_cognition"},
         }
-    return {
-        "schema_version": "action_target.v1",
-        "target_kind": "current_channel",
-        "target_id": None,
-        "owner": "dispatcher",
-        "scope": {"channel_relation": "same"},
-    }
+    raise AssertionError(f"unsupported action kind in test: {kind}")
 
 
 def _no_continuation() -> dict:
@@ -88,12 +81,7 @@ def _params_for_kind(kind: str) -> dict:
             "trigger_at": "2026-05-16T00:30:00+00:00",
             "continuation_objective": "Re-evaluate the promise after a natural pause.",
         }
-    return {
-        "target_channel": "same",
-        "text": "Checking in now.",
-        "execute_at": None,
-        "delivery_mentions": [],
-    }
+    raise AssertionError(f"unsupported action kind in test: {kind}")
 
 
 def _action_spec(kind: str) -> dict:
@@ -230,21 +218,11 @@ def test_evaluator_accepts_private_future_cognition_trigger() -> None:
     assert result["handler_owner"] == "orchestrator"
 
 
-def test_send_message_bridge_capability_is_not_l2d_initial_capability() -> None:
-    """Dispatcher delivery remains available only to the bridge evaluator."""
-
-    initial_capabilities = build_initial_action_capabilities()
-    bridge_capabilities = build_dispatcher_bridge_capabilities()
-
-    assert "send_message" not in initial_capabilities
-    assert set(bridge_capabilities) == {"send_message"}
-
-
 def test_evaluator_validates_continuation_contract() -> None:
     """Continuation requests must be structurally bounded before execution."""
 
-    evaluator = ActionSpecEvaluator(build_dispatcher_bridge_capabilities())
-    action_spec = _action_spec("send_message")
+    evaluator = ActionSpecEvaluator(build_initial_action_capabilities())
+    action_spec = _action_spec("trigger_future_cognition")
     action_spec["continuation"] = {
         "schema_version": "action_continuation.v1",
         "mode": "immediate_followup",

@@ -2,9 +2,8 @@
 
 This module is the canonical ICD for `kazusa_ai_chatbot.self_cognition`.
 It owns source collection, trigger packet construction, route tracking,
-action-attempt compatibility, dispatcher-handoff compatibility, worker,
-production attempt persistence, and dry-run artifact contracts for the idle
-self-cognition agency loop.
+action-attempt compatibility, worker, production attempt persistence, and
+dry-run artifact contracts for the idle self-cognition agency loop.
 
 ## Boundary
 
@@ -19,9 +18,8 @@ The module supports two entry points:
   builds the same route records in memory, invokes the existing dialog graph
   for private finalization when consolidation is applied, calls the existing
   consolidator through the shared same-path entry, records sanitized event-log
-  telemetry, persists action-attempt state through the DB facade, and may hand
-  a cognition-selected delivery candidate to the existing action-spec
-  `send_message` bridge before `TaskDispatcher`.
+  telemetry, and persists action-attempt state through the DB facade. It does
+  not hand prewritten text to delivery.
 
 Self-cognition is an upstream trigger source for the shared persona path. It is
 not a downstream action consumer, private cleanup channel, adapter sender, or
@@ -35,22 +33,22 @@ self-cognition triggers and should not be treated as a separate action path.
 
 The production worker is enabled by default with `SELF_COGNITION_ENABLED=true`.
 Set it to `false` to suppress self-cognition worker activation. The only
-allowed outward production side effect is the normal dispatcher/scheduler
-handling of a non-duplicate action candidate.
+allowed delayed production side effect is the normal future-cognition scheduler
+path, where the later cognition cycle decides again whether any visible output
+should exist.
 
 Self-cognition-created episodes set
 `origin_metadata.debug_modes.no_visual_directives=true` by default, so the
 shared L3 visual-directive LLM is skipped for self-cognition. These episodes do
 not set `no_remember`. Production worker consolidation can update the existing
-character-state, relationship, affinity, memory-unit, task-dispatch, and cache
-lanes through the shared consolidator policy. It does not create a separate
-self-cognition memory or progress store.
+character-state, relationship, affinity, memory-unit, and cache lanes through
+the shared consolidator policy. It does not create a separate self-cognition
+memory or progress store.
 
-The module does not call adapters directly or write `/chat` conversation rows.
-Private finalization exists only to feed the shared consolidator and optional
-action-candidate rendering. Dispatcher rejection is recorded through event
-logging and persisted action-attempt state; it must not be converted into an
-adapter send.
+The module does not call adapters directly, write `/chat` conversation rows, or
+schedule prewritten user-visible text. Private finalization exists only to feed
+the shared consolidator and optional action-candidate rendering for local
+tracking.
 
 Consolidation can run even when self-cognition selects no visible action.
 Private finalization, action results, or episode-trace evidence are sufficient
@@ -107,8 +105,6 @@ cognition's route or contact decision.
 - `runner.build_self_cognition_case_artifacts_async(case, rag_client=None, cognition_client=None, dialog_client=None, consolidation_client=None, apply_consolidation=False)`
 - `runner.run_self_cognition_case(case, output_dir, rag_client=None, cognition_client=None, dialog_client=None, consolidation_client=None, apply_consolidation=False)`
 - `artifacts.write_tracking_artifacts(output_dir, artifacts)`
-- `handoff.build_send_message_action_spec(case, action_candidate)`
-- `handoff.dispatch_action_candidate(case, action_attempt, action_candidate, dispatcher, now)`
 - `worker.run_self_cognition_worker_tick(...)`
 - `worker.start_self_cognition_worker(...)`
 - `worker.stop_self_cognition_worker(...)`
@@ -141,18 +137,19 @@ Existing attempts with these statuses suppress a new send candidate for the
 same idempotency key: `candidate`, `held`, `pending_handoff`,
 `handoff_accepted`, `scheduled`, `sent`, and `duplicate_suppressed`.
 
-The live worker stores suppression history in the
+The live worker stores suppression and audit history in the
 `self_cognition_action_attempts` MongoDB collection through
 `kazusa_ai_chatbot.db` helpers. That collection now also backs generic
 action-attempt metadata for the shared action-spec layer. Old send-message
 attempt rows remain readable, and new rows must stay tolerant of the older
-shape. Event logging mirrors sanitized run and dispatch metadata for
-operators, but event logs are not used as production control state.
+shape. Event logging mirrors sanitized trigger, run, route, action-attempt, and
+consolidation metadata for operators, but event logs are not used as production
+control state.
 
 ## Delivery Mentions
 
 Self-cognition may attach one platform-neutral `delivery_mentions` request to
-a proactive `send_message` action candidate when the shared dialog graph
+a local action candidate artifact when the shared dialog graph
 returns `mention_target_user=true` and the case has a semantic target user in
 `target_scope.user_id`.
 
@@ -188,23 +185,16 @@ Action candidates may carry:
 ]
 ```
 
-Self-cognition does not decide adapter capability, channel feasibility, or
-native mention syntax. It only carries the dialog-owned semantic mention
-request as metadata. The dispatcher passes the metadata through and adapters
-render or ignore it.
+Self-cognition does not decide adapter capability, channel feasibility, native
+mention syntax, or delivery. It only carries the dialog-owned semantic mention
+request as local tracking metadata.
 
-## Action-Spec Handoff
+## Future Cognition Handoff
 
-Self-cognition may still produce legacy delivery candidates for proactive
-follow-through. Production handoff now wraps those candidates as
-`ActionSpecV1(kind="send_message")`, validates them through the action-spec
-evaluator, then bridges the validated row to
-`RawToolCall(tool="send_message")` for `TaskDispatcher.dispatch`.
-
-Self-cognition itself does not expose `send_message` to L2d as a text-surface
-choice. Ordinary visible expression uses `speak`, L3 text, and dialog. The
-dispatcher bridge is only for adapter-facing delivery after text exists or for
-legacy delivery-candidate compatibility.
+Self-cognition may produce local delivery-candidate artifacts for dry-run
+inspection and duplicate suppression, but production worker ticks do not
+schedule or send those candidates. Ordinary visible expression uses `speak`, L3
+text, and dialog in the shared cognition path.
 
 `trigger_future_cognition` uses `scheduled_events` as an internal delayed
 trigger source. The action handler records a private non-dispatcher slot; a
@@ -217,13 +207,13 @@ limits.
 ## Event Logging
 
 The production worker mirrors sanitized trigger, run, route, action-attempt,
-consolidation-outcome, and dispatcher-result metadata through
+and consolidation-outcome metadata through
 `kazusa_ai_chatbot.event_logging`. This event-log mirror is the durable
 operator view for long-term production counts and `/ops/self-cognition/stats`.
 
 Dry-run artifacts remain the canonical debug output. The production worker
 does not write artifact files. Event-log rows store ids, route names, output
-modes, budget counters, dispatch status, consolidation write-success booleans,
+modes, budget counters, consolidation write-success booleans,
 scheduled-event counts, cache-eviction counts, origin labels, and status
 labels; they must not include source packet text, private finalization text,
 action candidate text, raw target channels, or conversation bodies.
@@ -241,14 +231,13 @@ The dry-run writer may produce:
 - `self_cognition_route_effect.json`
 - `self_cognition_action_attempt.json`
 - `self_cognition_action_candidate.json`
-- `self_cognition_dispatch_result.json`
 - `self_cognition_consolidation_outcome.json`
 - `self_cognition_loop_trace.md`
 
 Legacy dry-run delivery candidates use `dispatch_shape: "send_message"` and
-`production_handoff: false` in dry-run artifacts. In live mode, actual handoff
-state is represented by event logging, scheduler rows, action-spec bridge
-validation, and the `self_cognition_action_attempts` collection.
+`production_handoff: false` in dry-run artifacts. In live mode, they remain
+private tracking artifacts in the `self_cognition_action_attempts` collection
+and do not become scheduler rows.
 
 ## Command
 
@@ -331,16 +320,6 @@ self_cognition_action_candidate = {
     "dispatch_shape": "send_message",
     "production_handoff": False,
     "delivery_mentions": list[dict],  # optional
-}
-
-self_cognition_dispatch_result = {
-    "attempt_id": str,
-    "idempotency_key": str,
-    "production_handoff": bool,
-    "status": "accepted" | "rejected" | "not_requested",
-    "dispatcher_called": bool,
-    "scheduled_event_ids": list[str],
-    "rejections": list[str],
 }
 
 self_cognition_consolidation_outcome = {

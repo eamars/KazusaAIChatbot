@@ -237,7 +237,7 @@ self-cognition plan completed.
 | 4 | Progress-maintenance candidate | Before-due commitments and settled conversations should still preserve short-term continuity without sending. | `progress_maintenance` route effect | local route effect only |
 | 5 | Audit and evaluation | The system cannot be trusted without inspecting why the loop sent, held, or stayed silent. This is cheap and mandatory for quality. | readable loop trace and route explanation | local loop trace |
 | 6 | RAG / research planning | Topic-triggered RAG can make the loop more autonomous, but it should come after commitment/action routing is stable. | bounded RAG request/result linked to the run | read-only production/RAG call |
-| 7 | Dispatcher and scheduler handoff | This creates real-world interaction, but it is high-risk until tracking, idempotency, and outbox quality are proven. | ready handoff candidate | opt-in `TaskDispatcher` handoff; disabled by default |
+| 7 | Future-cognition scheduler handoff | This creates a delayed thinking opportunity without prewriting user-visible text. | future cognition request | private scheduler slot; later shared cognition decides whether to speak |
 | 8 | Reflection / growth projection | Growth is important, but hourly self-cognition should not directly mutate personality; only compact projections may feed slower systems. | growth_candidate projection | future approved projection only |
 | 9 | Source-aware consolidation / production projections | This has the widest blast radius because it touches existing persistence semantics. It is useful later, not needed to prove the loop. | consolidation/progress/history projection candidate | future approved projection only |
 

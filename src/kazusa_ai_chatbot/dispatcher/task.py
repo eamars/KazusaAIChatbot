@@ -1,4 +1,4 @@
-"""Dataclasses for raw tool calls, dispatch context, and scheduled tasks."""
+"""Dataclasses for dispatch context and scheduled tasks."""
 
 from __future__ import annotations
 
@@ -41,19 +41,6 @@ def parse_iso_datetime(value: str) -> datetime:
     normalized = value.replace("Z", "+00:00")
     return_value = _to_utc_datetime(datetime.fromisoformat(normalized))
     return return_value
-
-
-@dataclass(frozen=True)
-class RawToolCall:
-    """Unvalidated tool call emitted by the consolidator LLM.
-
-    Args:
-        tool: Tool name chosen by the LLM.
-        args: Raw argument mapping emitted for that tool.
-    """
-
-    tool: str
-    args: dict
 
 
 @dataclass(frozen=True)
@@ -109,8 +96,6 @@ class DispatchContext:
             source_character_name=str(doc.get("source_character_name") or ""),
         )
         return return_value
-
-
 @dataclass(frozen=True)
 class Task:
     """Validated scheduled tool invocation ready for persistence or execution.
@@ -175,16 +160,3 @@ class Task:
             execute_at=parse_iso_datetime(doc["execute_at"]),
         )
         return return_value
-
-
-@dataclass(frozen=True)
-class DispatchResult:
-    """Dispatcher outcome containing scheduled and rejected tool calls.
-
-    Args:
-        scheduled: Validated tasks plus the persisted scheduler event id.
-        rejected: Raw tool calls rejected before scheduling, with the reason.
-    """
-
-    scheduled: list[tuple[Task, str]]
-    rejected: list[tuple[RawToolCall, str]]

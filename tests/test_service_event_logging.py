@@ -441,7 +441,6 @@ async def test_lifespan_records_process_and_resource_events(monkeypatch) -> None
     monkeypatch.setattr(service_module.scheduler, "configure_runtime", MagicMock())
     monkeypatch.setattr(service_module.scheduler, "load_pending_events", AsyncMock())
     monkeypatch.setattr(service_module.scheduler, "shutdown", AsyncMock())
-    monkeypatch.setattr(service_module, "configure_task_dispatcher", MagicMock())
     monkeypatch.setattr(
         service_module,
         "render_llm_route_table",

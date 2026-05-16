@@ -52,7 +52,7 @@ ALLOWED_CONTINUATION_MODES = frozenset(
     ("none", "immediate_followup", "scheduled_followup", "background_followup")
 )
 ALLOWED_CAPABILITY_OWNERS = frozenset(
-    ("dispatcher", "memory_lifecycle", "orchestrator", "l3_text", "l3_image")
+    ("memory_lifecycle", "orchestrator", "l3_text", "l3_image")
 )
 ALLOWED_COGNITION_MODES = frozenset(("deliberative", "reflex"))
 ALLOWED_URGENCY_VALUES = frozenset(("now", "background", "scheduled"))
@@ -151,7 +151,6 @@ class CapabilitySpecV1(TypedDict):
     capability_kind: str
     category: Literal["action"]
     owner_module: Literal[
-        "dispatcher",
         "memory_lifecycle",
         "orchestrator",
         "l3_text",
@@ -192,15 +191,6 @@ class ActionEvalResult(TypedDict):
     idempotency_key: str | None
     handler_owner: str | None
     errors: list[str]
-
-
-class SendMessageParamsV1(TypedDict):
-    """Params for the bridge-only dispatcher send-message action."""
-
-    target_channel: str
-    text: str
-    execute_at: str | None
-    delivery_mentions: list[dict[str, object]]
 
 
 class SpeakParamsV1(TypedDict):

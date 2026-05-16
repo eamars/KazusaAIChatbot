@@ -7,7 +7,6 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from kazusa_ai_chatbot.dispatcher import DispatchResult, RawToolCall
 from kazusa_ai_chatbot.nodes import (
     persona_supervisor2_consolidator_persistence as persistence_module,
 )
@@ -138,7 +137,6 @@ def _patch_allowed_write_dependencies(
         "update_user_memory_units_from_state": AsyncMock(
             return_value=memory_results
         ),
-        "get_dispatcher": MagicMock(return_value=None),
         "update_affinity": AsyncMock(),
         "update_character_image": AsyncMock(return_value=character_image),
         "upsert_character_self_image": AsyncMock(),
@@ -162,11 +160,6 @@ def _patch_allowed_write_dependencies(
         persistence_module,
         "update_user_memory_units_from_state",
         mocks["update_user_memory_units_from_state"],
-    )
-    monkeypatch.setattr(
-        persistence_module,
-        "_get_task_dispatcher",
-        mocks["get_dispatcher"],
     )
     monkeypatch.setattr(
         persistence_module,
@@ -209,21 +202,6 @@ async def test_db_writer_denied_origin_skips_all_durable_write_effects(
         "update_user_memory_units_from_state",
         denied_async_effect,
     )
-    monkeypatch.setattr(
-        persistence_module,
-        "_get_task_dispatcher",
-        denied_sync_effect,
-    )
-    monkeypatch.setattr(
-        persistence_module,
-        "_build_dispatch_context",
-        denied_sync_effect,
-    )
-    monkeypatch.setattr(
-        persistence_module,
-        "_generate_raw_tool_calls",
-        denied_async_effect,
-    )
     monkeypatch.setattr(persistence_module, "update_affinity", denied_async_effect)
     monkeypatch.setattr(
         persistence_module,
@@ -260,8 +238,8 @@ async def test_db_writer_denied_origin_skips_all_durable_write_effects(
     }
     assert result["metadata"]["cache_invalidated"] == []
     assert result["metadata"]["cache_evicted_count"] == 0
-    assert result["metadata"]["scheduled_event_ids"] == []
-    assert result["metadata"]["task_dispatch_rejected"] == []
+    assert "scheduled_event_ids" not in result["metadata"]
+    assert all("dispatch" not in key for key in result["metadata"])
     denied_async_effect.assert_not_called()
     denied_sync_effect.assert_not_called()
 
@@ -300,36 +278,16 @@ async def test_db_writer_user_message_origin_preserves_character_and_user_writes
 
 
 @pytest.mark.asyncio
-async def test_db_writer_user_message_origin_preserves_scheduler_dispatch(
+async def test_db_writer_user_message_origin_does_not_emit_dispatch_metadata(
     monkeypatch,
 ) -> None:
-    """Allowed user-message origins still run scheduler dispatch."""
+    """Allowed user-message origins no longer schedule user-visible text."""
     mocks = _patch_allowed_write_dependencies(monkeypatch)
-    raw_calls = [RawToolCall(tool="send_message", args={"text": "later"})]
-    generate_raw_tool_calls = AsyncMock(return_value=raw_calls)
-    fake_dispatcher = MagicMock()
-    fake_dispatcher.dispatch = AsyncMock(
-        return_value=DispatchResult(
-            scheduled=[(object(), "event-1")],
-            rejected=[],
-        )
-    )
-    get_dispatcher = MagicMock(return_value=fake_dispatcher)
-    monkeypatch.setattr(
-        persistence_module,
-        "_generate_raw_tool_calls",
-        generate_raw_tool_calls,
-    )
-    monkeypatch.setattr(persistence_module, "_get_task_dispatcher", get_dispatcher)
 
     result = await persistence_module.db_writer(_state())
 
-    get_dispatcher.assert_called_once_with()
-    generate_raw_tool_calls.assert_awaited_once()
-    fake_dispatcher.dispatch.assert_awaited_once()
-    assert fake_dispatcher.dispatch.await_args.args[0] == raw_calls
-    assert result["metadata"]["scheduled_event_ids"] == ["event-1"]
-    assert result["metadata"]["task_dispatch_rejected"] == []
+    assert "scheduled_event_ids" not in result["metadata"]
+    assert all("dispatch" not in key for key in result["metadata"])
     mocks["update_user_memory_units_from_state"].assert_awaited_once()
 
 

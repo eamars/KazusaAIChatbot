@@ -23,13 +23,10 @@ from kazusa_ai_chatbot.action_spec.models import (
 )
 from kazusa_ai_chatbot.action_spec.registry import (
     MEMORY_LIFECYCLE_UPDATE_CAPABILITY,
-    SEND_MESSAGE_CAPABILITY,
     SPEAK_CAPABILITY,
     TRIGGER_FUTURE_COGNITION_CAPABILITY,
-    build_dispatcher_bridge_capabilities,
     build_initial_action_capabilities,
 )
-from kazusa_ai_chatbot.dispatcher.task import RawToolCall
 
 _TYPE_MAP = {
     "array": list,
@@ -87,33 +84,6 @@ class ActionSpecEvaluator:
         return result
 
 
-def build_raw_tool_call_from_action_spec(action_spec: dict[str, Any]) -> RawToolCall:
-    """Bridge a validated send-message action spec into dispatcher shape."""
-
-    evaluator = ActionSpecEvaluator(build_dispatcher_bridge_capabilities())
-    result = evaluator.evaluate(action_spec)
-    if not result["ok"]:
-        errors = "; ".join(result["errors"])
-        raise ActionValidationError(errors)
-    validated = result["action_spec"]
-    if validated is None or validated["kind"] != SEND_MESSAGE_CAPABILITY:
-        raise ActionValidationError("kind: expected send_message")
-
-    params = validated["params"]
-    raw_args = {
-        "target_channel": str(params["target_channel"]),
-        "text": str(params["text"]),
-    }
-    execute_at = params.get("execute_at")
-    if isinstance(execute_at, str) and execute_at.strip():
-        raw_args["execute_at"] = execute_at.strip()
-    delivery_mentions = params.get("delivery_mentions")
-    if isinstance(delivery_mentions, list):
-        raw_args["delivery_mentions"] = delivery_mentions
-    raw_call = RawToolCall(tool=SEND_MESSAGE_CAPABILITY, args=raw_args)
-    return raw_call
-
-
 def _rejected(
     errors: list[str],
     action_spec: dict[str, Any] | None = None,
@@ -141,24 +111,10 @@ def _validate_kind_specific_contract(action_spec: dict[str, Any]) -> None:
     kind = action_spec["kind"]
     if kind == MEMORY_LIFECYCLE_UPDATE_CAPABILITY:
         validate_memory_lifecycle_action(action_spec)
-    elif kind == SEND_MESSAGE_CAPABILITY:
-        _validate_send_message_contract(action_spec)
     elif kind == SPEAK_CAPABILITY:
         _validate_speak_contract(action_spec)
     elif kind == TRIGGER_FUTURE_COGNITION_CAPABILITY:
         validate_future_cognition_action(action_spec)
-
-
-def _validate_send_message_contract(action_spec: dict[str, Any]) -> None:
-    """Validate the initial send-message action target."""
-
-    target = action_spec["target"]
-    owner = target["owner"]
-    if owner != "dispatcher":
-        raise ActionValidationError("owner: expected dispatcher")
-    target_kind = target["target_kind"]
-    if target_kind not in ("current_channel", "channel"):
-        raise ActionValidationError("target_kind: expected channel target")
 
 
 def _validate_speak_contract(action_spec: dict[str, Any]) -> None:

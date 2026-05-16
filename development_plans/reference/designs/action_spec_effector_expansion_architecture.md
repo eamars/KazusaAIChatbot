@@ -129,8 +129,8 @@ reference before each new implementation stage.
 Do not merge action spec into dispatcher.
 
 Action spec is the graph-visible contract materialized from L2d's semantic
-action request. Dispatcher is one execution owner for a subset of actions:
-scheduled and adapter-facing tools.
+action request. Scheduler and adapter delivery are downstream mechanics, not
+cognition-visible action owners.
 
 The relationship should be:
 
@@ -140,39 +140,37 @@ L2d semantic action request
 -> ActionSpecEvaluator / capability policy
 -> selected execution owner or L3 surface handler
    -> L3 text/image for surface outputs
-   -> dispatcher bridge for delivered text after surface output exists
    -> memory lifecycle handler for promise retirement
    -> orchestrator for future cognition continuation
 -> ActionResultV1 + SurfaceOutputV1
 -> EpisodeTraceV1 for consolidation
 ```
 
-For visible text, `speak` selects the L3 text surface and `send_message` is only
-the dispatcher bridge after deliverable text exists:
+For visible text, `speak` selects the L3 text surface. Delayed user-visible
+contact is represented as future cognition, not as a prewritten delayed
+message:
 
 ```text
 ActionSpecV1(kind="speak")
 -> L3 text handler
 -> SurfaceOutputV1(surface_kind="text")
--> delivery validation
--> RawToolCall(tool="send_message", args=...)
--> TaskDispatcher.dispatch(...)
+-> live response delivery boundary
 ```
 
-For `memory_lifecycle_update`, dispatcher is not involved because the action is
-private persistence, not adapter-facing delivery.
+For `memory_lifecycle_update`, delivery is not involved because the action is
+private persistence.
 
 The practical rule is: keep modules separate, unify the registration model.
-Dispatcher becomes one capability owner under the action-spec system, not the
+Action spec is not a delivery scheduler, and delivery mechanics are not the
 parent system.
 
 ## Decision Table
 
 | Topic | Decision | Justification |
 |---|---|---|
-| Action spec vs dispatcher | Keep separate modules and bridge dispatcher-owned actions. | Prevents dispatcher from becoming a generic semantic action bus while preserving the proven `send_message` path. |
-| Registration model | Use semantic action-category `CapabilitySpecV1` entries for cognition-visible capabilities; dispatcher `ToolSpec` remains execution-specific. | Avoids two competing semantic registries while preserving dispatcher permissions and adapter validation. |
-| Current runtime scope | Implement action spec, evaluator, L2d semantic action initialization, L3 text surface routing, episode-trace consolidation, dispatcher bridge compatibility, future-cognition request contract, and user-memory lifecycle update first. | Solves the expired-promise case while preserving one shared action/consolidation path for text, private actions, and scheduled follow-up. |
+| Action spec vs delivery | Keep action selection separate from scheduler/adapter mechanics. | Prevents delivery infrastructure from becoming a generic semantic action bus. |
+| Registration model | Use semantic action-category `CapabilitySpecV1` entries for cognition-visible capabilities; scheduler `ToolSpec` remains execution-specific. | Avoids two competing semantic registries while preserving deterministic delivery validation. |
+| Current runtime scope | Implement action spec, evaluator, L2d semantic action initialization, L3 text surface routing, episode-trace consolidation, future-cognition request contract, and user-memory lifecycle update first. | Solves the expired-promise case while preserving one shared action/consolidation path for text, private actions, and scheduled follow-up. |
 | L2d boundary | L2d emits compact semantic `action_requests`; deterministic code materializes `ActionSpecV1`. | Keeps schema versions, handler IDs, source refs, transport targets, and persistence IDs out of the local LLM prompt. |
 | Target binding | Build action targets from deterministic binding context, never from L2d-emitted IDs or copied refs. | The local LLM can decide semantics, but target IDs belong to trusted episode/source/RAG/repository context and must not become model-facing selectors. |
 | L3 surface ownership | Treat L3 text/image as selected action handlers. | Enables no-response, delayed response, image surface, and future tool surfaces without always-on branches. |
@@ -212,8 +210,6 @@ selected L3 surfaces / action handlers
         |
         +--> L3 text/image -> SurfaceOutputV1
         |
-        +--> dispatcher bridge -> TaskDispatcher -> scheduler/adapters
-        |
         +--> memory lifecycle handler -> user_memory_units repository
         |
         +--> orchestrator continuation/future cognition -> typed follow-up episode
@@ -225,9 +221,9 @@ ActionResultV1 + SurfaceOutputV1
 EpisodeTraceV1 -> consolidator prompt-safe projection -> memory/state/progress
 ```
 
-The action spec path is additive. Existing final dialog and dispatcher behavior
-remain valid, but final dialog is treated as a text surface output rather than
-the only consolidation basis.
+The action spec path is additive. Existing final dialog remains valid, but
+final dialog is treated as a text surface output rather than the only
+consolidation basis.
 
 Target binding is part of materialization, not a model-facing planning task.
 For `memory_lifecycle_update`, deterministic code resolves the active
@@ -301,9 +297,7 @@ The initial runtime slice accepts only:
 
 - `speak` with owner `l3_text`;
 - `memory_lifecycle_update` with owner `memory_lifecycle`;
-- `trigger_future_cognition` with owner `orchestrator`;
-- bridge-only `send_message` with owner `dispatcher`, after a text surface
-  exists.
+- `trigger_future_cognition` with owner `orchestrator`.
 
 Future tools may use continuation, but the first execution plan validates the
 contract without shipping runtime web research or external image generation.
@@ -383,12 +377,6 @@ shape. Persistence maps them to existing owner fields:
      Typed scheduler fields, source refs, IDs, and target scope are
      deterministic-only metadata. If a faithful one-string objective cannot be
      built, the future cognition request fails closed.
-
-4. Bridge-only `send_message`
-   - Existing adapter-facing outbound delivery after text exists.
-   - Owner: dispatcher.
-   - Continuation: `none`.
-   - Execution: bridge to `RawToolCall` and `TaskDispatcher`.
 
 ### Next-Stage Tool Candidates
 

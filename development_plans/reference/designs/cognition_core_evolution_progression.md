@@ -127,16 +127,14 @@ production data; the corrections override anything below.
 3. **No procedural / skill memory.** Defense rules and style overlays are
    static configuration learned by reflection, not executable units the
    cognition core can call later.
-4. **One adapter-facing dispatcher effector.** Historical DB review confirmed
-   70/70 scheduled events used `send_message`. After the action-spec expansion,
-   dispatcher delivery remains bridge-only for adapter-facing sends while
-   private action capabilities such as memory lifecycle updates and future
-   cognition requests live outside the dispatcher boundary.
-5. **Outward loop exists but is one-shape.** `self_cognition` does fire and
-   schedule real outbound through the action-attempt ledger (verified in DB
-   review). What is missing is **route variety**: every accepted attempt is
-   a `send_message`. There is no scheduled self-research, no scheduled
-   internal recheck, no scheduled memory consolidation pass.
+4. **One historical adapter-facing effector.** Historical DB review confirmed
+   scheduled events used `send_message`. After the action-spec expansion and
+   delayed-text decommission, new proactive contact is represented as future
+   cognition rather than prewritten adapter delivery.
+5. **Outward loop exists but was one-shape.** `self_cognition` can collect due
+   work and record action attempts, but production ticks no longer schedule
+   prewritten outbound text. The remaining gap is **route variety**: there is
+   no scheduled self-research or scheduled memory consolidation pass yet.
 6. **Symbolic substrate absent.** World model lives in Mongo docs plus LLM
    short-term context. Acceptable today, but caps long-horizon self-evolution
    when contradictions accumulate.

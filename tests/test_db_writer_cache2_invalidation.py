@@ -81,8 +81,6 @@ def _patch_writers(monkeypatch, *, character_image=None) -> MagicMock:
     monkeypatch.setattr(persistence_module, "upsert_character_self_image", AsyncMock())
     monkeypatch.setattr(persistence_module, "_update_character_image", AsyncMock(return_value=character_image))
     monkeypatch.setattr(persistence_module, "update_user_memory_units_from_state", AsyncMock(return_value=[]))
-    monkeypatch.setattr(persistence_module, "_task_dispatcher", None)
-    monkeypatch.setattr(persistence_module, "_task_registry", None)
     return runtime
 
 

@@ -168,8 +168,6 @@ async def test_db_writer_runs_image_updaters_through_gather(monkeypatch) -> None
     monkeypatch.setattr(persistence_module, "upsert_character_self_image", AsyncMock())
     monkeypatch.setattr(persistence_module, "_update_character_image", AsyncMock(return_value=None))
     monkeypatch.setattr(persistence_module, "update_user_memory_units_from_state", AsyncMock(return_value=[]))
-    monkeypatch.setattr(persistence_module, "_task_dispatcher", None)
-    monkeypatch.setattr(persistence_module, "_task_registry", None)
 
     await persistence_module.db_writer({
         "timestamp": "2026-04-27T00:00:00+12:00",

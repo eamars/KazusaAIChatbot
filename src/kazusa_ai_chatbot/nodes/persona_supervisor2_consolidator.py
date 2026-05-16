@@ -224,7 +224,6 @@ async def call_consolidation_subgraph(global_state: GlobalPersonaState):
     logger.debug(f'Consolidation metadata: writes={log_dict_subset(metadata, ["write_success"])} cache_invalidated={metadata.get("cache_invalidated", [])} metadata={log_dict_subset(
             metadata,
             [
-                "scheduled_event_ids",
                 "contradiction_flags",
                 "affinity_before",
                 "affinity_delta_processed",

@@ -1,195 +1,65 @@
-# Dispatcher
+# Dispatcher Package
 
-`kazusa_ai_chatbot.dispatcher` is the task-dispatch layer for adapter-facing
-deferred tool execution.
+`kazusa_ai_chatbot.dispatcher` now contains deterministic delivery primitives
+used by the scheduler and runtime adapters. It is not a cognition action
+planner, not a consolidator extension, and not an LLM-facing tool-call router.
 
-It turns raw delivery tool calls into validated scheduled tasks, stores those
-tasks through the scheduler, and later delivers them through platform adapters.
-In the current runtime, this is mainly used for accepted future promises such
-as "remind me later" or "send a message to that group in one minute."
+The package keeps:
 
-The dispatcher handles tool-call generation, validation, deduplication,
-scheduling, and delivery for accepted future promises. Upstream consolidation
-owns the semantic decision that Kazusa accepted a future action.
+- `Task`: validated scheduler invocation payload.
+- `DispatchContext`: source-side delivery context persisted with scheduler
+  rows.
+- `ToolRegistry` and `ToolSpec`: deterministic registry for scheduler-owned
+  handlers.
+- `PendingTaskIndex`: in-process duplicate tracking for pending scheduler
+  rows.
+- `AdapterRegistry`, `MessagingAdapter`, `RemoteHttpAdapter`, and
+  `SendResult`: adapter-facing delivery boundary.
+- `build_send_message_tool()` and `handle_send_message(...)`: deterministic
+  scheduled message delivery handler.
 
-## Public Boundary
-
-Production callers should use the package facade:
-
-```python
-from kazusa_ai_chatbot.dispatcher import (
-    AdapterRegistry,
-    DispatchContext,
-    PendingTaskIndex,
-    RawToolCall,
-    RemoteHttpAdapter,
-    TaskDispatcher,
-    ToolCallEvaluator,
-    ToolRegistry,
-    build_send_message_tool,
-)
-```
-
-The main runtime object is:
-
-```python
-dispatcher = TaskDispatcher(evaluator, pending_index)
-```
-
-The dispatcher accepts raw LLM tool calls:
-
-```python
-await dispatcher.dispatch(
-    raw_calls=[
-        RawToolCall(
-            tool="send_message",
-            args={
-                "target_channel": "same",
-                "text": "drink water.",
-                "execute_at": "2026-04-22T18:16:28+00:00",
-            },
-        )
-    ],
-    ctx=dispatch_context,
-    instruction="Kazusa should follow through on 1 accepted promise.",
-)
-```
-
-It returns:
-
-```python
-{
-    "scheduled": [(Task, event_id), ...],
-    "rejected": [(RawToolCall, reason), ...],
-}
-```
+The removed runtime class cluster that generated, validated, and scheduled raw
+LLM delivery calls is no longer part of this package. Consolidation does not
+schedule user-visible text, and self-cognition does not hand prewritten text to
+delivery.
 
 ## Runtime Lifecycle
 
 ```text
 service startup
   -> build ToolRegistry
-       register dispatchable tools, including send_message
+       register deterministic scheduler tools, including send_message
   -> build AdapterRegistry
        adapters may be registered at runtime for each platform
   -> rebuild PendingTaskIndex from pending scheduler rows
-  -> build ToolCallEvaluator
-  -> build TaskDispatcher
-  -> configure consolidator with dispatcher + tool registry
   -> configure scheduler with tools + adapters + pending index
   -> load pending scheduler events
-
-chat turn completes
-  -> background consolidator writes durable memory/state
-  -> accepted future_promises are preserved from LLM output
-  -> task-dispatch LLM sees:
-       finalized dialog,
-       future_promises,
-       source context,
-       visible tool specs
-  -> task-dispatch LLM emits RawToolCall rows
-  -> TaskDispatcher validates and schedules them
 
 scheduled time arrives
   -> scheduler rehydrates Task and DispatchContext
   -> tool handler runs
+  -> handler records write-ahead outbound conversation row
   -> handler sends through the target platform adapter
   -> scheduler marks event completed or failed
 ```
 
-The dispatcher runs in the background consolidation path after response
-generation.
+The scheduler owns delayed execution. This package supplies the handler and
+adapter abstractions the scheduler needs to execute rows that already exist.
 
-## Action-Spec Bridge
+## Scheduler Task Shape
 
-The dispatcher is an execution owner, not the parent action system. Cognition
-does not call `TaskDispatcher` directly. When the shared action layer needs an
-adapter-facing delivery, the handoff is:
-
-```text
-ActionSpecV1(kind="send_message")
-  -> action-spec evaluator
-  -> RawToolCall(tool="send_message")
-  -> TaskDispatcher.dispatch(...)
-  -> scheduler event
-  -> registered platform adapter
-```
-
-`send_message` is bridge-only for this action-spec slice. L2d selects `speak`
-when a text surface is needed. The text/L3/dialog path produces the deliverable
-surface first; only then may delivery mechanics cross into this dispatcher
-boundary. Legacy self-cognition delivery candidates are also wrapped as
-validated `ActionSpecV1(kind="send_message")` rows before they become
-`RawToolCall` rows.
-
-The action-spec layer owns action residue validation and prompt-safe result
-tracing. The dispatcher owns tool visibility, schema validation, permission
-checks, adapter availability, deduplication, scheduler persistence, and
-delivery status.
-
-## Design Intention
-
-The dispatcher exists to separate semantic acceptance from operational execution.
-
-- The consolidator LLM decides what promises or commitments Kazusa accepted.
-- The task-dispatch LLM converts accepted future promises into candidate tool calls.
-- The evaluator checks tool availability, schema shape, permissions, adapters, source substitutions, and absolute time parsing.
-- The dispatcher deduplicates and persists valid tasks.
-- The scheduler owns delayed execution and status transitions.
-- Platform adapters own actual delivery.
-
-This keeps the local LLM's semantic work explicit while keeping execution mechanics deterministic and inspectable.
-
-## Upstream Handoff
-
-The dispatcher consumes delivery requests that have already passed upstream
-semantic ownership. For legacy task-dispatch generation, that source is
-`future_promises` emitted by the consolidator. For action-spec handoff, that
-source is a validated `ActionSpecV1(kind="send_message")` bridge row. The
-dispatcher does not reinterpret arbitrary user input.
-
-The task-dispatch LLM receives a structured payload containing:
-
-- character-local time context,
-- source platform and channel,
-- source channel type,
-- final dialog,
-- decontextualized input,
-- content anchors,
-- normalized future promises,
-- visible tool specifications.
-
-It returns JSON shaped like:
+`Task` is the validated invocation shape:
 
 ```python
-{
-    "tool_calls": [
-        {
-            "tool": "send_message",
-            "args": {
-                "target_channel": "same",
-                "text": "message to send later",
-                "execute_at": "2026-04-23 06:16",
-            },
-        }
-    ]
-}
+Task(
+    tool=str,
+    args=dict,
+    execute_at=datetime,
+    tags=list[str],
+)
 ```
 
-If the accepted commitment is an ongoing style, address, language, or formatting
-rule rather than a future action at a specific time, the task-dispatch LLM should
-return:
-
-```python
-{"tool_calls": []}
-```
-
-That distinction belongs in the LLM prompt and promise schema, not in
-keyword-based Python filters.
-
-## Dispatch Context
-
-`DispatchContext` carries source-side substitution data and validation scope:
+`DispatchContext` carries source-side metadata needed at execution time:
 
 ```python
 DispatchContext(
@@ -206,86 +76,40 @@ DispatchContext(
 
 Important meanings:
 
-- `source_platform` is the default target platform when a tool call omits `target_platform`.
-- `source_channel_id` is used when a tool call says `target_channel: "same"`.
-- `source_channel_type` is used when a tool call says `target_channel: "same"`.
-- `bot_permission_role` filters tools by permission before the LLM sees them and before evaluation accepts them.
-- `now` is the frozen dispatch time used for immediate tasks and relative-promise normalization upstream.
+- `source_platform` identifies the platform associated with the scheduler row.
+- `source_channel_id` and `source_channel_type` preserve source context.
+- `bot_permission_role` is retained for scheduler row compatibility and future
+  permission checks.
+- `now` is the execution time used by deterministic handlers.
 
-The persisted scheduler event carries this context so scheduled execution can be rehydrated later.
+## `send_message`
 
-## Tool Calls And Tasks
-
-`RawToolCall` is an untrusted raw tool-call payload. It may come from the
-legacy task-dispatch LLM or from the action-spec bridge:
-
-```python
-RawToolCall(tool=str, args=dict)
-```
-
-`Task` is the validated scheduled invocation:
-
-```python
-Task(
-    tool=str,
-    args=dict,
-    execute_at=datetime,
-    tags=list[str],
-)
-```
-
-The evaluator transforms a raw call into a task only when:
-
-- the tool exists and is visible in the current context,
-- the arguments satisfy the tool schema,
-- the target platform has a registered adapter,
-- `execute_at`, when supplied, parses as an absolute ISO timestamp,
-- source platform/channel substitution is structurally valid.
-
-Rejected calls are returned with human-readable reasons and are not persisted.
-
-## Tool Registry
-
-`ToolRegistry` is the dispatcher capability roster. A tool specification defines:
-
-- tool name,
-- prompt-facing description,
-- JSON-schema-like argument contract,
-- async handler,
-- optional minimum permission,
-- optional source-platform allowlist.
-
-The current built-in adapter-facing tool is `send_message`.
-
-`send_message` schedules a platform message with:
+The retained built-in scheduler tool is `send_message`.
 
 ```python
 {
+    "target_platform": str,
     "target_channel": str,
-    "target_channel_type": "group | private, required when target_channel is not same",
+    "target_channel_type": "group | private",
     "text": str,
-    "target_platform": str | omitted,
-    "execute_at": str | omitted,
     "reply_to_msg_id": str | None,
     "delivery_mentions": list[dict] | omitted,
 }
 ```
 
-`delivery_mentions` is optional adapter-owned rendering metadata. The
-dispatcher validates only that the field is an array when present, preserves it
+`delivery_mentions` is optional adapter-owned rendering metadata. The scheduler
+handler validates only that the field is structurally usable, preserves it
 inside task args, and passes it to the adapter unchanged. Mention feasibility,
 native syntax, and fallback behavior belong to the platform adapter.
-This field is runtime-only metadata and is not shown to the task-dispatcher
-LLM as a generatable tool argument.
 
-Additional tools are explicit capabilities with narrow schemas. Dispatch stays
-inspectable when each tool has clear ownership and validation.
+No current cognition or consolidation path creates new `send_message` scheduler
+rows. Existing pending rows can still be executed by the scheduler until a data
+migration cancels them.
 
 ## Adapter Boundary
 
-Adapters own delivery to external platforms.
-
-The dispatcher and scheduler speak only to the `MessagingAdapter` protocol:
+Adapters own delivery to external platforms. The scheduler handler speaks only
+to the `MessagingAdapter` protocol:
 
 ```python
 async def send_message(
@@ -302,14 +126,13 @@ async def send_message(
 or the request lacks the needed platform identity, it sends the original text.
 Prefix is the only approved placement for the current contract.
 
-`AdapterRegistry` maps platform keys to adapters. `RemoteHttpAdapter` bridges scheduled delivery to an adapter-owned HTTP endpoint, which lets the brain service schedule work even when the live platform adapter runs in another process.
+`AdapterRegistry` maps platform keys to adapters. `RemoteHttpAdapter` bridges
+scheduled delivery to an adapter-owned HTTP endpoint, which lets the brain
+service execute scheduled work even when the live platform adapter runs in
+another process.
 
-If no adapter is registered for the target platform, evaluation rejects the call before scheduling.
-
-The dispatcher owns the in-process registry abstraction, tool validation, and
-scheduled-send execution semantics. The HTTP contract for runtime adapter
-registration and heartbeat endpoints is owned by the
-[Brain Service ICD](../brain_service/README.md).
+The HTTP contract for runtime adapter registration and heartbeat endpoints is
+owned by the [Brain Service ICD](../brain_service/README.md).
 
 ## Deduplication
 
@@ -325,58 +148,26 @@ The deduplication signature is based on:
 }
 ```
 
-The index is rebuilt from pending scheduler rows at service startup. The dispatcher also rejects duplicates that appear within the same batch of raw tool calls.
+The index is rebuilt from pending scheduler rows at service startup.
+Deduplication is structural. It does not decide whether two natural-language
+promises mean the same thing; semantic decisions belong upstream in cognition.
 
-Deduplication is structural. It does not decide whether two natural-language promises mean the same thing; that semantic decision belongs upstream.
-
-## Scheduler Integration
-
-The dispatcher persists valid tasks as scheduler events. The scheduler:
-
-- inserts the pending event into MongoDB,
-- creates an in-process async timer,
-- rehydrates the task when the time arrives,
-- invokes the registered tool handler,
-- marks the event as `completed` or `failed`,
-- removes completed/cancelled tasks from the pending index.
-
-Scheduler persistence is the durable boundary. If the service restarts, pending events can be loaded again from MongoDB and scheduled in memory.
-
-## Semantic Ownership
+## Ownership
 
 LLMs own semantic decisions:
 
-- whether a user-facing request became an accepted future promise,
-- whether a promise means a delayed message or a long-lived behavioral rule,
-- what message text should be sent later,
-- how to map a named group/channel from the promise text into a target channel when the instruction explicitly provides one.
+- whether a user-visible response should exist;
+- whether a future cognition cycle should be scheduled;
+- whether a memory lifecycle action should retire a commitment.
 
 Deterministic code owns mechanics:
 
-- visible tool filtering,
-- schema validation,
-- permission checks,
-- adapter availability checks,
-- timestamp parsing,
-- source substitution for `target_channel: "same"` and its channel type,
-- duplicate detection,
-- scheduler persistence,
-- delivery status updates.
+- scheduler row execution;
+- adapter availability checks at send time;
+- write-ahead conversation persistence;
+- delivery receipt updates;
+- duplicate detection for pending scheduler rows;
+- scheduler status transitions.
 
-Channel and promise interpretation stays in the LLM prompt and schema
-contract. Deterministic code validates the emitted tool call and applies only
-explicit source-context substitutions.
-
-## Failure Behavior
-
-The dispatcher is fail-closed:
-
-- unavailable tools are rejected,
-- invalid schemas are rejected,
-- missing adapters are rejected,
-- unparseable timestamps are rejected,
-- duplicate pending tasks are rejected,
-- scheduler write failures are reported as rejections.
-
-Rejected dispatches are telemetry for logs and consolidation metadata. They
-preserve the already-generated response.
+Consolidation may persist and learn from prompt-safe episode traces, but it
+must not schedule, dispatch, or author user-visible output.

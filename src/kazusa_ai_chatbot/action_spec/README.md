@@ -2,7 +2,7 @@
 
 `kazusa_ai_chatbot.action_spec` owns the modality-neutral action contract used
 between cognition, selected surface handlers, private action handlers,
-consolidation, and the dispatcher bridge.
+consolidation, and scheduler-owned continuation handlers.
 
 It is not the dispatcher, not a scheduler, and not an LLM prompt package. Its
 job is to define typed action residues, validate them deterministically, project
@@ -15,11 +15,10 @@ owners have handled the action.
 L2d semantic action request
   -> deterministic materialization and target binding
   -> ActionSpecV1 validation
-  -> owner handler or bridge
+  -> owner handler
        l3_text / l3_image surface handler
        memory_lifecycle private handler
        orchestrator future-cognition request
-       dispatcher send_message bridge
   -> ActionResultV1 and SurfaceOutputV1
   -> EpisodeTraceV1
   -> prompt-safe consolidation projection
@@ -66,11 +65,11 @@ capabilities:
 | `memory_lifecycle_update` | `memory_lifecycle` | `private` | Lets the character change one bound `user_memory_units.active_commitment` lifecycle. |
 | `trigger_future_cognition` | `orchestrator` | `private` | Requests a later cognition cycle contract; it does not call cognition directly. |
 
-`send_message` is intentionally absent from the initial L2d registry. It exists
-only in `build_dispatcher_bridge_capabilities()` after deliverable text already
-exists or when a legacy self-cognition delivery candidate is being bridged.
-Validated `ActionSpecV1(kind="send_message")` rows become `RawToolCall` rows
-before crossing the existing `TaskDispatcher`.
+`send_message` is intentionally absent from the L2d registry. User-visible
+text is represented as `speak`, routed through the selected L3 text surface,
+and delivered only through the normal live response path. Delayed user-visible
+contact must be represented as `trigger_future_cognition`, so the character can
+decide again at execution time whether to speak.
 
 Prompt-safe capability projection hides `handler_id`, adapter ids, raw channel
 ids, credentials, collection names, and database internals.
@@ -94,7 +93,7 @@ and the repository must validate the bound target.
 
 Action attempts reuse `self_cognition_action_attempts`. New rows may carry
 generic action-attempt metadata, while old send-message rows must remain
-readable for duplicate suppression and dispatcher handoff compatibility.
+readable for duplicate suppression and audit compatibility.
 
 Do not add a second action ledger collection without a separate approved plan.
 

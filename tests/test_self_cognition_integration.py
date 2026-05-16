@@ -10,11 +10,9 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from kazusa_ai_chatbot.dispatcher.task import DispatchResult, Task
 from kazusa_ai_chatbot.db import user_memory_units as memory_units_module
 from kazusa_ai_chatbot.self_cognition import models, projection, sources
 from kazusa_ai_chatbot.self_cognition import tracking, worker
-from kazusa_ai_chatbot.self_cognition.handoff import dispatch_action_candidate
 
 
 @pytest.fixture(autouse=True)
@@ -29,11 +27,6 @@ def _disable_event_log_writes(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         worker.event_logging,
         "record_worker_event",
-        AsyncMock(),
-    )
-    monkeypatch.setattr(
-        worker.event_logging,
-        "record_dispatcher_event",
         AsyncMock(),
     )
     monkeypatch.setattr(
@@ -233,16 +226,14 @@ def _consolidation_result() -> dict[str, Any]:
 
     result = {
         "consolidation_metadata": {
-            "write_success": {
-                "character_state": True,
-                "relationship_insight": True,
-                "user_memory_units": False,
-                "task_dispatch": False,
-                "affinity": True,
-                "character_image": False,
+                "write_success": {
+                    "character_state": True,
+                    "relationship_insight": True,
+                    "user_memory_units": False,
+                    "affinity": True,
+                    "character_image": False,
                 "cache_invalidation": True,
             },
-            "scheduled_event_ids": [],
             "cache_evicted_count": 1,
         },
     }
@@ -454,7 +445,6 @@ async def test_worker_tick_marks_future_cognition_slot_completed(
 
     result = await worker.run_self_cognition_worker_tick(
         output_root=tmp_path,
-        dispatcher=None,
         now=datetime(2026, 5, 16, 10, 0, tzinfo=timezone.utc),
         is_primary_interaction_busy=lambda: False,
         collect_cases_func=collect_cases,
@@ -493,7 +483,6 @@ async def test_worker_tick_skips_future_cognition_slot_when_claim_fails(
 
     result = await worker.run_self_cognition_worker_tick(
         output_root=tmp_path,
-        dispatcher=None,
         now=datetime(2026, 5, 16, 10, 0, tzinfo=timezone.utc),
         is_primary_interaction_busy=lambda: False,
         collect_cases_func=collect_cases,
@@ -509,38 +498,6 @@ async def test_worker_tick_skips_future_cognition_slot_when_claim_fails(
     assert result.skipped_count == 1
     assert processed_cases == []
     assert completed_event_ids == []
-
-
-class _FakeDispatcher:
-    def __init__(self, *, reject: bool = False) -> None:
-        self.reject = reject
-        self.calls: list[dict[str, Any]] = []
-
-    async def dispatch(self, raw_calls, ctx, *, instruction: str = ""):
-        self.calls.append(
-            {
-                "raw_calls": raw_calls,
-                "ctx": ctx,
-                "instruction": instruction,
-            }
-        )
-        raw_call = raw_calls[0]
-        if self.reject:
-            result = DispatchResult(
-                scheduled=[],
-                rejected=[(raw_call, "no adapters registered")],
-            )
-            return result
-        task = Task(
-            tool=raw_call.tool,
-            args=dict(raw_call.args),
-            execute_at=ctx.now,
-        )
-        result = DispatchResult(
-            scheduled=[(task, "event-001")],
-            rejected=[],
-        )
-        return result
 
 
 class _AsyncCursor:
@@ -625,7 +582,6 @@ async def test_worker_default_path_requests_production_consolidation_without_fil
 
     result = await worker.run_self_cognition_worker_tick(
         output_root=tmp_path,
-        dispatcher=None,
         now=datetime(2026, 5, 13, tzinfo=timezone.utc),
         is_primary_interaction_busy=lambda: False,
         collect_cases_func=collect_cases,
@@ -647,7 +603,6 @@ async def test_worker_default_path_applies_consolidation_without_dispatch_or_fil
 
     case = _commitment_case()
     captured_consolidation_state: dict[str, Any] = {}
-    dispatcher = _FakeDispatcher()
 
     async def collect_cases(*, now: datetime, max_cases: int) -> list[dict[str, Any]]:
         del now, max_cases
@@ -680,7 +635,6 @@ async def test_worker_default_path_applies_consolidation_without_dispatch_or_fil
 
     result = await worker.run_self_cognition_worker_tick(
         output_root=tmp_path,
-        dispatcher=dispatcher,
         now=datetime(2026, 5, 13, tzinfo=timezone.utc),
         is_primary_interaction_busy=lambda: False,
         collect_cases_func=collect_cases,
@@ -689,8 +643,6 @@ async def test_worker_default_path_applies_consolidation_without_dispatch_or_fil
     )
 
     assert result.processed_count == 1
-    assert result.dispatched_count == 0
-    assert dispatcher.calls == []
     assert captured_consolidation_state["cognitive_episode"][
         "trigger_source"
     ] == "internal_thought"
@@ -701,14 +653,13 @@ async def test_worker_default_path_applies_consolidation_without_dispatch_or_fil
 
 
 @pytest.mark.asyncio
-async def test_worker_default_path_preserves_action_handoff_with_consolidation(
+async def test_worker_default_path_records_action_without_dispatch(
     monkeypatch,
     tmp_path,
 ) -> None:
-    """Consolidation should not bypass the existing dispatcher handoff."""
+    """Self-cognition action candidates stay private to the cognition ledger."""
 
     case = _commitment_case()
-    dispatcher = _FakeDispatcher()
     recorded_attempts: list[dict[str, Any]] = []
     captured_consolidation_state: dict[str, Any] = {}
 
@@ -746,7 +697,6 @@ async def test_worker_default_path_preserves_action_handoff_with_consolidation(
 
     result = await worker.run_self_cognition_worker_tick(
         output_root=tmp_path,
-        dispatcher=dispatcher,
         now=datetime(2026, 5, 13, tzinfo=timezone.utc),
         is_primary_interaction_busy=lambda: False,
         collect_cases_func=collect_cases,
@@ -755,10 +705,10 @@ async def test_worker_default_path_preserves_action_handoff_with_consolidation(
         max_cases=3,
     )
 
-    assert result.dispatched_count == 1
-    assert dispatcher.calls[0]["raw_calls"][0].tool == "send_message"
-    assert dispatcher.calls[0]["raw_calls"][0].args["text"] == "Checking in now."
-    assert recorded_attempts[0]["status"] == models.ACTION_ATTEMPT_STATUS_SCHEDULED
+    assert result.processed_count == 1
+    assert recorded_attempts[0]["status"] == models.ACTION_ATTEMPT_STATUS_CANDIDATE
+    assert "dispatch_status" not in recorded_attempts[0]
+    assert "scheduled_event_ids" not in recorded_attempts[0]
     assert captured_consolidation_state["final_dialog"] == [
         "Private finalization for consolidation only.",
     ]
@@ -793,7 +743,6 @@ async def test_worker_tick_loads_prior_attempts_before_running_case(
 
     result = await worker.run_self_cognition_worker_tick(
         output_root=tmp_path,
-        dispatcher=None,
         now=datetime(2026, 5, 13, tzinfo=timezone.utc),
         is_primary_interaction_busy=lambda: False,
         collect_cases_func=collect_cases,
@@ -809,13 +758,12 @@ async def test_worker_tick_loads_prior_attempts_before_running_case(
 
 
 @pytest.mark.asyncio
-async def test_worker_tick_dispatches_candidate_through_task_dispatcher(
+async def test_worker_tick_records_candidate_without_delivery_handoff(
     tmp_path,
 ) -> None:
-    """A live candidate should use TaskDispatcher instead of direct adapter send."""
+    """A live candidate must not schedule or send through the worker."""
 
     case = _commitment_case()
-    dispatcher = _FakeDispatcher()
     recorded_attempts: list[dict[str, Any]] = []
 
     async def collect_cases(*, now: datetime, max_cases: int) -> list[dict[str, Any]]:
@@ -831,7 +779,6 @@ async def test_worker_tick_dispatches_candidate_through_task_dispatcher(
 
     result = await worker.run_self_cognition_worker_tick(
         output_root=tmp_path,
-        dispatcher=dispatcher,
         now=datetime(2026, 5, 13, tzinfo=timezone.utc),
         is_primary_interaction_busy=lambda: False,
         collect_cases_func=collect_cases,
@@ -841,52 +788,11 @@ async def test_worker_tick_dispatches_candidate_through_task_dispatcher(
         max_cases=3,
     )
 
-    assert result.dispatched_count == 1
+    assert result.processed_count == 1
     assert result.artifact_paths == []
-    assert dispatcher.calls[0]["raw_calls"][0].tool == "send_message"
-    assert dispatcher.calls[0]["raw_calls"][0].args["text"] == "Checking in now."
-    assert recorded_attempts[0]["status"] == models.ACTION_ATTEMPT_STATUS_SCHEDULED
-    assert recorded_attempts[0]["dispatch_status"] == "accepted"
-    assert recorded_attempts[0]["scheduled_event_ids"] == ["event-001"]
-    assert list(tmp_path.iterdir()) == []
-
-
-@pytest.mark.asyncio
-async def test_worker_tick_records_dispatch_rejection_without_adapter_send(
-    tmp_path,
-) -> None:
-    """Dispatcher rejection should be tracked locally without calling adapters."""
-
-    case = _commitment_case()
-    dispatcher = _FakeDispatcher(reject=True)
-    recorded_attempts: list[dict[str, Any]] = []
-
-    async def collect_cases(*, now: datetime, max_cases: int) -> list[dict[str, Any]]:
-        del now, max_cases
-        return [case]
-
-    async def read_attempts(*, limit: int) -> list[dict[str, Any]]:
-        assert limit > 0
-        return list(recorded_attempts)
-
-    async def record_attempt(attempt: dict[str, Any]) -> None:
-        recorded_attempts.append(dict(attempt))
-
-    result = await worker.run_self_cognition_worker_tick(
-        output_root=tmp_path,
-        dispatcher=dispatcher,
-        now=datetime(2026, 5, 13, tzinfo=timezone.utc),
-        is_primary_interaction_busy=lambda: False,
-        collect_cases_func=collect_cases,
-        run_case_func=_case_runner_with_candidate,
-        read_attempts_func=read_attempts,
-        record_attempt_func=record_attempt,
-        max_cases=3,
-    )
-
-    assert result.rejected_count == 1
-    assert recorded_attempts[0]["status"] == models.ACTION_ATTEMPT_STATUS_HELD
-    assert recorded_attempts[0]["dispatch_status"] == "rejected"
+    assert recorded_attempts[0]["status"] == models.ACTION_ATTEMPT_STATUS_CANDIDATE
+    assert "dispatch_status" not in recorded_attempts[0]
+    assert "scheduled_event_ids" not in recorded_attempts[0]
     assert list(tmp_path.iterdir()) == []
 
 
@@ -894,7 +800,7 @@ async def test_worker_tick_records_dispatch_rejection_without_adapter_send(
 async def test_worker_tick_suppresses_duplicate_due_occurrence_from_prior_attempts(
     tmp_path,
 ) -> None:
-    """A prior persisted attempt should prevent a repeated dispatcher handoff."""
+    """A prior persisted attempt should prevent a repeated action attempt."""
 
     case = _commitment_case()
     prior_attempt = _action_attempt(
@@ -902,7 +808,6 @@ async def test_worker_tick_suppresses_duplicate_due_occurrence_from_prior_attemp
         status=models.ACTION_ATTEMPT_STATUS_SCHEDULED,
     )
     recorded_attempts = [prior_attempt]
-    dispatcher = _FakeDispatcher()
 
     async def collect_cases(*, now: datetime, max_cases: int) -> list[dict[str, Any]]:
         del now, max_cases
@@ -932,7 +837,6 @@ async def test_worker_tick_suppresses_duplicate_due_occurrence_from_prior_attemp
 
     result = await worker.run_self_cognition_worker_tick(
         output_root=tmp_path,
-        dispatcher=dispatcher,
         now=datetime(2026, 5, 13, tzinfo=timezone.utc),
         is_primary_interaction_busy=lambda: False,
         collect_cases_func=collect_cases,
@@ -942,8 +846,6 @@ async def test_worker_tick_suppresses_duplicate_due_occurrence_from_prior_attemp
         max_cases=3,
     )
 
-    assert result.dispatched_count == 0
-    assert dispatcher.calls == []
     assert recorded_attempts[-1]["status"] == (
         models.ACTION_ATTEMPT_STATUS_DUPLICATE
     )
@@ -955,7 +857,6 @@ async def test_worker_tick_uses_attempt_updates_between_cases(tmp_path) -> None:
     """Same-tick duplicate cases should see persisted attempts recorded earlier."""
 
     case = _commitment_case()
-    dispatcher = _FakeDispatcher()
     recorded_attempts: list[dict[str, Any]] = []
 
     async def collect_cases(
@@ -975,7 +876,6 @@ async def test_worker_tick_uses_attempt_updates_between_cases(tmp_path) -> None:
 
     result = await worker.run_self_cognition_worker_tick(
         output_root=tmp_path,
-        dispatcher=dispatcher,
         now=datetime(2026, 5, 13, tzinfo=timezone.utc),
         is_primary_interaction_busy=lambda: False,
         collect_cases_func=collect_cases,
@@ -986,9 +886,7 @@ async def test_worker_tick_uses_attempt_updates_between_cases(tmp_path) -> None:
     )
 
     assert result.processed_count == 2
-    assert result.dispatched_count == 1
-    assert len(dispatcher.calls) == 1
-    assert recorded_attempts[0]["status"] == models.ACTION_ATTEMPT_STATUS_SCHEDULED
+    assert recorded_attempts[0]["status"] == models.ACTION_ATTEMPT_STATUS_CANDIDATE
     assert recorded_attempts[1]["status"] == (
         models.ACTION_ATTEMPT_STATUS_DUPLICATE
     )
@@ -1004,7 +902,6 @@ async def test_worker_tick_defers_when_primary_interaction_is_busy(tmp_path) -> 
 
     result = await worker.run_self_cognition_worker_tick(
         output_root=tmp_path,
-        dispatcher=None,
         now=datetime(2026, 5, 13, tzinfo=timezone.utc),
         is_primary_interaction_busy=lambda: True,
         collect_cases_func=collect_cases,
@@ -1014,79 +911,6 @@ async def test_worker_tick_defers_when_primary_interaction_is_busy(tmp_path) -> 
     assert result.deferred is True
     assert result.defer_reason == "primary interaction busy"
     assert result.processed_count == 0
-
-
-@pytest.mark.asyncio
-async def test_dispatch_action_candidate_builds_existing_dispatch_context() -> None:
-    """The handoff layer should preserve candidate target and source context."""
-
-    case = _commitment_case()
-    attempt = _action_attempt(
-        case,
-        status=models.ACTION_ATTEMPT_STATUS_CANDIDATE,
-    )
-    candidate = _action_candidate(attempt)
-    dispatcher = _FakeDispatcher()
-
-    result = await dispatch_action_candidate(
-        case,
-        attempt,
-        candidate,
-        dispatcher,
-        now=datetime(2026, 5, 13, tzinfo=timezone.utc),
-    )
-
-    raw_call = dispatcher.calls[0]["raw_calls"][0]
-    ctx = dispatcher.calls[0]["ctx"]
-
-    assert raw_call.tool == "send_message"
-    assert raw_call.args["target_channel"] == "same"
-    assert "target_channel_type" not in raw_call.args
-    assert ctx.source_platform == "qq"
-    assert ctx.source_channel_type == "private"
-    assert result["production_handoff"] is True
-
-
-@pytest.mark.asyncio
-async def test_dispatch_action_candidate_preserves_delivery_mentions() -> None:
-    """Self-cognition handoff should pass mention metadata as task args."""
-
-    case = _commitment_case()
-    case["target_scope"] = {
-        "platform": "qq",
-        "platform_channel_id": "54369546",
-        "channel_type": "group",
-        "user_id": "user-1",
-    }
-    attempt = _action_attempt(
-        case,
-        status=models.ACTION_ATTEMPT_STATUS_CANDIDATE,
-    )
-    mention = {
-        "entity_kind": "user",
-        "placement": "prefix",
-        "platform_user_id": "platform-user-1",
-        "global_user_id": "user-1",
-        "display_name": "Target User",
-        "requested_by": "dialog.mention_target_user",
-    }
-    candidate = _action_candidate(attempt)
-    candidate["target_channel"] = "54369546"
-    candidate["target_channel_type"] = "group"
-    candidate["delivery_mentions"] = [mention]
-    dispatcher = _FakeDispatcher()
-
-    await dispatch_action_candidate(
-        case,
-        attempt,
-        candidate,
-        dispatcher,
-        now=datetime(2026, 5, 13, tzinfo=timezone.utc),
-    )
-
-    raw_call = dispatcher.calls[0]["raw_calls"][0]
-    assert raw_call.args["text"] == "Checking in now."
-    assert raw_call.args["delivery_mentions"] == [mention]
 
 
 @pytest.mark.asyncio

@@ -41,8 +41,8 @@ def _current_channel_target() -> dict:
         "schema_version": "action_target.v1",
         "target_kind": "current_channel",
         "target_id": None,
-        "owner": "dispatcher",
-        "scope": {"channel_relation": "same"},
+        "owner": "l3_text",
+        "scope": {"surface": "text"},
     }
 
 
@@ -56,38 +56,37 @@ def _no_continuation() -> dict:
     }
 
 
-def _send_message_action() -> dict:
+def _speak_action() -> dict:
     return {
         "schema_version": ACTION_SPEC_VERSION,
-        "kind": "send_message",
+        "kind": "speak",
         "cognition_mode": "deliberative",
         "source_refs": [_source_ref()],
         "target": _current_channel_target(),
         "params": {
-            "target_channel": "same",
-            "text": "Checking in now.",
+            "delivery_mode": "visible_reply",
             "execute_at": None,
-            "delivery_mentions": [],
+            "surface_requirements": {"decision": "respond briefly"},
         },
         "urgency": "now",
         "visibility": "user_visible",
         "deadline": None,
         "continuation": _no_continuation(),
-        "reason": "The character decided the promised follow-up should be sent.",
+        "reason": "The character selected a text surface reply.",
     }
 
 
 def _capability_spec() -> dict:
     return {
         "schema_version": "capability_spec.v1",
-        "capability_kind": "send_message",
+        "capability_kind": "speak",
         "category": "action",
-        "owner_module": "dispatcher",
+        "owner_module": "l3_text",
         "input_schema": {"type": "object", "required": ["text"]},
         "output_schema": {"type": "object"},
-        "handler_id": "dispatcher.send_message",
+        "handler_id": "l3_text.surface",
         "lifecycle_hooks": ["validate", "dispatch"],
-        "permission_policy": "policy:dispatcher.send_message.v1",
+        "permission_policy": "policy:action.speak.v1",
         "rate_limit_policy": "policy:action.default_rate_limit.v1",
         "audit_policy": "policy:action.audit.v1",
         "prompt_projection_policy": "policy:prompt.action_safe.v1",
@@ -97,10 +96,10 @@ def _capability_spec() -> dict:
 def test_action_spec_validator_accepts_deliberative_contract() -> None:
     """A complete deliberative action spec should satisfy the public contract."""
 
-    validated = validate_action_spec(_send_message_action())
+    validated = validate_action_spec(_speak_action())
 
     assert validated["schema_version"] == ACTION_SPEC_VERSION
-    assert validated["kind"] == "send_message"
+    assert validated["kind"] == "speak"
     assert validated["cognition_mode"] == "deliberative"
     assert validated["continuation"]["mode"] == "none"
 
@@ -108,7 +107,7 @@ def test_action_spec_validator_accepts_deliberative_contract() -> None:
 def test_action_spec_validator_rejects_reflex_for_initial_slice() -> None:
     """The schema reserves reflex mode, but no current capability may use it."""
 
-    action_spec = _send_message_action()
+    action_spec = _speak_action()
     action_spec["cognition_mode"] = "reflex"
 
     with pytest.raises(ActionValidationError, match="reflex"):
@@ -137,7 +136,7 @@ def test_supporting_shape_validators_reject_incomplete_payloads() -> None:
 
 
 def test_capability_spec_requires_action_category_and_policy_refs() -> None:
-    """Capability specs are action-category entries, not raw dispatcher tools."""
+    """Capability specs are action-category entries, not raw delivery tools."""
 
     validated = validate_capability_spec(_capability_spec())
     assert validated["category"] == "action"
@@ -154,7 +153,7 @@ def test_capability_spec_requires_action_category_and_policy_refs() -> None:
 
 
 def test_capability_spec_accepts_l3_surface_owner() -> None:
-    """Surface action handlers are registered action owners, not dispatcher tools."""
+    """Surface action handlers are registered action owners."""
 
     capability = _capability_spec()
     capability["owner_module"] = "l3_text"
@@ -162,6 +161,16 @@ def test_capability_spec_accepts_l3_surface_owner() -> None:
     validated = validate_capability_spec(capability)
 
     assert validated["owner_module"] == "l3_text"
+
+
+def test_capability_spec_rejects_removed_delivery_owner() -> None:
+    """User-visible text must be routed through cognition-owned surface actions."""
+
+    capability = _capability_spec()
+    capability["owner_module"] = "dispatcher"
+
+    with pytest.raises(ActionValidationError, match="owner_module"):
+        validate_capability_spec(capability)
 
 
 def test_lifecycle_decision_status_mapping_matches_plan() -> None:

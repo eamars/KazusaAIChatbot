@@ -593,9 +593,9 @@ memory_lifecycle_update
 trigger_future_cognition
 ```
 
-`send_message` is runtime-only bridge vocabulary for the dispatcher after a
-text surface exists. It is not exposed as an initial L2d-facing semantic action
-kind.
+`send_message` is not cognition-visible vocabulary. Text output remains the
+semantic `speak` action, with L3 text/dialog and the live service boundary
+owning wording and adapter delivery for the current turn.
 
 The initial runtime slice does not include web research, notes, image
 generation, motor actions, or arbitrary external tools. It does include the
@@ -914,19 +914,12 @@ trigger_future_cognition:
   owner: orchestrator
   cognition_mode: deliberative
   continuation: scheduled_followup
-
-send_message:
-  owner: dispatcher
-  exposure: runtime_bridge_only
-  source_capability: speak
-  cognition_mode: deliberative
-  continuation: none
 ```
 
 `speak`, `memory_lifecycle_update`, and `trigger_future_cognition` are the
-initial L2d-facing semantic capabilities. `send_message` is registered only so
-the dispatcher bridge remains auditable after a text surface exists; it must not
-appear in the prompt-visible L2d capability roster.
+initial L2d-facing semantic capabilities. `send_message` is not a
+cognition-visible capability; delayed contact is expressed as future cognition
+so the character re-decides at execution time.
 
 ### Deferred Action Capabilities
 
@@ -957,17 +950,14 @@ L2d semantic action request
 -> EpisodeTraceV1
 ```
 
-For `speak` and the dispatcher bridge:
+For `speak`:
 
 ```text
 ActionSpecV1(kind="speak")
 -> L3-text handler
 -> SurfaceOutputV1(surface_kind="text")
--> delivery validation
--> dispatcher bridge
--> RawToolCall(tool="send_message")
--> TaskDispatcher.dispatch(...)
--> ActionResultV1(kind="send_message", bridge-only)
+-> live response delivery boundary
+-> ActionResultV1(kind="speak")
 ```
 
 For `memory_lifecycle_update`:
@@ -988,7 +978,7 @@ ActionSpecV1(kind="trigger_future_cognition")
 -> ActionResultV1
 ```
 
-Dispatcher owns adapter-facing scheduled tools and adapter delivery. L3 surface
+Scheduler/adapters own adapter-facing delivery mechanics. L3 surface
 handlers own surface generation. Memory owners own memory lifecycle writes.
 Orchestration owns continuation episodes and future cognition scheduling. The
 consolidator consumes the resulting episode trace and does not execute any of

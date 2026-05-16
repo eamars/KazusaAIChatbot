@@ -184,10 +184,6 @@ def build_consolidation_outcome_record(
         if isinstance(key, str)
     }
 
-    scheduled_event_ids = metadata["scheduled_event_ids"]
-    if not isinstance(scheduled_event_ids, list):
-        raise ValueError("scheduled_event_ids must be a list")
-
     cache_evicted_count = metadata["cache_evicted_count"]
     if isinstance(cache_evicted_count, bool) or not isinstance(
         cache_evicted_count,
@@ -198,7 +194,7 @@ def build_consolidation_outcome_record(
     outcome = {
         "consolidation_called": True,
         "write_success": sanitized_write_success,
-        "scheduled_event_count": len(scheduled_event_ids),
+        "scheduled_event_count": 0,
         "cache_evicted_count": cache_evicted_count,
         "origin_trigger_source": episode["trigger_source"],
         "origin_episode_id": episode["episode_id"],

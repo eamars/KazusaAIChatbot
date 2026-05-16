@@ -145,22 +145,6 @@ def _case_runner_with_tracking(
     return payloads
 
 
-class _FakeDispatcher:
-    """Small dispatcher fake that accepts one handoff."""
-
-    async def dispatch(self, raw_calls, ctx, *, instruction: str = ""):
-        """Return one scheduled event id."""
-
-        del ctx, instruction
-        raw_call = raw_calls[0]
-        task = type("Task", (), {"tool": raw_call.tool, "args": raw_call.args})
-        result = type("DispatchResult", (), {
-            "scheduled": [(task, "event-001")],
-            "rejected": [],
-        })
-        return result
-
-
 @pytest.mark.asyncio
 async def test_runner_event_log_mirror_omits_candidate_text(
     monkeypatch,
@@ -192,15 +176,14 @@ async def test_runner_event_log_mirror_omits_candidate_text(
 
 
 @pytest.mark.asyncio
-async def test_worker_mirrors_production_run_and_dispatch_without_text(
+async def test_worker_mirrors_production_run_without_dispatch_text(
     monkeypatch,
     tmp_path,
 ) -> None:
-    """Production worker should mirror run and dispatch metadata only."""
+    """Production worker should mirror run metadata without delivery handoff."""
 
     record_self_cognition_event = AsyncMock()
     record_worker_event = AsyncMock()
-    record_dispatcher_event = AsyncMock()
     monkeypatch.setattr(
         worker.event_logging,
         "record_self_cognition_event",
@@ -210,11 +193,6 @@ async def test_worker_mirrors_production_run_and_dispatch_without_text(
         worker.event_logging,
         "record_worker_event",
         record_worker_event,
-    )
-    monkeypatch.setattr(
-        worker.event_logging,
-        "record_dispatcher_event",
-        record_dispatcher_event,
     )
 
     async def collect_cases(*, now: datetime, max_cases: int) -> list[dict[str, Any]]:
@@ -229,7 +207,6 @@ async def test_worker_mirrors_production_run_and_dispatch_without_text(
 
     result = await worker.run_self_cognition_worker_tick(
         output_root=tmp_path,
-        dispatcher=_FakeDispatcher(),
         now=datetime(2026, 5, 13, tzinfo=timezone.utc),
         is_primary_interaction_busy=lambda: False,
         collect_cases_func=collect_cases,
@@ -239,11 +216,11 @@ async def test_worker_mirrors_production_run_and_dispatch_without_text(
         max_cases=3,
     )
 
-    assert result.dispatched_count == 1
+    assert result.processed_count == 1
     record_self_cognition_event.assert_awaited_once()
     self_kwargs = record_self_cognition_event.await_args.kwargs
     assert self_kwargs["component"] == "self_cognition.worker"
-    assert self_kwargs["dispatch_status"] == "accepted"
+    assert self_kwargs["dispatch_status"] == "not_requested"
     assert self_kwargs["attempt_id"] == "self_cognition_attempt:promise-001"
     assert self_kwargs["consolidation_outcome"] == {
         "consolidation_called": True,
@@ -253,13 +230,7 @@ async def test_worker_mirrors_production_run_and_dispatch_without_text(
         "origin_trigger_source": "internal_thought",
         "origin_episode_id": "self_cognition:dry_run:promise-001",
     }
-    record_dispatcher_event.assert_awaited_once()
-    dispatch_kwargs = record_dispatcher_event.await_args.kwargs
-    assert dispatch_kwargs["scheduled_event_ids"] == ["event-001"]
-    serialized = json.dumps(
-        {"self": self_kwargs, "dispatch": dispatch_kwargs},
-        ensure_ascii=False,
-    )
+    serialized = json.dumps({"self": self_kwargs}, ensure_ascii=False)
     assert "Checking in now." not in serialized
     record_worker_event.assert_awaited_once()
     record_attempt.assert_awaited_once()

@@ -19,8 +19,7 @@ from kazusa_ai_chatbot.config import (
     SELF_COGNITION_WORKER_INTERVAL_SECONDS,
 )
 from kazusa_ai_chatbot import db, event_logging
-from kazusa_ai_chatbot.dispatcher import TaskDispatcher
-from kazusa_ai_chatbot.self_cognition import handoff, models, runner
+from kazusa_ai_chatbot.self_cognition import models, runner
 from kazusa_ai_chatbot.self_cognition import sources as source_collectors
 
 logger = logging.getLogger(__name__)
@@ -35,8 +34,6 @@ class SelfCognitionWorkerResult:
     """Outcome counters for one self-cognition worker tick."""
 
     processed_count: int = 0
-    dispatched_count: int = 0
-    rejected_count: int = 0
     skipped_count: int = 0
     deferred: bool = False
     defer_reason: str = ""
@@ -54,7 +51,6 @@ class SelfCognitionWorkerHandle:
 def start_self_cognition_worker(
     *,
     is_primary_interaction_busy: Callable[[], bool],
-    dispatcher: TaskDispatcher,
     character_profile_provider: Callable[[], dict[str, Any]],
     output_root: str | Path = SELF_COGNITION_TRACKING_DIR,
 ) -> SelfCognitionWorkerHandle:
@@ -62,7 +58,6 @@ def start_self_cognition_worker(
 
     Args:
         is_primary_interaction_busy: Service load probe.
-        dispatcher: Existing task dispatcher for outbound handoff.
         character_profile_provider: Callable returning current character state.
         output_root: Compatibility path passed only to injected test seams.
 
@@ -75,7 +70,6 @@ def start_self_cognition_worker(
         _self_cognition_worker_loop(
             stop_event=stop_event,
             is_primary_interaction_busy=is_primary_interaction_busy,
-            dispatcher=dispatcher,
             character_profile_provider=character_profile_provider,
             output_root=output_root,
         )
@@ -104,13 +98,11 @@ async def stop_self_cognition_worker(
 async def run_self_cognition_worker_tick(
     *,
     output_root: str | Path,
-    dispatcher: TaskDispatcher | None,
     now: datetime,
     is_primary_interaction_busy: Callable[[], bool],
     character_profile: dict[str, Any] | None = None,
     collect_cases_func: Callable[..., Any] | None = None,
     run_case_func: Callable[..., Any] | None = None,
-    dispatch_candidate_func: Callable[..., Any] | None = None,
     read_attempts_func: Callable[..., Any] | None = None,
     record_attempt_func: Callable[..., Any] | None = None,
     complete_scheduled_event_func: Callable[..., Any] | None = None,
@@ -121,13 +113,11 @@ async def run_self_cognition_worker_tick(
 
     Args:
         output_root: Compatibility path passed only to injected test seams.
-        dispatcher: Existing task dispatcher, or `None` for no handoff.
         now: Current worker tick time.
         is_primary_interaction_busy: Service load probe.
         character_profile: Current character state snapshot.
         collect_cases_func: Optional test seam for source collection.
         run_case_func: Optional test seam for self-cognition case projection.
-        dispatch_candidate_func: Optional test seam for dispatcher handoff.
         read_attempts_func: Optional test seam for prior attempt reads.
         record_attempt_func: Optional test seam for attempt persistence.
         complete_scheduled_event_func: Optional test seam for source slot
@@ -162,9 +152,6 @@ async def run_self_cognition_worker_tick(
 
     root = Path(output_root)
     result = SelfCognitionWorkerResult()
-    active_dispatch_candidate = (
-        dispatch_candidate_func or handoff.dispatch_action_candidate
-    )
     active_read_attempts = read_attempts_func or (
         db.list_self_cognition_action_attempts
     )
@@ -210,13 +197,9 @@ async def run_self_cognition_worker_tick(
             )
         result.processed_count += 1
         dispatch_status = await _handle_case_action_outputs(
-            case=case_for_run,
             artifact_payloads=artifact_payloads,
-            dispatcher=dispatcher,
             now=now,
-            dispatch_candidate_func=active_dispatch_candidate,
             record_attempt_func=active_record_attempt,
-            result=result,
         )
         await _record_self_cognition_event_from_artifacts(
             case=case_for_run,
@@ -236,7 +219,6 @@ async def _self_cognition_worker_loop(
     *,
     stop_event: asyncio.Event,
     is_primary_interaction_busy: Callable[[], bool],
-    dispatcher: TaskDispatcher,
     character_profile_provider: Callable[[], dict[str, Any]],
     output_root: str | Path,
 ) -> None:
@@ -247,7 +229,6 @@ async def _self_cognition_worker_loop(
             character_profile = character_profile_provider()
             await run_self_cognition_worker_tick(
                 output_root=output_root,
-                dispatcher=dispatcher,
                 now=datetime.now(timezone.utc),
                 is_primary_interaction_busy=is_primary_interaction_busy,
                 character_profile=character_profile,
@@ -297,72 +278,20 @@ async def _collect_cases(
 
 async def _handle_case_action_outputs(
     *,
-    case: models.SelfCognitionCase,
     artifact_payloads: dict[str, Any],
-    dispatcher: TaskDispatcher | None,
     now: datetime,
-    dispatch_candidate_func: Callable[..., Any],
     record_attempt_func: Callable[..., Any],
-    result: SelfCognitionWorkerResult,
 ) -> str:
-    """Record action attempts and optional dispatcher handoff for one case."""
+    """Record private action attempts for one case without scheduling output."""
 
     action_attempt = artifact_payloads.get(models.ARTIFACT_ACTION_ATTEMPT)
     if not isinstance(action_attempt, dict):
         return_value = "not_requested"
         return return_value
 
-    action_candidate = artifact_payloads.get(models.ARTIFACT_ACTION_CANDIDATE)
-    if not isinstance(action_candidate, dict):
-        attempt_state = _attempt_state(
-            action_attempt,
-            dispatch_result=None,
-            now=now,
-        )
-        await _call_maybe_async(record_attempt_func, attempt_state)
-        return_value = "not_requested"
-        return return_value
-
-    if dispatcher is None:
-        dispatch_result = _not_requested_dispatch_result(action_attempt)
-    else:
-        dispatch_result = await _call_maybe_async(
-            dispatch_candidate_func,
-            case,
-            action_attempt,
-            action_candidate,
-            dispatcher,
-            now=now,
-        )
-
-    if dispatch_result["status"] == "accepted":
-        result.dispatched_count += 1
-    elif dispatch_result["status"] == "rejected":
-        result.rejected_count += 1
-    await event_logging.record_dispatcher_event(
-        component="self_cognition.worker",
-        action_kind=models.ACTION_KIND_SEND_MESSAGE,
-        validation_status=str(dispatch_result["status"]),
-        adapter_available=bool(dispatcher is not None),
-        status=str(dispatch_result["status"]),
-        scheduled_event_ids=[
-            str(event_id)
-            for event_id in dispatch_result["scheduled_event_ids"]
-        ],
-        rejection_codes=[
-            str(rejection)
-            for rejection in dispatch_result["rejections"]
-        ],
-        attempt_id=str(action_attempt["attempt_id"]),
-    )
-
-    attempt_state = _attempt_state(
-        action_attempt,
-        dispatch_result=dispatch_result,
-        now=now,
-    )
+    attempt_state = _attempt_state(action_attempt, now=now)
     await _call_maybe_async(record_attempt_func, attempt_state)
-    return_value = str(dispatch_result["status"])
+    return_value = "not_requested"
     return return_value
 
 
@@ -384,8 +313,6 @@ async def _record_worker_tick_event(result: SelfCognitionWorkerResult) -> None:
         run_kind="self_cognition_tick",
         status=status,
         processed_count=result.processed_count,
-        succeeded_count=result.dispatched_count,
-        failed_count=result.rejected_count,
         skipped_count=result.skipped_count,
         deferred=result.deferred,
         defer_reason=result.defer_reason,
@@ -496,41 +423,13 @@ def _case_with_prior_attempts(
 def _attempt_state(
     action_attempt: dict[str, Any],
     *,
-    dispatch_result: dict[str, Any] | None,
     now: datetime,
 ) -> dict[str, Any]:
     """Build the persisted state row for one action attempt."""
 
     attempt_state = dict(action_attempt)
     attempt_state["recorded_at"] = now.isoformat()
-    if dispatch_result is None:
-        return attempt_state
-
-    dispatch_status = dispatch_result["status"]
-    attempt_state["dispatch_status"] = dispatch_status
-    attempt_state["scheduled_event_ids"] = list(
-        dispatch_result["scheduled_event_ids"]
-    )
-    if dispatch_status == "accepted":
-        attempt_state["status"] = models.ACTION_ATTEMPT_STATUS_SCHEDULED
-    elif dispatch_status == "rejected":
-        attempt_state["status"] = models.ACTION_ATTEMPT_STATUS_HELD
     return attempt_state
-
-
-def _not_requested_dispatch_result(action_attempt: dict[str, Any]) -> dict[str, Any]:
-    """Build a dispatch artifact for a candidate when no dispatcher is supplied."""
-
-    dispatch_result = {
-        "attempt_id": action_attempt["attempt_id"],
-        "idempotency_key": action_attempt["idempotency_key"],
-        "production_handoff": False,
-        "dispatcher_called": False,
-        "scheduled_event_ids": [],
-        "rejections": ["dispatcher unavailable"],
-        "status": "not_requested",
-    }
-    return dispatch_result
 
 
 def _case_output_dir(

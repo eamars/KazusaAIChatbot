@@ -81,8 +81,6 @@ from kazusa_ai_chatbot.dispatcher import (
     AdapterRegistry,
     PendingTaskIndex,
     RemoteHttpAdapter,
-    TaskDispatcher,
-    ToolCallEvaluator,
     ToolRegistry,
     build_send_message_tool,
 )
@@ -123,7 +121,6 @@ from kazusa_ai_chatbot.nodes.persona_supervisor2_msg_decontexualizer import (
 )
 from kazusa_ai_chatbot.nodes.persona_supervisor2 import persona_supervisor2
 from kazusa_ai_chatbot.nodes.persona_supervisor2_consolidator import call_consolidation_subgraph
-from kazusa_ai_chatbot.nodes.persona_supervisor2_consolidator_persistence import configure_task_dispatcher
 from kazusa_ai_chatbot.rag.cache2_policy import INITIALIZER_CACHE_NAME
 from kazusa_ai_chatbot.rag.cache2_runtime import get_rag_cache2_runtime
 from kazusa_ai_chatbot.reflection_cycle import (
@@ -463,7 +460,6 @@ async def _save_assistant_message(result: dict) -> None:
 _static_character_profile: dict = {}
 _runtime_character_state: dict = {}
 _graph = None
-_task_dispatcher: TaskDispatcher | None = None
 _adapter_registry: AdapterRegistry | None = None
 _character_identity_backfilled: set[tuple[str, str, str]] = set()
 _chat_input_queue = ChatInputQueue()
@@ -1656,7 +1652,7 @@ async def _hydrate_rag_initializer_cache() -> int:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     global _static_character_profile, _runtime_character_state
-    global _graph, _task_dispatcher, _adapter_registry
+    global _graph, _adapter_registry
     global _reflection_worker_handle, _self_cognition_worker_handle
 
     process_correlation_id = uuid4().hex
@@ -1748,16 +1744,13 @@ async def lifespan(app: FastAPI):
                 status="ok",
             )
 
-        # 6. Build the task-dispatch runtime
+        # 6. Build the scheduled delivery runtime
         tool_registry = ToolRegistry()
         tool_registry.register(build_send_message_tool())
         adapter_registry = AdapterRegistry()
         _adapter_registry = adapter_registry
         pending_index = PendingTaskIndex()
         await pending_index.rebuild_from_db()
-        evaluator = ToolCallEvaluator(tool_registry, adapter_registry)
-        _task_dispatcher = TaskDispatcher(evaluator, pending_index)
-        configure_task_dispatcher(_task_dispatcher, tool_registry)
         scheduler.configure_runtime(
             tool_registry=tool_registry,
             adapter_registry=adapter_registry,
@@ -1775,7 +1768,6 @@ async def lifespan(app: FastAPI):
         if SELF_COGNITION_ENABLED:
             _self_cognition_worker_handle = start_self_cognition_worker(
                 is_primary_interaction_busy=_primary_interaction_busy,
-                dispatcher=_task_dispatcher,
                 character_profile_provider=_current_character_profile_snapshot,
                 output_root=SELF_COGNITION_TRACKING_DIR,
             )

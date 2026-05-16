@@ -171,7 +171,7 @@ states for future runtime persistence.
 This module must not:
 
 - register a scheduler job;
-- call `TaskDispatcher` or dispatcher scheduling;
+- create scheduler-owned user-visible output;
 - call normal conversation persistence;
 - call delivery receipt persistence;
 - register runtime adapters;
@@ -187,10 +187,9 @@ Upstream cognition may produce a preview only when its source contract allows
 `output_mode="preview"`. The preview is not deliverable until a matching
 permission record exists and policy returns `allowed`.
 
-The dispatcher remains the owner for accepted future promises that came from
-normal conversation consolidation. Proactive output is not a replacement for
-dispatcher scheduling and must not bypass dispatcher permission or scheduler
-contracts.
+Accepted future contact must go through a reviewed cognition or scheduler
+owner. Proactive output is not a replacement for delayed-contact scheduling and
+must not bypass permission or scheduler contracts.
 
 Future production integration must define, in a new approved plan:
 
@@ -208,7 +207,7 @@ Any change to this module must run:
 ```powershell
 venv\Scripts\python.exe -m py_compile src\kazusa_ai_chatbot\proactive_output\__init__.py src\kazusa_ai_chatbot\proactive_output\contracts.py src\kazusa_ai_chatbot\proactive_output\policy.py src\kazusa_ai_chatbot\proactive_output\outbox.py tests\test_multi_source_cognition_stage_10_proactive_policy.py tests\test_multi_source_cognition_stage_10_proactive_outbox.py
 venv\Scripts\python.exe -m pytest tests\test_multi_source_cognition_stage_10_proactive_policy.py tests\test_multi_source_cognition_stage_10_proactive_outbox.py
-rg -n "scheduler\.schedule_event|TaskDispatcher|dispatcher\.dispatch|save_conversation|apply_assistant_delivery_receipt|insert_scheduled_event|register_runtime_adapter|register_remote_runtime_adapter" src\kazusa_ai_chatbot\proactive_output tests\test_multi_source_cognition_stage_10_proactive_policy.py tests\test_multi_source_cognition_stage_10_proactive_outbox.py
+rg -n "scheduler\.schedule_event|dispatcher\.dispatch|save_conversation|apply_assistant_delivery_receipt|insert_scheduled_event|register_runtime_adapter|register_remote_runtime_adapter" src\kazusa_ai_chatbot\proactive_output tests\test_multi_source_cognition_stage_10_proactive_policy.py tests\test_multi_source_cognition_stage_10_proactive_outbox.py
 rg -n "proactive_output|proactive_preview|proactive_sent|Proactive" src\kazusa_ai_chatbot\service.py src\kazusa_ai_chatbot\scheduler.py src\kazusa_ai_chatbot\db src\kazusa_ai_chatbot\dispatcher
 rg -n "send_message" src\kazusa_ai_chatbot\proactive_output tests\test_multi_source_cognition_stage_10_proactive_policy.py tests\test_multi_source_cognition_stage_10_proactive_outbox.py
 git diff --check

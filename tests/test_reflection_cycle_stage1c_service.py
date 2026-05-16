@@ -222,7 +222,6 @@ async def _run_lifespan(
     monkeypatch.setattr(service_module.scheduler, "load_pending_events", AsyncMock())
     monkeypatch.setattr(service_module.scheduler, "shutdown", AsyncMock())
     monkeypatch.setattr(service_module.scheduler, "configure_runtime", MagicMock())
-    monkeypatch.setattr(service_module, "configure_task_dispatcher", MagicMock())
     monkeypatch.setattr(
         service_module,
         "render_llm_route_table",
