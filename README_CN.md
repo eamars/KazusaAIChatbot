@@ -9,12 +9,6 @@
     <a href="README.md">English</a>
     ·
     <a href="docs/HOWTO.md">运行指南</a>
-    ·
-    <a href="src/kazusa_ai_chatbot/brain_service/README.md">脑服务接口文档</a>
-    ·
-    <a href="src/kazusa_ai_chatbot/event_logging/README.md">事件日志接口文档</a>
-    ·
-    <a href="src/kazusa_ai_chatbot/nodes/README.md">认知节点文档</a>
   </p>
 
 <p>

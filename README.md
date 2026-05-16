@@ -9,14 +9,6 @@
     <a href="README_CN.md">简体中文</a>
     ·
     <a href="docs/HOWTO.md">HOWTO</a>
-    ·
-    <a href="src/kazusa_ai_chatbot/brain_service/README.md">Brain Service ICD</a>
-    ·
-    <a href="src/kazusa_ai_chatbot/action_spec/README.md">Action Spec</a>
-    ·
-    <a href="src/kazusa_ai_chatbot/event_logging/README.md">Event Logging ICD</a>
-    ·
-    <a href="src/kazusa_ai_chatbot/nodes/README.md">Cognition Nodes</a>
   </p>
 
 <p>
