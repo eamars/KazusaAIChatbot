@@ -38,7 +38,7 @@ long_term/todo.md
 
 | Plan | Status | Execution |
 |---|---|---|
-| _None_ | _None_ | _None_ |
+| [consolidator_text_dispatch_decommission_plan.md](active/short_term/consolidator_text_dispatch_decommission_plan.md) | approved | Ready for execution |
 
 ## Active Bugfix Plans
 
