@@ -11,6 +11,7 @@ from kazusa_ai_chatbot.action_spec.registry import SPEAK_CAPABILITY
 from kazusa_ai_chatbot.cognition_episode import build_text_chat_cognitive_episode
 from kazusa_ai_chatbot.nodes import persona_supervisor2_cognition as cognition_module
 from kazusa_ai_chatbot.nodes import persona_supervisor2 as persona_module
+from kazusa_ai_chatbot.nodes import persona_supervisor2_l3_surface as l3_surface_module
 from kazusa_ai_chatbot.nodes.persona_supervisor2 import persona_supervisor2
 from kazusa_ai_chatbot.time_context import build_character_time_context
 
@@ -364,6 +365,107 @@ async def test_selected_speak_runs_l3_surface_and_dialog_once() -> None:
     dialog_state = dialog.await_args.args[0]
     serialized_dialog_state = json.dumps(dialog_state, ensure_ascii=False)
     assert RETIRED_L3_FIELD not in serialized_dialog_state
+
+
+@pytest.mark.asyncio
+async def test_parent_graph_preserves_social_context_for_selected_l3() -> None:
+    """Parent persona graph should retain L2c2 fields for selected L3."""
+
+    captured_content_state: dict = {}
+
+    async def content_anchor(state: dict) -> dict:
+        captured_content_state.update(state)
+        return {
+            "content_anchors": [
+                "[DECISION] Answer directly.",
+                "[ANSWER] Known fact.",
+            ],
+        }
+
+    with (
+        patch.object(
+            persona_module,
+            "call_msg_decontexualizer",
+            new_callable=AsyncMock,
+            return_value={"decontexualized_input": "Please answer."},
+        ),
+        patch.object(
+            persona_module,
+            "stage_1_research",
+            new_callable=AsyncMock,
+            return_value={"rag_result": {"answer": "Known fact."}},
+        ),
+        patch.object(
+            persona_module,
+            "call_cognition_subgraph",
+            new_callable=AsyncMock,
+            return_value={
+                "internal_monologue": "I should answer.",
+                "interaction_subtext": "direct request",
+                "emotional_appraisal": "calm",
+                "character_intent": "PROVIDE",
+                "logical_stance": "CONFIRM",
+                "judgment_note": "Answering is allowed.",
+                "social_distance": "friendly",
+                "emotional_intensity": "low",
+                "vibe_check": "calm",
+                "relational_dynamic": "direct request",
+                "action_specs": [_speak_action_spec()],
+            },
+        ),
+        patch.object(
+            l3_surface_module,
+            "call_interaction_style_context_loader",
+            new_callable=AsyncMock,
+            return_value={"interaction_style_context": {}},
+        ),
+        patch.object(
+            l3_surface_module,
+            "call_style_agent",
+            new_callable=AsyncMock,
+            return_value={
+                "rhetorical_strategy": "answer directly",
+                "linguistic_style": "brief",
+                "forbidden_phrases": [],
+            },
+        ),
+        patch.object(l3_surface_module, "call_content_anchor_agent", content_anchor),
+        patch.object(
+            l3_surface_module,
+            "call_preference_adapter",
+            new_callable=AsyncMock,
+            return_value={"accepted_user_preferences": []},
+        ),
+        patch.object(
+            l3_surface_module,
+            "call_visual_agent",
+            new_callable=AsyncMock,
+            return_value={
+                "facial_expression": [],
+                "body_language": [],
+                "gaze_direction": [],
+                "visual_vibe": [],
+            },
+        ),
+        patch.object(
+            persona_module,
+            "dialog_agent",
+            new_callable=AsyncMock,
+            return_value={
+                "final_dialog": ["Known fact."],
+                "target_addressed_user_ids": ["global-user-123"],
+                "target_broadcast": False,
+                "mention_target_user": True,
+            },
+        ),
+    ):
+        result = await persona_supervisor2(_persona_state())
+
+    assert result["final_dialog"] == ["Known fact."]
+    assert captured_content_state["social_distance"] == "friendly"
+    assert captured_content_state["emotional_intensity"] == "low"
+    assert captured_content_state["vibe_check"] == "calm"
+    assert captured_content_state["relational_dynamic"] == "direct request"
 
 
 @pytest.mark.asyncio

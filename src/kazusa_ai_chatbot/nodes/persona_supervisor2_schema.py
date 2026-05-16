@@ -89,6 +89,10 @@ class GlobalPersonaState(TypedDict):
     character_intent: str
     logical_stance: str
     judgment_note: str
+    social_distance: str
+    emotional_intensity: str
+    vibe_check: str
+    relational_dynamic: str
 
     # Dialog output
     final_dialog: [str]  # -> Will be used for dialog end point (e.g,. Discord)
