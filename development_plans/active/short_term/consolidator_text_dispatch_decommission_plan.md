@@ -675,12 +675,18 @@ deployment window while the service is stopped (or with
     removed dispatcher symbols, action-spec bridge helpers, `task_dispatch`,
     task-dispatch wording, and send-message bridge claims -> no matches.
   - Sign-off: Codex/2026-05-17.
-- [ ] Stage 6 - scheduler migration complete
+- [x] Stage 6 - scheduler migration complete
   - Covers: implementation order step 7.
   - Verify: the service was stopped or scheduler disabled during migration, the
     exported artifact exists, and pending/running `send_message` count is zero.
-  - Evidence: record export path, update count, and verification query.
-  - Sign-off: `<agent/date>` after evidence is recorded.
+  - Evidence: 2026-05-17 user confirmed all services were shut down before
+    migration. Export artifact:
+    `test_artifacts\scheduler_migration\send_message_pending_running_20260516T234719Z.json`.
+    Migration query `{"tool":"send_message","status":{"$in":["pending","running"]}}`
+    returned `before_count=0`, `matched_count=0`, `modified_count=0`, and
+    `after_count=0`; no historical completed/failed/cancelled rows were
+    modified.
+  - Sign-off: Codex/2026-05-17.
 - [ ] Stage 7 - deterministic, real LLM, and service verification complete
   - Covers: implementation order steps 8-9.
   - Verify: all commands in `Verification` pass or have recorded accepted
@@ -890,7 +896,13 @@ This plan is complete when:
   reflection, action-spec, self-cognition, scheduler, adapter, and future
   cognition suites -> 179 passed in 9.99s.
 - Database export artifact:
-- Database migration result:
+  `test_artifacts\scheduler_migration\send_message_pending_running_20260516T234719Z.json`
+  with 0 exported pending/running `send_message` documents.
+- Database migration result: 2026-05-17 service shutdown was confirmed by the
+  user before the migration command. Exact filter:
+  `{"tool":"send_message","status":{"$in":["pending","running"]}}`.
+  Update result: `before_count=0`, `matched_count=0`, `modified_count=0`,
+  `after_count=0`, `cleanup_reason=consolidator_text_dispatch_decommission`.
 - Real LLM trace artifacts:
 - Real service smoke artifacts:
 - Independent code review:
