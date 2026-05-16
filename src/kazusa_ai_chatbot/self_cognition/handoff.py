@@ -10,7 +10,7 @@ from kazusa_ai_chatbot.action_spec.evaluator import (
 )
 from kazusa_ai_chatbot.action_spec.registry import SEND_MESSAGE_CAPABILITY
 from kazusa_ai_chatbot.dispatcher import TaskDispatcher
-from kazusa_ai_chatbot.dispatcher.task import DispatchContext, RawToolCall
+from kazusa_ai_chatbot.dispatcher.task import DispatchContext
 from kazusa_ai_chatbot.self_cognition import models
 
 
@@ -55,7 +55,7 @@ def build_send_message_action_spec(
             "scope": {"channel_relation": "same"},
         },
         "params": {
-            "target_channel": str(action_candidate.get("target_channel") or ""),
+            "target_channel": "same",
             "text": str(action_candidate.get("text") or ""),
             "execute_at": execute_at,
             "delivery_mentions": delivery_mentions,
@@ -73,45 +73,6 @@ def build_send_message_action_spec(
         "reason": "Self-cognition selected a user-visible follow-up.",
     }
     return action_spec
-
-
-def build_raw_tool_call(action_candidate: dict[str, Any]) -> RawToolCall:
-    """Convert a self-cognition candidate to the existing dispatcher shape.
-
-    Args:
-        action_candidate: Local action-candidate artifact emitted by tracking.
-
-    Returns:
-        Raw `send_message` tool call accepted by `TaskDispatcher`.
-
-    Raises:
-        ValueError: If the candidate is not a send-message candidate.
-    """
-
-    dispatch_shape = action_candidate.get("dispatch_shape")
-    if dispatch_shape != models.ACTION_KIND_SEND_MESSAGE:
-        raise ValueError("self-cognition candidate is not send_message")
-
-    args = {
-        "target_platform": str(action_candidate.get("target_platform") or ""),
-        "target_channel": str(action_candidate.get("target_channel") or ""),
-        "target_channel_type": str(
-            action_candidate.get("target_channel_type") or ""
-        ),
-        "text": str(action_candidate.get("text") or ""),
-    }
-    execute_at = action_candidate.get("execute_at")
-    if isinstance(execute_at, str) and execute_at.strip():
-        args["execute_at"] = execute_at.strip()
-    delivery_mentions = action_candidate.get("delivery_mentions")
-    if isinstance(delivery_mentions, list):
-        args["delivery_mentions"] = delivery_mentions
-
-    raw_call = RawToolCall(
-        tool=models.ACTION_KIND_SEND_MESSAGE,
-        args=args,
-    )
-    return raw_call
 
 
 async def dispatch_action_candidate(

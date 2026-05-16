@@ -2,7 +2,6 @@
 
 from kazusa_ai_chatbot.self_cognition.artifacts import write_tracking_artifacts
 from kazusa_ai_chatbot.self_cognition.handoff import (
-    build_raw_tool_call,
     build_send_message_action_spec,
     dispatch_action_candidate,
 )
@@ -33,7 +32,6 @@ __all__ = [
     "SelfCognitionWorkerResult",
     "build_self_cognition_case_artifacts",
     "build_self_cognition_case_artifacts_async",
-    "build_raw_tool_call",
     "build_send_message_action_spec",
     "build_action_attempt",
     "build_action_candidate",

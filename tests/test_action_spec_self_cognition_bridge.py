@@ -173,6 +173,7 @@ def test_send_message_action_spec_bridges_to_raw_tool_call() -> None:
     assert isinstance(raw_call, RawToolCall)
     assert raw_call.tool == "send_message"
     assert raw_call.args["target_channel"] == "same"
+    assert "target_channel_type" not in raw_call.args
     assert raw_call.args["text"] == "Checking in now."
     assert raw_call.args["delivery_mentions"][0]["display_name"] == "提拉米苏"
     assert "handler_id" not in raw_call.args
@@ -189,7 +190,7 @@ def test_self_cognition_candidate_builds_valid_action_spec() -> None:
 
     assert validated["kind"] == "send_message"
     assert validated["source_refs"][0]["ref_kind"] == "memory_unit"
-    assert validated["params"]["target_channel"] == "673225019"
+    assert validated["params"]["target_channel"] == "same"
     assert validated["params"]["text"] == "Checking in now."
     assert validated["target"]["owner"] == "dispatcher"
 

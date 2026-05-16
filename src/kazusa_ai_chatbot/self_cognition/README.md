@@ -107,8 +107,7 @@ cognition's route or contact decision.
 - `runner.build_self_cognition_case_artifacts_async(case, rag_client=None, cognition_client=None, dialog_client=None, consolidation_client=None, apply_consolidation=False)`
 - `runner.run_self_cognition_case(case, output_dir, rag_client=None, cognition_client=None, dialog_client=None, consolidation_client=None, apply_consolidation=False)`
 - `artifacts.write_tracking_artifacts(output_dir, artifacts)`
-- `handoff.build_send_message_action_spec(case, action_attempt, action_candidate)`
-- `handoff.build_raw_tool_call(action_candidate)`
+- `handoff.build_send_message_action_spec(case, action_candidate)`
 - `handoff.dispatch_action_candidate(case, action_attempt, action_candidate, dispatcher, now)`
 - `worker.run_self_cognition_worker_tick(...)`
 - `worker.start_self_cognition_worker(...)`

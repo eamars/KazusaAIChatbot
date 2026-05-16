@@ -1040,7 +1040,8 @@ async def test_dispatch_action_candidate_builds_existing_dispatch_context() -> N
     ctx = dispatcher.calls[0]["ctx"]
 
     assert raw_call.tool == "send_message"
-    assert raw_call.args["target_channel"] == "673225019"
+    assert raw_call.args["target_channel"] == "same"
+    assert "target_channel_type" not in raw_call.args
     assert ctx.source_platform == "qq"
     assert ctx.source_channel_type == "private"
     assert result["production_handoff"] is True
