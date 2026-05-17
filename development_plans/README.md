@@ -40,7 +40,9 @@ No active short-term plans.
 
 ## Active Bugfix Plans
 
-No active bugfix plans.
+| Document | Type | Status |
+|---|---|---|
+| [memory_lifecycle_specialist_routing_plan.md](active/bugfix/memory_lifecycle_specialist_routing_plan.md) | Bugfix development plan | approved |
 
 ## Reference Documents
 
