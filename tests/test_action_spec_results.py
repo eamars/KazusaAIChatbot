@@ -8,7 +8,10 @@ import pytest
 
 from kazusa_ai_chatbot.action_spec import execution as execution_module
 from kazusa_ai_chatbot.action_spec.evaluator import ActionSpecEvaluator
-from kazusa_ai_chatbot.db import DatabaseOperationError
+from kazusa_ai_chatbot.action_spec.registry import (
+    APPLY_MEMORY_LIFECYCLE_UPDATE_CAPABILITY,
+    MEMORY_LIFECYCLE_UPDATE_CAPABILITY,
+)
 from kazusa_ai_chatbot.action_spec.results import (
     build_action_result,
     build_episode_trace,
@@ -17,6 +20,7 @@ from kazusa_ai_chatbot.action_spec.results import (
     has_consolidatable_output,
     project_episode_trace_for_consolidation,
 )
+from kazusa_ai_chatbot.db import DatabaseOperationError
 
 
 def _speak_action_spec() -> dict:
@@ -66,7 +70,7 @@ def _speak_action_spec() -> dict:
 def _memory_lifecycle_action_spec() -> dict:
     return {
         "schema_version": "action_spec.v1",
-        "kind": "memory_lifecycle_update",
+        "kind": APPLY_MEMORY_LIFECYCLE_UPDATE_CAPABILITY,
         "cognition_mode": "deliberative",
         "source_refs": [
             {
@@ -247,5 +251,63 @@ async def test_memory_lifecycle_execution_failure_returns_failed_result(
     )
 
     assert results[0]["status"] == "failed"
-    assert results[0]["action_kind"] == "memory_lifecycle_update"
+    assert results[0]["action_kind"] == APPLY_MEMORY_LIFECYCLE_UPDATE_CAPABILITY
     assert "memory update unavailable" in results[0]["result_summary"]
+
+
+@pytest.mark.asyncio
+async def test_memory_lifecycle_route_intent_is_not_executed_directly(
+    monkeypatch,
+) -> None:
+    """Execution should not treat the L2d route as a DB lifecycle update."""
+
+    executed = False
+
+    async def fail_if_executed(
+        action_spec: dict,
+        *,
+        storage_timestamp_utc: str,
+        action_attempt_id: str,
+    ) -> dict:
+        nonlocal executed
+        del action_spec, storage_timestamp_utc, action_attempt_id
+        executed = True
+        return {}
+
+    monkeypatch.setattr(
+        execution_module,
+        "execute_user_memory_lifecycle_action",
+        fail_if_executed,
+    )
+    route_spec = _memory_lifecycle_action_spec()
+    route_spec["kind"] = MEMORY_LIFECYCLE_UPDATE_CAPABILITY
+    route_spec["source_refs"] = [
+        {
+            "schema_version": "action_source_ref.v1",
+            "ref_kind": "cognitive_episode",
+            "ref_id": "current_cognitive_episode",
+            "owner": "cognition_episode",
+            "relationship": "basis",
+            "evidence_refs": [],
+        }
+    ]
+    route_spec["target"] = {
+        "schema_version": "action_target.v1",
+        "target_kind": "cognitive_episode",
+        "target_id": None,
+        "owner": "memory_lifecycle_specialist",
+        "scope": {"unit_type": "active_commitment"},
+    }
+    route_spec["params"] = {
+        "review_kind": "active_commitment_lifecycle",
+        "detail": "Review active commitments.",
+    }
+
+    results = await execution_module.execute_action_specs_for_trace(
+        [route_spec],
+        storage_timestamp_utc="2026-05-16T00:00:00+00:00",
+    )
+
+    assert executed is False
+    assert results[0]["action_kind"] == MEMORY_LIFECYCLE_UPDATE_CAPABILITY
+    assert results[0]["status"] != "executed"

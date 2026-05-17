@@ -8,6 +8,9 @@ from typing import Any
 
 import pytest
 
+from kazusa_ai_chatbot.action_spec.registry import (
+    MEMORY_LIFECYCLE_UPDATE_CAPABILITY,
+)
 from kazusa_ai_chatbot.cognition_episode import build_text_chat_cognitive_episode
 from kazusa_ai_chatbot.nodes import persona_supervisor2_cognition_l2d as l2d_module
 from kazusa_ai_chatbot.self_cognition import models as self_cognition_models
@@ -156,10 +159,10 @@ def _speak_request(reason: str = "A visible text surface is needed.") -> dict:
 
 def _memory_lifecycle_request() -> dict:
     return {
-        "capability": "memory_lifecycle_update",
-        "decision": "deferred",
-        "detail": "The spice promise remains open until a natural pause.",
-        "reason": "The promise remains open until the character can raise it naturally.",
+        "capability": MEMORY_LIFECYCLE_UPDATE_CAPABILITY,
+        "decision": "review_needed",
+        "detail": "Review whether active commitment lifecycle changed.",
+        "reason": "The current turn may affect active commitment lifecycle.",
     }
 
 
@@ -186,7 +189,7 @@ def test_action_initializer_payload_is_prompt_safe() -> None:
     assert "强度=quiet and low pressure" in action_context
     assert "氛围=relaxed daily conversation" in action_context
     assert "关系=stable trust with room to wait" in action_context
-    assert "可绑定承诺：有" in action_context
+    assert "活动承诺线索：有" in action_context
     assert "Reveal the spice answer." in action_context
     assert "semantic_input_summary" not in serialized
     assert "execution_boundary" not in serialized
@@ -284,8 +287,8 @@ def test_action_initializer_prompt_follows_cognition_prompt_structure() -> None:
     assert "5090 能跑什么人工智能模型" not in prompt
 
 
-def test_action_initializer_hides_lifecycle_without_single_bound_target() -> None:
-    """Lifecycle should not be offered when code has no deterministic target."""
+def test_action_initializer_hides_lifecycle_without_active_commitments() -> None:
+    """Lifecycle should not be offered when no active commitment exists."""
 
     state = _state()
     state["rag_result"]["user_image"]["user_memory_context"][
@@ -294,15 +297,43 @@ def test_action_initializer_hides_lifecycle_without_single_bound_target() -> Non
 
     action_context = l2d_module.build_action_initializer_payload(state)
 
-    assert "可绑定承诺：无" in action_context
+    assert "活动承诺线索：无" in action_context
     assert "memory_lifecycle_update" not in action_context
 
 
+def test_action_initializer_offers_lifecycle_route_for_multiple_commitments() -> None:
+    """Multiple active commitments should still allow specialist routing."""
+
+    state = _state()
+    state["rag_result"]["user_image"]["user_memory_context"][
+        "active_commitments"
+    ] = [
+        {
+            "unit_id": "promise-001",
+            "fact": "Reveal the spice answer.",
+            "due_at": "2026-05-07T00:00:00+00:00",
+            "due_state": "past_due",
+        },
+        {
+            "unit_id": "promise-002",
+            "fact": "Check the tea result.",
+            "due_at": "2026-05-08T00:00:00+00:00",
+            "due_state": "past_due",
+        },
+    ]
+
+    action_context = l2d_module.build_action_initializer_payload(state)
+
+    assert "活动承诺线索：有" in action_context
+    assert "promise-001" not in action_context
+    assert "promise-002" not in action_context
+
+
 @pytest.mark.asyncio
-async def test_action_initializer_ignores_lifecycle_target_ids_from_llm(
+async def test_action_initializer_ignores_lifecycle_target_fields_from_llm(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Opaque IDs in L2d text must not select one target from many."""
+    """Unknown target fields from L2d must not become DB lifecycle params."""
 
     state = _state()
     state["rag_result"]["user_image"]["user_memory_context"][
@@ -324,10 +355,13 @@ async def test_action_initializer_ignores_lifecycle_target_ids_from_llm(
     fake_llm = _FakeLLM(json.dumps({
         "action_requests": [
             {
-                "capability": "memory_lifecycle_update",
-                "decision": "abandoned",
-                "detail": "Select promise-001.",
-                "reason": "The model copied an opaque target identifier.",
+                "capability": MEMORY_LIFECYCLE_UPDATE_CAPABILITY,
+                "decision": "review_needed",
+                "detail": "Review whether a promise changed.",
+                "reason": "A commitment may have changed.",
+                "unit_id": "promise-001",
+                "target_alias": "commitment_1",
+                "lifecycle_decision": "fulfilled",
             },
         ],
     }))
@@ -335,7 +369,24 @@ async def test_action_initializer_ignores_lifecycle_target_ids_from_llm(
 
     result = await l2d_module.call_action_initializer(state)
 
-    assert result["action_specs"] == []
+    assert len(result["action_specs"]) == 1
+    action_spec = result["action_specs"][0]
+    serialized = json.dumps(action_spec, ensure_ascii=False)
+    assert action_spec["kind"] == MEMORY_LIFECYCLE_UPDATE_CAPABILITY
+    assert action_spec["target"] == {
+        "schema_version": "action_target.v1",
+        "target_kind": "cognitive_episode",
+        "target_id": None,
+        "owner": "memory_lifecycle_specialist",
+        "scope": {"unit_type": "active_commitment"},
+    }
+    assert action_spec["params"] == {
+        "review_kind": "active_commitment_lifecycle",
+        "detail": "Review whether a promise changed.",
+    }
+    assert "promise-001" not in serialized
+    assert "target_alias" not in serialized
+    assert "lifecycle_decision" not in serialized
 
 
 @pytest.mark.asyncio
@@ -465,9 +516,16 @@ async def test_action_initializer_accepts_multiple_valid_action_specs(
 
     assert [spec["kind"] for spec in result["action_specs"]] == [
         "speak",
-        "memory_lifecycle_update",
+        MEMORY_LIFECYCLE_UPDATE_CAPABILITY,
         "trigger_future_cognition",
     ]
+    lifecycle_spec = result["action_specs"][1]
+    assert lifecycle_spec["target"]["target_kind"] == "cognitive_episode"
+    assert lifecycle_spec["target"]["owner"] == "memory_lifecycle_specialist"
+    assert lifecycle_spec["params"] == {
+        "review_kind": "active_commitment_lifecycle",
+        "detail": "Review whether active commitment lifecycle changed.",
+    }
     human_context = fake_llm.messages[1].content
     assert human_context.startswith("当前行动上下文：")
     assert "trigger_context" not in human_context
@@ -498,5 +556,5 @@ async def test_action_initializer_drops_invalid_specs_and_caps_valid_specs(
     assert [spec["reason"] for spec in result["action_specs"]] == [
         "first",
         "second",
-        "The promise remains open until the character can raise it naturally.",
+        "The current turn may affect active commitment lifecycle.",
     ]

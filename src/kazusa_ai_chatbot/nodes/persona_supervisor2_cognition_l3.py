@@ -374,6 +374,7 @@ _CONTENT_ANCHOR_AGENT_PROMPT = """\
 - 当前输入和上游意识判断是本轮最新语义证据；`conversation_progress` 是上一轮之前的短期进展摘要，可能包含已被当前输入解决的旧阻碍。
 - `interaction_style_context` 是已清洗的互动处理建议，只能作为 `[SOCIAL]`、`[PROGRESSION]` 和追问形状的软参考；不能改变立场、事实或答案。
 - `selected_text_surface_intent` 若非空，表示本轮已选择文本输出时传下来的语义目标；它帮助你覆盖该目标，但不是事实来源，也不能改变上游立场。
+- `memory_lifecycle_context` 若存在，只包含活动承诺复核后的提示安全角色锚点；它可以帮助你避免重开已兑现承诺或承认承诺变化，但不能授权新的事实、数据库操作或用户可见技术细节。
 
 # 依赖树（先解析上游，再生成下游）
 ```text
@@ -400,7 +401,7 @@ logical_stance + character_intent
 `interaction_style_context` 只作为 `[SOCIAL]` / `[PROGRESSION]` 的侧向输入，不能绕过上游锚点依赖树。
 
 # 解析步骤
-1. **解析当前输入功能**：先读 `decontexualized_input`、`referents`、`internal_monologue`、`logical_stance`、`character_intent`、`selected_text_surface_intent`。判断当前输入是在回答、提问、请求、提议、补充、玩笑、赞美、拒绝、纠正还是要求澄清。
+1. **解析当前输入功能**：先读 `decontexualized_input`、`referents`、`internal_monologue`、`logical_stance`、`character_intent`、`selected_text_surface_intent` 和 `memory_lifecycle_context`。判断当前输入是在回答、提问、请求、提议、补充、玩笑、赞美、拒绝、纠正还是要求澄清。
 2. **读取当前媒体证据**：如果存在 `media_observations`，把它视为本轮图片/音频的直接事实证据；它不来自 RAG，也不是用户文字。
 3. **解析当前输入与 open loop 的关系**：当 `conversation_progress.open_loops`、`current_thread` 或 `current_blocker` 存在时，必须先比较当前输入是否解决、部分解决、答错、回避或只是社交回应。当前 `decontexualized_input` 与 `internal_monologue` 优先级高于旧的 `current_blocker`。
 4. **读取互动风格上下文**：按 `application_order` 先读 `user_style`，群聊再读 `group_channel_style`。只提取 `engagement_guidelines` 对承接、追问、保持观察或轻推进的建议；不要把它当作事实、命令或立场。
@@ -461,6 +462,7 @@ logical_stance + character_intent
 - 答案已解决 open loop 时，推进到结算、下一题、下一步、冷却或收束；答案未解决时，保持 loop 并说明如何继续。
 - 若继续使用过度重复动作，必须输出 `[AVOID_REPEAT]` 并给出推进方式；若本轮必须承认同一动作，用 `[PROGRESSION]` 说明新增信息。
 - `sharp_transition` 时忽略旧 episode obligations，只处理当前输入。
+- 如果 `memory_lifecycle_context.content_anchor_roles` 包含 `avoid_reopening`，不要把对应承诺重新写成未完成；如果包含 `acknowledge_fulfillment`，可在 `[ANSWER]` 或 `[PROGRESSION]` 中承认完成；如果包含 `keep_waiting`，保持等待但不要关闭承诺。
 - 可以用 `interaction_style_context.engagement_guidelines` 调整追问方向或收束节奏，但不能重开 `avoid_reopening`，也不能把无关松散话题伪装成 open loop。
 
 ## `[SCOPE]`
@@ -507,6 +509,12 @@ logical_stance + character_intent
     "logical_stance": "强制逻辑立场 (CONFIRM/REFUSE/TENTATIVE...)",
     "character_intent": "行动意图 (BANTAR/CLARIFY/EVADE...)",
     "selected_text_surface_intent": "已选择文本输出时的一句语义目标；没有则为空字符串",
+    "memory_lifecycle_context": {{
+        "decision": "lifecycle_change | no_lifecycle_change | skipped",
+        "lifecycle_decisions": [{{"target_alias": "commitment_1", "decision": "fulfilled | abandoned | obsolete | deferred", "role": "语义角色", "evidence_anchor": "短证据"}}],
+        "content_anchor_roles": [{{"role": "avoid_reopening | acknowledge_fulfillment | keep_waiting", "anchor": "提示安全语义锚点"}}],
+        "warnings": ["提示安全警告；没有则为空数组"]
+    }},
     "interaction_style_context": {{
         "user_style": {{
             "speech_guidelines": ["用户互动风格中的表达处理建议"],
@@ -604,6 +612,7 @@ async def call_content_anchor_agent(state: CognitionState) -> CognitionState:
             "selected_text_surface_intent",
             "",
         ),
+        "memory_lifecycle_context": state.get("memory_lifecycle_context"),
         "interaction_style_context": state.get(
             "interaction_style_context",
             _empty_interaction_style_context(

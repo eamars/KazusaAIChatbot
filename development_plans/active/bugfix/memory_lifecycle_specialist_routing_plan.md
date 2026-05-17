@@ -6,7 +6,7 @@
   and move active-commitment lifecycle judgment, target selection, and
   executable update construction into a dedicated memory lifecycle specialist.
 - Plan class: large
-- Status: approved
+- Status: in_progress
 - Mandatory skills: `development-plan-writing`, `local-llm-architecture`,
   `no-prepost-user-input`, `py-style`, `test-style-and-execution`,
   `cjk-safety`
@@ -558,42 +558,42 @@ content anchoring when the same turn also speaks.
 
 ## Progress Checklist
 
-- [ ] Stage 1 - action-spec kind split complete
+- [x] Stage 1 - action-spec kind split complete
   - Covers: Implementation Order steps 1-2.
   - Verify: focused action-spec tests pass.
   - Evidence: record failing baseline, changed files, and passing output in
     Execution Evidence.
-  - Sign-off: `<agent/date>` after verification and evidence are recorded.
-- [ ] Stage 2 - specialist module contract complete
+  - Sign-off: `Codex/2026-05-18`.
+- [x] Stage 2 - specialist module contract complete
   - Covers: Implementation Order steps 3-4.
   - Verify: `tests/test_memory_lifecycle_specialist.py` passes.
   - Evidence: record patched LLM test output and prompt-safety assertions.
-  - Sign-off: `<agent/date>` after verification and evidence are recorded.
-- [ ] Stage 3 - L2d router contract complete
+  - Sign-off: `Codex/2026-05-18`.
+- [x] Stage 3 - L2d router contract complete
   - Covers: Implementation Order step 5.
   - Verify: L2d focused tests pass and prompt grep shows no DB target binding
     language.
   - Evidence: record test output and grep result.
-  - Sign-off: `<agent/date>` after verification and evidence are recorded.
-- [ ] Stage 4 - persona graph and L3 handoff complete
+  - Sign-off: `Codex/2026-05-18`.
+- [x] Stage 4 - persona graph and L3 handoff complete
   - Covers: Implementation Order steps 6-7.
   - Verify: integration tests pass and memory lifecycle role anchors reach
     content-anchor payload without `unit_id`.
   - Evidence: record test output and inspected payload.
-  - Sign-off: `<agent/date>` after verification and evidence are recorded.
-- [ ] Stage 5 - self-cognition, consolidation, docs, and live tests complete
+  - Sign-off: `Codex/2026-05-18`.
+- [x] Stage 5 - self-cognition, consolidation, docs, and live tests complete
   - Covers: Implementation Order steps 8-10.
   - Verify: listed focused tests pass; real LLM tests are run one at a time and
     traces are inspected.
   - Evidence: record command output, trace paths, and manual judgment.
-  - Sign-off: `<agent/date>` after verification and evidence are recorded.
-- [ ] Stage 6 - full verification and independent code review complete
+  - Sign-off: `Codex/2026-05-18`.
+- [x] Stage 6 - full verification and independent code review complete
   - Covers: Implementation Order steps 11-12.
   - Verify: all Verification commands pass and Independent Code Review is
     approved.
   - Evidence: record full command output, review findings, fixes, reruns, and
     residual risks.
-  - Sign-off: `<agent/date>` after review approval and evidence are recorded.
+  - Sign-off: `Codex/2026-05-18`.
 
 ## Verification
 
@@ -726,6 +726,21 @@ If a finding requires a new contract, fallback path, or change outside the
 approved boundary, stop and update the plan or request approval before editing
 code.
 
+Code review run on 2026-05-18. No separate reviewer was available in this
+session, so the active agent reread this plan, inspected the source/test/docs
+diff from a fresh-review posture, ran the verification gates, fixed findings,
+and reran the affected tests.
+
+Findings and fixes:
+
+| Severity | Finding | Fix |
+|---|---|---|
+| Major | `memory_lifecycle_update` route capability was still registered under the old `memory_lifecycle` owner name, hiding the specialist ownership boundary. | Changed route `owner_module` and allowed capability owner vocabulary to `memory_lifecycle_specialist`; kept `apply_memory_lifecycle_update` owned by `memory_lifecycle`. |
+| Major | Route validation did not reject `memory_unit` source refs, so a malformed route could smuggle a DB target through provenance. | Added evaluator rejection for `memory_unit` / `user_memory_units` source refs on `memory_lifecycle_update` and added regression coverage. |
+| Minor | If unrelated raw memory candidates existed, fallback active-commitment rows with trusted unit ids could be skipped. | Filter raw DB units first and fall back to prompt-context active commitments only when no active raw commitment survives filtering; added regression coverage. |
+
+Review result: approved after the fixes above and the final verification rerun.
+
 ## Acceptance Criteria
 
 This plan is complete when:
@@ -776,7 +791,32 @@ lifecycle statuses, merge history, and active-commitment rows remain unchanged.
     `test_artifacts/llm_traces/l2d_commitment_alias_experiment__20260517T200937403540Z.json`.
 - Independent Plan Review completed on 2026-05-18. Three blockers were found
   and fixed in this plan before approval.
-- Implementation not started. All Progress Checklist items remain unchecked.
+- Implementation evidence on 2026-05-18:
+  - `venv\Scripts\python.exe -m pytest tests\test_action_spec_memory_lifecycle.py tests\test_action_spec_evaluator.py tests\test_action_spec_results.py tests\test_memory_lifecycle_specialist.py tests\test_persona_supervisor2_action_initializer.py tests\test_self_cognition_tracking.py tests\test_service_background_consolidation.py tests\test_consolidator_facts_rag2.py tests\test_l2d_action_selection_cases.py -q`
+    passed: 123 tests.
+  - `venv\Scripts\python.exe -m py_compile src\kazusa_ai_chatbot\action_spec\models.py src\kazusa_ai_chatbot\action_spec\registry.py src\kazusa_ai_chatbot\action_spec\evaluator.py src\kazusa_ai_chatbot\action_spec\execution.py src\kazusa_ai_chatbot\action_spec\handlers\memory_lifecycle.py src\kazusa_ai_chatbot\nodes\persona_supervisor2.py src\kazusa_ai_chatbot\nodes\persona_supervisor2_cognition_l2d.py src\kazusa_ai_chatbot\nodes\persona_supervisor2_cognition_l3.py src\kazusa_ai_chatbot\nodes\persona_supervisor2_l3_surface.py src\kazusa_ai_chatbot\nodes\persona_supervisor2_schema.py src\kazusa_ai_chatbot\nodes\persona_supervisor2_memory_lifecycle.py src\kazusa_ai_chatbot\self_cognition\runner.py tests\test_memory_lifecycle_specialist_live_llm.py`
+    passed.
+  - `git diff --check` passed.
+  - Static greps found no `unit_id`, `target_alias`, or `lifecycle_decision`
+    matches in `persona_supervisor2_cognition_l2d.py`, and no route/action
+    string pairing of `memory_lifecycle_update` with DB lifecycle fields.
+  - Live LLM specialist tests were run one at a time with `-m live_llm`:
+    `test_live_tiramisu_fulfilled`,
+    `test_live_new_sweet_plan_no_lifecycle_change`,
+    `test_live_magic_fulfilled`,
+    `test_live_ambiguous_reply_no_lifecycle_change`, and
+    `test_live_capacity_12_commitments_last_alias_fulfilled` all passed.
+  - Live trace paths:
+    `test_artifacts/llm_traces/memory_lifecycle_specialist_live_llm__tiramisu_fulfilled.json`,
+    `test_artifacts/llm_traces/memory_lifecycle_specialist_live_llm__new_sweet_plan_no_change.json`,
+    `test_artifacts/llm_traces/memory_lifecycle_specialist_live_llm__magic_fulfilled.json`,
+    `test_artifacts/llm_traces/memory_lifecycle_specialist_live_llm__ambiguous_no_change.json`,
+    `test_artifacts/llm_traces/memory_lifecycle_specialist_live_llm__capacity_12_last_fulfilled.json`.
+  - Manual trace inspection confirmed tiramisu produced
+    `commitment_1 -> fulfilled -> unit-tiramisu`, magic produced
+    `commitment_2 -> fulfilled -> unit-magic`, no-change cases produced no
+    apply actions, and the 12-alias case produced
+    `commitment_12 -> fulfilled -> unit-capacity-12`.
 
 ## Execution Handoff
 

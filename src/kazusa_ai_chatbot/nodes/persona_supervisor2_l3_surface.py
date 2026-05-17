@@ -154,6 +154,9 @@ async def call_l3_text_surface_handler(state: GlobalPersonaState) -> dict:
         initial_state["selected_text_surface_intent"] = (
             selected_text_surface_intent
         )
+    memory_lifecycle_context = state.get("memory_lifecycle_context")
+    if isinstance(memory_lifecycle_context, dict):
+        initial_state["memory_lifecycle_context"] = memory_lifecycle_context
 
     result = await surface_graph.ainvoke(initial_state)
     return_value = {

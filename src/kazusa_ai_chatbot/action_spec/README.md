@@ -13,7 +13,9 @@ owners have handled the action.
 
 ```text
 L2d semantic action request
-  -> deterministic materialization and target binding
+  -> deterministic route materialization
+  -> optional specialist-owned target judgment
+  -> deterministic executable materialization and target binding
   -> ActionSpecV1 validation
   -> owner handler
        l3_text / l3_image surface handler
@@ -56,13 +58,15 @@ reserved schema slot and fails validation in this implementation slice.
 
 ## Capabilities
 
-`build_initial_action_capabilities()` exposes only L2d-facing semantic
-capabilities:
+`build_initial_action_capabilities()` registers the available runtime
+capabilities. Prompt projection exposes only L2d-facing semantic capabilities;
+internal executable capabilities stay hidden from L2d prompts.
 
 | Capability | Owner | Visibility | Meaning |
 | --- | --- | --- | --- |
 | `speak` | `l3_text` | `user_visible` | Selects a text surface. L2d provides surface intent, not final wording. |
-| `memory_lifecycle_update` | `memory_lifecycle` | `private` | Lets the character change one bound `user_memory_units.active_commitment` lifecycle. |
+| `memory_lifecycle_update` | `memory_lifecycle_specialist` | `private` | Selects specialist review for active-commitment lifecycle changes. L2d does not choose a memory target or lifecycle decision. |
+| `apply_memory_lifecycle_update` | `memory_lifecycle` | `private` | Internal executable DB update produced after specialist alias validation. It is not projected to L2d. |
 | `trigger_future_cognition` | `orchestrator` | `private` | Requests a later cognition cycle contract; it does not call cognition directly. |
 
 `send_message` is intentionally absent from the L2d registry. User-visible
@@ -79,15 +83,19 @@ ids, credentials, collection names, and database internals.
 Targetful actions are resolved by deterministic code from trusted episode,
 trigger-source, RAG, and repository context.
 
-For `memory_lifecycle_update`, materialization is allowed only when exactly one
-eligible active commitment target is bound. If no single target exists, the
-lifecycle capability should be hidden from L2d when possible or rejected before
-persistence. The model may choose `fulfilled`, `abandoned`, `obsolete`, or
-`deferred`; code maps those decisions to collection statuses.
+For `memory_lifecycle_update`, L2d may only request a specialist review. The
+target is a cognitive episode owned by the memory lifecycle specialist. It must
+not include `unit_id`, collection names, target aliases, or lifecycle decisions.
+
+The memory lifecycle specialist receives prompt-safe aliases such as
+`commitment_1`, chooses `fulfilled`, `abandoned`, `obsolete`, or `deferred`
+only when the evidence is clear, and returns aliases plus prompt-safe content
+anchors. Deterministic code validates the alias, resolves it to the trusted
+memory unit id, and materializes `apply_memory_lifecycle_update` for execution.
 
 No promise or commitment is retired because it is old, overdue, keyword-matched,
-or visually stale. The character must semantically choose the lifecycle action,
-and the repository must validate the bound target.
+or visually stale. The specialist must semantically judge the lifecycle change,
+and the repository must validate the resolved target.
 
 ## Attempt Ledger
 

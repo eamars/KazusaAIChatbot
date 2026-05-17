@@ -82,7 +82,7 @@ def test_compare_rejects_forbidden_dispatch_route() -> None:
 
 
 def test_compare_requires_specific_action_params() -> None:
-    """Lifecycle fixtures can require a specific semantic decision."""
+    """Lifecycle fixtures can require the router review kind."""
 
     case = _case(
         source_kind="self_cognition",
@@ -93,7 +93,7 @@ def test_compare_requires_specific_action_params() -> None:
             },
             "required_params_by_kind": {
                 "memory_lifecycle_update": {
-                    "lifecycle_decision": "abandoned",
+                    "review_kind": "active_commitment_lifecycle",
                 }
             },
         },
@@ -101,7 +101,7 @@ def test_compare_requires_specific_action_params() -> None:
 
     report = compare_action_specs_to_expectations(
         case,
-        [_memory_lifecycle_action("abandoned")],
+        [_memory_lifecycle_action("active_commitment_lifecycle")],
     )
 
     assert report["ok"] is True
@@ -109,7 +109,7 @@ def test_compare_requires_specific_action_params() -> None:
 
 
 def test_compare_rejects_wrong_action_params() -> None:
-    """Lifecycle fixtures should fail when the semantic decision differs."""
+    """Lifecycle fixtures should fail when the review kind differs."""
 
     case = _case(
         source_kind="self_cognition",
@@ -117,7 +117,7 @@ def test_compare_rejects_wrong_action_params() -> None:
             "required_action_kinds": ["memory_lifecycle_update"],
             "required_params_by_kind": {
                 "memory_lifecycle_update": {
-                    "lifecycle_decision": "abandoned",
+                    "detail": "Review the active commitment lifecycle.",
                 }
             },
         },
@@ -125,14 +125,17 @@ def test_compare_rejects_wrong_action_params() -> None:
 
     report = compare_action_specs_to_expectations(
         case,
-        [_memory_lifecycle_action("deferred")],
+        [_memory_lifecycle_action(
+            "active_commitment_lifecycle",
+            detail="Review a different lifecycle concern.",
+        )],
     )
 
     assert report["ok"] is False
     assert report["errors"] == [
         (
             "missing required param for memory_lifecycle_update: "
-            "lifecycle_decision=abandoned"
+            "detail=Review the active commitment lifecycle."
         )
     ]
 
@@ -264,8 +267,12 @@ def _action_spec(kind: str, visibility: str) -> dict[str, object]:
     return action
 
 
-def _memory_lifecycle_action(lifecycle_decision: str) -> dict[str, object]:
-    """Build a memory lifecycle action for routing comparison tests."""
+def _memory_lifecycle_action(
+    review_kind: str,
+    *,
+    detail: str = "Review whether an active commitment lifecycle changed.",
+) -> dict[str, object]:
+    """Build a memory lifecycle route action for comparison tests."""
 
     action = _action_spec("speak", "private")
     action["kind"] = "memory_lifecycle_update"
@@ -278,28 +285,17 @@ def _memory_lifecycle_action(lifecycle_decision: str) -> dict[str, object]:
             "relationship": "basis",
             "evidence_refs": [],
         },
-        {
-            "schema_version": "action_source_ref.v1",
-            "ref_kind": "memory_unit",
-            "ref_id": "promise-001",
-            "owner": "user_memory_units",
-            "relationship": "target",
-            "evidence_refs": [],
-        },
     ]
     action["target"] = {
         "schema_version": "action_target.v1",
-        "target_kind": "memory_unit",
-        "target_id": "promise-001",
-        "owner": "user_memory_units",
+        "target_kind": "cognitive_episode",
+        "target_id": None,
+        "owner": "memory_lifecycle_specialist",
         "scope": {"unit_type": "active_commitment"},
     }
     action["params"] = {
-        "memory_kind": "user_memory_unit",
-        "unit_type": "active_commitment",
-        "unit_id": "promise-001",
-        "lifecycle_decision": lifecycle_decision,
-        "due_at": "2026-05-07T00:00:00+00:00",
+        "review_kind": review_kind,
+        "detail": detail,
     }
     action["visibility"] = "private"
     action["urgency"] = "background"

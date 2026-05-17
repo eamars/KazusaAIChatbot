@@ -82,6 +82,7 @@ class GlobalPersonaState(TypedDict):
     action_results: NotRequired[list[ActionResultV1]]
     surface_outputs: NotRequired[list[SurfaceOutputV1]]
     episode_trace: NotRequired[EpisodeTraceV1]
+    memory_lifecycle_context: NotRequired[dict]
 
     # Cognition output for consolidation
     interaction_subtext: str
@@ -177,6 +178,7 @@ class CognitionState(TypedDict):
     action_results: NotRequired[list[ActionResultV1]]
     surface_outputs: NotRequired[list[SurfaceOutputV1]]
     episode_trace: NotRequired[EpisodeTraceV1]
+    memory_lifecycle_context: NotRequired[dict]
     target_addressed_user_ids: NotRequired[list[str]]
     target_broadcast: NotRequired[bool]
 

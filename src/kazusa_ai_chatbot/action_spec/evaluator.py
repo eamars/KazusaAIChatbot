@@ -22,6 +22,7 @@ from kazusa_ai_chatbot.action_spec.models import (
     validate_capability_spec,
 )
 from kazusa_ai_chatbot.action_spec.registry import (
+    APPLY_MEMORY_LIFECYCLE_UPDATE_CAPABILITY,
     MEMORY_LIFECYCLE_UPDATE_CAPABILITY,
     SPEAK_CAPABILITY,
     TRIGGER_FUTURE_COGNITION_CAPABILITY,
@@ -110,6 +111,8 @@ def _validate_kind_specific_contract(action_spec: dict[str, Any]) -> None:
 
     kind = action_spec["kind"]
     if kind == MEMORY_LIFECYCLE_UPDATE_CAPABILITY:
+        _validate_memory_lifecycle_route_contract(action_spec)
+    elif kind == APPLY_MEMORY_LIFECYCLE_UPDATE_CAPABILITY:
         validate_memory_lifecycle_action(action_spec)
     elif kind == SPEAK_CAPABILITY:
         _validate_speak_contract(action_spec)
@@ -127,6 +130,35 @@ def _validate_speak_contract(action_spec: dict[str, Any]) -> None:
     target_kind = target["target_kind"]
     if target_kind not in ("current_channel", "self"):
         raise ActionValidationError("target_kind: expected text surface target")
+
+
+def _validate_memory_lifecycle_route_contract(action_spec: dict[str, Any]) -> None:
+    """Validate the specialist route intent without DB execution fields."""
+
+    for source_ref in action_spec["source_refs"]:
+        if source_ref["ref_kind"] == "memory_unit":
+            raise ActionValidationError(
+                "source_refs: route must not bind memory_unit"
+            )
+        if source_ref["owner"] == "user_memory_units":
+            raise ActionValidationError(
+                "source_refs: route must not bind user_memory_units"
+            )
+    target = action_spec["target"]
+    if target["target_kind"] != "cognitive_episode":
+        raise ActionValidationError("target_kind: expected cognitive_episode")
+    if target["target_id"] is not None:
+        raise ActionValidationError("target_id: expected null")
+    if target["owner"] != "memory_lifecycle_specialist":
+        raise ActionValidationError("owner: expected memory_lifecycle_specialist")
+    scope = target["scope"]
+    if scope.get("unit_type") != "active_commitment":
+        raise ActionValidationError("scope.unit_type: expected active_commitment")
+    params = action_spec["params"]
+    if params.get("review_kind") != "active_commitment_lifecycle":
+        raise ActionValidationError(
+            "review_kind: expected active_commitment_lifecycle"
+        )
 
 
 def _validate_params(params: dict[str, Any], schema: dict[str, object]) -> None:

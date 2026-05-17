@@ -12,7 +12,6 @@ from kazusa_ai_chatbot.action_spec.models import (
     ActionSourceRefV1,
     ActionSpecV1,
     CapabilitySpecV1,
-    LIFECYCLE_STATUS_BY_DECISION,
     validate_action_spec,
 )
 from kazusa_ai_chatbot.action_spec.registry import (
@@ -35,7 +34,6 @@ from kazusa_ai_chatbot.utils import get_llm, log_preview, parse_llm_json_output
 logger = logging.getLogger(__name__)
 
 ACTION_SPEC_CAP = 3
-_ALLOWED_LIFECYCLE_DECISIONS = frozenset(LIFECYCLE_STATUS_BY_DECISION)
 
 
 class ActionRequestV1(TypedDict, total=False):
@@ -63,21 +61,9 @@ def build_action_initializer_payload(
 
     if capabilities is None:
         capabilities = build_initial_action_capabilities()
-    prompt_capabilities = _prompt_capabilities_for_state(state, capabilities)
+    prompt_capabilities = dict(capabilities)
     action_context = _build_action_context_text(state, prompt_capabilities)
     return action_context
-
-
-def _prompt_capabilities_for_state(
-    state: CognitionState,
-    capabilities: Mapping[str, CapabilitySpecV1],
-) -> dict[str, CapabilitySpecV1]:
-    """Return action capabilities allowed by deterministic bindings."""
-
-    prompt_capabilities = dict(capabilities)
-    if _select_active_commitment(state) is None:
-        prompt_capabilities.pop(MEMORY_LIFECYCLE_UPDATE_CAPABILITY, None)
-    return prompt_capabilities
 
 
 def _build_action_context_text(
@@ -140,33 +126,19 @@ def _commitment_context_text(
 ) -> str:
     """Return the prompt-safe commitment context without persistence IDs."""
 
-    selected_commitment = _select_active_commitment(state)
-    if selected_commitment is None:
-        projected_commitments = _project_active_commitments_for_prompt(
-            _raw_active_commitments(state)
-        )
-        if projected_commitments:
-            commitment_lines = _evidence_list_text(projected_commitments)
-            commitment_text = (
-                "可绑定承诺：无唯一目标；"
-                f"当前只可作为承诺线索阅读：{commitment_lines}"
-            )
-            return commitment_text
-        commitment_text = "可绑定承诺：无。"
+    projected_commitments = _project_active_commitments_for_prompt(
+        _raw_active_commitments(state)
+    )
+    if not projected_commitments:
+        commitment_text = "活动承诺线索：无。"
         return commitment_text
 
-    projected_commitments = _project_active_commitments_for_prompt(
-        [selected_commitment]
-    )
     commitment_lines = _evidence_list_text(projected_commitments)
     if memory_lifecycle_visible:
-        commitment_text = f"可绑定承诺：有；{commitment_lines}"
+        commitment_text = f"活动承诺线索：有；{commitment_lines}"
         return commitment_text
 
-    commitment_text = (
-        "可绑定承诺：有承诺线索，但当前不允许承诺生命周期动作；"
-        f"{commitment_lines}"
-    )
+    commitment_text = f"活动承诺线索：当前不允许生命周期复核；{commitment_lines}"
     return commitment_text
 
 
@@ -490,46 +462,26 @@ def _delivery_mode_for_request(
 
 def _build_memory_lifecycle_action_spec(
     request: ActionRequestV1,
-    state: CognitionState,
+    _state: CognitionState,
 ) -> dict[str, object] | None:
-    """Build the deterministic envelope for a commitment lifecycle request."""
+    """Build the specialist route intent for commitment lifecycle review."""
 
-    lifecycle_decision = _semantic_text(request, "decision")
-    if lifecycle_decision not in _ALLOWED_LIFECYCLE_DECISIONS:
-        logger.warning(
-            f"L2d dropped lifecycle request with unsupported decision: "
-            f"{lifecycle_decision}"
-        )
-        return None
-
-    active_commitment = _select_active_commitment(state)
-    if active_commitment is None:
-        logger.warning("L2d dropped lifecycle request without target commitment")
-        return None
-
-    unit_id = str(active_commitment["unit_id"])
-    due_at = active_commitment.get("due_at")
-    if due_at is not None and not isinstance(due_at, str):
-        due_at = None
+    detail = _semantic_text(request, "detail")
+    if not detail:
+        detail = request["reason"]
     action_spec = _build_action_spec(
         kind=MEMORY_LIFECYCLE_UPDATE_CAPABILITY,
-        source_refs=[
-            _current_episode_source_ref(),
-            _memory_unit_source_ref(unit_id),
-        ],
+        source_refs=[_current_episode_source_ref()],
         target={
             "schema_version": "action_target.v1",
-            "target_kind": "memory_unit",
-            "target_id": unit_id,
-            "owner": "user_memory_units",
+            "target_kind": "cognitive_episode",
+            "target_id": None,
+            "owner": "memory_lifecycle_specialist",
             "scope": {"unit_type": "active_commitment"},
         },
         params={
-            "memory_kind": "user_memory_unit",
-            "unit_type": "active_commitment",
-            "unit_id": unit_id,
-            "lifecycle_decision": lifecycle_decision,
-            "due_at": due_at,
+            "review_kind": "active_commitment_lifecycle",
+            "detail": detail,
         },
         urgency="background",
         visibility="private",
@@ -537,30 +489,6 @@ def _build_memory_lifecycle_action_spec(
         reason=request["reason"],
     )
     return action_spec
-
-
-def _select_active_commitment(state: CognitionState) -> dict[str, object] | None:
-    """Resolve the current episode to one deterministic active commitment."""
-
-    active_commitments = _active_commitments(state)
-    if len(active_commitments) == 1:
-        return active_commitments[0]
-    return None
-
-
-def _active_commitments(state: CognitionState) -> list[dict[str, object]]:
-    """Return active commitment dictionaries that carry stable unit IDs."""
-
-    raw_commitments = _raw_active_commitments(state)
-    active_commitments: list[dict[str, object]] = []
-    for raw_commitment in raw_commitments:
-        if not isinstance(raw_commitment, dict):
-            continue
-        unit_id = raw_commitment.get("unit_id")
-        if not isinstance(unit_id, str) or not unit_id.strip():
-            continue
-        active_commitments.append(raw_commitment)
-    return active_commitments
 
 
 def _build_future_cognition_action_spec(
@@ -712,20 +640,6 @@ def _build_action_spec(
     return action_spec
 
 
-def _memory_unit_source_ref(unit_id: str) -> ActionSourceRefV1:
-    """Return a source reference for a selected memory unit."""
-
-    source_ref: ActionSourceRefV1 = {
-        "schema_version": "action_source_ref.v1",
-        "ref_kind": "memory_unit",
-        "ref_id": unit_id,
-        "owner": "user_memory_units",
-        "relationship": "target",
-        "evidence_refs": [],
-    }
-    return source_ref
-
-
 def _no_continuation() -> dict[str, object]:
     """Return the default no-continuation execution contract."""
 
@@ -776,13 +690,13 @@ _ACTION_INITIALIZER_PROMPT = """\
 
 # 可选动作
 - `speak`：角色需要一个文字表层。`detail` 写清文字表层要处理的具体对象、问题、承诺或待处理目标。
-- `memory_lifecycle_update`：角色已经决定改变一个可绑定承诺的状态。当前行动上下文需要写明可绑定承诺为有。`decision` 只能是 fulfilled、abandoned、obsolete、deferred。
+- `memory_lifecycle_update`：当前回合可能涉及活动承诺的兑现、放弃、过时或延期，需要专门复核活动承诺生命周期。你只选择复核需要，不选择具体承诺、别名、数据库目标或生命周期决定。
 - `trigger_future_cognition`：角色需要在未来拿到或消费一个具体新信息后再想一次。`detail` 写成完整目标：等待或消费什么新信息，继续处理哪个具体问题、任务或承诺。
 
 # 选择流程
 1. 先根据当前行动上下文确认角色现在的行动意图。
 2. 当前需要文字表层时，选择 `speak`。
-3. 当前有可绑定承诺，并且行动意图已经包含承诺状态变化时，选择 `memory_lifecycle_update`。
+3. 当前活动承诺可能被本轮输入或已形成决定影响时，选择 `memory_lifecycle_update`，并在 `detail` 写清需要复核的语义原因。
 4. 当前回合存在具体未完成问题，且继续处理依赖未来新信息时，选择 `trigger_future_cognition`。
 5. 没有真实动作时，返回空数组。
 6. 同一轮可以选择多个彼此独立的动作，最多 3 个。
@@ -798,7 +712,7 @@ _ACTION_INITIALIZER_PROMPT = """\
 
 # 输入格式
 用户消息是一段中文行动上下文字符串，不是 JSON。
-它描述当前回合的动态信息：触发来源、输出要求、已形成的决定、即时感受、社交语境、当前输入摘要、检索结论、可绑定承诺、相关记忆和对话进度。
+它描述当前回合的动态信息：触发来源、输出要求、已形成的决定、即时感受、社交语境、当前输入摘要、检索结论、活动承诺线索、相关记忆和对话进度。
 
 # 输出格式
 只返回合法 JSON 字符串：
@@ -806,7 +720,7 @@ _ACTION_INITIALIZER_PROMPT = """\
   "action_requests": [
     {
       "capability": "speak | memory_lifecycle_update | trigger_future_cognition",
-      "decision": "生命周期枚举，或简短语义决定",
+      "decision": "文字表层或未来认知的简短语义决定；memory_lifecycle_update 可省略或留空",
       "detail": "一个精确语义字符串",
       "reason": "选择这个动作的简短语义理由"
     }

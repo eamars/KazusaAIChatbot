@@ -61,6 +61,11 @@ stage_0_msg_decontexualizer
        L2d action initializer
        state["internal_monologue"]
        state["action_specs"]
+  -> stage_2_memory_lifecycle
+       consumes `memory_lifecycle_update` route intents
+       aliases active commitments for specialist review
+       materializes private `apply_memory_lifecycle_update` actions
+       writes prompt-safe `memory_lifecycle_context`
   -> route
        selected speak action -> stage_3_action
            selected L3 text directives
@@ -97,6 +102,15 @@ the text surface path runs L3 directives plus `dialog_agent` and records the
 final text as `SurfaceOutputV1(surface_kind="text")`. When no visible surface
 is selected, the graph may still produce private finalization or action results
 for consolidation without fabricating user-visible dialog.
+
+Memory lifecycle is also split by ownership. L2d may select
+`memory_lifecycle_update` when the current turn might affect an active
+commitment, but it does not choose a commitment, alias, database id, or lifecycle
+status. The memory lifecycle specialist runs before selected L3 text, chooses
+prompt-safe aliases, and deterministic code resolves those aliases into
+`apply_memory_lifecycle_update` actions. L3 receives only
+`memory_lifecycle_context` role anchors, so content can avoid reopening a
+fulfilled promise without seeing persistence ids.
 
 L3 text and L3 image are treated as registered surface handlers. The current
 runtime implements text-surface routing and keeps visual directives/promptable

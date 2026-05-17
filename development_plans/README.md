@@ -42,7 +42,7 @@ No active short-term plans.
 
 | Document | Type | Status |
 |---|---|---|
-| [memory_lifecycle_specialist_routing_plan.md](active/bugfix/memory_lifecycle_specialist_routing_plan.md) | Bugfix development plan | approved |
+| [memory_lifecycle_specialist_routing_plan.md](active/bugfix/memory_lifecycle_specialist_routing_plan.md) | Bugfix development plan | in_progress |
 
 ## Reference Documents
 

@@ -125,11 +125,13 @@ cognition's route or contact decision.
 If shared cognition does not select outward contact, the route is recorded as
 a silence, audit, or progress observation.
 
-Past-due commitments do not disappear because of due age. A commitment can be
-retired only when cognition selects a private `memory_lifecycle_update` action
-and deterministic target binding resolves exactly one eligible
-`user_memory_units.active_commitment`. If the target cannot be bound, the
-lifecycle request is rejected before persistence.
+Past-due commitments do not disappear because of due age. Shared cognition may
+select a private `memory_lifecycle_update` route, but that route is handed to
+the memory lifecycle specialist before execution. A commitment can be retired
+only after the specialist chooses a prompt-safe alias and deterministic code
+resolves it into an executable `apply_memory_lifecycle_update` action for one
+eligible `user_memory_units.active_commitment`. If the alias cannot be bound,
+the lifecycle request is rejected before persistence.
 
 ## Repeat Suppression
 

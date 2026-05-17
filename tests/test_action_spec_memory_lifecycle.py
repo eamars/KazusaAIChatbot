@@ -11,6 +11,10 @@ from kazusa_ai_chatbot.action_spec.handlers.memory_lifecycle import (
     validate_memory_lifecycle_action,
 )
 from kazusa_ai_chatbot.action_spec.models import ActionValidationError
+from kazusa_ai_chatbot.action_spec.registry import (
+    APPLY_MEMORY_LIFECYCLE_UPDATE_CAPABILITY,
+    MEMORY_LIFECYCLE_UPDATE_CAPABILITY,
+)
 
 
 def _memory_target() -> dict:
@@ -26,7 +30,7 @@ def _memory_target() -> dict:
 def _action_spec() -> dict:
     return {
         "schema_version": "action_spec.v1",
-        "kind": "memory_lifecycle_update",
+        "kind": APPLY_MEMORY_LIFECYCLE_UPDATE_CAPABILITY,
         "cognition_mode": "deliberative",
         "source_refs": [
             {
@@ -69,7 +73,7 @@ def test_lifecycle_status_mapping_matches_existing_user_memory_statuses() -> Non
     assert map_lifecycle_decision_to_status("deferred") == "active"
 
 
-def test_memory_lifecycle_update_builds_narrow_repository_call() -> None:
+def test_apply_memory_lifecycle_update_builds_narrow_repository_call() -> None:
     """The handler should produce only the approved user-memory update fields."""
 
     action_spec = _action_spec()
@@ -205,3 +209,24 @@ def test_memory_lifecycle_rejects_non_utc_storage_timestamp() -> None:
             storage_timestamp_utc="2026-05-16T12:00:00+12:00",
             action_attempt_id="attempt-004",
         )
+
+
+def test_memory_lifecycle_route_intent_is_not_executable_db_action() -> None:
+    """The L2d route intent must not be accepted as a DB lifecycle mutation."""
+
+    action_spec = _action_spec()
+    action_spec["kind"] = MEMORY_LIFECYCLE_UPDATE_CAPABILITY
+    action_spec["target"] = {
+        "schema_version": "action_target.v1",
+        "target_kind": "cognitive_episode",
+        "target_id": None,
+        "owner": "memory_lifecycle_specialist",
+        "scope": {"unit_type": "active_commitment"},
+    }
+    action_spec["params"] = {
+        "review_kind": "active_commitment_lifecycle",
+        "detail": "Review active commitments for lifecycle changes.",
+    }
+
+    with pytest.raises(ActionValidationError, match="apply_memory_lifecycle_update"):
+        validate_memory_lifecycle_action(action_spec)

@@ -213,11 +213,13 @@ async def test_facts_harvester_receives_prompt_safe_action_trace(monkeypatch) ->
         "action_results": [
             {
                 "schema_version": "consolidation_action_projection.v1",
-                "action_kind": "memory_lifecycle_update",
+                "action_kind": "apply_memory_lifecycle_update",
                 "status": "executed",
                 "visibility": "private",
                 "semantic_decision": "角色决定放弃这个过期承诺。",
-                "result_summary": "memory_lifecycle_update executed: cancelled",
+                "result_summary": (
+                    "apply_memory_lifecycle_update executed: cancelled"
+                ),
                 "evidence_refs": [],
             }
         ],
@@ -232,7 +234,7 @@ async def test_facts_harvester_receives_prompt_safe_action_trace(monkeypatch) ->
     rendered = json.dumps(action_trace, ensure_ascii=False)
     assert "episode_trace_projection" in system_prompt
     assert action_trace["action_results"][0]["action_kind"] == (
-        "memory_lifecycle_update"
+        "apply_memory_lifecycle_update"
     )
     assert "handler_id" not in rendered
     assert "raw_params" not in rendered
@@ -337,11 +339,13 @@ async def test_fact_harvester_evaluator_receives_prompt_safe_action_trace(
             "action_results": [
                 {
                     "schema_version": "consolidation_action_projection.v1",
-                    "action_kind": "memory_lifecycle_update",
+                    "action_kind": "apply_memory_lifecycle_update",
                     "status": "executed",
                     "visibility": "private",
                     "semantic_decision": "角色决定放弃这个过期承诺。",
-                    "result_summary": "memory_lifecycle_update executed: cancelled",
+                    "result_summary": (
+                        "apply_memory_lifecycle_update executed: cancelled"
+                    ),
                     "evidence_refs": [],
                 }
             ],
@@ -357,7 +361,7 @@ async def test_fact_harvester_evaluator_receives_prompt_safe_action_trace(
     assert "episode_trace_projection" in system_prompt
     assert payload["episode_trace_projection"]["action_results"][0][
         "action_kind"
-    ] == "memory_lifecycle_update"
+    ] == "apply_memory_lifecycle_update"
     assert "handler_id" not in rendered
     assert "raw_params" not in rendered
 

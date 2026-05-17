@@ -42,7 +42,6 @@ logger = logging.getLogger(__name__)
 _CASE_FILE_ENV = "L2D_LIVE_CASE_FILE"
 _CASE_ID_ENV = "L2D_LIVE_CASE_ID"
 REAL_COMMITMENT_CASE_LIMIT = 1
-LIFECYCLE_TEST_DECISION = "abandoned"
 _FORBIDDEN_ACTION_SPEC_FRAGMENTS = (
     "handler_id",
     "credentials",
@@ -145,18 +144,23 @@ async def test_l2d_live_routes_real_active_commitment_lifecycle_update() -> None
         f"trace={trace_path} kinds={json.dumps(observed_kinds)}"
     )
 
-    assert "可绑定承诺：有" in prompt_payload
+    assert "活动承诺线索：有" in prompt_payload
     assert active_commitment["unit_id"] not in prompt_payload
     assert "speak" not in observed_kinds
     assert len(lifecycle_specs) == 1
     lifecycle_spec = lifecycle_specs[0]
     assert lifecycle_spec["visibility"] == "private"
-    assert lifecycle_spec["target"]["target_id"] == active_commitment["unit_id"]
-    assert lifecycle_spec["params"]["unit_id"] == active_commitment["unit_id"]
-    assert lifecycle_spec["params"]["unit_type"] == "active_commitment"
-    assert lifecycle_spec["params"]["lifecycle_decision"] == (
-        LIFECYCLE_TEST_DECISION
+    assert lifecycle_spec["target"]["target_kind"] == "cognitive_episode"
+    assert lifecycle_spec["target"]["target_id"] is None
+    assert lifecycle_spec["target"]["owner"] == "memory_lifecycle_specialist"
+    assert lifecycle_spec["params"]["review_kind"] == (
+        "active_commitment_lifecycle"
     )
+    assert lifecycle_spec["params"]["detail"]
+    assert set(lifecycle_spec["params"]) == {"review_kind", "detail"}
+    serialized_spec = json.dumps(lifecycle_spec, ensure_ascii=False)
+    assert active_commitment["unit_id"] not in serialized_spec
+    assert "lifecycle_decision" not in serialized_spec
     assert leakage_errors == []
 
 

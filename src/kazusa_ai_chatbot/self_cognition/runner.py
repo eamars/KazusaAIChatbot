@@ -13,6 +13,7 @@ from kazusa_ai_chatbot import event_logging
 from kazusa_ai_chatbot.action_spec.attempt_ledger import upsert_action_attempt
 from kazusa_ai_chatbot.action_spec.execution import execute_action_specs_for_trace
 from kazusa_ai_chatbot.action_spec.registry import (
+    APPLY_MEMORY_LIFECYCLE_UPDATE_CAPABILITY,
     MEMORY_LIFECYCLE_UPDATE_CAPABILITY,
     SPEAK_CAPABILITY,
     TRIGGER_FUTURE_COGNITION_CAPABILITY,
@@ -36,6 +37,9 @@ from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition import (
 )
 from kazusa_ai_chatbot.nodes.persona_supervisor2_l3_surface import (
     call_l3_text_surface_handler,
+)
+from kazusa_ai_chatbot.nodes.persona_supervisor2_memory_lifecycle import (
+    call_memory_lifecycle_update_handler,
 )
 from kazusa_ai_chatbot.nodes.persona_supervisor2_rag_projection import (
     project_known_facts,
@@ -64,7 +68,7 @@ RAG_BACKED_CASE_NAMES = frozenset(
 )
 SELF_COGNITION_PRIVATE_ACTION_KINDS = frozenset(
     (
-        MEMORY_LIFECYCLE_UPDATE_CAPABILITY,
+        APPLY_MEMORY_LIFECYCLE_UPDATE_CAPABILITY,
         TRIGGER_FUTURE_COGNITION_CAPABILITY,
     )
 )
@@ -588,9 +592,13 @@ async def _with_private_action_results(
 ) -> dict[str, Any]:
     """Execute selected private actions before route and consolidation handling."""
 
-    private_specs = _private_action_specs(cognition_output)
+    routed_output = await _with_memory_lifecycle_specialist_update(
+        cognition_state,
+        cognition_output,
+    )
+    private_specs = _private_action_specs(routed_output)
     if not private_specs:
-        return_value = cognition_output
+        return_value = routed_output
         return return_value
 
     action_results = await execute_action_specs_for_trace(
@@ -598,7 +606,7 @@ async def _with_private_action_results(
         storage_timestamp_utc=cognition_state["storage_timestamp_utc"],
         record_attempt_func=upsert_action_attempt,
     )
-    updated_output = dict(cognition_output)
+    updated_output = dict(routed_output)
     updated_output["action_results"] = action_results
     updated_output["episode_trace"] = _episode_trace_for_private_actions(
         cognition_state,
@@ -606,6 +614,39 @@ async def _with_private_action_results(
         action_results,
     )
     return updated_output
+
+
+async def _with_memory_lifecycle_specialist_update(
+    cognition_state: dict[str, Any],
+    cognition_output: dict[str, Any],
+) -> dict[str, Any]:
+    """Run lifecycle specialist when shared cognition selected the route."""
+
+    if not _has_memory_lifecycle_route(cognition_output):
+        return_value = cognition_output
+        return return_value
+
+    specialist_state = dict(cognition_state)
+    specialist_state.update(cognition_output)
+    specialist_update = await call_memory_lifecycle_update_handler(
+        specialist_state,
+    )
+    if not specialist_update:
+        return_value = cognition_output
+        return return_value
+
+    updated_output = dict(cognition_output)
+    updated_output.update(specialist_update)
+    return updated_output
+
+
+def _has_memory_lifecycle_route(cognition_output: dict[str, Any]) -> bool:
+    """Return whether cognition selected a lifecycle specialist route."""
+
+    for action_spec in _action_specs(cognition_output):
+        if action_spec.get("kind") == MEMORY_LIFECYCLE_UPDATE_CAPABILITY:
+            return True
+    return False
 
 
 def _private_action_specs(cognition_output: dict[str, Any]) -> list[dict[str, Any]]:

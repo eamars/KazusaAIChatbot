@@ -52,7 +52,13 @@ ALLOWED_CONTINUATION_MODES = frozenset(
     ("none", "immediate_followup", "scheduled_followup", "background_followup")
 )
 ALLOWED_CAPABILITY_OWNERS = frozenset(
-    ("memory_lifecycle", "orchestrator", "l3_text", "l3_image")
+    (
+        "memory_lifecycle",
+        "memory_lifecycle_specialist",
+        "orchestrator",
+        "l3_text",
+        "l3_image",
+    )
 )
 ALLOWED_COGNITION_MODES = frozenset(("deliberative", "reflex"))
 ALLOWED_URGENCY_VALUES = frozenset(("now", "background", "scheduled"))
@@ -152,6 +158,7 @@ class CapabilitySpecV1(TypedDict):
     category: Literal["action"]
     owner_module: Literal[
         "memory_lifecycle",
+        "memory_lifecycle_specialist",
         "orchestrator",
         "l3_text",
         "l3_image",

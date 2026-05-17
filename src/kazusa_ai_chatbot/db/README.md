@@ -304,7 +304,9 @@ That helper updates only one currently active `active_commitment`, records
 `updated_at`, stamps `completed_at`, `cancelled_at`, or `archived_at` when
 appropriate, and appends a `merge_history` audit row containing the
 action-attempt id and cognition-authored reason. It is the persistence owner
-behind validated `memory_lifecycle_update` actions.
+behind validated `apply_memory_lifecycle_update` actions. The
+`memory_lifecycle_update` action kind is only a cognition route to the memory
+lifecycle specialist and is not executable by database code.
 
 ### `character_state`
 

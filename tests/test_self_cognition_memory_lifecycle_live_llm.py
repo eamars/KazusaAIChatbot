@@ -97,12 +97,12 @@ async def test_self_cognition_e2e_retires_controlled_past_due_commitment() -> No
         action_results = cognition_output.get("action_results")
         lifecycle_specs = _rows_for_kind(
             action_specs,
-            "memory_lifecycle_update",
+            "apply_memory_lifecycle_update",
             field_name="kind",
         )
         lifecycle_results = _rows_for_kind(
             action_results,
-            "memory_lifecycle_update",
+            "apply_memory_lifecycle_update",
             field_name="action_kind",
         )
 

@@ -17,7 +17,7 @@ from kazusa_ai_chatbot.action_spec.handlers.memory_lifecycle import (
 )
 from kazusa_ai_chatbot.action_spec.models import ActionValidationError
 from kazusa_ai_chatbot.action_spec.registry import (
-    MEMORY_LIFECYCLE_UPDATE_CAPABILITY,
+    APPLY_MEMORY_LIFECYCLE_UPDATE_CAPABILITY,
     SPEAK_CAPABILITY,
     TRIGGER_FUTURE_COGNITION_CAPABILITY,
 )
@@ -75,7 +75,7 @@ async def execute_action_specs_for_trace(
                 "status": status,
                 "errors": list(eval_result["errors"]),
             }
-        elif validated_spec["kind"] == MEMORY_LIFECYCLE_UPDATE_CAPABILITY:
+        elif validated_spec["kind"] == APPLY_MEMORY_LIFECYCLE_UPDATE_CAPABILITY:
             try:
                 memory_result = await execute_user_memory_lifecycle_action(
                     validated_spec,
@@ -84,21 +84,27 @@ async def execute_action_specs_for_trace(
                 )
             except ActionValidationError as exc:
                 status = "rejected"
-                result_summary = f"memory_lifecycle_update rejected: {exc}"
+                result_summary = (
+                    f"{APPLY_MEMORY_LIFECYCLE_UPDATE_CAPABILITY} rejected: {exc}"
+                )
                 execution_result = {
                     "status": status,
                     "error": str(exc),
                 }
             except DatabaseOperationError as exc:
                 status = "failed"
-                result_summary = f"memory_lifecycle_update failed: {exc}"
+                result_summary = (
+                    f"{APPLY_MEMORY_LIFECYCLE_UPDATE_CAPABILITY} failed: {exc}"
+                )
                 execution_result = {
                     "status": status,
                     "error": str(exc),
                 }
             except ValueError as exc:
                 status = "rejected"
-                result_summary = f"memory_lifecycle_update rejected: {exc}"
+                result_summary = (
+                    f"{APPLY_MEMORY_LIFECYCLE_UPDATE_CAPABILITY} rejected: {exc}"
+                )
                 execution_result = {
                     "status": status,
                     "error": str(exc),
@@ -110,7 +116,8 @@ async def execute_action_specs_for_trace(
                 else:
                     status = "failed"
                 result_summary = (
-                    f"memory_lifecycle_update {memory_result['status']}: "
+                    f"{APPLY_MEMORY_LIFECYCLE_UPDATE_CAPABILITY} "
+                    f"{memory_result['status']}: "
                     f"{memory_result['lifecycle_status']}"
                 )
                 execution_result = {

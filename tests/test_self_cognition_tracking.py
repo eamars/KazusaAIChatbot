@@ -13,6 +13,7 @@ from typing import Any
 import pytest
 
 from kazusa_ai_chatbot.action_spec.registry import (
+    APPLY_MEMORY_LIFECYCLE_UPDATE_CAPABILITY,
     MEMORY_LIFECYCLE_UPDATE_CAPABILITY,
     SPEAK_CAPABILITY,
 )
@@ -288,7 +289,7 @@ def _speak_action_spec() -> dict[str, Any]:
 def _memory_lifecycle_action_spec() -> dict[str, Any]:
     spec = {
         "schema_version": "action_spec.v1",
-        "kind": MEMORY_LIFECYCLE_UPDATE_CAPABILITY,
+        "kind": APPLY_MEMORY_LIFECYCLE_UPDATE_CAPABILITY,
         "cognition_mode": "deliberative",
         "source_refs": [
             {
@@ -333,6 +334,47 @@ def _memory_lifecycle_action_spec() -> dict[str, Any]:
             "include_result_as": None,
         },
         "reason": "The character chose to abandon the stale commitment.",
+    }
+    return spec
+
+
+def _memory_lifecycle_route_action_spec() -> dict[str, Any]:
+    spec = {
+        "schema_version": "action_spec.v1",
+        "kind": MEMORY_LIFECYCLE_UPDATE_CAPABILITY,
+        "cognition_mode": "deliberative",
+        "source_refs": [
+            {
+                "schema_version": "action_source_ref.v1",
+                "ref_kind": "cognitive_episode",
+                "ref_id": "self-cognition-episode",
+                "owner": "cognition_episode",
+                "relationship": "basis",
+                "evidence_refs": [],
+            },
+        ],
+        "target": {
+            "schema_version": "action_target.v1",
+            "target_kind": "cognitive_episode",
+            "target_id": None,
+            "owner": "memory_lifecycle_specialist",
+            "scope": {"unit_type": "active_commitment"},
+        },
+        "params": {
+            "review_kind": "active_commitment_lifecycle",
+            "detail": "Review the active commitment lifecycle.",
+        },
+        "urgency": "background",
+        "visibility": "private",
+        "deadline": None,
+        "continuation": {
+            "schema_version": "action_continuation.v1",
+            "mode": "none",
+            "episode_type": None,
+            "max_depth": 0,
+            "include_result_as": None,
+        },
+        "reason": "The dry run selected lifecycle review.",
     }
     return spec
 
@@ -1064,11 +1106,13 @@ def test_runner_executes_private_lifecycle_action_for_consolidation(
             {
                 "schema_version": "action_result.v1",
                 "action_attempt_id": "action_attempt:memory-unit-001",
-                "action_kind": MEMORY_LIFECYCLE_UPDATE_CAPABILITY,
+                "action_kind": APPLY_MEMORY_LIFECYCLE_UPDATE_CAPABILITY,
                 "handler_owner": "memory_lifecycle",
                 "status": "executed",
                 "visibility": "private",
-                "result_summary": "memory_lifecycle_update executed: cancelled",
+                "result_summary": (
+                    "apply_memory_lifecycle_update executed: cancelled"
+                ),
                 "result_refs": [],
                 "continuation": action_specs[0]["continuation"],
                 "completed_at": "2026-05-10T00:30:00+00:00",
@@ -1108,14 +1152,120 @@ def test_runner_executes_private_lifecycle_action_for_consolidation(
     )
     cognition_output = artifact_payloads[models.ARTIFACT_COGNITION_OUTPUT]
 
-    assert captured_specs[0]["kind"] == MEMORY_LIFECYCLE_UPDATE_CAPABILITY
+    assert captured_specs[0]["kind"] == APPLY_MEMORY_LIFECYCLE_UPDATE_CAPABILITY
     assert cognition_output["action_results"][0]["status"] == "executed"
     assert cognition_output["episode_trace"]["action_results"][0][
         "action_kind"
-    ] == MEMORY_LIFECYCLE_UPDATE_CAPABILITY
+    ] == APPLY_MEMORY_LIFECYCLE_UPDATE_CAPABILITY
     assert captured_consolidation_state["episode_trace"]["action_results"][0][
         "status"
     ] == "executed"
+
+
+def test_runner_routes_lifecycle_intent_through_specialist_before_execution(
+    monkeypatch,
+) -> None:
+    """Self-cognition route intents should become apply actions via specialist."""
+
+    case = _commitment_case()
+    captured_specialist_state: dict[str, Any] = {}
+    captured_specs: list[dict[str, Any]] = []
+
+    async def specialist_handler(state: dict[str, Any]) -> dict[str, Any]:
+        captured_specialist_state.update(state)
+        return_value = {
+            "action_specs": [_memory_lifecycle_action_spec()],
+            "memory_lifecycle_context": {
+                "schema_version": "memory_lifecycle_context.v1",
+                "source": "memory_lifecycle_specialist",
+                "decision": "lifecycle_change",
+                "visible_alias_count": 1,
+                "omitted_alias_count": 0,
+                "lifecycle_decisions": [
+                    {
+                        "target_alias": "commitment_1",
+                        "decision": "abandoned",
+                        "role": "avoid_reopening",
+                        "evidence_anchor": "The commitment is stale.",
+                    }
+                ],
+                "content_anchor_roles": [
+                    {
+                        "role": "avoid_reopening",
+                        "anchor": "Do not reopen the stale commitment.",
+                    }
+                ],
+                "warnings": [],
+            },
+        }
+        return return_value
+
+    async def action_executor(
+        action_specs: list[dict[str, Any]],
+        *,
+        storage_timestamp_utc: str,
+        executed_action_attempt_ids: set[str] | None = None,
+        record_attempt_func: Any = None,
+    ) -> list[dict[str, Any]]:
+        del storage_timestamp_utc, executed_action_attempt_ids
+        del record_attempt_func
+        captured_specs.extend(action_specs)
+        action_results = [
+            {
+                "schema_version": "action_result.v1",
+                "action_attempt_id": "action_attempt:memory-unit-001",
+                "action_kind": APPLY_MEMORY_LIFECYCLE_UPDATE_CAPABILITY,
+                "handler_owner": "memory_lifecycle",
+                "status": "executed",
+                "visibility": "private",
+                "result_summary": (
+                    "apply_memory_lifecycle_update executed: cancelled"
+                ),
+                "result_refs": [],
+                "continuation": action_specs[0]["continuation"],
+                "completed_at": "2026-05-10T00:30:00+00:00",
+            }
+        ]
+        return action_results
+
+    monkeypatch.setattr(
+        runner,
+        "call_memory_lifecycle_update_handler",
+        specialist_handler,
+    )
+    monkeypatch.setattr(
+        runner,
+        "execute_action_specs_for_trace",
+        action_executor,
+    )
+    artifact_payloads = runner.build_self_cognition_case_artifacts(
+        case,
+        cognition_client=lambda state: {
+            "logical_stance": "CONFIRM",
+            "character_intent": "DISMISS",
+            "internal_monologue": "Review the stale commitment privately.",
+            "judgment_note": "The commitment may need lifecycle review.",
+            "action_directives": {"linguistic_directives": {"content_anchors": []}},
+            "action_specs": [_memory_lifecycle_route_action_spec()],
+        },
+        apply_consolidation=False,
+        execute_private_actions=True,
+    )
+    cognition_output = artifact_payloads[models.ARTIFACT_COGNITION_OUTPUT]
+
+    assert captured_specialist_state["action_specs"][0][
+        "kind"
+    ] == MEMORY_LIFECYCLE_UPDATE_CAPABILITY
+    assert captured_specs[0]["kind"] == APPLY_MEMORY_LIFECYCLE_UPDATE_CAPABILITY
+    assert cognition_output["action_specs"][0][
+        "kind"
+    ] == APPLY_MEMORY_LIFECYCLE_UPDATE_CAPABILITY
+    assert cognition_output["memory_lifecycle_context"]["decision"] == (
+        "lifecycle_change"
+    )
+    assert cognition_output["episode_trace"]["action_specs"][0][
+        "kind"
+    ] == APPLY_MEMORY_LIFECYCLE_UPDATE_CAPABILITY
 
 
 def test_runner_does_not_execute_private_actions_by_default(

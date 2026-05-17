@@ -9,6 +9,9 @@ from kazusa_ai_chatbot.action_spec.models import (
     ActionValidationError,
     validate_action_spec,
 )
+from kazusa_ai_chatbot.action_spec.registry import (
+    APPLY_MEMORY_LIFECYCLE_UPDATE_CAPABILITY,
+)
 from kazusa_ai_chatbot.db.user_memory_units import (
     update_user_memory_unit_lifecycle,
 )
@@ -27,12 +30,14 @@ def map_lifecycle_decision_to_status(decision: str) -> str:
 def validate_memory_lifecycle_action(
     action_spec: dict[str, Any],
 ) -> dict[str, Any]:
-    """Validate the initial memory-lifecycle action slice."""
+    """Validate the executable memory-lifecycle action slice."""
 
     _reject_evolving_memory_targets(action_spec)
     validated = validate_action_spec(action_spec)
-    if validated["kind"] != "memory_lifecycle_update":
-        raise ActionValidationError("kind: expected memory_lifecycle_update")
+    if validated["kind"] != APPLY_MEMORY_LIFECYCLE_UPDATE_CAPABILITY:
+        raise ActionValidationError(
+            f"kind: expected {APPLY_MEMORY_LIFECYCLE_UPDATE_CAPABILITY}"
+        )
     params = validated["params"]
     _validate_memory_params(params)
     target = validated["target"]

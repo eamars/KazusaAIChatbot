@@ -6,24 +6,53 @@ import json
 
 from kazusa_ai_chatbot.action_spec.evaluator import ActionSpecEvaluator
 from kazusa_ai_chatbot.action_spec.registry import (
+    APPLY_MEMORY_LIFECYCLE_UPDATE_CAPABILITY,
+    MEMORY_LIFECYCLE_UPDATE_CAPABILITY,
+    SPEAK_CAPABILITY,
+    TRIGGER_FUTURE_COGNITION_CAPABILITY,
     build_initial_action_capabilities,
     project_prompt_affordances,
 )
 
 
-def _source_ref() -> dict:
+def _cognitive_source_ref() -> dict:
     return {
         "schema_version": "action_source_ref.v1",
-        "ref_kind": "memory_unit",
-        "ref_id": "promise-001",
-        "owner": "user_memory_units",
+        "ref_kind": "cognitive_episode",
+        "ref_id": "current_cognitive_episode",
+        "owner": "cognition_episode",
         "relationship": "basis",
         "evidence_refs": [],
     }
 
 
+def _memory_source_ref() -> dict:
+    return {
+        "schema_version": "action_source_ref.v1",
+        "ref_kind": "memory_unit",
+        "ref_id": "promise-001",
+        "owner": "user_memory_units",
+        "relationship": "target",
+        "evidence_refs": [],
+    }
+
+
+def _source_refs_for_kind(kind: str) -> list[dict]:
+    if kind == APPLY_MEMORY_LIFECYCLE_UPDATE_CAPABILITY:
+        return [_cognitive_source_ref(), _memory_source_ref()]
+    return [_cognitive_source_ref()]
+
+
 def _target_for_kind(kind: str) -> dict:
-    if kind == "memory_lifecycle_update":
+    if kind == MEMORY_LIFECYCLE_UPDATE_CAPABILITY:
+        return {
+            "schema_version": "action_target.v1",
+            "target_kind": "cognitive_episode",
+            "target_id": None,
+            "owner": "memory_lifecycle_specialist",
+            "scope": {"unit_type": "active_commitment"},
+        }
+    if kind == APPLY_MEMORY_LIFECYCLE_UPDATE_CAPABILITY:
         return {
             "schema_version": "action_target.v1",
             "target_kind": "memory_unit",
@@ -31,7 +60,7 @@ def _target_for_kind(kind: str) -> dict:
             "owner": "user_memory_units",
             "scope": {"unit_type": "active_commitment"},
         }
-    if kind == "speak":
+    if kind == SPEAK_CAPABILITY:
         return {
             "schema_version": "action_target.v1",
             "target_kind": "current_channel",
@@ -39,7 +68,7 @@ def _target_for_kind(kind: str) -> dict:
             "owner": "l3_text",
             "scope": {"surface": "text"},
         }
-    if kind == "trigger_future_cognition":
+    if kind == TRIGGER_FUTURE_COGNITION_CAPABILITY:
         return {
             "schema_version": "action_target.v1",
             "target_kind": "cognitive_episode",
@@ -61,7 +90,12 @@ def _no_continuation() -> dict:
 
 
 def _params_for_kind(kind: str) -> dict:
-    if kind == "memory_lifecycle_update":
+    if kind == MEMORY_LIFECYCLE_UPDATE_CAPABILITY:
+        return {
+            "review_kind": "active_commitment_lifecycle",
+            "detail": "Review active commitments for lifecycle changes.",
+        }
+    if kind == APPLY_MEMORY_LIFECYCLE_UPDATE_CAPABILITY:
         return {
             "memory_kind": "user_memory_unit",
             "unit_type": "active_commitment",
@@ -69,13 +103,13 @@ def _params_for_kind(kind: str) -> dict:
             "lifecycle_decision": "abandoned",
             "due_at": "2026-05-07T00:00:00+00:00",
         }
-    if kind == "speak":
+    if kind == SPEAK_CAPABILITY:
         return {
             "delivery_mode": "visible_reply",
             "execute_at": None,
             "surface_requirements": {"tone": "brief"},
         }
-    if kind == "trigger_future_cognition":
+    if kind == TRIGGER_FUTURE_COGNITION_CAPABILITY:
         return {
             "episode_type": "self_cognition",
             "trigger_at": "2026-05-16 00:30",
@@ -89,13 +123,21 @@ def _action_spec(kind: str) -> dict:
         "schema_version": "action_spec.v1",
         "kind": kind,
         "cognition_mode": "deliberative",
-        "source_refs": [_source_ref()],
+        "source_refs": _source_refs_for_kind(kind),
         "target": _target_for_kind(kind),
         "params": _params_for_kind(kind),
-        "urgency": "scheduled" if kind == "trigger_future_cognition" else "now",
+        "urgency": (
+            "scheduled"
+            if kind == TRIGGER_FUTURE_COGNITION_CAPABILITY
+            else "now"
+        ),
         "visibility": (
             "private"
-            if kind in ("memory_lifecycle_update", "trigger_future_cognition")
+            if kind in (
+                MEMORY_LIFECYCLE_UPDATE_CAPABILITY,
+                APPLY_MEMORY_LIFECYCLE_UPDATE_CAPABILITY,
+                TRIGGER_FUTURE_COGNITION_CAPABILITY,
+            )
             else "user_visible"
         ),
         "deadline": None,
@@ -110,24 +152,56 @@ def test_initial_registry_contains_only_approved_runtime_capabilities() -> None:
     capabilities = build_initial_action_capabilities()
 
     assert set(capabilities) == {
-        "memory_lifecycle_update",
-        "speak",
-        "trigger_future_cognition",
+        MEMORY_LIFECYCLE_UPDATE_CAPABILITY,
+        APPLY_MEMORY_LIFECYCLE_UPDATE_CAPABILITY,
+        SPEAK_CAPABILITY,
+        TRIGGER_FUTURE_COGNITION_CAPABILITY,
     }
-    assert capabilities["memory_lifecycle_update"]["owner_module"] == "memory_lifecycle"
-    assert capabilities["speak"]["owner_module"] == "l3_text"
-    assert capabilities["trigger_future_cognition"]["owner_module"] == "orchestrator"
+    assert (
+        capabilities[MEMORY_LIFECYCLE_UPDATE_CAPABILITY]["owner_module"]
+        == "memory_lifecycle_specialist"
+    )
+    assert (
+        capabilities[APPLY_MEMORY_LIFECYCLE_UPDATE_CAPABILITY]["owner_module"]
+        == "memory_lifecycle"
+    )
+    assert capabilities[SPEAK_CAPABILITY]["owner_module"] == "l3_text"
+    assert (
+        capabilities[TRIGGER_FUTURE_COGNITION_CAPABILITY]["owner_module"]
+        == "orchestrator"
+    )
     assert "send_message" not in capabilities
     assert "web_research" not in capabilities
     assert "schedule_self_check" not in capabilities
     assert "note_open_loop" not in capabilities
 
 
-def test_memory_lifecycle_schema_and_vocabulary_match_plan() -> None:
-    """The lifecycle capability should expose the exact approved vocabulary."""
+def test_memory_lifecycle_route_schema_matches_router_contract() -> None:
+    """The L2d route capability must not expose DB mutation parameters."""
 
     capabilities = build_initial_action_capabilities()
-    capability = capabilities["memory_lifecycle_update"]
+    capability = capabilities[MEMORY_LIFECYCLE_UPDATE_CAPABILITY]
+    schema = capability["input_schema"]
+    properties = schema["properties"]
+
+    assert schema["required"] == [
+        "review_kind",
+        "detail",
+    ]
+    assert properties["review_kind"]["enum"] == [
+        "active_commitment_lifecycle",
+    ]
+    assert "unit_id" not in properties
+    assert "target_alias" not in properties
+    assert "lifecycle_decision" not in properties
+    assert capability["category"] == "action"
+
+
+def test_apply_memory_lifecycle_schema_and_vocabulary_match_plan() -> None:
+    """The executable lifecycle action should expose DB update vocabulary."""
+
+    capabilities = build_initial_action_capabilities()
+    capability = capabilities[APPLY_MEMORY_LIFECYCLE_UPDATE_CAPABILITY]
     schema = capability["input_schema"]
     properties = schema["properties"]
 
@@ -157,6 +231,7 @@ def test_prompt_affordance_projection_excludes_runtime_internals() -> None:
     serialized = json.dumps(projection, sort_keys=True).lower()
 
     assert "memory_lifecycle_update" in serialized
+    assert "apply_memory_lifecycle_update" not in serialized
     assert "speak" in serialized
     assert "trigger_future_cognition" in serialized
     assert "send_message" not in serialized
@@ -183,9 +258,10 @@ def test_evaluator_rejects_reflex_for_all_current_capabilities() -> None:
     evaluator = ActionSpecEvaluator(build_initial_action_capabilities())
 
     for kind in (
-        "memory_lifecycle_update",
-        "speak",
-        "trigger_future_cognition",
+        MEMORY_LIFECYCLE_UPDATE_CAPABILITY,
+        APPLY_MEMORY_LIFECYCLE_UPDATE_CAPABILITY,
+        SPEAK_CAPABILITY,
+        TRIGGER_FUTURE_COGNITION_CAPABILITY,
     ):
         action_spec = _action_spec(kind)
         action_spec["cognition_mode"] = "reflex"
@@ -199,10 +275,59 @@ def test_evaluator_accepts_speak_surface_action_without_dispatcher_bridge() -> N
 
     evaluator = ActionSpecEvaluator(build_initial_action_capabilities())
 
-    result = evaluator.evaluate(_action_spec("speak"))
+    result = evaluator.evaluate(_action_spec(SPEAK_CAPABILITY))
 
     assert result["ok"] is True
     assert result["handler_owner"] == "l3_text"
+
+
+def test_evaluator_accepts_memory_lifecycle_route_intent_without_db_target() -> None:
+    """L2d memory lifecycle specs route to the specialist, not the DB."""
+
+    evaluator = ActionSpecEvaluator(build_initial_action_capabilities())
+
+    result = evaluator.evaluate(_action_spec(MEMORY_LIFECYCLE_UPDATE_CAPABILITY))
+
+    assert result["ok"] is True
+    assert result["handler_owner"] == "memory_lifecycle_specialist"
+    assert result["action_spec"]["target"]["target_kind"] == "cognitive_episode"
+    assert (
+        result["action_spec"]["target"]["owner"]
+        == "memory_lifecycle_specialist"
+    )
+    assert all(
+        source_ref["ref_kind"] != "memory_unit"
+        for source_ref in result["action_spec"]["source_refs"]
+    )
+    assert "unit_id" not in result["action_spec"]["params"]
+
+
+def test_evaluator_rejects_memory_lifecycle_route_with_memory_unit_ref() -> None:
+    """Route intents must not smuggle a DB memory-unit binding."""
+
+    evaluator = ActionSpecEvaluator(build_initial_action_capabilities())
+    action_spec = _action_spec(MEMORY_LIFECYCLE_UPDATE_CAPABILITY)
+    action_spec["source_refs"].append(_memory_source_ref())
+
+    result = evaluator.evaluate(action_spec)
+
+    assert result["ok"] is False
+    assert any("memory_unit" in error for error in result["errors"])
+
+
+def test_evaluator_accepts_apply_memory_lifecycle_executable_action() -> None:
+    """Only the apply action carries a trusted user-memory unit target."""
+
+    evaluator = ActionSpecEvaluator(build_initial_action_capabilities())
+
+    result = evaluator.evaluate(
+        _action_spec(APPLY_MEMORY_LIFECYCLE_UPDATE_CAPABILITY)
+    )
+
+    assert result["ok"] is True
+    assert result["handler_owner"] == "memory_lifecycle"
+    assert result["action_spec"]["target"]["target_kind"] == "memory_unit"
+    assert result["action_spec"]["params"]["unit_id"] == "promise-001"
 
 
 def test_evaluator_accepts_private_future_cognition_trigger() -> None:
@@ -210,7 +335,7 @@ def test_evaluator_accepts_private_future_cognition_trigger() -> None:
 
     evaluator = ActionSpecEvaluator(build_initial_action_capabilities())
 
-    action_spec = _action_spec("trigger_future_cognition")
+    action_spec = _action_spec(TRIGGER_FUTURE_COGNITION_CAPABILITY)
     action_spec["visibility"] = "private"
     result = evaluator.evaluate(action_spec)
 
@@ -222,7 +347,7 @@ def test_evaluator_validates_continuation_contract() -> None:
     """Continuation requests must be structurally bounded before execution."""
 
     evaluator = ActionSpecEvaluator(build_initial_action_capabilities())
-    action_spec = _action_spec("trigger_future_cognition")
+    action_spec = _action_spec(TRIGGER_FUTURE_COGNITION_CAPABILITY)
     action_spec["continuation"] = {
         "schema_version": "action_continuation.v1",
         "mode": "immediate_followup",

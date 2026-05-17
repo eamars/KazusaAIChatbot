@@ -627,7 +627,7 @@ async def test_chat_consolidates_private_action_result_without_dialog(monkeypatc
         {
             "schema_version": "action_result.v1",
             "action_attempt_id": "action_attempt:abc",
-            "action_kind": "memory_lifecycle_update",
+            "action_kind": "apply_memory_lifecycle_update",
             "handler_owner": "memory_lifecycle",
             "status": "executed",
             "visibility": "private",
@@ -656,7 +656,7 @@ async def test_chat_consolidates_private_action_result_without_dialog(monkeypatc
     assert response.messages == []
     await asyncio.wait_for(consolidation_done.wait(), timeout=1.0)
     assert captured_state["action_results"][0]["action_kind"] == (
-        "memory_lifecycle_update"
+        "apply_memory_lifecycle_update"
     )
     save_assistant_message.assert_not_awaited()
     progress_recorder.assert_not_awaited()

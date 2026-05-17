@@ -10,6 +10,7 @@ from kazusa_ai_chatbot.action_spec.models import (
 )
 
 MEMORY_LIFECYCLE_UPDATE_CAPABILITY = "memory_lifecycle_update"
+APPLY_MEMORY_LIFECYCLE_UPDATE_CAPABILITY = "apply_memory_lifecycle_update"
 SPEAK_CAPABILITY = "speak"
 TRIGGER_FUTURE_COGNITION_CAPABILITY = "trigger_future_cognition"
 
@@ -19,6 +20,9 @@ def build_initial_action_capabilities() -> dict[str, CapabilitySpecV1]:
 
     capabilities = {
         MEMORY_LIFECYCLE_UPDATE_CAPABILITY: _memory_lifecycle_capability(),
+        APPLY_MEMORY_LIFECYCLE_UPDATE_CAPABILITY: (
+            _apply_memory_lifecycle_capability()
+        ),
         SPEAK_CAPABILITY: _speak_capability(),
         TRIGGER_FUTURE_COGNITION_CAPABILITY: _future_cognition_capability(),
     }
@@ -49,6 +53,44 @@ def _memory_lifecycle_capability() -> CapabilitySpecV1:
     return_value: CapabilitySpecV1 = {
         "schema_version": "capability_spec.v1",
         "capability_kind": MEMORY_LIFECYCLE_UPDATE_CAPABILITY,
+        "category": "action",
+        "owner_module": "memory_lifecycle_specialist",
+        "input_schema": {
+            "type": "object",
+            "required": [
+                "review_kind",
+                "detail",
+            ],
+            "properties": {
+                "review_kind": {
+                    "type": "string",
+                    "enum": ["active_commitment_lifecycle"],
+                },
+                "detail": {"type": "string"},
+            },
+        },
+        "output_schema": {
+            "type": "object",
+            "properties": {
+                "status": {"type": "string"},
+            },
+        },
+        "handler_id": "memory_lifecycle.specialist.route.v1",
+        "lifecycle_hooks": ["route_to_specialist"],
+        "permission_policy": "policy:memory_lifecycle.private_review.v1",
+        "rate_limit_policy": "policy:action.default_rate_limit.v1",
+        "audit_policy": "policy:action.audit.v1",
+        "prompt_projection_policy": "policy:prompt.action_safe.v1",
+    }
+    return return_value
+
+
+def _apply_memory_lifecycle_capability() -> CapabilitySpecV1:
+    """Build the executable memory-lifecycle capability spec."""
+
+    return_value: CapabilitySpecV1 = {
+        "schema_version": "capability_spec.v1",
+        "capability_kind": APPLY_MEMORY_LIFECYCLE_UPDATE_CAPABILITY,
         "category": "action",
         "owner_module": "memory_lifecycle",
         "input_schema": {
@@ -211,16 +253,10 @@ def _memory_lifecycle_projection() -> dict[str, object]:
         "capability": MEMORY_LIFECYCLE_UPDATE_CAPABILITY,
         "available": True,
         "visibility": "private",
-        "allowed_lifecycle_decisions": [
-            "fulfilled",
-            "abandoned",
-            "obsolete",
-            "deferred",
-        ],
         "semantic_input_summary": [
-            "Use when the character semantically changes a commitment lifecycle.",
-            "Choose the lifecycle decision and describe the affected commitment.",
+            "Use when active commitments need semantic lifecycle review.",
+            "Provide review_kind=active_commitment_lifecycle and a short detail.",
         ],
-        "execution_boundary": "downstream lifecycle owner resolves persistence fields",
+        "execution_boundary": "memory lifecycle specialist chooses aliases and decisions",
     }
     return return_value

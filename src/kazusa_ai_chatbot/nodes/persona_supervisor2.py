@@ -24,6 +24,9 @@ from kazusa_ai_chatbot.nodes.persona_supervisor2_consolidator import call_consol
 from kazusa_ai_chatbot.nodes.persona_supervisor2_l3_surface import (
     call_l3_text_surface_handler,
 )
+from kazusa_ai_chatbot.nodes.persona_supervisor2_memory_lifecycle import (
+    call_memory_lifecycle_update_handler,
+)
 from kazusa_ai_chatbot.nodes.persona_supervisor2_msg_decontexualizer import call_msg_decontexualizer
 from kazusa_ai_chatbot.nodes.persona_supervisor2_rag_projection import project_known_facts
 from kazusa_ai_chatbot.nodes.persona_supervisor2_schema import GlobalPersonaState
@@ -422,13 +425,18 @@ async def persona_supervisor2(state: IMProcessState) -> dict:
     )
     persona_builder.add_node("stage_1_research", stage_1_research)
     persona_builder.add_node("stage_2_cognition", call_cognition_subgraph)
+    persona_builder.add_node(
+        "stage_2_memory_lifecycle",
+        call_memory_lifecycle_update_handler,
+    )
     persona_builder.add_node("stage_3_action", call_action_subgraph)  # perform action
     persona_builder.add_node("stage_3_no_response", stage_3_no_response)
     persona_builder.add_edge(START, "stage_0_msg_decontexualizer")
     persona_builder.add_edge("stage_0_msg_decontexualizer", "stage_1_research")
     persona_builder.add_edge("stage_1_research", "stage_2_cognition")
+    persona_builder.add_edge("stage_2_cognition", "stage_2_memory_lifecycle")
     persona_builder.add_conditional_edges(
-        "stage_2_cognition",
+        "stage_2_memory_lifecycle",
         _route_after_cognition,
         {
             "silent": "stage_3_no_response",
