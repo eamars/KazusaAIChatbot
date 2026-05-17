@@ -1767,6 +1767,7 @@ async def lifespan(app: FastAPI):
             _self_cognition_worker_handle = start_self_cognition_worker(
                 is_primary_interaction_busy=_primary_interaction_busy,
                 character_profile_provider=_current_character_profile_snapshot,
+                adapter_registry_provider=lambda: _adapter_registry,
                 output_root=SELF_COGNITION_TRACKING_DIR,
             )
         else:

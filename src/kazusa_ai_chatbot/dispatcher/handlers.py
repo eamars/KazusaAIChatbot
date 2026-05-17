@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from typing import TypedDict
 from uuid import uuid4
 
 from kazusa_ai_chatbot import event_logging
@@ -22,6 +23,14 @@ from kazusa_ai_chatbot.time_boundary import storage_utc_now_iso
 
 HANDLER_COMPONENT = "dispatcher.handlers"
 logger = logging.getLogger(__name__)
+
+
+class SendMessageDispatchResult(TypedDict):
+    """Delivery metadata returned by the send-message handler."""
+
+    conversation_message_id: str
+    delivery_tracking_id: str
+    adapter_message_id: str
 
 
 def _handler_correlation_id(ctx: DispatchContext) -> str:
@@ -121,13 +130,16 @@ async def handle_send_message(
     args: dict,
     ctx: DispatchContext,
     adapters: AdapterRegistry,
-) -> None:
+) -> SendMessageDispatchResult:
     """Deliver a scheduled channel message through the target platform adapter.
 
     Args:
         args: Validated tool arguments for ``send_message``.
         ctx: Source-side dispatch context, available for future extensions.
         adapters: Adapter registry used to look up the platform transport.
+
+    Returns:
+        Conversation row id, delivery tracking id, and adapter message id.
     """
 
     correlation_id = _handler_correlation_id(ctx)
@@ -143,7 +155,7 @@ async def handle_send_message(
         platform_bot_id = _platform_bot_id(ctx, adapter)
         character_name = _character_name(ctx, adapter)
         addressed_to = [ctx.source_user_id] if ctx.source_user_id.strip() else []
-        await record_assistant_outbound_message(
+        conversation_message_id = await record_assistant_outbound_message(
             platform=target_platform,
             platform_channel_id=target_channel,
             channel_type=channel_type,
@@ -229,6 +241,12 @@ async def handle_send_message(
         status="succeeded",
         correlation_id=correlation_id,
     )
+    dispatch_result = {
+        "conversation_message_id": conversation_message_id,
+        "delivery_tracking_id": delivery_tracking_id,
+        "adapter_message_id": send_result.message_id,
+    }
+    return dispatch_result
 
 
 def _delivery_mentions(args: dict) -> list[dict] | None:

@@ -1,3 +1,13 @@
+> Superseded Architecture Document
+>
+> Status: superseded
+> Superseded by plan: development_plans/active/bugfix/self_cognition_speak_delivery_bugfix_plan.md
+> Canonical current doc: src/kazusa_ai_chatbot/self_cognition/README.md
+> Supersession rule: private-candidate-only and no-production-delivery claims
+> in this document are no longer architecture authority. Current production
+> self-cognition selected `speak` must resolve a target before cognition and
+> attempt delivery after dialog rendering.
+
 # self cognition reasoning basis
 
 ## Document Control
@@ -233,7 +243,7 @@ self-cognition plan completed.
 |---|---|---|---|---|
 | 1 | Self-cognition tracking | Every useful outcome needs a place to land. Current no-dialog cognition residue is ephemeral, so tracking is the foundation for both silence and action. | run, trigger, evidence ref, route effect | local tracking artifacts |
 | 2 | Action-attempt lifecycle and runtime agency controls | The expired-promise case can re-trigger every idle tick unless attempts, idempotency, retry, and duplicate suppression exist first. | action_attempt with stable idempotency key | local attempt ledger |
-| 3 | Proactive preview / outbox candidate | The clearest character-growth benefit was a past-due commitment becoming one natural outward message candidate. | preview/outbox candidate tied to an action_attempt | private local candidate only; no production delivery |
+| 3 | Proactive preview / outbox candidate | The clearest character-growth benefit was a past-due commitment becoming one natural outward message candidate. | preview/outbox candidate tied to an action_attempt | superseded preview-only boundary; see banner |
 | 4 | Progress-maintenance candidate | Before-due commitments and settled conversations should still preserve short-term continuity without sending. | `progress_maintenance` route effect | local route effect only |
 | 5 | Audit and evaluation | The system cannot be trusted without inspecting why the loop sent, held, or stayed silent. This is cheap and mandatory for quality. | readable loop trace and route explanation | local loop trace |
 | 6 | RAG / research planning | Topic-triggered RAG can make the loop more autonomous, but it should come after commitment/action routing is stable. | bounded RAG request/result linked to the run | read-only production/RAG call |
@@ -276,8 +286,8 @@ Consumers:
 self-cognition tracking: write run and trigger records
 action_attempt: new idempotency key for this due occurrence
 outbox candidate: ready if structural and cadence mechanics pass
-production delivery: none from this path; delayed contact must be reconsidered
-  by a future cognition slot and any visible text must be authored by L3 text
+production delivery: superseded preview-only boundary; current selected
+  `speak` delivery is defined by the canonical self-cognition README
 progress effect: candidate update after delivery, not a direct write here
 ```
 

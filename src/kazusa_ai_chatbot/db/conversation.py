@@ -307,6 +307,57 @@ async def get_conversation_history(
     return return_value
 
 
+async def get_latest_private_channel_for_user(
+    *,
+    platform: str,
+    global_user_id: str | None,
+    platform_user_id: str | None,
+) -> dict[str, Any] | None:
+    """Return the latest known private channel for a platform user.
+
+    Args:
+        platform: Platform key shared by the source case and target user.
+        global_user_id: Internal user id to match when available.
+        platform_user_id: Platform-native user id to match when available.
+
+    Returns:
+        Newest private-channel user conversation row, or ``None``.
+    """
+
+    clean_global_user_id = str(global_user_id or "").strip()
+    clean_platform_user_id = str(platform_user_id or "").strip()
+    if not clean_global_user_id and not clean_platform_user_id:
+        return_value = None
+        return return_value
+
+    user_filters: list[dict[str, str]] = []
+    if clean_global_user_id:
+        user_filters.append({"global_user_id": clean_global_user_id})
+    if clean_platform_user_id:
+        user_filters.append({"platform_user_id": clean_platform_user_id})
+
+    query: dict[str, Any] = {
+        "platform": platform,
+        "channel_type": "private",
+        "platform_channel_id": {"$type": "string", "$ne": ""},
+        "role": "user",
+        "$or": user_filters,
+    }
+    db = await get_db()
+    row = await (
+        db.conversation_history
+        .find(query)
+        .sort("timestamp", -1)
+        .limit(1)
+        .to_list(length=1)
+    )
+    if row:
+        return_value = row[0]
+    else:
+        return_value = None
+    return return_value
+
+
 async def search_conversation_history(
     query: str,
     platform: str | None = None,

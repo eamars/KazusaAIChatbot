@@ -9,6 +9,8 @@ from typing import Any
 from kazusa_ai_chatbot.action_spec.registry import SPEAK_CAPABILITY
 from kazusa_ai_chatbot.self_cognition import models
 
+DRY_RUN_HANDOFF_ENABLED = False
+
 
 def build_idempotency_key(
     source_kind: str,
@@ -335,7 +337,7 @@ def build_action_candidate(
         "text": clean_text,
         "execute_at": None,
         "dispatch_shape": models.ACTION_KIND_SEND_MESSAGE,
-        "production_handoff": False,
+        "production_handoff": DRY_RUN_HANDOFF_ENABLED,
     }
     delivery_mentions = _delivery_mentions_for_action(
         case,

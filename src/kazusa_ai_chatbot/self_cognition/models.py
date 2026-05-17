@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, NotRequired, TypedDict
+from typing import Any, Literal, NotRequired, TypedDict
 
 from kazusa_ai_chatbot.time_boundary import LocalTimeContextDoc
 
@@ -58,6 +58,7 @@ ACTION_ATTEMPT_STATUS_PENDING_HANDOFF = "pending_handoff"
 ACTION_ATTEMPT_STATUS_HANDOFF_ACCEPTED = "handoff_accepted"
 ACTION_ATTEMPT_STATUS_SCHEDULED = "scheduled"
 ACTION_ATTEMPT_STATUS_SENT = "sent"
+ACTION_ATTEMPT_STATUS_DELIVERY_FAILED = "delivery_failed"
 ACTION_ATTEMPT_STATUS_DUPLICATE = "duplicate_suppressed"
 ACTION_ATTEMPT_STATUS_CLOSED_NO_ACTION = "closed_no_action"
 ACTION_ATTEMPT_SUPPRESSING_STATUSES = frozenset(
@@ -142,6 +143,50 @@ class DeliveryMention(TypedDict):
     requested_by: str
 
 
+class SelfCognitionDeliveryTarget(TypedDict):
+    """Deterministic send destination bound before cognition starts."""
+
+    schema_version: Literal["self_cognition_delivery_target.v1"]
+    platform: str
+    platform_channel_id: str
+    channel_type: Literal["private", "group"]
+    target_global_user_id: str | None
+    target_platform_user_id: str | None
+    source_kind: Literal[
+        "target_private_channel",
+        "self_cognition_source_channel",
+    ]
+    source_ref: str
+    source_platform_channel_id: str
+    source_channel_type: Literal["private", "group"]
+    source_message_id: str
+    source_global_user_id: str | None
+    source_platform_bot_id: str
+    source_character_name: str
+    guild_id: str | None
+    bot_permission_role: str
+    fallback_reason: Literal["", "private_channel_unavailable"]
+
+
+class SelfCognitionTargetBindingFailure(TypedDict):
+    """Auditable reason a production case cannot bind a send target."""
+
+    status: Literal["target_binding_failed"]
+    reason: Literal[
+        "missing_platform",
+        "missing_target_user",
+        "missing_delivery_target",
+        "private_channel_unavailable_and_source_invalid",
+        "private_channel_unavailable_and_source_missing",
+    ]
+    platform: str
+    source_ref: str
+    source_platform_channel_id: str
+    source_channel_type: str
+    target_global_user_id: str | None
+    target_platform_user_id: str | None
+
+
 class SelfCognitionSourceRef(TypedDict, total=False):
     """Reference to visible or actionable evidence for one dry-run case."""
 
@@ -187,6 +232,9 @@ class SelfCognitionCase(TypedDict, total=False):
     budget: SelfCognitionBudget
     source_scheduled_event_id: str
     source_action_attempt_id: str
+    delivery_target: SelfCognitionDeliveryTarget
+    target_binding_status: Literal["bound", "failed"]
+    target_binding_failure: SelfCognitionTargetBindingFailure
 
 
 class SourcePacket(TypedDict):

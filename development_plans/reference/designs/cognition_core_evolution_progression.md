@@ -349,7 +349,7 @@ usage, status distributions, and date ranges.
 | # | Claim from earlier in this document | Verdict | Evidence |
 |---|---|---|---|
 | A | `global_character_growth_traits` is designed but not wired into L2 | **Refuted** | 7 traits, all `status: active`. Each carries `strength` (0.15-0.36), `maturity_band` (`emerging` / `observed`), `evidence_count` (2-3), `supporting_dates`, and `source_reflection_run_ids` linking 16-24 reflection runs per trait. Created 2026-05-11 to 2026-05-14. |
-| B | `self_cognition` is built but gated off | **Refuted historically; revised by 2026-05-17 decommission** | 2026-05-15 DB review found 6 action attempts and 5 scheduled legacy delivery attempts. The later decommission keeps the self-cognition loop as a trigger/source and action ledger, but removes production prewritten text delivery from this path. |
+| B | `self_cognition` is built but gated off | **Refuted historically; revised by 2026-05-17 delivery decision** | 2026-05-15 DB review found 6 action attempts and 5 scheduled legacy delivery attempts. Current selected self-cognition `speak` resolves a target before cognition and dispatches through the runtime adapter bridge after dialog rendering. |
 | C | `CharacterProfileDoc.self_image` is deferred / not populated | **Refuted** | `self_image` contains `recent_window` (6 dated entries, newest 2026-05-14T20:26:32), `historical_summary` (multi-paragraph Chinese self-model), and `meta.synthesis_count: 472`. Actively maintained. |
 | D | Reflection runs hourly → daily → global | **Confirmed** | 28/30 sampled runs are `hourly_slot`; `daily_channel` and `daily_global_promotion` runs present in the same window. 30/30 succeeded. |
 | E | Growth cadence: daily / weekly | **Refined** | All runs are `run_kind: global_character_growth`. Cadence is daily, sometimes multiple per day. 18 runs span 2026-05-10 to 2026-05-14, 15 applied, 2 dry_run, 1 failed. |
@@ -386,7 +386,8 @@ progression plan.
    is the same idempotency-keyed store the reasoning basis described. The
    historical DB sample included legacy scheduled delivery attempts; after the
    2026-05-17 decommission, the ledger remains for private action attempts and
-   duplicate suppression, not production prewritten text delivery.
+   duplicate suppression. Current selected self-cognition `speak` delivery is
+   immediate runtime-adapter handoff after dialog rendering.
 
 ### Honest gaps after the database review
 

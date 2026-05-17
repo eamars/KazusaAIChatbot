@@ -644,6 +644,7 @@ async def record_self_cognition_event(
     run_id: str = "",
     attempt_id: str = "",
     consolidation_outcome: Mapping[str, object] | None = None,
+    target_binding_failure: Mapping[str, object] | None = None,
     severity: EventSeverity = "info",
     occurred_at: datetime | None = None,
 ) -> EventLogWriteResult:
@@ -670,6 +671,13 @@ async def record_self_cognition_event(
     )
     if sanitized_consolidation_outcome:
         payload["consolidation_outcome"] = sanitized_consolidation_outcome
+    sanitized_target_binding_failure = (
+        _sanitize_self_cognition_target_binding_failure(
+            target_binding_failure,
+        )
+    )
+    if sanitized_target_binding_failure:
+        payload["target_binding_failure"] = sanitized_target_binding_failure
     result = await _record_event(
         event_family="self_cognition",
         event_type=trigger_kind,
@@ -683,6 +691,50 @@ async def record_self_cognition_event(
         occurred_at=occurred_at,
     )
     return result
+
+
+def _sanitize_self_cognition_target_binding_failure(
+    target_binding_failure: Mapping[str, object] | None,
+) -> dict[str, object]:
+    """Project target-binding failure metadata into the event-log shape."""
+
+    if target_binding_failure is None:
+        empty_failure: dict[str, object] = {}
+        return empty_failure
+
+    target_global_user_id = sanitize_short_text(
+        target_binding_failure.get("target_global_user_id", ""),
+        limit=160,
+    )
+    target_platform_user_id = sanitize_short_text(
+        target_binding_failure.get("target_platform_user_id", ""),
+        limit=160,
+    )
+    sanitized_failure: dict[str, object] = {
+        "reason": sanitize_short_text(
+            target_binding_failure.get("reason", ""),
+            limit=120,
+        ),
+        "platform": sanitize_short_text(
+            target_binding_failure.get("platform", ""),
+            limit=80,
+        ),
+        "source_ref": sanitize_short_text(
+            target_binding_failure.get("source_ref", ""),
+            limit=160,
+        ),
+        "source_platform_channel_id": sanitize_short_text(
+            target_binding_failure.get("source_platform_channel_id", ""),
+            limit=160,
+        ),
+        "source_channel_type": sanitize_short_text(
+            target_binding_failure.get("source_channel_type", ""),
+            limit=80,
+        ),
+        "has_target_global_user_id": bool(target_global_user_id),
+        "has_target_platform_user_id": bool(target_platform_user_id),
+    }
+    return sanitized_failure
 
 
 def _sanitize_self_cognition_consolidation_outcome(

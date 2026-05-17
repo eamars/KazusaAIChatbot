@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Mapping
+from pathlib import Path
 from unittest.mock import AsyncMock
 
 import pytest
@@ -257,6 +258,19 @@ async def _reset_queue_state() -> None:
 
     await service_module._stop_chat_input_worker()
     service_module._chat_input_queue.reset_for_test()
+
+
+def test_self_cognition_worker_receives_adapter_registry_provider() -> None:
+    """Service startup should pass the runtime adapter registry to the worker."""
+
+    source_text = Path(service_module.__file__).read_text(encoding="utf-8")
+    call_start = source_text.index(
+        "_self_cognition_worker_handle = start_self_cognition_worker("
+    )
+    call_block = source_text[call_start: call_start + 500]
+
+    assert "adapter_registry_provider" in call_block
+    assert "_adapter_registry" in call_block
 
 
 @pytest.mark.asyncio

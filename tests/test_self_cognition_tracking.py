@@ -788,11 +788,14 @@ def test_past_due_contact_decision_writes_action_attempt_and_candidate_without_h
     )
     action_attempt = _read_json(paths[models.ARTIFACT_ACTION_ATTEMPT])
     action_candidate = _read_json(paths[models.ARTIFACT_ACTION_CANDIDATE])
+    route_effect = _read_json(paths[models.ARTIFACT_ROUTE_EFFECT])
 
     assert action_attempt["status"] == models.ACTION_ATTEMPT_STATUS_CANDIDATE
     assert action_candidate["dispatch_shape"] == "send_message"
     assert action_candidate["production_handoff"] is False
     assert "checking in now" in action_candidate["text"]
+    assert "without delivery" not in route_effect["effect_summary"]
+    assert "runtime adapter bridge" in route_effect["effect_summary"]
 
 
 def test_build_self_cognition_case_artifacts_does_not_write_files(tmp_path) -> None:

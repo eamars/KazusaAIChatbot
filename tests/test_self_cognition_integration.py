@@ -11,8 +11,10 @@ from unittest.mock import AsyncMock
 import pytest
 
 from kazusa_ai_chatbot.action_spec.registry import SPEAK_CAPABILITY
-from kazusa_ai_chatbot.nodes.dialog_agent import StateContractError
 from kazusa_ai_chatbot.db import user_memory_units as memory_units_module
+from kazusa_ai_chatbot.dispatcher import AdapterRegistry, SendResult
+import kazusa_ai_chatbot.dispatcher.handlers as handlers_module
+from kazusa_ai_chatbot.nodes.dialog_agent import StateContractError
 from kazusa_ai_chatbot.self_cognition import models, projection, sources
 from kazusa_ai_chatbot.self_cognition import tracking, worker
 
@@ -48,6 +50,55 @@ def _target_scope() -> dict[str, str | None]:
     return scope
 
 
+class _FakeMessagingAdapter:
+    """Adapter double used by worker delivery integration tests."""
+
+    platform = "qq"
+    platform_bot_id = "bot-1"
+    display_name = "Character"
+
+    def __init__(self, *, fail: bool = False) -> None:
+        self.fail = fail
+        self.calls: list[dict[str, Any]] = []
+
+    async def send_message(
+        self,
+        channel_id: str,
+        text: str,
+        *,
+        channel_type: str,
+        reply_to_msg_id: str | None = None,
+        delivery_mentions: list[dict[str, Any]] | None = None,
+    ) -> SendResult:
+        """Capture one send request or raise a deterministic failure."""
+
+        self.calls.append({
+            "channel_id": channel_id,
+            "text": text,
+            "channel_type": channel_type,
+            "reply_to_msg_id": reply_to_msg_id,
+            "delivery_mentions": delivery_mentions,
+        })
+        if self.fail:
+            raise RuntimeError("adapter failed")
+        sent_at = datetime(2026, 5, 17, 5, 57, tzinfo=timezone.utc)
+        result = SendResult(
+            platform="qq",
+            channel_id=channel_id,
+            message_id="adapter-message-1",
+            sent_at=sent_at,
+        )
+        return result
+
+
+def _adapter_registry(adapter: _FakeMessagingAdapter) -> AdapterRegistry:
+    """Build a registry containing one fake QQ adapter."""
+
+    registry = AdapterRegistry()
+    registry.register(adapter)
+    return registry
+
+
 def _commitment_case() -> dict[str, Any]:
     case = {
         "case_name": models.CASE_COMMITMENT_PAST_DUE,
@@ -73,6 +124,79 @@ def _commitment_case() -> dict[str, Any]:
                 "timestamp": "2026-05-12T23:50:00+00:00",
             }
         ],
+    }
+    return case
+
+
+def _delivery_target(
+    *,
+    channel_id: str = "dm-1",
+    channel_type: str = "private",
+    source_kind: str = "target_private_channel",
+    fallback_reason: str = "",
+) -> dict[str, Any]:
+    """Build deterministic delivery target metadata for worker tests."""
+
+    target = {
+        "schema_version": "self_cognition_delivery_target.v1",
+        "platform": "qq",
+        "platform_channel_id": channel_id,
+        "channel_type": channel_type,
+        "target_global_user_id": "global-target",
+        "target_platform_user_id": "qq-target",
+        "source_kind": source_kind,
+        "source_ref": "promise-001",
+        "source_platform_channel_id": "group-1",
+        "source_channel_type": "group",
+        "source_message_id": "msg-1",
+        "source_global_user_id": "global-target",
+        "source_platform_bot_id": "bot-1",
+        "source_character_name": "Character",
+        "guild_id": "guild-1",
+        "bot_permission_role": "user",
+        "fallback_reason": fallback_reason,
+    }
+    return target
+
+
+def _commitment_case_with_delivery_target(
+    *,
+    delivery_target: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Build a production worker case with bound delivery metadata."""
+
+    case = _commitment_case()
+    case["target_scope"] = {
+        "platform": "qq",
+        "platform_channel_id": "group-1",
+        "channel_type": "group",
+        "user_id": "global-target",
+        "platform_user_id": "qq-target",
+        "display_name": "Target User",
+    }
+    if delivery_target is None:
+        delivery_target = _delivery_target()
+    case["target_binding_status"] = "bound"
+    case["delivery_target"] = delivery_target
+    case["platform_bot_id"] = "bot-1"
+    case["character_profile"] = {"name": "Character"}
+    return case
+
+
+def _target_binding_failed_case() -> dict[str, Any]:
+    """Build a production worker case rejected before cognition."""
+
+    case = _commitment_case()
+    case["target_binding_status"] = "failed"
+    case["target_binding_failure"] = {
+        "status": "target_binding_failed",
+        "reason": "private_channel_unavailable_and_source_missing",
+        "platform": "qq",
+        "source_ref": "promise-001",
+        "source_platform_channel_id": "",
+        "source_channel_type": "internal",
+        "target_global_user_id": "global-target",
+        "target_platform_user_id": "qq-target",
     }
     return case
 
@@ -143,6 +267,13 @@ def _future_cognition_case() -> dict[str, Any]:
         ],
         "visible_context": [],
         "source_scheduled_event_id": "future_cognition:action_attempt:future-123",
+        "target_binding_status": "bound",
+        "delivery_target": _delivery_target(
+            channel_id="group-1",
+            channel_type="group",
+            source_kind="self_cognition_source_channel",
+            fallback_reason="private_channel_unavailable",
+        ),
     }
     return case
 
@@ -183,6 +314,85 @@ def _action_candidate(attempt: dict[str, Any]) -> dict[str, Any]:
         "production_handoff": False,
     }
     return candidate
+
+
+def _selected_speak_artifacts(
+    case: dict[str, Any],
+    *,
+    text: str = "Checking in now.",
+    attempt_status: str = models.ACTION_ATTEMPT_STATUS_CANDIDATE,
+    mention_target_user: bool = False,
+) -> dict[str, Any]:
+    """Build in-memory runner artifacts for a selected speak route."""
+
+    trigger_record = tracking.build_trigger_record(case)
+    run_record = tracking.build_run_record(
+        case,
+        trigger_record,
+        selected_route=models.ROUTE_ACTION_CANDIDATE,
+        budget={
+            "rag_calls": 0,
+            "cognition_calls": 1,
+            "dialog_calls": 1,
+            "topic_limit": 1,
+        },
+    )
+    action_attempt = _action_attempt(case, status=attempt_status)
+    action_candidate = tracking.build_action_candidate(
+        case,
+        action_attempt,
+        text,
+        mention_target_user=mention_target_user,
+    )
+    payloads: dict[str, Any] = {
+        models.ARTIFACT_TRIGGER_RECORD: trigger_record,
+        models.ARTIFACT_RUN_RECORD: run_record,
+        models.ARTIFACT_ACTION_ATTEMPT: action_attempt,
+    }
+    if action_candidate is not None:
+        payloads[models.ARTIFACT_ACTION_CANDIDATE] = action_candidate
+    return payloads
+
+
+def _patch_dispatcher_persistence(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep autonomous delivery tests off MongoDB persistence."""
+
+    async def save_conversation(document: dict[str, Any]) -> str:
+        assert document["body_text"]
+        return "conversation-row-1"
+
+    async def ensure_character_identity(**kwargs: Any) -> str:
+        assert kwargs["platform"]
+        return "character-global"
+
+    async def apply_receipt(**kwargs: Any) -> None:
+        assert kwargs["delivery_tracking_id"]
+
+    monkeypatch.setattr(
+        handlers_module,
+        "save_conversation",
+        save_conversation,
+    )
+    monkeypatch.setattr(
+        handlers_module,
+        "ensure_character_identity",
+        ensure_character_identity,
+    )
+    monkeypatch.setattr(
+        handlers_module,
+        "apply_assistant_delivery_receipt",
+        apply_receipt,
+    )
+    monkeypatch.setattr(
+        handlers_module.event_logging,
+        "record_dispatcher_event",
+        AsyncMock(),
+    )
+    monkeypatch.setattr(
+        handlers_module.event_logging,
+        "record_runtime_error_event",
+        AsyncMock(),
+    )
 
 
 def _progress_cognition_output() -> dict[str, Any]:
@@ -327,11 +537,16 @@ async def test_collect_scheduled_future_cognition_cases_projects_due_slots() -> 
         calls.append(dict(kwargs))
         return [_future_cognition_event()]
 
+    async def no_private_channel(**kwargs: Any) -> None:
+        del kwargs
+        return None
+
     cases = await sources.collect_scheduled_future_cognition_cases(
         now=now,
         character_profile={"name": "TestCharacter"},
         max_cases=3,
         list_due_events_func=list_due_events,
+        get_latest_private_channel_func=no_private_channel,
     )
 
     assert calls == [{"current_timestamp_utc": now.isoformat(), "limit": 3}]
@@ -398,11 +613,16 @@ async def test_collect_scheduled_future_cognition_cases_preserves_source_scope()
         del kwargs
         return [event]
 
+    async def no_private_channel(**kwargs: Any) -> None:
+        del kwargs
+        return None
+
     cases = await sources.collect_scheduled_future_cognition_cases(
         now=now,
         character_profile={"name": "TestCharacter"},
         max_cases=1,
         list_due_events_func=list_due_events,
+        get_latest_private_channel_func=no_private_channel,
     )
 
     assert cases[0]["target_scope"] == {
@@ -529,6 +749,392 @@ async def test_worker_tick_skips_future_cognition_slot_when_claim_fails(
 
 
 @pytest.mark.asyncio
+async def test_worker_selected_speak_dispatches_to_private_channel(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Selected production speak should dispatch to a known private channel."""
+
+    _patch_dispatcher_persistence(monkeypatch)
+    adapter = _FakeMessagingAdapter()
+    recorded_attempts: list[dict[str, Any]] = []
+
+    async def collect_cases(**kwargs: Any) -> list[dict[str, Any]]:
+        del kwargs
+        return [_commitment_case_with_delivery_target()]
+
+    async def run_case(case: dict[str, Any], output_dir: Path) -> dict[str, Any]:
+        del output_dir
+        return _selected_speak_artifacts(case)
+
+    async def record_attempt(attempt: dict[str, Any]) -> None:
+        recorded_attempts.append(dict(attempt))
+
+    result = await worker.run_self_cognition_worker_tick(
+        output_root=tmp_path,
+        now=datetime(2026, 5, 17, 5, 57, tzinfo=timezone.utc),
+        is_primary_interaction_busy=lambda: False,
+        collect_cases_func=collect_cases,
+        run_case_func=run_case,
+        read_attempts_func=lambda **kwargs: [],
+        record_attempt_func=record_attempt,
+        adapter_registry_provider=lambda: _adapter_registry(adapter),
+        max_cases=1,
+    )
+
+    assert result.processed_count == 1
+    assert adapter.calls[0]["channel_id"] == "dm-1"
+    assert adapter.calls[0]["channel_type"] == "private"
+    assert recorded_attempts[-1]["status"] == models.ACTION_ATTEMPT_STATUS_SENT
+    self_kwargs = worker.event_logging.record_self_cognition_event.await_args.kwargs
+    assert self_kwargs["dispatch_status"] == "sent"
+
+
+@pytest.mark.asyncio
+async def test_worker_selected_speak_falls_back_to_source_channel(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Selected speak should use the source channel when private is unavailable."""
+
+    _patch_dispatcher_persistence(monkeypatch)
+    adapter = _FakeMessagingAdapter()
+    fallback_target = _delivery_target(
+        channel_id="group-1",
+        channel_type="group",
+        source_kind="self_cognition_source_channel",
+        fallback_reason="private_channel_unavailable",
+    )
+
+    async def collect_cases(**kwargs: Any) -> list[dict[str, Any]]:
+        del kwargs
+        return [
+            _commitment_case_with_delivery_target(
+                delivery_target=fallback_target,
+            )
+        ]
+
+    async def run_case(case: dict[str, Any], output_dir: Path) -> dict[str, Any]:
+        del output_dir
+        return _selected_speak_artifacts(case)
+
+    result = await worker.run_self_cognition_worker_tick(
+        output_root=tmp_path,
+        now=datetime(2026, 5, 17, 5, 57, tzinfo=timezone.utc),
+        is_primary_interaction_busy=lambda: False,
+        collect_cases_func=collect_cases,
+        run_case_func=run_case,
+        read_attempts_func=lambda **kwargs: [],
+        record_attempt_func=lambda attempt: None,
+        adapter_registry_provider=lambda: _adapter_registry(adapter),
+        max_cases=1,
+    )
+
+    assert result.processed_count == 1
+    assert adapter.calls[0]["channel_id"] == "group-1"
+    assert adapter.calls[0]["channel_type"] == "group"
+
+
+@pytest.mark.asyncio
+async def test_worker_missing_delivery_target_blocks_before_dialog(
+    tmp_path: Path,
+) -> None:
+    """Production cases without target binding should stop before runner work."""
+
+    run_case = AsyncMock()
+
+    async def collect_cases(**kwargs: Any) -> list[dict[str, Any]]:
+        del kwargs
+        return [_commitment_case()]
+
+    result = await worker.run_self_cognition_worker_tick(
+        output_root=tmp_path,
+        now=datetime(2026, 5, 17, 5, 57, tzinfo=timezone.utc),
+        is_primary_interaction_busy=lambda: False,
+        collect_cases_func=collect_cases,
+        run_case_func=run_case,
+        read_attempts_func=lambda **kwargs: [],
+        record_attempt_func=lambda attempt: None,
+        adapter_registry_provider=lambda: _adapter_registry(
+            _FakeMessagingAdapter(),
+        ),
+        max_cases=1,
+    )
+
+    assert result.processed_count == 0
+    assert result.skipped_count == 1
+    run_case.assert_not_called()
+    self_kwargs = worker.event_logging.record_self_cognition_event.await_args.kwargs
+    assert self_kwargs["dispatch_status"] == "target_binding_failed"
+
+
+@pytest.mark.asyncio
+async def test_worker_missing_delivery_target_blocks_without_adapter_provider(
+    tmp_path: Path,
+) -> None:
+    """Missing production target should fail closed even without adapters."""
+
+    run_case = AsyncMock()
+    record_attempt = AsyncMock()
+
+    async def collect_cases(**kwargs: Any) -> list[dict[str, Any]]:
+        del kwargs
+        return [_commitment_case()]
+
+    result = await worker.run_self_cognition_worker_tick(
+        output_root=tmp_path,
+        now=datetime(2026, 5, 17, 5, 57, tzinfo=timezone.utc),
+        is_primary_interaction_busy=lambda: False,
+        collect_cases_func=collect_cases,
+        run_case_func=run_case,
+        read_attempts_func=lambda **kwargs: [],
+        record_attempt_func=record_attempt,
+        max_cases=1,
+    )
+
+    assert result.processed_count == 0
+    assert result.skipped_count == 1
+    run_case.assert_not_called()
+    record_attempt.assert_not_awaited()
+    self_kwargs = worker.event_logging.record_self_cognition_event.await_args.kwargs
+    assert self_kwargs["dispatch_status"] == "target_binding_failed"
+
+
+@pytest.mark.asyncio
+async def test_worker_records_target_binding_failed_and_completes_scheduled_event(
+    tmp_path: Path,
+) -> None:
+    """Invalid scheduled source rows should be recorded and completed once."""
+
+    completed_event_ids: list[str] = []
+    case = _target_binding_failed_case()
+    case["trigger_kind"] = models.TRIGGER_SCHEDULED_FUTURE_COGNITION
+    case["source_scheduled_event_id"] = "future-cognition-1"
+
+    async def collect_cases(**kwargs: Any) -> list[dict[str, Any]]:
+        del kwargs
+        return [case]
+
+    async def complete_event(event_id: str) -> bool:
+        completed_event_ids.append(event_id)
+        return True
+
+    result = await worker.run_self_cognition_worker_tick(
+        output_root=tmp_path,
+        now=datetime(2026, 5, 17, 5, 57, tzinfo=timezone.utc),
+        is_primary_interaction_busy=lambda: False,
+        collect_cases_func=collect_cases,
+        run_case_func=AsyncMock(),
+        read_attempts_func=lambda **kwargs: [],
+        record_attempt_func=lambda attempt: None,
+        complete_scheduled_event_func=complete_event,
+        claim_scheduled_event_func=lambda event_id: True,
+        adapter_registry_provider=lambda: _adapter_registry(
+            _FakeMessagingAdapter(),
+        ),
+        max_cases=1,
+    )
+
+    assert result.processed_count == 0
+    assert result.skipped_count == 1
+    assert completed_event_ids == ["future-cognition-1"]
+    self_kwargs = worker.event_logging.record_self_cognition_event.await_args.kwargs
+    assert self_kwargs["status"] == "target_binding_failed"
+    assert self_kwargs["dispatch_status"] == "target_binding_failed"
+
+
+@pytest.mark.asyncio
+async def test_worker_selected_speak_never_records_not_requested(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Selected speak should record a terminal delivery status."""
+
+    _patch_dispatcher_persistence(monkeypatch)
+    adapter = _FakeMessagingAdapter()
+
+    async def collect_cases(**kwargs: Any) -> list[dict[str, Any]]:
+        del kwargs
+        return [_commitment_case_with_delivery_target()]
+
+    async def run_case(case: dict[str, Any], output_dir: Path) -> dict[str, Any]:
+        del output_dir
+        return _selected_speak_artifacts(case)
+
+    await worker.run_self_cognition_worker_tick(
+        output_root=tmp_path,
+        now=datetime(2026, 5, 17, 5, 57, tzinfo=timezone.utc),
+        is_primary_interaction_busy=lambda: False,
+        collect_cases_func=collect_cases,
+        run_case_func=run_case,
+        read_attempts_func=lambda **kwargs: [],
+        record_attempt_func=lambda attempt: None,
+        adapter_registry_provider=lambda: _adapter_registry(adapter),
+        max_cases=1,
+    )
+
+    self_kwargs = worker.event_logging.record_self_cognition_event.await_args.kwargs
+    assert self_kwargs["dispatch_status"] != "not_requested"
+
+
+@pytest.mark.asyncio
+async def test_worker_no_speak_does_not_dispatch(
+    tmp_path: Path,
+) -> None:
+    """Non-speak artifact output should not call the adapter."""
+
+    adapter = _FakeMessagingAdapter()
+
+    async def collect_cases(**kwargs: Any) -> list[dict[str, Any]]:
+        del kwargs
+        return [_commitment_case_with_delivery_target()]
+
+    async def run_case(case: dict[str, Any], output_dir: Path) -> dict[str, Any]:
+        del case, output_dir
+        return {}
+
+    result = await worker.run_self_cognition_worker_tick(
+        output_root=tmp_path,
+        now=datetime(2026, 5, 17, 5, 57, tzinfo=timezone.utc),
+        is_primary_interaction_busy=lambda: False,
+        collect_cases_func=collect_cases,
+        run_case_func=run_case,
+        read_attempts_func=lambda **kwargs: [],
+        record_attempt_func=lambda attempt: None,
+        adapter_registry_provider=lambda: _adapter_registry(adapter),
+        max_cases=1,
+    )
+
+    assert result.processed_count == 1
+    assert adapter.calls == []
+
+
+@pytest.mark.asyncio
+async def test_worker_adapter_failure_marks_delivery_failed(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Adapter send failures should persist a delivery_failed attempt."""
+
+    _patch_dispatcher_persistence(monkeypatch)
+    adapter = _FakeMessagingAdapter(fail=True)
+    recorded_attempts: list[dict[str, Any]] = []
+
+    async def collect_cases(**kwargs: Any) -> list[dict[str, Any]]:
+        del kwargs
+        return [_commitment_case_with_delivery_target()]
+
+    async def run_case(case: dict[str, Any], output_dir: Path) -> dict[str, Any]:
+        del output_dir
+        return _selected_speak_artifacts(case)
+
+    async def record_attempt(attempt: dict[str, Any]) -> None:
+        recorded_attempts.append(dict(attempt))
+
+    await worker.run_self_cognition_worker_tick(
+        output_root=tmp_path,
+        now=datetime(2026, 5, 17, 5, 57, tzinfo=timezone.utc),
+        is_primary_interaction_busy=lambda: False,
+        collect_cases_func=collect_cases,
+        run_case_func=run_case,
+        read_attempts_func=lambda **kwargs: [],
+        record_attempt_func=record_attempt,
+        adapter_registry_provider=lambda: _adapter_registry(adapter),
+        max_cases=1,
+    )
+
+    assert recorded_attempts[-1]["status"] == (
+        models.ACTION_ATTEMPT_STATUS_DELIVERY_FAILED
+    )
+    self_kwargs = worker.event_logging.record_self_cognition_event.await_args.kwargs
+    assert self_kwargs["dispatch_status"] == "delivery_failed"
+
+
+@pytest.mark.asyncio
+async def test_worker_empty_dialog_text_marks_delivery_failed(
+    tmp_path: Path,
+) -> None:
+    """Selected speak with empty rendered text must not persist candidate."""
+
+    adapter = _FakeMessagingAdapter()
+    recorded_attempts: list[dict[str, Any]] = []
+
+    async def collect_cases(**kwargs: Any) -> list[dict[str, Any]]:
+        del kwargs
+        return [_commitment_case_with_delivery_target()]
+
+    async def run_case(case: dict[str, Any], output_dir: Path) -> dict[str, Any]:
+        del output_dir
+        return _selected_speak_artifacts(case, text="")
+
+    async def record_attempt(attempt: dict[str, Any]) -> None:
+        recorded_attempts.append(dict(attempt))
+
+    await worker.run_self_cognition_worker_tick(
+        output_root=tmp_path,
+        now=datetime(2026, 5, 17, 5, 57, tzinfo=timezone.utc),
+        is_primary_interaction_busy=lambda: False,
+        collect_cases_func=collect_cases,
+        run_case_func=run_case,
+        read_attempts_func=lambda **kwargs: [],
+        record_attempt_func=record_attempt,
+        adapter_registry_provider=lambda: _adapter_registry(adapter),
+        max_cases=1,
+    )
+
+    assert adapter.calls == []
+    assert recorded_attempts[-1]["status"] == (
+        models.ACTION_ATTEMPT_STATUS_DELIVERY_FAILED
+    )
+    assert recorded_attempts[-1]["failure_reason"] == "empty_text"
+    self_kwargs = worker.event_logging.record_self_cognition_event.await_args.kwargs
+    assert self_kwargs["dispatch_status"] == "delivery_failed"
+
+
+@pytest.mark.asyncio
+async def test_worker_duplicate_suppression_marks_duplicate_suppressed(
+    tmp_path: Path,
+) -> None:
+    """Duplicate suppression should not call adapter delivery."""
+
+    adapter = _FakeMessagingAdapter()
+    recorded_attempts: list[dict[str, Any]] = []
+
+    async def collect_cases(**kwargs: Any) -> list[dict[str, Any]]:
+        del kwargs
+        return [_commitment_case_with_delivery_target()]
+
+    async def run_case(case: dict[str, Any], output_dir: Path) -> dict[str, Any]:
+        del output_dir
+        return _selected_speak_artifacts(
+            case,
+            attempt_status=models.ACTION_ATTEMPT_STATUS_DUPLICATE,
+        )
+
+    async def record_attempt(attempt: dict[str, Any]) -> None:
+        recorded_attempts.append(dict(attempt))
+
+    await worker.run_self_cognition_worker_tick(
+        output_root=tmp_path,
+        now=datetime(2026, 5, 17, 5, 57, tzinfo=timezone.utc),
+        is_primary_interaction_busy=lambda: False,
+        collect_cases_func=collect_cases,
+        run_case_func=run_case,
+        read_attempts_func=lambda **kwargs: [],
+        record_attempt_func=record_attempt,
+        adapter_registry_provider=lambda: _adapter_registry(adapter),
+        max_cases=1,
+    )
+
+    assert adapter.calls == []
+    assert recorded_attempts[-1]["status"] == (
+        models.ACTION_ATTEMPT_STATUS_DUPLICATE
+    )
+    self_kwargs = worker.event_logging.record_self_cognition_event.await_args.kwargs
+    assert self_kwargs["dispatch_status"] == "duplicate_suppressed"
+
+
+@pytest.mark.asyncio
 async def test_worker_tick_records_state_contract_error_without_tick_failure(
     monkeypatch,
     tmp_path: Path,
@@ -550,7 +1156,7 @@ async def test_worker_tick_records_state_contract_error_without_tick_failure(
 
     async def collect_cases(*, now: datetime, max_cases: int) -> list[dict[str, Any]]:
         del now, max_cases
-        return [_commitment_case()]
+        return [_commitment_case_with_delivery_target()]
 
     async def read_attempts(*, limit: int) -> list[dict[str, Any]]:
         assert limit > 0
@@ -627,7 +1233,7 @@ async def test_worker_default_path_requests_production_consolidation_without_fil
 ) -> None:
     """Default worker runs should request consolidation and stay in memory."""
 
-    case = _commitment_case()
+    case = _commitment_case_with_delivery_target()
     captured_kwargs: dict[str, Any] = {}
 
     async def collect_cases(*, now: datetime, max_cases: int) -> list[dict[str, Any]]:
@@ -696,7 +1302,7 @@ async def test_worker_default_path_applies_consolidation_without_dispatch_or_fil
 ) -> None:
     """Internal-only cognition should consolidate without outward delivery."""
 
-    case = _commitment_case()
+    case = _commitment_case_with_delivery_target()
     captured_consolidation_state: dict[str, Any] = {}
 
     async def collect_cases(*, now: datetime, max_cases: int) -> list[dict[str, Any]]:
@@ -749,9 +1355,9 @@ async def test_worker_default_path_records_action_without_dispatch(
     monkeypatch,
     tmp_path,
 ) -> None:
-    """Self-cognition action candidates stay private to the cognition ledger."""
+    """Selected speak without a registry should persist delivery_failed."""
 
-    case = _commitment_case()
+    case = _commitment_case_with_delivery_target()
     recorded_attempts: list[dict[str, Any]] = []
     captured_consolidation_state: dict[str, Any] = {}
 
@@ -798,9 +1404,13 @@ async def test_worker_default_path_records_action_without_dispatch(
     )
 
     assert result.processed_count == 1
-    assert recorded_attempts[0]["status"] == models.ACTION_ATTEMPT_STATUS_CANDIDATE
-    assert "dispatch_status" not in recorded_attempts[0]
-    assert "scheduled_event_ids" not in recorded_attempts[0]
+    assert recorded_attempts[0]["status"] == (
+        models.ACTION_ATTEMPT_STATUS_DELIVERY_FAILED
+    )
+    assert recorded_attempts[0]["dispatch_status"] == "delivery_failed"
+    assert recorded_attempts[0]["failure_reason"] == (
+        "adapter_registry_unavailable"
+    )
     assert captured_consolidation_state["final_dialog"] == ["Checking in now."]
     assert list(tmp_path.iterdir()) == []
 
@@ -811,7 +1421,7 @@ async def test_worker_tick_loads_prior_attempts_before_running_case(
 ) -> None:
     """Prior persisted attempts should enter the next case run."""
 
-    case = _commitment_case()
+    case = _commitment_case_with_delivery_target()
     prior_attempt = _action_attempt(
         case,
         status=models.ACTION_ATTEMPT_STATUS_SCHEDULED,
@@ -848,41 +1458,37 @@ async def test_worker_tick_loads_prior_attempts_before_running_case(
 
 
 @pytest.mark.asyncio
-async def test_worker_tick_records_candidate_without_delivery_handoff(
+async def test_worker_tick_blocks_unbound_case_before_candidate_render(
     tmp_path,
 ) -> None:
-    """A live candidate must not schedule or send through the worker."""
+    """Unbound worker cases should not become private candidates."""
 
     case = _commitment_case()
-    recorded_attempts: list[dict[str, Any]] = []
+    run_case = AsyncMock()
+    record_attempt = AsyncMock()
 
     async def collect_cases(*, now: datetime, max_cases: int) -> list[dict[str, Any]]:
         del now, max_cases
         return [case]
-
-    async def read_attempts(*, limit: int) -> list[dict[str, Any]]:
-        assert limit > 0
-        return list(recorded_attempts)
-
-    async def record_attempt(attempt: dict[str, Any]) -> None:
-        recorded_attempts.append(dict(attempt))
 
     result = await worker.run_self_cognition_worker_tick(
         output_root=tmp_path,
         now=datetime(2026, 5, 13, tzinfo=timezone.utc),
         is_primary_interaction_busy=lambda: False,
         collect_cases_func=collect_cases,
-        run_case_func=_case_runner_with_candidate,
-        read_attempts_func=read_attempts,
+        run_case_func=run_case,
+        read_attempts_func=lambda **kwargs: [],
         record_attempt_func=record_attempt,
         max_cases=3,
     )
 
-    assert result.processed_count == 1
+    assert result.processed_count == 0
+    assert result.skipped_count == 1
     assert result.artifact_paths == []
-    assert recorded_attempts[0]["status"] == models.ACTION_ATTEMPT_STATUS_CANDIDATE
-    assert "dispatch_status" not in recorded_attempts[0]
-    assert "scheduled_event_ids" not in recorded_attempts[0]
+    run_case.assert_not_called()
+    record_attempt.assert_not_awaited()
+    self_kwargs = worker.event_logging.record_self_cognition_event.await_args.kwargs
+    assert self_kwargs["dispatch_status"] == "target_binding_failed"
     assert list(tmp_path.iterdir()) == []
 
 
@@ -892,7 +1498,7 @@ async def test_worker_tick_suppresses_duplicate_due_occurrence_from_prior_attemp
 ) -> None:
     """A prior persisted attempt should prevent a repeated action attempt."""
 
-    case = _commitment_case()
+    case = _commitment_case_with_delivery_target()
     prior_attempt = _action_attempt(
         case,
         status=models.ACTION_ATTEMPT_STATUS_SCHEDULED,
@@ -943,10 +1549,15 @@ async def test_worker_tick_suppresses_duplicate_due_occurrence_from_prior_attemp
 
 
 @pytest.mark.asyncio
-async def test_worker_tick_uses_attempt_updates_between_cases(tmp_path) -> None:
+async def test_worker_tick_uses_attempt_updates_between_cases(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
     """Same-tick duplicate cases should see persisted attempts recorded earlier."""
 
-    case = _commitment_case()
+    _patch_dispatcher_persistence(monkeypatch)
+    adapter = _FakeMessagingAdapter()
+    case = _commitment_case_with_delivery_target()
     recorded_attempts: list[dict[str, Any]] = []
 
     async def collect_cases(
@@ -972,11 +1583,21 @@ async def test_worker_tick_uses_attempt_updates_between_cases(tmp_path) -> None:
         run_case_func=_case_runner_with_tracking,
         read_attempts_func=read_attempts,
         record_attempt_func=record_attempt,
+        adapter_registry_provider=lambda: _adapter_registry(adapter),
         max_cases=3,
     )
 
     assert result.processed_count == 2
-    assert recorded_attempts[0]["status"] == models.ACTION_ATTEMPT_STATUS_CANDIDATE
+    assert adapter.calls == [
+        {
+            "channel_id": "dm-1",
+            "text": "Checking in now.",
+            "channel_type": "private",
+            "reply_to_msg_id": None,
+            "delivery_mentions": [],
+        }
+    ]
+    assert recorded_attempts[0]["status"] == models.ACTION_ATTEMPT_STATUS_SENT
     assert recorded_attempts[1]["status"] == (
         models.ACTION_ATTEMPT_STATUS_DUPLICATE
     )
@@ -1045,6 +1666,10 @@ async def test_active_commitment_source_builds_due_case_from_memory_unit() -> No
         assert global_user_id == "673225019"
         return {"affinity": 600, "display_name": "User"}
 
+    async def no_private_channel(**kwargs: Any) -> None:
+        del kwargs
+        return None
+
     cases = await sources.collect_active_commitment_cases(
         now=datetime(2026, 5, 13, 0, 30, tzinfo=timezone.utc),
         character_profile={"name": "Character", "mood": "focused"},
@@ -1052,6 +1677,7 @@ async def test_active_commitment_source_builds_due_case_from_memory_unit() -> No
         list_active_commitments_func=list_commitments,
         get_conversation_history_func=get_history,
         get_user_profile_func=get_profile,
+        get_latest_private_channel_func=no_private_channel,
     )
 
     assert len(cases) == 1

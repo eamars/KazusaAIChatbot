@@ -9,7 +9,10 @@ if TYPE_CHECKING:
     from kazusa_ai_chatbot.dispatcher.adapter_iface import AdapterRegistry
     from kazusa_ai_chatbot.dispatcher.task import DispatchContext
 
-TaskHandler = Callable[[dict, "DispatchContext", "AdapterRegistry"], Awaitable[None]]
+TaskHandler = Callable[
+    [dict, "DispatchContext", "AdapterRegistry"],
+    Awaitable[object | None],
+]
 
 _ROLE_ORDER = {"user": 0, "moderator": 1, "admin": 2}
 

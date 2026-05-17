@@ -77,6 +77,7 @@ from kazusa_ai_chatbot.db.conversation import (
     apply_assistant_delivery_receipt,
     get_conversation_by_platform_message_id,
     get_conversation_history,
+    get_latest_private_channel_for_user,
     save_conversation,
     search_conversation_history,
     update_conversation_attachment_descriptions,
@@ -232,7 +233,8 @@ __all__ = [
     "db_bootstrap",
     # Conversation
     "aggregate_conversation_by_user", "apply_assistant_delivery_receipt",
-    "get_conversation_by_platform_message_id", "get_conversation_history", "save_conversation",
+    "get_conversation_by_platform_message_id", "get_conversation_history",
+    "get_latest_private_channel_for_user", "save_conversation",
     "search_conversation_history", "update_conversation_attachment_descriptions",
     "explain_monitored_channel_query",
     "list_recent_character_message_channels",

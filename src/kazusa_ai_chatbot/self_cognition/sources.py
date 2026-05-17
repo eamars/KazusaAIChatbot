@@ -12,6 +12,7 @@ from kazusa_ai_chatbot.config import (
 )
 from kazusa_ai_chatbot.db import (
     get_conversation_history,
+    get_latest_private_channel_for_user,
     get_user_profile,
     list_due_future_cognition_events,
     query_active_commitment_memory_units,
@@ -77,6 +78,7 @@ async def collect_scheduled_future_cognition_cases(
     character_profile: dict[str, Any],
     max_cases: int,
     list_due_events_func: Callable[..., Any] | None = None,
+    get_latest_private_channel_func: Callable[..., Any] | None = None,
 ) -> list[models.SelfCognitionCase]:
     """Build worker cases from due scheduled future-cognition slots.
 
@@ -85,6 +87,8 @@ async def collect_scheduled_future_cognition_cases(
         character_profile: Current character state snapshot.
         max_cases: Maximum due slots to project.
         list_due_events_func: Optional test seam for scheduled-slot reads.
+        get_latest_private_channel_func: Optional test seam for private-channel
+            target lookup.
 
     Returns:
         Prompt-safe self-cognition cases for the standard worker runner.
@@ -123,6 +127,11 @@ async def collect_scheduled_future_cognition_cases(
         )
         if case is None:
             continue
+        await _attach_scheduled_delivery_binding(
+            case,
+            event,
+            get_latest_private_channel_func=get_latest_private_channel_func,
+        )
         cases.append(case)
 
     return cases
@@ -136,6 +145,7 @@ async def collect_active_commitment_cases(
     list_active_commitments_func: Callable[..., Any] | None = None,
     get_conversation_history_func: Callable[..., Any] | None = None,
     get_user_profile_func: Callable[..., Any] | None = None,
+    get_latest_private_channel_func: Callable[..., Any] | None = None,
 ) -> list[models.SelfCognitionCase]:
     """Build due-check cases from active commitment memory units.
 
@@ -146,6 +156,8 @@ async def collect_active_commitment_cases(
         list_active_commitments_func: Optional test seam for commitment reads.
         get_conversation_history_func: Optional test seam for visible context.
         get_user_profile_func: Optional test seam for user profile reads.
+        get_latest_private_channel_func: Optional test seam for private-channel
+            target lookup.
 
     Returns:
         Bounded self-cognition cases with recent visible context.
@@ -187,9 +199,191 @@ async def collect_active_commitment_cases(
             now=now,
             due_state=due_state,
         )
+        await _attach_active_commitment_delivery_binding(
+            case,
+            unit,
+            rows[-1],
+            get_latest_private_channel_func=get_latest_private_channel_func,
+        )
         cases.append(case)
 
     return cases
+
+
+async def resolve_self_cognition_delivery_target(
+    *,
+    platform: str,
+    source_platform_channel_id: str | None,
+    source_channel_type: str | None,
+    source_message_id: str | None,
+    source_ref: str,
+    source_global_user_id: str | None,
+    source_platform_bot_id: str | None,
+    source_character_name: str | None,
+    guild_id: str | None,
+    bot_permission_role: str | None,
+    target_global_user_id: str | None,
+    target_platform_user_id: str | None,
+    get_latest_private_channel_func: Callable[..., Any] | None = None,
+) -> (
+    models.SelfCognitionDeliveryTarget
+    | models.SelfCognitionTargetBindingFailure
+):
+    """Bind a production self-cognition case to a deterministic send target.
+
+    Args:
+        platform: Source and target platform key.
+        source_platform_channel_id: Original source channel, if known.
+        source_channel_type: Original source channel type.
+        source_message_id: Original source message id, if known.
+        source_ref: Stable case/source reference used for audit.
+        source_global_user_id: Global user id from source context.
+        source_platform_bot_id: Platform id of the active character.
+        source_character_name: Runtime display name of the active character.
+        guild_id: Optional platform guild/server scope.
+        bot_permission_role: Permission role carried into dispatcher context.
+        target_global_user_id: Semantic target user's global id.
+        target_platform_user_id: Semantic target user's platform id.
+        get_latest_private_channel_func: Optional private-channel lookup seam.
+
+    Returns:
+        Bound delivery target or an auditable binding failure.
+    """
+
+    clean_platform = text_or_empty(platform)
+    clean_source_ref = text_or_empty(source_ref)
+    clean_source_channel_id = text_or_empty(source_platform_channel_id)
+    clean_source_channel_type = text_or_empty(source_channel_type)
+    clean_source_message_id = (
+        text_or_empty(source_message_id)
+        or f"self_cognition:{clean_source_ref}"
+    )
+    clean_source_global_user_id = (
+        text_or_empty(source_global_user_id)
+        or text_or_empty(target_global_user_id)
+        or None
+    )
+    clean_target_global_user_id = text_or_empty(target_global_user_id) or None
+    clean_target_platform_user_id = (
+        text_or_empty(target_platform_user_id) or None
+    )
+
+    if not clean_platform:
+        failure = _target_binding_failure(
+            reason="missing_platform",
+            platform=clean_platform,
+            source_ref=clean_source_ref,
+            source_platform_channel_id=clean_source_channel_id,
+            source_channel_type=clean_source_channel_type,
+            target_global_user_id=clean_target_global_user_id,
+            target_platform_user_id=clean_target_platform_user_id,
+        )
+        return failure
+    if (
+        clean_target_global_user_id is None
+        and clean_target_platform_user_id is None
+    ):
+        failure = _target_binding_failure(
+            reason="missing_target_user",
+            platform=clean_platform,
+            source_ref=clean_source_ref,
+            source_platform_channel_id=clean_source_channel_id,
+            source_channel_type=clean_source_channel_type,
+            target_global_user_id=clean_target_global_user_id,
+            target_platform_user_id=clean_target_platform_user_id,
+        )
+        return failure
+
+    private_channel_reader = (
+        get_latest_private_channel_func or get_latest_private_channel_for_user
+    )
+    private_channel = await _call_maybe_async(
+        private_channel_reader,
+        platform=clean_platform,
+        global_user_id=clean_target_global_user_id,
+        platform_user_id=clean_target_platform_user_id,
+    )
+    if isinstance(private_channel, dict):
+        private_channel_id = text_or_empty(
+            private_channel.get("platform_channel_id")
+        )
+    else:
+        private_channel_id = ""
+    if private_channel_id:
+        if clean_source_channel_type in ("private", "group"):
+            bound_source_channel_type = clean_source_channel_type
+            bound_source_channel_id = clean_source_channel_id
+        else:
+            bound_source_channel_type = "private"
+            bound_source_channel_id = private_channel_id
+        if not bound_source_channel_id:
+            bound_source_channel_id = private_channel_id
+        target = _delivery_target(
+            platform=clean_platform,
+            platform_channel_id=private_channel_id,
+            channel_type="private",
+            target_global_user_id=clean_target_global_user_id,
+            target_platform_user_id=clean_target_platform_user_id,
+            source_kind="target_private_channel",
+            source_ref=clean_source_ref,
+            source_platform_channel_id=bound_source_channel_id,
+            source_channel_type=bound_source_channel_type,
+            source_message_id=clean_source_message_id,
+            source_global_user_id=clean_source_global_user_id,
+            source_platform_bot_id=text_or_empty(source_platform_bot_id),
+            source_character_name=(
+                text_or_empty(source_character_name) or "active character"
+            ),
+            guild_id=guild_id,
+            bot_permission_role=text_or_empty(bot_permission_role) or "user",
+            fallback_reason="",
+        )
+        return target
+
+    if not clean_source_channel_id:
+        failure = _target_binding_failure(
+            reason="private_channel_unavailable_and_source_missing",
+            platform=clean_platform,
+            source_ref=clean_source_ref,
+            source_platform_channel_id=clean_source_channel_id,
+            source_channel_type=clean_source_channel_type,
+            target_global_user_id=clean_target_global_user_id,
+            target_platform_user_id=clean_target_platform_user_id,
+        )
+        return failure
+    if clean_source_channel_type not in ("private", "group"):
+        failure = _target_binding_failure(
+            reason="private_channel_unavailable_and_source_invalid",
+            platform=clean_platform,
+            source_ref=clean_source_ref,
+            source_platform_channel_id=clean_source_channel_id,
+            source_channel_type=clean_source_channel_type,
+            target_global_user_id=clean_target_global_user_id,
+            target_platform_user_id=clean_target_platform_user_id,
+        )
+        return failure
+
+    target = _delivery_target(
+        platform=clean_platform,
+        platform_channel_id=clean_source_channel_id,
+        channel_type=clean_source_channel_type,
+        target_global_user_id=clean_target_global_user_id,
+        target_platform_user_id=clean_target_platform_user_id,
+        source_kind="self_cognition_source_channel",
+        source_ref=clean_source_ref,
+        source_platform_channel_id=clean_source_channel_id,
+        source_channel_type=clean_source_channel_type,
+        source_message_id=clean_source_message_id,
+        source_global_user_id=clean_source_global_user_id,
+        source_platform_bot_id=text_or_empty(source_platform_bot_id),
+        source_character_name=(
+            text_or_empty(source_character_name) or "active character"
+        ),
+        guild_id=guild_id,
+        bot_permission_role=text_or_empty(bot_permission_role) or "user",
+        fallback_reason="private_channel_unavailable",
+    )
+    return target
 
 
 def _is_due_future_cognition_event(
@@ -217,6 +411,187 @@ def _is_due_future_cognition_event(
 
     return_value = execute_time <= now
     return return_value
+
+
+async def _attach_scheduled_delivery_binding(
+    case: models.SelfCognitionCase,
+    event: dict[str, Any],
+    *,
+    get_latest_private_channel_func: Callable[..., Any] | None,
+) -> None:
+    """Attach target binding metadata to a scheduled source case."""
+
+    binding = await resolve_self_cognition_delivery_target(
+        platform=text_or_empty(event.get("source_platform")),
+        source_platform_channel_id=text_or_empty(event.get("source_channel_id")),
+        source_channel_type=text_or_empty(event.get("source_channel_type")),
+        source_message_id=text_or_empty(event.get("source_message_id")),
+        source_ref=text_or_empty(case.get("case_id")),
+        source_global_user_id=text_or_empty(event.get("source_user_id")),
+        source_platform_bot_id=text_or_empty(
+            event.get("source_platform_bot_id")
+        ),
+        source_character_name=text_or_empty(
+            event.get("source_character_name")
+        ),
+        guild_id=_optional_text(event.get("guild_id")),
+        bot_permission_role=text_or_empty(event.get("bot_role")),
+        target_global_user_id=text_or_empty(event.get("source_user_id")),
+        target_platform_user_id=None,
+        get_latest_private_channel_func=get_latest_private_channel_func,
+    )
+    _attach_binding(case, binding)
+
+
+async def _attach_active_commitment_delivery_binding(
+    case: models.SelfCognitionCase,
+    unit: dict[str, Any],
+    latest_row: dict[str, Any],
+    *,
+    get_latest_private_channel_func: Callable[..., Any] | None,
+) -> None:
+    """Attach target binding metadata to an active-commitment case."""
+
+    binding = await resolve_self_cognition_delivery_target(
+        platform=text_or_empty(latest_row.get("platform")),
+        source_platform_channel_id=text_or_empty(
+            latest_row.get("platform_channel_id")
+        ),
+        source_channel_type=text_or_empty(latest_row.get("channel_type")),
+        source_message_id=text_or_empty(latest_row.get("platform_message_id")),
+        source_ref=text_or_empty(case.get("case_id")),
+        source_global_user_id=text_or_empty(unit.get("global_user_id")),
+        source_platform_bot_id=text_or_empty(case.get("platform_bot_id")),
+        source_character_name=_character_name(case),
+        guild_id=_optional_text(latest_row.get("guild_id")),
+        bot_permission_role=text_or_empty(latest_row.get("bot_role")) or "user",
+        target_global_user_id=text_or_empty(unit.get("global_user_id")),
+        target_platform_user_id=text_or_empty(latest_row.get("platform_user_id")),
+        get_latest_private_channel_func=get_latest_private_channel_func,
+    )
+    _attach_binding(case, binding)
+
+
+def _attach_binding(
+    case: models.SelfCognitionCase,
+    binding: (
+        models.SelfCognitionDeliveryTarget
+        | models.SelfCognitionTargetBindingFailure
+    ),
+) -> None:
+    """Store target binding or failure metadata on the case."""
+
+    if binding.get("status") == "target_binding_failed":
+        failure = binding
+        case["target_binding_status"] = "failed"
+        case["target_binding_failure"] = failure
+    else:
+        target = binding
+        case["target_binding_status"] = "bound"
+        case["delivery_target"] = target
+
+
+def _target_binding_failure(
+    *,
+    reason: str,
+    platform: str,
+    source_ref: str,
+    source_platform_channel_id: str,
+    source_channel_type: str,
+    target_global_user_id: str | None,
+    target_platform_user_id: str | None,
+) -> models.SelfCognitionTargetBindingFailure:
+    """Build an auditable target-binding failure payload."""
+
+    failure: models.SelfCognitionTargetBindingFailure = {
+        "status": "target_binding_failed",
+        "reason": reason,
+        "platform": platform,
+        "source_ref": source_ref,
+        "source_platform_channel_id": source_platform_channel_id,
+        "source_channel_type": source_channel_type,
+        "target_global_user_id": target_global_user_id,
+        "target_platform_user_id": target_platform_user_id,
+    }
+    return failure
+
+
+def _delivery_target(
+    *,
+    platform: str,
+    platform_channel_id: str,
+    channel_type: str,
+    target_global_user_id: str | None,
+    target_platform_user_id: str | None,
+    source_kind: str,
+    source_ref: str,
+    source_platform_channel_id: str,
+    source_channel_type: str,
+    source_message_id: str,
+    source_global_user_id: str | None,
+    source_platform_bot_id: str,
+    source_character_name: str,
+    guild_id: str | None,
+    bot_permission_role: str,
+    fallback_reason: str,
+) -> models.SelfCognitionDeliveryTarget:
+    """Build a normalized delivery target payload."""
+
+    target: models.SelfCognitionDeliveryTarget = {
+        "schema_version": "self_cognition_delivery_target.v1",
+        "platform": platform,
+        "platform_channel_id": platform_channel_id,
+        "channel_type": channel_type,
+        "target_global_user_id": target_global_user_id,
+        "target_platform_user_id": target_platform_user_id,
+        "source_kind": source_kind,
+        "source_ref": source_ref,
+        "source_platform_channel_id": source_platform_channel_id,
+        "source_channel_type": source_channel_type,
+        "source_message_id": source_message_id,
+        "source_global_user_id": source_global_user_id,
+        "source_platform_bot_id": source_platform_bot_id,
+        "source_character_name": source_character_name,
+        "guild_id": guild_id,
+        "bot_permission_role": bot_permission_role,
+        "fallback_reason": fallback_reason,
+    }
+    return target
+
+
+def _character_name(case: models.SelfCognitionCase) -> str:
+    """Read the case character name for delivery audit metadata."""
+
+    profile = case.get("character_profile")
+    if not isinstance(profile, dict):
+        return_value = "active character"
+        return return_value
+    return_value = text_or_empty(profile.get("name")) or "active character"
+    return return_value
+
+
+def _optional_text(value: object) -> str | None:
+    """Return a stripped string or ``None`` for optional source metadata."""
+
+    clean_value = text_or_empty(value)
+    if clean_value:
+        return_value = clean_value
+    else:
+        return_value = None
+    return return_value
+
+
+async def _call_maybe_async(
+    callable_object: Callable[..., Any],
+    *args: Any,
+    **kwargs: Any,
+) -> Any:
+    """Call a sync or async source seam with a common awaitable contract."""
+
+    value = callable_object(*args, **kwargs)
+    if inspect.isawaitable(value):
+        value = await value
+    return value
 
 
 def _build_scheduled_future_cognition_case(

@@ -35,6 +35,11 @@ The current module provides deterministic contracts for:
 No current production path imports this package to send a message. Stage 10
 ends at contract, policy, outbox, and fake-transport verification.
 
+This package does not govern selected self-cognition speech. A selected self-cognition `speak`
+is immediate selected speech handled by the shared dialog, persistence, and
+runtime adapter bridge path, not by the proactive output outbox or fake
+transport contract.
+
 ## Public Interface
 
 Current callers import concrete modules:

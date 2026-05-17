@@ -15,11 +15,12 @@ The module supports two entry points:
   visible `speak` surface, and writes local artifacts under the requested
   output directory.
 - The service worker collects bounded visible/actionable source cases,
-  builds the same route records in memory, invokes the existing dialog graph
-  only for selected visible `speak` rendering, calls the existing consolidator
-  through the shared same-path entry, records sanitized event-log telemetry,
-  and persists action-attempt state through the DB facade. It does not hand
-  prewritten text to delivery.
+  binds `SelfCognitionDeliveryTarget` before cognition, builds the same route
+  records in memory, invokes the existing dialog graph only for selected
+  visible `speak` rendering, calls the existing consolidator through the shared
+  same-path entry, records sanitized event-log telemetry, persists
+  action-attempt state through the DB facade, and dispatches selected `speak`
+  through the runtime adapter bridge.
 
 Self-cognition is an upstream trigger source for the shared persona path. It is
 not a downstream action consumer, private cleanup channel, adapter sender, or
@@ -45,10 +46,12 @@ character-state, relationship, affinity, memory-unit, and cache lanes through
 the shared consolidator policy. It does not create a separate self-cognition
 memory or progress store.
 
-The module does not call adapters directly, write `/chat` conversation rows, or
-schedule prewritten user-visible text. Local action-candidate rendering exists
-only when selected `speak` already authorized visible dialog; candidates remain
-private tracking artifacts.
+The module does not call platform adapters directly from graph code, route
+direct `/chat` requests through the worker, or schedule prewritten user-visible
+text. Production selected `speak` must attempt delivery after dialog rendering:
+the dispatcher persists the assistant outbound row, looks up the registered
+runtime adapter, sends to the bound target, and returns terminal delivery
+metadata for action-attempt persistence.
 
 Consolidation can run even when self-cognition selects no visible action.
 Action results, episode-trace evidence, and an empty `final_dialog` are
@@ -146,6 +149,20 @@ shape. Event logging mirrors sanitized trigger, run, route, action-attempt, and
 consolidation metadata for operators, but event logs are not used as production
 control state.
 
+## Delivery Target Binding
+
+Production source collectors attach either a bound
+`SelfCognitionDeliveryTarget` or a target-binding failure before cognition.
+The resolver prefers the latest known private channel on the same platform for
+the semantic target user. If no known private channel exists, it uses the
+self-cognition source channel when that source is a valid private or group
+channel. Cases without a valid target are recorded as `target_binding_failed`
+and stop before RAG, cognition, dialog, consolidation, and delivery.
+
+`SelfCognitionDeliveryTarget` is deterministic runtime metadata. It must stay
+out of source packets, RAG requests, cognition state, dialog state, prompts,
+prompt anchors, prompt schemas, and model-facing artifacts.
+
 ## Delivery Mentions
 
 Self-cognition may attach one platform-neutral `delivery_mentions` request to
@@ -192,9 +209,11 @@ request as local tracking metadata.
 ## Future Cognition Handoff
 
 Self-cognition may produce local delivery-candidate artifacts for dry-run
-inspection and duplicate suppression, but production worker ticks do not
-schedule or send those candidates. Visible expression requires selected
-`speak`, L3 text directives, and dialog in the shared cognition path.
+inspection and duplicate suppression. In production worker ticks, selected
+`speak` requires a bound delivery target, L3 text directives, and dialog in the
+shared cognition path, then the worker hands the final text to dispatcher
+delivery in the same tick. Dry-run candidate rendering remains inspection-only
+and does not deliver.
 
 `trigger_future_cognition` uses `scheduled_events` as an internal delayed
 trigger source. The action handler records a private non-dispatcher slot; a
@@ -235,9 +254,9 @@ The dry-run writer may produce:
 - `self_cognition_loop_trace.md`
 
 Legacy dry-run delivery candidates use `dispatch_shape: "send_message"` and
-`production_handoff: false` in dry-run artifacts. In live mode, they remain
-private tracking artifacts in the `self_cognition_action_attempts` collection
-and do not become scheduler rows.
+an inspection-only handoff marker in dry-run artifacts. In live mode,
+production selected speech records a terminal action-attempt status such as
+`sent`, `delivery_failed`, `held`, or `duplicate_suppressed`.
 
 ## Command
 
@@ -318,7 +337,7 @@ self_cognition_action_candidate = {
     "text": str,
     "execute_at": str | None,
     "dispatch_shape": "send_message",
-    "production_handoff": False,
+    "inspection_only": True,
     "delivery_mentions": list[dict],  # optional
 }
 

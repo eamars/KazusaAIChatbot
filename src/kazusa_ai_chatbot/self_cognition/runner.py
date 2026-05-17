@@ -68,6 +68,7 @@ SELF_COGNITION_PRIVATE_ACTION_KINDS = frozenset(
         TRIGGER_FUTURE_COGNITION_CAPABILITY,
     )
 )
+DRY_RUN_EVENT_DISPATCH_STATUS = "not_requested"
 
 
 def run_self_cognition_case(
@@ -208,7 +209,7 @@ async def run_self_cognition_case_async(
         await _record_self_cognition_event_from_artifacts(
             case=case,
             artifact_payloads=artifact_payloads,
-            dispatch_status="not_requested",
+            dispatch_status=DRY_RUN_EVENT_DISPATCH_STATUS,
             component="self_cognition.runner",
         )
     return written_paths
@@ -941,8 +942,9 @@ def _route_effect_for_route(
     if route == models.ROUTE_ACTION_CANDIDATE:
         consumer = "local_action_candidate"
         effect_summary = (
-            "Runner created or suppressed a private action candidate; "
-            "production worker records the attempt without delivery."
+            "Dry-run action candidate artifacts are inspection-only; "
+            "production selected speak uses the dispatcher/runtime adapter "
+            "bridge after dialog rendering."
         )
     elif route == models.ROUTE_PROGRESS_MAINTENANCE:
         consumer = "conversation_progress_candidate"

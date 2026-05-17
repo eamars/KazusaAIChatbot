@@ -19,7 +19,12 @@ from kazusa_ai_chatbot.config import (
     SELF_COGNITION_WORKER_INTERVAL_SECONDS,
 )
 from kazusa_ai_chatbot import db, event_logging
+from kazusa_ai_chatbot.dispatcher.adapter_iface import AdapterRegistry
 from kazusa_ai_chatbot.nodes.dialog_agent import StateContractError
+from kazusa_ai_chatbot.self_cognition.delivery import (
+    SelfCognitionDeliveryResult,
+    deliver_selected_speak,
+)
 from kazusa_ai_chatbot.self_cognition import models, runner
 from kazusa_ai_chatbot.self_cognition import sources as source_collectors
 from kazusa_ai_chatbot.time_boundary import storage_utc_now
@@ -55,6 +60,7 @@ def start_self_cognition_worker(
     *,
     is_primary_interaction_busy: Callable[[], bool],
     character_profile_provider: Callable[[], dict[str, Any]],
+    adapter_registry_provider: Callable[[], AdapterRegistry | None] | None = None,
     output_root: str | Path = SELF_COGNITION_TRACKING_DIR,
 ) -> SelfCognitionWorkerHandle:
     """Start the process-local self-cognition worker loop.
@@ -62,6 +68,7 @@ def start_self_cognition_worker(
     Args:
         is_primary_interaction_busy: Service load probe.
         character_profile_provider: Callable returning current character state.
+        adapter_registry_provider: Callable returning the live adapter registry.
         output_root: Compatibility path passed only to injected test seams.
 
     Returns:
@@ -74,6 +81,7 @@ def start_self_cognition_worker(
             stop_event=stop_event,
             is_primary_interaction_busy=is_primary_interaction_busy,
             character_profile_provider=character_profile_provider,
+            adapter_registry_provider=adapter_registry_provider,
             output_root=output_root,
         )
     )
@@ -110,6 +118,7 @@ async def run_self_cognition_worker_tick(
     record_attempt_func: Callable[..., Any] | None = None,
     complete_scheduled_event_func: Callable[..., Any] | None = None,
     claim_scheduled_event_func: Callable[..., Any] | None = None,
+    adapter_registry_provider: Callable[[], AdapterRegistry | None] | None = None,
     max_cases: int = SELF_COGNITION_MAX_CASES_PER_TICK,
 ) -> SelfCognitionWorkerResult:
     """Run one bounded self-cognition worker tick.
@@ -127,6 +136,7 @@ async def run_self_cognition_worker_tick(
             completion.
         claim_scheduled_event_func: Optional test seam for atomically claiming
             source scheduler rows before processing.
+        adapter_registry_provider: Optional live adapter registry provider.
         max_cases: Maximum cases to process in this tick.
 
     Returns:
@@ -167,6 +177,7 @@ async def run_self_cognition_worker_tick(
     active_claim_scheduled_event = (
         claim_scheduled_event_func or db.claim_pending_scheduled_event_running
     )
+    adapter_registry = _adapter_registry_for_tick(adapter_registry_provider)
 
     for case in cases[:max_cases]:
         if is_primary_interaction_busy():
@@ -179,6 +190,14 @@ async def run_self_cognition_worker_tick(
         )
         if not claimed:
             result.skipped_count += 1
+            continue
+        if _target_binding_failed(case):
+            result.skipped_count += 1
+            await _record_target_binding_failed_event(case)
+            await _complete_scheduled_future_cognition_event(
+                case,
+                complete_scheduled_event_func=active_complete_scheduled_event,
+            )
             continue
         prior_attempts = await _call_maybe_async(
             active_read_attempts,
@@ -214,9 +233,11 @@ async def run_self_cognition_worker_tick(
             continue
         result.processed_count += 1
         dispatch_status = await _handle_case_action_outputs(
+            case=case_for_run,
             artifact_payloads=artifact_payloads,
             now=now,
             record_attempt_func=active_record_attempt,
+            adapter_registry=adapter_registry,
         )
         await _record_self_cognition_event_from_artifacts(
             case=case_for_run,
@@ -237,6 +258,7 @@ async def _self_cognition_worker_loop(
     stop_event: asyncio.Event,
     is_primary_interaction_busy: Callable[[], bool],
     character_profile_provider: Callable[[], dict[str, Any]],
+    adapter_registry_provider: Callable[[], AdapterRegistry | None] | None,
     output_root: str | Path,
 ) -> None:
     """Run self-cognition scheduling ticks until stopped."""
@@ -249,6 +271,7 @@ async def _self_cognition_worker_loop(
                 now=storage_utc_now(),
                 is_primary_interaction_busy=is_primary_interaction_busy,
                 character_profile=character_profile,
+                adapter_registry_provider=adapter_registry_provider,
             )
         except Exception as exc:
             logger.exception(f"Self-cognition worker tick failed: {exc}")
@@ -295,20 +318,250 @@ async def _collect_cases(
 
 async def _handle_case_action_outputs(
     *,
+    case: models.SelfCognitionCase,
     artifact_payloads: dict[str, Any],
     now: datetime,
     record_attempt_func: Callable[..., Any],
+    adapter_registry: AdapterRegistry | None,
 ) -> str:
-    """Record private action attempts for one case without scheduling output."""
+    """Record or deliver selected action outputs for one case."""
 
     action_attempt = artifact_payloads.get(models.ARTIFACT_ACTION_ATTEMPT)
     if not isinstance(action_attempt, dict):
         return_value = "not_requested"
         return return_value
 
-    attempt_state = _attempt_state(action_attempt, now=now)
+    attempt_status = str(action_attempt.get("status") or "")
+    if attempt_status == models.ACTION_ATTEMPT_STATUS_DUPLICATE:
+        attempt_state = _attempt_state(action_attempt, now=now)
+        await _call_maybe_async(record_attempt_func, attempt_state)
+        return_value = "duplicate_suppressed"
+        return return_value
+    if attempt_status == models.ACTION_ATTEMPT_STATUS_HELD:
+        attempt_state = _attempt_state(action_attempt, now=now)
+        await _call_maybe_async(record_attempt_func, attempt_state)
+        return_value = "held"
+        return return_value
+
+    action_candidate = artifact_payloads.get(models.ARTIFACT_ACTION_CANDIDATE)
+    delivery_target = case.get("delivery_target")
+    if (
+        attempt_status == models.ACTION_ATTEMPT_STATUS_CANDIDATE
+        and not isinstance(action_candidate, dict)
+        and isinstance(delivery_target, dict)
+    ):
+        delivery_result: SelfCognitionDeliveryResult = {
+            "status": "delivery_failed",
+            "conversation_message_id": None,
+            "delivery_tracking_id": None,
+            "adapter_message_id": None,
+            "failure_reason": "empty_text",
+        }
+        attempt_state = _attempt_state(
+            _action_attempt_with_delivery_result(
+                action_attempt,
+                delivery_result,
+            ),
+            now=now,
+        )
+        await _call_maybe_async(record_attempt_func, attempt_state)
+        return_value = delivery_result["status"]
+        return return_value
+    if (
+        attempt_status != models.ACTION_ATTEMPT_STATUS_CANDIDATE
+        or not isinstance(action_candidate, dict)
+        or not isinstance(delivery_target, dict)
+    ):
+        attempt_state = _attempt_state(action_attempt, now=now)
+        await _call_maybe_async(record_attempt_func, attempt_state)
+        return_value = "not_requested"
+        return return_value
+
+    delivery_result = await deliver_selected_speak(
+        text=str(action_candidate.get("text") or ""),
+        delivery_target=delivery_target,
+        character_profile=_character_profile(case),
+        adapter_registry=adapter_registry,
+        now=now,
+        reply_to_msg_id=_optional_text(action_candidate.get("reply_to_msg_id")),
+        delivery_mentions=_delivery_mentions(action_candidate),
+    )
+    attempt_state = _attempt_state(
+        _action_attempt_with_delivery_result(
+            action_attempt,
+            delivery_result,
+        ),
+        now=now,
+    )
     await _call_maybe_async(record_attempt_func, attempt_state)
-    return_value = "not_requested"
+    return_value = delivery_result["status"]
+    return return_value
+
+
+def _action_attempt_with_delivery_result(
+    action_attempt: dict[str, Any],
+    delivery_result: SelfCognitionDeliveryResult,
+) -> dict[str, Any]:
+    """Apply terminal delivery metadata to an action-attempt row."""
+
+    attempt_state = dict(action_attempt)
+    result_status = delivery_result["status"]
+    if result_status == "delivery_failed":
+        attempt_state["status"] = models.ACTION_ATTEMPT_STATUS_DELIVERY_FAILED
+    else:
+        attempt_state["status"] = result_status
+    attempt_state["dispatch_status"] = result_status
+    if delivery_result["conversation_message_id"]:
+        attempt_state["conversation_message_id"] = (
+            delivery_result["conversation_message_id"]
+        )
+    if delivery_result["delivery_tracking_id"]:
+        attempt_state["delivery_tracking_id"] = (
+            delivery_result["delivery_tracking_id"]
+        )
+    if delivery_result["adapter_message_id"]:
+        attempt_state["adapter_message_id"] = delivery_result[
+            "adapter_message_id"
+        ]
+    if delivery_result["failure_reason"]:
+        attempt_state["failure_reason"] = delivery_result["failure_reason"]
+    return attempt_state
+
+
+def _adapter_registry_for_tick(
+    adapter_registry_provider: Callable[[], AdapterRegistry | None] | None,
+) -> AdapterRegistry | None:
+    """Resolve the live adapter registry once for a worker tick."""
+
+    if adapter_registry_provider is None:
+        return_value = None
+        return return_value
+    return_value = adapter_registry_provider()
+    return return_value
+
+
+def _target_binding_failed(
+    case: models.SelfCognitionCase,
+) -> bool:
+    """Return whether a worker case must stop before cognition."""
+
+    if case.get("target_binding_status") == "failed":
+        return_value = True
+        return return_value
+    if not isinstance(case.get("delivery_target"), dict):
+        return_value = True
+        return return_value
+    return_value = False
+    return return_value
+
+
+async def _record_target_binding_failed_event(
+    case: models.SelfCognitionCase,
+) -> None:
+    """Record a skipped production case whose target could not be bound."""
+
+    failure = case.get("target_binding_failure")
+    if not isinstance(failure, dict):
+        failure = _missing_delivery_target_failure(case)
+    await event_logging.record_self_cognition_event(
+        component="self_cognition.worker",
+        case_id=str(case.get("case_id") or ""),
+        trigger_kind=str(case.get("trigger_kind") or ""),
+        selected_route="not_started",
+        output_mode="none",
+        budget={
+            "rag_calls": 0,
+            "cognition_calls": 0,
+            "dialog_calls": 0,
+            "topic_limit": 0,
+        },
+        dispatch_status="target_binding_failed",
+        status="target_binding_failed",
+        trigger_id="",
+        run_id="",
+        attempt_id="",
+        consolidation_outcome=None,
+        target_binding_failure=failure,
+    )
+
+
+def _missing_delivery_target_failure(
+    case: models.SelfCognitionCase,
+) -> models.SelfCognitionTargetBindingFailure:
+    """Build audit metadata for a worker-owned missing target failure."""
+
+    target_scope = case.get("target_scope")
+    if not isinstance(target_scope, dict):
+        target_scope = {}
+    source_refs = case.get("source_refs")
+    if isinstance(source_refs, list) and source_refs:
+        raw_source_ref = source_refs[0]
+    else:
+        raw_source_ref = {}
+    if not isinstance(raw_source_ref, dict):
+        raw_source_ref = {}
+
+    source_id = _optional_text(raw_source_ref.get("source_id"))
+    case_id = _optional_text(case.get("case_id"))
+    source_ref = source_id or case_id or ""
+    target_global_user_id = _optional_text(target_scope.get("user_id"))
+    target_platform_user_id = _optional_text(
+        target_scope.get("platform_user_id")
+    )
+    failure: models.SelfCognitionTargetBindingFailure = {
+        "status": "target_binding_failed",
+        "reason": "missing_delivery_target",
+        "platform": _optional_text(target_scope.get("platform")) or "",
+        "source_ref": source_ref,
+        "source_platform_channel_id": (
+            _optional_text(target_scope.get("platform_channel_id")) or ""
+        ),
+        "source_channel_type": (
+            _optional_text(target_scope.get("channel_type")) or ""
+        ),
+        "target_global_user_id": target_global_user_id,
+        "target_platform_user_id": target_platform_user_id,
+    }
+    return failure
+
+
+def _delivery_mentions(action_candidate: dict[str, Any]) -> list[dict[str, Any]] | None:
+    """Read optional delivery mention metadata from an action candidate."""
+
+    value = action_candidate.get("delivery_mentions")
+    if not isinstance(value, list):
+        return_value = None
+        return return_value
+    mentions = [
+        dict(item)
+        for item in value
+        if isinstance(item, dict)
+    ]
+    return mentions
+
+
+def _character_profile(case: models.SelfCognitionCase) -> dict[str, Any]:
+    """Return the case character profile used by delivery metadata."""
+
+    value = case.get("character_profile")
+    if isinstance(value, dict):
+        profile = value
+    else:
+        profile = {}
+    return profile
+
+
+def _optional_text(value: object) -> str | None:
+    """Return stripped optional text from a local artifact field."""
+
+    if not isinstance(value, str):
+        return_value = None
+        return return_value
+    clean_value = value.strip()
+    if clean_value:
+        return_value = clean_value
+    else:
+        return_value = None
     return return_value
 
 

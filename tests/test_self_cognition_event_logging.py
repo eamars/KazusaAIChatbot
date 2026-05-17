@@ -192,11 +192,11 @@ async def test_runner_event_log_mirror_omits_candidate_text(
 
 
 @pytest.mark.asyncio
-async def test_worker_mirrors_production_run_without_dispatch_text(
+async def test_worker_records_target_binding_failure_without_dispatch_text(
     monkeypatch,
     tmp_path,
 ) -> None:
-    """Production worker should mirror run metadata without delivery handoff."""
+    """Production worker should mirror target binding failure without text."""
 
     record_self_cognition_event = AsyncMock()
     record_worker_event = AsyncMock()
@@ -211,46 +211,164 @@ async def test_worker_mirrors_production_run_without_dispatch_text(
         record_worker_event,
     )
 
+    failed_case = _commitment_case()
+    failed_case["target_binding_status"] = "failed"
+    failed_case["target_binding_failure"] = {
+        "status": "target_binding_failed",
+        "reason": "private_channel_unavailable_and_source_missing",
+        "platform": "qq",
+        "source_ref": "promise-001",
+        "source_platform_channel_id": "",
+        "source_channel_type": "internal",
+        "target_global_user_id": "673225019",
+        "target_platform_user_id": None,
+    }
+
     async def collect_cases(*, now: datetime, max_cases: int) -> list[dict[str, Any]]:
         del now, max_cases
-        return [_commitment_case()]
+        return [failed_case]
 
     async def read_attempts(*, limit: int) -> list[dict[str, Any]]:
         assert limit > 0
         return []
 
     record_attempt = AsyncMock()
+    run_case = AsyncMock()
 
     result = await worker.run_self_cognition_worker_tick(
         output_root=tmp_path,
         now=datetime(2026, 5, 13, tzinfo=timezone.utc),
         is_primary_interaction_busy=lambda: False,
         collect_cases_func=collect_cases,
-        run_case_func=_case_runner_with_tracking,
+        run_case_func=run_case,
         read_attempts_func=read_attempts,
         record_attempt_func=record_attempt,
+        adapter_registry_provider=lambda: None,
         max_cases=3,
     )
 
-    assert result.processed_count == 1
+    assert result.processed_count == 0
+    assert result.skipped_count == 1
     record_self_cognition_event.assert_awaited_once()
     self_kwargs = record_self_cognition_event.await_args.kwargs
     assert self_kwargs["component"] == "self_cognition.worker"
-    assert self_kwargs["dispatch_status"] == "not_requested"
-    assert self_kwargs["attempt_id"] == "self_cognition_attempt:promise-001"
-    assert self_kwargs["consolidation_outcome"] == {
-        "consolidation_called": True,
-        "write_success": {"character_state": True},
-        "scheduled_event_count": 0,
-        "cache_evicted_count": 1,
-        "origin_trigger_source": "internal_thought",
-        "origin_episode_id": "self_cognition:dry_run:promise-001",
-    }
+    assert self_kwargs["dispatch_status"] == "target_binding_failed"
+    assert self_kwargs["status"] == "target_binding_failed"
+    assert self_kwargs["selected_route"] == "not_started"
+    assert self_kwargs["attempt_id"] == ""
+    assert self_kwargs["target_binding_failure"] == (
+        failed_case["target_binding_failure"]
+    )
     serialized = json.dumps({"self": self_kwargs}, ensure_ascii=False)
     assert "Checking in now." not in serialized
     record_worker_event.assert_awaited_once()
-    record_attempt.assert_awaited_once()
+    record_attempt.assert_not_awaited()
+    run_case.assert_not_called()
     assert list(tmp_path.iterdir()) == []
+
+
+@pytest.mark.asyncio
+async def test_worker_synthesizes_missing_target_binding_failure_metadata(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    """Worker-owned missing target failures should stay auditable."""
+
+    record_self_cognition_event = AsyncMock()
+    monkeypatch.setattr(
+        worker.event_logging,
+        "record_self_cognition_event",
+        record_self_cognition_event,
+    )
+    monkeypatch.setattr(
+        worker.event_logging,
+        "record_worker_event",
+        AsyncMock(),
+    )
+
+    failed_case = _commitment_case()
+
+    async def collect_cases(*, now: datetime, max_cases: int) -> list[dict[str, Any]]:
+        del now, max_cases
+        return [failed_case]
+
+    await worker.run_self_cognition_worker_tick(
+        output_root=tmp_path,
+        now=datetime(2026, 5, 13, tzinfo=timezone.utc),
+        is_primary_interaction_busy=lambda: False,
+        collect_cases_func=collect_cases,
+        run_case_func=AsyncMock(),
+        read_attempts_func=AsyncMock(),
+        record_attempt_func=AsyncMock(),
+        max_cases=1,
+    )
+
+    self_kwargs = record_self_cognition_event.await_args.kwargs
+    failure = self_kwargs["target_binding_failure"]
+    assert failure["status"] == "target_binding_failed"
+    assert failure["reason"] == "missing_delivery_target"
+    assert failure["platform"] == "qq"
+    assert failure["source_ref"] == "promise-001"
+    assert failure["source_platform_channel_id"] == "673225019"
+    assert failure["source_channel_type"] == "private"
+    assert failure["target_global_user_id"] == "673225019"
+    assert failure["target_platform_user_id"] is None
+
+
+@pytest.mark.asyncio
+async def test_self_cognition_event_logger_records_target_binding_failure(
+    monkeypatch,
+) -> None:
+    """Target binding failure events should preserve audit fields only."""
+
+    captured: dict[str, object] = {}
+
+    async def write_event(document):
+        captured.update(document)
+        event_id = str(document["event_id"])
+        return event_id
+
+    monkeypatch.setattr(recording_module.repository, "write_event", write_event)
+
+    await event_logging.record_self_cognition_event(
+        component="self_cognition.worker",
+        case_id="case-1",
+        trigger_kind=models.TRIGGER_ACTIVE_COMMITMENT_DUE_CHECK,
+        selected_route="not_started",
+        output_mode="none",
+        budget={
+            "rag_calls": 0,
+            "cognition_calls": 0,
+            "dialog_calls": 0,
+            "topic_limit": 0,
+        },
+        dispatch_status="target_binding_failed",
+        status="target_binding_failed",
+        target_binding_failure={
+            "status": "target_binding_failed",
+            "reason": "private_channel_unavailable_and_source_missing",
+            "platform": "qq",
+            "source_ref": "promise-001",
+            "source_platform_channel_id": "",
+            "source_channel_type": "internal",
+            "target_global_user_id": "secret-global-user-id",
+            "target_platform_user_id": None,
+        },
+    )
+
+    payload = captured["payload"]
+    assert isinstance(payload, dict)
+    assert payload["target_binding_failure"] == {
+        "reason": "private_channel_unavailable_and_source_missing",
+        "platform": "qq",
+        "source_ref": "promise-001",
+        "source_platform_channel_id": "",
+        "source_channel_type": "internal",
+        "has_target_global_user_id": True,
+        "has_target_platform_user_id": False,
+    }
+    serialized = json.dumps(captured, ensure_ascii=False, sort_keys=True)
+    assert "secret-global-user-id" not in serialized
 
 
 @pytest.mark.asyncio

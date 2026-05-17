@@ -71,6 +71,12 @@ typed episode -> evidence assembly / RAG -> cognition concerns
 - Self-cognition is a trigger source for the same cognition/action/consolidation
   pipeline. It is not a downstream consumer, private cleanup path, or alternate
   action executor.
+- A selected self-cognition `speak` uses the same shared
+  cognition/action/consolidation pipeline and the same shared cognition/dialog/persistence path
+  as other selected speech, then hands the rendered text to the runtime adapter bridge
+  after dialog rendering. This does not create a separate self-cognition
+  action-execution owner and does not change LLM prompt, schema, or model
+  ownership.
 - Reflection-derived material can be projected as gated context or evidence
   after another valid trigger exists. It is not an initial trigger source.
 - Raw reflection output does not enter normal cognition. Only promoted, gated,

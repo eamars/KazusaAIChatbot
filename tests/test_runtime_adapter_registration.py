@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 from datetime import datetime, timezone
+from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
 import httpx
@@ -205,6 +206,19 @@ def test_register_runtime_adapter_payload_reuses_remote_registration(monkeypatch
     )
     assert response.status == "heartbeat_ok"
     assert response.platform == "qq"
+
+
+def test_self_cognition_uses_registered_runtime_adapter() -> None:
+    """Self-cognition worker startup should receive the service registry."""
+
+    source_text = Path(service_module.__file__).read_text(encoding="utf-8")
+    call_start = source_text.index(
+        "_self_cognition_worker_handle = start_self_cognition_worker("
+    )
+    call_block = source_text[call_start: call_start + 500]
+
+    assert "adapter_registry_provider" in call_block
+    assert "_adapter_registry" in call_block
 
 
 @pytest.mark.asyncio

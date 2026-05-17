@@ -2,8 +2,14 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from typing import Any, get_type_hints
+from unittest.mock import AsyncMock
 
+import pytest
+
+from kazusa_ai_chatbot.dispatcher import AdapterRegistry, SendResult
+import kazusa_ai_chatbot.dispatcher.handlers as handlers_module
 from kazusa_ai_chatbot.self_cognition import models, tracking
 
 
@@ -49,6 +55,68 @@ def _candidate_for_scope(
         mention_target_user=mention_target_user,
     )
     return action_candidate
+
+
+class _FakeAdapter:
+    """Adapter double that records delivery mentions from self-cognition."""
+
+    platform = "qq"
+    platform_bot_id = "bot-1"
+    display_name = "Character"
+
+    def __init__(self) -> None:
+        self.calls: list[dict[str, Any]] = []
+
+    async def send_message(
+        self,
+        channel_id: str,
+        text: str,
+        *,
+        channel_type: str,
+        reply_to_msg_id: str | None = None,
+        delivery_mentions: list[dict[str, Any]] | None = None,
+    ) -> SendResult:
+        """Capture delivery mention metadata and return a send result."""
+
+        self.calls.append({
+            "channel_id": channel_id,
+            "text": text,
+            "channel_type": channel_type,
+            "reply_to_msg_id": reply_to_msg_id,
+            "delivery_mentions": delivery_mentions,
+        })
+        result = SendResult(
+            platform="qq",
+            channel_id=channel_id,
+            message_id="adapter-message-1",
+            sent_at=datetime(2026, 5, 17, 5, 57, tzinfo=timezone.utc),
+        )
+        return result
+
+
+def _delivery_target() -> dict[str, Any]:
+    """Build a source-channel delivery target for mention tests."""
+
+    target = {
+        "schema_version": "self_cognition_delivery_target.v1",
+        "platform": "qq",
+        "platform_channel_id": "group-1",
+        "channel_type": "group",
+        "target_global_user_id": "global-target-1",
+        "target_platform_user_id": "qq-target",
+        "source_kind": "self_cognition_source_channel",
+        "source_ref": "promise-001",
+        "source_platform_channel_id": "group-1",
+        "source_channel_type": "group",
+        "source_message_id": "msg-1",
+        "source_global_user_id": "global-target-1",
+        "source_platform_bot_id": "bot-1",
+        "source_character_name": "Character",
+        "guild_id": None,
+        "bot_permission_role": "user",
+        "fallback_reason": "private_channel_unavailable",
+    }
+    return target
 
 
 def test_delivery_mention_typed_shape_is_declared() -> None:
@@ -144,3 +212,68 @@ def test_group_delivery_scope_without_semantic_target_omits_mentions() -> None:
 
     assert action_candidate is not None
     assert "delivery_mentions" not in action_candidate
+
+
+@pytest.mark.asyncio
+async def test_self_cognition_delivery_preserves_mentions(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Selected self-cognition delivery should pass mention metadata through."""
+
+    from kazusa_ai_chatbot.self_cognition.delivery import deliver_selected_speak
+
+    async def save_conversation(document: dict[str, Any]) -> str:
+        assert document["body_text"] == "Checking in now."
+        return "conversation-row-1"
+
+    async def ensure_character_identity(**kwargs: Any) -> str:
+        assert kwargs["platform"] == "qq"
+        return "character-global"
+
+    async def apply_receipt(**kwargs: Any) -> None:
+        assert kwargs["platform_message_id"] == "adapter-message-1"
+
+    monkeypatch.setattr(
+        handlers_module,
+        "save_conversation",
+        save_conversation,
+    )
+    monkeypatch.setattr(
+        handlers_module,
+        "ensure_character_identity",
+        ensure_character_identity,
+    )
+    monkeypatch.setattr(
+        handlers_module,
+        "apply_assistant_delivery_receipt",
+        apply_receipt,
+    )
+    monkeypatch.setattr(
+        handlers_module.event_logging,
+        "record_dispatcher_event",
+        AsyncMock(),
+    )
+
+    adapter = _FakeAdapter()
+    registry = AdapterRegistry()
+    registry.register(adapter)
+    mention = {
+        "entity_kind": "user",
+        "placement": "prefix",
+        "platform_user_id": "qq-target",
+        "global_user_id": "global-target-1",
+        "display_name": "Target User",
+        "requested_by": "dialog.mention_target_user",
+    }
+
+    result = await deliver_selected_speak(
+        text="Checking in now.",
+        delivery_target=_delivery_target(),
+        character_profile={"name": "Character"},
+        adapter_registry=registry,
+        now=datetime(2026, 5, 17, 5, 57, tzinfo=timezone.utc),
+        delivery_mentions=[mention],
+    )
+
+    assert result["status"] == "sent"
+    assert adapter.calls[0]["delivery_mentions"] == [mention]

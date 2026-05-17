@@ -1,3 +1,13 @@
+> Superseded Architecture Document
+>
+> Status: superseded
+> Superseded by plan: development_plans/active/bugfix/self_cognition_speak_delivery_bugfix_plan.md
+> Canonical current doc: src/kazusa_ai_chatbot/self_cognition/README.md
+> Supersession rule: private-candidate-only and no-production-delivery claims
+> in this document are no longer architecture authority. Current production
+> self-cognition selected `speak` must resolve a target before cognition and
+> attempt delivery after dialog rendering.
+
 # self cognition tracking ICD
 
 ## Document Control
