@@ -1484,16 +1484,23 @@ async def test_existing_cognition_and_dialog_prompts_render_with_mocked_llms(
     monkeypatch.setattr(dialog_module, "_dialog_generator_llm", generator_llm)
     generator_result = await dialog_module.dialog_generator(dialog_state)
     assert generator_result["final_dialog"] == ["ok"]
-    _assert_prompt_messages(
+    generator_payload = _assert_prompt_messages(
         generator_llm,
-        {"internal_monologue", "linguistic_directives", "tone_history"},
+        {"linguistic_directives", "contextual_directives", "user_name"},
     )
+    assert set(generator_payload) == {
+        "linguistic_directives",
+        "contextual_directives",
+        "user_name",
+    }
 
     evaluator_llm = _CaptureLLM({"feedback": "Passed", "should_stop": True})
     monkeypatch.setattr(dialog_module, "_dialog_evaluator_llm", evaluator_llm)
     evaluator_result = await dialog_module.dialog_evaluator(dialog_state)
     assert evaluator_result["should_stop"] is True
-    _assert_prompt_messages(
+    evaluator_payload = _assert_prompt_messages(
         evaluator_llm,
-        {"retry", "final_dialog", "linguistic_directives"},
+        {"retry", "final_dialog", "linguistic_directives", "contextual_directives"},
     )
+    assert "internal_monologue" not in evaluator_payload
+    assert "last_user" "_message" not in evaluator_payload

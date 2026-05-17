@@ -44,7 +44,8 @@ long_term/todo.md
 
 | Plan | Status | Execution |
 |---|---|---|
-| _None_ | _None_ | _None_ |
+| [dialog_anchor_authority_stale_history_bugfix_plan.md](active/bugfix/dialog_anchor_authority_stale_history_bugfix_plan.md) | in_progress | Execution started for dialog anchor authority payload and prompt fix |
+| [self_cognition_dialog_state_contract_bugfix_plan.md](active/bugfix/self_cognition_dialog_state_contract_bugfix_plan.md) | approved | Execution blocked until dialog anchor authority work is completed or parked |
 
 ## Reference Documents
 

@@ -17,8 +17,6 @@ from kazusa_ai_chatbot.config import (
 from kazusa_ai_chatbot.nodes import dialog_agent as dialog_module
 from kazusa_ai_chatbot.nodes.dialog_agent import (
     _DIALOG_GENERATOR_PROMPT,
-    build_affinity_block,
-    build_interaction_history_recent,
     get_abstraction_reframing_description,
     get_counter_questioning_description,
     get_direct_assertion_description,
@@ -30,7 +28,11 @@ from kazusa_ai_chatbot.nodes.dialog_agent import (
     get_self_deprecation_description,
     get_softener_density_description,
 )
-from kazusa_ai_chatbot.utils import load_personality, parse_llm_json_output
+from kazusa_ai_chatbot.utils import (
+    build_affinity_block,
+    load_personality,
+    parse_llm_json_output,
+)
 from tests.llm_trace import write_llm_trace
 
 
@@ -116,15 +118,8 @@ def _render_system_prompt(character_profile: dict) -> SystemMessage:
 def _dialog_payload(character_profile: dict, case: dict) -> tuple[HumanMessage, list]:
     """Build the same human payload shape used by dialog_generator."""
 
-    history = build_interaction_history_recent(
-        case.get('chat_history_wide', []),
-        'live-dialog-user',
-        'live-dialog-bot',
-    )
-    tone_history = dialog_module._tone_history_for_generator(history)
     affinity_block = build_affinity_block(case.get('affinity', 500))
     msg = {
-        'internal_monologue': case['internal_monologue'],
         'linguistic_directives': {
             'rhetorical_strategy': case['rhetorical_strategy'],
             'linguistic_style': case['linguistic_style'],
@@ -138,7 +133,6 @@ def _dialog_payload(character_profile: dict, case: dict) -> tuple[HumanMessage, 
             'vibe_check': case['vibe_check'],
             'relational_dynamic': case['relational_dynamic'],
         },
-        'tone_history': tone_history,
         'user_name': '测试用户',
     }
     recent_messages = case.get('recent_messages', [])
@@ -155,7 +149,6 @@ async def test_live_dialog_generator_deepseek_returns_final_dialog_schema() -> N
     cases = [
         {
             'case_id': 'benign_topic_shift',
-            'internal_monologue': '这是轻松换话题，可以自然接住，不需要判断话题是否合法。',
             'rhetorical_strategy': '自然接住轻松话题，直接回答。',
             'linguistic_style': '轻快、简短、自然。',
             'content_anchors': [
@@ -169,7 +162,6 @@ async def test_live_dialog_generator_deepseek_returns_final_dialog_schema() -> N
         },
         {
             'case_id': 'mundane_practical_advice',
-            'internal_monologue': '这是普通整理建议，按事实回答就好。',
             'rhetorical_strategy': '给出明确但不说教的建议。',
             'linguistic_style': '务实、短句、略带吐槽。',
             'content_anchors': [
@@ -183,7 +175,6 @@ async def test_live_dialog_generator_deepseek_returns_final_dialog_schema() -> N
         },
         {
             'case_id': 'not_a_promise_clarification',
-            'internal_monologue': '用户只是澄清不是要我承诺，不需要产生防御。',
             'rhetorical_strategy': '接住澄清，回到整理动作本身。',
             'linguistic_style': '自然、克制、不要上升关系。',
             'content_anchors': [

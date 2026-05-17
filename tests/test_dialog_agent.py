@@ -116,17 +116,18 @@ class TestDialogAgentState:
 
 def test_dialog_evaluator_prompt_preserves_concise_safe_dialog() -> None:
     """Evaluator prompt should not force rewrites of short safe on-topic dialog."""
-    assert "简短、克制、贴题的台词可以直接通过" in _DIALOG_EVALUATOR_PROMPT
-    assert "`……`、`?`、停顿型语气词本身不构成动作描写" in _DIALOG_EVALUATOR_PROMPT
-    assert "不要为了追求“抽象重构”或“感官化比喻”而鼓励引入身体接触" in _DIALOG_EVALUATOR_PROMPT
-    assert "若只有软性问题（如修辞展开不足、句子偏短、比喻不够浓），但核心逻辑正确、话题贴合、且未触犯物理污染红线，则仍应 `should_stop: true`" in _DIALOG_EVALUATOR_PROMPT
+
+    assert "简短、贴锚点、安全的台词应通过" in _DIALOG_EVALUATOR_PROMPT
+    assert "硬门槛全部通过后，才看软风格" in _DIALOG_EVALUATOR_PROMPT
+    assert "动作描写、物理感官、不可见状态" in _DIALOG_EVALUATOR_PROMPT
 
 
 def test_dialog_evaluator_prompt_checks_anchor_fidelity() -> None:
     """Evaluator prompt should judge dialog against every anchor class."""
 
     prompt = _DIALOG_EVALUATOR_PROMPT
-    assert '逐项检查所有 `content_anchors`' in prompt
+    assert '`content_anchors` 是唯一语义权威' in prompt
+    assert '锚点忠实：不得缺失、替换、反转或绕开' in prompt
     assert '[DECISION]' in prompt
     assert '[FACT]' in prompt
     assert '[ANSWER]' in prompt
@@ -140,11 +141,11 @@ def test_dialog_evaluator_prompt_orders_hard_gates_before_style() -> None:
     """Evaluator prompt should read as an ordered weak-model audit."""
 
     prompt = _DIALOG_EVALUATOR_PROMPT
-    assert '不是决定是否要回复用户' in prompt
-    assert prompt.index('# 1. 判定顺序') < prompt.index('# 2. 核心红线')
-    assert prompt.index('* **锚点忠实与话题对齐') < prompt.index('* **表达安全')
-    assert prompt.index('* **表达安全') < prompt.index('# 3. 软性指标')
-    assert prompt.index('# 3. 软性指标') < prompt.index('# 4. 动态通过逻辑')
+    assert '不要从上下文自行决定话题、意图或风格' in prompt
+    assert prompt.index('# Pass Condition') < prompt.index('# Hard Gates')
+    assert prompt.index('# Hard Gates') < prompt.index('# Soft Style')
+    assert prompt.index('# Soft Style') < prompt.index('# 4. 动态通过逻辑')
+    assert prompt.index('# 4. 动态通过逻辑') < prompt.index('# Audit Order')
     assert '"should_stop": boolean' in prompt
     assert 'should_stop=false` 表示必须把 `feedback` 交回生成器重试' in prompt
 
@@ -153,14 +154,14 @@ def test_dialog_evaluator_prompt_rejects_unsupported_concrete_content() -> None:
     """Evaluator prompt should reject concrete claims not backed by anchors."""
 
     prompt = _DIALOG_EVALUATOR_PROMPT
-    rule_start = prompt.index('未经 `content_anchors` 支持的具体内容')
+    rule_start = prompt.index('事实边界：不得添加 `content_anchors` 未授权')
     unsupported_rule = prompt[rule_start:rule_start + 500]
 
-    assert '必须驳回' in unsupported_rule
-    assert '型号' in unsupported_rule
-    assert '距离' in unsupported_rule
-    assert '日期' in unsupported_rule
+    assert '具体实体' in unsupported_rule
+    assert '属性' in unsupported_rule
+    assert '数量' in unsupported_rule
     assert '时间' in unsupported_rule
+    assert '地点' in unsupported_rule
     assert '承诺' in unsupported_rule
 
 
@@ -172,6 +173,24 @@ def test_dialog_generator_prompt_has_no_decision_ownership() -> None:
     assert "character_intent" not in _DIALOG_GENERATOR_PROMPT
     assert "boundary_profile" not in _DIALOG_GENERATOR_PROMPT
     assert "话题合法性" not in _DIALOG_GENERATOR_PROMPT
+
+
+def test_dialog_prompts_use_content_anchors_as_semantic_authority() -> None:
+    """Generator and evaluator prompts should not expose stale history fields."""
+
+    assert 'content_anchors` 是本轮可见回复的唯一语义内容来源' in _DIALOG_GENERATOR_PROMPT
+    assert 'internal_monologue' not in _DIALOG_GENERATOR_PROMPT
+    assert 'tone' '_history' not in _DIALOG_GENERATOR_PROMPT
+    assert 'last_user' '_message' not in _DIALOG_EVALUATOR_PROMPT
+    assert 'internal_monologue' not in _DIALOG_EVALUATOR_PROMPT
+    assert '`content_anchors` 是唯一语义权威' in _DIALOG_EVALUATOR_PROMPT
+    assert '只有同时满足以下条件才返回 `should_stop=true`' in _DIALOG_EVALUATOR_PROMPT
+    assert '没有把另一个 object / offer / request / question 当作核心话题' in (
+        _DIALOG_EVALUATOR_PROMPT
+    )
+    assert '`retry` 只是输入里的计数字段' in _DIALOG_EVALUATOR_PROMPT
+    assert '绝不能影响 pass/fail' in _DIALOG_EVALUATOR_PROMPT
+    assert '强制 `should_stop: true`' not in _DIALOG_EVALUATOR_PROMPT
 
 
 def test_build_interaction_history_recent_excludes_other_user_messages():
