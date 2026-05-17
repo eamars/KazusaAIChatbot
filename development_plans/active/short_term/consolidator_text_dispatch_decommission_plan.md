@@ -670,10 +670,13 @@ deployment window while the service is stopped (or with
   - Sign-off: Codex/2026-05-17.
 - [x] Stage 5 - documentation updated
   - Covers: implementation order step 6.
-  - Verify: static greps for stale task-dispatch claims pass.
+  - Verify: static greps for stale task-dispatch claims outside this plan pass.
   - Evidence: 2026-05-17 updated reference and subsystem docs. Static grep for
     removed dispatcher symbols, action-spec bridge helpers, `task_dispatch`,
-    task-dispatch wording, and send-message bridge claims -> no matches.
+    task-dispatch wording, and send-message bridge claims outside this plan ->
+    no stale active-path matches. This plan intentionally keeps removed-path
+    wording where it documents the decommissioned behavior and migration
+    instructions.
   - Sign-off: Codex/2026-05-17.
 - [x] Stage 6 - scheduler migration complete
   - Covers: implementation order step 7.
@@ -687,18 +690,40 @@ deployment window while the service is stopped (or with
     `after_count=0`; no historical completed/failed/cancelled rows were
     modified.
   - Sign-off: Codex/2026-05-17.
-- [ ] Stage 7 - deterministic, real LLM, and service verification complete
+- [x] Stage 7 - deterministic, real LLM, and service verification complete
   - Covers: implementation order steps 8-9.
   - Verify: all commands in `Verification` pass or have recorded accepted
     residual risk.
-  - Evidence: record command output and live trace artifact paths.
-  - Sign-off: `<agent/date>` after evidence is recorded.
-- [ ] Stage 8 - independent code review complete
+  - Evidence: 2026-05-17 full plan deterministic batch -> 119 passed in
+    4.55s; changed Python files passed `py_compile`; static greps for removed
+    dispatcher/action-spec bridge symbols returned no matches. L2d real LLM
+    delayed-follow-up trace:
+    `test_artifacts\llm_traces\l2d_action_selection_live_llm__self_future_001__20260516T235312309787Z.json`.
+    Scheduled future-cognition real LLM chain:
+    `test_artifacts\cognition_stage_connection\future_cognition_chain\decommission_stage7_qq_group_019_20260516T235939Z`.
+    Real service smoke response:
+    `test_artifacts\debug_runs\turn_decommission_stage7_normal_response_20260517_120136.json`;
+    log slice:
+    `test_artifacts\debug_runs\turn_decommission_stage7_normal_log_20260517_120136.txt`.
+    Stage 7 initially exposed a self-cognition RAG handoff bug where raw RAG
+    supervisor output reached shared cognition without `user_image`; fixed in
+    `self_cognition.runner._rag_result` by projecting raw RAG output through
+    the live-chat RAG projection before cognition.
+  - Sign-off: Codex/2026-05-17.
+- [x] Stage 8 - independent code review complete
   - Covers: implementation order step 10.
   - Verify: full diff reviewed, findings fixed or explicitly recorded.
-  - Evidence: record review findings, fixes, rerun commands, residual risks,
-    and approval status.
-  - Sign-off: `<agent/date>` after evidence is recorded.
+  - Evidence: 2026-05-17 independent reviewer Boyle inspected the diff and
+    found no blocking runtime path where consolidator schedules visible text,
+    self-cognition dispatches prewritten `send_message`, or L2d/action-spec
+    exposes `send_message`. Non-blocking findings were stale documentation /
+    runtime wording and one test fixture readability issue; those were fixed
+    before final verification. Residual risk is explicitly out of scope for
+    this decommission: a later background self-cognition `speak` does not yet
+    own adapter delivery as a new visible-output path. This plan only proves
+    delayed intent becomes `trigger_future_cognition` and never prewritten
+    `send_message`.
+  - Sign-off: Codex/2026-05-17.
 
 ## Verification
 
@@ -887,10 +912,12 @@ This plan is complete when:
   `dispatcher/dispatcher.py`, `dispatcher/evaluator.py`, and
   `self_cognition/handoff.py`, and kept only deterministic scheduler/adapter
   delivery primitives.
-- Static grep results: 2026-05-17 no matches for
+- Static grep results: 2026-05-17 no active-path matches for
   `TaskDispatcher|ToolCallEvaluator|EvalResult|RawToolCall|DispatchResult`,
   bridge helper names, `task_dispatch`, `task-dispatch`, or send-message bridge
-  doc claims under `src`, `tests`, docs, and reference design documents.
+  doc claims under `src`, `tests`, docs, and reference design documents. The
+  active decommission plan itself intentionally retains historical
+  removed-path terminology in its problem statement and execution steps.
 - Deterministic test results: 2026-05-17 focused batch passed:
   `venv\Scripts\python.exe -m pytest` over the consolidator, service,
   reflection, action-spec, self-cognition, scheduler, adapter, and future
@@ -903,6 +930,77 @@ This plan is complete when:
   `{"tool":"send_message","status":{"$in":["pending","running"]}}`.
   Update result: `before_count=0`, `matched_count=0`, `modified_count=0`,
   `after_count=0`, `cleanup_reason=consolidator_text_dispatch_decommission`.
+- Stage 7 regression fix: the scheduled-chain real LLM probe initially failed
+  before cognition because `self_cognition.runner._rag_result` passed raw RAG
+  supervisor output directly into shared cognition. Live chat uses
+  `project_known_facts(...)` first, so self-cognition now normalizes raw RAG
+  output into the same cognition-facing shape before merging source-ref
+  commitments. Deterministic regression:
+  `tests\test_self_cognition_tracking.py::test_scheduled_future_cognition_uses_rag_query_for_next_cycle`.
+- Static grep results after Stage 7 fix: 2026-05-17 no matches for
+  `_TASK_DISPATCHER_PROMPT|_task_dispatcher_llm|_task_dispatcher\b|_task_registry|_generate_raw_tool_calls|configure_task_dispatcher`,
+  bridge helper names, `TaskDispatcher|ToolCallEvaluator|EvalResult|RawToolCall|DispatchResult`,
+  `task_dispatch`, or `future_promises.*send_message|send_message.*future_promises`
+  under `src` and `tests`.
+- Deterministic test results after Stage 7 fix: 2026-05-17
+  `venv\Scripts\python.exe -m pytest tests\test_consolidator_origin_policy_db_writer.py tests\test_consolidation_origin_policy.py tests\test_consolidator_efficiency.py tests\test_db_writer_cache2_invalidation.py tests\test_service_event_logging.py tests\test_reflection_cycle_stage1c_service.py tests\test_self_cognition_integration.py tests\test_self_cognition_tracking.py tests\test_self_cognition_event_logging.py tests\test_action_spec_evaluator.py tests\test_action_spec_models.py tests\test_action_spec_future_cognition.py tests\test_action_spec_results.py tests\test_scheduler_future_promise.py tests\test_dispatcher_event_logging.py -q`
+  -> 119 passed in 4.55s. Changed Python files passed `py_compile`.
 - Real LLM trace artifacts:
+  - L2d delayed follow-up:
+    `test_artifacts\llm_traces\l2d_action_selection_live_llm__self_future_001__20260516T235312309787Z.json`.
+    Observed route: `trigger_future_cognition`, private visibility, no
+    `send_message`.
+  - Scheduled future-cognition chain:
+    `test_artifacts\cognition_stage_connection\future_cognition_chain\decommission_stage7_qq_group_019_20260516T235939Z`.
+    RAG ran first, external web search failed because the web-search MCP tool
+    name was unavailable (`unknown tool mcp-searxng__searxng_web_search`),
+    shared cognition still received a complete RAG shape, chose
+    `action_specs=[]` / `audit_only`, and consolidation ran. This records a
+    separate web-search connector residual risk, not a decommission failure.
 - Real service smoke artifacts:
-- Independent code review:
+  `test_artifacts\debug_runs\turn_decommission_stage7_normal_response_20260517_120136.json`
+  and
+  `test_artifacts\debug_runs\turn_decommission_stage7_normal_log_20260517_120136.txt`.
+  Observed path: relevance accepted, RAG found no needed slots, cognition
+  selected `speak`, L3 content anchors ran, dialog returned
+  `["可以收到哦", "回复完全没问题"]`, and response had
+  `scheduled_followups=0`.
+- Delayed-contact service smoke artifacts:
+  `test_artifacts\debug_runs\turn_decommission_stage7_delayed_payload_20260517_121724.json`,
+  `test_artifacts\debug_runs\turn_decommission_stage7_delayed_response_20260517_121724.json`,
+  `test_artifacts\debug_runs\turn_decommission_stage7_delayed_log_20260517_121724.txt`,
+  `test_artifacts\debug_runs\decommission_stage7_delayed_before.json`,
+  `test_artifacts\debug_runs\decommission_stage7_delayed_after.json`, and
+  `test_artifacts\debug_runs\decommission_stage7_delayed_cleanup.json`.
+  Observed path: live `/chat` selected immediate `speak` plus private
+  `trigger_future_cognition`; scheduler wrote exactly one
+  `scheduled_events.tool="trigger_future_cognition"` row for the unique debug
+  channel, with no `args.text` or prewritten message body. No
+  `send_message` row was created. The debug pending future-cognition row was
+  cancelled after inspection (`matched_count=1`, `modified_count=1`,
+  `after_pending_count=0`).
+- Independent code review: 2026-05-17 reviewer Boyle found no blocking runtime
+  issue. Findings fixed before final sign-off:
+  - `self_cognition.runner` route-effect wording no longer says worker
+    handoff.
+  - `self_cognition_tracking_icd.md`,
+    `self_cognition_reasoning_basis.md`,
+    `cognition_core_evolution_progression.md`, `brain_service/README.md`,
+    and `event_logging/README.md` no longer describe an active dispatcher or
+    consolidator text-output handoff.
+  - `persona_supervisor2_consolidator.py` now documents that the db writer
+    does not schedule or dispatch visible text.
+  - `tests/test_self_cognition_integration.py` fixture wording and indentation
+    were cleaned up.
+- Post-review verification: 2026-05-17 removed-path static greps returned no
+  matches under `src` and `tests`; changed Python files passed `py_compile`;
+  `git diff main --check` reported only existing LF-to-CRLF warnings; full
+  plan deterministic batch
+  `venv\Scripts\python.exe -m pytest tests\test_consolidator_origin_policy_db_writer.py tests\test_consolidation_origin_policy.py tests\test_consolidator_efficiency.py tests\test_db_writer_cache2_invalidation.py tests\test_service_event_logging.py tests\test_reflection_cycle_stage1c_service.py tests\test_self_cognition_integration.py tests\test_self_cognition_tracking.py tests\test_self_cognition_event_logging.py tests\test_action_spec_evaluator.py tests\test_action_spec_models.py tests\test_action_spec_future_cognition.py tests\test_action_spec_results.py tests\test_scheduler_future_promise.py tests\test_dispatcher_event_logging.py -q`
+  -> 119 passed in 4.50s.
+- Residual risk recorded, not a blocker for this plan: this decommission does
+  not add a new background visible-delivery owner for a later self-cognition
+  `speak`. Adding that would reintroduce user-visible autonomous contact and
+  needs a separate action/result/delivery contract. The accepted replacement
+  proven here is delayed reasoning via `trigger_future_cognition`, with no
+  prewritten text body.

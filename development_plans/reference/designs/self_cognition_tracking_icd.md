@@ -15,15 +15,16 @@ The production-owned self-cognition module now owns the canonical ICD for
 `kazusa_ai_chatbot.self_cognition`.
 
 Use `src/kazusa_ai_chatbot/self_cognition/README.md` for the current public
-interfaces, local artifact shapes, controlled-handoff boundary,
-configuration surface, dry-run command, supported case schema, and
+interfaces, local artifact shapes, production boundary, configuration
+surface, dry-run command, supported case schema, and
 `SC-TRACKING-ICD-001` tracking contract.
 
-The current boundary is a controlled-handoff contract: the module writes local
-tracking artifacts and, only when `SELF_COGNITION_ENABLED=true`, may hand a
-cognition-selected `send_message` candidate to the existing dispatcher. It does
-not call adapters directly or write live-chat, consolidation, reflection,
-stable-memory, or conversation-progress state.
+The current boundary is a private tracking contract: the module writes local
+tracking artifacts and production action-attempt rows, but it does not hand
+prewritten text to the scheduler or dispatcher. If a delayed follow-up should
+be reconsidered, the active path is a scheduled future cognition slot. It does
+not call adapters directly or write live-chat, reflection, stable-memory, or
+conversation-progress state.
 
 This reference document remains only as a development-plan registry pointer so
 older research and plan material can resolve to the implemented module

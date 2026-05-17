@@ -36,6 +36,9 @@ from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition import (
 from kazusa_ai_chatbot.nodes.persona_supervisor2_l3_surface import (
     call_l3_text_surface_handler,
 )
+from kazusa_ai_chatbot.nodes.persona_supervisor2_rag_projection import (
+    project_known_facts,
+)
 from kazusa_ai_chatbot.nodes.persona_supervisor2_rag_supervisor2 import (
     call_rag_supervisor,
 )
@@ -956,8 +959,8 @@ def _route_effect_for_route(
     if route == models.ROUTE_ACTION_CANDIDATE:
         consumer = "local_action_candidate"
         effect_summary = (
-            "Runner created or suppressed a send-message candidate; worker "
-            "handoff is recorded separately when enabled."
+            "Runner created or suppressed a private action candidate; "
+            "production worker records the attempt without delivery."
         )
     elif route == models.ROUTE_PROGRESS_MAINTENANCE:
         consumer = "conversation_progress_candidate"
@@ -1035,15 +1038,20 @@ def _rag_result(
 
     source_ref_commitments = _active_commitments_from_source_refs(case)
     if isinstance(rag_output, dict):
+        projected_output = _project_rag_output_for_cognition(case, rag_output)
         return_value = _merge_source_ref_commitments(
-            rag_output,
+            projected_output,
             source_ref_commitments,
         )
         return return_value
     case_rag_output = case.get("rag_output")
     if isinstance(case_rag_output, dict):
-        return_value = _merge_source_ref_commitments(
+        projected_output = _project_rag_output_for_cognition(
+            case,
             case_rag_output,
+        )
+        return_value = _merge_source_ref_commitments(
+            projected_output,
             source_ref_commitments,
         )
         return return_value
@@ -1148,6 +1156,53 @@ def _merge_source_ref_commitments(
 
     return_value = merged_result
     return return_value
+
+
+def _project_rag_output_for_cognition(
+    case: models.SelfCognitionCase,
+    rag_output: dict[str, Any],
+) -> dict[str, Any]:
+    """Project raw RAG supervisor output into the shared cognition shape."""
+
+    if "user_image" in rag_output:
+        return_value = rag_output
+        return return_value
+
+    raw_known_facts = rag_output.get("known_facts")
+    if isinstance(raw_known_facts, list):
+        known_facts = raw_known_facts
+    else:
+        known_facts = []
+
+    raw_answer = rag_output.get("answer")
+    answer = raw_answer if isinstance(raw_answer, str) else ""
+
+    raw_unknown_slots = rag_output.get("unknown_slots")
+    if isinstance(raw_unknown_slots, list):
+        unknown_slots = raw_unknown_slots
+    else:
+        unknown_slots = []
+
+    raw_loop_count = rag_output.get("loop_count")
+    loop_count = raw_loop_count if isinstance(raw_loop_count, int) else 0
+
+    target_scope = _target_scope(case)
+    character_profile = _character_profile(case)
+    raw_character_user_id = character_profile.get("global_user_id")
+    character_user_id = (
+        raw_character_user_id
+        if isinstance(raw_character_user_id, str)
+        else ""
+    )
+    projected_output = project_known_facts(
+        known_facts,
+        current_user_id=target_scope["user_id"] or "",
+        character_user_id=character_user_id,
+        answer=answer,
+        unknown_slots=unknown_slots,
+        loop_count=loop_count,
+    )
+    return projected_output
 
 
 def _character_profile(case: models.SelfCognitionCase) -> dict[str, Any]:

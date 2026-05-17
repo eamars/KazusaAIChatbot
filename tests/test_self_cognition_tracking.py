@@ -1444,6 +1444,11 @@ def test_scheduled_future_cognition_uses_rag_query_for_next_cycle(
         assert state["rag_result"]["answer"] == (
             "Retrieved follow-up evidence for the GPU model topic."
         )
+        assert "user_image" in state["rag_result"]
+        assert "character_image" in state["rag_result"]
+        assert state["rag_result"]["user_image"]["user_memory_context"][
+            "active_commitments"
+        ] == []
         return _silent_cognition_output()
 
     paths = run_self_cognition_case(

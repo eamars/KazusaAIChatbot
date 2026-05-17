@@ -203,7 +203,7 @@ def _progress_cognition_output() -> dict[str, Any]:
 
 
 def _action_cognition_output() -> dict[str, Any]:
-    """Build a cognition output that requests dispatcher handoff."""
+    """Build a cognition output that requests a private action candidate."""
 
     output = {
         "logical_stance": "FOLLOW_UP",
@@ -226,12 +226,12 @@ def _consolidation_result() -> dict[str, Any]:
 
     result = {
         "consolidation_metadata": {
-                "write_success": {
-                    "character_state": True,
-                    "relationship_insight": True,
-                    "user_memory_units": False,
-                    "affinity": True,
-                    "character_image": False,
+            "write_success": {
+                "character_state": True,
+                "relationship_insight": True,
+                "user_memory_units": False,
+                "affinity": True,
+                "character_image": False,
                 "cache_invalidation": True,
             },
             "cache_evicted_count": 1,

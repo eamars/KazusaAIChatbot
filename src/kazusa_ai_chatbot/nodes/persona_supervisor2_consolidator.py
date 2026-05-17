@@ -8,9 +8,8 @@ commits everything to MongoDB and invalidates the RAG cache.
 * A unified ``metadata`` bundle threaded through every node and accumulated
   at each step.
 * The ``db_writer`` routes durable user memory through ``user_memory_units``,
-  emits Cache2 invalidation events after successful writes, and hands accepted
-  future obligations to the task dispatcher so tool calls can be scheduled
-  through the shared scheduler.
+  emits Cache2 invalidation events after successful writes, and returns
+  sanitized write metadata. It does not schedule or dispatch visible text.
 """
 
 from __future__ import annotations

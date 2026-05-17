@@ -50,7 +50,9 @@ trigger source (user_message | internal_thought | self_cognition)
        L1 subconscious  -> emotional_appraisal, interaction_subtext
        L2 consciousness -> logical_stance, character_intent, internal_monologue
        L3 contextual    -> final_dialog wording, pacing, style
-  -> Dispatcher (single effector: send_message)
+  -> ActionSpec / surface execution
+       speak -> L3 text -> normal live response delivery
+       trigger_future_cognition -> scheduler slot -> later cognition
   -> Consolidation subgraph (per-turn writes)
        CharacterProfileDoc.mood / global_vibe / reflection_summary (transient)
        UserProfileDoc.affinity / last_relationship_insight
@@ -95,7 +97,7 @@ Two load-bearing properties already in production:
 | Reasoning over symbolic state | PLN | LLM in-context | LLM reflection prompts | LLM + iterative refinement | LLM graph nodes | LLM only (local Gemma) |
 | Procedural / skill learning | MOSES | None | Plans -> behaviors | Persisted skill code | Few-shot in tools | Defense rules + style overlays (static config, not callable) |
 | Self-modification loop | Goal system + ECAN feedback | Memory edits | Reflection abstracts memories | Auto-curriculum | None | Reflection promotion -> `EvolvingMemoryDoc` |
-| Embodied / world loop | CogPrime perception-action | Tool calls | Town tick | Game tick | Tool calls | Reactive chat; scheduled adapter sends via `send_message`; private action-spec slice in progress |
+| Embodied / world loop | CogPrime perception-action | Tool calls | Town tick | Game tick | Tool calls | Reactive chat; scheduled future cognition; retained adapter delivery primitives |
 | Idle / self-pacing | Cognitive cycle | None | Reflection at idle | Continual play | None | `self_cognition` module exists; gated off by default |
 | Persistent goals | First-class goal atoms | None | Plans | Auto-generated curricula | None | `character_intent` per turn, not persisted |
 
@@ -194,7 +196,7 @@ Retrieval score:
 Small surface, no new collection. Produces materially better RAG hit ranking
 for a weak local LLM where prompt budget is the limiting factor.
 
-### D. Procedural skill library, backed by the dispatcher
+### D. Procedural skill library, backed by the action registry
 
 The Voyager move, adapted to local-Gemma constraints. Reuse the lineage and
 auditability already in `EvolvingMemoryDoc`:
@@ -212,13 +214,14 @@ SkillDoc {
 }
 ```
 
-Skills are structured plans of existing dispatcher tools, not free-form code.
+Skills are structured plans of approved action capabilities and deterministic
+handlers, not free-form code.
 Reuses similarity dedup so the bot does not invent endless near-duplicates.
 
 ### E. Effector expansion
 
 Direct fix for "make the cognition core more interactive with the world."
-Concrete first additions, all cheap because the dispatcher tool registry and
+Concrete first additions, all cheap because the action registry and
 permission gating already exist:
 
 | Tool | Purpose | Notes |
@@ -346,14 +349,14 @@ usage, status distributions, and date ranges.
 | # | Claim from earlier in this document | Verdict | Evidence |
 |---|---|---|---|
 | A | `global_character_growth_traits` is designed but not wired into L2 | **Refuted** | 7 traits, all `status: active`. Each carries `strength` (0.15-0.36), `maturity_band` (`emerging` / `observed`), `evidence_count` (2-3), `supporting_dates`, and `source_reflection_run_ids` linking 16-24 reflection runs per trait. Created 2026-05-11 to 2026-05-14. |
-| B | `self_cognition` is built but gated off | **Refuted** | 6 action attempts; 5 are `status: scheduled` with `dispatch_status: accepted`, real `target_channel` QQ IDs and `due_at`. 1 is `duplicate_suppressed`. The loop is firing and the dispatcher is accepting. |
+| B | `self_cognition` is built but gated off | **Refuted historically; revised by 2026-05-17 decommission** | 2026-05-15 DB review found 6 action attempts and 5 scheduled legacy delivery attempts. The later decommission keeps the self-cognition loop as a trigger/source and action ledger, but removes production prewritten text delivery from this path. |
 | C | `CharacterProfileDoc.self_image` is deferred / not populated | **Refuted** | `self_image` contains `recent_window` (6 dated entries, newest 2026-05-14T20:26:32), `historical_summary` (multi-paragraph Chinese self-model), and `meta.synthesis_count: 472`. Actively maintained. |
 | D | Reflection runs hourly → daily → global | **Confirmed** | 28/30 sampled runs are `hourly_slot`; `daily_channel` and `daily_global_promotion` runs present in the same window. 30/30 succeeded. |
 | E | Growth cadence: daily / weekly | **Refined** | All runs are `run_kind: global_character_growth`. Cadence is daily, sometimes multiple per day. 18 runs span 2026-05-10 to 2026-05-14, 15 applied, 2 dry_run, 1 failed. |
 | F | `EvolvingMemoryDoc` uses lineage-tracked supersede/merge | **Confirmed with caveat** | Of 200 sampled memory rows: 73 carry non-empty `supersedes_memory_unit_ids` (36.5%); only 3 carry non-empty `merged_from_memory_unit_ids` (1.5%). Merge path is *implemented but barely used*. Supersession is the dominant evolution. `source_kind` is `reflection_inferred` for 75.5% of rows; `authority` is `reflection_promoted` for 75.5%. |
 | G | `UserMemoryUnitDoc.unit_type` set is the five named | **Confirmed exactly** | `objective_fact` 44%, `milestone` 22%, `recent_shift` 18.5%, `active_commitment` 14.5%, `stable_pattern` 1%. All 200 sampled rows are `status: active` — the `completed` / `cancelled` lifecycle exists in schema but is unused in the sample. |
-| H | Dispatcher has one effector: `send_message` | **Confirmed absolutely** | 70/70 scheduled events use `send_message`. Status: completed 84%, failed 14%, pending 1%. |
-| I | Event log captures observability | **Confirmed but narrow** | 100 events all from a 20-minute window on 2026-05-14. Subsystems represented: `brain_service` 95%, `reflection_cycle.worker` 5%. RAG, cognition, dispatcher, scheduler, and self-cognition emit nothing in this window. |
+| H | Scheduled events were dominated by `send_message` | **Confirmed historically; revised by 2026-05-17 decommission** | 2026-05-15 DB review found 70/70 scheduled events used `send_message`. After the decommission, new proactive follow-up should use `trigger_future_cognition`; the retained `send_message` handler is an adapter delivery primitive, not a cognition authoring path. |
+| I | Event log captures observability | **Confirmed but narrow** | 100 events all from a 20-minute window on 2026-05-14. Subsystems represented: `brain_service` 95%, `reflection_cycle.worker` 5%. RAG, cognition, scheduler, and self-cognition emit nothing in this window. |
 | J | `ConversationEpisodeStateDoc` shape | **Confirmed and *richer*** | Documented seven fields all present and populated. **Additional fields not described in earlier text:** `current_blocker`, `progression_guidance`, `current_thread`, `episode_label`, `episode_phase` (`developing` / `pivoting` / `resolving`), `emotional_trajectory`, `topic_momentum`, `conversation_mode`, `user_goal`, `expires_at`, `continuity`. |
 | K | `UserProfileDoc.affinity` is populated | **Confirmed** | Affinity is a numeric integer on a 0-1000-ish scale, 500 baseline. `last_relationship_insight` populated in 17/30 sampled users with substantive Chinese-language strings. |
 | L | `interaction_style_images` stores user *and* group overlays | **Confirmed and *with lineage*** | 6 group_channel, 2 user docs. Each carries `overlay` with `speech_guidelines`, `social_guidelines`, `pacing_guidelines`, `engagement_guidelines`, plus a `revision` counter (1-12) and a `source_reflection_run_ids` array linking up to 15 reflection runs. Style overlays are themselves a lineage-tracked, reflection-driven, slowly-evolving artifact. |
@@ -380,9 +383,10 @@ progression plan.
    under-informed by this; some of what I called "missing intent" is
    actually expressed here.
 5. **Self-cognition action ledger is real.** `self_cognition_action_attempts`
-   is the same idempotency-keyed store the reasoning basis described, and
-   it is dispatching `send_message` candidates with `dispatch_status:
-   accepted`. The proactive loop is live, not a prototype.
+   is the same idempotency-keyed store the reasoning basis described. The
+   historical DB sample included legacy scheduled delivery attempts; after the
+   2026-05-17 decommission, the ledger remains for private action attempts and
+   duplicate suppression, not production prewritten text delivery.
 
 ### Honest gaps after the database review
 
@@ -390,7 +394,9 @@ Items in the original "Honest Gaps" list that survive the DB check:
 
 - No salience / attention economy over user memory units. Confirmed: all 200
   sampled units are `status: active` with no decay or scoring fields.
-- One effector. Confirmed: 100% of scheduled events are `send_message`.
+- Historical one-effector scheduled-event surface. Confirmed in the 2026-05-15
+  DB sample: 100% of sampled scheduled events were `send_message`. Superseded
+  for new proactive contact by future-cognition scheduling.
 - No procedural / skill memory. Confirmed: no skill collection exists.
 - No symbolic substrate. Confirmed.
 - Merge path is implemented but underused (3 of 200 vs. 73 supersessions).
@@ -410,7 +416,9 @@ Items removed from the gap list because the DB shows they are already
 addressed:
 
 - "global growth traits not wired" — already wired, daily, 7 active traits.
-- "self_cognition gated off" — actively dispatching.
+- "self_cognition gated off" — the loop was active in the historical sample;
+  after the decommission it remains active as a private trigger/action-ledger
+  path, without scheduled prewritten delivery.
 - "self_image deferred" — populated and actively synthesized.
 - "no persistent self representation across turns" — `self_image` is exactly
   that, just narrative rather than goal-structured.
@@ -424,19 +432,20 @@ data shows is the real frontier.
 | # | Step | Rationale grounded in DB review | Plan size |
 |---|---|---|---|
 | 1 | Finish `quote_aware_rag_sequence_plan` (already moved to completed bugfix records). | Verified by README registry update. | done |
-| 2 | **Effector expansion beyond `send_message`.** Add at minimum `schedule_future_check`, `fetch_url`, `note_open_loop` / `close_open_loop` to the dispatcher registry. | DB shows 70/70 events are `send_message`. This is the strongest single-source effector asymmetry and the highest-leverage near-term fix. | medium short-term |
+| 2 | **Capability expansion beyond prewritten sends.** Add at minimum `schedule_future_check`, `fetch_url`, `note_open_loop` / `close_open_loop` to the action/capability registry. | Historical DB review showed 70/70 scheduled events were `send_message`. After the decommission, the next frontier is adding non-text capabilities without reintroducing prewritten delayed text. | medium short-term |
 | 3 | **Memory salience + decay on `user_memory_units`.** Add `salience` (decayed per hour) and `importance` (set by reflection). Rank retrieval by linear combination. | DB shows 200/200 units are status active with no scoring; retrieval today is embedding-similarity only. Compounds with item 7. | small short-term |
-| 4 | **User-memory lifecycle progression audit.** Investigate why `completed_at` / `cancelled_at` never fire on `active_commitment` units. Either the transition path is dead code, or the dispatcher post-send hook is missing. | DB shows 0/200 transitions in the sample despite 29 active_commitment units. | small bugfix |
+| 4 | **User-memory lifecycle progression audit.** Investigate why `completed_at` / `cancelled_at` rarely fire on `active_commitment` units, and verify whether `memory_lifecycle_update` now covers the intended transitions. | DB review showed 0/200 transitions in the sample despite 29 active_commitment units. | small bugfix |
 | 5 | **Merge-vs-supersede balance audit.** 73 supersessions vs 3 merges suggests either Gemma prefers replace-over-fuse or the merge threshold (0.88) is too tight. Targeted eval before any new lineage logic. | DB shows the asymmetry directly. | calibration only |
 | 6 | **Event-log retention or fan-in fix.** 20 minutes of events from only `brain_service` + `reflection_cycle.worker` is not enough to drive any calibration eval. | Without this, items 5 and 7 cannot be measured. | small bugfix |
 | 7 | **Local-Gemma calibration suite.** Run a one-week eval emitting structured `character_intent`, salience scores, and skill-plan candidates and hand-grade them. Gate items 8 and 9 on the result. | All higher-tier recommendations assume Gemma can do reliable structured emission. The eval has to come before, not after. | medium short-term |
 | 8 | **Goal-shaped intent layer on top of `self_image`.** Add `CharacterIntentDoc` only after item 7 confirms Gemma can classify forward-looking intent. Integrate with the existing `self_image.recent_window`, not parallel to it. | DB shows narrative self-model exists; the gap is goal-structure, not persistence. | medium short-term, gated |
-| 9 | **`SkillDoc` skill library, reusing `source_reflection_run_ids` lineage.** Plans of dispatcher tools, not free-form code. | DB shows lineage primitive is already cross-subsystem; reuse it. | large short-term, gated |
+| 9 | **`SkillDoc` skill library, reusing `source_reflection_run_ids` lineage.** Plans of approved action capabilities, not free-form code. | DB shows lineage primitive is already cross-subsystem; reuse it. | large short-term, gated |
 | 10 | **Symbolic-lite world model.** Deferred until contradictions in `memory` are observed. | Same as before. | deferred |
 
 The recommended starting point is now **item 2 (effector expansion)**, not
-the earlier item 2 (wire growth traits). Growth traits are already wired;
-the dispatcher is the most empirically constrained surface in the system.
+the earlier item 2 (wire growth traits). Growth traits are already wired; the
+capability/action layer is the most empirically constrained surface in the
+system.
 
 ### Implication summary
 

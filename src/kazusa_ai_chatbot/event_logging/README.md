@@ -26,13 +26,13 @@ layout, sanitizer internals, or repository helpers.
 The event logging module records durable, sanitized operational telemetry for
 long-term agent and operator analysis. It covers process lifecycle, worker
 ticks, LLM-stage health, recoverable runtime failures, live pipeline outcomes,
-queue decisions, RAG stages, dialog quality checks, dispatcher handoff,
+queue decisions, RAG stages, dialog quality checks, scheduler delivery,
 approved database-operation outcomes, self-cognition cases, model contract
 drift, and resource health.
 
 The module is append-only and best-effort. A telemetry write must never change
 live chat behavior, reflection routing, self-cognition routing, dispatcher
-handoff, scheduler execution, memory promotion, or adapter delivery.
+planning, scheduler execution, memory promotion, or adapter delivery.
 On the live chat input path, routine successful enqueue, message persistence,
 assistant-message persistence, and turn completion are intentionally not
 mirrored into `event_log_events`; `conversation_history` is the canonical

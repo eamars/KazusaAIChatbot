@@ -109,7 +109,7 @@ final_dialog exists
 -> conversation progress may be recorded
 -> consolidation may run
 -> character state, relationship state, memory units, affinity,
-   character image, cache invalidation, and task dispatch may happen
+   character image, and cache invalidation may happen
 ```
 
 This coupling is suitable for normal `/chat` turns but too broad for idle
@@ -233,7 +233,7 @@ self-cognition plan completed.
 |---|---|---|---|---|
 | 1 | Self-cognition tracking | Every useful outcome needs a place to land. Current no-dialog cognition residue is ephemeral, so tracking is the foundation for both silence and action. | run, trigger, evidence ref, route effect | local tracking artifacts |
 | 2 | Action-attempt lifecycle and runtime agency controls | The expired-promise case can re-trigger every idle tick unless attempts, idempotency, retry, and duplicate suppression exist first. | action_attempt with stable idempotency key | local attempt ledger |
-| 3 | Proactive preview / outbox candidate | The clearest character-growth benefit was a past-due commitment becoming one natural outward message candidate. | preview/outbox candidate tied to an action_attempt | local candidate; dispatcher handoff only when enabled |
+| 3 | Proactive preview / outbox candidate | The clearest character-growth benefit was a past-due commitment becoming one natural outward message candidate. | preview/outbox candidate tied to an action_attempt | private local candidate only; no production delivery |
 | 4 | Progress-maintenance candidate | Before-due commitments and settled conversations should still preserve short-term continuity without sending. | `progress_maintenance` route effect | local route effect only |
 | 5 | Audit and evaluation | The system cannot be trusted without inspecting why the loop sent, held, or stayed silent. This is cheap and mandatory for quality. | readable loop trace and route explanation | local loop trace |
 | 6 | RAG / research planning | Topic-triggered RAG can make the loop more autonomous, but it should come after commitment/action routing is stable. | bounded RAG request/result linked to the run | read-only production/RAG call |
@@ -276,7 +276,8 @@ Consumers:
 self-cognition tracking: write run and trigger records
 action_attempt: new idempotency key for this due occurrence
 outbox candidate: ready if structural and cadence mechanics pass
-production handoff: dispatcher/scheduler only through the ICD
+production delivery: none from this path; delayed contact must be reconsidered
+  by a future cognition slot and any visible text must be authored by L3 text
 progress effect: candidate update after delivery, not a direct write here
 ```
 
