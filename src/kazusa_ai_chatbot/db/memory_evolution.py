@@ -72,11 +72,11 @@ async def compute_memory_document_embedding(text: str) -> list[float]:
     return embedding
 
 
-def build_active_memory_filter(now_timestamp: str) -> dict[str, Any]:
+def build_active_memory_filter(now_timestamp_utc: str) -> dict[str, Any]:
     """Build the MongoDB filter for active, non-expired memory rows.
 
     Args:
-        now_timestamp: ISO timestamp used as the expiry cutoff.
+        now_timestamp_utc: Storage UTC timestamp used as the expiry cutoff.
 
     Returns:
         MongoDB filter fragment.
@@ -87,7 +87,7 @@ def build_active_memory_filter(now_timestamp: str) -> dict[str, Any]:
                 "$or": [
                     {"expiry_timestamp": None},
                     {"expiry_timestamp": {"$exists": False}},
-                    {"expiry_timestamp": {"$gt": now_timestamp}},
+                    {"expiry_timestamp": {"$gt": now_timestamp_utc}},
                 ]
             },
             {"status": MemoryStatus.ACTIVE},
@@ -99,9 +99,9 @@ def build_active_memory_filter(now_timestamp: str) -> dict[str, Any]:
 def _active_query_filter(
     query: MemoryUnitQuery,
     *,
-    now_timestamp: str,
+    now_timestamp_utc: str,
 ) -> dict[str, Any]:
-    filter_doc = build_active_memory_filter(now_timestamp)
+    filter_doc = build_active_memory_filter(now_timestamp_utc)
     for field in (
         "memory_name",
         "source_global_user_id",
@@ -215,7 +215,7 @@ async def find_active_memory_documents(
     *,
     query: MemoryUnitQuery,
     limit: int,
-    now_timestamp: str,
+    now_timestamp_utc: str,
     query_embedding: list[float] | None,
 ) -> list[MemoryUnitSearchResult]:
     """Find active memory documents with retrieval scores through MongoDB.
@@ -223,7 +223,7 @@ async def find_active_memory_documents(
     Args:
         query: Constrained query shape.
         limit: Maximum rows to return.
-        now_timestamp: ISO timestamp used as the expiry cutoff.
+        now_timestamp_utc: Storage UTC timestamp used as the expiry cutoff.
         query_embedding: Optional semantic query embedding.
 
     Returns:
@@ -231,7 +231,10 @@ async def find_active_memory_documents(
         reads use score ``-1.0``.
     """
     db = await get_db()
-    filter_doc = _active_query_filter(query, now_timestamp=now_timestamp)
+    filter_doc = _active_query_filter(
+        query,
+        now_timestamp_utc=now_timestamp_utc,
+    )
     if query_embedding is not None:
         candidate_count = max(
             RAG_VECTOR_MIN_CANDIDATES,

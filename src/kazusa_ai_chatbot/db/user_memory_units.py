@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 import re
-from datetime import datetime, timezone
+from datetime import datetime
 from uuid import uuid4
 
 from pymongo.errors import PyMongoError
@@ -19,6 +19,10 @@ from kazusa_ai_chatbot.db.schemas import (
     UserMemoryUnitDoc,
     UserMemoryUnitStatus,
     UserMemoryUnitType,
+)
+from kazusa_ai_chatbot.time_boundary import (
+    parse_storage_utc_datetime,
+    storage_utc_now_iso,
 )
 from kazusa_ai_chatbot.utils import text_or_empty
 
@@ -45,18 +49,14 @@ ACTIVE_COMMITMENT_DUE_BUCKET_FUTURE = 1
 
 
 def _now_iso() -> str:
-    current_time = datetime.now(timezone.utc).isoformat()
+    current_time = storage_utc_now_iso()
     return current_time
 
 
 def _parse_datetime_for_query(value: str) -> datetime:
     """Parse stored ISO-like timestamps into aware UTC datetimes."""
 
-    normalized = value.replace("Z", "+00:00").replace(" ", "T")
-    parsed = datetime.fromisoformat(normalized)
-    if parsed.tzinfo is None:
-        parsed = parsed.replace(tzinfo=timezone.utc)
-    return_value = parsed.astimezone(timezone.utc)
+    return_value = parse_storage_utc_datetime(value)
     return return_value
 
 
@@ -100,7 +100,7 @@ def build_user_memory_unit_doc(
     global_user_id: str,
     unit: dict,
     *,
-    timestamp: str | None = None,
+    storage_timestamp_utc: str | None = None,
     unit_id: str | None = None,
 ) -> UserMemoryUnitDoc:
     """Build a structurally valid memory-unit document.
@@ -108,7 +108,8 @@ def build_user_memory_unit_doc(
     Args:
         global_user_id: Internal UUID for the memory owner.
         unit: LLM-authored semantic unit with ``unit_type`` and triple fields.
-        timestamp: Write timestamp. Defaults to current UTC time.
+        storage_timestamp_utc: Write storage UTC timestamp. Defaults to the
+            current storage UTC time.
         unit_id: Optional stable id, primarily for tests or migrations.
 
     Returns:
@@ -116,7 +117,7 @@ def build_user_memory_unit_doc(
     """
 
     validate_user_memory_unit_semantics(unit)
-    write_time = timestamp or _now_iso()
+    write_time = storage_timestamp_utc or _now_iso()
     status = text_or_empty(unit.get("status")) or UserMemoryUnitStatus.ACTIVE
     count = unit.get("count")
     source_refs = unit.get("source_refs")
@@ -148,7 +149,7 @@ async def insert_user_memory_units(
     global_user_id: str,
     units: list[dict],
     *,
-    timestamp: str | None = None,
+    storage_timestamp_utc: str | None = None,
     include_embeddings: bool = True,
 ) -> list[UserMemoryUnitDoc]:
     """Insert new memory units for one user.
@@ -156,7 +157,7 @@ async def insert_user_memory_units(
     Args:
         global_user_id: Internal UUID for the memory owner.
         units: LLM-authored memory unit dictionaries.
-        timestamp: Optional write timestamp.
+        storage_timestamp_utc: Optional write storage UTC timestamp.
         include_embeddings: Whether to compute vector embeddings before insert.
 
     Returns:
@@ -164,7 +165,11 @@ async def insert_user_memory_units(
     """
 
     docs = [
-        build_user_memory_unit_doc(global_user_id, unit, timestamp=timestamp)
+        build_user_memory_unit_doc(
+            global_user_id,
+            unit,
+            storage_timestamp_utc=storage_timestamp_utc,
+        )
         for unit in units
     ]
     if not docs:
@@ -219,21 +224,21 @@ async def query_user_memory_units(
 
 async def query_active_commitment_memory_units(
     *,
-    current_timestamp: str,
+    current_timestamp_utc: str,
     limit: int = 100,
 ) -> list[UserMemoryUnitDoc]:
     """Read active commitment units across users for idle due checks.
 
     Args:
-        current_timestamp: Worker tick timestamp used to prioritize due or
-            past-due commitments before future commitments.
+        current_timestamp_utc: Worker tick storage UTC timestamp used to
+            prioritize due or past-due commitments before future commitments.
         limit: Maximum documents to return.
 
     Returns:
         Active commitment memory units without embeddings.
     """
 
-    current_time = _parse_datetime_for_query(current_timestamp)
+    current_time = _parse_datetime_for_query(current_timestamp_utc)
     db = await get_db()
     pipeline = [
         {
@@ -417,7 +422,7 @@ async def update_user_memory_unit_semantics(
     unit_id: str,
     updated_unit: dict,
     *,
-    timestamp: str | None = None,
+    storage_timestamp_utc: str | None = None,
     lifecycle_fields: dict | None = None,
     merge_history_entry: dict | None = None,
     increment_count: bool = True,
@@ -427,7 +432,7 @@ async def update_user_memory_unit_semantics(
     Args:
         unit_id: Stable memory-unit id.
         updated_unit: LLM-authored replacement semantic triple.
-        timestamp: Optional write timestamp.
+        storage_timestamp_utc: Optional write storage UTC timestamp.
         lifecycle_fields: Optional structural lifecycle fields to preserve
             from the extractor, such as due_at.
         merge_history_entry: Optional merge/evolve audit row.
@@ -438,7 +443,7 @@ async def update_user_memory_unit_semantics(
         if not text_or_empty(updated_unit.get(field)):
             raise ValueError(f"missing rewritten user memory unit field: {field}")
 
-    write_time = timestamp or _now_iso()
+    write_time = storage_timestamp_utc or _now_iso()
     set_doc = {
         "fact": text_or_empty(updated_unit["fact"]),
         "subjective_appraisal": text_or_empty(updated_unit["subjective_appraisal"]),
@@ -468,7 +473,7 @@ async def update_user_memory_unit_lifecycle(
     unit_id: str,
     *,
     status: str,
-    timestamp: str,
+    storage_timestamp_utc: str,
     reason: str,
     action_attempt_id: str,
     due_at: str | None = None,
@@ -478,7 +483,8 @@ async def update_user_memory_unit_lifecycle(
     Args:
         unit_id: Stable ``user_memory_units.unit_id`` selected by cognition.
         status: Collection-native lifecycle status to write.
-        timestamp: ISO timestamp for the update and audit row.
+        storage_timestamp_utc: Storage UTC timestamp for the update and audit
+            row.
         reason: Cognition-authored semantic reason for the lifecycle change.
         action_attempt_id: Action-attempt identifier used for audit lineage.
         due_at: Optional due timestamp copied from the action evidence.
@@ -494,8 +500,8 @@ async def update_user_memory_unit_lifecycle(
         raise ValueError("unit_id is required")
     if status not in VALID_USER_MEMORY_UNIT_STATUSES:
         raise ValueError(f"invalid user memory unit status: {status!r}")
-    if not text_or_empty(timestamp):
-        raise ValueError("timestamp is required")
+    if not text_or_empty(storage_timestamp_utc):
+        raise ValueError("storage_timestamp_utc is required")
     if not text_or_empty(reason):
         raise ValueError("reason is required")
     if not text_or_empty(action_attempt_id):
@@ -506,21 +512,21 @@ async def update_user_memory_unit_lifecycle(
         "status": status,
         "reason": reason,
         "action_attempt_id": action_attempt_id,
-        "timestamp": timestamp,
+        "timestamp": storage_timestamp_utc,
     }
     set_doc: dict[str, object] = {
         "status": status,
-        "updated_at": timestamp,
+        "updated_at": storage_timestamp_utc,
     }
     if due_at is not None:
         set_doc["due_at"] = due_at
         merge_history_entry["due_at"] = due_at
     if status == UserMemoryUnitStatus.COMPLETED:
-        set_doc["completed_at"] = timestamp
+        set_doc["completed_at"] = storage_timestamp_utc
     elif status == UserMemoryUnitStatus.CANCELLED:
-        set_doc["cancelled_at"] = timestamp
+        set_doc["cancelled_at"] = storage_timestamp_utc
     elif status == UserMemoryUnitStatus.ARCHIVED:
-        set_doc["archived_at"] = timestamp
+        set_doc["archived_at"] = storage_timestamp_utc
 
     db = await get_db()
     result = await db.user_memory_units.update_one(
@@ -548,14 +554,14 @@ async def update_user_memory_unit_window(
     unit_id: str,
     *,
     window: str,
-    timestamp: str | None = None,
+    storage_timestamp_utc: str | None = None,
 ) -> None:
     """Apply an LLM-selected recent/stable window to one pattern unit.
 
     Args:
         unit_id: Stable memory-unit id.
         window: LLM-selected ``recent`` or ``stable`` value.
-        timestamp: Optional write timestamp.
+        storage_timestamp_utc: Optional write storage UTC timestamp.
     """
 
     if window == "stable":
@@ -568,5 +574,10 @@ async def update_user_memory_unit_window(
     db = await get_db()
     await db.user_memory_units.update_one(
         {"unit_id": unit_id},
-        {"$set": {"unit_type": unit_type, "updated_at": timestamp or _now_iso()}},
+        {
+            "$set": {
+                "unit_type": unit_type,
+                "updated_at": storage_timestamp_utc or _now_iso(),
+            }
+        },
     )

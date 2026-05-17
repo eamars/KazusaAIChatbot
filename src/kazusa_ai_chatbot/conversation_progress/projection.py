@@ -22,26 +22,26 @@ from kazusa_ai_chatbot.conversation_progress.policy import (
     cap_text,
     empty_progress_prompt_doc,
     enforce_progress_prompt_budget,
-    parse_iso_datetime,
 )
 from kazusa_ai_chatbot.db.schemas import ConversationEpisodeEntryDoc, ConversationEpisodeStateDoc
+from kazusa_ai_chatbot.time_boundary import parse_storage_utc_datetime
 
 logger = logging.getLogger(__name__)
 
 
-def age_hint(*, first_seen_at: str, current_timestamp: str) -> str:
+def age_hint(*, first_seen_at: str, current_timestamp_utc: str) -> str:
     """Convert a first-seen timestamp into a compact relative-age label.
 
     Args:
         first_seen_at: ISO-8601 timestamp when the entry first appeared.
-        current_timestamp: ISO-8601 timestamp for the current turn.
+        current_timestamp_utc: Storage UTC timestamp for the current turn.
 
     Returns:
         Human-facing relative age such as ``"just now"`` or ``"~3h ago"``.
     """
 
-    first_seen = parse_iso_datetime(first_seen_at)
-    current = parse_iso_datetime(current_timestamp)
+    first_seen = parse_storage_utc_datetime(first_seen_at)
+    current = parse_storage_utc_datetime(current_timestamp_utc)
     delta = current - first_seen
     if delta < timedelta(minutes=5):
         return "just now"
@@ -63,13 +63,14 @@ def age_hint(*, first_seen_at: str, current_timestamp: str) -> str:
 def _project_entry(
     *,
     entry: ConversationEpisodeEntryDoc,
-    current_timestamp: str,
+    current_timestamp_utc: str,
 ) -> dict[str, str] | None:
     """Project one stored entry when its shape is prompt-safe.
 
     Args:
         entry: Stored episode entry.
-        current_timestamp: Current turn timestamp for age hints.
+        current_timestamp_utc: Current turn storage UTC timestamp for age
+            hints.
 
     Returns:
         Prompt-facing entry, or ``None`` for malformed legacy data.
@@ -82,7 +83,7 @@ def _project_entry(
     try:
         relative_age = age_hint(
             first_seen_at=first_seen_at,
-            current_timestamp=current_timestamp,
+            current_timestamp_utc=current_timestamp_utc,
         )
     except ValueError as exc:
         logger.debug(f"Dropping progress entry with invalid first_seen_at: {exc}")
@@ -97,12 +98,15 @@ def _project_entry(
 def _project_entries(
     *,
     entries: list[ConversationEpisodeEntryDoc],
-    current_timestamp: str,
+    current_timestamp_utc: str,
     limit: int,
 ) -> list[dict[str, str]]:
     result: list[dict[str, str]] = []
     for entry in entries:
-        projected = _project_entry(entry=entry, current_timestamp=current_timestamp)
+        projected = _project_entry(
+            entry=entry,
+            current_timestamp_utc=current_timestamp_utc,
+        )
         if projected is None:
             continue
         result.append(projected)
@@ -136,13 +140,14 @@ def _project_string_list(*, values: list, limit: int, max_chars: int) -> list[st
 def project_prompt_doc(
     *,
     document: ConversationEpisodeStateDoc | None,
-    current_timestamp: str,
+    current_timestamp_utc: str,
 ) -> ConversationProgressPromptDoc:
     """Project a stored episode document into the prompt-facing shape.
 
     Args:
         document: Stored episode-state document or ``None``.
-        current_timestamp: Current turn timestamp for age hints.
+        current_timestamp_utc: Current turn storage UTC timestamp for age
+            hints.
 
     Returns:
         Compact progress payload safe to place in a HumanMessage.
@@ -189,7 +194,7 @@ def project_prompt_doc(
         "current_blocker": cap_text(document.get("current_blocker", ""), MAX_THREAD_CHARS),
         "user_state_updates": _project_entries(
             entries=document.get("user_state_updates", []),
-            current_timestamp=current_timestamp,
+            current_timestamp_utc=current_timestamp_utc,
             limit=USER_STATE_UPDATES_LIMIT,
         ),
         "assistant_moves": _project_string_list(
@@ -204,17 +209,17 @@ def project_prompt_doc(
         ),
         "open_loops": _project_entries(
             entries=document.get("open_loops", []),
-            current_timestamp=current_timestamp,
+            current_timestamp_utc=current_timestamp_utc,
             limit=OPEN_LOOPS_LIMIT,
         ),
         "resolved_threads": _project_entries(
             entries=document.get("resolved_threads", []),
-            current_timestamp=current_timestamp,
+            current_timestamp_utc=current_timestamp_utc,
             limit=RESOLVED_THREADS_LIMIT,
         ),
         "avoid_reopening": _project_entries(
             entries=document.get("avoid_reopening", []),
-            current_timestamp=current_timestamp,
+            current_timestamp_utc=current_timestamp_utc,
             limit=AVOID_REOPENING_LIMIT,
         ),
         "emotional_trajectory": cap_text(document.get("emotional_trajectory", ""), MAX_THREAD_CHARS),

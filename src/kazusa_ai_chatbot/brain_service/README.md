@@ -219,7 +219,7 @@ Purpose:
 | `channel_name` | no | adapter | Human-readable channel label. |
 | `content_type` | no | adapter | High-level input type, currently usually `text`. |
 | `message_envelope` | yes | adapter | Typed envelope defined by the message envelope ICD. |
-| `timestamp` | no | adapter | Adapter event timestamp. Empty string means service receive time is used. |
+| `local_timestamp` | no | adapter | Adapter event time as configured-local wall-clock text. Empty string means service receive time is used. |
 | `debug_modes` | no | adapter/debug client | Debug toggles: `listen_only`, `think_only`, `no_remember`. |
 
 `ChatResponse` fields:

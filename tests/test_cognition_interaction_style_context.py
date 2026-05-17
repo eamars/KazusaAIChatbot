@@ -13,6 +13,12 @@ from kazusa_ai_chatbot.cognition_episode import (
 from kazusa_ai_chatbot.nodes import persona_supervisor2_cognition as cognition_module
 from kazusa_ai_chatbot.nodes import persona_supervisor2_cognition_l3 as l3_module
 from kazusa_ai_chatbot.nodes import persona_supervisor2_l3_surface as surface_module
+from kazusa_ai_chatbot.time_boundary import build_turn_clock_from_storage_utc
+
+
+_TURN_CLOCK = build_turn_clock_from_storage_utc(
+    "2026-05-06T00:00:00+00:00",
+)
 
 
 class _FakeStyleLlm:
@@ -123,11 +129,8 @@ def _cognitive_episode(*, channel_type: str = "private") -> CognitiveEpisode:
     return build_text_chat_cognitive_episode(
         episode_id=f"interaction-style-{channel_type}-episode",
         percept_id=f"interaction-style-{channel_type}-percept",
-        timestamp="2026-05-06T00:00:00+00:00",
-        time_context={
-            "current_local_datetime": "2026-05-09 19:30",
-            "current_local_weekday": "Saturday",
-        },
+        storage_timestamp_utc=_TURN_CLOCK["storage_timestamp_utc"],
+        local_time_context=_TURN_CLOCK["local_time_context"],
         user_input="hello",
         platform="qq",
         platform_channel_id=f"{channel_type}-channel",
@@ -221,8 +224,8 @@ def _global_state(*, channel_type: str) -> dict:
 
     return_value = {
         "character_profile": _character_profile(),
-        "timestamp": "2026-05-06T00:00:00+00:00",
-        "time_context": {},
+        "storage_timestamp_utc": _TURN_CLOCK["storage_timestamp_utc"],
+        "local_time_context": _TURN_CLOCK["local_time_context"],
         "user_input": "hello",
         "prompt_message_context": {},
         "platform": "qq",

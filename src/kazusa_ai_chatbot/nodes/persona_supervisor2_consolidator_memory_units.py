@@ -29,10 +29,10 @@ from kazusa_ai_chatbot.nodes.persona_supervisor2_consolidator_origin import (
 from kazusa_ai_chatbot.nodes.persona_supervisor2_consolidator_schema import ConsolidatorState
 from kazusa_ai_chatbot.rag.prompt_projection import project_tool_result_for_llm
 from kazusa_ai_chatbot.rag.user_memory_unit_retrieval import retrieve_memory_unit_merge_candidates
-from kazusa_ai_chatbot.time_context import (
-    format_history_for_llm,
-    format_timestamp_for_llm,
-    structured_llm_time_to_utc_iso,
+from kazusa_ai_chatbot.time_boundary import (
+    format_storage_utc_for_llm,
+    format_storage_utc_history_for_llm,
+    local_llm_datetime_to_storage_utc_iso,
 )
 from kazusa_ai_chatbot.utils import get_llm, parse_llm_json_output, text_or_empty
 
@@ -59,7 +59,7 @@ def _json_payload(state: ConsolidatorState) -> dict:
     if not isinstance(projected_memory_context, dict):
         projected_memory_context = {}
 
-    local_datetime = state["time_context"]["current_local_datetime"]
+    local_datetime = state["local_time_context"]["current_local_datetime"]
     return_value = {
         "timestamp": local_datetime,
         "global_user_id": state["global_user_id"],
@@ -74,7 +74,9 @@ def _json_payload(state: ConsolidatorState) -> dict:
         "interaction_subtext": state["interaction_subtext"],
         "logical_stance": state["logical_stance"],
         "character_intent": state["character_intent"],
-        "chat_history_recent": format_history_for_llm(state["chat_history_recent"]),
+        "chat_history_recent": format_storage_utc_history_for_llm(
+            state["chat_history_recent"]
+        ),
         "rag_user_memory_context": projected_memory_context,
         "new_facts_evidence": project_tool_result_for_llm(
             state["new_facts"]
@@ -134,7 +136,7 @@ def _normalize_candidate_lifecycle_fields(candidate: dict) -> tuple[dict, list[s
             normalized_candidate.pop(field, None)
             continue
         try:
-            normalized_candidate[field] = structured_llm_time_to_utc_iso(
+            normalized_candidate[field] = local_llm_datetime_to_storage_utc_iso(
                 raw_value
             )
         except ValueError as exc:
@@ -365,7 +367,7 @@ def _session_spread(source_refs: list[dict]) -> dict:
         raw_ts = text_or_empty(ref.get("timestamp"))
         if not raw_ts:
             continue
-        formatted_timestamp = format_timestamp_for_llm(raw_ts)
+        formatted_timestamp = format_storage_utc_for_llm(raw_ts)
         day = (formatted_timestamp or raw_ts)[:10]
         if day:
             timestamp_days.add(day)
@@ -406,7 +408,9 @@ def _recent_examples(candidate: dict, cluster: dict) -> list[dict]:
         examples.append({
             "source": "existing_unit",
             "fact": text_or_empty(cluster.get("fact")),
-            "updated_at": format_timestamp_for_llm(text_or_empty(cluster.get("updated_at"))),
+            "updated_at": format_storage_utc_for_llm(
+                text_or_empty(cluster.get("updated_at"))
+            ),
         })
     examples.append({
         "source": "new_candidate",
@@ -437,7 +441,7 @@ def _stability_payload(
         JSON payload with semantic evidence labels and raw support details.
     """
 
-    local_datetime = state["time_context"]["current_local_datetime"]
+    local_datetime = state["local_time_context"]["current_local_datetime"]
     cluster = project_tool_result_for_llm(
         _matching_cluster(candidate_clusters, unit_id)
     )
@@ -469,10 +473,10 @@ def _stability_payload(
             "session_spread": _session_spread(source_refs + candidate_refs),
             "recency": {
                 "current_turn_timestamp": local_datetime,
-                "existing_updated_at": format_timestamp_for_llm(
+                "existing_updated_at": format_storage_utc_for_llm(
                     text_or_empty(cluster.get("updated_at"))
                 ),
-                "existing_last_seen_at": format_timestamp_for_llm(
+                "existing_last_seen_at": format_storage_utc_for_llm(
                     text_or_empty(cluster.get("last_seen_at"))
                 ),
             },
@@ -523,7 +527,7 @@ _EXTRACTOR_PROMPT = '''\
 - 能确定具体执行时间的 `active_commitment`，`due_at` 使用本地 `YYYY-MM-DD HH:MM`。
 - 无到期日的持续规则、长期偏好或稳定事实可以省略 `due_at`。
 - 如果一个时间性承诺只能看到 `下次`、`之后`、`回头`、`later`、`next time` 这类相对说法，且输入不足以确定具体日期、时间或当前状态，不输出该 memory_unit。
-- 不输出自然语言时间、UTC、Z、时区名或带秒格式到 `due_at`。
+- `due_at` 只能填写精确 `YYYY-MM-DD HH:MM`；无法得到这种精确值时省略该字段。
 
 # unit_type 判定
 - `objective_fact`: 用户事实、用户偏好、项目名称、明确决定或系统性说明；如果同一事实已经被 `{character_name}` 接受为后续行为，改用 `active_commitment`。
@@ -1007,12 +1011,12 @@ async def process_memory_unit_candidate(state: ConsolidatorState, candidate: dic
     )
     merge_result = await _judge_memory_unit_merge(candidate, candidate_clusters)
 
-    timestamp = state["timestamp"]
+    storage_timestamp_utc = state["storage_timestamp_utc"]
     if merge_result["decision"] == "create":
         docs = await insert_user_memory_units(
             global_user_id,
             [candidate],
-            timestamp=timestamp,
+            storage_timestamp_utc=storage_timestamp_utc,
         )
         unit_id = docs[0]["unit_id"]
     else:
@@ -1020,10 +1024,10 @@ async def process_memory_unit_candidate(state: ConsolidatorState, candidate: dic
         await update_user_memory_unit_semantics(
             merge_result["cluster_id"],
             rewrite_result,
-            timestamp=timestamp,
+            storage_timestamp_utc=storage_timestamp_utc,
             lifecycle_fields=_candidate_lifecycle_updates(candidate),
             merge_history_entry={
-                "timestamp": timestamp,
+                "timestamp": storage_timestamp_utc,
                 "decision": merge_result["decision"],
                 "candidate_id": candidate["candidate_id"],
                 "reason": merge_result["reason"],
@@ -1045,7 +1049,7 @@ async def process_memory_unit_candidate(state: ConsolidatorState, candidate: dic
         await update_user_memory_unit_window(
             unit_id,
             window=stability_result["window"],
-            timestamp=timestamp,
+            storage_timestamp_utc=storage_timestamp_utc,
         )
     else:
         stability_result = {}

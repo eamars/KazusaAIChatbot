@@ -525,7 +525,7 @@ async def save_conversation(doc: ConversationMessageDoc) -> str:
         platform=doc.get("platform", ""),
         platform_channel_id=doc.get("platform_channel_id", ""),
         global_user_id=doc.get("global_user_id", ""),
-        timestamp=doc.get("timestamp", ""),
+        storage_timestamp_utc=doc.get("timestamp", ""),
         reason="save_conversation",
     )
     cache_runtime = cache2_runtime.get_rag_cache2_runtime()

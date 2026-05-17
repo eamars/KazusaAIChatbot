@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -31,7 +30,10 @@ from kazusa_ai_chatbot.db.script_operations import (
     resolve_global_user_id_for_export,
 )
 from kazusa_ai_chatbot.rag.user_memory_unit_retrieval import build_user_memory_context
-from kazusa_ai_chatbot.time_context import build_character_time_context
+from kazusa_ai_chatbot.time_boundary import (
+    local_time_context_from_storage_utc,
+    storage_utc_now_iso,
+)
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -133,8 +135,9 @@ async def main() -> None:
             records_key = "user_memory_context"
             records = {}
             if global_user_id:
-                time_context = build_character_time_context(
-                    datetime.now(timezone.utc).isoformat()
+                storage_timestamp_utc = storage_utc_now_iso()
+                time_context = local_time_context_from_storage_utc(
+                    storage_timestamp_utc,
                 )
                 records = await build_user_memory_context(
                     global_user_id,

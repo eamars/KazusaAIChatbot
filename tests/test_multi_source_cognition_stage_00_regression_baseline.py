@@ -30,7 +30,7 @@ from kazusa_ai_chatbot.nodes.persona_supervisor2_rag_projection import (
 from kazusa_ai_chatbot.rag.user_memory_unit_retrieval import (
     empty_user_memory_context,
 )
-from kazusa_ai_chatbot.time_context import build_character_time_context
+from kazusa_ai_chatbot.time_boundary import build_turn_clock
 
 
 FIXTURE_PATH = (
@@ -230,10 +230,10 @@ def _message_envelope(case: dict[str, Any]) -> dict[str, Any]:
 def _base_state(case_id: str = "private_text") -> dict[str, Any]:
     """Build a service/persona state from a fixture case."""
     case = _case(case_id)
-    timestamp = "2026-05-01T09:00:00+12:00"
+    turn_clock = build_turn_clock("2026-05-01 09:00:00")
     return_value = {
-        "timestamp": timestamp,
-        "time_context": build_character_time_context(timestamp),
+        "storage_timestamp_utc": turn_clock["storage_timestamp_utc"],
+        "local_time_context": turn_clock["local_time_context"],
         "active_turn_platform_message_ids": [case["platform_message_id"]],
         "active_turn_conversation_row_ids": ["conversation-row-1"],
         "platform": case["platform"],
@@ -300,8 +300,8 @@ def _base_state(case_id: str = "private_text") -> dict[str, Any]:
             f"{return_value['platform_channel_id']}:"
             f"{return_value['platform_message_id']}:dialog_text:0"
         ),
-        timestamp=return_value["timestamp"],
-        time_context=return_value["time_context"],
+        storage_timestamp_utc=return_value["storage_timestamp_utc"],
+        local_time_context=return_value["local_time_context"],
         user_input=return_value["user_input"],
         platform=return_value["platform"],
         platform_channel_id=return_value["platform_channel_id"],
@@ -377,8 +377,8 @@ def _cognition_state() -> dict[str, Any]:
     state["cognitive_episode"] = build_text_chat_cognitive_episode(
         episode_id="user_message:debug:direct:message-1",
         percept_id="user_message:debug:direct:message-1:dialog_text:0",
-        timestamp=state["timestamp"],
-        time_context=state["time_context"],
+        storage_timestamp_utc=state["storage_timestamp_utc"],
+        local_time_context=state["local_time_context"],
         user_input=state["user_input"],
         platform=state["platform"],
         platform_channel_id=state["platform_channel_id"],
@@ -507,6 +507,7 @@ def _dialog_state() -> dict[str, Any]:
         "messages": [],
         "should_stop": False,
         "retry": 0,
+        "dialog_usage_mode": "live_visible_reply",
         "final_dialog": ["ok"],
         "target_addressed_user_ids": [],
         "target_broadcast": False,

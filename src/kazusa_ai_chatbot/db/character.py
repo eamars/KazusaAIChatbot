@@ -146,12 +146,12 @@ async def upsert_character_state(
     mood: str,
     global_vibe: str,
     reflection_summary: str,
-    timestamp: str,
+    updated_at_utc: str,
 ) -> None:
     """Update the runtime character state.
 
     Empty-string arguments are treated as "leave unchanged" — the existing
-    value for that field is preserved. ``timestamp`` always overwrites
+    value for that field is preserved. ``updated_at_utc`` always overwrites
     ``updated_at``.
     """
     try:
@@ -177,7 +177,7 @@ async def upsert_character_state(
                     "mood": mood,
                     "global_vibe": global_vibe,
                     "reflection_summary": reflection_summary,
-                    "updated_at": timestamp,
+                    "updated_at": updated_at_utc,
                 }
             },
             upsert=True,

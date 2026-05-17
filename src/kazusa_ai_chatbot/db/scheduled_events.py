@@ -14,7 +14,7 @@ async def query_pending_scheduled_events(
     platform: str,
     platform_channel_id: str,
     global_user_id: str,
-    current_timestamp: str,
+    current_timestamp_utc: str,
     limit: int = 10,
 ) -> list[ScheduledEventDoc]:
     """Read pending future events scoped to one source user and channel.
@@ -23,7 +23,8 @@ async def query_pending_scheduled_events(
         platform: Source platform of the conversation that created the event.
         platform_channel_id: Source channel or private thread identifier.
         global_user_id: Internal UUID for the source user.
-        current_timestamp: Lower bound for pending ``execute_at`` timestamps.
+        current_timestamp_utc: Lower bound for pending ``execute_at`` storage
+            UTC timestamps.
         limit: Maximum number of pending events to return.
 
     Returns:
@@ -35,7 +36,7 @@ async def query_pending_scheduled_events(
         "source_platform": platform,
         "source_channel_id": platform_channel_id,
         "source_user_id": global_user_id,
-        "execute_at": {"$gte": current_timestamp},
+        "execute_at": {"$gte": current_timestamp_utc},
     }
 
     db = await get_db()
@@ -72,14 +73,14 @@ async def list_pending_scheduler_events() -> list[ScheduledEventDoc]:
 
 async def list_due_future_cognition_events(
     *,
-    current_timestamp: str,
+    current_timestamp_utc: str,
     limit: int,
 ) -> list[ScheduledEventDoc]:
     """Return due pending future-cognition slots in execution order.
 
     Args:
-        current_timestamp: Worker tick timestamp; rows at or before this time
-            are eligible for collection.
+        current_timestamp_utc: Worker tick storage UTC timestamp; rows at or
+            before this time are eligible for collection.
         limit: Maximum number of scheduled slots to return.
 
     Returns:
@@ -89,7 +90,7 @@ async def list_due_future_cognition_events(
     query = {
         "status": "pending",
         "tool": "trigger_future_cognition",
-        "execute_at": {"$lte": current_timestamp},
+        "execute_at": {"$lte": current_timestamp_utc},
     }
     db = await get_db()
     cursor = (

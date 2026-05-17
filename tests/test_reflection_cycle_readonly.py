@@ -413,7 +413,7 @@ async def test_runtime_splits_channel_into_active_hour_buckets(
         "2026-05-03T13:00:00+00:00",
     ]
     assert len(active_hour_slots) == 4
-    assert active_hour_slots[0]["hour"] == "2026-05-03T10:00:00+00:00"
+    assert active_hour_slots[0]["hour"] == "2026-05-03 22:00"
 
 
 def _channel_row(
@@ -466,7 +466,7 @@ def _messages(*, channel_type: str) -> list[dict]:
     return messages
 
 
-def _message(role: str, timestamp: str) -> dict:
+def _message(role: str, timestamp_utc: str) -> dict:
     """Build one timestamped reflection test message."""
 
     message = {
@@ -474,9 +474,9 @@ def _message(role: str, timestamp: str) -> dict:
         "platform_user_id": f"{role}-platform",
         "global_user_id": f"{role}-global",
         "display_name": role,
-        "body_text": f"{role} message at {timestamp}",
+        "body_text": f"{role} message at {timestamp_utc}",
         "attachments": [],
-        "timestamp": timestamp,
+        "timestamp": timestamp_utc,
     }
     return message
 

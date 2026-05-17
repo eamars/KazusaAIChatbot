@@ -36,13 +36,14 @@ class ConversationProgressRuntime:
         self,
         *,
         scope: ConversationProgressScope,
-        current_timestamp: str,
+        current_timestamp_utc: str,
     ) -> ConversationProgressLoadResult:
         """Load, select, and project episode state for one responsive turn.
 
         Args:
             scope: Platform/channel/user scope.
-            current_timestamp: ISO timestamp used for age-hint projection.
+            current_timestamp_utc: Storage UTC timestamp used for age-hint
+                projection.
 
         Returns:
             Full load result with source metadata.
@@ -58,7 +59,7 @@ class ConversationProgressRuntime:
             source = "empty"
         prompt_doc = projection.project_prompt_doc(
             document=selected_document,
-            current_timestamp=current_timestamp,
+            current_timestamp_utc=current_timestamp_utc,
         )
         logger.debug(
             f'Conversation progress load detail: platform={scope.platform} '
@@ -99,7 +100,7 @@ class ConversationProgressRuntime:
         )
         document = repository.build_episode_state_doc(
             scope=scope,
-            timestamp=record_input["timestamp"],
+            storage_timestamp_utc=record_input["storage_timestamp_utc"],
             prior_episode_state=record_input["prior_episode_state"],
             recorder_output=recorder_output,
             last_user_input=record_input["decontexualized_input"],
@@ -140,13 +141,13 @@ _default_runtime = ConversationProgressRuntime()
 async def load_progress_context(
     *,
     scope: ConversationProgressScope,
-    current_timestamp: str,
+    current_timestamp_utc: str,
 ) -> ConversationProgressLoadResult:
     """Load and project progress state for one responsive turn."""
 
     return_value = await _default_runtime.load_progress_context(
         scope=scope,
-        current_timestamp=current_timestamp,
+        current_timestamp_utc=current_timestamp_utc,
     )
     return return_value
 

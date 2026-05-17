@@ -12,15 +12,15 @@ from kazusa_ai_chatbot.db import (
     query_pending_scheduled_events,
     query_user_memory_units,
 )
-from kazusa_ai_chatbot.dispatcher.task import parse_iso_datetime
 from kazusa_ai_chatbot.rag.helper_agent import BaseRAGHelperAgent
+from kazusa_ai_chatbot.time_boundary import parse_storage_utc_datetime
 from kazusa_ai_chatbot.utils import text_or_empty
 
 _REQUIRED_CONTEXT_FIELDS = (
     "platform",
     "platform_channel_id",
     "global_user_id",
-    "current_timestamp",
+    "current_timestamp_utc",
 )
 _VOLATILE_CACHE_STATUS = {
     "enabled": False,
@@ -93,7 +93,7 @@ def _clip_text(value: object, *, limit: int) -> str:
 
 
 def _safe_parse_datetime(value: object) -> datetime | None:
-    """Parse an optional external timestamp without treating bad data as fatal.
+    """Parse an optional storage UTC instant without treating bad data as fatal.
 
     Args:
         value: Timestamp-like value from DB or progress state.
@@ -106,7 +106,7 @@ def _safe_parse_datetime(value: object) -> datetime | None:
     if not raw_value:
         return None
     try:
-        parsed = parse_iso_datetime(raw_value)
+        parsed = parse_storage_utc_datetime(raw_value)
     except ValueError:
         return None
     return parsed
@@ -250,7 +250,7 @@ def _mode_from_task(task: str) -> str:
 def _progress_is_active(
     progress: object,
     episode_state: object,
-    current_timestamp: str,
+    current_timestamp_utc: str,
 ) -> bool:
     """Decide whether conversation progress can serve active recall."""
 
@@ -265,7 +265,7 @@ def _progress_is_active(
     if not expires_at and isinstance(episode_state, dict):
         expires_at = episode_state.get("expires_at")
     expiry = _safe_parse_datetime(expires_at)
-    current = _safe_parse_datetime(current_timestamp)
+    current = _safe_parse_datetime(current_timestamp_utc)
     if expiry is None or current is None:
         return True
     return_value = expiry > current
@@ -436,8 +436,14 @@ class ProgressCollector:
 
         progress = context.get("conversation_progress")
         episode_state = context.get("conversation_episode_state")
-        current_timestamp = text_or_empty(context.get("current_timestamp"))
-        if not _progress_is_active(progress, episode_state, current_timestamp):
+        current_timestamp_utc = text_or_empty(
+            context.get("current_timestamp_utc")
+        )
+        if not _progress_is_active(
+            progress,
+            episode_state,
+            current_timestamp_utc,
+        ):
             return_value: list[dict[str, str]] = []
             return return_value
 
@@ -500,13 +506,14 @@ class ScheduledEventCollector:
     async def collect(self, context: dict[str, Any]) -> list[dict[str, str]]:
         """Read pending scheduled events and convert them to candidates."""
 
-        events = await query_pending_scheduled_events(
-            platform=context["platform"],
-            platform_channel_id=context["platform_channel_id"],
-            global_user_id=context["global_user_id"],
-            current_timestamp=context["current_timestamp"],
-            limit=10,
-        )
+        query_args = {
+            "platform": context["platform"],
+            "platform_channel_id": context["platform_channel_id"],
+            "global_user_id": context["global_user_id"],
+            "current_timestamp_utc": context["current_timestamp_utc"],
+            "limit": 10,
+        }
+        events = await query_pending_scheduled_events(**query_args)
         candidates: list[dict[str, str]] = []
         for event in events:
             candidates.append(

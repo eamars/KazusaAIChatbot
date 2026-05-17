@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import copy
 import json
-from datetime import datetime, timezone
 from typing import Any
 
 from kazusa_ai_chatbot.reflection_cycle.models import (
@@ -17,6 +16,10 @@ from kazusa_ai_chatbot.reflection_cycle.models import (
     ReflectionInputSet,
     ReflectionLLMResult,
     ReflectionScopeInput,
+)
+from kazusa_ai_chatbot.time_boundary import (
+    format_storage_utc_for_llm,
+    parse_storage_utc_datetime,
 )
 
 
@@ -256,18 +259,17 @@ def _compact_text_list(value: Any) -> tuple[list[str], int]:
     return return_value
 
 
-def _hour_start_label(timestamp: str) -> str:
-    """Return a UTC ISO hour-start label for a daily active-hour slot."""
+def _hour_start_label(storage_timestamp_utc: str) -> str:
+    """Return a configured-local hour label for a daily active-hour slot."""
 
-    parsed_timestamp = datetime.fromisoformat(
-        str(timestamp).replace("Z", "+00:00")
-    )
-    hour_start = parsed_timestamp.astimezone(timezone.utc).replace(
+    timestamp_utc = parse_storage_utc_datetime(str(storage_timestamp_utc))
+    hour_start_utc = timestamp_utc.replace(
         minute=0,
         second=0,
         microsecond=0,
     )
-    return_value = hour_start.isoformat()
+    hour_start_utc_iso = hour_start_utc.isoformat()
+    return_value = format_storage_utc_for_llm(hour_start_utc_iso)
     return return_value
 
 

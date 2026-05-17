@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
 from typing import Any
 
 from kazusa_ai_chatbot import scheduler
@@ -13,6 +12,10 @@ from kazusa_ai_chatbot.action_spec.models import (
 )
 from kazusa_ai_chatbot.action_spec.registry import (
     TRIGGER_FUTURE_COGNITION_CAPABILITY,
+)
+from kazusa_ai_chatbot.time_boundary import (
+    local_llm_datetime_to_storage_utc_iso,
+    normalize_storage_utc_iso,
 )
 
 MAX_FUTURE_COGNITION_CONTINUATION_DEPTH = 1
@@ -36,15 +39,16 @@ _FORBIDDEN_RAW_ID_PARAM_KEYS = frozenset(
 def build_future_cognition_scheduled_event(
     action_spec: dict[str, Any],
     *,
-    timestamp: str,
+    storage_timestamp_utc: str,
     action_attempt_id: str,
 ) -> dict:
     """Build a scheduler document for a future self-cognition slot.
 
     Args:
         action_spec: Selected ``trigger_future_cognition`` action spec.
-        timestamp: Current episode timestamp used as creation time and as the
-            immediate background slot time when no trigger time was supplied.
+        storage_timestamp_utc: Current episode storage UTC timestamp used as
+            creation time and as the immediate background slot time when no
+            trigger time was supplied.
         action_attempt_id: Stable action-attempt id for trace correlation.
 
     Returns:
@@ -55,8 +59,9 @@ def build_future_cognition_scheduled_event(
             self-cognition trigger contract.
     """
 
-    if not timestamp.strip():
-        raise ActionValidationError("timestamp: expected non-empty string")
+    normalized_storage_timestamp_utc = _normalize_storage_timestamp(
+        storage_timestamp_utc,
+    )
     if not action_attempt_id.strip():
         raise ActionValidationError("action_attempt_id: expected non-empty string")
 
@@ -65,10 +70,10 @@ def build_future_cognition_scheduled_event(
     source_scope = _source_scope(validated["target"]["scope"])
     trigger_at = params["trigger_at"]
     if trigger_at is None:
-        execute_at = _normalized_iso_datetime(timestamp)
+        execute_at = normalized_storage_timestamp_utc
         normalized_trigger_at = None
     else:
-        normalized_trigger_at = _normalized_absolute_iso_datetime(trigger_at)
+        normalized_trigger_at = _storage_utc_from_local_trigger_at(trigger_at)
         execute_at = normalized_trigger_at
 
     continuation_objective = str(params["continuation_objective"]).strip()
@@ -84,7 +89,7 @@ def build_future_cognition_scheduled_event(
             "continuation": dict(validated["continuation"]),
         },
         "execute_at": execute_at,
-        "created_at": _normalized_iso_datetime(timestamp),
+        "created_at": normalized_storage_timestamp_utc,
         "status": "pending",
         "source_platform": source_scope["source_platform"],
         "source_channel_id": source_scope["source_channel_id"],
@@ -102,14 +107,14 @@ def build_future_cognition_scheduled_event(
 async def execute_future_cognition_action(
     action_spec: dict[str, Any],
     *,
-    timestamp: str,
+    storage_timestamp_utc: str,
     action_attempt_id: str,
 ) -> dict:
     """Persist a future self-cognition slot without running cognition inline.
 
     Args:
         action_spec: Selected ``trigger_future_cognition`` action spec.
-        timestamp: Current episode timestamp.
+        storage_timestamp_utc: Current episode storage UTC timestamp.
         action_attempt_id: Stable action-attempt id for trace correlation.
 
     Returns:
@@ -118,7 +123,7 @@ async def execute_future_cognition_action(
 
     event = build_future_cognition_scheduled_event(
         action_spec,
-        timestamp=timestamp,
+        storage_timestamp_utc=storage_timestamp_utc,
         action_attempt_id=action_attempt_id,
     )
     event_id = await scheduler.schedule_event(event)
@@ -160,7 +165,7 @@ def validate_future_cognition_action(
     if trigger_at is not None:
         if not isinstance(trigger_at, str):
             raise ActionValidationError("trigger_at: expected string or null")
-        _normalized_absolute_iso_datetime(trigger_at)
+        _storage_utc_from_local_trigger_at(trigger_at)
     continuation_objective = params.get("continuation_objective")
     if (
         not isinstance(continuation_objective, str)
@@ -221,31 +226,27 @@ def _scope_text(scope: dict[str, Any], field_name: str) -> str:
     return return_value
 
 
-def _normalized_iso_datetime(value: str) -> str:
-    """Normalize an ISO timestamp into UTC ISO format."""
+def _normalize_storage_timestamp(storage_timestamp_utc: str) -> str:
+    """Normalize a storage UTC action timestamp for persistence fields."""
 
     try:
-        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        normalized_timestamp_utc = normalize_storage_utc_iso(
+            storage_timestamp_utc,
+        )
     except ValueError as exc:
         raise ActionValidationError(
-            f"timestamp: invalid ISO timestamp: {exc}"
+            f"storage_timestamp_utc: invalid storage UTC timestamp: {exc}"
         ) from exc
-    if parsed.tzinfo is None:
-        parsed = parsed.replace(tzinfo=timezone.utc)
-    normalized = parsed.astimezone(timezone.utc).isoformat()
-    return normalized
+    return normalized_timestamp_utc
 
 
-def _normalized_absolute_iso_datetime(value: str) -> str:
-    """Normalize an absolute ISO timestamp or raise a validation error."""
+def _storage_utc_from_local_trigger_at(value: str) -> str:
+    """Convert LLM-authored local trigger text to storage UTC."""
 
     try:
-        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        trigger_at_utc = local_llm_datetime_to_storage_utc_iso(value)
     except ValueError as exc:
         raise ActionValidationError(
-            f"trigger_at: invalid ISO timestamp: {exc}"
+            f"trigger_at: expected exact local YYYY-MM-DD HH:MM: {exc}"
         ) from exc
-    if parsed.tzinfo is None:
-        raise ActionValidationError("trigger_at: expected absolute timestamp")
-    normalized = parsed.astimezone(timezone.utc).isoformat()
-    return normalized
+    return trigger_at_utc

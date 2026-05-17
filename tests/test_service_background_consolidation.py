@@ -10,6 +10,11 @@ import pytest
 from fastapi import BackgroundTasks
 
 from kazusa_ai_chatbot import service as service_module
+from kazusa_ai_chatbot.time_boundary import build_turn_clock
+
+
+_CONSOLIDATION_TURN_CLOCK = build_turn_clock("2026-04-25 18:00:58")
+_GRAPH_TURN_CLOCK = build_turn_clock("2026-04-25 18:07:24")
 
 
 class _MappingState(Mapping):
@@ -97,7 +102,10 @@ def _consolidation_state() -> dict:
     """
 
     return_value = {
-        "timestamp": "2026-04-25T18:00:58+12:00",
+        "storage_timestamp_utc": (
+            _CONSOLIDATION_TURN_CLOCK["storage_timestamp_utc"]
+        ),
+        "local_time_context": _CONSOLIDATION_TURN_CLOCK["local_time_context"],
         "platform": "qq",
         "platform_channel_id": "chan-1",
         "platform_message_id": "msg-1",
@@ -917,7 +925,10 @@ async def test_background_consolidation_refreshes_cached_character_state(monkeyp
         }),
     )
 
-    await service_module._run_consolidation_background({"timestamp": "t1"})
+    await service_module._run_consolidation_background({
+        "storage_timestamp_utc": "2026-04-25T06:00:58+00:00",
+        "local_time_context": _CONSOLIDATION_TURN_CLOCK["local_time_context"],
+    })
 
     assert service_module._runtime_character_state["mood"] == "Curious"
     assert service_module._runtime_character_state["global_vibe"] == "Focused"
@@ -991,7 +1002,10 @@ async def test_build_graph_preserves_consolidation_state_from_supervisor(monkeyp
             "final_dialog": ["好呀。"],
             "future_promises": [],
             "consolidation_state": {
-                "timestamp": "2026-04-25T18:07:24+12:00",
+                "storage_timestamp_utc": _GRAPH_TURN_CLOCK[
+                    "storage_timestamp_utc"
+                ],
+                "local_time_context": _GRAPH_TURN_CLOCK["local_time_context"],
                 "final_dialog": ["好呀。"],
                 "decontexualized_input": "一分钟后发消息",
             },
@@ -1021,7 +1035,8 @@ async def test_build_graph_preserves_consolidation_state_from_supervisor(monkeyp
 
     graph = service_module._build_graph()
     result = await graph.ainvoke({
-        "timestamp": "2026-04-25T18:07:24+12:00",
+        "storage_timestamp_utc": _GRAPH_TURN_CLOCK["storage_timestamp_utc"],
+        "local_time_context": _GRAPH_TURN_CLOCK["local_time_context"],
         "platform": "qq",
         "platform_message_id": "268099968",
         "platform_user_id": "673225019",
@@ -1097,7 +1112,8 @@ async def test_build_graph_preserves_persona_no_response(monkeypatch):
 
     graph = service_module._build_graph()
     result = await graph.ainvoke({
-        "timestamp": "2026-04-25T18:07:24+12:00",
+        "storage_timestamp_utc": _GRAPH_TURN_CLOCK["storage_timestamp_utc"],
+        "local_time_context": _GRAPH_TURN_CLOCK["local_time_context"],
         "platform": "qq",
         "platform_message_id": "268099968",
         "platform_user_id": "673225019",
@@ -1142,7 +1158,8 @@ async def test_build_graph_skips_episode_state_loader_when_relevance_declines(mo
 
     graph = service_module._build_graph()
     result = await graph.ainvoke({
-        "timestamp": "2026-04-25T18:07:24+12:00",
+        "storage_timestamp_utc": _GRAPH_TURN_CLOCK["storage_timestamp_utc"],
+        "local_time_context": _GRAPH_TURN_CLOCK["local_time_context"],
         "platform": "qq",
         "platform_message_id": "268099968",
         "platform_user_id": "673225019",

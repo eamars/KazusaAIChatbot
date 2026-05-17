@@ -20,7 +20,7 @@ from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition_prompt_selection impo
     CognitionPromptStage,
     select_cognition_prompt_variant,
 )
-from kazusa_ai_chatbot.time_context import build_character_time_context
+from kazusa_ai_chatbot.time_boundary import build_turn_clock
 
 
 _APPROVED_STAGES: tuple[CognitionPromptStage, ...] = (
@@ -110,12 +110,12 @@ def _text_chat_episode(
     Returns:
         Valid `CognitiveEpisode` for selector tests.
     """
-    timestamp = "2026-05-01T09:00:00+12:00"
+    turn_clock = build_turn_clock("2026-05-01 09:00:00")
     episode = build_text_chat_cognitive_episode(
         episode_id="user_message:debug:direct:message-1",
         percept_id="user_message:debug:direct:message-1:dialog_text:0",
-        timestamp=timestamp,
-        time_context=build_character_time_context(timestamp),
+        storage_timestamp_utc=turn_clock["storage_timestamp_utc"],
+        local_time_context=turn_clock["local_time_context"],
         user_input="Please keep it short.",
         platform="debug",
         platform_channel_id="direct",

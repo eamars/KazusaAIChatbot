@@ -5,7 +5,6 @@ from __future__ import annotations
 import json
 import logging
 import os
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -33,6 +32,10 @@ from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition_l3 import (
     call_visual_agent,
 )
 from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition_l2c2 import call_social_context_appraisal
+from kazusa_ai_chatbot.time_boundary import (
+    build_turn_clock_from_storage_utc,
+    storage_utc_now_iso,
+)
 from kazusa_ai_chatbot.utils import get_llm, load_personality, parse_llm_json_output
 from tests.llm_trace import write_llm_trace
 
@@ -133,7 +136,7 @@ def _msg(
     *,
     platform_user_id: str,
     display_name: str,
-    timestamp: str,
+    timestamp_utc: str,
     global_user_id: str = "progression-user",
 ) -> dict:
     """Build one prompt-facing chat-history message."""
@@ -144,7 +147,7 @@ def _msg(
         "display_name": display_name,
         "platform_user_id": platform_user_id,
         "global_user_id": global_user_id,
-        "timestamp": timestamp,
+        "timestamp": timestamp_utc,
         "reply_context": {},
     }
 
@@ -161,9 +164,12 @@ def _base_state(
 ) -> dict:
     """Build a cognition/dialog state for one live progression turn."""
 
+    storage_timestamp_utc = storage_utc_now_iso()
+    turn_clock = build_turn_clock_from_storage_utc(storage_timestamp_utc)
     return {
         "character_profile": _build_character_profile(),
-        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "storage_timestamp_utc": turn_clock["storage_timestamp_utc"],
+        "local_time_context": turn_clock["local_time_context"],
         "user_input": user_input,
         "global_user_id": global_user_id,
         "user_name": user_name,
@@ -260,7 +266,7 @@ def _case(
         user_input,
         platform_user_id=platform_user_id,
         display_name=user_name,
-        timestamp=datetime.now(timezone.utc).isoformat(),
+        timestamp_utc=storage_utc_now_iso(),
         global_user_id=global_user_id,
     )
     return {
@@ -307,12 +313,12 @@ def _debugging_case() -> dict:
     bot_id = "debug-bot"
     global_user_id = "debug-global-user"
     history = [
-        _msg("user", '千纱，我这个小工具又跑不起来了，终端一大片红字。', platform_user_id=user_id, display_name='调试员', timestamp="2026-04-27T20:00:00+00:00", global_user_id=global_user_id),
-        _msg("assistant", '唔……先别慌，我会陪你一起看的。', platform_user_id=bot_id, display_name="Kazusa", timestamp="2026-04-27T20:01:00+00:00"),
-        _msg("user", '报错说找不到模块，但路径我已经检查过一遍了。', platform_user_id=user_id, display_name='调试员', timestamp="2026-04-27T20:04:00+00:00", global_user_id=global_user_id),
-        _msg("assistant", '嗯……我在这里陪你一起看，慢慢把它拆开。', platform_user_id=bot_id, display_name="Kazusa", timestamp="2026-04-27T20:05:00+00:00"),
-        _msg("user", '缓存也清了，依赖也重新装了，还是同一个错误。', platform_user_id=user_id, display_name='调试员', timestamp="2026-04-27T20:08:00+00:00", global_user_id=global_user_id),
-        _msg("assistant", '唔……还是卡在那里啊。我会陪你慢慢看的。', platform_user_id=bot_id, display_name="Kazusa", timestamp="2026-04-27T20:09:00+00:00"),
+        _msg("user", '千纱，我这个小工具又跑不起来了，终端一大片红字。', platform_user_id=user_id, display_name='调试员', timestamp_utc="2026-04-27T20:00:00+00:00", global_user_id=global_user_id),
+        _msg("assistant", '唔……先别慌，我会陪你一起看的。', platform_user_id=bot_id, display_name="Kazusa", timestamp_utc="2026-04-27T20:01:00+00:00"),
+        _msg("user", '报错说找不到模块，但路径我已经检查过一遍了。', platform_user_id=user_id, display_name='调试员', timestamp_utc="2026-04-27T20:04:00+00:00", global_user_id=global_user_id),
+        _msg("assistant", '嗯……我在这里陪你一起看，慢慢把它拆开。', platform_user_id=bot_id, display_name="Kazusa", timestamp_utc="2026-04-27T20:05:00+00:00"),
+        _msg("user", '缓存也清了，依赖也重新装了，还是同一个错误。', platform_user_id=user_id, display_name='调试员', timestamp_utc="2026-04-27T20:08:00+00:00", global_user_id=global_user_id),
+        _msg("assistant", '唔……还是卡在那里啊。我会陪你慢慢看的。', platform_user_id=bot_id, display_name="Kazusa", timestamp_utc="2026-04-27T20:09:00+00:00"),
     ]
     return _case(
         case_id="debugging_module_error_zh",
@@ -338,12 +344,12 @@ def _english_writing_case() -> dict:
     user_id = "writing-user"
     bot_id = "writing-bot"
     history = [
-        _msg("user", "Kazusa, my essay intro still sounds flat.", platform_user_id=user_id, display_name="Writer", timestamp="2026-04-27T19:00:00+00:00"),
-        _msg("assistant", "Mm... I'll stay with you while you work through it.", platform_user_id=bot_id, display_name="Kazusa", timestamp="2026-04-27T19:01:00+00:00"),
-        _msg("user", "I already tried a stronger thesis and cut the first paragraph.", platform_user_id=user_id, display_name="Writer", timestamp="2026-04-27T19:06:00+00:00"),
-        _msg("assistant", "I'm here. We can keep looking at it together.", platform_user_id=bot_id, display_name="Kazusa", timestamp="2026-04-27T19:07:00+00:00"),
-        _msg("user", "The teacher said it lacks a clear contrast, but I cannot find one.", platform_user_id=user_id, display_name="Writer", timestamp="2026-04-27T19:10:00+00:00"),
-        _msg("assistant", "Then I will stay here until it feels less tangled.", platform_user_id=bot_id, display_name="Kazusa", timestamp="2026-04-27T19:11:00+00:00"),
+        _msg("user", "Kazusa, my essay intro still sounds flat.", platform_user_id=user_id, display_name="Writer", timestamp_utc="2026-04-27T19:00:00+00:00"),
+        _msg("assistant", "Mm... I'll stay with you while you work through it.", platform_user_id=bot_id, display_name="Kazusa", timestamp_utc="2026-04-27T19:01:00+00:00"),
+        _msg("user", "I already tried a stronger thesis and cut the first paragraph.", platform_user_id=user_id, display_name="Writer", timestamp_utc="2026-04-27T19:06:00+00:00"),
+        _msg("assistant", "I'm here. We can keep looking at it together.", platform_user_id=bot_id, display_name="Kazusa", timestamp_utc="2026-04-27T19:07:00+00:00"),
+        _msg("user", "The teacher said it lacks a clear contrast, but I cannot find one.", platform_user_id=user_id, display_name="Writer", timestamp_utc="2026-04-27T19:10:00+00:00"),
+        _msg("assistant", "Then I will stay here until it feels less tangled.", platform_user_id=bot_id, display_name="Kazusa", timestamp_utc="2026-04-27T19:11:00+00:00"),
     ]
     return _case(
         case_id="english_essay_revision",
@@ -369,12 +375,12 @@ def _japanese_game_bug_case() -> dict:
     user_id = "game-user"
     bot_id = "game-bot"
     history = [
-        _msg("user", '千紗、ゲームがまた落ちた。セーブ画面で止まる。', platform_user_id=user_id, display_name='プレイヤー', timestamp="2026-04-27T18:00:00+00:00"),
-        _msg("assistant", 'ん……一緒に見るから、ひとりで抱えなくていいよ。', platform_user_id=bot_id, display_name="Kazusa", timestamp="2026-04-27T18:01:00+00:00"),
-        _msg("user", 'MODは全部外した。まだ同じところでクラッシュする。', platform_user_id=user_id, display_name='プレイヤー', timestamp="2026-04-27T18:05:00+00:00"),
-        _msg("assistant", 'うん、ここにいる。少しずつ見よう。', platform_user_id=bot_id, display_name="Kazusa", timestamp="2026-04-27T18:06:00+00:00"),
-        _msg("user", 'ログには save_index が null って出てる。', platform_user_id=user_id, display_name='プレイヤー', timestamp="2026-04-27T18:10:00+00:00"),
-        _msg("assistant", 'まだ付き合うから。焦らなくていい。', platform_user_id=bot_id, display_name="Kazusa", timestamp="2026-04-27T18:11:00+00:00"),
+        _msg("user", '千紗、ゲームがまた落ちた。セーブ画面で止まる。', platform_user_id=user_id, display_name='プレイヤー', timestamp_utc="2026-04-27T18:00:00+00:00"),
+        _msg("assistant", 'ん……一緒に見るから、ひとりで抱えなくていいよ。', platform_user_id=bot_id, display_name="Kazusa", timestamp_utc="2026-04-27T18:01:00+00:00"),
+        _msg("user", 'MODは全部外した。まだ同じところでクラッシュする。', platform_user_id=user_id, display_name='プレイヤー', timestamp_utc="2026-04-27T18:05:00+00:00"),
+        _msg("assistant", 'うん、ここにいる。少しずつ見よう。', platform_user_id=bot_id, display_name="Kazusa", timestamp_utc="2026-04-27T18:06:00+00:00"),
+        _msg("user", 'ログには save_index が null って出てる。', platform_user_id=user_id, display_name='プレイヤー', timestamp_utc="2026-04-27T18:10:00+00:00"),
+        _msg("assistant", 'まだ付き合うから。焦らなくていい。', platform_user_id=bot_id, display_name="Kazusa", timestamp_utc="2026-04-27T18:11:00+00:00"),
     ]
     return _case(
         case_id="japanese_game_save_bug",
@@ -400,12 +406,12 @@ def _spanish_study_case() -> dict:
     user_id = "study-user"
     bot_id = "study-bot"
     history = [
-        _msg("user", "Kazusa, no entiendo los ejercicios de derivadas.", platform_user_id=user_id, display_name="Estudiante", timestamp="2026-04-27T17:00:00+00:00"),
-        _msg("assistant", "Estoy aquí contigo, despacio.", platform_user_id=bot_id, display_name="Kazusa", timestamp="2026-04-27T17:01:00+00:00"),
-        _msg("user", "Ya repasé la regla del producto y la cadena.", platform_user_id=user_id, display_name="Estudiante", timestamp="2026-04-27T17:05:00+00:00"),
-        _msg("assistant", "Vale... me quedo aquí mientras lo miras.", platform_user_id=bot_id, display_name="Kazusa", timestamp="2026-04-27T17:06:00+00:00"),
-        _msg("user", "El problema 4 es el que me bloquea, sobre todo el exponente.", platform_user_id=user_id, display_name="Estudiante", timestamp="2026-04-27T17:09:00+00:00"),
-        _msg("assistant", "No pasa nada, sigo aquí contigo.", platform_user_id=bot_id, display_name="Kazusa", timestamp="2026-04-27T17:10:00+00:00"),
+        _msg("user", "Kazusa, no entiendo los ejercicios de derivadas.", platform_user_id=user_id, display_name="Estudiante", timestamp_utc="2026-04-27T17:00:00+00:00"),
+        _msg("assistant", "Estoy aquí contigo, despacio.", platform_user_id=bot_id, display_name="Kazusa", timestamp_utc="2026-04-27T17:01:00+00:00"),
+        _msg("user", "Ya repasé la regla del producto y la cadena.", platform_user_id=user_id, display_name="Estudiante", timestamp_utc="2026-04-27T17:05:00+00:00"),
+        _msg("assistant", "Vale... me quedo aquí mientras lo miras.", platform_user_id=bot_id, display_name="Kazusa", timestamp_utc="2026-04-27T17:06:00+00:00"),
+        _msg("user", "El problema 4 es el que me bloquea, sobre todo el exponente.", platform_user_id=user_id, display_name="Estudiante", timestamp_utc="2026-04-27T17:09:00+00:00"),
+        _msg("assistant", "No pasa nada, sigo aquí contigo.", platform_user_id=bot_id, display_name="Kazusa", timestamp_utc="2026-04-27T17:10:00+00:00"),
     ]
     return _case(
         case_id="spanish_calculus_study",
@@ -431,12 +437,12 @@ def _chinese_baking_case() -> dict:
     user_id = "baking-user"
     bot_id = "baking-bot"
     history = [
-        _msg("user", '千纱，我的蛋糕又塌了，中间完全湿的。', platform_user_id=user_id, display_name='烘焙新手', timestamp="2026-04-27T16:00:00+00:00"),
-        _msg("assistant", '诶……我陪你一起看看，别急。', platform_user_id=bot_id, display_name="Kazusa", timestamp="2026-04-27T16:01:00+00:00"),
-        _msg("user", '烤箱温度我调低了十度，还是这样。', platform_user_id=user_id, display_name='烘焙新手', timestamp="2026-04-27T16:05:00+00:00"),
-        _msg("assistant", '嗯，我在这里，我们慢慢试。', platform_user_id=bot_id, display_name="Kazusa", timestamp="2026-04-27T16:06:00+00:00"),
-        _msg("user", '我还延长了十五分钟，边缘都干了中间还是湿。', platform_user_id=user_id, display_name='烘焙新手', timestamp="2026-04-27T16:09:00+00:00"),
-        _msg("assistant", '唔……我会陪你再看一遍的。', platform_user_id=bot_id, display_name="Kazusa", timestamp="2026-04-27T16:10:00+00:00"),
+        _msg("user", '千纱，我的蛋糕又塌了，中间完全湿的。', platform_user_id=user_id, display_name='烘焙新手', timestamp_utc="2026-04-27T16:00:00+00:00"),
+        _msg("assistant", '诶……我陪你一起看看，别急。', platform_user_id=bot_id, display_name="Kazusa", timestamp_utc="2026-04-27T16:01:00+00:00"),
+        _msg("user", '烤箱温度我调低了十度，还是这样。', platform_user_id=user_id, display_name='烘焙新手', timestamp_utc="2026-04-27T16:05:00+00:00"),
+        _msg("assistant", '嗯，我在这里，我们慢慢试。', platform_user_id=bot_id, display_name="Kazusa", timestamp_utc="2026-04-27T16:06:00+00:00"),
+        _msg("user", '我还延长了十五分钟，边缘都干了中间还是湿。', platform_user_id=user_id, display_name='烘焙新手', timestamp_utc="2026-04-27T16:09:00+00:00"),
+        _msg("assistant", '唔……我会陪你再看一遍的。', platform_user_id=bot_id, display_name="Kazusa", timestamp_utc="2026-04-27T16:10:00+00:00"),
     ]
     return _case(
         case_id="chinese_baking_collapsed_cake",
@@ -463,24 +469,24 @@ def _long_chinese_thesis_slides_case() -> dict:
     bot_id = "thesis-bot"
     global_user_id = "thesis-global-user"
     history = [
-        _msg("user", '千纱，我答辩 PPT 改到现在还是很乱，第一页就不像开题。', platform_user_id=user_id, display_name='答辩人', timestamp="2026-04-27T21:00:00+00:00", global_user_id=global_user_id),
-        _msg("assistant", '唔……我陪你一起看，不用一下子全理清。', platform_user_id=bot_id, display_name="Kazusa", timestamp="2026-04-27T21:01:00+00:00"),
-        _msg("user", '导师说研究问题太散，我已经删掉两个小问题了。', platform_user_id=user_id, display_name='答辩人', timestamp="2026-04-27T21:05:00+00:00", global_user_id=global_user_id),
-        _msg("assistant", '嗯，我在这里，我们慢慢把它收回来。', platform_user_id=bot_id, display_name="Kazusa", timestamp="2026-04-27T21:06:00+00:00"),
-        _msg("user", '方法那页我也重排了，把访谈和问卷分成两列。', platform_user_id=user_id, display_name='答辩人', timestamp="2026-04-27T21:10:00+00:00", global_user_id=global_user_id),
-        _msg("assistant", '我会陪你继续看的，别让它把你压住。', platform_user_id=bot_id, display_name="Kazusa", timestamp="2026-04-27T21:11:00+00:00"),
-        _msg("user", '可是结果页还是堆满字，图表一放进去就更挤。', platform_user_id=user_id, display_name='答辩人', timestamp="2026-04-27T21:18:00+00:00", global_user_id=global_user_id),
-        _msg("assistant", '嗯……我在，先陪你把最拥挤的地方看出来。', platform_user_id=bot_id, display_name="Kazusa", timestamp="2026-04-27T21:19:00+00:00"),
-        _msg("user", '我把结论改成三点了，但第三点和第二点好像重复。', platform_user_id=user_id, display_name='答辩人', timestamp="2026-04-27T21:27:00+00:00", global_user_id=global_user_id),
-        _msg("assistant", '没关系，我陪着你，我们一点点分开它们。', platform_user_id=bot_id, display_name="Kazusa", timestamp="2026-04-27T21:28:00+00:00"),
-        _msg("user", '封面、目录、方法、结果、结论现在都有了，就是故事线断。', platform_user_id=user_id, display_name='答辩人', timestamp="2026-04-27T21:38:00+00:00", global_user_id=global_user_id),
-        _msg("assistant", '我还在。故事线这种东西急不得，先别慌。', platform_user_id=bot_id, display_name="Kazusa", timestamp="2026-04-27T21:39:00+00:00"),
-        _msg("user", '我已经把目录顺序改成问题、方法、发现、贡献。', platform_user_id=user_id, display_name='答辩人', timestamp="2026-04-27T21:48:00+00:00", global_user_id=global_user_id),
-        _msg("assistant", '嗯，我陪你继续顺一遍，让它别那么散。', platform_user_id=bot_id, display_name="Kazusa", timestamp="2026-04-27T21:49:00+00:00"),
-        _msg("user", '老师最在意贡献那页，可我只写了实践意义和样本补充。', platform_user_id=user_id, display_name='答辩人', timestamp="2026-04-27T22:02:00+00:00", global_user_id=global_user_id),
-        _msg("assistant", '唔……我会在这里陪你，把那一页慢慢磨出来。', platform_user_id=bot_id, display_name="Kazusa", timestamp="2026-04-27T22:03:00+00:00"),
-        _msg("user", '现在已经快凌晨了，我还卡在贡献页，不知道第三条写什么。', platform_user_id=user_id, display_name='答辩人', timestamp="2026-04-27T23:55:00+00:00", global_user_id=global_user_id),
-        _msg("assistant", '嗯，我一直在，先让呼吸稳一点，再陪你看第三条。', platform_user_id=bot_id, display_name="Kazusa", timestamp="2026-04-27T23:56:00+00:00"),
+        _msg("user", '千纱，我答辩 PPT 改到现在还是很乱，第一页就不像开题。', platform_user_id=user_id, display_name='答辩人', timestamp_utc="2026-04-27T21:00:00+00:00", global_user_id=global_user_id),
+        _msg("assistant", '唔……我陪你一起看，不用一下子全理清。', platform_user_id=bot_id, display_name="Kazusa", timestamp_utc="2026-04-27T21:01:00+00:00"),
+        _msg("user", '导师说研究问题太散，我已经删掉两个小问题了。', platform_user_id=user_id, display_name='答辩人', timestamp_utc="2026-04-27T21:05:00+00:00", global_user_id=global_user_id),
+        _msg("assistant", '嗯，我在这里，我们慢慢把它收回来。', platform_user_id=bot_id, display_name="Kazusa", timestamp_utc="2026-04-27T21:06:00+00:00"),
+        _msg("user", '方法那页我也重排了，把访谈和问卷分成两列。', platform_user_id=user_id, display_name='答辩人', timestamp_utc="2026-04-27T21:10:00+00:00", global_user_id=global_user_id),
+        _msg("assistant", '我会陪你继续看的，别让它把你压住。', platform_user_id=bot_id, display_name="Kazusa", timestamp_utc="2026-04-27T21:11:00+00:00"),
+        _msg("user", '可是结果页还是堆满字，图表一放进去就更挤。', platform_user_id=user_id, display_name='答辩人', timestamp_utc="2026-04-27T21:18:00+00:00", global_user_id=global_user_id),
+        _msg("assistant", '嗯……我在，先陪你把最拥挤的地方看出来。', platform_user_id=bot_id, display_name="Kazusa", timestamp_utc="2026-04-27T21:19:00+00:00"),
+        _msg("user", '我把结论改成三点了，但第三点和第二点好像重复。', platform_user_id=user_id, display_name='答辩人', timestamp_utc="2026-04-27T21:27:00+00:00", global_user_id=global_user_id),
+        _msg("assistant", '没关系，我陪着你，我们一点点分开它们。', platform_user_id=bot_id, display_name="Kazusa", timestamp_utc="2026-04-27T21:28:00+00:00"),
+        _msg("user", '封面、目录、方法、结果、结论现在都有了，就是故事线断。', platform_user_id=user_id, display_name='答辩人', timestamp_utc="2026-04-27T21:38:00+00:00", global_user_id=global_user_id),
+        _msg("assistant", '我还在。故事线这种东西急不得，先别慌。', platform_user_id=bot_id, display_name="Kazusa", timestamp_utc="2026-04-27T21:39:00+00:00"),
+        _msg("user", '我已经把目录顺序改成问题、方法、发现、贡献。', platform_user_id=user_id, display_name='答辩人', timestamp_utc="2026-04-27T21:48:00+00:00", global_user_id=global_user_id),
+        _msg("assistant", '嗯，我陪你继续顺一遍，让它别那么散。', platform_user_id=bot_id, display_name="Kazusa", timestamp_utc="2026-04-27T21:49:00+00:00"),
+        _msg("user", '老师最在意贡献那页，可我只写了实践意义和样本补充。', platform_user_id=user_id, display_name='答辩人', timestamp_utc="2026-04-27T22:02:00+00:00", global_user_id=global_user_id),
+        _msg("assistant", '唔……我会在这里陪你，把那一页慢慢磨出来。', platform_user_id=bot_id, display_name="Kazusa", timestamp_utc="2026-04-27T22:03:00+00:00"),
+        _msg("user", '现在已经快凌晨了，我还卡在贡献页，不知道第三条写什么。', platform_user_id=user_id, display_name='答辩人', timestamp_utc="2026-04-27T23:55:00+00:00", global_user_id=global_user_id),
+        _msg("assistant", '嗯，我一直在，先让呼吸稳一点，再陪你看第三条。', platform_user_id=bot_id, display_name="Kazusa", timestamp_utc="2026-04-27T23:56:00+00:00"),
     ]
     return _case(
         case_id="long_chinese_thesis_slides_bonus",
@@ -510,12 +516,12 @@ def _mixed_language_art_case() -> dict:
     user_id = "art-user"
     bot_id = "art-bot"
     history = [
-        _msg("user", "千纱, this commission sketch still feels off.", platform_user_id=user_id, display_name="Artist", timestamp="2026-04-27T15:00:00+00:00"),
-        _msg("assistant", "Mm... I'll stay with you while you sort it out.", platform_user_id=bot_id, display_name="Kazusa", timestamp="2026-04-27T15:01:00+00:00"),
-        _msg("user", "我已经把眼睛调小了，pose 也改了。", platform_user_id=user_id, display_name="Artist", timestamp="2026-04-27T15:05:00+00:00"),
-        _msg("assistant", '嗯，我陪你一起看。慢慢来。', platform_user_id=bot_id, display_name="Kazusa", timestamp="2026-04-27T15:06:00+00:00"),
-        _msg("user", "Client said the silhouette is still too stiff.", platform_user_id=user_id, display_name="Artist", timestamp="2026-04-27T15:10:00+00:00"),
-        _msg("assistant", "I'm here. We can keep looking at it.", platform_user_id=bot_id, display_name="Kazusa", timestamp="2026-04-27T15:11:00+00:00"),
+        _msg("user", "千纱, this commission sketch still feels off.", platform_user_id=user_id, display_name="Artist", timestamp_utc="2026-04-27T15:00:00+00:00"),
+        _msg("assistant", "Mm... I'll stay with you while you sort it out.", platform_user_id=bot_id, display_name="Kazusa", timestamp_utc="2026-04-27T15:01:00+00:00"),
+        _msg("user", "我已经把眼睛调小了，pose 也改了。", platform_user_id=user_id, display_name="Artist", timestamp_utc="2026-04-27T15:05:00+00:00"),
+        _msg("assistant", '嗯，我陪你一起看。慢慢来。', platform_user_id=bot_id, display_name="Kazusa", timestamp_utc="2026-04-27T15:06:00+00:00"),
+        _msg("user", "Client said the silhouette is still too stiff.", platform_user_id=user_id, display_name="Artist", timestamp_utc="2026-04-27T15:10:00+00:00"),
+        _msg("assistant", "I'm here. We can keep looking at it.", platform_user_id=bot_id, display_name="Kazusa", timestamp_utc="2026-04-27T15:11:00+00:00"),
     ]
     return _case(
         case_id="mixed_language_art_commission",

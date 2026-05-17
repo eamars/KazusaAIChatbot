@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import re
+from pathlib import Path
+
 from kazusa_ai_chatbot.reflection_cycle.models import (
     READONLY_REFLECTION_DAILY_PROMPT_MAX_CHARS,
     READONLY_REFLECTION_HOURLY_PROMPT_MAX_CHARS,
@@ -20,6 +23,29 @@ from kazusa_ai_chatbot.reflection_cycle.prompts import (
     build_hourly_reflection_prompt,
     build_skipped_daily_result,
     build_skipped_hourly_result,
+)
+
+_REPO_ROOT = Path(__file__).resolve().parents[1]
+_ALLOWED_PROMPT_CLEANUP_FILES = (
+    "src/kazusa_ai_chatbot/nodes/"
+    "persona_supervisor2_consolidator_memory_units.py",
+    "src/kazusa_ai_chatbot/reflection_cycle/prompts.py",
+    "src/kazusa_ai_chatbot/reflection_cycle/promotion.py",
+)
+_FORBIDDEN_PROMPT_TIME_PATTERNS = (
+    (re.compile(r"character_time_zone"), "character_time_zone"),
+    (re.compile(r"IANA timezone", re.IGNORECASE), "IANA timezone"),
+    (re.compile(r"UTC hour-start", re.IGNORECASE), "UTC hour-start"),
+    (re.compile(r"ISO timestamp", re.IGNORECASE), "ISO timestamp"),
+    (re.compile(r"\bUTC\b"), "UTC"),
+    (re.compile(r"\btimezone\b", re.IGNORECASE), "timezone"),
+    (re.compile(r"time zone", re.IGNORECASE), "time zone"),
+    (re.compile(r"时区"), "时区"),
+    (
+        re.compile(r"Pacific/Auckland|America/|Europe/|Asia/"),
+        "timezone name",
+    ),
+    (re.compile(r"\bZ\b"), "raw Z timezone marker"),
 )
 
 
@@ -85,6 +111,20 @@ def test_reflection_prompts_require_chinese_free_text() -> None:
     )
 
 
+def test_reflection_prompts_do_not_expose_timezone_concepts() -> None:
+    """Prompt text must stay timezone agnostic after local projection."""
+
+    failures: list[str] = []
+    for relative_path in _ALLOWED_PROMPT_CLEANUP_FILES:
+        path = _REPO_ROOT / relative_path
+        text = path.read_text(encoding="utf-8")
+        for pattern, label in _FORBIDDEN_PROMPT_TIME_PATTERNS:
+            if pattern.search(text):
+                failures.append(f"{relative_path}: {label}")
+
+    assert failures == []
+
+
 def test_daily_prompt_consumes_hourly_outputs_not_raw_transcripts() -> None:
     """Daily synthesis must not receive raw transcript rows."""
 
@@ -106,6 +146,8 @@ def test_daily_prompt_consumes_hourly_outputs_not_raw_transcripts() -> None:
     assert "小时反思" not in prompt.human_payload
     hourly_projection = prompt.human_payload["active_hour_slots"][0]
     assert "hour" in hourly_projection
+    assert hourly_projection["hour"] == "2026-05-04 10:00"
+    assert "2026-05-03T22:00:00+00:00" not in prompt.human_prompt
     assert "conversation_quality_feedback" in hourly_projection
     assert "participant_observations" not in hourly_projection
     assert "active_hour_summaries" in prompt.system_prompt
@@ -211,7 +253,7 @@ def test_daily_output_validation_rejects_rewritten_hours() -> None:
             "synthesis_limitations": [],
             "confidence": "high",
         },
-        allowed_hours={"2026-05-03T22:00:00+00:00"},
+        allowed_hours={"2026-05-04 10:00"},
     )
 
     assert warnings == [(

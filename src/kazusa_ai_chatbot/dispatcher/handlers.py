@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
 from uuid import uuid4
 
 from kazusa_ai_chatbot import event_logging
@@ -19,6 +18,7 @@ from kazusa_ai_chatbot.db import (
 from kazusa_ai_chatbot.dispatcher.adapter_iface import AdapterRegistry
 from kazusa_ai_chatbot.dispatcher.task import DispatchContext
 from kazusa_ai_chatbot.dispatcher.tool_spec import ToolSpec
+from kazusa_ai_chatbot.time_boundary import storage_utc_now_iso
 
 HANDLER_COMPONENT = "dispatcher.handlers"
 logger = logging.getLogger(__name__)
@@ -153,7 +153,7 @@ async def handle_send_message(
             addressed_to_global_user_ids=addressed_to,
             broadcast=not bool(addressed_to),
             delivery_tracking_id=delivery_tracking_id,
-            timestamp=datetime.now(timezone.utc).isoformat(),
+            storage_timestamp_utc=storage_utc_now_iso(),
             ensure_character_global_identity_func=(
                 _ensure_dispatcher_character_identity
             ),

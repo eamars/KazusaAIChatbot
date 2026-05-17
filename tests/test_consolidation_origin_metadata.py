@@ -19,7 +19,7 @@ from kazusa_ai_chatbot.nodes.persona_supervisor2_consolidator_origin import (
     build_self_cognition_consolidation_origin,
     build_user_message_consolidation_origin,
 )
-from kazusa_ai_chatbot.time_context import build_character_time_context
+from kazusa_ai_chatbot.time_boundary import build_turn_clock
 
 
 def _text_chat_episode(
@@ -33,12 +33,12 @@ def _text_chat_episode(
     Returns:
         Valid current text-chat cognitive episode.
     """
-    timestamp = "2026-05-10T09:00:00+12:00"
+    turn_clock = build_turn_clock("2026-05-10 09:00:00")
     episode = build_text_chat_cognitive_episode(
         episode_id="episode-1",
         percept_id="percept-1",
-        timestamp=timestamp,
-        time_context=build_character_time_context(timestamp),
+        storage_timestamp_utc=turn_clock["storage_timestamp_utc"],
+        local_time_context=turn_clock["local_time_context"],
         user_input="Please remember this.",
         platform="qq",
         platform_channel_id="channel-1",
@@ -68,7 +68,7 @@ def _self_cognition_episode(
     Returns:
         Valid self-cognition cognitive episode.
     """
-    timestamp = "2026-05-10T21:00:00+12:00"
+    turn_clock = build_turn_clock("2026-05-10 21:00:00")
     episode: CognitiveEpisode = {
         "episode_id": "self-cognition-episode-1",
         "trigger_source": "internal_thought",
@@ -100,8 +100,8 @@ def _self_cognition_episode(
             "active_turn_conversation_row_ids": [],
             "debug_modes": {"no_visual_directives": True},
         },
-        "timestamp": timestamp,
-        "time_context": build_character_time_context(timestamp),
+        "storage_timestamp_utc": turn_clock["storage_timestamp_utc"],
+        "local_time_context": turn_clock["local_time_context"],
     }
     return episode
 
@@ -112,11 +112,10 @@ def _global_state() -> dict:
     Returns:
         Global persona state fields consumed by `call_consolidation_subgraph`.
     """
+    turn_clock = build_turn_clock("2026-05-10 09:00:00")
     state = {
-        "timestamp": "2026-05-10T09:00:00+12:00",
-        "time_context": build_character_time_context(
-            "2026-05-10T09:00:00+12:00"
-        ),
+        "storage_timestamp_utc": turn_clock["storage_timestamp_utc"],
+        "local_time_context": turn_clock["local_time_context"],
         "global_user_id": "global-user-1",
         "user_name": "Test User",
         "user_profile": {"affinity": 500},
@@ -162,7 +161,7 @@ def test_build_user_message_consolidation_origin_returns_exact_metadata() -> Non
         "trigger_source": "user_message",
         "input_sources": ["dialog_text"],
         "output_mode": "visible_reply",
-        "timestamp": "2026-05-10T09:00:00+12:00",
+        "storage_timestamp_utc": episode["storage_timestamp_utc"],
         "platform": "qq",
         "platform_channel_id": "channel-1",
         "channel_type": "group",
@@ -263,7 +262,7 @@ def test_build_self_cognition_consolidation_origin_returns_exact_metadata() -> N
         "trigger_source": "internal_thought",
         "input_sources": ["internal_monologue"],
         "output_mode": "preview",
-        "timestamp": "2026-05-10T21:00:00+12:00",
+        "storage_timestamp_utc": episode["storage_timestamp_utc"],
         "platform": "qq",
         "platform_channel_id": "channel-1",
         "channel_type": "private",

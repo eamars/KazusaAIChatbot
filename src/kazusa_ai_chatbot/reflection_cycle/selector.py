@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import hashlib
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 from typing import Any
 
 from kazusa_ai_chatbot.db.conversation_reflection import (
@@ -19,26 +19,28 @@ from kazusa_ai_chatbot.reflection_cycle.models import (
     ReflectionInputSet,
     ReflectionScopeInput,
 )
+from kazusa_ai_chatbot.time_boundary import (
+    normalize_storage_utc_iso,
+    parse_storage_utc_datetime,
+    storage_utc_now,
+)
 
 
 def normalize_utc_datetime(value: datetime | None) -> datetime:
-    """Return a timezone-aware UTC timestamp for deterministic callers."""
+    """Return a storage UTC datetime for deterministic callers."""
 
     if value is None:
-        return_value = datetime.now(timezone.utc)
+        return_value = storage_utc_now()
         return return_value
-    if value.tzinfo is None:
-        return_value = value.replace(tzinfo=timezone.utc)
-        return return_value
-    return_value = value.astimezone(timezone.utc)
+    normalized_utc_iso = normalize_storage_utc_iso(value.isoformat())
+    return_value = parse_storage_utc_datetime(normalized_utc_iso)
     return return_value
 
 
 def isoformat_utc(value: datetime) -> str:
     """Render a UTC datetime in the repository's ISO timestamp shape."""
 
-    normalized = normalize_utc_datetime(value)
-    return_value = normalized.isoformat()
+    return_value = normalize_storage_utc_iso(value.isoformat())
     return return_value
 
 

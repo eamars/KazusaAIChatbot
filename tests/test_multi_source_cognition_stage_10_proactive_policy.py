@@ -91,7 +91,7 @@ def test_missing_permission_is_denied() -> None:
         permission=None,
         existing_idempotency_keys=set(),
         adapter_platforms={"qq"},
-        current_timestamp=CURRENT_TIMESTAMP,
+        current_timestamp_utc=CURRENT_TIMESTAMP,
         current_local_time=CURRENT_LOCAL_TIME,
     )
 
@@ -104,7 +104,7 @@ def test_disabled_and_expired_permissions_are_denied() -> None:
         permission=_permission(enabled=False),
         existing_idempotency_keys=set(),
         adapter_platforms={"qq"},
-        current_timestamp=CURRENT_TIMESTAMP,
+        current_timestamp_utc=CURRENT_TIMESTAMP,
         current_local_time=CURRENT_LOCAL_TIME,
     )
     expired = evaluate_proactive_permission(
@@ -112,7 +112,7 @@ def test_disabled_and_expired_permissions_are_denied() -> None:
         permission=_permission(expires_at=CURRENT_TIMESTAMP),
         existing_idempotency_keys=set(),
         adapter_platforms={"qq"},
-        current_timestamp=CURRENT_TIMESTAMP,
+        current_timestamp_utc=CURRENT_TIMESTAMP,
         current_local_time=CURRENT_LOCAL_TIME,
     )
 
@@ -126,7 +126,7 @@ def test_wrong_target_and_unapproved_trigger_are_denied() -> None:
         permission=_permission(allowed_trigger_sources=["user_message"]),
         existing_idempotency_keys=set(),
         adapter_platforms={"qq"},
-        current_timestamp=CURRENT_TIMESTAMP,
+        current_timestamp_utc=CURRENT_TIMESTAMP,
         current_local_time=CURRENT_LOCAL_TIME,
     )
     wrong_trigger = evaluate_proactive_permission(
@@ -134,7 +134,7 @@ def test_wrong_target_and_unapproved_trigger_are_denied() -> None:
         permission=_permission(allowed_trigger_sources=["scheduled_recall"]),
         existing_idempotency_keys=set(),
         adapter_platforms={"qq"},
-        current_timestamp=CURRENT_TIMESTAMP,
+        current_timestamp_utc=CURRENT_TIMESTAMP,
         current_local_time=CURRENT_LOCAL_TIME,
     )
     wrong_target = evaluate_proactive_permission(
@@ -142,7 +142,7 @@ def test_wrong_target_and_unapproved_trigger_are_denied() -> None:
         permission=_permission(),
         existing_idempotency_keys=set(),
         adapter_platforms={"qq"},
-        current_timestamp=CURRENT_TIMESTAMP,
+        current_timestamp_utc=CURRENT_TIMESTAMP,
         current_local_time=CURRENT_LOCAL_TIME,
     )
 
@@ -162,7 +162,7 @@ def test_quiet_hours_denies_even_with_valid_permission() -> None:
         permission=_permission(quiet_hours=quiet_hours),
         existing_idempotency_keys=set(),
         adapter_platforms={"qq"},
-        current_timestamp=CURRENT_TIMESTAMP,
+        current_timestamp_utc=CURRENT_TIMESTAMP,
         current_local_time="23:30",
     )
 
@@ -196,7 +196,7 @@ def test_adapter_unavailable_and_duplicate_idempotency_are_denied() -> None:
         permission=_permission(),
         existing_idempotency_keys=set(),
         adapter_platforms={"discord"},
-        current_timestamp=CURRENT_TIMESTAMP,
+        current_timestamp_utc=CURRENT_TIMESTAMP,
         current_local_time=CURRENT_LOCAL_TIME,
     )
     duplicate = evaluate_proactive_permission(
@@ -204,7 +204,7 @@ def test_adapter_unavailable_and_duplicate_idempotency_are_denied() -> None:
         permission=_permission(),
         existing_idempotency_keys={"episode-1:global-user-1"},
         adapter_platforms={"qq"},
-        current_timestamp=CURRENT_TIMESTAMP,
+        current_timestamp_utc=CURRENT_TIMESTAMP,
         current_local_time=CURRENT_LOCAL_TIME,
     )
 
@@ -218,7 +218,7 @@ def test_private_or_unsafe_preview_content_is_denied() -> None:
         permission=_permission(allowed_output_modes=["silent"]),
         existing_idempotency_keys=set(),
         adapter_platforms={"qq"},
-        current_timestamp=CURRENT_TIMESTAMP,
+        current_timestamp_utc=CURRENT_TIMESTAMP,
         current_local_time=CURRENT_LOCAL_TIME,
     )
     internal_content = evaluate_proactive_permission(
@@ -226,7 +226,7 @@ def test_private_or_unsafe_preview_content_is_denied() -> None:
         permission=_permission(),
         existing_idempotency_keys=set(),
         adapter_platforms={"qq"},
-        current_timestamp=CURRENT_TIMESTAMP,
+        current_timestamp_utc=CURRENT_TIMESTAMP,
         current_local_time=CURRENT_LOCAL_TIME,
     )
     empty_text = evaluate_proactive_permission(
@@ -234,7 +234,7 @@ def test_private_or_unsafe_preview_content_is_denied() -> None:
         permission=_permission(),
         existing_idempotency_keys=set(),
         adapter_platforms={"qq"},
-        current_timestamp=CURRENT_TIMESTAMP,
+        current_timestamp_utc=CURRENT_TIMESTAMP,
         current_local_time=CURRENT_LOCAL_TIME,
     )
 
@@ -249,7 +249,7 @@ def test_valid_permission_allows_preview() -> None:
         permission=_permission(),
         existing_idempotency_keys=set(),
         adapter_platforms={"qq"},
-        current_timestamp=CURRENT_TIMESTAMP,
+        current_timestamp_utc=CURRENT_TIMESTAMP,
         current_local_time=CURRENT_LOCAL_TIME,
     )
 

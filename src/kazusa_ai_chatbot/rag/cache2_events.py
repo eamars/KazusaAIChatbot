@@ -39,7 +39,7 @@ class CacheInvalidationEvent:
         platform_channel_id: Optional channel scope.
         global_user_id: Optional internal user UUID scope.
         display_name: Optional display-name scope.
-        timestamp: Optional write timestamp, used for range-overlap checks.
+        storage_timestamp_utc: Optional write timestamp used for range checks.
         reason: Human-readable invalidation reason for logs and metrics.
     """
 
@@ -48,5 +48,5 @@ class CacheInvalidationEvent:
     platform_channel_id: str = ""
     global_user_id: str = ""
     display_name: str = ""
-    timestamp: str = ""
+    storage_timestamp_utc: str = ""
     reason: str = ""

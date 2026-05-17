@@ -66,7 +66,7 @@ def preserve_first_seen_entries(
     *,
     prior_entries: list[ConversationEpisodeEntryDoc],
     new_texts: list[str],
-    current_timestamp: str,
+    current_timestamp_utc: str,
     limit: int,
 ) -> list[ConversationEpisodeEntryDoc]:
     """Attach first-seen metadata to recorder-returned entry text.
@@ -74,7 +74,8 @@ def preserve_first_seen_entries(
     Args:
         prior_entries: Existing stored entries from the previous state.
         new_texts: Recorder-returned text values for this turn.
-        current_timestamp: Timestamp to stamp on newly seen entries.
+        current_timestamp_utc: Storage UTC timestamp to stamp on newly seen
+            entries.
         limit: Maximum number of entries to keep.
 
     Returns:
@@ -99,7 +100,7 @@ def preserve_first_seen_entries(
             continue
         entries.append({
             "text": text,
-            "first_seen_at": prior_first_seen.get(text, current_timestamp),
+            "first_seen_at": prior_first_seen.get(text, current_timestamp_utc),
         })
         if len(entries) >= limit:
             break
@@ -129,7 +130,7 @@ def _string_or_generated_id(value: object) -> str:
 def build_episode_state_doc(
     *,
     scope: ConversationProgressScope,
-    timestamp: str,
+    storage_timestamp_utc: str,
     prior_episode_state: ConversationEpisodeStateDoc | None,
     recorder_output: dict,
     last_user_input: str,
@@ -138,7 +139,7 @@ def build_episode_state_doc(
 
     Args:
         scope: Platform/channel/user scope.
-        timestamp: Current turn timestamp.
+        storage_timestamp_utc: Current turn storage UTC timestamp.
         prior_episode_state: Prior stored state, if any.
         recorder_output: Validated recorder JSON.
         last_user_input: Current decontextualized user input.
@@ -149,7 +150,7 @@ def build_episode_state_doc(
 
     prior_state = prior_episode_state or {}
     next_turn_count = int(prior_state.get("turn_count", 0)) + 1
-    created_at_value = prior_state.get("created_at", timestamp)
+    created_at_value = prior_state.get("created_at", storage_timestamp_utc)
     if not isinstance(created_at_value, str):
         raise TypeError("created_at must be a string")
     created_at = created_at_value
@@ -170,7 +171,7 @@ def build_episode_state_doc(
         "user_state_updates": preserve_first_seen_entries(
             prior_entries=prior_state.get("user_state_updates", []),
             new_texts=recorder_output["user_state_updates"],
-            current_timestamp=timestamp,
+            current_timestamp_utc=storage_timestamp_utc,
             limit=USER_STATE_UPDATES_LIMIT,
         ),
         "assistant_moves": _cap_strings(
@@ -186,19 +187,19 @@ def build_episode_state_doc(
         "open_loops": preserve_first_seen_entries(
             prior_entries=prior_state.get("open_loops", []),
             new_texts=recorder_output["open_loops"],
-            current_timestamp=timestamp,
+            current_timestamp_utc=storage_timestamp_utc,
             limit=OPEN_LOOPS_LIMIT,
         ),
         "resolved_threads": preserve_first_seen_entries(
             prior_entries=prior_state.get("resolved_threads", []),
             new_texts=recorder_output.get("resolved_threads", []),
-            current_timestamp=timestamp,
+            current_timestamp_utc=storage_timestamp_utc,
             limit=RESOLVED_THREADS_LIMIT,
         ),
         "avoid_reopening": preserve_first_seen_entries(
             prior_entries=prior_state.get("avoid_reopening", []),
             new_texts=recorder_output.get("avoid_reopening", []),
-            current_timestamp=timestamp,
+            current_timestamp_utc=storage_timestamp_utc,
             limit=AVOID_REOPENING_LIMIT,
         ),
         "emotional_trajectory": cap_text(recorder_output.get("emotional_trajectory", ""), MAX_THREAD_CHARS),
@@ -211,8 +212,8 @@ def build_episode_state_doc(
         "turn_count": next_turn_count,
         "last_user_input": last_user_input,
         "created_at": created_at,
-        "updated_at": timestamp,
-        "expires_at": expires_at_for(timestamp),
+        "updated_at": storage_timestamp_utc,
+        "expires_at": expires_at_for(storage_timestamp_utc),
     }
     return return_value
 

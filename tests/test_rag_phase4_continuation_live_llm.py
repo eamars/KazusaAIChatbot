@@ -5,7 +5,6 @@ from __future__ import annotations
 import json
 import logging
 import re
-from datetime import datetime, timezone
 from uuid import uuid4
 
 import httpx
@@ -19,6 +18,10 @@ from kazusa_ai_chatbot.db import build_memory_doc, close_db, save_memory
 from kazusa_ai_chatbot.db._client import get_db
 from kazusa_ai_chatbot.nodes import persona_supervisor2_rag_supervisor2 as rag2_module
 from kazusa_ai_chatbot.rag.cache2_runtime import RAGCache2Runtime
+from kazusa_ai_chatbot.time_boundary import (
+    build_turn_clock_from_storage_utc,
+    storage_utc_now_iso,
+)
 from kazusa_ai_chatbot.rag.memory_retrieval_tools import search_persistent_memory_keyword
 from tests.llm_trace import write_llm_trace
 
@@ -268,7 +271,7 @@ async def _seed_policy_memory() -> dict[str, str]:
     suffix = uuid4().hex
     memory_unit_id = f'pytest-rag2-phase4-continuation-{suffix}'
     memory_name = f'rag2_phase4_cb1_cm4_source_policy_{suffix}'
-    timestamp = datetime.now(timezone.utc).isoformat()
+    timestamp = storage_utc_now_iso()
     doc = build_memory_doc(
         memory_name=memory_name,
         content=_POLICY_CONTENT,
@@ -542,6 +545,8 @@ async def test_live_db_supervisor_reenters_initializer_with_cache2_active(
     monkeypatch.setattr(rag2_module, "record_initializer_hit", _noop_async)
 
     try:
+        storage_timestamp_utc = storage_utc_now_iso()
+        turn_clock = build_turn_clock_from_storage_utc(storage_timestamp_utc)
         result = await rag2_module.call_rag_supervisor(
             original_query=_ORIGINAL_QUERY,
             character_name='the active character',
@@ -550,7 +555,8 @@ async def test_live_db_supervisor_reenters_initializer_with_cache2_active(
                 "platform_channel_id": "rag-phase4-live-db",
                 "global_user_id": "user-1",
                 "user_name": "Live Tester",
-                "current_timestamp": datetime.now(timezone.utc).isoformat(),
+                "current_timestamp_utc": turn_clock["storage_timestamp_utc"],
+                "local_time_context": turn_clock["local_time_context"],
                 "prompt_message_context": {
                     "body_text": _ORIGINAL_QUERY,
                     "mentions": [],

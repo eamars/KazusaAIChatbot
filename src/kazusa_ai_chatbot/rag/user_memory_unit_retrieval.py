@@ -9,7 +9,7 @@ from kazusa_ai_chatbot.db.schemas import (
     UserMemoryUnitStatus,
     UserMemoryUnitType,
 )
-from kazusa_ai_chatbot.time_context import format_timestamp_for_llm
+from kazusa_ai_chatbot.time_boundary import format_storage_utc_for_llm
 from kazusa_ai_chatbot.utils import text_or_empty
 
 
@@ -117,7 +117,7 @@ def _due_state(unit: dict, *, current_local_datetime: str) -> str:
         return_value = "no_due_date"
         return return_value
 
-    due_local = format_timestamp_for_llm(due_at)
+    due_local = format_storage_utc_for_llm(due_at)
     due_date = _local_date(due_local)
     current_date = _local_date(current_local_datetime)
     if not due_date or not current_date:
@@ -149,7 +149,7 @@ def _project_unit(
         entry["updated_at"] = updated_at
     due_at = text_or_empty(unit.get("due_at"))
     if due_at:
-        entry["due_at"] = format_timestamp_for_llm(due_at)
+        entry["due_at"] = format_storage_utc_for_llm(due_at)
         entry["due_state"] = _due_state(
             unit,
             current_local_datetime=current_local_datetime,

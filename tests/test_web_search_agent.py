@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from kazusa_ai_chatbot.rag.web_search_agent import WebSearchAgent, _run_subgraph, web_search, web_url_read
+from kazusa_ai_chatbot.time_boundary import build_turn_clock_from_storage_utc
 
 
 @pytest.mark.asyncio
@@ -59,11 +60,11 @@ async def test_run_subgraph_returns_expected_keys() -> None:
             task="search something",
             context={},
             expected_response="relevant results",
-            timestamp="2026-04-27T00:00:00+00:00",
+            local_prompt_timestamp="2026-04-27 12:00",
         )
 
     sub_state = graph_builder.compile.return_value.ainvoke.await_args.args[0]
-    assert sub_state["timestamp"] == "2026-04-27 12:00"
+    assert sub_state["prompt_timestamp"] == "2026-04-27 12:00"
     assert result == {
         "status": "success",
         "reason": "found info",
@@ -87,9 +88,12 @@ async def test_web_search_agent_run_wraps_subgraph_result() -> None:
             "knowledge_metadata": {},
         },
     ) as run_subgraph:
+        turn_clock = build_turn_clock_from_storage_utc(
+            "2026-04-27T00:00:00+00:00"
+        )
         result = await WebSearchAgent().run(
             task="search current weather",
-            context={"current_timestamp": "2026-04-27T00:00:00+00:00"},
+            context={"local_time_context": turn_clock["local_time_context"]},
         )
 
     run_subgraph.assert_awaited_once()

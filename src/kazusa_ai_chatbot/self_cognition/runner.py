@@ -47,7 +47,10 @@ from kazusa_ai_chatbot.rag.user_memory_unit_retrieval import (
     empty_user_memory_context,
 )
 from kazusa_ai_chatbot.self_cognition import artifacts, models, projection, tracking
-from kazusa_ai_chatbot.time_context import build_character_time_context
+from kazusa_ai_chatbot.time_boundary import (
+    build_turn_clock_from_storage_utc,
+    format_storage_utc_for_llm,
+)
 
 
 SelfCognitionClient = Callable[[dict[str, Any]], Any]
@@ -591,7 +594,7 @@ async def _with_private_action_results(
 
     action_results = await execute_action_specs_for_trace(
         private_specs,
-        timestamp=cognition_state["timestamp"],
+        storage_timestamp_utc=cognition_state["storage_timestamp_utc"],
         record_attempt_func=upsert_action_attempt,
     )
     updated_output = dict(cognition_output)
@@ -647,7 +650,7 @@ def _episode_trace_for_private_actions(
     trace = build_episode_trace(
         episode_id=episode["episode_id"],
         trigger_source=episode["trigger_source"],
-        created_at=cognition_state["timestamp"],
+        created_at=cognition_state["storage_timestamp_utc"],
         action_specs=_action_specs(cognition_output),
         action_results=action_results,
         surface_outputs=[],
@@ -662,20 +665,23 @@ def _build_cognition_state(
 ) -> dict[str, Any]:
     """Build the shared cognition graph state for an idle dry run."""
 
-    timestamp = _string_field(case, "idle_timestamp")
-    time_context = build_character_time_context(timestamp)
+    source_timestamp_utc = _string_field(case, "idle_timestamp_utc")
+    turn_clock = build_turn_clock_from_storage_utc(source_timestamp_utc)
+    storage_timestamp_utc = turn_clock["storage_timestamp_utc"]
+    local_time_context = turn_clock["local_time_context"]
     target_scope = _target_scope(case)
     chat_history = _chat_history(case, target_scope)
     episode = _build_cognitive_episode(
         case,
         rendered_packet,
-        time_context=time_context,
+        storage_timestamp_utc=storage_timestamp_utc,
+        local_time_context=local_time_context,
     )
     user_id = target_scope["user_id"] or "self_cognition_target"
     state = {
         "character_profile": _character_profile(case),
-        "timestamp": timestamp,
-        "time_context": time_context,
+        "storage_timestamp_utc": storage_timestamp_utc,
+        "local_time_context": local_time_context,
         "user_input": models.SELF_COGNITION_INPUT_TEXT,
         "prompt_message_context": {
             "body_text": models.SELF_COGNITION_INPUT_TEXT,
@@ -867,11 +873,11 @@ def _build_cognitive_episode(
     case: models.SelfCognitionCase,
     rendered_packet: str,
     *,
-    time_context: dict[str, str],
+    storage_timestamp_utc: str,
+    local_time_context: dict[str, str],
 ) -> CognitiveEpisode:
     """Represent the self-cognition source packet as an internal percept."""
 
-    timestamp = _string_field(case, "idle_timestamp")
     target_scope = _target_scope(case)
     user_id = target_scope["user_id"] or "self_cognition_target"
     percept_content = json.dumps(
@@ -919,8 +925,8 @@ def _build_cognitive_episode(
             "active_turn_conversation_row_ids": [],
             "debug_modes": {"no_visual_directives": True},
         },
-        "timestamp": timestamp,
-        "time_context": time_context,
+        "storage_timestamp_utc": storage_timestamp_utc,
+        "local_time_context": local_time_context,
     }
     validate_cognitive_episode(episode)
     return episode
@@ -1089,7 +1095,9 @@ def _active_commitments_from_source_refs(
         }
         due_at = _string_field(raw_ref, "due_at")
         if due_at:
-            commitment["due_at"] = due_at
+            local_due_at = format_storage_utc_for_llm(due_at)
+            if local_due_at:
+                commitment["due_at"] = local_due_at
         if due_state:
             commitment["due_state"] = due_state
         commitments.append(commitment)
@@ -1304,7 +1312,9 @@ def _chat_history(
         if role == "assistant":
             global_user_id = models.DRY_RUN_ASSISTANT_GLOBAL_USER_ID
         row = {
-            "timestamp": _string_field(item, "timestamp"),
+            "timestamp": format_storage_utc_for_llm(
+                _string_field(item, "timestamp"),
+            ),
             "role": role,
             "platform_user_id": global_user_id,
             "global_user_id": global_user_id,

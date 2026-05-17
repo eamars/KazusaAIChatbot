@@ -80,7 +80,7 @@ def _history_row(
     global_user_id: str = "",
     display_name: str = "",
     content: str,
-    timestamp: str,
+    timestamp_utc: str,
     reply_context: dict | None = None,
     addressed_to_global_user_ids: list[str] | None = None,
 ) -> dict:
@@ -92,7 +92,7 @@ def _history_row(
         global_user_id: Internal UUID for the author, when known.
         display_name: Human-readable display name.
         content: Prompt-facing text content.
-        timestamp: ISO timestamp used by group-attention scoring.
+        timestamp_utc: Storage UTC timestamp used by group-attention scoring.
         reply_context: Optional platform reply metadata.
         addressed_to_global_user_ids: Typed addressee UUIDs.
 
@@ -107,7 +107,7 @@ def _history_row(
         "display_name": display_name,
         "content": content,
         "body_text": content,
-        "timestamp": timestamp,
+        "timestamp": timestamp_utc,
         "reply_context": reply_context or {},
         "addressed_to_global_user_ids": addressed_to_global_user_ids or [],
         "broadcast": False,
@@ -175,14 +175,14 @@ def _mario_context_history() -> list[dict]:
             global_user_id=_BLANK_USER_PROFILE["global_user_id"],
             display_name="ㅤ",
             content="我的伙伴呢，出来冒个泡",
-            timestamp="2026-04-30T23:21:05.879167+00:00",
+            timestamp_utc="2026-04-30T23:21:05.879167+00:00",
         ),
         _history_row(
             platform_user_id="3167827653",
             global_user_id="8dfd2edb-78a4-4854-909f-2311aab95723",
             display_name="赛博马里奥",
             content="既然主人亲自点名，我也就不在后台潜水了。",
-            timestamp="2026-04-30T23:21:12.884122+00:00",
+            timestamp_utc="2026-04-30T23:21:12.884122+00:00",
             reply_context={
                 "reply_to_message_id": "316209184",
                 "reply_to_platform_user_id": "3300869207",
@@ -203,7 +203,7 @@ def _nickname_collision_history() -> list[dict]:
             global_user_id="43f9c213-8e99-4561-8dcd-c3d4d73ece85",
             display_name='总是跌倒的企鹅',
             content='还要背回国',
-            timestamp="2026-05-04T14:39:37.072843+00:00",
+            timestamp_utc="2026-05-04T14:39:37.072843+00:00",
         ),
     ]
     return history

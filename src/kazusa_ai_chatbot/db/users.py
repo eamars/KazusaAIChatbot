@@ -13,7 +13,6 @@ from __future__ import annotations
 import logging
 import re
 import uuid
-from datetime import datetime, timezone
 
 from pymongo.errors import PyMongoError
 
@@ -28,14 +27,15 @@ from kazusa_ai_chatbot.db.errors import DatabaseOperationError
 from kazusa_ai_chatbot.db.schemas import (
     UserProfileDoc,
 )
+from kazusa_ai_chatbot.time_boundary import storage_utc_now_iso
 
 logger = logging.getLogger(__name__)
 
 
 def _now_iso() -> str:
     """Current UTC timestamp as ISO-8601 string."""
-    current_time = datetime.now(timezone.utc).isoformat()
-    return current_time
+    current_time_utc = storage_utc_now_iso()
+    return current_time_utc
 
 
 # ── Identity resolution ────────────────────────────────────────────

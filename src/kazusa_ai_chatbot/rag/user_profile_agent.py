@@ -73,11 +73,11 @@ def _current_local_date(context: dict[str, Any]) -> str:
         ``YYYY-MM-DD`` local date, or an empty string when unavailable.
     """
 
-    time_context = context.get("time_context")
-    if not isinstance(time_context, dict):
+    local_time_context = context.get("local_time_context")
+    if not isinstance(local_time_context, dict):
         return_value = ""
         return return_value
-    current_local_datetime = time_context.get("current_local_datetime")
+    current_local_datetime = local_time_context.get("current_local_datetime")
     if not isinstance(current_local_datetime, str):
         return_value = ""
         return return_value
@@ -202,7 +202,7 @@ class UserProfileAgent(BaseRAGHelperAgent):
                 user_profile=context.get("user_profile"),
                 input_embedding=input_embedding,
                 include_semantic=True,
-                time_context=context.get("time_context"),
+                time_context=context.get("local_time_context"),
             )
             dependencies = build_user_profile_dependencies(global_user_id)
             metadata = {"profile_source": "user_profile"}

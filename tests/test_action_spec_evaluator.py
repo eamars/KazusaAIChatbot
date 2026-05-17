@@ -78,7 +78,7 @@ def _params_for_kind(kind: str) -> dict:
     if kind == "trigger_future_cognition":
         return {
             "episode_type": "self_cognition",
-            "trigger_at": "2026-05-16T00:30:00+00:00",
+            "trigger_at": "2026-05-16 00:30",
             "continuation_objective": "Re-evaluate the promise after a natural pause.",
         }
     raise AssertionError(f"unsupported action kind in test: {kind}")

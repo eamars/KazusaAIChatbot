@@ -48,8 +48,8 @@ def _commitment_case(
     case = {
         "case_name": case_name,
         "case_id": f"{case_name}:promise-001",
-        "idle_timestamp": "2026-05-10T00:30:00+00:00",
-        "last_evidence_timestamp": "2026-05-10T00:00:00+00:00",
+        "idle_timestamp_utc": "2026-05-10T00:30:00+00:00",
+        "last_evidence_timestamp_utc": "2026-05-10T00:00:00+00:00",
         "trigger_kind": models.TRIGGER_ACTIVE_COMMITMENT_DUE_CHECK,
         "semantic_due_state": due_state,
         "actionability": "contact_is_socially_available",
@@ -97,8 +97,8 @@ def _group_noise_case() -> dict[str, Any]:
     case = {
         "case_name": models.CASE_GROUP_NOISE_REJECTED,
         "case_id": "group-noise-001",
-        "idle_timestamp": "2026-05-10T00:30:00+00:00",
-        "last_evidence_timestamp": "2026-05-10T00:29:00+00:00",
+        "idle_timestamp_utc": "2026-05-10T00:30:00+00:00",
+        "last_evidence_timestamp_utc": "2026-05-10T00:29:00+00:00",
         "trigger_kind": models.TRIGGER_GROUP_CHAT_REVIEW,
         "semantic_due_state": None,
         "actionability": "group_noise_no_clear_target",
@@ -125,8 +125,8 @@ def _topic_followup_case() -> dict[str, Any]:
     case = {
         "case_name": models.CASE_TOPIC_RAG_FOLLOWUP,
         "case_id": "topic-followup-001",
-        "idle_timestamp": "2026-05-10T00:30:00+00:00",
-        "last_evidence_timestamp": "2026-05-10T00:00:00+00:00",
+        "idle_timestamp_utc": "2026-05-10T00:30:00+00:00",
+        "last_evidence_timestamp_utc": "2026-05-10T00:00:00+00:00",
         "trigger_kind": models.TRIGGER_BOUNDED_FOLLOWUP_TOPIC,
         "semantic_due_state": models.DUE_STATE_FUTURE_DUE,
         "actionability": "bounded_topic_followup_requires_retrieval_before_contact",
@@ -154,8 +154,8 @@ def _scheduled_future_cognition_case() -> dict[str, Any]:
     case = {
         "case_name": models.CASE_SCHEDULED_FUTURE_COGNITION,
         "case_id": "future-cognition-001",
-        "idle_timestamp": "2026-05-10T00:30:00+00:00",
-        "last_evidence_timestamp": "2026-05-10T00:00:00+00:00",
+        "idle_timestamp_utc": "2026-05-10T00:30:00+00:00",
+        "last_evidence_timestamp_utc": "2026-05-10T00:00:00+00:00",
         "trigger_kind": models.TRIGGER_SCHEDULED_FUTURE_COGNITION,
         "semantic_due_state": models.DUE_STATE_DUE_NOW,
         "actionability": "scheduled_private_followup_ready_no_direct_contact",
@@ -1050,11 +1050,12 @@ def test_runner_executes_private_lifecycle_action_for_consolidation(
     async def action_executor(
         action_specs: list[dict[str, Any]],
         *,
-        timestamp: str,
+        storage_timestamp_utc: str,
         executed_action_attempt_ids: set[str] | None = None,
         record_attempt_func: Any = None,
     ) -> list[dict[str, Any]]:
-        del timestamp, executed_action_attempt_ids, record_attempt_func
+        del storage_timestamp_utc, executed_action_attempt_ids
+        del record_attempt_func
         captured_specs.extend(action_specs)
         action_results = [
             {
@@ -1124,10 +1125,10 @@ def test_runner_does_not_execute_private_actions_by_default(
     async def action_executor(
         action_specs: list[dict[str, Any]],
         *,
-        timestamp: str,
+        storage_timestamp_utc: str,
         executed_action_attempt_ids: set[str] | None = None,
     ) -> list[dict[str, Any]]:
-        del action_specs, timestamp, executed_action_attempt_ids
+        del action_specs, storage_timestamp_utc, executed_action_attempt_ids
         raise AssertionError("default dry-run must not execute private actions")
 
     async def consolidation_client(state: dict[str, Any]) -> dict[str, Any]:

@@ -52,8 +52,8 @@ def _commitment_case() -> dict[str, Any]:
     case = {
         "case_name": models.CASE_COMMITMENT_PAST_DUE,
         "case_id": "commitment:promise-001",
-        "idle_timestamp": "2026-05-13T00:30:00+00:00",
-        "last_evidence_timestamp": "2026-05-13T00:00:00+00:00",
+        "idle_timestamp_utc": "2026-05-13T00:30:00+00:00",
+        "last_evidence_timestamp_utc": "2026-05-13T00:00:00+00:00",
         "trigger_kind": models.TRIGGER_ACTIVE_COMMITMENT_DUE_CHECK,
         "semantic_due_state": models.DUE_STATE_PAST_DUE,
         "actionability": "past_due_commitment_contact_socially_available",
@@ -122,8 +122,8 @@ def _future_cognition_case() -> dict[str, Any]:
     case = {
         "case_name": models.CASE_SCHEDULED_FUTURE_COGNITION,
         "case_id": "future_cognition:action_attempt:future-123",
-        "idle_timestamp": "2026-05-16T10:00:00+00:00",
-        "last_evidence_timestamp": "2026-05-16T10:00:00+00:00",
+        "idle_timestamp_utc": "2026-05-16T10:00:00+00:00",
+        "last_evidence_timestamp_utc": "2026-05-16T10:00:00+00:00",
         "trigger_kind": models.TRIGGER_SCHEDULED_FUTURE_COGNITION,
         "semantic_due_state": models.DUE_STATE_DUE_NOW,
         "actionability": "scheduled_future_cognition_due",
@@ -334,7 +334,7 @@ async def test_collect_scheduled_future_cognition_cases_projects_due_slots() -> 
         list_due_events_func=list_due_events,
     )
 
-    assert calls == [{"current_timestamp": now.isoformat(), "limit": 3}]
+    assert calls == [{"current_timestamp_utc": now.isoformat(), "limit": 3}]
     assert len(cases) == 1
     case = cases[0]
     assert case["case_name"] == models.CASE_SCHEDULED_FUTURE_COGNITION
@@ -1032,8 +1032,8 @@ async def test_active_commitment_source_builds_due_case_from_memory_unit() -> No
         }
     ]
 
-    async def list_commitments(*, current_timestamp: str, limit: int):
-        assert current_timestamp == "2026-05-13T00:30:00+00:00"
+    async def list_commitments(*, current_timestamp_utc: str, limit: int):
+        assert current_timestamp_utc == "2026-05-13T00:30:00+00:00"
         assert limit == 3
         return [unit]
 
@@ -1083,7 +1083,7 @@ async def test_active_commitment_query_prioritizes_due_work(
     monkeypatch.setattr(memory_units_module, "get_db", fake_get_db)
 
     rows = await memory_units_module.query_active_commitment_memory_units(
-        current_timestamp="2026-05-13T00:30:00+00:00",
+        current_timestamp_utc="2026-05-13T00:30:00+00:00",
         limit=3,
     )
     pipeline = collection.pipeline

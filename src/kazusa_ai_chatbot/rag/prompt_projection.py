@@ -5,9 +5,9 @@ from __future__ import annotations
 import copy
 from typing import Any
 
-from kazusa_ai_chatbot.time_context import (
-    format_history_for_llm,
-    format_time_fields_for_llm,
+from kazusa_ai_chatbot.time_boundary import (
+    format_storage_utc_fields_for_llm,
+    format_storage_utc_history_for_llm,
 )
 
 _TIME_FIELDS = (
@@ -212,9 +212,9 @@ def project_runtime_context_for_llm(context: dict[str, Any]) -> dict[str, Any]:
         if key in context:
             projected[key] = project_tool_result_for_llm(context[key])
 
-    time_context = context.get("time_context")
-    if isinstance(time_context, dict):
-        projected["time_context"] = _project_time_context(time_context)
+    local_time_context = context.get("local_time_context")
+    if isinstance(local_time_context, dict):
+        projected["time_context"] = _project_time_context(local_time_context)
 
     user_profile = context.get("user_profile")
     if isinstance(user_profile, dict):
@@ -257,7 +257,7 @@ def project_selector_input_for_llm(
 
 def _project_dict_for_llm(row: dict[str, Any]) -> dict[str, Any]:
     """Project one known result row and its source-owned nested fields."""
-    projected = format_time_fields_for_llm(row, _TIME_FIELDS)
+    projected = format_storage_utc_fields_for_llm(row, _TIME_FIELDS)
     for key in _STRIPPED_RAW_KEYS:
         projected.pop(key, None)
 
@@ -285,7 +285,7 @@ def _project_history_for_llm(rows: list[object]) -> list[object]:
         for row in rows
         if isinstance(row, dict)
     ]
-    formatted_rows = format_history_for_llm(dict_rows)
+    formatted_rows = format_storage_utc_history_for_llm(dict_rows)
     formatted_iter = iter(formatted_rows)
 
     projected_rows: list[object] = []
@@ -316,5 +316,5 @@ def _project_user_profile_for_llm(profile: dict[str, Any]) -> dict[str, Any]:
         for key in _USER_PROFILE_FIELDS
         if key in profile
     }
-    projected = format_time_fields_for_llm(projected, _TIME_FIELDS)
+    projected = format_storage_utc_fields_for_llm(projected, _TIME_FIELDS)
     return projected

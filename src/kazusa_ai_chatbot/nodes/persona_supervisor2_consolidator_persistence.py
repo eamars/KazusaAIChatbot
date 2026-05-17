@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from datetime import datetime, timedelta, timezone
+from datetime import timedelta
 
 from kazusa_ai_chatbot.config import (
     AFFINITY_DECREMENT_BREAKPOINTS,
@@ -31,9 +31,11 @@ from kazusa_ai_chatbot.nodes.persona_supervisor2_consolidator_origin_policy impo
 from kazusa_ai_chatbot.nodes.persona_supervisor2_consolidator_schema import (
     ConsolidatorState,
 )
-from kazusa_ai_chatbot.dispatcher.task import parse_iso_datetime
 from kazusa_ai_chatbot.rag.cache2_events import CacheInvalidationEvent
-from kazusa_ai_chatbot.time_context import local_llm_time_to_utc_iso
+from kazusa_ai_chatbot.time_boundary import (
+    local_llm_datetime_to_storage_utc_iso,
+    parse_storage_utc_datetime,
+)
 from kazusa_ai_chatbot.rag.cache2_runtime import get_rag_cache2_runtime
 from kazusa_ai_chatbot.utils import (
     text_or_empty,
@@ -78,22 +80,18 @@ def process_affinity_delta(current_affinity: int, raw_delta: int) -> int:
     return return_value
 
 
-def _default_future_promise_due_time(timestamp: str) -> str:
+def _default_future_promise_due_time(storage_timestamp_utc: str) -> str:
     """Return the immediate fallback due time for untimed future promises.
 
     Args:
-        timestamp: Turn timestamp used as the reference clock.
+        storage_timestamp_utc: Turn storage timestamp used as the reference
+            clock.
 
     Returns:
-        ISO-8601 UTC timestamp for now or the next minute boundary.
+        Storage UTC timestamp for now or the next minute boundary.
     """
 
-    try:
-        reference_time = parse_iso_datetime(timestamp)
-    except ValueError as exc:
-        logger.debug(f"Using current time for invalid promise timestamp: {exc}")
-        reference_time = datetime.now(timezone.utc)
-
+    reference_time = parse_storage_utc_datetime(storage_timestamp_utc)
     if reference_time.second == 0 and reference_time.microsecond == 0:
         return_value = reference_time.isoformat()
         return return_value
@@ -104,33 +102,19 @@ def _default_future_promise_due_time(timestamp: str) -> str:
 
 
 def _normalize_due_time_to_utc(value: str) -> str:
-    """Normalize a structured promise time into UTC storage format.
+    """Normalize a structured promise time into storage UTC format.
 
     Args:
-        value: Exact local ``YYYY-MM-DD HH:MM`` from the harvester, or a
-            legacy offset-aware ISO value already present in internal state.
+        value: Exact local ``YYYY-MM-DD HH:MM`` from the harvester.
 
     Returns:
-        UTC ISO string with timezone information.
+        Storage UTC string for persistence.
 
     Raises:
-        ValueError: If ``value`` is neither exact local time nor offset-aware
-            ISO time.
+        ValueError: If ``value`` is not exact configured-local minute text.
     """
     stripped_value = value.strip()
-    try:
-        utc_value = local_llm_time_to_utc_iso(stripped_value)
-    except ValueError:
-        offset_part = stripped_value[10:]
-        has_offset = (
-            "+" in offset_part
-            or "-" in offset_part
-            or stripped_value.endswith(("Z", "z"))
-        )
-        if not has_offset:
-            raise
-        parsed = parse_iso_datetime(stripped_value)
-        utc_value = parsed.astimezone(timezone.utc).isoformat()
+    utc_value = local_llm_datetime_to_storage_utc_iso(stripped_value)
 
     return_value = utc_value
     return return_value
@@ -139,13 +123,14 @@ def _normalize_due_time_to_utc(value: str) -> str:
 def _normalize_future_promises(
     future_promises: list[dict],
     *,
-    timestamp: str,
+    storage_timestamp_utc: str,
 ) -> list[dict]:
     """Normalize actionable promise due times into UTC storage format.
 
     Args:
         future_promises: Raw promise rows from the harvester.
-        timestamp: Turn timestamp used to resolve immediate fallbacks.
+        storage_timestamp_utc: Turn storage timestamp used to resolve
+            immediate fallbacks.
 
     Returns:
         Promise rows with ``future_promise`` due times normalized. Rows with
@@ -153,7 +138,9 @@ def _normalize_future_promises(
         replacement time.
     """
 
-    fallback_due_time = _default_future_promise_due_time(timestamp)
+    fallback_due_time = _default_future_promise_due_time(
+        storage_timestamp_utc
+    )
     normalized: list[dict] = []
 
     for promise in future_promises:
@@ -182,7 +169,7 @@ def _normalize_future_promises(
 
 
 async def db_writer(state: ConsolidatorState) -> dict:
-    timestamp = state.get("timestamp") or datetime.now(timezone.utc).isoformat()
+    storage_timestamp_utc = state["storage_timestamp_utc"]
     global_user_id = state.get("global_user_id", "")
     user_name = state.get("user_name", "")
 
@@ -203,7 +190,7 @@ async def db_writer(state: ConsolidatorState) -> dict:
                 mood=mood,
                 global_vibe=global_vibe,
                 reflection_summary=reflection_summary,
-                timestamp=timestamp,
+                updated_at_utc=storage_timestamp_utc,
             )
             write_log["character_state"] = True
         except DatabaseOperationError as exc:
@@ -234,7 +221,7 @@ async def db_writer(state: ConsolidatorState) -> dict:
     if origin_policy["user_memory_units"]["allowed"]:
         future_promises = _normalize_future_promises(
             state.get("future_promises") or [],
-            timestamp=timestamp,
+            storage_timestamp_utc=storage_timestamp_utc,
         )
         normalized_state = {
             **state,
@@ -286,7 +273,10 @@ async def db_writer(state: ConsolidatorState) -> dict:
     # ── Step 5: character image ──────────────────────────────────────
     if origin_policy["character_image"]["allowed"]:
         image_results = await asyncio.gather(
-            _update_character_image(state, timestamp=timestamp),
+            _update_character_image(
+                state,
+                storage_timestamp_utc=storage_timestamp_utc,
+            ),
             return_exceptions=True,
         )
         character_image_result = image_results[0]
@@ -330,7 +320,7 @@ async def db_writer(state: ConsolidatorState) -> dict:
                 platform=state["platform"],
                 platform_channel_id=state["platform_channel_id"],
                 global_user_id=global_user_id,
-                timestamp=timestamp,
+                storage_timestamp_utc=storage_timestamp_utc,
                 reason="consolidator: user_profile",
             ))
 

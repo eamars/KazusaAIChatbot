@@ -16,6 +16,7 @@ from scripts._db_export import configure_logging, configure_stdout, load_project
 
 from kazusa_ai_chatbot.db import close_db
 from kazusa_ai_chatbot.reflection_cycle import run_readonly_reflection_evaluation
+from kazusa_ai_chatbot.time_boundary import parse_storage_utc_datetime
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -91,8 +92,7 @@ def _parse_optional_datetime(value: str | None) -> datetime | None:
     if not value:
         return_value = None
         return return_value
-    normalized = value.replace("Z", "+00:00")
-    return_value = datetime.fromisoformat(normalized)
+    return_value = parse_storage_utc_datetime(value)
     return return_value
 
 

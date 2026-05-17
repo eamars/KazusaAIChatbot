@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
 from typing import Any
 
 from kazusa_ai_chatbot.config import (
@@ -28,11 +27,12 @@ from kazusa_ai_chatbot.memory_evolution.identity import (
     deterministic_memory_unit_id,
     memory_embedding_source_text as evolving_memory_embedding_source_text,
 )
+from kazusa_ai_chatbot.time_boundary import storage_utc_now_iso
 
 
 def _now_iso() -> str:
-    current_time = datetime.now(timezone.utc).isoformat()
-    return current_time
+    current_time_utc = storage_utc_now_iso()
+    return current_time_utc
 
 
 async def enable_memory_vector_index() -> None:
@@ -116,7 +116,7 @@ def _legacy_memory_authority(doc: MemoryDoc) -> str:
     return return_value
 
 
-async def save_memory(doc: MemoryDoc, timestamp: str) -> None:
+async def save_memory(doc: MemoryDoc, storage_timestamp_utc: str) -> None:
     """Insert a memory entry through the evolving memory-unit API.
 
     Legacy callers that do not yet provide evolving ids receive a deterministic
@@ -124,7 +124,7 @@ async def save_memory(doc: MemoryDoc, timestamp: str) -> None:
 
     Args:
         doc: A dict produced by :func:`build_memory_doc`.
-        timestamp: ISO-8601 UTC timestamp for when the memory was created.
+        storage_timestamp_utc: Storage UTC timestamp for memory creation.
     """
     if "embedding" in doc:
         raise ValueError("save_memory callers must not provide embedding")
@@ -137,7 +137,7 @@ async def save_memory(doc: MemoryDoc, timestamp: str) -> None:
         "lineage_id": lineage_id,
         "version": doc.get("version", 1),
         "authority": _legacy_memory_authority(doc),
-        "timestamp": timestamp,
+        "timestamp": storage_timestamp_utc,
     }
 
     await insert_memory_unit(document=payload)
@@ -145,7 +145,7 @@ async def save_memory(doc: MemoryDoc, timestamp: str) -> None:
 
 async def get_active_promises(
     source_global_user_id: str,
-    now_timestamp: str,
+    now_timestamp_utc: str,
     limit: int = 10,
 ) -> list[MemoryDoc]:
     """Return active, non-expired promise memories for a single user.
@@ -153,7 +153,7 @@ async def get_active_promises(
     Args:
         source_global_user_id: Internal UUID of the user whose promises should be
             loaded.
-        now_timestamp: ISO-8601 timestamp used as the freshness cutoff.
+        now_timestamp_utc: Storage UTC timestamp used as the freshness cutoff.
         limit: Maximum number of promises to return, newest first.
 
     Returns:
@@ -168,7 +168,7 @@ async def get_active_promises(
             "$or": [
                 {"expiry_timestamp": None},
                 {"expiry_timestamp": {"$exists": False}},
-                {"expiry_timestamp": {"$gt": now_timestamp}},
+                {"expiry_timestamp": {"$gt": now_timestamp_utc}},
             ],
         }
     ).sort("timestamp", -1).limit(limit)

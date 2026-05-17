@@ -11,7 +11,7 @@ from kazusa_ai_chatbot.message_envelope import project_prompt_message_context
 from kazusa_ai_chatbot.rag import cache2_policy
 from kazusa_ai_chatbot.rag.cache2_policy import build_initializer_cache_key
 from kazusa_ai_chatbot.rag.cache2_runtime import RAGCache2Runtime
-from kazusa_ai_chatbot.time_context import build_character_time_context
+from kazusa_ai_chatbot.time_boundary import build_turn_clock_from_storage_utc
 
 
 class _ClosedTask:
@@ -110,12 +110,12 @@ def test_initializer_cache_key_ignores_volatile_timestamp() -> None:
         "platform": "discord",
         "platform_channel_id": "chan-1",
         "user_name": "<current user>",
-        "current_timestamp": "2026-04-26T00:00:00+00:00",
+        "current_timestamp_utc": "2026-04-26T00:00:00+00:00",
         "prompt_message_context": _prompt_context(),
     }
     later_context = {
         **base_context,
-        "current_timestamp": "2026-04-26T00:01:00+00:00",
+        "current_timestamp_utc": "2026-04-26T00:01:00+00:00",
     }
 
     key_a = build_initializer_cache_key(
@@ -789,11 +789,12 @@ async def test_rag_initializer_payload_uses_prompt_context_for_large_image(
 
 @pytest.mark.asyncio
 async def test_rag_initializer_payload_projects_runtime_context(monkeypatch) -> None:
-    """Initializer payload should not expose raw current_timestamp to the LLM."""
+    """Initializer payload should not expose raw current UTC time to the LLM."""
     runtime = RAGCache2Runtime(max_entries=10)
     created_tasks: list = []
     llm = _CountingAsyncLLM({"unknown_slots": []})
-    turn_timestamp = "2026-05-03T00:00:03+00:00"
+    turn_timestamp_utc = "2026-05-03T00:00:03+00:00"
+    turn_clock = build_turn_clock_from_storage_utc(turn_timestamp_utc)
     state = {
         "original_query": "what did current user say today?",
         "character_name": "<active character>",
@@ -801,8 +802,8 @@ async def test_rag_initializer_payload_projects_runtime_context(monkeypatch) -> 
             "platform": "discord",
             "platform_channel_id": "chan-1",
             "user_name": "<current user>",
-            "current_timestamp": turn_timestamp,
-            "time_context": build_character_time_context(turn_timestamp),
+            "current_timestamp_utc": turn_clock["storage_timestamp_utc"],
+            "local_time_context": turn_clock["local_time_context"],
             "prompt_message_context": _prompt_context(),
             "known_facts": [
                 {
@@ -826,7 +827,8 @@ async def test_rag_initializer_payload_projects_runtime_context(monkeypatch) -> 
 
     payload = json.loads(llm.messages[0][1].content)
     context = payload["context"]
-    assert "current_timestamp" not in context
+    assert "current_" "timestamp" not in context
+    assert "current_timestamp_utc" not in context
     local_datetime = context["time_context"]["current_local_datetime"]
     assert local_datetime == "2026-05-03 12:00"
     assert context["known_facts"][0]["raw_result"]["timestamp"] == (

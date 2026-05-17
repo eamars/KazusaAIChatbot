@@ -62,7 +62,7 @@ def build_trigger_record(case: models.SelfCognitionCase) -> dict[str, Any]:
         "trigger_kind": _string_field(case, "trigger_kind"),
         "target_scope": target_scope,
         "source_refs": source_refs,
-        "idle_timestamp": _string_field(case, "idle_timestamp"),
+        "idle_timestamp_utc": _string_field(case, "idle_timestamp_utc"),
     }
     trigger_id = _stable_prefixed_id(
         "self_cognition_trigger",
@@ -73,6 +73,7 @@ def build_trigger_record(case: models.SelfCognitionCase) -> dict[str, Any]:
         "trigger_kind": _string_field(case, "trigger_kind"),
         "target_scope": target_scope,
         "source_refs": source_refs,
+        "idle_timestamp_utc": _string_field(case, "idle_timestamp_utc"),
         "semantic_due_state": _optional_string_field(
             case,
             "semantic_due_state",
@@ -108,7 +109,7 @@ def build_run_record(
     run_record = {
         "run_id": f"self_cognition_run:{trigger_record['trigger_id']}",
         "trigger_id": trigger_record["trigger_id"],
-        "idle_timestamp": _string_field(case, "idle_timestamp"),
+        "idle_timestamp_utc": _string_field(case, "idle_timestamp_utc"),
         "output_mode": output_mode,
         "selected_route": selected_route,
         "status": "completed",

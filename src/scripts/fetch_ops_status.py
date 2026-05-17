@@ -13,12 +13,12 @@ import asyncio
 import json
 import logging
 import sys
-from datetime import datetime, timezone
 from typing import Any
 
 from kazusa_ai_chatbot import event_logging
 from kazusa_ai_chatbot.config import SELF_COGNITION_ENABLED
 from kazusa_ai_chatbot.db import close_db
+from kazusa_ai_chatbot.time_boundary import storage_utc_now_iso
 
 DEFAULT_WINDOW_HOURS = 24
 
@@ -193,7 +193,7 @@ async def build_ops_status_document(*, window_hours: int) -> dict[str, Any]:
         window_hours=window_hours,
     )
     status_document = {
-        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "generated_at": storage_utc_now_iso(),
         "window_hours": window_hours,
         "runtime_status": runtime_status,
         "reflection_stats": reflection_stats,

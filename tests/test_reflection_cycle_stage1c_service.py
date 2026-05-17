@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import datetime, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
@@ -94,13 +95,13 @@ async def test_reflection_worker_defers_while_primary_interaction_is_busy() -> N
     """Worker tick should defer when the service busy probe is true."""
 
     results = await worker_module._run_worker_tick(
-        now=worker_module.datetime(
+        now=datetime(
             2026,
             5,
             4,
             18,
             0,
-            tzinfo=worker_module.timezone.utc,
+            tzinfo=timezone.utc,
         ),
         is_primary_interaction_busy=lambda: True,
     )

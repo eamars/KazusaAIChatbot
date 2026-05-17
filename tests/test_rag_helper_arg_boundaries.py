@@ -149,6 +149,48 @@ def test_conversation_aggregate_args_do_not_stringify_container_fields() -> None
     }
 
 
+def test_conversation_aggregate_today_uses_local_context_date() -> None:
+    """Aggregate date windows should use configured-local calendar labels."""
+
+    from_timestamp, to_timestamp = conversation_aggregate_agent._time_bounds(
+        "today",
+        {
+            "current_timestamp_utc": "2026-05-17T04:55:28+00:00",
+            "local_time_context": {
+                "current_local_datetime": "2026-05-17 16:55",
+                "current_local_weekday": "Sunday",
+            },
+        },
+    )
+
+    assert from_timestamp == "2026-05-16T12:00:00+00:00"
+    assert to_timestamp == "2026-05-17T04:55:28+00:00"
+
+
+def test_conversation_aggregate_today_does_not_fallback_to_utc_date() -> None:
+    """Missing local context should not become a UTC calendar-day bound."""
+
+    from_timestamp, to_timestamp = conversation_aggregate_agent._time_bounds(
+        "today",
+        {"current_timestamp_utc": "2026-05-17T04:55:28+00:00"},
+    )
+
+    assert from_timestamp is None
+    assert to_timestamp is None
+
+
+def test_conversation_aggregate_all_does_not_require_current_time() -> None:
+    """The all-time aggregate window should not require any clock field."""
+
+    from_timestamp, to_timestamp = conversation_aggregate_agent._time_bounds(
+        "all",
+        {},
+    )
+
+    assert from_timestamp is None
+    assert to_timestamp is None
+
+
 def test_persistent_memory_search_args_do_not_stringify_container_fields() -> None:
     """Persistent-memory search args should ignore non-string scalar fields."""
 

@@ -16,7 +16,7 @@ from kazusa_ai_chatbot.state import (
 )
 from kazusa_ai_chatbot.db import CharacterProfileDoc, ConversationEpisodeStateDoc, UserProfileDoc
 from kazusa_ai_chatbot.message_envelope import PromptMessageContext
-from kazusa_ai_chatbot.time_context import TimeContextDoc
+from kazusa_ai_chatbot.time_boundary import LocalTimeContextDoc
 
 ReferentRole = Literal["subject", "object", "time"]
 
@@ -34,8 +34,8 @@ class GlobalPersonaState(TypedDict):
     character_profile: CharacterProfileDoc
 
     # Inputs
-    timestamp: str
-    time_context: TimeContextDoc
+    storage_timestamp_utc: str
+    local_time_context: LocalTimeContextDoc
     user_input: str
     prompt_message_context: PromptMessageContext
     cognitive_episode: NotRequired[CognitiveEpisode]
@@ -120,8 +120,8 @@ class GlobalPersonaState(TypedDict):
 class CognitionState(TypedDict):
     character_profile: CharacterProfileDoc
 
-    timestamp: str
-    time_context: TimeContextDoc
+    storage_timestamp_utc: str
+    local_time_context: LocalTimeContextDoc
     user_input: str
     prompt_message_context: PromptMessageContext
     cognitive_episode: NotRequired[CognitiveEpisode]

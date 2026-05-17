@@ -17,7 +17,7 @@ from kazusa_ai_chatbot.nodes.persona_supervisor2_schema import GlobalPersonaStat
 from kazusa_ai_chatbot.rag.user_memory_unit_retrieval import (
     empty_user_memory_context,
 )
-from kazusa_ai_chatbot.time_context import TimeContextDoc
+from kazusa_ai_chatbot.time_boundary import LocalTimeContextDoc
 
 InternalThoughtDryRunOutputMode = Literal["think_only", "preview", "silent"]
 InternalThoughtDryRunStatus = Literal[
@@ -98,8 +98,8 @@ class InternalThoughtCognitionDryRunError(ValueError):
 def build_internal_thought_cognitive_episode(
     *,
     residue: InternalThoughtResidue,
-    timestamp: str,
-    time_context: TimeContextDoc,
+    storage_timestamp_utc: str,
+    local_time_context: LocalTimeContextDoc,
     action_latch: InternalActionLatch | None = None,
     output_mode: InternalThoughtDryRunOutputMode = "think_only",
     visual_directives_enabled: bool = True,
@@ -108,8 +108,8 @@ def build_internal_thought_cognitive_episode(
 
     Args:
         residue: Private runtime-generated thought admitted to cognition.
-        timestamp: UTC timestamp for the dry-run event.
-        time_context: Character-local time context associated with the event.
+        storage_timestamp_utc: Storage UTC timestamp for the dry-run event.
+        local_time_context: Configured-local time context for the event.
         action_latch: Optional audit-only action candidate.
         output_mode: Audit-only cognition output mode.
         visual_directives_enabled: Whether this run may generate visual
@@ -175,8 +175,8 @@ def build_internal_thought_cognitive_episode(
             "active_turn_conversation_row_ids": [],
             "debug_modes": debug_modes,
         },
-        "timestamp": timestamp,
-        "time_context": time_context,
+        "storage_timestamp_utc": storage_timestamp_utc,
+        "local_time_context": local_time_context,
     }
     validate_cognitive_episode(episode)
     return episode
@@ -187,8 +187,8 @@ async def run_internal_thought_cognition_dry_run(
     residue: InternalThoughtResidue,
     character_profile: CharacterProfileDoc,
     user_profile: UserProfileDoc,
-    timestamp: str,
-    time_context: TimeContextDoc,
+    storage_timestamp_utc: str,
+    local_time_context: LocalTimeContextDoc,
     is_primary_interaction_busy: Callable[[], bool],
     call_cognition_subgraph_func: Callable[
         [GlobalPersonaState],
@@ -204,8 +204,8 @@ async def run_internal_thought_cognition_dry_run(
         residue: Private runtime-generated thought admitted to cognition.
         character_profile: Current character profile snapshot for cognition.
         user_profile: Dry-run placeholder user profile.
-        timestamp: UTC timestamp for the dry-run event.
-        time_context: Character-local time context associated with the event.
+        storage_timestamp_utc: Storage UTC timestamp for the dry-run event.
+        local_time_context: Configured-local time context for the event.
         is_primary_interaction_busy: Probe for live interaction load.
         call_cognition_subgraph_func: Injected cognition callable.
         action_latch: Optional audit-only action candidate.
@@ -266,8 +266,8 @@ async def run_internal_thought_cognition_dry_run(
 
     episode = build_internal_thought_cognitive_episode(
         residue=residue,
-        timestamp=timestamp,
-        time_context=time_context,
+        storage_timestamp_utc=storage_timestamp_utc,
+        local_time_context=local_time_context,
         action_latch=action_latch,
         output_mode=output_mode,
         visual_directives_enabled=visual_directives_enabled,
@@ -275,8 +275,8 @@ async def run_internal_thought_cognition_dry_run(
     debug_modes = dict(episode["origin_metadata"]["debug_modes"])
     dry_run_state: GlobalPersonaState = {
         "character_profile": character_profile,
-        "timestamp": timestamp,
-        "time_context": time_context,
+        "storage_timestamp_utc": storage_timestamp_utc,
+        "local_time_context": local_time_context,
         "user_input": _INTERNAL_THOUGHT_INPUT_TEXT,
         "prompt_message_context": {
             "body_text": "",

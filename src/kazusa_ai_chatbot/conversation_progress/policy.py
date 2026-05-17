@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime, timedelta, timezone
+from datetime import timedelta
 
 from kazusa_ai_chatbot.conversation_progress.models import ConversationProgressPromptDoc
+from kazusa_ai_chatbot.time_boundary import parse_storage_utc_datetime
 
 COLLECTION_NAME = "conversation_episode_state"
 EPISODE_TTL = timedelta(hours=48)
@@ -134,34 +135,16 @@ def enforce_progress_prompt_budget(payload: ConversationProgressPromptDoc) -> Co
     return result
 
 
-def expires_at_for(timestamp: str) -> str:
+def expires_at_for(storage_timestamp_utc: str) -> str:
     """Compute the TTL expiry timestamp for an episode document.
 
     Args:
-        timestamp: Current turn timestamp in ISO-8601 format.
+        storage_timestamp_utc: Current turn storage UTC timestamp.
 
     Returns:
         ISO-8601 timestamp when the episode state should expire.
     """
 
-    current = parse_iso_datetime(timestamp)
+    current = parse_storage_utc_datetime(storage_timestamp_utc)
     return_value = (current + EPISODE_TTL).isoformat()
-    return return_value
-
-
-def parse_iso_datetime(value: str) -> datetime:
-    """Parse an ISO-8601 timestamp into an aware UTC datetime.
-
-    Args:
-        value: ISO-8601 timestamp. A trailing ``Z`` is accepted.
-
-    Returns:
-        Timezone-aware datetime normalized to UTC.
-    """
-
-    normalized = value.replace("Z", "+00:00")
-    parsed = datetime.fromisoformat(normalized)
-    if parsed.tzinfo is None:
-        parsed = parsed.replace(tzinfo=timezone.utc)
-    return_value = parsed.astimezone(timezone.utc)
     return return_value

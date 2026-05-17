@@ -13,7 +13,7 @@ from kazusa_ai_chatbot.nodes import (
 from kazusa_ai_chatbot.nodes.persona_supervisor2_consolidator_origin import (
     ConsolidationOriginMetadata,
 )
-from kazusa_ai_chatbot.time_context import build_character_time_context
+from kazusa_ai_chatbot.time_boundary import build_turn_clock
 
 
 def _origin(
@@ -35,12 +35,13 @@ def _origin(
     if input_sources is None:
         input_sources = ["dialog_text"]
 
+    turn_clock = build_turn_clock("2026-04-27 00:00:00")
     origin: ConsolidationOriginMetadata = {
         "episode_id": "episode-1",
         "trigger_source": trigger_source,
         "input_sources": input_sources,
         "output_mode": output_mode,
-        "timestamp": "2026-04-27T00:00:00+12:00",
+        "storage_timestamp_utc": turn_clock["storage_timestamp_utc"],
         "platform": "qq",
         "platform_channel_id": "chan-1",
         "channel_type": "group",
@@ -66,9 +67,10 @@ def _state(*, origin: ConsolidationOriginMetadata | None = None) -> dict[str, An
     if origin is None:
         origin = _origin()
 
+    turn_clock = build_turn_clock("2026-04-27 00:00:00")
     state: dict[str, Any] = {
-        "timestamp": "2026-04-27T00:00:00+12:00",
-        "time_context": build_character_time_context("2026-04-27T00:00:00+12:00"),
+        "storage_timestamp_utc": turn_clock["storage_timestamp_utc"],
+        "local_time_context": turn_clock["local_time_context"],
         "global_user_id": "user-1",
         "user_name": "User",
         "platform": "qq",

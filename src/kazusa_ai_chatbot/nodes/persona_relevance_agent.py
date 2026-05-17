@@ -7,7 +7,7 @@ Outputs a structured JSON decision.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime
 import json
 import logging
 
@@ -25,7 +25,10 @@ from kazusa_ai_chatbot.db import (
     build_user_engagement_relevance_context,
 )
 from kazusa_ai_chatbot.state import IMProcessState
-from kazusa_ai_chatbot.time_context import format_history_for_llm
+from kazusa_ai_chatbot.time_boundary import (
+    format_storage_utc_history_for_llm,
+    parse_storage_utc_datetime,
+)
 from kazusa_ai_chatbot.utils import (
     build_affinity_block,
     get_llm,
@@ -53,21 +56,18 @@ def _parse_history_timestamp(value: object) -> datetime | None:
         value: Raw timestamp value from a conversation-history row.
 
     Returns:
-        A timezone-aware datetime, or None when the value cannot be parsed.
+        A parsed storage UTC datetime, or None when the value cannot be parsed.
     """
     if not isinstance(value, str) or not value.strip():
         return None
 
     try:
-        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        parsed = parse_storage_utc_datetime(value)
     except ValueError as exc:
         logger.debug(f"Ignoring history row with invalid timestamp: {exc}")
         return None
 
-    if parsed.tzinfo is None:
-        return_value = parsed.replace(tzinfo=timezone.utc)
-        return return_value
-    return_value = parsed.astimezone(timezone.utc)
+    return_value = parsed
     return return_value
 
 
@@ -686,7 +686,7 @@ async def relevance_agent(state: IMProcessState) -> IMProcessState:
             "channel_name": channel_name,
             "reply_context": reply_context,
         },
-        "conversation_history": format_history_for_llm(
+        "conversation_history": format_storage_utc_history_for_llm(
             state.get("chat_history_wide") or []
         ),
     }

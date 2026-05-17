@@ -11,6 +11,10 @@ import pytest
 from kazusa_ai_chatbot import chat_input_queue as queue_module
 from kazusa_ai_chatbot import service as service_module
 from kazusa_ai_chatbot.config import CHARACTER_GLOBAL_USER_ID
+from kazusa_ai_chatbot.time_boundary import build_turn_clock
+
+
+_TURN_CLOCK = build_turn_clock("2026-05-14 12:00:00")
 
 
 def _request(message_id: str, *, body_text: str = "private body"):
@@ -51,7 +55,9 @@ def _item(message_id: str, *, body_text: str = "private body"):
     item = queue_module.QueuedChatItem(
         sequence=1,
         request=_request(message_id, body_text=body_text),
-        timestamp="2026-05-14T00:00:00+00:00",
+        storage_timestamp_utc=_TURN_CLOCK["storage_timestamp_utc"],
+        local_timestamp=_TURN_CLOCK["local_timestamp"],
+        local_time_context=_TURN_CLOCK["local_time_context"],
         future=future,
     )
     return item

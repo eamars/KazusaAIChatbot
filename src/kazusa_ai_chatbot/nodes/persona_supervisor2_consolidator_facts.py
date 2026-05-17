@@ -1,4 +1,4 @@
-"""Stage 4 consolidator fact extraction agents."""
+"""Consolidator fact extraction agents."""
 
 from __future__ import annotations
 
@@ -302,7 +302,7 @@ async def facts_harvester(state: ConsolidatorState) -> dict:
         character_name=state["character_profile"]["name"],
     ))
 
-    local_datetime = state["time_context"]["current_local_datetime"]
+    local_datetime = state["local_time_context"]["current_local_datetime"]
     rag_result = _facts_harvester_rag_view(state["rag_result"])
     msg = {
         "user_name": state["user_name"],

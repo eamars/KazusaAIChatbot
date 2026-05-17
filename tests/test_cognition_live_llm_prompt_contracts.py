@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
 from pathlib import Path
 import logging
 
@@ -8,7 +7,10 @@ import httpx
 import pytest
 
 from kazusa_ai_chatbot.cognition_episode import build_text_chat_cognitive_episode
-from kazusa_ai_chatbot.time_context import build_character_time_context
+from kazusa_ai_chatbot.time_boundary import (
+    build_turn_clock_from_storage_utc,
+    storage_utc_now_iso,
+)
 from kazusa_ai_chatbot.nodes.dialog_agent import dialog_agent
 from kazusa_ai_chatbot.config import COGNITION_LLM_BASE_URL
 from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition_l1 import call_cognition_subconscious
@@ -107,19 +109,19 @@ def _build_character_profile() -> dict:
 
 def _text_chat_episode(
     *,
-    timestamp: str,
+    storage_timestamp_utc: str,
     user_input: str,
     user_name: str,
     global_user_id: str,
 ) -> dict:
     """Build a valid text-chat episode for direct live node calls."""
 
-    time_context = build_character_time_context(timestamp)
+    turn_clock = build_turn_clock_from_storage_utc(storage_timestamp_utc)
     episode = build_text_chat_cognitive_episode(
         episode_id="live-prompt-contracts-episode",
         percept_id="live-prompt-contracts-percept",
-        timestamp=timestamp,
-        time_context=time_context,
+        storage_timestamp_utc=turn_clock["storage_timestamp_utc"],
+        local_time_context=turn_clock["local_time_context"],
         user_input=user_input,
         platform="qq",
         platform_channel_id="live-prompt-channel",
@@ -192,16 +194,17 @@ def _make_state(
             "recent_window": [{"summary": character_image}],
         }
 
-    timestamp = datetime.now(timezone.utc).isoformat()
+    storage_timestamp_utc = storage_utc_now_iso()
     cognitive_episode = _text_chat_episode(
-        timestamp=timestamp,
+        storage_timestamp_utc=storage_timestamp_utc,
         user_input=user_input,
         user_name=user_name,
         global_user_id=global_user_id,
     )
     state = {
         "character_profile": _build_character_profile(),
-        "timestamp": timestamp,
+        "storage_timestamp_utc": storage_timestamp_utc,
+        "local_time_context": cognitive_episode["local_time_context"],
         "cognitive_episode": cognitive_episode,
         "user_input": user_input,
         "global_user_id": global_user_id,

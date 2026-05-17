@@ -7,7 +7,7 @@ import pytest
 
 from kazusa_ai_chatbot.cognition_episode import build_text_chat_cognitive_episode
 from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition_l3 import call_preference_adapter
-from kazusa_ai_chatbot.time_context import build_character_time_context
+from kazusa_ai_chatbot.time_boundary import build_turn_clock
 
 
 class _FakePreferenceAdapterLlm:
@@ -39,13 +39,12 @@ class _CapturingPreferenceAdapterLlm:
 
 def _minimal_text_chat_episode() -> dict:
     """Build a valid text-chat cognitive episode for direct L3 tests."""
-    timestamp = "2026-04-27T00:00:00+12:00"
-    time_context = build_character_time_context(timestamp)
+    turn_clock = build_turn_clock("2026-04-27 00:00:00")
     episode = build_text_chat_cognitive_episode(
         episode_id="episode-preference",
         percept_id="percept-preference",
-        timestamp=timestamp,
-        time_context=time_context,
+        storage_timestamp_utc=turn_clock["storage_timestamp_utc"],
+        local_time_context=turn_clock["local_time_context"],
         user_input="please keep replies short",
         platform="qq",
         platform_channel_id="chan-1",

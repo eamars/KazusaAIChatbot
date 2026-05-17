@@ -39,8 +39,8 @@ from kazusa_ai_chatbot.db import (
 )
 from kazusa_ai_chatbot.rag.prompt_projection import project_tool_result_for_llm
 from kazusa_ai_chatbot.rag.user_memory_unit_retrieval import empty_user_memory_context
-from kazusa_ai_chatbot.time_context import (
-    format_history_for_llm,
+from kazusa_ai_chatbot.time_boundary import (
+    format_storage_utc_history_for_llm,
 )
 
 from langchain_core.messages import HumanMessage, SystemMessage
@@ -108,7 +108,7 @@ def _surface_history_for_visual(chat_history: list[dict]) -> list[dict]:
         At most four messages for local tone and social adjacency.
     """
 
-    history = format_history_for_llm(chat_history[-4:])
+    history = format_storage_utc_history_for_llm(chat_history[-4:])
     return history
 
 
@@ -123,7 +123,7 @@ def _surface_history_for_style(chat_history: list[dict]) -> list[dict]:
         At most two messages for phrase/cadence reference.
     """
 
-    history = format_history_for_llm(chat_history[-2:])
+    history = format_storage_utc_history_for_llm(chat_history[-2:])
     return history
 
 

@@ -11,7 +11,9 @@ from kazusa_ai_chatbot.nodes import persona_supervisor2_consolidator_persistence
 from kazusa_ai_chatbot.nodes.persona_supervisor2_consolidator_origin import (
     build_user_message_consolidation_origin,
 )
-from kazusa_ai_chatbot.time_context import build_character_time_context
+from kazusa_ai_chatbot.time_boundary import local_time_context_from_storage_utc
+
+STORAGE_TIMESTAMP_UTC = "2026-04-26T12:00:00+00:00"
 
 
 def _consolidation_origin() -> dict:
@@ -20,12 +22,13 @@ def _consolidation_origin() -> dict:
     Returns:
         Valid user-message consolidation origin metadata.
     """
-    timestamp = "2026-04-27T00:00:00+12:00"
     episode = build_text_chat_cognitive_episode(
         episode_id="episode-1",
         percept_id="percept-1",
-        timestamp=timestamp,
-        time_context=build_character_time_context(timestamp),
+        storage_timestamp_utc=STORAGE_TIMESTAMP_UTC,
+        local_time_context=local_time_context_from_storage_utc(
+            STORAGE_TIMESTAMP_UTC,
+        ),
         user_input="remember tea",
         platform="qq",
         platform_channel_id="chan-1",
@@ -39,12 +42,17 @@ def _consolidation_origin() -> dict:
         debug_modes={},
     )
     origin = build_user_message_consolidation_origin(episode=episode)
+    assert origin["storage_timestamp_utc"] == STORAGE_TIMESTAMP_UTC
+    assert "timestamp" not in origin
     return origin
 
 
 def _state() -> dict:
     return {
-        "timestamp": "2026-04-27T00:00:00+12:00",
+        "storage_timestamp_utc": STORAGE_TIMESTAMP_UTC,
+        "local_time_context": local_time_context_from_storage_utc(
+            STORAGE_TIMESTAMP_UTC,
+        ),
         "global_user_id": "user-1",
         "user_name": "User",
         "platform": "qq",

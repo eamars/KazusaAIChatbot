@@ -190,7 +190,7 @@ async def test_action_execution_rejects_malformed_spec_without_crashing() -> Non
 
     results = await execution_module.execute_action_specs_for_trace(
         [{"kind": "speak"}],
-        timestamp="2026-05-16T00:00:00+00:00",
+        storage_timestamp_utc="2026-05-16T00:00:00+00:00",
     )
 
     assert len(results) == 1
@@ -210,7 +210,7 @@ async def test_action_execution_records_attempt_ledger() -> None:
 
     results = await execution_module.execute_action_specs_for_trace(
         [_speak_action_spec()],
-        timestamp="2026-05-16T00:00:00+00:00",
+        storage_timestamp_utc="2026-05-16T00:00:00+00:00",
         record_attempt_func=record_attempt,
     )
 
@@ -229,10 +229,10 @@ async def test_memory_lifecycle_execution_failure_returns_failed_result(
     async def fail_lifecycle_action(
         action_spec: dict,
         *,
-        timestamp: str,
+        storage_timestamp_utc: str,
         action_attempt_id: str,
     ) -> dict:
-        del action_spec, timestamp, action_attempt_id
+        del action_spec, storage_timestamp_utc, action_attempt_id
         raise DatabaseOperationError("memory update unavailable")
 
     monkeypatch.setattr(
@@ -243,7 +243,7 @@ async def test_memory_lifecycle_execution_failure_returns_failed_result(
 
     results = await execution_module.execute_action_specs_for_trace(
         [_memory_lifecycle_action_spec()],
-        timestamp="2026-05-16T00:00:00+00:00",
+        storage_timestamp_utc="2026-05-16T00:00:00+00:00",
     )
 
     assert results[0]["status"] == "failed"

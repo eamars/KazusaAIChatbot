@@ -19,6 +19,10 @@ from kazusa_ai_chatbot.nodes.persona_supervisor2_consolidator_origin import (
     build_user_message_consolidation_origin,
 )
 from kazusa_ai_chatbot.nodes.persona_relevance_agent import relevance_agent
+from kazusa_ai_chatbot.time_boundary import build_turn_clock
+
+
+_TURN_CLOCK = build_turn_clock("2026-05-10 09:30:00")
 
 
 class _CapturingServiceGraph:
@@ -50,10 +54,7 @@ class _CapturingServiceGraph:
 
 def _time_context() -> dict[str, str]:
     """Build the minimal character-local time context for episode fixtures."""
-    time_context = {
-        "current_local_datetime": "2026-05-10 09:30",
-        "current_local_weekday": "Sunday",
-    }
+    time_context = _TURN_CLOCK["local_time_context"]
     return time_context
 
 
@@ -62,8 +63,8 @@ def _episode_kwargs() -> dict[str, object]:
     kwargs: dict[str, object] = {
         "episode_id": "episode-image-1",
         "percept_id": "percept-dialog",
-        "timestamp": "2026-05-09T21:30:00+00:00",
-        "time_context": _time_context(),
+        "storage_timestamp_utc": _TURN_CLOCK["storage_timestamp_utc"],
+        "local_time_context": _TURN_CLOCK["local_time_context"],
         "user_input": "Does this support my plan?",
         "platform": "debug",
         "platform_channel_id": "debug-private-1",
@@ -100,8 +101,8 @@ def _image_observation() -> dict[str, object]:
 def _minimal_relevance_state() -> dict[str, object]:
     """Build relevance-agent state with one described image attachment."""
     state: dict[str, object] = {
-        "timestamp": "2026-05-09T21:30:00+00:00",
-        "time_context": _time_context(),
+        "storage_timestamp_utc": _TURN_CLOCK["storage_timestamp_utc"],
+        "local_time_context": _TURN_CLOCK["local_time_context"],
         "platform": "debug",
         "platform_message_id": "platform-message-9",
         "platform_user_id": "platform-user-9",
@@ -193,7 +194,9 @@ def _queued_item(request: service_module.ChatRequest) -> queue_module.QueuedChat
     item = queue_module.QueuedChatItem(
         sequence=10,
         request=request,
-        timestamp="2026-05-09T21:31:00+00:00",
+        storage_timestamp_utc=_TURN_CLOCK["storage_timestamp_utc"],
+        local_timestamp=_TURN_CLOCK["local_timestamp"],
+        local_time_context=_TURN_CLOCK["local_time_context"],
         future=future,
     )
     return item
@@ -305,7 +308,13 @@ def test_source_payload_projects_structured_image_observations() -> None:
 
     assert source_payload == {
         "media_observations": {
-            "image_observations": [_image_observation()],
+            "image_observations": [
+                {
+                    key: value
+                    for key, value in _image_observation().items()
+                    if key != "source_message_id"
+                }
+            ],
             "audio_observations": [],
         },
     }

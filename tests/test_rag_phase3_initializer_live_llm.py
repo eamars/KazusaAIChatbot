@@ -12,6 +12,7 @@ from kazusa_ai_chatbot.nodes import persona_supervisor2_rag_supervisor2 as super
 from kazusa_ai_chatbot.rag import user_memory_evidence_agent as user_memory_evidence_module
 from kazusa_ai_chatbot.rag.cache2_runtime import get_rag_cache2_runtime
 from kazusa_ai_chatbot.rag.memory_evidence_agent import MemoryEvidenceAgent
+from kazusa_ai_chatbot.time_boundary import local_time_context_from_storage_utc
 from tests.llm_trace import write_llm_trace
 
 pytestmark = [pytest.mark.asyncio, pytest.mark.live_llm]
@@ -59,6 +60,7 @@ async def _skip_if_llm_unavailable() -> None:
 def _initializer_state(query: str) -> dict:
     """Build a minimal prompt-safe initializer state for one route check."""
 
+    current_timestamp_utc = "2026-05-02T00:00:00+00:00"
     return_value = {
         "original_query": query,
         "character_name": "the active character",
@@ -68,7 +70,10 @@ def _initializer_state(query: str) -> dict:
             "platform_user_id": "673225019",
             "global_user_id": "256e8a10-c406-47e9-ac8f-efd270d18160",
             "user_name": "蚝爹油",
-            "current_timestamp": "2026-05-02T00:00:00+00:00",
+            "current_timestamp_utc": current_timestamp_utc,
+            "local_time_context": local_time_context_from_storage_utc(
+                current_timestamp_utc,
+            ),
             "prompt_message_context": {
                 "body_text": query,
                 "mentions": [],

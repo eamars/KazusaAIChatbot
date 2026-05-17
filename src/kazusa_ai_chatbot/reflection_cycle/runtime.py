@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import subprocess
 from collections import defaultdict
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -28,7 +28,12 @@ from kazusa_ai_chatbot.reflection_cycle.prompts import (
 )
 from kazusa_ai_chatbot.reflection_cycle.selector import (
     collect_reflection_inputs,
-    normalize_utc_datetime,
+)
+from kazusa_ai_chatbot.time_boundary import (
+    normalize_storage_utc_iso,
+    parse_storage_utc_datetime,
+    storage_utc_now,
+    storage_utc_now_iso,
 )
 
 
@@ -239,20 +244,21 @@ def _channel_input_set(
 def _parse_message_timestamp(value: str) -> datetime:
     """Parse one conversation timestamp and normalize it to UTC."""
 
-    parsed_timestamp = datetime.fromisoformat(value.replace("Z", "+00:00"))
-    normalized_timestamp = parsed_timestamp.astimezone(timezone.utc)
-    return normalized_timestamp
+    timestamp_utc = parse_storage_utc_datetime(value)
+    return timestamp_utc
 
 
 def _hour_start(value: datetime) -> datetime:
     """Return the UTC hour start for one timestamp."""
 
-    hour_start = value.astimezone(timezone.utc).replace(
+    normalized_utc_iso = normalize_storage_utc_iso(value.isoformat())
+    timestamp_utc = parse_storage_utc_datetime(normalized_utc_iso)
+    hour_start_utc = timestamp_utc.replace(
         minute=0,
         second=0,
         microsecond=0,
     )
-    return hour_start
+    return hour_start_utc
 
 
 def _hourly_scope_ref(channel_scope_ref: str, hour_start: datetime) -> str:
@@ -450,15 +456,17 @@ def _manual_review_notes(
 def _artifact_path(output_dir: Path) -> Path:
     """Return a unique artifact path for this local evaluation run."""
 
-    timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
-    return_value = output_dir / f"readonly_reflection_evaluation_{timestamp}.json"
+    timestamp_utc = storage_utc_now().strftime("%Y%m%dT%H%M%S%fZ")
+    return_value = (
+        output_dir / f"readonly_reflection_evaluation_{timestamp_utc}.json"
+    )
     return return_value
 
 
 def _utc_now_iso() -> str:
     """Return the current UTC time as an ISO string."""
 
-    return_value = normalize_utc_datetime(None).isoformat()
+    return_value = storage_utc_now_iso()
     return return_value
 
 

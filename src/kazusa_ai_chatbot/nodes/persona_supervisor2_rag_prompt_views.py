@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from kazusa_ai_chatbot.rag.prompt_projection import project_tool_result_for_llm
-from kazusa_ai_chatbot.time_context import format_timestamp_for_llm
+from kazusa_ai_chatbot.time_boundary import format_storage_utc_for_llm
 
 
 _LLM_SUMMARY_TEXT_LIMIT = 400
@@ -72,7 +72,7 @@ def _compact_memory_unit_rows(rows: object) -> list[object]:
             if key in row:
                 value = _clip_llm_summary_text(row[key])
                 if key in _TIME_KEYS:
-                    value = format_timestamp_for_llm(str(value))
+                    value = format_storage_utc_for_llm(str(value))
                 compact_row[key] = value
         compact_rows.append(compact_row)
 

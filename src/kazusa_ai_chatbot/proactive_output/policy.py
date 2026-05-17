@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime
 
 from kazusa_ai_chatbot.cognition_episode import OutputMode
 from kazusa_ai_chatbot.proactive_output.contracts import (
@@ -11,6 +11,7 @@ from kazusa_ai_chatbot.proactive_output.contracts import (
     ProactivePreviewRecord,
     QuietHoursPolicy,
 )
+from kazusa_ai_chatbot.time_boundary import parse_storage_utc_datetime
 
 __all__ = [
     "PROACTIVE_ALLOWED_OUTPUT_MODE",
@@ -21,24 +22,20 @@ __all__ = [
 PROACTIVE_ALLOWED_OUTPUT_MODE: OutputMode = "preview"
 
 
-def _parse_utc_datetime(value: str) -> datetime:
-    """Parse an ISO timestamp into a timezone-aware UTC datetime.
+def _parse_storage_utc(value: str) -> datetime:
+    """Parse a persisted storage UTC timestamp.
 
     Args:
-        value: ISO timestamp string to parse.
+        value: Storage UTC timestamp string to parse.
 
     Returns:
-        Parsed timestamp normalized to UTC.
+        Parsed storage UTC datetime.
 
     Raises:
-        ValueError: If the timestamp is not valid ISO datetime text.
+        ValueError: If the timestamp is not valid storage UTC text.
     """
 
-    normalized = value.replace("Z", "+00:00")
-    parsed = datetime.fromisoformat(normalized)
-    if parsed.tzinfo is None:
-        parsed = parsed.replace(tzinfo=timezone.utc)
-    return_value = parsed.astimezone(timezone.utc)
+    return_value = parse_storage_utc_datetime(value)
     return return_value
 
 
@@ -109,7 +106,7 @@ def evaluate_proactive_permission(
     permission: ProactivePermissionRecord | None,
     existing_idempotency_keys: set[str],
     adapter_platforms: set[str],
-    current_timestamp: str,
+    current_timestamp_utc: str,
     current_local_time: str,
 ) -> ProactivePolicyDecision:
     """Evaluate whether one proactive preview is allowed to leave dry run.
@@ -119,7 +116,7 @@ def evaluate_proactive_permission(
         permission: Explicit permission record for the target, if one exists.
         existing_idempotency_keys: Already accepted or sent outbox keys.
         adapter_platforms: Platform keys with an available messaging adapter.
-        current_timestamp: Current UTC timestamp for expiry checks.
+        current_timestamp_utc: Current storage UTC timestamp for expiry checks.
         current_local_time: Current local clock time formatted as ``HH:MM``.
 
     Returns:
@@ -143,9 +140,9 @@ def evaluate_proactive_permission(
         }
         return decision
 
-    expires_at = _parse_utc_datetime(permission["expires_at"])
-    current_utc = _parse_utc_datetime(current_timestamp)
-    if expires_at <= current_utc:
+    expires_at_utc = _parse_storage_utc(permission["expires_at"])
+    current_utc = _parse_storage_utc(current_timestamp_utc)
+    if expires_at_utc <= current_utc:
         decision = {
             "allowed": False,
             "reason": "permission_expired",

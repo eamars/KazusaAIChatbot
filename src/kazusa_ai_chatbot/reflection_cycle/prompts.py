@@ -182,7 +182,7 @@ DAILY_SYNTHESIS_SYSTEM_PROMPT = '''\
 - 合并 `active_hour_slots` 里的重复话题、回应质量模式、隐私风险和局限性。
 - 只基于 `active_hour_slots` 与 `channel`，不要推断未提供的原始对话。
 - 缺失的小时表示没有可用小时反思数据，不代表没有聊天，也不代表聊天质量好或坏。
-- `active_hour_summaries.hour` 必须从 `active_hour_slots.hour` 中逐字复制，不要换算时区，不要改写格式。
+- `active_hour_summaries.hour` 必须从 `active_hour_slots.hour` 中逐字复制，保持输入格式。
 - `*_omitted_count` 表示同类小时反思内容因预算被省略，只能作为局限性信号，不要把它当成具体内容。
 - 输出用于人工评估日汇总是否有价值，不作为持久化写入合同。
 
@@ -199,8 +199,8 @@ DAILY_SYNTHESIS_SYSTEM_PROMPT = '''\
 {
   "evaluation_mode": "readonly_daily_synthesis",
   "window": {
-    "requested_start": "ISO timestamp",
-    "requested_end": "ISO timestamp",
+    "requested_start": "window boundary label",
+    "requested_end": "window boundary label",
     "fallback_used": false,
     "fallback_reason": ""
   },
@@ -209,7 +209,7 @@ DAILY_SYNTHESIS_SYSTEM_PROMPT = '''\
   },
   "active_hour_slots": [
     {
-      "hour": "UTC hour-start ISO timestamp",
+      "hour": "exact YYYY-MM-DD HH:MM active-hour label",
       "topic_summary": "该小时的紧凑话题概括",
       "conversation_quality_feedback": ["紧凑回应质量反馈"],
       "conversation_quality_feedback_omitted_count": 0,

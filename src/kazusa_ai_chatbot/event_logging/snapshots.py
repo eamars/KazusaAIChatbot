@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from datetime import datetime, timezone
+from datetime import timedelta
 from typing import Literal
 from uuid import uuid4
 
@@ -19,6 +19,7 @@ from kazusa_ai_chatbot.event_logging.status import (
     build_semantic_descriptors,
     build_snapshot_source_counts,
 )
+from kazusa_ai_chatbot.time_boundary import storage_utc_now
 
 logger = logging.getLogger(__name__)
 
@@ -49,20 +50,17 @@ async def write_analysis_snapshot(
     """Write one deterministic aggregate snapshot for later analysis."""
 
     snapshot_id = uuid4().hex
-    generated_at = datetime.now(timezone.utc)
+    generated_at_utc = storage_utc_now()
     seconds = max(0, int(window_hours)) * 3600
-    window_start = datetime.fromtimestamp(
-        generated_at.timestamp() - seconds,
-        timezone.utc,
-    )
+    window_start_utc = generated_at_utc - timedelta(seconds=seconds)
     source_counts = await build_snapshot_source_counts(window_hours=window_hours)
     descriptors = build_semantic_descriptors(source_counts)
     snapshot_doc = EventLogSnapshotDoc(
         snapshot_id=snapshot_id,
         snapshot_kind=snapshot_kind,
-        window_start=window_start.isoformat(),
-        window_end=generated_at.isoformat(),
-        generated_at=generated_at.isoformat(),
+        window_start=window_start_utc.isoformat(),
+        window_end=generated_at_utc.isoformat(),
+        generated_at=generated_at_utc.isoformat(),
         source_counts=source_counts,
         semantic_descriptors=descriptors,
         findings=[],

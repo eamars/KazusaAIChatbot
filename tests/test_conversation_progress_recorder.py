@@ -86,7 +86,7 @@ def _record_input(
 
     record_input: ConversationProgressRecordInput = {
         "scope": ConversationProgressScope("qq", "channel-1", "user-1"),
-        "timestamp": "2026-05-01T04:00:00+00:00",
+        "storage_timestamp_utc": "2026-05-01T04:00:00+00:00",
         "character_name": "TestCharacter",
         "prior_episode_state": None,
         "decontexualized_input": "I meant the other thing.",

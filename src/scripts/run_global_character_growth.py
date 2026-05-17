@@ -4,14 +4,16 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-from datetime import datetime, timedelta
-from zoneinfo import ZoneInfo
+from datetime import date, timedelta
 
 from scripts._db_export import configure_logging, configure_stdout, load_project_env
 
-from kazusa_ai_chatbot.config import CHARACTER_TIME_ZONE
 from kazusa_ai_chatbot.db import close_db
 from kazusa_ai_chatbot.global_character_growth import run_global_character_growth_pass
+from kazusa_ai_chatbot.time_boundary import (
+    local_time_context_from_storage_utc,
+    storage_utc_now_iso,
+)
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -83,8 +85,14 @@ def _date_or_previous(value: str) -> str:
 
     if value:
         return value
-    local_now = datetime.now(ZoneInfo(CHARACTER_TIME_ZONE))
-    previous_date = local_now.date() - timedelta(days=1)
+    storage_timestamp_utc = storage_utc_now_iso()
+    local_time_context = local_time_context_from_storage_utc(
+        storage_timestamp_utc,
+    )
+    current_local_date = date.fromisoformat(
+        local_time_context["current_local_datetime"][:10],
+    )
+    previous_date = current_local_date - timedelta(days=1)
     return_value = previous_date.isoformat()
     return return_value
 

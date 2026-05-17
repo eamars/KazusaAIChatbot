@@ -21,7 +21,8 @@ class TestIMProcessState:
     def test_has_required_input_fields(self):
         hints = typing.get_type_hints(IMProcessState)
         required_fields = [
-            "timestamp", "platform", "platform_message_id", "platform_user_id", "global_user_id",
+            "storage_timestamp_utc", "local_time_context", "platform",
+            "platform_message_id", "platform_user_id", "global_user_id",
             "user_name", "user_input", "message_envelope", "user_multimedia_input", "user_profile",
             "platform_bot_id", "character_name", "character_profile",
             "platform_channel_id", "channel_name", "chat_history_wide", "chat_history_recent", "reply_context",

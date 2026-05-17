@@ -12,7 +12,7 @@ from kazusa_ai_chatbot.cognition_episode import build_text_chat_cognitive_episod
 from kazusa_ai_chatbot.nodes import dialog_agent as dialog_module
 from kazusa_ai_chatbot.nodes import persona_supervisor2_cognition_l2c2 as l2c2_module
 from kazusa_ai_chatbot.nodes import persona_supervisor2_cognition_l3 as l3_module
-from kazusa_ai_chatbot.time_context import build_character_time_context
+from kazusa_ai_chatbot.time_boundary import build_turn_clock
 
 _ROOT = Path(__file__).resolve().parents[1]
 _LAST_USER_MESSAGE_KEY = "last_user" "_message"
@@ -110,13 +110,12 @@ def _character_profile() -> dict:
 
 def _minimal_text_chat_episode() -> dict:
     """Build a valid text-chat cognitive episode for direct L3 tests."""
-    timestamp = "2026-04-27T00:00:00+12:00"
-    time_context = build_character_time_context(timestamp)
+    turn_clock = build_turn_clock("2026-04-27 00:00:00")
     episode = build_text_chat_cognitive_episode(
         episode_id="episode-history-policy",
         percept_id="percept-history-policy",
-        timestamp=timestamp,
-        time_context=time_context,
+        storage_timestamp_utc=turn_clock["storage_timestamp_utc"],
+        local_time_context=turn_clock["local_time_context"],
         user_input="please answer",
         platform="qq",
         platform_channel_id="chan-1",
@@ -245,6 +244,7 @@ async def test_dialog_generator_payload_excludes_raw_history_and_monologue(monke
         "chat_history_recent": _history(),
         "channel_type": "group",
         "use_reply_feature": False,
+        "dialog_usage_mode": "live_visible_reply",
         "platform_user_id": "user-1",
         "platform_bot_id": "bot-1",
         "global_user_id": "global-user-1",
@@ -293,6 +293,7 @@ async def test_dialog_evaluator_payload_excludes_history_message_and_monologue(m
         },
         "chat_history_wide": _history(),
         "chat_history_recent": _history(),
+        "dialog_usage_mode": "live_visible_reply",
         "platform_user_id": "user-1",
         "platform_bot_id": "bot-1",
         "global_user_id": "global-user-1",

@@ -17,7 +17,7 @@ from kazusa_ai_chatbot.rag.user_memory_unit_retrieval import (
     empty_user_memory_context,
 )
 from kazusa_ai_chatbot.reflection_cycle.context import PromotedReflectionContext
-from kazusa_ai_chatbot.time_context import TimeContextDoc
+from kazusa_ai_chatbot.time_boundary import LocalTimeContextDoc
 
 ReflectionDryRunOutputMode = Literal["think_only", "preview", "silent"]
 ReflectionDryRunStatus = Literal[
@@ -64,8 +64,8 @@ class ReflectionCognitionDryRunAudit(TypedDict):
 def build_reflection_signal_cognitive_episode(
     *,
     promoted_reflection_context: PromotedReflectionContext,
-    timestamp: str,
-    time_context: TimeContextDoc,
+    storage_timestamp_utc: str,
+    local_time_context: LocalTimeContextDoc,
     output_mode: ReflectionDryRunOutputMode = "think_only",
 ) -> CognitiveEpisode:
     """Build a source-neutral cognitive episode for promoted reflection.
@@ -73,8 +73,8 @@ def build_reflection_signal_cognitive_episode(
     Args:
         promoted_reflection_context: Gated reflection context allowed into
             model-facing cognition prompts.
-        timestamp: UTC timestamp for the dry-run event.
-        time_context: Character-local time context associated with the event.
+        storage_timestamp_utc: Storage UTC timestamp for the dry-run event.
+        local_time_context: Configured-local time context for the event.
         output_mode: Audit-only cognition output mode.
 
     Returns:
@@ -129,8 +129,8 @@ def build_reflection_signal_cognitive_episode(
             "active_turn_conversation_row_ids": [],
             "debug_modes": {"think_only": True, "no_remember": True},
         },
-        "timestamp": timestamp,
-        "time_context": time_context,
+        "storage_timestamp_utc": storage_timestamp_utc,
+        "local_time_context": local_time_context,
     }
     validate_cognitive_episode(episode)
     return episode
@@ -141,8 +141,8 @@ async def run_reflection_cognition_dry_run(
     promoted_reflection_context: PromotedReflectionContext,
     character_profile: CharacterProfileDoc,
     user_profile: UserProfileDoc,
-    timestamp: str,
-    time_context: TimeContextDoc,
+    storage_timestamp_utc: str,
+    local_time_context: LocalTimeContextDoc,
     is_primary_interaction_busy: Callable[[], bool],
     call_cognition_subgraph_func: Callable[
         [GlobalPersonaState],
@@ -157,8 +157,8 @@ async def run_reflection_cognition_dry_run(
             model-facing cognition prompts.
         character_profile: Current character profile snapshot for cognition.
         user_profile: Reflection-cycle placeholder user profile.
-        timestamp: UTC timestamp for the dry-run event.
-        time_context: Character-local time context associated with the event.
+        storage_timestamp_utc: Storage UTC timestamp for the dry-run event.
+        local_time_context: Configured-local time context for the event.
         is_primary_interaction_busy: Probe for live interaction load.
         call_cognition_subgraph_func: Injected cognition callable.
         output_mode: Audit-only cognition output mode.
@@ -207,14 +207,14 @@ async def run_reflection_cognition_dry_run(
 
     episode = build_reflection_signal_cognitive_episode(
         promoted_reflection_context=promoted_reflection_context,
-        timestamp=timestamp,
-        time_context=time_context,
+        storage_timestamp_utc=storage_timestamp_utc,
+        local_time_context=local_time_context,
         output_mode=output_mode,
     )
     dry_run_state: GlobalPersonaState = {
         "character_profile": character_profile,
-        "timestamp": timestamp,
-        "time_context": time_context,
+        "storage_timestamp_utc": storage_timestamp_utc,
+        "local_time_context": local_time_context,
         "user_input": _REFLECTION_DRY_RUN_INPUT_TEXT,
         "prompt_message_context": {
             "body_text": "",

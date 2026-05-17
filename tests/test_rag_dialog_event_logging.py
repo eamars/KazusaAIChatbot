@@ -14,7 +14,7 @@ from kazusa_ai_chatbot.nodes import dialog_agent as dialog_module
 from kazusa_ai_chatbot.nodes import persona_supervisor2 as supervisor_module
 from kazusa_ai_chatbot.nodes import persona_supervisor2_rag_dispatch as dispatch_module
 from kazusa_ai_chatbot.nodes import persona_supervisor2_rag_supervisor2 as rag2_module
-from kazusa_ai_chatbot.time_context import build_character_time_context
+from kazusa_ai_chatbot.time_boundary import build_turn_clock
 
 
 class _StaticLLM:
@@ -44,13 +44,12 @@ def _serialized(value: object) -> str:
 def _minimal_episode() -> dict[str, object]:
     """Build a text-chat episode accepted by RAG request construction."""
 
-    timestamp = "2026-04-27T00:00:00+12:00"
-    time_context = build_character_time_context(timestamp)
+    turn_clock = build_turn_clock("2026-04-27 00:00:00")
     episode = build_text_chat_cognitive_episode(
         episode_id="episode-event-log",
         percept_id="percept-event-log",
-        timestamp=timestamp,
-        time_context=time_context,
+        storage_timestamp_utc=turn_clock["storage_timestamp_utc"],
+        local_time_context=turn_clock["local_time_context"],
         user_input="private stage input",
         platform="qq",
         platform_channel_id="private-channel",
@@ -71,8 +70,7 @@ def _minimal_episode() -> dict[str, object]:
 def _stage_1_state(*, referents: list[dict[str, object]]) -> dict[str, object]:
     """Build a persona state slice for direct stage-one RAG tests."""
 
-    timestamp = "2026-04-27T00:00:00+12:00"
-    time_context = build_character_time_context(timestamp)
+    turn_clock = build_turn_clock("2026-04-27 00:00:00")
     state = {
         "decontexualized_input": "private query text",
         "referents": referents,
@@ -88,8 +86,8 @@ def _stage_1_state(*, referents: list[dict[str, object]]) -> dict[str, object]:
         "global_user_id": "user-1",
         "user_name": "User",
         "user_profile": {"affinity": 500},
-        "timestamp": timestamp,
-        "time_context": time_context,
+        "storage_timestamp_utc": turn_clock["storage_timestamp_utc"],
+        "local_time_context": turn_clock["local_time_context"],
         "prompt_message_context": {
             "body_text": "private prompt context",
             "mentions": [],
@@ -169,6 +167,7 @@ def _dialog_global_state() -> dict[str, object]:
         "chat_history_recent": [],
         "debug_modes": {},
         "should_respond": True,
+        "dialog_usage_mode": "live_visible_reply",
         "channel_type": "group",
         "use_reply_feature": False,
         "platform_user_id": "platform-user-1",

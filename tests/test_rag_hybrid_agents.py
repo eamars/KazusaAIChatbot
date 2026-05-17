@@ -228,7 +228,7 @@ def test_conversation_search_reapplies_scope_time_and_literal_anchors() -> None:
             "platform_channel_id": "905393941",
             "global_user_id": "user-1",
             "conversation_user_scope": "current_user",
-            "time_context": {
+            "local_time_context": {
                 "current_local_datetime": "2026-05-12 08:40",
                 "current_local_weekday": "Tuesday",
             },

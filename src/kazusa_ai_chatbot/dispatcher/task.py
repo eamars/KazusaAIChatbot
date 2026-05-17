@@ -3,44 +3,16 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Optional
 
 from kazusa_ai_chatbot.db import ScheduledEventDoc
+from kazusa_ai_chatbot.time_boundary import (
+    normalize_storage_utc_iso,
+    parse_storage_utc_datetime,
+)
 
 BotPermissionRole = str
-
-
-def _to_utc_datetime(value: datetime) -> datetime:
-    """Normalize a datetime into an aware UTC value.
-
-    Args:
-        value: Datetime to normalize.
-
-    Returns:
-        A timezone-aware UTC datetime.
-    """
-
-    if value.tzinfo is None:
-        return_value = value.replace(tzinfo=timezone.utc)
-        return return_value
-    return_value = value.astimezone(timezone.utc)
-    return return_value
-
-
-def parse_iso_datetime(value: str) -> datetime:
-    """Parse an ISO-8601 string into a timezone-aware UTC datetime.
-
-    Args:
-        value: ISO-8601 timestamp string.
-
-    Returns:
-        Parsed UTC datetime.
-    """
-
-    normalized = value.replace("Z", "+00:00")
-    return_value = _to_utc_datetime(datetime.fromisoformat(normalized))
-    return return_value
 
 
 @dataclass(frozen=True)
@@ -90,7 +62,7 @@ class DispatchContext:
             source_message_id=doc["source_message_id"],
             guild_id=doc.get("guild_id"),
             bot_permission_role=doc["bot_role"],
-            now=parse_iso_datetime(doc["execute_at"]),
+            now=parse_storage_utc_datetime(doc["execute_at"]),
             source_channel_type=str(doc["source_channel_type"]),
             source_platform_bot_id=str(doc.get("source_platform_bot_id") or ""),
             source_character_name=str(doc.get("source_character_name") or ""),
@@ -124,10 +96,11 @@ class Task:
             A ``ScheduledEventDoc`` ready for ``scheduler.schedule_event``.
         """
 
+        execute_at_utc = normalize_storage_utc_iso(self.execute_at.isoformat())
         return_value = {
             "tool": self.tool,
             "args": self.args,
-            "execute_at": _to_utc_datetime(self.execute_at).isoformat(),
+            "execute_at": execute_at_utc,
             "status": "pending",
             "source_platform": ctx.source_platform,
             "source_channel_id": ctx.source_channel_id,
@@ -157,6 +130,6 @@ class Task:
         return_value = cls(
             tool=doc["tool"],
             args=dict(doc["args"]),
-            execute_at=parse_iso_datetime(doc["execute_at"]),
+            execute_at=parse_storage_utc_datetime(doc["execute_at"]),
         )
         return return_value

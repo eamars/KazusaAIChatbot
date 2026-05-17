@@ -24,9 +24,7 @@ from kazusa_ai_chatbot.rag.conversation_search_agent import ConversationSearchAg
 from kazusa_ai_chatbot.rag.helper_agent import BaseRAGHelperAgent
 from kazusa_ai_chatbot.rag.hybrid_retrieval import candidate_prompt_text
 from kazusa_ai_chatbot.rag.prompt_projection import project_selector_input_for_llm
-from kazusa_ai_chatbot.time_context import (
-    format_timestamp_for_llm,
-)
+from kazusa_ai_chatbot.time_boundary import format_storage_utc_for_llm
 from kazusa_ai_chatbot.utils import get_llm, parse_llm_json_output, text_or_empty
 
 logger = logging.getLogger(__name__)
@@ -973,7 +971,9 @@ def _aggregate_row_summary(row: dict[str, Any]) -> str:
     else:
         count_text = text_or_empty(message_count)
 
-    last_timestamp = format_timestamp_for_llm(text_or_empty(row.get("last_timestamp")))
+    last_timestamp = format_storage_utc_for_llm(
+        text_or_empty(row.get("last_timestamp"))
+    )
     parts = []
     if display_name:
         parts.append(display_name)

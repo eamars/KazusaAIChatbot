@@ -14,8 +14,9 @@ from kazusa_ai_chatbot.config import RAG_SUBAGENT_LLM_API_KEY, RAG_SUBAGENT_LLM_
 from kazusa_ai_chatbot.db import aggregate_conversation_by_user
 from kazusa_ai_chatbot.rag.helper_agent import BaseRAGHelperAgent
 from kazusa_ai_chatbot.rag.prompt_projection import project_runtime_context_for_llm
-from kazusa_ai_chatbot.time_context import (
-    local_date_bounds_to_utc_iso,
+from kazusa_ai_chatbot.time_boundary import (
+    local_date_bounds_to_storage_utc_iso,
+    parse_storage_utc_datetime,
 )
 from kazusa_ai_chatbot.utils import get_llm, parse_llm_json_output, text_or_empty
 
@@ -137,8 +138,8 @@ async def _extract_aggregate_args(task: str, context: dict[str, Any]) -> dict[st
     return return_value
 
 
-def _parse_current_timestamp(context: dict[str, Any]) -> datetime.datetime:
-    """Parse current timestamp from context, falling back to current UTC time.
+def _parse_current_timestamp_utc(context: dict[str, Any]) -> datetime.datetime:
+    """Parse the current storage UTC timestamp from runtime context.
 
     Args:
         context: Runtime context passed to the agent.
@@ -146,19 +147,8 @@ def _parse_current_timestamp(context: dict[str, Any]) -> datetime.datetime:
     Returns:
         Timezone-aware UTC datetime.
     """
-    raw_timestamp = str(context.get("current_timestamp") or "").strip()
-    if raw_timestamp:
-        try:
-            parsed = datetime.datetime.fromisoformat(raw_timestamp.replace("Z", "+00:00"))
-        except ValueError as exc:
-            logger.debug(f"Using current time for invalid aggregate timestamp: {exc}")
-            parsed = datetime.datetime.now(datetime.timezone.utc)
-    else:
-        parsed = datetime.datetime.now(datetime.timezone.utc)
-
-    if parsed.tzinfo is None:
-        parsed = parsed.replace(tzinfo=datetime.timezone.utc)
-    return_value = parsed.astimezone(datetime.timezone.utc)
+    current_timestamp_utc = text_or_empty(context.get("current_timestamp_utc"))
+    return_value = parse_storage_utc_datetime(current_timestamp_utc)
     return return_value
 
 
@@ -169,24 +159,38 @@ def _time_bounds(
 
     Args:
         time_window: One of recent, today, yesterday, or all.
-        context: Runtime context containing current_timestamp when available.
+        context: Runtime context containing current_timestamp_utc when available.
 
     Returns:
         Tuple of from_timestamp and to_timestamp strings, either of which may be None.
     """
-    now = _parse_current_timestamp(context)
     if time_window == "all":
         return_value = None, None
         return return_value
+
+    now_utc = _parse_current_timestamp_utc(context)
     if time_window == "recent":
-        return_value = (now - datetime.timedelta(days=7)).isoformat(), now.isoformat()
+        return_value = (
+            (now_utc - datetime.timedelta(days=7)).isoformat(),
+            now_utc.isoformat(),
+        )
         return return_value
 
-    time_context = context.get("time_context") or {}
-    local_date_str = str(time_context.get("current_local_datetime", "")).split(" ")[0]
+    local_time_context = context.get("local_time_context")
+    if isinstance(local_time_context, dict):
+        local_date_str = str(
+            local_time_context.get("current_local_datetime", "")
+        ).split(" ")[0]
+    else:
+        local_date_str = ""
+
+    if time_window in ("today", "yesterday") and not local_date_str:
+        return_value = None, None
+        return return_value
+
     if time_window == "today" and local_date_str:
-        today_start, _ = local_date_bounds_to_utc_iso(local_date_str)
-        return_value = today_start, now.isoformat()
+        today_start, _ = local_date_bounds_to_storage_utc_iso(local_date_str)
+        return_value = today_start, now_utc.isoformat()
         return return_value
     if time_window == "yesterday" and local_date_str:
         try:
@@ -195,17 +199,12 @@ def _time_bounds(
             pass
         else:
             yesterday_str = (local_date - datetime.timedelta(days=1)).isoformat()
-            yesterday_start, yesterday_end = local_date_bounds_to_utc_iso(yesterday_str)
+            yesterday_start, yesterday_end = local_date_bounds_to_storage_utc_iso(
+                yesterday_str
+            )
             return_value = yesterday_start, yesterday_end
             return return_value
-
-    start_of_today = now.replace(hour=0, minute=0, second=0, microsecond=0)
-    if time_window == "today":
-        return_value = start_of_today.isoformat(), now.isoformat()
-        return return_value
-
-    start_of_yesterday = start_of_today - datetime.timedelta(days=1)
-    return_value = start_of_yesterday.isoformat(), start_of_today.isoformat()
+    return_value = None, None
     return return_value
 
 

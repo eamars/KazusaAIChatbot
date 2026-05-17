@@ -18,22 +18,30 @@ from kazusa_ai_chatbot.cognition_episode import (
     project_text_chat_compatibility_fields,
     validate_cognitive_episode,
 )
+from kazusa_ai_chatbot.nodes.persona_supervisor2_consolidator_schema import (
+    ConsolidatorState,
+)
+from kazusa_ai_chatbot.nodes.persona_supervisor2_schema import (
+    CognitionState,
+    GlobalPersonaState,
+)
+from kazusa_ai_chatbot.state import IMProcessState
 
 
-def _time_context() -> dict[str, str]:
-    time_context = {
+def _local_time_context() -> dict[str, str]:
+    local_time_context = {
         "current_local_datetime": "2026-05-09 19:30",
         "current_local_weekday": "Saturday",
     }
-    return time_context
+    return local_time_context
 
 
 def _builder_kwargs() -> dict:
     kwargs = {
         "episode_id": "episode-1",
         "percept_id": "percept-1",
-        "timestamp": "2026-05-09T07:30:00+00:00",
-        "time_context": _time_context(),
+        "storage_timestamp_utc": "2026-05-09T07:30:00+00:00",
+        "local_time_context": _local_time_context(),
         "user_input": "hello from current text chat",
         "platform": "debug",
         "platform_channel_id": "debug-private-1",
@@ -89,12 +97,12 @@ def test_public_contract_shapes_expose_expected_fields() -> None:
         "percepts",
         "target_scope",
         "origin_metadata",
-        "timestamp",
-        "time_context",
+        "storage_timestamp_utc",
+        "local_time_context",
     }
     assert set(TextChatCompatibilityProjection.__annotations__) == {
-        "timestamp",
-        "time_context",
+        "storage_timestamp_utc",
+        "local_time_context",
         "user_input",
         "platform",
         "platform_channel_id",
@@ -106,6 +114,16 @@ def test_public_contract_shapes_expose_expected_fields() -> None:
         "global_user_id",
         "user_name",
     }
+    for state_schema in (
+        IMProcessState,
+        GlobalPersonaState,
+        CognitionState,
+        ConsolidatorState,
+    ):
+        assert "storage_timestamp_utc" in state_schema.__annotations__
+        assert "local_time_context" in state_schema.__annotations__
+        assert "timestamp" not in state_schema.__annotations__
+        assert "time_context" not in state_schema.__annotations__
 
 
 def test_text_chat_builder_creates_valid_user_message_episode() -> None:
@@ -117,8 +135,8 @@ def test_text_chat_builder_creates_valid_user_message_episode() -> None:
     assert episode["trigger_source"] == "user_message"
     assert episode["input_sources"] == ["dialog_text"]
     assert episode["output_mode"] == "visible_reply"
-    assert episode["timestamp"] == "2026-05-09T07:30:00+00:00"
-    assert episode["time_context"] == _time_context()
+    assert episode["storage_timestamp_utc"] == "2026-05-09T07:30:00+00:00"
+    assert episode["local_time_context"] == _local_time_context()
     assert episode["target_scope"] == {
         "platform": "debug",
         "platform_channel_id": "debug-private-1",
@@ -170,8 +188,8 @@ def test_compatibility_projection_returns_current_text_chat_fields_only() -> Non
 
     assert set(projection) == set(TextChatCompatibilityProjection.__annotations__)
     assert projection == {
-        "timestamp": "2026-05-09T07:30:00+00:00",
-        "time_context": _time_context(),
+        "storage_timestamp_utc": "2026-05-09T07:30:00+00:00",
+        "local_time_context": _local_time_context(),
         "user_input": "hello from current text chat",
         "platform": "debug",
         "platform_channel_id": "debug-private-1",
@@ -229,7 +247,16 @@ def test_validate_rejects_duplicate_percept_ids() -> None:
 
 def test_validate_rejects_missing_time_context_fields() -> None:
     episode = deepcopy(_valid_episode())
-    del episode["time_context"]["current_local_weekday"]
+    del episode["local_time_context"]["current_local_weekday"]
+
+    with pytest.raises(CognitiveEpisodeValidationError):
+        validate_cognitive_episode(episode)
+
+
+def test_validate_rejects_legacy_episode_time_fields() -> None:
+    episode = deepcopy(_valid_episode())
+    episode["timestamp"] = "2026-05-09T07:30:00+00:00"
+    episode["time_context"] = _local_time_context()
 
     with pytest.raises(CognitiveEpisodeValidationError):
         validate_cognitive_episode(episode)

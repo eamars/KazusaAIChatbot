@@ -6,9 +6,10 @@ import argparse
 import asyncio
 import json
 from collections.abc import Mapping, Sequence
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+
+from kazusa_ai_chatbot.time_boundary import storage_utc_now_iso
 
 PROFILE_ROW_TEXT_LIMIT = 180
 POSITIVE_CASE_KIND = "positive"
@@ -47,7 +48,7 @@ def _identity_text(value: object) -> str:
 def _utc_now_iso() -> str:
     """Return the current UTC timestamp for profile artifacts."""
 
-    return_value = datetime.now(timezone.utc).isoformat()
+    return_value = storage_utc_now_iso()
     return return_value
 
 

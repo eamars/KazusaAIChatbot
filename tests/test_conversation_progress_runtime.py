@@ -37,7 +37,7 @@ async def test_runtime_load_projects_empty_state(monkeypatch) -> None:
 
     result = await progress_runtime.load_progress_context(
         scope=ConversationProgressScope("qq", "channel-1", "user-1"),
-        current_timestamp="2026-04-28T04:00:00+00:00",
+        current_timestamp_utc="2026-04-28T04:00:00+00:00",
     )
 
     assert result["episode_state"] is None
@@ -69,7 +69,7 @@ async def test_runtime_record_writes_and_updates_cache(monkeypatch) -> None:
     result = await progress_runtime.record_turn_progress(
         record_input={
             "scope": scope,
-            "timestamp": "2026-04-28T04:00:00+00:00",
+            "storage_timestamp_utc": "2026-04-28T04:00:00+00:00",
             "character_name": "Character",
             "prior_episode_state": None,
             "decontexualized_input": "what is the third point?",
@@ -116,7 +116,7 @@ async def test_runtime_record_does_not_cache_stale_write(monkeypatch) -> None:
     result = await progress_runtime.record_turn_progress(
         record_input={
             "scope": ConversationProgressScope("qq", "channel-1", "user-1"),
-            "timestamp": "2026-04-28T04:00:00+00:00",
+            "storage_timestamp_utc": "2026-04-28T04:00:00+00:00",
             "character_name": "Character",
             "prior_episode_state": None,
             "decontexualized_input": "hello",

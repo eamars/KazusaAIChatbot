@@ -704,21 +704,23 @@ class LiveContextAgent(BaseRAGHelperAgent):
                 )
                 return result
 
-            time_context = _validated_runtime_time_context(context.get("time_context"))
-            if time_context is None:
+            local_time_context = _validated_runtime_time_context(
+                context.get("local_time_context")
+            )
+            if local_time_context is None:
                 result = self._missing_target_result(
                     source_policy=(
                         "current-turn runtime state missing or malformed "
                         "character-local time context"
                     ),
-                    missing_context=["time_context"],
+                    missing_context=["local_time_context"],
                     supporting_workers=supporting_workers,
                     worker_payloads=worker_payloads,
                 )
                 return result
             result = self._resolved_runtime_result(
                 fact_type=fact_type,
-                time_context=time_context,
+                time_context=local_time_context,
             )
             return result
 

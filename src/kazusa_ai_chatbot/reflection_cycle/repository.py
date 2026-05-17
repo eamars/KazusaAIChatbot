@@ -5,9 +5,8 @@ from __future__ import annotations
 import hashlib
 import json
 import re
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 from typing import Any
-from zoneinfo import ZoneInfo
 
 from kazusa_ai_chatbot.config import CHARACTER_TIME_ZONE
 from kazusa_ai_chatbot.db import reflection_cycle as reflection_store
@@ -30,6 +29,12 @@ from kazusa_ai_chatbot.reflection_cycle.models import (
     ReflectionLLMResult,
     ReflectionScopeInput,
 )
+from kazusa_ai_chatbot.time_boundary import (
+    local_time_context_from_storage_utc,
+    normalize_storage_utc_iso,
+    parse_storage_utc_datetime,
+    storage_utc_now_iso,
+)
 
 
 _HOURLY_SCOPE_SUFFIX_RE = re.compile(r"_[0-9]{8}T[0-9]{2}Z$")
@@ -38,8 +43,8 @@ _HOURLY_SCOPE_SUFFIX_RE = re.compile(r"_[0-9]{8}T[0-9]{2}Z$")
 def now_iso() -> str:
     """Return the current UTC timestamp for reflection-run documents."""
 
-    current_time = datetime.now(timezone.utc).isoformat()
-    return current_time
+    current_time_utc = storage_utc_now_iso()
+    return current_time_utc
 
 
 def deterministic_run_id(parts: list[str]) -> str:
@@ -104,11 +109,8 @@ def daily_global_promotion_run_id(
 def parse_timestamp(value: str) -> datetime:
     """Parse an ISO timestamp and normalize it to UTC."""
 
-    parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
-    if parsed.tzinfo is None:
-        parsed = parsed.replace(tzinfo=timezone.utc)
-    normalized = parsed.astimezone(timezone.utc)
-    return normalized
+    timestamp_utc = parse_storage_utc_datetime(value)
+    return timestamp_utc
 
 
 def hour_start_for_scope(scope: ReflectionScopeInput) -> datetime:
@@ -126,8 +128,11 @@ def character_local_date_for_utc(
 ) -> str:
     """Return the character-local calendar date for a UTC timestamp."""
 
-    local_time = value.astimezone(ZoneInfo(time_zone))
-    local_date = local_time.date().isoformat()
+    if time_zone != CHARACTER_TIME_ZONE:
+        raise ValueError("only the configured character local clock is supported")
+    timestamp_utc = normalize_storage_utc_iso(value.isoformat())
+    local_time_context = local_time_context_from_storage_utc(timestamp_utc)
+    local_date = local_time_context["current_local_datetime"][:10]
     return local_date
 
 

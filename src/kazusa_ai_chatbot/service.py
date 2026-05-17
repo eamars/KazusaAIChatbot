@@ -16,7 +16,6 @@ import traceback
 from uuid import uuid4
 from collections.abc import Mapping
 from contextlib import asynccontextmanager, suppress
-from datetime import datetime, timezone
 from typing import Literal
 
 from fastapi import FastAPI, BackgroundTasks
@@ -68,7 +67,11 @@ from kazusa_ai_chatbot.db import (
 )
 from kazusa_ai_chatbot.mcp_client import mcp_manager
 from kazusa_ai_chatbot.state import IMProcessState, MultiMediaDoc, DebugModes, ReplyContext
-from kazusa_ai_chatbot.time_context import build_character_time_context
+from kazusa_ai_chatbot.time_boundary import (
+    parse_storage_utc_datetime,
+    storage_utc_now,
+    storage_utc_now_iso,
+)
 from kazusa_ai_chatbot.chat_input_queue import ChatInputQueue, QueuedChatItem
 from kazusa_ai_chatbot.message_envelope import (
     MessageEnvelope,
@@ -195,26 +198,21 @@ def _queue_wait_ms(item: QueuedChatItem) -> int:
     """Return how long a queued item waited before service processing.
 
     Args:
-        item: Queued chat item assigned a timestamp at enqueue time.
+        item: Queued chat item assigned storage UTC time at enqueue time.
 
     Returns:
-        Non-negative queue wait duration in milliseconds. Invalid external
-        timestamps are treated as unknown and reported as zero.
+        Non-negative queue wait duration in milliseconds. Invalid storage UTC
+        values are treated as unknown and reported as zero.
     """
 
-    timestamp = item.timestamp
-    if timestamp.endswith("Z"):
-        timestamp = f"{timestamp[:-1]}+00:00"
     try:
-        queued_at = datetime.fromisoformat(timestamp)
+        queued_at = parse_storage_utc_datetime(item.storage_timestamp_utc)
     except ValueError:
         return_value = 0
         return return_value
 
-    if queued_at.tzinfo is None:
-        queued_at = queued_at.replace(tzinfo=timezone.utc)
-    now = datetime.now(timezone.utc)
-    wait_seconds = max(0.0, (now - queued_at.astimezone(timezone.utc)).total_seconds())
+    now = storage_utc_now()
+    wait_seconds = max(0.0, (now - queued_at).total_seconds())
     wait_ms = int(wait_seconds * MILLISECONDS_PER_SECOND)
     return wait_ms
 
@@ -307,7 +305,7 @@ async def load_conversation_episode_state(state: IMProcessState) -> dict:
     )
     load_result = await load_progress_context(
         scope=scope,
-        current_timestamp=state["timestamp"],
+        current_timestamp_utc=state["storage_timestamp_utc"],
     )
     progress = load_result["conversation_progress"]
     logger.info(
@@ -450,7 +448,7 @@ async def _save_assistant_message(result: dict) -> None:
         result,
         ensure_character_global_identity_func=_ensure_character_global_identity,
         save_conversation_func=save_conversation,
-        now_func=lambda: datetime.now(timezone.utc),
+        now_func=storage_utc_now,
         logger=logger,
     )
 
@@ -668,7 +666,7 @@ async def _save_user_message_from_item(
     """Persist one queued user message.
 
     Args:
-        item: Queued chat item containing the request and timestamp.
+        item: Queued chat item containing the request and storage UTC time.
         global_user_id: Resolved global user identifier.
         reply_context: Adapter-supplied reply metadata after compacting.
         message_envelope: Envelope after service-side identity resolution, when
@@ -1134,7 +1132,7 @@ async def _process_queued_chat_item(item: QueuedChatItem) -> None:
 
         logger.debug(f'Chat request: platform={req.platform} channel={req.platform_channel_id or "<dm>"} message={req.platform_message_id or "<none>"} user={req.platform_user_id} global_user={global_user_id} content_type={req.content_type} attachments={len(message_envelope["attachments"])} media_attachments={len(multimedia_input)} history_wide={len(chat_history_wide)} history_recent={len(chat_history_recent)} reply_context={log_preview(reply_context)} debug_modes={active_flags} collapsed={is_collapsed_turn} collapsed_count={len(item.collapsed_items)} content={log_preview(user_input)}')
 
-        time_context = build_character_time_context(item.timestamp)
+        local_time_context = item.local_time_context
         try:
             promoted_reflection_context = await build_promoted_reflection_context()
         except Exception as exc:
@@ -1175,8 +1173,8 @@ async def _process_queued_chat_item(item: QueuedChatItem) -> None:
         episode: CognitiveEpisode = build_text_chat_cognitive_episode(
             episode_id=episode_id,
             percept_id=percept_id,
-            timestamp=item.timestamp,
-            time_context=time_context,
+            storage_timestamp_utc=item.storage_timestamp_utc,
+            local_time_context=local_time_context,
             user_input=user_input,
             platform=req.platform,
             platform_channel_id=req.platform_channel_id,
@@ -1198,8 +1196,8 @@ async def _process_queued_chat_item(item: QueuedChatItem) -> None:
         stages_reached.append("episode_built")
 
         initial_state: IMProcessState = {
-            "timestamp": item.timestamp,
-            "time_context": time_context,
+            "storage_timestamp_utc": item.storage_timestamp_utc,
+            "local_time_context": local_time_context,
             "platform": req.platform,
             "platform_message_id": req.platform_message_id,
             "active_turn_platform_message_ids": active_turn_platform_message_ids,
@@ -2008,7 +2006,7 @@ async def delivery_receipt(
         Update status for the matching assistant conversation row.
     """
 
-    delivered_at = req.delivered_at or datetime.now(timezone.utc).isoformat()
+    delivered_at = req.delivered_at or storage_utc_now_iso()
     updated = await apply_assistant_delivery_receipt(
         platform=req.platform,
         platform_channel_id=req.platform_channel_id,

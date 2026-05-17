@@ -5,7 +5,6 @@ from __future__ import annotations
 import json
 import logging
 import os
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -20,6 +19,10 @@ from kazusa_ai_chatbot.config import (
 )
 from kazusa_ai_chatbot.nodes.dialog_agent import dialog_agent
 from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition_l3 import call_content_anchor_agent
+from kazusa_ai_chatbot.time_boundary import (
+    build_turn_clock_from_storage_utc,
+    storage_utc_now_iso,
+)
 from kazusa_ai_chatbot.utils import get_llm, load_personality, parse_llm_json_output
 from tests.llm_trace import write_llm_trace
 
@@ -149,13 +152,13 @@ def _build_character_profile() -> dict:
     return profile
 
 
-def _msg(role: str, content: str, timestamp: str) -> dict:
+def _msg(role: str, content: str, timestamp_utc: str) -> dict:
     """Build one prompt-facing conversation-history message.
 
     Args:
         role: Message role, either user or assistant.
         content: Message content.
-        timestamp: ISO-ish timestamp for the fixture.
+        timestamp_utc: Storage UTC timestamp for the fixture.
 
     Returns:
         Conversation history item in the shape used by cognition/dialog tests.
@@ -169,7 +172,7 @@ def _msg(role: str, content: str, timestamp: str) -> dict:
         "display_name": display_name,
         "platform_user_id": platform_user_id,
         "global_user_id": "flow-global-user",
-        "timestamp": timestamp,
+        "timestamp": timestamp_utc,
         "reply_context": {},
     }
 
@@ -313,9 +316,12 @@ def _base_state() -> dict:
 
     user_input = '那这一条到底怎么写？别再让我从头顺一遍了。'
     history = _thesis_history()
+    storage_timestamp_utc = storage_utc_now_iso()
+    turn_clock = build_turn_clock_from_storage_utc(storage_timestamp_utc)
     return {
         "character_profile": _build_character_profile(),
-        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "storage_timestamp_utc": turn_clock["storage_timestamp_utc"],
+        "local_time_context": turn_clock["local_time_context"],
         "user_input": user_input,
         "user_multimedia_input": [],
         "platform": "test",
@@ -475,9 +481,12 @@ def _release_case_state(case: dict[str, Any]) -> dict:
 
     profile = _build_character_profile()
     profile["reflection_summary"] = case["reflection_summary"]
+    storage_timestamp_utc = storage_utc_now_iso()
+    turn_clock = build_turn_clock_from_storage_utc(storage_timestamp_utc)
     return {
         "character_profile": profile,
-        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "storage_timestamp_utc": turn_clock["storage_timestamp_utc"],
+        "local_time_context": turn_clock["local_time_context"],
         "user_input": case["user_input"],
         "user_multimedia_input": [],
         "platform": "test",

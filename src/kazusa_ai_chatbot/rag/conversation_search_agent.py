@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
-from datetime import datetime, timedelta, timezone
+from datetime import timedelta
 from typing import Any
 
 from langchain_core.messages import HumanMessage, SystemMessage
@@ -48,8 +48,9 @@ from kazusa_ai_chatbot.rag.prompt_projection import (
 from kazusa_ai_chatbot.rag.search_runtime import (
     apply_conversation_runtime_constraints,
 )
-from kazusa_ai_chatbot.time_context import (
-    structured_llm_time_to_utc_iso,
+from kazusa_ai_chatbot.time_boundary import (
+    local_llm_datetime_to_storage_utc_iso,
+    parse_storage_utc_datetime,
 )
 from kazusa_ai_chatbot.utils import get_llm, parse_llm_json_output, text_or_empty
 
@@ -223,7 +224,7 @@ def _normalize_args(raw_args: dict[str, Any]) -> dict[str, Any]:
         if not value:
             continue
         try:
-            args[key] = structured_llm_time_to_utc_iso(value)
+            args[key] = local_llm_datetime_to_storage_utc_iso(value)
         except ValueError as exc:
             logger.debug(f"Dropping invalid {key} from LLM output: {exc}")
 
@@ -505,19 +506,11 @@ def _neighbor_time_bounds(
         return_value = "", ""
         return return_value
 
-    normalized = timestamp
-    if normalized.endswith("Z") or normalized.endswith("z"):
-        normalized = normalized[:-1] + "+00:00"
     try:
-        center = datetime.fromisoformat(normalized)
+        center = parse_storage_utc_datetime(timestamp)
     except ValueError:
         return_value = "", ""
         return return_value
-    if center.tzinfo is None:
-        return_value = "", ""
-        return return_value
-
-    center = center.astimezone(timezone.utc)
     window = timedelta(minutes=window_minutes)
     from_timestamp = (center - window).strftime("%Y-%m-%dT%H:%M:%S+00:00")
     to_timestamp = (center + window).strftime("%Y-%m-%dT%H:%M:%S+00:00")

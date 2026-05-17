@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
 import os
 
 import httpx
@@ -19,6 +18,10 @@ from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition_l2 import (
 )
 from kazusa_ai_chatbot.rag.user_memory_unit_retrieval import (
     empty_user_memory_context,
+)
+from kazusa_ai_chatbot.time_boundary import (
+    build_turn_clock_from_storage_utc,
+    storage_utc_now_iso,
 )
 from tests.llm_trace import write_llm_trace
 
@@ -151,7 +154,7 @@ def _history_row(
     global_user_id: str,
     display_name: str,
     content: str,
-    timestamp: str,
+    timestamp_utc: str,
 ) -> dict:
     """Build a compact recent-history row for cognition probes.
 
@@ -161,7 +164,7 @@ def _history_row(
         global_user_id: Internal author UUID.
         display_name: Display name shown in the group.
         content: Prompt-facing text content.
-        timestamp: ISO timestamp.
+        timestamp_utc: Storage UTC timestamp.
 
     Returns:
         A trimmed row suitable for cognition history fixtures.
@@ -174,7 +177,7 @@ def _history_row(
         "display_name": display_name,
         "content": content,
         "body_text": content,
-        "timestamp": timestamp,
+        "timestamp": timestamp_utc,
         "reply_context": {},
         "addressed_to_global_user_ids": [],
         "broadcast": False,
@@ -192,7 +195,7 @@ def _repair_history() -> list[dict]:
             global_user_id=_BLANK_USER_PROFILE["global_user_id"],
             display_name="ㅤ",
             content="我的伙伴呢，出来冒个泡",
-            timestamp="2026-04-30T23:21:05.879167+00:00",
+            timestamp_utc="2026-04-30T23:21:05.879167+00:00",
         ),
         _history_row(
             role="assistant",
@@ -200,7 +203,7 @@ def _repair_history() -> list[dict]:
             global_user_id=_CHARACTER_GLOBAL_USER_ID,
             display_name=_DB_CHARACTER_PROFILE["name"],
             content="哈？我的伙伴？\n谁批准你这么叫的啊",
-            timestamp="2026-04-30T23:22:09.130722+00:00",
+            timestamp_utc="2026-04-30T23:22:09.130722+00:00",
         ),
         _history_row(
             role="user",
@@ -208,7 +211,7 @@ def _repair_history() -> list[dict]:
             global_user_id=_BLANK_USER_PROFILE["global_user_id"],
             display_name="ㅤ",
             content="你bot分不清人啊",
-            timestamp="2026-04-30T23:22:41.000000+00:00",
+            timestamp_utc="2026-04-30T23:22:41.000000+00:00",
         ),
         _history_row(
             role="user",
@@ -216,7 +219,7 @@ def _repair_history() -> list[dict]:
             global_user_id=_OWNER_USER_PROFILE["global_user_id"],
             display_name="蚝爹油",
             content="千纱千纱，这算是误会，咱们这次就别继续纠结这个了",
-            timestamp="2026-05-01T04:50:18.000000+00:00",
+            timestamp_utc="2026-05-01T04:50:18.000000+00:00",
         ),
         _history_row(
             role="user",
@@ -224,7 +227,7 @@ def _repair_history() -> list[dict]:
             global_user_id=_OWNER_USER_PROFILE["global_user_id"],
             display_name="蚝爹油",
             content="他刚刚在喊他自己的bot，没有在喊你",
-            timestamp="2026-05-01T04:55:05.000000+00:00",
+            timestamp_utc="2026-05-01T04:55:05.000000+00:00",
         ),
     ]
     return history
@@ -289,9 +292,12 @@ def _cognition_state(
         Minimal ``CognitionState`` fields needed by L1 and L2 handlers.
     """
 
+    storage_timestamp_utc = storage_utc_now_iso()
+    turn_clock = build_turn_clock_from_storage_utc(storage_timestamp_utc)
     state = {
         "character_profile": _DB_CHARACTER_PROFILE,
-        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "storage_timestamp_utc": turn_clock["storage_timestamp_utc"],
+        "local_time_context": turn_clock["local_time_context"],
         "platform": "qq",
         "platform_channel_id": _CHANNEL_ID,
         "platform_user_id": platform_user_id,

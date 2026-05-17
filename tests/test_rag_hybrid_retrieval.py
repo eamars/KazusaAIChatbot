@@ -13,13 +13,13 @@ def _row(
     text: str,
     *,
     score: float = 0.0,
-    timestamp: str = "2026-05-11T09:00:00+00:00",
+    timestamp_utc: str = "2026-05-11T09:00:00+00:00",
 ) -> dict[str, object]:
     return {
         "platform_message_id": message_id,
         "body_text": text,
         "display_name": "Tester",
-        "timestamp": timestamp,
+        "timestamp": timestamp_utc,
         "score": score,
     }
 

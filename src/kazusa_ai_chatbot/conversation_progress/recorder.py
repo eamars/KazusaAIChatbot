@@ -26,7 +26,7 @@ from kazusa_ai_chatbot.nodes.boundary_profile import (
     get_relationship_priority_description,
     get_self_integrity_description,
 )
-from kazusa_ai_chatbot.time_context import format_timestamp_for_llm
+from kazusa_ai_chatbot.time_boundary import format_storage_utc_for_llm
 from kazusa_ai_chatbot.utils import get_llm, log_preview, parse_llm_json_output
 
 logger = logging.getLogger(__name__)
@@ -206,9 +206,9 @@ def _project_recorder_chat_history_row(
         "speaker_kind": speaker_kind,
         "body_text": body_text,
     }
-    timestamp = format_timestamp_for_llm(row.get("timestamp"))
-    if timestamp:
-        projected_row["timestamp"] = timestamp
+    timestamp_local = format_storage_utc_for_llm(row.get("timestamp"))
+    if timestamp_local:
+        projected_row["timestamp"] = timestamp_local
     return projected_row
 
 
@@ -247,8 +247,8 @@ async def record_with_llm(record_input: ConversationProgressRecordInput) -> dict
     }
     character_name = record_input["character_name"]
     human_payload = {
-        "current_turn_timestamp": format_timestamp_for_llm(
-            record_input["timestamp"]
+        "current_turn_timestamp": format_storage_utc_for_llm(
+            record_input["storage_timestamp_utc"]
         ),
         "prior_episode_state": build_recorder_prior_state(
             record_input["prior_episode_state"],

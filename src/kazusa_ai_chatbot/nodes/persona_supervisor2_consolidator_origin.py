@@ -22,7 +22,7 @@ class ConsolidationOriginMetadata(TypedDict):
     trigger_source: TriggerSource
     input_sources: list[InputSource]
     output_mode: OutputMode
-    timestamp: str
+    storage_timestamp_utc: str
     platform: str
     platform_channel_id: str
     channel_type: str
@@ -164,7 +164,7 @@ def _project_consolidation_origin_metadata(
         "trigger_source": episode["trigger_source"],
         "input_sources": list(episode["input_sources"]),
         "output_mode": episode["output_mode"],
-        "timestamp": episode["timestamp"],
+        "storage_timestamp_utc": episode["storage_timestamp_utc"],
         "platform": target_scope["platform"],
         "platform_channel_id": target_scope["platform_channel_id"],
         "channel_type": target_scope["channel_type"],

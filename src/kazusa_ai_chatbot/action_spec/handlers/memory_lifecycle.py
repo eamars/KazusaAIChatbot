@@ -12,6 +12,7 @@ from kazusa_ai_chatbot.action_spec.models import (
 from kazusa_ai_chatbot.db.user_memory_units import (
     update_user_memory_unit_lifecycle,
 )
+from kazusa_ai_chatbot.time_boundary import normalize_storage_utc_iso
 
 
 def map_lifecycle_decision_to_status(decision: str) -> str:
@@ -43,13 +44,14 @@ def validate_memory_lifecycle_action(
 def build_user_memory_lifecycle_update(
     action_spec: dict[str, Any],
     *,
-    timestamp: str,
+    storage_timestamp_utc: str,
     action_attempt_id: str,
 ) -> dict[str, Any]:
     """Build the narrow repository call payload for one lifecycle action."""
 
-    if not timestamp.strip():
-        raise ActionValidationError("timestamp: expected non-empty string")
+    normalized_storage_timestamp_utc = _normalize_storage_timestamp(
+        storage_timestamp_utc,
+    )
     if not action_attempt_id.strip():
         raise ActionValidationError("action_attempt_id: expected non-empty string")
     validated = validate_memory_lifecycle_action(action_spec)
@@ -59,7 +61,7 @@ def build_user_memory_lifecycle_update(
     update = {
         "unit_id": str(params["unit_id"]),
         "status": status,
-        "timestamp": timestamp,
+        "timestamp": normalized_storage_timestamp_utc,
         "reason": str(validated["reason"]),
         "action_attempt_id": action_attempt_id,
         "due_at": params.get("due_at"),
@@ -70,20 +72,20 @@ def build_user_memory_lifecycle_update(
 async def execute_user_memory_lifecycle_action(
     action_spec: dict[str, Any],
     *,
-    timestamp: str,
+    storage_timestamp_utc: str,
     action_attempt_id: str,
 ) -> dict[str, Any]:
     """Execute a validated memory lifecycle action through its DB owner."""
 
     update = build_user_memory_lifecycle_update(
         action_spec,
-        timestamp=timestamp,
+        storage_timestamp_utc=storage_timestamp_utc,
         action_attempt_id=action_attempt_id,
     )
     result = await update_user_memory_unit_lifecycle(
         update["unit_id"],
         status=update["status"],
-        timestamp=update["timestamp"],
+        storage_timestamp_utc=update["timestamp"],
         reason=update["reason"],
         action_attempt_id=update["action_attempt_id"],
         due_at=update["due_at"],
@@ -167,3 +169,17 @@ def _reject_evolving_memory_targets(action_spec: dict[str, Any]) -> None:
     params = action_spec.get("params")
     if isinstance(params, dict) and params.get("memory_kind") == "EvolvingMemoryDoc":
         raise ActionValidationError("EvolvingMemoryDoc targets are unsupported")
+
+
+def _normalize_storage_timestamp(storage_timestamp_utc: str) -> str:
+    """Normalize an action audit timestamp before persistence."""
+
+    try:
+        normalized_storage_timestamp_utc = normalize_storage_utc_iso(
+            storage_timestamp_utc,
+        )
+    except ValueError as exc:
+        raise ActionValidationError(
+            f"storage_timestamp_utc: invalid storage UTC timestamp: {exc}"
+        ) from exc
+    return normalized_storage_timestamp_utc

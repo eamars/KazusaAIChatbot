@@ -22,6 +22,7 @@ from scripts._db_export import (
     write_json_export,
 )
 from kazusa_ai_chatbot.db import close_db, get_conversation_history
+from kazusa_ai_chatbot.time_boundary import normalize_storage_utc_iso
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -56,10 +57,18 @@ async def main() -> None:
     load_project_env()
 
     now = utc_now()
-    from_timestamp = args.from_timestamp
+    from_timestamp_utc = (
+        normalize_storage_utc_iso(args.from_timestamp)
+        if args.from_timestamp
+        else None
+    )
     if args.hours is not None:
-        from_timestamp = timestamp_hours_ago(args.hours, now=now)
-    to_timestamp = args.to_timestamp or now.isoformat()
+        from_timestamp_utc = timestamp_hours_ago(args.hours, now=now)
+    to_timestamp_utc = (
+        normalize_storage_utc_iso(args.to_timestamp)
+        if args.to_timestamp
+        else now.isoformat()
+    )
     exclude_fields = [] if args.include_embeddings else list(DEFAULT_EXCLUDED_FIELDS)
     output_path = args.output or default_output_path("chat_history", args.platform_channel_id)
 
@@ -68,15 +77,15 @@ async def main() -> None:
             platform=args.platform,
             platform_channel_id=args.platform_channel_id,
             limit=args.limit,
-            from_timestamp=from_timestamp,
-            to_timestamp=to_timestamp,
+            from_timestamp=from_timestamp_utc,
+            to_timestamp=to_timestamp_utc,
         )
         query = {
             "collection": "conversation_history",
             "platform": args.platform,
             "platform_channel_id": args.platform_channel_id,
-            "from_timestamp": from_timestamp,
-            "to_timestamp": to_timestamp,
+            "from_timestamp": from_timestamp_utc,
+            "to_timestamp": to_timestamp_utc,
             "limit": args.limit,
             "sort": "timestamp ascending after selecting latest matching rows",
         }

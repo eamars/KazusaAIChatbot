@@ -28,8 +28,8 @@ def _base_state():
         "current_local_weekday": "Monday",
     }
     state = {
-        "timestamp": "2024-01-01T00:00:00Z",
-        "time_context": time_context,
+        "storage_timestamp_utc": "2024-01-01T00:00:00Z",
+        "local_time_context": time_context,
         "platform": "discord",
         "platform_message_id": "msg_123",
         "platform_user_id": "user_123",
@@ -73,8 +73,8 @@ def _base_state():
     state["cognitive_episode"] = build_text_chat_cognitive_episode(
         episode_id="episode-msg_123",
         percept_id="percept-msg_123-dialog",
-        timestamp=state["timestamp"],
-        time_context=time_context,
+        storage_timestamp_utc=state["storage_timestamp_utc"],
+        local_time_context=time_context,
         user_input=state["user_input"],
         platform=state["platform"],
         platform_channel_id=state["platform_channel_id"],
@@ -94,7 +94,7 @@ def _history_row(
     *,
     role: str = "user",
     platform_user_id: str = "user_123",
-    timestamp: str = "2026-04-27T10:00:00+00:00",
+    timestamp_utc: str = "2026-04-27T10:00:00+00:00",
     reply_context: dict | None = None,
     addressed_to_global_user_ids: list[str] | None = None,
     content: str = "",
@@ -105,7 +105,7 @@ def _history_row(
     Args:
         role: Conversation role.
         platform_user_id: Platform user id that produced the row.
-        timestamp: ISO timestamp for active-window selection.
+        timestamp_utc: Storage UTC timestamp for active-window selection.
         reply_context: Optional structured reply metadata.
         addressed_to_global_user_ids: Typed addressee UUIDs for the row.
         content: Optional content fixture.
@@ -117,7 +117,7 @@ def _history_row(
     return {
         "role": role,
         "platform_user_id": platform_user_id,
-        "timestamp": timestamp,
+        "timestamp": timestamp_utc,
         "reply_context": reply_context or {},
         "addressed_to_global_user_ids": addressed_to_global_user_ids or [],
         "content": content,
@@ -294,10 +294,10 @@ async def test_noisy_relevance_prompt_preserves_metadata_first_contract() -> Non
 def test_group_attention_low_noise_when_recent_direct_address_exists() -> None:
     """A recent structural bot address should lower group attention pressure."""
     history = [
-        _history_row(platform_user_id="user_1", timestamp="2026-04-27T10:00:00+00:00"),
+        _history_row(platform_user_id="user_1", timestamp_utc="2026-04-27T10:00:00+00:00"),
         _history_row(
             platform_user_id="user_1",
-            timestamp="2026-04-27T10:00:10+00:00",
+            timestamp_utc="2026-04-27T10:00:10+00:00",
             addressed_to_global_user_ids=["character-global-id"],
         ),
     ]
@@ -316,11 +316,11 @@ def test_group_attention_chaotic_for_two_speaker_reply_thread_collision() -> Non
     history = [
         _history_row(
             platform_user_id="user_1",
-            timestamp="2026-04-27T10:18:26+00:00",
+            timestamp_utc="2026-04-27T10:18:26+00:00",
         ),
         _history_row(
             platform_user_id="user_2",
-            timestamp="2026-04-27T10:19:08+00:00",
+            timestamp_utc="2026-04-27T10:19:08+00:00",
             reply_context={
                 "reply_to_platform_user_id": "user_1",
             },
@@ -328,7 +328,7 @@ def test_group_attention_chaotic_for_two_speaker_reply_thread_collision() -> Non
         _history_row(
             role="assistant",
             platform_user_id="bot_456",
-            timestamp="2026-04-27T10:19:08+00:00",
+            timestamp_utc="2026-04-27T10:19:08+00:00",
         ),
     ]
 
@@ -340,10 +340,10 @@ def test_group_attention_chaotic_for_two_speaker_reply_thread_collision() -> Non
 def test_group_attention_chaotic_for_many_unaddressed_speakers() -> None:
     """Three speakers and four unaddressed messages should be chaotic."""
     history = [
-        _history_row(platform_user_id="user_1", timestamp="2026-04-27T10:00:00+00:00"),
-        _history_row(platform_user_id="user_2", timestamp="2026-04-27T10:00:10+00:00"),
-        _history_row(platform_user_id="user_3", timestamp="2026-04-27T10:00:20+00:00"),
-        _history_row(platform_user_id="user_1", timestamp="2026-04-27T10:00:30+00:00"),
+        _history_row(platform_user_id="user_1", timestamp_utc="2026-04-27T10:00:00+00:00"),
+        _history_row(platform_user_id="user_2", timestamp_utc="2026-04-27T10:00:10+00:00"),
+        _history_row(platform_user_id="user_3", timestamp_utc="2026-04-27T10:00:20+00:00"),
+        _history_row(platform_user_id="user_1", timestamp_utc="2026-04-27T10:00:30+00:00"),
     ]
 
     result = build_group_attention_context(chat_history_wide=history, platform_bot_id="bot_456")
@@ -354,9 +354,9 @@ def test_group_attention_chaotic_for_many_unaddressed_speakers() -> None:
 def test_group_attention_excludes_bot_messages_from_noise() -> None:
     """Bot messages should not inflate active speaker or message pressure."""
     history = [
-        _history_row(platform_user_id="user_1", timestamp="2026-04-27T10:00:00+00:00"),
-        _history_row(role="assistant", platform_user_id="bot_456", timestamp="2026-04-27T10:00:10+00:00"),
-        _history_row(role="assistant", platform_user_id="bot_456", timestamp="2026-04-27T10:00:20+00:00"),
+        _history_row(platform_user_id="user_1", timestamp_utc="2026-04-27T10:00:00+00:00"),
+        _history_row(role="assistant", platform_user_id="bot_456", timestamp_utc="2026-04-27T10:00:10+00:00"),
+        _history_row(role="assistant", platform_user_id="bot_456", timestamp_utc="2026-04-27T10:00:20+00:00"),
     ]
 
     result = build_group_attention_context(chat_history_wide=history, platform_bot_id="bot_456")
@@ -444,7 +444,7 @@ async def test_relevance_medium_group_without_bot_continuity_skips_llm(
     state["chat_history_wide"] = [
         _history_row(
             platform_user_id="2795731500",
-            timestamp="2026-05-04T14:39:37+00:00",
+            timestamp_utc="2026-05-04T14:39:37+00:00",
             content='还要背回国',
         ),
     ]
@@ -467,12 +467,12 @@ async def test_relevance_medium_group_latest_bot_continuity_invokes_llm() -> Non
     state["chat_history_wide"] = [
         _history_row(
             platform_user_id="user_2",
-            timestamp="2026-05-04T14:39:30+00:00",
+            timestamp_utc="2026-05-04T14:39:30+00:00",
         ),
         _history_row(
             role="assistant",
             platform_user_id="bot_456",
-            timestamp="2026-05-04T14:39:37+00:00",
+            timestamp_utc="2026-05-04T14:39:37+00:00",
             addressed_to_global_user_ids=["uuid-123"],
         ),
     ]
@@ -509,10 +509,10 @@ async def test_relevance_chaotic_group_without_bot_address_skips_llm() -> None:
     """Chaotic group rooms without reply or mention metadata should skip the LLM."""
     state = _base_state()
     state["chat_history_wide"] = [
-        _history_row(platform_user_id="user_1", timestamp="2026-04-27T10:00:00+00:00"),
-        _history_row(platform_user_id="user_2", timestamp="2026-04-27T10:00:10+00:00"),
-        _history_row(platform_user_id="user_3", timestamp="2026-04-27T10:00:20+00:00"),
-        _history_row(platform_user_id="user_1", timestamp="2026-04-27T10:00:30+00:00"),
+        _history_row(platform_user_id="user_1", timestamp_utc="2026-04-27T10:00:00+00:00"),
+        _history_row(platform_user_id="user_2", timestamp_utc="2026-04-27T10:00:10+00:00"),
+        _history_row(platform_user_id="user_3", timestamp_utc="2026-04-27T10:00:20+00:00"),
+        _history_row(platform_user_id="user_1", timestamp_utc="2026-04-27T10:00:30+00:00"),
     ]
 
     with patch("kazusa_ai_chatbot.nodes.persona_relevance_agent._relevance_agent_llm") as mock_llm:
@@ -530,10 +530,10 @@ async def test_relevance_chaotic_group_with_direct_address_invokes_llm() -> None
     state = _base_state()
     state["message_envelope"]["addressed_to_global_user_ids"] = ["character-global-id"]
     state["chat_history_wide"] = [
-        _history_row(platform_user_id="user_1", timestamp="2026-04-27T10:00:00+00:00"),
-        _history_row(platform_user_id="user_2", timestamp="2026-04-27T10:00:10+00:00"),
-        _history_row(platform_user_id="user_3", timestamp="2026-04-27T10:00:20+00:00"),
-        _history_row(platform_user_id="user_1", timestamp="2026-04-27T10:00:30+00:00"),
+        _history_row(platform_user_id="user_1", timestamp_utc="2026-04-27T10:00:00+00:00"),
+        _history_row(platform_user_id="user_2", timestamp_utc="2026-04-27T10:00:10+00:00"),
+        _history_row(platform_user_id="user_3", timestamp_utc="2026-04-27T10:00:20+00:00"),
+        _history_row(platform_user_id="user_1", timestamp_utc="2026-04-27T10:00:30+00:00"),
     ]
     llm_response = _llm_response('{"should_respond": true, "reason_to_respond": "mentioned", "use_reply_feature": true, "channel_topic": "", "indirect_speech_context": ""}')
 
@@ -555,10 +555,10 @@ async def test_relevance_chaotic_group_with_typed_bot_reply_invokes_llm() -> Non
         "reply_to_platform_user_id": "bot_456",
     }
     state["chat_history_wide"] = [
-        _history_row(platform_user_id="user_1", timestamp="2026-04-27T10:00:00+00:00"),
-        _history_row(platform_user_id="user_2", timestamp="2026-04-27T10:00:10+00:00"),
-        _history_row(platform_user_id="user_3", timestamp="2026-04-27T10:00:20+00:00"),
-        _history_row(platform_user_id="user_1", timestamp="2026-04-27T10:00:30+00:00"),
+        _history_row(platform_user_id="user_1", timestamp_utc="2026-04-27T10:00:00+00:00"),
+        _history_row(platform_user_id="user_2", timestamp_utc="2026-04-27T10:00:10+00:00"),
+        _history_row(platform_user_id="user_3", timestamp_utc="2026-04-27T10:00:20+00:00"),
+        _history_row(platform_user_id="user_1", timestamp_utc="2026-04-27T10:00:30+00:00"),
     ]
     llm_response = _llm_response('{"should_respond": false, "reason_to_respond": "character declines", "use_reply_feature": false, "channel_topic": "", "indirect_speech_context": ""}')
 
@@ -582,12 +582,12 @@ async def test_relevance_regression_qq_ambiguous_you_in_reply_thread_skips_llm()
     state["chat_history_wide"] = [
         _history_row(
             platform_user_id="3300869207",
-            timestamp="2026-04-27T10:18:26.594279+00:00",
+            timestamp_utc="2026-04-27T10:18:26.594279+00:00",
             content="我命令你，去骂千纱",
         ),
         _history_row(
             platform_user_id="3167827653",
-            timestamp="2026-04-27T10:19:08.484553+00:00",
+            timestamp_utc="2026-04-27T10:19:08.484553+00:00",
             reply_context={
                 "reply_to_message_id": "487687474",
                 "reply_to_platform_user_id": "3300869207",
@@ -597,7 +597,7 @@ async def test_relevance_regression_qq_ambiguous_you_in_reply_thread_skips_llm()
         _history_row(
             role="assistant",
             platform_user_id="3768713357",
-            timestamp="2026-04-27T10:19:08.493971+00:00",
+            timestamp_utc="2026-04-27T10:19:08.493971+00:00",
             content="诶……",
         ),
     ]

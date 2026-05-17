@@ -14,18 +14,21 @@ from kazusa_ai_chatbot.conversation_progress.policy import (
 )
 
 
-def _entry(text: str, timestamp: str = "2026-04-28T01:00:00+00:00") -> dict:
+def _entry(
+    text: str,
+    first_seen_at_utc: str = "2026-04-28T01:00:00+00:00",
+) -> dict:
     """Build a stored entry fixture.
 
     Args:
         text: Entry text.
-        timestamp: First-seen timestamp.
+        first_seen_at_utc: First-seen storage UTC timestamp.
 
     Returns:
         Stored conversation episode entry.
     """
 
-    return {"text": text, "first_seen_at": timestamp}
+    return {"text": text, "first_seen_at": first_seen_at_utc}
 
 
 def test_old_phase1_document_projects_with_empty_phase2_fields() -> None:
@@ -43,7 +46,7 @@ def test_old_phase1_document_projects_with_empty_phase2_fields() -> None:
             "open_loops": [_entry("third point remains unresolved")],
             "progression_guidance": "answer the missing point",
         },
-        current_timestamp="2026-04-28T04:00:00+00:00",
+        current_timestamp_utc="2026-04-28T04:00:00+00:00",
     )
 
     assert prompt_doc["conversation_mode"] == ""
@@ -75,7 +78,7 @@ def test_sharp_transition_suppresses_stale_flow_fields() -> None:
             "next_affordances": ["continue old task"],
             "progression_guidance": "continue old task",
         },
-        current_timestamp="2026-04-28T04:00:00+00:00",
+        current_timestamp_utc="2026-04-28T04:00:00+00:00",
     )
 
     assert prompt_doc["continuity"] == "sharp_transition"
@@ -116,7 +119,7 @@ def test_projected_phase2_payload_is_hard_capped() -> None:
             "next_affordances": [f"affordance {index} {long_text}" for index in range(8)],
             "progression_guidance": long_text,
         },
-        current_timestamp="2026-04-28T04:00:00+00:00",
+        current_timestamp_utc="2026-04-28T04:00:00+00:00",
     )
 
     assert prompt_payload_chars(prompt_doc) <= MAX_PROGRESS_PROMPT_CHARS
@@ -131,7 +134,7 @@ def test_build_episode_state_doc_caps_phase2_fields() -> None:
     long_text = "x" * 500
     document = repository.build_episode_state_doc(
         scope=scope,
-        timestamp="2026-04-28T04:00:00+00:00",
+        storage_timestamp_utc="2026-04-28T04:00:00+00:00",
         prior_episode_state=None,
         recorder_output={
             "status": "active",
@@ -344,7 +347,7 @@ def test_repository_rejects_non_string_new_entries() -> None:
         repository.preserve_first_seen_entries(
             prior_entries=[],
             new_texts=[{"text": "bad"}],
-            current_timestamp="2026-04-28T04:00:00+00:00",
+            current_timestamp_utc="2026-04-28T04:00:00+00:00",
             limit=5,
         )
 
@@ -367,7 +370,7 @@ def test_projection_suppresses_malformed_legacy_shapes() -> None:
             "open_loops": [_entry("clean open loop")],
             "progression_guidance": "continue cleanly",
         },
-        current_timestamp="2026-04-28T04:00:00+00:00",
+        current_timestamp_utc="2026-04-28T04:00:00+00:00",
     )
 
     assert prompt_doc["user_state_updates"] == [

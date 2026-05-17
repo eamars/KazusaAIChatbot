@@ -67,7 +67,7 @@ async def save_assistant_message(
         broadcast=bool(result["target_broadcast"]),
         fallback_addressed_global_user_id=str(result["global_user_id"]),
         delivery_tracking_id=str(result.get("delivery_tracking_id") or ""),
-        timestamp=utc_timestamp(now_func),
+        storage_timestamp_utc=utc_timestamp(now_func),
         ensure_character_global_identity_func=(
             ensure_character_global_identity_func
         ),
@@ -136,7 +136,7 @@ async def run_conversation_progress_record_background(
     )
     record_input: ConversationProgressRecordInput = {
         "scope": scope,
-        "timestamp": state["timestamp"],
+        "storage_timestamp_utc": state["storage_timestamp_utc"],
         "character_name": character_profile["name"],
         "prior_episode_state": state.get("conversation_episode_state"),
         "decontexualized_input": state["decontexualized_input"],
@@ -148,7 +148,7 @@ async def run_conversation_progress_record_background(
         "boundary_profile": boundary_profile,
     }
     record_preview = {
-        "timestamp": record_input["timestamp"],
+        "storage_timestamp_utc": record_input["storage_timestamp_utc"],
         "character_name": record_input["character_name"],
         "prior_episode_state": record_input["prior_episode_state"],
         "decontexualized_input": record_input["decontexualized_input"],

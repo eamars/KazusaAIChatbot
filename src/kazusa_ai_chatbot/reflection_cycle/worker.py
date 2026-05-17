@@ -7,12 +7,10 @@ import logging
 import time
 from collections.abc import Callable
 from contextlib import suppress
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta
 from typing import Any
-from zoneinfo import ZoneInfo
 
 from kazusa_ai_chatbot.config import (
-    CHARACTER_TIME_ZONE,
     GLOBAL_CHARACTER_GROWTH_PASS_ENABLED,
     REFLECTION_DAILY_RUN_AFTER_LOCAL_TIME,
     REFLECTION_HOURLY_SLOTS_PER_TICK,
@@ -58,6 +56,11 @@ from kazusa_ai_chatbot.reflection_cycle.promotion import (
 )
 from kazusa_ai_chatbot.reflection_cycle.interaction_style import (
     run_daily_interaction_style_update as _run_daily_interaction_style_update,
+)
+from kazusa_ai_chatbot.time_boundary import (
+    local_time_context_from_storage_utc,
+    normalize_storage_utc_iso,
+    storage_utc_now,
 )
 
 
@@ -179,7 +182,7 @@ async def _reflection_worker_loop(
     while not stop_event.is_set():
         try:
             await _run_worker_tick(
-                now=datetime.now(timezone.utc),
+                now=storage_utc_now(),
                 is_primary_interaction_busy=is_primary_interaction_busy,
             )
         except Exception as exc:
@@ -230,9 +233,12 @@ async def _run_worker_tick(
     results.append(hourly_result)
     await _record_reflection_worker_result(hourly_result)
 
-    local_now = now.astimezone(ZoneInfo(CHARACTER_TIME_ZONE))
-    previous_local_date = (local_now.date() - timedelta(days=1)).isoformat()
-    if _local_time_is_after(local_now, REFLECTION_DAILY_RUN_AFTER_LOCAL_TIME):
+    now_utc_iso = normalize_storage_utc_iso(now.isoformat())
+    local_time_context = local_time_context_from_storage_utc(now_utc_iso)
+    local_datetime = local_time_context["current_local_datetime"]
+    current_local_date = date.fromisoformat(local_datetime[:10])
+    previous_local_date = (current_local_date - timedelta(days=1)).isoformat()
+    if _local_time_is_after(local_datetime, REFLECTION_DAILY_RUN_AFTER_LOCAL_TIME):
         if is_primary_interaction_busy():
             return results
         daily_result = await _run_daily_channel_reflection_cycle(
@@ -252,7 +258,7 @@ async def _run_worker_tick(
         results.append(style_result)
         await _record_reflection_worker_result(style_result)
 
-    if _local_time_is_after(local_now, REFLECTION_PROMOTION_RUN_AFTER_LOCAL_TIME):
+    if _local_time_is_after(local_datetime, REFLECTION_PROMOTION_RUN_AFTER_LOCAL_TIME):
         if is_primary_interaction_busy():
             return results
         promotion_result = await _run_global_reflection_promotion(
@@ -848,11 +854,15 @@ async def _record_reflection_llm_stage(
         )
 
 
-def _local_time_is_after(local_now: datetime, value: str) -> bool:
+def _local_time_is_after(local_datetime: str, value: str) -> bool:
     """Return whether the local clock is at or after a HH:MM gate."""
 
     hour_text, minute_text = value.split(":", maxsplit=1)
     gate_minutes = int(hour_text) * 60 + int(minute_text)
-    current_minutes = local_now.hour * 60 + local_now.minute
+    local_hour_text, local_minute_text = local_datetime[11:16].split(
+        ":",
+        maxsplit=1,
+    )
+    current_minutes = int(local_hour_text) * 60 + int(local_minute_text)
     return_value = current_minutes >= gate_minutes
     return return_value

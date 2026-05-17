@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Literal, Mapping
 
-from kazusa_ai_chatbot.time_context import format_timestamp_for_llm
+from kazusa_ai_chatbot.time_boundary import format_storage_utc_for_llm
 from kazusa_ai_chatbot.utils import text_or_empty
 
 HybridSource = Literal["conversation", "persistent_memory"]
@@ -337,7 +337,7 @@ def _conversation_text(row: Mapping[str, Any]) -> str:
     content = "\n".join(part for part in parts if part)
 
     display_name = text_or_empty(row.get("display_name"))
-    timestamp = format_timestamp_for_llm(text_or_empty(row.get("timestamp")))
+    timestamp = format_storage_utc_for_llm(text_or_empty(row.get("timestamp")))
     if display_name and timestamp and content:
         text = f"{display_name} at {timestamp}: {content}"
         return text
@@ -352,7 +352,7 @@ def _persistent_memory_text(row: Mapping[str, Any]) -> str:
 
     content = _first_text_field(row, ("content", "description", "text", "summary"))
     memory_name = text_or_empty(row.get("memory_name"))
-    timestamp = format_timestamp_for_llm(text_or_empty(row.get("timestamp")))
+    timestamp = format_storage_utc_for_llm(text_or_empty(row.get("timestamp")))
     parts = []
     if memory_name:
         parts.append(memory_name)

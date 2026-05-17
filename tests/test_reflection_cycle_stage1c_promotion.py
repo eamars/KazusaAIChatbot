@@ -714,7 +714,7 @@ async def test_promotion_uses_repository_evidence_refs_not_llm_refs(
         {
             "reflection_run_id": "llm-made-up",
             "scope_ref": "made-up-scope",
-            "captured_at": "2026-05-04T00:00:00+00:00",
+            "captured_at": "2026-05-04 12:00",
             "source": "reflection_cycle",
         }
     ]
@@ -772,7 +772,7 @@ async def test_promotion_uses_repository_evidence_refs_not_llm_refs(
     evidence_refs = captured_docs[0]["evidence_refs"]
     assert evidence_refs[0]["reflection_run_id"] == "hourly-run-1"
     assert evidence_refs[0]["scope_ref"] == "scope-1"
-    assert evidence_refs[0]["captured_at"] == "2026-05-04T10:00:00+00:00"
+    assert evidence_refs[0]["captured_at"] == "2026-05-04 22:00"
     assert "llm-made-up" not in {
         evidence_ref["reflection_run_id"]
         for evidence_ref in evidence_refs
@@ -785,7 +785,6 @@ def _promotion_payload() -> promotion_module.GlobalPromotionPromptPayload:
     payload = {
         "evaluation_mode": "daily_global_promotion",
         "character_local_date": "2026-05-04",
-        "character_time_zone": "Pacific/Auckland",
         "channel_daily_syntheses": [
             {
                 "daily_run_id": "daily-run-1",
@@ -810,7 +809,7 @@ def _promotion_payload() -> promotion_module.GlobalPromotionPromptPayload:
                 "scope_ref": "scope-1",
                 "channel_type": "group",
                 "character_local_date": "2026-05-04",
-                "captured_at": "2026-05-04T10:00:00+00:00",
+                "captured_at": "2026-05-04 22:00",
                 "active_character_utterance": "这个频道的固定设定应写成公共频道事实。",
                 "sanitized_observation": "角色确认频道固定设定属于公共事实。",
                 "supports": ["lore"],
@@ -822,7 +821,7 @@ def _promotion_payload() -> promotion_module.GlobalPromotionPromptPayload:
                 "scope_ref": "scope-1",
                 "channel_type": "group",
                 "character_local_date": "2026-05-04",
-                "captured_at": "2026-05-04T10:05:00+00:00",
+                "captured_at": "2026-05-04 22:05",
                 "active_character_utterance": "以后写记忆时，不要把频道事实写成用户画像。",
                 "sanitized_observation": "角色给出未来记忆撰写的行为规则。",
                 "supports": ["self_guidance"],
@@ -868,7 +867,7 @@ def _decision(lane: str) -> promotion_module.ReflectionPromotionDecision:
             {
                 "reflection_run_id": "hourly-run-1",
                 "scope_ref": "scope-1",
-                "captured_at": "2026-05-04T10:00:00+00:00",
+                "captured_at": "2026-05-04 22:00",
                 "source": "reflection_cycle",
             }
         ],

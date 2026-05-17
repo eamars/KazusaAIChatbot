@@ -7,7 +7,6 @@ All operations are idempotent — safe to run on every service start.
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
 
 from kazusa_ai_chatbot.config import RAG_CACHE2_MAX_ENTRIES
 from kazusa_ai_chatbot.db._client import enable_vector_index, get_db
@@ -40,12 +39,13 @@ from kazusa_ai_chatbot.db.rag_cache2_persistent import (
 from kazusa_ai_chatbot.db.self_cognition import (
     SELF_COGNITION_ACTION_ATTEMPTS_COLLECTION,
 )
+from kazusa_ai_chatbot.time_boundary import storage_utc_now_iso
 
 logger = logging.getLogger(__name__)
 
 
 def _now_iso() -> str:
-    return_value = datetime.now(timezone.utc).isoformat()
+    return_value = storage_utc_now_iso()
     return return_value
 
 

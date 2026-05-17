@@ -2,7 +2,7 @@
 
 Verifies that representative LLM payloads built by the production modules
 contain no raw UTC timestamps, timezone offsets, timezone names, or UTC
-labels. These complement the unit-level tests in ``test_time_context.py``.
+labels. These complement the unit-level tests in ``test_time_boundary.py``.
 """
 
 from __future__ import annotations
@@ -18,9 +18,9 @@ from kazusa_ai_chatbot.rag.prompt_projection import (
     project_runtime_context_for_llm,
     project_tool_result_for_llm,
 )
-from kazusa_ai_chatbot.time_context import (
-    build_character_time_context,
-    format_history_for_llm,
+from kazusa_ai_chatbot.time_boundary import (
+    build_turn_clock_from_storage_utc,
+    format_storage_utc_history_for_llm,
 )
 
 
@@ -73,7 +73,9 @@ def _assert_absent_key(payload: Any, key: str, path: str = "$") -> None:
 # ---------------------------------------------------------------------------
 
 _TURN_TIMESTAMP = "2026-05-03T00:00:03+00:00"
-_TIME_CONTEXT = build_character_time_context(_TURN_TIMESTAMP)
+_LOCAL_TIME_CONTEXT = build_turn_clock_from_storage_utc(
+    _TURN_TIMESTAMP,
+)["local_time_context"]
 
 
 class _DummyResponse:
@@ -97,11 +99,11 @@ class _CapturingAsyncLLM:
         return response
 
 
-def _fake_consolidator_state(*, time_context: dict | None = None) -> dict:
+def _fake_consolidator_state(*, local_time_context: dict | None = None) -> dict:
     """Minimal ConsolidatorState-like dict for payload builder tests."""
     return {
-        "timestamp": _TURN_TIMESTAMP,
-        "time_context": time_context or _TIME_CONTEXT,
+        "storage_timestamp_utc": _TURN_TIMESTAMP,
+        "local_time_context": local_time_context or _LOCAL_TIME_CONTEXT,
         "global_user_id": "user-1",
         "user_name": "Tester",
         "consolidation_origin": {
@@ -109,7 +111,7 @@ def _fake_consolidator_state(*, time_context: dict | None = None) -> dict:
             "trigger_source": "user_message",
             "input_sources": ["dialog_text"],
             "output_mode": "visible_reply",
-            "timestamp": _TURN_TIMESTAMP,
+            "storage_timestamp_utc": _TURN_TIMESTAMP,
             "platform": "debug",
             "platform_channel_id": "channel-1",
             "channel_type": "private",
@@ -253,7 +255,7 @@ def test_formatted_history_has_no_utc_leak() -> None:
             "timestamp": "2026-05-02T20:31:00+00:00",
         },
     ]
-    formatted = format_history_for_llm(raw_history)
+    formatted = format_storage_utc_history_for_llm(raw_history)
     for entry in formatted:
         _assert_no_utc_leak(entry, "$.chat_history_recent[]")
 
@@ -266,8 +268,8 @@ def test_formatted_history_has_no_utc_leak() -> None:
 def test_runtime_context_projects_episode_state_times() -> None:
     """RAG runtime context should not raw-copy stored episode timestamps."""
     context = {
-        "current_timestamp": "2026-05-02T20:00:00+00:00",
-        "time_context": _TIME_CONTEXT,
+        "current_timestamp_utc": "2026-05-02T20:00:00+00:00",
+        "local_time_context": _LOCAL_TIME_CONTEXT,
         "conversation_episode_state": {
             "status": "active",
             "created_at": "2026-05-02T20:00:00+00:00",
@@ -288,7 +290,9 @@ def test_runtime_context_projects_episode_state_times() -> None:
 
     projected = project_runtime_context_for_llm(context)
 
-    assert "current_timestamp" not in projected
+    assert "current_timestamp_utc" not in projected
+    assert "current_" "timestamp" not in projected
+    assert projected["time_context"] == _LOCAL_TIME_CONTEXT
     episode_state = projected["conversation_episode_state"]
     assert episode_state["created_at"] == "2026-05-03 08:00"
     assert episode_state["updated_at"] == "2026-05-03 08:05"
@@ -463,7 +467,7 @@ async def test_live_context_runtime_result_has_no_utc_leak() -> None:
     agent = LiveContextAgent()
     result = await agent.run(
         "Live-context: answer active character current local time",
-        {"time_context": _TIME_CONTEXT},
+        {"local_time_context": _LOCAL_TIME_CONTEXT},
     )
 
     assert result["resolved"] is True
@@ -493,7 +497,7 @@ def test_normalize_future_promises_converts_local_due_time() -> None:
     ]
     normalized = _normalize_future_promises(
         promises,
-        timestamp="2026-05-03T00:00:00+00:00",
+        storage_timestamp_utc="2026-05-03T00:00:00+00:00",
     )
     due_time = normalized[0]["due_time"]
     assert "+00:00" in due_time or due_time.endswith("Z"), (
@@ -502,8 +506,8 @@ def test_normalize_future_promises_converts_local_due_time() -> None:
     assert "2026-05-04T02:00:00" in due_time
 
 
-def test_normalize_future_promises_normalizes_legacy_iso_offset() -> None:
-    """Legacy ISO+offset due_time values should normalize to UTC."""
+def test_normalize_future_promises_rejects_offset_due_time() -> None:
+    """Offset-aware LLM due_time values should be rejected, not normalized."""
     from kazusa_ai_chatbot.nodes.persona_supervisor2_consolidator_persistence import (
         _normalize_future_promises,
     )
@@ -519,9 +523,9 @@ def test_normalize_future_promises_normalizes_legacy_iso_offset() -> None:
     ]
     normalized = _normalize_future_promises(
         promises,
-        timestamp="2026-05-03T00:00:00+00:00",
+        storage_timestamp_utc="2026-05-03T00:00:00+00:00",
     )
-    assert normalized[0]["due_time"] == "2026-05-04T02:00:00+00:00"
+    assert normalized == []
 
 
 def test_normalize_future_promises_drops_invalid_due_time() -> None:
@@ -540,7 +544,7 @@ def test_normalize_future_promises_drops_invalid_due_time() -> None:
     ]
     normalized = _normalize_future_promises(
         promises,
-        timestamp="2026-05-03T00:00:00+00:00",
+        storage_timestamp_utc="2026-05-03T00:00:00+00:00",
     )
     assert normalized == []
 

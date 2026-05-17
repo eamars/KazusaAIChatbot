@@ -9,7 +9,7 @@ from langgraph.graph.message import add_messages
 from kazusa_ai_chatbot.nodes.persona_supervisor2_consolidator_origin import (
     ConsolidationOriginMetadata,
 )
-from kazusa_ai_chatbot.time_context import TimeContextDoc
+from kazusa_ai_chatbot.time_boundary import LocalTimeContextDoc
 
 
 def _merge_dicts(a: dict, b: dict) -> dict:
@@ -82,8 +82,8 @@ def content_anchors_from_action_directives(
 
 class ConsolidatorState(TypedDict):
     # Inputs for db_writer
-    timestamp: str
-    time_context: TimeContextDoc
+    storage_timestamp_utc: str
+    local_time_context: LocalTimeContextDoc
     global_user_id: str
     user_name: str
     user_profile: dict

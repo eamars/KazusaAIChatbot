@@ -11,7 +11,7 @@ from kazusa_ai_chatbot.cognition_episode import build_text_chat_cognitive_episod
 from kazusa_ai_chatbot.nodes import persona_supervisor2 as supervisor_module
 from kazusa_ai_chatbot.nodes import persona_supervisor2_rag_supervisor2 as rag2_module
 from kazusa_ai_chatbot.rag.cache2_runtime import RAGCache2Runtime
-from kazusa_ai_chatbot.time_context import build_character_time_context
+from kazusa_ai_chatbot.time_boundary import build_turn_clock
 
 
 @pytest.fixture(autouse=True)
@@ -118,13 +118,12 @@ def _stage_1_research_snapshot_state() -> dict:
     Returns:
         Persona graph state subset with a valid text-chat cognitive episode.
     """
-    timestamp = "2026-04-27T00:00:00+12:00"
-    time_context = build_character_time_context(timestamp)
+    turn_clock = build_turn_clock("2026-04-27 00:00:00")
     episode = build_text_chat_cognitive_episode(
         episode_id="episode-rag-snapshot",
         percept_id="percept-rag-snapshot",
-        timestamp=timestamp,
-        time_context=time_context,
+        storage_timestamp_utc=turn_clock["storage_timestamp_utc"],
+        local_time_context=turn_clock["local_time_context"],
         user_input="Need current evidence.",
         platform="qq",
         platform_channel_id="chan-1",
@@ -150,8 +149,8 @@ def _stage_1_research_snapshot_state() -> dict:
         "global_user_id": "user-1",
         "user_name": "User",
         "user_profile": {"affinity": 500},
-        "timestamp": timestamp,
-        "time_context": time_context,
+        "storage_timestamp_utc": turn_clock["storage_timestamp_utc"],
+        "local_time_context": turn_clock["local_time_context"],
         "message_envelope": {
             "body_text": "Need current evidence.",
             "raw_wire_text": "Need current evidence.",
@@ -195,13 +194,12 @@ def _minimal_text_chat_episode() -> dict:
     Returns:
         Valid user-message cognitive episode with no active-turn collapse ids.
     """
-    timestamp = "2026-04-27T00:00:00+12:00"
-    time_context = build_character_time_context(timestamp)
+    turn_clock = build_turn_clock("2026-04-27 00:00:00")
     episode = build_text_chat_cognitive_episode(
         episode_id="episode-rag-direct",
         percept_id="percept-rag-direct",
-        timestamp=timestamp,
-        time_context=time_context,
+        storage_timestamp_utc=turn_clock["storage_timestamp_utc"],
+        local_time_context=turn_clock["local_time_context"],
         user_input="clean body",
         platform="qq",
         platform_channel_id="chan-1",
@@ -415,6 +413,7 @@ async def test_stage_1_research_calls_rag2_and_projects_payload(monkeypatch) -> 
         _call_quote_aware_rag_supervisor,
     )
 
+    turn_clock = build_turn_clock("2026-04-27 00:00:00")
     result = await supervisor_module.stage_1_research({
         "decontexualized_input": "你记得我喜欢什么吗？",
         "referents": [],
@@ -426,8 +425,8 @@ async def test_stage_1_research_calls_rag2_and_projects_payload(monkeypatch) -> 
         "global_user_id": "user-1",
         "user_name": "User",
         "user_profile": {"affinity": 500},
-        "timestamp": "2026-04-27T00:00:00+12:00",
-        "time_context": build_character_time_context("2026-04-27T00:00:00+12:00"),
+        "storage_timestamp_utc": turn_clock["storage_timestamp_utc"],
+        "local_time_context": turn_clock["local_time_context"],
         "message_envelope": {
             "body_text": "clean body",
             "raw_wire_text": "clean body",
@@ -515,9 +514,8 @@ async def test_stage_1_research_pre_stage_04_request_shape_snapshot(monkeypatch)
         _call_quote_aware_rag_supervisor,
     )
 
-    result = await supervisor_module.stage_1_research(
-        _stage_1_research_snapshot_state()
-    )
+    state = _stage_1_research_snapshot_state()
+    result = await supervisor_module.stage_1_research(state)
 
     expected_request = {
         "fresh_query": "Need current evidence.",
@@ -536,10 +534,8 @@ async def test_stage_1_research_pre_stage_04_request_shape_snapshot(monkeypatch)
             "global_user_id": "user-1",
             "user_name": "User",
             "user_profile": {"affinity": 500},
-            "current_timestamp": "2026-04-27T00:00:00+12:00",
-            "time_context": build_character_time_context(
-                "2026-04-27T00:00:00+12:00"
-            ),
+            "current_timestamp_utc": state["storage_timestamp_utc"],
+            "local_time_context": state["local_time_context"],
             "prompt_message_context": {
                 "body_text": "Need current evidence.",
                 "mentions": [],
@@ -629,6 +625,7 @@ async def test_stage_1_research_skips_rag_for_unresolved_referents(monkeypatch) 
         _call_quote_aware_rag_supervisor,
     )
 
+    turn_clock = build_turn_clock("2026-04-27 00:00:00")
     result = await supervisor_module.stage_1_research({
         "decontexualized_input": "这些是什么意思？",
         "referents": [
@@ -642,8 +639,8 @@ async def test_stage_1_research_skips_rag_for_unresolved_referents(monkeypatch) 
         "global_user_id": "user-1",
         "user_name": "User",
         "user_profile": {"affinity": 500},
-        "timestamp": "2026-04-27T00:00:00+12:00",
-        "time_context": build_character_time_context("2026-04-27T00:00:00+12:00"),
+        "storage_timestamp_utc": turn_clock["storage_timestamp_utc"],
+        "local_time_context": turn_clock["local_time_context"],
         "message_envelope": {
             "body_text": "clean body",
             "raw_wire_text": "clean body",
@@ -707,6 +704,7 @@ async def test_stage_1_research_runs_rag_for_mixed_referents(monkeypatch) -> Non
         _call_quote_aware_rag_supervisor,
     )
 
+    turn_clock = build_turn_clock("2026-04-27 00:00:00")
     result = await supervisor_module.stage_1_research({
         "decontexualized_input": "他上次说的那些关于X的话是什么意思？",
         "referents": [
@@ -721,8 +719,8 @@ async def test_stage_1_research_runs_rag_for_mixed_referents(monkeypatch) -> Non
         "global_user_id": "user-1",
         "user_name": "User",
         "user_profile": {"affinity": 500},
-        "timestamp": "2026-04-27T00:00:00+12:00",
-        "time_context": build_character_time_context("2026-04-27T00:00:00+12:00"),
+        "storage_timestamp_utc": turn_clock["storage_timestamp_utc"],
+        "local_time_context": turn_clock["local_time_context"],
         "message_envelope": {
             "body_text": "clean body",
             "raw_wire_text": "clean body",
@@ -773,6 +771,7 @@ async def test_stage_1_research_skips_when_referents_are_all_unresolved(monkeypa
         _call_quote_aware_rag_supervisor,
     )
 
+    turn_clock = build_turn_clock("2026-04-27 00:00:00")
     result = await supervisor_module.stage_1_research({
         "decontexualized_input": "这些是什么意思？",
         "referents": [
@@ -786,8 +785,8 @@ async def test_stage_1_research_skips_when_referents_are_all_unresolved(monkeypa
         "global_user_id": "user-1",
         "user_name": "User",
         "user_profile": {"affinity": 500},
-        "timestamp": "2026-04-27T00:00:00+12:00",
-        "time_context": build_character_time_context("2026-04-27T00:00:00+12:00"),
+        "storage_timestamp_utc": turn_clock["storage_timestamp_utc"],
+        "local_time_context": turn_clock["local_time_context"],
         "message_envelope": {
             "body_text": "clean body",
             "raw_wire_text": "clean body",

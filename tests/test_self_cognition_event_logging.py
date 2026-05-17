@@ -34,8 +34,8 @@ def _commitment_case() -> dict[str, Any]:
     case = {
         "case_name": models.CASE_COMMITMENT_PAST_DUE,
         "case_id": "commitment:promise-001",
-        "idle_timestamp": "2026-05-13T00:30:00+00:00",
-        "last_evidence_timestamp": "2026-05-13T00:00:00+00:00",
+        "idle_timestamp_utc": "2026-05-13T00:30:00+00:00",
+        "last_evidence_timestamp_utc": "2026-05-13T00:00:00+00:00",
         "trigger_kind": models.TRIGGER_ACTIVE_COMMITMENT_DUE_CHECK,
         "semantic_due_state": models.DUE_STATE_PAST_DUE,
         "actionability": "past_due_commitment_contact_socially_available",
@@ -109,7 +109,7 @@ def _case_runner_with_tracking(
     run_record = {
         "run_id": "self_cognition_run:promise-001",
         "trigger_id": trigger_record["trigger_id"],
-        "idle_timestamp": case["idle_timestamp"],
+        "idle_timestamp_utc": case["idle_timestamp_utc"],
         "output_mode": "scheduled_action_request",
         "selected_route": models.ROUTE_ACTION_CANDIDATE,
         "status": "completed",

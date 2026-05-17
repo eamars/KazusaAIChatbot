@@ -49,7 +49,7 @@ def _future_cognition_action_spec() -> dict:
         },
         "params": {
             "episode_type": "self_cognition",
-            "trigger_at": "2026-05-16T10:00:00+12:00",
+            "trigger_at": "2026-05-16 10:00",
             "continuation_objective": "Re-check whether a natural pause appeared.",
         },
         "urgency": "scheduled",
@@ -69,7 +69,7 @@ def test_build_future_cognition_event_uses_prompt_safe_scheduler_shape() -> None
 
     event = build_future_cognition_scheduled_event(
         _future_cognition_action_spec(),
-        timestamp="2026-05-16T09:00:00+12:00",
+        storage_timestamp_utc="2026-05-15T21:00:00+00:00",
         action_attempt_id="action_attempt:future-123",
     )
     serialized = json.dumps(event, sort_keys=True)
@@ -118,7 +118,7 @@ def test_future_cognition_event_copies_trusted_source_scope() -> None:
 
     event = build_future_cognition_scheduled_event(
         action_spec,
-        timestamp="2026-05-16T09:00:00+12:00",
+        storage_timestamp_utc="2026-05-15T21:00:00+00:00",
         action_attempt_id="action_attempt:future-123",
     )
 
@@ -155,7 +155,7 @@ async def test_execute_future_cognition_schedules_without_inline_cognition(
 
     result = await future_cognition.execute_future_cognition_action(
         _future_cognition_action_spec(),
-        timestamp="2026-05-16T09:00:00+12:00",
+        storage_timestamp_utc="2026-05-15T21:00:00+00:00",
         action_attempt_id="action_attempt:future-123",
     )
 
@@ -183,7 +183,7 @@ def test_future_cognition_rejects_raw_target_id() -> None:
     with pytest.raises(ActionValidationError, match="target_id"):
         build_future_cognition_scheduled_event(
             action_spec,
-            timestamp="2026-05-16T09:00:00+12:00",
+            storage_timestamp_utc="2026-05-15T21:00:00+00:00",
             action_attempt_id="action_attempt:future-123",
         )
 
@@ -201,7 +201,7 @@ def test_future_cognition_rejects_invalid_episode_type() -> None:
     with pytest.raises(ActionValidationError, match="episode_type"):
         build_future_cognition_scheduled_event(
             action_spec,
-            timestamp="2026-05-16T09:00:00+12:00",
+            storage_timestamp_utc="2026-05-15T21:00:00+00:00",
             action_attempt_id="action_attempt:future-123",
         )
 
@@ -219,6 +219,24 @@ def test_future_cognition_rejects_unbounded_continuation() -> None:
     with pytest.raises(ActionValidationError, match="max_depth"):
         build_future_cognition_scheduled_event(
             action_spec,
-            timestamp="2026-05-16T09:00:00+12:00",
+            storage_timestamp_utc="2026-05-15T21:00:00+00:00",
+            action_attempt_id="action_attempt:future-123",
+        )
+
+
+def test_future_cognition_rejects_offset_aware_llm_trigger_time() -> None:
+    """LLM-produced schedule times must be exact configured-local minutes."""
+
+    from kazusa_ai_chatbot.action_spec.handlers.future_cognition import (
+        build_future_cognition_scheduled_event,
+    )
+
+    action_spec = _future_cognition_action_spec()
+    action_spec["params"]["trigger_at"] = "2026-05-16T10:00:00+12:00"
+
+    with pytest.raises(ActionValidationError, match="trigger_at"):
+        build_future_cognition_scheduled_event(
+            action_spec,
+            storage_timestamp_utc="2026-05-15T21:00:00+00:00",
             action_attempt_id="action_attempt:future-123",
         )

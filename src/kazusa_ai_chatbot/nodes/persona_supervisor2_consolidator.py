@@ -14,7 +14,6 @@ commits everything to MongoDB and invalidates the RAG cache.
 
 from __future__ import annotations
 
-from datetime import datetime
 import logging
 
 from langgraph.graph import END, START, StateGraph
@@ -45,6 +44,7 @@ from kazusa_ai_chatbot.nodes.persona_supervisor2_consolidator_schema import (
     normalize_subjective_appraisals,
 )
 from kazusa_ai_chatbot.nodes.persona_supervisor2_schema import GlobalPersonaState
+from kazusa_ai_chatbot.time_boundary import build_turn_clock
 from kazusa_ai_chatbot.utils import (
     log_dict_subset,
     log_list_preview,
@@ -169,8 +169,8 @@ async def call_consolidation_subgraph(global_state: GlobalPersonaState):
     chat_history_recent = global_state.get("chat_history_recent", [])
 
     sub_state: ConsolidatorState = {
-        "timestamp": global_state["timestamp"],
-        "time_context": global_state["time_context"],
+        "storage_timestamp_utc": global_state["storage_timestamp_utc"],
+        "local_time_context": global_state["local_time_context"],
         "global_user_id": global_state["global_user_id"],
         "user_name": global_state["user_name"],
         "user_profile": global_state["user_profile"],
@@ -208,7 +208,10 @@ async def call_consolidation_subgraph(global_state: GlobalPersonaState):
     new_facts = result.get("new_facts", [])
     future_promises = _normalize_future_promises(
         result.get("future_promises", []),
-        timestamp=result.get("timestamp", global_state["timestamp"]),
+        storage_timestamp_utc=result.get(
+            "storage_timestamp_utc",
+            global_state["storage_timestamp_utc"],
+        ),
     )
     metadata = result.get("metadata", {}) or {}
 
@@ -251,12 +254,15 @@ async def test_main():
     )
     trimmed_history = trim_history_dict(history)
 
-    current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    turn_clock = build_turn_clock()
+    storage_timestamp_utc = turn_clock["storage_timestamp_utc"]
+    local_time_context = turn_clock["local_time_context"]
 
     user_input = "既然作业已经写完了，active character 可以晚上可以好好奖励我么♥?"
 
     state: GlobalPersonaState = {
-        "timestamp": current_time,
+        "storage_timestamp_utc": storage_timestamp_utc,
+        "local_time_context": local_time_context,
         "global_user_id": "320899931776745483",
         "user_name": "<current user>",
         "user_profile": {"affinity": 950},

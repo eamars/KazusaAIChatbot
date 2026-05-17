@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import re
-from datetime import datetime, timezone
 
 from kazusa_ai_chatbot.db._client import get_db
 from kazusa_ai_chatbot.db.schemas import (
@@ -17,6 +16,7 @@ from kazusa_ai_chatbot.config import (
     L3_INTERACTION_STYLE_GUIDELINES_PER_FIELD_LIMIT,
     RELEVANCE_USER_ENGAGEMENT_GUIDELINES_LIMIT,
 )
+from kazusa_ai_chatbot.time_boundary import storage_utc_now_iso
 from kazusa_ai_chatbot.utils import text_or_empty
 
 
@@ -41,13 +41,6 @@ _EVENT_MARKER_PATTERNS = (
     re.compile(r"run_id|reflection_run|source_reflection", re.IGNORECASE),
 )
 _QUOTE_EXAMPLE_CHARS = "\"“”‘’「」『』"
-
-
-def _now_iso() -> str:
-    """Return the current UTC timestamp as an ISO string."""
-
-    current_time = datetime.now(timezone.utc).isoformat()
-    return current_time
 
 
 def empty_interaction_style_overlay() -> InteractionStyleOverlayDoc:
@@ -311,7 +304,7 @@ async def upsert_user_style_image(
     global_user_id: str,
     overlay: dict,
     source_reflection_run_ids: list[str],
-    timestamp: str | None = None,
+    storage_timestamp_utc: str | None = None,
 ) -> InteractionStyleImageDoc:
     """Create or replace the current style image for one user.
 
@@ -319,7 +312,7 @@ async def upsert_user_style_image(
         global_user_id: Internal user UUID.
         overlay: Sanitized or candidate overlay payload.
         source_reflection_run_ids: Internal audit source run ids.
-        timestamp: Optional UTC write timestamp.
+        storage_timestamp_utc: Optional storage UTC write timestamp.
 
     Returns:
         The persisted document without Mongo internals.
@@ -328,7 +321,7 @@ async def upsert_user_style_image(
     style_image_id = _style_image_id_for_user(global_user_id)
     existing = await get_user_style_image(global_user_id)
     sanitized_overlay = validate_interaction_style_overlay(overlay)
-    write_time = timestamp or _now_iso()
+    write_time = storage_timestamp_utc or storage_utc_now_iso()
     status = (
         InteractionStyleStatus.ACTIVE
         if _overlay_has_guidelines(sanitized_overlay)
@@ -359,7 +352,7 @@ async def upsert_group_channel_style_image(
     platform_channel_id: str,
     overlay: dict,
     source_reflection_run_ids: list[str],
-    timestamp: str | None = None,
+    storage_timestamp_utc: str | None = None,
 ) -> InteractionStyleImageDoc:
     """Create or replace the current style image for one group channel.
 
@@ -368,7 +361,7 @@ async def upsert_group_channel_style_image(
         platform_channel_id: Platform channel or group id.
         overlay: Sanitized or candidate overlay payload.
         source_reflection_run_ids: Internal audit source run ids.
-        timestamp: Optional UTC write timestamp.
+        storage_timestamp_utc: Optional storage UTC write timestamp.
 
     Returns:
         The persisted document without Mongo internals.
@@ -385,7 +378,7 @@ async def upsert_group_channel_style_image(
         platform_channel_id=clean_platform_channel_id,
     )
     sanitized_overlay = validate_interaction_style_overlay(overlay)
-    write_time = timestamp or _now_iso()
+    write_time = storage_timestamp_utc or storage_utc_now_iso()
     status = (
         InteractionStyleStatus.ACTIVE
         if _overlay_has_guidelines(sanitized_overlay)

@@ -5,12 +5,16 @@ from __future__ import annotations
 import json
 import logging
 import sys
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
 from bson import json_util
 from dotenv import load_dotenv
+from kazusa_ai_chatbot.time_boundary import (
+    normalize_storage_utc_iso,
+    storage_utc_now,
+)
 
 DEFAULT_EXCLUDED_FIELDS = ("_id", "embedding")
 
@@ -61,7 +65,7 @@ def utc_now() -> datetime:
     Returns:
         Current time in UTC.
     """
-    return_value = datetime.now(timezone.utc)
+    return_value = storage_utc_now()
     return return_value
 
 
@@ -76,7 +80,8 @@ def timestamp_hours_ago(hours: float, *, now: datetime | None = None) -> str:
         ISO-8601 timestamp with a UTC offset.
     """
     reference = now or utc_now()
-    return_value = (reference - timedelta(hours=hours)).isoformat()
+    raw_timestamp = (reference - timedelta(hours=hours)).isoformat()
+    return_value = normalize_storage_utc_iso(raw_timestamp)
     return return_value
 
 

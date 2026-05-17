@@ -11,7 +11,7 @@ from kazusa_ai_chatbot.cognition_episode import build_text_chat_cognitive_episod
 from kazusa_ai_chatbot.nodes import dialog_agent as dialog_module
 from kazusa_ai_chatbot.nodes import persona_supervisor2_cognition_l3 as l3_module
 from kazusa_ai_chatbot.nodes import persona_supervisor2_cognition_l2c2 as l2c2_module
-from kazusa_ai_chatbot.time_context import build_character_time_context
+from kazusa_ai_chatbot.time_boundary import build_turn_clock
 
 
 class _FakeResponse:
@@ -46,13 +46,12 @@ class _FailingLLM:
 
 def _minimal_text_chat_episode() -> dict:
     """Build a valid text-chat cognitive episode for direct L3 tests."""
-    timestamp = "2026-04-27T00:00:00+12:00"
-    time_context = build_character_time_context(timestamp)
+    turn_clock = build_turn_clock("2026-04-27 00:00:00")
     episode = build_text_chat_cognitive_episode(
         episode_id="episode-progress-cognition",
         percept_id="percept-progress-cognition",
-        timestamp=timestamp,
-        time_context=time_context,
+        storage_timestamp_utc=turn_clock["storage_timestamp_utc"],
+        local_time_context=turn_clock["local_time_context"],
         user_input="what is the missing third point?",
         platform="qq",
         platform_channel_id="chan-1",
@@ -331,7 +330,7 @@ def test_projection_preserves_relative_age_for_prior_disclosure() -> None:
             "open_loops": [],
             "progression_guidance": "",
         },
-        current_timestamp="2026-04-28T04:00:00+00:00",
+        current_timestamp_utc="2026-04-28T04:00:00+00:00",
     )
 
     assert prompt_doc["user_state_updates"][0]["age_hint"] == "~3h ago"

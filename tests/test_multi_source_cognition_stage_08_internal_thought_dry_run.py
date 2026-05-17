@@ -107,8 +107,8 @@ _PROMPT_FINGERPRINTS = (
     (
         "_CONTENT_ANCHOR_AGENT_PROMPT",
         l3_module._CONTENT_ANCHOR_AGENT_PROMPT,
-        16784,
-        "25c377a3ff3ee189e63f5cd9e1ed2178a9182605e3bda513db8b393f2ced5c48",
+        17122,
+        "8bed4dc81bab7831d4a900c779eed347a2c1b44ef92968db6321ce10f968ad9c",
     ),
     (
         "_PREFERENCE_ADAPTER_PROMPT",
@@ -181,7 +181,7 @@ def _time_context() -> dict[str, str]:
     """Build a fixed character-local time context for dry-run tests.
 
     Returns:
-        Minimal `TimeContextDoc`-compatible mapping.
+        Minimal local time context mapping.
     """
     time_context = {
         "current_local_datetime": "2026-05-10 09:30",
@@ -550,14 +550,14 @@ def _internal_thought_dry_run_state() -> dict[str, Any]:
     episode = build_internal_thought_cognitive_episode(
         residue=_residue(),
         action_latch=_action_latch(),
-        timestamp="2026-05-09T21:30:00+00:00",
-        time_context=_time_context(),
+        storage_timestamp_utc="2026-05-09T21:30:00+00:00",
+        local_time_context=_time_context(),
         output_mode="think_only",
     )
     state = {
         "character_profile": _character_profile(),
-        "timestamp": "2026-05-09T21:30:00+00:00",
-        "time_context": _time_context(),
+        "storage_timestamp_utc": "2026-05-09T21:30:00+00:00",
+        "local_time_context": _time_context(),
         "user_input": "Internal thought dry run over private cognition residue.",
         "prompt_message_context": {
             "body_text": "",
@@ -670,8 +670,8 @@ def test_internal_thought_builder_creates_valid_episode() -> None:
     episode = build_internal_thought_cognitive_episode(
         residue=residue,
         action_latch=latch,
-        timestamp="2026-05-09T21:30:00+00:00",
-        time_context=_time_context(),
+        storage_timestamp_utc="2026-05-09T21:30:00+00:00",
+        local_time_context=_time_context(),
         output_mode="preview",
     )
 
@@ -681,8 +681,8 @@ def test_internal_thought_builder_creates_valid_episode() -> None:
     assert episode["trigger_source"] == "internal_thought"
     assert episode["input_sources"] == ["internal_monologue"]
     assert episode["output_mode"] == "preview"
-    assert episode["timestamp"] == "2026-05-09T21:30:00+00:00"
-    assert episode["time_context"] == _time_context()
+    assert episode["storage_timestamp_utc"] == "2026-05-09T21:30:00+00:00"
+    assert episode["local_time_context"] == _time_context()
     assert episode["target_scope"] == {
         "platform": "internal_thought",
         "platform_channel_id": "internal_thought_dry_run",
@@ -715,8 +715,8 @@ def test_internal_thought_builder_can_disable_visual_directives() -> None:
     """Builder parameter should seed the internal visual skip flag."""
     episode = build_internal_thought_cognitive_episode(
         residue=_residue(),
-        timestamp="2026-05-09T21:30:00+00:00",
-        time_context=_time_context(),
+        storage_timestamp_utc="2026-05-09T21:30:00+00:00",
+        local_time_context=_time_context(),
         visual_directives_enabled=False,
     )
 
@@ -739,8 +739,8 @@ def test_internal_thought_builder_obeys_global_visual_config(
 
     episode = dry_run_module.build_internal_thought_cognitive_episode(
         residue=_residue(),
-        timestamp="2026-05-09T21:30:00+00:00",
-        time_context=_time_context(),
+        storage_timestamp_utc="2026-05-09T21:30:00+00:00",
+        local_time_context=_time_context(),
     )
 
     assert episode["origin_metadata"]["debug_modes"] == {
@@ -757,8 +757,8 @@ def test_internal_thought_builder_uses_empty_latch_payload_when_absent() -> None
 
     episode = build_internal_thought_cognitive_episode(
         residue=residue,
-        timestamp="2026-05-09T21:30:00+00:00",
-        time_context=_time_context(),
+        storage_timestamp_utc="2026-05-09T21:30:00+00:00",
+        local_time_context=_time_context(),
     )
 
     assert episode["episode_id"] == _expected_episode_id(content)
@@ -773,8 +773,8 @@ def test_internal_thought_builder_rejects_unsupported_output_mode() -> None:
     ):
         build_internal_thought_cognitive_episode(
             residue=_residue(),
-            timestamp="2026-05-09T21:30:00+00:00",
-            time_context=_time_context(),
+            storage_timestamp_utc="2026-05-09T21:30:00+00:00",
+            local_time_context=_time_context(),
             output_mode="visible_reply",
         )
 
@@ -790,8 +790,8 @@ def test_internal_thought_builder_rejects_empty_residue_text() -> None:
     ):
         build_internal_thought_cognitive_episode(
             residue=residue,
-            timestamp="2026-05-09T21:30:00+00:00",
-            time_context=_time_context(),
+            storage_timestamp_utc="2026-05-09T21:30:00+00:00",
+            local_time_context=_time_context(),
         )
 
 
@@ -806,8 +806,8 @@ def test_internal_thought_builder_rejects_wrong_residue_source() -> None:
     ):
         build_internal_thought_cognitive_episode(
             residue=residue,
-            timestamp="2026-05-09T21:30:00+00:00",
-            time_context=_time_context(),
+            storage_timestamp_utc="2026-05-09T21:30:00+00:00",
+            local_time_context=_time_context(),
         )
 
 
@@ -822,8 +822,8 @@ def test_internal_thought_builder_rejects_over_cap_monologue() -> None:
     ):
         build_internal_thought_cognitive_episode(
             residue=residue,
-            timestamp="2026-05-09T21:30:00+00:00",
-            time_context=_time_context(),
+            storage_timestamp_utc="2026-05-09T21:30:00+00:00",
+            local_time_context=_time_context(),
         )
 
 
@@ -839,8 +839,8 @@ def test_internal_thought_builder_rejects_non_audit_latch() -> None:
         build_internal_thought_cognitive_episode(
             residue=_residue(),
             action_latch=latch,
-            timestamp="2026-05-09T21:30:00+00:00",
-            time_context=_time_context(),
+            storage_timestamp_utc="2026-05-09T21:30:00+00:00",
+            local_time_context=_time_context(),
         )
 
 
@@ -856,8 +856,8 @@ def test_internal_thought_builder_rejects_over_cap_latch_text() -> None:
         build_internal_thought_cognitive_episode(
             residue=_residue(),
             action_latch=latch,
-            timestamp="2026-05-09T21:30:00+00:00",
-            time_context=_time_context(),
+            storage_timestamp_utc="2026-05-09T21:30:00+00:00",
+            local_time_context=_time_context(),
         )
 
 
@@ -866,8 +866,8 @@ def test_selector_returns_internal_thought_variant_for_every_stage() -> None:
     episode = build_internal_thought_cognitive_episode(
         residue=_residue(),
         action_latch=_action_latch(),
-        timestamp="2026-05-09T21:30:00+00:00",
-        time_context=_time_context(),
+        storage_timestamp_utc="2026-05-09T21:30:00+00:00",
+        local_time_context=_time_context(),
         output_mode="silent",
     )
 
@@ -894,8 +894,8 @@ def test_source_payload_projects_internal_thought_residue() -> None:
     episode = build_internal_thought_cognitive_episode(
         residue=residue,
         action_latch=latch,
-        timestamp="2026-05-09T21:30:00+00:00",
-        time_context=_time_context(),
+        storage_timestamp_utc="2026-05-09T21:30:00+00:00",
+        local_time_context=_time_context(),
     )
     selection = select_cognition_prompt_variant(
         episode=episode,
@@ -924,8 +924,8 @@ def test_source_payload_projects_empty_action_latch_when_absent() -> None:
     residue = _residue()
     episode = build_internal_thought_cognitive_episode(
         residue=residue,
-        timestamp="2026-05-09T21:30:00+00:00",
-        time_context=_time_context(),
+        storage_timestamp_utc="2026-05-09T21:30:00+00:00",
+        local_time_context=_time_context(),
     )
     selection = select_cognition_prompt_variant(
         episode=episode,
@@ -950,8 +950,8 @@ def test_source_payload_rejects_duplicate_internal_monologue_percepts() -> None:
     """Internal-thought payload projection should require one percept."""
     episode = build_internal_thought_cognitive_episode(
         residue=_residue(),
-        timestamp="2026-05-09T21:30:00+00:00",
-        time_context=_time_context(),
+        storage_timestamp_utc="2026-05-09T21:30:00+00:00",
+        local_time_context=_time_context(),
     )
     second_percept = deepcopy(episode["percepts"][0])
     second_percept["percept_id"] = "internal_thought:percept:duplicate"
@@ -976,8 +976,8 @@ def test_source_payload_rejects_malformed_internal_thought_json() -> None:
     """Internal-thought payload projection should require canonical JSON."""
     episode = build_internal_thought_cognitive_episode(
         residue=_residue(),
-        timestamp="2026-05-09T21:30:00+00:00",
-        time_context=_time_context(),
+        storage_timestamp_utc="2026-05-09T21:30:00+00:00",
+        local_time_context=_time_context(),
     )
     episode["percepts"][0]["content"] = "{not-json"
     selection = {
@@ -1004,8 +1004,8 @@ def test_source_payload_rejects_non_string_action_latch_values() -> None:
     episode = build_internal_thought_cognitive_episode(
         residue=_residue(),
         action_latch=_action_latch(),
-        timestamp="2026-05-09T21:30:00+00:00",
-        time_context=_time_context(),
+        storage_timestamp_utc="2026-05-09T21:30:00+00:00",
+        local_time_context=_time_context(),
     )
     content_payload = json.loads(episode["percepts"][0]["content"])
     content_payload["action_latch"]["action_text"] = ["not", "a", "string"]
@@ -1037,8 +1037,8 @@ def test_selector_rejects_internal_thought_visible_reply_output_mode() -> None:
     """Internal-thought prompt selection should fail closed for visible reply."""
     episode = build_internal_thought_cognitive_episode(
         residue=_residue(),
-        timestamp="2026-05-09T21:30:00+00:00",
-        time_context=_time_context(),
+        storage_timestamp_utc="2026-05-09T21:30:00+00:00",
+        local_time_context=_time_context(),
     )
     episode["output_mode"] = "visible_reply"
 
@@ -1053,8 +1053,8 @@ def test_selector_rejects_internal_thought_dialog_text_source() -> None:
     """Internal-thought prompt selection should fail closed for dialog text."""
     episode = build_internal_thought_cognitive_episode(
         residue=_residue(),
-        timestamp="2026-05-09T21:30:00+00:00",
-        time_context=_time_context(),
+        storage_timestamp_utc="2026-05-09T21:30:00+00:00",
+        local_time_context=_time_context(),
     )
     episode["input_sources"] = ["dialog_text"]
     episode["percepts"][0]["input_source"] = "dialog_text"
@@ -1070,8 +1070,8 @@ def test_selector_rejects_non_internal_trigger_source() -> None:
     """Internal-thought source should not be selected for other triggers."""
     episode = build_internal_thought_cognitive_episode(
         residue=_residue(),
-        timestamp="2026-05-09T21:30:00+00:00",
-        time_context=_time_context(),
+        storage_timestamp_utc="2026-05-09T21:30:00+00:00",
+        local_time_context=_time_context(),
     )
     episode["trigger_source"] = "scheduled_recall"
 
@@ -1095,8 +1095,8 @@ async def test_dry_run_returns_busy_skip_without_cognition_call() -> None:
         action_latch=latch,
         character_profile=_character_profile(),
         user_profile=_user_profile(),
-        timestamp="2026-05-09T21:30:00+00:00",
-        time_context=_time_context(),
+        storage_timestamp_utc="2026-05-09T21:30:00+00:00",
+        local_time_context=_time_context(),
         is_primary_interaction_busy=busy_probe,
         call_cognition_subgraph_func=cognition,
         output_mode="silent",
@@ -1134,8 +1134,8 @@ async def test_dry_run_rejects_output_mode_before_busy_probe() -> None:
             residue=_residue(),
             character_profile=_character_profile(),
             user_profile=_user_profile(),
-            timestamp="2026-05-09T21:30:00+00:00",
-            time_context=_time_context(),
+            storage_timestamp_utc="2026-05-09T21:30:00+00:00",
+            local_time_context=_time_context(),
             is_primary_interaction_busy=busy_probe,
             call_cognition_subgraph_func=cognition,
             output_mode="visible_reply",
@@ -1157,8 +1157,8 @@ async def test_dry_run_returns_empty_residue_skip_without_cognition_call() -> No
         residue=residue,
         character_profile=_character_profile(),
         user_profile=_user_profile(),
-        timestamp="2026-05-09T21:30:00+00:00",
-        time_context=_time_context(),
+        storage_timestamp_utc="2026-05-09T21:30:00+00:00",
+        local_time_context=_time_context(),
         is_primary_interaction_busy=busy_probe,
         call_cognition_subgraph_func=cognition,
         output_mode="think_only",
@@ -1198,8 +1198,8 @@ async def test_dry_run_rejects_over_cap_residue_before_cognition_call() -> None:
             residue=residue,
             character_profile=_character_profile(),
             user_profile=_user_profile(),
-            timestamp="2026-05-09T21:30:00+00:00",
-            time_context=_time_context(),
+            storage_timestamp_utc="2026-05-09T21:30:00+00:00",
+            local_time_context=_time_context(),
             is_primary_interaction_busy=busy_probe,
             call_cognition_subgraph_func=cognition,
             output_mode="think_only",
@@ -1229,8 +1229,8 @@ async def test_dry_run_calls_injected_cognition_once_and_returns_audit() -> None
         action_latch=latch,
         character_profile=_character_profile(),
         user_profile=_user_profile(),
-        timestamp="2026-05-09T21:30:00+00:00",
-        time_context=_time_context(),
+        storage_timestamp_utc="2026-05-09T21:30:00+00:00",
+        local_time_context=_time_context(),
         is_primary_interaction_busy=busy_probe,
         call_cognition_subgraph_func=cognition,
         output_mode="preview",
@@ -1338,8 +1338,8 @@ async def test_dry_run_visual_disable_omits_prompt_key_and_sets_state_flag() -> 
         residue=residue,
         character_profile=_character_profile(),
         user_profile=_user_profile(),
-        timestamp="2026-05-09T21:30:00+00:00",
-        time_context=_time_context(),
+        storage_timestamp_utc="2026-05-09T21:30:00+00:00",
+        local_time_context=_time_context(),
         is_primary_interaction_busy=busy_probe,
         call_cognition_subgraph_func=cognition,
         visual_directives_enabled=False,
@@ -1379,8 +1379,8 @@ async def test_dry_run_global_visual_config_disables_prompt_key(
         residue=_residue(),
         character_profile=_character_profile(),
         user_profile=_user_profile(),
-        timestamp="2026-05-09T21:30:00+00:00",
-        time_context=_time_context(),
+        storage_timestamp_utc="2026-05-09T21:30:00+00:00",
+        local_time_context=_time_context(),
         is_primary_interaction_busy=_BusyProbe(False),
         call_cognition_subgraph_func=cognition,
     )

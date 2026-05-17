@@ -16,6 +16,7 @@ from kazusa_ai_chatbot.config import (
 from kazusa_ai_chatbot.nodes import persona_supervisor2_msg_decontexualizer as decontext
 from kazusa_ai_chatbot.nodes import persona_supervisor2_rag_supervisor2 as rag_supervisor
 from kazusa_ai_chatbot.rag.cache2_runtime import get_rag_cache2_runtime
+from kazusa_ai_chatbot.time_boundary import build_turn_clock_from_storage_utc
 from tests.llm_trace import write_llm_trace
 
 
@@ -146,6 +147,9 @@ def _decontext_state() -> dict:
 def _initializer_state(query: str) -> dict:
     """Build a RAG initializer state from the decontextualized query."""
 
+    turn_clock = build_turn_clock_from_storage_utc(
+        '2026-05-11T13:08:13+00:00'
+    )
     state = {
         'original_query': query,
         'character_name': _CHARACTER_NAME,
@@ -155,7 +159,8 @@ def _initializer_state(query: str) -> dict:
             'platform_user_id': '1285663364',
             'global_user_id': 'debug-readable-mention-user',
             'user_name': '接待小哥',
-            'current_timestamp': '2026-05-11T21:08:13+08:00',
+            'current_timestamp_utc': turn_clock['storage_timestamp_utc'],
+            'local_time_context': turn_clock['local_time_context'],
             'prompt_message_context': {
                 'body_text': _ADAPTER_SHAPED_TEXT,
                 'mentions': [

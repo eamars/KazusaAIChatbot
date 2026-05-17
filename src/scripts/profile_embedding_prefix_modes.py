@@ -7,11 +7,11 @@ import asyncio
 import json
 import math
 from collections.abc import Mapping, Sequence
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 from openai import AsyncOpenAI
+from kazusa_ai_chatbot.time_boundary import storage_utc_now_iso
 
 from scripts.profile_rag_retrieval import (
     load_profile_cases,
@@ -291,7 +291,7 @@ async def run_prefix_mode_profile(
         mode_results.append(mode_result)
 
     result = {
-        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "generated_at": storage_utc_now_iso(),
         "phase_label": phase_label,
         "cases_path": str(cases_path),
         "input_path": str(input_path),

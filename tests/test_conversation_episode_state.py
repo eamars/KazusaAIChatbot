@@ -21,7 +21,7 @@ def test_preserve_first_seen_entries_keeps_llm_returned_text_timestamp() -> None
             "user has an unresolved draft outline",
             "user is worried about the introduction",
         ],
-        current_timestamp="2026-04-28T04:00:00+00:00",
+        current_timestamp_utc="2026-04-28T04:00:00+00:00",
         limit=8,
     )
 
@@ -37,7 +37,7 @@ def test_build_episode_state_doc_caps_lists_and_increments_turn_count() -> None:
     scope = ConversationProgressScope("qq", "channel-1", "user-1")
     document = repository.build_episode_state_doc(
         scope=scope,
-        timestamp="2026-04-28T04:00:00+00:00",
+        storage_timestamp_utc="2026-04-28T04:00:00+00:00",
         prior_episode_state={
             "episode_state_id": "episode-1",
             "turn_count": 3,

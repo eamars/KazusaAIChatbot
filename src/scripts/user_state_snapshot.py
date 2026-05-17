@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -31,6 +30,7 @@ from kazusa_ai_chatbot.db.script_operations import (
     replace_user_state_snapshot_collection_rows,
     restore_user_state_alias_profile_refs,
 )
+from kazusa_ai_chatbot.time_boundary import storage_utc_now_iso
 
 SNAPSHOT_TYPE = "user_state"
 SNAPSHOT_VERSION = 1
@@ -51,7 +51,7 @@ def _utc_now_iso() -> str:
     Returns:
         ISO-8601 timestamp with a UTC offset.
     """
-    return_value = datetime.now(timezone.utc).isoformat()
+    return_value = storage_utc_now_iso()
     return return_value
 
 

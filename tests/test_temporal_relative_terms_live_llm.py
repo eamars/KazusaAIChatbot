@@ -16,7 +16,7 @@ from kazusa_ai_chatbot.conversation_progress.models import (
     ConversationProgressScope,
 )
 from kazusa_ai_chatbot.nodes import persona_supervisor2_consolidator_facts as facts_module
-from kazusa_ai_chatbot.time_context import build_character_time_context
+from kazusa_ai_chatbot.time_boundary import build_turn_clock_from_storage_utc
 from tests.llm_trace import write_llm_trace
 
 
@@ -317,12 +317,13 @@ async def test_live_recorder_contract_absolute_or_omit_episode_state(
 def _facts_harvester_state() -> dict[str, Any]:
     """Build a facts-harvester fixture with a resolvable relative promise."""
 
-    timestamp = '2026-05-08T09:47:00+00:00'
+    timestamp_utc = '2026-05-08T09:47:00+00:00'
+    turn_clock = build_turn_clock_from_storage_utc(timestamp_utc)
     state = {
         'character_profile': {'name': '杏山千纱 (Kyōyama Kazusa)'},
         'user_name': '蚝爹油',
-        'timestamp': timestamp,
-        'time_context': build_character_time_context(timestamp),
+        'storage_timestamp_utc': turn_clock['storage_timestamp_utc'],
+        'local_time_context': turn_clock['local_time_context'],
         'decontexualized_input': (
             '用户问明天早上能不能提醒他检查香料清单。'
         ),

@@ -240,7 +240,7 @@ Approved DB-interface functions:
 
 ```python
 async def compute_memory_embedding(text: str) -> list[float]
-def build_active_memory_filter(now_timestamp: str) -> dict[str, Any]
+def build_active_memory_filter(now_timestamp_utc: str) -> dict[str, Any]
 async def find_memory_unit_by_id(memory_unit_id: str) -> EvolvingMemoryDoc | None
 async def insert_memory_unit_document(document: EvolvingMemoryDoc) -> None
 async def replace_memory_unit_document(document: EvolvingMemoryDoc) -> None

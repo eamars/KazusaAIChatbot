@@ -41,6 +41,7 @@ from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition_prompt_selection impo
     select_cognition_prompt_variant,
 )
 from kazusa_ai_chatbot.nodes.referent_resolution import normalize_referents
+from kazusa_ai_chatbot.time_boundary import build_turn_clock
 from kazusa_ai_chatbot.utils import (
     build_affinity_block,
     get_llm,
@@ -59,6 +60,7 @@ _TRACE_SUITE = "image_cognition_options_live_llm"
 _USER_MESSAGE = (
     "Look at this image and tell me what visual details matter for the reply."
 )
+_TURN_CLOCK = build_turn_clock("2026-05-10 20:00:00")
 _REQUIRED_FIELDS = (
     "understood_user_intent",
     "visual_facts_used",
@@ -659,11 +661,8 @@ def _image_episode(
     episode = build_text_chat_cognitive_episode(
         episode_id=f"episode-{case_id}",
         percept_id=f"percept-{case_id}",
-        timestamp="2026-05-10T08:00:00+12:00",
-        time_context={
-            "current_local_datetime": "2026-05-10 20:00",
-            "current_local_weekday": "Sunday",
-        },
+        storage_timestamp_utc=_TURN_CLOCK["storage_timestamp_utc"],
+        local_time_context=_TURN_CLOCK["local_time_context"],
         user_input=user_message,
         platform="debug",
         platform_channel_id="image-quality",
@@ -703,11 +702,8 @@ def _text_episode(
     episode = build_text_chat_cognitive_episode(
         episode_id=f"episode-direct-{case_id}",
         percept_id=f"percept-direct-{case_id}",
-        timestamp="2026-05-10T08:00:00+12:00",
-        time_context={
-            "current_local_datetime": "2026-05-10 20:00",
-            "current_local_weekday": "Sunday",
-        },
+        storage_timestamp_utc=_TURN_CLOCK["storage_timestamp_utc"],
+        local_time_context=_TURN_CLOCK["local_time_context"],
         user_input=user_message,
         platform="debug",
         platform_channel_id="image-quality",
@@ -742,8 +738,8 @@ def _base_layer_state(
 
     state: dict[str, Any] = {
         "character_profile": _character_profile(),
-        "timestamp": "2026-05-10T08:00:00+12:00",
-        "time_context": episode["time_context"],
+        "storage_timestamp_utc": episode["storage_timestamp_utc"],
+        "local_time_context": episode["local_time_context"],
         "user_input": user_message,
         "global_user_id": "global-user-image-quality",
         "user_name": "Image Quality User",

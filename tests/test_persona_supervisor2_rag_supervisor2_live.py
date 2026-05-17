@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 import logging
-from datetime import datetime, timezone
 
 import httpx
 import pytest
@@ -15,6 +14,10 @@ from kazusa_ai_chatbot.mcp_client import mcp_manager
 from kazusa_ai_chatbot.nodes.persona_supervisor2_rag_supervisor2 import (
     call_rag_supervisor,
     rag_finalizer,
+)
+from kazusa_ai_chatbot.time_boundary import (
+    build_turn_clock_from_storage_utc,
+    storage_utc_now_iso,
 )
 from tests.llm_trace import write_llm_trace
 
@@ -74,10 +77,13 @@ def _build_context(platform_channel_id: str, query: str) -> dict:
     Returns:
         Context dict passed directly into ``call_rag_supervisor``.
     """
+    storage_timestamp_utc = storage_utc_now_iso()
+    turn_clock = build_turn_clock_from_storage_utc(storage_timestamp_utc)
     return {
         "platform": "qq",
         "platform_channel_id": platform_channel_id,
-        "current_timestamp": datetime.now(timezone.utc).isoformat(),
+        "current_timestamp_utc": turn_clock["storage_timestamp_utc"],
+        "local_time_context": turn_clock["local_time_context"],
         "global_user_id": "",
         "user_name": "",
         "prompt_message_context": {

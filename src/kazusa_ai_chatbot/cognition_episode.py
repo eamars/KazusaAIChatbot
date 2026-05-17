@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any, Literal, NoReturn, NotRequired, TypedDict, get_args
 
-from kazusa_ai_chatbot.time_context import TimeContextDoc
+from kazusa_ai_chatbot.time_boundary import LocalTimeContextDoc
 
 TriggerSource = Literal[
     "user_message",
@@ -92,13 +92,13 @@ class CognitiveEpisode(TypedDict):
     percepts: list[CognitivePercept]
     target_scope: TargetScope
     origin_metadata: OriginMetadata
-    timestamp: str
-    time_context: TimeContextDoc
+    storage_timestamp_utc: str
+    local_time_context: LocalTimeContextDoc
 
 
 class TextChatCompatibilityProjection(TypedDict):
-    timestamp: str
-    time_context: TimeContextDoc
+    storage_timestamp_utc: str
+    local_time_context: LocalTimeContextDoc
     user_input: str
     platform: str
     platform_channel_id: str
@@ -119,7 +119,7 @@ _TRIGGER_SOURCES = frozenset(get_args(TriggerSource))
 _INPUT_SOURCES = frozenset(get_args(InputSource))
 _VISIBILITIES = frozenset(get_args(Visibility))
 _OUTPUT_MODES = frozenset(get_args(OutputMode))
-_TIME_CONTEXT_FIELDS = tuple(TimeContextDoc.__annotations__)
+_LOCAL_TIME_CONTEXT_FIELDS = tuple(LocalTimeContextDoc.__annotations__)
 MAX_COGNITIVE_EPISODE_MEDIA_PERCEPTS = 4
 MAX_COGNITIVE_EPISODE_MEDIA_DESCRIPTION_CHARS = 800
 _IMAGE_OBSERVATION_LIST_FIELDS = (
@@ -366,9 +366,21 @@ def validate_cognitive_episode(episode: CognitiveEpisode) -> None:
     _validate_target_scope(target_scope)
     origin_metadata = _require_dict(episode_data, "origin_metadata", "episode")
     _validate_origin_metadata(origin_metadata)
-    _require_non_empty_string(episode_data, "timestamp", "episode")
-    time_context = _require_dict(episode_data, "time_context", "episode")
-    _validate_time_context(time_context)
+    if "timestamp" in episode_data or "time_context" in episode_data:
+        _raise_validation_error(
+            "episode contains legacy timestamp or time_context field"
+        )
+    _require_non_empty_string(
+        episode_data,
+        "storage_timestamp_utc",
+        "episode",
+    )
+    local_time_context = _require_dict(
+        episode_data,
+        "local_time_context",
+        "episode",
+    )
+    _validate_local_time_context(local_time_context)
 
     percept_input_sources = _validate_percepts(percepts)
     _validate_percept_sources_match_input_sources(
@@ -383,8 +395,8 @@ def build_text_chat_cognitive_episode(
     *,
     episode_id: str,
     percept_id: str,
-    timestamp: str,
-    time_context: TimeContextDoc,
+    storage_timestamp_utc: str,
+    local_time_context: LocalTimeContextDoc,
     user_input: str,
     platform: str,
     platform_channel_id: str,
@@ -406,8 +418,8 @@ def build_text_chat_cognitive_episode(
     Args:
         episode_id: Stable id for this cognitive episode.
         percept_id: Stable id for the single text percept.
-        timestamp: Original turn timestamp.
-        time_context: Character-local time context already built by the caller.
+        storage_timestamp_utc: Storage UTC timestamp for the turn.
+        local_time_context: Configured-local time context for model payloads.
         user_input: Current text input seen by the chat path.
         platform: Adapter platform name.
         platform_channel_id: Platform channel or private conversation id.
@@ -475,8 +487,8 @@ def build_text_chat_cognitive_episode(
         "percepts": [percept, *media_percepts],
         "target_scope": target_scope,
         "origin_metadata": origin_metadata,
-        "timestamp": timestamp,
-        "time_context": time_context,
+        "storage_timestamp_utc": storage_timestamp_utc,
+        "local_time_context": local_time_context,
     }
 
     validate_cognitive_episode(episode)
@@ -515,8 +527,8 @@ def replace_text_chat_media_percepts(
     refreshed_episode = build_text_chat_cognitive_episode(
         episode_id=episode["episode_id"],
         percept_id=dialog_percept["percept_id"],
-        timestamp=episode["timestamp"],
-        time_context=episode["time_context"],
+        storage_timestamp_utc=episode["storage_timestamp_utc"],
+        local_time_context=episode["local_time_context"],
         user_input=dialog_percept["content"],
         platform=target_scope["platform"],
         platform_channel_id=target_scope["platform_channel_id"],
@@ -572,8 +584,8 @@ def project_text_chat_compatibility_fields(
     target_scope = episode["target_scope"]
     origin_metadata = episode["origin_metadata"]
     projection: TextChatCompatibilityProjection = {
-        "timestamp": episode["timestamp"],
-        "time_context": episode["time_context"],
+        "storage_timestamp_utc": episode["storage_timestamp_utc"],
+        "local_time_context": episode["local_time_context"],
         "user_input": dialog_content,
         "platform": target_scope["platform"],
         "platform_channel_id": target_scope["platform_channel_id"],
@@ -866,9 +878,15 @@ def _validate_origin_metadata(origin_metadata: dict[str, Any]) -> None:
             )
 
 
-def _validate_time_context(time_context: dict[str, Any]) -> None:
-    for field_name in _TIME_CONTEXT_FIELDS:
-        _require_non_empty_string(time_context, field_name, "time_context")
+def _validate_local_time_context(
+    local_time_context: dict[str, Any],
+) -> None:
+    for field_name in _LOCAL_TIME_CONTEXT_FIELDS:
+        _require_non_empty_string(
+            local_time_context,
+            field_name,
+            "local_time_context",
+        )
 
 
 def _validate_percepts(percepts: list[Any]) -> set[str]:

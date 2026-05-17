@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import logging
 import uuid
-from datetime import datetime, timezone
 
 from kazusa_ai_chatbot.db import (
     ScheduledEventDoc,
@@ -18,8 +17,13 @@ from kazusa_ai_chatbot.db import (
 )
 from kazusa_ai_chatbot.dispatcher.adapter_iface import AdapterRegistry
 from kazusa_ai_chatbot.dispatcher.pending_index import PendingTaskIndex
-from kazusa_ai_chatbot.dispatcher.task import DispatchContext, Task, parse_iso_datetime
+from kazusa_ai_chatbot.dispatcher.task import DispatchContext, Task
 from kazusa_ai_chatbot.dispatcher.tool_spec import ToolRegistry
+from kazusa_ai_chatbot.time_boundary import (
+    parse_storage_utc_datetime,
+    storage_utc_now,
+    storage_utc_now_iso,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -96,9 +100,9 @@ async def _schedule_task(event: ScheduledEventDoc) -> None:
         event: Persisted scheduled event document to await.
     """
 
-    execute_at = parse_iso_datetime(event["execute_at"])
-    now = datetime.now(timezone.utc)
-    delay = max(0.0, (execute_at - now).total_seconds())
+    execute_at_utc = parse_storage_utc_datetime(event["execute_at"])
+    now_utc = storage_utc_now()
+    delay = max(0.0, (execute_at_utc - now_utc).total_seconds())
     if delay > 0:
         await asyncio.sleep(delay)
     await _fire_event(event)
@@ -115,7 +119,7 @@ async def schedule_event(event: ScheduledEventDoc) -> str:
     """
 
     event.setdefault("event_id", str(uuid.uuid4()))
-    event.setdefault("created_at", datetime.now(timezone.utc).isoformat())
+    event.setdefault("created_at", storage_utc_now_iso())
     event.setdefault("status", "pending")
 
     await insert_scheduled_event(event)
@@ -179,7 +183,7 @@ async def cancel_event(event_id: str) -> bool:
 
     return_value = await cancel_pending_scheduled_event(
         event_id,
-        cancelled_at=datetime.now(timezone.utc).isoformat(),
+        cancelled_at=storage_utc_now_iso(),
     )
     return return_value
 

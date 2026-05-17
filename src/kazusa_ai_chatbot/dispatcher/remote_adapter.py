@@ -4,13 +4,16 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 import logging
-from datetime import datetime, timezone
 from typing import Any
 
 import httpx
 
 from kazusa_ai_chatbot.dispatcher.adapter_iface import SendResult
-from kazusa_ai_chatbot.dispatcher.task import parse_iso_datetime
+from kazusa_ai_chatbot.time_boundary import (
+    parse_storage_utc_datetime,
+    storage_utc_now,
+    storage_utc_now_iso,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -87,12 +90,12 @@ class RemoteHttpAdapter:
         response.raise_for_status()
         data = response.json()
 
-        sent_at_raw = str(data.get("sent_at") or datetime.now(timezone.utc).isoformat())
+        sent_at_raw = str(data.get("sent_at") or storage_utc_now_iso())
         try:
-            sent_at = parse_iso_datetime(sent_at_raw)
+            sent_at = parse_storage_utc_datetime(sent_at_raw)
         except ValueError as exc:
             logger.debug(f"Using current time for invalid adapter sent_at: {exc}")
-            sent_at = datetime.now(timezone.utc)
+            sent_at = storage_utc_now()
 
         return_value = SendResult(
             platform=str(data.get("platform") or self.platform),

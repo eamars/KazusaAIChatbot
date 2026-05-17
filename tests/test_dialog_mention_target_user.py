@@ -86,6 +86,7 @@ def _dialog_state() -> dict:
         "character_profile": _character_profile(),
         "debug_modes": {},
         "should_respond": True,
+        "dialog_usage_mode": "live_visible_reply",
         "messages": [],
     }
     return state

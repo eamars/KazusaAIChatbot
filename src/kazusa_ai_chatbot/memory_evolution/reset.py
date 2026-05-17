@@ -145,7 +145,7 @@ def validate_seed_entries(entries: list[SeedMemoryEntry]) -> list[str]:
 def _seed_document(
     entry: dict[str, Any],
     *,
-    timestamp: str,
+    storage_timestamp_utc: str,
     updated_at: str,
 ) -> EvolvingMemoryDoc:
     memory_unit_id = repository.seed_memory_unit_id(
@@ -168,7 +168,7 @@ def _seed_document(
         "merged_from_memory_unit_ids": [],
         "evidence_refs": [
             {
-                "captured_at": timestamp,
+                "captured_at": storage_timestamp_utc,
                 "source": "seed_file",
             }
         ],
@@ -179,7 +179,7 @@ def _seed_document(
             "reviewer": "seed_tool",
         },
         "confidence_note": entry["confidence_note"],
-        "timestamp": timestamp,
+        "timestamp": storage_timestamp_utc,
         "updated_at": updated_at,
         "expiry_timestamp": entry["expiry_timestamp"],
     }
@@ -205,10 +205,14 @@ async def _reset_counts(
         )
         seed_ids.append(seed_id)
         existing = await memory_store.find_memory_unit_by_id(seed_id)
-        timestamp = str(existing.get("timestamp", write_time)) if existing else write_time
+        storage_timestamp_utc = (
+            str(existing.get("timestamp", write_time))
+            if existing
+            else write_time
+        )
         candidate = _seed_document(
             entry.data,
-            timestamp=timestamp,
+            storage_timestamp_utc=storage_timestamp_utc,
             updated_at=write_time,
         )
         normalized = repository.normalize_memory_document(

@@ -5,8 +5,6 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Any
 
-from pymongo.errors import PyMongoError
-
 from kazusa_ai_chatbot.action_spec.attempt_ledger import (
     build_action_attempt_record,
 )
@@ -29,6 +27,7 @@ from kazusa_ai_chatbot.action_spec.results import (
     build_action_result,
 )
 from kazusa_ai_chatbot.db import DatabaseOperationError
+from kazusa_ai_chatbot.time_boundary import normalize_storage_utc_iso
 
 ActionAttemptRecorder = Callable[[dict[str, Any]], Any]
 
@@ -36,7 +35,7 @@ ActionAttemptRecorder = Callable[[dict[str, Any]], Any]
 async def execute_action_specs_for_trace(
     action_specs: list[dict[str, Any]],
     *,
-    timestamp: str,
+    storage_timestamp_utc: str,
     executed_action_attempt_ids: set[str] | None = None,
     record_attempt_func: ActionAttemptRecorder | None = None,
 ) -> list[ActionResultV1]:
@@ -44,7 +43,8 @@ async def execute_action_specs_for_trace(
 
     Args:
         action_specs: Materialized action specs selected for the episode.
-        timestamp: Episode timestamp used for execution and completion audit.
+        storage_timestamp_utc: Episode storage UTC timestamp used for execution
+            and completion audit.
         executed_action_attempt_ids: Action attempts already realized by a
             surface handler before this function is called.
         record_attempt_func: Optional existing-ledger writer. When omitted,
@@ -55,6 +55,9 @@ async def execute_action_specs_for_trace(
         Prompt-safe action results for episode trace and consolidation.
     """
 
+    normalized_storage_timestamp_utc = _normalize_storage_timestamp(
+        storage_timestamp_utc,
+    )
     executed_attempts = executed_action_attempt_ids or set()
     evaluator = ActionSpecEvaluator()
     action_results: list[ActionResultV1] = []
@@ -76,7 +79,7 @@ async def execute_action_specs_for_trace(
             try:
                 memory_result = await execute_user_memory_lifecycle_action(
                     validated_spec,
-                    timestamp=timestamp,
+                    storage_timestamp_utc=normalized_storage_timestamp_utc,
                     action_attempt_id=action_attempt_id,
                 )
             except ActionValidationError as exc:
@@ -93,13 +96,6 @@ async def execute_action_specs_for_trace(
                     "status": status,
                     "error": str(exc),
                 }
-            except PyMongoError as exc:
-                status = "failed"
-                result_summary = f"memory_lifecycle_update failed: {exc}"
-                execution_result = {
-                    "status": status,
-                    "error": str(exc),
-                }
             except ValueError as exc:
                 status = "rejected"
                 result_summary = f"memory_lifecycle_update rejected: {exc}"
@@ -110,7 +106,7 @@ async def execute_action_specs_for_trace(
             else:
                 if memory_result["status"] in ("executed", "unchanged"):
                     status = "executed"
-                    completed_at = timestamp
+                    completed_at = normalized_storage_timestamp_utc
                 else:
                     status = "failed"
                 result_summary = (
@@ -125,7 +121,7 @@ async def execute_action_specs_for_trace(
             try:
                 future_result = await execute_future_cognition_action(
                     validated_spec,
-                    timestamp=timestamp,
+                    storage_timestamp_utc=normalized_storage_timestamp_utc,
                     action_attempt_id=action_attempt_id,
                 )
             except ActionValidationError as exc:
@@ -144,7 +140,7 @@ async def execute_action_specs_for_trace(
                 }
             else:
                 status = "scheduled"
-                completed_at = timestamp
+                completed_at = normalized_storage_timestamp_utc
                 scheduled_ids = future_result["scheduled_event_ids"]
                 result_summary = (
                     "trigger_future_cognition scheduled: "
@@ -157,7 +153,7 @@ async def execute_action_specs_for_trace(
                 }
         elif action_attempt_id in executed_attempts:
             status = "executed"
-            completed_at = timestamp
+            completed_at = normalized_storage_timestamp_utc
             execution_result = {"status": status}
         elif validated_spec["kind"] == SPEAK_CAPABILITY:
             status = "rejected"
@@ -178,7 +174,7 @@ async def execute_action_specs_for_trace(
                 record_attempt_func,
                 validated_spec,
                 eval_result,
-                timestamp=timestamp,
+                storage_timestamp_utc=normalized_storage_timestamp_utc,
                 execution_result=execution_result,
             )
         action_results.append(action_result)
@@ -190,7 +186,7 @@ async def _record_action_attempt(
     action_spec: dict[str, Any],
     eval_result: dict[str, Any],
     *,
-    timestamp: str,
+    storage_timestamp_utc: str,
     execution_result: dict[str, Any],
 ) -> None:
     """Record one action attempt through the existing idempotency ledger."""
@@ -198,9 +194,23 @@ async def _record_action_attempt(
     attempt_record = build_action_attempt_record(
         action_spec,
         eval_result,
-        recorded_at=timestamp,
+        recorded_at=storage_timestamp_utc,
         execution_result=execution_result,
     )
     result = record_attempt_func(attempt_record)
     if hasattr(result, "__await__"):
         await result
+
+
+def _normalize_storage_timestamp(storage_timestamp_utc: str) -> str:
+    """Normalize an action execution timestamp before trace/audit use."""
+
+    try:
+        normalized_storage_timestamp_utc = normalize_storage_utc_iso(
+            storage_timestamp_utc,
+        )
+    except ValueError as exc:
+        raise ActionValidationError(
+            f"storage_timestamp_utc: invalid storage UTC timestamp: {exc}"
+        ) from exc
+    return normalized_storage_timestamp_utc

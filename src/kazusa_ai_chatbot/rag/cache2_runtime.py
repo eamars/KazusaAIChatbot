@@ -12,7 +12,7 @@ import logging
 from collections import OrderedDict
 from copy import deepcopy
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Any
 
 from kazusa_ai_chatbot.config import RAG_CACHE2_MAX_ENTRIES
@@ -20,6 +20,7 @@ from kazusa_ai_chatbot.rag.cache2_events import (
     CacheDependency,
     CacheInvalidationEvent,
 )
+from kazusa_ai_chatbot.time_boundary import storage_utc_now
 
 logger = logging.getLogger(__name__)
 
@@ -48,7 +49,7 @@ def stable_cache_key(namespace: str, payload: dict[str, Any]) -> str:
 
 def _now_utc() -> datetime:
     """Return the current UTC timestamp."""
-    return_value = datetime.now(timezone.utc)
+    return_value = storage_utc_now()
     return return_value
 
 
@@ -72,11 +73,15 @@ def _timestamp_overlaps_dependency(
         True when the event has no timestamp, the dependency has no closed
         range, or the event timestamp falls inside the dependency range.
     """
-    if not event.timestamp:
+    event_storage_timestamp_utc = event.storage_timestamp_utc
+    if not event_storage_timestamp_utc:
         return True
-    if dependency.from_timestamp and event.timestamp < dependency.from_timestamp:
+    if (
+        dependency.from_timestamp
+        and event_storage_timestamp_utc < dependency.from_timestamp
+    ):
         return False
-    if dependency.to_timestamp and event.timestamp > dependency.to_timestamp:
+    if dependency.to_timestamp and event_storage_timestamp_utc > dependency.to_timestamp:
         return False
     return True
 

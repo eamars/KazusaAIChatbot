@@ -16,8 +16,8 @@ from kazusa_ai_chatbot.db import (
     list_due_future_cognition_events,
     query_active_commitment_memory_units,
 )
-from kazusa_ai_chatbot.dispatcher.task import parse_iso_datetime
 from kazusa_ai_chatbot.self_cognition import models
+from kazusa_ai_chatbot.time_boundary import parse_storage_utc_datetime
 from kazusa_ai_chatbot.utils import text_or_empty
 
 _CHARACTER_PROFILE_FIELDS = frozenset(
@@ -94,10 +94,10 @@ async def collect_scheduled_future_cognition_cases(
         return_value: list[models.SelfCognitionCase] = []
         return return_value
 
-    current_now = parse_iso_datetime(now.isoformat())
+    current_now_utc = parse_storage_utc_datetime(now.isoformat())
     due_events_reader = list_due_events_func or list_due_future_cognition_events
     raw_events = due_events_reader(
-        current_timestamp=current_now.isoformat(),
+        current_timestamp_utc=current_now_utc.isoformat(),
         limit=max_cases,
     )
     if inspect.isawaitable(raw_events):
@@ -114,12 +114,12 @@ async def collect_scheduled_future_cognition_cases(
             break
         if not isinstance(event, dict):
             continue
-        if not _is_due_future_cognition_event(event, current_now):
+        if not _is_due_future_cognition_event(event, current_now_utc):
             continue
         case = _build_scheduled_future_cognition_case(
             event,
             character_profile=character_profile,
-            now=current_now,
+            now=current_now_utc,
         )
         if case is None:
             continue
@@ -158,7 +158,7 @@ async def collect_active_commitment_cases(
     profile_reader = get_user_profile_func or get_user_profile
 
     units = await active_commitment_reader(
-        current_timestamp=now.isoformat(),
+        current_timestamp_utc=now.isoformat(),
         limit=max_cases,
     )
     cases: list[models.SelfCognitionCase] = []
@@ -210,7 +210,7 @@ def _is_due_future_cognition_event(
         return_value = False
         return return_value
     try:
-        execute_time = parse_iso_datetime(execute_at)
+        execute_time = parse_storage_utc_datetime(execute_at)
     except ValueError:
         return_value = False
         return return_value
@@ -263,8 +263,10 @@ def _build_scheduled_future_cognition_case(
     case: models.SelfCognitionCase = {
         "case_name": models.CASE_SCHEDULED_FUTURE_COGNITION,
         "case_id": event_id,
-        "idle_timestamp": now.isoformat(),
-        "last_evidence_timestamp": _scheduled_event_evidence_timestamp(event),
+        "idle_timestamp_utc": now.isoformat(),
+        "last_evidence_timestamp_utc": (
+            _scheduled_event_evidence_timestamp_utc(event)
+        ),
         "trigger_kind": models.TRIGGER_SCHEDULED_FUTURE_COGNITION,
         "semantic_due_state": models.DUE_STATE_DUE_NOW,
         "actionability": "scheduled_private_followup_ready_no_direct_contact",
@@ -372,7 +374,7 @@ def _safe_continuation(value: object) -> dict[str, Any]:
     return safe_value
 
 
-def _scheduled_event_evidence_timestamp(event: dict[str, Any]) -> str:
+def _scheduled_event_evidence_timestamp_utc(event: dict[str, Any]) -> str:
     """Choose the visible timestamp for a scheduled slot case."""
 
     execute_at = text_or_empty(event.get("execute_at"))
@@ -406,8 +408,11 @@ def _build_active_commitment_case(
     case: models.SelfCognitionCase = {
         "case_name": case_name,
         "case_id": f"active_commitment:{unit_id}:{due_at}",
-        "idle_timestamp": now.isoformat(),
-        "last_evidence_timestamp": _last_evidence_timestamp(unit, rows),
+        "idle_timestamp_utc": now.isoformat(),
+        "last_evidence_timestamp_utc": _last_evidence_timestamp_utc(
+            unit,
+            rows,
+        ),
         "trigger_kind": models.TRIGGER_ACTIVE_COMMITMENT_DUE_CHECK,
         "semantic_due_state": due_state,
         "actionability": actionability,
@@ -444,7 +449,7 @@ def _due_state(due_at: str, now: datetime) -> str:
     """Classify a due timestamp relative to the worker tick."""
 
     try:
-        due_time = parse_iso_datetime(due_at)
+        due_time = parse_storage_utc_datetime(due_at)
     except ValueError:
         return_value = ""
         return return_value
@@ -457,21 +462,21 @@ def _due_state(due_at: str, now: datetime) -> str:
     return return_value
 
 
-def _last_evidence_timestamp(
+def _last_evidence_timestamp_utc(
     unit: dict[str, Any],
     rows: list[dict[str, Any]],
 ) -> str:
     """Choose the most recent visible or memory timestamp for a case."""
 
     latest_row = rows[-1]
-    row_timestamp = text_or_empty(latest_row.get("timestamp"))
-    if row_timestamp:
-        return_value = row_timestamp
+    row_timestamp_utc = text_or_empty(latest_row.get("timestamp"))
+    if row_timestamp_utc:
+        return_value = row_timestamp_utc
         return return_value
     for field_name in ("updated_at", "last_seen_at", "first_seen_at"):
-        timestamp = text_or_empty(unit.get(field_name))
-        if timestamp:
-            return timestamp
+        timestamp_utc = text_or_empty(unit.get(field_name))
+        if timestamp_utc:
+            return timestamp_utc
     return_value = ""
     return return_value
 

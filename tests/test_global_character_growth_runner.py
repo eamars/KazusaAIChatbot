@@ -180,6 +180,49 @@ async def test_runner_skips_when_no_eligible_memory(monkeypatch) -> None:
 
 
 @pytest.mark.asyncio
+async def test_runner_derives_missing_date_from_configured_local_time(
+    monkeypatch,
+) -> None:
+    """Omitted growth dates should use the configured local date, not UTC date."""
+
+    recorded_runs = []
+    fixed_now_utc = datetime(2026, 5, 10, 13, 30, tzinfo=timezone.utc)
+    monkeypatch.setattr(runner_module, "storage_utc_now", lambda: fixed_now_utc)
+    monkeypatch.setattr(
+        runner_module,
+        "find_active_memory_units",
+        AsyncMock(return_value=[]),
+    )
+    monkeypatch.setattr(
+        runner_module.growth_store,
+        "list_active_growth_traits",
+        AsyncMock(return_value=[]),
+    )
+    generate = AsyncMock()
+    monkeypatch.setattr(runner_module, "generate_growth_candidates", generate)
+
+    async def _insert_run(document: dict) -> None:
+        recorded_runs.append(document)
+
+    monkeypatch.setattr(
+        runner_module.growth_store,
+        "insert_growth_run_document",
+        _insert_run,
+    )
+
+    result = await runner_module.run_global_character_growth_pass(
+        character_local_date=None,
+        dry_run=True,
+        enable_trait_writes=False,
+    )
+
+    assert result["status"] == "skipped"
+    assert recorded_runs[0]["character_local_date"] == "2026-05-11"
+    assert recorded_runs[0]["created_at"] == "2026-05-10T13:30:00+00:00"
+    generate.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_runner_uses_budgeted_payload_and_records_prompt_budget_diagnostics(
     monkeypatch,
 ) -> None:

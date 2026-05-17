@@ -11,7 +11,7 @@ from kazusa_ai_chatbot.rag.cognitive_episode_adapter import (
     RAGEpisodeAdapterError,
     build_text_chat_rag_request,
 )
-from kazusa_ai_chatbot.time_context import build_character_time_context
+from kazusa_ai_chatbot.time_boundary import build_turn_clock_from_storage_utc
 
 
 def _valid_episode() -> dict:
@@ -20,13 +20,13 @@ def _valid_episode() -> dict:
     Returns:
         Valid user-message cognitive episode.
     """
-    timestamp = "2026-04-27T00:00:00+12:00"
-    time_context = build_character_time_context(timestamp)
+    storage_timestamp_utc = "2026-04-26T12:00:00+00:00"
+    turn_clock = build_turn_clock_from_storage_utc(storage_timestamp_utc)
     episode = build_text_chat_cognitive_episode(
         episode_id="episode-1",
         percept_id="percept-1",
-        timestamp=timestamp,
-        time_context=time_context,
+        storage_timestamp_utc=storage_timestamp_utc,
+        local_time_context=turn_clock["local_time_context"],
         user_input="Need current evidence.",
         platform="qq",
         platform_channel_id="chan-1",
@@ -103,10 +103,11 @@ def test_valid_text_chat_episode_builds_exact_rag_request_shape() -> None:
             "global_user_id": "user-1",
             "user_name": "User",
             "user_profile": {"affinity": 500},
-            "current_timestamp": "2026-04-27T00:00:00+12:00",
-            "time_context": build_character_time_context(
-                "2026-04-27T00:00:00+12:00"
-            ),
+            "current_timestamp_utc": "2026-04-26T12:00:00+00:00",
+            "local_time_context": {
+                "current_local_datetime": "2026-04-27 00:00",
+                "current_local_weekday": "Monday",
+            },
             "prompt_message_context": {
                 "body_text": "Need current evidence.",
                 "mentions": [],
@@ -134,6 +135,8 @@ def test_valid_text_chat_episode_builds_exact_rag_request_shape() -> None:
         "character_user_id": "character-1",
     }
     assert request == expected_request
+    assert "current_" "timestamp" not in request["context"]
+    assert "time_context" not in request["context"]
 
 
 def test_optional_context_fields_default_to_none() -> None:

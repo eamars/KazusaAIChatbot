@@ -5,10 +5,14 @@ from __future__ import annotations
 import asyncio
 from collections import deque
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
 from typing import Any
 
 from kazusa_ai_chatbot.config import CHARACTER_GLOBAL_USER_ID
+from kazusa_ai_chatbot.time_boundary import (
+    LocalTimeContextDoc,
+    build_turn_clock,
+    parse_storage_utc_datetime,
+)
 
 GROUP_COALESCE_MAX_GAP_SECONDS = 120.0
 
@@ -20,7 +24,9 @@ class QueuedChatItem:
     Args:
         sequence: Monotonic brain-local arrival sequence.
         request: Original chat request payload.
-        timestamp: Stable timestamp assigned at enqueue time.
+        storage_timestamp_utc: Storage UTC timestamp assigned at enqueue time.
+        local_timestamp: Configured-local wall-clock timestamp for the turn.
+        local_time_context: Configured-local context for model-facing payloads.
         future: Response future awaited by the `/chat` endpoint.
         combined_content: Optional combined content for a collapsed turn.
         collapsed_items: Later queued items collapsed into this survivor.
@@ -30,7 +36,9 @@ class QueuedChatItem:
 
     sequence: int
     request: Any
-    timestamp: str
+    storage_timestamp_utc: str
+    local_timestamp: str
+    local_time_context: LocalTimeContextDoc
     future: asyncio.Future[Any]
     combined_content: str | None = None
     collapsed_items: list[QueuedChatItem] = field(default_factory=list)
@@ -85,14 +93,16 @@ class ChatInputQueue:
 
         condition = self._get_condition()
         future: asyncio.Future[Any] = asyncio.get_running_loop().create_future()
-        timestamp = request.timestamp or datetime.now(timezone.utc).isoformat()
+        turn_clock = build_turn_clock(request.local_timestamp or None)
 
         async with condition:
             self._sequence += 1
             item = QueuedChatItem(
                 sequence=self._sequence,
                 request=request,
-                timestamp=timestamp,
+                storage_timestamp_utc=turn_clock["storage_timestamp_utc"],
+                local_timestamp=turn_clock["local_timestamp"],
+                local_time_context=turn_clock["local_time_context"],
                 future=future,
             )
             self._queue.append(item)
@@ -331,10 +341,10 @@ class ChatInputQueue:
 
         A group run may collapse only while queued items remain consecutive,
         share platform, group channel, and platform user id, and each adjacent
-        timestamp gap is within the configured collapse window. The first item
-        in the run must structurally mention the bot or reply to the character.
-        A repeated non-empty platform message id breaks the run so duplicate
-        deliveries are not treated as user follow-ups.
+        storage UTC gap is within the configured collapse window. The first
+        item in the run must structurally mention the bot or reply to the
+        character. A repeated non-empty platform message id breaks the run so
+        duplicate deliveries are not treated as user follow-ups.
 
         Args:
             waiting_items: Ordered list of queued items after private coalescing.
@@ -464,30 +474,26 @@ class ChatInputQueue:
         return_value = (survivors, collapsed)
         return return_value
 
-    def _timestamp_from_item(self, item: QueuedChatItem) -> datetime | None:
-        """Parse the queued item timestamp."""
-
-        timestamp = item.timestamp
-        if timestamp.endswith("Z"):
-            timestamp = f"{timestamp[:-1]}+00:00"
-        try:
-            return_value = datetime.fromisoformat(timestamp)
-        except ValueError:
-            return_value = None
-        return return_value
-
     def _seconds_between(
         self,
         first: QueuedChatItem,
         second: QueuedChatItem,
     ) -> float | None:
-        """Return the timestamp gap between two queued items."""
+        """Return the storage UTC timestamp gap between two queued items."""
 
-        first_timestamp = self._timestamp_from_item(first)
-        second_timestamp = self._timestamp_from_item(second)
-        if first_timestamp is None or second_timestamp is None:
+        try:
+            first_timestamp_utc = parse_storage_utc_datetime(
+                first.storage_timestamp_utc,
+            )
+            second_timestamp_utc = parse_storage_utc_datetime(
+                second.storage_timestamp_utc,
+            )
+        except ValueError:
             return None
-        return_value = max(0.0, (second_timestamp - first_timestamp).total_seconds())
+        return_value = max(
+            0.0,
+            (second_timestamp_utc - first_timestamp_utc).total_seconds(),
+        )
         return return_value
 
     def _same_group_author(

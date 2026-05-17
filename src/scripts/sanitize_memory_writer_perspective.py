@@ -5,7 +5,6 @@ from __future__ import annotations
 import argparse
 import asyncio
 from copy import deepcopy
-from datetime import datetime, timezone
 import json
 from pathlib import Path
 from typing import Any
@@ -35,6 +34,7 @@ from kazusa_ai_chatbot.db.script_operations import (
 )
 from kazusa_ai_chatbot.memory_evolution import supersede_memory_unit
 from kazusa_ai_chatbot.memory_evolution.identity import deterministic_memory_unit_id
+from kazusa_ai_chatbot.time_boundary import storage_utc_now_iso
 from kazusa_ai_chatbot.utils import get_llm, parse_llm_json_output
 
 
@@ -427,13 +427,13 @@ async def _apply_character_state(after: dict[str, Any]) -> None:
     """Apply singleton character-state fields through existing helpers."""
 
     state = await get_character_state()
-    timestamp = datetime.now(timezone.utc).isoformat()
+    storage_timestamp_utc = storage_utc_now_iso()
     if 'reflection_summary' in after:
         await upsert_character_state(
             '',
             '',
             str(after.get('reflection_summary') or ''),
-            timestamp,
+            storage_timestamp_utc,
         )
     if isinstance(after.get('self_image'), dict):
         await upsert_character_self_image(after['self_image'])

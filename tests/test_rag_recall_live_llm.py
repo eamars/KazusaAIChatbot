@@ -11,6 +11,7 @@ from kazusa_ai_chatbot.config import RAG_PLANNER_LLM_BASE_URL
 from kazusa_ai_chatbot.nodes import persona_supervisor2_rag_supervisor2 as supervisor2_module
 from kazusa_ai_chatbot.rag import recall_agent as recall_module
 from kazusa_ai_chatbot.rag.cache2_runtime import get_rag_cache2_runtime
+from kazusa_ai_chatbot.time_boundary import local_time_context_from_storage_utc
 from tests.llm_trace import write_llm_trace
 
 pytestmark = [pytest.mark.asyncio, pytest.mark.live_llm]
@@ -69,6 +70,7 @@ def _initializer_state(query: str) -> dict:
         State dictionary consumed by ``rag_initializer``.
     """
 
+    current_timestamp_utc = "2026-05-02T00:00:00+00:00"
     return_value = {
         "original_query": query,
         "character_name": "the active character",
@@ -77,7 +79,10 @@ def _initializer_state(query: str) -> dict:
             "platform_channel_id": "recall-live-route-test",
             "global_user_id": "user-live-recall",
             "user_name": "User",
-            "current_timestamp": "2026-05-02T00:00:00+00:00",
+            "current_timestamp_utc": current_timestamp_utc,
+            "local_time_context": local_time_context_from_storage_utc(
+                current_timestamp_utc,
+            ),
             "prompt_message_context": {
                 "body_text": query,
                 "mentions": [],

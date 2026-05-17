@@ -9,7 +9,7 @@ import re
 from collections.abc import Callable
 from contextlib import suppress
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -22,6 +22,7 @@ from kazusa_ai_chatbot import db, event_logging
 from kazusa_ai_chatbot.nodes.dialog_agent import StateContractError
 from kazusa_ai_chatbot.self_cognition import models, runner
 from kazusa_ai_chatbot.self_cognition import sources as source_collectors
+from kazusa_ai_chatbot.time_boundary import storage_utc_now
 
 logger = logging.getLogger(__name__)
 
@@ -245,7 +246,7 @@ async def _self_cognition_worker_loop(
             character_profile = character_profile_provider()
             await run_self_cognition_worker_tick(
                 output_root=output_root,
-                now=datetime.now(timezone.utc),
+                now=storage_utc_now(),
                 is_primary_interaction_busy=is_primary_interaction_busy,
                 character_profile=character_profile,
             )

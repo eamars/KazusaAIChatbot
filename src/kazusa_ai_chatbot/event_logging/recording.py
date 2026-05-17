@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from collections.abc import Mapping, Sequence
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Literal
 from uuid import uuid4
 
@@ -26,26 +26,23 @@ from kazusa_ai_chatbot.event_logging.sanitization import (
     unsafe_field_paths,
 )
 from kazusa_ai_chatbot.event_logging.schemas import EventLogEventDoc
+from kazusa_ai_chatbot.time_boundary import (
+    normalize_storage_utc_iso,
+    storage_utc_now_iso,
+)
 
 logger = logging.getLogger(__name__)
 
 EVENT_LOG_WRITE_TIMEOUT_SECONDS = 0.25
 
 
-def _utc_now_iso() -> str:
-    """Return the current UTC timestamp as an ISO string."""
-
-    timestamp = datetime.now(timezone.utc).isoformat()
-    return timestamp
-
-
 def _iso_from_optional(value: datetime | None) -> str:
-    """Return a UTC ISO timestamp from an optional datetime."""
+    """Return a canonical storage UTC timestamp from an optional datetime."""
 
     if value is None:
-        timestamp = _utc_now_iso()
+        timestamp = storage_utc_now_iso()
     else:
-        timestamp = value.astimezone(timezone.utc).isoformat()
+        timestamp = normalize_storage_utc_iso(value.isoformat())
     return timestamp
 
 
@@ -149,6 +146,11 @@ async def _record_event(
         result = _rejection_result(event_id, "invalid severity")
         return result
 
+    occurred_at_utc = _iso_from_optional(occurred_at)
+    if occurred_at is None:
+        created_at_utc = occurred_at_utc
+    else:
+        created_at_utc = storage_utc_now_iso()
     event_doc = EventLogEventDoc(
         event_id=event_id,
         event_family=sanitize_short_text(event_family, limit=80),
@@ -160,8 +162,8 @@ async def _record_event(
         run_id=sanitize_short_text(run_id, limit=160),
         trigger_id=sanitize_short_text(trigger_id, limit=160),
         attempt_id=sanitize_short_text(attempt_id, limit=160),
-        occurred_at=_iso_from_optional(occurred_at),
-        created_at=_utc_now_iso(),
+        occurred_at=occurred_at_utc,
+        created_at=created_at_utc,
         duration_ms=duration_ms,
         scope=build_scope_record(scope),
         metrics=metrics or {},

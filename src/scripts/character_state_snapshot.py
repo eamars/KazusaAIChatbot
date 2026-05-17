@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -22,6 +21,7 @@ from kazusa_ai_chatbot.db.script_operations import (
     load_character_state_snapshot_document,
     replace_character_state_snapshot_document,
 )
+from kazusa_ai_chatbot.time_boundary import storage_utc_now_iso
 
 DEFAULT_SNAPSHOT_PATH = Path("test_artifacts") / "character_state_snapshot.json"
 SNAPSHOT_TYPE = "character_state"
@@ -34,7 +34,7 @@ def _utc_now_iso() -> str:
     Returns:
         ISO-8601 timestamp with a UTC offset.
     """
-    return_value = datetime.now(timezone.utc).isoformat()
+    return_value = storage_utc_now_iso()
     return return_value
 
 

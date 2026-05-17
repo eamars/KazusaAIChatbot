@@ -179,6 +179,7 @@ class DebugChatRequest(BaseModel):
     channel_name: str = ""
     content_type: str = "text"
     message_envelope: dict
+    local_timestamp: str = ""
     debug_modes: DebugModesIn = Field(default_factory=DebugModesIn)
 
 

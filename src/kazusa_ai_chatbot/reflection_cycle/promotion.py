@@ -10,7 +10,6 @@ from typing import Any, Literal, TypedDict
 from langchain_core.messages import HumanMessage, SystemMessage
 
 from kazusa_ai_chatbot.config import (
-    CHARACTER_TIME_ZONE,
     CONSOLIDATION_LLM_API_KEY,
     CONSOLIDATION_LLM_BASE_URL,
     CONSOLIDATION_LLM_MODEL,
@@ -46,6 +45,7 @@ from kazusa_ai_chatbot.reflection_cycle.models import (
     ReflectionPromotionResult,
 )
 from kazusa_ai_chatbot.reflection_cycle.projection import build_prompt_result
+from kazusa_ai_chatbot.time_boundary import format_storage_utc_for_llm
 import kazusa_ai_chatbot.reflection_cycle.repository as repository
 from kazusa_ai_chatbot.utils import parse_llm_json_output
 from kazusa_ai_chatbot.utils import get_llm
@@ -137,7 +137,6 @@ class GlobalPromotionPromptPayload(TypedDict):
 
     evaluation_mode: Literal["daily_global_promotion"]
     character_local_date: str
-    character_time_zone: str
     channel_daily_syntheses: list[ChannelDailySynthesisCard]
     evidence_cards: list[ReflectionEvidenceCard]
     promotion_limits: PromotionLimits
@@ -182,7 +181,6 @@ JSON key 和枚举值必须保持英文。你新生成的自由文本字段必�
 {{
   "evaluation_mode": "daily_global_promotion",
   "character_local_date": "YYYY-MM-DD",
-  "character_time_zone": "IANA timezone",
   "channel_daily_syntheses": [
     {{
       "daily_run_id": "reflection run id",
@@ -204,7 +202,7 @@ JSON key 和枚举值必须保持英文。你新生成的自由文本字段必�
       "scope_ref": "scope_x",
       "channel_type": "private|group|system|unknown",
       "character_local_date": "YYYY-MM-DD",
-      "captured_at": "ISO timestamp",
+      "captured_at": "YYYY-MM-DD HH:MM evidence label",
       "source_utterance": "{character_name} 原文片段",
       "sanitized_observation": "去身份化观察",
       "supports": ["lore", "self_guidance"],
@@ -248,7 +246,7 @@ ReflectionPromotionDecision 字段：
     {{
       "reflection_run_id": "source run id",
       "scope_ref": "scope_x",
-      "captured_at": "ISO timestamp",
+      "captured_at": "YYYY-MM-DD HH:MM evidence label",
       "source": "reflection_cycle"
     }}
   ]
@@ -630,7 +628,6 @@ async def build_global_promotion_payload(
     payload: GlobalPromotionPromptPayload = {
         "evaluation_mode": "daily_global_promotion",
         "character_local_date": character_local_date,
-        "character_time_zone": CHARACTER_TIME_ZONE,
         "channel_daily_syntheses": channel_cards,
         "evidence_cards": evidence_cards,
         "promotion_limits": {
@@ -1277,18 +1274,20 @@ def _evidence_cards_from_hourly_doc(
         return cards
     lead_utterance = str(utterances[0]) if utterances else ""
     observation = topic_summary or " ".join(quality_items)
+    captured_at_source = str(
+        hourly_doc.get("created_at")
+        or hourly_doc.get("hour_start")
+        or hourly_doc.get("window_start")
+        or "",
+    )
+    captured_at = format_storage_utc_for_llm(captured_at_source)
     card: ReflectionEvidenceCard = {
         "evidence_card_id": f"evidence_{source_run_id}",
         "source_reflection_run_ids": [source_run_id],
         "scope_ref": str(scope["scope_ref"]),
         "channel_type": str(scope["channel_type"]),
         "character_local_date": str(hourly_doc["character_local_date"]),
-        "captured_at": str(
-            hourly_doc.get("created_at")
-            or hourly_doc.get("hour_start")
-            or hourly_doc.get("window_start")
-            or "",
-        ),
+        "captured_at": captured_at,
         "active_character_utterance": _preview_text(lead_utterance, 180),
         "sanitized_observation": _preview_text(observation, 180),
         "supports": ["lore", "self_guidance"],

@@ -5,7 +5,6 @@ from __future__ import annotations
 import json
 import logging
 import sys
-from datetime import datetime, timezone
 from typing import Any
 
 import httpx
@@ -16,6 +15,10 @@ from kazusa_ai_chatbot.config import RAG_PLANNER_LLM_BASE_URL
 from kazusa_ai_chatbot.db import close_db, db_bootstrap, get_character_profile
 from kazusa_ai_chatbot.mcp_client import mcp_manager
 from kazusa_ai_chatbot.rag import quote_aware_sequence as quote_module
+from kazusa_ai_chatbot.time_boundary import (
+    build_turn_clock_from_storage_utc,
+    storage_utc_now_iso,
+)
 from tests.llm_trace import write_llm_trace
 
 pytestmark = [pytest.mark.asyncio, pytest.mark.live_llm, pytest.mark.live_db]
@@ -57,10 +60,13 @@ def _character_name_for_supervisor(profile: dict[str, Any]) -> str:
 
 def _build_context(fresh_query: str, reply_excerpt: str) -> dict[str, Any]:
     """Build one live RAG context with pass-local cache fields."""
+    storage_timestamp_utc = storage_utc_now_iso()
+    turn_clock = build_turn_clock_from_storage_utc(storage_timestamp_utc)
     context = {
         "platform": "qq",
         "platform_channel_id": "quote-aware-live",
-        "current_timestamp": datetime.now(timezone.utc).isoformat(),
+        "current_timestamp_utc": turn_clock["storage_timestamp_utc"],
+        "local_time_context": turn_clock["local_time_context"],
         "global_user_id": "",
         "user_name": "",
         "prompt_message_context": {

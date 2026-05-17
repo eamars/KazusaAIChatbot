@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import Any, NotRequired, TypedDict
 
+from kazusa_ai_chatbot.time_boundary import LocalTimeContextDoc
+
 
 CASE_COMMITMENT_BEFORE_DUE = "commitment_before_due"
 CASE_COMMITMENT_PAST_DUE = "commitment_past_due"
@@ -163,8 +165,8 @@ class SelfCognitionCase(TypedDict, total=False):
 
     case_name: str
     case_id: str
-    idle_timestamp: str
-    last_evidence_timestamp: str
+    idle_timestamp_utc: str
+    last_evidence_timestamp_utc: str
     trigger_kind: str
     target_scope: SelfCognitionTargetScope
     source_refs: list[SelfCognitionSourceRef]
@@ -192,8 +194,9 @@ class SourcePacket(TypedDict):
 
     instruction: str
     case_name: str
-    idle_timestamp: str
-    last_evidence_timestamp: str
+    idle_local_datetime: str
+    last_evidence_local_datetime: str
+    local_time_context: LocalTimeContextDoc
     trigger_kind: str
     semantic_due_state: str | None
     actionability: str

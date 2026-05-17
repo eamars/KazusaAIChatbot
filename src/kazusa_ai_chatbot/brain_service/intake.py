@@ -206,10 +206,10 @@ async def save_user_message_from_item(
     message_envelope: MessageEnvelope | None = None,
     logger: logging.Logger,
 ) -> str | None:
-    """Persist one queued user message.
+    """Persist one queued user message with its storage UTC timestamp.
 
     Args:
-        item: Queued chat item containing the request and timestamp.
+        item: Queued chat item containing the request and storage UTC time.
         global_user_id: Resolved global user identifier.
         reply_context: Adapter-supplied reply metadata after compacting.
         save_conversation_func: Service-level persistence function.
@@ -244,7 +244,7 @@ async def save_user_message_from_item(
         "broadcast": False,
         "attachments": attachment_docs,
         "reply_context": reply_context,
-        "timestamp": item.timestamp,
+        "timestamp": item.storage_timestamp_utc,
     }
 
     try:

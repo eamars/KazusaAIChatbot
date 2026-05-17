@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
 from typing import Any
 
 from pymongo import ASCENDING, DESCENDING
@@ -19,6 +18,7 @@ from kazusa_ai_chatbot.rag.cache2_policy import (
     INITIALIZER_PROMPT_VERSION,
     INITIALIZER_STRATEGY_SCHEMA_VERSION,
 )
+from kazusa_ai_chatbot.time_boundary import storage_utc_now_iso
 
 logger = logging.getLogger(__name__)
 
@@ -33,8 +33,8 @@ PERSISTENT_CACHE_LOOKUP_KEYS = [
 
 
 def _now_iso() -> str:
-    current_time = datetime.now(timezone.utc).isoformat()
-    return current_time
+    current_time_utc = storage_utc_now_iso()
+    return current_time_utc
 
 
 async def _get_collection():

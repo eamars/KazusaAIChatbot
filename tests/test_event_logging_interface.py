@@ -5,12 +5,15 @@ from __future__ import annotations
 import asyncio
 import inspect
 import json
+import re
 from datetime import datetime, timezone
+from pathlib import Path
 
 import pytest
 
 from kazusa_ai_chatbot import event_logging
 import kazusa_ai_chatbot.event_logging.recording as recording_module
+import kazusa_ai_chatbot.event_logging.status as status_module
 
 
 _RECORDER_NAMES = [
@@ -28,6 +31,50 @@ _RECORDER_NAMES = [
     "record_model_contract_event",
     "record_resource_health_event",
 ]
+
+_REPO_ROOT = Path(__file__).resolve().parents[1]
+_STAGE7_TIME_BOUNDARY_DIRS = (
+    "src/kazusa_ai_chatbot/event_logging",
+    "src/kazusa_ai_chatbot/db",
+    "src/kazusa_ai_chatbot/memory_evolution",
+    "src/kazusa_ai_chatbot/global_character_growth",
+    "src/kazusa_ai_chatbot/reflection_cycle",
+    "src/scripts",
+)
+_STAGE7_FORBIDDEN_TIME_PATTERNS = (
+    (
+        re.compile(r"from kazusa_ai_chatbot\.time_context"),
+        "legacy time_context import",
+    ),
+    (
+        re.compile(r"build_character_" r"time_context"),
+        "legacy time_context helper",
+    ),
+    (
+        re.compile(r"datetime\.now\(timezone\.utc\)"),
+        "direct UTC clock read",
+    ),
+    (
+        re.compile(r"datetime\.datetime\.now\(datetime\.timezone\.utc\)"),
+        "direct UTC clock read",
+    ),
+    (
+        re.compile(r"datetime\.fromisoformat\("),
+        "direct datetime parsing",
+    ),
+    (
+        re.compile(r"datetime\.datetime\.fromisoformat\("),
+        "direct datetime parsing",
+    ),
+    (
+        re.compile(r"\.astimezone\("),
+        "direct timezone conversion",
+    ),
+    (
+        re.compile(r"ZoneInfo\("),
+        "direct configured timezone loading",
+    ),
+)
 
 
 def test_public_recorders_are_async_keyword_only() -> None:
@@ -90,6 +137,74 @@ async def test_process_event_records_sanitized_scope(monkeypatch) -> None:
     assert scope["platform_channel_ref"] != "raw-channel-1"
     serialized = json.dumps(captured, sort_keys=True)
     assert "raw-channel-1" not in serialized
+
+
+@pytest.mark.asyncio
+async def test_recorder_uses_time_boundary_for_default_storage_timestamps(
+    monkeypatch,
+) -> None:
+    """Recorder default event times should come from the canonical boundary."""
+
+    captured: dict[str, object] = {}
+    fixed_timestamp_utc = "2026-05-17T04:55:28+00:00"
+
+    async def write_event(document):
+        captured.update(document)
+        event_id = str(document["event_id"])
+        return event_id
+
+    monkeypatch.setattr(recording_module.repository, "write_event", write_event)
+    monkeypatch.setattr(
+        recording_module,
+        "storage_utc_now_iso",
+        lambda: fixed_timestamp_utc,
+    )
+
+    result = await event_logging.record_process_event(
+        event_type="startup",
+        phase="lifespan",
+        component="service",
+        status="started",
+        pid=123,
+        host_label="host",
+    )
+
+    assert result["status"] == "recorded"
+    assert captured["occurred_at"] == fixed_timestamp_utc
+    assert captured["created_at"] == fixed_timestamp_utc
+
+
+@pytest.mark.asyncio
+async def test_status_builders_use_time_boundary_for_windows_and_generated_at(
+    monkeypatch,
+) -> None:
+    """Ops status windows and generated timestamps should share one UTC clock."""
+
+    captured_filters: list[dict[str, object]] = []
+    fixed_now_utc = datetime(2026, 5, 17, 4, 55, 28, tzinfo=timezone.utc)
+
+    async def count_events(filter_doc):
+        captured_filters.append(filter_doc)
+        return 0
+
+    async def find_events(filter_doc, *, sort, limit):
+        captured_filters.append(filter_doc)
+        return []
+
+    monkeypatch.setattr(status_module.repository, "count_events", count_events)
+    monkeypatch.setattr(status_module.repository, "find_events", find_events)
+    monkeypatch.setattr(status_module, "storage_utc_now", lambda: fixed_now_utc)
+
+    result = await status_module.build_runtime_status(window_hours=1)
+
+    assert result["generated_at"] == "2026-05-17T04:55:28+00:00"
+    lower_bounds = [
+        filter_doc["occurred_at"]["$gte"]
+        for filter_doc in captured_filters
+        if "occurred_at" in filter_doc
+    ]
+    assert lower_bounds
+    assert set(lower_bounds) == {"2026-05-17T03:55:28+00:00"}
 
 
 @pytest.mark.asyncio
@@ -231,3 +346,19 @@ def test_public_types_are_exported() -> None:
     assert event_logging.EventScopeInput
     assert event_logging.SelfCognitionBudget
     assert event_logging.EventRefRecord
+
+
+def test_stage7_sources_import_time_boundary_for_time_conversion() -> None:
+    """Stage 7 source files should not own UTC or local timezone conversion."""
+
+    failures: list[str] = []
+    for directory in _STAGE7_TIME_BOUNDARY_DIRS:
+        source_root = _REPO_ROOT / directory
+        for path in sorted(source_root.rglob("*.py")):
+            text = path.read_text(encoding="utf-8")
+            relative_path = path.relative_to(_REPO_ROOT).as_posix()
+            for pattern, reason in _STAGE7_FORBIDDEN_TIME_PATTERNS:
+                if pattern.search(text):
+                    failures.append(f"{relative_path}: {reason}")
+
+    assert failures == []

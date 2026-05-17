@@ -132,14 +132,14 @@ _character_image_compress_llm = get_llm(
 async def _update_character_image(
     state: "ConsolidatorState",
     *,
-    timestamp: str,
+    storage_timestamp_utc: str,
 ) -> dict | None:
     """Build an updated character self-image document using the rolling three-tier mechanism.
 
     Args:
         state: Current consolidator state (mood, global_vibe, reflection_summary,
             character_profile with existing self_image).
-        timestamp: ISO-8601 UTC timestamp for this session.
+        storage_timestamp_utc: Storage UTC timestamp for this session.
 
     Returns:
         Updated image document dict, or ``None`` if no reflection was produced.
@@ -176,7 +176,10 @@ async def _update_character_image(
     session_summary = result.get("session_summary", "")
 
     if session_summary:
-        recent_window.append({"timestamp": timestamp, "summary": session_summary})
+        recent_window.append({
+            "timestamp": storage_timestamp_utc,
+            "summary": session_summary,
+        })
 
         if len(recent_window) > _CHARACTER_IMAGE_MAX_RECENT_WINDOW:
             oldest = recent_window.pop(0)
@@ -208,6 +211,9 @@ async def _update_character_image(
         "milestones": milestones,
         "recent_window": recent_window,
         "historical_summary": historical_summary,
-        "meta": {"synthesis_count": synthesis_count + 1, "last_updated": timestamp},
+        "meta": {
+            "synthesis_count": synthesis_count + 1,
+            "last_updated": storage_timestamp_utc,
+        },
     }
     return return_value

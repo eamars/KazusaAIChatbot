@@ -14,8 +14,8 @@ def test_self_cognition_framing_presents_agency_without_silence_bias() -> None:
     case = {
         "case_name": models.CASE_COMMITMENT_PAST_DUE,
         "case_id": "case-past-due",
-        "idle_timestamp": "2026-05-10T00:30:00+00:00",
-        "last_evidence_timestamp": "2026-05-10T00:00:00+00:00",
+        "idle_timestamp_utc": "2026-05-10T00:30:00+00:00",
+        "last_evidence_timestamp_utc": "2026-05-10T00:00:00+00:00",
         "trigger_kind": models.TRIGGER_ACTIVE_COMMITMENT_DUE_CHECK,
         "semantic_due_state": models.DUE_STATE_PAST_DUE,
         "actionability": "contact_is_socially_available",
@@ -52,16 +52,19 @@ def test_self_cognition_framing_presents_agency_without_silence_bias() -> None:
     assert "proactive message candidate" not in rendered_text
     assert "visible `speak` action" in rendered_text
     assert "shared action-spec contract" in rendered_text
-    assert "- idle_timestamp: 2026-05-10T00:30:00+00:00" in rendered_text
-    assert "- last_evidence_timestamp: 2026-05-10T00:00:00+00:00" in rendered_text
+    assert "- idle_local_datetime: 2026-05-10 12:30" in rendered_text
+    assert "- last_evidence_local_datetime: 2026-05-10 12:00" in rendered_text
+    assert "idle_timestamp" not in rendered_text
+    assert "last_evidence_timestamp" not in rendered_text
+    assert "+00:00" not in rendered_text
 
 
 def test_topic_rag_request_carries_cache_required_context() -> None:
     case = {
         "case_name": models.CASE_TOPIC_RAG_FOLLOWUP,
         "case_id": "case-rag-followup",
-        "idle_timestamp": "2026-05-10T00:30:00+00:00",
-        "last_evidence_timestamp": "2026-05-10T00:00:00+00:00",
+        "idle_timestamp_utc": "2026-05-10T00:30:00+00:00",
+        "last_evidence_timestamp_utc": "2026-05-10T00:00:00+00:00",
         "trigger_kind": models.TRIGGER_BOUNDED_FOLLOWUP_TOPIC,
         "semantic_due_state": models.DUE_STATE_FUTURE_DUE,
         "actionability": "followup_topic_needs_retrieval",
@@ -95,6 +98,10 @@ def test_topic_rag_request_carries_cache_required_context() -> None:
     assert prompt_context["addressed_to_global_user_ids"] == ["user-001"]
     assert prompt_context["broadcast"] is True
     assert context["global_user_id"] == "user-001"
-    assert context["current_timestamp"] == "2026-05-10T00:30:00+00:00"
-    assert context["time_context"]["current_local_datetime"]
+    assert context["current_timestamp_utc"] == "2026-05-10T00:30:00+00:00"
+    assert context["local_time_context"]["current_local_datetime"] == (
+        "2026-05-10 12:30"
+    )
+    assert "current_" "timestamp" not in context
+    assert "time_context" not in context
     assert context["chat_history_recent"] == case["visible_context"]

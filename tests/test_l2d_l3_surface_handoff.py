@@ -16,24 +16,25 @@ from kazusa_ai_chatbot.nodes import persona_supervisor2_cognition_l3 as l3_modul
 from kazusa_ai_chatbot.nodes import persona_supervisor2 as persona_module
 from kazusa_ai_chatbot.nodes import persona_supervisor2_l3_surface as l3_surface_module
 from kazusa_ai_chatbot.nodes.persona_supervisor2 import persona_supervisor2
-from kazusa_ai_chatbot.time_context import build_character_time_context
+from kazusa_ai_chatbot.time_boundary import build_turn_clock
 
 RETIRED_L3_FIELD = "expression" + "_willingness"
 
 
 def _time_context() -> dict:
-    timestamp = "2026-05-16T09:00:00+12:00"
-    time_context = build_character_time_context(timestamp)
+    time_context = build_turn_clock("2026-05-16 09:00:00")[
+        "local_time_context"
+    ]
     return time_context
 
 
 def _episode() -> dict:
-    timestamp = "2026-05-16T09:00:00+12:00"
+    turn_clock = build_turn_clock("2026-05-16 09:00:00")
     episode = build_text_chat_cognitive_episode(
         episode_id="episode-123",
         percept_id="percept-123",
-        timestamp=timestamp,
-        time_context=_time_context(),
+        storage_timestamp_utc=turn_clock["storage_timestamp_utc"],
+        local_time_context=turn_clock["local_time_context"],
         user_input="Please answer.",
         platform="debug",
         platform_channel_id="channel-123",
@@ -87,10 +88,10 @@ def _character_profile() -> dict:
 
 
 def _persona_state() -> dict:
-    timestamp = "2026-05-16T09:00:00+12:00"
+    turn_clock = build_turn_clock("2026-05-16 09:00:00")
     state = {
-        "timestamp": timestamp,
-        "time_context": _time_context(),
+        "storage_timestamp_utc": turn_clock["storage_timestamp_utc"],
+        "local_time_context": turn_clock["local_time_context"],
         "user_name": "Test User",
         "platform": "debug",
         "platform_message_id": "message-123",

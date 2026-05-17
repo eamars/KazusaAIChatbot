@@ -6,9 +6,11 @@ import datetime
 import re
 from typing import Any
 
-from kazusa_ai_chatbot.time_context import (
-    local_date_bounds_to_utc_iso,
-    structured_llm_time_to_utc_iso,
+from kazusa_ai_chatbot.time_boundary import (
+    local_date_bounds_to_storage_utc_iso,
+    local_llm_datetime_to_storage_utc_iso,
+    one_second_before_storage_utc_iso,
+    parse_storage_utc_datetime,
 )
 from kazusa_ai_chatbot.utils import text_or_empty
 
@@ -242,10 +244,16 @@ def _coerce_timestamp_bound(value: object) -> str:
     if not text:
         return ''
     try:
-        normalized = structured_llm_time_to_utc_iso(text)
+        storage_datetime = parse_storage_utc_datetime(text)
     except ValueError:
-        return text
-    return normalized
+        try:
+            normalized = local_llm_datetime_to_storage_utc_iso(text)
+        except ValueError:
+            return_value = ''
+            return return_value
+        return normalized
+    return_value = storage_datetime.isoformat()
+    return return_value
 
 
 def _relative_time_bounds_from_context(
@@ -291,13 +299,13 @@ def _relative_time_haystack(task: str, context: dict[str, Any]) -> str:
 def _current_local_date(context: dict[str, Any]) -> datetime.date | None:
     """Read the character-local current date from runtime time context."""
 
-    time_context = context.get('time_context')
-    if not isinstance(time_context, dict):
+    local_time_context = context.get('local_time_context')
+    if not isinstance(local_time_context, dict):
         return_value = None
         return return_value
 
     current_local_datetime = text_or_empty(
-        time_context.get('current_local_datetime')
+        local_time_context.get('current_local_datetime')
     )
     local_date_text = current_local_datetime.split(' ', 1)[0]
     try:
@@ -315,20 +323,12 @@ def _inclusive_local_date_range(
 ) -> tuple[str, str]:
     """Convert local start/end dates to inclusive UTC timestamp bounds."""
 
-    start_timestamp, _ = local_date_bounds_to_utc_iso(start_date.isoformat())
-    _, exclusive_end_timestamp = local_date_bounds_to_utc_iso(end_date.isoformat())
-    to_timestamp = _one_second_before(exclusive_end_timestamp)
+    start_timestamp, _ = local_date_bounds_to_storage_utc_iso(
+        start_date.isoformat()
+    )
+    _, exclusive_end_timestamp = local_date_bounds_to_storage_utc_iso(
+        end_date.isoformat()
+    )
+    to_timestamp = one_second_before_storage_utc_iso(exclusive_end_timestamp)
     return_value = (start_timestamp, to_timestamp)
     return return_value
-
-
-def _one_second_before(timestamp: str) -> str:
-    """Return the UTC ISO timestamp one second before an exclusive bound."""
-
-    normalized = timestamp
-    if normalized.endswith('Z') or normalized.endswith('z'):
-        normalized = normalized[:-1] + '+00:00'
-    parsed = datetime.datetime.fromisoformat(normalized)
-    adjusted = parsed - datetime.timedelta(seconds=1)
-    result = adjusted.strftime('%Y-%m-%dT%H:%M:%S+00:00')
-    return result

@@ -115,8 +115,8 @@ async def call_l3_text_surface_handler(state: GlobalPersonaState) -> dict:
     )
     initial_state: CognitionState = {
         "character_profile": state["character_profile"],
-        "timestamp": state["timestamp"],
-        "time_context": state["time_context"],
+        "storage_timestamp_utc": state["storage_timestamp_utc"],
+        "local_time_context": state["local_time_context"],
         "user_input": state["user_input"],
         "prompt_message_context": state["prompt_message_context"],
         "platform": state["platform"],

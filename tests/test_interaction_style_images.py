@@ -173,7 +173,7 @@ async def test_build_interaction_style_context_uses_configured_l3_limit(
             "confidence": "medium",
         },
         source_reflection_run_ids=["run-1"],
-        timestamp="2026-05-06T00:00:00+00:00",
+        storage_timestamp_utc="2026-05-06T00:00:00+00:00",
     )
     await style_store.upsert_group_channel_style_image(
         platform="qq",
@@ -190,7 +190,7 @@ async def test_build_interaction_style_context_uses_configured_l3_limit(
             "confidence": "high",
         },
         source_reflection_run_ids=["run-2"],
-        timestamp="2026-05-06T00:00:00+00:00",
+        storage_timestamp_utc="2026-05-06T00:00:00+00:00",
     )
 
     context = await style_store.build_interaction_style_context(
@@ -306,13 +306,13 @@ async def test_upsert_user_style_image_replaces_current_document(
         global_user_id="user-1",
         overlay=overlay,
         source_reflection_run_ids=["run-1"],
-        timestamp="2026-05-06T00:00:00+00:00",
+        storage_timestamp_utc="2026-05-06T00:00:00+00:00",
     )
     second_doc = await style_store.upsert_user_style_image(
         global_user_id="user-1",
         overlay=overlay,
         source_reflection_run_ids=["run-2"],
-        timestamp="2026-05-07T00:00:00+00:00",
+        storage_timestamp_utc="2026-05-07T00:00:00+00:00",
     )
 
     assert first_doc["revision"] == 1
@@ -341,7 +341,7 @@ async def test_build_interaction_style_context_private_omits_group_key(
             "confidence": "medium",
         },
         source_reflection_run_ids=["run-1"],
-        timestamp="2026-05-06T00:00:00+00:00",
+        storage_timestamp_utc="2026-05-06T00:00:00+00:00",
     )
 
     context = await style_store.build_interaction_style_context(
@@ -374,7 +374,7 @@ async def test_build_interaction_style_context_group_applies_user_then_group(
             "confidence": "medium",
         },
         source_reflection_run_ids=["run-1"],
-        timestamp="2026-05-06T00:00:00+00:00",
+        storage_timestamp_utc="2026-05-06T00:00:00+00:00",
     )
     await style_store.upsert_group_channel_style_image(
         platform="qq",
@@ -387,7 +387,7 @@ async def test_build_interaction_style_context_group_applies_user_then_group(
             "confidence": "high",
         },
         source_reflection_run_ids=["run-2"],
-        timestamp="2026-05-06T00:00:00+00:00",
+        storage_timestamp_utc="2026-05-06T00:00:00+00:00",
     )
 
     context = await style_store.build_interaction_style_context(
@@ -427,7 +427,7 @@ async def test_build_user_engagement_relevance_context_projects_only_engagement(
             "confidence": "high",
         },
         source_reflection_run_ids=["run-1"],
-        timestamp="2026-05-06T00:00:00+00:00",
+        storage_timestamp_utc="2026-05-06T00:00:00+00:00",
     )
 
     context = await style_store.build_user_engagement_relevance_context("user-1")
@@ -469,7 +469,7 @@ async def test_build_user_engagement_relevance_context_uses_configured_limit(
             "confidence": "high",
         },
         source_reflection_run_ids=["run-1"],
-        timestamp="2026-05-06T00:00:00+00:00",
+        storage_timestamp_utc="2026-05-06T00:00:00+00:00",
     )
 
     context = await style_store.build_user_engagement_relevance_context("user-1")
@@ -495,7 +495,7 @@ async def test_build_user_engagement_relevance_context_empty_for_missing_or_inac
         global_user_id="user-empty",
         overlay=style_store.empty_interaction_style_overlay(),
         source_reflection_run_ids=[],
-        timestamp="2026-05-06T00:00:00+00:00",
+        storage_timestamp_utc="2026-05-06T00:00:00+00:00",
     )
 
     missing = await style_store.build_user_engagement_relevance_context("missing")

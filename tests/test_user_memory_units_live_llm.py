@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
 import json
 
 import httpx
@@ -10,7 +9,11 @@ import pytest
 
 from kazusa_ai_chatbot.config import CONSOLIDATION_LLM_BASE_URL
 from kazusa_ai_chatbot.nodes import persona_supervisor2_consolidator_memory_units as memory_units_module
-from kazusa_ai_chatbot.time_context import build_character_time_context
+from kazusa_ai_chatbot.time_boundary import (
+    build_turn_clock,
+    build_turn_clock_from_storage_utc,
+    storage_utc_now_iso,
+)
 from tests.llm_trace import write_llm_trace
 
 
@@ -83,10 +86,11 @@ def _build_extractor_state() -> dict:
         Consolidator state containing one concrete architecture decision and
         relationship appraisal evidence.
     """
-    timestamp = datetime.now(timezone.utc).isoformat()
+    timestamp_utc = storage_utc_now_iso()
+    turn_clock = build_turn_clock_from_storage_utc(timestamp_utc)
     state = {
-        "timestamp": timestamp,
-        "time_context": build_character_time_context(timestamp),
+        "storage_timestamp_utc": turn_clock["storage_timestamp_utc"],
+        "local_time_context": turn_clock["local_time_context"],
         "global_user_id": "live-memory-unit-user",
         "character_profile": {"name": "杏山千纱 (Kyōyama Kazusa)"},
         "user_name": "LiveMemoryUnitUser",
@@ -175,10 +179,11 @@ def _build_dated_commitment_extractor_state() -> dict:
     Returns:
         Consolidator state where ``明天`` must resolve to 2026-05-07.
     """
-    timestamp = "2026-05-06T07:31:00+00:00"
+    timestamp_utc = "2026-05-06T07:31:00+00:00"
+    turn_clock = build_turn_clock_from_storage_utc(timestamp_utc)
     state = {
-        "timestamp": timestamp,
-        "time_context": build_character_time_context(timestamp),
+        "storage_timestamp_utc": turn_clock["storage_timestamp_utc"],
+        "local_time_context": turn_clock["local_time_context"],
         "global_user_id": "live-memory-unit-user",
         "character_profile": {"name": "杏山千纱 (Kyōyama Kazusa)"},
         "user_name": "LiveMemoryUnitUser",
@@ -255,10 +260,11 @@ def _build_unresolved_commitment_extractor_state() -> dict:
         Consolidator state where ``下次`` is the only timing signal and should
         not become an active commitment.
     """
-    timestamp = "2026-05-06T07:31:00+00:00"
+    timestamp_utc = "2026-05-06T07:31:00+00:00"
+    turn_clock = build_turn_clock_from_storage_utc(timestamp_utc)
     state = {
-        "timestamp": timestamp,
-        "time_context": build_character_time_context(timestamp),
+        "storage_timestamp_utc": turn_clock["storage_timestamp_utc"],
+        "local_time_context": turn_clock["local_time_context"],
         "global_user_id": "live-memory-unit-user",
         "character_profile": {"name": "杏山千纱 (Kyōyama Kazusa)"},
         "user_name": "LiveMemoryUnitUser",
@@ -538,10 +544,11 @@ async def test_live_merge_rewrite_compacts_similar_memory_unit(
         ),
         "evidence_refs": [],
     }
-    timestamp = datetime.now(timezone.utc).isoformat()
+    timestamp_utc = storage_utc_now_iso()
+    turn_clock = build_turn_clock_from_storage_utc(timestamp_utc)
     state = {
-        "timestamp": timestamp,
-        "time_context": build_character_time_context(timestamp),
+        "storage_timestamp_utc": turn_clock["storage_timestamp_utc"],
+        "local_time_context": turn_clock["local_time_context"],
         "global_user_id": "live-memory-unit-user",
         "rag_result": {"user_memory_unit_candidates": [existing_unit]},
     }
@@ -705,10 +712,10 @@ async def test_live_stability_judge_uses_session_spread_evidence(
         "cluster_id": "existing-stability-pattern",
         "reason": "same recurring memory architecture guidance",
     }
-    timestamp = "2026-04-29T10:00:00+12:00"
+    turn_clock = build_turn_clock("2026-04-29 10:00:00")
     state = {
-        "timestamp": timestamp,
-        "time_context": build_character_time_context(timestamp),
+        "storage_timestamp_utc": turn_clock["storage_timestamp_utc"],
+        "local_time_context": turn_clock["local_time_context"],
         "global_user_id": "live-memory-unit-user",
     }
     payload = memory_units_module._stability_payload(

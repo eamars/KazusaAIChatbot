@@ -12,7 +12,7 @@ from kazusa_ai_chatbot.cognition_episode import build_text_chat_cognitive_episod
 from kazusa_ai_chatbot.nodes import persona_supervisor2_cognition_l2d as l2d_module
 from kazusa_ai_chatbot.self_cognition import models as self_cognition_models
 from kazusa_ai_chatbot.self_cognition import runner as self_cognition_runner
-from kazusa_ai_chatbot.time_context import build_character_time_context
+from kazusa_ai_chatbot.time_boundary import build_turn_clock_from_storage_utc
 
 
 class _FakeLLM:
@@ -29,12 +29,13 @@ class _FakeLLM:
 
 
 def _episode() -> dict:
-    timestamp = "2026-05-16T09:00:00+12:00"
+    storage_timestamp_utc = "2026-05-15T21:00:00+00:00"
+    turn_clock = build_turn_clock_from_storage_utc(storage_timestamp_utc)
     episode = build_text_chat_cognitive_episode(
         episode_id="user_message:debug:raw-channel-123:raw-message-456",
         percept_id="user_message:debug:raw-channel-123:raw-message-456:dialog_text:0",
-        timestamp=timestamp,
-        time_context=build_character_time_context(timestamp),
+        storage_timestamp_utc=storage_timestamp_utc,
+        local_time_context=turn_clock["local_time_context"],
         user_input="Please handle the old spice promise naturally.",
         platform="debug",
         platform_channel_id="raw-channel-123",
@@ -54,8 +55,11 @@ def _episode() -> dict:
 
 
 def _state() -> dict:
+    storage_timestamp_utc = "2026-05-15T21:00:00+00:00"
+    turn_clock = build_turn_clock_from_storage_utc(storage_timestamp_utc)
     return {
-        "timestamp": "2026-05-16T09:00:00+12:00",
+        "storage_timestamp_utc": storage_timestamp_utc,
+        "local_time_context": turn_clock["local_time_context"],
         "cognitive_episode": _episode(),
         "channel_type": "private",
         "decontexualized_input": (
@@ -113,8 +117,8 @@ def _self_cognition_commitment_case() -> dict:
     case = {
         "case_name": self_cognition_models.CASE_COMMITMENT_PAST_DUE,
         "case_id": "active_commitment:promise-001:2026-05-07T00:00:00+00:00",
-        "idle_timestamp": "2026-05-16T09:00:00+12:00",
-        "last_evidence_timestamp": "2026-05-15T09:00:00+12:00",
+        "idle_timestamp_utc": "2026-05-15T21:00:00+00:00",
+        "last_evidence_timestamp_utc": "2026-05-14T21:00:00+00:00",
         "trigger_kind": (
             self_cognition_models.TRIGGER_ACTIVE_COMMITMENT_DUE_CHECK
         ),
@@ -229,7 +233,7 @@ def test_self_cognition_source_ref_binds_active_commitment_context() -> None:
             "unit_id": "promise-001",
             "fact": "The active character promised to reveal the spice answer.",
             "summary": "The active character promised to reveal the spice answer.",
-            "due_at": "2026-05-07T00:00:00+00:00",
+            "due_at": "2026-05-07 12:00",
             "due_state": self_cognition_models.DUE_STATE_PAST_DUE,
             "status": "active",
         }

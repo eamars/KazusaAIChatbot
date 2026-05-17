@@ -22,7 +22,8 @@ class TestGlobalPersonaState:
     def test_has_input_fields(self):
         hints = typing.get_type_hints(GlobalPersonaState)
         input_fields = [
-            "timestamp", "user_input", "platform", "platform_user_id",
+            "storage_timestamp_utc", "local_time_context", "user_input",
+            "platform", "platform_user_id",
             "global_user_id", "user_name", "user_profile", "platform_bot_id",
             "chat_history_wide", "chat_history_recent", "reply_context", "indirect_speech_context", "channel_topic",
             "prompt_message_context",

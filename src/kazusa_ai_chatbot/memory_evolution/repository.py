@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Any
 
 from kazusa_ai_chatbot.db import memory_evolution as memory_store
@@ -24,6 +24,10 @@ from kazusa_ai_chatbot.memory_evolution.models import (
 )
 from kazusa_ai_chatbot.rag.cache2_events import CacheInvalidationEvent
 from kazusa_ai_chatbot.rag.cache2_runtime import get_rag_cache2_runtime
+from kazusa_ai_chatbot.time_boundary import (
+    parse_storage_utc_datetime,
+    storage_utc_now_iso,
+)
 
 _IGNORED_IDEMPOTENCY_FIELDS = {"_id", "embedding", "updated_at"}
 _QUERY_FIELDS = {
@@ -40,26 +44,24 @@ _QUERY_FIELDS = {
 
 
 def now_iso() -> str:
-    """Return the current UTC timestamp string."""
-    current_time = datetime.now(timezone.utc).isoformat()
-    return current_time
+    """Return the current storage UTC timestamp string."""
+
+    current_time_utc = storage_utc_now_iso()
+    return current_time_utc
 
 
 def _parse_timestamp(value: str) -> datetime:
-    normalized = value.replace("Z", "+00:00")
-    parsed = datetime.fromisoformat(normalized)
-    if parsed.tzinfo is None:
-        parsed = parsed.replace(tzinfo=timezone.utc)
-    return parsed
+    parsed_utc = parse_storage_utc_datetime(value)
+    return parsed_utc
 
 
-def _expiry_is_past(expiry_timestamp: object, now_timestamp: str) -> bool:
+def _expiry_is_past(expiry_timestamp: object, now_timestamp_utc: str) -> bool:
     if expiry_timestamp is None:
         return False
     if not isinstance(expiry_timestamp, str) or not expiry_timestamp.strip():
         return False
     expiry_time = _parse_timestamp(expiry_timestamp.strip())
-    now_time = _parse_timestamp(now_timestamp)
+    now_time = _parse_timestamp(now_timestamp_utc)
     return_value = expiry_time <= now_time
     return return_value
 
@@ -199,7 +201,7 @@ async def invalidate_memory_cache(
         CacheInvalidationEvent(
             source="memory",
             global_user_id=str(document.get("source_global_user_id", "")).strip(),
-            timestamp=str(document.get("updated_at", "")).strip(),
+            storage_timestamp_utc=str(document.get("updated_at", "")).strip(),
             reason=reason,
         )
     )
@@ -224,12 +226,12 @@ def _active_source_or_raise(
     document: dict[str, Any],
     field_name: str,
     *,
-    now_timestamp: str,
+    now_timestamp_utc: str,
 ) -> None:
     if document.get("status") != MemoryStatus.ACTIVE:
         raise ValueError(f"{field_name} must be active")
     expiry_timestamp = document.get("expiry_timestamp")
-    if _expiry_is_past(expiry_timestamp, now_timestamp):
+    if _expiry_is_past(expiry_timestamp, now_timestamp_utc):
         raise ValueError(f"{field_name} must be active and non-expired")
 
 
@@ -292,7 +294,7 @@ async def supersede_memory_unit(
         _active_source_or_raise(
             target,
             "supersede target",
-            now_timestamp=write_time,
+            now_timestamp_utc=write_time,
         )
 
         expected_lineage = str(target["lineage_id"])
@@ -366,7 +368,7 @@ async def merge_memory_units(
             _active_source_or_raise(
                 source,
                 "merge source",
-                now_timestamp=write_time,
+                now_timestamp_utc=write_time,
             )
             sources.append(source)
 
@@ -454,7 +456,7 @@ async def find_active_memory_units(
     matches = await memory_store.find_active_memory_documents(
         query=query,
         limit=limit,
-        now_timestamp=now_iso(),
+        now_timestamp_utc=now_iso(),
         query_embedding=query_embedding,
     )
     return_value = [(score, dict(doc)) for score, doc in matches]

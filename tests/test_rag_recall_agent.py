@@ -24,7 +24,7 @@ def _base_context(**overrides: object) -> dict:
         "platform": "qq",
         "platform_channel_id": "chan-1",
         "global_user_id": "user-1",
-        "current_timestamp": "2026-05-02T00:00:00+00:00",
+        "current_timestamp_utc": "2026-05-02T00:00:00+00:00",
         "conversation_progress": {
             "status": "active",
             "continuity": "same_episode",
@@ -62,11 +62,12 @@ async def _empty_scheduled_events(
     platform: str,
     platform_channel_id: str,
     global_user_id: str,
-    current_timestamp: str,
+    current_timestamp_utc: str,
     limit: int = 10,
 ) -> list[dict]:
     """Return no scheduled events while preserving query arguments."""
-    del platform, platform_channel_id, global_user_id, current_timestamp, limit
+    del platform, platform_channel_id, global_user_id
+    del current_timestamp_utc, limit
     return_value: list[dict] = []
     return return_value
 
@@ -114,7 +115,7 @@ async def test_recall_missing_mandatory_scope_does_not_query_db(monkeypatch) -> 
             "platform": "qq",
             "platform_channel_id": "",
             "global_user_id": "user-1",
-            "current_timestamp": "2026-05-02T00:00:00+00:00",
+            "current_timestamp_utc": "2026-05-02T00:00:00+00:00",
         },
     )
 
@@ -209,13 +210,13 @@ async def test_recall_includes_pending_scheduled_events(monkeypatch) -> None:
         platform: str,
         platform_channel_id: str,
         global_user_id: str,
-        current_timestamp: str,
+        current_timestamp_utc: str,
         limit: int = 10,
     ) -> list[dict]:
         assert platform == "qq"
         assert platform_channel_id == "chan-1"
         assert global_user_id == "user-1"
-        assert current_timestamp == "2026-05-02T00:00:00+00:00"
+        assert current_timestamp_utc == "2026-05-02T00:00:00+00:00"
         assert limit == 10
         return_value = [
             {
@@ -279,10 +280,11 @@ async def test_recall_active_mode_uses_commitment_before_scheduled_event(monkeyp
         platform: str,
         platform_channel_id: str,
         global_user_id: str,
-        current_timestamp: str,
+        current_timestamp_utc: str,
         limit: int = 10,
     ) -> list[dict]:
-        del platform, platform_channel_id, global_user_id, current_timestamp, limit
+        del platform, platform_channel_id, global_user_id
+        del current_timestamp_utc, limit
         return_value = [
             {
                 "event_id": "event-1",
@@ -538,7 +540,7 @@ async def test_query_pending_scheduled_events_scopes_read(monkeypatch) -> None:
         platform="qq",
         platform_channel_id="chan-1",
         global_user_id="user-1",
-        current_timestamp="2026-05-02T00:00:00+00:00",
+        current_timestamp_utc="2026-05-02T00:00:00+00:00",
         limit=3,
     )
 

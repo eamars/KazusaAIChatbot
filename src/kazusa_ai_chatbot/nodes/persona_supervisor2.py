@@ -38,7 +38,7 @@ from kazusa_ai_chatbot.rag.quote_aware_sequence import (
     call_quote_aware_rag_supervisor,
 )
 from kazusa_ai_chatbot.state import IMProcessState
-from kazusa_ai_chatbot.time_context import format_history_for_llm
+from kazusa_ai_chatbot.time_boundary import format_storage_utc_history_for_llm
 from kazusa_ai_chatbot.utils import build_interaction_history_recent, log_preview
 
 logger = logging.getLogger(__name__)
@@ -115,7 +115,7 @@ async def _action_results_for_state(
 
     action_results = await execute_action_specs_for_trace(
         _selected_action_specs(state),
-        timestamp=state["timestamp"],
+        storage_timestamp_utc=state["storage_timestamp_utc"],
         executed_action_attempt_ids=executed_action_attempt_ids,
     )
     return action_results
@@ -133,7 +133,7 @@ def _episode_trace_update(
     trace = build_episode_trace(
         episode_id=episode["episode_id"],
         trigger_source=episode["trigger_source"],
-        created_at=state["timestamp"],
+        created_at=state["storage_timestamp_utc"],
         action_specs=_selected_action_specs(state),
         action_results=action_results,
         surface_outputs=surface_outputs,
@@ -174,7 +174,7 @@ async def call_action_subgraph(state: GlobalPersonaState) -> dict:
     surface_outputs = [
         build_text_surface_output(
             fragments=final_dialog,
-            created_at=state["timestamp"],
+            created_at=state["storage_timestamp_utc"],
             action_attempt_id=speak_attempt_id,
         )
     ]
@@ -215,7 +215,7 @@ async def stage_3_no_response(state: GlobalPersonaState) -> dict:
         surface_outputs = [
             build_private_surface_output(
                 summary="No visible text surface selected for this episode.",
-                created_at=state["timestamp"],
+                created_at=state["storage_timestamp_utc"],
             )
         ]
     return_value.update(_episode_trace_update(
@@ -387,7 +387,7 @@ async def persona_supervisor2(state: IMProcessState) -> dict:
         Dialog output and the persona-state snapshot used by background tasks.
     """
 
-    recent_channel_history_for_decontextualizer = format_history_for_llm(
+    recent_channel_history_for_decontextualizer = format_storage_utc_history_for_llm(
         state["chat_history_wide"]
     )[-CHAT_HISTORY_RECENT_LIMIT:]
     raw_interaction_wide = build_interaction_history_recent(
@@ -396,7 +396,9 @@ async def persona_supervisor2(state: IMProcessState) -> dict:
         state["platform_bot_id"],
         state["global_user_id"],
     )
-    interaction_history_wide = format_history_for_llm(raw_interaction_wide)
+    interaction_history_wide = format_storage_utc_history_for_llm(
+        raw_interaction_wide
+    )
     interaction_history_recent = interaction_history_wide[-CHAT_HISTORY_RECENT_LIMIT:]
 
     async def stage_0_msg_decontexualizer(
@@ -444,8 +446,8 @@ async def persona_supervisor2(state: IMProcessState) -> dict:
         "character_profile": state["character_profile"],
 
         # Inputs
-        "timestamp": state["timestamp"],
-        "time_context": state["time_context"],
+        "storage_timestamp_utc": state["storage_timestamp_utc"],
+        "local_time_context": state["local_time_context"],
         "user_input": state["user_input"],
         "prompt_message_context": state["prompt_message_context"],
         "platform": state["platform"],

@@ -333,7 +333,7 @@ async def _seed_conversation(
     reply_context: dict | None = None,
     addressed_to_global_user_ids: list[str] | None = None,
     broadcast: bool | None = None,
-    timestamp: str | None = None,
+    timestamp_utc: str | None = None,
 ) -> None:
     if addressed_to_global_user_ids is None:
         if role == "user":
@@ -362,7 +362,7 @@ async def _seed_conversation(
             "broadcast": broadcast,
             "attachments": [],
             "reply_context": reply_context or {},
-            "timestamp": timestamp or datetime.now(timezone.utc).isoformat(),
+            "timestamp": timestamp_utc or datetime.now(timezone.utc).isoformat(),
         }
     )
 
@@ -426,7 +426,7 @@ async def _seed_group_series(identities: dict[str, dict], messages: list[dict], 
             content=content,
             role=role,
             platform_user_id=identity["platform_user_id"],
-            timestamp=(base_time + timedelta(seconds=index)).isoformat(),
+            timestamp_utc=(base_time + timedelta(seconds=index)).isoformat(),
         )
 
 
@@ -858,7 +858,7 @@ async def test_live_graph_active_commitment_language_applies_on_next_turn(live_e
                 "due_at": (datetime.now(timezone.utc) + timedelta(days=1)).isoformat(),
             }
         ],
-        timestamp=timestamp,
+        timestamp_utc=timestamp,
     )
 
     async with _neutral_character_runtime_state():
@@ -1189,7 +1189,7 @@ async def test_live_web_search_agent_returns_live_result(live_env) -> None:
         task="查找今天奥克兰的天气，并用中文简短说明当前情况，附一个来源链接。",
         context={},
         expected_response="中文短答，包含 1 个来源链接。",
-        timestamp=datetime.now(timezone.utc).isoformat(),
+        timestamp_utc=datetime.now(timezone.utc).isoformat(),
     )
 
     assert result["status"] in {"success", "partial", "not_found"}

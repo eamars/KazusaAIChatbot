@@ -9,7 +9,10 @@ import pytest
 from kazusa_ai_chatbot.db.schemas import UserMemoryUnitType
 from kazusa_ai_chatbot.nodes import persona_supervisor2_consolidator_memory_units as memory_units_module
 from kazusa_ai_chatbot.rag import user_memory_unit_retrieval as retrieval_module
-from kazusa_ai_chatbot.time_context import build_character_time_context
+from kazusa_ai_chatbot.time_boundary import (
+    build_turn_clock,
+    local_time_context_from_storage_utc,
+)
 
 
 class _DummyResponse:
@@ -152,11 +155,13 @@ def test_project_user_memory_units_labels_due_today() -> None:
             "due_at": "2026-05-06T12:00:00+00:00",
         }
     ]
-    time_context = build_character_time_context("2026-05-06T13:30:00+00:00")
+    local_time_context = local_time_context_from_storage_utc(
+        "2026-05-06T13:30:00+00:00"
+    )
 
     context = retrieval_module.project_user_memory_units(
         units,
-        time_context=time_context,
+        time_context=local_time_context,
     )
 
     commitment = context["active_commitments"][0]
@@ -225,7 +230,10 @@ async def test_process_memory_unit_candidate_creates_when_merge_cluster_id_is_un
 
     result = await memory_units_module.process_memory_unit_candidate(
         {
-            "timestamp": "2026-05-14T12:38:43+00:00",
+            "storage_timestamp_utc": "2026-05-14T12:38:43+00:00",
+            "local_time_context": local_time_context_from_storage_utc(
+                "2026-05-14T12:38:43+00:00"
+            ),
             "global_user_id": "user-1",
             "character_profile": {"name": "杏山千纱 (Kyōyama Kazusa)"},
             "rag_result": {"user_memory_unit_candidates": [existing_unit]},
@@ -282,7 +290,10 @@ async def test_process_memory_unit_candidate_reuses_rag_surfaced_units(monkeypat
 
     result = await memory_units_module.process_memory_unit_candidate(
         {
-            "timestamp": "2026-04-29T00:00:00+12:00",
+            "storage_timestamp_utc": "2026-04-28T12:00:00+00:00",
+            "local_time_context": local_time_context_from_storage_utc(
+                "2026-04-28T12:00:00+00:00"
+            ),
             "global_user_id": "user-1",
             "character_profile": {"name": "杏山千纱 (Kyōyama Kazusa)"},
             "rag_result": {"user_memory_unit_candidates": [surfaced_unit]},
@@ -364,7 +375,10 @@ async def test_process_memory_unit_candidate_merges_memory_evidence_surfaced_sco
 
     result = await memory_units_module.process_memory_unit_candidate(
         {
-            "timestamp": "2026-04-29T00:00:00+12:00",
+            "storage_timestamp_utc": "2026-04-28T12:00:00+00:00",
+            "local_time_context": local_time_context_from_storage_utc(
+                "2026-04-28T12:00:00+00:00"
+            ),
             "global_user_id": "user-1",
             "character_profile": {"name": "杏山千纱 (Kyōyama Kazusa)"},
             "rag_result": {"user_memory_unit_candidates": [surfaced_unit]},
@@ -441,7 +455,10 @@ async def test_process_memory_unit_candidate_normalizes_merge_candidate_id(monke
 
     result = await memory_units_module.process_memory_unit_candidate(
         {
-            "timestamp": "2026-04-29T00:00:00+12:00",
+            "storage_timestamp_utc": "2026-04-28T12:00:00+00:00",
+            "local_time_context": local_time_context_from_storage_utc(
+                "2026-04-28T12:00:00+00:00"
+            ),
             "global_user_id": "user-1",
             "character_profile": {"name": "杏山千纱 (Kyōyama Kazusa)"},
             "rag_result": {"user_memory_unit_candidates": [existing_unit]},
@@ -511,7 +528,10 @@ async def test_process_memory_unit_candidate_uses_validated_merge_cluster_when_r
 
     result = await memory_units_module.process_memory_unit_candidate(
         {
-            "timestamp": "2026-04-29T00:00:00+12:00",
+            "storage_timestamp_utc": "2026-04-28T12:00:00+00:00",
+            "local_time_context": local_time_context_from_storage_utc(
+                "2026-04-28T12:00:00+00:00"
+            ),
             "global_user_id": "user-1",
             "character_profile": {"name": "杏山千纱 (Kyōyama Kazusa)"},
             "rag_result": {"user_memory_unit_candidates": [existing_unit]},
@@ -548,17 +568,17 @@ async def test_stability_judge_receives_count_session_and_recent_examples(monkey
         "source_refs": [
             {
                 "source": "chat",
-                "timestamp": "2026-04-28T11:00:00+12:00",
+                "timestamp": "2026-04-27T23:00:00+00:00",
                 "message_id": "m-1",
             },
             {
                 "source": "chat",
-                "timestamp": "2026-04-29T12:00:00+12:00",
+                "timestamp": "2026-04-29T00:00:00+00:00",
                 "message_id": "m-2",
             },
         ],
-        "updated_at": "2026-04-29T12:00:00+12:00",
-        "last_seen_at": "2026-04-29T12:00:00+12:00",
+        "updated_at": "2026-04-29T00:00:00+00:00",
+        "last_seen_at": "2026-04-29T00:00:00+00:00",
     }
     candidate = {
         "candidate_id": "candidate-pattern-1",
@@ -569,7 +589,7 @@ async def test_stability_judge_receives_count_session_and_recent_examples(monkey
         "evidence_refs": [
             {
                 "source": "chat",
-                "timestamp": "2026-04-30T12:00:00+12:00",
+                "timestamp": "2026-04-30T00:00:00+00:00",
                 "message_id": "m-3",
             }
         ],
@@ -627,10 +647,11 @@ async def test_stability_judge_receives_count_session_and_recent_examples(monkey
         _update_user_memory_unit_window,
     )
 
+    turn_clock = build_turn_clock("2026-04-30 12:00:00")
     result = await memory_units_module.process_memory_unit_candidate(
         {
-            "timestamp": "2026-04-30T12:00:00+12:00",
-            "time_context": build_character_time_context("2026-04-30T12:00:00+12:00"),
+            "storage_timestamp_utc": turn_clock["storage_timestamp_utc"],
+            "local_time_context": turn_clock["local_time_context"],
             "global_user_id": "user-1",
             "character_profile": {"name": "杏山千纱 (Kyōyama Kazusa)"},
             "rag_result": {"user_memory_unit_candidates": [existing_unit]},
@@ -742,9 +763,10 @@ async def test_update_user_memory_units_drops_bad_extractor_output(
 
 
 def test_extractor_payload_includes_recent_history() -> None:
+    turn_clock = build_turn_clock("2026-04-29 00:00:00")
     state = {
-        "timestamp": "2026-04-29T00:00:00+12:00",
-        "time_context": build_character_time_context("2026-04-29T00:00:00+12:00"),
+        "storage_timestamp_utc": turn_clock["storage_timestamp_utc"],
+        "local_time_context": turn_clock["local_time_context"],
         "global_user_id": "user-1",
         "user_name": "User",
         "consolidation_origin": {
@@ -752,7 +774,7 @@ def test_extractor_payload_includes_recent_history() -> None:
             "trigger_source": "user_message",
             "input_sources": ["dialog_text"],
             "output_mode": "visible_reply",
-            "timestamp": "2026-04-29T00:00:00+12:00",
+            "storage_timestamp_utc": turn_clock["storage_timestamp_utc"],
             "platform": "debug",
             "platform_channel_id": "channel-1",
             "channel_type": "private",

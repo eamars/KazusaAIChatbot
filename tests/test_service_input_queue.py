@@ -8,11 +8,13 @@ from unittest.mock import AsyncMock
 
 import pytest
 from fastapi import BackgroundTasks
+from pydantic import ValidationError
 
 from kazusa_ai_chatbot import chat_input_queue as queue_module
 from kazusa_ai_chatbot import service as service_module
 from kazusa_ai_chatbot.brain_service import intake as brain_intake
 from kazusa_ai_chatbot.config import CHARACTER_GLOBAL_USER_ID
+from kazusa_ai_chatbot.time_boundary import build_turn_clock_from_storage_utc
 
 
 @pytest.fixture(autouse=True)
@@ -46,6 +48,7 @@ def _request(
     direct_address: bool = False,
     bot_reply: bool = False,
     listen_only: bool = False,
+    local_timestamp: str = "",
 ) -> service_module.ChatRequest:
     """Build a chat request for queue tests.
 
@@ -58,6 +61,8 @@ def _request(
         direct_address: Whether the typed envelope directly mentions the bot.
         bot_reply: Whether the typed envelope addresses the character via reply.
         listen_only: Whether the adapter marked the message as observation-only.
+        local_timestamp: Optional configured local timestamp supplied by the
+            adapter or debug client.
 
     Returns:
         ChatRequest with deterministic payload fields.
@@ -108,6 +113,7 @@ def _request(
         channel_name="Group",
         content_type=content_type,
         message_envelope=message_envelope,
+        local_timestamp=local_timestamp,
         debug_modes=service_module.DebugModesIn(listen_only=listen_only),
     )
     return request
@@ -124,7 +130,7 @@ def _item(
     content_type: str = "text",
     attachments: list[dict[str, object]] | None = None,
     message_envelope: dict[str, object] | None = None,
-    timestamp: str | None = None,
+    storage_timestamp_utc: str | None = None,
     direct_address: bool = False,
     bot_reply: bool = False,
     listen_only: bool = False,
@@ -150,6 +156,9 @@ def _item(
     future: asyncio.Future[service_module.ChatResponse] = (
         asyncio.get_running_loop().create_future()
     )
+    turn_clock = build_turn_clock_from_storage_utc(
+        storage_timestamp_utc or f"2026-04-29T00:00:{sequence:02d}+00:00",
+    )
     item = queue_module.QueuedChatItem(
         sequence=sequence,
         request=_request(
@@ -165,7 +174,9 @@ def _item(
             bot_reply=bot_reply,
             listen_only=listen_only,
         ),
-        timestamp=timestamp or f"2026-04-29T00:00:{sequence:02d}+00:00",
+        storage_timestamp_utc=turn_clock["storage_timestamp_utc"],
+        local_timestamp=turn_clock["local_timestamp"],
+        local_time_context=turn_clock["local_time_context"],
         future=future,
     )
     return item
@@ -266,8 +277,10 @@ def _patch_common_dependencies(monkeypatch, graph) -> None:
 async def test_intake_save_user_message_from_item_returns_row_id() -> None:
     """Intake should return the inserted conversation row ID from persistence."""
     item = _item(1)
+    captured_docs = []
 
     async def _save_conversation(doc):
+        captured_docs.append(doc)
         return_value = "row-1"
         return return_value
 
@@ -281,6 +294,47 @@ async def test_intake_save_user_message_from_item_returns_row_id() -> None:
     )
 
     assert row_id == "row-1"
+    assert captured_docs[0]["timestamp"] == item.storage_timestamp_utc
+
+
+@pytest.mark.asyncio
+async def test_queue_separates_storage_utc_and_local_timestamp() -> None:
+    """Queue enqueue should keep storage UTC separate from configured local time."""
+
+    request = _request(
+        "clock",
+        local_timestamp="2026-05-17 16:55:28.395",
+    )
+    queue = queue_module.ChatInputQueue()
+    enqueue_task = asyncio.create_task(queue.enqueue(request))
+    await asyncio.sleep(0)
+
+    queued_item = queue.pop_left_for_test()
+
+    assert queued_item.storage_timestamp_utc == (
+        "2026-05-17T04:55:28.395000+00:00"
+    )
+    assert queued_item.local_timestamp == "2026-05-17 16:55:28.395000"
+    assert queued_item.local_time_context == {
+        "current_local_datetime": "2026-05-17 16:55",
+        "current_local_weekday": "Sunday",
+    }
+    assert not hasattr(queued_item, "timestamp")
+
+    queued_item.future.set_result(service_module.ChatResponse())
+    response = await asyncio.wait_for(enqueue_task, timeout=1.0)
+
+    assert response.messages == []
+
+
+def test_chat_request_timestamp_field_is_rejected() -> None:
+    """The old `/chat` timestamp field should fail the request contract."""
+
+    payload = _request("legacy").model_dump()
+    payload["timestamp"] = "2026-05-17T04:55:28+00:00"
+
+    with pytest.raises(ValidationError):
+        service_module.ChatRequest(**payload)
 
 
 @pytest.mark.asyncio
@@ -669,12 +723,12 @@ async def test_group_followups_require_same_author_adjacency_and_time_gap() -> N
         4,
         platform_user_id="user-1",
         direct_address=True,
-        timestamp="2026-04-29T00:10:00+00:00",
+        storage_timestamp_utc="2026-04-29T00:10:00+00:00",
     )
     too_late = _item(
         5,
         platform_user_id="user-1",
-        timestamp="2026-04-29T00:13:00+00:00",
+        storage_timestamp_utc="2026-04-29T00:13:00+00:00",
     )
 
     queue = queue_module.ChatInputQueue()

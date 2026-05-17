@@ -21,6 +21,8 @@ from kazusa_ai_chatbot.dispatcher import (
     build_send_message_tool,
 )
 
+FIXED_STORAGE_NOW_UTC = "2026-04-25T00:00:00+00:00"
+
 
 class _StubAdapter:
     platform = "discord"
@@ -137,6 +139,11 @@ async def test_schedule_event_persists_tool_doc_metadata():
     with patch(
         "kazusa_ai_chatbot.db.scheduled_events.get_db",
         AsyncMock(return_value=db),
+    ), patch.object(
+        scheduler,
+        "storage_utc_now_iso",
+        MagicMock(return_value=FIXED_STORAGE_NOW_UTC),
+        create=True,
     ):
         event = {
             "tool": "send_message",
@@ -162,7 +169,7 @@ async def test_schedule_event_persists_tool_doc_metadata():
     assert persisted["status"] == "pending"
     assert persisted["tool"] == "send_message"
     assert persisted["source_channel_type"] == "group"
-    assert "created_at" in persisted
+    assert persisted["created_at"] == FIXED_STORAGE_NOW_UTC
 
 
 @pytest.mark.asyncio
@@ -174,6 +181,11 @@ async def test_cancel_event_sets_cancelled_status_and_timestamp():
     with patch(
         "kazusa_ai_chatbot.db.scheduled_events.get_db",
         AsyncMock(return_value=db),
+    ), patch.object(
+        scheduler,
+        "storage_utc_now_iso",
+        MagicMock(return_value=FIXED_STORAGE_NOW_UTC),
+        create=True,
     ):
         ok = await scheduler.cancel_event("evt-1")
 
@@ -181,7 +193,50 @@ async def test_cancel_event_sets_cancelled_status_and_timestamp():
     update_call = db.scheduled_events.update_one.call_args
     assert update_call.args[0] == {"event_id": "evt-1", "status": "pending"}
     assert update_call.args[1]["$set"]["status"] == "cancelled"
-    assert "cancelled_at" in update_call.args[1]["$set"]
+    assert update_call.args[1]["$set"]["cancelled_at"] == FIXED_STORAGE_NOW_UTC
+
+
+class _EmptyAsyncCursor:
+    def __init__(self) -> None:
+        self.sort_args = ()
+        self.limit_arg = None
+
+    def sort(self, *args):
+        self.sort_args = args
+        return self
+
+    def limit(self, limit):
+        self.limit_arg = limit
+        return self
+
+    def __aiter__(self):
+        return self
+
+    async def __anext__(self):
+        raise StopAsyncIteration
+
+
+@pytest.mark.asyncio
+async def test_due_future_cognition_query_uses_storage_timestamp_utc_name():
+    """Due-event repository callers must pass a storage UTC lower bound."""
+
+    cursor = _EmptyAsyncCursor()
+    db = _make_mock_db()
+    db.scheduled_events.find = MagicMock(return_value=cursor)
+
+    with patch(
+        "kazusa_ai_chatbot.db.scheduled_events.get_db",
+        AsyncMock(return_value=db),
+    ):
+        rows = await scheduled_events_module.list_due_future_cognition_events(
+            current_timestamp_utc=FIXED_STORAGE_NOW_UTC,
+            limit=3,
+        )
+
+    query = db.scheduled_events.find.call_args.args[0]
+    assert rows == []
+    assert query["execute_at"] == {"$lte": FIXED_STORAGE_NOW_UTC}
+    assert cursor.limit_arg == 3
 
 
 @pytest.mark.asyncio
@@ -233,9 +288,19 @@ async def test_fire_event_executes_registered_tool_handler_and_marks_completed()
     with patch(
         "kazusa_ai_chatbot.db.scheduled_events.get_db",
         AsyncMock(return_value=db),
+    ), patch.object(
+        handlers_module,
+        "storage_utc_now_iso",
+        MagicMock(return_value=FIXED_STORAGE_NOW_UTC),
+        create=True,
     ):
         await scheduler._fire_event(event)
 
+    record_call = handlers_module.record_assistant_outbound_message.await_args
+    assert (
+        record_call.kwargs["storage_timestamp_utc"]
+        == FIXED_STORAGE_NOW_UTC
+    )
     assert adapter.calls == [
         {
             "channel_id": "chan-1",

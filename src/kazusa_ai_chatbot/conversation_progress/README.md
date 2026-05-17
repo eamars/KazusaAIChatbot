@@ -37,7 +37,7 @@ scope = ConversationProgressScope(
 
 load_result = await load_progress_context(
     scope=scope,
-    current_timestamp=current_timestamp,
+    current_timestamp_utc=current_timestamp_utc,
 )
 
 record_result = await record_turn_progress(

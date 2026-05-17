@@ -10,7 +10,22 @@ from kazusa_ai_chatbot.config import (
     SELF_COGNITION_SOURCE_PACKET_CHAR_LIMIT,
 )
 from kazusa_ai_chatbot.self_cognition import models
-from kazusa_ai_chatbot.time_context import build_character_time_context
+from kazusa_ai_chatbot.time_boundary import (
+    format_storage_utc_for_llm,
+    local_time_context_from_storage_utc,
+)
+
+_RAG_OUTPUT_TIME_FIELDS = frozenset(
+    (
+        "timestamp",
+        "created_at",
+        "updated_at",
+        "due_at",
+        "execute_at",
+        "completed_at",
+        "recorded_at",
+    )
+)
 
 
 def build_source_packet(
@@ -27,17 +42,27 @@ def build_source_packet(
         Source packet containing semantic labels and bounded visible evidence.
     """
 
+    idle_timestamp_utc = _string_field(case, "idle_timestamp_utc")
+    last_evidence_timestamp_utc = _string_field(
+        case,
+        "last_evidence_timestamp_utc",
+    )
+    local_time_context = local_time_context_from_storage_utc(
+        idle_timestamp_utc,
+    )
     target_scope = _target_scope(case)
     source_refs = _source_refs(case)
     visible_context = _visible_context(case)
     packet: models.SourcePacket = {
         "instruction": models.SELF_COGNITION_INPUT_TEXT,
         "case_name": _string_field(case, "case_name"),
-        "idle_timestamp": _string_field(case, "idle_timestamp"),
-        "last_evidence_timestamp": _string_field(
-            case,
-            "last_evidence_timestamp",
+        "idle_local_datetime": format_storage_utc_for_llm(
+            idle_timestamp_utc,
         ),
+        "last_evidence_local_datetime": format_storage_utc_for_llm(
+            last_evidence_timestamp_utc,
+        ),
+        "local_time_context": local_time_context,
         "trigger_kind": _string_field(case, "trigger_kind"),
         "semantic_due_state": _optional_string_field(
             case,
@@ -104,8 +129,12 @@ def render_source_packet_text(packet: models.SourcePacket) -> str:
         '',
         '# 当前自检',
         f'- case_name: {packet["case_name"]}',
-        f'- idle_timestamp: {packet["idle_timestamp"]}',
-        f'- last_evidence_timestamp: {packet["last_evidence_timestamp"]}',
+        f'- idle_local_datetime: {packet["idle_local_datetime"]}',
+        (
+            '- last_evidence_local_datetime: '
+            f'{packet["last_evidence_local_datetime"]}'
+        ),
+        f'- local_time_context: {_compact_value(packet["local_time_context"])}',
         f'- trigger_kind: {packet["trigger_kind"]}',
         f'- semantic_due_state: {packet["semantic_due_state"]}',
         f'- actionability: {packet["actionability"]}',
@@ -165,8 +194,8 @@ def build_rag_request(case: models.SelfCognitionCase) -> dict[str, Any]:
         query = _fallback_rag_query(case)
     target_scope = _target_scope(case)
     user_id = target_scope["user_id"] or ""
-    idle_timestamp = _string_field(case, "idle_timestamp")
-    visible_context = _visible_context(case)
+    idle_timestamp_utc = _string_field(case, "idle_timestamp_utc")
+    visible_context = _rag_visible_context(case)
     user_profile = case.get("user_profile")
     if not isinstance(user_profile, dict):
         user_profile = {}
@@ -195,8 +224,10 @@ def build_rag_request(case: models.SelfCognitionCase) -> dict[str, Any]:
             "user_name": display_name,
             "user_profile": user_profile,
             "character_profile": character_profile,
-            "current_timestamp": idle_timestamp,
-            "time_context": build_character_time_context(idle_timestamp),
+            "current_timestamp_utc": idle_timestamp_utc,
+            "local_time_context": local_time_context_from_storage_utc(
+                idle_timestamp_utc,
+            ),
             "prompt_message_context": prompt_message_context,
             "channel_topic": _string_field(case, "channel_topic"),
             "chat_history_recent": visible_context,
@@ -232,7 +263,12 @@ def project_rag_output(rag_output: dict[str, Any]) -> dict[str, Any]:
         Bounded dict retaining the factual answer and compact fact list.
     """
 
-    rendered = json.dumps(rag_output, ensure_ascii=False, sort_keys=True)
+    projected_rag_output = _project_rag_time_fields(rag_output)
+    rendered = json.dumps(
+        projected_rag_output,
+        ensure_ascii=False,
+        sort_keys=True,
+    )
     clipped = _clip_text(rendered, SELF_COGNITION_RAG_EVIDENCE_CHAR_LIMIT)
     projected_output = {
         "bounded_json": clipped,
@@ -303,14 +339,39 @@ def _source_refs(
             "summary": _string_field(item, "summary"),
         }
         due_at = item.get("due_at")
-        if due_at is None or isinstance(due_at, str):
-            source_ref["due_at"] = due_at
+        if due_at is None:
+            source_ref["due_at"] = None
+        elif isinstance(due_at, str):
+            source_ref["due_at"] = (
+                format_storage_utc_for_llm(due_at) or None
+            )
         refs.append(source_ref)
     return refs
 
 
 def _visible_context(case: models.SelfCognitionCase) -> list[dict[str, Any]]:
-    """Copy visible dialog rows supplied by the case file."""
+    """Copy visible dialog rows and localize storage times for model input."""
+
+    value = case.get("visible_context")
+    if not isinstance(value, list):
+        return_value: list[dict[str, Any]] = []
+        return return_value
+
+    rows: list[dict[str, Any]] = []
+    for item in value:
+        if isinstance(item, dict):
+            row = dict(item)
+            raw_timestamp = row.get("timestamp")
+            if isinstance(raw_timestamp, str):
+                row["timestamp"] = format_storage_utc_for_llm(raw_timestamp)
+            rows.append(row)
+    return rows
+
+
+def _rag_visible_context(
+    case: models.SelfCognitionCase,
+) -> list[dict[str, Any]]:
+    """Copy visible dialog rows for internal RAG runtime context."""
 
     value = case.get("visible_context")
     if not isinstance(value, list):
@@ -398,6 +459,28 @@ def _render_visible_context(rows: list[dict[str, Any]]) -> str:
         lines.append(f'- {timestamp} {speaker}: {body_text}')
     rendered = '\n'.join(lines)
     return rendered
+
+
+def _project_rag_time_fields(value: object) -> object:
+    """Project storage UTC time fields in RAG evidence to local text."""
+
+    if isinstance(value, dict):
+        projected: dict[str, object] = {}
+        for key, item in value.items():
+            if key in _RAG_OUTPUT_TIME_FIELDS and isinstance(item, str):
+                projected[key] = format_storage_utc_for_llm(item)
+            else:
+                projected[key] = _project_rag_time_fields(item)
+        return projected
+
+    if isinstance(value, list):
+        projected_list = [
+            _project_rag_time_fields(item)
+            for item in value
+        ]
+        return projected_list
+
+    return value
 
 
 def _compact_value(value: object) -> str:

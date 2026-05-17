@@ -39,6 +39,7 @@ from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition_prompt_selection impo
 from kazusa_ai_chatbot.rag.user_memory_unit_retrieval import (
     empty_user_memory_context,
 )
+from kazusa_ai_chatbot.time_boundary import build_turn_clock
 
 
 _APPROVED_STAGES: tuple[CognitionPromptStage, ...] = (
@@ -57,6 +58,7 @@ _MULTIMODAL_PROMPT_VARIANTS = (
     "text_chat_user_message_audio_observation",
     "text_chat_user_message_image_audio_observation",
 )
+_TURN_CLOCK = build_turn_clock("2026-05-10 09:30:00")
 _PROMPT_FINGERPRINTS = (
     (
         "_COGNITION_SUBCONSCIOUS_PROMPT",
@@ -97,8 +99,8 @@ _PROMPT_FINGERPRINTS = (
     (
         "_CONTENT_ANCHOR_AGENT_PROMPT",
         l3_module._CONTENT_ANCHOR_AGENT_PROMPT,
-        16784,
-        "25c377a3ff3ee189e63f5cd9e1ed2178a9182605e3bda513db8b393f2ced5c48",
+        17122,
+        "8bed4dc81bab7831d4a900c779eed347a2c1b44ef92968db6321ce10f968ad9c",
     ),
     (
         "_PREFERENCE_ADAPTER_PROMPT",
@@ -160,10 +162,7 @@ def _time_context() -> dict[str, str]:
     Returns:
         Minimal character-local time context accepted by the episode validator.
     """
-    time_context = {
-        "current_local_datetime": "2026-05-10 09:30",
-        "current_local_weekday": "Sunday",
-    }
+    time_context = _TURN_CLOCK["local_time_context"]
     return time_context
 
 
@@ -176,8 +175,8 @@ def _builder_kwargs() -> dict[str, object]:
     kwargs: dict[str, object] = {
         "episode_id": "episode-stage-09",
         "percept_id": "percept-dialog",
-        "timestamp": "2026-05-09T21:30:00+00:00",
-        "time_context": _time_context(),
+        "storage_timestamp_utc": _TURN_CLOCK["storage_timestamp_utc"],
+        "local_time_context": _TURN_CLOCK["local_time_context"],
         "user_input": "Can you look at this and tell me what matters?",
         "platform": "debug",
         "platform_channel_id": "debug-private-1",
@@ -244,7 +243,9 @@ def _queued_item(request: service_module.ChatRequest) -> queue_module.QueuedChat
     item = queue_module.QueuedChatItem(
         sequence=9,
         request=request,
-        timestamp="2026-05-09T21:30:00+00:00",
+        storage_timestamp_utc=_TURN_CLOCK["storage_timestamp_utc"],
+        local_timestamp=_TURN_CLOCK["local_timestamp"],
+        local_time_context=_TURN_CLOCK["local_time_context"],
         future=future,
     )
     return item
@@ -319,7 +320,8 @@ def _descriptor_state() -> dict[str, object]:
     """
     episode = build_text_chat_cognitive_episode(**_builder_kwargs())
     state: dict[str, object] = {
-        "timestamp": "2026-05-09T21:30:00+00:00",
+        "storage_timestamp_utc": _TURN_CLOCK["storage_timestamp_utc"],
+        "local_time_context": _TURN_CLOCK["local_time_context"],
         "platform": "debug",
         "platform_channel_id": "debug-private-1",
         "platform_message_id": "platform-message-9",
@@ -384,8 +386,8 @@ def _stage_08_text_only_snapshot() -> dict[str, object]:
             "active_turn_conversation_row_ids": ["conversation-row-9"],
             "debug_modes": {"think_only": False},
         },
-        "timestamp": "2026-05-09T21:30:00+00:00",
-        "time_context": _time_context(),
+        "storage_timestamp_utc": _TURN_CLOCK["storage_timestamp_utc"],
+        "local_time_context": _TURN_CLOCK["local_time_context"],
     }
     return snapshot
 

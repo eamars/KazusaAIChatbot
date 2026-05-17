@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta
 from typing import Any
 
 from kazusa_ai_chatbot.event_logging import repository
@@ -12,15 +12,20 @@ from kazusa_ai_chatbot.event_logging.models import (
     self_cognition_liveness_label,
     worker_error_level_label,
 )
+from kazusa_ai_chatbot.time_boundary import storage_utc_now
 
 
-def _window_filter(*, window_hours: int) -> dict[str, Any]:
+def _window_filter(
+    *,
+    window_hours: int,
+    now_utc: datetime | None = None,
+) -> dict[str, Any]:
     """Build a Mongo-style lower-bound filter for recent events."""
 
     seconds = max(0, int(window_hours)) * 3600
-    now = datetime.now(timezone.utc)
-    window_start = datetime.fromtimestamp(now.timestamp() - seconds, timezone.utc)
-    filter_doc = {"occurred_at": {"$gte": window_start.isoformat()}}
+    reference_utc = now_utc or storage_utc_now()
+    window_start_utc = reference_utc - timedelta(seconds=seconds)
+    filter_doc = {"occurred_at": {"$gte": window_start_utc.isoformat()}}
     return filter_doc
 
 
@@ -46,7 +51,11 @@ async def _latest_event(filter_doc: dict[str, Any]) -> dict[str, Any]:
 async def build_runtime_status(*, window_hours: int = 24) -> dict[str, object]:
     """Build bounded runtime status for `/ops/runtime-status`."""
 
-    base_filter = _window_filter(window_hours=window_hours)
+    generated_at_utc = storage_utc_now()
+    base_filter = _window_filter(
+        window_hours=window_hours,
+        now_utc=generated_at_utc,
+    )
     process_latest = await _latest_event({
         **base_filter,
         "event_family": "process",
@@ -66,7 +75,7 @@ async def build_runtime_status(*, window_hours: int = 24) -> dict[str, object]:
     })
     status = {
         "status": "ok",
-        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "generated_at": generated_at_utc.isoformat(),
         "window_hours": window_hours,
         "process": {
             "last_event_at": str(process_latest.get("occurred_at", "")),
@@ -94,7 +103,11 @@ async def build_runtime_status(*, window_hours: int = 24) -> dict[str, object]:
 async def build_reflection_stats(*, window_hours: int = 24) -> dict[str, object]:
     """Build bounded reflection stats for `/ops/reflection/stats`."""
 
-    base_filter = _window_filter(window_hours=window_hours)
+    generated_at_utc = storage_utc_now()
+    base_filter = _window_filter(
+        window_hours=window_hours,
+        now_utc=generated_at_utc,
+    )
     event_filter = {
         **base_filter,
         "component": "reflection_cycle.worker",
@@ -105,7 +118,7 @@ async def build_reflection_stats(*, window_hours: int = 24) -> dict[str, object]
     latest = await _latest_event(event_filter)
     stats = {
         "status": "ok",
-        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "generated_at": generated_at_utc.isoformat(),
         "window_hours": window_hours,
         "counts": {
             "succeeded": succeeded_count,
@@ -131,7 +144,11 @@ async def build_reflection_stats(*, window_hours: int = 24) -> dict[str, object]
 async def build_self_cognition_stats(*, window_hours: int = 24) -> dict[str, object]:
     """Build bounded self-cognition stats for `/ops/self-cognition/stats`."""
 
-    base_filter = _window_filter(window_hours=window_hours)
+    generated_at_utc = storage_utc_now()
+    base_filter = _window_filter(
+        window_hours=window_hours,
+        now_utc=generated_at_utc,
+    )
     event_filter = {
         **base_filter,
         "event_family": "self_cognition",
@@ -144,7 +161,7 @@ async def build_self_cognition_stats(*, window_hours: int = 24) -> dict[str, obj
     latest = await _latest_event(event_filter)
     stats = {
         "status": "ok",
-        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "generated_at": generated_at_utc.isoformat(),
         "window_hours": window_hours,
         "counts": {
             "runs": run_count,

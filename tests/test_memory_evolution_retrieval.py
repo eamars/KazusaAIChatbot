@@ -119,7 +119,7 @@ async def test_find_active_memory_documents_vector_post_filters_active_rows(
             "source_global_user_id": "user-1",
         },
         limit=4,
-        now_timestamp="2026-05-05T00:00:00+00:00",
+        now_timestamp_utc="2026-05-05T00:00:00+00:00",
         query_embedding=[0.1, 0.2],
     )
 
@@ -160,7 +160,7 @@ async def test_find_active_memory_documents_vector_returns_scores(
     results = await db_memory_evolution_module.find_active_memory_documents(
         query={"semantic_query": "near duplicate"},
         limit=4,
-        now_timestamp="2026-05-05T00:00:00+00:00",
+        now_timestamp_utc="2026-05-05T00:00:00+00:00",
         query_embedding=[0.1, 0.2],
     )
 
@@ -192,7 +192,7 @@ async def test_find_active_memory_documents_excludes_memory_unit_ids(
     await db_memory_evolution_module.find_active_memory_documents(
         query={"exclude_memory_unit_ids": ["unit-1", "unit-2"]},
         limit=4,
-        now_timestamp="2026-05-05T00:00:00+00:00",
+        now_timestamp_utc="2026-05-05T00:00:00+00:00",
         query_embedding=None,
     )
 
@@ -223,7 +223,7 @@ async def test_find_active_memory_documents_metadata_uses_placeholder_score(
     results = await db_memory_evolution_module.find_active_memory_documents(
         query={"memory_type": "fact"},
         limit=4,
-        now_timestamp="2026-05-05T00:00:00+00:00",
+        now_timestamp_utc="2026-05-05T00:00:00+00:00",
         query_embedding=None,
     )
 

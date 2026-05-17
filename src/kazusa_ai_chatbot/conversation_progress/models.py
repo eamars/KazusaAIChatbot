@@ -66,7 +66,7 @@ class ConversationProgressRecordInput(TypedDict):
     """Input required to record one completed responsive turn."""
 
     scope: ConversationProgressScope
-    timestamp: str
+    storage_timestamp_utc: str
     character_name: str
     prior_episode_state: ConversationEpisodeStateDoc | None
     decontexualized_input: str

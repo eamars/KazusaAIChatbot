@@ -20,10 +20,6 @@ from kazusa_ai_chatbot.config import (
 from kazusa_ai_chatbot.mcp_client import mcp_manager
 from kazusa_ai_chatbot.rag.helper_agent import BaseRAGHelperAgent
 from kazusa_ai_chatbot.rag.prompt_projection import project_runtime_context_for_llm
-from kazusa_ai_chatbot.time_context import (
-    build_character_time_context,
-    format_timestamp_for_llm,
-)
 from kazusa_ai_chatbot.utils import get_llm, parse_llm_json_output
 
 logger = logging.getLogger(__name__)
@@ -31,30 +27,33 @@ logger = logging.getLogger(__name__)
 _DEFAULT_EXPECTED_RESPONSE = "返回能直接解决当前槽位的来源扎根网页证据。"
 
 
-def _prompt_timestamp_for_llm(timestamp: str, context: dict[str, Any]) -> str:
+def _prompt_timestamp_for_llm(
+    local_prompt_timestamp: str,
+    context: dict[str, Any],
+) -> str:
     """Return the safe local timestamp string used in web-search prompts."""
-    time_context = context.get("time_context") or {}
-    local_datetime = str(time_context.get("current_local_datetime", "")).strip()
-    local_weekday = str(time_context.get("current_local_weekday", "")).strip()
+    local_time_context = context.get("local_time_context") or {}
+    local_datetime = str(
+        local_time_context.get("current_local_datetime", "")
+    ).strip()
+    local_weekday = str(
+        local_time_context.get("current_local_weekday", "")
+    ).strip()
     if local_datetime:
         if local_weekday:
             return f"{local_datetime} ({local_weekday})"
         return local_datetime
 
-    raw_timestamp = str(timestamp or "").strip()
-    formatted_timestamp = format_timestamp_for_llm(raw_timestamp)
-    if formatted_timestamp:
-        return formatted_timestamp
-
+    raw_local_prompt_timestamp = str(local_prompt_timestamp or "").strip()
     has_machine_time_marker = (
-        "UTC" in raw_timestamp
-        or "T" in raw_timestamp
-        or "+" in raw_timestamp
-        or raw_timestamp.endswith(("Z", "z"))
+        "UTC" in raw_local_prompt_timestamp
+        or "T" in raw_local_prompt_timestamp
+        or "+" in raw_local_prompt_timestamp
+        or raw_local_prompt_timestamp.endswith(("Z", "z"))
     )
     if has_machine_time_marker:
         return ""
-    return raw_timestamp
+    return raw_local_prompt_timestamp
 
 
 @tool
@@ -128,7 +127,7 @@ class WebSearchState(TypedDict):
     messages: Annotated[list, add_messages]
     should_stop: bool
     retry: int
-    timestamp: str
+    prompt_timestamp: str
     knowledge_metadata: dict
     final_response: str
     final_status: str
@@ -327,7 +326,10 @@ async def _tool_call_generator(state: WebSearchState) -> dict:
     """
     agent_tools = "\n".join([f"- {t.name}: {t.description}" for t in _ALL_TOOLS])
     system_prompt = SystemMessage(
-        content=_WEB_SEARCH_GENERATOR_PROMPT.format(agent_tools=agent_tools, timestamp=state["timestamp"])
+        content=_WEB_SEARCH_GENERATOR_PROMPT.format(
+            agent_tools=agent_tools,
+            timestamp=state["prompt_timestamp"],
+        )
     )
     user_input = {"task": state["task"], "context": state["context"]}
     human_message = HumanMessage(content=json.dumps(user_input, ensure_ascii=False))
@@ -366,7 +368,10 @@ async def _tool_call_evaluator(state: WebSearchState) -> dict:
 
     agent_tools = "\n".join([f"- {t.name}: {t.description}" for t in _ALL_TOOLS])
     system_prompt = SystemMessage(
-        content=_WEB_SEARCH_EVALUATOR_PROMPT.format(agent_tools=agent_tools, timestamp=state["timestamp"])
+        content=_WEB_SEARCH_EVALUATOR_PROMPT.format(
+            agent_tools=agent_tools,
+            timestamp=state["prompt_timestamp"],
+        )
     )
     evaluation_input = {
         "task": state["task"],
@@ -463,7 +468,7 @@ async def _run_subgraph(
     task: str,
     context: dict[str, Any],
     expected_response: str,
-    timestamp: str,
+    local_prompt_timestamp: str,
 ) -> dict[str, Any]:
     """Build and execute the web-search LangGraph subgraph.
 
@@ -471,7 +476,7 @@ async def _run_subgraph(
         task: Slot description containing the web search request.
         context: Runtime hints from the outer-loop supervisor.
         expected_response: Description of the evidence format the caller expects.
-        timestamp: ISO-8601 reference timestamp for the evaluator and generator.
+        local_prompt_timestamp: Local reference timestamp for prompt rendering.
 
     Returns:
         Dict with status, reason, response, is_empty_result, and knowledge_metadata.
@@ -494,7 +499,7 @@ async def _run_subgraph(
 
     sub_graph = builder.compile()
     llm_context = project_runtime_context_for_llm(context)
-    prompt_timestamp = _prompt_timestamp_for_llm(timestamp, context)
+    prompt_timestamp = _prompt_timestamp_for_llm(local_prompt_timestamp, context)
     sub_state: WebSearchState = {
         "task": task,
         "context": llm_context,
@@ -507,7 +512,7 @@ async def _run_subgraph(
         "final_reason": "",
         "final_response": "",
         "final_is_empty_result": False,
-        "timestamp": prompt_timestamp,
+        "prompt_timestamp": prompt_timestamp,
         "knowledge_metadata": {},
     }
     result = await sub_graph.ainvoke(sub_state)
@@ -555,24 +560,27 @@ class WebSearchAgent(BaseRAGHelperAgent):
         """
         del max_attempts
 
-        time_context = context.get("time_context") or {}
-        local_datetime = str(time_context.get("current_local_datetime", "")).strip()
-        local_weekday = str(time_context.get("current_local_weekday", "")).strip()
+        local_time_context = context.get("local_time_context") or {}
+        local_datetime = str(
+            local_time_context.get("current_local_datetime", "")
+        ).strip()
+        local_weekday = str(
+            local_time_context.get("current_local_weekday", "")
+        ).strip()
         if local_datetime:
-            timestamp = f"{local_datetime} ({local_weekday})" if local_weekday else local_datetime
-        else:
-            fallback_context = build_character_time_context(
-                str(context.get("current_timestamp") or "").strip()
+            local_prompt_timestamp = (
+                f"{local_datetime} ({local_weekday})"
+                if local_weekday
+                else local_datetime
             )
-            local_datetime = fallback_context["current_local_datetime"]
-            local_weekday = fallback_context["current_local_weekday"]
-            timestamp = f"{local_datetime} ({local_weekday})"
+        else:
+            local_prompt_timestamp = ""
 
         raw = await _run_subgraph(
             task=task,
             context=context,
             expected_response=_DEFAULT_EXPECTED_RESPONSE,
-            timestamp=timestamp,
+            local_prompt_timestamp=local_prompt_timestamp,
         )
         return_value = self.with_cache_status(
             {

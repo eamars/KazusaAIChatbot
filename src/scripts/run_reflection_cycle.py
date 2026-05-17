@@ -4,18 +4,22 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+from datetime import date
 from datetime import datetime
 from datetime import timedelta
-from zoneinfo import ZoneInfo
 
 from scripts._db_export import configure_logging, configure_stdout, load_project_env
 
 from kazusa_ai_chatbot.db import close_db
-from kazusa_ai_chatbot.config import CHARACTER_TIME_ZONE
 from kazusa_ai_chatbot.reflection_cycle import (
     run_daily_channel_reflection_cycle,
     run_global_reflection_promotion,
     run_hourly_reflection_cycle,
+)
+from kazusa_ai_chatbot.time_boundary import (
+    local_time_context_from_storage_utc,
+    parse_storage_utc_datetime,
+    storage_utc_now_iso,
 )
 
 
@@ -95,8 +99,14 @@ def _date_or_previous(value: str) -> str:
 
     if value:
         return value
-    local_now = datetime.now(ZoneInfo(CHARACTER_TIME_ZONE))
-    previous_date = local_now.date() - timedelta(days=1)
+    storage_timestamp_utc = storage_utc_now_iso()
+    local_time_context = local_time_context_from_storage_utc(
+        storage_timestamp_utc,
+    )
+    current_local_date = date.fromisoformat(
+        local_time_context["current_local_datetime"][:10],
+    )
+    previous_date = current_local_date - timedelta(days=1)
     return_value = previous_date.isoformat()
     return return_value
 
@@ -107,9 +117,8 @@ def _parse_optional_datetime(value: str | None) -> datetime | None:
     if not value:
         return_value = None
         return return_value
-    normalized = value.replace("Z", "+00:00")
-    parsed = datetime.fromisoformat(normalized)
-    return parsed
+    parsed_utc = parse_storage_utc_datetime(value)
+    return parsed_utc
 
 
 if __name__ == "__main__":

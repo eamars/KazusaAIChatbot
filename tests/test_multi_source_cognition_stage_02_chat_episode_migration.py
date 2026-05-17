@@ -14,7 +14,7 @@ from kazusa_ai_chatbot.chat_input_queue import QueuedChatItem
 from kazusa_ai_chatbot.cognition_episode import build_text_chat_cognitive_episode
 from kazusa_ai_chatbot.nodes import persona_supervisor2 as supervisor_module
 from kazusa_ai_chatbot.nodes import persona_supervisor2_cognition as cognition_module
-from kazusa_ai_chatbot.time_context import build_character_time_context
+from kazusa_ai_chatbot.time_boundary import build_turn_clock
 
 
 BACKGROUND_HANDOFF_WAIT_POLLS = 100
@@ -70,6 +70,14 @@ def _character_profile() -> dict[str, Any]:
             "defense": "calm",
             "quirks": "dry",
             "taboos": "none",
+        },
+        "boundary_profile": {
+            "self_integrity": 0.8,
+            "control_sensitivity": 0.3,
+            "control_intimacy_misread": 0.2,
+            "relational_override": 0.25,
+            "compliance_strategy": "comply",
+            "boundary_recovery": "rebound",
         },
     }
     return return_value
@@ -308,12 +316,12 @@ def _episode() -> dict[str, Any]:
         Cognitive episode fixture built through the public text chat builder.
     """
 
-    timestamp = "2026-05-01T09:00:00+12:00"
+    turn_clock = build_turn_clock("2026-05-01 09:00:00")
     episode = build_text_chat_cognitive_episode(
         episode_id="user_message:qq:private-chan-1:msg-private-1",
         percept_id="user_message:qq:private-chan-1:msg-private-1:dialog_text:0",
-        timestamp=timestamp,
-        time_context=build_character_time_context(timestamp),
+        storage_timestamp_utc=turn_clock["storage_timestamp_utc"],
+        local_time_context=turn_clock["local_time_context"],
         user_input="hello there",
         platform="qq",
         platform_channel_id="private-chan-1",
@@ -342,10 +350,10 @@ def _base_persona_state() -> dict[str, Any]:
         Persona graph input fixture with the episode attached.
     """
 
-    timestamp = "2026-05-01T09:00:00+12:00"
+    turn_clock = build_turn_clock("2026-05-01 09:00:00")
     return_value = {
-        "timestamp": timestamp,
-        "time_context": build_character_time_context(timestamp),
+        "storage_timestamp_utc": turn_clock["storage_timestamp_utc"],
+        "local_time_context": turn_clock["local_time_context"],
         "platform": "qq",
         "platform_message_id": "msg-private-1",
         "active_turn_platform_message_ids": ["msg-private-1"],
@@ -559,12 +567,15 @@ async def test_service_maps_debug_modes_to_episode_output_mode(
     listen_graph = _FakeGraph(_graph_result(final_dialog=[]))
     _patch_service_dependencies(monkeypatch, listen_graph)
     future: asyncio.Future[Any] = asyncio.get_running_loop().create_future()
+    turn_clock = build_turn_clock("2026-05-01 09:00:00")
     item = QueuedChatItem(
         sequence=7,
         request=_chat_request(
             debug_modes=service_module.DebugModesIn(listen_only=True),
         ),
-        timestamp="2026-05-01T09:00:00+12:00",
+        storage_timestamp_utc=turn_clock["storage_timestamp_utc"],
+        local_timestamp=turn_clock["local_timestamp"],
+        local_time_context=turn_clock["local_time_context"],
         future=future,
     )
 

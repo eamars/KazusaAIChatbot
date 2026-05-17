@@ -32,9 +32,7 @@ from kazusa_ai_chatbot.rag.prompt_projection import (
 from kazusa_ai_chatbot.rag.search_runtime import (
     apply_conversation_filter_runtime_constraints,
 )
-from kazusa_ai_chatbot.time_context import (
-    structured_llm_time_to_utc_iso,
-)
+from kazusa_ai_chatbot.time_boundary import local_llm_datetime_to_storage_utc_iso
 from kazusa_ai_chatbot.utils import get_llm, parse_llm_json_output, text_or_empty
 
 logger = logging.getLogger(__name__)
@@ -159,7 +157,7 @@ def _normalize_args(raw_args: dict[str, Any]) -> dict[str, Any]:
         if not value:
             continue
         try:
-            args[key] = structured_llm_time_to_utc_iso(value)
+            args[key] = local_llm_datetime_to_storage_utc_iso(value)
         except ValueError as exc:
             logger.debug(f"Dropping invalid {key} from LLM output: {exc}")
 
@@ -348,7 +346,7 @@ async def _test_main() -> None:
         context={
             "platform": "qq",
             "platform_channel_id": "54369546",
-            "current_timestamp": "2026-04-25T00:00:00+00:00",
+            "current_timestamp_utc": "2026-04-25T00:00:00+00:00",
             "known_facts": [],
         },
     )

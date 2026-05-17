@@ -20,7 +20,7 @@ from kazusa_ai_chatbot.nodes import (
 from kazusa_ai_chatbot.nodes.persona_supervisor2_consolidator_origin import (
     ConsolidationOriginMetadata,
 )
-from kazusa_ai_chatbot.time_context import build_character_time_context
+from kazusa_ai_chatbot.time_boundary import build_turn_clock
 
 
 class _CaptureLLM:
@@ -56,12 +56,13 @@ def _internal_thought_origin() -> ConsolidationOriginMetadata:
     Returns:
         Identifier-only origin metadata for tests.
     """
+    turn_clock = build_turn_clock("2026-05-10 21:00:00")
     origin: ConsolidationOriginMetadata = {
         "episode_id": "self-cognition-episode-1",
         "trigger_source": "internal_thought",
         "input_sources": ["internal_monologue"],
         "output_mode": "preview",
-        "timestamp": "2026-05-10T21:00:00+12:00",
+        "storage_timestamp_utc": turn_clock["storage_timestamp_utc"],
         "platform": "qq",
         "platform_channel_id": "channel-1",
         "channel_type": "private",
@@ -81,7 +82,7 @@ def _state() -> dict[str, Any]:
     Returns:
         State fields consumed by source-aware prompt handlers.
     """
-    timestamp = "2026-05-10T21:00:00+12:00"
+    turn_clock = build_turn_clock("2026-05-10 21:00:00")
     user_memory_context = {
         "stable_patterns": [],
         "recent_shifts": [],
@@ -90,8 +91,8 @@ def _state() -> dict[str, Any]:
         "milestones": [],
     }
     state: dict[str, Any] = {
-        "timestamp": timestamp,
-        "time_context": build_character_time_context(timestamp),
+        "storage_timestamp_utc": turn_clock["storage_timestamp_utc"],
+        "local_time_context": turn_clock["local_time_context"],
         "global_user_id": "global-user-1",
         "user_name": "Test User",
         "user_profile": {"affinity": 500},

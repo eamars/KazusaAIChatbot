@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from datetime import datetime, timezone
+from datetime import timedelta
 from typing import Any
 
 from kazusa_ai_chatbot.db._client import get_db
+from kazusa_ai_chatbot.time_boundary import storage_utc_now, storage_utc_now_iso
 
 EVENT_LOG_EVENTS_COLLECTION = "event_log_events"
 EVENT_LOG_SNAPSHOTS_COLLECTION = "event_log_snapshots"
@@ -15,8 +16,8 @@ EVENT_LOG_SNAPSHOTS_COLLECTION = "event_log_snapshots"
 def _utc_now_iso() -> str:
     """Return the current UTC timestamp as an ISO string."""
 
-    timestamp = datetime.now(timezone.utc).isoformat()
-    return timestamp
+    timestamp_utc = storage_utc_now_iso()
+    return timestamp_utc
 
 
 async def ensure_event_log_indexes() -> None:
@@ -134,8 +135,8 @@ async def count_event_log_events(filter_doc: Mapping[str, Any]) -> int:
 def window_start_iso(*, window_hours: int) -> str:
     """Return a UTC lower-bound timestamp for an event-log query window."""
 
-    now = datetime.now(timezone.utc)
+    now_utc = storage_utc_now()
     seconds = max(0, int(window_hours)) * 3600
-    window_start = datetime.fromtimestamp(now.timestamp() - seconds, timezone.utc)
-    return_value = window_start.isoformat()
+    window_start_utc = now_utc - timedelta(seconds=seconds)
+    return_value = window_start_utc.isoformat()
     return return_value

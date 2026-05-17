@@ -52,7 +52,7 @@ def _base_context(**overrides: object) -> dict:
         "platform_user_id": "platform-user-1",
         "global_user_id": "user-1",
         "user_name": "Tester",
-        "current_timestamp": "2026-05-02T00:00:00+00:00",
+        "current_timestamp_utc": "2026-05-02T00:00:00+00:00",
         "known_facts": [],
         "current_slot": "slot 1",
     }
@@ -266,7 +266,7 @@ async def test_live_context_current_local_time_uses_runtime_state_only() -> None
     result = await agent.run(
         "Live-context: answer active character current local time",
         _base_context(
-            time_context={
+            local_time_context={
                 "current_local_datetime": "2026-05-03 14:53",
                 "current_local_weekday": "Sunday",
             }
@@ -300,7 +300,7 @@ async def test_live_context_current_local_date_uses_runtime_state_only() -> None
     result = await agent.run(
         "Live-context: answer active character current local date",
         _base_context(
-            time_context={
+            local_time_context={
                 "current_local_datetime": "2026-05-03 14:53",
                 "current_local_weekday": "Sunday",
             }
@@ -330,7 +330,7 @@ async def test_live_context_current_local_weekday_uses_runtime_state_only() -> N
     result = await agent.run(
         "Live-context: answer active character current local weekday",
         _base_context(
-            time_context={
+            local_time_context={
                 "current_local_datetime": "2026-05-03 14:53",
                 "current_local_weekday": "Sunday",
             }
@@ -347,8 +347,8 @@ async def test_live_context_current_local_weekday_uses_runtime_state_only() -> N
 
 
 @pytest.mark.asyncio
-async def test_live_context_current_local_time_requires_time_context() -> None:
-    """Missing runtime time_context should stay unresolved without fallback."""
+async def test_live_context_current_local_time_requires_local_time_context() -> None:
+    """Missing runtime local_time_context should stay unresolved without fallback."""
     agent = LiveContextAgent()
     web_worker = _FakeWorker(_web_result("should not be called"))
     memory_worker = _FakeWorker({"resolved": True, "result": []})
@@ -363,7 +363,7 @@ async def test_live_context_current_local_time_requires_time_context() -> None:
     )
 
     assert result["resolved"] is False
-    assert result["result"]["missing_context"] == ["time_context"]
+    assert result["result"]["missing_context"] == ["local_time_context"]
     assert web_worker.calls == []
     assert memory_worker.calls == []
     assert conversation_worker.calls == []
@@ -383,7 +383,7 @@ async def test_live_context_legacy_unknown_location_current_time_uses_runtime_st
     result = await agent.run(
         "Live-context: answer current time for unknown location",
         _base_context(
-            time_context={
+            local_time_context={
                 "current_local_datetime": "2026-05-03 14:53",
                 "current_local_weekday": "Sunday",
             }
@@ -412,7 +412,7 @@ async def test_live_context_current_user_local_time_without_user_time_context_is
     result = await agent.run(
         "Live-context: answer current user local time if configured",
         _base_context(
-            time_context={
+            local_time_context={
                 "current_local_datetime": "2026-05-03 14:53",
                 "current_local_weekday": "Sunday",
             }
@@ -440,7 +440,7 @@ async def test_live_context_explicit_location_current_time_stays_external() -> N
     result = await agent.run(
         "Live-context: answer current time for explicit location Auckland",
         _base_context(
-            time_context={
+            local_time_context={
                 "current_local_datetime": "2026-05-03 14:53",
                 "current_local_weekday": "Sunday",
             }

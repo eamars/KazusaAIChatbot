@@ -48,7 +48,7 @@ async def test_lifecycle_update_marks_active_commitment_cancelled(monkeypatch):
     result = await user_memory_units.update_user_memory_unit_lifecycle(
         "promise-001",
         status="cancelled",
-        timestamp="2026-05-16T00:00:00+00:00",
+        storage_timestamp_utc="2026-05-16T00:00:00+00:00",
         reason="角色决定不再继续这个承诺。",
         action_attempt_id="action_attempt:001",
         due_at="2026-05-07T00:00:00+00:00",
@@ -83,7 +83,7 @@ async def test_lifecycle_update_allows_deferred_active_audit(monkeypatch):
     await user_memory_units.update_user_memory_unit_lifecycle(
         "promise-001",
         status="active",
-        timestamp="2026-05-16T00:00:00+00:00",
+        storage_timestamp_utc="2026-05-16T00:00:00+00:00",
         reason="角色决定继续等待自然间隙。",
         action_attempt_id="action_attempt:002",
     )

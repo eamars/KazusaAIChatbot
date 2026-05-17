@@ -10,12 +10,12 @@ import argparse
 import asyncio
 import json
 import sys
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 from kazusa_ai_chatbot import event_logging
 from kazusa_ai_chatbot.db import close_db
+from kazusa_ai_chatbot.time_boundary import storage_utc_now, storage_utc_now_iso
 
 
 def _configure_stdout() -> None:
@@ -28,11 +28,11 @@ def _configure_stdout() -> None:
 def _default_output_path() -> Path:
     """Build the default event-log diagnostics export path."""
 
-    timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    timestamp_utc = storage_utc_now().strftime("%Y%m%dT%H%M%SZ")
     output_path = (
         Path("test_artifacts")
         / "diagnostics"
-        / f"event_log_{timestamp}.json"
+        / f"event_log_{timestamp_utc}.json"
     )
     return output_path
 
@@ -80,7 +80,7 @@ async def build_export_document(*, window_hours: int) -> dict[str, Any]:
         window_hours=window_hours,
     )
     export_document = {
-        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "generated_at": storage_utc_now_iso(),
         "window_hours": window_hours,
         "runtime_status": runtime_status,
         "reflection_stats": reflection_stats,

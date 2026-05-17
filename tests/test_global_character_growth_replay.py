@@ -10,7 +10,7 @@ import pytest
 from kazusa_ai_chatbot.cognition_episode import build_text_chat_cognitive_episode
 from kazusa_ai_chatbot.nodes import persona_supervisor2_cognition_l2 as l2_module
 from kazusa_ai_chatbot.rag.user_memory_unit_retrieval import empty_user_memory_context
-from kazusa_ai_chatbot.time_context import build_character_time_context
+from kazusa_ai_chatbot.time_boundary import build_turn_clock_from_storage_utc
 
 
 @pytest.mark.asyncio
@@ -97,12 +97,13 @@ class _Response:
 def _state(*, promoted_reflection_context: dict) -> dict:
     """Build a minimal L2 cognition state fixture."""
 
-    timestamp = "2026-05-05T10:00:00+00:00"
+    storage_timestamp_utc = "2026-05-05T10:00:00+00:00"
+    turn_clock = build_turn_clock_from_storage_utc(storage_timestamp_utc)
     episode = build_text_chat_cognitive_episode(
         episode_id="global-growth-replay",
         percept_id="global-growth-replay-percept",
-        timestamp=timestamp,
-        time_context=build_character_time_context(timestamp),
+        storage_timestamp_utc=turn_clock["storage_timestamp_utc"],
+        local_time_context=turn_clock["local_time_context"],
         user_input="Can you answer directly?",
         platform="qq",
         platform_channel_id="chan-1",

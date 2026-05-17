@@ -9,7 +9,6 @@ compatibility shims used by focused tests.
 from __future__ import annotations
 
 import asyncio
-import datetime
 import json
 import logging
 import time
@@ -30,6 +29,7 @@ from kazusa_ai_chatbot.nodes.persona_supervisor2_rag_types import (
     RAGAgentRegistryEntry,
     RAGFactSource,
 )
+from kazusa_ai_chatbot.time_boundary import build_turn_clock
 from kazusa_ai_chatbot.utils import log_list_preview, log_preview
 
 logger = logging.getLogger(__name__)
@@ -489,6 +489,7 @@ async def test_main():
         "display_name": "<current user>",
     }
 
+    turn_clock = build_turn_clock()
     result = await call_rag_supervisor(
         original_query="<character mention><character mention>欢迎回来",
         character_name=character_profile["name"],
@@ -496,7 +497,8 @@ async def test_main():
             "platform": "qq",
             "platform_channel_id": "902317662",
             "user_name": user_profile.get("display_name", ""),
-            "current_timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+            "current_timestamp_utc": turn_clock["storage_timestamp_utc"],
+            "local_time_context": turn_clock["local_time_context"],
         },
     )
 

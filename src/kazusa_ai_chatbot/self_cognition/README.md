@@ -271,7 +271,7 @@ self_cognition_trigger_record = {
 self_cognition_run_record = {
     "run_id": str,
     "trigger_id": str,
-    "idle_timestamp": str,
+    "idle_timestamp_utc": str,
     "output_mode": "silent" | "preview" | "scheduled_action_request",
     "selected_route": str,
     "status": str,

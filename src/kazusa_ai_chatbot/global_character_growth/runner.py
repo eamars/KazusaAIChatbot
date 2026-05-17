@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Any
 
 from kazusa_ai_chatbot.config import GLOBAL_CHARACTER_GROWTH_PROMPT_CHAR_BUDGET
@@ -31,6 +31,11 @@ from kazusa_ai_chatbot.global_character_growth.validation import (
     validate_candidate_response,
 )
 from kazusa_ai_chatbot.memory_evolution import find_active_memory_units
+from kazusa_ai_chatbot.time_boundary import (
+    local_time_context_from_storage_utc,
+    normalize_storage_utc_iso,
+    storage_utc_now,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -50,14 +55,18 @@ async def run_global_character_growth_pass(
         raise ValueError("enable_trait_writes cannot be true during dry_run")
     if not dry_run and not enable_trait_writes:
         raise ValueError("enable_trait_writes is required for apply mode")
-    run_now = now or datetime.now(timezone.utc)
-    local_date = character_local_date or run_now.date().isoformat()
+    run_now_utc = now or storage_utc_now()
+    run_created_at = normalize_storage_utc_iso(run_now_utc.isoformat())
+    local_time_context = local_time_context_from_storage_utc(run_created_at)
+    local_date = (
+        character_local_date
+        or local_time_context["current_local_datetime"][:10]
+    )
     run_id = build_run_id(
         character_local_date=local_date,
         dry_run=dry_run,
-        now=run_now,
+        now=run_now_utc,
     )
-    run_created_at = run_now.astimezone(timezone.utc).isoformat()
     failure_input_quality: dict[str, Any] = {
         "raw_memory_rows": 0,
         "eligible_memory_cards": 0,
@@ -209,8 +218,10 @@ def build_run_id(
     """Build a stable run id for one invocation."""
 
     mode = "dry_run" if dry_run else "apply"
-    timestamp = now.astimezone(timezone.utc).isoformat()
-    return_value = f"global_character_growth:{character_local_date}:{mode}:{timestamp}"
+    timestamp_utc = normalize_storage_utc_iso(now.isoformat())
+    return_value = (
+        f"global_character_growth:{character_local_date}:{mode}:{timestamp_utc}"
+    )
     return return_value
 
 

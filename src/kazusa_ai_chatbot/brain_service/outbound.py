@@ -40,7 +40,7 @@ async def record_assistant_outbound_message(
     broadcast: bool,
     fallback_addressed_global_user_id: str = "",
     delivery_tracking_id: str = "",
-    timestamp: str,
+    storage_timestamp_utc: str,
     ensure_character_global_identity_func: EnsureCharacterIdentity,
     save_conversation_func: SaveConversation,
 ) -> str:
@@ -58,7 +58,7 @@ async def record_assistant_outbound_message(
         fallback_addressed_global_user_id: User id used when a direct
             assistant row has no explicit addressee.
         delivery_tracking_id: Optional local id for delivery receipts.
-        timestamp: ISO timestamp for the conversation-history row.
+        storage_timestamp_utc: Storage UTC timestamp for the persisted row.
         ensure_character_global_identity_func: Identity resolver/backfiller.
         save_conversation_func: Conversation-history persistence function.
 
@@ -96,7 +96,7 @@ async def record_assistant_outbound_message(
         "mentions": [],
         "broadcast": broadcast,
         "attachments": [],
-        "timestamp": timestamp,
+        "timestamp": storage_timestamp_utc,
     }
     clean_tracking_id = str(delivery_tracking_id or "").strip()
     if clean_tracking_id:

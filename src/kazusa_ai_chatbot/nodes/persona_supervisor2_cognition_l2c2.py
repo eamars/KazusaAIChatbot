@@ -23,7 +23,7 @@ from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition_prompt_selection impo
     select_cognition_prompt_variant,
 )
 from kazusa_ai_chatbot.nodes.persona_supervisor2_schema import CognitionState
-from kazusa_ai_chatbot.time_context import format_history_for_llm
+from kazusa_ai_chatbot.time_boundary import format_storage_utc_history_for_llm
 from kazusa_ai_chatbot.utils import (
     build_affinity_block,
     get_llm,
@@ -42,7 +42,7 @@ def _surface_history_for_social_context(chat_history: list[dict]) -> list[dict]:
         At most four messages for local tone and social adjacency.
     """
 
-    history = format_history_for_llm(chat_history[-4:])
+    history = format_storage_utc_history_for_llm(chat_history[-4:])
     return history
 
 

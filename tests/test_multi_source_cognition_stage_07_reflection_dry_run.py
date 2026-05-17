@@ -99,8 +99,8 @@ _PROMPT_FINGERPRINTS = (
     (
         "_CONTENT_ANCHOR_AGENT_PROMPT",
         l3_module._CONTENT_ANCHOR_AGENT_PROMPT,
-        16784,
-        "25c377a3ff3ee189e63f5cd9e1ed2178a9182605e3bda513db8b393f2ced5c48",
+        17122,
+        "8bed4dc81bab7831d4a900c779eed347a2c1b44ef92968db6321ce10f968ad9c",
     ),
     (
         "_PREFERENCE_ADAPTER_PROMPT",
@@ -211,7 +211,7 @@ def _time_context() -> dict[str, str]:
     """Build a fixed character-local time context for dry-run tests.
 
     Returns:
-        Minimal `TimeContextDoc`-compatible mapping.
+        Minimal local time context mapping.
     """
     time_context = {
         "current_local_datetime": "2026-05-10 09:30",
@@ -519,8 +519,8 @@ def test_reflection_episode_builder_creates_valid_episode() -> None:
     context = _promoted_reflection_context()
     episode = build_reflection_signal_cognitive_episode(
         promoted_reflection_context=context,
-        timestamp="2026-05-09T21:30:00+00:00",
-        time_context=_time_context(),
+        storage_timestamp_utc="2026-05-09T21:30:00+00:00",
+        local_time_context=_time_context(),
         output_mode="think_only",
     )
 
@@ -530,8 +530,8 @@ def test_reflection_episode_builder_creates_valid_episode() -> None:
     assert episode["trigger_source"] == "reflection_signal"
     assert episode["input_sources"] == ["reflection_artifact"]
     assert episode["output_mode"] == "think_only"
-    assert episode["timestamp"] == "2026-05-09T21:30:00+00:00"
-    assert episode["time_context"] == _time_context()
+    assert episode["storage_timestamp_utc"] == "2026-05-09T21:30:00+00:00"
+    assert episode["local_time_context"] == _time_context()
     assert episode["target_scope"] == {
         "platform": "reflection_cycle",
         "platform_channel_id": "reflection_dry_run",
@@ -568,8 +568,8 @@ def test_reflection_episode_builder_rejects_empty_promoted_context() -> None:
     ):
         build_reflection_signal_cognitive_episode(
             promoted_reflection_context={"retrieval_notes": ["nothing active"]},
-            timestamp="2026-05-09T21:30:00+00:00",
-            time_context=_time_context(),
+            storage_timestamp_utc="2026-05-09T21:30:00+00:00",
+            local_time_context=_time_context(),
         )
 
 
@@ -581,8 +581,8 @@ def test_reflection_episode_builder_rejects_unsupported_output_mode() -> None:
     ):
         build_reflection_signal_cognitive_episode(
             promoted_reflection_context=_promoted_reflection_context(),
-            timestamp="2026-05-09T21:30:00+00:00",
-            time_context=_time_context(),
+            storage_timestamp_utc="2026-05-09T21:30:00+00:00",
+            local_time_context=_time_context(),
             output_mode="visible_reply",
         )
 
@@ -591,8 +591,8 @@ def test_selector_returns_reflection_variant_for_every_stage() -> None:
     """Reflection episodes should select the exact dry-run prompt variant."""
     episode = build_reflection_signal_cognitive_episode(
         promoted_reflection_context=_promoted_reflection_context(),
-        timestamp="2026-05-09T21:30:00+00:00",
-        time_context=_time_context(),
+        storage_timestamp_utc="2026-05-09T21:30:00+00:00",
+        local_time_context=_time_context(),
         output_mode="preview",
     )
 
@@ -617,8 +617,8 @@ def test_source_payload_projects_only_reflection_artifact() -> None:
     context = _promoted_reflection_context()
     episode = build_reflection_signal_cognitive_episode(
         promoted_reflection_context=context,
-        timestamp="2026-05-09T21:30:00+00:00",
-        time_context=_time_context(),
+        storage_timestamp_utc="2026-05-09T21:30:00+00:00",
+        local_time_context=_time_context(),
         output_mode="think_only",
     )
     selection = select_cognition_prompt_variant(
@@ -641,8 +641,8 @@ def test_source_payload_rejects_duplicate_reflection_artifacts() -> None:
     """Reflection payload projection should require one artifact percept."""
     episode = build_reflection_signal_cognitive_episode(
         promoted_reflection_context=_promoted_reflection_context(),
-        timestamp="2026-05-09T21:30:00+00:00",
-        time_context=_time_context(),
+        storage_timestamp_utc="2026-05-09T21:30:00+00:00",
+        local_time_context=_time_context(),
         output_mode="think_only",
     )
     second_percept = deepcopy(episode["percepts"][0])
@@ -664,8 +664,8 @@ def test_selector_rejects_reflection_visible_reply_output_mode() -> None:
     """Reflection prompt selection should fail closed for visible replies."""
     episode = build_reflection_signal_cognitive_episode(
         promoted_reflection_context=_promoted_reflection_context(),
-        timestamp="2026-05-09T21:30:00+00:00",
-        time_context=_time_context(),
+        storage_timestamp_utc="2026-05-09T21:30:00+00:00",
+        local_time_context=_time_context(),
         output_mode="think_only",
     )
     episode["output_mode"] = "visible_reply"
@@ -687,8 +687,8 @@ async def test_dry_run_returns_busy_skip_without_cognition_call() -> None:
         promoted_reflection_context=_promoted_reflection_context(),
         character_profile=_character_profile(),
         user_profile=_user_profile(),
-        timestamp="2026-05-09T21:30:00+00:00",
-        time_context=_time_context(),
+        storage_timestamp_utc="2026-05-09T21:30:00+00:00",
+        local_time_context=_time_context(),
         is_primary_interaction_busy=busy_probe,
         call_cognition_subgraph_func=cognition,
         output_mode="preview",
@@ -731,8 +731,8 @@ async def test_dry_run_rejects_output_mode_before_busy_probe() -> None:
             promoted_reflection_context=_promoted_reflection_context(),
             character_profile=_character_profile(),
             user_profile=_user_profile(),
-            timestamp="2026-05-09T21:30:00+00:00",
-            time_context=_time_context(),
+            storage_timestamp_utc="2026-05-09T21:30:00+00:00",
+            local_time_context=_time_context(),
             is_primary_interaction_busy=_failing_busy_probe,
             call_cognition_subgraph_func=cognition,
             output_mode="visible_reply",
@@ -751,8 +751,8 @@ async def test_dry_run_returns_empty_context_skip_without_cognition_call() -> No
         promoted_reflection_context={"retrieval_notes": ["nothing active"]},
         character_profile=_character_profile(),
         user_profile=_user_profile(),
-        timestamp="2026-05-09T21:30:00+00:00",
-        time_context=_time_context(),
+        storage_timestamp_utc="2026-05-09T21:30:00+00:00",
+        local_time_context=_time_context(),
         is_primary_interaction_busy=busy_probe,
         call_cognition_subgraph_func=cognition,
         output_mode="silent",
@@ -788,8 +788,8 @@ async def test_dry_run_calls_injected_cognition_once_and_returns_audit() -> None
         promoted_reflection_context=context,
         character_profile=_character_profile(),
         user_profile=_user_profile(),
-        timestamp="2026-05-09T21:30:00+00:00",
-        time_context=_time_context(),
+        storage_timestamp_utc="2026-05-09T21:30:00+00:00",
+        local_time_context=_time_context(),
         is_primary_interaction_busy=busy_probe,
         call_cognition_subgraph_func=cognition,
         output_mode="think_only",
@@ -888,8 +888,8 @@ async def test_reflection_prompt_rendering_uses_only_artifact_payload(
         promoted_reflection_context=context,
         character_profile=_character_profile(),
         user_profile=_user_profile(),
-        timestamp="2026-05-09T21:30:00+00:00",
-        time_context=_time_context(),
+        storage_timestamp_utc="2026-05-09T21:30:00+00:00",
+        local_time_context=_time_context(),
         is_primary_interaction_busy=_BusyProbe(False),
         call_cognition_subgraph_func=cognition_module.call_cognition_subgraph,
         output_mode="think_only",

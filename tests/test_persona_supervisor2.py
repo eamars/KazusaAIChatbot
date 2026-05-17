@@ -13,16 +13,17 @@ from kazusa_ai_chatbot.nodes.persona_supervisor2 import (
     persona_supervisor2,
     stage_3_no_response,
 )
-from kazusa_ai_chatbot.time_context import build_character_time_context
+from kazusa_ai_chatbot.time_boundary import build_turn_clock_from_storage_utc
 
 
 def _base_discord_state():
     """Minimal IMProcessState with all required keys."""
-    timestamp = "2024-01-01T00:00:00Z"
-    time_context = build_character_time_context(timestamp)
+    storage_timestamp_utc = "2024-01-01T00:00:00+00:00"
+    turn_clock = build_turn_clock_from_storage_utc(storage_timestamp_utc)
+    local_time_context = turn_clock["local_time_context"]
     return {
-        "timestamp": timestamp,
-        "time_context": time_context,
+        "storage_timestamp_utc": storage_timestamp_utc,
+        "local_time_context": local_time_context,
         "user_name": "TestUser",
         "platform": "discord",
         "platform_message_id": "msg_123",
@@ -70,8 +71,8 @@ def _base_discord_state():
         "cognitive_episode": build_text_chat_cognitive_episode(
             episode_id="episode-123",
             percept_id="percept-123",
-            timestamp=timestamp,
-            time_context=time_context,
+            storage_timestamp_utc=storage_timestamp_utc,
+            local_time_context=local_time_context,
             user_input="Hello",
             platform="discord",
             platform_channel_id="chan_1",

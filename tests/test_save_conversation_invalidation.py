@@ -42,7 +42,7 @@ async def test_save_conversation_invalidates_conversation_history_cache(monkeypa
         "mentions": [],
         "broadcast": False,
         "attachments": [],
-        "timestamp": "2026-04-27T00:00:00+12:00",
+        "timestamp": "2026-04-26T12:00:00+00:00",
     })
 
     db.conversation_history.insert_one.assert_awaited_once()
@@ -51,4 +51,4 @@ async def test_save_conversation_invalidates_conversation_history_cache(monkeypa
     assert event.platform == "qq"
     assert event.platform_channel_id == "chan-1"
     assert event.global_user_id == "user-1"
-    assert event.timestamp == "2026-04-27T00:00:00+12:00"
+    assert event.storage_timestamp_utc == "2026-04-26T12:00:00+00:00"

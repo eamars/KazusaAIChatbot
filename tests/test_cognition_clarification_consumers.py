@@ -10,6 +10,10 @@ from kazusa_ai_chatbot.cognition_episode import (
 )
 from kazusa_ai_chatbot.nodes import persona_supervisor2_cognition_l2 as l2_module
 from kazusa_ai_chatbot.nodes import persona_supervisor2_cognition_l3 as l3_module
+from kazusa_ai_chatbot.time_boundary import build_turn_clock
+
+
+_TURN_CLOCK = build_turn_clock("2026-05-09 19:30:00")
 
 
 class _DummyResponse:
@@ -58,11 +62,8 @@ def _cognitive_episode() -> CognitiveEpisode:
     return build_text_chat_cognitive_episode(
         episode_id="clarification-consumer-episode",
         percept_id="clarification-consumer-percept",
-        timestamp="2026-05-06T00:00:00+00:00",
-        time_context={
-            "current_local_datetime": "2026-05-09 19:30",
-            "current_local_weekday": "Saturday",
-        },
+        storage_timestamp_utc=_TURN_CLOCK["storage_timestamp_utc"],
+        local_time_context=_TURN_CLOCK["local_time_context"],
         user_input="hello",
         platform="qq",
         platform_channel_id="private-channel",

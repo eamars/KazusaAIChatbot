@@ -76,7 +76,7 @@ def test_memory_lifecycle_update_builds_narrow_repository_call() -> None:
 
     update = build_user_memory_lifecycle_update(
         action_spec,
-        timestamp="2026-05-16T00:00:00+00:00",
+        storage_timestamp_utc="2026-05-16T00:00:00+00:00",
         action_attempt_id="attempt-001",
     )
 
@@ -151,7 +151,7 @@ def test_deferred_lifecycle_decision_keeps_commitment_active() -> None:
 
     update = build_user_memory_lifecycle_update(
         action_spec,
-        timestamp="2026-05-16T00:00:00+00:00",
+        storage_timestamp_utc="2026-05-16T00:00:00+00:00",
         action_attempt_id="attempt-002",
     )
 
@@ -186,7 +186,7 @@ async def test_memory_lifecycle_execute_uses_repository_owner(monkeypatch) -> No
 
     result = await execute_user_memory_lifecycle_action(
         _action_spec(),
-        timestamp="2026-05-16T00:00:00+00:00",
+        storage_timestamp_utc="2026-05-16T00:00:00+00:00",
         action_attempt_id="attempt-003",
     )
 
@@ -194,3 +194,14 @@ async def test_memory_lifecycle_execute_uses_repository_owner(monkeypatch) -> No
     assert captured["unit_id"] == "promise-001"
     assert captured["status"] == "cancelled"
     assert captured["reason"] == _action_spec()["reason"]
+
+
+def test_memory_lifecycle_rejects_non_utc_storage_timestamp() -> None:
+    """Action audit time must already be a storage UTC timestamp."""
+
+    with pytest.raises(ActionValidationError, match="storage_timestamp_utc"):
+        build_user_memory_lifecycle_update(
+            _action_spec(),
+            storage_timestamp_utc="2026-05-16T12:00:00+12:00",
+            action_attempt_id="attempt-004",
+        )

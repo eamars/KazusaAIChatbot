@@ -7,7 +7,7 @@ import json
 import pytest
 
 from kazusa_ai_chatbot.nodes import persona_supervisor2_consolidator_facts as facts_module
-from kazusa_ai_chatbot.time_context import build_character_time_context
+from kazusa_ai_chatbot.time_boundary import build_turn_clock
 
 
 _COMPACT_CANDIDATE_FIELDS = {
@@ -48,17 +48,18 @@ class _CapturingAsyncLLM:
 
 
 def _state() -> dict:
+    turn_clock = build_turn_clock("2026-04-27 00:00:00")
     return {
         "character_profile": {"name": "杏山千纱"},
         "user_name": "提拉米苏",
-        "timestamp": "2026-04-27T00:00:00+12:00",
-        "time_context": build_character_time_context("2026-04-27T00:00:00+12:00"),
+        "storage_timestamp_utc": turn_clock["storage_timestamp_utc"],
+        "local_time_context": turn_clock["local_time_context"],
         "consolidation_origin": {
             "episode_id": "episode-1",
             "trigger_source": "user_message",
             "input_sources": ["dialog_text"],
             "output_mode": "visible_reply",
-            "timestamp": "2026-04-27T00:00:00+12:00",
+            "storage_timestamp_utc": turn_clock["storage_timestamp_utc"],
             "platform": "debug",
             "platform_channel_id": "channel-1",
             "channel_type": "private",
