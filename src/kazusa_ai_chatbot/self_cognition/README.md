@@ -16,10 +16,10 @@ The module supports two entry points:
   output directory.
 - The service worker collects bounded visible/actionable source cases,
   builds the same route records in memory, invokes the existing dialog graph
-  for private finalization when consolidation is applied, calls the existing
-  consolidator through the shared same-path entry, records sanitized event-log
-  telemetry, and persists action-attempt state through the DB facade. It does
-  not hand prewritten text to delivery.
+  only for selected visible `speak` rendering, calls the existing consolidator
+  through the shared same-path entry, records sanitized event-log telemetry,
+  and persists action-attempt state through the DB facade. It does not hand
+  prewritten text to delivery.
 
 Self-cognition is an upstream trigger source for the shared persona path. It is
 not a downstream action consumer, private cleanup channel, adapter sender, or
@@ -46,14 +46,15 @@ the shared consolidator policy. It does not create a separate self-cognition
 memory or progress store.
 
 The module does not call adapters directly, write `/chat` conversation rows, or
-schedule prewritten user-visible text. Private finalization exists only to feed
-the shared consolidator and optional action-candidate rendering for local
-tracking.
+schedule prewritten user-visible text. Local action-candidate rendering exists
+only when selected `speak` already authorized visible dialog; candidates remain
+private tracking artifacts.
 
 Consolidation can run even when self-cognition selects no visible action.
-Private finalization, action results, or episode-trace evidence are sufficient
-to make the episode consolidatable. The consolidator consumes prompt-safe
-evidence and does not execute actions, dispatch, schedule, or trigger cognition.
+Action results, episode-trace evidence, and an empty `final_dialog` are
+sufficient to make the episode consolidatable. The consolidator consumes
+prompt-safe evidence and does not execute actions, dispatch, schedule, or
+trigger cognition.
 
 ## Configuration
 
@@ -84,9 +85,8 @@ cognition's route or contact decision.
   cognition graph. Internal RAG2 helper calls remain governed by RAG2.
 - If L2d selects visible `speak`, the selected L3 text handler may invoke the
   existing dialog graph once to render text.
-- When consolidation is applied, the runner may invoke the existing dialog
-  graph once for private finalization even when no send candidate can be
-  created.
+- When consolidation is applied without a selected visible `speak`, the runner
+  reuses an empty `final_dialog` and does not invoke dialog.
 - The production worker applies consolidation by default and keeps the existing
   `SELF_COGNITION_MAX_CASES_PER_TICK` case cap.
 
@@ -193,8 +193,8 @@ request as local tracking metadata.
 
 Self-cognition may produce local delivery-candidate artifacts for dry-run
 inspection and duplicate suppression, but production worker ticks do not
-schedule or send those candidates. Ordinary visible expression uses `speak`, L3
-text, and dialog in the shared cognition path.
+schedule or send those candidates. Visible expression requires selected
+`speak`, L3 text directives, and dialog in the shared cognition path.
 
 `trigger_future_cognition` uses `scheduled_events` as an internal delayed
 trigger source. The action handler records a private non-dispatcher slot; a
@@ -215,8 +215,8 @@ Dry-run artifacts remain the canonical debug output. The production worker
 does not write artifact files. Event-log rows store ids, route names, output
 modes, budget counters, consolidation write-success booleans,
 scheduled-event counts, cache-eviction counts, origin labels, and status
-labels; they must not include source packet text, private finalization text,
-action candidate text, raw target channels, or conversation bodies.
+labels; they must not include source packet text, action candidate text, raw
+target channels, or conversation bodies.
 
 ## Artifacts
 

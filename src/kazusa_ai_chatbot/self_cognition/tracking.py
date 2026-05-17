@@ -161,7 +161,7 @@ def build_consolidation_outcome_record(
     """Build sanitized metadata for a self-cognition consolidation call.
 
     Args:
-        consolidation_state: Private finalization state passed to the shared
+        consolidation_state: Self-cognition state passed to the shared
             consolidator.
         consolidation_result: Result returned by the shared consolidator.
 
@@ -231,13 +231,6 @@ def classify_route(
     anchor_route = _route_from_content_anchors(cognition_output)
     if anchor_route:
         route = _route_with_action_attempt(anchor_route, action_attempt)
-        return route
-
-    if _cognition_selects_outward_contact(cognition_output):
-        route = _route_with_action_attempt(
-            models.ROUTE_ACTION_CANDIDATE,
-            action_attempt,
-        )
         return route
 
     case_name = _string_field(case, "case_name")
@@ -352,28 +345,6 @@ def build_action_candidate(
     return action_candidate
 
 
-def extract_action_candidate_text(cognition_output: dict[str, Any]) -> str:
-    """Extract candidate message text from model-emitted action anchors.
-
-    Args:
-        cognition_output: Output returned by the shared cognition graph.
-
-    Returns:
-        Text after the first action-candidate marker, or an empty string.
-    """
-
-    for anchor in _content_anchors(cognition_output):
-        _, marker, candidate_text = anchor.partition(
-            models.ACTION_CANDIDATE_MARKER
-        )
-        if not marker:
-            continue
-        return_value = candidate_text.strip()
-        return return_value
-    return_value = ""
-    return return_value
-
-
 def _candidate_status(
     case: models.SelfCognitionCase,
     idempotency_key: str,
@@ -479,9 +450,6 @@ def _route_from_content_anchors(cognition_output: dict[str, Any]) -> str:
 
     anchors = _content_anchors(cognition_output)
     for anchor in anchors:
-        if models.ACTION_CANDIDATE_MARKER in anchor:
-            return_value = models.ROUTE_ACTION_CANDIDATE
-            return return_value
         if models.PROGRESS_MAINTENANCE_MARKER in anchor:
             return_value = models.ROUTE_PROGRESS_MAINTENANCE
             return return_value
@@ -492,28 +460,6 @@ def _route_from_content_anchors(cognition_output: dict[str, Any]) -> str:
             return_value = models.ROUTE_SILENT_NO_WRITE
             return return_value
     return_value = ""
-    return return_value
-
-
-def _cognition_selects_outward_contact(
-    cognition_output: dict[str, Any],
-) -> bool:
-    """Detect when cognition has selected outward contact semantics."""
-
-    intent = cognition_output.get("character_intent")
-    if isinstance(intent, str) and intent in models.OUTWARD_CONTACT_INTENTS:
-        return_value = True
-        return return_value
-
-    stance = cognition_output.get("logical_stance")
-    if isinstance(stance, str) and stance in models.OUTWARD_CONTACT_STANCES:
-        anchors = _content_anchors(cognition_output)
-        has_answer_anchor = any("[ANSWER]" in anchor for anchor in anchors)
-        if has_answer_anchor:
-            return_value = True
-            return return_value
-
-    return_value = False
     return return_value
 
 

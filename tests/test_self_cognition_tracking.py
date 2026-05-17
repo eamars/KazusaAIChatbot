@@ -10,10 +10,13 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+import pytest
+
 from kazusa_ai_chatbot.action_spec.registry import (
     MEMORY_LIFECYCLE_UPDATE_CAPABILITY,
     SPEAK_CAPABILITY,
 )
+from kazusa_ai_chatbot.nodes.dialog_agent import StateContractError
 from kazusa_ai_chatbot.self_cognition import artifacts, models, projection
 from kazusa_ai_chatbot.self_cognition import sources, tracking
 from kazusa_ai_chatbot.self_cognition import runner
@@ -180,13 +183,25 @@ def _scheduled_future_cognition_case() -> dict[str, Any]:
 
 def _action_cognition_output(text: str) -> dict[str, Any]:
     output = {
-        "logical_stance": "outward contact is appropriate",
-        "character_intent": "send a concise follow-up",
+        "logical_stance": "CONFIRM",
+        "character_intent": "PROVIDE",
+        "internal_monologue": "The scheduled follow-up should be visible.",
         "action_directives": {
+            "contextual_directives": {
+                "social_distance": "friendly",
+                "emotional_intensity": "low",
+                "vibe_check": "focused",
+                "relational_dynamic": "scheduled follow-up",
+            },
             "linguistic_directives": {
-                "content_anchors": [f"[ACTION_CANDIDATE] {text}"],
+                "rhetorical_strategy": "answer the scheduled follow-up",
+                "linguistic_style": "brief",
+                "accepted_user_preferences": [],
+                "content_anchors": [f"[ANSWER] {text}"],
+                "forbidden_phrases": [],
             },
         },
+        "action_specs": [_speak_action_spec()],
     }
     return output
 
@@ -371,6 +386,24 @@ def _read_json(path: str | Path) -> dict[str, Any]:
     content = Path(path).read_text(encoding="utf-8")
     data = json.loads(content)
     return data
+
+
+def _dialog_client_with_text(
+    text: str,
+    *,
+    mention_target_user: bool = False,
+):
+    """Build a deterministic dialog seam for selected speak tests."""
+
+    async def dialog_client(state: dict[str, Any]) -> dict[str, Any]:
+        del state
+        result = {
+            "final_dialog": [text],
+            "mention_target_user": mention_target_user,
+        }
+        return result
+
+    return dialog_client
 
 
 def test_build_idempotency_key_ignores_generated_text() -> None:
@@ -622,7 +655,7 @@ def test_classify_route_returns_action_candidate_when_cognition_selects_contact(
     assert route == models.ROUTE_ACTION_CANDIDATE
 
 
-def test_classify_route_returns_action_candidate_when_cognition_intent_provides() -> None:
+def test_classify_route_does_not_use_answer_anchor_without_speak_action() -> None:
     case = _commitment_case()
     route = tracking.classify_route(
         case,
@@ -636,10 +669,25 @@ def test_classify_route_returns_action_candidate_when_cognition_intent_provides(
                     ],
                 },
             },
+            "action_specs": [],
         },
     )
 
-    assert route == models.ROUTE_ACTION_CANDIDATE
+    assert route == models.ROUTE_AUDIT_ONLY
+
+
+def test_classify_route_does_not_use_intent_label_without_speak_or_anchor() -> None:
+    case = _commitment_case()
+    route = tracking.classify_route(
+        case,
+        {
+            "logical_stance": "CONFIRM",
+            "character_intent": "PROVIDE",
+            "action_specs": [],
+        },
+    )
+
+    assert route == models.ROUTE_AUDIT_ONLY
 
 
 def test_classify_route_does_not_render_private_only_action_specs() -> None:
@@ -734,6 +782,9 @@ def test_past_due_contact_decision_writes_action_attempt_and_candidate_without_h
         cognition_client=lambda state: _action_cognition_output(
             "I noticed the reminder is due; checking in now.",
         ),
+        dialog_client=_dialog_client_with_text(
+            "I noticed the reminder is due; checking in now.",
+        ),
     )
     action_attempt = _read_json(paths[models.ARTIFACT_ACTION_ATTEMPT])
     action_candidate = _read_json(paths[models.ARTIFACT_ACTION_CANDIDATE])
@@ -755,6 +806,9 @@ def test_build_self_cognition_case_artifacts_does_not_write_files(tmp_path) -> N
         cognition_client=lambda state: _action_cognition_output(
             "I noticed the reminder is due; checking in now.",
         ),
+        dialog_client=_dialog_client_with_text(
+            "I noticed the reminder is due; checking in now.",
+        ),
     )
 
     assert not output_dir.exists()
@@ -766,19 +820,13 @@ def test_build_self_cognition_case_artifacts_does_not_write_files(tmp_path) -> N
     )
 
 
-def test_runner_apply_consolidation_builds_private_finalization_state() -> None:
+def test_runner_apply_consolidation_uses_empty_dialog_without_render() -> None:
     case = _commitment_case()
-    captured_dialog_state: dict[str, Any] = {}
     captured_consolidation_state: dict[str, Any] = {}
 
     async def dialog_client(state: dict[str, Any]) -> dict[str, Any]:
-        captured_dialog_state.update(state)
-        return_value = {
-            "final_dialog": ["Private finalization for consolidation only."],
-            "target_addressed_user_ids": [state["global_user_id"]],
-            "target_broadcast": False,
-        }
-        return return_value
+        del state
+        raise AssertionError("audit-only consolidation should not call dialog")
 
     async def consolidation_client(state: dict[str, Any]) -> dict[str, Any]:
         captured_consolidation_state.update(state)
@@ -805,21 +853,13 @@ def test_runner_apply_consolidation_builds_private_finalization_state() -> None:
         apply_consolidation=True,
     )
 
-    assert captured_dialog_state["cognitive_episode"]["trigger_source"] == (
-        "internal_thought"
-    )
-    assert captured_dialog_state["dialog_usage_mode"] == (
-        "self_cognition_private_finalization"
-    )
     assert captured_consolidation_state["cognitive_episode"]["trigger_source"] == (
         "internal_thought"
     )
     assert captured_consolidation_state["cognitive_episode"]["output_mode"] == (
         "preview"
     )
-    assert captured_consolidation_state["final_dialog"] == [
-        "Private finalization for consolidation only.",
-    ]
+    assert captured_consolidation_state["final_dialog"] == []
     assert "The user expected a follow-up" in (
         captured_consolidation_state["decontexualized_input"]
     )
@@ -842,7 +882,6 @@ def test_runner_apply_consolidation_builds_private_finalization_state() -> None:
         "origin_episode_id": "self_cognition:dry_run:commitment_past_due:promise-001",
     }
     serialized = json.dumps(outcome, ensure_ascii=False)
-    assert "Private finalization" not in serialized
     assert "Reminder was expected" not in serialized
 
 
@@ -891,6 +930,114 @@ def test_runner_consolidates_no_action_cognition_without_dialog() -> None:
     assert artifact_payloads[models.ARTIFACT_CONSOLIDATION_OUTCOME][
         "consolidation_called"
     ] is True
+
+
+def test_runner_does_not_call_dialog_for_intent_only_no_speak() -> None:
+    case = _commitment_case()
+    captured_consolidation_state: dict[str, Any] = {}
+
+    async def dialog_client(state: dict[str, Any]) -> dict[str, Any]:
+        del state
+        raise AssertionError("intent-only cognition should not call dialog")
+
+    async def consolidation_client(state: dict[str, Any]) -> dict[str, Any]:
+        captured_consolidation_state.update(state)
+        return_value = {
+            "consolidation_metadata": {
+                "write_success": {"character_state": True},
+                "scheduled_event_ids": [],
+                "cache_evicted_count": 0,
+            },
+        }
+        return return_value
+
+    artifact_payloads = runner.build_self_cognition_case_artifacts(
+        case,
+        cognition_client=lambda state: {
+            "logical_stance": "CONFIRM",
+            "character_intent": "PROVIDE",
+            "internal_monologue": (
+                "The scheduled topic is remembered, but no visible reply "
+                "was selected."
+            ),
+            "action_specs": [],
+        },
+        dialog_client=dialog_client,
+        consolidation_client=consolidation_client,
+        apply_consolidation=True,
+    )
+
+    assert captured_consolidation_state["final_dialog"] == []
+    assert models.ARTIFACT_ACTION_ATTEMPT not in artifact_payloads
+    assert models.ARTIFACT_ACTION_CANDIDATE not in artifact_payloads
+    assert artifact_payloads[models.ARTIFACT_RUN_RECORD][
+        "selected_route"
+    ] == models.ROUTE_AUDIT_ONLY
+    assert artifact_payloads[models.ARTIFACT_RUN_RECORD]["budget"][
+        "dialog_calls"
+    ] == 0
+
+
+def test_runner_skips_dialog_for_private_only_actions_without_directives() -> None:
+    case = _commitment_case()
+    captured_consolidation_state: dict[str, Any] = {}
+
+    async def dialog_client(state: dict[str, Any]) -> dict[str, Any]:
+        del state
+        raise AssertionError("private-only actions should not call dialog")
+
+    async def consolidation_client(state: dict[str, Any]) -> dict[str, Any]:
+        captured_consolidation_state.update(state)
+        return_value = {
+            "consolidation_metadata": {
+                "write_success": {"character_state": True},
+                "scheduled_event_ids": [],
+                "cache_evicted_count": 0,
+            },
+        }
+        return return_value
+
+    artifact_payloads = runner.build_self_cognition_case_artifacts(
+        case,
+        cognition_client=lambda state: {
+            "logical_stance": "CONFIRM",
+            "character_intent": "PROVIDE",
+            "internal_monologue": "Only private memory maintenance is selected.",
+            "action_specs": [_memory_lifecycle_action_spec()],
+        },
+        dialog_client=dialog_client,
+        consolidation_client=consolidation_client,
+        apply_consolidation=True,
+    )
+
+    assert captured_consolidation_state["final_dialog"] == []
+    assert artifact_payloads[models.ARTIFACT_RUN_RECORD][
+        "selected_route"
+    ] == models.ROUTE_AUDIT_ONLY
+    assert artifact_payloads[models.ARTIFACT_RUN_RECORD]["budget"][
+        "dialog_calls"
+    ] == 0
+
+
+def test_runner_rejects_explicit_visible_route_without_speak() -> None:
+    case = _commitment_case()
+
+    async def dialog_client(state: dict[str, Any]) -> dict[str, Any]:
+        del state
+        raise AssertionError("invalid visible route should not call dialog")
+
+    with pytest.raises(StateContractError, match="action_specs.speak"):
+        runner.build_self_cognition_case_artifacts(
+            case,
+            cognition_client=lambda state: {
+                "logical_stance": "CONFIRM",
+                "character_intent": "PROVIDE",
+                "self_cognition_route": models.ROUTE_ACTION_CANDIDATE,
+                "action_directives": _surface_action_directives(),
+                "action_specs": [],
+            },
+            dialog_client=dialog_client,
+        )
 
 
 def test_runner_executes_private_lifecycle_action_for_consolidation(
@@ -1047,19 +1194,9 @@ def test_runner_reuses_dialog_render_for_action_and_consolidation() -> None:
 
     artifact_payloads = runner.build_self_cognition_case_artifacts(
         case,
-        cognition_client=lambda state: {
-            "logical_stance": "CONFIRM",
-            "character_intent": "PROVIDE",
-            "action_directives": {
-                "contextual_directives": {
-                },
-                "linguistic_directives": {
-                    "content_anchors": [
-                        "[ANSWER] The commitment is due now.",
-                    ],
-                },
-            },
-        },
+        cognition_client=lambda state: _action_cognition_output(
+            "The commitment is due now.",
+        ),
         dialog_client=dialog_client,
         consolidation_client=consolidation_client,
         apply_consolidation=True,
@@ -1085,11 +1222,24 @@ def test_contact_decision_without_candidate_marker_uses_dialog_candidate(
     tmp_path,
 ) -> None:
     case = _commitment_case()
+    l3_states: list[dict[str, Any]] = []
+
+    async def l3_text_surface_handler(state: dict[str, Any]) -> dict[str, Any]:
+        l3_states.append(state)
+        assert state["action_specs"][0]["kind"] == SPEAK_CAPABILITY
+        result = {"action_directives": _surface_action_directives()}
+        return result
 
     async def fake_dialog_client(state: dict[str, Any]) -> dict[str, Any]:
         return_value = {"final_dialog": ['我来确认一下，刚才那个时间已经到了哦。']}
         return return_value
 
+    monkeypatch.setattr(
+        runner,
+        "call_l3_text_surface_handler",
+        l3_text_surface_handler,
+        raising=False,
+    )
     monkeypatch.setattr(
         runner,
         "_default_dialog_client",
@@ -1098,19 +1248,14 @@ def test_contact_decision_without_candidate_marker_uses_dialog_candidate(
     paths = run_self_cognition_case(
         case,
         tmp_path,
-        cognition_client=lambda state: {
-            "logical_stance": "CONFIRM",
-            "character_intent": "PROVIDE",
-            "action_directives": {
-                "linguistic_directives": {
-                    "content_anchors": ["[ANSWER] The commitment is due now."],
-                },
-            },
-        },
+        cognition_client=lambda state: (
+            _speak_cognition_output_with_partial_directives()
+        ),
     )
     action_candidate = _read_json(paths[models.ARTIFACT_ACTION_CANDIDATE])
     run_record = _read_json(paths[models.ARTIFACT_RUN_RECORD])
 
+    assert len(l3_states) == 1
     assert action_candidate["production_handoff"] is False
     assert action_candidate["text"] == '我来确认一下，刚才那个时间已经到了哦。'
     assert run_record["budget"]["dialog_calls"] == 1
@@ -1203,15 +1348,9 @@ def test_dialog_false_mention_flag_suppresses_group_action_delivery_mention(
     paths = run_self_cognition_case(
         case,
         tmp_path,
-        cognition_client=lambda state: {
-            "logical_stance": "CONFIRM",
-            "character_intent": "PROVIDE",
-            "action_directives": {
-                "linguistic_directives": {
-                    "content_anchors": ["[ANSWER] The commitment is due now."],
-                },
-            },
-        },
+        cognition_client=lambda state: _action_cognition_output(
+            "The commitment is due now.",
+        ),
     )
     action_candidate = _read_json(paths[models.ARTIFACT_ACTION_CANDIDATE])
 
@@ -1248,15 +1387,9 @@ def test_dialog_true_mention_flag_builds_group_action_delivery_mention(
     paths = run_self_cognition_case(
         case,
         tmp_path,
-        cognition_client=lambda state: {
-            "logical_stance": "CONFIRM",
-            "character_intent": "PROVIDE",
-            "action_directives": {
-                "linguistic_directives": {
-                    "content_anchors": ["[ANSWER] The commitment is due now."],
-                },
-            },
-        },
+        cognition_client=lambda state: _action_cognition_output(
+            "The commitment is due now.",
+        ),
     )
     action_candidate = _read_json(paths[models.ARTIFACT_ACTION_CANDIDATE])
 
@@ -1401,6 +1534,9 @@ def test_topic_followup_contact_decision_writes_action_candidate(
         tmp_path,
         rag_client=rag_client,
         cognition_client=lambda state: _action_cognition_output(
+            "Want to continue the GraphRAG thread?",
+        ),
+        dialog_client=_dialog_client_with_text(
             "Want to continue the GraphRAG thread?",
         ),
     )

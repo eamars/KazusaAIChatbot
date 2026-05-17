@@ -11,6 +11,7 @@ from unittest.mock import AsyncMock
 import pytest
 
 from kazusa_ai_chatbot import event_logging
+from kazusa_ai_chatbot.action_spec.registry import SPEAK_CAPABILITY
 import kazusa_ai_chatbot.event_logging.recording as recording_module
 from kazusa_ai_chatbot.self_cognition import models, runner, worker
 
@@ -59,18 +60,32 @@ def _commitment_case() -> dict[str, Any]:
 
 
 def _action_cognition_output() -> dict[str, Any]:
-    """Build a cognition output that contains an action marker."""
+    """Build a cognition output that selects visible dialog through speak."""
 
     output = {
-        "logical_stance": "outward contact is appropriate",
-        "character_intent": "send a concise follow-up",
+        "logical_stance": "CONFIRM",
+        "character_intent": "PROVIDE",
         "action_directives": {
+            "contextual_directives": {
+                "social_distance": "friendly",
+                "emotional_intensity": "low",
+                "vibe_check": "focused",
+                "relational_dynamic": "scheduled follow-up",
+            },
             "linguistic_directives": {
-                "content_anchors": [
-                    "[ACTION_CANDIDATE] Checking in now.",
-                ],
+                "rhetorical_strategy": "answer the scheduled follow-up",
+                "linguistic_style": "brief",
+                "accepted_user_preferences": [],
+                "content_anchors": ["[ANSWER] Checking in now."],
+                "forbidden_phrases": [],
             },
         },
+        "action_specs": [
+            {
+                "kind": SPEAK_CAPABILITY,
+                "visibility": "user_visible",
+            }
+        ],
     }
     return output
 
@@ -163,6 +178,7 @@ async def test_runner_event_log_mirror_omits_candidate_text(
         _commitment_case(),
         tmp_path,
         cognition_client=lambda state: _action_cognition_output(),
+        dialog_client=lambda state: {"final_dialog": ["Checking in now."]},
         event_log_mirror=True,
     )
 
@@ -261,7 +277,7 @@ async def test_self_cognition_event_logger_sanitizes_consolidation_outcome(
         budget={
             "rag_calls": 0,
             "cognition_calls": 1,
-            "dialog_calls": 1,
+            "dialog_calls": 0,
             "topic_limit": 1,
         },
         dispatch_status="not_requested",
@@ -270,13 +286,12 @@ async def test_self_cognition_event_logger_sanitizes_consolidation_outcome(
             "consolidation_called": True,
             "write_success": {
                 "character_state": True,
-                "raw_output": "Private finalization for consolidation only.",
+                "raw_output": "Internal consolidation note.",
             },
             "scheduled_event_count": 0,
             "cache_evicted_count": 1,
             "origin_trigger_source": "internal_thought",
             "origin_episode_id": "self_cognition:dry_run:promise-001",
-            "private_finalization": "Private finalization for consolidation only.",
             "source_packet_text": "Please check back after the appointment.",
         },
     )
@@ -293,5 +308,5 @@ async def test_self_cognition_event_logger_sanitizes_consolidation_outcome(
         "origin_episode_id": "self_cognition:dry_run:promise-001",
     }
     serialized = json.dumps(captured, ensure_ascii=False, sort_keys=True)
-    assert "Private finalization" not in serialized
+    assert "Internal consolidation note" not in serialized
     assert "Please check back" not in serialized

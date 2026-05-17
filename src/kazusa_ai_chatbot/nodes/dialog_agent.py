@@ -12,7 +12,7 @@ Design intent:
 """
 
 import time
-from typing import Annotated, TypedDict
+from typing import Annotated, Any, TypedDict
 
 from kazusa_ai_chatbot import event_logging
 from kazusa_ai_chatbot.nodes.persona_supervisor2_schema import GlobalPersonaState
@@ -59,9 +59,70 @@ DEFAULT_DIALOG_USAGE_MODE = "live_visible_reply"
 DIALOG_USAGE_MODE_SELF_COGNITION_ACTION_CANDIDATE = (
     "self_cognition_action_candidate_render"
 )
-DIALOG_USAGE_MODE_SELF_COGNITION_PRIVATE_FINALIZATION = (
-    "self_cognition_private_finalization"
-)
+
+
+class StateContractError(ValueError):
+    """Raised when internal graph state violates the dialog contract."""
+
+
+def validate_dialog_action_directives(
+    state: dict[str, Any],
+    *,
+    usage_mode: str,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Return required dialog directives or raise a typed contract error.
+
+    Args:
+        state: Dialog-ready state built by the persona graph or a shared
+            background runner.
+        usage_mode: Stable label describing why dialog is being rendered.
+
+    Returns:
+        Linguistic and contextual directive dictionaries.
+
+    Raises:
+        StateContractError: If the required directive envelope is absent or
+            not dictionary-shaped.
+    """
+
+    if "action_directives" not in state:
+        raise StateContractError(
+            f"dialog state missing action_directives "
+            f"for usage_mode={usage_mode}"
+        )
+    action_directives = state["action_directives"]
+    if not isinstance(action_directives, dict):
+        raise StateContractError(
+            f"dialog state field action_directives must be a dict "
+            f"for usage_mode={usage_mode}"
+        )
+
+    if "linguistic_directives" not in action_directives:
+        raise StateContractError(
+            f"dialog state missing action_directives.linguistic_directives "
+            f"for usage_mode={usage_mode}"
+        )
+    linguistic_directives = action_directives["linguistic_directives"]
+    if not isinstance(linguistic_directives, dict):
+        raise StateContractError(
+            "dialog state field action_directives.linguistic_directives "
+            f"must be a dict for usage_mode={usage_mode}"
+        )
+
+    if "contextual_directives" not in action_directives:
+        raise StateContractError(
+            f"dialog state missing action_directives.contextual_directives "
+            f"for usage_mode={usage_mode}"
+        )
+    contextual_directives = action_directives["contextual_directives"]
+    if not isinstance(contextual_directives, dict):
+        raise StateContractError(
+            "dialog state field action_directives.contextual_directives "
+            f"must be a dict for usage_mode={usage_mode}"
+        )
+
+    return_value = (linguistic_directives, contextual_directives)
+    return return_value
 
 
 def _elapsed_ms(started_at: float) -> int:
@@ -300,6 +361,10 @@ _dialog_generator_llm = get_llm(
 
 async def dialog_generator(state: DialogAgentState) -> DialogAgentState:
 
+    usage_mode = state["dialog_usage_mode"]
+    linguistic_directives, contextual_directives = (
+        validate_dialog_action_directives(state, usage_mode=usage_mode)
+    )
     ltp = state["character_profile"]["linguistic_texture_profile"]
     system_prompt = SystemMessage(content=_DIALOG_GENERATOR_PROMPT.format(
         character_name=state["character_profile"]["name"],
@@ -321,8 +386,8 @@ async def dialog_generator(state: DialogAgentState) -> DialogAgentState:
     ))
 
     msg = {
-        "linguistic_directives": state["action_directives"]["linguistic_directives"],
-        "contextual_directives": state["action_directives"]["contextual_directives"],
+        "linguistic_directives": linguistic_directives,
+        "contextual_directives": contextual_directives,
         "user_name": state["user_name"],
     }
 
@@ -541,6 +606,10 @@ _dialog_evaluator_llm = get_llm(
     api_key=DIALOG_EVALUATOR_LLM_API_KEY,
 )
 async def dialog_evaluator(state: DialogAgentState) -> DialogAgentState:
+    usage_mode = state["dialog_usage_mode"]
+    linguistic_directives, contextual_directives = (
+        validate_dialog_action_directives(state, usage_mode=usage_mode)
+    )
     mbti = state["character_profile"]["personality_brief"]["mbti"]
 
     ltp_eval = state["character_profile"]["linguistic_texture_profile"]
@@ -556,8 +625,8 @@ async def dialog_evaluator(state: DialogAgentState) -> DialogAgentState:
     msg = {
         "retry": f"{retry}/{MAX_DIALOG_AGENT_RETRY}",
         "final_dialog": state["final_dialog"],
-        "linguistic_directives": state["action_directives"]["linguistic_directives"],
-        "contextual_directives": state["action_directives"]["contextual_directives"],
+        "linguistic_directives": linguistic_directives,
+        "contextual_directives": contextual_directives,
     }
 
     human_message = HumanMessage(content=json.dumps(msg, ensure_ascii=False))
@@ -642,6 +711,10 @@ async def dialog_agent(
     """
     
     usage_mode = _dialog_usage_mode(global_state)
+    linguistic_directives, _ = validate_dialog_action_directives(
+        global_state,
+        usage_mode=usage_mode,
+    )
     sub_agent_builder = StateGraph(DialogAgentState)
 
     # Add nodes
@@ -716,7 +789,7 @@ async def dialog_agent(
         retry_count=int(result["retry"]),
         failure_codes=[] if final_dialog else ["empty_dialog"],
         anchor_count=len(
-            global_state["action_directives"]["linguistic_directives"].get(
+            linguistic_directives.get(
                 "content_anchors",
                 [],
             )

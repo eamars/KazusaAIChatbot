@@ -15,6 +15,8 @@ from kazusa_ai_chatbot.nodes.dialog_agent import (
     _DIALOG_GENERATOR_PROMPT,
     dialog_agent,
     DialogAgentState,
+    StateContractError,
+    validate_dialog_action_directives,
 )
 from kazusa_ai_chatbot.config import CHARACTER_GLOBAL_USER_ID
 from kazusa_ai_chatbot.utils import build_interaction_history_recent
@@ -97,6 +99,59 @@ def _base_global_state():
             },
         },
     }
+
+
+def test_validate_dialog_action_directives_requires_action_directives() -> None:
+    """Dialog validation should report the missing top-level directives."""
+
+    state = _base_global_state()
+    state.pop("action_directives")
+
+    with pytest.raises(StateContractError, match="action_directives"):
+        validate_dialog_action_directives(state, usage_mode="unit_test")
+
+
+def test_validate_dialog_action_directives_requires_linguistic_directives() -> None:
+    """Dialog validation should report missing linguistic directives."""
+
+    state = _base_global_state()
+    state["action_directives"].pop("linguistic_directives")
+
+    with pytest.raises(
+        StateContractError,
+        match="action_directives.linguistic_directives",
+    ):
+        validate_dialog_action_directives(state, usage_mode="unit_test")
+
+
+def test_validate_dialog_action_directives_requires_contextual_directives() -> None:
+    """Dialog validation should report missing contextual directives."""
+
+    state = _base_global_state()
+    state["action_directives"].pop("contextual_directives")
+
+    with pytest.raises(
+        StateContractError,
+        match="action_directives.contextual_directives",
+    ):
+        validate_dialog_action_directives(state, usage_mode="unit_test")
+
+
+def test_validate_dialog_action_directives_accepts_complete_directives() -> None:
+    """Dialog validation should return the directive dictionaries unchanged."""
+
+    state = _base_global_state()
+
+    linguistic_directives, contextual_directives = (
+        validate_dialog_action_directives(state, usage_mode="unit_test")
+    )
+
+    assert linguistic_directives is state["action_directives"][
+        "linguistic_directives"
+    ]
+    assert contextual_directives is state["action_directives"][
+        "contextual_directives"
+    ]
 
 
 class TestDialogAgentState:
@@ -312,6 +367,31 @@ async def test_dialog_agent_returns_final_dialog():
 
 
 @pytest.mark.asyncio
+async def test_dialog_agent_validates_action_directives_before_llm_call(
+    monkeypatch,
+) -> None:
+    """Missing dialog-ready directives should fail before LLM invocation."""
+
+    state = _base_global_state()
+    state["action_directives"].pop("linguistic_directives")
+    generator_llm = MagicMock()
+    generator_llm.ainvoke = AsyncMock()
+    evaluator_llm = MagicMock()
+    evaluator_llm.ainvoke = AsyncMock()
+    monkeypatch.setattr(dialog_module, "_dialog_generator_llm", generator_llm)
+    monkeypatch.setattr(dialog_module, "_dialog_evaluator_llm", evaluator_llm)
+
+    with pytest.raises(
+        StateContractError,
+        match="action_directives.linguistic_directives",
+    ):
+        await dialog_agent(state)
+
+    generator_llm.ainvoke.assert_not_awaited()
+    evaluator_llm.ainvoke.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_dialog_agent_handles_empty_dialog():
     """If generator returns no dialog, final_dialog should default to empty list."""
     state = _base_global_state()
@@ -342,10 +422,10 @@ async def test_dialog_agent_handles_empty_dialog():
 
 @pytest.mark.asyncio
 async def test_dialog_agent_logs_explicit_usage_mode(caplog):
-    """Dialog output logs should identify private finalization usage."""
+    """Dialog output logs should identify the caller-supplied usage mode."""
 
     state = _base_global_state()
-    state["dialog_usage_mode"] = "self_cognition_private_finalization"
+    state["dialog_usage_mode"] = "background_contract_render"
 
     from langchain_core.messages import AIMessage
     generator_response = AIMessage(content='{"final_dialog": ["Internal only."]}')
@@ -379,7 +459,7 @@ async def test_dialog_agent_logs_explicit_usage_mode(caplog):
         with caplog.at_level(logging.INFO, logger=dialog_module.__name__):
             await dialog_agent(state)
 
-    assert "usage_mode=self_cognition_private_finalization" in caplog.text
+    assert "usage_mode=background_contract_render" in caplog.text
 
 
 def test_dialog_usage_mode_requires_internal_state_fields():

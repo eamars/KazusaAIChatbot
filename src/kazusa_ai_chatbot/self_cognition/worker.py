@@ -19,6 +19,7 @@ from kazusa_ai_chatbot.config import (
     SELF_COGNITION_WORKER_INTERVAL_SECONDS,
 )
 from kazusa_ai_chatbot import db, event_logging
+from kazusa_ai_chatbot.nodes.dialog_agent import StateContractError
 from kazusa_ai_chatbot.self_cognition import models, runner
 from kazusa_ai_chatbot.self_cognition import sources as source_collectors
 
@@ -34,6 +35,7 @@ class SelfCognitionWorkerResult:
     """Outcome counters for one self-cognition worker tick."""
 
     processed_count: int = 0
+    failed_count: int = 0
     skipped_count: int = 0
     deferred: bool = False
     defer_reason: str = ""
@@ -183,18 +185,32 @@ async def run_self_cognition_worker_tick(
         )
         case_for_run = _case_with_prior_attempts(case, prior_attempts)
         output_dir = _case_output_dir(root, now=now, case=case_for_run)
-        if run_case_func is None:
-            artifact_payloads = await runner.build_self_cognition_case_artifacts_async(
-                case_for_run,
-                apply_consolidation=True,
-                execute_private_actions=True,
+        try:
+            if run_case_func is None:
+                artifact_payloads = (
+                    await runner.build_self_cognition_case_artifacts_async(
+                        case_for_run,
+                        apply_consolidation=True,
+                        execute_private_actions=True,
+                    )
+                )
+            else:
+                artifact_payloads = await _call_maybe_async(
+                    run_case_func,
+                    case_for_run,
+                    output_dir,
+                )
+        except StateContractError as exc:
+            result.failed_count += 1
+            await event_logging.record_runtime_error_event(
+                component="self_cognition.worker",
+                error_class="StateContractError",
+                error_preview=str(exc),
+                stack_fingerprint="self_cognition_case_state_contract",
+                top_frame_module=__name__,
+                recovered=True,
             )
-        else:
-            artifact_payloads = await _call_maybe_async(
-                run_case_func,
-                case_for_run,
-                output_dir,
-            )
+            continue
         result.processed_count += 1
         dispatch_status = await _handle_case_action_outputs(
             artifact_payloads=artifact_payloads,
@@ -300,6 +316,8 @@ async def _record_worker_tick_event(result: SelfCognitionWorkerResult) -> None:
 
     if result.deferred:
         status = "deferred"
+    elif result.processed_count == 0 and result.failed_count > 0:
+        status = "failed"
     elif result.processed_count == 0 and result.skipped_count > 0:
         status = "skipped"
     else:
@@ -313,6 +331,7 @@ async def _record_worker_tick_event(result: SelfCognitionWorkerResult) -> None:
         run_kind="self_cognition_tick",
         status=status,
         processed_count=result.processed_count,
+        failed_count=result.failed_count,
         skipped_count=result.skipped_count,
         deferred=result.deferred,
         defer_reason=result.defer_reason,

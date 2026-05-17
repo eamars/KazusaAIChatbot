@@ -50,8 +50,8 @@ def build_source_packet(
         "agency_options": [
             "Silence is allowed when contact would add no value.",
             (
-                "If outward contact is beneficial, emit one proactive message "
-                f"candidate with {models.ACTION_CANDIDATE_MARKER}."
+                "If outward contact is beneficial, select a visible `speak` "
+                "action through the shared action-spec contract."
             ),
             (
                 "If only internal tracking is useful, emit "

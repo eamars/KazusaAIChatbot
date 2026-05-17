@@ -24,8 +24,9 @@ from kazusa_ai_chatbot.cognition_episode import (
 )
 from kazusa_ai_chatbot.nodes.dialog_agent import (
     DIALOG_USAGE_MODE_SELF_COGNITION_ACTION_CANDIDATE,
-    DIALOG_USAGE_MODE_SELF_COGNITION_PRIVATE_FINALIZATION,
+    StateContractError,
     dialog_agent,
+    validate_dialog_action_directives,
 )
 from kazusa_ai_chatbot.nodes.persona_supervisor2_consolidator import (
     call_consolidation_subgraph,
@@ -85,10 +86,10 @@ def run_self_cognition_case(
         output_dir: Local output directory for artifacts.
         rag_client: Optional test seam for the RAG2 supervisor.
         cognition_client: Optional test seam for the shared cognition graph.
-        dialog_client: Optional test seam for private finalization.
+        dialog_client: Optional test seam for selected visible `speak` render.
         consolidation_client: Optional test seam for the shared consolidator.
-        apply_consolidation: When true, build private finalization and call the
-            shared consolidation seam.
+        apply_consolidation: When true, call the shared consolidation seam
+            with already-rendered dialog output when present.
         event_log_mirror: When true, mirror sanitized artifact metadata through
             the public event-logging interface.
         execute_private_actions: When true, execute selected private action
@@ -130,10 +131,10 @@ def build_self_cognition_case_artifacts(
         case: External self-cognition case data.
         rag_client: Optional test seam for the RAG2 supervisor.
         cognition_client: Optional test seam for the shared cognition graph.
-        dialog_client: Optional test seam for private finalization.
+        dialog_client: Optional test seam for selected visible `speak` render.
         consolidation_client: Optional test seam for the shared consolidator.
-        apply_consolidation: When true, build private finalization and call the
-            shared consolidation seam.
+        apply_consolidation: When true, call the shared consolidation seam
+            with already-rendered dialog output when present.
         execute_private_actions: When true, execute selected private action
             specs through their deterministic owners.
 
@@ -174,10 +175,10 @@ async def run_self_cognition_case_async(
         output_dir: Local output directory for artifacts.
         rag_client: Optional test seam for the RAG2 supervisor.
         cognition_client: Optional test seam for the shared cognition graph.
-        dialog_client: Optional test seam for private finalization.
+        dialog_client: Optional test seam for selected visible `speak` render.
         consolidation_client: Optional test seam for the shared consolidator.
-        apply_consolidation: When true, build private finalization and call the
-            shared consolidation seam.
+        apply_consolidation: When true, call the shared consolidation seam
+            with already-rendered dialog output when present.
         event_log_mirror: When true, mirror sanitized artifact metadata through
             the public event-logging interface.
         execute_private_actions: When true, execute selected private action
@@ -226,10 +227,10 @@ async def build_self_cognition_case_artifacts_async(
         case: External self-cognition case data.
         rag_client: Optional test seam for the RAG2 supervisor.
         cognition_client: Optional test seam for the shared cognition graph.
-        dialog_client: Optional test seam for private finalization.
+        dialog_client: Optional test seam for selected visible `speak` render.
         consolidation_client: Optional test seam for the shared consolidator.
-        apply_consolidation: When true, build private finalization and call the
-            shared consolidation seam.
+        apply_consolidation: When true, call the shared consolidation seam
+            with already-rendered dialog output when present.
         execute_private_actions: When true, execute selected private action
             specs through their deterministic owners.
 
@@ -321,19 +322,17 @@ async def build_self_cognition_case_artifacts_async(
             action_attempt=action_attempt,
         )
         if action_attempt["status"] == models.ACTION_ATTEMPT_STATUS_CANDIDATE:
-            action_text = tracking.extract_action_candidate_text(cognition_output)
-            if not action_text:
-                dialog_state = await _build_dialog_state_with_text_surface(
-                    cognition_state,
-                    cognition_output,
-                    usage_mode=DIALOG_USAGE_MODE_SELF_COGNITION_ACTION_CANDIDATE,
-                )
-                dialog_output = await _call_maybe_async(
-                    active_dialog_client,
-                    dialog_state,
-                )
-                dialog_calls = models.DIALOG_RENDER_CALL_LIMIT
-                action_text = _dialog_text(dialog_output)
+            dialog_state = await _build_dialog_state_with_text_surface(
+                cognition_state,
+                cognition_output,
+                usage_mode=DIALOG_USAGE_MODE_SELF_COGNITION_ACTION_CANDIDATE,
+            )
+            dialog_output = await _call_maybe_async(
+                active_dialog_client,
+                dialog_state,
+            )
+            dialog_calls = models.DIALOG_RENDER_CALL_LIMIT
+            action_text = _dialog_text(dialog_output)
             action_candidate = tracking.build_action_candidate(
                 case,
                 action_attempt,
@@ -356,8 +355,6 @@ async def build_self_cognition_case_artifacts_async(
                 cognition_state,
                 cognition_output,
                 rendered_packet,
-                selected_route=selected_route,
-                dialog_client=active_dialog_client,
                 dialog_output=dialog_output,
             )
         )
@@ -490,7 +487,7 @@ async def _default_dialog_client(state: dict[str, Any]) -> dict[str, Any]:
         state: Global persona state merged with shared cognition output.
 
     Returns:
-        Dialog graph result used only as a local dry-run candidate.
+        Dialog graph result used as a local selected-speak render candidate.
     """
 
     dialog_result = await dialog_agent(state)
@@ -501,8 +498,8 @@ async def _default_consolidation_client(state: dict[str, Any]) -> dict[str, Any]
     """Call the existing post-dialog consolidator subgraph.
 
     Args:
-        state: Self-cognition state after shared cognition and private
-            finalization.
+        state: Self-cognition state after shared cognition and optional
+            selected-speak rendering.
 
     Returns:
         Shared consolidator result with write metadata.
@@ -530,50 +527,29 @@ async def _build_consolidation_ready_state(
     cognition_output: dict[str, Any],
     rendered_packet: str,
     *,
-    selected_route: str,
-    dialog_client: SelfCognitionClient,
     dialog_output: dict[str, Any] | None,
 ) -> ConsolidationBuildResult:
-    """Build private-finalization state for same-path consolidation.
+    """Build same-path consolidation state from cognition and dialog output.
 
     Args:
         cognition_state: State originally sent into shared cognition.
         cognition_output: Shared cognition graph output.
         rendered_packet: Internal-thought evidence text used as the
             decontextualized consolidation input.
-        selected_route: Route selected for the self-cognition run.
-        dialog_client: Existing dialog/finalization seam.
         dialog_output: Previously rendered dialog output, if the action route
             already needed it.
 
     Returns:
-        Consolidation-ready state, dialog output, and whether a new dialog call
-        was needed.
+        Consolidation-ready state, dialog output, and whether a new dialog
+        call was needed.
     """
 
     dialog_called = False
     active_dialog_output = dialog_output
-    if active_dialog_output is None and _needs_private_dialog_finalization(
-        selected_route,
-        cognition_output,
-    ):
-        dialog_state = await _build_dialog_state_with_text_surface(
-            cognition_state,
-            cognition_output,
-            usage_mode=DIALOG_USAGE_MODE_SELF_COGNITION_PRIVATE_FINALIZATION,
-        )
-        active_dialog_output = await _call_maybe_async(
-            dialog_client,
-            dialog_state,
-        )
-        dialog_called = True
-    elif active_dialog_output is None:
+    if active_dialog_output is None:
         active_dialog_output = {
             "final_dialog": [],
             "mention_target_user": False,
-            "dialog_usage_mode": (
-                DIALOG_USAGE_MODE_SELF_COGNITION_PRIVATE_FINALIZATION
-            ),
         }
 
     consolidation_state = _build_consolidation_state(
@@ -586,41 +562,13 @@ async def _build_consolidation_ready_state(
     return return_value
 
 
-def _needs_private_dialog_finalization(
-    selected_route: str,
-    cognition_output: dict[str, Any],
-) -> bool:
-    """Return whether consolidation needs a private text surface first."""
-
-    if selected_route == models.ROUTE_ACTION_CANDIDATE:
-        return True
-
-    action_directives = cognition_output.get("action_directives")
-    if not isinstance(action_directives, dict):
-        return False
-
-    linguistic_directives = action_directives.get("linguistic_directives")
-    if not isinstance(linguistic_directives, dict):
-        return False
-
-    content_anchors = linguistic_directives.get("content_anchors")
-    if not isinstance(content_anchors, list):
-        return False
-
-    needs_finalization = any(
-        isinstance(anchor, str) and bool(anchor.strip())
-        for anchor in content_anchors
-    )
-    return needs_finalization
-
-
 def _build_consolidation_state(
     cognition_state: dict[str, Any],
     cognition_output: dict[str, Any],
     dialog_output: dict[str, Any],
     rendered_packet: str,
 ) -> dict[str, Any]:
-    """Merge cognition and private finalization for the consolidator."""
+    """Merge cognition and rendered dialog payload for the consolidator."""
 
     consolidation_state = dict(cognition_state)
     consolidation_state.update(cognition_output)
@@ -813,7 +761,35 @@ async def _build_dialog_state_with_text_surface(
             dialog_state,
         )
         dialog_state.update(surface_update)
+    _validate_self_cognition_dialog_state(
+        dialog_state,
+        usage_mode=usage_mode,
+    )
     return dialog_state
+
+
+def _validate_self_cognition_dialog_state(
+    dialog_state: dict[str, Any],
+    *,
+    usage_mode: str,
+) -> None:
+    """Validate that self-cognition dialog has selected speak and directives.
+
+    Args:
+        dialog_state: State that will be passed to the dialog graph.
+        usage_mode: Stable label describing why dialog is being rendered.
+
+    Raises:
+        StateContractError: If visible dialog is not backed by selected speak
+            or the L3 directive payload is incomplete.
+    """
+
+    if not _has_selected_speak_action(dialog_state):
+        raise StateContractError(
+            f"self-cognition dialog state missing action_specs.speak "
+            f"for usage_mode={usage_mode}"
+        )
+    validate_dialog_action_directives(dialog_state, usage_mode=usage_mode)
 
 
 def _needs_text_surface_directives(state: dict[str, Any]) -> bool:

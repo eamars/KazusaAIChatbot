@@ -10,6 +10,8 @@ from unittest.mock import AsyncMock
 
 import pytest
 
+from kazusa_ai_chatbot.action_spec.registry import SPEAK_CAPABILITY
+from kazusa_ai_chatbot.nodes.dialog_agent import StateContractError
 from kazusa_ai_chatbot.db import user_memory_units as memory_units_module
 from kazusa_ai_chatbot.self_cognition import models, projection, sources
 from kazusa_ai_chatbot.self_cognition import tracking, worker
@@ -202,21 +204,47 @@ def _progress_cognition_output() -> dict[str, Any]:
     return output
 
 
+def _speak_action_spec() -> dict[str, Any]:
+    """Build the selected visible action spec used by worker tests."""
+
+    spec = {
+        "kind": SPEAK_CAPABILITY,
+        "visibility": "user_visible",
+    }
+    return spec
+
+
+def _visible_action_directives() -> dict[str, Any]:
+    """Build complete text directives for deterministic dialog rendering."""
+
+    directives = {
+        "contextual_directives": {
+            "social_distance": "friendly",
+            "emotional_intensity": "low",
+            "vibe_check": "focused",
+            "relational_dynamic": "scheduled follow-up",
+        },
+        "linguistic_directives": {
+            "rhetorical_strategy": "answer the scheduled follow-up",
+            "linguistic_style": "brief",
+            "accepted_user_preferences": [],
+            "content_anchors": ["[ANSWER] Checking in now."],
+            "forbidden_phrases": [],
+        },
+    }
+    return directives
+
+
 def _action_cognition_output() -> dict[str, Any]:
-    """Build a cognition output that requests a private action candidate."""
+    """Build a cognition output that selects visible dialog through speak."""
 
     output = {
-        "logical_stance": "FOLLOW_UP",
-        "character_intent": "FOLLOW_UP",
+        "logical_stance": "CONFIRM",
+        "character_intent": "PROVIDE",
         "mood": "hurt",
         "affinity_delta": -1,
-        "action_directives": {
-            "linguistic_directives": {
-                "content_anchors": [
-                    "[ACTION_CANDIDATE] Checking in now.",
-                ],
-            },
-        },
+        "action_directives": _visible_action_directives(),
+        "action_specs": [_speak_action_spec()],
     }
     return output
 
@@ -500,6 +528,73 @@ async def test_worker_tick_skips_future_cognition_slot_when_claim_fails(
     assert completed_event_ids == []
 
 
+@pytest.mark.asyncio
+async def test_worker_tick_records_state_contract_error_without_tick_failure(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    """One malformed case should be recorded without failing the whole tick."""
+
+    record_runtime_error_event = AsyncMock()
+    record_worker_event = AsyncMock()
+    monkeypatch.setattr(
+        worker.event_logging,
+        "record_runtime_error_event",
+        record_runtime_error_event,
+    )
+    monkeypatch.setattr(
+        worker.event_logging,
+        "record_worker_event",
+        record_worker_event,
+    )
+
+    async def collect_cases(*, now: datetime, max_cases: int) -> list[dict[str, Any]]:
+        del now, max_cases
+        return [_commitment_case()]
+
+    async def read_attempts(*, limit: int) -> list[dict[str, Any]]:
+        assert limit > 0
+        return []
+
+    async def build_artifacts(
+        next_case: dict[str, Any],
+        output_dir: Path,
+    ) -> dict[str, Any]:
+        del next_case, output_dir
+        raise StateContractError(
+            "usage_mode=self_cognition_action_candidate_render "
+            "missing action_specs.speak"
+        )
+
+    result = await worker.run_self_cognition_worker_tick(
+        output_root=tmp_path,
+        now=datetime(2026, 5, 13, tzinfo=timezone.utc),
+        is_primary_interaction_busy=lambda: False,
+        collect_cases_func=collect_cases,
+        run_case_func=build_artifacts,
+        read_attempts_func=read_attempts,
+        max_cases=3,
+    )
+
+    assert result.processed_count == 0
+    assert result.failed_count == 1
+    record_runtime_error_event.assert_awaited_once()
+    runtime_kwargs = record_runtime_error_event.await_args.kwargs
+    assert runtime_kwargs["component"] == "self_cognition.worker"
+    assert runtime_kwargs["error_class"] == "StateContractError"
+    assert "action_specs.speak" in runtime_kwargs["error_preview"]
+    assert runtime_kwargs["stack_fingerprint"] == (
+        "self_cognition_case_state_contract"
+    )
+    assert runtime_kwargs["top_frame_module"] == worker.__name__
+    assert runtime_kwargs["recovered"] is True
+    record_worker_event.assert_awaited_once()
+    worker_kwargs = record_worker_event.await_args.kwargs
+    assert worker_kwargs["status"] == "failed"
+    assert worker_kwargs["processed_count"] == 0
+    assert worker_kwargs["failed_count"] == 1
+
+
 class _AsyncCursor:
     def __init__(self, docs: list[dict[str, Any]]) -> None:
         self._docs = iter(docs)
@@ -617,9 +712,8 @@ async def test_worker_default_path_applies_consolidation_without_dispatch_or_fil
         return _progress_cognition_output()
 
     async def dialog_client(state: dict[str, Any]) -> dict[str, Any]:
-        assert state["should_respond"] is False
-        assert state["dialog_usage_mode"] == "self_cognition_private_finalization"
-        return {"final_dialog": ["Private finalization for consolidation only."]}
+        del state
+        raise AssertionError("internal-only consolidation should not call dialog")
 
     async def consolidation_client(state: dict[str, Any]) -> dict[str, Any]:
         captured_consolidation_state.update(state)
@@ -646,9 +740,7 @@ async def test_worker_default_path_applies_consolidation_without_dispatch_or_fil
     assert captured_consolidation_state["cognitive_episode"][
         "trigger_source"
     ] == "internal_thought"
-    assert captured_consolidation_state["final_dialog"] == [
-        "Private finalization for consolidation only.",
-    ]
+    assert captured_consolidation_state["final_dialog"] == []
     assert list(tmp_path.iterdir()) == []
 
 
@@ -680,8 +772,8 @@ async def test_worker_default_path_records_action_without_dispatch(
 
     async def dialog_client(state: dict[str, Any]) -> dict[str, Any]:
         assert state["should_respond"] is False
-        assert state["dialog_usage_mode"] == "self_cognition_private_finalization"
-        return {"final_dialog": ["Private finalization for consolidation only."]}
+        assert state["dialog_usage_mode"] == "self_cognition_action_candidate_render"
+        return {"final_dialog": ["Checking in now."]}
 
     async def consolidation_client(state: dict[str, Any]) -> dict[str, Any]:
         captured_consolidation_state.update(state)
@@ -709,9 +801,7 @@ async def test_worker_default_path_records_action_without_dispatch(
     assert recorded_attempts[0]["status"] == models.ACTION_ATTEMPT_STATUS_CANDIDATE
     assert "dispatch_status" not in recorded_attempts[0]
     assert "scheduled_event_ids" not in recorded_attempts[0]
-    assert captured_consolidation_state["final_dialog"] == [
-        "Private finalization for consolidation only.",
-    ]
+    assert captured_consolidation_state["final_dialog"] == ["Checking in now."]
     assert list(tmp_path.iterdir()) == []
 
 

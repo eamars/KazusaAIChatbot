@@ -49,8 +49,9 @@ def test_self_cognition_framing_presents_agency_without_silence_bias() -> None:
     assert "There is no new user message to answer" not in rendered_text
     assert "Prefer silence" not in rendered_text
     assert "Silence is allowed" in rendered_text
-    assert "proactive message candidate" in rendered_text
-    assert "[ACTION_CANDIDATE]" in rendered_text
+    assert "proactive message candidate" not in rendered_text
+    assert "visible `speak` action" in rendered_text
+    assert "shared action-spec contract" in rendered_text
     assert "- idle_timestamp: 2026-05-10T00:30:00+00:00" in rendered_text
     assert "- last_evidence_timestamp: 2026-05-10T00:00:00+00:00" in rendered_text
 

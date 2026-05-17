@@ -4,7 +4,7 @@
 
 - Goal: Ensure dialog generation and evaluation treat `content_anchors` as the only semantic authority, so stale prior-turn history cannot override cognition/L3 instructions.
 - Plan class: large
-- Status: in_progress
+- Status: completed
 - Mandatory skills: `local-llm-architecture`, `py-style`, `test-style-and-execution`
 - Overall cutover strategy: bigbang response-path payload cleanup with no database, queue, RAG, cognition, adapter, or persistence changes.
 - Highest-risk areas: weakening dialog style quality, hiding the RAG current-row exclusion invariant, preserving stale semantic fields through tests, and relying on prompt text while still feeding conflicting payload fields.
