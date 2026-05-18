@@ -276,6 +276,9 @@ async def db_writer(state: ConsolidatorState) -> dict:
         async def _update_character_image_from_runtime_state() -> dict | None:
             """Build character image using the DB-current self-image base."""
 
+            if not state["reflection_summary"]:
+                return None
+
             runtime_state = await get_character_runtime_state()
             runtime_self_image = runtime_state.get("self_image")
             if isinstance(runtime_self_image, dict):

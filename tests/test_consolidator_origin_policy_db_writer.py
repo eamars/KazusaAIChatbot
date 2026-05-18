@@ -507,3 +507,29 @@ async def test_db_writer_runtime_state_failure_fails_character_image_closed(
     mocks["get_character_runtime_state"].assert_awaited_once()
     mocks["upsert_character_self_image"].assert_not_awaited()
     assert result["metadata"]["write_success"]["character_image"] is False
+
+
+@pytest.mark.asyncio
+async def test_db_writer_empty_reflection_skips_self_image_db_read(
+    monkeypatch,
+) -> None:
+    """No image synthesis means no DB-current self-image read is needed."""
+
+    mocks = _patch_writer_dependencies_except_image(
+        monkeypatch,
+        runtime_state_error=DatabaseOperationError("must not read self image"),
+    )
+    state = _state(
+        origin=_origin(
+            trigger_source="internal_thought",
+            input_sources=["internal_monologue"],
+            output_mode="preview",
+        )
+    )
+    state["reflection_summary"] = ""
+
+    result = await persistence_module.db_writer(state)
+
+    mocks["get_character_runtime_state"].assert_not_awaited()
+    mocks["upsert_character_self_image"].assert_not_awaited()
+    assert "character_image" not in result["metadata"]["write_success"]
