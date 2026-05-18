@@ -14,6 +14,7 @@ from kazusa_ai_chatbot.config import (
 )
 from kazusa_ai_chatbot.db import (
     DatabaseOperationError,
+    get_character_runtime_state,
     update_affinity,
     update_last_relationship_insight,
     upsert_character_self_image,
@@ -272,11 +273,25 @@ async def db_writer(state: ConsolidatorState) -> dict:
 
     # ── Step 5: character image ──────────────────────────────────────
     if origin_policy["character_image"]["allowed"]:
-        image_results = await asyncio.gather(
-            _update_character_image(
+        async def _update_character_image_from_runtime_state() -> dict | None:
+            """Build character image using the DB-current self-image base."""
+
+            runtime_state = await get_character_runtime_state()
+            runtime_self_image = runtime_state.get("self_image")
+            if isinstance(runtime_self_image, dict):
+                existing_image = runtime_self_image
+            else:
+                existing_image = {}
+
+            character_image = await _update_character_image(
                 state,
                 storage_timestamp_utc=storage_timestamp_utc,
-            ),
+                existing_image=existing_image,
+            )
+            return character_image
+
+        image_results = await asyncio.gather(
+            _update_character_image_from_runtime_state(),
             return_exceptions=True,
         )
         character_image_result = image_results[0]

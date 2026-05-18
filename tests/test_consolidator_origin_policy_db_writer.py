@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from kazusa_ai_chatbot.db import DatabaseOperationError
 from kazusa_ai_chatbot.nodes import (
+    persona_supervisor2_consolidator_images as image_module,
     persona_supervisor2_consolidator_persistence as persistence_module,
 )
 from kazusa_ai_chatbot.nodes.persona_supervisor2_consolidator_origin import (
@@ -141,6 +144,7 @@ def _patch_allowed_write_dependencies(
         ),
         "update_affinity": AsyncMock(),
         "update_character_image": AsyncMock(return_value=character_image),
+        "get_character_runtime_state": AsyncMock(return_value={}),
         "upsert_character_self_image": AsyncMock(),
     }
     monkeypatch.setattr(
@@ -175,8 +179,114 @@ def _patch_allowed_write_dependencies(
     )
     monkeypatch.setattr(
         persistence_module,
+        "get_character_runtime_state",
+        mocks["get_character_runtime_state"],
+        raising=False,
+    )
+    monkeypatch.setattr(
+        persistence_module,
         "upsert_character_self_image",
         mocks["upsert_character_self_image"],
+    )
+    return mocks
+
+
+def _image_response(summary: str) -> SimpleNamespace:
+    """Build a fake LangChain response with JSON content."""
+
+    response = SimpleNamespace(
+        content=f'{{"session_summary": "{summary}"}}',
+    )
+    return response
+
+
+def _image_llm(summary: str) -> SimpleNamespace:
+    """Build a fake character-image LLM object."""
+
+    llm = SimpleNamespace(
+        ainvoke=AsyncMock(return_value=_image_response(summary)),
+    )
+    return llm
+
+
+def _patch_writer_dependencies_except_image(
+    monkeypatch,
+    *,
+    runtime_state: dict[str, Any] | None = None,
+    runtime_state_error: Exception | None = None,
+) -> dict[str, Any]:
+    """Patch db_writer dependencies while keeping the real image updater.
+
+    Args:
+        monkeypatch: Pytest monkeypatch fixture.
+        runtime_state: Runtime character state returned by the DB reader.
+        runtime_state_error: Optional exception raised by the DB reader.
+
+    Returns:
+        Named mocks and fake runtime objects for assertions.
+    """
+
+    runtime = MagicMock()
+    runtime.invalidate = AsyncMock(return_value=1)
+    if runtime_state_error is None:
+        get_character_runtime_state = AsyncMock(
+            return_value=runtime_state or {},
+        )
+    else:
+        get_character_runtime_state = AsyncMock(
+            side_effect=runtime_state_error,
+        )
+
+    mocks: dict[str, Any] = {
+        "runtime": runtime,
+        "get_runtime": MagicMock(return_value=runtime),
+        "upsert_character_state": AsyncMock(),
+        "update_last_relationship_insight": AsyncMock(),
+        "update_user_memory_units_from_state": AsyncMock(return_value=[]),
+        "update_affinity": AsyncMock(),
+        "get_character_runtime_state": get_character_runtime_state,
+        "upsert_character_self_image": AsyncMock(),
+    }
+    monkeypatch.setattr(
+        persistence_module,
+        "get_rag_cache2_runtime",
+        mocks["get_runtime"],
+    )
+    monkeypatch.setattr(
+        persistence_module,
+        "upsert_character_state",
+        mocks["upsert_character_state"],
+    )
+    monkeypatch.setattr(
+        persistence_module,
+        "update_last_relationship_insight",
+        mocks["update_last_relationship_insight"],
+    )
+    monkeypatch.setattr(
+        persistence_module,
+        "update_user_memory_units_from_state",
+        mocks["update_user_memory_units_from_state"],
+    )
+    monkeypatch.setattr(
+        persistence_module,
+        "update_affinity",
+        mocks["update_affinity"],
+    )
+    monkeypatch.setattr(
+        persistence_module,
+        "get_character_runtime_state",
+        mocks["get_character_runtime_state"],
+        raising=False,
+    )
+    monkeypatch.setattr(
+        persistence_module,
+        "upsert_character_self_image",
+        mocks["upsert_character_self_image"],
+    )
+    monkeypatch.setattr(
+        image_module,
+        "_character_image_session_summary_llm",
+        _image_llm("new self-image"),
     )
     return mocks
 
@@ -316,3 +426,84 @@ async def test_db_writer_user_message_origin_preserves_cache_invalidation(
         "character_state",
     ]
     assert result["metadata"]["cache_evicted_count"] == 2
+
+
+@pytest.mark.asyncio
+async def test_db_writer_internal_thought_uses_db_current_self_image(
+    monkeypatch,
+) -> None:
+    """Internal-thought image writes must merge from DB-current image state."""
+
+    existing_image = {
+        "milestones": [{"summary": "stable self image"}],
+        "recent_window": [
+            {
+                "timestamp": "2026-05-18T00:00:00+00:00",
+                "summary": "previous self-image",
+            }
+        ],
+        "historical_summary": "older self-image history",
+        "meta": {"synthesis_count": 4},
+    }
+    mocks = _patch_writer_dependencies_except_image(
+        monkeypatch,
+        runtime_state={"self_image": existing_image},
+    )
+    state = _state(
+        origin=_origin(
+            trigger_source="internal_thought",
+            input_sources=["internal_monologue"],
+            output_mode="preview",
+        )
+    )
+
+    result = await persistence_module.db_writer(state)
+
+    expected_image = {
+        "milestones": [{"summary": "stable self image"}],
+        "recent_window": [
+            {
+                "timestamp": "2026-05-18T00:00:00+00:00",
+                "summary": "previous self-image",
+            },
+            {
+                "timestamp": state["storage_timestamp_utc"],
+                "summary": "new self-image",
+            },
+        ],
+        "historical_summary": "older self-image history",
+        "meta": {
+            "synthesis_count": 5,
+            "last_updated": state["storage_timestamp_utc"],
+        },
+    }
+    mocks["get_character_runtime_state"].assert_awaited_once()
+    mocks["upsert_character_self_image"].assert_awaited_once_with(
+        expected_image,
+    )
+    assert result["metadata"]["write_success"]["character_image"] is True
+
+
+@pytest.mark.asyncio
+async def test_db_writer_runtime_state_failure_fails_character_image_closed(
+    monkeypatch,
+) -> None:
+    """A DB-current image read failure must not abort db_writer."""
+
+    mocks = _patch_writer_dependencies_except_image(
+        monkeypatch,
+        runtime_state_error=DatabaseOperationError("runtime state unavailable"),
+    )
+    state = _state(
+        origin=_origin(
+            trigger_source="internal_thought",
+            input_sources=["internal_monologue"],
+            output_mode="preview",
+        )
+    )
+
+    result = await persistence_module.db_writer(state)
+
+    mocks["get_character_runtime_state"].assert_awaited_once()
+    mocks["upsert_character_self_image"].assert_not_awaited()
+    assert result["metadata"]["write_success"]["character_image"] is False

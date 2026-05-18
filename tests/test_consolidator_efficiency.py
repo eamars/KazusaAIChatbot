@@ -170,6 +170,11 @@ async def test_db_writer_runs_image_updaters_through_gather(monkeypatch) -> None
     monkeypatch.setattr(persistence_module, "upsert_character_state", AsyncMock())
     monkeypatch.setattr(persistence_module, "update_last_relationship_insight", AsyncMock())
     monkeypatch.setattr(persistence_module, "update_affinity", AsyncMock())
+    monkeypatch.setattr(
+        persistence_module,
+        "get_character_runtime_state",
+        AsyncMock(return_value={}),
+    )
     monkeypatch.setattr(persistence_module, "upsert_character_self_image", AsyncMock())
     monkeypatch.setattr(persistence_module, "_update_character_image", AsyncMock(return_value=None))
     monkeypatch.setattr(persistence_module, "update_user_memory_units_from_state", AsyncMock(return_value=[]))

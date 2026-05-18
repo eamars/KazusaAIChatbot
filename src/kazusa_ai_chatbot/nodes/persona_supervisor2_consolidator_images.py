@@ -133,13 +133,15 @@ async def _update_character_image(
     state: "ConsolidatorState",
     *,
     storage_timestamp_utc: str,
+    existing_image: dict,
 ) -> dict | None:
-    """Build an updated character self-image document using the rolling three-tier mechanism.
+    """Build an updated character self-image document from explicit state.
 
     Args:
         state: Current consolidator state (mood, global_vibe, reflection_summary,
-            character_profile with existing self_image).
+            and character profile name for prompt rendering).
         storage_timestamp_utc: Storage UTC timestamp for this session.
+        existing_image: Current durable character self-image from the database.
 
     Returns:
         Updated image document dict, or ``None`` if no reflection was produced.
@@ -153,7 +155,6 @@ async def _update_character_image(
     character_profile = state["character_profile"]
     character_name = character_profile["name"]
 
-    existing_image = character_profile.get("self_image") or {}
     milestones = list(existing_image.get("milestones") or [])
     recent_window = list(existing_image.get("recent_window") or [])
     historical_summary = existing_image.get("historical_summary") or ""
