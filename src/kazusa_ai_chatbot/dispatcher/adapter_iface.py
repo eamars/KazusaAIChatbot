@@ -31,6 +31,14 @@ class MessagingAdapter(Protocol):
 
     platform: str
 
+    async def can_send_message(
+        self,
+        channel_id: str,
+        *,
+        channel_type: str,
+    ) -> bool:
+        """Return whether the adapter can send to the target channel."""
+
     async def send_message(
         self,
         channel_id: str,
@@ -45,6 +53,10 @@ class MessagingAdapter(Protocol):
 
 class UnknownPlatformError(KeyError):
     """Raised when no adapter is registered for the requested platform."""
+
+
+class AdapterChannelUnavailableError(RuntimeError):
+    """Raised when an adapter reports the target channel cannot be used."""
 
 
 class AdapterRegistry:

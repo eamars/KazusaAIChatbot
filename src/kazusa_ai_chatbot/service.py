@@ -1777,6 +1777,7 @@ async def lifespan(app: FastAPI):
         if REFLECTION_CYCLE_ENABLED:
             _reflection_worker_handle = start_reflection_cycle_worker(
                 is_primary_interaction_busy=lambda: False,
+                adapter_registry_provider=lambda: _adapter_registry,
             )
         else:
             logger.info(

@@ -18,12 +18,16 @@ from kazusa_ai_chatbot.config import (
     REFLECTION_PROMOTION_RUN_AFTER_LOCAL_TIME,
     REFLECTION_SELF_GUIDANCE_PROMOTION_ENABLED,
     REFLECTION_WORKER_INTERVAL_SECONDS,
+    SELF_COGNITION_MAX_CASES_PER_TICK,
+    SELF_COGNITION_TRACKING_DIR,
 )
 from kazusa_ai_chatbot import event_logging
 from kazusa_ai_chatbot.global_character_growth import (
     run_global_character_growth_pass,
 )
+from kazusa_ai_chatbot.db import get_character_profile
 from kazusa_ai_chatbot.db.schemas import CharacterReflectionRunDoc
+from kazusa_ai_chatbot.dispatcher.adapter_iface import AdapterRegistry
 from kazusa_ai_chatbot.reflection_cycle import repository
 from kazusa_ai_chatbot.reflection_cycle.models import (
     DailySynthesisResult,
@@ -57,6 +61,8 @@ from kazusa_ai_chatbot.reflection_cycle.promotion import (
 from kazusa_ai_chatbot.reflection_cycle.interaction_style import (
     run_daily_interaction_style_update as _run_daily_interaction_style_update,
 )
+from kazusa_ai_chatbot.self_cognition import sources as self_cognition_sources
+from kazusa_ai_chatbot.self_cognition import worker as self_cognition_worker
 from kazusa_ai_chatbot.time_boundary import (
     local_time_context_from_storage_utc,
     normalize_storage_utc_iso,
@@ -125,6 +131,7 @@ async def run_daily_interaction_style_update(
 def start_reflection_cycle_worker(
     *,
     is_primary_interaction_busy: Callable[[], bool],
+    adapter_registry_provider: Callable[[], AdapterRegistry | None] | None = None,
 ) -> ReflectionWorkerHandle:
     """Start the process-local reflection worker loop."""
 
@@ -133,6 +140,7 @@ def start_reflection_cycle_worker(
         _reflection_worker_loop(
             stop_event=stop_event,
             is_primary_interaction_busy=is_primary_interaction_busy,
+            adapter_registry_provider=adapter_registry_provider,
         )
     )
     handle = ReflectionWorkerHandle(task=task, stop_event=stop_event)
@@ -167,6 +175,7 @@ async def _reflection_worker_loop(
     *,
     stop_event: asyncio.Event,
     is_primary_interaction_busy: Callable[[], bool],
+    adapter_registry_provider: Callable[[], AdapterRegistry | None] | None,
 ) -> None:
     """Run reflection scheduling ticks until stopped."""
 
@@ -184,6 +193,7 @@ async def _reflection_worker_loop(
             await _run_worker_tick(
                 now=storage_utc_now(),
                 is_primary_interaction_busy=is_primary_interaction_busy,
+                adapter_registry_provider=adapter_registry_provider,
             )
         except Exception as exc:
             logger.exception(f"Reflection worker tick failed: {exc}")
@@ -208,6 +218,7 @@ async def _run_worker_tick(
     *,
     now: datetime,
     is_primary_interaction_busy: Callable[[], bool],
+    adapter_registry_provider: Callable[[], AdapterRegistry | None] | None = None,
 ) -> list[Any]:
     """Run one scheduled worker tick in approved priority order."""
 
@@ -232,6 +243,21 @@ async def _run_worker_tick(
     )
     results.append(hourly_result)
     await _record_reflection_worker_result(hourly_result)
+    if (
+        _run_hourly_reflection_cycle is _DEFAULT_HOURLY_REFLECTION_CYCLE
+        or _run_group_self_cognition_review is not _DEFAULT_GROUP_REVIEW_HOOK
+    ):
+        group_review_result = await _run_group_self_cognition_review(
+            now=now,
+            is_primary_interaction_busy=is_primary_interaction_busy,
+            adapter_registry_provider=adapter_registry_provider,
+        )
+        if (
+            _run_group_self_cognition_review is not _DEFAULT_GROUP_REVIEW_HOOK
+            or _group_review_has_work(group_review_result)
+        ):
+            results.append(group_review_result)
+            await _record_reflection_worker_result(group_review_result)
 
     now_utc_iso = normalize_storage_utc_iso(now.isoformat())
     local_time_context = local_time_context_from_storage_utc(now_utc_iso)
@@ -369,6 +395,78 @@ async def _run_hourly_reflection_cycle(
         f"deferred={result.deferred} reason={result.defer_reason}"
     )
     return result
+
+
+_DEFAULT_HOURLY_REFLECTION_CYCLE = _run_hourly_reflection_cycle
+
+
+async def _run_group_self_cognition_review(
+    *,
+    now: datetime,
+    is_primary_interaction_busy: Callable[[], bool],
+    adapter_registry_provider: Callable[[], AdapterRegistry | None] | None = None,
+) -> ReflectionWorkerResult:
+    """Run bounded group self-cognition review on reflection cadence."""
+
+    result = ReflectionWorkerResult(
+        run_kind="group_self_cognition_review",
+        dry_run=False,
+    )
+
+    if is_primary_interaction_busy():
+        result.deferred = True
+        result.defer_reason = "primary interaction busy"
+        return result
+
+    character_profile = await get_character_profile()
+    cases = await self_cognition_sources.collect_group_chat_review_cases(
+        now=now,
+        character_profile=character_profile,
+        max_cases=SELF_COGNITION_MAX_CASES_PER_TICK,
+    )
+    if not cases:
+        result.skipped_count = 1
+        result.defer_reason = "no group review cases"
+        return result
+
+    async def _collect_cases(**kwargs: Any) -> list[dict[str, Any]]:
+        max_cases = int(kwargs["max_cases"])
+        selected_cases = cases[:max_cases]
+        return selected_cases
+
+    self_result = await self_cognition_worker.run_self_cognition_worker_tick(
+        output_root=SELF_COGNITION_TRACKING_DIR,
+        now=now,
+        is_primary_interaction_busy=is_primary_interaction_busy,
+        character_profile=character_profile,
+        collect_cases_func=_collect_cases,
+        adapter_registry_provider=adapter_registry_provider,
+        max_cases=min(len(cases), SELF_COGNITION_MAX_CASES_PER_TICK),
+    )
+    result.processed_count = self_result.processed_count
+    result.succeeded_count = max(
+        0,
+        self_result.processed_count - self_result.failed_count,
+    )
+    result.failed_count = self_result.failed_count
+    result.skipped_count = self_result.skipped_count
+    result.deferred = self_result.deferred
+    result.defer_reason = self_result.defer_reason
+    return result
+
+
+_DEFAULT_GROUP_REVIEW_HOOK = _run_group_self_cognition_review
+
+
+def _group_review_has_work(result: ReflectionWorkerResult) -> bool:
+    """Return whether a group-review sidecar result should be surfaced."""
+
+    has_work = (
+        result.processed_count > 0
+        or result.failed_count > 0
+        or result.deferred
+    )
+    return has_work
 
 
 async def _run_daily_channel_reflection_cycle(

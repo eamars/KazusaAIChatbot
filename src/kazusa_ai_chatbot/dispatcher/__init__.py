@@ -1,6 +1,7 @@
 """Task dispatch primitives for deferred tool execution."""
 
 from kazusa_ai_chatbot.dispatcher.adapter_iface import (
+    AdapterChannelUnavailableError,
     AdapterRegistry,
     MessagingAdapter,
     SendResult,
@@ -17,6 +18,7 @@ from kazusa_ai_chatbot.dispatcher.task import (
 from kazusa_ai_chatbot.dispatcher.tool_spec import ToolRegistry, ToolSpec
 
 __all__ = [
+    "AdapterChannelUnavailableError",
     "AdapterRegistry",
     "BotPermissionRole",
     "DispatchContext",

@@ -8,17 +8,26 @@ from datetime import datetime
 from typing import Any
 
 from kazusa_ai_chatbot.config import (
+    CHARACTER_GLOBAL_USER_ID,
     SELF_COGNITION_TRIGGER_ACTIVE_COMMITMENT_ENABLED,
+    SELF_COGNITION_TRIGGER_GROUP_CHAT_REVIEW_ENABLED,
 )
 from kazusa_ai_chatbot.db import (
     get_conversation_history,
-    get_latest_private_channel_for_user,
     get_user_profile,
     list_due_future_cognition_events,
     query_active_commitment_memory_units,
 )
+from kazusa_ai_chatbot.reflection_cycle.activity_windows import (
+    GroupActivityWindow,
+    build_group_activity_windows,
+)
+from kazusa_ai_chatbot.reflection_cycle.selector import collect_reflection_inputs
 from kazusa_ai_chatbot.self_cognition import models
-from kazusa_ai_chatbot.time_boundary import parse_storage_utc_datetime
+from kazusa_ai_chatbot.time_boundary import (
+    normalize_storage_utc_iso,
+    parse_storage_utc_datetime,
+)
 from kazusa_ai_chatbot.utils import text_or_empty
 
 _CHARACTER_PROFILE_FIELDS = frozenset(
@@ -68,9 +77,110 @@ async def collect_self_cognition_cases(
                 max_cases=remaining_cases,
             )
             cases.extend(commitment_cases)
-
     selected_cases = cases[:max_cases]
     return selected_cases
+
+
+async def collect_group_chat_review_cases(
+    *,
+    now: datetime,
+    character_profile: dict[str, Any],
+    max_cases: int,
+    collect_reflection_inputs_func: Callable[..., Any] | None = None,
+) -> list[models.SelfCognitionCase]:
+    """Build active group-review cases from reflection activity windows.
+
+    Args:
+        now: Current reflection tick time.
+        character_profile: Current character state snapshot.
+        max_cases: Maximum group-review cases for this tick.
+        collect_reflection_inputs_func: Optional reflection input seam.
+
+    Returns:
+        Source-channel-bound self-cognition cases for group review.
+    """
+
+    if not SELF_COGNITION_TRIGGER_GROUP_CHAT_REVIEW_ENABLED:
+        return_value: list[models.SelfCognitionCase] = []
+        return return_value
+
+    input_collector = collect_reflection_inputs_func or collect_reflection_inputs
+    input_set = await input_collector(
+        lookback_hours=3,
+        now=now,
+        allow_fallback=False,
+    )
+    window_start = parse_storage_utc_datetime(input_set.effective_start)
+    window_end = parse_storage_utc_datetime(input_set.effective_end)
+    windows: list[GroupActivityWindow] = []
+    for scope in input_set.selected_scopes:
+        if scope.channel_type != "group":
+            continue
+        scope_windows = build_group_activity_windows(
+            scope=scope,
+            window_start=window_start,
+            window_end=window_end,
+            now=now,
+            character_global_user_id=(
+                text_or_empty(character_profile.get("global_user_id"))
+                or CHARACTER_GLOBAL_USER_ID
+            ),
+            platform_bot_id=text_or_empty(
+                character_profile.get("platform_bot_id"),
+            ),
+        )
+        windows.extend(scope_windows)
+    windows.sort(key=lambda item: item.window_start, reverse=True)
+
+    cases = await collect_group_review_cases(
+        now=now,
+        character_profile=character_profile,
+        windows=windows,
+        max_cases=max_cases,
+    )
+    return cases
+
+
+async def collect_group_review_cases(
+    *,
+    now: datetime,
+    character_profile: dict[str, Any],
+    windows: list[GroupActivityWindow],
+    max_cases: int,
+) -> list[models.SelfCognitionCase]:
+    """Build group-review cases from precomputed activity windows."""
+
+    cases: list[models.SelfCognitionCase] = []
+    for window in windows:
+        if len(cases) >= max_cases:
+            break
+        if not window.visible_context:
+            continue
+        case = _build_group_review_case(
+            window,
+            character_profile=character_profile,
+            now=now,
+        )
+        binding = await resolve_self_cognition_delivery_target(
+            platform=window.platform,
+            source_platform_channel_id=window.platform_channel_id,
+            source_channel_type=window.channel_type,
+            source_message_id=_window_source_message_id(window),
+            source_ref=window.source_id,
+            source_global_user_id=None,
+            source_platform_bot_id=text_or_empty(
+                character_profile.get("platform_bot_id"),
+            ),
+            source_character_name=_profile_character_name(character_profile),
+            guild_id=None,
+            bot_permission_role="user",
+            target_global_user_id=None,
+            target_platform_user_id=None,
+        )
+        _attach_binding(case, binding)
+        cases.append(case)
+
+    return cases
 
 
 async def collect_scheduled_future_cognition_cases(
@@ -244,7 +354,8 @@ async def resolve_self_cognition_delivery_target(
         bot_permission_role: Permission role carried into dispatcher context.
         target_global_user_id: Semantic target user's global id.
         target_platform_user_id: Semantic target user's platform id.
-        get_latest_private_channel_func: Optional private-channel lookup seam.
+        get_latest_private_channel_func: Deprecated compatibility seam. The
+            source-channel target policy does not call it.
 
     Returns:
         Bound delivery target or an auditable binding failure.
@@ -279,70 +390,9 @@ async def resolve_self_cognition_delivery_target(
             target_platform_user_id=clean_target_platform_user_id,
         )
         return failure
-    if (
-        clean_target_global_user_id is None
-        and clean_target_platform_user_id is None
-    ):
-        failure = _target_binding_failure(
-            reason="missing_target_user",
-            platform=clean_platform,
-            source_ref=clean_source_ref,
-            source_platform_channel_id=clean_source_channel_id,
-            source_channel_type=clean_source_channel_type,
-            target_global_user_id=clean_target_global_user_id,
-            target_platform_user_id=clean_target_platform_user_id,
-        )
-        return failure
-
-    private_channel_reader = (
-        get_latest_private_channel_func or get_latest_private_channel_for_user
-    )
-    private_channel = await _call_maybe_async(
-        private_channel_reader,
-        platform=clean_platform,
-        global_user_id=clean_target_global_user_id,
-        platform_user_id=clean_target_platform_user_id,
-    )
-    if isinstance(private_channel, dict):
-        private_channel_id = text_or_empty(
-            private_channel.get("platform_channel_id")
-        )
-    else:
-        private_channel_id = ""
-    if private_channel_id:
-        if clean_source_channel_type in ("private", "group"):
-            bound_source_channel_type = clean_source_channel_type
-            bound_source_channel_id = clean_source_channel_id
-        else:
-            bound_source_channel_type = "private"
-            bound_source_channel_id = private_channel_id
-        if not bound_source_channel_id:
-            bound_source_channel_id = private_channel_id
-        target = _delivery_target(
-            platform=clean_platform,
-            platform_channel_id=private_channel_id,
-            channel_type="private",
-            target_global_user_id=clean_target_global_user_id,
-            target_platform_user_id=clean_target_platform_user_id,
-            source_kind="target_private_channel",
-            source_ref=clean_source_ref,
-            source_platform_channel_id=bound_source_channel_id,
-            source_channel_type=bound_source_channel_type,
-            source_message_id=clean_source_message_id,
-            source_global_user_id=clean_source_global_user_id,
-            source_platform_bot_id=text_or_empty(source_platform_bot_id),
-            source_character_name=(
-                text_or_empty(source_character_name) or "active character"
-            ),
-            guild_id=guild_id,
-            bot_permission_role=text_or_empty(bot_permission_role) or "user",
-            fallback_reason="",
-        )
-        return target
-
     if not clean_source_channel_id:
         failure = _target_binding_failure(
-            reason="private_channel_unavailable_and_source_missing",
+            reason="missing_delivery_target",
             platform=clean_platform,
             source_ref=clean_source_ref,
             source_platform_channel_id=clean_source_channel_id,
@@ -353,7 +403,7 @@ async def resolve_self_cognition_delivery_target(
         return failure
     if clean_source_channel_type not in ("private", "group"):
         failure = _target_binding_failure(
-            reason="private_channel_unavailable_and_source_invalid",
+            reason="missing_delivery_target",
             platform=clean_platform,
             source_ref=clean_source_ref,
             source_platform_channel_id=clean_source_channel_id,
@@ -381,9 +431,60 @@ async def resolve_self_cognition_delivery_target(
         ),
         guild_id=guild_id,
         bot_permission_role=text_or_empty(bot_permission_role) or "user",
-        fallback_reason="private_channel_unavailable",
+        fallback_reason="",
     )
     return target
+
+
+def _build_group_review_case(
+    window: GroupActivityWindow,
+    *,
+    character_profile: dict[str, Any],
+    now: datetime,
+) -> models.SelfCognitionCase:
+    """Project one group activity window into a self-cognition case."""
+
+    window_start = normalize_storage_utc_iso(window.window_start.isoformat())
+    window_end = normalize_storage_utc_iso(window.window_end.isoformat())
+    semantic_labels = dict(window.semantic_labels)
+    case: models.SelfCognitionCase = {
+        "case_name": models.CASE_GROUP_CHAT_REVIEW,
+        "case_id": f"group_activity_window:{window.source_id}",
+        "idle_timestamp_utc": now.isoformat(),
+        "last_evidence_timestamp_utc": window.last_evidence_timestamp_utc,
+        "trigger_kind": models.TRIGGER_GROUP_CHAT_REVIEW,
+        "semantic_due_state": None,
+        "actionability": "active_group_review_same_channel_no_fallback",
+        "target_scope": {
+            "platform": window.platform,
+            "platform_channel_id": window.platform_channel_id,
+            "channel_type": "group",
+            "user_id": None,
+        },
+        "source_refs": [dict(source_ref) for source_ref in window.source_refs],
+        "visible_context": [dict(row) for row in window.visible_context],
+        "group_activity_window": {
+            "source": "reflection_activity_window",
+            "window_start": window_start,
+            "window_end": window_end,
+            "semantic_labels": semantic_labels,
+        },
+        "conversation_progress": {
+            "source": "reflection_activity_window",
+            "window_start": window_start,
+            "window_end": window_end,
+            "activity_labels": semantic_labels,
+        },
+        "character_profile": _project_character_profile(character_profile),
+        "user_profile": {
+            "affinity": models.DEFAULT_DRY_RUN_AFFINITY,
+            "display_name": "group audience",
+            "last_relationship_insight": "",
+        },
+        "current_mood": text_or_empty(character_profile.get("mood")),
+        "global_vibe": text_or_empty(character_profile.get("global_vibe")),
+    }
+    return case
 
 
 def _is_due_future_cognition_event(
@@ -747,6 +848,27 @@ def _safe_continuation(value: object) -> dict[str, Any]:
     if isinstance(mode, str):
         safe_value["mode"] = mode
     return safe_value
+
+
+def _window_source_message_id(window: GroupActivityWindow) -> str:
+    """Choose a stable source message id for delivery audit metadata."""
+
+    if window.source_message_refs:
+        message_id = text_or_empty(window.source_message_refs[-1].get("message_id"))
+        if message_id:
+            return_value = message_id
+            return return_value
+    return_value = window.source_id
+    return return_value
+
+
+def _profile_character_name(character_profile: dict[str, Any]) -> str:
+    """Read the active character name from a profile snapshot."""
+
+    name = text_or_empty(character_profile.get("name"))
+    if not name:
+        name = "active character"
+    return name
 
 
 def _scheduled_event_evidence_timestamp_utc(event: dict[str, Any]) -> str:

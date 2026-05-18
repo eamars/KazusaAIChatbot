@@ -23,8 +23,16 @@ from kazusa_ai_chatbot import service as service_module
 class _DummyResponse:
     """Tiny HTTP response double for adapter-registration tests."""
 
-    def __init__(self, payload: dict):
+    def __init__(self, payload: dict, *, status_code: int = 200):
         self._payload = payload
+        self.status_code = status_code
+
+    @property
+    def is_error(self) -> bool:
+        """Return whether the fake status code represents an HTTP error."""
+
+        return_value = self.status_code >= 400
+        return return_value
 
     def raise_for_status(self) -> None:
         """Pretend the HTTP request succeeded."""
@@ -71,6 +79,9 @@ class _FakeAsyncClient:
             "headers": headers,
             "timeout": self.timeout,
         }
+        if url.endswith("/send_message/capability"):
+            return_value = _DummyResponse({"available": True})
+            return return_value
         return _DummyResponse({
             "platform": "qq",
             "channel_id": json["channel_id"],
@@ -257,6 +268,41 @@ async def test_remote_http_adapter_posts_send_message_payload(monkeypatch):
     assert result.platform == "qq"
     assert result.channel_id == "54369546"
     assert result.message_id == "outbound-1"
+
+
+@pytest.mark.asyncio
+async def test_remote_http_adapter_posts_send_message_capability_payload(
+    monkeypatch,
+) -> None:
+    """The remote proxy should query adapter channel capability."""
+
+    _FakeAsyncClient.last_call = None
+    monkeypatch.setattr(
+        "kazusa_ai_chatbot.dispatcher.remote_adapter.httpx.AsyncClient",
+        _FakeAsyncClient,
+    )
+    adapter = RemoteHttpAdapter(
+        platform="qq",
+        callback_url="http://127.0.0.1:8011",
+        shared_secret="secret-token",
+        timeout_seconds=7.5,
+    )
+
+    available = await adapter.can_send_message(
+        channel_id="54369546",
+        channel_type="group",
+    )
+
+    assert available is True
+    assert _FakeAsyncClient.last_call == {
+        "url": "http://127.0.0.1:8011/send_message/capability",
+        "json": {
+            "channel_id": "54369546",
+            "channel_type": "group",
+        },
+        "headers": {"Authorization": "Bearer secret-token"},
+        "timeout": 7.5,
+    }
 
 
 class _FakeNapCatWebSocket:

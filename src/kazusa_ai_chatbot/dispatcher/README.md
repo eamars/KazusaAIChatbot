@@ -122,6 +122,11 @@ async def send_message(
 ) -> SendResult
 ```
 
+Adapters may also expose `can_send_message(channel_id, channel_type=...)` so
+the dispatcher can reject unavailable channels before write-ahead conversation
+persistence. Remote adapters report this through `/send_message/capability`;
+unavailable or unsupported capability checks fail closed.
+
 `delivery_mentions` requests are best-effort. If an adapter cannot render one
 or the request lacks the needed platform identity, it sends the original text.
 Prefix is the only approved placement for the current contract.
@@ -163,7 +168,7 @@ LLMs own semantic decisions:
 Deterministic code owns mechanics:
 
 - scheduler row execution;
-- adapter availability checks at send time;
+- adapter availability and channel capability checks at send time;
 - write-ahead conversation persistence;
 - delivery receipt updates;
 - duplicate detection for pending scheduler rows;

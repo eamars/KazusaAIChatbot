@@ -41,6 +41,10 @@ async def test_lifespan_starts_reflection_worker_by_default(monkeypatch) -> None
     assert calls["stopped"] == 1
     assert callable(calls["busy_probe"])
     assert calls["busy_probe"]() is False
+    assert callable(calls["reflection_adapter_registry_provider"])
+    assert calls["reflection_adapter_registry_provider"]() is (
+        service_module._adapter_registry
+    )
 
 
 @pytest.mark.asyncio
@@ -146,6 +150,7 @@ async def _run_lifespan(
         "self_cognition_started": 0,
         "self_cognition_stopped": 0,
         "self_cognition_busy_probe": None,
+        "reflection_adapter_registry_provider": None,
     }
     handle = SimpleNamespace(
         task=asyncio.create_task(_sleep_forever()),
@@ -153,9 +158,14 @@ async def _run_lifespan(
     )
     self_cognition_handle: SimpleNamespace | None = None
 
-    def _start_reflection_cycle_worker(*, is_primary_interaction_busy):
+    def _start_reflection_cycle_worker(
+        *,
+        is_primary_interaction_busy,
+        adapter_registry_provider=None,
+    ):
         calls["started"] = int(calls["started"]) + 1
         calls["busy_probe"] = is_primary_interaction_busy
+        calls["reflection_adapter_registry_provider"] = adapter_registry_provider
         return handle
 
     async def _stop_reflection_cycle_worker(_handle):

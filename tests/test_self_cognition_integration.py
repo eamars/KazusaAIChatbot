@@ -57,9 +57,22 @@ class _FakeMessagingAdapter:
     platform_bot_id = "bot-1"
     display_name = "Character"
 
-    def __init__(self, *, fail: bool = False) -> None:
+    def __init__(self, *, fail: bool = False, can_send: bool = True) -> None:
         self.fail = fail
+        self.can_send = can_send
         self.calls: list[dict[str, Any]] = []
+
+    async def can_send_message(
+        self,
+        channel_id: str,
+        *,
+        channel_type: str,
+    ) -> bool:
+        """Return whether the fake adapter accepts the target channel."""
+
+        del channel_id, channel_type
+        return_value = self.can_send
+        return return_value
 
     async def send_message(
         self,
@@ -272,7 +285,7 @@ def _future_cognition_case() -> dict[str, Any]:
             channel_id="group-1",
             channel_type="group",
             source_kind="self_cognition_source_channel",
-            fallback_reason="private_channel_unavailable",
+            fallback_reason="",
         ),
     }
     return case
@@ -791,26 +804,26 @@ async def test_worker_selected_speak_dispatches_to_private_channel(
 
 
 @pytest.mark.asyncio
-async def test_worker_selected_speak_falls_back_to_source_channel(
+async def test_worker_selected_speak_dispatches_to_bound_group_source_channel(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    """Selected speak should use the source channel when private is unavailable."""
+    """Selected group speak should dispatch to the bound source group."""
 
     _patch_dispatcher_persistence(monkeypatch)
     adapter = _FakeMessagingAdapter()
-    fallback_target = _delivery_target(
+    source_group_target = _delivery_target(
         channel_id="group-1",
         channel_type="group",
         source_kind="self_cognition_source_channel",
-        fallback_reason="private_channel_unavailable",
+        fallback_reason="",
     )
 
     async def collect_cases(**kwargs: Any) -> list[dict[str, Any]]:
         del kwargs
         return [
             _commitment_case_with_delivery_target(
-                delivery_target=fallback_target,
+                delivery_target=source_group_target,
             )
         ]
 
@@ -833,6 +846,70 @@ async def test_worker_selected_speak_falls_back_to_source_channel(
     assert result.processed_count == 1
     assert adapter.calls[0]["channel_id"] == "group-1"
     assert adapter.calls[0]["channel_type"] == "group"
+
+
+@pytest.mark.asyncio
+async def test_worker_channel_capability_failure_blocks_before_history_write(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Unavailable source channels should fail before write-ahead persistence."""
+
+    saved_documents: list[dict[str, Any]] = []
+    recorded_attempts: list[dict[str, Any]] = []
+    adapter = _FakeMessagingAdapter(can_send=False)
+
+    async def save_conversation(document: dict[str, Any]) -> str:
+        saved_documents.append(dict(document))
+        return "conversation-row-1"
+
+    async def ensure_character_identity(**kwargs: Any) -> str:
+        del kwargs
+        return "character-global"
+
+    monkeypatch.setattr(
+        handlers_module,
+        "save_conversation",
+        save_conversation,
+    )
+    monkeypatch.setattr(
+        handlers_module,
+        "ensure_character_identity",
+        ensure_character_identity,
+    )
+
+    async def collect_cases(**kwargs: Any) -> list[dict[str, Any]]:
+        del kwargs
+        return [_commitment_case_with_delivery_target()]
+
+    async def run_case(case: dict[str, Any], output_dir: Path) -> dict[str, Any]:
+        del output_dir
+        return _selected_speak_artifacts(case)
+
+    async def record_attempt(attempt: dict[str, Any]) -> None:
+        recorded_attempts.append(dict(attempt))
+
+    result = await worker.run_self_cognition_worker_tick(
+        output_root=tmp_path,
+        now=datetime(2026, 5, 17, 5, 57, tzinfo=timezone.utc),
+        is_primary_interaction_busy=lambda: False,
+        collect_cases_func=collect_cases,
+        run_case_func=run_case,
+        read_attempts_func=lambda **kwargs: [],
+        record_attempt_func=record_attempt,
+        adapter_registry_provider=lambda: _adapter_registry(adapter),
+        max_cases=1,
+    )
+
+    assert result.processed_count == 1
+    assert adapter.calls == []
+    assert saved_documents == []
+    assert recorded_attempts[-1]["status"] == (
+        models.ACTION_ATTEMPT_STATUS_DELIVERY_FAILED
+    )
+    assert recorded_attempts[-1]["failure_reason"] == (
+        "adapter_channel_unavailable"
+    )
 
 
 @pytest.mark.asyncio

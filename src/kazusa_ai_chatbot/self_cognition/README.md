@@ -38,6 +38,12 @@ allowed delayed production side effect is the normal future-cognition scheduler
 path, where the later cognition cycle decides again whether any visible output
 should exist.
 
+Group chat review is hosted by the reflection-cycle worker, not by the
+standalone self-cognition worker interval. Reflection passes bounded
+`group_chat_review` cases into the normal self-cognition runner on the
+reflection cadence, then self-cognition owns routing, dialog rendering,
+attempt persistence, consolidation, and source-bound delivery.
+
 Self-cognition-created episodes set
 `origin_metadata.debug_modes.no_visual_directives=true` by default, so the
 shared L3 visual-directive LLM is skipped for self-cognition. These episodes do
@@ -97,6 +103,7 @@ cognition's route or contact decision.
 
 - `sources.collect_self_cognition_cases(...)`
 - `sources.collect_active_commitment_cases(...)`
+- `sources.collect_group_chat_review_cases(...)`
 - `tracking.build_idempotency_key(...)`
 - `tracking.build_trigger_record(case)`
 - `tracking.build_run_record(case, trigger_record, selected_route, budget)`
@@ -119,7 +126,13 @@ cognition's route or contact decision.
 - `commitment_duplicate_tick`
 - `private_no_action`
 - `group_noise_rejected`
+- `group_chat_review`
 - `topic_rag_followup`
+
+`group_chat_review` is built from reflection-cycle group activity windows. It
+uses active group-review wording, bounded visible context, deterministic
+semantic labels, and source-aligned delivery metadata. Empty windows are
+skipped before cognition.
 
 `commitment_past_due` and `commitment_duplicate_tick` do not force contact.
 If shared cognition does not select outward contact, the route is recorded as
@@ -141,6 +154,9 @@ and action kind. Generated message text is not part of the identity.
 Existing attempts with these statuses suppress a new send candidate for the
 same idempotency key: `candidate`, `held`, `pending_handoff`,
 `handoff_accepted`, `scheduled`, `sent`, and `duplicate_suppressed`.
+For `group_chat_review`, a prior `delivery_failed` attempt for the same
+activity-window identity also suppresses another visible-speech attempt; this
+prevents one group window from repeatedly trying the same selected speech.
 
 The live worker stores suppression and audit history in the
 `self_cognition_action_attempts` MongoDB collection through
@@ -155,11 +171,14 @@ control state.
 
 Production source collectors attach either a bound
 `SelfCognitionDeliveryTarget` or a target-binding failure before cognition.
-The resolver prefers the latest known private channel on the same platform for
-the semantic target user. If no known private channel exists, it uses the
-self-cognition source channel when that source is a valid private or group
-channel. Cases without a valid target are recorded as `target_binding_failed`
-and stop before RAG, cognition, dialog, consolidation, and delivery.
+The resolver binds to the concrete source channel when that source is a valid
+private or group channel. Group sources target the same group channel; private
+sources target the same private channel. The resolver does not perform
+private-channel lookup, private fallback, or delivery retry. Adapter channel
+capability is checked immediately before dispatcher write-ahead persistence.
+Cases without a valid concrete source target are recorded as
+`target_binding_failed` and stop before RAG, cognition, dialog, consolidation,
+and delivery.
 
 `SelfCognitionDeliveryTarget` is deterministic runtime metadata. It must stay
 out of source packets, RAG requests, cognition state, dialog state, prompts,
@@ -204,9 +223,10 @@ Action candidates may carry:
 ]
 ```
 
-Self-cognition does not decide adapter capability, channel feasibility, native
-mention syntax, or delivery. It only carries the dialog-owned semantic mention
-request as local tracking metadata.
+Self-cognition does not decide native mention syntax. Adapter-owned channel
+capability and delivery are checked at the dispatcher boundary; self-cognition
+only carries the dialog-owned semantic mention request as local tracking
+metadata.
 
 ## Future Cognition Handoff
 

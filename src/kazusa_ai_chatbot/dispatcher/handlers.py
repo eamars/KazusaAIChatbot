@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import inspect
 import logging
 from typing import TypedDict
 from uuid import uuid4
@@ -17,6 +18,7 @@ from kazusa_ai_chatbot.db import (
     save_conversation,
 )
 from kazusa_ai_chatbot.dispatcher.adapter_iface import AdapterRegistry
+from kazusa_ai_chatbot.dispatcher.adapter_iface import AdapterChannelUnavailableError
 from kazusa_ai_chatbot.dispatcher.task import DispatchContext
 from kazusa_ai_chatbot.dispatcher.tool_spec import ToolSpec
 from kazusa_ai_chatbot.time_boundary import storage_utc_now_iso
@@ -149,9 +151,19 @@ async def handle_send_message(
         target_platform = str(args["target_platform"])
         adapter_available = adapters.has(target_platform)
         adapter = adapters.get(target_platform)
-        delivery_tracking_id = uuid4().hex
         target_channel = str(args["target_channel"])
         channel_type = str(args["target_channel_type"])
+        adapter_accepts_target = await _adapter_accepts_target(
+            adapter,
+            channel_id=target_channel,
+            channel_type=channel_type,
+        )
+        if not adapter_accepts_target:
+            raise AdapterChannelUnavailableError(
+                f"Adapter cannot send to {target_platform}:{channel_type}:"
+                f"{target_channel}"
+            )
+        delivery_tracking_id = uuid4().hex
         platform_bot_id = _platform_bot_id(ctx, adapter)
         character_name = _character_name(ctx, adapter)
         addressed_to = [ctx.source_user_id] if ctx.source_user_id.strip() else []
@@ -200,15 +212,18 @@ async def handle_send_message(
     except Exception as exc:
         if not adapter_available:
             rejection_code = "adapter_unavailable"
+        elif isinstance(exc, AdapterChannelUnavailableError):
+            rejection_code = "adapter_channel_unavailable"
         elif delivery_attempted:
             rejection_code = "adapter_send_failed"
         else:
             rejection_code = "conversation_history_write_failed"
-        validation_status = (
-            "adapter_available"
-            if adapter_available
-            else "adapter_unavailable"
-        )
+        if rejection_code == "adapter_channel_unavailable":
+            validation_status = "adapter_channel_unavailable"
+        elif adapter_available:
+            validation_status = "adapter_available"
+        else:
+            validation_status = "adapter_unavailable"
         await event_logging.record_dispatcher_event(
             component=HANDLER_COMPONENT,
             action_kind="send_message",
@@ -247,6 +262,25 @@ async def handle_send_message(
         "adapter_message_id": send_result.message_id,
     }
     return dispatch_result
+
+
+async def _adapter_accepts_target(
+    adapter: object,
+    *,
+    channel_id: str,
+    channel_type: str,
+) -> bool:
+    """Ask an adapter whether the target channel can receive a message."""
+
+    can_send_message = getattr(adapter, "can_send_message", None)
+    if can_send_message is None:
+        return_value = True
+        return return_value
+    raw_result = can_send_message(channel_id, channel_type=channel_type)
+    if inspect.isawaitable(raw_result):
+        raw_result = await raw_result
+    return_value = bool(raw_result)
+    return return_value
 
 
 def _delivery_mentions(args: dict) -> list[dict] | None:

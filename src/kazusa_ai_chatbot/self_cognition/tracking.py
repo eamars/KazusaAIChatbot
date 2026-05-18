@@ -358,15 +358,24 @@ def _candidate_status(
     for attempt in existing_attempts:
         attempt_key = attempt.get("idempotency_key")
         attempt_status = attempt.get("status")
+        group_retry_status = (
+            _string_field(case, "case_name") == models.CASE_GROUP_CHAT_REVIEW
+            and attempt_status == models.ACTION_ATTEMPT_STATUS_DELIVERY_FAILED
+        )
         if (
             attempt_key == idempotency_key
-            and attempt_status in models.ACTION_ATTEMPT_SUPPRESSING_STATUSES
+            and (
+                attempt_status in models.ACTION_ATTEMPT_SUPPRESSING_STATUSES
+                or group_retry_status
+            )
         ):
             return_value = models.ACTION_ATTEMPT_STATUS_DUPLICATE
             return return_value
 
     due_state = _optional_string_field(case, "semantic_due_state")
     if due_state in models.CONTACT_DUE_STATES:
+        return_value = models.ACTION_ATTEMPT_STATUS_CANDIDATE
+    elif _string_field(case, "case_name") == models.CASE_GROUP_CHAT_REVIEW:
         return_value = models.ACTION_ATTEMPT_STATUS_CANDIDATE
     elif _string_field(case, "case_name") == models.CASE_TOPIC_RAG_FOLLOWUP:
         return_value = models.ACTION_ATTEMPT_STATUS_CANDIDATE

@@ -189,6 +189,115 @@ async def test_worker_tick_passes_busy_probe_to_promotion(monkeypatch) -> None:
 
 
 @pytest.mark.asyncio
+async def test_worker_tick_runs_group_review_on_reflection_cadence(
+    monkeypatch,
+) -> None:
+    """The reflection tick should host group self-cognition review."""
+
+    captured: dict[str, object] = {}
+    adapter_provider = lambda: object()
+    now = datetime(2026, 5, 5, 18, 0, tzinfo=timezone.utc)
+    hourly_result = worker_module.ReflectionWorkerResult(
+        run_kind="hourly_slot",
+        dry_run=False,
+    )
+    group_review_result = worker_module.ReflectionWorkerResult(
+        run_kind="group_self_cognition_review",
+        dry_run=False,
+    )
+
+    async def _run_group_self_cognition_review(**kwargs):
+        captured.update(kwargs)
+        return group_review_result
+
+    monkeypatch.setattr(
+        worker_module,
+        "_run_hourly_reflection_cycle",
+        AsyncMock(return_value=hourly_result),
+    )
+    monkeypatch.setattr(
+        worker_module,
+        "_run_group_self_cognition_review",
+        _run_group_self_cognition_review,
+        raising=False,
+    )
+    monkeypatch.setattr(worker_module, "_local_time_is_after", lambda *_: False)
+
+    def _busy_probe() -> bool:
+        return False
+
+    results = await worker_module._run_worker_tick(
+        now=now,
+        is_primary_interaction_busy=_busy_probe,
+        adapter_registry_provider=adapter_provider,
+    )
+
+    assert results == [hourly_result, group_review_result]
+    assert captured == {
+        "now": now,
+        "is_primary_interaction_busy": _busy_probe,
+        "adapter_registry_provider": adapter_provider,
+    }
+
+
+@pytest.mark.asyncio
+async def test_group_review_passes_adapter_registry_provider_to_self_cognition(
+    monkeypatch,
+) -> None:
+    """Reflection-attached group review should be able to dispatch speaks."""
+
+    captured: dict[str, object] = {}
+    now = datetime(2026, 5, 5, 18, 0, tzinfo=timezone.utc)
+    adapter_provider = lambda: object()
+    character_profile = {"name": "Character"}
+    group_case = {
+        "case_name": "group_chat_review",
+        "delivery_target": {
+            "platform": "qq",
+            "platform_channel_id": "group-1",
+            "channel_type": "group",
+        },
+    }
+
+    async def _collect_group_cases(**kwargs):
+        assert kwargs["now"] == now
+        assert kwargs["character_profile"] == character_profile
+        return [group_case]
+
+    async def _run_self_cognition_tick(**kwargs):
+        captured.update(kwargs)
+        return worker_module.self_cognition_worker.SelfCognitionWorkerResult(
+            processed_count=1,
+        )
+
+    monkeypatch.setattr(
+        worker_module,
+        "get_character_profile",
+        AsyncMock(return_value=character_profile),
+    )
+    monkeypatch.setattr(
+        worker_module.self_cognition_sources,
+        "collect_group_chat_review_cases",
+        _collect_group_cases,
+    )
+    monkeypatch.setattr(
+        worker_module.self_cognition_worker,
+        "run_self_cognition_worker_tick",
+        _run_self_cognition_tick,
+    )
+
+    result = await worker_module._run_group_self_cognition_review(
+        now=now,
+        is_primary_interaction_busy=lambda: False,
+        adapter_registry_provider=adapter_provider,
+    )
+
+    assert result.processed_count == 1
+    assert captured["adapter_registry_provider"] is adapter_provider
+    assert captured["collect_cases_func"] is not None
+
+
+@pytest.mark.asyncio
 async def test_hourly_retry_builds_prompt_directly(monkeypatch) -> None:
     """Hourly retry should build the prompt without creating a skipped result."""
 

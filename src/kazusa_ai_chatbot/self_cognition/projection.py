@@ -54,7 +54,7 @@ def build_source_packet(
     source_refs = _source_refs(case)
     visible_context = _visible_context(case)
     packet: models.SourcePacket = {
-        "instruction": models.SELF_COGNITION_INPUT_TEXT,
+        "instruction": _instruction_for_case(case),
         "case_name": _string_field(case, "case_name"),
         "idle_local_datetime": format_storage_utc_for_llm(
             idle_timestamp_utc,
@@ -94,6 +94,10 @@ def build_source_packet(
     if isinstance(conversation_progress, dict):
         packet["conversation_progress"] = conversation_progress
 
+    group_activity_window = _group_activity_window(case)
+    if group_activity_window is not None:
+        packet["group_activity_window"] = group_activity_window
+
     current_mood = case.get("current_mood")
     if isinstance(current_mood, str) and current_mood:
         packet["current_mood"] = current_mood
@@ -124,8 +128,8 @@ def render_source_packet_text(packet: models.SourcePacket) -> str:
 
     lines = [
         packet['instruction'],
-        '这是角色自己的空闲自检，不是用户新发来的消息，也不是外部命令。',
-        '我只是在根据自己看得见的对话、承诺和当前心情，判断现在要不要自然地做点什么。',
+        _source_packet_contract_line(packet),
+        _source_packet_task_line(packet),
         '',
         '# 当前自检',
         f'- case_name: {packet["case_name"]}',
@@ -160,6 +164,19 @@ def render_source_packet_text(packet: models.SourcePacket) -> str:
             '',
             '# 触发证据',
             _render_source_refs(packet['source_refs']),
+        ]
+    )
+    group_activity_window = packet.get('group_activity_window')
+    if isinstance(group_activity_window, dict):
+        lines.extend(
+            [
+                '',
+                '# 群聊活动窗口',
+                _compact_value(group_activity_window),
+            ]
+        )
+    lines.extend(
+        [
             '',
             '# 最近可见对话',
             _render_visible_context(packet['visible_context']),
@@ -177,6 +194,123 @@ def render_source_packet_text(packet: models.SourcePacket) -> str:
         SELF_COGNITION_SOURCE_PACKET_CHAR_LIMIT,
     )
     return clipped_text
+
+
+def _instruction_for_case(case: models.SelfCognitionCase) -> str:
+    """Return the model-facing task instruction for a source case."""
+
+    trigger_kind = _string_field(case, "trigger_kind")
+    if trigger_kind == models.TRIGGER_GROUP_CHAT_REVIEW:
+        return_value = (
+            "active group chat review over a recent source-aligned group "
+            "activity window."
+        )
+        return return_value
+    return_value = models.SELF_COGNITION_INPUT_TEXT
+    return return_value
+
+
+def _group_activity_window(
+    case: models.SelfCognitionCase,
+) -> dict[str, Any] | None:
+    """Project the semantic group-window source-packet contract."""
+
+    group_activity_window = case.get("group_activity_window")
+    if isinstance(group_activity_window, dict):
+        return_value = _sanitize_group_activity_window(group_activity_window)
+        return return_value
+
+    if _string_field(case, "trigger_kind") != models.TRIGGER_GROUP_CHAT_REVIEW:
+        return_value = None
+        return return_value
+
+    conversation_progress = case.get("conversation_progress")
+    if not isinstance(conversation_progress, dict):
+        return_value = None
+        return return_value
+    source = conversation_progress.get("source")
+    window_start = conversation_progress.get("window_start")
+    window_end = conversation_progress.get("window_end")
+    activity_labels = conversation_progress.get("activity_labels")
+    if not isinstance(source, str):
+        return_value = None
+        return return_value
+    if not isinstance(window_start, str):
+        return_value = None
+        return return_value
+    if not isinstance(window_end, str):
+        return_value = None
+        return return_value
+    if not isinstance(activity_labels, dict):
+        return_value = None
+        return return_value
+
+    return_value = _sanitize_group_activity_window({
+        "source": source,
+        "window_start": window_start,
+        "window_end": window_end,
+        "semantic_labels": activity_labels,
+    })
+    return return_value
+
+
+def _sanitize_group_activity_window(
+    group_activity_window: dict[str, Any],
+) -> dict[str, Any] | None:
+    """Keep only the prompt-approved group-window evidence fields."""
+
+    source = group_activity_window.get("source")
+    window_start = group_activity_window.get("window_start")
+    window_end = group_activity_window.get("window_end")
+    semantic_labels = group_activity_window.get("semantic_labels")
+    if not isinstance(source, str):
+        return_value = None
+        return return_value
+    if not isinstance(window_start, str):
+        return_value = None
+        return return_value
+    if not isinstance(window_end, str):
+        return_value = None
+        return return_value
+    if not isinstance(semantic_labels, dict):
+        return_value = None
+        return return_value
+    safe_labels = {
+        key: value
+        for key, value in semantic_labels.items()
+        if isinstance(key, str) and isinstance(value, str)
+    }
+    return_value = {
+        "source": source,
+        "window_start": window_start,
+        "window_end": window_end,
+        "semantic_labels": safe_labels,
+    }
+    return return_value
+
+
+def _source_packet_contract_line(packet: models.SourcePacket) -> str:
+    """Return the stable source-packet contract line for the trigger type."""
+
+    if packet["trigger_kind"] == models.TRIGGER_GROUP_CHAT_REVIEW:
+        return_value = (
+            '这是角色对刚才一个群聊活动窗口的主动回顾，不是用户新发来的私聊，也不是外部命令。'
+        )
+        return return_value
+    return_value = '这是角色自己的空闲自检，不是用户新发来的消息，也不是外部命令。'
+    return return_value
+
+
+def _source_packet_task_line(packet: models.SourcePacket) -> str:
+    """Return the semantic task line for the trigger type."""
+
+    if packet["trigger_kind"] == models.TRIGGER_GROUP_CHAT_REVIEW:
+        return_value = (
+            '我只是在根据群聊窗口标签、可见对话和当前心情，判断保持安静、记录观察、维持进度或自然发言哪一种更合适。'
+        )
+        return return_value
+    return_value = '我只是在根据自己看得见的对话、承诺和当前心情，判断现在要不要自然地做点什么。'
+    return return_value
 
 
 def build_rag_request(case: models.SelfCognitionCase) -> dict[str, Any]:

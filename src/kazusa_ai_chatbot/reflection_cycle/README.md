@@ -57,6 +57,7 @@ async def run_global_reflection_promotion(
 def start_reflection_cycle_worker(
     *,
     is_primary_interaction_busy: Callable[[], bool],
+    adapter_registry_provider: Callable[[], AdapterRegistry | None] | None = None,
 ) -> ReflectionWorkerHandle: ...
 
 async def stop_reflection_cycle_worker(
@@ -69,7 +70,10 @@ the package facade above.
 
 The worker-owned promotion path passes its busy probe into the internal
 promotion runner so a chat turn that appears after the LLM call can defer
-memory writes. CLI and manual promotion calls use the package facade above.
+memory writes. The worker also accepts the live adapter-registry provider so
+the reflection-attached group self-cognition sidecar can dispatch selected
+speech through the same source-bound delivery path. CLI and manual promotion
+calls use the package facade above.
 
 ## DB Boundaries
 
@@ -209,8 +213,23 @@ grouping uses the character-local date of each hourly slot.
 Tick priority:
 
 1. Run due hourly slots.
-2. Run due daily-channel syntheses after terminal hourly documents exist.
-3. Run daily global promotion after daily-channel documents are terminal.
+2. Run group self-cognition review as a sidecar on the same 15-minute
+   reflection cadence.
+3. Run due daily-channel syntheses after terminal hourly documents exist.
+4. Run daily global promotion after daily-channel documents are terminal.
+
+Group self-cognition review is not a second scheduler. It derives non-empty
+15-minute group activity windows from the same monitored-channel selection:
+group scopes are eligible when the character has an assistant message in the
+24-hour monitor window, and the source packet receives bounded visible context
+plus deterministic semantic labels. Selected visible speech targets the same
+group channel as the source. There is no private fallback, retry loop, adapter
+capability probe, or reflection-specific group-review interval.
+
+Raw hourly or daily reflection output is not fed into self-cognition. The
+group-review sidecar shares the monitored activity projection only; hourly and
+daily reflection records continue to contribute to normal cognition only
+through the existing promoted, gated reflection context.
 
 The service does not serialize reflection behind `/chat`. Both paths may run at
 the same time and may contend for shared LLM or database resources.

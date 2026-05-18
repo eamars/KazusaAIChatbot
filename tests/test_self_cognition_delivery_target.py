@@ -32,75 +32,61 @@ def _source_kwargs(**overrides: Any) -> dict[str, Any]:
     return kwargs
 
 
-def _private_channel_row() -> dict[str, str]:
-    """Return a stored private channel row for the semantic target user."""
-
-    row = {
-        "platform": "qq",
-        "platform_channel_id": "dm-1",
-        "channel_type": "private",
-        "platform_user_id": "qq-target",
-    }
-    return row
-
-
 @pytest.mark.asyncio
-async def test_resolver_prefers_known_private_channel() -> None:
-    """Known private channel should win over the source channel."""
-
-    calls: list[dict[str, Any]] = []
+async def test_group_resolver_binds_to_source_group_without_private_lookup(
+) -> None:
+    """Group-source self-cognition must target the same group channel."""
 
     async def latest_private_channel(**kwargs: Any) -> dict[str, str]:
-        calls.append(dict(kwargs))
-        return _private_channel_row()
+        del kwargs
+        raise AssertionError("group source must not use private-channel lookup")
 
     target = await sources.resolve_self_cognition_delivery_target(
         **_source_kwargs(get_latest_private_channel_func=latest_private_channel),
     )
 
     assert target["schema_version"] == "self_cognition_delivery_target.v1"
-    assert target["source_kind"] == "target_private_channel"
-    assert target["platform_channel_id"] == "dm-1"
-    assert target["channel_type"] == "private"
+    assert target["source_kind"] == "self_cognition_source_channel"
+    assert target["platform_channel_id"] == "group-1"
+    assert target["channel_type"] == "group"
     assert target["source_platform_channel_id"] == "group-1"
     assert target["source_channel_type"] == "group"
     assert target["target_global_user_id"] == "global-target"
     assert target["target_platform_user_id"] == "qq-target"
     assert target["fallback_reason"] == ""
-    assert calls == [
-        {
-            "platform": "qq",
-            "global_user_id": "global-target",
-            "platform_user_id": "qq-target",
-        }
-    ]
 
 
 @pytest.mark.asyncio
-async def test_resolver_falls_back_to_source_channel_when_private_missing() -> None:
-    """Missing private channel should bind the self-cognition source channel."""
+async def test_private_resolver_binds_to_source_private_without_lookup() -> None:
+    """Private-source self-cognition must target the same private channel."""
 
-    async def latest_private_channel(**kwargs: Any) -> None:
+    async def latest_private_channel(**kwargs: Any) -> dict[str, str]:
         del kwargs
-        return None
+        raise AssertionError("private source must not use alternate lookup")
 
     target = await sources.resolve_self_cognition_delivery_target(
-        **_source_kwargs(get_latest_private_channel_func=latest_private_channel),
+        **_source_kwargs(
+            source_platform_channel_id="dm-source",
+            source_channel_type="private",
+            get_latest_private_channel_func=latest_private_channel,
+        ),
     )
 
     assert target["source_kind"] == "self_cognition_source_channel"
-    assert target["platform_channel_id"] == "group-1"
-    assert target["channel_type"] == "group"
-    assert target["fallback_reason"] == "private_channel_unavailable"
+    assert target["platform_channel_id"] == "dm-source"
+    assert target["channel_type"] == "private"
+    assert target["source_platform_channel_id"] == "dm-source"
+    assert target["source_channel_type"] == "private"
+    assert target["fallback_reason"] == ""
 
 
 @pytest.mark.asyncio
-async def test_resolver_rejects_missing_private_and_source() -> None:
-    """No known private channel and no source channel should fail binding."""
+async def test_resolver_rejects_missing_concrete_source_channel() -> None:
+    """Cases without a concrete source channel should fail closed."""
 
-    async def latest_private_channel(**kwargs: Any) -> None:
+    async def latest_private_channel(**kwargs: Any) -> dict[str, str]:
         del kwargs
-        return None
+        raise AssertionError("missing source must not use alternate lookup")
 
     failure = await sources.resolve_self_cognition_delivery_target(
         **_source_kwargs(
@@ -110,17 +96,17 @@ async def test_resolver_rejects_missing_private_and_source() -> None:
     )
 
     assert failure["status"] == "target_binding_failed"
-    assert failure["reason"] == "private_channel_unavailable_and_source_missing"
+    assert failure["reason"] == "missing_delivery_target"
 
 
 @pytest.mark.asyncio
-async def test_resolver_does_not_infer_private_from_group_platform_user_id(
+async def test_resolver_does_not_infer_channel_from_group_platform_user_id(
 ) -> None:
-    """A group platform user id is not itself a known private channel."""
+    """A group platform user id is not itself a concrete channel target."""
 
-    async def latest_private_channel(**kwargs: Any) -> None:
+    async def latest_private_channel(**kwargs: Any) -> dict[str, str]:
         del kwargs
-        return None
+        raise AssertionError("source-aligned binding must not use lookup")
 
     target = await sources.resolve_self_cognition_delivery_target(
         **_source_kwargs(get_latest_private_channel_func=latest_private_channel),
@@ -133,11 +119,11 @@ async def test_resolver_does_not_infer_private_from_group_platform_user_id(
 
 @pytest.mark.asyncio
 async def test_resolver_rejects_invalid_source_channel_type() -> None:
-    """Invalid source channel types cannot become fallback delivery targets."""
+    """Invalid source channel types cannot become delivery targets."""
 
-    async def latest_private_channel(**kwargs: Any) -> None:
+    async def latest_private_channel(**kwargs: Any) -> dict[str, str]:
         del kwargs
-        return None
+        raise AssertionError("invalid source must not use alternate lookup")
 
     failure = await sources.resolve_self_cognition_delivery_target(
         **_source_kwargs(
@@ -147,30 +133,7 @@ async def test_resolver_rejects_invalid_source_channel_type() -> None:
     )
 
     assert failure["status"] == "target_binding_failed"
-    assert failure["reason"] == "private_channel_unavailable_and_source_invalid"
-
-
-@pytest.mark.asyncio
-async def test_resolver_normalizes_invalid_source_channel_when_private_exists(
-) -> None:
-    """Private target binding should provide valid source channel metadata."""
-
-    async def latest_private_channel(**kwargs: Any) -> dict[str, str]:
-        del kwargs
-        return _private_channel_row()
-
-    target = await sources.resolve_self_cognition_delivery_target(
-        **_source_kwargs(
-            source_platform_channel_id="",
-            source_channel_type="internal",
-            get_latest_private_channel_func=latest_private_channel,
-        ),
-    )
-
-    assert target["source_kind"] == "target_private_channel"
-    assert target["platform_channel_id"] == "dm-1"
-    assert target["source_platform_channel_id"] == "dm-1"
-    assert target["source_channel_type"] == "private"
+    assert failure["reason"] == "missing_delivery_target"
 
 
 @pytest.mark.asyncio
@@ -212,7 +175,7 @@ async def test_production_collectors_attach_delivery_target_before_cognition(
 
     async def latest_private_channel(**kwargs: Any) -> dict[str, str]:
         del kwargs
-        return _private_channel_row()
+        raise AssertionError("group source must not use private-channel lookup")
 
     cases = await sources.collect_active_commitment_cases(
         now=now,
@@ -226,9 +189,11 @@ async def test_production_collectors_attach_delivery_target_before_cognition(
 
     assert cases[0]["target_binding_status"] == "bound"
     assert cases[0]["delivery_target"]["source_kind"] == (
-        "target_private_channel"
+        "self_cognition_source_channel"
     )
-    assert cases[0]["delivery_target"]["platform_channel_id"] == "dm-1"
+    assert cases[0]["delivery_target"]["platform_channel_id"] == "group-1"
+    assert cases[0]["delivery_target"]["channel_type"] == "group"
+    assert cases[0]["delivery_target"]["fallback_reason"] == ""
 
 
 @pytest.mark.asyncio
@@ -261,9 +226,9 @@ async def test_collectors_return_failed_case_when_target_binding_fails() -> None
         del kwargs
         return [event]
 
-    async def latest_private_channel(**kwargs: Any) -> None:
+    async def latest_private_channel(**kwargs: Any) -> dict[str, str]:
         del kwargs
-        return None
+        raise AssertionError("invalid source must not use alternate lookup")
 
     cases = await sources.collect_scheduled_future_cognition_cases(
         now=now,
@@ -278,7 +243,7 @@ async def test_collectors_return_failed_case_when_target_binding_fails() -> None
         "target_binding_failed"
     )
     assert cases[0]["target_binding_failure"]["reason"] == (
-        "private_channel_unavailable_and_source_missing"
+        "missing_delivery_target"
     )
 
 

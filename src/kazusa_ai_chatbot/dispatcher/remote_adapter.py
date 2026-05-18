@@ -45,6 +45,46 @@ class RemoteHttpAdapter:
         self._shared_secret = shared_secret
         self._timeout_seconds = timeout_seconds
 
+    async def can_send_message(
+        self,
+        channel_id: str,
+        *,
+        channel_type: str,
+    ) -> bool:
+        """Return whether the remote adapter accepts the target channel."""
+
+        headers: dict[str, str] = {}
+        if self._shared_secret:
+            headers["Authorization"] = f"Bearer {self._shared_secret}"
+
+        payload = {
+            "channel_id": channel_id,
+            "channel_type": channel_type,
+        }
+        try:
+            async with httpx.AsyncClient(timeout=self._timeout_seconds) as client:
+                response = await client.post(
+                    f"{self._callback_url}/send_message/capability",
+                    json=payload,
+                    headers=headers,
+                )
+        except httpx.HTTPError:
+            return_value = False
+            return return_value
+        if response.status_code == 503:
+            return_value = False
+            return return_value
+        if response.is_error:
+            return_value = False
+            return return_value
+        try:
+            data = response.json()
+        except ValueError:
+            return_value = False
+            return return_value
+        return_value = bool(data.get("available"))
+        return return_value
+
     async def send_message(
         self,
         channel_id: str,

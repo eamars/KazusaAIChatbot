@@ -12,6 +12,7 @@ CASE_COMMITMENT_PAST_DUE = "commitment_past_due"
 CASE_COMMITMENT_DUPLICATE_TICK = "commitment_duplicate_tick"
 CASE_PRIVATE_NO_ACTION = "private_no_action"
 CASE_GROUP_NOISE_REJECTED = "group_noise_rejected"
+CASE_GROUP_CHAT_REVIEW = "group_chat_review"
 CASE_TOPIC_RAG_FOLLOWUP = "topic_rag_followup"
 CASE_SCHEDULED_FUTURE_COGNITION = "scheduled_future_cognition"
 SUPPORTED_CASE_NAMES = frozenset(
@@ -21,6 +22,7 @@ SUPPORTED_CASE_NAMES = frozenset(
         CASE_COMMITMENT_DUPLICATE_TICK,
         CASE_PRIVATE_NO_ACTION,
         CASE_GROUP_NOISE_REJECTED,
+        CASE_GROUP_CHAT_REVIEW,
         CASE_TOPIC_RAG_FOLLOWUP,
         CASE_SCHEDULED_FUTURE_COGNITION,
     )
@@ -219,6 +221,7 @@ class SelfCognitionCase(TypedDict, total=False):
     actionability: str
     visible_context: list[dict[str, Any]]
     conversation_progress: dict[str, Any]
+    group_activity_window: dict[str, Any]
     current_mood: str
     global_vibe: str
     reflection_modifier: dict[str, Any]
@@ -252,6 +255,7 @@ class SourcePacket(TypedDict):
     source_refs: list[SelfCognitionSourceRef]
     visible_context: list[dict[str, Any]]
     conversation_progress: NotRequired[dict[str, Any]]
+    group_activity_window: NotRequired[dict[str, Any]]
     current_mood: NotRequired[str]
     global_vibe: NotRequired[str]
     reflection_modifier: NotRequired[dict[str, Any]]

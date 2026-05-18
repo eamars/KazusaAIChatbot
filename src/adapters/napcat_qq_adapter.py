@@ -313,6 +313,41 @@ class RuntimeSendMessageResponse(BaseModel):
     sent_at: str
 
 
+class RuntimeSendMessageCapabilityRequest(BaseModel):
+    channel_id: str
+    channel_type: str
+
+
+class RuntimeSendMessageCapabilityResponse(BaseModel):
+    available: bool
+    reason: str = ""
+
+
+@runtime_app.post(
+    "/send_message/capability",
+    response_model=RuntimeSendMessageCapabilityResponse,
+)
+async def send_message_capability_endpoint(
+    req: RuntimeSendMessageCapabilityRequest,
+    authorization: str = Header(default=""),
+):
+    """Report whether the live NapCat adapter can send to one target."""
+
+    if _runtime_adapter is None:
+        raise HTTPException(status_code=503, detail="Runtime adapter is not ready")
+    if _runtime_adapter.runtime_shared_secret:
+        expected = f"Bearer {_runtime_adapter.runtime_shared_secret}"
+        if authorization != expected:
+            raise HTTPException(status_code=401, detail="Unauthorized")
+
+    available = await _runtime_adapter.can_send_message(
+        channel_id=req.channel_id,
+        channel_type=req.channel_type,
+    )
+    response = RuntimeSendMessageCapabilityResponse(available=available)
+    return response
+
+
 @runtime_app.post("/send_message", response_model=RuntimeSendMessageResponse)
 async def send_message_endpoint(
     req: RuntimeSendMessageRequest,
@@ -1092,6 +1127,28 @@ class NapCatWSAdapter:
             self._runtime_server.should_exit = True
         if self._runtime_server_task is not None:
             await self._runtime_server_task
+
+    async def can_send_message(
+        self,
+        channel_id: str,
+        *,
+        channel_type: str,
+    ) -> bool:
+        """Return whether NapCat can accept one outbound target."""
+
+        if self._ws is None:
+            return_value = False
+            return return_value
+        if channel_type not in {"private", "group"}:
+            return_value = False
+            return return_value
+        try:
+            int(channel_id)
+        except ValueError:
+            return_value = False
+            return return_value
+        return_value = True
+        return return_value
 
     async def send_message(
         self,

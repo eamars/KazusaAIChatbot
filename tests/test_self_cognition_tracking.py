@@ -122,6 +122,37 @@ def _group_noise_case() -> dict[str, Any]:
     return case
 
 
+def _group_chat_review_case() -> dict[str, Any]:
+    """Build a group-review case with stable window identity."""
+
+    case = {
+        "case_name": models.CASE_GROUP_CHAT_REVIEW,
+        "case_id": "group_activity_window:scope_group:2026-05-18T04:00Z",
+        "idle_timestamp_utc": "2026-05-18T04:15:00+00:00",
+        "last_evidence_timestamp_utc": "2026-05-18T04:10:00+00:00",
+        "trigger_kind": models.TRIGGER_GROUP_CHAT_REVIEW,
+        "semantic_due_state": None,
+        "actionability": "active_group_review_same_channel_no_fallback",
+        "target_scope": _target_scope(channel_type="group"),
+        "source_refs": [
+            {
+                "source_kind": "reflection_activity_window",
+                "source_id": "scope_group:2026-05-18T04:00Z:2026-05-18T04:15Z",
+                "due_at": None,
+                "summary": "quiet group activity, one speaker, risk low",
+            }
+        ],
+        "visible_context": [
+            {
+                "role": "user",
+                "text": "A recent group message.",
+                "timestamp": "2026-05-18T04:10:00+00:00",
+            }
+        ],
+    }
+    return case
+
+
 def _topic_followup_case() -> dict[str, Any]:
     case = {
         "case_name": models.CASE_TOPIC_RAG_FOLLOWUP,
@@ -1622,6 +1653,41 @@ def test_duplicate_contact_decision_suppresses_active_prior_attempt_statuses(
 
         assert action_attempt["status"] == models.ACTION_ATTEMPT_STATUS_DUPLICATE
         assert models.ARTIFACT_ACTION_CANDIDATE not in paths
+
+
+def test_group_review_suppresses_prior_delivery_failed_attempt(
+    tmp_path,
+) -> None:
+    """A failed send for one group window should not repeat visible speech."""
+
+    case = _group_chat_review_case()
+    source_ref = case["source_refs"][0]
+    idempotency_key = tracking.build_idempotency_key(
+        source_ref["source_kind"],
+        source_ref["source_id"],
+        source_ref["due_at"],
+        case["target_scope"],
+        models.ACTION_KIND_SEND_MESSAGE,
+    )
+    case["existing_attempts"] = [
+        {
+            "attempt_id": "self_cognition_attempt:group-delivery-failed",
+            "idempotency_key": idempotency_key,
+            "status": models.ACTION_ATTEMPT_STATUS_DELIVERY_FAILED,
+        }
+    ]
+
+    paths = run_self_cognition_case(
+        case,
+        tmp_path,
+        cognition_client=lambda state: _action_cognition_output(
+            "A visible group response.",
+        ),
+    )
+    action_attempt = _read_json(paths[models.ARTIFACT_ACTION_ATTEMPT])
+
+    assert action_attempt["status"] == models.ACTION_ATTEMPT_STATUS_DUPLICATE
+    assert models.ARTIFACT_ACTION_CANDIDATE not in paths
 
 
 def test_duplicate_tick_fixture_supplies_prior_attempt_state() -> None:

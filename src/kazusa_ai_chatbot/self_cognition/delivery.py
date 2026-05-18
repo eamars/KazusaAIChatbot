@@ -10,6 +10,7 @@ from kazusa_ai_chatbot.brain_service.outbound import (
     ConversationHistoryWriteError,
 )
 from kazusa_ai_chatbot.dispatcher.adapter_iface import (
+    AdapterChannelUnavailableError,
     AdapterRegistry,
     UnknownPlatformError,
 )
@@ -102,6 +103,9 @@ async def deliver_selected_speak(
     }
     try:
         dispatch_result = await handle_send_message(args, ctx, adapter_registry)
+    except AdapterChannelUnavailableError:
+        result = _failed_result("adapter_channel_unavailable")
+        return result
     except UnknownPlatformError:
         result = _failed_result("adapter_unavailable")
         return result
