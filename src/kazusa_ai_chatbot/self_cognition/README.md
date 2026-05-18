@@ -130,9 +130,9 @@ cognition's route or contact decision.
 - `topic_rag_followup`
 
 `group_chat_review` is built from reflection-cycle group activity windows. It
-uses active group-review wording, bounded visible context, deterministic
-semantic labels, and source-aligned delivery metadata. Empty windows are
-skipped before cognition.
+uses first-person chat-window data framing, bounded visible context,
+deterministic semantic labels, and source-aligned delivery metadata. Empty
+windows are skipped before cognition.
 
 `commitment_past_due` and `commitment_duplicate_tick` do not force contact.
 If shared cognition does not select outward contact, the route is recorded as
@@ -173,9 +173,11 @@ Production source collectors attach either a bound
 `SelfCognitionDeliveryTarget` or a target-binding failure before cognition.
 The resolver binds to the concrete source channel when that source is a valid
 private or group channel. Group sources target the same group channel; private
-sources target the same private channel. The resolver does not perform
-private-channel lookup, private fallback, or delivery retry. Adapter channel
-capability is checked immediately before dispatcher write-ahead persistence.
+sources target the same private channel. A known private channel is used only
+when it is already attached as the self-cognition source channel for the case.
+The resolver does not perform private-channel lookup, private fallback, or
+delivery retry. Adapter channel capability is checked immediately before
+dispatcher write-ahead persistence.
 Cases without a valid concrete source target are recorded as
 `target_binding_failed` and stop before RAG, cognition, dialog, consolidation,
 and delivery.
@@ -244,6 +246,10 @@ marks the source slot completed after the normal runner path returns. The
 model-facing source packet receives only semantic follow-up context, not
 scheduler ids, action-attempt ids, continuation schema versions, or depth
 limits.
+Due-aware packets may render neutral due-state facts such as
+`约定状态: 已过期` as source state. Actionability strings and route
+instructions remain tracking metadata and must not be rendered to the
+character.
 
 ## Event Logging
 

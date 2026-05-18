@@ -26,6 +26,11 @@ _RAG_OUTPUT_TIME_FIELDS = frozenset(
         "recorded_at",
     )
 )
+_DUE_STATE_LABELS = {
+    models.DUE_STATE_FUTURE_DUE: '未到期',
+    models.DUE_STATE_DUE_NOW: '当前到期',
+    models.DUE_STATE_PAST_DUE: '已过期',
+}
 
 
 def build_source_packet(
@@ -72,22 +77,6 @@ def build_source_packet(
         "target_scope": target_scope,
         "source_refs": source_refs,
         "visible_context": visible_context,
-        "agency_options": [
-            "Silence is allowed when contact would add no value.",
-            (
-                "If outward contact is beneficial, select a visible `speak` "
-                "action through the shared action-spec contract."
-            ),
-            (
-                "If only internal tracking is useful, emit "
-                f"{models.PROGRESS_MAINTENANCE_MARKER}."
-            ),
-            (
-                "If the evidence should only be audited, emit "
-                f"{models.AUDIT_ONLY_MARKER} or "
-                f"{models.SILENT_NO_WRITE_MARKER}."
-            ),
-        ],
     }
 
     conversation_progress = case.get("conversation_progress")
@@ -128,26 +117,25 @@ def render_source_packet_text(packet: models.SourcePacket) -> str:
 
     lines = [
         packet['instruction'],
-        _source_packet_contract_line(packet),
-        _source_packet_task_line(packet),
+        _source_packet_reason_line(packet),
         '',
-        '# 当前自检',
-        f'- case_name: {packet["case_name"]}',
+        '# 当前聊天窗口',
         f'- idle_local_datetime: {packet["idle_local_datetime"]}',
         (
             '- last_evidence_local_datetime: '
             f'{packet["last_evidence_local_datetime"]}'
         ),
         f'- local_time_context: {_compact_value(packet["local_time_context"])}',
-        f'- trigger_kind: {packet["trigger_kind"]}',
-        f'- semantic_due_state: {packet["semantic_due_state"]}',
-        f'- actionability: {packet["actionability"]}',
-        '',
-        '# 我可以选择的自然路线',
     ]
-    for option in packet["agency_options"]:
-        lines.append(f"- {option}")
-
+    source_state = _render_source_state(packet)
+    if source_state:
+        lines.extend(
+            [
+                '',
+                '# 来源状态',
+                source_state,
+            ]
+        )
     lines.extend(
         [
             '',
@@ -159,10 +147,10 @@ def render_source_packet_text(packet: models.SourcePacket) -> str:
                 f'{_compact_value(packet.get("reflection_modifier", {}))}'
             ),
             '',
-            '# 目标对象',
+            '# 聊天位置',
             _render_target_scope(packet['target_scope']),
             '',
-            '# 触发证据',
+            '# 来源依据',
             _render_source_refs(packet['source_refs']),
         ]
     )
@@ -171,7 +159,7 @@ def render_source_packet_text(packet: models.SourcePacket) -> str:
         lines.extend(
             [
                 '',
-                '# 群聊活动窗口',
+                '# 群聊窗口信息',
                 _compact_value(group_activity_window),
             ]
         )
@@ -197,14 +185,18 @@ def render_source_packet_text(packet: models.SourcePacket) -> str:
 
 
 def _instruction_for_case(case: models.SelfCognitionCase) -> str:
-    """Return the model-facing task instruction for a source case."""
+    """Return the model-facing data-source line for a source case."""
 
     trigger_kind = _string_field(case, "trigger_kind")
     if trigger_kind == models.TRIGGER_GROUP_CHAT_REVIEW:
-        return_value = (
-            "active group chat review over a recent source-aligned group "
-            "activity window."
-        )
+        return_value = '来源位置：我所在群聊窗口的最近可见内容。'
+        return return_value
+    target_scope = _target_scope(case)
+    if target_scope["channel_type"] == "private":
+        return_value = '来源位置：我和对方私聊窗口的最近可见内容。'
+        return return_value
+    if target_scope["channel_type"] == "group":
+        return_value = '来源位置：我所在群聊窗口的最近可见内容。'
         return return_value
     return_value = models.SELF_COGNITION_INPUT_TEXT
     return return_value
@@ -289,28 +281,41 @@ def _sanitize_group_activity_window(
     return return_value
 
 
-def _source_packet_contract_line(packet: models.SourcePacket) -> str:
-    """Return the stable source-packet contract line for the trigger type."""
+def _source_packet_reason_line(packet: models.SourcePacket) -> str:
+    """Return why the current chat-window data is visible to the character."""
 
     if packet["trigger_kind"] == models.TRIGGER_GROUP_CHAT_REVIEW:
         return_value = (
-            '这是角色对刚才一个群聊活动窗口的主动回顾，不是用户新发来的私聊，也不是外部命令。'
+            '出现原因：我在这个群聊里，需要接上这段群聊的时间线和现场感。'
         )
         return return_value
-    return_value = '这是角色自己的空闲自检，不是用户新发来的消息，也不是外部命令。'
-    return return_value
-
-
-def _source_packet_task_line(packet: models.SourcePacket) -> str:
-    """Return the semantic task line for the trigger type."""
-
-    if packet["trigger_kind"] == models.TRIGGER_GROUP_CHAT_REVIEW:
+    if packet["target_scope"]["channel_type"] == "private":
         return_value = (
-            '我只是在根据群聊窗口标签、可见对话和当前心情，判断保持安静、记录观察、维持进度或自然发言哪一种更合适。'
+            '出现原因：我在这段私聊里，需要接上这段对话的时间线和约定。'
         )
         return return_value
-    return_value = '我只是在根据自己看得见的对话、承诺和当前心情，判断现在要不要自然地做点什么。'
+    if packet["target_scope"]["channel_type"] == "group":
+        return_value = (
+            '出现原因：我在这个群聊里，需要接上这段群聊的时间线和现场感。'
+        )
+        return return_value
+    return_value = '出现原因：我需要接上这段聊天的时间线和现场感。'
     return return_value
+
+
+def _render_source_state(packet: models.SourcePacket) -> str:
+    """Render neutral source-state facts without action route guidance."""
+
+    semantic_due_state = packet['semantic_due_state']
+    if semantic_due_state is None:
+        return_value = ''
+        return return_value
+    due_state_label = _DUE_STATE_LABELS.get(
+        semantic_due_state,
+        semantic_due_state,
+    )
+    rendered = f'- 约定状态: {due_state_label}'
+    return rendered
 
 
 def build_rag_request(case: models.SelfCognitionCase) -> dict[str, Any]:
@@ -542,9 +547,7 @@ def _render_target_scope(
 
     lines = [
         f'- platform: {target_scope["platform"]}',
-        f'- platform_channel_id: {target_scope["platform_channel_id"]}',
         f'- channel_type: {target_scope["channel_type"]}',
-        f'- user_id: {target_scope["user_id"]}',
     ]
     rendered = '\n'.join(lines)
     return rendered

@@ -119,7 +119,7 @@ DRY_RUN_ASSISTANT_GLOBAL_USER_ID = "00000000-0000-4000-8000-000000000001"
 EMPTY_ROUTE_EFFECT_NEXT_TOPIC = None
 
 SELF_COGNITION_INPUT_TEXT = (
-    "Idle self-cognition trigger over visible or actionable evidence."
+    '我所在聊天窗口的最近可见内容。'
 )
 
 
@@ -260,4 +260,3 @@ class SourcePacket(TypedDict):
     global_vibe: NotRequired[str]
     reflection_modifier: NotRequired[dict[str, Any]]
     rag_evidence: NotRequired[dict[str, Any]]
-    agency_options: list[str]

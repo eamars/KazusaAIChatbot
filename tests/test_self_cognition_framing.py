@@ -10,7 +10,7 @@ from kazusa_ai_chatbot.self_cognition.projection import (
 )
 
 
-def test_self_cognition_framing_presents_agency_without_silence_bias() -> None:
+def test_self_cognition_framing_presents_chat_data_without_action_guidance() -> None:
     case = {
         "case_name": models.CASE_COMMITMENT_PAST_DUE,
         "case_id": "case-past-due",
@@ -45,13 +45,22 @@ def test_self_cognition_framing_presents_agency_without_silence_bias() -> None:
     source_packet = build_source_packet(case, rag_output=None)
     rendered_text = render_source_packet_text(source_packet)
 
-    assert models.SELF_COGNITION_INPUT_TEXT in rendered_text
+    assert "来源位置：我和对方私聊窗口的最近可见内容。" in rendered_text
+    assert (
+        "出现原因：我在这段私聊里，需要接上这段对话的时间线和约定。"
+        in rendered_text
+    )
     assert "There is no new user message to answer" not in rendered_text
     assert "Prefer silence" not in rendered_text
-    assert "Silence is allowed" in rendered_text
+    assert "Silence is allowed" not in rendered_text
     assert "proactive message candidate" not in rendered_text
-    assert "visible `speak` action" in rendered_text
-    assert "shared action-spec contract" in rendered_text
+    assert "visible `speak` action" not in rendered_text
+    assert "shared action-spec contract" not in rendered_text
+    assert "当前自检" not in rendered_text
+    assert "自然路线" not in rendered_text
+    assert "# 来源状态" in rendered_text
+    assert "- 约定状态: 已过期" in rendered_text
+    assert "contact_is_socially_available" not in rendered_text
     assert "- idle_local_datetime: 2026-05-10 12:30" in rendered_text
     assert "- last_evidence_local_datetime: 2026-05-10 12:00" in rendered_text
     assert "idle_timestamp" not in rendered_text

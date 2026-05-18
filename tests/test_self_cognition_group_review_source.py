@@ -236,7 +236,7 @@ async def test_collect_self_cognition_cases_does_not_schedule_group_review(
 
 
 def test_group_review_source_packet_uses_active_group_review_contract() -> None:
-    """Group review should not reuse the old idle self-check framing."""
+    """Group review should use first-person chat-window data framing."""
 
     case = _group_review_case()
 
@@ -245,12 +245,22 @@ def test_group_review_source_packet_uses_active_group_review_contract() -> None:
     serialized_packet = json.dumps(source_packet, ensure_ascii=False)
 
     assert source_packet["instruction"] != models.SELF_COGNITION_INPUT_TEXT
-    assert "active group chat review" in source_packet["instruction"]
-    assert "group_chat_trigger_review" in rendered_packet
-    assert "active_group_review_same_channel_no_fallback" in rendered_packet
+    assert source_packet["instruction"] == (
+        "来源位置：我所在群聊窗口的最近可见内容。"
+    )
+    assert (
+        "出现原因：我在这个群聊里，需要接上这段群聊的时间线和现场感。"
+        in rendered_packet
+    )
+    assert "group_chat_trigger_review" in serialized_packet
+    assert "active_group_review_same_channel_no_fallback" in serialized_packet
+    assert "group_chat_trigger_review" not in rendered_packet
+    assert "active_group_review_same_channel_no_fallback" not in rendered_packet
     assert "group_activity_window" in serialized_packet
     assert "semantic_labels" in serialized_packet
-    assert "# 群聊活动窗口" in rendered_packet
+    assert "# 群聊窗口信息" in rendered_packet
+    assert "当前自检" not in rendered_packet
+    assert "自然路线" not in rendered_packet
     assert "delivery_target" not in serialized_packet
     assert "dm-" not in serialized_packet
     assert "self_cognition_delivery_target" not in serialized_packet
@@ -289,7 +299,7 @@ def test_non_group_source_packet_omits_group_window_section() -> None:
     serialized_packet = json.dumps(source_packet, ensure_ascii=False)
 
     assert "group_activity_window" not in serialized_packet
-    assert "# 群聊活动窗口" not in rendered_packet
+    assert "# 群聊窗口信息" not in rendered_packet
 
 
 def _input_set(scopes: list[ReflectionScopeInput]) -> ReflectionInputSet:
