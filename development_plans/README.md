@@ -40,11 +40,7 @@ No active short-term plans.
 
 ## Active Bugfix Plans
 
-| Document | Type | Status |
-|---|---|---|
-| [character_self_image_rolling_state_bugfix_plan.md](active/bugfix/character_self_image_rolling_state_bugfix_plan.md) | Bugfix development plan | approved |
-| [memory_lifecycle_specialist_routing_plan.md](active/bugfix/memory_lifecycle_specialist_routing_plan.md) | Bugfix development plan | in_progress |
-| [self_cognition_group_speak_selection_bugfix_plan.md](active/bugfix/self_cognition_group_speak_selection_bugfix_plan.md) | Bugfix development plan | in_progress |
+No active bugfix plans.
 
 ## Reference Documents
 
@@ -58,6 +54,9 @@ No active short-term plans.
 | [self_cognition_loop_architecture.md](reference/designs/self_cognition_loop_architecture.md) | Architecture reference |
 | [self_cognition_reasoning_basis.md](reference/designs/self_cognition_reasoning_basis.md) | Reasoning basis |
 | [self_cognition_tracking_icd.md](reference/designs/self_cognition_tracking_icd.md) | Interface control document |
+| [cognition_prompt_chain_side_by_side_comparison_20260519.md](reference/evidence/cognition_prompt_chain_side_by_side_comparison_20260519.md) | Supporting evidence |
+| [cognition_prompt_chain_previous20_equivalence_check_20260519.md](reference/evidence/cognition_prompt_chain_previous20_equivalence_check_20260519.md) | Supporting evidence |
+| [cognition_prompt_chain_previous20_input_output_20260519.md](reference/evidence/cognition_prompt_chain_previous20_input_output_20260519.md) | Supporting evidence |
 | [multi_source_cognition_stage_03_inactive_prompt_variant_notes.md](reference/multi_source_cognition_stage_03_inactive_prompt_variant_notes.md) | Reference notes |
 
 ## Triage
@@ -89,11 +88,14 @@ plans.
 
 | Plan |
 |---|
+| [character_self_image_rolling_state_bugfix_plan.md](archive/completed/bugfix/character_self_image_rolling_state_bugfix_plan.md) |
 | [cognition_silence_short_circuit_and_dialog_evaluator_quality_plan.md](archive/completed/bugfix/cognition_silence_short_circuit_and_dialog_evaluator_quality_plan.md) |
 | [consolidator_facts_prompt_budget_bugfix_plan.md](archive/completed/bugfix/consolidator_facts_prompt_budget_bugfix_plan.md) |
 | [conversation_progress_identity_leakage_bugfix_plan.md](archive/completed/bugfix/conversation_progress_identity_leakage_bugfix_plan.md) |
 | [dialog_anchor_authority_stale_history_bugfix_plan.md](archive/completed/bugfix/dialog_anchor_authority_stale_history_bugfix_plan.md) |
+| [generic_cognition_prompt_migration_plan.md](archive/completed/bugfix/generic_cognition_prompt_migration_plan.md) |
 | [l3_content_anchor_open_loop_resolution_plan.md](archive/completed/bugfix/l3_content_anchor_open_loop_resolution_plan.md) |
+| [memory_lifecycle_specialist_routing_plan.md](archive/completed/bugfix/memory_lifecycle_specialist_routing_plan.md) |
 | [quote_aware_rag_sequence_plan.md](archive/completed/bugfix/quote_aware_rag_sequence_plan.md) |
 | [rag_active_turn_conversation_row_exclusion_plan.md](archive/completed/bugfix/rag_active_turn_conversation_row_exclusion_plan.md) |
 | [rag_hybrid_search_time_config_plan.md](archive/completed/bugfix/rag_hybrid_search_time_config_plan.md) |
@@ -103,6 +105,7 @@ plans.
 | [reflection_global_promotion_replay_bugfix_plan.md](archive/completed/bugfix/reflection_global_promotion_replay_bugfix_plan.md) |
 | [self_cognition_background_context_budget_bugfix_plan.md](archive/completed/bugfix/self_cognition_background_context_budget_bugfix_plan.md) |
 | [self_cognition_dialog_state_contract_bugfix_plan.md](archive/completed/bugfix/self_cognition_dialog_state_contract_bugfix_plan.md) |
+| [self_cognition_group_speak_selection_bugfix_plan.md](archive/completed/bugfix/self_cognition_group_speak_selection_bugfix_plan.md) |
 | [self_cognition_speak_delivery_bugfix_plan.md](archive/completed/bugfix/self_cognition_speak_delivery_bugfix_plan.md) |
 | [task_dispatcher_json_contract_bugfix_plan.md](archive/completed/bugfix/task_dispatcher_json_contract_bugfix_plan.md) |
 | [temporal_grounding_rag_episode_state_plan.md](archive/completed/bugfix/temporal_grounding_rag_episode_state_plan.md) |

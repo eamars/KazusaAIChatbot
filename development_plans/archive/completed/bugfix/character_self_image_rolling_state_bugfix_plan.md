@@ -6,7 +6,7 @@
   or prompt-projected character profile, so `recent_window`,
   `historical_summary`, and `meta.synthesis_count` accumulate correctly.
 - Plan class: large
-- Status: approved
+- Status: completed
 - Mandatory skills: `py-style`, `cjk-safety`, `test-style-and-execution`,
   `local-llm-architecture`, `systematic-debugging`.
 - Overall cutover strategy: bigbang for write behavior; no compatibility path.
@@ -648,3 +648,5 @@ This plan is complete when:
   `existing_image` contract and all callers must pass it.
 - Verification: focused tests cover the production failure mode, runtime-state
   read failure isolation, and rollover.
+- Closure: completed and archived on 2026-05-19 during registry cleanup after
+  all checklist stages and review evidence were already recorded.

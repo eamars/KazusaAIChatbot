@@ -7,7 +7,7 @@
   selection, while preserving the character's autonomy to speak when the
   observed scene gives enough reason.
 - Plan class: large
-- Status: in_progress
+- Status: completed
 - Mandatory skills: `development-plan-writing`, `local-llm-architecture`,
   `py-style`, `test-style-and-execution`, and `cjk-safety`
 - Overall cutover strategy: bigbang for group self-cognition source framing
@@ -736,9 +736,12 @@ until the owner approves a plan update.
 
 ## Plan Self-Review
 
-- Conclusion: the plan is ready to remain as a draft work contract.
+- Conclusion: the plan is completed and archived as a historical execution
+  record.
 - Tightness: source sentences, prompt-rewrite rule, change surface,
   implementation order, verification gates, and forbidden behavior are fixed.
 - Autonomy boundary: implementation autonomy is limited to local helper names;
   no model-facing wording, prompt contract, data shape, or behavior boundary
   is open for creative reinterpretation.
+- Closure: completed and archived on 2026-05-19 during registry cleanup after
+  all checklist stages and review evidence were already recorded.
