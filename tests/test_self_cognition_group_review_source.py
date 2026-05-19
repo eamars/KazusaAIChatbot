@@ -12,7 +12,7 @@ from kazusa_ai_chatbot.reflection_cycle.models import (
     ReflectionInputSet,
     ReflectionScopeInput,
 )
-from kazusa_ai_chatbot.self_cognition import models, projection, sources
+from kazusa_ai_chatbot.self_cognition import models, projection, runner, sources
 
 
 @pytest.mark.asyncio
@@ -246,12 +246,17 @@ def test_group_review_source_packet_uses_active_group_review_contract() -> None:
 
     assert source_packet["instruction"] != models.SELF_COGNITION_INPUT_TEXT
     assert source_packet["instruction"] == (
-        "来源位置：我所在群聊窗口的最近可见内容。"
+        "我刚看到群里刚刚发生的一段现场。里面有人把话题指向我。"
     )
+    assert rendered_packet.startswith(
+        "我刚看到群里刚刚发生的一段现场。里面有人把话题指向我。"
+        "\n\n# 当前聊天窗口"
+    )
+    _assert_no_group_source_trigger_labels(rendered_packet)
     assert (
-        "出现原因：我在这个群聊里，需要接上这段群聊的时间线和现场感。"
-        in rendered_packet
-    )
+        "我刚看到群里刚刚发生的一段现场。我之前没有插话，"
+        "这段里也没有人把话题交给我。"
+    ) not in rendered_packet
     assert "group_chat_trigger_review" in serialized_packet
     assert "active_group_review_same_channel_no_fallback" in serialized_packet
     assert "group_chat_trigger_review" not in rendered_packet
@@ -264,6 +269,57 @@ def test_group_review_source_packet_uses_active_group_review_contract() -> None:
     assert "delivery_target" not in serialized_packet
     assert "dm-" not in serialized_packet
     assert "self_cognition_delivery_target" not in serialized_packet
+
+
+def test_group_review_source_packet_uses_ambient_sentence_when_not_addressed(
+) -> None:
+    """Ambient group review should not imply anyone addressed the character."""
+
+    case = _group_review_case()
+    case["conversation_progress"]["activity_labels"]["bot_addressing"] = (
+        "ambient_group_context"
+    )
+    case["group_activity_window"]["semantic_labels"]["bot_addressing"] = (
+        "ambient_group_context"
+    )
+
+    source_packet = projection.build_source_packet(case)
+    rendered_packet = projection.render_source_packet_text(source_packet)
+
+    assert source_packet["instruction"] == (
+        "我刚看到群里刚刚发生的一段现场。我之前没有插话，"
+        "这段里也没有人把话题交给我。"
+    )
+    assert rendered_packet.startswith(
+        "我刚看到群里刚刚发生的一段现场。我之前没有插话，"
+        "这段里也没有人把话题交给我。"
+        "\n\n# 当前聊天窗口"
+    )
+    _assert_no_group_source_trigger_labels(rendered_packet)
+    assert (
+        "我刚看到群里刚刚发生的一段现场。里面有人把话题指向我。"
+        not in rendered_packet
+    )
+
+
+def test_group_review_cognition_state_does_not_invent_target_user() -> None:
+    """Channel-scoped group review should not fabricate a semantic target."""
+
+    case = _group_review_case()
+
+    cognition_state = runner._build_cognition_state(
+        case,
+        "rendered group source packet",
+    )
+    episode_target_scope = cognition_state["cognitive_episode"]["target_scope"]
+
+    assert cognition_state["global_user_id"] == ""
+    assert cognition_state["platform_user_id"] == ""
+    assert cognition_state["user_name"] == "group audience"
+    assert episode_target_scope["current_global_user_id"] == ""
+    assert episode_target_scope["current_platform_user_id"] == ""
+    assert episode_target_scope["current_display_name"] == "group audience"
+    assert episode_target_scope["target_addressed_user_ids"] == []
 
 
 def test_non_group_source_packet_omits_group_window_section() -> None:
@@ -317,6 +373,21 @@ def _input_set(scopes: list[ReflectionScopeInput]) -> ReflectionInputSet:
         query_diagnostics={},
     )
     return input_set
+
+
+def _assert_no_group_source_trigger_labels(rendered_packet: str) -> None:
+    """Assert group-review source text has no label or action-pressure cue."""
+
+    for forbidden in (
+        "来源位置：",
+        "出现原因：",
+        "数据身份：",
+        "进入注意的原因：",
+        "阅读方式",
+        "自检",
+        "需要接上",
+    ):
+        assert forbidden not in rendered_packet
 
 
 def _group_scope() -> ReflectionScopeInput:

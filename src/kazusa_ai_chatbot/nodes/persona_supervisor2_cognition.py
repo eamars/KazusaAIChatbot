@@ -6,12 +6,14 @@ Agent implementations live in the layer-specific submodules:
   - persona_supervisor2_cognition_l2c2 (L2c2 social context)
   - persona_supervisor2_cognition_l2d  (L2d action selection)
 """
-from kazusa_ai_chatbot.nodes.persona_supervisor2_schema import GlobalPersonaState, CognitionState
-from kazusa_ai_chatbot.utils import build_interaction_history_recent, log_preview
+from collections.abc import Mapping
+import logging
 
 from langgraph.graph import StateGraph, START, END
 
-import logging
+from kazusa_ai_chatbot.db import build_group_engagement_action_context
+from kazusa_ai_chatbot.nodes.persona_supervisor2_schema import GlobalPersonaState, CognitionState
+from kazusa_ai_chatbot.utils import build_interaction_history_recent, log_preview
 
 logger = logging.getLogger(__name__)
 
@@ -33,6 +35,54 @@ from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition_l2c2 import (  # noqa
 from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition_l2d import (  # noqa: E402
     call_action_initializer,
 )
+
+
+async def call_group_engagement_action_context_loader(
+    state: CognitionState,
+) -> CognitionState:
+    """Load group-channel engagement guidance before action selection."""
+
+    empty_context = {"engagement_guidelines": [], "confidence": ""}
+    if not _is_group_self_cognition_state(state):
+        return_value = {
+            "group_engagement_action_context": empty_context,
+        }
+        return return_value
+
+    context = await build_group_engagement_action_context(
+        channel_type=state["channel_type"],
+        platform=state["platform"],
+        platform_channel_id=state["platform_channel_id"],
+    )
+    return_value = {
+        "group_engagement_action_context": context,
+    }
+    return return_value
+
+
+def _is_group_self_cognition_state(state: CognitionState) -> bool:
+    """Return whether the current cognition state is group self-cognition."""
+
+    if state["channel_type"] != "group":
+        return_value = False
+        return return_value
+
+    episode = state.get("cognitive_episode")
+    if not isinstance(episode, Mapping):
+        return_value = False
+        return return_value
+
+    trigger_source = episode.get("trigger_source")
+    input_sources = episode.get("input_sources")
+    is_internal_monologue = (
+        isinstance(input_sources, list)
+        and "internal_monologue" in input_sources
+    )
+    is_self_cognition = (
+        trigger_source == "internal_thought"
+        and is_internal_monologue
+    )
+    return is_self_cognition
 
 
 async def call_cognition_subgraph(state: GlobalPersonaState) -> GlobalPersonaState:
@@ -57,6 +107,10 @@ async def call_cognition_subgraph(state: GlobalPersonaState) -> GlobalPersonaSta
         "l2c2_social_context_appraisal",
         call_social_context_appraisal,
     )
+    sub_agent_builder.add_node(
+        "group_engagement_action_context",
+        call_group_engagement_action_context_loader,
+    )
     sub_agent_builder.add_node("l2d_action_selection", call_action_initializer)
 
     # Connect
@@ -75,6 +129,10 @@ async def call_cognition_subgraph(state: GlobalPersonaState) -> GlobalPersonaSta
 
     sub_agent_builder.add_edge(
         ["l2c1_judgment_synthesis", "l2c2_social_context_appraisal"],
+        "group_engagement_action_context",
+    )
+    sub_agent_builder.add_edge(
+        "group_engagement_action_context",
         "l2d_action_selection",
     )
     sub_agent_builder.add_edge("l2d_action_selection", END)

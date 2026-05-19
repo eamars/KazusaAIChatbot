@@ -44,6 +44,7 @@ No active short-term plans.
 |---|---|---|
 | [character_self_image_rolling_state_bugfix_plan.md](active/bugfix/character_self_image_rolling_state_bugfix_plan.md) | Bugfix development plan | approved |
 | [memory_lifecycle_specialist_routing_plan.md](active/bugfix/memory_lifecycle_specialist_routing_plan.md) | Bugfix development plan | in_progress |
+| [self_cognition_group_speak_selection_bugfix_plan.md](active/bugfix/self_cognition_group_speak_selection_bugfix_plan.md) | Bugfix development plan | in_progress |
 
 ## Reference Documents
 

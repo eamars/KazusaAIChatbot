@@ -313,6 +313,128 @@ async def test_cognition_subgraph_runs_l2c2_before_l2d() -> None:
 
 
 @pytest.mark.asyncio
+async def test_cognition_subgraph_loads_group_engagement_before_l2d() -> None:
+    """Targetless group self-cognition should load group engagement pre-L2d."""
+
+    call_order: list[str] = []
+
+    async def l1_agent(_state: dict) -> dict:
+        call_order.append("l1")
+        return {
+            "emotional_appraisal": "curious",
+            "interaction_subtext": "observing group scene",
+        }
+
+    async def l2a_agent(_state: dict) -> dict:
+        call_order.append("l2a")
+        return {
+            "internal_monologue": "I am watching whether the group has an opening.",
+            "logical_stance": "TENTATIVE",
+            "character_intent": "EVADE",
+        }
+
+    async def l2b_agent(_state: dict) -> dict:
+        call_order.append("l2b")
+        return {
+            "boundary_core_assessment": {
+                "boundary_issue": "none",
+                "acceptance": "allow",
+                "stance_bias": "tentative",
+            },
+        }
+
+    async def l2c1_agent(_state: dict) -> dict:
+        call_order.append("l2c1")
+        return {
+            "logical_stance": "TENTATIVE",
+            "character_intent": "EVADE",
+            "judgment_note": "Keep the group context in view.",
+        }
+
+    async def l2c2_agent(_state: dict) -> dict:
+        call_order.append("l2c2")
+        return {
+            "social_distance": "ambient group",
+            "emotional_intensity": "low",
+            "vibe_check": "busy group",
+            "relational_dynamic": "no single target",
+        }
+
+    async def engagement_loader(state: dict) -> dict:
+        assert state["channel_type"] == "group"
+        assert state["global_user_id"] == ""
+        call_order.append("engagement")
+        return {
+            "group_engagement_action_context": {
+                "engagement_guidelines": [
+                    "Stay with the current group topic.",
+                ],
+                "confidence": "medium",
+            }
+        }
+
+    async def l2d_agent(state: dict) -> dict:
+        assert state["group_engagement_action_context"] == {
+            "engagement_guidelines": [
+                "Stay with the current group topic.",
+            ],
+            "confidence": "medium",
+        }
+        call_order.append("l2d")
+        return {"action_specs": []}
+
+    state = _cognition_state()
+    state.update({
+        "channel_type": "group",
+        "platform_channel_id": "group-123",
+        "platform_user_id": "",
+        "global_user_id": "",
+        "user_name": "group audience",
+    })
+    episode = dict(state["cognitive_episode"])
+    episode["trigger_source"] = "internal_thought"
+    episode["input_sources"] = ["internal_monologue"]
+    episode["output_mode"] = "preview"
+    episode["target_scope"] = {
+        "platform": "debug",
+        "platform_channel_id": "group-123",
+        "channel_type": "group",
+        "current_platform_user_id": "",
+        "current_global_user_id": "",
+        "current_display_name": "group audience",
+        "target_addressed_user_ids": [],
+        "target_broadcast": True,
+    }
+    state["cognitive_episode"] = episode
+
+    with (
+        patch.object(cognition_module, "call_cognition_subconscious", l1_agent),
+        patch.object(cognition_module, "call_cognition_consciousness", l2a_agent),
+        patch.object(cognition_module, "call_boundary_core_agent", l2b_agent),
+        patch.object(cognition_module, "call_judgment_core_agent", l2c1_agent),
+        patch.object(
+            cognition_module,
+            "call_social_context_appraisal",
+            l2c2_agent,
+            create=True,
+        ),
+        patch.object(
+            cognition_module,
+            "call_group_engagement_action_context_loader",
+            engagement_loader,
+            create=True,
+        ),
+        patch.object(cognition_module, "call_action_initializer", l2d_agent),
+    ):
+        result = await cognition_module.call_cognition_subgraph(state)
+
+    assert result["action_specs"] == []
+    assert call_order.index("l2c1") < call_order.index("engagement")
+    assert call_order.index("l2c2") < call_order.index("engagement")
+    assert call_order.index("engagement") < call_order.index("l2d")
+
+
+@pytest.mark.asyncio
 async def test_selected_speak_runs_l3_surface_and_dialog_once() -> None:
     """A selected text action should invoke selected L3 then dialog."""
 

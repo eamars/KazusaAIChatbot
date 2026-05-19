@@ -260,6 +260,10 @@ def test_action_initializer_prompt_follows_cognition_prompt_structure() -> None:
     assert "你是角色的语义行动选择层" in prompt
     assert "用户消息只包含本轮动态行动上下文" in prompt
     assert "行动请求只描述角色想做什么" in prompt
+    assert "`speak` 是可见文字回复" in prompt
+    assert "内心独白是证据，不是动作" in prompt
+    assert "群聊参与习惯" in prompt
+    assert "不能替代当前场景" in prompt
     assert "只返回合法 JSON 字符串" in prompt
     assert "`speak`" in prompt
     assert "`trigger_future_cognition`" in prompt
@@ -285,6 +289,46 @@ def test_action_initializer_prompt_follows_cognition_prompt_structure() -> None:
     assert "L2c2" not in prompt
     assert "小判断例" not in prompt
     assert "5090 能跑什么人工智能模型" not in prompt
+
+
+def test_action_initializer_payload_includes_group_engagement_context() -> None:
+    """Group self-cognition should expose bounded engagement before L2d."""
+
+    state = _state()
+    state["channel_type"] = "group"
+    state["cognitive_episode"]["trigger_source"] = "internal_thought"
+    state["cognitive_episode"]["input_sources"] = ["internal_monologue"]
+    state["cognitive_episode"]["output_mode"] = "preview"
+    state["group_engagement_action_context"] = {
+        "engagement_guidelines": [
+            "Join clear direct group openings.",
+            "Stay with the current group topic.",
+        ],
+        "confidence": "high",
+    }
+
+    action_context = l2d_module.build_action_initializer_payload(state)
+
+    assert "群聊参与习惯：" in action_context
+    assert "Join clear direct group openings." in action_context
+    assert "Stay with the current group topic." in action_context
+    assert "confidence=high" in action_context
+    assert "Do not leak this to L2d." not in action_context
+
+
+def test_action_initializer_payload_omits_group_engagement_for_private() -> None:
+    """Private chat should not receive group-channel engagement guidance."""
+
+    state = _state()
+    state["group_engagement_action_context"] = {
+        "engagement_guidelines": ["Join clear direct group openings."],
+        "confidence": "high",
+    }
+
+    action_context = l2d_module.build_action_initializer_payload(state)
+
+    assert "群聊参与习惯：" not in action_context
+    assert "Join clear direct group openings." not in action_context
 
 
 def test_action_initializer_hides_lifecycle_without_active_commitments() -> None:

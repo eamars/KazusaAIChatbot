@@ -115,8 +115,74 @@ def _build_action_context_text(
         f"相关记忆：{_evidence_list_text(evidence['memory_evidence'])}",
         f"对话进度：{_compact_context_value(evidence['conversation_progress'])}",
     ]
+    group_engagement_text = _group_engagement_context_text(state)
+    if group_engagement_text:
+        context_lines.append(group_engagement_text)
     action_context = "\n".join(context_lines)
     return action_context
+
+
+def _group_engagement_context_text(state: CognitionState) -> str:
+    """Return group-channel engagement evidence for group self-cognition."""
+
+    if not _is_group_self_cognition_context(state):
+        return_value = ""
+        return return_value
+
+    raw_context = state.get("group_engagement_action_context")
+    if not isinstance(raw_context, Mapping):
+        return_value = "群聊参与习惯：无"
+        return return_value
+
+    raw_guidelines = raw_context.get("engagement_guidelines")
+    guidelines: list[str] = []
+    if isinstance(raw_guidelines, list):
+        guidelines = [
+            item.strip()
+            for item in raw_guidelines
+            if isinstance(item, str) and item.strip()
+        ]
+    if not guidelines:
+        return_value = "群聊参与习惯：无"
+        return return_value
+
+    confidence = ""
+    raw_confidence = raw_context.get("confidence")
+    if isinstance(raw_confidence, str) and raw_confidence.strip():
+        confidence = raw_confidence.strip()
+
+    guideline_text = "；".join(guidelines)
+    if confidence:
+        return_value = f"群聊参与习惯：{guideline_text}；confidence={confidence}"
+        return return_value
+
+    return_value = f"群聊参与习惯：{guideline_text}"
+    return return_value
+
+
+def _is_group_self_cognition_context(state: CognitionState) -> bool:
+    """Return whether L2d is selecting for a group self-cognition source."""
+
+    if state["channel_type"] != "group":
+        return_value = False
+        return return_value
+
+    episode = state.get("cognitive_episode")
+    if not isinstance(episode, Mapping):
+        return_value = False
+        return return_value
+
+    trigger_source = episode.get("trigger_source")
+    input_sources = episode.get("input_sources")
+    is_internal_monologue = (
+        isinstance(input_sources, list)
+        and "internal_monologue" in input_sources
+    )
+    is_self_cognition = (
+        trigger_source == "internal_thought"
+        and is_internal_monologue
+    )
+    return is_self_cognition
 
 
 def _commitment_context_text(
@@ -678,10 +744,10 @@ def _semantic_text(value: Mapping[str, object], field_name: str) -> str:
 
 _ACTION_INITIALIZER_PROMPT = """\
 你是角色的语义行动选择层。
-前面的理解过程已经完成当前事件的立场、意图、边界和社交语境判断。
+前序理解已经形成当前事件的立场、意图、边界判断和社交语境。
 用户消息只包含本轮动态行动上下文。
-你的任务是把已经成形的角色行动意图整理成 0 到 3 个语义动作请求。
-行动请求只描述角色想做什么，保持在语义层；输出内容只包含动作名、语义决定、目标细节和理由。
+你的任务是把角色已经形成的行动意图整理成 0 到 3 个语义动作请求。
+行动请求只描述角色想做什么，保持在语义层；不要生成最终发言文本，不要执行动作。
 
 # 语言政策
 - 除字段名、枚举值、ID、URL、代码、命令、模型标签等必须保持原样的内容外，你新生成的内部自由文本字段使用简体中文。
@@ -689,30 +755,33 @@ _ACTION_INITIALIZER_PROMPT = """\
 - 保留原语言内容时只保留原文，不另加旁注解释。
 
 # 可选动作
-- `speak`：角色需要一个文字表层。`detail` 写清文字表层要处理的具体对象、问题、承诺或待处理目标。
-- `memory_lifecycle_update`：当前回合可能涉及活动承诺的兑现、放弃、过时或延期，需要专门复核活动承诺生命周期。你只选择复核需要，不选择具体承诺、别名、数据库目标或生命周期决定。
-- `trigger_future_cognition`：角色需要在未来拿到或消费一个具体新信息后再想一次。`detail` 写成完整目标：等待或消费什么新信息，继续处理哪个具体问题、任务或承诺。
+- `speak` 是可见文字回复。选择它表示角色决定把话说到当前外部频道；之后才会交给 L3/dialog 渲染为可见文本。`detail` 写清这个可见回复要处理的具体对象、问题、承诺或待处理目标。
+- `memory_lifecycle_update` 表示当前回合可能影响活动承诺的兑现、放弃、过时或延期，需要专门复核活动承诺生命周期。只选择复核需要，不选择具体承诺、别名、数据库目标或生命周期决定。
+- `trigger_future_cognition` 表示角色需要在未来拿到或消费一个具体新信息后再想一次。`detail` 必须写清等待或消费什么具体新信息，以及它会继续处理哪个具体问题、任务或承诺。
 
 # 选择流程
-1. 先根据当前行动上下文确认角色现在的行动意图。
-2. 当前需要文字表层时，选择 `speak`。
-3. 当前活动承诺可能被本轮输入或已形成决定影响时，选择 `memory_lifecycle_update`，并在 `detail` 写清需要复核的语义原因。
-4. 当前回合存在具体未完成问题，且继续处理依赖未来新信息时，选择 `trigger_future_cognition`。
-5. 没有真实动作时，返回空数组。
-6. 同一轮可以选择多个彼此独立的动作，最多 3 个。
+1. 先阅读当前行动上下文，判断角色现在是否真的要把某件事外部化为动作。
+2. 内心独白是证据，不是动作。私人好奇、只想观察、保持沉默、维护进度、等待更自然时机，除非已经决定外部化，否则都不是 `speak`。
+3. 只有当前场景给了足够清楚的可见发言理由，并且角色愿意把该内容发到当前频道，才选择 `speak`。
+4. 群聊参与习惯只是群频道互动证据。它可以帮助判断当前场景是否有合适开口，但不能替代当前场景，也不能命令角色发言。
+5. 当前活动承诺可能被本轮输入或已形成决定影响时，选择 `memory_lifecycle_update`，并在 `detail` 写清需要复核的语义原因。
+6. 当前回合存在具体未完成问题，且继续处理依赖未来新信息时，选择 `trigger_future_cognition`。
+7. 没有需要外部化或私有处理的真实动作时，返回空数组。
+8. 同一轮可以选择多个彼此独立的动作，最多 3 个。
 
 # 未来认知判断
-未来认知动作承接需要下一轮思考的具体信息缺口。
+未来认知动作承接需要下一轮思考的信息缺口。
 合格的 `detail` 同时包含两部分：
 - 未来要等待或消费的具体新信息；
 - 该信息将继续处理的具体问题、任务或承诺。
 
 普通等待、情绪余波、关系观察和更自然的时机属于对话进度，不生成未来认知动作。
-如果未来认知动作与文字表层动作并列，`speak.detail` 写当前文字表层目标，`trigger_future_cognition.detail` 写下一轮思考目标。
+如果未来认知动作与 `speak` 并列，`speak.detail` 写当前可见回复目标，`trigger_future_cognition.detail` 写下一轮思考目标。
 
 # 输入格式
 用户消息是一段中文行动上下文字符串，不是 JSON。
-它描述当前回合的动态信息：触发来源、输出要求、已形成的决定、即时感受、社交语境、当前输入摘要、检索结论、活动承诺线索、相关记忆和对话进度。
+它描述当前回合的动态信息：触发来源、输出要求、已形成的决定、即时感受、社交语境、当前输入摘要、检索结论、活动承诺线索、相关记忆、对话进度，以及可能出现的群聊参与习惯。
+当出现 `群聊参与习惯` 时，把它当作抽象参与证据；它只说明这个群频道通常如何承接、观察或推进，不能替代当前场景。
 
 # 输出格式
 只返回合法 JSON 字符串：

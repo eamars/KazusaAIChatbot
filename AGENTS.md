@@ -1,17 +1,27 @@
 # AGENTS.md
 
-## Operating Posture
+## How To Work Here
 
 Work as a senior system engineer. Start with the system-level picture, identify
-the ownership boundaries, then move into technical detail. Do not jump to a
-conclusion before reading the relevant code, docs, tests, and current git
+the ownership boundaries, then move into implementation detail. Do not jump to
+a conclusion before reading the relevant code, docs, tests, and current git
 state.
 
-Communicate with the user before meaningful action. State what context you are
-gathering, what assumption you are making, and what concrete change or command
+Communicate before meaningful action. Tell the user what context you are
+gathering, what assumption you are making, and what concrete command or change
 you are about to run.
 
-## Project Shape
+Before editing, check:
+
+- `git status --short`
+- `README.md`
+- `docs/HOWTO.md`
+- Relevant subsystem README files under `src/kazusa_ai_chatbot/**/README.md`
+- The source and test files directly involved in the request
+
+Never read `.env` unless the user explicitly asks for environment inspection.
+
+## Project Model
 
 Kazusa is a platform-agnostic character brain service, not a generic assistant
 shell. The core boundary is:
@@ -21,25 +31,42 @@ adapter/debug client -> brain service -> queue/intake -> RAG -> cognition
 -> dialog -> persistence/consolidation -> scheduler/reflection
 ```
 
-Adapters should stay thin. Brain code should consume typed message-envelope
-fields instead of parsing raw Discord, QQ, or debug-wire syntax.
+Adapters stay thin. They normalize platform events and deliver returned
+surfaces. Brain code consumes typed message-envelope fields and must not parse
+raw Discord, QQ, or debug-wire syntax as its main contract.
 
-## First Files To Read
+Keep these ownership lines clear:
 
-- `README.md`
-- `docs/HOWTO.md`
-- Relevant subsystem README files under `src/kazusa_ai_chatbot/**/README.md`
-- The specific source and test files for the requested change
+- RAG returns evidence.
+- Cognition decides stance, boundaries, character judgment, and response goals.
+- Dialog and L3 surfaces own final wording and visible rendering.
+- Persistence, consolidation, scheduler, and reflection maintain continuity
+  outside the live response wording path.
 
-Never read `.env` unless the user explicitly asks for environment inspection.
+## Character Judgment Goal
 
-## Architecture Rules
+Evaluate behavior as a character brain, not as a generic assistant optimized
+for safe, low-response output. The target behavior is believable character
+judgment grounded in observation, context, mood, relationship, and scene
+pressure.
+
+Do not propose mechanical suppression just because a dialog result is awkward
+or a previous response was noisy. If the character has enough reason and enough
+observed context to speak, she should speak. If the reason is weak, stale,
+self-referential, or based only on the existence of an internal cognition
+window, she should stay quiet because the character lacks a grounded reason.
+
+When investigating response sensitivity, judge the quality of the character's
+reason to speak first. Response ratio, gating, and engagement tuning are tools
+for preserving character judgment and topic fit; they are not the product goal.
+
+## Architecture Guardrails
 
 - Preserve the live response path as bounded and inspectable.
 - LLM stages own semantic judgment.
 - Deterministic code owns validation, persistence, limits, permissions, cache
   invalidation, scheduler execution, and adapter delivery.
-- RAG returns evidence; cognition decides stance; dialog owns final wording.
+- RAG evidence must not be treated as persona or final stance.
 - Reflection runs outside live chat. Raw reflection output must not enter normal
   cognition directly; only promoted, gated context may be used.
 - Future autonomous contact must go through explicit permission, dispatcher or
@@ -68,27 +95,28 @@ Before reading or executing development plans, read
 `development_plans/README.md`. It is the lifecycle registry for long-term,
 active, archived, reference, and triage documents.
 
-`development_plans/long_term/todo.md` is a living long-term development plan,
-not an executable work contract. Promote roadmap items into
-`development_plans/active/short_term/` or `development_plans/active/bugfix/`
-before implementation.
+Use plan status as the execution boundary:
 
-Only execute plans in `development_plans/active/` whose `Status` is `approved`
-or `in_progress`. Treat `draft` plans as discussion artifacts, archived plans
-as historical records, reference documents as context only, and triage files as
-blocked until classified.
-
-Completed plans are historical records. Do not append new scope to a completed
-plan; create a new or superseding plan.
+- `development_plans/long_term/todo.md` is a living roadmap, not an executable
+  work contract.
+- Promote roadmap items into `development_plans/active/short_term/` or
+  `development_plans/active/bugfix/` before implementation.
+- Only execute plans in `development_plans/active/` whose `Status` is
+  `approved` or `in_progress`.
+- Treat `draft` plans as discussion artifacts.
+- Treat archived plans as historical records.
+- Treat reference documents as context only.
+- Treat triage files as blocked until classified.
+- Completed plans are historical records. Do not append new scope to a
+  completed plan; create a new or superseding plan.
 
 ## Git And Files
 
-- Check `git status --short` before editing.
 - Do not revert user changes unless explicitly asked.
 - Keep edits scoped to the request.
 - Prefer `rg` for searches.
+- Use `apply_patch` for manual edits.
 - PowerShell path safety: use `-LiteralPath '...'` for filesystem paths,
   especially Windows absolute paths and any path that may contain spaces.
   Never pass unquoted paths to commands. Prefer repo-relative paths when
   possible.
-- Use `apply_patch` for manual edits.

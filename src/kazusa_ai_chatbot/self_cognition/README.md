@@ -130,9 +130,21 @@ cognition's route or contact decision.
 - `topic_rag_followup`
 
 `group_chat_review` is built from reflection-cycle group activity windows. It
-uses first-person chat-window data framing, bounded visible context,
-deterministic semantic labels, and source-aligned delivery metadata. Empty
-windows are skipped before cognition.
+uses label-free first-person chat-window data framing, bounded visible
+context, deterministic semantic labels, and source-aligned delivery metadata.
+For ambient group windows, the model-facing source packet says the character
+has just noticed a group scene where she has not yet joined and nobody has
+handed the topic to her. For directly addressed group windows, the source
+packet says someone has pointed the topic at her. Empty windows are skipped
+before cognition.
+
+Ambient group review keeps `target_scope.user_id=None`: the semantic target is
+the observed group scene, not a fabricated latest speaker. The delivery target
+remains the source group channel. Before L2d action selection, targetless
+group review may load bounded group-channel engagement guidance so the
+character can judge whether the current scene gives enough reason to speak.
+This guidance is evidence only; it is not a response-ratio control, a command
+to speak, or a deterministic silence rule.
 
 `commitment_past_due` and `commitment_duplicate_tick` do not force contact.
 If shared cognition does not select outward contact, the route is recorded as

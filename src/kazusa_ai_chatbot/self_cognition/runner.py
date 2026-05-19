@@ -719,7 +719,7 @@ def _build_cognition_state(
         storage_timestamp_utc=storage_timestamp_utc,
         local_time_context=local_time_context,
     )
-    user_id = target_scope["user_id"] or "self_cognition_target"
+    user_id = target_scope["user_id"] or ""
     state = {
         "character_profile": _character_profile(case),
         "storage_timestamp_utc": storage_timestamp_utc,
@@ -921,7 +921,7 @@ def _build_cognitive_episode(
     """Represent the self-cognition source packet as an internal percept."""
 
     target_scope = _target_scope(case)
-    user_id = target_scope["user_id"] or "self_cognition_target"
+    user_id = target_scope["user_id"] or ""
     percept_content = json.dumps(
         {
             "residue": {
@@ -1286,9 +1286,14 @@ def _user_profile(case: models.SelfCognitionCase) -> dict[str, Any]:
         return_value = value
         return return_value
 
+    target_scope = _target_scope(case)
+    if target_scope["channel_type"] == "group" and target_scope["user_id"] is None:
+        display_name = "group audience"
+    else:
+        display_name = target_scope["user_id"] or "self cognition target"
     profile = {
         "affinity": models.DEFAULT_DRY_RUN_AFFINITY,
-        "display_name": _target_scope(case)["user_id"] or "self cognition target",
+        "display_name": display_name,
         "last_relationship_insight": "",
     }
     return profile

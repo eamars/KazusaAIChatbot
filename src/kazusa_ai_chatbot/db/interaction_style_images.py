@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import logging
 import re
+
+from pymongo.errors import PyMongoError
 
 from kazusa_ai_chatbot.db._client import get_db
 from kazusa_ai_chatbot.db.schemas import (
@@ -19,6 +22,7 @@ from kazusa_ai_chatbot.config import (
 from kazusa_ai_chatbot.time_boundary import storage_utc_now_iso
 from kazusa_ai_chatbot.utils import text_or_empty
 
+logger = logging.getLogger(__name__)
 
 INTERACTION_STYLE_IMAGE_COLLECTION = "interaction_style_images"
 _GUIDELINE_FIELDS = (
@@ -28,6 +32,8 @@ _GUIDELINE_FIELDS = (
     "engagement_guidelines",
 )
 _CONFIDENCE_VALUES = {"", "low", "medium", "high"}
+_STYLE_LOAD_ERRORS = (PyMongoError, ValueError)
+_STYLE_PROJECTION_ERRORS = (KeyError, TypeError, ValueError)
 _EVENT_MARKER_PATTERNS = (
     re.compile(r"\b\d{4}-\d{2}-\d{2}\b"),
     re.compile(r"\b\d{1,2}:\d{2}\b"),
@@ -469,22 +475,106 @@ async def build_interaction_style_context(
         Prompt-facing style context. Private chats omit group-channel style.
     """
 
-    user_document = await get_user_style_image(global_user_id)
-    user_style = _project_l3_overlay(_runtime_overlay(user_document))
+    clean_global_user_id = text_or_empty(global_user_id).strip()
+    if channel_type != "group" and not clean_global_user_id:
+        raise ValueError("global_user_id is required")
+
+    user_style = empty_interaction_style_overlay()
+    if clean_global_user_id:
+        try:
+            user_document = await get_user_style_image(clean_global_user_id)
+        except _STYLE_LOAD_ERRORS as exc:
+            logger.exception(f"User interaction style load failed: {exc}")
+        else:
+            try:
+                user_style = _project_l3_overlay(
+                    _runtime_overlay(user_document)
+                )
+            except _STYLE_PROJECTION_ERRORS as exc:
+                logger.exception(
+                    f"User interaction style projection failed: {exc}"
+                )
+
     context: dict = {
         "user_style": user_style,
         "application_order": ["user_style"],
     }
     if channel_type == "group":
+        group_style = empty_interaction_style_overlay()
+        try:
+            group_document = await get_group_channel_style_image(
+                platform=platform,
+                platform_channel_id=platform_channel_id,
+            )
+        except _STYLE_LOAD_ERRORS as exc:
+            logger.exception(f"Group interaction style load failed: {exc}")
+        else:
+            try:
+                group_style = _project_l3_overlay(
+                    _runtime_overlay(group_document)
+                )
+            except _STYLE_PROJECTION_ERRORS as exc:
+                logger.exception(
+                    f"Group interaction style projection failed: {exc}"
+                )
+        context["group_channel_style"] = group_style
+        context["application_order"] = ["user_style", "group_channel_style"]
+    return context
+
+
+async def build_group_engagement_action_context(
+    *,
+    channel_type: str,
+    platform: str,
+    platform_channel_id: str,
+) -> dict:
+    """Project group-channel engagement guidance for action selection.
+
+    Args:
+        channel_type: Current channel type.
+        platform: Platform namespace.
+        platform_channel_id: Platform channel or group id.
+
+    Returns:
+        Compact group engagement guidance for L2d.
+    """
+
+    empty_context = {"engagement_guidelines": [], "confidence": ""}
+    if channel_type != "group":
+        return_value = empty_context
+        return return_value
+
+    try:
         group_document = await get_group_channel_style_image(
             platform=platform,
             platform_channel_id=platform_channel_id,
         )
-        context["group_channel_style"] = _project_l3_overlay(
-            _runtime_overlay(group_document)
-        )
-        context["application_order"] = ["user_style", "group_channel_style"]
-    return context
+    except _STYLE_LOAD_ERRORS as exc:
+        logger.exception(f"Group engagement style load failed: {exc}")
+        return_value = empty_context
+        return return_value
+
+    try:
+        group_style = _runtime_overlay(group_document)
+    except _STYLE_PROJECTION_ERRORS as exc:
+        logger.exception(f"Group engagement style projection failed: {exc}")
+        return_value = empty_context
+        return return_value
+
+    engagement_guidelines = list(
+        group_style["engagement_guidelines"][
+            :L3_INTERACTION_STYLE_GUIDELINES_PER_FIELD_LIMIT
+        ]
+    )
+    if not engagement_guidelines:
+        return_value = empty_context
+        return return_value
+
+    return_value = {
+        "engagement_guidelines": engagement_guidelines,
+        "confidence": group_style["confidence"],
+    }
+    return return_value
 
 
 async def build_user_engagement_relevance_context(global_user_id: str) -> dict:

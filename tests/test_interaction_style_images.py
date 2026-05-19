@@ -405,6 +405,110 @@ async def test_build_interaction_style_context_group_applies_user_then_group(
 
 
 @pytest.mark.asyncio
+async def test_build_interaction_style_context_group_allows_missing_user_id(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Targetless group review should still load group-channel style."""
+
+    db = _StyleImageDb()
+    _patch_get_db(monkeypatch, db)
+    await style_store.upsert_group_channel_style_image(
+        platform="qq",
+        platform_channel_id="group-1",
+        overlay={
+            "speech_guidelines": [],
+            "social_guidelines": [],
+            "pacing_guidelines": [],
+            "engagement_guidelines": [
+                "Join when the current group topic gives a clear opening."
+            ],
+            "confidence": "high",
+        },
+        source_reflection_run_ids=["run-2"],
+        storage_timestamp_utc="2026-05-06T00:00:00+00:00",
+    )
+
+    context = await style_store.build_interaction_style_context(
+        global_user_id="",
+        channel_type="group",
+        platform="qq",
+        platform_channel_id="group-1",
+    )
+
+    assert context["application_order"] == ["user_style", "group_channel_style"]
+    assert context["user_style"] == style_store.empty_interaction_style_overlay()
+    assert context["group_channel_style"]["engagement_guidelines"] == [
+        "Join when the current group topic gives a clear opening."
+    ]
+    assert context["group_channel_style"]["confidence"] == "high"
+
+
+@pytest.mark.asyncio
+async def test_build_interaction_style_context_private_requires_user_id(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Private style loading still requires a concrete user target."""
+
+    db = _StyleImageDb()
+    _patch_get_db(monkeypatch, db)
+
+    with pytest.raises(ValueError, match="global_user_id is required"):
+        await style_store.build_interaction_style_context(
+            global_user_id="",
+            channel_type="private",
+            platform="qq",
+            platform_channel_id="private-1",
+        )
+
+
+@pytest.mark.asyncio
+async def test_build_group_engagement_action_context_projects_group_only(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """L2d engagement context should expose only bounded group engagement."""
+
+    db = _StyleImageDb()
+    _patch_get_db(monkeypatch, db)
+    monkeypatch.setattr(
+        style_store,
+        "L3_INTERACTION_STYLE_GUIDELINES_PER_FIELD_LIMIT",
+        2,
+        raising=False,
+    )
+    await style_store.upsert_group_channel_style_image(
+        platform="qq",
+        platform_channel_id="group-1",
+        overlay={
+            "speech_guidelines": ["Do not leak this to L2d."],
+            "social_guidelines": ["Do not leak this either."],
+            "pacing_guidelines": [],
+            "engagement_guidelines": [
+                "Join clear direct group openings.",
+                "Stay with the current group topic.",
+                "This third item should be capped.",
+            ],
+            "confidence": "medium",
+        },
+        source_reflection_run_ids=["run-2"],
+        storage_timestamp_utc="2026-05-06T00:00:00+00:00",
+    )
+
+    context = await style_store.build_group_engagement_action_context(
+        channel_type="group",
+        platform="qq",
+        platform_channel_id="group-1",
+    )
+
+    assert context == {
+        "engagement_guidelines": [
+            "Join clear direct group openings.",
+            "Stay with the current group topic.",
+        ],
+        "confidence": "medium",
+    }
+
+
+@pytest.mark.asyncio
 async def test_build_user_engagement_relevance_context_projects_only_engagement(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

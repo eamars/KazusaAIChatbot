@@ -115,9 +115,11 @@ def render_source_packet_text(packet: models.SourcePacket) -> str:
         Text no longer than the configured source-packet character limit.
     """
 
-    lines = [
-        packet['instruction'],
-        _source_packet_reason_line(packet),
+    lines = [packet['instruction']]
+    reason_line = _source_packet_reason_line(packet)
+    if reason_line:
+        lines.append(reason_line)
+    lines.extend([
         '',
         '# 当前聊天窗口',
         f'- idle_local_datetime: {packet["idle_local_datetime"]}',
@@ -126,7 +128,7 @@ def render_source_packet_text(packet: models.SourcePacket) -> str:
             f'{packet["last_evidence_local_datetime"]}'
         ),
         f'- local_time_context: {_compact_value(packet["local_time_context"])}',
-    ]
+    ])
     source_state = _render_source_state(packet)
     if source_state:
         lines.extend(
@@ -189,7 +191,14 @@ def _instruction_for_case(case: models.SelfCognitionCase) -> str:
 
     trigger_kind = _string_field(case, "trigger_kind")
     if trigger_kind == models.TRIGGER_GROUP_CHAT_REVIEW:
-        return_value = '来源位置：我所在群聊窗口的最近可见内容。'
+        group_activity_window = _group_activity_window(case)
+        if _is_directly_addressed_group_window(group_activity_window):
+            return_value = '我刚看到群里刚刚发生的一段现场。里面有人把话题指向我。'
+            return return_value
+        return_value = (
+            '我刚看到群里刚刚发生的一段现场。'
+            '我之前没有插话，这段里也没有人把话题交给我。'
+        )
         return return_value
     target_scope = _target_scope(case)
     if target_scope["channel_type"] == "private":
@@ -281,13 +290,25 @@ def _sanitize_group_activity_window(
     return return_value
 
 
+def _is_directly_addressed_group_window(
+    group_activity_window: dict[str, Any] | None,
+) -> bool:
+    """Return whether semantic labels say the group window addressed the bot."""
+
+    if group_activity_window is None:
+        return_value = False
+        return return_value
+    semantic_labels = group_activity_window["semantic_labels"]
+    bot_addressing = semantic_labels.get("bot_addressing", "")
+    is_directly_addressed = bot_addressing == "directly_addressed"
+    return is_directly_addressed
+
+
 def _source_packet_reason_line(packet: models.SourcePacket) -> str:
     """Return why the current chat-window data is visible to the character."""
 
     if packet["trigger_kind"] == models.TRIGGER_GROUP_CHAT_REVIEW:
-        return_value = (
-            '出现原因：我在这个群聊里，需要接上这段群聊的时间线和现场感。'
-        )
+        return_value = ''
         return return_value
     if packet["target_scope"]["channel_type"] == "private":
         return_value = (
@@ -296,10 +317,10 @@ def _source_packet_reason_line(packet: models.SourcePacket) -> str:
         return return_value
     if packet["target_scope"]["channel_type"] == "group":
         return_value = (
-            '出现原因：我在这个群聊里，需要接上这段群聊的时间线和现场感。'
+            '出现原因：我在这个群聊里，刚看到这段群聊的时间线和现场感。'
         )
         return return_value
-    return_value = '出现原因：我需要接上这段聊天的时间线和现场感。'
+    return_value = '出现原因：我正在查看这段聊天的时间线和现场感。'
     return return_value
 
 

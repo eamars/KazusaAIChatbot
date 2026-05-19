@@ -104,6 +104,7 @@ from kazusa_ai_chatbot.db.global_character_growth import (
     upsert_growth_trait_documents,
 )
 from kazusa_ai_chatbot.db.interaction_style_images import (
+    build_group_engagement_action_context,
     build_interaction_style_context,
     build_user_engagement_relevance_context,
     empty_interaction_style_overlay,
@@ -246,7 +247,8 @@ __all__ = [
     "ensure_global_character_growth_indexes", "insert_growth_run_document",
     "list_active_growth_traits", "list_prompt_visible_growth_traits",
     "upsert_growth_trait_documents",
-    "build_interaction_style_context", "build_user_engagement_relevance_context",
+    "build_group_engagement_action_context", "build_interaction_style_context",
+    "build_user_engagement_relevance_context",
     "empty_interaction_style_overlay", "ensure_interaction_style_image_indexes",
     "get_group_channel_style_image",
     "get_user_style_image", "upsert_group_channel_style_image",
