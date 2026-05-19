@@ -406,6 +406,26 @@ class DiscordAdapter(discord.Client):
         self._brain_registration_done = False
         self._heartbeat_task: asyncio.Task | None = None
 
+    def _outbound_channel_allowed(
+        self,
+        channel_id: str,
+        *,
+        channel_type: str,
+    ) -> bool:
+        """Return whether this adapter may visibly send to the target."""
+
+        if channel_type == "private":
+            return_value = True
+            return return_value
+        if channel_type != "group":
+            return_value = False
+            return return_value
+        if self.channel_ids is None:
+            return_value = False
+            return return_value
+        return_value = str(channel_id) in self.channel_ids
+        return return_value
+
     async def setup_hook(self) -> None:
         """Start the runtime callback server before Discord events begin."""
 
@@ -672,6 +692,16 @@ class DiscordAdapter(discord.Client):
         messages = data.get("messages", [])
         if not messages:
             return
+        if not self._outbound_channel_allowed(
+            channel_id_str,
+            channel_type="private" if is_dm else "group",
+        ):
+            logger.warning(
+                "Suppressing Discord response for disallowed target: "
+                f"channel_type={'private' if is_dm else 'group'} "
+                f"channel_id={channel_id_str}"
+            )
+            return
 
         use_reply = data.get("use_reply_feature", False)
         combined = "\n".join(messages)
@@ -734,7 +764,10 @@ class DiscordAdapter(discord.Client):
     ) -> bool:
         """Return whether Discord can accept one outbound target."""
 
-        if channel_type not in {"private", "group"}:
+        if not self._outbound_channel_allowed(
+            channel_id,
+            channel_type=channel_type,
+        ):
             return_value = False
             return return_value
         try:
@@ -783,6 +816,14 @@ class DiscordAdapter(discord.Client):
 
         if channel_type not in {"group", "private"}:
             raise RuntimeError(f"Unsupported Discord channel_type: {channel_type}")
+        if not self._outbound_channel_allowed(
+            channel_id,
+            channel_type=channel_type,
+        ):
+            raise RuntimeError(
+                "Discord target channel is not allowed: "
+                f"channel_type={channel_type} channel_id={channel_id}"
+            )
 
         channel = self.get_channel(int(channel_id))
         if channel is None:

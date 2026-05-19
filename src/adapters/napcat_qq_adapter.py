@@ -433,6 +433,26 @@ class NapCatWSAdapter:
         # Initialize connection
         self.brain_client = httpx.AsyncClient(base_url=self.brain_url, timeout=brain_response_timeout)
 
+    def _outbound_channel_allowed(
+        self,
+        channel_id: str,
+        *,
+        channel_type: str,
+    ) -> bool:
+        """Return whether this adapter may visibly send to the target."""
+
+        if channel_type == "private":
+            return_value = True
+            return return_value
+        if channel_type != "group":
+            return_value = False
+            return return_value
+        if self.channel_ids is None:
+            return_value = False
+            return return_value
+        return_value = str(channel_id) in self.channel_ids
+        return return_value
+
     async def connect(self):
         """Connect to NapCat and keep processing incoming websocket events."""
 
@@ -1048,6 +1068,16 @@ class NapCatWSAdapter:
             f"message_count={len(replies)}"
         )
         if replies:
+            if not self._outbound_channel_allowed(
+                channel_id,
+                channel_type="group" if is_group else "private",
+            ):
+                logger.warning(
+                    "Suppressing QQ response for disallowed target: "
+                    f"channel_type={'group' if is_group else 'private'} "
+                    f"channel_id={channel_id}"
+                )
+                return
             combined = "\n".join(replies)
             reply_to_msg_id = None
             if brain_data.get("use_reply_feature"):
@@ -1139,7 +1169,10 @@ class NapCatWSAdapter:
         if self._ws is None:
             return_value = False
             return return_value
-        if channel_type not in {"private", "group"}:
+        if not self._outbound_channel_allowed(
+            channel_id,
+            channel_type=channel_type,
+        ):
             return_value = False
             return return_value
         try:
@@ -1172,6 +1205,16 @@ class NapCatWSAdapter:
             Structured send result for the dispatcher.
         """
 
+        if channel_type not in {"private", "group"}:
+            raise RuntimeError(f"Unsupported QQ channel_type: {channel_type}")
+        if not self._outbound_channel_allowed(
+            channel_id,
+            channel_type=channel_type,
+        ):
+            raise RuntimeError(
+                "NapCat target channel is not allowed: "
+                f"channel_type={channel_type} channel_id={channel_id}"
+            )
         if self._ws is None:
             raise RuntimeError("NapCat websocket is not connected")
 
@@ -1188,8 +1231,6 @@ class NapCatWSAdapter:
         elif channel_type == "group":
             params["message_type"] = "group"
             params["group_id"] = int(channel_id)
-        else:
-            raise RuntimeError(f"Unsupported QQ channel_type: {channel_type}")
 
         try:
             response = await self._call_api(self._ws, "send_msg", params)

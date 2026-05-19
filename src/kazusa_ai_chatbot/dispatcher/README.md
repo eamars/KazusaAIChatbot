@@ -125,7 +125,9 @@ async def send_message(
 Adapters may also expose `can_send_message(channel_id, channel_type=...)` so
 the dispatcher can reject unavailable channels before write-ahead conversation
 persistence. Remote adapters report this through `/send_message/capability`;
-unavailable or unsupported capability checks fail closed.
+unavailable, unsupported, or not-configured targets fail closed. Platform
+adapters own configured-channel permission checks, so capability means both
+transport reachability and permission to deliver to that target.
 
 `delivery_mentions` requests are best-effort. If an adapter cannot render one
 or the request lacks the needed platform identity, it sends the original text.

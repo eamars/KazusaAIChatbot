@@ -230,6 +230,12 @@ python -m adapters.discord_adapter --channels 123456789012345678
 Listed channels are active, non-listed guild channels become listen-only, and
 DMs are always active.
 
+Outbound brain-originated sends follow the same public-channel list. Runtime
+callback sends to non-listed guild channels are rejected before Discord
+delivery, and normal `/chat` responses for listen-only guild channels are
+suppressed locally with no delivery receipt. DMs remain sendable regardless of
+the public channel list.
+
 ### NapCat QQ
 
 The NapCat adapter reads `BRAIN_URL`, `NAPCAT_WS_URL`, and `NAPCAT_WS_TOKEN`
@@ -241,6 +247,12 @@ python -m adapters.napcat_qq_adapter --channels 987654321
 
 Listed groups are active, non-listed groups become listen-only, and private
 chats are always active.
+
+Outbound brain-originated sends follow the same public-group list. Runtime
+callback sends to non-listed groups are rejected before NapCat `send_msg`, and
+normal `/chat` responses for listen-only groups are suppressed locally with no
+delivery receipt. Private chats remain sendable regardless of the public group
+list.
 
 ## HTTP API
 

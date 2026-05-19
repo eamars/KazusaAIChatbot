@@ -1208,6 +1208,146 @@ async def test_napcat_delivery_receipt_skips_when_send_fails():
 
 
 @pytest.mark.asyncio
+async def test_napcat_suppresses_normal_response_for_unlisted_group() -> None:
+    """Listen-only QQ groups should not receive returned brain messages."""
+
+    adapter = NapCatWSAdapter(
+        ws_url="ws://napcat.local/ws",
+        ws_token="token",
+        brain_url="http://127.0.0.1:8000",
+        brain_response_timeout=30,
+        runtime_host="127.0.0.1",
+        runtime_port=8011,
+        runtime_public_url="http://127.0.0.1:8011",
+        channel_ids=["905393941"],
+        debug_modes={},
+    )
+    adapter.bot_id = "3768713357"
+    adapter.bot_name = "Kazusa"
+    adapter.brain_client.post = AsyncMock(return_value=_DummyResponse({
+        "messages": ["this should stay local"],
+        "use_reply_feature": False,
+        "delivery_tracking_id": "delivery-suppressed",
+    }))
+    ws = _FakeNapCatWebSocket({"message_id": "should-not-send"})
+
+    await adapter.handle_event(
+        {
+            "post_type": "message",
+            "message_type": "group",
+            "message_id": 1602974844,
+            "group_id": 99999999,
+            "user_id": 2787858400,
+            "sender": {"nickname": "User A"},
+            "message": [{"type": "text", "data": {"text": " hi"}}],
+        },
+        ws,
+    )
+
+    chat_call = adapter.brain_client.post.await_args
+    assert adapter.brain_client.post.await_count == 1
+    assert chat_call.args == ("http://127.0.0.1:8000/chat",)
+    assert chat_call.kwargs["json"]["debug_modes"]["listen_only"] is True
+    assert ws.sent_payloads == []
+    await adapter.close()
+
+
+@pytest.mark.asyncio
+async def test_napcat_runtime_capability_rejects_unlisted_group() -> None:
+    """NapCat runtime capability should reject non-allowlisted groups."""
+
+    adapter = NapCatWSAdapter(
+        ws_url="ws://napcat.local/ws",
+        ws_token="token",
+        brain_url="http://127.0.0.1:8000",
+        brain_response_timeout=30,
+        runtime_host="127.0.0.1",
+        runtime_port=8011,
+        runtime_public_url="http://127.0.0.1:8011",
+        channel_ids=["54369546"],
+        debug_modes={},
+    )
+    adapter._ws = _FakeNapCatWebSocket({"message_id": "unused"})
+
+    available = await adapter.can_send_message(
+        channel_id="99999999",
+        channel_type="group",
+    )
+
+    assert available is False
+    assert adapter._ws.sent_payloads == []
+    await adapter.close()
+
+
+@pytest.mark.asyncio
+async def test_napcat_runtime_send_rejects_unlisted_group() -> None:
+    """NapCat runtime send should fail before send_msg for unlisted groups."""
+
+    adapter = NapCatWSAdapter(
+        ws_url="ws://napcat.local/ws",
+        ws_token="token",
+        brain_url="http://127.0.0.1:8000",
+        brain_response_timeout=30,
+        runtime_host="127.0.0.1",
+        runtime_port=8011,
+        runtime_public_url="http://127.0.0.1:8011",
+        channel_ids=["54369546"],
+        debug_modes={},
+    )
+    ws = _FakeNapCatWebSocket({"message_id": "unused"})
+    adapter._ws = ws
+
+    with pytest.raises(RuntimeError, match="NapCat target channel is not allowed"):
+        await adapter.send_message(
+            channel_id="99999999",
+            text="scheduled hello",
+            channel_type="group",
+        )
+
+    assert ws.sent_payloads == []
+    await adapter.close()
+
+
+@pytest.mark.asyncio
+async def test_napcat_runtime_allows_unlisted_private_target() -> None:
+    """NapCat private runtime sends should bypass public group allowlists."""
+
+    adapter = NapCatWSAdapter(
+        ws_url="ws://napcat.local/ws",
+        ws_token="token",
+        brain_url="http://127.0.0.1:8000",
+        brain_response_timeout=30,
+        runtime_host="127.0.0.1",
+        runtime_port=8011,
+        runtime_public_url="http://127.0.0.1:8011",
+        channel_ids=["54369546"],
+        debug_modes={},
+    )
+    ws = _FakeNapCatWebSocket({"message_id": "private-outbound"})
+    adapter._ws = ws
+
+    available = await adapter.can_send_message(
+        channel_id="673225019",
+        channel_type="private",
+    )
+    result = await adapter.send_message(
+        channel_id="673225019",
+        text="scheduled private hello",
+        channel_type="private",
+    )
+
+    assert available is True
+    assert ws.sent_payloads[0]["action"] == "send_msg"
+    assert ws.sent_payloads[0]["params"] == {
+        "message_type": "private",
+        "user_id": 673225019,
+        "message": "scheduled private hello",
+    }
+    assert result.message_id == "private-outbound"
+    await adapter.close()
+
+
+@pytest.mark.asyncio
 async def test_napcat_runtime_send_message_uses_reply_segments():
     """Runtime reply sends should use structured OneBot reply segments."""
 
@@ -1653,6 +1793,127 @@ async def test_discord_on_message_prefixes_delivery_mention_from_brain():
 
     assert message.reply_chunks == []
     assert message.channel.sent_chunks == ["<@2787858400> hello there"]
+    await adapter.close()
+
+
+@pytest.mark.asyncio
+async def test_discord_suppresses_normal_response_for_unlisted_group() -> None:
+    """Listen-only Discord guild channels should not receive brain messages."""
+
+    adapter = DiscordAdapter(
+        brain_url="http://127.0.0.1:8000",
+        runtime_host="127.0.0.1",
+        runtime_port=8012,
+        runtime_public_url="http://127.0.0.1:8012",
+        runtime_shared_secret="secret-token",
+        channel_ids=["12345"],
+        debug_modes={},
+    )
+    adapter._http_client.post = AsyncMock(return_value=_DummyResponse({
+        "messages": ["this should stay local"],
+        "use_reply_feature": False,
+        "delivery_tracking_id": "delivery-suppressed",
+    }))
+    message = _FakeDiscordMessage()
+    message.channel.id = 99999
+
+    await adapter.on_message(message)
+
+    chat_call = adapter._http_client.post.await_args
+    assert adapter._http_client.post.await_count == 1
+    assert chat_call.args == ("http://127.0.0.1:8000/chat",)
+    assert chat_call.kwargs["json"]["debug_modes"]["listen_only"] is True
+    assert message.reply_chunks == []
+    assert message.channel.sent_chunks == []
+    await adapter.close()
+
+
+@pytest.mark.asyncio
+async def test_discord_runtime_capability_rejects_unlisted_group() -> None:
+    """Discord runtime capability should reject non-allowlisted guild channels."""
+
+    adapter = DiscordAdapter(
+        brain_url="http://127.0.0.1:8000",
+        runtime_host="127.0.0.1",
+        runtime_port=8012,
+        runtime_public_url="http://127.0.0.1:8012",
+        runtime_shared_secret="secret-token",
+        channel_ids=["12345"],
+        debug_modes={},
+    )
+    adapter.get_channel = MagicMock(return_value=_FakeDiscordChannel())
+    adapter.fetch_channel = AsyncMock(return_value=_FakeDiscordChannel())
+
+    available = await adapter.can_send_message(
+        channel_id="99999",
+        channel_type="group",
+    )
+
+    assert available is False
+    adapter.get_channel.assert_not_called()
+    adapter.fetch_channel.assert_not_awaited()
+    await adapter.close()
+
+
+@pytest.mark.asyncio
+async def test_discord_runtime_send_rejects_unlisted_group() -> None:
+    """Discord runtime send should fail before native send for unlisted groups."""
+
+    adapter = DiscordAdapter(
+        brain_url="http://127.0.0.1:8000",
+        runtime_host="127.0.0.1",
+        runtime_port=8012,
+        runtime_public_url="http://127.0.0.1:8012",
+        runtime_shared_secret="secret-token",
+        channel_ids=["12345"],
+        debug_modes={},
+    )
+    channel = _FakeDiscordChannel()
+    adapter.get_channel = MagicMock(return_value=channel)
+    adapter.fetch_channel = AsyncMock(return_value=channel)
+
+    with pytest.raises(RuntimeError, match="Discord target channel is not allowed"):
+        await adapter.send_message(
+            channel_id="99999",
+            text="scheduled hello",
+            channel_type="group",
+        )
+
+    assert channel.sent_chunks == []
+    adapter.get_channel.assert_not_called()
+    adapter.fetch_channel.assert_not_awaited()
+    await adapter.close()
+
+
+@pytest.mark.asyncio
+async def test_discord_runtime_allows_unlisted_private_target() -> None:
+    """Discord private runtime sends should bypass public channel allowlists."""
+
+    adapter = DiscordAdapter(
+        brain_url="http://127.0.0.1:8000",
+        runtime_host="127.0.0.1",
+        runtime_port=8012,
+        runtime_public_url="http://127.0.0.1:8012",
+        runtime_shared_secret="secret-token",
+        channel_ids=["12345"],
+        debug_modes={},
+    )
+    channel = _FakeDiscordChannel()
+    adapter.get_channel = MagicMock(return_value=channel)
+
+    available = await adapter.can_send_message(
+        channel_id="99999",
+        channel_type="private",
+    )
+    result = await adapter.send_message(
+        channel_id="99999",
+        text="scheduled private hello",
+        channel_type="private",
+    )
+
+    assert available is True
+    assert channel.sent_chunks == ["scheduled private hello"]
+    assert result.message_id == "discord-send-1"
     await adapter.close()
 
 
