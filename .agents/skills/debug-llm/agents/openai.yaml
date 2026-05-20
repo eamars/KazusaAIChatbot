@@ -1,0 +1,4 @@
+interface:
+  display_name: "Debug LLM"
+  short_description: "Human quality review for LLM debug runs."
+  default_prompt: "Use debug-llm to run or review this LLM debug task with real inputs, real outputs, and a human-readable quality evaluation artifact."
