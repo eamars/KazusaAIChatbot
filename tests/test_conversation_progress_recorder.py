@@ -107,13 +107,43 @@ def test_render_recorder_prompt_requires_absolute_or_omit_temporal_state() -> No
 
     assert "测试角色" in prompt
     assert "{character_name}" not in prompt
-    assert "直接成为下一轮对话的活跃操作状态" in prompt
+    assert "下一轮可以直接使用的短期进度" in prompt
     assert "默认删除" in prompt
     assert "不要把旧的、不确定的、相对时间的事项污染到下一轮" in prompt
     assert "用户项目名、产品名、文件名、频道名等专名可以保留" in prompt
     assert "请务必返回合法的 JSON 字符串" in prompt
     assert "当前角色" not in prompt
     assert "紧凑 assistant" not in prompt
+
+
+def test_render_recorder_prompt_shows_concrete_list_string_shapes() -> None:
+    """Recorder prompt must show string-list fields with literal string examples."""
+
+    prompt = recorder.render_recorder_prompt("测试角色")
+
+    assert "# 生成步骤" in prompt
+    assert "# 输入格式" in prompt
+    assert "# 输出格式" in prompt
+    assert "# 连续性判断" not in prompt
+    assert "# Generation Procedure" not in prompt
+    assert "# Input Format" not in prompt
+    assert "# Output Format" not in prompt
+    assert "枚举取值" not in prompt
+    assert "活跃操作状态" not in prompt
+    assert "短期工作记忆" not in prompt
+    assert "open loop" not in prompt
+    assert "不要照抄旧状态里的 `task_support`" in prompt
+    assert '"conversation_mode": "任务协助"' in prompt
+    assert '"assistant_moves": ["旧动作标签"]' in prompt
+    assert "不是带 `text` 或 `first_seen_at` 的对象数组" in prompt
+    assert '"user_state_updates": ["观察1", "..."]' in prompt
+    assert '"assistant_moves": ["标签1", "..."]' in prompt
+    assert '"overused_moves": ["标签1", "..."]' in prompt
+    assert '"open_loops": ["事项1", "..."]' in prompt
+    assert '"resolved_threads": ["事项1", "..."]' in prompt
+    assert '"avoid_reopening": ["事项1", "..."]' in prompt
+    assert '"next_affordances": ["动作1", "..."]' in prompt
+    assert '"assistant_moves": ["紧凑话语动作标签"]' not in prompt
 
 
 @pytest.mark.asyncio

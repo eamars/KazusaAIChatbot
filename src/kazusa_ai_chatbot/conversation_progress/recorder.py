@@ -32,114 +32,135 @@ from kazusa_ai_chatbot.utils import get_llm, log_preview, parse_llm_json_output
 logger = logging.getLogger(__name__)
 
 _RECORDER_PROMPT = '''\
-你是 {character_name} 的短期对话进度记录器。你的输出会直接成为下一轮对话的活跃操作状态。
+你负责整理 {character_name} 刚结束的一轮对话，把它压成下一轮可以直接使用的短期进度。
+它不是长期记忆、复盘记录，也不是下一轮台词草稿；只保留会影响下一轮衔接的内容。
 
-# 核心优先级
-1. 信息少一点也可以；不要把旧的、不确定的、相对时间的事项污染到下一轮。
-2. `prior_episode_state` 只是背景，不是必须继承的待办清单。
-3. 本轮用户、`content_anchors` 或 `final_dialog` 没有正向重申的旧时间性 open loop，默认删除。
-4. 不生成下一轮台词，不写日记，不写长期记忆，不复制完整回复。
+# 任务
+输出一份短小、稳定、几天后仍能看懂的 JSON。
+宁可少记，也不要把旧的、不确定的、相对时间的事项污染到下一轮。
+不生成下一轮台词，不写日记，不复制完整回复，不写长期记忆。
 
-# 语言与字段
-- 自由文本字段使用简体中文；schema key、枚举值、ID、URL、代码、命令保持原样。
-- `continuity`、`status`、`episode_phase`、`topic_momentum` 必须使用输出格式中的英文枚举。
-- `conversation_mode` 是给下游 LLM 读取的短语义描述，不是枚举；用 80 字符以内的简短英文或简体中文短语概括互动类型。
-- 用户原文和专有名词只有在必须精确保留时才保持原语言。
-
-# 输入读取
-- `current_turn_timestamp` 是本轮记录时的本地时间。
-- 本轮人设名是「{character_name}」；自由文本确实需要点名时使用「{character_name}」。
-- `prior_episode_state` 是旧操作状态；它可能已经被旧 prompt 污染，所以不能直接相信。
-- `chat_history_recent` 只用于判断本轮附近发生了什么；用 `speaker_name` 和 `speaker_kind` 判断谁说话。
-- `decontexualized_input`、`content_anchors`、`logical_stance`、`character_intent`、`final_dialog` 决定本轮真正发生的事。
-- `character_boundary_profile` 只影响推进节奏和边界恢复，不制造新事实。
-
-# 连续性
-- `same_episode`: 用户仍在同一话题附近，但不代表继承旧 open loop。
-- `related_shift`: 话题转向，旧进度只能作为背景。
-- `sharp_transition`: 明显新话题，旧目标、阻塞点和旧压力不应继续指导下一轮。
+# 阅读顺序
+先看本轮实际发出的内容，再决定旧进度还能不能用：
+1. `final_dialog` 和 `content_anchors`：这一轮最后说了什么、用了哪些锚点。
+2. `decontexualized_input`：用户这一轮真正想表达什么。
+3. `logical_stance` 和 `character_intent`：这一轮大致是什么态度。
+4. `chat_history_recent`：附近几句是谁说的、怎么接上的。
+5. `prior_episode_state`：旧进度只当参考，不当待办清单。
+6. `character_boundary_profile`：只用来把握节奏和边界感，不能拿来编事实。
 
 # 字段写法
-- `current_thread`: 本轮正在谈什么；不要夹带旧时间性承诺。
-- `user_goal` / `current_blocker`: 只有本轮明确有目标或阻塞点才写，否则空字符串。
-- `user_state_updates`: 只写本轮后仍有用的用户状态观察。
-- 自由文本需要点名本轮发言对象时，使用 `{character_name}`；不需要点名时优先使用无主语动作标签。
-- 不把机器端标签、内部枚举名或 schema key 当作说话人名字写进自由文本。
+- 自由文本默认用简体中文；字段名、枚举值、ID、URL、代码、命令保持原样。
 - 用户项目名、产品名、文件名、频道名等专名可以保留；后续提及时优先保留完整专名，或改成“该项目/这个项目”等中性指称，不要截成“这个/该 + 末尾类名”。
-- `assistant_moves`: 写本轮的紧凑话语动作标签；保留字段名，值里不要写机器端标签。
-- `overused_moves`: 写过度重复、下一轮应避免的动作。
-- `open_loops`: 默认空数组；只写本轮明确产生或本轮正向重申的未闭合事项。
-- `resolved_threads`: 只写本轮处理完的事项；不要复述旧相对时间细节。
-- `avoid_reopening`: 可写无日期的旧条件提醒，例如“旧奖励条件不要主动重提”；这里也不能停放未锚定的旧日期。
-- `next_affordances`: 写下一轮自然可承接的动作，不写具体台词或未定时间。
-- `progression_guidance`: 写一条短推进指令；优先给无日期策略，不重启旧时间压力。
-- 每个自由文本字段都必须让几天后读取的人仍然明白其有效期；做不到时，删掉时间成分或删掉该项目。
-- 输出字段不要保留会随读取日期漂移的日指示词。当前轮只是日常节奏确认时，删掉日期前缀：把“今天上午是否休息”压缩成“上午休息确认”，把“聚焦今日实际安排”压缩成“聚焦实际安排”。
-- 旧事项被放下时，可以写无日期结论。例如把“今晚游戏与明天考核挂钩暂告段落”压缩成“旧游戏奖励挂钩暂告段落”，不要复述旧相对日期。
-- 旧事项只是提醒下一轮不要主动重提时，也要删掉旧日期。例如把“下周二香料笔记除非用户提及否则不追”压缩成“旧香料笔记安排不要主动重提”。
-- 如果日期本身会影响承诺有效期，不能删成模糊标签；必须写成 `YYYY-MM-DD` 或 `YYYY-MM-DD HH:MM`。
+- 本轮人设名是「{character_name}」。自由文本确实需要点名时使用「{character_name}」；不需要点名时优先使用无主语动作标签。
+- 不把机器端标签、内部枚举名或字段名当作说话人名字写进自由文本。
+- `continuity` 写 `same_episode`、`related_shift` 或 `sharp_transition`。同一话题附近才用 `same_episode`；明显换题用 `sharp_transition`。
+- `status` 写 `active`、`suspended` 或 `closed`。本轮已经收束的片段用 `closed`，暂时放下但可能回来再谈的片段用 `suspended`。
+- `episode_phase` 写 `opening`、`developing`、`deepening`、`pivoting`、`stuck_loop`、`resolving` 或 `cooling_down`。
+- `topic_momentum` 写 `stable`、`drifting`、`quick_pivot`、`fragmented` 或 `sharp_break`。
+- `episode_label` 写一个短标签。
+- `conversation_mode` 写 80 字以内的简短中文描述；它不是固定枚举，不要照抄旧状态里的 `task_support`、`playful_banter`、`casual_chat` 这类英文标签。
+- `current_thread` 写本轮正在谈什么，不要夹带已经失效的旧承诺。
+- `user_goal` 和 `current_blocker` 只有本轮明确存在时才写；没有就写空字符串。
+- `user_state_updates` 写本轮之后仍有用的用户状态观察。
+- `assistant_moves` 写本轮已经做过的话语动作标签。
+- `overused_moves` 写下一轮应避免重复的动作。
+- `open_loops` 只写本轮明确提出或本轮重新确认的未闭合事项；没有就写 `[]`。
+- `resolved_threads` 写本轮已经处理完、收束或答复过的事项。
+- `avoid_reopening` 写除非用户主动重开，否则下一轮不要拖回来的旧事项或已闭合事项。
+- `emotional_trajectory` 写本轮局部情绪或张力的一行变化。
+- `next_affordances` 写下一轮自然可接的动作，不要写成完整台词。
+- `progression_guidance` 写一条短推进建议。
+- 所有输出列表都只能放普通字符串，不能放对象、嵌套数组，也不能出现 `text`、`label`、`reason`、`first_seen_at` 这类子字段。
 
 # 时间规则
-- 本轮新出现的时间表达如果影响承诺、安排、奖励、考核、提醒、等待条件或下一步行动，必须用 `current_turn_timestamp` 和可见消息时间写成绝对本地日期或日期时间。
-- 如果一个项目只能靠“对话当天 / 下一天 / 稍后 / 某事件完成后”之类的上下文才能理解何时发生，它不是自足的操作状态；能锚定就写成绝对日期，不能锚定就删除。
-- 旧状态里的相对日期、相对时段、顺序条件、事件后条件不要修复、不要猜、不要滚动到当前日期之后；除非本轮正向重申并且可见证据足以锚定，否则直接删除。
-- 历史原话可以含有相对时间，但本记录不是历史引用库；不要把旧原话复制进 active 字段。
-- 含有“旧安排先放下”“不继续加压”“不要主动重提”的本轮回应，表示旧时间性事项不再是 active open loop。
-- 红线示例：把“今天上午休息确认”原样写进 `current_thread`；应该写“上午休息确认”或“2026-05-10 上午休息确认”。
-- 红线示例：把“下周二香料笔记”写进 `avoid_reopening`；应该写“旧香料笔记安排不要主动重提”或锚定成绝对日期。
-- 红线示例：旧状态里有“明天测试”，当前已经过了原本的明天，却输出“当前日期的下一天测试”。
-- 红线示例：旧状态里有“晚餐后游戏”，本轮没有重新确认晚餐或游戏，却输出“晚餐完成后讨论游戏”。
-- 红线示例：本轮只是在降低压力，却在 `resolved_threads` 里复述“今晚游戏与明天考核”。
-- 合格示例：删除这些旧 open loop，或在 `avoid_reopening` 写无日期的“旧条件不要主动重提”。
+- `current_turn_timestamp` 是这次记录时的本地时间。
+- 本轮新出现的时间如果会影响承诺、安排、奖励、考核、提醒、等待条件或下一步行动，必须写成绝对本地日期或日期时间，例如 `YYYY-MM-DD` 或 `YYYY-MM-DD HH:MM`。
+- 只能靠“今天”“明天”“稍后”“饭后”等上下文才看得懂的项目，不适合留到下一轮；能锚定就写绝对时间，不能锚定就删掉时间成分或整项删除。
+- 旧状态里的相对日期、相对时段、先后条件、事件后条件不要修复、不要猜、不要滚到当前日期之后；除非本轮重新确认且证据足够锚定，否则直接删除。
+- 历史原话可以含有相对时间，但本记录不是历史引用库；不要把旧原话复制进有效字段。
+- 本轮用户、`content_anchors` 或 `final_dialog` 没有正向重申的旧时间性未闭合事项，默认删除。
+- 本轮回应如果是在降低压力、放下旧安排或避免继续追问，就不要把旧时间性事项重新写成有效未闭合事项。
+- 不要把“今天上午休息确认”原样写进 `current_thread`；改成“上午休息确认”，或在确有必要时写“2026-05-10 上午休息确认”。
+- 不要把“下周二香料笔记”直接写进 `avoid_reopening`；改成“旧香料笔记安排不要主动重提”，或锚定成绝对日期。
+- 不要看到旧状态里有“明天测试”，就改写成当前日期的下一天测试。
+- 不要在本轮没有重新确认晚餐或游戏时，把旧的“饭后游戏”继续写成待处理事项。
+- 如果本轮只是在降压，不要在 `resolved_threads` 里复述“今晚游戏与明天考核”。
+- 这类旧事项通常直接删掉；必要时只在 `avoid_reopening` 里写无日期的“旧条件不要主动重提”。
 
 # 生成步骤
-1. 先用本轮输入判断 `continuity`、`status`、`conversation_mode`、`episode_phase`、`topic_momentum`。
-2. 只把本轮明确产生或正向重申的事项写入 `open_loops`。
+1. 先判断本轮真正推进、收束、转向或中断了什么。
+2. 选择 `continuity`、`status`、`episode_phase` 和 `topic_momentum`；把 `conversation_mode` 写成 80 字以内的简短中文描述。
 3. 对旧状态逐项检查：无时间依赖且仍有用的可以继承；含相对时间、相对顺序或旧压力的默认删除。
-4. 所有自由文本输出前做最后检查；如果某项目仍需要读者根据相对时间或事件顺序推断有效期，改写成绝对日期、改成无日期语义标签，或删除该项目。
-5. 返回严格 JSON，不要输出解释文字。
+4. 只保留仍然有用的目标、阻塞点、用户状态、未闭合事项、已处理事项和不要重提提醒。
+5. 检查所有列表字段：只能输出字符串；没有内容就输出 `[]`。
+6. 缺失的单值字段写空字符串。
+7. 只返回合法 JSON；不要解释，不要代码块围栏，不要注释，不要额外字段。
 
 # 输入格式
-{
+`prior_episode_state` 可能为 `null`；非 `null` 时，列表字段已经是字符串数组，不是带 `text` 或 `first_seen_at` 的对象数组。
+{{
     "current_turn_timestamp": "本轮记录时的本地时间，YYYY-MM-DD HH:MM",
-    "prior_episode_state": "上一轮紧凑操作状态，或 null；可能包含 created_at、updated_at、expires_at 时间字段",
+    "prior_episode_state": {{
+        "status": "active",
+        "episode_label": "上一轮短标签",
+        "continuity": "same_episode",
+        "conversation_mode": "上一轮简短描述",
+        "episode_phase": "developing",
+        "topic_momentum": "stable",
+        "current_thread": "上一轮当前话题",
+        "user_goal": "上一轮用户目标，或空字符串",
+        "current_blocker": "上一轮阻塞点，或空字符串",
+        "user_state_updates": ["旧观察文本"],
+        "assistant_moves": ["旧动作标签"],
+        "overused_moves": ["旧重复动作标签"],
+        "open_loops": ["旧未闭合事项文本"],
+        "resolved_threads": ["旧已处理事项文本"],
+        "avoid_reopening": ["旧不要主动重提事项文本"],
+        "emotional_trajectory": "上一轮情绪走向",
+        "next_affordances": ["旧下一步动作文本"],
+        "progression_guidance": "上一轮短推进指令",
+        "created_at": "可选 UTC 时间",
+        "updated_at": "可选 UTC 时间",
+        "expires_at": "可选 UTC 时间"
+    }},
     "decontexualized_input": "用户本轮消息经去上下文化后的内容",
     "chat_history_recent": [
-        {"speaker_name": "用户显示名或 {character_name}", "speaker_kind": "user | character | other", "body_text": "消息文本", "timestamp": "可选本地 YYYY-MM-DD HH:MM"}
+        {{"speaker_name": "用户显示名或 {character_name}", "speaker_kind": "user | character | other", "body_text": "消息文本", "timestamp": "可选本地 YYYY-MM-DD HH:MM"}}
     ],
     "content_anchors": ["刚结束回复使用过的内容锚点"],
     "logical_stance": "CONFIRM | REFUSE | TENTATIVE | DIVERGE | CHALLENGE",
     "character_intent": "PROVIDE | BANTAR | REJECT | EVADE | CONFRONT | DISMISS | CLARIFY",
     "final_dialog": ["本轮最终实际发出的回复文本"],
-    "character_boundary_profile": {
+    "character_boundary_profile": {{
         "boundary_recovery_description": "边界恢复节奏描述",
         "self_integrity_description": "自我定义稳定性描述",
         "relationship_priority_description": "关系优先级描述"
-    }
-}
+    }}
+}}
 
 # 输出格式
 请务必返回合法的 JSON 字符串，仅包含以下字段：
-{
-    "continuity": "same_episode | related_shift | sharp_transition",
-    "status": "active | suspended | closed",
+{{
+    "continuity": "same_episode",
+    "status": "active",
     "episode_label": "短语义标签",
-    "conversation_mode": "80 字符以内的短语义描述，例如 task_support / serious_boundary_setting / casual_chat",
-    "episode_phase": "opening | developing | deepening | pivoting | stuck_loop | resolving | cooling_down",
-    "topic_momentum": "stable | drifting | quick_pivot | fragmented | sharp_break",
-    "current_thread": "一行中性当前话题；不夹带旧时间性承诺",
-    "user_goal": "可选目标；没有则为空字符串",
-    "current_blocker": "可选阻塞点；没有则为空字符串",
-    "user_state_updates": ["紧凑用户状态观察"],
-    "assistant_moves": ["紧凑话语动作标签"],
-    "overused_moves": ["已经过度重复的话语动作标签"],
-    "open_loops": ["本轮明确产生或正向重申的未闭合事项；通常可以是空数组"],
-    "resolved_threads": ["本轮已处理事项"],
-    "avoid_reopening": ["除非用户主动重开否则不要拖回来的旧事项"],
+    "conversation_mode": "任务协助",
+    "episode_phase": "developing",
+    "topic_momentum": "stable",
+    "current_thread": "当前话题",
+    "user_goal": "",
+    "current_blocker": "",
+    "user_state_updates": ["观察1", "..."],
+    "assistant_moves": ["标签1", "..."],
+    "overused_moves": ["标签1", "..."],
+    "open_loops": ["事项1", "..."],
+    "resolved_threads": ["事项1", "..."],
+    "avoid_reopening": ["事项1", "..."],
     "emotional_trajectory": "一行情绪走向",
-    "next_affordances": ["下一轮自然可承接的动作"],
+    "next_affordances": ["动作1", "..."],
     "progression_guidance": "给下一轮的一条短推进指令"
-}
+}}
 '''
 
 _recorder_llm = get_llm(
@@ -154,7 +175,7 @@ _recorder_llm = get_llm(
 def _render_recorder_prompt(character_name: str) -> str:
     """Render recorder prompt with exact active character identity."""
 
-    rendered_prompt = _RECORDER_PROMPT.replace("{character_name}", character_name)
+    rendered_prompt = _RECORDER_PROMPT.format(character_name=character_name)
     return rendered_prompt
 
 

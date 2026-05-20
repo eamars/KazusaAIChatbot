@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from time import perf_counter
 
 import httpx
@@ -87,7 +88,7 @@ def _base_record_input() -> ConversationProgressRecordInput:
 
     record_input: ConversationProgressRecordInput = {
         "scope": ConversationProgressScope("qq", "673225019", "identity-user"),
-        "timestamp": "2026-05-10T03:19:18+00:00",
+        "storage_timestamp_utc": "2026-05-10T03:19:18+00:00",
         "prior_episode_state": None,
         "decontexualized_input": '用户已经回答第一题：瓦尔萨尔瓦动作，也夸了千纱知识很多。',
         "chat_history_recent": [
@@ -142,6 +143,31 @@ def _identity_hits(value: str, *, allowed_terms: tuple[str, ...] = ()) -> list[s
         if label.lower() in lowered_value
     ]
     return hits
+
+
+def _contains_cjk(value: str) -> bool:
+    """Return whether text contains CJK ideographs."""
+
+    matched = re.search(r"[\u4e00-\u9fff]", value)
+    return matched is not None
+
+
+def _assert_string_list_fields(payload: dict, trace_payload: dict) -> None:
+    """Assert recorder output uses the persisted string-list contract."""
+
+    list_fields = (
+        "user_state_updates",
+        "assistant_moves",
+        "overused_moves",
+        "open_loops",
+        "resolved_threads",
+        "avoid_reopening",
+        "next_affordances",
+    )
+    for field_name in list_fields:
+        field_value = payload[field_name]
+        assert isinstance(field_value, list), trace_payload
+        assert all(isinstance(item, str) for item in field_value), trace_payload
 
 
 async def _run_case(
@@ -224,6 +250,7 @@ async def test_live_recorder_does_not_use_generic_active_character_labels(
 
     output_text = _all_output_text(result)
     assert len(result["conversation_mode"]) <= 80, trace_payload
+    assert _contains_cjk(result["conversation_mode"]), trace_payload
     assert not _identity_hits(output_text), trace_payload
 
 
@@ -264,8 +291,78 @@ async def test_live_recorder_preserves_user_owned_helper_term(
     )
 
     output_text = _all_output_text(result)
+    assert _contains_cjk(result["conversation_mode"]), trace_payload
     assert '学习助手' in output_text, trace_payload
     assert not _identity_hits(
         output_text,
         allowed_terms=('学习助手', '该助手', '这个助手'),
     ), trace_payload
+
+
+async def test_live_recorder_returns_string_items_for_progress_lists(
+    ensure_live_llm,
+    monkeypatch,
+) -> None:
+    """Recorder should emit plain strings for every progress list field."""
+
+    del ensure_live_llm
+    record_input = _base_record_input()
+    record_input["decontexualized_input"] = (
+        '用户说周五可以加双倍提拉米苏，但要求千纱亲昵地喊他一声才答应。'
+    )
+    record_input["prior_episode_state"] = {
+        "status": "active",
+        "episode_label": '甜点加码博弈',
+        "continuity": "same_episode",
+        "conversation_mode": "playful_banter",
+        "episode_phase": "developing",
+        "topic_momentum": "stable",
+        "current_thread": '围绕周五提拉米苏加码条件进行轻松博弈',
+        "user_goal": '通过亲昵称呼交换达成甜点加码',
+        "current_blocker": '',
+        "assistant_moves": ['得寸进尺地提出甜点加码'],
+        "overused_moves": [],
+        "open_loops": [
+            {
+                "text": '2026-05-15 周五提拉米苏加双倍确认',
+                "first_seen_at": '2026-05-10T03:00:00+00:00',
+            },
+        ],
+        "resolved_threads": [],
+        "avoid_reopening": [],
+        "emotional_trajectory": '轻松调侃逐渐变成亲昵称呼交换',
+        "next_affordances": ['确认称呼交换是否已经闭合'],
+        "progression_guidance": '如果用户接受条件，收束本轮甜点博弈',
+    }
+    record_input["chat_history_recent"] = [
+        {
+            "role": "user",
+            "display_name": '测试用户',
+            "body_text": '可以是可以，但是我要听你亲昵地喊我一声我才答应。',
+            "timestamp": '2026-05-10T03:18:00+00:00',
+        },
+        {
+            "role": "assistant",
+            "display_name": _CHARACTER_NAME,
+            "body_text": '行吧行吧……亲爱的，周五提拉米苏加双倍，记住了。',
+            "timestamp": '2026-05-10T03:19:00+00:00',
+        },
+    ]
+    record_input["content_anchors"] = [
+        '接受亲昵称呼交换',
+        '确认周五提拉米苏加双倍',
+        '收束本轮甜点博弈',
+    ]
+    record_input["final_dialog"] = [
+        '行吧行吧……亲爱的，周五提拉米苏加双倍，记住了。'
+    ]
+
+    result, trace_payload = await _run_case(
+        monkeypatch,
+        "returns_string_items_for_progress_lists",
+        record_input,
+    )
+
+    _assert_string_list_fields(result, trace_payload)
+    assert _contains_cjk(result["conversation_mode"]), trace_payload
+    assert result["assistant_moves"], trace_payload
