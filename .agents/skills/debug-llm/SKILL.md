@@ -15,10 +15,24 @@ Never present an LLM debug/test result as complete from deterministic success
 alone. Schema validity, no exception, accepted validation, or a passing command
 only proves the harness ran. The user still needs to evaluate output quality.
 
+## Agent-Authored Review Boundary
+
+The human-readable review is an agent-authored artifact. Do not generate
+Markdown, HTML, prose reports, quality assessments, carryover explanations, or
+human judgment artifacts from scripts, tests, CLIs, experiment harnesses, or
+production/debug code.
+
+Scripts may emit only raw or structured evidence: JSON, JSONL, CSV, logs,
+prompt captures, model outputs, parser results, validation status, counts, and
+file paths. After inspecting that evidence, the agent must write the readable
+review itself. If an existing harness emits a report, remove or ignore that
+path and author the review from the raw trace instead.
+
 ## Required Artifact
 
-For every LLM debug/test run, produce a human-readable review artifact first.
-Use Markdown sections and tables by default. Keep JSON, logs, and raw traces as
+For every LLM debug/test run, the agent must produce a human-readable review
+artifact first. Use Markdown sections and tables by default unless the user
+requests a different readable shape. Keep JSON, logs, and raw traces as
 appendix or linked evidence, not as the primary evaluation surface.
 
 The artifact must include real data from the run:
