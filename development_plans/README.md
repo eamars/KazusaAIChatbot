@@ -36,7 +36,11 @@ long_term/todo.md
 
 ## Active Short-Term Plans
 
-No active short-term plans.
+| Document | Type | Status |
+|---|---|---|
+| [consolidation_target_routing_architecture_plan.md](active/short_term/consolidation_target_routing_architecture_plan.md) | High-risk migration development plan | draft |
+| [conversation_graph_recent_context_plan.md](active/short_term/conversation_graph_recent_context_plan.md) | High-risk migration development plan | draft |
+| [internal_monologue_residue_lifecycle_plan.md](active/short_term/internal_monologue_residue_lifecycle_plan.md) | High-risk migration development plan | draft |
 
 ## Active Bugfix Plans
 
