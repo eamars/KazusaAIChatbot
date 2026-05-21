@@ -5,9 +5,7 @@ from __future__ import annotations
 import pytest
 
 from kazusa_ai_chatbot.cognition_episode import CognitiveEpisode
-from kazusa_ai_chatbot.nodes import (
-    persona_supervisor2_consolidator as consolidator_module,
-)
+from kazusa_ai_chatbot.consolidation import core as consolidator_module
 from kazusa_ai_chatbot.nodes.persona_supervisor2_consolidator_origin import (
     build_self_cognition_consolidation_origin,
 )
@@ -70,7 +68,7 @@ def _self_cognition_global_state() -> dict:
         "local_time_context": turn_clock["local_time_context"],
         "global_user_id": "global-user-1",
         "user_name": "Test User",
-        "user_profile": {"affinity": 500},
+        "user_profile": {"global_user_id": "global-user-1", "affinity": 500},
         "platform": "qq",
         "platform_channel_id": "channel-1",
         "channel_type": "private",

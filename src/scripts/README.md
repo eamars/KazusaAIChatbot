@@ -23,6 +23,7 @@ Generated from active entry points, runtime docs, and tests on `2026-05-17`.
 | `fetch_ops_status.py` | `python -m scripts.fetch_ops_status` / `fetch-ops-status` | Query runtime operational status snapshots. |
 | `identify_group_image.py` | `python -m scripts.identify_group_image <group-id>` / `identify-group-image` | Export/inspect group image metadata by ID. |
 | `identify_user_image.py` | `python -m scripts.identify_user_image <user-id>` / `identify-user-image` | Export/inspect user image diagnostics. |
+| `inspect_consolidation_target_lifecycle.py` | `python -m scripts.inspect_consolidation_target_lifecycle [--apply]` | Dry-run report and approved apply cleanup for synthetic consolidation user rows and malformed target lifecycle data. |
 | `load_character_profile.py` | `python -m scripts.load_character_profile personalities/<file>.json` | Load a character profile JSON into MongoDB (service bootstrap prerequisite). |
 | `manage_memory_knowledge.py` | `manage-memory-knowledge` | Edit and sync local memory knowledge entries. |
 | `migrate_conversation_history_envelope.py` | `python -m scripts.migrate_conversation_history_envelope [--apply]` | Convert legacy raw conversation rows to typed-envelope fields. |
@@ -38,4 +39,3 @@ Generated from active entry points, runtime docs, and tests on `2026-05-17`.
 | `search_conversation.py` | `search-conversations` | Search conversation history with keyword or vector search. |
 | `search_memory.py` | `python -m scripts.search_memory` | Search memory entries with keyword or vector modes. |
 | `user_state_snapshot.py` | `python -m scripts.user_state_snapshot snapshot|restore` / `user-state-snapshot` | Snapshot/restore authoritative per-user state across user collections. |
-

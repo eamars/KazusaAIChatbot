@@ -47,6 +47,111 @@ TEXT_VECTOR_REEMBEDDING_COLLECTIONS = (
     "memory",
     "user_memory_units",
 )
+SYNTHETIC_CONSOLIDATION_USER_ID = "self_cognition"
+SYNTHETIC_CONSOLIDATION_CLEANUP_REASON = (
+    "synthetic_consolidation_user_cleanup"
+)
+SYNTHETIC_CONSOLIDATION_USER_COUNT_KEYS = (
+    "synthetic_user_profiles",
+    "synthetic_scheduled_events",
+    "synthetic_user_memory_units",
+)
+
+
+def _consolidation_target_lifecycle_filters(
+    synthetic_user_id: str,
+) -> dict[str, dict[str, Any]]:
+    """Build exact selectors for synthetic consolidation lifecycle rows."""
+
+    filters = {
+        "synthetic_user_profiles": {
+            "global_user_id": synthetic_user_id,
+        },
+        "user_profiles_missing_affinity": {
+            "affinity": {"$exists": False},
+        },
+        "synthetic_scheduled_events": {
+            "source_user_id": synthetic_user_id,
+        },
+        "synthetic_user_memory_units": {
+            "global_user_id": synthetic_user_id,
+        },
+        "future_cognition_attempts_missing_user": {
+            "action_kind": "trigger_future_cognition",
+            "$or": [
+                {"target_scope.scope.source_user_id": {"$exists": False}},
+                {"target_scope.scope.source_user_id": ""},
+                {"target_scope.scope.source_user_id": None},
+            ],
+        },
+        "synthetic_user_profiles_with_platform_accounts": {
+            "global_user_id": synthetic_user_id,
+            "platform_accounts.0": {"$exists": True},
+        },
+    }
+    return filters
+
+
+def _planned_consolidation_target_lifecycle_apply(
+    *,
+    filters: Mapping[str, Mapping[str, Any]],
+    synthetic_user_id: str,
+) -> dict[str, Any]:
+    """Describe approved maintenance mutations without runtime timestamps."""
+
+    planned_apply = {
+        "scheduled_events": {
+            "operation": "update_many",
+            "filter": dict(filters["synthetic_scheduled_events"]),
+            "set_fields": {
+                "status": "failed",
+                "migration_reason": SYNTHETIC_CONSOLIDATION_CLEANUP_REASON,
+                "migration_original_source_user_id": synthetic_user_id,
+            },
+            "unset_fields": ["source_user_id"],
+            "runtime_fields": ["migration_applied_at"],
+        },
+        "user_profiles": {
+            "operation": "delete_many",
+            "filter": dict(filters["synthetic_user_profiles"]),
+        },
+        "user_memory_units": {
+            "operation": "delete_many",
+            "filter": dict(filters["synthetic_user_memory_units"]),
+        },
+    }
+    return planned_apply
+
+
+def _scheduled_event_synthetic_cleanup_update(
+    *,
+    synthetic_user_id: str,
+    storage_timestamp_utc: str,
+) -> dict[str, Any]:
+    """Build the maintenance update that removes synthetic user ownership."""
+
+    update_doc = {
+        "$set": {
+            "status": "failed",
+            "migration_reason": SYNTHETIC_CONSOLIDATION_CLEANUP_REASON,
+            "migration_applied_at": storage_timestamp_utc,
+            "migration_original_source_user_id": synthetic_user_id,
+        },
+        "$unset": {"source_user_id": ""},
+    }
+    return update_doc
+
+
+def _synthetic_consolidation_user_owned_count(
+    counts: Mapping[str, int],
+) -> int:
+    """Count rows still owned by the forbidden synthetic user id."""
+
+    total_count = sum(
+        counts[key]
+        for key in SYNTHETIC_CONSOLIDATION_USER_COUNT_KEYS
+    )
+    return total_count
 
 
 def _vector_search_index_config(collection_name: str) -> dict[str, Any]:
@@ -224,6 +329,155 @@ async def export_collection_rows(
     cursor = cursor.limit(limit)
     records = [dict(doc) for doc in await cursor.to_list(length=limit)]
     return records
+
+
+async def inspect_consolidation_target_lifecycle() -> dict[str, Any]:
+    """Count rows affected by forbidden synthetic consolidation user ids.
+
+    Returns:
+        Read-only diagnostic counts and the exact filters operators should
+        review before approving any cleanup action.
+    """
+
+    synthetic_user_id = SYNTHETIC_CONSOLIDATION_USER_ID
+    filters = _consolidation_target_lifecycle_filters(synthetic_user_id)
+
+    db = await get_db()
+    counts = {
+        "synthetic_user_profiles": await db.user_profiles.count_documents(
+            filters["synthetic_user_profiles"],
+        ),
+        "user_profiles_missing_affinity": (
+            await db.user_profiles.count_documents(
+                filters["user_profiles_missing_affinity"],
+            )
+        ),
+        "synthetic_scheduled_events": (
+            await db.scheduled_events.count_documents(
+                filters["synthetic_scheduled_events"],
+            )
+        ),
+        "synthetic_user_memory_units": (
+            await db.user_memory_units.count_documents(
+                filters["synthetic_user_memory_units"],
+            )
+        ),
+        "future_cognition_attempts_missing_user": (
+            await db.self_cognition_action_attempts.count_documents(
+                filters["future_cognition_attempts_missing_user"],
+            )
+        ),
+        "synthetic_user_profiles_with_platform_accounts": (
+            await db.user_profiles.count_documents(
+                filters["synthetic_user_profiles_with_platform_accounts"],
+            )
+        ),
+    }
+    cleanup_blocked = (
+        counts["synthetic_user_profiles_with_platform_accounts"] > 0
+    )
+    planned_apply_status = "available"
+    if cleanup_blocked:
+        planned_apply_status = "blocked"
+
+    result = {
+        "synthetic_user_id": synthetic_user_id,
+        "mode": "dry_run",
+        "counts": counts,
+        "filters": filters,
+        "cleanup_blocked": cleanup_blocked,
+        "planned_apply_status": planned_apply_status,
+        "planned_apply": _planned_consolidation_target_lifecycle_apply(
+            filters=filters,
+            synthetic_user_id=synthetic_user_id,
+        ),
+    }
+    return result
+
+
+async def apply_consolidation_target_lifecycle_cleanup(
+    *,
+    storage_timestamp_utc: str,
+) -> dict[str, Any]:
+    """Apply approved cleanup for forbidden synthetic consolidation user rows.
+
+    Args:
+        storage_timestamp_utc: UTC storage timestamp recorded on migrated
+            scheduled-event rows.
+
+    Returns:
+        Sanitized before and after counts, write result counts, and safety
+        status for the operator-approved maintenance action.
+    """
+
+    if not storage_timestamp_utc.strip():
+        raise ValueError("storage_timestamp_utc is required")
+
+    before_report = await inspect_consolidation_target_lifecycle()
+    before_counts = before_report["counts"]
+    filters: dict[str, dict[str, Any]] = before_report["filters"]
+    synthetic_user_id = str(before_report["synthetic_user_id"])
+    if before_report["cleanup_blocked"]:
+        result = {
+            "synthetic_user_id": synthetic_user_id,
+            "mode": "apply",
+            "apply_status": "blocked",
+            "blocked_reason": "synthetic_profile_has_platform_accounts",
+            "before_counts": before_counts,
+            "after_counts": before_counts,
+            "cleanup_blocked": True,
+            "synthetic_user_owned_rows_after": (
+                _synthetic_consolidation_user_owned_count(before_counts)
+            ),
+            "applied": {
+                "scheduled_events_modified": 0,
+                "synthetic_user_profiles_deleted": 0,
+                "synthetic_user_memory_units_deleted": 0,
+            },
+            "filters": filters,
+            "planned_apply": before_report["planned_apply"],
+        }
+        return result
+
+    scheduled_event_update = _scheduled_event_synthetic_cleanup_update(
+        synthetic_user_id=synthetic_user_id,
+        storage_timestamp_utc=storage_timestamp_utc,
+    )
+    db = await get_db()
+    scheduled_result = await db.scheduled_events.update_many(
+        filters["synthetic_scheduled_events"],
+        scheduled_event_update,
+    )
+    profile_result = await db.user_profiles.delete_many(
+        filters["synthetic_user_profiles"],
+    )
+    memory_result = await db.user_memory_units.delete_many(
+        filters["synthetic_user_memory_units"],
+    )
+
+    after_report = await inspect_consolidation_target_lifecycle()
+    after_counts = after_report["counts"]
+    result = {
+        "synthetic_user_id": synthetic_user_id,
+        "mode": "apply",
+        "apply_status": "applied",
+        "blocked_reason": "",
+        "before_counts": before_counts,
+        "after_counts": after_counts,
+        "cleanup_blocked": after_report["cleanup_blocked"],
+        "synthetic_user_owned_rows_after": (
+            _synthetic_consolidation_user_owned_count(after_counts)
+        ),
+        "applied": {
+            "scheduled_events_modified": scheduled_result.modified_count,
+            "synthetic_user_profiles_deleted": profile_result.deleted_count,
+            "synthetic_user_memory_units_deleted": memory_result.deleted_count,
+        },
+        "filters": filters,
+        "scheduled_events_update": scheduled_event_update,
+        "planned_apply": before_report["planned_apply"],
+    }
+    return result
 
 
 async def export_memory_rows(

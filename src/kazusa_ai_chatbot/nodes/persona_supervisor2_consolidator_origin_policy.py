@@ -13,6 +13,7 @@ WritePolicyKey = Literal[
     "relationship_insight",
     "user_memory_units",
     "affinity",
+    "group_channel_style_image",
     "character_image",
     "cache_invalidation",
 ]
@@ -32,6 +33,7 @@ class ConsolidationWritePolicy(TypedDict):
     relationship_insight: WritePolicyDecision
     user_memory_units: WritePolicyDecision
     affinity: WritePolicyDecision
+    group_channel_style_image: WritePolicyDecision
     character_image: WritePolicyDecision
     cache_invalidation: WritePolicyDecision
 
@@ -90,6 +92,7 @@ def build_consolidation_write_policy(
         "relationship_insight": {"allowed": allowed, "reason": reason},
         "user_memory_units": {"allowed": allowed, "reason": reason},
         "affinity": {"allowed": allowed, "reason": reason},
+        "group_channel_style_image": {"allowed": allowed, "reason": reason},
         "character_image": {"allowed": allowed, "reason": reason},
         "cache_invalidation": {"allowed": allowed, "reason": reason},
     }

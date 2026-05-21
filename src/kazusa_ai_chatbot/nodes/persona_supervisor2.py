@@ -20,7 +20,7 @@ from kazusa_ai_chatbot import event_logging
 from kazusa_ai_chatbot.config import CHAT_HISTORY_RECENT_LIMIT
 from kazusa_ai_chatbot.nodes.dialog_agent import dialog_agent
 from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition import call_cognition_subgraph
-from kazusa_ai_chatbot.nodes.persona_supervisor2_consolidator import call_consolidation_subgraph
+from kazusa_ai_chatbot.consolidation.core import call_consolidation_subgraph
 from kazusa_ai_chatbot.nodes.persona_supervisor2_l3_surface import (
     call_l3_text_surface_handler,
 )

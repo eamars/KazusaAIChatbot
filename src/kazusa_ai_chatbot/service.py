@@ -123,7 +123,7 @@ from kazusa_ai_chatbot.nodes.persona_supervisor2_msg_decontexualizer import (
     multimedia_descriptor_agent,
 )
 from kazusa_ai_chatbot.nodes.persona_supervisor2 import persona_supervisor2
-from kazusa_ai_chatbot.nodes.persona_supervisor2_consolidator import call_consolidation_subgraph
+from kazusa_ai_chatbot.consolidation.core import call_consolidation_subgraph
 from kazusa_ai_chatbot.rag.cache2_policy import INITIALIZER_CACHE_NAME
 from kazusa_ai_chatbot.rag.cache2_runtime import get_rag_cache2_runtime
 from kazusa_ai_chatbot.reflection_cycle import (

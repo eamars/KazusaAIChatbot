@@ -17,6 +17,7 @@ _POLICY_KEYS: tuple[WritePolicyKey, ...] = (
     "relationship_insight",
     "user_memory_units",
     "affinity",
+    "group_channel_style_image",
     "character_image",
     "cache_invalidation",
 )

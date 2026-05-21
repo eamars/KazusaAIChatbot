@@ -34,7 +34,7 @@ The package currently contains five major node groups:
 | Persona orchestration | `persona_supervisor2.py` | Live turn graph: decontextualization, RAG, cognition, dialog/no-response routing. |
 | Cognition and action initialization | `persona_supervisor2_cognition*.py`, `boundary_profile.py`, `linguistic_texture.py` | Layered internal appraisal, stance, boundary judgment, L2d action initialization, and selected L3 surface directives. |
 | Dialog | `dialog_agent.py` | Final text generation and evaluator retry loop. |
-| Consolidation | `persona_supervisor2_consolidator*.py` | Background extraction of durable facts, promises, relationship state, images, memory units, and character state. |
+| Consolidation inputs | `persona_supervisor2_consolidator*.py` | Extraction helper nodes for facts, promises, relationship state, images, memory units, and character state. The `kazusa_ai_chatbot.consolidation` package owns the public entrypoint and target-aware durable write routing. |
 
 The nodes consume platform-neutral state. Platform wire syntax must already be
 normalized by adapters and the brain service into `message_envelope`,
@@ -127,6 +127,12 @@ Action and surface outcomes are collected into `EpisodeTraceV1`:
 The consolidator consumes a prompt-safe projection of the episode trace. It
 does not select actions, execute actions, call the dispatcher, call the
 scheduler, or trigger cognition.
+
+Durable consolidation routing lives in `kazusa_ai_chatbot.consolidation`.
+Nodes produce prompt-safe state and helper-node outputs; the consolidation
+package builds the deterministic target plan, validates write lanes, and keeps
+user, group-channel, character, and internal targets separate before DB helper
+calls.
 
 ## Cognitive Episode Contract
 

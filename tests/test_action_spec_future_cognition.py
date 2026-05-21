@@ -132,6 +132,22 @@ def test_future_cognition_event_copies_trusted_source_scope() -> None:
     assert "source_user_id" not in event["args"]
 
 
+def test_future_cognition_missing_source_user_does_not_fabricate_identity() -> None:
+    """Missing source user should stay targetless instead of becoming a user."""
+
+    from kazusa_ai_chatbot.action_spec.handlers.future_cognition import (
+        build_future_cognition_scheduled_event,
+    )
+
+    event = build_future_cognition_scheduled_event(
+        _future_cognition_action_spec(),
+        storage_timestamp_utc="2026-05-15T21:00:00+00:00",
+        action_attempt_id="action_attempt:future-123",
+    )
+
+    assert event["source_user_id"] == ""
+
+
 @pytest.mark.asyncio
 async def test_execute_future_cognition_schedules_without_inline_cognition(
     monkeypatch: pytest.MonkeyPatch,

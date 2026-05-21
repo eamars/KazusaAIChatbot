@@ -29,7 +29,7 @@ from kazusa_ai_chatbot.nodes.dialog_agent import (
     dialog_agent,
     validate_dialog_action_directives,
 )
-from kazusa_ai_chatbot.nodes.persona_supervisor2_consolidator import (
+from kazusa_ai_chatbot.consolidation.core import (
     call_consolidation_subgraph,
 )
 from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition import (
@@ -1287,6 +1287,10 @@ def _user_profile(case: models.SelfCognitionCase) -> dict[str, Any]:
         return return_value
 
     target_scope = _target_scope(case)
+    if target_scope["user_id"]:
+        return_value = {}
+        return return_value
+
     if target_scope["channel_type"] == "group" and target_scope["user_id"] is None:
         display_name = "group audience"
     else:

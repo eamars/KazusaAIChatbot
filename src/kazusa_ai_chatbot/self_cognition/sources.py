@@ -12,6 +12,7 @@ from kazusa_ai_chatbot.config import (
     SELF_COGNITION_TRIGGER_ACTIVE_COMMITMENT_ENABLED,
     SELF_COGNITION_TRIGGER_GROUP_CHAT_REVIEW_ENABLED,
 )
+from kazusa_ai_chatbot.consolidation.target import SYNTHETIC_USER_IDS
 from kazusa_ai_chatbot.db import (
     get_conversation_history,
     get_user_profile,
@@ -189,6 +190,7 @@ async def collect_scheduled_future_cognition_cases(
     max_cases: int,
     list_due_events_func: Callable[..., Any] | None = None,
     get_latest_private_channel_func: Callable[..., Any] | None = None,
+    get_user_profile_func: Callable[..., Any] | None = None,
 ) -> list[models.SelfCognitionCase]:
     """Build worker cases from due scheduled future-cognition slots.
 
@@ -199,6 +201,7 @@ async def collect_scheduled_future_cognition_cases(
         list_due_events_func: Optional test seam for scheduled-slot reads.
         get_latest_private_channel_func: Optional test seam for private-channel
             target lookup.
+        get_user_profile_func: Optional test seam for real user profile reads.
 
     Returns:
         Prompt-safe self-cognition cases for the standard worker runner.
@@ -210,6 +213,7 @@ async def collect_scheduled_future_cognition_cases(
 
     current_now_utc = parse_storage_utc_datetime(now.isoformat())
     due_events_reader = list_due_events_func or list_due_future_cognition_events
+    profile_reader = get_user_profile_func or get_user_profile
     raw_events = due_events_reader(
         current_timestamp_utc=current_now_utc.isoformat(),
         limit=max_cases,
@@ -230,10 +234,19 @@ async def collect_scheduled_future_cognition_cases(
             continue
         if not _is_due_future_cognition_event(event, current_now_utc):
             continue
+        source_user_id = _non_synthetic_user_id(event.get("source_user_id"))
+        if source_user_id:
+            user_profile = await _call_maybe_async(
+                profile_reader,
+                source_user_id,
+            )
+        else:
+            user_profile = None
         case = _build_scheduled_future_cognition_case(
             event,
             character_profile=character_profile,
             now=current_now_utc,
+            user_profile=user_profile,
         )
         if case is None:
             continue
@@ -522,13 +535,14 @@ async def _attach_scheduled_delivery_binding(
 ) -> None:
     """Attach target binding metadata to a scheduled source case."""
 
+    source_user_id = _non_synthetic_user_id(event.get("source_user_id"))
     binding = await resolve_self_cognition_delivery_target(
         platform=text_or_empty(event.get("source_platform")),
         source_platform_channel_id=text_or_empty(event.get("source_channel_id")),
         source_channel_type=text_or_empty(event.get("source_channel_type")),
         source_message_id=text_or_empty(event.get("source_message_id")),
         source_ref=text_or_empty(case.get("case_id")),
-        source_global_user_id=text_or_empty(event.get("source_user_id")),
+        source_global_user_id=source_user_id,
         source_platform_bot_id=text_or_empty(
             event.get("source_platform_bot_id")
         ),
@@ -537,7 +551,7 @@ async def _attach_scheduled_delivery_binding(
         ),
         guild_id=_optional_text(event.get("guild_id")),
         bot_permission_role=text_or_empty(event.get("bot_role")),
-        target_global_user_id=text_or_empty(event.get("source_user_id")),
+        target_global_user_id=source_user_id,
         target_platform_user_id=None,
         get_latest_private_channel_func=get_latest_private_channel_func,
     )
@@ -682,6 +696,15 @@ def _optional_text(value: object) -> str | None:
     return return_value
 
 
+def _non_synthetic_user_id(value: object) -> str:
+    """Return a user id only when the value is not a provenance label."""
+
+    user_id = text_or_empty(value)
+    if user_id.casefold() in SYNTHETIC_USER_IDS:
+        user_id = ""
+    return user_id
+
+
 async def _call_maybe_async(
     callable_object: Callable[..., Any],
     *args: Any,
@@ -700,6 +723,7 @@ def _build_scheduled_future_cognition_case(
     *,
     character_profile: dict[str, Any],
     now: datetime,
+    user_profile: object = None,
 ) -> models.SelfCognitionCase | None:
     """Project one due future-cognition slot into a normal worker case."""
 
@@ -727,14 +751,25 @@ def _build_scheduled_future_cognition_case(
     source_platform = text_or_empty(event.get("source_platform"))
     source_channel_id = text_or_empty(event.get("source_channel_id"))
     source_channel_type = text_or_empty(event.get("source_channel_type"))
-    source_user_id = text_or_empty(event.get("source_user_id"))
+    target_user_id = _non_synthetic_user_id(event.get("source_user_id"))
     source_platform_bot_id = text_or_empty(event.get("source_platform_bot_id"))
+    if not target_user_id and source_channel_type == "group":
+        display_name = "group audience"
+    else:
+        display_name = target_user_id or "scheduled follow-up"
     source_refs = _scheduled_future_cognition_source_refs(
         args,
         continuation_objective=continuation_objective,
         execute_at=execute_at,
     )
     safe_continuation = _safe_continuation(args.get("continuation"))
+    if target_user_id:
+        if isinstance(user_profile, dict):
+            case_user_profile = dict(user_profile)
+        else:
+            case_user_profile = {}
+    else:
+        case_user_profile = {}
 
     case: models.SelfCognitionCase = {
         "case_name": models.CASE_SCHEDULED_FUTURE_COGNITION,
@@ -750,8 +785,8 @@ def _build_scheduled_future_cognition_case(
             "platform": source_platform or "orchestrator",
             "platform_channel_id": source_channel_id,
             "channel_type": source_channel_type or "internal",
-            "user_id": source_user_id or "self_cognition",
-            "display_name": source_user_id or "self-cognition",
+            "user_id": target_user_id or None,
+            "display_name": display_name,
         },
         "source_refs": source_refs,
         "visible_context": [],
@@ -761,11 +796,7 @@ def _build_scheduled_future_cognition_case(
             "continuation": safe_continuation,
         },
         "character_profile": _project_character_profile(character_profile),
-        "user_profile": {
-            "affinity": models.DEFAULT_DRY_RUN_AFFINITY,
-            "display_name": "self-cognition",
-            "last_relationship_insight": "",
-        },
+        "user_profile": case_user_profile,
         "current_mood": text_or_empty(character_profile.get("mood")),
         "global_vibe": text_or_empty(character_profile.get("global_vibe")),
         "rag_query": continuation_objective,

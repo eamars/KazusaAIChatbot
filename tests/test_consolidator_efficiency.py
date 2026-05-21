@@ -7,7 +7,10 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from kazusa_ai_chatbot.cognition_episode import build_text_chat_cognitive_episode
-from kazusa_ai_chatbot.nodes import persona_supervisor2_consolidator as consolidator_module
+from kazusa_ai_chatbot.consolidation import core as consolidator_module
+from kazusa_ai_chatbot.consolidation.target import (
+    build_consolidation_target_plan,
+)
 from kazusa_ai_chatbot.nodes import persona_supervisor2_consolidator_persistence as persistence_module
 from kazusa_ai_chatbot.nodes.persona_supervisor2_consolidator_origin import (
     build_user_message_consolidation_origin,
@@ -66,6 +69,7 @@ def _global_state() -> dict:
         "global_user_id": "user-1",
         "user_name": "User",
         "user_profile": {
+            "global_user_id": "user-1",
             "affinity": 500,
         },
         "platform": "qq",
@@ -179,7 +183,7 @@ async def test_db_writer_runs_image_updaters_through_gather(monkeypatch) -> None
     monkeypatch.setattr(persistence_module, "_update_character_image", AsyncMock(return_value=None))
     monkeypatch.setattr(persistence_module, "update_user_memory_units_from_state", AsyncMock(return_value=[]))
 
-    await persistence_module.db_writer({
+    state = {
         "storage_timestamp_utc": STORAGE_TIMESTAMP_UTC,
         "local_time_context": local_time_context_from_storage_utc(
             STORAGE_TIMESTAMP_UTC,
@@ -188,6 +192,7 @@ async def test_db_writer_runs_image_updaters_through_gather(monkeypatch) -> None
         "user_name": "User",
         "platform": "qq",
         "platform_channel_id": "chan-1",
+        "channel_type": "group",
         "platform_message_id": "msg-1",
         "character_profile": {"name": "Kazusa"},
         "metadata": {},
@@ -199,11 +204,14 @@ async def test_db_writer_runs_image_updaters_through_gather(monkeypatch) -> None
         "last_relationship_insight": "",
         "new_facts": [],
         "future_promises": [],
-        "user_profile": {"affinity": 500},
+        "user_profile": {"global_user_id": "user-1", "affinity": 500},
         "affinity_delta": 0,
         "decontexualized_input": "hello",
         "consolidation_origin": _consolidation_origin(),
-    })
+    }
+    state["consolidation_target_plan"] = build_consolidation_target_plan(state)
+
+    await persistence_module.db_writer(state)
 
     assert len(gather_calls) == 1
     assert len(gather_calls[0][0]) == 1

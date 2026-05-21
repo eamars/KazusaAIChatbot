@@ -256,6 +256,12 @@ Stores durable user identity and relationship headers: global user id, linked
 platform accounts, suspected aliases, display names, affinity, and
 `last_relationship_insight`.
 
+`user_profiles` is user-only. Source labels such as `self_cognition`,
+`group_chat_review`, `internal_thought`, or `group_channel` are not valid
+`global_user_id` values. Missing required fields such as `affinity` should fail
+at lifecycle validation or helper read sites instead of receiving local
+defaults.
+
 It is not the cognition-facing long-term memory store. User facts,
 commitments, patterns, and relationship signals belong in `user_memory_units`.
 
@@ -341,6 +347,10 @@ Stores reflection-derived interaction-style overlays keyed by user or group
 channel. These documents are compact runtime guidance, not raw reflection
 transcripts. Validation must reject event-like details that should remain in
 reflection evidence or memory systems.
+
+The group-channel style image is the current durable group-image lane. It is
+keyed by platform and channel id, not by `global_user_id`, and must stay
+separate from user affinity, relationship insight, and `user_memory_units`.
 
 ### `scheduled_events`
 

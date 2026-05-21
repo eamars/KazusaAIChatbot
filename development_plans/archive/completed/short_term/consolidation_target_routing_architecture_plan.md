@@ -6,21 +6,20 @@
   character-self, and internal/background cognition do not share the
   user-profile write path.
 - Plan class: high_risk_migration
-- Status: draft
+- Status: completed
 - Mandatory skills: `development-plan-writing`, `local-llm-architecture`,
-  `systematic-debugging`, `database-data-pull`, `debug-llm`, `py-style`,
+  `systematic-debugging`, `database-data-pull`, `py-style`,
   `test-style-and-execution`, `no-prepost-user-input`; apply `cjk-safety`
   before editing Python files containing CJK prompt text.
 - Overall cutover strategy: staged bigbang for target planning and validation,
   compatible for current valid user-message consolidation, migration for
   existing malformed synthetic-user rows.
-- Highest-risk areas: recreating fake user targets, treating participant
-  presence as salience, weakening fail-fast user-profile invariants, and
-  adding routing complexity that a local LLM cannot apply reliably.
+- Highest-risk areas: recreating fake user targets, weakening fail-fast
+  user-profile invariants, and adding routing complexity that deterministic
+  target validation does not need.
 - Acceptance criteria: every durable write is validated against a deterministic
-  target plan; group writes do not use user lanes; optional LLM salience routing
-  is best-effort and cannot create targets; `self_cognition` is never used as a
-  user id.
+  target plan; group writes do not use user lanes; `self_cognition` is never
+  used as a user id.
 
 ## Context
 
@@ -43,15 +42,13 @@ The architecture now has multiple cognition origins:
 `origin_kind` explains why cognition ran. It does not identify the durable
 entity that can be written. The missing contract is `target_kind`.
 
-The real-data router POC showed the key execution decision:
+The failed path showed the key execution decision:
 
-- self-cognition outputs with internal monologue provide usable character-facing
-  signal for extra user target salience;
-- raw or single `/chat` evidence can produce false positives when the LLM
-  selects a user from thread context without a real character reaction;
-- group-image routing is deterministic and must not be produced by the LLM;
-- a 15-minute group-review consolidation window is a best-effort background
-  judgment, not a strict pass/fail classifier.
+- group-image routing is deterministic and must not be produced by an LLM;
+- a group-review consolidation window may write group-channel state, but it
+  must not fabricate a user target from participant presence;
+- source labels such as `self_cognition` are provenance only and never durable
+  user identities.
 
 This plan preserves the crash as a useful invariant and fixes the lifecycle
 path that let a non-user become a user target.
@@ -65,8 +62,6 @@ path that let a non-user become a user target.
   addresses lifecycle root cause rather than the crash symptom.
 - `database-data-pull`: load before read-only production diagnostics or cleanup
   planning.
-- `debug-llm`: load before running or changing any LLM router POC, prompt test,
-  or quality evaluation artifact.
 - `py-style`: load before editing Python files.
 - `test-style-and-execution`: load before adding, changing, or running tests.
 - `no-prepost-user-input`: load before changing user-message interpretation,
@@ -82,24 +77,11 @@ path that let a non-user become a user target.
 - Keep `origin_kind` as provenance only. It must not grant write lanes.
 - Deterministic code owns target construction, target validation, write-lane
   permission, scheduler materialization, cache invalidation, and persistence.
-- The LLM may choose only among prompt-safe target aliases provided by
-  deterministic code. It must not create `target_kind`, target ids, write lanes,
-  database operations, or group targets.
+- Target construction is deterministic. LLM output must not create
+  `target_kind`, target ids, write lanes, database operations, or group targets.
 - Participant presence in a message window is not enough to create a user
-  write. A user target beyond the base deterministic target requires
-  character-facing signal.
-- Group image routing is deterministic for group-scoped consolidation. The
-  salience router only identifies additional high-strength user targets.
-- A 15-minute group-review consolidation pass is best-effort. Verification
-  proves contract safety and reviewability; it does not require an exact
-  expected target set for subjective salience.
-- Raw source messages are supporting evidence. The router must prioritize real
-  character-facing signal such as internal monologue, emotional appraisal,
-  content anchors, assistant response, action results, or final dialog.
-- Do not run the extra salience router for a `/chat` case that has only raw
-  source context and no assistant/internal cognition signal.
-- `source_focus_user` may resolve generic references such as "the user" in a
-  self-cognition artifact. It is resolver metadata, not salience evidence.
+  write.
+- Group image routing is deterministic for group-scoped consolidation.
 - Do not let group-channel consolidation write `affinity`,
   `last_relationship_insight`, or `user_memory_units`.
 - Do not let character-self consolidation write user affinity or user memory.
@@ -127,8 +109,6 @@ path that let a non-user become a user target.
 - Validate every internal write intent against the target plan.
 - Remove the missing-`source_user_id` fallback to `"self_cognition"`.
 - Add a deterministic group-channel target path for group-scoped consolidation.
-- Keep the optional extra user target router narrow, best-effort, and
-  character-signal driven.
 - Add read-only diagnostics and a dry-run-first cleanup path for malformed
   synthetic-user rows.
 - Add focused tests and static checks for target planning, forbidden synthetic
@@ -159,7 +139,6 @@ Overall strategy: staged bigbang.
 | Write-intent validation | bigbang | Every proposed write intent is validated against target alias, target kind, and allowed lane before persistence. |
 | Existing valid user-message writes | compatible | Preserve current behavior for real validated user targets. |
 | Group target behavior | bigbang | Group-scoped consolidation receives a deterministic group-channel target. The LLM does not output group targets. |
-| Extra user salience routing | bigbang | Run only as a background best-effort selector over deterministic real-user aliases and real character-facing signal. |
 | Missing durable target | bigbang | Missing or ambiguous durable target produces `internal` or no write, never a fake user. |
 | Existing malformed rows | migration | Clean only through approved dry-run/apply operator flow after code prevents re-creation. |
 
@@ -180,19 +159,15 @@ Overall strategy: staged bigbang.
   consolidator even when the durable target is a group channel, character-self
   state, internal artifact, or no durable entity.
 - Minimal change: create a consolidation package boundary, add deterministic
-  target planning, validate proposed writes before persistence, and keep the
-  extra user salience router best-effort and narrow.
+  target planning, and validate proposed writes before persistence.
 - Ownership boundaries: deterministic code builds targets and allowed lanes;
-  LLM stages may judge semantic salience only over provided aliases; database
-  helpers persist already-validated writes and remain fail-fast.
-- Rejected complexity: no DB defaulting, fake users, source refs in router
-  output, group affinity, memory-provider registry, trigger registry, broad
-  prompt rewrite, retry loop, feature flag, compatibility shim, or L1/L2/L3
-  redesign.
+  database helpers persist already-validated writes and remain fail-fast.
+- Rejected complexity: no DB defaulting, fake users, prompt-built targets,
+  group affinity, memory-provider registry, trigger registry, broad prompt
+  rewrite, retry loop, feature flag, compatibility shim, or L1/L2/L3 redesign.
 - Evidence threshold: add a broader provider abstraction, new group-image
-  collection, router retry, or larger prompt contract only after a focused test
-  or real-data review artifact proves the minimal target plan cannot represent
-  required behavior.
+  collection, or larger prompt contract only after a separate approved plan
+  proves deterministic target planning cannot represent required behavior.
 
 ## Agent Autonomy Boundaries
 
@@ -200,8 +175,8 @@ Overall strategy: staged bigbang.
   this plan remain intact.
 - The agent must not let the LLM create targets, target ids, target kinds,
   write lanes, group targets, or persistence operations.
-- The agent must not add alternate execution paths, fallback users, router
-  retries, feature flags, compatibility shims, or unrelated cleanup.
+- The agent must not add alternate execution paths, fallback users, feature
+  flags, compatibility shims, or unrelated cleanup.
 - Changes outside the listed Change Surface require a plan revision or explicit
   user approval.
 - If code and plan disagree, preserve the plan's stated intent and record the
@@ -213,7 +188,7 @@ Overall strategy: staged bigbang.
 cognitive episode or self-cognition case
   -> kazusa_ai_chatbot.consolidation.core
   -> deterministic ConsolidationTargetPlan
-  -> existing extraction plus optional extra-user alias routing
+  -> existing extraction
   -> deterministic write-intent projection
   -> deterministic validation
   -> target-specific persistence
@@ -225,16 +200,16 @@ write-intent validation, and persistence dispatch.
 
 Minimum target mappings:
 
-| Source case | Deterministic base target | Extra salience router input |
-|---|---|---|
-| Normal `/chat` with validated real author | `user` for the current author | Only if assistant/internal cognition signal exists; raw context alone is insufficient. |
-| Group-scoped `/chat` consolidation | `group_channel` plus current author user target when valid | Additional users only from character-facing signal, not participant presence. |
-| User-scoped active commitment | `user` for the validated commitment owner | `source_focus_user` may resolve generic "the user" references. |
-| 15-minute group review | `group_channel` | Best-effort additional real users only when internal monologue or cognition output highlights them strongly. |
-| Scheduled future cognition from real user source | `user` | `source_focus_user` resolves carried user context. |
-| Scheduled future cognition from group source | `group_channel` | Best-effort additional real users only if carried roster plus character signal supports them. |
-| Character self-check | `character` | No user salience routing. |
-| No validated durable target | `internal` or no write | No durable user write. |
+| Source case | Deterministic base target |
+|---|---|
+| Normal `/chat` with validated real author | `user` for the current author |
+| Group-scoped `/chat` consolidation | `group_channel` plus current author user target when valid |
+| User-scoped active commitment | `user` for the validated commitment owner |
+| Group review | `group_channel` |
+| Scheduled future cognition from real user source | `user` |
+| Scheduled future cognition from group source | `group_channel` |
+| Character self-check | `character` |
+| No validated durable target | `internal` or no write |
 
 Allowed write lanes:
 
@@ -252,11 +227,6 @@ Allowed write lanes:
 | DB crash behavior | Keep user-profile readers fail-fast. | The crash revealed malformed lifecycle data. Defaulting would hide the root cause. |
 | Origin versus target | Keep `origin_kind` separate from `target_kind`. | A source such as self-cognition can reason about a user, group, character, or internal artifact. |
 | Group path | Build group-channel target deterministically for group-scoped consolidation. | A group has group image/state, not affinity or user memory. This does not need LLM judgment. |
-| Extra user routing | Use LLM only to select additional high-strength user targets from deterministic aliases. | The model can judge semantic salience, but deterministic code must own target identity and write permission. |
-| 15-minute review | Treat 15-minute group-review consolidation as best-effort. | Salience is subjective and local-model quality varies; human review should judge quality while tests enforce safety. |
-| `/chat` raw context | Do not run extra salience routing from raw single-message context alone. | The POC showed false-positive risk when the LLM chose a participant without real character reaction. |
-| `source_focus_user` | Keep it as resolver metadata only. | It helps bind "the user" in self-cognition, but it does not prove durable salience. |
-| Router output shape | Keep optional salience router output to selected `target_alias` values. | Evidence already lives in prompt-safe episode trace and debug artifacts. The router does not need `source_ref`, `target_kind`, write lanes, or payloads. |
 | Core module boundary | Move `call_consolidation_subgraph(...)` to `kazusa_ai_chatbot.consolidation.core`. | Consolidation is a subsystem boundary, not a persona-node implementation detail. |
 
 ## Contracts And Data Shapes
@@ -276,13 +246,6 @@ class ConsolidationTargetPlan(TypedDict):
     targets: list[ConsolidationTarget]
 ```
 
-LLM-proposed salience route:
-
-```python
-class ConsolidationTargetRoute(TypedDict):
-    target_alias: str
-```
-
 Internal write intent, projected by deterministic code from extraction output
 and validated target context:
 
@@ -296,7 +259,6 @@ class ConsolidationWriteIntent(TypedDict):
 Validation requirements:
 
 - `target_alias` must exist in the target plan.
-- salience-router output may contain only target aliases from the plan.
 - `write_lane` must be listed for that target.
 - `user` targets must resolve to real validated user profiles.
 - `group_channel` targets must not call user-profile or user-memory helpers.
@@ -305,24 +267,12 @@ Validation requirements:
 - Synthetic user ids, including `"self_cognition"`, are rejected before DB
   helper calls.
 
-Debug/evaluation artifacts may include evidence summaries, raw model output,
-input tables, and human-readable interpretation. Runtime router output does not
-need `source_ref`, and prompt output must not create write lanes.
-
 ## LLM Call And Context Budget
 
 - Target-plan construction adds zero LLM calls.
 - Existing consolidation extraction remains a background post-response path.
-- Extra user salience routing, when implemented, adds at most one background
-  `CONSOLIDATION_LLM` call per consolidation run.
-- The extra router is skipped when no character-facing signal exists.
-- The extra router receives prompt-safe aliases, source scope, character-facing
-  signal, and bounded supporting evidence. It must not receive raw database ids
-  except inside deterministic validation after model output.
-- The extra router output is alias selection only and best-effort. Schema-valid
-  output is not treated as quality proof.
-- Real LLM evaluation must use `debug-llm`: write a human-readable Markdown
-  artifact first and keep JSON as secondary evidence.
+- This plan adds no new LLM call, prompt, retry loop, or real-data LLM
+  quality-review gate.
 
 ## Change Surface
 
@@ -340,7 +290,7 @@ need `source_ref`, and prompt output must not create write lanes.
 - `src/kazusa_ai_chatbot/consolidation/group_channel.py`
   - group-channel projection and persistence dispatch for allowed group lanes.
 - `tests/test_consolidation_target_routing.py`
-  - target-plan, router-skip, and forbidden synthetic-user tests.
+  - target-plan and forbidden synthetic-user tests.
 - `tests/test_consolidator_group_channel_branch.py`
   - group-channel write-lane and negative user-lane tests.
 
@@ -397,7 +347,8 @@ need `source_ref`, and prompt output must not create write lanes.
 
 ## Data Migration
 
-No production mutation is approved by this draft alone.
+No production mutation is approved by this implementation plan. Apply mode
+requires separate explicit approval after dry-run evidence is reviewed.
 
 Required dry-run diagnostics:
 
@@ -411,7 +362,8 @@ Required dry-run diagnostics:
 
 Approved apply behavior, after user approval:
 
-- cancel or fail synthetic pending scheduled events with a migration reason;
+- fail synthetic scheduled events with a migration reason and remove their
+  synthetic source-user ownership;
 - remove or quarantine malformed synthetic user-profile and memory rows;
 - leave real UUID-like users untouched;
 - rerun diagnostics and record zero remaining synthetic user-owned rows.
@@ -431,86 +383,76 @@ Approved apply behavior, after user approval:
 8. Connect group-channel write support through existing interaction-style image
    storage.
 9. Connect character-self target lanes without user-profile dependency.
-10. Add or adjust the optional extra user salience router only after validation
-    exists; skip it when there is no character-facing signal.
-11. Update subsystem READMEs and direct-import tests.
-12. Add migration dry-run helper; do not implement apply mode until dry-run
+10. Update subsystem READMEs and direct-import tests.
+11. Add migration dry-run helper; do not implement apply mode until dry-run
     output is reviewed.
-13. Run verification.
-14. Run independent code review and fix in-scope findings.
-15. Run production cleanup apply only after explicit user approval.
+12. Run verification.
+13. Run independent code review and fix in-scope findings.
+14. Run production cleanup apply only after explicit user approval.
 
 ## Progress Checklist
 
-- [ ] Stage 1 - plan approval gate complete
+- [x] Stage 1 - plan approval gate complete
   - Covers: Implementation Order step 1.
   - Verify: independent plan review has no remaining blockers and owner approves
     the draft for execution.
   - Evidence: record approval status in Execution Evidence.
-  - Sign-off: `<agent/date>`.
+  - Sign-off: `Codex/2026-05-21`.
 
-- [ ] Stage 2 - read-only diagnostics complete
+- [x] Stage 2 - read-only diagnostics complete
   - Covers: step 2.
   - Verify: diagnostic counts recorded without production mutation.
   - Evidence: record sanitized counts only.
-  - Sign-off: `<agent/date>`.
+  - Sign-off: `Codex/2026-05-21`.
 
-- [ ] Stage 3 - target contract and package boundary complete
+- [x] Stage 3 - target contract and package boundary complete
   - Covers: steps 3-5.
   - Verify: target routing focused tests pass and consolidator imports resolve
     from `kazusa_ai_chatbot.consolidation.core`.
   - Evidence: record red/green focused test output and import grep output.
-  - Sign-off: `<agent/date>`.
+  - Sign-off: `Codex/2026-05-21`.
 
-- [ ] Stage 4 - synthetic identity fallback removed
+- [x] Stage 4 - synthetic identity fallback removed
   - Covers: step 6.
   - Verify: tests prove missing user ids do not become `"self_cognition"` user
     targets.
   - Evidence: record focused test output.
-  - Sign-off: `<agent/date>`.
+  - Sign-off: `Codex/2026-05-21`.
 
-- [ ] Stage 5 - validation and target lanes wired
+- [x] Stage 5 - validation and target lanes wired
   - Covers: steps 7-9.
   - Verify: invalid aliases, invalid lanes, group-to-user writes,
     character-to-user writes, and synthetic user targets fail before DB helper
     calls.
   - Evidence: record tests and static grep results.
-  - Sign-off: `<agent/date>`.
+  - Sign-off: `Codex/2026-05-21`.
 
-- [ ] Stage 6 - optional salience router bounded
-  - Covers: step 10.
-  - Verify: router skips raw-only `/chat` cases, uses character-facing signal,
-    and produces human-readable debug artifacts from real data.
-  - Evidence: record Markdown artifact path and human quality notes; do not use
-    pass/fail target-set scoring for 15-minute cases.
-  - Sign-off: `<agent/date>`.
-
-- [ ] Stage 7 - docs and migration dry-run complete
-  - Covers: steps 11-12.
+- [x] Stage 6 - docs and migration dry-run complete
+  - Covers: steps 10-11.
   - Verify: subsystem READMEs match the implemented target contract and dry-run
     cleanup reports exact planned mutation without applying it.
   - Evidence: record docs diff summary and dry-run output path/counts.
-  - Sign-off: `<agent/date>`.
+  - Sign-off: `Codex/2026-05-21`.
 
-- [ ] Stage 8 - full verification complete
-  - Covers: step 13.
+- [x] Stage 7 - full verification complete
+  - Covers: step 12.
   - Verify: every Verification command passes or has an approved blocker.
   - Evidence: record command outputs.
-  - Sign-off: `<agent/date>`.
+  - Sign-off: `Codex/2026-05-21`.
 
-- [ ] Stage 9 - independent code review complete
-  - Covers: step 14.
+- [x] Stage 8 - independent code review complete
+  - Covers: step 13.
   - Verify: review findings are closed or explicitly accepted as residual risk.
   - Evidence: record reviewer mode, findings, fixes, rerun commands, and final
     approval status.
-  - Sign-off: `<agent/date>`.
+  - Sign-off: `Codex/2026-05-21`.
 
-- [ ] Stage 10 - approved production cleanup complete
-  - Covers: step 15.
+- [x] Stage 9 - approved production cleanup complete
+  - Covers: step 14.
   - Verify: apply mode runs only after explicit user approval and post-cleanup
     diagnostics show no synthetic user-owned rows.
   - Evidence: record sanitized before/after counts.
-  - Sign-off: `<agent/date>`.
+  - Sign-off: `Codex/2026-05-21`.
 
 ## Verification
 
@@ -554,9 +496,7 @@ Required assertions:
 
 - target planning does not call an LLM client;
 - missing user id never becomes `"self_cognition"`;
-- participant presence alone cannot create an extra user target;
-- raw-only `/chat` cases skip extra salience routing;
-- 15-minute group review always has deterministic group-channel eligibility;
+- group review always has deterministic group-channel eligibility;
 - group-channel writes cannot use user lanes;
 - character-self writes cannot use user lanes.
 
@@ -566,23 +506,6 @@ Required assertions:
 - `venv\Scripts\python -m pytest tests\test_interaction_style_images.py tests\test_cognition_interaction_style_context.py -q`
 - `venv\Scripts\python -m pytest tests\test_consolidator_character_image.py tests\test_service_background_consolidation.py -q`
 - `venv\Scripts\python -m pytest tests\test_self_cognition_group_review_source.py tests\test_self_cognition_tracking.py -q`
-
-### Real-Data LLM Quality Review
-
-Run only when the extra salience router prompt or harness changes:
-
-- `venv\Scripts\python experiments\consolidator_target_router_poc.py`
-
-Expected evidence:
-
-- Markdown review artifact exists and shows real input, interpreted input,
-  raw/parsed output, accepted/rejected target rows, and human attention notes.
-- JSON artifact exists as secondary evidence.
-- Review records quality observations for both `/chat` and self-cognition
-  cases.
-- 15-minute cases are evaluated as best-effort quality, not strict pass/fail.
-- A better new output may be preferred over current baseline when the
-  human-readable artifact supports that judgment.
 
 ### Live DB Diagnostics
 
@@ -603,20 +526,16 @@ Do not print raw message bodies, raw reflection text, or secrets.
 Run this gate before approval, execution, or handoff. Prefer a reviewer that
 did not draft the plan. If no separate reviewer is available, the active agent
 must reread this plan, the development-plan registry, README, HOWTO,
-self-cognition README, nodes README, brain-service README, DB README, and any
-available router POC artifact from a fresh-review posture.
+self-cognition README, nodes README, brain-service README, and DB README from
+a fresh-review posture.
 
 Review scope:
 
 - The plan addresses target lifecycle and write validation, not only the crash.
 - `origin_kind` and `target_kind` stay separate.
 - Group-channel target creation is deterministic and outside LLM output.
-- Extra user routing requires character-facing signal and cannot rely on
-  participant presence.
-- 15-minute consolidation is documented as best-effort quality review, not
-  strict pass/fail.
-- LLM output cannot create targets, target kinds, write lanes, source refs, or
-  DB operations.
+- LLM output cannot create targets, target kinds, write lanes, or DB
+  operations.
 - Synthetic `self_cognition` user identity is removed without weakening
   fail-fast profile invariants.
 - The core consolidator entrypoint moves to a consolidation package.
@@ -631,30 +550,20 @@ Reviewer mode: active agent fresh-review; no separate reviewer was available.
 Inputs reviewed: `git status --short`, `README.md`, `docs/HOWTO.md`,
 `development_plans/README.md`, `src/kazusa_ai_chatbot/self_cognition/README.md`,
 `src/kazusa_ai_chatbot/nodes/README.md`,
-`src/kazusa_ai_chatbot/brain_service/README.md`,
-`src/kazusa_ai_chatbot/db/README.md`, and
-`experiments/consolidator_target_router_poc.py`.
+`src/kazusa_ai_chatbot/brain_service/README.md`, and
+`src/kazusa_ai_chatbot/db/README.md`.
 
 Findings fixed in this revision:
 
-- Blocker: the previous plan allowed "any validated real user targets present
-  in the window." That made participant presence look like salience. The plan
-  now requires character-facing signal for extra user routing.
-- Blocker: the previous plan did not state that 15-minute consolidation is
-  best-effort. The plan now makes quality review human-judged and keeps tests
-  focused on safety contracts.
-- Blocker: the previous plan did not clearly skip raw-only `/chat` salience
-  routing. The plan now requires assistant/internal cognition signal before
-  extra routing.
-- Blocker: the first rewrite mixed optional salience-router output with
-  persistence write intents. The plan now separates LLM alias selection from
-  deterministic write-intent projection and validation.
+- Blocker: the previous plan allowed target construction paths that could
+  recreate fake users. The plan now requires deterministic target construction
+  and write-intent validation before persistence.
 - Non-blocking: the previous plan carried trend projection and broad future
   direction not needed for execution. This revision removed that material and
   retained only decision rationale.
 
 Approval status: no remaining plan-readiness blockers found in this review.
-The plan remains `draft` until the owner approves execution.
+The owner approved execution on 2026-05-21, and the plan is now `in_progress`.
 
 ## Independent Code Review
 
@@ -669,12 +578,10 @@ Review scope:
   compliance.
 - Alignment with Must Do, Deferred, target contracts, cutover policy, change
   surface, verification, and acceptance criteria.
-- Design risk: hidden fallback users, prompt metadata leaks, raw-only salience
-  routing, fake identities, invalid lanes, group-to-user writes, and accidental
-  L3/dialog changes.
+- Design risk: hidden fallback users, prompt metadata leaks, fake identities,
+  invalid lanes, group-to-user writes, and accidental L3/dialog changes.
 - Regression coverage: focused target-plan tests, future-cognition tests,
-  group-channel tests, character-self tests, real-data LLM review artifacts,
-  and sanitized DB diagnostics.
+  group-channel tests, character-self tests, and sanitized DB diagnostics.
 
 Fix findings directly only when the fix is inside this plan's approved change
 surface. If a finding requires a broader contract or new architecture, stop and
@@ -690,8 +597,6 @@ This plan is complete when:
   module.
 - Every consolidation run has an explicit deterministic
   `ConsolidationTargetPlan`.
-- Optional LLM salience routing can emit only target aliases from the target
-  plan.
 - Durable writes are materialized as internal write intents only after
   deterministic lane projection and validation.
 - Deterministic validation rejects unknown aliases, forbidden lanes, fake user
@@ -699,9 +604,6 @@ This plan is complete when:
 - Valid current user-message consolidation behavior is preserved.
 - Group-scoped consolidation has deterministic group-channel eligibility.
 - Group-channel intents write only group-channel state.
-- Extra user routing requires character-facing signal and is best-effort.
-- 15-minute group-review quality is reviewed through human-readable artifacts,
-  not strict pass/fail target-set scoring.
 - Character-self consolidation targets character-owned state only.
 - Missing durable targets no longer become `global_user_id="self_cognition"`.
 - User-profile helpers remain fail-fast for malformed rows.
@@ -716,8 +618,6 @@ This plan is complete when:
 | Risk | Mitigation | Verification |
 |---|---|---|
 | Fake user semantics return through another path | Forbid synthetic ids and add static greps plus target-plan tests | Static Greps and focused tests |
-| LLM selects participants because they appeared in a window | Require character-facing signal and skip raw-only `/chat` routing | Focused tests and real-data Markdown review |
-| 15-minute review gets treated as deterministic truth | Document best-effort decision and require human quality review | Debug LLM review artifact |
 | Group-channel writes call user helpers | Validate target kind and lane before persistence | Group-channel negative tests |
 | Existing valid user writes regress | Preserve compatible user lane and run adjacent consolidator tests | Adjacent tests |
 | Core package move becomes broad helper migration | Move only public entrypoint and target modules | Import greps and py_compile |
@@ -725,9 +625,116 @@ This plan is complete when:
 
 ## Execution Evidence
 
-No implementation has started under this revised plan. Record plan approval,
-diagnostics, test results, LLM quality review artifacts, code review, and
-optional production cleanup evidence here during execution.
+- 2026-05-21: Owner approved execution by requesting implementation start.
+  Status changed to `in_progress`; Stage 1 signed off by Codex.
+- 2026-05-21: Read-only lifecycle diagnostic dry-run wrote
+  `test_artifacts\consolidation_target_lifecycle_dry_run.json`.
+  Sanitized counts: `synthetic_user_profiles=1`,
+  `user_profiles_missing_affinity=1`, `synthetic_scheduled_events=3`,
+  `synthetic_user_memory_units=1`,
+  `future_cognition_attempts_missing_user=3`,
+  `synthetic_user_profiles_with_platform_accounts=0`. No apply mode ran.
+- 2026-05-21: Production-data dry-run rerun wrote
+  `test_artifacts\consolidation_target_lifecycle_production_dry_run_20260521_214920.json`
+  with the same sanitized counts. Field-limited detail exports confirmed the
+  synthetic scheduled events are `running`, not `pending`; the synthetic
+  active commitment has no matching conversation-history rows; and cleanup is
+  not blocked by linked platform accounts.
+- 2026-05-21: Moved the public consolidator entrypoint to
+  `src\kazusa_ai_chatbot\consolidation\core.py`, added deterministic target
+  validation in `consolidation\target.py`, and retired the old node module as
+  a non-entrypoint module.
+- 2026-05-21: Removed future-cognition missing-user fallback to
+  `"self_cognition"`. Scheduled real-user cases now read the real
+  `user_profile`; missing profiles remain empty and fail validation instead of
+  receiving a dry-run default.
+- 2026-05-21: Wired explicit `consolidation_target_plan` into consolidator
+  state and required `db_writer` to read it with plain indexing.
+- 2026-05-21: Added group-channel write validation and persistence dispatch via
+  `consolidation\group_channel.py`; group review with a group target no longer
+  receives an accidental character target.
+- 2026-05-21: Strengthened real user-target validation so
+  `user_profile.global_user_id` must match the selected `global_user_id`.
+- 2026-05-21: Scope correction narrowed this plan to deterministic target
+  construction, write-intent validation, group-channel separation, and
+  synthetic-user cleanup only.
+- 2026-05-21: Independent code review found four issues: group-channel
+  persistence was declared but not called; `origin_kind` still allowed group
+  internal-thought cases to update character lanes; real-user validation was
+  shape-only; and the plan still contained stale draft text. Fixes were made
+  in scope and rerun through focused and adjacent verification.
+- 2026-05-21: Final independent code review reported no blocking findings.
+  Residual risks recorded: group-channel style-image extraction is not yet
+  end-to-end beyond direct persistence wiring, some adjacent service tests
+  connect to the configured MongoDB.
+- 2026-05-21: Verification passed:
+  `py_compile` over touched consolidation, persistence, self-cognition,
+  service, action-spec, and diagnostic modules; `git diff --check` with only
+  LF/CRLF warnings; static greps for old consolidator imports, synthetic
+  `self_cognition` user fallbacks, user DB helpers in group-channel module,
+  and LLM dependency in target planning.
+- 2026-05-21: Focused and adjacent tests passed:
+  `tests\test_consolidation_target_routing.py`,
+  `tests\test_consolidator_group_channel_branch.py`,
+  `tests\test_action_spec_future_cognition.py`,
+  `tests\test_self_cognition_integration.py`,
+  `tests\test_self_cognition_delivery_target.py`,
+  `tests\test_consolidation_lifecycle_diagnostics.py`,
+  `tests\test_consolidation_origin_policy.py`,
+  `tests\test_consolidator_origin_policy_db_writer.py`,
+  `tests\test_db_writer_cache2_invalidation.py`,
+  `tests\test_consolidator_origin_selection.py`,
+  `tests\test_consolidation_origin_metadata.py`,
+  `tests\test_consolidator_efficiency.py`,
+  `tests\test_interaction_style_images.py`,
+  `tests\test_cognition_interaction_style_context.py`,
+  `tests\test_consolidator_character_image.py`,
+  `tests\test_service_background_consolidation.py`,
+  `tests\test_self_cognition_group_review_source.py`, and
+  `tests\test_self_cognition_tracking.py`.
+- 2026-05-21: Implemented approved cleanup apply support in
+  `db.script_operations` and
+  `scripts.inspect_consolidation_target_lifecycle --apply`. Apply mode blocks
+  when the synthetic profile has linked platform accounts, fails synthetic
+  scheduled events with migration metadata, removes the synthetic
+  `source_user_id`, deletes exact synthetic profile and user-memory rows, and
+  reports sanitized before/after counts. Verification passed:
+  `venv\Scripts\python -m py_compile src\kazusa_ai_chatbot\db\script_operations.py src\scripts\inspect_consolidation_target_lifecycle.py tests\test_consolidation_lifecycle_diagnostics.py`,
+  `venv\Scripts\python -m pytest tests\test_consolidation_lifecycle_diagnostics.py -q`,
+  `venv\Scripts\python -m pytest tests\test_script_db_boundary.py -q`,
+  `venv\Scripts\python -m scripts.inspect_consolidation_target_lifecycle --help`,
+  and scoped `git diff --check` with only LF/CRLF warnings.
+- 2026-05-21: Owner explicitly approved Stage 9 production cleanup. Fresh
+  pre-apply diagnostic wrote
+  `test_artifacts\consolidation_target_lifecycle_stage9_before_20260521_225632.json`.
+  Sanitized counts before apply: `synthetic_user_profiles=1`,
+  `user_profiles_missing_affinity=1`, `synthetic_scheduled_events=3`,
+  `synthetic_user_memory_units=1`,
+  `future_cognition_attempts_missing_user=3`,
+  `synthetic_user_profiles_with_platform_accounts=0`.
+  Approved apply wrote
+  `test_artifacts\consolidation_target_lifecycle_stage9_apply_20260521_225632.json`
+  with `apply_status=applied` and `synthetic_user_owned_rows_after=0`.
+  Post-apply diagnostic wrote
+  `test_artifacts\consolidation_target_lifecycle_stage9_after_20260521_225632.json`.
+  Sanitized counts after apply: `synthetic_user_profiles=0`,
+  `user_profiles_missing_affinity=0`, `synthetic_scheduled_events=0`,
+  `synthetic_user_memory_units=0`,
+  `future_cognition_attempts_missing_user=3`,
+  `synthetic_user_profiles_with_platform_accounts=0`.
+- 2026-05-21: Post-Stage-9 independent code review found no blocking or
+  important issues. Follow-up fixes normalized scheduled synthetic
+  `source_user_id` before profile lookup, target construction, and delivery
+  binding; kept targetless scheduled future-cognition `user_profile` empty;
+  removed the dormant optional Stage-6 routing API surface; and updated stale
+  self-cognition docs. Residual risks accepted: the entire repo test suite was
+  not rerun, and some adjacent service tests connect to the configured MongoDB.
+  Final verification passed: `py_compile` over touched files; 46
+  future/self-cognition target tests; 15 lifecycle/target-routing tests; 38
+  consolidation origin/persistence/cache tests; 97 service/image/tracking
+  adjacent tests; `git diff --check`; and static greps for synthetic
+  `self_cognition` user fallbacks, old consolidator imports, group-channel
+  user-profile helper use, and removed optional routing API names.
 
 ## Glossary
 
@@ -735,11 +742,8 @@ optional production cleanup evidence here during execution.
 - `target_kind`: durable entity a validated write may modify: user,
   group channel, character, or internal artifact.
 - `target_alias`: prompt-safe handle for one deterministic target.
-- `salience_route`: optional LLM-selected target alias for an extra user target.
 - `write_intent`: internal projected change naming a target alias and write
   lane after deterministic validation.
-- `source_focus_user`: deterministic resolver for generic references to the
-  current/source user; not evidence of salience.
 - `group image`: group-scoped durable state; first slice uses existing
   group-channel interaction-style image storage.
 - `synthetic user`: any non-user label, including `"self_cognition"`, used as

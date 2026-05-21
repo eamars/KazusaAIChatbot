@@ -207,8 +207,7 @@ def _source_scope(scope: dict[str, Any]) -> dict[str, str]:
         "source_channel_id": _scope_text(scope, "source_channel_id"),
         "source_channel_type": _scope_text(scope, "source_channel_type")
         or "internal",
-        "source_user_id": _scope_text(scope, "source_user_id")
-        or "self_cognition",
+        "source_user_id": _scope_text(scope, "source_user_id"),
         "source_platform_bot_id": _scope_text(scope, "source_platform_bot_id"),
         "source_character_name": _scope_text(scope, "source_character_name"),
     }

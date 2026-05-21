@@ -8,9 +8,19 @@ from datetime import timedelta
 
 from kazusa_ai_chatbot.config import (
     AFFINITY_DECREMENT_BREAKPOINTS,
-    AFFINITY_DEFAULT,
     AFFINITY_INCREMENT_BREAKPOINTS,
     AFFINITY_RAW_DEAD_ZONE,
+)
+from kazusa_ai_chatbot.consolidation.target import (
+    CHARACTER_TARGET_ALIAS,
+    GROUP_CHANNEL_TARGET_ALIAS,
+    USER_TARGET_ALIAS,
+    ConsolidationTargetPlan,
+    ConsolidationTargetValidationError,
+    validate_write_intent,
+)
+from kazusa_ai_chatbot.consolidation.group_channel import (
+    persist_group_channel_style_image,
 )
 from kazusa_ai_chatbot.db import (
     DatabaseOperationError,
@@ -43,6 +53,89 @@ from kazusa_ai_chatbot.utils import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _target_plan(state: ConsolidatorState) -> ConsolidationTargetPlan:
+    """Return the deterministic target plan attached before persistence."""
+
+    target_plan = state["consolidation_target_plan"]
+    return target_plan
+
+
+def _write_intent_is_allowed(
+    state: ConsolidatorState,
+    *,
+    target_alias: str,
+    write_lane: str,
+    payload: dict,
+) -> bool:
+    """Validate one target/lane pair without calling persistence helpers."""
+
+    target_plan = _target_plan(state)
+    try:
+        validate_write_intent(
+            {
+                "target_alias": target_alias,
+                "write_lane": write_lane,
+                "payload": payload,
+            },
+            target_plan,
+        )
+    except ConsolidationTargetValidationError as exc:
+        logger.debug(
+            f"db_writer: write intent denied before persistence: {exc}"
+        )
+        return_value = False
+    else:
+        return_value = True
+    return return_value
+
+
+def _group_channel_style_image_payload(
+    state: ConsolidatorState,
+) -> dict[str, object] | None:
+    """Validate an optional group-channel style image payload."""
+
+    raw_payload = state.get("group_channel_style_image")
+    if raw_payload is None:
+        return_value = None
+        return return_value
+    if not isinstance(raw_payload, dict):
+        raise ConsolidationTargetValidationError(
+            "group_channel_style_image: expected dict"
+        )
+    if not raw_payload:
+        return_value = None
+        return return_value
+
+    overlay = raw_payload.get("overlay")
+    if not isinstance(overlay, dict) or not overlay:
+        raise ConsolidationTargetValidationError(
+            "group_channel_style_image.overlay: expected non-empty dict"
+        )
+    raw_source_ids = raw_payload.get("source_reflection_run_ids")
+    if not isinstance(raw_source_ids, list):
+        raise ConsolidationTargetValidationError(
+            "group_channel_style_image.source_reflection_run_ids: expected list"
+        )
+
+    source_reflection_run_ids: list[str] = []
+    for source_id in raw_source_ids:
+        if not isinstance(source_id, str):
+            raise ConsolidationTargetValidationError(
+                "group_channel_style_image.source_reflection_run_ids: "
+                "expected string items"
+            )
+        clean_source_id = source_id.strip()
+        if clean_source_id:
+            source_reflection_run_ids.append(clean_source_id)
+
+    payload: dict[str, object] = {
+        "overlay": dict(overlay),
+        "source_reflection_run_ids": source_reflection_run_ids,
+    }
+    return payload
+
 
 def process_affinity_delta(current_affinity: int, raw_delta: int) -> int:
     """Scale a raw affinity delta by direction-specific breakpoints.
@@ -148,7 +241,10 @@ def _normalize_future_promises(
         normalized_promise = dict(promise)
         commitment_type = text_or_empty(normalized_promise.get("commitment_type"))
         due_time = normalized_promise.get("due_time")
-        due_time_is_missing = due_time is None or (isinstance(due_time, str) and not due_time.strip())
+        due_time_is_missing = (
+            due_time is None
+            or (isinstance(due_time, str) and not due_time.strip())
+        )
 
         if commitment_type == "future_promise" and due_time_is_missing:
             normalized_promise["due_time"] = fallback_due_time
@@ -185,7 +281,17 @@ async def db_writer(state: ConsolidatorState) -> dict:
     mood = state.get("mood", "")
     global_vibe = state.get("global_vibe", "")
     reflection_summary = state.get("reflection_summary", "")
-    if origin_policy["character_state"]["allowed"]:
+    character_state_allowed = _write_intent_is_allowed(
+        state,
+        target_alias=CHARACTER_TARGET_ALIAS,
+        write_lane="character_state",
+        payload={
+            "mood": mood,
+            "global_vibe": global_vibe,
+            "reflection_summary": reflection_summary,
+        },
+    )
+    if origin_policy["character_state"]["allowed"] and character_state_allowed:
         try:
             await upsert_character_state(
                 mood=mood,
@@ -202,8 +308,17 @@ async def db_writer(state: ConsolidatorState) -> dict:
 
     # ── Step 2: last relationship insight ───────────────────────────
     last_relationship_insight = state.get("last_relationship_insight", "")
+    relationship_insight_allowed = _write_intent_is_allowed(
+        state,
+        target_alias=USER_TARGET_ALIAS,
+        write_lane="relationship_insight",
+        payload={"last_relationship_insight": last_relationship_insight},
+    )
     if global_user_id and last_relationship_insight:
-        if origin_policy["relationship_insight"]["allowed"]:
+        if (
+            origin_policy["relationship_insight"]["allowed"]
+            and relationship_insight_allowed
+        ):
             try:
                 await update_last_relationship_insight(
                     global_user_id,
@@ -219,7 +334,16 @@ async def db_writer(state: ConsolidatorState) -> dict:
             write_log["relationship_insight"] = False
 
     # ── Step 3: unified user-memory units ────────────────────────────
-    if origin_policy["user_memory_units"]["allowed"]:
+    user_memory_units_allowed = _write_intent_is_allowed(
+        state,
+        target_alias=USER_TARGET_ALIAS,
+        write_lane="user_memory_units",
+        payload={
+            "new_facts": state.get("new_facts") or [],
+            "future_promises": state.get("future_promises") or [],
+        },
+    )
+    if origin_policy["user_memory_units"]["allowed"] and user_memory_units_allowed:
         future_promises = _normalize_future_promises(
             state.get("future_promises") or [],
             storage_timestamp_utc=storage_timestamp_utc,
@@ -232,7 +356,7 @@ async def db_writer(state: ConsolidatorState) -> dict:
         future_promises = []
         normalized_state = state
 
-    if origin_policy["user_memory_units"]["allowed"]:
+    if origin_policy["user_memory_units"]["allowed"] and user_memory_units_allowed:
         try:
             memory_unit_results = await update_user_memory_units_from_state(
                 normalized_state
@@ -248,15 +372,23 @@ async def db_writer(state: ConsolidatorState) -> dict:
         write_log["user_memory_units"] = False
 
     # ── Step 4: affinity (direction-scaled) ─────────────────────────
-    user_profile = state.get("user_profile", {})
-    user_affinity_score = user_profile.get("affinity", AFFINITY_DEFAULT)
-    raw_affinity_delta = state.get("affinity_delta", 0) or 0
-    processed_affinity_delta = process_affinity_delta(
-        user_affinity_score,
-        raw_affinity_delta,
+    affinity_allowed = _write_intent_is_allowed(
+        state,
+        target_alias=USER_TARGET_ALIAS,
+        write_lane="affinity",
+        payload={"affinity_delta": state.get("affinity_delta", 0) or 0},
     )
+    raw_affinity_delta = state.get("affinity_delta", 0) or 0
+    user_affinity_score: int | None = None
+    processed_affinity_delta = 0
     if global_user_id:
-        if origin_policy["affinity"]["allowed"]:
+        if origin_policy["affinity"]["allowed"] and affinity_allowed:
+            user_profile = state["user_profile"]
+            user_affinity_score = int(user_profile["affinity"])
+            processed_affinity_delta = process_affinity_delta(
+                user_affinity_score,
+                raw_affinity_delta,
+            )
             try:
                 await update_affinity(global_user_id, processed_affinity_delta)
                 write_log["affinity"] = True
@@ -266,13 +398,63 @@ async def db_writer(state: ConsolidatorState) -> dict:
         else:
             write_log["affinity"] = False
 
-    logger.debug(
-        f"User {user_name}(@{global_user_id}) affinity {user_affinity_score} "
-        f"-> {user_affinity_score + processed_affinity_delta}"
-    )
+    if user_affinity_score is not None:
+        logger.debug(
+            f"User {user_name}(@{global_user_id}) affinity "
+            f"{user_affinity_score} "
+            f"-> {user_affinity_score + processed_affinity_delta}"
+        )
 
-    # ── Step 5: character image ──────────────────────────────────────
-    if origin_policy["character_image"]["allowed"]:
+    # ── Step 5: group-channel image ─────────────────────────────────
+    has_group_channel_target = False
+    for target in _target_plan(state)["targets"]:
+        if target["target_alias"] == GROUP_CHANNEL_TARGET_ALIAS:
+            has_group_channel_target = True
+            break
+
+    group_channel_style_payload = _group_channel_style_image_payload(state)
+    if group_channel_style_payload is not None:
+        group_channel_style_allowed = _write_intent_is_allowed(
+            state,
+            target_alias=GROUP_CHANNEL_TARGET_ALIAS,
+            write_lane="group_channel_style_image",
+            payload=group_channel_style_payload,
+        )
+    else:
+        group_channel_style_allowed = False
+
+    if (
+        group_channel_style_payload is not None
+        and origin_policy["group_channel_style_image"]["allowed"]
+        and group_channel_style_allowed
+    ):
+        try:
+            await persist_group_channel_style_image(
+                platform=state["platform"],
+                platform_channel_id=state["platform_channel_id"],
+                overlay=group_channel_style_payload["overlay"],
+                source_reflection_run_ids=group_channel_style_payload[
+                    "source_reflection_run_ids"
+                ],
+                storage_timestamp_utc=storage_timestamp_utc,
+            )
+            write_log["group_channel_style_image"] = True
+        except DatabaseOperationError as exc:
+            logger.exception(
+                f"db_writer: failed to persist group_channel_style_image: {exc}"
+            )
+            write_log["group_channel_style_image"] = False
+    elif has_group_channel_target:
+        write_log["group_channel_style_image"] = False
+
+    # ── Step 6: character image ──────────────────────────────────────
+    character_image_allowed = _write_intent_is_allowed(
+        state,
+        target_alias=CHARACTER_TARGET_ALIAS,
+        write_lane="character_self_image",
+        payload={"reflection_summary": state.get("reflection_summary", "")},
+    )
+    if origin_policy["character_image"]["allowed"] and character_image_allowed:
         async def _update_character_image_from_runtime_state() -> dict | None:
             """Build character image using the DB-current self-image base."""
 
@@ -322,7 +504,7 @@ async def db_writer(state: ConsolidatorState) -> dict:
     else:
         write_log["character_image"] = False
 
-    # ── Step 6: Cache2 invalidation events (after persistence) ──────
+    # ── Step 7: Cache2 invalidation events (after persistence) ──────
     evicted_total = 0
     if origin_policy["cache_invalidation"]["allowed"]:
         runtime = get_rag_cache2_runtime()
@@ -358,6 +540,7 @@ async def db_writer(state: ConsolidatorState) -> dict:
         "cache_invalidated": cache_invalidated,
         "affinity_before": user_affinity_score,
         "affinity_delta_processed": processed_affinity_delta,
+        "consolidation_target_plan": _target_plan(state),
     })
 
     logger.debug(

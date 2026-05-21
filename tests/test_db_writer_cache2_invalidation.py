@@ -7,6 +7,9 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from kazusa_ai_chatbot.cognition_episode import build_text_chat_cognitive_episode
+from kazusa_ai_chatbot.consolidation.target import (
+    build_consolidation_target_plan,
+)
 from kazusa_ai_chatbot.nodes import persona_supervisor2_consolidator_persistence as persistence_module
 from kazusa_ai_chatbot.nodes.persona_supervisor2_consolidator_origin import (
     build_user_message_consolidation_origin,
@@ -48,7 +51,7 @@ def _consolidation_origin() -> dict:
 
 
 def _state() -> dict:
-    return {
+    state = {
         "storage_timestamp_utc": STORAGE_TIMESTAMP_UTC,
         "local_time_context": local_time_context_from_storage_utc(
             STORAGE_TIMESTAMP_UTC,
@@ -57,6 +60,7 @@ def _state() -> dict:
         "user_name": "User",
         "platform": "qq",
         "platform_channel_id": "chan-1",
+        "channel_type": "group",
         "platform_message_id": "msg-1",
         "character_profile": {"name": "Kazusa"},
         "metadata": {},
@@ -72,11 +76,13 @@ def _state() -> dict:
             "dedup_key": "likes_tea",
         }],
         "future_promises": [],
-        "user_profile": {"affinity": 500},
+        "user_profile": {"global_user_id": "user-1", "affinity": 500},
         "affinity_delta": 1,
         "decontexualized_input": "remember tea",
         "consolidation_origin": _consolidation_origin(),
     }
+    state["consolidation_target_plan"] = build_consolidation_target_plan(state)
+    return state
 
 
 def _patch_writers(monkeypatch, *, character_image=None) -> MagicMock:

@@ -112,7 +112,7 @@ def _consolidation_state() -> dict:
         "platform_message_id": "msg-1",
         "global_user_id": "global-user-1",
         "user_name": "Test User",
-        "user_profile": {"affinity": 500},
+        "user_profile": {"global_user_id": "global-user-1", "affinity": 500},
         "character_profile": {"name": "Character"},
         "action_directives": {"linguistic_directives": {"content_anchors": []}},
         "internal_monologue": "test",
@@ -218,7 +218,9 @@ def _patch_chat_dependencies(monkeypatch, graph) -> None:
     monkeypatch.setattr(
         service_module,
         "get_user_profile",
-        AsyncMock(return_value={"affinity": 500}),
+        AsyncMock(
+            return_value={"global_user_id": "global-user-1", "affinity": 500},
+        ),
     )
     monkeypatch.setattr(
         service_module,
@@ -1058,7 +1060,7 @@ async def test_build_graph_preserves_consolidation_state_from_supervisor(monkeyp
         "user_name": "蚝爹油",
         "user_input": "一分钟后发消息",
         "user_multimedia_input": [],
-        "user_profile": {"affinity": 500},
+        "user_profile": {"global_user_id": "global-user-1", "affinity": 500},
         "platform_bot_id": "bot-id",
         "character_name": "Character",
         "character_profile": {"name": "杏山千纱"},
@@ -1135,7 +1137,7 @@ async def test_build_graph_preserves_persona_no_response(monkeypatch):
         "user_name": "Test User",
         "user_input": "ignored message",
         "user_multimedia_input": [],
-        "user_profile": {"affinity": 500},
+        "user_profile": {"global_user_id": "global-user-1", "affinity": 500},
         "platform_bot_id": "bot-id",
         "character_name": "Character",
         "character_profile": {"name": "Character"},
@@ -1181,7 +1183,7 @@ async def test_build_graph_skips_episode_state_loader_when_relevance_declines(mo
         "user_name": "Test User",
         "user_input": "third party chat",
         "user_multimedia_input": [],
-        "user_profile": {"affinity": 500},
+        "user_profile": {"global_user_id": "global-user-1", "affinity": 500},
         "platform_bot_id": "bot-id",
         "character_name": "Character",
         "character_profile": {"name": "Character"},
@@ -1231,10 +1233,28 @@ async def test_chat_listen_only_drops_before_graph(monkeypatch):
         "_ensure_character_global_identity",
         AsyncMock(return_value="character-global-id"),
     )
-    monkeypatch.setattr(service_module, "resolve_global_user_id", AsyncMock(return_value="global-user-1"))
-    monkeypatch.setattr(service_module, "get_user_profile", AsyncMock(return_value={"affinity": 500}))
-    monkeypatch.setattr(service_module, "get_conversation_history", AsyncMock(return_value=[]))
-    monkeypatch.setattr(service_module, "_hydrate_reply_context", AsyncMock(return_value={}))
+    monkeypatch.setattr(
+        service_module,
+        "resolve_global_user_id",
+        AsyncMock(return_value="global-user-1"),
+    )
+    monkeypatch.setattr(
+        service_module,
+        "get_user_profile",
+        AsyncMock(
+            return_value={"global_user_id": "global-user-1", "affinity": 500},
+        ),
+    )
+    monkeypatch.setattr(
+        service_module,
+        "get_conversation_history",
+        AsyncMock(return_value=[]),
+    )
+    monkeypatch.setattr(
+        service_module,
+        "_hydrate_reply_context",
+        AsyncMock(return_value={}),
+    )
     monkeypatch.setattr(
         service_module.event_logging,
         "record_database_operation_event",

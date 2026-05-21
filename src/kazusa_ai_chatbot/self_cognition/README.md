@@ -47,10 +47,12 @@ attempt persistence, consolidation, and source-bound delivery.
 Self-cognition-created episodes set
 `origin_metadata.debug_modes.no_visual_directives=true` by default, so the
 shared L3 visual-directive LLM is skipped for self-cognition. These episodes do
-not set `no_remember`. Production worker consolidation can update the existing
-character-state, relationship, affinity, memory-unit, and cache lanes through
-the shared consolidator policy. It does not create a separate self-cognition
-memory or progress store.
+not set `no_remember`. Production worker consolidation goes through the shared
+target-aware consolidator policy. Real user-scoped cases may update existing
+relationship, affinity, memory-unit, and cache lanes. Group-scoped or
+targetless cases do not fabricate a user id and cannot reach user-profile
+lanes. Self-cognition does not create a separate self-cognition memory or
+progress store.
 
 The module does not call platform adapters directly from graph code, route
 direct `/chat` requests through the worker, or schedule prewritten user-visible
@@ -145,6 +147,11 @@ group review may load bounded group-channel engagement guidance so the
 character can judge whether the current scene gives enough reason to speak.
 This guidance is evidence only; it is not a response-ratio control, a command
 to speak, or a deterministic silence rule.
+
+When these cases are consolidated, the deterministic target plan gives the
+group channel its own target eligibility. Group-review participant presence is
+not enough to create a user lane. The source label `self_cognition` is
+provenance only and must never be used as `global_user_id`.
 
 `commitment_past_due` and `commitment_duplicate_tick` do not force contact.
 If shared cognition does not select outward contact, the route is recorded as

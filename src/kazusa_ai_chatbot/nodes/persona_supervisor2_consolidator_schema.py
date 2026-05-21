@@ -9,6 +9,7 @@ from langgraph.graph.message import add_messages
 from kazusa_ai_chatbot.nodes.persona_supervisor2_consolidator_origin import (
     ConsolidationOriginMetadata,
 )
+from kazusa_ai_chatbot.consolidation.target import ConsolidationTargetPlan
 from kazusa_ai_chatbot.time_boundary import LocalTimeContextDoc
 
 
@@ -102,6 +103,7 @@ class ConsolidatorState(TypedDict):
     character_intent: str
     logical_stance: str
     character_profile: dict
+    group_channel_style_image: dict
 
     # Facts
     rag_result: dict
@@ -114,6 +116,7 @@ class ConsolidatorState(TypedDict):
     # Shared metadata bundle seeded from RAG metadata and accumulated per node.
     metadata: Annotated[dict, _merge_dicts]
     consolidation_origin: ConsolidationOriginMetadata
+    consolidation_target_plan: ConsolidationTargetPlan
 
     # global state updater
     mood: str

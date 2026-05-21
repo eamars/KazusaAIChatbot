@@ -9,6 +9,9 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from kazusa_ai_chatbot.db import DatabaseOperationError
+from kazusa_ai_chatbot.consolidation.target import (
+    build_consolidation_target_plan,
+)
 from kazusa_ai_chatbot.nodes import (
     persona_supervisor2_consolidator_images as image_module,
     persona_supervisor2_consolidator_persistence as persistence_module,
@@ -103,13 +106,14 @@ def _state(*, origin: ConsolidationOriginMetadata | None = None) -> dict[str, An
                 "commitment_type": "future_promise",
             }
         ],
-        "user_profile": {"affinity": 500},
+        "user_profile": {"global_user_id": "user-1", "affinity": 500},
         "affinity_delta": 1,
         "decontexualized_input": "remember tea",
         "final_dialog": ["I will remind you later."],
         "action_directives": {"linguistic_directives": {"content_anchors": []}},
         "consolidation_origin": origin,
     }
+    state["consolidation_target_plan"] = build_consolidation_target_plan(state)
     return state
 
 
@@ -146,6 +150,7 @@ def _patch_allowed_write_dependencies(
         "update_character_image": AsyncMock(return_value=character_image),
         "get_character_runtime_state": AsyncMock(return_value={}),
         "upsert_character_self_image": AsyncMock(),
+        "persist_group_channel_style_image": AsyncMock(),
     }
     monkeypatch.setattr(
         persistence_module,
@@ -187,6 +192,11 @@ def _patch_allowed_write_dependencies(
         persistence_module,
         "upsert_character_self_image",
         mocks["upsert_character_self_image"],
+    )
+    monkeypatch.setattr(
+        persistence_module,
+        "persist_group_channel_style_image",
+        mocks["persist_group_channel_style_image"],
     )
     return mocks
 
@@ -292,6 +302,17 @@ def _patch_writer_dependencies_except_image(
 
 
 @pytest.mark.asyncio
+async def test_db_writer_requires_attached_target_plan() -> None:
+    """Persistence must receive the explicit target plan from core."""
+
+    state = _state()
+    del state["consolidation_target_plan"]
+
+    with pytest.raises(KeyError, match="consolidation_target_plan"):
+        await persistence_module.db_writer(state)
+
+
+@pytest.mark.asyncio
 async def test_db_writer_denied_origin_skips_all_durable_write_effects(
     monkeypatch,
 ) -> None:
@@ -327,6 +348,11 @@ async def test_db_writer_denied_origin_skips_all_durable_write_effects(
     )
     monkeypatch.setattr(
         persistence_module,
+        "persist_group_channel_style_image",
+        denied_async_effect,
+    )
+    monkeypatch.setattr(
+        persistence_module,
         "get_rag_cache2_runtime",
         denied_sync_effect,
     )
@@ -346,6 +372,7 @@ async def test_db_writer_denied_origin_skips_all_durable_write_effects(
         "relationship_insight": False,
         "user_memory_units": False,
         "affinity": False,
+        "group_channel_style_image": False,
         "character_image": False,
     }
     assert result["metadata"]["cache_invalidated"] == []
@@ -385,8 +412,58 @@ async def test_db_writer_user_message_origin_preserves_character_and_user_writes
         "relationship_insight": True,
         "user_memory_units": True,
         "affinity": True,
+        "group_channel_style_image": False,
         "character_image": True,
     }
+
+
+@pytest.mark.asyncio
+async def test_db_writer_group_review_persists_group_channel_style_image(
+    monkeypatch,
+) -> None:
+    """Group-review consolidation can write the group lane without user lanes."""
+
+    mocks = _patch_allowed_write_dependencies(monkeypatch)
+    origin = _origin(
+        trigger_source="internal_thought",
+        input_sources=["internal_monologue"],
+        output_mode="preview",
+    )
+    state = _state(origin=origin)
+    state["global_user_id"] = "self_cognition"
+    state["user_name"] = "self-cognition"
+    state["user_profile"] = {
+        "affinity": 500,
+        "display_name": "group audience",
+    }
+    state["group_channel_style_image"] = {
+        "overlay": {
+            "speech_guidelines": ["Keep replies compact in this group."],
+            "social_guidelines": [],
+            "pacing_guidelines": [],
+            "engagement_guidelines": [],
+            "confidence": "medium",
+        },
+        "source_reflection_run_ids": ["group-review-case-1"],
+    }
+    state["consolidation_target_plan"] = build_consolidation_target_plan(state)
+
+    result = await persistence_module.db_writer(state)
+
+    mocks["persist_group_channel_style_image"].assert_awaited_once_with(
+        platform="qq",
+        platform_channel_id="chan-1",
+        overlay=state["group_channel_style_image"]["overlay"],
+        source_reflection_run_ids=["group-review-case-1"],
+        storage_timestamp_utc=state["storage_timestamp_utc"],
+    )
+    mocks["update_last_relationship_insight"].assert_not_awaited()
+    mocks["update_user_memory_units_from_state"].assert_not_awaited()
+    mocks["update_affinity"].assert_not_awaited()
+    assert result["metadata"]["write_success"]["group_channel_style_image"] is True
+    assert result["metadata"]["write_success"]["relationship_insight"] is False
+    assert result["metadata"]["write_success"]["user_memory_units"] is False
+    assert result["metadata"]["write_success"]["affinity"] is False
 
 
 @pytest.mark.asyncio
@@ -456,6 +533,9 @@ async def test_db_writer_internal_thought_uses_db_current_self_image(
             output_mode="preview",
         )
     )
+    state["platform_channel_id"] = "private-1"
+    state["channel_type"] = "private"
+    state["consolidation_target_plan"] = build_consolidation_target_plan(state)
 
     result = await persistence_module.db_writer(state)
 
@@ -501,6 +581,9 @@ async def test_db_writer_runtime_state_failure_fails_character_image_closed(
             output_mode="preview",
         )
     )
+    state["platform_channel_id"] = "private-1"
+    state["channel_type"] = "private"
+    state["consolidation_target_plan"] = build_consolidation_target_plan(state)
 
     result = await persistence_module.db_writer(state)
 
@@ -526,6 +609,9 @@ async def test_db_writer_empty_reflection_skips_self_image_db_read(
             output_mode="preview",
         )
     )
+    state["platform_channel_id"] = "private-1"
+    state["channel_type"] = "private"
+    state["consolidation_target_plan"] = build_consolidation_target_plan(state)
     state["reflection_summary"] = ""
 
     result = await persistence_module.db_writer(state)
