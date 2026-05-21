@@ -202,6 +202,7 @@ cognition, and scheduling remain in the platform-neutral core.
 | RAG 2                    | Slot-driven helper-agent retrieval and Cache2 evidence projection                       | [RAG 2](src/kazusa_ai_chatbot/rag/README.md)                                           |
 | Cognition and dialog     | Character stance, boundaries, judgment, style, visual directives, and final wording     | [Cognition Nodes](src/kazusa_ai_chatbot/nodes/README.md)                              |
 | Action spec              | L2d action residues, capability registry, evaluator, results, surfaces, and traces      | [Action Spec](src/kazusa_ai_chatbot/action_spec/README.md)                            |
+| Consolidation            | Durable target routing, write-intent validation, and target-specific persistence        | [Consolidation ICD](src/kazusa_ai_chatbot/consolidation/README.md)                    |
 | Database                 | MongoDB collection ownership, embeddings, indexes, public persistence helpers           | [Database ICD](src/kazusa_ai_chatbot/db/README.md)                                     |
 | Event logging            | Sanitized operational telemetry, status snapshots, statistics, and export contracts     | [Event Logging ICD](src/kazusa_ai_chatbot/event_logging/README.md)                     |
 | Dispatcher and scheduler | Validated delayed tool execution for accepted future promises                           | [Dispatcher](src/kazusa_ai_chatbot/dispatcher/README.md)                               |
@@ -260,6 +261,7 @@ src/
     message_envelope/          Typed adapter-to-brain message contract
     nodes/                     Persona, cognition, dialog, consolidation stages
     action_spec/               Modality-neutral action contracts, registry, results
+    consolidation/             Durable target routing and consolidation ICD
     rag/                       RAG 2 helper agents, hybrid retrieval, Cache2
     conversation_progress/     Short-term episode memory
     db/                        MongoDB facade, schemas, collection owners
@@ -310,6 +312,7 @@ rather than production sends.
 | [Message Envelope ICD](src/kazusa_ai_chatbot/message_envelope/README.md) | Typed inbound message contract                                    |
 | [Database ICD](src/kazusa_ai_chatbot/db/README.md)                       | Persistence ownership and collection contracts                    |
 | [Action Spec](src/kazusa_ai_chatbot/action_spec/README.md)               | Modality-neutral action contracts and trace handoff               |
+| [Consolidation ICD](src/kazusa_ai_chatbot/consolidation/README.md)       | Durable target routing and write-intent validation                |
 | [Event Logging ICD](src/kazusa_ai_chatbot/event_logging/README.md)        | Sanitized telemetry interface, event taxonomy, and ops statistics |
 | [RAG 2](src/kazusa_ai_chatbot/rag/README.md)                             | Retrieval architecture and evidence projection                    |
 | [Cognition Nodes](src/kazusa_ai_chatbot/nodes/README.md)                 | Layered cognition, dialog, and node-package design contracts      |
