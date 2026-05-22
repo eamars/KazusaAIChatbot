@@ -285,6 +285,11 @@ async def test_group_review_passes_adapter_registry_provider_to_self_cognition(
         "run_self_cognition_worker_tick",
         _run_self_cognition_tick,
     )
+    monkeypatch.setattr(
+        worker_module,
+        "is_self_cognition_sleep_period",
+        lambda now: False,
+    )
 
     result = await worker_module._run_group_self_cognition_review(
         now=now,
@@ -295,6 +300,85 @@ async def test_group_review_passes_adapter_registry_provider_to_self_cognition(
     assert result.processed_count == 1
     assert captured["adapter_registry_provider"] is adapter_provider
     assert captured["collect_cases_func"] is not None
+
+
+@pytest.mark.asyncio
+async def test_group_self_cognition_review_skips_cases_during_sleep(
+    monkeypatch,
+) -> None:
+    """The reflection sidecar should not collect group cases while asleep."""
+
+    monkeypatch.setattr(
+        worker_module,
+        "is_self_cognition_sleep_period",
+        lambda now: True,
+    )
+    monkeypatch.setattr(
+        worker_module,
+        "get_character_profile",
+        AsyncMock(side_effect=AssertionError("profile fetch should sleep")),
+    )
+    monkeypatch.setattr(
+        worker_module.self_cognition_sources,
+        "collect_group_chat_review_cases",
+        AsyncMock(side_effect=AssertionError("group review should sleep")),
+    )
+    monkeypatch.setattr(
+        worker_module.self_cognition_worker,
+        "run_self_cognition_worker_tick",
+        AsyncMock(side_effect=AssertionError("worker tick should sleep")),
+    )
+
+    result = await worker_module._run_group_self_cognition_review(
+        now=datetime(2026, 5, 12, 14, 30, tzinfo=timezone.utc),
+        is_primary_interaction_busy=lambda: False,
+    )
+
+    assert result.skipped_count == 1
+    assert result.defer_reason == "self-cognition sleep period"
+
+
+@pytest.mark.asyncio
+async def test_worker_tick_keeps_hourly_reflection_when_group_review_sleeps(
+    monkeypatch,
+) -> None:
+    """Sleep should suppress only the group self-cognition sidecar."""
+
+    now = datetime(2026, 5, 12, 14, 30, tzinfo=timezone.utc)
+    sleep_checks: list[datetime] = []
+    input_collector = AsyncMock(return_value=_input_set([]))
+    monkeypatch.setattr(worker_module, "collect_reflection_inputs", input_collector)
+
+    def _is_sleep_period(checked_now: datetime) -> bool:
+        sleep_checks.append(checked_now)
+        return True
+
+    monkeypatch.setattr(
+        worker_module,
+        "is_self_cognition_sleep_period",
+        _is_sleep_period,
+    )
+    monkeypatch.setattr(worker_module, "_local_time_is_after", lambda *_: False)
+    profile_fetch = AsyncMock(
+        side_effect=AssertionError("profile fetch should sleep"),
+    )
+    monkeypatch.setattr(
+        worker_module,
+        "get_character_profile",
+        profile_fetch,
+    )
+
+    results = await worker_module._run_worker_tick(
+        now=now,
+        is_primary_interaction_busy=lambda: False,
+    )
+
+    assert len(results) == 1
+    assert results[0].run_kind == REFLECTION_RUN_KIND_HOURLY
+    assert results[0].defer_reason == "no monitored message-bearing hourly slots"
+    assert sleep_checks == [now]
+    assert input_collector.await_count == 1
+    profile_fetch.assert_not_awaited()
 
 
 @pytest.mark.asyncio

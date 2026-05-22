@@ -74,6 +74,7 @@ CONVERSATION_HISTORY_LIMIT=10
 SCHEDULED_TASKS_ENABLED=true
 COGNITION_VISUAL_DIRECTIVES_ENABLED=true
 SELF_COGNITION_ENABLED=true
+CHARACTER_SLEEP_LOCAL_PERIOD=02:00-12:00
 
 # MCP servers and timeouts
 MCP_SERVERS={"mcp-searxng":{"url":"http://localhost:4001/mcp"}}
@@ -142,6 +143,13 @@ debug-client request payloads do not control this behavior.
 disable visual directives by default with
 `origin_metadata.debug_modes.no_visual_directives=true`, so normal
 self-cognition worker runs do not invoke the L3 visual-directive LLM.
+`CHARACTER_SLEEP_LOCAL_PERIOD` defaults to `02:00-12:00` in
+`CHARACTER_TIME_ZONE`. During that local period, active-commitment
+self-cognition and reflection-attached group self-cognition do not trigger.
+Scheduled future cognition, reflection, consolidation, scheduler execution,
+dispatcher validation, and adapter delivery continue. Set
+`CHARACTER_SLEEP_LOCAL_PERIOD` to an empty value to disable this sleep-period
+suppression.
 
 ## Dependencies
 

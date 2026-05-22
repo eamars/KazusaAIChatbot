@@ -819,6 +819,86 @@ async def test_collect_self_cognition_cases_includes_future_slots(
 
 
 @pytest.mark.asyncio
+async def test_collect_self_cognition_cases_skips_active_commitments_during_sleep(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The production collector should not trigger promises during sleep."""
+
+    async def no_scheduled(**kwargs: Any) -> list[dict[str, Any]]:
+        del kwargs
+        return []
+
+    async def active_commitments(**kwargs: Any) -> list[dict[str, Any]]:
+        del kwargs
+        raise AssertionError("active commitments should sleep")
+
+    monkeypatch.setattr(
+        sources,
+        "collect_scheduled_future_cognition_cases",
+        no_scheduled,
+    )
+    monkeypatch.setattr(
+        sources,
+        "collect_active_commitment_cases",
+        active_commitments,
+    )
+    monkeypatch.setattr(
+        sources,
+        "is_self_cognition_sleep_period",
+        lambda now: True,
+    )
+
+    cases = await sources.collect_self_cognition_cases(
+        now=datetime(2026, 5, 12, 14, 30, tzinfo=timezone.utc),
+        character_profile={"name": "TestCharacter"},
+        max_cases=3,
+    )
+
+    assert cases == []
+
+
+@pytest.mark.asyncio
+async def test_collect_self_cognition_cases_keeps_scheduled_future_slots_during_sleep(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Sleep should not suppress explicitly scheduled future cognition."""
+
+    async def future_cases(**kwargs: Any) -> list[dict[str, Any]]:
+        del kwargs
+        return [_future_cognition_case()]
+
+    async def active_commitments(**kwargs: Any) -> list[dict[str, Any]]:
+        del kwargs
+        raise AssertionError("active commitments should sleep")
+
+    monkeypatch.setattr(
+        sources,
+        "collect_scheduled_future_cognition_cases",
+        future_cases,
+    )
+    monkeypatch.setattr(
+        sources,
+        "collect_active_commitment_cases",
+        active_commitments,
+    )
+    monkeypatch.setattr(
+        sources,
+        "is_self_cognition_sleep_period",
+        lambda now: True,
+    )
+
+    cases = await sources.collect_self_cognition_cases(
+        now=datetime(2026, 5, 12, 14, 30, tzinfo=timezone.utc),
+        character_profile={"name": "TestCharacter"},
+        max_cases=3,
+    )
+
+    assert [case["trigger_kind"] for case in cases] == [
+        models.TRIGGER_SCHEDULED_FUTURE_COGNITION,
+    ]
+
+
+@pytest.mark.asyncio
 async def test_worker_tick_marks_future_cognition_slot_completed(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,

@@ -234,6 +234,12 @@ through the existing promoted, gated reflection context.
 The service does not serialize reflection behind `/chat`. Both paths may run at
 the same time and may contend for shared LLM or database resources.
 
+`CHARACTER_SLEEP_LOCAL_PERIOD` is owned by self-cognition trigger policy. When
+the current character-local time is inside that period, hourly, daily, style,
+promotion, and global reflection still run; only the group self-cognition
+review sidecar is skipped before profile fetch, case collection, or
+self-cognition worker tick.
+
 Terminal hourly statuses are `succeeded`, `failed`, `skipped`, and `dry_run`;
 a failed hourly slot does not block daily synthesis forever.
 If non-terminal hourly documents are present, daily synthesis uses the terminal

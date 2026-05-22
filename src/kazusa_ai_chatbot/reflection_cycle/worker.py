@@ -62,6 +62,9 @@ from kazusa_ai_chatbot.reflection_cycle.interaction_style import (
     run_daily_interaction_style_update as _run_daily_interaction_style_update,
 )
 from kazusa_ai_chatbot.self_cognition import sources as self_cognition_sources
+from kazusa_ai_chatbot.self_cognition.sleep_period import (
+    is_self_cognition_sleep_period,
+)
 from kazusa_ai_chatbot.self_cognition import worker as self_cognition_worker
 from kazusa_ai_chatbot.time_boundary import (
     local_time_context_from_storage_utc,
@@ -416,6 +419,11 @@ async def _run_group_self_cognition_review(
     if is_primary_interaction_busy():
         result.deferred = True
         result.defer_reason = "primary interaction busy"
+        return result
+
+    if is_self_cognition_sleep_period(now):
+        result.skipped_count = 1
+        result.defer_reason = "self-cognition sleep period"
         return result
 
     character_profile = await get_character_profile()

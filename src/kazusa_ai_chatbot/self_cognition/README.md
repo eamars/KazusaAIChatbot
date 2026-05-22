@@ -78,6 +78,8 @@ Central settings live in `kazusa_ai_chatbot.config`:
   explicit dry-run/debug artifact writers, not by the production worker.
 - `SELF_COGNITION_SOURCE_PACKET_CHAR_LIMIT`, default `4000`.
 - `SELF_COGNITION_RAG_EVIDENCE_CHAR_LIMIT`, default `4000`.
+- `CHARACTER_SLEEP_LOCAL_PERIOD`, default `02:00-12:00` in
+  `CHARACTER_TIME_ZONE`; empty disables sleep-period suppression.
 - Trigger-source enablement flags, all default `true`:
   `SELF_COGNITION_TRIGGER_ACTIVE_COMMITMENT_ENABLED`,
   `SELF_COGNITION_TRIGGER_CONVERSATION_PROGRESS_ENABLED`,
@@ -88,6 +90,14 @@ Central settings live in `kazusa_ai_chatbot.config`:
 
 Trigger flags control source collector eligibility only. They do not override
 cognition's route or contact decision.
+
+The self-cognition module owns sleep-period trigger suppression through
+`sleep_period.is_self_cognition_sleep_period(...)`. During the configured
+local sleep period, production source selection skips active-commitment due
+checks, and the reflection-cycle group review sidecar skips group
+self-cognition before case collection. Due scheduled future-cognition slots
+remain eligible. Reflection, consolidation, scheduler execution, dispatcher
+validation, and adapter delivery are not paused by this predicate.
 
 ## Runtime Engine Budget
 
@@ -113,6 +123,7 @@ cognition's route or contact decision.
 - `tracking.classify_route(case, cognition_output, action_attempt=None)`
 - `tracking.build_action_attempt(case, trigger_record, existing_attempts)`
 - `tracking.build_action_candidate(case, action_attempt, text, mention_target_user=False)`
+- `sleep_period.is_self_cognition_sleep_period(...)`
 - `runner.build_self_cognition_case_artifacts(case, rag_client=None, cognition_client=None, dialog_client=None, consolidation_client=None, apply_consolidation=False)`
 - `runner.build_self_cognition_case_artifacts_async(case, rag_client=None, cognition_client=None, dialog_client=None, consolidation_client=None, apply_consolidation=False)`
 - `runner.run_self_cognition_case(case, output_dir, rag_client=None, cognition_client=None, dialog_client=None, consolidation_client=None, apply_consolidation=False)`

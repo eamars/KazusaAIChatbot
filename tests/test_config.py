@@ -606,6 +606,7 @@ class TestSelfCognitionConfig:
         env.pop("SELF_COGNITION_TRIGGER_PENDING_OUTBOX_ENABLED", None)
         env.pop("SELF_COGNITION_TRIGGER_BOUNDED_TOPIC_FOLLOWUP_ENABLED", None)
         env.pop("SELF_COGNITION_TRIGGER_GROUP_CHAT_REVIEW_ENABLED", None)
+        env.pop("CHARACTER_SLEEP_LOCAL_PERIOD", None)
 
         result = subprocess.run(
             [
@@ -624,7 +625,8 @@ class TestSelfCognitionConfig:
                     "print(config.SELF_COGNITION_TRIGGER_RECENT_DIRECT_DIALOG_ENABLED); "
                     "print(config.SELF_COGNITION_TRIGGER_PENDING_OUTBOX_ENABLED); "
                     "print(config.SELF_COGNITION_TRIGGER_BOUNDED_TOPIC_FOLLOWUP_ENABLED); "
-                    "print(config.SELF_COGNITION_TRIGGER_GROUP_CHAT_REVIEW_ENABLED)"
+                    "print(config.SELF_COGNITION_TRIGGER_GROUP_CHAT_REVIEW_ENABLED); "
+                    "print(config.CHARACTER_SLEEP_LOCAL_PERIOD)"
                 ),
             ],
             cwd=tmp_path,
@@ -648,7 +650,72 @@ class TestSelfCognitionConfig:
             "True",
             "True",
             "True",
+            "02:00-12:00",
         ]
+
+    def test_self_cognition_sleep_period_parses_valid_values(self, tmp_path):
+        env = _configured_subprocess_env_without_dotenv()
+        env["CHARACTER_SLEEP_LOCAL_PERIOD"] = " 23:30-07:30 "
+
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-c",
+                (
+                    "import kazusa_ai_chatbot.config as config; "
+                    "print(config.CHARACTER_SLEEP_LOCAL_PERIOD)"
+                ),
+            ],
+            cwd=tmp_path,
+            env=env,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+        assert result.returncode == 0
+        assert result.stdout.strip() == "23:30-07:30"
+
+    def test_self_cognition_sleep_period_allows_empty_opt_out(self, tmp_path):
+        env = _configured_subprocess_env_without_dotenv()
+        env["CHARACTER_SLEEP_LOCAL_PERIOD"] = "   "
+
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-c",
+                (
+                    "import kazusa_ai_chatbot.config as config; "
+                    "print(repr(config.CHARACTER_SLEEP_LOCAL_PERIOD))"
+                ),
+            ],
+            cwd=tmp_path,
+            env=env,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+        assert result.returncode == 0
+        assert result.stdout.strip() == "''"
+
+    def test_self_cognition_sleep_period_rejects_invalid_values(self, tmp_path):
+        invalid_values = ["2:00-12:00", "24:00-12:00", "02:00-02:00"]
+        for invalid_value in invalid_values:
+            env = _configured_subprocess_env_without_dotenv()
+            env["CHARACTER_SLEEP_LOCAL_PERIOD"] = invalid_value
+
+            result = subprocess.run(
+                [sys.executable, "-c", "import kazusa_ai_chatbot.config"],
+                cwd=tmp_path,
+                env=env,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            assert result.returncode != 0
+            assert "CHARACTER_SLEEP_LOCAL_PERIOD" in result.stderr
 
     def test_self_cognition_char_limits_fail_fast_when_invalid(self, tmp_path):
         source_packet_env = _configured_subprocess_env_without_dotenv()

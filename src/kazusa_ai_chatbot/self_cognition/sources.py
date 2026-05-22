@@ -25,6 +25,9 @@ from kazusa_ai_chatbot.reflection_cycle.activity_windows import (
 )
 from kazusa_ai_chatbot.reflection_cycle.selector import collect_reflection_inputs
 from kazusa_ai_chatbot.self_cognition import models
+from kazusa_ai_chatbot.self_cognition.sleep_period import (
+    is_self_cognition_sleep_period,
+)
 from kazusa_ai_chatbot.time_boundary import (
     normalize_storage_utc_iso,
     parse_storage_utc_datetime,
@@ -70,14 +73,18 @@ async def collect_self_cognition_cases(
     cases.extend(scheduled_cases)
 
     remaining_cases = max_cases - len(cases)
-    if SELF_COGNITION_TRIGGER_ACTIVE_COMMITMENT_ENABLED:
-        if remaining_cases > 0:
-            commitment_cases = await collect_active_commitment_cases(
-                now=now,
-                character_profile=character_profile,
-                max_cases=remaining_cases,
-            )
-            cases.extend(commitment_cases)
+    active_commitment_enabled = (
+        SELF_COGNITION_TRIGGER_ACTIVE_COMMITMENT_ENABLED
+        and remaining_cases > 0
+        and not is_self_cognition_sleep_period(now)
+    )
+    if active_commitment_enabled:
+        commitment_cases = await collect_active_commitment_cases(
+            now=now,
+            character_profile=character_profile,
+            max_cases=remaining_cases,
+        )
+        cases.extend(commitment_cases)
     selected_cases = cases[:max_cases]
     return selected_cases
 

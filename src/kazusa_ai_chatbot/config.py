@@ -125,6 +125,44 @@ def _non_empty_string_from_env(name: str, default: str) -> str:
     return value
 
 
+def _local_time_minutes_from_value(name: str, value: str) -> int:
+    """Parse exact ``HH:MM`` text into minutes after local midnight."""
+
+    if len(value) != 5 or value[2] != ":":
+        raise ValueError(f"{name} must use HH:MM-HH:MM")
+    hour_text = value[:2]
+    minute_text = value[3:]
+    if not hour_text.isdecimal() or not minute_text.isdecimal():
+        raise ValueError(f"{name} must use HH:MM-HH:MM")
+
+    hour = int(hour_text)
+    minute = int(minute_text)
+    if hour > 23 or minute > 59:
+        raise ValueError(f"{name} must use HH:MM-HH:MM")
+
+    minutes = (hour * 60) + minute
+    return minutes
+
+
+def _optional_local_period_from_env(name: str, default: str) -> str:
+    """Read an optional exact ``HH:MM-HH:MM`` local clock period."""
+
+    raw_value = os.getenv(name, default)
+    value = raw_value.strip()
+    if not value:
+        return ""
+
+    parts = value.split("-", maxsplit=1)
+    if len(parts) != 2:
+        raise ValueError(f"{name} must use HH:MM-HH:MM")
+    start_minutes = _local_time_minutes_from_value(name, parts[0])
+    end_minutes = _local_time_minutes_from_value(name, parts[1])
+    if start_minutes == end_minutes:
+        raise ValueError(f"{name} start and end must differ")
+
+    return value
+
+
 load_dotenv()
 
 # MongoDB
@@ -403,6 +441,10 @@ SELF_COGNITION_TRIGGER_BOUNDED_TOPIC_FOLLOWUP_ENABLED = _bool_from_env(
 SELF_COGNITION_TRIGGER_GROUP_CHAT_REVIEW_ENABLED = _bool_from_env(
     "SELF_COGNITION_TRIGGER_GROUP_CHAT_REVIEW_ENABLED",
     "true",
+)
+CHARACTER_SLEEP_LOCAL_PERIOD = _optional_local_period_from_env(
+    "CHARACTER_SLEEP_LOCAL_PERIOD",
+    "02:00-12:00",
 )
 
 # Character timezone (IANA name) for converting UTC to character-local time.
