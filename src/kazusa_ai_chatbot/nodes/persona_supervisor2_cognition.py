@@ -86,20 +86,34 @@ def _is_group_self_cognition_state(state: CognitionState) -> bool:
 
 
 async def call_cognition_subgraph(state: GlobalPersonaState) -> GlobalPersonaState:
-    """
-    Future development plans: 
-    
-    - Separate the global character mood with the user specific mood. 
-      * Global mood get update from all users' conversation
-      * User mood get update from this user's conversation (this is not affinity. The mood can change indenpendently from affinity in time)
+    """Run the cognition subgraph for one persona turn.
 
+    Args:
+        state: Persona state containing current stimulus, RAG evidence, profile
+            context, and optional private residue context.
+
+    Returns:
+        Cognition state updates merged back into the persona graph.
     """
+
+    residue_context = state.get("internal_monologue_residue_context", "")
+
+    async def call_l2a_conscious_framing(
+        cognition_state: CognitionState,
+    ) -> CognitionState:
+        """Inject private residue only into the L2a consciousness node."""
+
+        l2a_state = dict(cognition_state)
+        l2a_state["internal_monologue_residue_context"] = residue_context
+        result = await call_cognition_consciousness(l2a_state)
+        return result
+
     sub_agent_builder = StateGraph(CognitionState)
 
     sub_agent_builder.add_node("l1_subconscious", call_cognition_subconscious)
     sub_agent_builder.add_node(
         "l2a_conscious_framing",
-        call_cognition_consciousness,
+        call_l2a_conscious_framing,
     )
     sub_agent_builder.add_node("l2b_boundary_appraisal", call_boundary_core_agent)
     sub_agent_builder.add_node("l2c1_judgment_synthesis", call_judgment_core_agent)

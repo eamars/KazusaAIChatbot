@@ -23,6 +23,7 @@ from kazusa_ai_chatbot.cognition_episode import (
     CognitiveEpisode,
     validate_cognitive_episode,
 )
+from kazusa_ai_chatbot.config import CHARACTER_GLOBAL_USER_ID
 from kazusa_ai_chatbot.nodes.dialog_agent import (
     DIALOG_USAGE_MODE_SELF_COGNITION_ACTION_CANDIDATE,
     StateContractError,
@@ -31,6 +32,10 @@ from kazusa_ai_chatbot.nodes.dialog_agent import (
 )
 from kazusa_ai_chatbot.consolidation.core import (
     call_consolidation_subgraph,
+)
+from kazusa_ai_chatbot.internal_monologue_residue import (
+    load_residue_context,
+    record_completed_episode_residue,
 )
 from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition import (
     call_cognition_subgraph,
@@ -295,10 +300,12 @@ async def build_self_cognition_case_artifacts_async(
     artifact_payloads[models.ARTIFACT_COGNITION_INPUT] = cognition_input
 
     active_cognition_client = cognition_client or _default_cognition_client
+    residue_context = await _load_residue_context_for_case(case)
     cognition_state = _build_cognition_state(
         case,
         rendered_packet,
         rag_output=rag_output,
+        residue_context=residue_context,
     )
     cognition_output = await _call_maybe_async(
         active_cognition_client,
@@ -375,6 +382,10 @@ async def build_self_cognition_case_artifacts_async(
             active_consolidation_client,
             consolidation_state,
         )
+        await record_completed_episode_residue(
+            completed_state=consolidation_state,
+            current_timestamp_utc=consolidation_state["storage_timestamp_utc"],
+        )
         artifact_payloads[models.ARTIFACT_CONSOLIDATION_OUTCOME] = (
             tracking.build_consolidation_outcome_record(
                 consolidation_state,
@@ -447,6 +458,34 @@ async def _record_self_cognition_event_from_artifacts(
         attempt_id=str(action_attempt.get("attempt_id") or ""),
         consolidation_outcome=consolidation_outcome,
     )
+
+
+async def _load_residue_context_for_case(
+    case: models.SelfCognitionCase,
+) -> str:
+    """Load prior residue for a self-cognition trigger without exposing rows."""
+
+    target_scope = _target_scope(case)
+    character_profile = _character_profile(case)
+    character_id = _string_field(character_profile, "global_user_id")
+    if not character_id:
+        character_id = CHARACTER_GLOBAL_USER_ID
+    idle_timestamp_utc = _string_field(case, "idle_timestamp_utc")
+    if not idle_timestamp_utc:
+        return_value = ""
+        return return_value
+    load_result = await load_residue_context(
+        trigger_scope={
+            "character_id": character_id,
+            "platform": target_scope["platform"],
+            "platform_channel_id": target_scope["platform_channel_id"],
+            "channel_type": target_scope["channel_type"],
+            "global_user_id": target_scope["user_id"] or "",
+        },
+        current_timestamp_utc=idle_timestamp_utc,
+    )
+    residue_context = load_result["internal_monologue_residue_context"]
+    return residue_context
 
 
 async def _default_rag_client(
@@ -704,6 +743,7 @@ def _build_cognition_state(
     case: models.SelfCognitionCase,
     rendered_packet: str,
     rag_output: dict[str, Any] | None = None,
+    residue_context: str = "",
 ) -> dict[str, Any]:
     """Build the shared cognition graph state for an idle dry run."""
 
@@ -750,6 +790,7 @@ def _build_cognition_state(
         "channel_topic": _string_field(case, "channel_topic"),
         "conversation_progress": case.get("conversation_progress"),
         "promoted_reflection_context": case.get("promoted_reflection_context"),
+        "internal_monologue_residue_context": residue_context,
         "debug_modes": {"no_visual_directives": True},
         "should_respond": False,
         "decontexualized_input": models.SELF_COGNITION_INPUT_TEXT,

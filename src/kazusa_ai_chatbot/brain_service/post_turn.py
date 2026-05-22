@@ -22,6 +22,7 @@ SaveConversation = Callable[[dict], Awaitable[str | None]]
 CallConsolidation = Callable[[dict], Awaitable[dict]]
 UpdateCharacterRuntimeState = Callable[[dict], Awaitable[None]]
 RecordTurnProgress = Callable[..., Awaitable[dict]]
+RecordResidue = Callable[..., Awaitable[dict]]
 
 
 async def save_assistant_message(
@@ -181,4 +182,40 @@ async def run_conversation_progress_record_background(
         f'turn_count={result["turn_count"]} '
         f'continuity={result["continuity"]} status={result["status"]} '
         f'cache_updated={result["cache_updated"]}'
+    )
+
+
+async def run_internal_monologue_residue_record_background(
+    state: dict,
+    *,
+    record_completed_episode_residue_func: RecordResidue,
+    logger: logging.Logger,
+    current_timestamp_utc: str | None = None,
+) -> None:
+    """Record compact private residue after an episode has completed."""
+
+    record_timestamp_utc = current_timestamp_utc
+    if record_timestamp_utc is None:
+        record_timestamp_utc = str(state["storage_timestamp_utc"])
+
+    try:
+        result = await record_completed_episode_residue_func(
+            completed_state=state,
+            current_timestamp_utc=record_timestamp_utc,
+        )
+    except Exception as exc:
+        logger.exception(
+            f"Background internal monologue residue recording failed: {exc}"
+        )
+        return
+
+    result_status = result.get("status", "")
+    result_written = result.get("written", False)
+    result_retry_count = result.get("retry_count", 0)
+    logger.debug(
+        f"Internal monologue residue recorded: "
+        f"platform={state['platform']} "
+        f'channel={state["platform_channel_id"] or "<dm>"} '
+        f'user={state["global_user_id"]} status={result_status} '
+        f'written={result_written} retry_count={result_retry_count}'
     )

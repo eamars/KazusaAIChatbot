@@ -246,8 +246,9 @@ and they do not imply a required wording for production outputs.
 File: `persona_supervisor2_cognition_l1.py`
 
 L1 is the fast affective layer. It receives the current stimulus plus the
-character's immediate mood, global vibe, last reflection residue, relationship
-insight for the user, and MBTI-derived instinct hint.
+character's immediate mood, global vibe, relationship insight for the user,
+and MBTI-derived instinct hint. L1 no longer receives `reflection_summary` as
+live carry-over; internal monologue residue is projected only into L2a.
 
 It outputs:
 
@@ -304,7 +305,8 @@ File: `persona_supervisor2_cognition_l2.py`
 
 L2a is the rational interpretation layer. It reads L1, decontextualized input,
 RAG evidence, user memory context, current commitments, promoted reflection
-context, conversation progress, affinity, mood, and global vibe.
+context, conversation progress, projected internal monologue residue, affinity,
+mood, and global vibe.
 
 It outputs a candidate:
 

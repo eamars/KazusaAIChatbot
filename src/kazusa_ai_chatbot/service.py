@@ -46,6 +46,10 @@ from kazusa_ai_chatbot.conversation_progress import (
     load_progress_context,
     record_turn_progress,
 )
+from kazusa_ai_chatbot.internal_monologue_residue import (
+    load_residue_context,
+    record_completed_episode_residue,
+)
 from kazusa_ai_chatbot.llm_route_report import render_llm_route_table
 from kazusa_ai_chatbot.db import (
     backfill_character_conversation_identity,
@@ -289,13 +293,13 @@ def _build_graph():
 
 
 async def load_conversation_episode_state(state: IMProcessState) -> dict:
-    """Load prompt-facing conversation progress after relevance approves response.
+    """Load prompt-facing pre-cognition context after relevance approves response.
 
     Args:
         state: Current service graph state after relevance.
 
     Returns:
-        Partial state update containing stored episode state and compact progress.
+        Partial state update containing compact progress and private residue.
     """
 
     scope = ConversationProgressScope(
@@ -320,11 +324,42 @@ async def load_conversation_episode_state(state: IMProcessState) -> dict:
         f'channel={scope.platform_channel_id or "<dm>"} '
         f"user={scope.global_user_id} progress={log_preview(progress)}"
     )
+    residue_scope = {
+        "character_id": _character_id_from_profile(state["character_profile"]),
+        "platform": state["platform"],
+        "platform_channel_id": state["platform_channel_id"],
+        "channel_type": state["channel_type"],
+        "global_user_id": state["global_user_id"],
+    }
+    residue_result = await load_residue_context(
+        trigger_scope=residue_scope,
+        current_timestamp_utc=state["storage_timestamp_utc"],
+    )
+    logger.info(
+        f"Internal monologue residue loaded: platform={scope.platform} "
+        f'channel={scope.platform_channel_id or "<dm>"} '
+        f'user={scope.global_user_id} status={residue_result["status"]} '
+        f'selected={residue_result["selected_count"]}'
+    )
     return_value = {
         "conversation_episode_state": load_result["episode_state"],
         "conversation_progress": load_result["conversation_progress"],
+        "internal_monologue_residue_context": (
+            residue_result["internal_monologue_residue_context"]
+        ),
     }
     return return_value
+
+
+def _character_id_from_profile(character_profile: Mapping[str, object]) -> str:
+    """Return the configured character id from a composed profile."""
+
+    value = character_profile.get("global_user_id")
+    if isinstance(value, str) and value:
+        character_id = value
+    else:
+        character_id = CHARACTER_GLOBAL_USER_ID
+    return character_id
 
 
 def _compact_reply_context(reply_context: ReplyContext) -> ReplyContext:
@@ -1421,6 +1456,15 @@ async def _process_queued_chat_item(item: QueuedChatItem) -> None:
         if should_consolidate and consolidation_state_dict is not None:
             await _run_consolidation_background(consolidation_state_dict)
             stages_reached.append("consolidation_recorded")
+        if (
+            not debug_modes.get("no_remember")
+            and is_consolidatable
+            and consolidation_state_dict is not None
+        ):
+            await _run_internal_monologue_residue_record_background(
+                consolidation_state_dict,
+            )
+            stages_reached.append("residue_recorded")
     except Exception as exc:
         logger.exception(f"Queued chat item failed: {exc}")
         _chat_input_queue.fail(item, exc)
@@ -1582,6 +1626,18 @@ async def _run_conversation_progress_record_background(state: dict) -> None:
     await brain_post_turn.run_conversation_progress_record_background(
         state,
         record_turn_progress_func=record_turn_progress,
+        logger=logger,
+    )
+
+
+async def _run_internal_monologue_residue_record_background(
+    state: dict,
+) -> None:
+    """Record private internal residue after response completion."""
+
+    await brain_post_turn.run_internal_monologue_residue_record_background(
+        state,
+        record_completed_episode_residue_func=record_completed_episode_residue,
         logger=logger,
     )
 

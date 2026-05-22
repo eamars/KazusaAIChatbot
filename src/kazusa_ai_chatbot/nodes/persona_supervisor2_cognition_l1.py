@@ -73,7 +73,6 @@ _COGNITION_SUBCONSCIOUS_PROMPT = '''\
 # 情绪滤镜
 - 当前心境：{character_mood}
 - 背景氛围：{character_global_vibe}
-- 情绪余波：{character_reflection_summary}
 - 关系直觉：{user_last_relationship_insight}
 - MBTI 本能：{mbti_natural_response}
 
@@ -130,7 +129,6 @@ async def call_cognition_subconscious(state: CognitionState) -> CognitionState:
         character_mbti=mbti,
         character_mood=state['character_profile']['mood'],
         character_global_vibe=state['character_profile']['global_vibe'],
-        character_reflection_summary=state["character_profile"].get("reflection_summary", ""),
         user_last_relationship_insight=state["user_profile"].get("last_relationship_insight", ""),
         mbti_natural_response=get_mbti_natural_response(mbti),
     ))

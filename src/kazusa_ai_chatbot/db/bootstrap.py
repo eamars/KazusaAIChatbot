@@ -17,6 +17,10 @@ from kazusa_ai_chatbot.db.conversation import (
 from kazusa_ai_chatbot.db.interaction_style_images import (
     ensure_interaction_style_image_indexes,
 )
+from kazusa_ai_chatbot.db.internal_monologue_residue import (
+    INTERNAL_MONOLOGUE_RESIDUE_COLLECTION,
+    ensure_internal_monologue_residue_indexes,
+)
 from kazusa_ai_chatbot.db.global_character_growth import (
     GLOBAL_CHARACTER_GROWTH_RUNS_COLLECTION,
     GLOBAL_CHARACTER_GROWTH_TRAITS_COLLECTION,
@@ -79,6 +83,7 @@ async def db_bootstrap() -> None:
         EVENT_LOG_EVENTS_COLLECTION,
         EVENT_LOG_SNAPSHOTS_COLLECTION,
         SELF_COGNITION_ACTION_ATTEMPTS_COLLECTION,
+        INTERNAL_MONOLOGUE_RESIDUE_COLLECTION,
     ]
     for name in required_collections:
         if name not in existing:
@@ -211,6 +216,7 @@ async def db_bootstrap() -> None:
     await ensure_interaction_style_image_indexes()
     await ensure_global_character_growth_indexes()
     await ensure_event_log_indexes()
+    await ensure_internal_monologue_residue_indexes()
 
     await purge_stale_initializer_entries()
     await prune_persistent_entries(

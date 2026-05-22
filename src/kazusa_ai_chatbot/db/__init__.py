@@ -45,6 +45,8 @@ from kazusa_ai_chatbot.db.schemas import (
     ConversationMessageDoc,
     GlobalCharacterGrowthRunDoc,
     GlobalCharacterGrowthTraitDoc,
+    InternalMonologueResidueDoc,
+    InternalMonologueResidueSourceRefDoc,
     InteractionStyleImageDoc,
     InteractionStyleOverlayDoc,
     InteractionStyleScopeType,
@@ -114,6 +116,12 @@ from kazusa_ai_chatbot.db.interaction_style_images import (
     upsert_group_channel_style_image,
     upsert_user_style_image,
     validate_interaction_style_overlay,
+)
+from kazusa_ai_chatbot.db.internal_monologue_residue import (
+    INTERNAL_MONOLOGUE_RESIDUE_COLLECTION,
+    ensure_internal_monologue_residue_indexes,
+    insert_internal_monologue_residue_row,
+    list_internal_monologue_residue_rows,
 )
 
 # ── Users (identity + profile + affinity) ─────────────────────────
@@ -221,6 +229,7 @@ __all__ = [
     "ConversationEpisodeEntryDoc", "ConversationEpisodeStateDoc",
     "ConversationMessageDoc", "GlobalCharacterGrowthRunDoc",
     "GlobalCharacterGrowthTraitDoc", "InteractionStyleImageDoc",
+    "InternalMonologueResidueDoc", "InternalMonologueResidueSourceRefDoc",
     "InteractionStyleOverlayDoc", "InteractionStyleScopeType",
     "InteractionStyleStatus", "MemoryDoc", "MentionDoc",
     "PlatformAccountDoc", "RAGCache2PersistentEntryDoc",
@@ -253,6 +262,10 @@ __all__ = [
     "get_group_channel_style_image",
     "get_user_style_image", "upsert_group_channel_style_image",
     "upsert_user_style_image", "validate_interaction_style_overlay",
+    "INTERNAL_MONOLOGUE_RESIDUE_COLLECTION",
+    "ensure_internal_monologue_residue_indexes",
+    "insert_internal_monologue_residue_row",
+    "list_internal_monologue_residue_rows",
     # Users
     "add_suspected_alias", "backfill_character_conversation_identity",
     "create_user_profile",

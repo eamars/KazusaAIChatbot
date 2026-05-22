@@ -120,6 +120,7 @@ class IMProcessState(TypedDict):
     conversation_episode_state: NotRequired[ConversationEpisodeStateDoc | None]
     conversation_progress: NotRequired[ConversationProgressPromptDoc]
     promoted_reflection_context: NotRequired[dict]
+    internal_monologue_residue_context: NotRequired[str]
 
     # Debug modes (optional, passed from ChatRequest)
     debug_modes: DebugModes

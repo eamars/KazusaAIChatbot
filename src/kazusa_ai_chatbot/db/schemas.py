@@ -139,6 +139,30 @@ class ConversationEpisodeStateDoc(TypedDict, total=False):
     expires_at: str
 
 
+class InternalMonologueResidueSourceRefDoc(TypedDict, total=False):
+    """Sanitized source identifier for an internal residue row."""
+
+    ref_kind: str
+    ref_id: str
+
+
+class InternalMonologueResidueDoc(TypedDict, total=False):
+    """Compact private residue row in ``internal_monologue_residue_state``."""
+
+    residue_id: str
+    character_id: str
+    scope_key: str
+    scope_kind: str
+    platform: str
+    platform_channel_id: str
+    channel_type: str
+    global_user_id: str
+    residue_text: str
+    source_kind: str
+    source_refs: list[InternalMonologueResidueSourceRefDoc]
+    created_at: str
+
+
 class PlatformAccountDoc(TypedDict, total=False):
     """A linked platform account within a UserProfileDoc."""
     platform: str             # "discord" | "qq" | ...

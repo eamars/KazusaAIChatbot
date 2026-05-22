@@ -39,7 +39,6 @@ long_term/todo.md
 | Document | Type | Status |
 |---|---|---|
 | [conversation_graph_recent_context_plan.md](active/short_term/conversation_graph_recent_context_plan.md) | High-risk migration development plan | draft |
-| [internal_monologue_residue_lifecycle_plan.md](active/short_term/internal_monologue_residue_lifecycle_plan.md) | High-risk migration development plan | draft |
 
 ## Active Bugfix Plans
 
@@ -140,6 +139,7 @@ plans.
 | [global_input_queue_plan.md](archive/completed/short_term/global_input_queue_plan.md) |
 | [group_chat_noise_relevance_plan.md](archive/completed/short_term/group_chat_noise_relevance_plan.md) |
 | [identity_free_memory_output_contract_plan.md](archive/completed/short_term/identity_free_memory_output_contract_plan.md) |
+| [internal_monologue_residue_lifecycle_plan.md](archive/completed/short_term/internal_monologue_residue_lifecycle_plan.md) |
 | [interaction_style_image_plan.md](archive/completed/short_term/interaction_style_image_plan.md) |
 | [live_context_runtime_facts_plan.md](archive/completed/short_term/live_context_runtime_facts_plan.md) |
 | [llm_routing_migration_plan.md](archive/completed/short_term/llm_routing_migration_plan.md) |

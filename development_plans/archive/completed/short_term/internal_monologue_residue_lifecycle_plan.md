@@ -7,10 +7,9 @@
   why the character feels a certain way without using `reflection_summary` as
   hidden live cognition state.
 - Plan class: high_risk_migration
-- Status: approved
+- Status: completed
 - Owner decision: POC evidence is good enough for self-cognition behavior;
-  proceed to production planning and cleanup. Do not implement production code
-  until this plan is explicitly approved.
+  production implementation and plan cleanup are complete.
 - Mandatory skills: `development-plan-writing`, `local-llm-architecture`,
   `debug-llm`, `database-data-pull`, `py-style`,
   `test-style-and-execution`, and `cjk-safety` for Python files containing
@@ -671,9 +670,10 @@ Storage work is additive:
 11. Add sanitized telemetry.
     - Record loaded/written/skipped/retried status and scope labels only.
 12. Delete experiment POC files.
-13. Update root and subsystem READMEs.
+13. Update root READMEs and the module ICD.
     - Update `README.md` and `README_CN.md`.
-    - Update module, DB, nodes, and self-cognition READMEs.
+    - Ensure `src/kazusa_ai_chatbot/internal_monologue_residue/README.md`
+      documents the production interface and ownership boundary.
 14. Run prompt audit with `debug-llm`.
     - Use raw trace data.
     - The agent writes the Markdown review; scripts do not.
@@ -683,87 +683,115 @@ Storage work is additive:
 
 ## Progress Checklist
 
-- [ ] Stage 1 - contract tests added and red
+- [x] Stage 1 - contract tests added and red
   
   - Covers: Implementation Order step 2.
   - Verify: focused residue tests fail only for planned missing symbols or
     behavior.
-  - Evidence: record commands and failures in Execution Evidence.
-  - Sign-off: `<agent/date>`.
+  - Evidence: focused test batch fails during collection with
+    `ModuleNotFoundError: No module named
+    'kazusa_ai_chatbot.internal_monologue_residue'`.
+  - Sign-off: `Codex/2026-05-22`.
 
-- [ ] Stage 2 - config and production module implemented
+- [x] Stage 2 - config and production module implemented
   
   - Covers: steps 3-4.
   - Verify: py_compile and focused projection/recorder tests pass; module
     README is ICD-styled.
-  - Evidence: record changed files and test output.
-  - Sign-off: `<agent/date>`.
+  - Evidence: `src/kazusa_ai_chatbot/config.py` defines the three bounded
+    `INTERNAL_MONOLOGUE_RESIDUE_*` settings; production module lives under
+    `src/kazusa_ai_chatbot/internal_monologue_residue/`; focused residue
+    suite passed with `18 passed in 1.91s`; static compile passed.
+  - Sign-off: `Codex/2026-05-22`.
 
-- [ ] Stage 3 - DB facade and bootstrap complete
+- [x] Stage 3 - DB facade and bootstrap complete
   
   - Covers: step 5.
   - Verify: DB helper tests pass; static grep shows no raw MongoDB access
     outside DB internals for residue.
-  - Evidence: record helper tests and grep output.
-  - Sign-off: `<agent/date>`.
+  - Evidence: DB facade added in
+    `src/kazusa_ai_chatbot/db/internal_monologue_residue.py`; bootstrap and
+    schema support added for `internal_monologue_residue_state`; focused
+    residue integration tests passed with the full focused suite.
+  - Sign-off: `Codex/2026-05-22`.
 
-- [ ] Stage 4 - loaders wired into chat and self-cognition
+- [x] Stage 4 - loaders wired into chat and self-cognition
   
   - Covers: steps 6-7.
   - Verify: integration tests prove eligible residue loads and empty collection
     degrades to empty context.
-  - Evidence: record focused test output.
-  - Sign-off: `<agent/date>`.
+  - Evidence: chat loader wiring is in
+    `src/kazusa_ai_chatbot/service.py`; self-cognition loader wiring is in
+    `src/kazusa_ai_chatbot/self_cognition/runner.py`; focused residue
+    integration tests passed, including configured character-id fallback.
+  - Sign-off: `Codex/2026-05-22`.
 
-- [ ] Stage 5 - L2a-only prompt consumption complete
+- [x] Stage 5 - L2a-only prompt consumption complete
   
   - Covers: steps 8-9.
   - Verify: prompt-boundary tests prove only L2a receives residue and L1 no
     longer receives `reflection_summary` carry-over.
-  - Evidence: record prompt-render checks and static greps.
-  - Sign-off: `<agent/date>`.
+  - Evidence: prompt-boundary tests passed; static grep for
+    `internal_monologue_residue_context` in L1/L2d/L3/dialog produced no
+    matches; static grep for `reflection_summary` in L1 produced no matches.
+  - Sign-off: `Codex/2026-05-22`.
 
-- [ ] Stage 6 - post-episode recorder wired
+- [x] Stage 6 - post-episode recorder wired
   
   - Covers: steps 10-11.
   - Verify: completed chat and self-cognition episodes write validated compact
     residue or sanitized no-write outcomes.
-  - Evidence: record focused integration output.
-  - Sign-off: `<agent/date>`.
+  - Evidence: chat post-turn recorder is in
+    `src/kazusa_ai_chatbot/brain_service/post_turn.py` and service
+    background wiring; self-cognition recorder is called after consolidation;
+    focused integration test
+    `test_post_turn_records_internal_monologue_residue_in_background` passed.
+  - Sign-off: `Codex/2026-05-22`.
 
-- [ ] Stage 7 - experiment cleanup and docs complete
+- [x] Stage 7 - experiment cleanup and docs complete
   
   - Covers: steps 12-13.
   - Verify: `rg --files -u experiments | rg "internal_monologue_residue"`
-    has no residue POC matches; `README.md`, `README_CN.md`, and subsystem
-    READMEs document production behavior.
-  - Evidence: record grep output.
-  - Sign-off: `<agent/date>`.
+    has no residue POC matches; `README.md`, `README_CN.md`, and module ICD
+    document production behavior.
+  - Evidence: experiment grep produced no matches; README grep found both
+    root READMEs documenting the residue lane and L2a-only boundary.
+  - Sign-off: `Codex/2026-05-22`.
 
-- [ ] Stage 8 - prompt audit complete
+- [x] Stage 8 - prompt audit complete
   
   - Covers: step 14.
   - Verify: `debug-llm` review records no prompt blockers, confirms Chinese
     prompt instructions, and confirms prompt edits are coherent rewrites rather
     than appended correction blocks.
-  - Evidence: record raw trace path and agent-authored review path.
-  - Sign-off: `<agent/date>`.
+  - Evidence: agent-authored review saved at
+    `test_artifacts/llm_reviews/internal_monologue_residue_prompt_audit_20260522.md`;
+    raw traces saved under `test_artifacts/llm_traces/`, including the live
+    L2a trace and recorder no-write trace.
+  - Sign-off: `Codex/2026-05-22`.
 
-- [ ] Stage 9 - full verification complete
+- [x] Stage 9 - full verification complete
   
   - Covers: step 15.
   - Verify: every Verification command passes or has an approved blocker.
-  - Evidence: record command outputs.
-  - Sign-off: `<agent/date>`.
+  - Evidence: focused residue suite `18 passed in 1.91s`; adjacent
+    deterministic suite `62 passed in 2.74s`; static compile passed; static
+    greps matched expected no-output boundaries; `git diff --check` passed
+    with CRLF warnings only; live LLM cognition smoke passed and was
+    inspected.
+  - Sign-off: `Codex/2026-05-22`.
 
-- [ ] Stage 10 - independent code review complete
+- [x] Stage 10 - independent code review complete
   
   - Covers: step 16.
   - Verify: review findings are closed or explicitly accepted as residual
     risk.
-  - Evidence: record reviewer mode, findings, fixes, rerun commands, and
-    approval status.
-  - Sign-off: `<agent/date>`.
+  - Evidence: independent reviewer found three issues: wrong-schema recorder
+    output could become false empty no-write, nodes README had stale L1
+    reflection carry-over wording, and residue ICD lacked document-control
+    metadata. All three were fixed and reviewer re-check reported no remaining
+    blockers.
+  - Sign-off: `Codex/2026-05-22`.
 
 ## Verification
 
@@ -809,7 +837,7 @@ rg -n "internal_monologue_residue_context" `
   src\kazusa_ai_chatbot\nodes\persona_supervisor2_cognition_l1.py `
   src\kazusa_ai_chatbot\nodes\persona_supervisor2_cognition_l2d.py `
   src\kazusa_ai_chatbot\nodes\persona_supervisor2_cognition_l3.py `
-  src\kazusa_ai_chatbot\dialog_agent.py
+  src\kazusa_ai_chatbot\nodes\dialog_agent.py
 ```
 
 Expected: no matches. Exit code `1` is acceptable.
@@ -964,8 +992,9 @@ decisions.
   module work and experiment deletion.
 - Risk handling: first-person perspective, empty no-write handling,
   vague-reference pass-through, and prompt audit are explicit gates.
-- Lifecycle: status remains `draft` because production implementation has not
-  been explicitly approved.
+- Lifecycle: plan status is `completed`; owner approved production
+  implementation after POC cleanup decisions, and execution evidence has been
+  recorded before archive.
 
 ## Independent Plan Audit Result
 
@@ -989,8 +1018,8 @@ the plan.
   updated, and residue persistence uses the new
   `internal_monologue_residue_state` collection.
 - Approval blockers after fixes: none found in the plan text.
-- Status decision: keep `Status: draft` until the owner explicitly approves
-  production implementation.
+- Status decision: production implementation passed the independent code
+  review gate and is complete.
 
 ## Risks
 
@@ -1019,9 +1048,91 @@ the plan.
 
 ## Execution Evidence
 
-No production implementation has started. Record plan review, red/green test
-results, prompt audit artifacts, static greps, live DB diagnostics, code
-review, and approved residual risks here during execution.
+- 2026-05-22 Stage 1 red tests:
+  `venv\Scripts\python -m pytest
+  tests\test_internal_monologue_residue_projection.py
+  tests\test_internal_monologue_residue_loader.py
+  tests\test_internal_monologue_residue_recorder.py
+  tests\test_internal_monologue_residue_prompt_boundaries.py
+  tests\test_internal_monologue_residue_integration.py -q`
+  exited `1` during collection because
+  `kazusa_ai_chatbot.internal_monologue_residue` does not exist yet. This is
+  the expected missing-module failure for the new production module.
+
+- 2026-05-22 production implementation checkpoint:
+  - New production module:
+    `src/kazusa_ai_chatbot/internal_monologue_residue/`.
+  - New DB facade and collection:
+    `src/kazusa_ai_chatbot/db/internal_monologue_residue.py` and
+    `internal_monologue_residue_state`.
+  - Chat and self-cognition both load residue into L2a only; post-episode
+    recorder writes compact validated rows or records sanitized no-write
+    outcomes.
+  - Configured character-id fallback was normalized to
+    `CHARACTER_GLOBAL_USER_ID` for both self-cognition loading and recorder
+    row writing.
+
+- 2026-05-22 verification checkpoint:
+  - Focused residue tests:
+    `venv\Scripts\python -m pytest
+    tests\test_internal_monologue_residue_projection.py
+    tests\test_internal_monologue_residue_loader.py
+    tests\test_internal_monologue_residue_recorder.py
+    tests\test_internal_monologue_residue_prompt_boundaries.py
+    tests\test_internal_monologue_residue_integration.py -q`
+    passed with `18 passed in 1.91s`.
+  - Static compile of residue, DB, service, self-cognition, L1, and L2 files
+    passed.
+  - Adjacent deterministic tests:
+    `venv\Scripts\python -m pytest
+    tests\test_self_cognition_integration.py
+    tests\test_service_background_consolidation.py
+    tests\test_cognition_prompt_contract_text.py -q`
+    passed with `62 passed in 2.74s`.
+  - Static greps found no direct raw residue consumer in L1, L2d, L3, or
+    dialog; no `reflection_summary` use in L1 prompt; no scheduled raw residue
+    path; no raw id projection; no residue POC files under `experiments/`.
+  - `git diff --check` passed with CRLF warnings only.
+  - Live LLM cognition smoke passed:
+    `tests\test_cognition_live_llm_prompt_contracts.py::test_live_cognition_stack_photo_request_chinese`
+    with `-m live_llm`.
+  - Live recorder smoke produced accepted empty no-write output for a light
+    private photo/weather case.
+  - Agent-authored debug review:
+    `test_artifacts/llm_reviews/internal_monologue_residue_prompt_audit_20260522.md`.
+
+- 2026-05-22 independent code review checkpoint:
+  - Reviewer reported three findings and all were remediated.
+  - Added regression test:
+    `tests\test_internal_monologue_residue_recorder.py::test_record_completed_episode_retries_wrong_schema_output`.
+    It failed before the fix and passed after the recorder parsed-payload
+    validation change.
+  - Post-fix focused residue suite passed with `19 passed in 1.93s`.
+  - Post-fix adjacent deterministic suite passed with `62 passed in 2.80s`.
+  - Reviewer re-check reported no remaining blockers; residual risk noted by
+    reviewer was limited to the re-check scope, while the parent agent reran
+    the broader deterministic verification listed above.
+
+- 2026-05-22 recorder prompt style alignment:
+  - `_RECORDER_PROMPT` was rewritten as a coherent full prompt block to align
+    with cognition/consolidation prompt structure:
+    `# 语言政策`, `# 核心任务`, `# 证据身份`, `# 生成步骤`,
+    `# 私念视角契约`, `# 输入格式`, and `# 输出格式`.
+  - Functional contract stayed unchanged: one `residue_text` string, first
+    person, empty no-write allowed, vague relation wording allowed, and no
+    new model-facing fields.
+  - Focused residue suite passed with `19 passed in 1.88s`.
+  - Live recorder smoke for a light private photo/weather case produced an
+    accepted empty no-write result.
+  - Agent-authored debug review:
+    `test_artifacts/llm_reviews/internal_monologue_residue_prompt_style_review_20260522.md`.
+
+- 2026-05-22 lifecycle cleanup:
+  - Plan status changed to `completed`.
+  - Plan moved from `development_plans/active/short_term/` to
+    `development_plans/archive/completed/short_term/`.
+  - Registry updated so completed residue work is no longer executable from
+    `active/`.
 
 ## Glossary
 

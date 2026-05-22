@@ -17,6 +17,22 @@ def _positive_int_from_env(name: str, default: str) -> int:
     return value
 
 
+def _bounded_int_from_env(
+    name: str,
+    default: str,
+    *,
+    minimum: int,
+    maximum: int,
+) -> int:
+    """Read an integer within inclusive bounds from the environment."""
+
+    raw_value = os.getenv(name, default)
+    value = int(raw_value)
+    if value < minimum or value > maximum:
+        raise ValueError(f"{name} must be between {minimum} and {maximum}")
+    return value
+
+
 def _positive_int_from_value(name: str, raw_value: str) -> int:
     """Parse a positive integer config value and fail fast if invalid."""
 
@@ -263,6 +279,25 @@ L3_INTERACTION_STYLE_GUIDELINES_PER_FIELD_LIMIT = _positive_int_from_env(
 RELEVANCE_USER_ENGAGEMENT_GUIDELINES_LIMIT = _positive_int_from_env(
     "RELEVANCE_USER_ENGAGEMENT_GUIDELINES_LIMIT",
     "3",
+)
+
+INTERNAL_MONOLOGUE_RESIDUE_WINDOW_SIZE = _bounded_int_from_env(
+    "INTERNAL_MONOLOGUE_RESIDUE_WINDOW_SIZE",
+    "5",
+    minimum=1,
+    maximum=10,
+)
+INTERNAL_MONOLOGUE_RESIDUE_CONTEXT_CHAR_LIMIT = _bounded_int_from_env(
+    "INTERNAL_MONOLOGUE_RESIDUE_CONTEXT_CHAR_LIMIT",
+    "3000",
+    minimum=200,
+    maximum=3000,
+)
+INTERNAL_MONOLOGUE_RESIDUE_ROW_CHAR_LIMIT = _bounded_int_from_env(
+    "INTERNAL_MONOLOGUE_RESIDUE_ROW_CHAR_LIMIT",
+    "220",
+    minimum=80,
+    maximum=500,
 )
 
 # MCP tool servers — JSON dict of {name: {url: ...}}

@@ -40,6 +40,7 @@ At a high level, Kazusa provides:
 | Typed message boundary           | Platform syntax is normalized into `MessageEnvelope` fields before cognition or RAG sees it.                                       |
 | Bounded live response path       | Queueing, relevance, RAG, cognition, action routing, and L3 surfaces are explicit stages with caps and inspectable payloads.       |
 | Multi-horizon memory             | Recent chat, short-term conversation flow, retrieved evidence, durable memory, and scheduled commitments remain separate.          |
+| Internal monologue residue       | A short private residue lane carries bounded first-person reasons from completed episodes into the next L2a cognition pass.       |
 | RAG 2 evidence retrieval         | Helper agents retrieve user profiles, memories, conversation history, live facts, web evidence, and recall state.                  |
 | Layered cognition                | Cognition decides stance, boundaries, judgment, style, action needs, and response goals before selected L3 surfaces render output. |
 | Background consolidation         | Completed episodes update durable memory, relationship state, Cache2 invalidation, images, and progress from text plus action/surface traces. |
@@ -126,6 +127,7 @@ Persona turn
   - decontextualize the current message
   - retrieve evidence through RAG 2
   - load short-term conversation progress
+  - load projected private residue for L2a only
   - reason through stance, boundary, style, and intent
   - initialize zero-or-more semantic actions through L2d
   - run selected L3 text/action handlers
@@ -137,6 +139,7 @@ Persona turn
 Post-turn work
   - persist assistant surface rows and delivery tracking
   - record conversation progress
+  - record compact internal monologue residue outside visible response work
   - consolidate durable memory and state from the episode trace
   - invalidate stale Cache2 entries
   - schedule accepted future promises
@@ -180,6 +183,11 @@ Kazusa does not flatten all context into one prompt. Immediate surface text,
 conversation progress, retrieved evidence, durable memory, promoted reflection,
 and scheduled commitments each have a separate lifecycle.
 
+Internal monologue residue is a separate short-lived lane. It stores one compact
+first-person reason from a completed episode and projects it only into L2a as
+`internal_monologue_residue_context`. It is not `reflection_summary`, durable
+memory, visible dialog planning, or scheduler input.
+
 **Reflection does not shortcut into live chat**
 
 Reflection is slower sense-making work. Raw reflection output is stored for
@@ -199,6 +207,7 @@ cognition, and scheduling remain in the platform-neutral core.
 | Brain service            | HTTP API, queue, graph startup, health, delivery receipts, runtime adapter registration | [Brain Service ICD](src/kazusa_ai_chatbot/brain_service/README.md)                     |
 | Message envelope         | Typed inbound content, mentions, replies, attachments, addressees, broadcast state      | [Message Envelope ICD](src/kazusa_ai_chatbot/message_envelope/README.md)               |
 | Conversation progress    | Short-term episode state used by cognition to avoid loops and stale reopenings          | [Conversation Progress](src/kazusa_ai_chatbot/conversation_progress/README.md)         |
+| Internal monologue residue | Short-lived private first-person residue loaded only into L2a cognition               | [Internal Monologue Residue ICD](src/kazusa_ai_chatbot/internal_monologue_residue/README.md) |
 | RAG 2                    | Slot-driven helper-agent retrieval and Cache2 evidence projection                       | [RAG 2](src/kazusa_ai_chatbot/rag/README.md)                                           |
 | Cognition and dialog     | Character stance, boundaries, judgment, style, visual directives, and final wording     | [Cognition Nodes](src/kazusa_ai_chatbot/nodes/README.md)                              |
 | Action spec              | L2d action residues, capability registry, evaluator, results, surfaces, and traces      | [Action Spec](src/kazusa_ai_chatbot/action_spec/README.md)                            |
@@ -264,6 +273,7 @@ src/
     consolidation/             Durable target routing and consolidation ICD
     rag/                       RAG 2 helper agents, hybrid retrieval, Cache2
     conversation_progress/     Short-term episode memory
+    internal_monologue_residue/ Short-lived private residue lane for L2a
     db/                        MongoDB facade, schemas, collection owners
     event_logging/             Sanitized operational telemetry interface and ICD
     dispatcher/                Delayed task validation and adapter handoff
@@ -311,6 +321,7 @@ rather than production sends.
 | [Brain Service ICD](src/kazusa_ai_chatbot/brain_service/README.md)       | HTTP endpoint contracts and adapter obligations                   |
 | [Message Envelope ICD](src/kazusa_ai_chatbot/message_envelope/README.md) | Typed inbound message contract                                    |
 | [Database ICD](src/kazusa_ai_chatbot/db/README.md)                       | Persistence ownership and collection contracts                    |
+| [Internal Monologue Residue ICD](src/kazusa_ai_chatbot/internal_monologue_residue/README.md) | Short-lived private residue lifecycle and L2a-only contract |
 | [Action Spec](src/kazusa_ai_chatbot/action_spec/README.md)               | Modality-neutral action contracts and trace handoff               |
 | [Consolidation ICD](src/kazusa_ai_chatbot/consolidation/README.md)       | Durable target routing and write-intent validation                |
 | [Event Logging ICD](src/kazusa_ai_chatbot/event_logging/README.md)        | Sanitized telemetry interface, event taxonomy, and ops statistics |

@@ -475,6 +475,10 @@ async def persona_supervisor2(state: IMProcessState) -> dict:
         "conversation_episode_state": state.get("conversation_episode_state"),
         "conversation_progress": state.get("conversation_progress"),
         "promoted_reflection_context": state.get("promoted_reflection_context"),
+        "internal_monologue_residue_context": state.get(
+            "internal_monologue_residue_context",
+            "",
+        ),
         "referents": [],
         "debug_modes": state["debug_modes"],
         "should_respond": state["should_respond"],

@@ -59,6 +59,7 @@ class GlobalPersonaState(TypedDict):
     conversation_episode_state: NotRequired[ConversationEpisodeStateDoc | None]
     conversation_progress: NotRequired[ConversationProgressPromptDoc]
     promoted_reflection_context: NotRequired[dict]
+    internal_monologue_residue_context: NotRequired[str]
 
     # Debug
     debug_modes: DebugModes
@@ -139,6 +140,7 @@ class CognitionState(TypedDict):
     channel_topic: str
     conversation_progress: NotRequired[ConversationProgressPromptDoc]
     promoted_reflection_context: NotRequired[dict]
+    internal_monologue_residue_context: NotRequired[str]
     interaction_style_context: NotRequired[dict]
     group_engagement_action_context: NotRequired[dict]
     selected_text_surface_intent: NotRequired[str]
