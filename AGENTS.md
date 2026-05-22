@@ -89,7 +89,7 @@ for preserving character judgment and topic fit; they are not the product goal.
 
 For multi-file plans, migrations, decommissions, prompt or graph changes,
 database changes, and risky refactors, apply
-`.agents/skills/development-plan-writing`.
+`.agents/skills/development-plan`.
 
 Before reading or executing development plans, read
 `development_plans/README.md`. It is the lifecycle registry for long-term,

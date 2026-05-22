@@ -36,7 +36,7 @@ Include enforcement language:
 ```md
 ## Cutover Policy Enforcement
 
-- The implementation agent must follow the selected policy for each area.
+- The responsible execution agent must follow the selected policy for each area.
 - The agent must not choose a more conservative strategy by default.
 - If an area is `bigbang`, delete or rewrite legacy references instead of preserving them.
 - If an area is `migration`, follow the exact migration phases and cleanup gates listed in this plan.

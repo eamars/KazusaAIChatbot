@@ -6,6 +6,7 @@ evidence, handoff, and review-derived accuracy gates.
 
 ## Table Of Contents
 
+- [Parent/Subagent Execution Model](#parentsubagent-execution-model)
 - [Implementation Order](#implementation-order)
 - [Granular Execution Steps](#granular-execution-steps)
 - [Progress Checklist](#progress-checklist)
@@ -17,65 +18,109 @@ evidence, handoff, and review-derived accuracy gates.
 - [Execution Evidence](#execution-evidence)
 - [Execution Handoff](#execution-handoff)
 
+## Parent/Subagent Execution Model
+
+Development-plan execution is parent-led and requires native subagent
+capability unless the user explicitly requests fallback execution. Use the
+current harness's native delegation feature rather than depending on a specific
+framework or tool name.
+
+Default ownership:
+
+- The parent agent owns orchestration, test code, test validation, static
+  checks, execution evidence, review feedback remediation, lifecycle updates,
+  and final sign-off.
+- The production-code subagent owns planned production code changes only. It
+  receives the approved plan, mandatory skills, change surface, focused test
+  contract, and production ownership boundary. It must close after planned
+  production code changes are complete, excluding review fixes.
+- The independent code-review subagent owns review only. It receives the
+  approved plan, full diff, verification evidence, and review scope. It reports
+  findings to the parent and does not implement fixes.
+
+Normal execution uses exactly two subagents in sequence:
+
+1. One production-code subagent after the parent establishes the focused test
+   contract.
+2. One independent code-review subagent after planned implementation
+   verification passes.
+
+The parent must establish the focused test contract before production
+implementation starts. After that gate, production code and broader
+test/verification work may proceed in parallel: the production subagent edits
+production code while the parent continues integration tests, regression tests,
+validation scripts, static checks, evidence, and plan-progress updates.
+
+If native subagent capability is unavailable, stop before execution and report
+the blocker. Do not silently switch to single-agent execution. A fallback path
+is valid only when the user explicitly asks for it.
+
 ## Implementation Order
 
 Implementation order must prevent avoidable breakage and agent improvisation.
 
-Default to a module-first, test-first order. The plan should prove the module
-contract before implementation, then prove integration after the module is
-stable. For LLM, database, migration, or production-path changes, include the
-focused module test and the relevant integration, real LLM, real database,
-migration dry-run, or smoke test needed to cover the actual risk.
+Default to a parent-owned test-contract-first order. The plan should prove the
+module contract before production implementation, then prove integration after
+the module is stable. For LLM, database, migration, or production-path changes,
+include the focused module test and the relevant integration, real LLM, real
+database, migration dry-run, or smoke test needed to cover the actual risk.
 
 Every final plan must include this general sequence unless a step is truly
 inapplicable:
 
-1. Add or update module tests.
+1. Parent adds or updates module tests.
    - Name the exact test file, test function, fixture, or diagnostic that
      proves the target module contract.
    - Run the module test before implementation when applicable and record the
      expected failure, missing symbol, missing entrypoint, or baseline result.
-2. Add or update integration tests.
+2. Parent starts the production-code subagent.
+   - Provide the approved plan, mandatory skills, change surface, focused test
+     contract, and exact production-code ownership boundary.
+   - The subagent edits production code only and reports changed files,
+     commands run, blockers, and residual risks before closing.
+3. Parent adds or updates integration tests.
    - Name the exact integration, real LLM, real database, migration, smoke, or
      cross-module test that proves callers can use the module correctly.
    - Run the integration test before implementation when practical and record
      the failure mode or current behavior.
-3. Implement the module.
+   - This work may happen while the production-code subagent implements
+     production code.
+4. Production-code subagent implements the module.
    - Keep the behavior inside the target module and approved public interface
      whenever possible.
    - Do not update existing outside modules or introduce new code paths,
      prompts, or variables without the strong justification required in
      `Change Surface`.
-4. Run module tests.
+5. Parent runs module tests.
    - Re-run the same module test from step 1.
    - Record the result in `Execution Evidence`.
-5. Loop back to step 1 if needed.
+6. Loop back to step 1 if needed.
    - If the module test fails or reveals an incomplete contract, update the
      module test or module implementation only to match the approved plan, then
-     repeat steps 1, 3, and 4 before touching integration.
-6. Implement integration.
+     repeat the focused test, production implementation, and module-test gates
+     before touching integration.
+7. Parent implements integration or directs production-code ownership changes.
    - Wire existing callers, adapters, prompts, database paths, or service
      entrypoints to the module only after module tests pass.
    - Keep integration edits inside the approved change surface.
-7. Run integration tests.
-   - Re-run the same integration test from step 2.
+8. Parent runs integration tests.
+   - Re-run the same integration test from step 3.
    - Then run any broader verification gates listed in `Verification`.
    - Record the result in `Execution Evidence`.
-8. Loop back to step 1 if needed.
+9. Loop back to step 1 if needed.
    - If integration exposes a module contract problem, return to module tests
      before changing integration again.
    - If integration exposes only wiring behavior, update integration and re-run
      the integration test.
-9. Run the independent code review gate.
+10. Parent starts the independent code-review subagent.
    - Review the full implementation diff against project style, code quality,
      plan alignment, design risk, regression coverage, handoff artifacts, and
      verification accuracy.
-   - Prefer a reviewer that did not implement the change. If no separate
-     reviewer is available, the active agent must reread the full plan and
-     perform a fresh review pass before sign-off.
+   - The review subagent reports findings and approval status; it does not own
+     implementation fixes.
    - Record findings, fixes needed, commands rerun, residual risks, and review
      approval status in `Execution Evidence`.
-10. Remediate review findings and repeat required verification.
+11. Parent remediates review findings and repeats required verification.
     - Fix findings directly only when the fix is inside the approved change
       surface or the plan explicitly allows review-only corrections.
     - If a finding requires a contract, boundary, or change-surface change,
@@ -85,7 +130,8 @@ inapplicable:
 
 For low-risk documentation-only plans, explicitly state that the
 module/integration test-first sequence is not applicable and replace it with a
-before/after review gate.
+before/after review gate. The native subagent requirement still applies unless
+the user explicitly approves fallback execution.
 
 Additional ordering guidance:
 
@@ -104,9 +150,9 @@ cognition, consolidation, and tests.
 
 ## Granular Execution Steps
 
-Implementation stages must decompose into small, verifiable steps. A step is
-too broad if an implementation agent could complete it in multiple incompatible
-ways without violating the wording.
+Execution stages must decompose into small, verifiable steps. A step is too
+broad if a parent or execution subagent could complete it in multiple
+incompatible ways without violating the wording.
 
 Default step shape:
 
@@ -155,10 +201,10 @@ and verification commands over copy-paste implementation bodies.
 ## Progress Checklist
 
 Every final plan must include a tickable progress checklist using Markdown
-checkbox syntax (`- [ ]` or `1. [ ]`). These are the progress boxes
-implementation agents update as each function, module, integration step, or
-sign-off gate is completed. Small plans may have a short checklist, but they
-still need one so progress and handoff state are visible.
+checkbox syntax (`- [ ]` or `1. [ ]`). These are the progress boxes the parent
+or active execution agent updates as each function, module, integration step,
+or sign-off gate is completed. Small plans may have a short checklist, but
+they still need one so progress and handoff state are visible.
 
 Checkpoints exist so multiple agents can resume the work without rediscovering
 state or guessing which partial changes are complete. They should be granular
@@ -201,22 +247,23 @@ checkpoint only after running its verification and recording the result in
 `Execution Evidence` or a linked execution record. If verification is skipped
 or blocked, leave the box unchecked and record why.
 
-Agents must sign off stages one at a time, immediately after each stage is
-genuinely complete. Do not pre-fill sign-offs, do not sign off future stages,
-and do not batch multiple stage sign-offs at the end of a session. If handing
-off mid-plan, leave all unfinished stages unchecked and unsigned, and add a
-brief handoff note that points to the next unchecked stage.
+The parent or active execution agent must sign off stages one at a time,
+immediately after each stage is genuinely complete. Do not pre-fill sign-offs,
+do not sign off future stages, and do not batch multiple stage sign-offs at the
+end of a session. If handing off mid-plan, leave all unfinished stages
+unchecked and unsigned, and add a brief handoff note that points to the next
+unchecked stage.
 
-After signing off any major checklist stage, the active agent must reread the
-entire plan before starting the next stage. This reread requirement must be
-written into the plan's `Mandatory Rules` and treated as part of each major
-stage sign-off gate.
+After signing off any major checklist stage, the parent or active execution
+agent must reread the entire plan before starting the next stage. This reread
+requirement must be written into the plan's `Mandatory Rules` and treated as
+part of each major stage sign-off gate.
 
 Every executable plan must include a final progress-checklist checkpoint for
-independent code review. The plan cannot be marked completed, merged, or signed
-off until this checkpoint is verified and evidence is recorded. The checkpoint
-must remain unchecked if the review is skipped, blocked, or finds unresolved
-issues.
+independent code review by the review subagent. The plan cannot be marked
+completed, merged, or signed off until this checkpoint is verified and evidence
+is recorded. The checkpoint must remain unchecked if the review is skipped,
+blocked, or finds unresolved issues.
 
 ## Independent Plan Review Gate
 
@@ -243,7 +290,7 @@ The review checklist must cover:
   user decisions, and registry or ledger handoff are present and current.
 - **Instruction completeness:** exact contracts, file paths, change surface,
   implementation order, verification commands, progress checklist, evidence,
-  and acceptance criteria are specific enough for an implementation agent.
+  and acceptance criteria are specific enough for parent and execution agents.
 - **Creativity suppression:** no unresolved choices, broad verbs, helper
   freedom, alternate call paths, fallbacks, compatibility shims, or unbounded
   "similar to" wording remains.
@@ -318,10 +365,11 @@ For every static check, state the exact expected result:
 ## Independent Code Review Gate
 
 The independent code review gate is mandatory for executable plans and runs
-after verification, before completion or merge. It exists to catch the problems
-that normal implementation verification often misses: style drift, weak design
-choices, plan deviations, stale static-grep expectations, missing handoff
-artifacts, and unplanned file changes.
+after verification, before completion or merge. Normal execution requires an
+independent code-review subagent. It exists to catch the problems that normal
+implementation verification often misses: style drift, weak design choices,
+plan deviations, stale static-grep expectations, missing handoff artifacts, and
+unplanned file changes.
 
 The gate must inspect these inputs:
 
@@ -346,15 +394,16 @@ The review checklist must cover:
   tests preserved, new tests mapped to risks, stale static gates corrected, and
   next-stage handoff left clean.
 
-Concrete findings should be fixed before sign-off when they are inside the
-approved change surface or inside an explicit review-fix allowance. If a
-finding requires new scope, a different public contract, or edits outside the
-approved boundary, the agent must stop and update the active plan or request
-approval before implementing the fix.
+Concrete findings should be fixed by the parent before sign-off when they are
+inside the approved change surface or inside an explicit review-fix allowance.
+If a finding requires new scope, a different public contract, or edits outside
+the approved boundary, the parent must stop and update the active plan or
+request approval before implementing the fix.
 
 The review outcome must be recorded as evidence. A useful evidence line states
-the reviewer mode, files reviewed, findings, fixes made, verification rerun,
-residual risks, and whether the plan is approved for completion.
+the review subagent identity or harness role, files reviewed, findings, fixes
+made, verification rerun, residual risks, and whether the plan is approved for
+completion.
 
 ## Review-Derived Accuracy Gates
 
@@ -401,12 +450,15 @@ completed plan unchanged and create a separate follow-up plan.
 
 ## Execution Handoff
 
-After finalizing a plan, state the intended execution mode:
+Use this section only for multi-session handoff, interrupted execution, or
+transfer to another parent agent. Do not add it to every plan by default.
 
-- same-session inline execution
-- sequential handoff to another agent
-- parallel or subagent-driven execution, only when the user explicitly
-  authorizes it and file ownership boundaries are disjoint
+When needed, state the intended execution mode:
+
+- parent-led native subagent execution
+- explicit user-approved fallback execution, only when requested
+- sequential handoff to another parent agent, with the next unchecked stage and
+  subagent state clearly named
 
 For handoff, name the next unchecked stage, required skills, files expected to
 change next, and verification commands to run before sign-off.

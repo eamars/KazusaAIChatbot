@@ -8,7 +8,7 @@
   local adjacency.
 - Plan class: high_risk_migration.
 - Status: draft.
-- Mandatory skills: `development-plan-writing`, `local-llm-architecture`,
+- Mandatory skills: `development-plan`, `local-llm-architecture`,
   `py-style`, `test-style-and-execution`; apply `cjk-safety` before editing
   Python files that contain CJK prompt text.
 - Overall cutover strategy: compatible for runtime behavior, migration for
@@ -62,7 +62,7 @@ Relevant current boundaries:
 
 ## Mandatory Skills
 
-- `development-plan-writing`: follow this plan lifecycle, checklist,
+- `development-plan`: follow this plan lifecycle, checklist,
   verification, evidence, and review contract.
 - `local-llm-architecture`: keep graph construction deterministic; keep LLM
   prompts bounded and semantic; do not add response-path LLM calls.
@@ -166,8 +166,10 @@ Overall strategy: compatible.
 
 ## Cutover Policy Enforcement
 
-- The implementation agent must follow the selected policy for each area.
-- The agent must not choose a more conservative strategy by default.
+- The responsible execution agent must follow the selected policy for each
+  area.
+- The responsible execution agent must not choose a more conservative strategy
+  by default.
 - Bigbang graph naming means no `conversation_flow` packages, fields,
   collection names, docs, tests, or prompt labels.
 - Migration areas must use the exact index and backfill gates in this plan.
@@ -808,14 +810,14 @@ After this plan:
 
 ### Live LLM Tests
 
-No live LLM test is required for plan completion. If an implementation agent
+No live LLM test is required for plan completion. If an execution agent
 runs live LLM tests for prompt confidence, run one case at a time and inspect
 the output before running another case.
 
 ## Independent Plan Review
 
 Run this gate before approval, execution, or handoff. Prefer a reviewer that
-did not draft the plan. If no separate reviewer is available, the active agent
+did not draft the plan. If no separate reviewer is available, the drafting agent
 must reread this plan, the relevant subsystem READMEs, and the source/test
 context from a fresh-review posture.
 
@@ -838,9 +840,9 @@ Approve only when blockers are resolved.
 ## Independent Code Review
 
 Run this gate after all Verification commands pass and before final sign-off.
-Prefer a reviewer that did not implement the change. If no separate reviewer is
-available, the active agent must reread this plan, inspect the full diff from a
-fresh-review posture, and record that no separate reviewer was available.
+The parent agent must create one independent code-review subagent through the
+current harness's native subagent capability. If native subagents are
+unavailable, stop unless the user explicitly approves fallback execution.
 
 Review scope:
 

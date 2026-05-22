@@ -18,11 +18,13 @@ sections.
 - [Deferred](#deferred)
 - [Overdesign Guardrail](#overdesign-guardrail)
 - [Agent Autonomy Boundaries](#agent-autonomy-boundaries)
-- [Context And Target State](#context-and-target-state)
+- [Context](#context)
+- [Target State](#target-state)
 - [Design Decisions](#design-decisions)
 - [Contracts And Data Shapes](#contracts-and-data-shapes)
 - [LLM Call And Context Budget](#llm-call-and-context-budget)
 - [Change Surface](#change-surface)
+- [Execution Model](#execution-model)
 - [Independent Plan Review](#independent-plan-review)
 - [Independent Code Review](#independent-code-review)
 - [Acceptance Criteria](#acceptance-criteria)
@@ -35,7 +37,7 @@ Keep these stages separate:
 - **Discovery / Drafting:** questions, options, code inspection, tradeoffs, and
   user confirmation are allowed here.
 - **Final Development Plan:** no unresolved questions, no decision prompts, no
-  alternatives left for the implementation agent.
+  alternatives left for parent or execution agents.
 - **Execution Record:** what was done, what passed, what failed, and evidence.
 
 Do not mix final-plan content with unresolved design discussion.
@@ -120,12 +122,13 @@ Every final plan must include these sections:
 ## Must Do
 ## Deferred
 ## Cutover Policy
-## Agent Autonomy Boundaries
 ## Target State
 ## Design Decisions
 ## Change Surface
 ## Overdesign Guardrail
+## Agent Autonomy Boundaries
 ## Implementation Order
+## Execution Model
 ## Progress Checklist
 ## Verification
 ## Independent Code Review
@@ -136,19 +139,23 @@ Add these sections whenever relevant:
 
 ```md
 ## Data Migration
-## Risks
+## Contracts And Data Shapes
 ## LLM Call And Context Budget
-## Operational Steps
 ## Independent Plan Review
 ## Execution Evidence
-## Glossary
+## Risks
 ```
+
+Use the mandatory-section order above as the canonical order for final plans.
+Reference sections below are grouped for explanation and may not appear in the
+same order.
 
 ## Mandatory Skills
 
-Each plan must explicitly name every skill the implementation agent is required
-to load before making changes. Do not rely on the agent inferring mandatory
-skills from the repo, task, memories, or surrounding conversation.
+Each plan must explicitly name every skill the parent agent, production-code
+subagent, review subagent, or fallback execution agent is required to load
+before making changes or reviewing work. Do not rely on agents inferring
+mandatory skills from the repo, task, memories, or surrounding conversation.
 
 Use a short, concrete list:
 
@@ -172,7 +179,7 @@ If no specialized skill is required, state that explicitly:
 For plans that touch multiple domains, list the skills in the order the agent
 should load them and state which stage each skill governs. The plan must also
 copy the critical skill-derived rules into `Mandatory Rules`; naming a skill is
-not enough because implementation agents may lose context after compaction.
+not enough because execution agents may lose context after compaction.
 
 ## Mandatory Rules
 
@@ -200,14 +207,16 @@ duplicate important skill content here.
 
 Every final plan must include these plan-continuity rules in `Mandatory Rules`:
 
-- After any automatic context compaction, the active agent must reread this
-  entire plan before continuing implementation, verification, handoff, or final
-  reporting.
-- After signing off any major progress checklist stage, the active agent must
-  reread this entire plan before starting the next stage.
+- After any automatic context compaction, the parent or active execution agent
+  must reread this entire plan before continuing implementation, verification,
+  handoff, or final reporting.
+- After signing off any major progress checklist stage, the parent or active
+  execution agent must reread this entire plan before starting the next stage.
 - Before final completion, lifecycle status changes, merge, or sign-off, the
-  active agent must run the plan's `Independent Code Review` gate and record
+  parent agent must run the plan's `Independent Code Review` gate and record
   the result in `Execution Evidence`.
+- The plan's `Execution Model` must use parent-led native subagent execution
+  unless the user explicitly approves fallback execution.
 
 ## No Unresolved Questions
 
@@ -257,7 +266,8 @@ The `Must Do` section defines non-negotiable scope. Use directive language:
 - Run every verification command in the Verification section.
 ```
 
-The implementation agent must not downgrade, reinterpret, or skip these items.
+The responsible execution agent must not downgrade, reinterpret, or skip these
+items.
 
 ## Deferred
 
@@ -272,8 +282,8 @@ The `Deferred` section defines explicit non-scope. Use directive language:
 - Do not refactor unrelated prompt architecture.
 ```
 
-The implementation agent must not opportunistically do deferred work, even if
-it looks useful.
+The responsible execution agent must not opportunistically do deferred work,
+even if it looks useful.
 
 ## Overdesign Guardrail
 
@@ -315,39 +325,40 @@ ownership change.
 
 ## Agent Autonomy Boundaries
 
-Add a section that constrains implementation-agent judgment:
+Add a section that constrains parent, production-code subagent, review
+subagent, and fallback execution agent judgment:
 
 ```md
 ## Agent Autonomy Boundaries
 
-- The agent may choose local implementation mechanics only when they preserve
-  the contracts in this plan.
-- The agent must not introduce new architecture, alternate migration
+- The responsible agent may choose local implementation mechanics only when
+  they preserve the contracts in this plan.
+- The responsible agent must not introduce new architecture, alternate migration
   strategies, compatibility layers, fallback paths, or extra features.
-- The agent must treat changes outside the target module as high-scrutiny
-  changes. Updating an existing module outside the target module, or
-  introducing a new code path, prompt, or variable, requires strong
+- The responsible agent must treat changes outside the target module as
+  high-scrutiny changes. Updating an existing module outside the target module
+  or introducing a new code path, prompt, or variable requires strong
   justification in the plan before implementation.
-- The agent may remove code from the existing codebase with lighter
+- The responsible agent may remove code from the existing codebase with lighter
   justification when the removal is explicitly in scope and verified by
   references, greps, and tests.
-- If the agent is allowed to implement a helper or function, the agent must
-  search the codebase first for existing equivalent behavior. If equivalent
-  behavior already exists, abstract or move it into an appropriate common
-  location instead of duplicating it. For Python code, this extraction must
-  follow `py-style` guidance.
-- The agent must not perform unrelated cleanup, formatting churn, dependency
-  upgrades, prompt rewrites, or broad refactors unless explicitly listed in
-  Must Do.
-- If the plan and code disagree, the agent must preserve the plan's stated
-  intent and report the discrepancy.
-- If a required instruction is impossible, the agent must stop and report the
-  blocker instead of inventing a substitute.
+- If the responsible agent is allowed to implement a helper or function, the
+  responsible agent must search the codebase first for existing equivalent
+  behavior. If equivalent behavior already exists, abstract or move it into an
+  appropriate common location instead of duplicating it. For Python code, this
+  extraction must follow `py-style` guidance.
+- The responsible agent must not perform unrelated cleanup, formatting churn,
+  dependency upgrades, prompt rewrites, or broad refactors unless explicitly
+  listed in Must Do.
+- If the plan and code disagree, the responsible agent must preserve the plan's
+  stated intent and report the discrepancy.
+- If a required instruction is impossible, the responsible agent must stop and
+  report the blocker instead of inventing a substitute.
 ```
 
-## Context And Target State
+## Context
 
-Describe the current state, target state, and why the change exists.
+Describe the current state and why the change exists.
 
 Good context includes:
 
@@ -365,11 +376,9 @@ Good context includes:
 - adjacent improvement areas discovered during planning that are intentionally
   deferred
 
-Target state should describe observable end behavior, not just files changed.
-
 When listing adjacent improvement areas, keep them concise and non-authorizing.
-They are context for future planning, not permission for the implementation
-agent to expand scope:
+They are context for future planning, not permission for the parent or
+production-code subagent to expand scope:
 
 ```md
 ## Context
@@ -381,6 +390,12 @@ Adjacent improvement areas intentionally left for later plans:
 - ...
 - ...
 ```
+
+## Target State
+
+Describe the observable completed behavior, not just files changed. Include the
+new ownership boundary, public entrypoint, state shape, call path, prompt
+surface, database state, or operational state when those are part of the plan.
 
 ## Design Decisions
 
@@ -400,7 +415,11 @@ is clearly rejected and the rejection helps prevent future agent drift.
 
 ## Contracts And Data Shapes
 
-For architecture or pipeline changes, define new contracts explicitly:
+Add this section for architecture, pipeline, schema, prompt-interface, or new
+module changes. Otherwise, fold small contract notes into `Target State` or
+`Design Decisions`.
+
+When this section is present, define new contracts explicitly:
 
 - function signatures
 - state keys
@@ -488,6 +507,31 @@ scope. For delete-only work, require enough evidence to show the deleted code
 is obsolete or unreferenced, but do not force the same level of justification
 required for adding or expanding behavior outside the target module.
 
+## Execution Model
+
+Every final executable plan must state how the work will be executed. Use this
+shape unless a user explicitly approves fallback execution:
+
+```md
+## Execution Model
+
+- Parent agent owns orchestration, test code, verification, execution evidence,
+  review feedback remediation, lifecycle updates, and final sign-off.
+- Parent agent establishes the focused test contract first and records the
+  expected failure or baseline before production implementation starts.
+- Production-code subagent: exactly one native subagent, started after the
+  focused test contract is established; owns production code changes only; does
+  not edit tests unless the parent explicitly directs it; closes after planned
+  production code changes are complete, excluding review fixes.
+- Parent agent may continue integration tests, regression tests, static checks,
+  and validation work while the production-code subagent edits production code.
+- Independent code-review subagent: exactly one native subagent, started after
+  planned verification passes; reviews the plan, diff, and evidence; reports
+  findings to the parent; does not implement fixes.
+- If native subagent capability is unavailable, stop before execution unless
+  the user explicitly requests fallback execution.
+```
+
 ## Independent Plan Review
 
 Use this optional section when the user asks for approval review,
@@ -501,7 +545,7 @@ Use this shape:
 ## Independent Plan Review
 
 Run this gate before approval, execution, or handoff. Prefer a reviewer that
-did not draft the plan. If no separate reviewer is available, the active agent
+did not draft the plan. If no separate reviewer is available, the drafting agent
 must reread the parent architecture plan, completed prior-stage artifacts, this
 plan, and relevant source/test context from a fresh-review posture.
 
@@ -512,7 +556,7 @@ Review scope:
   architecture plan.
 - The stage is unblocked: dependencies, decisions, status, registry rows, and
   required artifacts are present.
-- The plan gives full, concrete instructions for an implementation agent:
+- The plan gives full, concrete instructions for execution agents:
   contracts, change surface, exact file paths, verification gates, progress
   checklist, and evidence requirements.
 - Agent creativity is tightly bounded: no unresolved choices, broad verbs,
@@ -537,6 +581,7 @@ Place it after `Verification` and before `Acceptance Criteria`, and include a
 matching final progress-checklist checkpoint. The review happens after all
 planned implementation verification has passed and before marking the plan
 completed, updating lifecycle records to completed, merging, or signing off.
+Normal execution uses the independent code-review subagent for this gate.
 
 Use this shape:
 
@@ -544,9 +589,9 @@ Use this shape:
 ## Independent Code Review
 
 Run this gate after all `Verification` commands pass and before final sign-off.
-Prefer a reviewer that did not implement the change. If no separate reviewer is
-available, the active agent must reread this plan, inspect the full diff from a
-fresh-review posture, and record that no separate reviewer was available.
+The parent agent must create one independent code-review subagent through the
+current harness's native subagent capability. If native subagents are
+unavailable, stop unless the user explicitly approves fallback execution.
 
 Review scope:
 
@@ -562,10 +607,11 @@ Review scope:
   regression tests, execution evidence, next-stage handoff notes, and
   path-safe commands for directories containing spaces.
 
-Fix concrete findings directly only when the fix is inside the approved change
-surface or this review gate explicitly allows review-only fixture/documentation
-corrections. If a fix would cross the approved boundary or alter the contract,
-stop and update the plan or request approval before changing code.
+The parent agent fixes concrete findings directly only when the fix is inside
+the approved change surface or this review gate explicitly allows review-only
+fixture/documentation corrections. If a fix would cross the approved boundary
+or alter the contract, stop and update the plan or request approval before
+changing code.
 
 Record findings, fixes, commands rerun, residual risks, and approval status in
 `Execution Evidence`.
@@ -593,7 +639,8 @@ This plan is complete when:
 
 ## Risks
 
-Use a compact risk table:
+Use this section only for `large`, `high_risk_migration`, data, production,
+security, prompt, or operational-risk plans. Keep it compact:
 
 ```md
 ## Risks

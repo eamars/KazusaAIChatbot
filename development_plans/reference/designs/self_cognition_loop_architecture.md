@@ -21,7 +21,7 @@
 - Execution rule: this document is not an implementation contract. Promote a
   bounded slice into `development_plans/active/short_term/` before any
   production work.
-- Mandatory skills for future executable plans: `development-plan-writing`,
+- Mandatory skills for future executable plans: `development-plan`,
   `local-llm-architecture`, `no-prepost-user-input`, `py-style`,
   `test-style-and-execution`, `database-data-pull` when using real data, and
   `cjk-safety` when editing Python files that contain CJK prompt text.
