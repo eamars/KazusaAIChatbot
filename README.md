@@ -268,9 +268,9 @@ src/
   kazusa_ai_chatbot/
     brain_service/             Service API, graph, intake, health, post-turn glue
     message_envelope/          Typed adapter-to-brain message contract
-    nodes/                     Persona, cognition, dialog, consolidation stages
+    nodes/                     Persona, cognition, and dialog stages
     action_spec/               Modality-neutral action contracts, registry, results
-    consolidation/             Durable target routing and consolidation ICD
+    consolidation/             Durable consolidation helpers, target routing, and ICD
     rag/                       RAG 2 helper agents, hybrid retrieval, Cache2
     conversation_progress/     Short-term episode memory
     internal_monologue_residue/ Short-lived private residue lane for L2a

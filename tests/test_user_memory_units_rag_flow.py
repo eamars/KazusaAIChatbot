@@ -7,7 +7,7 @@ import json
 import pytest
 
 from kazusa_ai_chatbot.db.schemas import UserMemoryUnitType
-from kazusa_ai_chatbot.nodes import persona_supervisor2_consolidator_memory_units as memory_units_module
+from kazusa_ai_chatbot.consolidation import memory_units as memory_units_module
 from kazusa_ai_chatbot.rag import user_memory_unit_retrieval as retrieval_module
 from kazusa_ai_chatbot.time_boundary import (
     build_turn_clock,

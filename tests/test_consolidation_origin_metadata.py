@@ -12,7 +12,7 @@ from kazusa_ai_chatbot.cognition_episode import (
     build_text_chat_cognitive_episode,
 )
 from kazusa_ai_chatbot.consolidation import core as consolidator_module
-from kazusa_ai_chatbot.nodes.persona_supervisor2_consolidator_origin import (
+from kazusa_ai_chatbot.consolidation.origin import (
     ConsolidationOriginError,
     build_self_cognition_consolidation_origin,
     build_user_message_consolidation_origin,

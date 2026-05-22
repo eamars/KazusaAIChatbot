@@ -12,11 +12,11 @@ from kazusa_ai_chatbot.db import DatabaseOperationError
 from kazusa_ai_chatbot.consolidation.target import (
     build_consolidation_target_plan,
 )
-from kazusa_ai_chatbot.nodes import (
-    persona_supervisor2_consolidator_images as image_module,
-    persona_supervisor2_consolidator_persistence as persistence_module,
+from kazusa_ai_chatbot.consolidation import (
+    images as image_module,
+    persistence as persistence_module,
 )
-from kazusa_ai_chatbot.nodes.persona_supervisor2_consolidator_origin import (
+from kazusa_ai_chatbot.consolidation.origin import (
     ConsolidationOriginMetadata,
 )
 from kazusa_ai_chatbot.time_boundary import build_turn_clock

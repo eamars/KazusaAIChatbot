@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-from kazusa_ai_chatbot.nodes.persona_supervisor2_consolidator_origin import (
+from kazusa_ai_chatbot.consolidation.origin import (
     ConsolidationOriginMetadata,
 )
-from kazusa_ai_chatbot.nodes.persona_supervisor2_consolidator_origin_policy import (
+from kazusa_ai_chatbot.consolidation.origin_policy import (
     ConsolidationWritePolicy,
     WritePolicyKey,
     build_consolidation_write_policy,

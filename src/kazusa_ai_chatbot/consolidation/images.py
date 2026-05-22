@@ -14,7 +14,7 @@ from kazusa_ai_chatbot.config import (
 from kazusa_ai_chatbot.memory_writer_prompt_projection import (
     project_character_image_prompt_payload,
 )
-from kazusa_ai_chatbot.nodes.persona_supervisor2_consolidator_schema import (
+from kazusa_ai_chatbot.consolidation.schema import (
     ConsolidatorState,
 )
 from kazusa_ai_chatbot.utils import get_llm, parse_llm_json_output

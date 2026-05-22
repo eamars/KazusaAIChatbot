@@ -13,10 +13,10 @@ from kazusa_ai_chatbot.config import (
     CONSOLIDATION_LLM_MODEL,
 )
 from kazusa_ai_chatbot.config import MAX_FACT_HARVESTER_RETRY
-from kazusa_ai_chatbot.nodes.persona_supervisor2_consolidator_origin import (
+from kazusa_ai_chatbot.consolidation.origin import (
     project_consolidation_origin_prompt_block,
 )
-from kazusa_ai_chatbot.nodes.persona_supervisor2_consolidator_schema import (
+from kazusa_ai_chatbot.consolidation.schema import (
     ConsolidatorState,
     content_anchors_from_action_directives,
 )

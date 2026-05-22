@@ -152,8 +152,8 @@ def _fake_consolidator_state(*, local_time_context: dict | None = None) -> dict:
 @pytest.mark.asyncio
 async def test_facts_harvester_payload_uses_local_time(monkeypatch) -> None:
     """facts_harvester payload should contain only local time strings."""
-    from kazusa_ai_chatbot.nodes import (
-        persona_supervisor2_consolidator_facts as facts_module,
+    from kazusa_ai_chatbot.consolidation import (
+        facts as facts_module,
     )
 
     llm = _CapturingAsyncLLM({"new_facts": [], "future_promises": []})
@@ -186,7 +186,7 @@ async def test_facts_harvester_payload_uses_local_time(monkeypatch) -> None:
 
 def test_stability_payload_timestamps_are_local() -> None:
     """Stability judge payload should contain only local timestamps."""
-    from kazusa_ai_chatbot.nodes.persona_supervisor2_consolidator_memory_units import (
+    from kazusa_ai_chatbot.consolidation.memory_units import (
         _stability_payload,
     )
 
@@ -483,7 +483,7 @@ async def test_live_context_runtime_result_has_no_utc_leak() -> None:
 
 def test_normalize_future_promises_converts_local_due_time() -> None:
     """_normalize_future_promises should convert local YYYY-MM-DD HH:MM to UTC ISO."""
-    from kazusa_ai_chatbot.nodes.persona_supervisor2_consolidator_persistence import (
+    from kazusa_ai_chatbot.consolidation.persistence import (
         _normalize_future_promises,
     )
 
@@ -508,7 +508,7 @@ def test_normalize_future_promises_converts_local_due_time() -> None:
 
 def test_normalize_future_promises_rejects_offset_due_time() -> None:
     """Offset-aware LLM due_time values should be rejected, not normalized."""
-    from kazusa_ai_chatbot.nodes.persona_supervisor2_consolidator_persistence import (
+    from kazusa_ai_chatbot.consolidation.persistence import (
         _normalize_future_promises,
     )
 
@@ -530,7 +530,7 @@ def test_normalize_future_promises_rejects_offset_due_time() -> None:
 
 def test_normalize_future_promises_drops_invalid_due_time() -> None:
     """Malformed explicit due_time values should not receive fallbacks."""
-    from kazusa_ai_chatbot.nodes.persona_supervisor2_consolidator_persistence import (
+    from kazusa_ai_chatbot.consolidation.persistence import (
         _normalize_future_promises,
     )
 

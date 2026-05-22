@@ -6,7 +6,7 @@ import json
 
 import pytest
 
-from kazusa_ai_chatbot.nodes import persona_supervisor2_consolidator_reflection as reflection_module
+from kazusa_ai_chatbot.consolidation import reflection as reflection_module
 
 
 class _DummyResponse:

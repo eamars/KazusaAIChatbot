@@ -30,16 +30,16 @@ from kazusa_ai_chatbot.db import (
     upsert_character_self_image,
     upsert_character_state,
 )
-from kazusa_ai_chatbot.nodes.persona_supervisor2_consolidator_images import (
+from kazusa_ai_chatbot.consolidation.images import (
     _update_character_image,
 )
-from kazusa_ai_chatbot.nodes.persona_supervisor2_consolidator_memory_units import (
+from kazusa_ai_chatbot.consolidation.memory_units import (
     update_user_memory_units_from_state,
 )
-from kazusa_ai_chatbot.nodes.persona_supervisor2_consolidator_origin_policy import (
+from kazusa_ai_chatbot.consolidation.origin_policy import (
     build_consolidation_write_policy,
 )
-from kazusa_ai_chatbot.nodes.persona_supervisor2_consolidator_schema import (
+from kazusa_ai_chatbot.consolidation.schema import (
     ConsolidatorState,
 )
 from kazusa_ai_chatbot.rag.cache2_events import CacheInvalidationEvent

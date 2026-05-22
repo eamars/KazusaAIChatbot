@@ -5,8 +5,8 @@ from __future__ import annotations
 import inspect
 
 from kazusa_ai_chatbot import memory_writer_prompt_projection as projection_module
-from kazusa_ai_chatbot.nodes import (
-    persona_supervisor2_consolidator_memory_units as memory_units_module,
+from kazusa_ai_chatbot.consolidation import (
+    memory_units as memory_units_module,
 )
 
 

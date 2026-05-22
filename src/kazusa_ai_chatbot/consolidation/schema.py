@@ -6,7 +6,7 @@ from typing import Annotated, TypedDict
 
 from langgraph.graph.message import add_messages
 
-from kazusa_ai_chatbot.nodes.persona_supervisor2_consolidator_origin import (
+from kazusa_ai_chatbot.consolidation.origin import (
     ConsolidationOriginMetadata,
 )
 from kazusa_ai_chatbot.consolidation.target import ConsolidationTargetPlan

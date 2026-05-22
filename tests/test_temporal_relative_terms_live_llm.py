@@ -15,7 +15,7 @@ from kazusa_ai_chatbot.conversation_progress.models import (
     ConversationProgressRecordInput,
     ConversationProgressScope,
 )
-from kazusa_ai_chatbot.nodes import persona_supervisor2_consolidator_facts as facts_module
+from kazusa_ai_chatbot.consolidation import facts as facts_module
 from kazusa_ai_chatbot.time_boundary import build_turn_clock_from_storage_utc
 from tests.llm_trace import write_llm_trace
 

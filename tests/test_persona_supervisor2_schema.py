@@ -5,7 +5,7 @@ from __future__ import annotations
 import typing
 import pytest
 
-from kazusa_ai_chatbot.nodes.persona_supervisor2_consolidator_schema import (
+from kazusa_ai_chatbot.consolidation.schema import (
     normalize_subjective_appraisals,
 )
 from kazusa_ai_chatbot.nodes.persona_supervisor2_schema import GlobalPersonaState, CognitionState

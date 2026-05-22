@@ -23,10 +23,10 @@ from kazusa_ai_chatbot.memory_writer_prompt_projection import (
     project_memory_unit_extractor_prompt_payload,
     project_memory_unit_rewrite_prompt_payload,
 )
-from kazusa_ai_chatbot.nodes.persona_supervisor2_consolidator_origin import (
+from kazusa_ai_chatbot.consolidation.origin import (
     project_consolidation_origin_prompt_block,
 )
-from kazusa_ai_chatbot.nodes.persona_supervisor2_consolidator_schema import ConsolidatorState
+from kazusa_ai_chatbot.consolidation.schema import ConsolidatorState
 from kazusa_ai_chatbot.rag.prompt_projection import project_tool_result_for_llm
 from kazusa_ai_chatbot.rag.user_memory_unit_retrieval import retrieve_memory_unit_merge_candidates
 from kazusa_ai_chatbot.time_boundary import (

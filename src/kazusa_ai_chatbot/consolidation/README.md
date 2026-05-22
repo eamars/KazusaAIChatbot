@@ -17,8 +17,14 @@
   - `src/kazusa_ai_chatbot/consolidation/core.py`
   - `src/kazusa_ai_chatbot/consolidation/target.py`
   - `src/kazusa_ai_chatbot/consolidation/group_channel.py`
-  - `src/kazusa_ai_chatbot/nodes/persona_supervisor2_consolidator.py`
-  - `src/kazusa_ai_chatbot/nodes/persona_supervisor2_consolidator_persistence.py`
+  - `src/kazusa_ai_chatbot/consolidation/schema.py`
+  - `src/kazusa_ai_chatbot/consolidation/origin.py`
+  - `src/kazusa_ai_chatbot/consolidation/origin_policy.py`
+  - `src/kazusa_ai_chatbot/consolidation/facts.py`
+  - `src/kazusa_ai_chatbot/consolidation/reflection.py`
+  - `src/kazusa_ai_chatbot/consolidation/images.py`
+  - `src/kazusa_ai_chatbot/consolidation/memory_units.py`
+  - `src/kazusa_ai_chatbot/consolidation/persistence.py`
   - `src/kazusa_ai_chatbot/db/script_operations.py`
 
 This ICD owns the caller-facing consolidation contract. Runtime callers enter
@@ -84,8 +90,8 @@ provenance strings.
 ### Consolidation Package
 
 The consolidation package owns public entry routing, target-plan construction,
-write-intent validation, group-channel helper boundaries, and the compatibility
-wrapper around existing extraction nodes.
+write-intent validation, group-channel helper boundaries, and the extraction
+and evaluator helpers that produce durable write candidates.
 
 It may call LLM-backed extraction/evaluation nodes, but target planning itself
 is deterministic and has no LLM dependency.
@@ -108,7 +114,7 @@ cleanup. Scripts do not issue raw MongoDB operations directly.
 persona or self-cognition state
   -> consolidation.core.call_consolidation_subgraph(...)
   -> consolidation.target.build_consolidation_target_plan(...)
-  -> existing extraction and evaluator nodes
+  -> consolidation extraction and evaluator helpers
   -> consolidation.target.validate_write_intent(...)
   -> target-specific persistence helpers
   -> database facade helpers
@@ -123,9 +129,8 @@ operator
   -> exact synthetic-row diagnostics or approved cleanup
 ```
 
-The old `kazusa_ai_chatbot.nodes.persona_supervisor2_consolidator` module is
-not the public entrypoint. It remains an internal compatibility module for the
-node implementation used by `consolidation.core`.
+Historical node-level consolidator modules are not public entrypoints and are
+not compatibility surfaces. Runtime callers enter through `consolidation.core`.
 
 ## Public Interface
 
@@ -152,13 +157,8 @@ venv\Scripts\python -m scripts.inspect_consolidation_target_lifecycle
 venv\Scripts\python -m scripts.inspect_consolidation_target_lifecycle --apply
 ```
 
-Forbidden runtime imports:
-
-```python
-from kazusa_ai_chatbot.nodes.persona_supervisor2_consolidator import (
-    call_consolidation_subgraph,
-)
-```
+Forbidden runtime imports: node-level consolidator entrypoints or helper
+modules.
 
 Runtime callers must not import `db._client`, build raw MongoDB query/update
 documents, or call maintenance-only cleanup helpers.

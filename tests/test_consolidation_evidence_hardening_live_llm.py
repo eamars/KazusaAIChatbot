@@ -20,8 +20,8 @@ from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition_l3 import (
     call_visual_agent,
 )
 from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition_l2c2 import call_social_context_appraisal
-from kazusa_ai_chatbot.nodes.persona_supervisor2_consolidator_facts import facts_harvester
-from kazusa_ai_chatbot.nodes.persona_supervisor2_consolidator_reflection import relationship_recorder
+from kazusa_ai_chatbot.consolidation.facts import facts_harvester
+from kazusa_ai_chatbot.consolidation.reflection import relationship_recorder
 from kazusa_ai_chatbot.utils import load_personality
 from tests.llm_trace import write_llm_trace
 

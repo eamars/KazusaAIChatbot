@@ -2,14 +2,14 @@
 
 from __future__ import annotations
 
-from kazusa_ai_chatbot.nodes import (
-    persona_supervisor2_consolidator_images as images_module,
+from kazusa_ai_chatbot.consolidation import (
+    images as images_module,
 )
-from kazusa_ai_chatbot.nodes import (
-    persona_supervisor2_consolidator_memory_units as memory_units_module,
+from kazusa_ai_chatbot.consolidation import (
+    memory_units as memory_units_module,
 )
-from kazusa_ai_chatbot.nodes import (
-    persona_supervisor2_consolidator_reflection as reflection_module,
+from kazusa_ai_chatbot.consolidation import (
+    reflection as reflection_module,
 )
 from kazusa_ai_chatbot.reflection_cycle import promotion as promotion_module
 from scripts import sanitize_memory_writer_perspective as migration_module

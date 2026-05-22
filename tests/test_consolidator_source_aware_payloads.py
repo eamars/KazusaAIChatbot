@@ -8,16 +8,16 @@ from typing import Any
 
 import pytest
 
-from kazusa_ai_chatbot.nodes import (
-    persona_supervisor2_consolidator_facts as facts_module,
+from kazusa_ai_chatbot.consolidation import (
+    facts as facts_module,
 )
-from kazusa_ai_chatbot.nodes import (
-    persona_supervisor2_consolidator_memory_units as memory_units_module,
+from kazusa_ai_chatbot.consolidation import (
+    memory_units as memory_units_module,
 )
-from kazusa_ai_chatbot.nodes import (
-    persona_supervisor2_consolidator_reflection as reflection_module,
+from kazusa_ai_chatbot.consolidation import (
+    reflection as reflection_module,
 )
-from kazusa_ai_chatbot.nodes.persona_supervisor2_consolidator_origin import (
+from kazusa_ai_chatbot.consolidation.origin import (
     ConsolidationOriginMetadata,
 )
 from kazusa_ai_chatbot.time_boundary import build_turn_clock

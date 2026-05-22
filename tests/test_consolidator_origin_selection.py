@@ -6,7 +6,7 @@ import pytest
 
 from kazusa_ai_chatbot.cognition_episode import CognitiveEpisode
 from kazusa_ai_chatbot.consolidation import core as consolidator_module
-from kazusa_ai_chatbot.nodes.persona_supervisor2_consolidator_origin import (
+from kazusa_ai_chatbot.consolidation.origin import (
     build_self_cognition_consolidation_origin,
 )
 from kazusa_ai_chatbot.time_boundary import build_turn_clock

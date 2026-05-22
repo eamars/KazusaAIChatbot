@@ -27,8 +27,8 @@ from kazusa_ai_chatbot.reflection_cycle.prompts import (
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 _ALLOWED_PROMPT_CLEANUP_FILES = (
-    "src/kazusa_ai_chatbot/nodes/"
-    "persona_supervisor2_consolidator_memory_units.py",
+    "src/kazusa_ai_chatbot/consolidation/"
+    "memory_units.py",
     "src/kazusa_ai_chatbot/reflection_cycle/prompts.py",
     "src/kazusa_ai_chatbot/reflection_cycle/promotion.py",
 )

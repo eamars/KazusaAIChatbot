@@ -18,7 +18,7 @@ from kazusa_ai_chatbot.cognition_episode import (
     project_text_chat_compatibility_fields,
     validate_cognitive_episode,
 )
-from kazusa_ai_chatbot.nodes.persona_supervisor2_consolidator_schema import (
+from kazusa_ai_chatbot.consolidation.schema import (
     ConsolidatorState,
 )
 from kazusa_ai_chatbot.nodes.persona_supervisor2_schema import (

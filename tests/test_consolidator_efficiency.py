@@ -11,8 +11,8 @@ from kazusa_ai_chatbot.consolidation import core as consolidator_module
 from kazusa_ai_chatbot.consolidation.target import (
     build_consolidation_target_plan,
 )
-from kazusa_ai_chatbot.nodes import persona_supervisor2_consolidator_persistence as persistence_module
-from kazusa_ai_chatbot.nodes.persona_supervisor2_consolidator_origin import (
+from kazusa_ai_chatbot.consolidation import persistence as persistence_module
+from kazusa_ai_chatbot.consolidation.origin import (
     build_user_message_consolidation_origin,
 )
 from kazusa_ai_chatbot.time_boundary import local_time_context_from_storage_utc

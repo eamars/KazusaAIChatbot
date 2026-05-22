@@ -15,7 +15,7 @@ from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition_prompt_selection impo
     build_cognition_prompt_source_payload,
     select_cognition_prompt_variant,
 )
-from kazusa_ai_chatbot.nodes.persona_supervisor2_consolidator_origin import (
+from kazusa_ai_chatbot.consolidation.origin import (
     build_user_message_consolidation_origin,
 )
 from kazusa_ai_chatbot.nodes.persona_relevance_agent import relevance_agent

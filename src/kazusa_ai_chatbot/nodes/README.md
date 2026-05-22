@@ -34,7 +34,7 @@ The package currently contains five major node groups:
 | Persona orchestration | `persona_supervisor2.py` | Live turn graph: decontextualization, RAG, cognition, dialog/no-response routing. |
 | Cognition and action initialization | `persona_supervisor2_cognition*.py`, `boundary_profile.py`, `linguistic_texture.py` | Layered internal appraisal, stance, boundary judgment, L2d action initialization, and selected L3 surface directives. |
 | Dialog | `dialog_agent.py` | Final text generation and evaluator retry loop. |
-| Consolidation inputs | `persona_supervisor2_consolidator*.py` | Extraction helper nodes for facts, promises, relationship state, images, memory units, and character state. The `kazusa_ai_chatbot.consolidation` package owns the public entrypoint and target-aware durable write routing. |
+| Consolidation handoff | `persona_supervisor2.py` | Completed persona state is handed to `kazusa_ai_chatbot.consolidation`, which owns extraction helpers, origin projection, target validation, and durable write routing. |
 
 The nodes consume platform-neutral state. Platform wire syntax must already be
 normalized by adapters and the brain service into `message_envelope`,

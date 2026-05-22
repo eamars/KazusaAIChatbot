@@ -8,8 +8,8 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from kazusa_ai_chatbot.nodes import (
-    persona_supervisor2_consolidator_images as image_module,
+from kazusa_ai_chatbot.consolidation import (
+    images as image_module,
 )
 
 STORAGE_TIMESTAMP_UTC = "2026-05-19T00:00:00+00:00"

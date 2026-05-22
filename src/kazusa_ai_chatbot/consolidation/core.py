@@ -12,24 +12,24 @@ from kazusa_ai_chatbot.action_spec.results import (
 from kazusa_ai_chatbot.consolidation.target import (
     build_consolidation_target_plan,
 )
-from kazusa_ai_chatbot.nodes.persona_supervisor2_consolidator_facts import (
+from kazusa_ai_chatbot.consolidation.facts import (
     fact_harvester_evaluator,
     facts_harvester,
 )
-from kazusa_ai_chatbot.nodes.persona_supervisor2_consolidator_origin import (
+from kazusa_ai_chatbot.consolidation.origin import (
     ConsolidationOriginError,
     build_self_cognition_consolidation_origin,
     build_user_message_consolidation_origin,
 )
-from kazusa_ai_chatbot.nodes.persona_supervisor2_consolidator_persistence import (
+from kazusa_ai_chatbot.consolidation.persistence import (
     _normalize_future_promises,
     db_writer,
 )
-from kazusa_ai_chatbot.nodes.persona_supervisor2_consolidator_reflection import (
+from kazusa_ai_chatbot.consolidation.reflection import (
     global_state_updater,
     relationship_recorder,
 )
-from kazusa_ai_chatbot.nodes.persona_supervisor2_consolidator_schema import (
+from kazusa_ai_chatbot.consolidation.schema import (
     ConsolidatorState,
     normalize_subjective_appraisals,
 )

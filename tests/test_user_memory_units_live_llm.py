@@ -8,7 +8,7 @@ import httpx
 import pytest
 
 from kazusa_ai_chatbot.config import CONSOLIDATION_LLM_BASE_URL
-from kazusa_ai_chatbot.nodes import persona_supervisor2_consolidator_memory_units as memory_units_module
+from kazusa_ai_chatbot.consolidation import memory_units as memory_units_module
 from kazusa_ai_chatbot.time_boundary import (
     build_turn_clock,
     build_turn_clock_from_storage_utc,

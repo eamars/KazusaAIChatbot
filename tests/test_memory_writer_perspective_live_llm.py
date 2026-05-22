@@ -13,14 +13,14 @@ from kazusa_ai_chatbot.memory_writer_prompt_projection import (
     project_memory_unit_rewrite_prompt_payload,
     project_reflection_promotion_prompt_payload,
 )
-from kazusa_ai_chatbot.nodes import (
-    persona_supervisor2_consolidator_images as images_module,
+from kazusa_ai_chatbot.consolidation import (
+    images as images_module,
 )
-from kazusa_ai_chatbot.nodes import (
-    persona_supervisor2_consolidator_memory_units as memory_units_module,
+from kazusa_ai_chatbot.consolidation import (
+    memory_units as memory_units_module,
 )
-from kazusa_ai_chatbot.nodes import (
-    persona_supervisor2_consolidator_reflection as reflection_module,
+from kazusa_ai_chatbot.consolidation import (
+    reflection as reflection_module,
 )
 from kazusa_ai_chatbot.reflection_cycle import promotion as promotion_module
 from kazusa_ai_chatbot.utils import parse_llm_json_output
