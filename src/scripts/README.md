@@ -26,7 +26,7 @@ Generated from active entry points, runtime docs, and tests on `2026-05-17`.
 | `inspect_consolidation_target_lifecycle.py` | `python -m scripts.inspect_consolidation_target_lifecycle [--apply]` | Dry-run report and approved apply cleanup for synthetic consolidation user rows and malformed target lifecycle data. |
 | `load_character_profile.py` | `python -m scripts.load_character_profile personalities/<file>.json` | Load a character profile JSON into MongoDB (service bootstrap prerequisite). |
 | `manage_memory_knowledge.py` | `manage-memory-knowledge` | Edit and sync local memory knowledge entries. |
-| `migrate_conversation_history_envelope.py` | `python -m scripts.migrate_conversation_history_envelope [--apply]` | Convert legacy raw conversation rows to typed-envelope fields. |
+| `migrate_conversation_history_envelope.py` | `python -m scripts.migrate_conversation_history_envelope [--apply]` | Repair conversation rows that violate typed-envelope storage fields or semantic-text cleanliness. |
 | `profile_embedding_prefix_modes.py` | `python -m scripts.profile_embedding_prefix_modes` | Compare embedding prefix strategies for RAG tuning. |
 | `profile_rag_retrieval.py` | `python -m scripts.profile_rag_retrieval` | Generate RAG retrieval profile cases for tuning/validation. |
 | `reembed_text_vector_embeddings.py` | `python -m scripts.reembed_text_vector_embeddings` | Replay text embedding generation for documents/collections. |

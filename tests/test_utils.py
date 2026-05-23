@@ -132,6 +132,176 @@ def test_trim_history_dict():
     assert trimmed[1]["role"] == "user"
 
 
+def test_trim_history_dict_projects_image_only_attachment_text():
+    """Image-only history rows should expose prompt-safe image meaning."""
+    from kazusa_ai_chatbot.utils import trim_history_dict
+
+    history = [
+        {
+            "display_name": "总是跌倒的企鹅",
+            "platform_user_id": "user_123",
+            "global_user_id": "uuid-1",
+            "body_text": "",
+            "raw_wire_text": "[CQ:image,file=sam.png]",
+            "attachments": [
+                {
+                    "media_type": "image/png",
+                    "description": "拓竹入驻山姆，不只是上架 3D 打印机",
+                },
+            ],
+            "addressed_to_global_user_ids": ["character"],
+            "mentions": [],
+            "broadcast": False,
+            "role": "user",
+            "timestamp": "t1",
+        },
+    ]
+
+    trimmed = trim_history_dict(history)
+
+    assert trimmed[0]["body_text"] == (
+        "<image>拓竹入驻山姆，不只是上架 3D 打印机</image>"
+    )
+
+
+def test_trim_history_dict_appends_image_block_after_body_text():
+    """Authored text should remain before appended image blocks."""
+    from kazusa_ai_chatbot.utils import trim_history_dict
+
+    history = [
+        {
+            "display_name": "总是跌倒的企鹅",
+            "platform_user_id": "user_123",
+            "global_user_id": "uuid-1",
+            "body_text": "这个也进山姆了",
+            "attachments": [
+                {
+                    "media_kind": "image",
+                    "description": "拓竹入驻山姆，不只是上架 3D 打印机",
+                },
+            ],
+            "addressed_to_global_user_ids": ["character"],
+            "mentions": [],
+            "broadcast": False,
+            "role": "user",
+            "timestamp": "t1",
+        },
+    ]
+
+    trimmed = trim_history_dict(history)
+
+    assert trimmed[0]["body_text"] == (
+        "这个也进山姆了\n"
+        "<image>拓竹入驻山姆，不只是上架 3D 打印机</image>"
+    )
+
+
+def test_trim_history_dict_projects_reply_image_description():
+    """Reply image descriptions should survive in reply excerpt text."""
+    from kazusa_ai_chatbot.utils import trim_history_dict
+
+    history = [
+        {
+            "display_name": "总是跌倒的企鹅",
+            "platform_user_id": "user_123",
+            "global_user_id": "uuid-1",
+            "body_text": "小孩的消费力还是强",
+            "attachments": [],
+            "reply_context": {
+                "reply_to_message_id": "1581464756",
+                "reply_to_platform_user_id": "user_123",
+                "reply_to_display_name": "总是跌倒的企鹅",
+                "reply_attachments": [
+                    {
+                        "media_kind": "image",
+                        "description": "拓竹入驻山姆，不只是上架 3D 打印机",
+                    },
+                ],
+            },
+            "addressed_to_global_user_ids": ["character"],
+            "mentions": [],
+            "broadcast": False,
+            "role": "user",
+            "timestamp": "t2",
+        },
+    ]
+
+    trimmed = trim_history_dict(history)
+
+    assert trimmed[0]["reply_context"]["reply_excerpt"] == (
+        "<image>拓竹入驻山姆，不只是上架 3D 打印机</image>"
+    )
+
+
+def test_trim_history_dict_escapes_image_description_boundaries():
+    """Image descriptions should not create or close image tags."""
+    from kazusa_ai_chatbot.utils import trim_history_dict
+
+    history = [
+        {
+            "display_name": "User",
+            "platform_user_id": "user_123",
+            "global_user_id": "uuid-1",
+            "body_text": "",
+            "attachments": [
+                {
+                    "media_kind": "image",
+                    "description": "A < B & already </image> closed",
+                },
+            ],
+            "addressed_to_global_user_ids": ["character"],
+            "mentions": [],
+            "broadcast": False,
+            "role": "user",
+            "timestamp": "t1",
+        },
+    ]
+
+    trimmed = trim_history_dict(history)
+
+    assert trimmed[0]["body_text"] == (
+        "<image>A &lt; B &amp; already &lt;/image&gt; closed</image>"
+    )
+
+
+def test_trim_history_dict_truncates_long_image_description():
+    """Image descriptions should reuse the current prompt attachment cap."""
+    from kazusa_ai_chatbot.message_envelope import (
+        MAX_PROMPT_ATTACHMENT_DESCRIPTION_CHARS,
+    )
+    from kazusa_ai_chatbot.utils import trim_history_dict
+
+    history = [
+        {
+            "display_name": "User",
+            "platform_user_id": "user_123",
+            "global_user_id": "uuid-1",
+            "body_text": "",
+            "attachments": [
+                {
+                    "media_kind": "image",
+                    "description": "x" * (
+                        MAX_PROMPT_ATTACHMENT_DESCRIPTION_CHARS + 10
+                    ),
+                },
+            ],
+            "addressed_to_global_user_ids": ["character"],
+            "mentions": [],
+            "broadcast": False,
+            "role": "user",
+            "timestamp": "t1",
+        },
+    ]
+
+    trimmed = trim_history_dict(history)
+    projected_description = trimmed[0]["body_text"].removeprefix(
+        "<image>",
+    ).removesuffix("</image>")
+
+    assert len(projected_description) == MAX_PROMPT_ATTACHMENT_DESCRIPTION_CHARS
+    assert projected_description.endswith("...")
+
+
 def test_parse_llm_json_output_accepts_markdown_fenced_raw_output():
     """Markdown fences are repaired from raw LLM text without escaped wrapping."""
     raw_output = """```json

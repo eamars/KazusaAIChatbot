@@ -1,8 +1,9 @@
-"""Rewrite stored conversation rows into the typed envelope storage contract.
+"""Repair stored conversation rows for the typed envelope storage contract.
 
 This command is an operator-run maintenance utility. It is not imported by the
 chat service startup path; runtime code expects the database to already satisfy
-the strict conversation-history contract.
+the strict conversation-history contract. It fills missing typed fields on
+legacy rows and removes transport syntax that leaked into semantic text fields.
 
 Typical use:
     python -m scripts.migrate_conversation_history_envelope
@@ -42,6 +43,31 @@ _DISCORD_ROLE_MENTION_PATTERN = re.compile(r"<@&\d+>")
 _DISCORD_CHANNEL_MENTION_PATTERN = re.compile(r"<#\d+>")
 _DISCORD_CUSTOM_EMOJI_PATTERN = re.compile(r"<a?:[A-Za-z0-9_]+:\d+>")
 _DISCORD_EVERYONE_PATTERN = re.compile(r"@(everyone|here)\b")
+BODY_TEXT_TRANSPORT_SYNTAX_PATTERN = (
+    r"(\[Reply to message\]|\[CQ:[^\]]+\]|<@!?\d+>|<@&\d+>|"
+    r"<#\d+>|<a?:[A-Za-z0-9_]+:\d+>)"
+)
+_BODY_TEXT_TRANSPORT_PATTERNS = (
+    _LEGACY_REPLY_MARKER_PATTERN,
+    _CQ_ANY_PATTERN,
+    _DISCORD_USER_MENTION_PATTERN,
+    _DISCORD_ROLE_MENTION_PATTERN,
+    _DISCORD_CHANNEL_MENTION_PATTERN,
+    _DISCORD_CUSTOM_EMOJI_PATTERN,
+)
+
+
+def _collapse_legacy_text_spacing(text: str) -> str:
+    """Collapse whitespace after transport markers are removed."""
+
+    without_runs = re.sub(r"[ \t]+", " ", text)
+    normalized_lines = [
+        line.strip()
+        for line in without_runs.splitlines()
+    ]
+    without_empty_runs = "\n".join(normalized_lines)
+    return_value = re.sub(r"\n{3,}", "\n\n", without_empty_runs).strip()
+    return return_value
 
 
 def normalize_legacy_body_text(raw_wire_text: str) -> str:
@@ -63,13 +89,43 @@ def normalize_legacy_body_text(raw_wire_text: str) -> str:
     body_text = _DISCORD_CHANNEL_MENTION_PATTERN.sub(" ", body_text)
     body_text = _DISCORD_CUSTOM_EMOJI_PATTERN.sub(" ", body_text)
     body_text = _DISCORD_EVERYONE_PATTERN.sub(" ", body_text)
-    without_runs = re.sub(r"[ \t]+", " ", body_text)
-    normalized_lines = [
-        line.strip()
-        for line in without_runs.splitlines()
-    ]
-    without_empty_runs = "\n".join(normalized_lines)
-    return_value = re.sub(r"\n{3,}", "\n\n", without_empty_runs).strip()
+    return_value = _collapse_legacy_text_spacing(body_text)
+    return return_value
+
+
+def body_text_has_transport_syntax(body_text: str) -> bool:
+    """Return whether a typed text field still contains transport syntax."""
+
+    for pattern in _BODY_TEXT_TRANSPORT_PATTERNS:
+        if pattern.search(body_text):
+            return_value = True
+            return return_value
+
+    return_value = False
+    return return_value
+
+
+def normalize_dirty_body_text(body_text: str) -> str:
+    """Strip transport syntax from an existing typed text field.
+
+    Args:
+        body_text: Stored semantic text that may still contain platform
+            transport markers.
+
+    Returns:
+        Cleaned text for the typed storage contract. Readable broadcast tokens
+        such as ``@everyone`` are preserved because they are valid body text.
+    """
+
+    clean_text = _LEGACY_REPLY_MARKER_PATTERN.sub(" ", body_text)
+    clean_text = _CQ_REPLY_PATTERN.sub(" ", clean_text)
+    clean_text = _CQ_AT_PATTERN.sub(" ", clean_text)
+    clean_text = _CQ_ANY_PATTERN.sub(" ", clean_text)
+    clean_text = _DISCORD_USER_MENTION_PATTERN.sub(" ", clean_text)
+    clean_text = _DISCORD_ROLE_MENTION_PATTERN.sub(" ", clean_text)
+    clean_text = _DISCORD_CHANNEL_MENTION_PATTERN.sub(" ", clean_text)
+    clean_text = _DISCORD_CUSTOM_EMOJI_PATTERN.sub(" ", clean_text)
+    return_value = _collapse_legacy_text_spacing(clean_text)
     return return_value
 
 
@@ -150,6 +206,42 @@ def legacy_list_field(row: dict[str, Any], field: str) -> list[Any]:
     return return_value
 
 
+def sanitized_reply_context(row: dict[str, Any]) -> dict[str, Any] | None:
+    """Return a repaired reply context only when one needs text cleanup.
+
+    Args:
+        row: Raw MongoDB conversation document.
+
+    Returns:
+        A reply-context copy with dirty excerpt text repaired, or ``None`` when
+        the row does not need a reply-context update.
+    """
+
+    reply_context = row.get("reply_context")
+    if not isinstance(reply_context, dict):
+        return_value: dict[str, Any] | None = None
+        return return_value
+
+    reply_excerpt = reply_context.get("reply_excerpt")
+    if not isinstance(reply_excerpt, str):
+        return_value = None
+        return return_value
+
+    if not body_text_has_transport_syntax(reply_excerpt):
+        return_value = None
+        return return_value
+
+    repaired_context = dict(reply_context)
+    repaired_excerpt = normalize_dirty_body_text(reply_excerpt)
+    if repaired_excerpt:
+        repaired_context["reply_excerpt"] = repaired_excerpt
+    else:
+        repaired_context.pop("reply_excerpt", None)
+
+    return_value = repaired_context
+    return return_value
+
+
 def legacy_conversation_fields(row: dict[str, Any]) -> dict[str, Any]:
     """Build typed-envelope fields for one stored conversation row.
 
@@ -162,7 +254,10 @@ def legacy_conversation_fields(row: dict[str, Any]) -> dict[str, Any]:
 
     raw_wire_text = legacy_raw_wire_text(row)
     body_text = row.get("body_text")
-    if not isinstance(body_text, str):
+    if isinstance(body_text, str):
+        if body_text_has_transport_syntax(body_text):
+            body_text = normalize_dirty_body_text(body_text)
+    else:
         body_text = normalize_legacy_body_text(raw_wire_text)
 
     broadcast = row.get("broadcast")
@@ -177,6 +272,9 @@ def legacy_conversation_fields(row: dict[str, Any]) -> dict[str, Any]:
         "broadcast": broadcast,
         "attachments": legacy_list_field(row, "attachments"),
     }
+    reply_context = sanitized_reply_context(row)
+    if reply_context is not None:
+        fields["reply_context"] = reply_context
     return fields
 
 
@@ -199,7 +297,9 @@ async def migrate_legacy_conversation_history_rows(
     """
 
     if dry_run:
-        legacy_count = await count_legacy_conversation_history_rows()
+        legacy_count = await count_legacy_conversation_history_rows(
+            semantic_text_pattern=BODY_TEXT_TRANSPORT_SYNTAX_PATTERN,
+        )
         print(f"{legacy_count} conversation_history row(s) need migration")
         return_value = legacy_count
         return return_value
@@ -208,6 +308,7 @@ async def migrate_legacy_conversation_history_rows(
     while True:
         rows = await list_legacy_conversation_history_rows(
             batch_size=batch_size,
+            semantic_text_pattern=BODY_TEXT_TRANSPORT_SYNTAX_PATTERN,
         )
         if not rows:
             break
@@ -221,7 +322,9 @@ async def migrate_legacy_conversation_history_rows(
             )
             migrated_count += 1
 
-    remaining_count = await count_legacy_conversation_history_rows()
+    remaining_count = await count_legacy_conversation_history_rows(
+        semantic_text_pattern=BODY_TEXT_TRANSPORT_SYNTAX_PATTERN,
+    )
     if remaining_count:
         raise RuntimeError(
             "conversation_history typed-envelope rewrite incomplete: "
@@ -248,7 +351,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     """
 
     parser = argparse.ArgumentParser(
-        description="Rewrite conversation_history rows to typed envelope storage."
+        description="Repair conversation_history rows for typed envelope storage."
     )
     parser.add_argument(
         "--apply",

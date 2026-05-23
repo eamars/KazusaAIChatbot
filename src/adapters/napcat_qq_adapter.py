@@ -4,7 +4,7 @@ import argparse
 import asyncio
 import base64
 from collections import OrderedDict
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from datetime import datetime, timezone
 import json
 import logging
@@ -60,6 +60,63 @@ _CQ_REPLY_PATTERN = re.compile(r"\[CQ:reply,id=([^\],]+)[^\]]*\]")
 _CQ_AT_PATTERN = re.compile(r"\[CQ:at,qq=([^\],]+)[^\]]*\]")
 _CQ_ANY_PATTERN = re.compile(r"\[CQ:[^\]]+\]")
 _MENTION_DISPLAY_CACHE_LIMIT = 512
+
+
+def _qq_mention_entity_kind(platform_user_id: str, platform_bot_id: str) -> str:
+    """Classify a QQ mention target without interpreting message semantics."""
+
+    if platform_user_id.lower() == "all":
+        return_value = "everyone"
+    elif platform_user_id == platform_bot_id:
+        return_value = "bot"
+    else:
+        return_value = "user"
+    return return_value
+
+
+def project_qq_semantic_text(
+    raw_wire_text: str,
+    platform_bot_id: str,
+    display_names: Mapping[str, str],
+) -> str:
+    """Project QQ wire text into adapter-owned semantic body text.
+
+    Args:
+        raw_wire_text: QQ wire text that may contain CQ transport markers.
+        platform_bot_id: QQ id of the bot account receiving the event.
+        display_names: Optional QQ id to display-name map for visible mentions.
+
+    Returns:
+        Clean semantic text suitable for `MessageEnvelope.body_text` or
+        `MessageEnvelope.reply.excerpt`.
+    """
+
+    occurrence_counts: dict[str, int] = {}
+
+    def replacement(match: re.Match[str]) -> str:
+        platform_user_id = match.group(1)
+        entity_kind = _qq_mention_entity_kind(
+            platform_user_id,
+            platform_bot_id,
+        )
+        fallback_kind = "user" if entity_kind == "bot" else entity_kind
+        occurrence_counts[fallback_kind] = (
+            occurrence_counts.get(fallback_kind, 0) + 1
+        )
+        token = readable_mention_token(
+            entity_kind=entity_kind,
+            display_name=display_names.get(platform_user_id, ""),
+            occurrence_index=occurrence_counts[fallback_kind],
+            raw_label=platform_user_id if entity_kind == "everyone" else "",
+        )
+        return_value = f" {token} "
+        return return_value
+
+    body_text = _CQ_REPLY_PATTERN.sub(" ", raw_wire_text)
+    body_text = _CQ_AT_PATTERN.sub(replacement, body_text)
+    body_text = _CQ_ANY_PATTERN.sub(" ", body_text)
+    projected_text = normalize_body_spacing(body_text)
+    return projected_text
 
 
 def _outbound_message_payload(
@@ -168,8 +225,13 @@ class QQEnvelopeNormalizer:
             platform_bot_id,
             mention_display_names,
         )
-        reply = self._reply_target(raw_wire_text, reply_context, platform_bot_id)
-        body_text = self._body_text(
+        reply = self._reply_target(
+            raw_wire_text,
+            reply_context,
+            platform_bot_id,
+            mention_display_names,
+        )
+        body_text = project_qq_semantic_text(
             raw_wire_text,
             platform_bot_id,
             mention_display_names,
@@ -194,41 +256,6 @@ class QQEnvelopeNormalizer:
 
         return envelope
 
-    def _body_text(
-        self,
-        raw_wire_text: str,
-        platform_bot_id: str,
-        display_names: dict[str, str],
-    ) -> str:
-        """Replace QQ mention wire markers with readable body tokens."""
-
-        occurrence_counts: dict[str, int] = {}
-
-        def replacement(match: re.Match[str]) -> str:
-            platform_user_id = match.group(1)
-            entity_kind = self._mention_entity_kind(
-                platform_user_id,
-                platform_bot_id,
-            )
-            fallback_kind = "user" if entity_kind == "bot" else entity_kind
-            occurrence_counts[fallback_kind] = (
-                occurrence_counts.get(fallback_kind, 0) + 1
-            )
-            token = readable_mention_token(
-                entity_kind=entity_kind,
-                display_name=display_names.get(platform_user_id, ""),
-                occurrence_index=occurrence_counts[fallback_kind],
-                raw_label=platform_user_id if entity_kind == "everyone" else "",
-            )
-            return_value = f" {token} "
-            return return_value
-
-        body_text = _CQ_REPLY_PATTERN.sub(" ", raw_wire_text)
-        body_text = _CQ_AT_PATTERN.sub(replacement, body_text)
-        body_text = _CQ_ANY_PATTERN.sub(" ", body_text)
-        body_text = normalize_body_spacing(body_text)
-        return body_text
-
     def _raw_mentions(
         self,
         raw_wire_text: str,
@@ -240,7 +267,7 @@ class QQEnvelopeNormalizer:
         raw_mentions: list[RawMention] = []
         for match in _CQ_AT_PATTERN.finditer(raw_wire_text):
             platform_user_id = match.group(1)
-            entity_kind = self._mention_entity_kind(
+            entity_kind = _qq_mention_entity_kind(
                 platform_user_id,
                 platform_bot_id,
             )
@@ -254,26 +281,12 @@ class QQEnvelopeNormalizer:
 
         return raw_mentions
 
-    def _mention_entity_kind(
-        self,
-        platform_user_id: str,
-        platform_bot_id: str,
-    ) -> str:
-        """Classify a QQ at target without interpreting message semantics."""
-
-        if platform_user_id.lower() == "all":
-            return_value = "everyone"
-        elif platform_user_id == platform_bot_id:
-            return_value = "bot"
-        else:
-            return_value = "user"
-        return return_value
-
     def _reply_target(
         self,
         raw_wire_text: str,
         reply_context: dict,
         platform_bot_id: str,
+        display_names: dict[str, str],
     ) -> ReplyTarget:
         """Extract the typed reply target from CQ text and adapter metadata."""
 
@@ -294,7 +307,13 @@ class QQEnvelopeNormalizer:
         if reply_context.get("reply_to_display_name"):
             reply["display_name"] = str(reply_context["reply_to_display_name"])
         if reply_context.get("reply_excerpt"):
-            reply["excerpt"] = str(reply_context["reply_excerpt"])
+            reply_excerpt = project_qq_semantic_text(
+                str(reply_context["reply_excerpt"]),
+                platform_bot_id,
+                display_names,
+            )
+            if reply_excerpt:
+                reply["excerpt"] = reply_excerpt
         return reply
 
 
@@ -704,7 +723,13 @@ class NapCatWSAdapter:
 
         reply_excerpt = message_data.get("raw_message") or message_data.get("message")
         if isinstance(reply_excerpt, str) and reply_excerpt:
-            reply_context["reply_excerpt"] = reply_excerpt
+            semantic_excerpt = project_qq_semantic_text(
+                reply_excerpt,
+                str(self.bot_id or ""),
+                {},
+            )
+            if semantic_excerpt:
+                reply_context["reply_excerpt"] = semantic_excerpt
 
     async def _hydrate_reply_context_from_platform(self, reply_context: dict[str, str | bool], ws) -> None:
         """Resolve reply target metadata from NapCat before calling the brain.

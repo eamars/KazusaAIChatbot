@@ -769,12 +769,24 @@ async def reembed_text_vector_embeddings(
     return result
 
 
-async def count_legacy_conversation_history_rows() -> int:
-    """Count conversation-history rows matching a maintenance selector."""
+async def count_legacy_conversation_history_rows(
+    *,
+    semantic_text_pattern: str = "",
+) -> int:
+    """Count conversation-history rows matching a maintenance selector.
+
+    Args:
+        semantic_text_pattern: Optional regex for dirty semantic text fields.
+
+    Returns:
+        Number of rows that need maintenance repair.
+    """
 
     db = await get_db()
     count = await db.conversation_history.count_documents(
-        _legacy_conversation_query()
+        _legacy_conversation_query(
+            semantic_text_pattern=semantic_text_pattern,
+        )
     )
     return count
 
@@ -782,13 +794,25 @@ async def count_legacy_conversation_history_rows() -> int:
 async def list_legacy_conversation_history_rows(
     *,
     batch_size: int,
+    semantic_text_pattern: str = "",
 ) -> list[dict[str, Any]]:
-    """Load one deterministic batch of conversation-history rows."""
+    """Load one deterministic batch of conversation-history rows.
+
+    Args:
+        batch_size: Maximum number of rows to load.
+        semantic_text_pattern: Optional regex for dirty semantic text fields.
+
+    Returns:
+        Conversation rows that need maintenance repair.
+    """
 
     db = await get_db()
+    query = _legacy_conversation_query(
+        semantic_text_pattern=semantic_text_pattern,
+    )
     cursor = (
         db.conversation_history
-        .find(_legacy_conversation_query())
+        .find(query)
         .sort("timestamp", 1)
         .limit(batch_size)
     )
@@ -1055,8 +1079,18 @@ async def find_persistent_memory_without_embedding(
     return return_value
 
 
-def _legacy_conversation_query() -> dict[str, Any]:
-    """Build the selector for rows outside the typed storage contract."""
+def _legacy_conversation_query(
+    *,
+    semantic_text_pattern: str = "",
+) -> dict[str, Any]:
+    """Build the selector for rows outside the typed storage contract.
+
+    Args:
+        semantic_text_pattern: Optional regex for dirty semantic text fields.
+
+    Returns:
+        MongoDB selector for rows that need maintenance repair.
+    """
 
     query: dict[str, Any] = {
         "$or": [
@@ -1069,6 +1103,11 @@ def _legacy_conversation_query() -> dict[str, Any]:
             {"attachments": {"$exists": False}},
         ]
     }
+    if semantic_text_pattern:
+        query["$or"].extend([
+            {"body_text": {"$regex": semantic_text_pattern}},
+            {"reply_context.reply_excerpt": {"$regex": semantic_text_pattern}},
+        ])
     return query
 
 

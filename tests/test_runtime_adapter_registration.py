@@ -414,6 +414,40 @@ async def test_napcat_hydrates_reply_target_from_platform_get_msg():
 
 
 @pytest.mark.asyncio
+async def test_napcat_hydrated_reply_target_drops_image_only_raw_message():
+    """Platform image syntax should not become adapter reply excerpt text."""
+
+    adapter = NapCatWSAdapter(
+        ws_url="ws://napcat.local/ws",
+        ws_token="token",
+        brain_url="http://127.0.0.1:8000",
+        brain_response_timeout=30,
+        runtime_host="127.0.0.1",
+        runtime_port=8011,
+        runtime_public_url="http://127.0.0.1:8011",
+        channel_ids=["54369546"],
+        debug_modes={},
+    )
+    adapter.bot_id = "3768713357"
+    ws = _FakeNapCatWebSocket({
+        "message_id": 1733223276,
+        "user_id": 2787858400,
+        "sender": {"nickname": "User A"},
+        "raw_message": "[CQ:image,file=sam.png]",
+    })
+    reply_context = {"reply_to_message_id": "1733223276"}
+
+    await adapter._hydrate_reply_context_from_platform(reply_context, ws)
+
+    assert reply_context == {
+        "reply_to_message_id": "1733223276",
+        "reply_to_platform_user_id": "2787858400",
+        "reply_to_display_name": "User A",
+    }
+    await adapter.close()
+
+
+@pytest.mark.asyncio
 async def test_napcat_handle_event_forwards_typed_bot_reply_metadata():
     """Inbound QQ replies to the bot should reach the brain as typed addressees."""
 

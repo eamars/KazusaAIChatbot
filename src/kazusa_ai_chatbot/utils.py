@@ -19,8 +19,13 @@ from kazusa_ai_chatbot.config import (
     JSON_REPAIR_LLM_BASE_URL,
     JSON_REPAIR_LLM_MODEL,
 )
+from kazusa_ai_chatbot.message_envelope import (
+    MAX_PROMPT_ATTACHMENT_DESCRIPTION_CHARS,
+)
 
 logger = logging.getLogger(__name__)
+
+_IMAGE_DESCRIPTION_ELLIPSIS = "..."
 
 
 def get_llm(
@@ -56,6 +61,101 @@ def get_llm(
     return _llm
 
 
+def _is_image_attachment(attachment: dict) -> bool:
+    """Return whether a stored attachment is an image summary source."""
+
+    media_kind = attachment.get("media_kind")
+    if media_kind == "image":
+        return True
+
+    media_type = attachment.get("media_type")
+    if not isinstance(media_type, str):
+        return False
+    return_value = media_type.startswith("image/")
+    return return_value
+
+
+def _escape_image_description(description: str) -> str:
+    """Escape literal image-boundary characters for prompt text."""
+
+    escaped = description.replace("&", "&amp;")
+    escaped = escaped.replace("<", "&lt;")
+    escaped = escaped.replace(">", "&gt;")
+    return_value = escaped
+    return return_value
+
+
+def _trim_image_description(description: str) -> str:
+    """Bound a prompt-facing image description with the shared cap."""
+
+    if len(description) <= MAX_PROMPT_ATTACHMENT_DESCRIPTION_CHARS:
+        return description
+
+    body_limit = (
+        MAX_PROMPT_ATTACHMENT_DESCRIPTION_CHARS
+        - len(_IMAGE_DESCRIPTION_ELLIPSIS)
+    )
+    trimmed = description[:body_limit].rstrip()
+    return_value = f"{trimmed}{_IMAGE_DESCRIPTION_ELLIPSIS}"
+    return return_value
+
+
+def _render_image_block(description: str) -> str:
+    """Render one escaped image description with exact image boundaries."""
+
+    escaped_description = _escape_image_description(description.strip())
+    trimmed_description = _trim_image_description(escaped_description)
+    return_value = f"<image>{trimmed_description}</image>"
+    return return_value
+
+
+def _image_blocks_from_attachments(attachments: object) -> list[str]:
+    """Extract prompt-facing image blocks from stored attachment summaries."""
+
+    image_blocks: list[str] = []
+    if not isinstance(attachments, list):
+        return image_blocks
+
+    for attachment in attachments:
+        if not isinstance(attachment, dict):
+            continue
+        if not _is_image_attachment(attachment):
+            continue
+
+        description = attachment.get("description")
+        if not isinstance(description, str) or not description.strip():
+            continue
+
+        image_block = _render_image_block(description)
+        image_blocks.append(image_block)
+    return image_blocks
+
+
+def _append_image_blocks(text: str, image_blocks: list[str]) -> str:
+    """Append image blocks after any remaining human-authored text."""
+
+    if not image_blocks:
+        return text
+
+    parts: list[str] = []
+    if text:
+        parts.append(text)
+    parts.extend(image_blocks)
+    projected_text = "\n".join(parts)
+    return projected_text
+
+
+def _project_text_with_image_blocks(text: str, attachments: object) -> str:
+    """Project typed image descriptions into prompt-facing history text."""
+
+    image_blocks = _image_blocks_from_attachments(attachments)
+    if not image_blocks:
+        return text
+
+    projected_text = _append_image_blocks(text, image_blocks)
+    return projected_text
+
+
 def trim_history_dict(history: list[dict]) -> list[dict]:
     """Project conversation-history rows to prompt-facing metadata.
 
@@ -68,19 +168,36 @@ def trim_history_dict(history: list[dict]) -> list[dict]:
     """
     results = []
     for msg in history:
-        body_text = msg["body_text"]
-        raw_reply_context = msg.get("reply_context") or {}
-        reply_context = {
-            key: raw_reply_context.get(key)
-            for key in (
-                "reply_to_message_id",
-                "reply_to_platform_user_id",
-                "reply_to_display_name",
-                "reply_excerpt",
-            )
-            if isinstance(raw_reply_context, dict)
-            and raw_reply_context.get(key) not in ("", None)
-        }
+        body_text = _project_text_with_image_blocks(
+            msg["body_text"],
+            msg.get("attachments"),
+        )
+        raw_reply_context_value = msg.get("reply_context") or {}
+        if isinstance(raw_reply_context_value, dict):
+            raw_reply_context = raw_reply_context_value
+        else:
+            raw_reply_context = {}
+
+        reply_context = {}
+        for key in (
+            "reply_to_message_id",
+            "reply_to_platform_user_id",
+            "reply_to_display_name",
+        ):
+            value = raw_reply_context.get(key)
+            if value not in ("", None):
+                reply_context[key] = value
+
+        reply_excerpt = raw_reply_context.get("reply_excerpt")
+        if not isinstance(reply_excerpt, str):
+            reply_excerpt = ""
+        reply_excerpt = _project_text_with_image_blocks(
+            reply_excerpt,
+            raw_reply_context.get("reply_attachments"),
+        )
+        if reply_excerpt:
+            reply_context["reply_excerpt"] = reply_excerpt
+
         trimmed_msg = {
             "name": msg.get("display_name"),
             "display_name": msg.get("display_name"),

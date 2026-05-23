@@ -44,6 +44,7 @@ long_term/todo.md
 
 | Document | Type | Status |
 |---|---|---|
+| [history_media_projection_image_boundary_plan.md](active/bugfix/history_media_projection_image_boundary_plan.md) | Medium bugfix development plan | completed |
 
 ## Reference Documents
 

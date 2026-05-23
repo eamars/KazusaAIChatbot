@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+from adapters import napcat_qq_adapter as napcat_module
 from adapters.discord_adapter import DiscordEnvelopeNormalizer
 from adapters.napcat_qq_adapter import QQEnvelopeNormalizer
 from kazusa_ai_chatbot.config import CHARACTER_GLOBAL_USER_ID
@@ -80,6 +81,71 @@ def test_qq_normalizer_uses_occurrence_label_without_display_name() -> None:
     assert "[CQ:" not in envelope["body_text"]
     assert envelope["mentions"][0]["platform_user_id"] == "673225019"
     assert envelope["mentions"][0]["display_name"] == ""
+
+
+def test_qq_normalizer_drops_image_only_reply_excerpt_cq() -> None:
+    """QQ image wire syntax should not cross as semantic reply text."""
+
+    handlers = build_default_attachment_handler_registry()
+    request = SimpleNamespace(
+        platform="qq",
+        channel_type="group",
+        content="[CQ:reply,id=1733223276]what is this?",
+        platform_bot_id="3768713357",
+        reply_context={
+            "reply_to_message_id": "1733223276",
+            "reply_excerpt": "[CQ:image,file=sam.png]",
+        },
+        attachments=[],
+    )
+
+    envelope = QQEnvelopeNormalizer().normalize(
+        request,
+        PassthroughMentionResolver(),
+        handlers,
+    )
+
+    assert "excerpt" not in envelope["reply"]
+    assert envelope["reply"]["platform_message_id"] == "1733223276"
+
+
+def test_qq_normalizer_sanitizes_mixed_reply_excerpt_cq() -> None:
+    """QQ reply excerpts should keep text while removing transport syntax."""
+
+    handlers = build_default_attachment_handler_registry()
+    request = SimpleNamespace(
+        platform="qq",
+        channel_type="group",
+        content="[CQ:reply,id=1733223276]what is this?",
+        platform_bot_id="3768713357",
+        reply_context={
+            "reply_to_message_id": "1733223276",
+            "reply_excerpt": "look[CQ:image,file=sam.png]nice",
+        },
+        attachments=[],
+    )
+
+    envelope = QQEnvelopeNormalizer().normalize(
+        request,
+        PassthroughMentionResolver(),
+        handlers,
+    )
+
+    assert envelope["reply"]["excerpt"] == "look nice"
+    assert "[CQ:" not in envelope["reply"]["excerpt"]
+
+
+def test_qq_semantic_text_projection_is_adapter_owned() -> None:
+    """QQ transport stripping should be available without private method calls."""
+
+    project_text = getattr(napcat_module, "project_qq_semantic_text", None)
+
+    assert callable(project_text)
+    assert project_text(
+        "[CQ:reply,id=1733223276]look[CQ:image,file=sam.png]nice",
+        "3768713357",
+        {},
+    ) == "look nice"
 
 
 def test_discord_normalizer_rewrites_tags_as_readable_tokens() -> None:
