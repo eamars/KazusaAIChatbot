@@ -1,3 +1,4 @@
+import re
 from typing import Any, Mapping
 
 from langchain_core.tools import tool
@@ -10,7 +11,13 @@ from kazusa_ai_chatbot.config import (
 )
 from kazusa_ai_chatbot.db import get_conversation_history, search_conversation_history
 from kazusa_ai_chatbot.db import search_memory as search_memory_db
-from kazusa_ai_chatbot.utils import text_or_empty
+from kazusa_ai_chatbot.time_boundary import format_storage_utc_for_llm_seconds
+from kazusa_ai_chatbot.utils import (
+    project_text_with_image_blocks,
+    text_or_empty,
+)
+
+_CQ_WIRE_SEGMENT_RE = re.compile(r"\[CQ:[^\]]*\]")
 
 
 def _message_body_text(message: dict) -> str:
@@ -23,8 +30,13 @@ def _message_body_text(message: dict) -> str:
         Clean `body_text`.
     """
 
-    body_text = message["body_text"]
-    return body_text
+    body_text = text_or_empty(message.get("body_text"))
+    body_text = _CQ_WIRE_SEGMENT_RE.sub("", body_text).strip()
+    projected_body_text = project_text_with_image_blocks(
+        body_text,
+        message.get("attachments"),
+    )
+    return projected_body_text
 
 
 def _conversation_search_top_k(value: int) -> int:
@@ -59,17 +71,16 @@ def conversation_message_payload(message: dict) -> dict:
     body_text = _message_body_text(message)
     payload = {
         "body_text": body_text,
-        "timestamp": message.get("timestamp", ""),
+        "timestamp": format_storage_utc_for_llm_seconds(
+            text_or_empty(message.get("timestamp")),
+        ),
         "display_name": message.get("display_name", ""),
         "role": message.get("role", ""),
         "platform": message.get("platform", ""),
         "platform_channel_id": message.get("platform_channel_id", ""),
-        "platform_message_id": message.get("platform_message_id", ""),
-        "conversation_row_id": str(message.get("_id", "")),
         "platform_user_id": message.get("platform_user_id", ""),
         "global_user_id": message.get("global_user_id", ""),
         "reply_context": _compact_reply_context(message.get("reply_context")),
-        "attachments": _compact_attachments(message.get("attachments")),
     }
     return payload
 
@@ -82,50 +93,21 @@ def _compact_reply_context(reply_context: object) -> dict[str, Any]:
         return return_value
 
     projected: dict[str, Any] = {}
-    for key in (
-        "reply_to_message_id",
-        "reply_to_platform_user_id",
-        "reply_to_global_user_id",
-        "reply_to_display_name",
-        "reply_excerpt",
-    ):
+    for key in ("reply_to_display_name",):
         value = text_or_empty(reply_context.get(key))
         if value:
             projected[key] = value
 
-    reply_attachments = reply_context.get("reply_attachments")
-    attachments = _compact_attachments(reply_attachments)
-    if attachments:
-        projected["reply_attachments"] = attachments
+    reply_excerpt = text_or_empty(reply_context.get("reply_excerpt"))
+    reply_excerpt = _CQ_WIRE_SEGMENT_RE.sub("", reply_excerpt).strip()
+    reply_excerpt = project_text_with_image_blocks(
+        reply_excerpt,
+        reply_context.get("reply_attachments"),
+    )
+    if reply_excerpt:
+        projected["reply_excerpt"] = reply_excerpt
 
     return projected
-
-
-def _compact_attachments(attachments: object) -> list[dict[str, Any]]:
-    """Return attachment metadata that is useful for retrieval prompts."""
-
-    if not isinstance(attachments, list):
-        return_value: list[dict[str, Any]] = []
-        return return_value
-
-    projected_attachments: list[dict[str, Any]] = []
-    for attachment in attachments:
-        if not isinstance(attachment, Mapping):
-            continue
-
-        projected: dict[str, Any] = {}
-        for key in ("media_type", "url", "description", "storage_shape"):
-            value = text_or_empty(attachment.get(key))
-            if value:
-                projected[key] = value
-        size_bytes = attachment.get("size_bytes")
-        if isinstance(size_bytes, int) and not isinstance(size_bytes, bool):
-            projected["size_bytes"] = size_bytes
-        if projected:
-            projected_attachments.append(projected)
-
-    return_value = projected_attachments
-    return return_value
 
 
 @tool

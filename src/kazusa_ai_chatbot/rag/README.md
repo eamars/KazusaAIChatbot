@@ -52,6 +52,22 @@ Continuation metadata, when present, is kept under
 `supervisor_trace.dispatched[*].continuation`; it is not public evidence for
 cognition.
 
+Public memory, recall, and conversation evidence is formatted for cognition
+with the same semantic order:
+
+```text
+Conclusion: direct factual answer or no-evidence finding.
+Evidence summary:
+- source or speaker at configured local time: readable support.
+Uncertainty: remaining uncertainty, conflict, or none.
+```
+
+Prompt-facing evidence must not expose raw adapter wire syntax, raw attachment
+URLs, storage ids, embeddings, binary payloads, source rows, or raw UTC
+timestamps. Source ids and raw refs stay in `supervisor_trace` or helper
+payloads for debugging, not in the primary evidence text consumed by
+cognition.
+
 ## Cognitive Episode Adapter
 
 `cognitive_episode_adapter.py` owns the text-chat projection from
@@ -322,7 +338,10 @@ rather than per-agent literals.
 
 Conversation projection includes bounded attachment descriptions and reply
 excerpts, so rows whose body text is empty can still become usable evidence
-when attachments carried the remembered content.
+when attachments carried the remembered content. Image summaries are rendered
+as escaped `<image>...</image>` blocks in prompt-facing text; raw CQ syntax,
+raw URLs, and binary fields are stripped before the RAG tool output reaches an
+LLM.
 
 Relative-day conversation retrieval is grounded before tool execution when the
 runtime `time_context` is available. For example, a local "yesterday" slot uses
@@ -347,14 +366,23 @@ Each fact recorded by the supervisor keeps both operational and provenance infor
 }
 ```
 
-`summary` is the normal prompt-facing evidence for search-like agents. `raw_result` is retained where structure matters, especially user and character profile bundles. The projection layer applies a hybrid policy:
+`summary` is the worker-level retrieval summary. `raw_result` is retained
+where structure matters, especially user and character profile bundles. The
+projection layer applies a hybrid policy:
 
 - structured profile/image bundles remain structured,
-- scoped `user_memory_units` rows surfaced through `Memory-evidence:` remain in `memory_evidence` with scope metadata preserved and are also appended to `rag_result.user_memory_unit_candidates` for consolidation merge/evolve reuse,
-- conversation evidence is summarized,
-- shared memory evidence is summarized,
+- scoped `user_memory_units` rows surfaced through `Memory-evidence:` remain
+  in `memory_evidence` with scope metadata preserved and are also appended to
+  `rag_result.user_memory_unit_candidates` for consolidation merge/evolve
+  reuse,
+- conversation evidence becomes formatted conclusion/evidence/uncertainty
+  text, while raw message refs stay trace-only,
+- shared and scoped memory evidence becomes formatted
+  conclusion/evidence/uncertainty dictionaries,
 - live/external evidence keeps URL-bearing text,
-- recall evidence stays structured because downstream stages inspect fields such as status and temporal scope.
+- recall evidence stays structured because downstream stages inspect fields
+  such as `primary_source`, but prompt-facing recall summaries and evidence
+  lines use the same formatted evidence style.
 
 ## Scope And Provenance
 
@@ -431,6 +459,10 @@ Cognition reads `rag_result`, not raw RAG supervisor state. The intended divisio
 
 RAG evidence preserves facts, uncertainty, and source context. Cognition owns
 persona stance, emotional interpretation, and user-facing intent.
+
+Formatted evidence is still evidence, not a persona decision. Cognition should
+consume the conclusion, support, and uncertainty directly, then decide stance
+and response goals from the wider cognition state.
 
 ## Integration With Consolidation
 

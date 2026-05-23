@@ -12,6 +12,7 @@ from kazusa_ai_chatbot.config import (
     RAG_SEARCH_DEFAULT_TOP_K,
 )
 from kazusa_ai_chatbot.rag.memory_retrieval_tools import (
+    conversation_message_payload,
     get_conversation,
     search_conversation,
     search_conversation_keyword,
@@ -51,6 +52,7 @@ async def test_search_conversation_delegates_to_vector_history_search() -> None:
                     "reply_excerpt": "previous",
                     "reply_attachments": [
                         {
+                            "media_kind": "image",
                             "description": "reply image",
                             "base64_data": "reply-bytes",
                         }
@@ -58,6 +60,7 @@ async def test_search_conversation_delegates_to_vector_history_search() -> None:
                 },
                 "attachments": [
                     {
+                        "media_kind": "image",
                         "description": "chart image",
                         "url": "https://example.test/chart.png",
                         "base64_data": "inline-bytes",
@@ -94,34 +97,24 @@ async def test_search_conversation_delegates_to_vector_history_search() -> None:
         from_timestamp="2026-04-01T00:00:00Z",
         to_timestamp="2026-04-02T00:00:00Z",
     )
-    assert result == [
-        (
-            0.9,
-            {
-                "body_text": "hello",
-                "timestamp": "t1",
-                "display_name": "User",
-                "role": "user",
-                "platform": "qq",
-                "platform_channel_id": "channel-1",
-                "platform_message_id": "message-1",
-                "platform_user_id": "platform-user-1",
-                "global_user_id": "global-user-1",
-                "conversation_row_id": "row-object-id",
-                "reply_context": {
-                    "reply_excerpt": "previous",
-                    "reply_attachments": [{"description": "reply image"}],
-                },
-                "attachments": [
-                    {
-                        "description": "chart image",
-                        "url": "https://example.test/chart.png",
-                    }
-                ],
-            },
-        )
-    ]
-    assert isinstance(result[0][1]["conversation_row_id"], str)
+    assert result[0][0] == 0.9
+    payload = result[0][1]
+    assert payload["body_text"] == "hello\n<image>chart image</image>"
+    assert payload["timestamp"] == ""
+    assert payload["display_name"] == "User"
+    assert payload["role"] == "user"
+    assert payload["platform"] == "qq"
+    assert payload["platform_channel_id"] == "channel-1"
+    assert payload["platform_user_id"] == "platform-user-1"
+    assert payload["global_user_id"] == "global-user-1"
+    assert payload["reply_context"] == {
+        "reply_excerpt": "previous\n<image>reply image</image>",
+    }
+    rendered = repr(payload)
+    assert "conversation_row_id" not in payload
+    assert "platform_message_id" not in payload
+    assert "https://example.test/chart.png" not in rendered
+    assert "base64_data" not in rendered
 
 
 @pytest.mark.asyncio
@@ -216,8 +209,7 @@ async def test_search_conversation_keyword_delegates_to_keyword_history_search()
         to_timestamp=None,
     )
     assert result[0]["body_text"] == "DDR5 came up"
-    assert result[0]["conversation_row_id"] == "row-object-id"
-    assert isinstance(result[0]["conversation_row_id"], str)
+    assert "conversation_row_id" not in result[0]
     assert "content" not in result[0]
     assert result[0]["display_name"] == "User"
 
@@ -280,10 +272,113 @@ async def test_get_conversation_filters_and_strips_internal_fields() -> None:
         to_timestamp=None,
     )
     assert result[0]["body_text"] == "hi"
-    assert result[0]["conversation_row_id"] == "row-object-id"
-    assert isinstance(result[0]["conversation_row_id"], str)
+    assert "conversation_row_id" not in result[0]
     assert "content" not in result[0]
     assert "embedding" not in result[0]
+
+
+def test_conversation_message_payload_projects_image_blocks_from_attachments() -> None:
+    payload = conversation_message_payload(
+        {
+            "_id": _FakeObjectId(),
+            "body_text": "",
+            "timestamp": "2026-05-01T12:34:56.789000+00:00",
+            "attachments": [
+                {
+                    "media_kind": "image",
+                    "media_type": "image/png",
+                    "description": "chart <with> boundary",
+                    "url": "https://cdn.example/chart.png",
+                }
+            ],
+        }
+    )
+
+    assert payload["body_text"] == "<image>chart &lt;with&gt; boundary</image>"
+    rendered = repr(payload)
+    assert "https://cdn.example/chart.png" not in rendered
+    assert "conversation_row_id" not in payload
+
+
+def test_conversation_message_payload_projects_reply_image_blocks() -> None:
+    payload = conversation_message_payload(
+        {
+            "body_text": "following up",
+            "reply_context": {
+                "reply_excerpt": "",
+                "reply_to_display_name": "Tester",
+                "reply_attachments": [
+                    {
+                        "media_type": "image/jpeg",
+                        "description": "reply chart",
+                        "url": "https://cdn.example/reply.jpg",
+                    }
+                ],
+            },
+        }
+    )
+
+    assert payload["reply_context"] == {
+        "reply_to_display_name": "Tester",
+        "reply_excerpt": "<image>reply chart</image>",
+    }
+    assert "reply_attachments" not in payload["reply_context"]
+
+
+def test_conversation_message_payload_uses_local_second_precision_timestamp() -> None:
+    payload = conversation_message_payload(
+        {
+            "body_text": "time test",
+            "timestamp": "2026-05-01T12:34:56.789000+00:00",
+        }
+    )
+
+    assert payload["timestamp"] == "2026-05-02 00:34:56"
+
+
+def test_conversation_message_payload_drops_raw_attachment_url_and_storage_ids() -> None:
+    payload = conversation_message_payload(
+        {
+            "_id": _FakeObjectId(),
+            "body_text": "see chart",
+            "platform_message_id": "message-1",
+            "attachments": [
+                {
+                    "media_kind": "image",
+                    "description": "chart image",
+                    "url": "https://cdn.example/chart.png",
+                    "storage_object_id": "stored-object-1",
+                    "raw_wire_text": "[CQ:image,file=abc]",
+                }
+            ],
+        }
+    )
+
+    rendered = repr(payload)
+    assert "conversation_row_id" not in payload
+    assert "platform_message_id" not in payload
+    assert "https://cdn.example/chart.png" not in rendered
+    assert "stored-object-1" not in rendered
+    assert "raw_wire_text" not in rendered
+
+
+def test_conversation_message_payload_strips_or_avoids_cq_wire_syntax() -> None:
+    payload = conversation_message_payload(
+        {
+            "body_text": "[CQ:image,file=abc,url=https://cdn.example/raw.png]",
+            "attachments": [
+                {
+                    "media_kind": "image",
+                    "description": "clean image description",
+                }
+            ],
+        }
+    )
+
+    assert payload["body_text"] == "<image>clean image description</image>"
+    rendered = repr(payload)
+    assert "[CQ:" not in rendered
+    assert "url=" not in rendered
 
 
 @pytest.mark.asyncio

@@ -145,8 +145,17 @@ def _append_image_blocks(text: str, image_blocks: list[str]) -> str:
     return projected_text
 
 
-def _project_text_with_image_blocks(text: str, attachments: object) -> str:
-    """Project typed image descriptions into prompt-facing history text."""
+def project_text_with_image_blocks(text: str, attachments: object) -> str:
+    """Project typed image descriptions into prompt-facing text.
+
+    Args:
+        text: Already-sanitized authored text for a prompt row.
+        attachments: Stored attachment summaries for the same row.
+
+    Returns:
+        Authored text with escaped image-description blocks appended, or only
+        image-description blocks when no authored text is present.
+    """
 
     image_blocks = _image_blocks_from_attachments(attachments)
     if not image_blocks:
@@ -168,7 +177,7 @@ def trim_history_dict(history: list[dict]) -> list[dict]:
     """
     results = []
     for msg in history:
-        body_text = _project_text_with_image_blocks(
+        body_text = project_text_with_image_blocks(
             msg["body_text"],
             msg.get("attachments"),
         )
@@ -191,7 +200,7 @@ def trim_history_dict(history: list[dict]) -> list[dict]:
         reply_excerpt = raw_reply_context.get("reply_excerpt")
         if not isinstance(reply_excerpt, str):
             reply_excerpt = ""
-        reply_excerpt = _project_text_with_image_blocks(
+        reply_excerpt = project_text_with_image_blocks(
             reply_excerpt,
             raw_reply_context.get("reply_attachments"),
         )

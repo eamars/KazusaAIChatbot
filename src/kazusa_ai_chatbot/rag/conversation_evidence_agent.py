@@ -21,6 +21,14 @@ from kazusa_ai_chatbot.rag.conversation_aggregate_agent import (
 )
 from kazusa_ai_chatbot.rag.conversation_filter_agent import ConversationFilterAgent
 from kazusa_ai_chatbot.rag.conversation_search_agent import ConversationSearchAgent
+from kazusa_ai_chatbot.rag.evidence_coverage import (
+    EvidenceCoverage,
+    assess_evidence_coverage,
+    coverage_allows_resolution,
+    evidence_buckets_for_coverage,
+    requested_coverage_items,
+    task_requires_value_evidence,
+)
 from kazusa_ai_chatbot.rag.helper_agent import BaseRAGHelperAgent
 from kazusa_ai_chatbot.rag.hybrid_retrieval import candidate_prompt_text
 from kazusa_ai_chatbot.rag.prompt_projection import project_selector_input_for_llm
@@ -144,9 +152,18 @@ def _result_payload(
     conflicts: list[str] | None = None,
     observation_candidates: list[dict[str, Any]] | None = None,
     source_hints: list[dict[str, Any]] | None = None,
+    coverage: EvidenceCoverage | None = None,
+    confirmed_evidence: list[str] | None = None,
+    partial_evidence: list[str] | None = None,
+    nearby_evidence: list[str] | None = None,
 ) -> dict[str, Any]:
     """Build the standard top-level conversation capability payload."""
 
+    coverage_payload = coverage or assess_evidence_coverage(
+        task="",
+        evidence_items=[],
+        worker_resolved=False,
+    )
     payload = {
         "selected_summary": _clip_text(selected_summary),
         "capability": _CAPABILITY_NAME,
@@ -161,6 +178,10 @@ def _result_payload(
         "conflicts": list(conflicts or []),
         "observation_candidates": list(observation_candidates or []),
         "source_hints": list(source_hints or []),
+        "coverage": coverage_payload,
+        "confirmed_evidence": list(confirmed_evidence or []),
+        "partial_evidence": list(partial_evidence or []),
+        "nearby_evidence": list(nearby_evidence or []),
     }
     return payload
 
@@ -182,6 +203,26 @@ def _strip_prefix(task: str) -> str:
         return task.strip()
     _, _, remainder = task.partition(":")
     return_value = remainder.strip()
+    return return_value
+
+
+def _coverage_fields(
+    *,
+    task: str,
+    evidence_items: list[str],
+    worker_resolved: bool,
+    requires_value_evidence: bool | None = None,
+) -> tuple[EvidenceCoverage, dict[str, list[str]]]:
+    """Build coverage and quality-specific evidence buckets."""
+
+    coverage = assess_evidence_coverage(
+        task=task,
+        evidence_items=evidence_items,
+        worker_resolved=worker_resolved,
+        requires_value_evidence=requires_value_evidence,
+    )
+    buckets = evidence_buckets_for_coverage(coverage, evidence_items)
+    return_value = (coverage, buckets)
     return return_value
 
 
@@ -445,6 +486,83 @@ def _iter_known_refs(context: dict[str, Any]) -> list[dict[str, Any]]:
             if isinstance(ref, dict):
                 refs.append(ref)
     return refs
+
+
+def _coverage_requires_value_evidence(task: str, context: dict[str, Any]) -> bool:
+    """Preserve value-evidence intent across narrowed continuation slots."""
+
+    if task_requires_value_evidence(task):
+        return_value = True
+        return return_value
+
+    current_items = requested_coverage_items(task)
+    if not current_items:
+        return_value = False
+        return return_value
+
+    known_facts = context.get("known_facts")
+    if not isinstance(known_facts, list):
+        return_value = False
+        return return_value
+
+    for fact in known_facts:
+        if not isinstance(fact, dict):
+            continue
+        if _known_fact_carries_value_intent(fact, current_items):
+            return_value = True
+            return return_value
+
+    return_value = False
+    return return_value
+
+
+def _known_fact_carries_value_intent(
+    fact: dict[str, Any],
+    current_items: list[str],
+) -> bool:
+    """Return whether one prior fact preserves value intent for current items."""
+
+    if fact.get("agent") != _AGENT_NAME:
+        return_value = False
+        return return_value
+    if bool(fact.get("resolved")):
+        return_value = False
+        return return_value
+
+    slot = text_or_empty(fact.get("slot"))
+    if not task_requires_value_evidence(slot):
+        return_value = False
+        return return_value
+
+    prior_items = _prior_requested_items(fact, slot)
+    if not prior_items:
+        return_value = False
+        return return_value
+
+    current_item_set = set(current_items)
+    prior_item_set = set(prior_items)
+    return_value = bool(current_item_set & prior_item_set)
+    return return_value
+
+
+def _prior_requested_items(fact: dict[str, Any], slot: str) -> list[str]:
+    """Read requested coverage items from a prior fact or its slot text."""
+
+    raw_result = fact.get("raw_result")
+    if isinstance(raw_result, dict):
+        coverage = raw_result.get("coverage")
+        if isinstance(coverage, dict):
+            requested_items = coverage.get("requested_items")
+            if isinstance(requested_items, list):
+                items = [
+                    item
+                    for value in requested_items
+                    if (item := text_or_empty(value))
+                ]
+                return items
+
+    items = requested_coverage_items(slot)
+    return items
 
 
 def _first_person_ref(context: dict[str, Any]) -> dict[str, Any] | None:
@@ -789,6 +907,7 @@ def _message_projection(rows: list[dict[str, Any]]) -> _ConversationProjection:
             _message_row_text(row),
             limit=RAG_CONVERSATION_EVIDENCE_TEXT_LIMIT,
         )
+        summary = _dedupe_speaker_prefix(summary, row)
         if not summary:
             continue
         summaries.append(summary)
@@ -800,6 +919,19 @@ def _message_projection(rows: list[dict[str, Any]]) -> _ConversationProjection:
         "resolved_refs": resolved_refs,
     }
     return projection
+
+
+def _dedupe_speaker_prefix(summary: str, row: dict[str, Any]) -> str:
+    """Collapse repeated speaker prefixes in projected conversation text."""
+
+    display_name = text_or_empty(row.get("display_name"))
+    if not display_name:
+        return summary
+    doubled_prefix = f"{display_name}: {display_name}: "
+    if summary.startswith(doubled_prefix):
+        deduped = f"{display_name}: {summary[len(doubled_prefix):]}"
+        return deduped
+    return summary
 
 
 def _projection_row(row: dict[str, Any], summary: str) -> dict[str, Any]:
@@ -1071,6 +1203,7 @@ class ConversationEvidenceAgent(BaseRAGHelperAgent):
         if primary_worker == "incompatible":
             reason = text_or_empty(plan["reason"]) or "unsupported"
             result = self._unresolved(
+                task=task,
                 source_policy=f"incompatible intent; use {reason}",
                 missing_context=[f"incompatible_intent:{reason}"],
                 primary_worker="",
@@ -1081,6 +1214,7 @@ class ConversationEvidenceAgent(BaseRAGHelperAgent):
         person_ref = _first_person_ref(context)
         if bool(plan["requires_person_ref"]) and person_ref is None:
             result = self._unresolved(
+                task=task,
                 source_policy="structured person ref required but missing",
                 missing_context=["person_ref"],
                 primary_worker=primary_worker,
@@ -1112,9 +1246,32 @@ class ConversationEvidenceAgent(BaseRAGHelperAgent):
         )
         summaries = projection["summaries"]
         projection_rows = projection["rows"]
-        selected_summary = "\n".join(summaries[:RAG_SEARCH_SELECTED_SUMMARY_LIMIT])
+        worker_resolved = bool(worker_result.get("resolved"))
+        requires_value_evidence = _coverage_requires_value_evidence(
+            task,
+            context,
+        )
+        coverage, evidence_buckets = _coverage_fields(
+            task=task,
+            evidence_items=summaries,
+            worker_resolved=worker_resolved,
+            requires_value_evidence=requires_value_evidence,
+        )
+        confirmed_evidence = evidence_buckets["confirmed_evidence"]
+        partial_evidence = evidence_buckets["partial_evidence"]
+        nearby_evidence = evidence_buckets["nearby_evidence"]
+        legacy_evidence = confirmed_evidence
+        if not legacy_evidence:
+            legacy_evidence = partial_evidence or nearby_evidence
+        selected_summary = "\n".join(
+            legacy_evidence[:RAG_SEARCH_SELECTED_SUMMARY_LIMIT],
+        )
         resolved_refs = projection["resolved_refs"]
-        resolved = bool(worker_result.get("resolved")) and bool(summaries)
+        resolved = (
+            worker_resolved
+            and bool(summaries)
+            and coverage_allows_resolution(coverage)
+        )
         missing_context = [] if resolved else ["conversation_evidence"]
         observation_candidates = []
         source_hints: list[dict[str, Any]] = []
@@ -1145,11 +1302,15 @@ class ConversationEvidenceAgent(BaseRAGHelperAgent):
                 "rows": projection_rows,
             },
             worker_payloads=worker_payloads,
-            evidence=summaries,
+            evidence=legacy_evidence,
             missing_context=missing_context,
             conflicts=[],
             observation_candidates=observation_candidates,
             source_hints=source_hints,
+            coverage=coverage,
+            confirmed_evidence=confirmed_evidence,
+            partial_evidence=partial_evidence,
+            nearby_evidence=nearby_evidence,
         )
         logger.info(
             f"{_AGENT_NAME} output: resolved={resolved} "
@@ -1187,12 +1348,18 @@ class ConversationEvidenceAgent(BaseRAGHelperAgent):
     def _unresolved(
         self,
         *,
+        task: str,
         source_policy: str,
         missing_context: list[str],
         primary_worker: str,
         worker_payloads: dict[str, Any],
     ) -> dict[str, Any]:
         """Build an unresolved result without calling another source."""
+        coverage, evidence_buckets = _coverage_fields(
+            task=task,
+            evidence_items=[],
+            worker_resolved=False,
+        )
         payload = _result_payload(
             selected_summary="",
             primary_worker=primary_worker,
@@ -1206,6 +1373,10 @@ class ConversationEvidenceAgent(BaseRAGHelperAgent):
             conflicts=[],
             observation_candidates=[],
             source_hints=[],
+            coverage=coverage,
+            confirmed_evidence=evidence_buckets["confirmed_evidence"],
+            partial_evidence=evidence_buckets["partial_evidence"],
+            nearby_evidence=evidence_buckets["nearby_evidence"],
         )
         logger.info(
             f"{_AGENT_NAME} output: resolved=False "

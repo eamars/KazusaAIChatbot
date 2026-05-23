@@ -52,6 +52,20 @@ class _InitializerLLM:
         return response
 
 
+class _MultiSlotInitializerLLM:
+    """Static RAG initializer fake with caller-provided slots."""
+
+    def __init__(self, slots: list[str]) -> None:
+        """Store the slot queue emitted by this fake."""
+        self.slots = slots
+
+    async def ainvoke(self, _messages: list) -> _DummyResponse:
+        """Return the configured slot queue."""
+        payload = {"unknown_slots": self.slots}
+        response = _DummyResponse(json.dumps(payload))
+        return response
+
+
 class _ContinuationLLM:
     """Static continuation refiner fake."""
 
@@ -94,6 +108,7 @@ class _FakeWorker:
     def __init__(self, result: dict) -> None:
         """Store the worker result."""
         self.result = result
+        self.calls: list[dict] = []
 
     async def run(
         self,
@@ -102,7 +117,13 @@ class _FakeWorker:
         max_attempts: int = 3,
     ) -> dict:
         """Return the configured worker result."""
-        del task, context, max_attempts
+        self.calls.append(
+            {
+                "task": task,
+                "context": context,
+                "max_attempts": max_attempts,
+            }
+        )
         return_value = self.result
         return return_value
 
@@ -364,6 +385,121 @@ async def test_call_rag_supervisor_public_keys_unchanged(monkeypatch) -> None:
         stop_result["known_facts"][0]["continuation"]["should_continue"]
         is False
     )
+
+
+@pytest.mark.asyncio
+async def test_call_rag_supervisor_continues_remaining_slots_after_unresolved_stop_decision(
+    monkeypatch,
+) -> None:
+    """One unresolved source should not block queued independent slots."""
+    runtime = RAGCache2Runtime(max_entries=10)
+    conversation_worker = _FakeWorker(
+        {
+            "resolved": False,
+            "result": {
+                "capability": "conversation_evidence",
+                "selected_summary": "",
+                "projection_payload": {"summaries": [], "rows": []},
+                "missing_context": ["conversation_evidence"],
+                "observation_candidates": [],
+                "source_hints": [],
+            },
+            "attempts": 1,
+            "cache": {"enabled": False, "hit": False, "reason": "patched"},
+        }
+    )
+    memory_worker = _FakeWorker(
+        {
+            "resolved": True,
+            "result": {
+                "capability": "memory_evidence",
+                "selected_summary": "Scoped preference found.",
+                "projection_payload": {
+                    "memory_rows": [
+                        {
+                            "content": "Scoped preference found.",
+                            "source_system": "user_memory_units",
+                        }
+                    ]
+                },
+                "missing_context": [],
+            },
+            "attempts": 1,
+            "cache": {"enabled": False, "hit": False, "reason": "patched"},
+        }
+    )
+    conversation_entry = dict(
+        rag2_module._RAG_SUPERVISOR_AGENT_REGISTRY["conversation_evidence_agent"]
+    )
+    conversation_entry["agent"] = conversation_worker.run
+    memory_entry = dict(
+        rag2_module._RAG_SUPERVISOR_AGENT_REGISTRY["memory_evidence_agent"]
+    )
+    memory_entry["agent"] = memory_worker.run
+
+    monkeypatch.setitem(
+        rag2_module._RAG_SUPERVISOR_AGENT_REGISTRY,
+        "conversation_evidence_agent",
+        conversation_entry,
+    )
+    monkeypatch.setitem(
+        rag2_module._RAG_SUPERVISOR_AGENT_REGISTRY,
+        "memory_evidence_agent",
+        memory_entry,
+    )
+    monkeypatch.setattr(rag2_module, "get_rag_cache2_runtime", lambda: runtime)
+    monkeypatch.setattr(
+        rag2_module,
+        "_initializer_llm",
+        _MultiSlotInitializerLLM(
+            [
+                "Conversation-evidence: retrieve missing conversation evidence",
+                "Memory-evidence: retrieve durable current-user preference",
+            ]
+        ),
+    )
+    monkeypatch.setattr(
+        rag2_module,
+        "_continuation_assessor_llm",
+        _ContinuationLLM(
+            {
+                "should_continue": False,
+                "refined_query": "",
+                "reason": "no better conversation source",
+            }
+        ),
+    )
+    monkeypatch.setattr(rag2_module, "_evaluator_summarizer_llm", _SummaryLLM())
+    monkeypatch.setattr(rag2_module, "_finalizer_llm", _FinalizerLLM())
+    monkeypatch.setattr(rag2_module, "upsert_initializer_entry", _noop_async)
+    monkeypatch.setattr(rag2_module, "record_initializer_hit", _noop_async)
+
+    result = await rag2_module.call_rag_supervisor(
+        original_query="Need conversation and memory evidence.",
+        character_name="<active character>",
+        context={
+            "platform": "qq",
+            "platform_channel_id": "multi-slot-test",
+            "global_user_id": "user-1",
+            "prompt_message_context": {
+                "body_text": "Need conversation and memory evidence.",
+                "mentions": [],
+                "attachments": [],
+                "addressed_to_global_user_ids": [],
+                "broadcast": False,
+            },
+        },
+    )
+
+    assert len(conversation_worker.calls) == 1
+    assert len(memory_worker.calls) == 1
+    assert result["unknown_slots"] == []
+    assert [
+        fact["agent"]
+        for fact in result["known_facts"]
+    ] == ["conversation_evidence_agent", "memory_evidence_agent"]
+    assert result["known_facts"][0]["resolved"] is False
+    assert result["known_facts"][1]["resolved"] is True
 
 
 @pytest.mark.asyncio

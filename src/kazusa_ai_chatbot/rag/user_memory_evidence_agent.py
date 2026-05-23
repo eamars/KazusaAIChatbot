@@ -148,6 +148,33 @@ def _project_rows(rows: list[dict[str, Any]], global_user_id: str) -> list[dict[
     return projected_rows
 
 
+def _append_unique_rows(
+    rows: list[dict[str, Any]],
+    new_rows: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Append rows until the evidence cap, deduping stable unit ids."""
+
+    merged_rows = list(rows)
+    seen_unit_ids = {
+        unit_id
+        for row in merged_rows
+        if isinstance(row, dict)
+        if (unit_id := text_or_empty(row.get("unit_id")))
+    }
+    for row in new_rows:
+        if not isinstance(row, dict):
+            continue
+        unit_id = text_or_empty(row.get("unit_id"))
+        if unit_id:
+            if unit_id in seen_unit_ids:
+                continue
+            seen_unit_ids.add(unit_id)
+        merged_rows.append(row)
+        if len(merged_rows) >= _MAX_ROWS:
+            break
+    return merged_rows
+
+
 def _result_payload(
     *,
     rows: list[dict[str, Any]],
@@ -234,7 +261,8 @@ class UserMemoryEvidenceAgent(BaseRAGHelperAgent):
                     limit=_MAX_ROWS,
                 )
                 if keyword_rows:
-                    rows = keyword_rows
+                    rows = _append_unique_rows(rows, keyword_rows)
+                if len(rows) >= _MAX_ROWS:
                     break
 
         if not rows and not literal_terms:

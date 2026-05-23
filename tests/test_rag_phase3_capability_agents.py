@@ -14,6 +14,7 @@ from kazusa_ai_chatbot.rag import memory_evidence_agent as memory_evidence_modul
 from kazusa_ai_chatbot.rag.conversation_evidence_agent import (
     ConversationEvidenceAgent,
 )
+from kazusa_ai_chatbot.rag.evidence_coverage import requested_coverage_items
 from kazusa_ai_chatbot.rag.live_context_agent import LiveContextAgent
 from kazusa_ai_chatbot.rag.memory_evidence_agent import MemoryEvidenceAgent
 from kazusa_ai_chatbot.rag.person_context_agent import PersonContextAgent
@@ -344,6 +345,300 @@ async def test_live_context_current_local_weekday_uses_runtime_state_only() -> N
     assert web_worker.calls == []
     assert memory_worker.calls == []
     assert conversation_worker.calls == []
+
+
+@pytest.mark.asyncio
+async def test_memory_evidence_uses_current_user_scope_from_original_query() -> None:
+    """First-person durable recall should not depend on perfect slot wording."""
+    agent = MemoryEvidenceAgent()
+    scoped_worker = _FakeWorker(
+        {
+            "resolved": True,
+            "result": {
+                "memory_rows": [
+                    {
+                        "content": "The user prefers reliable recall over latency.",
+                        "source_system": "user_memory_units",
+                    }
+                ]
+            },
+            "attempts": 1,
+            "cache": {"enabled": False, "hit": False, "reason": "test"},
+        }
+    )
+    persistent_worker = _FakeWorker(
+        {
+            "resolved": True,
+            "result": [{"content": "World-level memory should not be used."}],
+            "attempts": 1,
+            "cache": {"enabled": False, "hit": False, "reason": "test"},
+        }
+    )
+    agent.user_memory_agent = scoped_worker
+    agent.search_agent = persistent_worker
+
+    result = await agent.run(
+        "Memory-evidence: retrieve durable evidence about decision preference for architecture",
+        _base_context(
+            original_query=(
+                "What did I care about most when choosing the architecture?"
+            ),
+        ),
+    )
+
+    assert result["resolved"] is True
+    assert len(scoped_worker.calls) == 1
+    assert persistent_worker.calls == []
+    assert result["result"]["primary_worker"] == "user_memory_evidence_agent"
+    assert result["result"]["coverage"]["evidence_quality"] == "confirmed"
+    assert result["result"]["confirmed_evidence"] == [
+        "The user prefers reliable recall over latency."
+    ]
+
+
+@pytest.mark.asyncio
+async def test_conversation_evidence_marks_partial_multi_target_result_unresolved() -> None:
+    """A multi-target slot should not resolve from evidence for only one target."""
+    agent = ConversationEvidenceAgent()
+    search_worker = _FakeWorker(
+        {
+            "resolved": True,
+            "result": [
+                (
+                    0.91,
+                    {
+                        "body_text": "Speaker: Model Alpha was quoted at 1200.",
+                        "display_name": "Speaker",
+                        "platform": "qq",
+                        "platform_channel_id": "chan-1",
+                    },
+                )
+            ],
+            "attempts": 1,
+            "cache": {"enabled": True, "hit": False, "reason": "test"},
+        }
+    )
+    agent.search_agent = search_worker
+
+    result = await agent.run(
+        (
+            "Conversation-evidence: retrieve price discussion for "
+            "Model Alpha and Model Beta respectively speaker=any_speaker"
+        ),
+        _base_context(),
+    )
+
+    assert result["resolved"] is False
+    assert len(search_worker.calls) == 1
+    payload = result["result"]
+    assert payload["coverage"]["evidence_quality"] == "partial"
+    assert "Model Alpha" in payload["coverage"]["covered_items"]
+    assert "Model Beta" in payload["coverage"]["missing_items"]
+    assert payload["confirmed_evidence"] == []
+    assert payload["partial_evidence"] == ["Speaker: Model Alpha was quoted at 1200."]
+    assert payload["nearby_evidence"] == []
+    assert payload["evidence"] == ["Speaker: Model Alpha was quoted at 1200."]
+    assert payload["selected_summary"] == "Speaker: Model Alpha was quoted at 1200."
+
+
+@pytest.mark.asyncio
+async def test_conversation_evidence_matches_cjk_target_spacing_variants() -> None:
+    """CJK target coverage should tolerate common chat spelling variants."""
+    agent = ConversationEvidenceAgent()
+    search_worker = _FakeWorker(
+        {
+            "resolved": True,
+            "result": [
+                {
+                    "body_text": "Nyan: 闪铸的c5那边多少钱",
+                    "display_name": "Nyan",
+                    "platform": "qq",
+                    "platform_channel_id": "905393941",
+                },
+                {
+                    "body_text": "蚝爹油: @Nyan 1800\nreply: 闪铸的c5那边多少钱",
+                    "display_name": "蚝爹油",
+                    "platform": "qq",
+                    "platform_channel_id": "905393941",
+                },
+            ],
+            "attempts": 1,
+            "cache": {"enabled": True, "hit": False, "reason": "test"},
+        }
+    )
+    agent.search_agent = search_worker
+
+    result = await agent.run(
+        (
+            "Conversation-evidence: retrieve messages mentioning "
+            "'闪铸 C5' in QQ group 905393941"
+        ),
+        _base_context(platform_channel_id="905393941"),
+    )
+
+    assert result["resolved"] is True
+    payload = result["result"]
+    assert payload["coverage"]["requested_items"] == ["闪铸 C5"]
+    assert payload["coverage"]["covered_items"] == ["闪铸 C5"]
+    assert payload["coverage"]["evidence_quality"] == "confirmed"
+    assert "Nyan: 闪铸的c5那边多少钱" in payload["confirmed_evidence"]
+
+
+@pytest.mark.asyncio
+async def test_conversation_price_evidence_requires_value_per_target() -> None:
+    """Price tasks should not resolve from target mentions without values."""
+    agent = ConversationEvidenceAgent()
+    search_worker = _FakeWorker(
+        {
+            "resolved": True,
+            "result": [
+                {
+                    "body_text": "Nyan: 闪铸的c5那边多少钱",
+                    "display_name": "Nyan",
+                    "platform": "qq",
+                    "platform_channel_id": "905393941",
+                },
+                {
+                    "body_text": "蚝爹油: X2D 是 $649 起",
+                    "display_name": "蚝爹油",
+                    "platform": "qq",
+                    "platform_channel_id": "905393941",
+                },
+            ],
+            "attempts": 1,
+            "cache": {"enabled": True, "hit": False, "reason": "test"},
+        }
+    )
+    agent.search_agent = search_worker
+
+    result = await agent.run(
+        (
+            "Conversation-evidence: retrieve price discussion for "
+            "'X2D' and '闪铸 C5' in QQ group 905393941"
+        ),
+        _base_context(platform_channel_id="905393941"),
+    )
+
+    assert result["resolved"] is False
+    payload = result["result"]
+    assert payload["coverage"]["evidence_quality"] == "partial"
+    assert payload["coverage"]["covered_items"] == ["X2D"]
+    assert payload["coverage"]["missing_items"] == ["闪铸 C5"]
+    assert payload["partial_evidence"] == [
+        "Nyan: 闪铸的c5那边多少钱",
+        "蚝爹油: X2D 是 $649 起",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_conversation_continuation_carries_value_intent() -> None:
+    """Narrowed follow-up slots should keep unresolved price intent."""
+    agent = ConversationEvidenceAgent()
+    search_worker = _FakeWorker(
+        {
+            "resolved": True,
+            "result": [
+                {
+                    "body_text": "Nyan: 闪铸的c5那边多少钱",
+                    "display_name": "Nyan",
+                    "platform": "qq",
+                    "platform_channel_id": "905393941",
+                }
+            ],
+            "attempts": 1,
+            "cache": {"enabled": True, "hit": False, "reason": "test"},
+        }
+    )
+    agent.search_agent = search_worker
+
+    prior_fact = {
+        "agent": "conversation_evidence_agent",
+        "resolved": False,
+        "slot": (
+            "Conversation-evidence: retrieve price discussion for "
+            "'X2D' and '闪铸 C5'"
+        ),
+        "raw_result": {
+            "coverage": {
+                "requested_items": ["X2D", "闪铸 C5"],
+                "missing_items": ["闪铸 C5"],
+            }
+        },
+    }
+    result = await agent.run(
+        "Conversation-evidence: retrieve messages mentioning '闪铸 C5'",
+        _base_context(
+            platform_channel_id="905393941",
+            known_facts=[prior_fact],
+        ),
+    )
+
+    assert result["resolved"] is False
+    payload = result["result"]
+    assert payload["coverage"]["evidence_quality"] == "nearby"
+    assert payload["coverage"]["missing_items"] == ["闪铸 C5"]
+    assert payload["nearby_evidence"] == ["Nyan: 闪铸的c5那边多少钱"]
+
+
+def test_requested_coverage_items_ignores_command_scaffold() -> None:
+    """Coverage targets should come from explicit entities, not command casing."""
+    items = requested_coverage_items(
+        (
+            'Conversation-evidence: Find Retrieve Price Discussion for '
+            '"Model Alpha" and "Model Beta" speaker=any_speaker'
+        )
+    )
+
+    assert items == ["Model Alpha", "Model Beta"]
+
+
+def test_requested_coverage_items_ignores_platform_scaffold() -> None:
+    """Platform/channel labels should not become required evidence targets."""
+    items = requested_coverage_items(
+        (
+            "Conversation-evidence: retrieve messages mentioning "
+            "'闪铸 C5' in QQ group 905393941"
+        )
+    )
+
+    assert items == ["闪铸 C5"]
+
+
+@pytest.mark.asyncio
+async def test_memory_evidence_marks_partial_multi_target_result_unresolved() -> None:
+    """Explicit multi-target memory slots need evidence for every target."""
+    agent = MemoryEvidenceAgent()
+    search_worker = _FakeWorker(
+        {
+            "resolved": True,
+            "result": [
+                {
+                    "memory_name": "model-alpha-price",
+                    "content": "Model Alpha was stored at 1200.",
+                    "source_kind": "manual",
+                }
+            ],
+            "attempts": 1,
+            "cache": {"enabled": True, "hit": False, "reason": "test"},
+        }
+    )
+    agent.search_agent = search_worker
+
+    result = await agent.run(
+        (
+            'Memory-evidence: retrieve durable evidence for '
+            '"Model Alpha" and "Model Beta"'
+        ),
+        _base_context(),
+    )
+
+    assert result["resolved"] is False
+    payload = result["result"]
+    assert payload["coverage"]["evidence_quality"] == "partial"
+    assert "Model Alpha" in payload["coverage"]["covered_items"]
+    assert "Model Beta" in payload["coverage"]["missing_items"]
+    assert payload["confirmed_evidence"] == []
+    assert payload["partial_evidence"] == ["Model Alpha was stored at 1200."]
 
 
 @pytest.mark.asyncio
@@ -1757,6 +2052,61 @@ async def test_memory_evidence_user_memory_unit_uses_scoped_worker() -> None:
     )
     assert result["result"]["projection_payload"]["memory_rows"][0]["scope_type"] == (
         "user_continuity"
+    )
+
+
+@pytest.mark.asyncio
+async def test_memory_evidence_current_user_preferences_use_scoped_worker() -> None:
+    """Current-user durable preferences should route to scoped user memory."""
+    agent = MemoryEvidenceAgent()
+    search_worker = _FakeWorker({"resolved": True, "result": []})
+    user_worker = _FakeWorker(
+        {
+            "resolved": True,
+            "result": {
+                "selected_summary": "The current user prioritizes search precision.",
+                "memory_rows": [
+                    {
+                        "unit_id": "unit-preference",
+                        "unit_type": "objective_fact",
+                        "fact": "The current user prioritizes search precision.",
+                        "content": "The current user prioritizes search precision.",
+                        "source_system": "user_memory_units",
+                        "scope_type": "user_continuity",
+                        "scope_global_user_id": "user-1",
+                    }
+                ],
+                "source_system": "user_memory_units",
+                "scope_type": "user_continuity",
+                "scope_global_user_id": "user-1",
+                "missing_context": [],
+            },
+            "attempts": 1,
+            "cache": {
+                "enabled": False,
+                "hit": False,
+                "reason": "scoped_user_memory_uncached",
+            },
+        }
+    )
+    agent.search_agent = search_worker
+    agent.user_memory_agent = user_worker
+
+    result = await agent.run(
+        (
+            "Memory-evidence: retrieve durable evidence about current_user's "
+            "technical preferences regarding RAG/GraphRAG/information graph "
+            "solutions"
+        ),
+        _base_context(),
+    )
+
+    assert result["resolved"] is True
+    assert search_worker.calls == []
+    assert len(user_worker.calls) == 1
+    assert result["result"]["primary_worker"] == "user_memory_evidence_agent"
+    assert result["result"]["projection_payload"]["memory_rows"][0]["unit_id"] == (
+        "unit-preference"
     )
 
 

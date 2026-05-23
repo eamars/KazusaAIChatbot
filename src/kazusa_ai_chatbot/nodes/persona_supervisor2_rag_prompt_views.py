@@ -4,12 +4,13 @@ from __future__ import annotations
 
 from typing import Any
 
+from kazusa_ai_chatbot.config import RAG_SEARCH_SELECTED_SUMMARY_LIMIT
 from kazusa_ai_chatbot.rag.prompt_projection import project_tool_result_for_llm
 from kazusa_ai_chatbot.time_boundary import format_storage_utc_for_llm
 
 
 _LLM_SUMMARY_TEXT_LIMIT = 400
-_LLM_SUMMARY_LIST_LIMIT = 5
+_LLM_SUMMARY_LIST_LIMIT = min(RAG_SEARCH_SELECTED_SUMMARY_LIMIT, 10)
 _LLM_SUMMARY_REF_LIMIT = 8
 _LLM_SUMMARY_PROFILE_UNIT_LIMIT = 4
 

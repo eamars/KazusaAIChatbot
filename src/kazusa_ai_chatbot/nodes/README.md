@@ -241,6 +241,12 @@ asks for a short explanation of a Python virtual environment:
 The values are illustrative. They are not copied from a private conversation,
 and they do not imply a required wording for production outputs.
 
+When RAG returns memory, recall, or conversation evidence, those fields are
+already cognition-ready. They use conclusion-first evidence blocks with
+configured local timestamps and explicit uncertainty. Raw message ids, raw
+storage ids, CQ wire text, attachment URLs, embeddings, and source rows remain
+outside the public evidence fields and may appear only in trace/debug surfaces.
+
 ## L1: Subconscious
 
 File: `persona_supervisor2_cognition_l1.py`

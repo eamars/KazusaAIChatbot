@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from typing import Any
 
 from langchain_core.messages import HumanMessage, SystemMessage
@@ -16,6 +17,13 @@ from kazusa_ai_chatbot.config import (
     RAG_SUBAGENT_LLM_MODEL,
 )
 from kazusa_ai_chatbot.rag.helper_agent import BaseRAGHelperAgent
+from kazusa_ai_chatbot.rag.evidence_coverage import (
+    EvidenceCoverage,
+    assess_evidence_coverage,
+    coverage_allows_resolution,
+    evidence_buckets_for_coverage,
+    has_explicit_multi_target_request,
+)
 from kazusa_ai_chatbot.rag.persistent_memory_search_agent import (
     PersistentMemorySearchAgent,
 )
@@ -33,6 +41,17 @@ _KNOWN_WORKERS = {
     "user_memory_evidence_agent",
     "incompatible",
 }
+_FIRST_PERSON_REFERENCE_RE = re.compile(
+    r"\b(?:i|me|my|mine|we|us|our|ours)\b",
+    flags=re.IGNORECASE,
+)
+_CJK_FIRST_PERSON_MARKERS = (
+    '我',
+    '我的',
+    '我们',
+    '咱',
+    '咱们',
+)
 
 
 def _clip_text(value: object, *, limit: int = 1000) -> str:
@@ -69,8 +88,17 @@ def _result_payload(
     conflicts: list[str] | None = None,
     observation_candidates: list[dict[str, Any]] | None = None,
     source_hints: list[dict[str, Any]] | None = None,
+    coverage: EvidenceCoverage | None = None,
+    confirmed_evidence: list[str] | None = None,
+    partial_evidence: list[str] | None = None,
+    nearby_evidence: list[str] | None = None,
 ) -> dict[str, Any]:
     """Build the standard top-level memory capability payload."""
+    coverage_payload = coverage or assess_evidence_coverage(
+        task="",
+        evidence_items=[],
+        worker_resolved=False,
+    )
     payload = {
         "selected_summary": _clip_text(selected_summary),
         "capability": _CAPABILITY_NAME,
@@ -85,6 +113,10 @@ def _result_payload(
         "conflicts": list(conflicts or []),
         "observation_candidates": list(observation_candidates or []),
         "source_hints": list(source_hints or []),
+        "coverage": coverage_payload,
+        "confirmed_evidence": list(confirmed_evidence or []),
+        "partial_evidence": list(partial_evidence or []),
+        "nearby_evidence": list(nearby_evidence or []),
     }
     return payload
 
@@ -106,6 +138,46 @@ def _strip_prefix(task: str) -> str:
         return task.strip()
     _, _, remainder = task.partition(":")
     return_value = remainder.strip()
+    return return_value
+
+
+def _has_first_person_scope(value: str) -> bool:
+    """Return whether runtime query text points at the current user."""
+    text = text_or_empty(value)
+    if not text:
+        return_value = False
+        return return_value
+    if _FIRST_PERSON_REFERENCE_RE.search(text):
+        return_value = True
+        return return_value
+    return_value = any(marker in text for marker in _CJK_FIRST_PERSON_MARKERS)
+    return return_value
+
+
+def _coverage_fields(
+    *,
+    task: str,
+    evidence_items: list[str],
+    worker_resolved: bool,
+) -> tuple[EvidenceCoverage, dict[str, list[str]]]:
+    """Build coverage and quality-specific evidence buckets."""
+    coverage = assess_evidence_coverage(
+        task=task,
+        evidence_items=evidence_items,
+        worker_resolved=worker_resolved,
+    )
+    buckets = evidence_buckets_for_coverage(coverage, evidence_items)
+    return_value = (coverage, buckets)
+    return return_value
+
+
+def _memory_coverage_task(task: str) -> str:
+    """Return the task text only when memory evidence needs strict coverage."""
+
+    if has_explicit_multi_target_request(task):
+        return_value = task
+        return return_value
+    return_value = ""
     return return_value
 
 
@@ -163,6 +235,8 @@ def _deterministic_plan(
 
     scoped_user_scope_markers = (
         "current user's",
+        "current_user's",
+        "current_user",
         "current user",
         "with the current user",
         "remember me",
@@ -178,11 +252,18 @@ def _deterministic_plan(
         "user-specific",
         "scoped",
         "with the current user",
+        "current user",
+        "current_user",
         "私有",
     )
     scoped_user_topic_markers = (
         "continuity",
         "accepted preference",
+        "accepted preferences",
+        "preference",
+        "preferences",
+        "technical preference",
+        "technical preferences",
         "shared experience",
         "past interaction",
         "past interactions",
@@ -195,6 +276,12 @@ def _deterministic_plan(
         "remember the current user",
         "recognize the current user",
         "remember me",
+        "decision",
+        "decisions",
+        "choice",
+        "choices",
+        "care about",
+        "cared about",
         "user memory evidence",
         "story lore",
         "story continuity",
@@ -202,6 +289,8 @@ def _deterministic_plan(
         "private continuity",
         "setting",
         "连续性",
+        "偏好",
+        "技术偏好",
         "设定",
         "过往互动",
         "历史互动",
@@ -222,7 +311,7 @@ def _deterministic_plan(
     has_context_scoped_user_scope = any(
         marker in original_query_text
         for marker in context_scoped_user_scope_markers
-    )
+    ) or _has_first_person_scope(original_query_text)
     has_scoped_user_scope = (
         has_slot_scoped_user_scope or has_context_scoped_user_scope
     )
@@ -483,6 +572,7 @@ class MemoryEvidenceAgent(BaseRAGHelperAgent):
         if primary_worker == "incompatible":
             reason = text_or_empty(plan["reason"]) or "unsupported"
             result = self._unresolved(
+                task=task,
                 source_policy=f"incompatible intent; use {reason}",
                 missing_context=[f"incompatible_intent:{reason}"],
                 primary_worker="",
@@ -495,12 +585,26 @@ class MemoryEvidenceAgent(BaseRAGHelperAgent):
         worker_payloads = {primary_worker: worker_result}
         memory_rows = _memory_rows(worker_result)
         summaries = _summaries_from_rows(memory_rows)
-        selected_summary = "\n".join(summaries[:RAG_SEARCH_SELECTED_SUMMARY_LIMIT])
+        worker_resolved = bool(worker_result.get("resolved"))
+        coverage_task = _memory_coverage_task(task)
+        coverage, evidence_buckets = _coverage_fields(
+            task=coverage_task,
+            evidence_items=summaries,
+            worker_resolved=worker_resolved,
+        )
+        confirmed_evidence = evidence_buckets["confirmed_evidence"]
+        selected_summary = "\n".join(
+            confirmed_evidence[:RAG_SEARCH_SELECTED_SUMMARY_LIMIT],
+        )
         resolved_refs = _refs_from_rows(memory_rows)
-        resolved = bool(worker_result.get("resolved")) and bool(summaries)
+        resolved = (
+            worker_resolved
+            and bool(summaries)
+            and coverage_allows_resolution(coverage)
+        )
         missing_context = [] if resolved else ["memory_evidence"]
         projection_rows = memory_rows
-        evidence = summaries
+        evidence = confirmed_evidence
         observation_candidates: list[dict[str, Any]] = []
         source_hints: list[dict[str, Any]] = []
         if not resolved:
@@ -529,6 +633,10 @@ class MemoryEvidenceAgent(BaseRAGHelperAgent):
             conflicts=[],
             observation_candidates=observation_candidates,
             source_hints=source_hints,
+            coverage=coverage,
+            confirmed_evidence=confirmed_evidence,
+            partial_evidence=evidence_buckets["partial_evidence"],
+            nearby_evidence=evidence_buckets["nearby_evidence"],
         )
         logger.info(
             f"{_AGENT_NAME} output: resolved={resolved} "
@@ -555,12 +663,19 @@ class MemoryEvidenceAgent(BaseRAGHelperAgent):
     def _unresolved(
         self,
         *,
+        task: str,
         source_policy: str,
         missing_context: list[str],
         primary_worker: str,
         worker_payloads: dict[str, Any],
     ) -> dict[str, Any]:
         """Build an unresolved result without calling a memory source."""
+        coverage_task = _memory_coverage_task(task)
+        coverage, evidence_buckets = _coverage_fields(
+            task=coverage_task,
+            evidence_items=[],
+            worker_resolved=False,
+        )
         payload = _result_payload(
             selected_summary="",
             primary_worker=primary_worker,
@@ -573,6 +688,10 @@ class MemoryEvidenceAgent(BaseRAGHelperAgent):
             conflicts=[],
             observation_candidates=[],
             source_hints=[],
+            coverage=coverage,
+            confirmed_evidence=evidence_buckets["confirmed_evidence"],
+            partial_evidence=evidence_buckets["partial_evidence"],
+            nearby_evidence=evidence_buckets["nearby_evidence"],
         )
         logger.info(
             f"{_AGENT_NAME} output: resolved=False "

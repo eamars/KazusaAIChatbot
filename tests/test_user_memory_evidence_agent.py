@@ -143,6 +143,53 @@ async def test_user_memory_evidence_exact_cjk_term_uses_scoped_keyword(monkeypat
 
 
 @pytest.mark.asyncio
+async def test_user_memory_evidence_agent_collects_multiple_literal_anchor_hits(
+    monkeypatch,
+) -> None:
+    agent = UserMemoryEvidenceAgent()
+    calls: list[str] = []
+
+    async def _embedding(text: str) -> list[float]:
+        raise AssertionError(f"embedding should not run for literal lookup: {text}")
+
+    async def _vector(*args, **kwargs):
+        raise AssertionError("vector search should not run for literal lookup")
+
+    async def _keyword(global_user_id: str, keyword: str, **kwargs):
+        assert global_user_id == "user-1"
+        calls.append(keyword)
+        rows_by_keyword = {
+            "arcade": [_memory_row("unit-arcade", "User remembers the arcade promise.")],
+            "tea": [_memory_row("unit-tea", "User prefers tea during late sessions.")],
+        }
+        return rows_by_keyword.get(keyword, [])
+
+    async def _recent(*args, **kwargs):
+        raise AssertionError("recent fallback should not run when keyword retrieval resolves")
+
+    monkeypatch.setattr(module, "get_query_text_embedding", _embedding)
+    monkeypatch.setattr(module, "search_user_memory_units_by_vector", _vector)
+    monkeypatch.setattr(module, "search_user_memory_units_by_keyword", _keyword)
+    monkeypatch.setattr(module, "query_user_memory_units", _recent)
+
+    result = await agent.run(
+        'Memory-evidence: retrieve durable evidence about "arcade" and "tea"',
+        _context(),
+    )
+
+    assert result["resolved"] is True
+    assert calls[:2] == ["arcade", "tea"]
+    assert [
+        row["unit_id"]
+        for row in result["result"]["memory_rows"]
+    ] == ["unit-arcade", "unit-tea"]
+    assert result["result"]["selected_summary"] == (
+        "User remembers the arcade promise.\n"
+        "User prefers tea during late sessions."
+    )
+
+
+@pytest.mark.asyncio
 async def test_user_memory_evidence_literal_miss_is_unresolved(monkeypatch) -> None:
     agent = UserMemoryEvidenceAgent()
     calls: dict[str, object] = {"keyword_count": 0}

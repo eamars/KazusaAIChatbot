@@ -358,6 +358,11 @@ def _route_after_evaluator(state: ProgressiveRAGState) -> str:
             and state.get("loop_count", 0) < _MAX_LOOP_COUNT
         ):
             return "loop"
+        if (
+            state.get("unknown_slots")
+            and state.get("loop_count", 0) < _MAX_LOOP_COUNT
+        ):
+            return "loop"
         return "finalize"
     if state.get("unknown_slots") and state.get("loop_count", 0) < _MAX_LOOP_COUNT:
         return "loop"

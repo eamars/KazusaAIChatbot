@@ -77,13 +77,13 @@ _EVALUATOR_SUMMARIZER_PROMPT = '''\
 
 # 生成步骤
 1. 先读取 `slot` 和 `agent`，确认本次工具结果回答的是哪一个槽位。
-2. 读取 `raw_result`，只提炼其中已经存在的事实、标识符和可引用来源。
+2. 读取 `raw_result`，只提炼其中已经存在的事实和可引用来源。
 3. 参考 `known_facts`，避免重复已经总结过的槽位结论。
 4. 如果 `resolved` 为 false 或 `raw_result` 缺少可用信息，只说明本次来源没有返回什么，不要扩大结论。
 
 # 摘要要求
-- 保留对后续步骤有用的关键标识符（global_user_id、display_name、URL 等）
-- 如果内容是对话记录，列出 1-5 条最相关的消息摘要（说话人 + 关键内容）
+- 保留 display_name、URL 等可读来源；不要把 global_user_id 或 source id 写进摘要。
+- 如果内容是对话记录，列出 1-10 条最相关的消息摘要（说话人 + 关键内容）
 - 如果内容是用户画像或持久记忆，提炼关键事实
 - 如果槽位未解决（resolved: false），简洁说明本次检索的来源没有返回什么
 - 如果 raw_result 为空，不要推断先前槽位失败；只有 known_facts 明确显示先前槽位 unresolved 时才可这样说
