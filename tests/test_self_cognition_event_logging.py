@@ -268,6 +268,42 @@ async def test_worker_records_target_binding_failure_without_dispatch_text(
 
 
 @pytest.mark.asyncio
+async def test_worker_records_empty_source_collection_reason(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    """Empty source ticks should say why self-cognition did not run."""
+
+    record_worker_event = AsyncMock()
+    monkeypatch.setattr(
+        worker.event_logging,
+        "record_worker_event",
+        record_worker_event,
+    )
+
+    async def collect_cases(*, now: datetime, max_cases: int) -> list[dict[str, Any]]:
+        del now, max_cases
+        return []
+
+    result = await worker.run_self_cognition_worker_tick(
+        output_root=tmp_path,
+        now=datetime(2026, 5, 13, tzinfo=timezone.utc),
+        is_primary_interaction_busy=lambda: False,
+        collect_cases_func=collect_cases,
+        max_cases=3,
+    )
+
+    assert result.processed_count == 0
+    assert result.skipped_count == 1
+    assert result.defer_reason == "no eligible source cases"
+    record_worker_event.assert_awaited_once()
+    assert record_worker_event.await_args.kwargs["status"] == "skipped"
+    assert record_worker_event.await_args.kwargs["defer_reason"] == (
+        "no eligible source cases"
+    )
+
+
+@pytest.mark.asyncio
 async def test_worker_synthesizes_missing_target_binding_failure_metadata(
     monkeypatch,
     tmp_path,

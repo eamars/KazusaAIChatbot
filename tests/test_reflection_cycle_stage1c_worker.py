@@ -347,6 +347,7 @@ async def test_worker_tick_keeps_hourly_reflection_when_group_review_sleeps(
     now = datetime(2026, 5, 12, 14, 30, tzinfo=timezone.utc)
     sleep_checks: list[datetime] = []
     input_collector = AsyncMock(return_value=_input_set([]))
+    record_worker_event = worker_module.event_logging.record_worker_event
     monkeypatch.setattr(worker_module, "collect_reflection_inputs", input_collector)
 
     def _is_sleep_period(checked_now: datetime) -> bool:
@@ -373,12 +374,72 @@ async def test_worker_tick_keeps_hourly_reflection_when_group_review_sleeps(
         is_primary_interaction_busy=lambda: False,
     )
 
-    assert len(results) == 1
+    assert len(results) == 2
     assert results[0].run_kind == REFLECTION_RUN_KIND_HOURLY
     assert results[0].defer_reason == "no monitored message-bearing hourly slots"
+    assert results[1].run_kind == "group_self_cognition_review"
+    assert results[1].defer_reason == "self-cognition sleep period"
     assert sleep_checks == [now]
     assert input_collector.await_count == 1
     profile_fetch.assert_not_awaited()
+    group_review_events = [
+        call
+        for call in record_worker_event.await_args_list
+        if call.kwargs["run_kind"] == "group_self_cognition_review"
+    ]
+    assert len(group_review_events) == 1
+    assert group_review_events[0].kwargs["status"] == "skipped"
+    assert group_review_events[0].kwargs["defer_reason"] == (
+        "self-cognition sleep period"
+    )
+
+
+@pytest.mark.asyncio
+async def test_worker_tick_surfaces_group_review_empty_case_skip(
+    monkeypatch,
+) -> None:
+    """Operator events should distinguish no group windows from no worker."""
+
+    now = datetime(2026, 5, 12, 18, 30, tzinfo=timezone.utc)
+    character_profile = {"name": "Character"}
+    input_collector = AsyncMock(return_value=_input_set([]))
+    record_worker_event = worker_module.event_logging.record_worker_event
+    monkeypatch.setattr(worker_module, "collect_reflection_inputs", input_collector)
+    monkeypatch.setattr(
+        worker_module,
+        "is_self_cognition_sleep_period",
+        lambda checked_now: False,
+    )
+    monkeypatch.setattr(
+        worker_module,
+        "get_character_profile",
+        AsyncMock(return_value=character_profile),
+    )
+    monkeypatch.setattr(
+        worker_module.self_cognition_sources,
+        "collect_group_chat_review_cases",
+        AsyncMock(return_value=[]),
+    )
+    monkeypatch.setattr(worker_module, "_local_time_is_after", lambda *_: False)
+
+    results = await worker_module._run_worker_tick(
+        now=now,
+        is_primary_interaction_busy=lambda: False,
+    )
+
+    assert len(results) == 2
+    assert results[1].run_kind == "group_self_cognition_review"
+    assert results[1].defer_reason == "no group review cases"
+    group_review_events = [
+        call
+        for call in record_worker_event.await_args_list
+        if call.kwargs["run_kind"] == "group_self_cognition_review"
+    ]
+    assert len(group_review_events) == 1
+    assert group_review_events[0].kwargs["status"] == "skipped"
+    assert group_review_events[0].kwargs["defer_reason"] == (
+        "no group review cases"
+    )
 
 
 @pytest.mark.asyncio

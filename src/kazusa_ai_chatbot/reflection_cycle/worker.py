@@ -473,6 +473,7 @@ def _group_review_has_work(result: ReflectionWorkerResult) -> bool:
         result.processed_count > 0
         or result.failed_count > 0
         or result.deferred
+        or (result.skipped_count > 0 and bool(result.defer_reason))
     )
     return has_work
 

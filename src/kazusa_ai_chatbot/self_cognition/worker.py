@@ -159,7 +159,10 @@ async def run_self_cognition_worker_tick(
         collect_cases_func=collect_cases_func,
     )
     if not cases:
-        result = SelfCognitionWorkerResult(skipped_count=1)
+        result = SelfCognitionWorkerResult(
+            skipped_count=1,
+            defer_reason="no eligible source cases",
+        )
         await _record_worker_tick_event(result)
         return result
 
