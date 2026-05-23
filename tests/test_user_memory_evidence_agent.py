@@ -368,10 +368,19 @@ async def test_user_memory_evidence_preserves_stronger_provenance_fields(monkeyp
     async def _recent(*args, **kwargs):
         raise AssertionError("recent fallback should not run when semantic retrieval resolves")
 
+    async def _review(task: str, rows: list[dict[str, object]]) -> dict[str, object]:
+        return {
+            "confirmed_unit_ids": ["unit-stronger"],
+            "nearby_unit_ids": [],
+            "summary": "The user and Kazusa already adopted the ice-cream-shop lore.",
+            "uncertainty": "",
+        }
+
     monkeypatch.setattr(module, "get_query_text_embedding", _embedding)
     monkeypatch.setattr(module, "search_user_memory_units_by_vector", _vector)
     monkeypatch.setattr(module, "search_user_memory_units_by_keyword", _keyword)
     monkeypatch.setattr(module, "query_user_memory_units", _recent)
+    monkeypatch.setattr(module, "_review_user_memory_rows", _review)
 
     result = await agent.run(
         "Memory-evidence: retrieve durable evidence about the current user's story continuity around the ice-cream shop",
@@ -395,3 +404,109 @@ async def test_user_memory_evidence_preserves_stronger_provenance_fields(monkeyp
     assert row["authority"] == "explicitly_scoped_continuity"
     assert row["truth_status"] == "explicitly_reinforced_continuity"
     assert row["origin"] == "user_reinforced_interaction"
+
+
+@pytest.mark.asyncio
+async def test_user_memory_evidence_uses_reviewer_confirmed_rows(monkeypatch) -> None:
+    agent = UserMemoryEvidenceAgent()
+
+    async def _embedding(text: str) -> list[float]:
+        return [0.9, 0.1]
+
+    async def _vector(global_user_id: str, embedding: list[float], **kwargs):
+        return [
+            _memory_row("unit-nearby", "The user discussed unrelated search tooling."),
+            _memory_row("unit-target", "The user prioritized recall precision over cost."),
+        ]
+
+    async def _keyword(*args, **kwargs):
+        raise AssertionError("keyword retrieval should not run for unquoted semantic query")
+
+    async def _recent(*args, **kwargs):
+        raise AssertionError("recent fallback should not run when vector retrieval returns rows")
+
+    async def _review(task: str, rows: list[dict[str, object]]) -> dict[str, object]:
+        return {
+            "confirmed_unit_ids": ["unit-target"],
+            "nearby_unit_ids": ["unit-nearby"],
+            "summary": "The user prioritized recall precision over cost.",
+            "uncertainty": "",
+        }
+
+    monkeypatch.setattr(module, "get_query_text_embedding", _embedding)
+    monkeypatch.setattr(module, "search_user_memory_units_by_vector", _vector)
+    monkeypatch.setattr(module, "search_user_memory_units_by_keyword", _keyword)
+    monkeypatch.setattr(module, "query_user_memory_units", _recent)
+    monkeypatch.setattr(module, "_review_user_memory_rows", _review, raising=False)
+
+    result = await agent.run(
+        (
+            "Memory-evidence: retrieve durable evidence about the current "
+            "user's technical preferences for recall quality"
+        ),
+        _context(),
+    )
+
+    assert result["resolved"] is True
+    assert [
+        row["unit_id"]
+        for row in result["result"]["memory_rows"]
+    ] == ["unit-target"]
+    assert result["result"]["selected_summary"] == (
+        "The user prioritized recall precision over cost."
+    )
+    assert [
+        row["unit_id"]
+        for row in result["result"]["nearby_memory_rows"]
+    ] == ["unit-nearby"]
+
+
+@pytest.mark.asyncio
+async def test_user_memory_evidence_reviewer_can_leave_rows_unresolved(
+    monkeypatch,
+) -> None:
+    agent = UserMemoryEvidenceAgent()
+
+    async def _embedding(text: str) -> list[float]:
+        return [0.9, 0.1]
+
+    async def _vector(global_user_id: str, embedding: list[float], **kwargs):
+        return [
+            _memory_row("unit-nearby", "The user discussed unrelated search tooling."),
+        ]
+
+    async def _keyword(*args, **kwargs):
+        raise AssertionError("keyword retrieval should not run for unquoted semantic query")
+
+    async def _recent(*args, **kwargs):
+        raise AssertionError("recent fallback should not run when vector retrieval returns rows")
+
+    async def _review(task: str, rows: list[dict[str, object]]) -> dict[str, object]:
+        return {
+            "confirmed_unit_ids": [],
+            "nearby_unit_ids": ["unit-nearby"],
+            "summary": "",
+            "uncertainty": "Only nearby material was found.",
+        }
+
+    monkeypatch.setattr(module, "get_query_text_embedding", _embedding)
+    monkeypatch.setattr(module, "search_user_memory_units_by_vector", _vector)
+    monkeypatch.setattr(module, "search_user_memory_units_by_keyword", _keyword)
+    monkeypatch.setattr(module, "query_user_memory_units", _recent)
+    monkeypatch.setattr(module, "_review_user_memory_rows", _review, raising=False)
+
+    result = await agent.run(
+        (
+            "Memory-evidence: retrieve durable evidence about the current "
+            "user's technical preferences for recall quality"
+        ),
+        _context(),
+    )
+
+    assert result["resolved"] is False
+    assert result["result"]["memory_rows"] == []
+    assert result["result"]["missing_context"] == ["user_memory_evidence"]
+    assert [
+        row["unit_id"]
+        for row in result["result"]["nearby_memory_rows"]
+    ] == ["unit-nearby"]

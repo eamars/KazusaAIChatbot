@@ -348,8 +348,10 @@ async def test_live_context_current_local_weekday_uses_runtime_state_only() -> N
 
 
 @pytest.mark.asyncio
-async def test_memory_evidence_uses_current_user_scope_from_original_query() -> None:
-    """First-person durable recall should not depend on perfect slot wording."""
+async def test_memory_evidence_selector_uses_current_user_scope_from_query(
+    monkeypatch,
+) -> None:
+    """First-person durable recall should reach the selector LLM."""
     agent = MemoryEvidenceAgent()
     scoped_worker = _FakeWorker(
         {
@@ -376,6 +378,20 @@ async def test_memory_evidence_uses_current_user_scope_from_original_query() -> 
     )
     agent.user_memory_agent = scoped_worker
     agent.search_agent = persistent_worker
+    selector_calls: list[list[object]] = []
+
+    class _SelectorLLM:
+        async def ainvoke(self, messages: list[object]) -> SimpleNamespace:
+            selector_calls.append(messages)
+            response = SimpleNamespace(
+                content=(
+                    '{"worker": "user_memory_evidence_agent", '
+                    '"reason": "scoped current-user continuity evidence"}'
+                )
+            )
+            return response
+
+    monkeypatch.setattr(memory_evidence_module, "_selector_llm", _SelectorLLM())
 
     result = await agent.run(
         "Memory-evidence: retrieve durable evidence about decision preference for architecture",
@@ -387,6 +403,7 @@ async def test_memory_evidence_uses_current_user_scope_from_original_query() -> 
     )
 
     assert result["resolved"] is True
+    assert len(selector_calls) == 1
     assert len(scoped_worker.calls) == 1
     assert persistent_worker.calls == []
     assert result["result"]["primary_worker"] == "user_memory_evidence_agent"
@@ -2111,6 +2128,73 @@ async def test_memory_evidence_current_user_preferences_use_scoped_worker() -> N
 
 
 @pytest.mark.asyncio
+async def test_memory_evidence_selector_can_route_user_preference_slot(
+    monkeypatch,
+) -> None:
+    """Ambiguous user-preference slots should reach the selector LLM."""
+    agent = MemoryEvidenceAgent()
+    search_worker = _FakeWorker({"resolved": True, "result": []})
+    user_worker = _FakeWorker(
+        {
+            "resolved": True,
+            "result": {
+                "selected_summary": "The current user prioritizes recall precision.",
+                "memory_rows": [
+                    {
+                        "unit_id": "unit-preference",
+                        "content": "The current user prioritizes recall precision.",
+                        "source_system": "user_memory_units",
+                        "scope_type": "user_continuity",
+                        "scope_global_user_id": "user-1",
+                    }
+                ],
+                "source_system": "user_memory_units",
+                "scope_type": "user_continuity",
+                "scope_global_user_id": "user-1",
+                "missing_context": [],
+            },
+            "attempts": 1,
+            "cache": {
+                "enabled": False,
+                "hit": False,
+                "reason": "scoped_user_memory_uncached",
+            },
+        }
+    )
+    selector_calls: list[list[object]] = []
+
+    class _SelectorLLM:
+        async def ainvoke(self, messages: list[object]) -> SimpleNamespace:
+            selector_calls.append(messages)
+            response = SimpleNamespace(
+                content=(
+                    '{"worker": "user_memory_evidence_agent", '
+                    '"reason": "scoped current-user continuity evidence"}'
+                )
+            )
+            return response
+
+    agent.search_agent = search_worker
+    agent.user_memory_agent = user_worker
+    monkeypatch.setattr(memory_evidence_module, "_selector_llm", _SelectorLLM())
+
+    result = await agent.run(
+        (
+            "Memory-evidence: retrieve durable evidence about user's "
+            "technical preferences regarding RAG/GraphRAG/information graph "
+            "solutions"
+        ),
+        _base_context(),
+    )
+
+    assert result["resolved"] is True
+    assert len(selector_calls) == 1
+    assert search_worker.calls == []
+    assert len(user_worker.calls) == 1
+    assert result["result"]["primary_worker"] == "user_memory_evidence_agent"
+
+
+@pytest.mark.asyncio
 async def test_memory_evidence_remember_me_slot_uses_scoped_worker() -> None:
     """Current-user recognition requests should search scoped user memory."""
     agent = MemoryEvidenceAgent()
@@ -2241,7 +2325,9 @@ async def test_memory_evidence_shared_fact_ignores_remember_me_query_scope() -> 
 
 
 @pytest.mark.asyncio
-async def test_memory_evidence_old_setting_slot_uses_scoped_context() -> None:
+async def test_memory_evidence_old_setting_slot_uses_selector_context(
+    monkeypatch,
+) -> None:
     """Old durable-setting slots should use original-query scoped continuity."""
     agent = MemoryEvidenceAgent()
     search_worker = _FakeWorker({"resolved": True, "result": []})
@@ -2282,6 +2368,20 @@ async def test_memory_evidence_old_setting_slot_uses_scoped_context() -> None:
     )
     agent.search_agent = search_worker
     agent.user_memory_agent = user_worker
+    selector_calls: list[list[object]] = []
+
+    class _SelectorLLM:
+        async def ainvoke(self, messages: list[object]) -> SimpleNamespace:
+            selector_calls.append(messages)
+            response = SimpleNamespace(
+                content=(
+                    '{"worker": "user_memory_evidence_agent", '
+                    '"reason": "scoped current-user continuity evidence"}'
+                )
+            )
+            return response
+
+    monkeypatch.setattr(memory_evidence_module, "_selector_llm", _SelectorLLM())
 
     result = await agent.run(
         'Memory-evidence: retrieve durable evidence about “学姐抹茶冰淇淋店” setting',
@@ -2291,6 +2391,7 @@ async def test_memory_evidence_old_setting_slot_uses_scoped_context() -> None:
     )
 
     assert result["resolved"] is True
+    assert len(selector_calls) == 1
     assert search_worker.calls == []
     assert len(user_worker.calls) == 1
     assert result["result"]["primary_worker"] == "user_memory_evidence_agent"

@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import logging
-import re
 from typing import Any
 
 from langchain_core.messages import HumanMessage, SystemMessage
@@ -41,17 +40,6 @@ _KNOWN_WORKERS = {
     "user_memory_evidence_agent",
     "incompatible",
 }
-_FIRST_PERSON_REFERENCE_RE = re.compile(
-    r"\b(?:i|me|my|mine|we|us|our|ours)\b",
-    flags=re.IGNORECASE,
-)
-_CJK_FIRST_PERSON_MARKERS = (
-    '我',
-    '我的',
-    '我们',
-    '咱',
-    '咱们',
-)
 
 
 def _clip_text(value: object, *, limit: int = 1000) -> str:
@@ -141,19 +129,6 @@ def _strip_prefix(task: str) -> str:
     return return_value
 
 
-def _has_first_person_scope(value: str) -> bool:
-    """Return whether runtime query text points at the current user."""
-    text = text_or_empty(value)
-    if not text:
-        return_value = False
-        return return_value
-    if _FIRST_PERSON_REFERENCE_RE.search(text):
-        return_value = True
-        return return_value
-    return_value = any(marker in text for marker in _CJK_FIRST_PERSON_MARKERS)
-    return return_value
-
-
 def _coverage_fields(
     *,
     task: str,
@@ -225,12 +200,10 @@ def _deterministic_plan(
         return plan
 
     slot_parts = [task_body]
-    original_query_text = ""
     if isinstance(context, dict):
         current_slot = text_or_empty(context.get("current_slot"))
         if current_slot:
             slot_parts.append(current_slot)
-        original_query_text = text_or_empty(context.get("original_query")).lower()
     slot_text = "\n".join(slot_parts).lower()
 
     scoped_user_scope_markers = (
@@ -247,14 +220,14 @@ def _deterministic_plan(
         "还记得我",
         "认识我",
     )
-    context_scoped_user_scope_markers = (
-        "private",
-        "user-specific",
-        "scoped",
-        "with the current user",
-        "current user",
-        "current_user",
-        "私有",
+    ambiguous_user_scope_markers = (
+        "user's",
+        "users'",
+        "user preferences",
+        "user preference",
+        "user decisions",
+        "user decision",
+        "用户的",
     )
     scoped_user_topic_markers = (
         "continuity",
@@ -308,22 +281,21 @@ def _deterministic_plan(
     has_slot_scoped_user_scope = any(
         marker in slot_text for marker in scoped_user_scope_markers
     )
-    has_context_scoped_user_scope = any(
-        marker in original_query_text
-        for marker in context_scoped_user_scope_markers
-    ) or _has_first_person_scope(original_query_text)
-    has_scoped_user_scope = (
-        has_slot_scoped_user_scope or has_context_scoped_user_scope
-    )
     has_scoped_user_topic = any(
         marker in slot_text for marker in scoped_user_topic_markers
     )
-    if has_scoped_user_scope and has_scoped_user_topic:
+    if has_slot_scoped_user_scope and has_scoped_user_topic:
         plan = {
             "worker": "user_memory_evidence_agent",
             "reason": "scoped current-user continuity evidence",
         }
         return plan
+
+    has_ambiguous_user_scope = any(
+        marker in slot_text for marker in ambiguous_user_scope_markers
+    )
+    if has_ambiguous_user_scope and has_scoped_user_topic:
+        return None
 
     exact_markers = (
         "named fact",
@@ -340,6 +312,9 @@ def _deterministic_plan(
             "reason": "hybrid durable named fact or exact memory evidence",
         }
         return plan
+
+    if has_scoped_user_topic:
+        return None
 
     plan = {
         "worker": "persistent_memory_search_agent",
@@ -451,6 +426,25 @@ def _memory_rows(worker_result: dict[str, Any]) -> list[dict[str, Any]]:
         text = text_or_empty(row)
         if text:
             rows.append({"content": text})
+    return rows
+
+
+def _nearby_memory_rows(worker_result: dict[str, Any]) -> list[dict[str, Any]]:
+    """Preserve nearby scoped-memory rows for unresolved observations."""
+    value = worker_result.get("result")
+    if not isinstance(value, dict):
+        return_value: list[dict[str, Any]] = []
+        return return_value
+
+    raw_rows = value.get("nearby_memory_rows")
+    if not isinstance(raw_rows, list):
+        return_value = []
+        return return_value
+
+    rows: list[dict[str, Any]] = []
+    for row in raw_rows:
+        if isinstance(row, dict):
+            rows.append(dict(row))
     return rows
 
 
@@ -584,6 +578,7 @@ class MemoryEvidenceAgent(BaseRAGHelperAgent):
         worker_result = await worker.run(task, context, max_attempts=1)
         worker_payloads = {primary_worker: worker_result}
         memory_rows = _memory_rows(worker_result)
+        nearby_rows = _nearby_memory_rows(worker_result)
         summaries = _summaries_from_rows(memory_rows)
         worker_resolved = bool(worker_result.get("resolved"))
         coverage_task = _memory_coverage_task(task)
@@ -612,7 +607,10 @@ class MemoryEvidenceAgent(BaseRAGHelperAgent):
             resolved_refs = []
             projection_rows = []
             evidence = []
-            observation_candidates = _memory_observation_candidates(memory_rows)
+            observation_rows = memory_rows or nearby_rows
+            observation_candidates = _memory_observation_candidates(
+                observation_rows,
+            )
             source_hints = [
                 {
                     "kind": "memory",

@@ -2,12 +2,19 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import re
 from typing import Any
 
+from langchain_core.messages import HumanMessage, SystemMessage
 from openai import OpenAIError
 
+from kazusa_ai_chatbot.config import (
+    RAG_SUBAGENT_LLM_API_KEY,
+    RAG_SUBAGENT_LLM_BASE_URL,
+    RAG_SUBAGENT_LLM_MODEL,
+)
 from kazusa_ai_chatbot.db import (
     get_query_text_embedding,
     query_user_memory_units,
@@ -16,7 +23,7 @@ from kazusa_ai_chatbot.db import (
 )
 from kazusa_ai_chatbot.db.schemas import UserMemoryUnitStatus
 from kazusa_ai_chatbot.rag.helper_agent import BaseRAGHelperAgent
-from kazusa_ai_chatbot.utils import text_or_empty
+from kazusa_ai_chatbot.utils import get_llm, parse_llm_json_output, text_or_empty
 
 logger = logging.getLogger(__name__)
 
@@ -180,6 +187,8 @@ def _result_payload(
     rows: list[dict[str, Any]],
     global_user_id: str,
     missing_context: list[str],
+    nearby_rows: list[dict[str, Any]] | None = None,
+    review: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Build the public result payload for scoped user-memory evidence."""
     selected_summary = "\n".join(
@@ -195,6 +204,12 @@ def _result_payload(
         "scope_global_user_id": global_user_id,
         "missing_context": missing_context,
     }
+    if nearby_rows:
+        payload["nearby_memory_rows"] = nearby_rows
+    if review:
+        uncertainty = text_or_empty(review.get("uncertainty"))
+        if uncertainty:
+            payload["review_uncertainty"] = uncertainty
     return payload
 
 
@@ -207,6 +222,179 @@ def _agent_result(*, resolved: bool, payload: dict[str, Any]) -> dict[str, Any]:
         "cache": _cache_status(),
     }
     return result
+
+
+def _review_candidate_payload(rows: list[dict[str, Any]]) -> list[dict[str, str]]:
+    """Project scoped memory rows into a compact LLM review payload."""
+    candidates: list[dict[str, str]] = []
+    for row in rows[:_MAX_ROWS]:
+        unit_id = text_or_empty(row.get("unit_id"))
+        content = _row_content(row)
+        if not unit_id or not content:
+            continue
+        candidate = {
+            "unit_id": unit_id,
+            "content": content,
+            "unit_type": text_or_empty(row.get("unit_type")),
+            "subjective_appraisal": text_or_empty(
+                row.get("subjective_appraisal")
+            ),
+            "relationship_signal": text_or_empty(
+                row.get("relationship_signal")
+            ),
+            "authority": text_or_empty(row.get("authority")),
+            "truth_status": text_or_empty(row.get("truth_status")),
+            "origin": text_or_empty(row.get("origin")),
+        }
+        candidates.append(candidate)
+    return candidates
+
+
+def _ordered_valid_ids(raw_value: object, allowed_ids: set[str]) -> list[str]:
+    """Keep reviewer-selected ids that refer to retrieved candidate rows."""
+    if not isinstance(raw_value, list):
+        return_value: list[str] = []
+        return return_value
+
+    selected_ids: list[str] = []
+    for value in raw_value:
+        unit_id = text_or_empty(value)
+        if not unit_id or unit_id not in allowed_ids:
+            continue
+        if unit_id in selected_ids:
+            continue
+        selected_ids.append(unit_id)
+    return selected_ids
+
+
+def _normalize_review_payload(
+    raw_review: object,
+    candidates: list[dict[str, str]],
+) -> dict[str, Any]:
+    """Validate reviewer output without interpreting candidate text."""
+    allowed_ids = {
+        candidate["unit_id"]
+        for candidate in candidates
+        if candidate.get("unit_id")
+    }
+    if not isinstance(raw_review, dict):
+        raw_review = {}
+
+    confirmed_ids = _ordered_valid_ids(
+        raw_review.get("confirmed_unit_ids"),
+        allowed_ids,
+    )
+    nearby_ids = _ordered_valid_ids(
+        raw_review.get("nearby_unit_ids"),
+        allowed_ids,
+    )
+    if not confirmed_ids and not nearby_ids:
+        nearby_ids = [
+            candidate["unit_id"]
+            for candidate in candidates
+            if candidate.get("unit_id")
+        ]
+    review = {
+        "confirmed_unit_ids": confirmed_ids,
+        "nearby_unit_ids": nearby_ids,
+        "summary": text_or_empty(raw_review.get("summary")),
+        "uncertainty": text_or_empty(raw_review.get("uncertainty")),
+    }
+    return review
+
+
+def _rows_for_review_ids(
+    rows: list[dict[str, Any]],
+    unit_ids: list[str],
+) -> list[dict[str, Any]]:
+    """Select retrieved rows by reviewer-approved unit ids."""
+    selected_rows: list[dict[str, Any]] = []
+    for unit_id in unit_ids:
+        for row in rows:
+            if text_or_empty(row.get("unit_id")) != unit_id:
+                continue
+            selected_rows.append(row)
+            break
+    return selected_rows
+
+
+_REVIEW_PROMPT = """\
+You review scoped current-user memory candidates for one durable-memory
+evidence slot. Decide which retrieved rows directly answer the slot, which are
+nearby context only, and which should be left out. Do not invent facts and do
+not use shared/world memory assumptions.
+
+# Generation Procedure
+1. Read the evidence slot and candidate rows.
+2. Mark a row confirmed only when it directly supports the requested private
+   current-user continuity.
+3. Mark a row nearby when it is related but does not directly answer the slot.
+4. Leave unrelated rows out of both confirmed and nearby lists.
+5. If no row directly answers the slot, return no confirmed ids and explain the
+   uncertainty briefly.
+
+# Input Format
+{
+  "task": "Memory-evidence slot text",
+  "candidates": [
+    {
+      "unit_id": "stable candidate id",
+      "content": "memory content",
+      "unit_type": "memory category",
+      "subjective_appraisal": "optional appraisal",
+      "relationship_signal": "optional continuity signal",
+      "authority": "source authority",
+      "truth_status": "truth status",
+      "origin": "memory origin"
+    }
+  ]
+}
+
+# Output Format
+Return valid JSON only:
+{
+  "confirmed_unit_ids": ["candidate unit_id"],
+  "nearby_unit_ids": ["candidate unit_id"],
+  "summary": "short factual summary of confirmed rows, or empty string",
+  "uncertainty": "short uncertainty note, or empty string"
+}
+"""
+_review_llm = get_llm(
+    temperature=0.0,
+    top_p=1.0,
+    model=RAG_SUBAGENT_LLM_MODEL,
+    base_url=RAG_SUBAGENT_LLM_BASE_URL,
+    api_key=RAG_SUBAGENT_LLM_API_KEY,
+)
+
+
+async def _review_user_memory_rows(
+    task: str,
+    rows: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """Ask the reviewer LLM which scoped memory rows answer the slot."""
+    candidates = _review_candidate_payload(rows)
+    if not candidates:
+        review = {
+            "confirmed_unit_ids": [],
+            "nearby_unit_ids": [],
+            "summary": "",
+            "uncertainty": "No reviewable scoped memory rows were retrieved.",
+        }
+        return review
+
+    payload = {
+        "task": _task_body(task),
+        "candidates": candidates,
+    }
+    system_prompt = SystemMessage(content=_REVIEW_PROMPT)
+    human_message = HumanMessage(
+        content=json.dumps(payload, ensure_ascii=False, default=str)
+    )
+    response = await _review_llm.ainvoke([system_prompt, human_message])
+    raw_review = parse_llm_json_output(response.content)
+    review = _normalize_review_payload(raw_review, candidates)
+    return review
 
 
 class UserMemoryEvidenceAgent(BaseRAGHelperAgent):
@@ -249,10 +437,12 @@ class UserMemoryEvidenceAgent(BaseRAGHelperAgent):
             return result
 
         rows: list[dict[str, Any]] = []
+        retrieval_mode = ""
         task_body = _task_body(task)
         literal_terms = _extract_literal_terms(task)
 
         if literal_terms:
+            retrieval_mode = "literal"
             for literal in literal_terms:
                 keyword_rows = await search_user_memory_units_by_keyword(
                     global_user_id,
@@ -276,6 +466,7 @@ class UserMemoryEvidenceAgent(BaseRAGHelperAgent):
                 )
 
             if query_embedding:
+                retrieval_mode = "semantic"
                 rows = await search_user_memory_units_by_vector(
                     global_user_id,
                     query_embedding,
@@ -284,6 +475,7 @@ class UserMemoryEvidenceAgent(BaseRAGHelperAgent):
                 )
 
         if not rows and not literal_terms and _allows_recency_fallback(task):
+            retrieval_mode = "recent"
             rows = await query_user_memory_units(
                 global_user_id,
                 statuses=[UserMemoryUnitStatus.ACTIVE],
@@ -291,12 +483,25 @@ class UserMemoryEvidenceAgent(BaseRAGHelperAgent):
             )
 
         projected_rows = _project_rows(rows, global_user_id)
+        nearby_rows: list[dict[str, Any]] = []
+        review: dict[str, Any] = {}
+        if projected_rows and retrieval_mode == "semantic":
+            review = await _review_user_memory_rows(task, projected_rows)
+            confirmed_unit_ids = review["confirmed_unit_ids"]
+            nearby_unit_ids = review["nearby_unit_ids"]
+            nearby_rows = _rows_for_review_ids(projected_rows, nearby_unit_ids)
+            projected_rows = _rows_for_review_ids(
+                projected_rows,
+                confirmed_unit_ids,
+            )
         resolved = bool(projected_rows)
         missing_context = [] if resolved else ["user_memory_evidence"]
         payload = _result_payload(
             rows=projected_rows,
             global_user_id=global_user_id,
             missing_context=missing_context,
+            nearby_rows=nearby_rows,
+            review=review,
         )
         logger.info(
             f"{_AGENT_NAME} output: resolved={resolved} "
