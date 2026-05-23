@@ -1,5 +1,15 @@
 # conversation graph recent context plan
 
+## Lifecycle
+
+- Status: superseded.
+- Superseded on 2026-05-23 because the conversation-graph/DAG line did not
+  prove enough implementation value for the current recall-quality problem.
+- The current executable priority is RAG2 cognition-ready evidence, not
+  conversation graph implementation.
+- This document is historical context only. Do not execute it unless a future
+  plan explicitly revives conversation graph work.
+
 ## Summary
 
 - Goal: Add a bounded `conversation_graph` subsystem that records recent
@@ -7,7 +17,7 @@
   recent-flow context without forcing RAG conversation search to reconstruct
   local adjacency.
 - Plan class: high_risk_migration.
-- Status: draft.
+- Status: superseded.
 - Mandatory skills: `development-plan`, `local-llm-architecture`,
   `py-style`, `test-style-and-execution`; apply `cjk-safety` before editing
   Python files that contain CJK prompt text.

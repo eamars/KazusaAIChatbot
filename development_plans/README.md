@@ -38,13 +38,17 @@ long_term/todo.md
 
 | Document | Type | Status |
 |---|---|---|
-| [conversation_graph_recent_context_plan.md](active/short_term/conversation_graph_recent_context_plan.md) | High-risk migration development plan | draft |
+| [rag2_cognition_ready_evidence_plan.md](active/short_term/rag2_cognition_ready_evidence_plan.md) | Large production development plan | draft |
+
+## Supporting Experiment Records
+
+| Document | Type | Status | Supports |
+|---|---|---|---|
+| [rag2_recall_quality_experiment_plan.md](reference/evidence/rag2_recall_quality_experiment_plan.md) | Experiment decision and supporting evidence | reference evidence | [rag2_cognition_ready_evidence_plan.md](active/short_term/rag2_cognition_ready_evidence_plan.md) |
 
 ## Active Bugfix Plans
 
-| Document | Type | Status |
-|---|---|---|
-| [history_media_projection_image_boundary_plan.md](active/bugfix/history_media_projection_image_boundary_plan.md) | Medium bugfix development plan | completed |
+No active bugfix plans.
 
 ## Reference Documents
 
@@ -61,6 +65,7 @@ long_term/todo.md
 | [cognition_prompt_chain_side_by_side_comparison_20260519.md](reference/evidence/cognition_prompt_chain_side_by_side_comparison_20260519.md) | Supporting evidence |
 | [cognition_prompt_chain_previous20_equivalence_check_20260519.md](reference/evidence/cognition_prompt_chain_previous20_equivalence_check_20260519.md) | Supporting evidence |
 | [cognition_prompt_chain_previous20_input_output_20260519.md](reference/evidence/cognition_prompt_chain_previous20_input_output_20260519.md) | Supporting evidence |
+| [rag2_recall_quality_experiment_plan.md](reference/evidence/rag2_recall_quality_experiment_plan.md) | Supporting experiment evidence |
 | [multi_source_cognition_stage_03_inactive_prompt_variant_notes.md](reference/multi_source_cognition_stage_03_inactive_prompt_variant_notes.md) | Reference notes |
 
 ## Triage
@@ -99,6 +104,7 @@ plans.
 | [conversation_progress_identity_leakage_bugfix_plan.md](archive/completed/bugfix/conversation_progress_identity_leakage_bugfix_plan.md) |
 | [dialog_anchor_authority_stale_history_bugfix_plan.md](archive/completed/bugfix/dialog_anchor_authority_stale_history_bugfix_plan.md) |
 | [generic_cognition_prompt_migration_plan.md](archive/completed/bugfix/generic_cognition_prompt_migration_plan.md) |
+| [history_media_projection_image_boundary_plan.md](archive/completed/bugfix/history_media_projection_image_boundary_plan.md) |
 | [l3_content_anchor_open_loop_resolution_plan.md](archive/completed/bugfix/l3_content_anchor_open_loop_resolution_plan.md) |
 | [memory_lifecycle_specialist_routing_plan.md](archive/completed/bugfix/memory_lifecycle_specialist_routing_plan.md) |
 | [quote_aware_rag_sequence_plan.md](archive/completed/bugfix/quote_aware_rag_sequence_plan.md) |
@@ -193,5 +199,7 @@ plans.
 | Plan |
 |---|
 | [character_reflection_cycle_stage1_plan.md](archive/superseded/character_reflection_cycle_stage1_plan.md) |
+| [conversation_graph_recent_context_plan.md](archive/superseded/conversation_graph_recent_context_plan.md) |
+| [graph_rag_recall_experiment_plan.md](archive/superseded/graph_rag_recall_experiment_plan.md) |
 | [rag_supervisor2_inner_loop_agents_plan.md](archive/superseded/rag_supervisor2_inner_loop_agents_plan.md) |
 | [short_circuit_early_stop_plan.md](archive/superseded/short_circuit_early_stop_plan.md) |
