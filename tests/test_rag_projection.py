@@ -12,11 +12,11 @@ from kazusa_ai_chatbot.nodes.persona_supervisor2_rag_projection import project_k
 
 
 def _assert_ordered_evidence_block(text: str) -> None:
-    assert text.startswith("Conclusion: ")
-    conclusion_index = text.index("Conclusion: ")
-    uncertainty_index = text.index("Uncertainty: ")
-    if "Evidence summary:" in text:
-        evidence_index = text.index("Evidence summary:")
+    assert text.startswith('结论：')
+    conclusion_index = text.index('结论：')
+    uncertainty_index = text.index('不确定性：')
+    if '上下文：' in text:
+        evidence_index = text.index('上下文：')
         assert conclusion_index < evidence_index < uncertainty_index
     else:
         assert conclusion_index < uncertainty_index
@@ -152,10 +152,10 @@ def test_project_known_facts_groups_summarized_evidence() -> None:
     )
 
     assert result["third_party_profiles"] == ["小钳子 resolved to user-2"]
-    assert result["memory_evidence"][0]["summary"].startswith("Conclusion: memory summary")
-    assert result["memory_evidence"][0]["content"].startswith("Evidence summary:")
+    assert result["memory_evidence"][0]["summary"].startswith('结论：memory summary')
+    assert result["memory_evidence"][0]["content"].startswith('上下文：')
     assert "AAAAAAA…" in result["memory_evidence"][0]["content"]
-    assert result["conversation_evidence"] == ["Conclusion: conversation summary\nUncertainty: none"]
+    assert result["conversation_evidence"] == ['结论：conversation summary\n不确定性：无']
     assert result["external_evidence"][0]["summary"] == "web summary"
     assert result["external_evidence"][0]["content"] == "https:/…"
     assert result["external_evidence"][0]["url"] == ""
@@ -202,11 +202,11 @@ def test_project_known_facts_does_not_stringify_malformed_fact_values() -> None:
     ]
     assert result["third_party_profiles"] == []
     assert result["memory_evidence"] == [
-        {
-            "summary": "Conclusion: memory summary",
-            "content": "Uncertainty: no prompt-facing memory evidence was available.",
-        }
-    ]
+            {
+                "summary": '结论：memory summary',
+                "content": '不确定性：没有可用于提示的记忆证据。',
+            }
+        ]
     assert result["external_evidence"] == [{"summary": "web summary", "content": "", "url": ""}]
 
 
@@ -246,14 +246,14 @@ def test_project_known_facts_projects_recall_agent_result() -> None:
 
     recall_entry = result["recall_evidence"][0]
     assert recall_entry["selected_summary"] == (
-        "Conclusion: The active agreement is pickup at 9:30."
+        '结论：The active agreement is pickup at 9:30.'
     )
     assert recall_entry["recall_type"] == "active_episode_agreement"
     assert recall_entry["primary_source"] == "conversation_progress"
     assert recall_entry["supporting_sources"] == ["user_memory_units"]
     assert recall_entry["freshness_basis"] == "Active progress is current."
     assert recall_entry["conflicts"] == []
-    assert recall_entry["evidence_summary"].startswith("Evidence summary:")
+    assert recall_entry["evidence_summary"].startswith('上下文：')
     assert "Pickup at 9:30." in recall_entry["evidence_summary"]
     assert "2026-05-02 11:00:00" in recall_entry["evidence_summary"]
     assert "2026-05-01T23:00:00+00:00" not in repr(recall_entry)
@@ -285,7 +285,7 @@ def test_project_known_facts_caps_recall_evidence_to_three_entries() -> None:
     )
 
     assert [
-        entry["selected_summary"].replace("Conclusion: ", "")
+        entry["selected_summary"].replace('结论：', '')
         for entry in result["recall_evidence"]
     ] == [
         "Recall summary 0",
@@ -401,11 +401,11 @@ def test_project_known_facts_maps_top_level_capability_payloads() -> None:
         }
     ]
     assert result["conversation_evidence"] == [
-        "Conclusion: speaker: phrase\nUncertainty: none",
-        "Conclusion: speaker: link\nUncertainty: none",
+        '结论：speaker: phrase\n不确定性：无',
+        '结论：speaker: link\n不确定性：无',
     ]
-    assert result["memory_evidence"][0]["summary"] == "Conclusion: memory summary"
-    assert result["memory_evidence"][0]["content"].startswith("Evidence summary:")
+    assert result["memory_evidence"][0]["summary"] == '结论：memory summary'
+    assert result["memory_evidence"][0]["content"].startswith('上下文：')
     assert "official address is 123 Example Street" in result["memory_evidence"][0]["content"]
     assert result["user_image"]["display_name"] == "Tester"
     assert "_user_memory_units" not in result["user_image"]
@@ -488,8 +488,8 @@ def test_project_known_facts_preserves_scoped_user_memory_metadata_and_candidate
 
     assert len(result["memory_evidence"]) == 1
     entry = result["memory_evidence"][0]
-    assert entry["summary"] == "Conclusion: scoped continuity summary"
-    assert entry["content"].startswith("Evidence summary:")
+    assert entry["summary"] == '结论：scoped continuity summary'
+    assert entry["content"].startswith('上下文：')
     assert "冰淇淋摊老板是千纱的初中学姐。" in entry["content"]
     assert "The active character's official address is 123 Example Street." in entry["content"]
     assert entry["source_system"] == "user_memory_units"
@@ -666,11 +666,11 @@ def test_project_known_facts_projects_formatted_memory_evidence() -> None:
     )
 
     entry = result["memory_evidence"][0]
-    assert entry["summary"] == "Conclusion: User prefers tea."
-    assert entry["content"].startswith("Evidence summary:\n- ")
+    assert entry["summary"] == '结论：User prefers tea.'
+    assert entry["content"].startswith('上下文：\n- ')
     assert "User prefers tea during late sessions." in entry["content"]
     assert "2026-05-02 00:34:56" in entry["content"]
-    assert "Uncertainty: none" in entry["content"]
+    assert '不确定性：无' in entry["content"]
     assert "2026-05-01T12:34:56.789000+00:00" not in repr(entry)
 
 
@@ -705,7 +705,7 @@ def test_project_known_facts_projects_formatted_conversation_evidence() -> None:
     evidence = result["conversation_evidence"][0]
     _assert_ordered_evidence_block(evidence)
     assert "Tester promised to send the chart." in evidence
-    assert "Tester at 2026-05-02 00:34:56" in evidence
+    assert "Tester（2026-05-02 00:34:56）" in evidence
     assert "Tester: I will send the chart tonight." in evidence
     assert "row-1" not in evidence
     assert "message-1" not in evidence
@@ -743,6 +743,7 @@ def test_project_known_facts_redacts_source_ids_from_public_conversation_summary
     evidence = result["conversation_evidence"][0]
     assert "123e4567-e89b-12d3-a456-426614174000" not in evidence
     assert "global_user_id" not in evidence
+    assert "[来源标识已省略]" not in evidence
     assert "Tester sent the chart." in evidence
 
 
@@ -812,12 +813,12 @@ def test_project_known_facts_projects_formatted_recall_evidence() -> None:
 
     entry = result["recall_evidence"][0]
     assert entry["selected_summary"] == (
-        "Conclusion: The active agreement is pickup at 9:30."
+        '结论：The active agreement is pickup at 9:30.'
     )
-    assert entry["evidence_summary"].startswith("Evidence summary:\n- ")
+    assert entry["evidence_summary"].startswith('上下文：\n- ')
     assert "Pickup at 9:30." in entry["evidence_summary"]
     assert "2026-05-02 11:00:00" in entry["evidence_summary"]
-    assert "Uncertainty: none" in entry["evidence_summary"]
+    assert '不确定性：无' in entry["evidence_summary"]
     assert "candidates" not in entry
     assert "2026-05-01T23:00:00+00:00" not in repr(entry)
 

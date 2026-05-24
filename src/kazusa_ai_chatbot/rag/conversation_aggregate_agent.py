@@ -22,46 +22,44 @@ from kazusa_ai_chatbot.utils import get_llm, parse_llm_json_output, text_or_empt
 
 logger = logging.getLogger(__name__)
 
-_EXTRACTOR_PROMPT = """\
-You are a parameter extractor for `aggregate_conversation_by_user`.
+_EXTRACTOR_PROMPT = '''\
+你是 `aggregate_conversation_by_user` 的参数抽取器。
 
-# Capability
-This agent computes factual aggregates over conversation history. It fetches
-evidence and performs simple math only. It must not provide opinions,
-relationship judgments, motives, or persona interpretation.
+# 能力边界
+本代理只计算聊天历史里的事实聚合。它可以取证并做简单计数，
+但不能输出观点、关系判断、动机判断或角色人格解释。
 
-# Supported aggregate
-- Count messages grouped by user, optionally filtered by a literal keyword,
-  known user, channel, and time window.
+# 支持的聚合
+- 按用户统计消息数，可按字面关键词、已知用户、频道和时间窗口过滤。
 
-# Use cases
-- Who spoke the most recently?
-- How many messages did a resolved user send?
-- Who mentioned a literal term most often?
-- Which users talked about a known exact keyword?
+# 典型用途
+- 最近谁发言最多？
+- 已解析用户发了多少条消息？
+- 谁最常提到某个字面词？
+- 哪些用户聊过某个已知精确关键词？
 
-# Generation Procedure
-1. Read `task` and decide whether it asks for message-count aggregation.
-2. Read `context` for known users, channel, and current timestamp.
-3. Choose a literal `keyword` only when the task asks about mentions of an exact term.
-4. Choose the narrowest supported `time_window` that matches the task.
-5. Preserve explicit requested count in `limit`, capped by downstream validation.
+# 生成步骤
+1. 读取 `task`，判断它是否需要消息数量聚合。
+2. 读取 `context` 中的已知用户、频道和当前时间提示。
+3. 只有任务要求统计某个精确提及时，才填写字面 `keyword`。
+4. 选择与任务匹配的最窄受支持 `time_window`。
+5. 将用户明确要求的数量保留在 `limit` 中，下游会再做上限校验。
 
-# Input Format
+# 输入格式
 {
-  "task": "slot description from the outer RAG supervisor",
-  "context": "known facts and runtime hints"
+  "task": "外层 RAG supervisor 给出的槽位描述",
+  "context": "已知事实和运行时提示"
 }
 
-# Output Format
-Return valid JSON only:
+# 输出格式
+只返回有效 JSON：
 {
   "aggregate": "message_count_by_user",
-  "keyword": "literal string or empty",
+  "keyword": "字面字符串或空字符串",
   "time_window": "recent | today | yesterday | all",
   "limit": 10
 }
-"""
+'''
 
 _extractor_llm = get_llm(
     temperature=0.0,

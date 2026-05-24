@@ -5,9 +5,14 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from typing import TypedDict
 
+from kazusa_ai_chatbot.rag.evidence_formatting import (
+    sanitize_public_rag_evidence_text,
+)
+
 
 MAX_CONTINUATION_DECISIONS_PER_RAG_RUN = 2
 MAX_REFINED_QUERY_LENGTH = 1200
+MAX_PROMOTION_SUMMARY_LENGTH = 800
 
 _TRUE_STRINGS = {
     "1",
@@ -75,11 +80,14 @@ _MISSING_USER_PLACEHOLDER_MARKERS = (
 
 
 class RAGContinuationDecision(TypedDict):
-    """Structured decision for bounded refined-query re-entry."""
+    """Structured decision for candidate promotion or refined-query re-entry."""
 
     should_continue: bool
     refined_query: str
     reason: str
+    promote_candidate: bool
+    promoted_candidate_indexes: list[int]
+    promotion_summary: str
 
 
 def empty_continuation_decision() -> RAGContinuationDecision:
@@ -89,26 +97,57 @@ def empty_continuation_decision() -> RAGContinuationDecision:
         "should_continue": False,
         "refined_query": "",
         "reason": "",
+        "promote_candidate": False,
+        "promoted_candidate_indexes": [],
+        "promotion_summary": "",
     }
     return decision
 
 
-def normalize_continuation_decision(raw: object) -> RAGContinuationDecision:
+def normalize_continuation_decision(
+    raw: object,
+    *,
+    candidate_count: int = 0,
+) -> RAGContinuationDecision:
     """Normalize untrusted refiner output into the public decision shape.
 
     Args:
         raw: Parsed LLM output or another external value.
+        candidate_count: Number of observation candidates the LLM could cite.
 
     Returns:
-        A fully populated continuation decision. Stop decisions cannot carry a
-        refined query because only ``should_continue`` may trigger re-entry.
+        A fully populated continuation decision. Candidate promotion, when
+        valid, suppresses refined-query re-entry.
     """
 
     if not isinstance(raw, Mapping):
         decision = empty_continuation_decision()
         return decision
 
+    promotion_indexes = _ordered_valid_indexes(
+        raw.get("promoted_candidate_indexes"),
+        candidate_count,
+    )
+    if not promotion_indexes:
+        promotion_indexes = _ordered_valid_indexes(
+            raw.get("candidate_indexes"),
+            candidate_count,
+        )
+    promotion_summary = _text(
+        raw.get("promotion_summary"),
+        limit=MAX_PROMOTION_SUMMARY_LENGTH,
+    )
+    promotion_summary = sanitize_public_rag_evidence_text(promotion_summary)
+    promote_candidate = (
+        _bool_value(raw.get("promote_candidate"))
+        and bool(promotion_indexes)
+        and bool(promotion_summary)
+    )
+
     should_continue = _bool_value(raw.get("should_continue"))
+    if promote_candidate:
+        should_continue = False
+
     refined_query = ""
     if should_continue:
         refined_query = _text(
@@ -120,6 +159,9 @@ def normalize_continuation_decision(raw: object) -> RAGContinuationDecision:
         "should_continue": should_continue,
         "refined_query": refined_query,
         "reason": _text(raw.get("reason"), limit=MAX_REFINED_QUERY_LENGTH),
+        "promote_candidate": promote_candidate,
+        "promoted_candidate_indexes": promotion_indexes if promote_candidate else [],
+        "promotion_summary": promotion_summary if promote_candidate else "",
     }
     return decision
 
@@ -130,6 +172,7 @@ def validate_refined_query(
     original_query: str,
     previous_refined_queries: Sequence[str],
     continuation_count: int,
+    candidate_count: int = 0,
     max_continuations: int = MAX_CONTINUATION_DECISIONS_PER_RAG_RUN,
 ) -> RAGContinuationDecision:
     """Validate whether a normalized decision may re-enter the initializer.
@@ -139,15 +182,23 @@ def validate_refined_query(
         original_query: The first user query for this RAG run.
         previous_refined_queries: Refined queries already accepted in this run.
         continuation_count: Prior accepted refined-query decisions.
+        candidate_count: Number of observation candidates the LLM could cite.
         max_continuations: Maximum refined-query decisions allowed in this run.
 
     Returns:
-        A decision that may continue only when its refined query is present,
-        different from the original and prior refined queries, and shaped like
-        natural-language input rather than an executable slot or backend query.
+        A decision that may promote candidate evidence, or may continue only
+        when its refined query is present, different from the original and
+        prior refined queries, and shaped like natural-language input rather
+        than an executable slot or backend query.
     """
 
-    decision = normalize_continuation_decision(raw)
+    decision = normalize_continuation_decision(
+        raw,
+        candidate_count=candidate_count,
+    )
+    if decision["promote_candidate"]:
+        return decision
+
     if not decision["should_continue"]:
         return decision
 
@@ -191,6 +242,9 @@ def _without_refined_query(
         "should_continue": False,
         "refined_query": "",
         "reason": decision["reason"],
+        "promote_candidate": False,
+        "promoted_candidate_indexes": [],
+        "promotion_summary": "",
     }
     return stopped_decision
 
@@ -216,6 +270,30 @@ def _text(value: object, *, limit: int) -> str:
     if len(text) > limit:
         text = text[:limit].rstrip()
     return text
+
+
+def _ordered_valid_indexes(raw_value: object, max_index: int) -> list[int]:
+    """Keep LLM-selected candidate indexes that exist in the payload."""
+
+    if not isinstance(raw_value, list):
+        indexes: list[int] = []
+        return indexes
+
+    valid_indexes: list[int] = []
+    for value in raw_value:
+        if isinstance(value, int) and not isinstance(value, bool):
+            index = value
+        else:
+            value_text = _text(value, limit=20)
+            if not value_text.isdigit():
+                continue
+            index = int(value_text)
+        if index < 0 or index >= max_index:
+            continue
+        if index in valid_indexes:
+            continue
+        valid_indexes.append(index)
+    return valid_indexes
 
 
 def _looks_like_planned_slot(query: str) -> bool:

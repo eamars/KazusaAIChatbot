@@ -367,29 +367,25 @@ def _rows_for_review_ids(
     return selected_rows
 
 
-_REVIEW_PROMPT = """\
-You review scoped current-user memory candidates for one durable-memory
-evidence slot. Decide which retrieved rows directly answer the slot, which are
-nearby context only, and which should be left out. Do not invent facts and do
-not use shared/world memory assumptions.
+_REVIEW_PROMPT = '''\
+你审查 scoped current-user memory 候选，用于一个 durable-memory evidence 槽位。
+判断哪些检索行直接回答槽位，哪些只是附近上下文，哪些应排除。
+不要编造事实，也不要使用 shared/world memory 假设。
 
-# Generation Procedure
-1. Read the evidence slot and candidate rows.
-2. Mark a row confirmed only when it directly supports the requested private
-   current-user continuity.
-3. Treat a remembered concrete instance as direct support for a broader slot
-   when the row names a specific product, plan, decision, promise, preference,
-   recommendation, or prior interaction that satisfies the requested category.
-4. Use `subjective_appraisal` and `relationship_signal` as supporting context
-   for whether the row answers the slot, but do not invent facts beyond them.
-5. Mark a row nearby when it is related but does not directly answer the slot.
-6. Leave unrelated rows out of both confirmed and nearby lists.
-7. If no row directly answers the slot, return no confirmed ids and explain the
-   uncertainty briefly.
+# 生成步骤
+1. 读取 evidence slot 和 candidate rows。
+2. 只有一行直接支持所请求的当前用户私有连续性时，才标为 confirmed。
+3. 当某行记住的具体实例命名了满足请求类别的特定 product、plan、decision、
+   promise、preference、recommendation 或 prior interaction 时，可视为对更宽槽位的直接支持。
+4. `subjective_appraisal` 和 `relationship_signal` 只能作为该行是否回答槽位的辅助上下文，
+   不要据此编造额外事实。
+5. 相关但不能直接回答槽位的行标为 nearby。
+6. 无关行不要放入 confirmed 或 nearby。
+7. 如果没有行直接回答槽位，返回空 confirmed ids，并用中文简短说明不确定性。
 
-# Input Format
+# 输入格式
 {
-  "task": "Memory-evidence slot text",
+  "task": "Memory-evidence 槽位文本",
   "candidates": [
     {
       "unit_id": "stable candidate id",
@@ -404,15 +400,15 @@ not use shared/world memory assumptions.
   ]
 }
 
-# Output Format
-Return valid JSON only:
+# 输出格式
+只返回有效 JSON：
 {
   "confirmed_unit_ids": ["candidate unit_id"],
   "nearby_unit_ids": ["candidate unit_id"],
-  "summary": "short factual summary of confirmed rows, or empty string",
-  "uncertainty": "short uncertainty note, or empty string"
+  "summary": "已确认行的简短事实摘要，或空字符串",
+  "uncertainty": "简短不确定性说明，或空字符串"
 }
-"""
+'''
 _review_llm = get_llm(
     temperature=0.0,
     top_p=1.0,
@@ -433,7 +429,7 @@ async def _review_user_memory_rows(
             "confirmed_unit_ids": [],
             "nearby_unit_ids": [],
             "summary": "",
-            "uncertainty": "No reviewable scoped memory rows were retrieved.",
+            "uncertainty": "没有检索到可审查的当前用户记忆行。",
         }
         return review
 

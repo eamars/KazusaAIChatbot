@@ -172,9 +172,11 @@ def _conclusion_line(summary: str) -> str:
     """Return one prompt-facing conclusion line."""
 
     summary_text = sanitize_public_rag_evidence_text(summary)
-    if summary_text.startswith("Conclusion: "):
+    if summary_text.startswith("结论："):
         return summary_text
-    conclusion = f"Conclusion: {summary_text}"
+    if summary_text.startswith("Conclusion: "):
+        summary_text = summary_text.removeprefix("Conclusion: ").strip()
+    conclusion = f"结论：{summary_text}"
     return conclusion
 
 
@@ -193,15 +195,15 @@ def _evidence_summary_content(
     if not clean_items:
         uncertainty_text = (
             sanitize_public_rag_evidence_text(empty_uncertainty)
-            or "none"
+            or "无"
         )
-        content = f"Uncertainty: {uncertainty_text}"
+        content = f"不确定性：{uncertainty_text}"
         return content
 
-    lines = ["Evidence summary:"]
+    lines = ["上下文："]
     for item in clean_items:
         lines.append(f"- {item}")
-    lines.append("Uncertainty: none")
+    lines.append("不确定性：无")
     content = "\n".join(lines)
     return content
 
@@ -222,16 +224,6 @@ def _first_local_second_time(
     return ""
 
 
-def _memory_row_source(row: dict[str, Any]) -> str:
-    """Return a readable source label for one memory evidence row."""
-
-    for field in ("source_system", "source_kind", "memory_name", "origin"):
-        source = text_or_empty(row.get(field))
-        if source:
-            return source
-    return "memory"
-
-
 def _memory_evidence_items(
     rows: list[dict[str, Any]],
     *,
@@ -247,15 +239,14 @@ def _memory_evidence_items(
         if not content:
             continue
         clipped_content = _clip_text(content, limit=evidence_char_limit)
-        source = _memory_row_source(row)
         evidence_time = _first_local_second_time(
             row,
             ("updated_at", "timestamp", "created_at", "last_seen_at"),
         )
         if evidence_time:
-            evidence_item = f"{source} at {evidence_time}: {clipped_content}"
+            evidence_item = f"记忆（{evidence_time}）：{clipped_content}"
         else:
-            evidence_item = f"{source}: {clipped_content}"
+            evidence_item = f"记忆：{clipped_content}"
         evidence_items.append(evidence_item)
     return evidence_items
 
@@ -287,12 +278,12 @@ def _conversation_evidence_items(
         clipped_content = _clip_text(content, limit=evidence_char_limit)
         speaker = text_or_empty(row.get("display_name"))
         if not speaker:
-            speaker = text_or_empty(row.get("role")) or "conversation_history"
+            speaker = text_or_empty(row.get("role")) or "对话记录"
         evidence_time = _first_local_second_time(row, ("timestamp",))
         if evidence_time:
-            evidence_item = f"{speaker} at {evidence_time}: {clipped_content}"
+            evidence_item = f"{speaker}（{evidence_time}）：{clipped_content}"
         else:
-            evidence_item = f"{speaker}: {clipped_content}"
+            evidence_item = f"{speaker}：{clipped_content}"
         evidence_items.append(evidence_item)
     return evidence_items
 
@@ -314,15 +305,14 @@ def _recall_candidate_items(
         if not claim:
             continue
         clipped_claim = _clip_text(claim, limit=evidence_char_limit)
-        source = text_or_empty(candidate.get("source")) or "recall"
         evidence_time = _first_local_second_time(
             candidate,
             ("evidence_time", "timestamp", "updated_at"),
         )
         if evidence_time:
-            evidence_item = f"{source} at {evidence_time}: {clipped_claim}"
+            evidence_item = f"召回记录（{evidence_time}）：{clipped_claim}"
         else:
-            evidence_item = f"{source}: {clipped_claim}"
+            evidence_item = f"召回记录：{clipped_claim}"
         evidence_items.append(evidence_item)
     return evidence_items
 
@@ -424,7 +414,7 @@ def _recall_evidence_entry(
     )
     entry["evidence_summary"] = _evidence_summary_content(
         evidence_items,
-        empty_uncertainty="no prompt-facing recall evidence was available.",
+        empty_uncertainty="没有可用于提示的召回证据。",
     )
     return entry
 
@@ -446,7 +436,7 @@ def _memory_evidence_entry(
         "content": _evidence_summary_content(
             evidence_items,
             empty_uncertainty=(
-                "no prompt-facing memory evidence was available."
+                "没有可用于提示的记忆证据。"
             ),
         ),
     }
@@ -575,6 +565,20 @@ def project_known_facts(
         continuation = fact.get("continuation")
         if isinstance(continuation, dict):
             dispatched_entry["continuation"] = {
+                "promote_candidate": bool(
+                    continuation.get("promote_candidate", False)
+                ),
+                "promoted_candidate_indexes": [
+                    index
+                    for index in continuation.get(
+                        "promoted_candidate_indexes",
+                        [],
+                    )
+                    if isinstance(index, int) and not isinstance(index, bool)
+                ],
+                "promotion_summary": text_or_empty(
+                    continuation.get("promotion_summary")
+                ),
                 "should_continue": bool(
                     continuation.get("should_continue", False)
                 ),
@@ -761,8 +765,7 @@ def project_known_facts(
                         "evidence_summary": _evidence_summary_content(
                             [],
                             empty_uncertainty=(
-                                "no prompt-facing recall evidence was "
-                                "available."
+                                "没有可用于提示的召回证据。"
                             ),
                         ),
                     }

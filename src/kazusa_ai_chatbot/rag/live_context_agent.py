@@ -358,40 +358,39 @@ def _normalize_selector_plan(raw_plan: dict[str, Any]) -> dict[str, Any]:
     return plan
 
 
-_EXTERNAL_LIVE_SELECTOR_PROMPT = """\
-You choose the bounded source path for one live external fact request.
-The live value itself must come from public live/web evidence, never from memory.
-Memory or recent conversation may only resolve the target/scope, such as a
-stable character location or a recently stated user location.
+_EXTERNAL_LIVE_SELECTOR_PROMPT = '''\
+你要为一个 live external fact 请求选择有边界的来源路径。
+实时值本身必须来自公开实时/网页证据，绝不能来自 memory。
+memory 或近期聊天只能用于解析 target/scope，例如稳定的角色位置或用户近期提到的位置。
 
-# Generation Procedure
-1. Identify the changing real-time fact type: weather, temperature,
-   opening_status, schedule, price, exchange_rate, current_event_status, or other.
-2. Identify target_source:
-   - explicit: the task names the place, venue, market, product, event, or public target.
-   - active_character_default: the task asks for the character's location/scope.
-   - current_user_recent: the task asks for the current user's own location/scope.
-   - unknown: no trusted target/scope is visible.
-3. Fill target only when target_source is explicit.
-4. If the target is unknown, include the missing context, usually "location" or "target".
+# 生成步骤
+1. 识别变化中的实时事实类型：weather、temperature、opening_status、
+   schedule、price、exchange_rate、current_event_status 或 other。
+2. 识别 target_source：
+   - explicit: 任务明确给出地点、场馆、市场、产品、事件或公开目标。
+   - active_character_default: 任务询问活跃角色的位置/范围。
+   - current_user_recent: 任务询问当前用户自己的位置/范围。
+   - unknown: 没有可信 target/scope 可见。
+3. 只有 target_source 为 explicit 时填写 target。
+4. 如果 target 未知，在 missing_context 中写出缺失项，通常是 "location" 或 "target"。
 
-# Input Format
+# 输入格式
 {
-  "task": "Live-context slot text",
-  "original_query": "decontextualized user query when available",
-  "current_slot": "slot label",
-  "known_facts": "ordered facts from previous RAG2 slots"
+  "task": "Live-context 槽位文本",
+  "original_query": "可用时的去上下文化用户问题",
+  "current_slot": "槽位标签",
+  "known_facts": "之前 RAG2 槽位得到的有序事实"
 }
 
-# Output Format
-Return valid JSON only:
+# 输出格式
+只返回有效 JSON：
 {
   "fact_type": "weather | temperature | opening_status | schedule | price | exchange_rate | current_event_status | other",
   "target_source": "explicit | active_character_default | current_user_recent | unknown",
-  "target": "explicit target text, otherwise empty",
-  "missing_context": ["location or target when unresolved"]
+  "target": "明确目标文本，否则为空字符串",
+  "missing_context": ["未解析时缺少的 location 或 target"]
 }
-"""
+'''
 _external_live_selector_llm = get_llm(
     temperature=0.0,
     top_p=1.0,

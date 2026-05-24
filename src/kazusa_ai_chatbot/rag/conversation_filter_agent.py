@@ -37,41 +37,38 @@ from kazusa_ai_chatbot.utils import get_llm, parse_llm_json_output, text_or_empt
 
 logger = logging.getLogger(__name__)
 
-_GENERATOR_PROMPT = Template("""\
-You generate structured filter parameters only for `get_conversation`.
+_GENERATOR_PROMPT = Template('''\
+你只为 `get_conversation` 生成结构化过滤参数。
 
-# Scope
-- Produce parameters only for `get_conversation`.
-- Prefer explicit platform, channel, user, display_name, and time range from
-  `context` and `known_facts`.
-- If task or context.original_query explicitly asks for a count, such as
-  "最近3条" or "last 3 messages", put that number in `limit`.
-- If previous `feedback` says too few results, widen the time range or raise
-  `limit`.
-- If previous `feedback` says the user filter is wrong, change the user
-  filter. If it says the time range is wrong, change the time range.
-- Do not invent nonexistent UUIDs; leave unavailable fields empty.
-- Use English for generated control/status text. Preserve display names,
-  anchors, quotes, URLs, filenames, and source text in their original language.
+# 范围
+- 只生成 `get_conversation` 的参数。
+- 优先使用 `context` 和 `known_facts` 中明确的 platform、channel、user、
+  display_name 和时间范围。
+- 如果 task 或 context.original_query 明确要求数量，例如 "最近3条" 或
+  "last 3 messages"，把该数量写入 `limit`。
+- 如果上一轮 `feedback` 说结果太少，扩大时间范围或提高 `limit`。
+- 如果上一轮 `feedback` 说用户过滤错误，就修改用户过滤；如果说时间范围错误，
+  就修改时间范围。
+- 不要编造不存在的 UUID；不可用字段留空。
+- 生成的控制/状态说明使用中文。保留 display names、anchors、quotes、URLs、
+  filenames 和 source text 的原始语言。
 
-# Generation Procedure
-1. Read `task` and identify which structured conversation records are needed.
-2. Extract explicit platform, channel, user, display_name, time range, and
-   limit from `context` and `known_facts`.
-3. If feedback says too few results, wrong user, or wrong time, adjust that
-   filter.
-4. Do not guess UUIDs; use display_name or omit user filtering when no clear
-   UUID exists.
+# 生成步骤
+1. 读取 `task`，识别需要哪些结构化聊天记录。
+2. 从 `context` 和 `known_facts` 抽取明确的 platform、channel、user、
+   display_name、time range 和 limit。
+3. 如果 feedback 指出结果太少、用户错误或时间错误，调整对应过滤器。
+4. 不要猜 UUID；没有明确 UUID 时使用 display_name 或省略用户过滤。
 
-# Input Format
+# 输入格式
 {
-  "task": "slot description from the outer RAG supervisor",
-  "context": "known facts and runtime hints",
-  "feedback": "previous judge feedback, or empty string"
+  "task": "外层 RAG supervisor 给出的槽位描述",
+  "context": "已知事实和运行时提示",
+  "feedback": "上一轮 judge feedback，或空字符串"
 }
 
-# Output Format
-Return valid JSON only:
+# 输出格式
+只返回有效 JSON：
 {
   "platform": "string or omitted",
   "platform_channel_id": "string or omitted",
@@ -81,7 +78,7 @@ Return valid JSON only:
   "from_timestamp": "local YYYY-MM-DD HH:MM or omitted",
   "to_timestamp": "local YYYY-MM-DD HH:MM or omitted"
 }
-""").substitute(default_limit=RAG_SEARCH_DEFAULT_TOP_K)
+''').substitute(default_limit=RAG_SEARCH_DEFAULT_TOP_K)
 _generator_llm = get_llm(
     temperature=0.0,
     top_p=1.0,
@@ -90,42 +87,39 @@ _generator_llm = get_llm(
     api_key=RAG_SUBAGENT_LLM_API_KEY,
 )
 
-_JUDGE_PROMPT = """\
-You judge whether a `get_conversation` result resolves the current slot.
+_JUDGE_PROMPT = '''\
+你判断 `get_conversation` 的结果是否解决当前槽位。
 
-# Task
-- Decide whether the current result is enough to resolve the slot.
-- If unresolved, feedback must specify how the next attempt should adjust
-  filters.
+# 任务
+- 判断当前结果是否足够解决槽位。
+- 如果未解决，feedback 必须说明下一次应如何调整过滤器。
 
-# Audit Procedure
-1. Read `task` and identify the needed conversation record range.
-2. Check whether `result` contains enough records, the right user, and the
-   right time range.
-3. Return `resolved: true` only when the result is enough to resolve the slot.
-4. If unresolved, state whether the next attempt should widen time, raise
-   limit, change user filter, or adjust direction.
+# 生成步骤
+1. 读取 `task`，识别需要的聊天记录范围。
+2. 检查 `result` 是否包含足够记录、正确用户和正确时间范围。
+3. 只有结果足够解决槽位时，才返回 `resolved: true`。
+4. 如果未解决，说明下一次应扩大时间、提高 limit、修改用户过滤或调整方向。
 
-# Input Format
+# 输入格式
 {
-  "task": "slot description from the outer RAG supervisor",
-  "result": "tool result from get_conversation"
+  "task": "外层 RAG supervisor 给出的槽位描述",
+  "result": "get_conversation 的工具结果"
 }
 
-# Common Feedback Directions
-- Too few results; widen time range or raise limit.
-- Wrong filter; change global_user_id or display_name.
-- Time range too narrow or direction reversed.
-- Relevant records already found; stop.
-- Use English for generated control/status text while preserving source text.
+# 常见反馈方向
+- 结果太少；扩大时间范围或提高 limit。
+- 过滤错误；修改 global_user_id 或 display_name。
+- 时间范围太窄或方向反了。
+- 已找到相关记录；停止。
+- 反馈说明使用中文；source text 保持原文。
 
-# Output Format
-Return valid JSON only:
+# 输出格式
+只返回有效 JSON：
 {
   "resolved": true or false,
   "feedback": "string"
 }
-"""
+'''
 _judge_llm = get_llm(
     temperature=0.0,
     top_p=1.0,
@@ -257,7 +251,7 @@ async def _judge(task: str, result: object) -> tuple[bool, str]:
     response = await _judge_llm.ainvoke([system_prompt, human_message])
     verdict = parse_llm_json_output(response.content)
     if not isinstance(verdict, dict):
-        return_value = False, "Invalid judge output; adjust the time range or raise limit."
+        return_value = False, "judge 输出无效；调整时间范围或提高 limit。"
         return return_value
 
     resolved = bool(verdict.get("resolved", False))

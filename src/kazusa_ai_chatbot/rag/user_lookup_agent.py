@@ -26,26 +26,26 @@ logger = logging.getLogger(__name__)
 
 _USER_PROFILE_CACHE_SOURCE = "user_profile"
 
-_EXTRACTOR_PROMPT = """\
-Extract the exact display name to look up from the slot description below.
+_EXTRACTOR_PROMPT = '''\
+从下面的槽位描述中抽取要查询的精确 display name。
 
-# Generation Procedure
-1. Read `task` and find the literal display name being resolved.
-2. Use `context` only to disambiguate, not to invent a name.
-3. Output an empty string only when no display name is present.
+# 生成步骤
+1. 读取 `task`，找出正在解析的字面显示名。
+2. `context` 只能用于消歧，不能用来编造名字。
+3. 只有确实没有显示名时，才输出空字符串。
 
-# Input Format
+# 输入格式
 {
-    "task": "slot description from the outer RAG supervisor",
-    "context": "known facts and runtime hints"
+    "task": "外层 RAG supervisor 给出的槽位描述",
+    "context": "已知事实和运行时提示"
 }
 
-# Output Format:
-Valid JSON without markdown wrap. Only include the following keys
+# 输出格式
+只返回有效 JSON，不要 markdown 包裹。只包含以下键：
 {
-    "display_name": "the name string"
+    "display_name": "名字字符串"
 }
-"""
+'''
 
 _extractor_llm = get_llm(
     temperature=0.0,
@@ -85,28 +85,28 @@ async def _extract_display_name_with_llm(
     return return_value
 
 
-_PICKER_PROMPT = """\
-You are matching a target display name against a list of candidates.
-Return the global_user_id of the best match, or null if none is close enough.
+_PICKER_PROMPT = '''\
+你要把目标 display name 与候选列表进行匹配。
+返回最佳匹配的 global_user_id；如果没有足够接近的候选，返回 null。
 
-# Generation Procedure
-1. Read `target` as the name being resolved.
-2. Compare only against the provided `candidates`.
-3. Choose the closest candidate by display name and platform context.
-4. Return null if no candidate is close enough.
+# 生成步骤
+1. 将 `target` 视为正在解析的名字。
+2. 只在给定的 `candidates` 内比较。
+3. 根据 display name 和 platform 上下文选择最接近的候选。
+4. 如果没有足够接近的候选，返回 null。
 
-# Input Format
+# 输入格式
 {
-    "target": "display name to resolve",
-    "candidates": [{"global_user_id": "uuid", "display_name": "candidate name", "platform": "optional platform"}]
+    "target": "需要解析的 display name",
+    "candidates": [{"global_user_id": "uuid", "display_name": "候选名字", "platform": "可选平台"}]
 }
 
-# Output Format:
-Valid JSON without markdown wrap. Only include the following keys
+# 输出格式
+只返回有效 JSON，不要 markdown 包裹。只包含以下键：
 {
-    "global_user_id": "uuid" or null
+    "global_user_id": "uuid 或 null"
 }
-"""
+'''
 
 _picker_llm = get_llm(
     temperature=0.0,

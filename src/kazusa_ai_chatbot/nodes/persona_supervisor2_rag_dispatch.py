@@ -251,78 +251,51 @@ _DISPATCH_AGENT_ALIASES = {
 }
 
 _DISPATCHER_PROMPT = '''\
-You are a RAG Dispatcher. For each slot, select exactly one inner-loop retrieval agent and produce a concise task description for it.
+你是 RAG Dispatcher。对每个槽位，选择且只选择一个 inner-loop retrieval agent，
+并为该代理生成简短任务描述。
 
-## Agent Roster
+## Agent roster
 
-- `live_context_agent`: Top-level present-tense live context capability.
-  Answers runtime-backed current local time/date/weekday directly. For weather,
-  temperature, opening status, schedules, prices, exchange rates, or current
-  public status, resolves target/scope and then delegates to web.
-  Use for `Live-context:` slots.
+- `live_context_agent`：顶层当前时态 live context 能力。直接回答 runtime 支持的
+  当前本地时间/日期/星期；对天气、温度、营业状态、日程、价格、汇率或当前公开状态，
+  先解析 target/scope，再委托给 web。用于 `Live-context:` 槽位。
 
-- `conversation_evidence_agent`: Top-level conversation-history evidence capability.
-  Chooses hybrid exact/fuzzy search, structured filter, or aggregate
-  conversation worker internally. Use for `Conversation-evidence:` slots and
-  legacy `Conversation-keyword:`, `Conversation-semantic:`,
-  `Conversation-filter:`, and `Conversation-aggregate:` slots.
+- `conversation_evidence_agent`：顶层聊天历史证据能力。内部选择混合精确/模糊搜索、
+  结构化过滤或聚合 worker。用于 `Conversation-evidence:` 以及 legacy
+  `Conversation-keyword:`、`Conversation-semantic:`、`Conversation-filter:`、
+  `Conversation-aggregate:` 槽位。
 
-- `memory_evidence_agent`: Top-level durable memory evidence capability.
-  Handles durable memory evidence relevant to answering the slot.
-  Chooses hybrid exact/fuzzy persistent-memory workers internally.
-  Use for `Memory-evidence:`, legacy `Memory-search:`, and legacy
-  `Memory-keyword:` slots.
+- `memory_evidence_agent`：顶层 durable memory evidence 能力。处理回答槽位所需的
+  durable memory evidence，并内部选择混合精确/模糊 persistent-memory workers。
+  用于 `Memory-evidence:`、legacy `Memory-search:`、`Memory-keyword:` 槽位。
 
-- `person_context_agent`: Top-level person/profile/relationship capability.
-  Chooses identity, profile, user-list, or relationship worker internally.
-  Use for `Person-context:` slots.
+- `person_context_agent`：顶层 person/profile/relationship 能力。内部选择 identity、
+  profile、user-list 或 relationship worker。用于 `Person-context:` 槽位。
 
-- `user_lookup_agent`: Direct user-profile lookup by display name.
-  Queries the user_profiles collection (NOT conversation history). Returns global_user_id.
-  Use as the ONLY choice when the slot is about resolving who a named person is.
+- `user_lookup_agent`：按 display name 直接查询 user_profiles，返回 global_user_id。
+  仅当槽位本身是在解析命名人物是谁时使用。
 
-- `user_list_agent`: User enumeration by display-name predicates or participant metadata.
-  Handles listing users whose display names equal, contain, start with, or end with a literal value.
-  Use for "all users whose names..." and similar user-list questions.
+- `user_list_agent`：按 display-name 谓词或 participant metadata 枚举用户。
+  处理 display name 等于、包含、开头或结尾为某个字面值的用户列表问题。
 
-- `user_profile_agent`: Reads a user's full profile from the user-profile store.
-  Use ONLY when global_user_id is already present in known_facts. Never for unknown identities.
+- `user_profile_agent`：读取用户完整 profile。仅当 known_facts 已有 global_user_id
+  时使用；不要用于未知身份。
 
-- `relationship_agent`: Ranks profiled users by the character's relationship data.
-  Use for `Relationship:` slots. The agent extracts its own ranking parameters.
+- `relationship_agent`：按活跃角色的关系数据对已建档用户排序。
+  用于 `Relationship:` 槽位；代理自行抽取排名参数。
 
-- `conversation_filter_agent`: Internal structured filter over conversation history.
-  Handles: fetching messages from a known user (by global_user_id); filtering by channel, time range, or message count.
-  Top-level dispatch should use `conversation_evidence_agent`, which invokes this worker internally when appropriate.
+- `recall_agent`：从 scoped progress、active commitments、pending scheduled events
+  和 gated history proof 中协调活跃约定、持续承诺、当前计划、open loops 和当前 episode 状态。
+  用于 `Recall:` 槽位。
 
-- `conversation_aggregate_agent`: Internal factual aggregate over conversation history.
-  Handles: counts and rankings grouped by user, optionally filtered by literal keyword, known user, channel, and time window.
-  Top-level dispatch should use `conversation_evidence_agent` for "who spoke most", "how many messages", and "who mentioned X most" questions.
-  It returns evidence only, not opinions or persona interpretation.
+- `web_search_agent2`：公开互联网搜索。仅当信息不可能存在于本地聊天历史或 persistent memory 时使用。
 
-- `conversation_keyword_agent`: Internal exact-string worker used by hybrid conversation search.
-  Top-level dispatch should use `conversation_evidence_agent` for URLs, filenames, exact phrases, and proper nouns.
+内部 worker 由顶层能力自行选择，不要把它们作为 `agent_name` 输出。
 
-- `conversation_search_agent`: Internal hybrid semantic plus literal-anchor search over message content.
-  Top-level dispatch should use `conversation_evidence_agent` for fuzzy topic recall and exact/literal recall.
+## 槽位前缀 → agent mapping（先检查；覆盖下面所有规则）
 
-- `persistent_memory_keyword_agent`: Internal exact-keyword worker used by hybrid persistent-memory search.
-  Top-level dispatch should use `memory_evidence_agent` for tags, event names, and exact memory identifiers.
-
-- `persistent_memory_search_agent`: Internal hybrid search over persistent memories.
-  Top-level dispatch should use `memory_evidence_agent` for durable memory evidence.
-
-- `recall_agent`: Reconciles active agreements, ongoing promises, current plans,
-  open loops, and current-episode state from scoped progress, active commitments,
-  pending scheduled events, and gated history proof. Use for `Recall:` slots.
-
-- `web_search_agent2`: Public internet search.
-  Use ONLY when information cannot exist in local conversation history or persistent memory.
-
-## Slot prefix → agent mapping (check this FIRST — overrides everything below)
-
-Slots produced by the initializer start with a prefix that maps directly to an agent.
-Match the prefix literally and use the mapped agent without further deliberation:
+initializer 生成的槽位以可直接映射到 agent 的前缀开头。
+按字面匹配前缀，并直接使用映射的 agent，不要额外推理：
 
 | Slot prefix                  | Agent                            |
 |------------------------------|----------------------------------|
@@ -344,55 +317,53 @@ Match the prefix literally and use the mapped agent without further deliberation
 | "Recall: ..."                | `recall_agent`                   |
 | "Web-search: ..."            | `web_search_agent2`              |
 
-## Fallback decision sequence — use only when slot has no recognised prefix
+## Fallback decision sequence（仅当槽位没有可识别前缀时使用）
 
-Evaluate top to bottom, pick the first match:
+从上到下检查，选择第一个匹配项：
 
-1. Slot resolves a named person's identity (display_name → global_user_id)?
+1. 槽位解析命名人物身份（display_name → global_user_id）？
    → `user_lookup_agent`.
 
-2. Slot enumerates users by display-name pattern or participant metadata?
+2. 槽位按 display-name pattern 或 participant metadata 枚举用户？
    → `user_list_agent`.
 
-3. Slot needs a user's full profile AND global_user_id is already in known_facts?
+3. 槽位需要用户完整 profile，且 known_facts 已有 global_user_id？
    → `user_profile_agent`.
 
-4. Slot targets conversation history, including literal strings, URLs,
-   filenames, exact phrases, fuzzy topics, structured filters, counts, or
-   rankings?
+4. 槽位目标是聊天历史，包括字面字符串、URLs、filenames、精确短语、模糊话题、
+   结构化过滤、计数或排名？
    → `conversation_evidence_agent`.
 
-5. Slot targets durable persistent memory by exact keyword, tag, event name,
-   proper noun, memory identifier, or semantic memory meaning?
+5. 槽位目标是 durable persistent memory，包括精确关键词、tag、event name、
+   proper noun、memory identifier 或语义记忆含义？
    → `memory_evidence_agent`.
 
-6. Slot asks what was agreed, promised, planned, left unresolved, or where the
-    current episode left off?
+6. 槽位询问约定、承诺、计划、未解决事项，或当前 episode 停在何处？
    → `recall_agent`.
 
-7. Slot requires public internet data?
+7. 槽位需要公开互联网数据？
    → `web_search_agent2`.
 
-## Input
+## 输入格式
 
 {{
-    "current_slot": "the slot to resolve this turn",
-    "known_facts": [{{"slot": "...", "agent": "...", "resolved": true/false, "summary": "concise fact summary", "attempts": 1}}, ...],
-    "context": runtime info (platform, channel, timestamp, etc.)
+    "current_slot": "本轮要解决的槽位",
+    "known_facts": [{{"slot": "已完成槽位", "agent": "agent_name", "resolved": true, "summary": "简短事实摘要", "attempts": 1}}],
+    "context": {{"platform": "qq", "channel": "频道标识", "timestamp": "当前时间"}}
 }}
 
-## Generation Procedure
-1. Read `current_slot` and match its prefix against the prefix-to-agent table first.
-2. If there is no recognized prefix, use the fallback decision sequence.
-3. Build a concise task for the chosen inner-loop agent, preserving dependency references such as "slot N".
-4. Pass through only relevant context needed by the chosen agent.
+## 生成步骤
+1. 读取 `current_slot`，先与 prefix-to-agent 表做字面匹配。
+2. 如果没有可识别前缀，使用 fallback decision sequence。
+3. 为选中的 inner-loop agent 生成简短任务，保留 "slot N" 这样的依赖引用。
+4. 只传递该 agent 需要的相关 context。
 
-## Output
+## 输出格式
 
-Return valid JSON only:
+只返回有效 JSON：
 {{
     "agent_name": "{agent_name_union}",
-    "task": "task description for the chosen agent",
+    "task": "给所选 agent 的任务描述",
     "context": {{}},
     "max_attempts": 3
 }}

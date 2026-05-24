@@ -11,40 +11,40 @@ from kazusa_ai_chatbot.rag.evidence_formatting import (
 
 def _safe_rag_result() -> dict[str, object]:
     return {
-        "answer": "Conclusion: the relevant preference is tea.",
+        "answer": '结论：the relevant preference is tea.',
         "memory_evidence": [
             {
-                "summary": "Conclusion: User prefers tea.",
+                "summary": '结论：User prefers tea.',
                 "content": (
-                    "Evidence summary:\n"
+                    '上下文：\n'
                     "- user_memory_units at 2026-05-02 00:34:56: User prefers tea.\n"
-                    "Uncertainty: none"
+                    '不确定性：无'
                 ),
             }
         ],
         "recall_evidence": [
             {
-                "selected_summary": "Conclusion: Pickup agreement is 9:30.",
+                "selected_summary": '结论：Pickup agreement is 9:30.',
                 "evidence_summary": (
-                    "Evidence summary:\n"
+                    '上下文：\n'
                     "- conversation_progress: pickup at 9:30.\n"
-                    "Uncertainty: none"
+                    '不确定性：无'
                 ),
             }
         ],
         "third_party_profiles": ["Night resolved to a public display profile."],
         "conversation_evidence": [
             (
-                "Conclusion: User sent an image.\n"
-                "Evidence summary:\n"
+                '结论：User sent an image.\n'
+                '上下文：\n'
                 "- User at 2026-05-02 00:35:01: <image>a clean chart</image>\n"
-                "Uncertainty: none"
+                '不确定性：无'
             )
         ],
         "external_evidence": [
             {
-                "summary": "Conclusion: Weather context was available.",
-                "content": "Evidence summary:\n- External source: light rain.\nUncertainty: none",
+                "summary": '结论：Weather context was available.',
+                "content": '上下文：\n- External source: light rain.\n不确定性：无',
                 "url": "https://weather.example/current",
             }
         ],
@@ -70,19 +70,19 @@ def test_public_rag_result_evidence_rejects_raw_cq_wire_text_urls_ids_and_embedd
     rag_result = _safe_rag_result()
     rag_result["memory_evidence"] = [
         {
-            "summary": "Conclusion: leaked raw row.",
-            "content": "Evidence summary:\n- [CQ:image,file=abc]\nUncertainty: none",
+            "summary": '结论：leaked raw row.',
+            "content": '上下文：\n- [CQ:image,file=abc]\n不确定性：无',
             "conversation_row_id": "row-1",
         }
     ]
     rag_result["recall_evidence"] = [
         {
-            "selected_summary": "Conclusion: leaked vector payload.",
+            "selected_summary": '结论：leaked vector payload.',
             "embedding": [0.1, 0.2],
         }
     ]
     rag_result["conversation_evidence"] = [
-        "Conclusion: leaked url.\nEvidence summary:\n- url=https://cdn.example/image.png\nUncertainty: none"
+        '结论：leaked url.\n上下文：\n- url=https://cdn.example/image.png\n不确定性：无'
     ]
 
     with pytest.raises(ValueError, match="prompt-facing RAG evidence"):
@@ -93,11 +93,11 @@ def test_public_rag_result_evidence_rejects_source_uuid_text() -> None:
     rag_result = _safe_rag_result()
     rag_result["conversation_evidence"] = [
         (
-            "Conclusion: Tester global_user_id: "
+            '结论：Tester global_user_id: '
             "123e4567-e89b-12d3-a456-426614174000 sent the chart.\n"
-            "Evidence summary:\n"
+            '上下文：\n'
             "- Tester: chart sent.\n"
-            "Uncertainty: none"
+            '不确定性：无'
         )
     ]
 
@@ -110,6 +110,14 @@ def test_public_rag_result_evidence_rejects_third_party_profile_uuid_text() -> N
     rag_result["third_party_profiles"] = [
         "Night | 123e4567-e89b-12d3-a456-426614174000"
     ]
+
+    with pytest.raises(ValueError, match="prompt-facing RAG evidence"):
+        ensure_public_rag_evidence_prompt_safe(rag_result)
+
+
+def test_public_rag_result_evidence_rejects_readable_message_id_text() -> None:
+    rag_result = _safe_rag_result()
+    rag_result["answer"] = "在消息 ID 529487488 中，用户识别了五种香料。"
 
     with pytest.raises(ValueError, match="prompt-facing RAG evidence"):
         ensure_public_rag_evidence_prompt_safe(rag_result)

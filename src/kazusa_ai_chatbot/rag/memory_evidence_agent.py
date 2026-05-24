@@ -377,45 +377,41 @@ def _normalize_selector_plan(raw_plan: dict[str, Any]) -> dict[str, Any]:
     return plan
 
 
-_SELECTOR_PROMPT = """\
-You choose one bounded persistent-memory worker for a durable evidence slot.
-Do not answer active agreements, person profiles, relationships, or live external facts.
+_SELECTOR_PROMPT = '''\
+你要为一个 durable evidence 槽位选择一个有边界的 persistent-memory worker。
+不要用本路径回答活跃约定、人物资料、关系判断或实时外部事实。
 
-# Generation Procedure
-1. If the task asks for live active agreements, active promises, or current
-   episode state, output worker="incompatible" and reason="Recall". Do not use
-   this rule for historical completed/outstanding status evidence.
-2. If the task asks for person profile, impression, compatibility, or
-   relationship context, output worker="incompatible" and reason="Person-context".
-3. If the task asks for current weather, temperature, opening status, prices,
-   exchange rates, or any changing live value, output worker="incompatible"
-   and reason="Live-context".
-4. Use user_memory_evidence_agent for current-user durable memory, private
-   continuity, accepted preference, user-specific lore, current-user
-   recognition, prior interaction history, prior shared experience with the
-   current user, and completed/outstanding lifecycle status of prior
-   user-specific promises or commitments.
-5. Use persistent_memory_search_agent for natural-language durable facts,
-   exact named facts, tags, memory_name/dedup_key lookups, proper nouns,
-   quoted terms, home/address/location questions, fuzzy concepts, common
-   sense, world knowledge, and character-world facts. The search worker
-   performs hybrid semantic plus literal-anchor retrieval.
+# 生成步骤
+1. 如果任务询问实时活跃约定、活跃承诺或当前 episode 状态，输出
+   worker="incompatible"，reason="Recall"。历史已完成/未完成状态证据不适用此条。
+2. 如果任务询问人物资料、印象、相性或关系上下文，输出
+   worker="incompatible"，reason="Person-context"。
+3. 如果任务询问当前天气、温度、营业状态、价格、汇率或任何变化中的实时值，
+   输出 worker="incompatible"，reason="Live-context"。
+4. 当前用户 durable memory、私有连续性、已接受偏好、用户专属设定、
+   当前用户识别、过往互动历史、与当前用户的共同经历，以及过往用户专属
+   promise/commitment 的已完成或未完成生命周期状态，使用
+   user_memory_evidence_agent。
+5. 自然语言 durable facts、精确命名事实、tags、memory_name/dedup_key 查询、
+   proper nouns、quoted terms、home/address/location 问题、模糊概念、common sense、
+   world knowledge 和 character-world facts，使用 persistent_memory_search_agent。
+   该 worker 会执行语义加字面锚点的混合检索。
 
-# Input Format
+# 输入格式
 {
-  "task": "Memory-evidence slot text",
-  "original_query": "decontextualized user query when available",
-  "current_slot": "slot label",
-  "known_facts": "ordered facts from previous RAG2 slots"
+  "task": "Memory-evidence 槽位文本",
+  "original_query": "可用时的去上下文化用户问题",
+  "current_slot": "槽位标签",
+  "known_facts": "之前 RAG2 槽位得到的有序事实"
 }
 
-# Output Format
-Return valid JSON only:
+# 输出格式
+只返回有效 JSON：
 {
   "worker": "user_memory_evidence_agent | persistent_memory_search_agent | incompatible",
-  "reason": "short source selection explanation"
+  "reason": "简短来源选择说明"
 }
-"""
+'''
 _selector_llm = get_llm(
     temperature=0.0,
     top_p=1.0,

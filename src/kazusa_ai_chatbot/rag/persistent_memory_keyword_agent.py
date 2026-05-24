@@ -36,46 +36,41 @@ from kazusa_ai_chatbot.utils import get_llm, parse_llm_json_output, text_or_empt
 
 logger = logging.getLogger(__name__)
 
-_GENERATOR_PROMPT = Template("""\
-You generate retrieval parameters only for `search_persistent_memory_keyword`.
+_GENERATOR_PROMPT = Template('''\
+你只为 `search_persistent_memory_keyword` 生成检索参数。
 
-# Scope
-- Produce parameters only for `search_persistent_memory_keyword`.
-- `keyword` must be the shortest unambiguous core term or phrase, not a full
-  sentence.
-- Prefer literal anchors for proper nouns, nicknames, event names, filenames,
-  or short tags.
-- If `feedback` says the term is too specific, no results were found, or a
-  broader expression is needed, change the next keyword meaningfully.
-- `source_global_user_id` is a privacy boundary, not a relevance hint. Omit it
-  by default; fill it only when the task explicitly asks for memory triggered,
-  provided, or promised by one source user.
-- Use English for generated control/status text. Preserve literal anchors,
-  names, quotes, URLs, filenames, and source text in their original language.
+# 范围
+- 只生成 `search_persistent_memory_keyword` 的参数。
+- `keyword` 必须是最短且不歧义的核心词或短语，不是完整句子。
+- proper nouns、nicknames、event names、filenames 或 short tags 优先使用字面 anchor。
+- 如果 `feedback` 指出词太具体、没有结果或需要更宽表达，下一次 keyword 必须有意义地改变。
+- `source_global_user_id` 是隐私边界，不是相关性提示。默认省略；只有任务明确
+  要求某个来源用户触发、提供或承诺的记忆时才填写。
+- 生成的控制/状态说明使用中文。保留 literal anchors、names、quotes、URLs、
+  filenames 和 source text 的原始语言。
 
-# Generation Procedure
-1. Read `task` and find the shortest unambiguous literal anchor.
-2. Read `context`; use `source_global_user_id` only when the task explicitly
-   requires a memory source-user filter.
-3. If feedback says no result, too specific, or needs broadening, change the
-   keyword substantially.
-4. Output one keyword plus necessary filter fields.
+# 生成步骤
+1. 读取 `task`，找出最短且不歧义的字面 anchor。
+2. 读取 `context`；只有任务明确要求 memory source-user filter 时才使用
+   `source_global_user_id`。
+3. 如果 feedback 说无结果、太具体或需要变宽，显著改变 keyword。
+4. 输出一个 keyword 加必要过滤字段。
 
-# Input Format
+# 输入格式
 {
-  "task": "slot description from the outer RAG supervisor",
-  "context": "known facts and runtime hints",
-  "feedback": "previous judge feedback, or empty string"
+  "task": "外层 RAG supervisor 给出的槽位描述",
+  "context": "已知事实和运行时提示",
+  "feedback": "上一轮 judge feedback，或空字符串"
 }
 
-# Output Format
-Return valid JSON only:
+# 输出格式
+只返回有效 JSON：
 {
   "keyword": "string",
   "top_k": $default_top_k,
   "source_global_user_id": "string or omitted"
 }
-""").substitute(default_top_k=RAG_SEARCH_DEFAULT_TOP_K)
+''').substitute(default_top_k=RAG_SEARCH_DEFAULT_TOP_K)
 _generator_llm = get_llm(
     temperature=0.0,
     top_p=1.0,
@@ -84,41 +79,39 @@ _generator_llm = get_llm(
     api_key=RAG_SUBAGENT_LLM_API_KEY,
 )
 
-_JUDGE_PROMPT = """\
-You judge whether a `search_persistent_memory_keyword` result resolves the current slot.
+_JUDGE_PROMPT = '''\
+你判断 `search_persistent_memory_keyword` 的结果是否解决当前槽位。
 
-# Task
-- Decide whether the current result is enough to resolve the slot.
-- If unresolved, feedback must clearly tell the next attempt how to change the
-  keyword.
+# 任务
+- 判断当前结果是否足够解决槽位。
+- 如果未解决，feedback 必须清楚说明下一次应如何修改 keyword。
 
-# Audit Procedure
-1. Read `task` and identify the memory evidence needed.
-2. Inspect `result` for relevant durable memory, errors, or empty output.
-3. Return `resolved: true` only when the result is enough to resolve the slot.
-4. If unresolved, state whether the next keyword should be shorter, broader,
-   a synonym, or use different source filtering.
+# 生成步骤
+1. 读取 `task`，识别需要的 memory evidence。
+2. 检查 `result` 中的相关 durable memory、错误或空输出。
+3. 只有结果足够解决槽位时，才返回 `resolved: true`。
+4. 如果未解决，说明下一次 keyword 应更短、更宽、改用同义词，或使用不同来源过滤。
 
-# Input Format
+# 输入格式
 {
-  "task": "slot description from the outer RAG supervisor",
-  "result": "tool result from search_persistent_memory_keyword"
+  "task": "外层 RAG supervisor 给出的槽位描述",
+  "result": "search_persistent_memory_keyword 的工具结果"
 }
 
-# Common Feedback Directions
-- Keyword too long; shrink to the core term.
-- Keyword too specific; use a more common or broader expression.
-- No match; use a synonym or remove extra modifiers.
-- Add or remove source-user filtering.
-- Use English for generated control/status text while preserving source text.
+# 常见反馈方向
+- Keyword 太长；缩成核心词。
+- Keyword 太具体；使用更常见或更宽的表达。
+- 没有匹配；使用同义词或移除额外修饰。
+- 添加或移除 source-user filtering。
+- 反馈说明使用中文；source text 保持原文。
 
-# Output Format
-Return valid JSON only:
+# 输出格式
+只返回有效 JSON：
 {
   "resolved": true or false,
   "feedback": "string"
 }
-"""
+'''
 _judge_llm = get_llm(
     temperature=0.0,
     top_p=1.0,
@@ -247,7 +240,7 @@ async def _judge(task: str, result: object) -> tuple[bool, str]:
     response = await _judge_llm.ainvoke([system_prompt, human_message])
     verdict = parse_llm_json_output(response.content)
     if not isinstance(verdict, dict):
-        return_value = False, "Invalid judge output; use a shorter or more common keyword."
+        return_value = False, "judge 输出无效；使用更短或更常见的 keyword。"
         return return_value
 
     resolved = bool(verdict.get("resolved", False))

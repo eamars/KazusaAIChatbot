@@ -86,37 +86,42 @@ _SOURCE_ID_LABEL_RE = re.compile(
     r")\b",
     flags=re.IGNORECASE,
 )
+_READABLE_MESSAGE_ID_TEXT_RE = re.compile(
+    r"(?:\bmessage\s*id\s*(?:is|=|:)?\s*\d{5,}\b)"
+    r"|(?:消息\s*(?:ID|id|编号)\s*(?:为|是|=|:)?\s*\d{5,})",
+    flags=re.IGNORECASE,
+)
 _INTERNAL_PUBLIC_LABEL_REPLACEMENTS = (
-    ("user_memory_evidence_agent", "user memory evidence"),
-    ("persistent_memory_search_agent", "durable memory evidence"),
-    ("conversation_evidence_agent", "conversation evidence"),
-    ("memory_evidence_agent", "memory evidence"),
-    ("person_context_agent", "person context"),
-    ("user_lookup_agent", "user lookup"),
-    ("user_profile_agent", "user profile"),
-    ("user_list_agent", "user list"),
-    ("recall_agent", "recall evidence"),
-    ("user_memory_units", "user memory units"),
-    ("conversation_evidence", "conversation evidence"),
-    ("memory_evidence", "memory evidence"),
-    ("recall_evidence", "recall evidence"),
-    ("durable_commitment", "durable commitment"),
-    ("active_episode_agreement", "active episode agreement"),
-    ("exact_agreement_history", "exact agreement history"),
-    ("episode_position", "episode position"),
+    ("user_memory_evidence_agent", "用户记忆证据"),
+    ("persistent_memory_search_agent", "持久记忆证据"),
+    ("conversation_evidence_agent", "对话证据"),
+    ("memory_evidence_agent", "记忆证据"),
+    ("person_context_agent", "人物上下文"),
+    ("user_lookup_agent", "用户识别"),
+    ("user_profile_agent", "用户画像"),
+    ("user_list_agent", "用户列表"),
+    ("recall_agent", "召回证据"),
+    ("user_memory_units", "用户记忆"),
+    ("conversation_evidence", "对话证据"),
+    ("memory_evidence", "记忆证据"),
+    ("recall_evidence", "召回证据"),
+    ("durable_commitment", "持续承诺"),
+    ("active_episode_agreement", "当前对话约定"),
+    ("exact_agreement_history", "历史约定"),
+    ("episode_position", "当前对话进展"),
 )
 _INTERNAL_PREFIX_REPLACEMENTS = (
     (
         re.compile(r"\brecall\s*:\s*", flags=re.IGNORECASE),
-        "Recall candidate: ",
+        "召回候选：",
     ),
     (
         re.compile(r"\bmemory\s*:\s*", flags=re.IGNORECASE),
-        "Memory candidate: ",
+        "记忆候选：",
     ),
     (
         re.compile(r"\bconversation\s*:\s*", flags=re.IGNORECASE),
-        "Conversation candidate: ",
+        "对话候选：",
     ),
 )
 
@@ -180,11 +185,12 @@ def sanitize_public_rag_evidence_text(value: object) -> str:
     text = _RAW_STORAGE_UTC_RE.sub(_format_storage_utc_match, text)
     text = _replace_internal_public_labels(text)
     text = _SOURCE_ID_PREFIX_RE.sub("", text)
-    text = _SOURCE_ID_TEXT_RE.sub("[source id omitted]", text)
     text = _GLOBAL_USER_ID_TEXT_RE.sub("", text)
+    text = _SOURCE_ID_TEXT_RE.sub("[来源标识已省略]", text)
+    text = _READABLE_MESSAGE_ID_TEXT_RE.sub("消息记录", text)
     text = _SEPARATOR_SOURCE_ID_RE.sub("", text)
-    text = _UUID_RE.sub("[source id omitted]", text)
-    text = _SOURCE_ID_LABEL_RE.sub("source id", text)
+    text = _UUID_RE.sub("[来源标识已省略]", text)
+    text = _SOURCE_ID_LABEL_RE.sub("来源标识", text)
     return text
 
 
@@ -192,14 +198,14 @@ def format_evidence_block(
     *,
     conclusion: str,
     evidence_items: list[str],
-    uncertainty: str = "none",
+    uncertainty: str = "无",
 ) -> str:
     """Build the standard cognition-ready evidence block.
 
     Args:
         conclusion: Direct answer or no-evidence conclusion.
         evidence_items: Ordered prompt-facing support lines.
-        uncertainty: Remaining uncertainty or ``"none"`` when clear.
+        uncertainty: Remaining uncertainty or ``"无"`` when clear.
 
     Returns:
         A compact evidence block with conclusion first, evidence when present,
@@ -207,19 +213,19 @@ def format_evidence_block(
     """
 
     conclusion_text = sanitize_public_rag_evidence_text(conclusion)
-    uncertainty_text = sanitize_public_rag_evidence_text(uncertainty) or "none"
+    uncertainty_text = sanitize_public_rag_evidence_text(uncertainty) or "无"
     clean_items = [
         text
         for item in evidence_items
         if (text := sanitize_public_rag_evidence_text(item))
     ]
 
-    lines = [f"Conclusion: {conclusion_text}"]
+    lines = [f"结论：{conclusion_text}"]
     if clean_items:
-        lines.append("Evidence summary:")
+        lines.append("上下文：")
         for item in clean_items:
             lines.append(f"- {item}")
-    lines.append(f"Uncertainty: {uncertainty_text}")
+    lines.append(f"不确定性：{uncertainty_text}")
 
     block = "\n".join(lines)
     return block
@@ -322,6 +328,10 @@ def _collect_text_violations(
         return
 
     if _RAW_STORAGE_UTC_RE.search(value):
+        violations.append(path)
+        return
+
+    if _READABLE_MESSAGE_ID_TEXT_RE.search(value):
         violations.append(path)
         return
 

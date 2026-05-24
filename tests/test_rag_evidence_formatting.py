@@ -9,7 +9,7 @@ from kazusa_ai_chatbot.rag.evidence_formatting import (
 from kazusa_ai_chatbot.time_boundary import format_storage_utc_for_llm_seconds
 
 
-def test_format_evidence_block_orders_conclusion_evidence_uncertainty() -> None:
+def test_format_evidence_block_orders_conclusion_context_uncertainty() -> None:
     block = format_evidence_block(
         conclusion="The pickup agreement is 9:30.",
         evidence_items=[
@@ -20,11 +20,11 @@ def test_format_evidence_block_orders_conclusion_evidence_uncertainty() -> None:
     )
 
     assert block == (
-        "Conclusion: The pickup agreement is 9:30.\n"
-        "Evidence summary:\n"
+        "结论：The pickup agreement is 9:30.\n"
+        "上下文：\n"
         "- User at 2026-05-02 00:30:00: Please pick me up at 9:30.\n"
         "- Kazusa at 2026-05-02 00:31:00: I will remember 9:30.\n"
-        "Uncertainty: No later cancellation was found."
+        "不确定性：No later cancellation was found."
     )
 
 
@@ -34,7 +34,7 @@ def test_format_evidence_block_uses_empty_uncertainty_when_clear() -> None:
         evidence_items=["user_memory_units: User prefers tea."],
     )
 
-    assert block.endswith("\nUncertainty: none")
+    assert block.endswith("\n不确定性：无")
 
 
 def test_format_evidence_block_does_not_emit_blank_sections() -> None:
@@ -45,10 +45,10 @@ def test_format_evidence_block_does_not_emit_blank_sections() -> None:
     )
 
     assert block == (
-        "Conclusion: No matching evidence was found.\n"
-        "Uncertainty: The search returned no direct or nearby evidence."
+        "结论：No matching evidence was found.\n"
+        "不确定性：The search returned no direct or nearby evidence."
     )
-    assert "Evidence summary:\nUncertainty" not in block
+    assert "上下文：\n不确定性" not in block
     assert "\n\n" not in block
 
 
@@ -64,8 +64,8 @@ def test_sanitize_public_rag_evidence_text_renders_internal_source_labels() -> N
     assert "user_memory_units" not in clean_text
     assert "durable_commitment" not in clean_text
     assert "2026-05-22T10:16:47.993342+00:00" not in clean_text
-    assert "Recall candidate" in clean_text
-    assert "user memory units" in clean_text
+    assert '召回候选' in clean_text
+    assert '用户记忆' in clean_text
     assert "2026-05-22 22:16" in clean_text
 
 
@@ -81,8 +81,8 @@ def test_sanitize_public_rag_evidence_text_renders_person_context_labels() -> No
     assert "user_lookup_agent" not in clean_text
     assert "global_user_id" not in clean_text
     assert "263c883d-aeff-4e0b-a758-6f69186ae8ec" not in clean_text
-    assert "person context" in clean_text
-    assert "user lookup" in clean_text
+    assert '人物上下文' in clean_text
+    assert '用户识别' in clean_text
 
 
 def test_sanitize_public_rag_evidence_text_removes_conversation_source_ids() -> None:
@@ -96,7 +96,7 @@ def test_sanitize_public_rag_evidence_text_removes_conversation_source_ids() -> 
     assert "conversation:" not in clean_text
     assert "platform_message_id" not in clean_text
     assert "1195502528" not in clean_text
-    assert "Conversation candidate" in clean_text
+    assert '对话候选' in clean_text
     assert "蚝爹油: 这是你第一次来我家么？" in clean_text
 
 
@@ -110,7 +110,18 @@ def test_sanitize_public_rag_evidence_text_removes_ocr_source_id_labels() -> Non
 
     assert "global_user_id" not in clean_text
     assert "d815be2-d6dd-41b7-9026-aa01ea4367a2" not in clean_text
-    assert "[source id omitted]" in clean_text
+    assert "[来源标识已省略]" in clean_text
+
+
+def test_sanitize_public_rag_evidence_text_removes_readable_message_ids() -> None:
+    text = "消息 ID 529487488 直接识别了肉桂皮、小豆蔻和八角。"
+
+    clean_text = sanitize_public_rag_evidence_text(text)
+
+    assert "消息 ID" not in clean_text
+    assert "529487488" not in clean_text
+    assert "消息记录" in clean_text
+    assert "直接识别" in clean_text
 
 
 def test_format_storage_utc_for_llm_seconds_projects_configured_local_time() -> None:

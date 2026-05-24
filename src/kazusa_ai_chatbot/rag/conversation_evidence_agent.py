@@ -494,38 +494,36 @@ def _normalize_selector_plan(
     return plan
 
 
-_SELECTOR_PROMPT = """\
-You choose one bounded conversation-history worker path for a RAG evidence slot.
-Do not answer from durable memory, active episode progress, user profiles, or web.
+_SELECTOR_PROMPT = '''\
+你要为一个 RAG 证据槽位选择一个有边界的 conversation-history worker 路径。
+不要用聊天历史路径回答 durable memory、活跃 episode 进度、用户资料或网页内容。
 
-# Generation Procedure
-1. If the task asks for an active/current agreement or episode state, output
-   worker="incompatible" and reason="Recall".
-2. If the task asks for a durable world fact, output worker="incompatible" and
-   reason="Memory-evidence".
-3. Use conversation_search_agent for fuzzy topics, semantic message evidence,
-   exact phrases, URLs, filenames, literal terms, and quoted-message provenance.
-   The search worker performs hybrid semantic plus literal-anchor retrieval.
-4. Use conversation_filter_agent for known user/time/date-window retrieval.
-5. Use conversation_aggregate_agent for counts, rankings, or grouped stats.
-6. Do not decide whether a structured person reference is required. That
-   dependency is validated deterministically from the slot text.
+# 生成步骤
+1. 如果任务询问活跃/当前约定或 episode 状态，输出
+   worker="incompatible"，reason="Recall"。
+2. 如果任务询问 durable world fact，输出 worker="incompatible"，
+   reason="Memory-evidence"。
+3. 模糊话题、语义消息证据、精确短语、URLs、filenames、字面词和引用消息来源，
+   使用 conversation_search_agent。该 worker 执行语义加字面锚点的混合检索。
+4. 已知用户、时间或日期窗口检索使用 conversation_filter_agent。
+5. 计数、排名或分组统计使用 conversation_aggregate_agent。
+6. 不要判断是否需要结构化人物引用；该依赖由槽位文本的确定性校验负责。
 
-# Input Format
+# 输入格式
 {
-  "task": "Conversation-evidence slot text",
-  "original_query": "decontextualized user query when available",
-  "current_slot": "slot label",
-  "known_facts": "ordered facts from previous RAG2 slots"
+  "task": "Conversation-evidence 槽位文本",
+  "original_query": "可用时的去上下文化用户问题",
+  "current_slot": "槽位标签",
+  "known_facts": "之前 RAG2 槽位得到的有序事实"
 }
 
-# Output Format
-Return valid JSON only:
+# 输出格式
+只返回有效 JSON：
 {
   "worker": "conversation_search_agent | conversation_filter_agent | conversation_aggregate_agent | incompatible",
-  "reason": "short source selection explanation"
+  "reason": "简短来源选择说明"
 }
-"""
+'''
 _selector_llm = get_llm(
     temperature=0.0,
     top_p=1.0,

@@ -652,37 +652,29 @@ def _review_source_hints(review: dict[str, Any]) -> list[dict[str, str]]:
     return source_hints
 
 
-_RECALL_REVIEW_PROMPT = """\
-You review Recall candidates for one active agreement, commitment, plan, or
-episode-position slot. Decide whether any retrieved candidate directly answers
-that slot. Do not invent facts.
+_RECALL_REVIEW_PROMPT = '''\
+你审查 Recall candidates，用于一个 active agreement、commitment、plan 或
+episode-position 槽位。判断是否有候选项直接回答该槽位。不要编造事实。
 
-# Generation Procedure
-1. Read the Recall slot and identify the essential requested details: concrete
-   entities, dates/times, places, status, obligations, people, and event
-   context.
-2. Confirm a candidate only when it is the same concrete agreement, promise,
-   plan, or episode state requested by the slot.
-3. If the slot contains multiple essential details, a confirmed candidate must
-   cover all of them or clearly entail all of them. Matching only one detail is
-   not direct support.
-4. For `active_episode_agreement`, be strict: a durable commitment candidate
-   must describe the same current/recent agreement, not merely another active
-   commitment in the same broad topic.
-5. For `active_episode_agreement`, a milestone, objective fact, or status
-   record may confirm the slot when it directly states the requested agreement's
-   fulfillment, cancellation, payment, completion, or current status.
-6. Do not confirm a candidate merely because it shares a broad category with
-   the slot, such as both being about dessert, hardware, meetings, or tasks.
-7. Mark a candidate nearby when it is related but not enough to answer.
-8. When unsure, leave it unconfirmed so the caller can search conversation or
-   memory evidence for exact historical details.
-9. If no candidate directly answers, return no confirmed indexes and give a
-   short source hint for what evidence source would likely be needed next.
+# 生成步骤
+1. 读取 Recall slot，识别必要请求细节：具体实体、日期/时间、地点、状态、
+   obligations、人物和事件上下文。
+2. 只有候选项是槽位请求的同一个具体 agreement、promise、plan 或 episode state，
+   才确认该候选项。
+3. 如果槽位包含多个必要细节，confirmed candidate 必须覆盖所有细节，或清楚蕴含所有细节。
+   只匹配一个细节不是直接支持。
+4. 对 `active_episode_agreement` 要严格：durable commitment candidate 必须描述同一个
+   当前/近期约定，而不是同一宽泛话题下的另一个 active commitment。
+5. 对 `active_episode_agreement`，如果 milestone、objective fact 或 status record
+   直接说明所请求约定的履行、取消、付款、完成或当前状态，可以确认槽位。
+6. 不要仅因候选项和槽位同属甜点、硬件、会议或任务等宽泛类别就确认。
+7. 相关但不足以回答的候选项标为 nearby。
+8. 不确定时保持 unconfirmed，让调用方搜索 conversation 或 memory evidence 获取精确历史细节。
+9. 如果没有候选项直接回答，返回空 confirmed indexes，并用中文给出下一步可能需要的证据来源提示。
 
-# Input Format
+# 输入格式
 {
-  "task": "Recall slot text",
+  "task": "Recall 槽位文本",
   "mode": "active_episode_agreement | durable_commitment | episode_position | exact_agreement_history",
   "candidates": [
     {
@@ -697,16 +689,16 @@ that slot. Do not invent facts.
   ]
 }
 
-# Output Format
-Return valid JSON only:
+# 输出格式
+只返回有效 JSON：
 {
   "confirmed_candidate_indexes": [0],
   "nearby_candidate_indexes": [1],
-  "summary": "short factual summary of confirmed candidates, or empty string",
-  "uncertainty": "short uncertainty note, or empty string",
-  "source_hints": ["short hint when no candidate confirms the slot"]
+  "summary": "已确认候选项的简短事实摘要，或空字符串",
+  "uncertainty": "简短不确定性说明，或空字符串",
+  "source_hints": ["没有候选项确认槽位时的简短提示"]
 }
-"""
+'''
 _recall_review_llm = get_llm(
     temperature=0.0,
     top_p=1.0,
@@ -729,7 +721,7 @@ async def _review_recall_candidates(
             "confirmed_candidate_indexes": [],
             "nearby_candidate_indexes": [],
             "summary": "",
-            "uncertainty": "No recall candidates were available.",
+            "uncertainty": "没有可用的 Recall 候选项。",
             "source_hints": [],
         }
         return review
@@ -1018,9 +1010,8 @@ class RecallAgent(BaseRAGHelperAgent):
                     primary_source="",
                     supporting_sources=[],
                     freshness_basis=(
-                        "Fallback recall candidates were available, but none "
-                        "were authoritative enough to answer the requested "
-                        "active recall slot."
+                        "存在备用 recall 候选，但没有任何候选具备足够权威性来回答"
+                        "请求的活跃召回槽位。"
                     ),
                     conflicts=conflicts,
                     candidates=ranked_candidates,

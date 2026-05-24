@@ -64,45 +64,42 @@ _RAW_CONVERSATION_STORAGE_KEYS = (
 )
 
 _GENERATOR_PROMPT = (
-    """\
-You generate retrieval parameters only for `search_conversation`.
+    '''\
+你只为 `search_conversation` 生成检索参数。
 
-# Scope
-- Produce one high-quality semantic search argument set for the current slot.
-- You may generate parameters only for `search_conversation`.
-- `search_query` must be a natural-language semantic query, not a keyword list.
-- `literal_anchors` is optional. Include only proper nouns, technical terms,
-  short phrases, URLs, filenames, or quoted text that must match literally.
-  Do not split a full sentence into a word list.
-- If context already provides platform, platform_channel_id, global_user_id,
-  or time bounds, use those trusted constraints.
-- `context.original_query` is the decontextualized user request. When `task`
-  only locates an anchor, screenshot, link, or timestamp, still include the
-  surrounding facts, follow-up discussion, and speaker relationships requested
-  by `original_query` in `search_query`.
-- `feedback` comes from the previous judge pass. If it says too broad, wrong
-  angle, or irrelevant result, rewrite the query angle instead of repeating it.
-- Use English for generated control/status text. Preserve literal anchors,
-  names, quotes, URLs, filenames, and source message text in their original
-  source language.
+# 范围
+- 为当前槽位生成一组高质量语义搜索参数。
+- 只能生成 `search_conversation` 的参数。
+- `search_query` 必须是自然语言语义查询，不是关键词列表。
+- `literal_anchors` 是可选项。只放必须字面匹配的 proper nouns、技术词、
+  短语、URLs、filenames 或 quoted text。不要把完整句子拆成词表。
+- 如果 context 已经提供 platform、platform_channel_id、global_user_id 或时间边界，
+  使用这些可信约束。
+- `context.original_query` 是去上下文化后的用户请求。当 `task` 只定位锚点、
+  截图、链接或时间戳时，`search_query` 仍要覆盖 original_query 要求的
+  周边事实、后续讨论和说话人关系。
+- `feedback` 来自上一轮 judge。如果它指出过宽、角度错误或结果无关，
+  改写查询角度，不要重复旧查询。
+- 生成的控制/状态说明使用中文。保留 literal anchors、names、quotes、URLs、
+  filenames 和 source message text 的原始语言。
 
-# Generation Procedure
-1. Read `task` to identify the semantic conversation evidence needed.
-2. Read `context.original_query`, `context.current_slot`, and `context.known_facts`
-   for broader information needs that the narrowed slot may omit.
-3. Read `context` for platform, channel, user, time, and known-fact constraints.
-4. Read `feedback`; if present, change the search angle instead of repeating the previous query.
-5. Write one natural-language `search_query`, then add only filters supported by context.
+# 生成步骤
+1. 读取 `task`，识别需要的语义聊天证据。
+2. 读取 `context.original_query`、`context.current_slot` 和 `context.known_facts`，
+   补足窄槽位可能省略的更大信息需求。
+3. 读取 `context` 中的 platform、channel、user、time 和 known-fact 约束。
+4. 读取 `feedback`；若存在，改变搜索角度，不要重复上一轮查询。
+5. 写出一个自然语言 `search_query`，再只添加 context 支持的过滤字段。
 
-# Input Format
+# 输入格式
 {{
-  "task": "slot description from the outer RAG supervisor",
-  "context": "known facts and runtime hints",
-  "feedback": "previous judge feedback, or empty string"
+  "task": "外层 RAG supervisor 给出的槽位描述",
+  "context": "已知事实和运行时提示",
+  "feedback": "上一轮 judge feedback，或空字符串"
 }}
 
-# Output Format
-Return valid JSON only:
+# 输出格式
+只返回有效 JSON：
 {{
   "search_query": "string",
   "literal_anchors": ["string, optional; at most 5 anchors"],
@@ -113,7 +110,7 @@ Return valid JSON only:
   "from_timestamp": "local YYYY-MM-DD HH:MM or omitted",
   "to_timestamp": "local YYYY-MM-DD HH:MM or omitted"
 }}
-"""
+'''
 ).format(default_top_k=CONVERSATION_SEARCH_DEFAULT_TOP_K)
 _generator_llm = get_llm(
     temperature=0.0,
@@ -123,45 +120,43 @@ _generator_llm = get_llm(
     api_key=RAG_SUBAGENT_LLM_API_KEY,
 )
 
-_JUDGE_PROMPT = """\
-You judge whether a `search_conversation` result resolves the current slot.
+_JUDGE_PROMPT = '''\
+你判断 `search_conversation` 的结果是否解决当前槽位。
 
-# Task
-- Decide whether the current result is enough to resolve the slot.
-- If unresolved, `feedback` must give an executable correction for the next
-  search query or filters.
+# 任务
+- 判断当前结果是否足够解决槽位。
+- 如果未解决，`feedback` 必须给出下一次搜索查询或过滤器可执行的修正。
 
-# Generation Procedure
-1. Read `task` and identify what evidence would resolve it.
-2. Read `context.original_query` and `context.current_slot`; if they ask for
-   surrounding conversation, follow-up discussion, or additional entities that
-   the narrowed `task` omits, require those facts too.
-3. Inspect `result` for directly relevant messages, source metadata, and errors.
-4. Return resolved=true only when the result answers the slot and does not
-   drop essential broader context visible in `context`.
-5. If unresolved, write concrete feedback for the next search query or filters.
+# 生成步骤
+1. 读取 `task`，识别什么证据可以解决它。
+2. 读取 `context.original_query` 和 `context.current_slot`；如果它们要求
+   周边对话、后续讨论或窄 `task` 省略的其他实体，也必须要求这些事实。
+3. 检查 `result` 中的直接相关消息、可读来源信息和错误。
+4. 只有结果回答了槽位，且没有漏掉 `context` 中可见的关键大上下文时，
+   才返回 resolved=true。
+5. 如果未解决，为下一次搜索查询或过滤器写出具体反馈。
 
-# Input Format
+# 输入格式
 {
-  "task": "slot description from the outer RAG supervisor",
-  "context": "projected runtime context, including original_query/current_slot when available",
-  "result": "tool result from search_conversation"
+  "task": "外层 RAG supervisor 给出的槽位描述",
+  "context": "投影后的运行时上下文，可用时包含 original_query/current_slot",
+  "result": "search_conversation 的工具结果"
 }
 
-# Common Feedback Directions
-- Query too broad; use a more specific semantic description.
-- Query angle wrong; focus on person, link, event, or requested detail.
-- Missing filters; use known user or time range.
-- Returned messages irrelevant; rewrite as "opinion about X" or "mentions X".
-- Use English for generated control/status text while preserving source text.
+# 常见反馈方向
+- 查询过宽；使用更具体的语义描述。
+- 查询角度错误；聚焦人物、链接、事件或请求的细节。
+- 缺少过滤器；使用已知用户或时间范围。
+- 返回消息无关；改写为 "opinion about X" 或 "mentions X"。
+- 反馈说明使用中文；source text 保持原文。
 
-# Output Format
-Return valid JSON only:
+# 输出格式
+只返回有效 JSON：
 {
   "resolved": true or false,
   "feedback": "string"
 }
-"""
+'''
 _judge_llm = get_llm(
     temperature=0.0,
     top_p=1.0,
@@ -642,7 +637,7 @@ async def _judge(
     response = await _judge_llm.ainvoke([system_prompt, human_message])
     verdict = parse_llm_json_output(response.content)
     if not isinstance(verdict, dict):
-        return_value = False, "Invalid judge output; make the semantic query more specific."
+        return_value = False, "judge 输出无效；把 semantic query 写得更具体。"
         return return_value
 
     resolved = bool(verdict.get("resolved", False))

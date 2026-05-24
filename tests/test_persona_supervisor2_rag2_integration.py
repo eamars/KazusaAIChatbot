@@ -66,6 +66,76 @@ class _MultiSlotInitializerLLM:
         return response
 
 
+def test_normalize_initializer_slots_drops_invalid_person_slot_reference() -> None:
+    """Person-resolved speaker slots must reference a person-producing slot."""
+
+    slots = rag2_module._normalize_initializer_slots(
+        [
+            "Conversation-evidence: retrieve messages containing 'opus'",
+            (
+                "Conversation-evidence: retrieve messages "
+                "speaker=person resolved in slot 1"
+            ),
+            "Conversation-evidence: retrieve messages speaker=any_speaker",
+        ]
+    )
+
+    assert slots == [
+        "Conversation-evidence: retrieve messages containing 'opus'",
+        "Conversation-evidence: retrieve messages speaker=any_speaker",
+    ]
+
+
+def test_normalize_initializer_slots_keeps_valid_person_slot_reference() -> None:
+    """Person references are valid when earlier slots can resolve a person."""
+
+    slots = rag2_module._normalize_initializer_slots(
+        [
+            "Person-context: resolve display name 小钳子",
+            (
+                "Conversation-evidence: retrieve messages "
+                "speaker=person resolved in slot 1"
+            ),
+            (
+                "Conversation-evidence: retrieve phrase to identify the speaker"
+            ),
+            (
+                "Conversation-evidence: retrieve profile comment "
+                "speaker=person resolved in slot 3"
+            ),
+        ]
+    )
+
+    assert slots == [
+        "Person-context: resolve display name 小钳子",
+        "Conversation-evidence: retrieve messages speaker=person resolved in slot 1",
+        "Conversation-evidence: retrieve phrase to identify the speaker",
+        "Conversation-evidence: retrieve profile comment speaker=person resolved in slot 3",
+    ]
+
+
+def test_normalize_initializer_slots_removes_source_ids() -> None:
+    """Initializer slots are prompt-facing and must not carry raw source ids."""
+
+    slots = rag2_module._normalize_initializer_slots(
+        [
+            (
+                "Conversation-evidence: retrieve messages from speaker 小钳子 "
+                "(global_user_id: 263c883d-aeff-4e0b-a758-6f69186ae8ec)"
+            ),
+            (
+                "Conversation-evidence: retrieve message ID 529487488 "
+                "containing product image"
+            ),
+        ]
+    )
+
+    assert slots == [
+        "Conversation-evidence: retrieve messages from speaker 小钳子",
+        "Conversation-evidence: retrieve 消息记录 containing product image",
+    ]
+
+
 class _ContinuationLLM:
     """Static continuation refiner fake."""
 

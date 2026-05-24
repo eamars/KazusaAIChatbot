@@ -38,6 +38,7 @@ long_term/todo.md
 
 | Document | Type | Status |
 |---|---|---|
+| [rag2_mainline_fusion_recall_quality_plan.md](active/short_term/rag2_mainline_fusion_recall_quality_plan.md) | Large production RAG2 fusion quality plan | in_progress |
 | [rag3_router_interpreter_poc_experiment_plan.md](active/short_term/rag3_router_interpreter_poc_experiment_plan.md) | Medium experiment and POC design plan | draft |
 
 ## Supporting Experiment Records

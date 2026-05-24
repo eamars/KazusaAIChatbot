@@ -56,11 +56,16 @@ Public memory, recall, and conversation evidence is formatted for cognition
 with the same semantic order:
 
 ```text
-Conclusion: direct factual answer or no-evidence finding.
-Evidence summary:
-- source or speaker at configured local time: readable support.
-Uncertainty: remaining uncertainty, conflict, or none.
+结论：直接事实答案，或明确说明没有找到证据。
+上下文：
+- 来源或发言人在配置的本地时间：可读的支撑内容。
+不确定性：仍然存在的不确定、冲突，或“无”。
 ```
+
+Prompt-facing generated RAG wording is Chinese-first because the primary chat
+data, retrieval anchors, and cognition consumer are Chinese. Stable code-level
+route tokens, JSON keys, source text, URLs, filenames, model labels, and quoted
+user content keep their original spelling.
 
 Prompt-facing evidence must not expose raw adapter wire syntax, raw attachment
 URLs, storage ids, embeddings, binary payloads, source rows, or raw UTC
@@ -375,10 +380,10 @@ projection layer applies a hybrid policy:
   in `memory_evidence` with scope metadata preserved and are also appended to
   `rag_result.user_memory_unit_candidates` for consolidation merge/evolve
   reuse,
-- conversation evidence becomes formatted conclusion/evidence/uncertainty
+- conversation evidence becomes formatted conclusion/context/uncertainty
   text, while raw message refs stay trace-only,
 - shared and scoped memory evidence becomes formatted
-  conclusion/evidence/uncertainty dictionaries,
+  conclusion/context/uncertainty dictionaries,
 - live/external evidence keeps URL-bearing text,
 - recall evidence stays structured because downstream stages inspect fields
   such as `primary_source`, but prompt-facing recall summaries and evidence
