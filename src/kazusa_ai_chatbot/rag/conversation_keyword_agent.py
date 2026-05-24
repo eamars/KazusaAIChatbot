@@ -37,47 +37,48 @@ from kazusa_ai_chatbot.utils import get_llm, parse_llm_json_output, text_or_empt
 
 logger = logging.getLogger(__name__)
 
-_GENERATOR_PROMPT = Template("""\
-You are a parameter generator for `search_conversation_keyword`.
-The tool accepts ONE keyword string and runs a case-insensitive regex match against message content.
+_GENERATOR_PROMPT = Template('''\
+你是 `search_conversation_keyword` 的参数生成器。
+该工具只接受一个 keyword 字符串，并对消息内容执行大小写不敏感的 regex 匹配。
 
-## Keyword selection rules
+## Keyword 选择规则
 
-1. Pick the single MOST SPECIFIC term — the one least likely to appear in unrelated messages.
+1. 选择唯一且最具体的词，也就是最不容易出现在无关消息里的词。
    - GOOD: "qwen27b"  (unique technical name)
-   - BAD:  "5090 qwen27b"  (space between terms will NOT match "5090跑qwen27b" — different separator)
+   - BAD:  "5090 qwen27b"  (词间空格不会匹配 "5090跑qwen27b"，分隔符不同)
 
-2. When the task mentions two or more terms, do NOT join them.
-   Choose whichever one term is rarest/most distinctive.
-   Example: task says "find messages with '5090' and 'qwen27b'" → use keyword="qwen27b", not "5090 qwen27b".
+2. 当任务提到两个或更多词时，不要把它们拼接。
+   选择其中最稀有、最有辨识度的一个。
+   示例：task 说 "find messages with '5090' and 'qwen27b'"，
+   应使用 keyword="qwen27b"，不要用 "5090 qwen27b"。
 
-3. For URLs, filenames, or exact phrases — keep the shortest unambiguous anchor
-   (e.g. "xhslink.com", "cookie管理器", "play的一环").
+3. URLs、filenames 或 exact phrases 使用最短且不歧义的 anchor
+   (e.g. "xhslink.com", "cookie管理器", "play的一环")。
 
-4. Never pass a full sentence as the keyword.
+4. 绝不要把完整句子作为 keyword。
 
-5. If feedback says "no results" or "too many results", change the keyword meaningfully:
-   - No results → try a shorter term or a synonym
-   - Too many results → add filters (global_user_id, platform_channel_id, time range) rather than lengthening the keyword
+5. 如果 feedback 说 "no results" 或 "too many results"，要有意义地改变 keyword：
+   - No results → 尝试更短的词或同义词
+   - Too many results → 添加过滤器 (global_user_id, platform_channel_id, time range)，不要拉长 keyword
 
 ## Context filters
-If context contains platform / platform_channel_id / global_user_id / time bounds, include them.
+如果 context 包含 platform / platform_channel_id / global_user_id / time bounds，就带上它们。
 
-# Generation Procedure
-1. Read `task` and identify the most distinctive literal anchor.
-2. Use `context` only for filters such as platform, channel, user, or time bounds.
-3. If `feedback` says no results or too many results, change the keyword or filters meaningfully.
-4. Output one keyword string; do not join multiple terms into a sentence.
+# 生成步骤
+1. 读取 `task`，识别最有辨识度的字面 anchor。
+2. `context` 只用于 platform、channel、user 或 time bounds 等过滤器。
+3. 如果 `feedback` 指出 no results 或 too many results，有意义地修改 keyword 或过滤器。
+4. 输出一个 keyword 字符串；不要把多个词拼成一句话。
 
-# Input Format
+# 输入格式
 {
-  "task": "slot description from the outer RAG supervisor",
-  "context": "known facts and runtime hints",
-  "feedback": "previous judge feedback, or empty string"
+  "task": "外层 RAG supervisor 给出的槽位描述",
+  "context": "已知事实和运行时提示",
+  "feedback": "上一轮 judge feedback，或空字符串"
 }
 
-## Output format
-Return valid JSON only:
+## 输出格式
+只返回有效 JSON：
 {
   "keyword": "string",
   "global_user_id": "string or omitted",
@@ -87,7 +88,7 @@ Return valid JSON only:
   "from_timestamp": "local YYYY-MM-DD HH:MM or omitted",
   "to_timestamp": "local YYYY-MM-DD HH:MM or omitted"
 }
-""").substitute(default_top_k=RAG_SEARCH_DEFAULT_TOP_K)
+''').substitute(default_top_k=RAG_SEARCH_DEFAULT_TOP_K)
 _generator_llm = get_llm(
     temperature=0.0,
     top_p=1.0,
@@ -96,38 +97,40 @@ _generator_llm = get_llm(
     api_key=RAG_SUBAGENT_LLM_API_KEY,
 )
 
-_JUDGE_PROMPT = """\
-你是 `search_conversation_keyword` 的结果评估器。
+_JUDGE_PROMPT = '''\
+你判断 `search_conversation_keyword` 的结果是否解决当前槽位。
 
 # 任务
-- 判断结果是否已经解决槽位。
-- 如果未解决，必须输出可以立刻执行的反馈。
+- 判断结果是否解决槽位。
+- 如果未解决，输出下一次 keyword/filter 尝试可以直接使用的 feedback。
 
 # 生成步骤
-1. 先读取 `task`，确认需要命中的字面锚点。
-2. 检查 `result` 是否包含相关消息、错误或空结果。
-3. 只有结果足以解决槽位时才返回 `resolved: true`。
-4. 未解决时，给出下一轮关键词或过滤条件的具体修正。
+1. 读取 `task`，识别必须匹配的字面 anchor。
+2. 检查 `result` 中的相关消息、错误或空输出。
+3. 只有结果足够解决槽位时，才返回 `resolved: true`。
+4. 如果未解决，为下一次 keyword 或 filters 给出具体修正。
+5. 生成的控制/状态说明使用中文。保留 source message text、display names、
+   literal anchors、URLs 和 filenames 的原始语言。
 
 # 输入格式
 {
-  "task": "外层 RAG supervisor 生成的槽位描述",
+  "task": "外层 RAG supervisor 给出的槽位描述",
   "result": "search_conversation_keyword 的工具结果"
 }
 
 # 常见反馈方向
-- 关键词太长，请只保留核心 noun / phrase
-- 没有匹配，请尝试更短或更常见的同义词
-- 需要加入或移除用户/时间过滤
-- 命中内容偏题，需要换成真正的锚点词
+- Keyword 太长；只保留核心名词或短语。
+- 没有匹配；尝试更短的词或常见同义词。
+- 添加或移除用户/时间过滤器。
+- 命中偏题；改用真正的 anchor term。
 
 # 输出格式
-请只返回合法 JSON：
+只返回有效 JSON：
 {
   "resolved": true or false,
   "feedback": "string"
 }
-"""
+'''
 _judge_llm = get_llm(
     temperature=0.0,
     top_p=1.0,
@@ -264,7 +267,7 @@ async def _judge(task: str, result: object) -> tuple[bool, str]:
     response = await _judge_llm.ainvoke([system_prompt, human_message])
     verdict = parse_llm_json_output(response.content)
     if not isinstance(verdict, dict):
-        return_value = False, "评估输出无效，请把关键词缩短成最核心的词。"
+        return_value = False, "judge 输出无效；把 keyword 缩短为核心词。"
         return return_value
 
     resolved = bool(verdict.get("resolved", False))

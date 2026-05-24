@@ -256,6 +256,41 @@ def format_storage_utc_for_llm(value: str | None) -> str:
     return formatted_value
 
 
+def format_storage_utc_for_llm_seconds(value: str | None) -> str:
+    """Project storage UTC text to configured-local seconds for LLM payloads.
+
+    Args:
+        value: Optional storage UTC timestamp string.
+
+    Returns:
+        Configured-local ``YYYY-MM-DD HH:MM:SS`` text for valid storage UTC, or
+        an empty string for local, ambiguous, invalid, or non-string input.
+    """
+
+    if value is None:
+        formatted_value = ""
+        return formatted_value
+
+    if not isinstance(value, str):
+        formatted_value = ""
+        return formatted_value
+
+    stripped = value.strip()
+    if not stripped:
+        formatted_value = ""
+        return formatted_value
+
+    try:
+        storage_datetime_utc = parse_storage_utc_datetime(stripped)
+    except ValueError:
+        formatted_value = ""
+        return formatted_value
+
+    local_datetime = _storage_utc_to_local_naive(storage_datetime_utc)
+    formatted_value = local_datetime.strftime("%Y-%m-%d %H:%M:%S")
+    return formatted_value
+
+
 def format_storage_utc_history_for_llm(rows: list[dict]) -> list[dict]:
     """Shallow-copy history rows and project top-level ``timestamp`` fields.
 

@@ -21,6 +21,14 @@ from kazusa_ai_chatbot.rag.conversation_aggregate_agent import (
 )
 from kazusa_ai_chatbot.rag.conversation_filter_agent import ConversationFilterAgent
 from kazusa_ai_chatbot.rag.conversation_search_agent import ConversationSearchAgent
+from kazusa_ai_chatbot.rag.evidence_coverage import (
+    EvidenceCoverage,
+    assess_evidence_coverage,
+    coverage_allows_resolution,
+    evidence_buckets_for_coverage,
+    requested_coverage_items,
+    task_requires_value_evidence,
+)
 from kazusa_ai_chatbot.rag.helper_agent import BaseRAGHelperAgent
 from kazusa_ai_chatbot.rag.hybrid_retrieval import candidate_prompt_text
 from kazusa_ai_chatbot.rag.prompt_projection import project_selector_input_for_llm
@@ -33,6 +41,10 @@ _CAPABILITY_NAME = "conversation_evidence"
 _AGENT_NAME = "conversation_evidence_agent"
 _UNCACHED_REASON = "capability_orchestrator_uncached"
 _URL_PATTERN = re.compile(r"https?://[^\s)>\]}\"']+")
+_COUNT_INTENT_RE = re.compile(
+    r"\b(?:count|counts|counted|counting)\b",
+    flags=re.IGNORECASE,
+)
 _EXPLICIT_SPEAKER_SCOPE_PATTERN = re.compile(
     r"\bspeaker\s*=\s*(current_user|active_character|any_speaker)\b",
     re.IGNORECASE,
@@ -71,6 +83,31 @@ _RECALL_OWNED_TASK_MARKERS = (
     "where the current episode left off",
     "where current episode left off",
 )
+_RETRIEVAL_CONFIRMATION_MARKERS = (
+    "retrieve messages",
+    "retrieve recent messages",
+    "find context",
+    "messages around",
+    "messages near",
+    "context mentioning",
+    "mentioning",
+    "containing",
+)
+_VALUE_IDENTIFICATION_MARKERS = (
+    "identify",
+    "who said",
+    "which speaker",
+    "which user",
+    "which person",
+    "what time",
+    "when was",
+    "when did",
+    "count ",
+    "how many",
+    "ranking",
+    "grouped",
+    "aggregate",
+)
 _EXACT_ANCHOR_CHARS = (
     '"',
     "'",
@@ -83,6 +120,17 @@ _EXACT_ANCHOR_CHARS = (
     "\u300e",
     "\u300f",
 )
+_RELATION_REQUIREMENT_RE = re.compile(
+    r"\brelation\s*=\s*"
+    r"(previous_message|next_message|reply_parent)\b",
+    re.IGNORECASE,
+)
+_RELATION_LABELS = {
+    "previous_message": "上一条",
+    "next_message": "下一条",
+    "reply_parent": "回复对象",
+}
+_MAX_PACKET_RELATIONS = 3
 
 
 class _ConversationProjection(TypedDict):
@@ -90,6 +138,7 @@ class _ConversationProjection(TypedDict):
 
     summaries: list[str]
     rows: list[dict[str, Any]]
+    packets: list[dict[str, Any]]
     resolved_refs: list[dict[str, Any]]
 
 
@@ -144,9 +193,18 @@ def _result_payload(
     conflicts: list[str] | None = None,
     observation_candidates: list[dict[str, Any]] | None = None,
     source_hints: list[dict[str, Any]] | None = None,
+    coverage: EvidenceCoverage | None = None,
+    confirmed_evidence: list[str] | None = None,
+    partial_evidence: list[str] | None = None,
+    nearby_evidence: list[str] | None = None,
 ) -> dict[str, Any]:
     """Build the standard top-level conversation capability payload."""
 
+    coverage_payload = coverage or assess_evidence_coverage(
+        task="",
+        evidence_items=[],
+        worker_resolved=False,
+    )
     payload = {
         "selected_summary": _clip_text(selected_summary),
         "capability": _CAPABILITY_NAME,
@@ -161,6 +219,10 @@ def _result_payload(
         "conflicts": list(conflicts or []),
         "observation_candidates": list(observation_candidates or []),
         "source_hints": list(source_hints or []),
+        "coverage": coverage_payload,
+        "confirmed_evidence": list(confirmed_evidence or []),
+        "partial_evidence": list(partial_evidence or []),
+        "nearby_evidence": list(nearby_evidence or []),
     }
     return payload
 
@@ -183,6 +245,159 @@ def _strip_prefix(task: str) -> str:
     _, _, remainder = task.partition(":")
     return_value = remainder.strip()
     return return_value
+
+
+def _coverage_fields(
+    *,
+    task: str,
+    evidence_items: list[str],
+    worker_resolved: bool,
+    requires_value_evidence: bool | None = None,
+) -> tuple[EvidenceCoverage, dict[str, list[str]]]:
+    """Build coverage and quality-specific evidence buckets."""
+
+    coverage = assess_evidence_coverage(
+        task=task,
+        evidence_items=evidence_items,
+        worker_resolved=worker_resolved,
+        requires_value_evidence=requires_value_evidence,
+    )
+    buckets = evidence_buckets_for_coverage(coverage, evidence_items)
+    return_value = (coverage, buckets)
+    return return_value
+
+
+def _coverage_confirms_retrieval_task(
+    task: str,
+    coverage: EvidenceCoverage,
+) -> bool:
+    """Return whether deterministic coverage confirms a retrieval slot.
+
+    Args:
+        task: Conversation-evidence slot text.
+        coverage: Deterministic target coverage for projected evidence.
+
+    Returns:
+        True when the slot asks to retrieve matching conversation messages and
+        all required anchors are covered. Slots asking to identify or extract
+        a missing value still require the worker's own resolved judgment.
+    """
+
+    if coverage["evidence_quality"] != "partial":
+        return_value = False
+        return return_value
+    if not coverage["covered_items"]:
+        return_value = False
+        return return_value
+
+    coverage_requirement = coverage["coverage_requirement"]
+    missing_items = coverage["missing_items"]
+    if coverage_requirement == "all" and missing_items:
+        return_value = False
+        return return_value
+
+    task_body = _strip_prefix(task).lower()
+    if any(marker in task_body for marker in _VALUE_IDENTIFICATION_MARKERS):
+        return_value = False
+        return return_value
+
+    confirms_retrieval = any(
+        marker in task_body
+        for marker in _RETRIEVAL_CONFIRMATION_MARKERS
+    )
+    return_value = confirms_retrieval
+    return return_value
+
+
+def _relation_requirement(task: str) -> str:
+    """Read the stable relation contract token from a conversation slot."""
+
+    task_body = _strip_prefix(task)
+    match = _RELATION_REQUIREMENT_RE.search(task_body)
+    if match is None:
+        return_value = ""
+        return return_value
+
+    relation = match.group(1).lower()
+    return relation
+
+
+def _projection_has_relation(
+    projection: _ConversationProjection,
+    relation: str,
+) -> bool:
+    """Return whether a projected packet includes the required relation."""
+
+    if not relation:
+        return_value = True
+        return return_value
+
+    for packet in projection["packets"]:
+        relation_types = packet.get("relation_types")
+        if not isinstance(relation_types, list):
+            continue
+        if relation in relation_types:
+            return_value = True
+            return return_value
+
+    return_value = False
+    return return_value
+
+
+def _projection_evidence_items(
+    projection: _ConversationProjection,
+    *,
+    packets: list[dict[str, Any]],
+) -> list[str]:
+    """Return packet summaries when available, otherwise row summaries."""
+
+    packet_summaries = [
+        summary
+        for packet in packets
+        if (summary := text_or_empty(packet.get("summary")))
+    ]
+    if packet_summaries:
+        return_value = packet_summaries
+        return return_value
+
+    return_value = projection["summaries"]
+    return return_value
+
+
+def _projection_evidence_packets(
+    projection: _ConversationProjection,
+    *,
+    relation_required: bool,
+) -> list[dict[str, Any]]:
+    """Return packets selected for cognition-facing evidence."""
+
+    if relation_required:
+        packets = list(projection["packets"])
+        return packets
+
+    packets = [
+        packet
+        for packet in projection["packets"]
+        if _packet_has_keyword_support(packet)
+    ]
+    return packets
+
+
+def _confirmed_retrieval_coverage(
+    coverage: EvidenceCoverage,
+) -> EvidenceCoverage:
+    """Promote fully covered retrieval evidence to confirmed coverage."""
+
+    confirmed_coverage: EvidenceCoverage = {
+        "requested_items": list(coverage["requested_items"]),
+        "covered_items": list(coverage["covered_items"]),
+        "missing_items": list(coverage["missing_items"]),
+        "evidence_quality": "confirmed",
+        "confidence": coverage["confidence"],
+        "reason": "Deterministic coverage confirmed the retrieval evidence.",
+        "coverage_requirement": coverage["coverage_requirement"],
+    }
+    return confirmed_coverage
 
 
 def _speaker_scope(task: str) -> str:
@@ -275,7 +490,7 @@ def _deterministic_plan(task: str) -> dict[str, Any] | None:
         return plan
 
     if (
-        "count " in normalized
+        _COUNT_INTENT_RE.search(normalized)
         or "how many" in normalized
         or "ranking" in normalized
         or "grouped" in normalized
@@ -299,6 +514,21 @@ def _deterministic_plan(task: str) -> dict[str, Any] | None:
         plan = {
             "worker": "conversation_search_agent",
             "reason": "hybrid literal phrase, URL, filename, or exact anchor",
+            "requires_person_ref": requires_person_ref,
+        }
+        return plan
+
+    if (
+        "relation=" in normalized
+        or "attachment" in normalized
+        or "screenshot" in normalized
+        or "image" in normalized
+        or "preceding" in normalized
+        or "previous" in normalized
+    ):
+        plan = {
+            "worker": "conversation_search_agent",
+            "reason": "relation or media-bearing conversation evidence",
             "requires_person_ref": requires_person_ref,
         }
         return plan
@@ -365,38 +595,36 @@ def _normalize_selector_plan(
     return plan
 
 
-_SELECTOR_PROMPT = """\
-You choose one bounded conversation-history worker path for a RAG evidence slot.
-Do not answer from durable memory, active episode progress, user profiles, or web.
+_SELECTOR_PROMPT = '''\
+你要为一个 RAG 证据槽位选择一个有边界的 conversation-history worker 路径。
+不要用聊天历史路径回答 durable memory、活跃 episode 进度、用户资料或网页内容。
 
-# Generation Procedure
-1. If the task asks for an active/current agreement or episode state, output
-   worker="incompatible" and reason="Recall".
-2. If the task asks for a durable world fact, output worker="incompatible" and
-   reason="Memory-evidence".
-3. Use conversation_search_agent for fuzzy topics, semantic message evidence,
-   exact phrases, URLs, filenames, literal terms, and quoted-message provenance.
-   The search worker performs hybrid semantic plus literal-anchor retrieval.
-4. Use conversation_filter_agent for known user/time/date-window retrieval.
-5. Use conversation_aggregate_agent for counts, rankings, or grouped stats.
-6. Do not decide whether a structured person reference is required. That
-   dependency is validated deterministically from the slot text.
+# 生成步骤
+1. 如果任务询问活跃/当前约定或 episode 状态，输出
+   worker="incompatible"，reason="Recall"。
+2. 如果任务询问 durable world fact，输出 worker="incompatible"，
+   reason="Memory-evidence"。
+3. 模糊话题、语义消息证据、精确短语、URLs、filenames、字面词和引用消息来源，
+   使用 conversation_search_agent。该 worker 执行语义加字面锚点的混合检索。
+4. 已知用户、时间或日期窗口检索使用 conversation_filter_agent。
+5. 计数、排名或分组统计使用 conversation_aggregate_agent。
+6. 不要判断是否需要结构化人物引用；该依赖由槽位文本的确定性校验负责。
 
-# Input Format
+# 输入格式
 {
-  "task": "Conversation-evidence slot text",
-  "original_query": "decontextualized user query when available",
-  "current_slot": "slot label",
-  "known_facts": "ordered facts from previous RAG2 slots"
+  "task": "Conversation-evidence 槽位文本",
+  "original_query": "可用时的去上下文化用户问题",
+  "current_slot": "槽位标签",
+  "known_facts": "之前 RAG2 槽位得到的有序事实"
 }
 
-# Output Format
-Return valid JSON only:
+# 输出格式
+只返回有效 JSON：
 {
   "worker": "conversation_search_agent | conversation_filter_agent | conversation_aggregate_agent | incompatible",
-  "reason": "short source selection explanation"
+  "reason": "简短来源选择说明"
 }
-"""
+'''
 _selector_llm = get_llm(
     temperature=0.0,
     top_p=1.0,
@@ -445,6 +673,83 @@ def _iter_known_refs(context: dict[str, Any]) -> list[dict[str, Any]]:
             if isinstance(ref, dict):
                 refs.append(ref)
     return refs
+
+
+def _coverage_requires_value_evidence(task: str, context: dict[str, Any]) -> bool:
+    """Preserve value-evidence intent across narrowed continuation slots."""
+
+    if task_requires_value_evidence(task):
+        return_value = True
+        return return_value
+
+    current_items = requested_coverage_items(task)
+    if not current_items:
+        return_value = False
+        return return_value
+
+    known_facts = context.get("known_facts")
+    if not isinstance(known_facts, list):
+        return_value = False
+        return return_value
+
+    for fact in known_facts:
+        if not isinstance(fact, dict):
+            continue
+        if _known_fact_carries_value_intent(fact, current_items):
+            return_value = True
+            return return_value
+
+    return_value = False
+    return return_value
+
+
+def _known_fact_carries_value_intent(
+    fact: dict[str, Any],
+    current_items: list[str],
+) -> bool:
+    """Return whether one prior fact preserves value intent for current items."""
+
+    if fact.get("agent") != _AGENT_NAME:
+        return_value = False
+        return return_value
+    if bool(fact.get("resolved")):
+        return_value = False
+        return return_value
+
+    slot = text_or_empty(fact.get("slot"))
+    if not task_requires_value_evidence(slot):
+        return_value = False
+        return return_value
+
+    prior_items = _prior_requested_items(fact, slot)
+    if not prior_items:
+        return_value = False
+        return return_value
+
+    current_item_set = set(current_items)
+    prior_item_set = set(prior_items)
+    return_value = bool(current_item_set & prior_item_set)
+    return return_value
+
+
+def _prior_requested_items(fact: dict[str, Any], slot: str) -> list[str]:
+    """Read requested coverage items from a prior fact or its slot text."""
+
+    raw_result = fact.get("raw_result")
+    if isinstance(raw_result, dict):
+        coverage = raw_result.get("coverage")
+        if isinstance(coverage, dict):
+            requested_items = coverage.get("requested_items")
+            if isinstance(requested_items, list):
+                items = [
+                    item
+                    for value in requested_items
+                    if (item := text_or_empty(value))
+                ]
+                return items
+
+    items = requested_coverage_items(slot)
+    return items
 
 
 def _first_person_ref(context: dict[str, Any]) -> dict[str, Any] | None:
@@ -583,6 +888,7 @@ def _empty_projection() -> _ConversationProjection:
     projection: _ConversationProjection = {
         "summaries": [],
         "rows": [],
+        "packets": [],
         "resolved_refs": [],
     }
     return projection
@@ -789,17 +1095,33 @@ def _message_projection(rows: list[dict[str, Any]]) -> _ConversationProjection:
             _message_row_text(row),
             limit=RAG_CONVERSATION_EVIDENCE_TEXT_LIMIT,
         )
+        summary = _dedupe_speaker_prefix(summary, row)
         if not summary:
             continue
         summaries.append(summary)
         projected_rows.append(_projection_row(row, summary))
+    packets = _conversation_packets(projected_rows)
     resolved_refs = _refs_from_message_rows(rows)
     projection: _ConversationProjection = {
         "summaries": summaries,
         "rows": projected_rows,
+        "packets": packets,
         "resolved_refs": resolved_refs,
     }
     return projection
+
+
+def _dedupe_speaker_prefix(summary: str, row: dict[str, Any]) -> str:
+    """Collapse repeated speaker prefixes in projected conversation text."""
+
+    display_name = text_or_empty(row.get("display_name"))
+    if not display_name:
+        return summary
+    doubled_prefix = f"{display_name}: {display_name}: "
+    if summary.startswith(doubled_prefix):
+        deduped = f"{display_name}: {summary[len(doubled_prefix):]}"
+        return deduped
+    return summary
 
 
 def _projection_row(row: dict[str, Any], summary: str) -> dict[str, Any]:
@@ -824,6 +1146,9 @@ def _projection_row(row: dict[str, Any], summary: str) -> dict[str, Any]:
         score: float | None = float(score_value)
     else:
         score = None
+    reply_context = row.get("reply_context")
+    if not isinstance(reply_context, dict):
+        reply_context = {}
 
     projected_row = {
         "summary": summary,
@@ -833,8 +1158,210 @@ def _projection_row(row: dict[str, Any], summary: str) -> dict[str, Any]:
         "conversation_row_id": conversation_row_id,
         "methods": methods,
         "score": score,
+        "relation_to_seed": text_or_empty(row.get("relation_to_seed")),
+        "seed_platform_message_id": text_or_empty(
+            row.get("seed_platform_message_id")
+        ),
+        "seed_conversation_row_id": text_or_empty(
+            row.get("seed_conversation_row_id")
+        ),
+        "seed_timestamp": text_or_empty(row.get("seed_timestamp")),
+        "reply_parent_summary": text_or_empty(
+            reply_context.get("reply_excerpt")
+        ),
+        "reply_parent_display_name": text_or_empty(
+            reply_context.get("reply_to_display_name")
+        ),
     }
     return projected_row
+
+
+def _conversation_packets(
+    rows: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Build compact seed-plus-relation packets from projected rows."""
+
+    seed_rows = [
+        row
+        for row in rows
+        if not _row_relation_type(row) or _row_has_direct_retrieval_method(row)
+    ]
+    if not seed_rows:
+        return_value: list[dict[str, Any]] = []
+        return return_value
+
+    packets: list[dict[str, Any]] = []
+    for seed in seed_rows[:RAG_SEARCH_SELECTED_SUMMARY_LIMIT]:
+        relations = _relations_for_seed(seed, rows)
+        if not relations:
+            continue
+        relation_types = [
+            relation["relation_type"]
+            for relation in relations
+            if relation["relation_type"]
+        ]
+        packet = {
+            "summary": _packet_summary(seed, relations),
+            "seed": seed,
+            "relations": relations,
+            "relation_types": relation_types,
+        }
+        packets.append(packet)
+
+    return packets
+
+
+def _relations_for_seed(
+    seed: dict[str, Any],
+    rows: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Return bounded relation rows attached to one seed message."""
+
+    relations: list[dict[str, Any]] = []
+    reply_parent = _reply_parent_relation(seed)
+    seen_types: set[str] = set()
+    if reply_parent is not None:
+        relations.append(reply_parent)
+        seen_types.add("reply_parent")
+
+    for row in rows:
+        relation_type = _row_relation_type(row)
+        if not relation_type:
+            continue
+        if not _row_attaches_to_seed(row, seed):
+            continue
+        if relation_type in seen_types:
+            continue
+        relations.append(
+            {
+                "relation_type": relation_type,
+                "summary": row["summary"],
+                "row": row,
+            }
+        )
+        seen_types.add(relation_type)
+        if len(relations) >= _MAX_PACKET_RELATIONS:
+            break
+
+    return relations
+
+
+def _reply_parent_relation(
+    seed: dict[str, Any],
+) -> dict[str, Any] | None:
+    """Return reply-parent relation from prompt-safe reply metadata."""
+
+    summary = text_or_empty(seed.get("reply_parent_summary"))
+    if not summary:
+        return None
+
+    display_name = text_or_empty(seed.get("reply_parent_display_name"))
+    if display_name:
+        relation_summary = f"{display_name}: {summary}"
+    else:
+        relation_summary = summary
+    relation = {
+        "relation_type": "reply_parent",
+        "summary": relation_summary,
+        "row": {},
+    }
+    return relation
+
+
+def _row_relation_type(row: dict[str, Any]) -> str:
+    """Return a stable relation type from a projected row."""
+
+    relation_type = text_or_empty(row.get("relation_to_seed")).lower()
+    if relation_type in _RELATION_LABELS:
+        return relation_type
+    return_value = ""
+    return return_value
+
+
+def _row_has_direct_retrieval_method(row: dict[str, Any]) -> bool:
+    """Return whether a projected row was retrieved directly, not only nearby."""
+
+    methods = row.get("methods")
+    if not isinstance(methods, list):
+        return_value = False
+        return return_value
+
+    for method in methods:
+        method_text = text_or_empty(method)
+        if method_text == "semantic" or method_text.startswith("keyword:"):
+            return_value = True
+            return return_value
+
+    return_value = False
+    return return_value
+
+
+def _packet_has_keyword_support(packet: dict[str, Any]) -> bool:
+    """Return whether a packet seed came from exact keyword retrieval."""
+
+    seed = packet.get("seed")
+    if not isinstance(seed, dict):
+        return_value = False
+        return return_value
+
+    methods = seed.get("methods")
+    if not isinstance(methods, list):
+        return_value = False
+        return return_value
+
+    for method in methods:
+        if text_or_empty(method).startswith("keyword:"):
+            return_value = True
+            return return_value
+
+    return_value = False
+    return return_value
+
+
+def _row_attaches_to_seed(
+    row: dict[str, Any],
+    seed: dict[str, Any],
+) -> bool:
+    """Return whether a relation row is attached to the seed row."""
+
+    seed_platform_message_id = text_or_empty(seed.get("platform_message_id"))
+    row_seed_platform_message_id = text_or_empty(
+        row.get("seed_platform_message_id")
+    )
+    if seed_platform_message_id and row_seed_platform_message_id:
+        return_value = seed_platform_message_id == row_seed_platform_message_id
+        return return_value
+
+    seed_conversation_row_id = text_or_empty(seed.get("conversation_row_id"))
+    row_seed_conversation_row_id = text_or_empty(
+        row.get("seed_conversation_row_id")
+    )
+    if seed_conversation_row_id and row_seed_conversation_row_id:
+        return_value = seed_conversation_row_id == row_seed_conversation_row_id
+        return return_value
+
+    seed_timestamp = text_or_empty(seed.get("timestamp"))
+    row_seed_timestamp = text_or_empty(row.get("seed_timestamp"))
+    return_value = bool(seed_timestamp and seed_timestamp == row_seed_timestamp)
+    return return_value
+
+
+def _packet_summary(
+    seed: dict[str, Any],
+    relations: list[dict[str, Any]],
+) -> str:
+    """Reduce a conversation packet into one cognition-facing fact."""
+
+    parts = [f"命中消息：{seed['summary']}"]
+    for relation in relations[:_MAX_PACKET_RELATIONS]:
+        relation_type = text_or_empty(relation.get("relation_type"))
+        label = _RELATION_LABELS.get(relation_type, "相关消息")
+        summary = text_or_empty(relation.get("summary"))
+        if not summary:
+            continue
+        parts.append(f"{label}：{summary}")
+    summary = "；".join(parts)
+    return summary
 
 
 def _conversation_projection_source(row: dict[str, Any]) -> str:
@@ -943,6 +1470,7 @@ def _aggregate_projection(value: object) -> _ConversationProjection:
     projection: _ConversationProjection = {
         "summaries": summaries,
         "rows": [],
+        "packets": [],
         "resolved_refs": _refs_from_aggregate_rows(rows),
     }
     return projection
@@ -1071,6 +1599,7 @@ class ConversationEvidenceAgent(BaseRAGHelperAgent):
         if primary_worker == "incompatible":
             reason = text_or_empty(plan["reason"]) or "unsupported"
             result = self._unresolved(
+                task=task,
                 source_policy=f"incompatible intent; use {reason}",
                 missing_context=[f"incompatible_intent:{reason}"],
                 primary_worker="",
@@ -1081,6 +1610,7 @@ class ConversationEvidenceAgent(BaseRAGHelperAgent):
         person_ref = _first_person_ref(context)
         if bool(plan["requires_person_ref"]) and person_ref is None:
             result = self._unresolved(
+                task=task,
                 source_policy="structured person ref required but missing",
                 missing_context=["person_ref"],
                 primary_worker=primary_worker,
@@ -1110,12 +1640,63 @@ class ConversationEvidenceAgent(BaseRAGHelperAgent):
             exclusion_counts["conversation_row_id"]
             + exclusion_counts["platform_message_id"]
         )
-        summaries = projection["summaries"]
+        relation_requirement = _relation_requirement(task)
+        evidence_packets = _projection_evidence_packets(
+            projection,
+            relation_required=bool(relation_requirement),
+        )
+        summaries = _projection_evidence_items(
+            projection,
+            packets=evidence_packets,
+        )
         projection_rows = projection["rows"]
-        selected_summary = "\n".join(summaries[:RAG_SEARCH_SELECTED_SUMMARY_LIMIT])
+        worker_resolved = bool(worker_result.get("resolved"))
+        requires_value_evidence = _coverage_requires_value_evidence(
+            task,
+            context,
+        )
+        coverage, evidence_buckets = _coverage_fields(
+            task=task,
+            evidence_items=summaries,
+            worker_resolved=worker_resolved,
+            requires_value_evidence=requires_value_evidence,
+        )
+        coverage_confirms_retrieval = _coverage_confirms_retrieval_task(
+            task,
+            coverage,
+        )
+        if coverage_confirms_retrieval:
+            coverage = _confirmed_retrieval_coverage(coverage)
+            evidence_buckets = evidence_buckets_for_coverage(
+                coverage,
+                summaries,
+            )
+        confirmed_evidence = evidence_buckets["confirmed_evidence"]
+        partial_evidence = evidence_buckets["partial_evidence"]
+        nearby_evidence = evidence_buckets["nearby_evidence"]
+        legacy_evidence = confirmed_evidence
+        if not legacy_evidence:
+            legacy_evidence = partial_evidence or nearby_evidence
+        selected_summary = "\n".join(
+            legacy_evidence[:RAG_SEARCH_SELECTED_SUMMARY_LIMIT],
+        )
         resolved_refs = projection["resolved_refs"]
-        resolved = bool(worker_result.get("resolved")) and bool(summaries)
-        missing_context = [] if resolved else ["conversation_evidence"]
+        relation_available = _projection_has_relation(
+            projection,
+            relation_requirement,
+        )
+        resolved = (
+            bool(summaries)
+            and coverage_allows_resolution(coverage)
+            and (worker_resolved or coverage_confirms_retrieval)
+            and relation_available
+        )
+        if resolved:
+            missing_context = []
+        elif relation_requirement and not relation_available:
+            missing_context = [f"conversation_relation:{relation_requirement}"]
+        else:
+            missing_context = ["conversation_evidence"]
         observation_candidates = []
         source_hints: list[dict[str, Any]] = []
         if summaries and not resolved:
@@ -1141,15 +1722,20 @@ class ConversationEvidenceAgent(BaseRAGHelperAgent):
             source_policy=text_or_empty(plan["reason"]),
             resolved_refs=resolved_refs,
             projection_payload={
-                "summaries": summaries,
+                "summaries": projection["summaries"],
                 "rows": projection_rows,
+                "packets": evidence_packets,
             },
             worker_payloads=worker_payloads,
-            evidence=summaries,
+            evidence=legacy_evidence,
             missing_context=missing_context,
             conflicts=[],
             observation_candidates=observation_candidates,
             source_hints=source_hints,
+            coverage=coverage,
+            confirmed_evidence=confirmed_evidence,
+            partial_evidence=partial_evidence,
+            nearby_evidence=nearby_evidence,
         )
         logger.info(
             f"{_AGENT_NAME} output: resolved={resolved} "
@@ -1187,25 +1773,35 @@ class ConversationEvidenceAgent(BaseRAGHelperAgent):
     def _unresolved(
         self,
         *,
+        task: str,
         source_policy: str,
         missing_context: list[str],
         primary_worker: str,
         worker_payloads: dict[str, Any],
     ) -> dict[str, Any]:
         """Build an unresolved result without calling another source."""
+        coverage, evidence_buckets = _coverage_fields(
+            task=task,
+            evidence_items=[],
+            worker_resolved=False,
+        )
         payload = _result_payload(
             selected_summary="",
             primary_worker=primary_worker,
             supporting_workers=[],
             source_policy=source_policy,
             resolved_refs=[],
-            projection_payload={"summaries": []},
+            projection_payload={"summaries": [], "packets": []},
             worker_payloads=worker_payloads,
             evidence=[],
             missing_context=missing_context,
             conflicts=[],
             observation_candidates=[],
             source_hints=[],
+            coverage=coverage,
+            confirmed_evidence=evidence_buckets["confirmed_evidence"],
+            partial_evidence=evidence_buckets["partial_evidence"],
+            nearby_evidence=evidence_buckets["nearby_evidence"],
         )
         logger.info(
             f"{_AGENT_NAME} output: resolved=False "

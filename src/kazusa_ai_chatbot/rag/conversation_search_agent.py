@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
-from datetime import timedelta
+from datetime import datetime, timedelta
 from typing import Any
 
 from langchain_core.messages import HumanMessage, SystemMessage
@@ -38,6 +38,7 @@ from kazusa_ai_chatbot.rag.cache2_policy import (
 from kazusa_ai_chatbot.rag.helper_agent import BaseRAGHelperAgent
 from kazusa_ai_chatbot.rag.hybrid_retrieval import (
     HybridCandidate,
+    hybrid_row_identity,
     merge_hybrid_candidates,
     select_neighbor_seed_candidates,
 )
@@ -49,6 +50,7 @@ from kazusa_ai_chatbot.rag.search_runtime import (
     apply_conversation_runtime_constraints,
 )
 from kazusa_ai_chatbot.time_boundary import (
+    local_datetime_to_storage_utc_iso,
     local_llm_datetime_to_storage_utc_iso,
     parse_storage_utc_datetime,
 )
@@ -64,32 +66,42 @@ _RAW_CONVERSATION_STORAGE_KEYS = (
 )
 
 _GENERATOR_PROMPT = (
-    """\
-你是一个只负责 `search_conversation` 的检索参数生成器。
+    '''\
+你只为 `search_conversation` 生成检索参数。
 
-# 你的唯一职责
-- 目标是为当前槽位生成一次高质量的语义检索参数。
-- 你只能为 `search_conversation` 生成参数，禁止改调其它工具。
-- `search_query` 必须是自然语言语义查询，不要退化成关键词列表。
-- `literal_anchors` 是可选字段，只放原问题中必须字面命中的专有名词、技术词、短语或中文关键词；不要把整句拆成词表。
-- 如果 `context` 里已经给出 platform / platform_channel_id / global_user_id / 时间边界，就优先利用这些明确线索。
-- `feedback` 来自上一轮评估，必须优先吸收；如果反馈说"太泛""角度不对""结果不相关"，就重写查询意图而不是重复上一轮。
+# 范围
+- 为当前槽位生成一组高质量语义搜索参数。
+- 只能生成 `search_conversation` 的参数。
+- `search_query` 必须是自然语言语义查询，不是关键词列表。
+- `literal_anchors` 是可选项。只放必须字面匹配的 proper nouns、技术词、
+  短语、URLs、filenames 或 quoted text。不要把完整句子拆成词表。
+- 如果 context 已经提供 platform、platform_channel_id、global_user_id 或时间边界，
+  使用这些可信约束。
+- `context.original_query` 是去上下文化后的用户请求。当 `task` 只定位锚点、
+  截图、链接或时间戳时，`search_query` 仍要覆盖 original_query 要求的
+  周边事实、后续讨论和说话人关系。
+- `feedback` 来自上一轮 judge。如果它指出过宽、角度错误或结果无关，
+  改写查询角度，不要重复旧查询。
+- 生成的控制/状态说明使用中文。保留 literal anchors、names、quotes、URLs、
+  filenames 和 source message text 的原始语言。
 
-# Generation Procedure
-1. Read `task` to identify the semantic conversation evidence needed.
-2. Read `context` for platform, channel, user, time, and known-fact constraints.
-3. Read `feedback`; if present, change the search angle instead of repeating the previous query.
-4. Write one natural-language `search_query`, then add only filters supported by context.
+# 生成步骤
+1. 读取 `task`，识别需要的语义聊天证据。
+2. 读取 `context.original_query`、`context.current_slot` 和 `context.known_facts`，
+   补足窄槽位可能省略的更大信息需求。
+3. 读取 `context` 中的 platform、channel、user、time 和 known-fact 约束。
+4. 读取 `feedback`；若存在，改变搜索角度，不要重复上一轮查询。
+5. 写出一个自然语言 `search_query`，再只添加 context 支持的过滤字段。
 
-# Input Format
+# 输入格式
 {{
-  "task": "slot description from the outer RAG supervisor",
-  "context": "known facts and runtime hints",
-  "feedback": "previous judge feedback, or empty string"
+  "task": "外层 RAG supervisor 给出的槽位描述",
+  "context": "已知事实和运行时提示",
+  "feedback": "上一轮 judge feedback，或空字符串"
 }}
 
 # 输出格式
-请只返回合法 JSON：
+只返回有效 JSON：
 {{
   "search_query": "string",
   "literal_anchors": ["string, optional; at most 5 anchors"],
@@ -100,7 +112,7 @@ _GENERATOR_PROMPT = (
   "from_timestamp": "local YYYY-MM-DD HH:MM or omitted",
   "to_timestamp": "local YYYY-MM-DD HH:MM or omitted"
 }}
-"""
+'''
 ).format(default_top_k=CONVERSATION_SEARCH_DEFAULT_TOP_K)
 _generator_llm = get_llm(
     temperature=0.0,
@@ -110,38 +122,43 @@ _generator_llm = get_llm(
     api_key=RAG_SUBAGENT_LLM_API_KEY,
 )
 
-_JUDGE_PROMPT = """\
-你是 `search_conversation` 的结果评估器。
+_JUDGE_PROMPT = '''\
+你判断 `search_conversation` 的结果是否解决当前槽位。
 
 # 任务
-- 判断当前结果是否已经足以解决槽位。
-- 如果未解决，`feedback` 必须给出下一轮可执行的修正建议。
+- 判断当前结果是否足够解决槽位。
+- 如果未解决，`feedback` 必须给出下一次搜索查询或过滤器可执行的修正。
 
-# Generation Procedure
-1. Read `task` and identify what evidence would resolve it.
-2. Inspect `result` for directly relevant messages, source metadata, and errors.
-3. Return resolved=true only when the result answers the slot.
-4. If unresolved, write concrete feedback for the next search query or filters.
+# 生成步骤
+1. 读取 `task`，识别什么证据可以解决它。
+2. 读取 `context.original_query` 和 `context.current_slot`；如果它们要求
+   周边对话、后续讨论或窄 `task` 省略的其他实体，也必须要求这些事实。
+3. 检查 `result` 中的直接相关消息、可读来源信息和错误。
+4. 只有结果回答了槽位，且没有漏掉 `context` 中可见的关键大上下文时，
+   才返回 resolved=true。
+5. 如果未解决，为下一次搜索查询或过滤器写出具体反馈。
 
-# Input Format
+# 输入格式
 {
-  "task": "slot description from the outer RAG supervisor",
-  "result": "tool result from search_conversation"
+  "task": "外层 RAG supervisor 给出的槽位描述",
+  "context": "投影后的运行时上下文，可用时包含 original_query/current_slot",
+  "result": "search_conversation 的工具结果"
 }
 
 # 常见反馈方向
-- 查询太泛，需要换成更具体的语义表述
-- 查询角度错了，需要聚焦人物/链接/事件
-- 缺少过滤条件，需要利用已知用户或时间范围
-- 返回消息不相关，需要改写成"对什么的看法/提到什么内容"
+- 查询过宽；使用更具体的语义描述。
+- 查询角度错误；聚焦人物、链接、事件或请求的细节。
+- 缺少过滤器；使用已知用户或时间范围。
+- 返回消息无关；改写为 "opinion about X" 或 "mentions X"。
+- 反馈说明使用中文；source text 保持原文。
 
 # 输出格式
-请只返回合法 JSON：
+只返回有效 JSON：
 {
   "resolved": true or false,
   "feedback": "string"
 }
-"""
+'''
 _judge_llm = get_llm(
     temperature=0.0,
     top_p=1.0,
@@ -441,15 +458,22 @@ async def _conversation_neighbor_rows(
     )
     rows_by_identity: dict[str, dict[str, Any]] = {}
     for seed in seeds:
-        from_timestamp, to_timestamp = _neighbor_time_bounds(
-            seed.row,
-            window_minutes=window_minutes,
+        from_timestamp, seed_storage_timestamp, to_timestamp = (
+            _neighbor_time_bounds(
+                seed.row,
+                window_minutes=window_minutes,
+            )
         )
-        if not from_timestamp or not to_timestamp:
+        if (
+            not from_timestamp
+            or not seed_storage_timestamp
+            or not to_timestamp
+        ):
             continue
-        seed_timestamp = text_or_empty(seed.row.get("timestamp"))
-        if not seed_timestamp:
+        seed_display_timestamp = text_or_empty(seed.row.get("timestamp"))
+        if not seed_display_timestamp:
             continue
+        seed_identity = hybrid_row_identity(seed.row, source="conversation")
         side_limit = max(1, message_limit)
         platform = text_or_empty(seed.row.get("platform"))
         if not platform:
@@ -462,35 +486,63 @@ async def _conversation_neighbor_rows(
             platform_channel_id=platform_channel_id or None,
             limit=side_limit,
             from_timestamp=from_timestamp,
-            to_timestamp=seed_timestamp,
+            to_timestamp=seed_storage_timestamp,
             sort_direction=-1,
         )
         after_docs = await get_conversation_history(
             platform=platform or None,
             platform_channel_id=platform_channel_id or None,
             limit=side_limit,
-            from_timestamp=seed_timestamp,
+            from_timestamp=seed_storage_timestamp,
             to_timestamp=to_timestamp,
             sort_direction=1,
         )
-        for doc in before_docs + after_docs:
-            if not isinstance(doc, dict):
-                continue
-            candidate = _conversation_result_row(doc)
-            identity = text_or_empty(candidate.get("platform_message_id"))
-            if not identity:
-                identity = text_or_empty(candidate.get("conversation_row_id"))
-            if not identity:
-                identity = text_or_empty(candidate.get("_id"))
-            if not identity:
-                identity = f"{candidate.get('timestamp', '')}:{len(rows_by_identity)}"
-            rows_by_identity[identity] = candidate
+        for relation_type, docs in (
+            ("previous_message", before_docs),
+            ("next_message", after_docs),
+        ):
+            for doc in docs:
+                if not isinstance(doc, dict):
+                    continue
+                candidate = _conversation_result_row(doc)
+                candidate_identity = hybrid_row_identity(
+                    candidate,
+                    source="conversation",
+                )
+                if candidate_identity == seed_identity:
+                    continue
+                candidate["relation_to_seed"] = relation_type
+                seed_platform_message_id = text_or_empty(
+                    seed.row.get("platform_message_id")
+                )
+                seed_conversation_row_id = text_or_empty(
+                    seed.row.get("conversation_row_id")
+                )
+                if seed_platform_message_id:
+                    candidate["seed_platform_message_id"] = (
+                        seed_platform_message_id
+                    )
+                if seed_conversation_row_id:
+                    candidate["seed_conversation_row_id"] = (
+                        seed_conversation_row_id
+                    )
+                candidate["seed_timestamp"] = seed_display_timestamp
+                identity = text_or_empty(candidate.get("platform_message_id"))
+                if not identity:
+                    identity = text_or_empty(candidate.get("conversation_row_id"))
+                if not identity:
+                    identity = text_or_empty(candidate.get("_id"))
+                if not identity:
+                    identity = (
+                        f"{candidate.get('timestamp', '')}:"
+                        f"{len(rows_by_identity)}"
+                    )
+                rows_by_identity[identity] = candidate
 
     rows = sorted(
         rows_by_identity.values(),
         key=lambda row: text_or_empty(row.get("timestamp")),
     )
-    rows = rows[: max(1, message_limit * 2)]
     return rows
 
 
@@ -498,25 +550,41 @@ def _neighbor_time_bounds(
     row: dict[str, Any],
     *,
     window_minutes: int,
-) -> tuple[str, str]:
-    """Return UTC ISO bounds around one candidate timestamp."""
+) -> tuple[str, str, str]:
+    """Return UTC ISO bounds and the normalized center timestamp."""
 
     timestamp = text_or_empty(row.get("timestamp"))
     if not timestamp:
-        return_value = "", ""
+        return_value = "", "", ""
         return return_value
+
+    center = _neighbor_center_datetime(timestamp)
+    if center is None:
+        return_value = "", "", ""
+        return return_value
+
+    window = timedelta(minutes=window_minutes)
+    from_timestamp = (center - window).strftime("%Y-%m-%dT%H:%M:%S+00:00")
+    seed_timestamp = center.strftime("%Y-%m-%dT%H:%M:%S+00:00")
+    to_timestamp = (center + window).strftime("%Y-%m-%dT%H:%M:%S+00:00")
+    return_value = from_timestamp, seed_timestamp, to_timestamp
+    return return_value
+
+
+def _neighbor_center_datetime(timestamp: str) -> datetime | None:
+    """Parse a seed timestamp for bounded neighboring-row retrieval."""
 
     try:
         center = parse_storage_utc_datetime(timestamp)
     except ValueError:
-        return_value = "", ""
-        return return_value
-    window = timedelta(minutes=window_minutes)
-    from_timestamp = (center - window).strftime("%Y-%m-%dT%H:%M:%S+00:00")
-    to_timestamp = (center + window).strftime("%Y-%m-%dT%H:%M:%S+00:00")
-    return_value = from_timestamp, to_timestamp
-    return return_value
+        try:
+            normalized = local_datetime_to_storage_utc_iso(timestamp)
+        except ValueError:
+            return_value = None
+            return return_value
+        center = parse_storage_utc_datetime(normalized)
 
+    return center
 
 def _conversation_result_row(row: dict[str, Any]) -> dict[str, Any]:
     """Project one conversation row into the search-agent result contract."""
@@ -524,7 +592,11 @@ def _conversation_result_row(row: dict[str, Any]) -> dict[str, Any]:
     if "body_text" not in row:
         return _strip_raw_conversation_storage_fields(row)
 
-    payload = conversation_message_payload(row)
+    timestamp = text_or_empty(row.get("timestamp"))
+    if timestamp and not _is_storage_utc_timestamp(timestamp):
+        payload = _strip_raw_conversation_storage_fields(row)
+    else:
+        payload = conversation_message_payload(row)
     for key in (
         "error",
         "method",
@@ -537,6 +609,19 @@ def _conversation_result_row(row: dict[str, Any]) -> dict[str, Any]:
             payload[key] = row[key]
 
     return payload
+
+
+def _is_storage_utc_timestamp(timestamp: str) -> bool:
+    """Return whether timestamp text is a storage UTC value."""
+
+    try:
+        parse_storage_utc_datetime(timestamp)
+    except ValueError:
+        return_value = False
+        return return_value
+
+    return_value = True
+    return return_value
 
 
 def _strip_raw_conversation_storage_fields(row: dict[str, Any]) -> dict[str, Any]:
@@ -592,25 +677,38 @@ def _apply_runtime_constraints(
     return constrained
 
 
-async def _judge(task: str, result: object) -> tuple[bool, str]:
+async def _judge(
+    task: str,
+    result: object,
+    context: dict[str, Any] | None = None,
+) -> tuple[bool, str]:
     """Judge whether the latest semantic search result resolves the slot.
 
     Args:
         task: Slot description produced by the outer-loop dispatcher.
         result: Tool result from the current attempt.
+        context: Runtime context carrying the broader original query.
 
     Returns:
         Tuple of (resolved, feedback).
     """
     system_prompt = SystemMessage(content=_JUDGE_PROMPT)
     llm_result = project_tool_result_for_llm(result)
+    llm_context = project_runtime_context_for_llm(context or {})
     human_message = HumanMessage(
-        content=json.dumps({"task": task, "result": llm_result}, ensure_ascii=False)
+        content=json.dumps(
+            {
+                "task": task,
+                "context": llm_context,
+                "result": llm_result,
+            },
+            ensure_ascii=False,
+        )
     )
     response = await _judge_llm.ainvoke([system_prompt, human_message])
     verdict = parse_llm_json_output(response.content)
     if not isinstance(verdict, dict):
-        return_value = False, "评估输出无效，请把语义查询改得更具体。"
+        return_value = False, "judge 输出无效；把 semantic query 写得更具体。"
         return return_value
 
     resolved = bool(verdict.get("resolved", False))
@@ -672,7 +770,7 @@ class ConversationSearchAgent(BaseRAGHelperAgent):
             args = _apply_runtime_constraints(args, task, context)
             args = _apply_context_top_k(args, context)
             result = await _tool(args)
-            resolved, feedback = await _judge(task, result)
+            resolved, feedback = await _judge(task, result, context)
             if resolved:
                 break
 

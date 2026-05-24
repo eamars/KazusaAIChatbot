@@ -170,12 +170,19 @@ async def test_conversation_search_judge_serializes_mongo_rows(
                 "embedding": [0.1, 0.2, 0.3],
             },
         ],
+        {
+            "original_query": "What did people say around the GPU screenshot?",
+            "current_slot": "Conversation-evidence: retrieve GPU discussion",
+        },
     )
 
     human_message = judge_llm.messages[-1]
     payload = json.loads(human_message.content)
     assert resolved is True
     assert feedback == ""
+    assert payload["context"]["original_query"] == (
+        "What did people say around the GPU screenshot?"
+    )
     assert "_id" not in payload["result"][0]
     assert "conversation_row_id" not in payload["result"][0]
     assert "embedding" not in payload["result"][0]
@@ -315,6 +322,30 @@ def test_persistent_memory_search_reapplies_trusted_source_filter() -> None:
     assert args["source_global_user_id"] == "trusted-user"
 
 
+def test_persistent_memory_search_prompt_preserves_chinese_attribute_anchors() -> None:
+    """Memory search prompt should preserve source-language attribute handles."""
+
+    prompt = persistent_memory_search_agent._GENERATOR_PROMPT
+
+    assert '不要把中文查询翻译成英文' in prompt
+    assert '具体属性名' in prompt
+    assert '主体名和被询问的具体属性名作为 literal anchors' in prompt
+
+
+def test_conversation_result_row_preserves_prompt_safe_local_timestamp() -> None:
+    """Already projected conversation rows should keep local prompt timestamps."""
+
+    row = conversation_search_agent._conversation_result_row(
+        {
+            "platform_message_id": "seed",
+            "body_text": "Google Drive 又不是第一次这样了",
+            "timestamp": "2026-05-23 08:26:45",
+        }
+    )
+
+    assert row["timestamp"] == "2026-05-23 08:26:45"
+
+
 @pytest.mark.asyncio
 async def test_conversation_neighbor_rows_fetches_nearest_sides(
     monkeypatch,
@@ -373,6 +404,140 @@ async def test_conversation_neighbor_rows_fetches_nearest_sides(
 
     assert [call["sort_direction"] for call in calls] == [-1, 1]
     assert [row["platform_message_id"] for row in rows] == ["before", "after"]
+    assert [row["relation_to_seed"] for row in rows] == [
+        "previous_message",
+        "next_message",
+    ]
+    assert [row["seed_platform_message_id"] for row in rows] == [
+        "seed",
+        "seed",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_conversation_neighbor_rows_normalizes_local_seed_time(
+    monkeypatch,
+) -> None:
+    """Neighbor expansion should query storage UTC for local prompt timestamps."""
+
+    calls: list[dict[str, object]] = []
+
+    async def fake_get_conversation_history(**kwargs: object) -> list[dict[str, object]]:
+        calls.append(dict(kwargs))
+        return []
+
+    monkeypatch.setattr(
+        conversation_search_agent,
+        "get_conversation_history",
+        fake_get_conversation_history,
+    )
+    candidates = conversation_search_agent.merge_hybrid_candidates(
+        [
+            {
+                "platform_message_id": "seed",
+                "body_text": "GPU seed",
+                "timestamp": "2026-05-11 21:00:00",
+                "score": RAG_HYBRID_SEMANTIC_ONLY_SCORE_FLOOR,
+            }
+        ],
+        [],
+        semantic_only_floor=RAG_HYBRID_SEMANTIC_ONLY_SCORE_FLOOR,
+        selected_limit=20,
+        source="conversation",
+    )
+
+    rows = await conversation_search_agent._conversation_neighbor_rows(
+        candidates,
+        {"platform": "qq", "platform_channel_id": "905393941"},
+        semantic_only_floor=RAG_HYBRID_SEMANTIC_ONLY_SCORE_FLOOR,
+        seed_limit=8,
+        message_limit=3,
+        window_minutes=3,
+    )
+
+    assert rows == []
+    assert calls == [
+        {
+            "platform": "qq",
+            "platform_channel_id": "905393941",
+            "limit": 3,
+            "from_timestamp": "2026-05-11T08:57:00+00:00",
+            "to_timestamp": "2026-05-11T09:00:00+00:00",
+            "sort_direction": -1,
+        },
+        {
+            "platform": "qq",
+            "platform_channel_id": "905393941",
+            "limit": 3,
+            "from_timestamp": "2026-05-11T09:00:00+00:00",
+            "to_timestamp": "2026-05-11T09:03:00+00:00",
+            "sort_direction": 1,
+        },
+    ]
+
+
+@pytest.mark.asyncio
+async def test_conversation_neighbor_rows_keep_each_seed_window(
+    monkeypatch,
+) -> None:
+    """Neighbor expansion should preserve bounded rows from each seed."""
+
+    call_index = 0
+
+    async def fake_get_conversation_history(**kwargs: object) -> list[dict[str, object]]:
+        nonlocal call_index
+        call_index += 1
+        sort_direction = kwargs["sort_direction"]
+        suffix = "before" if sort_direction == -1 else "after"
+        return [
+            {
+                "platform_message_id": f"{suffix}-{call_index}",
+                "body_text": f"{suffix} seed context",
+                "timestamp": f"2026-05-11T09:00:0{call_index}+00:00",
+            }
+        ]
+
+    monkeypatch.setattr(
+        conversation_search_agent,
+        "get_conversation_history",
+        fake_get_conversation_history,
+    )
+    candidates = conversation_search_agent.merge_hybrid_candidates(
+        [
+            {
+                "platform_message_id": "seed-1",
+                "body_text": "first seed",
+                "timestamp": "2026-05-11T09:00:00+00:00",
+                "score": RAG_HYBRID_SEMANTIC_ONLY_SCORE_FLOOR,
+            },
+            {
+                "platform_message_id": "seed-2",
+                "body_text": "second seed",
+                "timestamp": "2026-05-11T09:10:00+00:00",
+                "score": RAG_HYBRID_SEMANTIC_ONLY_SCORE_FLOOR,
+            },
+        ],
+        [],
+        semantic_only_floor=RAG_HYBRID_SEMANTIC_ONLY_SCORE_FLOOR,
+        selected_limit=20,
+        source="conversation",
+    )
+
+    rows = await conversation_search_agent._conversation_neighbor_rows(
+        candidates,
+        {"platform": "qq", "platform_channel_id": "905393941"},
+        semantic_only_floor=RAG_HYBRID_SEMANTIC_ONLY_SCORE_FLOOR,
+        seed_limit=2,
+        message_limit=1,
+        window_minutes=3,
+    )
+
+    assert [row["body_text"] for row in rows] == [
+        "before seed context",
+        "after seed context",
+        "before seed context",
+        "after seed context",
+    ]
 
 
 @pytest.mark.asyncio

@@ -2,12 +2,19 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import re
 from typing import Any
 
+from langchain_core.messages import HumanMessage, SystemMessage
 from openai import OpenAIError
 
+from kazusa_ai_chatbot.config import (
+    RAG_SUBAGENT_LLM_API_KEY,
+    RAG_SUBAGENT_LLM_BASE_URL,
+    RAG_SUBAGENT_LLM_MODEL,
+)
 from kazusa_ai_chatbot.db import (
     get_query_text_embedding,
     query_user_memory_units,
@@ -16,7 +23,7 @@ from kazusa_ai_chatbot.db import (
 )
 from kazusa_ai_chatbot.db.schemas import UserMemoryUnitStatus
 from kazusa_ai_chatbot.rag.helper_agent import BaseRAGHelperAgent
-from kazusa_ai_chatbot.utils import text_or_empty
+from kazusa_ai_chatbot.utils import get_llm, parse_llm_json_output, text_or_empty
 
 logger = logging.getLogger(__name__)
 
@@ -94,14 +101,12 @@ def _allows_recency_fallback(task: str) -> bool:
         "current user continuity",
         "private continuity",
         "user memory evidence",
-        "当前用户之间已经形成的私有连续性",
     )
     specific_markers = (
         " about ",
         " around ",
         " relevant to ",
         "exact term",
-        "关于",
     )
     has_broad_marker = any(marker in task_body for marker in broad_markers)
     has_specific_marker = any(marker in task_body for marker in specific_markers)
@@ -109,13 +114,64 @@ def _allows_recency_fallback(task: str) -> bool:
     return return_value
 
 
+def _semantic_query_text(task: str, context: dict[str, Any]) -> str:
+    """Build the semantic query used for scoped memory vector retrieval.
+
+    Args:
+        task: Current memory-evidence slot selected for this worker.
+        context: Trusted RAG runtime context containing decontextualized query
+            fields from the outer supervisor.
+
+    Returns:
+        A compact text payload that preserves slot intent while retaining
+        decontextualized query details the initializer may have omitted.
+    """
+
+    parts: list[str] = []
+    for value in (
+        _task_body(task),
+        text_or_empty(context.get("current_slot")),
+        text_or_empty(context.get("original_query")),
+    ):
+        if not value:
+            continue
+        if value in parts:
+            continue
+        parts.append(value)
+
+    query_text = "\n".join(parts)
+    return query_text
+
+
 def _row_content(row: dict[str, Any]) -> str:
-    """Choose the prompt-facing content field for one memory row."""
-    for field in ("content", "fact", "subjective_appraisal", "relationship_signal"):
-        text = text_or_empty(row.get(field))
-        if text:
-            return text
-    return ""
+    """Build prompt-facing evidence text from one memory row.
+
+    Args:
+        row: User-memory row from storage or a projected evidence payload.
+
+    Returns:
+        Fact text plus appraisal and continuity details when they exist. A
+        pre-computed ``content`` field is treated as authoritative.
+    """
+
+    content = text_or_empty(row.get("content"))
+    if content:
+        return content
+
+    fact = text_or_empty(row.get("fact"))
+    appraisal = text_or_empty(row.get("subjective_appraisal"))
+    relationship = text_or_empty(row.get("relationship_signal"))
+
+    parts: list[str] = []
+    if fact:
+        parts.append(fact)
+    if appraisal and appraisal not in parts:
+        parts.append(f"Subjective appraisal: {appraisal}")
+    if relationship and relationship not in parts:
+        parts.append(f"Continuity signal: {relationship}")
+
+    evidence_text = "\n".join(parts)
+    return evidence_text
 
 
 def _project_row(row: dict[str, Any], global_user_id: str) -> dict[str, Any]:
@@ -148,11 +204,40 @@ def _project_rows(rows: list[dict[str, Any]], global_user_id: str) -> list[dict[
     return projected_rows
 
 
+def _append_unique_rows(
+    rows: list[dict[str, Any]],
+    new_rows: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Append rows until the evidence cap, deduping stable unit ids."""
+
+    merged_rows = list(rows)
+    seen_unit_ids = {
+        unit_id
+        for row in merged_rows
+        if isinstance(row, dict)
+        if (unit_id := text_or_empty(row.get("unit_id")))
+    }
+    for row in new_rows:
+        if not isinstance(row, dict):
+            continue
+        unit_id = text_or_empty(row.get("unit_id"))
+        if unit_id:
+            if unit_id in seen_unit_ids:
+                continue
+            seen_unit_ids.add(unit_id)
+        merged_rows.append(row)
+        if len(merged_rows) >= _MAX_ROWS:
+            break
+    return merged_rows
+
+
 def _result_payload(
     *,
     rows: list[dict[str, Any]],
     global_user_id: str,
     missing_context: list[str],
+    nearby_rows: list[dict[str, Any]] | None = None,
+    review: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Build the public result payload for scoped user-memory evidence."""
     selected_summary = "\n".join(
@@ -168,6 +253,12 @@ def _result_payload(
         "scope_global_user_id": global_user_id,
         "missing_context": missing_context,
     }
+    if nearby_rows:
+        payload["nearby_memory_rows"] = nearby_rows
+    if review:
+        uncertainty = text_or_empty(review.get("uncertainty"))
+        if uncertainty:
+            payload["review_uncertainty"] = uncertainty
     return payload
 
 
@@ -180,6 +271,180 @@ def _agent_result(*, resolved: bool, payload: dict[str, Any]) -> dict[str, Any]:
         "cache": _cache_status(),
     }
     return result
+
+
+def _review_candidate_payload(rows: list[dict[str, Any]]) -> list[dict[str, str]]:
+    """Project scoped memory rows into a compact LLM review payload."""
+    candidates: list[dict[str, str]] = []
+    for row in rows[:_MAX_ROWS]:
+        unit_id = text_or_empty(row.get("unit_id"))
+        content = _row_content(row)
+        if not unit_id or not content:
+            continue
+        candidate = {
+            "unit_id": unit_id,
+            "content": content,
+            "unit_type": text_or_empty(row.get("unit_type")),
+            "subjective_appraisal": text_or_empty(
+                row.get("subjective_appraisal")
+            ),
+            "relationship_signal": text_or_empty(
+                row.get("relationship_signal")
+            ),
+            "authority": text_or_empty(row.get("authority")),
+            "truth_status": text_or_empty(row.get("truth_status")),
+            "origin": text_or_empty(row.get("origin")),
+        }
+        candidates.append(candidate)
+    return candidates
+
+
+def _ordered_valid_ids(raw_value: object, allowed_ids: set[str]) -> list[str]:
+    """Keep reviewer-selected ids that refer to retrieved candidate rows."""
+    if not isinstance(raw_value, list):
+        return_value: list[str] = []
+        return return_value
+
+    selected_ids: list[str] = []
+    for value in raw_value:
+        unit_id = text_or_empty(value)
+        if not unit_id or unit_id not in allowed_ids:
+            continue
+        if unit_id in selected_ids:
+            continue
+        selected_ids.append(unit_id)
+    return selected_ids
+
+
+def _normalize_review_payload(
+    raw_review: object,
+    candidates: list[dict[str, str]],
+) -> dict[str, Any]:
+    """Validate reviewer output without interpreting candidate text."""
+    allowed_ids = {
+        candidate["unit_id"]
+        for candidate in candidates
+        if candidate.get("unit_id")
+    }
+    if not isinstance(raw_review, dict):
+        raw_review = {}
+
+    confirmed_ids = _ordered_valid_ids(
+        raw_review.get("confirmed_unit_ids"),
+        allowed_ids,
+    )
+    nearby_ids = _ordered_valid_ids(
+        raw_review.get("nearby_unit_ids"),
+        allowed_ids,
+    )
+    if not confirmed_ids and not nearby_ids:
+        nearby_ids = [
+            candidate["unit_id"]
+            for candidate in candidates
+            if candidate.get("unit_id")
+        ]
+    review = {
+        "confirmed_unit_ids": confirmed_ids,
+        "nearby_unit_ids": nearby_ids,
+        "summary": text_or_empty(raw_review.get("summary")),
+        "uncertainty": text_or_empty(raw_review.get("uncertainty")),
+    }
+    return review
+
+
+def _rows_for_review_ids(
+    rows: list[dict[str, Any]],
+    unit_ids: list[str],
+) -> list[dict[str, Any]]:
+    """Select retrieved rows by reviewer-approved unit ids."""
+    selected_rows: list[dict[str, Any]] = []
+    for unit_id in unit_ids:
+        for row in rows:
+            if text_or_empty(row.get("unit_id")) != unit_id:
+                continue
+            selected_rows.append(row)
+            break
+    return selected_rows
+
+
+_REVIEW_PROMPT = '''\
+你审查 scoped current-user memory 候选，用于一个 durable-memory evidence 槽位。
+判断哪些检索行直接回答槽位，哪些只是附近上下文，哪些应排除。
+不要编造事实，也不要使用 shared/world memory 假设。
+
+# 生成步骤
+1. 读取 evidence slot 和 candidate rows。
+2. 只有一行直接支持所请求的当前用户私有连续性时，才标为 confirmed。
+3. 当某行记住的具体实例命名了满足请求类别的特定 product、plan、decision、
+   promise、preference、recommendation 或 prior interaction 时，可视为对更宽槽位的直接支持。
+4. `subjective_appraisal` 和 `relationship_signal` 只能作为该行是否回答槽位的辅助上下文，
+   不要据此编造额外事实。
+5. 相关但不能直接回答槽位的行标为 nearby。
+6. 无关行不要放入 confirmed 或 nearby。
+7. 如果没有行直接回答槽位，返回空 confirmed ids，并用中文简短说明不确定性。
+
+# 输入格式
+{
+  "task": "Memory-evidence 槽位文本",
+  "candidates": [
+    {
+      "unit_id": "stable candidate id",
+      "content": "memory content",
+      "unit_type": "memory category",
+      "subjective_appraisal": "optional appraisal",
+      "relationship_signal": "optional continuity signal",
+      "authority": "source authority",
+      "truth_status": "truth status",
+      "origin": "memory origin"
+    }
+  ]
+}
+
+# 输出格式
+只返回有效 JSON：
+{
+  "confirmed_unit_ids": ["candidate unit_id"],
+  "nearby_unit_ids": ["candidate unit_id"],
+  "summary": "已确认行的简短事实摘要，或空字符串",
+  "uncertainty": "简短不确定性说明，或空字符串"
+}
+'''
+_review_llm = get_llm(
+    temperature=0.0,
+    top_p=1.0,
+    model=RAG_SUBAGENT_LLM_MODEL,
+    base_url=RAG_SUBAGENT_LLM_BASE_URL,
+    api_key=RAG_SUBAGENT_LLM_API_KEY,
+)
+
+
+async def _review_user_memory_rows(
+    task: str,
+    rows: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """Ask the reviewer LLM which scoped memory rows answer the slot."""
+    candidates = _review_candidate_payload(rows)
+    if not candidates:
+        review = {
+            "confirmed_unit_ids": [],
+            "nearby_unit_ids": [],
+            "summary": "",
+            "uncertainty": "没有检索到可审查的当前用户记忆行。",
+        }
+        return review
+
+    payload = {
+        "task": _task_body(task),
+        "candidates": candidates,
+    }
+    system_prompt = SystemMessage(content=_REVIEW_PROMPT)
+    human_message = HumanMessage(
+        content=json.dumps(payload, ensure_ascii=False, default=str)
+    )
+    response = await _review_llm.ainvoke([system_prompt, human_message])
+    raw_review = parse_llm_json_output(response.content)
+    review = _normalize_review_payload(raw_review, candidates)
+    return review
 
 
 class UserMemoryEvidenceAgent(BaseRAGHelperAgent):
@@ -222,10 +487,12 @@ class UserMemoryEvidenceAgent(BaseRAGHelperAgent):
             return result
 
         rows: list[dict[str, Any]] = []
+        retrieval_mode = ""
         task_body = _task_body(task)
         literal_terms = _extract_literal_terms(task)
 
         if literal_terms:
+            retrieval_mode = "literal"
             for literal in literal_terms:
                 keyword_rows = await search_user_memory_units_by_keyword(
                     global_user_id,
@@ -234,13 +501,15 @@ class UserMemoryEvidenceAgent(BaseRAGHelperAgent):
                     limit=_MAX_ROWS,
                 )
                 if keyword_rows:
-                    rows = keyword_rows
+                    rows = _append_unique_rows(rows, keyword_rows)
+                if len(rows) >= _MAX_ROWS:
                     break
 
         if not rows and not literal_terms:
             query_embedding: list[float] | None = None
+            query_text = _semantic_query_text(task, context)
             try:
-                query_embedding = await get_query_text_embedding(task_body)
+                query_embedding = await get_query_text_embedding(query_text)
             except OpenAIError as exc:
                 logger.info(
                     f"{_AGENT_NAME} embedding unavailable; "
@@ -248,6 +517,7 @@ class UserMemoryEvidenceAgent(BaseRAGHelperAgent):
                 )
 
             if query_embedding:
+                retrieval_mode = "semantic"
                 rows = await search_user_memory_units_by_vector(
                     global_user_id,
                     query_embedding,
@@ -256,6 +526,7 @@ class UserMemoryEvidenceAgent(BaseRAGHelperAgent):
                 )
 
         if not rows and not literal_terms and _allows_recency_fallback(task):
+            retrieval_mode = "recent"
             rows = await query_user_memory_units(
                 global_user_id,
                 statuses=[UserMemoryUnitStatus.ACTIVE],
@@ -263,12 +534,26 @@ class UserMemoryEvidenceAgent(BaseRAGHelperAgent):
             )
 
         projected_rows = _project_rows(rows, global_user_id)
+        nearby_rows: list[dict[str, Any]] = []
+        review: dict[str, Any] = {}
+        if projected_rows and retrieval_mode == "semantic":
+            review_task = _semantic_query_text(task, context)
+            review = await _review_user_memory_rows(review_task, projected_rows)
+            confirmed_unit_ids = review["confirmed_unit_ids"]
+            nearby_unit_ids = review["nearby_unit_ids"]
+            nearby_rows = _rows_for_review_ids(projected_rows, nearby_unit_ids)
+            projected_rows = _rows_for_review_ids(
+                projected_rows,
+                confirmed_unit_ids,
+            )
         resolved = bool(projected_rows)
         missing_context = [] if resolved else ["user_memory_evidence"]
         payload = _result_payload(
             rows=projected_rows,
             global_user_id=global_user_id,
             missing_context=missing_context,
+            nearby_rows=nearby_rows,
+            review=review,
         )
         logger.info(
             f"{_AGENT_NAME} output: resolved={resolved} "

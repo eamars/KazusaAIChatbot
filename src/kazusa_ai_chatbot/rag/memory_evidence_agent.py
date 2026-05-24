@@ -16,6 +16,13 @@ from kazusa_ai_chatbot.config import (
     RAG_SUBAGENT_LLM_MODEL,
 )
 from kazusa_ai_chatbot.rag.helper_agent import BaseRAGHelperAgent
+from kazusa_ai_chatbot.rag.evidence_coverage import (
+    EvidenceCoverage,
+    assess_evidence_coverage,
+    coverage_allows_resolution,
+    evidence_buckets_for_coverage,
+    has_explicit_multi_target_request,
+)
 from kazusa_ai_chatbot.rag.persistent_memory_search_agent import (
     PersistentMemorySearchAgent,
 )
@@ -69,8 +76,17 @@ def _result_payload(
     conflicts: list[str] | None = None,
     observation_candidates: list[dict[str, Any]] | None = None,
     source_hints: list[dict[str, Any]] | None = None,
+    coverage: EvidenceCoverage | None = None,
+    confirmed_evidence: list[str] | None = None,
+    partial_evidence: list[str] | None = None,
+    nearby_evidence: list[str] | None = None,
 ) -> dict[str, Any]:
     """Build the standard top-level memory capability payload."""
+    coverage_payload = coverage or assess_evidence_coverage(
+        task="",
+        evidence_items=[],
+        worker_resolved=False,
+    )
     payload = {
         "selected_summary": _clip_text(selected_summary),
         "capability": _CAPABILITY_NAME,
@@ -85,6 +101,10 @@ def _result_payload(
         "conflicts": list(conflicts or []),
         "observation_candidates": list(observation_candidates or []),
         "source_hints": list(source_hints or []),
+        "coverage": coverage_payload,
+        "confirmed_evidence": list(confirmed_evidence or []),
+        "partial_evidence": list(partial_evidence or []),
+        "nearby_evidence": list(nearby_evidence or []),
     }
     return payload
 
@@ -106,6 +126,33 @@ def _strip_prefix(task: str) -> str:
         return task.strip()
     _, _, remainder = task.partition(":")
     return_value = remainder.strip()
+    return return_value
+
+
+def _coverage_fields(
+    *,
+    task: str,
+    evidence_items: list[str],
+    worker_resolved: bool,
+) -> tuple[EvidenceCoverage, dict[str, list[str]]]:
+    """Build coverage and quality-specific evidence buckets."""
+    coverage = assess_evidence_coverage(
+        task=task,
+        evidence_items=evidence_items,
+        worker_resolved=worker_resolved,
+    )
+    buckets = evidence_buckets_for_coverage(coverage, evidence_items)
+    return_value = (coverage, buckets)
+    return return_value
+
+
+def _memory_coverage_task(task: str) -> str:
+    """Return the task text only when memory evidence needs strict coverage."""
+
+    if has_explicit_multi_target_request(task):
+        return_value = task
+        return return_value
+    return_value = ""
     return return_value
 
 
@@ -153,36 +200,37 @@ def _deterministic_plan(
         return plan
 
     slot_parts = [task_body]
-    original_query_text = ""
     if isinstance(context, dict):
         current_slot = text_or_empty(context.get("current_slot"))
         if current_slot:
             slot_parts.append(current_slot)
-        original_query_text = text_or_empty(context.get("original_query")).lower()
     slot_text = "\n".join(slot_parts).lower()
 
     scoped_user_scope_markers = (
         "current user's",
+        "current_user's",
+        "current_user",
         "current user",
         "with the current user",
         "remember me",
         "recognize me",
-        "当前用户",
-        "私有",
-        "记得我",
-        "还记得我",
-        "认识我",
     )
-    context_scoped_user_scope_markers = (
-        "private",
-        "user-specific",
-        "scoped",
-        "with the current user",
-        "私有",
+    ambiguous_user_scope_markers = (
+        "user's",
+        "users'",
+        "user preferences",
+        "user preference",
+        "user decisions",
+        "user decision",
     )
     scoped_user_topic_markers = (
         "continuity",
         "accepted preference",
+        "accepted preferences",
+        "preference",
+        "preferences",
+        "technical preference",
+        "technical preferences",
         "shared experience",
         "past interaction",
         "past interactions",
@@ -192,47 +240,96 @@ def _deterministic_plan(
         "prior shared interaction",
         "prior shared interactions",
         "shared history",
+        "shared by current user",
+        "shared by current_user",
+        "current user's shared",
+        "current-user's shared",
+        "created by current user",
+        "created by current_user",
+        "current user's created",
+        "current-user's created",
+        "promise",
+        "promises",
+        "commitment",
+        "commitments",
+        "consideration",
+        "considerations",
         "remember the current user",
         "recognize the current user",
         "remember me",
+        "decision",
+        "decisions",
+        "choice",
+        "choices",
+        "care about",
+        "cared about",
         "user memory evidence",
         "story lore",
         "story continuity",
         "private lore",
         "private continuity",
         "setting",
-        "连续性",
-        "设定",
-        "过往互动",
-        "历史互动",
-        "之前的互动",
-        "以前的互动",
-        "共同经历",
-        "记得我",
-        "还记得我",
-        "认识我",
-        "记得当前用户",
-        "认识当前用户",
     )
     # Query-level context can confirm private scope, but each slot must carry
     # its own scoped-user topic so mixed queries keep independent memory paths.
     has_slot_scoped_user_scope = any(
         marker in slot_text for marker in scoped_user_scope_markers
     )
-    has_context_scoped_user_scope = any(
-        marker in original_query_text
-        for marker in context_scoped_user_scope_markers
-    )
-    has_scoped_user_scope = (
-        has_slot_scoped_user_scope or has_context_scoped_user_scope
-    )
     has_scoped_user_topic = any(
         marker in slot_text for marker in scoped_user_topic_markers
     )
-    if has_scoped_user_scope and has_scoped_user_topic:
+    if has_slot_scoped_user_scope and has_scoped_user_topic:
         plan = {
             "worker": "user_memory_evidence_agent",
             "reason": "scoped current-user continuity evidence",
+        }
+        return plan
+
+    lifecycle_status_markers = (
+        "completed",
+        "outstanding",
+        "fulfilled",
+        "unfulfilled",
+        "finished",
+        "unfinished",
+        "status",
+    )
+    has_runtime_user_scope = bool(
+        isinstance(context, dict)
+        and text_or_empty(context.get("global_user_id"))
+    )
+    has_lifecycle_status_topic = any(
+        marker in slot_text
+        for marker in lifecycle_status_markers
+    )
+    if has_runtime_user_scope and has_scoped_user_topic and has_lifecycle_status_topic:
+        plan = {
+            "worker": "user_memory_evidence_agent",
+            "reason": "scoped current-user memory lifecycle evidence",
+        }
+        return plan
+
+    has_ambiguous_user_scope = any(
+        marker in slot_text for marker in ambiguous_user_scope_markers
+    )
+    if has_ambiguous_user_scope and has_scoped_user_topic:
+        return None
+
+    shared_memory_markers = (
+        "official",
+        "common sense",
+        "world knowledge",
+        "character-world",
+        "character world",
+        "character design",
+        "home",
+        "address",
+        "location",
+    )
+    if any(marker in normalized for marker in shared_memory_markers):
+        plan = {
+            "worker": "persistent_memory_search_agent",
+            "reason": "semantic durable memory evidence",
         }
         return plan
 
@@ -251,6 +348,12 @@ def _deterministic_plan(
             "reason": "hybrid durable named fact or exact memory evidence",
         }
         return plan
+
+    if has_scoped_user_topic:
+        return None
+
+    if isinstance(context, dict) and text_or_empty(context.get("original_query")):
+        return None
 
     plan = {
         "worker": "persistent_memory_search_agent",
@@ -274,43 +377,41 @@ def _normalize_selector_plan(raw_plan: dict[str, Any]) -> dict[str, Any]:
     return plan
 
 
-_SELECTOR_PROMPT = """\
-You choose one bounded persistent-memory worker for a durable evidence slot.
-Do not answer active agreements, person profiles, relationships, or live external facts.
+_SELECTOR_PROMPT = '''\
+你要为一个 durable evidence 槽位选择一个有边界的 persistent-memory worker。
+不要用本路径回答活跃约定、人物资料、关系判断或实时外部事实。
 
-# Generation Procedure
-1. If the task asks for active agreements, promises, or current episode state,
-   output worker="incompatible" and reason="Recall".
-2. If the task asks for person profile, impression, compatibility, or
-   relationship context, output worker="incompatible" and reason="Person-context".
-3. If the task asks for current weather, temperature, opening status, prices,
-   exchange rates, or any changing live value, output worker="incompatible"
-   and reason="Live-context".
-4. Use user_memory_evidence_agent for current-user durable memory, private
-   continuity, accepted preference, user-specific lore, current-user
-   recognition, prior interaction history, or prior shared experience with the
-   current user.
-5. Use persistent_memory_search_agent for natural-language durable facts,
-   exact named facts, tags, memory_name/dedup_key lookups, proper nouns,
-   quoted terms, home/address/location questions, fuzzy concepts, common
-   sense, world knowledge, and character-world facts. The search worker
-   performs hybrid semantic plus literal-anchor retrieval.
+# 生成步骤
+1. 如果任务询问实时活跃约定、活跃承诺或当前 episode 状态，输出
+   worker="incompatible"，reason="Recall"。历史已完成/未完成状态证据不适用此条。
+2. 如果任务询问人物资料、印象、相性或关系上下文，输出
+   worker="incompatible"，reason="Person-context"。
+3. 如果任务询问当前天气、温度、营业状态、价格、汇率或任何变化中的实时值，
+   输出 worker="incompatible"，reason="Live-context"。
+4. 当前用户 durable memory、私有连续性、已接受偏好、用户专属设定、
+   当前用户识别、过往互动历史、与当前用户的共同经历，以及过往用户专属
+   promise/commitment 的已完成或未完成生命周期状态，使用
+   user_memory_evidence_agent。
+5. 自然语言 durable facts、精确命名事实、tags、memory_name/dedup_key 查询、
+   proper nouns、quoted terms、home/address/location 问题、模糊概念、common sense、
+   world knowledge 和 character-world facts，使用 persistent_memory_search_agent。
+   该 worker 会执行语义加字面锚点的混合检索。
 
-# Input Format
+# 输入格式
 {
-  "task": "Memory-evidence slot text",
-  "original_query": "decontextualized user query when available",
-  "current_slot": "slot label",
-  "known_facts": "ordered facts from previous RAG2 slots"
+  "task": "Memory-evidence 槽位文本",
+  "original_query": "可用时的去上下文化用户问题",
+  "current_slot": "槽位标签",
+  "known_facts": "之前 RAG2 槽位得到的有序事实"
 }
 
-# Output Format
-Return valid JSON only:
+# 输出格式
+只返回有效 JSON：
 {
   "worker": "user_memory_evidence_agent | persistent_memory_search_agent | incompatible",
-  "reason": "short source selection explanation"
+  "reason": "简短来源选择说明"
 }
-"""
+'''
 _selector_llm = get_llm(
     temperature=0.0,
     top_p=1.0,
@@ -362,6 +463,25 @@ def _memory_rows(worker_result: dict[str, Any]) -> list[dict[str, Any]]:
         text = text_or_empty(row)
         if text:
             rows.append({"content": text})
+    return rows
+
+
+def _nearby_memory_rows(worker_result: dict[str, Any]) -> list[dict[str, Any]]:
+    """Preserve nearby scoped-memory rows for unresolved observations."""
+    value = worker_result.get("result")
+    if not isinstance(value, dict):
+        return_value: list[dict[str, Any]] = []
+        return return_value
+
+    raw_rows = value.get("nearby_memory_rows")
+    if not isinstance(raw_rows, list):
+        return_value = []
+        return return_value
+
+    rows: list[dict[str, Any]] = []
+    for row in raw_rows:
+        if isinstance(row, dict):
+            rows.append(dict(row))
     return rows
 
 
@@ -483,6 +603,7 @@ class MemoryEvidenceAgent(BaseRAGHelperAgent):
         if primary_worker == "incompatible":
             reason = text_or_empty(plan["reason"]) or "unsupported"
             result = self._unresolved(
+                task=task,
                 source_policy=f"incompatible intent; use {reason}",
                 missing_context=[f"incompatible_intent:{reason}"],
                 primary_worker="",
@@ -494,13 +615,28 @@ class MemoryEvidenceAgent(BaseRAGHelperAgent):
         worker_result = await worker.run(task, context, max_attempts=1)
         worker_payloads = {primary_worker: worker_result}
         memory_rows = _memory_rows(worker_result)
+        nearby_rows = _nearby_memory_rows(worker_result)
         summaries = _summaries_from_rows(memory_rows)
-        selected_summary = "\n".join(summaries[:RAG_SEARCH_SELECTED_SUMMARY_LIMIT])
+        worker_resolved = bool(worker_result.get("resolved"))
+        coverage_task = _memory_coverage_task(task)
+        coverage, evidence_buckets = _coverage_fields(
+            task=coverage_task,
+            evidence_items=summaries,
+            worker_resolved=worker_resolved,
+        )
+        confirmed_evidence = evidence_buckets["confirmed_evidence"]
+        selected_summary = "\n".join(
+            confirmed_evidence[:RAG_SEARCH_SELECTED_SUMMARY_LIMIT],
+        )
         resolved_refs = _refs_from_rows(memory_rows)
-        resolved = bool(worker_result.get("resolved")) and bool(summaries)
+        resolved = (
+            worker_resolved
+            and bool(summaries)
+            and coverage_allows_resolution(coverage)
+        )
         missing_context = [] if resolved else ["memory_evidence"]
         projection_rows = memory_rows
-        evidence = summaries
+        evidence = confirmed_evidence
         observation_candidates: list[dict[str, Any]] = []
         source_hints: list[dict[str, Any]] = []
         if not resolved:
@@ -508,7 +644,10 @@ class MemoryEvidenceAgent(BaseRAGHelperAgent):
             resolved_refs = []
             projection_rows = []
             evidence = []
-            observation_candidates = _memory_observation_candidates(memory_rows)
+            observation_rows = memory_rows or nearby_rows
+            observation_candidates = _memory_observation_candidates(
+                observation_rows,
+            )
             source_hints = [
                 {
                     "kind": "memory",
@@ -529,6 +668,10 @@ class MemoryEvidenceAgent(BaseRAGHelperAgent):
             conflicts=[],
             observation_candidates=observation_candidates,
             source_hints=source_hints,
+            coverage=coverage,
+            confirmed_evidence=confirmed_evidence,
+            partial_evidence=evidence_buckets["partial_evidence"],
+            nearby_evidence=evidence_buckets["nearby_evidence"],
         )
         logger.info(
             f"{_AGENT_NAME} output: resolved={resolved} "
@@ -555,12 +698,19 @@ class MemoryEvidenceAgent(BaseRAGHelperAgent):
     def _unresolved(
         self,
         *,
+        task: str,
         source_policy: str,
         missing_context: list[str],
         primary_worker: str,
         worker_payloads: dict[str, Any],
     ) -> dict[str, Any]:
         """Build an unresolved result without calling a memory source."""
+        coverage_task = _memory_coverage_task(task)
+        coverage, evidence_buckets = _coverage_fields(
+            task=coverage_task,
+            evidence_items=[],
+            worker_resolved=False,
+        )
         payload = _result_payload(
             selected_summary="",
             primary_worker=primary_worker,
@@ -573,6 +723,10 @@ class MemoryEvidenceAgent(BaseRAGHelperAgent):
             conflicts=[],
             observation_candidates=[],
             source_hints=[],
+            coverage=coverage,
+            confirmed_evidence=evidence_buckets["confirmed_evidence"],
+            partial_evidence=evidence_buckets["partial_evidence"],
+            nearby_evidence=evidence_buckets["nearby_evidence"],
         )
         logger.info(
             f"{_AGENT_NAME} output: resolved=False "

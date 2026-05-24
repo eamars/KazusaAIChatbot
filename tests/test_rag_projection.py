@@ -11,6 +11,17 @@ from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition_l3 import (
 from kazusa_ai_chatbot.nodes.persona_supervisor2_rag_projection import project_known_facts
 
 
+def _assert_ordered_evidence_block(text: str) -> None:
+    assert text.startswith('结论：')
+    conclusion_index = text.index('结论：')
+    uncertainty_index = text.index('不确定性：')
+    if '上下文：' in text:
+        evidence_index = text.index('上下文：')
+        assert conclusion_index < evidence_index < uncertainty_index
+    else:
+        assert conclusion_index < uncertainty_index
+
+
 def test_project_known_facts_empty_payload() -> None:
     result = project_known_facts(
         [],
@@ -141,8 +152,10 @@ def test_project_known_facts_groups_summarized_evidence() -> None:
     )
 
     assert result["third_party_profiles"] == ["小钳子 resolved to user-2"]
-    assert result["memory_evidence"] == [{"summary": "memory summary", "content": "AAAAAAA…"}]
-    assert result["conversation_evidence"] == ["conversation summary"]
+    assert result["memory_evidence"][0]["summary"].startswith('结论：memory summary')
+    assert result["memory_evidence"][0]["content"].startswith('上下文：')
+    assert "AAAAAAA…" in result["memory_evidence"][0]["content"]
+    assert result["conversation_evidence"] == ['结论：conversation summary\n不确定性：无']
     assert result["external_evidence"][0]["summary"] == "web summary"
     assert result["external_evidence"][0]["content"] == "https:/…"
     assert result["external_evidence"][0]["url"] == ""
@@ -188,7 +201,12 @@ def test_project_known_facts_does_not_stringify_malformed_fact_values() -> None:
         {"slot": "web", "agent": "web_search_agent2", "resolved": True},
     ]
     assert result["third_party_profiles"] == []
-    assert result["memory_evidence"] == [{"summary": "memory summary", "content": ""}]
+    assert result["memory_evidence"] == [
+            {
+                "summary": '结论：memory summary',
+                "content": '不确定性：没有可用于提示的记忆证据。',
+            }
+        ]
     assert result["external_evidence"] == [{"summary": "web summary", "content": "", "url": ""}]
 
 
@@ -226,26 +244,20 @@ def test_project_known_facts_projects_recall_agent_result() -> None:
         character_user_id="character-1",
     )
 
-    assert result["recall_evidence"] == [
-        {
-            "selected_summary": "The active agreement is pickup at 9:30.",
-            "recall_type": "active_episode_agreement",
-            "primary_source": "conversation_progress",
-            "supporting_sources": ["user_memory_units"],
-            "freshness_basis": "Active progress is current.",
-            "conflicts": [],
-            "candidates": [
-                {
-                    "source": "conversation_progress",
-                    "claim": "Pickup at 9:30.",
-                    "temporal_scope": "current_episode",
-                    "lifecycle_status": "active",
-                    "evidence_time": "2026-05-01T23:00:00+00:00",
-                    "authority": "primary_for_current_episode",
-                }
-            ],
-        }
-    ]
+    recall_entry = result["recall_evidence"][0]
+    assert recall_entry["selected_summary"] == (
+        '结论：The active agreement is pickup at 9:30.'
+    )
+    assert recall_entry["recall_type"] == "active_episode_agreement"
+    assert recall_entry["primary_source"] == "conversation_progress"
+    assert recall_entry["supporting_sources"] == ["user_memory_units"]
+    assert recall_entry["freshness_basis"] == "Active progress is current."
+    assert recall_entry["conflicts"] == []
+    assert recall_entry["evidence_summary"].startswith('上下文：')
+    assert "Pickup at 9:30." in recall_entry["evidence_summary"]
+    assert "2026-05-02 11:00:00" in recall_entry["evidence_summary"]
+    assert "2026-05-01T23:00:00+00:00" not in repr(recall_entry)
+    assert "candidates" not in recall_entry
     assert result["conversation_evidence"] == []
 
 
@@ -273,7 +285,7 @@ def test_project_known_facts_caps_recall_evidence_to_three_entries() -> None:
     )
 
     assert [
-        entry["selected_summary"]
+        entry["selected_summary"].replace('结论：', '')
         for entry in result["recall_evidence"]
     ] == [
         "Recall summary 0",
@@ -388,13 +400,13 @@ def test_project_known_facts_maps_top_level_capability_payloads() -> None:
             "url": "https://weather.example/auckland",
         }
     ]
-    assert result["conversation_evidence"] == ["speaker: phrase", "speaker: link"]
-    assert result["memory_evidence"] == [
-        {
-            "summary": "memory summary",
-            "content": "official address is 123 Example Street",
-        }
+    assert result["conversation_evidence"] == [
+        '结论：speaker: phrase\n不确定性：无',
+        '结论：speaker: link\n不确定性：无',
     ]
+    assert result["memory_evidence"][0]["summary"] == '结论：memory summary'
+    assert result["memory_evidence"][0]["content"].startswith('上下文：')
+    assert "official address is 123 Example Street" in result["memory_evidence"][0]["content"]
     assert result["user_image"]["display_name"] == "Tester"
     assert "_user_memory_units" not in result["user_image"]
     assert result["user_memory_unit_candidates"] == [
@@ -402,6 +414,34 @@ def test_project_known_facts_maps_top_level_capability_payloads() -> None:
     ]
     assert result["character_image"] == character_profile
     assert result["third_party_profiles"] == ["Third party summary"]
+
+
+def test_project_known_facts_sanitizes_third_party_profile_source_ids() -> None:
+    """Third-party profile summaries should not expose source ids to cognition."""
+
+    result = project_known_facts(
+        [
+            {
+                "slot": "third party",
+                "agent": "person_context_agent",
+                "resolved": True,
+                "summary": "fallback summary",
+                "raw_result": {
+                    "projection_payload": {
+                        "profile_kind": "third_party",
+                        "summary": (
+                            "Night | "
+                            "123e4567-e89b-12d3-a456-426614174000"
+                        ),
+                    }
+                },
+            }
+        ],
+        current_user_id="user-1",
+        character_user_id="character-1",
+    )
+
+    assert result["third_party_profiles"] == ["Night"]
 
 
 def test_project_known_facts_preserves_scoped_user_memory_metadata_and_candidates() -> None:
@@ -446,21 +486,18 @@ def test_project_known_facts_preserves_scoped_user_memory_metadata_and_candidate
         character_user_id="character-1",
     )
 
-    assert result["memory_evidence"] == [
-        {
-            "summary": "scoped continuity summary",
-            "content": (
-                "冰淇淋摊老板是千纱的初中学姐。\n"
-                "The active character's official address is 123 Example Street."
-            ),
-            "source_system": "user_memory_units",
-            "scope_type": "user_continuity",
-            "scope_global_user_id": "user-1",
-            "authority": "scoped_continuity",
-            "truth_status": "character_lore_or_interaction_continuity",
-            "origin": "consolidated_interaction",
-        }
-    ]
+    assert len(result["memory_evidence"]) == 1
+    entry = result["memory_evidence"][0]
+    assert entry["summary"] == '结论：scoped continuity summary'
+    assert entry["content"].startswith('上下文：')
+    assert "冰淇淋摊老板是千纱的初中学姐。" in entry["content"]
+    assert "The active character's official address is 123 Example Street." in entry["content"]
+    assert entry["source_system"] == "user_memory_units"
+    assert entry["scope_type"] == "user_continuity"
+    assert entry["scope_global_user_id"] == "user-1"
+    assert entry["authority"] == "scoped_continuity"
+    assert entry["truth_status"] == "character_lore_or_interaction_continuity"
+    assert entry["origin"] == "consolidated_interaction"
     assert result["user_memory_unit_candidates"] == [
         {
             "unit_id": "unit-7",
@@ -601,6 +638,292 @@ def test_project_known_facts_public_keys_unchanged() -> None:
         "unknown_slots",
         "dispatched",
     }
+
+
+def test_project_known_facts_projects_formatted_memory_evidence() -> None:
+    result = project_known_facts(
+        [
+            {
+                "slot": "memory",
+                "agent": "memory_evidence_agent",
+                "resolved": True,
+                "summary": "User prefers tea.",
+                "raw_result": {
+                    "projection_payload": {
+                        "memory_rows": [
+                            {
+                                "content": "User prefers tea during late sessions.",
+                                "updated_at": "2026-05-01T12:34:56.789000+00:00",
+                                "source_system": "user_memory_units",
+                            }
+                        ],
+                    }
+                },
+            }
+        ],
+        current_user_id="user-1",
+        character_user_id="character-1",
+    )
+
+    entry = result["memory_evidence"][0]
+    assert entry["summary"] == '结论：User prefers tea.'
+    assert entry["content"].startswith('上下文：\n- ')
+    assert "User prefers tea during late sessions." in entry["content"]
+    assert "2026-05-02 00:34:56" in entry["content"]
+    assert '不确定性：无' in entry["content"]
+    assert "2026-05-01T12:34:56.789000+00:00" not in repr(entry)
+
+
+def test_project_known_facts_projects_formatted_conversation_evidence() -> None:
+    result = project_known_facts(
+        [
+            {
+                "slot": "conversation",
+                "agent": "conversation_evidence_agent",
+                "resolved": True,
+                "summary": "Tester promised to send the chart.",
+                "raw_result": {
+                    "projection_payload": {
+                        "summaries": ["Tester: I will send the chart tonight."],
+                        "rows": [
+                            {
+                                "summary": "Tester: I will send the chart tonight.",
+                                "timestamp": "2026-05-01T12:34:56.789000+00:00",
+                                "display_name": "Tester",
+                                "conversation_row_id": "row-1",
+                                "platform_message_id": "message-1",
+                            }
+                        ],
+                    }
+                },
+            }
+        ],
+        current_user_id="user-1",
+        character_user_id="character-1",
+    )
+
+    evidence = result["conversation_evidence"][0]
+    _assert_ordered_evidence_block(evidence)
+    assert "Tester promised to send the chart." in evidence
+    assert "Tester（2026-05-02 00:34:56）" in evidence
+    assert "Tester: I will send the chart tonight." in evidence
+    assert "row-1" not in evidence
+    assert "message-1" not in evidence
+    assert "2026-05-01T12:34:56.789000+00:00" not in evidence
+
+
+def test_project_known_facts_prefers_conversation_packets_over_flat_rows() -> None:
+    result = project_known_facts(
+        [
+            {
+                "slot": "conversation",
+                "agent": "conversation_evidence_agent",
+                "resolved": True,
+                "summary": "Google Drive context was found.",
+                "raw_result": {
+                    "projection_payload": {
+                        "summaries": [
+                            "Nightfall: Google Drive 又不是第一次这样了。",
+                            "Nightfall: <image>Google Drive 权限禁止的截图。</image>",
+                        ],
+                        "rows": [
+                            {
+                                "summary": "Nightfall: Google Drive 又不是第一次这样了。",
+                                "timestamp": "2026-05-22T09:10:00+00:00",
+                                "display_name": "Nightfall",
+                                "platform_message_id": "seed",
+                            },
+                            {
+                                "summary": "Nightfall: <image>Google Drive 权限禁止的截图。</image>",
+                                "timestamp": "2026-05-22T09:09:50+00:00",
+                                "display_name": "Nightfall",
+                                "platform_message_id": "previous",
+                            },
+                        ],
+                        "packets": [
+                            {
+                                "summary": (
+                                    "命中消息：Nightfall: Google Drive 又不是第一次这样了。"
+                                    "；上一条：Nightfall: "
+                                    "<image>Google Drive 权限禁止的截图。</image>"
+                                ),
+                                "seed": {
+                                    "platform_message_id": "seed",
+                                },
+                                "relations": [
+                                    {
+                                        "relation_type": "previous_message",
+                                        "row": {
+                                            "platform_message_id": "previous",
+                                        },
+                                    }
+                                ],
+                            }
+                        ],
+                    }
+                },
+            }
+        ],
+        current_user_id="user-1",
+        character_user_id="character-1",
+    )
+
+    evidence = result["conversation_evidence"][0]
+    assert "Google Drive context was found." in evidence
+    assert "命中消息" in evidence
+    assert "上一条" in evidence
+    assert "Google Drive 权限禁止的截图" in evidence
+    assert "seed" not in evidence
+    assert "previous" not in evidence
+
+
+def test_project_known_facts_redacts_source_ids_from_public_conversation_summary() -> None:
+    result = project_known_facts(
+        [
+            {
+                "slot": "conversation",
+                "agent": "conversation_evidence_agent",
+                "resolved": True,
+                "summary": (
+                    "Tester global_user_id: "
+                    "123e4567-e89b-12d3-a456-426614174000 sent the chart."
+                ),
+                "raw_result": {
+                    "projection_payload": {
+                        "rows": [
+                            {
+                                "summary": "Tester: chart sent.",
+                                "timestamp": "2026-05-01T12:34:56.789000+00:00",
+                                "display_name": "Tester",
+                            }
+                        ],
+                    }
+                },
+            }
+        ],
+        current_user_id="user-1",
+        character_user_id="character-1",
+    )
+
+    evidence = result["conversation_evidence"][0]
+    assert "123e4567-e89b-12d3-a456-426614174000" not in evidence
+    assert "global_user_id" not in evidence
+    assert "[来源标识已省略]" not in evidence
+    assert "Tester sent the chart." in evidence
+
+
+def test_project_known_facts_includes_later_relevant_conversation_rows() -> None:
+    rows = [
+        {
+            "summary": f"Speaker {index}: filler message {index}.",
+            "display_name": f"Speaker {index}",
+        }
+        for index in range(8)
+    ]
+    rows.append(
+        {
+            "summary": "Nightfall: <image>oxygen sensor product page</image>",
+            "display_name": "Nightfall",
+        }
+    )
+
+    result = project_known_facts(
+        [
+            {
+                "slot": "conversation",
+                "agent": "conversation_evidence_agent",
+                "resolved": True,
+                "summary": "Nightfall sent the oxygen sensor image.",
+                "raw_result": {
+                    "projection_payload": {
+                        "rows": rows,
+                    }
+                },
+            }
+        ],
+        current_user_id="user-1",
+        character_user_id="character-1",
+    )
+
+    evidence = result["conversation_evidence"][0]
+    assert "Nightfall sent the oxygen sensor image." in evidence
+    assert "<image>oxygen sensor product page</image>" in evidence
+
+
+def test_project_known_facts_projects_formatted_recall_evidence() -> None:
+    result = project_known_facts(
+        [
+            {
+                "slot": "recall",
+                "agent": "recall_agent",
+                "resolved": True,
+                "summary": "The active agreement is pickup at 9:30.",
+                "raw_result": {
+                    "selected_summary": "The active agreement is pickup at 9:30.",
+                    "recall_type": "active_episode_agreement",
+                    "primary_source": "conversation_progress",
+                    "candidates": [
+                        {
+                            "source": "conversation_progress",
+                            "claim": "Pickup at 9:30.",
+                            "evidence_time": "2026-05-01T23:00:00+00:00",
+                        }
+                    ],
+                },
+            }
+        ],
+        current_user_id="user-1",
+        character_user_id="character-1",
+    )
+
+    entry = result["recall_evidence"][0]
+    assert entry["selected_summary"] == (
+        '结论：The active agreement is pickup at 9:30.'
+    )
+    assert entry["evidence_summary"].startswith('上下文：\n- ')
+    assert "Pickup at 9:30." in entry["evidence_summary"]
+    assert "2026-05-02 11:00:00" in entry["evidence_summary"]
+    assert '不确定性：无' in entry["evidence_summary"]
+    assert "candidates" not in entry
+    assert "2026-05-01T23:00:00+00:00" not in repr(entry)
+
+
+def test_project_known_facts_keeps_raw_refs_trace_only() -> None:
+    result = project_known_facts(
+        [
+            {
+                "slot": "conversation",
+                "agent": "conversation_evidence_agent",
+                "resolved": True,
+                "summary": "Chart was sent.",
+                "raw_result": {
+                    "projection_payload": {
+                        "summaries": ["Tester: here is the chart."],
+                        "rows": [
+                            {
+                                "summary": "Tester: here is the chart.",
+                                "conversation_row_id": "row-1",
+                                "platform_message_id": "message-1",
+                            }
+                        ],
+                    }
+                },
+            }
+        ],
+        current_user_id="user-1",
+        character_user_id="character-1",
+    )
+
+    public_payload = {
+        key: value
+        for key, value in result.items()
+        if key != "supervisor_trace"
+    }
+
+    assert "row-1" not in repr(public_payload)
+    assert "message-1" not in repr(public_payload)
+    assert "row-1" in repr(result["supervisor_trace"])
+    assert "message-1" in repr(result["supervisor_trace"])
 
 
 def test_cognition_rag_result_preserves_public_recall_payload() -> None:

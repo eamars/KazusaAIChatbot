@@ -2,14 +2,23 @@
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
+from kazusa_ai_chatbot.config import RAG_SEARCH_SELECTED_SUMMARY_LIMIT
 from kazusa_ai_chatbot.rag.prompt_projection import project_tool_result_for_llm
 from kazusa_ai_chatbot.time_boundary import format_storage_utc_for_llm
 
 
+_STORAGE_UTC_TEXT_RE = re.compile(
+    r"\b\d{4}-\d{2}-\d{2}T"
+    r"\d{2}:\d{2}:\d{2}"
+    r"(?:[\.,]\d{1,6})?"
+    r"(?:Z|\+00:00)\b",
+    flags=re.IGNORECASE,
+)
 _LLM_SUMMARY_TEXT_LIMIT = 400
-_LLM_SUMMARY_LIST_LIMIT = 5
+_LLM_SUMMARY_LIST_LIMIT = min(RAG_SEARCH_SELECTED_SUMMARY_LIMIT, 10)
 _LLM_SUMMARY_REF_LIMIT = 8
 _LLM_SUMMARY_PROFILE_UNIT_LIMIT = 4
 
@@ -205,6 +214,65 @@ def _compact_projection_payload_for_llm(payload: object) -> dict[str, object]:
     return return_value
 
 
+def _format_storage_utc_markers_for_llm(value: object) -> str:
+    """Project embedded storage UTC timestamps inside prompt-facing text.
+
+    Args:
+        value: Prompt-facing text that may contain storage UTC substrings.
+
+    Returns:
+        Text with recognized storage UTC substrings rendered as configured
+        local wall-clock timestamps.
+    """
+
+    text = _clip_llm_summary_text(value)
+
+    def _replace_timestamp(match: re.Match[str]) -> str:
+        raw_timestamp = match.group(0)
+        formatted = format_storage_utc_for_llm(raw_timestamp)
+        if formatted:
+            return formatted
+        return_value = raw_timestamp
+        return return_value
+
+    formatted_text = _STORAGE_UTC_TEXT_RE.sub(_replace_timestamp, text)
+    return formatted_text
+
+
+def _compact_recall_result_for_llm(raw_result: dict[str, object]) -> dict[str, object]:
+    """Build a safe summary view for Recall raw results.
+
+    Args:
+        raw_result: Recall helper result payload.
+
+    Returns:
+        Prompt-facing Recall summary without source internals, candidates, or
+        raw storage timestamps.
+    """
+
+    compact_result: dict[str, object] = {}
+    selected_summary = _clip_llm_summary_text(
+        raw_result.get("selected_summary", ""),
+    )
+    if selected_summary:
+        compact_result["selected_summary"] = selected_summary
+
+    freshness_basis = _format_storage_utc_markers_for_llm(
+        raw_result.get("freshness_basis", ""),
+    )
+    if freshness_basis:
+        compact_result["freshness_basis"] = freshness_basis
+
+    missing_context = raw_result.get("missing_context")
+    if isinstance(missing_context, list):
+        compact_result["missing_context"] = [
+            _clip_llm_summary_text(item)
+            for item in missing_context
+        ]
+
+    return compact_result
+
+
 def _compact_raw_result_for_llm(raw_result: object) -> object:
     """Remove heavy internals before a raw result enters a local LLM prompt.
 
@@ -219,6 +287,10 @@ def _compact_raw_result_for_llm(raw_result: object) -> object:
     projected_result = project_tool_result_for_llm(raw_result)
     if not isinstance(projected_result, dict):
         return projected_result
+
+    if "recall_type" in projected_result:
+        return_value = _compact_recall_result_for_llm(projected_result)
+        return return_value
 
     if "capability" in projected_result:
         compact_result: dict[str, object] = {

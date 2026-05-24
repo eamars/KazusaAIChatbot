@@ -52,6 +52,27 @@ Continuation metadata, when present, is kept under
 `supervisor_trace.dispatched[*].continuation`; it is not public evidence for
 cognition.
 
+Public memory, recall, and conversation evidence is formatted for cognition
+with the same semantic order:
+
+```text
+结论：直接事实答案，或明确说明没有找到证据。
+上下文：
+- 来源或发言人在配置的本地时间：可读的支撑内容。
+不确定性：仍然存在的不确定、冲突，或“无”。
+```
+
+Prompt-facing generated RAG wording is Chinese-first because the primary chat
+data, retrieval anchors, and cognition consumer are Chinese. Stable code-level
+route tokens, JSON keys, source text, URLs, filenames, model labels, and quoted
+user content keep their original spelling.
+
+Prompt-facing evidence must not expose raw adapter wire syntax, raw attachment
+URLs, storage ids, embeddings, binary payloads, source rows, or raw UTC
+timestamps. Source ids and raw refs stay in `supervisor_trace` or helper
+payloads for debugging, not in the primary evidence text consumed by
+cognition.
+
 ## Cognitive Episode Adapter
 
 `cognitive_episode_adapter.py` owns the text-chat projection from
@@ -90,7 +111,10 @@ persona_supervisor2
 
 The loop is slot-driven. `unknown_slots` is the work queue and the stop condition: slots are drained one at a time, and each completed attempt appends a fact row to `known_facts`.
 
-The default loop cap is eight dispatch iterations. This prevents open-ended agentic search while still allowing multi-hop queries such as resolving a pronoun, finding a referenced conversation object, then reading external content.
+The default loop cap is four dispatch iterations. This prevents open-ended
+agentic search and keeps normal chatbot latency bounded. Future RAG
+optimization should reduce the need for repeated loops instead of raising this
+cap.
 
 ## Observation-Driven Continuation
 
@@ -132,7 +156,7 @@ parameters. When `should_continue` is true, `refined_query` is self-contained
 because Cache 2 keys the initializer from its normal query and context inputs.
 
 Continuation is capped by `MAX_CONTINUATION_DECISIONS_PER_RAG_RUN` and the
-existing eight-loop supervisor cap. Rejected candidates and continuation
+existing four-loop supervisor cap. Rejected candidates and continuation
 metadata stay in supervisor/debug trace. Public evidence remains limited to
 accepted `rag_result` fields.
 
@@ -322,7 +346,20 @@ rather than per-agent literals.
 
 Conversation projection includes bounded attachment descriptions and reply
 excerpts, so rows whose body text is empty can still become usable evidence
-when attachments carried the remembered content.
+when attachments carried the remembered content. Image summaries are rendered
+as escaped `<image>...</image>` blocks in prompt-facing text; raw CQ syntax,
+raw URLs, and binary fields are stripped before the RAG tool output reaches an
+LLM.
+
+Conversation evidence can also produce bounded relation packets for adjacent
+message questions. The initializer may mark stable internal relation contracts
+such as `relation=previous_message`, `relation=next_message`, or
+`relation=reply_parent`. The search helper annotates neighboring rows with
+their relation to the seed message, and `conversation_evidence_agent` reduces
+the seed plus relation rows into packet summaries under
+`projection_payload.packets`. Public `conversation_evidence` prefers those
+packet summaries so cognition sees the answered relation, while raw row IDs
+and full row details remain trace/debug material.
 
 Relative-day conversation retrieval is grounded before tool execution when the
 runtime `time_context` is available. For example, a local "yesterday" slot uses
@@ -347,14 +384,23 @@ Each fact recorded by the supervisor keeps both operational and provenance infor
 }
 ```
 
-`summary` is the normal prompt-facing evidence for search-like agents. `raw_result` is retained where structure matters, especially user and character profile bundles. The projection layer applies a hybrid policy:
+`summary` is the worker-level retrieval summary. `raw_result` is retained
+where structure matters, especially user and character profile bundles. The
+projection layer applies a hybrid policy:
 
 - structured profile/image bundles remain structured,
-- scoped `user_memory_units` rows surfaced through `Memory-evidence:` remain in `memory_evidence` with scope metadata preserved and are also appended to `rag_result.user_memory_unit_candidates` for consolidation merge/evolve reuse,
-- conversation evidence is summarized,
-- shared memory evidence is summarized,
+- scoped `user_memory_units` rows surfaced through `Memory-evidence:` remain
+  in `memory_evidence` with scope metadata preserved and are also appended to
+  `rag_result.user_memory_unit_candidates` for consolidation merge/evolve
+  reuse,
+- conversation evidence becomes formatted conclusion/context/uncertainty
+  text, while raw message refs stay trace-only,
+- shared and scoped memory evidence becomes formatted
+  conclusion/context/uncertainty dictionaries,
 - live/external evidence keeps URL-bearing text,
-- recall evidence stays structured because downstream stages inspect fields such as status and temporal scope.
+- recall evidence stays structured because downstream stages inspect fields
+  such as `primary_source`, but prompt-facing recall summaries and evidence
+  lines use the same formatted evidence style.
 
 ## Scope And Provenance
 
@@ -431,6 +477,10 @@ Cognition reads `rag_result`, not raw RAG supervisor state. The intended divisio
 
 RAG evidence preserves facts, uncertainty, and source context. Cognition owns
 persona stance, emotional interpretation, and user-facing intent.
+
+Formatted evidence is still evidence, not a persona decision. Cognition should
+consume the conclusion, support, and uncertainty directly, then decide stance
+and response goals from the wider cognition state.
 
 ## Integration With Consolidation
 

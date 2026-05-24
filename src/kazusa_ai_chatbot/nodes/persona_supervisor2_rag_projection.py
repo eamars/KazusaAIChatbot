@@ -5,12 +5,20 @@ from __future__ import annotations
 import re
 from typing import Any
 
+from kazusa_ai_chatbot.config import RAG_SEARCH_SELECTED_SUMMARY_LIMIT
+from kazusa_ai_chatbot.rag.evidence_formatting import (
+    ensure_public_rag_evidence_prompt_safe,
+    format_evidence_block,
+    sanitize_public_rag_evidence_text,
+)
 from kazusa_ai_chatbot.rag.user_memory_unit_retrieval import empty_user_memory_context
+from kazusa_ai_chatbot.time_boundary import format_storage_utc_for_llm_seconds
 from kazusa_ai_chatbot.utils import text_or_empty
 
 _URL_RE = re.compile(r"https?://\S+")
 _SLOT_REF_RE = re.compile(r"slot\s+(\d+)", flags=re.IGNORECASE)
 _MAX_RECALL_EVIDENCE = 3
+_MAX_CONVERSATION_EVIDENCE_ITEMS = RAG_SEARCH_SELECTED_SUMMARY_LIMIT
 
 
 def _clip_text(text: str, *, limit: int) -> str:
@@ -160,17 +168,297 @@ def _append_user_memory_unit_candidates(
     return merged_candidates
 
 
+def _conclusion_line(summary: str) -> str:
+    """Return one prompt-facing conclusion line."""
+
+    summary_text = sanitize_public_rag_evidence_text(summary)
+    if summary_text.startswith("结论："):
+        return summary_text
+    if summary_text.startswith("Conclusion: "):
+        summary_text = summary_text.removeprefix("Conclusion: ").strip()
+    conclusion = f"结论：{summary_text}"
+    return conclusion
+
+
+def _evidence_summary_content(
+    evidence_items: list[str],
+    *,
+    empty_uncertainty: str,
+) -> str:
+    """Return evidence-summary text without a repeated conclusion line."""
+
+    clean_items = [
+        item_text
+        for item in evidence_items
+        if (item_text := sanitize_public_rag_evidence_text(item))
+    ]
+    if not clean_items:
+        uncertainty_text = (
+            sanitize_public_rag_evidence_text(empty_uncertainty)
+            or "无"
+        )
+        content = f"不确定性：{uncertainty_text}"
+        return content
+
+    lines = ["上下文："]
+    for item in clean_items:
+        lines.append(f"- {item}")
+    lines.append("不确定性：无")
+    content = "\n".join(lines)
+    return content
+
+
+def _first_local_second_time(
+    row: dict[str, Any],
+    fields: tuple[str, ...],
+) -> str:
+    """Return the first valid local-second timestamp from known row fields."""
+
+    for field in fields:
+        value = text_or_empty(row.get(field))
+        if not value:
+            continue
+        projected_time = format_storage_utc_for_llm_seconds(value)
+        if projected_time:
+            return projected_time
+    return ""
+
+
+def _memory_evidence_items(
+    rows: list[dict[str, Any]],
+    *,
+    evidence_char_limit: int,
+) -> list[str]:
+    """Project memory rows into prompt-facing evidence lines."""
+
+    evidence_items: list[str] = []
+    for row in rows[:5]:
+        if not isinstance(row, dict):
+            continue
+        content = text_or_empty(row.get("content"))
+        if not content:
+            continue
+        clipped_content = _clip_text(content, limit=evidence_char_limit)
+        evidence_time = _first_local_second_time(
+            row,
+            ("updated_at", "timestamp", "created_at", "last_seen_at"),
+        )
+        if evidence_time:
+            evidence_item = f"记忆（{evidence_time}）：{clipped_content}"
+        else:
+            evidence_item = f"记忆：{clipped_content}"
+        evidence_items.append(evidence_item)
+    return evidence_items
+
+
+def _conversation_row_text(row: dict[str, Any]) -> str:
+    """Return the prompt-facing text from one conversation evidence row."""
+
+    for field in ("summary", "body_text", "content"):
+        content = text_or_empty(row.get(field))
+        if content:
+            return content
+    return ""
+
+
+def _conversation_evidence_items(
+    rows: list[dict[str, Any]],
+    *,
+    evidence_char_limit: int,
+) -> list[str]:
+    """Project conversation rows into speaker/time evidence lines."""
+
+    evidence_items: list[str] = []
+    for row in rows[:_MAX_CONVERSATION_EVIDENCE_ITEMS]:
+        if not isinstance(row, dict):
+            continue
+        content = _conversation_row_text(row)
+        if not content:
+            continue
+        clipped_content = _clip_text(content, limit=evidence_char_limit)
+        speaker = text_or_empty(row.get("display_name"))
+        if not speaker:
+            speaker = text_or_empty(row.get("role")) or "对话记录"
+        evidence_time = _first_local_second_time(row, ("timestamp",))
+        if evidence_time:
+            evidence_item = f"{speaker}（{evidence_time}）：{clipped_content}"
+        else:
+            evidence_item = f"{speaker}：{clipped_content}"
+        evidence_items.append(evidence_item)
+    return evidence_items
+
+
+def _conversation_packet_items(
+    packets: list[Any],
+    *,
+    evidence_char_limit: int,
+) -> list[str]:
+    """Project conversation relation packets into compact evidence lines."""
+
+    evidence_items: list[str] = []
+    for packet in packets[:_MAX_CONVERSATION_EVIDENCE_ITEMS]:
+        if not isinstance(packet, dict):
+            continue
+        summary = sanitize_public_rag_evidence_text(
+            text_or_empty(packet.get("summary"))
+        )
+        if not summary:
+            continue
+        evidence_items.append(_clip_text(summary, limit=evidence_char_limit))
+    return evidence_items
+
+
+def _recall_candidate_items(
+    candidates: list[Any],
+    *,
+    evidence_char_limit: int,
+) -> list[str]:
+    """Project recall candidates into prompt-facing evidence lines."""
+
+    evidence_items: list[str] = []
+    for candidate in candidates[:5]:
+        if not isinstance(candidate, dict):
+            continue
+        claim = text_or_empty(candidate.get("claim"))
+        if not claim:
+            claim = text_or_empty(candidate.get("summary"))
+        if not claim:
+            continue
+        clipped_claim = _clip_text(claim, limit=evidence_char_limit)
+        evidence_time = _first_local_second_time(
+            candidate,
+            ("evidence_time", "timestamp", "updated_at"),
+        )
+        if evidence_time:
+            evidence_item = f"召回记录（{evidence_time}）：{clipped_claim}"
+        else:
+            evidence_item = f"召回记录：{clipped_claim}"
+        evidence_items.append(evidence_item)
+    return evidence_items
+
+
+def _source_ref_value(row: dict[str, Any], field: str) -> str:
+    """Return a trace-only source-ref value from a raw row field."""
+
+    value = row.get(field)
+    if field == "_id" and value is not None:
+        return_value = str(value)
+        return return_value
+    return_value = text_or_empty(value)
+    return return_value
+
+
+def _source_refs_from_rows(rows: list[Any]) -> list[dict[str, str]]:
+    """Collect compact trace-only refs from raw evidence rows."""
+
+    source_refs: list[dict[str, str]] = []
+    source_fields = (
+        "conversation_row_id",
+        "platform_message_id",
+        "_id",
+        "unit_id",
+        "source",
+        "source_system",
+        "timestamp",
+        "evidence_time",
+    )
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        source_ref: dict[str, str] = {}
+        for field in source_fields:
+            value = _source_ref_value(row, field)
+            if value:
+                source_ref[field] = value
+        if source_ref:
+            source_refs.append(source_ref)
+    return source_refs
+
+
+def _attach_source_refs(
+    dispatched_entry: dict[str, Any],
+    rows: list[Any],
+) -> None:
+    """Attach trace-only source refs to one dispatched supervisor row."""
+
+    source_refs = _source_refs_from_rows(rows)
+    if not source_refs:
+        return
+    dispatched_entry["source_refs"] = source_refs
+
+
+def _public_string_list(value: object) -> list[str] | None:
+    """Return a list of strings when the value is a prompt-safe string list."""
+
+    if not isinstance(value, list):
+        return None
+    string_items = [
+        item
+        for item in value
+        if isinstance(item, str)
+    ]
+    if len(string_items) != len(value):
+        return None
+    return string_items
+
+
+def _recall_evidence_entry(
+    recall_payload: dict[str, Any],
+    *,
+    summary: str,
+    evidence_char_limit: int,
+) -> dict[str, Any]:
+    """Project one Recall payload into cognition-ready public evidence."""
+
+    selected_summary = (
+        text_or_empty(recall_payload.get("selected_summary")) or summary
+    )
+    entry: dict[str, Any] = {
+        "selected_summary": _conclusion_line(selected_summary),
+    }
+
+    for field in ("recall_type", "primary_source", "freshness_basis"):
+        value = text_or_empty(recall_payload.get(field))
+        if value:
+            entry[field] = value
+
+    for field in ("supporting_sources", "conflicts"):
+        value = _public_string_list(recall_payload.get(field))
+        if value is not None:
+            entry[field] = value
+
+    candidates = _as_list(recall_payload.get("candidates"))
+    evidence_items = _recall_candidate_items(
+        candidates,
+        evidence_char_limit=evidence_char_limit,
+    )
+    entry["evidence_summary"] = _evidence_summary_content(
+        evidence_items,
+        empty_uncertainty="没有可用于提示的召回证据。",
+    )
+    return entry
+
+
 def _memory_evidence_entry(
     *,
     summary: str,
     rows: list[dict[str, Any]],
     current_user_id: str,
     evidence_char_limit: int,
-) -> dict[str, str]:
+) -> dict[str, Any]:
     """Project one memory-evidence item and preserve scoped continuity metadata."""
-    entry: dict[str, str] = {
-        "summary": summary,
-        "content": _extract_memory_content(rows, evidence_char_limit=evidence_char_limit),
+    evidence_items = _memory_evidence_items(
+        rows,
+        evidence_char_limit=evidence_char_limit,
+    )
+    entry: dict[str, Any] = {
+        "summary": _conclusion_line(summary),
+        "content": _evidence_summary_content(
+            evidence_items,
+            empty_uncertainty=(
+                "没有可用于提示的记忆证据。"
+            ),
+        ),
     }
     scoped_rows = _scoped_user_memory_rows(rows, current_user_id=current_user_id)
     if not scoped_rows:
@@ -256,7 +544,7 @@ def project_known_facts(
         ``rag_result`` dict consumed by cognition and consolidation stages.
     """
     rag_result: dict[str, Any] = {
-        "answer": text_or_empty(answer),
+        "answer": sanitize_public_rag_evidence_text(answer),
         "user_image": {"user_memory_context": empty_user_memory_context()},
         "user_memory_unit_candidates": [],
         "character_image": {},
@@ -273,7 +561,7 @@ def project_known_facts(
     }
 
     third_party_profiles: list[str] = []
-    memory_evidence: list[dict[str, str]] = []
+    memory_evidence: list[dict[str, Any]] = []
     recall_evidence: list[dict[str, Any]] = []
     conversation_evidence: list[str] = []
     external_evidence: list[dict[str, str]] = []
@@ -297,6 +585,20 @@ def project_known_facts(
         continuation = fact.get("continuation")
         if isinstance(continuation, dict):
             dispatched_entry["continuation"] = {
+                "promote_candidate": bool(
+                    continuation.get("promote_candidate", False)
+                ),
+                "promoted_candidate_indexes": [
+                    index
+                    for index in continuation.get(
+                        "promoted_candidate_indexes",
+                        [],
+                    )
+                    if isinstance(index, int) and not isinstance(index, bool)
+                ],
+                "promotion_summary": text_or_empty(
+                    continuation.get("promotion_summary")
+                ),
                 "should_continue": bool(
                     continuation.get("should_continue", False)
                 ),
@@ -321,23 +623,64 @@ def project_known_facts(
                 url_match = _URL_RE.search(content)
                 url = url_match.group(0) if url_match else ""
             external_evidence.append({
-                "summary": summary,
-                "content": content,
+                "summary": sanitize_public_rag_evidence_text(summary),
+                "content": sanitize_public_rag_evidence_text(content),
                 "url": url,
             })
             continue
 
         if agent == "conversation_evidence_agent":
             payload = _projection_payload(raw_result)
-            conversation_evidence.extend(
-                _project_top_level_summaries(
-                    payload,
-                    key="summaries",
-                    evidence_char_limit=evidence_char_limit,
-                )
+            rows = [
+                row
+                for row in _as_list(payload.get("rows"))
+                if isinstance(row, dict)
+            ]
+            _attach_source_refs(dispatched_entry, rows)
+            packet_items = _conversation_packet_items(
+                _as_list(payload.get("packets")),
+                evidence_char_limit=evidence_char_limit,
             )
-            if not _as_list(payload.get("summaries")) and summary:
-                conversation_evidence.append(summary)
+            row_items = _conversation_evidence_items(
+                rows,
+                evidence_char_limit=evidence_char_limit,
+            )
+            if packet_items:
+                conversation_evidence.append(
+                    format_evidence_block(
+                        conclusion=summary,
+                        evidence_items=packet_items,
+                    )
+                )
+                continue
+            if row_items:
+                conversation_evidence.append(
+                    format_evidence_block(
+                        conclusion=summary,
+                        evidence_items=row_items,
+                    )
+                )
+                continue
+
+            summaries = _project_top_level_summaries(
+                payload,
+                key="summaries",
+                evidence_char_limit=evidence_char_limit,
+            )
+            for item_summary in summaries:
+                conversation_evidence.append(
+                    format_evidence_block(
+                        conclusion=item_summary,
+                        evidence_items=[],
+                    )
+                )
+            if not summaries and summary:
+                conversation_evidence.append(
+                    format_evidence_block(
+                        conclusion=summary,
+                        evidence_items=[],
+                    )
+                )
             continue
 
         if agent == "memory_evidence_agent":
@@ -347,6 +690,7 @@ def project_known_facts(
                 for row in _as_list(payload.get("memory_rows"))
                 if isinstance(row, dict)
             ]
+            _attach_source_refs(dispatched_entry, memory_rows)
             memory_evidence.append(
                 _memory_evidence_entry(
                     summary=summary,
@@ -380,8 +724,9 @@ def project_known_facts(
             if profile_kind == "active_character":
                 rag_result["character_image"] = raw_profile
                 continue
-            if payload_summary:
-                third_party_profiles.append(payload_summary)
+            public_summary = sanitize_public_rag_evidence_text(payload_summary)
+            if public_summary:
+                third_party_profiles.append(public_summary)
             continue
 
         if agent == "user_profile_agent":
@@ -401,20 +746,32 @@ def project_known_facts(
             if owner_id == character_user_id or (not owner_id and raw_profile.get("self_image") is not None):
                 rag_result["character_image"] = raw_profile
                 continue
-            if summary:
-                third_party_profiles.append(summary)
+            public_summary = sanitize_public_rag_evidence_text(summary)
+            if public_summary:
+                third_party_profiles.append(public_summary)
             continue
 
         if agent in {"user_lookup_agent", "user_list_agent", "relationship_agent"}:
-            if summary:
-                third_party_profiles.append(summary)
+            public_summary = sanitize_public_rag_evidence_text(summary)
+            if public_summary:
+                third_party_profiles.append(public_summary)
             continue
 
         if agent in {"persistent_memory_search_agent", "persistent_memory_keyword_agent"}:
-            memory_evidence.append({
-                "summary": summary,
-                "content": _extract_memory_content(raw_result, evidence_char_limit=evidence_char_limit),
-            })
+            memory_rows = [
+                row
+                for row in _as_list(raw_result)
+                if isinstance(row, dict)
+            ]
+            _attach_source_refs(dispatched_entry, memory_rows)
+            memory_evidence.append(
+                _memory_evidence_entry(
+                    summary=summary,
+                    rows=memory_rows,
+                    current_user_id=current_user_id,
+                    evidence_char_limit=evidence_char_limit,
+                )
+            )
             continue
 
         if agent == "recall_agent":
@@ -422,9 +779,29 @@ def project_known_facts(
                 continue
             recall_payload = _as_dict(raw_result)
             if recall_payload:
-                recall_evidence.append(recall_payload)
+                _attach_source_refs(
+                    dispatched_entry,
+                    _as_list(recall_payload.get("candidates")),
+                )
+                recall_evidence.append(
+                    _recall_evidence_entry(
+                        recall_payload,
+                        summary=summary,
+                        evidence_char_limit=evidence_char_limit,
+                    )
+                )
             elif summary:
-                recall_evidence.append({"selected_summary": summary})
+                recall_evidence.append(
+                    {
+                        "selected_summary": _conclusion_line(summary),
+                        "evidence_summary": _evidence_summary_content(
+                            [],
+                            empty_uncertainty=(
+                                "没有可用于提示的召回证据。"
+                            ),
+                        ),
+                    }
+                )
             continue
 
         if agent in {
@@ -434,20 +811,36 @@ def project_known_facts(
             "conversation_aggregate_agent",
         }:
             if summary:
-                conversation_evidence.append(summary)
+                rows = [
+                    row
+                    for row in _as_list(raw_result)
+                    if isinstance(row, dict)
+                ]
+                _attach_source_refs(dispatched_entry, rows)
+                conversation_evidence.append(
+                    format_evidence_block(
+                        conclusion=summary,
+                        evidence_items=[],
+                    )
+                )
             continue
 
         if agent == "web_search_agent2":
             content, url = _extract_external_content(raw_result, evidence_char_limit=evidence_char_limit)
             external_evidence.append({
-                "summary": summary,
-                "content": content,
+                "summary": sanitize_public_rag_evidence_text(summary),
+                "content": sanitize_public_rag_evidence_text(content),
                 "url": url,
             })
             continue
 
         if summary:
-            conversation_evidence.append(summary)
+            conversation_evidence.append(
+                format_evidence_block(
+                    conclusion=summary,
+                    evidence_items=[],
+                )
+            )
 
     rag_result["third_party_profiles"] = third_party_profiles
     rag_result["memory_evidence"] = memory_evidence
@@ -455,4 +848,5 @@ def project_known_facts(
     rag_result["conversation_evidence"] = conversation_evidence
     rag_result["external_evidence"] = external_evidence
     rag_result["supervisor_trace"]["dispatched"] = dispatched
+    ensure_public_rag_evidence_prompt_safe(rag_result)
     return rag_result

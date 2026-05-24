@@ -6,7 +6,7 @@
   reaches cognition as source-backed, formatted, prompt-safe facts instead of
   uneven free-form summaries or raw transcript fragments.
 - Plan class: large
-- Status: approved
+- Status: completed
 - Mandatory skills: `development-plan`, `local-llm-architecture`,
   `debug-llm`, `py-style`, `cjk-safety`, `test-style-and-execution`
 - Overall cutover strategy: bigbang for prompt-facing RAG evidence formatting;
@@ -665,62 +665,62 @@ The execution agent must ask for approval before:
 
 ## Progress Checklist
 
-- [ ] Stage 0 - plan approved for implementation
+- [x] Stage 0 - plan approved for implementation
   - Covers: approval only.
   - Verify: plan `Status` is `approved` or `in_progress`.
   - Evidence: record user approval and initial `git status --short`.
   - Handoff: start Stage 1.
-  - Sign-off: `<agent/date>`.
-- [ ] Stage 1 - focused test contract established
+  - Sign-off: `Codex/2026-05-23`.
+- [x] Stage 1 - focused test contract established
   - Covers: implementation steps 1-4.
   - Verify: run the four focused pytest commands listed in steps 1-4.
   - Evidence: record expected failures, missing symbols, and baseline snippets.
   - Handoff: start production-code subagent.
-  - Sign-off: `<agent/date>`.
-- [ ] Stage 2 - production-code subagent completed source changes
+  - Sign-off: `Codex/2026-05-23`.
+- [x] Stage 2 - production-code subagent completed source changes
   - Covers: implementation steps 5-6.
   - Verify: subagent reports changed production files and commands run.
   - Evidence: record subagent id, changed files, blockers, and residual risks.
   - Handoff: parent runs focused tests.
-  - Sign-off: `<agent/date>`.
-- [ ] Stage 3 - focused module tests pass
+  - Sign-off: `Codex/2026-05-23`.
+- [x] Stage 3 - focused module tests pass
   - Covers: implementation step 7.
   - Verify: focused formatter, prompt-safety, conversation projection,
     user-memory, and RAG projection tests pass.
   - Evidence: record command output and any loop-back fixes.
   - Handoff: run integration tests.
-  - Sign-off: `<agent/date>`.
-- [ ] Stage 4 - integration tests and docs complete
+  - Sign-off: `Codex/2026-05-23`.
+- [x] Stage 4 - integration tests and docs complete
   - Covers: implementation steps 8-10.
   - Verify: integration pytest command and `py_compile` for the artifact
     validation helper pass.
   - Evidence: record docs changed and validation-helper compile output.
   - Handoff: run debug-LLM production validation.
-  - Sign-off: `<agent/date>`.
-- [ ] Stage 5 - debug-LLM production validation complete
+  - Sign-off: `Codex/2026-05-23`.
+- [x] Stage 5 - debug-LLM production validation complete
   - Covers: implementation step 11.
   - Verify: baseline runner writes 10 `rag2-alt-*` artifacts, artifact public
     evidence validator reports expected count 10, and
     `production_cognition_ready_evidence_review.md` exists.
   - Evidence: record commands, report path, and agent review conclusion.
   - Handoff: run full verification and independent code review.
-  - Sign-off: `<agent/date>`.
-- [ ] Stage 6 - independent code review complete and remediated
+  - Sign-off: `Codex/2026-05-23`.
+- [x] Stage 6 - independent code review complete and remediated
   - Covers: implementation step 12.
   - Verify: independent reviewer reports no unresolved blockers or major
     findings, or accepted residual risk is recorded with user approval when
     needed.
   - Evidence: record review id, findings, fixes, and rerun commands.
   - Handoff: remove experiment code.
-  - Sign-off: `<agent/date>`.
-- [ ] Stage 7 - experiment code removed and final checks pass
+  - Sign-off: `Codex/2026-05-23`.
+- [x] Stage 7 - experiment code removed and final checks pass
   - Covers: implementation step 13.
   - Verify: `Test-Path -LiteralPath 'experiments/rag2_recall_quality'` returns
     `False`, import grep returns no production/test imports, and focused tests
     still pass.
   - Evidence: record deletion proof and final `git status --short`.
   - Handoff: final user report.
-  - Sign-off: `<agent/date>`.
+  - Sign-off: `Codex/2026-05-23`.
 
 ## Verification
 
@@ -898,3 +898,259 @@ Record the review result and fix status in `Execution Evidence`.
   - no backend/search mechanics in prompts;
   - no development-process or experiment language in runtime prompts;
   - deterministic projection of raw operational data before model input.
+
+### 2026-05-23 execution start
+
+- User approved executing this plan with subagents per the development-plan
+  skill and explicitly said no branch/worktree is needed.
+- Plan status changed to `in_progress`.
+- Initial active-scope command:
+  `git status --short -- development_plans src tests scripts`.
+
+### 2026-05-23 focused test contract baseline
+
+- Parent-owned tests added before production source edits:
+  - `tests/test_rag_evidence_formatting.py`
+  - `tests/test_rag_prompt_evidence_safety.py`
+  - `tests/test_memory_retrieval_tools.py`
+  - `tests/test_user_memory_evidence_agent.py`
+  - `tests/test_rag_projection.py`
+- Baseline command:
+  `venv\Scripts\python.exe -m pytest tests/test_rag_evidence_formatting.py -q`.
+  Result: expected collection failure because
+  `kazusa_ai_chatbot.rag.evidence_formatting` does not exist.
+- Baseline command:
+  `venv\Scripts\python.exe -m pytest tests/test_rag_prompt_evidence_safety.py -q`.
+  Result: expected collection failure because the shared public-evidence safety
+  boundary does not exist.
+- Baseline command:
+  `venv\Scripts\python.exe -m pytest tests/test_memory_retrieval_tools.py -q`.
+  Result: expected `8 failed, 7 passed`. Baseline failures prove
+  `conversation_message_payload` currently leaves image descriptions outside
+  `body_text`, keeps `conversation_row_id`/`platform_message_id`, keeps raw
+  attachment URLs in prompt-facing payloads, leaves raw storage UTC timestamps,
+  exposes reply attachments separately, and preserves raw `[CQ:...]` body text.
+- Baseline command:
+  `venv\Scripts\python.exe -m pytest tests/test_user_memory_evidence_agent.py tests/test_rag_projection.py -q`.
+  Result: expected `10 failed, 15 passed`. Baseline failures prove scoped
+  user-memory literal retrieval stops after the first successful anchor, RAG
+  projection keeps memory/conversation/recall evidence in old free-form or raw
+  shapes, recall keeps raw candidate rows and UTC evidence time in public
+  fields, and raw conversation refs are not retained in trace-only source refs.
+
+### 2026-05-23 production subagent and focused verification
+
+- Production-code subagent:
+  `019e547d-29d4-7a71-83f1-9b37e1c7b437`.
+- Subagent changed production source only:
+  - `src/kazusa_ai_chatbot/rag/evidence_formatting.py`
+  - `src/kazusa_ai_chatbot/time_boundary.py`
+  - `src/kazusa_ai_chatbot/utils.py`
+  - `src/kazusa_ai_chatbot/rag/memory_retrieval_tools.py`
+  - `src/kazusa_ai_chatbot/rag/user_memory_evidence_agent.py`
+  - `src/kazusa_ai_chatbot/nodes/persona_supervisor2_rag_projection.py`
+- Subagent reported no blockers and no production imports from `experiments/`.
+- Parent reran focused deterministic checks:
+  - `venv\Scripts\python.exe -m pytest tests/test_rag_evidence_formatting.py -q`
+    passed: `5 passed`.
+  - `venv\Scripts\python.exe -m pytest tests/test_rag_prompt_evidence_safety.py -q`
+    passed: `3 passed`.
+  - `venv\Scripts\python.exe -m pytest tests/test_memory_retrieval_tools.py -q`
+    passed: `15 passed`.
+  - `venv\Scripts\python.exe -m pytest tests/test_user_memory_evidence_agent.py tests/test_rag_projection.py -q`
+    passed: `25 passed`.
+- Consumer mapping confirmed the most sensitive consumers keep relying on the
+  existing top-level `rag_result` fields:
+  - L2/L3 cognition removes only `user_memory_unit_candidates` before prompt
+    projection and otherwise consumes public evidence fields.
+  - fact consolidation consumes `memory_evidence`, `recall_evidence`,
+    `conversation_evidence`, `external_evidence`, and trace separately.
+  - memory-unit consolidation depends on `user_image` and
+    `user_memory_unit_candidates`.
+  - memory lifecycle projects `memory_evidence.summary/content` and active
+    commitments.
+
+### 2026-05-23 integration validation and docs
+
+- Integration command:
+  `venv\Scripts\python.exe -m pytest tests/test_llm_time_payload_projection.py tests/test_rag_finalizer_time_context.py tests/test_rag_phase3_capability_agents.py tests/test_rag_search_body_text.py -q`.
+  Result: `84 passed`.
+- Added artifact validator:
+  `scripts/validate_rag2_public_evidence_artifacts.py`.
+- Validator compile command:
+  `venv\Scripts\python.exe -m py_compile scripts\validate_rag2_public_evidence_artifacts.py`.
+  Result: passed.
+- Docs updated:
+  - `src/kazusa_ai_chatbot/rag/README.md` now documents the formatted
+    conclusion/evidence/uncertainty contract, image-block projection, local
+    timestamp policy, and trace-only source refs.
+  - `src/kazusa_ai_chatbot/nodes/README.md` now notes that cognition receives
+    formatted evidence and that raw refs stay outside public evidence fields.
+
+### 2026-05-23 Stage 5 quality loop-back
+
+- Live production artifact validation commands completed:
+  - `venv\Scripts\python.exe -m experiments.rag2_recall_quality.baseline_runner --cases test_artifacts/rag2_recall_quality/inputs/contextual_case_matrix_alt10.jsonl --limit 10`
+    wrote 10 `rag2-alt-*` artifacts.
+  - `venv\Scripts\python.exe -m scripts.validate_rag2_public_evidence_artifacts --input-dir test_artifacts/rag2_recall_quality/baseline --case-prefix rag2-alt- --expected-count 10`
+    reported `validated 10 public RAG2 evidence artifacts`.
+- Human quality inspection found Stage 5 cannot be signed off yet:
+  - one unresolved conversation slot can stop the supervisor before an
+    independent queued memory slot runs;
+  - current-user technical preference slots route to shared memory instead of
+    scoped user memory;
+  - public conversation summaries can contain `global_user_id` source-id text;
+  - formatted public evidence only includes the first five conversation rows,
+    hiding relevant image rows in the oxygen-sensor case.
+- Loop-back deterministic tests were added for these failures and produced the
+  expected failures before remediation:
+  - `tests/test_rag_prompt_evidence_safety.py::test_public_rag_result_evidence_rejects_source_uuid_text`
+  - `tests/test_rag_projection.py::test_project_known_facts_redacts_source_ids_from_public_conversation_summary`
+  - `tests/test_rag_projection.py::test_project_known_facts_includes_later_relevant_conversation_rows`
+  - `tests/test_rag_phase3_capability_agents.py::test_memory_evidence_current_user_preferences_use_scoped_worker`
+  - `tests/test_persona_supervisor2_rag2_integration.py::test_call_rag_supervisor_continues_remaining_slots_after_unresolved_stop_decision`
+- Smallest prompt-change contract before editing evaluator prompt:
+  - Semantic question: summarize one resolved helper result into useful facts
+    for queued slots and final answer.
+  - Required inputs: slot, agent, resolved flag, compact raw result, prior known
+    facts.
+  - Required output fields: one concise plain-text fact summary.
+  - Deterministic owners: source ids remain in `resolved_refs`,
+    `source_refs`, raw worker payloads, and `supervisor_trace`; public
+    projection redacts id-like text.
+  - Rejected complexity: no new LLM call, no backend parameters, no route
+    mechanics, no experiment language, and no graph/DAG behavior.
+
+### 2026-05-23 Stage 5 remediation and production review
+
+- Loop-back remediation was implemented inside the approved change surface:
+  - `persona_supervisor2_rag_supervisor2.py` now continues queued independent
+    slots after an unresolved stop decision when the loop budget allows it.
+  - `memory_evidence_agent.py` routes current-user technical preference queries
+    to scoped user-memory retrieval.
+  - `persona_supervisor2_rag_evaluator.py`,
+    `persona_supervisor2_rag_prompt_views.py`, and
+    `persona_supervisor2_rag_projection.py` keep source ids trace-only,
+    increase public summary visibility for selected evidence rows, and sanitize
+    public summaries before projection.
+- Loop-back focused tests passed:
+  - `venv\Scripts\python.exe -m pytest tests/test_rag_prompt_evidence_safety.py::test_public_rag_result_evidence_rejects_source_uuid_text tests/test_rag_projection.py::test_project_known_facts_redacts_source_ids_from_public_conversation_summary tests/test_rag_projection.py::test_project_known_facts_includes_later_relevant_conversation_rows -q`
+    result: `3 passed`.
+  - `venv\Scripts\python.exe -m pytest tests/test_rag_phase3_capability_agents.py::test_memory_evidence_current_user_preferences_use_scoped_worker -q`
+    result: `1 passed`.
+  - `venv\Scripts\python.exe -m pytest tests/test_persona_supervisor2_rag2_integration.py::test_call_rag_supervisor_continues_remaining_slots_after_unresolved_stop_decision -q`
+    result: `1 passed`.
+- Broader focused deterministic checks passed:
+  - `venv\Scripts\python.exe -m pytest tests/test_rag_prompt_evidence_safety.py tests/test_rag_projection.py tests/test_rag_phase3_capability_agents.py tests/test_persona_supervisor2_rag2_integration.py -q`
+    result: `88 passed`.
+  - `venv\Scripts\python.exe -m pytest tests/test_rag_evidence_formatting.py tests/test_rag_prompt_evidence_safety.py tests/test_memory_retrieval_tools.py tests/test_rag_projection.py tests/test_llm_time_payload_projection.py tests/test_rag_finalizer_time_context.py tests/test_rag_phase3_capability_agents.py tests/test_user_memory_evidence_agent.py tests/test_rag_search_body_text.py -q`
+    result: `136 passed`.
+  - `venv\Scripts\python.exe -m py_compile src\kazusa_ai_chatbot\nodes\persona_supervisor2_rag_evaluator.py src\kazusa_ai_chatbot\nodes\persona_supervisor2_rag_prompt_views.py src\kazusa_ai_chatbot\nodes\persona_supervisor2_rag_supervisor2.py src\kazusa_ai_chatbot\nodes\persona_supervisor2_rag_projection.py src\kazusa_ai_chatbot\rag\memory_evidence_agent.py src\kazusa_ai_chatbot\rag\evidence_formatting.py`
+    result: passed.
+  - `venv\Scripts\python.exe -m py_compile scripts\validate_rag2_public_evidence_artifacts.py`
+    result: passed.
+- Live production artifact validation was rerun:
+  - `venv\Scripts\python.exe -m experiments.rag2_recall_quality.baseline_runner --cases test_artifacts/rag2_recall_quality/inputs/contextual_case_matrix_alt10.jsonl --limit 10`
+    wrote 10 `rag2-alt-*` artifacts.
+  - `venv\Scripts\python.exe -m scripts.validate_rag2_public_evidence_artifacts --input-dir test_artifacts/rag2_recall_quality/baseline --case-prefix rag2-alt- --expected-count 10`
+    reported `validated 10 public RAG2 evidence artifacts`.
+- Agent-authored debug-LLM review was written to:
+  `test_artifacts/rag2_recall_quality/production_cognition_ready_evidence_review.md`.
+- Review conclusion:
+  - 6 cases passed, 3 were partial, and 1 failed.
+  - The known Stage 5 blockers are fixed: scoped preference memory is found,
+    queued independent slots continue after an unresolved stop decision, public
+    source-id leaks are rejected/redacted, and late conversation rows can reach
+    public evidence.
+  - Remaining misses in `rag2-alt-004`, `rag2-alt-006`, `rag2-alt-007`, and
+    `rag2-alt-008` are retrieval selection/synthesis weaknesses, not public
+    evidence formatting or prompt-safety regressions.
+
+### 2026-05-23 independent code review and remediation
+
+- Independent code reviewer:
+  `019e54ab-d1dd-7e81-8bb4-3dc1cc8ed34d`.
+- Initial review findings:
+  - BLOCKER: `rag_result.third_party_profiles` leaked raw user UUIDs to
+    cognition-facing public RAG output in live artifacts.
+  - BLOCKER: `tests/test_rag_initializer_real_data_live_llm.py` imported
+    `experiments.conversation_graph_poc`, violating the import-boundary
+    acceptance criterion.
+  - MAJOR: `scripts/validate_rag2_public_evidence_artifacts.py` did not scan
+    `third_party_profiles` or reject UUID/global-user-id marker text, so the
+    validator did not cover the leak class.
+- Remediation:
+  - `src/kazusa_ai_chatbot/rag/evidence_formatting.py` now treats
+    `third_party_profiles` as public RAG evidence and rejects UUID text there.
+  - `sanitize_public_rag_evidence_text()` now removes separator-form source
+    ids such as `display name | <uuid>` before public projection.
+  - `persona_supervisor2_rag_projection.py` sanitizes third-party profile
+    summaries before appending them to `rag_result`.
+  - `scripts/validate_rag2_public_evidence_artifacts.py` now scans
+    `third_party_profiles`, rejects UUID text, rejects `global_user_id` and
+    `source_global_user_id` markers, and keeps the explicit
+    `.scope_global_user_id` compatibility exception.
+  - `tests/test_rag_initializer_real_data_live_llm.py` was removed because it
+    was an obsolete conversation-graph live test importing from `experiments/`;
+    the conversation-graph plan is superseded and out of production scope.
+  - `test_artifacts/rag2_recall_quality/production_cognition_ready_evidence_review.md`
+    received a Stage 6 addendum with the validator failure, remediation, fresh
+    artifact result, and updated case judgments.
+- Verification after remediation:
+  - Old artifacts failed the strengthened validator with raw UUID errors in
+    `third_party_profiles` for cases `001`, `005`, `007`, and `010`.
+  - Fresh live artifact command:
+    `venv\Scripts\python.exe -m experiments.rag2_recall_quality.baseline_runner --cases test_artifacts/rag2_recall_quality/inputs/contextual_case_matrix_alt10.jsonl --limit 10`
+    wrote 10 fresh artifacts.
+  - Fresh validator command:
+    `venv\Scripts\python.exe -m scripts.validate_rag2_public_evidence_artifacts --input-dir test_artifacts/rag2_recall_quality/baseline --case-prefix rag2-alt- --expected-count 10`
+    reported `validated 10 public RAG2 evidence artifacts`.
+  - Import boundary command:
+    `rg -n "experiments\.|from experiments|import experiments" src tests scripts`
+    returned no matches with exit code `1`.
+  - Focused deterministic command:
+    `venv\Scripts\python.exe -m pytest tests/test_rag_evidence_formatting.py tests/test_rag_prompt_evidence_safety.py tests/test_memory_retrieval_tools.py tests/test_rag_projection.py tests/test_llm_time_payload_projection.py tests/test_rag_finalizer_time_context.py tests/test_rag_phase3_capability_agents.py tests/test_user_memory_evidence_agent.py tests/test_rag_search_body_text.py -q`
+    result: `138 passed`.
+  - RAG2 integration command:
+    `venv\Scripts\python.exe -m pytest tests/test_persona_supervisor2_rag2_integration.py -q`
+    result: `8 passed`.
+  - `py_compile` for touched Python files passed.
+  - `git diff --check` exited `0` with CRLF warnings only.
+- Reviewer re-check result:
+  - previous blockers are fixed;
+  - previous validator major finding is fixed;
+  - no unresolved BLOCKER or MAJOR findings remain;
+  - Stage 6 can be signed off.
+- Residual risks recorded by reviewer:
+  - `rag2-alt-004`, `rag2-alt-005`, and `rag2-alt-007` remain partial quality
+    cases; these are retrieval/synthesis risks, not prompt-safety blockers.
+  - `scope_global_user_id` remains allowed as compatibility metadata in scoped
+    memory evidence; future prompt consumers should not rely on it
+    semantically.
+
+### 2026-05-23 experiment cleanup and final sign-off
+
+- Removed ignored experiment implementation directory:
+  `experiments/rag2_recall_quality/`.
+- Deletion proof:
+  `Test-Path -LiteralPath 'experiments\rag2_recall_quality'` returned
+  `False`.
+- Final focused deterministic command:
+  `venv\Scripts\python.exe -m pytest tests/test_rag_evidence_formatting.py tests/test_rag_prompt_evidence_safety.py tests/test_memory_retrieval_tools.py tests/test_rag_projection.py tests/test_llm_time_payload_projection.py tests/test_rag_finalizer_time_context.py tests/test_rag_phase3_capability_agents.py tests/test_user_memory_evidence_agent.py tests/test_rag_search_body_text.py -q`
+  reported `138 passed`.
+- Public artifact validation command:
+  `venv\Scripts\python.exe -m scripts.validate_rag2_public_evidence_artifacts --input-dir test_artifacts/rag2_recall_quality/baseline --case-prefix rag2-alt- --expected-count 10`
+  reported `validated 10 public RAG2 evidence artifacts`.
+- Import-boundary command:
+  `rg -n "experiments\.|from experiments|import experiments" src tests scripts`
+  returned no matches with exit code `1`.
+- `git diff --check` exited `0`; output contained CRLF normalization warnings
+  only.
+- Post-archive scoped `git status --short -- development_plans src tests
+  scripts experiments` was recorded: the active plan path is deleted, the
+  completed archive plan path is added, `development_plans/README.md` is
+  updated, production/test/doc changes are present, and the unrelated untracked
+  `development_plans/active/short_term/rag3_router_interpreter_poc_experiment_plan.md`
+  was left untouched.
+- Stage 7 is signed off. This plan is complete and archived under
+  `development_plans/archive/completed/short_term/`.

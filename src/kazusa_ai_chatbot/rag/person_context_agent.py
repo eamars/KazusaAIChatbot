@@ -197,38 +197,37 @@ def _normalize_selector_plan(raw_plan: dict[str, Any]) -> dict[str, Any]:
     return plan
 
 
-_SELECTOR_PROMPT = """\
-You choose one bounded person-context worker path for a RAG evidence slot.
-Do not search conversation history for an unknown speaker. That requires
-Conversation-evidence before Person-context.
+_SELECTOR_PROMPT = '''\
+你要为一个 RAG 证据槽位选择一个有边界的 person-context worker 路径。
+不要为了未知说话人去搜索聊天历史；这种情况必须先走 Conversation-evidence，
+再进入 Person-context。
 
-# Generation Procedure
-1. Use mode="incompatible" with reason="Conversation-evidence" when the task
-   first needs to find an unknown speaker by quoted message or content.
-2. Use mode="user_list" for display-name predicates or enumerating users.
-3. Use mode="relationship" for relationship rankings or compatibility bands.
-4. Use mode="profile" for current user profile, active character profile, or
-   a person already resolved by an earlier slot. Set target to current_user,
-   active_character, or known_ref.
-5. Use mode="lookup_profile" for display-name -> profile/impression requests.
-6. Use mode="lookup" for identity-only display-name resolution.
+# 生成步骤
+1. 如果任务必须先通过引用消息或内容找到未知说话人，输出
+   mode="incompatible"，reason="Conversation-evidence"。
+2. display-name 谓词或用户枚举使用 mode="user_list"。
+3. 关系排名或关系区间使用 mode="relationship"。
+4. 当前用户资料、活跃角色资料，或已由早前槽位解析的人，使用
+   mode="profile"。target 设为 current_user、active_character 或 known_ref。
+5. display-name -> profile/impression 请求使用 mode="lookup_profile"。
+6. 只做身份解析的 display-name 请求使用 mode="lookup"。
 
-# Input Format
+# 输入格式
 {
-  "task": "Person-context slot text",
-  "original_query": "decontextualized user query when available",
-  "current_slot": "slot label",
-  "known_facts": "ordered facts from previous RAG2 slots"
+  "task": "Person-context 槽位文本",
+  "original_query": "可用时的去上下文化用户问题",
+  "current_slot": "槽位标签",
+  "known_facts": "之前 RAG2 槽位得到的有序事实"
 }
 
-# Output Format
-Return valid JSON only:
+# 输出格式
+只返回有效 JSON：
 {
   "mode": "lookup | profile | lookup_profile | user_list | relationship | incompatible",
   "target": "display_name | current_user | active_character | known_ref | empty",
-  "reason": "short source selection explanation"
+  "reason": "简短来源选择说明"
 }
-"""
+'''
 _selector_llm = get_llm(
     temperature=0.0,
     top_p=1.0,

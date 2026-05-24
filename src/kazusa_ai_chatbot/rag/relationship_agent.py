@@ -46,50 +46,49 @@ _POSITIVE_LABELS = {
     "Unwavering",
 }
 
-_EXTRACTOR_PROMPT = """\
-You are a parameter extractor for `relationship_agent`.
+_EXTRACTOR_PROMPT = '''\
+你是 `relationship_agent` 的参数抽取器。
 
-# Capability
-This agent ranks profiled users by the character's internal relationship score.
-It is for questions like:
-- who the character likes most / favorite person / closest person
-- whether there is a liked person
-- who the character dislikes or hates most
-- top-N relationship ranking
+# 能力边界
+本代理按活跃角色的内部关系分数对已建档用户排序。适用于：
+- 角色最喜欢谁、最偏爱谁、最亲近谁
+- 是否存在被喜欢的人
+- 角色最讨厌或最不喜欢谁
+- top-N 关系排名
 
-# Arguments
+# 参数含义
 - mode:
-  - "one": one strongest matching candidate
-  - "n": ranked list with the requested count
-  - "existence": whether any matching candidate exists
+  - "one": 一个最强匹配候选
+  - "n": 按请求数量返回排名列表
+  - "existence": 判断是否存在匹配候选
 - rank_order:
-  - "top": highest relationship score
-  - "bottom": lowest relationship score
+  - "top": 关系分数最高
+  - "bottom": 关系分数最低
 - limit:
-  - Preserve explicit requested count.
-  - Use 1 for mode="one".
-  - Use 3 for mode="existence" unless the task explicitly requests another count.
+  - 保留用户明确请求的数量。
+  - mode="one" 时使用 1。
+  - mode="existence" 默认使用 3，除非任务明确要求其他数量。
 
-# Generation Procedure
-1. Read `task` and decide whether it asks for one user, a ranked list, or existence.
-2. Choose `rank_order`: top for liked/closest/favorite, bottom for disliked/hated.
-3. Preserve explicit count in `limit`; otherwise use the mode defaults.
-4. Ignore tasks that require conversation evidence or persona interpretation beyond relationship ranking.
+# 生成步骤
+1. 读取 `task`，判断它要一个用户、排名列表还是存在性判断。
+2. 选择 `rank_order`：喜欢/亲近/偏爱用 top；讨厌/不喜欢用 bottom。
+3. 将明确数量写入 `limit`；否则使用 mode 默认值。
+4. 忽略需要聊天证据或超出关系排名的人格解释任务。
 
-# Input Format
+# 输入格式
 {
-  "task": "slot description from the outer RAG supervisor",
-  "context": "known facts and runtime hints"
+  "task": "外层 RAG supervisor 给出的槽位描述",
+  "context": "已知事实和运行时提示"
 }
 
-# Output Format
-Return valid JSON only:
+# 输出格式
+只返回有效 JSON：
 {
   "mode": "one | n | existence",
   "rank_order": "top | bottom",
   "limit": 1
 }
-"""
+'''
 
 _extractor_llm = get_llm(
     temperature=0.0,

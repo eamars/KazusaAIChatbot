@@ -21,49 +21,48 @@ from kazusa_ai_chatbot.utils import get_llm, parse_llm_json_output, text_or_empt
 
 logger = logging.getLogger(__name__)
 
-_EXTRACTOR_PROMPT = """\
-You are a parameter extractor for `list_users_by_display_name`.
+_EXTRACTOR_PROMPT = '''\
+你是 `list_users_by_display_name` 的参数抽取器。
 
-# Capability
-This agent enumerates users. It is for questions like:
-- list users whose display names end with a character
-- find users whose display names contain a literal fragment
-- list known users or observed conversation participants matching a name pattern
+# 能力边界
+本代理用于枚举用户。适用于：
+- 列出 display name 以某个字符结尾的用户
+- 查找 display name 包含某个字面片段的用户
+- 列出符合名字模式的已知用户或聊天参与者
 
-# Source selection
-- Use source="user_profiles" for known/profiled/registered users.
-- Use source="conversation_participants" for users observed speaking in chat history,
-  especially when the task mentions a channel, recent activity, or speakers.
-- Use source="both" only when the task clearly asks for all users and does not
-  distinguish between profiled users and observed chat participants.
+# 来源选择
+- source="user_profiles"：已知、已建档或注册用户。
+- source="conversation_participants"：聊天历史中观察到发言的用户，
+  尤其是任务提到频道、近期活动或说话人时。
+- source="both"：仅当任务明确询问全部用户，且不区分建档用户和已观察参与者时使用。
 
 # Display-name operators
-- "ends_with": display name ends with the value.
-- "starts_with": display name starts with the value.
-- "equals": display name exactly equals the value.
-- "contains": display name contains the value.
+- "ends_with": display name 以 value 结尾。
+- "starts_with": display name 以 value 开头。
+- "equals": display name 与 value 完全相等。
+- "contains": display name 包含 value。
 
-# Generation Procedure
-1. Read `task` and identify the requested user source: profiled users, conversation participants, or both.
-2. Extract the literal display-name fragment and choose the matching operator.
-3. Read `context` only for runtime hints such as platform or channel.
-4. Preserve explicit requested count in `limit`; otherwise keep the default.
+# 生成步骤
+1. 读取 `task`，识别请求的用户来源：建档用户、聊天参与者或两者。
+2. 抽取字面 display-name 片段，并选择匹配 operator。
+3. `context` 只用于读取 platform、channel 等运行时提示。
+4. 将明确请求的数量保留在 `limit`；否则保持默认值。
 
-# Input Format
+# 输入格式
 {
-  "task": "slot description from the outer RAG supervisor",
-  "context": "known facts and runtime hints"
+  "task": "外层 RAG supervisor 给出的槽位描述",
+  "context": "已知事实和运行时提示"
 }
 
-# Output Format
-Return valid JSON only:
+# 输出格式
+只返回有效 JSON：
 {
   "source": "user_profiles | conversation_participants | both",
   "display_name_operator": "equals | contains | starts_with | ends_with",
-  "display_name_value": "literal string",
+  "display_name_value": "字面字符串",
   "limit": 20
 }
-"""
+'''
 
 _extractor_llm = get_llm(
     temperature=0.0,

@@ -37,32 +37,38 @@ from kazusa_ai_chatbot.utils import get_llm, parse_llm_json_output, text_or_empt
 
 logger = logging.getLogger(__name__)
 
-_GENERATOR_PROMPT = Template("""\
-你是一个只负责 `get_conversation` 的结构化筛选参数生成器。
+_GENERATOR_PROMPT = Template('''\
+你只为 `get_conversation` 生成结构化过滤参数。
 
-# 你的唯一职责
-- 只为 `get_conversation` 生成参数。
-- 优先从 `context` 与 `known_facts` 里提取明确的 platform / channel / user / display_name / time range。
-- 如果 task 或 context.original_query 明确要求数量（例如“最近3条 / last 3 messages”），必须把这个数量写入 `limit`。
-- 如果上一轮 `feedback` 说结果太少，就优先扩大时间范围或提高 `limit`。
-- 如果上一轮 `feedback` 说用户错了，就改 user filter；如果说时间错了，就改时间范围。
-- 不要凭空猜不存在的 UUID；没有就留空。
+# 范围
+- 只生成 `get_conversation` 的参数。
+- 优先使用 `context` 和 `known_facts` 中明确的 platform、channel、user、
+  display_name 和时间范围。
+- 如果 task 或 context.original_query 明确要求数量，例如 "最近3条" 或
+  "last 3 messages"，把该数量写入 `limit`。
+- 如果上一轮 `feedback` 说结果太少，扩大时间范围或提高 `limit`。
+- 如果上一轮 `feedback` 说用户过滤错误，就修改用户过滤；如果说时间范围错误，
+  就修改时间范围。
+- 不要编造不存在的 UUID；不可用字段留空。
+- 生成的控制/状态说明使用中文。保留 display names、anchors、quotes、URLs、
+  filenames 和 source text 的原始语言。
 
 # 生成步骤
-1. 先读取 `task`，确认需要拉取哪段结构化对话记录。
-2. 从 `context` 和 `known_facts` 提取明确的 platform、channel、user、display_name、time range 和 limit。
-3. 若 `feedback` 指出结果太少、用户错或时间错，调整对应过滤条件。
+1. 读取 `task`，识别需要哪些结构化聊天记录。
+2. 从 `context` 和 `known_facts` 抽取明确的 platform、channel、user、
+   display_name、time range 和 limit。
+3. 如果 feedback 指出结果太少、用户错误或时间错误，调整对应过滤器。
 4. 不要猜 UUID；没有明确 UUID 时使用 display_name 或省略用户过滤。
 
 # 输入格式
 {
-  "task": "外层 RAG supervisor 生成的槽位描述",
-  "context": "已知事实与运行时提示",
-  "feedback": "上一轮评估反馈，或空字符串"
+  "task": "外层 RAG supervisor 给出的槽位描述",
+  "context": "已知事实和运行时提示",
+  "feedback": "上一轮 judge feedback，或空字符串"
 }
 
 # 输出格式
-请只返回合法 JSON：
+只返回有效 JSON：
 {
   "platform": "string or omitted",
   "platform_channel_id": "string or omitted",
@@ -72,7 +78,7 @@ _GENERATOR_PROMPT = Template("""\
   "from_timestamp": "local YYYY-MM-DD HH:MM or omitted",
   "to_timestamp": "local YYYY-MM-DD HH:MM or omitted"
 }
-""").substitute(default_limit=RAG_SEARCH_DEFAULT_TOP_K)
+''').substitute(default_limit=RAG_SEARCH_DEFAULT_TOP_K)
 _generator_llm = get_llm(
     temperature=0.0,
     top_p=1.0,
@@ -81,38 +87,39 @@ _generator_llm = get_llm(
     api_key=RAG_SUBAGENT_LLM_API_KEY,
 )
 
-_JUDGE_PROMPT = """\
-你是 `get_conversation` 的结果评估器。
+_JUDGE_PROMPT = '''\
+你判断 `get_conversation` 的结果是否解决当前槽位。
 
 # 任务
-- 判断当前结果是否已经足以解决槽位。
-- 如果未解决，反馈必须具体到下一轮该怎么调 filter。
+- 判断当前结果是否足够解决槽位。
+- 如果未解决，feedback 必须说明下一次应如何调整过滤器。
 
-# 审计步骤
-1. 先读取 `task`，确认需要的对话记录范围。
-2. 检查 `result` 是否包含足够数量、正确用户和正确时间范围的记录。
-3. 结果足以解决槽位时返回 `resolved: true`。
-4. 未解决时，指出下一轮应放宽时间、提高 limit、换用户过滤或调整方向。
+# 生成步骤
+1. 读取 `task`，识别需要的聊天记录范围。
+2. 检查 `result` 是否包含足够记录、正确用户和正确时间范围。
+3. 只有结果足够解决槽位时，才返回 `resolved: true`。
+4. 如果未解决，说明下一次应扩大时间、提高 limit、修改用户过滤或调整方向。
 
 # 输入格式
 {
-  "task": "外层 RAG supervisor 生成的槽位描述",
+  "task": "外层 RAG supervisor 给出的槽位描述",
   "result": "get_conversation 的工具结果"
 }
 
 # 常见反馈方向
-- 结果太少，请放宽时间范围或提高 limit
-- 过滤错了，请更换 global_user_id / display_name
-- 时间范围太窄或方向反了
-- 已经拿到相关记录，可以停止
+- 结果太少；扩大时间范围或提高 limit。
+- 过滤错误；修改 global_user_id 或 display_name。
+- 时间范围太窄或方向反了。
+- 已找到相关记录；停止。
+- 反馈说明使用中文；source text 保持原文。
 
 # 输出格式
-请只返回合法 JSON：
+只返回有效 JSON：
 {
   "resolved": true or false,
   "feedback": "string"
 }
-"""
+'''
 _judge_llm = get_llm(
     temperature=0.0,
     top_p=1.0,
@@ -244,7 +251,7 @@ async def _judge(task: str, result: object) -> tuple[bool, str]:
     response = await _judge_llm.ainvoke([system_prompt, human_message])
     verdict = parse_llm_json_output(response.content)
     if not isinstance(verdict, dict):
-        return_value = False, "评估输出无效，请调整时间范围或提高 limit。"
+        return_value = False, "judge 输出无效；调整时间范围或提高 limit。"
         return return_value
 
     resolved = bool(verdict.get("resolved", False))
