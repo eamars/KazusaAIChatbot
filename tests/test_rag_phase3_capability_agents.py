@@ -551,6 +551,243 @@ async def test_conversation_evidence_keeps_value_identification_unresolved() -> 
 
 
 @pytest.mark.asyncio
+async def test_conversation_evidence_relation_slot_requires_packet_relation() -> None:
+    """A relation-dependent slot should not resolve from the seed row alone."""
+    agent = ConversationEvidenceAgent()
+    search_worker = _FakeWorker(
+        {
+            "resolved": True,
+            "result": [
+                {
+                    "body_text": "后面这句提到了 Google Drive。",
+                    "display_name": "Nightfall",
+                    "platform": "qq",
+                    "platform_channel_id": "905393941",
+                    "platform_message_id": "seed",
+                    "timestamp": "2026-05-22T09:10:00+00:00",
+                    "methods": ["semantic"],
+                }
+            ],
+            "attempts": 1,
+            "cache": {"enabled": False, "hit": False, "reason": "test"},
+        }
+    )
+    agent.search_agent = search_worker
+
+    result = await agent.run(
+        (
+            "Conversation-evidence: retrieve Google Drive discussion "
+            "relation=previous_message speaker=any_speaker"
+        ),
+        _base_context(platform_channel_id="905393941"),
+    )
+
+    assert result["resolved"] is False
+    payload = result["result"]
+    assert payload["missing_context"] == [
+        "conversation_relation:previous_message"
+    ]
+    assert payload["projection_payload"]["packets"] == []
+
+
+@pytest.mark.asyncio
+async def test_conversation_evidence_relation_packet_reduces_seed_and_previous() -> None:
+    """Relation packets should expose seed plus required nearby context."""
+    agent = ConversationEvidenceAgent()
+    search_worker = _FakeWorker(
+        {
+            "resolved": True,
+            "result": [
+                {
+                    "body_text": "Google Drive 又不是第一次这样了。",
+                    "display_name": "Nightfall",
+                    "platform": "qq",
+                    "platform_channel_id": "905393941",
+                    "platform_message_id": "seed",
+                    "timestamp": "2026-05-22T09:10:00+00:00",
+                    "methods": ["semantic"],
+                },
+                {
+                    "body_text": "<image>Google Drive 权限禁止的截图。</image>",
+                    "display_name": "Nightfall",
+                    "platform": "qq",
+                    "platform_channel_id": "905393941",
+                    "platform_message_id": "previous",
+                    "timestamp": "2026-05-22T09:09:50+00:00",
+                    "methods": ["neighbor"],
+                    "relation_to_seed": "previous_message",
+                    "seed_platform_message_id": "seed",
+                    "seed_timestamp": "2026-05-22T09:10:00+00:00",
+                },
+            ],
+            "attempts": 1,
+            "cache": {"enabled": False, "hit": False, "reason": "test"},
+        }
+    )
+    agent.search_agent = search_worker
+
+    result = await agent.run(
+        (
+            "Conversation-evidence: retrieve Google Drive discussion "
+            "relation=previous_message speaker=any_speaker"
+        ),
+        _base_context(platform_channel_id="905393941"),
+    )
+
+    assert result["resolved"] is True
+    payload = result["result"]
+    assert payload["missing_context"] == []
+    assert payload["projection_payload"]["packets"][0]["relation_types"] == [
+        "previous_message"
+    ]
+    assert "命中消息" in payload["selected_summary"]
+    assert "上一条" in payload["selected_summary"]
+    assert "<image>Google Drive 权限禁止的截图。</image>" in payload["selected_summary"]
+
+
+@pytest.mark.asyncio
+async def test_conversation_evidence_relation_packet_keeps_direct_neighbor_seed() -> None:
+    """A direct hit should remain a packet seed even if also tagged as nearby."""
+    agent = ConversationEvidenceAgent()
+    search_worker = _FakeWorker(
+        {
+            "resolved": True,
+            "result": [
+                {
+                    "body_text": "Google Drive 又不是第一次这样了。",
+                    "display_name": "Nightfall",
+                    "platform": "qq",
+                    "platform_channel_id": "905393941",
+                    "platform_message_id": "seed",
+                    "timestamp": "2026-05-22T09:10:00+00:00",
+                    "methods": ["semantic", "neighbor"],
+                    "relation_to_seed": "next_message",
+                    "seed_platform_message_id": "previous",
+                },
+                {
+                    "body_text": "<image>Google Drive 权限禁止的截图。</image>",
+                    "display_name": "Nightfall",
+                    "platform": "qq",
+                    "platform_channel_id": "905393941",
+                    "platform_message_id": "previous",
+                    "timestamp": "2026-05-22T09:09:50+00:00",
+                    "methods": ["semantic", "neighbor"],
+                    "relation_to_seed": "previous_message",
+                    "seed_platform_message_id": "seed",
+                    "seed_timestamp": "2026-05-22T09:10:00+00:00",
+                },
+            ],
+            "attempts": 1,
+            "cache": {"enabled": False, "hit": False, "reason": "test"},
+        }
+    )
+    agent.search_agent = search_worker
+
+    result = await agent.run(
+        (
+            "Conversation-evidence: retrieve Google Drive discussion "
+            "relation=previous_message speaker=any_speaker"
+        ),
+        _base_context(platform_channel_id="905393941"),
+    )
+
+    assert result["resolved"] is True
+    payload = result["result"]
+    assert payload["missing_context"] == []
+    assert payload["projection_payload"]["packets"][0]["relation_types"] == [
+        "previous_message"
+    ]
+
+
+@pytest.mark.asyncio
+async def test_conversation_evidence_non_relation_packets_require_keyword_seed() -> None:
+    """Ordinary exact slots should not promote unrelated semantic packets."""
+    agent = ConversationEvidenceAgent()
+    search_worker = _FakeWorker(
+        {
+            "resolved": True,
+            "result": [
+                {
+                    "body_text": "Google Drive 又不是第一次这样了。",
+                    "display_name": "Nightfall",
+                    "platform": "qq",
+                    "platform_channel_id": "905393941",
+                    "platform_message_id": "seed",
+                    "timestamp": "2026-05-22T09:10:00+00:00",
+                    "methods": ["semantic", "keyword:Google Drive"],
+                },
+                {
+                    "body_text": "<image>Google Drive 账号封禁截图。</image>",
+                    "display_name": "Nightfall",
+                    "platform": "qq",
+                    "platform_channel_id": "905393941",
+                    "platform_message_id": "previous",
+                    "timestamp": "2026-05-22T09:09:50+00:00",
+                    "methods": ["neighbor"],
+                    "relation_to_seed": "previous_message",
+                    "seed_platform_message_id": "seed",
+                    "seed_timestamp": "2026-05-22T09:10:00+00:00",
+                },
+                {
+                    "body_text": "RAG 搜不到就不能作为事实基础。",
+                    "display_name": "Tester",
+                    "platform": "qq",
+                    "platform_channel_id": "905393941",
+                    "platform_message_id": "noise-seed",
+                    "timestamp": "2026-05-22T09:20:00+00:00",
+                    "methods": ["semantic"],
+                },
+                {
+                    "body_text": "后台可以看到么",
+                    "display_name": "Other",
+                    "platform": "qq",
+                    "platform_channel_id": "905393941",
+                    "platform_message_id": "noise-relation",
+                    "timestamp": "2026-05-22T09:19:50+00:00",
+                    "methods": ["neighbor"],
+                    "relation_to_seed": "previous_message",
+                    "seed_platform_message_id": "noise-seed",
+                    "seed_timestamp": "2026-05-22T09:20:00+00:00",
+                },
+            ],
+            "attempts": 1,
+            "cache": {"enabled": False, "hit": False, "reason": "test"},
+        }
+    )
+    agent.search_agent = search_worker
+
+    result = await agent.run(
+        (
+            "Conversation-evidence: retrieve messages containing exact phrase "
+            "'Google Drive 又不是第一次这样了' speaker=any_speaker"
+        ),
+        _base_context(platform_channel_id="905393941"),
+    )
+
+    assert result["resolved"] is True
+    selected_summary = result["result"]["selected_summary"]
+    assert "Google Drive 账号封禁截图" in selected_summary
+    assert "RAG 搜不到" not in selected_summary
+    assert "后台可以看到么" not in selected_summary
+    assert len(result["result"]["projection_payload"]["packets"]) == 1
+
+
+def test_conversation_evidence_media_relation_slot_uses_search_path() -> None:
+    """Media-adjacent conversation slots should not be routed to memory."""
+
+    plan = conversation_evidence_module._deterministic_plan(
+        (
+            "Conversation-evidence: retrieve message with attachment preceding "
+            "the Google Drive quote to identify content of social media screenshot"
+        )
+    )
+
+    assert plan is not None
+    assert plan["worker"] == "conversation_search_agent"
+    assert plan["reason"] == "relation or media-bearing conversation evidence"
+
+
+@pytest.mark.asyncio
 async def test_conversation_evidence_matches_cjk_target_spacing_variants() -> None:
     """CJK target coverage should tolerate common chat spelling variants."""
     agent = ConversationEvidenceAgent()
@@ -2168,10 +2405,10 @@ def test_memory_evidence_selector_prompt_renders_scoped_worker_option() -> None:
     """The selector prompt should expose the scoped user-memory worker."""
     prompt = memory_evidence_module._SELECTOR_PROMPT
 
-    assert "# Input Format" in prompt
-    assert "# Output Format" in prompt
+    assert "# 输入格式" in prompt
+    assert "# 输出格式" in prompt
     assert "user_memory_evidence_agent" in prompt
-    assert "current-user durable memory" in prompt
+    assert "当前用户 durable memory" in prompt
 
 
 @pytest.mark.asyncio

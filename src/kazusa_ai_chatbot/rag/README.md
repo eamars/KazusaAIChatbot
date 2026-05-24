@@ -348,6 +348,16 @@ as escaped `<image>...</image>` blocks in prompt-facing text; raw CQ syntax,
 raw URLs, and binary fields are stripped before the RAG tool output reaches an
 LLM.
 
+Conversation evidence can also produce bounded relation packets for adjacent
+message questions. The initializer may mark stable internal relation contracts
+such as `relation=previous_message`, `relation=next_message`, or
+`relation=reply_parent`. The search helper annotates neighboring rows with
+their relation to the seed message, and `conversation_evidence_agent` reduces
+the seed plus relation rows into packet summaries under
+`projection_payload.packets`. Public `conversation_evidence` prefers those
+packet summaries so cognition sees the answered relation, while raw row IDs
+and full row details remain trace/debug material.
+
 Relative-day conversation retrieval is grounded before tool execution when the
 runtime `time_context` is available. For example, a local "yesterday" slot uses
 the character-local previous date converted to UTC query bounds instead of

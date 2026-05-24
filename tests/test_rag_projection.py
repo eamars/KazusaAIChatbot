@@ -712,6 +712,71 @@ def test_project_known_facts_projects_formatted_conversation_evidence() -> None:
     assert "2026-05-01T12:34:56.789000+00:00" not in evidence
 
 
+def test_project_known_facts_prefers_conversation_packets_over_flat_rows() -> None:
+    result = project_known_facts(
+        [
+            {
+                "slot": "conversation",
+                "agent": "conversation_evidence_agent",
+                "resolved": True,
+                "summary": "Google Drive context was found.",
+                "raw_result": {
+                    "projection_payload": {
+                        "summaries": [
+                            "Nightfall: Google Drive 又不是第一次这样了。",
+                            "Nightfall: <image>Google Drive 权限禁止的截图。</image>",
+                        ],
+                        "rows": [
+                            {
+                                "summary": "Nightfall: Google Drive 又不是第一次这样了。",
+                                "timestamp": "2026-05-22T09:10:00+00:00",
+                                "display_name": "Nightfall",
+                                "platform_message_id": "seed",
+                            },
+                            {
+                                "summary": "Nightfall: <image>Google Drive 权限禁止的截图。</image>",
+                                "timestamp": "2026-05-22T09:09:50+00:00",
+                                "display_name": "Nightfall",
+                                "platform_message_id": "previous",
+                            },
+                        ],
+                        "packets": [
+                            {
+                                "summary": (
+                                    "命中消息：Nightfall: Google Drive 又不是第一次这样了。"
+                                    "；上一条：Nightfall: "
+                                    "<image>Google Drive 权限禁止的截图。</image>"
+                                ),
+                                "seed": {
+                                    "platform_message_id": "seed",
+                                },
+                                "relations": [
+                                    {
+                                        "relation_type": "previous_message",
+                                        "row": {
+                                            "platform_message_id": "previous",
+                                        },
+                                    }
+                                ],
+                            }
+                        ],
+                    }
+                },
+            }
+        ],
+        current_user_id="user-1",
+        character_user_id="character-1",
+    )
+
+    evidence = result["conversation_evidence"][0]
+    assert "Google Drive context was found." in evidence
+    assert "命中消息" in evidence
+    assert "上一条" in evidence
+    assert "Google Drive 权限禁止的截图" in evidence
+    assert "seed" not in evidence
+    assert "previous" not in evidence
+
+
 def test_project_known_facts_redacts_source_ids_from_public_conversation_summary() -> None:
     result = project_known_facts(
         [

@@ -120,6 +120,17 @@ _EXACT_ANCHOR_CHARS = (
     "\u300e",
     "\u300f",
 )
+_RELATION_REQUIREMENT_RE = re.compile(
+    r"\brelation\s*=\s*"
+    r"(previous_message|next_message|reply_parent)\b",
+    re.IGNORECASE,
+)
+_RELATION_LABELS = {
+    "previous_message": "上一条",
+    "next_message": "下一条",
+    "reply_parent": "回复对象",
+}
+_MAX_PACKET_RELATIONS = 3
 
 
 class _ConversationProjection(TypedDict):
@@ -127,6 +138,7 @@ class _ConversationProjection(TypedDict):
 
     summaries: list[str]
     rows: list[dict[str, Any]]
+    packets: list[dict[str, Any]]
     resolved_refs: list[dict[str, Any]]
 
 
@@ -297,6 +309,80 @@ def _coverage_confirms_retrieval_task(
     return return_value
 
 
+def _relation_requirement(task: str) -> str:
+    """Read the stable relation contract token from a conversation slot."""
+
+    task_body = _strip_prefix(task)
+    match = _RELATION_REQUIREMENT_RE.search(task_body)
+    if match is None:
+        return_value = ""
+        return return_value
+
+    relation = match.group(1).lower()
+    return relation
+
+
+def _projection_has_relation(
+    projection: _ConversationProjection,
+    relation: str,
+) -> bool:
+    """Return whether a projected packet includes the required relation."""
+
+    if not relation:
+        return_value = True
+        return return_value
+
+    for packet in projection["packets"]:
+        relation_types = packet.get("relation_types")
+        if not isinstance(relation_types, list):
+            continue
+        if relation in relation_types:
+            return_value = True
+            return return_value
+
+    return_value = False
+    return return_value
+
+
+def _projection_evidence_items(
+    projection: _ConversationProjection,
+    *,
+    packets: list[dict[str, Any]],
+) -> list[str]:
+    """Return packet summaries when available, otherwise row summaries."""
+
+    packet_summaries = [
+        summary
+        for packet in packets
+        if (summary := text_or_empty(packet.get("summary")))
+    ]
+    if packet_summaries:
+        return_value = packet_summaries
+        return return_value
+
+    return_value = projection["summaries"]
+    return return_value
+
+
+def _projection_evidence_packets(
+    projection: _ConversationProjection,
+    *,
+    relation_required: bool,
+) -> list[dict[str, Any]]:
+    """Return packets selected for cognition-facing evidence."""
+
+    if relation_required:
+        packets = list(projection["packets"])
+        return packets
+
+    packets = [
+        packet
+        for packet in projection["packets"]
+        if _packet_has_keyword_support(packet)
+    ]
+    return packets
+
+
 def _confirmed_retrieval_coverage(
     coverage: EvidenceCoverage,
 ) -> EvidenceCoverage:
@@ -428,6 +514,21 @@ def _deterministic_plan(task: str) -> dict[str, Any] | None:
         plan = {
             "worker": "conversation_search_agent",
             "reason": "hybrid literal phrase, URL, filename, or exact anchor",
+            "requires_person_ref": requires_person_ref,
+        }
+        return plan
+
+    if (
+        "relation=" in normalized
+        or "attachment" in normalized
+        or "screenshot" in normalized
+        or "image" in normalized
+        or "preceding" in normalized
+        or "previous" in normalized
+    ):
+        plan = {
+            "worker": "conversation_search_agent",
+            "reason": "relation or media-bearing conversation evidence",
             "requires_person_ref": requires_person_ref,
         }
         return plan
@@ -787,6 +888,7 @@ def _empty_projection() -> _ConversationProjection:
     projection: _ConversationProjection = {
         "summaries": [],
         "rows": [],
+        "packets": [],
         "resolved_refs": [],
     }
     return projection
@@ -998,10 +1100,12 @@ def _message_projection(rows: list[dict[str, Any]]) -> _ConversationProjection:
             continue
         summaries.append(summary)
         projected_rows.append(_projection_row(row, summary))
+    packets = _conversation_packets(projected_rows)
     resolved_refs = _refs_from_message_rows(rows)
     projection: _ConversationProjection = {
         "summaries": summaries,
         "rows": projected_rows,
+        "packets": packets,
         "resolved_refs": resolved_refs,
     }
     return projection
@@ -1042,6 +1146,9 @@ def _projection_row(row: dict[str, Any], summary: str) -> dict[str, Any]:
         score: float | None = float(score_value)
     else:
         score = None
+    reply_context = row.get("reply_context")
+    if not isinstance(reply_context, dict):
+        reply_context = {}
 
     projected_row = {
         "summary": summary,
@@ -1051,8 +1158,210 @@ def _projection_row(row: dict[str, Any], summary: str) -> dict[str, Any]:
         "conversation_row_id": conversation_row_id,
         "methods": methods,
         "score": score,
+        "relation_to_seed": text_or_empty(row.get("relation_to_seed")),
+        "seed_platform_message_id": text_or_empty(
+            row.get("seed_platform_message_id")
+        ),
+        "seed_conversation_row_id": text_or_empty(
+            row.get("seed_conversation_row_id")
+        ),
+        "seed_timestamp": text_or_empty(row.get("seed_timestamp")),
+        "reply_parent_summary": text_or_empty(
+            reply_context.get("reply_excerpt")
+        ),
+        "reply_parent_display_name": text_or_empty(
+            reply_context.get("reply_to_display_name")
+        ),
     }
     return projected_row
+
+
+def _conversation_packets(
+    rows: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Build compact seed-plus-relation packets from projected rows."""
+
+    seed_rows = [
+        row
+        for row in rows
+        if not _row_relation_type(row) or _row_has_direct_retrieval_method(row)
+    ]
+    if not seed_rows:
+        return_value: list[dict[str, Any]] = []
+        return return_value
+
+    packets: list[dict[str, Any]] = []
+    for seed in seed_rows[:RAG_SEARCH_SELECTED_SUMMARY_LIMIT]:
+        relations = _relations_for_seed(seed, rows)
+        if not relations:
+            continue
+        relation_types = [
+            relation["relation_type"]
+            for relation in relations
+            if relation["relation_type"]
+        ]
+        packet = {
+            "summary": _packet_summary(seed, relations),
+            "seed": seed,
+            "relations": relations,
+            "relation_types": relation_types,
+        }
+        packets.append(packet)
+
+    return packets
+
+
+def _relations_for_seed(
+    seed: dict[str, Any],
+    rows: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Return bounded relation rows attached to one seed message."""
+
+    relations: list[dict[str, Any]] = []
+    reply_parent = _reply_parent_relation(seed)
+    seen_types: set[str] = set()
+    if reply_parent is not None:
+        relations.append(reply_parent)
+        seen_types.add("reply_parent")
+
+    for row in rows:
+        relation_type = _row_relation_type(row)
+        if not relation_type:
+            continue
+        if not _row_attaches_to_seed(row, seed):
+            continue
+        if relation_type in seen_types:
+            continue
+        relations.append(
+            {
+                "relation_type": relation_type,
+                "summary": row["summary"],
+                "row": row,
+            }
+        )
+        seen_types.add(relation_type)
+        if len(relations) >= _MAX_PACKET_RELATIONS:
+            break
+
+    return relations
+
+
+def _reply_parent_relation(
+    seed: dict[str, Any],
+) -> dict[str, Any] | None:
+    """Return reply-parent relation from prompt-safe reply metadata."""
+
+    summary = text_or_empty(seed.get("reply_parent_summary"))
+    if not summary:
+        return None
+
+    display_name = text_or_empty(seed.get("reply_parent_display_name"))
+    if display_name:
+        relation_summary = f"{display_name}: {summary}"
+    else:
+        relation_summary = summary
+    relation = {
+        "relation_type": "reply_parent",
+        "summary": relation_summary,
+        "row": {},
+    }
+    return relation
+
+
+def _row_relation_type(row: dict[str, Any]) -> str:
+    """Return a stable relation type from a projected row."""
+
+    relation_type = text_or_empty(row.get("relation_to_seed")).lower()
+    if relation_type in _RELATION_LABELS:
+        return relation_type
+    return_value = ""
+    return return_value
+
+
+def _row_has_direct_retrieval_method(row: dict[str, Any]) -> bool:
+    """Return whether a projected row was retrieved directly, not only nearby."""
+
+    methods = row.get("methods")
+    if not isinstance(methods, list):
+        return_value = False
+        return return_value
+
+    for method in methods:
+        method_text = text_or_empty(method)
+        if method_text == "semantic" or method_text.startswith("keyword:"):
+            return_value = True
+            return return_value
+
+    return_value = False
+    return return_value
+
+
+def _packet_has_keyword_support(packet: dict[str, Any]) -> bool:
+    """Return whether a packet seed came from exact keyword retrieval."""
+
+    seed = packet.get("seed")
+    if not isinstance(seed, dict):
+        return_value = False
+        return return_value
+
+    methods = seed.get("methods")
+    if not isinstance(methods, list):
+        return_value = False
+        return return_value
+
+    for method in methods:
+        if text_or_empty(method).startswith("keyword:"):
+            return_value = True
+            return return_value
+
+    return_value = False
+    return return_value
+
+
+def _row_attaches_to_seed(
+    row: dict[str, Any],
+    seed: dict[str, Any],
+) -> bool:
+    """Return whether a relation row is attached to the seed row."""
+
+    seed_platform_message_id = text_or_empty(seed.get("platform_message_id"))
+    row_seed_platform_message_id = text_or_empty(
+        row.get("seed_platform_message_id")
+    )
+    if seed_platform_message_id and row_seed_platform_message_id:
+        return_value = seed_platform_message_id == row_seed_platform_message_id
+        return return_value
+
+    seed_conversation_row_id = text_or_empty(seed.get("conversation_row_id"))
+    row_seed_conversation_row_id = text_or_empty(
+        row.get("seed_conversation_row_id")
+    )
+    if seed_conversation_row_id and row_seed_conversation_row_id:
+        return_value = seed_conversation_row_id == row_seed_conversation_row_id
+        return return_value
+
+    seed_timestamp = text_or_empty(seed.get("timestamp"))
+    row_seed_timestamp = text_or_empty(row.get("seed_timestamp"))
+    return_value = bool(seed_timestamp and seed_timestamp == row_seed_timestamp)
+    return return_value
+
+
+def _packet_summary(
+    seed: dict[str, Any],
+    relations: list[dict[str, Any]],
+) -> str:
+    """Reduce a conversation packet into one cognition-facing fact."""
+
+    parts = [f"命中消息：{seed['summary']}"]
+    for relation in relations[:_MAX_PACKET_RELATIONS]:
+        relation_type = text_or_empty(relation.get("relation_type"))
+        label = _RELATION_LABELS.get(relation_type, "相关消息")
+        summary = text_or_empty(relation.get("summary"))
+        if not summary:
+            continue
+        parts.append(f"{label}：{summary}")
+    summary = "；".join(parts)
+    return summary
 
 
 def _conversation_projection_source(row: dict[str, Any]) -> str:
@@ -1161,6 +1470,7 @@ def _aggregate_projection(value: object) -> _ConversationProjection:
     projection: _ConversationProjection = {
         "summaries": summaries,
         "rows": [],
+        "packets": [],
         "resolved_refs": _refs_from_aggregate_rows(rows),
     }
     return projection
@@ -1330,7 +1640,15 @@ class ConversationEvidenceAgent(BaseRAGHelperAgent):
             exclusion_counts["conversation_row_id"]
             + exclusion_counts["platform_message_id"]
         )
-        summaries = projection["summaries"]
+        relation_requirement = _relation_requirement(task)
+        evidence_packets = _projection_evidence_packets(
+            projection,
+            relation_required=bool(relation_requirement),
+        )
+        summaries = _projection_evidence_items(
+            projection,
+            packets=evidence_packets,
+        )
         projection_rows = projection["rows"]
         worker_resolved = bool(worker_result.get("resolved"))
         requires_value_evidence = _coverage_requires_value_evidence(
@@ -1363,12 +1681,22 @@ class ConversationEvidenceAgent(BaseRAGHelperAgent):
             legacy_evidence[:RAG_SEARCH_SELECTED_SUMMARY_LIMIT],
         )
         resolved_refs = projection["resolved_refs"]
+        relation_available = _projection_has_relation(
+            projection,
+            relation_requirement,
+        )
         resolved = (
             bool(summaries)
             and coverage_allows_resolution(coverage)
             and (worker_resolved or coverage_confirms_retrieval)
+            and relation_available
         )
-        missing_context = [] if resolved else ["conversation_evidence"]
+        if resolved:
+            missing_context = []
+        elif relation_requirement and not relation_available:
+            missing_context = [f"conversation_relation:{relation_requirement}"]
+        else:
+            missing_context = ["conversation_evidence"]
         observation_candidates = []
         source_hints: list[dict[str, Any]] = []
         if summaries and not resolved:
@@ -1394,8 +1722,9 @@ class ConversationEvidenceAgent(BaseRAGHelperAgent):
             source_policy=text_or_empty(plan["reason"]),
             resolved_refs=resolved_refs,
             projection_payload={
-                "summaries": summaries,
+                "summaries": projection["summaries"],
                 "rows": projection_rows,
+                "packets": evidence_packets,
             },
             worker_payloads=worker_payloads,
             evidence=legacy_evidence,
@@ -1462,7 +1791,7 @@ class ConversationEvidenceAgent(BaseRAGHelperAgent):
             supporting_workers=[],
             source_policy=source_policy,
             resolved_refs=[],
-            projection_payload={"summaries": []},
+            projection_payload={"summaries": [], "packets": []},
             worker_payloads=worker_payloads,
             evidence=[],
             missing_context=missing_context,

@@ -288,6 +288,26 @@ def _conversation_evidence_items(
     return evidence_items
 
 
+def _conversation_packet_items(
+    packets: list[Any],
+    *,
+    evidence_char_limit: int,
+) -> list[str]:
+    """Project conversation relation packets into compact evidence lines."""
+
+    evidence_items: list[str] = []
+    for packet in packets[:_MAX_CONVERSATION_EVIDENCE_ITEMS]:
+        if not isinstance(packet, dict):
+            continue
+        summary = sanitize_public_rag_evidence_text(
+            text_or_empty(packet.get("summary"))
+        )
+        if not summary:
+            continue
+        evidence_items.append(_clip_text(summary, limit=evidence_char_limit))
+    return evidence_items
+
+
 def _recall_candidate_items(
     candidates: list[Any],
     *,
@@ -617,10 +637,22 @@ def project_known_facts(
                 if isinstance(row, dict)
             ]
             _attach_source_refs(dispatched_entry, rows)
+            packet_items = _conversation_packet_items(
+                _as_list(payload.get("packets")),
+                evidence_char_limit=evidence_char_limit,
+            )
             row_items = _conversation_evidence_items(
                 rows,
                 evidence_char_limit=evidence_char_limit,
             )
+            if packet_items:
+                conversation_evidence.append(
+                    format_evidence_block(
+                        conclusion=summary,
+                        evidence_items=packet_items,
+                    )
+                )
+                continue
             if row_items:
                 conversation_evidence.append(
                     format_evidence_block(

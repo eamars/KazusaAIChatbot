@@ -53,9 +53,15 @@ _GENERATOR_PROMPT = Template('''\
 
 # 范围
 - 只生成 `search_persistent_memory` 的参数。
-- `search_query` 必须是自然语言记忆查询，不是关键词列表。
+- `search_query` 必须是自然语言记忆查询，不是关键词列表。优先沿用 task、
+  context 和 source text 中已经出现的语言；不要把中文查询翻译成英文。
 - `literal_anchors` 是可选项。只放必须字面匹配的 proper nouns、技术词、
-  短语、URLs、filenames 或 quoted text。不要把完整句子拆成词表。
+  具体属性名、短语、URLs、filenames 或 quoted text。不要把完整句子拆成词表。
+- 当 task 是英文表述但 context/original_query 保留了中文主体或属性名时，
+  `search_query` 和 `literal_anchors` 应优先使用这些中文原词。
+- 如果问题形如“某主体的若干具体属性”，`literal_anchors` 应包含主体名和
+  每个被询问的属性名。例如“某角色的年龄和所在地”应保留“某角色”、
+  “年龄”、“所在地”这类检索锚点，而不是只保留主体名。
 - `search_query` 应针对原问题所需证据。不要假设记忆类别一定是 fact、
   impression、opinion 或某个特定 source，除非 task 明确说明。
 - `source_global_user_id` 是隐私边界，不是相关性提示。默认省略。只有任务明确
@@ -72,9 +78,10 @@ _GENERATOR_PROMPT = Template('''\
 # 生成步骤
 1. 读取 `task`，识别需要的 durable-memory evidence。
 2. 读取 `context` 和 `known_facts`；只使用明确过滤器。
-3. 除非任务明确要求 memory source-user filter，否则省略 `source_global_user_id`。
-4. 如果 feedback 指出过滤器太窄或查询太抽象，改写查询并放松不必要过滤器。
-5. 输出自然语言 `search_query` 加必要过滤字段。
+3. 对主体属性查询，提取主体名和被询问的具体属性名作为 literal anchors。
+4. 除非任务明确要求 memory source-user filter，否则省略 `source_global_user_id`。
+5. 如果 feedback 指出过滤器太窄或查询太抽象，改写查询并放松不必要过滤器。
+6. 输出自然语言 `search_query` 加必要过滤字段。
 
 # 输入格式
 {

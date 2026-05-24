@@ -137,6 +137,12 @@ impression evidence 时再加 `Person-context:`。
 - 近期或模糊聊天话题；
 - current_user、active_character、any_speaker，或早前槽位解析出的人发过的消息；
 - counts、totals、rankings 或 grouped message statistics。
+如果问题需要消息之间的关系，必须在槽位中追加一个 relation 字段：
+relation=previous_message、relation=next_message 或 relation=reply_parent。
+只有用户问到上一条、下一条、回复对象、前一张/后一张图片这类关系时才追加。
+如果用户把某个精确短语、消息或截图和“前面/前置/上一张/后一张/preceding/previous”
+绑定在同一个问题里，优先生成一个带 relation 的 Conversation-evidence 槽位，
+不要拆成一个定位消息槽位和一个无 relation 的附件槽位。
 作者范围必须附加且只附加一个 speaker 字段：
 speaker=current_user、speaker=active_character、speaker=any_speaker，
 或 speaker=person resolved in slot N。slot-N 形式只能引用早前槽位产生的人。
@@ -194,7 +200,7 @@ Conversation-evidence 的 speaker=current_user。
 - "Live-context: answer active character current local <time / date / weekday>"
 - "Live-context: answer current user local time if configured"
 - "Live-context: answer current <weather / temperature / opening status / price / exchange rate / schedule / availability / latest fact> for <explicit location/target X | the active character's location | the current user's location if recently stated | unknown location/target>"
-- "Conversation-evidence: retrieve <exact phrase / URL / recent messages / topic / count/ranking> [speaker=current_user | speaker=active_character | speaker=any_speaker | speaker=person resolved in slot N] [to identify the speaker] [time/count limit]"
+- "Conversation-evidence: retrieve <exact phrase / URL / recent messages / topic / count/ranking> [speaker=current_user | speaker=active_character | speaker=any_speaker | speaker=person resolved in slot N] [relation=previous_message | relation=next_message | relation=reply_parent] [to identify the speaker] [time/count limit]"
 - "Memory-evidence: retrieve current-user private continuity and prior shared interactions with the active character"
 - "Memory-evidence: retrieve durable evidence about <official fact / address / common-sense topic / world fact / user memory topic>"
 - "Person-context: retrieve <active character profile / current user profile / profile/impression for display name X / profile for speaker found in slot N / relationship ranking / user list predicate>"
@@ -247,6 +253,14 @@ Query: "<named user>发的那个小红书链接，里面写的是什么"
 ["Person-context: resolve display name <named user>",
  "Conversation-evidence: retrieve messages containing a 小红书 URL speaker=person resolved in slot 1",
  "Web-evidence: retrieve public web content for the URL found in slot 2"]
+
+Query: "他这句话上一张图是什么"
+→ 需要聊天消息与上一条图片之间的关系。
+["Conversation-evidence: retrieve related message and previous image context speaker=any_speaker relation=previous_message"]
+
+Query: "谁说 Google Drive 又不是第一次这样了？前面那张图大概是什么事情？"
+→ 精确发言和前置图片属于同一个聊天关系证据。
+["Conversation-evidence: retrieve exact phrase 'Google Drive 又不是第一次这样了' and previous image context speaker=any_speaker relation=previous_message"]
 
 Query: "你家的官方地址是什么？"
 → 稳定官方 character/world fact，使用 durable memory。

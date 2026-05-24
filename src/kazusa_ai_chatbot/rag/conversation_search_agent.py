@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
-from datetime import timedelta
+from datetime import datetime, timedelta
 from typing import Any
 
 from langchain_core.messages import HumanMessage, SystemMessage
@@ -38,6 +38,7 @@ from kazusa_ai_chatbot.rag.cache2_policy import (
 from kazusa_ai_chatbot.rag.helper_agent import BaseRAGHelperAgent
 from kazusa_ai_chatbot.rag.hybrid_retrieval import (
     HybridCandidate,
+    hybrid_row_identity,
     merge_hybrid_candidates,
     select_neighbor_seed_candidates,
 )
@@ -49,6 +50,7 @@ from kazusa_ai_chatbot.rag.search_runtime import (
     apply_conversation_runtime_constraints,
 )
 from kazusa_ai_chatbot.time_boundary import (
+    local_datetime_to_storage_utc_iso,
     local_llm_datetime_to_storage_utc_iso,
     parse_storage_utc_datetime,
 )
@@ -456,15 +458,22 @@ async def _conversation_neighbor_rows(
     )
     rows_by_identity: dict[str, dict[str, Any]] = {}
     for seed in seeds:
-        from_timestamp, to_timestamp = _neighbor_time_bounds(
-            seed.row,
-            window_minutes=window_minutes,
+        from_timestamp, seed_storage_timestamp, to_timestamp = (
+            _neighbor_time_bounds(
+                seed.row,
+                window_minutes=window_minutes,
+            )
         )
-        if not from_timestamp or not to_timestamp:
+        if (
+            not from_timestamp
+            or not seed_storage_timestamp
+            or not to_timestamp
+        ):
             continue
-        seed_timestamp = text_or_empty(seed.row.get("timestamp"))
-        if not seed_timestamp:
+        seed_display_timestamp = text_or_empty(seed.row.get("timestamp"))
+        if not seed_display_timestamp:
             continue
+        seed_identity = hybrid_row_identity(seed.row, source="conversation")
         side_limit = max(1, message_limit)
         platform = text_or_empty(seed.row.get("platform"))
         if not platform:
@@ -477,29 +486,58 @@ async def _conversation_neighbor_rows(
             platform_channel_id=platform_channel_id or None,
             limit=side_limit,
             from_timestamp=from_timestamp,
-            to_timestamp=seed_timestamp,
+            to_timestamp=seed_storage_timestamp,
             sort_direction=-1,
         )
         after_docs = await get_conversation_history(
             platform=platform or None,
             platform_channel_id=platform_channel_id or None,
             limit=side_limit,
-            from_timestamp=seed_timestamp,
+            from_timestamp=seed_storage_timestamp,
             to_timestamp=to_timestamp,
             sort_direction=1,
         )
-        for doc in before_docs + after_docs:
-            if not isinstance(doc, dict):
-                continue
-            candidate = _conversation_result_row(doc)
-            identity = text_or_empty(candidate.get("platform_message_id"))
-            if not identity:
-                identity = text_or_empty(candidate.get("conversation_row_id"))
-            if not identity:
-                identity = text_or_empty(candidate.get("_id"))
-            if not identity:
-                identity = f"{candidate.get('timestamp', '')}:{len(rows_by_identity)}"
-            rows_by_identity[identity] = candidate
+        for relation_type, docs in (
+            ("previous_message", before_docs),
+            ("next_message", after_docs),
+        ):
+            for doc in docs:
+                if not isinstance(doc, dict):
+                    continue
+                candidate = _conversation_result_row(doc)
+                candidate_identity = hybrid_row_identity(
+                    candidate,
+                    source="conversation",
+                )
+                if candidate_identity == seed_identity:
+                    continue
+                candidate["relation_to_seed"] = relation_type
+                seed_platform_message_id = text_or_empty(
+                    seed.row.get("platform_message_id")
+                )
+                seed_conversation_row_id = text_or_empty(
+                    seed.row.get("conversation_row_id")
+                )
+                if seed_platform_message_id:
+                    candidate["seed_platform_message_id"] = (
+                        seed_platform_message_id
+                    )
+                if seed_conversation_row_id:
+                    candidate["seed_conversation_row_id"] = (
+                        seed_conversation_row_id
+                    )
+                candidate["seed_timestamp"] = seed_display_timestamp
+                identity = text_or_empty(candidate.get("platform_message_id"))
+                if not identity:
+                    identity = text_or_empty(candidate.get("conversation_row_id"))
+                if not identity:
+                    identity = text_or_empty(candidate.get("_id"))
+                if not identity:
+                    identity = (
+                        f"{candidate.get('timestamp', '')}:"
+                        f"{len(rows_by_identity)}"
+                    )
+                rows_by_identity[identity] = candidate
 
     rows = sorted(
         rows_by_identity.values(),
@@ -512,25 +550,41 @@ def _neighbor_time_bounds(
     row: dict[str, Any],
     *,
     window_minutes: int,
-) -> tuple[str, str]:
-    """Return UTC ISO bounds around one candidate timestamp."""
+) -> tuple[str, str, str]:
+    """Return UTC ISO bounds and the normalized center timestamp."""
 
     timestamp = text_or_empty(row.get("timestamp"))
     if not timestamp:
-        return_value = "", ""
+        return_value = "", "", ""
         return return_value
+
+    center = _neighbor_center_datetime(timestamp)
+    if center is None:
+        return_value = "", "", ""
+        return return_value
+
+    window = timedelta(minutes=window_minutes)
+    from_timestamp = (center - window).strftime("%Y-%m-%dT%H:%M:%S+00:00")
+    seed_timestamp = center.strftime("%Y-%m-%dT%H:%M:%S+00:00")
+    to_timestamp = (center + window).strftime("%Y-%m-%dT%H:%M:%S+00:00")
+    return_value = from_timestamp, seed_timestamp, to_timestamp
+    return return_value
+
+
+def _neighbor_center_datetime(timestamp: str) -> datetime | None:
+    """Parse a seed timestamp for bounded neighboring-row retrieval."""
 
     try:
         center = parse_storage_utc_datetime(timestamp)
     except ValueError:
-        return_value = "", ""
-        return return_value
-    window = timedelta(minutes=window_minutes)
-    from_timestamp = (center - window).strftime("%Y-%m-%dT%H:%M:%S+00:00")
-    to_timestamp = (center + window).strftime("%Y-%m-%dT%H:%M:%S+00:00")
-    return_value = from_timestamp, to_timestamp
-    return return_value
+        try:
+            normalized = local_datetime_to_storage_utc_iso(timestamp)
+        except ValueError:
+            return_value = None
+            return return_value
+        center = parse_storage_utc_datetime(normalized)
 
+    return center
 
 def _conversation_result_row(row: dict[str, Any]) -> dict[str, Any]:
     """Project one conversation row into the search-agent result contract."""
@@ -538,7 +592,11 @@ def _conversation_result_row(row: dict[str, Any]) -> dict[str, Any]:
     if "body_text" not in row:
         return _strip_raw_conversation_storage_fields(row)
 
-    payload = conversation_message_payload(row)
+    timestamp = text_or_empty(row.get("timestamp"))
+    if timestamp and not _is_storage_utc_timestamp(timestamp):
+        payload = _strip_raw_conversation_storage_fields(row)
+    else:
+        payload = conversation_message_payload(row)
     for key in (
         "error",
         "method",
@@ -551,6 +609,19 @@ def _conversation_result_row(row: dict[str, Any]) -> dict[str, Any]:
             payload[key] = row[key]
 
     return payload
+
+
+def _is_storage_utc_timestamp(timestamp: str) -> bool:
+    """Return whether timestamp text is a storage UTC value."""
+
+    try:
+        parse_storage_utc_datetime(timestamp)
+    except ValueError:
+        return_value = False
+        return return_value
+
+    return_value = True
+    return return_value
 
 
 def _strip_raw_conversation_storage_fields(row: dict[str, Any]) -> dict[str, Any]:

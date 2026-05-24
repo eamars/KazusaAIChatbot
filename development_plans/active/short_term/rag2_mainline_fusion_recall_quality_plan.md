@@ -19,7 +19,10 @@
   experiment cases, adding deterministic user-keyword matching, degrading
   retrieval through English translation, leaking raw ids or raw UTC timestamps,
   overvaluing source provenance instead of cognition usability, and changing
-  cognition/dialog ownership.
+  cognition/dialog ownership. The fresh holdout adds one structural risk:
+  treating flat retrieved conversation rows as authoritative evidence even
+  when the user asks for a relation such as previous image, reply parent,
+  follow-up line, or exact speaker attribution.
 - Acceptance criteria: the fused implementation preserves mainline output
   cleanliness, preserves the current branch's private user-memory recall win,
   promotes direct candidate evidence when it answers the requested slot,
@@ -75,6 +78,60 @@ cognition-facing handoff. The quality question starts from the consumer:
 whether cognition receives the facts, uncertainty, and concise context needed
 to reason and generate. Source detail is supporting evidence only.
 
+Fresh 20-case holdout review:
+
+```text
+experiments/rag2_branch_quality/reports/holdout20_current_vs_mainline_review_20260524.md
+```
+
+Raw artifacts:
+
+```text
+test_artifacts/rag2_branch_quality/holdout20_cases_20260524.jsonl
+test_artifacts/rag2_branch_quality/holdout20_current_20260524/
+test_artifacts/rag2_branch_quality/holdout20_mainline_20260524/
+```
+
+Holdout learning from the cognition-consumer view:
+
+| Area | Learning | Design implication |
+|---|---|---|
+| Scoped user memory | Current branch materially improves several private user-memory cases where mainline returns no confirmed fact. | Preserve the scoped user-memory path and do not roll it back while fixing conversation evidence. |
+| Conversation/media context | Current branch can find a seed row but miss the required adjacent image, reply parent, or follow-up line. | Conversation evidence needs a relational packet contract before final synthesis, not just more retrieved rows. |
+| Group who-said-what | Current branch can identify a speaker but lose reply direction or exact line coverage. | Resolution for relational questions must require the requested relation, not only lexical or semantic coverage. |
+| Too much information | Some current outputs contain the right fact plus unrelated side facts. | RAG must reduce evidence before cognition; downstream cognition must not be asked to filter broad evidence dumps. |
+| Baseline behavior | Mainline often preserves more relational neighborhood but can expose large noisy evidence lists. | Borrow the relational strength, not the noisy flat-row output style. |
+
+Structural conclusion: the next phase is not "retrieve more conversation
+history." The core issue is the shape of accepted conversation evidence.
+Flat retrieved rows, generic neighbor rows, and free-form final answers are too
+weak as the primary cognition-facing contract for relational chat history.
+RAG should first form a bounded evidence packet around a seed row, attach only
+the required relations, then reduce that packet to one to three concise facts
+before projection.
+
+Bad or weak designs to remove or demote:
+
+- Flat conversation rows must stop being treated as authoritative evidence for
+  relational questions. Keep rows for trace/debug, but accepted public
+  evidence should state the answered relation.
+- Generic neighbor expansion must stop acting like a relevance boost. Neighbor
+  rows should be promoted only when attached to a seed as a supported relation
+  such as `previous_message`, `next_message`, or `reply_parent`.
+- The LLM judge should not be the sole authority for `resolved=true` on
+  relation-dependent questions. It may judge semantic relevance, but the
+  packet must contain the required relation before the slot is accepted.
+- The deterministic coverage checker is a guardrail, not a proof of relational
+  correctness. It may confirm literal or value coverage, but it cannot prove
+  reply direction, previous-image context, or topic-flow order.
+- The free-form RAG `answer` should be treated as debug/fallback synthesis, not
+  the strongest cognition input. Compact evidence facts and uncertainty should
+  be primary.
+- Broad retry/search-more behavior should not be the default recovery path.
+  Prefer seed-specific relation fetch, packet reduction, or a single
+  source-owned fallback when the first source returns nearby-but-not-answer
+  evidence.
+
 Relevant architecture documents:
 
 - `src/kazusa_ai_chatbot/rag/README.md`
@@ -119,6 +176,9 @@ Relevant architecture documents:
   DAG, RAG3 routing, or consolidation behavior in this plan.
 - RAG returns evidence. Cognition decides stance, boundaries, character
   judgment, and response goals. Dialog owns final visible wording.
+- RAG must not shift evidence filtering responsibility to cognition. If RAG
+  retrieves a large candidate set, RAG is responsible for reducing it into
+  compact facts and explicit uncertainty before projection.
 - Evaluate RAG output from the cognition consumer's point of view. Do not score
   an output higher merely because it includes source names, source ids, source
   collections, or provenance text. Score it higher only when the output gives
@@ -141,6 +201,10 @@ Relevant architecture documents:
   candidate directly answers the slot, the evaluator may promote it to
   confirmed evidence. Deterministic code may validate and sanitize the promoted
   shape, but must not decide semantic relevance from user-keyword matching.
+- Conversation evidence promotion must respect relation requirements. For
+  questions about previous images, replies, follow-up lines, topic flow, or
+  who-said-what, a seed row is not sufficient unless the required relation is
+  present and represented in the accepted evidence.
 - Prompt-facing evidence must not expose raw adapter wire syntax such as
   `[CQ:...]`, raw source rows, raw storage ids, raw global user ids, embeddings,
   binary/base64 data, raw attachment URLs, raw UTC timestamps, or microsecond
@@ -183,6 +247,18 @@ Relevant architecture documents:
   hardcoding its terms.
 - Preserve useful negative-result behavior: when no direct evidence is found,
   report the no-evidence conclusion and nearby commitments/facts separately.
+- Add a bounded conversation evidence packet contract for relation-dependent
+  conversation recall. A packet should start from a seed message and may attach
+  only supported relation rows for this stage: previous message/image, next
+  message, or reply parent. Reply-child and same-topic relation producers stay
+  deferred until a source-owned implementation exists. The packet reducer must
+  output compact cognition-facing facts rather than a broad row dump.
+- Keep conversation packetization inside the existing RAG2 helper-agent
+  boundary. Do not add a new response-path LLM call; use existing worker
+  generation/judgment stages and deterministic relation fetching/validation.
+- Preserve raw rows and source refs for trace/debug only. Public
+  `conversation_evidence` should emphasize the answered fact, speaker, local
+  time when useful, relation type, and uncertainty.
 - Preserve or improve source sanitation: no raw message ids, raw global user
   ids, raw CQ syntax, or raw UTC timestamps in `rag_result.answer`,
   `memory_evidence`, `recall_evidence`, or `conversation_evidence`.
@@ -204,6 +280,7 @@ Relevant architecture documents:
 
 - RAG3 router/interpreter work.
 - Graph RAG, DAG, or conversation graph work.
+- Full conversation graph replacement of recent history.
 - New databases, collections, indexes, vector-search changes, or memory schema
   migrations.
 - Conversation-progress redesign.
@@ -211,6 +288,8 @@ Relevant architecture documents:
 - New LLM stages, extra response-path calls, fallback retries, or compatibility
   shims not named in this plan.
 - Deterministic semantic matching over user input.
+- Increasing conversation `top_k` or retry count as the main quality fix.
+- Asking cognition or dialog to filter broad, noisy RAG evidence.
 
 ## Cutover Policy
 
@@ -440,14 +519,14 @@ Expected test and experiment surface:
 ## Progress Checklist
 
 - [x] Stage 1 - branch/mainline diff audit recorded.
-- [ ] Stage 2 - focused tests added and baseline behavior recorded.
+- [x] Stage 2 - focused tests added and baseline behavior recorded.
 - [x] Stage 3 - production-code subagent completes approved fusion changes.
 - [x] Stage 4 - integration compatibility checks pass.
 - [x] Stage 5 - focused branch-vs-mainline live LLM probes completed during
       implementation feedback.
 - [x] Stage 6 - fixed 20-case `debug-llm` review completed.
 - [ ] Stage 7 - fresh 20-case holdout `debug-llm` review completed.
-- [ ] Stage 8 - independent code review completed and findings resolved.
+- [x] Stage 8 - independent code review completed and findings resolved.
 - [ ] Stage 9 - execution evidence recorded and lifecycle status updated.
 
 ## Verification
@@ -662,3 +741,78 @@ evidence before sign-off.
   character/world memory attribute recall while preserving current-branch
   private user-memory recall, then address exact/coined phrase load, media
   product-image recall, and technical conversation recall.
+- 2026-05-24: Priority 1 was addressed only; other failed-case priorities
+  remain deferred. Root cause: the durable-memory search specialist translated
+  Chinese subject/attribute queries into English and generated only the subject
+  as a literal anchor, so exact character/world attribute rows such as
+  birthday/zodiac memories were ranked below broader subject memories. Fix:
+  `persistent_memory_search_agent` prompt now requires preserving the source
+  language and treating subject-plus-requested-attribute queries as literal
+  anchor candidates generated by the LLM specialist, without adding
+  deterministic keyword extraction from user input. Focused live RAG2 result:
+  `rag2-branch-quality-020` now resolves in one loop with the answer
+  `已确认杏山千纱（Kyōyama Kazusa）的生日为8月5日，星座为狮子座。该信息来源于持久化记忆中的明确记录。`
+  Private-memory regression check `rag2-branch-quality-005` still resolves via
+  `user_memory_evidence_agent`. Review artifact:
+  `experiments/rag2_branch_quality/reports/priority1_durable_memory_recall_review_20260524.md`.
+  Raw artifacts:
+  `test_artifacts/rag2_branch_quality/priority1_after_current_20260524/`,
+  `test_artifacts/rag2_branch_quality/priority1_after_attribute_prompt_probe_20260524.json`.
+  Verification:
+  `venv\Scripts\python.exe -m py_compile
+  src\kazusa_ai_chatbot\rag\persistent_memory_search_agent.py
+  tests\test_rag_hybrid_agents.py` passed, and
+  `venv\Scripts\python.exe -m pytest
+  tests\test_rag_hybrid_agents.py::test_persistent_memory_search_prompt_preserves_chinese_attribute_anchors
+  tests\test_rag_hybrid_agents.py::test_persistent_memory_search_tool_fuses_semantic_and_keyword_rows
+  tests\test_rag_hybrid_agents.py::test_persistent_memory_search_rejects_untrusted_source_filter
+  tests\test_rag_hybrid_agents.py::test_persistent_memory_search_reapplies_trusted_source_filter
+  -q` returned `4 passed`.
+- 2026-05-24: Next-stage conversation relation packet improvement completed.
+  Production changes stayed inside the existing RAG2 helper/projection
+  boundary:
+  `conversation_search_agent` now preserves prompt-safe local timestamps,
+  normalizes seed timestamps back to storage UTC for neighbor queries, and
+  annotates previous/next neighbor rows with stable seed relation metadata;
+  `conversation_evidence_agent` now builds bounded seed-plus-relation packets,
+  requires relation packets for relation-dependent slots, keeps direct
+  semantic/keyword hits usable as packet seeds even when they are also
+  neighbors, filters non-relation packet evidence to keyword-anchored seeds,
+  and routes media-adjacent conversation slots to conversation search instead
+  of memory; `persona_supervisor2_rag_projection` prefers selected packet
+  summaries for public `conversation_evidence`; initializer prompt text now
+  documents only supported relation tokens (`previous_message`,
+  `next_message`, `reply_parent`) and the initializer cache version was bumped
+  to `initializer_prompt:v20`. Unsupported advertised relation tokens
+  `reply_child` and `same_topic_nearby` were removed from this stage because
+  no source-owned producer exists yet.
+- 2026-05-24: Independent code-review subagent reviewed the relation-packet
+  diff. Findings: unsupported relation tokens were advertised, direct hits
+  could become relation-tagged and lose packet seed status, and packet
+  summaries could expand non-relation evidence. Fixes applied in this stage:
+  contract narrowed to produced relation tokens, direct retrieval methods keep
+  rows eligible as packet seeds, and non-relation public packets are limited
+  to keyword-supported seeds.
+- 2026-05-24: Focused real RAG2 live probe against real MongoDB data used
+  holdout case `rag2-holdout20-20260524-018` from
+  `test_artifacts/rag2_branch_quality/holdout20_cases_20260524.jsonl`.
+  Input: `谁说 Google Drive 又不是第一次这样了？前面那张图大概是什么事情？`
+  Final answer after fixes:
+  `总是跌倒的企鹅：Google drive又不是第一次这样了；上一条消息包含一张社交媒体平台（类似 X/Twitter）上的帖子截图，发帖人 ID 为 @masahiroitosugi，内容讲述其 Google 账号因上传旧漫画数据到 Drive 而被封禁且申诉失败，发布时间为 2026 年 5 月 15 日晚上 8:46。`
+  Raw artifact:
+  `test_artifacts/rag2_branch_quality/conversation_packet_probe_final_20260524/rag2-holdout20-20260524-018.json`.
+  Human-readable debug review:
+  `experiments/rag2_branch_quality/reports/conversation_packet_probe_review_20260524.md`.
+- 2026-05-24: Deterministic verification for the conversation-packet stage
+  passed. `py_compile` passed for touched RAG/projection/cache/test Python
+  files. Focused tests covering local timestamp preservation, UTC neighbor
+  query bounds, relation-required unresolved behavior, packet reduction,
+  direct-neighbor seed retention, non-relation packet filtering, media-slot
+  routing, public projection, and initializer prompt version passed. Broader
+  adjacent suite returned `126 passed`:
+  `venv\Scripts\python.exe -m pytest tests\test_rag_hybrid_agents.py
+  tests\test_rag_phase3_capability_agents.py tests\test_rag_projection.py
+  tests\test_rag_prompt_evidence_safety.py
+  tests\test_rag_initializer_cache2.py::test_initializer_prompt_version_bumped_for_capability_cutover
+  tests\test_rag_initializer_cache2.py::test_initializer_prompt_version_bumps_to_v20_for_current_contract
+  -q`. `git diff --check` exited 0 with only CRLF normalization warnings.
