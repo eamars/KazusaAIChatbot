@@ -261,6 +261,52 @@ def test_project_known_facts_projects_recall_agent_result() -> None:
     assert result["conversation_evidence"] == []
 
 
+def test_project_known_facts_omits_unsafe_recall_freshness_basis() -> None:
+    """Trace-like Recall provenance should not crash public projection."""
+
+    result = project_known_facts(
+        [
+            {
+                "slot": "Recall: retrieve active_episode_agreement relevant to tiramisu",
+                "agent": "recall_agent",
+                "resolved": True,
+                "summary": "The active agreement is unresolved tiramisu compensation.",
+                "raw_result": {
+                    "selected_summary": "The active agreement is unresolved tiramisu compensation.",
+                    "recall_type": "active_episode_agreement",
+                    "primary_source": "user_memory_units",
+                    "supporting_sources": ["conversation_progress"],
+                    "freshness_basis": (
+                        "Selected user_memory_units for active_episode_agreement; "
+                        "evidence_time=2026-05-24T09:18:11.123456+00:00."
+                    ),
+                    "conflicts": [],
+                    "candidates": [
+                        {
+                            "source": "user_memory_units",
+                            "claim": "Tiramisu compensation is still unresolved.",
+                            "temporal_scope": "active_episode",
+                            "lifecycle_status": "active",
+                            "evidence_time": "2026-05-24T09:18:11.123456+00:00",
+                            "authority": "primary_for_current_episode",
+                        }
+                    ],
+                },
+            }
+        ],
+        current_user_id="user-1",
+        character_user_id="character-1",
+    )
+
+    recall_entry = result["recall_evidence"][0]
+    rendered_entry = repr(recall_entry)
+
+    assert "freshness_basis" not in recall_entry
+    assert "Tiramisu compensation is still unresolved." in rendered_entry
+    assert "2026-05-24 21:18:11" in rendered_entry
+    assert "2026-05-24T09:18:11.123456+00:00" not in rendered_entry
+
+
 def test_project_known_facts_caps_recall_evidence_to_three_entries() -> None:
     """Projection should expose only the first three Recall results."""
 

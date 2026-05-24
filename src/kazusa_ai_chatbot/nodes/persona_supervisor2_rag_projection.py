@@ -19,6 +19,10 @@ _URL_RE = re.compile(r"https?://\S+")
 _SLOT_REF_RE = re.compile(r"slot\s+(\d+)", flags=re.IGNORECASE)
 _MAX_RECALL_EVIDENCE = 3
 _MAX_CONVERSATION_EVIDENCE_ITEMS = RAG_SEARCH_SELECTED_SUMMARY_LIMIT
+_TRACE_ONLY_RECALL_FRESHNESS_MARKERS = (
+    "evidence_time=",
+    "selected ",
+)
 
 
 def _clip_text(text: str, *, limit: int) -> str:
@@ -402,6 +406,22 @@ def _public_string_list(value: object) -> list[str] | None:
     return string_items
 
 
+def _public_recall_freshness_basis(value: object) -> str:
+    """Return prompt-facing Recall freshness text, or empty for trace metadata."""
+
+    raw_text = text_or_empty(value)
+    if not raw_text:
+        return ""
+
+    raw_lower = raw_text.lower()
+    for marker in _TRACE_ONLY_RECALL_FRESHNESS_MARKERS:
+        if marker in raw_lower:
+            return ""
+
+    public_text = sanitize_public_rag_evidence_text(raw_text)
+    return public_text
+
+
 def _recall_evidence_entry(
     recall_payload: dict[str, Any],
     *,
@@ -417,10 +437,16 @@ def _recall_evidence_entry(
         "selected_summary": _conclusion_line(selected_summary),
     }
 
-    for field in ("recall_type", "primary_source", "freshness_basis"):
+    for field in ("recall_type", "primary_source"):
         value = text_or_empty(recall_payload.get(field))
         if value:
             entry[field] = value
+
+    freshness_basis = _public_recall_freshness_basis(
+        recall_payload.get("freshness_basis")
+    )
+    if freshness_basis:
+        entry["freshness_basis"] = freshness_basis
 
     for field in ("supporting_sources", "conflicts"):
         value = _public_string_list(recall_payload.get(field))
