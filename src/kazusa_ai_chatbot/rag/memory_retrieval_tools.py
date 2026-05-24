@@ -69,6 +69,12 @@ def conversation_message_payload(message: dict) -> dict:
     """Project one typed conversation row for RAG tool output."""
 
     body_text = _message_body_text(message)
+    platform_message_id = text_or_empty(message.get("platform_message_id"))
+    conversation_row_id = text_or_empty(message.get("conversation_row_id"))
+    raw_row_id = message.get("_id")
+    if not conversation_row_id and raw_row_id is not None:
+        conversation_row_id = str(raw_row_id)
+
     payload = {
         "body_text": body_text,
         "timestamp": format_storage_utc_for_llm_seconds(
@@ -82,6 +88,11 @@ def conversation_message_payload(message: dict) -> dict:
         "global_user_id": message.get("global_user_id", ""),
         "reply_context": _compact_reply_context(message.get("reply_context")),
     }
+    if platform_message_id:
+        payload["platform_message_id"] = platform_message_id
+    if conversation_row_id:
+        payload["conversation_row_id"] = conversation_row_id
+
     return payload
 
 

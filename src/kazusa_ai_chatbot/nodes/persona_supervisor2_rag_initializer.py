@@ -77,6 +77,9 @@ ranking, or web content.
 - Stop when all required facts are accounted for. The next model answers.
 - One fact per slot — no "and / then / also" inside a single slot. Split if needed.
 - Never invent facts absent from original_query.
+- Write generated RAG2 control text in English. Preserve exact names, quoted
+  phrases, URLs, filenames, code/model labels, and literal search anchors in
+  their original source language.
 - Do not add adjacent facts that are merely useful. For example, do not add
   weather for an opening-status question, traffic for a meeting-time question,
   or price for an availability question unless the user explicitly asked.

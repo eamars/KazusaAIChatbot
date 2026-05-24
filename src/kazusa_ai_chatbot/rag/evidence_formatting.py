@@ -6,6 +6,7 @@ import re
 from collections.abc import Mapping
 from typing import Any
 
+from kazusa_ai_chatbot.time_boundary import format_storage_utc_for_llm
 from kazusa_ai_chatbot.utils import text_or_empty
 
 _PUBLIC_RAG_EVIDENCE_KEYS = (
@@ -48,7 +49,7 @@ _FORBIDDEN_TEXT_MARKERS = (
 )
 _UUID_RE = re.compile(rf"\b{_UUID_PATTERN}\b", flags=re.IGNORECASE)
 _GLOBAL_USER_ID_TEXT_RE = re.compile(
-    r"\s*\(?\bglobal_user_id\s*[:=]\s*"
+    r"\s*\(?\bglobal_user_id\s*(?::|=)?\s*"
     rf"{_UUID_PATTERN}\)?",
     flags=re.IGNORECASE,
 )
@@ -64,26 +65,126 @@ _RAW_STORAGE_UTC_RE = re.compile(
     r"(?:Z|\+00:00)\b",
     flags=re.IGNORECASE,
 )
+_SOURCE_ID_PREFIX_RE = re.compile(
+    r"\b(?:"
+    r"platform_message_id|conversation_row_id|source_global_user_id|"
+    r"global_user_id"
+    r")\s*:\s*[^:;\n]+:\s*",
+    flags=re.IGNORECASE,
+)
+_SOURCE_ID_TEXT_RE = re.compile(
+    r"\b(?:"
+    r"platform_message_id|conversation_row_id|source_global_user_id|"
+    r"global_user_id"
+    r")\b\s*(?:\u4e3a|is|=|:)?\s*[0-9a-f][0-9a-f-]{5,40}",
+    flags=re.IGNORECASE,
+)
+_SOURCE_ID_LABEL_RE = re.compile(
+    r"\b(?:"
+    r"platform_message_id|conversation_row_id|source_global_user_id|"
+    r"global_user_id"
+    r")\b",
+    flags=re.IGNORECASE,
+)
+_INTERNAL_PUBLIC_LABEL_REPLACEMENTS = (
+    ("user_memory_evidence_agent", "user memory evidence"),
+    ("persistent_memory_search_agent", "durable memory evidence"),
+    ("conversation_evidence_agent", "conversation evidence"),
+    ("memory_evidence_agent", "memory evidence"),
+    ("person_context_agent", "person context"),
+    ("user_lookup_agent", "user lookup"),
+    ("user_profile_agent", "user profile"),
+    ("user_list_agent", "user list"),
+    ("recall_agent", "recall evidence"),
+    ("user_memory_units", "user memory units"),
+    ("conversation_evidence", "conversation evidence"),
+    ("memory_evidence", "memory evidence"),
+    ("recall_evidence", "recall evidence"),
+    ("durable_commitment", "durable commitment"),
+    ("active_episode_agreement", "active episode agreement"),
+    ("exact_agreement_history", "exact agreement history"),
+    ("episode_position", "episode position"),
+)
+_INTERNAL_PREFIX_REPLACEMENTS = (
+    (
+        re.compile(r"\brecall\s*:\s*", flags=re.IGNORECASE),
+        "Recall candidate: ",
+    ),
+    (
+        re.compile(r"\bmemory\s*:\s*", flags=re.IGNORECASE),
+        "Memory candidate: ",
+    ),
+    (
+        re.compile(r"\bconversation\s*:\s*", flags=re.IGNORECASE),
+        "Conversation candidate: ",
+    ),
+)
+
+
+def _format_storage_utc_match(match: re.Match[str]) -> str:
+    """Render an embedded storage UTC timestamp for public evidence text.
+
+    Args:
+        match: Regex match containing one storage UTC timestamp.
+
+    Returns:
+        Configured-local wall-clock text, or the original timestamp if the
+        timestamp cannot be projected.
+    """
+
+    raw_timestamp = match.group(0)
+    formatted_timestamp = format_storage_utc_for_llm(raw_timestamp)
+    if formatted_timestamp:
+        return formatted_timestamp
+    return raw_timestamp
+
+
+def _replace_internal_public_labels(text: str) -> str:
+    """Replace storage-facing labels with reader-facing evidence labels.
+
+    Args:
+        text: Public evidence prose that may contain internal source labels.
+
+    Returns:
+        Evidence prose with known internal labels rendered as readable source
+        descriptions.
+    """
+
+    cleaned_text = text
+    for prefix_re, replacement in _INTERNAL_PREFIX_REPLACEMENTS:
+        cleaned_text = prefix_re.sub(replacement, cleaned_text)
+    for marker, replacement in _INTERNAL_PUBLIC_LABEL_REPLACEMENTS:
+        marker_re = re.compile(
+            rf"\b{re.escape(marker)}\b",
+            flags=re.IGNORECASE,
+        )
+        cleaned_text = marker_re.sub(replacement, cleaned_text)
+    return cleaned_text
 
 
 def sanitize_public_rag_evidence_text(value: object) -> str:
-    """Remove source-id text from prompt-facing evidence prose.
+    """Remove source internals from prompt-facing evidence prose.
 
     Args:
         value: Evidence prose from a helper summary, result row, or finalizer.
 
     Returns:
-        Text with raw source-id fragments removed while preserving readable
-        surrounding prose.
+        Text with raw source-id fragments, storage timestamps, and
+        implementation labels removed or rendered for downstream prompts.
     """
 
     text = text_or_empty(value)
     if not text:
         return ""
 
+    text = _RAW_STORAGE_UTC_RE.sub(_format_storage_utc_match, text)
+    text = _replace_internal_public_labels(text)
+    text = _SOURCE_ID_PREFIX_RE.sub("", text)
+    text = _SOURCE_ID_TEXT_RE.sub("[source id omitted]", text)
     text = _GLOBAL_USER_ID_TEXT_RE.sub("", text)
     text = _SEPARATOR_SOURCE_ID_RE.sub("", text)
     text = _UUID_RE.sub("[source id omitted]", text)
+    text = _SOURCE_ID_LABEL_RE.sub("source id", text)
     return text
 
 

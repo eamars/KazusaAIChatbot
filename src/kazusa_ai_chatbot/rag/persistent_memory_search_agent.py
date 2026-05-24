@@ -49,35 +49,49 @@ from kazusa_ai_chatbot.utils import get_llm, parse_llm_json_output, text_or_empt
 logger = logging.getLogger(__name__)
 
 _GENERATOR_PROMPT = Template("""\
-你是一个只负责 `search_persistent_memory` 的检索参数生成器。
+You generate retrieval parameters only for `search_persistent_memory`.
 
-# 你的唯一职责
-- 只为 `search_persistent_memory` 生成参数。
-- `search_query` 必须写成自然语言的记忆查询，不要退化成关键词列表。
-- `literal_anchors` 是可选字段，只放原问题中必须字面命中的专有名词、技术词、短语或中文关键词；不要把整句拆成词表。
-- `search_query` 应围绕原问题所需的相关证据，不要预设记忆属于事实、印象、看法或特定来源。
-- `source_global_user_id` 是隐私边界，不是相关性提示。默认省略；只有任务明确要求查找"由某个用户触发/提供/承诺"的记忆时才填写。
-- 如果 `feedback` 指出过滤条件太窄、查询太抽象或没有相关记忆，下一轮必须改写。
+# Scope
+- Produce parameters only for `search_persistent_memory`.
+- `search_query` must be a natural-language memory query, not a keyword list.
+- `literal_anchors` is optional. Include only proper nouns, technical terms,
+  short phrases, URLs, filenames, or quoted text that must match literally.
+  Do not split a full sentence into a word list.
+- `search_query` should target evidence needed by the original question. Do
+  not assume the memory category is fact, impression, opinion, or one specific
+  source unless the task says so.
+- `source_global_user_id` is a privacy boundary, not a relevance hint. Omit it
+  by default. Fill it only when the task explicitly asks for memory triggered,
+  provided, or promised by one source user.
+- If `feedback` says filters are too narrow, query is too abstract, or no
+  relevant memory was found, rewrite the next attempt.
+- Use English for generated control/status text. Preserve literal anchors,
+  names, quotes, URLs, filenames, and source text in their original language.
 
-# 字段约束（严格遵守）
-- `source_global_user_id`：只有任务明确要求按"记忆来源用户"过滤，且 context 或 known_facts 中存在**明确的 UUID 格式**来源用户 ID 时才填写；平台频道 ID、用户名、昵称、当前说话人、被查询对象均不是来源用户过滤理由，一律省略。
+# Field Constraints
+- `source_global_user_id`: fill only when the task explicitly requests a
+  source-user filter and context or known_facts contains a clear UUID source
+  user id. Platform channel id, username, nickname, current speaker, and target
+  person are not valid source-user filters.
 
-# 生成步骤
-1. 先读取 `task`，判断需要哪类持久记忆证据。
-2. 读取 `context` 和 `known_facts`，只使用明确给出的过滤条件。
-3. 默认不要填写 `source_global_user_id`；只有任务明确按记忆来源用户过滤时才填写。
-4. 如果 `feedback` 指出过滤太窄或查询太抽象，改写查询并放宽不必要过滤。
-5. 输出自然语言 `search_query` 和必要过滤字段。
+# Generation Procedure
+1. Read `task` and identify the durable-memory evidence needed.
+2. Read `context` and `known_facts`; use only explicit filters.
+3. Omit `source_global_user_id` unless the task explicitly requires a memory
+   source-user filter.
+4. If feedback says the filter is too narrow or the query is too abstract,
+   rewrite the query and relax unnecessary filters.
+5. Output natural-language `search_query` plus necessary filter fields.
 
-# 输入格式
+# Input Format
 {
-  "task": "外层 RAG supervisor 生成的槽位描述",
-  "context": "已知事实、known_facts 与运行时提示",
-  "feedback": "上一轮评估反馈，或空字符串"
+  "task": "slot description from the outer RAG supervisor",
+  "context": "known facts and runtime hints",
+  "feedback": "previous judge feedback, or empty string"
 }
 
-# 输出格式
-请只返回合法 JSON：
+# Output Format
+Return valid JSON only:
 {
   "search_query": "string",
   "literal_anchors": ["string, optional; at most 5 anchors"],
@@ -94,32 +108,36 @@ _generator_llm = get_llm(
 )
 
 _JUDGE_PROMPT = """\
-你是 `search_persistent_memory` 的结果评估器。
+You judge whether a `search_persistent_memory` result resolves the current slot.
 
-# 任务
-- 判断当前结果是否已经足以解决槽位。
-- 如果未解决，反馈必须具体可执行。
+# Task
+- Decide whether the current result is enough to resolve the slot.
+- If unresolved, feedback must be specific and executable.
 
-# 审计步骤
-1. 先读取 `task`，确认槽位需要的记忆证据。
-2. 检查 `result` 是否包含直接相关的持久记忆、错误或空结果。
-3. 只有结果足以解决槽位时才返回 `resolved: true`。
-4. 未解决时，明确说明下一轮应改写查询、放宽过滤还是换主题角度。
+# Audit Procedure
+1. Read `task` and identify the memory evidence the slot needs.
+2. Inspect `result` for directly relevant durable memories, errors, or empty
+   output.
+3. Return `resolved: true` only when the result is enough to resolve the slot.
+4. If unresolved, state whether the next attempt should rewrite the query,
+   relax filters, or change topic angle.
 
-# 输入格式
+# Input Format
 {
-  "task": "外层 RAG supervisor 生成的槽位描述",
-  "result": "search_persistent_memory 的工具结果"
+  "task": "slot description from the outer RAG supervisor",
+  "result": "tool result from search_persistent_memory"
 }
 
-# 常见反馈方向
-- 查询太抽象，需要改成围绕原问题的具体证据查询
-- 过滤条件太窄，需要移除来源过滤
-- 返回记忆不相关，需要换主题角度
-- 没有相关记忆，需要放宽过滤或改写查询
+# Common Feedback Directions
+- Query too abstract; rewrite around concrete evidence required by the
+  original question.
+- Filters too narrow; remove source filters.
+- Returned memories irrelevant; change topic angle.
+- No relevant memory; relax filters or rewrite query.
+- Use English for generated control/status text while preserving source text.
 
-# 输出格式
-请只返回合法 JSON：
+# Output Format
+Return valid JSON only:
 {
   "resolved": true or false,
   "feedback": "string"
@@ -267,7 +285,7 @@ def _is_about_resolved_user_search(task: str) -> bool:
     references_resolved_user = "user resolved in slot" in task_lower
     asks_about_subject = any(
         marker in task_lower
-        for marker in ("about", "impression", "opinion", "看法", "印象", "评价")
+        for marker in ("about", "impression", "opinion")
     )
     return_value = references_resolved_user and asks_about_subject
     return return_value
@@ -495,7 +513,7 @@ async def _judge(task: str, result: object) -> tuple[bool, str]:
     response = await _judge_llm.ainvoke([system_prompt, human_message])
     verdict = parse_llm_json_output(response.content)
     if not isinstance(verdict, dict):
-        return_value = False, "评估输出无效，请把查询改成更具体的记忆描述。"
+        return_value = False, "Invalid judge output; make the memory query more concrete."
         return return_value
 
     resolved = bool(verdict.get("resolved", False))

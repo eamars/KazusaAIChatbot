@@ -37,30 +37,39 @@ from kazusa_ai_chatbot.utils import get_llm, parse_llm_json_output, text_or_empt
 logger = logging.getLogger(__name__)
 
 _GENERATOR_PROMPT = Template("""\
-你是一个只负责 `search_persistent_memory_keyword` 的检索参数生成器。
+You generate retrieval parameters only for `search_persistent_memory_keyword`.
 
-# 你的唯一职责
-- 只为 `search_persistent_memory_keyword` 生成参数。
-- `keyword` 必须是最短且不歧义的核心词或短语，不能是完整句子。
-- 如果目标是专有名词、昵称、事件名、文件名或短标签，就优先保留字面锚点。
-- 如果 `feedback` 指出词太具体、无结果或需要更泛化的表达，下一轮必须显著调整。
-- `source_global_user_id` 是隐私边界，不是相关性提示。默认省略；只有任务明确要求查找"由某个用户触发/提供/承诺"的记忆时才填写。
+# Scope
+- Produce parameters only for `search_persistent_memory_keyword`.
+- `keyword` must be the shortest unambiguous core term or phrase, not a full
+  sentence.
+- Prefer literal anchors for proper nouns, nicknames, event names, filenames,
+  or short tags.
+- If `feedback` says the term is too specific, no results were found, or a
+  broader expression is needed, change the next keyword meaningfully.
+- `source_global_user_id` is a privacy boundary, not a relevance hint. Omit it
+  by default; fill it only when the task explicitly asks for memory triggered,
+  provided, or promised by one source user.
+- Use English for generated control/status text. Preserve literal anchors,
+  names, quotes, URLs, filenames, and source text in their original language.
 
-# 生成步骤
-1. 先读取 `task`，找到最短且不歧义的字面锚点。
-2. 读取 `context`，只有明确要求按记忆来源用户过滤时才使用 `source_global_user_id`。
-3. 若 `feedback` 指出无结果、太具体或需要泛化，显著调整关键词。
-4. 输出一个 keyword 和必要过滤字段。
+# Generation Procedure
+1. Read `task` and find the shortest unambiguous literal anchor.
+2. Read `context`; use `source_global_user_id` only when the task explicitly
+   requires a memory source-user filter.
+3. If feedback says no result, too specific, or needs broadening, change the
+   keyword substantially.
+4. Output one keyword plus necessary filter fields.
 
-# 输入格式
+# Input Format
 {
-  "task": "外层 RAG supervisor 生成的槽位描述",
-  "context": "已知事实与运行时提示",
-  "feedback": "上一轮评估反馈，或空字符串"
+  "task": "slot description from the outer RAG supervisor",
+  "context": "known facts and runtime hints",
+  "feedback": "previous judge feedback, or empty string"
 }
 
-# 输出格式
-请只返回合法 JSON：
+# Output Format
+Return valid JSON only:
 {
   "keyword": "string",
   "top_k": $default_top_k,
@@ -76,32 +85,35 @@ _generator_llm = get_llm(
 )
 
 _JUDGE_PROMPT = """\
-你是 `search_persistent_memory_keyword` 的结果评估器。
+You judge whether a `search_persistent_memory_keyword` result resolves the current slot.
 
-# 任务
-- 判断当前结果是否已经足以解决槽位。
-- 如果未解决，反馈必须明确告诉下一轮怎么改关键词。
+# Task
+- Decide whether the current result is enough to resolve the slot.
+- If unresolved, feedback must clearly tell the next attempt how to change the
+  keyword.
 
-# 审计步骤
-1. 先读取 `task`，确认槽位需要的记忆证据。
-2. 检查 `result` 是否包含相关持久记忆、错误或空结果。
-3. 只有结果足以解决槽位时才返回 `resolved: true`。
-4. 未解决时，明确说明下一轮应缩短、泛化、换同义词或调整来源过滤。
+# Audit Procedure
+1. Read `task` and identify the memory evidence needed.
+2. Inspect `result` for relevant durable memory, errors, or empty output.
+3. Return `resolved: true` only when the result is enough to resolve the slot.
+4. If unresolved, state whether the next keyword should be shorter, broader,
+   a synonym, or use different source filtering.
 
-# 输入格式
+# Input Format
 {
-  "task": "外层 RAG supervisor 生成的槽位描述",
-  "result": "search_persistent_memory_keyword 的工具结果"
+  "task": "slot description from the outer RAG supervisor",
+  "result": "tool result from search_persistent_memory_keyword"
 }
 
-# 常见反馈方向
-- 关键词太长，请收缩到核心词
-- 关键词太细，请换成更常见或更泛一点的叫法
-- 没有匹配，请换同义词或去掉多余修饰
-- 需要补充/移除来源用户过滤
+# Common Feedback Directions
+- Keyword too long; shrink to the core term.
+- Keyword too specific; use a more common or broader expression.
+- No match; use a synonym or remove extra modifiers.
+- Add or remove source-user filtering.
+- Use English for generated control/status text while preserving source text.
 
-# 输出格式
-请只返回合法 JSON：
+# Output Format
+Return valid JSON only:
 {
   "resolved": true or false,
   "feedback": "string"
@@ -235,7 +247,7 @@ async def _judge(task: str, result: object) -> tuple[bool, str]:
     response = await _judge_llm.ainvoke([system_prompt, human_message])
     verdict = parse_llm_json_output(response.content)
     if not isinstance(verdict, dict):
-        return_value = False, "评估输出无效，请把关键词改成更短或更常见的叫法。"
+        return_value = False, "Invalid judge output; use a shorter or more common keyword."
         return return_value
 
     resolved = bool(verdict.get("resolved", False))

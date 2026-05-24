@@ -214,11 +214,6 @@ def _deterministic_plan(
         "with the current user",
         "remember me",
         "recognize me",
-        "当前用户",
-        "私有",
-        "记得我",
-        "还记得我",
-        "认识我",
     )
     ambiguous_user_scope_markers = (
         "user's",
@@ -227,7 +222,6 @@ def _deterministic_plan(
         "user preference",
         "user decisions",
         "user decision",
-        "用户的",
     )
     scoped_user_topic_markers = (
         "continuity",
@@ -246,6 +240,20 @@ def _deterministic_plan(
         "prior shared interaction",
         "prior shared interactions",
         "shared history",
+        "shared by current user",
+        "shared by current_user",
+        "current user's shared",
+        "current-user's shared",
+        "created by current user",
+        "created by current_user",
+        "current user's created",
+        "current-user's created",
+        "promise",
+        "promises",
+        "commitment",
+        "commitments",
+        "consideration",
+        "considerations",
         "remember the current user",
         "recognize the current user",
         "remember me",
@@ -261,20 +269,6 @@ def _deterministic_plan(
         "private lore",
         "private continuity",
         "setting",
-        "连续性",
-        "偏好",
-        "技术偏好",
-        "设定",
-        "过往互动",
-        "历史互动",
-        "之前的互动",
-        "以前的互动",
-        "共同经历",
-        "记得我",
-        "还记得我",
-        "认识我",
-        "记得当前用户",
-        "认识当前用户",
     )
     # Query-level context can confirm private scope, but each slot must carry
     # its own scoped-user topic so mixed queries keep independent memory paths.
@@ -291,11 +285,53 @@ def _deterministic_plan(
         }
         return plan
 
+    lifecycle_status_markers = (
+        "completed",
+        "outstanding",
+        "fulfilled",
+        "unfulfilled",
+        "finished",
+        "unfinished",
+        "status",
+    )
+    has_runtime_user_scope = bool(
+        isinstance(context, dict)
+        and text_or_empty(context.get("global_user_id"))
+    )
+    has_lifecycle_status_topic = any(
+        marker in slot_text
+        for marker in lifecycle_status_markers
+    )
+    if has_runtime_user_scope and has_scoped_user_topic and has_lifecycle_status_topic:
+        plan = {
+            "worker": "user_memory_evidence_agent",
+            "reason": "scoped current-user memory lifecycle evidence",
+        }
+        return plan
+
     has_ambiguous_user_scope = any(
         marker in slot_text for marker in ambiguous_user_scope_markers
     )
     if has_ambiguous_user_scope and has_scoped_user_topic:
         return None
+
+    shared_memory_markers = (
+        "official",
+        "common sense",
+        "world knowledge",
+        "character-world",
+        "character world",
+        "character design",
+        "home",
+        "address",
+        "location",
+    )
+    if any(marker in normalized for marker in shared_memory_markers):
+        plan = {
+            "worker": "persistent_memory_search_agent",
+            "reason": "semantic durable memory evidence",
+        }
+        return plan
 
     exact_markers = (
         "named fact",
@@ -314,6 +350,9 @@ def _deterministic_plan(
         return plan
 
     if has_scoped_user_topic:
+        return None
+
+    if isinstance(context, dict) and text_or_empty(context.get("original_query")):
         return None
 
     plan = {
@@ -343,8 +382,9 @@ You choose one bounded persistent-memory worker for a durable evidence slot.
 Do not answer active agreements, person profiles, relationships, or live external facts.
 
 # Generation Procedure
-1. If the task asks for active agreements, promises, or current episode state,
-   output worker="incompatible" and reason="Recall".
+1. If the task asks for live active agreements, active promises, or current
+   episode state, output worker="incompatible" and reason="Recall". Do not use
+   this rule for historical completed/outstanding status evidence.
 2. If the task asks for person profile, impression, compatibility, or
    relationship context, output worker="incompatible" and reason="Person-context".
 3. If the task asks for current weather, temperature, opening status, prices,
@@ -352,8 +392,9 @@ Do not answer active agreements, person profiles, relationships, or live externa
    and reason="Live-context".
 4. Use user_memory_evidence_agent for current-user durable memory, private
    continuity, accepted preference, user-specific lore, current-user
-   recognition, prior interaction history, or prior shared experience with the
-   current user.
+   recognition, prior interaction history, prior shared experience with the
+   current user, and completed/outstanding lifecycle status of prior
+   user-specific promises or commitments.
 5. Use persistent_memory_search_agent for natural-language durable facts,
    exact named facts, tags, memory_name/dedup_key lookups, proper nouns,
    quoted terms, home/address/location questions, fuzzy concepts, common

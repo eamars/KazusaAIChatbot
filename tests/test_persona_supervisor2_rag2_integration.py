@@ -72,9 +72,11 @@ class _ContinuationLLM:
     def __init__(self, decision: dict) -> None:
         """Store the decision emitted by this fake."""
         self.decision = decision
+        self.calls: list[list] = []
 
-    async def ainvoke(self, _messages: list) -> _DummyResponse:
+    async def ainvoke(self, messages: list) -> _DummyResponse:
         """Return the configured continuation decision."""
+        self.calls.append(messages)
         response = _DummyResponse(json.dumps(self.decision))
         return response
 
@@ -384,6 +386,278 @@ async def test_call_rag_supervisor_public_keys_unchanged(monkeypatch) -> None:
     assert (
         stop_result["known_facts"][0]["continuation"]["should_continue"]
         is False
+    )
+
+
+@pytest.mark.asyncio
+async def test_assess_continuation_waits_for_pending_evidence_slot(
+    monkeypatch,
+) -> None:
+    """Queued evidence slots should run before refined-query re-entry."""
+
+    continuation_llm = _ContinuationLLM(
+        {
+            "should_continue": True,
+            "refined_query": "Search exact conversation evidence again.",
+            "reason": "the fake would continue if called",
+        }
+    )
+    monkeypatch.setattr(
+        rag2_module,
+        "_continuation_assessor_llm",
+        continuation_llm,
+    )
+
+    decision = await rag2_module._assess_continuation(
+        observation_payload={
+            "original_query": "What did I forget?",
+            "current_slot": "Recall: retrieve active_episode_agreement",
+            "agent": "recall_agent",
+            "resolved": False,
+            "source_policy": "",
+            "missing_context": ["recall_evidence"],
+            "conflicts": [],
+            "observation_candidates": [
+                {"content": "A durable memory candidate was inconclusive."}
+            ],
+            "source_hints": [
+                {"kind": "recall", "source": "conversation evidence needed"}
+            ],
+            "user_resolution_hints": [],
+            "known_facts": [],
+            "pending_slots": [
+                "Conversation-evidence: retrieve exact agreement messages",
+            ],
+        },
+        original_query="What did I forget?",
+        previous_refined_queries=[],
+        continuation_count=0,
+    )
+
+    assert decision["should_continue"] is False
+    assert decision["refined_query"] == ""
+    assert "pending evidence slots" in decision["reason"]
+    assert continuation_llm.calls == []
+
+
+@pytest.mark.asyncio
+async def test_assess_continuation_waits_for_pending_evidence_slot_after_memory(
+    monkeypatch,
+) -> None:
+    """Queued evidence slots should also stop non-Recall re-entry."""
+
+    continuation_llm = _ContinuationLLM(
+        {
+            "should_continue": True,
+            "refined_query": "Search a broader memory trail.",
+            "reason": "the fake would continue if called",
+        }
+    )
+    monkeypatch.setattr(
+        rag2_module,
+        "_continuation_assessor_llm",
+        continuation_llm,
+    )
+
+    decision = await rag2_module._assess_continuation(
+        observation_payload={
+            "original_query": "Did we discuss this?",
+            "current_slot": "Memory-evidence: retrieve durable evidence",
+            "agent": "memory_evidence_agent",
+            "resolved": False,
+            "source_policy": "",
+            "missing_context": ["memory_evidence"],
+            "conflicts": [],
+            "observation_candidates": [
+                {"content": "Nearby memory was not direct evidence."}
+            ],
+            "source_hints": [
+                {"kind": "memory", "source": "conversation evidence needed"}
+            ],
+            "user_resolution_hints": [],
+            "known_facts": [],
+            "pending_slots": [
+                "Conversation-evidence: retrieve exact messages",
+            ],
+        },
+        original_query="Did we discuss this?",
+        previous_refined_queries=[],
+        continuation_count=0,
+    )
+
+    assert decision["should_continue"] is False
+    assert decision["refined_query"] == ""
+    assert "pending evidence slots" in decision["reason"]
+    assert continuation_llm.calls == []
+
+
+@pytest.mark.asyncio
+async def test_assess_continuation_finalizes_memory_miss_after_recall(
+    monkeypatch,
+) -> None:
+    """Recall plus memory miss should not fan out into broad absence search."""
+
+    continuation_llm = _ContinuationLLM(
+        {
+            "should_continue": True,
+            "refined_query": "Search every broad historical source.",
+            "reason": "the fake would continue if called",
+        }
+    )
+    monkeypatch.setattr(
+        rag2_module,
+        "_continuation_assessor_llm",
+        continuation_llm,
+    )
+
+    decision = await rag2_module._assess_continuation(
+        observation_payload={
+            "original_query": "Did this old agreement exist?",
+            "current_slot": "Memory-evidence: retrieve durable evidence",
+            "agent": "memory_evidence_agent",
+            "resolved": False,
+            "source_policy": "",
+            "missing_context": ["memory_evidence"],
+            "conflicts": [],
+            "observation_candidates": [
+                {"content": "Nearby memory was not direct evidence."}
+            ],
+            "source_hints": [
+                {"kind": "memory", "source": "related durable memory"}
+            ],
+            "user_resolution_hints": [],
+            "known_facts": [
+                {
+                    "slot": "Recall: retrieve active agreement",
+                    "agent": "recall_agent",
+                    "resolved": False,
+                    "summary": "Recall found nearby but unconfirmed rows.",
+                }
+            ],
+            "pending_slots": [],
+        },
+        original_query="Did this old agreement exist?",
+        previous_refined_queries=[],
+        continuation_count=0,
+    )
+
+    assert decision["should_continue"] is False
+    assert decision["refined_query"] == ""
+    assert "Recall and memory evidence" in decision["reason"]
+    assert continuation_llm.calls == []
+
+
+@pytest.mark.asyncio
+async def test_call_rag_supervisor_does_not_expand_after_resolved_evidence(
+    monkeypatch,
+) -> None:
+    """Resolved evidence should cap later unresolved secondary expansion."""
+
+    runtime = RAGCache2Runtime(max_entries=10)
+    memory_worker = _FakeWorker(
+        {
+            "resolved": True,
+            "result": {
+                "capability": "memory_evidence",
+                "selected_summary": "Primary evidence found.",
+                "missing_context": [],
+            },
+            "attempts": 1,
+            "cache": {"enabled": False, "hit": False, "reason": "patched"},
+        }
+    )
+    conversation_worker = _FakeWorker(
+        {
+            "resolved": False,
+            "result": {
+                "capability": "conversation_evidence",
+                "selected_summary": "",
+                "missing_context": ["conversation_evidence"],
+                "observation_candidates": [
+                    {"content": "Nearby but insufficient conversation row."}
+                ],
+                "source_hints": [
+                    {"kind": "conversation", "source": "search nearby rows"}
+                ],
+            },
+            "attempts": 1,
+            "cache": {"enabled": False, "hit": False, "reason": "patched"},
+        }
+    )
+    continuation_llm = _ContinuationLLM(
+        {
+            "should_continue": True,
+            "refined_query": "Search yet another query.",
+            "reason": "the fake would continue if called",
+        }
+    )
+
+    memory_entry = dict(
+        rag2_module._RAG_SUPERVISOR_AGENT_REGISTRY["memory_evidence_agent"]
+    )
+    memory_entry["agent"] = memory_worker.run
+    conversation_entry = dict(
+        rag2_module._RAG_SUPERVISOR_AGENT_REGISTRY[
+            "conversation_evidence_agent"
+        ]
+    )
+    conversation_entry["agent"] = conversation_worker.run
+
+    monkeypatch.setitem(
+        rag2_module._RAG_SUPERVISOR_AGENT_REGISTRY,
+        "memory_evidence_agent",
+        memory_entry,
+    )
+    monkeypatch.setitem(
+        rag2_module._RAG_SUPERVISOR_AGENT_REGISTRY,
+        "conversation_evidence_agent",
+        conversation_entry,
+    )
+    monkeypatch.setattr(rag2_module, "get_rag_cache2_runtime", lambda: runtime)
+    monkeypatch.setattr(
+        rag2_module,
+        "_initializer_llm",
+        _MultiSlotInitializerLLM(
+            [
+                "Memory-evidence: retrieve primary evidence",
+                "Conversation-evidence: retrieve secondary evidence",
+            ]
+        ),
+    )
+    monkeypatch.setattr(
+        rag2_module,
+        "_continuation_assessor_llm",
+        continuation_llm,
+    )
+    monkeypatch.setattr(rag2_module, "_evaluator_summarizer_llm", _SummaryLLM())
+    monkeypatch.setattr(rag2_module, "_finalizer_llm", _FinalizerLLM())
+    monkeypatch.setattr(rag2_module, "upsert_initializer_entry", _noop_async)
+    monkeypatch.setattr(rag2_module, "record_initializer_hit", _noop_async)
+
+    result = await rag2_module.call_rag_supervisor(
+        original_query="Need primary and secondary evidence.",
+        character_name="<active character>",
+        context={
+            "platform": "qq",
+            "platform_channel_id": "resolved-then-unresolved-test",
+            "global_user_id": "user-1",
+            "prompt_message_context": {
+                "body_text": "Need primary and secondary evidence.",
+                "mentions": [],
+                "attachments": [],
+                "addressed_to_global_user_ids": [],
+                "broadcast": False,
+            },
+        },
+    )
+
+    assert len(memory_worker.calls) == 1
+    assert len(conversation_worker.calls) == 1
+    assert continuation_llm.calls == []
+    assert result["known_facts"][0]["resolved"] is True
+    assert result["known_facts"][1]["continuation"]["should_continue"] is False
+    assert "Existing resolved evidence" in (
+        result["known_facts"][1]["continuation"]["reason"]
     )
 
 

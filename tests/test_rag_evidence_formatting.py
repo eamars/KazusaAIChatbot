@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
-from kazusa_ai_chatbot.rag.evidence_formatting import format_evidence_block
+from kazusa_ai_chatbot.rag.evidence_formatting import (
+    format_evidence_block,
+    sanitize_public_rag_evidence_text,
+)
 from kazusa_ai_chatbot.time_boundary import format_storage_utc_for_llm_seconds
 
 
@@ -47,6 +50,67 @@ def test_format_evidence_block_does_not_emit_blank_sections() -> None:
     )
     assert "Evidence summary:\nUncertainty" not in block
     assert "\n\n" not in block
+
+
+def test_sanitize_public_rag_evidence_text_renders_internal_source_labels() -> None:
+    text = (
+        "recall:user_memory_units at 2026-05-22T10:16:47.993342+00:00 "
+        "confirmed durable_commitment."
+    )
+
+    clean_text = sanitize_public_rag_evidence_text(text)
+
+    assert "recall:" not in clean_text
+    assert "user_memory_units" not in clean_text
+    assert "durable_commitment" not in clean_text
+    assert "2026-05-22T10:16:47.993342+00:00" not in clean_text
+    assert "Recall candidate" in clean_text
+    assert "user memory units" in clean_text
+    assert "2026-05-22 22:16" in clean_text
+
+
+def test_sanitize_public_rag_evidence_text_renders_person_context_labels() -> None:
+    text = (
+        "person_context_agent resolved via user_lookup_agent with "
+        "global_user_id 263c883d-aeff-4e0b-a758-6f69186ae8ec."
+    )
+
+    clean_text = sanitize_public_rag_evidence_text(text)
+
+    assert "person_context_agent" not in clean_text
+    assert "user_lookup_agent" not in clean_text
+    assert "global_user_id" not in clean_text
+    assert "263c883d-aeff-4e0b-a758-6f69186ae8ec" not in clean_text
+    assert "person context" in clean_text
+    assert "user lookup" in clean_text
+
+
+def test_sanitize_public_rag_evidence_text_removes_conversation_source_ids() -> None:
+    text = (
+        "conversation:platform_message_id:1195502528: "
+        "蚝爹油: 这是你第一次来我家么？"
+    )
+
+    clean_text = sanitize_public_rag_evidence_text(text)
+
+    assert "conversation:" not in clean_text
+    assert "platform_message_id" not in clean_text
+    assert "1195502528" not in clean_text
+    assert "Conversation candidate" in clean_text
+    assert "蚝爹油: 这是你第一次来我家么？" in clean_text
+
+
+def test_sanitize_public_rag_evidence_text_removes_ocr_source_id_labels() -> None:
+    text = (
+        "image description includes global_user_id 为 "
+        "d815be2-d6dd-41b7-9026-aa01ea4367a2 and account details."
+    )
+
+    clean_text = sanitize_public_rag_evidence_text(text)
+
+    assert "global_user_id" not in clean_text
+    assert "d815be2-d6dd-41b7-9026-aa01ea4367a2" not in clean_text
+    assert "[source id omitted]" in clean_text
 
 
 def test_format_storage_utc_for_llm_seconds_projects_configured_local_time() -> None:

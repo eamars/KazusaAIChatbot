@@ -101,14 +101,12 @@ def _allows_recency_fallback(task: str) -> bool:
         "current user continuity",
         "private continuity",
         "user memory evidence",
-        "当前用户之间已经形成的私有连续性",
     )
     specific_markers = (
         " about ",
         " around ",
         " relevant to ",
         "exact term",
-        "关于",
     )
     has_broad_marker = any(marker in task_body for marker in broad_markers)
     has_specific_marker = any(marker in task_body for marker in specific_markers)
@@ -116,13 +114,64 @@ def _allows_recency_fallback(task: str) -> bool:
     return return_value
 
 
+def _semantic_query_text(task: str, context: dict[str, Any]) -> str:
+    """Build the semantic query used for scoped memory vector retrieval.
+
+    Args:
+        task: Current memory-evidence slot selected for this worker.
+        context: Trusted RAG runtime context containing decontextualized query
+            fields from the outer supervisor.
+
+    Returns:
+        A compact text payload that preserves slot intent while retaining
+        decontextualized query details the initializer may have omitted.
+    """
+
+    parts: list[str] = []
+    for value in (
+        _task_body(task),
+        text_or_empty(context.get("current_slot")),
+        text_or_empty(context.get("original_query")),
+    ):
+        if not value:
+            continue
+        if value in parts:
+            continue
+        parts.append(value)
+
+    query_text = "\n".join(parts)
+    return query_text
+
+
 def _row_content(row: dict[str, Any]) -> str:
-    """Choose the prompt-facing content field for one memory row."""
-    for field in ("content", "fact", "subjective_appraisal", "relationship_signal"):
-        text = text_or_empty(row.get(field))
-        if text:
-            return text
-    return ""
+    """Build prompt-facing evidence text from one memory row.
+
+    Args:
+        row: User-memory row from storage or a projected evidence payload.
+
+    Returns:
+        Fact text plus appraisal and continuity details when they exist. A
+        pre-computed ``content`` field is treated as authoritative.
+    """
+
+    content = text_or_empty(row.get("content"))
+    if content:
+        return content
+
+    fact = text_or_empty(row.get("fact"))
+    appraisal = text_or_empty(row.get("subjective_appraisal"))
+    relationship = text_or_empty(row.get("relationship_signal"))
+
+    parts: list[str] = []
+    if fact:
+        parts.append(fact)
+    if appraisal and appraisal not in parts:
+        parts.append(f"Subjective appraisal: {appraisal}")
+    if relationship and relationship not in parts:
+        parts.append(f"Continuity signal: {relationship}")
+
+    evidence_text = "\n".join(parts)
+    return evidence_text
 
 
 def _project_row(row: dict[str, Any], global_user_id: str) -> dict[str, Any]:
@@ -328,9 +377,14 @@ not use shared/world memory assumptions.
 1. Read the evidence slot and candidate rows.
 2. Mark a row confirmed only when it directly supports the requested private
    current-user continuity.
-3. Mark a row nearby when it is related but does not directly answer the slot.
-4. Leave unrelated rows out of both confirmed and nearby lists.
-5. If no row directly answers the slot, return no confirmed ids and explain the
+3. Treat a remembered concrete instance as direct support for a broader slot
+   when the row names a specific product, plan, decision, promise, preference,
+   recommendation, or prior interaction that satisfies the requested category.
+4. Use `subjective_appraisal` and `relationship_signal` as supporting context
+   for whether the row answers the slot, but do not invent facts beyond them.
+5. Mark a row nearby when it is related but does not directly answer the slot.
+6. Leave unrelated rows out of both confirmed and nearby lists.
+7. If no row directly answers the slot, return no confirmed ids and explain the
    uncertainty briefly.
 
 # Input Format
@@ -457,8 +511,9 @@ class UserMemoryEvidenceAgent(BaseRAGHelperAgent):
 
         if not rows and not literal_terms:
             query_embedding: list[float] | None = None
+            query_text = _semantic_query_text(task, context)
             try:
-                query_embedding = await get_query_text_embedding(task_body)
+                query_embedding = await get_query_text_embedding(query_text)
             except OpenAIError as exc:
                 logger.info(
                     f"{_AGENT_NAME} embedding unavailable; "
@@ -486,7 +541,8 @@ class UserMemoryEvidenceAgent(BaseRAGHelperAgent):
         nearby_rows: list[dict[str, Any]] = []
         review: dict[str, Any] = {}
         if projected_rows and retrieval_mode == "semantic":
-            review = await _review_user_memory_rows(task, projected_rows)
+            review_task = _semantic_query_text(task, context)
+            review = await _review_user_memory_rows(review_task, projected_rows)
             confirmed_unit_ids = review["confirmed_unit_ids"]
             nearby_unit_ids = review["nearby_unit_ids"]
             nearby_rows = _rows_for_review_ids(projected_rows, nearby_unit_ids)

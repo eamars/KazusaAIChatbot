@@ -97,32 +97,36 @@ _generator_llm = get_llm(
 )
 
 _JUDGE_PROMPT = """\
-你是 `search_conversation_keyword` 的结果评估器。
+You judge whether a `search_conversation_keyword` result resolves the current slot.
 
-# 任务
-- 判断结果是否已经解决槽位。
-- 如果未解决，必须输出可以立刻执行的反馈。
+# Task
+- Decide whether the result resolves the slot.
+- If unresolved, output feedback that the next keyword/filter attempt can use
+  immediately.
 
-# 生成步骤
-1. 先读取 `task`，确认需要命中的字面锚点。
-2. 检查 `result` 是否包含相关消息、错误或空结果。
-3. 只有结果足以解决槽位时才返回 `resolved: true`。
-4. 未解决时，给出下一轮关键词或过滤条件的具体修正。
+# Generation Procedure
+1. Read `task` and identify the literal anchor that must match.
+2. Inspect `result` for relevant messages, errors, or empty output.
+3. Return `resolved: true` only when the result is enough to resolve the slot.
+4. If unresolved, give a specific correction for the next keyword or filters.
+5. Use English for generated control/status text. Preserve source message
+   text, display names, literal anchors, URLs, and filenames in their original
+   source language.
 
-# 输入格式
+# Input Format
 {
-  "task": "外层 RAG supervisor 生成的槽位描述",
-  "result": "search_conversation_keyword 的工具结果"
+  "task": "slot description from the outer RAG supervisor",
+  "result": "tool result from search_conversation_keyword"
 }
 
-# 常见反馈方向
-- 关键词太长，请只保留核心 noun / phrase
-- 没有匹配，请尝试更短或更常见的同义词
-- 需要加入或移除用户/时间过滤
-- 命中内容偏题，需要换成真正的锚点词
+# Common Feedback Directions
+- Keyword too long; keep only the core noun or phrase.
+- No match; try a shorter term or a common synonym.
+- Add or remove user/time filters.
+- Hits are off-topic; change to the real anchor term.
 
-# 输出格式
-请只返回合法 JSON：
+# Output Format
+Return valid JSON only:
 {
   "resolved": true or false,
   "feedback": "string"
@@ -264,7 +268,7 @@ async def _judge(task: str, result: object) -> tuple[bool, str]:
     response = await _judge_llm.ainvoke([system_prompt, human_message])
     verdict = parse_llm_json_output(response.content)
     if not isinstance(verdict, dict):
-        return_value = False, "评估输出无效，请把关键词缩短成最核心的词。"
+        return_value = False, "Invalid judge output; shorten the keyword to the core term."
         return return_value
 
     resolved = bool(verdict.get("resolved", False))

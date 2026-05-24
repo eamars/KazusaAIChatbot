@@ -2,9 +2,18 @@
 
 from __future__ import annotations
 
+import json
+import logging
 from datetime import datetime
 from typing import Any
 
+from langchain_core.messages import HumanMessage, SystemMessage
+
+from kazusa_ai_chatbot.config import (
+    RAG_SUBAGENT_LLM_API_KEY,
+    RAG_SUBAGENT_LLM_BASE_URL,
+    RAG_SUBAGENT_LLM_MODEL,
+)
 from kazusa_ai_chatbot.db import (
     UserMemoryUnitStatus,
     UserMemoryUnitType,
@@ -14,7 +23,9 @@ from kazusa_ai_chatbot.db import (
 )
 from kazusa_ai_chatbot.rag.helper_agent import BaseRAGHelperAgent
 from kazusa_ai_chatbot.time_boundary import parse_storage_utc_datetime
-from kazusa_ai_chatbot.utils import text_or_empty
+from kazusa_ai_chatbot.utils import get_llm, parse_llm_json_output, text_or_empty
+
+logger = logging.getLogger(__name__)
 
 _REQUIRED_CONTEXT_FIELDS = (
     "platform",
@@ -167,6 +178,34 @@ def _candidate(
     return return_value
 
 
+def _candidate_key(candidate: dict[str, str]) -> tuple[str, str, str]:
+    """Return a stable duplicate key for Recall candidates."""
+
+    return_value = (
+        candidate["source"],
+        candidate["claim"],
+        candidate["evidence_time"],
+    )
+    return return_value
+
+
+def _dedupe_candidates(
+    candidates: list[dict[str, str]],
+) -> list[dict[str, str]]:
+    """Remove duplicate Recall candidates while preserving first occurrence."""
+
+    deduped: list[dict[str, str]] = []
+    seen: set[tuple[str, str, str]] = set()
+    for candidate in candidates:
+        key = _candidate_key(candidate)
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(candidate)
+    return_value = deduped
+    return return_value
+
+
 def _result_payload(
     *,
     selected_summary: object = "",
@@ -176,6 +215,10 @@ def _result_payload(
     freshness_basis: object = "",
     conflicts: list[str] | None = None,
     candidates: list[dict[str, str]] | None = None,
+    missing_context: list[str] | None = None,
+    observation_candidates: list[dict[str, str]] | None = None,
+    source_hints: list[dict[str, str]] | None = None,
+    review_uncertainty: object = "",
     error: str | None = None,
 ) -> dict[str, Any]:
     """Build the nested Recall result payload with fixed size caps."""
@@ -197,6 +240,13 @@ def _result_payload(
             for conflict in list(conflicts or [])[:_CONFLICT_LIMIT]
         ],
         "candidates": list(candidates or [])[:29],
+        "missing_context": list(missing_context or []),
+        "observation_candidates": list(observation_candidates or []),
+        "source_hints": list(source_hints or []),
+        "review_uncertainty": _clip_text(
+            review_uncertainty,
+            limit=_OUTPUT_FRESHNESS_BASIS_LIMIT,
+        ),
     }
     if error is not None:
         result_payload["error"] = error
@@ -428,6 +478,284 @@ def _freshness_basis(selected: dict[str, str], mode: str, progress_unavailable: 
     return return_value
 
 
+def _candidate_review_payload(
+    candidates: list[dict[str, str]],
+) -> list[dict[str, str]]:
+    """Project recall candidates into a compact LLM review payload."""
+
+    payload: list[dict[str, str]] = []
+    for index, candidate in enumerate(candidates):
+        payload.append(
+            {
+                "index": str(index),
+                "source": candidate["source"],
+                "claim": candidate["claim"],
+                "temporal_scope": candidate["temporal_scope"],
+                "lifecycle_status": candidate["lifecycle_status"],
+                "evidence_time": candidate["evidence_time"],
+                "authority": candidate["authority"],
+            }
+        )
+    return payload
+
+
+def _ordered_valid_candidate_indexes(
+    raw_value: object,
+    max_index: int,
+) -> list[int]:
+    """Keep reviewer-selected indexes that refer to retrieved candidates."""
+
+    if not isinstance(raw_value, list):
+        indexes: list[int] = []
+        return indexes
+
+    selected_indexes: list[int] = []
+    for value in raw_value:
+        if isinstance(value, int):
+            index = value
+        else:
+            value_text = text_or_empty(value)
+            if not value_text.isdigit():
+                continue
+            index = int(value_text)
+        if index < 0 or index >= max_index:
+            continue
+        if index in selected_indexes:
+            continue
+        selected_indexes.append(index)
+    return selected_indexes
+
+
+def _normalize_recall_review(
+    raw_review: object,
+    candidate_count: int,
+) -> dict[str, Any]:
+    """Validate recall reviewer output without interpreting candidate text."""
+
+    if not isinstance(raw_review, dict):
+        raw_review = {}
+
+    confirmed_indexes = _ordered_valid_candidate_indexes(
+        raw_review.get("confirmed_candidate_indexes"),
+        candidate_count,
+    )
+    nearby_indexes = _ordered_valid_candidate_indexes(
+        raw_review.get("nearby_candidate_indexes"),
+        candidate_count,
+    )
+    source_hints = []
+    raw_source_hints = raw_review.get("source_hints")
+    if isinstance(raw_source_hints, list):
+        for item in raw_source_hints[:3]:
+            source_hint = text_or_empty(item)
+            if source_hint:
+                source_hints.append(source_hint)
+
+    review = {
+        "confirmed_candidate_indexes": confirmed_indexes,
+        "nearby_candidate_indexes": nearby_indexes,
+        "summary": text_or_empty(raw_review.get("summary")),
+        "uncertainty": text_or_empty(raw_review.get("uncertainty")),
+        "source_hints": source_hints,
+    }
+    return review
+
+
+def _recall_slot_needs_candidate_review(
+    *,
+    task: str,
+    mode: str,
+    progress_unavailable: bool,
+    candidates: list[dict[str, str]],
+) -> bool:
+    """Return whether fallback recall candidates need semantic arbitration."""
+
+    if not progress_unavailable:
+        return_value = False
+        return return_value
+    if not candidates:
+        return_value = False
+        return return_value
+
+    durable_candidate_count = sum(
+        1
+        for candidate in candidates
+        if candidate["source"] == "user_memory_units"
+    )
+    if durable_candidate_count <= 1:
+        return_value = False
+        return return_value
+    if mode in _ACTIVE_MODES:
+        return_value = True
+        return return_value
+
+    task_text = task.casefold()
+    review_markers = (
+        "relevant to",
+        "about",
+        "regarding",
+        "for ",
+    )
+    needs_review = any(marker in task_text for marker in review_markers)
+    return_value = needs_review
+    return return_value
+
+
+def _review_observation_candidates(
+    candidates: list[dict[str, str]],
+    indexes: list[int] | None = None,
+) -> list[dict[str, str]]:
+    """Expose unconfirmed recall candidates as continuation observations."""
+
+    selected_candidates = candidates[:6]
+    if indexes is not None:
+        selected_candidates = [
+            candidates[index]
+            for index in indexes
+            if 0 <= index < len(candidates)
+        ][:6]
+
+    observation_candidates: list[dict[str, str]] = []
+    for candidate in selected_candidates:
+        observation_candidates.append(
+            {
+                "content": candidate["claim"],
+                "source": f"recall:{candidate['source']}",
+                "summary": candidate["claim"],
+            }
+        )
+    return observation_candidates
+
+
+def _review_source_hints(review: dict[str, Any]) -> list[dict[str, str]]:
+    """Build continuation source hints from recall-review uncertainty."""
+
+    source_hints: list[dict[str, str]] = []
+    for hint in review["source_hints"]:
+        source_hints.append(
+            {
+                "kind": "recall",
+                "source": hint,
+            }
+        )
+    if not source_hints:
+        source_hints.append(
+            {
+                "kind": "recall",
+                "source": (
+                    "Fallback recall candidates did not directly answer; "
+                    "conversation or memory evidence may be needed for exact "
+                    "historical details."
+                ),
+            }
+        )
+    return source_hints
+
+
+_RECALL_REVIEW_PROMPT = """\
+You review Recall candidates for one active agreement, commitment, plan, or
+episode-position slot. Decide whether any retrieved candidate directly answers
+that slot. Do not invent facts.
+
+# Generation Procedure
+1. Read the Recall slot and identify the essential requested details: concrete
+   entities, dates/times, places, status, obligations, people, and event
+   context.
+2. Confirm a candidate only when it is the same concrete agreement, promise,
+   plan, or episode state requested by the slot.
+3. If the slot contains multiple essential details, a confirmed candidate must
+   cover all of them or clearly entail all of them. Matching only one detail is
+   not direct support.
+4. For `active_episode_agreement`, be strict: a durable commitment candidate
+   must describe the same current/recent agreement, not merely another active
+   commitment in the same broad topic.
+5. For `active_episode_agreement`, a milestone, objective fact, or status
+   record may confirm the slot when it directly states the requested agreement's
+   fulfillment, cancellation, payment, completion, or current status.
+6. Do not confirm a candidate merely because it shares a broad category with
+   the slot, such as both being about dessert, hardware, meetings, or tasks.
+7. Mark a candidate nearby when it is related but not enough to answer.
+8. When unsure, leave it unconfirmed so the caller can search conversation or
+   memory evidence for exact historical details.
+9. If no candidate directly answers, return no confirmed indexes and give a
+   short source hint for what evidence source would likely be needed next.
+
+# Input Format
+{
+  "task": "Recall slot text",
+  "mode": "active_episode_agreement | durable_commitment | episode_position | exact_agreement_history",
+  "candidates": [
+    {
+      "index": "0",
+      "source": "source name",
+      "claim": "candidate claim",
+      "temporal_scope": "candidate time scope",
+      "lifecycle_status": "active | pending | historical",
+      "evidence_time": "visible timestamp if available",
+      "authority": "source authority label"
+    }
+  ]
+}
+
+# Output Format
+Return valid JSON only:
+{
+  "confirmed_candidate_indexes": [0],
+  "nearby_candidate_indexes": [1],
+  "summary": "short factual summary of confirmed candidates, or empty string",
+  "uncertainty": "short uncertainty note, or empty string",
+  "source_hints": ["short hint when no candidate confirms the slot"]
+}
+"""
+_recall_review_llm = get_llm(
+    temperature=0.0,
+    top_p=1.0,
+    model=RAG_SUBAGENT_LLM_MODEL,
+    base_url=RAG_SUBAGENT_LLM_BASE_URL,
+    api_key=RAG_SUBAGENT_LLM_API_KEY,
+)
+
+
+async def _review_recall_candidates(
+    *,
+    task: str,
+    mode: str,
+    candidates: list[dict[str, str]],
+) -> dict[str, Any]:
+    """Ask the reviewer LLM whether recall candidates answer the slot."""
+
+    if not candidates:
+        review = {
+            "confirmed_candidate_indexes": [],
+            "nearby_candidate_indexes": [],
+            "summary": "",
+            "uncertainty": "No recall candidates were available.",
+            "source_hints": [],
+        }
+        return review
+
+    payload = {
+        "task": task,
+        "mode": mode,
+        "candidates": _candidate_review_payload(candidates),
+    }
+    system_prompt = SystemMessage(content=_RECALL_REVIEW_PROMPT)
+    human_message = HumanMessage(
+        content=json.dumps(payload, ensure_ascii=False, default=str)
+    )
+    response = await _recall_review_llm.ainvoke([system_prompt, human_message])
+    raw_review = parse_llm_json_output(response.content)
+    review = _normalize_recall_review(raw_review, len(candidates))
+    logger.info(
+        f"recall_agent candidate review: "
+        f"confirmed={review['confirmed_candidate_indexes']} "
+        f"nearby={review['nearby_candidate_indexes']} "
+        f"uncertainty={review['uncertainty']!r}"
+    )
+    logger.debug(f"recall_agent candidate review raw={raw_review!r}")
+    return review
+
+
 class ProgressCollector:
     """Collect active-episode claims from already-loaded progress state."""
 
@@ -617,15 +945,22 @@ class RecallAgent(BaseRAGHelperAgent):
         scheduled_candidates = await self.scheduled_event_collector.collect(context)
         progress_unavailable = not progress_candidates
 
-        candidates = [
-            *progress_candidates,
-            *commitment_candidates,
-            *scheduled_candidates,
-        ]
+        candidates = _dedupe_candidates(
+            [
+                *progress_candidates,
+                *commitment_candidates,
+                *scheduled_candidates,
+            ]
+        )
 
         if mode in _ACTIVE_MODES and progress_unavailable:
             if commitment_candidates:
-                candidates = [*commitment_candidates, *scheduled_candidates]
+                candidates = _dedupe_candidates(
+                    [
+                        *commitment_candidates,
+                        *scheduled_candidates,
+                    ]
+                )
             else:
                 result_payload = _result_payload(
                     recall_type="active_episode_agreement",
@@ -660,6 +995,53 @@ class RecallAgent(BaseRAGHelperAgent):
         ranked_candidates = _rank_candidates(mode, candidates)
         selected = ranked_candidates[0]
         conflicts = _conflict_notes(candidates)
+        if _recall_slot_needs_candidate_review(
+            task=task,
+            mode=mode,
+            progress_unavailable=progress_unavailable,
+            candidates=ranked_candidates,
+        ):
+            review = await _review_recall_candidates(
+                task=task,
+                mode=mode,
+                candidates=ranked_candidates,
+            )
+            confirmed_indexes = review["confirmed_candidate_indexes"]
+            if not confirmed_indexes:
+                observation_candidates = _review_observation_candidates(
+                    ranked_candidates,
+                    indexes=review["nearby_candidate_indexes"],
+                )
+                result_payload = _result_payload(
+                    selected_summary="",
+                    recall_type=mode,
+                    primary_source="",
+                    supporting_sources=[],
+                    freshness_basis=(
+                        "Fallback recall candidates were available, but none "
+                        "were authoritative enough to answer the requested "
+                        "active recall slot."
+                    ),
+                    conflicts=conflicts,
+                    candidates=ranked_candidates,
+                    missing_context=["recall_evidence"],
+                    observation_candidates=observation_candidates,
+                    source_hints=_review_source_hints(review),
+                    review_uncertainty=review["uncertainty"],
+                )
+                result = _agent_result(
+                    resolved=False,
+                    result_payload=result_payload,
+                )
+                return result
+
+            selected = ranked_candidates[confirmed_indexes[0]]
+            if review["summary"]:
+                selected["claim"] = _clip_text(
+                    review["summary"],
+                    limit=_CANDIDATE_CLAIM_LIMIT,
+                )
+
         supporting_sources = sorted(
             {
                 candidate["source"]

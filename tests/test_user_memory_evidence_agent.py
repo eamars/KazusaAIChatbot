@@ -29,6 +29,24 @@ def _memory_row(unit_id: str, fact: str, **overrides: object) -> dict[str, objec
     return row
 
 
+def test_user_memory_project_row_preserves_contextual_fields() -> None:
+    row = _memory_row(
+        "unit-mac",
+        "用户正在考虑购买 Mac Studio，主要用于 AI 模型运行。",
+        subjective_appraisal=(
+            "杏山千纱认真给出了 M2 Ultra 版的推荐并提示内存带宽瓶颈。"
+        ),
+        relationship_signal="后续提及硬件选购时可关联此推荐细节。",
+    )
+
+    projected = module._project_row(row, "user-1")
+
+    content = projected["content"]
+    assert "Mac Studio" in content
+    assert "M2 Ultra" in content
+    assert "硬件选购" in content
+
+
 @pytest.mark.asyncio
 async def test_user_memory_evidence_requires_global_user_id(monkeypatch) -> None:
     agent = UserMemoryEvidenceAgent()
@@ -305,6 +323,73 @@ async def test_user_memory_evidence_specific_semantic_miss_is_unresolved(
 
 
 @pytest.mark.asyncio
+async def test_user_memory_evidence_semantic_query_uses_original_query_context(
+    monkeypatch,
+) -> None:
+    agent = UserMemoryEvidenceAgent()
+    calls: dict[str, object] = {}
+
+    async def _embedding(text: str) -> list[float]:
+        calls["embedding_text"] = text
+        return [0.5, 0.4, 0.3]
+
+    async def _vector(global_user_id: str, embedding: list[float], **kwargs):
+        assert global_user_id == "user-1"
+        if "Mac Studio" not in calls["embedding_text"]:
+            return []
+        return [
+            _memory_row(
+                "unit-mac",
+                "用户正在考虑购买 Mac Studio，主要用于 AI 模型运行。",
+                subjective_appraisal=(
+                    "杏山千纱认真给出了 M2 Ultra 版的推荐并提示内存带宽瓶颈。"
+                ),
+                relationship_signal="后续提及硬件选购时可关联此推荐细节。",
+            )
+        ]
+
+    async def _keyword(*args, **kwargs):
+        raise AssertionError("keyword retrieval should not run for semantic query")
+
+    async def _recent(*args, **kwargs):
+        raise AssertionError("recent fallback should not run when vector returns rows")
+
+    async def _review(task: str, rows: list[dict[str, object]]) -> dict[str, object]:
+        calls["review_task"] = task
+        return {
+            "confirmed_unit_ids": ["unit-mac"],
+            "nearby_unit_ids": [],
+            "summary": "The user considered a Mac Studio.",
+            "uncertainty": "",
+        }
+
+    monkeypatch.setattr(module, "get_query_text_embedding", _embedding)
+    monkeypatch.setattr(module, "search_user_memory_units_by_vector", _vector)
+    monkeypatch.setattr(module, "search_user_memory_units_by_keyword", _keyword)
+    monkeypatch.setattr(module, "query_user_memory_units", _recent)
+    monkeypatch.setattr(module, "_review_user_memory_rows", _review, raising=False)
+
+    result = await agent.run(
+        (
+            "Memory-evidence: retrieve durable evidence about user's previous "
+            "considerations regarding Apple hardware for AI model running"
+        ),
+        _context(
+            original_query=(
+                "用户询问之前考虑购买哪台 Apple 机器用于本地 AI 模型运行，"
+                "需要召回 Mac Studio 和 M2 Ultra 推荐。"
+            ),
+        ),
+    )
+
+    assert result["resolved"] is True
+    assert "Mac Studio" in calls["embedding_text"]
+    assert "M2 Ultra" in calls["review_task"]
+    assert "Mac Studio" in result["result"]["selected_summary"]
+    assert "M2 Ultra" in result["result"]["selected_summary"]
+
+
+@pytest.mark.asyncio
 async def test_user_memory_evidence_falls_back_when_embedding_call_is_unavailable(
     monkeypatch,
 ) -> None:
@@ -452,8 +537,8 @@ async def test_user_memory_evidence_uses_reviewer_confirmed_rows(monkeypatch) ->
         row["unit_id"]
         for row in result["result"]["memory_rows"]
     ] == ["unit-target"]
-    assert result["result"]["selected_summary"] == (
-        "The user prioritized recall precision over cost."
+    assert "The user prioritized recall precision over cost." in (
+        result["result"]["selected_summary"]
     )
     assert [
         row["unit_id"]

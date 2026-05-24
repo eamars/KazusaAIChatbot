@@ -316,6 +316,281 @@ async def test_recall_active_mode_uses_commitment_before_scheduled_event(monkeyp
 
 
 @pytest.mark.asyncio
+async def test_recall_review_rejects_unrelated_fallback_commitments(monkeypatch) -> None:
+    """Multiple fallback commitments should not resolve a concrete slot by category."""
+
+    async def _commitments(
+        global_user_id: str,
+        *,
+        unit_types: list[str] | None = None,
+        statuses: list[str] | None = None,
+        limit: int = 100,
+    ) -> list[dict]:
+        del global_user_id, unit_types, statuses, limit
+        return_value = [
+            {
+                "unit_id": "commitment-dessert",
+                "unit_type": UserMemoryUnitType.ACTIVE_COMMITMENT,
+                "status": UserMemoryUnitStatus.ACTIVE,
+                "fact": "The user owes the character a dessert challenge reward.",
+                "updated_at": "2026-05-01T22:00:00+00:00",
+            },
+            {
+                "unit_id": "commitment-noodle",
+                "unit_type": UserMemoryUnitType.ACTIVE_COMMITMENT,
+                "status": UserMemoryUnitStatus.ACTIVE,
+                "fact": "The user promised to cook noodles as compensation.",
+                "updated_at": "2026-05-01T23:00:00+00:00",
+            },
+        ]
+        return return_value
+
+    async def _review(
+        *,
+        task: str,
+        mode: str,
+        candidates: list[dict[str, str]],
+    ) -> dict[str, object]:
+        del task, mode, candidates
+        return_value = {
+            "confirmed_candidate_indexes": [],
+            "nearby_candidate_indexes": [0],
+            "summary": "",
+            "uncertainty": "Only nearby fallback commitments were found.",
+            "source_hints": ["Search conversation evidence for exact history."],
+        }
+        return return_value
+
+    monkeypatch.setattr(recall_module, "query_user_memory_units", _commitments)
+    monkeypatch.setattr(recall_module, "query_pending_scheduled_events", _empty_scheduled_events)
+    monkeypatch.setattr(recall_module, "get_conversation_history", _empty_history)
+    monkeypatch.setattr(recall_module, "_review_recall_candidates", _review)
+
+    result = await RecallAgent().run(
+        "Recall: retrieve active_episode_agreement relevant to Beers by Bacon Bros and tiramisu promises",
+        _base_context(conversation_progress=None),
+    )
+
+    assert result["resolved"] is False
+    assert result["result"]["selected_summary"] == ""
+    assert result["result"]["missing_context"] == ["recall_evidence"]
+    assert result["result"]["observation_candidates"][0]["source"] == (
+        "recall:user_memory_units"
+    )
+    assert result["result"]["source_hints"] == [
+        {
+            "kind": "recall",
+            "source": "Search conversation evidence for exact history.",
+        }
+    ]
+
+
+@pytest.mark.asyncio
+async def test_recall_review_accepts_matching_fallback_commitment(monkeypatch) -> None:
+    """A reviewer-confirmed durable fallback commitment remains accepted."""
+
+    async def _commitments(
+        global_user_id: str,
+        *,
+        unit_types: list[str] | None = None,
+        statuses: list[str] | None = None,
+        limit: int = 100,
+    ) -> list[dict]:
+        del global_user_id, unit_types, statuses, limit
+        return_value = [
+            {
+                "unit_id": "commitment-dessert",
+                "unit_type": UserMemoryUnitType.ACTIVE_COMMITMENT,
+                "status": UserMemoryUnitStatus.ACTIVE,
+                "fact": "The user owes the character a dessert challenge reward.",
+                "updated_at": "2026-05-01T22:00:00+00:00",
+            },
+            {
+                "unit_id": "commitment-noodle",
+                "unit_type": UserMemoryUnitType.ACTIVE_COMMITMENT,
+                "status": UserMemoryUnitStatus.ACTIVE,
+                "fact": "The user promised to cook noodles as compensation.",
+                "updated_at": "2026-05-01T23:00:00+00:00",
+            },
+        ]
+        return return_value
+
+    async def _review(
+        *,
+        task: str,
+        mode: str,
+        candidates: list[dict[str, str]],
+    ) -> dict[str, object]:
+        del task, mode, candidates
+        return_value = {
+            "confirmed_candidate_indexes": [1],
+            "nearby_candidate_indexes": [],
+            "summary": "The user promised to cook noodles as compensation.",
+            "uncertainty": "",
+            "source_hints": [],
+        }
+        return return_value
+
+    monkeypatch.setattr(recall_module, "query_user_memory_units", _commitments)
+    monkeypatch.setattr(recall_module, "query_pending_scheduled_events", _empty_scheduled_events)
+    monkeypatch.setattr(recall_module, "get_conversation_history", _empty_history)
+    monkeypatch.setattr(recall_module, "_review_recall_candidates", _review)
+
+    result = await RecallAgent().run(
+        "Recall: retrieve durable_commitment relevant to noodle compensation",
+        _base_context(conversation_progress=None),
+    )
+
+    assert result["resolved"] is True
+    assert result["result"]["primary_source"] == "user_memory_units"
+    assert result["result"]["selected_summary"] == (
+        "The user promised to cook noodles as compensation."
+    )
+
+
+@pytest.mark.asyncio
+async def test_recall_active_review_accepts_exact_durable_memory_fallback(
+    monkeypatch,
+) -> None:
+    """A reviewer-confirmed active memory can answer when progress is absent."""
+
+    async def _commitments(
+        global_user_id: str,
+        *,
+        unit_types: list[str] | None = None,
+        statuses: list[str] | None = None,
+        limit: int = 100,
+    ) -> list[dict]:
+        del global_user_id, unit_types, statuses, limit
+        return_value = [
+            {
+                "unit_id": "commitment-dessert",
+                "unit_type": UserMemoryUnitType.ACTIVE_COMMITMENT,
+                "status": UserMemoryUnitStatus.ACTIVE,
+                "fact": "The user owes the character a dessert challenge reward.",
+                "updated_at": "2026-05-01T22:00:00+00:00",
+            },
+            {
+                "unit_id": "commitment-noodle",
+                "unit_type": UserMemoryUnitType.ACTIVE_COMMITMENT,
+                "status": UserMemoryUnitStatus.ACTIVE,
+                "fact": "The user promised to cook noodles as compensation.",
+                "updated_at": "2026-05-01T23:00:00+00:00",
+            },
+        ]
+        return return_value
+
+    async def _review(
+        *,
+        task: str,
+        mode: str,
+        candidates: list[dict[str, str]],
+    ) -> dict[str, object]:
+        del task, mode, candidates
+        return_value = {
+            "confirmed_candidate_indexes": [1],
+            "nearby_candidate_indexes": [0],
+            "summary": "The user promised to cook noodles as compensation.",
+            "uncertainty": "",
+            "source_hints": [],
+        }
+        return return_value
+
+    monkeypatch.setattr(recall_module, "query_user_memory_units", _commitments)
+    monkeypatch.setattr(
+        recall_module,
+        "query_pending_scheduled_events",
+        _empty_scheduled_events,
+    )
+    monkeypatch.setattr(recall_module, "get_conversation_history", _empty_history)
+    monkeypatch.setattr(recall_module, "_review_recall_candidates", _review)
+
+    result = await RecallAgent().run(
+        "Recall: retrieve active_episode_agreement relevant to noodle compensation",
+        _base_context(conversation_progress=None),
+    )
+
+    assert result["resolved"] is True
+    assert result["result"]["recall_type"] == "durable_commitment"
+    assert result["result"]["primary_source"] == "user_memory_units"
+    assert result["result"]["selected_summary"] == (
+        "The user promised to cook noodles as compensation."
+    )
+    assert (
+        "Active-episode state was unavailable"
+        in result["result"]["freshness_basis"]
+    )
+
+
+@pytest.mark.asyncio
+async def test_recall_active_review_accepts_broad_memory_inventory(
+    monkeypatch,
+) -> None:
+    """A broad reviewed inventory can return multiple durable commitments."""
+
+    async def _commitments(
+        global_user_id: str,
+        *,
+        unit_types: list[str] | None = None,
+        statuses: list[str] | None = None,
+        limit: int = 100,
+    ) -> list[dict]:
+        del global_user_id, unit_types, statuses, limit
+        return_value = [
+            {
+                "unit_id": "commitment-dessert",
+                "unit_type": UserMemoryUnitType.ACTIVE_COMMITMENT,
+                "status": UserMemoryUnitStatus.ACTIVE,
+                "fact": "The user owes the character a dessert challenge reward.",
+                "updated_at": "2026-05-01T22:00:00+00:00",
+            },
+            {
+                "unit_id": "commitment-noodle",
+                "unit_type": UserMemoryUnitType.ACTIVE_COMMITMENT,
+                "status": UserMemoryUnitStatus.ACTIVE,
+                "fact": "The user promised to cook noodles as compensation.",
+                "updated_at": "2026-05-01T23:00:00+00:00",
+            },
+        ]
+        return return_value
+
+    async def _review(
+        *,
+        task: str,
+        mode: str,
+        candidates: list[dict[str, str]],
+    ) -> dict[str, object]:
+        del task, mode, candidates
+        return_value = {
+            "confirmed_candidate_indexes": [0, 1],
+            "nearby_candidate_indexes": [],
+            "summary": "Two active commitments remain relevant.",
+            "uncertainty": "",
+            "source_hints": [],
+        }
+        return return_value
+
+    monkeypatch.setattr(recall_module, "query_user_memory_units", _commitments)
+    monkeypatch.setattr(
+        recall_module,
+        "query_pending_scheduled_events",
+        _empty_scheduled_events,
+    )
+    monkeypatch.setattr(recall_module, "get_conversation_history", _empty_history)
+    monkeypatch.setattr(recall_module, "_review_recall_candidates", _review)
+
+    result = await RecallAgent().run(
+        "Recall: retrieve active_episode_agreement relevant to open commitments",
+        _base_context(conversation_progress=None),
+    )
+
+    assert result["resolved"] is True
+    assert result["result"]["selected_summary"] == (
+        "Two active commitments remain relevant."
+    )
+
+
+@pytest.mark.asyncio
 async def test_recall_exact_history_runs_history_gate(monkeypatch) -> None:
     """Exact agreement history mode should retrieve bounded transcript proof."""
     history_calls: list[dict] = []

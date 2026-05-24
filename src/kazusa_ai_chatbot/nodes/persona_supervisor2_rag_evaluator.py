@@ -22,6 +22,9 @@ from kazusa_ai_chatbot.rag.continuation import (
     empty_continuation_decision,
     validate_refined_query,
 )
+from kazusa_ai_chatbot.rag.evidence_formatting import (
+    sanitize_public_rag_evidence_text,
+)
 from kazusa_ai_chatbot.nodes.persona_supervisor2_rag_initializer import (
     _normalize_initializer_slots,
     rag_initializer,
@@ -73,81 +76,112 @@ def _state_correlation_id(state: ProgressiveRAGState) -> str:
 # ── Evaluator ──────────────────────────────────────────────────────
 
 _EVALUATOR_SUMMARIZER_PROMPT = '''\
-你是一个槽位结果提炼器。给定槽位任务描述和原始工具结果，提炼出一段简洁的中文事实摘要，供后续检索代理和最终回答器使用。
+You distill one RAG2 slot result into a concise factual summary for later
+retrieval agents and the final factual synthesizer.
 
-# 生成步骤
-1. 先读取 `slot` 和 `agent`，确认本次工具结果回答的是哪一个槽位。
-2. 读取 `raw_result`，只提炼其中已经存在的事实和可引用来源。
-3. 参考 `known_facts`，避免重复已经总结过的槽位结论。
-4. 如果 `resolved` 为 false 或 `raw_result` 缺少可用信息，只说明本次来源没有返回什么，不要扩大结论。
+# Generation Procedure
+1. Read `slot` and `agent` to identify the evidence target answered by this
+   result.
+2. Read `raw_result` and extract only facts and readable sources already
+   present there.
+3. Use `known_facts` only to avoid repeating earlier slot conclusions.
+4. If `resolved` is false or `raw_result` lacks usable evidence, state what
+   this source did not confirm without broadening the conclusion.
+5. Use English for generated control words and source-status prose. Preserve
+   display names, quotes, URLs, filenames, code/model labels, and message text
+   in their original source language.
 
-# 摘要要求
-- 保留 display_name、URL 等可读来源；不要把 global_user_id 或 source id 写进摘要。
-- 如果内容是对话记录，列出 1-10 条最相关的消息摘要（说话人 + 关键内容）
-- 如果内容是用户画像或持久记忆，提炼关键事实
-- 如果槽位未解决（resolved: false），简洁说明本次检索的来源没有返回什么
-- 如果 raw_result 为空，不要推断先前槽位失败；只有 known_facts 明确显示先前槽位 unresolved 时才可这样说
+# Summary Requirements
+- Keep readable sources such as display_name and URL. Do not include
+  global_user_id or source ids.
+- For conversation rows, list 1-10 most relevant message summaries as
+  speaker plus key content.
+- For profile or durable memory payloads, extract the key facts.
+- For unresolved slots, briefly state that this retrieval source did not
+  confirm the slot.
+- If raw_result is empty, do not infer that previous slots failed unless
+  known_facts explicitly shows that.
 
-# 输入格式
-human payload 是以下 JSON：
+# Input Format
+The human payload is JSON:
 {
-    "slot": "当前槽位任务描述",
-    "agent": "执行该槽位的 agent 名称",
+    "slot": "current slot description",
+    "agent": "agent name that executed the slot",
     "resolved": true,
-    "raw_result": "工具原始输出，可以是 dict/list/string/null",
+    "raw_result": "raw tool output; dict/list/string/null",
     "known_facts": [{"slot": "...", "agent": "...", "resolved": true, "summary": "...", "raw_result": "...", "attempts": 1}]
 }
 
-# Recall 结果
-- 如果 `agent` 是 `recall_agent` 且 `raw_result.selected_summary` 存在，必须保留该 selected_summary 的核心内容。
-- 可补充 `primary_source` 与 `supporting_sources`，但不要把 progress-only recall 当成长期事实来源。
+# Recall Results
+- If `agent` is `recall_agent` and `raw_result.selected_summary` exists,
+  preserve its core content.
+- You may add `primary_source` and `supporting_sources`, but do not treat
+  progress-only recall as long-term fact storage.
 
-# 输出格式
-- 不超过 200 字，纯文本，无 JSON 外壳
+# Output Format
+- Plain text only, no JSON wrapper.
+- Keep under 200 Chinese characters or 120 English words.
 '''
 
 _EVALUATOR_SUMMARIZER_USER_PROFILE_PROMPT = '''\
-你是一个用户/角色画像槽位结果提炼器。给定 Profile 槽位、原始画像结果、以及先前身份解析结果，提炼一段简洁中文事实摘要。
+You distill a Profile/Person-context slot result into a concise factual
+summary. The result may describe the current user, a third-party user, or the
+active character's own public profile.
 
-# 字段语义（必须遵守）
-- user_memory_context：当前用户的统一记忆投影。每条记录都包含 fact、subjective_appraisal、relationship_signal，可分别作为事实锚点、角色的主观评价、未来互动信号。
-- objective_facts、milestones、active_commitments 若出现，应来自 user_memory_context 内部分类，不再作为旧的独立画像来源处理。
-- 如果 raw_result 包含 name/description/gender/age/birthday/backstory/self_image，且不包含 user_memory_context：
-  这是角色自己的公开资料或自我画像。按“角色自身资料”总结，不要当成第三方用户画像。
+# Field Semantics
+- `user_memory_context` is the unified current-user memory projection. Each
+  row may include `fact`, `subjective_appraisal`, and `relationship_signal`;
+  treat these as fact anchor, character-side appraisal, and future interaction
+  signal respectively.
+- `objective_facts`, `milestones`, and `active_commitments`, when present,
+  are sections inside `user_memory_context`, not legacy standalone profile
+  sources.
+- If raw_result contains name/description/gender/age/birthday/backstory or
+  self_image without user_memory_context, it is the active character's own
+  public profile or self-image. Summarize it as character profile data, not a
+  third-party user profile.
 
-# 生成步骤
-1. 先读取 `slot`、`agent` 与 `known_facts`，确认本次 profile 结果对应当前用户、第三方用户还是角色自身。
-2. 如果 `raw_result` 包含 `user_memory_context`，按五类记忆单元总结：先写事实锚点，再写角色的主观评价和关系信号。
-3. 如果 `raw_result` 是角色公开资料或 `self_image`，按角色自身资料总结，不要写成用户画像。
-4. 只使用 `raw_result` 中已有的信息；未知字段保持未知，不要补全。
+# Generation Procedure
+1. Read `slot`, `agent`, and `known_facts` to decide whether this profile
+   result belongs to the current user, a third-party user, or the active
+   character.
+2. If `raw_result` contains `user_memory_context`, summarize memory-unit
+   facts first, then character-side appraisal and relationship signal.
+3. If `raw_result` is public character profile or `self_image`, summarize it
+   as the character's own profile.
+4. Use only information present in raw_result. Leave unknown fields unknown.
+5. Use English for generated control/status prose. Preserve source content,
+   names, and quotes in their original source language.
 
-# 摘要要求
-- 保留 global_user_id、display_name 等对后续步骤有用的标识。
-- 明确区分“目标用户是谁”、事实锚点是什么、角色的主观评价是什么。
-- 只总结 raw_result 中已有的信息，不要补全未知信息。
+# Summary Requirements
+- Keep useful identifiers such as global_user_id and display_name when needed
+  by later steps.
+- Distinguish the target user, fact anchors, and character-side appraisal.
+- Do not fill unknown information.
 
-# 输入格式
-human payload 是以下 JSON：
+# Input Format
+The human payload is JSON:
 {
-    "slot": "当前 Profile 槽位任务描述",
+    "slot": "current Profile slot description",
     "agent": "user_profile_agent",
     "resolved": true,
     "raw_result": {
-        "global_user_id": "用户 UUID",
-        "display_name": "用户显示名",
+        "global_user_id": "user UUID",
+        "display_name": "user display name",
         "user_memory_context": {
-            "stable_patterns": [{"fact": "...", "subjective_appraisal": "...", "relationship_signal": "...", "updated_at": "本地时间YYYY-MM-DD HH:MM"}],
-            "recent_shifts": [{"fact": "...", "subjective_appraisal": "...", "relationship_signal": "...", "updated_at": "本地时间YYYY-MM-DD HH:MM"}],
-            "objective_facts": [{"fact": "...", "subjective_appraisal": "...", "relationship_signal": "...", "updated_at": "本地时间YYYY-MM-DD HH:MM"}],
-            "milestones": [{"fact": "...", "subjective_appraisal": "...", "relationship_signal": "...", "updated_at": "本地时间YYYY-MM-DD HH:MM"}],
-            "active_commitments": [{"fact": "...", "subjective_appraisal": "...", "relationship_signal": "...", "updated_at": "本地时间YYYY-MM-DD HH:MM", "due_at": "可选本地到期时间YYYY-MM-DD HH:MM", "due_state": "no_due_date | future_due | due_today | past_due | unknown_due_date"}]
+            "stable_patterns": [{"fact": "...", "subjective_appraisal": "...", "relationship_signal": "...", "updated_at": "local YYYY-MM-DD HH:MM"}],
+            "recent_shifts": [{"fact": "...", "subjective_appraisal": "...", "relationship_signal": "...", "updated_at": "local YYYY-MM-DD HH:MM"}],
+            "objective_facts": [{"fact": "...", "subjective_appraisal": "...", "relationship_signal": "...", "updated_at": "local YYYY-MM-DD HH:MM"}],
+            "milestones": [{"fact": "...", "subjective_appraisal": "...", "relationship_signal": "...", "updated_at": "local YYYY-MM-DD HH:MM"}],
+            "active_commitments": [{"fact": "...", "subjective_appraisal": "...", "relationship_signal": "...", "updated_at": "local YYYY-MM-DD HH:MM", "due_at": "optional local due time YYYY-MM-DD HH:MM", "due_state": "no_due_date | future_due | due_today | past_due | unknown_due_date"}]
         }
     },
     "known_facts": [{"slot": "...", "agent": "...", "resolved": true, "summary": "...", "raw_result": "...", "attempts": 1}]
 }
 
-# 输出格式
-- 不超过 220 字，纯文本，无 JSON 外壳。
+# Output Format
+- Plain text only, no JSON wrapper.
+- Keep under 220 Chinese characters or 140 English words.
 '''
 
 _evaluator_summarizer_llm = get_llm(
@@ -178,7 +212,7 @@ async def _summarize_agent_result(
         known_facts: Facts resolved before this slot.
 
     Returns:
-        A concise Chinese-language summary of the key facts extracted.
+        A concise factual summary with English RAG2 control prose.
     """
     if agent_name == "user_profile_agent":
         prompt = _EVALUATOR_SUMMARIZER_USER_PROFILE_PROMPT
@@ -237,14 +271,17 @@ def _unresolved_summary(slot: str, raw_result: object) -> str:
                     continue
                 if content:
                     preview_parts.append(content)
-            preview = '；'.join(preview_parts)
+            preview = '; '.join(preview_parts)
             if preview:
                 summary = (
-                    f'检索到候选结果，但未确认足以解决槽位。'
-                    f'槽位: {slot}。候选: {preview}'
+                    f'Retrieved candidates, but none were confirmed enough '
+                    f'to resolve the slot. Slot: {slot}. Candidates: {preview}'
                 )
                 return summary
-            summary = f'检索到候选结果，但未确认足以解决槽位。槽位: {slot}'
+            summary = (
+                f'Retrieved candidates, but none were confirmed enough '
+                f'to resolve the slot. Slot: {slot}'
+            )
             return summary
 
         missing_context = _compact_continuation_text_list(
@@ -260,21 +297,22 @@ def _unresolved_summary(slot: str, raw_result: object) -> str:
                     incompatible_routes.append(route)
 
             if incompatible_routes:
-                route_text = '、'.join(incompatible_routes)
+                route_text = ', '.join(incompatible_routes)
                 summary = (
-                    f'检索来源不匹配，当前槽位应由 {route_text} 处理；'
-                    f'未将该结果解释为记录不存在。槽位: {slot}'
+                    f'Retrieval source mismatch; this slot should be handled '
+                    f'by {route_text}. This is not evidence that no record '
+                    f'exists. Slot: {slot}'
                 )
                 return summary
 
-            context_text = '、'.join(missing_context)
+            context_text = ', '.join(missing_context)
             summary = (
-                f'检索缺少必要上下文，未确认槽位。'
-                f'槽位: {slot}。缺少: {context_text}'
+                f'Retrieval lacked required context and did not confirm the '
+                f'slot. Slot: {slot}. Missing: {context_text}'
             )
             return summary
 
-    summary = f'检索未返回相关结果。槽位: {slot}'
+    summary = f'Retrieval returned no relevant confirmed result. Slot: {slot}'
     return summary
 
 
@@ -426,6 +464,71 @@ def _has_continuation_observation(payload: dict[str, object]) -> bool:
     return has_material
 
 
+def _slot_prefix(slot: object) -> str:
+    """Return the semantic prefix before a planned RAG slot separator."""
+
+    slot_text = str(slot).strip()
+    prefix, _, _ = slot_text.partition(":")
+    normalized_prefix = prefix.casefold()
+    return normalized_prefix
+
+
+def _pending_slots_can_absorb_continuation(
+    payload: dict[str, object],
+) -> bool:
+    """Return whether queued evidence slots should run before re-entry."""
+
+    pending_slots = payload["pending_slots"]
+    if not isinstance(pending_slots, list):
+        return_value = False
+        return return_value
+
+    evidence_prefixes = {"conversation-evidence", "memory-evidence"}
+    can_absorb = any(
+        _slot_prefix(slot) in evidence_prefixes
+        for slot in pending_slots
+    )
+    return can_absorb
+
+
+def _has_resolved_known_fact(known_facts: list[dict]) -> bool:
+    """Return whether the current RAG run already found usable evidence."""
+
+    has_resolved_fact = any(
+        fact.get("resolved") is True
+        for fact in known_facts
+    )
+    return has_resolved_fact
+
+
+def _memory_miss_after_recall_should_finalize(
+    payload: dict[str, object],
+) -> bool:
+    """Return whether Recall plus memory miss is enough to finalize."""
+
+    if payload["agent"] != "memory_evidence_agent":
+        return_value = False
+        return return_value
+
+    known_facts = payload["known_facts"]
+    if not isinstance(known_facts, list):
+        return_value = False
+        return return_value
+
+    has_unresolved_recall = False
+    for fact in known_facts:
+        if not isinstance(fact, dict):
+            continue
+        if fact.get("resolved") is True:
+            return_value = False
+            return return_value
+        if fact.get("agent") == "recall_agent" and fact.get("resolved") is False:
+            has_unresolved_recall = True
+
+    return_value = has_unresolved_recall
+    return return_value
+
+
 def _accepted_continuation_count(known_facts: list[dict]) -> int:
     """Count prior accepted refined-query re-entries in this RAG run."""
     count = 0
@@ -470,40 +573,63 @@ def _refined_initializer_context(
 
 
 _CONTINUATION_ASSESSOR_PROMPT = '''\
-你只负责判断是否需要把上一轮未解决检索的观察材料合并成一个新的用户查询，再交给现有初始化器重新规划。
-不要回答用户。不要生成槽位、前缀、agent 名、工具名、数据库参数或下一步列表。
+You decide whether unresolved retrieval observations should be folded into a
+new self-contained user query and sent back to the existing initializer.
+Do not answer the user. Do not generate slots, prefixes, agent names, tool
+names, database parameters, or step lists.
 
-# 决策顺序
-1. 先判断是否必须停止。命中任一停止条件时，should_continue=false 且 refined_query=""。
-2. 停止条件：观察材料无关、噪声、只说明失败，或没有提供能改善下一轮查询的信息。
-3. 停止条件：观察材料说答案取决于用户尚未提供的用途、预算、偏好、范围、权限、时间或地点。
-4. 停止条件：下一轮查询只能写成"根据我的用途/预算/偏好..."这类占位请求。
-5. 未命中停止条件时，再判断能否继续。只有观察材料提供了现在就能使用的知识、来源方向、约束或检索策略，才允许 should_continue=true。
-6. true 时 refined_query 必须是自包含、现在可执行的自然语言查询：包含原问题目标和观察材料中的有用知识；不要依赖隐藏上下文。
+# Decision Order
+1. First decide whether continuation must stop. If any stop condition applies,
+   return should_continue=false and refined_query="".
+2. Stop when observations are unrelated, noisy, failure-only, or provide no
+   information that can improve the next query.
+3. Stop when observations say the answer depends on user-provided use case,
+   budget, preference, scope, permission, time, or location that is still
+   missing.
+4. Stop when the next query would only be a placeholder such as "based on my
+   use case/budget/preferences".
+5. Stop when observations are merely side candidates in the same broad
+   category, such as other commitments, other food, other devices, other
+   images, or other historical events, but do not cover the original target's
+   key object, time, source, or event. Do not enumerate just to prove absence.
+6. Stop when the requested source was already searched and only
+   related/nearby/unconfirmed candidates remain, with no new source, message
+   position, time range, person identity, or executable constraint.
+7. Continue when the current source is memory_evidence but the slot target is
+   clearly media shared in conversation, such as an image, photo, screenshot,
+   attachment, illustration, or OCR description. These usually belong in
+   conversation evidence rather than durable memory.
+8. Otherwise continue only when observations provide immediately usable
+   knowledge, source direction, constraints, or retrieval strategy.
+9. If true, refined_query must be self-contained natural language including
+   the original target and useful observation material. Do not rely on hidden
+   context.
+10. Use English for generated control/status prose. Preserve names, quotes,
+   URLs, filenames, and source text in their original source language.
 
-# 输入格式
-用户消息是 JSON：
+# Input Format
+The user message is JSON:
 {
-  "original_query": "去上下文化后的用户问题",
-  "current_slot": "刚失败的槽位",
-  "agent": "产生未解决结果的 agent",
+  "original_query": "decontextualized user question",
+  "current_slot": "slot that just failed",
+  "agent": "agent that produced the unresolved result",
   "resolved": false,
-  "source_policy": "当前来源选择说明",
-  "missing_context": ["当前来源缺失的上下文"],
-  "conflicts": ["当前来源发现的冲突"],
-  "observation_candidates": [{"content": "未能回答但可能有用的观察材料"}],
-  "source_hints": [{"kind": "线索类型", "source": "线索来源"}],
-  "user_resolution_hints": ["已发现需要用户补充的约束"],
+  "source_policy": "current source selection note",
+  "missing_context": ["missing context from current source"],
+  "conflicts": ["conflicts found by current source"],
+  "observation_candidates": [{"content": "observation that did not answer but may help"}],
+  "source_hints": [{"kind": "hint kind", "source": "hint source"}],
+  "user_resolution_hints": ["constraints that require user input"],
   "known_facts": [{"slot": "...", "agent": "...", "resolved": true, "summary": "..."}],
-  "pending_slots": ["已经在等待的槽位"]
+  "pending_slots": ["slots already waiting"]
 }
 
-# 输出格式
-只返回合法 JSON：
+# Output Format
+Return valid JSON only:
 {
   "should_continue": true,
-  "refined_query": "继续时填写自包含自然语言查询；停止时为空字符串",
-  "reason": "简短诊断说明，仅用于日志和 trace"
+  "refined_query": "self-contained natural-language query when continuing; empty string when stopping",
+  "reason": "short diagnostic note for logs and trace only"
 }
 '''
 _continuation_assessor_llm = get_llm(
@@ -525,6 +651,36 @@ async def _assess_continuation(
     """Classify an unresolved observation and validate refined-query re-entry."""
     if not _has_continuation_observation(observation_payload):
         decision = empty_continuation_decision()
+        return decision
+
+    if _pending_slots_can_absorb_continuation(observation_payload):
+        decision: RAGContinuationDecision = {
+            "should_continue": False,
+            "refined_query": "",
+            "reason": (
+                "Existing pending evidence slots should run before "
+                "initializer re-entry."
+            ),
+        }
+        logger.info(
+            f"RAG2 continuation skipped: "
+            f"reason={log_preview(decision['reason'])}"
+        )
+        return decision
+
+    if _memory_miss_after_recall_should_finalize(observation_payload):
+        decision = {
+            "should_continue": False,
+            "refined_query": "",
+            "reason": (
+                "Recall and memory evidence were both unresolved; finalize "
+                "the negative result instead of broad query expansion."
+            ),
+        }
+        logger.info(
+            f"RAG2 continuation skipped: "
+            f"reason={log_preview(decision['reason'])}"
+        )
         return decision
 
     if continuation_count >= MAX_CONTINUATION_DECISIONS_PER_RAG_RUN:
@@ -669,12 +825,26 @@ async def rag_evaluator(state: ProgressiveRAGState) -> dict:
             remaining_slots=remaining_slots,
         )
         if loop_count < _MAX_LOOP_COUNT:
-            continuation_decision = await _assess_continuation(
-                observation_payload=observation_payload,
-                original_query=state.get("original_query", ""),
-                previous_refined_queries=_previous_refined_queries(known_facts),
-                continuation_count=_accepted_continuation_count(known_facts),
-            )
+            if _has_resolved_known_fact(known_facts):
+                continuation_decision = {
+                    "should_continue": False,
+                    "refined_query": "",
+                    "reason": (
+                        "Existing resolved evidence should be finalized before "
+                        "secondary query expansion."
+                    ),
+                }
+                logger.info(
+                    f"RAG2 continuation skipped: "
+                    f"reason={log_preview(continuation_decision['reason'])}"
+                )
+            else:
+                continuation_decision = await _assess_continuation(
+                    observation_payload=observation_payload,
+                    original_query=state.get("original_query", ""),
+                    previous_refined_queries=_previous_refined_queries(known_facts),
+                    continuation_count=_accepted_continuation_count(known_facts),
+                )
 
     new_fact = {
         "slot": slot,
@@ -719,43 +889,60 @@ async def rag_evaluator(state: ProgressiveRAGState) -> dict:
 # ── Finalizer ──────────────────────────────────────────────────────
 
 _FINALIZER_PROMPT = '''\
-你是一个事实总结员。请根据 `known_facts` 生成简短事实摘要。
+You are a factual synthesizer. Generate a short factual summary from
+`known_facts`.
 
-# 生成步骤
-1. 先读取 `original_query`，确认本次摘要需要覆盖的事实类型。
-2. 读取 `time_context`，将“今天/昨天/前天”等相对日期解释为角色本地日期。
-3. 按顺序读取 `known_facts`，只使用 resolved 槽位中的 summary 和 raw_result。
-4. 如果 user_profile_agent 的 raw_result 包含 user_memory_context，区分 fact、subjective_appraisal、relationship_signal 三种语义。
-5. 如果某个必要槽位 unresolved，只说明缺少该槽位信息。
-6. 如果 agent="recall_agent"，优先使用 raw_result.selected_summary 总结约定/承诺/进度事实。
-7. 输出一段短的事实摘要；说话人、来源、时间和引用都应来自 `known_facts` 中可见内容。
+# Generation Procedure
+1. Read `original_query` to identify the fact types this summary must cover.
+2. Read `time_context`; interpret relative dates such as today, yesterday, or
+   two days ago using the character-local date.
+3. Read `known_facts` in order. Use only summaries and raw_result from
+   resolved slots.
+4. If user_profile_agent raw_result contains user_memory_context, distinguish
+   fact, subjective_appraisal, and relationship_signal.
+5. If a necessary slot is unresolved, state which part is missing.
+6. If agent="recall_agent", prefer raw_result.selected_summary for agreement,
+   commitment, or episode-position facts.
+7. Produce one short factual summary. Speakers, sources, times, and quotes
+   must come from visible known_facts content.
+8. Use English for generated control/status prose. Preserve source message
+   text, display names, quoted text, URLs, filenames, and code/model labels in
+   their original source language.
 
-# 准则
-- 围绕 `original_query` 需要的事实组织摘要，不要复述查找过程。
-- 如果 known_facts 为空，说明本次 RAG 没有需要检索的外部/内部事实；不要说“缺少关于该问题的具体信息”。
-- 如果某个槽位未能解决（resolved: false），如实告知缺少哪一部分信息。
-- 不要把某个来源没有检索结果扩大成“没有任何记录/没有互动记录”；只能说明实际查询过的来源没有返回结果。
-- 引用来源 URL 或对话来源时尽量保留。
-- 对 conversation evidence，按“可见来源/说话人标签 + 时间 + 内容”的方式摘要；没有可见标签时使用“说话人”。
-- 引用对话原文时，保留原文内部的人称，不要改写引用内容。
-- 当 known_facts 中 agent="user_profile_agent" 且 raw_result 包含 user_memory_context：
-  fact 是事实锚点，subjective_appraisal 是画像来源的主观评价，relationship_signal 是未来互动信号。
-  回答时不要把 subjective_appraisal 误写成目标用户自己的感受。
-- 当 known_facts 中 agent="user_profile_agent" 且 raw_result 是公开资料或 self_image：
-  这是 self_image 或公开资料对应的主体资料。回答自我资料问题时，可以使用这些公开资料；
-  不要误写成第三方用户画像。
-- 当 known_facts 中 agent="recall_agent" 且 raw_result 包含 selected_summary：
-  这是当前约定/承诺/进度的已仲裁回忆结果。直接使用 selected_summary 回答，不要改搜关键字或把它改写成长期设定。
+# Rules
+- Organize the summary around facts needed by `original_query`; do not repeat
+  the search process.
+- If known_facts is empty, state that this RAG run had no external/internal
+  facts to retrieve. Do not claim that specific information is missing.
+- If a slot is unresolved, state the missing part truthfully.
+- Do not broaden one source miss into "no record exists" or "no interaction
+  exists"; only state what the searched source returned.
+- Preserve readable URL or conversation source references where possible.
+- For conversation evidence, summarize as visible source/speaker label plus
+  time plus content. If no visible label exists, use "speaker".
+- When quoting message text, preserve the quote's original pronouns.
+- When known_facts has agent="user_profile_agent" and raw_result contains
+  user_memory_context, fact is the fact anchor, subjective_appraisal is the
+  profile source's character-side appraisal, and relationship_signal is the
+  future interaction signal. Do not miswrite subjective_appraisal as the target
+  user's own feeling.
+- When known_facts has agent="user_profile_agent" and raw_result is public
+  profile or self_image, that is the subject's own profile data. Use it for
+  self-profile questions, not as third-party user profile memory.
+- When known_facts has agent="recall_agent" and raw_result contains
+  selected_summary, it is the arbitrated recall result for current agreement,
+  commitment, or progress. Use selected_summary directly; do not turn it into
+  a long-term setting or search-keyword rewrite.
 
-# 输入格式
+# Input Format
 {
-    "original_query": "用户原始问题",
+    "original_query": "user original question",
     "time_context": {"current_local_datetime": "YYYY-MM-DD HH:MM", "current_local_weekday": "Weekday"},
-    "known_facts": [{"slot": ..., "agent": ..., "resolved": ..., "summary": "简洁事实摘要", "raw_result": "原始工具输出（如需引用原文）", "attempts": ...}, ...]
+    "known_facts": [{"slot": ..., "agent": ..., "resolved": ..., "summary": "concise fact summary", "raw_result": "raw tool output when needed for quotes", "attempts": ...}, ...]
 }
 
-# 输出格式
-请直接返回一段自然语言事实摘要（纯文本，无 JSON 外壳）。
+# Output Format
+Return one natural-language factual summary as plain text with no JSON wrapper.
 - no markdown formatting
 - preserve visible source/speaker labels
 - no broad interpretation beyond short extractive summaries
@@ -767,9 +954,9 @@ _finalizer_llm = get_llm(
     base_url=RAG_SUBAGENT_LLM_BASE_URL,
     api_key=RAG_SUBAGENT_LLM_API_KEY,
 )
-_FINALIZER_UNRESOLVED_FACT_LIMIT = 5
-_FINALIZER_UNRESOLVED_SLOT_LIMIT = 200
-_FINALIZER_UNRESOLVED_SUMMARY_LIMIT = 400
+_FINALIZER_UNRESOLVED_STATUS_LIMIT = 4
+_FINALIZER_UNRESOLVED_CANDIDATE_LIMIT = 6
+_FINALIZER_UNRESOLVED_CANDIDATE_TEXT_LIMIT = 180
 
 
 def _finalizer_time_context(state: ProgressiveRAGState) -> dict[str, object]:
@@ -817,32 +1004,198 @@ def _all_known_facts_unresolved(known_facts: object) -> bool:
     return return_value
 
 
-def _unresolved_finalizer_answer(known_facts: list[dict]) -> str:
-    """Summarize all-unresolved RAG output without inferring absence."""
+def _unresolved_fact_label(fact: dict) -> str:
+    """Return a compact source label for an unresolved fact."""
 
-    fact_lines: list[str] = []
-    for fact in known_facts[:_FINALIZER_UNRESOLVED_FACT_LIMIT]:
-        slot = _clip_llm_summary_text(
-            fact.get("slot", ""),
-            limit=_FINALIZER_UNRESOLVED_SLOT_LIMIT,
+    agent = _clip_llm_summary_text(
+        fact.get("agent", ""),
+        limit=80,
+    )
+    if agent:
+        return agent
+
+    slot = _clip_llm_summary_text(
+        fact.get("slot", ""),
+        limit=80,
+    )
+    if slot:
+        return slot
+
+    return_value = "unknown_source"
+    return return_value
+
+
+def _unresolved_fact_status(fact: dict) -> str:
+    """Describe why one fact is still unresolved without dumping candidates."""
+
+    label = _unresolved_fact_label(fact)
+    raw_result = fact.get("raw_result")
+    if isinstance(raw_result, dict):
+        missing_context = _compact_continuation_text_list(
+            raw_result.get("missing_context"),
         )
-        summary = _clip_llm_summary_text(
-            fact.get("summary", ""),
-            limit=_FINALIZER_UNRESOLVED_SUMMARY_LIMIT,
+        incompatible_routes = []
+        for item in missing_context:
+            if not item.startswith("incompatible_intent:"):
+                continue
+            _, _, route = item.partition(":")
+            if route:
+                incompatible_routes.append(route)
+
+        if incompatible_routes:
+            route_text = ", ".join(incompatible_routes)
+            status = f"{label}: source mismatch; should be handled by {route_text}"
+            return status
+
+        has_candidates = bool(
+            raw_result.get("observation_candidates")
+            or raw_result.get("candidates")
         )
-        if slot and summary:
-            fact_lines.append(f"{slot}: {summary}")
+        if has_candidates:
+            status = f"{label}: candidates found but not confirmed enough to answer"
+            return status
+
+        if missing_context:
+            context_text = ", ".join(missing_context)
+            status = f"{label}: missing {context_text}"
+            return status
+
+    status = f"{label}: no confirmed result returned"
+    return status
+
+
+def _candidate_preview_text(candidate: object) -> str:
+    """Return one concise candidate text from a raw unresolved candidate row."""
+
+    if isinstance(candidate, dict):
+        text = ""
+        for key in ("content", "summary", "claim", "fact", "text"):
+            if key in candidate:
+                text = _clip_llm_summary_text(
+                    candidate[key],
+                    limit=_FINALIZER_UNRESOLVED_CANDIDATE_TEXT_LIMIT,
+                )
+                break
+        if not text:
+            return_value = ""
+            return return_value
+
+        source = _clip_llm_summary_text(
+            candidate.get("source", ""),
+            limit=60,
+        )
+        if source:
+            preview = f"{source}: {text}"
+            return preview
+        return text
+
+    preview = _clip_llm_summary_text(
+        candidate,
+        limit=_FINALIZER_UNRESOLVED_CANDIDATE_TEXT_LIMIT,
+    )
+    return preview
+
+
+def _candidate_previews_from_facts(known_facts: list[dict]) -> list[str]:
+    """Collect unresolved candidate text from the provided facts."""
+
+    previews: list[str] = []
+    seen: set[str] = set()
+    for fact in known_facts:
+        raw_result = fact.get("raw_result")
+        if not isinstance(raw_result, dict):
             continue
-        if summary:
-            fact_lines.append(summary)
 
-    details = "；".join(fact_lines)
-    if details:
-        final_answer = f"本次检索没有得到已确认事实。未解决槽位: {details}"
-        return final_answer
+        raw_candidates = raw_result.get("observation_candidates")
+        if not raw_candidates:
+            raw_candidates = raw_result.get("candidates")
+        if not isinstance(raw_candidates, list):
+            continue
 
-    final_answer = "本次检索没有得到已确认事实。"
+        for candidate in raw_candidates:
+            preview = _candidate_preview_text(candidate)
+            if not preview:
+                continue
+            if preview in seen:
+                continue
+            seen.add(preview)
+            previews.append(preview)
+            if len(previews) >= _FINALIZER_UNRESOLVED_CANDIDATE_LIMIT:
+                return previews
+
+    return previews
+
+
+def _unresolved_candidate_previews(known_facts: list[dict]) -> list[str]:
+    """Collect the most relevant nearby candidates for a negative result."""
+
+    recall_facts = [
+        fact
+        for fact in known_facts
+        if fact.get("agent") == "recall_agent"
+    ]
+    recall_previews = _candidate_previews_from_facts(recall_facts)
+    if recall_previews:
+        return recall_previews
+
+    previews = _candidate_previews_from_facts(known_facts)
+    return previews
+
+
+def _unresolved_finalizer_answer(known_facts: list[dict]) -> str:
+    """Summarize all-unresolved RAG output without raw slot dumps."""
+
+    status_lines = [
+        _unresolved_fact_status(fact)
+        for fact in known_facts[:_FINALIZER_UNRESOLVED_STATUS_LIMIT]
+    ]
+    status_lines = [line for line in status_lines if line]
+    candidate_previews = _unresolved_candidate_previews(known_facts)
+
+    final_parts = ["This RAG run found no confirmed facts."]
+    if status_lines:
+        status_text = "; ".join(status_lines)
+        final_parts.append(f" Checked sources: {status_text}.")
+    if candidate_previews:
+        candidate_text = "; ".join(candidate_previews)
+        final_parts.append(f" Nearby but unconfirmed candidates: {candidate_text}.")
+
+    final_answer = "".join(final_parts)
     return final_answer
+
+
+def _finalizer_known_facts_llm_view(
+    known_facts: object,
+) -> list[dict[str, object]]:
+    """Build finalizer input without unresolved candidate evidence leakage."""
+
+    compact_facts = _known_facts_llm_view(known_facts)
+    finalizer_facts: list[dict[str, object]] = []
+    for fact in compact_facts:
+        finalizer_fact = dict(fact)
+        if finalizer_fact.get("resolved") is not False:
+            finalizer_facts.append(finalizer_fact)
+            continue
+
+        raw_result = finalizer_fact.get("raw_result")
+        missing_context: list[str] = []
+        selected_summary = ""
+        if isinstance(raw_result, dict):
+            missing_context = _compact_continuation_text_list(
+                raw_result.get("missing_context"),
+            )
+            selected_summary = _clip_llm_summary_text(
+                raw_result.get("selected_summary", ""),
+            )
+
+        finalizer_fact["raw_result"] = {
+            "missing_context": missing_context,
+            "selected_summary": selected_summary,
+        }
+        finalizer_facts.append(finalizer_fact)
+
+    return_value = finalizer_facts
+    return return_value
 
 
 async def rag_finalizer(state: ProgressiveRAGState) -> dict:
@@ -857,6 +1210,7 @@ async def rag_finalizer(state: ProgressiveRAGState) -> dict:
     known_facts = state.get("known_facts", [])
     if _all_known_facts_unresolved(known_facts):
         final_answer = _unresolved_finalizer_answer(known_facts)
+        final_answer = sanitize_public_rag_evidence_text(final_answer)
         logger.info(
             "RAG2 finalizer deterministic unresolved output: "
             f"answer={log_preview(final_answer)}"
@@ -868,7 +1222,7 @@ async def rag_finalizer(state: ProgressiveRAGState) -> dict:
     finalizer_input = {
         "original_query": state["original_query"],
         "time_context": _finalizer_time_context(state),
-        "known_facts": _known_facts_llm_view(known_facts),
+        "known_facts": _finalizer_known_facts_llm_view(known_facts),
     }
     human_message = HumanMessage(content=json.dumps(finalizer_input, ensure_ascii=False, default=str))
 
@@ -893,5 +1247,6 @@ async def rag_finalizer(state: ProgressiveRAGState) -> dict:
         correlation_id=_state_correlation_id(state),
         duration_ms=_elapsed_ms(started_at),
     )
-    return_value = {"final_answer": response.content}
+    final_answer = sanitize_public_rag_evidence_text(response.content)
+    return_value = {"final_answer": final_answer}
     return return_value

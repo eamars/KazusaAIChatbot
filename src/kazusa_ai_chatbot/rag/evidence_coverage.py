@@ -8,6 +8,7 @@ from typing import Literal, TypedDict
 from kazusa_ai_chatbot.utils import text_or_empty
 
 EvidenceQuality = Literal["confirmed", "partial", "nearby", "missing"]
+CoverageRequirement = Literal["all", "any"]
 
 _MAX_REQUESTED_ITEMS = 8
 _MAX_ITEM_CHARS = 80
@@ -59,10 +60,24 @@ _TARGET_REGION_RE = re.compile(
     r")\b\s*(?P<body>.+)",
     flags=re.IGNORECASE,
 )
+_SPECIFIC_TARGET_MARKER_RE = re.compile(
+    r"\b(?:specifically|especially|in\s+particular)\b"
+    r"|\u7279\u522b\u662f|\u5c24\u5176|\u5177\u4f53(?:\u662f|\u5305\u62ec)?",
+    flags=re.IGNORECASE,
+)
 _MULTI_TARGET_CONNECTIVE_RE = re.compile(
     r"\b(?:and|or|versus|vs\.?|respectively)\b"
     r"|[,;]"
     r"|[\u3001\uff0c\uff1b]"
+    r"|\u548c|\u4e0e|\u53ca|\u5206\u522b",
+    flags=re.IGNORECASE,
+)
+_ANY_TARGET_CONNECTIVE_RE = re.compile(
+    r"\b(?:or|either)\b|\u6216|\u6216\u8005|\u4efb\u4e00",
+    flags=re.IGNORECASE,
+)
+_ALL_TARGET_CONNECTIVE_RE = re.compile(
+    r"\b(?:and|versus|vs\.?|respectively)\b"
     r"|\u548c|\u4e0e|\u53ca|\u5206\u522b",
     flags=re.IGNORECASE,
 )
@@ -120,6 +135,7 @@ class EvidenceCoverage(TypedDict):
     evidence_quality: EvidenceQuality
     confidence: float
     reason: str
+    coverage_requirement: CoverageRequirement
 
 
 def assess_evidence_coverage(
@@ -168,17 +184,20 @@ def assess_evidence_coverage(
         for item in requested_items
         if item not in covered_items
     ]
+    coverage_requirement = _coverage_requirement(task)
 
     evidence_quality = _evidence_quality(
         requested_items=requested_items,
         covered_items=covered_items,
         clean_evidence=clean_evidence,
         worker_resolved=worker_resolved,
+        coverage_requirement=coverage_requirement,
     )
     confidence = _coverage_confidence(
         evidence_quality=evidence_quality,
         requested_items=requested_items,
         covered_items=covered_items,
+        coverage_requirement=coverage_requirement,
     )
     reason = _coverage_reason(
         evidence_quality=evidence_quality,
@@ -186,6 +205,7 @@ def assess_evidence_coverage(
         covered_items=covered_items,
         missing_items=missing_items,
         worker_resolved=worker_resolved,
+        coverage_requirement=coverage_requirement,
     )
     coverage: EvidenceCoverage = {
         "requested_items": requested_items,
@@ -194,6 +214,7 @@ def assess_evidence_coverage(
         "evidence_quality": evidence_quality,
         "confidence": confidence,
         "reason": reason,
+        "coverage_requirement": coverage_requirement,
     }
     return coverage
 
@@ -219,7 +240,7 @@ def requested_coverage_items(task: str) -> list[str]:
     for match in _URL_RE.finditer(task_body):
         _append_unique_item(candidates, match.group(0))
 
-    target_text = _target_region_for_names(task_body)
+    target_text = _specific_target_region(_target_region_for_names(task_body))
     for match in _CAPITALIZED_PHRASE_RE.finditer(target_text):
         _append_unique_item(candidates, match.group(0))
 
@@ -257,6 +278,33 @@ def task_requires_value_evidence(task: str) -> bool:
     task_body = _task_body(task)
     requires_value = _VALUE_TASK_RE.search(task_body) is not None
     return_value = requires_value
+    return return_value
+
+
+def _coverage_requirement(task: str) -> CoverageRequirement:
+    """Return whether all requested targets or any target should resolve.
+
+    Slots that ask for alternatives, such as "A or B", should not reject a
+    result that directly answers one alternative. Slots that ask for
+    comparison, respectively-scoped answers, or conjunction still require every
+    named target.
+    """
+
+    task_body = _strip_scope_annotations(_task_body(task))
+    target_text = _target_region_for_names(task_body)
+    if _ANY_TARGET_CONNECTIVE_RE.search(target_text):
+        if not _ALL_TARGET_CONNECTIVE_RE.search(target_text):
+            return_value: CoverageRequirement = "any"
+            return return_value
+
+        all_match = _ALL_TARGET_CONNECTIVE_RE.search(target_text)
+        any_match = _ANY_TARGET_CONNECTIVE_RE.search(target_text)
+        if any_match is not None and all_match is not None:
+            if any_match.start() < all_match.start():
+                return_value = "any"
+                return return_value
+
+    return_value = "all"
     return return_value
 
 
@@ -327,6 +375,29 @@ def _target_region_for_names(task_body: str) -> str:
     else:
         target_text = stripped
     return target_text
+
+
+def _specific_target_region(target_text: str) -> str:
+    """Return the narrowed target region after a specificity marker.
+
+    Args:
+        target_text: Candidate task text after routing and quote scaffolding
+            have been removed.
+
+    Returns:
+        The region after markers such as ``specifically`` when present. Text
+        before that marker is treated as broad category context, not a separate
+        literal target that selected evidence must repeat.
+    """
+
+    match = _SPECIFIC_TARGET_MARKER_RE.search(target_text)
+    if match is None:
+        return target_text
+
+    specific_text = target_text[match.end():].strip()
+    if not specific_text:
+        return target_text
+    return specific_text
 
 
 def _explicit_anchor_items(task_body: str) -> list[str]:
@@ -472,14 +543,20 @@ def _evidence_quality(
     covered_items: list[str],
     clean_evidence: list[str],
     worker_resolved: bool,
+    coverage_requirement: CoverageRequirement,
 ) -> EvidenceQuality:
     """Classify evidence quality from worker verdict and item coverage."""
 
     if requested_items:
+        enough_coverage = _has_required_coverage(
+            requested_items=requested_items,
+            covered_items=covered_items,
+            coverage_requirement=coverage_requirement,
+        )
         if (
             worker_resolved
             and clean_evidence
-            and len(covered_items) == len(requested_items)
+            and enough_coverage
         ):
             return_value: EvidenceQuality = "confirmed"
             return return_value
@@ -502,15 +579,35 @@ def _evidence_quality(
     return return_value
 
 
+def _has_required_coverage(
+    *,
+    requested_items: list[str],
+    covered_items: list[str],
+    coverage_requirement: CoverageRequirement,
+) -> bool:
+    """Return whether covered items satisfy the slot's target requirement."""
+
+    if coverage_requirement == "any":
+        has_coverage = bool(covered_items)
+        return has_coverage
+    has_coverage = len(covered_items) == len(requested_items)
+    return has_coverage
+
+
 def _coverage_confidence(
     *,
     evidence_quality: EvidenceQuality,
     requested_items: list[str],
     covered_items: list[str],
+    coverage_requirement: CoverageRequirement,
 ) -> float:
     """Return a stable confidence score for the quality label."""
 
     if evidence_quality == "confirmed":
+        if coverage_requirement == "any" and requested_items:
+            ratio = len(covered_items) / len(requested_items)
+            confidence = round(max(ratio, 0.51), 2)
+            return confidence
         return 1.0
     if evidence_quality == "partial" and requested_items:
         ratio = len(covered_items) / len(requested_items)
@@ -528,11 +625,16 @@ def _coverage_reason(
     covered_items: list[str],
     missing_items: list[str],
     worker_resolved: bool,
+    coverage_requirement: CoverageRequirement,
 ) -> str:
     """Build a compact human-readable coverage reason."""
 
     if evidence_quality == "confirmed":
         if requested_items:
+            if coverage_requirement == "any":
+                covered_text = ", ".join(covered_items)
+                reason = f"Evidence covers an allowed alternative: {covered_text}."
+                return reason
             reason = "Evidence covers all requested items."
             return reason
         reason = "Worker returned selected evidence and judged it resolved."

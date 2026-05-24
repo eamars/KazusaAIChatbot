@@ -41,6 +41,10 @@ _CAPABILITY_NAME = "conversation_evidence"
 _AGENT_NAME = "conversation_evidence_agent"
 _UNCACHED_REASON = "capability_orchestrator_uncached"
 _URL_PATTERN = re.compile(r"https?://[^\s)>\]}\"']+")
+_COUNT_INTENT_RE = re.compile(
+    r"\b(?:count|counts|counted|counting)\b",
+    flags=re.IGNORECASE,
+)
 _EXPLICIT_SPEAKER_SCOPE_PATTERN = re.compile(
     r"\bspeaker\s*=\s*(current_user|active_character|any_speaker)\b",
     re.IGNORECASE,
@@ -78,6 +82,31 @@ _RECALL_OWNED_TASK_MARKERS = (
     "current episode state",
     "where the current episode left off",
     "where current episode left off",
+)
+_RETRIEVAL_CONFIRMATION_MARKERS = (
+    "retrieve messages",
+    "retrieve recent messages",
+    "find context",
+    "messages around",
+    "messages near",
+    "context mentioning",
+    "mentioning",
+    "containing",
+)
+_VALUE_IDENTIFICATION_MARKERS = (
+    "identify",
+    "who said",
+    "which speaker",
+    "which user",
+    "which person",
+    "what time",
+    "when was",
+    "when did",
+    "count ",
+    "how many",
+    "ranking",
+    "grouped",
+    "aggregate",
 )
 _EXACT_ANCHOR_CHARS = (
     '"',
@@ -226,6 +255,65 @@ def _coverage_fields(
     return return_value
 
 
+def _coverage_confirms_retrieval_task(
+    task: str,
+    coverage: EvidenceCoverage,
+) -> bool:
+    """Return whether deterministic coverage confirms a retrieval slot.
+
+    Args:
+        task: Conversation-evidence slot text.
+        coverage: Deterministic target coverage for projected evidence.
+
+    Returns:
+        True when the slot asks to retrieve matching conversation messages and
+        all required anchors are covered. Slots asking to identify or extract
+        a missing value still require the worker's own resolved judgment.
+    """
+
+    if coverage["evidence_quality"] != "partial":
+        return_value = False
+        return return_value
+    if not coverage["covered_items"]:
+        return_value = False
+        return return_value
+
+    coverage_requirement = coverage["coverage_requirement"]
+    missing_items = coverage["missing_items"]
+    if coverage_requirement == "all" and missing_items:
+        return_value = False
+        return return_value
+
+    task_body = _strip_prefix(task).lower()
+    if any(marker in task_body for marker in _VALUE_IDENTIFICATION_MARKERS):
+        return_value = False
+        return return_value
+
+    confirms_retrieval = any(
+        marker in task_body
+        for marker in _RETRIEVAL_CONFIRMATION_MARKERS
+    )
+    return_value = confirms_retrieval
+    return return_value
+
+
+def _confirmed_retrieval_coverage(
+    coverage: EvidenceCoverage,
+) -> EvidenceCoverage:
+    """Promote fully covered retrieval evidence to confirmed coverage."""
+
+    confirmed_coverage: EvidenceCoverage = {
+        "requested_items": list(coverage["requested_items"]),
+        "covered_items": list(coverage["covered_items"]),
+        "missing_items": list(coverage["missing_items"]),
+        "evidence_quality": "confirmed",
+        "confidence": coverage["confidence"],
+        "reason": "Deterministic coverage confirmed the retrieval evidence.",
+        "coverage_requirement": coverage["coverage_requirement"],
+    }
+    return confirmed_coverage
+
+
 def _speaker_scope(task: str) -> str:
     """Extract the optional conversation author scope from a slot.
 
@@ -316,7 +404,7 @@ def _deterministic_plan(task: str) -> dict[str, Any] | None:
         return plan
 
     if (
-        "count " in normalized
+        _COUNT_INTENT_RE.search(normalized)
         or "how many" in normalized
         or "ranking" in normalized
         or "grouped" in normalized
@@ -1257,6 +1345,16 @@ class ConversationEvidenceAgent(BaseRAGHelperAgent):
             worker_resolved=worker_resolved,
             requires_value_evidence=requires_value_evidence,
         )
+        coverage_confirms_retrieval = _coverage_confirms_retrieval_task(
+            task,
+            coverage,
+        )
+        if coverage_confirms_retrieval:
+            coverage = _confirmed_retrieval_coverage(coverage)
+            evidence_buckets = evidence_buckets_for_coverage(
+                coverage,
+                summaries,
+            )
         confirmed_evidence = evidence_buckets["confirmed_evidence"]
         partial_evidence = evidence_buckets["partial_evidence"]
         nearby_evidence = evidence_buckets["nearby_evidence"]
@@ -1268,9 +1366,9 @@ class ConversationEvidenceAgent(BaseRAGHelperAgent):
         )
         resolved_refs = projection["resolved_refs"]
         resolved = (
-            worker_resolved
-            and bool(summaries)
+            bool(summaries)
             and coverage_allows_resolution(coverage)
+            and (worker_resolved or coverage_confirms_retrieval)
         )
         missing_context = [] if resolved else ["conversation_evidence"]
         observation_candidates = []

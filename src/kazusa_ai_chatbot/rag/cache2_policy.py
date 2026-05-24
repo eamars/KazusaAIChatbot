@@ -14,7 +14,7 @@ from kazusa_ai_chatbot.rag.cache2_runtime import stable_cache_key
 
 INITIALIZER_CACHE_NAME = "rag2_initializer"
 INITIALIZER_POLICY_VERSION = "initializer:v1"
-INITIALIZER_PROMPT_VERSION = "initializer_prompt:v18"
+INITIALIZER_PROMPT_VERSION = "initializer_prompt:v19"
 INITIALIZER_AGENT_REGISTRY_VERSION = "rag_supervisor2_registry:v2"
 INITIALIZER_STRATEGY_SCHEMA_VERSION = "initializer_strategy_schema:v1"
 
@@ -45,7 +45,7 @@ CONVERSATION_KEYWORD_CACHE_NAME = "rag2_conversation_keyword_agent"
 CONVERSATION_KEYWORD_POLICY_VERSION = "conversation_keyword:v2"
 
 CONVERSATION_SEARCH_CACHE_NAME = "rag2_conversation_search_agent"
-CONVERSATION_SEARCH_POLICY_VERSION = "conversation_search:v2"
+CONVERSATION_SEARCH_POLICY_VERSION = "conversation_search:v3"
 
 PERSISTENT_MEMORY_KEYWORD_CACHE_NAME = "rag2_persistent_memory_keyword_agent"
 PERSISTENT_MEMORY_KEYWORD_POLICY_VERSION = "persistent_memory_keyword:v3"
@@ -579,8 +579,17 @@ def build_conversation_search_cache_key(task: str, context: dict[str, Any]) -> s
     Returns:
         Stable exact-match cache key.
     """
-    return_value = _build_conversation_cache_key(
-        CONVERSATION_SEARCH_CACHE_NAME, CONVERSATION_SEARCH_POLICY_VERSION, task, context
+    scope = _context_scope(context)
+    return_value = stable_cache_key(
+        CONVERSATION_SEARCH_CACHE_NAME,
+        {
+            "policy_version": CONVERSATION_SEARCH_POLICY_VERSION,
+            "task": normalize_cache_text(task),
+            "original_query": normalize_cache_text(context.get("original_query")),
+            "current_slot": normalize_cache_text(context.get("current_slot")),
+            "platform": scope["platform"],
+            "platform_channel_id": scope["platform_channel_id"],
+        },
     )
     return return_value
 
