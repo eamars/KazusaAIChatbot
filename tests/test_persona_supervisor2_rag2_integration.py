@@ -520,7 +520,7 @@ async def test_assess_continuation_waits_for_pending_evidence_slot(
 
     assert decision["should_continue"] is False
     assert decision["refined_query"] == ""
-    assert "pending evidence slots" in decision["reason"]
+    assert "待处理证据槽位" in decision["reason"]
     assert continuation_llm.calls == []
 
 
@@ -571,7 +571,7 @@ async def test_assess_continuation_waits_for_pending_evidence_slot_after_memory(
 
     assert decision["should_continue"] is False
     assert decision["refined_query"] == ""
-    assert "pending evidence slots" in decision["reason"]
+    assert "待处理证据槽位" in decision["reason"]
     assert continuation_llm.calls == []
 
 
@@ -627,7 +627,7 @@ async def test_assess_continuation_finalizes_memory_miss_after_recall(
 
     assert decision["should_continue"] is False
     assert decision["refined_query"] == ""
-    assert "Recall and memory evidence" in decision["reason"]
+    assert "Recall 和 memory evidence 都未解决" in decision["reason"]
     assert continuation_llm.calls == []
 
 
@@ -740,7 +740,7 @@ async def test_call_rag_supervisor_does_not_expand_after_resolved_evidence(
     assert continuation_llm.calls == []
     assert result["known_facts"][0]["resolved"] is True
     assert result["known_facts"][1]["continuation"]["should_continue"] is False
-    assert "Existing resolved evidence" in (
+    assert "已有已解决证据" in (
         result["known_facts"][1]["continuation"]["reason"]
     )
 

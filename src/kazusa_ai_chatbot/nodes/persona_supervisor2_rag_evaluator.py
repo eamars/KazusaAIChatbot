@@ -629,11 +629,7 @@ async def _assess_continuation(
         decision = empty_continuation_decision()
         return decision
 
-    has_promotion_candidates = _has_promotion_candidates(observation_payload)
-    if (
-        _pending_slots_can_absorb_continuation(observation_payload)
-        and not has_promotion_candidates
-    ):
+    if _pending_slots_can_absorb_continuation(observation_payload):
         decision: RAGContinuationDecision = {
             "should_continue": False,
             "refined_query": "",
@@ -650,10 +646,7 @@ async def _assess_continuation(
         )
         return decision
 
-    if (
-        _memory_miss_after_recall_should_finalize(observation_payload)
-        and not has_promotion_candidates
-    ):
+    if _memory_miss_after_recall_should_finalize(observation_payload):
         decision = {
             "should_continue": False,
             "refined_query": "",
@@ -960,10 +953,7 @@ async def rag_evaluator(state: ProgressiveRAGState) -> dict:
             remaining_slots=remaining_slots,
         )
         if loop_count < _MAX_LOOP_COUNT:
-            if (
-                _has_resolved_known_fact(known_facts)
-                and not _has_promotion_candidates(observation_payload)
-            ):
+            if _has_resolved_known_fact(known_facts):
                 continuation_decision = {
                     "should_continue": False,
                     "refined_query": "",

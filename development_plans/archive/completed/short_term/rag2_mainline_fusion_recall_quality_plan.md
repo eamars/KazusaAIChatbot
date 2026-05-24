@@ -6,7 +6,7 @@
   cleaner mainline RAG2 behavior, then fix shared RAG2 quality gaps without
   choosing one branch wholesale.
 - Plan class: large
-- Status: in_progress
+- Status: completed
 - Mandatory skills: `development-plan`, `local-llm-architecture`,
   `debug-llm`, `no-prepost-user-input`, `py-style`, `cjk-safety`,
   `test-style-and-execution`
@@ -526,9 +526,9 @@ Expected test and experiment surface:
 - [x] Stage 5 - focused branch-vs-mainline live LLM probes completed during
       implementation feedback.
 - [x] Stage 6 - fixed 20-case `debug-llm` review completed.
-- [ ] Stage 7 - fresh 20-case holdout `debug-llm` review completed.
+- [x] Stage 7 - fresh 20-case holdout `debug-llm` review completed.
 - [x] Stage 8 - independent code review completed and findings resolved.
-- [ ] Stage 9 - execution evidence recorded and lifecycle status updated.
+- [x] Stage 9 - execution evidence recorded and lifecycle status updated.
 
 ## Verification
 
@@ -817,3 +817,22 @@ evidence before sign-off.
   tests\test_rag_initializer_cache2.py::test_initializer_prompt_version_bumped_for_capability_cutover
   tests\test_rag_initializer_cache2.py::test_initializer_prompt_version_bumps_to_v20_for_current_contract
   -q`. `git diff --check` exited 0 with only CRLF normalization warnings.
+- 2026-05-24: Closeout cleanup completed. User rejected variable loop-budget
+  complexity and directed a universal four-loop cap. Production RAG2 now uses
+  `_MAX_LOOP_COUNT = 4`; the RAG README and this plan record that future
+  optimization should make common recall paths fit below four loops instead of
+  adding broader loop budgets. The evaluator now finalizes or drains queued
+  evidence before asking the continuation LLM when there are pending evidence
+  slots, Recall plus memory both miss, or already resolved evidence exists.
+  Verification: `venv\Scripts\python.exe -m py_compile
+  src\kazusa_ai_chatbot\nodes\persona_supervisor2_rag_evaluator.py
+  tests\test_persona_supervisor2_rag2_integration.py` passed, and
+  `venv\Scripts\python.exe -m pytest
+  tests\test_persona_supervisor2_rag2_integration.py -q` returned
+  `16 passed`. Final current-plus-holdout observation report:
+  `experiments/rag2_branch_quality/reports/current20_and_holdout20_after_packets_review_20260524.md`.
+- 2026-05-24: Plan status set to `completed` and archived under
+  `development_plans/archive/completed/short_term/`. Follow-up direction was
+  recorded in the RAG3 draft plan: improve first-pass routing precision,
+  reduce loop demand below four, and do not use RAG3 as a way to add variable
+  or broader loop budgets.

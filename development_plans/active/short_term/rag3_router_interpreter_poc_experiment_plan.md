@@ -17,8 +17,8 @@
 - Highest-risk areas: repeating the RAG2.1 initializer simplification failure,
   losing speaker scope, treating semantic segments as backend query plans,
   touching low-level subagent behavior, adding unbounded LLM calls, invalid
-  dependency graphs, hiding routing errors behind string slots, colliding with
-  the in-progress RAG2 cognition-ready evidence plan, and making cognition
+  dependency graphs, hiding routing errors behind string slots, using RAG3 to
+  hide RAG2 retrieval weaknesses behind more retries, and making cognition
   consume planning artifacts instead of evidence.
 - Acceptance criteria: the experiment produces a readable comparison of RAG2
   initializer output versus candidate RAG3 router/interpreter output over the
@@ -86,12 +86,35 @@ scope for RAG3. RAG3 may only improve the tiered decision about which existing
 subagent receives which semantic task, in which order, and with which
 scope/dependency hints.
 
-The in-progress
-`development_plans/active/short_term/rag2_cognition_ready_evidence_plan.md`
-improves production RAG2 evidence quality and explicitly defers RAG3 routing.
-This plan is separate and non-blocking. If both plans need to touch the same
-production RAG files later, this plan must wait for explicit user approval and
-a clear execution order.
+The completed RAG2 recall-quality hardening work is archived at:
+
+```text
+development_plans/archive/completed/short_term/rag2_mainline_fusion_recall_quality_plan.md
+```
+
+That work improved production RAG2 evidence quality and deliberately kept RAG3
+routing deferred. This draft now starts from that baseline. If RAG3 later needs
+to touch production RAG files, it requires explicit user approval and a new
+execution boundary.
+
+## Direction From RAG2 Recall Closeout
+
+The 2026-05-24 RAG2 recall-quality attempt produced this direction for RAG3:
+
+- Do not use RAG3 to add more loop capacity. Production RAG2 now uses a
+  universal four-loop supervisor cap; RAG3 should reduce retries and make
+  common recall paths fit below four loops.
+- Prioritize first-pass route precision: select the right memory family,
+  speaker scope, relation requirement, time scope, and evidence source before
+  retrieval starts.
+- Keep low-level subagents frozen in the first experiment. Improve the
+  routing and segmentation contract above them instead of rewriting search
+  workers.
+- Treat continuation and refinement as targeted repair only, not the normal
+  path for hard recall.
+- Judge RAG output from the cognition consumer's point of view. Compact,
+  accurate facts and explicit uncertainty matter more than rich source
+  provenance in the final evidence surface.
 
 ## RAG2 Weaknesses Under Evaluation
 
@@ -842,8 +865,8 @@ review with a fresh agent. The reviewer must check:
   user input;
 - whether live LLM and debug review steps are sufficient for local/weaker LLM
   risk;
-- whether this plan conflicts with the in-progress RAG2 cognition-ready
-  evidence plan.
+- whether this plan stays compatible with the completed RAG2 recall-quality
+  baseline and does not reopen closed RAG2 scope.
 
 Record the review result in `Execution Evidence` before asking for approval.
 
@@ -890,9 +913,9 @@ Record the review result in `Execution Evidence` before asking for approval.
   - Direct capability execution should remain a later option because it has
     higher blast radius.
   - Closed-loop refinement should be bounded to one pre-execution repair pass.
-- Observed active-plan context:
-  - `rag2_cognition_ready_evidence_plan.md` is currently `in_progress`.
-  - RAG3 work must remain separate from that production RAG2 evidence work
+- Observed plan context:
+  - RAG2 recall-quality production work is completed and archived.
+  - RAG3 work must start from that production baseline and remain separate
     unless the user explicitly approves a shared execution order.
 - Draft verification:
   - `git diff --check -- development_plans/README.md development_plans/active/short_term/rag3_router_interpreter_poc_experiment_plan.md`
