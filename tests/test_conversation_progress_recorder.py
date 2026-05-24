@@ -116,6 +116,18 @@ def test_render_recorder_prompt_requires_absolute_or_omit_temporal_state() -> No
     assert "紧凑 assistant" not in prompt
 
 
+def test_recorder_llm_uses_explicit_completion_token_budget() -> None:
+    """Recorder calls should not inherit a small backend default output cap."""
+
+    assert recorder.RECORDER_MAX_COMPLETION_TOKENS == 4096
+    assert recorder._recorder_llm.max_tokens == (
+        recorder.RECORDER_MAX_COMPLETION_TOKENS
+    )
+    assert recorder._recorder_llm._default_params["max_completion_tokens"] == (
+        recorder.RECORDER_MAX_COMPLETION_TOKENS
+    )
+
+
 def test_render_recorder_prompt_shows_concrete_list_string_shapes() -> None:
     """Recorder prompt must show string-list fields with literal string examples."""
 
