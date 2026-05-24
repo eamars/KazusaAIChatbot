@@ -48,7 +48,9 @@ long_term/todo.md
 
 ## Active Bugfix Plans
 
-No active bugfix plans.
+| Document | Type | Status |
+|---|---|---|
+| [rag2_public_output_contract_leak_bugfix_plan.md](active/bugfix/rag2_public_output_contract_leak_bugfix_plan.md) | Large RAG2 prompt/evidence contract bugfix plan | draft |
 
 ## Reference Documents
 
