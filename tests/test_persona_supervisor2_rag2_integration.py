@@ -136,6 +136,20 @@ def test_normalize_initializer_slots_removes_source_ids() -> None:
     ]
 
 
+def test_route_after_evaluator_stops_at_loop_count_four() -> None:
+    """RAG2 should stop once the universal loop budget is exhausted."""
+
+    state = {
+        "unknown_slots": ["Memory-evidence: retrieve another fact"],
+        "known_facts": [],
+        "loop_count": 4,
+    }
+
+    route = rag2_module._route_after_evaluator(state)
+
+    assert route == "finalize"
+
+
 class _ContinuationLLM:
     """Static continuation refiner fake."""
 

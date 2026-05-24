@@ -410,8 +410,9 @@ new public fields.
 ## LLM Call And Context Budget
 
 - Do not add a new RAG response-path LLM call.
-- Preserve the existing RAG2 loop cap and continuation caps unless the user
-  approves a separate budget change.
+- Lower the universal RAG2 supervisor loop cap from eight to four per user
+  direction. Future optimization should make common recall paths fit within
+  fewer than four loops instead of adding variable per-case budgets.
 - Chinese prompt conversion must not increase prompt length materially. Replace
   English instructions in place rather than appending Chinese duplicates.
 - Candidate promotion must run inside existing evaluator/finalizer calls or

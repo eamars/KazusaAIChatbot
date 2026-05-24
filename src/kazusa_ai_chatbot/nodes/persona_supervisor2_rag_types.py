@@ -7,7 +7,7 @@ from typing import Annotated, Awaitable, Callable, TypedDict
 from langgraph.graph.message import add_messages
 
 
-_MAX_LOOP_COUNT = 8
+_MAX_LOOP_COUNT = 4
 
 
 

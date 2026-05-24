@@ -111,7 +111,10 @@ persona_supervisor2
 
 The loop is slot-driven. `unknown_slots` is the work queue and the stop condition: slots are drained one at a time, and each completed attempt appends a fact row to `known_facts`.
 
-The default loop cap is eight dispatch iterations. This prevents open-ended agentic search while still allowing multi-hop queries such as resolving a pronoun, finding a referenced conversation object, then reading external content.
+The default loop cap is four dispatch iterations. This prevents open-ended
+agentic search and keeps normal chatbot latency bounded. Future RAG
+optimization should reduce the need for repeated loops instead of raising this
+cap.
 
 ## Observation-Driven Continuation
 
@@ -153,7 +156,7 @@ parameters. When `should_continue` is true, `refined_query` is self-contained
 because Cache 2 keys the initializer from its normal query and context inputs.
 
 Continuation is capped by `MAX_CONTINUATION_DECISIONS_PER_RAG_RUN` and the
-existing eight-loop supervisor cap. Rejected candidates and continuation
+existing four-loop supervisor cap. Rejected candidates and continuation
 metadata stay in supervisor/debug trace. Public evidence remains limited to
 accepted `rag_result` fields.
 
