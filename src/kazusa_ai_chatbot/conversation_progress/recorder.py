@@ -466,6 +466,10 @@ def validate_recorder_output(payload: dict) -> dict:
 
     continuity = _require_string(payload.get("continuity", ""), "continuity")
     status = _require_string(payload.get("status", ""), "status")
+    # `new_episode` is prompt-facing lifecycle vocabulary. If the recorder copies
+    # it into continuity, persist canonical `sharp_transition` instead.
+    if continuity == "new_episode":
+        continuity = "sharp_transition"
     if continuity not in VALID_CONTINUITY:
         raise ValueError(f"invalid continuity: {continuity}")
     if status not in VALID_STATUS:

@@ -197,6 +197,59 @@ def test_recorder_validator_accepts_phase2_fields() -> None:
     assert payload["next_affordances"] == ["give a concrete third point"]
 
 
+def test_recorder_validator_normalizes_prompt_new_episode_continuity() -> None:
+    """Recorder validator maps prompt-facing new_episode to stored continuity."""
+
+    payload = recorder.validate_recorder_output({
+        "status": "active",
+        "episode_label": "new topic",
+        "continuity": "new_episode",
+        "conversation_mode": "casual_chat",
+        "episode_phase": "opening",
+        "topic_momentum": "sharp_break",
+        "current_thread": "bot definition",
+        "user_goal": "",
+        "current_blocker": "",
+        "user_state_updates": [],
+        "assistant_moves": ["teasing clarification"],
+        "overused_moves": [],
+        "open_loops": ["user may explain their bot standard"],
+        "resolved_threads": [],
+        "avoid_reopening": [],
+        "emotional_trajectory": "light teasing",
+        "next_affordances": ["let user define the standard"],
+        "progression_guidance": "treat this as a fresh conversational branch",
+    })
+
+    assert payload["continuity"] == "sharp_transition"
+
+
+def test_recorder_validator_rejects_unknown_continuity() -> None:
+    """Recorder validator only aliases the known prompt-facing lifecycle label."""
+
+    with pytest.raises(ValueError, match="invalid continuity: fresh_start"):
+        recorder.validate_recorder_output({
+            "status": "active",
+            "episode_label": "bad output",
+            "continuity": "fresh_start",
+            "conversation_mode": "casual_chat",
+            "episode_phase": "opening",
+            "topic_momentum": "sharp_break",
+            "current_thread": "bad recorder output",
+            "user_goal": "",
+            "current_blocker": "",
+            "user_state_updates": [],
+            "assistant_moves": [],
+            "overused_moves": [],
+            "open_loops": [],
+            "resolved_threads": [],
+            "avoid_reopening": [],
+            "emotional_trajectory": "",
+            "next_affordances": [],
+            "progression_guidance": "",
+        })
+
+
 def test_recorder_validator_normalizes_scalar_string_list_field() -> None:
     """Recorder validator accepts one string where the LLM should emit a list."""
 
