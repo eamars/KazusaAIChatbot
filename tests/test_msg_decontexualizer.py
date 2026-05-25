@@ -601,10 +601,15 @@ async def test_decontexualizer_forwards_reply_context_to_llm():
     assert "raw_wire_text" not in payload
     assert '"addressed_to_global_user_ids": ["character-global"]' in payload
     assert '"reply_excerpt": "评价这种事' in payload
-    assert '"broadcast": true' in system_prompt
-    assert '"mentions": [' in system_prompt
-    assert '"attachments": [' in system_prompt
-    assert '"summary_status": "available | unavailable"' in system_prompt
+    assert "# 输入格式" not in system_prompt
+    assert "# 本轮输入字段说明" in system_prompt
+    assert "prompt_message_context.body_text" in system_prompt
+    assert "addressed_to_global_user_ids" in system_prompt
+    assert "`broadcast`" in system_prompt
+    assert "`mentions`" in system_prompt
+    assert "prompt_message_context.attachments" in system_prompt
+    assert "`summary_status`" in system_prompt
+    assert "reply_context.reply_excerpt" in system_prompt
     assert result["decontexualized_input"] == "是的，我是想让 active character 具体评价我。"
 
 

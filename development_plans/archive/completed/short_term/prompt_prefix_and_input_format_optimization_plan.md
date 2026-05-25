@@ -6,7 +6,7 @@
   first-token latency, with `# 输入格式` / `# Input Format` removal handled as a
   measured exploratory gate before production prompt changes.
 - Plan class: large
-- Status: approved
+- Status: completed
 - Mandatory skills: `development-plan`, `local-llm-architecture`,
   `debug-llm`, `py-style`, `cjk-safety`, `test-style-and-execution`,
   `python-venv`
@@ -326,6 +326,7 @@ the experiment and user approval gates pass.
 | P0 | `src/kazusa_ai_chatbot/rag/web_search_agent.py::_WEB_SEARCH_GENERATOR_PROMPT` | Formats timestamp into the system prompt. | Move timestamp to human JSON. Remove input-format only if the web generator ablation passes. |
 | P0 | `src/kazusa_ai_chatbot/rag/web_search_agent.py::_WEB_SEARCH_EVALUATOR_PROMPT` | Formats timestamp into the system prompt. | Move timestamp to human JSON. Remove input-format only if the web evaluator ablation passes. |
 | P1 | `src/kazusa_ai_chatbot/nodes/persona_supervisor2_cognition_l3.py::_CONTENT_ANCHOR_AGENT_PROMPT` | Very long prompt with positive L3b ablation evidence already recorded. | Do not move character identity in this plan. Remove input-format only if the user approves the L3b evidence and field-coverage review. |
+| P1 | `src/kazusa_ai_chatbot/nodes/persona_supervisor2_msg_decontexualizer.py::_MSG_DECONTEXUALIZER_PROMPT` | Uses prompt template substitution via `.replace(...)` and has a live-path input-format section that may be latency-relevant. | Convert template substitution to `.format(...)`. Evaluate input-format omission with matching ablation evidence; remove input-format only if decontextualizer behavior and referent output remain acceptable. |
 
 ### Experiment-Only Or Deferred Prompt Groups
 
@@ -338,7 +339,7 @@ require a later plan update or a separate approved plan.
 | RAG initializer and dispatcher | Measure only; do not change production prompts in this plan. |
 | L2/L2c2 cognition prompts | Measure only; volatile state is already mostly in human payload. |
 | Other L3 prompts: style, preference adapter, visual | Measure only; leave unchanged unless a later approved plan targets them. |
-| Message decontextualizer and vision descriptor | Measure only; not part of first production pass. |
+| Vision descriptor | Measure only; not part of first production pass. |
 | RAG evaluator and helper agents | Measure only; avoid spending first-pass implementation time on low-impact helper prompts. |
 | Background consolidation, reflection, growth, and recorder prompts | Measure only; outside live first-token path for normal chat. |
 | Utility JSON repair prompt | Leave unchanged; parser/repair policy is outside this plan. |
@@ -381,6 +382,13 @@ require a later plan update or a separate approved plan.
   input-format section only if field-coverage review passes. Do not change
   `_STYLE_AGENT_PROMPT`, `_PREFERENCE_ADAPTER_PROMPT`, or
   `_VISUAL_AGENT_PROMPT` in this plan.
+- `src/kazusa_ai_chatbot/nodes/persona_supervisor2_msg_decontexualizer.py`:
+  user-approved scope expansion after execution started; convert
+  `_MSG_DECONTEXUALIZER_PROMPT` placeholder substitution from `.replace(...)`
+  to `.format(...)`, escape literal JSON braces as needed, then evaluate its
+  input-format section with a matching ablation run. Remove the input-format
+  section only if decontextualizer ablation evidence, debug-LLM review, and
+  field-coverage review pass.
 - Focused tests that assert prompt headings or payload shape for prompts
   changed by this plan.
 
@@ -443,6 +451,8 @@ require a later plan update or a separate approved plan.
 3. Run exploratory live LLM comparisons one prompt family at a time.
    - Required production-candidate set: relevance non-noisy, relevance noisy,
      L1 subconscious, web search generator, and web search evaluator.
+   - User-approved scope clarification adds message decontextualizer after
+     execution started; run its ablation before any input-format removal.
    - L3b content anchor already has pre-approval evidence. Rerun it only if the
      route, payload construction, or user review asks for a fresh comparison.
    - Experiment-only/deferred groups may be measured for discovery, but those
@@ -501,36 +511,36 @@ require a later plan update or a separate approved plan.
 
 ## Progress Checklist
 
-- [ ] Stage 1 - prompt inventory refreshed
+- [x] Stage 1 - prompt inventory refreshed
   - Covers: implementation order step 1.
   - Verify: record AST prompt inventory and `rg` input-format scan output in
     `Execution Evidence`.
   - Sign-off: after evidence is recorded.
-- [ ] Stage 2 - exploratory ablation harness created
+- [x] Stage 2 - exploratory ablation harness created
   - Covers: implementation order step 2.
   - Verify: `venv\Scripts\python -m py_compile experiments/prompt_input_format_ablation.py`.
   - Sign-off: after the harness writes raw evidence for one smoke prompt.
-- [ ] Stage 3 - first live LLM comparison set completed
+- [x] Stage 3 - first live LLM comparison set completed
   - Covers: implementation order steps 3 and 4 for the required
     production-candidate set.
   - Verify: every prompt family has raw JSON evidence and a debug-LLM review.
   - Sign-off: after reviews are inspected and recorded.
-- [ ] Stage 4 - user review gate completed
+- [x] Stage 4 - user review gate completed
   - Covers: implementation order step 5.
   - Verify: user approval identifies exact prompt families allowed for final
     optimization.
   - Sign-off: after plan status and execution boundary are updated.
-- [ ] Stage 5 - approved production prompt optimizations implemented
+- [x] Stage 5 - approved production prompt optimizations implemented
   - Covers: implementation order steps 6, 7, 8, and 9.
   - Verify: prompt-flow review passes, focused tests pass, and no unapproved
     prompt files changed.
   - Sign-off: after changed files, prompt-flow evidence, and test evidence are
     recorded.
-- [ ] Stage 6 - final verification completed
+- [x] Stage 6 - final verification completed
   - Covers: verification section.
   - Verify: static greps, focused tests, and approved live LLM checks pass.
   - Sign-off: after evidence is recorded.
-- [ ] Stage 7 - independent code review completed
+- [x] Stage 7 - independent code review completed
   - Covers: independent code review gate.
   - Verify: review findings, fixes, rerun commands, and approval status are
     recorded in `Execution Evidence`.
@@ -702,4 +712,222 @@ This plan is complete when:
     variants produced valid `content_anchors` with matching label sequences;
     omitted-input-format output was more faithful to the actual unresolved
     referent phrase in the synthetic payload.
-- Execution of production changes is pending. This plan remains `draft`.
+- Execution started after user approval on 2026-05-25.
+- Pre-execution plan commit: `880c7f8 Add prompt optimization development plan`.
+- Stage 1 evidence:
+  - Prompt input-format inventory refreshed with:
+    `rg -n "# 输入格式|## 输入格式|# Input Format|## Input Format" src/kazusa_ai_chatbot`
+  - Volatile system-prefix scan refreshed with:
+    `rg -n "timestamp=.*format|mood=.*format|global_vibe=.*format|user_name=.*format|last_relationship_insight=.*format|format\(" src/kazusa_ai_chatbot/nodes/persona_relevance_agent.py src/kazusa_ai_chatbot/nodes/persona_supervisor2_cognition_l1.py src/kazusa_ai_chatbot/rag/web_search_agent.py src/kazusa_ai_chatbot/nodes/persona_supervisor2_cognition_l3.py`
+- Stage 2 evidence:
+  - Created `experiments/prompt_input_format_ablation.py`.
+  - Verified with:
+    `venv\Scripts\python -m py_compile experiments/prompt_input_format_ablation.py`
+  - Verified CLI shape with:
+    `venv\Scripts\python experiments/prompt_input_format_ablation.py --help`
+- Stage 3 evidence:
+  - Private relevance run:
+    `test_artifacts/experiments/prompt_input_format_ablation/relevance_private/20260525T101625848776/run.json`
+  - Private relevance review:
+    `test_artifacts/experiments/prompt_input_format_ablation/relevance_private/20260525T101625848776/debug_review.md`
+  - Noisy relevance run:
+    `test_artifacts/experiments/prompt_input_format_ablation/relevance_noisy/20260525T101635011241/run.json`
+  - Noisy relevance review:
+    `test_artifacts/experiments/prompt_input_format_ablation/relevance_noisy/20260525T101635011241/debug_review.md`
+  - L1 subconscious run:
+    `test_artifacts/experiments/prompt_input_format_ablation/l1_subconscious/20260525T101644892204/run.json`
+  - L1 subconscious review:
+    `test_artifacts/experiments/prompt_input_format_ablation/l1_subconscious/20260525T101644892204/debug_review.md`
+  - Web generator run:
+    `test_artifacts/experiments/prompt_input_format_ablation/web_generator/20260525T101716257111/run.json`
+  - Web generator review:
+    `test_artifacts/experiments/prompt_input_format_ablation/web_generator/20260525T101716257111/debug_review.md`
+  - Web evaluator run:
+    `test_artifacts/experiments/prompt_input_format_ablation/web_evaluator/20260525T101724243292/run.json`
+  - Web evaluator review:
+    `test_artifacts/experiments/prompt_input_format_ablation/web_evaluator/20260525T101724243292/debug_review.md`
+  - Result: all five required production-candidate families preserved parser
+    or tool-call validity, required keys, and decision-critical behavior.
+    L1 became slightly sharper in tone but stayed within first-reaction and
+    subtext ownership.
+- Stage 4 evidence:
+  - User approved execution on 2026-05-25 and instructed execution with
+    subagents.
+  - Exact production rewrite scope is limited to:
+    `persona_relevance_agent::_RELEVANCE_SYSTEM_PROMPT`,
+    `persona_relevance_agent::_RELEVANCE_SYSTEM_NOISY_PROMPT`,
+    `persona_supervisor2_cognition_l1::_COGNITION_SUBCONSCIOUS_PROMPT`,
+    `web_search_agent::_WEB_SEARCH_GENERATOR_PROMPT`,
+    `web_search_agent::_WEB_SEARCH_EVALUATOR_PROMPT`, and
+    `persona_supervisor2_cognition_l3::_CONTENT_ANCHOR_AGENT_PROMPT`.
+- Scope clarification after execution started:
+  - User identified `_MSG_DECONTEXUALIZER_PROMPT` as also having targeted
+    input-format guidance and `.replace(...)` prompt substitution.
+  - The plan scope now includes
+    `persona_supervisor2_msg_decontexualizer::_MSG_DECONTEXUALIZER_PROMPT`
+    for `.replace(...)` to `.format(...)` conversion and input-format
+    ablation. Its input-format section must not be removed until the matching
+    ablation, debug-LLM review, and field-coverage review pass.
+- Stage 3 scope-expansion evidence:
+  - Message decontextualizer run:
+    `test_artifacts/experiments/prompt_input_format_ablation/msg_decontextualizer/20260525T103855744619/run.json`
+  - Message decontextualizer review:
+    `test_artifacts/experiments/prompt_input_format_ablation/msg_decontextualizer/20260525T103855744619/debug_review.md`
+  - Result: baseline and omitted-input-format variants both parsed, preserved
+    reply confirmation expansion, and preserved unresolved referent signaling.
+    The omitted variant reduced rendered system prompt size from `4241` to
+    `3339` chars and prompt tokens by `283` in both tested cases.
+- Stage 5 implementation evidence:
+  - Production files changed:
+    `src/kazusa_ai_chatbot/nodes/persona_relevance_agent.py`,
+    `src/kazusa_ai_chatbot/nodes/persona_supervisor2_cognition_l1.py`,
+    `src/kazusa_ai_chatbot/nodes/persona_supervisor2_cognition_l3.py`,
+    `src/kazusa_ai_chatbot/nodes/persona_supervisor2_msg_decontexualizer.py`,
+    and `src/kazusa_ai_chatbot/rag/web_search_agent.py`.
+  - Test files changed:
+    `tests/test_persona_relevance_agent.py` and
+    `tests/test_msg_decontexualizer.py`.
+  - Relevance prompts now keep stable role, decision, and output contract
+    text in the system prompt. Per-run `character_name`, bot id, mood,
+    global vibe, affinity guidance, relationship insight, user identity,
+    reply context, direct-address metadata, group attention, and engagement
+    context are explained in the prompt body and passed in Human JSON.
+  - L1 subconscious prompt now keeps source recognition, first-reaction
+    procedure, MBTI guidance, and output contract in the system prompt.
+    Per-run mood, global vibe, relationship insight, user input, indirect
+    speech context, media observations, reflection artifact, and internal
+    thought residue are explained in prompt rules and passed in Human JSON.
+  - Web generator and evaluator prompts now read `reference_time` from Human
+    JSON. Task, context, expected response, search/read history, call history,
+    tool-result distinction, and evaluator feedback remain explained in the
+    prompt procedure; output/tool contracts are unchanged.
+  - L3 content anchor replaced the removed schema dump with field guidance for
+    `user_input`, `dialog_act_intent`, cognitive stage summaries, retrieved
+    memory/context evidence, conversation progress, interaction style,
+    referents, media observations, and candidate grounding.
+  - Message decontextualizer converted placeholder rendering from
+    `.replace(...)` to `.format(...)`, escaped literal JSON braces, and
+    replaced the removed schema dump with field guidance for `user_input`,
+    speaker/bot identity, typed message context, mentions, attachments,
+    history, reply context, channel topic, and indirect speech context.
+  - Prompt-flow render check passed for:
+    `_RELEVANCE_SYSTEM_PROMPT: 3019`,
+    `_RELEVANCE_SYSTEM_NOISY_PROMPT: 5234`,
+    `_COGNITION_SUBCONSCIOUS_PROMPT: 1464`,
+    `_WEB_SEARCH_GENERATOR_PROMPT: 872`,
+    `_WEB_SEARCH_EVALUATOR_PROMPT: 2428`,
+    `_CONTENT_ANCHOR_AGENT_PROMPT: 7821`,
+    `_MSG_DECONTEXUALIZER_PROMPT: 4055`.
+  - The render check also confirmed no changed prompt still has `# 输入格式`
+    or `# Input Format`.
+  - Field-coverage table for removed input-format sections:
+
+| Prompt family | Field or field group | Remaining explanation location | Status |
+|---|---|---|---|
+| Relevance private/noisy | `current_run_context.character_name`, `platform_bot_id` | `# 本轮语境` identity rule | explained |
+| Relevance private/noisy | `current_run_context.mood`, `global_vibe` | `# 本轮语境` and decision steps say these only adjust qualified messages | explained |
+| Relevance private/noisy | `current_run_context.affinity_level`, `affinity_instruction`, `last_relationship_insight` | `# 本轮语境`, `# 响应决策逻辑`, and noisy evidence tier 5 | explained |
+| Relevance private/noisy | `user_message.user_name`, `platform_user_id`, `content`, `channel_name` | `# 本轮语境`, `# 思考路径`, and direct/third-party decision rules | explained |
+| Relevance private/noisy | `user_message.directly_addressed`, `reply_context.reply_to_platform_user_id`, `reply_to_display_name`, `reply_excerpt` | `# 本轮语境`, `# 证据层级`, and `use_reply_feature` rules | explained |
+| Relevance private/noisy | `conversation_history` | `# 本轮语境`, conversation-continuity rules, and noisy evidence tier 3 | explained |
+| Relevance noisy | `group_attention` | `# 本轮语境` and noisy evidence tier 2 | explained |
+| Relevance noisy | `user_engagement_context.engagement_guidelines`, `confidence` | `# 本轮语境` and noisy evidence tier 4 | explained |
+| L1 subconscious | `character_state.mood`, `global_vibe`, `last_relationship_insight` | `# 本轮语境` emotion-filter rules | explained |
+| L1 subconscious | `user_input`, `indirect_speech_context` | `# 来源识别`, `# 本轮语境`, and generation flow | explained |
+| L1 subconscious | `media_observations.image_observations`, `audio_observations` | `# 本轮语境` and generation flow media rules | explained |
+| L1 subconscious | `reflection_artifact`, `internal_thought_residue.internal_monologue`, `action_latch` | `# 来源识别` and generation flow source rules | explained |
+| Web generator | `task`, `context`, `reference_time`, appended `messages` | `# 本轮输入`, `# 任务流程`, and `# 语言与时间` | explained |
+| Web evaluator | `task`, `expected_response`, `call_history`, `retry`, `reference_time` | `# 本轮输入`, `# 审计步骤`, and `# 消息时效与计算` | explained |
+| L3 content anchor | `decontexualized_input`, `referents`, `media_observations` | `# 本轮输入字段说明` and Clarification override/media rules | explained |
+| L3 content anchor | `rag_result.answer`, evidence arrays, `user_image.user_memory_context`, `character_image`, `third_party_profiles`, `supervisor_trace` | `# 本轮输入字段说明`, `[FACT]`, `[ANSWER]`, and dependency tree rules | explained |
+| L3 content anchor | `internal_monologue`, `logical_stance`, `character_intent`, `selected_text_surface_intent` | `# 本轮输入字段说明`, dependency tree, and `[DECISION]`/`[ANSWER]` rules | explained |
+| L3 content anchor | `memory_lifecycle_context`, `interaction_style_context`, `conversation_progress` | `# 本轮输入字段说明`, `[SOCIAL]`, `[PROGRESSION]`, and open-loop rules | explained |
+| L3 content anchor | `reflection_artifact`, `internal_thought_residue` | `# 本轮输入字段说明` source-ownership rules | explained |
+| Message decontextualizer | `user_input`, `platform_user_id`, `user_name`, `platform_bot_id` | `# 本轮输入字段说明` identity and rewrite-scope rules | explained |
+| Message decontextualizer | `prompt_message_context.body_text`, `addressed_to_global_user_ids`, `broadcast`, `mentions` | `# 本轮输入字段说明` typed-envelope evidence rule | explained |
+| Message decontextualizer | `prompt_message_context.attachments.description`, `summary_status` | `# 本轮输入字段说明` attachment referent rule | explained |
+| Message decontextualizer | `chat_history.display_name`, `body_text` | `# 本轮输入字段说明` history referent and reported-speech rule | explained |
+| Message decontextualizer | `reply_context.reply_to_display_name`, `reply_excerpt` | `# 本轮输入字段说明` strong reply-evidence rule | explained |
+| Message decontextualizer | `channel_topic`, `indirect_speech_context` | `# 本轮输入字段说明` weak-hint rule | explained |
+
+- Stage 6 verification evidence:
+  - `rg -n "# 输入格式|## 输入格式|# Input Format|## Input Format" ...`
+    over the changed prompt files returned only deferred unchanged prompt
+    headings: vision descriptor, L3 style, L3 preference, L3 visual, and web
+    finalizer.
+  - `rg -n 'timestamp=.*format|mood=.*format|global_vibe=.*format|user_name=.*format|last_relationship_insight=.*format|\.replace\(\s*"\{[^\"]+\}"|\.replace\(\s*''\{[^'']+\}''' src/kazusa_ai_chatbot/nodes src/kazusa_ai_chatbot/rag`
+    returned no matches; exit code `1` is the expected no-match result.
+  - `rg -n "_DIALOG_GENERATOR_PROMPT|_DIALOG_EVALUATOR_PROMPT" src/kazusa_ai_chatbot/nodes/dialog_agent.py`
+    confirmed dialog prompt constants remain present and outside this diff.
+  - `venv\Scripts\python -m py_compile experiments/prompt_input_format_ablation.py <changed production files>`
+    passed.
+  - `git diff --check` passed, with only existing LF-to-CRLF warnings from
+    Git.
+  - Focused deterministic tests passed:
+    `66 passed, 10 deselected`.
+  - Post-review targeted payload tests passed:
+    `tests/test_web_search_agent.py` plus
+    `tests/test_cognition_prompt_contract_text.py::test_l1_subconscious_payload_passes_character_state_in_human_json`
+    returned `7 passed`.
+  - Selected multi-source regression slice passed:
+    `56 passed, 4 deselected`.
+  - Live LLM checks were run one at a time and inspected:
+    decontextualizer unresolved referent passed; noisy relevance preserved
+    `should_respond=True` and `use_reply_feature=True`; content anchor
+    birthday fact case returned a grounded `[FACT]` anchor; full cognition
+    weather-English case passed through L1-L4 and preserved English reply
+    preference.
+  - Known unrelated/stale failures remain outside this plan: prompt fingerprint
+    goldens for broad cognition prompt bytes, one L2 boundary-profile wording
+    assertion, and older live/full-stack fixtures missing current
+    `cognitive_episode` or `local_time_context` fields.
+- Independent review remediation before re-check:
+  - Removed the duplicated web generator `# 可用工具` block because tool schemas
+    already come from `_generator_llm.bind_tools(_ALL_TOOLS)`.
+  - Tightened `_WEB_SEARCH_GENERATOR_PROMPT` from the reviewed `1994` chars to
+    `872` chars, below the review baseline of `892` chars.
+  - Updated `experiments/prompt_input_format_ablation.py` fixtures so
+    relevance cases include `current_run_context`, L1 includes
+    `character_state`, and web generator/evaluator include `reference_time`.
+  - Added deterministic payload assertions for web generator/evaluator
+    `reference_time` and L1 `character_state`.
+  - Replaced prose-only field coverage with the table above.
+- Stage 7 independent code review evidence:
+  - Review subagent: `019e5ec4-a7ce-7bc3-ab30-03e859263f8c`.
+  - Initial findings:
+    - High: `_WEB_SEARCH_GENERATOR_PROMPT` duplicated tool descriptions and
+      grew beyond the original prompt-size baseline.
+    - Medium: web/L1 experiment fixtures did not yet match final Human JSON
+      payloads.
+    - Low: field coverage was prose instead of the required table.
+  - Fixes made:
+    - Removed the generator tool-description block and left tool schemas in
+      `_generator_llm.bind_tools(_ALL_TOOLS)`.
+    - Tightened generator wording to `872` chars versus review baseline
+      `892`.
+    - Updated the experiment harness fixtures for final payload fields.
+    - Added deterministic payload tests for web `reference_time` and L1
+      `character_state`.
+    - Added the field-coverage table in Stage 5 evidence.
+  - Rerun commands:
+    `venv\Scripts\python -m py_compile experiments/prompt_input_format_ablation.py src/kazusa_ai_chatbot/rag/web_search_agent.py tests/test_web_search_agent.py tests/test_cognition_prompt_contract_text.py`;
+    `venv\Scripts\python -m pytest tests/test_web_search_agent.py tests/test_cognition_prompt_contract_text.py::test_l1_subconscious_payload_passes_character_state_in_human_json -q`;
+    focused deterministic suite listed above;
+    static greps listed above;
+    `git diff --check`.
+  - Re-review result: no remaining blocking findings. All three findings were
+    resolved. Stage 7 approved.
+  - Residual risk: re-review did not rerun live LLM checks; it accepted the
+    existing live evidence plus deterministic remediation checks because the
+    fixes tightened prompt size and corrected payload placement without adding
+    behavior.
+- Post-completion cleanup and review correction:
+  - User requested cleanup of the generated experiment harness under
+    `experiments/` after completion.
+  - Removed local ignored file `experiments/prompt_input_format_ablation.py`
+    and generated bytecode
+    `experiments/__pycache__/prompt_input_format_ablation.cpython-313.pyc`.
+  - Independent cleanup review found no high/blocking findings. It requested
+    clearer private relevance prompt text for `user_message.user_name`,
+    `platform_user_id`, `content`, and `channel_name`; the prompt and focused
+    test were updated accordingly.

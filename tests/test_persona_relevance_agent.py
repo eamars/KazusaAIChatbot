@@ -487,8 +487,8 @@ async def test_relevance_medium_group_latest_bot_continuity_invokes_llm() -> Non
 
 
 @pytest.mark.asyncio
-async def test_relevance_private_payload_omits_group_attention_fields() -> None:
-    """Private relevance payload should keep the existing shape."""
+async def test_relevance_private_payload_keeps_group_only_fields_out() -> None:
+    """Private relevance payload should include direct metadata but no group-only fields."""
     state = _base_state()
     state["channel_type"] = "private"
     llm_response = _llm_response('{"should_respond": true, "reason_to_respond": "private", "use_reply_feature": false, "channel_topic": "", "indirect_speech_context": ""}')
@@ -497,9 +497,15 @@ async def test_relevance_private_payload_omits_group_attention_fields() -> None:
         mock_llm.ainvoke = AsyncMock(return_value=llm_response)
         await relevance_agent(state)
 
+    system_prompt = mock_llm.ainvoke.await_args.args[0][0].content
     human_payload = mock_llm.ainvoke.await_args.args[0][1].content
     parsed_payload = json.loads(human_payload)
-    assert "directly_addressed" not in parsed_payload["user_message"]
+    assert "user_message.user_name" in system_prompt
+    assert "platform_user_id" in system_prompt
+    assert "`content` 是当前消息正文" in system_prompt
+    assert "channel_name" in system_prompt
+    assert parsed_payload["user_message"]["directly_addressed"] is False
+    assert parsed_payload["current_run_context"]["character_name"] == "Character"
     assert "group_attention" not in parsed_payload
     assert "user_engagement_context" not in parsed_payload
 

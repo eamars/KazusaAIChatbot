@@ -284,21 +284,15 @@ def _has_latest_bot_turn_continuity(
 
 
 _RELEVANCE_SYSTEM_PROMPT = """\
-你负责担任角色 `{character_name}` 的社交前置处理器。通过分析实时对话、角色当前状态及用户历史档案，决定 `{character_name}` 是否有必要介入当前的对话。
+你负责担任 active character 的社交前置处理器。通过分析实时对话、角色当前状态及用户历史档案，决定 active character 是否有必要介入当前的对话。
 
-# 核心背景
-## 1. 角色当前状态
-- **心情 (Mood)**: {mood}
-- **全局氛围 (Global Vibe)**: {global_vibe}
-
-## 2. 对用户 {user_name} 的主观判断 (Affinity Context)
-- **关系评价 (Level)**: {affinity_level}
-- **行为准则 (Instruction)**: {affinity_instruction}
-- **关系洞察 (Insight)**: {last_relationship_insight}
-
-## 3. 社交身份
-- **Name**: {character_name}
-- **Platform ID**: {platform_bot_id}
+# 本轮语境
+- `current_run_context.character_name` 和 `current_run_context.platform_bot_id` 是本轮角色身份与平台账号，只用于区分 active character、当前发言者和 reply 目标。
+- `current_run_context.mood` 与 `current_run_context.global_vibe` 是角色此刻心境和背景氛围，只能在消息已经可能面向 active character 时调整介入倾向。
+- `current_run_context.affinity_level`、`affinity_instruction` 和 `last_relationship_insight` 是对当前发言者的关系判断；它们影响已合格消息的回应意愿，但不能替代指向证据。
+- `user_message.user_name` 与 `platform_user_id` 是当前发言者身份；`content` 是当前消息正文；`channel_name` 是会话名称，只用于理解场景和话题。
+- `user_message.directly_addressed` 与 `user_message.reply_context` 是结构化平台证据，优先级高于正文措辞。
+- `conversation_history` 是近期对话窗口，用来判断线性延续、第三方对话和上下文断层。
 
 # 响应决策逻辑 (Decision Logic)
 
@@ -307,11 +301,11 @@ _RELEVANCE_SYSTEM_PROMPT = """\
    - **注意**：结构化指向证据来自 typed envelope，不要从正文里的平台标记样式自行解析目标。
    - 如果结构化目标指向的是**其他人**，即使正文提到你，也属于”与他人交谈”，绝不是在召唤你！
    - 注意：即便在关系恶劣（如 Hostile）时，也要根据该等级的指令（如”冷嘲热讽”）进行回复。*
-2. **对话延续**：你是最后一个发言者，且 `{user_name}` 正在回应你。
+2. **对话延续**：你是最后一个发言者，且当前发言者正在回应你。
 3. **主观倾向触发**：
-   - 如果关系属于 `Friendly` 以上：即便没有直接提问，只要话题涉及 `{user_name}` 的 `facts` 或符合你的 `mood`，也应主动参与。
+   - 如果关系属于 `Friendly` 以上：即便没有直接提问，只要话题涉及当前发言者的事实或符合 `current_run_context.mood`，也应主动参与。
    - 如果关系属于 `Reserved` 以下：除非被直接召唤或涉及关键利益，否则倾向于保持冷漠/沉默。
-4. **情感波动响应**：用户表达痛苦、寻求安慰，且你的 `affinity_instruction` 允许你表现出关心（如 `Caring` 级别）。
+4. **情感波动响应**：用户表达痛苦、寻求安慰，且 `current_run_context.affinity_instruction` 允许你表现出关心（如 `Caring` 级别）。
 
 ## B. 拒绝回复 (Should Respond: false)
 1. **第三方对话**：用户显然是在与其他人/或其他机器人交谈。就算消息中抱怨或提到了你的名字或“我的机器人”，只要其主要互动对象是别人，你也应保持沉默旁观。
@@ -338,37 +332,20 @@ _RELEVANCE_SYSTEM_PROMPT = """\
 ## indirect_speech_context 生成规则
 在写入 `indirect_speech_context` 前，必须先检查消息正文的语法人称，再按以下逻辑分类：
 
-- **情况 A — 直接对{character_name}说**：正文使用第二人称"你"指向{character_name}，或直接命令/质问{character_name}本人。
+- **情况 A — 直接对 active character 说**：正文使用第二人称"你"指向 active character，或直接命令/质问 active character 本人。
   - 示例："你真是个怪叔叔" / "你在搞什么鬼"
   - `indirect_speech_context` 输出空字符串 ""（无需间接语境描述）。
 
-- **情况 B — 向群内其他人谈论{character_name}**：正文使用第三人称"他"/"她"指代{character_name}，且包含面向他人的命令句（如"不要"/"别"/"小心"）警告他人注意{character_name}的行为；此时{character_name}是话题对象而非受话人。
-  - 示例："他是怪叔叔，不要跟着他的圈套走"（reply/@{character_name} 仅提供线程上下文）
-  - `indirect_speech_context` 输出：明确说明实际听众为其他群员，以及{character_name}在消息中的角色（被讨论的对象）。
+- **情况 B — 向群内其他人谈论 active character**：正文使用第三人称"他"/"她"指代 active character，且包含面向他人的命令句（如"不要"/"别"/"小心"）警告他人注意 active character 的行为；此时 active character 是话题对象而非受话人。
+  - 示例："他是怪叔叔，不要跟着他的圈套走"（reply/@active character 仅提供线程上下文）
+  - `indirect_speech_context` 输出：明确说明实际听众为其他群员，以及 active character 在消息中的角色（被讨论的对象）。
 
 # 思考路径
 1. 先读取 `user_message.directly_addressed` 与 `user_message.reply_context`，判断消息是否结构化指向角色本人。
 2. 再读取正文内容和 `conversation_history`，判断是否是直接召唤、对话延续、第三方对话或低信号内容。
-3. 结合当前心情、关系等级和关系洞察，只在已经确认可能需要回复之后调整是否介入。
+3. 结合 `current_run_context` 中的当前心情、关系等级和关系洞察，只在已经确认可能需要回复之后调整是否介入。
 4. 判断是否需要 `use_reply_feature` 来锚定回复对象。
 5. 最后区分直接对角色说话和向别人谈论角色，生成 `indirect_speech_context`。
-
-# 输入格式
-{{
-    "user_message": {{
-        "user_name": "当前发言者显示名",
-        "platform_user_id": "当前发言者平台 ID",
-        "content": "当前消息正文",
-        "channel_name": "会话名称",
-        "directly_addressed": true,
-        "reply_context": {{
-            "reply_to_platform_user_id": "被回复者平台 ID",
-            "reply_to_display_name": "被回复者显示名",
-            "reply_excerpt": "被回复消息摘要"
-        }}
-    }},
-    "conversation_history": ["近期群聊或私聊消息"]
-}}
 
 # 输出格式
 请务必返回合法的 JSON 字符串，仅包含以下字段：
@@ -382,18 +359,15 @@ _RELEVANCE_SYSTEM_PROMPT = """\
 """
 
 _RELEVANCE_SYSTEM_NOISY_PROMPT = """\
-你负责担任角色 `{character_name}` 的群聊相关性判断器。
-你的任务不是聊天，而是在生成回复之前判断 `{character_name}` 是否应该介入当前这一条群聊消息。
+你负责担任 active character 的群聊相关性判断器。
+你的任务不是聊天，而是在生成回复之前判断 active character 是否应该介入当前这一条群聊消息。
 
-# 背景
-- 角色名: {character_name}
-- 平台账号 ID: {platform_bot_id}
-- 当前心情: {mood}
-- 当前全局氛围: {global_vibe}
-- 当前发言者: {user_name}
-- 对当前发言者的关系等级: {affinity_level}
-- 关系行为准则: {affinity_instruction}
-- 关系洞察: {last_relationship_insight}
+# 本轮语境
+- `current_run_context.character_name` 和 `current_run_context.platform_bot_id` 是本轮角色身份与平台账号，只用于区分 active character、当前发言者和 reply 目标。
+- `user_message.user_name` 是当前发言者；`user_message.directly_addressed` 与 `user_message.reply_context` 是结构化平台指向证据。
+- `group_attention` 描述当前群聊窗口噪音和竞争线程强度，不描述谁是听众。
+- `user_engagement_context.engagement_guidelines` 是当前发言者的互动参与偏好，只能在消息已经合格时作为软参考。
+- `current_run_context.mood`、`current_run_context.global_vibe`、`current_run_context.affinity_level`、`current_run_context.affinity_instruction` 和 `current_run_context.last_relationship_insight` 只能在听众已经确认后调整介入倾向。
 
 # 核心契约
 1. 你只判断是否介入当前群聊消息，不生成角色回复内容。
@@ -401,31 +375,31 @@ _RELEVANCE_SYSTEM_NOISY_PROMPT = """\
 3. 正文只能用于理解语义、语气和语法角色，不能当作平台结构化指向证据。
 4. 群聊中不要猜昵称或别称。没有结构化指向时，`<昵称>你...` 必须返回 `false`。
 5. 用户互动风格只能在结构化资格、直接对话语法或历史连续性已经成立后，帮助判断是否承接用户分享；它不能替代指向证据，也不能把第三人称谈论升级为邀请你发言。
-6. 关系亲密度、心情、话题兴趣只能在确认消息可能是对 `{character_name}` 说之后影响是否回复；它们不能替代指向证据。
-7. 如果不能确定当前消息是不是对 `{character_name}` 说，返回 `should_respond=false`。
+6. 关系亲密度、心情、话题兴趣只能在确认消息可能是对 active character 说之后影响是否回复；它们不能替代指向证据。
+7. 如果不能确定当前消息是不是对 active character 说，返回 `should_respond=false`。
 
 # 证据层级
 按下面顺序判断，不要跳步:
 
 1. 结构化指向
    - `user_message.directly_addressed=true` 表示 typed envelope 的 addressee 列表明确包含 active character。这是最强直接指向。
-   - `user_message.reply_context.reply_to_platform_user_id` 如果存在且不是 `{platform_bot_id}`，表示当前消息是平台原生 reply 到其他人。这是强反证；除非 `directly_addressed=true`，否则通常不应回复。
+   - `user_message.reply_context.reply_to_platform_user_id` 如果存在且不是 `current_run_context.platform_bot_id`，表示当前消息是平台原生 reply 到其他人。这是强反证；除非 `directly_addressed=true`，否则通常不应回复。
 2. 群聊噪音
    - `group_attention` 只描述群聊窗口噪音，不描述谁是听众。
-   - `low_noise` 只表示竞争线程少，不表示默认轮到 `{character_name}` 说话。
+   - `low_noise` 只表示竞争线程少，不表示默认轮到 active character 说话。
 3. 正文语法和历史连续性
-   - 角色名、第二人称、话题相关、可见 mention 样式文本都只是语义线索，不能单独证明当前消息是在对 `{character_name}` 说。
+   - 角色名、第二人称、话题相关、可见 mention 样式文本都只是语义线索，不能单独证明当前消息是在对 active character 说。
    - 名字或代词如果是主语、宾语或被讨论话题，应先按群内谈论处理。
-   - 询问 `{character_name}` 会不会、是否、想不想、怎么看某事，但句法上把名字作为主语时，仍是谈论 `{character_name}` 的第三人称问题，不是对你本人说话。
+   - 询问 active character 会不会、是否、想不想、怎么看某事，但句法上把名字作为主语时，仍是谈论 active character 的第三人称问题，不是对你本人说话。
    - 只有可分离的角色名称呼加第二人称续接、直接请求或命令，才算正文中的直接对话证据。
    - 历史连续性只能作为辅助证据，且必须非常清楚: 当前发言者正在延续你上一轮相关发言，窗口里没有明显竞争线程。
 4. 用户互动风格
    - `user_engagement_context.engagement_guidelines` 描述当前发言者通常如何期待互动，只能作为合格消息的软性偏好。
    - 如果当前消息已经通过结构化指向、直接对话语法或极清楚历史连续性确认是在邀请你参与，可用这些指南判断是否更适合追问、轻接话题或保持观察。
-   - 如果当前消息只是谈论 `{character_name}` 对某事的可能反应，互动指南不能把它解释成用户分享给你本人。
+   - 如果当前消息只是谈论 active character 对某事的可能反应，互动指南不能把它解释成用户分享给你本人。
    - 如果前面层级没有确认听众，或消息结构化指向别人，互动指南必须忽略。
 5. 关系和状态
-   - 只有在结构化指向、直接对话语法或极清楚历史连续性成立后，才参考 `affinity_level`、`affinity_instruction`、`last_relationship_insight`、`mood` 和 `global_vibe`。
+   - 只有在结构化指向、直接对话语法或极清楚历史连续性成立后，才参考 `current_run_context` 中的关系、心境和氛围字段。
    - 高亲密度可以让你更愿意回应已确认面向你的消息，但不能把模糊群聊消息升级成召唤。
    - 低亲密度可以让你更倾向沉默，但不能否定明确指向你的必要回应。
 
@@ -445,9 +419,9 @@ _RELEVANCE_SYSTEM_NOISY_PROMPT = """\
 返回 `false` 的条件:
 - 当前消息结构化 reply 到其他人，且没有结构化 mention 你。
 - 当前消息像是群内其他人的相互交流、插话、玩笑、讨论你、评价你，或询问另一个人对你的看法。
-- 当前消息把 `{character_name}` 当作第三人称主语、宾语或话题对象，而不是可分离的呼格听众。
-- 当前消息用第三人称主语句式询问 `{character_name}` 会不会、是否、想不想或可能有什么感受，即使内容与用户分享或图片有关。
-- 当前消息的听众无法从结构化指向、直接对话语法或清楚历史连续性中唯一解析为 `{character_name}`。
+- 当前消息把 active character 当作第三人称主语、宾语或话题对象，而不是可分离的呼格听众。
+- 当前消息用第三人称主语句式询问 active character 会不会、是否、想不想或可能有什么感受，即使内容与用户分享或图片有关。
+- 当前消息的听众无法从结构化指向、直接对话语法或清楚历史连续性中唯一解析为 active character。
 - 噪音为 `medium_noise` 或更高，而指向证据只来自正文里的名字、第二人称或话题相关性。
 - 当前消息只使用泛称、关系称呼、未解析代词、昵称或别称，例如 `bot`、`伙伴`、`她`、`TA`。
 - `user_engagement_context` 鼓励参与，但当前消息没有通过结构化指向、直接对话语法或清楚历史连续性确认听众是你。
@@ -487,33 +461,11 @@ _RELEVANCE_SYSTEM_NOISY_PROMPT = """\
 # 思考路径
 1. 读取 `directly_addressed` 与 `reply_context.reply_to_platform_user_id`。
 2. 读取 `group_attention`，按噪音等级决定介入门槛。
-3. 判断正文语法角色和历史连续性，先区分名字是呼格听众还是第三人称主语，再确认 `{character_name}` 是否是当前消息的唯一听众。
+3. 判断正文语法角色和历史连续性，先区分名字是呼格听众还是第三人称主语，再确认 active character 是否是当前消息的唯一听众。
 4. 只有在听众确认后，才读取 `user_engagement_context`，判断是否应承接已合格的分享或追问。
 5. 再参考关系亲密度、心情、话题兴趣和消息内容强度。
 6. 决定 `should_respond`。
 7. 如果决定回复，再决定 `use_reply_feature` 和 `indirect_speech_context`。
-
-# 输入格式
-{{
-    "user_message": {{
-        "user_name": "当前发言者显示名",
-        "platform_user_id": "当前发言者平台 ID",
-        "content": "当前消息正文",
-        "channel_name": "群聊名称",
-        "directly_addressed": true,
-        "reply_context": {{
-            "reply_to_platform_user_id": "被回复者平台 ID",
-            "reply_to_display_name": "被回复者显示名",
-            "reply_excerpt": "被回复消息摘要"
-        }}
-    }},
-    "conversation_history": ["近期群聊消息"],
-    "group_attention": "low_noise | medium_noise | high_noise | chaotic_noise",
-    "user_engagement_context": {{
-        "engagement_guidelines": ["当前发言者相关的互动参与偏好，最多 {relevance_user_engagement_guidelines_limit} 条"],
-        "confidence": "low | medium | high | "
-    }}
-}}
 
 # 输出格式
 请务必返回合法的 JSON 字符串，仅包含以下字段：
@@ -663,27 +615,27 @@ async def relevance_agent(state: IMProcessState) -> IMProcessState:
         return return_value
 
     """Analyze context and determine relevance using LLM."""
-    system_prompt = SystemMessage(content=prompt_template.format(
-        character_name=state["character_profile"]["name"],
-        mood=state["character_profile"]["mood"],
-        global_vibe=state["character_profile"]["global_vibe"],
-        user_name=user_name,
-        affinity_level=affinity_block["level"],
-        affinity_instruction=affinity_block["instruction"],
-        last_relationship_insight=state["user_profile"].get("last_relationship_insight", ""),
-        platform_bot_id=state["platform_bot_id"],
-        relevance_user_engagement_guidelines_limit=(
-            RELEVANCE_USER_ENGAGEMENT_GUIDELINES_LIMIT
-        ),
-    ))
-
+    system_prompt = SystemMessage(content=prompt_template.format())
 
     human_data = {
+        "current_run_context": {
+            "character_name": state["character_profile"]["name"],
+            "platform_bot_id": state["platform_bot_id"],
+            "mood": state["character_profile"]["mood"],
+            "global_vibe": state["character_profile"]["global_vibe"],
+            "affinity_level": affinity_block["level"],
+            "affinity_instruction": affinity_block["instruction"],
+            "last_relationship_insight": state["user_profile"].get(
+                "last_relationship_insight",
+                "",
+            ),
+        },
         "user_message": {
             "user_name": user_name,
             "platform_user_id": platform_user_id,
             "content": user_input,
             "channel_name": channel_name,
+            "directly_addressed": directly_addressed,
             "reply_context": reply_context,
         },
         "conversation_history": format_storage_utc_history_for_llm(
@@ -691,7 +643,6 @@ async def relevance_agent(state: IMProcessState) -> IMProcessState:
         ),
     }
     if is_noisy_environment:
-        human_data["user_message"]["directly_addressed"] = directly_addressed
         human_data["group_attention"] = group_attention
         try:
             user_engagement_context = await build_user_engagement_relevance_context(

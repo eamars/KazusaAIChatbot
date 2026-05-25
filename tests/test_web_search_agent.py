@@ -2,11 +2,20 @@
 
 from __future__ import annotations
 
+import json
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
-from kazusa_ai_chatbot.rag.web_search_agent import WebSearchAgent, _run_subgraph, web_search, web_url_read
+from kazusa_ai_chatbot.rag import web_search_agent as web_module
+from kazusa_ai_chatbot.rag.web_search_agent import (
+    WebSearchAgent,
+    _run_subgraph,
+    web_search,
+    web_url_read,
+)
 from kazusa_ai_chatbot.time_boundary import build_turn_clock_from_storage_utc
 
 
@@ -72,6 +81,70 @@ async def test_run_subgraph_returns_expected_keys() -> None:
         "is_empty_result": False,
         "knowledge_metadata": {"tool": "web_search"},
     }
+
+
+@pytest.mark.asyncio
+async def test_tool_call_generator_passes_reference_time_to_human_json(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Generator prompt keeps current time in the late Human JSON payload."""
+
+    fake_llm = SimpleNamespace(
+        ainvoke=AsyncMock(return_value=AIMessage(content="")),
+    )
+    monkeypatch.setattr(web_module, "_generator_llm", fake_llm)
+    state = {
+        "task": "Find the latest release status.",
+        "context": {"platform": "debug"},
+        "messages": [HumanMessage(content="start")],
+        "prompt_timestamp": "2026-05-25 21:30 (Monday)",
+    }
+
+    await web_module._tool_call_generator(state)
+
+    messages = fake_llm.ainvoke.await_args.args[0]
+    system_prompt = messages[0].content
+    payload = json.loads(messages[1].content)
+    assert "# 可用工具" not in system_prompt
+    assert payload["reference_time"] == "2026-05-25 21:30 (Monday)"
+
+
+@pytest.mark.asyncio
+async def test_tool_call_evaluator_passes_reference_time_to_human_json(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Evaluator prompt keeps current time in the late Human JSON payload."""
+
+    fake_llm = SimpleNamespace(
+        ainvoke=AsyncMock(return_value=AIMessage(content='{"should_stop": true}')),
+    )
+    monkeypatch.setattr(web_module, "_evaluator_llm", fake_llm)
+    state = {
+        "task": "Find the latest release status.",
+        "expected_response": "official status",
+        "messages": [
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "web_search",
+                        "args": {"query": "Python release"},
+                        "id": "call-1",
+                    }
+                ],
+            ),
+            ToolMessage(content="search result", tool_call_id="call-1"),
+        ],
+        "retry": 0,
+        "prompt_timestamp": "2026-05-25 21:30 (Monday)",
+    }
+
+    await web_module._tool_call_evaluator(state)
+
+    messages = fake_llm.ainvoke.await_args.args[0]
+    payload = json.loads(messages[1].content)
+    assert payload["reference_time"] == "2026-05-25 21:30 (Monday)"
+    assert payload["call_history"][0]["tool"] == "web_search"
 
 
 @pytest.mark.asyncio

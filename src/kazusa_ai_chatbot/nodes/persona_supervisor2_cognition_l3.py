@@ -468,89 +468,19 @@ logical_stance + character_intent
 ## `[SCOPE]`
 - 只根据已生成锚点控制篇幅：仅 `[DECISION]` 约 15 字；含 `[FACT]` 或 `[ANSWER]` 约 20-40 字；多个实质锚点约 50 字以上。
  
-# 输入格式
-{{
-    "decontexualized_input": "用户输入语义摘要",
-    "referents": [
-        {{"phrase": "这些", "referent_role": "object", "status": "unresolved"}}
-    ],
-    "media_observations": {{
-        "image_observations": ["当前图片的结构化视觉观察；没有则为空数组"],
-        "audio_observations": ["当前音频转写或摘要；没有则为空数组"]
-    }},
-    "rag_result": {{
-        "answer": "检索主管的一行综合结论",
-        "user_image": {{
-            "global_user_id": "当前用户 UUID",
-            "display_name": "当前用户显示名",
-            "user_memory_context": {{
-                "stable_patterns": [{{"fact": "重复出现的事实模式", "subjective_appraisal": "角色的主观评价", "relationship_signal": "未来互动信号", "updated_at": "本地时间YYYY-MM-DD HH:MM"}}],
-                "recent_shifts": [{{"fact": "最近变化或局部事件", "subjective_appraisal": "角色的主观评价", "relationship_signal": "未来互动信号", "updated_at": "本地时间YYYY-MM-DD HH:MM"}}],
-                "objective_facts": [{{"fact": "客观事实", "subjective_appraisal": "角色如何看待这个事实", "relationship_signal": "未来互动信号", "updated_at": "本地时间YYYY-MM-DD HH:MM"}}],
-                "milestones": [{{"fact": "里程碑事件", "subjective_appraisal": "角色如何看待这个事件", "relationship_signal": "未来互动信号", "updated_at": "本地时间YYYY-MM-DD HH:MM"}}],
-                "active_commitments": [{{"fact": "当前仍有效的承诺/约定", "subjective_appraisal": "角色如何看待这个承诺", "relationship_signal": "执行或表达上的注意点", "updated_at": "本地时间YYYY-MM-DD HH:MM", "due_at": "可选本地到期时间YYYY-MM-DD HH:MM", "due_state": "no_due_date | future_due | due_today | past_due | unknown_due_date"}}]
-            }}
-        }},
-        "character_image": {{
-            "name": "{character_name}",
-            "self_image": {{
-                "milestones": [{{"event": "{character_name} 的关键自我认知", "category": "类别", "superseded_by": null}}],
-                "historical_summary": "{character_name} 的较早自我总结",
-                "recent_window": [{{"summary": "{character_name} 最近几次互动后的自我状态"}}]
-            }}
-        }},
-        "third_party_profiles": ["第三方用户的持久画像——注意区分：这是关于'他人'的记忆，不是当前用户"],
-        "memory_evidence": [{{"summary": "与当前话题相关的跨轮记忆摘要", "content": "相关记忆原文摘录"}}],
-        "conversation_evidence": ["频道近期提到的第三方实体/人物的对话摘要——这是'最近发生的事'，不是持久印象"],
-        "external_evidence": [{{"summary": "外部知识检索摘要", "content": "网页正文摘录", "url": "https://example.com"}}],
-        "supervisor_trace": {{"unknown_slots": ["未解决槽位"], "loop_count": 1}}
-    }},
-    "internal_monologue": "意识层的决策逻辑",
-    "logical_stance": "强制逻辑立场 (CONFIRM/REFUSE/TENTATIVE...)",
-    "character_intent": "行动意图 (BANTAR/CLARIFY/EVADE...)",
-    "selected_text_surface_intent": "已选择文本输出时的一句语义目标；没有则为空字符串",
-    "memory_lifecycle_context": {{
-        "decision": "lifecycle_change | no_lifecycle_change | skipped",
-        "lifecycle_decisions": [{{"target_alias": "commitment_1", "decision": "fulfilled | abandoned | obsolete | deferred", "role": "语义角色", "evidence_anchor": "短证据"}}],
-        "content_anchor_roles": [{{"role": "avoid_reopening | acknowledge_fulfillment | keep_waiting", "anchor": "提示安全语义锚点"}}],
-        "warnings": ["提示安全警告；没有则为空数组"]
-    }},
-    "interaction_style_context": {{
-        "user_style": {{
-            "speech_guidelines": ["用户互动风格中的表达处理建议"],
-            "social_guidelines": ["用户互动风格中的社交处理建议"],
-            "pacing_guidelines": ["用户互动风格中的节奏处理建议"],
-            "engagement_guidelines": ["用户互动风格中的参与/追问/观察建议"],
-            "confidence": "low | medium | high | "
-        }},
-        "group_channel_style": {{
-            "speech_guidelines": ["群聊频道互动风格中的表达处理建议"],
-            "social_guidelines": ["群聊频道互动风格中的社交处理建议"],
-            "pacing_guidelines": ["群聊频道互动风格中的节奏处理建议"],
-            "engagement_guidelines": ["群聊频道互动风格中的参与/追问/观察建议"],
-            "confidence": "low | medium | high | "
-        }},
-        "application_order": ["user_style", "group_channel_style"]
-    }},
-    "conversation_progress": {{
-        "status": "active | new_episode | suspended | closed",
-        "continuity": "same_episode | related_shift | sharp_transition",
-        "conversation_mode": "80 字符以内的短语义描述，可直接按语义读取，不是枚举",
-        "episode_phase": "opening | developing | deepening | pivoting | stuck_loop | resolving | cooling_down",
-        "topic_momentum": "stable | drifting | quick_pivot | fragmented | sharp_break",
-        "current_thread": "当前正在讨论的中性线程",
-        "user_goal": "当前目标；非目标型对话可为空",
-        "current_blocker": "当前阻碍；非问题解决型对话可为空",
-        "user_state_updates": [{{"text": "用户已经披露的状态", "age_hint": "~3h ago"}}],
-        "overused_moves": ["已经过度使用的回应动作"],
-        "open_loops": [{{"text": "尚未解决的对话线程", "age_hint": "~3h ago"}}],
-        "resolved_threads": [{{"text": "已经处理过的线程", "age_hint": "~3h ago"}}],
-        "avoid_reopening": [{{"text": "不要主动重开的旧点", "age_hint": "~3h ago"}}],
-        "emotional_trajectory": "当前 episode 的情绪变化",
-        "next_affordances": ["自然下一步动作，例如 continue/deepen/clarify/resolve/cool_down"],
-        "progression_guidance": "下一轮应如何推进"
-    }}
-}}
+# 本轮输入字段说明
+- `decontexualized_input` 是当前输入或触发材料的语义摘要，是判断问题、请求、回答、玩笑、补充或澄清需求的第一入口。
+- `referents` 是指代解析结果；任一 `status` 为 `unresolved` 时，必须按 Clarification override 使用对应 `phrase` 生成澄清锚点。
+- `media_observations` 若存在，是本轮图片或音频的直接事实。只在当前输入询问或引用媒体内容时用于 `[FACT]` / `[ANSWER]`，不要把它当成长期偏好或动作描写来源。
+- `rag_result` 是检索证据包：`answer` 是最高优先级的直接检索结论；`memory_evidence`、`conversation_evidence`、`external_evidence` 和 `recall_evidence` 是可引用支撑；`user_image.user_memory_context` 是当前用户连续性，其中 `active_commitments.due_state` 用于判断承诺时态；`character_image` 只在当前输入询问 active character 自我状态时使用；`third_party_profiles` 是他人信息；`supervisor_trace` 是检索过程痕迹，不是用户可见事实。
+- `internal_monologue` 是上游意识层的解释依据，只用于理解决定，不要原文暴露。
+- `logical_stance` 与 `character_intent` 是已定的 L2 立场和意图；内容锚点只能执行它们，不能改判。
+- `selected_text_surface_intent` 是已选择文本输出时传下来的语义目标；覆盖它，但不要把它当成事实来源。
+- `memory_lifecycle_context` 是活动承诺复核后的提示安全锚点；重点读取 `content_anchor_roles` 的 `avoid_reopening`、`acknowledge_fulfillment` 和 `keep_waiting`。
+- `interaction_style_context` 是已清洗的用户/群频道互动风格，按 `application_order` 使用；其中 `engagement_guidelines` 只调节承接、追问或收束方式。
+- `conversation_progress` 是短期进展摘要；重点读取 `continuity`、`current_thread`、`current_blocker`、`open_loops`、`resolved_threads`、`avoid_reopening`、`overused_moves`、`next_affordances` 和 `progression_guidance`，并以当前输入覆盖旧阻碍。
+- `reflection_artifact` 若存在，表示本轮材料来自角色自己的反思资料，不是用户正在说话；只根据上游判断和反思中真实沉淀的经历生成锚点。
+- `internal_thought_residue` 若存在，表示本轮材料来自内部观察残留，不是外部命令或当前用户发言；只把其中真实可见的观察作为来源背景。
 
 # 输出格式 (JSON)
 请务必返回合法的 JSON 字符串，仅包含以下字段：

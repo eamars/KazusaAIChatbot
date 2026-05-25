@@ -136,17 +136,17 @@ class WebSearchState(TypedDict):
 
 
 _WEB_SEARCH_GENERATOR_PROMPT = """\
-你是一个专家级的网络搜索代理 (Web Search Agent)。你的目标是通过互联网检索最准确、最及时的信息来完成任务。
+你是网络搜索代理 (Web Search Agent)。目标是检索准确、及时的信息来完成任务。
 
 # 核心准则
 - **行为分解**：搜索 (`web_search`) 只是为了寻找线索；阅读 (`web_url_read`) 才是为了获取知识。严禁仅根据搜索结果摘要（Snippets）撰写最终答案。
 - **拒绝假设**：严禁猜测未知的 URL 或事实。如果信息不存在，请如实反馈。
-- **反馈至上**：评估员 (Evaluator) 的反馈是你的最高指令。如果评估员要求你"深入阅读"，不要再次发起搜索。
+- **反馈至上**：评估员反馈优先；若要求"深入阅读"，不要再次搜索。
 
-# 搜索策略 (Advanced Query Engineering)
-1. **多维度搜索**：如果第一次搜索无果，尝试使用近义词、英文翻译（针对技术或国际话题）或特定的日期限定。
-2. **搜索语法**：合理利用高级语法，如 `"精确匹配"`，`site:official-website.com`，或 `-排除无关词`。
-3. **优先级排序**：优先选择权威来源（政府、大型机构、官方文档）而非博客或社交媒体。
+# 搜索策略
+1. **多维度搜索**：无果时尝试近义词、英文翻译或日期限定。
+2. **搜索语法**：合理利用 `"精确匹配"`、`site:official-website.com` 或 `-排除无关词`。
+3. **优先级排序**：优先政府、大型机构、官方文档等权威来源。
 
 # 任务流程
 1. **历史审计**：核查 `messages`。如果上一步已经得到了搜索列表，这一步通常应该使用 `web_url_read` 读取其中最相关的 1-3 个链接。
@@ -157,15 +157,14 @@ _WEB_SEARCH_GENERATOR_PROMPT = """\
    - 无法继续？在回复中说明原因。
 
 # 语言与时间
-- **当前时间参考**：{timestamp}。
+- **当前时间参考**：读取 Human JSON 的 `reference_time`。涉及最新、最近、日期范围或时效判断时必须以它为准。
 - **语言匹配**：默认使用任务语言搜索。但对于全球性技术、科学或国际新闻，建议同时尝试英文搜索。
 
-# 输入格式
-{{
-    "task": "任务描述",
-    "context": 辅助搜索信息,
-    "messages": [包含评估员反馈的历史记录]
-}}
+# 本轮输入
+- `task`: 外部检索任务。
+- `context`: 已知地点、URL、约束或上游确认事实。
+- `reference_time`: 相对日期和时效判断基准。
+- 追加的历史 `messages`: 已执行工具结果和评估员反馈；据此决定继续搜索、读链接或停止说明。
 """
 _generator_llm = get_llm(
     temperature=0.3,
@@ -194,7 +193,7 @@ _WEB_SEARCH_EVALUATOR_PROMPT = """\
 3. **确认无果**：已穷尽相关关键词和域名限制（如 search, site: official_site 等）依然无法找到目标信息。
 
 # 消息时效与计算
-- **当前时间**：{timestamp}。
+- **当前时间**：读取 Human JSON 的 `reference_time`。
 - **时间敏感度**：如果任务涉及"最新"、"最近"、"三天内"或特定年份，必须核对结果日期。
 - **动态计算**：如果用户要求"过去一周"，请根据当前时间计算出具体的日期范围，并在 `feedback` 中告知 Generator 使用该范围。
 
@@ -209,13 +208,11 @@ _WEB_SEARCH_EVALUATOR_PROMPT = """\
 3. 若已有相关链接但缺正文，建议读取正文；若关键词太泛，建议具体搜索策略。
 4. 若信息已足够或继续搜索收益低，设置 `should_stop: true`。
 
-# 输入格式
-{{
-    "task": "任务描述",
-    "expected_response": "用户期待的回复内容和格式，有可能包含更多搜索细节",
-    "call_history": [已执行的工具、参数及结果摘要],
-    "retry": 当前重试次数 n / MAX_RETRY
-}}
+# 本轮输入
+- `task` 是原始检索任务，`expected_response` 是下游希望得到的证据范围或格式。
+- `call_history` 是已经执行过的工具、参数和结果摘要；其中搜索 snippet 只能作为线索，正文读取结果才是更强证据。
+- `retry` 是当前评估轮次，用于判断是否已经接近重试上限。
+- `reference_time` 是本轮时间基准，用于核对结果日期和计算相对日期范围。
 
 # 输出格式
 请务必返回合法的 JSON 字符串，仅包含以下字段：
@@ -324,14 +321,12 @@ async def _tool_call_generator(state: WebSearchState) -> dict:
     Returns:
         State update with the LLM's next message appended.
     """
-    agent_tools = "\n".join([f"- {t.name}: {t.description}" for t in _ALL_TOOLS])
-    system_prompt = SystemMessage(
-        content=_WEB_SEARCH_GENERATOR_PROMPT.format(
-            agent_tools=agent_tools,
-            timestamp=state["prompt_timestamp"],
-        )
-    )
-    user_input = {"task": state["task"], "context": state["context"]}
+    system_prompt = SystemMessage(content=_WEB_SEARCH_GENERATOR_PROMPT)
+    user_input = {
+        "task": state["task"],
+        "context": state["context"],
+        "reference_time": state["prompt_timestamp"],
+    }
     human_message = HumanMessage(content=json.dumps(user_input, ensure_ascii=False))
 
     if len(state["messages"]) > 3:
@@ -370,7 +365,6 @@ async def _tool_call_evaluator(state: WebSearchState) -> dict:
     system_prompt = SystemMessage(
         content=_WEB_SEARCH_EVALUATOR_PROMPT.format(
             agent_tools=agent_tools,
-            timestamp=state["prompt_timestamp"],
         )
     )
     evaluation_input = {
@@ -378,6 +372,7 @@ async def _tool_call_evaluator(state: WebSearchState) -> dict:
         "expected_response": state["expected_response"],
         "call_history": call_history,
         "retry": f"{retry}/{MAX_WEB_SEARCH_AGENT_RETRY}",
+        "reference_time": state["prompt_timestamp"],
     }
     response = await _evaluator_llm.ainvoke(
         [system_prompt, HumanMessage(content=json.dumps(evaluation_input, ensure_ascii=False))]

@@ -2,14 +2,20 @@
 
 from __future__ import annotations
 
+import json
 import re
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
+from langchain_core.messages import AIMessage
 
+from kazusa_ai_chatbot.cognition_episode import build_text_chat_cognitive_episode
 from kazusa_ai_chatbot.nodes import persona_supervisor2_cognition_l1 as l1_module
 from kazusa_ai_chatbot.nodes import persona_supervisor2_cognition_l2 as l2_module
 from kazusa_ai_chatbot.nodes import persona_supervisor2_cognition_l2c2 as l2c2_module
 from kazusa_ai_chatbot.nodes import persona_supervisor2_cognition_l2d as l2d_module
+from kazusa_ai_chatbot.time_boundary import build_turn_clock_from_storage_utc
 
 
 _AFFECTED_PROMPTS = (
@@ -324,8 +330,76 @@ def test_affected_prompts_forbid_copying_source_packet_metadata() -> None:
             prompt_name,
             prompt_text,
             _GENERATED_FIELD_TERMS,
-            'generated-field targets for the metadata-copy prohibition',
+                'generated-field targets for the metadata-copy prohibition',
         )
+
+
+@pytest.mark.asyncio
+async def test_l1_subconscious_payload_passes_character_state_in_human_json(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """L1 runtime state belongs in Human JSON, not formatted system text."""
+
+    turn_clock = build_turn_clock_from_storage_utc(
+        '2026-05-25T09:30:00+00:00',
+    )
+    episode = build_text_chat_cognitive_episode(
+        episode_id='prompt-contract-l1-episode',
+        percept_id='prompt-contract-l1-percept',
+        storage_timestamp_utc=turn_clock['storage_timestamp_utc'],
+        local_time_context=turn_clock['local_time_context'],
+        user_input='Is it safe to remove this prompt section?',
+        platform='debug',
+        platform_channel_id='debug-private-1',
+        channel_type='private',
+        platform_message_id='message-1',
+        platform_user_id='user-1',
+        global_user_id='global-user-1',
+        user_name='Ran',
+        active_turn_platform_message_ids=['message-1'],
+        active_turn_conversation_row_ids=[],
+        debug_modes={},
+        target_addressed_user_ids=['character-1'],
+        target_broadcast=False,
+    )
+    fake_llm = SimpleNamespace(
+        ainvoke=AsyncMock(
+            return_value=AIMessage(
+                content=(
+                    '{"emotional_appraisal":"先稳住",'
+                    '"interaction_subtext":"在问风险"}'
+                ),
+            ),
+        ),
+    )
+    monkeypatch.setattr(l1_module, '_subconscious_llm', fake_llm)
+    state = {
+        'character_profile': {
+            'name': 'Kazusa',
+            'mood': 'guarded',
+            'global_vibe': 'quiet review',
+            'personality_brief': {'mbti': 'INTJ'},
+        },
+        'user_profile': {
+            'last_relationship_insight': 'The user expects precise tradeoffs.',
+        },
+        'cognitive_episode': episode,
+        'user_input': 'Is it safe to remove this prompt section?',
+        'indirect_speech_context': '',
+    }
+
+    result = await l1_module.call_cognition_subconscious(state)
+
+    messages = fake_llm.ainvoke.await_args.args[0]
+    system_prompt = messages[0].content
+    payload = json.loads(messages[1].content)
+    assert result['emotional_appraisal'] == '先稳住'
+    assert '# 输入格式' not in system_prompt
+    assert payload['character_state'] == {
+        'mood': 'guarded',
+        'global_vibe': 'quiet review',
+        'last_relationship_insight': 'The user expects precise tradeoffs.',
+    }
 
 
 def test_l2d_prompt_defines_speak_and_scene_grounded_detail() -> None:

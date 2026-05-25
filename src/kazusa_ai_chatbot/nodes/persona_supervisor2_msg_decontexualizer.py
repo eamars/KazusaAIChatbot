@@ -355,42 +355,27 @@ _MSG_DECONTEXUALIZER_PROMPT = '''\
 - 群聊提及指向群成员：`user_input = "她说她不喜欢你，你自己心里有数"` -> 把「她」改成可见说话人名，把所有指向被提及群友的「你 / 你自己」改成该群友。
 - 转述可见说话人：最近 A 说「我的琴谱在柜子最上层」，`user_input = "A 刚才说我的琴谱在柜子最上层，我明天帮她拿"` -> `output = "A 刚才说 A 的琴谱在柜子最上层，我明天帮 A 拿"`。
 - 回复短答：`reply_context.reply_excerpt = "你是想让我说明白对你的看法吗？"` 且 `user_input = "是的"` -> `output = "是的，我是想让{character_name}说明白对我的看法"`。
-- 缺失对象：`user_input = "这些是什么意思？"` 且没有可见对象 -> 保持原句，并输出 `{"phrase": "这些", "referent_role": "object", "status": "unresolved"}`。
+- 缺失对象：`user_input = "这些是什么意思？"` 且没有可见对象 -> 保持原句，并输出 `{{"phrase": "这些", "referent_role": "object", "status": "unresolved"}}`。
 
-# 输入格式
-{
-    "user_input": "string",
-    "platform_user_id": "string",
-    "user_name": "string",
-    "platform_bot_id": "string",
-    "prompt_message_context": {
-        "body_text": "string",
-        "addressed_to_global_user_ids": ["string"],
-        "broadcast": true,
-        "mentions": [{"platform_user_id": "string", "global_user_id": "string", "display_name": "string", "entity_kind": "bot | user | platform_role | channel | everyone | unknown"}],
-        "attachments": [{"media_kind": "image | audio | video | file", "description": "string", "summary_status": "available | unavailable"}]
-    },
-    "chat_history": [
-        {"role": "user | assistant", "display_name": "string", "body_text": "string"}
-    ],
-    "channel_topic": "string",
-    "indirect_speech_context": "string",
-    "reply_context": {
-        "reply_to_display_name": "string",
-        "reply_excerpt": "string"
-    }
-}
+# 本轮输入字段说明
+- `user_input` 是当前需要去语境化的原文，只能同义补全，不能回答问题或改写意图。
+- `platform_user_id`、`user_name` 是当前发言者身份；`platform_bot_id` 是 active character 的平台账号身份，只用于区分当前用户、角色账号和被提及对象。
+- `prompt_message_context.body_text` 是 typed envelope 投影后的可见正文；`addressed_to_global_user_ids`、`broadcast` 和 `mentions` 是平台结构化指向证据，优先于正文里的可见标记样式。
+- `prompt_message_context.attachments` 是本轮附件事实；只使用其中可用的 `description` 和 `summary_status` 解释"这个/这些/上面那个"等指示词。
+- `chat_history` 是最近可见频道历史；每行的 `display_name` 是该行说话人，`body_text` 是可见正文，只用于解析临近先行词、转述来源和短答对象。
+- `reply_context.reply_to_display_name` 与 `reply_context.reply_excerpt` 是当前消息回复的对象和可见摘录，是短答、确认、"这个/这些"解析的强证据。
+- `channel_topic` 与 `indirect_speech_context` 是弱提示，只能辅助解释场景，不能覆盖明确正文、reply、mention 或附件证据。
 
 # 输出格式
 请务必只返回一个合法 JSON 对象：
-{
+{{
     "output": "重写后的用户输入，或原句",
     "is_modified": true,
     "reasoning": "一句话说明使用了哪些证据；未修改时说明原因",
     "referents": [
-        {"phrase": "原文中的指代短语", "referent_role": "subject | object | time", "status": "resolved | unresolved"}
+        {{"phrase": "原文中的指代短语", "referent_role": "subject | object | time", "status": "resolved | unresolved"}}
     ]
-}
+}}
 
 `status="resolved"` 表示对象能从任一输入字段确定，包括 `reply_context.reply_excerpt`；它不要求 `output` 一定改写。`status="unresolved"` 只在所有输入字段都没有可识别对象时使用。
 `is_modified` 表示 `output` 是否不同于原句。`referents` 必须每次输出。`referent_role` 只允许 `subject`、`object`、`time`；`status` 只允许 `resolved` 或 `unresolved`。
@@ -400,9 +385,8 @@ _MSG_DECONTEXUALIZER_PROMPT = '''\
 def _render_msg_decontexualizer_prompt(character_name: str) -> str:
     """Render the decontextualizer prompt with active character identity."""
 
-    rendered_prompt = _MSG_DECONTEXUALIZER_PROMPT.replace(
-        "{character_name}",
-        character_name,
+    rendered_prompt = _MSG_DECONTEXUALIZER_PROMPT.format(
+        character_name=character_name,
     )
     return rendered_prompt
 

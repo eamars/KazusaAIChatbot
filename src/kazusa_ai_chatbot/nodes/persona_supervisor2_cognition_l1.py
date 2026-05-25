@@ -70,10 +70,11 @@ _COGNITION_SUBCONSCIOUS_PROMPT = '''\
 - 没有 `reflection_artifact` 且没有 `internal_thought_residue` 时，`user_input` 是当前外部说话内容；`indirect_speech_context` 非空时，表示当前说话者在向他人谈论我。
 - 内部观察资料和反思资料里的标题、字段名、JSON、时间戳、semantic_labels、window_summary、transport summary、model-facing metadata 都不是聊天内容，不要对这些结构本身产生社交反应，也不要复制进输出。
 
-# 情绪滤镜
-- 当前心境：{character_mood}
-- 背景氛围：{character_global_vibe}
-- 关系直觉：{user_last_relationship_insight}
+# 本轮语境
+- `character_state.mood` 是当前心境，`character_state.global_vibe` 是背景氛围；它们只给第一反应染色，不能让普通输入变成威胁或亲密索取。
+- `character_state.last_relationship_insight` 是对当前用户的关系直觉；只在外部说话内容确实涉及当前关系时使用。
+- `user_input` 是外部文本或运输摘要；`indirect_speech_context` 非空时说明说话者在向他人谈论我。
+- `media_observations` 是本轮图片或音频事实；只对可见内容产生第一反应。
 - MBTI 本能：{mbti_natural_response}
 
 # 生成流程
@@ -83,16 +84,6 @@ _COGNITION_SUBCONSCIOUS_PROMPT = '''\
 4. 反思资料：只对已经发生并被沉淀的经历、关系余波或自我理解产生第一反应。
 5. 普通问候、事实分享、图片描述、轻度闲聊、群聊玩笑，缺少明确命令、羞辱、威胁、身份接管、控制或亲密索取时，保持中性或轻度社交反应。
 6. 只输出本能感受和潜台词；不要写该不该说话、是否行动、如何回复。
-
-# 输入格式
-用户消息是 JSON，可能包含：
-{{
-  "user_input": "当前外部文本或运输摘要",
-  "indirect_speech_context": "空字符串表示直接对话，非空表示说话者在向他人谈论我",
-  "media_observations": {{"image_observations": [], "audio_observations": []}},
-  "reflection_artifact": "string",
-  "internal_thought_residue": {{"residue_id": "string", "internal_monologue": "string", "action_latch": {{}}}}
-}}
 
 # 输出格式
 只返回合法 JSON 字符串：
@@ -127,13 +118,18 @@ async def call_cognition_subconscious(state: CognitionState) -> CognitionState:
     system_prompt = SystemMessage(content=prompt_template.format(
         character_name=state["character_profile"]["name"],
         character_mbti=mbti,
-        character_mood=state['character_profile']['mood'],
-        character_global_vibe=state['character_profile']['global_vibe'],
-        user_last_relationship_insight=state["user_profile"].get("last_relationship_insight", ""),
         mbti_natural_response=get_mbti_natural_response(mbti),
     ))
 
     msg = {
+        "character_state": {
+            "mood": state["character_profile"]["mood"],
+            "global_vibe": state["character_profile"]["global_vibe"],
+            "last_relationship_insight": state["user_profile"].get(
+                "last_relationship_insight",
+                "",
+            ),
+        },
         "user_input": state["user_input"],
         "indirect_speech_context": state.get("indirect_speech_context", ""),
     }

@@ -38,7 +38,6 @@ long_term/todo.md
 
 | Document | Type | Status |
 |---|---|---|
-| [prompt_prefix_and_input_format_optimization_plan.md](active/short_term/prompt_prefix_and_input_format_optimization_plan.md) | Large prompt optimization and experiment plan | approved |
 | [rag3_router_interpreter_poc_experiment_plan.md](active/short_term/rag3_router_interpreter_poc_experiment_plan.md) | Medium experiment and POC design plan | draft |
 | [web_agent3_replacement_plan.md](active/short_term/web_agent3_replacement_plan.md) | Medium web helper replacement and router architecture plan | draft |
 
@@ -177,6 +176,7 @@ plans.
 | [multi_source_cognition_architecture_stage_10_permissioned_proactive_output_plan.md](archive/completed/short_term/multi_source_cognition_architecture_stage_10_permissioned_proactive_output_plan.md) |
 | [native_shape_boundary_hardening_plan.md](archive/completed/short_term/native_shape_boundary_hardening_plan.md) |
 | [outbound_adapter_channel_allowlist_plan.md](archive/completed/short_term/outbound_adapter_channel_allowlist_plan.md) |
+| [prompt_prefix_and_input_format_optimization_plan.md](archive/completed/short_term/prompt_prefix_and_input_format_optimization_plan.md) |
 | [prompt_safe_message_context_plan.md](archive/completed/short_term/prompt_safe_message_context_plan.md) |
 | [qq_adapter_readable_mentions_plan.md](archive/completed/short_term/qq_adapter_readable_mentions_plan.md) |
 | [rag1_decommission_plan.md](archive/completed/short_term/rag1_decommission_plan.md) |
