@@ -163,15 +163,12 @@ _RECORDER_PROMPT = '''\
 }}
 '''
 
-RECORDER_MAX_COMPLETION_TOKENS = 4096
-
 _recorder_llm = get_llm(
     temperature=0.2,
     top_p=0.75,
     model=CONSOLIDATION_LLM_MODEL,
     base_url=CONSOLIDATION_LLM_BASE_URL,
     api_key=CONSOLIDATION_LLM_API_KEY,
-    max_tokens=RECORDER_MAX_COMPLETION_TOKENS,
 )
 
 

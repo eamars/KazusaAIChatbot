@@ -25,6 +25,8 @@ from kazusa_ai_chatbot.message_envelope import (
 
 logger = logging.getLogger(__name__)
 
+DEFAULT_LLM_MAX_COMPLETION_TOKENS = 8192
+
 _IMAGE_DESCRIPTION_ELLIPSIS = "..."
 
 
@@ -45,11 +47,16 @@ def get_llm(
         model: Route-specific model name.
         base_url: Route-specific OpenAI-compatible base URL.
         api_key: Route-specific API key.
-        **kwargs: Additional ChatOpenAI options.
+        **kwargs: Additional ChatOpenAI options. When no completion-token
+            budget is supplied, the shared default is applied so local
+            OpenAI-compatible endpoints do not inherit unsafe provider caps.
 
     Returns:
         Configured ChatOpenAI client.
     """
+    if "max_tokens" not in kwargs and "max_completion_tokens" not in kwargs:
+        kwargs["max_tokens"] = DEFAULT_LLM_MAX_COMPLETION_TOKENS
+
     _llm = ChatOpenAI(
         model=model,
         temperature=temperature,

@@ -18,6 +18,7 @@ from kazusa_ai_chatbot.nodes.boundary_profile import (
     get_relationship_priority_description,
     get_self_integrity_description,
 )
+from kazusa_ai_chatbot.utils import DEFAULT_LLM_MAX_COMPLETION_TOKENS
 
 
 _BOUNDARY_PROFILE = {
@@ -116,15 +117,12 @@ def test_render_recorder_prompt_requires_absolute_or_omit_temporal_state() -> No
     assert "紧凑 assistant" not in prompt
 
 
-def test_recorder_llm_uses_explicit_completion_token_budget() -> None:
-    """Recorder calls should not inherit a small backend default output cap."""
+def test_recorder_llm_uses_shared_completion_token_budget() -> None:
+    """Recorder calls should inherit the shared output cap."""
 
-    assert recorder.RECORDER_MAX_COMPLETION_TOKENS == 4096
-    assert recorder._recorder_llm.max_tokens == (
-        recorder.RECORDER_MAX_COMPLETION_TOKENS
-    )
+    assert recorder._recorder_llm.max_tokens == DEFAULT_LLM_MAX_COMPLETION_TOKENS
     assert recorder._recorder_llm._default_params["max_completion_tokens"] == (
-        recorder.RECORDER_MAX_COMPLETION_TOKENS
+        DEFAULT_LLM_MAX_COMPLETION_TOKENS
     )
 
 

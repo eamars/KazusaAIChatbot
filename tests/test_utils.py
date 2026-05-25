@@ -7,7 +7,12 @@ from langchain_core.messages import HumanMessage, SystemMessage
 
 from kazusa_ai_chatbot.config import AFFINITY_DEFAULT, JSON_REPAIR_LLM_BASE_URL
 from kazusa_ai_chatbot import utils as utils_module
-from kazusa_ai_chatbot.utils import build_affinity_block, parse_llm_json_output
+from kazusa_ai_chatbot.utils import (
+    DEFAULT_LLM_MAX_COMPLETION_TOKENS,
+    build_affinity_block,
+    get_llm,
+    parse_llm_json_output,
+)
 from tests.llm_trace import write_llm_trace
 
 
@@ -56,6 +61,51 @@ def _skip_if_json_repair_llm_unavailable() -> None:
             f"JSON repair LLM endpoint returned server error "
             f"{response.status_code}: {JSON_REPAIR_LLM_BASE_URL}"
         )
+
+
+def test_get_llm_applies_shared_completion_token_budget() -> None:
+    """LLM routes should not inherit provider default output caps."""
+
+    llm = get_llm(
+        model="test-model",
+        base_url="http://localhost:1234/v1",
+        api_key="test-key",
+    )
+
+    assert llm.max_tokens == DEFAULT_LLM_MAX_COMPLETION_TOKENS
+    assert llm._default_params["max_completion_tokens"] == (
+        DEFAULT_LLM_MAX_COMPLETION_TOKENS
+    )
+
+
+def test_get_llm_preserves_explicit_max_tokens_budget() -> None:
+    """Route-specific max_tokens settings should override the shared default."""
+
+    explicit_budget = 1234
+    llm = get_llm(
+        model="test-model",
+        base_url="http://localhost:1234/v1",
+        api_key="test-key",
+        max_tokens=explicit_budget,
+    )
+
+    assert llm.max_tokens == explicit_budget
+    assert llm._default_params["max_completion_tokens"] == explicit_budget
+
+
+def test_get_llm_preserves_explicit_max_completion_tokens_budget() -> None:
+    """Route-specific OpenAI output caps should override the shared default."""
+
+    explicit_budget = 2048
+    llm = get_llm(
+        model="test-model",
+        base_url="http://localhost:1234/v1",
+        api_key="test-key",
+        max_completion_tokens=explicit_budget,
+    )
+
+    assert llm.max_tokens == explicit_budget
+    assert llm._default_params["max_completion_tokens"] == explicit_budget
 
 
 @pytest.fixture()

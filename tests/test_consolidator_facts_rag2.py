@@ -8,6 +8,7 @@ import pytest
 
 from kazusa_ai_chatbot.consolidation import facts as facts_module
 from kazusa_ai_chatbot.time_boundary import build_turn_clock
+from kazusa_ai_chatbot.utils import DEFAULT_LLM_MAX_COMPLETION_TOKENS
 
 
 _COMPACT_CANDIDATE_FIELDS = {
@@ -26,6 +27,23 @@ _RAW_CANDIDATE_MARKERS = (
     "RAW_MERGE_MARKER",
     "RAW_ARBITRARY_MARKER",
 )
+
+
+def test_fact_harvester_llms_use_shared_completion_token_budget() -> None:
+    """Fact extraction calls should not inherit backend default output caps."""
+
+    assert facts_module._facts_harvester_llm.max_tokens == (
+        DEFAULT_LLM_MAX_COMPLETION_TOKENS
+    )
+    assert facts_module._facts_harvester_llm._default_params[
+        "max_completion_tokens"
+    ] == DEFAULT_LLM_MAX_COMPLETION_TOKENS
+    assert facts_module._fact_harvester_evaluator_llm.max_tokens == (
+        DEFAULT_LLM_MAX_COMPLETION_TOKENS
+    )
+    assert facts_module._fact_harvester_evaluator_llm._default_params[
+        "max_completion_tokens"
+    ] == DEFAULT_LLM_MAX_COMPLETION_TOKENS
 
 
 class _DummyResponse:
