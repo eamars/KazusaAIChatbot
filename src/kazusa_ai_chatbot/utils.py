@@ -19,6 +19,10 @@ from kazusa_ai_chatbot.config import (
     JSON_REPAIR_LLM_BASE_URL,
     JSON_REPAIR_LLM_MODEL,
 )
+from kazusa_ai_chatbot.llm_reload_monitor import (
+    MonitoredChatModel,
+    monitored_chat_model,
+)
 from kazusa_ai_chatbot.message_envelope import (
     MAX_PROMPT_ATTACHMENT_DESCRIPTION_CHARS,
 )
@@ -38,7 +42,7 @@ def get_llm(
     base_url: str,
     api_key: str,
     **kwargs,
-) -> ChatOpenAI:
+) -> MonitoredChatModel:
     """Create a chat LLM client for an explicit configured route.
 
     Args:
@@ -52,7 +56,7 @@ def get_llm(
             OpenAI-compatible endpoints do not inherit unsafe provider caps.
 
     Returns:
-        Configured ChatOpenAI client.
+        Configured monitored chat model client.
     """
     if "max_tokens" not in kwargs and "max_completion_tokens" not in kwargs:
         kwargs["max_tokens"] = DEFAULT_LLM_MAX_COMPLETION_TOKENS
@@ -65,7 +69,12 @@ def get_llm(
         api_key=api_key,
         **kwargs,
     )
-    return _llm
+    monitored_llm = monitored_chat_model(
+        _llm,
+        base_url=base_url,
+        model=model,
+    )
+    return monitored_llm
 
 
 def _is_image_attachment(attachment: dict) -> bool:

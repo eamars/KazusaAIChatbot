@@ -135,6 +135,13 @@ settings. Missing route variables stop config loading. The web-search helper
 expects an MCP server named `mcp-searxng` exposing `searxng_web_search` and
 `web_url_read`.
 
+When LM Studio reports
+`The model has crashed without additional information.`, chat model calls made
+through the shared LLM factory retry the same request once. Calls for the same
+`base_url` and model wait while that retry reloads the model; calls for other
+models continue normally. Other 400 responses and non-unload errors are not
+retried by this recovery path.
+
 `COGNITION_VISUAL_DIRECTIVES_ENABLED` is a brain-service level switch. Set it
 to `false` to skip L3 visual-directive generation globally; adapters and
 debug-client request payloads do not control this behavior.
