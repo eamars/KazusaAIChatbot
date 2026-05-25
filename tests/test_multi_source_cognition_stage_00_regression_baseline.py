@@ -1265,7 +1265,7 @@ def test_frozen_evidence_corpus_projects_rag_hit_shape() -> None:
 
     assert rag_result["answer"] == expected["answer"]
     assert rag_result["conversation_evidence"] == [
-        "Prior discussion settled on a short plan."
+        "结论：Prior discussion settled on a short plan.\n不确定性：无"
     ]
     assert rag_result["memory_evidence"][0]["source_system"] == (
         "user_memory_units"
@@ -1505,3 +1505,72 @@ async def test_existing_cognition_and_dialog_prompts_render_with_mocked_llms(
     )
     assert "internal_monologue" not in evaluator_payload
     assert "last_user" "_message" not in evaluator_payload
+
+
+@pytest.mark.asyncio
+async def test_l2_consciousness_receives_local_time_for_same_day_commitment(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """L2 needs the turn-local date before interpreting appointment timing."""
+
+    state = _cognition_state()
+    turn_clock = build_turn_clock("2026-05-25 16:14:00")
+    user_input = "还记得今天的约定吗？"
+    state["storage_timestamp_utc"] = turn_clock["storage_timestamp_utc"]
+    state["local_time_context"] = turn_clock["local_time_context"]
+    state["user_input"] = user_input
+    state["decontexualized_input"] = user_input
+    state["cognitive_episode"] = build_text_chat_cognitive_episode(
+        episode_id="user_message:qq:same-day-commitment:message-1",
+        percept_id=(
+            "user_message:qq:same-day-commitment:message-1:dialog_text:0"
+        ),
+        storage_timestamp_utc=state["storage_timestamp_utc"],
+        local_time_context=state["local_time_context"],
+        user_input=user_input,
+        platform=state["platform"],
+        platform_channel_id=state["platform_channel_id"],
+        channel_type=state["channel_type"],
+        platform_message_id=state["platform_message_id"],
+        platform_user_id=state["platform_user_id"],
+        global_user_id=state["global_user_id"],
+        user_name=state["user_name"],
+        active_turn_platform_message_ids=state[
+            "active_turn_platform_message_ids"
+        ],
+        active_turn_conversation_row_ids=state[
+            "active_turn_conversation_row_ids"
+        ],
+        debug_modes=state["debug_modes"],
+        output_mode="visible_reply",
+        target_addressed_user_ids=state["prompt_message_context"][
+            "addressed_to_global_user_ids"
+        ],
+        target_broadcast=state["prompt_message_context"]["broadcast"],
+    )
+    state["rag_result"]["answer"] = (
+        "已确认约定：2026-05-25 17:00 在学校大门口交接提拉米苏。"
+    )
+
+    conscious_llm = _CaptureLLM({
+        "internal_monologue": "今天下午五点还有提拉米苏交接约定。",
+        "logical_stance": "CONFIRM",
+        "character_intent": "BANTAR",
+    })
+    monkeypatch.setattr(l2_module, "_conscious_llm", conscious_llm)
+
+    result = await l2_module.call_cognition_consciousness(state)
+
+    assert result["logical_stance"] == "CONFIRM"
+    payload = _assert_prompt_messages(
+        conscious_llm,
+        {
+            "decontextualized_input",
+            "local_time_context",
+            "rag_result",
+        },
+    )
+    assert payload["local_time_context"] == {
+        "current_local_datetime": "2026-05-25 16:14",
+        "current_local_weekday": "Monday",
+    }

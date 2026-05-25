@@ -224,6 +224,7 @@ _COGNITION_CONSCIOUSNESS_PROMPT = '''\
 8. 图片或音频观察是当前事实证据，不是说话者意图。只有当前文本正在讨论这些可见事实时，才把它纳入解释。
 9. 普通问候、事实分享、图片描述、日常约定、轻度闲聊和群聊玩笑，缺少明确越界证据时，保持日常或轻度社交理解。
 10. 如果当前场景给了具体理由，我可以在内心形成想说话、想吐槽、想追问或想保持旁观的判断；不要把单纯资料困惑写成要向外部频道澄清。
+11. 解释日期或相对时间时，先读取 `local_time_context.current_local_datetime`。如果证据中的绝对日期与当前本地日期相同，称为今天，不要称为明天。
 
 # 标签
 `logical_stance` 只能使用：
@@ -247,6 +248,7 @@ _COGNITION_CONSCIOUSNESS_PROMPT = '''\
 {{
   "character_mood": "当前心境",
   "global_vibe": "环境氛围背景",
+  "local_time_context": {{"current_local_datetime": "YYYY-MM-DD HH:MM", "current_local_weekday": "Monday"}},
   "user_memory_context": {{"stable_patterns": [], "recent_shifts": [], "objective_facts": [], "milestones": [], "active_commitments": []}},
   "last_relationship_insight": "当前关系洞察",
   "affinity_context": {{"level": "string", "instruction": "string"}},
@@ -309,6 +311,7 @@ async def call_cognition_consciousness(state: CognitionState) -> CognitionState:
     msg = {
         "character_mood": state['character_profile']['mood'],
         "global_vibe": state["character_profile"]["global_vibe"],
+        "local_time_context": state["local_time_context"],
         "user_memory_context": user_memory_context,
         "last_relationship_insight": state["user_profile"]["last_relationship_insight"],
 
