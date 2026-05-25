@@ -38,7 +38,9 @@ long_term/todo.md
 
 | Document | Type | Status |
 |---|---|---|
+| [prompt_prefix_and_input_format_optimization_plan.md](active/short_term/prompt_prefix_and_input_format_optimization_plan.md) | Large prompt optimization and experiment plan | approved |
 | [rag3_router_interpreter_poc_experiment_plan.md](active/short_term/rag3_router_interpreter_poc_experiment_plan.md) | Medium experiment and POC design plan | draft |
+| [web_agent3_replacement_plan.md](active/short_term/web_agent3_replacement_plan.md) | Medium web helper replacement and router architecture plan | draft |
 
 ## Supporting Experiment Records
 
