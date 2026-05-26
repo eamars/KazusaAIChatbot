@@ -1,160 +1,47 @@
 # web_agent3 Replacement Plan
 
-Status: draft
+Status: in_progress
 Class: large
 Created: 2026-05-25
-Last updated: 2026-05-26
+Last updated: 2026-05-27
 Owner: Codex
 
 ## Summary
 
-- Goal: build `web_agent3` as a local-tool-first replacement for
-  `web_search_agent2`, then cut active RAG wiring over in one big-bang rename.
-- Contract rule: `web_agent3` must keep the same helper input/output contract
-  as `web_search_agent2`; only the active agent name changes.
-- Execution order: implement and verify all `web_agent3` functions first while
-  `web_search_agent2` remains the active runtime helper, then perform the
-  big-bang transition.
-- Architecture: provider routing lives inside `web_agent3`; the RAG supervisor
-  still sees one web helper and one text evidence result.
-- Dummy handlers: Bilibili, YouTube, and nHentai handlers must exist now to
-  prove router capability, but they must fall back to the generic SearXNG/local
-  handler with this fixed marker:
-  `FIXME(web_agent3): replace generic fallback with provider API client in a future approved plan.`
-- Status: draft. Do not implement until approved.
+Build `web_agent3` as the replacement candidate for `web_search_agent2`, keep
+`web_search_agent2` active until `web_agent3` is implemented and verified, then
+perform one later big-bang transition.
 
-## Context
+Latest user correction:
 
-`src/kazusa_ai_chatbot/rag/web_search_agent.py` currently defines
-`WebSearchAgent`, registered as `web_search_agent2` in the RAG dispatcher. It
-delegates search and URL reads through MCP SearXNG tools, then returns evidence
-text through the `BaseRAGHelperAgent` contract.
+- Web search and URL reads must go through the existing SearXNG facility.
+- Do not over design.
+- Runtime LLM prompts must follow project prompt rules and preserve stable
+  prompt prefixes for local LLM cache behavior.
+- The web-agent router is the first LLM stage. It emits only `action`,
+  `source`, and `query`; source-specific parsing belongs inside subagents.
+- YouTube, Bilibili, and nHentai must exist as source subagent placeholders.
+  At this stage each placeholder returns no result and must not fall back to
+  generic search.
+- Source subagents are tracked as separate modules under `web_agent3/subagent/`:
+  `generic.py`, `bilibili.py`, `youtube.py`, and `nhentai.py`. Each module
+  exposes its source name, prompt-facing description, and primary async
+  execution interface. The web agent auto-discovers these subagent modules.
+- Subagent `DESCRIPTION` values carry source-local query generation rules.
+  The router prompt remains generic and tells the model to follow the selected
+  source description when producing `query`.
+- LLM-facing source descriptions expose only source capability and query
+  shaping rules. Transport details, placeholder implementation notes, retry
+  control fields, and comparison-fixture metadata stay out of LLM payloads.
+- The side-by-side real LLM comparison must be apple-to-apple through the
+  shared public helper contract: both agents receive the same `task`,
+  `context`, and `max_attempts`, and both are judged from the same public
+  output shape.
 
-The requested target keeps the RAG/cognition boundary stable:
+## Current Contract
 
-- Same `run(task, context, max_attempts=3)` input shape.
-- Same dictionary output shape.
-- Same downstream projection expectation: `result` is evidence text.
-- No new supervisor, cognition, dialog, adapter, persistence, or database
-  contract.
-
-The change replaces only the web helper implementation and active helper name.
-
-## Mandatory Skills
-
-- `.agents/skills/development-plan/SKILL.md`: load before plan lifecycle
-  changes, execution, progress updates, or sign-off.
-- `.agents/skills/py-style/SKILL.md`: load before editing Python.
-- `.agents/skills/test-style-and-execution/SKILL.md`: load before editing or
-  running tests.
-- `.agents/skills/local-llm-architecture/SKILL.md`: load before changing
-  prompts, LLM calls, routing, or context budgets.
-
-## Mandatory Rules
-
-- Do not read `.env`.
-- Do not change cognition, dialog, memory, persistence, adapters, scheduler,
-  reflection, database code, `config.py`, `mcp_client.py`, or `pyproject.toml`.
-- Do not add a service process, dependency, global config object, or MCP server.
-- Do not call `mcp_manager`, `mcp-searxng`, `searxng_web_search`, or
-  `web_url_read` from `web_agent3`.
-- Do not keep a runtime compatibility path from `web_agent3` to
-  `web_search_agent2`.
-- Temporary development-time coexistence of `web_agent3.py` and
-  `web_search_agent.py` is allowed only before the cutover. Active runtime
-  registration must never expose both helpers.
-- Establish focused tests before production implementation.
-- Implement and verify all `web_agent3` functions before updating dispatcher,
-  projection, live-context wiring, or deleting `web_search_agent.py`.
-- Use `apply_patch` for manual edits and `venv\Scripts\python` for Python and
-  pytest commands.
-- After context compaction or major checklist sign-off, reread this plan before
-  continuing.
-- Run independent code review and record evidence before completion.
-
-## Must Do
-
-- Create `src/kazusa_ai_chatbot/rag/web_agent3.py` with `WebAgent3`.
-- Preserve the exact external helper contract listed in
-  `Contracts And Data Shapes`.
-- Implement local generic search through a SearXNG-compatible HTTP JSON
-  endpoint.
-- Implement local URL fetch, URL safety validation, metadata extraction, and
-  evidence finalization.
-- Implement internal provider routing and dummy Bilibili, YouTube, and nHentai
-  handlers.
-- Make dummy handlers match their domains, record that they were selected, and
-  fall back to `generic_local_web` with the fixed `FIXME(web_agent3)` marker.
-- Verify focused `web_agent3` function tests before the big-bang transition.
-- After focused verification, replace active `web_search_agent2` wiring with
-  `web_agent3`, delete `web_search_agent.py`, and update active tests/docs.
-
-## Deferred
-
-- Real Bilibili API client.
-- Real YouTube Data API client.
-- Real nHentai API client.
-- MCP-backed provider implementation.
-- Provider credentials and credential validation.
-- Caching.
-- Any outer RAG planner, cognition, dialog, adapter, persistence, scheduler, or
-  database redesign.
-
-## Cutover Policy
-
-Overall strategy: `bigbang`.
-
-| Area | Policy | Instruction |
-|---|---|---|
-| Function implementation | staged before cutover | Build and verify `web_agent3.py` while old runtime wiring remains active. |
-| Runtime registration | bigbang | Replace active `web_search_agent2` references with `web_agent3` in one wiring pass. |
-| Old helper | bigbang | Delete `web_search_agent.py` after `web_agent3` focused tests pass and wiring is updated. |
-| Dummy handlers | explicit temporary fallback | Current dummy providers fall back to `generic_local_web`; this is allowed by user instruction and must carry the fixed FIXME marker. |
-| Tests/docs | bigbang after focused verification | Rename active expectations from `web_search_agent2` to `web_agent3`. |
-
-No released runtime state may register or dispatch both `web_search_agent2` and
-`web_agent3`.
-
-## Target State
-
-```text
-RAG supervisor
-  -> web_agent3.run(task, context, max_attempts=3)
-       -> deterministic request shaping
-       -> provider registry
-          -> bilibili_dummy_provider -> generic_local_web
-          -> youtube_dummy_provider  -> generic_local_web
-          -> nhentai_dummy_provider  -> generic_local_web
-          -> generic_local_web
-       -> local search or validated URL fetch
-       -> one evidence finalizer
-  -> same text result contract as web_search_agent2
-```
-
-The supervisor does not learn provider APIs, provider credentials, or provider
-tool schemas.
-
-## Design Decisions
-
-- `web_agent3` keeps the same external helper input/output contract as
-  `web_search_agent2`.
-- Request classification and provider selection are deterministic; no LLM
-  router is added.
-- The only network executor in this plan is `generic_local_web`.
-- Dummy providers are execution-relevant because they prove future routing
-  capability now; they do not implement real provider APIs.
-- Search uses `WEB_AGENT3_SEARXNG_BASE_URL` from the environment inside
-  `web_agent3`; no central config field is added.
-- Direct URL fetch must validate task-derived URLs before every request and
-  redirect.
-- The finalizer returns compact external evidence text and must not invent facts
-  beyond tool output.
-
-## Contracts And Data Shapes
-
-### Public Helper Contract
-
-`WebAgent3.run` must accept the same inputs as `WebSearchAgent.run`:
+`web_agent3` must keep the same helper input/output contract as
+`web_search_agent2`:
 
 ```python
 async def run(
@@ -165,17 +52,7 @@ async def run(
 ) -> dict[str, Any]:
 ```
 
-Contract requirements:
-
-- `task` and `context` are passed by existing RAG callers unchanged.
-- `max_attempts` is accepted for compatibility and ignored, matching
-  `WebSearchAgent.run`.
-- `context["local_time_context"]` is read the same way to build the current
-  local timestamp for prompt grounding.
-- No caller must provide new input fields.
-- `name` changes to `web_agent3`; `cache_name` remains `""`.
-
-Output must match the current BaseRAG helper wrapper shape:
+Output:
 
 ```python
 {
@@ -191,296 +68,549 @@ Output must match the current BaseRAG helper wrapper shape:
 }
 ```
 
-`result` must stay a string. Provider routing metadata remains internal or test
-visible through focused module helpers; it must not replace the public result
-shape.
+`result` stays a source-grounded evidence string for RAG projection. The RAG
+supervisor, cognition, dialog, persistence, adapters, scheduler, and database
+contracts do not change.
 
-### Internal Data
+## Mandatory Rules
 
-- `WebRequest`: task, context, URLs, query, and mode.
-- `ProviderMatch`: provider name, score, and reason.
-- `WebToolResult`: selected provider, executed provider, operation, query/URL,
-  title, description, bounded content, bounded search items, delegation reason,
-  missing context, and error.
-- `WebSearchItem`: title, URL, snippet, and source.
+- Do not read `.env`.
+- Use `venv\Scripts\python` for Python and pytest commands.
+- Use `apply_patch` for manual edits.
+- Keep `web_search_agent2` active until all `web_agent3` functions and the
+  comparison suite have been verified.
+- Do not add a service process, dependency, MCP server, global config field,
+  provider credential path, direct HTTP client, custom URL fetcher, URL safety
+  layer, or HTML extraction layer.
+- All web search and URL-read execution in `web_agent3` must call the existing
+  SearXNG MCP tools through the existing local facility:
+  `mcp-searxng__searxng_web_search` and `mcp-searxng__web_url_read`.
+- Bilibili, YouTube, and nHentai adapters are allowed only as router
+  placeholders. They must return explicit no-search-data observations without
+  falling back to generic SearXNG, and carry:
+  `FIXME(web_agent3): replace no-search-data placeholder with provider API client in a future approved plan.`
+- Runtime prompts are Chinese-first RAG evidence prompts. Stable role,
+  generation procedure, and output contract text stay in `SystemMessage`;
+  runtime-varying fields such as `task`, projected `context`,
+  `reference_time`, tool history, and evaluator feedback stay in
+  `HumanMessage` JSON.
+- Router/generator prompts must not include a `# 输入格式` or `# Input Format`
+  section. Field meanings must be explained through concise generation rules
+  and the output contract.
+- Router/generator source descriptions must not mention SearXNG, placeholder
+  adapter execution details, fallback behavior, credentials, transport, or
+  provider metadata. Those are executor/subagent/code concerns.
+- The router/generator output contract has exactly three fields:
+  `action`, `source`, and `query`. The `source` value must be one available
+  source token listed in the source-adapter descriptions rendered in the
+  generator prompt. Do not add URL fields, target-type fields, reasons,
+  provider metadata, or API-specific parameters.
+- After context compaction or major checklist sign-off, reread this plan before
+  continuing.
 
-## Network And Search Contract
+## Router Decision
 
-Task-derived URL fetch must:
+`web_agent3` uses one LLM router/generator stage before execution. It receives
+the current `Web-evidence:` task, compact runtime context, reference time,
+bounded prior tool history, and evaluator feedback. It returns only:
 
-- accept only `http` and `https`;
-- reject empty hosts, userinfo, `localhost`, `.local`, and non-global resolved
-  IPs;
-- reject loopback, private, link-local, multicast, unspecified, reserved, and
-  metadata-service addresses;
-- disable automatic redirects and manually follow at most three redirects;
-- validate every redirect target before requesting it;
-- clamp `WEB_AGENT3_HTTP_TIMEOUT_SECONDS` to 1-30 seconds with a 10 second
-  default;
-- send `WEB_AGENT3_USER_AGENT` or `Kazusa-web-agent3/1.0`;
-- read at most 1,000,000 response bytes;
-- pass at most 12,000 fetched-content characters to the finalizer;
-- accept only textual content types;
-- return unresolved for invalid URL, blocked target, DNS failure, HTTP failure,
-  timeout, redirect cap, oversized response, or non-textual content.
+```json
+{
+    "action": "search",
+    "source": "generic",
+    "query": "local tool router demo web agent architecture"
+}
+```
 
-Generic search must:
+Allowed values:
 
-- call `GET {WEB_AGENT3_SEARXNG_BASE_URL.rstrip("/")}/search`;
-- send `q`, `format=json`, `pageno=1`, `language=auto`, and
-  `categories=general`;
-- parse a JSON object with `results`;
-- keep at most five result items;
-- read item `title`, `url`, `content` as snippet, and `engine` as source;
-- drop items without `http` or `https` URLs;
-- clip title to 200 characters, snippet to 500, and source to 80;
-- return unresolved with
-  `missing_context=["web_agent3_searxng_base_url"]` when the base URL is absent.
+- `action`: `search`, `read`, or `stop`.
+- `source`: `generic`, `bilibili`, `youtube`, or `nhentai`.
+- `query`: the only payload passed to the selected subagent.
 
-The configured SearXNG base URL is operator-controlled and can be local. It is
-not subject to task-derived URL blocking, but timeout and response caps still
-apply.
+For `search`, `query` is a ready-to-run search string for the selected source.
+For `read`, `query` carries the raw target string such as a URL, BV/AV value,
+YouTube URL/video text, nHentai numeric id, or other user-provided target.
+For `stop`, `query` is an empty string.
 
-## LLM Call And Context Budget
+The router/generator must not extract YouTube video IDs, Bilibili BV/AV IDs,
+nHentai gallery IDs, API fields, credentials, request parameters, or transport
+details. Those are source-adapter responsibilities. Current placeholder
+adapters return no search data; future real adapters may
+extract source-specific keys with regex or their own LLM stage in a later
+approved plan.
 
-- Before: `web_search_agent2` can use generator, evaluator, and finalizer LLM
-  stages.
-- After: `web_agent3` uses deterministic request/provider selection, local tool
-  execution, and one finalizer LLM call.
-- No evaluator loop and no LLM repair loop.
-- Finalizer input caps: five search items, 500 characters per snippet, and
-  12,000 fetched-content characters.
-- If finalizer output misses the required evidence field, return unresolved
-  instead of inventing evidence.
+## Source Subagent Placeholder Decision
+
+- `generic` is the only active web search and URL-read executor in the current
+  stage. It uses the existing SearXNG facility.
+- `youtube`, `bilibili`, and `nhentai` must be present in the source adapter
+  registry as dedicated placeholder subagents.
+- Source subagents are not tracked in a single `source_subagents.py` file.
+  They live under `subagent/` with one source module per file.
+- Each placeholder subagent receives the router decision with `query`
+  unchanged and returns an explicit no-result observation.
+- Placeholder subagents must not call SearXNG, must not delegate to `generic`,
+  and must not perform automatic source fallback.
+- The evaluator may inspect the no-result observation and decide whether the
+  overall web-agent loop should stop or continue, but source adapters must not
+  silently substitute another source.
+- Real provider APIs, credentials, request parameter extraction, and local or
+  MCP tool variants remain deferred to a later approved plan.
+
+## Target Architecture
+
+```text
+RAG supervisor
+  -> WebAgent3.run(task, context, max_attempts=3)
+       -> LangGraph router/evaluator/finalizer loop
+       -> router/generator emits action/source/query
+       -> executor selects subagent from source
+          -> generic_adapter  -> existing SearXNG MCP facility
+          -> bilibili_adapter -> no_search_data placeholder
+          -> youtube_adapter  -> no_search_data placeholder
+          -> nhentai_adapter  -> no_search_data placeholder
+       -> same text evidence result contract
+```
+
+The router is inside the web helper. The outer RAG supervisor still sees one
+web helper and one text evidence result. The executor dispatches only by
+`source` and `action`; it must not reinterpret the semantic meaning of `query`.
+
+## Module Layout
+
+Final candidate code lives under:
+
+```text
+src/kazusa_ai_chatbot/rag/web_agent3/
+  README.md
+  __init__.py
+  agent.py
+  contracts.py
+  providers.py
+  searxng_tools.py
+  subagent/
+    __init__.py
+    generic.py
+    bilibili.py
+    youtube.py
+    nhentai.py
+```
+
+Ownership:
+
+| File | Responsibility |
+|---|---|
+| `README.md` | Subpackage ICD. |
+| `agent.py` | Router/evaluator/finalizer loop and `WebAgent3`. |
+| `searxng_tools.py` | Existing SearXNG MCP tool calls. |
+| `providers.py` | Thin source decision executor that dispatches to registered source subagents. |
+| `subagent/__init__.py` | Auto-discovery and validation for source subagent modules. |
+| `subagent/generic.py` | Generic search/read subagent backed by the existing SearXNG facility. |
+| `subagent/bilibili.py` | Bilibili placeholder subagent. |
+| `subagent/youtube.py` | YouTube placeholder subagent. |
+| `subagent/nhentai.py` | nHentai placeholder subagent. |
+| `contracts.py` | Minimal router output and comparison-test data contracts. |
 
 ## Change Surface
 
-### Create First
+Current pre-cutover work may touch only:
 
-- `src/kazusa_ai_chatbot/rag/web_agent3.py`
+- `development_plans/active/short_term/web_agent3_replacement_plan.md`
+- `src/kazusa_ai_chatbot/rag/web_agent3/`
 - `tests/test_web_agent3.py`
+- `tests/test_web_agent_comparison_live_llm.py`
+- ignored debug-LLM artifacts under `test_artifacts/`
 
-These files are created and verified before runtime wiring changes.
+Later big-bang transition may touch only active web-helper references in:
 
-### Big-Bang Transition After Focused Verification
+- `src/kazusa_ai_chatbot/nodes/persona_supervisor2_rag_dispatch.py`
+- `src/kazusa_ai_chatbot/nodes/persona_supervisor2_rag_projection.py`
+- `src/kazusa_ai_chatbot/rag/live_context_agent.py`
+- active web/RAG tests and docs that name `web_search_agent2`
+- deletion of `src/kazusa_ai_chatbot/rag/web_search_agent.py`
 
-- Delete `src/kazusa_ai_chatbot/rag/web_search_agent.py`.
-- Modify rename-only runtime wiring:
-  `src/kazusa_ai_chatbot/nodes/persona_supervisor2_rag_dispatch.py`,
-  `src/kazusa_ai_chatbot/rag/live_context_agent.py`, and
-  `src/kazusa_ai_chatbot/nodes/persona_supervisor2_rag_projection.py`.
-- Modify docs:
-  `src/kazusa_ai_chatbot/rag/README.md` and `docs/HOWTO.md`.
-- Modify active tests/fixtures:
-  `tests/fixtures/multi_source_cognition_stage_00_cases.json`,
-  `tests/test_persona_supervisor2_rag2_integration.py`,
-  `tests/test_quote_aware_rag_sequence.py`,
-  `tests/test_rag_initializer_cache2.py`,
-  `tests/test_rag_phase3_capability_agents.py`,
-  `tests/test_rag_phase3_supervisor_integration.py`,
-  `tests/test_rag_phase4_continuation_live_llm.py`,
-  `tests/test_rag_projection.py`, and `tests/test_e2e_live_llm.py`.
-- Add `tests/test_web_agent3_live_llm.py` only for live-LLM finalizer smoke.
-
-### Keep
-
-`mcp_client.py`, `config.py`, `pyproject.toml`, adapters, cognition, dialog,
-persistence, database, scheduler, reflection, and `tests/test_mcp_client.py`.
-
-## Overdesign Guardrail
-
-- Actual problem: the active web helper depends on a separate MCP web service
-  and lacks an internal provider router for future site-specific work.
-- Minimal change: build `web_agent3` with the same public helper contract,
-  generic local search/fetch, and dummy provider routing; cut over after
-  focused verification.
-- Ownership boundaries: RAG supervisor selects the web helper; `web_agent3`
-  owns provider routing and web execution; projection consumes the same text
-  evidence; cognition owns stance and response judgment.
-- Rejected complexity: real provider APIs, provider credentials, MCP provider
-  adapter, plugin loader, LLM router, evaluator loop, repair loop, cache,
-  global config, and outer planner redesign.
-- Evidence threshold: real provider clients need a later approved plan with API
-  contracts, credentials, rate limits, provider tests, and content boundaries.
-
-## Agent Autonomy Boundaries
-
-The execution agent may implement local mechanics inside `web_agent3.py` when
-they preserve this plan's contracts. The agent must not add real provider
-clients, new services, new dependencies, global config fields, unrelated
-refactors, or changes outside the listed files. If implementation reveals that
-the same public contract cannot be preserved, stop and report the blocker.
+No other modules are in scope.
 
 ## Implementation Order
 
-1. Baseline.
-   - Run `git status --short`.
-   - Reread this plan and affected docs/source/tests.
-   - Run
-     `rg "web_search_agent2|WebSearchAgent|web_search_agent|mcp-searxng|searxng_web_search|web_url_read" src tests docs README.md`.
-   - Record git state and grep output.
-
-2. Focused tests before implementation.
-   - Create `tests/test_web_agent3.py`.
-   - Tests must cover SearXNG search, missing search endpoint, URL metadata
-     extraction, blocked local/private/metadata URLs, redirect revalidation,
-     dummy provider route-and-fallback behavior, and exact public
-     `WebAgent3.run` output contract.
-   - Run `venv\Scripts\python -m pytest tests/test_web_agent3.py -q`.
-   - Expected before implementation: missing module/symbol or failing new
-     contract tests.
-
-3. Implement all `web_agent3` functions.
-   - Create `src/kazusa_ai_chatbot/rag/web_agent3.py`.
-   - Implement helper contract, local timestamp grounding, request shaping,
-     provider registry, dummy handlers, generic SearXNG search, URL validator,
-     URL fetch, metadata extraction, and finalizer.
-   - Do not touch runtime wiring in this step.
-   - Run `venv\Scripts\python -m pytest tests/test_web_agent3.py -q`.
-   - Do not proceed to cutover until this passes.
-
-4. Big-bang transition.
-   - Delete `web_search_agent.py`.
-   - Rename runtime imports, registry key, prefix mapping, prompt-visible helper
-     name, projection check, live-context worker payload key, and active test
-     expectations from `web_search_agent2` to `web_agent3`.
-   - Update docs listed in Change Surface.
-
-5. Integration verification.
-   - Run
-     `venv\Scripts\python -m pytest tests/test_rag_projection.py tests/test_persona_supervisor2_rag2_integration.py tests/test_rag_phase3_capability_agents.py tests/test_rag_phase3_supervisor_integration.py -q`.
-   - Add and run the live-LLM finalizer smoke only when live-LLM environment is
-     available.
-
-6. Final verification and review.
-   - Run all Verification commands.
-   - Start one independent code-review subagent after verification passes.
-   - Fix review findings only inside this plan's Change Surface and rerun
-     affected checks.
-
-## Execution Model
-
-- Parent owns tests, orchestration, transition wiring, verification, evidence,
-  review remediation, lifecycle updates, and sign-off.
-- If native subagents are available, one production-code subagent may implement
-  `src/kazusa_ai_chatbot/rag/web_agent3.py` only after focused tests exist.
-- The parent performs the big-bang transition only after focused tests pass.
-- One independent code-review subagent reviews the final diff and evidence.
-- If native subagents are unavailable, stop before execution unless the user
-  explicitly approves fallback execution.
-
-## Progress Checklist
-
-- [ ] Stage 1 - baseline recorded.
-  - Verify: `git status --short` and baseline `rg` completed.
-  - Evidence/sign-off: record outputs and sign `<agent/date>`.
-
-- [ ] Stage 2 - focused `web_agent3` tests established.
-  - Verify: `venv\Scripts\python -m pytest tests/test_web_agent3.py -q`
-    fails for expected missing/new-contract reason.
-  - Evidence/sign-off: record failure and sign `<agent/date>`.
-
-- [ ] Stage 3 - all `web_agent3` functions implemented and verified.
-  - Verify: `venv\Scripts\python -m pytest tests/test_web_agent3.py -q`
-    passes before any runtime cutover.
-  - Evidence/sign-off: record changed files and test output, then sign
-    `<agent/date>`.
-
-- [ ] Stage 4 - big-bang transition complete.
-  - Verify: integration test command in Implementation Order step 5 passes.
-  - Evidence/sign-off: record changed wiring/docs/tests and output, then sign
-    `<agent/date>`.
-
-- [ ] Stage 5 - final verification and independent code review complete.
-  - Verify: all Verification commands pass or live-LLM skip reason is recorded.
-  - Evidence/sign-off: record review findings, fixes, reruns, residual risks,
-    and sign `<agent/date>`.
+1. Keep `web_search_agent2` active.
+2. Implement `web_agent3` functions inside the package with the
+   `action/source/query` router contract.
+3. Run focused deterministic `web_agent3` tests.
+3A. Update code to match the final router/subagent architecture:
+   - In `agent.py`, replace the current bound-tool generator with a structured
+     router/generator LLM stage that parses exactly `action`, `source`, and
+     `query`.
+   - In `agent.py`, keep the evaluator and finalizer loop; evaluator feedback
+     returns to the router/generator on continuation.
+   - In `agent.py`, remove provider-route metadata from prompt-facing state and
+     final helper output. The public result remains only `resolved`, `result`,
+     `attempts`, and `cache`.
+   - In `providers.py`, implement source adapter dispatch where
+     `generic`, `bilibili`, `youtube`, and `nhentai` each receive `query`
+     unchanged. The non-generic placeholder adapters return no search data
+     with the fixed FIXME marker and do not call SearXNG.
+   - In `searxng_tools.py`, keep existing SearXNG MCP calls as the only web
+     search and URL-read execution path.
+   - In `contracts.py`, keep only minimal router decision and test fixture
+     contracts needed by `web_agent3`; do not introduce provider metadata,
+     locators, URL fields, API parameter objects, or credential/config shapes.
+   - In `README.md`, update the ICD to describe the
+     `router -> executor -> subagent -> evaluator -> loop/finalizer` flow.
+   - In `tests/test_web_agent3.py`, add focused tests proving strict router
+     output parsing, prompt omission of `# 输入格式` / `# Input Format`, query
+     pass-through to each source adapter, placeholder no-search-data behavior,
+     evaluator-driven loop continuation, and public helper contract parity.
+3B. Add dedicated placeholder source subagents:
+   - Add `subagent/` so each source subagent is tracked in its own module:
+     `generic.py`, `bilibili.py`, `youtube.py`, and `nhentai.py`.
+   - Each subagent module exposes its source name, prompt-facing description,
+     and primary async execution interface.
+   - Source-specific query generation rules live in each subagent
+     `DESCRIPTION`; the router prompt only tells the model to follow the
+     selected source description.
+   - In `subagent/__init__.py`, auto-discover and validate the subagent
+     modules, then expose the source description map and execution registry.
+   - In `providers.py`, keep only the selected source decision execution
+     surface used by the graph executor.
+   - Each placeholder subagent receives the router decision with `query`
+     unchanged and returns an explicit no-result observation.
+   - Placeholder subagents must not call SearXNG, must not delegate to
+     `generic`, and must not perform automatic fallback.
+   - Keep `generic` as the only active SearXNG-backed search/read source in
+     this stage.
+   - In `agent.py`, keep the executor dispatch limited to selected source
+     adapter execution; do not add router-side compensation for placeholder
+     no-result observations.
+   - In `tests/test_web_agent3.py`, add or keep focused tests proving
+     placeholder no-result behavior, no SearXNG call for non-generic sources,
+     and unchanged query delivery into the placeholder subagents.
+4. Run the focused deterministic Stage 3A and Stage 3B tests and static checks.
+5. Run the same ten real LLM comparison cases one at a time and inspect traces.
+6. Write a debug-LLM comparison report from real trace data.
+7. Complete RCA against `web_search_agent2` and close parity gaps.
+8. Only after focused tests, live comparison, RCA, and review are acceptable,
+   perform the big-bang transition in a separate pass.
 
 ## Verification
 
-```powershell
-venv\Scripts\python -m pytest tests/test_web_agent3.py -q
-```
+Focused deterministic:
 
 ```powershell
-venv\Scripts\python -m pytest tests/test_rag_projection.py tests/test_persona_supervisor2_rag2_integration.py tests/test_rag_phase3_capability_agents.py tests/test_rag_phase3_supervisor_integration.py -q
+venv\Scripts\python -m py_compile src\kazusa_ai_chatbot\rag\web_agent3\agent.py src\kazusa_ai_chatbot\rag\web_agent3\contracts.py src\kazusa_ai_chatbot\rag\web_agent3\providers.py src\kazusa_ai_chatbot\rag\web_agent3\searxng_tools.py src\kazusa_ai_chatbot\rag\web_agent3\subagent\__init__.py src\kazusa_ai_chatbot\rag\web_agent3\subagent\generic.py src\kazusa_ai_chatbot\rag\web_agent3\subagent\bilibili.py src\kazusa_ai_chatbot\rag\web_agent3\subagent\youtube.py src\kazusa_ai_chatbot\rag\web_agent3\subagent\nhentai.py
+venv\Scripts\python -m pytest tests\test_web_agent3.py -q
+venv\Scripts\python -m pytest tests\test_web_search_agent.py tests\test_web_agent3.py -q
 ```
 
-```powershell
-venv\Scripts\python -m pytest -m "not live_db and not live_llm" -q
-```
+Focused prompt/payload minimization must prove:
 
-Run only when live-LLM environment is available:
-
-```powershell
-venv\Scripts\python -m pytest tests/test_web_agent3_live_llm.py::test_live_web_agent3_finalizer_compacts_tool_output -q -s -m live_llm
-```
+- router source descriptions expose capability and query guidance only, not
+  transport or placeholder execution details;
+- evaluator LLM payload does not receive retry/cap control fields;
+- finalizer LLM payload receives clean evaluator feedback, not message-wrapper
+  metadata.
 
 Static checks:
 
 ```powershell
-rg "web_search_agent2|web_search_agent.py|WebSearchAgent" src tests docs
+rg "WEB_AGENT3_SEARXNG|WEB_AGENT3_HTTP|httpx|url_safety|html_extract" src\kazusa_ai_chatbot\rag\web_agent3 tests\test_web_agent3.py
 ```
 
-Expected final result: no active runtime, test, or documentation matches.
+Expected: no matches.
 
 ```powershell
-rg "mcp-searxng|searxng_web_search|web_url_read|mcp_manager" src/kazusa_ai_chatbot/rag/web_agent3.py tests/test_web_agent3.py
+rg "mcp-searxng__searxng_web_search|mcp-searxng__web_url_read" src\kazusa_ai_chatbot\rag\web_agent3
 ```
 
-Expected result: no matches.
+Expected: matches only in `searxng_tools.py`.
 
 ```powershell
-rg "FIXME\\(web_agent3\\): replace generic fallback" src/kazusa_ai_chatbot/rag/web_agent3.py tests/test_web_agent3.py
+rg "# 输入格式|# Input Format|locator|locator_type|provider_history|selected_provider_name|executed_provider_name" src\kazusa_ai_chatbot\rag\web_agent3 tests\test_web_agent3.py
 ```
 
-Expected result: matches in dummy-provider code and focused test expectations.
+Expected: no matches, except `selected_provider_name` and
+`executed_provider_name` may appear only inside comparison-fixture structures
+if those fixtures still mirror old trace artifacts; runtime router/executor
+code must not depend on them.
 
-## Independent Plan Review
+Real LLM comparison:
 
-Before approval or execution, review that the plan preserves the
-`web_search_agent2` input/output contract, implements and verifies all
-`web_agent3` functions before cutover, keeps dummy providers as generic
-fallbacks with FIXME markers, and removes only active old-agent wiring during
-the big-bang transition.
+Run each test in `tests/test_web_agent_comparison_live_llm.py` individually
+with `-q -s -m live_llm`, inspect the emitted trace, then proceed to the next
+case. Do not batch-run the live LLM suite as the evidence source. The suite
+must compare `WebSearchAgent().run(...)` and `WebAgent3().run(...)` with the
+same public intake and output contract; internal finalizer-only comparison is
+not sufficient for cutover evidence.
 
-## Independent Code Review
+## Progress Checklist
 
-After Verification passes, run one independent code review over this plan, the
-diff, and execution evidence. Review scope: contract preservation, implementation
-order, URL safety, dummy fallback clarity, absence of MCP runtime calls in
-`web_agent3`, rename completeness, test coverage, and forbidden-file changes.
-Record findings, fixes, reruns, residual risks, and approval status.
+- [x] Stage 1 - `web_search_agent2` restored as active runtime helper.
+  - Evidence: prior focused checks passed with active old-agent wiring.
+  - Sign-off: Codex / 2026-05-26.
+
+- [x] Stage 2 - `web_agent3` package and ICD created.
+  - Evidence: `src/kazusa_ai_chatbot/rag/web_agent3/README.md` exists.
+  - Sign-off: Codex / 2026-05-26.
+
+- [x] Stage 3 - direct HTTP implementation removed and SearXNG facility path
+  restored inside `web_agent3`.
+  - Evidence: focused deterministic tests pass after rewrite.
+  - Sign-off: Codex / 2026-05-26.
+
+- [x] Stage 3A - router/generator and subagent dispatch code updated.
+  - Code changes: `src/kazusa_ai_chatbot/rag/web_agent3/agent.py`,
+    `contracts.py`, `providers.py`, `searxng_tools.py`, `README.md`, and
+    `tests/test_web_agent3.py`; comparison fixture constructor updates in
+    `tests/test_web_agent_comparison_live_llm.py`.
+  - Verify: focused deterministic Stage 3A tests pass; static checks show no
+    direct HTTP stack and no router prompt `# 输入格式` / `# Input Format`;
+    executor passes `query` unchanged to selected source adapters.
+  - Evidence: focused deterministic checks and static checks passed.
+  - Sign-off: Codex / 2026-05-26.
+
+- [x] Stage 3B - dedicated placeholder source subagents tracked and verified.
+  - Code changes: `src/kazusa_ai_chatbot/rag/web_agent3/subagent/`,
+    `providers.py`, `agent.py` if executor dispatch requires adjustment,
+    `contracts.py` if discovered source validation requires adjustment,
+    `README.md` if the ICD needs clarification, and `tests/test_web_agent3.py`.
+  - Verify: focused deterministic tests prove `youtube`, `bilibili`, and
+    `nhentai` return no-result observations, do not call SearXNG, do not
+    delegate to `generic`, receive `query` unchanged, and are tracked outside
+    the thin executor facade as per-source modules discovered from
+    `subagent/`.
+  - Evidence: focused tests, full `tests/test_web_agent3.py`, adjacent
+    `tests/test_web_search_agent.py tests/test_web_agent3.py`, and static
+    greps passed.
+  - Sign-off: Codex / 2026-05-27.
+
+- [ ] Stage 4 - parity comparison rerun and RCA report updated.
+  - Evidence: ten live LLM cases run one at a time, traces inspected, and a
+    debug-LLM report written from real data.
+  - Sign-off: `<agent/date>`.
+
+- [ ] Stage 5 - big-bang transition completed.
+  - Evidence: active wiring/docs/tests use `web_agent3`, old helper deleted,
+    integration tests pass.
+  - Sign-off: `<agent/date>`.
+
+- [ ] Stage 6 - independent code review and final verification complete.
+  - Evidence: review findings, fixes, reruns, and residual risks recorded.
+  - Sign-off: `<agent/date>`.
 
 ## Execution Evidence
 
-Record: baseline git status and grep; focused test expected failure; focused
-test pass before cutover; transition diff summary; integration output; static
-grep output; deterministic regression output; live-LLM output or skip reason;
-independent review result; remediation and rerun output; residual risks.
+- 2026-05-26 restore-and-compare hold:
+  - Active runtime wiring was restored to `web_search_agent2`.
+  - Added `tests/test_web_agent_comparison_live_llm.py` with ten real LLM
+    comparison cases.
+  - Prior report:
+    `test_artifacts/llm_reviews/web_agent2_vs_web_agent3_live_llm_review_20260526.md`.
+  - RCA report:
+    `test_artifacts/llm_reviews/web_agent3_transition_rca_20260526.md`.
+- 2026-05-26 latest correction:
+  - Replaced the over-designed direct HTTP/search/fetch package with a smaller
+    SearXNG-facility implementation.
+  - `venv\Scripts\python -m py_compile src\kazusa_ai_chatbot\rag\web_agent3\agent.py src\kazusa_ai_chatbot\rag\web_agent3\contracts.py src\kazusa_ai_chatbot\rag\web_agent3\providers.py src\kazusa_ai_chatbot\rag\web_agent3\searxng_tools.py`: passed.
+  - `venv\Scripts\python -m pytest tests\test_web_agent3.py -q`: 12 passed.
+- 2026-05-26 Stage 3A planning update:
+  - Added concrete Stage 3A code-change scope for the strict
+    `action/source/query` router contract, source subagent dispatch, prompt
+    omission of `# 输入格式` / `# Input Format`, focused tests, and static
+    checks.
+- 2026-05-26 Stage 3A implementation:
+  - Updated `web_agent3` to use
+    `router/generator -> executor -> source subagent -> evaluator -> loop/finalizer`.
+  - Router/generator parses only `action`, `source`, and `query`.
+  - Source subagents receive `query` unchanged; non-generic sources initially
+    fell back to the generic SearXNG path with the fixed FIXME marker.
+  - Removed provider-route metadata from runtime state and focused tests.
+  - Updated the subpackage ICD and comparison fixture constructors.
+  - `venv\Scripts\python -m py_compile src\kazusa_ai_chatbot\rag\web_agent3\agent.py src\kazusa_ai_chatbot\rag\web_agent3\contracts.py src\kazusa_ai_chatbot\rag\web_agent3\providers.py src\kazusa_ai_chatbot\rag\web_agent3\searxng_tools.py`: passed.
+  - `venv\Scripts\python -m pytest tests\test_web_agent3.py -q`: 14 passed.
+  - `venv\Scripts\python -m pytest tests\test_web_search_agent.py tests\test_web_agent3.py -q`: 20 passed.
+  - `venv\Scripts\python -m pytest -m live_llm tests\test_web_agent_comparison_live_llm.py --collect-only -q`: 10 tests collected.
+  - Static check `rg "WEB_AGENT3_SEARXNG|WEB_AGENT3_HTTP|httpx|url_safety|html_extract" src\kazusa_ai_chatbot\rag\web_agent3 tests\test_web_agent3.py`: no matches.
+  - Static check `rg "mcp-searxng__searxng_web_search|mcp-searxng__web_url_read" src\kazusa_ai_chatbot\rag\web_agent3`: matches only `searxng_tools.py`.
+  - Static check `rg "# 输入格式|# Input Format|locator|locator_type|provider_history|selected_provider_name|executed_provider_name" src\kazusa_ai_chatbot\rag\web_agent3 tests\test_web_agent3.py`: no matches.
+  - Static check `rg "selected_provider_name|executed_provider_name|provider_history" src\kazusa_ai_chatbot\rag\web_agent3 tests\test_web_agent_comparison_live_llm.py`: no matches.
+  - Live LLM comparison and big-bang cutover were not run in Stage 3A.
+- 2026-05-27 Stage 3A placeholder-adapter prompt update:
+  - Added explicit Bilibili, YouTube, and nHentai placeholder adapters in the
+    source adapter registry.
+  - Non-generic placeholder adapters now return `no_search_data` without
+    calling generic SearXNG.
+  - Updated the router/generator prompt to use the existing project prompt
+    style: one static triple-quoted prompt string, Chinese-first instructions,
+    `# 来源原则`, `# 审计步骤`, and `# 输出格式`.
+  - Source principles are rendered from the available source adapter
+    descriptions with `.format(...)`; the output shape keeps `source` as a
+    string instead of duplicating the current source enum.
+  - `venv\Scripts\python -m pytest tests\test_web_agent3.py::test_web_agent3_router_prompt_uses_project_prompt_style tests\test_web_agent3.py::test_web_agent3_specialized_adapters_return_no_search_data -q`: 2 passed after failing for the expected missing behavior.
+  - `venv\Scripts\python -m py_compile src\kazusa_ai_chatbot\rag\web_agent3\agent.py src\kazusa_ai_chatbot\rag\web_agent3\contracts.py src\kazusa_ai_chatbot\rag\web_agent3\providers.py src\kazusa_ai_chatbot\rag\web_agent3\searxng_tools.py`: passed.
+  - `venv\Scripts\python -m pytest tests\test_web_agent3.py -q`: 15 passed.
+  - `venv\Scripts\python -m pytest tests\test_web_search_agent.py tests\test_web_agent3.py -q`: 21 passed.
+  - Static check `rg "_WEB_AGENT3_GENERATOR_PROMPT\s*=\s*\(|_WEB_AGENT3_GENERATOR_PROMPT\s*=\s*f|= f'''|= f\"\"\"|source adapter roster|# 输出契约|locator|provider metadata" src\kazusa_ai_chatbot\rag\web_agent3 tests\test_web_agent3.py`: no matches.
+  - Static check `rg "mcp-searxng__searxng_web_search|mcp-searxng__web_url_read" src\kazusa_ai_chatbot\rag\web_agent3`: matches only `searxng_tools.py`.
+- 2026-05-27 Stage 3B planning update:
+  - Added a dedicated Stage 3B implementation/order checkpoint for
+    `youtube`, `bilibili`, and `nhentai` placeholder subagents.
+  - Stage 3B tracks the explicit no-result, no-SearXNG, no-generic-fallback
+    behavior separately from Stage 3A router/generator work.
+  - No production code was changed for this planning update.
+- 2026-05-27 Stage 3B implementation:
+  - Added focused coverage proving `bilibili`, `youtube`, and `nhentai` are
+    dedicated placeholder source subagents separate from `generic`.
+  - Verified placeholder source subagents return `no_search_data`, preserve
+    the router `query`, do not call SearXNG, and do not delegate to `generic`.
+  - `venv\Scripts\python -m pytest tests\test_web_agent3.py::test_web_agent3_placeholder_sources_are_dedicated_no_result_subagents tests\test_web_agent3.py::test_web_agent3_specialized_adapters_return_no_search_data -q`: 2 passed.
+  - `venv\Scripts\python -m py_compile src\kazusa_ai_chatbot\rag\web_agent3\agent.py src\kazusa_ai_chatbot\rag\web_agent3\contracts.py src\kazusa_ai_chatbot\rag\web_agent3\providers.py src\kazusa_ai_chatbot\rag\web_agent3\searxng_tools.py`: passed.
+  - `venv\Scripts\python -m pytest tests\test_web_agent3.py -q`: 16 passed.
+  - `venv\Scripts\python -m pytest tests\test_web_search_agent.py tests\test_web_agent3.py -q`: 22 passed.
+  - Static check `rg "WEB_AGENT3_SEARXNG|WEB_AGENT3_HTTP|httpx|url_safety|html_extract" src\kazusa_ai_chatbot\rag\web_agent3 tests\test_web_agent3.py`: no matches.
+  - Static check `rg "mcp-searxng__searxng_web_search|mcp-searxng__web_url_read" src\kazusa_ai_chatbot\rag\web_agent3`: matches only `searxng_tools.py`.
+  - Static check `rg "# 输入格式|# Input Format|locator|locator_type|provider_history|selected_provider_name|executed_provider_name|provider metadata" src\kazusa_ai_chatbot\rag\web_agent3 tests\test_web_agent3.py`: no matches.
+  - CJK quote safety check `rg '[“”]' src\kazusa_ai_chatbot\rag\web_agent3\agent.py src\kazusa_ai_chatbot\rag\web_agent3\providers.py`: no matches.
+- 2026-05-27 Stage 3B source-module correction:
+  - User corrected the subagent tracking shape: `source_subagents.py` was too
+    shallow; the required layout is `subagent/generic.py`,
+    `subagent/bilibili.py`, `subagent/youtube.py`, and
+    `subagent/nhentai.py`.
+  - Added a failing deterministic test for per-source module discovery before
+    changing production code. The test failed on missing `subagent/`.
+  - Replaced `source_subagents.py` with `subagent/` package modules.
+  - `subagent/__init__.py` now auto-discovers and validates subagent modules,
+    exposes the source description map for the router prompt, and exposes the
+    execution registry for the provider facade.
+  - Each subagent module exposes `SOURCE`, `DESCRIPTION`, and `execute(...)`.
+  - `providers.py` remains the thin graph-facing dispatch facade and does not
+    own source-specific registry data.
+  - `venv\Scripts\python -m pytest tests\test_web_agent3.py::test_web_agent3_source_subagents_are_discovered_from_subagent_package tests\test_web_agent3.py::test_web_agent3_generic_search_receives_query_unchanged tests\test_web_agent3.py::test_web_agent3_placeholder_sources_are_dedicated_no_result_subagents tests\test_web_agent3.py::test_web_agent3_specialized_adapters_return_no_search_data -q`: 4 passed.
+  - `venv\Scripts\python -m py_compile src\kazusa_ai_chatbot\rag\web_agent3\agent.py src\kazusa_ai_chatbot\rag\web_agent3\contracts.py src\kazusa_ai_chatbot\rag\web_agent3\providers.py src\kazusa_ai_chatbot\rag\web_agent3\searxng_tools.py src\kazusa_ai_chatbot\rag\web_agent3\subagent\__init__.py src\kazusa_ai_chatbot\rag\web_agent3\subagent\generic.py src\kazusa_ai_chatbot\rag\web_agent3\subagent\bilibili.py src\kazusa_ai_chatbot\rag\web_agent3\subagent\youtube.py src\kazusa_ai_chatbot\rag\web_agent3\subagent\nhentai.py`: passed.
+  - `venv\Scripts\python -m pytest tests\test_web_agent3.py -q`: 17 passed.
+  - `venv\Scripts\python -m pytest tests\test_web_search_agent.py tests\test_web_agent3.py -q`: 23 passed.
+  - Static check `rg "WEB_AGENT3_SEARXNG|WEB_AGENT3_HTTP|httpx|url_safety|html_extract" src\kazusa_ai_chatbot\rag\web_agent3 tests\test_web_agent3.py`: no matches.
+  - Static check `rg "mcp-searxng__searxng_web_search|mcp-searxng__web_url_read" src\kazusa_ai_chatbot\rag\web_agent3`: matches only `searxng_tools.py`.
+  - Static check `rg "# 输入格式|# Input Format|locator|locator_type|provider_history|selected_provider_name|executed_provider_name|provider metadata" src\kazusa_ai_chatbot\rag\web_agent3 tests\test_web_agent3.py`: no matches.
+  - CJK quote safety check `rg '[“”]' src\kazusa_ai_chatbot\rag\web_agent3\agent.py src\kazusa_ai_chatbot\rag\web_agent3\providers.py src\kazusa_ai_chatbot\rag\web_agent3\subagent tests\test_web_agent3.py`: no matches.
+  - File presence check `Test-Path -LiteralPath 'src/kazusa_ai_chatbot/rag/web_agent3/source_subagents.py'`: `False`.
+- 2026-05-27 Stage 3B source-description query guidance:
+  - Moved generic web search/read query generation guidance into
+    `subagent/generic.py` `DESCRIPTION`.
+  - Added placeholder-source query guidance to `subagent/bilibili.py`,
+    `subagent/youtube.py`, and `subagent/nhentai.py` descriptions.
+  - Updated the router prompt to require `query` to follow the selected source
+    description while keeping router output limited to `action`, `source`, and
+    `query`.
+  - Sorted subagent discovery by module name for stable source-description
+    rendering.
+  - Added focused deterministic coverage for subagent-owned generation rules.
+  - `venv\Scripts\python -m pytest tests\test_web_agent3.py::test_web_agent3_router_uses_subagent_generation_rules -q`: failed before implementation for missing generic rules, then passed after implementation.
+  - `venv\Scripts\python -m py_compile src\kazusa_ai_chatbot\rag\web_agent3\agent.py src\kazusa_ai_chatbot\rag\web_agent3\contracts.py src\kazusa_ai_chatbot\rag\web_agent3\providers.py src\kazusa_ai_chatbot\rag\web_agent3\searxng_tools.py src\kazusa_ai_chatbot\rag\web_agent3\subagent\__init__.py src\kazusa_ai_chatbot\rag\web_agent3\subagent\generic.py src\kazusa_ai_chatbot\rag\web_agent3\subagent\bilibili.py src\kazusa_ai_chatbot\rag\web_agent3\subagent\youtube.py src\kazusa_ai_chatbot\rag\web_agent3\subagent\nhentai.py`: passed.
+  - `venv\Scripts\python -m pytest tests\test_web_agent3.py -q`: 18 passed.
+  - `venv\Scripts\python -m pytest tests\test_web_search_agent.py tests\test_web_agent3.py -q`: 24 passed.
+  - Static check `rg "WEB_AGENT3_SEARXNG|WEB_AGENT3_HTTP|httpx|url_safety|html_extract" src\kazusa_ai_chatbot\rag\web_agent3 tests\test_web_agent3.py`: no matches.
+  - Static check `rg "mcp-searxng__searxng_web_search|mcp-searxng__web_url_read" src\kazusa_ai_chatbot\rag\web_agent3`: matches only `searxng_tools.py`.
+  - Static check `rg "# 输入格式|# Input Format|locator|locator_type|provider_history|selected_provider_name|executed_provider_name|provider metadata" src\kazusa_ai_chatbot\rag\web_agent3 tests\test_web_agent3.py`: no matches.
+  - CJK quote safety check `rg '[“”]' src\kazusa_ai_chatbot\rag\web_agent3\agent.py src\kazusa_ai_chatbot\rag\web_agent3\providers.py src\kazusa_ai_chatbot\rag\web_agent3\subagent tests\test_web_agent3.py`: no matches.
+- 2026-05-27 LLM-input minimization pass:
+  - Removed SearXNG transport detail from the router-visible generic source
+    description.
+  - Removed placeholder/no-fallback implementation notes from router-visible
+    Bilibili, YouTube, and nHentai source descriptions.
+  - Kept SearXNG as the generic subagent implementation path in code and ICD,
+    but not as router prompt knowledge.
+  - Removed the evaluator retry/cap field from the evaluator LLM payload;
+    deterministic code still owns the retry cap.
+  - Changed the finalizer LLM payload to receive the clean
+    `evaluator_feedback` string instead of evaluator message wrapper metadata.
+  - Added focused failing tests first, then implemented the prompt/payload
+    cleanup.
+  - `venv\Scripts\python -m pytest tests\test_web_agent3.py::test_web_agent3_router_source_text_omits_execution_details tests\test_web_agent3.py::test_web_agent3_evaluator_continues_with_feedback tests\test_web_agent3.py::test_web_agent3_finalizer_payload_uses_clean_feedback -q`: failed before implementation, then 3 passed after implementation.
+  - `venv\Scripts\python -m py_compile src\kazusa_ai_chatbot\rag\web_agent3\agent.py src\kazusa_ai_chatbot\rag\web_agent3\contracts.py src\kazusa_ai_chatbot\rag\web_agent3\providers.py src\kazusa_ai_chatbot\rag\web_agent3\searxng_tools.py src\kazusa_ai_chatbot\rag\web_agent3\subagent\__init__.py src\kazusa_ai_chatbot\rag\web_agent3\subagent\generic.py src\kazusa_ai_chatbot\rag\web_agent3\subagent\bilibili.py src\kazusa_ai_chatbot\rag\web_agent3\subagent\youtube.py src\kazusa_ai_chatbot\rag\web_agent3\subagent\nhentai.py`: passed.
+  - `venv\Scripts\python -m pytest tests\test_web_agent3.py -q`: 20 passed.
+  - `venv\Scripts\python -m pytest tests\test_web_search_agent.py tests\test_web_agent3.py -q`: 26 passed.
+  - Static check `rg "WEB_AGENT3_SEARXNG|WEB_AGENT3_HTTP|httpx|url_safety|html_extract" src\kazusa_ai_chatbot\rag\web_agent3 tests\test_web_agent3.py`: no matches.
+  - Static check `rg "mcp-searxng__searxng_web_search|mcp-searxng__web_url_read" src\kazusa_ai_chatbot\rag\web_agent3`: matches only `searxng_tools.py`.
+  - Static check `rg "# 输入格式|# Input Format|locator|locator_type|provider_history|selected_provider_name|executed_provider_name|provider metadata" src\kazusa_ai_chatbot\rag\web_agent3 tests\test_web_agent3.py`: no matches.
+- 2026-05-27 apple-to-apple side-by-side live LLM comparison:
+  - Replaced the comparison harness boundary with public helper calls:
+    `WebSearchAgent().run(task, context, max_attempts=3)` versus
+    `WebAgent3().run(task, context, max_attempts=3)`.
+  - Both agents receive the same task/context and the same deterministic
+    patched SearXNG fixture backend while real LLM stages remain active.
+  - `venv\Scripts\python -m py_compile tests\test_web_agent_comparison_live_llm.py`: passed.
+  - `venv\Scripts\python -m pytest -m live_llm tests\test_web_agent_comparison_live_llm.py --collect-only -q`: 10 tests collected.
+  - Ran all 10 live comparison cases one at a time with
+    `venv\Scripts\python -m pytest tests\test_web_agent_comparison_live_llm.py::<case> -q -s -m live_llm`: all 10 passed structural assertions and wrote trace artifacts.
+  - Debug review:
+    `test_artifacts/llm_reviews/web_agent2_vs_web_agent3_public_run_live_llm_review_20260527.md`.
+  - Key RCA signals: web_agent3 regresses on YouTube and Bilibili URL tasks
+    because placeholder source routing returns `no_search_data`; web_agent3
+    also failed to mark stale news as stale. web_agent3 improved the
+    no-relevant-info case by returning `resolved=false` with negative evidence.
+  - Result: not ready for big-bang cutover without addressing these parity
+    gaps or explicitly accepting placeholder-source regressions.
+- 2026-05-27 dedicated routing edge-case unit coverage:
+  - Added `tests/test_web_agent3_routing.py` to isolate deterministic router
+    boundary checks from broader helper tests.
+  - Covered malformed action/source normalization, empty query fallback, stop
+    query clearing, valid edge-source route preservation for YouTube,
+    Bilibili, nHentai, and generic URL reads, invalid route fallback to generic
+    search, and executor dispatch without cross-source fallback.
+  - `venv\Scripts\python -m py_compile tests\test_web_agent3_routing.py`:
+    passed.
+  - `venv\Scripts\python -m pytest tests\test_web_agent3_routing.py -q`: 4
+    passed.
+  - `venv\Scripts\python -m pytest tests\test_web_agent3.py tests\test_web_agent3_routing.py -q`: 24 passed.
+  - `venv\Scripts\python -m pytest tests\test_web_search_agent.py tests\test_web_agent3.py tests\test_web_agent3_routing.py -q`: 30 passed.
 
-## Risks
+## Independent Plan Review
 
-| Risk | Mitigation | Verification |
-|---|---|---|
-| Public helper contract drift | Preserve exact `run` signature and output shape | Focused contract test |
-| URL fetch reaches local/metadata targets | Validate scheme, DNS/IP, and redirects before requests | URL safety focused tests |
-| Dummy handlers appear as real provider support | Fixed FIXME marker and delegation reason | Dummy route-and-fallback focused test |
-| Cutover before function readiness | Focused tests must pass before wiring changes | Stage 3 gate |
-| Rename misses active references | Baseline and final `rg` checks | Static checks |
+Review date: 2026-05-26.
+
+Inputs reviewed: this active plan, the current `web_search_agent2` contract,
+the user-confirmed router contract, project RAG ownership rules, and current
+pre-cutover change surface.
+
+Findings:
+
+- No blocker: Stage 3A now encodes the user-confirmed architecture instead of
+  the earlier deterministic-router interpretation.
+- No blocker: The plan keeps upstream/downstream boundaries stable. The RAG
+  initializer still produces semantic `Web-evidence:` work, and downstream
+  RAG/cognition still receives text evidence.
+- No blocker: The execution surface remains limited to `web_agent3` package,
+  focused web-agent tests, comparison tests, and this plan until cutover.
+- Non-blocking risk: The current working-tree code still reflects the older
+  metadata-heavy implementation. Stage 3A must be completed before rerunning
+  live comparison or attempting cutover.
+- Non-blocking risk: The static grep allows comparison-fixture metadata if
+  needed. Before final cutover, runtime code should have no dependency on those
+  metadata fields.
+
+Review result: approved for Stage 3A implementation. Do not proceed to live
+LLM comparison or big-bang transition until Stage 3A focused verification and
+static checks pass.
 
 ## Acceptance Criteria
 
-- `WebAgent3.run` accepts the same inputs and returns the same output shape as
-  `WebSearchAgent.run`.
-- All `web_agent3` functions pass focused tests before runtime wiring changes.
-- Active runtime and tests use `web_agent3`, not `web_search_agent2`.
-- `web_search_agent.py` is deleted after cutover.
-- Generic local search and validated URL fetch work.
-- Bilibili, YouTube, and nHentai dummy handlers route and fall back to
-  `generic_local_web` with the fixed FIXME marker.
-- No real provider API client, MCP web helper path, new service, dependency, or
-  forbidden-module change is added.
-- Deterministic verification passes and live-LLM finalizer behavior is
-  inspected when available.
-- Independent code review is completed and recorded.
+- `WebAgent3.run` keeps the same public contract as `WebSearchAgent.run`.
+- `web_agent3` search/read execution uses the existing SearXNG MCP facility.
+- No direct HTTP search/fetch, URL safety module, HTML extraction module, or
+  new environment variable is introduced.
+- Router/generator emits only `action`, `source`, and `query`; prompts omit
+  `# 输入格式` / `# Input Format`.
+- Router/generator source descriptions do not expose transport details,
+  placeholder execution details, or provider metadata.
+- Router normalization and executor dispatch are covered for edge cases around
+  malformed LLM output, stop actions, source-specific IDs, site URLs, and
+  placeholder-source boundaries.
+- Evaluator/finalizer LLM payloads contain only fields each stage uses for its
+  semantic decision.
+- Placeholder source adapters return no search data without calling generic
+  SearXNG and carry the fixed FIXME marker.
+- Prompt content follows project language and cache-prefix rules.
+- Focused deterministic tests pass.
+- The ten real LLM comparison cases are rerun one at a time and summarized in a
+  human-authored debug-LLM report before any cutover.
