@@ -39,7 +39,7 @@ long_term/todo.md
 | Document | Type | Status |
 |---|---|---|
 | [rag3_router_interpreter_poc_experiment_plan.md](active/short_term/rag3_router_interpreter_poc_experiment_plan.md) | Medium experiment and POC design plan | draft |
-| [web_agent3_replacement_plan.md](active/short_term/web_agent3_replacement_plan.md) | Medium web helper replacement and router architecture plan | draft |
+| [web_agent3_replacement_plan.md](active/short_term/web_agent3_replacement_plan.md) | Large web helper replacement and router architecture plan | draft |
 
 ## Supporting Experiment Records
 
