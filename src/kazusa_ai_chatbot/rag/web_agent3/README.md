@@ -42,15 +42,19 @@ or new RAG supervisor fields.
 | `subagent/generic.py` | Generic search/read subagent backed by the existing SearXNG facility. |
 | `subagent/bilibili.py` | Bilibili placeholder subagent. |
 | `subagent/youtube.py` | YouTube placeholder subagent. |
-| `subagent/nhentai.py` | nHentai placeholder subagent. |
+| `subagent/nhentai.py` | nHentai API v2 metadata/search subagent. |
 | `contracts.py` | Minimal router decision and test/comparison data contracts. |
 
 ## SearXNG Facility Rule
 
-All web search and URL-read execution goes through the existing SearXNG MCP
-facility. `web_agent3` does not perform direct HTTP search, direct URL fetch,
-SSRF filtering, or custom HTML extraction. Those concerns remain owned by the
-configured SearXNG/MCP server.
+Ordinary webpage search and URL-read execution goes through the existing
+SearXNG MCP facility. `web_agent3` does not perform direct HTTP search, direct
+URL fetch, SSRF filtering, or custom HTML extraction for generic web work.
+Those concerns remain owned by the configured SearXNG/MCP server.
+
+Source-specific metadata/search is owned by the selected source subagent.
+Currently, only `nhentai` has an approved direct provider API path, limited to
+gallery metadata reads and gallery search through its own subagent.
 
 ## Prompt Rule
 
@@ -81,8 +85,9 @@ Allowed actions are `search`, `read`, and `stop`. Allowed sources are
 by `source` and `action`; it does not reinterpret `query`.
 
 `query` is passed unchanged to the selected source subagent. Source-specific
-ID extraction, API parameter building, credentials, and local/MCP tool variants
-are intentionally deferred to future subagent work.
+ID extraction, API parameter building, credential use, and local/MCP tool
+variants are subagent responsibilities. In the current stage, only `nhentai`
+implements deterministic gallery-id extraction and API parameter building.
 
 ## Source Subagents
 
@@ -97,17 +102,21 @@ The source subagent roster and prompt-facing descriptions are auto-discovered
 from `subagent/*.py`. Each source module exposes `SOURCE`, `DESCRIPTION`, and
 `execute(...)`. `DESCRIPTION` includes source-local `query` generation rules
 for the router prompt. `generic` uses the existing SearXNG facility directly.
-The other source adapters prove the dispatch point for future provider APIs. In
-this stage they return an explicit `no_search_data` placeholder instead of
-falling back to generic search, and carry:
+`nhentai` uses the official API v2 for metadata-only gallery reads and bounded
+gallery searches. Bilibili and YouTube prove the dispatch point for future
+provider APIs. In this stage they return an explicit `no_search_data`
+placeholder instead of falling back to generic search, and carry:
 
 ```text
 FIXME(web_agent3): replace no-search-data placeholder with provider API client in a future approved plan.
 ```
 
-Real Bilibili, YouTube, nHentai, local-tool variants, MCP-backed variants,
-credentials, rate limits, and source-specific parsers require a later approved
-plan.
+Real Bilibili, YouTube, local-tool variants, MCP-backed variants, rate-limit
+policy, and additional source-specific parsers require a later approved plan.
+The nHentai subagent may read its optional API token from the process
+environment at execution time and must not put credentials, headers, image
+URLs, download URLs, comments, favorite state, or account data into
+observations.
 
 ## Current Verification
 
@@ -121,6 +130,10 @@ Focused deterministic tests must cover:
 - query pass-through from executor to source subagents.
 - source subagent discovery from per-source modules under `subagent/`.
 - source-local query generation rules rendered from subagent descriptions.
-- placeholder source adapters return no search data without calling SearXNG.
+- Bilibili and YouTube placeholder source adapters return no search data
+  without calling SearXNG.
+- nHentai `read` returns only compact title/name and grouped tags.
+- nHentai `search` returns bounded gallery candidates without image, download,
+  comment, favorite, header, or token data.
 - generator/evaluator prompt payload placement for `reference_time`.
 - finalizer comparison helper shape used by live LLM reports.

@@ -267,15 +267,16 @@ async def test_web_agent3_generic_search_receives_query_unchanged(
 
 @pytest.mark.asyncio
 async def test_web_agent3_placeholder_sources_are_dedicated_no_result_subagents() -> None:
-    """Placeholder sources should be separate no-result subagents."""
+    """Bilibili and YouTube should remain separate no-result subagents."""
     source_module = importlib.import_module(
         "kazusa_ai_chatbot.rag.web_agent3.subagent"
     )
     source_subagents = source_module._SUBAGENTS
     generic_subagent = source_subagents["generic"]
 
-    for source in ("bilibili", "youtube", "nhentai"):
-        assert source_subagents[source] is not generic_subagent
+    assert source_subagents["nhentai"] is not generic_subagent
+
+    for source in ("bilibili", "youtube"):
         decision = web_module._RouterDecision(
             action="search",
             source=source,
@@ -306,7 +307,7 @@ async def test_web_agent3_specialized_adapters_return_no_search_data(
     monkeypatch.setattr(generic_subagent.searxng_tools, "web_url_read", fake_read)
     monkeypatch.setattr(generic_subagent.searxng_tools, "web_search", fake_search)
 
-    for source in ("bilibili", "youtube", "nhentai"):
+    for source in ("bilibili", "youtube"):
         fake_read.ainvoke.reset_mock()
         fake_search.ainvoke.reset_mock()
         decision = web_module._RouterDecision(

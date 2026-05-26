@@ -14,15 +14,15 @@ perform one later big-bang transition.
 
 Latest user correction:
 
-- Web search and URL reads must go through the existing SearXNG facility.
+- Ordinary webpage search and URL reads must go through the existing SearXNG
+  facility.
 - Do not over design.
 - Runtime LLM prompts must follow project prompt rules and preserve stable
   prompt prefixes for local LLM cache behavior.
 - The web-agent router is the first LLM stage. It emits only `action`,
   `source`, and `query`; source-specific parsing belongs inside subagents.
-- YouTube, Bilibili, and nHentai must exist as source subagent placeholders.
-  At this stage each placeholder returns no result and must not fall back to
-  generic search.
+- YouTube and Bilibili remain source subagent placeholders. nHentai is approved
+  for Stage 3C real metadata/search implementation inside its source subagent.
 - Source subagents are tracked as separate modules under `web_agent3/subagent/`:
   `generic.py`, `bilibili.py`, `youtube.py`, and `nhentai.py`. Each module
   exposes its source name, prompt-facing description, and primary async
@@ -33,6 +33,10 @@ Latest user correction:
 - LLM-facing source descriptions expose only source capability and query
   shaping rules. Transport details, placeholder implementation notes, retry
   control fields, and comparison-fixture metadata stay out of LLM payloads.
+- nHentai Stage 3C scope is metadata-only: `read` returns gallery name/title
+  and tags; `search` returns bounded gallery candidates. No download, image
+  page read, thumbnail payload, comment read, favorite mutation, account
+  mutation, moderation endpoint, or media binary handling is in scope.
 - The side-by-side real LLM comparison must be apple-to-apple through the
   shared public helper contract: both agents receive the same `task`,
   `context`, and `max_attempts`, and both are judged from the same public
@@ -80,15 +84,24 @@ contracts do not change.
 - Keep `web_search_agent2` active until all `web_agent3` functions and the
   comparison suite have been verified.
 - Do not add a service process, dependency, MCP server, global config field,
-  provider credential path, direct HTTP client, custom URL fetcher, URL safety
-  layer, or HTML extraction layer.
-- All web search and URL-read execution in `web_agent3` must call the existing
-  SearXNG MCP tools through the existing local facility:
+  custom URL fetcher, URL safety layer, or HTML extraction layer.
+- The only approved direct provider HTTP path in pre-cutover `web_agent3` is
+  the nHentai Stage 3C API client code inside
+  `src/kazusa_ai_chatbot/rag/web_agent3/subagent/nhentai.py`. Generic web
+  search and generic URL reads still must use the existing SearXNG facility.
+- `NHENTAI_TOKEN` may be read from the process environment inside
+  `subagent/nhentai.py` only. Do not read `.env`, do not log the token, do not
+  put the token in prompts or observations, and do not add a required
+  `config.py` import-time variable that can break unrelated startup.
+- All generic web search and generic URL-read execution in `web_agent3` must
+  call the existing SearXNG MCP tools through the existing local facility:
   `mcp-searxng__searxng_web_search` and `mcp-searxng__web_url_read`.
-- Bilibili, YouTube, and nHentai adapters are allowed only as router
-  placeholders. They must return explicit no-search-data observations without
+- Bilibili and YouTube adapters are allowed only as router placeholders. They
+  must return explicit no-search-data observations without
   falling back to generic SearXNG, and carry:
   `FIXME(web_agent3): replace no-search-data placeholder with provider API client in a future approved plan.`
+- nHentai must stop being a placeholder in Stage 3C and must use only the
+  official nHentai API v2 metadata/search endpoints needed by this plan.
 - Runtime prompts are Chinese-first RAG evidence prompts. Stable role,
   generation procedure, and output contract text stay in `SystemMessage`;
   runtime-varying fields such as `task`, projected `context`,
@@ -135,28 +148,39 @@ For `stop`, `query` is an empty string.
 
 The router/generator must not extract YouTube video IDs, Bilibili BV/AV IDs,
 nHentai gallery IDs, API fields, credentials, request parameters, or transport
-details. Those are source-adapter responsibilities. Current placeholder
-adapters return no search data; future real adapters may
-extract source-specific keys with regex or their own LLM stage in a later
-approved plan.
+details. Those are source-adapter responsibilities. Bilibili and YouTube
+placeholder adapters return no search data. The nHentai Stage 3C adapter may
+extract gallery ids deterministically from its `query` with regex and may call
+the official API v2 endpoints named in this plan.
 
-## Source Subagent Placeholder Decision
+## Source Subagent Decision
 
 - `generic` is the only active web search and URL-read executor in the current
   stage. It uses the existing SearXNG facility.
 - `youtube`, `bilibili`, and `nhentai` must be present in the source adapter
-  registry as dedicated placeholder subagents.
+  registry as dedicated subagents.
 - Source subagents are not tracked in a single `source_subagents.py` file.
   They live under `subagent/` with one source module per file.
-- Each placeholder subagent receives the router decision with `query`
-  unchanged and returns an explicit no-result observation.
+- Bilibili and YouTube remain placeholder subagents. Each placeholder receives
+  the router decision with `query` unchanged and returns an explicit no-result
+  observation.
 - Placeholder subagents must not call SearXNG, must not delegate to `generic`,
   and must not perform automatic source fallback.
+- nHentai receives the router decision with `query` unchanged, then owns
+  deterministic extraction of gallery ids, API parameter shaping, HTTP request
+  execution, and response compaction inside `subagent/nhentai.py`.
+- nHentai `read` must read only gallery name/title and grouped tags. It must
+  not expose image page URLs, thumbnails, download URLs, comments, favorite
+  state, account state, moderation data, or media binary data.
+- nHentai `search` must search galleries through the official search endpoint
+  and return bounded gallery candidates suitable for evaluator follow-up. It
+  must not download or read pictures.
 - The evaluator may inspect the no-result observation and decide whether the
   overall web-agent loop should stop or continue, but source adapters must not
   silently substitute another source.
-- Real provider APIs, credentials, request parameter extraction, and local or
-  MCP tool variants remain deferred to a later approved plan.
+- Real Bilibili and YouTube provider APIs, credentials, request parameter
+  extraction, and local or MCP tool variants remain deferred to a later
+  approved plan.
 
 ## Target Architecture
 
@@ -169,7 +193,7 @@ RAG supervisor
           -> generic_adapter  -> existing SearXNG MCP facility
           -> bilibili_adapter -> no_search_data placeholder
           -> youtube_adapter  -> no_search_data placeholder
-          -> nhentai_adapter  -> no_search_data placeholder
+          -> nhentai_adapter  -> official nHentai API v2 metadata/search
        -> same text evidence result contract
 ```
 
@@ -209,8 +233,98 @@ Ownership:
 | `subagent/generic.py` | Generic search/read subagent backed by the existing SearXNG facility. |
 | `subagent/bilibili.py` | Bilibili placeholder subagent. |
 | `subagent/youtube.py` | YouTube placeholder subagent. |
-| `subagent/nhentai.py` | nHentai placeholder subagent. |
+| `subagent/nhentai.py` | nHentai API v2 metadata/search subagent. |
 | `contracts.py` | Minimal router output and comparison-test data contracts. |
+
+## Contracts And Data Shapes
+
+### nHentai Subagent Input
+
+`subagent/nhentai.py` keeps the existing source subagent interface:
+
+```python
+async def execute(decision: _RouterDecision) -> dict[str, Any]:
+```
+
+`decision.query` remains the only source-specific payload. The router does not
+produce API fields.
+
+### nHentai Read Behavior
+
+Accepted `read` targets:
+
+- a bare gallery id such as `652244`;
+- a gallery page URL such as `https://nhentai.net/g/652244/`;
+- an API URL/path containing `/api/v2/galleries/652244`.
+
+Implementation instruction:
+
+- Extract the gallery id with a deterministic regex inside
+  `subagent/nhentai.py`.
+- Call `GET https://nhentai.net/api/v2/galleries/{gallery_id}`.
+- If `NHENTAI_TOKEN` is present, send `Authorization: Key <token>`.
+- Always send a descriptive `User-Agent`.
+- Return only a compact observation with:
+
+```python
+{
+    "status": "success" | "not_found" | "error",
+    "source": "nhentai",
+    "action": "read",
+    "query": str,
+    "gallery_id": int | None,
+    "url": str | None,
+    "title": {
+        "english": str,
+        "japanese": str | None,
+        "pretty": str,
+    },
+    "tags": {
+        "language": list[str],
+        "artist": list[str],
+        "group": list[str],
+        "parody": list[str],
+        "character": list[str],
+        "tag": list[str],
+        "category": list[str],
+    },
+    "message": str,
+}
+```
+
+Forbidden read fields: page image URLs, cover paths, thumbnail URLs, download
+URLs, comments, favorite state, user/account fields, moderation fields, raw
+headers, and tokens.
+
+### nHentai Search Behavior
+
+Accepted `search` targets:
+
+- normal search text;
+- nHentai search syntax supported by the official API, including tag filters,
+  exact phrases, negation, numeric filters, and date filters;
+- a numeric gallery id, which the nHentai subagent may internally treat as a
+  gallery `read` because the router is not responsible for that distinction.
+
+Implementation instruction:
+
+- Call `GET https://nhentai.net/api/v2/search` with `query=<decision.query>`,
+  `sort=date`, and `page=1`.
+- Return at most five gallery candidates.
+- Each candidate contains only:
+
+```python
+{
+    "id": int,
+    "url": str,
+    "title": str,
+    "num_pages": int,
+    "num_favorites": int,
+}
+```
+
+Search observations must not include image URLs, thumbnail URLs, download
+URLs, or token/header data.
 
 ## Change Surface
 
@@ -219,6 +333,8 @@ Current pre-cutover work may touch only:
 - `development_plans/active/short_term/web_agent3_replacement_plan.md`
 - `src/kazusa_ai_chatbot/rag/web_agent3/`
 - `tests/test_web_agent3.py`
+- `tests/test_web_agent3_routing.py`
+- `tests/test_web_agent3_nhentai.py`
 - `tests/test_web_agent_comparison_live_llm.py`
 - ignored debug-LLM artifacts under `test_artifacts/`
 
@@ -286,7 +402,37 @@ No other modules are in scope.
    - In `tests/test_web_agent3.py`, add or keep focused tests proving
      placeholder no-result behavior, no SearXNG call for non-generic sources,
      and unchanged query delivery into the placeholder subagents.
-4. Run the focused deterministic Stage 3A and Stage 3B tests and static checks.
+3C. Implement nHentai metadata/search subagent:
+   - In `tests/test_web_agent3_nhentai.py`, add focused deterministic tests
+     before production code for gallery id extraction from bare ids, gallery
+     URLs, API URLs, and invalid targets.
+   - In `tests/test_web_agent3_nhentai.py`, add tests that `read` calls the
+     gallery endpoint and returns only name/title plus grouped tags.
+   - In `tests/test_web_agent3_nhentai.py`, add tests that `search` calls the
+     gallery search endpoint and returns bounded gallery candidates.
+   - In `tests/test_web_agent3_nhentai.py`, add tests that a numeric `search`
+     target is handled as a gallery lookup inside the nHentai subagent.
+   - In `tests/test_web_agent3_nhentai.py`, add tests for missing token,
+     present token header, 404, 429, timeout/HTTP error, malformed JSON or
+     malformed response shape, and no leakage of token, headers, image URLs,
+     thumbnail URLs, download URLs, comments, or favorite state.
+   - In `subagent/nhentai.py`, replace the placeholder with deterministic
+     helper functions for gallery id extraction, auth header creation,
+     official API request execution using existing `httpx`, response
+     compaction, and bounded error observations.
+   - In `subagent/nhentai.py`, read `NHENTAI_TOKEN` with `os.getenv` at
+     execution time. Do not add a required `config.py` setting.
+   - In `subagent/nhentai.py`, keep prompt-facing `DESCRIPTION` source-local
+     and query-oriented. It may mention gallery metadata/search and query
+     shaping, but must not mention token, authorization headers, endpoints,
+     implementation placeholders, or transport mechanics.
+   - In `tests/test_web_agent3.py`, update previous placeholder expectations
+     so only Bilibili and YouTube remain no-data placeholders.
+   - In `tests/test_web_agent3_routing.py`, keep router and executor boundary
+     tests focused on source dispatch and query pass-through; do not make the
+     router extract nHentai ids.
+4. Run the focused deterministic Stage 3A, Stage 3B, and Stage 3C tests and
+   static checks.
 5. Run the same ten real LLM comparison cases one at a time and inspect traces.
 6. Write a debug-LLM comparison report from real trace data.
 7. Complete RCA against `web_search_agent2` and close parity gaps.
@@ -299,8 +445,10 @@ Focused deterministic:
 
 ```powershell
 venv\Scripts\python -m py_compile src\kazusa_ai_chatbot\rag\web_agent3\agent.py src\kazusa_ai_chatbot\rag\web_agent3\contracts.py src\kazusa_ai_chatbot\rag\web_agent3\providers.py src\kazusa_ai_chatbot\rag\web_agent3\searxng_tools.py src\kazusa_ai_chatbot\rag\web_agent3\subagent\__init__.py src\kazusa_ai_chatbot\rag\web_agent3\subagent\generic.py src\kazusa_ai_chatbot\rag\web_agent3\subagent\bilibili.py src\kazusa_ai_chatbot\rag\web_agent3\subagent\youtube.py src\kazusa_ai_chatbot\rag\web_agent3\subagent\nhentai.py
+venv\Scripts\python -m py_compile tests\test_web_agent3.py tests\test_web_agent3_routing.py tests\test_web_agent3_nhentai.py tests\test_web_agent_comparison_live_llm.py
 venv\Scripts\python -m pytest tests\test_web_agent3.py -q
-venv\Scripts\python -m pytest tests\test_web_search_agent.py tests\test_web_agent3.py -q
+venv\Scripts\python -m pytest tests\test_web_agent3_nhentai.py -q
+venv\Scripts\python -m pytest tests\test_web_search_agent.py tests\test_web_agent3.py tests\test_web_agent3_routing.py tests\test_web_agent3_nhentai.py -q
 ```
 
 Focused prompt/payload minimization must prove:
@@ -314,10 +462,22 @@ Focused prompt/payload minimization must prove:
 Static checks:
 
 ```powershell
-rg "WEB_AGENT3_SEARXNG|WEB_AGENT3_HTTP|httpx|url_safety|html_extract" src\kazusa_ai_chatbot\rag\web_agent3 tests\test_web_agent3.py
+rg "WEB_AGENT3_SEARXNG|WEB_AGENT3_HTTP|url_safety|html_extract" src\kazusa_ai_chatbot\rag\web_agent3 tests\test_web_agent3.py tests\test_web_agent3_routing.py tests\test_web_agent3_nhentai.py
 ```
 
 Expected: no matches.
+
+```powershell
+rg "httpx|NHENTAI_TOKEN|Authorization" src\kazusa_ai_chatbot\rag\web_agent3
+```
+
+Expected: matches only in `subagent/nhentai.py`.
+
+```powershell
+rg "NHENTAI_TOKEN|Authorization" tests\test_web_agent3.py tests\test_web_agent3_routing.py tests\test_web_agent3_nhentai.py
+```
+
+Expected: matches only in `tests/test_web_agent3_nhentai.py`.
 
 ```powershell
 rg "mcp-searxng__searxng_web_search|mcp-searxng__web_url_read" src\kazusa_ai_chatbot\rag\web_agent3
@@ -326,7 +486,7 @@ rg "mcp-searxng__searxng_web_search|mcp-searxng__web_url_read" src\kazusa_ai_cha
 Expected: matches only in `searxng_tools.py`.
 
 ```powershell
-rg "# 输入格式|# Input Format|locator|locator_type|provider_history|selected_provider_name|executed_provider_name" src\kazusa_ai_chatbot\rag\web_agent3 tests\test_web_agent3.py
+rg "# 输入格式|# Input Format|locator|locator_type|provider_history|selected_provider_name|executed_provider_name" src\kazusa_ai_chatbot\rag\web_agent3 tests\test_web_agent3.py tests\test_web_agent3_routing.py tests\test_web_agent3_nhentai.py
 ```
 
 Expected: no matches, except `selected_provider_name` and
@@ -382,6 +542,21 @@ not sufficient for cutover evidence.
   - Evidence: focused tests, full `tests/test_web_agent3.py`, adjacent
     `tests/test_web_search_agent.py tests/test_web_agent3.py`, and static
     greps passed.
+  - Sign-off: Codex / 2026-05-27.
+
+- [x] Stage 3C - nHentai metadata/search subagent implemented and verified.
+  - Code changes: `src/kazusa_ai_chatbot/rag/web_agent3/subagent/nhentai.py`,
+    `src/kazusa_ai_chatbot/rag/web_agent3/README.md` if ICD wording needs
+    update, `tests/test_web_agent3.py`, `tests/test_web_agent3_routing.py`,
+    and `tests/test_web_agent3_nhentai.py`.
+  - Verify: focused tests prove read returns only title/name and grouped tags,
+    search returns bounded gallery candidates, token headers are used only
+    when `NHENTAI_TOKEN` is present, numeric search is handled inside the
+    nHentai subagent, and no image/download/comment/favorite/token/header data
+    leaks into observations.
+  - Evidence: focused `tests/test_web_agent3_nhentai.py`, adjacent web-agent
+    regression batch, static greps, and independent Stage 3C code review
+    passed. Live API smoke was not run because the user did not request it.
   - Sign-off: Codex / 2026-05-27.
 
 - [ ] Stage 4 - parity comparison rerun and RCA report updated.
@@ -564,6 +739,59 @@ not sufficient for cutover evidence.
     passed.
   - `venv\Scripts\python -m pytest tests\test_web_agent3.py tests\test_web_agent3_routing.py -q`: 24 passed.
   - `venv\Scripts\python -m pytest tests\test_web_search_agent.py tests\test_web_agent3.py tests\test_web_agent3_routing.py -q`: 30 passed.
+- 2026-05-27 Stage 3C nHentai planning update:
+  - User approved replacing the nHentai placeholder with metadata-only
+    official API v2 support.
+  - Recorded scope: `read` returns gallery name/title and grouped tags only;
+    `search` returns bounded gallery candidates only.
+  - Recorded constraints: no download, no picture/page read, no thumbnails, no
+    comments, no favorite/account/moderation endpoints, no token/header leak,
+    no generic router expansion, and no SearXNG bypass for ordinary web search
+    or URL reads.
+  - No production code was changed for this planning update.
+- 2026-05-27 Stage 3C nHentai implementation:
+  - Replaced `subagent/nhentai.py` placeholder with source-local gallery id
+    extraction, optional process-environment API token handling, official API
+    metadata read, official API search, response compaction, and bounded error
+    observations.
+  - Kept router/generator contract unchanged: `action`, `source`, and `query`
+    only. nHentai id extraction and API parameter shaping live inside the
+    nHentai subagent.
+  - Updated `src/kazusa_ai_chatbot/rag/web_agent3/README.md` to mark nHentai
+    as metadata/search API-backed and Bilibili/YouTube as the remaining
+    no-data placeholders.
+  - Updated `tests/test_web_agent3.py` placeholder expectations so only
+    Bilibili and YouTube remain no-data placeholder sources.
+  - Added `tests/test_web_agent3_nhentai.py` with deterministic coverage for
+    id extraction, metadata read, bounded search, numeric search lookup,
+    missing gallery ids, token header behavior, API 404/429/HTTP/JSON/shape
+    errors, and forbidden data leakage.
+  - `venv\Scripts\python -m py_compile src\kazusa_ai_chatbot\rag\web_agent3\subagent\nhentai.py tests\test_web_agent3_nhentai.py`:
+    passed.
+  - `venv\Scripts\python -m py_compile src\kazusa_ai_chatbot\rag\web_agent3\agent.py src\kazusa_ai_chatbot\rag\web_agent3\contracts.py src\kazusa_ai_chatbot\rag\web_agent3\providers.py src\kazusa_ai_chatbot\rag\web_agent3\searxng_tools.py src\kazusa_ai_chatbot\rag\web_agent3\subagent\__init__.py src\kazusa_ai_chatbot\rag\web_agent3\subagent\generic.py src\kazusa_ai_chatbot\rag\web_agent3\subagent\bilibili.py src\kazusa_ai_chatbot\rag\web_agent3\subagent\youtube.py src\kazusa_ai_chatbot\rag\web_agent3\subagent\nhentai.py tests\test_web_agent3.py tests\test_web_agent3_routing.py tests\test_web_agent3_nhentai.py tests\test_web_agent_comparison_live_llm.py`:
+    passed.
+  - `venv\Scripts\python -m pytest tests\test_web_agent3_nhentai.py -q`: 6
+    passed.
+  - `venv\Scripts\python -m pytest tests\test_web_agent3.py tests\test_web_agent3_routing.py tests\test_web_agent3_nhentai.py -q`:
+    30 passed.
+  - `venv\Scripts\python -m pytest tests\test_web_search_agent.py tests\test_web_agent3.py tests\test_web_agent3_routing.py tests\test_web_agent3_nhentai.py -q`:
+    36 passed.
+  - Static check `rg "WEB_AGENT3_SEARXNG|WEB_AGENT3_HTTP|url_safety|html_extract" src\kazusa_ai_chatbot\rag\web_agent3 tests\test_web_agent3.py tests\test_web_agent3_routing.py tests\test_web_agent3_nhentai.py`:
+    no matches.
+  - Static check `rg "httpx|NHENTAI_TOKEN|Authorization" src\kazusa_ai_chatbot\rag\web_agent3`:
+    matches only `subagent/nhentai.py`.
+  - Static check `rg "NHENTAI_TOKEN|Authorization" tests\test_web_agent3.py tests\test_web_agent3_routing.py tests\test_web_agent3_nhentai.py`:
+    matches only `tests/test_web_agent3_nhentai.py`.
+  - Static check `rg "mcp-searxng__searxng_web_search|mcp-searxng__web_url_read" src\kazusa_ai_chatbot\rag\web_agent3`:
+    matches only `searxng_tools.py`.
+  - Static check `rg "# 输入格式|# Input Format|locator|locator_type|provider_history|selected_provider_name|executed_provider_name" src\kazusa_ai_chatbot\rag\web_agent3 tests\test_web_agent3.py tests\test_web_agent3_routing.py tests\test_web_agent3_nhentai.py`:
+    no matches.
+  - CJK quote safety check `rg '[“”]' src\kazusa_ai_chatbot\rag\web_agent3\subagent\nhentai.py tests\test_web_agent3_nhentai.py`:
+    no matches.
+  - Broad exception check `rg "except Exception|except:" src\kazusa_ai_chatbot\rag\web_agent3\subagent\nhentai.py`:
+    no matches.
+  - Independent Stage 3C code review subagent found no blocking findings.
+    Residual risk: live nHentai API behavior was not smoke-tested.
 
 ## Independent Plan Review
 
@@ -596,9 +824,13 @@ static checks pass.
 ## Acceptance Criteria
 
 - `WebAgent3.run` keeps the same public contract as `WebSearchAgent.run`.
-- `web_agent3` search/read execution uses the existing SearXNG MCP facility.
-- No direct HTTP search/fetch, URL safety module, HTML extraction module, or
-  new environment variable is introduced.
+- `web_agent3` generic search/read execution uses the existing SearXNG MCP
+  facility.
+- No direct HTTP search/fetch, URL safety module, or HTML extraction module is
+  introduced for generic web search or URL read.
+- nHentai is the only approved direct provider HTTP client in pre-cutover
+  `web_agent3`, and it reads only the optional `NHENTAI_TOKEN` environment
+  variable inside `subagent/nhentai.py`.
 - Router/generator emits only `action`, `source`, and `query`; prompts omit
   `# 输入格式` / `# Input Format`.
 - Router/generator source descriptions do not expose transport details,
@@ -608,8 +840,12 @@ static checks pass.
   placeholder-source boundaries.
 - Evaluator/finalizer LLM payloads contain only fields each stage uses for its
   semantic decision.
-- Placeholder source adapters return no search data without calling generic
-  SearXNG and carry the fixed FIXME marker.
+- Bilibili and YouTube placeholder source adapters return no search data
+  without calling generic SearXNG and carry the fixed FIXME marker.
+- nHentai `read` returns gallery title/name and grouped tags only; nHentai
+  `search` returns bounded gallery candidates only; neither path returns
+  images, download URLs, thumbnails, comments, favorite/account data, raw
+  headers, or tokens.
 - Prompt content follows project language and cache-prefix rules.
 - Focused deterministic tests pass.
 - The ten real LLM comparison cases are rerun one at a time and summarized in a
