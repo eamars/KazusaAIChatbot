@@ -223,6 +223,10 @@ Use f-strings for immediate string interpolation. They keep the rendered
 message close to the values being inserted and match the project's logging
 style.
 
+This rule does not apply to LLM prompt constants or prompt rendering. Prompt
+constants must use triple-single-quoted strings (`'''...'''`), and prompt
+composition must use `.format(...)` with named placeholders only.
+
 For reusable template strings that are defined separately from the substitution
 site, use `.format(...)` with named placeholders. Do not populate templates by
 chaining `.replace(...)` calls.
@@ -232,6 +236,7 @@ chaining `.replace(...)` calls.
 logger.info("User %s affinity changed to %d", user_id, affinity)
 message = "User %s" % user_id
 prompt = PROMPT_TEMPLATE.replace("{user_name}", user_name)
+prompt = f"""Role: {character_name}"""
 ```
 
 **Right:**
@@ -257,11 +262,31 @@ LLM handler function
 This lets reviewers inspect the prompt together with the model configuration,
 payload construction, parser, and structural validation that consume it.
 
-Structured LLM prompts must include explicit generation guidance plus
-`# Input Format` and `# Output Format` sections. Use a section such as
-`# Generation Procedure` or `# Thinking Steps` to tell the local LLM how to
-inspect inputs and choose output fields. The format sections must match the
-handler's actual JSON payload and validator expectations.
+Structured LLM prompt constants must be triple-single-quoted strings:
+`'''...'''`. Do not use prompt f-strings, triple-double-quoted prompt strings,
+or `.replace(...)` prompt rendering. If a prompt needs static composition, use
+`.format(...)` with named placeholders only.
+
+Structured LLM prompts must keep a static `SystemMessage` for the Python
+session. Static `.format(...)` composition is allowed only for process-stable
+contract text; time, mood, user names, relationship state, retrieved evidence,
+tool results, and other per-run facts belong in the `HumanMessage`.
+
+Structured stages must include an explicit output contract. Use
+`# Output Format` or the local-language equivalent, state JSON field names and
+types, and make the prompt body explain how each returned field is generated.
+Input-format sections are optional after KV-cache input-format omission has
+been approved for that prompt family. When `# Input Format` is omitted, the
+prompt-specific steps must still explain every top-level human-payload field
+and decision-critical nested field they use. The generation-guidance heading
+does not need to be exactly `# Generation Procedure` or `# Thinking Steps` if a
+local heading such as `# 审计步骤` or `# 生成步骤` clearly tells the model how to
+inspect inputs and choose output fields.
+
+Use one language for ordinary prompt instructions. For free-form return fields
+that downstream stages read, state the expected output language; keep JSON keys,
+enum values, action names, code, commands, URLs, model labels, and quoted source
+text exact.
 
 **Wrong:**
 ```python

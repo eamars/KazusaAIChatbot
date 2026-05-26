@@ -253,15 +253,48 @@ Risky prompts:
 
 When editing prompt strings embedded in code:
 
-- Check whether the prompt is later processed by `.format(...)`, f-strings, templates, or JSON serialization.
+- Define prompt constants with triple-single-quoted strings: `'''...'''`.
+  Do not use triple-double-quoted strings, f-string prompt literals, f-string
+  `SystemMessage` content, or `.replace(...)` prompt rendering.
+- Render prompt templates only with `.format(...)` and named placeholders.
+  `.format(...)` composition is allowed only for process-stable contract values;
+  per-run facts still belong in the `HumanMessage`.
 - Escape literal braces in `.format(...)` templates, or avoid inserting inline JSON examples there.
 - Run a runtime prompt-render check, not only a syntax check. `py_compile` will not catch broken `.format(...)` placeholders.
 - Keep examples as semantic boundary anchors. Add an example only when it fixes
   a reusable routing boundary or recurring confusion; do not add examples to
   make one fixture pass.
-- Always state `# Input Format` and `# Output Format` for structured prompt stages. The examples must match the exact payload built by the handler and the exact parsed output expected by validators. If you cannot write those sections precisely, the prompt contract is not ready.
-- For local LLMs, also include explicit generation guidance such as `# Generation Procedure` or `# Thinking Steps` before the format sections. The guidance should tell the model how to inspect the input and choose the output fields; do not rely on the schema alone to imply the procedure.
-- Keep prompt vocabulary grounded in the prompt's visible inputs and role. Do not introduce foreign terms, acronyms, internal architecture names, storage jargon, or source labels that are not explicitly present in the input format or defined in the prompt itself. If the handler payload contains `rag_result.memory_evidence`, say that exact field name or explain it semantically as "retrieved memory evidence"; do not say "RAG evidence" unless the input format exposes and defines "RAG" as a concept the model should reason about. The same rule applies to terms such as "canonical", "planner", "router", or hidden node names: use them only when they are part of the model-facing contract, otherwise translate them into the evidence or decision source the model can actually see.
+- For KV-cache-optimized local prompts, keep the `SystemMessage` static for the
+  Python session. Static `.format(...)` composition is acceptable only for process-stable
+  contract text. Put time, mood, user names, relationship state, retrieved
+  evidence, tool results, and other per-run facts in the `HumanMessage`.
+- Structured prompt stages must keep an explicit output contract. State
+  `# Output Format` or the local-language equivalent, list JSON field names and
+  types, and make the prompt body explain how each returned field is generated.
+- `# Input Format` is optional after a prompt family has been approved for
+  KV-cache input-format omission. When it is omitted, the remaining prompt body
+  must explain each top-level human-payload field and decision-critical nested
+  field where the prompt uses it. Do not treat the absence of `# Input Format`
+  as a gap by itself.
+- Include prompt-specific generation guidance before the output contract. The
+  heading does not need to be exactly `# Generation Procedure` or
+  `# Thinking Steps`; local headings such as `# 审计步骤` or `# 生成步骤` are fine
+  when they tell the model how to inspect the input and choose output fields.
+- Keep prompt vocabulary grounded in the prompt's visible inputs and role. Do
+  not introduce foreign terms, acronyms, internal architecture names, storage
+  jargon, or source labels unless they are present in the model-facing input or
+  defined in the prompt body. If the handler payload contains
+  `rag_result.memory_evidence`, say that exact field name or explain it
+  semantically as "retrieved memory evidence"; do not say "RAG evidence" unless
+  the prompt exposes and defines "RAG" as a concept the model should reason
+  about. The same rule applies to terms such as "canonical", "planner",
+  "router", or hidden node names: use them only when they are part of the
+  model-facing contract, otherwise translate them into the evidence or decision
+  source the model can actually see.
+- Use one language for ordinary instructions. For free-form return fields that
+  downstream stages read, state the expected output language; keep JSON keys,
+  enum values, action names, code, commands, URLs, model labels, and quoted
+  source text exact.
 - Do not hard-code a character's concrete name in reusable prompt contracts. First decide whether the stage truly needs a name:
   - If the stage only needs role ownership, use role-neutral wording such as "the active character", "the character", or "the speaker". This is preferred for memory schemas, subjective appraisals, internal reasoning fields, RAG summaries, and any stage that might affect voice.
   - If the stage must distinguish the character from the user or resolve identity, inject the runtime value via a formatted variable such as `{character_name}`, following the local pattern used by cognition prompts. Never assume the character is always called by a name seen in logs or examples.

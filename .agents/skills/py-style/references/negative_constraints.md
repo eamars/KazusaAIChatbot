@@ -217,16 +217,22 @@ except TimeoutError as exc:
 Do not use legacy `%` formatting, and do not rely on logging's comma-argument
 `%s` substitution style. Use f-strings instead.
 
+Exception: do not use f-strings for LLM prompt constants or prompt rendering.
+Prompt constants must be triple-single-quoted strings (`'''...'''`), and prompt
+composition must use `.format(...)` with named placeholders only.
+
 **Forbidden:**
 ```python
 logger.info("User %s affinity changed to %d", user_id, affinity)
 message = "User %s" % user_id
+prompt = f"""Role: {character_name}"""
 ```
 
 **Correct:**
 ```python
 logger.info(f"User {user_id} affinity changed to {affinity}")
 message = f"User {user_id}"
+prompt = PROMPT_TEMPLATE.format(character_name=character_name)
 ```
 
 ---
@@ -510,7 +516,9 @@ directly.
 
 This applies to prompt templates, message templates, query templates, and other
 strings whose placeholder values are supplied after the template is defined.
-Immediate interpolation should still use f-strings under `P-008`.
+Immediate interpolation should still use f-strings under `P-008`, except for
+LLM prompt strings. Prompt constants must use `'''...'''`, and prompt rendering
+must use `.format(...)` only.
 
 **Forbidden:**
 ```python
@@ -532,7 +540,8 @@ rendered_prompt = PROMPT_TEMPLATE.format(
 When reviewing, flag `.replace(...)` calls that are being used to fill
 placeholder tokens in a template. `.replace(...)` remains acceptable for
 ordinary text normalization where the code is replacing literal content rather
-than rendering a template.
+than rendering a template. For LLM prompts, also flag f-string prompt literals
+and triple-double-quoted prompt constants.
 
 ---
 
