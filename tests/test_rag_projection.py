@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import json
+import logging
+
 from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition_l2 import (
     _cognition_rag_result as _l2_cognition_rag_result,
 )
@@ -460,6 +463,226 @@ def test_project_known_facts_maps_top_level_capability_payloads() -> None:
     ]
     assert result["character_image"] == character_profile
     assert result["third_party_profiles"] == ["Third party summary"]
+
+
+def test_project_known_facts_preserves_external_url_query_marker() -> None:
+    result = project_known_facts(
+        [
+            {
+                "slot": "live",
+                "agent": "live_context_agent",
+                "resolved": True,
+                "summary": "live summary",
+                "raw_result": {
+                    "projection_payload": {
+                        "external_text": "External source was read.",
+                        "url": (
+                            "https://example.test/redirect?"
+                            "url=https%3A%2F%2Ftarget.example%2Fpage"
+                        ),
+                    }
+                },
+            }
+        ],
+        current_user_id="user-1",
+        character_user_id="character-1",
+    )
+
+    assert result["external_evidence"][0]["url"] == (
+        "https://example.test/redirect?"
+        "url=https%3A%2F%2Ftarget.example%2Fpage"
+    )
+
+
+def test_project_known_facts_preserves_external_url_uuid_path() -> None:
+    result = project_known_facts(
+        [
+            {
+                "slot": "live",
+                "agent": "live_context_agent",
+                "resolved": True,
+                "summary": "live summary",
+                "raw_result": {
+                    "projection_payload": {
+                        "external_text": "External source was read.",
+                        "url": (
+                            "https://example.test/resource/"
+                            "123e4567-e89b-12d3-a456-426614174000"
+                        ),
+                    }
+                },
+            }
+        ],
+        current_user_id="user-1",
+        character_user_id="character-1",
+    )
+
+    assert result["external_evidence"][0]["url"] == (
+        "https://example.test/resource/"
+        "123e4567-e89b-12d3-a456-426614174000"
+    )
+
+
+def test_project_known_facts_keeps_external_content_with_valid_url_query() -> None:
+    result = project_known_facts(
+        [
+            {
+                "slot": "web",
+                "agent": "web_search_agent2",
+                "resolved": True,
+                "summary": "web summary",
+                "raw_result": (
+                    "Source says target value is 42 at "
+                    "https://example.test/redirect?"
+                    "url=https%3A%2F%2Ftarget.example%2Fpage"
+                ),
+            }
+        ],
+        current_user_id="user-1",
+        character_user_id="character-1",
+    )
+
+    assert "target value is 42" in result["external_evidence"][0]["content"]
+    assert result["external_evidence"][0]["url"] == (
+        "https://example.test/redirect?"
+        "url=https%3A%2F%2Ftarget.example%2Fpage"
+    )
+
+
+def test_project_known_facts_blanks_malformed_external_url() -> None:
+    result = project_known_facts(
+        [
+            {
+                "slot": "live",
+                "agent": "live_context_agent",
+                "resolved": True,
+                "summary": "live summary",
+                "raw_result": {
+                    "projection_payload": {
+                        "external_text": "External source was read.",
+                        "url": "http://[broken",
+                    }
+                },
+            }
+        ],
+        current_user_id="user-1",
+        character_user_id="character-1",
+    )
+
+    assert result["external_evidence"][0]["url"] == ""
+    assert result["supervisor_trace"]["safety_recovery"]
+
+
+def test_project_known_facts_drops_unsafe_cq_answer(caplog) -> None:
+    caplog.set_level(
+        logging.WARNING,
+        logger="kazusa_ai_chatbot.nodes.persona_supervisor2_rag_projection",
+    )
+
+    result = project_known_facts(
+        [],
+        current_user_id="user-1",
+        character_user_id="character-1",
+        answer="[CQ:image,file=abc]",
+    )
+
+    assert result["answer"] == ""
+    assert result["supervisor_trace"]["safety_recovery"]
+    json.dumps(result, ensure_ascii=False)
+    assert "[CQ:" not in caplog.text
+
+
+def test_project_known_facts_records_recoverable_answer_sanitization() -> None:
+    result = project_known_facts(
+        [],
+        current_user_id="user-1",
+        character_user_id="character-1",
+        answer=(
+            "global_user_id: "
+            "123e4567-e89b-12d3-a456-426614174000 says tea"
+        ),
+    )
+
+    assert "says tea" in result["answer"]
+    assert result["supervisor_trace"]["safety_recovery"]
+
+
+def test_project_known_facts_drops_unsafe_memory_line() -> None:
+    result = project_known_facts(
+        [
+            {
+                "slot": "memory",
+                "agent": "memory_evidence_agent",
+                "resolved": True,
+                "summary": "memory summary",
+                "raw_result": {
+                    "projection_payload": {
+                        "memory_rows": [
+                            {"content": "[CQ:image,file=abc]"},
+                            {"content": "User prefers tea."},
+                        ],
+                    }
+                },
+            }
+        ],
+        current_user_id="user-1",
+        character_user_id="character-1",
+    )
+
+    rendered = repr(result["memory_evidence"])
+
+    assert "User prefers tea." in rendered
+    assert "[CQ:" not in rendered
+    assert result["supervisor_trace"]["safety_recovery"]
+
+
+def test_project_known_facts_drops_unrecoverable_external_evidence() -> None:
+    result = project_known_facts(
+        [
+            {
+                "slot": "web",
+                "agent": "web_search_agent2",
+                "resolved": True,
+                "summary": "[CQ:bad]",
+                "raw_result": "[CQ:image,file=abc]",
+            }
+        ],
+        current_user_id="user-1",
+        character_user_id="character-1",
+    )
+
+    assert result["external_evidence"] == []
+    assert result["supervisor_trace"]["safety_recovery"]
+
+
+def test_cognition_rag_result_omits_safety_recovery_trace() -> None:
+    rag_result = {
+        "answer": "safe answer",
+        "memory_evidence": [],
+        "recall_evidence": [],
+        "conversation_evidence": [],
+        "external_evidence": [],
+        "supervisor_trace": {
+            "loop_count": 1,
+            "unknown_slots": [],
+            "dispatched": [],
+            "safety_recovery": ["dropped_text:rag_result.answer"],
+        },
+    }
+
+    l2_payload = _l2_cognition_rag_result(rag_result)
+    l3_payload = _l3_cognition_rag_result(rag_result)
+
+    assert l2_payload["supervisor_trace"] == {
+        "loop_count": 1,
+        "unknown_slots": [],
+        "dispatched": [],
+    }
+    assert l3_payload["supervisor_trace"] == {
+        "loop_count": 1,
+        "unknown_slots": [],
+        "dispatched": [],
+    }
 
 
 def test_project_known_facts_sanitizes_third_party_profile_source_ids() -> None:

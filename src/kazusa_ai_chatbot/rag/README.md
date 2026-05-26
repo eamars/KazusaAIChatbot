@@ -73,6 +73,66 @@ timestamps. Source ids and raw refs stay in `supervisor_trace` or helper
 payloads for debugging, not in the primary evidence text consumed by
 cognition.
 
+## Prompt-Facing Safety Sanitization Policy
+
+RAG safety checks protect the cognition prompt from raw storage, adapter, and
+binary material. They must not make the live chat graph fragile. The
+operational rule is:
+
+```text
+Unsafe prompt-facing RAG evidence degrades RAG evidence; it must not crash the
+turn.
+```
+
+The projection boundary owns this policy. `project_known_facts(...)` converts
+supervisor `known_facts` into `rag_result`, then applies prompt-facing
+sanitization before cognition receives the payload. The safety policy covers
+the public evidence fields:
+
+- `answer`
+- `third_party_profiles`
+- `memory_evidence`
+- `recall_evidence`
+- `conversation_evidence`
+- `external_evidence`
+
+`supervisor_trace` is not public evidence. It may contain compact provenance,
+dispatch metadata, continuation metadata, and capped recovery incident labels
+for debugging. Cognition prompt projections strip recovery incident labels from
+`supervisor_trace` so local LLM stages do not receive sanitization internals as
+semantic evidence.
+
+Sanitization follows a recover-first order:
+
+1. Preserve safe evidence unchanged. `external_evidence[*].url` is validated as
+   a URL field, not scanned as prose; valid `http` and `https` URLs may contain
+   ordinary query parameters such as `url=` and UUID-like path segments.
+2. Strip or rewrite recoverable source markers from prose using the shared
+   public RAG evidence sanitizer. Trace-only provenance markers such as
+   `evidence_time=` are handled by this shared boundary, not by
+   source-specific projection exceptions.
+3. Drop raw adapter wire lines such as CQ message syntax. CQ material should be
+   stopped by adapters before RAG; if it reaches RAG evidence, it is ignored
+   rather than shown to cognition.
+4. Drop only the unsafe line when a multi-line evidence block contains both
+   usable evidence and raw unsafe material.
+5. Blank optional malformed external URL fields when the surrounding external
+   evidence text is still usable.
+6. Drop an evidence item when every useful public field in that item is unsafe
+   or empty after recovery.
+7. Empty the public RAG evidence fields if residual unsafe material remains
+   after recovery.
+
+All recovery incidents are operational signals, not user-facing facts. The
+projection layer logs a warning and records capped labels under
+`rag_result.supervisor_trace.safety_recovery`. Repeated incidents indicate an
+upstream projection or helper-agent contract bug that should be fixed, but the
+current user turn should continue with partial or empty RAG evidence.
+
+This policy applies only at the prompt-facing evidence boundary. Raw helper
+payloads may still keep source ids, refs, and worker material for trace/debug
+use while they remain outside cognition-visible evidence fields.
+
 ## Cognitive Episode Adapter
 
 `cognitive_episode_adapter.py` owns the text-chat projection from

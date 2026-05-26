@@ -66,6 +66,52 @@ def test_public_rag_result_evidence_allows_trace_ids_only() -> None:
     ensure_public_rag_evidence_prompt_safe(_safe_rag_result())
 
 
+def test_public_rag_result_evidence_allows_external_url_query_marker() -> None:
+    rag_result = _safe_rag_result()
+    rag_result["external_evidence"] = [
+        {
+            "summary": '结论：External context was available.',
+            "content": '上下文：\n- External source was read.\n不确定性：无',
+            "url": (
+                "https://example.test/redirect?"
+                "url=https%3A%2F%2Ftarget.example%2Fpage"
+            ),
+        }
+    ]
+
+    ensure_public_rag_evidence_prompt_safe(rag_result)
+
+
+def test_public_rag_result_evidence_allows_external_url_uuid_path() -> None:
+    rag_result = _safe_rag_result()
+    rag_result["external_evidence"] = [
+        {
+            "summary": '结论：External context was available.',
+            "content": '上下文：\n- External source was read.\n不确定性：无',
+            "url": (
+                "https://example.test/resource/"
+                "123e4567-e89b-12d3-a456-426614174000"
+            ),
+        }
+    ]
+
+    ensure_public_rag_evidence_prompt_safe(rag_result)
+
+
+def test_public_rag_result_evidence_rejects_malformed_external_url() -> None:
+    rag_result = _safe_rag_result()
+    rag_result["external_evidence"] = [
+        {
+            "summary": '结论：External context was available.',
+            "content": '上下文：\n- External source was read.\n不确定性：无',
+            "url": "http://[broken",
+        }
+    ]
+
+    with pytest.raises(ValueError, match=r"external_evidence\[0\]\.url"):
+        ensure_public_rag_evidence_prompt_safe(rag_result)
+
+
 def test_public_rag_result_evidence_rejects_raw_cq_wire_text_urls_ids_and_embeddings() -> None:
     rag_result = _safe_rag_result()
     rag_result["memory_evidence"] = [

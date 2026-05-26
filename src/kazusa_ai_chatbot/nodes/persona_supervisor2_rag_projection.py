@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
+import logging
 import re
 from typing import Any
 
 from kazusa_ai_chatbot.config import RAG_SEARCH_SELECTED_SUMMARY_LIMIT
 from kazusa_ai_chatbot.rag.evidence_formatting import (
-    ensure_public_rag_evidence_prompt_safe,
     format_evidence_block,
+    recover_public_rag_evidence_prompt_safe,
     sanitize_public_rag_evidence_text,
 )
 from kazusa_ai_chatbot.rag.user_memory_unit_retrieval import empty_user_memory_context
@@ -19,10 +20,9 @@ _URL_RE = re.compile(r"https?://\S+")
 _SLOT_REF_RE = re.compile(r"slot\s+(\d+)", flags=re.IGNORECASE)
 _MAX_RECALL_EVIDENCE = 3
 _MAX_CONVERSATION_EVIDENCE_ITEMS = RAG_SEARCH_SELECTED_SUMMARY_LIMIT
-_TRACE_ONLY_RECALL_FRESHNESS_MARKERS = (
-    "evidence_time=",
-    "selected ",
-)
+_MAX_SAFETY_RECOVERY_INCIDENTS = 20
+
+logger = logging.getLogger(__name__)
 
 
 def _clip_text(text: str, *, limit: int) -> str:
@@ -406,22 +406,6 @@ def _public_string_list(value: object) -> list[str] | None:
     return string_items
 
 
-def _public_recall_freshness_basis(value: object) -> str:
-    """Return prompt-facing Recall freshness text, or empty for trace metadata."""
-
-    raw_text = text_or_empty(value)
-    if not raw_text:
-        return ""
-
-    raw_lower = raw_text.lower()
-    for marker in _TRACE_ONLY_RECALL_FRESHNESS_MARKERS:
-        if marker in raw_lower:
-            return ""
-
-    public_text = sanitize_public_rag_evidence_text(raw_text)
-    return public_text
-
-
 def _recall_evidence_entry(
     recall_payload: dict[str, Any],
     *,
@@ -437,16 +421,10 @@ def _recall_evidence_entry(
         "selected_summary": _conclusion_line(selected_summary),
     }
 
-    for field in ("recall_type", "primary_source"):
+    for field in ("recall_type", "primary_source", "freshness_basis"):
         value = text_or_empty(recall_payload.get(field))
         if value:
             entry[field] = value
-
-    freshness_basis = _public_recall_freshness_basis(
-        recall_payload.get("freshness_basis")
-    )
-    if freshness_basis:
-        entry["freshness_basis"] = freshness_basis
 
     for field in ("supporting_sources", "conflicts"):
         value = _public_string_list(recall_payload.get(field))
@@ -570,7 +548,7 @@ def project_known_facts(
         ``rag_result`` dict consumed by cognition and consolidation stages.
     """
     rag_result: dict[str, Any] = {
-        "answer": sanitize_public_rag_evidence_text(answer),
+        "answer": text_or_empty(answer),
         "user_image": {"user_memory_context": empty_user_memory_context()},
         "user_memory_unit_candidates": [],
         "character_image": {},
@@ -874,5 +852,15 @@ def project_known_facts(
     rag_result["conversation_evidence"] = conversation_evidence
     rag_result["external_evidence"] = external_evidence
     rag_result["supervisor_trace"]["dispatched"] = dispatched
-    ensure_public_rag_evidence_prompt_safe(rag_result)
+    rag_result, safety_incidents = recover_public_rag_evidence_prompt_safe(
+        rag_result,
+    )
+    if safety_incidents:
+        incident_preview = safety_incidents[:_MAX_SAFETY_RECOVERY_INCIDENTS]
+        rag_result["supervisor_trace"]["safety_recovery"] = incident_preview
+        logger.warning(
+            f"RAG public evidence safety recovery applied: "
+            f"incident_count={len(safety_incidents)} "
+            f"first_incident={safety_incidents[0]}"
+        )
     return rag_result

@@ -327,6 +327,53 @@ async def test_stage_1_success_records_counts_without_evidence(monkeypatch) -> N
 
 
 @pytest.mark.asyncio
+async def test_stage_1_success_records_safety_recovery_count(monkeypatch) -> None:
+    """RAG telemetry should expose recovery counts without unsafe content."""
+
+    record_rag_stage_event = AsyncMock()
+    monkeypatch.setattr(
+        supervisor_module.event_logging,
+        "record_rag_stage_event",
+        record_rag_stage_event,
+    )
+
+    async def call_rag_supervisor(
+        *,
+        fresh_query: str,
+        reply_context: dict,
+        character_name: str,
+        context: dict,
+    ) -> dict[str, object]:
+        """Return an unsafe answer that should be dropped at projection."""
+
+        del fresh_query, reply_context, character_name, context
+        result = {
+            "answer": "[CQ:image,file=abc]",
+            "known_facts": [],
+            "unknown_slots": [],
+            "loop_count": 1,
+        }
+        return result
+
+    monkeypatch.setattr(
+        supervisor_module,
+        "call_quote_aware_rag_supervisor",
+        call_rag_supervisor,
+    )
+
+    state = _stage_1_state(referents=[])
+
+    result = await supervisor_module.stage_1_research(state)
+
+    assert result["rag_result"]["answer"] == ""
+    record_rag_stage_event.assert_awaited_once()
+    kwargs = record_rag_stage_event.await_args.kwargs
+    assert kwargs["safety_recovery_count"] > 0
+    assert kwargs["safety_recovery_first"] == "dropped_text_line:rag_result.answer"
+    assert "[CQ:" not in _serialized(kwargs)
+
+
+@pytest.mark.asyncio
 async def test_rag_dispatcher_records_llm_metadata_without_slot_text(monkeypatch) -> None:
     """RAG dispatcher telemetry should store counts and status, not slot text."""
 

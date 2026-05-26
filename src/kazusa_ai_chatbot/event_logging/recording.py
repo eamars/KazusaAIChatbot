@@ -474,6 +474,8 @@ async def record_rag_stage_event(
     cache_hit: bool,
     no_evidence: bool,
     latency_ms: int,
+    safety_recovery_count: int = 0,
+    safety_recovery_first: str = "",
     run_id: str = "",
     severity: EventSeverity = "info",
     occurred_at: datetime | None = None,
@@ -487,6 +489,11 @@ async def record_rag_stage_event(
         "cache_hit": cache_hit,
         "no_evidence": no_evidence,
         "latency_ms": latency_ms,
+        "safety_recovery_count": max(0, safety_recovery_count),
+        "safety_recovery_first": sanitize_short_text(
+            safety_recovery_first,
+            limit=160,
+        ),
     }
     result = await _record_event(
         event_family="rag_stage",

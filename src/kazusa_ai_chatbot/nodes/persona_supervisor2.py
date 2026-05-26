@@ -78,6 +78,25 @@ def _rag_correlation_id(state: GlobalPersonaState) -> str:
     return correlation_id
 
 
+def _safety_recovery_incidents(rag_result: dict) -> list[str]:
+    """Return compact RAG safety recovery labels from trace metadata."""
+
+    supervisor_trace = rag_result.get("supervisor_trace")
+    if not isinstance(supervisor_trace, dict):
+        incidents: list[str] = []
+        return incidents
+    raw_incidents = supervisor_trace.get("safety_recovery")
+    if not isinstance(raw_incidents, list):
+        incidents = []
+        return incidents
+    incidents = [
+        str(incident)
+        for incident in raw_incidents
+        if incident
+    ]
+    return incidents
+
+
 def _cognition_selects_text_surface(state: GlobalPersonaState) -> bool:
     """Return whether L2d selected the text surface handler."""
 
@@ -332,6 +351,12 @@ async def stage_1_research(state: GlobalPersonaState) -> dict:
         + len(rag_result["external_evidence"])
         + len(rag_result["third_party_profiles"])
     )
+    safety_recovery_incidents = _safety_recovery_incidents(rag_result)
+    safety_recovery_first = (
+        safety_recovery_incidents[0]
+        if safety_recovery_incidents
+        else ""
+    )
     await event_logging.record_rag_stage_event(
         component=PERSONA_RAG_COMPONENT,
         correlation_id=correlation_id,
@@ -342,6 +367,8 @@ async def stage_1_research(state: GlobalPersonaState) -> dict:
         cache_hit=False,
         no_evidence=retrieval_count == 0,
         latency_ms=_elapsed_ms(started_at),
+        safety_recovery_count=len(safety_recovery_incidents),
+        safety_recovery_first=safety_recovery_first,
     )
     return_value = {
         "rag_result": rag_result,

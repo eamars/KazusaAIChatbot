@@ -91,6 +91,11 @@ def _cognition_rag_result(rag_result: object) -> dict[str, Any]:
         return return_value
     public_result = dict(rag_result)
     public_result.pop("user_memory_unit_candidates", None)
+    supervisor_trace = public_result.get("supervisor_trace")
+    if isinstance(supervisor_trace, dict):
+        prompt_trace = dict(supervisor_trace)
+        prompt_trace.pop("safety_recovery", None)
+        public_result["supervisor_trace"] = prompt_trace
     projected_result = project_tool_result_for_llm(public_result)
     if not isinstance(projected_result, dict):
         return {}

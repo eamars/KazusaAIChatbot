@@ -5,6 +5,7 @@ from __future__ import annotations
 import re
 from collections.abc import Mapping
 from typing import Any
+from urllib.parse import urlsplit
 
 from kazusa_ai_chatbot.time_boundary import format_storage_utc_for_llm
 from kazusa_ai_chatbot.utils import text_or_empty
@@ -41,12 +42,17 @@ _FORBIDDEN_TEXT_MARKERS = (
     "raw_wire_text",
     "base64_data",
     "conversation_row_id",
+    "evidence_time=",
     "global_user_id",
     "platform_message_id",
     "source_global_user_id",
     ";base64,",
     "data:image/",
 )
+_MAX_PUBLIC_EXTERNAL_URL_CHARS = 2048
+_CONTROL_TEXT_RE = re.compile(r"[\x00-\x1f\x7f]")
+_DROP_PUBLIC_VALUE = object()
+_HTTP_URL_RE = re.compile(r"https?://\S+", flags=re.IGNORECASE)
 _UUID_RE = re.compile(rf"\b{_UUID_PATTERN}\b", flags=re.IGNORECASE)
 _GLOBAL_USER_ID_TEXT_RE = re.compile(
     r"\s*\(?\bglobal_user_id\s*(?::|=)?\s*"
@@ -244,6 +250,29 @@ def ensure_public_rag_evidence_prompt_safe(rag_result: Mapping[str, Any]) -> Non
             scanned because it is trace-only material.
     """
 
+    violations = public_rag_evidence_prompt_safety_violations(rag_result)
+
+    if violations:
+        first_violation = violations[0]
+        raise ValueError(
+            "prompt-facing RAG evidence contains unsafe material at "
+            f"{first_violation}"
+        )
+
+
+def public_rag_evidence_prompt_safety_violations(
+    rag_result: Mapping[str, Any],
+) -> list[str]:
+    """Return unsafe public evidence paths without raising.
+
+    Args:
+        rag_result: Projected RAG result or evidence-like mapping.
+
+    Returns:
+        Prompt-facing evidence paths that still contain raw storage, adapter,
+        binary, or malformed external URL material.
+    """
+
     violations: list[str] = []
     for key in _PUBLIC_RAG_EVIDENCE_KEYS:
         if key not in rag_result:
@@ -254,13 +283,227 @@ def ensure_public_rag_evidence_prompt_safe(rag_result: Mapping[str, Any]) -> Non
             path=path,
             violations=violations,
         )
+    return violations
 
-    if violations:
-        first_violation = violations[0]
-        raise ValueError(
-            "prompt-facing RAG evidence contains unsafe material at "
-            f"{first_violation}"
+
+def recover_public_rag_evidence_prompt_safe(
+    rag_result: Mapping[str, Any],
+) -> tuple[dict[str, Any], list[str]]:
+    """Recover prompt-facing RAG evidence without raising on unsafe leaves.
+
+    Args:
+        rag_result: Projected RAG result or evidence-like mapping.
+
+    Returns:
+        A recovered RAG result and compact incident paths. Recoverable unsafe
+        prose is stripped or dropped, malformed optional URLs are blanked, and
+        unrecoverable public evidence falls back to empty public RAG fields.
+    """
+
+    recovered = dict(rag_result)
+    incidents: list[str] = []
+    for key in _PUBLIC_RAG_EVIDENCE_KEYS:
+        if key not in rag_result:
+            continue
+        path = f"rag_result.{key}"
+        recovered_value = _recover_prompt_safe_value(
+            rag_result[key],
+            path=path,
+            incidents=incidents,
         )
+        if recovered_value is _DROP_PUBLIC_VALUE:
+            recovered[key] = _empty_public_rag_evidence_value(key)
+            continue
+        recovered[key] = recovered_value
+
+    remaining_violations = public_rag_evidence_prompt_safety_violations(
+        recovered,
+    )
+    if remaining_violations:
+        incidents.extend(
+            f"emptied_unrecoverable:{path}"
+            for path in remaining_violations
+        )
+        for key in _PUBLIC_RAG_EVIDENCE_KEYS:
+            if key in recovered:
+                recovered[key] = _empty_public_rag_evidence_value(key)
+
+    return_value = (recovered, incidents)
+    return return_value
+
+
+def _empty_public_rag_evidence_value(key: str) -> str | list[Any]:
+    """Return the empty value for one public RAG evidence field."""
+
+    if key == "answer":
+        return_value: str | list[Any] = ""
+        return return_value
+    return_value = []
+    return return_value
+
+
+def _recover_prompt_safe_value(
+    value: object,
+    *,
+    path: str,
+    incidents: list[str],
+) -> object:
+    """Return a best-effort prompt-safe value for one public evidence leaf."""
+
+    if isinstance(value, Mapping):
+        recovered_mapping: dict[str, Any] = {}
+        for key, item in value.items():
+            key_text = str(key)
+            item_path = f"{path}.{key_text}"
+            if key_text in _FORBIDDEN_PUBLIC_KEYS:
+                incidents.append(f"dropped_key:{item_path}")
+                continue
+            if key_text == "url":
+                if _is_external_evidence_url_path(item_path):
+                    recovered_url = _recover_external_evidence_url(
+                        item,
+                        path=item_path,
+                        incidents=incidents,
+                    )
+                    recovered_mapping[key_text] = recovered_url
+                    continue
+                incidents.append(f"dropped_url_key:{item_path}")
+                continue
+            recovered_item = _recover_prompt_safe_value(
+                item,
+                path=item_path,
+                incidents=incidents,
+            )
+            if recovered_item is not _DROP_PUBLIC_VALUE:
+                recovered_mapping[key_text] = recovered_item
+        return recovered_mapping
+
+    if isinstance(value, list):
+        recovered_items = []
+        for index, item in enumerate(value):
+            item_path = f"{path}[{index}]"
+            recovered_item = _recover_prompt_safe_value(
+                item,
+                path=item_path,
+                incidents=incidents,
+            )
+            if _recovered_value_has_content(recovered_item):
+                recovered_items.append(recovered_item)
+        return recovered_items
+
+    if isinstance(value, tuple):
+        recovered_items = []
+        for index, item in enumerate(value):
+            item_path = f"{path}[{index}]"
+            recovered_item = _recover_prompt_safe_value(
+                item,
+                path=item_path,
+                incidents=incidents,
+            )
+            if _recovered_value_has_content(recovered_item):
+                recovered_items.append(recovered_item)
+        return recovered_items
+
+    if isinstance(value, str):
+        recovered_text = _recover_prompt_safe_text(
+            value,
+            path=path,
+            incidents=incidents,
+        )
+        return recovered_text
+
+    return value
+
+
+def _recovered_value_has_content(value: object) -> bool:
+    """Return whether a recovered evidence value should remain public."""
+
+    if value is _DROP_PUBLIC_VALUE:
+        return False
+    if isinstance(value, str):
+        return bool(value)
+    if isinstance(value, Mapping):
+        return any(
+            _recovered_value_has_content(item)
+            for item in value.values()
+        )
+    if isinstance(value, list):
+        return any(
+            _recovered_value_has_content(item)
+            for item in value
+        )
+    return True
+
+
+def _recover_external_evidence_url(
+    value: object,
+    *,
+    path: str,
+    incidents: list[str],
+) -> str:
+    """Return a validated public external URL, or blank it when malformed."""
+
+    url = text_or_empty(value).strip()
+    if not url:
+        return ""
+    if _external_evidence_url_violation(url):
+        incidents.append(f"blanked_url:{path}")
+        return ""
+    return url
+
+
+def _recover_prompt_safe_text(
+    value: str,
+    *,
+    path: str,
+    incidents: list[str],
+) -> object:
+    """Sanitize prompt-facing prose and drop unsafe residual lines."""
+
+    violations: list[str] = []
+    _collect_text_violations(value, path=path, violations=violations)
+    if not violations:
+        return value
+
+    text = sanitize_public_rag_evidence_text(value)
+    sanitized_violations: list[str] = []
+    _collect_text_violations(
+        text,
+        path=path,
+        violations=sanitized_violations,
+    )
+    if not sanitized_violations:
+        if text != value:
+            incidents.append(f"sanitized_text:{path}")
+        return text
+
+    recovered_lines = []
+    for line in text.splitlines():
+        line_violations: list[str] = []
+        _collect_text_violations(
+            line,
+            path=path,
+            violations=line_violations,
+        )
+        if line_violations:
+            incidents.append(f"dropped_text_line:{path}")
+            continue
+        recovered_lines.append(line)
+    recovered_text = "\n".join(recovered_lines).strip()
+
+    remaining_violations: list[str] = []
+    _collect_text_violations(
+        recovered_text,
+        path=path,
+        violations=remaining_violations,
+    )
+    if remaining_violations:
+        incidents.append(f"dropped_text:{path}")
+        return _DROP_PUBLIC_VALUE
+    if not recovered_text:
+        incidents.append(f"dropped_text:{path}")
+        return _DROP_PUBLIC_VALUE
+    return recovered_text
 
 
 def _collect_prompt_safety_violations(
@@ -307,6 +550,10 @@ def _collect_prompt_safety_violations(
         return
 
     if isinstance(value, str):
+        if _is_external_evidence_url_path(path):
+            if _external_evidence_url_violation(value):
+                violations.append(path)
+            return
         _collect_text_violations(value, path=path, violations=violations)
 
 
@@ -323,7 +570,9 @@ def _collect_text_violations(
             violations.append(path)
             return
 
-    if _RAW_URL_ASSIGNMENT_RE.search(value):
+    value_without_public_urls = _remove_valid_public_urls(value)
+
+    if _RAW_URL_ASSIGNMENT_RE.search(value_without_public_urls):
         violations.append(path)
         return
 
@@ -335,8 +584,26 @@ def _collect_text_violations(
         violations.append(path)
         return
 
-    if _UUID_RE.search(value) and not _is_allowed_public_uuid_path(path):
+    if (
+        _UUID_RE.search(value_without_public_urls)
+        and not _is_allowed_public_uuid_path(path)
+    ):
         violations.append(path)
+
+
+def _remove_valid_public_urls(value: str) -> str:
+    """Remove valid public URLs before scanning prose-only unsafe markers."""
+
+    def replace_match(match: re.Match[str]) -> str:
+        candidate = match.group(0)
+        url = candidate.rstrip(".,;:!?)]}")
+        suffix = candidate[len(url):]
+        if url and not _external_evidence_url_violation(url):
+            return suffix
+        return candidate
+
+    cleaned_text = _HTTP_URL_RE.sub(replace_match, value)
+    return cleaned_text
 
 
 def _is_external_evidence_url_path(path: str) -> bool:
@@ -347,6 +614,33 @@ def _is_external_evidence_url_path(path: str) -> bool:
         and path.endswith(".url")
     )
     return is_allowed
+
+
+def _external_evidence_url_violation(value: str) -> bool:
+    """Return whether a public external URL field is malformed."""
+
+    url = text_or_empty(value).strip()
+    if not url:
+        return False
+    if len(url) > _MAX_PUBLIC_EXTERNAL_URL_CHARS:
+        return True
+    if _CONTROL_TEXT_RE.search(url):
+        return True
+    if any(character.isspace() for character in url):
+        return True
+    for marker in _FORBIDDEN_TEXT_MARKERS:
+        if marker in url:
+            return True
+
+    try:
+        parsed = urlsplit(url)
+    except ValueError:
+        return True
+    if parsed.scheme not in {"http", "https"}:
+        return True
+    if not parsed.netloc:
+        return True
+    return False
 
 
 def _is_allowed_public_uuid_path(path: str) -> bool:
