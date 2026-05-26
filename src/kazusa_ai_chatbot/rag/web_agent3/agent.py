@@ -257,6 +257,7 @@ _WEB_AGENT3_EVALUATOR_PROMPT = '''\
 1. 已有正文或来源信息能支持准确证据包。
 2. 多轮尝试没有新增有用信息。
 3. 任务相关信息确认缺失，继续检索收益很低。
+4. 如果同一 URL 已经 read 过且正文为空或没有新增信息，不要重复读取同一 URL；应停止并说明只有搜索摘要线索，或建议不同 search query。
 
 # 审计步骤
 1. 读取 `task` 和 `expected_response`，确认要满足的事实范围。
@@ -332,13 +333,20 @@ _WEB_AGENT3_FINALIZER_PROMPT = '''\
 - 不要代替角色回答：禁止写成直接对用户说话的最终答复。
 - 来源优先：优先保留来源 URL、页面标题、时间或站点名称；若未知则明确写未知。
 - 允许压缩，不允许编造：可以压缩为 3-6 条事实要点，但每条必须来自已有检索内容，禁止补全或猜测。
+- 缺失即缺失：如果 `content` 明确说明任务所需事实缺失、未提及、没有相关信息或无法从来源确认，`response` 应记录这个缺失证据，且 `is_empty_result` 必须为 true。
+- 时效诚实：如果 `task` 要求最新、最近、当前或现在的信息，用 `reference_time` 对照来源时间；来源过旧或无法确认当前状态时，必须明确写出时效限制。
+- 时间边界：不要提及模型知识、训练数据、知识截止或真实世界当前时间；时效判断只能使用 `reference_time`、来源时间和检索内容。
+- 失败诚实：只有观察内容明确包含错误、空内容、工具失败或无数据时，才可以声称读取失败或没有检索数据。
+- 摘要诚实：如果只有搜索摘要、snippet 或搜索结果线索，或者后续正文读取为空，必须标注为搜索摘要级证据，不要写成已读取正文确认。
 - 语言策略：提示面向下游认知，优先使用中文整理证据；URL、标题、来源文本、代码名和专有名词保持原文。
 
 # 生成步骤
-1. 先读取 `task` 与 `expected_response`，确认下游需要什么证据包。
+1. 先读取 `task`、`expected_response` 与 `reference_time`，确认下游需要什么证据包。
 2. 从 `content` 中提取有来源支撑的事实要点，保留 URL、标题、站点或时间。
 3. 结合 `evaluator_feedback` 判断完整度并给出 `score` 与 `reason`。
-4. 只有在确认没有任何相关信息时才设置 `is_empty_result: true`。
+4. 如果已有来源明确说目标事实缺失或未提及，将这个缺失作为证据整理，并设置 `is_empty_result: true`。
+5. 如果任务要求当前性但来源时间过旧或无法确认当前状态，在证据包中明确说明当前性限制。
+6. 只有在已有来源能支持任务所需事实时，才设置 `is_empty_result: false`。
 
 # 输出格式
 请务必返回合法的 JSON 字符串，仅包含以下字段：
@@ -379,6 +387,7 @@ async def _tool_call_finalizer(state: WebAgent3State) -> dict[str, Any]:
     finalizer_input = {
         "task": state["task"],
         "expected_response": state["expected_response"],
+        "reference_time": state["prompt_timestamp"],
         "content": tool_results,
         "evaluator_feedback": state["evaluator_feedback"],
     }
@@ -388,18 +397,16 @@ async def _tool_call_finalizer(state: WebAgent3State) -> dict[str, Any]:
     ])
     result = parse_llm_json_output(response.content)
 
-    score = result.get("score", 0)
-    if score > 80:
-        status = "success"
-    elif score > 50:
-        status = "partial"
+    raw_score = result.get("score", 0)
+    if isinstance(raw_score, int) and not isinstance(raw_score, bool):
+        score = raw_score
     else:
-        status = "not_found"
+        score = 0
 
+    missing_response = "response" not in result
     if "response" not in result:
         result["response"] = "No information retrieved."
         result["score"] = 0
-        status = "error"
         logger.error(f"web_agent3 finalizer omitted response; raw result: {result}")
 
     if "reason" not in result:
@@ -409,6 +416,11 @@ async def _tool_call_finalizer(state: WebAgent3State) -> dict[str, Any]:
     if not isinstance(is_empty_result, bool):
         logger.error(f"web_agent3 finalizer omitted is_empty_result; raw result={result}")
         is_empty_result = False
+
+    if missing_response:
+        status = "error"
+    else:
+        status = _status_from_score(score, is_empty_result)
 
     return_value = {
         "final_response": result.get("response"),

@@ -829,7 +829,7 @@ def project_known_facts(
                 )
             continue
 
-        if agent == "web_search_agent2":
+        if agent == "web_agent3":
             content, url = _extract_external_content(raw_result, evidence_char_limit=evidence_char_limit)
             external_evidence.append({
                 "summary": sanitize_public_rag_evidence_text(summary),

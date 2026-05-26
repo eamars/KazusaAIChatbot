@@ -34,7 +34,7 @@ from kazusa_ai_chatbot.db import (
 from kazusa_ai_chatbot.db._client import get_db
 from kazusa_ai_chatbot.mcp_client import mcp_manager
 from kazusa_ai_chatbot.rag.cache2_runtime import get_rag_cache2_runtime
-from kazusa_ai_chatbot.rag.web_search_agent import _run_subgraph as web_search_agent
+from kazusa_ai_chatbot.rag.web_agent3 import WebAgent3
 from kazusa_ai_chatbot.utils import trim_history_dict
 from tests.llm_trace import write_llm_trace
 
@@ -1177,7 +1177,7 @@ async def test_live_real_case_third_party_impression_uses_resolved_profile_evide
     assert final_dialog
     assert "小钳子" in final_dialog
 
-async def test_live_web_search_agent_returns_live_result(live_env) -> None:
+async def test_live_web_agent3_returns_live_result(live_env) -> None:
     required_tools = {
         "mcp-searxng__searxng_web_search",
         "mcp-searxng__web_url_read",
@@ -1185,12 +1185,11 @@ async def test_live_web_search_agent_returns_live_result(live_env) -> None:
     if not required_tools.issubset(live_env["mcp_tools"]):
         pytest.skip("SearXNG MCP tools are not configured in this environment.")
 
-    result = await web_search_agent(
+    result = await WebAgent3().run(
         task="查找今天奥克兰的天气，并用中文简短说明当前情况，附一个来源链接。",
         context={},
-        expected_response="中文短答，包含 1 个来源链接。",
-        timestamp_utc=datetime.now(timezone.utc).isoformat(),
+        max_attempts=3,
     )
 
-    assert result["status"] in {"success", "partial", "not_found"}
-    assert result["response"]
+    assert isinstance(result["resolved"], bool)
+    assert result["result"]

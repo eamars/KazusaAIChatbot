@@ -111,7 +111,7 @@ async def test_live_context_explicit_location_goes_directly_to_web() -> None:
 
     payload = result["result"]
     assert payload["capability"] == "live_context"
-    assert payload["primary_worker"] == "web_search_agent2"
+    assert payload["primary_worker"] == "web_agent3"
     assert payload["supporting_workers"] == []
     assert payload["projection_payload"] == {
         "external_text": "Auckland is 17 C now. Source: https://weather.example/auckland",
@@ -158,7 +158,7 @@ async def test_live_context_character_location_uses_memory_only_for_target_scope
     assert len(web_worker.calls) == 1
 
     payload = result["result"]
-    assert payload["primary_worker"] == "web_search_agent2"
+    assert payload["primary_worker"] == "web_agent3"
     assert payload["supporting_workers"] == ["persistent_memory_search_agent"]
     assert "target_scope_lookup" in payload["source_policy"]
     assert payload["resolved_refs"][0]["role"] == "character_default"
@@ -1122,7 +1122,7 @@ async def test_live_context_explicit_location_current_time_stays_external() -> N
     )
 
     assert result["resolved"] is True
-    assert result["result"]["primary_worker"] == "web_search_agent2"
+    assert result["result"]["primary_worker"] == "web_agent3"
     assert len(web_worker.calls) == 1
     assert "fact_type=current_time" in web_worker.calls[0]["task"]
     assert memory_worker.calls == []

@@ -1,8 +1,8 @@
 # web_agent3 ICD
 
-`kazusa_ai_chatbot.rag.web_agent3` is the candidate replacement for
-`web_search_agent2`. It keeps the same RAG helper input and output contract
-while adding a small internal source router.
+`kazusa_ai_chatbot.rag.web_agent3` is the active web evidence helper. It keeps
+the standard RAG helper input and output contract while adding a small internal
+source router.
 
 ## Public Contract
 
@@ -12,7 +12,7 @@ from kazusa_ai_chatbot.rag.web_agent3 import WebAgent3
 await WebAgent3().run(task: str, context: dict, max_attempts: int = 3)
 ```
 
-The returned shape matches `web_search_agent2`:
+The returned shape is:
 
 ```python
 {
@@ -40,8 +40,8 @@ or new RAG supervisor fields.
 | `providers.py` | Thin source decision executor used by the graph executor. |
 | `subagent/__init__.py` | Auto-discovery and validation for source subagent modules. |
 | `subagent/generic.py` | Generic search/read subagent backed by the existing SearXNG facility. |
-| `subagent/bilibili.py` | Bilibili placeholder subagent. |
-| `subagent/youtube.py` | YouTube placeholder subagent. |
+| `subagent/bilibili.py` | Bilibili subagent with temporary generic web fallback. |
+| `subagent/youtube.py` | YouTube subagent with temporary generic web fallback. |
 | `subagent/nhentai.py` | nHentai API v2 metadata/search subagent. |
 | `contracts.py` | Minimal router decision and test/comparison data contracts. |
 
@@ -104,11 +104,11 @@ from `subagent/*.py`. Each source module exposes `SOURCE`, `DESCRIPTION`, and
 for the router prompt. `generic` uses the existing SearXNG facility directly.
 `nhentai` uses the official API v2 for metadata-only gallery reads and bounded
 gallery searches. Bilibili and YouTube prove the dispatch point for future
-provider APIs. In this stage they return an explicit `no_search_data`
-placeholder instead of falling back to generic search, and carry:
+provider APIs. In this stage each source module temporarily delegates to the
+generic SearXNG-backed subagent and carries:
 
 ```text
-FIXME(web_agent3): replace no-search-data placeholder with provider API client in a future approved plan.
+FIXME(web_agent3): replace temporary generic web fallback with a source provider implementation inside this subagent.
 ```
 
 Real Bilibili, YouTube, local-tool variants, MCP-backed variants, rate-limit
@@ -130,8 +130,8 @@ Focused deterministic tests must cover:
 - query pass-through from executor to source subagents.
 - source subagent discovery from per-source modules under `subagent/`.
 - source-local query generation rules rendered from subagent descriptions.
-- Bilibili and YouTube placeholder source adapters return no search data
-  without calling SearXNG.
+- Bilibili and YouTube source adapters keep their own modules while using the
+  temporary generic web fallback.
 - nHentai `read` returns only compact title/name and grouped tags.
 - nHentai `search` returns bounded gallery candidates without image, download,
   comment, favorite, header, or token data.

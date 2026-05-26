@@ -39,7 +39,6 @@ long_term/todo.md
 | Document | Type | Status |
 |---|---|---|
 | [rag3_router_interpreter_poc_experiment_plan.md](active/short_term/rag3_router_interpreter_poc_experiment_plan.md) | Medium experiment and POC design plan | draft |
-| [web_agent3_replacement_plan.md](active/short_term/web_agent3_replacement_plan.md) | Large web helper replacement and router architecture plan | in_progress |
 
 ## Supporting Experiment Records
 
@@ -200,6 +199,7 @@ plans.
 | [typed_message_envelope_stage2_plan.md](archive/completed/short_term/typed_message_envelope_stage2_plan.md) |
 | [user_style_engagement_consumer_plan.md](archive/completed/short_term/user_style_engagement_consumer_plan.md) |
 | [user_memory_unit_rolling_window_plan.md](archive/completed/short_term/user_memory_unit_rolling_window_plan.md) |
+| [web_agent3_replacement_plan.md](archive/completed/short_term/web_agent3_replacement_plan.md) |
 
 ### Superseded Records
 

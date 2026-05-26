@@ -1,6 +1,6 @@
 # web_agent3 Replacement Plan
 
-Status: in_progress
+Status: completed
 Class: large
 Created: 2026-05-25
 Last updated: 2026-05-27
@@ -8,8 +8,8 @@ Owner: Codex
 
 ## Summary
 
-Build `web_agent3` as the replacement candidate for `web_search_agent2`, keep
-`web_search_agent2` active until `web_agent3` is implemented and verified, then
+Build `web_agent3` as the replacement for the previous web helper. Keep the
+previous helper active until `web_agent3` is implemented and verified, then
 perform one later big-bang transition.
 
 Latest user correction:
@@ -21,8 +21,11 @@ Latest user correction:
   prompt prefixes for local LLM cache behavior.
 - The web-agent router is the first LLM stage. It emits only `action`,
   `source`, and `query`; source-specific parsing belongs inside subagents.
-- YouTube and Bilibili remain source subagent placeholders. nHentai is approved
-  for Stage 3C real metadata/search implementation inside its source subagent.
+- YouTube and Bilibili remain dedicated source subagents. Until their provider
+  clients exist, their own subagent modules temporarily delegate to the generic
+  SearXNG-backed web path with a FIXME; the registry and router must not
+  special-case this workaround. nHentai is approved for Stage 3C real
+  metadata/search implementation inside its source subagent.
 - Source subagents are tracked as separate modules under `web_agent3/subagent/`:
   `generic.py`, `bilibili.py`, `youtube.py`, and `nhentai.py`. Each module
   exposes its source name, prompt-facing description, and primary async
@@ -44,8 +47,8 @@ Latest user correction:
 
 ## Current Contract
 
-`web_agent3` must keep the same helper input/output contract as
-`web_search_agent2`:
+`web_agent3` must keep the same helper input/output contract as the previous
+web helper:
 
 ```python
 async def run(
@@ -96,10 +99,12 @@ contracts do not change.
 - All generic web search and generic URL-read execution in `web_agent3` must
   call the existing SearXNG MCP tools through the existing local facility:
   `mcp-searxng__searxng_web_search` and `mcp-searxng__web_url_read`.
-- Bilibili and YouTube adapters are allowed only as router placeholders. They
-  must return explicit no-search-data observations without
-  falling back to generic SearXNG, and carry:
-  `FIXME(web_agent3): replace no-search-data placeholder with provider API client in a future approved plan.`
+- Bilibili and YouTube adapters must remain source subagents. Their current
+  temporary workaround is inside `subagent/bilibili.py` and
+  `subagent/youtube.py`: each receives `query` unchanged, builds a generic
+  decision internally, and calls the generic SearXNG-backed subagent. Each
+  module must carry a FIXME to replace the workaround with a source provider
+  implementation. Do not change the registry or router to support this path.
 - nHentai must stop being a placeholder in Stage 3C and must use only the
   official nHentai API v2 metadata/search endpoints needed by this plan.
 - Runtime prompts are Chinese-first RAG evidence prompts. Stable role,
@@ -149,23 +154,26 @@ For `stop`, `query` is an empty string.
 The router/generator must not extract YouTube video IDs, Bilibili BV/AV IDs,
 nHentai gallery IDs, API fields, credentials, request parameters, or transport
 details. Those are source-adapter responsibilities. Bilibili and YouTube
-placeholder adapters return no search data. The nHentai Stage 3C adapter may
-extract gallery ids deterministically from its `query` with regex and may call
-the official API v2 endpoints named in this plan.
+subagents temporarily delegate to the generic web path inside their own
+modules. The nHentai Stage 3C adapter may extract gallery ids deterministically
+from its `query` with regex and may call the official API v2 endpoints named in
+this plan.
 
 ## Source Subagent Decision
 
-- `generic` is the only active web search and URL-read executor in the current
-  stage. It uses the existing SearXNG facility.
+- `generic` is the active generic web search and URL-read executor. It uses the
+  existing SearXNG facility.
 - `youtube`, `bilibili`, and `nhentai` must be present in the source adapter
   registry as dedicated subagents.
 - Source subagents are not tracked in a single `source_subagents.py` file.
   They live under `subagent/` with one source module per file.
-- Bilibili and YouTube remain placeholder subagents. Each placeholder receives
-  the router decision with `query` unchanged and returns an explicit no-result
-  observation.
-- Placeholder subagents must not call SearXNG, must not delegate to `generic`,
-  and must not perform automatic source fallback.
+- Bilibili and YouTube remain dedicated subagents. Each module receives the
+  router decision with `query` unchanged, then temporarily delegates to the
+  generic SearXNG-backed subagent inside the source module until a real
+  provider implementation is approved.
+- The Bilibili/YouTube workaround must not be implemented in the router,
+  registry, or provider dispatcher. It must stay inside each source subagent
+  and carry a FIXME.
 - nHentai receives the router decision with `query` unchanged, then owns
   deterministic extraction of gallery ids, API parameter shaping, HTTP request
   execution, and response compaction inside `subagent/nhentai.py`.
@@ -191,8 +199,8 @@ RAG supervisor
        -> router/generator emits action/source/query
        -> executor selects subagent from source
           -> generic_adapter  -> existing SearXNG MCP facility
-          -> bilibili_adapter -> no_search_data placeholder
-          -> youtube_adapter  -> no_search_data placeholder
+          -> bilibili_adapter -> temporary generic web fallback
+          -> youtube_adapter  -> temporary generic web fallback
           -> nhentai_adapter  -> official nHentai API v2 metadata/search
        -> same text evidence result contract
 ```
@@ -231,8 +239,8 @@ Ownership:
 | `providers.py` | Thin source decision executor that dispatches to registered source subagents. |
 | `subagent/__init__.py` | Auto-discovery and validation for source subagent modules. |
 | `subagent/generic.py` | Generic search/read subagent backed by the existing SearXNG facility. |
-| `subagent/bilibili.py` | Bilibili placeholder subagent. |
-| `subagent/youtube.py` | YouTube placeholder subagent. |
+| `subagent/bilibili.py` | Bilibili subagent with temporary generic web fallback. |
+| `subagent/youtube.py` | YouTube subagent with temporary generic web fallback. |
 | `subagent/nhentai.py` | nHentai API v2 metadata/search subagent. |
 | `contracts.py` | Minimal router output and comparison-test data contracts. |
 
@@ -365,8 +373,9 @@ No other modules are in scope.
      `attempts`, and `cache`.
    - In `providers.py`, implement source adapter dispatch where
      `generic`, `bilibili`, `youtube`, and `nhentai` each receive `query`
-     unchanged. The non-generic placeholder adapters return no search data
-     with the fixed FIXME marker and do not call SearXNG.
+     unchanged. Bilibili and YouTube keep their workaround inside their own
+     subagent modules and delegate to the generic SearXNG-backed subagent until
+     real provider implementations exist.
    - In `searxng_tools.py`, keep existing SearXNG MCP calls as the only web
      search and URL-read execution path.
    - In `contracts.py`, keep only minimal router decision and test fixture
@@ -376,8 +385,9 @@ No other modules are in scope.
      `router -> executor -> subagent -> evaluator -> loop/finalizer` flow.
    - In `tests/test_web_agent3.py`, add focused tests proving strict router
      output parsing, prompt omission of `# 输入格式` / `# Input Format`, query
-     pass-through to each source adapter, placeholder no-search-data behavior,
-     evaluator-driven loop continuation, and public helper contract parity.
+     pass-through to each source adapter, temporary Bilibili/YouTube generic
+     web fallback behavior, evaluator-driven loop continuation, and public
+     helper contract parity.
 3B. Add dedicated placeholder source subagents:
    - Add `subagent/` so each source subagent is tracked in its own module:
      `generic.py`, `bilibili.py`, `youtube.py`, and `nhentai.py`.
@@ -390,18 +400,18 @@ No other modules are in scope.
      modules, then expose the source description map and execution registry.
    - In `providers.py`, keep only the selected source decision execution
      surface used by the graph executor.
-   - Each placeholder subagent receives the router decision with `query`
-     unchanged and returns an explicit no-result observation.
-   - Placeholder subagents must not call SearXNG, must not delegate to
-     `generic`, and must not perform automatic fallback.
-   - Keep `generic` as the only active SearXNG-backed search/read source in
-     this stage.
+   - Bilibili and YouTube receive the router decision with `query` unchanged
+     and temporarily delegate inside their own source modules to the generic
+     SearXNG-backed subagent.
+   - The temporary Bilibili/YouTube workaround must not be implemented in the
+     router, registry, or provider dispatcher.
+   - Keep generic web execution SearXNG-backed in this stage.
    - In `agent.py`, keep the executor dispatch limited to selected source
-     adapter execution; do not add router-side compensation for placeholder
-     no-result observations.
+     adapter execution; do not add router-side compensation for Bilibili or
+     YouTube.
    - In `tests/test_web_agent3.py`, add or keep focused tests proving
-     placeholder no-result behavior, no SearXNG call for non-generic sources,
-     and unchanged query delivery into the placeholder subagents.
+     dedicated Bilibili/YouTube subagent boundaries, source-local generic web
+     fallback, and unchanged query delivery into the subagents.
 3C. Implement nHentai metadata/search subagent:
    - In `tests/test_web_agent3_nhentai.py`, add focused deterministic tests
      before production code for gallery id extraction from bare ids, gallery
@@ -426,8 +436,8 @@ No other modules are in scope.
      and query-oriented. It may mention gallery metadata/search and query
      shaping, but must not mention token, authorization headers, endpoints,
      implementation placeholders, or transport mechanics.
-   - In `tests/test_web_agent3.py`, update previous placeholder expectations
-     so only Bilibili and YouTube remain no-data placeholders.
+   - In `tests/test_web_agent3.py`, keep Bilibili and YouTube generic-web
+     fallback expectations separate from nHentai API-backed expectations.
    - In `tests/test_web_agent3_routing.py`, keep router and executor boundary
      tests focused on source dispatch and query pass-through; do not make the
      router extract nHentai ids.
@@ -445,10 +455,10 @@ Focused deterministic:
 
 ```powershell
 venv\Scripts\python -m py_compile src\kazusa_ai_chatbot\rag\web_agent3\agent.py src\kazusa_ai_chatbot\rag\web_agent3\contracts.py src\kazusa_ai_chatbot\rag\web_agent3\providers.py src\kazusa_ai_chatbot\rag\web_agent3\searxng_tools.py src\kazusa_ai_chatbot\rag\web_agent3\subagent\__init__.py src\kazusa_ai_chatbot\rag\web_agent3\subagent\generic.py src\kazusa_ai_chatbot\rag\web_agent3\subagent\bilibili.py src\kazusa_ai_chatbot\rag\web_agent3\subagent\youtube.py src\kazusa_ai_chatbot\rag\web_agent3\subagent\nhentai.py
-venv\Scripts\python -m py_compile tests\test_web_agent3.py tests\test_web_agent3_routing.py tests\test_web_agent3_nhentai.py tests\test_web_agent_comparison_live_llm.py
+venv\Scripts\python -m py_compile tests\test_web_agent3.py tests\test_web_agent3_routing.py tests\test_web_agent3_nhentai.py
 venv\Scripts\python -m pytest tests\test_web_agent3.py -q
 venv\Scripts\python -m pytest tests\test_web_agent3_nhentai.py -q
-venv\Scripts\python -m pytest tests\test_web_search_agent.py tests\test_web_agent3.py tests\test_web_agent3_routing.py tests\test_web_agent3_nhentai.py -q
+venv\Scripts\python -m pytest tests\test_web_agent3.py tests\test_web_agent3_routing.py tests\test_web_agent3_nhentai.py -q
 ```
 
 Focused prompt/payload minimization must prove:
@@ -496,12 +506,12 @@ code must not depend on them.
 
 Real LLM comparison:
 
-Run each test in `tests/test_web_agent_comparison_live_llm.py` individually
-with `-q -s -m live_llm`, inspect the emitted trace, then proceed to the next
-case. Do not batch-run the live LLM suite as the evidence source. The suite
-must compare `WebSearchAgent().run(...)` and `WebAgent3().run(...)` with the
-same public intake and output contract; internal finalizer-only comparison is
-not sufficient for cutover evidence.
+The side-by-side live comparison is a pre-cutover gate. It was completed in
+Stage 4 and recorded under `test_artifacts/llm_reviews/`. After Stage 5, the
+retired helper and comparison harness are intentionally removed; final
+verification uses active `web_agent3` deterministic tests, static checks, and
+the live `WebAgent3().run(...)` smoke test when a live LLM/SearXNG environment
+is explicitly available.
 
 ## Progress Checklist
 
@@ -559,19 +569,23 @@ not sufficient for cutover evidence.
     passed. Live API smoke was not run because the user did not request it.
   - Sign-off: Codex / 2026-05-27.
 
-- [ ] Stage 4 - parity comparison rerun and RCA report updated.
+- [x] Stage 4 - parity comparison rerun and RCA report updated.
   - Evidence: ten live LLM cases run one at a time, traces inspected, and a
-    debug-LLM report written from real data.
-  - Sign-off: `<agent/date>`.
+    debug-LLM report written from real data. Result is not acceptable for
+    cutover because unresolved parity gaps remain.
+  - Sign-off: Codex / 2026-05-27.
 
-- [ ] Stage 5 - big-bang transition completed.
-  - Evidence: active wiring/docs/tests use `web_agent3`, old helper deleted,
-    integration tests pass.
-  - Sign-off: `<agent/date>`.
+- [x] Stage 5 - big-bang transition completed.
+  - Evidence: active runtime wiring, docs, fixtures, and focused integration
+    tests use `web_agent3`; the old helper module and old-helper tests were
+    deleted; focused Stage 5 deterministic integration batch passed.
+  - Sign-off: Codex / 2026-05-27.
 
-- [ ] Stage 6 - independent code review and final verification complete.
-  - Evidence: review findings, fixes, reruns, and residual risks recorded.
-  - Sign-off: `<agent/date>`.
+- [x] Stage 6 - independent code review and final verification complete.
+  - Evidence: independent reviewer found no critical, important, or minor
+    findings; fresh syntax, static, focused deterministic, and live-test
+    collection checks passed; residual risks are recorded below.
+  - Sign-off: Codex / 2026-05-27.
 
 ## Execution Evidence
 
@@ -792,6 +806,136 @@ not sufficient for cutover evidence.
     no matches.
   - Independent Stage 3C code review subagent found no blocking findings.
     Residual risk: live nHentai API behavior was not smoke-tested.
+- 2026-05-27 Stage 4 post-Stage-3C live LLM comparison:
+  - Reran all ten live comparison cases one at a time with
+    `venv\Scripts\python -m pytest tests\test_web_agent_comparison_live_llm.py::<case> -q -s -m live_llm`.
+  - `venv\Scripts\python -m py_compile tests\test_web_agent_comparison_live_llm.py`:
+    passed.
+  - `venv\Scripts\python -m pytest -m live_llm tests\test_web_agent_comparison_live_llm.py --collect-only -q`:
+    10 tests collected.
+  - Structural results: all ten individual live LLM cases passed pytest
+    assertions and wrote trace artifacts.
+  - Debug review:
+    `test_artifacts/llm_reviews/web_agent2_vs_web_agent3_public_run_live_llm_review_stage4_after_3c_20260527.md`.
+  - Key RCA signals: nHentai API-docs behavior is acceptable after Stage 3C;
+    Python release, redirected docs, structured API page, and conflicting
+    snippet cases are acceptable or improved. YouTube and Bilibili page
+    description tasks still regress because the router selects placeholder
+    subagents. The no-relevant-info case regresses because web_agent3 returns
+    `resolved=true` while stating the requested hours are absent. The
+    stale-news case still preserves the date but does not explicitly flag
+    currentness limitation. The search-results-only case adds unsupported
+    read-failure commentary.
+  - Result: not ready for Stage 5 big-bang cutover under the current plan
+    gates. Stage 5 remains unchecked until these parity gaps are fixed or the
+    user explicitly accepts the known placeholder-source and finalizer status
+    regressions.
+- 2026-05-27 Stage 4 regression remediation:
+  - User corrected the YouTube/Bilibili path: do not change the registry or
+    bypass the submodule architecture. Keep each as a dedicated source
+    subagent, but add a FIXME-backed temporary workaround inside
+    `subagent/youtube.py` and `subagent/bilibili.py` that delegates to the
+    generic SearXNG-backed subagent until real provider clients exist.
+  - Updated `subagent/youtube.py` and `subagent/bilibili.py` to build an
+    internal generic router decision and call the generic subagent. The router,
+    auto-discovery registry, and provider dispatcher remain unchanged.
+  - Removed the obsolete no-data dummy provider FIXME from `contracts.py` and
+    the package export.
+  - Updated the finalizer to include `reference_time`, make
+    `is_empty_result` authoritative for `not_found` status, treat explicit
+    missing evidence as unresolved, flag stale/currentness limits from source
+    dates, avoid model-knowledge time disclaimers, and label snippet-only
+    evidence as search-summary evidence.
+  - Updated the evaluator prompt to avoid repeating the same URL read when a
+    prior read returned empty content or no new information.
+  - Updated `README.md`, current plan decision text, and deterministic tests to
+    reflect source-local generic-web fallback for Bilibili/YouTube instead of
+    no-search-data placeholders.
+  - Red/green targeted tests:
+    `venv\Scripts\python -m pytest tests\test_web_agent3.py::test_web_agent3_youtube_bilibili_keep_subagent_boundary_and_use_generic_search tests\test_web_agent3.py::test_web_agent3_youtube_bilibili_read_delegates_to_generic_web_read tests\test_web_agent3.py::test_web_agent3_finalizer_prompt_covers_known_regression_rules tests\test_web_agent3.py::test_web_agent3_finalizer_empty_result_forces_not_found_status tests\test_web_agent3.py::test_web_agent3_finalizer_payload_uses_clean_feedback tests\test_web_agent3_routing.py::test_web_agent3_executor_dispatches_edge_sources -q`:
+    failed before implementation, then passed.
+  - Snippet/duplicate-read prompt tests:
+    `venv\Scripts\python -m pytest tests\test_web_agent3.py::test_web_agent3_finalizer_prompt_covers_known_regression_rules tests\test_web_agent3.py::test_web_agent3_evaluator_prompt_avoids_duplicate_empty_reads -q`:
+    failed before prompt update, then passed.
+  - Focused deterministic regression:
+    `venv\Scripts\python -m pytest tests\test_web_search_agent.py tests\test_web_agent3.py tests\test_web_agent3_routing.py tests\test_web_agent3_nhentai.py -q`:
+    39 passed.
+  - Static checks:
+    `venv\Scripts\python -m py_compile ...web_agent3... tests\test_web_agent3.py tests\test_web_agent3_routing.py tests\test_web_agent3_nhentai.py tests\test_web_agent_comparison_live_llm.py`:
+    passed.
+  - Static prompt/search checks for prompt f-strings, input-format headers,
+    provider metadata, direct generic HTTP/search, obsolete no-search-data
+    placeholders, and nHentai HTTP scope passed with expected results.
+  - Reran all ten live LLM comparison cases one at a time with the corrected
+    code version. All ten passed structural assertions and were inspected:
+    YouTube and Bilibili now resolve through their source-local generic-web
+    workaround; no-relevant-info returns `resolved=false`; stale news is
+    explicitly stale against 2026-05-27; search-results-only is labeled
+    snippet-level.
+  - Debug review:
+    `test_artifacts/llm_reviews/web_agent2_vs_web_agent3_public_run_live_llm_review_stage4_regression_fix_20260527.md`.
+  - Result: the known Stage 4 regressions are addressed. Stage 5 remains a
+    separate cutover step and was not executed in this remediation pass.
+- 2026-05-27 Stage 5 big-bang transition:
+  - Rewired the RAG supervisor registry and deterministic web prefixes from
+    the previous web helper to `web_agent3`.
+  - Updated live-context delegation so external live facts call `WebAgent3`
+    and report `primary_worker="web_agent3"`.
+  - Updated RAG projection so `web_agent3` facts project into
+    `external_evidence`.
+  - Updated active RAG docs, fixtures, and tests to use `web_agent3`.
+  - Deleted the retired helper module and the old-helper/pre-cutover
+    comparison tests.
+  - Static reference check
+    `rg "web_search_agent2|web_search_agent|WebSearchAgent" src tests README.md docs/HOWTO.md`:
+    no matches.
+  - `venv\Scripts\python -m py_compile` for changed runtime modules,
+    `web_agent3` modules, and changed tests: passed.
+  - Focused static checks for direct generic HTTP/search, nHentai HTTP scope,
+    SearXNG MCP ownership, router input-format headers, and provider metadata:
+    passed with expected matches only.
+  - Focused deterministic cutover batch:
+    `venv\Scripts\python -m pytest tests\test_web_agent3.py tests\test_web_agent3_routing.py tests\test_web_agent3_nhentai.py tests\test_rag_projection.py tests\test_rag_initializer_cache2.py::test_live_context_consolidation_policy_stays_operational tests\test_rag_initializer_cache2.py::test_rag_dispatcher_uses_deterministic_new_prefix tests\test_rag_initializer_cache2.py::test_rag_dispatcher_remaps_legacy_prefix_alias tests\test_rag_initializer_cache2.py::test_normalize_dispatch_accepts_valid_payload tests\test_persona_supervisor2_rag2_integration.py tests\test_rag_phase3_capability_agents.py tests\test_rag_phase3_supervisor_integration.py tests\test_quote_aware_rag_sequence.py -q`:
+    184 passed.
+  - Broader exploratory run of the full included
+    `tests/test_rag_initializer_cache2.py` file found six unrelated
+    initializer prompt-contract failures. Root cause: those tests assert
+    English prompt fragments that are absent from the current Chinese
+    initializer prompt; the cutover changed only that file's registry-key test.
+    This was not fixed in Stage 5 because initializer prompt/test alignment is
+    outside the web-helper transition scope.
+- 2026-05-27 Stage 6 independent review and final verification:
+  - Independent code review subagent reviewed `git diff HEAD` against this
+    plan's Stage 5/6 requirements and found no critical, important, or minor
+    issues. Assessment: ready to merge.
+  - Reviewer confirmed the cutover wiring is complete, stale active references
+    are absent, Bilibili/YouTube generic fallback remains inside their own
+    subagent modules, generic search/read still uses `searxng_tools.py`, and
+    direct `httpx`/`NHENTAI_TOKEN`/`Authorization` use remains limited to
+    `subagent/nhentai.py` and its tests.
+  - Updated this plan's post-cutover verification text so it no longer points
+    final verification at the deleted pre-cutover comparison harness.
+  - Fresh static stale-reference check
+    `rg -n "web_search_agent2|web_search_agent|WebSearchAgent" src tests README.md docs/HOWTO.md`:
+    no matches.
+  - Fresh static scope checks passed:
+    direct generic HTTP/search and URL-safety strings had no matches; nHentai
+    HTTP/token/header terms matched only `subagent/nhentai.py` and
+    `tests/test_web_agent3_nhentai.py`; SearXNG MCP tool names matched only
+    `searxng_tools.py`; router input-format/provider-metadata terms had no
+    matches.
+  - `venv\Scripts\python -m py_compile` for changed runtime modules,
+    `web_agent3` modules, and changed tests: passed.
+  - Focused deterministic cutover batch:
+    `venv\Scripts\python -m pytest tests\test_web_agent3.py tests\test_web_agent3_routing.py tests\test_web_agent3_nhentai.py tests\test_rag_projection.py tests\test_rag_initializer_cache2.py::test_live_context_consolidation_policy_stays_operational tests\test_rag_initializer_cache2.py::test_rag_dispatcher_uses_deterministic_new_prefix tests\test_rag_initializer_cache2.py::test_rag_dispatcher_remaps_legacy_prefix_alias tests\test_rag_initializer_cache2.py::test_normalize_dispatch_accepts_valid_payload tests\test_persona_supervisor2_rag2_integration.py tests\test_rag_phase3_capability_agents.py tests\test_rag_phase3_supervisor_integration.py tests\test_quote_aware_rag_sequence.py -q`:
+    184 passed.
+  - Live web-agent test collection:
+    `venv\Scripts\python -m pytest tests\test_e2e_live_llm.py::test_live_web_agent3_returns_live_result --collect-only -q -m live_llm`:
+    1 test collected. It was not executed because live LLM/SearXNG execution is
+    environment-dependent and was not requested for Stage 6.
+  - `git diff --check`: passed.
+  - Residual risk: the broader unrelated initializer prompt-contract failures
+    discovered in Stage 5 remain outside this web-agent cutover scope.
 
 ## Independent Plan Review
 
@@ -837,11 +981,13 @@ static checks pass.
   placeholder execution details, or provider metadata.
 - Router normalization and executor dispatch are covered for edge cases around
   malformed LLM output, stop actions, source-specific IDs, site URLs, and
-  placeholder-source boundaries.
+  source-subagent boundaries.
 - Evaluator/finalizer LLM payloads contain only fields each stage uses for its
   semantic decision.
-- Bilibili and YouTube placeholder source adapters return no search data
-  without calling generic SearXNG and carry the fixed FIXME marker.
+- Bilibili and YouTube source adapters keep their own modules and temporarily
+  delegate inside those modules to the generic SearXNG-backed subagent with a
+  fixed FIXME marker. The router, registry, and provider dispatcher do not
+  special-case this workaround.
 - nHentai `read` returns gallery title/name and grouped tags only; nHentai
   `search` returns bounded gallery candidates only; neither path returns
   images, download URLs, thumbnails, comments, favorite/account data, raw

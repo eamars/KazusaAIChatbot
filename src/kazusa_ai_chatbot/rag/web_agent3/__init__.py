@@ -14,7 +14,6 @@ from kazusa_ai_chatbot.rag.web_agent3.agent import (
     _tool_call_generator,
 )
 from kazusa_ai_chatbot.rag.web_agent3.contracts import (
-    _DUMMY_PROVIDER_FIXME,
     _RouterDecision,
     _WebSearchItem,
     _WebToolResult,
@@ -28,7 +27,6 @@ from kazusa_ai_chatbot.rag.web_agent3.searxng_tools import (
 
 __all__ = [
     "WebAgent3",
-    "_DUMMY_PROVIDER_FIXME",
     "_RouterDecision",
     "_WebSearchItem",
     "_WebToolResult",

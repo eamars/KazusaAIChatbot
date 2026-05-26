@@ -6,10 +6,6 @@ from dataclasses import dataclass, field
 from typing import Any, Literal, cast
 
 _DEFAULT_EXPECTED_RESPONSE = "返回能直接解决当前槽位的来源扎根网页证据。"
-_DUMMY_PROVIDER_FIXME = (
-    "FIXME(web_agent3): replace no-search-data placeholder with provider API client "
-    "in a future approved plan."
-)
 _ROUTER_ACTIONS = ("search", "read", "stop")
 _ROUTER_SOURCES = ("generic", "bilibili", "youtube", "nhentai")
 _VALID_STATUS_ORDER = {

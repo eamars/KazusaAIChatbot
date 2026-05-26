@@ -266,17 +266,22 @@ async def test_web_agent3_generic_search_receives_query_unchanged(
 
 
 @pytest.mark.asyncio
-async def test_web_agent3_placeholder_sources_are_dedicated_no_result_subagents() -> None:
-    """Bilibili and YouTube should remain separate no-result subagents."""
+async def test_web_agent3_youtube_bilibili_keep_subagent_boundary_and_use_generic_search(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Bilibili and YouTube stay separate subagents while using generic search."""
     source_module = importlib.import_module(
         "kazusa_ai_chatbot.rag.web_agent3.subagent"
     )
     source_subagents = source_module._SUBAGENTS
     generic_subagent = source_subagents["generic"]
+    fake_search = SimpleNamespace(ainvoke=AsyncMock(return_value="search body"))
+    monkeypatch.setattr(generic_subagent.searxng_tools, "web_search", fake_search)
 
     assert source_subagents["nhentai"] is not generic_subagent
 
     for source in ("bilibili", "youtube"):
+        assert source_subagents[source] is not generic_subagent
         decision = web_module._RouterDecision(
             action="search",
             source=source,
@@ -285,20 +290,19 @@ async def test_web_agent3_placeholder_sources_are_dedicated_no_result_subagents(
 
         result = await web_module._execute_source_decision(decision)
 
-        assert result == {
-            "status": "no_search_data",
-            "source": source,
-            "action": "search",
-            "query": "raw-source-target",
-            "message": "Source subagent placeholder has no search data.",
-        }
+        assert result == "search body"
+
+    assert fake_search.ainvoke.await_count == 2
+    first_call, second_call = fake_search.ainvoke.await_args_list
+    assert first_call.args[0] == {"query": "raw-source-target"}
+    assert second_call.args[0] == {"query": "raw-source-target"}
 
 
 @pytest.mark.asyncio
-async def test_web_agent3_specialized_adapters_return_no_search_data(
+async def test_web_agent3_youtube_bilibili_read_delegates_to_generic_web_read(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Placeholder source adapters should not fall back to generic search data."""
+    """Temporary source adapters should route URL reads through generic web read."""
     generic_subagent = importlib.import_module(
         "kazusa_ai_chatbot.rag.web_agent3.subagent.generic"
     )
@@ -318,17 +322,9 @@ async def test_web_agent3_specialized_adapters_return_no_search_data(
 
         result = await web_module._execute_source_decision(decision)
 
-        fake_read.ainvoke.assert_not_awaited()
+        fake_read.ainvoke.assert_awaited_once_with({"url": "652244"})
         fake_search.ainvoke.assert_not_awaited()
-        assert result == {
-            "status": "no_search_data",
-            "source": source,
-            "action": "read",
-            "query": "652244",
-            "message": "Source subagent placeholder has no search data.",
-        }
-
-    assert web_module._DUMMY_PROVIDER_FIXME.startswith("FIXME(web_agent3)")
+        assert result == "page body"
 
 
 @pytest.mark.asyncio
@@ -535,6 +531,64 @@ async def test_web_agent3_finalizer_comparison_helper_returns_public_shape(
     }
 
 
+def test_web_agent3_finalizer_prompt_covers_known_regression_rules() -> None:
+    """Finalizer prompt should cover absent evidence, stale facts, and failures."""
+    prompt = agent_module._WEB_AGENT3_FINALIZER_PROMPT
+
+    assert "reference_time" in prompt
+    assert "缺失" in prompt
+    assert "未提及" in prompt
+    assert "is_empty_result" in prompt
+    assert "最新" in prompt
+    assert "当前" in prompt
+    assert "读取失败" in prompt
+    assert "搜索摘要" in prompt
+    assert "模型知识" in prompt
+
+
+def test_web_agent3_evaluator_prompt_avoids_duplicate_empty_reads() -> None:
+    """Evaluator prompt should avoid repeating empty reads of the same target."""
+    prompt = agent_module._WEB_AGENT3_EVALUATOR_PROMPT
+
+    assert "不要重复读取" in prompt
+    assert "同一 URL" in prompt
+    assert "正文为空" in prompt
+
+
+@pytest.mark.asyncio
+async def test_web_agent3_finalizer_empty_result_forces_not_found_status(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Finalizer status should agree with an explicit empty-result decision."""
+    fake_llm = SimpleNamespace(
+        ainvoke=AsyncMock(return_value=AIMessage(
+            content=(
+                '{"response": "未找到相关信息", "score": 95, '
+                '"reason": "content states the requested fact is absent", '
+                '"is_empty_result": true}'
+            ),
+        )),
+    )
+    monkeypatch.setattr(agent_module, "_finalizer_llm", fake_llm)
+    state = {
+        "task": "Web-evidence: find operating hours",
+        "expected_response": "operating hours",
+        "messages": [
+            ToolMessage(
+                content='{"result": "page does not mention operating hours"}',
+                tool_call_id="tool-1",
+            ),
+        ],
+        "evaluator_feedback": "requested fact is absent",
+        "prompt_timestamp": "2026-05-27 12:00 (Wednesday)",
+    }
+
+    update = await agent_module._tool_call_finalizer(state)
+
+    assert update["final_status"] == "not_found"
+    assert update["final_is_empty_result"] is True
+
+
 @pytest.mark.asyncio
 async def test_web_agent3_finalizer_payload_uses_clean_feedback(
     monkeypatch: pytest.MonkeyPatch,
@@ -568,12 +622,14 @@ async def test_web_agent3_finalizer_payload_uses_clean_feedback(
             ),
         ],
         "evaluator_feedback": "read official page",
+        "prompt_timestamp": "2026-05-27 12:00 (Wednesday)",
     }
 
     await agent_module._tool_call_finalizer(state)
 
     messages = fake_llm.ainvoke.await_args.args[0]
     finalizer_payload = json.loads(messages[1].content)
+    assert finalizer_payload["reference_time"] == "2026-05-27 12:00 (Wednesday)"
     assert finalizer_payload["evaluator_feedback"] == "read official page"
     assert "source" not in messages[1].content
     assert "evidence_limitations" not in messages[1].content

@@ -62,7 +62,7 @@ def _context(body_text: str = "original body") -> dict[str, Any]:
 def _fact(
     slot: str,
     *,
-    agent: str = "web_search_agent2",
+    agent: str = "web_agent3",
     resolved: bool = True,
     summary: str = "summary",
 ) -> dict[str, Any]:

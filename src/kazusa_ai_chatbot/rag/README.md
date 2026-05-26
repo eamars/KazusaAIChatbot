@@ -271,7 +271,7 @@ dispatcher LLM:
 | `Conversation-evidence:` | `conversation_evidence_agent` |
 | `Memory-evidence:` | `memory_evidence_agent` |
 | `Person-context:` | `person_context_agent` |
-| `Web-evidence:` | `web_search_agent2` |
+| `Web-evidence:` | `web_agent3` |
 | `Recall:` | `recall_agent` |
 
 Legacy worker prefixes remain accepted as compatibility aliases:
@@ -288,7 +288,7 @@ Legacy worker prefixes remain accepted as compatibility aliases:
 | `Conversation-semantic:` | `conversation_evidence_agent` |
 | `Memory-keyword:` | `memory_evidence_agent` |
 | `Memory-search:` | `memory_evidence_agent` |
-| `Web-search:` | `web_search_agent2` |
+| `Web-search:` | `web_agent3` |
 
 If a slot has no recognized prefix, the dispatcher falls back to semantic
 routing rules for compatibility. Normal generated slots should use the
@@ -336,7 +336,7 @@ The dispatcher-visible top-level capability agents are:
 
 | Agent | Responsibility |
 |---|---|
-| `live_context_agent` | Resolves target/scope for live external facts, then delegates to `web_search_agent2`. It refuses missing location/target instead of guessing. |
+| `live_context_agent` | Resolves target/scope for live external facts, then delegates to `web_agent3`. It refuses missing location/target instead of guessing. |
 | `conversation_evidence_agent` | Chooses the appropriate conversation worker for hybrid exact/fuzzy evidence, structured filters, counts, URLs, and speaker provenance. |
 | `memory_evidence_agent` | Chooses among shared hybrid memory retrieval and scoped current-user continuity retrieval. Natural-language home/address questions and literal memory identifiers both use shared hybrid memory search; current-user recognition, private continuity, accepted preferences, user-specific lore, and prior shared interactions use `user_memory_evidence_agent`. |
 | `person_context_agent` | Chooses identity, profile, user-list, relationship, or the approved display-name to profile chain. |
@@ -385,7 +385,7 @@ The reusable worker agents are:
 | `persistent_memory_keyword_agent` | Lower-level exact-keyword memory worker used by hybrid fusion. Top-level shared-memory evidence does not route literal recall here directly. |
 | `persistent_memory_search_agent` | Performs hybrid durable-memory recall for exact and fuzzy shared memory evidence. It fuses semantic memory rows with literal-anchor keyword rows, enforces trusted source filters, and keeps scoped `user_memory_evidence_agent` separate. |
 | `user_memory_evidence_agent` | Searches `user_memory_units` for the current `global_user_id` only. It uses vector retrieval when available, explicit literal lexical retrieval for exact continuity anchors, and bounded recency fallback. Returned rows keep `source_system`, `scope_type`, `scope_global_user_id`, `authority`, `truth_status`, and `origin`. |
-| `web_search_agent2` | Searches or reads public web content when the requested fact belongs outside local profiles, memories, or conversation history. |
+| `web_agent3` | Searches or reads public web content when the requested fact belongs outside local profiles, memories, or conversation history. |
 
 Most agents are evidence retrievers. They should answer "what was found?" rather than "what should Kazusa think about it?" The only ranking-style agents still return factual rankings from stored data or message counts; interpretation remains downstream.
 

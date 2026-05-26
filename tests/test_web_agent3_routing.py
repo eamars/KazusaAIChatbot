@@ -198,7 +198,7 @@ async def test_web_agent3_generator_falls_back_for_invalid_edge_route(
 async def test_web_agent3_executor_dispatches_edge_sources(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Executor should dispatch by source without cross-source fallback."""
+    """Executor should preserve source dispatch and source-local workarounds."""
     generic_subagent = importlib.import_module(
         "kazusa_ai_chatbot.rag.web_agent3.subagent.generic"
     )
@@ -232,15 +232,13 @@ async def test_web_agent3_executor_dispatches_edge_sources(
     fake_search.ainvoke.assert_awaited_once_with({
         "query": "official docs latest release",
     })
-    fake_read.ainvoke.assert_awaited_once_with({
+    assert fake_read.ainvoke.await_args_list[0].args[0] == {
         "url": "https://example.test/docs",
-    })
+    }
     assert generic_search_result == "search body"
     assert generic_read_result == "page body"
-    assert specialized_result == {
-        "status": "no_search_data",
-        "source": "youtube",
-        "action": "read",
-        "query": "https://www.youtube.com/watch?v=abc123",
-        "message": "Source subagent placeholder has no search data.",
+    assert fake_read.ainvoke.await_count == 2
+    assert fake_read.ainvoke.await_args_list[1].args[0] == {
+        "url": "https://www.youtube.com/watch?v=abc123",
     }
+    assert specialized_result == "page body"
