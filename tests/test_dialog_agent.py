@@ -197,10 +197,10 @@ def test_dialog_evaluator_prompt_orders_hard_gates_before_style() -> None:
 
     prompt = _DIALOG_EVALUATOR_PROMPT
     assert '不要从上下文自行决定话题、意图或风格' in prompt
-    assert prompt.index('# Pass Condition') < prompt.index('# Hard Gates')
-    assert prompt.index('# Hard Gates') < prompt.index('# Soft Style')
-    assert prompt.index('# Soft Style') < prompt.index('# 4. 动态通过逻辑')
-    assert prompt.index('# 4. 动态通过逻辑') < prompt.index('# Audit Order')
+    assert prompt.index('# 通过条件') < prompt.index('# 硬门槛')
+    assert prompt.index('# 硬门槛') < prompt.index('# 软风格')
+    assert prompt.index('# 软风格') < prompt.index('# 动态通过逻辑')
+    assert prompt.index('# 动态通过逻辑') < prompt.index('# 审核顺序')
     assert '"should_stop": boolean' in prompt
     assert 'should_stop=false` 表示必须把 `feedback` 交回生成器重试' in prompt
 
@@ -218,6 +218,24 @@ def test_dialog_evaluator_prompt_rejects_unsupported_concrete_content() -> None:
     assert '时间' in unsupported_rule
     assert '地点' in unsupported_rule
     assert '承诺' in unsupported_rule
+
+
+def test_dialog_evaluator_prompt_rejects_guess_owner_flip() -> None:
+    """Evaluator prompt should reject changed owner for guessing gates."""
+
+    prompt = _DIALOG_EVALUATOR_PROMPT
+    assert '指代与动作所有权' in prompt
+    assert '指代基准' in prompt
+    assert '硬失败速查' in prompt
+    assert '默认猜测动作属于被回应者' in prompt
+    assert '我/我的/自己' in prompt
+    assert '你/对方/你们' in prompt
+    assert '猜测对象' in prompt
+    assert '当前角色' in prompt
+    assert '偏好' in prompt
+    assert '我会想看' in prompt
+    assert '我想看' in prompt
+    assert '必须驳回' in prompt
 
 
 def test_dialog_generator_prompt_has_no_decision_ownership() -> None:
@@ -240,7 +258,7 @@ def test_dialog_prompts_use_content_anchors_as_semantic_authority() -> None:
     assert 'internal_monologue' not in _DIALOG_EVALUATOR_PROMPT
     assert '`content_anchors` 是唯一语义权威' in _DIALOG_EVALUATOR_PROMPT
     assert '只有同时满足以下条件才返回 `should_stop=true`' in _DIALOG_EVALUATOR_PROMPT
-    assert '没有把另一个 object / offer / request / question 当作核心话题' in (
+    assert '没有把另一个对象、提议、请求、问题或偏好所有者当作核心话题' in (
         _DIALOG_EVALUATOR_PROMPT
     )
     assert '`retry` 只是输入里的计数字段' in _DIALOG_EVALUATOR_PROMPT

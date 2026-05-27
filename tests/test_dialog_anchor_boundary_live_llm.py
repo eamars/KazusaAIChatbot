@@ -199,6 +199,7 @@ def _incident_dialog_state() -> dict:
         'global_user_id': '256e8a10-c406-47e9-ac8f-efd270d18160',
         'user_name': '蚝爹油',
         'user_profile': {'affinity': 501},
+        'dialog_usage_mode': 'live_evaluator_contract',
         'debug_modes': {},
         'should_respond': True,
     }

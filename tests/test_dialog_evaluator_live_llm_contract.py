@@ -122,6 +122,7 @@ def _base_evaluator_state() -> dict:
         "global_user_id": "live-user-global",
         "user_name": "LiveEvaluatorUser",
         "user_profile": {"affinity": 500},
+        "dialog_usage_mode": "live_evaluator_contract",
         "character_profile": {
             "name": "Kazusa",
             "description": "A character used for live evaluator tests.",
@@ -147,6 +148,39 @@ def _base_evaluator_state() -> dict:
             },
         },
     }
+    return state
+
+
+def _guess_gate_evaluator_state(final_dialog: list[str]) -> dict:
+    """Build a generic recommendation-gate evaluator state."""
+
+    state = _base_evaluator_state()
+    state["internal_monologue"] = (
+        "The user asks for more recommendations. The intended move is to "
+        "confirm more recommendations exist, then require the other person "
+        "to guess a type or show sincerity before receiving the list."
+    )
+    linguistic_directives = state["action_directives"]["linguistic_directives"]
+    linguistic_directives.update({
+        "rhetorical_strategy": '先确认可推荐，再设置轻微互动门槛',
+        "linguistic_style": '轻微挑衅、简短、保留博弈感',
+        "content_anchors": [
+            '[DECISION] 接受推荐请求但设置获取门槛',
+            '[ANSWER] 确认还有其他推荐，但要求对方先猜对一个类型或展示诚意作为交换条件',
+            '[SOCIAL] 维持轻微挑衅和博弈感，不直接满足索取行为',
+            '[PROGRESSION] 将话题引向猜类型换推荐的互动环节',
+            '[SCOPE] ~40字，覆盖DECISION、ANSWER、SOCIAL、PROGRESSION',
+        ],
+    })
+    contextual_directives = state["action_directives"]["contextual_directives"]
+    contextual_directives.update({
+        "social_distance": '熟悉但保留轻微拉扯',
+        "emotional_intensity": '中低，轻快',
+        "vibe_check": '轻微挑衅的推荐交换',
+        "relational_dynamic": '用户索要推荐，角色要求对方先猜类型作为交换条件',
+    })
+    state["final_dialog"] = final_dialog
+    state["retry"] = 0
     return state
 
 
@@ -192,3 +226,102 @@ async def test_live_dialog_evaluator_rejects_unanchored_concrete_claim(
     assert llm_calls
     assert result["should_stop"] is False
     assert feedback_payload["feedback"] != "Passed"
+
+
+async def test_live_dialog_evaluator_rejects_owner_flipped_guess_target(
+    ensure_live_dialog_evaluator_llm,
+    monkeypatch,
+) -> None:
+    """Live evaluator must reject guessing the character's own preference."""
+
+    del ensure_live_dialog_evaluator_llm
+
+    llm_calls: list[dict] = []
+    evaluator_llm = _CapturingAsyncLLM(
+        dialog_module._dialog_evaluator_llm,
+        llm_calls,
+    )
+    monkeypatch.setattr(dialog_module, "_dialog_evaluator_llm", evaluator_llm)
+
+    state = _guess_gate_evaluator_state([
+        '不如先猜猜我会想看哪种类型？',
+        '猜中了再给清单。',
+    ])
+    result = await dialog_evaluator(state)
+    feedback_payload = json.loads(result["messages"][0].content)
+    trace_path = write_llm_trace(
+        "dialog_evaluator_live_llm_contract",
+        "reject_owner_flipped_guess_target",
+        {
+            "model": DIALOG_EVALUATOR_LLM_MODEL,
+            "base_url": DIALOG_EVALUATOR_LLM_BASE_URL,
+            "state": state,
+            "llm_calls": llm_calls,
+            "result": result,
+            "feedback_payload": feedback_payload,
+            "judgment": (
+                "Pass only if the live evaluator rejects dialog that changes "
+                "a generic type-guessing gate into guessing the character's "
+                "own desired type."
+            ),
+        },
+    )
+    raw_response = llm_calls[0]["raw_response"] if llm_calls else ""
+
+    print(f"trace_path={trace_path}")
+    print(f"feedback_payload={json.dumps(feedback_payload, ensure_ascii=False)}")
+    print(f"raw_response={raw_response}")
+
+    assert llm_calls
+    assert result["should_stop"] is False
+    assert feedback_payload["feedback"] != "Passed"
+
+
+async def test_live_dialog_evaluator_accepts_owner_preserving_guess_condition(
+    ensure_live_dialog_evaluator_llm,
+    monkeypatch,
+) -> None:
+    """Live evaluator should accept owner-correct guessing gates."""
+
+    del ensure_live_dialog_evaluator_llm
+
+    llm_calls: list[dict] = []
+    evaluator_llm = _CapturingAsyncLLM(
+        dialog_module._dialog_evaluator_llm,
+        llm_calls,
+    )
+    monkeypatch.setattr(dialog_module, "_dialog_evaluator_llm", evaluator_llm)
+
+    state = _guess_gate_evaluator_state([
+        '还有别的推荐可以给。',
+        '不过先猜一个类型试试看？',
+        '猜中了再给清单。',
+    ])
+    result = await dialog_evaluator(state)
+    feedback_payload = json.loads(result["messages"][0].content)
+    trace_path = write_llm_trace(
+        "dialog_evaluator_live_llm_contract",
+        "accept_owner_preserving_guess_condition",
+        {
+            "model": DIALOG_EVALUATOR_LLM_MODEL,
+            "base_url": DIALOG_EVALUATOR_LLM_BASE_URL,
+            "state": state,
+            "llm_calls": llm_calls,
+            "result": result,
+            "feedback_payload": feedback_payload,
+            "judgment": (
+                "Pass only if the live evaluator accepts a concise dialog "
+                "that keeps the guessing target as the other person's type "
+                "choice before recommendations are given."
+            ),
+        },
+    )
+    raw_response = llm_calls[0]["raw_response"] if llm_calls else ""
+
+    print(f"trace_path={trace_path}")
+    print(f"feedback_payload={json.dumps(feedback_payload, ensure_ascii=False)}")
+    print(f"raw_response={raw_response}")
+
+    assert llm_calls
+    assert result["should_stop"] is True
+    assert feedback_payload["feedback"] == "Passed"

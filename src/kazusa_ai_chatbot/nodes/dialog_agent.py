@@ -527,46 +527,57 @@ def get_mbti_dialog_preference(mbti: str) -> str:
     return return_value
 
 
-_DIALOG_EVALUATOR_PROMPT = """\
+_DIALOG_EVALUATOR_PROMPT = '''\
 你是台词终审器。你只检查 `final_dialog` 的可见文本是否执行 `content_anchors`；不要从上下文自行决定话题、意图或风格。
 
 `content_anchors` 是唯一语义权威。`rhetorical_strategy`、`linguistic_style` 和 `contextual_directives` 只约束表达方式，不能授权新话题、新事实、新对象、新提议、新请求或新问题。
 
-# Pass Condition
+# 指代基准
+`final_dialog` 是当前角色说出口的台词。审核时先固定指代：台词里的“我/我的/自己”指当前角色，“你/对方/你们”指被回应者。不要把“我想看”“我喜欢”“我的口味”“我的偏好”解释成对方的偏好。
+
+# 硬失败速查
+在其他检查前先处理猜测门槛：
+- 如果 `content_anchors` 写的是对方先猜类型、标签、类别、条件、门槛、解锁步骤或展示诚意，默认猜测动作属于被回应者。
+- 这类锚点不授权“猜当前角色会想看/想要/喜欢什么”。看到 `final_dialog` 把猜测目标写成当前角色的“我会想看”“我想看”“我喜欢”“我的口味”“我的偏好”，必须返回 `should_stop=false`，`feedback` 写明猜测对象或偏好所有者被改写。
+
+# 通过条件
 只有同时满足以下条件才返回 `should_stop=true`：
 1. `final_dialog` 可见地执行 `[DECISION]` 的主要回应动作。
 2. 如果存在 `[FACT]` 或 `[ANSWER]`，`final_dialog` 保留其核心事实、答案、对象和立场。
 3. 如果存在 `[SOCIAL]`、`[AVOID_REPEAT]`、`[PROGRESSION]` 或 `[SCOPE]`，`final_dialog` 服从其表达姿态、连续性、推进方向和范围约束。
-4. `final_dialog` 没有把另一个 object / offer / request / question 当作核心话题。
-5. 没有触发表达安全红线。
+4. `final_dialog` 没有把另一个对象、提议、请求、问题或偏好所有者当作核心话题。
+5. `final_dialog` 没有把 `content_anchors` 授权给对方的猜测动作改写成猜当前角色自己的偏好、口味、喜欢内容或想看内容。
+6. 没有触发表达安全红线。
 
 任一条件不满足，返回 `should_stop=false`，`feedback` 点名缺失或被替换的锚点。
 
-# Hard Gates
+# 硬门槛
 先执行硬门槛；硬门槛失败时不要评估软风格。
 - 锚点忠实：不得缺失、替换、反转或绕开 `[DECISION]`、`[FACT]`、`[ANSWER]`、`[SOCIAL]`、`[AVOID_REPEAT]`、`[PROGRESSION]`、`[SCOPE]` 中明示的约束。
 - 话题一致：核心对象、提议、请求、问题必须来自 `content_anchors`；不得转成另一个核心话题。
+- 指代与动作所有权：如果 `content_anchors` 只要求对方猜类型、标签、条件、门槛、解锁步骤或对方要看的类别，`final_dialog` 不得改成猜当前角色想看、喜欢、偏好或口味。合格猜测目标应是对方要猜的类型、标签或类别；除非 `content_anchors` 明确说明猜测对象是当前角色的偏好，否则含有等价于“猜我”“我会想看”“我想看”“我喜欢”“我的口味”“我的偏好”的猜测句必须驳回，并在 `feedback` 中说明猜测对象或偏好所有者被改写。
 - 事实边界：不得添加 `content_anchors` 未授权的具体实体、属性、数量、时间、地点、承诺、日程或技术细节。
 - 禁用词：不得包含 `forbidden_phrases`。
 - 表达安全：不得包含动作描写、物理感官、不可见状态、情绪播报、元对话、括号说明或系统提示。
 - 声纹红线：{ltp_hesitation_density_rule} 若停顿符号明显超出约束，必须驳回。
 
-# Soft Style
+# 软风格
 硬门槛全部通过后，才看软风格：
 - 简短、贴锚点、安全的台词应通过，即使不华丽。
 - `rhetorical_strategy`、`linguistic_style`、`contextual_directives` 只提供修辞和语气建议。
 - 已接受偏好应自然体现，但不能覆盖锚点。
 - 风格参考：{mbti_dialog_preference}
 
-# 4. 动态通过逻辑 (Dynamic Passing Logic)
+# 动态通过逻辑
 `retry` 只是输入里的计数字段，只能影响 `feedback` 的简洁程度；它绝不能影响 pass/fail。所有 retry 使用完全相同的硬门槛和通过条件。
 
-# Audit Order
-1. 从 `final_dialog` 可见文本识别实际回应动作和核心话题。
-2. 从 `content_anchors` 识别要求的回应动作、核心话题、事实/答案/对象/立场、社交/连续性/推进/范围约束。
-3. 如果两者不一致，立即 `should_stop=false`。
-4. 再检查未授权具体内容、禁用词和表达安全红线。
-5. 硬门槛全通过时，轻微软风格问题不阻止通过。
+# 审核顺序
+1. 先按“我/我的=当前角色，你/对方=被回应者”固定 `final_dialog` 的指代。
+2. 从 `final_dialog` 可见文本识别实际回应动作、核心话题、猜测对象和偏好所有者。
+3. 从 `content_anchors` 识别要求的回应动作、核心话题、事实/答案/对象/立场、猜测对象、偏好所有者、社交/连续性/推进/范围约束。
+4. 如果两者不一致，立即 `should_stop=false`。
+5. 再检查未授权具体内容、禁用词和表达安全红线。
+6. 硬门槛全通过时，轻微软风格问题不阻止通过。
 
 # 输入格式
 {{
@@ -597,7 +608,7 @@ _DIALOG_EVALUATOR_PROMPT = """\
     "should_stop": boolean
 }}
 语义：`should_stop=true` 表示可以结束本轮生成；`should_stop=false` 表示必须把 `feedback` 交回生成器重试。
-"""
+'''
 _dialog_evaluator_llm = get_llm(
     temperature=0.1,
     top_p=0.7,
