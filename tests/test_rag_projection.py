@@ -143,7 +143,7 @@ def test_project_known_facts_groups_summarized_evidence() -> None:
             },
             {
                 "slot": "web",
-                "agent": "web_search_agent2",
+                "agent": "web_agent3",
                 "resolved": True,
                 "summary": "web summary",
                 "raw_result": "https://example.com " + ("B" * 20),
@@ -185,7 +185,7 @@ def test_project_known_facts_does_not_stringify_malformed_fact_values() -> None:
             },
             {
                 "slot": "web",
-                "agent": "web_search_agent2",
+                "agent": "web_agent3",
                 "resolved": True,
                 "summary": "web summary",
                 "raw_result": {"bad": "external content"},
@@ -201,7 +201,7 @@ def test_project_known_facts_does_not_stringify_malformed_fact_values() -> None:
     assert result["supervisor_trace"]["dispatched"] == [
         {"slot": "", "agent": "user_lookup_agent", "resolved": True},
         {"slot": "memory", "agent": "persistent_memory_search_agent", "resolved": True},
-        {"slot": "web", "agent": "web_search_agent2", "resolved": True},
+        {"slot": "web", "agent": "web_agent3", "resolved": True},
     ]
     assert result["third_party_profiles"] == []
     assert result["memory_evidence"] == [
@@ -528,7 +528,7 @@ def test_project_known_facts_keeps_external_content_with_valid_url_query() -> No
         [
             {
                 "slot": "web",
-                "agent": "web_search_agent2",
+                "agent": "web_agent3",
                 "resolved": True,
                 "summary": "web summary",
                 "raw_result": (
@@ -641,7 +641,7 @@ def test_project_known_facts_drops_unrecoverable_external_evidence() -> None:
         [
             {
                 "slot": "web",
-                "agent": "web_search_agent2",
+                "agent": "web_agent3",
                 "resolved": True,
                 "summary": "[CQ:bad]",
                 "raw_result": "[CQ:image,file=abc]",

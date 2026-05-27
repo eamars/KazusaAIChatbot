@@ -358,7 +358,7 @@ def _live_result() -> dict:
         "resolved": True,
         "result": {
             "capability": "live_context",
-            "primary_worker": "web_search_agent2",
+            "primary_worker": "web_agent3",
             "supporting_workers": [],
             "source_policy": "fresh external retrieval",
             "selected_summary": "Fresh evidence found.",

@@ -31,7 +31,7 @@ from kazusa_ai_chatbot.rag.relationship_agent import RelationshipAgent
 from kazusa_ai_chatbot.rag.user_list_agent import UserListAgent
 from kazusa_ai_chatbot.rag.user_lookup_agent import UserLookupAgent
 from kazusa_ai_chatbot.rag.user_profile_agent import UserProfileAgent
-from kazusa_ai_chatbot.rag.web_search_agent import WebSearchAgent
+from kazusa_ai_chatbot.rag.web_agent3 import WebAgent3
 from kazusa_ai_chatbot.nodes.persona_supervisor2_rag_prompt_views import (
     _known_facts_llm_view,
 )
@@ -147,8 +147,8 @@ _RAG_SUPERVISOR_AGENT_REGISTRY: dict[str, RAGAgentRegistryEntry] = {
             "can_consolidate_as_new_knowledge": False,
         },
     },
-    "web_search_agent2": {
-        "agent": WebSearchAgent().run,
+    "web_agent3": {
+        "agent": WebAgent3().run,
         "fact_source": {
             "source_kind": "external",
             "source_system": "web",
@@ -226,7 +226,7 @@ _PREFIX_DISPATCH_TABLE: tuple[tuple[str, str, int], ...] = (
     ("Conversation-evidence:", "conversation_evidence_agent", 1),
     ("Memory-evidence:", "memory_evidence_agent", 1),
     ("Person-context:", "person_context_agent", 1),
-    ("Web-evidence:", "web_search_agent2", 3),
+    ("Web-evidence:", "web_agent3", 3),
     ("Identity:", "user_lookup_agent", 3),
     ("User-list:", "user_list_agent", 3),
     ("Relationship:", "relationship_agent", 3),
@@ -238,7 +238,7 @@ _PREFIX_DISPATCH_TABLE: tuple[tuple[str, str, int], ...] = (
     ("Memory-keyword:", "memory_evidence_agent", 1),
     ("Memory-search:", "memory_evidence_agent", 1),
     ("Recall:", "recall_agent", 1),
-    ("Web-search:", "web_search_agent2", 3),
+    ("Web-search:", "web_agent3", 3),
 )
 
 _DISPATCH_AGENT_ALIASES = {
@@ -288,7 +288,7 @@ _DISPATCHER_PROMPT = '''\
   和 gated history proof 中协调活跃约定、持续承诺、当前计划、open loops 和当前 episode 状态。
   用于 `Recall:` 槽位。
 
-- `web_search_agent2`：公开互联网搜索。仅当信息不可能存在于本地聊天历史或 persistent memory 时使用。
+- `web_agent3`：公开互联网搜索。仅当信息不可能存在于本地聊天历史或 persistent memory 时使用。
 
 内部 worker 由顶层能力自行选择，不要把它们作为 `agent_name` 输出。
 
@@ -303,7 +303,7 @@ initializer 生成的槽位以可直接映射到 agent 的前缀开头。
 | "Conversation-evidence: ..." | `conversation_evidence_agent`    |
 | "Memory-evidence: ..."       | `memory_evidence_agent`          |
 | "Person-context: ..."        | `person_context_agent`           |
-| "Web-evidence: ..."          | `web_search_agent2`              |
+| "Web-evidence: ..."          | `web_agent3`                     |
 | "Identity: ..."              | `user_lookup_agent`              |
 | "User-list: ..."             | `user_list_agent`                |
 | "Relationship: ..."          | `relationship_agent`             |
@@ -315,7 +315,7 @@ initializer 生成的槽位以可直接映射到 agent 的前缀开头。
 | "Memory-keyword: ..."        | `memory_evidence_agent`          |
 | "Memory-search: ..."         | `memory_evidence_agent`          |
 | "Recall: ..."                | `recall_agent`                   |
-| "Web-search: ..."            | `web_search_agent2`              |
+| "Web-search: ..."            | `web_agent3`                     |
 
 ## Fallback decision sequence（仅当槽位没有可识别前缀时使用）
 
@@ -342,7 +342,7 @@ initializer 生成的槽位以可直接映射到 agent 的前缀开头。
    → `recall_agent`.
 
 7. 槽位需要公开互联网数据？
-   → `web_search_agent2`.
+   → `web_agent3`.
 
 ## 输入格式
 

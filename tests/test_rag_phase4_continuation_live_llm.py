@@ -494,7 +494,7 @@ async def test_live_db_supervisor_reenters_initializer_with_cache2_active(
             "resolved": True,
             "result": {
                 "capability": "live_context",
-                "primary_worker": "web_search_agent2",
+                "primary_worker": "web_agent3",
                 "supporting_workers": [],
                 "source_policy": "fresh external retrieval",
                 "selected_summary": f'fresh follow-up executed: {task}',

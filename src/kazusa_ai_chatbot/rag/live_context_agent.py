@@ -18,7 +18,7 @@ from kazusa_ai_chatbot.rag.conversation_search_agent import ConversationSearchAg
 from kazusa_ai_chatbot.rag.helper_agent import BaseRAGHelperAgent
 from kazusa_ai_chatbot.rag.persistent_memory_search_agent import PersistentMemorySearchAgent
 from kazusa_ai_chatbot.rag.prompt_projection import project_selector_input_for_llm
-from kazusa_ai_chatbot.rag.web_search_agent import WebSearchAgent
+from kazusa_ai_chatbot.rag.web_agent3 import WebAgent3
 from kazusa_ai_chatbot.utils import get_llm, parse_llm_json_output, text_or_empty
 
 logger = logging.getLogger(__name__)
@@ -588,7 +588,7 @@ class LiveContextAgent(BaseRAGHelperAgent):
             cache_name="",
             cache_runtime=cache_runtime,
         )
-        self.web_agent = WebSearchAgent(cache_runtime=cache_runtime)
+        self.web_agent = WebAgent3(cache_runtime=cache_runtime)
         self.memory_search_agent = PersistentMemorySearchAgent(
             cache_runtime=cache_runtime
         )
@@ -818,7 +818,7 @@ class LiveContextAgent(BaseRAGHelperAgent):
             context,
             max_attempts=1,
         )
-        worker_payloads["web_search_agent2"] = web_result
+        worker_payloads["web_agent3"] = web_result
         evidence_text = _clip_text(web_result.get("result"))
         resolved = bool(web_result.get("resolved")) and bool(evidence_text)
         projection_payload = {
@@ -827,7 +827,7 @@ class LiveContextAgent(BaseRAGHelperAgent):
         }
         payload = _result_payload(
             selected_summary=evidence_text,
-            primary_worker="web_search_agent2",
+            primary_worker="web_agent3",
             supporting_workers=supporting_workers,
             source_policy=source_policy,
             resolved_refs=resolved_refs,
@@ -839,7 +839,7 @@ class LiveContextAgent(BaseRAGHelperAgent):
         )
         logger.info(
             f"{_AGENT_NAME} output: resolved={resolved} "
-            f"primary_worker=web_search_agent2 "
+            f"primary_worker=web_agent3 "
             f"missing_context={payload['missing_context']} "
             f"selected_summary={payload['selected_summary']} "
             f"cache_reason={_UNCACHED_REASON}"

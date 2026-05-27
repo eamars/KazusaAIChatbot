@@ -163,7 +163,7 @@
       },
       {
         "slot": "Web-evidence: retrieve public reference",
-        "agent": "web_search_agent2",
+        "agent": "web_agent3",
         "resolved": true,
         "summary": "External source confirms the reference URL exists.",
         "raw_result": "Reference page at https://example.com/stage-00 confirms the topic.",

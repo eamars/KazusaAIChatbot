@@ -604,7 +604,7 @@ def test_live_context_consolidation_policy_stays_operational() -> None:
     """Live facts should not become durable knowledge while direct web can."""
     registry = supervisor2_module._RAG_SUPERVISOR_AGENT_REGISTRY
     live_source = registry["live_context_agent"]["fact_source"]
-    web_source = registry["web_search_agent2"]["fact_source"]
+    web_source = registry["web_agent3"]["fact_source"]
 
     assert live_source["consolidation_policy"] == "do_not_write_knowledge"
     assert live_source["can_consolidate_as_new_knowledge"] is False

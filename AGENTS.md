@@ -11,7 +11,7 @@ Communicate before meaningful action. Tell the user what context you are
 gathering, what assumption you are making, and what concrete command or change
 you are about to run.
 
-Before editing, check:
+Before substantive edits, and always before production-code edits, check:
 
 - `git status --short`
 - `README.md`
@@ -20,6 +20,19 @@ Before editing, check:
 - The source and test files directly involved in the request
 
 Never read `.env` unless the user explicitly asks for environment inspection.
+
+## Production Code Change Control
+
+- Do not modify, add, or remove production code unless the user explicitly
+  commands that implementation change. For this rule, `experiments/*` and
+  `tests/*` are not production code, but normal scope and safety rules still
+  apply.
+- Analysis is not authorization. Failure analysis, RCA, debugging,
+  investigation, review, and diagnosis may identify fixes, but they do not
+  authorize production-code changes.
+- Before any production-code change, answer the user's outstanding questions
+  and confirm unclear intent. Do not treat assumptions, plan status, or
+  inferred approval as permission to touch production code.
 
 ## Project Model
 
@@ -95,7 +108,8 @@ Before reading or executing development plans, read
 `development_plans/README.md`. It is the lifecycle registry for long-term,
 active, archived, reference, and triage documents.
 
-Use plan status as the execution boundary:
+Use plan status as an execution boundary, not as authorization to modify
+production code:
 
 - `development_plans/long_term/todo.md` is a living roadmap, not an executable
   work contract.
@@ -103,6 +117,8 @@ Use plan status as the execution boundary:
   `development_plans/active/bugfix/` before implementation.
 - Only execute plans in `development_plans/active/` whose `Status` is
   `approved` or `in_progress`.
+- Plan status is necessary but not sufficient for production-code changes; the
+  user must still explicitly command the implementation work.
 - Treat `draft` plans as discussion artifacts.
 - Treat archived plans as historical records.
 - Treat reference documents as context only.

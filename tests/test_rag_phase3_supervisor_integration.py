@@ -259,7 +259,7 @@ def _fresh_live_result(summary: str) -> dict:
         "resolved": True,
         "result": {
             "capability": "live_context",
-            "primary_worker": "web_search_agent2",
+            "primary_worker": "web_agent3",
             "supporting_workers": [],
             "source_policy": "fresh external retrieval",
             "selected_summary": summary,
@@ -379,7 +379,7 @@ async def test_supervisor_routes_explicit_weather_through_live_context(
     assert "17 C" in result["answer"]
     assert result["known_facts"][0]["agent"] == "live_context_agent"
     raw_result = result["known_facts"][0]["raw_result"]
-    assert raw_result["primary_worker"] == "web_search_agent2"
+    assert raw_result["primary_worker"] == "web_agent3"
     assert raw_result["projection_payload"]["url"] == "https://weather.example/auckland"
     info_messages = [
         record.getMessage()
@@ -418,7 +418,7 @@ async def test_supervisor_routes_opening_status_through_live_context(monkeypatch
     assert "open now" in result["answer"]
     assert result["known_facts"][0]["agent"] == "live_context_agent"
     raw_result = result["known_facts"][0]["raw_result"]
-    assert raw_result["primary_worker"] == "web_search_agent2"
+    assert raw_result["primary_worker"] == "web_agent3"
     assert raw_result["projection_payload"]["url"] == (
         "https://status.example/adventure-park"
     )
